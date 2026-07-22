@@ -417,6 +417,13 @@
         "stateConcurrency.test.ts"
       ],
       "performance": ["blockRunIndexPerformance.test.ts"]
+    },
+    {
+      "root": "packages/server/src/__tests__",
+      "unit": [],
+      "integration": ["lifecycle.test.ts"],
+      "platform": [],
+      "performance": []
     }
   ]
 }
