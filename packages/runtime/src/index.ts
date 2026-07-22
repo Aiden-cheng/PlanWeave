@@ -231,6 +231,7 @@ export {
 } from "./autoRun/agentRegistry.js";
 export {
   claimNext,
+  claimDispatchedBlock,
   claimBlock,
   claimBlockType,
   claimTask,
@@ -240,6 +241,7 @@ export {
   runProjectDoctor,
   renderPrompt,
   submitBlockResult,
+  submitBlockResultFromBytes,
   submitReviewResult,
   submitFeedback,
   markBlockBlocked,

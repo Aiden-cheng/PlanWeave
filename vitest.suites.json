@@ -421,7 +421,13 @@
     {
       "root": "packages/server/src/__tests__",
       "unit": [],
-      "integration": ["dispatches.test.ts", "lifecycle.test.ts", "wsServer.test.ts"],
+      "integration": [
+        "artifacts.test.ts",
+        "dispatches.test.ts",
+        "lifecycle.test.ts",
+        "runtimeWriteback.test.ts",
+        "wsServer.test.ts"
+      ],
       "platform": [],
       "performance": []
     }

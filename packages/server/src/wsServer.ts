@@ -3,6 +3,7 @@ import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer } from "ws";
 import { DispatchService } from "./dispatches.js";
 import { AgentHostRepository } from "./hosts.js";
+import { authenticateAgentHostRequest } from "./hostTransportAuth.js";
 import { DurableMailbox, type MailboxMessage } from "./mailbox.js";
 import {
   agentHostProtocolVersion,
@@ -31,11 +32,6 @@ export type AgentHostWebSocketServer = {
 function rejectUpgrade(socket: Duplex, status: number, message: string): void {
   socket.write(`HTTP/1.1 ${status} ${message}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
   socket.destroy();
-}
-
-function bearerToken(header: string | undefined): string | undefined {
-  const match = /^Bearer ([A-Za-z0-9_-]{32,256})$/.exec(header ?? "");
-  return match?.[1];
 }
 
 function hostIdFromUrl(url: string | undefined): string | undefined {
@@ -195,19 +191,14 @@ export function attachAgentHostWebSocketServer(
       rejectUpgrade(socket, 404, "Not Found");
       return;
     }
-    if (request.headers.origin) {
-      rejectUpgrade(socket, 403, "Forbidden");
-      return;
-    }
-    const encrypted = "encrypted" in request.socket && request.socket.encrypted === true;
-    if (!encrypted && !options.allowInsecureTransport) {
-      rejectUpgrade(socket, 426, "Upgrade Required");
-      return;
-    }
-    const authorization = request.headers.authorization;
-    const token = bearerToken(Array.isArray(authorization) ? authorization[0] : authorization);
-    if (!token || !options.hosts.authenticate(hostId, token)) {
-      rejectUpgrade(socket, 401, "Unauthorized");
+    const authentication = authenticateAgentHostRequest(
+      request,
+      options.hosts,
+      hostId,
+      options.allowInsecureTransport ?? false
+    );
+    if (!authentication.ok) {
+      rejectUpgrade(socket, authentication.status, authentication.message);
       return;
     }
     webSocketServer.handleUpgrade(request, socket, head, (webSocket) => {

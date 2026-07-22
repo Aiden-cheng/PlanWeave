@@ -75,9 +75,24 @@ CREATE INDEX idx_dispatch_events_dispatch_sequence
   ON dispatch_events(dispatch_id,sequence);
 `;
 
+const migration3 = `
+CREATE TABLE artifacts (
+  ref TEXT PRIMARY KEY,
+  sha256 TEXT NOT NULL UNIQUE,
+  size_bytes INTEGER NOT NULL CHECK(size_bytes >= 0),
+  media_type TEXT NOT NULL,
+  relative_path TEXT NOT NULL UNIQUE,
+  created_by_host_id TEXT REFERENCES agent_hosts(id),
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_artifacts_created_by_host ON artifacts(created_by_host_id,created_at);
+`;
+
 const migrations = [
   { version: 1, sql: migration1 },
-  { version: 2, sql: migration2 }
+  { version: 2, sql: migration2 },
+  { version: 3, sql: migration3 }
 ] as const;
 
 export function applyMigrations(database: SqliteDatabase): void {

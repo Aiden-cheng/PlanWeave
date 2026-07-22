@@ -1,3 +1,10 @@
+export { ArtifactStore, type ArtifactMetadata } from "./artifacts.js";
+export {
+  attachAgentHostArtifactHttp,
+  handleAgentHostArtifactRequest,
+  type ArtifactHttpOptions,
+  type ArtifactHttpServer
+} from "./artifactHttp.js";
 export { readServerConfig, type ServerConfig } from "./config.js";
 export {
   createDistributedCoordination,
@@ -25,6 +32,7 @@ export {
 export { DurableMailbox, type MailboxMessage } from "./mailbox.js";
 export {
   agentHostProtocolVersion,
+  artifactRefSchema,
   dispatchFailureSchema,
   dispatchResultSchema,
   hostEventSchema,
@@ -38,6 +46,10 @@ export {
   type ProtocolDispatchResult,
   type ServerEvent
 } from "./protocol.js";
+export {
+  createPlanPackageDispatchWriteback,
+  type PlanPackageWritebackOptions
+} from "./runtimeWriteback.js";
 export {
   attachAgentHostWebSocketServer,
   type AgentHostWebSocketOptions,

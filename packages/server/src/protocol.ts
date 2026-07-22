@@ -19,9 +19,12 @@ export const capabilitiesSchema = z
   .max(128)
   .transform((values) => [...new Set(values)]);
 
+export const artifactRefSchema = z.string().regex(/^artifact:sha256:[a-f0-9]{64}$/);
+
 export const dispatchResultSchema = z.object({
   summary: z.string().max(16384),
-  artifactRefs: z.array(z.string().min(1).max(4096)).max(256).default([])
+  reportArtifactRef: artifactRefSchema,
+  artifactRefs: z.array(artifactRefSchema).max(256).default([])
 });
 
 export const dispatchFailureSchema = z.object({

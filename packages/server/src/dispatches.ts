@@ -2,7 +2,13 @@ import { randomUUID } from "node:crypto";
 import { AgentHostRepository } from "./hosts.js";
 import { HostEventInbox } from "./hostEvents.js";
 import { DurableMailbox, type MailboxMessage } from "./mailbox.js";
-import { capabilitiesSchema, dispatchFailureSchema, dispatchResultSchema } from "./protocol.js";
+import {
+  capabilitiesSchema,
+  dispatchFailureSchema,
+  dispatchResultSchema,
+  type ProtocolDispatchFailure,
+  type ProtocolDispatchResult
+} from "./protocol.js";
 import { inWriteTransaction, type SqliteDatabase } from "./sqlite.js";
 
 export type DispatchStatus =
@@ -14,8 +20,8 @@ export type DispatchStatus =
   | "failed"
   | "cancelled";
 
-export type DispatchResult = { summary: string; artifactRefs: string[] };
-export type DispatchFailure = { code: string; message: string; retryable: boolean };
+export type DispatchResult = ProtocolDispatchResult;
+export type DispatchFailure = ProtocolDispatchFailure;
 
 export type DispatchRecord = {
   id: string;

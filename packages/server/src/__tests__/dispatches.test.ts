@@ -7,6 +7,7 @@ import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 
 const directories: string[] = [];
 const servers: PlanweaveServer[] = [];
+const reportArtifactRef = `artifact:sha256:${"a".repeat(64)}`;
 
 afterEach(async () => {
   for (const server of servers.splice(0)) server.close();
@@ -88,7 +89,11 @@ describe("distributed dispatch coordination", () => {
     expect(renewed).toHaveLength(1);
     expect(renewed[0]?.leaseExpiresAt >= previousExpiry).toBe(true);
 
-    const result = { summary: "Block completed.", artifactRefs: ["artifact://result-1"] };
+    const result = {
+      summary: "Block completed.",
+      reportArtifactRef,
+      artifactRefs: [reportArtifactRef]
+    };
     const completed = await coordination.dispatches.complete(
       registration.host.id,
       "complete-1",
@@ -145,7 +150,7 @@ describe("distributed dispatch coordination", () => {
         "complete-2",
         dispatch.id,
         dispatch.leaseId,
-        { summary: "Done", artifactRefs: [] }
+        { summary: "Done", reportArtifactRef, artifactRefs: [] }
       )
     ).rejects.toThrowError("runtime unavailable");
     expect(coordination.dispatches.getRequired(dispatch.id).status).toBe("awaiting_writeback");
@@ -232,7 +237,7 @@ describe("distributed dispatch coordination", () => {
         "late-result",
         dispatch.id,
         dispatch.leaseId,
-        { summary: "Too late", artifactRefs: [] }
+        { summary: "Too late", reportArtifactRef, artifactRefs: [] }
       )
     ).rejects.toThrowError("lease_expired");
   });
