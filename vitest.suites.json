@@ -422,6 +422,8 @@
       "root": "packages/server/src/__tests__",
       "unit": [],
       "integration": [
+        "agentHostClient.test.ts",
+        "agentHostState.test.ts",
         "artifacts.test.ts",
         "dispatches.test.ts",
         "lifecycle.test.ts",

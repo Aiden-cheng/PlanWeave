@@ -1,5 +1,19 @@
 export { ArtifactStore, type ArtifactMetadata } from "./artifacts.js";
 export {
+  AgentHostClient,
+  type AgentHostArtifactInput,
+  type AgentHostClientOptions,
+  type AgentHostExecutionContext,
+  type AgentHostExecutor
+} from "./agentHostClient.js";
+export {
+  AgentHostState,
+  openAgentHostState,
+  type AgentHostCancellation,
+  type AgentHostExecution,
+  type AgentHostExecutionStatus
+} from "./agentHostState.js";
+export {
   attachAgentHostArtifactHttp,
   handleAgentHostArtifactRequest,
   type ArtifactHttpOptions,
