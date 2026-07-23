@@ -1,14 +1,19 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDistributedCoordination } from "../distributedCoordination.js";
+import { ArtifactStore } from "../artifacts.js";
+import type { DispatchRecord } from "../dispatches.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 import { executionEnvelopeFor } from "./protocolTestFixtures.js";
 
 const directories: string[] = [];
 const servers: PlanweaveServer[] = [];
-const reportArtifactRef = `artifact:sha256:${"a".repeat(64)}`;
+const reportBytes = Buffer.from("accepted dispatch report");
+const reportSha256 = createHash("sha256").update(reportBytes).digest("hex");
+const reportArtifactRef = `artifact:sha256:${reportSha256}`;
 
 afterEach(async () => {
   for (const server of servers.splice(0)) server.close();
@@ -27,6 +32,46 @@ async function createServer(): Promise<PlanweaveServer> {
   });
   servers.push(server);
   return server;
+}
+
+async function acceptReportArtifact(
+  server: PlanweaveServer,
+  coordination: ReturnType<typeof createDistributedCoordination>,
+  dispatch: DispatchRecord,
+  hostId: string
+): Promise<void> {
+  const grant = coordination.artifactAuthorization.createOutputGrant({
+    operationId: `report:${dispatch.id}`,
+    projectId: dispatch.projectId,
+    hostId,
+    dispatchId: dispatch.id,
+    leaseId: dispatch.leaseId,
+    executionAttemptId: dispatch.executionAttemptId,
+    permission: "report_write",
+    expectedSha256: reportSha256,
+    expectedSizeBytes: reportBytes.byteLength,
+    expectedMediaType: "text/markdown"
+  });
+  const artifacts = new ArtifactStore(server.database, server.config.dataDirectory, 1024 * 1024);
+  const artifact = await artifacts.put({
+    expectedSha256: reportSha256,
+    expectedSizeBytes: reportBytes.byteLength,
+    mediaType: "text/markdown",
+    chunks: (async function* () {
+      yield reportBytes;
+    })()
+  });
+  coordination.artifactAuthorization.acceptOutputUpload(
+    {
+      projectId: dispatch.projectId,
+      hostId,
+      dispatchId: dispatch.id,
+      leaseId: dispatch.leaseId,
+      executionAttemptId: dispatch.executionAttemptId,
+      grantId: grant.grantId
+    },
+    artifact
+  );
 }
 
 describe("distributed dispatch coordination", () => {
@@ -82,6 +127,8 @@ describe("distributed dispatch coordination", () => {
         dispatch.executionAttemptId
       )
     ).toThrowError("host_event_message_id_reused");
+
+    await acceptReportArtifact(server, coordination, dispatch, registration.host.id);
 
     const previousExpiry = dispatch.leaseExpiresAt;
     const renewed = coordination.dispatches.heartbeat(registration.host.id, "heartbeat-1", [
@@ -153,6 +200,7 @@ describe("distributed dispatch coordination", () => {
       dispatch.leaseId,
       dispatch.executionAttemptId
     );
+    await acceptReportArtifact(server, coordination, dispatch, registration.host.id);
 
     await expect(
       coordination.dispatches.complete(
@@ -241,7 +289,6 @@ describe("distributed dispatch coordination", () => {
       dispatch.leaseId,
       dispatch.executionAttemptId
     );
-    first.database.prepare("DELETE FROM schema_migrations WHERE version=5").run();
     first.close();
     servers.pop();
 

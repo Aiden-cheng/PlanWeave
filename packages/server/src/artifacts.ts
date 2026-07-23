@@ -3,32 +3,29 @@ import { createReadStream, type ReadStream } from "node:fs";
 import { chmod, link, mkdir, open, readFile, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
+import { artifactMediaTypeSchema } from "./artifactMediaType.js";
 import { artifactRefSchema } from "./protocol.js";
 import type { SqliteDatabase } from "./sqlite.js";
 
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
-const mediaTypeSchema = z
-  .string()
-  .min(1)
-  .max(255)
-  .regex(/^[\x20-\x7e]+$/);
+export { artifactMediaTypeSchema } from "./artifactMediaType.js";
 
-const artifactRowSchema = z.object({
-  ref: artifactRefSchema,
-  sha256: sha256Schema,
-  size_bytes: z.number().int().nonnegative(),
-  media_type: mediaTypeSchema,
-  relative_path: z.string().regex(/^[a-f0-9]{2}\/[a-f0-9]{64}$/),
-  created_by_host_id: z.string().nullable(),
-  created_at: z.string().datetime()
-});
+const artifactRowSchema = z
+  .object({
+    ref: artifactRefSchema,
+    sha256: sha256Schema,
+    size_bytes: z.number().int().nonnegative(),
+    media_type: artifactMediaTypeSchema,
+    relative_path: z.string().regex(/^[a-f0-9]{2}\/[a-f0-9]{64}$/),
+    created_at: z.string().datetime()
+  })
+  .strict();
 
 export type ArtifactMetadata = {
   ref: string;
   sha256: string;
   sizeBytes: number;
   mediaType: string;
-  createdByHostId?: string;
   createdAt: string;
 };
 
@@ -56,11 +53,10 @@ export class ArtifactStore {
     expectedSha256: string;
     expectedSizeBytes: number;
     mediaType: string;
-    createdByHostId?: string;
     chunks: AsyncIterable<Uint8Array>;
   }): Promise<ArtifactMetadata> {
     const expectedSha256 = sha256Schema.parse(input.expectedSha256);
-    const mediaType = mediaTypeSchema.parse(input.mediaType);
+    const mediaType = artifactMediaTypeSchema.parse(input.mediaType);
     if (
       !Number.isSafeInteger(input.expectedSizeBytes) ||
       input.expectedSizeBytes < 0 ||
@@ -113,20 +109,12 @@ export class ArtifactStore {
       const createdAt = new Date().toISOString();
       this.database
         .prepare(
-          `INSERT INTO artifacts(
-            ref,sha256,size_bytes,media_type,relative_path,created_by_host_id,created_at
-          ) VALUES (?,?,?,?,?,?,?)
+          `INSERT INTO artifact_blobs(
+            ref,sha256,size_bytes,media_type,relative_path,created_at
+          ) VALUES (?,?,?,?,?,?)
           ON CONFLICT(ref) DO NOTHING`
         )
-        .run(
-          ref,
-          expectedSha256,
-          sizeBytes,
-          mediaType,
-          relativePath,
-          input.createdByHostId ?? null,
-          createdAt
-        );
+        .run(ref, expectedSha256, sizeBytes, mediaType, relativePath, createdAt);
       return this.getRequired(ref);
     } finally {
       await unlink(temporaryPath).catch((error: unknown) => {
@@ -137,7 +125,7 @@ export class ArtifactStore {
 
   get(ref: string): ArtifactMetadata | undefined {
     const parsedRef = artifactRefSchema.parse(ref);
-    const raw = this.database.prepare("SELECT * FROM artifacts WHERE ref=?").get(parsedRef);
+    const raw = this.database.prepare("SELECT * FROM artifact_blobs WHERE ref=?").get(parsedRef);
     if (!raw) return undefined;
     const row = artifactRowSchema.parse(raw);
     return {
@@ -145,7 +133,6 @@ export class ArtifactStore {
       sha256: row.sha256,
       sizeBytes: row.size_bytes,
       mediaType: row.media_type,
-      createdByHostId: row.created_by_host_id ?? undefined,
       createdAt: row.created_at
     };
   }

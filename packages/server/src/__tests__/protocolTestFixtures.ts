@@ -20,6 +20,7 @@ export function executionEnvelopeFor(
     projectId,
     taskId,
     blockRef,
+    inputArtifacts: [],
     requiredCapabilities
   });
 }

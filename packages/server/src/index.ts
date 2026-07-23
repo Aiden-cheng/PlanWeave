@@ -1,4 +1,12 @@
 export { ArtifactStore, type ArtifactMetadata } from "./artifacts.js";
+export { artifactMediaTypeSchema } from "./artifactMediaType.js";
+export {
+  ArtifactAuthorizationRepository,
+  type AcceptedArtifactProvenance,
+  type ArtifactGrant,
+  type ArtifactPermission,
+  type OutputArtifactPermission
+} from "./artifactAuthorization.js";
 export {
   AgentHostClient,
   type AgentHostArtifactInput,

@@ -3,6 +3,7 @@ import {
   type DispatchServiceOptions,
   type DispatchWriteback
 } from "./dispatches.js";
+import { ArtifactAuthorizationRepository } from "./artifactAuthorization.js";
 import { AgentHostRepository } from "./hosts.js";
 import { DurableMailbox } from "./mailbox.js";
 import type { SqliteDatabase } from "./sqlite.js";
@@ -17,6 +18,7 @@ export function createDistributedCoordination(
 ) {
   const hosts = new AgentHostRepository(database);
   const mailbox = new DurableMailbox(database);
-  const dispatches = new DispatchService(database, hosts, mailbox, options);
-  return { hosts, mailbox, dispatches };
+  const artifactAuthorization = new ArtifactAuthorizationRepository(database);
+  const dispatches = new DispatchService(database, hosts, mailbox, artifactAuthorization, options);
+  return { hosts, mailbox, artifactAuthorization, dispatches };
 }

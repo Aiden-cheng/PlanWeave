@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { ArtifactAuthorizationRepository } from "./artifactAuthorization.js";
 import { AgentHostRepository } from "./hosts.js";
 import { HostEventInbox } from "./hostEvents.js";
 import { DurableMailbox, type MailboxMessage } from "./mailbox.js";
@@ -139,6 +140,7 @@ export class DispatchService {
     private readonly database: SqliteDatabase,
     private readonly hosts: AgentHostRepository,
     private readonly mailbox: DurableMailbox,
+    private readonly artifactAuthorization: ArtifactAuthorizationRepository,
     private readonly options: DispatchServiceOptions
   ) {
     if (!Number.isInteger(options.leaseDurationMs) || options.leaseDurationMs < 1000) {
@@ -166,8 +168,21 @@ export class DispatchService {
   dispatchBlock(input: { packageRef: string; envelope: ExecutionEnvelope }): DispatchRecord {
     const envelope = executionEnvelopeSchema.parse(input.envelope);
     const requiredCapabilities = capabilitiesSchema.parse(envelope.requiredCapabilities);
+    const envelopeDigest = hashExecutionEnvelope(envelope);
     let pendingMessage: MailboxMessage | undefined;
     const dispatch = inWriteTransaction(this.database, () => {
+      const existing = this.get(envelope.execution.dispatchId);
+      if (existing) {
+        if (existing.packageRef !== input.packageRef) {
+          throw new Error("dispatch_identity_conflict");
+        }
+        this.artifactAuthorization.assertExecutionEnvelopeReplay(
+          existing.id,
+          envelopeDigest,
+          envelope
+        );
+        return existing;
+      }
       const onlineAfter = new Date(Date.now() - this.options.hostOfflineAfterMs);
       const host = this.hosts.listAvailable(requiredCapabilities, onlineAfter)[0];
       if (!host) throw new Error("no_compatible_agent_host");
@@ -197,6 +212,15 @@ export class DispatchService {
           createdAt
         );
       this.appendEvent(id, "dispatch.leased", { hostId: host.id, leaseId, leaseExpiresAt });
+      const artifactScope = {
+        projectId: envelope.projectId,
+        hostId: host.id,
+        dispatchId: id,
+        leaseId,
+        executionAttemptId
+      };
+      this.artifactAuthorization.recordExecutionEnvelope(id, envelopeDigest, envelope);
+      this.artifactAuthorization.grantDispatchInputs(artifactScope, envelope);
       pendingMessage = this.mailbox.enqueue(
         host.id,
         mailboxCommandSchema.parse({
@@ -206,7 +230,7 @@ export class DispatchService {
           leaseId,
           executionAttemptId,
           leaseExpiresAt,
-          envelopeDigest: hashExecutionEnvelope(envelope),
+          envelopeDigest,
           envelope
         })
       );
@@ -385,6 +409,16 @@ export class DispatchService {
         if (dispatch.status !== "running" && dispatch.status !== "cancelling") {
           throw new Error("dispatch_not_running");
         }
+        this.artifactAuthorization.requireResultProvenance(
+          {
+            projectId: dispatch.projectId,
+            hostId,
+            dispatchId,
+            leaseId,
+            executionAttemptId
+          },
+          parsedResult
+        );
         this.database
           .prepare(
             "UPDATE dispatches SET status='awaiting_writeback',result_json=?,failure_json=NULL WHERE id=?"

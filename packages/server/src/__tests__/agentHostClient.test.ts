@@ -2,7 +2,7 @@ import { createServer, type Server as HttpServer } from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentHostClient, type AgentHostExecutor } from "../agentHostClient.js";
 import { openAgentHostState, type AgentHostState } from "../agentHostState.js";
 import { attachAgentHostArtifactHttp, type ArtifactHttpServer } from "../artifactHttp.js";
@@ -21,6 +21,7 @@ const artifactServers: ArtifactHttpServer[] = [];
 const webSocketServers: AgentHostWebSocketServer[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(clients.splice(0).map((client) => client.stop()));
   for (const state of states.splice(0)) state.close();
   for (const artifactServer of artifactServers.splice(0)) artifactServer.close();
@@ -69,6 +70,8 @@ describe("Agent Host client", () => {
     artifactServers.push(
       attachAgentHostArtifactHttp(httpServer, {
         hosts: coordination.hosts,
+        dispatches: coordination.dispatches,
+        authorization: coordination.artifactAuthorization,
         artifacts,
         allowInsecureTransport: true
       })
@@ -92,14 +95,19 @@ describe("Agent Host client", () => {
     states.push(state);
     const report = Buffer.from("# Remote result\n\nExecution completed.\n");
     const executor: AgentHostExecutor = {
-      execute: async (_execution, context) => ({
-        summary: "Remote execution completed.",
-        reportArtifactRef: await context.uploadArtifact({
+      execute: async (_execution, context) => {
+        const reportArtifactRef = await context.uploadArtifact({
           bytes: report,
-          mediaType: "text/markdown; charset=utf-8"
-        }),
-        artifactRefs: []
-      })
+          mediaType: "text/markdown; charset=utf-8",
+          purpose: "report",
+          operationKey: "primary-report"
+        });
+        return {
+          summary: "Remote execution completed.",
+          reportArtifactRef,
+          artifactRefs: []
+        };
+      }
     };
     const client = new AgentHostClient({
       serverUrl: `http://127.0.0.1:${address.port}`,
@@ -113,6 +121,12 @@ describe("Agent Host client", () => {
       reconnectDelayMs: 10
     });
     clients.push(client);
+    const realFetch = globalThis.fetch;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementationOnce(async (...args) => {
+      const response = await realFetch(...args);
+      await response.arrayBuffer();
+      throw new TypeError("simulated_lost_upload_response");
+    });
     client.start();
     await waitFor(
       () => coordination.hosts.getRequired(registration.host.id).lastSeenAt !== undefined
@@ -133,6 +147,18 @@ describe("Agent Host client", () => {
     await expect(artifacts.read(completed.result?.reportArtifactRef ?? "")).resolves.toEqual(
       report
     );
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(
+      database.database.prepare("SELECT COUNT(*) AS count FROM artifact_grants").get()?.count
+    ).toBe(1);
+    expect(
+      database.database
+        .prepare("SELECT COUNT(*) AS count FROM dispatch_artifact_links WHERE purpose='report'")
+        .get()?.count
+    ).toBe(1);
+    expect(
+      database.database.prepare("SELECT COUNT(*) AS count FROM artifact_blobs").get()?.count
+    ).toBe(1);
     expect(state.pendingExecutions(1)).toEqual([]);
   });
 });

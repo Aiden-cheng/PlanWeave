@@ -16,6 +16,8 @@ import {
 export type AgentHostArtifactInput = {
   bytes: Uint8Array;
   mediaType: string;
+  purpose: "report" | "output";
+  operationKey: string;
 };
 
 export type AgentHostExecutionContext = {
@@ -50,6 +52,11 @@ type ActiveExecution = {
 };
 
 const uploadResponseSchema = z.object({ ref: artifactRefSchema });
+const artifactOperationKeySchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
 
 function endpoint(base: URL, path: string, websocket: boolean): URL {
   const result = new URL(base.origin);
@@ -286,7 +293,7 @@ export class AgentHostClient {
         await this.options.executor.execute(execution, {
           signal: controller.signal,
           executionKey: `${execution.command.dispatchId}:${execution.command.leaseId}`,
-          uploadArtifact: (input) => this.uploadArtifact(input)
+          uploadArtifact: (input) => this.uploadArtifact(execution, input)
         })
       );
       if (this.stopped) return;
@@ -304,23 +311,57 @@ export class AgentHostClient {
     }
   }
 
-  private async uploadArtifact(input: AgentHostArtifactInput): Promise<string> {
+  private async uploadArtifact(
+    execution: AgentHostExecution,
+    input: AgentHostArtifactInput
+  ): Promise<string> {
     const bytes = Buffer.from(input.bytes);
     const sha256 = createHash("sha256").update(bytes).digest("hex");
+    const command = execution.command;
+    const operationKey = artifactOperationKeySchema.parse(input.operationKey);
+    const operationId = `artifact-upload:${createHash("sha256")
+      .update(
+        JSON.stringify([
+          this.options.hostId,
+          command.dispatchId,
+          command.leaseId,
+          command.executionAttemptId,
+          input.purpose,
+          operationKey,
+          sha256,
+          bytes.byteLength,
+          input.mediaType
+        ])
+      )
+      .digest("hex")}`;
     const url = endpoint(
       this.baseUrl,
-      `/agent-hosts/${encodeURIComponent(this.options.hostId)}/artifacts/${sha256}`,
+      `/agent-hosts/${encodeURIComponent(this.options.hostId)}` +
+        `/dispatches/${encodeURIComponent(command.dispatchId)}` +
+        `/leases/${encodeURIComponent(command.leaseId)}` +
+        `/attempts/${encodeURIComponent(command.executionAttemptId)}/artifacts/${sha256}`,
       false
     );
-    const response = await fetch(url, {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${this.options.token}`,
-        "content-type": input.mediaType,
-        "content-length": String(bytes.byteLength)
-      },
-      body: bytes
-    });
+    let response: Response | undefined;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        response = await fetch(url, {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${this.options.token}`,
+            "content-type": input.mediaType,
+            "content-length": String(bytes.byteLength),
+            "x-planweave-artifact-operation-id": operationId,
+            "x-planweave-artifact-purpose": input.purpose
+          },
+          body: bytes
+        });
+        break;
+      } catch (error) {
+        if (attempt === 1) throw new Error("artifact_upload_failed:transport", { cause: error });
+      }
+    }
+    if (!response) throw new Error("artifact_upload_failed:transport");
     if (!response.ok) throw new Error(`artifact_upload_failed:${response.status}`);
     const ref = uploadResponseSchema.parse(await response.json()).ref;
     if (ref !== `artifact:sha256:${sha256}`) throw new Error("artifact_upload_ref_mismatch");
