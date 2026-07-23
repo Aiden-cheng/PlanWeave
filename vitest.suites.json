@@ -432,11 +432,16 @@
       "performance": []
     },
     {
+      "root": "packages/agent-host/src/__tests__",
+      "unit": ["agentHostPackage.test.ts", "protocolConformance.test.ts"],
+      "integration": ["agentHostClient.test.ts", "agentHostState.test.ts"],
+      "platform": [],
+      "performance": []
+    },
+    {
       "root": "packages/server/src/__tests__",
       "unit": ["protocolPrimitives.test.ts"],
       "integration": [
-        "agentHostClient.test.ts",
-        "agentHostState.test.ts",
         "artifactAdversarialBoundary.test.ts",
         "artifactAdversarialPersistence.test.ts",
         "artifactAuthorization.test.ts",

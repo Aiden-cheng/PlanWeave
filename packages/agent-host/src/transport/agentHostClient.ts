@@ -1,37 +1,18 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
-import { z } from "zod";
-import { AgentHostState, type AgentHostExecution } from "./agentHostState.js";
 import {
-  artifactRefSchema,
-  capabilitiesSchema,
-  dispatchResultSchema,
-  hostEventSchema,
-  hostHelloSchema,
-  serverEventSchema,
-  type ProtocolDispatchResult,
+  parseAgentHostCapabilities,
+  parseAgentHostDispatchResult,
+  parseAgentHostEvent,
+  parseAgentHostServerEvent,
+  serializeAgentHostEvent,
+  serializeAgentHostHello,
   type ServerEvent
-} from "./protocol.js";
-
-export type AgentHostArtifactInput = {
-  bytes: Uint8Array;
-  mediaType: string;
-  purpose: "report" | "output";
-  operationKey: string;
-};
-
-export type AgentHostExecutionContext = {
-  signal: AbortSignal;
-  executionKey: string;
-  uploadArtifact(input: AgentHostArtifactInput): Promise<string>;
-};
-
-export type AgentHostExecutor = {
-  execute(
-    execution: AgentHostExecution,
-    context: AgentHostExecutionContext
-  ): Promise<ProtocolDispatchResult>;
-};
+} from "../protocol.js";
+import { HttpArtifactClient } from "../artifacts/httpArtifactTransfer.js";
+import type { AgentHostTransport } from "../composition/agentHostComposition.js";
+import type { AgentHostExecutor } from "../execution/agentHostExecutor.js";
+import type { AgentHostExecution, AgentHostStateRepository } from "../state/agentHostState.js";
 
 export type AgentHostClientOptions = {
   serverUrl: string;
@@ -39,7 +20,7 @@ export type AgentHostClientOptions = {
   token: string;
   capabilities: readonly string[];
   capacity: number;
-  state: AgentHostState;
+  state: AgentHostStateRepository;
   executor: AgentHostExecutor;
   allowInsecureTransport?: boolean;
   reconnectDelayMs?: number;
@@ -50,13 +31,6 @@ type ActiveExecution = {
   execution: AgentHostExecution;
   controller: AbortController;
 };
-
-const uploadResponseSchema = z.object({ ref: artifactRefSchema });
-const artifactOperationKeySchema = z
-  .string()
-  .min(1)
-  .max(128)
-  .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
 
 function endpoint(base: URL, path: string, websocket: boolean): URL {
   const result = new URL(base.origin);
@@ -81,9 +55,10 @@ function executionFailure(error: unknown, aborted: boolean) {
   };
 }
 
-export class AgentHostClient {
+export class AgentHostClient implements AgentHostTransport {
   private readonly baseUrl: URL;
   private readonly capabilities: string[];
+  private readonly artifacts: HttpArtifactClient;
   private readonly active = new Map<number, ActiveExecution>();
   private readonly runs = new Set<Promise<void>>();
   private socket?: WebSocket;
@@ -112,7 +87,12 @@ export class AgentHostClient {
     ) {
       throw new Error("agent_host_reconnect_delay_invalid");
     }
-    this.capabilities = capabilitiesSchema.parse(options.capabilities);
+    this.capabilities = parseAgentHostCapabilities(options.capabilities);
+    this.artifacts = new HttpArtifactClient({
+      baseUrl: this.baseUrl,
+      hostId: options.hostId,
+      token: options.token
+    });
   }
 
   start(): void {
@@ -152,7 +132,7 @@ export class AgentHostClient {
     });
     this.socket = socket;
     socket.on("open", () => {
-      const hello = hostHelloSchema.parse({
+      const hello = serializeAgentHostHello({
         type: "host.hello",
         protocolVersion: 1,
         lastAcknowledgedSequence: this.options.state.lastAcknowledgedSequence(),
@@ -160,13 +140,13 @@ export class AgentHostClient {
         capabilities: this.capabilities,
         capacity: this.options.capacity
       });
-      socket.send(JSON.stringify(hello));
+      socket.send(hello);
     });
     socket.on("message", (data, isBinary) => {
       this.processing = this.processing
         .then(async () => {
           if (isBinary) throw new Error("binary_messages_not_supported");
-          const event = serverEventSchema.parse(JSON.parse(data.toString()));
+          const event = parseAgentHostServerEvent(JSON.parse(data.toString()));
           await this.handleServerEvent(event);
         })
         .catch(() => socket.close(4003, "server event rejected"));
@@ -223,7 +203,7 @@ export class AgentHostClient {
     const send = () => {
       this.abandonExpiredExecutions();
       this.send(
-        hostEventSchema.parse({
+        parseAgentHostEvent({
           type: "host.heartbeat",
           protocolVersion: 1,
           messageId: randomUUID(),
@@ -241,7 +221,7 @@ export class AgentHostClient {
 
   private send(event: unknown): void {
     if (!this.welcomed || this.socket?.readyState !== WebSocket.OPEN) return;
-    this.socket.send(JSON.stringify(hostEventSchema.parse(event)));
+    this.socket.send(serializeAgentHostEvent(event));
   }
 
   private pump(): void {
@@ -289,11 +269,11 @@ export class AgentHostClient {
 
   private async run(execution: AgentHostExecution, controller: AbortController): Promise<void> {
     try {
-      const result = dispatchResultSchema.parse(
-        await this.options.executor.execute(execution, {
+      const result = parseAgentHostDispatchResult(
+        await this.options.executor.execute(execution.command, {
           signal: controller.signal,
           executionKey: `${execution.command.dispatchId}:${execution.command.leaseId}`,
-          uploadArtifact: (input) => this.uploadArtifact(execution, input)
+          artifacts: this.artifacts.forExecution(execution.command)
         })
       );
       if (this.stopped) return;
@@ -309,62 +289,5 @@ export class AgentHostClient {
       this.flushEvents();
       this.pump();
     }
-  }
-
-  private async uploadArtifact(
-    execution: AgentHostExecution,
-    input: AgentHostArtifactInput
-  ): Promise<string> {
-    const bytes = Buffer.from(input.bytes);
-    const sha256 = createHash("sha256").update(bytes).digest("hex");
-    const command = execution.command;
-    const operationKey = artifactOperationKeySchema.parse(input.operationKey);
-    const operationId = `artifact-upload:${createHash("sha256")
-      .update(
-        JSON.stringify([
-          this.options.hostId,
-          command.dispatchId,
-          command.leaseId,
-          command.executionAttemptId,
-          input.purpose,
-          operationKey,
-          sha256,
-          bytes.byteLength,
-          input.mediaType
-        ])
-      )
-      .digest("hex")}`;
-    const url = endpoint(
-      this.baseUrl,
-      `/agent-hosts/${encodeURIComponent(this.options.hostId)}` +
-        `/dispatches/${encodeURIComponent(command.dispatchId)}` +
-        `/leases/${encodeURIComponent(command.leaseId)}` +
-        `/attempts/${encodeURIComponent(command.executionAttemptId)}/artifacts/${sha256}`,
-      false
-    );
-    let response: Response | undefined;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        response = await fetch(url, {
-          method: "PUT",
-          headers: {
-            Authorization: `Bearer ${this.options.token}`,
-            "content-type": input.mediaType,
-            "content-length": String(bytes.byteLength),
-            "x-planweave-artifact-operation-id": operationId,
-            "x-planweave-artifact-purpose": input.purpose
-          },
-          body: bytes
-        });
-        break;
-      } catch (error) {
-        if (attempt === 1) throw new Error("artifact_upload_failed:transport", { cause: error });
-      }
-    }
-    if (!response) throw new Error("artifact_upload_failed:transport");
-    if (!response.ok) throw new Error(`artifact_upload_failed:${response.status}`);
-    const ref = uploadResponseSchema.parse(await response.json()).ref;
-    if (ref !== `artifact:sha256:${sha256}`) throw new Error("artifact_upload_ref_mismatch");
-    return ref;
   }
 }

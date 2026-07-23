@@ -1,16 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
-  hostEventSchema,
-  mailboxCommandSchema,
-  serverEventSchema,
+  parseAgentHostEvent,
+  parseAgentHostMailboxCommand,
+  parseAgentHostServerEvent,
   type HostEvent,
   type MailboxCommand,
-  type ProtocolDispatchFailure,
-  type ProtocolDispatchResult,
+  type NormalizedFailure as ProtocolDispatchFailure,
+  type DispatchResult as ProtocolDispatchResult,
   type ServerEvent
-} from "./protocol.js";
-import { inWriteTransaction, openServerDatabase, type SqliteDatabase } from "./sqlite.js";
+} from "../protocol.js";
+import {
+  inWriteTransaction,
+  openAgentHostDatabase,
+  type SqliteDatabase
+} from "./sqliteDatabase.js";
 
 type MailboxMessageEvent = Extract<ServerEvent, { type: "mailbox.message" }>;
 type ExecuteBlockCommand = Extract<MailboxCommand, { type: "execute_block" }>;
@@ -39,6 +43,33 @@ export type AgentHostCancellation = {
   messageId: string;
   command: CancelExecutionCommand;
 };
+
+export interface AgentHostStateRepository {
+  close(): void;
+  receive(input: ServerEvent): { stored: boolean; acknowledgement: HostEvent };
+  lastAcknowledgedSequence(): number;
+  pendingEvents(): HostEvent[];
+  acknowledgeEvent(messageId: string): boolean;
+  recoverInterruptedExecutions(): number;
+  pendingExecutions(limit: number): AgentHostExecution[];
+  activeLeases(): Array<{
+    dispatchId: string;
+    leaseId: string;
+    executionAttemptId: string;
+  }>;
+  renewLease(
+    dispatchId: string,
+    leaseId: string,
+    executionAttemptId: string,
+    leaseExpiresAt: string
+  ): boolean;
+  abandonExpiredExecutions(now: Date): AgentHostExecution[];
+  pendingCancellations(): AgentHostCancellation[];
+  applyCancellation(sequence: number): { shouldAbort: boolean };
+  startExecution(sequence: number): AgentHostExecution | undefined;
+  completeExecution(sequence: number, result: ProtocolDispatchResult): void;
+  failExecution(sequence: number, failure: ProtocolDispatchFailure): void;
+}
 
 const inboxRowSchema = z.object({
   sequence: z.number().int().positive(),
@@ -89,14 +120,14 @@ CREATE INDEX IF NOT EXISTS idx_agent_host_outbox_pending
 `;
 
 function messageEvent(input: ServerEvent): MailboxMessageEvent {
-  const parsed = serverEventSchema.parse(input);
+  const parsed = parseAgentHostServerEvent(input);
   if (parsed.type !== "mailbox.message") throw new Error("mailbox_message_required");
   return parsed;
 }
 
 function toExecution(raw: Record<string, unknown>): AgentHostExecution {
   const row = inboxRowSchema.parse(raw);
-  const command = mailboxCommandSchema.parse(JSON.parse(row.command_json));
+  const command = parseAgentHostMailboxCommand(JSON.parse(row.command_json));
   if (command.type !== "execute_block" || row.execution_status === null) {
     throw new Error("execute_block_record_required");
   }
@@ -114,7 +145,7 @@ function toExecution(raw: Record<string, unknown>): AgentHostExecution {
   };
 }
 
-export class AgentHostState {
+export class AgentHostState implements AgentHostStateRepository {
   constructor(private readonly database: SqliteDatabase) {
     database.exec(schema);
   }
@@ -170,7 +201,7 @@ export class AgentHostState {
       }
       const acknowledgement = this.queueEvent(
         `mailbox.ack:${event.sequence}`,
-        hostEventSchema.parse({
+        parseAgentHostEvent({
           type: "mailbox.ack",
           protocolVersion: 1,
           messageId: randomUUID(),
@@ -196,7 +227,7 @@ export class AgentHostState {
         "SELECT event_json FROM agent_host_outbox WHERE acknowledged_at IS NULL ORDER BY sequence ASC"
       )
       .all()
-      .map((raw) => hostEventSchema.parse(JSON.parse(outboxRowSchema.parse(raw).event_json)));
+      .map((raw) => parseAgentHostEvent(JSON.parse(outboxRowSchema.parse(raw).event_json)));
   }
 
   acknowledgeEvent(messageId: string): boolean {
@@ -206,7 +237,7 @@ export class AgentHostState {
         .get(messageId);
       if (!raw) return false;
       if (raw.acknowledged_at) return true;
-      const event = hostEventSchema.parse(JSON.parse(String(raw.event_json)));
+      const event = parseAgentHostEvent(JSON.parse(String(raw.event_json)));
       const acknowledgedAt = new Date().toISOString();
       this.database
         .prepare("UPDATE agent_host_outbox SET acknowledged_at=? WHERE message_id=?")
@@ -234,7 +265,7 @@ export class AgentHostState {
           .run(execution.sequence);
         this.queueEvent(
           `dispatch.interrupted:${execution.command.dispatchId}:${execution.command.leaseId}:${execution.command.executionAttemptId}`,
-          hostEventSchema.parse({
+          parseAgentHostEvent({
             type: "dispatch.interrupted",
             protocolVersion: 1,
             messageId: randomUUID(),
@@ -346,7 +377,7 @@ export class AgentHostState {
       )
       .all()
       .map((raw) => {
-        const command = mailboxCommandSchema.parse(JSON.parse(String(raw.command_json)));
+        const command = parseAgentHostMailboxCommand(JSON.parse(String(raw.command_json)));
         if (command.type !== "cancel_execution")
           throw new Error("cancel_execution_record_required");
         return {
@@ -363,7 +394,7 @@ export class AgentHostState {
         .prepare("SELECT command_json,processed_at FROM agent_host_inbox WHERE sequence=?")
         .get(sequence);
       if (!raw) throw new Error("mailbox_message_not_found");
-      const cancellation = mailboxCommandSchema.parse(JSON.parse(String(raw.command_json)));
+      const cancellation = parseAgentHostMailboxCommand(JSON.parse(String(raw.command_json)));
       if (cancellation.type !== "cancel_execution") throw new Error("cancel_execution_required");
       if (raw.processed_at) return { shouldAbort: false };
       this.database
@@ -421,7 +452,7 @@ export class AgentHostState {
       if (updated.changes !== 1) return undefined;
       this.queueEvent(
         `dispatch.accepted:${current.command.dispatchId}:${current.command.leaseId}`,
-        hostEventSchema.parse({
+        parseAgentHostEvent({
           type: "dispatch.accepted",
           protocolVersion: 1,
           messageId: randomUUID(),
@@ -441,7 +472,7 @@ export class AgentHostState {
       sequence,
       "completed",
       (command) =>
-        hostEventSchema.parse({
+        parseAgentHostEvent({
           type: "dispatch.completed",
           protocolVersion: 1,
           messageId: randomUUID(),
@@ -459,7 +490,7 @@ export class AgentHostState {
       sequence,
       "failed",
       (command) =>
-        hostEventSchema.parse({
+        parseAgentHostEvent({
           type: "dispatch.failed",
           protocolVersion: 1,
           messageId: randomUUID(),
@@ -507,7 +538,7 @@ export class AgentHostState {
   }
 
   private cancelledEvent(command: ExecuteBlockCommand): HostEvent {
-    return hostEventSchema.parse({
+    return parseAgentHostEvent({
       type: "dispatch.failed",
       protocolVersion: 1,
       messageId: randomUUID(),
@@ -523,7 +554,7 @@ export class AgentHostState {
   }
 
   private queueEvent(eventKey: string, input: HostEvent): HostEvent {
-    const event = hostEventSchema.parse(input);
+    const event = parseAgentHostEvent(input);
     this.database
       .prepare(
         `INSERT INTO agent_host_outbox(message_id,event_key,event_json,created_at)
@@ -534,7 +565,7 @@ export class AgentHostState {
       .prepare("SELECT event_json FROM agent_host_outbox WHERE event_key=?")
       .get(eventKey);
     if (!raw) throw new Error("host_event_not_persisted");
-    return hostEventSchema.parse(JSON.parse(String(raw.event_json)));
+    return parseAgentHostEvent(JSON.parse(String(raw.event_json)));
   }
 }
 
@@ -542,5 +573,5 @@ export async function openAgentHostState(
   path: string,
   busyTimeoutMs = 5000
 ): Promise<AgentHostState> {
-  return new AgentHostState(await openServerDatabase(path, busyTimeoutMs));
+  return new AgentHostState(await openAgentHostDatabase(path, busyTimeoutMs));
 }

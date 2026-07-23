@@ -12,16 +12,22 @@ import {
   hostEventSchema,
   hostHelloSchema,
   interactionSettlementSchema,
-  serverEventSchema
+  serverEventSchema,
+  type HostEvent as SharedHostEvent,
+  type ServerEvent as SharedServerEvent
 } from "@planweave-ai/distributed-protocol";
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   agentHostProtocolVersion as serverProtocolVersion,
   artifactRefSchema as serverArtifactRefSchema,
   capabilitiesSchema as serverCapabilitiesSchema,
   capabilitySchema as serverCapabilitySchema,
   dispatchFailureSchema,
-  opaqueIdentifierSchema as serverOpaqueIdentifierSchema
+  hostEventSchema as serverHostEventSchema,
+  opaqueIdentifierSchema as serverOpaqueIdentifierSchema,
+  serverEventSchema as serverServerEventSchema,
+  type HostEvent as ServerHostEvent,
+  type ServerEvent as ServerServerEvent
 } from "../protocol.js";
 
 describe("Server protocol primitives", () => {
@@ -32,6 +38,10 @@ describe("Server protocol primitives", () => {
     expect(serverCapabilitiesSchema).toBe(capabilitiesSchema);
     expect(serverArtifactRefSchema).toBe(artifactRefSchema);
     expect(dispatchFailureSchema).toBe(normalizedFailureSchema);
+    expect(serverHostEventSchema).toBe(hostEventSchema);
+    expect(serverServerEventSchema).toBe(serverEventSchema);
+    expectTypeOf<ServerHostEvent>().toEqualTypeOf<SharedHostEvent>();
+    expectTypeOf<ServerServerEvent>().toEqualTypeOf<SharedServerEvent>();
   });
 
   it("consumes the shared portable envelope fixture and locked digest", () => {
@@ -45,21 +55,25 @@ describe("Server protocol primitives", () => {
   });
 
   it("consumes the shared Coordinator and Agent Host golden fixtures", () => {
-    expect(hostHelloSchema.parse(agentHostProtocolGoldenFixtures.hello)).toEqual(
-      agentHostProtocolGoldenFixtures.hello
-    );
-    expect(serverEventSchema.parse(agentHostProtocolGoldenFixtures.executeDelivery)).toEqual(
-      agentHostProtocolGoldenFixtures.executeDelivery
-    );
-    expect(serverEventSchema.parse(agentHostProtocolGoldenFixtures.resumeDelivery)).toEqual(
+    const helloWire = JSON.stringify(hostHelloSchema.parse(agentHostProtocolGoldenFixtures.hello));
+    expect(helloWire).toBe(JSON.stringify(agentHostProtocolGoldenFixtures.hello));
+    for (const fixture of [
+      agentHostProtocolGoldenFixtures.executeDelivery,
       agentHostProtocolGoldenFixtures.resumeDelivery
-    );
-    expect(hostEventSchema.parse(agentHostProtocolGoldenFixtures.acpEventBatch)).toEqual(
-      agentHostProtocolGoldenFixtures.acpEventBatch
-    );
-    expect(hostEventSchema.parse(agentHostProtocolGoldenFixtures.interrupted)).toEqual(
-      agentHostProtocolGoldenFixtures.interrupted
-    );
+    ]) {
+      expect(JSON.stringify(serverServerEventSchema.parse(fixture))).toBe(
+        JSON.stringify(serverEventSchema.parse(fixture))
+      );
+    }
+    for (const fixture of [
+      agentHostProtocolGoldenFixtures.acpEventBatch,
+      agentHostProtocolGoldenFixtures.interrupted,
+      agentHostProtocolGoldenFixtures.authenticationRequired
+    ]) {
+      expect(JSON.stringify(serverHostEventSchema.parse(fixture))).toBe(
+        JSON.stringify(hostEventSchema.parse(fixture))
+      );
+    }
     expect(
       interactionSettlementSchema.parse(agentHostProtocolGoldenFixtures.authenticationSettlement)
     ).toEqual(agentHostProtocolGoldenFixtures.authenticationSettlement);

@@ -13,6 +13,7 @@ const packages = {
   desktop: "packages/desktop/package.json",
   mcp: "packages/mcp/package.json",
   "distributed-protocol": "packages/distributed-protocol/package.json",
+  "agent-host": "packages/agent-host/package.json",
   server: "packages/server/package.json"
 };
 
@@ -32,9 +33,19 @@ const versionFlagTargets = {
   "--desktop": ["desktop"],
   "--mcp": ["mcp"],
   "--distributed-protocol": ["distributed-protocol"],
+  "--agent-host": ["agent-host"],
   "--server": ["server"],
   "--npm": ["runtime", "cli"],
-  "--all": ["root", "runtime", "cli", "desktop", "mcp", "distributed-protocol", "server"]
+  "--all": [
+    "root",
+    "runtime",
+    "cli",
+    "desktop",
+    "mcp",
+    "distributed-protocol",
+    "agent-host",
+    "server"
+  ]
 };
 
 const semverTextPattern = String.raw`(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?`;
@@ -62,6 +73,7 @@ function usage() {
     "  --desktop   packages/desktop/package.json",
     "  --mcp       packages/mcp/package.json",
     "  --distributed-protocol packages/distributed-protocol/package.json",
+    "  --agent-host packages/agent-host/package.json",
     "  --server    packages/server/package.json",
     "  --npm       packages/runtime/package.json and packages/cli/package.json",
     "  --all       all package.json files above"

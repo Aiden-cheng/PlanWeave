@@ -6,7 +6,7 @@ import {
   agentHostProtocolGoldenFixtures,
   exampleExecuteDelivery
 } from "@planweave-ai/distributed-protocol";
-import { openAgentHostState, type AgentHostState } from "../agentHostState.js";
+import { openAgentHostState, type AgentHostState } from "../state/agentHostState.js";
 
 const directories: string[] = [];
 const states: AgentHostState[] = [];
