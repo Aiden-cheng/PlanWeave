@@ -149,6 +149,7 @@ export class AgentHostClient {
         type: "host.hello",
         protocolVersion: 1,
         lastAcknowledgedSequence: this.options.state.lastAcknowledgedSequence(),
+        lastObservedAcpCursor: 0,
         capabilities: this.capabilities,
         capacity: this.options.capacity
       });
@@ -197,7 +198,12 @@ export class AgentHostClient {
         this.options.state.acknowledgeEvent(event.messageId);
         return;
       case "lease.renewed":
-        this.options.state.renewLease(event.dispatchId, event.leaseId, event.leaseExpiresAt);
+        this.options.state.renewLease(
+          event.dispatchId,
+          event.leaseId,
+          event.executionAttemptId,
+          event.leaseExpiresAt
+        );
         return;
       case "protocol.error":
         this.options.onProtocolError?.(event);
@@ -212,6 +218,7 @@ export class AgentHostClient {
       this.send(
         hostEventSchema.parse({
           type: "host.heartbeat",
+          protocolVersion: 1,
           messageId: randomUUID(),
           activeLeases: this.options.state.activeLeases()
         })
@@ -239,7 +246,8 @@ export class AgentHostClient {
         for (const active of this.active.values()) {
           if (
             active.execution.command.dispatchId === cancellation.command.dispatchId &&
-            active.execution.command.leaseId === cancellation.command.leaseId
+            active.execution.command.leaseId === cancellation.command.leaseId &&
+            active.execution.command.executionAttemptId === cancellation.command.executionAttemptId
           ) {
             active.controller.abort();
           }

@@ -24,6 +24,7 @@
     "test": "cd ../.. && vitest run packages/server/src"
   },
   "dependencies": {
+    "@planweave-ai/distributed-protocol": "workspace:*",
     "@planweave-ai/runtime": "workspace:*",
     "ws": "^8.21.0",
     "zod": "^4.1.12"

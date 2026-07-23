@@ -419,8 +419,21 @@
       "performance": ["blockRunIndexPerformance.test.ts"]
     },
     {
+      "root": "packages/distributed-protocol/src/__tests__",
+      "unit": [
+        "agentHostProtocol.test.ts",
+        "canonicalJson.test.ts",
+        "executionEnvelope.test.ts",
+        "exports.test.ts",
+        "primitives.test.ts"
+      ],
+      "integration": [],
+      "platform": [],
+      "performance": []
+    },
+    {
       "root": "packages/server/src/__tests__",
-      "unit": [],
+      "unit": ["protocolPrimitives.test.ts"],
       "integration": [
         "agentHostClient.test.ts",
         "agentHostState.test.ts",

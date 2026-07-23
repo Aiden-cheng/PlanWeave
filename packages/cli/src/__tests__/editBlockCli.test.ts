@@ -30,6 +30,23 @@ describe("edit-block CLI", () => {
       throw new Error("Expected runtime to create the CLI shared resources task.");
     }
 
+    const rejected = JSON.parse(
+      (
+        await runCli(
+          [
+            "--project-root",
+            projectRoot,
+            "edit-block",
+            `${taskId}#B-001`,
+            "--required-capabilities",
+            "linux,acp.codex,linux"
+          ],
+          env
+        )
+      ).stdout
+    ) as { ok: boolean };
+    expect(rejected.ok).toBe(false);
+
     await runCli(
       [
         "--project-root",
@@ -37,7 +54,9 @@ describe("edit-block CLI", () => {
         "edit-block",
         `${taskId}#B-001`,
         "--shared-resources",
-        "api, repository,api"
+        "api, repository,api",
+        "--required-capabilities",
+        "linux,acp.codex"
       ],
       env
     );
@@ -50,6 +69,7 @@ describe("edit-block CLI", () => {
         blocks: Array<{
           id: string;
           parallel?: Record<string, unknown> & { sharedResources?: string[] };
+          requirements?: { capabilities: string[] };
         }>;
       }>;
     };
@@ -58,6 +78,7 @@ describe("edit-block CLI", () => {
       ?.blocks.find((item) => item.id === "B-001");
 
     expect(block?.parallel).toEqual({ sharedResources: ["api", "repository"] });
+    expect(block?.requirements).toEqual({ capabilities: ["linux", "acp.codex"] });
     expect(block?.parallel).not.toHaveProperty("safe");
     expect(block?.parallel).not.toHaveProperty("locks");
   });

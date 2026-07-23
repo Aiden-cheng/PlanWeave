@@ -69,6 +69,7 @@ export type UpdateBlockFieldsCommand = PlanGraphCommandBase & {
     executor?: string | null;
     dependsOn?: string[];
     sharedResources?: string[];
+    requiredCapabilities?: string[];
     reviewRequired?: boolean;
     maxFeedbackCycles?: number;
     reviewHook?: ReviewHookDefinition | null;

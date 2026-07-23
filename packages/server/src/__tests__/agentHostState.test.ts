@@ -2,6 +2,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import {
+  agentHostProtocolGoldenFixtures,
+  exampleExecuteDelivery
+} from "@planweave-ai/distributed-protocol";
 import { openAgentHostState, type AgentHostState } from "../agentHostState.js";
 
 const directories: string[] = [];
@@ -24,18 +28,13 @@ async function setup(): Promise<{ directory: string; state: AgentHostState }> {
 
 function executeMessage(sequence = 1) {
   return {
-    type: "mailbox.message" as const,
+    ...exampleExecuteDelivery,
     sequence,
     messageId: `mailbox-${sequence}`,
     command: {
-      type: "execute_block" as const,
-      dispatchId: "dispatch-1",
+      ...exampleExecuteDelivery.command,
       leaseId: "lease-1",
-      leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
-      projectId: "project-1",
-      blockRef: "T-001#B-001",
-      packageRef: "package://project-1/v1",
-      requiredCapabilities: ["linux"]
+      leaseExpiresAt: new Date(Date.now() + 60_000).toISOString()
     }
   };
 }
@@ -43,14 +42,27 @@ function executeMessage(sequence = 1) {
 function cancelMessage(sequence = 2) {
   return {
     type: "mailbox.message" as const,
+    protocolVersion: 1 as const,
     sequence,
     messageId: `mailbox-${sequence}`,
     command: {
       type: "cancel_execution" as const,
-      dispatchId: "dispatch-1",
+      protocolVersion: 1 as const,
+      dispatchId: exampleExecuteDelivery.command.dispatchId,
       leaseId: "lease-1",
+      executionAttemptId: exampleExecuteDelivery.command.executionAttemptId,
       reason: "The task was reassigned."
     }
+  };
+}
+
+function unsupportedMessage(sequence: number, command: Record<string, unknown>) {
+  return {
+    type: "mailbox.message" as const,
+    protocolVersion: 1 as const,
+    sequence,
+    messageId: `mailbox-${sequence}`,
+    command
   };
 }
 
@@ -86,6 +98,47 @@ describe("durable Agent Host state", () => {
     );
   });
 
+  it("rejects a stale envelope digest before persistence or acknowledgement", async () => {
+    const { state } = await setup();
+    const message = executeMessage();
+    expect(() =>
+      state.receive({
+        ...message,
+        command: {
+          ...message.command,
+          envelopeDigest: `envelope:sha256:${"0".repeat(64)}`
+        }
+      })
+    ).toThrow("envelopeDigest must match");
+    expect(state.pendingExecutions(1)).toEqual([]);
+    expect(state.pendingEvents()).toEqual([]);
+  });
+
+  it("rejects unsupported resume and interaction commands without durable ACK", async () => {
+    const { state } = await setup();
+    const identity = {
+      dispatchId: exampleExecuteDelivery.command.dispatchId,
+      leaseId: "lease-1",
+      executionAttemptId: exampleExecuteDelivery.command.executionAttemptId,
+      actionId: "action-1"
+    };
+    const commands = [
+      agentHostProtocolGoldenFixtures.resumeDelivery.command,
+      { type: "interaction.permission_response", ...identity, decision: "deny" },
+      { type: "interaction.elicitation_response", ...identity, response: "stop" },
+      { type: "interaction.authentication_action", ...identity, action: "cancel" }
+    ];
+    for (const [index, command] of commands.entries()) {
+      expect(() => state.receive(unsupportedMessage(index + 1, command))).toThrow(
+        `agent_host_command_unsupported:${command.type}`
+      );
+    }
+    expect(state.pendingExecutions(1)).toEqual([]);
+    expect(state.pendingCancellations()).toEqual([]);
+    expect(state.pendingEvents()).toEqual([]);
+    expect(state.lastAcknowledgedSequence()).toBe(0);
+  });
+
   it("atomically persists execution lifecycle events and recovers interrupted work", async () => {
     const { directory, state } = await setup();
     state.receive(executeMessage());
@@ -100,17 +153,12 @@ describe("durable Agent Host state", () => {
     const reopened = await openAgentHostState(join(directory, "host.sqlite"));
     states.push(reopened);
     expect(reopened.recoverInterruptedExecutions()).toBe(1);
-    expect(reopened.startExecution(1)?.status).toBe("running");
-    reopened.completeExecution(1, {
-      summary: "Remote execution completed.",
-      reportArtifactRef: `artifact:sha256:${"a".repeat(64)}`,
-      artifactRefs: []
-    });
+    expect(reopened.startExecution(1)).toBeUndefined();
 
     expect(reopened.pendingExecutions(1)).toEqual([]);
     expect(reopened.activeLeases()).toEqual([]);
     expect(reopened.pendingEvents()).toEqual(
-      expect.arrayContaining([expect.objectContaining({ type: "dispatch.completed" })])
+      expect.arrayContaining([expect.objectContaining({ type: "dispatch.interrupted" })])
     );
     expect(reopened.startExecution(1)).toBeUndefined();
   });
@@ -139,11 +187,36 @@ describe("durable Agent Host state", () => {
     );
   });
 
+  it("does not apply cancellation from a stale execution attempt", async () => {
+    const { state } = await setup();
+    state.receive(executeMessage());
+    state.startExecution(1);
+    const stale = cancelMessage();
+    state.receive({
+      ...stale,
+      command: { ...stale.command, executionAttemptId: "stale-attempt" }
+    });
+
+    expect(state.applyCancellation(2)).toEqual({ shouldAbort: false });
+    expect(state.activeLeases()).toEqual([
+      expect.objectContaining({
+        executionAttemptId: exampleExecuteDelivery.command.executionAttemptId
+      })
+    ]);
+  });
+
   it("tracks lease renewals and abandons expired local execution", async () => {
     const { state } = await setup();
     state.receive(executeMessage());
     const renewedUntil = new Date(Date.now() + 120_000).toISOString();
-    expect(state.renewLease("dispatch-1", "lease-1", renewedUntil)).toBe(true);
+    expect(
+      state.renewLease(
+        exampleExecuteDelivery.command.dispatchId,
+        "lease-1",
+        exampleExecuteDelivery.command.executionAttemptId,
+        renewedUntil
+      )
+    ).toBe(true);
     expect(state.pendingExecutions(1)[0]?.command.leaseExpiresAt).toBe(renewedUntil);
     expect(state.abandonExpiredExecutions(new Date(Date.now() + 60_000))).toEqual([]);
 

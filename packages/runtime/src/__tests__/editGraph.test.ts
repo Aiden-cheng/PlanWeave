@@ -134,7 +134,8 @@ describe("editGraph", () => {
       title: "Updated implementation",
       promptMarkdown: "# Updated implementation\n",
       executor: "manual",
-      sharedResources: ["db", "db"]
+      sharedResources: ["db", "db"],
+      requiredCapabilities: ["linux", "acp.codex"]
     });
     const blockTask = blockMutation.nextManifest.nodes.find(
       (node) => node.type === "task" && node.id === "T-001"
@@ -146,7 +147,8 @@ describe("editGraph", () => {
       "title",
       "prompt",
       "executor",
-      "parallel.sharedResources"
+      "parallel.sharedResources",
+      "requirements.capabilities"
     ]);
     expect(new Set(blockMutation.updatedFields).size).toBe(blockMutation.updatedFields.length);
     expect(blockMutation.sideEffects).toEqual([
@@ -159,7 +161,8 @@ describe("editGraph", () => {
     expect(blockTask.blocks.find((block) => block.id === "B-001")).toMatchObject({
       title: "Updated implementation",
       executor: "manual",
-      parallel: { sharedResources: ["db"] }
+      parallel: { sharedResources: ["db"] },
+      requirements: { capabilities: ["linux", "acp.codex"] }
     });
   });
 

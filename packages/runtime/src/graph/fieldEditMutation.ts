@@ -1,4 +1,5 @@
 import { parseBlockRef } from "./compileTaskGraph.js";
+import { capabilitiesSchema } from "@planweave-ai/distributed-protocol";
 import {
   buildPlanPackageManifestChangeMutation,
   writePromptSideEffects,
@@ -34,6 +35,7 @@ export type PlanPackageBlockFieldEditInput = {
   executor?: string | null;
   dependsOn?: string[];
   sharedResources?: string[];
+  requiredCapabilities?: string[];
   reviewRequired?: boolean;
   maxFeedbackCycles?: number;
   reviewHook?: ReviewHookDefinition | null;
@@ -144,7 +146,7 @@ export function buildPlanPackageExecutionPolicyFieldEditManifest(
 
 function editImplementationBlock(
   block: ManifestImplementationBlock,
-  input: Pick<PlanPackageBlockFieldEditInput, "sharedResources">
+  input: Pick<PlanPackageBlockFieldEditInput, "sharedResources" | "requiredCapabilities">
 ): { block: ManifestImplementationBlock; fields: string[] } {
   const fields: string[] = [];
   let next = block;
@@ -162,6 +164,19 @@ function editImplementationBlock(
       delete next.parallel;
     }
     fields.push("parallel.sharedResources");
+  }
+  if (input.requiredCapabilities !== undefined) {
+    const requiredCapabilities = capabilitiesSchema.parse(input.requiredCapabilities);
+    next = {
+      ...next,
+      ...(requiredCapabilities.length === 0
+        ? { requirements: undefined }
+        : { requirements: { capabilities: requiredCapabilities } })
+    };
+    if (requiredCapabilities.length === 0) {
+      delete next.requirements;
+    }
+    fields.push("requirements.capabilities");
   }
   return { block: next, fields };
 }
@@ -199,6 +214,9 @@ function ensureBlockFieldCompatibility(
 ): void {
   if (block.type !== "implementation" && input.sharedResources !== undefined) {
     throw new Error("parallel fields can only be edited on implementation blocks.");
+  }
+  if (block.type !== "implementation" && input.requiredCapabilities !== undefined) {
+    throw new Error("capability requirements can only be edited on implementation blocks.");
   }
   if (
     block.type !== "review" &&

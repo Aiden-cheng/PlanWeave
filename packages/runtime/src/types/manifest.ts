@@ -1,4 +1,5 @@
 import type { ExecutorProfile } from "./executor.js";
+import type { Capabilities } from "@planweave-ai/distributed-protocol";
 
 export const supportedManifestVersion = "plan-package/v1" as const;
 
@@ -29,6 +30,11 @@ export type BlockParallelPolicy = {
   sharedResources?: string[];
 };
 
+export type BlockExecutionRequirements = {
+  /** Portable Host capabilities required to execute this Block. */
+  capabilities: Capabilities;
+};
+
 export type ManifestImplementationBlock = {
   id: string;
   type: "implementation";
@@ -36,6 +42,7 @@ export type ManifestImplementationBlock = {
   prompt: string;
   depends_on: string[];
   executor?: string;
+  requirements?: BlockExecutionRequirements;
   parallel?: BlockParallelPolicy;
 };
 

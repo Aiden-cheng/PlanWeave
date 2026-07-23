@@ -152,6 +152,7 @@ export function promptHistoryTarget(command: PlanGraphCommand): string | null {
     command.fields.executor === undefined &&
     command.fields.dependsOn === undefined &&
     command.fields.sharedResources === undefined &&
+    command.fields.requiredCapabilities === undefined &&
     command.fields.reviewRequired === undefined &&
     command.fields.maxFeedbackCycles === undefined &&
     command.fields.reviewHook === undefined

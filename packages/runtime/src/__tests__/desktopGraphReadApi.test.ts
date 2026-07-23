@@ -41,7 +41,13 @@ afterEach(() => {
 
 describe("desktop graph read API", () => {
   it("returns graph view models with source prompt previews and block order", async () => {
-    const { root, init } = await createTestWorkspace();
+    const manifest = basicManifest();
+    const implementation = manifest.nodes[0]?.blocks[0];
+    if (implementation?.type !== "implementation") {
+      throw new Error("Fixture implementation block missing.");
+    }
+    implementation.requirements = { capabilities: ["linux", "acp.codex"] };
+    const { root, init } = await createTestWorkspace(manifest);
 
     const graph = await getGraphViewModel(root);
 
@@ -73,6 +79,8 @@ describe("desktop graph read API", () => {
     });
     expect(graph.tasks[0].promptPreview).toContain("T-001 task prompt");
     expect(graph.tasks[0].blocks.map((block) => block.ref)).toEqual(["T-001#B-001", "T-001#R-001"]);
+    expect(graph.tasks[0].blocks[0]?.requiredCapabilities).toEqual(["linux", "acp.codex"]);
+    expect(graph.tasks[0].blocks[1]?.requiredCapabilities).toEqual([]);
     expect(graph.tasks[0].blockPreview.map((block) => block.ref)).toEqual([
       "T-001#B-001",
       "T-001#R-001"

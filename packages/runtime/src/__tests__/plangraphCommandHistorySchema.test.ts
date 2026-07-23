@@ -121,11 +121,19 @@ function operationUndoneAt(indexPath: string, operationId: number): string | nul
 
 describe("PlanGraph command history schema", () => {
   it("creates SQLite indexes and uses them for history and graph queries", async () => {
-    const { root, init } = await createTestWorkspace(
-      basicManifest({ includeSecondTask: true, taskDependsOn: ["T-002"] })
-    );
+    const sourceManifest = basicManifest({ includeSecondTask: true, taskDependsOn: ["T-002"] });
+    const implementation = sourceManifest.nodes[0]?.blocks[0];
+    if (implementation?.type !== "implementation") {
+      throw new Error("Expected implementation fixture.");
+    }
+    implementation.requirements = { capabilities: ["linux", "acp.codex"] };
+    const { root, init } = await createTestWorkspace(sourceManifest);
     const store = await createSqlitePlanGraphStore({ projectRoot: root });
     await store.rebuild();
+    expect((await store.load())?.blocks.get("T-001#B-001")?.requiredCapabilities).toEqual([
+      "linux",
+      "acp.codex"
+    ]);
     const indexPath = store.indexPath;
     const historyKey = init.workspace.rootPath;
     const graphKey = init.workspace.workspaceRoot;
@@ -236,6 +244,7 @@ describe("PlanGraph command history schema", () => {
     withSqlite(store.indexPath, (db) => {
       db.exec("DROP INDEX idx_edges_project_order");
       db.exec("DROP INDEX idx_operation_log_undo_redo");
+      db.exec("ALTER TABLE blocks DROP COLUMN required_capabilities_json");
     });
     expect(sqliteIndexNames(store.indexPath)).not.toContain("idx_edges_project_order");
     expect(sqliteIndexNames(store.indexPath)).not.toContain("idx_operation_log_undo_redo");
@@ -245,6 +254,13 @@ describe("PlanGraph command history schema", () => {
     expect(sqliteIndexNames(store.indexPath)).toEqual(
       expect.arrayContaining(["idx_edges_project_order", "idx_operation_log_undo_redo"])
     );
+    const blockColumns = withSqlite(store.indexPath, (db) =>
+      db
+        .prepare("PRAGMA table_info(blocks)")
+        .all()
+        .map((row) => stringColumn(row, "name"))
+    );
+    expect(blockColumns).toContain("required_capabilities_json");
   });
 
   it("parses persisted command variants through the runtime command schema", () => {
@@ -320,6 +336,7 @@ describe("PlanGraph command history schema", () => {
           executor: null,
           dependsOn: ["B-001"],
           sharedResources: ["runtime"],
+          requiredCapabilities: ["linux", "acp.codex"],
           reviewRequired: true,
           maxFeedbackCycles: 2,
           reviewHook: {

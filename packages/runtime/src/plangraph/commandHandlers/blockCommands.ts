@@ -140,6 +140,9 @@ export function inverseBlockFieldsCommand(
     if (command.fields.sharedResources !== undefined) {
       fields.sharedResources = [...(current.block.parallel?.sharedResources ?? [])];
     }
+    if (command.fields.requiredCapabilities !== undefined) {
+      fields.requiredCapabilities = [...(current.block.requirements?.capabilities ?? [])];
+    }
   } else {
     if (command.fields.reviewRequired !== undefined) {
       fields.reviewRequired = current.block.review.required;
@@ -190,6 +193,7 @@ export const blockCommandHandler: PlanGraphCommandHandler<BlockCommand> = {
         executor: command.fields.executor,
         dependsOn: command.fields.dependsOn,
         sharedResources: command.fields.sharedResources,
+        requiredCapabilities: command.fields.requiredCapabilities,
         reviewRequired: command.fields.reviewRequired,
         maxFeedbackCycles: command.fields.maxFeedbackCycles,
         reviewHook: command.fields.reviewHook

@@ -57,8 +57,8 @@ export function writeGraphIndex(db: SqliteDatabase, projectRoot: string, graph: 
 
     const insertBlock = db.prepare(
       `INSERT INTO blocks
-       (project_root, block_ref, task_id, block_id, type, title, prompt_path, prompt_hash, prompt_preview, executor, depends_on_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       (project_root, block_ref, task_id, block_id, type, title, prompt_path, prompt_hash, prompt_preview, executor, depends_on_json, required_capabilities_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     for (const block of graph.blocks.values()) {
       insertBlock.run(
@@ -72,7 +72,8 @@ export function writeGraphIndex(db: SqliteDatabase, projectRoot: string, graph: 
         block.promptRef.contentHash,
         block.promptRef.preview,
         block.executor,
-        jsonString(block.dependsOn)
+        jsonString(block.dependsOn),
+        jsonString(block.requiredCapabilities)
       );
     }
 
@@ -150,8 +151,8 @@ function upsertTaskRow(db: SqliteDatabase, projectRoot: string, task: PlanGraphT
 function upsertBlockRow(db: SqliteDatabase, projectRoot: string, block: PlanGraphBlockNode): void {
   db.prepare(
     `INSERT OR REPLACE INTO blocks
-     (project_root, block_ref, task_id, block_id, type, title, prompt_path, prompt_hash, prompt_preview, executor, depends_on_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     (project_root, block_ref, task_id, block_id, type, title, prompt_path, prompt_hash, prompt_preview, executor, depends_on_json, required_capabilities_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     projectRoot,
     block.ref,
@@ -163,7 +164,8 @@ function upsertBlockRow(db: SqliteDatabase, projectRoot: string, block: PlanGrap
     block.promptRef.contentHash,
     block.promptRef.preview,
     block.executor,
-    jsonString(block.dependsOn)
+    jsonString(block.dependsOn),
+    jsonString(block.requiredCapabilities)
   );
 }
 
@@ -357,7 +359,8 @@ export function readGraphIndex(db: SqliteDatabase, projectRoot: string): PlanGra
       title: stringColumn(row, "title"),
       promptRef,
       executor: nullableStringColumn(row, "executor"),
-      dependsOn: stringArrayColumn(row, "depends_on_json")
+      dependsOn: stringArrayColumn(row, "depends_on_json"),
+      requiredCapabilities: stringArrayColumn(row, "required_capabilities_json")
     });
   }
 

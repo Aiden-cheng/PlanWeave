@@ -118,6 +118,10 @@ export const manifestSchemaDocument: SchemaDocument<"manifest"> = {
             prompt: "string, non-empty; package-relative prompt source path",
             depends_on: "block id string[], default: []",
             executor: "string, optional; must reference a known executor profile",
+            requirements: {
+              capabilities:
+                "portable unique lowercase capability token[], optional; duplicates rejected, max 128; never concrete Host or human identity"
+            },
             parallel: {
               sharedResources:
                 "string[], optional; deduplicated coordination hints that never affect ready, claim, or scheduling"
@@ -159,6 +163,7 @@ export const manifestSchemaDocument: SchemaDocument<"manifest"> = {
     "Only implementation and review block types are supported.",
     "Use task edges for task dependencies and block depends_on for block order inside a task.",
     "Dependencies answer when a block can start; shared resources only describe coordination context.",
+    "Implementation requirements express portable Host capabilities; concrete Host and human assignment stay outside the Plan Package.",
     "Absent block parallel means the block has no shared-resource coordination hints.",
     "Agent identity and runner transport are separate. Each agent profile selects exactly one runner: cli or acp.",
     "Legacy *-exec profiles remain valid and normalize once to the canonical agent plus CLI runner shape.",

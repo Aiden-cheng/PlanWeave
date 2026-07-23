@@ -240,6 +240,37 @@ describe("plan-package/v1 manifest schema", () => {
     ]);
   });
 
+  it("accepts unique portable implementation capability requirements and rejects duplicates", () => {
+    const manifest = basicManifest();
+    const block = manifest.nodes[0]?.blocks[0];
+    if (block?.type !== "implementation") {
+      throw new Error("missing block");
+    }
+    block.requirements = { capabilities: ["linux", "acp.codex"] };
+
+    const parsed = manifestSchema.parse(manifest).nodes[0]?.blocks[0];
+    expect(parsed?.type === "implementation" ? parsed.requirements?.capabilities : null).toEqual([
+      "linux",
+      "acp.codex"
+    ]);
+
+    block.requirements = { capabilities: ["linux", "acp.codex", "linux"] };
+    expect(manifestSchema.safeParse(manifest).success).toBe(false);
+  });
+
+  it("rejects concrete assignment and invalid capability fields in Block requirements", () => {
+    const manifest = basicManifest();
+    const block = manifest.nodes[0]?.blocks[0];
+    if (block?.type !== "implementation") {
+      throw new Error("missing block");
+    }
+    block.requirements = { capabilities: ["linux"], hostId: "host-1" } as never;
+    expect(manifestSchema.safeParse(manifest).success).toBe(false);
+
+    block.requirements = { capabilities: ["/usr/bin/node"] };
+    expect(manifestSchema.safeParse(manifest).success).toBe(false);
+  });
+
   it("normalizes empty shared resources to an absent parallel policy", () => {
     const manifest = basicManifest();
     const block = manifest.nodes[0]?.blocks[0];

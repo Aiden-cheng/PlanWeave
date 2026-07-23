@@ -50,7 +50,8 @@ export const planweaveHelpTopics: HelpTopic[] = [
       "prompt <block-ref>",
       "edit-task <task-id> --title <title>",
       "edit-block <block-ref> --review-required false",
-      "edit-block <block-ref> --shared-resources api,db"
+      "edit-block <block-ref> --shared-resources api,db",
+      "edit-block <block-ref> --required-capabilities linux,acp.codex"
     ],
     notes: [
       "Rendered prompts are derived output.",

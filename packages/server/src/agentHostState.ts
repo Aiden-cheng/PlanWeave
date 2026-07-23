@@ -19,6 +19,7 @@ type CancelExecutionCommand = Extract<MailboxCommand, { type: "cancel_execution"
 export type AgentHostExecutionStatus =
   | "pending"
   | "running"
+  | "interrupted"
   | "cancelling"
   | "completed"
   | "failed";
@@ -43,7 +44,9 @@ const inboxRowSchema = z.object({
   sequence: z.number().int().positive(),
   message_id: z.string(),
   command_json: z.string(),
-  execution_status: z.enum(["pending", "running", "cancelling", "completed", "failed"]).nullable(),
+  execution_status: z
+    .enum(["pending", "running", "interrupted", "cancelling", "completed", "failed"])
+    .nullable(),
   lease_expires_at: z.string().datetime().nullable(),
   received_at: z.string().datetime(),
   started_at: z.string().datetime().nullable(),
@@ -60,7 +63,7 @@ CREATE TABLE IF NOT EXISTS agent_host_inbox (
   message_id TEXT NOT NULL UNIQUE,
   command_json TEXT NOT NULL,
   execution_status TEXT CHECK(execution_status IN (
-    'pending','running','cancelling','completed','failed'
+    'pending','running','interrupted','cancelling','completed','failed'
   )),
   lease_expires_at TEXT,
   received_at TEXT NOT NULL,
@@ -122,6 +125,16 @@ export class AgentHostState {
 
   receive(input: ServerEvent): { stored: boolean; acknowledgement: HostEvent } {
     const event = messageEvent(input);
+    switch (event.command.type) {
+      case "execute_block":
+      case "cancel_execution":
+        break;
+      case "resume_execution":
+      case "interaction.permission_response":
+      case "interaction.elicitation_response":
+      case "interaction.authentication_action":
+        throw new Error(`agent_host_command_unsupported:${event.command.type}`);
+    }
     return inWriteTransaction(this.database, () => {
       const commandJson = JSON.stringify(event.command);
       const existing = this.database
@@ -159,6 +172,7 @@ export class AgentHostState {
         `mailbox.ack:${event.sequence}`,
         hostEventSchema.parse({
           type: "mailbox.ack",
+          protocolVersion: 1,
           messageId: randomUUID(),
           sequence: event.sequence
         })
@@ -210,11 +224,28 @@ export class AgentHostState {
 
   recoverInterruptedExecutions(): number {
     return inWriteTransaction(this.database, () => {
-      const restarted = this.database
-        .prepare(
-          "UPDATE agent_host_inbox SET execution_status='pending',started_at=NULL WHERE execution_status='running'"
-        )
-        .run().changes;
+      const running = this.database
+        .prepare("SELECT * FROM agent_host_inbox WHERE execution_status='running'")
+        .all()
+        .map(toExecution);
+      for (const execution of running) {
+        this.database
+          .prepare("UPDATE agent_host_inbox SET execution_status='interrupted' WHERE sequence=?")
+          .run(execution.sequence);
+        this.queueEvent(
+          `dispatch.interrupted:${execution.command.dispatchId}:${execution.command.leaseId}:${execution.command.executionAttemptId}`,
+          hostEventSchema.parse({
+            type: "dispatch.interrupted",
+            protocolVersion: 1,
+            messageId: randomUUID(),
+            dispatchId: execution.command.dispatchId,
+            leaseId: execution.command.leaseId,
+            executionAttemptId: execution.command.executionAttemptId,
+            reason: "host_restart",
+            resumable: false
+          })
+        );
+      }
       const cancelling = this.database
         .prepare("SELECT * FROM agent_host_inbox WHERE execution_status='cancelling'")
         .all()
@@ -228,7 +259,7 @@ export class AgentHostState {
           false
         );
       }
-      return restarted + cancelling.length;
+      return running.length + cancelling.length;
     });
   }
 
@@ -242,17 +273,30 @@ export class AgentHostState {
       .map(toExecution);
   }
 
-  activeLeases(): Array<{ dispatchId: string; leaseId: string }> {
+  activeLeases(): Array<{
+    dispatchId: string;
+    leaseId: string;
+    executionAttemptId: string;
+  }> {
     return this.database
       .prepare(
         "SELECT * FROM agent_host_inbox WHERE execution_status IN ('pending','running','cancelling') ORDER BY sequence ASC"
       )
       .all()
       .map(toExecution)
-      .map(({ command }) => ({ dispatchId: command.dispatchId, leaseId: command.leaseId }));
+      .map(({ command }) => ({
+        dispatchId: command.dispatchId,
+        leaseId: command.leaseId,
+        executionAttemptId: command.executionAttemptId
+      }));
   }
 
-  renewLease(dispatchId: string, leaseId: string, leaseExpiresAt: string): boolean {
+  renewLease(
+    dispatchId: string,
+    leaseId: string,
+    executionAttemptId: string,
+    leaseExpiresAt: string
+  ): boolean {
     const parsedExpiry = z.string().datetime().parse(leaseExpiresAt);
     const execution = this.database
       .prepare(
@@ -260,7 +304,12 @@ export class AgentHostState {
       )
       .all()
       .map(toExecution)
-      .find(({ command }) => command.dispatchId === dispatchId && command.leaseId === leaseId);
+      .find(
+        ({ command }) =>
+          command.dispatchId === dispatchId &&
+          command.leaseId === leaseId &&
+          command.executionAttemptId === executionAttemptId
+      );
     if (!execution) return false;
     return (
       this.database
@@ -330,7 +379,8 @@ export class AgentHostState {
         .find(
           ({ command }) =>
             command.dispatchId === cancellation.dispatchId &&
-            command.leaseId === cancellation.leaseId
+            command.leaseId === cancellation.leaseId &&
+            command.executionAttemptId === cancellation.executionAttemptId
         );
       if (!execution || execution.status === "completed" || execution.status === "failed") {
         return { shouldAbort: false };
@@ -373,9 +423,11 @@ export class AgentHostState {
         `dispatch.accepted:${current.command.dispatchId}:${current.command.leaseId}`,
         hostEventSchema.parse({
           type: "dispatch.accepted",
+          protocolVersion: 1,
           messageId: randomUUID(),
           dispatchId: current.command.dispatchId,
-          leaseId: current.command.leaseId
+          leaseId: current.command.leaseId,
+          executionAttemptId: current.command.executionAttemptId
         })
       );
       return toExecution(
@@ -391,9 +443,11 @@ export class AgentHostState {
       (command) =>
         hostEventSchema.parse({
           type: "dispatch.completed",
+          protocolVersion: 1,
           messageId: randomUUID(),
           dispatchId: command.dispatchId,
           leaseId: command.leaseId,
+          executionAttemptId: command.executionAttemptId,
           result
         }),
       "dispatch.completed"
@@ -407,9 +461,11 @@ export class AgentHostState {
       (command) =>
         hostEventSchema.parse({
           type: "dispatch.failed",
+          protocolVersion: 1,
           messageId: randomUUID(),
           dispatchId: command.dispatchId,
           leaseId: command.leaseId,
+          executionAttemptId: command.executionAttemptId,
           failure
         }),
       "dispatch.failed"
@@ -453,9 +509,11 @@ export class AgentHostState {
   private cancelledEvent(command: ExecuteBlockCommand): HostEvent {
     return hostEventSchema.parse({
       type: "dispatch.failed",
+      protocolVersion: 1,
       messageId: randomUUID(),
       dispatchId: command.dispatchId,
       leaseId: command.leaseId,
+      executionAttemptId: command.executionAttemptId,
       failure: {
         code: "execution_cancelled",
         message: "The execution was cancelled by the coordinator.",

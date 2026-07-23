@@ -51,6 +51,9 @@ function blockUpdatedFields(manifest: PlanPackageManifest, options: EditBlockInp
     if (options.sharedResources !== undefined) {
       fields.push("parallel.sharedResources");
     }
+    if (options.requiredCapabilities !== undefined) {
+      fields.push("requirements.capabilities");
+    }
   } else {
     if (options.reviewRequired !== undefined) {
       fields.push("review.required");
@@ -121,6 +124,7 @@ export async function editBlock(options: EditBlockInput): Promise<EditBlockResul
         executor: options.executor,
         dependsOn: options.dependsOn,
         sharedResources: options.sharedResources,
+        requiredCapabilities: options.requiredCapabilities,
         reviewRequired: options.reviewRequired,
         maxFeedbackCycles: options.maxFeedbackCycles,
         reviewHook: options.reviewHook

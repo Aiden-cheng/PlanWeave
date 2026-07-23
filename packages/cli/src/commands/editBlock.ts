@@ -47,6 +47,13 @@ function parseSharedResources(value: string): string[] {
   return value.split(",").map((item) => item.trim());
 }
 
+function parseRequiredCapabilities(value: string): string[] {
+  if (value.trim() === "") {
+    return [];
+  }
+  return value.split(",").map((item) => item.trim());
+}
+
 async function reviewHook(options: {
   reviewHookJson?: string;
   clearReviewHook?: boolean;
@@ -80,6 +87,10 @@ export function registerEditBlockCommand(program: Command): void {
         "--shared-resources <resources>",
         "set non-blocking shared resource hints as a comma-separated list"
       )
+      .option(
+        "--required-capabilities <capabilities>",
+        "set portable Host capability requirements as a comma-separated list"
+      )
       .option("--review-required <true|false>", "set whether a review block is required")
       .option("--max-feedback-cycles <count>", "set review max feedback cycles")
       .option("--review-hook-json <path>", "read review hook JSON from a file")
@@ -94,6 +105,7 @@ export function registerEditBlockCommand(program: Command): void {
         executor?: string;
         clearExecutor?: boolean;
         sharedResources?: string;
+        requiredCapabilities?: string;
         reviewRequired?: string;
         maxFeedbackCycles?: string;
         reviewHookJson?: string;
@@ -113,6 +125,10 @@ export function registerEditBlockCommand(program: Command): void {
           options.sharedResources === undefined
             ? undefined
             : parseSharedResources(options.sharedResources),
+        requiredCapabilities:
+          options.requiredCapabilities === undefined
+            ? undefined
+            : parseRequiredCapabilities(options.requiredCapabilities),
         reviewRequired:
           options.reviewRequired === undefined
             ? undefined

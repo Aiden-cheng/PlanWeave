@@ -73,7 +73,9 @@ function blockNode(taskId: string, block: ManifestBlock, promptRef: PromptRef): 
     title: block.title,
     promptRef,
     executor: block.executor ?? null,
-    dependsOn: block.depends_on.map((dependency) => blockRef(taskId, dependency))
+    dependsOn: block.depends_on.map((dependency) => blockRef(taskId, dependency)),
+    requiredCapabilities:
+      block.type === "implementation" ? [...(block.requirements?.capabilities ?? [])] : []
   };
 }
 

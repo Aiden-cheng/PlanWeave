@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { readJsonFile } from "../json.js";
 import { editBlock, editTask } from "../package/manifestEdit.js";
+import { renderPrompt } from "../taskManager/index.js";
 import type { PlanPackageManifest } from "../types.js";
 import { basicManifest, createTestWorkspace } from "./promptTestHelpers.js";
 
@@ -54,6 +55,14 @@ describe("manifest edit commands", () => {
 
   it("edits only the review block addressed by the full block ref", async () => {
     const { root, init } = await createTestWorkspace(basicManifest({ includeSecondTask: true }));
+
+    await expect(
+      editBlock({
+        projectRoot: root,
+        ref: "T-001#B-001",
+        requiredCapabilities: ["linux", "acp.codex", "linux"]
+      })
+    ).resolves.toMatchObject({ ok: false });
 
     const result = await editBlock({
       projectRoot: root,
@@ -131,7 +140,8 @@ describe("manifest edit commands", () => {
       projectRoot: root,
       ref: "T-001#B-001",
       dependsOn: [],
-      sharedResources: ["db", "api", "db"]
+      sharedResources: ["db", "api", "db"],
+      requiredCapabilities: ["linux", "acp.codex"]
     });
     const manifest = await readJsonFile<PlanPackageManifest>(init.workspace.manifestFile);
 
@@ -139,11 +149,26 @@ describe("manifest edit commands", () => {
       ok: true,
       ref: "T-001#B-001",
       blockType: "implementation",
-      updatedFields: ["depends_on", "parallel.sharedResources"]
+      updatedFields: ["depends_on", "parallel.sharedResources", "requirements.capabilities"]
     });
     expect(blockById(manifest, "T-001", "B-001")).toMatchObject({
       depends_on: [],
-      parallel: { sharedResources: ["db", "api"] }
+      parallel: { sharedResources: ["db", "api"] },
+      requirements: { capabilities: ["linux", "acp.codex"] }
     });
+
+    await editBlock({
+      projectRoot: root,
+      ref: "T-001#B-001",
+      title: "Preserve requirements"
+    });
+    const preserved = await readJsonFile<PlanPackageManifest>(init.workspace.manifestFile);
+    expect(blockById(preserved, "T-001", "B-001")).toMatchObject({
+      title: "Preserve requirements",
+      requirements: { capabilities: ["linux", "acp.codex"] }
+    });
+    await expect(renderPrompt({ projectRoot: root, ref: "T-001#B-001" })).resolves.toContain(
+      "## Required Host Capabilities\n\n- linux\n- acp.codex"
+    );
   });
 });

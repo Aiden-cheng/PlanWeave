@@ -30,6 +30,7 @@ export type DesktopBlockPreview = {
   title: string;
   status: BlockStatus;
   executor: string | null;
+  requiredCapabilities: string[];
   promptMissing: boolean;
   exceptionReason: string | null;
   /** True when claim/dispatch can start this block now. */

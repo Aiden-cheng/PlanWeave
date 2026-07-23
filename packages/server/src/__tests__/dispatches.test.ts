@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDistributedCoordination } from "../distributedCoordination.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
+import { executionEnvelopeFor } from "./protocolTestFixtures.js";
 
 const directories: string[] = [];
 const servers: PlanweaveServer[] = [];
@@ -52,10 +53,8 @@ describe("distributed dispatch coordination", () => {
 
     coordination.hosts.reportOnline(registration.host.id, ["linux", "node-22"], 2);
     const dispatch = coordination.dispatches.dispatchBlock({
-      projectId: "project-a",
-      blockRef: "T-001#B-001",
       packageRef: "https://packages.example.test/project-a-v1.tar.zst",
-      requiredCapabilities: ["linux", "node-22"]
+      envelope: executionEnvelopeFor("T-001#B-001", ["linux", "node-22"])
     });
 
     const messages = coordination.mailbox.listAfter(registration.host.id, 0);
@@ -70,7 +69,8 @@ describe("distributed dispatch coordination", () => {
         registration.host.id,
         "accept-1",
         dispatch.id,
-        dispatch.leaseId
+        dispatch.leaseId,
+        dispatch.executionAttemptId
       ).status
     ).toBe("running");
     expect(() =>
@@ -78,13 +78,18 @@ describe("distributed dispatch coordination", () => {
         registration.host.id,
         "accept-1",
         dispatch.id,
-        "different-lease"
+        "different-lease",
+        dispatch.executionAttemptId
       )
     ).toThrowError("host_event_message_id_reused");
 
     const previousExpiry = dispatch.leaseExpiresAt;
     const renewed = coordination.dispatches.heartbeat(registration.host.id, "heartbeat-1", [
-      { dispatchId: dispatch.id, leaseId: dispatch.leaseId }
+      {
+        dispatchId: dispatch.id,
+        leaseId: dispatch.leaseId,
+        executionAttemptId: dispatch.executionAttemptId
+      }
     ]);
     expect(renewed).toHaveLength(1);
     expect(renewed[0]?.leaseExpiresAt >= previousExpiry).toBe(true);
@@ -99,6 +104,7 @@ describe("distributed dispatch coordination", () => {
       "complete-1",
       dispatch.id,
       dispatch.leaseId,
+      dispatch.executionAttemptId,
       result
     );
     expect(completed.status).toBe("completed");
@@ -137,12 +143,16 @@ describe("distributed dispatch coordination", () => {
     const registration = coordination.hosts.register("Recovery Host");
     coordination.hosts.reportOnline(registration.host.id, ["linux"], 1);
     const dispatch = coordination.dispatches.dispatchBlock({
-      projectId: "project-a",
-      blockRef: "T-001#B-002",
       packageRef: "package://project-a/v1",
-      requiredCapabilities: ["linux"]
+      envelope: executionEnvelopeFor("T-001#B-002", ["linux"])
     });
-    coordination.dispatches.accept(registration.host.id, "accept-2", dispatch.id, dispatch.leaseId);
+    coordination.dispatches.accept(
+      registration.host.id,
+      "accept-2",
+      dispatch.id,
+      dispatch.leaseId,
+      dispatch.executionAttemptId
+    );
 
     await expect(
       coordination.dispatches.complete(
@@ -150,6 +160,7 @@ describe("distributed dispatch coordination", () => {
         "complete-2",
         dispatch.id,
         dispatch.leaseId,
+        dispatch.executionAttemptId,
         { summary: "Done", reportArtifactRef, artifactRefs: [] }
       )
     ).rejects.toThrowError("runtime unavailable");
@@ -173,27 +184,119 @@ describe("distributed dispatch coordination", () => {
 
     expect(() =>
       coordination.dispatches.dispatchBlock({
-        projectId: "project-a",
-        blockRef: "T-001#B-003",
         packageRef: "package://project-a/v1",
-        requiredCapabilities: ["linux"]
+        envelope: executionEnvelopeFor("T-001#B-003", ["linux"])
       })
     ).toThrowError("no_compatible_agent_host");
 
     const dispatch = coordination.dispatches.dispatchBlock({
-      projectId: "project-a",
-      blockRef: "T-001#B-003",
       packageRef: "package://project-a/v1",
-      requiredCapabilities: ["macos"]
+      envelope: executionEnvelopeFor("T-001#B-003", ["macos"])
     });
     expect(() =>
       coordination.dispatches.accept(
         registration.host.id,
         "accept-invalid",
         dispatch.id,
-        "wrong-lease"
+        "wrong-lease",
+        dispatch.executionAttemptId
       )
     ).toThrowError("lease_mismatch");
+    expect(() =>
+      coordination.dispatches.accept(
+        registration.host.id,
+        "accept-wrong-attempt",
+        dispatch.id,
+        dispatch.leaseId,
+        "wrong-attempt"
+      )
+    ).toThrowError("lease_mismatch");
+  });
+
+  it("persists an interrupted dispatch across server reopen without making it pending", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "planweave-dispatch-interrupted-"));
+    directories.push(dataDirectory);
+    const databasePath = join(dataDirectory, "server.sqlite");
+    const first = await startPlanweaveServer({
+      dataDirectory,
+      databasePath,
+      busyTimeoutMs: 5000
+    });
+    servers.push(first);
+    const coordination = createDistributedCoordination(first.database, {
+      leaseDurationMs: 60_000,
+      hostOfflineAfterMs: 60_000,
+      writeback: { complete: async () => {}, fail: async () => {} }
+    });
+    const registration = coordination.hosts.register("Restarted Host");
+    coordination.hosts.reportOnline(registration.host.id, ["linux"], 1);
+    const dispatch = coordination.dispatches.dispatchBlock({
+      packageRef: "package://project-a/interrupted",
+      envelope: executionEnvelopeFor("T-001#B-005", ["linux"])
+    });
+    coordination.dispatches.accept(
+      registration.host.id,
+      "accept-interrupted",
+      dispatch.id,
+      dispatch.leaseId,
+      dispatch.executionAttemptId
+    );
+    first.database.prepare("DELETE FROM schema_migrations WHERE version=5").run();
+    first.close();
+    servers.pop();
+
+    const reopened = await startPlanweaveServer({
+      dataDirectory,
+      databasePath,
+      busyTimeoutMs: 5000
+    });
+    servers.push(reopened);
+    const reopenedCoordination = createDistributedCoordination(reopened.database, {
+      leaseDurationMs: 60_000,
+      hostOfflineAfterMs: 60_000,
+      writeback: { complete: async () => {}, fail: async () => {} }
+    });
+    reopenedCoordination.dispatches.interrupt(registration.host.id, "interrupt-reopen", {
+      type: "dispatch.interrupted",
+      protocolVersion: 1,
+      messageId: "interrupt-reopen",
+      dispatchId: dispatch.id,
+      leaseId: dispatch.leaseId,
+      executionAttemptId: dispatch.executionAttemptId,
+      reason: "host_restart",
+      resumable: true,
+      recovery: { acpSessionId: "session-reopen", recoveryId: "recovery-reopen" }
+    });
+    expect(reopened.database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    reopened.close();
+    servers.pop();
+
+    const persisted = await startPlanweaveServer({
+      dataDirectory,
+      databasePath,
+      busyTimeoutMs: 5000
+    });
+    servers.push(persisted);
+    const persistedCoordination = createDistributedCoordination(persisted.database, {
+      leaseDurationMs: 60_000,
+      hostOfflineAfterMs: 60_000,
+      writeback: { complete: async () => {}, fail: async () => {} }
+    });
+    expect(persistedCoordination.dispatches.getRequired(dispatch.id)).toMatchObject({
+      status: "interrupted",
+      interruption: {
+        reason: "host_restart",
+        resumable: true,
+        recovery: { acpSessionId: "session-reopen", recoveryId: "recovery-reopen" }
+      }
+    });
+    expect(
+      persisted.database
+        .prepare("SELECT COUNT(*) AS count FROM dispatch_events WHERE dispatch_id=?")
+        .get(dispatch.id)?.count
+    ).toBeGreaterThan(0);
+    expect(persisted.database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    await expect(persistedCoordination.dispatches.recoverExpiredLeases()).resolves.toEqual([]);
   });
 
   it("rejects late results after recovering an expired lease", async () => {
@@ -207,16 +310,15 @@ describe("distributed dispatch coordination", () => {
     const registration = coordination.hosts.register("Expiring Host");
     coordination.hosts.reportOnline(registration.host.id, ["linux"], 1);
     const dispatch = coordination.dispatches.dispatchBlock({
-      projectId: "project-a",
-      blockRef: "T-001#B-004",
       packageRef: "package://project-a/v1",
-      requiredCapabilities: ["linux"]
+      envelope: executionEnvelopeFor("T-001#B-004", ["linux"])
     });
     coordination.dispatches.accept(
       registration.host.id,
       "accept-expiring",
       dispatch.id,
-      dispatch.leaseId
+      dispatch.leaseId,
+      dispatch.executionAttemptId
     );
     server.database
       .prepare("UPDATE dispatches SET lease_expires_at=? WHERE id=?")
@@ -237,6 +339,7 @@ describe("distributed dispatch coordination", () => {
         "late-result",
         dispatch.id,
         dispatch.leaseId,
+        dispatch.executionAttemptId,
         { summary: "Too late", reportArtifactRef, artifactRefs: [] }
       )
     ).rejects.toThrowError("lease_expired");

@@ -3,9 +3,19 @@ import { AgentHostRepository } from "./hosts.js";
 import { HostEventInbox } from "./hostEvents.js";
 import { DurableMailbox, type MailboxMessage } from "./mailbox.js";
 import {
+  acpRecoveryIdentitySchema,
   capabilitiesSchema,
   dispatchFailureSchema,
+  dispatchIdSchema,
   dispatchResultSchema,
+  executionEnvelopeSchema,
+  executionAttemptIdSchema,
+  hashExecutionEnvelope,
+  interruptionReasonSchema,
+  leaseIdSchema,
+  mailboxCommandSchema,
+  type ExecutionEnvelope,
+  type HostEvent,
   type ProtocolDispatchFailure,
   type ProtocolDispatchResult
 } from "./protocol.js";
@@ -14,6 +24,7 @@ import { inWriteTransaction, type SqliteDatabase } from "./sqlite.js";
 export type DispatchStatus =
   | "leased"
   | "running"
+  | "interrupted"
   | "cancelling"
   | "awaiting_writeback"
   | "completed"
@@ -22,6 +33,10 @@ export type DispatchStatus =
 
 export type DispatchResult = ProtocolDispatchResult;
 export type DispatchFailure = ProtocolDispatchFailure;
+export type DispatchInterruption = Pick<
+  Extract<HostEvent, { type: "dispatch.interrupted" }>,
+  "reason" | "resumable" | "recovery"
+>;
 
 export type DispatchRecord = {
   id: string;
@@ -32,12 +47,14 @@ export type DispatchRecord = {
   requiredCapabilities: string[];
   status: DispatchStatus;
   leaseId: string;
+  executionAttemptId: string;
   leaseExpiresAt: string;
   createdAt: string;
   acceptedAt?: string;
   finishedAt?: string;
   result?: DispatchResult;
   failure?: DispatchFailure;
+  interruption?: DispatchInterruption;
 };
 
 export type DispatchWriteback = {
@@ -72,24 +89,29 @@ type DispatchRow = Record<string, unknown> & {
   required_capabilities_json: string;
   status: DispatchStatus;
   lease_id: string;
+  execution_attempt_id: string;
   lease_expires_at: string;
   created_at: string;
   accepted_at: string | null;
   finished_at: string | null;
   result_json: string | null;
   failure_json: string | null;
+  interruption_reason: DispatchInterruption["reason"] | null;
+  interruption_resumable: number | null;
+  interruption_recovery_json: string | null;
 };
 
 function toDispatch(row: DispatchRow): DispatchRecord {
   return {
-    id: row.id,
+    id: dispatchIdSchema.parse(row.id),
     projectId: row.project_id,
     blockRef: row.block_ref,
     packageRef: row.package_ref,
     hostId: row.host_id,
     requiredCapabilities: capabilitiesSchema.parse(JSON.parse(row.required_capabilities_json)),
     status: row.status,
-    leaseId: row.lease_id,
+    leaseId: leaseIdSchema.parse(row.lease_id),
+    executionAttemptId: executionAttemptIdSchema.parse(row.execution_attempt_id),
     leaseExpiresAt: row.lease_expires_at,
     createdAt: row.created_at,
     acceptedAt: row.accepted_at ?? undefined,
@@ -97,6 +119,15 @@ function toDispatch(row: DispatchRow): DispatchRecord {
     result: row.result_json ? dispatchResultSchema.parse(JSON.parse(row.result_json)) : undefined,
     failure: row.failure_json
       ? dispatchFailureSchema.parse(JSON.parse(row.failure_json))
+      : undefined,
+    interruption: row.interruption_reason
+      ? {
+          reason: interruptionReasonSchema.parse(row.interruption_reason),
+          resumable: row.interruption_resumable === 1,
+          recovery: row.interruption_recovery_json
+            ? acpRecoveryIdentitySchema.parse(JSON.parse(row.interruption_recovery_json))
+            : undefined
+        }
       : undefined
   };
 }
@@ -132,79 +163,101 @@ export class DispatchService {
     return dispatch;
   }
 
-  dispatchBlock(input: {
-    projectId: string;
-    blockRef: string;
-    packageRef: string;
-    requiredCapabilities: readonly string[];
-  }): DispatchRecord {
-    const requiredCapabilities = capabilitiesSchema.parse(input.requiredCapabilities);
+  dispatchBlock(input: { packageRef: string; envelope: ExecutionEnvelope }): DispatchRecord {
+    const envelope = executionEnvelopeSchema.parse(input.envelope);
+    const requiredCapabilities = capabilitiesSchema.parse(envelope.requiredCapabilities);
     let pendingMessage: MailboxMessage | undefined;
     const dispatch = inWriteTransaction(this.database, () => {
       const onlineAfter = new Date(Date.now() - this.options.hostOfflineAfterMs);
       const host = this.hosts.listAvailable(requiredCapabilities, onlineAfter)[0];
       if (!host) throw new Error("no_compatible_agent_host");
-      const id = randomUUID();
-      const leaseId = randomUUID();
+      const id = envelope.execution.dispatchId;
+      const executionAttemptId = envelope.execution.attemptId;
+      const leaseId = leaseIdSchema.parse(randomUUID());
       const createdAt = new Date().toISOString();
       const leaseExpiresAt = new Date(Date.now() + this.options.leaseDurationMs).toISOString();
       this.database
         .prepare(
           `INSERT INTO dispatches(
             id,project_id,block_ref,package_ref,host_id,required_capabilities_json,
-            status,lease_id,lease_expires_at,created_at
-          ) VALUES (?,?,?,?,?,?,?,?,?,?)`
+            status,lease_id,execution_attempt_id,lease_expires_at,created_at
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?)`
         )
         .run(
           id,
-          input.projectId,
-          input.blockRef,
+          envelope.projectId,
+          envelope.blockRef,
           input.packageRef,
           host.id,
           JSON.stringify(requiredCapabilities),
           "leased",
           leaseId,
+          executionAttemptId,
           leaseExpiresAt,
           createdAt
         );
       this.appendEvent(id, "dispatch.leased", { hostId: host.id, leaseId, leaseExpiresAt });
-      pendingMessage = this.mailbox.enqueue(host.id, {
-        type: "execute_block",
-        dispatchId: id,
-        leaseId,
-        leaseExpiresAt,
-        projectId: input.projectId,
-        blockRef: input.blockRef,
-        packageRef: input.packageRef,
-        requiredCapabilities
-      });
+      pendingMessage = this.mailbox.enqueue(
+        host.id,
+        mailboxCommandSchema.parse({
+          type: "execute_block",
+          protocolVersion: envelope.protocolVersion,
+          dispatchId: id,
+          leaseId,
+          executionAttemptId,
+          leaseExpiresAt,
+          envelopeDigest: hashExecutionEnvelope(envelope),
+          envelope
+        })
+      );
       return this.getRequired(id);
     });
     if (pendingMessage) this.mailbox.publish(pendingMessage);
     return dispatch;
   }
 
-  accept(hostId: string, messageId: string, dispatchId: string, leaseId: string): DispatchRecord {
-    this.inbox.process(hostId, messageId, "dispatch.accepted", { dispatchId, leaseId }, () => {
-      const dispatch = this.requireCurrentLease(hostId, dispatchId, leaseId);
-      if (dispatch.status !== "leased") {
-        if (dispatch.status === "running") return;
-        throw new Error("dispatch_not_awaiting_acceptance");
+  accept(
+    hostId: string,
+    messageId: string,
+    dispatchId: string,
+    leaseId: string,
+    executionAttemptId: string
+  ): DispatchRecord {
+    this.inbox.process(
+      hostId,
+      messageId,
+      "dispatch.accepted",
+      { dispatchId, leaseId, executionAttemptId },
+      () => {
+        const dispatch = this.requireCurrentLease(hostId, dispatchId, leaseId, executionAttemptId);
+        if (dispatch.status !== "leased") {
+          if (dispatch.status === "running") return;
+          throw new Error("dispatch_not_awaiting_acceptance");
+        }
+        const acceptedAt = new Date().toISOString();
+        this.database
+          .prepare("UPDATE dispatches SET status='running',accepted_at=? WHERE id=?")
+          .run(acceptedAt, dispatchId);
+        this.appendEvent(dispatchId, "dispatch.accepted", { hostId, leaseId });
       }
-      const acceptedAt = new Date().toISOString();
-      this.database
-        .prepare("UPDATE dispatches SET status='running',accepted_at=? WHERE id=?")
-        .run(acceptedAt, dispatchId);
-      this.appendEvent(dispatchId, "dispatch.accepted", { hostId, leaseId });
-    });
+    );
     return this.getRequired(dispatchId);
   }
 
   heartbeat(
     hostId: string,
     messageId: string,
-    activeLeases: ReadonlyArray<{ dispatchId: string; leaseId: string }>
-  ): Array<{ dispatchId: string; leaseId: string; leaseExpiresAt: string }> {
+    activeLeases: ReadonlyArray<{
+      dispatchId: string;
+      leaseId: string;
+      executionAttemptId: string;
+    }>
+  ): Array<{
+    dispatchId: string;
+    leaseId: string;
+    executionAttemptId: string;
+    leaseExpiresAt: string;
+  }> {
     this.inbox.process(hostId, messageId, "host.heartbeat", { activeLeases }, () => {
       const now = new Date();
       this.hosts.touch(hostId, now);
@@ -214,6 +267,7 @@ export class DispatchService {
           !dispatch ||
           dispatch.hostId !== hostId ||
           dispatch.leaseId !== lease.leaseId ||
+          dispatch.executionAttemptId !== lease.executionAttemptId ||
           !["leased", "running", "cancelling"].includes(dispatch.status) ||
           new Date(dispatch.leaseExpiresAt).getTime() <= now.getTime()
         ) {
@@ -231,11 +285,13 @@ export class DispatchService {
       return dispatch &&
         dispatch.hostId === hostId &&
         dispatch.leaseId === lease.leaseId &&
+        dispatch.executionAttemptId === lease.executionAttemptId &&
         ["leased", "running", "cancelling"].includes(dispatch.status)
         ? [
             {
               dispatchId: dispatch.id,
               leaseId: dispatch.leaseId,
+              executionAttemptId: dispatch.executionAttemptId,
               leaseExpiresAt: dispatch.leaseExpiresAt
             }
           ]
@@ -246,10 +302,21 @@ export class DispatchService {
   recordProgress(
     hostId: string,
     messageId: string,
-    input: { dispatchId: string; leaseId: string; percent?: number; message?: string }
+    input: {
+      dispatchId: string;
+      leaseId: string;
+      executionAttemptId: string;
+      percent?: number;
+      message?: string;
+    }
   ): void {
     this.inbox.process(hostId, messageId, "dispatch.progress", input, () => {
-      const dispatch = this.requireCurrentLease(hostId, input.dispatchId, input.leaseId);
+      const dispatch = this.requireCurrentLease(
+        hostId,
+        input.dispatchId,
+        input.leaseId,
+        input.executionAttemptId
+      );
       if (dispatch.status !== "running" && dispatch.status !== "cancelling") {
         throw new Error("dispatch_not_running");
       }
@@ -260,11 +327,50 @@ export class DispatchService {
     });
   }
 
+  interrupt(
+    hostId: string,
+    messageId: string,
+    event: Extract<HostEvent, { type: "dispatch.interrupted" }>
+  ): DispatchRecord {
+    this.inbox.process(hostId, messageId, event.type, event, () => {
+      const dispatch = this.requireCurrentLease(
+        hostId,
+        event.dispatchId,
+        event.leaseId,
+        event.executionAttemptId
+      );
+      if (dispatch.status === "interrupted") return;
+      if (dispatch.status !== "running" && dispatch.status !== "cancelling") {
+        throw new Error("dispatch_not_running");
+      }
+      this.database
+        .prepare(
+          `UPDATE dispatches
+           SET status='interrupted',interruption_reason=?,interruption_resumable=?,
+               interruption_recovery_json=?
+           WHERE id=?`
+        )
+        .run(
+          event.reason,
+          event.resumable ? 1 : 0,
+          event.recovery ? JSON.stringify(event.recovery) : null,
+          dispatch.id
+        );
+      this.appendEvent(dispatch.id, event.type, {
+        reason: event.reason,
+        resumable: event.resumable,
+        recovery: event.recovery
+      });
+    });
+    return this.getRequired(event.dispatchId);
+  }
+
   async complete(
     hostId: string,
     messageId: string,
     dispatchId: string,
     leaseId: string,
+    executionAttemptId: string,
     result: DispatchResult
   ): Promise<DispatchRecord> {
     const parsedResult = dispatchResultSchema.parse(result);
@@ -272,9 +378,9 @@ export class DispatchService {
       hostId,
       messageId,
       "dispatch.completed",
-      { dispatchId, leaseId, result: parsedResult },
+      { dispatchId, leaseId, executionAttemptId, result: parsedResult },
       () => {
-        const dispatch = this.requireCurrentLease(hostId, dispatchId, leaseId);
+        const dispatch = this.requireCurrentLease(hostId, dispatchId, leaseId, executionAttemptId);
         if (dispatch.status === "completed") return;
         if (dispatch.status !== "running" && dispatch.status !== "cancelling") {
           throw new Error("dispatch_not_running");
@@ -295,6 +401,7 @@ export class DispatchService {
     messageId: string,
     dispatchId: string,
     leaseId: string,
+    executionAttemptId: string,
     failure: DispatchFailure
   ): Promise<DispatchRecord> {
     const parsedFailure = dispatchFailureSchema.parse(failure);
@@ -302,9 +409,9 @@ export class DispatchService {
       hostId,
       messageId,
       "dispatch.failed",
-      { dispatchId, leaseId, failure: parsedFailure },
+      { dispatchId, leaseId, executionAttemptId, failure: parsedFailure },
       () => {
-        const dispatch = this.requireCurrentLease(hostId, dispatchId, leaseId);
+        const dispatch = this.requireCurrentLease(hostId, dispatchId, leaseId, executionAttemptId);
         if (["failed", "cancelled"].includes(dispatch.status)) return;
         if (dispatch.status !== "running" && dispatch.status !== "cancelling") {
           throw new Error("dispatch_not_running");
@@ -325,17 +432,25 @@ export class DispatchService {
     const dispatch = inWriteTransaction(this.database, () => {
       const current = this.getRequired(dispatchId);
       if (["completed", "failed", "cancelled"].includes(current.status)) return current;
+      if (current.status === "interrupted") {
+        throw new Error("dispatch_interrupted_requires_recovery_policy");
+      }
       if (current.status === "awaiting_writeback") {
         throw new Error("dispatch_writeback_in_progress");
       }
       this.database.prepare("UPDATE dispatches SET status='cancelling' WHERE id=?").run(dispatchId);
       this.appendEvent(dispatchId, "dispatch.cancelling", { reason });
-      pendingMessage = this.mailbox.enqueue(current.hostId, {
-        type: "cancel_execution",
-        dispatchId,
-        leaseId: current.leaseId,
-        reason
-      });
+      pendingMessage = this.mailbox.enqueue(
+        current.hostId,
+        mailboxCommandSchema.parse({
+          type: "cancel_execution",
+          protocolVersion: 1,
+          dispatchId,
+          leaseId: current.leaseId,
+          executionAttemptId: current.executionAttemptId,
+          reason
+        })
+      );
       return this.getRequired(dispatchId);
     });
     if (pendingMessage) this.mailbox.publish(pendingMessage);
@@ -391,9 +506,18 @@ export class DispatchService {
     return recovered;
   }
 
-  private requireCurrentLease(hostId: string, dispatchId: string, leaseId: string): DispatchRecord {
+  private requireCurrentLease(
+    hostId: string,
+    dispatchId: string,
+    leaseId: string,
+    executionAttemptId: string
+  ): DispatchRecord {
     const dispatch = this.getRequired(dispatchId);
-    if (dispatch.hostId !== hostId || dispatch.leaseId !== leaseId) {
+    if (
+      dispatch.hostId !== hostId ||
+      dispatch.leaseId !== leaseId ||
+      dispatch.executionAttemptId !== executionAttemptId
+    ) {
       throw new Error("lease_mismatch");
     }
     if (new Date(dispatch.leaseExpiresAt).getTime() <= Date.now()) throw new Error("lease_expired");

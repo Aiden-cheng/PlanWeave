@@ -27,6 +27,7 @@ export {
 export {
   DispatchService,
   type DispatchFailure,
+  type DispatchInterruption,
   type DispatchRecord,
   type DispatchResult,
   type DispatchServiceOptions,

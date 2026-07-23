@@ -24,6 +24,7 @@ export type CompiledExecutionGraph = {
   blockDependentsByRef: Map<string, string[]>;
   reviewBlocksByTask: Map<string, string[]>;
   sharedResourcesByBlockRef: Map<string, string[]>;
+  requiredCapabilitiesByBlockRef: Map<string, string[]>;
   diagnostics: {
     errors: ValidationIssue[];
     warnings: ValidationIssue[];
@@ -105,6 +106,7 @@ export type EditBlockInput = {
   executor?: string | null;
   dependsOn?: string[];
   sharedResources?: string[];
+  requiredCapabilities?: string[];
   reviewRequired?: boolean;
   maxFeedbackCycles?: number;
   reviewHook?: ReviewHookDefinition | null;

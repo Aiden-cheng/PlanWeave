@@ -37,6 +37,7 @@ export type PlanGraphBlockNode = {
   promptRef: PromptRef;
   executor: string | null;
   dependsOn: BlockRef[];
+  requiredCapabilities: string[];
 };
 
 export type PlanGraphEdge =

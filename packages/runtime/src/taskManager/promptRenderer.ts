@@ -295,6 +295,11 @@ export async function renderPromptSurfaceFromContext(
     (resource) =>
       `${resource} (coordination hint only; it does not reserve the resource or block parallel work)`
   );
+  const requiredCapabilityLines = requireMapValue(
+    graph.requiredCapabilitiesByBlockRef,
+    ref,
+    "requiredCapabilitiesByBlockRef"
+  );
   const latestImplementationReports = await renderLatestImplementationReports(
     runtime,
     taskId,
@@ -360,6 +365,7 @@ export async function renderPromptSurfaceFromContext(
       `Completion policy: ${manifest.review.completionPolicy}`
     ]),
     renderNodeList("Dependency / Block Status", dependencyLines),
+    renderNodeList("Required Host Capabilities", requiredCapabilityLines),
     renderNodeList("Shared Resource Hints", sharedResourceLines),
     renderNodeList("Latest Implementation / Feedback Summary", latestImplementationReports),
     focusedReviewLines.length > 0

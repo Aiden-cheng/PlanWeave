@@ -68,6 +68,9 @@ describe("planweave CLI help and schema output", () => {
     expect(formatCliHelp("plan")).toContain(
       "planweave edit-block <block-ref> --shared-resources api,db"
     );
+    expect(formatCliHelp("plan")).toContain(
+      "planweave edit-block <block-ref> --required-capabilities linux,acp.codex"
+    );
     expect(formatCliHelp("plan")).not.toMatch(/parallel-safe|parallel-locks|exclusive/);
     expect(formatCliHelp("recovery")).toContain(
       "Doctor checks state/results consistency; it is not a general Plan Package repair tool."
@@ -96,6 +99,7 @@ describe("planweave CLI help and schema output", () => {
     );
     expect(formatSchemaHelp("manifest")).toContain("does not require a PlanWeave API key");
     expect(formatSchemaHelp("manifest")).toContain("explicit *-acp names select ACP");
+    expect(formatSchemaHelp("manifest")).toContain("portable unique lowercase capability token[]");
     expect(formatSchemaHelp("manifest")).toContain(
       '\\"codex\\" | \\"opencode\\" | \\"claude-code\\" | \\"pi\\" | \\"grok\\"'
     );

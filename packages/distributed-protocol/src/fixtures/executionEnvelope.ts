@@ -1,0 +1,65 @@
+import type { ExecutionEnvelopeInput } from "../executionEnvelope.js";
+
+/**
+ * Stable producer fixture for contract tests.
+ * Digest is locked by executionEnvelope.test.ts so consumers can share the same hash.
+ */
+export const exampleExecutionEnvelopeInput = {
+  protocolVersion: 1,
+  execution: {
+    dispatchId: "dispatch-demo-001",
+    attemptId: "attempt-001"
+  },
+  projectId: "project-demo",
+  canvasId: "default",
+  taskId: "FND-001",
+  blockRef: "FND-001#B-002",
+  blockType: "implementation" as const,
+  sourceRevision: "pgv-pkg-demo-revision-001",
+  graphFingerprint: "graph-fp-demo-001",
+  renderedPrompt:
+    "# Define and hash the portable Execution Envelope\n\nImplement a strict envelope.",
+  acceptance: [
+    "Envelope is bounded and content-addressed",
+    "Forbidden Coordinator-local fields are rejected by schema shape"
+  ],
+  dependencySummaries: [
+    {
+      blockRef: "FND-001#B-001",
+      outcome: "completed" as const,
+      summary: "Created schema-only distributed-protocol package.",
+      reportArtifactRef: `artifact:sha256:${"b".repeat(64)}`
+    }
+  ],
+  inputArtifacts: [
+    {
+      artifactRef: `artifact:sha256:${"c".repeat(64)}`,
+      logicalName: "upstream-report",
+      mediaType: "text/markdown"
+    }
+  ],
+  workspaceId: "workspace.planweave-core",
+  agentId: "codex",
+  agentProfileId: "acp.codex",
+  session: {
+    modeId: "default",
+    configOptions: [{ optionId: "model", valueId: "default" }]
+  },
+  requiredCapabilities: ["linux", "acp.codex", "workspace.git"],
+  output: {
+    reportRequired: true,
+    maxArtifactBytes: 1_048_576,
+    maxArtifactCount: 16
+  },
+  trace: {
+    correlationId: "corr-demo-001",
+    parentDispatchId: "dispatch-parent-000"
+  }
+} satisfies ExecutionEnvelopeInput;
+
+/**
+ * Locked digest for exampleExecutionEnvelopeInput after schema parse + canonical hash.
+ * Update only when the fixture or canonicalization rules intentionally change.
+ */
+export const exampleExecutionEnvelopeDigest =
+  "envelope:sha256:ac4adf33a3d831bbcac39d65de3d1410f7fed5d58fbde62cd4ed9b42d55bad5e";

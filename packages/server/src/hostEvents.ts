@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { canonicalizeJson } from "@planweave-ai/distributed-protocol";
 import { inWriteTransaction, type SqliteDatabase } from "./sqlite.js";
 
 export class HostEventInbox {
@@ -11,7 +12,7 @@ export class HostEventInbox {
     payload: unknown,
     action: () => void
   ): boolean {
-    const requestFingerprint = createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+    const requestFingerprint = createHash("sha256").update(canonicalizeJson(payload)).digest("hex");
     return inWriteTransaction(this.database, () => {
       const existing = this.database
         .prepare(

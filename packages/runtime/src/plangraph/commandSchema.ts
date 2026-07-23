@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { capabilitiesSchema } from "@planweave-ai/distributed-protocol";
 import {
   desktopLayoutFileSchema,
   desktopLayoutNodeSchema
@@ -108,6 +109,7 @@ const blockFieldEditSchema = z
     executor: z.string().nullable().optional(),
     dependsOn: z.array(z.string()).optional(),
     sharedResources: z.array(z.string()).optional(),
+    requiredCapabilities: capabilitiesSchema.optional(),
     reviewRequired: z.boolean().optional(),
     maxFeedbackCycles: z.number().int().nonnegative().optional(),
     reviewHook: reviewHookSchema.nullable().optional(),

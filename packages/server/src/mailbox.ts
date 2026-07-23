@@ -1,11 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { HostEventInbox } from "./hostEvents.js";
-import { mailboxCommandSchema, type MailboxCommand } from "./protocol.js";
+import {
+  mailboxCommandSchema,
+  mailboxDeliveredSequenceSchema,
+  mailboxMessageIdSchema,
+  type MailboxCommand,
+  type MailboxMessageId
+} from "@planweave-ai/distributed-protocol";
 import type { SqliteDatabase } from "./sqlite.js";
 
 export type MailboxMessage = {
   sequence: number;
-  messageId: string;
+  messageId: MailboxMessageId;
   hostId: string;
   command: MailboxCommand;
   createdAt: string;
@@ -16,8 +22,8 @@ type MailboxListener = (message: MailboxMessage) => void;
 
 function toMessage(row: Record<string, unknown>): MailboxMessage {
   return {
-    sequence: Number(row.sequence),
-    messageId: String(row.message_id),
+    sequence: mailboxDeliveredSequenceSchema.parse(Number(row.sequence)),
+    messageId: mailboxMessageIdSchema.parse(String(row.message_id)),
     hostId: String(row.host_id),
     command: mailboxCommandSchema.parse(JSON.parse(String(row.command_json))),
     createdAt: String(row.created_at),
@@ -35,7 +41,7 @@ export class DurableMailbox {
 
   enqueue(hostId: string, command: MailboxCommand): MailboxMessage {
     const parsedCommand = mailboxCommandSchema.parse(command);
-    const messageId = randomUUID();
+    const messageId = mailboxMessageIdSchema.parse(randomUUID());
     const createdAt = new Date().toISOString();
     const result = this.database
       .prepare(

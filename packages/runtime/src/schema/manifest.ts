@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { capabilitiesSchema } from "@planweave-ai/distributed-protocol";
 import {
   edgeTypes,
   executorProfileSchema,
@@ -22,6 +23,14 @@ const blockParallelPolicySchema = z
       : undefined
   );
 
+const blockExecutionRequirementsSchema = z
+  .object({
+    capabilities: capabilitiesSchema.refine((capabilities) => capabilities.length > 0, {
+      message: "requirements.capabilities must include at least one capability"
+    })
+  })
+  .strict();
+
 const reviewHookSchema = z
   .object({
     id: z.string().min(1),
@@ -40,6 +49,7 @@ const implementationBlockSchema = z
     prompt: z.string().min(1),
     depends_on: z.array(z.string().min(1)).default([]),
     executor: z.string().min(1).optional(),
+    requirements: blockExecutionRequirementsSchema.optional(),
     parallel: blockParallelPolicySchema.optional()
   })
   .strict();

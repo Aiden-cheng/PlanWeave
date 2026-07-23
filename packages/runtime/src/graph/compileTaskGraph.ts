@@ -18,6 +18,7 @@ import type {
 import { parseBlockRef } from "./blockRef.js";
 import { requireMapValue } from "./requireMapValue.js";
 import { sharedResourcesForBlock } from "./sharedResources.js";
+import { requiredCapabilitiesForBlock } from "./requiredCapabilities.js";
 
 export { parseBlockRef } from "./blockRef.js";
 
@@ -184,6 +185,7 @@ export function compileTaskGraph(manifest: PlanPackageManifest): CompiledExecuti
   const blockDependentsByRef = new Map<string, string[]>();
   const reviewBlocksByTask = new Map<string, string[]>();
   const sharedResourcesByBlockRef = new Map<string, string[]>();
+  const requiredCapabilitiesByBlockRef = new Map<string, string[]>();
 
   for (const taskId of taskNodesInManifestOrder) {
     taskDependenciesByTask.set(taskId, []);
@@ -216,6 +218,7 @@ export function compileTaskGraph(manifest: PlanPackageManifest): CompiledExecuti
         requireMapValue(reviewBlocksByTask, taskId, "reviewBlocksByTask").push(ref);
       }
       sharedResourcesByBlockRef.set(ref, sharedResourcesForBlock(block));
+      requiredCapabilitiesByBlockRef.set(ref, requiredCapabilitiesForBlock(block));
     }
   }
 
@@ -348,6 +351,7 @@ export function compileTaskGraph(manifest: PlanPackageManifest): CompiledExecuti
     blockDependentsByRef,
     reviewBlocksByTask,
     sharedResourcesByBlockRef,
+    requiredCapabilitiesByBlockRef,
     diagnostics: { errors, warnings },
     taskReachable: (from, to) => reachable(taskAdjacency, from, to),
     blockReachable: (fromRef, toRef) => reachable(blockDependenciesByRef, fromRef, toRef)

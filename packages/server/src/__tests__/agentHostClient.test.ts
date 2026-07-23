@@ -10,6 +10,7 @@ import { ArtifactStore } from "../artifacts.js";
 import { createDistributedCoordination } from "../distributedCoordination.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 import { attachAgentHostWebSocketServer, type AgentHostWebSocketServer } from "../wsServer.js";
+import { executionEnvelopeFor } from "./protocolTestFixtures.js";
 
 const directories: string[] = [];
 const databases: PlanweaveServer[] = [];
@@ -118,13 +119,16 @@ describe("Agent Host client", () => {
     );
 
     const dispatch = coordination.dispatches.dispatchBlock({
-      projectId: "project-client",
-      blockRef: "T-001#B-001",
       packageRef: "package://project-client/v1",
-      requiredCapabilities: ["test"]
+      envelope: executionEnvelopeFor("T-001#B-001", ["test"], "project-client")
     });
-    await waitFor(() => coordination.dispatches.getRequired(dispatch.id).status === "completed");
+    await waitFor(() =>
+      ["completed", "failed", "cancelled"].includes(
+        coordination.dispatches.getRequired(dispatch.id).status
+      )
+    );
     const completed = coordination.dispatches.getRequired(dispatch.id);
+    expect(completed.status).toBe("completed");
     expect(completed.result?.summary).toBe("Remote execution completed.");
     await expect(artifacts.read(completed.result?.reportArtifactRef ?? "")).resolves.toEqual(
       report

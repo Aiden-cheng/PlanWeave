@@ -62,6 +62,7 @@ export function ensureSchema(db: SqliteDatabase): void {
       prompt_preview TEXT NOT NULL,
       executor TEXT,
       depends_on_json TEXT NOT NULL,
+      required_capabilities_json TEXT NOT NULL DEFAULT '[]',
       PRIMARY KEY (project_root, block_ref)
     );
 
@@ -110,6 +111,12 @@ export function ensureSchema(db: SqliteDatabase): void {
     !operationLogColumns.some((column) => isRecord(column) && column.name === "workspace_ref_json")
   ) {
     db.exec("ALTER TABLE operation_log ADD COLUMN workspace_ref_json TEXT");
+  }
+  const blockColumns = db.prepare("PRAGMA table_info(blocks)").all();
+  if (
+    !blockColumns.some((column) => isRecord(column) && column.name === "required_capabilities_json")
+  ) {
+    db.exec("ALTER TABLE blocks ADD COLUMN required_capabilities_json TEXT NOT NULL DEFAULT '[]'");
   }
   ensureIndexes(db);
 }

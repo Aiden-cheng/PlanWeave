@@ -145,6 +145,7 @@ export async function updateBlockPlanning(
   ref: string,
   input: {
     sharedResources?: string[];
+    requiredCapabilities?: string[];
     reviewRequired?: boolean;
     maxFeedbackCycles?: number;
     reviewHook?: ReviewHookDefinition | null;

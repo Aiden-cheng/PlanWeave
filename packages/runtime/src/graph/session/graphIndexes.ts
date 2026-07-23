@@ -9,6 +9,7 @@ import type {
 } from "../../types.js";
 import { requireMapValue } from "../requireMapValue.js";
 import { sharedResourcesForBlock } from "../sharedResources.js";
+import { requiredCapabilitiesForBlock } from "../requiredCapabilities.js";
 
 export function issue(code: string, message: string, path?: string): ValidationIssue {
   return { code, message, path };
@@ -68,6 +69,7 @@ export function addBlockIndexes(
     requireMapValue(graph.reviewBlocksByTask, taskId, "reviewBlocksByTask").push(ref);
   }
   graph.sharedResourcesByBlockRef.set(ref, sharedResourcesForBlock(block));
+  graph.requiredCapabilitiesByBlockRef.set(ref, requiredCapabilitiesForBlock(block));
 }
 
 function wireBlockDependencyIndexes(
@@ -93,6 +95,7 @@ export function removeTaskIndexes(graph: CompiledExecutionGraph, taskId: string)
     graph.blockDependenciesByRef.delete(ref);
     graph.blockDependentsByRef.delete(ref);
     graph.sharedResourcesByBlockRef.delete(ref);
+    graph.requiredCapabilitiesByBlockRef.delete(ref);
   }
   for (const dependents of graph.blockDependentsByRef.values()) {
     for (let index = dependents.length - 1; index >= 0; index -= 1) {

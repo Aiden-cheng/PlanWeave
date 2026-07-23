@@ -137,6 +137,7 @@ function blockPreview(
     title: block.title,
     status: currentStatus.status,
     executor: effectiveExecutor(task, block, runtime),
+    requiredCapabilities: [...block.requiredCapabilities],
     promptMissing: block.promptRef.contentHash.length === 0,
     exceptionReason: currentStatus.reason,
     // Filled by desktop graph enrichment from claim readiness.

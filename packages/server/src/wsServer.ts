@@ -10,8 +10,7 @@ import {
   hostEventSchema,
   hostHelloSchema,
   serverEventSchema,
-  type HostEvent,
-  type ServerEvent
+  type HostEvent
 } from "./protocol.js";
 
 export type AgentHostWebSocketOptions = {
@@ -45,7 +44,7 @@ function hostIdFromUrl(url: string | undefined): string | undefined {
   }
 }
 
-function sendEvent(socket: WebSocket, event: ServerEvent): void {
+function sendEvent(socket: WebSocket, event: unknown): void {
   if (socket.readyState !== WebSocket.OPEN) return;
   socket.send(JSON.stringify(serverEventSchema.parse(event)));
 }
@@ -53,6 +52,7 @@ function sendEvent(socket: WebSocket, event: ServerEvent): void {
 function sendMailboxMessage(socket: WebSocket, message: MailboxMessage): void {
   sendEvent(socket, {
     type: "mailbox.message",
+    protocolVersion: agentHostProtocolVersion,
     sequence: message.sequence,
     messageId: message.messageId,
     command: message.command
@@ -98,14 +98,28 @@ export function attachAgentHostWebSocketServer(
           break;
         case "host.heartbeat": {
           const renewed = options.dispatches.heartbeat(hostId, event.messageId, event.activeLeases);
-          for (const lease of renewed) sendEvent(socket, { type: "lease.renewed", ...lease });
+          for (const lease of renewed)
+            sendEvent(socket, {
+              type: "lease.renewed",
+              protocolVersion: agentHostProtocolVersion,
+              ...lease
+            });
           break;
         }
         case "dispatch.accepted":
-          options.dispatches.accept(hostId, event.messageId, event.dispatchId, event.leaseId);
+          options.dispatches.accept(
+            hostId,
+            event.messageId,
+            event.dispatchId,
+            event.leaseId,
+            event.executionAttemptId
+          );
           break;
         case "dispatch.progress":
           options.dispatches.recordProgress(hostId, event.messageId, event);
+          break;
+        case "dispatch.interrupted":
+          options.dispatches.interrupt(hostId, event.messageId, event);
           break;
         case "dispatch.completed":
           await options.dispatches.complete(
@@ -113,6 +127,7 @@ export function attachAgentHostWebSocketServer(
             event.messageId,
             event.dispatchId,
             event.leaseId,
+            event.executionAttemptId,
             event.result
           );
           break;
@@ -122,11 +137,22 @@ export function attachAgentHostWebSocketServer(
             event.messageId,
             event.dispatchId,
             event.leaseId,
+            event.executionAttemptId,
             event.failure
           );
           break;
+        case "lease.renew":
+        case "acp.events":
+        case "interaction.permission_requested":
+        case "interaction.elicitation_requested":
+        case "interaction.authentication_required":
+          throw new Error(`host_event_unsupported:${event.type}`);
       }
-      sendEvent(socket, { type: "host.event_ack", messageId: event.messageId });
+      sendEvent(socket, {
+        type: "host.event_ack",
+        protocolVersion: agentHostProtocolVersion,
+        messageId: event.messageId
+      });
     };
 
     socket.on("message", (data, isBinary) => {
@@ -171,6 +197,7 @@ export function attachAgentHostWebSocketServer(
         .catch((error: unknown) => {
           sendEvent(socket, {
             type: "protocol.error",
+            protocolVersion: agentHostProtocolVersion,
             code: "event_rejected",
             message: error instanceof Error ? error.message : "Unknown protocol error."
           });
