@@ -60,10 +60,11 @@ async function createV5Database(mediaType: string) {
 
 describe("artifact migration v7", () => {
   it("preserves a valid quoted media parameter across upgrade and reopen", async () => {
+    const legacyMediaType = 'Text/Plain ; Charset = "utf-8"';
     const mediaType = 'text/plain; charset="utf-8"';
-    const { dataDirectory, database, digest } = await createV5Database(mediaType);
+    const { dataDirectory, database, digest } = await createV5Database(legacyMediaType);
     applyMigrations(database);
-    expect(centralSchemaVersion(database)).toBe(7);
+    expect(centralSchemaVersion(database)).toBe(8);
     expect(
       new ArtifactStore(database, dataDirectory, 1024).get(`artifact:sha256:${digest}`)
     ).toMatchObject({ mediaType });
@@ -73,7 +74,7 @@ describe("artifact migration v7", () => {
     const reopened = await openServerDatabase(join(dataDirectory, "server.sqlite"), 5000);
     databases.push(reopened);
     applyMigrations(reopened);
-    expect(centralSchemaVersion(reopened)).toBe(7);
+    expect(centralSchemaVersion(reopened)).toBe(8);
     expect(
       new ArtifactStore(reopened, dataDirectory, 1024).get(`artifact:sha256:${digest}`)
     ).toMatchObject({ mediaType });
@@ -91,6 +92,65 @@ describe("artifact migration v7", () => {
         .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='artifact_blobs'")
         .get()
     ).toBeUndefined();
+  });
+
+  it("canonicalizes blob and grant media types when upgrading an existing v7 database", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "planweave-artifact-existing-v7-"));
+    directories.push(dataDirectory);
+    const databasePath = join(dataDirectory, "server.sqlite");
+    const database = await openServerDatabase(databasePath, 5000);
+    databases.push(database);
+    const digest = "f".repeat(64);
+    const artifactRef = `artifact:sha256:${digest}`;
+    const legacyMediaType = "Text/Plain ; Charset = utf-8";
+    const canonicalMediaType = "text/plain; charset=utf-8";
+    database.exec(`
+      CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+      INSERT INTO schema_migrations(version,applied_at) VALUES
+        (1,'2020-01-01T00:00:00.000Z'),(2,'2020-01-01T00:00:00.000Z'),
+        (3,'2020-01-01T00:00:00.000Z'),(4,'2020-01-01T00:00:00.000Z'),
+        (5,'2020-01-01T00:00:00.000Z'),(6,'2020-01-01T00:00:00.000Z'),
+        (7,'2020-01-01T00:00:00.000Z');
+      CREATE TABLE artifact_blobs(
+        ref TEXT PRIMARY KEY,sha256 TEXT NOT NULL UNIQUE,size_bytes INTEGER NOT NULL,
+        media_type TEXT NOT NULL,relative_path TEXT NOT NULL UNIQUE,created_at TEXT NOT NULL
+      );
+      INSERT INTO artifact_blobs(
+        ref,sha256,size_bytes,media_type,relative_path,created_at
+      ) VALUES (
+        '${artifactRef}','${digest}',7,'${legacyMediaType}','ff/${digest}',
+        '2020-01-01T00:00:00.000Z'
+      );
+      CREATE TABLE artifact_grants(
+        grant_id TEXT PRIMARY KEY,expected_media_type TEXT
+      );
+      INSERT INTO artifact_grants(grant_id,expected_media_type)
+      VALUES ('grant-v7','${legacyMediaType}');
+    `);
+
+    applyMigrations(database);
+
+    expect(centralSchemaVersion(database)).toBe(8);
+    expect(
+      database.prepare("SELECT media_type FROM artifact_blobs WHERE ref=?").get(artifactRef)
+        ?.media_type
+    ).toBe(canonicalMediaType);
+    expect(
+      database
+        .prepare("SELECT expected_media_type FROM artifact_grants WHERE grant_id='grant-v7'")
+        .get()?.expected_media_type
+    ).toBe(canonicalMediaType);
+
+    database.close();
+    databases.pop();
+    const reopened = await openServerDatabase(databasePath, 5000);
+    databases.push(reopened);
+    applyMigrations(reopened);
+    expect(centralSchemaVersion(reopened)).toBe(8);
+    expect(
+      reopened.prepare("SELECT media_type FROM artifact_blobs WHERE ref=?").get(artifactRef)
+        ?.media_type
+    ).toBe(canonicalMediaType);
   });
 
   it("rejects a mismatched v6 link/grant tuple without rewriting history", async () => {

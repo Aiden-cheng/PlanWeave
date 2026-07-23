@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { artifactMediaTypeSchema } from "@planweave-ai/distributed-protocol";
 import type {
   AgentHostArtifactInput,
   AgentHostArtifactTransfer,
@@ -36,6 +37,7 @@ export class HttpArtifactClient {
     const bytes = Buffer.from(input.bytes);
     const sha256 = createHash("sha256").update(bytes).digest("hex");
     const operationKey = artifactOperationKeySchema.parse(input.operationKey);
+    const mediaType = artifactMediaTypeSchema.parse(input.mediaType);
     const operationId = `artifact-upload:${createHash("sha256")
       .update(
         JSON.stringify([
@@ -47,7 +49,7 @@ export class HttpArtifactClient {
           operationKey,
           sha256,
           bytes.byteLength,
-          input.mediaType
+          mediaType
         ])
       )
       .digest("hex")}`;
@@ -65,7 +67,7 @@ export class HttpArtifactClient {
           method: "PUT",
           headers: {
             Authorization: `Bearer ${this.options.token}`,
-            "content-type": input.mediaType,
+            "content-type": mediaType,
             "content-length": String(bytes.byteLength),
             "x-planweave-artifact-operation-id": operationId,
             "x-planweave-artifact-purpose": input.purpose

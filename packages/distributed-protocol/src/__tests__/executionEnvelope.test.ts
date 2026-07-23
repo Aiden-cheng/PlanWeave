@@ -33,6 +33,22 @@ function validEnvelope(overrides: Record<string, unknown> = {}): Record<string, 
 }
 
 describe("ExecutionEnvelope schema", () => {
+  it("uses the shared canonical artifact media type contract", () => {
+    const envelope = parseExecutionEnvelope(
+      validEnvelope({
+        inputArtifacts: [
+          {
+            artifactRef: `artifact:sha256:${"a".repeat(64)}`,
+            logicalName: "input",
+            mediaType: 'Text/Plain ; Charset="utf-8"'
+          }
+        ]
+      })
+    );
+
+    expect(envelope.inputArtifacts[0]?.mediaType).toBe('text/plain; charset="utf-8"');
+  });
+
   it("accepts a full portable envelope and round-trips producer to consumer", () => {
     const produced = parseExecutionEnvelope(exampleExecutionEnvelopeInput);
     const wire = JSON.parse(JSON.stringify(produced)) as unknown;

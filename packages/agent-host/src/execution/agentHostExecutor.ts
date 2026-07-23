@@ -4,13 +4,16 @@ import type {
   NormalizedFailure,
   ServerToHostCommand
 } from "../protocol.js";
-import { normalizedFailureSchema } from "@planweave-ai/distributed-protocol";
+import {
+  normalizedFailureSchema,
+  type ArtifactMediaType
+} from "@planweave-ai/distributed-protocol";
 
 export type AgentHostExecuteCommand = Extract<ServerToHostCommand, { type: "execute_block" }>;
 
 export type AgentHostArtifactInput = {
   bytes: Uint8Array;
-  mediaType: string;
+  mediaType: ArtifactMediaType;
   purpose: "report" | "output";
   operationKey: string;
 };

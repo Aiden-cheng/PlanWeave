@@ -193,6 +193,7 @@ describe("Agent Host outbound transport", () => {
     const uploads: Array<{
       authorization: string | undefined;
       body: Buffer;
+      contentType: string | undefined;
       operationId: string | undefined;
       path: string | undefined;
       purpose: string | undefined;
@@ -207,6 +208,7 @@ describe("Agent Host outbound transport", () => {
         uploads.push({
           authorization: request.headers.authorization,
           body: Buffer.concat(chunks),
+          contentType: request.headers["content-type"],
           operationId: request.headers["x-planweave-artifact-operation-id"] as string | undefined,
           path: request.url,
           purpose: request.headers["x-planweave-artifact-purpose"] as string | undefined
@@ -257,7 +259,7 @@ describe("Agent Host outbound transport", () => {
         );
         const reportArtifactRef = await context.artifacts.upload({
           bytes: report,
-          mediaType: "text/markdown; charset=utf-8",
+          mediaType: "Text/Markdown ; Charset=utf-8",
           purpose: "report",
           operationKey: "primary-report"
         });
@@ -293,6 +295,7 @@ describe("Agent Host outbound transport", () => {
     expect(uploads[1]).toMatchObject({
       authorization: "Bearer host-token",
       body: report,
+      contentType: "text/markdown; charset=utf-8",
       path:
         "/agent-hosts/host-client-001/dispatches/dispatch-client-001/leases/lease-client-001/attempts/attempt-client-001/artifacts/" +
         digest,

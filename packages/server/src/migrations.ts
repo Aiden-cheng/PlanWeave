@@ -302,6 +302,8 @@ CREATE INDEX idx_dispatch_artifact_links_provenance
   ON dispatch_artifact_links(dispatch_id,lease_id,execution_attempt_id,artifact_ref,purpose);
 `;
 
+const migration8 = "SELECT 1;";
+
 function tableExists(database: SqliteDatabase, table: string): boolean {
   return Boolean(
     database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)
@@ -310,19 +312,29 @@ function tableExists(database: SqliteDatabase, table: string): boolean {
 
 function validateArtifactMediaTypes(database: SqliteDatabase): void {
   const table = tableExists(database, "artifact_blobs") ? "artifact_blobs" : "artifacts";
-  for (const row of database.prepare(`SELECT media_type FROM ${table}`).all()) {
-    if (!artifactMediaTypeSchema.safeParse(row.media_type).success) {
+  for (const row of database.prepare(`SELECT ref,media_type FROM ${table}`).all()) {
+    const parsed = artifactMediaTypeSchema.safeParse(row.media_type);
+    if (!parsed.success) {
       throw new Error("migration_invalid_artifact_media_type");
+    }
+    if (parsed.data !== row.media_type) {
+      database.prepare(`UPDATE ${table} SET media_type=? WHERE ref=?`).run(parsed.data, row.ref);
     }
   }
   if (!tableExists(database, "artifact_grants")) return;
   for (const row of database
     .prepare(
-      "SELECT expected_media_type FROM artifact_grants WHERE expected_media_type IS NOT NULL"
+      "SELECT grant_id,expected_media_type FROM artifact_grants WHERE expected_media_type IS NOT NULL"
     )
     .all()) {
-    if (!artifactMediaTypeSchema.safeParse(row.expected_media_type).success) {
+    const parsed = artifactMediaTypeSchema.safeParse(row.expected_media_type);
+    if (!parsed.success) {
       throw new Error("migration_invalid_artifact_media_type");
+    }
+    if (parsed.data !== row.expected_media_type) {
+      database
+        .prepare("UPDATE artifact_grants SET expected_media_type=? WHERE grant_id=?")
+        .run(parsed.data, row.grant_id);
     }
   }
 }
@@ -369,7 +381,8 @@ const migrations: readonly Migration[] = [
       validateArtifactMediaTypes(database);
       validateArtifactLinkGrantTuples(database);
     }
-  }
+  },
+  { version: 8, sql: migration8, before: validateArtifactMediaTypes }
 ];
 
 export function applyMigrations(database: SqliteDatabase): void {

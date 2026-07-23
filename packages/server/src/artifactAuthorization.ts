@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  type ArtifactMediaType,
   artifactRefSchema,
   canonicalizeExecutionEnvelope,
   dispatchIdSchema,
@@ -73,7 +74,7 @@ export type ArtifactGrant = {
   artifactRef: string;
   expectedSha256: string;
   expectedSizeBytes?: number;
-  expectedMediaType?: string;
+  expectedMediaType?: ArtifactMediaType;
   expiresAt: string;
   revokedAt?: string;
   consumedAt?: string;
@@ -459,7 +460,7 @@ export class ArtifactAuthorizationRepository {
     artifactRef: string;
     expectedSha256: string;
     expectedSizeBytes?: number;
-    expectedMediaType?: string;
+    expectedMediaType?: ArtifactMediaType;
     expiresAt: string;
     requestFingerprint?: string;
   }): ArtifactGrant {

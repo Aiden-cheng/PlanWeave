@@ -1,4 +1,9 @@
 export { artifactRefSchema, type ArtifactRef } from "./artifacts.js";
+export {
+  ARTIFACT_MEDIA_TYPE_MAX_LENGTH,
+  artifactMediaTypeSchema,
+  type ArtifactMediaType
+} from "./artifactMediaType.js";
 export { blockRefSchema, type BlockRef } from "./blockRef.js";
 export { canonicalizeJson } from "./canonicalJson.js";
 export {
@@ -50,7 +55,6 @@ export {
   EXECUTION_ENVELOPE_MAX_BYTES,
   INPUT_ARTIFACT_MAX_COUNT,
   INPUT_ARTIFACT_NAME_MAX_LENGTH,
-  MEDIA_TYPE_MAX_LENGTH,
   OUTPUT_MAX_ARTIFACT_BYTES,
   OUTPUT_MAX_ARTIFACT_COUNT,
   RENDERED_PROMPT_MAX_LENGTH,

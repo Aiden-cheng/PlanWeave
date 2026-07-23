@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   CAPABILITIES_MAX_COUNT,
   CAPABILITY_MAX_LENGTH,
+  ARTIFACT_MEDIA_TYPE_MAX_LENGTH,
   NORMALIZED_FAILURE_MESSAGE_MAX_LENGTH,
   OPAQUE_IDENTIFIER_MAX_LENGTH,
   EXECUTION_ENVELOPE_MAX_BYTES,
@@ -12,6 +13,7 @@ import {
   agentHostProtocolVersionSchema,
   agentHostProtocolGoldenFixtures,
   artifactRefSchema,
+  artifactMediaTypeSchema,
   capabilitiesSchema,
   capabilitySchema,
   dispatchIdSchema,
@@ -43,6 +45,7 @@ const require = createRequire(import.meta.url);
 const publicRuntimeExports = {
   CAPABILITIES_MAX_COUNT,
   CAPABILITY_MAX_LENGTH,
+  ARTIFACT_MEDIA_TYPE_MAX_LENGTH,
   NORMALIZED_FAILURE_MESSAGE_MAX_LENGTH,
   OPAQUE_IDENTIFIER_MAX_LENGTH,
   EXECUTION_ENVELOPE_MAX_BYTES,
@@ -50,6 +53,7 @@ const publicRuntimeExports = {
   agentHostProtocolVersionSchema,
   agentHostProtocolGoldenFixtures,
   artifactRefSchema,
+  artifactMediaTypeSchema,
   capabilitiesSchema,
   capabilitySchema,
   dispatchIdSchema,
@@ -81,6 +85,7 @@ describe("public package exports", () => {
       [
         "CAPABILITIES_MAX_COUNT",
         "CAPABILITY_MAX_LENGTH",
+        "ARTIFACT_MEDIA_TYPE_MAX_LENGTH",
         "NORMALIZED_FAILURE_MESSAGE_MAX_LENGTH",
         "OPAQUE_IDENTIFIER_MAX_LENGTH",
         "EXECUTION_ENVELOPE_MAX_BYTES",
@@ -88,6 +93,7 @@ describe("public package exports", () => {
         "agentHostProtocolVersionSchema",
         "agentHostProtocolGoldenFixtures",
         "artifactRefSchema",
+        "artifactMediaTypeSchema",
         "capabilitiesSchema",
         "capabilitySchema",
         "dispatchIdSchema",
@@ -117,12 +123,14 @@ describe("public package exports", () => {
     expect(agentHostProtocolVersion).toBe(1);
     expect(OPAQUE_IDENTIFIER_MAX_LENGTH).toBe(128);
     expect(CAPABILITY_MAX_LENGTH).toBe(128);
+    expect(ARTIFACT_MEDIA_TYPE_MAX_LENGTH).toBe(255);
     expect(CAPABILITIES_MAX_COUNT).toBe(128);
     expect(NORMALIZED_FAILURE_MESSAGE_MAX_LENGTH).toBe(16384);
     expect(typeof opaqueIdentifierSchema.parse).toBe("function");
     expect(typeof capabilitySchema.parse).toBe("function");
     expect(typeof capabilitiesSchema.parse).toBe("function");
     expect(typeof artifactRefSchema.parse).toBe("function");
+    expect(artifactMediaTypeSchema.parse("Text/Plain")).toBe("text/plain");
     expect(typeof dispatchIdSchema.parse).toBe("function");
     expect(typeof executionAttemptIdSchema.parse).toBe("function");
     expect(typeof executionIdentitySchema.parse).toBe("function");

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { artifactMediaTypeSchema } from "./artifactMediaType.js";
 import { artifactRefSchema } from "./artifacts.js";
 import { blockRefSchema } from "./blockRef.js";
 import { capabilitiesSchema } from "./capabilities.js";
@@ -14,7 +15,6 @@ import {
   EXECUTION_ENVELOPE_MAX_BYTES,
   INPUT_ARTIFACT_MAX_COUNT,
   INPUT_ARTIFACT_NAME_MAX_LENGTH,
-  MEDIA_TYPE_MAX_LENGTH,
   OUTPUT_MAX_ARTIFACT_BYTES,
   OUTPUT_MAX_ARTIFACT_COUNT,
   RENDERED_PROMPT_MAX_LENGTH,
@@ -48,10 +48,6 @@ const sourceIdentitySchema = z
   .min(1)
   .max(SOURCE_IDENTITY_MAX_LENGTH)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
-
-const mediaTypeSchema = boundedUtf8String({ minBytes: 1, maxBytes: MEDIA_TYPE_MAX_LENGTH }).and(
-  z.string().regex(/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/)
-);
 
 /**
  * Outcome of a dependency Block as summarized for a downstream envelope.
@@ -87,7 +83,7 @@ export const dispatchInputArtifactSchema = z
       .min(1)
       .max(INPUT_ARTIFACT_NAME_MAX_LENGTH)
       .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
-    mediaType: mediaTypeSchema.optional()
+    mediaType: artifactMediaTypeSchema.optional()
   })
   .strict();
 

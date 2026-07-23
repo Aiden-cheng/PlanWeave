@@ -429,6 +429,7 @@
       "root": "packages/distributed-protocol/src/__tests__",
       "unit": [
         "agentHostProtocol.test.ts",
+        "artifactMediaType.test.ts",
         "canonicalJson.test.ts",
         "executionEnvelope.test.ts",
         "exports.test.ts",
@@ -445,6 +446,7 @@
         "protocolConformance.test.ts"
       ],
       "integration": [
+        "agentHostClientAdversarial.test.ts",
         "agentHostClient.test.ts",
         "agentHostState.test.ts",
         "remoteAcpExecutor.test.ts"
@@ -454,7 +456,7 @@
     },
     {
       "root": "packages/server/src/__tests__",
-      "unit": ["protocolPrimitives.test.ts"],
+      "unit": ["artifactMediaType.test.ts", "protocolPrimitives.test.ts"],
       "integration": [
         "artifactAdversarialBoundary.test.ts",
         "artifactAdversarialPersistence.test.ts",

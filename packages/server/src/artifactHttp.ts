@@ -1,5 +1,6 @@
 import type { IncomingMessage, Server as HttpServer, ServerResponse } from "node:http";
 import { z } from "zod";
+import { artifactMediaTypeSchema } from "./artifactMediaType.js";
 import { ArtifactAuthorizationRepository } from "./artifactAuthorization.js";
 import { ArtifactStore } from "./artifacts.js";
 import { DispatchService } from "./dispatches.js";
@@ -191,7 +192,9 @@ export async function handleAgentHostArtifactRequest(
       request.resume();
       return true;
     }
-    const mediaType = requestHeader(request.headers["content-type"], "content_type");
+    const mediaType = artifactMediaTypeSchema.parse(
+      requestHeader(request.headers["content-type"], "content_type")
+    );
     const operationId = requestHeader(
       request.headers["x-planweave-artifact-operation-id"],
       "artifact_operation_id"

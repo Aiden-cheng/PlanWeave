@@ -27,9 +27,6 @@ export const INPUT_ARTIFACT_MAX_COUNT = 256 as const;
 /** Maximum length of a logical input artifact name. */
 export const INPUT_ARTIFACT_NAME_MAX_LENGTH = 256 as const;
 
-/** Maximum length of a media type token. */
-export const MEDIA_TYPE_MAX_LENGTH = 128 as const;
-
 /** Maximum ACP session config options requested in one envelope. */
 export const SESSION_CONFIG_OPTION_MAX_COUNT = 32 as const;
 

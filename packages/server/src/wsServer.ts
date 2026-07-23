@@ -194,12 +194,12 @@ export function attachAgentHostWebSocketServer(
           }
           await handleHostEvent(hostEventSchema.parse(input));
         })
-        .catch((error: unknown) => {
+        .catch(() => {
           sendEvent(socket, {
             type: "protocol.error",
             protocolVersion: agentHostProtocolVersion,
             code: "event_rejected",
-            message: error instanceof Error ? error.message : "Unknown protocol error."
+            message: "The server rejected the host event."
           });
         });
     });

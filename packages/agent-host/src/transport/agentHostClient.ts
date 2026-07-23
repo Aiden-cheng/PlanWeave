@@ -48,11 +48,17 @@ function executionFailure(error: unknown, aborted: boolean) {
     };
   }
   if (error instanceof AgentHostExecutionError) return error.failure;
-  const retryable = error instanceof Error && error.message.startsWith("artifact_upload_failed:");
+  if (error instanceof Error && error.message.startsWith("artifact_upload_failed:")) {
+    return {
+      code: "artifact_upload_failed",
+      message: "The Agent Host could not transfer an execution artifact.",
+      retryable: true
+    };
+  }
   return {
     code: "executor_failed",
-    message: error instanceof Error ? error.message : "The Agent Host executor failed.",
-    retryable
+    message: "The Agent Host executor failed.",
+    retryable: false
   };
 }
 

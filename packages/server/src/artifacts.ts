@@ -3,7 +3,7 @@ import { createReadStream, type ReadStream } from "node:fs";
 import { chmod, link, mkdir, open, readFile, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { artifactMediaTypeSchema } from "./artifactMediaType.js";
+import { artifactMediaTypeSchema, type ArtifactMediaType } from "./artifactMediaType.js";
 import { artifactRefSchema } from "./protocol.js";
 import type { SqliteDatabase } from "./sqlite.js";
 
@@ -25,7 +25,7 @@ export type ArtifactMetadata = {
   ref: string;
   sha256: string;
   sizeBytes: number;
-  mediaType: string;
+  mediaType: ArtifactMediaType;
   createdAt: string;
 };
 
@@ -52,7 +52,7 @@ export class ArtifactStore {
   async put(input: {
     expectedSha256: string;
     expectedSizeBytes: number;
-    mediaType: string;
+    mediaType: ArtifactMediaType;
     chunks: AsyncIterable<Uint8Array>;
   }): Promise<ArtifactMetadata> {
     const expectedSha256 = sha256Schema.parse(input.expectedSha256);
