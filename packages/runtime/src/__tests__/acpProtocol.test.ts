@@ -27,6 +27,7 @@ function connect(
     onUpdate?: (text: string) => void;
     allowPermission?: boolean;
     shutdownGraceMs?: number;
+    maxInboundMessageBytes?: number;
   } = {}
 ): AcpConnection {
   const connection = createAcpConnection({
@@ -36,6 +37,7 @@ function connect(
     clientInfo: { name: "planweave-test-client", version: "1.0.0" },
     defaultTimeoutMs: options.timeoutMs ?? ACP_MOCK_OPERATION_TIMEOUT_MS,
     shutdownGraceMs: options.shutdownGraceMs,
+    maxInboundMessageBytes: options.maxInboundMessageBytes,
     onSessionUpdate(notification) {
       options.onUpdate?.(JSON.stringify(notification));
     },
@@ -252,6 +254,14 @@ describe("ACP official SDK subprocess connection", () => {
     await connection.initialize();
     await new Promise((resolve) => setTimeout(resolve, 35));
     await expect(connection.newSession({ cwd: process.cwd(), mcpServers: [] })).rejects.toThrow();
+  });
+
+  it("enforces the inbound limit at the raw UTF-8 stdio frame boundary", async () => {
+    const connection = connect("oversized-frame", { maxInboundMessageBytes: 1_024 });
+    await connection.initialize();
+    await expect(connection.newSession({ cwd: process.cwd(), mcpServers: [] })).rejects.toThrow(
+      "exceeded the 1024-byte limit"
+    );
   });
 
   it("fails closed on a valid JSON non-object and settles an in-flight request", async () => {

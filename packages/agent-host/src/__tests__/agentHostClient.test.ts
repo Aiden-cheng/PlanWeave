@@ -16,7 +16,7 @@ import {
 } from "@planweave-ai/distributed-protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
-import type { AgentHostExecutor } from "../execution/agentHostExecutor.js";
+import { AgentHostExecutionError, type AgentHostExecutor } from "../execution/agentHostExecutor.js";
 import { openAgentHostState, type AgentHostState } from "../state/agentHostState.js";
 import { AgentHostClient } from "../transport/agentHostClient.js";
 
@@ -252,6 +252,9 @@ describe("Agent Host outbound transport", () => {
     const executor: AgentHostExecutor = {
       async execute(command, context) {
         expect(command.dispatchId).toBe("dispatch-client-001");
+        expect(context.executionKey).toBe(
+          "dispatch-client-001:lease-client-001:attempt-client-001"
+        );
         const reportArtifactRef = await context.artifacts.upload({
           bytes: report,
           mediaType: "text/markdown; charset=utf-8",
@@ -297,6 +300,64 @@ describe("Agent Host outbound transport", () => {
     });
     expect(uploads[1]?.operationId).toMatch(/^artifact-upload:[a-f0-9]{64}$/);
     expect(state.pendingExecutions(1)).toEqual([]);
+  });
+
+  it("preserves a bounded typed executor failure on the durable dispatch event", async () => {
+    const failed = deferred<Extract<HostEvent, { type: "dispatch.failed" }>>();
+    const protocolFailure = deferred<unknown>();
+    const httpServer = createServer();
+    httpServers.push(httpServer);
+    const webSocketServer = new WebSocketServer({ server: httpServer });
+    webSocketServers.push(webSocketServer);
+    webSocketServer.on("connection", (socket) => {
+      socket.on("message", (data) => {
+        try {
+          const raw = JSON.parse(data.toString());
+          if (raw.type === "host.hello") {
+            hostHelloSchema.parse(raw);
+            sendEvent(socket, welcome());
+            sendEvent(socket, executeDelivery());
+            return;
+          }
+          const event = hostEventSchema.parse(raw);
+          acknowledge(socket, event);
+          if (event.type === "dispatch.failed") failed.resolve(event);
+        } catch (error) {
+          protocolFailure.reject(error);
+        }
+      });
+    });
+    const port = await listen(httpServer);
+    const state = await openState();
+    const executor: AgentHostExecutor = {
+      execute: async () => {
+        throw new AgentHostExecutionError({
+          code: "acp_capability_missing",
+          message: "The resolved ACP agent lacks a required capability.",
+          retryable: false
+        });
+      }
+    };
+    const client = new AgentHostClient({
+      serverUrl: `http://127.0.0.1:${port}`,
+      hostId: "host-client-001",
+      token: "host-token",
+      capabilities: ["test"],
+      capacity: 1,
+      state,
+      executor,
+      allowInsecureTransport: true
+    });
+    clients.push(client);
+    client.start();
+
+    await expect(Promise.race([failed.promise, protocolFailure.promise])).resolves.toMatchObject({
+      failure: {
+        code: "acp_capability_missing",
+        message: "The resolved ACP agent lacks a required capability.",
+        retryable: false
+      }
+    });
   });
 
   it("aborts the exact active execution when cancellation arrives", async () => {

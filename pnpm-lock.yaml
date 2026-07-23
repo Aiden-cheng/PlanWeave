@@ -47,6 +47,9 @@ importers:
       '@planweave-ai/distributed-protocol':
         specifier: workspace:*
         version: link:../distributed-protocol
+      '@planweave-ai/runtime':
+        specifier: workspace:*
+        version: link:../runtime
       ws:
         specifier: ^8.21.0
         version: 8.21.1

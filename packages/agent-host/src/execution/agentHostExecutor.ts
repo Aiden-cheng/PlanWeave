@@ -1,4 +1,10 @@
-import type { ArtifactRef, DispatchResult, ServerToHostCommand } from "../protocol.js";
+import type {
+  ArtifactRef,
+  DispatchResult,
+  NormalizedFailure,
+  ServerToHostCommand
+} from "../protocol.js";
+import { normalizedFailureSchema } from "@planweave-ai/distributed-protocol";
 
 export type AgentHostExecuteCommand = Extract<ServerToHostCommand, { type: "execute_block" }>;
 
@@ -19,6 +25,17 @@ export type AgentHostExecutionContext = {
   executionKey: string;
   artifacts: AgentHostArtifactTransfer;
 };
+
+export class AgentHostExecutionError extends Error {
+  readonly failure: NormalizedFailure;
+
+  constructor(failure: NormalizedFailure) {
+    const parsed = normalizedFailureSchema.parse(failure);
+    super(parsed.message);
+    this.failure = parsed;
+    this.name = "AgentHostExecutionError";
+  }
+}
 
 export interface AgentHostExecutor {
   execute(

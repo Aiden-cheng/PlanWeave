@@ -12,7 +12,7 @@ import {
 } from "../autoRun/agentRegistry.js";
 import { createCodexExecAdapter, listExecutorProfilesForManifest } from "../autoRun/executors.js";
 import { registeredAgentRunners, resolveAgentRunner } from "../autoRun/runnerRegistry.js";
-import { executorProfileSchema, type AgentFamily } from "../types.js";
+import { executorProfileSchema, type AgentExecutorProfile, type AgentFamily } from "../types.js";
 import { createTestWorkspace } from "./promptTestHelpers.js";
 import { manifestTestBuilder } from "./manifestTestBuilder.js";
 
@@ -121,6 +121,16 @@ describe("AgentRunner registries", () => {
       integration: null,
       message: "ACP session integration for agent 'codex' is available."
     });
+  });
+
+  it("fails closed for an unregistered runner transport", () => {
+    expect(() =>
+      resolveAgentRunner({
+        adapter: "agent",
+        agent: "codex",
+        runner: { transport: "unknown" }
+      } as unknown as AgentExecutorProfile)
+    ).toThrow("Agent runner transport 'unknown' is not registered.");
   });
 
   it.each([

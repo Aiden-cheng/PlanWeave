@@ -11,7 +11,7 @@ import {
 } from "../protocol.js";
 import { HttpArtifactClient } from "../artifacts/httpArtifactTransfer.js";
 import type { AgentHostTransport } from "../composition/agentHostComposition.js";
-import type { AgentHostExecutor } from "../execution/agentHostExecutor.js";
+import { AgentHostExecutionError, type AgentHostExecutor } from "../execution/agentHostExecutor.js";
 import type { AgentHostExecution, AgentHostStateRepository } from "../state/agentHostState.js";
 
 export type AgentHostClientOptions = {
@@ -47,6 +47,7 @@ function executionFailure(error: unknown, aborted: boolean) {
       retryable: false
     };
   }
+  if (error instanceof AgentHostExecutionError) return error.failure;
   const retryable = error instanceof Error && error.message.startsWith("artifact_upload_failed:");
   return {
     code: "executor_failed",
@@ -272,7 +273,7 @@ export class AgentHostClient implements AgentHostTransport {
       const result = parseAgentHostDispatchResult(
         await this.options.executor.execute(execution.command, {
           signal: controller.signal,
-          executionKey: `${execution.command.dispatchId}:${execution.command.leaseId}`,
+          executionKey: `${execution.command.dispatchId}:${execution.command.leaseId}:${execution.command.executionAttemptId}`,
           artifacts: this.artifacts.forExecution(execution.command)
         })
       );

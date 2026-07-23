@@ -250,6 +250,7 @@ describe("ACP live actions", () => {
     expect(events).toContain('"interactionKind":"permission"');
     expect(events).toContain('"status":"pending"');
     expect(events).toContain('"outcome":"expired"');
+    expect(events).toContain("Permission request expired at the ACP operation deadline.");
     expect(events).not.toContain("headless default-deny policy");
   });
 

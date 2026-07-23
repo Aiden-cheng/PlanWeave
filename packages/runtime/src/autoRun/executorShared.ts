@@ -23,6 +23,9 @@ import type {
 import type { ExecutionWaveId } from "./runnerContractSchemas.js";
 import { runCommandInTmux, type TmuxSessionInfo } from "./tmuxExecutor.js";
 import { recordBlockRunInIndex } from "./blockRunIndex.js";
+import { ExecutorCancelledError, isExecutorCancelledError } from "./executorCancellation.js";
+
+export { ExecutorCancelledError, isExecutorCancelledError } from "./executorCancellation.js";
 
 export type BlockClaim = Extract<ClaimResult, { kind: "block" }>;
 export type FeedbackClaim = Extract<ClaimResult, { kind: "feedback" }>;
@@ -33,17 +36,6 @@ export const DEFAULT_EXECUTOR_MAX_STDERR_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_EXECUTOR_HEARTBEAT_INTERVAL_MS = 5 * 1000;
 /** @deprecated Prefer DEFAULT_PROCESS_TREE_GRACE_MS; kept as the executor-facing alias. */
 export const EXECUTOR_FORCE_KILL_GRACE_MS = DEFAULT_PROCESS_TREE_GRACE_MS;
-
-export class ExecutorCancelledError extends Error {
-  constructor(message = "Executor cancelled.") {
-    super(message);
-    this.name = "AbortError";
-  }
-}
-
-export function isExecutorCancelledError(error: unknown): error is ExecutorCancelledError {
-  return error instanceof ExecutorCancelledError;
-}
 
 export type ExecutorRuntimeLimits = {
   timeoutMs: number;

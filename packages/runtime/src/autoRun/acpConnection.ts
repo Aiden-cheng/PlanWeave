@@ -1,12 +1,9 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { isAbsolute } from "node:path";
-import { Readable, Writable } from "node:stream";
 import {
   ClientSideConnection,
   PROTOCOL_VERSION,
-  ndJsonStream,
   type AgentCapabilities,
-  type AnyMessage,
   type AuthenticateRequest,
   type AuthenticateResponse,
   type CancelNotification,
@@ -29,16 +26,43 @@ import {
   type SetSessionModeResponse,
   type SessionNotification,
   type TerminalOutputRequest,
-  type TerminalOutputResponse,
-  type Stream
+  type TerminalOutputResponse
 } from "@agentclientprotocol/sdk";
 import { spawnManagedProcess, type ManagedProcessTree } from "../process/managedProcessTree.js";
 import type { LivePendingOperationHandle } from "./liveControl.js";
+import {
+  AcpProtocolError,
+  createGuardedAcpStream,
+  type AcpProtocolObserver
+} from "./acpTransportGuard.js";
+
+export {
+  AcpInboundMessageLimitError,
+  AcpProtocolError
+} from "./acpTransportGuard.js";
+export type {
+  AcpProtocolObservation,
+  AcpProtocolObserver
+} from "./acpTransportGuard.js";
 
 export class AcpOperationTimeoutError extends Error {
   constructor(operation: string, timeoutMs: number) {
     super(`ACP ${operation} timed out after ${timeoutMs}ms.`);
     this.name = "AcpOperationTimeoutError";
+  }
+}
+
+export class AcpProcessError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "AcpProcessError";
+  }
+}
+
+export class AcpStderrLimitError extends Error {
+  constructor(readonly maxBytes: number) {
+    super(`ACP stderr exceeded the ${maxBytes}-byte limit.`);
+    this.name = "AcpStderrLimitError";
   }
 }
 
@@ -55,16 +79,6 @@ export type TrustedAcpLaunch = {
   args: readonly string[];
 };
 
-export type AcpProtocolObservation = {
-  direction: "client_to_agent" | "agent_to_client" | "agent_stderr";
-  payload: unknown;
-};
-
-export type AcpProtocolObserver = {
-  redact(payload: unknown): unknown;
-  observe(observation: AcpProtocolObservation): void;
-};
-
 export type AcpOperationOptions = {
   signal?: AbortSignal;
   timeoutMs?: number;
@@ -76,6 +90,7 @@ export type AcpConnection = {
   readonly pendingOperations: ReadonlyMap<string, LivePendingOperationHandle>;
   readonly stderr: readonly string[];
   readonly closed: Promise<void>;
+  readonly terminalFailure?: Error | null;
   initialize(options?: AcpOperationOptions): Promise<InitializeResponse>;
   authenticate(
     request: AuthenticateRequest,
@@ -122,9 +137,13 @@ export type CreateAcpConnectionOptions = {
   observer?: AcpProtocolObserver;
   defaultTimeoutMs?: number;
   shutdownGraceMs?: number;
+  maxInboundMessageBytes?: number;
+  maxStderrBytes?: number;
 };
 
 export const DEFAULT_ACP_OPERATION_TIMEOUT_MS = 30_000;
+export const DEFAULT_ACP_INBOUND_MESSAGE_MAX_BYTES = 1_048_576;
+export const DEFAULT_ACP_STDERR_MAX_BYTES = 1_048_576;
 const DEFAULT_SHUTDOWN_GRACE_MS = 100;
 
 function validateSpawnOptions(options: CreateAcpConnectionOptions): void {
@@ -144,140 +163,29 @@ function validateSpawnOptions(options: CreateAcpConnectionOptions): void {
   if (options.clientCapabilities?.auth?.terminal === true) {
     throw new Error("ACP client does not implement terminal authentication.");
   }
+  const maxInboundMessageBytes =
+    options.maxInboundMessageBytes ?? DEFAULT_ACP_INBOUND_MESSAGE_MAX_BYTES;
+  if (!Number.isSafeInteger(maxInboundMessageBytes) || maxInboundMessageBytes <= 0) {
+    throw new Error("ACP inbound message byte limit must be a positive safe integer.");
+  }
+  const maxStderrBytes = options.maxStderrBytes ?? DEFAULT_ACP_STDERR_MAX_BYTES;
+  if (!Number.isSafeInteger(maxStderrBytes) || maxStderrBytes <= 0) {
+    throw new Error("ACP stderr byte limit must be a positive safe integer.");
+  }
 }
 
 function asError(error: unknown, message: string): Error {
   return error instanceof Error ? error : new Error(message, { cause: error });
 }
 
-function observe(
-  observer: AcpProtocolObserver | undefined,
-  direction: AcpProtocolObservation["direction"],
-  payload: unknown
-): void {
-  if (!observer) return;
-  observer.observe({ direction, payload: observer.redact(payload) });
-}
-
-function isJsonRpcId(value: unknown): boolean {
-  return (
-    value === null ||
-    typeof value === "string" ||
-    (typeof value === "number" && Number.isFinite(value))
-  );
-}
-
-function isTransportEnvelope(value: unknown): boolean {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const envelope = value as Record<string, unknown>;
-  if (envelope.jsonrpc !== "2.0") return false;
-  if ("method" in envelope) {
-    if (typeof envelope.method !== "string") return false;
-    if ("result" in envelope || "error" in envelope) return false;
-    return !("id" in envelope) || isJsonRpcId(envelope.id);
+function utf8Prefix(buffer: Buffer, maxBytes: number): string {
+  let end = Math.min(buffer.byteLength, maxBytes);
+  while (end > 0) {
+    const candidate = buffer.subarray(0, end).toString("utf8");
+    if (Buffer.byteLength(candidate, "utf8") <= maxBytes) return candidate;
+    end -= 1;
   }
-  if (!("id" in envelope) || !isJsonRpcId(envelope.id)) return false;
-  return "result" in envelope !== "error" in envelope;
-}
-
-function validateTransportLine(line: string): void {
-  let envelope: unknown;
-  try {
-    envelope = JSON.parse(line);
-  } catch (error) {
-    throw new Error("ACP transport received malformed JSON.", { cause: error });
-  }
-  if (!isTransportEnvelope(envelope)) {
-    throw new Error("ACP transport received an invalid JSON-RPC envelope.");
-  }
-}
-
-function createGuardedStream(
-  process: ChildProcessWithoutNullStreams,
-  observer: AcpProtocolObserver | undefined,
-  fail: (error: Error) => void
-): Stream {
-  const decoder = new TextDecoder();
-  let rawBuffer = "";
-  const rawGuard = new TransformStream<Uint8Array, Uint8Array>({
-    transform(chunk, controller) {
-      rawBuffer += decoder.decode(chunk, { stream: true });
-      const lines = rawBuffer.split("\n");
-      rawBuffer = lines.pop() ?? "";
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        validateTransportLine(line);
-      }
-      controller.enqueue(chunk);
-    },
-    flush() {
-      rawBuffer += decoder.decode();
-      if (!rawBuffer.trim()) return;
-      validateTransportLine(rawBuffer);
-    }
-  });
-  const stdout = Readable.toWeb(process.stdout) as ReadableStream<Uint8Array>;
-  const sdkStream = ndJsonStream(Writable.toWeb(process.stdin), stdout.pipeThrough(rawGuard));
-  const pendingIds = new Set<string>();
-  const completedIds = new Set<string>();
-  const idKey = (id: unknown): string => `${typeof id}:${String(id)}`;
-
-  return {
-    writable: new WritableStream<AnyMessage>({
-      async write(message) {
-        observe(observer, "client_to_agent", message);
-        if ("method" in message && "id" in message) pendingIds.add(idKey(message.id));
-        const writer = sdkStream.writable.getWriter();
-        try {
-          await writer.write(message);
-        } finally {
-          writer.releaseLock();
-        }
-      },
-      async close() {
-        const writer = sdkStream.writable.getWriter();
-        try {
-          await writer.close();
-        } finally {
-          writer.releaseLock();
-        }
-      },
-      abort(reason) {
-        return sdkStream.writable.abort(reason);
-      }
-    }),
-    readable: new ReadableStream<AnyMessage>({
-      async start(controller) {
-        const reader = sdkStream.readable.getReader();
-        try {
-          for (;;) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            observe(observer, "agent_to_client", value);
-            if ("id" in value && !("method" in value)) {
-              const key = idKey(value.id);
-              if (completedIds.has(key))
-                throw new Error(`ACP duplicate response id: ${String(value.id)}`);
-              if (!pendingIds.delete(key))
-                throw new Error(`ACP unknown response id: ${String(value.id)}`);
-              completedIds.add(key);
-            }
-            controller.enqueue(value);
-          }
-          controller.close();
-        } catch (error) {
-          const failure = asError(error, "ACP transport failed.");
-          fail(failure);
-          controller.error(failure);
-        } finally {
-          reader.releaseLock();
-        }
-      },
-      cancel(reason) {
-        return sdkStream.readable.cancel(reason);
-      }
-    })
-  };
+  return "";
 }
 
 class SubprocessAcpConnection implements AcpConnection {
@@ -293,6 +201,7 @@ class SubprocessAcpConnection implements AcpConnection {
   private disposePromise: Promise<void> | undefined;
   private readonly livePendingOperations = new Map<string, LivePendingOperationHandle>();
   private nextOperationId = 1;
+  private stderrBytes = 0;
 
   get processId(): number | null {
     return this.process.pid ?? null;
@@ -304,6 +213,10 @@ class SubprocessAcpConnection implements AcpConnection {
 
   get pendingOperations(): ReadonlyMap<string, LivePendingOperationHandle> {
     return this.livePendingOperations;
+  }
+
+  get terminalFailure(): Error | null {
+    return this.terminalError ?? null;
   }
 
   constructor(options: CreateAcpConnectionOptions) {
@@ -320,12 +233,29 @@ class SubprocessAcpConnection implements AcpConnection {
     this.processTree = managed.tree;
     this.process.stderr.setEncoding("utf8");
     this.process.stderr.on("data", (chunk: string) => {
-      this.stderr.push(chunk);
-      observe(options.observer, "agent_stderr", chunk);
+      const maxBytes = options.maxStderrBytes ?? DEFAULT_ACP_STDERR_MAX_BYTES;
+      const chunkBytes = Buffer.from(chunk, "utf8");
+      const remaining = Math.max(0, maxBytes - this.stderrBytes);
+      const accepted = utf8Prefix(chunkBytes, remaining);
+      if (accepted.length > 0) {
+        this.stderr.push(accepted);
+        this.stderrBytes += Buffer.byteLength(accepted, "utf8");
+        options.observer?.observe({
+          direction: "agent_stderr",
+          payload: options.observer.redact(accepted)
+        });
+      }
+      if (chunkBytes.byteLength > remaining) {
+        this.terminate(new AcpStderrLimitError(maxBytes));
+      }
     });
-    const stream = createGuardedStream(this.process, options.observer, (error) =>
-      this.terminate(error)
-    );
+    const stream = createGuardedAcpStream({
+      process: this.process,
+      observer: options.observer,
+      fail: (error) => this.terminate(error),
+      maxInboundMessageBytes:
+        options.maxInboundMessageBytes ?? DEFAULT_ACP_INBOUND_MESSAGE_MAX_BYTES
+    });
     const client: Client = {
       requestPermission: (request) => {
         if (!options.onPermissionRequest) {
@@ -341,12 +271,20 @@ class SubprocessAcpConnection implements AcpConnection {
     };
     this.sdk = new ClientSideConnection(() => client, stream);
     this.process.once("error", (error) =>
-      this.terminate(new Error("ACP process failed to start.", { cause: error }))
+      this.terminate(new AcpProcessError("ACP process failed to start.", { cause: error }))
     );
     this.process.once("exit", (code, signal) => {
-      this.terminate(
-        new Error(`ACP process exited (code=${String(code)}, signal=${String(signal)}).`)
+      const processError = new AcpProcessError(
+        `ACP process exited (code=${String(code)}, signal=${String(signal)}).`
       );
+      if (
+        !(this.terminalError instanceof AcpProtocolError) &&
+        !(this.terminalError instanceof AcpOperationTimeoutError) &&
+        !(this.terminalError instanceof AcpStderrLimitError)
+      ) {
+        this.terminalError = processError;
+      }
+      this.terminate(processError);
     });
     this.closed = this.sdk.closed;
   }

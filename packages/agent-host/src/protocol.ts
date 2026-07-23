@@ -2,6 +2,7 @@ import {
   artifactRefSchema,
   capabilitiesSchema,
   dispatchResultSchema,
+  executeBlockCommandSchema,
   hostEventSchema,
   hostHelloSchema,
   mailboxCommandSchema,
@@ -37,6 +38,12 @@ export function parseAgentHostCapabilities(input: unknown): string[] {
 
 export function parseAgentHostDispatchResult(input: unknown): DispatchResult {
   return dispatchResultSchema.parse(input);
+}
+
+export function parseAgentHostExecuteCommand(
+  input: unknown
+): Extract<ServerToHostCommand, { type: "execute_block" }> {
+  return executeBlockCommandSchema.parse(input);
 }
 
 export function parseAgentHostEvent(input: unknown): HostEvent {

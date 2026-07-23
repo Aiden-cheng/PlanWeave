@@ -1,21 +1,29 @@
-import type { NewSessionResponse } from "@agentclientprotocol/sdk";
+import type { NewSessionResponse, SessionConfigOption } from "@agentclientprotocol/sdk";
 import type { AgentFamily } from "../types.js";
 import type { AcpConnection } from "./acpConnection.js";
+import type { AcpEngineSessionConfigurator } from "./acpExecutionEngineContracts.js";
 import type { DesktopAcpSessionDefaults } from "./desktopAgentSettings.js";
 import {
   sessionConfigurationFromProtocol,
   type AcpSessionConfiguration
 } from "./acpSessionConfiguration.js";
 
-export async function applyDesktopAcpSessionDefaults(options: {
+type SessionDefaultsWriter = {
+  setConfigOption(
+    configId: string,
+    value: string | boolean
+  ): Promise<readonly SessionConfigOption[]>;
+  setMode(modeId: string): Promise<void>;
+};
+
+async function applySessionDefaults(options: {
   agentId: AgentFamily;
   defaults: DesktopAcpSessionDefaults;
-  connection: AcpConnection;
   session: NewSessionResponse;
-  operation?: { signal?: AbortSignal; timeoutMs?: number };
+  writer: SessionDefaultsWriter;
 }): Promise<AcpSessionConfiguration> {
   const defaults = options.defaults;
-  let advertised = options.session.configOptions ?? [];
+  let advertised: readonly SessionConfigOption[] = options.session.configOptions ?? [];
   let modes = options.session.modes;
   const configuredEntries = Object.entries(defaults.configOptions);
   for (const [configId, value] of configuredEntries) {
@@ -29,11 +37,7 @@ export async function applyDesktopAcpSessionDefaults(options: {
       if (typeof value !== "boolean") {
         throw new Error(`ACP option '${configId}' requires a boolean value.`);
       }
-      const response = await options.connection.setSessionConfigOption(
-        { sessionId: options.session.sessionId, configId, type: "boolean", value },
-        options.operation
-      );
-      advertised = response.configOptions;
+      advertised = (await options.writer.setConfigOption(configId, value)) ?? [];
       continue;
     }
     if (typeof value !== "string") {
@@ -45,11 +49,7 @@ export async function applyDesktopAcpSessionDefaults(options: {
     if (!available.some((candidate) => candidate.value === value)) {
       throw new Error(`ACP option '${configId}' did not advertise configured value '${value}'.`);
     }
-    const response = await options.connection.setSessionConfigOption(
-      { sessionId: options.session.sessionId, configId, value },
-      options.operation
-    );
-    advertised = response.configOptions;
+    advertised = (await options.writer.setConfigOption(configId, value)) ?? [];
   }
 
   const configuredProtocolMode = advertised.some(
@@ -61,11 +61,53 @@ export async function applyDesktopAcpSessionDefaults(options: {
         `ACP agent '${options.agentId}' did not advertise configured session mode '${defaults.modeId}'.`
       );
     }
-    await options.connection.setSessionMode(
-      { sessionId: options.session.sessionId, modeId: defaults.modeId },
-      options.operation
-    );
+    await options.writer.setMode(defaults.modeId);
     modes = { ...modes, currentModeId: defaults.modeId };
   }
   return sessionConfigurationFromProtocol({ modes, configOptions: advertised });
+}
+
+export function applyDesktopAcpSessionDefaults(options: {
+  agentId: AgentFamily;
+  defaults: DesktopAcpSessionDefaults;
+  connection: AcpConnection;
+  session: NewSessionResponse;
+  operation?: { signal?: AbortSignal; timeoutMs?: number };
+}): Promise<AcpSessionConfiguration> {
+  return applySessionDefaults({
+    ...options,
+    writer: {
+      setConfigOption: async (configId, value) => {
+        const response = await options.connection.setSessionConfigOption(
+          typeof value === "boolean"
+            ? { sessionId: options.session.sessionId, configId, type: "boolean", value }
+            : { sessionId: options.session.sessionId, configId, value },
+          options.operation
+        );
+        return response.configOptions;
+      },
+      setMode: async (modeId) => {
+        await options.connection.setSessionMode(
+          { sessionId: options.session.sessionId, modeId },
+          options.operation
+        );
+      }
+    }
+  });
+}
+
+export function applyDesktopAcpSessionDefaultsWithConfigurator(options: {
+  agentId: AgentFamily;
+  defaults: DesktopAcpSessionDefaults;
+  configurator: AcpEngineSessionConfigurator;
+  session: NewSessionResponse;
+}): Promise<AcpSessionConfiguration> {
+  return applySessionDefaults({
+    ...options,
+    writer: {
+      setConfigOption: (configId, value) =>
+        options.configurator.setConfigOption({ configId, value }),
+      setMode: (modeId) => options.configurator.setMode(modeId)
+    }
+  });
 }

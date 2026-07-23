@@ -1,19 +1,13 @@
 import { mkdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { z } from "zod";
 import type {
   AgentCapabilities,
-  CreateElicitationResponse,
-  NewSessionResponse,
   SessionNotification,
   TerminalOutputRequest,
   TerminalOutputResponse
 } from "@agentclientprotocol/sdk";
-import {
-  CreateElicitationRequest as CreateElicitationRequestGuard,
-  RequestError
-} from "@agentclientprotocol/sdk";
+import { RequestError } from "@agentclientprotocol/sdk";
 import type { AgentFamily, ExecutorAdapterResult } from "../types.js";
 import {
   AcpOperationTimeoutError,
@@ -25,11 +19,10 @@ import {
 import { agentProcessEnvRecord } from "../process/agentProcessEnv.js";
 import {
   AcpAuthenticationRequiredError,
-  coordinateAcpAuthentication,
   mayProbeSessionDespiteAuthRequired,
   type AcpAuthenticationHints
 } from "./acpAuthentication.js";
-import { ExecutorCancelledError } from "./executorShared.js";
+import { ExecutorCancelledError } from "./executorCancellation.js";
 import {
   extractFinalArtifactEnvelope,
   finalArtifactPromptInstruction,
@@ -44,20 +37,10 @@ import {
   type ActiveAgentRunIdentity,
   type ActiveAgentRunRegistry
 } from "./activeAgentRunRegistry.js";
-import {
-  redactAcpProtocolPayload,
-  redactRunnerEventPayload,
-  redactRunnerEventText
-} from "./runnerEventRedaction.js";
+import { redactAcpProtocolPayload, redactRunnerEventText } from "./runnerEventRedaction.js";
 import { normalizedRedactedContent } from "./normalizedEventContract.js";
+import type { LivePendingRequestHandle, RunnerInteractionBroker } from "./liveControl.js";
 import {
-  createLiveOwnership,
-  type LivePendingRequestHandle,
-  type RunnerInteractionBroker
-} from "./liveControl.js";
-import {
-  createAcpInteractionRequestId,
-  normalizeAcpElicitationHistory,
   normalizeAcpSessionNotification,
   normalizeAcpTerminalOutput
 } from "./acpEventNormalization.js";
@@ -68,7 +51,6 @@ import {
   runnerSessionActionIdentitySchema
 } from "./runnerContractSchemas.js";
 import { acpEventReadModels, type AcpEventReadModelRegistry } from "./acpEventReadModel.js";
-import { createAcpElicitationSettlement } from "./acpElicitationSettlement.js";
 import { createPersistentAcpPermissionHandler } from "./acpPermissionInteraction.js";
 import { AcpOwnerStateWriter } from "./acpOwnerState.js";
 import { AcpOwnerWriteFence } from "./acpOwnerWriteFence.js";
@@ -84,9 +66,12 @@ import type { RunnerInteractionObserver } from "./runnerInteractionObserver.js";
 import type { DesktopAcpSessionDefaults } from "./desktopAgentSettings.js";
 import { sessionConfigurationFromNewSession } from "./acpSessionConfiguration.js";
 import { acpSessionStartSchema, type AcpSessionStart } from "./acpRunRecovery.js";
-import { startAcpSession } from "./acpSessionStart.js";
 import { projectRunnerNextActions } from "./runnerNextActions.js";
-import { applyDesktopAcpSessionDefaults } from "./acpSessionDefaults.js";
+import { applyDesktopAcpSessionDefaultsWithConfigurator } from "./acpSessionDefaults.js";
+import { createLocalAcpPromptSource, executeLocalAcpAdapter } from "./acpLocalExecutionAdapter.js";
+import type { AcpEngineLifecycleEvent } from "./acpExecutionEngineContracts.js";
+import { createLocalAcpInteractionBroker } from "./acpLocalInteractionBroker.js";
+import { createLocalAcpActiveRunHandle } from "./acpLocalActiveRunHandle.js";
 
 export { applyDesktopAcpSessionDefaults } from "./acpSessionDefaults.js";
 
@@ -117,12 +102,6 @@ type TerminalStatus = "completed" | "failed" | "cancelled" | "timed_out";
 
 function environment(): Record<string, string> {
   return agentProcessEnvRecord();
-}
-
-function updateText(notification: SessionNotification): string | null {
-  const update = notification.update;
-  if (update.sessionUpdate !== "agent_message_chunk" || update.content.type !== "text") return null;
-  return update.content.text;
 }
 
 function diagnostic(error: unknown): string {
@@ -172,7 +151,6 @@ export class AcpSessionController {
     const sessionStart = acpSessionStartSchema.parse(run.sessionStart ?? { kind: "new" });
     let output = "";
     let executionPhase: "connecting" | "session" | "prompt" | "artifact" | "cleanup" = "connecting";
-    let connection: AcpConnection | null = null;
     let initializedCapabilities: AgentCapabilities | undefined;
     let initializedSessionId: string | null = null;
     let handle: ActiveAgentRunHandle | null = null;
@@ -217,7 +195,6 @@ export class AcpSessionController {
     const eventStore = eventModel?.store ?? null;
     if (eventStore)
       await eventStore.append({ kind: "lifecycle", state: "created", message: "ACP run created." });
-    let interactionOrdinal = 0;
     let interactionFailure: RunnerInteractionChannelError | null = null;
     let operationDeadline: Date | null = null;
     const pendingRequests = new Map<string, LivePendingRequestHandle>();
@@ -339,13 +316,12 @@ export class AcpSessionController {
       });
     }, 5_000);
     heartbeatTimer.unref();
+    const currentHandle = (): ActiveAgentRunHandle | null => handle;
     try {
       if (abortController.signal.aborted) {
         throw new ExecutorCancelledError(diagnostic(abortController.signal.reason));
       }
       const eventSink = async (notification: SessionNotification): Promise<void> => {
-        const text = updateText(notification);
-        if (text !== null) output += text;
         const normalized = normalizeAcpSessionNotification(notification);
         if (eventStore && normalized) {
           await eventStore.append(
@@ -383,464 +359,367 @@ export class AcpSessionController {
           interactionFailure ??= failure;
         }
       });
-      connection = this.connect({
-        launch: { trusted: true, ...run.launch },
-        cwd: run.cwd,
-        env: spawnEnvironment,
-        clientInfo: { name: "planweave", version: "1" },
-        ...(options?.interactionBroker
-          ? {
-              clientCapabilities: { elicitation: { form: {} } }
-            }
-          : {}),
-        defaultTimeoutMs: options?.timeoutMs,
-        onSessionUpdate: eventSink,
-        onPermissionRequest: async (request) => {
-          const requestId = createAcpInteractionRequestId("permission", ++interactionOrdinal);
-          const requestedAt = new Date().toISOString();
-          return permissionHandler(request, requestId, requestedAt);
+      const engineInteractionBroker = createLocalAcpInteractionBroker({
+        permissionHandler,
+        eventStore,
+        interactionBroker: options?.interactionBroker,
+        setOperationDeadline: (deadline) => {
+          operationDeadline = deadline;
         },
-        onElicitationRequest: async (request) => {
-          const requestId = createAcpInteractionRequestId("elicitation", ++interactionOrdinal);
-          const requestedAt = new Date().toISOString();
-          const sessionId =
-            "sessionId" in request && typeof request.sessionId === "string"
-              ? request.sessionId
-              : null;
-          if (eventStore)
-            await eventStore.append(
-              normalizeAcpElicitationHistory(request, requestId, requestedAt),
-              sessionId ? acpCorrelationSchema.parse({ sessionId }) : undefined
-            );
-          if (!options?.interactionBroker || !CreateElicitationRequestGuard.isForm(request)) {
-            if (eventStore)
-              await eventStore.append(
-                {
-                  kind: "interaction_result",
-                  requestId,
-                  interactionId: requestId,
-                  interactionKind: "elicitation",
-                  outcome: "cancelled",
-                  message: options?.interactionBroker
-                    ? "Unsupported elicitation was cancelled."
-                    : "Elicitation was cancelled by the headless default-safe policy."
-                },
-                sessionId ? acpCorrelationSchema.parse({ sessionId }) : undefined
-              );
-            return { action: "cancel" };
+        addPending: (pending) => {
+          pendingRequests.set(pending.requestId, pending);
+          if (handle?.lifecycleState === "running") {
+            this.registry.transition(handle, "waiting_interaction");
           }
-          return new Promise<CreateElicitationResponse>((resolve, reject) => {
-            const complete = (response: CreateElicitationResponse): void => {
-              releasePendingRequest(requestId);
-              resolve(response);
-            };
-            let settlement: ReturnType<typeof createAcpElicitationSettlement>;
-            try {
-              settlement = createAcpElicitationSettlement({
-                requestId,
-                requestedSchema: request.requestedSchema,
-                complete,
-                publishResult: async (result) => {
-                  if (eventStore)
-                    await eventStore.append(
-                      {
-                        kind: "interaction_result",
-                        requestId,
-                        interactionId: requestId,
-                        interactionKind: "elicitation",
-                        outcome: result.outcome,
-                        message: result.message
-                      },
-                      sessionId ? acpCorrelationSchema.parse({ sessionId }) : undefined
-                    );
-                }
-              });
-            } catch (error) {
-              throw RequestError.invalidParams(undefined, diagnostic(error));
-            }
-            const pending: LivePendingRequestHandle = {
-              requestId,
-              interactionId: requestId,
-              kind: "elicitation",
-              requestedAt,
-              summary: JSON.stringify(redactRunnerEventPayload(request)),
-              respond: settlement.respond,
-              reject: settlement.cancel,
-              elicitationSchema: z.json().parse(redactRunnerEventPayload(request.requestedSchema))
-            };
-            pendingRequests.set(requestId, pending);
-            if (handle?.lifecycleState === "running")
-              this.registry.transition(handle, "waiting_interaction");
-            if (handle) this.registry.notifyInteractionChanged(handle);
-            Promise.resolve(options.interactionBroker?.requestAvailable(pending)).catch((error) => {
-              releasePendingRequest(requestId);
-              reject(error);
-            });
-          });
+          if (handle) this.registry.notifyInteractionChanged(handle);
         },
-        ...(terminalOutputHandler
-          ? {
-              onTerminalOutput: async (request: TerminalOutputRequest) => {
-                const response = await terminalOutputHandler(request);
-                if (eventStore)
-                  await eventStore.append(
-                    normalizeAcpTerminalOutput(request, response),
-                    acpCorrelationSchema.parse({ sessionId: request.sessionId })
-                  );
-                return response;
-              }
-            }
-          : {}),
-        ...(eventStore
-          ? {
-              observer: {
-                redact: redactAcpProtocolPayload,
-                observe: (observation: { direction: string; payload: unknown }) => {
-                  void eventStore
-                    .appendProtocol(observation.direction, observation.payload)
-                    .catch((error) => {
-                      protocolObserverError ??= error;
-                    });
-                }
-              }
-            }
-          : {})
+        releasePending: releasePendingRequest
       });
-      if (abortController.signal.aborted) {
-        await connection.dispose();
-        throw new ExecutorCancelledError(diagnostic(abortController.signal.reason));
-      }
-      const ownership = createLiveOwnership(
-        `${run.identity.scope}:${run.identity.executorRunId}`,
-        1
-      );
-      handle = {
-        identity: { ...run.identity, desktopRunId: run.identity.desktopRunId ?? null },
-        connection,
-        abortController,
-        eventSink,
-        ownership,
-        lifecycleState: "initializing",
-        agentRunControlLeaseId,
-        control: {
-          ownership,
-          process: {
-            pid: connection.processId,
-            terminate: async () => connection?.dispose()
-          },
-          connection: {
-            send: async () => {
-              throw new Error("ACP raw sends are not available outside the protocol connection.");
-            },
-            close: async () => connection?.dispose(),
-            cancelSession: async (sessionId) => connection?.cancel({ sessionId }),
-            closeSession: async (sessionId) => {
-              await connection?.closeSession(sessionId);
-            },
-            get supportsSessionClose() {
-              return initializedCapabilities?.sessionCapabilities?.close != null;
-            }
-          },
-          sessionId: null,
-          interventionCapabilities: {
-            cancel: false,
-            permission: false,
-            elicitationPreview: false
-          },
-          pendingRequests,
-          pendingOperations: connection.pendingOperations
+      const expected = expectedArtifact(run);
+      const artifactRelative = finalArtifactRelativePath(run.kind);
+      const artifactPath = join(run.runDir, artifactRelative);
+      const agentPrompt = `${run.prompt}\n\n${finalArtifactPromptInstruction(expected)}`;
+      const markReady = async (): Promise<void> => {
+        if (!handle || handle.lifecycleState !== "initializing") return;
+        handle.control.interventionCapabilities.cancel = true;
+        handle.control.interventionCapabilities.permission = eventStore !== null;
+        handle.control.interventionCapabilities.elicitationPreview =
+          options?.interactionBroker != null;
+        this.registry.transition(handle, "ready");
+        if (eventStore) {
+          await eventStore.append({
+            kind: "lifecycle",
+            state: "ready",
+            message: "ACP runner is ready."
+          });
         }
       };
-      this.registry.register(handle);
-      handleRegistered = true;
-      if (eventStore)
-        await eventStore.append({
-          kind: "lifecycle",
-          state: "initializing",
-          message: "ACP connection initialized."
+      const publishConnection = (created: AcpConnection): void => {
+        handle = createLocalAcpActiveRunHandle({
+          identity: run.identity,
+          connection: created,
+          abortController,
+          eventSink,
+          agentRunControlLeaseId,
+          pendingRequests,
+          supportsSessionClose: () => initializedCapabilities?.sessionCapabilities?.close != null
         });
-      await writeState("running", { pid: connection.processId });
-      const initialized = await connection.initialize({
-        signal: abortController.signal,
-        timeoutMs: options?.timeoutMs
-      });
-      initializedCapabilities = initialized.agentCapabilities;
-      const authenticationOutcome = await coordinateAcpAuthentication({
-        connection,
-        initialized,
-        hints: run.authenticationHints,
-        availableEnvironmentVariables: new Set(Object.keys(spawnEnvironment)),
-        operationOptions: { signal: abortController.signal, timeoutMs: options?.timeoutMs }
-      });
-      const boundConnection = connection;
-      if (boundConnection === null) {
-        throw new Error("ACP connection was disposed before authentication completed.");
-      }
-      const sessionOperation = {
-        signal: abortController.signal,
-        timeoutMs: options?.timeoutMs
+        this.registry.register(handle);
+        handleRegistered = true;
       };
-      const startSession = (): Promise<NewSessionResponse> =>
-        startAcpSession({
-          connection: boundConnection,
-          initializedCapabilities: initialized.agentCapabilities,
-          sessionStart,
-          cwd: run.cwd,
-          operation: sessionOperation,
-          agentId: run.agentId,
-          onRecoveryLoaded: async (sessionId) => {
+      const followUpPrompts = createLocalAcpPromptSource(async (deliver) => {
+        if (!handle) throw new Error("ACP prompt source started before live ownership was ready.");
+        await this.registry.drainPromptQueue(handle, deliver);
+      });
+      const lifecycleObserver = async (event: AcpEngineLifecycleEvent): Promise<void> => {
+        switch (event.kind) {
+          case "connection_ready":
             if (eventStore) {
               await eventStore.append({
                 kind: "lifecycle",
                 state: "initializing",
-                message: `ACP recovery loaded source session '${sessionId}'.`
+                message: "ACP connection initialized."
               });
             }
+            await writeState("running", { pid: event.processId });
+            return;
+          case "initialized":
+            initializedCapabilities = event.agentCapabilities;
+            return;
+          case "authentication_completed":
+            if (event.authentication.kind === "auth_required") {
+              if (!mayProbeSessionDespiteAuthRequired(event.authentication) && eventStore) {
+                await eventStore.append({
+                  kind: "lifecycle",
+                  state: "initializing",
+                  message: "ACP authentication requires user action."
+                });
+              }
+              return;
+            }
+            if (eventStore) {
+              if (event.authentication.kind === "authenticated") {
+                await eventStore.append({
+                  kind: "lifecycle",
+                  state: "initializing",
+                  message: diagnostic(
+                    `ACP authentication method selected: ${event.authentication.methodId}`
+                  )
+                });
+                await eventStore.append({
+                  kind: "lifecycle",
+                  state: "initializing",
+                  message: "ACP authentication completed."
+                });
+              } else {
+                await eventStore.append({
+                  kind: "lifecycle",
+                  state: "initializing",
+                  message: "ACP agent did not advertise authentication methods."
+                });
+              }
+            }
+            await markReady();
+            return;
+          case "authentication_probe":
+            if (eventStore) {
+              await eventStore.append({
+                kind: "lifecycle",
+                state: "initializing",
+                message:
+                  event.state === "starting"
+                    ? "ACP advertised interactive authentication; probing whether an existing login can open a session."
+                    : event.state === "failed"
+                      ? "ACP session probe failed; interactive authentication is still required."
+                      : "ACP session opened with an existing agent login (no protocol authenticate)."
+              });
+            }
+            if (event.state === "succeeded") await markReady();
+            return;
+          case "session_ready": {
+            executionPhase = "session";
+            initializedSessionId = event.session.sessionId;
+            const sessionCorrelation = acpCorrelationSchema.parse({
+              sessionId: event.session.sessionId
+            });
+            if (event.loaded && eventStore) {
+              await eventStore.append({
+                kind: "lifecycle",
+                state: "initializing",
+                message: `ACP recovery loaded source session '${event.session.sessionId}'.`
+              });
+            }
+            if (eventStore) {
+              await eventStore.append(
+                {
+                  kind: "session_configuration_snapshot",
+                  phase: "initial",
+                  configuration: sessionConfigurationFromNewSession(event.session)
+                },
+                sessionCorrelation
+              );
+            }
+            if (options?.sessionDefaults) {
+              const configuredSession = await applyDesktopAcpSessionDefaultsWithConfigurator({
+                agentId: run.agentId,
+                defaults: options.sessionDefaults,
+                configurator: event.configurator,
+                session: event.session
+              });
+              if (eventStore) {
+                await eventStore.append(
+                  {
+                    kind: "session_configuration_snapshot",
+                    phase: "defaults_applied",
+                    configuration: configuredSession
+                  },
+                  sessionCorrelation
+                );
+              }
+            }
+            if (!handle) throw new Error("ACP session became ready without live ownership.");
+            this.registry.bindSession(handle, event.session.sessionId);
+            this.registry.transition(handle, "running");
+            await writeState("running", {
+              sessionId: event.session.sessionId,
+              agentSessionId: event.session.sessionId,
+              capabilities: initializedCapabilities ?? {}
+            });
+            if (run.identity.runSessionId) {
+              try {
+                const identity = runnerSessionActionIdentitySchema.parse({
+                  scope: run.identity.scope,
+                  executorRunId: run.identity.executorRunId,
+                  desktopRunId: run.identity.desktopRunId ?? null,
+                  runSessionId: run.identity.runSessionId,
+                  claimRef: run.identity.claimRef,
+                  sessionId: event.session.sessionId
+                });
+                controlServer = new AgentRunControlServer({
+                  runDir: run.runDir,
+                  leaseId: agentRunControlLeaseId,
+                  target: createActiveAgentRunControlTarget({
+                    registry: this.registry,
+                    handle,
+                    identity
+                  })
+                });
+                handle.beforeRemove = prepareControlRemoval;
+                const descriptor = await controlServer.start();
+                await ownerState.setControlAvailability(
+                  availableAgentRunControlSummary(descriptor.ownerPid)
+                );
+              } catch (startError) {
+                const cleanup = await Promise.allSettled([
+                  controlServer?.stop(),
+                  ownerState.setControlAvailability(
+                    unavailableAgentRunControlSummary("endpoint_start_failed")
+                  )
+                ]);
+                const cleanupFailures = cleanup.flatMap((result) =>
+                  result.status === "rejected" ? [result.reason] : []
+                );
+                if (cleanupFailures.length > 0) {
+                  throw new AggregateError(
+                    [startError, ...cleanupFailures],
+                    "ACP control endpoint startup cleanup failed."
+                  );
+                }
+                controlServer = null;
+                handle.beforeRemove = undefined;
+              }
+            } else {
+              await ownerState.setControlAvailability(
+                unavailableAgentRunControlSummary("identity_unavailable")
+              );
+            }
+            if (eventStore) {
+              await eventStore.append(
+                { kind: "lifecycle", state: "running", message: "ACP session is running." },
+                sessionCorrelation
+              );
+            }
+            return;
           }
-        });
-
-      // Interactive/agent methods: probe session/new before ready. Many CLIs already hold
-      // terminal credentials and accept a session without protocol authenticate.
-      let session: NewSessionResponse | null = null;
-      if (authenticationOutcome.kind === "auth_required") {
-        if (!mayProbeSessionDespiteAuthRequired(authenticationOutcome)) {
-          if (eventStore)
-            await eventStore.append({
-              kind: "lifecycle",
-              state: "initializing",
-              message: "ACP authentication requires user action."
+          case "prompt_starting":
+            executionPhase = "prompt";
+            operationDeadline = new Date(
+              Date.now() + (options?.timeoutMs ?? DEFAULT_ACP_OPERATION_TIMEOUT_MS)
+            );
+            if (event.followUp && eventStore) {
+              await eventStore.append(
+                {
+                  kind: "message",
+                  role: "user",
+                  messageId: `desktop-live-turn-${randomUUID()}`,
+                  chunk: false,
+                  ...normalizedRedactedContent(event.prompt)
+                },
+                acpCorrelationSchema.parse({ sessionId: event.sessionId })
+              );
+            }
+            return;
+          case "prompt_completed":
+            operationDeadline = null;
+            if (interactionFailure) throw interactionFailure;
+            if (event.stopReason === "cancelled" || abortController.signal.aborted) {
+              throw new ExecutorCancelledError(
+                event.stopReason === "cancelled"
+                  ? event.followUp
+                    ? "ACP agent cancelled the queued conversation turn."
+                    : "ACP agent cancelled the session."
+                  : diagnostic(abortController.signal.reason)
+              );
+            }
+            return;
+          case "prompts_completed": {
+            output = event.output;
+            if (eventStore) await eventStore.drain();
+            if (protocolObserverError !== undefined) throw protocolObserverError;
+            executionPhase = "artifact";
+            const envelope = extractFinalArtifactEnvelope(output, expected);
+            const artifactReference = await materializeFinalArtifact({
+              envelope,
+              expected,
+              rootDir: run.runDir,
+              relativePath: artifactRelative
             });
-          throw new AcpAuthenticationRequiredError(authenticationOutcome);
+            validatedArtifactReference = artifactReference;
+            if (eventStore) {
+              await eventStore.append({ kind: "artifact", artifact: artifactReference });
+              await eventStore.drain();
+            }
+            return;
+          }
+          case "cleanup_starting":
+            executionPhase = "cleanup";
+            cleanupAttempted = true;
+            if (handle && handleRegistered) {
+              const succeeded =
+                event.terminal.state === "succeeded" && validatedArtifactReference !== null;
+              await removeControlHandle(
+                handle,
+                succeeded
+                  ? "ACP claim completed and released live ownership."
+                  : "ACP claim failed and released live ownership.",
+                succeeded
+                  ? "succeeded"
+                  : event.terminal.state === "cancelled"
+                    ? "cancelled"
+                    : "failed",
+                succeeded
+              );
+            }
+            cleanupCompleted = true;
+            if (eventStore) await eventStore.drain();
+            if (protocolObserverError !== undefined) throw protocolObserverError;
+            return;
+          case "cleanup_completed":
+            cleanupCompleted = cleanupCompleted && event.cleanup.completed;
+            return;
         }
-        if (eventStore)
-          await eventStore.append({
-            kind: "lifecycle",
-            state: "initializing",
-            message:
-              "ACP advertised interactive authentication; probing whether an existing login can open a session."
-          });
-        executionPhase = "session";
-        try {
-          session = await startSession();
-        } catch {
-          if (eventStore)
-            await eventStore.append({
-              kind: "lifecycle",
-              state: "initializing",
-              message: "ACP session probe failed; interactive authentication is still required."
-            });
-          throw new AcpAuthenticationRequiredError(authenticationOutcome);
-        }
-        if (eventStore)
-          await eventStore.append({
-            kind: "lifecycle",
-            state: "initializing",
-            message: "ACP session opened with an existing agent login (no protocol authenticate)."
-          });
-      } else if (eventStore) {
-        if (authenticationOutcome.kind === "authenticated") {
-          await eventStore.append({
-            kind: "lifecycle",
-            state: "initializing",
-            message: diagnostic(
-              `ACP authentication method selected: ${authenticationOutcome.methodId}`
-            )
-          });
-          await eventStore.append({
-            kind: "lifecycle",
-            state: "initializing",
-            message: "ACP authentication completed."
-          });
-        } else {
-          await eventStore.append({
-            kind: "lifecycle",
-            state: "initializing",
-            message: "ACP agent did not advertise authentication methods."
-          });
-        }
-      }
-
-      handle.control.interventionCapabilities.cancel = true;
-      handle.control.interventionCapabilities.permission = eventStore !== null;
-      handle.control.interventionCapabilities.elicitationPreview =
-        options?.interactionBroker != null;
-      this.registry.transition(handle, "ready");
-      if (eventStore)
-        await eventStore.append({
-          kind: "lifecycle",
-          state: "ready",
-          message: "ACP runner is ready."
-        });
-      executionPhase = "session";
-      if (session === null) {
-        session = await startSession();
-      }
-      initializedSessionId = session.sessionId;
-      const sessionCorrelation = acpCorrelationSchema.parse({ sessionId: session.sessionId });
-      if (eventStore) {
-        await eventStore.append(
-          {
-            kind: "session_configuration_snapshot",
-            phase: "initial",
-            configuration: sessionConfigurationFromNewSession(session)
-          },
-          sessionCorrelation
-        );
-      }
-      if (options?.sessionDefaults) {
-        const configuredSession = await applyDesktopAcpSessionDefaults({
-          agentId: run.agentId,
-          defaults: options.sessionDefaults,
-          connection,
-          session,
-          operation: { signal: abortController.signal, timeoutMs: options.timeoutMs }
-        });
-        if (eventStore) {
-          await eventStore.append(
-            {
-              kind: "session_configuration_snapshot",
-              phase: "defaults_applied",
-              configuration: configuredSession
-            },
-            sessionCorrelation
-          );
-        }
-      }
-      this.registry.bindSession(handle, session.sessionId);
-      this.registry.transition(handle, "running");
-      await writeState("running", {
-        sessionId: session.sessionId,
-        agentSessionId: session.sessionId,
-        capabilities: initialized.agentCapabilities ?? {}
-      });
-      if (run.identity.runSessionId) {
-        try {
-          const identity = runnerSessionActionIdentitySchema.parse({
-            scope: run.identity.scope,
-            executorRunId: run.identity.executorRunId,
-            desktopRunId: run.identity.desktopRunId ?? null,
-            runSessionId: run.identity.runSessionId,
-            claimRef: run.identity.claimRef,
-            sessionId: session.sessionId
-          });
-          controlServer = new AgentRunControlServer({
-            runDir: run.runDir,
-            leaseId: agentRunControlLeaseId,
-            target: createActiveAgentRunControlTarget({ registry: this.registry, handle, identity })
-          });
-          handle.beforeRemove = prepareControlRemoval;
-          const descriptor = await controlServer.start();
-          await ownerState.setControlAvailability(
-            availableAgentRunControlSummary(descriptor.ownerPid)
-          );
-        } catch (startError) {
-          const cleanup = await Promise.allSettled([
-            controlServer?.stop(),
-            ownerState.setControlAvailability(
-              unavailableAgentRunControlSummary("endpoint_start_failed")
-            )
-          ]);
-          const cleanupFailures = cleanup.flatMap((result) =>
-            result.status === "rejected" ? [result.reason] : []
-          );
-          if (cleanupFailures.length > 0) {
-            throw new AggregateError(
-              [startError, ...cleanupFailures],
-              "ACP control endpoint startup cleanup failed."
+      };
+      const engineResult = await executeLocalAcpAdapter({
+        launch: run.launch,
+        cwd: run.cwd,
+        agentId: run.agentId,
+        env: spawnEnvironment,
+        prompt: agentPrompt,
+        sessionStart,
+        authenticationHints: run.authenticationHints,
+        signal: abortController.signal,
+        timeoutMs: options?.timeoutMs,
+        connect: this.connect,
+        onConnection: publishConnection,
+        connectionExtensions: {
+          ...(terminalOutputHandler
+            ? {
+                onTerminalOutput: async (request: TerminalOutputRequest) => {
+                  const response = await terminalOutputHandler(request);
+                  if (eventStore) {
+                    await eventStore.append(
+                      normalizeAcpTerminalOutput(request, response),
+                      acpCorrelationSchema.parse({ sessionId: request.sessionId })
+                    );
+                  }
+                  return response;
+                }
+              }
+            : {}),
+          ...(eventStore
+            ? {
+                observer: {
+                  redact: redactAcpProtocolPayload,
+                  observe: (observation: { direction: string; payload: unknown }) => {
+                    void eventStore
+                      .appendProtocol(observation.direction, observation.payload)
+                      .catch((error) => {
+                        protocolObserverError ??= error;
+                      });
+                  }
+                }
+              }
+            : {})
+        },
+        interactionBroker: engineInteractionBroker,
+        interactionDeadline: () => operationDeadline,
+        followUpPrompts,
+        eventSink: async (event) => {
+          if (event.kind === "session_update" && eventStore) {
+            await eventStore.append(
+              event.body,
+              acpCorrelationSchema.parse({ sessionId: event.sessionId })
             );
           }
-          controlServer = null;
-          handle.beforeRemove = undefined;
-        }
-      } else {
-        await ownerState.setControlAvailability(
-          unavailableAgentRunControlSummary("identity_unavailable")
-        );
-      }
-      if (eventStore)
-        await eventStore.append(
-          { kind: "lifecycle", state: "running", message: "ACP session is running." },
-          sessionCorrelation
-        );
-      const expected = expectedArtifact(run);
-      const agentPrompt = `${run.prompt}\n\n${finalArtifactPromptInstruction(expected)}`;
-      const activeConnection = connection;
-      operationDeadline = new Date(
-        Date.now() + (options?.timeoutMs ?? DEFAULT_ACP_OPERATION_TIMEOUT_MS)
-      );
-      executionPhase = "prompt";
-      const response = await activeConnection.prompt(
-        { sessionId: session.sessionId, prompt: [{ type: "text", text: agentPrompt }] },
-        { signal: abortController.signal, timeoutMs: options?.timeoutMs }
-      );
-      operationDeadline = null;
-      if (interactionFailure) throw interactionFailure;
-      if (response.stopReason === "cancelled" || abortController.signal.aborted) {
-        throw new ExecutorCancelledError(
-          response.stopReason === "cancelled"
-            ? "ACP agent cancelled the session."
-            : diagnostic(abortController.signal.reason)
-        );
-      }
-      await this.registry.drainPromptQueue(handle, async (text) => {
-        if (eventStore) {
-          await eventStore.append(
-            {
-              kind: "message",
-              role: "user",
-              messageId: `desktop-live-turn-${randomUUID()}`,
-              chunk: false,
-              ...normalizedRedactedContent(text)
-            },
-            acpCorrelationSchema.parse({ sessionId: session.sessionId })
-          );
-        }
-        operationDeadline = new Date(
-          Date.now() + (options?.timeoutMs ?? DEFAULT_ACP_OPERATION_TIMEOUT_MS)
-        );
-        const followUp = await activeConnection.prompt(
-          { sessionId: session.sessionId, prompt: [{ type: "text", text }] },
-          { signal: abortController.signal, timeoutMs: options?.timeoutMs }
-        );
-        operationDeadline = null;
-        if (interactionFailure) throw interactionFailure;
-        if (followUp.stopReason === "cancelled" || abortController.signal.aborted) {
-          throw new ExecutorCancelledError(
-            followUp.stopReason === "cancelled"
-              ? "ACP agent cancelled the queued conversation turn."
-              : diagnostic(abortController.signal.reason)
-          );
-        }
+        },
+        lifecycleObserver
       });
-      if (eventStore) await eventStore.drain();
-      if (protocolObserverError !== undefined) throw protocolObserverError;
-      executionPhase = "artifact";
-      const artifactRelative = finalArtifactRelativePath(run.kind);
-      const artifactPath = join(run.runDir, artifactRelative);
-      const envelope = extractFinalArtifactEnvelope(output, expected);
-      const artifactReference = await materializeFinalArtifact({
-        envelope,
-        expected,
-        rootDir: run.runDir,
-        relativePath: artifactRelative
-      });
-      validatedArtifactReference = artifactReference;
+      output = engineResult.output;
+      const sessionId = engineResult.sessionId;
+      if (!sessionId || !validatedArtifactReference) {
+        throw new Error("ACP engine succeeded without a validated local artifact.");
+      }
       if (eventStore) {
-        await eventStore.append({ kind: "artifact", artifact: artifactReference });
-        await eventStore.drain();
-      }
-      executionPhase = "cleanup";
-      cleanupAttempted = true;
-      await removeControlHandle(
-        handle,
-        "ACP claim completed and released live ownership.",
-        "succeeded",
-        true
-      );
-      cleanupCompleted = true;
-      if (eventStore) await eventStore.drain();
-      if (protocolObserverError !== undefined) throw protocolObserverError;
-      if (eventStore)
         await eventStore.append(
           {
             kind: "terminal",
@@ -861,16 +740,17 @@ export class AcpSessionController {
               })
             }
           },
-          acpCorrelationSchema.parse({ sessionId: session.sessionId })
+          acpCorrelationSchema.parse({ sessionId })
         );
-      if (eventStore) await eventStore.drain();
+        await eventStore.drain();
+      }
       clearInterval(heartbeatTimer);
       heartbeatTimer = null;
       const finishedAt = new Date().toISOString();
       await writeState("completed", {
-        sessionId: session.sessionId,
+        sessionId,
         exitCode: 0,
-        artifactReference
+        artifactReference: validatedArtifactReference
       });
       const common = {
         runId: run.identity.executorRunId,
@@ -878,11 +758,11 @@ export class AcpSessionController {
         agentId: run.agentId,
         runnerKind: "acp" as const,
         stdout: output,
-        stderr: connection.stderr.join(""),
+        stderr: engineResult.stderr.join(""),
         exitCode: 0,
         startedAt,
         finishedAt,
-        agentSessionId: session.sessionId
+        agentSessionId: sessionId
       };
       return run.kind === "review"
         ? { kind: "review", resultPath: artifactPath, ...common }
@@ -896,22 +776,20 @@ export class AcpSessionController {
       }
       const cancelledBeforeCleanup =
         error instanceof ExecutorCancelledError || options?.signal?.aborted === true;
-      if (error instanceof AcpOperationTimeoutError && handle) {
-        handle.control.sessionId = null;
+      const failedHandle = currentHandle();
+      if (error instanceof AcpOperationTimeoutError && failedHandle) {
+        failedHandle.control.sessionId = null;
       }
       let cleanupError: unknown;
       if (!cleanupAttempted) {
         cleanupAttempted = true;
         try {
-          if (handle && handleRegistered) {
+          if (failedHandle && handleRegistered) {
             await removeControlHandle(
-              handle,
+              failedHandle,
               "ACP claim failed and released live ownership.",
               cancelledBeforeCleanup ? "cancelled" : "failed"
             );
-            cleanupCompleted = true;
-          } else if (connection) {
-            await connection.dispose();
             cleanupCompleted = true;
           } else {
             cleanupCompleted = true;
@@ -946,7 +824,7 @@ export class AcpSessionController {
         ? `Execution: ${executionMessage}; cleanup: ${cleanupMessage}`
         : executionMessage;
       const timedOut = error instanceof AcpOperationTimeoutError;
-      const cancelled = cancelledBeforeCleanup || handle?.lifecycleState === "cancelled";
+      const cancelled = cancelledBeforeCleanup || failedHandle?.lifecycleState === "cancelled";
       const cleanupFailed =
         cleanupError !== undefined ||
         controlCleanupRetryError !== undefined ||
@@ -1032,8 +910,12 @@ export class AcpSessionController {
         finalizationErrors.push(controlCleanupRetryError);
       }
       finalizationErrors.push(...eventLogErrors.filter((caught) => caught !== error));
-      if (finalizationErrors.length > 0) {
-        throw new AggregateError([error, ...finalizationErrors], message);
+      if (cleanupFailed || finalizationErrors.length > 0) {
+        const executionErrors = error instanceof AggregateError ? error.errors : [error];
+        throw new AggregateError(
+          [...executionErrors, ...finalizationErrors],
+          cleanupFailed ? `Runner terminal cleanup did not complete cleanly. ${message}` : message
+        );
       }
       if (cancelled && !(error instanceof ExecutorCancelledError)) {
         throw new ExecutorCancelledError(message);

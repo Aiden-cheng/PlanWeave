@@ -812,3 +812,17 @@ export type * from "./plangraph/index.js";
 export type * from "./projectGraph/index.js";
 export type * from "./schemaDocs/index.js";
 export type * from "./types.js";
+export {
+  AcpEngineCapabilityError,
+  AcpEngineExecutionError,
+  AcpEngineInteractionError,
+  AcpEngineLimitError,
+  executeAcp,
+  executeAcpOrThrow
+} from "./autoRun/acpExecutionEngine.js";
+export {
+  DEFAULT_ACP_EXECUTION_LIMITS,
+  acpEngineSessionStartSchema,
+  acpExecutionLimitsSchema
+} from "./autoRun/acpExecutionEngineContracts.js";
+export type * from "./autoRun/acpExecutionEngineContracts.js";

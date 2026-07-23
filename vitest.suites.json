@@ -275,6 +275,8 @@
         "acpConnectionCleanup.test.ts",
         "acpCrossProcessPermission.test.ts",
         "acpElicitationSettlement.test.ts",
+        "acpExecutionEngine.test.ts",
+        "acpLocalExecutionAdapter.test.ts",
         "acpEventController.test.ts",
         "acpEvents.publisher.test.ts",
         "acpEvents.readModel.test.ts",
@@ -438,8 +440,15 @@
     },
     {
       "root": "packages/agent-host/src/__tests__",
-      "unit": ["agentHostPackage.test.ts", "protocolConformance.test.ts"],
-      "integration": ["agentHostClient.test.ts", "agentHostState.test.ts"],
+      "unit": [
+        "agentHostPackage.test.ts",
+        "protocolConformance.test.ts"
+      ],
+      "integration": [
+        "agentHostClient.test.ts",
+        "agentHostState.test.ts",
+        "remoteAcpExecutor.test.ts"
+      ],
       "platform": [],
       "performance": []
     },

@@ -28,8 +28,17 @@ if (scenario === "early-exit") {
   process.exit(23);
 }
 
+if (scenario === "private-overlong-process-error") {
+  process.stderr.write(`/Users/private-worktree token=raw-secret ${"x".repeat(20_000)}\n`);
+  process.exit(23);
+}
+
 if (scenario === "stderr") {
   process.stderr.write("mock ACP diagnostic\n");
+}
+
+if (scenario === "stderr-flood") {
+  process.stderr.write("é".repeat(1024));
 }
 
 if (scenario === "stubborn-pending") {
@@ -216,6 +225,22 @@ const app = agent({ name: "planweave-acp-mock" })
     if (scenario === "invalid-envelope-pending" || scenario === "invalid-object-envelope-pending") {
       await pause(100);
     }
+    if (scenario === "oversized-frame") {
+      process.stdout.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          method: "session/update",
+          params: {
+            sessionId: "oversized-session",
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              content: { type: "text", text: "é".repeat(600) }
+            }
+          }
+        })}\n`
+      );
+      await pause(100);
+    }
     const sessionId = `mock-session-${nextSession++}`;
     const currentModeId =
       scenario === "probe-session-config-current-second" ? "agent-full-access" : "read-only";
@@ -394,7 +419,9 @@ const app = agent({ name: "planweave-acp-mock" })
             ? `PLANWEAVE_FINAL_ARTIFACT ${JSON.stringify({ version: "planweave.runner-artifact/v1", artifact: { kind: "review", ref: "T-001#R-001", taskId: "T-001", reviewResult: { reviewBlockRef: "T-001#R-001", taskId: "T-001", verdict: scenario === "artifact-review-needs-changes" ? "needs_changes" : "passed", content: scenario === "artifact-review-needs-changes" ? "fix the implementation" : "passed" } } })}\n`
             : scenario === "artifact-feedback"
               ? `PLANWEAVE_FINAL_ARTIFACT ${JSON.stringify({ version: "planweave.runner-artifact/v1", artifact: { kind: "feedback", feedbackId: "FE-001", sourceReviewBlockRef: "T-001#R-001", taskId: "T-001", reportMarkdown: "feedback fixed\n" } })}\n`
-              : `hello from ${sessionId}`;
+              : scenario === "nontext-output"
+                ? "TOKEN=super-secret"
+                : `hello from ${sessionId}`;
     await ctx.client.notify(methods.client.session.update, {
       sessionId,
       update: {
@@ -402,6 +429,15 @@ const app = agent({ name: "planweave-acp-mock" })
         content: { type: "text", text: artifactText }
       }
     });
+    if (scenario === "nontext-output") {
+      await ctx.client.notify(methods.client.session.update, {
+        sessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "image", mimeType: "image/png", data: "AAAA" }
+        }
+      });
+    }
 
     if (scenario === "artifact-session-config-live") {
       await ctx.client.notify(methods.client.session.update, {
@@ -510,13 +546,14 @@ const app = agent({ name: "planweave-acp-mock" })
     if (
       scenario === "elicitation" ||
       scenario === "unsupported-elicitation" ||
-      scenario === "elicitation-secret"
+      scenario === "elicitation-secret" ||
+      scenario === "engine-elicitation-secret"
     ) {
       await ctx.client.request(methods.client.elicitation.create, {
         mode: scenario === "unsupported-elicitation" ? "url" : "form",
         sessionId,
         message:
-          scenario === "elicitation-secret"
+          scenario === "elicitation-secret" || scenario === "engine-elicitation-secret"
             ? "Authorization: Bearer secret-token"
             : "Choose a test value",
         ...(scenario === "unsupported-elicitation"
@@ -528,7 +565,9 @@ const app = agent({ name: "planweave-acp-mock" })
             value: {
               type: "string",
               title: "Value",
-              ...(scenario === "elicitation-secret" ? { default: "api_key=raw-secret" } : {})
+              ...(scenario === "elicitation-secret" || scenario === "engine-elicitation-secret"
+                ? { default: "api_key=raw-secret" }
+                : {})
             }
           },
           required: ["value"]
@@ -651,7 +690,24 @@ const app = agent({ name: "planweave-acp-mock" })
         update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "late" } }
       });
     }
-    return { stopReason: session.cancelled ? "cancelled" : "end_turn" };
+    const scriptedStopReason =
+      scenario === "refusal" || scenario === "max_tokens" || scenario === "max_turn_requests"
+        ? scenario
+        : "end_turn";
+    return {
+      stopReason: session.cancelled ? "cancelled" : scriptedStopReason,
+      ...(scenario === "prompt-usage"
+        ? {
+            usage: {
+              totalTokens: 15,
+              inputTokens: 9,
+              outputTokens: 6,
+              thoughtTokens: 2,
+              cachedReadTokens: 3
+            }
+          }
+        : {})
+    };
   });
 
 const stream = ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin));
