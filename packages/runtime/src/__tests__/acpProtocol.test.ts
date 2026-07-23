@@ -315,6 +315,22 @@ describe("ACP official SDK subprocess connection", () => {
     await settledPrompt;
   });
 
+  it("reports host cleanup failure after the ACP launcher exits during its grace window", async () => {
+    const connection = createAcpConnection({
+      launch: { trusted: true, command: process.execPath, args: [fixture, "success"] },
+      cwd: process.cwd(),
+      env: environment,
+      clientInfo: { name: "planweave-test-client", version: "1.0.0" },
+      cleanupExitedProcessTree: async () => {
+        throw new Error("sentinel WSL process-group cleanup failed");
+      }
+    });
+    connections.push(connection);
+    await connection.initialize();
+
+    await expect(connection.dispose()).rejects.toThrow("sentinel WSL process-group cleanup failed");
+  });
+
   it("escalates a SIGTERM-resistant production connection to SIGKILL and settles pending work", async () => {
     const connection = connect("stubborn-pending", { timeoutMs: 5_000, shutdownGraceMs: 25 });
     await connection.initialize();

@@ -141,6 +141,7 @@ export async function executeLocalAcpAdapter(options: {
   readonly cwd: string;
   readonly spawnCwd?: string | null;
   readonly decorateProcessTree?: CreateAcpConnectionOptions["decorateProcessTree"];
+  readonly cleanupExitedProcessTree?: CreateAcpConnectionOptions["cleanupExitedProcessTree"];
   readonly agentId: string;
   readonly env: Readonly<Record<string, string>>;
   readonly availableEnvironmentVariables?: ReadonlySet<string>;
@@ -194,6 +195,9 @@ export async function executeLocalAcpAdapter(options: {
             ...(options.spawnCwd !== undefined ? { spawnCwd: options.spawnCwd } : {}),
             ...(options.decorateProcessTree
               ? { decorateProcessTree: options.decorateProcessTree }
+              : {}),
+            ...(options.cleanupExitedProcessTree
+              ? { cleanupExitedProcessTree: options.cleanupExitedProcessTree }
               : {}),
             ...options.connectionExtensions
           })

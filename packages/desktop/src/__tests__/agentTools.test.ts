@@ -423,11 +423,46 @@ describe("desktop agent tool detection", () => {
       version: null,
       executionHost: { kind: "wsl", distribution: "Ubuntu" }
     });
-    expect(agents.find((agent) => agent.kind === "grok" && agent.runnerKind === "acp"))
-      .toMatchObject({ installed: true, version: null });
+    expect(
+      agents.find((agent) => agent.kind === "grok" && agent.runnerKind === "acp")
+    ).toMatchObject({ installed: true, version: null });
     expect(listWslDistributionsMock).toHaveBeenCalledWith({ platform: "win32" });
     expect(readWslLoginPathMock).toHaveBeenCalledWith("Ubuntu", { platform: "win32" });
     expect(resolveWindowsProcessInvocationMock).not.toHaveBeenCalled();
+  });
+
+  it("does not forward Windows credentials through WSLENV during WSL agent detection", async () => {
+    const previousWslEnv = process.env.WSLENV;
+    const previousXaiKey = process.env.XAI_API_KEY;
+    process.env.WSLENV = "XAI_API_KEY/u";
+    process.env.XAI_API_KEY = "desktop-secret-sentinel";
+    execFileMock.mockImplementation(
+      (
+        _command: string,
+        _args: string[],
+        options: { env?: NodeJS.ProcessEnv },
+        callback: (error: Error | null, stdout: string, stderr: string) => void
+      ) => {
+        expect(options.env).not.toHaveProperty("WSLENV");
+        expect(options.env).not.toHaveProperty("XAI_API_KEY");
+        callback(null, "1.2.3\n", "");
+      }
+    );
+
+    try {
+      const { detectAgentTools } = await import("../main/agentTools");
+      const agents = await detectAgentTools("win32", {
+        kind: "wsl",
+        distribution: "Ubuntu"
+      });
+
+      expect(agents.every((agent) => agent.installed)).toBe(true);
+    } finally {
+      if (previousWslEnv === undefined) delete process.env.WSLENV;
+      else process.env.WSLENV = previousWslEnv;
+      if (previousXaiKey === undefined) delete process.env.XAI_API_KEY;
+      else process.env.XAI_API_KEY = previousXaiKey;
+    }
   });
 
   it("reports a deleted WSL distribution for every agent without probing native Windows", async () => {
@@ -444,9 +479,11 @@ describe("desktop agent tool detection", () => {
     });
 
     expect(agents.every((agent) => !agent.installed)).toBe(true);
-    expect(agents.every((agent) =>
-      agent.unavailableReason === "WSL distribution 'Ubuntu' is not installed."
-    )).toBe(true);
+    expect(
+      agents.every(
+        (agent) => agent.unavailableReason === "WSL distribution 'Ubuntu' is not installed."
+      )
+    ).toBe(true);
     expect(readWslLoginPathMock).not.toHaveBeenCalled();
     expect(execFileMock).not.toHaveBeenCalled();
     expect(resolveWindowsProcessInvocationMock).not.toHaveBeenCalled();

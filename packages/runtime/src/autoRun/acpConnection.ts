@@ -125,6 +125,7 @@ export type CreateAcpConnectionOptions = {
   spawnCwd?: string | null;
   env: Readonly<Record<string, string>>;
   decorateProcessTree?: (tree: ManagedProcessTree) => ManagedProcessTree;
+  cleanupExitedProcessTree?: () => Promise<void>;
   clientInfo: { name: string; version: string };
   clientCapabilities?: Parameters<ClientSideConnection["initialize"]>[0]["clientCapabilities"];
   onSessionUpdate?: (notification: SessionNotification) => void | Promise<void>;
@@ -441,7 +442,10 @@ class SubprocessAcpConnection implements AcpConnection {
   private async disposeProcess(): Promise<void> {
     if (!this.process.stdin.destroyed && !this.process.stdin.writableEnded)
       this.process.stdin.end();
-    if (await this.waitForExit()) return;
+    if (await this.waitForExit()) {
+      await this.options.cleanupExitedProcessTree?.();
+      return;
+    }
     await this.processTree.terminate("acp-dispose");
     if (!(await this.waitForExit())) {
       throw new Error(

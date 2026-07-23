@@ -37,6 +37,16 @@ const WSL_TERMINATE_GROUP_SCRIPT = [
   'rm -f "$pw_pid_file"'
 ].join("; ");
 
+const WSL_LAUNCHER_ENVIRONMENT_KEYS = new Set([
+  "comspec",
+  "path",
+  "pathext",
+  "systemroot",
+  "temp",
+  "tmp",
+  "windir"
+]);
+
 export type WslCommandOutput = { stdout: Buffer; stderr: Buffer };
 export type WslCommandRunner = (args: readonly string[]) => Promise<WslCommandOutput>;
 
@@ -54,8 +64,10 @@ export type WslExecutionOptions = {
 export type PreparedWslProcessInvocation = {
   command: "wsl.exe";
   args: string[];
+  spawnEnvironment: Record<string, string>;
   sessionCwd: string;
   pidFile: string;
+  cleanupExitedProcessTree(): Promise<void>;
   decorateProcessTree(tree: ManagedProcessTree): ManagedProcessTree;
 };
 
@@ -63,10 +75,23 @@ export type PreparedExecutionHostInvocation = {
   command: string;
   args: string[];
   spawnCwd: string | undefined;
+  spawnEnvironment: Record<string, string>;
   sessionCwd: string;
   executionHost: ExecutionHost;
+  cleanupExitedProcessTree?: () => Promise<void>;
   decorateProcessTree(tree: ManagedProcessTree): ManagedProcessTree;
 };
+
+export function wslLauncherEnvironment(
+  environment: Readonly<Record<string, string | undefined>> = process.env
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(environment).filter(
+      (entry): entry is [string, string] =>
+        entry[1] !== undefined && WSL_LAUNCHER_ENVIRONMENT_KEYS.has(entry[0].toLowerCase())
+    )
+  );
+}
 
 export function availableExecutionHostEnvironmentVariables(
   host: ExecutionHost,
@@ -80,7 +105,13 @@ function defaultWslCommandRunner(args: readonly string[]): Promise<WslCommandOut
     execFile(
       "wsl.exe",
       [...args],
-      { encoding: "buffer", timeout: 15_000, maxBuffer: 1024 * 1024, windowsHide: true },
+      {
+        encoding: "buffer",
+        env: wslLauncherEnvironment(),
+        timeout: 15_000,
+        maxBuffer: 1024 * 1024,
+        windowsHide: true
+      },
       (error, stdout, stderr) => {
         const output = {
           stdout: Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout ?? ""),
@@ -88,7 +119,9 @@ function defaultWslCommandRunner(args: readonly string[]): Promise<WslCommandOut
         };
         if (error) {
           const detail = decodeCommandOutput(output.stderr).trim();
-          reject(new Error(detail ? `${error.message}: ${detail}` : error.message, { cause: error }));
+          reject(
+            new Error(detail ? `${error.message}: ${detail}` : error.message, { cause: error })
+          );
           return;
         }
         resolve(output);
@@ -148,8 +181,7 @@ export async function listWslDistributions(
     return {
       available: true,
       distributions: [...new Set(distributions)],
-      unavailableReason:
-        distributions.length === 0 ? "No WSL distributions are installed." : null
+      unavailableReason: distributions.length === 0 ? "No WSL distributions are installed." : null
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -317,9 +349,7 @@ async function terminateWslProcessGroup(options: {
 
 function decorateWslProcessTree(options: {
   tree: ManagedProcessTree;
-  distribution: string;
-  pidFile: string;
-  run: WslCommandRunner;
+  cleanupExitedProcessTree: () => Promise<void>;
 }): ManagedProcessTree {
   let termination: Promise<ProcessTerminationResult> | undefined;
   return {
@@ -328,7 +358,7 @@ function decorateWslProcessTree(options: {
     isAlive: () => options.tree.isAlive(),
     terminate(reason) {
       termination ??= (async () => {
-        const cleanup = terminateWslProcessGroup(options);
+        const cleanup = options.cleanupExitedProcessTree();
         const nativeTermination = options.tree.terminate(reason);
         const [cleanupResult, nativeResult] = await Promise.allSettled([
           cleanup,
@@ -381,6 +411,11 @@ export async function prepareWslProcessInvocation(options: {
   const token = validateToken(options.token ?? randomUUID());
   const pidFile = `/tmp/planweave-${token}.pid`;
   const run = commandRunner(executionOptions);
+  let cleanup: Promise<void> | undefined;
+  const cleanupExitedProcessTree = (): Promise<void> => {
+    cleanup ??= terminateWslProcessGroup({ distribution, pidFile, run });
+    return cleanup;
+  };
   return {
     command: "wsl.exe",
     args: [
@@ -400,10 +435,11 @@ export async function prepareWslProcessInvocation(options: {
       options.command,
       ...args
     ],
+    spawnEnvironment: wslLauncherEnvironment(options.env),
     sessionCwd,
     pidFile,
-    decorateProcessTree: (tree) =>
-      decorateWslProcessTree({ tree, distribution, pidFile, run })
+    cleanupExitedProcessTree,
+    decorateProcessTree: (tree) => decorateWslProcessTree({ tree, cleanupExitedProcessTree })
   };
 }
 
@@ -423,6 +459,11 @@ export async function prepareExecutionHostInvocation(options: {
       command: options.command,
       args: [...options.args],
       spawnCwd: options.cwd,
+      spawnEnvironment: Object.fromEntries(
+        Object.entries(options.env ?? process.env).filter(
+          (entry): entry is [string, string] => entry[1] !== undefined
+        )
+      ),
       sessionCwd: options.cwd,
       executionHost: options.host,
       decorateProcessTree: (tree) => tree
@@ -436,8 +477,10 @@ export async function prepareExecutionHostInvocation(options: {
     command: prepared.command,
     args: prepared.args,
     spawnCwd: undefined,
+    spawnEnvironment: prepared.spawnEnvironment,
     sessionCwd: prepared.sessionCwd,
     executionHost: options.host,
+    cleanupExitedProcessTree: prepared.cleanupExitedProcessTree,
     decorateProcessTree: prepared.decorateProcessTree
   };
 }

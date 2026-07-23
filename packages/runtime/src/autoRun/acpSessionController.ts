@@ -678,12 +678,15 @@ export class AcpSessionController {
         cwd: preparedLaunch.sessionCwd,
         spawnCwd: preparedLaunch.spawnCwd ?? null,
         decorateProcessTree: preparedLaunch.decorateProcessTree,
+        ...(preparedLaunch.cleanupExitedProcessTree
+          ? { cleanupExitedProcessTree: preparedLaunch.cleanupExitedProcessTree }
+          : {}),
         availableEnvironmentVariables: availableExecutionHostEnvironmentVariables(
           executionHost,
           spawnEnvironment
         ),
         agentId: run.agentId,
-        env: spawnEnvironment,
+        env: preparedLaunch.spawnEnvironment,
         prompt: agentPrompt,
         sessionStart,
         authenticationHints: run.authenticationHints,

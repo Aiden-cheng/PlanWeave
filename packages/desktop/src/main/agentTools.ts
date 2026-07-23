@@ -8,6 +8,7 @@ import {
   listWslDistributions,
   readWslLoginPath,
   resolveWindowsProcessInvocation,
+  wslLauncherEnvironment,
   type DesktopAgentDetection,
   type DesktopAgentToolProfile,
   type DesktopWslEnvironment,
@@ -240,7 +241,7 @@ async function runWslAgentProbe(
           ...profile.versionArgs
         ];
   return execFileText("wsl.exe", probeArgs, {
-    env: agentDetectionEnv({ platform: "win32" }),
+    env: wslLauncherEnvironment(agentDetectionEnv({ platform: "win32" })),
     timeout:
       profile.runnerKind === "acp" ? agentAcpDetectionTimeoutMs : agentVersionDetectionTimeoutMs,
     maxBuffer: 64 * 1024,
@@ -276,8 +277,7 @@ async function detectAgent(
       const { stdout, stderr } = await runWslAgentProbe(
         {
           ...profile,
-          versionArgs:
-            profile.versionArgs.length === 0 ? [] : profile.versionArgs
+          versionArgs: profile.versionArgs.length === 0 ? [] : profile.versionArgs
         },
         executionHost,
         wslLoginPath

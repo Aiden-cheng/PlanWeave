@@ -34,7 +34,8 @@ export {
   mapWindowsPathToWsl,
   prepareExecutionHostInvocation,
   prepareWslProcessInvocation,
-  readWslLoginPath
+  readWslLoginPath,
+  wslLauncherEnvironment
 } from "./process/wslExecutionHost.js";
 export type {
   PreparedExecutionHostInvocation,

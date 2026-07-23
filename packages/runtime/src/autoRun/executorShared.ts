@@ -449,7 +449,7 @@ export async function execWithStdin(options: {
       command: prepared.command,
       args: prepared.args,
       cwd: prepared.spawnCwd,
-      env,
+      env: prepared.spawnEnvironment,
       graceMs: EXECUTOR_FORCE_KILL_GRACE_MS
     });
     const child = managed.child;
@@ -704,7 +704,7 @@ export async function execWithStreaming(options: {
       command: prepared.command,
       args: prepared.args,
       cwd: prepared.spawnCwd,
-      env,
+      env: prepared.spawnEnvironment,
       graceMs: EXECUTOR_FORCE_KILL_GRACE_MS
     });
     const child = managed.child;

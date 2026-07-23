@@ -38,6 +38,7 @@ export type AcpConversationTurnConnectionOptions = Pick<
   | "spawnCwd"
   | "env"
   | "decorateProcessTree"
+  | "cleanupExitedProcessTree"
   | "clientInfo"
   | "onSessionUpdate"
   | "onPermissionRequest"
@@ -139,8 +140,11 @@ export class AcpConversationTurnCoordinator {
       },
       cwd: input.cwd,
       spawnCwd: preparedLaunch.spawnCwd ?? null,
-      env: spawnEnvironment,
+      env: preparedLaunch.spawnEnvironment,
       decorateProcessTree: preparedLaunch.decorateProcessTree,
+      ...(preparedLaunch.cleanupExitedProcessTree
+        ? { cleanupExitedProcessTree: preparedLaunch.cleanupExitedProcessTree }
+        : {}),
       clientInfo: { name: "planweave", version: "1" },
       onSessionUpdate: async (notification: SessionNotification) => {
         if (!persistNotifications || notification.sessionId !== input.sessionId) return;

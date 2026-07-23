@@ -3,12 +3,10 @@ import {
   availableExecutionHostEnvironmentVariables,
   listWslDistributions,
   mapWindowsPathToWsl,
+  prepareExecutionHostInvocation,
   prepareWslProcessInvocation
 } from "../process/wslExecutionHost.js";
-import {
-  executorProfileExecutionHost,
-  executorProfileSchema
-} from "../types/executor.js";
+import { executorProfileExecutionHost, executorProfileSchema } from "../types/executor.js";
 
 describe("WSL execution host", () => {
   it("does not treat native credentials as available inside WSL", () => {
@@ -23,6 +21,46 @@ describe("WSL execution host", () => {
         environment
       )
     ]).toEqual(["PATH", "PLANWEAVE_HOME"]);
+  });
+
+  it("does not expose Windows credentials or WSLENV to a WSL launcher", async () => {
+    const run = vi.fn(async (args: readonly string[]) => {
+      if (args.includes("wslpath")) {
+        return { stdout: Buffer.from("/mnt/c/work\n"), stderr: Buffer.alloc(0) };
+      }
+      return {
+        stdout: Buffer.from(
+          "__PLANWEAVE_PATH_BEGIN__/home/dev/.local/bin:/usr/bin__PLANWEAVE_PATH_END__\n"
+        ),
+        stderr: Buffer.alloc(0)
+      };
+    });
+
+    const prepared = await prepareExecutionHostInvocation({
+      host: { kind: "wsl", distribution: "Ubuntu" },
+      command: "grok",
+      args: [],
+      cwd: "C:\\work",
+      env: {
+        Path: "C:\\Windows\\System32",
+        PATHEXT: ".EXE;.CMD",
+        SystemRoot: "C:\\Windows",
+        TEMP: "C:\\Temp",
+        WSLENV: "XAI_API_KEY/u:PLANWEAVE_SENTINEL/u",
+        XAI_API_KEY: "xai-secret-sentinel",
+        PLANWEAVE_SENTINEL: "must-not-cross-host"
+      },
+      platform: "win32",
+      run,
+      token: "sanitized-environment"
+    });
+
+    expect(prepared.spawnEnvironment).toEqual({
+      Path: "C:\\Windows\\System32",
+      PATHEXT: ".EXE;.CMD",
+      SystemRoot: "C:\\Windows",
+      TEMP: "C:\\Temp"
+    });
   });
 
   it("keeps old agent profiles native and requires an explicit WSL distribution", () => {
@@ -68,9 +106,11 @@ describe("WSL execution host", () => {
   });
 
   it("reports WSL absence explicitly", async () => {
-    const run = vi.fn().mockRejectedValue(Object.assign(new Error("spawn wsl.exe ENOENT"), {
-      code: "ENOENT"
-    }));
+    const run = vi.fn().mockRejectedValue(
+      Object.assign(new Error("spawn wsl.exe ENOENT"), {
+        code: "ENOENT"
+      })
+    );
 
     await expect(listWslDistributions({ platform: "win32", run })).resolves.toEqual({
       available: false,
@@ -128,7 +168,9 @@ describe("WSL execution host", () => {
         }
       }
       return {
-        stdout: Buffer.from("shell noise\n__PLANWEAVE_PATH_BEGIN__/home/dev/.local/bin:/usr/bin__PLANWEAVE_PATH_END__\n"),
+        stdout: Buffer.from(
+          "shell noise\n__PLANWEAVE_PATH_BEGIN__/home/dev/.local/bin:/usr/bin__PLANWEAVE_PATH_END__\n"
+        ),
         stderr: Buffer.alloc(0)
       };
     });
@@ -169,7 +211,7 @@ describe("WSL execution host", () => {
     expect(prepared.args).not.toContain("XAI_API_KEY=must-not-cross-host");
   });
 
-  it("terminates both the WSL process group and the native wsl.exe tree exactly once", async () => {
+  it("shares one WSL cleanup across an exited launcher and decorated tree termination", async () => {
     const run = vi.fn(async (args: readonly string[]) => {
       if (args.includes("wslpath")) {
         return { stdout: Buffer.from("/mnt/c/work\n"), stderr: Buffer.alloc(0) };
@@ -204,14 +246,18 @@ describe("WSL execution host", () => {
       terminate: nativeTerminate
     });
 
+    const cleanupAfterExit = prepared.cleanupExitedProcessTree();
     const first = tree.terminate("cancelled");
     const second = tree.terminate("second reason");
+    await expect(cleanupAfterExit).resolves.toBeUndefined();
     await expect(first).resolves.toEqual({ outcome: "graceful", reason: "cancelled" });
     await expect(second).resolves.toEqual({ outcome: "graceful", reason: "cancelled" });
 
     expect(nativeTerminate).toHaveBeenCalledTimes(1);
     expect(nativeTerminate).toHaveBeenCalledWith("cancelled");
-    expect(run).toHaveBeenCalledWith([
+    const cleanupCalls = run.mock.calls.filter(([args]) => args.includes("planweave-wsl-cleanup"));
+    expect(cleanupCalls).toHaveLength(1);
+    expect(cleanupCalls[0]?.[0]).toEqual([
       "--distribution",
       "Ubuntu",
       "--exec",

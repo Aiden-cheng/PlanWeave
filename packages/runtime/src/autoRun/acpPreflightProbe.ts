@@ -127,8 +127,11 @@ export const probeInstalledAcpAgent: AcpPreflightProbe = async ({
     launch: { trusted: true, command: prepared.command, args: prepared.args },
     cwd,
     spawnCwd: prepared.spawnCwd ?? null,
-    env,
+    env: prepared.spawnEnvironment,
     decorateProcessTree: prepared.decorateProcessTree,
+    ...(prepared.cleanupExitedProcessTree
+      ? { cleanupExitedProcessTree: prepared.cleanupExitedProcessTree }
+      : {}),
     clientInfo: { name: "PlanWeave", version: "0.1.0" }
   });
   type ProbeResult = Awaited<ReturnType<AcpPreflightProbe>>;

@@ -1,11 +1,68 @@
+import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { createCodexExecAdapter, createOpencodeExecAdapter, runAutoRunStep } from "../index.js";
+import {
+  createCodexExecAdapter,
+  createOpencodeExecAdapter,
+  listWslDistributions,
+  prepareExecutionHostInvocation,
+  runAutoRunStep
+} from "../index.js";
 import { createTestWorkspace } from "./promptTestHelpers.js";
 import { manifestTestBuilder } from "./manifestTestBuilder.js";
 
 describe("executor environment", () => {
+  it.runIf(process.platform === "win32")(
+    "does not import a sentinel Windows credential named by WSLENV",
+    async ({ skip }) => {
+      const distributions = await listWslDistributions({ platform: "win32" });
+      const distribution = distributions.distributions[0];
+      if (!distributions.available || !distribution) {
+        skip(distributions.unavailableReason ?? "No WSL distribution is installed.");
+      }
+
+      const prepared = await prepareExecutionHostInvocation({
+        host: { kind: "wsl", distribution },
+        command: "sh",
+        args: [
+          "-c",
+          'if [ "${PLANWEAVE_WSL_SECRET_SENTINEL+x}" = x ]; then exit 91; fi; printf clean'
+        ],
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          WSLENV: "PLANWEAVE_WSL_SECRET_SENTINEL/u",
+          PLANWEAVE_WSL_SECRET_SENTINEL: "must-not-cross-host"
+        },
+        platform: "win32"
+      });
+
+      await expect(
+        new Promise<string>((resolve, reject) => {
+          execFile(
+            prepared.command,
+            prepared.args,
+            {
+              encoding: "utf8",
+              env: prepared.spawnEnvironment,
+              timeout: 30_000,
+              windowsHide: true
+            },
+            (error, stdout) => {
+              if (error) {
+                reject(error);
+                return;
+              }
+              resolve(String(stdout));
+            }
+          );
+        })
+      ).resolves.toBe("clean");
+    },
+    60_000
+  );
+
   it("runs codex-exec in the project directory with the PlanWeave data home", async () => {
     const manifest = manifestTestBuilder()
       .withExecutor("fake-codex", {

@@ -2,9 +2,17 @@ import type { SessionNotification } from "@agentclientprotocol/sdk";
 import { describe, expect, it, vi } from "vitest";
 import {
   AcpConversationTurnCoordinator,
-  type AcpConversationTurnConnection
+  type AcpConversationTurnConnection,
+  type AcpConversationTurnConnectionOptions
 } from "../autoRun/acpConversationTurn.js";
 import type { NormalizedRunnerEvent } from "../autoRun/normalizedEventContract.js";
+
+const { execFileMock } = vi.hoisted(() => ({ execFileMock: vi.fn() }));
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return { ...actual, execFile: execFileMock };
+});
 
 function sessionUpdate(text: string): SessionNotification {
   return {
@@ -32,9 +40,7 @@ function createHarness(
   const operationOrder: string[] = [];
   let authenticated = false;
   let releasePrompt: (() => void) | null = null;
-  let connectionOptions:
-    | Parameters<ConstructorParameters<typeof AcpConversationTurnCoordinator>[0]>[0]
-    | null = null;
+  let connectionOptions: AcpConversationTurnConnectionOptions | null = null;
   const connection: AcpConversationTurnConnection = {
     initialize: vi.fn(async () => {
       operationOrder.push("initialize");
@@ -105,6 +111,50 @@ function createHarness(
 }
 
 describe("ACP conversation turn", () => {
+  it("provides WSL host cleanup to a custom connection factory", async () => {
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
+    execFileMock.mockImplementation(
+      (
+        _command: string,
+        _args: string[],
+        _options: unknown,
+        callback: (error: Error | null, stdout: Buffer, stderr: Buffer) => void
+      ) => {
+        callback(
+          null,
+          Buffer.from(
+            "__PLANWEAVE_PATH_BEGIN__/home/dev/.local/bin:/usr/bin__PLANWEAVE_PATH_END__\n"
+          ),
+          Buffer.alloc(0)
+        );
+      }
+    );
+    const harness = createHarness();
+
+    try {
+      await harness.coordinator.send({
+        ...harness.input,
+        host: { kind: "wsl", distribution: "Ubuntu" }
+      });
+    } finally {
+      if (platformDescriptor) Object.defineProperty(process, "platform", platformDescriptor);
+      execFileMock.mockReset();
+    }
+
+    const connectionOptions = harness.connect.mock.calls[0]?.[0];
+    expect(connectionOptions?.cleanupExitedProcessTree).toEqual(expect.any(Function));
+  });
+
+  it("does not provide host cleanup to a native custom connection factory", async () => {
+    const harness = createHarness();
+
+    await harness.coordinator.send(harness.input);
+
+    const connectionOptions = harness.connect.mock.calls[0]?.[0];
+    expect(connectionOptions?.cleanupExitedProcessTree).toBeUndefined();
+  });
+
   it("loads the existing session and appends only the new turn", async () => {
     const harness = createHarness();
 
