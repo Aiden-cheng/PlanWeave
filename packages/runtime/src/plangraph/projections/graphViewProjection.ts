@@ -89,7 +89,7 @@ function executorLabel(
     })
   );
   if (blockExecutors.size > 1) {
-    return "Mixed";
+    return "__custom";
   }
   return (
     [...blockExecutors][0] ??

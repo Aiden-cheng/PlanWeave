@@ -265,10 +265,10 @@ export function graphNodes(
         saveState: saveStates[task.taskId] ?? "idle",
         agentEndpoints: applyAgentEndpointRequirements(agentEndpoints, requiredCapabilities),
         agentEndpointFleetCatalogError,
-        selectedAgentEndpointId: selectedAgentEndpointIdForTask(
-          task.taskId,
-          task.executorLabel === "Mixed" ? "manual" : task.executorLabel
-        ),
+        selectedAgentEndpointId:
+          task.executorLabel === "__custom"
+            ? "__custom"
+            : selectedAgentEndpointIdForTask(task.taskId, task.executorLabel),
         labels,
         selectedBlock,
         blockRunRecords,

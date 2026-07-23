@@ -130,6 +130,7 @@ export type DesktopCanvasNodeViewModel = {
 };
 
 export type DesktopCanvasExecutionPolicy = {
+  defaultExecutor: string | null;
   parallelEnabled: boolean;
   maxConcurrent: number;
 };

@@ -58,6 +58,7 @@ function executionPolicyFromManifestInput(raw: unknown): DesktopCanvasExecutionP
     return null;
   }
   return {
+    defaultExecutor: parsed.data.execution.defaultExecutor ?? null,
     parallelEnabled: parsed.data.execution.parallel.enabled,
     maxConcurrent: parsed.data.execution.parallel.maxConcurrent
   };

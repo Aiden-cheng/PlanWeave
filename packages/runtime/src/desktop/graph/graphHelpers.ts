@@ -118,16 +118,6 @@ export function exceptionForBlock(
   return null;
 }
 
-export function executorLabel(task: ManifestTaskNode): string {
-  const blockExecutors = new Set(
-    task.blocks.map((block) => block.executor ?? task.executor ?? null)
-  );
-  if (blockExecutors.size > 1) {
-    return "Mixed";
-  }
-  return [...blockExecutors][0] ?? task.executor ?? "manual";
-}
-
 export function promptPreview(markdown: string): string {
   return markdown.replace(/\s+/g, " ").trim().slice(0, 220);
 }

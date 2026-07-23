@@ -326,6 +326,7 @@ function CanvasMapRoute() {
   const { fileSync, graphWorkspace, shell } = useProjectWorkspace();
   return (
     <CanvasMapView
+      executorOptions={graphWorkspace.graph?.executorOptions ?? []}
       handleOpenBlockInspector={graphWorkspace.handleOpenBlockInspector}
       handleOpenProject={shell.handleOpenProject}
       handleRevealTaskCanvas={shell.handleRevealTaskCanvas}
@@ -333,6 +334,7 @@ function CanvasMapRoute() {
       loadProject={shell.loadProject}
       onAgentPromptCopied={graphWorkspace.onAgentPromptCopied}
       onTaskPanelSelect={graphWorkspace.onTaskPanelSelect}
+      packageExecutorNames={graphWorkspace.graph?.packageExecutorNames ?? []}
       refreshProjectDerivedState={fileSync.refreshProjectDerivedState}
       selectedCanvasId={shell.selectedCanvasId}
       selectedProject={shell.selectedProject}

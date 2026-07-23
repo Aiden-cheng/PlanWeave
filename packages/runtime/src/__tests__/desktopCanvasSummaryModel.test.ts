@@ -21,6 +21,7 @@ afterEach(() => {
 describe("desktop canvas summary model", () => {
   it("does not report shared-resource coordination hints as diagnostics", async () => {
     const manifest = basicManifest();
+    manifest.execution.defaultExecutor = "grok-acp";
     const task = manifest.nodes.find((node) => node.type === "task");
     const block =
       task?.type === "task" ? task.blocks.find((item) => item.type === "implementation") : null;
@@ -32,6 +33,11 @@ describe("desktop canvas summary model", () => {
 
     const summaries = await listTaskCanvases(root);
     expect(summaries[0]?.diagnostics).toEqual([]);
+    expect(summaries[0]?.executionPolicy).toEqual({
+      defaultExecutor: "grok-acp",
+      parallelEnabled: false,
+      maxConcurrent: 1
+    });
   });
 
   it("marks manifest schema diagnostics as errors", async () => {

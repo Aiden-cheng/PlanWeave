@@ -90,12 +90,12 @@ describe("desktop canvas graph API", () => {
       {
         canvasId: "default",
         packageDir: "canvases/default/package",
-        executionPolicy: { parallelEnabled: false, maxConcurrent: 1 }
+        executionPolicy: { defaultExecutor: null, parallelEnabled: false, maxConcurrent: 1 }
       },
       {
         canvasId: secondCanvas.canvasId,
         packageDir: `canvases/${secondCanvas.canvasId}/package`,
-        executionPolicy: { parallelEnabled: true, maxConcurrent: 3 }
+        executionPolicy: { defaultExecutor: null, parallelEnabled: true, maxConcurrent: 3 }
       }
     ]);
     expect(graph.edges).toEqual([

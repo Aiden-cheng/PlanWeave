@@ -219,6 +219,9 @@ export function TaskWorkspaceOverviewPanel({
               if (endpointId) await onSaveTaskAgentEndpoint(endpointId);
             }}
             selectedEndpointId={selectedAgentEndpointIdForTask}
+            selectedUnknownLabel={
+              selectedAgentEndpointIdForTask === "__custom" ? labels.customExecutor : undefined
+            }
             unavailableLabel={labels.unavailable}
           />
         </header>

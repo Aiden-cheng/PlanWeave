@@ -18,6 +18,7 @@ export function AgentEndpointSelect({
   inheritLabel,
   onValueChange,
   selectedEndpointId,
+  selectedUnknownLabel,
   unavailableLabel,
   triggerClassName
 }: {
@@ -27,6 +28,7 @@ export function AgentEndpointSelect({
   inheritLabel?: string;
   onValueChange: (endpointId: string) => void;
   selectedEndpointId: string;
+  selectedUnknownLabel?: string;
   unavailableLabel: string;
   triggerClassName?: string;
 }) {
@@ -75,7 +77,7 @@ export function AgentEndpointSelect({
           ) : null}
           {!selectedKnown ? (
             <SelectItem disabled value={selectedEndpointId}>
-              {unavailableLabel}
+              {selectedUnknownLabel ?? unavailableLabel}
             </SelectItem>
           ) : null}
           {localEndpoints.map(renderEndpointItem)}

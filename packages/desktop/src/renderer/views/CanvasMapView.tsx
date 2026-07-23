@@ -34,6 +34,7 @@ import type { AppView, CanvasFlowNode } from "../types";
 import { CanvasMapInspector } from "./CanvasMapInspector";
 
 type CanvasMapViewProps = {
+  executorOptions: readonly string[];
   handleOpenProject: () => Promise<void>;
   handleOpenBlockInspector: (ref: string, canvasId?: string | null) => Promise<void>;
   handleRevealTaskCanvas: (project: DesktopProjectSummary, canvasId: string) => Promise<void>;
@@ -45,6 +46,7 @@ type CanvasMapViewProps = {
   loadProject: (project: DesktopProjectSummary, canvasId?: string | null) => Promise<void>;
   onAgentPromptCopied: () => void;
   onTaskPanelSelect: (taskId: string | null) => void;
+  packageExecutorNames: readonly string[];
   refreshProjectDerivedState: () => Promise<void>;
   selectedCanvasId: string | null;
   selectedProject: DesktopProjectSummary | null;
@@ -124,6 +126,7 @@ function ScopeField({ label, value }: { label: string; value: string }) {
 }
 
 export function CanvasMapView({
+  executorOptions,
   handleOpenProject,
   handleOpenBlockInspector,
   handleRevealTaskCanvas,
@@ -131,6 +134,7 @@ export function CanvasMapView({
   loadProject,
   onAgentPromptCopied,
   onTaskPanelSelect,
+  packageExecutorNames,
   refreshProjectDerivedState,
   selectedCanvasId,
   selectedProject,
@@ -527,12 +531,14 @@ export function CanvasMapView({
               />
             ) : null}
             <CanvasMapInspector
+              executorOptions={executorOptions}
               graph={canvasGraph}
               onExecutionPolicySave={saveExecutionPolicy}
               onClose={closeInspector}
               onBlockOpen={openBlock}
               onCanvasOpen={openCanvas}
               onTaskOpen={openTask}
+              packageExecutorNames={packageExecutorNames}
               selectedCanvas={selectedCanvas}
               selectedCanvasId={selectedMapCanvasId}
               selectedEdge={selectedManifestEdge}

@@ -29,7 +29,7 @@ const graph: DesktopCanvasGraphViewModel = {
     {
       canvasId: "default",
       diagnostics: [],
-      executionPolicy: { parallelEnabled: false, maxConcurrent: 1 },
+      executionPolicy: { defaultExecutor: null, parallelEnabled: false, maxConcurrent: 1 },
       packageDir: "canvases/default/package",
       title: "Default"
     }

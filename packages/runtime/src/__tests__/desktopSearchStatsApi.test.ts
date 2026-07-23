@@ -115,7 +115,7 @@ describe("desktop search and statistics API", () => {
     );
 
     const graph = await getGraphViewModel(root);
-    expect(graph.tasks.find((task) => task.taskId === "T-001")?.executorLabel).toBe("Mixed");
+    expect(graph.tasks.find((task) => task.taskId === "T-001")?.executorLabel).toBe("__custom");
   });
 
   it("reports missing results directories through snapshot diagnostics without changing statistics shape", async () => {

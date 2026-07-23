@@ -30,7 +30,7 @@ const warningCanvas = {
   canvasId: "warning-canvas",
   name: "Warning canvas",
   packageDir: "canvases/warning-canvas/package",
-  executionPolicy: { parallelEnabled: true, maxConcurrent: 3 },
+  executionPolicy: { defaultExecutor: null, parallelEnabled: true, maxConcurrent: 3 },
   taskCount: 2,
   missingPromptCount: 0,
   diagnostics: [warningDiagnostic],

@@ -10,18 +10,29 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { buildExecutorOptionViews, executorOptionName } from "../executors/executorOptionViewModel";
 import type { createTranslator } from "../i18n";
 import { CanvasMapBlockedBlocksList, CanvasMapHealthDiagnostics } from "./CanvasMapHealthDetails";
 
 type CanvasMapInspectorProps = {
+  executorOptions: readonly string[];
   graph: DesktopCanvasGraphViewModel;
   onClose: () => void;
   onBlockOpen: (canvasId: string, blockRef: string) => void;
   onCanvasOpen: (canvasId: string) => void;
   onExecutionPolicySave: (canvasId: string, input: DesktopCanvasExecutionPolicy) => Promise<void>;
   onTaskOpen: (canvasId: string, taskId: string) => void;
+  packageExecutorNames: readonly string[];
   selectedCanvas: DesktopCanvasNodeViewModel | null;
   selectedCanvasId: string | null;
   selectedEdge: DesktopCanvasGraphEdgeViewModel | null;
@@ -113,14 +124,21 @@ function parsePositiveIntegerInput(value: string): number | null {
 
 function CanvasExecutionPolicyEditor({
   canvas,
+  executorOptions,
   onSave,
+  packageExecutorNames,
   t
 }: {
   canvas: DesktopCanvasNodeViewModel;
+  executorOptions: readonly string[];
   onSave: (canvasId: string, input: DesktopCanvasExecutionPolicy) => Promise<void>;
+  packageExecutorNames: readonly string[];
   t: ReturnType<typeof createTranslator>;
 }) {
   const policy = canvas.executionPolicy;
+  const [defaultExecutorDraft, setDefaultExecutorDraft] = useState<string | null>(
+    policy?.defaultExecutor ?? null
+  );
   const [parallelEnabled, setParallelEnabled] = useState(policy?.parallelEnabled ?? false);
   const [maxConcurrentDraft, setMaxConcurrentDraft] = useState(
     policy ? String(policy.maxConcurrent) : ""
@@ -129,6 +147,7 @@ function CanvasExecutionPolicyEditor({
 
   useEffect(() => {
     void canvas.canvasId;
+    setDefaultExecutorDraft(policy?.defaultExecutor ?? null);
     setParallelEnabled(policy?.parallelEnabled ?? false);
     setMaxConcurrentDraft(policy ? String(policy.maxConcurrent) : "");
     setSaving(false);
@@ -143,7 +162,9 @@ function CanvasExecutionPolicyEditor({
   const dirty = Boolean(
     policy &&
       parsedMaxConcurrent !== null &&
-      (parallelEnabled !== policy.parallelEnabled || parsedMaxConcurrent !== policy.maxConcurrent)
+      (defaultExecutorDraft !== policy.defaultExecutor ||
+        parallelEnabled !== policy.parallelEnabled ||
+        parsedMaxConcurrent !== policy.maxConcurrent)
   );
   const canSave = Boolean(policy && dirty && !saving && !validationMessage);
 
@@ -153,6 +174,7 @@ function CanvasExecutionPolicyEditor({
     }
     setSaving(true);
     await onSave(canvas.canvasId, {
+      defaultExecutor: defaultExecutorDraft,
       parallelEnabled,
       maxConcurrent: parsedMaxConcurrent
     });
@@ -166,6 +188,45 @@ function CanvasExecutionPolicyEditor({
       </div>
       {policy ? (
         <>
+          <div className="flex min-w-0 flex-col gap-1">
+            <span className="text-xs text-muted-foreground">{t("defaultExecutor")}</span>
+            <Select
+              disabled={saving}
+              onValueChange={(value) =>
+                setDefaultExecutorDraft(value === "__default" ? null : value)
+              }
+              value={
+                defaultExecutorDraft === null
+                  ? "__default"
+                  : executorOptionName(defaultExecutorDraft, packageExecutorNames)
+              }
+            >
+              <SelectTrigger aria-label={t("defaultExecutor")} className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="__default">{t("canvasDefaultExecutorFallback")}</SelectItem>
+                  {buildExecutorOptionViews({
+                    currentExecutorNames: defaultExecutorDraft ? [defaultExecutorDraft] : [],
+                    executorOptions,
+                    literalExecutorNames: packageExecutorNames
+                  }).map((executor) => (
+                    <SelectItem key={executor.name} value={executor.name}>
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span>{executor.label}</span>
+                        {executor.custom ? (
+                          <span className="text-xs text-muted-foreground">
+                            {t("customExecutor")}
+                          </span>
+                        ) : null}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
           <div className="flex min-w-0 items-center justify-between gap-3">
             <div className="min-w-0">
               <div className="text-sm font-medium">{t("parallelExecution")}</div>
@@ -216,12 +277,14 @@ function CanvasExecutionPolicyEditor({
 }
 
 export function CanvasMapInspector({
+  executorOptions = [],
   graph,
   onClose,
   onBlockOpen,
   onCanvasOpen,
   onExecutionPolicySave,
   onTaskOpen,
+  packageExecutorNames = [],
   selectedCanvas,
   selectedCanvasId,
   selectedEdge,
@@ -336,7 +399,13 @@ export function CanvasMapInspector({
             {selectedCanvas.packageDir}
           </div>
         </div>
-        <CanvasExecutionPolicyEditor canvas={selectedCanvas} onSave={onExecutionPolicySave} t={t} />
+        <CanvasExecutionPolicyEditor
+          canvas={selectedCanvas}
+          executorOptions={executorOptions}
+          onSave={onExecutionPolicySave}
+          packageExecutorNames={packageExecutorNames}
+          t={t}
+        />
         <CanvasBadgeList
           ids={upstreamCanvasIds}
           label={t("upstreamCanvases")}

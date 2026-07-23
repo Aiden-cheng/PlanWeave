@@ -466,16 +466,66 @@ describe("Task Workspace shell", () => {
     );
   });
 
-  it("shows manual for a Task without an explicit executor and does not expose canvas inheritance", () => {
-    render(<TaskWorkspaceRoute controller={controller()} labels={labels} />);
+  it("shows the inherited effective executor for a Task without overrides", () => {
+    const fixture = taskWorkspaceInspectorFixture();
+    const block = {
+      ...fixture.selectedRun.block,
+      executor: null,
+      effectiveExecutor: "codex",
+      runs: []
+    };
+    render(
+      <TaskWorkspaceRoute
+        controller={controller({
+          selectedAgentEndpointIdForTask: "local:codex",
+          workspace: {
+            ...fixture.workspace,
+            task: { ...fixture.workspace.task, executor: null },
+            blocks: [block],
+            activeRecordIds: [],
+            selectedRecordId: null
+          }
+        })}
+        labels={labels}
+      />
+    );
 
     const taskExecutor = screen.getByLabelText("Task executor");
-    expect(taskExecutor).toHaveTextContent("Manual");
-    fireEvent.click(taskExecutor);
-    expect(screen.getByRole("option", { name: "Manual" })).toBeInTheDocument();
-    expect(
-      screen.queryByRole("option", { name: /inherit canvas default/i })
-    ).not.toBeInTheDocument();
+    expect(taskExecutor).toHaveTextContent("Codex");
+  });
+
+  it("uses the same Custom aggregate label as the outer Task card", () => {
+    const fixture = taskWorkspaceInspectorFixture();
+    const implementation = {
+      ...fixture.selectedRun.block,
+      executor: null,
+      effectiveExecutor: "codex",
+      runs: []
+    };
+    const review = {
+      ...implementation,
+      ref: "T-001#R-001",
+      blockId: "R-001",
+      executor: "claude-code",
+      effectiveExecutor: "claude-code"
+    };
+    render(
+      <TaskWorkspaceRoute
+        controller={controller({
+          selectedAgentEndpointIdForTask: "__custom",
+          workspace: {
+            ...fixture.workspace,
+            task: { ...fixture.workspace.task, executor: null },
+            blocks: [implementation, review],
+            activeRecordIds: [],
+            selectedRecordId: null
+          }
+        })}
+        labels={labels}
+      />
+    );
+
+    expect(screen.getByLabelText("Task executor")).toHaveTextContent("Custom");
   });
 
   it("edits Task and Block executors from the overview while preserving current custom values", async () => {

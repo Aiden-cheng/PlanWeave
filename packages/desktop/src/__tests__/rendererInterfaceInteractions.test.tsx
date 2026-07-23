@@ -86,7 +86,7 @@ const project: DesktopProjectSummary = {
       canvasId: "canvas-main",
       name: "Main canvas",
       packageDir: "canvases/main/package",
-      executionPolicy: { parallelEnabled: false, maxConcurrent: 1 },
+      executionPolicy: { defaultExecutor: null, parallelEnabled: false, maxConcurrent: 1 },
       taskCount: 2,
       missingPromptCount: 0,
       createdAt: "2026-05-23T00:00:00.000Z",
@@ -614,7 +614,7 @@ describe("desktop renderer interface interactions", () => {
           canvasId: "canvas-main",
           title: "Main canvas",
           packageDir: "canvases/main/package",
-          executionPolicy: { parallelEnabled: false, maxConcurrent: 1 },
+          executionPolicy: { defaultExecutor: null, parallelEnabled: false, maxConcurrent: 1 },
           diagnostics: []
         }
       ],
@@ -662,7 +662,7 @@ describe("desktop renderer interface interactions", () => {
           canvasId: "canvas-main",
           title: "Main canvas",
           packageDir: "canvases/main/package",
-          executionPolicy: { parallelEnabled: false, maxConcurrent: 1 },
+          executionPolicy: { defaultExecutor: null, parallelEnabled: false, maxConcurrent: 1 },
           diagnostics: []
         }
       ],
@@ -705,6 +705,7 @@ describe("desktop renderer interface interactions", () => {
 
     await waitFor(() =>
       expect(onExecutionPolicySave).toHaveBeenCalledWith("canvas-main", {
+        defaultExecutor: null,
         parallelEnabled: true,
         maxConcurrent: 4
       })
@@ -721,7 +722,7 @@ describe("desktop renderer interface interactions", () => {
           canvasId: "canvas-main",
           title: "Main canvas",
           packageDir: "canvases/main/package",
-          executionPolicy: { parallelEnabled: true, maxConcurrent: 2 },
+          executionPolicy: { defaultExecutor: null, parallelEnabled: true, maxConcurrent: 2 },
           diagnostics: []
         }
       ],
@@ -771,7 +772,7 @@ describe("desktop renderer interface interactions", () => {
           canvasId: "canvas-main",
           title: "Main canvas",
           packageDir: "canvases/main/package",
-          executionPolicy: { parallelEnabled: false, maxConcurrent: 1 },
+          executionPolicy: { defaultExecutor: null, parallelEnabled: false, maxConcurrent: 1 },
           diagnostics: []
         }
       ],
@@ -830,14 +831,14 @@ describe("desktop renderer interface interactions", () => {
           canvasId: "canvas-main",
           title: "Main canvas",
           packageDir: "canvases/main/package",
-          executionPolicy: { parallelEnabled: true, maxConcurrent: 3 },
+          executionPolicy: { defaultExecutor: null, parallelEnabled: true, maxConcurrent: 3 },
           diagnostics: []
         },
         {
           canvasId: "canvas-upstream",
           title: "Upstream canvas",
           packageDir: "canvases/upstream/package",
-          executionPolicy: { parallelEnabled: false, maxConcurrent: 1 },
+          executionPolicy: { defaultExecutor: null, parallelEnabled: false, maxConcurrent: 1 },
           diagnostics: []
         }
       ],

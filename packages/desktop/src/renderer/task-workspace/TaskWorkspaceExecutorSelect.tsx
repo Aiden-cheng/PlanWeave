@@ -17,6 +17,7 @@ export function TaskWorkspaceExecutorSelect({
   labels,
   onSave,
   selectedEndpointId,
+  selectedUnknownLabel,
   unavailableLabel
 }: {
   className?: string;
@@ -27,6 +28,7 @@ export function TaskWorkspaceExecutorSelect({
   labels: { saved: string; saving: string };
   onSave: (endpointId: string | null) => Promise<void>;
   selectedEndpointId: string | null;
+  selectedUnknownLabel?: string;
   unavailableLabel: string;
 }) {
   const [error, setError] = useState<string | null>(null);
@@ -69,6 +71,7 @@ export function TaskWorkspaceExecutorSelect({
         inheritLabel={inheritLabel}
         onValueChange={(value) => void save(value)}
         selectedEndpointId={displayedValue}
+        selectedUnknownLabel={selectedUnknownLabel}
         triggerClassName={cn("w-full", compact && "h-8 text-xs")}
         unavailableLabel={unavailableLabel}
       />

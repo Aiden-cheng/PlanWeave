@@ -1050,15 +1050,27 @@ export function useTaskWorkspaceController(options: {
         scope: { kind: "task", taskId: navigation.taskId }
       })
     : null;
-  const selectedAgentEndpointIdForTask = agentEndpointSelectionId(
-    selectedAgentEndpointId({
-      executorName: workspace?.task.executor ?? "manual",
-      preference: taskEndpointPreferenceKey
-        ? agentEndpointPreferences[taskEndpointPreferenceKey]
-        : undefined,
-      endpoints: agentEndpointsForTask
-    })
+  const effectiveTaskExecutors = new Set(
+    workspace?.blocks
+      .map((block) => block.effectiveExecutor)
+      .filter((executor): executor is string => executor !== null) ?? []
   );
+  const effectiveTaskExecutor =
+    effectiveTaskExecutors.size > 1
+      ? "__custom"
+      : ([...effectiveTaskExecutors][0] ?? workspace?.task.executor ?? "manual");
+  const selectedAgentEndpointIdForTask =
+    effectiveTaskExecutor === "__custom"
+      ? effectiveTaskExecutor
+      : agentEndpointSelectionId(
+          selectedAgentEndpointId({
+            executorName: effectiveTaskExecutor,
+            preference: taskEndpointPreferenceKey
+              ? agentEndpointPreferences[taskEndpointPreferenceKey]
+              : undefined,
+            endpoints: agentEndpointsForTask
+          })
+        );
   const selectedAgentEndpointIdForBlock = useCallback(
     (blockRef: string): string | null => {
       const block = workspace?.blocks.find((candidate) => candidate.ref === blockRef);

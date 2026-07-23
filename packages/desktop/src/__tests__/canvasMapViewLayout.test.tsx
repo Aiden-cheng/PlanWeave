@@ -6,6 +6,7 @@ import type { DesktopCanvasGraphViewModel, DesktopProjectSummary } from "@planwe
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTranslator } from "../renderer/i18n";
 import { CanvasMapView } from "../renderer/views/CanvasMapView";
+import { stubSelectLayoutApis } from "./helpers/rendererTestEnvironment";
 
 const useCanvasMapMock = vi.hoisted(() => vi.fn());
 const bridgeMock = vi.hoisted(() => ({
@@ -63,7 +64,7 @@ const canvasGraph: DesktopCanvasGraphViewModel = {
     {
       canvasId: "default",
       diagnostics: [],
-      executionPolicy: { parallelEnabled: false, maxConcurrent: 1 },
+      executionPolicy: { defaultExecutor: "manual", parallelEnabled: false, maxConcurrent: 1 },
       packageDir: "canvases/default/package",
       title: "Ecco the Dolphin opencode"
     }
@@ -85,6 +86,7 @@ const canvasGraph: DesktopCanvasGraphViewModel = {
 function renderCanvasMapView(patch: Partial<Parameters<typeof CanvasMapView>[0]> = {}) {
   render(
     <CanvasMapView
+      executorOptions={["manual", "codex-acp", "grok-acp"]}
       handleOpenBlockInspector={vi.fn().mockResolvedValue(undefined)}
       handleOpenProject={vi.fn().mockResolvedValue(undefined)}
       handleRevealTaskCanvas={vi.fn().mockResolvedValue(undefined)}
@@ -92,6 +94,7 @@ function renderCanvasMapView(patch: Partial<Parameters<typeof CanvasMapView>[0]>
       loadProject={vi.fn().mockResolvedValue(undefined)}
       onAgentPromptCopied={vi.fn()}
       onTaskPanelSelect={vi.fn()}
+      packageExecutorNames={[]}
       refreshProjectDerivedState={vi.fn().mockResolvedValue(undefined)}
       selectedCanvasId="default"
       selectedProject={project}
@@ -104,6 +107,7 @@ function renderCanvasMapView(patch: Partial<Parameters<typeof CanvasMapView>[0]>
 }
 
 beforeEach(() => {
+  stubSelectLayoutApis();
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: {
@@ -225,6 +229,8 @@ describe("CanvasMapView agent scope layout", () => {
 
     renderCanvasMapView({ refreshProjectDerivedState });
 
+    fireEvent.click(screen.getByRole("combobox", { name: "Default executor" }));
+    fireEvent.click(screen.getByRole("option", { name: "grok" }));
     fireEvent.click(screen.getByRole("switch", { name: "Parallel execution" }));
     fireEvent.change(screen.getByRole("spinbutton", { name: "Max concurrent blocks" }), {
       target: { value: "3" }
@@ -234,7 +240,7 @@ describe("CanvasMapView agent scope layout", () => {
     await waitFor(() =>
       expect(bridgeMock.updateCanvasExecutionPolicy).toHaveBeenCalledWith(
         { projectRoot: longProjectRoot, canvasId: "default" },
-        { parallelEnabled: true, maxConcurrent: 3 }
+        { defaultExecutor: "grok", parallelEnabled: true, maxConcurrent: 3 }
       )
     );
     await waitFor(() => expect(loadCanvasMap).toHaveBeenCalledTimes(1));
@@ -275,6 +281,7 @@ describe("CanvasMapView agent scope layout", () => {
     const firstTranslator = createTranslator("en");
     const { rerender } = render(
       <CanvasMapView
+        executorOptions={["manual", "codex-acp", "grok-acp"]}
         handleOpenBlockInspector={vi.fn().mockResolvedValue(undefined)}
         handleOpenProject={vi.fn().mockResolvedValue(undefined)}
         handleRevealTaskCanvas={vi.fn().mockResolvedValue(undefined)}
@@ -282,6 +289,7 @@ describe("CanvasMapView agent scope layout", () => {
         loadProject={vi.fn().mockResolvedValue(undefined)}
         onAgentPromptCopied={vi.fn()}
         onTaskPanelSelect={vi.fn()}
+        packageExecutorNames={[]}
         refreshProjectDerivedState={vi.fn().mockResolvedValue(undefined)}
         selectedCanvasId="default"
         selectedProject={project}
@@ -298,6 +306,7 @@ describe("CanvasMapView agent scope layout", () => {
     const nextTranslator = (key: Parameters<typeof firstTranslator>[0]) => firstTranslator(key);
     rerender(
       <CanvasMapView
+        executorOptions={["manual", "codex-acp", "grok-acp"]}
         handleOpenBlockInspector={vi.fn().mockResolvedValue(undefined)}
         handleOpenProject={vi.fn().mockResolvedValue(undefined)}
         handleRevealTaskCanvas={vi.fn().mockResolvedValue(undefined)}
@@ -305,6 +314,7 @@ describe("CanvasMapView agent scope layout", () => {
         loadProject={vi.fn().mockResolvedValue(undefined)}
         onAgentPromptCopied={vi.fn()}
         onTaskPanelSelect={vi.fn()}
+        packageExecutorNames={[]}
         refreshProjectDerivedState={vi.fn().mockResolvedValue(undefined)}
         selectedCanvasId="default"
         selectedProject={project}
