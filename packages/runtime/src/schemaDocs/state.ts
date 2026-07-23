@@ -39,7 +39,37 @@ export const stateSchemaDocument: SchemaDocument<"state"> = {
         blockedReason: "string | null, optional",
         divergenceReason: "string | null, optional",
         completionReason: ["passed", "max_cycles_reached", null],
-        passedWorkRevision: "string | null, optional"
+        passedWorkRevision: "string | null, optional",
+        remoteOwnership: {
+          description:
+            "optional; absent for local/manual/CLI/ACP execution; implementation blocks only",
+          preparing: {
+            phase: "preparing",
+            operationId: "bounded portable identifier",
+            sourceRevision: "bounded portable source revision",
+            graphFingerprint: "bounded portable graph fingerprint"
+          },
+          active: {
+            phase: "active",
+            operationId: "same identifier as preparing",
+            sourceRevision: "same revision as preparing",
+            graphFingerprint: "same fingerprint as preparing",
+            dispatchId: "exact distributed dispatch identifier",
+            executionAttemptId: "exact distributed execution-attempt identifier"
+          }
+        },
+        remoteInterruption: {
+          description: "optional; present only on a diverged block with active remote ownership",
+          reason: "bounded distributed interruption reason",
+          resumable: "boolean; whether only the exact attempt may resume"
+        },
+        remoteOperationReceipt: {
+          description:
+            "optional implementation-only terminal idempotency evidence; never an active owner; completed or failed only",
+          completed:
+            "exact operation/source/dispatch/attempt identity plus the authoritative runId",
+          failed: "exact operation/source/dispatch/attempt identity plus normalized public failure"
+        }
       }
     },
     feedback: {
@@ -53,6 +83,10 @@ export const stateSchemaDocument: SchemaDocument<"state"> = {
   },
   notes: [
     "State is derived from manifest plus runtime actions.",
+    "Use status --json, explain, doctor, or Desktop read models for the canonical remoteExecution projection; it exposes only logical operation/source/dispatch-attempt identity, lifecycle phase/status, and Runtime-derived actionRequired.",
+    "Remote ownership is valid only for in_progress or diverged implementation blocks; completed, blocked, and reset state never retain an active owner.",
+    "Terminal remote receipts are immutable idempotency evidence and are cleared by reset, unblock, or later local recovery mutations.",
+    "Remote failure receipts preserve retryability, retain only Runtime-owned public codes/messages, and normalize every unknown wire code to remote_execution_failed with message Remote execution failed.",
     "Manifest edits can make old state refs stale; run validate/status/doctor instead of editing state by hand.",
     "Feedback is runtime state; do not create feedback blocks in the Plan Package manifest."
   ]

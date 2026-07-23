@@ -222,6 +222,47 @@ describe("desktop Task Workspace aggregate API", () => {
     expect(implementation?.runs).toEqual([]);
   });
 
+  it("projects canonical remote execution state into Task Workspace blocks", async () => {
+    const { root, init } = await createTestWorkspace();
+    await writeJsonFile(init.workspace.stateFile, {
+      currentRefs: ["T-001#B-001"],
+      currentFeedbackId: null,
+      currentReviewBlockRef: null,
+      tasks: { "T-001": { status: "in_progress", openFeedbackCount: 0 } },
+      blocks: {
+        "T-001#B-001": {
+          status: "diverged",
+          divergenceReason: "Remote transport was interrupted.",
+          remoteOwnership: {
+            phase: "active",
+            operationId: "operation-001",
+            sourceRevision: "revision-001",
+            graphFingerprint: "fingerprint-001",
+            dispatchId: "dispatch-001",
+            executionAttemptId: "attempt-001"
+          },
+          remoteInterruption: { reason: "transport_lost", resumable: true }
+        }
+      },
+      feedback: {}
+    });
+
+    const workspace = await getTaskWorkspace({
+      projectRoot: root,
+      canvasId: "default",
+      taskId: "T-001"
+    });
+
+    expect(taskWorkspaceSchema.parse(workspace)).toEqual(workspace);
+    expect(workspace.blocks[0]?.remoteExecution).toMatchObject({
+      identity: { operationId: "operation-001" },
+      phase: "active",
+      status: "interrupted",
+      actionRequired: true,
+      dispatchAttempt: { dispatchId: "dispatch-001", executionAttemptId: "attempt-001" }
+    });
+  });
+
   it("creates one read context per workspace request without calling public detail wrappers", async () => {
     const { root, init } = await createTestWorkspace();
     await writeFeedbackRun({

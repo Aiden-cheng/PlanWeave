@@ -7,6 +7,7 @@ import type {
   PackageWorkspaceRef
 } from "../types.js";
 import { buildClaimReadiness } from "./claimReadiness.js";
+import { projectRemoteBlockExecution } from "./remoteExecutionReadModel.js";
 import {
   createProjectGraphClaimGuard,
   type ProjectGraphClaimGuard
@@ -100,7 +101,8 @@ export async function buildExecutionStatus(
         completionReason: blockState.completionReason ?? null,
         lastRunId: blockState.lastRunId ?? null,
         latestReviewAttemptId: blockState.latestReviewAttemptId ?? null,
-        activeFeedbackId: blockState.activeFeedbackId ?? null
+        activeFeedbackId: blockState.activeFeedbackId ?? null,
+        remoteExecution: projectRemoteBlockExecution(blockState)
       };
     }),
     currentRefs: state.currentRefs,

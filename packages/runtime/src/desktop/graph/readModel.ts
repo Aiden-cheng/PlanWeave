@@ -50,6 +50,7 @@ function requireBlockStatusFromExecution(
   latestReviewAttemptId: string | null;
   activeFeedbackId: string | null;
   reason: string | null;
+  remoteExecution: ExecutionStatus["blocks"][number]["remoteExecution"];
 } {
   const blockStatus = status.blocks.find((item) => item.ref === ref);
   if (blockStatus === undefined) {
@@ -355,7 +356,8 @@ export async function buildBlockDetail(
     latestReviewAttemptId: blockStatus.latestReviewAttemptId ?? null,
     activeFeedbackId: blockStatus.activeFeedbackId ?? null,
     exceptionReason: blockStatus.reason ?? null,
-    reviewGate: claimHint?.reviewGate ?? null
+    reviewGate: claimHint?.reviewGate ?? null,
+    remoteExecution: blockStatus.remoteExecution
   };
 }
 

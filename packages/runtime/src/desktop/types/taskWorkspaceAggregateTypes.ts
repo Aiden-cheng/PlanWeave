@@ -13,6 +13,7 @@ import {
   taskStatuses
 } from "../../types/state.js";
 import { promptSourceSummarySchema } from "../../taskManager/promptContracts.js";
+import { remoteBlockExecutionReadModelSchema } from "../../schema/remoteExecutionReadModel.js";
 import {
   taskWorkspaceRunSchema,
   taskWorkspaceUnavailableTokenAccountingSchema
@@ -177,7 +178,8 @@ export const taskWorkspaceBlockSchema = z
     promptSources: z.array(promptSourceSummarySchema),
     dependencies: taskWorkspaceDependencyProgressSchema,
     runs: z.array(taskWorkspaceRunItemSchema),
-    annotations: z.array(taskWorkspaceAnnotationSchema)
+    annotations: z.array(taskWorkspaceAnnotationSchema),
+    remoteExecution: remoteBlockExecutionReadModelSchema.nullable()
   })
   .strict()
   .superRefine((value, context) => {

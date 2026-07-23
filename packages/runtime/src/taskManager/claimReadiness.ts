@@ -321,7 +321,12 @@ function buildClaimOrder(input: {
 
   const current = input.graph.blockRefsInManifestOrder.find((ref) => {
     const block = getBlock(input.graph, ref);
-    return requireBlockState(input.state, ref).status === "in_progress" && block.type !== "review";
+    const blockState = requireBlockState(input.state, ref);
+    return (
+      blockState.status === "in_progress" &&
+      blockState.remoteOwnership === undefined &&
+      block.type !== "review"
+    );
   });
   if (current) {
     const currentBlock = getBlock(input.graph, current);

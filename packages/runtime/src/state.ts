@@ -5,6 +5,7 @@ import { compileTaskGraph } from "./graph/compileTaskGraph.js";
 import { requireMapValue } from "./graph/requireMapValue.js";
 import { readJsonFile, writeJsonFile } from "./json.js";
 import { runtimeStateSchema } from "./schema/runtimeState.js";
+import { assertRemoteBlockOwnershipInvariant } from "./taskManager/remoteOwnershipTransitions.js";
 import type {
   BlockState,
   BlockStatus,
@@ -149,9 +150,28 @@ export function ensureStateForManifest(
 ): RuntimeState {
   const graph = compileTaskGraph(manifest);
   const validBlockRefs = new Set(graph.blockRefsInManifestOrder);
+  const terminalReceiptTypeDriftRefs = new Set<string>();
+
+  for (const [ref, blockState] of Object.entries(state.blocks)) {
+    const block = graph.blocksByRef.get(ref);
+    if (blockState.remoteOperationReceipt && block && block.type !== "implementation") {
+      terminalReceiptTypeDriftRefs.add(ref);
+    }
+    if (!blockState.remoteOwnership) {
+      continue;
+    }
+    if (!block) {
+      throw new Error(
+        `Remote-owned block '${ref}' no longer exists in the manifest. Run \`planweave doctor\` before reconciling state.`
+      );
+    }
+    assertRemoteBlockOwnershipInvariant({ blockType: block.type, blockState });
+  }
 
   // Manifest-drift: drop current refs that no longer exist in the package graph.
-  const currentRefs = state.currentRefs.filter((ref) => validBlockRefs.has(ref));
+  const currentRefs = state.currentRefs.filter(
+    (ref) => validBlockRefs.has(ref) && !terminalReceiptTypeDriftRefs.has(ref)
+  );
 
   // Manifest-drift: keep only feedback whose source review block still exists.
   const feedback: RuntimeState["feedback"] = {};
@@ -188,7 +208,7 @@ export function ensureStateForManifest(
 
   for (const ref of graph.blockRefsInManifestOrder) {
     // Missing key = block newly added to the manifest (seed defaults).
-    const existing = state.blocks[ref];
+    const existing = terminalReceiptTypeDriftRefs.has(ref) ? undefined : state.blocks[ref];
     next.blocks[ref] = existing ?? {
       status: defaultBlockStatus(ref, graph, next),
       lastRunId: null

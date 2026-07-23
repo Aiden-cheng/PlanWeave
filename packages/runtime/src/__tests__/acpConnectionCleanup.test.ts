@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createAcpConnection, type AcpConnection } from "../autoRun/acpConnection.js";
-import { fixture } from "./support/acpRunnerLifecycleFixture.js";
 
 const cleanupWaveCount = 3;
 const concurrentConnectionsPerWave = 4;
@@ -30,7 +29,18 @@ describe("ACP connection process cleanup", () => {
     await Promise.all(connections.splice(0).map((connection) => connection.dispose()));
   });
 
+  it("loads the ACP lifecycle fixture without an executor registry import cycle", async () => {
+    const { mockLaunch } = await import("./support/acpRunnerLifecycleFixture.js");
+
+    expect(mockLaunch("stubborn-pending")).toMatchObject({
+      command: process.execPath,
+      source: { registryId: "codex-acp" }
+    });
+  });
+
   it("reaps repeated waves of concurrent SIGTERM-resistant process trees", async () => {
+    const { fixture } = await import("./support/acpRunnerLifecycleFixture.js");
+
     for (let wave = 0; wave < cleanupWaveCount; wave += 1) {
       const current = Array.from({ length: concurrentConnectionsPerWave }, () => {
         const connection = createAcpConnection({

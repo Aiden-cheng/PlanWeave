@@ -10,6 +10,41 @@ export {
 } from "./promptRenderer.js";
 export type { PromptSourceKind, PromptSourceSummary, PromptSurface } from "./promptContracts.js";
 export { submitBlockResult, submitBlockResultFromBytes } from "./blockSubmission.js";
+export { createRemoteBlockRuntimePort } from "./remoteBlockRuntime.js";
+export type { RemoteBlockRuntimePort } from "./remoteBlockRuntime.js";
+export {
+  remoteBlockActiveIdentitySchema,
+  remoteBlockBindingViewSchema,
+  remoteBlockClaimInputSchema,
+  remoteBlockCompletionInputSchema,
+  remoteBlockCompletionResultSchema,
+  remoteBlockDispatchCandidateSchema,
+  remoteBlockFailureInputSchema,
+  remoteBlockInspectInputSchema,
+  remoteBlockInterruptionInputSchema,
+  remoteBlockMutationResultSchema,
+  remoteBlockOperationQuerySchema,
+  publicRemoteFailureSchema,
+  remoteBlockRefIdentitySchema,
+  remoteBlockRetryDecisionSchema,
+  RemoteBlockRuntimeError
+} from "./remoteBlockRuntimeContracts.js";
+export type {
+  RemoteBlockActiveIdentity,
+  RemoteBlockBindingView,
+  RemoteBlockClaimInput,
+  RemoteBlockCompletionInput,
+  RemoteBlockCompletionResult,
+  RemoteBlockDispatchCandidate,
+  RemoteBlockFailureInput,
+  RemoteBlockInspectInput,
+  RemoteBlockInterruptionInput,
+  RemoteBlockMutationResult,
+  RemoteBlockOperationQuery,
+  RemoteBlockRefIdentity,
+  RemoteBlockRetryDecision,
+  RemoteBlockRuntimeErrorCode
+} from "./remoteBlockRuntimeContracts.js";
 export { submitReviewResult } from "./reviewSubmission.js";
 export { submitFeedback } from "./feedbackSubmission.js";
 export {
@@ -21,6 +56,7 @@ export {
 } from "./blockStatusMutations.js";
 export { resetMaxCycleReviewsForRetry, retryReview } from "./reviewRetry.js";
 export { getExecutionStatus } from "./executionStatus.js";
+export { projectRemoteBlockExecution } from "./remoteExecutionReadModel.js";
 export {
   commandFingerprint,
   isCommandTrusted,

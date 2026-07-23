@@ -204,7 +204,8 @@ describe("Task Workspace run projection", () => {
               run
             }
           ],
-          annotations: []
+          annotations: [],
+          remoteExecution: null
         }
       ],
       activeRecordIds: ["T-001#B-001::RUN-001"],

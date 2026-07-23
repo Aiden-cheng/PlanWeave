@@ -1,0 +1,356 @@
+import { dirname } from "node:path";
+import { withCanvasLock } from "../fs/withCanvasLock.js";
+import { loadPackage } from "../package/loadPackage.js";
+import { writeState } from "../state.js";
+import type { PackageWorkspaceRef } from "../types.js";
+import { submitRemoteBlockResult } from "./blockSubmission.js";
+import {
+  assertRemoteBlockDispatchable,
+  assertRemoteBlockImplementation,
+  inspectRemoteBlockCandidate
+} from "./remoteBlockInspection.js";
+import {
+  activateRemoteBlockOwnership,
+  assertActiveRemoteBlockOwnership,
+  failRemoteBlockOwnership,
+  interruptRemoteBlockOwnership,
+  markRemoteBlockOwnershipSourceDrift,
+  matchesRemoteOperationReceipt,
+  prepareRemoteBlockOwnership,
+  RemoteOwnershipConflictError,
+  type ActiveRemoteOperationIdentity
+} from "./remoteOwnershipTransitions.js";
+import {
+  remoteBlockActiveIdentitySchema,
+  remoteBlockBindingViewSchema,
+  remoteBlockClaimInputSchema,
+  remoteBlockCompletionResultSchema,
+  remoteBlockFailureInputSchema,
+  remoteBlockInspectInputSchema,
+  remoteBlockInterruptionInputSchema,
+  remoteBlockMutationResultSchema,
+  remoteBlockOperationQuerySchema,
+  remoteBlockRefIdentitySchema,
+  RemoteBlockRuntimeError,
+  type RemoteBlockBindingView,
+  type RemoteBlockClaimInput,
+  type RemoteBlockCompletionInput,
+  type RemoteBlockCompletionResult,
+  type RemoteBlockDispatchCandidate,
+  type RemoteBlockFailureInput,
+  type RemoteBlockInterruptionInput,
+  type RemoteBlockInspectInput,
+  type RemoteBlockMutationResult,
+  type RemoteBlockOperationQuery,
+  type RemoteBlockRefIdentity
+} from "./remoteBlockRuntimeContracts.js";
+import { remoteBlockSourceEvidence, sameRemoteBlockSource } from "./remoteBlockSource.js";
+import {
+  loadRuntime,
+  loadRuntimeReadonly,
+  refreshDerivedState,
+  type RuntimeContext
+} from "./runtimeContext.js";
+
+function withCurrentRef(currentRefs: string[], ref: string): string[] {
+  return currentRefs.includes(ref) ? currentRefs : [...currentRefs, ref];
+}
+
+function bindingView(context: RuntimeContext, ref: string): RemoteBlockBindingView {
+  const state = context.state.blocks[ref];
+  if (!state) {
+    throw new RemoteBlockRuntimeError("remote_block_not_found", `Block '${ref}' does not exist.`);
+  }
+  return remoteBlockBindingViewSchema.parse({
+    ref,
+    status: state.status,
+    ...(state.remoteOwnership ? { ownership: state.remoteOwnership } : {}),
+    ...(state.remoteInterruption ? { interruption: state.remoteInterruption } : {}),
+    ...(state.remoteOperationReceipt ? { terminalReceipt: state.remoteOperationReceipt } : {}),
+    ...(state.blockedReason !== undefined ? { blockedReason: state.blockedReason } : {}),
+    ...(state.divergenceReason !== undefined ? { divergenceReason: state.divergenceReason } : {})
+  });
+}
+
+function assertOperationMatchesView(view: RemoteBlockBindingView, operationId: string): void {
+  const recordedOperationId = view.ownership?.operationId ?? view.terminalReceipt?.operationId;
+  if (!recordedOperationId) {
+    throw new RemoteOwnershipConflictError(
+      "remote_ownership_not_active",
+      `Block '${view.ref}' has no remote operation binding.`
+    );
+  }
+  if (recordedOperationId !== operationId) {
+    throw new RemoteOwnershipConflictError(
+      "remote_ownership_operation_conflict",
+      `Remote operation '${operationId}' conflicts with owner '${recordedOperationId}'.`
+    );
+  }
+}
+
+async function writeLockedState(context: RuntimeContext): Promise<void> {
+  await writeState(
+    context.workspace.stateFile,
+    refreshDerivedState(context.manifest, context.state)
+  );
+}
+
+function identityFromInput(input: {
+  operationId: string;
+  sourceRevision: string;
+  graphFingerprint: string;
+  dispatchId: string;
+  executionAttemptId: string;
+}): ActiveRemoteOperationIdentity {
+  return remoteBlockActiveIdentitySchema.parse({
+    operationId: input.operationId,
+    sourceRevision: input.sourceRevision,
+    graphFingerprint: input.graphFingerprint,
+    dispatchId: input.dispatchId,
+    executionAttemptId: input.executionAttemptId
+  });
+}
+
+export interface RemoteBlockRuntimePort {
+  inspect(input: RemoteBlockInspectInput): Promise<RemoteBlockDispatchCandidate>;
+  claim(input: RemoteBlockClaimInput): Promise<RemoteBlockBindingView>;
+  activate(input: RemoteBlockRefIdentity): Promise<RemoteBlockBindingView>;
+  query(input: RemoteBlockOperationQuery): Promise<RemoteBlockBindingView>;
+  reconcile(input: RemoteBlockOperationQuery): Promise<RemoteBlockBindingView>;
+  markInterrupted(input: RemoteBlockInterruptionInput): Promise<RemoteBlockMutationResult>;
+  complete(input: RemoteBlockCompletionInput): Promise<RemoteBlockCompletionResult>;
+  fail(input: RemoteBlockFailureInput): Promise<RemoteBlockMutationResult>;
+}
+
+export function createRemoteBlockRuntimePort(options: {
+  projectRoot: PackageWorkspaceRef;
+}): RemoteBlockRuntimePort {
+  const projectRoot = options.projectRoot;
+
+  async function withLock<T>(operation: (context: RuntimeContext) => Promise<T>): Promise<T> {
+    const { workspace } = await loadPackage(projectRoot);
+    return withCanvasLock(dirname(workspace.stateFile), async () =>
+      operation(await loadRuntime({ projectRoot }))
+    );
+  }
+
+  return {
+    inspect: async (rawInput) => {
+      const { ref } = remoteBlockInspectInputSchema.parse(rawInput);
+      return inspectRemoteBlockCandidate(projectRoot, ref);
+    },
+
+    claim: async (rawInput) => {
+      const input = remoteBlockClaimInputSchema.parse(rawInput);
+      return withLock(async (context) => {
+        assertRemoteBlockImplementation(context, input.ref);
+        const current = context.state.blocks[input.ref];
+        const prepared = prepareRemoteBlockOwnership({
+          blockType: "implementation",
+          blockState: current,
+          ownership: {
+            operationId: input.operationId,
+            sourceRevision: input.sourceRevision,
+            graphFingerprint: input.graphFingerprint
+          }
+        });
+        if (current.remoteOwnership) {
+          const source = await remoteBlockSourceEvidence(context, input.ref);
+          if (!sameRemoteBlockSource(source, input)) {
+            context.state.blocks[input.ref] = markRemoteBlockOwnershipSourceDrift({
+              blockType: "implementation",
+              blockState: current,
+              ...source,
+              reason: `Remote source changed after operation '${input.operationId}' was prepared.`
+            });
+            await writeLockedState(context);
+            throw new RemoteBlockRuntimeError(
+              "remote_block_source_changed",
+              `Remote source changed after operation '${input.operationId}' was prepared.`
+            );
+          }
+        } else {
+          await assertRemoteBlockDispatchable(context, input.ref);
+          const source = await remoteBlockSourceEvidence(context, input.ref);
+          if (!sameRemoteBlockSource(source, input)) {
+            throw new RemoteBlockRuntimeError(
+              "remote_block_source_changed",
+              `Inspected source for '${input.ref}' is no longer current.`
+            );
+          }
+        }
+        context.state.blocks[input.ref] = prepared;
+        context.state.currentRefs = withCurrentRef(context.state.currentRefs, input.ref);
+        await writeLockedState(context);
+        return bindingView(context, input.ref);
+      });
+    },
+
+    activate: async (rawInput) => {
+      const input = remoteBlockRefIdentitySchema.parse(rawInput);
+      return withLock(async (context) => {
+        assertRemoteBlockImplementation(context, input.ref);
+        activateRemoteBlockOwnership({
+          blockType: "implementation",
+          blockState: context.state.blocks[input.ref],
+          ownership: identityFromInput(input)
+        });
+        const source = await remoteBlockSourceEvidence(context, input.ref);
+        if (!sameRemoteBlockSource(source, input)) {
+          context.state.blocks[input.ref] = markRemoteBlockOwnershipSourceDrift({
+            blockType: "implementation",
+            blockState: context.state.blocks[input.ref],
+            ...source,
+            reason: `Remote source changed before activation of '${input.ref}'.`
+          });
+          await writeLockedState(context);
+          throw new RemoteBlockRuntimeError(
+            "remote_block_source_changed",
+            `Remote source changed before activation of '${input.ref}'.`
+          );
+        }
+        context.state.blocks[input.ref] = activateRemoteBlockOwnership({
+          blockType: "implementation",
+          blockState: context.state.blocks[input.ref],
+          ownership: identityFromInput(input)
+        });
+        await writeLockedState(context);
+        return bindingView(context, input.ref);
+      });
+    },
+
+    query: async (rawInput) => {
+      const { ref, operationId } = remoteBlockOperationQuerySchema.parse(rawInput);
+      const context = await loadRuntimeReadonly({ projectRoot });
+      assertRemoteBlockImplementation(context, ref);
+      const view = bindingView(context, ref);
+      assertOperationMatchesView(view, operationId);
+      return view;
+    },
+
+    reconcile: async (rawInput) => {
+      const { ref, operationId } = remoteBlockOperationQuerySchema.parse(rawInput);
+      return withLock(async (context) => {
+        assertRemoteBlockImplementation(context, ref);
+        let view = bindingView(context, ref);
+        assertOperationMatchesView(view, operationId);
+        if (!view.ownership) {
+          return view;
+        }
+        const source = await remoteBlockSourceEvidence(context, ref);
+        if (!sameRemoteBlockSource(source, view.ownership)) {
+          context.state.blocks[ref] = markRemoteBlockOwnershipSourceDrift({
+            blockType: "implementation",
+            blockState: context.state.blocks[ref],
+            ...source,
+            reason: `Remote source changed while operation '${operationId}' was active.`
+          });
+          await writeLockedState(context);
+          view = bindingView(context, ref);
+        }
+        return view;
+      });
+    },
+
+    markInterrupted: async (rawInput) => {
+      const input = remoteBlockInterruptionInputSchema.parse(rawInput);
+      return withLock(async (context) => {
+        assertRemoteBlockImplementation(context, input.ref);
+        assertActiveRemoteBlockOwnership({
+          blockType: "implementation",
+          blockState: context.state.blocks[input.ref],
+          ownership: identityFromInput(input)
+        });
+        const source = await remoteBlockSourceEvidence(context, input.ref);
+        if (!sameRemoteBlockSource(source, input)) {
+          context.state.blocks[input.ref] = markRemoteBlockOwnershipSourceDrift({
+            blockType: "implementation",
+            blockState: context.state.blocks[input.ref],
+            ...source,
+            reason: `Remote source changed before interruption of '${input.ref}'.`
+          });
+          await writeLockedState(context);
+          throw new RemoteBlockRuntimeError(
+            "remote_block_source_changed",
+            `Remote source changed before interruption of '${input.ref}'.`
+          );
+        }
+        context.state.blocks[input.ref] = interruptRemoteBlockOwnership({
+          blockType: "implementation",
+          blockState: context.state.blocks[input.ref],
+          ownership: identityFromInput(input),
+          interruption: input.interruption,
+          reason: `Remote execution interrupted: ${input.interruption.reason}.`
+        });
+        await writeLockedState(context);
+        return remoteBlockMutationResultSchema.parse({
+          binding: bindingView(context, input.ref),
+          retryDecision: input.interruption.resumable
+            ? "resume_exact_attempt"
+            : "manual_retry_required"
+        });
+      });
+    },
+
+    complete: async (input) =>
+      remoteBlockCompletionResultSchema.parse(
+        await submitRemoteBlockResult({ projectRoot, ...input })
+      ),
+
+    fail: async (rawInput) => {
+      const input = remoteBlockFailureInputSchema.parse(rawInput);
+      return withLock(async (context) => {
+        assertRemoteBlockImplementation(context, input.ref);
+        const current = context.state.blocks[input.ref];
+        if (current.remoteOperationReceipt) {
+          if (
+            current.remoteOperationReceipt.outcome !== "failed" ||
+            !matchesRemoteOperationReceipt(current.remoteOperationReceipt, input) ||
+            JSON.stringify(current.remoteOperationReceipt.failure) !== JSON.stringify(input.failure)
+          ) {
+            throw new RemoteOwnershipConflictError(
+              "remote_ownership_terminal_conflict",
+              `Remote failure for '${input.ref}' conflicts with its terminal operation receipt.`
+            );
+          }
+          return remoteBlockMutationResultSchema.parse({
+            binding: bindingView(context, input.ref),
+            retryDecision: input.failure.retryable ? "manual_retry_required" : "not_retryable"
+          });
+        }
+        assertActiveRemoteBlockOwnership({
+          blockType: "implementation",
+          blockState: current,
+          ownership: identityFromInput(input)
+        });
+        const source = await remoteBlockSourceEvidence(context, input.ref);
+        if (!sameRemoteBlockSource(source, input)) {
+          context.state.blocks[input.ref] = markRemoteBlockOwnershipSourceDrift({
+            blockType: "implementation",
+            blockState: current,
+            ...source,
+            reason: `Remote source changed before failure of '${input.ref}'.`
+          });
+          await writeLockedState(context);
+          throw new RemoteBlockRuntimeError(
+            "remote_block_source_changed",
+            `Remote source changed before failure of '${input.ref}'.`
+          );
+        }
+        context.state.blocks[input.ref] = failRemoteBlockOwnership({
+          blockType: "implementation",
+          blockState: current,
+          ownership: identityFromInput(input),
+          failure: input.failure,
+          blockedReason: `[${input.failure.code}] ${input.failure.message}`
+        });
+        context.state.currentRefs = context.state.currentRefs.filter((ref) => ref !== input.ref);
+        await writeLockedState(context);
+        return remoteBlockMutationResultSchema.parse({
+          binding: bindingView(context, input.ref),
+          retryDecision: input.failure.retryable ? "manual_retry_required" : "not_retryable"
+        });
+      });
+    }
+  };
+}

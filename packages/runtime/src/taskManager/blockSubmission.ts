@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { OUTPUT_MAX_ARTIFACT_BYTES } from "@planweave-ai/distributed-protocol";
 import {
   materializeArtifactBytes,
   readVerifiedArtifactReference,
@@ -28,10 +29,28 @@ import {
 import { exists, loadRuntime, refreshDerivedState } from "./runtimeContext.js";
 import { getBlock } from "./selectors.js";
 import { incrementTaskIndexCount, readTaskIndex, updateTaskIndex } from "./resultIndex.js";
+import { withoutRemoteBlockOwnership } from "./remoteOwnershipTransitions.js";
+import {
+  assertActiveRemoteBlockOwnership,
+  completeRemoteBlockOwnership,
+  matchesRemoteOperationReceipt,
+  markRemoteBlockOwnershipSourceDrift,
+  type ActiveRemoteOperationIdentity
+} from "./remoteOwnershipTransitions.js";
+import {
+  remoteBlockCompletionInputSchema,
+  RemoteBlockRuntimeError,
+  type RemoteBlockCompletionInput
+} from "./remoteBlockRuntimeContracts.js";
+import { remoteBlockSourceEvidence } from "./remoteBlockSource.js";
 
 type BlockSubmissionArtifact =
   | { mode: "legacy"; bytes: Buffer }
   | { mode: "verified"; reference: ArtifactReference; bytes: Buffer };
+
+type SubmissionAuthority =
+  | { kind: "local" }
+  | { kind: "remote"; identity: ActiveRemoteOperationIdentity };
 
 async function runHasSubmittedResult(
   runDir: string,
@@ -148,7 +167,60 @@ export async function submitVerifiedBlockResult(
   return submitBlockResultArtifact(
     options,
     { mode: "verified", reference: artifact.reference, bytes: artifact.bytes },
-    hooks
+    hooks,
+    { kind: "local" }
+  );
+}
+
+export async function submitRemoteBlockResult(
+  options: { projectRoot: PackageWorkspaceRef } & RemoteBlockCompletionInput,
+  hooks: ArtifactMaterializationHooks = {}
+): Promise<SubmitResult> {
+  const { projectRoot: _projectRoot, ...portableInput } = options;
+  const input = remoteBlockCompletionInputSchema.parse(portableInput);
+  const bytes = Buffer.from(input.reportBytes);
+  if (bytes.byteLength > OUTPUT_MAX_ARTIFACT_BYTES) {
+    throw new RemoteBlockRuntimeError(
+      "remote_block_result_conflict",
+      `Remote report exceeds the ${OUTPUT_MAX_ARTIFACT_BYTES}-byte output limit.`
+    );
+  }
+  const sha256 = input.reportArtifactRef.slice("artifact:sha256:".length);
+  const actualSha256 = createHash("sha256").update(bytes).digest("hex");
+  if (sha256 !== actualSha256) {
+    throw new RemoteBlockRuntimeError(
+      "remote_block_result_conflict",
+      "Remote report artifact reference does not match the supplied bytes."
+    );
+  }
+  return submitBlockResultArtifact(
+    {
+      projectRoot: options.projectRoot,
+      ref: input.ref
+    },
+    {
+      mode: "verified",
+      reference: {
+        version: "planweave.runner/v1",
+        kind: "implementation",
+        relativePath: "report.md",
+        sha256,
+        sizeBytes: bytes.byteLength,
+        mediaType: "text/markdown"
+      },
+      bytes
+    },
+    hooks,
+    {
+      kind: "remote",
+      identity: {
+        operationId: input.operationId,
+        sourceRevision: input.sourceRevision,
+        graphFingerprint: input.graphFingerprint,
+        dispatchId: input.dispatchId,
+        executionAttemptId: input.executionAttemptId
+      }
+    }
   );
 }
 
@@ -156,12 +228,13 @@ async function submitBlockResultArtifact(
   options: {
     projectRoot: PackageWorkspaceRef;
     ref: string;
-    reportPath: string;
+    reportPath?: string;
     runId?: string;
     session?: ExecutionGraphSession;
   },
   artifact: BlockSubmissionArtifact,
-  hooks: ArtifactMaterializationHooks = {}
+  hooks: ArtifactMaterializationHooks = {},
+  authority: SubmissionAuthority = { kind: "local" }
 ): Promise<SubmitResult> {
   const reportHash = createHash("sha256").update(artifact.bytes).digest("hex");
   if (
@@ -183,7 +256,75 @@ async function submitBlockResultArtifact(
     if (block.type === "review") {
       throw new Error("submit-result only accepts implementation blocks.");
     }
-    const inProgress = state.blocks[options.ref]?.status === "in_progress";
+    const blockState = state.blocks[options.ref];
+    if (authority.kind === "local" && blockState?.remoteOwnership) {
+      throw new Error(
+        `Remote-owned block '${options.ref}' must be completed through the remote operation port.`
+      );
+    }
+    if (authority.kind === "local" && blockState?.remoteOperationReceipt) {
+      throw new Error(
+        `Remote-completed block '${options.ref}' cannot be replayed through local submit-result.`
+      );
+    }
+    if (authority.kind === "remote" && blockState?.remoteOperationReceipt) {
+      if (
+        blockState.remoteOperationReceipt.outcome !== "completed" ||
+        !matchesRemoteOperationReceipt(blockState.remoteOperationReceipt, authority.identity)
+      ) {
+        throw new RemoteBlockRuntimeError(
+          "remote_block_result_conflict",
+          `Remote completion for '${options.ref}' conflicts with its terminal operation receipt.`
+        );
+      }
+      const receiptRunId = blockState.remoteOperationReceipt.runId;
+      const receiptRunDir = join(
+        workspace.resultsDir,
+        taskId,
+        "blocks",
+        blockId,
+        "runs",
+        receiptRunId
+      );
+      if (!(await runHasSubmittedResult(receiptRunDir, options.ref, receiptRunId, artifact))) {
+        throw new RemoteBlockRuntimeError(
+          "remote_block_result_conflict",
+          `Remote completion receipt for '${options.ref}' does not match the submitted report.`
+        );
+      }
+      return { ref: options.ref, runId: receiptRunId, status: "completed" };
+    }
+    if (authority.kind === "remote") {
+      assertActiveRemoteBlockOwnership({
+        blockType: block.type,
+        blockState,
+        ownership: authority.identity
+      });
+      const remoteCanSubmit =
+        blockState?.status === "in_progress" ||
+        (blockState?.status === "diverged" && blockState.remoteInterruption?.resumable === true);
+      if (!remoteCanSubmit) {
+        throw new Error(`Block '${options.ref}' must be in_progress before submit-result.`);
+      }
+      const currentSource = await remoteBlockSourceEvidence(context, options.ref);
+      if (
+        currentSource.sourceRevision !== authority.identity.sourceRevision ||
+        currentSource.graphFingerprint !== authority.identity.graphFingerprint
+      ) {
+        state.blocks[options.ref] = markRemoteBlockOwnershipSourceDrift({
+          blockType: block.type,
+          blockState,
+          ...currentSource,
+          reason: `Remote source changed before completion of '${options.ref}'.`
+        });
+        state = refreshDerivedState(manifest, state);
+        await writeState(workspace.stateFile, state);
+        throw new RemoteBlockRuntimeError(
+          "remote_block_source_changed",
+          `Remote source changed before completion of '${options.ref}'.`
+        );
+      }
+    }
     const persistedRunId = await findPersistedRun(
       workspace,
       taskId,
@@ -201,17 +342,24 @@ async function submitBlockResultArtifact(
           [options.ref]: persistedRunId
         }
       }));
-      state.blocks[options.ref] = {
-        ...state.blocks[options.ref],
-        status: "completed",
-        lastRunId: persistedRunId
-      };
+      state.blocks[options.ref] =
+        authority.kind === "remote"
+          ? completeRemoteBlockOwnership({
+              blockType: block.type,
+              blockState: state.blocks[options.ref],
+              ownership: authority.identity,
+              runId: persistedRunId
+            })
+          : {
+              ...withoutRemoteBlockOwnership(state.blocks[options.ref], "completed"),
+              lastRunId: persistedRunId
+            };
       state.currentRefs = state.currentRefs.filter((ref) => ref !== options.ref);
       state = refreshDerivedState(manifest, state);
       await writeState(workspace.stateFile, state);
       return { ref: options.ref, runId: persistedRunId, status: "completed" };
     }
-    if (!inProgress) {
+    if (authority.kind === "local" && blockState?.status !== "in_progress") {
       throw new Error(`Block '${options.ref}' must be in_progress before submit-result.`);
     }
     const runRoot = join(workspace.resultsDir, taskId, "blocks", blockId, "runs");
@@ -252,7 +400,7 @@ async function submitBlockResultArtifact(
       submittedAt: new Date().toISOString(),
       reportHash,
       ...(artifactReference ? { artifactReference } : {}),
-      sourceReportPath: options.reportPath
+      ...(options.reportPath ? { sourceReportPath: options.reportPath } : {})
     });
     await upsertBlockRunInIndex(runRoot, runId, true);
     await updateTaskIndex(workspace, taskId, (index) => ({
@@ -263,11 +411,18 @@ async function submitBlockResultArtifact(
       },
       counts: incrementTaskIndexCount(index, "runs")
     }));
-    state.blocks[options.ref] = {
-      ...state.blocks[options.ref],
-      status: "completed",
-      lastRunId: runId
-    };
+    state.blocks[options.ref] =
+      authority.kind === "remote"
+        ? completeRemoteBlockOwnership({
+            blockType: block.type,
+            blockState: state.blocks[options.ref],
+            ownership: authority.identity,
+            runId
+          })
+        : {
+            ...withoutRemoteBlockOwnership(state.blocks[options.ref], "completed"),
+            lastRunId: runId
+          };
     state.currentRefs = state.currentRefs.filter((ref) => ref !== options.ref);
     state = refreshDerivedState(manifest, state);
     await writeState(workspace.stateFile, state);

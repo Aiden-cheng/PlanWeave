@@ -5,6 +5,11 @@ import {
   taskStatuses,
   type RuntimeState
 } from "../types/state.js";
+import {
+  remoteBlockOwnershipSchema,
+  remoteInterruptionSchema,
+  remoteOperationReceiptSchema
+} from "./remoteOwnership.js";
 
 const taskStateSchema = z
   .object({
@@ -13,7 +18,7 @@ const taskStateSchema = z
   })
   .strict();
 
-const blockStateSchema = z
+export const blockStateSchema = z
   .object({
     status: z.enum(blockStatuses),
     lastRunId: z.string().nullable().optional(),
@@ -23,9 +28,52 @@ const blockStateSchema = z
     blockedReason: z.string().nullable().optional(),
     divergenceReason: z.string().nullable().optional(),
     completionReason: z.enum(["passed", "max_cycles_reached"]).nullable().optional(),
-    passedWorkRevision: z.string().nullable().optional()
+    passedWorkRevision: z.string().nullable().optional(),
+    remoteOwnership: remoteBlockOwnershipSchema.optional(),
+    remoteInterruption: remoteInterruptionSchema.optional(),
+    remoteOperationReceipt: remoteOperationReceiptSchema.optional()
   })
-  .strict();
+  .strict()
+  .superRefine((block, context) => {
+    if (block.remoteOwnership && block.status !== "in_progress" && block.status !== "diverged") {
+      context.addIssue({
+        code: "custom",
+        path: ["remoteOwnership"],
+        message: "remote ownership is allowed only while a block is in_progress or diverged"
+      });
+    }
+    if (
+      block.remoteInterruption &&
+      (block.status !== "diverged" || block.remoteOwnership?.phase !== "active")
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["remoteInterruption"],
+        message: "remote interruption requires a diverged block with active remote ownership"
+      });
+    }
+    if (
+      block.remoteOperationReceipt &&
+      ((block.remoteOperationReceipt.outcome === "completed" && block.status !== "completed") ||
+        (block.remoteOperationReceipt.outcome === "failed" && block.status !== "blocked"))
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["remoteOperationReceipt"],
+        message: "remote operation receipt must match the terminal block status"
+      });
+    }
+    if (
+      block.remoteOperationReceipt?.outcome === "completed" &&
+      block.lastRunId !== block.remoteOperationReceipt.runId
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["remoteOperationReceipt", "runId"],
+        message: "completed remote operation receipt must reference lastRunId"
+      });
+    }
+  });
 
 const feedbackEnvelopeSchema = z
   .object({

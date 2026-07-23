@@ -18,7 +18,7 @@ export type PlanGraphViewProjection = {
 function blockStatus(
   status: ExecutionStatus,
   ref: string
-): { status: BlockStatus; reason: string | null } {
+): Pick<ExecutionStatus["blocks"][number], "status" | "reason" | "remoteExecution"> {
   const block = status.blocks.find((item) => item.ref === ref);
   if (block === undefined) {
     throw new Error(
@@ -27,7 +27,8 @@ function blockStatus(
   }
   return {
     status: block.status,
-    reason: block.reason ?? null
+    reason: block.reason ?? null,
+    remoteExecution: block.remoteExecution
   };
 }
 
@@ -141,7 +142,8 @@ function blockPreview(
     promptMissing: block.promptRef.contentHash.length === 0,
     exceptionReason: currentStatus.reason,
     // Filled by desktop graph enrichment from claim readiness.
-    dispatchable: false
+    dispatchable: false,
+    remoteExecution: currentStatus.remoteExecution
   };
 }
 

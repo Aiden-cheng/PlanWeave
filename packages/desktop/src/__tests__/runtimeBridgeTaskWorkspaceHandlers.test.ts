@@ -41,6 +41,55 @@ describe("Task Workspace runtime bridge", () => {
     });
   });
 
+  it("validates and preserves Runtime-projected remote execution state", async () => {
+    const { runtimeMock } = getRuntimeBridgeMocks();
+    const input = { projectRoot: "/tmp/project", canvasId: "canvas-a", taskId: "T-001" };
+    const handler = registeredHandler(desktopBridgeInvokeChannels.getTaskWorkspace);
+    const base = taskWorkspaceSchema.parse(await handler(null, input));
+    const remoteExecution = {
+      identity: { operationId: "operation-001" },
+      phase: "active" as const,
+      status: "interrupted" as const,
+      actionRequired: true,
+      source: { revision: "revision-001", graphFingerprint: "fingerprint-001" },
+      dispatchAttempt: { dispatchId: "dispatch-001", executionAttemptId: "attempt-001" }
+    };
+    runtimeMock.getTaskWorkspace.mockResolvedValueOnce({
+      ...base,
+      task: { ...base.task, status: "in_progress" },
+      blocks: [
+        {
+          ref: "T-001#B-001",
+          taskId: "T-001",
+          blockId: "B-001",
+          type: "implementation",
+          title: "Remote implementation",
+          status: "diverged",
+          executor: "codex-acp",
+          effectiveExecutor: "codex-acp",
+          promptMarkdown: "# Remote implementation",
+          promptMissing: false,
+          promptSurfaceMarkdown: "# Remote implementation",
+          promptSources: [],
+          dependencies: {
+            total: 0,
+            completed: 0,
+            percent: 100,
+            status: "not_applicable",
+            blockers: []
+          },
+          runs: [],
+          annotations: [],
+          remoteExecution
+        }
+      ]
+    });
+
+    await expect(handler(null, input)).resolves.toMatchObject({
+      blocks: [{ ref: "T-001#B-001", remoteExecution }]
+    });
+  });
+
   it("validates and forwards the canonical retry identity to Runtime", async () => {
     const { runtimeMock } = getRuntimeBridgeMocks();
     const identity = {

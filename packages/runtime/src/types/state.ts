@@ -1,3 +1,16 @@
+import type {
+  RemoteBlockOwnership,
+  RemoteInterruption,
+  RemoteOperationReceipt
+} from "../schema/remoteOwnership.js";
+export type {
+  ActiveRemoteBlockOwnership,
+  PreparingRemoteBlockOwnership,
+  RemoteBlockOwnership,
+  RemoteInterruption,
+  RemoteOperationReceipt
+} from "../schema/remoteOwnership.js";
+
 export const taskStatuses = ["planned", "ready", "in_progress", "implemented"] as const;
 export const blockStatuses = [
   "planned",
@@ -31,6 +44,12 @@ export type BlockState = {
   divergenceReason?: string | null;
   completionReason?: "passed" | "max_cycles_reached" | null;
   passedWorkRevision?: string | null;
+  /** Absent for all local/manual/CLI/ACP execution. */
+  remoteOwnership?: RemoteBlockOwnership;
+  /** Present only while an activated remote operation is interrupted and unresolved. */
+  remoteInterruption?: RemoteInterruption;
+  /** Idempotency evidence for the most recent terminal remote operation; never an active owner. */
+  remoteOperationReceipt?: RemoteOperationReceipt;
 };
 
 export type FeedbackEnvelopeState = {

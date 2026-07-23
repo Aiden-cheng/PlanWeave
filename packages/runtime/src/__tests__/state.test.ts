@@ -3,7 +3,11 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { runtimeStateSchema } from "../schema/runtimeState.js";
 import { createEmptyState, ensureStateForManifest, readState, writeState } from "../state.js";
-import { claimBlock, getExecutionStatus } from "../taskManager/index.js";
+import {
+  claimBlock,
+  getExecutionStatus,
+  projectRemoteBlockExecution
+} from "../taskManager/index.js";
 import { loadRuntime, loadRuntimeReadonly } from "../taskManager/runtimeContext.js";
 import type { RuntimeState } from "../types.js";
 import { basicManifest, createTestWorkspace } from "./promptTestHelpers.js";
@@ -97,6 +101,86 @@ describe("readState Zod validation", () => {
     await expect(readState(init.workspace.stateFile)).resolves.toEqual(state);
   });
 
+  it("preserves legacy local state without inventing remote ownership", async () => {
+    const { init } = await createTestWorkspace();
+    const legacy = {
+      ...createEmptyState(),
+      blocks: { "T-001#B-001": { status: "in_progress", lastRunId: null } }
+    };
+    await writeFile(init.workspace.stateFile, `${JSON.stringify(legacy, null, 2)}\n`, "utf8");
+
+    const parsed = await readState(init.workspace.stateFile);
+    expect(parsed.blocks["T-001#B-001"]).toEqual({ status: "in_progress", lastRunId: null });
+    expect(parsed.blocks["T-001#B-001"]).not.toHaveProperty("remoteOwnership");
+  });
+
+  it("rejects remote ownership on terminal state", () => {
+    const parsed = runtimeStateSchema.safeParse({
+      ...createEmptyState(),
+      blocks: {
+        "T-001#B-001": {
+          status: "completed",
+          remoteOwnership: {
+            phase: "active",
+            operationId: "operation-001",
+            sourceRevision: "pgv-pkg-revision-001",
+            graphFingerprint: "pkg-fingerprint-001",
+            dispatchId: "dispatch-001",
+            executionAttemptId: "attempt-001"
+          }
+        }
+      }
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("requires terminal receipts and interruptions to match their block state", () => {
+    const completedReceipt = {
+      outcome: "completed" as const,
+      operationId: "operation-001",
+      sourceRevision: "source-revision-001",
+      graphFingerprint: "graph-fingerprint-001",
+      dispatchId: "dispatch-001",
+      executionAttemptId: "attempt-001",
+      runId: "RUN-001"
+    };
+    expect(
+      runtimeStateSchema.safeParse({
+        ...createEmptyState(),
+        blocks: {
+          "T-001#B-001": {
+            status: "completed",
+            lastRunId: "RUN-001",
+            remoteOperationReceipt: completedReceipt
+          }
+        }
+      }).success
+    ).toBe(true);
+    expect(
+      runtimeStateSchema.safeParse({
+        ...createEmptyState(),
+        blocks: {
+          "T-001#B-001": {
+            status: "completed",
+            lastRunId: "RUN-002",
+            remoteOperationReceipt: completedReceipt
+          }
+        }
+      }).success
+    ).toBe(false);
+    expect(
+      runtimeStateSchema.safeParse({
+        ...createEmptyState(),
+        blocks: {
+          "T-001#B-001": {
+            status: "diverged",
+            remoteInterruption: { reason: "transport_lost", resumable: true }
+          }
+        }
+      }).success
+    ).toBe(false);
+  });
+
   it("accepts ensureStateForManifest output under runtimeStateSchema", async () => {
     const state = ensureStateForManifest(basicManifest(), createEmptyState());
     const parsed = runtimeStateSchema.safeParse(state);
@@ -114,6 +198,166 @@ describe("readState Zod validation", () => {
 });
 
 describe("ensureStateForManifest manifest-drift repair", () => {
+  it("fails closed when a remote-owned block is removed or changes to review", () => {
+    const active = runtimeStateSchema.parse({
+      ...createEmptyState(),
+      blocks: {
+        "T-404#B-001": {
+          status: "in_progress",
+          remoteOwnership: {
+            phase: "preparing",
+            operationId: "operation-001",
+            sourceRevision: "pgv-pkg-revision-001",
+            graphFingerprint: "pkg-fingerprint-001"
+          }
+        }
+      }
+    });
+    expect(() => ensureStateForManifest(basicManifest(), active)).toThrow(
+      /no longer exists in the manifest/i
+    );
+
+    const reviewOwned = runtimeStateSchema.parse({
+      ...createEmptyState(),
+      blocks: {
+        "T-001#R-001": {
+          status: "in_progress",
+          remoteOwnership: {
+            phase: "preparing",
+            operationId: "operation-001",
+            sourceRevision: "pgv-pkg-revision-001",
+            graphFingerprint: "pkg-fingerprint-001"
+          }
+        }
+      }
+    });
+    expect(() => ensureStateForManifest(basicManifest(), reviewOwned)).toThrow(
+      /only implementation blocks/i
+    );
+  });
+
+  it.each([
+    "completed",
+    "failed"
+  ] as const)("normalizes a %s terminal remote implementation when the same ref changes to review", async (outcome) => {
+    const manifest = basicManifest();
+    const task = manifest.nodes[0];
+    if (task.type !== "task") {
+      throw new Error("Expected task node.");
+    }
+    task.blocks[0] = {
+      id: "B-001",
+      type: "review",
+      title: "Review replacement",
+      prompt: "nodes/T-001/blocks/B-001.prompt.md",
+      depends_on: [],
+      review: { required: true, maxFeedbackCycles: 1, hook: null }
+    };
+    const receiptIdentity = {
+      operationId: "operation-001",
+      sourceRevision: "source-revision-001",
+      graphFingerprint: "graph-fingerprint-001",
+      dispatchId: "dispatch-001",
+      executionAttemptId: "attempt-001"
+    };
+    const terminalState = runtimeStateSchema.parse({
+      ...createEmptyState(),
+      blocks: {
+        "T-001#B-001":
+          outcome === "completed"
+            ? {
+                status: "completed",
+                lastRunId: "RUN-001",
+                latestReviewAttemptId: "REV-STALE",
+                completionReason: "passed",
+                passedWorkRevision: "work-stale",
+                remoteOperationReceipt: {
+                  outcome,
+                  ...receiptIdentity,
+                  runId: "RUN-001"
+                }
+              }
+            : {
+                status: "blocked",
+                lastRunId: null,
+                blockedReason: "[executor_failed] stale remote failure",
+                pendingFeedbackId: "FE-STALE",
+                remoteOperationReceipt: {
+                  outcome,
+                  ...receiptIdentity,
+                  failure: {
+                    code: "executor_failed",
+                    message: "Remote executor failed.",
+                    retryable: true
+                  }
+                }
+              }
+      }
+    });
+
+    const reconciled = ensureStateForManifest(manifest, terminalState);
+
+    expect(reconciled.blocks["T-001#B-001"]).toEqual({
+      status: "ready",
+      lastRunId: null
+    });
+    expect(projectRemoteBlockExecution(reconciled.blocks["T-001#B-001"]!)).toBeNull();
+
+    const { root, init } = await createTestWorkspace(manifest);
+    await writeState(init.workspace.stateFile, terminalState);
+    const status = await getExecutionStatus({ projectRoot: root });
+    expect(status.blocks.find((block) => block.ref === "T-001#B-001")).toMatchObject({
+      type: "review",
+      status: "ready",
+      lastRunId: null,
+      latestReviewAttemptId: null,
+      completionReason: null,
+      remoteExecution: null
+    });
+  });
+
+  it.each([
+    "completed",
+    "failed"
+  ] as const)("drops a removed block with a %s terminal remote receipt", (outcome) => {
+    const wideManifest = basicManifest({ includeSecondTask: true });
+    const seeded = ensureStateForManifest(wideManifest, createEmptyState());
+    const receiptIdentity = {
+      operationId: "operation-removed",
+      sourceRevision: "source-revision-001",
+      graphFingerprint: "graph-fingerprint-001",
+      dispatchId: "dispatch-001",
+      executionAttemptId: "attempt-001"
+    };
+    seeded.blocks["T-002#B-001"] =
+      outcome === "completed"
+        ? {
+            status: "completed",
+            lastRunId: "RUN-001",
+            remoteOperationReceipt: { outcome, ...receiptIdentity, runId: "RUN-001" }
+          }
+        : {
+            status: "blocked",
+            lastRunId: null,
+            blockedReason: "[executor_failed] Remote executor failed.",
+            remoteOperationReceipt: {
+              outcome,
+              ...receiptIdentity,
+              failure: {
+                code: "executor_failed",
+                message: "Remote executor failed.",
+                retryable: true
+              }
+            }
+          };
+    seeded.currentRefs = ["T-002#B-001"];
+
+    const reconciled = ensureStateForManifest(basicManifest(), seeded);
+
+    expect(reconciled.blocks["T-002#B-001"]).toBeUndefined();
+    expect(reconciled.currentRefs).toEqual([]);
+  });
+
   it("prunes stale current refs, review refs, feedback, and removed task/block records", () => {
     const wideManifest = basicManifest({ includeSecondTask: true });
     const seeded = ensureStateForManifest(wideManifest, createEmptyState());

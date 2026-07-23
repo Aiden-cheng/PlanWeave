@@ -10,11 +10,13 @@ import type {
 import { canvasCommandFlag, commandCanvasIdForWorkspace } from "./canvasCommandScope.js";
 import { getExecutionStatus } from "./executionStatus.js";
 import { loadRuntimeReadonly } from "./runtimeContext.js";
+import { projectRemoteBlockExecution } from "./remoteExecutionReadModel.js";
 import {
   effectiveBlockExecutor,
   effectiveFeedbackExecutor,
   getBlock,
-  isActiveFeedbackStatus
+  isActiveFeedbackStatus,
+  requireBlockState
 } from "./selectors.js";
 
 function submitCommand(ref: string, block: ManifestBlock, canvasId: string | null = null): string {
@@ -70,7 +72,8 @@ export async function explainBlock(options: {
       options.ref,
       block,
       await commandCanvasIdForWorkspace(context.workspace)
-    )
+    ),
+    remoteExecution: projectRemoteBlockExecution(requireBlockState(context.state, options.ref))
   };
 }
 
@@ -80,15 +83,17 @@ export async function getCurrentWork(options: {
   const context = await loadRuntimeReadonly(options);
   const canvasId = await commandCanvasIdForWorkspace(context.workspace);
   const defaultExecutor = context.manifest.execution.defaultExecutor;
-  const items = context.state.currentRefs.map((ref) =>
-    currentItem(
-      ref,
-      getBlock(context.graph, ref),
-      context.workspace.packageDir,
-      canvasId,
-      effectiveBlockExecutor(context.graph, ref, defaultExecutor)
-    )
-  );
+  const items = context.state.currentRefs
+    .filter((ref) => context.state.blocks[ref]?.remoteOwnership === undefined)
+    .map((ref) =>
+      currentItem(
+        ref,
+        getBlock(context.graph, ref),
+        context.workspace.packageDir,
+        canvasId,
+        effectiveBlockExecutor(context.graph, ref, defaultExecutor)
+      )
+    );
   const activeFeedbackId =
     context.state.currentFeedbackId &&
     isActiveFeedbackStatus(context.state.feedback[context.state.currentFeedbackId]?.status)
@@ -124,10 +129,15 @@ export async function getCurrentWork(options: {
     }
   }
   const taskIds = Array.from(new Set(items.map((item) => item.taskId)));
+  const remoteOwnedCurrent = context.state.currentRefs.some(
+    (ref) => context.state.blocks[ref]?.remoteOwnership !== undefined
+  );
   const blockingReason =
     items.length > 0 || activeFeedbackId
       ? null
-      : "No current claim. Run `planweave claim-next`, `planweave claim <ref>`, or `planweave status`.";
+      : remoteOwnedCurrent
+        ? "Current work is remotely owned and cannot be attached as local work."
+        : "No current claim. Run `planweave claim-next`, `planweave claim <ref>`, or `planweave status`.";
   return {
     currentRefs: context.state.currentRefs,
     currentFeedbackId: activeFeedbackId,

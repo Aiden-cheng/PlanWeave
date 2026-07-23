@@ -43,6 +43,46 @@ async function writeRunDir(options: {
 }
 
 describe("run session / results retention", () => {
+  it("retains artifacts for an in-flight remote-owned block", async () => {
+    const { root, init } = await createTestWorkspace();
+    await writeRunDir({
+      resultsDir: init.workspace.resultsDir,
+      taskId: "T-001",
+      blockId: "B-001",
+      runId: "RUN-001",
+      submittedAt: "2026-01-01T00:00:00.000Z"
+    });
+    await writeJsonFile(init.workspace.stateFile, {
+      currentRefs: ["T-001#B-001"],
+      currentFeedbackId: null,
+      currentReviewBlockRef: null,
+      tasks: {},
+      blocks: {
+        "T-001#B-001": {
+          status: "in_progress",
+          remoteOwnership: {
+            phase: "active",
+            operationId: "operation-001",
+            sourceRevision: "pgv-pkg-revision-001",
+            graphFingerprint: "pkg-fingerprint-001",
+            dispatchId: "dispatch-001",
+            executionAttemptId: "attempt-001"
+          }
+        }
+      },
+      feedback: {}
+    });
+
+    const plan = await computePrunePlan(root, {
+      olderThan: "1d",
+      now: new Date("2026-06-10T00:00:00.000Z")
+    });
+
+    expect(plan.items).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: "run", id: "RUN-001" })])
+    );
+  });
+
   it("computePrunePlan excludes lastRunId and in-flight sessions", async () => {
     const { root, init } = await createTestWorkspace();
     const resultsDir = init.workspace.resultsDir;
@@ -75,7 +115,19 @@ describe("run session / results retention", () => {
       currentReviewBlockRef: null,
       tasks: {},
       blocks: {
-        "T-001#B-001": { status: "completed", lastRunId: "RUN-003" }
+        "T-001#B-001": {
+          status: "completed",
+          lastRunId: "RUN-003",
+          remoteOperationReceipt: {
+            outcome: "completed",
+            operationId: "operation-003",
+            sourceRevision: "source-revision-003",
+            graphFingerprint: "graph-fingerprint-003",
+            dispatchId: "dispatch-003",
+            executionAttemptId: "attempt-003",
+            runId: "RUN-003"
+          }
+        }
       },
       feedback: {}
     });

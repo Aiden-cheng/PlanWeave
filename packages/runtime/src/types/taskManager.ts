@@ -2,6 +2,7 @@ import type { BlockType } from "./manifest.js";
 import type { BlockStatus, FeedbackStatus, ReviewVerdict, TaskStatus } from "./state.js";
 import type { ValidationIssue } from "./validation.js";
 import type { ReviewResult } from "../taskManager/reviewResultContract.js";
+import type { RemoteBlockExecutionReadModel } from "../schema/remoteExecutionReadModel.js";
 export type { ReviewResult } from "../taskManager/reviewResultContract.js";
 
 export type ClaimResult =
@@ -113,6 +114,7 @@ export type BlockStatusSummary = {
   lastRunId?: string | null;
   latestReviewAttemptId?: string | null;
   activeFeedbackId?: string | null;
+  remoteExecution: RemoteBlockExecutionReadModel | null;
 };
 
 export type ClaimHint = {
@@ -148,6 +150,7 @@ export type ReviewGateHint = {
 export type BlockExplanation = ClaimHint & {
   promptPath: string;
   submitCommand: string;
+  remoteExecution: RemoteBlockExecutionReadModel | null;
 };
 
 export type CurrentWorkOwner = {
@@ -197,6 +200,12 @@ export type DoctorIssue = {
     | "orphan_result"
     | "index_state_mismatch"
     | "task_result_index_invalid"
+    | "remote_ownership_orphaned_block"
+    | "remote_ownership_non_implementation"
+    | "remote_ownership_source_drift"
+    | "remote_ownership_interrupted"
+    | "remote_terminal_result_conflict"
+    | "remote_terminal_non_implementation"
     | "retention_threshold_exceeded"
     | "auto_run_pending_transition_unreadable"
     | "auto_run_pending_transition_incomplete";
@@ -217,6 +226,7 @@ export type DoctorIssue = {
 export type DoctorReport = {
   ok: boolean;
   issues: DoctorIssue[];
+  remoteExecutions: Array<{ ref: string; execution: RemoteBlockExecutionReadModel }>;
 };
 
 export function isDoctorErrorIssue(issue: DoctorIssue): boolean {

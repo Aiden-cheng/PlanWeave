@@ -347,6 +347,8 @@ export {
   taskWorkspaceWaitingInteractionSchema,
   taskWorkspaceWallClockSchema
 } from "./types/taskWorkspaceAggregateTypes.js";
+export { remoteBlockExecutionReadModelSchema } from "../schema/remoteExecutionReadModel.js";
+export type { RemoteBlockExecutionReadModel } from "../schema/remoteExecutionReadModel.js";
 export {
   TASK_WORKSPACE_RUNS_DEFAULT_LIMIT,
   TASK_WORKSPACE_RUNS_MAX_LIMIT,

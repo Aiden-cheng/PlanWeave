@@ -7,6 +7,372 @@ import type { TaskResultIndex } from "../types.js";
 import { createTestWorkspace } from "./promptTestHelpers.js";
 
 describe("runDoctor", () => {
+  it("reports invalid and drifted remote ownership without repairing away its evidence", async () => {
+    const { root, init } = await createTestWorkspace();
+    await writeJsonFile(init.workspace.stateFile, {
+      currentRefs: ["T-404#B-001"],
+      currentFeedbackId: null,
+      currentReviewBlockRef: null,
+      tasks: {},
+      blocks: {
+        "T-001#R-001": {
+          status: "in_progress",
+          remoteOwnership: {
+            phase: "preparing",
+            operationId: "operation-review",
+            sourceRevision: "pgv-pkg-revision-001",
+            graphFingerprint: "pkg-fingerprint-001"
+          }
+        },
+        "T-404#B-001": {
+          status: "in_progress",
+          remoteOwnership: {
+            phase: "preparing",
+            operationId: "operation-orphan",
+            sourceRevision: "pgv-pkg-revision-001",
+            graphFingerprint: "pkg-fingerprint-001"
+          }
+        },
+        "T-001#B-001": {
+          status: "diverged",
+          divergenceReason: "package changed",
+          remoteOwnership: {
+            phase: "active",
+            operationId: "operation-drifted",
+            sourceRevision: "pgv-pkg-revision-001",
+            graphFingerprint: "pkg-fingerprint-001",
+            dispatchId: "dispatch-001",
+            executionAttemptId: "attempt-001"
+          }
+        }
+      },
+      feedback: {}
+    });
+
+    const report = await runDoctor({ projectRoot: root, repair: true });
+
+    expect(report.ok).toBe(false);
+    expect(report.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "remote_ownership_non_implementation",
+          ref: "T-001#R-001",
+          repaired: false
+        }),
+        expect.objectContaining({
+          code: "remote_ownership_orphaned_block",
+          ref: "T-404#B-001",
+          repaired: false
+        }),
+        expect.objectContaining({
+          code: "remote_ownership_source_drift",
+          ref: "T-001#B-001",
+          repaired: false
+        }),
+        expect.objectContaining({
+          code: "stale_current_ref",
+          ref: "T-404#B-001",
+          repaired: false
+        })
+      ])
+    );
+    const persisted = await readJsonFile<Record<string, unknown>>(init.workspace.stateFile);
+    expect(persisted).toHaveProperty(
+      "blocks.T-001#B-001.remoteOwnership.operationId",
+      "operation-drifted"
+    );
+    expect(persisted).toHaveProperty(
+      "blocks.T-404#B-001.remoteOwnership.operationId",
+      "operation-orphan"
+    );
+    expect(persisted).toHaveProperty("currentRefs", ["T-404#B-001"]);
+  });
+
+  it("does not let index repair complete a remotely owned block", async () => {
+    const { root, init } = await createTestWorkspace();
+    const runDir = join(init.workspace.resultsDir, "T-001", "blocks", "B-001", "runs", "RUN-002");
+    await mkdir(runDir, { recursive: true });
+    await writeFile(join(runDir, "report.md"), "persisted report\n", "utf8");
+    await writeJsonFile(join(runDir, "metadata.json"), {
+      ref: "T-001#B-001",
+      taskId: "T-001",
+      blockId: "B-001",
+      runId: "RUN-002",
+      submittedAt: "2026-05-25T00:00:00.000Z"
+    });
+    await writeJsonFile(init.workspace.stateFile, {
+      currentRefs: ["T-001#B-001"],
+      currentFeedbackId: null,
+      currentReviewBlockRef: null,
+      tasks: {},
+      blocks: {
+        "T-001#B-001": {
+          status: "in_progress",
+          lastRunId: null,
+          remoteOwnership: {
+            phase: "active",
+            operationId: "operation-001",
+            sourceRevision: "pgv-pkg-revision-001",
+            graphFingerprint: "pkg-fingerprint-001",
+            dispatchId: "dispatch-001",
+            executionAttemptId: "attempt-001"
+          }
+        }
+      },
+      feedback: {}
+    });
+    await writeJsonFile(join(init.workspace.resultsDir, "T-001", "index.json"), {
+      latestRunByBlock: { "T-001#B-001": "RUN-002" },
+      counts: { runs: 2 }
+    });
+
+    const report = await runDoctor({ projectRoot: root, repair: true });
+
+    expect(report.ok).toBe(false);
+    expect(report.issues).toContainEqual(
+      expect.objectContaining({
+        code: "index_state_mismatch",
+        ref: "T-001#B-001",
+        repaired: false
+      })
+    );
+    const persisted = await readJsonFile<{
+      blocks: Record<string, { status: string; remoteOwnership?: { operationId: string } }>;
+    }>(init.workspace.stateFile);
+    expect(persisted.blocks["T-001#B-001"]).toMatchObject({
+      status: "in_progress",
+      remoteOwnership: { operationId: "operation-001" }
+    });
+  });
+
+  it.each([
+    "completed",
+    "failed"
+  ] as const)("reports and safely repairs a %s remote terminal receipt attached to a review block", async (outcome) => {
+    const { root, init } = await createTestWorkspace();
+    const identity = {
+      operationId: "operation-terminal-review",
+      sourceRevision: "source-revision-001",
+      graphFingerprint: "graph-fingerprint-001",
+      dispatchId: "dispatch-001",
+      executionAttemptId: "attempt-001"
+    };
+    const staleReview =
+      outcome === "completed"
+        ? {
+            status: "completed",
+            lastRunId: "RUN-REMOTE-001",
+            latestReviewAttemptId: "REV-STALE",
+            completionReason: "passed",
+            passedWorkRevision: "work-stale",
+            remoteOperationReceipt: {
+              outcome,
+              ...identity,
+              runId: "RUN-REMOTE-001"
+            }
+          }
+        : {
+            status: "blocked",
+            lastRunId: null,
+            latestReviewAttemptId: "REV-STALE",
+            blockedReason: "[executor_failed] Remote executor failed.",
+            remoteOperationReceipt: {
+              outcome,
+              ...identity,
+              failure: {
+                code: "executor_failed",
+                message: "Remote executor failed.",
+                retryable: true
+              }
+            }
+          };
+    await writeJsonFile(init.workspace.stateFile, {
+      currentRefs: ["T-001#R-001"],
+      currentFeedbackId: null,
+      currentReviewBlockRef: "T-001#R-001",
+      tasks: {},
+      blocks: { "T-001#R-001": staleReview },
+      feedback: {}
+    });
+
+    const before = await runDoctor({ projectRoot: root });
+    expect(before.ok).toBe(false);
+    expect(before.issues).toContainEqual(
+      expect.objectContaining({
+        code: "remote_terminal_non_implementation",
+        ref: "T-001#R-001",
+        repaired: false
+      })
+    );
+    expect(before.remoteExecutions).toContainEqual(
+      expect.objectContaining({
+        ref: "T-001#R-001",
+        execution: expect.objectContaining({ phase: "terminal", status: outcome })
+      })
+    );
+
+    const repair = await runDoctor({ projectRoot: root, repair: true });
+    expect(repair.ok).toBe(true);
+    expect(repair.issues).toContainEqual(
+      expect.objectContaining({
+        code: "remote_terminal_non_implementation",
+        ref: "T-001#R-001",
+        repaired: true
+      })
+    );
+    expect(repair.remoteExecutions).not.toContainEqual(
+      expect.objectContaining({ ref: "T-001#R-001" })
+    );
+    const persisted = await readJsonFile<{
+      currentRefs: string[];
+      currentReviewBlockRef: string | null;
+      blocks: Record<string, Record<string, unknown>>;
+    }>(init.workspace.stateFile);
+    expect(persisted.currentRefs).toEqual([]);
+    expect(persisted.currentReviewBlockRef).toBeNull();
+    expect(persisted.blocks["T-001#R-001"]).toEqual({
+      status: "planned",
+      lastRunId: null
+    });
+
+    const after = await runDoctor({ projectRoot: root });
+    expect(after.ok).toBe(true);
+    expect(after.issues).not.toContainEqual(
+      expect.objectContaining({ code: "remote_terminal_non_implementation" })
+    );
+    expect(after.remoteExecutions).not.toContainEqual(
+      expect.objectContaining({ ref: "T-001#R-001" })
+    );
+  });
+
+  it("does not repair a non-implementation terminal receipt while active ownership blocks graph reconciliation", async () => {
+    const { root, init } = await createTestWorkspace();
+    const state = {
+      currentRefs: ["T-001#R-001", "T-404#B-001"],
+      currentFeedbackId: null,
+      currentReviewBlockRef: "T-001#R-001",
+      tasks: {},
+      blocks: {
+        "T-001#R-001": {
+          status: "blocked",
+          blockedReason: "[executor_failed] Remote executor failed.",
+          remoteOperationReceipt: {
+            outcome: "failed",
+            operationId: "operation-terminal-review",
+            sourceRevision: "source-revision-001",
+            graphFingerprint: "graph-fingerprint-001",
+            dispatchId: "dispatch-001",
+            executionAttemptId: "attempt-001",
+            failure: {
+              code: "executor_failed",
+              message: "Remote executor failed.",
+              retryable: true
+            }
+          }
+        },
+        "T-404#B-001": {
+          status: "in_progress",
+          remoteOwnership: {
+            phase: "preparing",
+            operationId: "operation-orphan",
+            sourceRevision: "source-revision-001",
+            graphFingerprint: "graph-fingerprint-001"
+          }
+        }
+      },
+      feedback: {}
+    };
+    await writeJsonFile(init.workspace.stateFile, state);
+
+    const report = await runDoctor({ projectRoot: root, repair: true });
+
+    expect(report.ok).toBe(false);
+    expect(report.issues).toContainEqual(
+      expect.objectContaining({
+        code: "remote_terminal_non_implementation",
+        ref: "T-001#R-001",
+        repaired: false
+      })
+    );
+    expect(report.remoteExecutions).toContainEqual(expect.objectContaining({ ref: "T-001#R-001" }));
+    await expect(readJsonFile(init.workspace.stateFile)).resolves.toEqual(state);
+  });
+
+  it("keeps a failed remote terminal receipt authoritative over historical result index evidence", async () => {
+    const { root, init } = await createTestWorkspace();
+    const runDir = join(init.workspace.resultsDir, "T-001", "blocks", "B-001", "runs", "RUN-002");
+    await mkdir(runDir, { recursive: true });
+    await writeFile(join(runDir, "report.md"), "historical report\n", "utf8");
+    await writeJsonFile(join(runDir, "metadata.json"), {
+      ref: "T-001#B-001",
+      taskId: "T-001",
+      blockId: "B-001",
+      runId: "RUN-002",
+      submittedAt: "2026-05-25T00:00:00.000Z"
+    });
+    const failedBlock = {
+      status: "blocked",
+      lastRunId: null,
+      blockedReason: "[executor_failed] Remote executor failed.",
+      remoteOperationReceipt: {
+        outcome: "failed",
+        operationId: "operation-001",
+        sourceRevision: "source-revision-001",
+        graphFingerprint: "graph-fingerprint-001",
+        dispatchId: "dispatch-001",
+        executionAttemptId: "attempt-001",
+        failure: {
+          code: "executor_failed",
+          message: "Remote executor failed.",
+          retryable: true
+        }
+      }
+    };
+    await writeJsonFile(init.workspace.stateFile, {
+      currentRefs: [],
+      currentFeedbackId: null,
+      currentReviewBlockRef: null,
+      tasks: {},
+      blocks: { "T-001#B-001": failedBlock },
+      feedback: {}
+    });
+    await writeJsonFile(join(init.workspace.resultsDir, "T-001", "index.json"), {
+      latestRunByBlock: { "T-001#B-001": "RUN-002" },
+      counts: { runs: 2 }
+    });
+
+    const before = await runDoctor({ projectRoot: root });
+    expect(before.issues).toContainEqual(
+      expect.objectContaining({
+        code: "remote_terminal_result_conflict",
+        ref: "T-001#B-001",
+        repaired: false
+      })
+    );
+
+    const repaired = await runDoctor({ projectRoot: root, repair: true });
+    expect(repaired.ok).toBe(false);
+    expect(repaired.issues).toContainEqual(
+      expect.objectContaining({
+        code: "remote_terminal_result_conflict",
+        ref: "T-001#B-001",
+        repaired: false
+      })
+    );
+    const persisted = await readJsonFile<{
+      blocks: Record<string, typeof failedBlock>;
+    }>(init.workspace.stateFile);
+    expect(persisted.blocks["T-001#B-001"]).toEqual(failedBlock);
+
+    const after = await runDoctor({ projectRoot: root });
+    expect(after.remoteExecutions).toContainEqual(
+      expect.objectContaining({
+        ref: "T-001#B-001",
+        execution: expect.objectContaining({ status: "failed", phase: "terminal" })
+      })
+    );
+  });
+
   it("reports orphan results, stale current refs, and state/index drift", async () => {
     const { root, init } = await createTestWorkspace();
     await writeJsonFile(init.workspace.stateFile, {
@@ -55,7 +421,17 @@ describe("runDoctor", () => {
       currentReviewBlockRef: null,
       tasks: {},
       blocks: {
-        "T-001#B-001": { status: "in_progress", lastRunId: null }
+        "T-001#B-001": {
+          status: "in_progress",
+          lastRunId: null,
+          latestReviewAttemptId: "REV-STALE",
+          activeFeedbackId: "FE-ACTIVE-STALE",
+          pendingFeedbackId: "FE-PENDING-STALE",
+          blockedReason: "stale blocked reason",
+          divergenceReason: "stale divergence reason",
+          completionReason: "passed",
+          passedWorkRevision: "work-stale"
+        }
       },
       feedback: {}
     });
@@ -80,6 +456,14 @@ describe("runDoctor", () => {
     const status = await getExecutionStatus({ projectRoot: root });
     expect(status.currentRefs).toEqual([]);
     expect(status.blocks.find((block) => block.ref === "T-001#B-001")).toMatchObject({
+      status: "completed",
+      lastRunId: "RUN-002",
+      reason: null
+    });
+    const persisted = await readJsonFile<{
+      blocks: Record<string, Record<string, unknown>>;
+    }>(init.workspace.stateFile);
+    expect(persisted.blocks["T-001#B-001"]).toEqual({
       status: "completed",
       lastRunId: "RUN-002"
     });

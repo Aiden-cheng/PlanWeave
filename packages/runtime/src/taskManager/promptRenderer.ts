@@ -156,6 +156,7 @@ export async function renderPromptSurface(options: {
   session?: ExecutionGraphSession;
   includeSubmissionInstructions?: boolean;
   allowMissingPromptSources?: boolean;
+  renderMode?: "default" | "remote-dispatch";
 }): Promise<PromptSurface> {
   const runtime = await loadRuntimeReadonly(options);
   const projectAggregation = await loadProjectCanvasRuntimeAggregation(runtime.workspace);
@@ -179,7 +180,8 @@ export async function renderPromptSurface(options: {
   };
   return renderPromptSurfaceFromContext(context, options.ref, {
     includeSubmissionInstructions: options.includeSubmissionInstructions,
-    allowMissingPromptSources: options.allowMissingPromptSources
+    allowMissingPromptSources: options.allowMissingPromptSources,
+    renderMode: options.renderMode
   });
 }
 
@@ -207,6 +209,7 @@ export async function renderPromptSurfaceFromContext(
   options: {
     includeSubmissionInstructions?: boolean;
     allowMissingPromptSources?: boolean;
+    renderMode?: "default" | "remote-dispatch";
   } = {}
 ): Promise<PromptSurface> {
   const {
@@ -238,10 +241,11 @@ export async function renderPromptSurfaceFromContext(
     allowMissingPromptSources
   );
   const projectCanvasContext = projectCanvasContextRenderer(taskId);
+  const remoteDispatchMode = options.renderMode === "remote-dispatch";
   const planGraphContext = buildAgentClaimMarkdown({
     graph: planGraphPackage.graph,
     ref,
-    status
+    ...(remoteDispatchMode ? {} : { status })
   });
   const promptSources = [
     promptSourceSummary({
@@ -300,11 +304,9 @@ export async function renderPromptSurfaceFromContext(
     ref,
     "requiredCapabilitiesByBlockRef"
   );
-  const latestImplementationReports = await renderLatestImplementationReports(
-    runtime,
-    taskId,
-    promptSourceReader
-  );
+  const latestImplementationReports = remoteDispatchMode
+    ? []
+    : await renderLatestImplementationReports(runtime, taskId, promptSourceReader);
   const focusedReviewLines =
     block.type === "review" ? await renderFocusedReviewLines(runtime, ref, promptSourceReader) : [];
   const reviewSchema =
@@ -359,15 +361,19 @@ export async function renderPromptSurfaceFromContext(
     "## Block Prompt",
     blockPrompt.markdown.trim(),
     renderNodeList("Task Acceptance", task.acceptance),
-    renderNodeList("Execution Context", [
-      `Task status: ${requireTaskState(state, taskId).status}`,
-      `Block status: ${requireBlockState(state, ref).status}`,
-      `Completion policy: ${manifest.review.completionPolicy}`
-    ]),
-    renderNodeList("Dependency / Block Status", dependencyLines),
+    remoteDispatchMode
+      ? ""
+      : renderNodeList("Execution Context", [
+          `Task status: ${requireTaskState(state, taskId).status}`,
+          `Block status: ${requireBlockState(state, ref).status}`,
+          `Completion policy: ${manifest.review.completionPolicy}`
+        ]),
+    remoteDispatchMode ? "" : renderNodeList("Dependency / Block Status", dependencyLines),
     renderNodeList("Required Host Capabilities", requiredCapabilityLines),
     renderNodeList("Shared Resource Hints", sharedResourceLines),
-    renderNodeList("Latest Implementation / Feedback Summary", latestImplementationReports),
+    remoteDispatchMode
+      ? ""
+      : renderNodeList("Latest Implementation / Feedback Summary", latestImplementationReports),
     focusedReviewLines.length > 0
       ? renderNodeList("Focused Re-review Context", focusedReviewLines)
       : "",

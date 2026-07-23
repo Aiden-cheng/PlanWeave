@@ -111,6 +111,44 @@ describe("desktop graph read API", () => {
     expect(graph.autoRunPreflightExecutorHint).toBe("custom-shell");
   });
 
+  it("projects canonical remote execution state into graph blocks", async () => {
+    const { root, init } = await createTestWorkspace();
+    await writeJsonFile(init.workspace.stateFile, {
+      currentRefs: ["T-001#B-001"],
+      currentFeedbackId: null,
+      currentReviewBlockRef: null,
+      tasks: { "T-001": { status: "in_progress", openFeedbackCount: 0 } },
+      blocks: {
+        "T-001#B-001": {
+          status: "in_progress",
+          remoteOwnership: {
+            phase: "active",
+            operationId: "operation-001",
+            sourceRevision: "revision-001",
+            graphFingerprint: "fingerprint-001",
+            dispatchId: "dispatch-001",
+            executionAttemptId: "attempt-001"
+          }
+        }
+      },
+      feedback: {}
+    });
+
+    const graph = await getGraphViewModel(root);
+
+    expect(graph.tasks[0]?.blocks[0]?.remoteExecution).toEqual({
+      identity: { operationId: "operation-001" },
+      phase: "active",
+      status: "owned",
+      actionRequired: false,
+      source: { revision: "revision-001", graphFingerprint: "fingerprint-001" },
+      dispatchAttempt: { dispatchId: "dispatch-001", executionAttemptId: "attempt-001" }
+    });
+    expect(JSON.stringify(graph.tasks[0]?.blocks[0]?.remoteExecution)).not.toMatch(
+      /host|credential|packageDir|stateFile/i
+    );
+  });
+
   it("resolves Auto Run preflight hint from the next serial claim instead of all executor options", async () => {
     const { root, init } = await createTestWorkspace(basicManifest({ includeSecondTask: true }));
     const manifest = await readJsonFile<PlanPackageManifest>(init.workspace.manifestFile);

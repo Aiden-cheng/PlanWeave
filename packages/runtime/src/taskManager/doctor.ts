@@ -9,6 +9,7 @@ import { loadPackage } from "../package/loadPackage.js";
 import { RETENTION_DOCTOR_THRESHOLD, countRetentionArtifacts } from "../runSessions/retention.js";
 import { ensureStateForManifest, readState, writeState } from "../state.js";
 import type {
+  BlockType,
   DoctorIssue,
   DoctorReport,
   PackageWorkspaceRef,
@@ -19,6 +20,7 @@ import type {
 import { isDoctorErrorIssue } from "../types.js";
 import { readImplementationRunMetadataFile } from "./implementationRunMetadata.js";
 import { readTaskIndex, updateTaskIndex } from "./resultIndex.js";
+import { projectRemoteBlockExecution } from "./remoteExecutionReadModel.js";
 
 async function exists(path: string): Promise<boolean> {
   return (await optionalStat(path)) !== null;
@@ -64,7 +66,15 @@ async function repairStateRunMismatch(options: {
   ref: string;
   taskId: string;
   indexRunId: string;
+  blockType: BlockType | undefined;
 }): Promise<boolean> {
+  if (
+    options.blockType !== "implementation" ||
+    options.state.blocks[options.ref]?.remoteOwnership ||
+    options.state.blocks[options.ref]?.remoteOperationReceipt
+  ) {
+    return false;
+  }
   if (
     !(await resultRunMatchesIndex(
       options.workspace,
@@ -76,7 +86,6 @@ async function repairStateRunMismatch(options: {
     return false;
   }
   options.state.blocks[options.ref] = {
-    ...(options.state.blocks[options.ref] ?? {}),
     status: "completed",
     lastRunId: options.indexRunId
   };
@@ -122,9 +131,87 @@ export async function runDoctor(options: {
     const issues: DoctorIssue[] = [];
     let stateChanged = false;
 
+    for (const [ref, blockState] of Object.entries(state.blocks)) {
+      const owner = blockState.remoteOwnership;
+      if (!owner) {
+        continue;
+      }
+      const block = graph.blocksByRef.get(ref);
+      if (!block) {
+        issues.push({
+          code: "remote_ownership_orphaned_block",
+          ref,
+          repaired: false,
+          message: `Remote-owned block '${ref}' no longer exists in the manifest.`
+        });
+        continue;
+      }
+      if (block.type !== "implementation") {
+        issues.push({
+          code: "remote_ownership_non_implementation",
+          ref,
+          repaired: false,
+          message: `Remote ownership operation '${owner.operationId}' is attached to non-implementation block '${ref}'.`
+        });
+        continue;
+      }
+      if (blockState.status === "diverged") {
+        if (blockState.remoteInterruption) {
+          issues.push({
+            code: "remote_ownership_interrupted",
+            ref,
+            repaired: false,
+            message: `Remote ownership operation '${owner.operationId}' was interrupted (${blockState.remoteInterruption.reason}); resumable=${String(blockState.remoteInterruption.resumable)}.`
+          });
+        } else {
+          issues.push({
+            code: "remote_ownership_source_drift",
+            ref,
+            repaired: false,
+            message: `Remote ownership operation '${owner.operationId}' is diverged from its recorded source revision or graph fingerprint.`
+          });
+        }
+      }
+    }
+    const remoteOwnershipBlocksRepair = issues.some(
+      (issue) =>
+        issue.code === "remote_ownership_orphaned_block" ||
+        issue.code === "remote_ownership_non_implementation"
+    );
+    const nonImplementationTerminals = Object.entries(state.blocks).flatMap(([ref, blockState]) => {
+      const receipt = blockState.remoteOperationReceipt;
+      const block = graph.blocksByRef.get(ref);
+      return receipt && block && block.type !== "implementation"
+        ? [{ ref, operationId: receipt.operationId }]
+        : [];
+    });
+    const repairedNonImplementationTerminals =
+      options.repair === true &&
+      !remoteOwnershipBlocksRepair &&
+      nonImplementationTerminals.length > 0;
+    if (repairedNonImplementationTerminals) {
+      const repairedRefs = new Set(nonImplementationTerminals.map(({ ref }) => ref));
+      if (state.currentReviewBlockRef !== null && repairedRefs.has(state.currentReviewBlockRef)) {
+        state.currentReviewBlockRef = null;
+      }
+      state = ensureStateForManifest(manifest, state);
+      stateChanged = true;
+    }
+    for (const { ref, operationId } of nonImplementationTerminals) {
+      issues.push({
+        code: "remote_terminal_non_implementation",
+        ref,
+        repaired: repairedNonImplementationTerminals,
+        message: `Remote terminal operation '${operationId}' is attached to non-implementation block '${ref}'.`
+      });
+    }
+
     for (const ref of state.currentRefs ?? []) {
       if (!graph.blocksByRef.has(ref)) {
-        const repaired = options.repair ? repairStaleCurrentRef(state, ref) : false;
+        const repaired =
+          options.repair && !remoteOwnershipBlocksRepair
+            ? repairStaleCurrentRef(state, ref)
+            : false;
         stateChanged = stateChanged || repaired;
         issues.push({
           code: "stale_current_ref",
@@ -162,11 +249,36 @@ export async function runDoctor(options: {
       const checkedRefs = new Set<string>();
       for (const [ref, indexRunId] of Object.entries(index.latestRunByBlock ?? {})) {
         checkedRefs.add(ref);
-        const stateRunId = state.blocks?.[ref]?.lastRunId ?? null;
+        const blockState = state.blocks?.[ref];
+        const stateRunId = blockState?.lastRunId ?? null;
         if (stateRunId !== indexRunId) {
-          const repaired = options.repair
-            ? await repairStateRunMismatch({ workspace, state, ref, taskId, indexRunId })
-            : false;
+          const failedReceipt =
+            blockState?.remoteOperationReceipt?.outcome === "failed"
+              ? blockState.remoteOperationReceipt
+              : null;
+          if (failedReceipt) {
+            issues.push({
+              code: "remote_terminal_result_conflict",
+              ref,
+              taskId,
+              path: indexPath,
+              stateRunId,
+              indexRunId,
+              repaired: false,
+              message: `Block '${ref}' records failed remote operation '${failedReceipt.operationId}', but the task index points to historical run '${indexRunId}'. Explicitly unblock, reset, or recover the block before selecting a different terminal outcome.`
+            });
+          }
+          const repaired =
+            options.repair && !remoteOwnershipBlocksRepair && !failedReceipt
+              ? await repairStateRunMismatch({
+                  workspace,
+                  state,
+                  ref,
+                  taskId,
+                  indexRunId,
+                  blockType: graph.blocksByRef.get(ref)?.type
+                })
+              : false;
           stateChanged = stateChanged || repaired;
           issues.push({
             code: "index_state_mismatch",
@@ -188,9 +300,10 @@ export async function runDoctor(options: {
         if (!stateRunId) {
           continue;
         }
-        const repaired = options.repair
-          ? await repairIndexRunMismatch({ workspace, ref, taskId, stateRunId })
-          : false;
+        const repaired =
+          options.repair && !remoteOwnershipBlocksRepair
+            ? await repairIndexRunMismatch({ workspace, ref, taskId, stateRunId })
+            : false;
         issues.push({
           code: "index_state_mismatch",
           ref,
@@ -246,7 +359,11 @@ export async function runDoctor(options: {
 
     return {
       ok: issues.every((issue) => !isDoctorErrorIssue(issue) || issue.repaired === true),
-      issues
+      issues,
+      remoteExecutions: Object.entries(state.blocks).flatMap(([ref, blockState]) => {
+        const execution = projectRemoteBlockExecution(blockState);
+        return execution ? [{ ref, execution }] : [];
+      })
     };
   };
 

@@ -59,6 +59,8 @@ export {
   manifestSchema,
   manifestSchemaTopLevelFields
 } from "./schema/manifest.js";
+export { remoteBlockExecutionReadModelSchema } from "./schema/remoteExecutionReadModel.js";
+export type { RemoteBlockExecutionReadModel } from "./schema/remoteExecutionReadModel.js";
 export {
   manifestSchemaDocument,
   layoutSchemaDocument,
@@ -240,6 +242,7 @@ export {
   runDoctor,
   runProjectDoctor,
   renderPrompt,
+  createRemoteBlockRuntimePort,
   submitBlockResult,
   submitBlockResultFromBytes,
   submitReviewResult,
@@ -250,12 +253,48 @@ export {
   unblockBlock,
   resolveBlockDivergence,
   getExecutionStatus,
+  projectRemoteBlockExecution,
   commandFingerprint,
   isCommandTrusted,
   listTrustedCommands,
   trustCommand
 } from "./taskManager/index.js";
-export type { TrustedCommand, TrustedCommandsFile } from "./taskManager/index.js";
+export {
+  remoteBlockActiveIdentitySchema,
+  remoteBlockBindingViewSchema,
+  remoteBlockClaimInputSchema,
+  remoteBlockCompletionInputSchema,
+  remoteBlockCompletionResultSchema,
+  remoteBlockDispatchCandidateSchema,
+  remoteBlockFailureInputSchema,
+  remoteBlockInspectInputSchema,
+  remoteBlockInterruptionInputSchema,
+  remoteBlockMutationResultSchema,
+  remoteBlockOperationQuerySchema,
+  publicRemoteFailureSchema,
+  remoteBlockRefIdentitySchema,
+  remoteBlockRetryDecisionSchema,
+  RemoteBlockRuntimeError
+} from "./taskManager/index.js";
+export type {
+  RemoteBlockActiveIdentity,
+  RemoteBlockBindingView,
+  RemoteBlockClaimInput,
+  RemoteBlockCompletionInput,
+  RemoteBlockCompletionResult,
+  RemoteBlockDispatchCandidate,
+  RemoteBlockFailureInput,
+  RemoteBlockInspectInput,
+  RemoteBlockInterruptionInput,
+  RemoteBlockMutationResult,
+  RemoteBlockOperationQuery,
+  RemoteBlockRefIdentity,
+  RemoteBlockRetryDecision,
+  RemoteBlockRuntimeErrorCode,
+  RemoteBlockRuntimePort,
+  TrustedCommand,
+  TrustedCommandsFile
+} from "./taskManager/index.js";
 export { getAutoRunStatus, runAutoRunStep } from "./taskManager/autoRun.js";
 export type { PromptSourceSummary } from "./taskManager/promptContracts.js";
 export {

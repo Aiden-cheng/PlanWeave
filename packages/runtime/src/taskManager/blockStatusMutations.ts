@@ -4,6 +4,10 @@ import { loadPackage } from "../package/loadPackage.js";
 import { writeState } from "../state.js";
 import type { BlockStatus, ExecutionGraphSession, PackageWorkspaceRef } from "../types.js";
 import { loadRuntime, refreshDerivedState } from "./runtimeContext.js";
+import {
+  clearRemoteBlockOperationState,
+  withoutRemoteBlockOwnership
+} from "./remoteOwnershipTransitions.js";
 import { clearReviewCompletionReason } from "./resultIndex.js";
 import { blockDependenciesCompleted, getBlock, openFeedbackForReview } from "./selectors.js";
 
@@ -28,8 +32,7 @@ export async function markBlockBlocked(options: {
       throw new Error("mark-blocked requires a non-empty reason.");
     }
     context.state.blocks[options.ref] = {
-      ...context.state.blocks[options.ref],
-      status: "blocked",
+      ...withoutRemoteBlockOwnership(context.state.blocks[options.ref], "blocked"),
       blockedReason: options.reason.trim()
     };
     if (block.type === "review" && openFeedbackForReview(context.state, options.ref)) {
@@ -54,8 +57,11 @@ export async function markBlockDiverged(options: {
       throw new Error("mark-diverged requires a non-empty reason.");
     }
     const taskId = graph.blockTaskByRef.get(options.ref);
+    const current = context.state.blocks[options.ref];
     context.state.blocks[options.ref] = {
-      ...context.state.blocks[options.ref],
+      ...(current.remoteOwnership
+        ? { ...current, remoteInterruption: undefined, remoteOperationReceipt: undefined }
+        : clearRemoteBlockOperationState(current)),
       status: "diverged",
       divergenceReason: options.reason.trim(),
       ...(block.type === "review"
@@ -92,9 +98,11 @@ export async function unblockBlock(options: {
     if (current?.status !== "blocked") {
       throw new Error(`Block '${options.ref}' is not blocked.`);
     }
+    const nextStatus = blockDependenciesCompleted(graph, context.state, options.ref)
+      ? "ready"
+      : "planned";
     context.state.blocks[options.ref] = {
-      ...current,
-      status: blockDependenciesCompleted(graph, context.state, options.ref) ? "ready" : "planned",
+      ...withoutRemoteBlockOwnership(current, nextStatus),
       blockedReason: null
     };
     await writeState(workspace.stateFile, refreshDerivedState(manifest, context.state));
@@ -119,9 +127,16 @@ export async function releaseInProgressBlock(options: {
     if (current?.status !== "in_progress") {
       throw new Error(`Block '${options.ref}' is not in_progress.`);
     }
+    if (current.remoteOwnership) {
+      throw new Error(
+        `Remote-owned block '${options.ref}' cannot be released without its operation identity.`
+      );
+    }
+    const nextStatus = blockDependenciesCompleted(graph, context.state, options.ref)
+      ? "ready"
+      : "planned";
     context.state.blocks[options.ref] = {
-      ...current,
-      status: blockDependenciesCompleted(graph, context.state, options.ref) ? "ready" : "planned",
+      ...withoutRemoteBlockOwnership(current, nextStatus),
       blockedReason: null
     };
     context.state.currentRefs = context.state.currentRefs.filter((ref) => ref !== options.ref);
@@ -148,8 +163,10 @@ export async function resolveBlockDivergence(options: {
     }
     const taskId = graph.blockTaskByRef.get(options.ref);
     context.state.blocks[options.ref] = {
-      ...current,
-      status: blockDependenciesCompleted(graph, context.state, options.ref) ? "ready" : "planned",
+      ...withoutRemoteBlockOwnership(
+        current,
+        blockDependenciesCompleted(graph, context.state, options.ref) ? "ready" : "planned"
+      ),
       divergenceReason: null,
       ...(block.type === "review"
         ? {

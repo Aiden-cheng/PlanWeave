@@ -624,7 +624,8 @@ export async function getTaskWorkspace(
         promptSources: detail.promptSources,
         dependencies: dependencyProgress(detail, detailsByRef),
         runs: [],
-        annotations
+        annotations,
+        remoteExecution: detail.remoteExecution
       };
     })
   );

@@ -14,6 +14,7 @@ import type { ProjectPromptPolicy } from "../../projectPromptPolicy.js";
 import type { PendingImportTransaction } from "../../package/importRecovery.js";
 import type { RunnerTransport } from "../../types.js";
 import type { DesktopLayout, DesktopLayoutNode } from "./desktopLayoutSchema.js";
+import type { RemoteBlockExecutionReadModel } from "../../schema/remoteExecutionReadModel.js";
 
 export type { DesktopLayout, DesktopLayoutNode };
 
@@ -35,6 +36,7 @@ export type DesktopBlockPreview = {
   exceptionReason: string | null;
   /** True when claim/dispatch can start this block now. */
   dispatchable: boolean;
+  remoteExecution: RemoteBlockExecutionReadModel | null;
 };
 
 export type DesktopSharedResourceGroup = {
@@ -255,6 +257,7 @@ export type DesktopBlockDetail = {
   activeFeedbackId: string | null;
   exceptionReason: string | null;
   reviewGate: ReviewGateHint | null;
+  remoteExecution: RemoteBlockExecutionReadModel | null;
 };
 
 export type DesktopTodoGroupName = BlockStatus | "implemented";
