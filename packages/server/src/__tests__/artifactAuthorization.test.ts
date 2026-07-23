@@ -10,6 +10,7 @@ import type { DispatchRecord } from "../dispatches.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 import { openServerDatabase } from "../sqlite.js";
 import { executionEnvelopeFor } from "./protocolTestFixtures.js";
+import { createRemoteDispatchFixture } from "./support/remoteDispatchFixture.js";
 
 const directories: string[] = [];
 const servers: PlanweaveServer[] = [];
@@ -87,10 +88,7 @@ describe("dispatch artifact authorization repository", () => {
         server.database.prepare("SELECT COUNT(*) AS count FROM artifact_grants").get()?.count ?? 0
       );
     });
-    const first = coordination.dispatches.dispatchBlock({
-      packageRef: "package://project-a/v1",
-      envelope
-    });
+    const first = createRemoteDispatchFixture(server.database, coordination, envelope);
     unsubscribe();
 
     expect(grantCountAtPublication).toBe(1);
@@ -105,10 +103,7 @@ describe("dispatch artifact authorization repository", () => {
         ?.count
     ).toBe(1);
 
-    const replay = coordination.dispatches.dispatchBlock({
-      packageRef: "package://project-a/v1",
-      envelope
-    });
+    const replay = createRemoteDispatchFixture(server.database, coordination, envelope);
     expect(replay).toEqual(first);
     expect(coordination.mailbox.listAfter(registration.host.id, 0)).toHaveLength(1);
     expect(
@@ -120,20 +115,14 @@ describe("dispatch artifact authorization repository", () => {
       renderedPrompt: `${envelope.renderedPrompt}\nconflicting replay`
     });
     expect(() =>
-      coordination.dispatches.dispatchBlock({
-        packageRef: "package://project-a/v1",
-        envelope: conflicting
-      })
-    ).toThrowError("dispatch_envelope_identity_conflict");
+      createRemoteDispatchFixture(server.database, coordination, conflicting)
+    ).toThrowError("remote_operation_envelope_conflict");
 
     const secondEnvelope = executionEnvelopeSchema.parse({
       ...executionEnvelopeFor("T-001#B-002", ["test"]),
       inputArtifacts: [{ artifactRef: input.ref, logicalName: "requirements.txt" }]
     });
-    const second = coordination.dispatches.dispatchBlock({
-      packageRef: "package://project-a/v1",
-      envelope: secondEnvelope
-    });
+    const second = createRemoteDispatchFixture(server.database, coordination, secondEnvelope);
     expect(
       server.database.prepare("SELECT COUNT(*) AS count FROM artifact_blobs").get()?.count
     ).toBe(1);
@@ -151,10 +140,11 @@ describe("dispatch artifact authorization repository", () => {
 
   it("binds output grants before upload and records one accepted provenance link", async () => {
     const { server, coordination, registration, artifacts } = await setup();
-    const dispatch = coordination.dispatches.dispatchBlock({
-      packageRef: "package://project-a/v1",
-      envelope: executionEnvelopeFor("T-001#B-003", ["test"])
-    });
+    const dispatch = createRemoteDispatchFixture(
+      server.database,
+      coordination,
+      executionEnvelopeFor("T-001#B-003", ["test"])
+    );
     coordination.dispatches.accept(
       registration.host.id,
       "accept-output",
@@ -256,10 +246,7 @@ describe("dispatch artifact authorization repository", () => {
       ...executionEnvelopeFor("T-001#B-004", ["test"]),
       inputArtifacts: [{ artifactRef: input.ref, logicalName: "input.txt" }]
     });
-    const dispatch = coordination.dispatches.dispatchBlock({
-      packageRef: "package://project-a/v1",
-      envelope
-    });
+    const dispatch = createRemoteDispatchFixture(server.database, coordination, envelope);
     const inputGrant = coordination.artifactAuthorization.authorizeInputRead({
       ...scope(dispatch),
       artifactRef: input.ref
@@ -297,10 +284,20 @@ describe("artifact authorization migration", () => {
         (1,'2020-01-01T00:00:00.000Z'),(2,'2020-01-01T00:00:00.000Z'),
         (3,'2020-01-01T00:00:00.000Z'),(4,'2020-01-01T00:00:00.000Z'),
         (5,'2020-01-01T00:00:00.000Z');
-      CREATE TABLE agent_hosts(id TEXT PRIMARY KEY);
+      CREATE TABLE agent_hosts(
+        id TEXT PRIMARY KEY,display_name TEXT NOT NULL,credential_hash TEXT NOT NULL,
+        capabilities_json TEXT NOT NULL,capacity INTEGER NOT NULL,last_seen_at TEXT,
+        last_acknowledged_sequence INTEGER NOT NULL DEFAULT 0,revoked_at TEXT,
+        created_at TEXT NOT NULL
+      );
       CREATE TABLE dispatches(
         id TEXT PRIMARY KEY,project_id TEXT NOT NULL,host_id TEXT NOT NULL,
         lease_id TEXT NOT NULL,execution_attempt_id TEXT NOT NULL
+      );
+      CREATE TABLE mailbox_messages(
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT,message_id TEXT NOT NULL UNIQUE,
+        host_id TEXT NOT NULL REFERENCES agent_hosts(id),command_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,acknowledged_at TEXT
       );
       CREATE TABLE artifacts(
         ref TEXT PRIMARY KEY,sha256 TEXT NOT NULL UNIQUE,size_bytes INTEGER NOT NULL,
@@ -321,7 +318,7 @@ describe("artifact authorization migration", () => {
       busyTimeoutMs: 5000
     });
     servers.push(upgraded);
-    expect(upgraded.readiness().schemaVersion).toBe(7);
+    expect(upgraded.readiness().schemaVersion).toBe(12);
     expect(
       upgraded.database.prepare("SELECT COUNT(*) AS count FROM artifact_blobs").get()?.count
     ).toBe(1);
@@ -338,7 +335,7 @@ describe("artifact authorization migration", () => {
       busyTimeoutMs: 5000
     });
     servers.push(reopened);
-    expect(reopened.readiness().schemaVersion).toBe(7);
+    expect(reopened.readiness().schemaVersion).toBe(12);
     expect(
       reopened.database.prepare("SELECT COUNT(*) AS count FROM artifact_blobs").get()?.count
     ).toBe(1);

@@ -12,6 +12,7 @@ import { createDistributedCoordination } from "../distributedCoordination.js";
 import type { DispatchRecord } from "../dispatches.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 import { executionEnvelopeFor } from "./protocolTestFixtures.js";
+import { createRemoteDispatchFixture } from "./support/remoteDispatchFixture.js";
 
 const directories: string[] = [];
 const servers: PlanweaveServer[] = [];
@@ -68,13 +69,14 @@ async function setup() {
   const inputB = await put(artifacts, Buffer.from("project B input"));
 
   const dispatch = (ref: string, projectId: string, capability: string, input: ArtifactMetadata) =>
-    coordination.dispatches.dispatchBlock({
-      packageRef: `package://${projectId}/v1`,
-      envelope: executionEnvelopeSchema.parse({
+    createRemoteDispatchFixture(
+      server.database,
+      coordination,
+      executionEnvelopeSchema.parse({
         ...executionEnvelopeFor(ref, [capability], projectId),
         inputArtifacts: [{ artifactRef: input.ref, logicalName: "input.txt" }]
       })
-    });
+    );
   const dispatchA = dispatch("T-001#B-030", "project-a", "project-a", inputA);
   const dispatchA2 = dispatch("T-001#B-031", "project-a", "project-a", inputA2);
   const dispatchB = dispatch("T-001#B-032", "project-b", "project-b", inputB);

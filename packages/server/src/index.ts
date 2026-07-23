@@ -16,6 +16,9 @@ export {
 export { readServerConfig, type ServerConfig } from "./config.js";
 export {
   createDistributedCoordination,
+  createRemoteBlockCoordination,
+  startRemoteBlockCoordinationServer,
+  type RemoteBlockCoordinationOptions,
   type DistributedCoordinationOptions
 } from "./distributedCoordination.js";
 export {
@@ -34,11 +37,55 @@ export {
   type RegisteredAgentHost
 } from "./hosts.js";
 export {
+  HostReservationRepository,
+  activeAttemptTransitionSchema,
+  reservationReleaseReasonSchema,
+  reservationStatusSchema,
+  type HostCapacityReservation,
+  type HostReservationRepositoryOptions
+} from "./hostReservations.js";
+export {
   startPlanweaveServer,
   type PlanweaveServer,
   type StartupReconciliationHook
 } from "./lifecycle.js";
 export { DurableMailbox, type MailboxMessage } from "./mailbox.js";
+export {
+  RemoteOperationRepository,
+  createRemoteOperationInputSchema,
+  remoteAttemptStatusSchema,
+  remoteOperationStateSchema,
+  remotePersistenceEventTypeSchema,
+  type CreateRemoteOperationInput,
+  type RemoteAttemptStatus,
+  type RemoteExecutionAttempt,
+  type RemoteOperation,
+  type RemoteOperationState,
+  type RemotePersistenceEventType
+} from "./remoteOperations.js";
+export {
+  RemoteBlockCoordinator,
+  type RemoteBlockCoordinatorOptions,
+  type RemoteDispatchOutcome,
+  type RemoteDispatchRequest
+} from "./remoteBlockCoordinator.js";
+export type {
+  RemoteArtifactContentPort,
+  RemoteBlockRuntimeResolverPort,
+  RemoteCoordinatorCheckpoint,
+  RemoteCoordinatorCheckpointPort,
+  RemoteDispatchReconciliationState,
+  RemoteDispatchPersistencePort,
+  RemoteInputArtifactPort,
+  RemoteMailboxPublisherPort,
+  RemoteOperationCandidatePort,
+  RemoteRuntimeLocator
+} from "./remoteBlockCoordinatorPorts.js";
+export {
+  SqliteRemoteDispatchPersistence,
+  SqliteRemoteOperationCandidateRepository
+} from "./remoteCoordinatorPersistence.js";
+export { RemoteRuntimePortRegistry } from "./remoteRuntimeLocator.js";
 export {
   agentHostProtocolVersion,
   artifactRefSchema,
@@ -55,10 +102,6 @@ export {
   type ProtocolDispatchResult,
   type ServerEvent
 } from "./protocol.js";
-export {
-  createPlanPackageDispatchWriteback,
-  type PlanPackageWritebackOptions
-} from "./runtimeWriteback.js";
 export {
   attachAgentHostWebSocketServer,
   type AgentHostWebSocketOptions,

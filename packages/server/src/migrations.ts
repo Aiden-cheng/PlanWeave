@@ -1,4 +1,5 @@
 import { artifactMediaTypeSchema } from "./artifactMediaType.js";
+import { capabilitiesSchema } from "./protocol.js";
 import type { SqliteDatabase } from "./sqlite.js";
 
 const migration1 = `
@@ -304,6 +305,134 @@ CREATE INDEX idx_dispatch_artifact_links_provenance
 
 const migration8 = "SELECT 1;";
 
+const migration10 = `
+CREATE TABLE remote_operations (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  canvas_id TEXT NOT NULL,
+  block_ref TEXT NOT NULL,
+  ownership_generation TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  request_fingerprint TEXT NOT NULL CHECK(
+    length(request_fingerprint)=64 AND request_fingerprint NOT GLOB '*[^a-f0-9]*'
+  ),
+  source_fingerprint TEXT NOT NULL,
+  required_capabilities_json TEXT NOT NULL,
+  state TEXT NOT NULL CHECK(state IN (
+    'preparing','claimed','reserved','activated','running','interrupted','action_required',
+    'awaiting_writeback','completed','failed','cancelled'
+  )),
+  dispatch_id TEXT NOT NULL UNIQUE,
+  execution_attempt_id TEXT NOT NULL UNIQUE,
+  envelope_digest TEXT CHECK(
+    envelope_digest IS NULL OR (
+      length(envelope_digest)=80 AND substr(envelope_digest,1,16)='envelope:sha256:'
+      AND substr(envelope_digest,17) NOT GLOB '*[^a-f0-9]*'
+    )
+  ),
+  envelope_reference TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  terminal_at TEXT,
+  UNIQUE(project_id,canvas_id,block_ref,ownership_generation,idempotency_key),
+  CHECK(
+    (state IN ('completed','failed','cancelled') AND terminal_at IS NOT NULL)
+    OR (state NOT IN ('completed','failed','cancelled') AND terminal_at IS NULL)
+  )
+);
+
+CREATE TABLE remote_execution_attempts (
+  execution_attempt_id TEXT PRIMARY KEY,
+  operation_id TEXT NOT NULL UNIQUE REFERENCES remote_operations(id),
+  dispatch_id TEXT NOT NULL UNIQUE,
+  project_id TEXT NOT NULL,
+  canvas_id TEXT NOT NULL,
+  block_ref TEXT NOT NULL,
+  ownership_generation TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN (
+    'prepared','reserved','activated','running','interrupted','action_required',
+    'awaiting_writeback','completed','failed','cancelled'
+  )),
+  host_id TEXT REFERENCES agent_hosts(id),
+  lease_id TEXT UNIQUE,
+  lease_fencing_token INTEGER NOT NULL DEFAULT 0 CHECK(lease_fencing_token >= 0),
+  lease_expires_at TEXT,
+  state_version INTEGER NOT NULL DEFAULT 0 CHECK(state_version >= 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  terminal_at TEXT,
+  CHECK(
+    (status='prepared' AND host_id IS NULL AND lease_id IS NULL AND lease_expires_at IS NULL
+      AND lease_fencing_token=0)
+    OR (status<>'prepared' AND host_id IS NOT NULL AND lease_id IS NOT NULL
+      AND lease_expires_at IS NOT NULL AND lease_fencing_token>0)
+  ),
+  CHECK(
+    (status IN ('completed','failed','cancelled') AND terminal_at IS NOT NULL)
+    OR (status NOT IN ('completed','failed','cancelled') AND terminal_at IS NULL)
+  )
+);
+
+CREATE UNIQUE INDEX idx_remote_attempt_active_ownership
+  ON remote_execution_attempts(project_id,canvas_id,block_ref,ownership_generation)
+  WHERE status IN (
+    'reserved','activated','running','interrupted','action_required','awaiting_writeback'
+  );
+CREATE INDEX idx_remote_attempt_operation_status
+  ON remote_execution_attempts(operation_id,status);
+
+CREATE TABLE host_capacity_reservations (
+  lease_id TEXT PRIMARY KEY,
+  execution_attempt_id TEXT NOT NULL UNIQUE
+    REFERENCES remote_execution_attempts(execution_attempt_id),
+  host_id TEXT NOT NULL REFERENCES agent_hosts(id),
+  fencing_token INTEGER NOT NULL CHECK(fencing_token > 0),
+  status TEXT NOT NULL CHECK(status IN ('active','released','expired','cancelled')),
+  lease_expires_at TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 0 CHECK(version >= 0),
+  created_at TEXT NOT NULL,
+  released_at TEXT,
+  CHECK(
+    (status='active' AND released_at IS NULL)
+    OR (status<>'active' AND released_at IS NOT NULL)
+  )
+);
+
+CREATE INDEX idx_host_capacity_reservations_active
+  ON host_capacity_reservations(host_id,lease_expires_at)
+  WHERE status='active';
+
+CREATE TABLE remote_operation_events (
+  sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+  operation_id TEXT NOT NULL REFERENCES remote_operations(id),
+  execution_attempt_id TEXT REFERENCES remote_execution_attempts(execution_attempt_id),
+  type TEXT NOT NULL CHECK(type IN (
+    'remote.operation.created','remote.operation.claimed','remote.operation.envelope_recorded',
+    'remote.attempt.reserved','remote.attempt.activated','remote.attempt.running',
+    'remote.attempt.interrupted','remote.attempt.action_required',
+    'remote.attempt.awaiting_writeback','remote.attempt.completed','remote.attempt.failed',
+    'remote.attempt.cancelled','remote.reservation.released','remote.reservation.expired',
+    'remote.reservation.cancelled'
+  )),
+  occurred_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_remote_operation_events_operation_sequence
+  ON remote_operation_events(operation_id,sequence);
+`;
+
+const migration11 = `
+ALTER TABLE remote_operations ADD COLUMN diagnostic_code TEXT;
+ALTER TABLE remote_operations ADD COLUMN diagnostic_message TEXT;
+ALTER TABLE mailbox_messages ADD COLUMN published_at TEXT;
+
+CREATE TABLE remote_operation_candidates (
+  operation_id TEXT PRIMARY KEY REFERENCES remote_operations(id),
+  candidate_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+`;
+
 function tableExists(database: SqliteDatabase, table: string): boolean {
   return Boolean(
     database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)
@@ -359,6 +488,26 @@ function validateArtifactLinkGrantTuples(database: SqliteDatabase): void {
   if (mismatch) throw new Error("migration_artifact_link_grant_mismatch");
 }
 
+function validateAgentHostsForReservations(database: SqliteDatabase): void {
+  for (const row of database
+    .prepare("SELECT id,capabilities_json,capacity FROM agent_hosts")
+    .all()) {
+    try {
+      if (typeof row.id !== "string" || row.id.length === 0) {
+        throw new Error("invalid_host_id");
+      }
+      const capabilities = JSON.parse(String(row.capabilities_json));
+      capabilitiesSchema.parse(capabilities);
+      const capacity = Number(row.capacity);
+      if (!Number.isInteger(capacity) || capacity < 1 || capacity > 128) {
+        throw new Error("invalid_host_capacity");
+      }
+    } catch (error) {
+      throw new Error("migration_invalid_agent_host_row", { cause: error });
+    }
+  }
+}
+
 type Migration = {
   version: number;
   sql: string;
@@ -382,7 +531,9 @@ const migrations: readonly Migration[] = [
       validateArtifactLinkGrantTuples(database);
     }
   },
-  { version: 8, sql: migration8, before: validateArtifactMediaTypes }
+  { version: 8, sql: migration8, before: validateArtifactMediaTypes },
+  { version: 10, sql: migration10, before: validateAgentHostsForReservations },
+  { version: 11, sql: migration11 }
 ];
 
 export function applyMigrations(database: SqliteDatabase): void {

@@ -10,6 +10,7 @@ import { ArtifactStore } from "../artifacts.js";
 import { createDistributedCoordination } from "../distributedCoordination.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 import { executionEnvelopeFor } from "./protocolTestFixtures.js";
+import { createRemoteDispatchFixture } from "./support/remoteDispatchFixture.js";
 
 const directories: string[] = [];
 const databases: PlanweaveServer[] = [];
@@ -131,12 +132,12 @@ describe("content-addressed artifacts", () => {
     });
     const envelope = executionEnvelopeSchema.parse({
       ...executionEnvelopeFor("T-001#B-020", ["test"]),
-      inputArtifacts: [{ artifactRef: input.ref, logicalName: "input.txt" }]
+      inputArtifacts: [
+        { artifactRef: input.ref, logicalName: "input.txt", mediaType: "Text/Plain" }
+      ]
     });
-    const dispatch = coordination.dispatches.dispatchBlock({
-      packageRef: "package://project-a/v1",
-      envelope
-    });
+    expect(envelope.inputArtifacts[0]?.mediaType).toBe("text/plain");
+    const dispatch = createRemoteDispatchFixture(server.database, coordination, envelope);
     coordination.dispatches.accept(
       registration.host.id,
       "accept-http",
@@ -170,7 +171,7 @@ describe("content-addressed artifacts", () => {
       method: "PUT",
       headers: {
         Authorization: "Bearer invalid-token",
-        "content-type": "text/markdown",
+        "content-type": "Text/Markdown ; Charset=UTF-8",
         "x-planweave-artifact-operation-id": "http-report-1",
         "x-planweave-artifact-purpose": "report"
       },
@@ -182,7 +183,7 @@ describe("content-addressed artifacts", () => {
       method: "PUT",
       headers: {
         Authorization: `Bearer ${registration.token}`,
-        "content-type": "text/markdown",
+        "content-type": "Text/Markdown ; Charset=UTF-8",
         "x-planweave-artifact-operation-id": "http-report-1",
         "x-planweave-artifact-purpose": "report"
       },
@@ -191,14 +192,15 @@ describe("content-addressed artifacts", () => {
     expect(uploaded.status).toBe(201);
     await expect(uploaded.json()).resolves.toMatchObject({
       ref: `artifact:sha256:${sha256}`,
-      sizeBytes: bytes.byteLength
+      sizeBytes: bytes.byteLength,
+      mediaType: "text/markdown; charset=UTF-8"
     });
 
     const retry = await fetch(url, {
       method: "PUT",
       headers: {
         Authorization: `Bearer ${registration.token}`,
-        "content-type": "text/markdown",
+        "content-type": "text/markdown; charset=UTF-8",
         "x-planweave-artifact-operation-id": "http-report-1",
         "x-planweave-artifact-purpose": "report"
       },
@@ -210,7 +212,7 @@ describe("content-addressed artifacts", () => {
       method: "PUT",
       headers: {
         Authorization: `Bearer ${registration.token}`,
-        "content-type": "text/markdown",
+        "content-type": "text/markdown; charset=UTF-8",
         "x-planweave-artifact-operation-id": "http-report-duplicate-operation",
         "x-planweave-artifact-purpose": "report"
       },
@@ -276,10 +278,11 @@ describe("content-addressed artifacts", () => {
     const foreign = coordination.hosts.register("Foreign Host");
     coordination.hosts.reportOnline(owner.host.id, ["owner"], 1);
     coordination.hosts.reportOnline(foreign.host.id, ["foreign"], 1);
-    const dispatch = coordination.dispatches.dispatchBlock({
-      packageRef: "package://project-a/v1",
-      envelope: executionEnvelopeFor("T-001#B-021", ["owner"])
-    });
+    const dispatch = createRemoteDispatchFixture(
+      server.database,
+      coordination,
+      executionEnvelopeFor("T-001#B-021", ["owner"])
+    );
     const httpServer = createServer();
     httpServers.push(httpServer);
     artifactServers.push(

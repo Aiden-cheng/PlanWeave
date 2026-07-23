@@ -1,21 +1,15 @@
-import { randomUUID } from "node:crypto";
 import { ArtifactAuthorizationRepository } from "./artifactAuthorization.js";
 import { AgentHostRepository } from "./hosts.js";
 import { HostEventInbox } from "./hostEvents.js";
-import { DurableMailbox, type MailboxMessage } from "./mailbox.js";
 import {
   acpRecoveryIdentitySchema,
   capabilitiesSchema,
   dispatchFailureSchema,
   dispatchIdSchema,
   dispatchResultSchema,
-  executionEnvelopeSchema,
   executionAttemptIdSchema,
-  hashExecutionEnvelope,
   interruptionReasonSchema,
   leaseIdSchema,
-  mailboxCommandSchema,
-  type ExecutionEnvelope,
   type HostEvent,
   type ProtocolDispatchFailure,
   type ProtocolDispatchResult
@@ -139,7 +133,6 @@ export class DispatchService {
   constructor(
     private readonly database: SqliteDatabase,
     private readonly hosts: AgentHostRepository,
-    private readonly mailbox: DurableMailbox,
     private readonly artifactAuthorization: ArtifactAuthorizationRepository,
     private readonly options: DispatchServiceOptions
   ) {
@@ -162,81 +155,6 @@ export class DispatchService {
   getRequired(dispatchId: string): DispatchRecord {
     const dispatch = this.get(dispatchId);
     if (!dispatch) throw new Error("dispatch_not_found");
-    return dispatch;
-  }
-
-  dispatchBlock(input: { packageRef: string; envelope: ExecutionEnvelope }): DispatchRecord {
-    const envelope = executionEnvelopeSchema.parse(input.envelope);
-    const requiredCapabilities = capabilitiesSchema.parse(envelope.requiredCapabilities);
-    const envelopeDigest = hashExecutionEnvelope(envelope);
-    let pendingMessage: MailboxMessage | undefined;
-    const dispatch = inWriteTransaction(this.database, () => {
-      const existing = this.get(envelope.execution.dispatchId);
-      if (existing) {
-        if (existing.packageRef !== input.packageRef) {
-          throw new Error("dispatch_identity_conflict");
-        }
-        this.artifactAuthorization.assertExecutionEnvelopeReplay(
-          existing.id,
-          envelopeDigest,
-          envelope
-        );
-        return existing;
-      }
-      const onlineAfter = new Date(Date.now() - this.options.hostOfflineAfterMs);
-      const host = this.hosts.listAvailable(requiredCapabilities, onlineAfter)[0];
-      if (!host) throw new Error("no_compatible_agent_host");
-      const id = envelope.execution.dispatchId;
-      const executionAttemptId = envelope.execution.attemptId;
-      const leaseId = leaseIdSchema.parse(randomUUID());
-      const createdAt = new Date().toISOString();
-      const leaseExpiresAt = new Date(Date.now() + this.options.leaseDurationMs).toISOString();
-      this.database
-        .prepare(
-          `INSERT INTO dispatches(
-            id,project_id,block_ref,package_ref,host_id,required_capabilities_json,
-            status,lease_id,execution_attempt_id,lease_expires_at,created_at
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,?)`
-        )
-        .run(
-          id,
-          envelope.projectId,
-          envelope.blockRef,
-          input.packageRef,
-          host.id,
-          JSON.stringify(requiredCapabilities),
-          "leased",
-          leaseId,
-          executionAttemptId,
-          leaseExpiresAt,
-          createdAt
-        );
-      this.appendEvent(id, "dispatch.leased", { hostId: host.id, leaseId, leaseExpiresAt });
-      const artifactScope = {
-        projectId: envelope.projectId,
-        hostId: host.id,
-        dispatchId: id,
-        leaseId,
-        executionAttemptId
-      };
-      this.artifactAuthorization.recordExecutionEnvelope(id, envelopeDigest, envelope);
-      this.artifactAuthorization.grantDispatchInputs(artifactScope, envelope);
-      pendingMessage = this.mailbox.enqueue(
-        host.id,
-        mailboxCommandSchema.parse({
-          type: "execute_block",
-          protocolVersion: envelope.protocolVersion,
-          dispatchId: id,
-          leaseId,
-          executionAttemptId,
-          leaseExpiresAt,
-          envelopeDigest,
-          envelope
-        })
-      );
-      return this.getRequired(id);
-    });
-    if (pendingMessage) this.mailbox.publish(pendingMessage);
     return dispatch;
   }
 
@@ -461,36 +379,6 @@ export class DispatchService {
     return this.writeBack(dispatchId);
   }
 
-  cancel(dispatchId: string, reason: string): DispatchRecord {
-    let pendingMessage: MailboxMessage | undefined;
-    const dispatch = inWriteTransaction(this.database, () => {
-      const current = this.getRequired(dispatchId);
-      if (["completed", "failed", "cancelled"].includes(current.status)) return current;
-      if (current.status === "interrupted") {
-        throw new Error("dispatch_interrupted_requires_recovery_policy");
-      }
-      if (current.status === "awaiting_writeback") {
-        throw new Error("dispatch_writeback_in_progress");
-      }
-      this.database.prepare("UPDATE dispatches SET status='cancelling' WHERE id=?").run(dispatchId);
-      this.appendEvent(dispatchId, "dispatch.cancelling", { reason });
-      pendingMessage = this.mailbox.enqueue(
-        current.hostId,
-        mailboxCommandSchema.parse({
-          type: "cancel_execution",
-          protocolVersion: 1,
-          dispatchId,
-          leaseId: current.leaseId,
-          executionAttemptId: current.executionAttemptId,
-          reason
-        })
-      );
-      return this.getRequired(dispatchId);
-    });
-    if (pendingMessage) this.mailbox.publish(pendingMessage);
-    return dispatch;
-  }
-
   async retryPendingWritebacks(): Promise<DispatchRecord[]> {
     const rows = this.database
       .prepare(
@@ -590,6 +478,11 @@ export class DispatchService {
 
   private finishWriteback(dispatch: DispatchRecord, status: "completed" | "failed" | "cancelled") {
     inWriteTransaction(this.database, () => {
+      const current = this.getRequired(dispatch.id);
+      if (current.status === status) return;
+      if (current.status !== "awaiting_writeback") {
+        throw new Error("dispatch_writeback_state_changed");
+      }
       const updated = this.database
         .prepare(
           "UPDATE dispatches SET status=?,finished_at=? WHERE id=? AND status='awaiting_writeback' AND lease_id=?"

@@ -10,6 +10,7 @@ import { ArtifactStore } from "../artifacts.js";
 import { createDistributedCoordination } from "../distributedCoordination.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 import { executionEnvelopeFor } from "./protocolTestFixtures.js";
+import { createRemoteDispatchFixture } from "./support/remoteDispatchFixture.js";
 
 const directories: string[] = [];
 const servers: PlanweaveServer[] = [];
@@ -50,10 +51,11 @@ describe("artifact output quotas", () => {
     });
     const host = coordination.hosts.register("Quota Host");
     coordination.hosts.reportOnline(host.host.id, ["quota"], 1);
-    const dispatch = coordination.dispatches.dispatchBlock({
-      packageRef: "package://project-quota/v1",
-      envelope: executionEnvelopeFor("T-001#B-050", ["quota"], "project-quota")
-    });
+    const dispatch = createRemoteDispatchFixture(
+      server.database,
+      coordination,
+      executionEnvelopeFor("T-001#B-050", ["quota"], "project-quota")
+    );
     coordination.dispatches.accept(
       dispatch.hostId,
       "accept-quota-test",

@@ -1,0 +1,385 @@
+import { leaseIdSchema, opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
+import { randomUUID } from "node:crypto";
+import { z } from "zod";
+import { capabilitiesSchema } from "./protocol.js";
+import { RemoteOperationRepository } from "./remoteOperations.js";
+import { inWriteTransaction, type SqliteDatabase } from "./sqlite.js";
+
+const timestampSchema = z.iso.datetime();
+const hostCandidateRowSchema = z
+  .object({
+    id: opaqueIdentifierSchema,
+    capabilities_json: z.string(),
+    capacity: z.number().int().min(1).max(128),
+    last_seen_at: timestampSchema,
+    active_reservations: z.number().int().nonnegative()
+  })
+  .strict();
+
+export const reservationStatusSchema = z.enum(["active", "released", "expired", "cancelled"]);
+export const reservationReleaseReasonSchema = z.enum([
+  "completed",
+  "failed",
+  "cancelled",
+  "expired"
+]);
+export const activeAttemptTransitionSchema = z.enum([
+  "activated",
+  "running",
+  "interrupted",
+  "action_required",
+  "awaiting_writeback"
+]);
+
+const reservationRowSchema = z
+  .object({
+    lease_id: leaseIdSchema,
+    execution_attempt_id: opaqueIdentifierSchema,
+    host_id: opaqueIdentifierSchema,
+    fencing_token: z.number().int().positive(),
+    status: reservationStatusSchema,
+    lease_expires_at: timestampSchema,
+    version: z.number().int().nonnegative(),
+    created_at: timestampSchema,
+    released_at: timestampSchema.nullable()
+  })
+  .strict();
+
+export type HostCapacityReservation = {
+  leaseId: string;
+  executionAttemptId: string;
+  hostId: string;
+  fencingToken: number;
+  status: z.infer<typeof reservationStatusSchema>;
+  leaseExpiresAt: string;
+  version: number;
+  createdAt: string;
+  releasedAt?: string;
+};
+
+export type HostReservationRepositoryOptions = {
+  hostOfflineAfterMs: number;
+  leaseDurationMs: number;
+  clock?: () => Date;
+};
+
+function attemptEventForRelease(reason: z.infer<typeof reservationReleaseReasonSchema>) {
+  if (reason === "expired") return "remote.attempt.interrupted" as const;
+  if (reason === "completed") return "remote.attempt.completed" as const;
+  if (reason === "failed") return "remote.attempt.failed" as const;
+  return "remote.attempt.cancelled" as const;
+}
+
+function reservationEventForRelease(reason: z.infer<typeof reservationReleaseReasonSchema>) {
+  if (reason === "expired") return "remote.reservation.expired" as const;
+  if (reason === "cancelled") return "remote.reservation.cancelled" as const;
+  return "remote.reservation.released" as const;
+}
+
+const reservationColumns = `
+  lease_id,execution_attempt_id,host_id,fencing_token,status,lease_expires_at,
+  version,created_at,released_at
+`;
+
+function toReservation(row: Record<string, unknown>): HostCapacityReservation {
+  try {
+    const parsed = reservationRowSchema.parse(row);
+    return {
+      leaseId: parsed.lease_id,
+      executionAttemptId: parsed.execution_attempt_id,
+      hostId: parsed.host_id,
+      fencingToken: parsed.fencing_token,
+      status: parsed.status,
+      leaseExpiresAt: parsed.lease_expires_at,
+      version: parsed.version,
+      createdAt: parsed.created_at,
+      releasedAt: parsed.released_at ?? undefined
+    };
+  } catch (error) {
+    throw new Error("host_reservation_row_invalid", { cause: error });
+  }
+}
+
+export class HostReservationRepository {
+  private readonly clock: () => Date;
+
+  constructor(
+    private readonly database: SqliteDatabase,
+    private readonly options: HostReservationRepositoryOptions
+  ) {
+    if (!Number.isInteger(options.hostOfflineAfterMs) || options.hostOfflineAfterMs < 1_000) {
+      throw new Error("hostOfflineAfterMs must be an integer of at least 1000.");
+    }
+    if (!Number.isInteger(options.leaseDurationMs) || options.leaseDurationMs < 1_000) {
+      throw new Error("leaseDurationMs must be an integer of at least 1000.");
+    }
+    this.clock = options.clock ?? (() => new Date());
+  }
+
+  reserve(operationId: string): HostCapacityReservation {
+    try {
+      return inWriteTransaction(this.database, () => {
+        const operation = new RemoteOperationRepository(this.database, this.clock).getRequired(
+          operationId
+        );
+        if (
+          operation.attempt.status !== "prepared" ||
+          (operation.state !== "preparing" && operation.state !== "claimed")
+        ) {
+          const existing = operation.attempt.leaseId
+            ? this.get(operation.attempt.leaseId)
+            : undefined;
+          if (existing?.status === "active") return existing;
+          throw new Error("remote_attempt_not_reservable");
+        }
+        const now = this.clock();
+        const onlineAfter = new Date(now.getTime() - this.options.hostOfflineAfterMs).toISOString();
+        const candidates = this.database
+          .prepare(
+            `SELECT h.id,h.capabilities_json,h.capacity,h.last_seen_at,
+              (SELECT COUNT(*) FROM host_capacity_reservations r
+                WHERE r.host_id=h.id AND r.status='active') AS active_reservations
+             FROM agent_hosts h
+             WHERE h.revoked_at IS NULL AND h.last_seen_at>=?
+             ORDER BY active_reservations ASC,h.last_seen_at DESC,h.id ASC`
+          )
+          .all(onlineAfter)
+          .map((row) => {
+            try {
+              const parsed = hostCandidateRowSchema.parse(row);
+              return {
+                ...parsed,
+                capabilities: capabilitiesSchema.parse(JSON.parse(parsed.capabilities_json))
+              };
+            } catch (error) {
+              throw new Error("agent_host_row_invalid", { cause: error });
+            }
+          });
+        const required = new Set(operation.requiredCapabilities);
+        const host = candidates.find(
+          (candidate) =>
+            candidate.active_reservations < candidate.capacity &&
+            [...required].every((capability) => candidate.capabilities.includes(capability))
+        );
+        if (!host) throw new Error("no_compatible_agent_host");
+
+        const leaseId = leaseIdSchema.parse(`lease-${randomUUID()}`);
+        const fencingToken = 1;
+        const leaseExpiresAt = new Date(now.getTime() + this.options.leaseDurationMs).toISOString();
+        this.database
+          .prepare(
+            `UPDATE remote_execution_attempts
+             SET status='reserved',host_id=?,lease_id=?,lease_fencing_token=?,lease_expires_at=?,
+               state_version=state_version+1,updated_at=?
+             WHERE execution_attempt_id=? AND status='prepared' AND state_version=?`
+          )
+          .run(
+            host.id,
+            leaseId,
+            fencingToken,
+            leaseExpiresAt,
+            now.toISOString(),
+            operation.executionAttemptId,
+            operation.attempt.stateVersion
+          );
+        this.database
+          .prepare(
+            `INSERT INTO host_capacity_reservations(
+              lease_id,execution_attempt_id,host_id,fencing_token,status,lease_expires_at,created_at
+            ) VALUES (?,?,?,?,'active',?,?)`
+          )
+          .run(
+            leaseId,
+            operation.executionAttemptId,
+            host.id,
+            fencingToken,
+            leaseExpiresAt,
+            now.toISOString()
+          );
+        this.database
+          .prepare("UPDATE remote_operations SET state='reserved',updated_at=? WHERE id=?")
+          .run(now.toISOString(), operation.id);
+        new RemoteOperationRepository(this.database, this.clock).appendEvent(
+          operation.id,
+          operation.executionAttemptId,
+          "remote.attempt.reserved",
+          now.toISOString()
+        );
+        return this.getRequired(leaseId);
+      });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        /UNIQUE constraint failed: remote_execution_attempts\.(project_id|canvas_id|block_ref|ownership_generation)/.test(
+          error.message
+        )
+      ) {
+        throw new Error("remote_active_attempt_conflict", { cause: error });
+      }
+      throw error;
+    }
+  }
+
+  get(leaseId: string): HostCapacityReservation | undefined {
+    const row = this.database
+      .prepare(`SELECT ${reservationColumns} FROM host_capacity_reservations WHERE lease_id=?`)
+      .get(leaseId);
+    return row ? toReservation(row) : undefined;
+  }
+
+  getRequired(leaseId: string): HostCapacityReservation {
+    const reservation = this.get(leaseId);
+    if (!reservation) throw new Error("host_reservation_not_found");
+    return reservation;
+  }
+
+  transition(input: {
+    leaseId: string;
+    fencingToken: number;
+    expectedAttemptVersion: number;
+    status: z.infer<typeof activeAttemptTransitionSchema>;
+  }) {
+    const status = activeAttemptTransitionSchema.parse(input.status);
+    return inWriteTransaction(this.database, () => {
+      const reservation = this.getRequired(input.leaseId);
+      if (reservation.fencingToken !== input.fencingToken) {
+        throw new Error("reservation_fence_conflict");
+      }
+      if (reservation.status !== "active") throw new Error("reservation_not_active");
+      const operations = new RemoteOperationRepository(this.database, this.clock);
+      const operationIdRow = this.database
+        .prepare("SELECT operation_id FROM remote_execution_attempts WHERE execution_attempt_id=?")
+        .get(reservation.executionAttemptId);
+      if (!operationIdRow || typeof operationIdRow.operation_id !== "string") {
+        throw new Error("remote_operation_attempt_identity_mismatch");
+      }
+      const operation = operations.getRequired(
+        opaqueIdentifierSchema.parse(operationIdRow.operation_id)
+      );
+      const allowed: Readonly<Record<string, readonly string[]>> = {
+        reserved: ["activated"],
+        activated: ["running", "interrupted"],
+        running: ["interrupted", "action_required", "awaiting_writeback"],
+        interrupted: ["running"],
+        action_required: ["running", "interrupted"]
+      };
+      if (!allowed[operation.attempt.status]?.includes(status)) {
+        throw new Error("remote_attempt_transition_invalid");
+      }
+      if (operation.attempt.stateVersion !== input.expectedAttemptVersion) {
+        throw new Error("remote_attempt_version_conflict");
+      }
+      const now = this.clock().toISOString();
+      const updated = this.database
+        .prepare(
+          `UPDATE remote_execution_attempts SET status=?,state_version=state_version+1,updated_at=?
+           WHERE execution_attempt_id=? AND lease_id=? AND lease_fencing_token=?
+             AND state_version=?`
+        )
+        .run(
+          status,
+          now,
+          operation.executionAttemptId,
+          reservation.leaseId,
+          reservation.fencingToken,
+          input.expectedAttemptVersion
+        );
+      if (updated.changes !== 1) throw new Error("remote_attempt_version_conflict");
+      this.database
+        .prepare("UPDATE remote_operations SET state=?,updated_at=? WHERE id=?")
+        .run(status, now, operation.id);
+      const eventType =
+        status === "action_required"
+          ? "remote.attempt.action_required"
+          : status === "awaiting_writeback"
+            ? "remote.attempt.awaiting_writeback"
+            : status === "activated"
+              ? "remote.attempt.activated"
+              : status === "running"
+                ? "remote.attempt.running"
+                : "remote.attempt.interrupted";
+      operations.appendEvent(operation.id, operation.executionAttemptId, eventType, now);
+      return operations.getRequired(operation.id);
+    });
+  }
+
+  release(input: {
+    leaseId: string;
+    fencingToken: number;
+    expectedVersion: number;
+    reason: z.infer<typeof reservationReleaseReasonSchema>;
+  }): HostCapacityReservation {
+    const reason = reservationReleaseReasonSchema.parse(input.reason);
+    return inWriteTransaction(this.database, () => {
+      const reservation = this.getRequired(input.leaseId);
+      if (reservation.fencingToken !== input.fencingToken) {
+        throw new Error("reservation_fence_conflict");
+      }
+      if (reservation.version !== input.expectedVersion) {
+        throw new Error("reservation_version_conflict");
+      }
+      if (reservation.status !== "active") throw new Error("reservation_not_active");
+      const operationIdRow = this.database
+        .prepare("SELECT operation_id FROM remote_execution_attempts WHERE execution_attempt_id=?")
+        .get(reservation.executionAttemptId);
+      if (!operationIdRow || typeof operationIdRow.operation_id !== "string") {
+        throw new Error("remote_operation_attempt_identity_mismatch");
+      }
+      const operationId = opaqueIdentifierSchema.parse(operationIdRow.operation_id);
+      const now = this.clock().toISOString();
+      const reservationStatus =
+        reason === "expired" ? "expired" : reason === "cancelled" ? "cancelled" : "released";
+      const attemptStatus = reason === "expired" ? "interrupted" : reason;
+      const terminalAt = reason === "expired" ? null : now;
+      const updated = this.database
+        .prepare(
+          `UPDATE host_capacity_reservations
+           SET status=?,version=version+1,released_at=?
+           WHERE lease_id=? AND status='active' AND fencing_token=? AND version=?`
+        )
+        .run(
+          reservationStatus,
+          now,
+          reservation.leaseId,
+          reservation.fencingToken,
+          reservation.version
+        );
+      if (updated.changes !== 1) throw new Error("reservation_version_conflict");
+      this.database
+        .prepare(
+          `UPDATE remote_execution_attempts
+           SET status=?,state_version=state_version+1,updated_at=?,terminal_at=?
+           WHERE execution_attempt_id=? AND lease_id=? AND lease_fencing_token=?`
+        )
+        .run(
+          attemptStatus,
+          now,
+          terminalAt,
+          reservation.executionAttemptId,
+          reservation.leaseId,
+          reservation.fencingToken
+        );
+      this.database
+        .prepare(
+          `UPDATE remote_operations SET state=?,updated_at=?,terminal_at=?
+           WHERE execution_attempt_id=?`
+        )
+        .run(attemptStatus, now, terminalAt, reservation.executionAttemptId);
+      const eventRepository = new RemoteOperationRepository(this.database, this.clock);
+      const operation = eventRepository.getRequired(operationId);
+      eventRepository.appendEvent(
+        operation.id,
+        operation.executionAttemptId,
+        attemptEventForRelease(reason),
+        now
+      );
+      eventRepository.appendEvent(
+        operation.id,
+        operation.executionAttemptId,
+        reservationEventForRelease(reason),
+        now
+      );
+      return this.getRequired(reservation.leaseId);
+    });
+  }
+}

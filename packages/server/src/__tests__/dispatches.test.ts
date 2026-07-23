@@ -8,6 +8,7 @@ import { ArtifactStore } from "../artifacts.js";
 import type { DispatchRecord } from "../dispatches.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 import { executionEnvelopeFor } from "./protocolTestFixtures.js";
+import { createRemoteDispatchFixture } from "./support/remoteDispatchFixture.js";
 
 const directories: string[] = [];
 const servers: PlanweaveServer[] = [];
@@ -97,10 +98,11 @@ describe("distributed dispatch coordination", () => {
     ).not.toBe(registration.token);
 
     coordination.hosts.reportOnline(registration.host.id, ["linux", "node-22"], 2);
-    const dispatch = coordination.dispatches.dispatchBlock({
-      packageRef: "https://packages.example.test/project-a-v1.tar.zst",
-      envelope: executionEnvelopeFor("T-001#B-001", ["linux", "node-22"])
-    });
+    const dispatch = createRemoteDispatchFixture(
+      server.database,
+      coordination,
+      executionEnvelopeFor("T-001#B-001", ["linux", "node-22"])
+    );
 
     const messages = coordination.mailbox.listAfter(registration.host.id, 0);
     expect(messages).toHaveLength(1);
@@ -159,7 +161,7 @@ describe("distributed dispatch coordination", () => {
       dispatchId: dispatch.id,
       projectId: "project-a",
       blockRef: "T-001#B-001",
-      packageRef: "https://packages.example.test/project-a-v1.tar.zst",
+      packageRef: "runtime:project-a:default",
       result
     });
     expect(fail).not.toHaveBeenCalled();
@@ -189,10 +191,11 @@ describe("distributed dispatch coordination", () => {
     });
     const registration = coordination.hosts.register("Recovery Host");
     coordination.hosts.reportOnline(registration.host.id, ["linux"], 1);
-    const dispatch = coordination.dispatches.dispatchBlock({
-      packageRef: "package://project-a/v1",
-      envelope: executionEnvelopeFor("T-001#B-002", ["linux"])
-    });
+    const dispatch = createRemoteDispatchFixture(
+      server.database,
+      coordination,
+      executionEnvelopeFor("T-001#B-002", ["linux"])
+    );
     coordination.dispatches.accept(
       registration.host.id,
       "accept-2",
@@ -231,16 +234,18 @@ describe("distributed dispatch coordination", () => {
     coordination.hosts.reportOnline(registration.host.id, ["macos"], 1);
 
     expect(() =>
-      coordination.dispatches.dispatchBlock({
-        packageRef: "package://project-a/v1",
-        envelope: executionEnvelopeFor("T-001#B-003", ["linux"])
-      })
+      createRemoteDispatchFixture(
+        server.database,
+        coordination,
+        executionEnvelopeFor("T-001#B-003", ["linux"])
+      )
     ).toThrowError("no_compatible_agent_host");
 
-    const dispatch = coordination.dispatches.dispatchBlock({
-      packageRef: "package://project-a/v1",
-      envelope: executionEnvelopeFor("T-001#B-003", ["macos"])
-    });
+    const dispatch = createRemoteDispatchFixture(
+      server.database,
+      coordination,
+      executionEnvelopeFor("T-001#B-013", ["macos"])
+    );
     expect(() =>
       coordination.dispatches.accept(
         registration.host.id,
@@ -278,10 +283,11 @@ describe("distributed dispatch coordination", () => {
     });
     const registration = coordination.hosts.register("Restarted Host");
     coordination.hosts.reportOnline(registration.host.id, ["linux"], 1);
-    const dispatch = coordination.dispatches.dispatchBlock({
-      packageRef: "package://project-a/interrupted",
-      envelope: executionEnvelopeFor("T-001#B-005", ["linux"])
-    });
+    const dispatch = createRemoteDispatchFixture(
+      first.database,
+      coordination,
+      executionEnvelopeFor("T-001#B-005", ["linux"])
+    );
     coordination.dispatches.accept(
       registration.host.id,
       "accept-interrupted",
@@ -356,10 +362,12 @@ describe("distributed dispatch coordination", () => {
     });
     const registration = coordination.hosts.register("Expiring Host");
     coordination.hosts.reportOnline(registration.host.id, ["linux"], 1);
-    const dispatch = coordination.dispatches.dispatchBlock({
-      packageRef: "package://project-a/v1",
-      envelope: executionEnvelopeFor("T-001#B-004", ["linux"])
-    });
+    const dispatch = createRemoteDispatchFixture(
+      server.database,
+      coordination,
+      executionEnvelopeFor("T-001#B-004", ["linux"]),
+      { leaseDurationMs: 1_000 }
+    );
     coordination.dispatches.accept(
       registration.host.id,
       "accept-expiring",

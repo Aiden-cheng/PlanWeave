@@ -16,6 +16,7 @@ export type MailboxMessage = {
   command: MailboxCommand;
   createdAt: string;
   acknowledgedAt?: string;
+  publishedAt?: string;
 };
 
 type MailboxListener = (message: MailboxMessage) => void;
@@ -27,7 +28,8 @@ function toMessage(row: Record<string, unknown>): MailboxMessage {
     hostId: String(row.host_id),
     command: mailboxCommandSchema.parse(JSON.parse(String(row.command_json))),
     createdAt: String(row.created_at),
-    acknowledgedAt: row.acknowledged_at ? String(row.acknowledged_at) : undefined
+    acknowledgedAt: row.acknowledged_at ? String(row.acknowledged_at) : undefined,
+    publishedAt: row.published_at ? String(row.published_at) : undefined
   };
 }
 
@@ -55,6 +57,59 @@ export class DurableMailbox {
       command: parsedCommand,
       createdAt
     };
+  }
+
+  enqueueOnce(
+    messageId: string,
+    hostId: string,
+    command: MailboxCommand
+  ): { message: MailboxMessage; created: boolean } {
+    const parsedMessageId = mailboxMessageIdSchema.parse(messageId);
+    const parsedCommand = mailboxCommandSchema.parse(command);
+    const existing = this.database
+      .prepare("SELECT * FROM mailbox_messages WHERE message_id=?")
+      .get(parsedMessageId);
+    if (existing) {
+      const message = toMessage(existing);
+      if (
+        message.hostId !== hostId ||
+        JSON.stringify(message.command) !== JSON.stringify(parsedCommand)
+      ) {
+        throw new Error("mailbox_message_identity_conflict");
+      }
+      return { message, created: false };
+    }
+    const createdAt = new Date().toISOString();
+    const result = this.database
+      .prepare(
+        "INSERT INTO mailbox_messages(message_id,host_id,command_json,created_at) VALUES (?,?,?,?)"
+      )
+      .run(parsedMessageId, hostId, JSON.stringify(parsedCommand), createdAt);
+    return {
+      created: true,
+      message: {
+        sequence: Number(result.lastInsertRowid),
+        messageId: parsedMessageId,
+        hostId,
+        command: parsedCommand,
+        createdAt
+      }
+    };
+  }
+
+  markPublished(messageId: string, at = new Date()): MailboxMessage {
+    const parsedMessageId = mailboxMessageIdSchema.parse(messageId);
+    const updated = this.database
+      .prepare(
+        "UPDATE mailbox_messages SET published_at=COALESCE(published_at,?) WHERE message_id=?"
+      )
+      .run(at.toISOString(), parsedMessageId);
+    if (updated.changes !== 1) throw new Error("mailbox_message_not_found");
+    const row = this.database
+      .prepare("SELECT * FROM mailbox_messages WHERE message_id=?")
+      .get(parsedMessageId);
+    if (!row) throw new Error("mailbox_message_not_found");
+    return toMessage(row);
   }
 
   publish(message: MailboxMessage): void {

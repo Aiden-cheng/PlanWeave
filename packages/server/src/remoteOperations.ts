@@ -1,0 +1,504 @@
+import {
+  dispatchIdSchema,
+  executionAttemptIdSchema,
+  opaqueIdentifierSchema
+} from "@planweave-ai/distributed-protocol";
+import { createHash, randomUUID } from "node:crypto";
+import { z } from "zod";
+import { capabilitiesSchema } from "./protocol.js";
+import { inWriteTransaction, type SqliteDatabase } from "./sqlite.js";
+
+const boundedKeySchema = z
+  .string()
+  .min(1)
+  .max(256)
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: persisted keys reject C0 controls and DEL.
+  .regex(/^[^\u0000-\u001f\u007f]+$/);
+const blockRefSchema = z
+  .string()
+  .min(3)
+  .max(257)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*#[A-Za-z0-9][A-Za-z0-9._:-]*$/);
+const timestampSchema = z.iso.datetime();
+
+export const remoteOperationStateSchema = z.enum([
+  "preparing",
+  "claimed",
+  "reserved",
+  "activated",
+  "running",
+  "interrupted",
+  "action_required",
+  "awaiting_writeback",
+  "completed",
+  "failed",
+  "cancelled"
+]);
+
+export const remoteAttemptStatusSchema = z.enum([
+  "prepared",
+  "reserved",
+  "activated",
+  "running",
+  "interrupted",
+  "action_required",
+  "awaiting_writeback",
+  "completed",
+  "failed",
+  "cancelled"
+]);
+
+export const remotePersistenceEventTypeSchema = z.enum([
+  "remote.operation.created",
+  "remote.operation.claimed",
+  "remote.operation.envelope_recorded",
+  "remote.attempt.reserved",
+  "remote.attempt.activated",
+  "remote.attempt.running",
+  "remote.attempt.interrupted",
+  "remote.attempt.action_required",
+  "remote.attempt.awaiting_writeback",
+  "remote.attempt.completed",
+  "remote.attempt.failed",
+  "remote.attempt.cancelled",
+  "remote.reservation.released",
+  "remote.reservation.expired",
+  "remote.reservation.cancelled"
+]);
+
+export const createRemoteOperationInputSchema = z
+  .object({
+    projectId: opaqueIdentifierSchema,
+    canvasId: opaqueIdentifierSchema,
+    blockRef: blockRefSchema,
+    ownershipGeneration: opaqueIdentifierSchema,
+    idempotencyKey: boundedKeySchema,
+    sourceFingerprint: opaqueIdentifierSchema,
+    requiredCapabilities: capabilitiesSchema
+  })
+  .strict();
+
+const operationRowSchema = z
+  .object({
+    id: opaqueIdentifierSchema,
+    project_id: opaqueIdentifierSchema,
+    canvas_id: opaqueIdentifierSchema,
+    block_ref: blockRefSchema,
+    ownership_generation: opaqueIdentifierSchema,
+    idempotency_key: boundedKeySchema,
+    request_fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+    source_fingerprint: opaqueIdentifierSchema,
+    required_capabilities_json: z.string(),
+    state: remoteOperationStateSchema,
+    dispatch_id: dispatchIdSchema,
+    execution_attempt_id: executionAttemptIdSchema,
+    envelope_digest: z
+      .string()
+      .regex(/^envelope:sha256:[a-f0-9]{64}$/)
+      .nullable(),
+    envelope_reference: boundedKeySchema.nullable(),
+    created_at: timestampSchema,
+    updated_at: timestampSchema,
+    terminal_at: timestampSchema.nullable()
+  })
+  .strict();
+
+const attemptRowSchema = z
+  .object({
+    execution_attempt_id: executionAttemptIdSchema,
+    operation_id: opaqueIdentifierSchema,
+    dispatch_id: dispatchIdSchema,
+    project_id: opaqueIdentifierSchema,
+    canvas_id: opaqueIdentifierSchema,
+    block_ref: blockRefSchema,
+    ownership_generation: opaqueIdentifierSchema,
+    status: remoteAttemptStatusSchema,
+    host_id: opaqueIdentifierSchema.nullable(),
+    lease_id: opaqueIdentifierSchema.nullable(),
+    lease_fencing_token: z.number().int().nonnegative(),
+    lease_expires_at: timestampSchema.nullable(),
+    state_version: z.number().int().nonnegative(),
+    created_at: timestampSchema,
+    updated_at: timestampSchema,
+    terminal_at: timestampSchema.nullable()
+  })
+  .strict();
+
+export type CreateRemoteOperationInput = z.infer<typeof createRemoteOperationInputSchema>;
+export type RemoteOperationState = z.infer<typeof remoteOperationStateSchema>;
+export type RemoteAttemptStatus = z.infer<typeof remoteAttemptStatusSchema>;
+export type RemotePersistenceEventType = z.infer<typeof remotePersistenceEventTypeSchema>;
+
+export type RemoteExecutionAttempt = {
+  executionAttemptId: string;
+  operationId: string;
+  dispatchId: string;
+  projectId: string;
+  canvasId: string;
+  blockRef: string;
+  ownershipGeneration: string;
+  status: RemoteAttemptStatus;
+  hostId?: string;
+  leaseId?: string;
+  leaseFencingToken: number;
+  leaseExpiresAt?: string;
+  stateVersion: number;
+  createdAt: string;
+  updatedAt: string;
+  terminalAt?: string;
+};
+
+export type RemoteOperation = {
+  id: string;
+  projectId: string;
+  canvasId: string;
+  blockRef: string;
+  ownershipGeneration: string;
+  idempotencyKey: string;
+  requestFingerprint: string;
+  sourceFingerprint: string;
+  requiredCapabilities: string[];
+  state: RemoteOperationState;
+  dispatchId: string;
+  executionAttemptId: string;
+  envelopeDigest?: string;
+  envelopeReference?: string;
+  createdAt: string;
+  updatedAt: string;
+  terminalAt?: string;
+  attempt: RemoteExecutionAttempt;
+};
+
+const operationColumns = `
+  id,project_id,canvas_id,block_ref,ownership_generation,idempotency_key,request_fingerprint,
+  source_fingerprint,required_capabilities_json,state,dispatch_id,execution_attempt_id,
+  envelope_digest,envelope_reference,created_at,updated_at,terminal_at
+`;
+
+const attemptColumns = `
+  execution_attempt_id,operation_id,dispatch_id,project_id,canvas_id,block_ref,
+  ownership_generation,status,host_id,lease_id,lease_fencing_token,lease_expires_at,
+  state_version,created_at,updated_at,terminal_at
+`;
+
+function requestFingerprint(input: CreateRemoteOperationInput): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        projectId: input.projectId,
+        canvasId: input.canvasId,
+        blockRef: input.blockRef,
+        ownershipGeneration: input.ownershipGeneration,
+        idempotencyKey: input.idempotencyKey,
+        sourceFingerprint: input.sourceFingerprint,
+        requiredCapabilities: input.requiredCapabilities
+      })
+    )
+    .digest("hex");
+}
+
+function parseAttempt(row: Record<string, unknown>): RemoteExecutionAttempt {
+  const parsed = attemptRowSchema.parse(row);
+  return {
+    executionAttemptId: parsed.execution_attempt_id,
+    operationId: parsed.operation_id,
+    dispatchId: parsed.dispatch_id,
+    projectId: parsed.project_id,
+    canvasId: parsed.canvas_id,
+    blockRef: parsed.block_ref,
+    ownershipGeneration: parsed.ownership_generation,
+    status: parsed.status,
+    hostId: parsed.host_id ?? undefined,
+    leaseId: parsed.lease_id ?? undefined,
+    leaseFencingToken: parsed.lease_fencing_token,
+    leaseExpiresAt: parsed.lease_expires_at ?? undefined,
+    stateVersion: parsed.state_version,
+    createdAt: parsed.created_at,
+    updatedAt: parsed.updated_at,
+    terminalAt: parsed.terminal_at ?? undefined
+  };
+}
+
+export class RemoteOperationRepository {
+  constructor(
+    private readonly database: SqliteDatabase,
+    private readonly clock: () => Date = () => new Date()
+  ) {}
+
+  create(rawInput: CreateRemoteOperationInput): RemoteOperation {
+    const input = createRemoteOperationInputSchema.parse(rawInput);
+    const fingerprint = requestFingerprint(input);
+    return inWriteTransaction(this.database, () => {
+      const existing = this.findByKey(input);
+      if (existing) {
+        if (
+          existing.requestFingerprint !== fingerprint ||
+          existing.projectId !== input.projectId ||
+          existing.canvasId !== input.canvasId ||
+          existing.blockRef !== input.blockRef ||
+          existing.ownershipGeneration !== input.ownershipGeneration ||
+          existing.idempotencyKey !== input.idempotencyKey ||
+          existing.sourceFingerprint !== input.sourceFingerprint ||
+          existing.requiredCapabilities.length !== input.requiredCapabilities.length ||
+          existing.requiredCapabilities.some(
+            (capability, index) => capability !== input.requiredCapabilities[index]
+          )
+        ) {
+          throw new Error("remote_operation_idempotency_conflict");
+        }
+        return existing;
+      }
+      const operationId = opaqueIdentifierSchema.parse(`operation-${randomUUID()}`);
+      const dispatchId = dispatchIdSchema.parse(`dispatch-${randomUUID()}`);
+      const executionAttemptId = executionAttemptIdSchema.parse(`attempt-${randomUUID()}`);
+      const now = this.clock().toISOString();
+      this.database
+        .prepare(
+          `INSERT INTO remote_operations(
+            id,project_id,canvas_id,block_ref,ownership_generation,idempotency_key,
+            request_fingerprint,source_fingerprint,required_capabilities_json,state,
+            dispatch_id,execution_attempt_id,created_at,updated_at
+          ) VALUES (?,?,?,?,?,?,?,?,?,'preparing',?,?,?,?)`
+        )
+        .run(
+          operationId,
+          input.projectId,
+          input.canvasId,
+          input.blockRef,
+          input.ownershipGeneration,
+          input.idempotencyKey,
+          fingerprint,
+          input.sourceFingerprint,
+          JSON.stringify(input.requiredCapabilities),
+          dispatchId,
+          executionAttemptId,
+          now,
+          now
+        );
+      this.database
+        .prepare(
+          `INSERT INTO remote_execution_attempts(
+            execution_attempt_id,operation_id,dispatch_id,project_id,canvas_id,block_ref,
+            ownership_generation,status,created_at,updated_at
+          ) VALUES (?,?,?,?,?,?,?,'prepared',?,?)`
+        )
+        .run(
+          executionAttemptId,
+          operationId,
+          dispatchId,
+          input.projectId,
+          input.canvasId,
+          input.blockRef,
+          input.ownershipGeneration,
+          now,
+          now
+        );
+      this.appendEvent(operationId, executionAttemptId, "remote.operation.created", now);
+      return this.getRequired(operationId);
+    });
+  }
+
+  markClaimed(operationId: string): RemoteOperation {
+    return inWriteTransaction(this.database, () => {
+      const operation = this.getRequired(operationId);
+      if (operation.state === "claimed") return operation;
+      if (operation.state !== "preparing") throw new Error("remote_operation_not_preparing");
+      const now = this.clock().toISOString();
+      this.database
+        .prepare("UPDATE remote_operations SET state='claimed',updated_at=? WHERE id=?")
+        .run(now, operation.id);
+      this.appendEvent(operation.id, operation.executionAttemptId, "remote.operation.claimed", now);
+      return this.getRequired(operation.id);
+    });
+  }
+
+  recordEnvelope(input: {
+    operationId: string;
+    digest: string;
+    reference?: string;
+  }): RemoteOperation {
+    const digest = z
+      .string()
+      .regex(/^envelope:sha256:[a-f0-9]{64}$/)
+      .parse(input.digest);
+    const reference =
+      input.reference === undefined ? undefined : boundedKeySchema.parse(input.reference);
+    return inWriteTransaction(this.database, () => {
+      const operation = this.getRequired(input.operationId);
+      if (operation.envelopeDigest) {
+        if (operation.envelopeDigest !== digest || operation.envelopeReference !== reference) {
+          throw new Error("remote_operation_envelope_conflict");
+        }
+        return operation;
+      }
+      if (operation.state !== "preparing" && operation.state !== "claimed") {
+        throw new Error("remote_operation_envelope_too_late");
+      }
+      const now = this.clock().toISOString();
+      this.database
+        .prepare(
+          "UPDATE remote_operations SET envelope_digest=?,envelope_reference=?,updated_at=? WHERE id=?"
+        )
+        .run(digest, reference ?? null, now, operation.id);
+      this.appendEvent(
+        operation.id,
+        operation.executionAttemptId,
+        "remote.operation.envelope_recorded",
+        now
+      );
+      return this.getRequired(operation.id);
+    });
+  }
+
+  appendEvent(
+    operationId: string,
+    executionAttemptId: string | undefined,
+    type: RemotePersistenceEventType,
+    occurredAt = this.clock().toISOString()
+  ): void {
+    this.database
+      .prepare(
+        `INSERT INTO remote_operation_events(operation_id,execution_attempt_id,type,occurred_at)
+         VALUES (?,?,?,?)`
+      )
+      .run(
+        opaqueIdentifierSchema.parse(operationId),
+        executionAttemptId ? executionAttemptIdSchema.parse(executionAttemptId) : null,
+        remotePersistenceEventTypeSchema.parse(type),
+        timestampSchema.parse(occurredAt)
+      );
+  }
+
+  get(operationId: string): RemoteOperation | undefined {
+    const row = this.database
+      .prepare(`SELECT ${operationColumns} FROM remote_operations WHERE id=?`)
+      .get(operationId);
+    if (!row) return undefined;
+    try {
+      const parsed = operationRowSchema.parse(row);
+      const requiredCapabilities = capabilitiesSchema.parse(
+        JSON.parse(parsed.required_capabilities_json)
+      );
+      const attemptRow = this.database
+        .prepare(`SELECT ${attemptColumns} FROM remote_execution_attempts WHERE operation_id=?`)
+        .get(parsed.id);
+      if (!attemptRow) throw new Error("remote_execution_attempt_missing");
+      const attempt = parseAttempt(attemptRow);
+      if (
+        attempt.executionAttemptId !== parsed.execution_attempt_id ||
+        attempt.dispatchId !== parsed.dispatch_id ||
+        attempt.projectId !== parsed.project_id ||
+        attempt.canvasId !== parsed.canvas_id ||
+        attempt.blockRef !== parsed.block_ref ||
+        attempt.ownershipGeneration !== parsed.ownership_generation
+      ) {
+        throw new Error("remote_operation_attempt_identity_mismatch");
+      }
+      return {
+        id: parsed.id,
+        projectId: parsed.project_id,
+        canvasId: parsed.canvas_id,
+        blockRef: parsed.block_ref,
+        ownershipGeneration: parsed.ownership_generation,
+        idempotencyKey: parsed.idempotency_key,
+        requestFingerprint: parsed.request_fingerprint,
+        sourceFingerprint: parsed.source_fingerprint,
+        requiredCapabilities,
+        state: parsed.state,
+        dispatchId: parsed.dispatch_id,
+        executionAttemptId: parsed.execution_attempt_id,
+        envelopeDigest: parsed.envelope_digest ?? undefined,
+        envelopeReference: parsed.envelope_reference ?? undefined,
+        createdAt: parsed.created_at,
+        updatedAt: parsed.updated_at,
+        terminalAt: parsed.terminal_at ?? undefined,
+        attempt
+      };
+    } catch (error) {
+      throw new Error("remote_operation_row_invalid", { cause: error });
+    }
+  }
+
+  getRequired(operationId: string): RemoteOperation {
+    const operation = this.get(operationId);
+    if (!operation) throw new Error("remote_operation_not_found");
+    return operation;
+  }
+
+  getByDispatchId(dispatchId: string): RemoteOperation | undefined {
+    const row = this.database
+      .prepare("SELECT id FROM remote_operations WHERE dispatch_id=?")
+      .get(dispatchId);
+    return typeof row?.id === "string" ? this.getRequired(row.id) : undefined;
+  }
+
+  findByCallerIdentity(input: {
+    projectId: string;
+    canvasId: string;
+    blockRef: string;
+    idempotencyKey: string;
+  }): RemoteOperation | undefined {
+    const rows = this.database
+      .prepare(
+        `SELECT id FROM remote_operations
+         WHERE project_id=? AND canvas_id=? AND block_ref=? AND idempotency_key=?
+         ORDER BY created_at DESC,id DESC LIMIT 2`
+      )
+      .all(input.projectId, input.canvasId, input.blockRef, input.idempotencyKey);
+    if (rows.length > 1) throw new Error("remote_operation_generation_ambiguous");
+    const id = rows[0]?.id;
+    return typeof id === "string" ? this.getRequired(id) : undefined;
+  }
+
+  listNonTerminal(): RemoteOperation[] {
+    return this.database
+      .prepare(
+        `SELECT id FROM remote_operations
+         WHERE state NOT IN ('completed','failed','cancelled') ORDER BY created_at,id`
+      )
+      .all()
+      .map((row) => {
+        if (typeof row.id !== "string") throw new Error("remote_operation_row_invalid");
+        return this.getRequired(row.id);
+      });
+  }
+
+  recordDiagnostic(operationId: string, code: string, message: string): void {
+    const parsedCode = opaqueIdentifierSchema.parse(code);
+    const parsedMessage = z.string().min(1).max(4_096).parse(message);
+    const updated = this.database
+      .prepare(
+        `UPDATE remote_operations SET diagnostic_code=?,diagnostic_message=?,updated_at=?
+         WHERE id=? AND state NOT IN ('completed','failed','cancelled')`
+      )
+      .run(parsedCode, parsedMessage, this.clock().toISOString(), operationId);
+    if (updated.changes !== 1) throw new Error("remote_operation_not_actionable");
+  }
+
+  clearDiagnostic(operationId: string): void {
+    const updated = this.database
+      .prepare(
+        `UPDATE remote_operations SET diagnostic_code=NULL,diagnostic_message=NULL,updated_at=?
+         WHERE id=? AND state NOT IN ('completed','failed','cancelled')`
+      )
+      .run(this.clock().toISOString(), operationId);
+    if (updated.changes !== 1) throw new Error("remote_operation_not_actionable");
+  }
+
+  private findByKey(input: CreateRemoteOperationInput): RemoteOperation | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT id FROM remote_operations
+         WHERE project_id=? AND canvas_id=? AND block_ref=? AND ownership_generation=?
+           AND idempotency_key=?`
+      )
+      .get(
+        input.projectId,
+        input.canvasId,
+        input.blockRef,
+        input.ownershipGeneration,
+        input.idempotencyKey
+      );
+    return row ? this.getRequired(String(row.id)) : undefined;
+  }
+}

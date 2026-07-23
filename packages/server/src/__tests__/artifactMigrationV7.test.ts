@@ -29,10 +29,20 @@ async function createV5Database(mediaType: string) {
       (1,'2020-01-01T00:00:00.000Z'),(2,'2020-01-01T00:00:00.000Z'),
       (3,'2020-01-01T00:00:00.000Z'),(4,'2020-01-01T00:00:00.000Z'),
       (5,'2020-01-01T00:00:00.000Z');
-    CREATE TABLE agent_hosts(id TEXT PRIMARY KEY);
+    CREATE TABLE agent_hosts(
+      id TEXT PRIMARY KEY,display_name TEXT NOT NULL,credential_hash TEXT NOT NULL,
+      capabilities_json TEXT NOT NULL,capacity INTEGER NOT NULL,last_seen_at TEXT,
+      last_acknowledged_sequence INTEGER NOT NULL DEFAULT 0,revoked_at TEXT,
+      created_at TEXT NOT NULL
+    );
     CREATE TABLE dispatches(
       id TEXT PRIMARY KEY,project_id TEXT NOT NULL,host_id TEXT NOT NULL,
       lease_id TEXT NOT NULL,execution_attempt_id TEXT NOT NULL
+    );
+    CREATE TABLE mailbox_messages(
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,message_id TEXT NOT NULL UNIQUE,
+      host_id TEXT NOT NULL REFERENCES agent_hosts(id),command_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,acknowledged_at TEXT
     );
     CREATE TABLE artifacts(
       ref TEXT PRIMARY KEY,sha256 TEXT NOT NULL UNIQUE,size_bytes INTEGER NOT NULL,
@@ -64,7 +74,7 @@ describe("artifact migration v7", () => {
     const mediaType = 'text/plain; charset="utf-8"';
     const { dataDirectory, database, digest } = await createV5Database(legacyMediaType);
     applyMigrations(database);
-    expect(centralSchemaVersion(database)).toBe(8);
+    expect(centralSchemaVersion(database)).toBe(12);
     expect(
       new ArtifactStore(database, dataDirectory, 1024).get(`artifact:sha256:${digest}`)
     ).toMatchObject({ mediaType });
@@ -74,7 +84,7 @@ describe("artifact migration v7", () => {
     const reopened = await openServerDatabase(join(dataDirectory, "server.sqlite"), 5000);
     databases.push(reopened);
     applyMigrations(reopened);
-    expect(centralSchemaVersion(reopened)).toBe(8);
+    expect(centralSchemaVersion(reopened)).toBe(12);
     expect(
       new ArtifactStore(reopened, dataDirectory, 1024).get(`artifact:sha256:${digest}`)
     ).toMatchObject({ mediaType });
@@ -111,6 +121,20 @@ describe("artifact migration v7", () => {
         (3,'2020-01-01T00:00:00.000Z'),(4,'2020-01-01T00:00:00.000Z'),
         (5,'2020-01-01T00:00:00.000Z'),(6,'2020-01-01T00:00:00.000Z'),
         (7,'2020-01-01T00:00:00.000Z');
+      CREATE TABLE agent_hosts(
+        id TEXT PRIMARY KEY,display_name TEXT NOT NULL,credential_hash TEXT NOT NULL,
+        capabilities_json TEXT NOT NULL,capacity INTEGER NOT NULL,last_seen_at TEXT,
+        last_acknowledged_sequence INTEGER NOT NULL DEFAULT 0,revoked_at TEXT,
+        created_at TEXT NOT NULL
+      );
+      INSERT INTO agent_hosts(
+        id,display_name,credential_hash,capabilities_json,capacity,created_at
+      ) VALUES ('host-v7','Host v7','credential-hash','["test"]',1,'2020-01-01T00:00:00.000Z');
+      CREATE TABLE mailbox_messages(
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT,message_id TEXT NOT NULL UNIQUE,
+        host_id TEXT NOT NULL REFERENCES agent_hosts(id),command_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,acknowledged_at TEXT
+      );
       CREATE TABLE artifact_blobs(
         ref TEXT PRIMARY KEY,sha256 TEXT NOT NULL UNIQUE,size_bytes INTEGER NOT NULL,
         media_type TEXT NOT NULL,relative_path TEXT NOT NULL UNIQUE,created_at TEXT NOT NULL
@@ -130,7 +154,7 @@ describe("artifact migration v7", () => {
 
     applyMigrations(database);
 
-    expect(centralSchemaVersion(database)).toBe(8);
+    expect(centralSchemaVersion(database)).toBe(12);
     expect(
       database.prepare("SELECT media_type FROM artifact_blobs WHERE ref=?").get(artifactRef)
         ?.media_type
@@ -146,7 +170,7 @@ describe("artifact migration v7", () => {
     const reopened = await openServerDatabase(databasePath, 5000);
     databases.push(reopened);
     applyMigrations(reopened);
-    expect(centralSchemaVersion(reopened)).toBe(8);
+    expect(centralSchemaVersion(reopened)).toBe(12);
     expect(
       reopened.prepare("SELECT media_type FROM artifact_blobs WHERE ref=?").get(artifactRef)
         ?.media_type

@@ -1,0 +1,442 @@
+import {
+  OUTPUT_MAX_ARTIFACT_BYTES,
+  OUTPUT_MAX_ARTIFACT_COUNT,
+  agentHostProtocolVersion,
+  executionEnvelopeSchema,
+  hashExecutionEnvelope,
+  mailboxCommandSchema,
+  type NormalizedFailure
+} from "@planweave-ai/distributed-protocol";
+import type { RemoteBlockDispatchCandidate } from "@planweave-ai/runtime";
+import { remoteBlockFailureInputSchema, remoteBlockRefIdentitySchema } from "@planweave-ai/runtime";
+import type {
+  RemoteArtifactContentPort,
+  RemoteBlockRuntimeResolverPort,
+  RemoteCoordinatorCheckpoint,
+  RemoteCoordinatorCheckpointPort,
+  RemoteDispatchPersistencePort,
+  RemoteInputArtifactPort,
+  RemoteMailboxPublisherPort,
+  RemoteOperationCandidatePort,
+  RemoteRuntimeLocator
+} from "./remoteBlockCoordinatorPorts.js";
+import { HostReservationRepository } from "./hostReservations.js";
+import { RemoteOperationRepository, type RemoteOperation } from "./remoteOperations.js";
+
+export type RemoteDispatchRequest = RemoteRuntimeLocator & {
+  blockRef: string;
+  idempotencyKey: string;
+};
+
+export type RemoteDispatchOutcome = {
+  operation: RemoteOperation;
+  status:
+    | "awaiting_host"
+    | "activated"
+    | "active"
+    | "wait_for_action"
+    | "awaiting_writeback"
+    | "terminal";
+};
+
+export type RemoteBlockCoordinatorOptions = {
+  runtimeResolver: RemoteBlockRuntimeResolverPort;
+  operations: RemoteOperationRepository;
+  candidates: RemoteOperationCandidatePort;
+  reservations: HostReservationRepository;
+  dispatches: RemoteDispatchPersistencePort;
+  mailbox: RemoteMailboxPublisherPort;
+  inputArtifacts: RemoteInputArtifactPort;
+  artifactContent: RemoteArtifactContentPort;
+  checkpoints?: RemoteCoordinatorCheckpointPort;
+};
+
+function buildEnvelope(operation: RemoteOperation, candidate: RemoteBlockDispatchCandidate) {
+  return executionEnvelopeSchema.parse({
+    protocolVersion: agentHostProtocolVersion,
+    execution: {
+      dispatchId: operation.dispatchId,
+      attemptId: operation.executionAttemptId
+    },
+    projectId: candidate.projectId,
+    canvasId: candidate.canvasId,
+    taskId: candidate.taskId,
+    blockRef: candidate.blockRef,
+    blockType: candidate.blockType,
+    sourceRevision: candidate.sourceRevision,
+    graphFingerprint: candidate.graphFingerprint,
+    renderedPrompt: candidate.renderedPrompt,
+    acceptance: candidate.acceptance,
+    dependencySummaries: candidate.dependencySummaries,
+    inputArtifacts: candidate.inputArtifacts,
+    workspaceId: candidate.workspaceId,
+    agentId: candidate.agentId,
+    agentProfileId: candidate.agentProfileId,
+    session: candidate.session,
+    requiredCapabilities: candidate.requiredCapabilities,
+    output: {
+      reportRequired: true,
+      maxArtifactBytes: OUTPUT_MAX_ARTIFACT_BYTES,
+      maxArtifactCount: OUTPUT_MAX_ARTIFACT_COUNT
+    },
+    trace: { correlationId: operation.id }
+  });
+}
+
+function identity(operation: RemoteOperation) {
+  return remoteBlockRefIdentitySchema.parse({
+    ref: operation.blockRef,
+    operationId: operation.id,
+    sourceRevision: operation.ownershipGeneration,
+    graphFingerprint: operation.sourceFingerprint,
+    dispatchId: operation.dispatchId,
+    executionAttemptId: operation.executionAttemptId
+  });
+}
+
+export class RemoteBlockCoordinator {
+  constructor(private readonly options: RemoteBlockCoordinatorOptions) {}
+
+  private async checkpoint(point: RemoteCoordinatorCheckpoint): Promise<void> {
+    await this.options.checkpoints?.reached(point);
+  }
+
+  async dispatch(request: RemoteDispatchRequest): Promise<RemoteDispatchOutcome> {
+    const existing = this.options.operations.findByCallerIdentity(request);
+    if (existing) return this.reenter(existing.id);
+
+    const runtime = this.options.runtimeResolver.resolve(request);
+    const candidate = await runtime.inspect({ ref: request.blockRef });
+    if (candidate.projectId !== request.projectId || candidate.canvasId !== request.canvasId) {
+      throw new Error("remote_runtime_locator_candidate_mismatch");
+    }
+    await this.checkpoint("before_operation_commit");
+    const operation = this.options.operations.create({
+      projectId: candidate.projectId,
+      canvasId: candidate.canvasId,
+      blockRef: candidate.blockRef,
+      ownershipGeneration: candidate.sourceRevision,
+      idempotencyKey: request.idempotencyKey,
+      sourceFingerprint: candidate.graphFingerprint,
+      requiredCapabilities: candidate.requiredCapabilities
+    });
+    await this.checkpoint("after_operation_commit");
+    this.options.candidates.record(operation.id, candidate);
+    await this.checkpoint("after_candidate_persistence");
+    return this.reenter(operation.id);
+  }
+
+  async reenter(operationId: string): Promise<RemoteDispatchOutcome> {
+    let operation = this.options.operations.getRequired(operationId);
+    if (["completed", "failed", "cancelled"].includes(operation.state)) {
+      return { operation, status: "terminal" };
+    }
+    const runtime = this.options.runtimeResolver.resolve(operation);
+    if (operation.state !== "preparing") {
+      try {
+        const binding = await runtime.reconcile({
+          ref: operation.blockRef,
+          operationId: operation.id
+        });
+        if (binding.divergenceReason) {
+          this.options.operations.recordDiagnostic(
+            operation.id,
+            "remote_source_changed",
+            binding.divergenceReason
+          );
+          throw new Error("remote_source_changed");
+        }
+      } catch (error) {
+        this.options.operations.recordDiagnostic(
+          operation.id,
+          "runtime_reconciliation_conflict",
+          error instanceof Error ? error.message : "Runtime reconciliation failed."
+        );
+        throw error;
+      }
+    }
+    let candidate = this.options.candidates.get(operation.id);
+    if (!candidate) {
+      if (operation.state !== "preparing") throw new Error("remote_operation_candidate_missing");
+      candidate = await runtime.inspect({ ref: operation.blockRef });
+      if (
+        candidate.projectId !== operation.projectId ||
+        candidate.canvasId !== operation.canvasId ||
+        candidate.sourceRevision !== operation.ownershipGeneration ||
+        candidate.graphFingerprint !== operation.sourceFingerprint
+      ) {
+        this.options.operations.recordDiagnostic(
+          operation.id,
+          "remote_source_changed",
+          "The Runtime source changed before the durable candidate could be restored."
+        );
+        throw new Error("remote_source_changed");
+      }
+      this.options.candidates.record(operation.id, candidate);
+      await this.checkpoint("after_candidate_persistence");
+    }
+
+    if (operation.state === "preparing") {
+      try {
+        await runtime.claim({
+          ref: operation.blockRef,
+          operationId: operation.id,
+          sourceRevision: operation.ownershipGeneration,
+          graphFingerprint: operation.sourceFingerprint
+        });
+        await this.checkpoint("after_runtime_claim");
+      } catch (error) {
+        this.options.operations.recordDiagnostic(
+          operation.id,
+          "runtime_claim_conflict",
+          error instanceof Error ? error.message : "Runtime claim failed."
+        );
+        throw error;
+      }
+      operation = this.options.operations.getRequired(operation.id);
+      if (operation.state === "preparing") {
+        operation = this.options.operations.markClaimed(operation.id);
+      }
+    }
+
+    const envelope = buildEnvelope(operation, candidate);
+    const envelopeDigest = hashExecutionEnvelope(envelope);
+    operation = this.options.operations.recordEnvelope({
+      operationId: operation.id,
+      digest: envelopeDigest
+    });
+    await this.checkpoint("after_envelope_persistence");
+    await this.options.inputArtifacts.materialize(candidate);
+    await this.checkpoint("after_input_materialization");
+
+    const persisted = this.inspectPersistence(
+      operation,
+      envelopeDigest,
+      candidate.inputArtifacts.length
+    );
+    if (persisted.dispatch?.status === "running" || persisted.dispatch?.status === "cancelling") {
+      await this.checkpoint("after_host_acceptance_observed");
+      return { operation: this.options.operations.getRequired(operation.id), status: "active" };
+    }
+    if (persisted.dispatch?.status === "interrupted") {
+      return {
+        operation: this.options.operations.getRequired(operation.id),
+        status: "wait_for_action"
+      };
+    }
+    if (persisted.dispatch?.status === "awaiting_writeback") {
+      await this.checkpoint("after_terminal_event_persistence");
+      const action = persisted.dispatch.terminalAction;
+      if (!action) {
+        this.recordInconsistency(
+          operation,
+          "An awaiting-writeback dispatch has no terminal payload."
+        );
+      }
+      if (action.kind === "complete") {
+        await this.complete(operation.id, action.reportArtifactRef);
+      } else {
+        await this.fail(operation.id, action.failure);
+      }
+      return {
+        operation: this.options.operations.getRequired(operation.id),
+        status: "terminal"
+      };
+    }
+    if (
+      persisted.dispatch?.status === "completed" ||
+      persisted.dispatch?.status === "failed" ||
+      persisted.dispatch?.status === "cancelled"
+    ) {
+      this.finalizeOperationTerminal(operation, persisted.dispatch.status);
+      return {
+        operation: this.options.operations.getRequired(operation.id),
+        status: "terminal"
+      };
+    }
+
+    let reservation = operation.attempt.leaseId
+      ? this.options.reservations.getRequired(operation.attempt.leaseId)
+      : undefined;
+    if (!reservation) {
+      try {
+        reservation = this.options.reservations.reserve(operation.id);
+        await this.checkpoint("after_host_reservation");
+        this.options.operations.clearDiagnostic(operation.id);
+      } catch (error) {
+        if (error instanceof Error && error.message === "no_compatible_agent_host") {
+          this.options.operations.recordDiagnostic(
+            operation.id,
+            "no_compatible_agent_host",
+            "No compatible online Agent Host currently has reservation capacity."
+          );
+          return {
+            operation: this.options.operations.getRequired(operation.id),
+            status: "awaiting_host"
+          };
+        }
+        throw error;
+      }
+    }
+    operation = this.options.operations.getRequired(operation.id);
+    this.options.dispatches.prepare({ operation, reservation, envelope, envelopeDigest });
+    await this.checkpoint("after_dispatch_persistence");
+
+    try {
+      await runtime.activate(identity(operation));
+      await this.checkpoint("after_runtime_binding");
+    } catch (error) {
+      this.options.operations.recordDiagnostic(
+        operation.id,
+        "runtime_activation_conflict",
+        error instanceof Error ? error.message : "Runtime activation failed."
+      );
+      throw error;
+    }
+    const command = mailboxCommandSchema.parse({
+      type: "execute_block",
+      protocolVersion: agentHostProtocolVersion,
+      dispatchId: operation.dispatchId,
+      leaseId: reservation.leaseId,
+      executionAttemptId: operation.executionAttemptId,
+      leaseExpiresAt: reservation.leaseExpiresAt,
+      envelopeDigest,
+      envelope
+    });
+    const delivery = this.options.dispatches.activate({ operation, reservation, command });
+    await this.checkpoint("after_mailbox_enqueue");
+    if (!delivery.message.publishedAt) {
+      this.options.mailbox.publish(delivery.message);
+      await this.checkpoint("after_mailbox_publish");
+      this.options.dispatches.markMailboxPublished(delivery.message.messageId);
+    }
+    this.options.operations.clearDiagnostic(operation.id);
+    return { operation: this.options.operations.getRequired(operation.id), status: "activated" };
+  }
+
+  async reenterPending(): Promise<RemoteDispatchOutcome[]> {
+    const outcomes: RemoteDispatchOutcome[] = [];
+    for (const operation of this.options.operations.listNonTerminal()) {
+      outcomes.push(await this.reenter(operation.id));
+    }
+    return outcomes;
+  }
+
+  async query(operationId: string) {
+    const operation = this.options.operations.getRequired(operationId);
+    return this.options.runtimeResolver.resolve(operation).query({
+      ref: operation.blockRef,
+      operationId: operation.id
+    });
+  }
+
+  requestCancel(operationId: string, reason: string): void {
+    const operation = this.options.operations.getRequired(operationId);
+    const message = this.options.dispatches.enqueueCancel({ operation, reason });
+    if (!message.publishedAt) {
+      this.options.mailbox.publish(message);
+      this.options.dispatches.markMailboxPublished(message.messageId);
+    }
+  }
+
+  async complete(operationId: string, reportArtifactRef: string): Promise<void> {
+    let operation = this.options.operations.getRequired(operationId);
+    const runtime = this.options.runtimeResolver.resolve(operation);
+    const reportBytes = new Uint8Array(
+      await this.options.artifactContent.readReport(reportArtifactRef)
+    );
+    await this.checkpoint("before_runtime_writeback");
+    await runtime.complete({ ...identity(operation), reportArtifactRef, reportBytes });
+    await this.checkpoint("after_runtime_writeback");
+    operation = this.options.operations.getRequired(operation.id);
+    this.options.dispatches.finishTerminal({ operation, status: "completed" });
+    await this.checkpoint("after_dispatch_terminal_persistence");
+    this.finalizeOperationTerminal(operation, "completed");
+    await this.checkpoint("after_terminal_persistence");
+  }
+
+  async fail(operationId: string, failure: NormalizedFailure): Promise<void> {
+    let operation = this.options.operations.getRequired(operationId);
+    const runtime = this.options.runtimeResolver.resolve(operation);
+    await this.checkpoint("before_runtime_writeback");
+    await runtime.fail(remoteBlockFailureInputSchema.parse({ ...identity(operation), failure }));
+    await this.checkpoint("after_runtime_writeback");
+    operation = this.options.operations.getRequired(operation.id);
+    const status = failure.code === "execution_cancelled" ? "cancelled" : "failed";
+    this.options.dispatches.finishTerminal({ operation, status });
+    await this.checkpoint("after_dispatch_terminal_persistence");
+    this.finalizeOperationTerminal(operation, status);
+    await this.checkpoint("after_terminal_persistence");
+  }
+
+  private finalizeOperationTerminal(
+    operation: RemoteOperation,
+    status: "completed" | "failed" | "cancelled"
+  ): void {
+    if (!operation.attempt.leaseId) throw new Error("remote_terminal_attempt_not_bound");
+    const reservation = this.options.reservations.getRequired(operation.attempt.leaseId);
+    if (reservation.status === "active") {
+      this.options.reservations.release({
+        leaseId: reservation.leaseId,
+        fencingToken: reservation.fencingToken,
+        expectedVersion: reservation.version,
+        reason: status
+      });
+      return;
+    }
+    const current = this.options.operations.getRequired(operation.id);
+    if (current.state !== status || current.attempt.status !== status) {
+      throw new Error("remote_terminal_persistence_conflict");
+    }
+  }
+
+  private inspectPersistence(
+    operation: RemoteOperation,
+    envelopeDigest: string,
+    expectedInputGrantCount: number
+  ) {
+    try {
+      const persisted = this.options.dispatches.inspect(operation);
+      if (persisted.dispatch) {
+        if (persisted.dispatch.envelopeDigest !== envelopeDigest) {
+          this.recordInconsistency(
+            operation,
+            "The persisted dispatch envelope is missing or changed."
+          );
+        }
+        if (persisted.dispatch.inputGrantCount !== expectedInputGrantCount) {
+          this.recordInconsistency(
+            operation,
+            "The persisted dispatch input grants do not match the immutable envelope."
+          );
+        }
+      }
+      if (persisted.mailbox && !persisted.dispatch) {
+        this.recordInconsistency(operation, "A mailbox command exists without a dispatch.");
+      }
+      if (operation.state === "activated" && !persisted.mailbox) {
+        this.recordInconsistency(operation, "An activated attempt has no durable mailbox command.");
+      }
+      return persisted;
+    } catch (error) {
+      if (error instanceof Error && error.message === "remote_persistence_inconsistent") {
+        throw error;
+      }
+      this.options.operations.recordDiagnostic(
+        operation.id,
+        "remote_persistence_inconsistent",
+        error instanceof Error ? error.message : "Persisted coordinator state is invalid."
+      );
+      throw new Error("remote_persistence_inconsistent", { cause: error });
+    }
+  }
+
+  private recordInconsistency(operation: RemoteOperation, message: string): never {
+    this.options.operations.recordDiagnostic(
+      operation.id,
+      "remote_persistence_inconsistent",
+      message
+    );
+    throw new Error("remote_persistence_inconsistent");
+  }
+}

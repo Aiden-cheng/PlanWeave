@@ -39,8 +39,13 @@ export async function startPlanweaveServer(
     return target;
   };
 
-  for (const hook of reconciliationHooks) {
-    await hook(database);
+  try {
+    for (const hook of reconciliationHooks) {
+      await hook(database);
+    }
+  } catch (error) {
+    database.close();
+    throw error;
   }
 
   return {
