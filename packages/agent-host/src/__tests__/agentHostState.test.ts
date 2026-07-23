@@ -142,7 +142,7 @@ describe("durable Agent Host state", () => {
 
     expect(state.pendingEventCount()).toBe(1);
     expect(() => state.startExecution(1)).toThrow("agent_host_pending_event_capacity_exceeded");
-    expect(state.pendingExecutions(1)[0]?.status).toBe("pending");
+    expect(state.pendingExecutions(1)[0]?.status).toBe("accepted");
 
     state.acknowledgeEvent(received.acknowledgement.messageId);
     expect(state.pendingEventCount()).toBe(0);
@@ -179,23 +179,26 @@ describe("durable Agent Host state", () => {
     expect(state.pendingEvents()).toEqual([]);
   });
 
-  it("rejects unsupported resume and interaction commands without durable ACK", async () => {
+  it("rejects unknown resume identity and unfenced interaction commands without durable ACK", async () => {
     const { state } = await setup();
     const identity = {
       dispatchId: exampleExecuteDelivery.command.dispatchId,
       leaseId: "lease-1",
       executionAttemptId: exampleExecuteDelivery.command.executionAttemptId,
+      acpSessionId: "acp-session-1",
       actionId: "action-1"
     };
+    expect(() =>
+      state.receive(unsupportedMessage(1, agentHostProtocolGoldenFixtures.resumeDelivery.command))
+    ).toThrow("execution_resume_identity_not_found");
     const commands = [
-      agentHostProtocolGoldenFixtures.resumeDelivery.command,
       { type: "interaction.permission_response", ...identity, decision: "deny" },
-      { type: "interaction.elicitation_response", ...identity, response: "stop" },
+      { type: "interaction.elicitation_response", ...identity, outcome: "cancelled" },
       { type: "interaction.authentication_action", ...identity, action: "cancel" }
     ];
-    for (const [index, command] of commands.entries()) {
-      expect(() => state.receive(unsupportedMessage(index + 1, command))).toThrow(
-        `agent_host_command_unsupported:${command.type}`
+    for (const command of commands) {
+      expect(() => state.receive(unsupportedMessage(1, command))).toThrow(
+        "execution_action_identity_stale"
       );
     }
     expect(state.pendingExecutions(1)).toEqual([]);
@@ -228,7 +231,7 @@ describe("durable Agent Host state", () => {
     expect(reopened.startExecution(1)).toBeUndefined();
   });
 
-  it("persists cancellation and does not restart cancelled work after a crash", async () => {
+  it("persists cancellation intent and reports ambiguous work as interrupted after a crash", async () => {
     const { directory, state } = await setup();
     state.receive(executeMessage());
     state.startExecution(1);
@@ -242,13 +245,11 @@ describe("durable Agent Host state", () => {
     states.push(reopened);
     expect(reopened.recoverInterruptedExecutions()).toBe(1);
     expect(reopened.pendingExecutions(1)).toEqual([]);
+    expect(reopened.executionEvidence(1)?.cancellationIntent).toEqual(
+      expect.objectContaining({ commandSequence: 2 })
+    );
     expect(reopened.pendingEvents()).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          type: "dispatch.failed",
-          failure: expect.objectContaining({ code: "execution_cancelled" })
-        })
-      ])
+      expect.arrayContaining([expect.objectContaining({ type: "dispatch.interrupted" })])
     );
   });
 

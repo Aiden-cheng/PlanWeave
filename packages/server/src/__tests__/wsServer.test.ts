@@ -107,7 +107,7 @@ async function createWsCoordination() {
 }
 
 describe("agent host WebSocket transport", () => {
-  it("advances a cancel action through mailbox acknowledgement and terminal settlement", async () => {
+  it("settles fresh-lease resume acceptance and terminalizes cancellation after load interruption", async () => {
     const { coordination, locator } = await createWsCoordination();
     const registration = coordination.hosts.register("Action Lifecycle Host");
     const httpServer = createServer();
@@ -207,7 +207,11 @@ describe("agent host WebSocket transport", () => {
         executionAttemptId: dispatch.executionAttemptId
       })
     );
-    await events.next();
+    await expect(events.next()).resolves.toMatchObject({
+      type: "host.event_ack",
+      messageId: "action-accepted"
+    });
+    expect(coordination.dispatches.getRequired(dispatch.id).status).toBe("running");
     expect(coordination.actions.getRequired(resumeActionId).state).toBe("settled");
     await coordination.coordinator.requestCancel(outcome.operation.id, "operator cancelled");
     const cancel = await events.next();
@@ -225,6 +229,26 @@ describe("agent host WebSocket transport", () => {
     expect(coordination.actions.getRequired(cancel.messageId).state).toBe("acknowledged");
     socket.send(
       JSON.stringify({
+        type: "dispatch.interrupted",
+        protocolVersion: 1,
+        messageId: "cancel-crash-interrupted",
+        dispatchId: dispatch.id,
+        leaseId: dispatch.leaseId,
+        executionAttemptId: dispatch.executionAttemptId,
+        reason: "acp_session_lost",
+        resumable: false
+      })
+    );
+    await expect(events.next()).resolves.toMatchObject({
+      type: "host.event_ack",
+      messageId: "cancel-crash-interrupted"
+    });
+    expect(coordination.dispatches.getRequired(dispatch.id)).toMatchObject({
+      status: "interrupted",
+      interruption: { reason: "acp_session_lost", resumable: false }
+    });
+    socket.send(
+      JSON.stringify({
         type: "dispatch.failed",
         protocolVersion: 1,
         messageId: "cancel-terminal",
@@ -236,6 +260,7 @@ describe("agent host WebSocket transport", () => {
     );
     await events.next();
     expect(coordination.actions.getRequired(cancel.messageId).state).toBe("settled");
+    expect(coordination.dispatches.getRequired(dispatch.id).status).toBe("cancelled");
   });
 
   it("authenticates a host and replays unacknowledged mailbox messages", async () => {

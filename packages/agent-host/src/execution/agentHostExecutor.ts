@@ -18,8 +18,20 @@ export type AgentHostArtifactInput = {
   operationKey: string;
 };
 
+export type AgentHostArtifactDownload = {
+  artifactRef: ArtifactRef;
+  logicalName: string;
+  mediaType?: ArtifactMediaType;
+};
+
+export type AgentHostArtifactDownloadResult = {
+  bytes: Uint8Array;
+  mediaType: ArtifactMediaType;
+};
+
 /** Artifact transfer already bound to the active dispatch and lease. */
 export interface AgentHostArtifactTransfer {
+  download(input: AgentHostArtifactDownload): Promise<AgentHostArtifactDownloadResult>;
   upload(input: AgentHostArtifactInput): Promise<ArtifactRef>;
 }
 
@@ -27,6 +39,7 @@ export type AgentHostExecutionContext = {
   signal: AbortSignal;
   executionKey: string;
   artifacts: AgentHostArtifactTransfer;
+  sessionStart: { kind: "new" } | { kind: "load"; sessionId: string };
 };
 
 export class AgentHostExecutionError extends Error {
@@ -37,6 +50,17 @@ export class AgentHostExecutionError extends Error {
     super(parsed.message);
     this.failure = parsed;
     this.name = "AgentHostExecutionError";
+  }
+}
+
+export class AgentHostSessionLoadError extends AgentHostExecutionError {
+  constructor() {
+    super({
+      code: "acp_session_load_failed",
+      message: "The Agent Host could not load the interrupted ACP session.",
+      retryable: false
+    });
+    this.name = "AgentHostSessionLoadError";
   }
 }
 

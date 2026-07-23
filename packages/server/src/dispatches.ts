@@ -15,6 +15,7 @@ import {
   type ProtocolDispatchResult
 } from "./protocol.js";
 import { inWriteTransaction, type SqliteDatabase } from "./sqlite.js";
+import { remoteExecutionActionRequestSchema } from "./remoteExecutionLifecycle.js";
 
 export type DispatchStatus =
   | "leased"
@@ -354,6 +355,22 @@ export class DispatchService {
     return this.writeBack(dispatchId);
   }
 
+  private hasPendingCancellation(dispatch: DispatchRecord): boolean {
+    return this.database
+      .prepare(
+        `SELECT request_json FROM remote_execution_actions
+         WHERE dispatch_id=? AND execution_attempt_id=? AND kind='cancel' AND state<>'settled'
+         ORDER BY created_at,action_id`
+      )
+      .all(dispatch.id, dispatch.executionAttemptId)
+      .some((row) => {
+        const action = remoteExecutionActionRequestSchema.parse(
+          JSON.parse(String(row.request_json))
+        );
+        return action.kind === "cancel" && action.leaseId === dispatch.leaseId;
+      });
+  }
+
   async fail(
     hostId: string,
     messageId: string,
@@ -371,7 +388,15 @@ export class DispatchService {
       () => {
         const dispatch = this.requireCurrentLease(hostId, dispatchId, leaseId, executionAttemptId);
         if (["failed", "cancelled"].includes(dispatch.status)) return;
-        if (dispatch.status !== "running" && dispatch.status !== "cancelling") {
+        const interruptedCancellation =
+          dispatch.status === "interrupted" &&
+          parsedFailure.code === "execution_cancelled" &&
+          this.hasPendingCancellation(dispatch);
+        if (
+          dispatch.status !== "running" &&
+          dispatch.status !== "cancelling" &&
+          !interruptedCancellation
+        ) {
           throw new Error("dispatch_not_running");
         }
         this.database

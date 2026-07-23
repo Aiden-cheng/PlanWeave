@@ -10,7 +10,7 @@ import { FileHostCredentialStore } from "../credentials/fileCredentialStore.js";
 import { AgentHostEnrollmentService } from "../enrollment/enrollmentService.js";
 import { HttpAgentHostEnrollmentExchange } from "../enrollment/httpEnrollmentExchange.js";
 import { RemoteAcpExecutor } from "../execution/remoteAcpExecutor.js";
-import { openAgentHostRemoteExecutionOutbox } from "../state/remoteExecutionOutbox.js";
+import { DurableAcpInteractionRelay } from "../execution/durableAcpRelay.js";
 import { openAgentHostState } from "../state/agentHostState.js";
 import {
   assertDurableStateReplacementSafe,
@@ -107,13 +107,15 @@ export class AgentHostOperator {
     await ensureDurableHostIdentity(config.dataDirectory, credential.hostId);
     const state = await openAgentHostState(join(config.dataDirectory, "state.sqlite"));
     state.recoverableExecutionCount();
-    const outbox = await openAgentHostRemoteExecutionOutbox(
+    await state.importLegacyRemoteExecutionStore(
       join(config.dataDirectory, "remote-execution.sqlite")
     );
+    const interactionRelay = new DurableAcpInteractionRelay(state);
     const executor = new RemoteAcpExecutor({
       workspaceResolver: new ConfiguredWorkspaceResolver(config),
       profileResolver: new ConfiguredAcpProfileResolver(config),
-      outbox,
+      outbox: state,
+      interactionResponder: interactionRelay,
       hostCapabilities: config.host.capabilities
     });
     const transport = new AgentHostClient({
@@ -124,19 +126,14 @@ export class AgentHostOperator {
       capacity: config.host.capacity,
       state,
       executor,
+      interactionRelay,
       allowInsecureTransport: config.coordinator.allowInsecureDevelopment
     });
     const composition = composeAgentHost({ state, transport });
     return {
       subscribeStatus: (listener) => composition.subscribeStatus(listener),
       start: () => composition.start(),
-      shutdown: async () => {
-        try {
-          await composition.shutdown();
-        } finally {
-          outbox.close();
-        }
-      }
+      shutdown: () => composition.shutdown()
     };
   }
 

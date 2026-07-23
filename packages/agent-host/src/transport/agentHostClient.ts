@@ -8,7 +8,13 @@ import {
   type ServerEvent
 } from "../protocol.js";
 import { HttpArtifactClient } from "../artifacts/httpArtifactTransfer.js";
-import { AgentHostExecutionError, type AgentHostExecutor } from "../execution/agentHostExecutor.js";
+import {
+  AgentHostExecutionError,
+  AgentHostSessionLoadError,
+  type AgentHostExecutionContext,
+  type AgentHostExecutor
+} from "../execution/agentHostExecutor.js";
+import type { DurableAcpInteractionRelay } from "../execution/durableAcpRelay.js";
 import type { AgentHostExecution, AgentHostStateRepository } from "../state/agentHostState.js";
 import {
   type HostTransport,
@@ -34,6 +40,7 @@ export type AgentHostClientOptions = {
   capacity: number;
   state: AgentHostStateRepository;
   executor: AgentHostExecutor;
+  interactionRelay?: Pick<DurableAcpInteractionRelay, "accept">;
   allowInsecureTransport?: boolean;
   reconnect?: Partial<ReconnectBackoffOptions>;
   clock?: HostTransportClock;
@@ -64,7 +71,12 @@ function executionFailure(error: unknown, aborted: boolean) {
     };
   }
   if (error instanceof AgentHostExecutionError) return error.failure;
-  if (error instanceof Error && error.message.startsWith("artifact_upload_failed:")) {
+  if (
+    error instanceof Error &&
+    (error.message.startsWith("artifact_upload_failed:") ||
+      error.message.startsWith("artifact_download_failed:") ||
+      error.message.startsWith("artifact_download_"))
+  ) {
     return {
       code: "artifact_upload_failed",
       message: "The Agent Host could not transfer an execution artifact.",
@@ -254,6 +266,20 @@ export class AgentHostClient implements HostTransport {
         return;
       case "mailbox.message":
         this.options.state.receive(event);
+        {
+          const cancelled = this.options.interactionRelay?.accept(event.command);
+          if (cancelled) {
+            for (const active of this.active.values()) {
+              if (
+                active.execution.command.dispatchId === cancelled.dispatchId &&
+                active.execution.command.leaseId === cancelled.leaseId &&
+                active.execution.command.executionAttemptId === cancelled.executionAttemptId
+              ) {
+                active.controller.abort();
+              }
+            }
+          }
+        }
         this.flushEvents();
         this.pump();
         return;
@@ -323,20 +349,34 @@ export class AgentHostClient implements HostTransport {
     this.flushEvents();
 
     const available = this.options.capacity - this.active.size;
-    for (const pending of this.options.state.pendingExecutions(available || 1)) {
+    for (const pending of this.options.state.pendingResumptions(available || 1)) {
+      if (this.active.size >= this.options.capacity) break;
+      const resumption = this.options.state.startResumption(pending.sequence);
+      if (!resumption) continue;
+      this.launch(resumption.execution, { kind: "load", sessionId: resumption.sessionId });
+    }
+    const remaining = this.options.capacity - this.active.size;
+    for (const pending of this.options.state.pendingExecutions(remaining || 1)) {
       if (this.active.size >= this.options.capacity) break;
       const execution = this.options.state.startExecution(pending.sequence);
       if (!execution) continue;
-      const controller = new AbortController();
-      this.active.set(execution.sequence, { execution, controller });
-      this.flushEvents();
-      const run = this.run(execution, controller);
-      this.runs.add(run);
-      void run.then(
-        () => this.runs.delete(run),
-        () => this.runs.delete(run)
-      );
+      this.launch(execution, { kind: "new" });
     }
+  }
+
+  private launch(
+    execution: AgentHostExecution,
+    sessionStart: AgentHostExecutionContext["sessionStart"]
+  ): void {
+    const controller = new AbortController();
+    this.active.set(execution.sequence, { execution, controller });
+    this.flushEvents();
+    const run = this.run(execution, controller, sessionStart);
+    this.runs.add(run);
+    void run.then(
+      () => this.runs.delete(run),
+      () => this.runs.delete(run)
+    );
   }
 
   private abandonExpiredExecutions(): void {
@@ -346,19 +386,37 @@ export class AgentHostClient implements HostTransport {
     for (const execution of expired) this.active.get(execution.sequence)?.controller.abort();
   }
 
-  private async run(execution: AgentHostExecution, controller: AbortController): Promise<void> {
+  private async run(
+    execution: AgentHostExecution,
+    controller: AbortController,
+    sessionStart: AgentHostExecutionContext["sessionStart"]
+  ): Promise<void> {
     try {
       const result = parseAgentHostDispatchResult(
         await this.options.executor.execute(execution.command, {
           signal: controller.signal,
           executionKey: `${execution.command.dispatchId}:${execution.command.leaseId}:${execution.command.executionAttemptId}`,
-          artifacts: this.artifacts.forExecution(execution.command)
+          artifacts: this.artifacts.forExecution(
+            execution.command,
+            (evidence) =>
+              this.options.state.recordArtifactTransfer(
+                execution.sequence,
+                execution.command.leaseId,
+                evidence
+              ),
+            controller.signal
+          ),
+          sessionStart
         })
       );
       if (this.stopped) return;
       this.options.state.completeExecution(execution.sequence, result);
     } catch (error) {
       if (this.stopped) return;
+      if (error instanceof AgentHostSessionLoadError && !controller.signal.aborted) {
+        this.options.state.failResumption(execution.sequence);
+        return;
+      }
       this.options.state.failExecution(
         execution.sequence,
         executionFailure(error, controller.signal.aborted)

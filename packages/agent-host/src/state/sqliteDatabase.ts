@@ -16,18 +16,36 @@ export type SqliteDatabase = {
 
 const require = createRequire(import.meta.url);
 
+function databaseConstructor(): new (
+  path: string,
+  options?: { readOnly?: boolean }
+) => SqliteDatabase {
+  const { DatabaseSync } = require("node:sqlite") as {
+    DatabaseSync: new (path: string, options?: { readOnly?: boolean }) => SqliteDatabase;
+  };
+  return DatabaseSync;
+}
+
 export async function openAgentHostDatabase(
   path: string,
   busyTimeoutMs: number
 ): Promise<SqliteDatabase> {
   await mkdir(dirname(path), { recursive: true });
-  const { DatabaseSync } = require("node:sqlite") as {
-    DatabaseSync: new (path: string) => SqliteDatabase;
-  };
+  const DatabaseSync = databaseConstructor();
   const database = new DatabaseSync(path);
   database.exec(
     `PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = ${busyTimeoutMs};`
   );
+  return database;
+}
+
+export function openReadonlyAgentHostDatabase(
+  path: string,
+  busyTimeoutMs: number
+): SqliteDatabase {
+  const DatabaseSync = databaseConstructor();
+  const database = new DatabaseSync(path, { readOnly: true });
+  database.exec(`PRAGMA foreign_keys = ON; PRAGMA busy_timeout = ${busyTimeoutMs};`);
   return database;
 }
 

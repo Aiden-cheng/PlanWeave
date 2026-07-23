@@ -21,8 +21,14 @@ import type {
   AgentHostRemoteExecutionIdentity,
   AgentHostRemoteInteractionResponder
 } from "../execution/remoteAcpPorts.js";
-import { AgentHostExecutionError } from "../execution/agentHostExecutor.js";
-import { RemoteAcpExecutor } from "../execution/remoteAcpExecutor.js";
+import {
+  AgentHostExecutionError,
+  AgentHostSessionLoadError
+} from "../execution/agentHostExecutor.js";
+import {
+  AGENT_HOST_RESUME_PROMPT,
+  RemoteAcpExecutor
+} from "../execution/remoteAcpExecutor.js";
 import {
   openAgentHostRemoteExecutionOutbox,
   type AgentHostSqliteRemoteExecutionOutbox
@@ -121,16 +127,22 @@ function profileResolver(scenario: string): AgentHostAcpProfileResolver {
 }
 
 function artifactContext(input: ReturnType<typeof command>) {
+  const download = vi.fn(async (artifact: { mediaType?: string }) => ({
+    bytes: new Uint8Array(),
+    mediaType: artifact.mediaType ?? "application/octet-stream"
+  }));
   const upload = vi.fn(
     async ({ bytes }: { bytes: Uint8Array }) =>
       `artifact:sha256:${createHash("sha256").update(bytes).digest("hex")}` as const
   );
   return {
+    download,
     upload,
     context: {
       signal: new AbortController().signal,
       executionKey: executionKey(input),
-      artifacts: { upload }
+      artifacts: { download, upload },
+      sessionStart: { kind: "new" as const }
     }
   };
 }
@@ -279,6 +291,68 @@ describe("RemoteAcpExecutor", () => {
     expect(reopened.records(identity(input)).length).toBeGreaterThan(3);
   });
 
+  it("loads the exact recovery session without redownloading inputs or replaying the original prompt", async () => {
+    const { outbox } = await openOutbox();
+    const input = command({ session: {} });
+    const executor = new RemoteAcpExecutor({
+      workspaceResolver: { resolve: () => ({ cwd: process.cwd() }) },
+      profileResolver: profileResolver("load-capable"),
+      outbox,
+      hostCapabilities: ["linux", "acp.test"]
+    });
+    const { context, download, upload } = artifactContext(input);
+
+    const result = await executor.execute(input, {
+      ...context,
+      sessionStart: { kind: "load", sessionId: "existing-session-42" }
+    });
+
+    expect(download).not.toHaveBeenCalled();
+    expect(upload).toHaveBeenCalledOnce();
+    expect(result.summary).toContain("existing-session-42");
+    expect(AGENT_HOST_RESUME_PROMPT).not.toBe(input.envelope.renderedPrompt);
+    expect(AGENT_HOST_RESUME_PROMPT).toContain("Do not assume");
+    expect(AGENT_HOST_RESUME_PROMPT).toContain("do not repeat side effects without evidence");
+    expect(outbox.records(identity(input))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "engine_event",
+          event: expect.objectContaining({
+            kind: "session_started",
+            sessionId: "existing-session-42",
+            loaded: true
+          })
+        })
+      ])
+    );
+  });
+
+  it("reports session/load failure without falling back to session/new", async () => {
+    const { outbox } = await openOutbox();
+    const input = command({ session: {} });
+    const executor = new RemoteAcpExecutor({
+      workspaceResolver: { resolve: () => ({ cwd: process.cwd() }) },
+      profileResolver: profileResolver("success"),
+      outbox,
+      hostCapabilities: ["linux", "acp.test"]
+    });
+    const { context, download, upload } = artifactContext(input);
+
+    await expect(
+      executor.execute(input, {
+        ...context,
+        sessionStart: { kind: "load", sessionId: "missing-session" }
+      })
+    ).rejects.toBeInstanceOf(AgentHostSessionLoadError);
+    expect(download).not.toHaveBeenCalled();
+    expect(upload).not.toHaveBeenCalled();
+    expect(
+      outbox
+        .records(identity(input))
+        .filter((record) => record.kind === "engine_event" && record.event.kind === "session_started")
+    ).toEqual([]);
+  });
+
   it("revalidates strict envelope, digest, and exact dispatch/lease/attempt context before resolving or spawning", async () => {
     const { outbox } = await openOutbox();
     const resolveWorkspace = vi.fn(() => ({ cwd: process.cwd() }));
@@ -334,6 +408,25 @@ describe("RemoteAcpExecutor", () => {
     expect(resolveWorkspace).not.toHaveBeenCalled();
   });
 
+  it("does not start ACP or publish terminal success when an input artifact fails verification", async () => {
+    const { outbox } = await openOutbox();
+    const input = command({ prompt: finalArtifactPrompt });
+    const executor = new RemoteAcpExecutor({
+      workspaceResolver: { resolve: () => ({ cwd: process.cwd() }) },
+      profileResolver: profileResolver("success"),
+      outbox,
+      hostCapabilities: ["linux", "acp.test"]
+    });
+    const { context, download, upload } = artifactContext(input);
+    download.mockRejectedValueOnce(new Error("artifact_download_hash_mismatch"));
+
+    await expect(executor.execute(input, context)).rejects.toThrow(
+      "artifact_download_hash_mismatch"
+    );
+    expect(upload).not.toHaveBeenCalled();
+    expect(outbox.records(identity(input))).toEqual([]);
+  });
+
   it("persists complete normalized interactions and fails closed at the bounded deadline", async () => {
     const { outbox } = await openOutbox();
     const input = command({ prompt: finalArtifactPrompt });
@@ -366,7 +459,7 @@ describe("RemoteAcpExecutor", () => {
   it("relays an interaction response without narrowing ACP option identity", async () => {
     const { outbox } = await openOutbox();
     const responder: AgentHostRemoteInteractionResponder = {
-      requestPermission: (request) => ({
+      requestPermission: (_identity, request) => ({
         kind: "select",
         optionId: request.options[0]?.optionId ?? ""
       }),

@@ -171,10 +171,12 @@ export interface AgentHostRemoteExecutionOutbox {
 
 export interface AgentHostRemoteInteractionResponder {
   requestPermission(
+    identity: AgentHostRemoteExecutionIdentity,
     request: AcpEnginePermissionRequest,
     context: AcpEngineInteractionContext
   ): ReturnType<AcpEngineInteractionBroker["requestPermission"]>;
   requestElicitation(
+    identity: AgentHostRemoteExecutionIdentity,
     request: AcpEngineElicitationRequest,
     context: AcpEngineInteractionContext
   ): ReturnType<AcpEngineInteractionBroker["requestElicitation"]>;

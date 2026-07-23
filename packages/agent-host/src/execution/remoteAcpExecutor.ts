@@ -11,6 +11,7 @@ import {
 import { parseAgentHostExecuteCommand } from "../protocol.js";
 import {
   AgentHostExecutionError,
+  AgentHostSessionLoadError,
   type AgentHostExecutionContext,
   type AgentHostExecutor
 } from "./agentHostExecutor.js";
@@ -22,6 +23,7 @@ import type {
   AgentHostWorkspaceResolver,
   ResolvedAgentHostAcpProfile
 } from "./remoteAcpPorts.js";
+import { prepareInputArtifacts } from "./inputArtifactWorkspace.js";
 
 type RemoteAcpExecutorOptions = {
   workspaceResolver: AgentHostWorkspaceResolver;
@@ -31,6 +33,9 @@ type RemoteAcpExecutorOptions = {
   interactionResponder?: AgentHostRemoteInteractionResponder;
   limits?: Partial<AcpExecutionLimits>;
 };
+
+export const AGENT_HOST_RESUME_PROMPT =
+  "Resume this interrupted PlanWeave execution in the loaded session. First inspect the existing session and workspace state. Do not assume an interrupted operation succeeded or failed, and do not repeat side effects without evidence. Complete only the remaining work you can establish. Prior pending permissions are invalid; request permission again when needed. Complete the required report.";
 
 function failure(code: string, message: string, retryable = false): AgentHostExecutionError {
   return new AgentHostExecutionError({ code, message, retryable });
@@ -139,7 +144,9 @@ function interactionBroker(options: {
         request: { ...request, options: [...request.options] },
         deadline: context.deadline.toISOString()
       });
-      if (options.responder) return options.responder.requestPermission(request, context);
+      if (options.responder) {
+        return options.responder.requestPermission(options.identity, request, context);
+      }
       return new Promise<never>(() => undefined);
     },
     requestElicitation: async (request, context) => {
@@ -149,7 +156,9 @@ function interactionBroker(options: {
         request,
         deadline: context.deadline.toISOString()
       });
-      if (options.responder) return options.responder.requestElicitation(request, context);
+      if (options.responder) {
+        return options.responder.requestElicitation(options.identity, request, context);
+      }
       return new Promise<never>(() => undefined);
     }
   };
@@ -167,6 +176,7 @@ export class RemoteAcpExecutor implements AgentHostExecutor {
     try {
       command = parseAgentHostExecuteCommand(commandInput);
     } catch {
+      if (context.sessionStart.kind === "load") throw new AgentHostSessionLoadError();
       throw failure(
         "execution_envelope_invalid",
         "Execution command or envelope validation failed."
@@ -198,62 +208,108 @@ export class RemoteAcpExecutor implements AgentHostExecutor {
         )
       ]);
     } catch {
+      if (context.sessionStart.kind === "load") throw new AgentHostSessionLoadError();
       throw failure(
         "host_resolution_failed",
         "The Agent Host could not resolve the requested workspace or ACP profile."
       );
     }
     if (!isAbsolute(workspace.cwd)) {
+      if (context.sessionStart.kind === "load") throw new AgentHostSessionLoadError();
       throw failure("workspace_invalid", "The resolved Agent Host workspace is invalid.");
     }
     if (profile.agentId !== command.envelope.agentId) {
+      if (context.sessionStart.kind === "load") throw new AgentHostSessionLoadError();
       throw failure("agent_profile_mismatch", "The resolved ACP profile does not match the agent.");
     }
+    const preparedInputs =
+      context.sessionStart.kind === "load"
+        ? {
+            prompt: AGENT_HOST_RESUME_PROMPT,
+            cleanup: async () => undefined
+          }
+        : await prepareInputArtifacts({
+            cwd: workspace.cwd,
+            prompt: command.envelope.renderedPrompt,
+            inputs: command.envelope.inputArtifacts,
+            artifacts: context.artifacts
+          });
 
     let sessionConfigurationFailed = false;
     const interactionTimeoutMs =
       this.options.limits?.interactionTimeoutMs ??
       DEFAULT_ACP_EXECUTION_LIMITS.interactionTimeoutMs;
-    const result = await executeAcp({
-      launch: {
-        command: profile.launch.command,
-        args: profile.launch.args,
-        trusted: true
-      },
-      workspace,
-      env: profile.env,
-      clientInfo: { name: "PlanWeave Agent Host", version: "0.3.0" },
-      prompt: command.envelope.renderedPrompt,
-      sessionStart: { kind: "new" },
-      authentication: profile.authentication,
-      interactionBroker: interactionBroker({
-        identity,
-        outbox: this.options.outbox,
-        responder: this.options.interactionResponder
-      }),
-      interactionDeadline: () =>
-        new Date(Math.min(Date.parse(command.leaseExpiresAt), Date.now() + interactionTimeoutMs)),
-      lifecycleObserver: async (event) => {
-        if (event.kind !== "session_ready") return;
-        try {
-          await configureSession(event, profile, command.envelope.session);
-        } catch {
-          sessionConfigurationFailed = true;
-          throw sessionCapabilityError();
+    let result: Awaited<ReturnType<typeof executeAcp>>;
+    let resumedSessionLoaded = false;
+    try {
+      result = await executeAcp({
+        launch: {
+          command: profile.launch.command,
+          args: profile.launch.args,
+          trusted: true
+        },
+        workspace,
+        env: profile.env,
+        clientInfo: { name: "PlanWeave Agent Host", version: "0.3.0" },
+        prompt: preparedInputs.prompt,
+        sessionStart: context.sessionStart,
+        authentication: profile.authentication,
+        interactionBroker: interactionBroker({
+          identity,
+          outbox: this.options.outbox,
+          responder: this.options.interactionResponder
+        }),
+        interactionDeadline: () =>
+          new Date(Math.min(Date.parse(command.leaseExpiresAt), Date.now() + interactionTimeoutMs)),
+        lifecycleObserver: async (event) => {
+          if (event.kind !== "session_ready") return;
+          try {
+            await configureSession(event, profile, command.envelope.session);
+          } catch {
+            sessionConfigurationFailed = true;
+            throw sessionCapabilityError();
+          }
+        },
+        eventSink: async (event) => {
+          await this.options.outbox.append({ kind: "engine_event", identity, event });
+          if (
+            context.sessionStart.kind === "load" &&
+            event.kind === "session_started" &&
+            event.loaded &&
+            event.sessionId === context.sessionStart.sessionId
+          ) {
+            resumedSessionLoaded = true;
+          }
+        },
+        signal: context.signal,
+        limits: {
+          ...this.options.limits,
+          outputMaxBytes: Math.min(
+            this.options.limits?.outputMaxBytes ?? DEFAULT_ACP_EXECUTION_LIMITS.outputMaxBytes,
+            command.envelope.output.maxArtifactBytes
+          )
         }
-      },
-      eventSink: (event) => this.options.outbox.append({ kind: "engine_event", identity, event }),
-      signal: context.signal,
-      limits: {
-        ...this.options.limits,
-        outputMaxBytes: Math.min(
-          this.options.limits?.outputMaxBytes ?? DEFAULT_ACP_EXECUTION_LIMITS.outputMaxBytes,
-          command.envelope.output.maxArtifactBytes
-        )
+      });
+    } catch (error) {
+      if (context.sessionStart.kind === "load" && !resumedSessionLoaded) {
+        throw new AgentHostSessionLoadError();
       }
-    });
+      throw error;
+    } finally {
+      try {
+        await preparedInputs.cleanup();
+      } catch {
+        throw failure(
+          "workspace_input_cleanup_failed",
+          "The Agent Host could not clean up dispatch input artifacts."
+        );
+      }
+    }
 
     if (result.terminal.state !== "succeeded") {
+      if (context.sessionStart.kind === "load" && !resumedSessionLoaded) {
+        throw new AgentHostSessionLoadError();
+      }
       if (sessionConfigurationFailed) {
         throw failure(
           "acp_session_config_failed",

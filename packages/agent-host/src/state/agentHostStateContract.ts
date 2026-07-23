@@ -4,7 +4,11 @@ import type {
   NormalizedFailure as ProtocolDispatchFailure,
   ServerEvent
 } from "../protocol.js";
-import type { AgentHostExecution, CancelExecutionCommand } from "./agentHostStateRecords.js";
+import type {
+  AgentHostExecution,
+  AgentHostExecutionEvidence,
+  CancelExecutionCommand
+} from "./agentHostStateRecords.js";
 
 export type AgentHostCancellation = {
   sequence: number;
@@ -12,14 +16,29 @@ export type AgentHostCancellation = {
   command: CancelExecutionCommand;
 };
 
+export type AgentHostResumption = {
+  execution: AgentHostExecution;
+  sessionId: string;
+};
+
 export type AgentHostStateLimits = {
   readonly maxPendingCommands: number;
   readonly maxPendingEvents: number;
+  readonly maxCapabilitiesBytes: number;
+  readonly maxActionsPerExecution: number;
+  readonly maxArtifactsPerExecution: number;
+  readonly maxRemoteRecordsPerExecution: number;
+  readonly maxRemoteRecordBytes: number;
 };
 
 export const DEFAULT_AGENT_HOST_STATE_LIMITS: AgentHostStateLimits = {
   maxPendingCommands: 1_024,
-  maxPendingEvents: 2_048
+  maxPendingEvents: 2_048,
+  maxCapabilitiesBytes: 64 * 1_024,
+  maxActionsPerExecution: 256,
+  maxArtifactsPerExecution: 256,
+  maxRemoteRecordsPerExecution: 4_096,
+  maxRemoteRecordBytes: 1_048_576
 };
 
 export interface AgentHostStateRepository {
@@ -39,6 +58,8 @@ export interface AgentHostStateRepository {
   recoverInterruptedExecutions(): number;
   recoverableExecutionCount(): number;
   pendingExecutions(limit: number): AgentHostExecution[];
+  executionEvidence(sequence: number): AgentHostExecutionEvidence | undefined;
+  recordArtifactTransfer(sequence: number, leaseId: string, input: unknown): boolean;
   activeLeases(): Array<{
     dispatchId: string;
     leaseId: string;
@@ -53,6 +74,9 @@ export interface AgentHostStateRepository {
   abandonExpiredExecutions(now: Date): AgentHostExecution[];
   pendingCancellations(): AgentHostCancellation[];
   applyCancellation(sequence: number): { shouldAbort: boolean };
+  pendingResumptions(limit: number): AgentHostExecution[];
+  startResumption(sequence: number): AgentHostResumption | undefined;
+  failResumption(sequence: number): void;
   startExecution(sequence: number): AgentHostExecution | undefined;
   completeExecution(sequence: number, result: ProtocolDispatchResult): void;
   failExecution(sequence: number, failure: ProtocolDispatchFailure): void;

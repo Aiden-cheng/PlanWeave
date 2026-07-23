@@ -352,6 +352,16 @@ describe("distributed dispatch coordination", () => {
         .get(dispatch.id)?.count
     ).toBeGreaterThan(0);
     expect(persisted.database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    await expect(
+      persistedCoordination.dispatches.fail(
+        registration.host.id,
+        "unrequested-interrupted-cancel",
+        dispatch.id,
+        dispatch.leaseId,
+        dispatch.executionAttemptId,
+        { code: "execution_cancelled", message: "Cancellation was not requested.", retryable: false }
+      )
+    ).rejects.toThrow("dispatch_not_running");
     await expect(persistedCoordination.dispatches.recoverExpiredLeases()).resolves.toEqual([]);
   });
 
