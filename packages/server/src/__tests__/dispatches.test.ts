@@ -159,6 +159,9 @@ describe("distributed dispatch coordination", () => {
     expect(completed.status).toBe("completed");
     expect(complete).toHaveBeenCalledWith({
       dispatchId: dispatch.id,
+      hostId: registration.host.id,
+      leaseId: dispatch.leaseId,
+      executionAttemptId: dispatch.executionAttemptId,
       projectId: "project-a",
       blockRef: "T-001#B-001",
       packageRef: "runtime:project-a:default",
@@ -352,7 +355,7 @@ describe("distributed dispatch coordination", () => {
     await expect(persistedCoordination.dispatches.recoverExpiredLeases()).resolves.toEqual([]);
   });
 
-  it("rejects late results after recovering an expired lease", async () => {
+  it("interrupts expired work without automatic failure and rejects late results", async () => {
     const server = await createServer();
     const fail = vi.fn(async () => {});
     const coordination = createDistributedCoordination(server.database, {
@@ -381,13 +384,14 @@ describe("distributed dispatch coordination", () => {
 
     await expect(
       coordination.dispatches.recoverExpiredLeases(new Date("2020-01-01T00:00:01.000Z"))
-    ).resolves.toMatchObject([{ id: dispatch.id, status: "failed" }]);
-    expect(fail).toHaveBeenCalledWith(
-      expect.objectContaining({
-        dispatchId: dispatch.id,
-        failure: expect.objectContaining({ code: "lease_expired", retryable: true })
-      })
-    );
+    ).resolves.toMatchObject([
+      {
+        id: dispatch.id,
+        status: "interrupted",
+        interruption: { reason: "lease_lost", resumable: false }
+      }
+    ]);
+    expect(fail).not.toHaveBeenCalled();
     await expect(
       coordination.dispatches.complete(
         registration.host.id,

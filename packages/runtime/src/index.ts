@@ -273,6 +273,7 @@ export {
   remoteBlockOperationQuerySchema,
   publicRemoteFailureSchema,
   remoteBlockRefIdentitySchema,
+  remoteBlockRetryAttemptInputSchema,
   remoteBlockRetryDecisionSchema,
   RemoteBlockRuntimeError
 } from "./taskManager/index.js";
@@ -289,6 +290,7 @@ export type {
   RemoteBlockMutationResult,
   RemoteBlockOperationQuery,
   RemoteBlockRefIdentity,
+  RemoteBlockRetryAttemptInput,
   RemoteBlockRetryDecision,
   RemoteBlockRuntimeErrorCode,
   RemoteBlockRuntimePort,

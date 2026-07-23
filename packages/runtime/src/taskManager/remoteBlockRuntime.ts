@@ -17,6 +17,8 @@ import {
   markRemoteBlockOwnershipSourceDrift,
   matchesRemoteOperationReceipt,
   prepareRemoteBlockOwnership,
+  resumeRemoteBlockOwnership,
+  retryRemoteBlockOwnership,
   RemoteOwnershipConflictError,
   type ActiveRemoteOperationIdentity
 } from "./remoteOwnershipTransitions.js";
@@ -31,6 +33,7 @@ import {
   remoteBlockMutationResultSchema,
   remoteBlockOperationQuerySchema,
   remoteBlockRefIdentitySchema,
+  remoteBlockRetryAttemptInputSchema,
   RemoteBlockRuntimeError,
   type RemoteBlockBindingView,
   type RemoteBlockClaimInput,
@@ -42,7 +45,8 @@ import {
   type RemoteBlockInspectInput,
   type RemoteBlockMutationResult,
   type RemoteBlockOperationQuery,
-  type RemoteBlockRefIdentity
+  type RemoteBlockRefIdentity,
+  type RemoteBlockRetryAttemptInput
 } from "./remoteBlockRuntimeContracts.js";
 import { remoteBlockSourceEvidence, sameRemoteBlockSource } from "./remoteBlockSource.js";
 import {
@@ -118,6 +122,8 @@ export interface RemoteBlockRuntimePort {
   query(input: RemoteBlockOperationQuery): Promise<RemoteBlockBindingView>;
   reconcile(input: RemoteBlockOperationQuery): Promise<RemoteBlockBindingView>;
   markInterrupted(input: RemoteBlockInterruptionInput): Promise<RemoteBlockMutationResult>;
+  resumeAttempt(input: RemoteBlockRefIdentity): Promise<RemoteBlockBindingView>;
+  retryAttempt(input: RemoteBlockRetryAttemptInput): Promise<RemoteBlockBindingView>;
   complete(input: RemoteBlockCompletionInput): Promise<RemoteBlockCompletionResult>;
   fail(input: RemoteBlockFailureInput): Promise<RemoteBlockMutationResult>;
 }
@@ -289,6 +295,98 @@ export function createRemoteBlockRuntimePort(options: {
             ? "resume_exact_attempt"
             : "manual_retry_required"
         });
+      });
+    },
+
+    resumeAttempt: async (rawInput) => {
+      const input = remoteBlockRefIdentitySchema.parse(rawInput);
+      return withLock(async (context) => {
+        assertRemoteBlockImplementation(context, input.ref);
+        const current = context.state.blocks[input.ref];
+        const requested = identityFromInput(input);
+        if (
+          current.status === "in_progress" &&
+          current.remoteOwnership?.phase === "active" &&
+          JSON.stringify(current.remoteOwnership) ===
+            JSON.stringify({ phase: "active", ...requested })
+        ) {
+          return bindingView(context, input.ref);
+        }
+        assertActiveRemoteBlockOwnership({
+          blockType: "implementation",
+          blockState: current,
+          ownership: requested
+        });
+        const source = await remoteBlockSourceEvidence(context, input.ref);
+        if (!sameRemoteBlockSource(source, input)) {
+          context.state.blocks[input.ref] = markRemoteBlockOwnershipSourceDrift({
+            blockType: "implementation",
+            blockState: context.state.blocks[input.ref],
+            ...source,
+            reason: `Remote source changed before resume of '${input.ref}'.`
+          });
+          await writeLockedState(context);
+          throw new RemoteBlockRuntimeError(
+            "remote_block_source_changed",
+            `Remote source changed before resume of '${input.ref}'.`
+          );
+        }
+        context.state.blocks[input.ref] = resumeRemoteBlockOwnership({
+          blockType: "implementation",
+          blockState: context.state.blocks[input.ref],
+          ownership: identityFromInput(input)
+        });
+        await writeLockedState(context);
+        return bindingView(context, input.ref);
+      });
+    },
+
+    retryAttempt: async (rawInput) => {
+      const input = remoteBlockRetryAttemptInputSchema.parse(rawInput);
+      return withLock(async (context) => {
+        assertRemoteBlockImplementation(context, input.ref);
+        const current = context.state.blocks[input.ref];
+        const retriedIdentity = identityFromInput({
+          ...input,
+          dispatchId: input.newDispatchId,
+          executionAttemptId: input.newExecutionAttemptId
+        });
+        if (
+          current.status === "in_progress" &&
+          current.remoteOwnership?.phase === "active" &&
+          JSON.stringify(current.remoteOwnership) ===
+            JSON.stringify({ phase: "active", ...retriedIdentity })
+        ) {
+          return bindingView(context, input.ref);
+        }
+        assertActiveRemoteBlockOwnership({
+          blockType: "implementation",
+          blockState: current,
+          ownership: identityFromInput(input)
+        });
+        const source = await remoteBlockSourceEvidence(context, input.ref);
+        if (!sameRemoteBlockSource(source, input)) {
+          context.state.blocks[input.ref] = markRemoteBlockOwnershipSourceDrift({
+            blockType: "implementation",
+            blockState: context.state.blocks[input.ref],
+            ...source,
+            reason: `Remote source changed before retry of '${input.ref}'.`
+          });
+          await writeLockedState(context);
+          throw new RemoteBlockRuntimeError(
+            "remote_block_source_changed",
+            `Remote source changed before retry of '${input.ref}'.`
+          );
+        }
+        context.state.blocks[input.ref] = retryRemoteBlockOwnership({
+          blockType: "implementation",
+          blockState: context.state.blocks[input.ref],
+          ownership: identityFromInput(input),
+          newDispatchId: input.newDispatchId,
+          newExecutionAttemptId: input.newExecutionAttemptId
+        });
+        await writeLockedState(context);
+        return bindingView(context, input.ref);
       });
     },
 

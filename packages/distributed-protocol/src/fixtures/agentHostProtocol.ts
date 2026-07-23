@@ -62,6 +62,7 @@ export const exampleAcpEventBatch = hostEventSchema.parse({
   dispatchId,
   leaseId,
   executionAttemptId,
+  acpSessionId: "acp-session-001",
   afterCursor: 0,
   cursor: 2,
   events: [
@@ -90,6 +91,8 @@ export const exampleAuthenticationRequired = hostEventSchema.parse({
   leaseId,
   executionAttemptId,
   actionId: "action-auth-001",
+  acpSessionId: "acp-session-001",
+  expiresAt: "2030-01-01T00:05:00.000Z",
   agentProfileId: "acp.codex",
   hostInstruction: "Sign in through the Agent Host's local provider UI."
 });
@@ -100,6 +103,7 @@ export const exampleAuthenticationSettlement = interactionSettlementSchema.parse
   leaseId,
   executionAttemptId,
   actionId: "action-auth-001",
+  acpSessionId: "acp-session-001",
   action: "retry_after_host_login"
 });
 

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { dispatchLifecycleIdentitySchema } from "./lifecycle.js";
+import { acpRecoveryIdentitySchema } from "./lifecycle.js";
 
 export const ACP_EVENT_BATCH_MAX_COUNT = 128 as const;
 export const ACP_EVENT_TEXT_MAX_LENGTH = 16_384 as const;
@@ -43,6 +44,7 @@ export const normalizedAcpEventSchema = z.discriminatedUnion("kind", [
 export const normalizedAcpEventBatchSchema = dispatchLifecycleIdentitySchema
   .extend({
     type: z.literal("acp.events"),
+    acpSessionId: acpRecoveryIdentitySchema.shape.acpSessionId,
     afterCursor: acpEventCursorSchema,
     cursor: acpEventCursorSchema,
     events: z.array(normalizedAcpEventSchema).min(1).max(ACP_EVENT_BATCH_MAX_COUNT)

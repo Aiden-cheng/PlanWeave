@@ -166,4 +166,150 @@ describe("HostReservationRepository", () => {
       )
     ).toThrowError("remote_active_attempt_conflict");
   });
+
+  it("expires without requeue and resumes the same attempt under a fresh fenced lease", async () => {
+    const server = await setup();
+    let now = new Date("2030-01-01T00:00:00.000Z");
+    const clock = () => now;
+    const hosts = new AgentHostRepository(server.database, clock);
+    const host = hosts.register("Resumable Host").host;
+    hosts.reportOnline(host.id, ["linux", "acp.session.load"], 1);
+    const operations = new RemoteOperationRepository(server.database, clock);
+    const reservations = new HostReservationRepository(server.database, {
+      clock,
+      hostOfflineAfterMs: 60_000,
+      leaseDurationMs: 60_000
+    });
+    const operation = createOperation(operations, "B-006", ["linux"]);
+    const original = reservations.reserve(operation.id);
+    reservations.transition({
+      leaseId: original.leaseId,
+      fencingToken: original.fencingToken,
+      expectedAttemptVersion: operations.getRequired(operation.id).attempt.stateVersion,
+      status: "activated"
+    });
+    const running = reservations.transition({
+      leaseId: original.leaseId,
+      fencingToken: original.fencingToken,
+      expectedAttemptVersion: operations.getRequired(operation.id).attempt.stateVersion,
+      status: "running"
+    });
+    now = new Date("2030-01-01T00:01:00.000Z");
+    expect(reservations.expireDue(now)).toMatchObject([
+      { leaseId: original.leaseId, status: "expired" }
+    ]);
+    const interrupted = operations.getRequired(operation.id);
+    expect(interrupted).toMatchObject({
+      state: "interrupted",
+      attempt: { status: "interrupted", executionAttemptId: running.executionAttemptId }
+    });
+    hosts.reportOnline(host.id, ["linux", "acp.session.load"], 1);
+
+    const resumed = reservations.resumeSameAttempt({
+      priorLeaseId: original.leaseId,
+      leaseId: "lease-resume-2",
+      leaseExpiresAt: "2030-01-01T00:02:00.000Z",
+      expectedAttemptVersion: interrupted.attempt.stateVersion
+    });
+    expect(resumed).toMatchObject({
+      leaseId: "lease-resume-2",
+      executionAttemptId: original.executionAttemptId,
+      hostId: original.hostId,
+      fencingToken: original.fencingToken + 1,
+      status: "active"
+    });
+    expect(
+      reservations.resumeSameAttempt({
+        priorLeaseId: original.leaseId,
+        leaseId: "lease-resume-2",
+        leaseExpiresAt: "2030-01-01T00:02:00.000Z",
+        expectedAttemptVersion: interrupted.attempt.stateVersion
+      })
+    ).toEqual(resumed);
+    expect(operations.getRequired(operation.id)).toMatchObject({
+      state: "activated",
+      attempt: {
+        status: "activated",
+        executionAttemptId: original.executionAttemptId,
+        leaseId: "lease-resume-2"
+      }
+    });
+    expect(reservations.getRequired(original.leaseId).status).toBe("expired");
+  });
+
+  it("terminalizes an exact fenced attempt idempotently", async () => {
+    const server = await setup();
+    const hosts = new AgentHostRepository(server.database);
+    const host = hosts.register("Fenced terminal Host").host;
+    hosts.reportOnline(host.id, ["linux"], 1);
+    const operations = new RemoteOperationRepository(server.database);
+    const reservations = new HostReservationRepository(server.database, {
+      hostOfflineAfterMs: 60_000,
+      leaseDurationMs: 60_000
+    });
+    const operation = createOperation(operations, "B-008");
+    const lease = reservations.reserve(operation.id);
+    reservations.transition({
+      leaseId: lease.leaseId,
+      fencingToken: lease.fencingToken,
+      expectedAttemptVersion: operations.getRequired(operation.id).attempt.stateVersion,
+      status: "activated"
+    });
+    reservations.release({
+      leaseId: lease.leaseId,
+      fencingToken: lease.fencingToken,
+      expectedVersion: lease.version,
+      reason: "expired"
+    });
+    const input = {
+      operationId: operation.id,
+      executionAttemptId: operation.executionAttemptId,
+      leaseId: lease.leaseId,
+      status: "failed" as const
+    };
+    reservations.finalizeFencedAttempt(input);
+    reservations.finalizeFencedAttempt(input);
+    expect(operations.getRequired(operation.id)).toMatchObject({
+      state: "failed",
+      attempt: { status: "failed" }
+    });
+  });
+
+  it("does not oversubscribe the original Host when resume capacity was reused", async () => {
+    const server = await setup();
+    let now = new Date("2030-01-01T00:00:00.000Z");
+    const clock = () => now;
+    const hosts = new AgentHostRepository(server.database, clock);
+    const host = hosts.register("Capacity Host").host;
+    hosts.reportOnline(host.id, ["linux", "acp.session.load"], 1);
+    const operations = new RemoteOperationRepository(server.database, clock);
+    const reservations = new HostReservationRepository(server.database, {
+      clock,
+      hostOfflineAfterMs: 60_000,
+      leaseDurationMs: 60_000
+    });
+    const interruptedOperation = createOperation(operations, "B-007");
+    const interruptedLease = reservations.reserve(interruptedOperation.id);
+    reservations.transition({
+      leaseId: interruptedLease.leaseId,
+      fencingToken: interruptedLease.fencingToken,
+      expectedAttemptVersion: operations.getRequired(interruptedOperation.id).attempt.stateVersion,
+      status: "activated"
+    });
+    now = new Date("2030-01-01T00:01:00.000Z");
+    reservations.expireDue(now);
+    hosts.reportOnline(host.id, ["linux", "acp.session.load"], 1);
+    reservations.reserve(createOperation(operations, "B-008").id);
+    const interrupted = operations.getRequired(interruptedOperation.id);
+
+    expect(() =>
+      reservations.resumeSameAttempt({
+        priorLeaseId: interruptedLease.leaseId,
+        leaseId: "lease-resume-capacity",
+        leaseExpiresAt: "2030-01-01T00:02:00.000Z",
+        expectedAttemptVersion: interrupted.attempt.stateVersion
+      })
+    ).toThrowError("remote_resume_host_capacity_exhausted");
+    expect(operations.getRequired(interruptedOperation.id).attempt.status).toBe("interrupted");
+  });
 });

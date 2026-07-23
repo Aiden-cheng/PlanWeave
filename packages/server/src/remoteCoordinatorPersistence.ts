@@ -1,6 +1,9 @@
 import {
+  acpRecoveryIdentitySchema,
   agentHostProtocolVersion,
+  capabilitiesSchema,
   dispatchResultSchema,
+  interruptionReasonSchema,
   mailboxCommandSchema,
   normalizedFailureSchema,
   type ExecutionEnvelope
@@ -17,6 +20,7 @@ import type {
 import type { HostCapacityReservation } from "./hostReservations.js";
 import { DurableMailbox } from "./mailbox.js";
 import { RemoteOperationRepository, type RemoteOperation } from "./remoteOperations.js";
+import type { RemoteExecutionActionRequest } from "./remoteExecutionLifecycle.js";
 import { inWriteTransaction, type SqliteDatabase } from "./sqlite.js";
 
 export class SqliteRemoteOperationCandidateRepository implements RemoteOperationCandidatePort {
@@ -72,7 +76,10 @@ export class SqliteRemoteDispatchPersistence implements RemoteDispatchPersistenc
 
   inspect(operation: RemoteOperation): RemoteDispatchReconciliationState {
     const dispatch = this.database
-      .prepare("SELECT status,result_json,failure_json FROM dispatches WHERE id=?")
+      .prepare(
+        `SELECT status,result_json,failure_json,interruption_reason,interruption_resumable
+         FROM dispatches WHERE id=?`
+      )
       .get(operation.dispatchId);
     const envelope = this.database
       .prepare("SELECT envelope_digest FROM dispatch_execution_envelopes WHERE dispatch_id=?")
@@ -149,6 +156,12 @@ export class SqliteRemoteDispatchPersistence implements RemoteDispatchPersistenc
     return {
       dispatch: {
         status,
+        interruption: dispatch.interruption_reason
+          ? {
+              reason: interruptionReasonSchema.parse(dispatch.interruption_reason),
+              resumable: dispatch.interruption_resumable === 1
+            }
+          : undefined,
         envelopeDigest: envelope
           ? z
               .string()
@@ -282,27 +295,142 @@ export class SqliteRemoteDispatchPersistence implements RemoteDispatchPersistenc
     });
   }
 
-  enqueueCancel(input: { operation: RemoteOperation; reason: string }) {
+  actionSnapshot(operation: RemoteOperation) {
+    const dispatch = this.database
+      .prepare(
+        `SELECT host_id,interruption_resumable,interruption_recovery_json
+         FROM dispatches WHERE id=?`
+      )
+      .get(operation.dispatchId);
+    if (!dispatch || typeof dispatch.host_id !== "string") {
+      throw new Error("remote_dispatch_not_found");
+    }
+    const reservation = operation.attempt.leaseId
+      ? this.database
+          .prepare("SELECT status FROM host_capacity_reservations WHERE lease_id=?")
+          .get(operation.attempt.leaseId)
+      : undefined;
+    const host = this.database
+      .prepare("SELECT capabilities_json FROM agent_hosts WHERE id=?")
+      .get(dispatch.host_id);
+    if (!host) throw new Error("remote_dispatch_host_not_found");
+    const recovery = dispatch.interruption_recovery_json
+      ? acpRecoveryIdentitySchema.parse(JSON.parse(String(dispatch.interruption_recovery_json)))
+      : undefined;
+    return {
+      operationId: operation.id,
+      dispatchId: operation.dispatchId,
+      executionAttemptId: operation.executionAttemptId,
+      attemptStatus: operation.attempt.status,
+      attemptVersion: operation.attempt.stateVersion,
+      leaseId: operation.attempt.leaseId,
+      leaseFenced: reservation?.status !== "active",
+      interruption:
+        dispatch.interruption_resumable === null || dispatch.interruption_resumable === undefined
+          ? undefined
+          : { resumable: dispatch.interruption_resumable === 1, recovery },
+      hostCapabilities: capabilitiesSchema.parse(JSON.parse(String(host.capabilities_json)))
+    };
+  }
+
+  enqueueCancel(input: {
+    operation: RemoteOperation;
+    action: Extract<RemoteExecutionActionRequest, { kind: "cancel" }>;
+  }) {
     const attempt = input.operation.attempt;
     if (!attempt.hostId || !attempt.leaseId) throw new Error("remote_attempt_not_bound");
     const hostId = attempt.hostId;
     const leaseId = attempt.leaseId;
-    return inWriteTransaction(
-      this.database,
-      () =>
-        this.mailbox.enqueueOnce(
-          `cancel-${input.operation.dispatchId}`,
-          hostId,
-          mailboxCommandSchema.parse({
-            type: "cancel_execution",
-            protocolVersion: agentHostProtocolVersion,
-            dispatchId: input.operation.dispatchId,
-            leaseId,
-            executionAttemptId: input.operation.executionAttemptId,
-            reason: input.reason
-          })
-        ).message
-    );
+    return inWriteTransaction(this.database, () => {
+      const updated = this.database
+        .prepare(
+          `UPDATE dispatches SET status='cancelling'
+           WHERE id=? AND lease_id=? AND execution_attempt_id=? AND status IN ('leased','running')`
+        )
+        .run(input.operation.dispatchId, leaseId, input.operation.executionAttemptId);
+      const current = this.database
+        .prepare("SELECT status FROM dispatches WHERE id=?")
+        .get(input.operation.dispatchId);
+      if (updated.changes !== 1 && current?.status !== "cancelling") {
+        throw new Error("remote_cancel_dispatch_conflict");
+      }
+      return this.mailbox.enqueueOnce(
+        input.action.actionId,
+        hostId,
+        mailboxCommandSchema.parse({
+          type: "cancel_execution",
+          protocolVersion: agentHostProtocolVersion,
+          dispatchId: input.operation.dispatchId,
+          leaseId,
+          executionAttemptId: input.operation.executionAttemptId,
+          reason: input.action.reason
+        })
+      ).message;
+    });
+  }
+
+  enqueueResume(input: {
+    operation: RemoteOperation;
+    action: Extract<RemoteExecutionActionRequest, { kind: "resume_same_session" }>;
+  }) {
+    const attempt = input.operation.attempt;
+    if (!attempt.hostId || attempt.leaseId !== input.action.leaseId) {
+      throw new Error("remote_resume_attempt_not_bound");
+    }
+    const hostId = attempt.hostId;
+    return inWriteTransaction(this.database, () => {
+      const updated = this.database
+        .prepare(
+          `UPDATE dispatches SET status='leased',lease_id=?,lease_expires_at=?,
+             interruption_reason=NULL,interruption_resumable=NULL,interruption_recovery_json=NULL
+           WHERE id=? AND execution_attempt_id=? AND status='interrupted'`
+        )
+        .run(
+          input.action.leaseId,
+          input.action.leaseExpiresAt,
+          input.operation.dispatchId,
+          input.operation.executionAttemptId
+        );
+      if (updated.changes !== 1) {
+        const current = this.database
+          .prepare("SELECT status,lease_id FROM dispatches WHERE id=? AND execution_attempt_id=?")
+          .get(input.operation.dispatchId, input.operation.executionAttemptId);
+        if (current?.status !== "leased" || current.lease_id !== input.action.leaseId) {
+          throw new Error("remote_resume_dispatch_conflict");
+        }
+      }
+      return this.mailbox.enqueueOnce(
+        input.action.actionId,
+        hostId,
+        mailboxCommandSchema.parse({
+          type: "resume_execution",
+          protocolVersion: agentHostProtocolVersion,
+          dispatchId: input.operation.dispatchId,
+          leaseId: input.action.leaseId,
+          executionAttemptId: input.operation.executionAttemptId,
+          priorRecovery: input.action.recovery,
+          leaseExpiresAt: input.action.leaseExpiresAt
+        })
+      ).message;
+    });
+  }
+
+  markActionRequired(operation: RemoteOperation): void {
+    const row = this.database
+      .prepare("SELECT status FROM dispatches WHERE id=?")
+      .get(operation.dispatchId);
+    if (row?.status !== "interrupted") throw new Error("remote_block_dispatch_not_interrupted");
+  }
+
+  prepareManualFailure(input: { operation: RemoteOperation; failure: unknown }): void {
+    const failure = normalizedFailureSchema.parse(input.failure);
+    const updated = this.database
+      .prepare(
+        `UPDATE dispatches SET status='awaiting_writeback',failure_json=?,result_json=NULL
+         WHERE id=? AND status='interrupted' AND execution_attempt_id=?`
+      )
+      .run(JSON.stringify(failure), input.operation.dispatchId, input.operation.executionAttemptId);
+    if (updated.changes !== 1) throw new Error("remote_manual_failure_dispatch_conflict");
   }
 
   markMailboxPublished(messageId: string): void {

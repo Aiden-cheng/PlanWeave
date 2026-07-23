@@ -109,5 +109,11 @@ describe("versioned Agent Host protocol", () => {
         actionId: "wrong-action"
       })
     ).toThrow("interaction_identity_mismatch");
+    expect(() =>
+      parseInteractionSettlementForRequest(request, {
+        ...agentHostProtocolGoldenFixtures.authenticationSettlement,
+        acpSessionId: "wrong-session"
+      })
+    ).toThrow("interaction_identity_mismatch");
   });
 });

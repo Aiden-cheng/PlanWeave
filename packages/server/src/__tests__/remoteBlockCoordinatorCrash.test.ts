@@ -187,7 +187,189 @@ function diagnosticCode(database: PlanweaveServer["database"], operationId: stri
     .get(operationId)?.code;
 }
 
+async function prepareInterruptedAction(harness: CoordinatorHarness, resumable: boolean) {
+  const hostId = harness.registerHost();
+  const coordination = harness.requireCoordination();
+  if (resumable) {
+    coordination.hosts.reportOnline(hostId, ["acp.codex", "acp.session.load"], 1);
+  }
+  const outcome = await coordination.coordinator.dispatch(
+    harness.request("T-001#B-001", `action-crash-${resumable}`)
+  );
+  const dispatch = coordination.dispatches.getRequired(outcome.operation.dispatchId);
+  coordination.dispatches.accept(
+    hostId,
+    `action-accepted-${resumable}`,
+    dispatch.id,
+    dispatch.leaseId,
+    dispatch.executionAttemptId
+  );
+  coordination.dispatches.interrupt(hostId, `action-interrupted-${resumable}`, {
+    type: "dispatch.interrupted",
+    protocolVersion: 1,
+    messageId: `action-interrupted-${resumable}`,
+    dispatchId: dispatch.id,
+    leaseId: dispatch.leaseId,
+    executionAttemptId: dispatch.executionAttemptId,
+    reason: resumable ? "transport_lost" : "acp_session_lost",
+    resumable,
+    ...(resumable
+      ? { recovery: { acpSessionId: "session-action-crash", recoveryId: "recovery-action-crash" } }
+      : {})
+  });
+  const lease = coordination.reservations.getRequired(dispatch.leaseId);
+  coordination.reservations.release({
+    leaseId: lease.leaseId,
+    fencingToken: lease.fencingToken,
+    expectedVersion: lease.version,
+    reason: "expired"
+  });
+  await coordination.coordinator.reenter(outcome.operation.id);
+  return { hostId, outcome, dispatch };
+}
+
 describe("RemoteBlockCoordinator crash reconciliation", () => {
+  it.each([
+    "block",
+    "fail"
+  ] as const)("recovers a %s action after its side effect but before action settlement", async (kind) => {
+    const harness = await CoordinatorHarness.create();
+    const prepared = await prepareInterruptedAction(harness, false);
+    let coordination = await harness.restart(new CrashOnce("after_action_side_effect"));
+    const interrupted = coordination.operations.getRequired(prepared.outcome.operation.id);
+    const request = {
+      actionId: `${kind}-action-crash`,
+      operationId: interrupted.id,
+      dispatchId: interrupted.dispatchId,
+      executionAttemptId: interrupted.executionAttemptId,
+      expectedAttemptVersion: interrupted.attempt.stateVersion,
+      kind,
+      leaseId: prepared.dispatch.leaseId,
+      reason: `${kind} after interruption`,
+      ...(kind === "fail"
+        ? {
+            failure: {
+              code: "operator_failed",
+              message: "Stopped manually.",
+              retryable: false
+            }
+          }
+        : {})
+    };
+    await expect(coordination.coordinator.executeAction(request)).rejects.toThrowError(
+      "injected_crash:after_action_side_effect"
+    );
+    coordination = await harness.restart();
+    await coordination.reconcile();
+    expect(coordination.actions.getRequired(request.actionId).state).toBe("settled");
+  });
+
+  it("recovers a resume action after fresh-lease and mailbox side effects", async () => {
+    const harness = await CoordinatorHarness.create();
+    const prepared = await prepareInterruptedAction(harness, true);
+    let coordination = await harness.restart(new CrashOnce("after_action_side_effect"));
+    const interrupted = coordination.operations.getRequired(prepared.outcome.operation.id);
+    const request = {
+      actionId: "resume-action-crash",
+      operationId: interrupted.id,
+      dispatchId: interrupted.dispatchId,
+      executionAttemptId: interrupted.executionAttemptId,
+      expectedAttemptVersion: interrupted.attempt.stateVersion,
+      kind: "resume_same_session",
+      priorLeaseId: prepared.dispatch.leaseId,
+      leaseId: "lease-resume-action-crash",
+      leaseExpiresAt: new Date(Date.now() + 55_000).toISOString(),
+      recovery: { acpSessionId: "session-action-crash", recoveryId: "recovery-action-crash" },
+      reason: "resume after transport interruption"
+    } as const;
+    await expect(coordination.coordinator.executeAction(request)).rejects.toThrowError(
+      "injected_crash:after_action_side_effect"
+    );
+    coordination = await harness.restart();
+    await coordination.reconcile();
+    expect(coordination.actions.getRequired(request.actionId).state).toBe("delivered");
+    expect(
+      harness
+        .requireServer()
+        .database.prepare("SELECT COUNT(*) AS count FROM mailbox_messages WHERE message_id=?")
+        .get(request.actionId)?.count
+    ).toBe(1);
+  });
+
+  it("recovers a retry crash after dispatching the new attempt but before settling the action", async () => {
+    const harness = await CoordinatorHarness.create();
+    const hostId = harness.registerHost();
+    let coordination = harness.requireCoordination();
+    const outcome = await coordination.coordinator.dispatch(harness.request());
+    const dispatch = coordination.dispatches.getRequired(outcome.operation.dispatchId);
+    coordination.dispatches.accept(
+      hostId,
+      "retry-accepted",
+      dispatch.id,
+      dispatch.leaseId,
+      dispatch.executionAttemptId
+    );
+    coordination.dispatches.interrupt(hostId, "retry-interrupted", {
+      type: "dispatch.interrupted",
+      protocolVersion: 1,
+      messageId: "retry-interrupted",
+      dispatchId: dispatch.id,
+      leaseId: dispatch.leaseId,
+      executionAttemptId: dispatch.executionAttemptId,
+      reason: "acp_session_lost",
+      resumable: false
+    });
+    const lease = coordination.reservations.getRequired(dispatch.leaseId);
+    coordination.reservations.release({
+      leaseId: lease.leaseId,
+      fencingToken: lease.fencingToken,
+      expectedVersion: lease.version,
+      reason: "expired"
+    });
+    await coordination.coordinator.reenter(outcome.operation.id);
+    coordination = await harness.restart(new CrashOnce("after_action_side_effect"));
+    const interrupted = coordination.operations.getRequired(outcome.operation.id);
+    const request = {
+      actionId: "retry-action-1",
+      operationId: interrupted.id,
+      dispatchId: interrupted.dispatchId,
+      executionAttemptId: interrupted.executionAttemptId,
+      expectedAttemptVersion: interrupted.attempt.stateVersion,
+      kind: "retry_new_attempt",
+      priorLeaseId: dispatch.leaseId,
+      newDispatchId: "dispatch-retry-action-2",
+      newExecutionAttemptId: "attempt-retry-action-2",
+      reason: "retry with a fresh attempt"
+    } as const;
+    await expect(coordination.coordinator.executeAction(request)).rejects.toThrowError(
+      "injected_crash:after_action_side_effect"
+    );
+    expect(coordination.actions.getRequired(request.actionId).state).toBe("recorded");
+
+    coordination = await harness.restart();
+    await coordination.reconcile();
+    const action = coordination.actions.getRequired(request.actionId);
+
+    expect(action.state).toBe("settled");
+    expect(coordination.operations.getRequired(outcome.operation.id)).toMatchObject({
+      state: "activated",
+      dispatchId: "dispatch-retry-action-2",
+      executionAttemptId: "attempt-retry-action-2"
+    });
+    expect(count(harness.requireServer().database, "dispatches")).toBe(2);
+    expect(count(harness.requireServer().database, "mailbox_messages")).toBe(2);
+  });
+
+  it("rejects completion without durable terminal evidence", async () => {
+    const harness = await CoordinatorHarness.create();
+    harness.registerHost();
+    const coordination = harness.requireCoordination();
+    const outcome = await coordination.coordinator.dispatch(harness.request());
+    await expect(coordination.coordinator.complete(outcome.operation.id)).rejects.toThrowError(
+      "remote_completion_evidence_missing"
+    );
+  });
+
   it.each(dispatchCrashPoints)("recovers the same operation after %s", async (checkpoint) => {
     const harness = await CoordinatorHarness.create();
     harness.registerHost();
@@ -396,12 +578,12 @@ describe("RemoteBlockCoordinator crash reconciliation", () => {
     const outcome = await harness.requireCoordination().coordinator.dispatch(harness.request());
     const coordinator = harness.requireCoordination().coordinator;
 
-    coordinator.requestCancel(outcome.operation.id, "operator requested cancellation");
-    coordinator.requestCancel(outcome.operation.id, "operator requested cancellation");
+    await coordinator.requestCancel(outcome.operation.id, "operator requested cancellation");
+    await coordinator.requestCancel(outcome.operation.id, "operator requested cancellation");
     expect(count(harness.requireServer().database, "mailbox_messages")).toBe(2);
-    expect(() => coordinator.requestCancel(outcome.operation.id, "different reason")).toThrowError(
-      "mailbox_message_identity_conflict"
-    );
+    await expect(
+      coordinator.requestCancel(outcome.operation.id, "different reason")
+    ).rejects.toThrowError("remote_action_idempotency_conflict");
     expect(count(harness.requireServer().database, "mailbox_messages")).toBe(2);
   });
 

@@ -431,6 +431,121 @@ describe("remote block runtime terminal transitions", () => {
     expect(terminal).not.toHaveProperty("interruption");
   });
 
+  it("rebinds only an exact non-resumable interrupted attempt for a manual retry", async () => {
+    const { port, identity } = await activateReadyBlock();
+    await port.markInterrupted({
+      ref: "T-001#B-001",
+      ...identity,
+      interruption: { reason: "acp_session_lost", resumable: false }
+    });
+
+    const retried = await port.retryAttempt({
+      ref: "T-001#B-001",
+      ...identity,
+      newDispatchId: "dispatch-002",
+      newExecutionAttemptId: "attempt-002"
+    });
+    expect(retried).toMatchObject({
+      status: "in_progress",
+      ownership: { ...identity, dispatchId: "dispatch-002", executionAttemptId: "attempt-002" }
+    });
+    expect(retried).not.toHaveProperty("interruption");
+    expect(retried).not.toHaveProperty("divergenceReason");
+
+    await expect(
+      port.retryAttempt({
+        ref: "T-001#B-001",
+        ...identity,
+        newDispatchId: "dispatch-003",
+        newExecutionAttemptId: "attempt-003"
+      })
+    ).rejects.toMatchObject({ code: "remote_ownership_activation_conflict" });
+  });
+
+  it("resumes only the exact resumable attempt and clears only its active interruption marker", async () => {
+    const { port, identity } = await activateReadyBlock();
+    await port.markInterrupted({
+      ref: "T-001#B-001",
+      ...identity,
+      interruption: { reason: "transport_lost", resumable: true }
+    });
+    await expect(
+      port.resumeAttempt({
+        ref: "T-001#B-001",
+        ...identity,
+        executionAttemptId: "attempt-stale"
+      })
+    ).rejects.toMatchObject({ code: "remote_ownership_activation_conflict" });
+    const stillInterrupted = await port.query({
+      ref: "T-001#B-001",
+      operationId: identity.operationId
+    });
+    expect(stillInterrupted).toMatchObject({
+      status: "diverged",
+      interruption: { reason: "transport_lost", resumable: true }
+    });
+
+    const resumed = await port.resumeAttempt({ ref: "T-001#B-001", ...identity });
+    expect(resumed).toMatchObject({ status: "in_progress", ownership: identity });
+    expect(resumed).not.toHaveProperty("interruption");
+    expect(resumed).not.toHaveProperty("divergenceReason");
+  });
+
+  it("keeps a non-resumable interruption marker when resume is rejected", async () => {
+    const { port, identity } = await activateReadyBlock();
+    await port.markInterrupted({
+      ref: "T-001#B-001",
+      ...identity,
+      interruption: { reason: "acp_session_lost", resumable: false }
+    });
+    await expect(port.resumeAttempt({ ref: "T-001#B-001", ...identity })).rejects.toMatchObject({
+      code: "remote_ownership_status_conflict"
+    });
+    await expect(
+      port.query({ ref: "T-001#B-001", operationId: identity.operationId })
+    ).resolves.toMatchObject({
+      status: "diverged",
+      interruption: { reason: "acp_session_lost", resumable: false }
+    });
+  });
+
+  it("rejects retry for resumable interruption and changed source evidence", async () => {
+    const resumable = await activateReadyBlock();
+    await resumable.port.markInterrupted({
+      ref: "T-001#B-001",
+      ...resumable.identity,
+      interruption: { reason: "transport_lost", resumable: true }
+    });
+    await expect(
+      resumable.port.retryAttempt({
+        ref: "T-001#B-001",
+        ...resumable.identity,
+        newDispatchId: "dispatch-002",
+        newExecutionAttemptId: "attempt-002"
+      })
+    ).rejects.toMatchObject({ code: "remote_ownership_status_conflict" });
+
+    const drifted = await activateReadyBlock();
+    await drifted.port.markInterrupted({
+      ref: "T-001#B-001",
+      ...drifted.identity,
+      interruption: { reason: "acp_session_lost", resumable: false }
+    });
+    await appendFile(
+      join(drifted.init.workspace.packageDir, "nodes/T-001/blocks/B-001.prompt.md"),
+      "\nchanged before retry\n",
+      "utf8"
+    );
+    await expect(
+      drifted.port.retryAttempt({
+        ref: "T-001#B-001",
+        ...drifted.identity,
+        newDispatchId: "dispatch-002",
+        newExecutionAttemptId: "attempt-002"
+      })
+    ).rejects.toMatchObject({ code: "remote_block_source_changed" });
+  });
+
   it("clears interrupted ownership only through explicit divergence resolution", async () => {
     const { root, init, port, identity } = await activateReadyBlock();
     await port.markInterrupted({

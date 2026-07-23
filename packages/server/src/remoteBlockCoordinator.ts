@@ -4,11 +4,10 @@ import {
   agentHostProtocolVersion,
   executionEnvelopeSchema,
   hashExecutionEnvelope,
-  mailboxCommandSchema,
-  type NormalizedFailure
+  mailboxCommandSchema
 } from "@planweave-ai/distributed-protocol";
 import type { RemoteBlockDispatchCandidate } from "@planweave-ai/runtime";
-import { remoteBlockFailureInputSchema, remoteBlockRefIdentitySchema } from "@planweave-ai/runtime";
+import { remoteBlockFailureInputSchema } from "@planweave-ai/runtime";
 import type {
   RemoteArtifactContentPort,
   RemoteBlockRuntimeResolverPort,
@@ -22,6 +21,12 @@ import type {
 } from "./remoteBlockCoordinatorPorts.js";
 import { HostReservationRepository } from "./hostReservations.js";
 import { RemoteOperationRepository, type RemoteOperation } from "./remoteOperations.js";
+import {
+  RemoteExecutionActionRepository,
+  type RemoteExecutionActionRecord
+} from "./remoteExecutionActions.js";
+import { RemoteBlockActionCoordinator } from "./remoteBlockActionCoordinator.js";
+import { remoteBlockIdentity } from "./remoteBlockIdentity.js";
 
 export type RemoteDispatchRequest = RemoteRuntimeLocator & {
   blockRef: string;
@@ -42,6 +47,7 @@ export type RemoteDispatchOutcome = {
 export type RemoteBlockCoordinatorOptions = {
   runtimeResolver: RemoteBlockRuntimeResolverPort;
   operations: RemoteOperationRepository;
+  actions: RemoteExecutionActionRepository;
   candidates: RemoteOperationCandidatePort;
   reservations: HostReservationRepository;
   dispatches: RemoteDispatchPersistencePort;
@@ -80,17 +86,6 @@ function buildEnvelope(operation: RemoteOperation, candidate: RemoteBlockDispatc
       maxArtifactCount: OUTPUT_MAX_ARTIFACT_COUNT
     },
     trace: { correlationId: operation.id }
-  });
-}
-
-function identity(operation: RemoteOperation) {
-  return remoteBlockRefIdentitySchema.parse({
-    ref: operation.blockRef,
-    operationId: operation.id,
-    sourceRevision: operation.ownershipGeneration,
-    graphFingerprint: operation.sourceFingerprint,
-    dispatchId: operation.dispatchId,
-    executionAttemptId: operation.executionAttemptId
   });
 }
 
@@ -138,7 +133,7 @@ export class RemoteBlockCoordinator {
           ref: operation.blockRef,
           operationId: operation.id
         });
-        if (binding.divergenceReason) {
+        if (binding.divergenceReason && !binding.interruption) {
           this.options.operations.recordDiagnostic(
             operation.id,
             "remote_source_changed",
@@ -218,7 +213,18 @@ export class RemoteBlockCoordinator {
       await this.checkpoint("after_host_acceptance_observed");
       return { operation: this.options.operations.getRequired(operation.id), status: "active" };
     }
+    if (persisted.dispatch?.status === "leased" && operation.state === "activated") {
+      return { operation: this.options.operations.getRequired(operation.id), status: "activated" };
+    }
     if (persisted.dispatch?.status === "interrupted") {
+      const interruption = persisted.dispatch.interruption;
+      if (!interruption) {
+        this.recordInconsistency(operation, "An interrupted dispatch has no interruption payload.");
+      }
+      await runtime.markInterrupted({
+        ...remoteBlockIdentity(operation),
+        interruption
+      });
       return {
         operation: this.options.operations.getRequired(operation.id),
         status: "wait_for_action"
@@ -234,9 +240,9 @@ export class RemoteBlockCoordinator {
         );
       }
       if (action.kind === "complete") {
-        await this.complete(operation.id, action.reportArtifactRef);
+        await this.complete(operation.id);
       } else {
-        await this.fail(operation.id, action.failure);
+        await this.fail(operation.id);
       }
       return {
         operation: this.options.operations.getRequired(operation.id),
@@ -283,7 +289,7 @@ export class RemoteBlockCoordinator {
     await this.checkpoint("after_dispatch_persistence");
 
     try {
-      await runtime.activate(identity(operation));
+      await runtime.activate(remoteBlockIdentity(operation));
       await this.checkpoint("after_runtime_binding");
     } catch (error) {
       this.options.operations.recordDiagnostic(
@@ -330,23 +336,40 @@ export class RemoteBlockCoordinator {
     });
   }
 
-  requestCancel(operationId: string, reason: string): void {
-    const operation = this.options.operations.getRequired(operationId);
-    const message = this.options.dispatches.enqueueCancel({ operation, reason });
-    if (!message.publishedAt) {
-      this.options.mailbox.publish(message);
-      this.options.dispatches.markMailboxPublished(message.messageId);
-    }
+  async executeAction(rawAction: unknown): Promise<RemoteExecutionActionRecord> {
+    return this.actionCoordinator().execute(rawAction);
   }
 
-  async complete(operationId: string, reportArtifactRef: string): Promise<void> {
+  async reconcileActions(): Promise<RemoteExecutionActionRecord[]> {
+    return this.actionCoordinator().reconcile();
+  }
+
+  async requestCancel(operationId: string, reason: string): Promise<void> {
+    await this.actionCoordinator().requestCancel(operationId, reason);
+  }
+
+  private actionCoordinator(): RemoteBlockActionCoordinator {
+    return new RemoteBlockActionCoordinator(this.options, {
+      reenter: (operationId) => this.reenter(operationId),
+      fail: (operationId) => this.fail(operationId),
+      checkpoint: () => this.checkpoint("after_action_side_effect")
+    });
+  }
+
+  async complete(operationId: string): Promise<void> {
     let operation = this.options.operations.getRequired(operationId);
+    const terminal = this.options.dispatches.inspect(operation).dispatch;
+    if (terminal?.status !== "awaiting_writeback" || terminal.terminalAction?.kind !== "complete") {
+      throw new Error("remote_completion_evidence_missing");
+    }
+    await this.checkpoint("after_terminal_event_persistence");
+    const reportArtifactRef = terminal.terminalAction.reportArtifactRef;
     const runtime = this.options.runtimeResolver.resolve(operation);
     const reportBytes = new Uint8Array(
       await this.options.artifactContent.readReport(reportArtifactRef)
     );
     await this.checkpoint("before_runtime_writeback");
-    await runtime.complete({ ...identity(operation), reportArtifactRef, reportBytes });
+    await runtime.complete({ ...remoteBlockIdentity(operation), reportArtifactRef, reportBytes });
     await this.checkpoint("after_runtime_writeback");
     operation = this.options.operations.getRequired(operation.id);
     this.options.dispatches.finishTerminal({ operation, status: "completed" });
@@ -355,11 +378,24 @@ export class RemoteBlockCoordinator {
     await this.checkpoint("after_terminal_persistence");
   }
 
-  async fail(operationId: string, failure: NormalizedFailure): Promise<void> {
+  async fail(operationId: string): Promise<void> {
     let operation = this.options.operations.getRequired(operationId);
+    const terminal = this.options.dispatches.inspect(operation).dispatch;
+    if (terminal?.status !== "awaiting_writeback" || terminal.terminalAction?.kind !== "fail") {
+      const current = this.options.dispatches.inspect(operation).dispatch;
+      if (current?.status === "failed" || current?.status === "cancelled") {
+        this.finalizeOperationTerminal(operation, current.status);
+        return;
+      }
+      throw new Error("remote_failure_evidence_missing");
+    }
+    await this.checkpoint("after_terminal_event_persistence");
+    const failure = terminal.terminalAction.failure;
     const runtime = this.options.runtimeResolver.resolve(operation);
     await this.checkpoint("before_runtime_writeback");
-    await runtime.fail(remoteBlockFailureInputSchema.parse({ ...identity(operation), failure }));
+    await runtime.fail(
+      remoteBlockFailureInputSchema.parse({ ...remoteBlockIdentity(operation), failure })
+    );
     await this.checkpoint("after_runtime_writeback");
     operation = this.options.operations.getRequired(operation.id);
     const status = failure.code === "execution_cancelled" ? "cancelled" : "failed";
@@ -385,9 +421,12 @@ export class RemoteBlockCoordinator {
       return;
     }
     const current = this.options.operations.getRequired(operation.id);
-    if (current.state !== status || current.attempt.status !== status) {
-      throw new Error("remote_terminal_persistence_conflict");
-    }
+    this.options.reservations.finalizeFencedAttempt({
+      operationId: current.id,
+      executionAttemptId: current.executionAttemptId,
+      leaseId: reservation.leaseId,
+      status
+    });
   }
 
   private inspectPersistence(

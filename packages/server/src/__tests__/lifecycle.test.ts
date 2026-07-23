@@ -27,7 +27,7 @@ describe("server lifecycle", () => {
     );
 
     try {
-      expect(server.readiness()).toEqual({ status: "ready", schemaVersion: 12 });
+      expect(server.readiness()).toEqual({ status: "ready", schemaVersion: 14 });
       expect(reconciled).toBe(true);
       const backup = await server.createBackup("before-upgrade.sqlite");
       expect((await stat(backup)).size).toBeGreaterThan(0);

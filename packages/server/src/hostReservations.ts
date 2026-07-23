@@ -234,6 +234,222 @@ export class HostReservationRepository {
     return reservation;
   }
 
+  expireDue(now = this.clock()): HostCapacityReservation[] {
+    const leaseIds = this.database
+      .prepare(
+        `SELECT lease_id FROM host_capacity_reservations
+         WHERE status='active' AND lease_expires_at<=? ORDER BY lease_expires_at,lease_id`
+      )
+      .all(now.toISOString())
+      .map((row) => leaseIdSchema.parse(row.lease_id));
+    const expired: HostCapacityReservation[] = [];
+    for (const leaseId of leaseIds) {
+      const reservation = this.getRequired(leaseId);
+      if (
+        reservation.status !== "active" ||
+        Date.parse(reservation.leaseExpiresAt) > now.getTime()
+      ) {
+        continue;
+      }
+      expired.push(
+        this.release({
+          leaseId,
+          fencingToken: reservation.fencingToken,
+          expectedVersion: reservation.version,
+          reason: "expired"
+        })
+      );
+    }
+    return expired;
+  }
+
+  resumeSameAttempt(input: {
+    priorLeaseId: string;
+    leaseId: string;
+    leaseExpiresAt: string;
+    expectedAttemptVersion: number;
+  }): HostCapacityReservation {
+    const priorLeaseId = leaseIdSchema.parse(input.priorLeaseId);
+    const leaseId = leaseIdSchema.parse(input.leaseId);
+    const leaseExpiresAt = timestampSchema.parse(input.leaseExpiresAt);
+    if (priorLeaseId === leaseId) throw new Error("remote_resume_lease_identity_reused");
+    return inWriteTransaction(this.database, () => {
+      const prior = this.getRequired(priorLeaseId);
+      const existing = this.get(leaseId);
+      if (existing) {
+        if (
+          existing.executionAttemptId === prior.executionAttemptId &&
+          existing.hostId === prior.hostId &&
+          existing.fencingToken === prior.fencingToken + 1 &&
+          existing.status === "active" &&
+          existing.leaseExpiresAt === leaseExpiresAt
+        ) {
+          return existing;
+        }
+        throw new Error("remote_resume_lease_identity_conflict");
+      }
+      if (prior.status !== "expired") throw new Error("remote_resume_prior_lease_not_fenced");
+      const now = this.clock();
+      const expiryTime = Date.parse(leaseExpiresAt);
+      if (
+        expiryTime <= now.getTime() ||
+        expiryTime > now.getTime() + this.options.leaseDurationMs
+      ) {
+        throw new Error("remote_resume_lease_expiry_invalid");
+      }
+      const operationRow = this.database
+        .prepare("SELECT operation_id FROM remote_execution_attempts WHERE execution_attempt_id=?")
+        .get(prior.executionAttemptId);
+      if (!operationRow || typeof operationRow.operation_id !== "string") {
+        throw new Error("remote_operation_attempt_identity_mismatch");
+      }
+      const operations = new RemoteOperationRepository(this.database, this.clock);
+      const operation = operations.getRequired(
+        opaqueIdentifierSchema.parse(operationRow.operation_id)
+      );
+      if (
+        operation.executionAttemptId !== prior.executionAttemptId ||
+        operation.attempt.status !== "interrupted" ||
+        operation.attempt.stateVersion !== input.expectedAttemptVersion ||
+        operation.attempt.leaseId !== prior.leaseId
+      ) {
+        throw new Error("remote_resume_attempt_conflict");
+      }
+      const onlineAfter = new Date(now.getTime() - this.options.hostOfflineAfterMs).toISOString();
+      const hostRow = this.database
+        .prepare(
+          `SELECT capabilities_json,capacity,
+             (SELECT COUNT(*) FROM host_capacity_reservations r
+               WHERE r.host_id=agent_hosts.id AND r.status='active') AS active_reservations
+           FROM agent_hosts
+           WHERE id=? AND revoked_at IS NULL AND last_seen_at>=?
+             AND (credential_expires_at IS NULL OR credential_expires_at>?)`
+        )
+        .get(prior.hostId, onlineAfter, now.toISOString());
+      if (!hostRow) throw new Error("remote_resume_host_unavailable");
+      const capabilities = capabilitiesSchema.parse(JSON.parse(String(hostRow.capabilities_json)));
+      if (!capabilities.includes("acp.session.load")) {
+        throw new Error("remote_resume_session_load_unsupported");
+      }
+      const capacity = z.number().int().positive().parse(hostRow.capacity);
+      const activeReservations = z.number().int().nonnegative().parse(hostRow.active_reservations);
+      if (activeReservations >= capacity) throw new Error("remote_resume_host_capacity_exhausted");
+      const fencingToken = prior.fencingToken + 1;
+      this.database
+        .prepare(
+          `INSERT INTO host_capacity_reservations(
+            lease_id,execution_attempt_id,host_id,fencing_token,status,lease_expires_at,created_at
+          ) VALUES (?,?,?,?,'active',?,?)`
+        )
+        .run(
+          leaseId,
+          prior.executionAttemptId,
+          prior.hostId,
+          fencingToken,
+          leaseExpiresAt,
+          now.toISOString()
+        );
+      const updated = this.database
+        .prepare(
+          `UPDATE remote_execution_attempts
+           SET status='activated',lease_id=?,lease_fencing_token=?,lease_expires_at=?,
+             state_version=state_version+1,updated_at=?
+           WHERE execution_attempt_id=? AND status='interrupted' AND lease_id=?
+             AND state_version=?`
+        )
+        .run(
+          leaseId,
+          fencingToken,
+          leaseExpiresAt,
+          now.toISOString(),
+          prior.executionAttemptId,
+          prior.leaseId,
+          input.expectedAttemptVersion
+        );
+      if (updated.changes !== 1) throw new Error("remote_resume_attempt_conflict");
+      this.database
+        .prepare("UPDATE remote_operations SET state='activated',updated_at=? WHERE id=?")
+        .run(now.toISOString(), operation.id);
+      operations.appendEvent(
+        operation.id,
+        operation.executionAttemptId,
+        "remote.attempt.activated",
+        now.toISOString()
+      );
+      return this.getRequired(leaseId);
+    });
+  }
+
+  isResumeApplied(input: {
+    priorLeaseId: string;
+    leaseId: string;
+    executionAttemptId: string;
+    leaseExpiresAt: string;
+  }): boolean {
+    const prior = this.getRequired(input.priorLeaseId);
+    const current = this.get(input.leaseId);
+    if (!current) return false;
+    const operationRow = this.database
+      .prepare("SELECT status,lease_id FROM remote_execution_attempts WHERE execution_attempt_id=?")
+      .get(input.executionAttemptId);
+    return (
+      prior.executionAttemptId === input.executionAttemptId &&
+      current.executionAttemptId === input.executionAttemptId &&
+      current.hostId === prior.hostId &&
+      current.fencingToken === prior.fencingToken + 1 &&
+      current.status === "active" &&
+      current.leaseExpiresAt === input.leaseExpiresAt &&
+      operationRow?.lease_id === current.leaseId &&
+      (operationRow.status === "activated" || operationRow.status === "running")
+    );
+  }
+
+  finalizeFencedAttempt(input: {
+    operationId: string;
+    executionAttemptId: string;
+    leaseId: string;
+    status: "completed" | "failed" | "cancelled";
+  }): void {
+    inWriteTransaction(this.database, () => {
+      const reservation = this.getRequired(input.leaseId);
+      if (reservation.executionAttemptId !== input.executionAttemptId) {
+        throw new Error("remote_terminal_attempt_identity_mismatch");
+      }
+      if (reservation.status === "active") throw new Error("reservation_still_active");
+      const operations = new RemoteOperationRepository(this.database, this.clock);
+      const operation = operations.getRequired(input.operationId);
+      if (operation.executionAttemptId !== input.executionAttemptId) {
+        throw new Error("remote_terminal_attempt_identity_mismatch");
+      }
+      if (operation.state === input.status && operation.attempt.status === input.status) return;
+      if (
+        operation.attempt.status !== "interrupted" &&
+        operation.attempt.status !== "action_required" &&
+        operation.attempt.status !== "awaiting_writeback"
+      ) {
+        throw new Error("remote_terminal_persistence_conflict");
+      }
+      const now = this.clock().toISOString();
+      const updated = this.database
+        .prepare(
+          `UPDATE remote_execution_attempts SET status=?,state_version=state_version+1,
+             updated_at=?,terminal_at=? WHERE execution_attempt_id=? AND operation_id=?
+             AND lease_id=? AND status IN ('interrupted','action_required','awaiting_writeback')`
+        )
+        .run(input.status, now, now, input.executionAttemptId, operation.id, reservation.leaseId);
+      if (updated.changes !== 1) throw new Error("remote_terminal_persistence_conflict");
+      this.database
+        .prepare("UPDATE remote_operations SET state=?,updated_at=?,terminal_at=? WHERE id=?")
+        .run(input.status, now, now, operation.id);
+      operations.appendEvent(
+        operation.id,
+        operation.executionAttemptId,
+        attemptEventForRelease(input.status),
+        now
+      );
+    });
+  }
+
   transition(input: {
     leaseId: string;
     fencingToken: number;

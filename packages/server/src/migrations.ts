@@ -456,6 +456,220 @@ const migration12 = `
 ALTER TABLE mailbox_messages ADD COLUMN previous_sequence INTEGER NOT NULL DEFAULT 0;
 `;
 
+const migration13 = `
+CREATE TABLE remote_execution_attempts_v13 (
+  execution_attempt_id TEXT PRIMARY KEY,
+  operation_id TEXT NOT NULL REFERENCES remote_operations(id),
+  dispatch_id TEXT NOT NULL UNIQUE,
+  project_id TEXT NOT NULL,
+  canvas_id TEXT NOT NULL,
+  block_ref TEXT NOT NULL,
+  ownership_generation TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN (
+    'prepared','reserved','activated','running','interrupted','action_required',
+    'awaiting_writeback','superseded','completed','failed','cancelled'
+  )),
+  host_id TEXT REFERENCES agent_hosts(id),
+  lease_id TEXT UNIQUE,
+  lease_fencing_token INTEGER NOT NULL DEFAULT 0 CHECK(lease_fencing_token >= 0),
+  lease_expires_at TEXT,
+  state_version INTEGER NOT NULL DEFAULT 0 CHECK(state_version >= 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  terminal_at TEXT,
+  CHECK(
+    (status='prepared' AND host_id IS NULL AND lease_id IS NULL AND lease_expires_at IS NULL
+      AND lease_fencing_token=0)
+    OR (status<>'prepared' AND host_id IS NOT NULL AND lease_id IS NOT NULL
+      AND lease_expires_at IS NOT NULL AND lease_fencing_token>0)
+  ),
+  CHECK(
+    (status IN ('superseded','completed','failed','cancelled') AND terminal_at IS NOT NULL)
+    OR (status NOT IN ('superseded','completed','failed','cancelled') AND terminal_at IS NULL)
+  )
+);
+
+INSERT INTO remote_execution_attempts_v13 SELECT * FROM remote_execution_attempts;
+
+CREATE TABLE host_capacity_reservations_v13 (
+  lease_id TEXT PRIMARY KEY,
+  execution_attempt_id TEXT NOT NULL REFERENCES remote_execution_attempts_v13(execution_attempt_id),
+  host_id TEXT NOT NULL REFERENCES agent_hosts(id),
+  fencing_token INTEGER NOT NULL CHECK(fencing_token > 0),
+  status TEXT NOT NULL CHECK(status IN ('active','released','expired','cancelled')),
+  lease_expires_at TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 0 CHECK(version >= 0),
+  created_at TEXT NOT NULL,
+  released_at TEXT,
+  CHECK(
+    (status='active' AND released_at IS NULL)
+    OR (status<>'active' AND released_at IS NOT NULL)
+  )
+);
+
+INSERT INTO host_capacity_reservations_v13 SELECT * FROM host_capacity_reservations;
+
+CREATE TABLE remote_operation_events_v13 (
+  sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+  operation_id TEXT NOT NULL REFERENCES remote_operations(id),
+  execution_attempt_id TEXT REFERENCES remote_execution_attempts_v13(execution_attempt_id),
+  type TEXT NOT NULL CHECK(type IN (
+    'remote.operation.created','remote.operation.claimed','remote.operation.envelope_recorded',
+    'remote.attempt.reserved','remote.attempt.activated','remote.attempt.running',
+    'remote.attempt.interrupted','remote.attempt.action_required',
+    'remote.attempt.awaiting_writeback','remote.attempt.superseded','remote.attempt.retry_created',
+    'remote.attempt.completed','remote.attempt.failed','remote.attempt.cancelled',
+    'remote.reservation.released','remote.reservation.expired','remote.reservation.cancelled'
+  )),
+  occurred_at TEXT NOT NULL
+);
+
+INSERT INTO remote_operation_events_v13 SELECT * FROM remote_operation_events;
+
+DROP TABLE remote_operation_events;
+DROP TABLE host_capacity_reservations;
+DROP TABLE remote_execution_attempts;
+ALTER TABLE remote_execution_attempts_v13 RENAME TO remote_execution_attempts;
+ALTER TABLE host_capacity_reservations_v13 RENAME TO host_capacity_reservations;
+ALTER TABLE remote_operation_events_v13 RENAME TO remote_operation_events;
+
+CREATE UNIQUE INDEX idx_remote_attempt_active_ownership
+  ON remote_execution_attempts(project_id,canvas_id,block_ref,ownership_generation)
+  WHERE status IN (
+    'reserved','activated','running','interrupted','action_required','awaiting_writeback'
+  );
+CREATE INDEX idx_remote_attempt_operation_status
+  ON remote_execution_attempts(operation_id,status);
+CREATE INDEX idx_host_capacity_reservations_active
+  ON host_capacity_reservations(host_id,lease_expires_at)
+  WHERE status='active';
+CREATE UNIQUE INDEX idx_host_capacity_reservation_active_attempt
+  ON host_capacity_reservations(execution_attempt_id)
+  WHERE status='active';
+CREATE INDEX idx_remote_operation_events_operation_sequence
+  ON remote_operation_events(operation_id,sequence);
+
+CREATE TABLE remote_execution_actions (
+  action_id TEXT PRIMARY KEY,
+  operation_id TEXT NOT NULL REFERENCES remote_operations(id),
+  dispatch_id TEXT NOT NULL,
+  execution_attempt_id TEXT NOT NULL REFERENCES remote_execution_attempts(execution_attempt_id),
+  kind TEXT NOT NULL CHECK(kind IN ('resume_same_session','retry_new_attempt','fail','block','cancel')),
+  request_fingerprint TEXT NOT NULL CHECK(
+    length(request_fingerprint)=64 AND request_fingerprint NOT GLOB '*[^a-f0-9]*'
+  ),
+  request_json TEXT NOT NULL,
+  state TEXT NOT NULL CHECK(state IN ('recorded','delivered','acknowledged','settled')),
+  created_at TEXT NOT NULL,
+  delivered_at TEXT,
+  acknowledged_at TEXT,
+  settled_at TEXT,
+  CHECK(
+    (state='recorded' AND delivered_at IS NULL AND acknowledged_at IS NULL AND settled_at IS NULL)
+    OR (state='delivered' AND delivered_at IS NOT NULL AND acknowledged_at IS NULL AND settled_at IS NULL)
+    OR (state='acknowledged' AND delivered_at IS NOT NULL AND acknowledged_at IS NOT NULL AND settled_at IS NULL)
+    OR (state='settled' AND settled_at IS NOT NULL)
+  )
+);
+
+CREATE INDEX idx_remote_execution_actions_operation_state
+  ON remote_execution_actions(operation_id,state,created_at);
+`;
+
+const migration14 = `
+CREATE TABLE remote_acp_event_streams (
+  execution_attempt_id TEXT PRIMARY KEY REFERENCES remote_execution_attempts(execution_attempt_id),
+  operation_id TEXT NOT NULL REFERENCES remote_operations(id),
+  dispatch_id TEXT NOT NULL,
+  lease_id TEXT NOT NULL,
+  host_id TEXT NOT NULL REFERENCES agent_hosts(id),
+  acp_session_id TEXT NOT NULL,
+  latest_cursor INTEGER NOT NULL DEFAULT 0 CHECK(latest_cursor >= 0),
+  retained_from_cursor INTEGER NOT NULL DEFAULT 1 CHECK(retained_from_cursor > 0),
+  retained_count INTEGER NOT NULL DEFAULT 0 CHECK(retained_count >= 0),
+  retained_bytes INTEGER NOT NULL DEFAULT 0 CHECK(retained_bytes >= 0),
+  dropped_count INTEGER NOT NULL DEFAULT 0 CHECK(dropped_count >= 0),
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE remote_acp_events (
+  execution_attempt_id TEXT NOT NULL REFERENCES remote_acp_event_streams(execution_attempt_id),
+  cursor INTEGER NOT NULL CHECK(cursor > 0),
+  event_json TEXT NOT NULL,
+  encoded_bytes INTEGER NOT NULL CHECK(encoded_bytes > 0),
+  received_at TEXT NOT NULL,
+  PRIMARY KEY(execution_attempt_id,cursor)
+);
+
+CREATE TABLE remote_interactions (
+  action_id TEXT NOT NULL,
+  operation_id TEXT NOT NULL REFERENCES remote_operations(id),
+  host_id TEXT NOT NULL REFERENCES agent_hosts(id),
+  dispatch_id TEXT NOT NULL,
+  lease_id TEXT NOT NULL,
+  execution_attempt_id TEXT NOT NULL REFERENCES remote_execution_attempts(execution_attempt_id),
+  acp_session_id TEXT NOT NULL,
+  request_type TEXT NOT NULL CHECK(request_type IN (
+    'interaction.permission_requested','interaction.elicitation_requested',
+    'interaction.authentication_required'
+  )),
+  request_fingerprint TEXT NOT NULL CHECK(
+    length(request_fingerprint)=64 AND request_fingerprint NOT GLOB '*[^a-f0-9]*'
+  ),
+  request_json TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('pending','settled','expired')),
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  settlement_fingerprint TEXT,
+  settlement_json TEXT,
+  settled_by TEXT,
+  settled_at TEXT,
+  mailbox_message_id TEXT,
+  expiry_mailbox_message_id TEXT,
+  CHECK(
+    (status='pending' AND settlement_fingerprint IS NULL AND settlement_json IS NULL
+      AND settled_by IS NULL AND settled_at IS NULL AND mailbox_message_id IS NULL
+      AND expiry_mailbox_message_id IS NULL)
+    OR (status='settled' AND settlement_fingerprint IS NOT NULL AND settlement_json IS NOT NULL
+      AND settled_by IS NOT NULL AND settled_at IS NOT NULL AND mailbox_message_id IS NOT NULL
+      AND expiry_mailbox_message_id IS NULL)
+    OR (status='expired' AND settlement_fingerprint IS NULL AND settlement_json IS NULL
+      AND settled_by IS NULL AND settled_at IS NOT NULL AND mailbox_message_id IS NULL)
+  ),
+  PRIMARY KEY(host_id,dispatch_id,execution_attempt_id,acp_session_id,action_id)
+);
+
+CREATE INDEX idx_remote_acp_events_attempt_cursor
+  ON remote_acp_events(execution_attempt_id,cursor);
+CREATE INDEX idx_remote_interactions_operation_status
+  ON remote_interactions(operation_id,status,expires_at);
+`;
+
+const migration15 = `
+CREATE UNIQUE INDEX idx_remote_attempt_dispatch_identity
+  ON remote_execution_attempts(dispatch_id);
+CREATE UNIQUE INDEX idx_remote_attempt_lease_identity
+  ON remote_execution_attempts(lease_id)
+  WHERE lease_id IS NOT NULL;
+`;
+
+function validateRemoteAttemptIdentities(database: SqliteDatabase): void {
+  const duplicateDispatch = database
+    .prepare(
+      `SELECT dispatch_id FROM remote_execution_attempts
+       GROUP BY dispatch_id HAVING COUNT(*)>1 LIMIT 1`
+    )
+    .get();
+  if (duplicateDispatch) throw new Error("migration_duplicate_remote_attempt_dispatch_identity");
+  const duplicateLease = database
+    .prepare(
+      `SELECT lease_id FROM remote_execution_attempts WHERE lease_id IS NOT NULL
+       GROUP BY lease_id HAVING COUNT(*)>1 LIMIT 1`
+    )
+    .get();
+  if (duplicateLease) throw new Error("migration_duplicate_remote_attempt_lease_identity");
+}
+
 function backfillMailboxPredecessors(database: SqliteDatabase): void {
   for (const row of database
     .prepare("SELECT sequence,host_id FROM mailbox_messages ORDER BY sequence ASC")
@@ -575,7 +789,10 @@ const migrations: readonly Migration[] = [
   { version: 9, sql: migration9 },
   { version: 10, sql: migration10, before: validateAgentHostsForReservations },
   { version: 11, sql: migration11 },
-  { version: 12, sql: migration12, after: backfillMailboxPredecessors }
+  { version: 12, sql: migration12, after: backfillMailboxPredecessors },
+  { version: 13, sql: migration13, disableForeignKeys: true },
+  { version: 14, sql: migration14 },
+  { version: 15, sql: migration15, before: validateRemoteAttemptIdentities }
 ];
 
 export function applyMigrations(database: SqliteDatabase): void {

@@ -43,6 +43,7 @@ export const remoteAttemptStatusSchema = z.enum([
   "interrupted",
   "action_required",
   "awaiting_writeback",
+  "superseded",
   "completed",
   "failed",
   "cancelled"
@@ -58,6 +59,8 @@ export const remotePersistenceEventTypeSchema = z.enum([
   "remote.attempt.interrupted",
   "remote.attempt.action_required",
   "remote.attempt.awaiting_writeback",
+  "remote.attempt.superseded",
+  "remote.attempt.retry_created",
   "remote.attempt.completed",
   "remote.attempt.failed",
   "remote.attempt.cancelled",
@@ -380,8 +383,11 @@ export class RemoteOperationRepository {
         JSON.parse(parsed.required_capabilities_json)
       );
       const attemptRow = this.database
-        .prepare(`SELECT ${attemptColumns} FROM remote_execution_attempts WHERE operation_id=?`)
-        .get(parsed.id);
+        .prepare(
+          `SELECT ${attemptColumns} FROM remote_execution_attempts
+           WHERE operation_id=? AND execution_attempt_id=?`
+        )
+        .get(parsed.id, parsed.execution_attempt_id);
       if (!attemptRow) throw new Error("remote_execution_attempt_missing");
       const attempt = parseAttempt(attemptRow);
       if (
@@ -461,6 +467,174 @@ export class RemoteOperationRepository {
         if (typeof row.id !== "string") throw new Error("remote_operation_row_invalid");
         return this.getRequired(row.id);
       });
+  }
+
+  retryAttempt(input: {
+    operationId: string;
+    priorExecutionAttemptId: string;
+    newDispatchId: string;
+    newExecutionAttemptId: string;
+    expectedAttemptVersion: number;
+  }): RemoteOperation {
+    const priorExecutionAttemptId = executionAttemptIdSchema.parse(input.priorExecutionAttemptId);
+    const newDispatchId = dispatchIdSchema.parse(input.newDispatchId);
+    const newExecutionAttemptId = executionAttemptIdSchema.parse(input.newExecutionAttemptId);
+    if (priorExecutionAttemptId === newExecutionAttemptId) {
+      throw new Error("remote_retry_attempt_identity_reused");
+    }
+    return inWriteTransaction(this.database, () => {
+      const operation = this.getRequired(input.operationId);
+      if (
+        operation.dispatchId === newDispatchId &&
+        operation.executionAttemptId === newExecutionAttemptId &&
+        operation.attempt.status === "prepared"
+      ) {
+        const prior = this.database
+          .prepare(
+            "SELECT dispatch_id,status,state_version FROM remote_execution_attempts WHERE operation_id=? AND execution_attempt_id=?"
+          )
+          .get(operation.id, priorExecutionAttemptId);
+        if (
+          prior?.status === "superseded" &&
+          prior.state_version === input.expectedAttemptVersion + 1
+        ) {
+          return operation;
+        }
+        throw new Error("remote_retry_attempt_version_conflict");
+      }
+      if (
+        operation.executionAttemptId !== priorExecutionAttemptId ||
+        operation.attempt.stateVersion !== input.expectedAttemptVersion
+      ) {
+        throw new Error("remote_retry_attempt_version_conflict");
+      }
+      if (
+        operation.attempt.status !== "interrupted" &&
+        operation.attempt.status !== "action_required"
+      ) {
+        throw new Error("remote_retry_attempt_not_interrupted");
+      }
+      if (!operation.attempt.leaseId) throw new Error("remote_retry_attempt_lease_missing");
+      const reservation = this.database
+        .prepare("SELECT status FROM host_capacity_reservations WHERE lease_id=?")
+        .get(operation.attempt.leaseId);
+      if (!reservation || reservation.status === "active") {
+        throw new Error("remote_retry_attempt_not_fenced");
+      }
+      if (
+        this.database
+          .prepare("SELECT 1 FROM remote_execution_attempts WHERE execution_attempt_id=?")
+          .get(newExecutionAttemptId)
+      ) {
+        throw new Error("remote_retry_attempt_identity_conflict");
+      }
+      const now = this.clock().toISOString();
+      const superseded = this.database
+        .prepare(
+          `UPDATE remote_execution_attempts
+           SET status='superseded',state_version=state_version+1,updated_at=?,terminal_at=?
+           WHERE execution_attempt_id=? AND operation_id=? AND state_version=?
+             AND status IN ('interrupted','action_required')`
+        )
+        .run(now, now, priorExecutionAttemptId, operation.id, input.expectedAttemptVersion);
+      if (superseded.changes !== 1) throw new Error("remote_retry_attempt_version_conflict");
+      this.database
+        .prepare(
+          `INSERT INTO remote_execution_attempts(
+            execution_attempt_id,operation_id,dispatch_id,project_id,canvas_id,block_ref,
+            ownership_generation,status,created_at,updated_at
+          ) VALUES (?,?,?,?,?,?,?,'prepared',?,?)`
+        )
+        .run(
+          newExecutionAttemptId,
+          operation.id,
+          newDispatchId,
+          operation.projectId,
+          operation.canvasId,
+          operation.blockRef,
+          operation.ownershipGeneration,
+          now,
+          now
+        );
+      this.database
+        .prepare(
+          `UPDATE remote_operations
+           SET state='claimed',dispatch_id=?,execution_attempt_id=?,envelope_digest=NULL,
+             envelope_reference=NULL,updated_at=? WHERE id=?`
+        )
+        .run(newDispatchId, newExecutionAttemptId, now, operation.id);
+      this.appendEvent(operation.id, priorExecutionAttemptId, "remote.attempt.superseded", now);
+      this.appendEvent(operation.id, newExecutionAttemptId, "remote.attempt.retry_created", now);
+      return this.getRequired(operation.id);
+    });
+  }
+
+  isRetryApplied(input: {
+    operationId: string;
+    priorExecutionAttemptId: string;
+    newDispatchId: string;
+    newExecutionAttemptId: string;
+    expectedAttemptVersion: number;
+  }): boolean {
+    const operation = this.getRequired(input.operationId);
+    if (
+      operation.dispatchId !== input.newDispatchId ||
+      operation.executionAttemptId !== input.newExecutionAttemptId
+    ) {
+      return false;
+    }
+    const prior = this.database
+      .prepare(
+        "SELECT status,state_version FROM remote_execution_attempts WHERE operation_id=? AND execution_attempt_id=?"
+      )
+      .get(operation.id, input.priorExecutionAttemptId);
+    return (
+      prior?.status === "superseded" && prior.state_version === input.expectedAttemptVersion + 1
+    );
+  }
+
+  markActionRequired(input: {
+    operationId: string;
+    executionAttemptId: string;
+    expectedAttemptVersion: number;
+  }): RemoteOperation {
+    return inWriteTransaction(this.database, () => {
+      const operation = this.getRequired(input.operationId);
+      if (
+        operation.executionAttemptId !== input.executionAttemptId ||
+        operation.attempt.status !== "interrupted" ||
+        operation.attempt.stateVersion !== input.expectedAttemptVersion
+      ) {
+        throw new Error("remote_action_required_attempt_conflict");
+      }
+      const reservation = operation.attempt.leaseId
+        ? this.database
+            .prepare("SELECT status FROM host_capacity_reservations WHERE lease_id=?")
+            .get(operation.attempt.leaseId)
+        : undefined;
+      if (!reservation || reservation.status === "active") {
+        throw new Error("remote_action_required_attempt_not_fenced");
+      }
+      const now = this.clock().toISOString();
+      const updated = this.database
+        .prepare(
+          `UPDATE remote_execution_attempts
+           SET status='action_required',state_version=state_version+1,updated_at=?
+           WHERE execution_attempt_id=? AND status='interrupted' AND state_version=?`
+        )
+        .run(now, operation.executionAttemptId, input.expectedAttemptVersion);
+      if (updated.changes !== 1) throw new Error("remote_action_required_attempt_conflict");
+      this.database
+        .prepare("UPDATE remote_operations SET state='action_required',updated_at=? WHERE id=?")
+        .run(now, operation.id);
+      this.appendEvent(
+        operation.id,
+        operation.executionAttemptId,
+        "remote.attempt.action_required",
+        now
+      );
+      return this.getRequired(operation.id);
+    });
   }
 
   recordDiagnostic(operationId: string, code: string, message: string): void {

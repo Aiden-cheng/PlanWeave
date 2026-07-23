@@ -73,6 +73,22 @@ export {
   type RemotePersistenceEventType
 } from "./remoteOperations.js";
 export {
+  RemoteExecutionActionRepository,
+  RemoteExecutionActionService,
+  type RemoteExecutionActionApplicationPort,
+  type RemoteExecutionActionRecord
+} from "./remoteExecutionActions.js";
+export {
+  decideRemoteExecutionAction,
+  nextRemoteExecutionActionState,
+  remoteExecutionActionRequestSchema,
+  remoteExecutionActionStateSchema,
+  type RemoteExecutionActionDecision,
+  type RemoteExecutionActionRequest,
+  type RemoteExecutionActionState,
+  type RemoteExecutionLifecycleSnapshot
+} from "./remoteExecutionLifecycle.js";
+export {
   RemoteBlockCoordinator,
   type RemoteBlockCoordinatorOptions,
   type RemoteDispatchOutcome,
@@ -95,6 +111,20 @@ export {
   SqliteRemoteOperationCandidateRepository
 } from "./remoteCoordinatorPersistence.js";
 export { RemoteRuntimePortRegistry } from "./remoteRuntimeLocator.js";
+export {
+  RemoteAcpEventRepository,
+  REMOTE_ACP_EVENT_RETENTION_MAX_BYTES,
+  REMOTE_ACP_EVENT_RETENTION_MAX_EVENTS,
+  type RemoteAcpEventReplay
+} from "./remoteAcpEvents.js";
+export {
+  RemoteInteractionService,
+  type RemoteInteractionAuthorizationPort,
+  type RemoteInteractionIdentity,
+  type RemoteInteractionPublisherPort,
+  type RemoteInteractionRecord,
+  type RemoteInteractionStatus
+} from "./remoteInteractions.js";
 export {
   agentHostProtocolVersion,
   artifactRefSchema,

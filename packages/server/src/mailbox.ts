@@ -131,10 +131,15 @@ export class DurableMailbox {
       .map(toMessage);
   }
 
-  acknowledge(hostId: string, messageId: string, sequence: number): void {
+  acknowledge(hostId: string, messageId: string, sequence: number): MailboxMessage {
     this.inbox.process(hostId, messageId, "mailbox.ack", { sequence }, () => {
       this.acknowledgeSequence(hostId, sequence);
     });
+    const row = this.database
+      .prepare("SELECT * FROM mailbox_messages WHERE host_id=? AND sequence=?")
+      .get(hostId, sequence);
+    if (!row) throw new Error("mailbox_ack_beyond_highest_sequence");
+    return toMessage(row);
   }
 
   private acknowledgeSequence(hostId: string, sequence: number): void {

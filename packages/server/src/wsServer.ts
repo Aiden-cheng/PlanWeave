@@ -5,6 +5,9 @@ import { DispatchService } from "./dispatches.js";
 import { AgentHostRepository } from "./hosts.js";
 import { authenticateAgentHostRequest } from "./hostTransportAuth.js";
 import { DurableMailbox, type MailboxMessage } from "./mailbox.js";
+import { RemoteAcpEventRepository } from "./remoteAcpEvents.js";
+import { RemoteInteractionService } from "./remoteInteractions.js";
+import { RemoteExecutionActionRepository } from "./remoteExecutionActions.js";
 import {
   agentHostProtocolVersion,
   hostEventSchema,
@@ -18,6 +21,9 @@ export type AgentHostWebSocketOptions = {
   hosts: AgentHostRepository;
   mailbox: DurableMailbox;
   dispatches: DispatchService;
+  acpEvents: RemoteAcpEventRepository;
+  interactions: RemoteInteractionService;
+  actions: RemoteExecutionActionRepository;
   heartbeatIntervalMs: number;
   leaseDurationMs: number;
   maxPayloadBytes?: number;
@@ -95,9 +101,12 @@ export function attachAgentHostWebSocketServer(
     const handleHostEvent = async (event: HostEvent): Promise<void> => {
       switch (event.type) {
         case "mailbox.ack":
-          options.mailbox.acknowledge(hostId, event.messageId, event.sequence);
+          options.actions.acknowledgeMailbox(
+            options.mailbox.acknowledge(hostId, event.messageId, event.sequence).messageId
+          );
           break;
         case "host.heartbeat": {
+          options.interactions.expireDue();
           const renewed = options.dispatches.heartbeat(hostId, event.messageId, event.activeLeases);
           for (const lease of renewed)
             sendEvent(socket, {
@@ -115,6 +124,11 @@ export function attachAgentHostWebSocketServer(
             event.leaseId,
             event.executionAttemptId
           );
+          options.actions.settleAttemptCommands({
+            dispatchId: event.dispatchId,
+            executionAttemptId: event.executionAttemptId,
+            kinds: ["resume_same_session"]
+          });
           break;
         case "dispatch.progress":
           options.dispatches.recordProgress(hostId, event.messageId, event);
@@ -131,6 +145,11 @@ export function attachAgentHostWebSocketServer(
             event.executionAttemptId,
             event.result
           );
+          options.actions.settleAttemptCommands({
+            dispatchId: event.dispatchId,
+            executionAttemptId: event.executionAttemptId,
+            kinds: ["cancel"]
+          });
           break;
         case "dispatch.failed":
           await options.dispatches.fail(
@@ -141,13 +160,26 @@ export function attachAgentHostWebSocketServer(
             event.executionAttemptId,
             event.failure
           );
+          options.actions.settleAttemptCommands({
+            dispatchId: event.dispatchId,
+            executionAttemptId: event.executionAttemptId,
+            kinds: ["cancel"]
+          });
           break;
         case "lease.renew":
-        case "acp.events":
+          throw new Error(`host_event_unsupported:${event.type}`);
+        case "acp.events": {
+          const { protocolVersion: _protocolVersion, messageId: _messageId, ...batch } = event;
+          options.acpEvents.ingest(hostId, event.messageId, batch);
+          break;
+        }
         case "interaction.permission_requested":
         case "interaction.elicitation_requested":
-        case "interaction.authentication_required":
-          throw new Error(`host_event_unsupported:${event.type}`);
+        case "interaction.authentication_required": {
+          const { protocolVersion: _protocolVersion, messageId: _messageId, ...request } = event;
+          options.interactions.recordRequest(hostId, event.messageId, request);
+          break;
+        }
       }
       sendEvent(socket, {
         type: "host.event_ack",

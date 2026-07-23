@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 import { applyMigrations, centralSchemaVersion } from "../migrations.js";
+import { AgentHostRepository } from "../hosts.js";
+import { HostReservationRepository } from "../hostReservations.js";
 import { RemoteOperationRepository } from "../remoteOperations.js";
+import { RemoteExecutionActionRepository } from "../remoteExecutionActions.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 
 const directories: string[] = [];
@@ -87,6 +90,71 @@ describe("RemoteOperationRepository", () => {
     server.database.exec("PRAGMA ignore_check_constraints = OFF");
     expect(() => repository.getRequired(created.id)).toThrowError("remote_operation_row_invalid");
   });
+
+  it("creates a new current attempt only after preserving and fencing the interrupted attempt", async () => {
+    const server = await setup();
+    const clock = () => new Date("2030-01-01T00:00:00.000Z");
+    const operations = new RemoteOperationRepository(server.database, clock);
+    const hosts = new AgentHostRepository(server.database, clock);
+    const host = hosts.register("Retry Host").host;
+    hosts.reportOnline(host.id, ["linux", "acp.codex"], 1);
+    const reservations = new HostReservationRepository(server.database, {
+      leaseDurationMs: 60_000,
+      hostOfflineAfterMs: 60_000,
+      clock
+    });
+    const created = operations.markClaimed(operations.create(operationInput).id);
+    const reservation = reservations.reserve(created.id);
+    reservations.transition({
+      leaseId: reservation.leaseId,
+      fencingToken: reservation.fencingToken,
+      expectedAttemptVersion: operations.getRequired(created.id).attempt.stateVersion,
+      status: "activated"
+    });
+    const activated = operations.getRequired(created.id);
+    reservations.release({
+      leaseId: reservation.leaseId,
+      fencingToken: reservation.fencingToken,
+      expectedVersion: reservation.version,
+      reason: "expired"
+    });
+    const interrupted = operations.getRequired(created.id);
+
+    const retried = operations.retryAttempt({
+      operationId: created.id,
+      priorExecutionAttemptId: interrupted.executionAttemptId,
+      newDispatchId: "dispatch-retry-2",
+      newExecutionAttemptId: "attempt-retry-2",
+      expectedAttemptVersion: interrupted.attempt.stateVersion
+    });
+    expect(retried).toMatchObject({
+      state: "claimed",
+      dispatchId: "dispatch-retry-2",
+      executionAttemptId: "attempt-retry-2",
+      attempt: { executionAttemptId: "attempt-retry-2", status: "prepared" }
+    });
+    expect(
+      operations.retryAttempt({
+        operationId: created.id,
+        priorExecutionAttemptId: interrupted.executionAttemptId,
+        newDispatchId: "dispatch-retry-2",
+        newExecutionAttemptId: "attempt-retry-2",
+        expectedAttemptVersion: interrupted.attempt.stateVersion
+      })
+    ).toEqual(retried);
+    expect(
+      server.database
+        .prepare(
+          "SELECT status,terminal_at FROM remote_execution_attempts WHERE execution_attempt_id=?"
+        )
+        .get(activated.executionAttemptId)
+    ).toMatchObject({ status: "superseded", terminal_at: expect.any(String) });
+    expect(
+      server.database
+        .prepare("SELECT COUNT(*) AS count FROM remote_execution_attempts WHERE operation_id=?")
+        .get(created.id)?.count
+    ).toBe(2);
+  });
 });
 
 describe("remote coordinator migration v9", () => {
@@ -132,11 +200,181 @@ describe("remote coordinator migration v9", () => {
       .prepare("UPDATE agent_hosts SET capabilities_json=? WHERE id=?")
       .run('["linux"]', "host-a");
     applyMigrations(database);
-    expect(centralSchemaVersion(database)).toBe(12);
+    expect(centralSchemaVersion(database)).toBe(15);
     expect(
       database
         .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='remote_operations'")
         .get()
     ).toBeDefined();
+  });
+});
+
+describe("remote recovery migration v13", () => {
+  it("preserves v12 attempt evidence and permits multiple fenced attempts and leases", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "planweave-remote-v13-migration-"));
+    directories.push(directory);
+    const database = await openServerDatabase(join(directory, "server.sqlite"), 5_000);
+    databases.push(database);
+    database.exec(`
+      CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY,applied_at TEXT NOT NULL);
+      INSERT INTO schema_migrations(version,applied_at) VALUES
+        (1,'2020-01-01T00:00:00.000Z'),(2,'2020-01-01T00:00:00.000Z'),
+        (3,'2020-01-01T00:00:00.000Z'),(4,'2020-01-01T00:00:00.000Z'),
+        (5,'2020-01-01T00:00:00.000Z'),(6,'2020-01-01T00:00:00.000Z'),
+        (7,'2020-01-01T00:00:00.000Z'),(8,'2020-01-01T00:00:00.000Z'),
+        (9,'2020-01-01T00:00:00.000Z'),(10,'2020-01-01T00:00:00.000Z'),
+        (11,'2020-01-01T00:00:00.000Z'),(12,'2020-01-01T00:00:00.000Z');
+      CREATE TABLE agent_hosts(
+        id TEXT PRIMARY KEY,display_name TEXT NOT NULL,credential_hash TEXT NOT NULL,
+        capabilities_json TEXT NOT NULL,capacity INTEGER NOT NULL,last_seen_at TEXT,
+        last_acknowledged_sequence INTEGER NOT NULL DEFAULT 0,revoked_at TEXT,
+        created_at TEXT NOT NULL,credential_expires_at TEXT
+      );
+      INSERT INTO agent_hosts(
+        id,display_name,credential_hash,capabilities_json,capacity,created_at
+      ) VALUES ('host-1','Host','${"a".repeat(64)}','["acp.codex"]',1,'2020-01-01T00:00:00.000Z');
+      CREATE TABLE remote_operations(
+        id TEXT PRIMARY KEY,project_id TEXT NOT NULL,canvas_id TEXT NOT NULL,
+        block_ref TEXT NOT NULL,ownership_generation TEXT NOT NULL,idempotency_key TEXT NOT NULL,
+        request_fingerprint TEXT NOT NULL,source_fingerprint TEXT NOT NULL,
+        required_capabilities_json TEXT NOT NULL,state TEXT NOT NULL,dispatch_id TEXT NOT NULL UNIQUE,
+        execution_attempt_id TEXT NOT NULL UNIQUE,envelope_digest TEXT,envelope_reference TEXT,
+        created_at TEXT NOT NULL,updated_at TEXT NOT NULL,terminal_at TEXT,
+        diagnostic_code TEXT,diagnostic_message TEXT
+      );
+      INSERT INTO remote_operations VALUES (
+        'operation-1','project-1','default','RC-003#B-001','generation-1','request-1',
+        '${"b".repeat(64)}','graph-1','["acp.codex"]','interrupted','dispatch-1','attempt-1',
+        NULL,NULL,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:01.000Z',NULL,NULL,NULL
+      );
+      CREATE TABLE remote_execution_attempts(
+        execution_attempt_id TEXT PRIMARY KEY,operation_id TEXT NOT NULL UNIQUE REFERENCES remote_operations(id),
+        dispatch_id TEXT NOT NULL UNIQUE,project_id TEXT NOT NULL,canvas_id TEXT NOT NULL,
+        block_ref TEXT NOT NULL,ownership_generation TEXT NOT NULL,status TEXT NOT NULL,
+        host_id TEXT REFERENCES agent_hosts(id),lease_id TEXT UNIQUE,lease_fencing_token INTEGER NOT NULL,
+        lease_expires_at TEXT,state_version INTEGER NOT NULL,created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,terminal_at TEXT
+      );
+      INSERT INTO remote_execution_attempts VALUES (
+        'attempt-1','operation-1','dispatch-1','project-1','default','RC-003#B-001',
+        'generation-1','interrupted','host-1','lease-1',1,'2020-01-01T00:00:01.000Z',4,
+        '2020-01-01T00:00:00.000Z','2020-01-01T00:00:01.000Z',NULL
+      );
+      CREATE TABLE host_capacity_reservations(
+        lease_id TEXT PRIMARY KEY,execution_attempt_id TEXT NOT NULL UNIQUE REFERENCES remote_execution_attempts(execution_attempt_id),
+        host_id TEXT NOT NULL REFERENCES agent_hosts(id),fencing_token INTEGER NOT NULL,
+        status TEXT NOT NULL,lease_expires_at TEXT NOT NULL,version INTEGER NOT NULL,
+        created_at TEXT NOT NULL,released_at TEXT
+      );
+      INSERT INTO host_capacity_reservations VALUES (
+        'lease-1','attempt-1','host-1',1,'expired','2020-01-01T00:00:01.000Z',1,
+        '2020-01-01T00:00:00.000Z','2020-01-01T00:00:01.000Z'
+      );
+      CREATE TABLE remote_operation_events(
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT,operation_id TEXT NOT NULL REFERENCES remote_operations(id),
+        execution_attempt_id TEXT REFERENCES remote_execution_attempts(execution_attempt_id),
+        type TEXT NOT NULL,occurred_at TEXT NOT NULL
+      );
+      INSERT INTO remote_operation_events(operation_id,execution_attempt_id,type,occurred_at)
+      VALUES ('operation-1','attempt-1','remote.attempt.interrupted','2020-01-01T00:00:01.000Z');
+    `);
+
+    applyMigrations(database);
+    expect(centralSchemaVersion(database)).toBe(15);
+    expect(
+      database.prepare("SELECT status,state_version FROM remote_execution_attempts").get()
+    ).toEqual({ status: "interrupted", state_version: 4 });
+    expect(database.prepare("SELECT status FROM host_capacity_reservations").get()).toEqual({
+      status: "expired"
+    });
+    expect(database.prepare("SELECT type FROM remote_operation_events").get()).toEqual({
+      type: "remote.attempt.interrupted"
+    });
+    expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+
+    database.exec(`
+      INSERT INTO remote_execution_attempts(
+        execution_attempt_id,operation_id,dispatch_id,project_id,canvas_id,block_ref,
+        ownership_generation,status,created_at,updated_at
+      ) VALUES (
+        'attempt-2','operation-1','dispatch-2','project-1','default','RC-003#B-001',
+        'generation-1','prepared','2020-01-01T00:00:02.000Z','2020-01-01T00:00:02.000Z'
+      );
+      INSERT INTO host_capacity_reservations(
+        lease_id,execution_attempt_id,host_id,fencing_token,status,lease_expires_at,
+        version,created_at,released_at
+      ) VALUES (
+        'lease-2','attempt-1','host-1',2,'expired','2020-01-01T00:00:02.000Z',1,
+        '2020-01-01T00:00:01.000Z','2020-01-01T00:00:02.000Z'
+      );
+    `);
+    expect(
+      database.prepare("SELECT COUNT(*) AS count FROM remote_execution_attempts").get()?.count
+    ).toBe(2);
+    expect(
+      database.prepare("SELECT COUNT(*) AS count FROM host_capacity_reservations").get()?.count
+    ).toBe(2);
+    expect(() =>
+      database.exec(`
+        INSERT INTO remote_execution_attempts(
+          execution_attempt_id,operation_id,dispatch_id,project_id,canvas_id,block_ref,
+          ownership_generation,status,created_at,updated_at
+        ) VALUES (
+          'attempt-duplicate-dispatch','operation-1','dispatch-2','project-1','default',
+          'RC-003#B-001','generation-1','prepared','2020-01-01T00:00:03.000Z',
+          '2020-01-01T00:00:03.000Z'
+        )
+      `)
+    ).toThrowError(/UNIQUE constraint failed/);
+    expect(() =>
+      database
+        .prepare(
+          `UPDATE remote_execution_attempts SET status='reserved',host_id='host-1',lease_id='lease-1',
+             lease_fencing_token=2,lease_expires_at='2020-01-01T00:00:03.000Z'
+           WHERE execution_attempt_id='attempt-2'`
+        )
+        .run()
+    ).toThrowError(/UNIQUE constraint failed/);
+
+    const actions = new RemoteExecutionActionRepository(database);
+    expect(
+      actions.record({
+        actionId: "action-1",
+        operationId: "operation-1",
+        dispatchId: "dispatch-1",
+        executionAttemptId: "attempt-1",
+        expectedAttemptVersion: 4,
+        kind: "block",
+        leaseId: "lease-1",
+        reason: "operator requires investigation"
+      }).state
+    ).toBe("recorded");
+  });
+
+  it("fails a v14 upgrade visibly when persisted attempt identities are ambiguous", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "planweave-remote-v15-migration-"));
+    directories.push(directory);
+    const database = await openServerDatabase(join(directory, "server.sqlite"), 5_000);
+    databases.push(database);
+    database.exec(`
+      CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY,applied_at TEXT NOT NULL);
+      INSERT INTO schema_migrations(version,applied_at)
+      SELECT value,'2020-01-01T00:00:00.000Z' FROM json_each('[1,2,3,4,5,6,7,8,9,10,11,12,13,14]');
+      CREATE TABLE remote_execution_attempts(
+        execution_attempt_id TEXT PRIMARY KEY,dispatch_id TEXT NOT NULL,lease_id TEXT
+      );
+      INSERT INTO remote_execution_attempts VALUES
+        ('attempt-1','dispatch-shared','lease-1'),
+        ('attempt-2','dispatch-shared','lease-2');
+    `);
+    expect(() => applyMigrations(database)).toThrowError(
+      "migration_duplicate_remote_attempt_dispatch_identity"
+    );
+    expect(centralSchemaVersion(database)).toBe(14);
+    database
+      .prepare("UPDATE remote_execution_attempts SET dispatch_id=? WHERE execution_attempt_id=?")
+      .run("dispatch-2", "attempt-2");
+    applyMigrations(database);
+    expect(centralSchemaVersion(database)).toBe(15);
   });
 });

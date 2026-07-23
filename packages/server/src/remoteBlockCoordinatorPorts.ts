@@ -1,5 +1,6 @@
 import type {
   ExecutionEnvelope,
+  InterruptionReason,
   MailboxCommand,
   NormalizedFailure
 } from "@planweave-ai/distributed-protocol";
@@ -7,6 +8,10 @@ import type { RemoteBlockDispatchCandidate, RemoteBlockRuntimePort } from "@plan
 import type { HostCapacityReservation } from "./hostReservations.js";
 import type { MailboxMessage } from "./mailbox.js";
 import type { RemoteOperation } from "./remoteOperations.js";
+import type {
+  RemoteExecutionActionRequest,
+  RemoteExecutionLifecycleSnapshot
+} from "./remoteExecutionLifecycle.js";
 
 export type RemoteCoordinatorCheckpoint =
   | "before_operation_commit"
@@ -20,6 +25,7 @@ export type RemoteCoordinatorCheckpoint =
   | "after_runtime_binding"
   | "after_mailbox_enqueue"
   | "after_mailbox_publish"
+  | "after_action_side_effect"
   | "after_host_acceptance_observed"
   | "after_terminal_event_persistence"
   | "before_runtime_writeback"
@@ -61,6 +67,10 @@ export type RemoteDispatchReconciliationState = {
       | "completed"
       | "failed"
       | "cancelled";
+    interruption?: {
+      reason: InterruptionReason;
+      resumable: boolean;
+    };
     envelopeDigest?: string;
     inputGrantCount: number;
     terminalAction?:
@@ -86,7 +96,17 @@ export interface RemoteDispatchPersistencePort {
     reservation: HostCapacityReservation;
     command: MailboxCommand;
   }): ActivatedMailboxDelivery;
-  enqueueCancel(input: { operation: RemoteOperation; reason: string }): MailboxMessage;
+  actionSnapshot(operation: RemoteOperation): RemoteExecutionLifecycleSnapshot;
+  enqueueCancel(input: {
+    operation: RemoteOperation;
+    action: Extract<RemoteExecutionActionRequest, { kind: "cancel" }>;
+  }): MailboxMessage;
+  enqueueResume(input: {
+    operation: RemoteOperation;
+    action: Extract<RemoteExecutionActionRequest, { kind: "resume_same_session" }>;
+  }): MailboxMessage;
+  markActionRequired(operation: RemoteOperation): void;
+  prepareManualFailure(input: { operation: RemoteOperation; failure: NormalizedFailure }): void;
   markMailboxPublished(messageId: string): void;
   finishTerminal(input: {
     operation: RemoteOperation;

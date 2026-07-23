@@ -26,6 +26,7 @@ export {
   remoteBlockOperationQuerySchema,
   publicRemoteFailureSchema,
   remoteBlockRefIdentitySchema,
+  remoteBlockRetryAttemptInputSchema,
   remoteBlockRetryDecisionSchema,
   RemoteBlockRuntimeError
 } from "./remoteBlockRuntimeContracts.js";
@@ -42,6 +43,7 @@ export type {
   RemoteBlockMutationResult,
   RemoteBlockOperationQuery,
   RemoteBlockRefIdentity,
+  RemoteBlockRetryAttemptInput,
   RemoteBlockRetryDecision,
   RemoteBlockRuntimeErrorCode
 } from "./remoteBlockRuntimeContracts.js";

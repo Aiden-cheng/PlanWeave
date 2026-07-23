@@ -299,6 +299,69 @@ export function interruptRemoteBlockOwnership(options: {
   };
 }
 
+export function retryRemoteBlockOwnership(options: {
+  blockType: BlockType;
+  blockState: BlockState;
+  ownership: ActiveRemoteOperationIdentity;
+  newDispatchId: string;
+  newExecutionAttemptId: string;
+}): BlockState {
+  const current = assertActiveRemoteBlockOwnership(options);
+  if (
+    options.blockState.status !== "diverged" ||
+    !options.blockState.remoteInterruption ||
+    options.blockState.remoteInterruption.resumable
+  ) {
+    throw new RemoteOwnershipConflictError(
+      "remote_ownership_status_conflict",
+      "A new remote attempt requires a non-resumable interrupted ownership."
+    );
+  }
+  const retried = activeRemoteBlockOwnershipSchema.parse({
+    ...current,
+    dispatchId: options.newDispatchId,
+    executionAttemptId: options.newExecutionAttemptId
+  });
+  if (
+    retried.dispatchId === current.dispatchId ||
+    retried.executionAttemptId === current.executionAttemptId
+  ) {
+    throw new RemoteOwnershipConflictError(
+      "remote_ownership_activation_conflict",
+      "A remote retry must use new dispatch and execution attempt identities."
+    );
+  }
+  const {
+    divergenceReason: _divergenceReason,
+    remoteInterruption: _remoteInterruption,
+    ...state
+  } = options.blockState;
+  return { ...state, status: "in_progress", remoteOwnership: retried };
+}
+
+export function resumeRemoteBlockOwnership(options: {
+  blockType: BlockType;
+  blockState: BlockState;
+  ownership: ActiveRemoteOperationIdentity;
+}): BlockState {
+  assertActiveRemoteBlockOwnership(options);
+  if (
+    options.blockState.status !== "diverged" ||
+    options.blockState.remoteInterruption?.resumable !== true
+  ) {
+    throw new RemoteOwnershipConflictError(
+      "remote_ownership_status_conflict",
+      "Remote resume requires a resumable interrupted ownership."
+    );
+  }
+  const {
+    divergenceReason: _divergenceReason,
+    remoteInterruption: _remoteInterruption,
+    ...state
+  } = options.blockState;
+  return { ...state, status: "in_progress" };
+}
+
 export function completeRemoteBlockOwnership(options: {
   blockType: BlockType;
   blockState: BlockState;

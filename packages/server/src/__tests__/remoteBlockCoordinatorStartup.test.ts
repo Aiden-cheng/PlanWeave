@@ -159,10 +159,13 @@ function eventCount(database: PlanweaveServer["database"], table: string, type: 
 
 describe("RemoteBlockCoordinator startup reconciliation", () => {
   it.each([
-    "complete",
-    "fail",
-    "cancel"
-  ] as const)("converges %s after dispatch terminal persistence without replaying Runtime writeback", async (action) => {
+    ["complete", "after_terminal_event_persistence"],
+    ["complete", "after_dispatch_terminal_persistence"],
+    ["fail", "after_terminal_event_persistence"],
+    ["fail", "after_dispatch_terminal_persistence"],
+    ["cancel", "after_terminal_event_persistence"],
+    ["cancel", "after_dispatch_terminal_persistence"]
+  ] as const)("converges %s after %s", async (action, checkpoint) => {
     const harness = await StartupHarness.create();
     const hostId = harness.registerHost();
     const writebacks = { complete: 0, fail: 0 };
@@ -177,7 +180,7 @@ describe("RemoteBlockCoordinator startup reconciliation", () => {
         return runtime.fail(input);
       }
     });
-    await harness.start(new CrashOnce("after_dispatch_terminal_persistence"), decorateRuntime);
+    await harness.start(new CrashOnce(checkpoint), decorateRuntime);
     const coordination = harness.requireCoordination();
     const outcome = await coordination.coordinator.dispatch(harness.request(`terminal-${action}`));
     const dispatch = coordination.dispatches.getRequired(outcome.operation.dispatchId);
@@ -235,7 +238,7 @@ describe("RemoteBlockCoordinator startup reconciliation", () => {
             artifactRefs: []
           }
         )
-      ).rejects.toThrowError("injected_crash:after_dispatch_terminal_persistence");
+      ).rejects.toThrowError(`injected_crash:${checkpoint}`);
     } else {
       const failure =
         action === "cancel"
@@ -250,17 +253,20 @@ describe("RemoteBlockCoordinator startup reconciliation", () => {
           dispatch.executionAttemptId,
           failure
         )
-      ).rejects.toThrowError("injected_crash:after_dispatch_terminal_persistence");
+      ).rejects.toThrowError(`injected_crash:${checkpoint}`);
     }
 
     const expectedStatus =
       action === "complete" ? "completed" : action === "cancel" ? "cancelled" : "failed";
-    expect(coordination.dispatches.getRequired(dispatch.id).status).toBe(expectedStatus);
+    expect(coordination.dispatches.getRequired(dispatch.id).status).toBe(
+      checkpoint === "after_terminal_event_persistence" ? "awaiting_writeback" : expectedStatus
+    );
     expect(coordination.operations.getRequired(outcome.operation.id).state).toBe("activated");
     expect(coordination.reservations.getRequired(dispatch.leaseId).status).toBe("active");
     expect(writebacks).toEqual({
-      complete: action === "complete" ? 1 : 0,
-      fail: action === "complete" ? 0 : 1
+      complete:
+        checkpoint === "after_dispatch_terminal_persistence" && action === "complete" ? 1 : 0,
+      fail: checkpoint === "after_dispatch_terminal_persistence" && action !== "complete" ? 1 : 0
     });
 
     const restarted = await harness.start(undefined, decorateRuntime);
@@ -297,5 +303,36 @@ describe("RemoteBlockCoordinator startup reconciliation", () => {
     );
     const restarted = await harness.start();
     expect(restarted.operations.getRequired(pending.operation.id).state).toBe("claimed");
+  });
+
+  it("fences expired leases and restores the Runtime interruption before reentry", async () => {
+    const harness = await StartupHarness.create();
+    harness.registerHost();
+    const outcome = await harness
+      .requireCoordination()
+      .coordinator.dispatch(harness.request("startup-expired-lease"));
+    const database = harness.requireServer().database;
+    const expiredAt = "2020-01-01T00:00:00.000Z";
+    database
+      .prepare("UPDATE dispatches SET lease_expires_at=? WHERE id=?")
+      .run(expiredAt, outcome.operation.dispatchId);
+    database
+      .prepare("UPDATE host_capacity_reservations SET lease_expires_at=? WHERE lease_id=?")
+      .run(expiredAt, outcome.operation.attempt.leaseId);
+
+    const restarted = await harness.start();
+
+    expect(restarted.dispatches.getRequired(outcome.operation.dispatchId)).toMatchObject({
+      status: "interrupted",
+      interruption: { reason: "lease_lost", resumable: false }
+    });
+    expect(restarted.operations.getRequired(outcome.operation.id)).toMatchObject({
+      state: "interrupted",
+      attempt: { status: "interrupted" }
+    });
+    await expect(restarted.coordinator.query(outcome.operation.id)).resolves.toMatchObject({
+      status: "diverged",
+      interruption: { reason: "lease_lost", resumable: false }
+    });
   });
 });

@@ -1,6 +1,8 @@
 import {
   artifactRefSchema,
   blockRefSchema,
+  dispatchIdSchema,
+  executionAttemptIdSchema,
   executionEnvelopeSchema,
   normalizedFailureSchema,
   opaqueIdentifierSchema,
@@ -122,6 +124,16 @@ export const remoteBlockInterruptionInputSchema = remoteBlockRefIdentitySchema.e
   interruption: remoteInterruptionSchema
 });
 
+export const remoteBlockRetryAttemptInputSchema = remoteBlockRefIdentitySchema
+  .extend({
+    newDispatchId: dispatchIdSchema,
+    newExecutionAttemptId: executionAttemptIdSchema
+  })
+  .refine((input) => input.executionAttemptId !== input.newExecutionAttemptId, {
+    message: "A remote retry requires a new execution attempt identity.",
+    path: ["newExecutionAttemptId"]
+  });
+
 export const remoteBlockBindingViewSchema = z
   .object({
     ref: blockRefSchema,
@@ -164,6 +176,7 @@ export type RemoteBlockRefIdentity = z.infer<typeof remoteBlockRefIdentitySchema
 export type RemoteBlockCompletionInput = z.infer<typeof remoteBlockCompletionInputSchema>;
 export type RemoteBlockFailureInput = z.infer<typeof remoteBlockFailureInputSchema>;
 export type RemoteBlockInterruptionInput = z.infer<typeof remoteBlockInterruptionInputSchema>;
+export type RemoteBlockRetryAttemptInput = z.infer<typeof remoteBlockRetryAttemptInputSchema>;
 export type RemoteBlockBindingView = z.infer<typeof remoteBlockBindingViewSchema>;
 export type RemoteBlockRetryDecision = z.infer<typeof remoteBlockRetryDecisionSchema>;
 export type RemoteBlockMutationResult = z.infer<typeof remoteBlockMutationResultSchema>;

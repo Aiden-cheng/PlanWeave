@@ -55,6 +55,9 @@ export type DispatchRecord = {
 export type DispatchWriteback = {
   complete(input: {
     dispatchId: string;
+    hostId: string;
+    leaseId: string;
+    executionAttemptId: string;
     projectId: string;
     blockRef: string;
     packageRef: string;
@@ -62,6 +65,9 @@ export type DispatchWriteback = {
   }): Promise<void>;
   fail(input: {
     dispatchId: string;
+    hostId: string;
+    leaseId: string;
+    executionAttemptId: string;
     projectId: string;
     blockRef: string;
     packageRef: string;
@@ -409,21 +415,22 @@ export class DispatchService {
         ) {
           return;
         }
-        const failure = dispatchFailureSchema.parse({
-          code: "lease_expired",
-          message: "The Agent Host stopped renewing its execution lease.",
-          retryable: true
-        });
         this.database
           .prepare(
-            "UPDATE dispatches SET status='awaiting_writeback',failure_json=?,result_json=NULL WHERE id=?"
+            `UPDATE dispatches
+             SET status='interrupted',interruption_reason='lease_lost',
+               interruption_resumable=0,interruption_recovery_json=NULL,
+               failure_json=NULL,result_json=NULL
+             WHERE id=?`
           )
-          .run(JSON.stringify(failure), dispatchId);
-        this.appendEvent(dispatchId, "dispatch.awaiting_writeback", {
-          outcome: "lease_expired"
+          .run(dispatchId);
+        this.appendEvent(dispatchId, "dispatch.interrupted", {
+          reason: "lease_lost",
+          resumable: false,
+          source: "lease_expiry"
         });
       });
-      recovered.push(await this.writeBack(dispatchId));
+      recovered.push(this.getRequired(dispatchId));
     }
     return recovered;
   }
@@ -452,6 +459,9 @@ export class DispatchService {
     if (dispatch.result) {
       await this.options.writeback.complete({
         dispatchId: dispatch.id,
+        hostId: dispatch.hostId,
+        leaseId: dispatch.leaseId,
+        executionAttemptId: dispatch.executionAttemptId,
         projectId: dispatch.projectId,
         blockRef: dispatch.blockRef,
         packageRef: dispatch.packageRef,
@@ -461,6 +471,9 @@ export class DispatchService {
     } else if (dispatch.failure) {
       await this.options.writeback.fail({
         dispatchId: dispatch.id,
+        hostId: dispatch.hostId,
+        leaseId: dispatch.leaseId,
+        executionAttemptId: dispatch.executionAttemptId,
         projectId: dispatch.projectId,
         blockRef: dispatch.blockRef,
         packageRef: dispatch.packageRef,
