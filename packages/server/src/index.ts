@@ -37,6 +37,10 @@ export {
   type RegisteredAgentHost
 } from "./hosts.js";
 export {
+  HostEnrollmentError,
+  HostEnrollmentService
+} from "./hostEnrollment.js";
+export {
   HostReservationRepository,
   activeAttemptTransitionSchema,
   reservationReleaseReasonSchema,
@@ -44,6 +48,11 @@ export {
   type HostCapacityReservation,
   type HostReservationRepositoryOptions
 } from "./hostReservations.js";
+export {
+  attachHostEnrollmentHttp,
+  handleHostEnrollmentRequest,
+  type HostEnrollmentHttpOptions
+} from "./hostEnrollmentHttp.js";
 export {
   startPlanweaveServer,
   type PlanweaveServer,

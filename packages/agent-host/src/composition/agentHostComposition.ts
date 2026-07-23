@@ -1,18 +1,18 @@
 import type { AgentHostStateRepository } from "../state/agentHostState.js";
-
-export interface AgentHostTransport {
-  start(): void | Promise<void>;
-  stop(): void | Promise<void>;
-}
+import type {
+  HostTransport,
+  HostTransportStatusListener
+} from "../transport/hostTransport.js";
 
 export interface AgentHostComposition {
   start(): Promise<void>;
   shutdown(): Promise<void>;
+  subscribeStatus(listener: HostTransportStatusListener): () => void;
 }
 
 export type AgentHostCompositionOptions = {
   state: Pick<AgentHostStateRepository, "close">;
-  transport: AgentHostTransport;
+  transport: Pick<HostTransport, "start" | "stop" | "subscribe">;
 };
 
 export function composeAgentHost(options: AgentHostCompositionOptions): AgentHostComposition {
@@ -20,6 +20,9 @@ export function composeAgentHost(options: AgentHostCompositionOptions): AgentHos
   let shutdownPromise: Promise<void> | undefined;
 
   return {
+    subscribeStatus(listener) {
+      return options.transport.subscribe(listener);
+    },
     start() {
       if (shutdownPromise) {
         return Promise.reject(new Error("agent_host_composition_already_shutdown"));
@@ -50,7 +53,11 @@ export function createNoopAgentHostComposition(): AgentHostComposition {
     },
     transport: {
       start() {},
-      stop() {}
+      stop() {},
+      subscribe(listener) {
+        listener({ state: "stopped" });
+        return () => {};
+      }
     }
   });
 }

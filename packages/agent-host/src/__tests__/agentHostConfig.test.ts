@@ -1,0 +1,135 @@
+import { mkdir, mkdtemp, realpath, rm, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { ConfiguredAcpProfileResolver, ConfiguredWorkspaceResolver } from "../config/resolvers.js";
+import { parseAgentHostConfig } from "../config/schema.js";
+
+const directories: string[] = [];
+afterEach(async () => {
+  await Promise.all(
+    directories.splice(0).map((path) => rm(path, { recursive: true, force: true }))
+  );
+});
+
+async function setup() {
+  const directory = await mkdtemp(join(tmpdir(), "planweave-host-config-"));
+  directories.push(directory);
+  const workspaceRoot = join(directory, "workspaces");
+  await mkdir(join(workspaceRoot, "project"), { recursive: true });
+  return { directory, workspaceRoot };
+}
+
+function input(directory: string, workspaceRoot: string) {
+  return {
+    version: "agent-host-config/v1",
+    coordinator: { url: "https://coordinator.example.com", allowInsecureDevelopment: false },
+    dataDirectory: join(directory, "data"),
+    workspaceRoot,
+    host: { displayName: "Build Host", capacity: 2, capabilities: ["linux", "workspace.git"] },
+    workspaces: [{ id: "workspace.core", path: "project" }],
+    agentProfiles: [
+      {
+        id: "acp.test",
+        agentId: "test-agent",
+        command: process.execPath,
+        args: ["agent.mjs"],
+        environment: [
+          { name: "SAFE_API_KEY", required: true },
+          { name: "OPTIONAL_VALUE", required: false }
+        ]
+      }
+    ]
+  };
+}
+
+describe("Agent Host configuration", () => {
+  it("strictly rejects unknown fields, duplicate ids, invalid capacity/capabilities, and insecure URLs", async () => {
+    const { directory, workspaceRoot } = await setup();
+    const valid = input(directory, workspaceRoot);
+    expect(() => parseAgentHostConfig({ ...valid, token: "secret" })).toThrow();
+    expect(() =>
+      parseAgentHostConfig({ ...valid, workspaces: [...valid.workspaces, valid.workspaces[0]] })
+    ).toThrow();
+    expect(() =>
+      parseAgentHostConfig({ ...valid, host: { ...valid.host, capacity: 0 } })
+    ).toThrow();
+    expect(() =>
+      parseAgentHostConfig({ ...valid, host: { ...valid.host, capabilities: ["linux", "linux"] } })
+    ).toThrow();
+    expect(
+      parseAgentHostConfig({
+        ...valid,
+        coordinator: { url: "http://example.com", allowInsecureDevelopment: true }
+      })
+    ).toBeDefined();
+    expect(() =>
+      parseAgentHostConfig({
+        ...valid,
+        coordinator: { url: "http://127.0.0.1", allowInsecureDevelopment: false }
+      })
+    ).toThrow();
+    expect(
+      parseAgentHostConfig({
+        ...valid,
+        coordinator: { url: "http://127.0.0.1", allowInsecureDevelopment: true }
+      })
+    ).toBeDefined();
+    expect(
+      parseAgentHostConfig({ ...valid, coordinator: { url: "wss://coordinator.example.com" } })
+    ).toBeDefined();
+  });
+
+  it("resolves only logical workspace ids and rejects traversal or symlink escape", async () => {
+    const { directory, workspaceRoot } = await setup();
+    const config = parseAgentHostConfig(input(directory, workspaceRoot));
+    const resolver = new ConfiguredWorkspaceResolver(config);
+    await expect(resolver.resolve("workspace.core")).resolves.toEqual({
+      cwd: await realpath(join(workspaceRoot, "project"))
+    });
+    await expect(resolver.resolve("../project")).rejects.toThrow("not_configured");
+    expect(() =>
+      parseAgentHostConfig({
+        ...input(directory, workspaceRoot),
+        workspaces: [{ id: "unsafe", path: "../outside" }]
+      })
+    ).toThrow();
+
+    await mkdir(join(directory, "outside"));
+    await symlink(join(directory, "outside"), join(workspaceRoot, "escape"));
+    const escaped = parseAgentHostConfig({
+      ...input(directory, workspaceRoot),
+      workspaces: [{ id: "escape", path: "escape" }]
+    });
+    await expect(new ConfiguredWorkspaceResolver(escaped).resolve("escape")).rejects.toThrow(
+      "workspace_escape"
+    );
+  });
+
+  it("resolves trusted local launch and copies only explicitly allowed environment names", async () => {
+    const { directory, workspaceRoot } = await setup();
+    const config = parseAgentHostConfig(input(directory, workspaceRoot));
+    const resolver = new ConfiguredAcpProfileResolver(config, {
+      SAFE_API_KEY: "local-secret",
+      UNTRUSTED_OVERRIDE: "ignored"
+    });
+    await expect(resolver.resolve("acp.test", "test-agent")).resolves.toMatchObject({
+      agentId: "test-agent",
+      launch: { command: process.execPath, args: ["agent.mjs"] },
+      env: { SAFE_API_KEY: "local-secret" }
+    });
+    await expect(resolver.resolve("acp.test", "wrong-agent")).rejects.toThrow("not_configured");
+    expect(() =>
+      parseAgentHostConfig({
+        ...input(directory, workspaceRoot),
+        agentProfiles: [
+          {
+            ...input(directory, workspaceRoot).agentProfiles[0],
+            environment: [{ name: "NODE_OPTIONS", required: false }]
+          }
+        ]
+      })
+    ).toThrow();
+    expect(dirname(process.execPath)).not.toBe("");
+  });
+});

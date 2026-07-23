@@ -116,6 +116,7 @@ export {
   cancelExecutionCommandSchema,
   executeBlockCommandSchema,
   hostEventAcknowledgementSchema,
+  hostCapacitySchema,
   hostEventSchema,
   hostHelloSchema,
   hostToServerEventSchema,
@@ -138,6 +139,19 @@ export {
   type ServerEvent,
   type ServerToHostCommand
 } from "./agentHostProtocol.js";
+export {
+  HOST_DISPLAY_NAME_MAX_LENGTH,
+  hostCredentialTokenSchema,
+  hostEnrollmentCodeSchema,
+  hostEnrollmentCompletedSchema,
+  hostEnrollmentErrorCodeSchema,
+  hostEnrollmentErrorSchema,
+  hostEnrollmentRequestSchema,
+  type HostEnrollmentCompleted,
+  type HostEnrollmentError,
+  type HostEnrollmentErrorCode,
+  type HostEnrollmentRequest
+} from "./agentHostEnrollment.js";
 export {
   ACP_EVENT_BATCH_MAX_COUNT,
   ACP_EVENT_TEXT_MAX_LENGTH,

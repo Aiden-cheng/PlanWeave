@@ -5,7 +5,6 @@ import {
   parseAgentHostMailboxCommand,
   parseAgentHostServerEvent,
   type HostEvent,
-  type MailboxCommand,
   type NormalizedFailure as ProtocolDispatchFailure,
   type DispatchResult as ProtocolDispatchResult,
   type ServerEvent
@@ -15,109 +14,28 @@ import {
   openAgentHostDatabase,
   type SqliteDatabase
 } from "./sqliteDatabase.js";
+import {
+  type AgentHostExecution,
+  type ExecuteBlockCommand,
+  initializeAgentHostStateSchema,
+  outboxRowSchema,
+  toExecution
+} from "./agentHostStateRecords.js";
+import {
+  type AgentHostCancellation,
+  type AgentHostStateLimits,
+  type AgentHostStateRepository,
+  DEFAULT_AGENT_HOST_STATE_LIMITS
+} from "./agentHostStateContract.js";
+
+export type { AgentHostExecution, AgentHostExecutionStatus } from "./agentHostStateRecords.js";
+export type {
+  AgentHostCancellation,
+  AgentHostStateLimits,
+  AgentHostStateRepository
+} from "./agentHostStateContract.js";
 
 type MailboxMessageEvent = Extract<ServerEvent, { type: "mailbox.message" }>;
-type ExecuteBlockCommand = Extract<MailboxCommand, { type: "execute_block" }>;
-type CancelExecutionCommand = Extract<MailboxCommand, { type: "cancel_execution" }>;
-
-export type AgentHostExecutionStatus =
-  | "pending"
-  | "running"
-  | "interrupted"
-  | "cancelling"
-  | "completed"
-  | "failed";
-
-export type AgentHostExecution = {
-  sequence: number;
-  messageId: string;
-  command: ExecuteBlockCommand;
-  status: AgentHostExecutionStatus;
-  receivedAt: string;
-  startedAt?: string;
-  finishedAt?: string;
-};
-
-export type AgentHostCancellation = {
-  sequence: number;
-  messageId: string;
-  command: CancelExecutionCommand;
-};
-
-export interface AgentHostStateRepository {
-  close(): void;
-  receive(input: ServerEvent): { stored: boolean; acknowledgement: HostEvent };
-  lastAcknowledgedSequence(): number;
-  pendingEvents(): HostEvent[];
-  acknowledgeEvent(messageId: string): boolean;
-  recoverInterruptedExecutions(): number;
-  pendingExecutions(limit: number): AgentHostExecution[];
-  activeLeases(): Array<{
-    dispatchId: string;
-    leaseId: string;
-    executionAttemptId: string;
-  }>;
-  renewLease(
-    dispatchId: string,
-    leaseId: string,
-    executionAttemptId: string,
-    leaseExpiresAt: string
-  ): boolean;
-  abandonExpiredExecutions(now: Date): AgentHostExecution[];
-  pendingCancellations(): AgentHostCancellation[];
-  applyCancellation(sequence: number): { shouldAbort: boolean };
-  startExecution(sequence: number): AgentHostExecution | undefined;
-  completeExecution(sequence: number, result: ProtocolDispatchResult): void;
-  failExecution(sequence: number, failure: ProtocolDispatchFailure): void;
-}
-
-const inboxRowSchema = z.object({
-  sequence: z.number().int().positive(),
-  message_id: z.string(),
-  command_json: z.string(),
-  execution_status: z
-    .enum(["pending", "running", "interrupted", "cancelling", "completed", "failed"])
-    .nullable(),
-  lease_expires_at: z.string().datetime().nullable(),
-  received_at: z.string().datetime(),
-  started_at: z.string().datetime().nullable(),
-  finished_at: z.string().datetime().nullable()
-});
-
-const outboxRowSchema = z.object({
-  event_json: z.string()
-});
-
-const schema = `
-CREATE TABLE IF NOT EXISTS agent_host_inbox (
-  sequence INTEGER PRIMARY KEY,
-  message_id TEXT NOT NULL UNIQUE,
-  command_json TEXT NOT NULL,
-  execution_status TEXT CHECK(execution_status IN (
-    'pending','running','interrupted','cancelling','completed','failed'
-  )),
-  lease_expires_at TEXT,
-  received_at TEXT NOT NULL,
-  started_at TEXT,
-  finished_at TEXT,
-  acknowledged_at TEXT,
-  processed_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS agent_host_outbox (
-  sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-  message_id TEXT NOT NULL UNIQUE,
-  event_key TEXT NOT NULL UNIQUE,
-  event_json TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  acknowledged_at TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_agent_host_inbox_execution
-  ON agent_host_inbox(execution_status,sequence);
-CREATE INDEX IF NOT EXISTS idx_agent_host_outbox_pending
-  ON agent_host_outbox(acknowledged_at,sequence);
-`;
 
 function messageEvent(input: ServerEvent): MailboxMessageEvent {
   const parsed = parseAgentHostServerEvent(input);
@@ -125,29 +43,24 @@ function messageEvent(input: ServerEvent): MailboxMessageEvent {
   return parsed;
 }
 
-function toExecution(raw: Record<string, unknown>): AgentHostExecution {
-  const row = inboxRowSchema.parse(raw);
-  const command = parseAgentHostMailboxCommand(JSON.parse(row.command_json));
-  if (command.type !== "execute_block" || row.execution_status === null) {
-    throw new Error("execute_block_record_required");
-  }
-  const effectiveCommand = row.lease_expires_at
-    ? { ...command, leaseExpiresAt: row.lease_expires_at }
-    : command;
-  return {
-    sequence: row.sequence,
-    messageId: row.message_id,
-    command: effectiveCommand,
-    status: row.execution_status,
-    receivedAt: row.received_at,
-    startedAt: row.started_at ?? undefined,
-    finishedAt: row.finished_at ?? undefined
-  };
-}
-
 export class AgentHostState implements AgentHostStateRepository {
-  constructor(private readonly database: SqliteDatabase) {
-    database.exec(schema);
+  private readonly limits: AgentHostStateLimits;
+
+  constructor(
+    private readonly database: SqliteDatabase,
+    limits: Partial<AgentHostStateLimits> = {}
+  ) {
+    this.limits = {
+      maxPendingCommands: this.parseLimit(
+        limits.maxPendingCommands ?? DEFAULT_AGENT_HOST_STATE_LIMITS.maxPendingCommands,
+        "pending_command"
+      ),
+      maxPendingEvents: this.parseLimit(
+        limits.maxPendingEvents ?? DEFAULT_AGENT_HOST_STATE_LIMITS.maxPendingEvents,
+        "pending_event"
+      )
+    };
+    initializeAgentHostStateSchema(database);
   }
 
   close(): void {
@@ -170,27 +83,38 @@ export class AgentHostState implements AgentHostStateRepository {
       const commandJson = JSON.stringify(event.command);
       const existing = this.database
         .prepare(
-          "SELECT sequence,message_id,command_json FROM agent_host_inbox WHERE sequence=? OR message_id=?"
+          "SELECT sequence,previous_sequence,message_id,command_json FROM agent_host_inbox WHERE sequence=? OR message_id=?"
         )
         .get(event.sequence, event.messageId);
       let stored = false;
       if (existing) {
         if (
           Number(existing.sequence) !== event.sequence ||
+          Number(existing.previous_sequence) !== event.previousSequence ||
           String(existing.message_id) !== event.messageId ||
           String(existing.command_json) !== commandJson
         ) {
           throw new Error("mailbox_message_conflict");
         }
       } else {
+        const latest = this.database
+          .prepare("SELECT MAX(sequence) AS sequence FROM agent_host_inbox")
+          .get();
+        if (event.previousSequence !== Number(latest?.sequence ?? 0)) {
+          throw new Error("mailbox_message_out_of_order");
+        }
+        if (this.pendingCommandCount() >= this.limits.maxPendingCommands) {
+          throw new Error("agent_host_pending_command_capacity_exceeded");
+        }
         this.database
           .prepare(
             `INSERT INTO agent_host_inbox(
-              sequence,message_id,command_json,execution_status,lease_expires_at,received_at
-            ) VALUES (?,?,?,?,?,?)`
+              sequence,previous_sequence,message_id,command_json,execution_status,lease_expires_at,received_at
+            ) VALUES (?,?,?,?,?,?,?)`
           )
           .run(
             event.sequence,
+            event.previousSequence,
             event.messageId,
             commandJson,
             event.command.type === "execute_block" ? "pending" : null,
@@ -221,13 +145,46 @@ export class AgentHostState implements AgentHostStateRepository {
     return Number(row?.sequence ?? 0);
   }
 
-  pendingEvents(): HostEvent[] {
+  pendingEvents(limit = this.limits.maxPendingEvents): HostEvent[] {
+    const parsedLimit = this.parseLimit(limit, "pending_event_query");
     return this.database
       .prepare(
-        "SELECT event_json FROM agent_host_outbox WHERE acknowledged_at IS NULL ORDER BY sequence ASC"
+        "SELECT event_json FROM agent_host_outbox WHERE acknowledged_at IS NULL ORDER BY sequence ASC LIMIT ?"
       )
-      .all()
+      .all(parsedLimit)
       .map((raw) => parseAgentHostEvent(JSON.parse(outboxRowSchema.parse(raw).event_json)));
+  }
+
+  pendingEventCount(): number {
+    const row = this.database
+      .prepare("SELECT COUNT(*) AS count FROM agent_host_outbox WHERE acknowledged_at IS NULL")
+      .get();
+    return Number(row?.count ?? 0);
+  }
+
+  queueHeartbeat(
+    activeLeases: ReadonlyArray<{
+      dispatchId: string;
+      leaseId: string;
+      executionAttemptId: string;
+    }>
+  ): HostEvent {
+    return inWriteTransaction(this.database, () => {
+      this.database
+        .prepare(
+          "DELETE FROM agent_host_outbox WHERE event_key='host.heartbeat' AND acknowledged_at IS NOT NULL"
+        )
+        .run();
+      return this.queueEvent(
+        "host.heartbeat",
+        parseAgentHostEvent({
+          type: "host.heartbeat",
+          protocolVersion: 1,
+          messageId: randomUUID(),
+          activeLeases
+        })
+      );
+    });
   }
 
   acknowledgeEvent(messageId: string): boolean {
@@ -245,7 +202,7 @@ export class AgentHostState implements AgentHostStateRepository {
       if (event.type === "mailbox.ack") {
         this.database
           .prepare(
-            "UPDATE agent_host_inbox SET acknowledged_at=COALESCE(acknowledged_at,?) WHERE sequence<=?"
+            "UPDATE agent_host_inbox SET acknowledged_at=COALESCE(acknowledged_at,?) WHERE sequence=?"
           )
           .run(acknowledgedAt, event.sequence);
       }
@@ -292,6 +249,15 @@ export class AgentHostState implements AgentHostStateRepository {
       }
       return running.length + cancelling.length;
     });
+  }
+
+  recoverableExecutionCount(): number {
+    const row = this.database
+      .prepare(
+        "SELECT COUNT(*) AS count FROM agent_host_inbox WHERE execution_status IN ('pending','running','interrupted','cancelling')"
+      )
+      .get();
+    return Number(row?.count ?? 0);
   }
 
   pendingExecutions(limit: number): AgentHostExecution[] {
@@ -555,6 +521,13 @@ export class AgentHostState implements AgentHostStateRepository {
 
   private queueEvent(eventKey: string, input: HostEvent): HostEvent {
     const event = parseAgentHostEvent(input);
+    const existing = this.database
+      .prepare("SELECT event_json FROM agent_host_outbox WHERE event_key=?")
+      .get(eventKey);
+    if (existing) return parseAgentHostEvent(JSON.parse(String(existing.event_json)));
+    if (this.pendingEventCount() >= this.limits.maxPendingEvents) {
+      throw new Error("agent_host_pending_event_capacity_exceeded");
+    }
     this.database
       .prepare(
         `INSERT INTO agent_host_outbox(message_id,event_key,event_json,created_at)
@@ -567,11 +540,30 @@ export class AgentHostState implements AgentHostStateRepository {
     if (!raw) throw new Error("host_event_not_persisted");
     return parseAgentHostEvent(JSON.parse(String(raw.event_json)));
   }
+
+  private pendingCommandCount(): number {
+    const row = this.database
+      .prepare(
+        `SELECT COUNT(*) AS count FROM agent_host_inbox
+         WHERE execution_status IN ('pending','running','cancelling')
+            OR (execution_status IS NULL AND processed_at IS NULL)`
+      )
+      .get();
+    return Number(row?.count ?? 0);
+  }
+
+  private parseLimit(value: number, name: string): number {
+    if (!Number.isSafeInteger(value) || value < 1) {
+      throw new Error(`agent_host_${name}_limit_invalid`);
+    }
+    return value;
+  }
 }
 
 export async function openAgentHostState(
   path: string,
-  busyTimeoutMs = 5000
+  busyTimeoutMs = 5000,
+  limits: Partial<AgentHostStateLimits> = {}
 ): Promise<AgentHostState> {
-  return new AgentHostState(await openAgentHostDatabase(path, busyTimeoutMs));
+  return new AgentHostState(await openAgentHostDatabase(path, busyTimeoutMs), limits);
 }

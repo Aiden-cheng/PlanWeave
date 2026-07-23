@@ -54,6 +54,7 @@ function sendMailboxMessage(socket: WebSocket, message: MailboxMessage): void {
     type: "mailbox.message",
     protocolVersion: agentHostProtocolVersion,
     sequence: message.sequence,
+    previousSequence: message.previousSequence,
     messageId: message.messageId,
     command: message.command
   });

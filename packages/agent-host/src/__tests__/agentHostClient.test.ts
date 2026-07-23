@@ -19,6 +19,7 @@ import { WebSocketServer } from "ws";
 import { AgentHostExecutionError, type AgentHostExecutor } from "../execution/agentHostExecutor.js";
 import { openAgentHostState, type AgentHostState } from "../state/agentHostState.js";
 import { AgentHostClient } from "../transport/agentHostClient.js";
+import { FakeHostTransportClock } from "./support/hostTransportTestClock.js";
 
 const directories: string[] = [];
 const states: AgentHostState[] = [];
@@ -118,6 +119,7 @@ function executeDelivery(sequence = 1): Extract<ServerEvent, { type: "mailbox.me
     type: "mailbox.message",
     protocolVersion: 1,
     sequence,
+    previousSequence: sequence - 1,
     messageId: `mailbox-client-${sequence}`,
     command: {
       type: "execute_block",
@@ -138,6 +140,7 @@ function cancelDelivery(execute: Extract<ServerEvent, { type: "mailbox.message" 
     type: "mailbox.message",
     protocolVersion: 1,
     sequence: execute.sequence + 1,
+    previousSequence: execute.sequence,
     messageId: `mailbox-client-${execute.sequence + 1}`,
     command: {
       type: "cancel_execution",
@@ -511,6 +514,7 @@ describe("Agent Host outbound transport", () => {
 
   it("reconnects with the durable acknowledgement cursor", async () => {
     const reconnected = deferred<void>();
+    const backingOff = deferred<void>();
     const protocolFailure = deferred<unknown>();
     const httpServer = createServer();
     httpServers.push(httpServer);
@@ -535,6 +539,7 @@ describe("Agent Host outbound transport", () => {
     });
     const port = await listen(httpServer);
     const state = await openState();
+    const clock = new FakeHostTransportClock();
     const executor: AgentHostExecutor = { execute: vi.fn() };
     const client = new AgentHostClient({
       serverUrl: `http://127.0.0.1:${port}`,
@@ -545,12 +550,66 @@ describe("Agent Host outbound transport", () => {
       state,
       executor,
       allowInsecureTransport: true,
-      reconnectDelayMs: 1
+      reconnect: { initialDelayMs: 100, maxDelayMs: 1_000 },
+      clock,
+      random: () => 0
+    });
+    client.subscribe((status) => {
+      if (status.state === "backing-off") {
+        expect(status).toMatchObject({ attempt: 1, delayMs: 50 });
+        backingOff.resolve();
+      }
     });
     clients.push(client);
     client.start();
 
+    await Promise.race([backingOff.promise, protocolFailure.promise]);
+    expect(clock.nextDelay()).toBe(50);
+    clock.advanceBy(50);
     await Promise.race([reconnected.promise, protocolFailure.promise]);
     expect(connectionCount).toBe(2);
+  });
+
+  it("treats a superseded Host connection as terminal instead of reconnecting", async () => {
+    const terminal = deferred<void>();
+    const httpServer = createServer();
+    httpServers.push(httpServer);
+    const webSocketServer = new WebSocketServer({ server: httpServer });
+    webSocketServers.push(webSocketServer);
+    let connectionCount = 0;
+    webSocketServer.on("connection", (socket) => {
+      connectionCount += 1;
+      socket.on("message", () => socket.close(4001, "superseded"));
+    });
+    const port = await listen(httpServer);
+    const state = await openState();
+    const clock = new FakeHostTransportClock();
+    const client = new AgentHostClient({
+      serverUrl: `http://127.0.0.1:${port}`,
+      hostId: "host-client-001",
+      token: "host-token",
+      capabilities: ["test"],
+      capacity: 1,
+      state,
+      executor: { execute: vi.fn() },
+      allowInsecureTransport: true,
+      clock
+    });
+    client.subscribe((status) => {
+      if (status.state === "degraded" && status.reason === "duplicate_host_connection") {
+        terminal.resolve();
+      }
+    });
+    clients.push(client);
+    client.start();
+
+    await terminal.promise;
+    clock.advanceBy(60_000);
+    await Promise.resolve();
+    expect(connectionCount).toBe(1);
+    expect(client.status()).toEqual({
+      state: "degraded",
+      reason: "duplicate_host_connection"
+    });
   });
 });

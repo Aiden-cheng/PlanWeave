@@ -1,18 +1,30 @@
-import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
 import {
   parseAgentHostCapabilities,
   parseAgentHostDispatchResult,
-  parseAgentHostEvent,
   parseAgentHostServerEvent,
   serializeAgentHostEvent,
   serializeAgentHostHello,
   type ServerEvent
 } from "../protocol.js";
 import { HttpArtifactClient } from "../artifacts/httpArtifactTransfer.js";
-import type { AgentHostTransport } from "../composition/agentHostComposition.js";
 import { AgentHostExecutionError, type AgentHostExecutor } from "../execution/agentHostExecutor.js";
 import type { AgentHostExecution, AgentHostStateRepository } from "../state/agentHostState.js";
+import {
+  type HostTransport,
+  type HostTransportClock,
+  type HostTransportLimits,
+  type HostTransportLogger,
+  type HostTransportStatus,
+  type HostTransportStatusListener,
+  parseHostTransportLimits,
+  systemHostTransportClock
+} from "./hostTransport.js";
+import {
+  parseReconnectBackoffOptions,
+  reconnectDelay,
+  type ReconnectBackoffOptions
+} from "./reconnectBackoff.js";
 
 export type AgentHostClientOptions = {
   serverUrl: string;
@@ -23,7 +35,11 @@ export type AgentHostClientOptions = {
   state: AgentHostStateRepository;
   executor: AgentHostExecutor;
   allowInsecureTransport?: boolean;
-  reconnectDelayMs?: number;
+  reconnect?: Partial<ReconnectBackoffOptions>;
+  clock?: HostTransportClock;
+  random?: () => number;
+  limits?: Partial<HostTransportLimits>;
+  logger?: HostTransportLogger;
   onProtocolError?(event: Extract<ServerEvent, { type: "protocol.error" }>): void;
 };
 
@@ -62,15 +78,22 @@ function executionFailure(error: unknown, aborted: boolean) {
   };
 }
 
-export class AgentHostClient implements AgentHostTransport {
+export class AgentHostClient implements HostTransport {
   private readonly baseUrl: URL;
   private readonly capabilities: string[];
   private readonly artifacts: HttpArtifactClient;
   private readonly active = new Map<number, ActiveExecution>();
   private readonly runs = new Set<Promise<void>>();
   private socket?: WebSocket;
-  private heartbeatTimer?: ReturnType<typeof setInterval>;
-  private reconnectTimer?: ReturnType<typeof setTimeout>;
+  private readonly clock: HostTransportClock;
+  private readonly limits: HostTransportLimits;
+  private readonly reconnect: ReconnectBackoffOptions;
+  private readonly listeners = new Set<HostTransportStatusListener>();
+  private heartbeatTimer?: unknown;
+  private reconnectTimer?: unknown;
+  private currentStatus: HostTransportStatus = { state: "stopped" };
+  private reconnectAttempt = 0;
+  private queuedMessages = 0;
   private processing = Promise.resolve();
   private welcomed = false;
   private stopped = true;
@@ -88,12 +111,9 @@ export class AgentHostClient implements AgentHostTransport {
     if (!Number.isInteger(options.capacity) || options.capacity < 1 || options.capacity > 128) {
       throw new Error("agent_host_capacity_out_of_range");
     }
-    if (
-      !Number.isInteger(options.reconnectDelayMs ?? 1000) ||
-      (options.reconnectDelayMs ?? 1000) < 1
-    ) {
-      throw new Error("agent_host_reconnect_delay_invalid");
-    }
+    this.clock = options.clock ?? systemHostTransportClock;
+    this.limits = parseHostTransportLimits(options.limits);
+    this.reconnect = parseReconnectBackoffOptions(options.reconnect);
     this.capabilities = parseAgentHostCapabilities(options.capabilities);
     this.artifacts = new HttpArtifactClient({
       baseUrl: this.baseUrl,
@@ -109,33 +129,48 @@ export class AgentHostClient implements AgentHostTransport {
     this.connect();
   }
 
+  status(): HostTransportStatus {
+    return this.currentStatus;
+  }
+
+  subscribe(listener: HostTransportStatusListener): () => void {
+    this.listeners.add(listener);
+    listener(this.currentStatus);
+    return () => this.listeners.delete(listener);
+  }
+
   async stop(): Promise<void> {
-    if (this.stopped) return;
+    if (this.currentStatus.state === "stopped") return;
     this.stopped = true;
     this.welcomed = false;
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    if (this.reconnectTimer) this.clock.clearTimeout(this.reconnectTimer);
+    if (this.heartbeatTimer) this.clock.clearTimeout(this.heartbeatTimer);
     for (const { controller } of this.active.values()) controller.abort();
     const socket = this.socket;
     this.socket = undefined;
     if (socket && socket.readyState !== WebSocket.CLOSED) {
-      await new Promise<void>((resolve) => {
-        socket.once("close", () => resolve());
-        socket.close(1000, "host shutdown");
-      });
+      await this.waitBounded(
+        new Promise<void>((resolve) => {
+          socket.once("close", () => resolve());
+          socket.close(1000, "host shutdown");
+        })
+      );
     }
-    await Promise.allSettled([...this.runs]);
+    await this.waitBounded(Promise.allSettled([...this.runs]).then(() => undefined));
+    this.transition({ state: "stopped" });
   }
 
   private connect(): void {
     if (this.stopped) return;
+    this.transition({ state: "connecting", attempt: this.reconnectAttempt + 1 });
     const url = endpoint(
       this.baseUrl,
       `/agent-hosts/${encodeURIComponent(this.options.hostId)}/connect`,
       true
     );
     const socket = new WebSocket(url, {
-      headers: { Authorization: `Bearer ${this.options.token}` }
+      headers: { Authorization: `Bearer ${this.options.token}` },
+      maxPayload: this.limits.maxPayloadBytes
     });
     this.socket = socket;
     socket.on("open", () => {
@@ -143,32 +178,64 @@ export class AgentHostClient implements AgentHostTransport {
         type: "host.hello",
         protocolVersion: 1,
         lastAcknowledgedSequence: this.options.state.lastAcknowledgedSequence(),
-        lastObservedAcpCursor: 0,
         capabilities: this.capabilities,
         capacity: this.options.capacity
       });
       socket.send(hello);
     });
     socket.on("message", (data, isBinary) => {
+      if (
+        Buffer.byteLength(data.toString()) > this.limits.maxPayloadBytes ||
+        ++this.queuedMessages > this.limits.maxQueuedMessages
+      ) {
+        this.transition({ state: "degraded", reason: "inbound_backpressure" });
+        socket.close(4009, "inbound backpressure");
+        return;
+      }
       this.processing = this.processing
         .then(async () => {
           if (isBinary) throw new Error("binary_messages_not_supported");
           const event = parseAgentHostServerEvent(JSON.parse(data.toString()));
           await this.handleServerEvent(event);
         })
-        .catch(() => socket.close(4003, "server event rejected"));
+        .catch(() => {
+          this.transition({ state: "degraded", reason: "invalid_server_event" });
+          this.stopped = true;
+          socket.close(4003, "server event rejected");
+        })
+        .finally(() => this.queuedMessages--);
+    });
+    socket.on("unexpected-response", (_request, response) => {
+      if (response.statusCode === 401 || response.statusCode === 403) {
+        this.stopped = true;
+        this.transition({ state: "auth-failed", reason: "credential_rejected" });
+      } else {
+        this.stopped = true;
+        this.transition({ state: "degraded", reason: "upgrade_rejected" });
+      }
+      socket.terminate();
     });
     socket.on("error", () => socket.terminate());
-    socket.on("close", () => {
+    socket.on("close", (code) => {
       if (this.socket !== socket) return;
       this.socket = undefined;
       this.welcomed = false;
-      if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+      if (this.heartbeatTimer) this.clock.clearTimeout(this.heartbeatTimer);
+      if (!this.stopped && code === 4001) {
+        this.stopped = true;
+        this.transition({ state: "degraded", reason: "duplicate_host_connection" });
+        return;
+      }
       if (!this.stopped) {
-        this.reconnectTimer = setTimeout(
-          () => this.connect(),
-          this.options.reconnectDelayMs ?? 1000
-        );
+        const attempt = ++this.reconnectAttempt;
+        const delayMs = reconnectDelay(attempt, this.options.random ?? Math.random, this.reconnect);
+        this.transition({
+          state: "backing-off",
+          attempt,
+          delayMs,
+          retryAt: new Date(this.clock.now().getTime() + delayMs).toISOString()
+        });
+        this.reconnectTimer = this.clock.setTimeout(() => this.connect(), delayMs);
       }
     });
   }
@@ -177,7 +244,9 @@ export class AgentHostClient implements AgentHostTransport {
     switch (event.type) {
       case "host.welcome":
         this.welcomed = true;
-        this.serverClockOffsetMs = Date.parse(event.serverTime) - Date.now();
+        this.reconnectAttempt = 0;
+        this.transition({ state: "connected", connectedAt: this.clock.now().toISOString() });
+        this.serverClockOffsetMs = Date.parse(event.serverTime) - this.clock.now().getTime();
         this.abandonExpiredExecutions();
         this.startHeartbeat(event.heartbeatIntervalMs);
         this.flushEvents();
@@ -190,6 +259,7 @@ export class AgentHostClient implements AgentHostTransport {
         return;
       case "host.event_ack":
         this.options.state.acknowledgeEvent(event.messageId);
+        this.flushEvents();
         return;
       case "lease.renewed":
         this.options.state.renewLease(
@@ -201,34 +271,36 @@ export class AgentHostClient implements AgentHostTransport {
         return;
       case "protocol.error":
         this.options.onProtocolError?.(event);
+        this.stopped = true;
+        this.transition({ state: "degraded", reason: "protocol_rejected" });
+        this.socket?.close(4003, "protocol rejected");
         return;
     }
   }
 
   private startHeartbeat(intervalMs: number): void {
-    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    if (this.heartbeatTimer) this.clock.clearTimeout(this.heartbeatTimer);
     const send = () => {
       this.abandonExpiredExecutions();
-      this.send(
-        parseAgentHostEvent({
-          type: "host.heartbeat",
-          protocolVersion: 1,
-          messageId: randomUUID(),
-          activeLeases: this.options.state.activeLeases()
-        })
-      );
+      this.send(this.options.state.queueHeartbeat(this.options.state.activeLeases()));
+      this.heartbeatTimer = this.clock.setTimeout(send, intervalMs);
     };
     send();
-    this.heartbeatTimer = setInterval(send, intervalMs);
   }
 
   private flushEvents(): void {
-    for (const event of this.options.state.pendingEvents()) this.send(event);
+    for (const event of this.options.state.pendingEvents(this.limits.maxOutboundBatch))
+      this.send(event);
   }
 
   private send(event: unknown): void {
     if (!this.welcomed || this.socket?.readyState !== WebSocket.OPEN) return;
-    this.socket.send(serializeAgentHostEvent(event));
+    const payload = serializeAgentHostEvent(event);
+    if (Buffer.byteLength(payload) > this.limits.maxPayloadBytes)
+      throw new Error("agent_host_outbound_payload_too_large");
+    if (this.socket.bufferedAmount + Buffer.byteLength(payload) > this.limits.maxBufferedBytes)
+      return;
+    this.socket.send(payload);
   }
 
   private pump(): void {
@@ -269,7 +341,7 @@ export class AgentHostClient implements AgentHostTransport {
 
   private abandonExpiredExecutions(): void {
     const expired = this.options.state.abandonExpiredExecutions(
-      new Date(Date.now() + this.serverClockOffsetMs)
+      new Date(this.clock.now().getTime() + this.serverClockOffsetMs)
     );
     for (const execution of expired) this.active.get(execution.sequence)?.controller.abort();
   }
@@ -296,5 +368,25 @@ export class AgentHostClient implements AgentHostTransport {
       this.flushEvents();
       this.pump();
     }
+  }
+
+  private transition(status: HostTransportStatus): void {
+    this.currentStatus = status;
+    this.options.logger?.log({
+      level: status.state === "degraded" || status.state === "auth-failed" ? "warn" : "debug",
+      event: "host_transport_state",
+      state: status.state,
+      reason: "reason" in status ? status.reason : undefined
+    });
+    for (const listener of this.listeners) listener(status);
+  }
+
+  private async waitBounded(operation: Promise<void>): Promise<void> {
+    let timer: unknown;
+    const timeout = new Promise<void>((resolve) => {
+      timer = this.clock.setTimeout(resolve, this.limits.shutdownTimeoutMs);
+    });
+    await Promise.race([operation, timeout]);
+    if (timer) this.clock.clearTimeout(timer);
   }
 }

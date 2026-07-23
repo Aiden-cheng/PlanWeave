@@ -2,8 +2,7 @@ export {
   composeAgentHost,
   createNoopAgentHostComposition,
   type AgentHostComposition,
-  type AgentHostCompositionOptions,
-  type AgentHostTransport
+  type AgentHostCompositionOptions
 } from "./composition/agentHostComposition.js";
 export type {
   AgentHostArtifactInput,
@@ -41,6 +40,46 @@ export {
   AgentHostClient,
   type AgentHostClientOptions
 } from "./transport/agentHostClient.js";
+export {
+  type HostTransport,
+  type HostTransportClock,
+  type HostTransportLimits,
+  type HostTransportLogger,
+  type HostTransportStatus,
+  parseHostTransportLimits
+} from "./transport/hostTransport.js";
+export { AgentHostOperator, loadAgentHostConfig } from "./operator/agentHostOperator.js";
+export {
+  parseAgentHostArgs,
+  runAgentHostCli,
+  waitForAgentHostSignal
+} from "./operator/cli.js";
+export {
+  agentHostConfigSchema,
+  parseAgentHostConfig,
+  type AgentHostConfig
+} from "./config/schema.js";
+export {
+  ConfiguredAcpProfileResolver,
+  ConfiguredWorkspaceResolver
+} from "./config/resolvers.js";
+export {
+  activeHostCredentialSchema,
+  hostCredentialDocumentSchema,
+  pendingHostEnrollmentSchema,
+  type ActiveHostCredential,
+  type HostCredentialDocument,
+  type PendingHostEnrollment
+} from "./credentials/credentialContract.js";
+export { FileHostCredentialStore } from "./credentials/fileCredentialStore.js";
+export {
+  AgentHostEnrollmentService,
+  type AgentHostEnrollmentExchange
+} from "./enrollment/enrollmentService.js";
+export {
+  HttpAgentHostEnrollmentExchange,
+  resolveHostEnrollmentEndpoint
+} from "./enrollment/httpEnrollmentExchange.js";
 export {
   parseAgentHostArtifactRef,
   parseAgentHostCapabilities,

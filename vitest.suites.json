@@ -428,6 +428,7 @@
     {
       "root": "packages/distributed-protocol/src/__tests__",
       "unit": [
+        "agentHostEnrollment.test.ts",
         "agentHostProtocol.test.ts",
         "artifactMediaType.test.ts",
         "canonicalJson.test.ts",
@@ -442,12 +443,16 @@
     {
       "root": "packages/agent-host/src/__tests__",
       "unit": [
+        "agentHostCli.test.ts",
+        "agentHostConfig.test.ts",
         "agentHostPackage.test.ts",
-        "protocolConformance.test.ts"
+        "protocolConformance.test.ts",
+        "reconnectBackoff.test.ts"
       ],
       "integration": [
         "agentHostClientAdversarial.test.ts",
         "agentHostClient.test.ts",
+        "agentHostEnrollment.test.ts",
         "agentHostState.test.ts",
         "remoteAcpExecutor.test.ts"
       ],
@@ -465,6 +470,7 @@
         "artifactQuota.test.ts",
         "artifacts.test.ts",
         "dispatches.test.ts",
+        "hostEnrollment.test.ts",
         "hostReservations.test.ts",
         "lifecycle.test.ts",
         "remoteBlockCoordinator.test.ts",

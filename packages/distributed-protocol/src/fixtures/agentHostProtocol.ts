@@ -16,7 +16,6 @@ export const exampleHostHello = hostHelloSchema.parse({
   type: "host.hello",
   protocolVersion,
   lastAcknowledgedSequence: 0,
-  lastObservedAcpCursor: 0,
   capabilities: ["acp.codex", "workspace.git"],
   capacity: 2
 });
@@ -25,6 +24,7 @@ export const exampleExecuteDelivery = serverEventSchema.parse({
   type: "mailbox.message",
   protocolVersion,
   sequence: 1,
+  previousSequence: 0,
   messageId: "mailbox-execute-001",
   command: {
     type: "execute_block",
@@ -42,6 +42,7 @@ export const exampleResumeDelivery = serverEventSchema.parse({
   type: "mailbox.message",
   protocolVersion,
   sequence: 2,
+  previousSequence: 1,
   messageId: "mailbox-resume-001",
   command: {
     type: "resume_execution",

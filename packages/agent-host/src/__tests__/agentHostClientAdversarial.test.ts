@@ -60,6 +60,7 @@ describe("Agent Host adversarial executor failure", () => {
       type: "mailbox.message",
       protocolVersion: 1,
       sequence: 1,
+      previousSequence: 0,
       messageId: "mailbox-adversarial",
       command: {
         type: "execute_block",

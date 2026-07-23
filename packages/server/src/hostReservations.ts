@@ -141,9 +141,10 @@ export class HostReservationRepository {
                 WHERE r.host_id=h.id AND r.status='active') AS active_reservations
              FROM agent_hosts h
              WHERE h.revoked_at IS NULL AND h.last_seen_at>=?
+               AND (h.credential_expires_at IS NULL OR h.credential_expires_at>?)
              ORDER BY active_reservations ASC,h.last_seen_at DESC,h.id ASC`
           )
-          .all(onlineAfter)
+          .all(onlineAfter, now.toISOString())
           .map((row) => {
             try {
               const parsed = hostCandidateRowSchema.parse(row);

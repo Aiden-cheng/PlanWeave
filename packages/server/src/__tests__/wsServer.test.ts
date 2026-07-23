@@ -1,14 +1,18 @@
 import { createServer, type Server as HttpServer } from "node:http";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
+import { createRemoteBlockRuntimePort, type PlanPackageManifest } from "@planweave-ai/runtime";
 import { WebSocket } from "ws";
-import { afterEach, describe, expect, it } from "vitest";
-import { createDistributedCoordination } from "../distributedCoordination.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createRemoteBlockCoordination } from "../distributedCoordination.js";
+import { RemoteRuntimePortRegistry } from "../remoteRuntimeLocator.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 import { serverEventSchema, type ServerEvent } from "../protocol.js";
 import { attachAgentHostWebSocketServer, type AgentHostWebSocketServer } from "../wsServer.js";
-import { executionEnvelopeFor } from "./protocolTestFixtures.js";
+import {
+  createTestWorkspace,
+  basicManifest
+} from "../../../runtime/src/__tests__/promptTestHelpers.js";
 
 const directories: string[] = [];
 const databases: PlanweaveServer[] = [];
@@ -17,6 +21,7 @@ const webSocketServers: AgentHostWebSocketServer[] = [];
 const sockets: WebSocket[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const socket of sockets.splice(0)) {
     if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
       socket.terminate();
@@ -61,21 +66,49 @@ async function openSocket(url: string, token: string): Promise<WebSocket> {
   return socket;
 }
 
+function remoteManifest(): PlanPackageManifest {
+  const manifest = basicManifest();
+  manifest.execution.defaultExecutor = "codex-acp";
+  manifest.executors = {
+    "codex-acp": {
+      adapter: "agent",
+      agent: "codex",
+      runner: { transport: "acp" }
+    }
+  };
+  return manifest;
+}
+
+async function createWsCoordination() {
+  const workspace = await createTestWorkspace(remoteManifest());
+  directories.push(workspace.home, workspace.root);
+  const dataDirectory = join(workspace.root, "server-data");
+  const database = await startPlanweaveServer({
+    dataDirectory,
+    databasePath: join(dataDirectory, "server.sqlite"),
+    busyTimeoutMs: 5000
+  });
+  databases.push(database);
+  const locator = { projectId: workspace.init.workspace.id, canvasId: "default" };
+  const registry = new RemoteRuntimePortRegistry();
+  registry.bind(locator, createRemoteBlockRuntimePort({ projectRoot: workspace.root }));
+  const coordination = createRemoteBlockCoordination(database.database, {
+    leaseDurationMs: 60_000,
+    hostOfflineAfterMs: 60_000,
+    runtimeResolver: registry,
+    inputArtifacts: {
+      materialize: async (candidate) => {
+        if (candidate.inputArtifacts.length > 0) throw new Error("unexpected_test_artifact");
+      }
+    },
+    artifactContent: { readReport: async () => new Uint8Array() }
+  });
+  return { database, coordination, locator };
+}
+
 describe("agent host WebSocket transport", () => {
   it("authenticates a host and replays unacknowledged mailbox messages", async () => {
-    const dataDirectory = await mkdtemp(join(tmpdir(), "planweave-ws-"));
-    directories.push(dataDirectory);
-    const database = await startPlanweaveServer({
-      dataDirectory,
-      databasePath: join(dataDirectory, "server.sqlite"),
-      busyTimeoutMs: 5000
-    });
-    databases.push(database);
-    const coordination = createDistributedCoordination(database.database, {
-      leaseDurationMs: 60_000,
-      hostOfflineAfterMs: 60_000,
-      writeback: { complete: async () => {}, fail: async () => {} }
-    });
+    const { coordination, locator } = await createWsCoordination();
     const registration = coordination.hosts.register("Remote Linux Host");
 
     const httpServer = createServer();
@@ -102,20 +135,22 @@ describe("agent host WebSocket transport", () => {
         type: "host.hello",
         protocolVersion: 1,
         lastAcknowledgedSequence: 0,
-        lastObservedAcpCursor: 0,
-        capabilities: ["linux", "node-22"],
+        capabilities: ["acp.codex"],
         capacity: 1
       })
     );
     await expect(firstEvents.next()).resolves.toMatchObject({ type: "host.welcome" });
 
-    const dispatch = coordination.dispatches.dispatchBlock({
-      packageRef: "package://project-ws/v1",
-      envelope: executionEnvelopeFor("T-001#B-001", ["linux"], "project-ws")
+    const outcome = await coordination.coordinator.dispatch({
+      ...locator,
+      blockRef: "T-001#B-001",
+      idempotencyKey: "ws-replay"
     });
+    const dispatch = coordination.dispatches.getRequired(outcome.operation.dispatchId);
     const firstDelivery = await firstEvents.next();
     expect(firstDelivery).toMatchObject({
       type: "mailbox.message",
+      previousSequence: 0,
       command: { type: "execute_block", dispatchId: dispatch.id }
     });
     if (firstDelivery.type !== "mailbox.message") throw new Error("Expected mailbox message.");
@@ -129,8 +164,7 @@ describe("agent host WebSocket transport", () => {
         type: "host.hello",
         protocolVersion: 1,
         lastAcknowledgedSequence: 0,
-        lastObservedAcpCursor: 0,
-        capabilities: ["linux", "node-22"],
+        capabilities: ["acp.codex"],
         capacity: 1
       })
     );
@@ -138,6 +172,7 @@ describe("agent host WebSocket transport", () => {
     await expect(secondEvents.next()).resolves.toMatchObject({
       type: "mailbox.message",
       sequence: firstDelivery.sequence,
+      previousSequence: 0,
       messageId: firstDelivery.messageId
     });
 
@@ -160,19 +195,7 @@ describe("agent host WebSocket transport", () => {
   });
 
   it("persists interruption before ACK and rejects unsupported live events without ACK", async () => {
-    const dataDirectory = await mkdtemp(join(tmpdir(), "planweave-ws-interruption-"));
-    directories.push(dataDirectory);
-    const database = await startPlanweaveServer({
-      dataDirectory,
-      databasePath: join(dataDirectory, "server.sqlite"),
-      busyTimeoutMs: 5000
-    });
-    databases.push(database);
-    const coordination = createDistributedCoordination(database.database, {
-      leaseDurationMs: 60_000,
-      hostOfflineAfterMs: 60_000,
-      writeback: { complete: async () => {}, fail: async () => {} }
-    });
+    const { database, coordination, locator } = await createWsCoordination();
     const registration = coordination.hosts.register("Interruption Host");
     const httpServer = createServer();
     httpServers.push(httpServer);
@@ -200,16 +223,17 @@ describe("agent host WebSocket transport", () => {
         type: "host.hello",
         protocolVersion: 1,
         lastAcknowledgedSequence: 0,
-        lastObservedAcpCursor: 0,
-        capabilities: ["linux"],
+        capabilities: ["acp.codex"],
         capacity: 1
       })
     );
     await expect(events.next()).resolves.toMatchObject({ type: "host.welcome" });
-    const dispatch = coordination.dispatches.dispatchBlock({
-      packageRef: "package://project-ws/interruption",
-      envelope: executionEnvelopeFor("T-001#B-002", ["linux"], "project-ws")
+    const outcome = await coordination.coordinator.dispatch({
+      ...locator,
+      blockRef: "T-001#B-001",
+      idempotencyKey: "ws-interruption"
     });
+    const dispatch = coordination.dispatches.getRequired(outcome.operation.dispatchId);
     await expect(events.next()).resolves.toMatchObject({ type: "mailbox.message" });
     socket.send(
       JSON.stringify({
@@ -259,6 +283,44 @@ describe("agent host WebSocket transport", () => {
         .get(dispatch.id)?.type
     ).toBe("dispatch.interrupted");
 
+    const rawDiagnostic = `/Users/private/server.sqlite token=server-secret-value ${"x".repeat(20_000)}`;
+    vi.spyOn(coordination.dispatches, "recordProgress").mockImplementationOnce(() => {
+      throw new Error(rawDiagnostic);
+    });
+    socket.send(
+      JSON.stringify({
+        type: "dispatch.progress",
+        protocolVersion: 1,
+        messageId: "adversarial-progress",
+        dispatchId: dispatch.id,
+        leaseId: dispatch.leaseId,
+        executionAttemptId: dispatch.executionAttemptId,
+        percent: 50
+      })
+    );
+    const rejection = await events.next();
+    expect(rejection).toEqual({
+      type: "protocol.error",
+      protocolVersion: 1,
+      code: "event_rejected",
+      message: "The server rejected the host event."
+    });
+    expect(JSON.stringify(rejection)).not.toContain("server.sqlite");
+    expect(JSON.stringify(rejection)).not.toContain("server-secret-value");
+
+    socket.send(
+      JSON.stringify({
+        type: "host.heartbeat",
+        protocolVersion: 1,
+        messageId: "heartbeat-after-adversarial-error",
+        activeLeases: []
+      })
+    );
+    await expect(events.next()).resolves.toMatchObject({
+      type: "host.event_ack",
+      messageId: "heartbeat-after-adversarial-error"
+    });
+
     const unsupportedEvents = [
       {
         type: "lease.renew",
@@ -305,7 +367,8 @@ describe("agent host WebSocket transport", () => {
       );
       await expect(events.next()).resolves.toMatchObject({
         type: "protocol.error",
-        message: `host_event_unsupported:${unsupported.type}`
+        code: "event_rejected",
+        message: "The server rejected the host event."
       });
       const heartbeatMessageId = `heartbeat-after-rejection-${index}`;
       socket.send(

@@ -6,6 +6,9 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "planweave-agent-host": "./dist/bin.js"
+  },
   "files": [
     "dist"
   ],

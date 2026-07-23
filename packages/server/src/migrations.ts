@@ -303,7 +303,26 @@ CREATE INDEX idx_dispatch_artifact_links_provenance
   ON dispatch_artifact_links(dispatch_id,lease_id,execution_attempt_id,artifact_ref,purpose);
 `;
 
-const migration8 = "SELECT 1;";
+const migration9 = `
+ALTER TABLE agent_hosts ADD COLUMN credential_expires_at TEXT;
+
+CREATE TABLE agent_host_enrollment_grants (
+  code_hash TEXT PRIMARY KEY CHECK(length(code_hash)=64 AND code_hash NOT GLOB '*[^a-f0-9]*'),
+  expires_at TEXT NOT NULL,
+  credential_expires_at TEXT NOT NULL,
+  revoked_at TEXT,
+  used_at TEXT,
+  used_attempt_id TEXT,
+  used_request_hash TEXT CHECK(used_request_hash IS NULL OR length(used_request_hash)=64),
+  host_id TEXT REFERENCES agent_hosts(id),
+  created_at TEXT NOT NULL,
+  CHECK(
+    (used_at IS NULL AND used_attempt_id IS NULL AND used_request_hash IS NULL AND host_id IS NULL)
+    OR
+    (used_at IS NOT NULL AND used_attempt_id IS NOT NULL AND used_request_hash IS NOT NULL AND host_id IS NOT NULL)
+  )
+);
+`;
 
 const migration10 = `
 CREATE TABLE remote_operations (
@@ -433,6 +452,27 @@ CREATE TABLE remote_operation_candidates (
 );
 `;
 
+const migration12 = `
+ALTER TABLE mailbox_messages ADD COLUMN previous_sequence INTEGER NOT NULL DEFAULT 0;
+`;
+
+function backfillMailboxPredecessors(database: SqliteDatabase): void {
+  for (const row of database
+    .prepare("SELECT sequence,host_id FROM mailbox_messages ORDER BY sequence ASC")
+    .all()) {
+    const prior = database
+      .prepare(
+        "SELECT MAX(sequence) AS sequence FROM mailbox_messages WHERE host_id=? AND sequence<?"
+      )
+      .get(row.host_id, row.sequence);
+    database
+      .prepare("UPDATE mailbox_messages SET previous_sequence=? WHERE sequence=?")
+      .run(Number(prior?.sequence ?? 0), row.sequence);
+  }
+}
+
+const migration8 = "SELECT 1;";
+
 function tableExists(database: SqliteDatabase, table: string): boolean {
   return Boolean(
     database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)
@@ -532,8 +572,10 @@ const migrations: readonly Migration[] = [
     }
   },
   { version: 8, sql: migration8, before: validateArtifactMediaTypes },
+  { version: 9, sql: migration9 },
   { version: 10, sql: migration10, before: validateAgentHostsForReservations },
-  { version: 11, sql: migration11 }
+  { version: 11, sql: migration11 },
+  { version: 12, sql: migration12, after: backfillMailboxPredecessors }
 ];
 
 export function applyMigrations(database: SqliteDatabase): void {

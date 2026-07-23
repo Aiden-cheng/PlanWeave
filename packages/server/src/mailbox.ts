@@ -11,6 +11,7 @@ import type { SqliteDatabase } from "./sqlite.js";
 
 export type MailboxMessage = {
   sequence: number;
+  previousSequence: number;
   messageId: MailboxMessageId;
   hostId: string;
   command: MailboxCommand;
@@ -24,6 +25,7 @@ type MailboxListener = (message: MailboxMessage) => void;
 function toMessage(row: Record<string, unknown>): MailboxMessage {
   return {
     sequence: mailboxDeliveredSequenceSchema.parse(Number(row.sequence)),
+    previousSequence: Number(row.previous_sequence),
     messageId: mailboxMessageIdSchema.parse(String(row.message_id)),
     hostId: String(row.host_id),
     command: mailboxCommandSchema.parse(JSON.parse(String(row.command_json))),
@@ -45,13 +47,15 @@ export class DurableMailbox {
     const parsedCommand = mailboxCommandSchema.parse(command);
     const messageId = mailboxMessageIdSchema.parse(randomUUID());
     const createdAt = new Date().toISOString();
+    const previousSequence = this.lastSequence(hostId);
     const result = this.database
       .prepare(
-        "INSERT INTO mailbox_messages(message_id,host_id,command_json,created_at) VALUES (?,?,?,?)"
+        "INSERT INTO mailbox_messages(message_id,host_id,previous_sequence,command_json,created_at) VALUES (?,?,?,?,?)"
       )
-      .run(messageId, hostId, JSON.stringify(parsedCommand), createdAt);
+      .run(messageId, hostId, previousSequence, JSON.stringify(parsedCommand), createdAt);
     return {
       sequence: Number(result.lastInsertRowid),
+      previousSequence,
       messageId,
       hostId,
       command: parsedCommand,
@@ -80,15 +84,17 @@ export class DurableMailbox {
       return { message, created: false };
     }
     const createdAt = new Date().toISOString();
+    const previousSequence = this.lastSequence(hostId);
     const result = this.database
       .prepare(
-        "INSERT INTO mailbox_messages(message_id,host_id,command_json,created_at) VALUES (?,?,?,?)"
+        "INSERT INTO mailbox_messages(message_id,host_id,previous_sequence,command_json,created_at) VALUES (?,?,?,?,?)"
       )
-      .run(parsedMessageId, hostId, JSON.stringify(parsedCommand), createdAt);
+      .run(parsedMessageId, hostId, previousSequence, JSON.stringify(parsedCommand), createdAt);
     return {
       created: true,
       message: {
         sequence: Number(result.lastInsertRowid),
+        previousSequence,
         messageId: parsedMessageId,
         hostId,
         command: parsedCommand,
@@ -132,15 +138,20 @@ export class DurableMailbox {
   }
 
   private acknowledgeSequence(hostId: string, sequence: number): void {
-    const highest = this.database
-      .prepare("SELECT MAX(sequence) AS sequence FROM mailbox_messages WHERE host_id=?")
+    const target = this.database
+      .prepare("SELECT previous_sequence FROM mailbox_messages WHERE host_id=? AND sequence=?")
+      .get(hostId, sequence);
+    if (!target) throw new Error("mailbox_ack_beyond_highest_sequence");
+    const host = this.database
+      .prepare("SELECT last_acknowledged_sequence FROM agent_hosts WHERE id=?")
       .get(hostId);
-    const highestSequence = Number(highest?.sequence ?? 0);
-    if (sequence > highestSequence) throw new Error("mailbox_ack_beyond_highest_sequence");
+    const current = Number(host?.last_acknowledged_sequence ?? 0);
+    if (sequence <= current) return;
+    if (Number(target.previous_sequence) !== current) throw new Error("mailbox_ack_out_of_order");
     const acknowledgedAt = new Date().toISOString();
     this.database
       .prepare(
-        "UPDATE mailbox_messages SET acknowledged_at=COALESCE(acknowledged_at,?) WHERE host_id=? AND sequence<=?"
+        "UPDATE mailbox_messages SET acknowledged_at=COALESCE(acknowledged_at,?) WHERE host_id=? AND sequence=?"
       )
       .run(acknowledgedAt, hostId, sequence);
     this.database
@@ -150,6 +161,13 @@ export class DurableMailbox {
          WHERE id=? AND revoked_at IS NULL`
       )
       .run(sequence, hostId);
+  }
+
+  private lastSequence(hostId: string): number {
+    const row = this.database
+      .prepare("SELECT MAX(sequence) AS sequence FROM mailbox_messages WHERE host_id=?")
+      .get(hostId);
+    return Number(row?.sequence ?? 0);
   }
 
   subscribe(hostId: string, listener: MailboxListener): () => void {

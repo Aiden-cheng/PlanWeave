@@ -28,6 +28,7 @@ import { agentHostProtocolVersionSchema } from "./version.js";
 export const PROTOCOL_ERROR_MESSAGE_MAX_LENGTH = 4_096 as const;
 export const CANCEL_REASON_MAX_LENGTH = 4_096 as const;
 export const ACTIVE_LEASE_MAX_COUNT = 128 as const;
+export const hostCapacitySchema = z.number().int().min(1).max(128);
 
 const versionedSchema = z.object({ protocolVersion: agentHostProtocolVersionSchema }).strict();
 const durableHostEventSchema = versionedSchema.extend({ messageId: mailboxMessageIdSchema });
@@ -35,9 +36,8 @@ const durableHostEventSchema = versionedSchema.extend({ messageId: mailboxMessag
 export const hostHelloSchema = versionedSchema.extend({
   type: z.literal("host.hello"),
   lastAcknowledgedSequence: mailboxSequenceSchema,
-  lastObservedAcpCursor: z.number().int().nonnegative().safe(),
   capabilities: capabilitiesSchema,
-  capacity: z.number().int().min(1).max(128)
+  capacity: hostCapacitySchema
 });
 
 export const hostWelcomeSchema = versionedSchema.extend({
@@ -108,6 +108,7 @@ export const mailboxCommandSchema = z.discriminatedUnion("type", [
 export const mailboxDeliverySchema = versionedSchema.extend({
   type: z.literal("mailbox.message"),
   sequence: mailboxDeliveredSequenceSchema,
+  previousSequence: mailboxSequenceSchema,
   messageId: mailboxMessageIdSchema,
   command: mailboxCommandSchema
 });

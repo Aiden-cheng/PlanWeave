@@ -30,6 +30,7 @@ function executeMessage(sequence = 1) {
   return {
     ...exampleExecuteDelivery,
     sequence,
+    previousSequence: sequence - 1,
     messageId: `mailbox-${sequence}`,
     command: {
       ...exampleExecuteDelivery.command,
@@ -44,6 +45,7 @@ function cancelMessage(sequence = 2) {
     type: "mailbox.message" as const,
     protocolVersion: 1 as const,
     sequence,
+    previousSequence: sequence - 1,
     messageId: `mailbox-${sequence}`,
     command: {
       type: "cancel_execution" as const,
@@ -61,6 +63,7 @@ function unsupportedMessage(sequence: number, command: Record<string, unknown>) 
     type: "mailbox.message" as const,
     protocolVersion: 1 as const,
     sequence,
+    previousSequence: sequence - 1,
     messageId: `mailbox-${sequence}`,
     command
   };
@@ -72,6 +75,7 @@ describe("durable Agent Host state", () => {
     const received = state.receive(executeMessage());
     expect(received.stored).toBe(true);
     expect(state.pendingExecutions(1)).toHaveLength(1);
+    expect(state.recoverableExecutionCount()).toBe(1);
     expect(state.lastAcknowledgedSequence()).toBe(0);
     expect(state.pendingEvents()).toContainEqual(received.acknowledgement);
 
@@ -96,6 +100,67 @@ describe("durable Agent Host state", () => {
     expect(() => state.receive({ ...message, messageId: "mailbox-conflict" })).toThrowError(
       "mailbox_message_conflict"
     );
+  });
+
+  it("bounds pending durable commands while still accepting an identical replay", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "planweave-agent-host-state-bounded-"));
+    directories.push(directory);
+    const state = await openAgentHostState(join(directory, "host.sqlite"), 5_000, {
+      maxPendingCommands: 1
+    });
+    states.push(state);
+    const message = executeMessage(1);
+    const first = state.receive(message);
+
+    expect(state.receive(message)).toEqual({
+      stored: false,
+      acknowledgement: first.acknowledgement
+    });
+    expect(() => state.receive(executeMessage(2))).toThrow(
+      "agent_host_pending_command_capacity_exceeded"
+    );
+    expect(state.pendingExecutions(2)).toHaveLength(1);
+  });
+
+  it("rejects a mailbox delivery whose per-host predecessor is not durable", async () => {
+    const { state } = await setup();
+    expect(() => state.receive({ ...executeMessage(2), previousSequence: 1 })).toThrow(
+      "mailbox_message_out_of_order"
+    );
+    expect(state.pendingExecutions(1)).toEqual([]);
+    expect(state.pendingEvents()).toEqual([]);
+  });
+
+  it("bounds durable outbound events without committing a partial state transition", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "planweave-agent-host-state-outbox-"));
+    directories.push(directory);
+    const state = await openAgentHostState(join(directory, "host.sqlite"), 5_000, {
+      maxPendingEvents: 1
+    });
+    states.push(state);
+    const received = state.receive(executeMessage());
+
+    expect(state.pendingEventCount()).toBe(1);
+    expect(() => state.startExecution(1)).toThrow("agent_host_pending_event_capacity_exceeded");
+    expect(state.pendingExecutions(1)[0]?.status).toBe("pending");
+
+    state.acknowledgeEvent(received.acknowledgement.messageId);
+    expect(state.pendingEventCount()).toBe(0);
+    expect(state.startExecution(1)?.status).toBe("running");
+  });
+
+  it("keeps at most one durable heartbeat pending until the server acknowledges it", async () => {
+    const { state } = await setup();
+    const first = state.queueHeartbeat([]);
+    const replay = state.queueHeartbeat([]);
+
+    expect(replay).toEqual(first);
+    expect(state.pendingEvents()).toEqual([first]);
+
+    state.acknowledgeEvent(first.messageId);
+    const next = state.queueHeartbeat([]);
+    expect(next.messageId).not.toBe(first.messageId);
+    expect(state.pendingEvents()).toEqual([next]);
   });
 
   it("rejects a stale envelope digest before persistence or acknowledgement", async () => {
