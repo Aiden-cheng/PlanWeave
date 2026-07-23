@@ -27,6 +27,23 @@ export {
   setAgentProcessEnvironmentOverlay
 } from "./process/agentProcessEnv.js";
 export type { AgentProcessPathOptions } from "./process/agentProcessEnv.js";
+export {
+  availableExecutionHostEnvironmentVariables,
+  decodeCommandOutput,
+  listWslDistributions,
+  mapWindowsPathToWsl,
+  prepareExecutionHostInvocation,
+  prepareWslProcessInvocation,
+  readWslLoginPath
+} from "./process/wslExecutionHost.js";
+export type {
+  PreparedExecutionHostInvocation,
+  PreparedWslProcessInvocation,
+  WslCommandOutput,
+  WslCommandRunner,
+  WslDistributionsResult,
+  WslExecutionOptions
+} from "./process/wslExecutionHost.js";
 export { readProjectPaths, resolvePlanweaveHome } from "./paths.js";
 export { readGlobalPrompt, updateGlobalPrompt } from "./globalPrompt.js";
 export { createManagedProjectId, createProjectId } from "./projectId.js";
@@ -779,11 +796,16 @@ export {
   executorIntegration,
   executorIntegrationSchema,
   executorIntegrations,
+  executionHostSchema,
+  executorProfileExecutionHost,
   executorProfileAdapterSchema,
   executorProfileSchema,
   executorRuntimeLimitsSchema,
+  nativeExecutionHost,
+  nativeExecutionHostSchema,
   reviewTriggerConditions,
   runnerTransportSchema,
+  wslExecutionHostSchema,
   runSubmitStatuses,
   reviewStatuses
 } from "./types.js";

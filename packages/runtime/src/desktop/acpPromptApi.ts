@@ -32,6 +32,8 @@ import { parseBlockRef } from "../graph/compileTaskGraph.js";
 import { loadPackage } from "../package/loadPackage.js";
 import {
   agentFamilySchema,
+  executionHostSchema,
+  executorProfileExecutionHost,
   type AgentExecutorProfile,
   type ExecutorProfile,
   type ProjectWorkspace
@@ -50,6 +52,7 @@ const acpPromptMetadataBaseSchema = z
     agentId: agentFamilySchema,
     runnerKind: z.literal("acp"),
     executor: z.string().min(1).max(256),
+    executionHost: executionHostSchema.optional(),
     runSessionId: runSessionIdSchema.nullable().optional(),
     desktopRunId: desktopRunIdSchema.nullable().optional()
   })
@@ -396,12 +399,19 @@ export async function continueAcpPrompt(options: {
   const launch = requireAcpLaunch(definition);
   const { manifest } = await loadPackage(options.workspace);
   const profile = resolveAcpPromptProfile(manifest.executors, options.context.metadata);
+  const persistedHost = options.context.metadata.executionHost ?? { kind: "native" };
+  if (JSON.stringify(executorProfileExecutionHost(profile)) !== JSON.stringify(persistedHost)) {
+    throw new Error(
+      "ACP conversation continuation execution host no longer matches the source run."
+    );
+  }
   await acpConversationTurns.send({
     key: options.context.runDir,
     cwd: workspaceExecutionCwd(options.workspace),
     sessionId: options.context.metadata.sessionId,
     agentId: options.context.metadata.agentId,
     launch: { command: launch.command, args: launch.args },
+    host: persistedHost,
     authenticationHints: definition.acp.authentication,
     text: options.text,
     timeoutMs: profile.timeoutMs ?? DEFAULT_EXECUTOR_TIMEOUT_MS,

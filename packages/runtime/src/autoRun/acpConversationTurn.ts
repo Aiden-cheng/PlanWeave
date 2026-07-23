@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { SessionNotification } from "@agentclientprotocol/sdk";
-import type { AgentFamily } from "../types.js";
+import type { AgentFamily, ExecutionHost } from "../types.js";
 import {
   createAcpConnection,
   type AcpConnection,
@@ -21,6 +21,10 @@ import {
 } from "./normalizedEventContract.js";
 import { acpCorrelationSchema } from "./runnerContractSchemas.js";
 import { redactAcpProtocolPayload, redactRunnerEventText } from "./runnerEventRedaction.js";
+import {
+  availableExecutionHostEnvironmentVariables,
+  prepareExecutionHostInvocation
+} from "../process/wslExecutionHost.js";
 
 export type AcpConversationTurnConnection = Pick<
   AcpConnection,
@@ -31,7 +35,9 @@ export type AcpConversationTurnConnectionOptions = Pick<
   CreateAcpConnectionOptions,
   | "launch"
   | "cwd"
+  | "spawnCwd"
   | "env"
+  | "decorateProcessTree"
   | "clientInfo"
   | "onSessionUpdate"
   | "onPermissionRequest"
@@ -46,6 +52,7 @@ export type AcpConversationTurnInput = {
   sessionId: string;
   agentId: AgentFamily;
   launch: { command: string; args: readonly string[] };
+  host?: ExecutionHost;
   authenticationHints?: AcpAuthenticationHints;
   text: string;
   timeoutMs: number;
@@ -116,10 +123,24 @@ export class AcpConversationTurnCoordinator {
       await this.notify(input.key);
     };
     const spawnEnvironment = environment();
-    const connection = this.connect({
-      launch: { trusted: true, ...input.launch },
+    const executionHost = input.host ?? { kind: "native" };
+    const preparedLaunch = await prepareExecutionHostInvocation({
+      host: executionHost,
+      command: input.launch.command,
+      args: input.launch.args,
       cwd: input.cwd,
+      env: spawnEnvironment
+    });
+    const connection = this.connect({
+      launch: {
+        trusted: true,
+        command: preparedLaunch.command,
+        args: preparedLaunch.args
+      },
+      cwd: input.cwd,
+      spawnCwd: preparedLaunch.spawnCwd ?? null,
       env: spawnEnvironment,
+      decorateProcessTree: preparedLaunch.decorateProcessTree,
       clientInfo: { name: "planweave", version: "1" },
       onSessionUpdate: async (notification: SessionNotification) => {
         if (!persistNotifications || notification.sessionId !== input.sessionId) return;
@@ -149,7 +170,10 @@ export class AcpConversationTurnCoordinator {
         connection,
         initialized,
         hints: input.authenticationHints,
-        availableEnvironmentVariables: new Set(Object.keys(spawnEnvironment))
+        availableEnvironmentVariables: availableExecutionHostEnvironmentVariables(
+          executionHost,
+          spawnEnvironment
+        )
       });
       if (
         authenticationOutcome.kind === "auth_required" &&
@@ -165,7 +189,7 @@ export class AcpConversationTurnCoordinator {
       try {
         await connection.loadSession({
           sessionId: input.sessionId,
-          cwd: input.cwd,
+          cwd: preparedLaunch.sessionCwd,
           mcpServers: []
         });
       } catch (error) {

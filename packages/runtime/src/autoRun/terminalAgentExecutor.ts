@@ -8,6 +8,7 @@ import type {
   ExecutorIntegrationName,
   PackageWorkspaceRef
 } from "../types.js";
+import { executorProfileExecutionHost } from "../types.js";
 import type { CliProcessExecutor } from "./cliProcess.js";
 import {
   executorLimitFailureMessage,
@@ -43,6 +44,8 @@ export type TerminalAgentInvocation = {
   command: string;
   args: string[];
   stdin: string;
+  /** Argument indexes containing host paths that must be mapped for non-native hosts. */
+  pathArgIndexes?: readonly number[];
   /** Session id known before launch (e.g. OpenCode `-s`). */
   sessionId?: string | null;
   /** Protocol-specific flag (e.g. OpenCode JSON event mode). */
@@ -259,11 +262,13 @@ export async function runTerminalAgentProtocolBlock<TProfile extends ProfileWith
     workspace,
     reviewContract ? reviewResultEnvironment(reviewContract) : undefined
   );
+  const executionHost = executorProfileExecutionHost(options.profile);
   const { tmux: _tmux, ...result } = await finalizeExecutorCancellationOnError({
     path: run.metadataPath,
     patch: {
       command: invocation.command,
       args: invocation.args,
+      executionHost,
       projectRoot: workspace.rootPath,
       executionCwd,
       timeoutMs: limits.timeoutMs,
@@ -277,6 +282,8 @@ export async function runTerminalAgentProtocolBlock<TProfile extends ProfileWith
         cwd: executionCwd,
         stdin: invocation.stdin,
         env,
+        host: executionHost,
+        pathArgIndexes: invocation.pathArgIndexes,
         limits,
         stdoutPath: join(run.runDir, "stdout.md"),
         stderrPath: join(run.runDir, "stderr.log"),
@@ -318,6 +325,7 @@ export async function runTerminalAgentProtocolBlock<TProfile extends ProfileWith
       patch: {
         command: resumeInvocation.command,
         args: resumeInvocation.args,
+        executionHost,
         projectRoot: workspace.rootPath,
         executionCwd,
         timeoutMs: limits.timeoutMs,
@@ -332,6 +340,8 @@ export async function runTerminalAgentProtocolBlock<TProfile extends ProfileWith
           cwd: executionCwd,
           stdin: resumeInvocation.stdin,
           env,
+          host: executionHost,
+          pathArgIndexes: resumeInvocation.pathArgIndexes,
           limits,
           stdoutPath: join(run.runDir, "resume-stdout.md"),
           stderrPath: join(run.runDir, "resume-stderr.log"),
@@ -566,6 +576,7 @@ export async function runTerminalAgentProtocolFeedback<TProfile extends ProfileW
     executionCwd: options.executionCwd
   });
   const limits = executorRuntimeLimits(options.profile);
+  const executionHost = executorProfileExecutionHost(options.profile);
   await writeJsonFile(metadataPath, {
     runId,
     feedbackId: options.claim.feedbackId,
@@ -575,6 +586,7 @@ export async function runTerminalAgentProtocolFeedback<TProfile extends ProfileW
     adapter: protocol.adapter,
     agentId: options.profile.agent,
     runnerKind: options.profile.runner.transport,
+    executionHost,
     projectRoot: options.projectRoot,
     executionCwd: options.executionCwd,
     startedAt,
@@ -620,6 +632,8 @@ export async function runTerminalAgentProtocolFeedback<TProfile extends ProfileW
         cwd: options.executionCwd,
         stdin: invocation.stdin,
         env: workspaceExecutorEnv({ planweaveHome: options.planweaveHome }),
+        host: executionHost,
+        pathArgIndexes: invocation.pathArgIndexes,
         limits,
         stdoutPath: join(runDir, "stdout.md"),
         stderrPath: join(runDir, "stderr.log"),

@@ -425,7 +425,11 @@ describe("DesktopSettingsStore", () => {
     const store = testStore(join(home, "config", "desktop-settings.json"));
 
     await expect(store.read()).resolves.toMatchObject({
-      execution: { tmuxMonitoring: true, agentTransport: "acp" }
+      execution: {
+        tmuxMonitoring: true,
+        agentTransport: "acp",
+        agentHost: { kind: "native" }
+      }
     });
 
     const patched = await store.mergePatch({ execution: { agentTransport: "cli" } });
@@ -439,7 +443,29 @@ describe("DesktopSettingsStore", () => {
       JSON.stringify({ execution: { tmuxMonitoring: false, agentTransport: "invalid" } })
     );
     await expect(store.read()).resolves.toMatchObject({
-      execution: { tmuxMonitoring: false, agentTransport: "acp" }
+      execution: {
+        tmuxMonitoring: false,
+        agentTransport: "acp",
+        agentHost: { kind: "native" }
+      }
+    });
+  });
+
+  it("persists a trimmed WSL host and rejects incomplete host settings", async () => {
+    const home = await tempHome();
+    const store = testStore(join(home, "config", "desktop-settings.json"));
+
+    const patched = await store.mergePatch({
+      execution: { agentHost: { kind: "wsl", distribution: " Ubuntu " } }
+    });
+    expect(patched.execution.agentHost).toEqual({ kind: "wsl", distribution: "Ubuntu" });
+
+    await writeFile(
+      store.settingsFile,
+      JSON.stringify({ execution: { agentHost: { kind: "wsl", distribution: "  " } } })
+    );
+    await expect(store.read()).resolves.toMatchObject({
+      execution: { agentHost: { kind: "native" } }
     });
   });
 

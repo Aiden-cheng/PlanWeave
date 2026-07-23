@@ -139,8 +139,11 @@ export function createLocalAcpPromptSource(
 export async function executeLocalAcpAdapter(options: {
   readonly launch: { readonly command: string; readonly args: readonly string[] };
   readonly cwd: string;
+  readonly spawnCwd?: string | null;
+  readonly decorateProcessTree?: CreateAcpConnectionOptions["decorateProcessTree"];
   readonly agentId: string;
   readonly env: Readonly<Record<string, string>>;
+  readonly availableEnvironmentVariables?: ReadonlySet<string>;
   readonly prompt: string;
   readonly sessionStart: AcpSessionStart;
   readonly authenticationHints?: AcpAuthenticationHints;
@@ -171,7 +174,8 @@ export async function executeLocalAcpAdapter(options: {
       sessionLoadUnsupportedMessage: `ACP agent '${options.agentId}' no longer advertises session/load for recovery.`,
       authentication: planWeaveAcpExecutionAuthentication({
         hints: options.authenticationHints,
-        availableEnvironmentVariables: new Set(Object.keys(options.env))
+        availableEnvironmentVariables:
+          options.availableEnvironmentVariables ?? new Set(Object.keys(options.env))
       }),
       interactionBroker: options.interactionBroker,
       interactionDeadline: options.interactionDeadline,
@@ -187,6 +191,10 @@ export async function executeLocalAcpAdapter(options: {
         const connection = ownedConnection(
           options.connect({
             ...engineOptions,
+            ...(options.spawnCwd !== undefined ? { spawnCwd: options.spawnCwd } : {}),
+            ...(options.decorateProcessTree
+              ? { decorateProcessTree: options.decorateProcessTree }
+              : {}),
             ...options.connectionExtensions
           })
         );

@@ -3,6 +3,7 @@ import type {
   DesktopAgentDetection,
   DesktopCanvasReference,
   DesktopGraphViewModel,
+  DesktopWslEnvironment,
   ExecutorPreflightCheck,
   ExecutorPreflightResult
 } from "@planweave-ai/runtime";
@@ -23,6 +24,7 @@ import { buildExecutorOptionViews } from "../executors/executorOptionViewModel";
 import { useExecutorPreflight } from "../hooks/useExecutorPreflight";
 import type { createTranslator } from "../i18n";
 import type { DesktopSettingsUpdate, DesktopUiSettings } from "../types";
+import { bridge } from "../bridge";
 
 type SettingsAgentsSectionProps = {
   agentDetectionRefreshing: boolean;
@@ -119,6 +121,10 @@ export function SettingsAgentsSection({
   updateSettings
 }: SettingsAgentsSectionProps) {
   const selectedTransport = settings.execution.agentTransport;
+  const selectedHost = settings.execution.agentHost;
+  const [hostMode, setHostMode] = useState<"native" | "wsl">(selectedHost.kind);
+  const [hostSaving, setHostSaving] = useState(false);
+  const [wslEnvironment, setWslEnvironment] = useState<DesktopWslEnvironment | null>(null);
   const transportAgents = useMemo(
     () => agents.filter((agent) => agent.runnerKind === selectedTransport),
     [agents, selectedTransport]
@@ -142,7 +148,7 @@ export function SettingsAgentsSection({
   );
   const [transportSaving, setTransportSaving] = useState(false);
   const graphPreflightKey = graph
-    ? `${graph.graphVersion}:${graph.packageFingerprint}:${selectedTransport}`
+    ? `${graph.graphVersion}:${graph.packageFingerprint}:${selectedTransport}:${JSON.stringify(selectedHost)}`
     : null;
   const preflight = useExecutorPreflight({
     bridgeUnavailableMessage: t("bridgeUnavailable"),
@@ -158,6 +164,21 @@ export function SettingsAgentsSection({
   );
   const resultBadgeVariant = preflight.result?.ok ? "secondary" : "destructive";
   const selectedExecutorLabel = selectedExecutor || t("none");
+  useEffect(() => {
+    setHostMode(selectedHost.kind);
+  }, [selectedHost.kind]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!bridge || typeof bridge.detectWslEnvironment !== "function") {
+      return;
+    }
+    void bridge.detectWslEnvironment().then((result) => {
+      if (!cancelled) setWslEnvironment(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   useEffect(() => {
     if (
       selectedExecutor &&
@@ -176,6 +197,94 @@ export function SettingsAgentsSection({
         </h1>
         <p className="mt-1 text-sm text-text-muted">{t("settingsAgentsHint")}</p>
       </div>
+      {wslEnvironment?.supported ? (
+        <div className="rounded-lg border bg-card p-4" data-testid="agent-host-settings">
+          <label className="text-sm font-medium text-text-strong" htmlFor="agent-host-select">
+            {t("agentHost")}
+          </label>
+          <p className="mt-1 text-xs text-muted-foreground">{t("agentHostHint")}</p>
+          <Select
+            disabled={hostSaving}
+            value={hostMode}
+            onValueChange={(kind: "native" | "wsl") => {
+              setHostMode(kind);
+              if (kind === "wsl") return;
+              setHostSaving(true);
+              const save = persistSettings
+                ? persistSettings({ execution: { agentHost: { kind: "native" } } })
+                : Promise.resolve(
+                    updateSettings({ execution: { agentHost: { kind: "native" } } })
+                  );
+              void save
+                .then(() => refreshAgentDetections())
+                .finally(() => setHostSaving(false));
+            }}
+          >
+            <SelectTrigger className="mt-3 w-56" id="agent-host-select" aria-label={t("agentHost")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="native">{t("agentHostNative")}</SelectItem>
+                <SelectItem value="wsl" disabled={!wslEnvironment.available}>
+                  {t("agentHostWsl")}
+                </SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          {hostMode === "wsl" ? (
+            <div className="mt-4">
+              <label
+                className="text-sm font-medium text-text-strong"
+                htmlFor="agent-wsl-distribution-select"
+              >
+                {t("agentWslDistribution")}
+              </label>
+              <Select
+                disabled={hostSaving || !wslEnvironment.available}
+                value={selectedHost.kind === "wsl" ? selectedHost.distribution : undefined}
+                onValueChange={(distribution) => {
+                  setHostSaving(true);
+                  const save = persistSettings
+                    ? persistSettings({
+                        execution: { agentHost: { kind: "wsl", distribution } }
+                      })
+                    : Promise.resolve(
+                        updateSettings({
+                          execution: { agentHost: { kind: "wsl", distribution } }
+                        })
+                      );
+                  void save
+                    .then(() => refreshAgentDetections())
+                    .finally(() => setHostSaving(false));
+                }}
+              >
+                <SelectTrigger
+                  className="mt-2 w-72"
+                  id="agent-wsl-distribution-select"
+                  aria-label={t("agentWslDistribution")}
+                >
+                  <SelectValue placeholder={t("agentWslDistributionPlaceholder")} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {wslEnvironment.distributions.map((distribution) => (
+                      <SelectItem key={distribution} value={distribution}>
+                        {distribution}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
+          {!wslEnvironment.available && wslEnvironment.unavailableReason ? (
+            <p className="mt-3 text-xs text-destructive">
+              {t("agentWslUnavailable")}: {wslEnvironment.unavailableReason}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       <div className="rounded-lg border bg-card p-4">
         <label className="text-sm font-medium text-text-strong" htmlFor="agent-transport-select">
           {t("agentTransport")}

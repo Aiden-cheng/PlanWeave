@@ -30,6 +30,7 @@ import { selectedDesktopAcpSessionDefaults } from "./desktopAgentSettings.js";
 import { optionalStat } from "../fs/optionalFile.js";
 import { recordBlockRunInIndex } from "./blockRunIndex.js";
 import { acpRunRecoveryExecutionSchema, renderAcpRunRecoveryPrompt } from "./acpRunRecovery.js";
+import { executorProfileExecutionHost, type ExecutionHost } from "../types.js";
 
 function unavailableMessage(agent: string): string {
   return `ACP runner for agent '${agent}' is not implemented; PlanWeave will not fall back to CLI.`;
@@ -80,6 +81,7 @@ export type AcpPreflightProbeResult = z.infer<typeof acpProbeResultSchema>;
 export type AcpPreflightProbe = (options: {
   definition: Parameters<AcpAgentRunner["availability"]>[0];
   cwd: string;
+  host: ExecutionHost;
   signal: AbortSignal;
 }) => Promise<AcpPreflightProbeResult>;
 
@@ -186,7 +188,12 @@ export function createAcpRunner(options?: {
       }, timeoutMs);
       let rawResult: unknown;
       try {
-        rawResult = await probe({ definition, cwd, signal: controller.signal });
+        rawResult = await probe({
+          definition,
+          cwd,
+          host: executorProfileExecutionHost(profile),
+          signal: controller.signal
+        });
         if (controller.signal.aborted) {
           const cancelled = signal?.aborted === true;
           return {
@@ -370,11 +377,14 @@ export function createAcpRunner(options?: {
       const recovery = input.runtime?.acpRecovery
         ? acpRunRecoveryExecutionSchema.parse(input.runtime.acpRecovery)
         : null;
+      const executionHost = executorProfileExecutionHost(input.profile);
       if (
         recovery &&
         (recovery.claimRef !== input.claim.ref ||
           recovery.agentId !== definition.agent ||
           recovery.executorProfile !== input.executorName ||
+          JSON.stringify(recovery.executionHost ?? { kind: "native" }) !==
+            JSON.stringify(executionHost) ||
           recovery.launch.command !== launch.command ||
           recovery.launch.args.length !== launch.args.length ||
           !recovery.launch.args.every((argument, index) => argument === launch.args[index]))
@@ -412,6 +422,7 @@ export function createAcpRunner(options?: {
             prompt,
             cwd: prepared.cwd,
             launch,
+            host: executionHost,
             authenticationHints: definition.acp.authentication,
             executorName: input.executorName,
             agentId: definition.agent,
@@ -476,6 +487,7 @@ export function createAcpRunner(options?: {
           prompt: input.claim.content,
           cwd: prepared.cwd,
           launch,
+          host: executorProfileExecutionHost(input.profile),
           authenticationHints: definition.acp.authentication,
           executorName: input.executorName,
           agentId: definition.agent,

@@ -8,7 +8,7 @@ import type {
   TerminalOutputResponse
 } from "@agentclientprotocol/sdk";
 import { RequestError } from "@agentclientprotocol/sdk";
-import type { AgentFamily, ExecutorAdapterResult } from "../types.js";
+import type { AgentFamily, ExecutionHost, ExecutorAdapterResult } from "../types.js";
 import {
   AcpOperationTimeoutError,
   DEFAULT_ACP_OPERATION_TIMEOUT_MS,
@@ -72,6 +72,10 @@ import { createLocalAcpPromptSource, executeLocalAcpAdapter } from "./acpLocalEx
 import type { AcpEngineLifecycleEvent } from "./acpExecutionEngineContracts.js";
 import { createLocalAcpInteractionBroker } from "./acpLocalInteractionBroker.js";
 import { createLocalAcpActiveRunHandle } from "./acpLocalActiveRunHandle.js";
+import {
+  availableExecutionHostEnvironmentVariables,
+  prepareExecutionHostInvocation
+} from "../process/wslExecutionHost.js";
 
 export { applyDesktopAcpSessionDefaults } from "./acpSessionDefaults.js";
 
@@ -84,6 +88,7 @@ export type AcpSessionRun = {
   prompt: string;
   cwd: string;
   launch: { command: string; args: readonly string[] };
+  host?: ExecutionHost;
   authenticationHints?: AcpAuthenticationHints;
   executorName: string;
   agentId: AgentFamily;
@@ -149,6 +154,7 @@ export class AcpSessionController {
     const ownerGeneration = 1;
     const ownerWriteFence = new AcpOwnerWriteFence(run.runDir, ownerLeaseId, ownerGeneration);
     const sessionStart = acpSessionStartSchema.parse(run.sessionStart ?? { kind: "new" });
+    const executionHost = run.host ?? { kind: "native" };
     let output = "";
     let executionPhase: "connecting" | "session" | "prompt" | "artifact" | "cleanup" = "connecting";
     let initializedCapabilities: AgentCapabilities | undefined;
@@ -221,6 +227,7 @@ export class AcpSessionController {
         executor: run.executorName,
         agentId: run.agentId,
         runnerKind: "acp",
+        executionHost,
         executorProfile: run.executorName,
         acpLaunch: run.launch,
         recovery: sessionStart.kind === "load" ? sessionStart.recovery : null,
@@ -331,6 +338,13 @@ export class AcpSessionController {
         }
       };
       const spawnEnvironment = environment();
+      const preparedLaunch = await prepareExecutionHostInvocation({
+        host: executionHost,
+        command: run.launch.command,
+        args: run.launch.args,
+        cwd: run.cwd,
+        env: spawnEnvironment
+      });
       const permissionHandler = createPersistentAcpPermissionHandler({
         runDir: run.runDir,
         identity: {
@@ -660,8 +674,14 @@ export class AcpSessionController {
         }
       };
       const engineResult = await executeLocalAcpAdapter({
-        launch: run.launch,
-        cwd: run.cwd,
+        launch: { command: preparedLaunch.command, args: preparedLaunch.args },
+        cwd: preparedLaunch.sessionCwd,
+        spawnCwd: preparedLaunch.spawnCwd ?? null,
+        decorateProcessTree: preparedLaunch.decorateProcessTree,
+        availableEnvironmentVariables: availableExecutionHostEnvironmentVariables(
+          executionHost,
+          spawnEnvironment
+        ),
         agentId: run.agentId,
         env: spawnEnvironment,
         prompt: agentPrompt,

@@ -5,10 +5,15 @@ import { isAbsolute, join } from "node:path";
 import {
   agentProcessEnv,
   agentProcessPath,
+  listWslDistributions,
+  readWslLoginPath,
   resolveWindowsProcessInvocation,
   type DesktopAgentDetection,
-  type DesktopAgentToolProfile
+  type DesktopAgentToolProfile,
+  type DesktopWslEnvironment,
+  type ExecutionHost
 } from "@planweave-ai/runtime";
+import { DesktopSettingsStore } from "./desktopSettingsStore.js";
 
 const agentVersionDetectionTimeoutMs = 5_000;
 const agentAcpDetectionTimeoutMs = 15_000;
@@ -206,6 +211,43 @@ async function runAgentProbe(
   });
 }
 
+async function runWslAgentProbe(
+  profile: DesktopAgentToolProfile,
+  executionHost: Extract<ExecutionHost, { kind: "wsl" }>,
+  loginPath: string
+): Promise<{ stdout: string; stderr: string }> {
+  const probeArgs =
+    profile.versionArgs.length === 0
+      ? [
+          "--distribution",
+          executionHost.distribution,
+          "--exec",
+          "env",
+          `PATH=${loginPath}`,
+          "sh",
+          "-c",
+          'command -v -- "$1" >/dev/null',
+          "planweave-wsl-detect",
+          profile.command
+        ]
+      : [
+          "--distribution",
+          executionHost.distribution,
+          "--exec",
+          "env",
+          `PATH=${loginPath}`,
+          profile.command,
+          ...profile.versionArgs
+        ];
+  return execFileText("wsl.exe", probeArgs, {
+    env: agentDetectionEnv({ platform: "win32" }),
+    timeout:
+      profile.runnerKind === "acp" ? agentAcpDetectionTimeoutMs : agentVersionDetectionTimeoutMs,
+    maxBuffer: 64 * 1024,
+    windowsHide: true
+  });
+}
+
 function missingExecutableReason(profile: DesktopAgentToolProfile): string {
   const missing = `Command '${profile.command}' was not found on PATH.`;
   if (profile.installCommand) {
@@ -216,14 +258,47 @@ function missingExecutableReason(profile: DesktopAgentToolProfile): string {
 
 async function detectAgent(
   profile: DesktopAgentToolProfile,
-  platform: NodeJS.Platform = process.platform
+  platform: NodeJS.Platform = process.platform,
+  executionHost: ExecutionHost = { kind: "native" },
+  wslLoginPath?: string
 ): Promise<DesktopAgentDetection> {
   const env = agentDetectionEnv({ platform });
   try {
+    if (executionHost.kind === "wsl") {
+      if (platform !== "win32") {
+        throw new Error("WSL execution host is only available on Windows.");
+      }
+      if (!wslLoginPath) {
+        throw new Error(
+          `Login-shell PATH is unavailable in WSL distribution '${executionHost.distribution}'.`
+        );
+      }
+      const { stdout, stderr } = await runWslAgentProbe(
+        {
+          ...profile,
+          versionArgs:
+            profile.versionArgs.length === 0 ? [] : profile.versionArgs
+        },
+        executionHost,
+        wslLoginPath
+      );
+      const version = `${stdout}${stderr}`.trim().split(/\r?\n/)[0] ?? "";
+      return {
+        ...profile,
+        executionHost,
+        installed: true,
+        version:
+          profile.versionArgs.length === 0 || profile.reportsVersion === false
+            ? null
+            : version || null,
+        unavailableReason: null
+      };
+    }
     if (profile.versionArgs.length === 0) {
       const installed = await executableAvailable(profile.command, env, platform);
       return {
         ...profile,
+        executionHost,
         installed,
         version: null,
         unavailableReason: installed ? null : missingExecutableReason(profile)
@@ -245,6 +320,7 @@ async function detectAgent(
     const version = `${stdout}${stderr}`.trim().split(/\r?\n/)[0] ?? "";
     return {
       ...profile,
+      executionHost,
       installed: true,
       version: profile.reportsVersion === false ? null : version || null,
       unavailableReason: null
@@ -255,6 +331,7 @@ async function detectAgent(
       /not found|ENOENT|was not found/i.test(message) || message.includes(profile.command);
     return {
       ...profile,
+      executionHost,
       installed: false,
       version: null,
       unavailableReason:
@@ -263,8 +340,64 @@ async function detectAgent(
   }
 }
 
-export async function detectAgentTools(
+export async function detectWslEnvironment(
   platform: NodeJS.Platform = process.platform
+): Promise<DesktopWslEnvironment> {
+  if (platform !== "win32") {
+    return {
+      supported: false,
+      available: false,
+      distributions: [],
+      unavailableReason: "WSL is only available on Windows."
+    };
+  }
+  const result = await listWslDistributions({ platform });
+  return { supported: true, ...result };
+}
+
+export async function detectAgentTools(
+  platform: NodeJS.Platform = process.platform,
+  hostOverride?: ExecutionHost
 ): Promise<DesktopAgentDetection[]> {
-  return Promise.all(agentProfiles.map((profile) => detectAgent(profile, platform)));
+  const executionHost =
+    hostOverride ?? (await new DesktopSettingsStore({ platform }).read()).execution.agentHost;
+  if (executionHost.kind === "native") {
+    return Promise.all(
+      agentProfiles.map((profile) => detectAgent(profile, platform, executionHost))
+    );
+  }
+  if (platform !== "win32") {
+    return Promise.all(
+      agentProfiles.map((profile) => detectAgent(profile, platform, executionHost))
+    );
+  }
+  const environment = await detectWslEnvironment(platform);
+  if (!environment.available || !environment.distributions.includes(executionHost.distribution)) {
+    const reason = environment.distributions.includes(executionHost.distribution)
+      ? environment.unavailableReason
+      : `WSL distribution '${executionHost.distribution}' is not installed.`;
+    return agentProfiles.map((profile) => ({
+      ...profile,
+      executionHost,
+      installed: false,
+      version: null,
+      unavailableReason: reason
+    }));
+  }
+  let loginPath: string;
+  try {
+    loginPath = await readWslLoginPath(executionHost.distribution, { platform });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return agentProfiles.map((profile) => ({
+      ...profile,
+      executionHost,
+      installed: false,
+      version: null,
+      unavailableReason: reason
+    }));
+  }
+  return Promise.all(
+    agentProfiles.map((profile) => detectAgent(profile, platform, executionHost, loginPath))
+  );
 }

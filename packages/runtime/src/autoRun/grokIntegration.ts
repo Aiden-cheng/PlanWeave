@@ -15,6 +15,7 @@ const grokProtocol: ProtocolAdapter<GrokExecExecutorProfile> = {
     return {
       command: profile.command,
       args: [...profile.args, promptPath],
+      pathArgIndexes: [profile.args.length],
       stdin: ""
     };
   }

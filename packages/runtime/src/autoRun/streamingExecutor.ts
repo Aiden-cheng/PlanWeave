@@ -1,5 +1,6 @@
 import { execWithStreaming, type ExecutorOutputLimitExceeded } from "./executorShared.js";
 import type { TmuxSessionInfo } from "./tmuxExecutor.js";
+import type { ExecutionHost } from "../types.js";
 
 export type StreamedCommandResult = {
   stdout: string;
@@ -35,6 +36,8 @@ export async function runStreamingCommandWithSessionCapture(options: {
   cwd: string;
   stdin: string;
   env?: NodeJS.ProcessEnv;
+  host?: ExecutionHost;
+  pathArgIndexes?: readonly number[];
   timeoutMs?: number;
   maxStdoutBytes?: number;
   maxStderrBytes?: number;
@@ -66,6 +69,8 @@ export async function runStreamingCommandWithSessionCapture(options: {
     cwd: options.cwd,
     stdin: options.stdin,
     env: options.env,
+    host: options.host,
+    pathArgIndexes: options.pathArgIndexes,
     stdoutPath: options.stdoutPath,
     stderrPath: options.stderrPath,
     timeoutMs: options.timeoutMs,

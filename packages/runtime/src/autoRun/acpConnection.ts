@@ -121,7 +121,10 @@ export type AcpConnection = {
 export type CreateAcpConnectionOptions = {
   launch: TrustedAcpLaunch;
   cwd: string;
+  /** Native process cwd. null deliberately omits cwd (used by WSL host adapters). */
+  spawnCwd?: string | null;
   env: Readonly<Record<string, string>>;
+  decorateProcessTree?: (tree: ManagedProcessTree) => ManagedProcessTree;
   clientInfo: { name: string; version: string };
   clientCapabilities?: Parameters<ClientSideConnection["initialize"]>[0]["clientCapabilities"];
   onSessionUpdate?: (notification: SessionNotification) => void | Promise<void>;
@@ -152,6 +155,9 @@ function validateSpawnOptions(options: CreateAcpConnectionOptions): void {
     throw new Error("ACP command is missing or invalid.");
   }
   if (!isAbsolute(options.cwd)) throw new Error("ACP cwd must be an absolute path.");
+  if (typeof options.spawnCwd === "string" && !isAbsolute(options.spawnCwd)) {
+    throw new Error("ACP spawn cwd must be an absolute path.");
+  }
   for (const argument of options.launch.args) {
     if (argument.includes("\0")) throw new Error("ACP command argument contains a null byte.");
   }
@@ -225,12 +231,12 @@ class SubprocessAcpConnection implements AcpConnection {
     const managed = spawnManagedProcess({
       command: options.launch.command,
       args: options.launch.args,
-      cwd: options.cwd,
+      cwd: options.spawnCwd === null ? undefined : (options.spawnCwd ?? options.cwd),
       env: { ...options.env },
       graceMs: options.shutdownGraceMs ?? DEFAULT_SHUTDOWN_GRACE_MS
     });
     this.process = managed.child;
-    this.processTree = managed.tree;
+    this.processTree = options.decorateProcessTree?.(managed.tree) ?? managed.tree;
     this.process.stderr.setEncoding("utf8");
     this.process.stderr.on("data", (chunk: string) => {
       const maxBytes = options.maxStderrBytes ?? DEFAULT_ACP_STDERR_MAX_BYTES;

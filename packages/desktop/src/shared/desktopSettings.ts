@@ -1,9 +1,10 @@
-import type { BlockType, DesktopAgentKind } from "@planweave-ai/runtime";
+import type { BlockType, DesktopAgentKind, ExecutionHost } from "@planweave-ai/runtime";
 import { z } from "zod";
 
 export type AppearanceMode = "system" | "light" | "dark";
 export type DesktopSettingsLanguage = "system" | "en" | "zh-CN";
 export type DesktopAgentTransport = "cli" | "acp";
+export type DesktopAgentHost = ExecutionHost;
 export type PaletteComponentKey = "task" | "implementation" | "review";
 export type FloatingControlPosition = { left: number; top: number };
 export type DesktopAcpConfigValue = string | boolean;
@@ -70,6 +71,7 @@ export type DesktopUiSettings = {
     tmuxMonitoring: boolean;
     agentTransport: DesktopAgentTransport;
     agentEndpointPreferences: Record<string, DesktopAgentEndpointPreference>;
+    agentHost: DesktopAgentHost;
   };
   windowMaterial: {
     enabled: boolean;
@@ -180,7 +182,8 @@ export const defaultDesktopSettings: DesktopUiSettings = {
   execution: {
     tmuxMonitoring: true,
     agentTransport: "acp",
-    agentEndpointPreferences: {}
+    agentEndpointPreferences: {},
+    agentHost: { kind: "native" }
   },
   windowMaterial: {
     enabled: false
@@ -380,6 +383,20 @@ function isAgentTransport(value: unknown): value is DesktopAgentTransport {
   return value === "cli" || value === "acp";
 }
 
+function normalizeAgentHost(value: unknown): DesktopAgentHost | undefined {
+  if (!isRecord(value)) return undefined;
+  if (value.kind === "native") return { kind: "native" };
+  if (
+    value.kind === "wsl" &&
+    typeof value.distribution === "string" &&
+    value.distribution.trim().length > 0 &&
+    value.distribution.trim().length <= 256
+  ) {
+    return { kind: "wsl", distribution: value.distribution.trim() };
+  }
+  return undefined;
+}
+
 function stringArray(value: unknown): string[] | undefined {
   return Array.isArray(value) && value.every((item) => typeof item === "string")
     ? value
@@ -521,11 +538,13 @@ export function normalizeDesktopSettingsPatch(value: unknown): DesktopSettingsPa
       ? value.execution.agentTransport
       : undefined;
     const endpointPreferences = agentEndpointPreferences(value.execution.agentEndpointPreferences);
-    if (execution || agentTransport || endpointPreferences) {
+    const agentHost = normalizeAgentHost(value.execution.agentHost);
+    if (execution || agentTransport || endpointPreferences || agentHost) {
       patch.execution = {
         ...execution,
         ...(agentTransport ? { agentTransport } : {}),
-        ...(endpointPreferences ? { agentEndpointPreferences: endpointPreferences } : {})
+        ...(endpointPreferences ? { agentEndpointPreferences: endpointPreferences } : {}),
+        ...(agentHost ? { agentHost } : {})
       };
     }
   }

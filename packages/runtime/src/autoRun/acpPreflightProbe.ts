@@ -19,6 +19,10 @@ import {
   type AcpAuthenticationOutcome
 } from "./acpAuthentication.js";
 import { agentProcessEnvRecord } from "../process/agentProcessEnv.js";
+import {
+  availableExecutionHostEnvironmentVariables,
+  prepareExecutionHostInvocation
+} from "../process/wslExecutionHost.js";
 
 export { sessionConfigurationFromNewSession } from "./acpSessionConfiguration.js";
 
@@ -100,17 +104,31 @@ function authRequiredResult(options: {
   };
 }
 
-export const probeInstalledAcpAgent: AcpPreflightProbe = async ({ definition, cwd, signal }) => {
+export const probeInstalledAcpAgent: AcpPreflightProbe = async ({
+  definition,
+  cwd,
+  host,
+  signal
+}) => {
   const launch = definition.acp.launch;
   if (!launch) return { kind: "failed", message: "ACP launch metadata is unavailable." };
   // Match desktop agent detection: include common POSIX install dirs so GUI-launched
   // Electron (short PATH) can still resolve Homebrew/npm agent binaries.
   const env = agentProcessEnvRecord();
-  const availableEnvironmentVariables = new Set(Object.keys(env));
-  const connection = createAcpConnection({
-    launch: { trusted: true, command: launch.command, args: launch.args },
+  const prepared = await prepareExecutionHostInvocation({
+    host,
+    command: launch.command,
+    args: launch.args,
     cwd,
+    env
+  });
+  const availableEnvironmentVariables = availableExecutionHostEnvironmentVariables(host, env);
+  const connection = createAcpConnection({
+    launch: { trusted: true, command: prepared.command, args: prepared.args },
+    cwd,
+    spawnCwd: prepared.spawnCwd ?? null,
     env,
+    decorateProcessTree: prepared.decorateProcessTree,
     clientInfo: { name: "PlanWeave", version: "0.1.0" }
   });
   type ProbeResult = Awaited<ReturnType<AcpPreflightProbe>>;
@@ -179,7 +197,10 @@ export const probeInstalledAcpAgent: AcpPreflightProbe = async ({ definition, cw
         }
         let probeSession: NewSessionResponse;
         try {
-          probeSession = await connection.newSession({ cwd, mcpServers: [] }, { signal });
+          probeSession = await connection.newSession(
+            { cwd: prepared.sessionCwd, mcpServers: [] },
+            { signal }
+          );
         } catch {
           const authenticationError = new AcpAuthenticationRequiredError(authenticationOutcome);
           return authRequiredResult({
@@ -212,7 +233,10 @@ export const probeInstalledAcpAgent: AcpPreflightProbe = async ({ definition, cw
 
       let session: NewSessionResponse;
       try {
-        session = await connection.newSession({ cwd, mcpServers: [] }, { signal });
+        session = await connection.newSession(
+          { cwd: prepared.sessionCwd, mcpServers: [] },
+          { signal }
+        );
       } catch (error) {
         if (!isAuthRequiredError(error)) {
           throw new AcpPreflightPhaseError("session", error);

@@ -4,6 +4,7 @@ import {
   type StreamedCommandResult
 } from "./streamingExecutor.js";
 import { createTmuxSessionInfo, type TmuxSessionInfo } from "./tmuxExecutor.js";
+import type { ExecutionHost } from "../types.js";
 
 export interface CliProcessRequest {
   command: string;
@@ -11,6 +12,8 @@ export interface CliProcessRequest {
   cwd: string;
   stdin: string;
   env?: NodeJS.ProcessEnv;
+  host?: ExecutionHost;
+  pathArgIndexes?: readonly number[];
   stdoutPath: string;
   stderrPath: string;
   limits: ExecutorRuntimeLimits;
@@ -36,6 +39,10 @@ export type CliProcessExecutor = (request: CliProcessRequest) => Promise<CliProc
 
 /** Owns one CLI process attempt, including optional tmux and streamed output capture. */
 export const executeCliProcess: CliProcessExecutor = async (request) => {
+  const host = request.host ?? { kind: "native" };
+  if (host.kind === "wsl" && request.tmux.enabled === true) {
+    throw new Error("tmux monitoring is not supported for WSL execution hosts.");
+  }
   const tmux = await createTmuxSessionInfo({
     runDir: request.tmux.runDir,
     runId: request.tmux.runId,
@@ -51,6 +58,8 @@ export const executeCliProcess: CliProcessExecutor = async (request) => {
     cwd: request.cwd,
     stdin: request.stdin,
     env: request.env,
+    host,
+    pathArgIndexes: request.pathArgIndexes,
     timeoutMs: request.limits.timeoutMs,
     maxStdoutBytes: request.limits.maxStdoutBytes,
     maxStderrBytes: request.limits.maxStderrBytes,

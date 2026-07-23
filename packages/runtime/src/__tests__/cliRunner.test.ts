@@ -16,6 +16,24 @@ const processLimits = {
 } as const;
 
 describe("CliRunner process ownership", () => {
+  it("rejects tmux monitoring for WSL instead of silently running on the native host", async () => {
+    const runDir = await mkdtemp(join(tmpdir(), "planweave-cli-runner-wsl-"));
+
+    await expect(
+      executeCliProcess({
+        command: "pi",
+        args: ["-p"],
+        cwd: runDir,
+        stdin: "prompt",
+        host: { kind: "wsl", distribution: "Ubuntu" },
+        stdoutPath: join(runDir, "stdout.md"),
+        stderrPath: join(runDir, "stderr.log"),
+        limits: processLimits,
+        tmux: { runDir, runId: "RUN-WSL", kind: "block", enabled: true }
+      })
+    ).rejects.toThrow("tmux monitoring is not supported for WSL execution hosts");
+  });
+
   it("owns one-shot stdin, stdout, stderr, heartbeat, and disabled tmux orchestration", async () => {
     const runDir = await mkdtemp(join(tmpdir(), "planweave-cli-runner-"));
     const stdoutPath = join(runDir, "stdout.md");

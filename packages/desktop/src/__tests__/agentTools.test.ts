@@ -1,8 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { accessMock, execFileMock, resolveWindowsProcessInvocationMock } = vi.hoisted(() => ({
+const {
+  accessMock,
+  execFileMock,
+  listWslDistributionsMock,
+  readWslLoginPathMock,
+  resolveWindowsProcessInvocationMock
+} = vi.hoisted(() => ({
   accessMock: vi.fn(),
   execFileMock: vi.fn(),
+  listWslDistributionsMock: vi.fn(),
+  readWslLoginPathMock: vi.fn(),
   resolveWindowsProcessInvocationMock: vi.fn()
 }));
 
@@ -22,6 +30,8 @@ vi.mock("@planweave-ai/runtime", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@planweave-ai/runtime")>();
   return {
     ...actual,
+    listWslDistributions: listWslDistributionsMock,
+    readWslLoginPath: readWslLoginPathMock,
     resolveWindowsProcessInvocation: resolveWindowsProcessInvocationMock
   };
 });
@@ -30,8 +40,16 @@ describe("desktop agent tool detection", () => {
   beforeEach(() => {
     execFileMock.mockReset();
     accessMock.mockReset();
+    listWslDistributionsMock.mockReset();
+    readWslLoginPathMock.mockReset();
     resolveWindowsProcessInvocationMock.mockReset();
     accessMock.mockResolvedValue(undefined);
+    listWslDistributionsMock.mockResolvedValue({
+      available: true,
+      distributions: ["Ubuntu"],
+      unavailableReason: null
+    });
+    readWslLoginPathMock.mockResolvedValue("/home/dev/.local/bin:/usr/bin:/bin");
   });
 
   it("adds Homebrew paths when detecting agent CLI versions on POSIX", async () => {
@@ -370,6 +388,68 @@ describe("desktop agent tool detection", () => {
       installed: false,
       unavailableReason: expect.stringMatching(/codex.*not found/i)
     });
+  });
+
+  it("detects CLI and ACP agents only inside the explicitly selected WSL distribution", async () => {
+    execFileMock.mockImplementation(
+      (
+        command: string,
+        args: string[],
+        _options: unknown,
+        callback: (error: Error | null, stdout: string, stderr: string) => void
+      ) => {
+        expect(command).toBe("wsl.exe");
+        expect(args.slice(0, 2)).toEqual(["--distribution", "Ubuntu"]);
+        const commandIndex = args.findIndex((argument) =>
+          ["codex", "claude", "opencode", "pi", "grok"].includes(argument)
+        );
+        const detectedCommand = commandIndex >= 0 ? args[commandIndex] : args.at(-1);
+        callback(null, detectedCommand === "grok" ? "grok 0.3.0\n" : "1.2.3\n", "");
+      }
+    );
+    const { detectAgentTools } = await import("../main/agentTools");
+
+    const agents = await detectAgentTools("win32", {
+      kind: "wsl",
+      distribution: "Ubuntu"
+    });
+
+    expect(agents).toHaveLength(10);
+    expect(agents.every((agent) => agent.installed)).toBe(true);
+    expect(agents.every((agent) => agent.executionHost?.kind === "wsl")).toBe(true);
+    expect(agents.find((agent) => agent.command === "pi-acp")).toMatchObject({
+      runnerKind: "acp",
+      installed: true,
+      version: null,
+      executionHost: { kind: "wsl", distribution: "Ubuntu" }
+    });
+    expect(agents.find((agent) => agent.kind === "grok" && agent.runnerKind === "acp"))
+      .toMatchObject({ installed: true, version: null });
+    expect(listWslDistributionsMock).toHaveBeenCalledWith({ platform: "win32" });
+    expect(readWslLoginPathMock).toHaveBeenCalledWith("Ubuntu", { platform: "win32" });
+    expect(resolveWindowsProcessInvocationMock).not.toHaveBeenCalled();
+  });
+
+  it("reports a deleted WSL distribution for every agent without probing native Windows", async () => {
+    listWslDistributionsMock.mockResolvedValue({
+      available: true,
+      distributions: ["Debian"],
+      unavailableReason: null
+    });
+    const { detectAgentTools } = await import("../main/agentTools");
+
+    const agents = await detectAgentTools("win32", {
+      kind: "wsl",
+      distribution: "Ubuntu"
+    });
+
+    expect(agents.every((agent) => !agent.installed)).toBe(true);
+    expect(agents.every((agent) =>
+      agent.unavailableReason === "WSL distribution 'Ubuntu' is not installed."
+    )).toBe(true);
+    expect(readWslLoginPathMock).not.toHaveBeenCalled();
+    expect(execFileMock).not.toHaveBeenCalled();
+    expect(resolveWindowsProcessInvocationMock).not.toHaveBeenCalled();
   });
 
   it("does not mark OpenCode ACP available when its ACP subcommand probe fails", async () => {

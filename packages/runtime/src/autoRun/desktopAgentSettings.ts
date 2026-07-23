@@ -1,7 +1,13 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import type { AgentFamily, ExecutorProfile, RunnerTransport } from "../types.js";
+import {
+  executionHostSchema,
+  type AgentFamily,
+  type ExecutionHost,
+  type ExecutorProfile,
+  type RunnerTransport
+} from "../types.js";
 
 export type DesktopAgentKind = AgentFamily;
 
@@ -20,6 +26,7 @@ type DesktopAgentSettings = Partial<Record<DesktopAgentKind, DesktopAgentRuntime
 
 type DesktopAgentRuntimeSettings = {
   agentTransport: RunnerTransport;
+  agentHost: ExecutionHost;
   agents: DesktopAgentSettings;
 };
 
@@ -91,8 +98,12 @@ function readDesktopAgentSettings(): DesktopAgentRuntimeSettings | null {
   const configuredTransport = isRecord(parsed.execution)
     ? parsed.execution.agentTransport
     : undefined;
+  const configuredHost = isRecord(parsed.execution)
+    ? executionHostSchema.safeParse(parsed.execution.agentHost)
+    : null;
   return {
     agentTransport: configuredTransport === "cli" ? "cli" : "acp",
+    agentHost: configuredHost?.success ? configuredHost.data : { kind: "native" },
     agents
   };
 }
@@ -126,6 +137,10 @@ export function selectedDesktopAgentTransport(): RunnerTransport {
   return readDesktopAgentSettings()?.agentTransport ?? "acp";
 }
 
+export function selectedDesktopAgentHost(): ExecutionHost {
+  return readDesktopAgentSettings()?.agentHost ?? { kind: "native" };
+}
+
 function addArgOnce(args: readonly string[], arg: string): string[] {
   if (args.includes(arg)) {
     return [...args];
@@ -136,9 +151,18 @@ function addArgOnce(args: readonly string[], arg: string): string[] {
 export function applyDesktopAgentSettingsToBuiltinProfiles(
   profiles: Record<string, ExecutorProfile>
 ): Record<string, ExecutorProfile> {
-  const settings = readDesktopAgentSettings() ?? { agentTransport: "acp", agents: {} };
+  const settings = readDesktopAgentSettings() ?? {
+    agentTransport: "acp",
+    agentHost: { kind: "native" } as const,
+    agents: {}
+  };
 
-  const next: Record<string, ExecutorProfile> = { ...profiles };
+  const next: Record<string, ExecutorProfile> = Object.fromEntries(
+    Object.entries(profiles).map(([name, profile]) => [
+      name,
+      profile.adapter === "agent" ? { ...profile, host: settings.agentHost } : profile
+    ])
+  );
   if (settings.agentTransport === "acp") {
     for (const kind of Object.keys(desktopAgentAcpNames) as DesktopAgentKind[]) {
       const acpProfile = next[desktopAgentAcpNames[kind]];

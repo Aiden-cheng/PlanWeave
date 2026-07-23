@@ -1,0 +1,443 @@
+import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import type { ExecutionHost } from "../types/executor.js";
+import type { ManagedProcessTree, ProcessTerminationResult } from "./managedProcessTree.js";
+
+const WSL_PATH_BEGIN = "__PLANWEAVE_PATH_BEGIN__";
+const WSL_PATH_END = "__PLANWEAVE_PATH_END__";
+const WSL_LOGIN_PATH_SCRIPT = [
+  'pw_shell="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f7)"',
+  '[ -x "$pw_shell" ] || pw_shell=/bin/sh',
+  `exec "$pw_shell" -l -i -c 'printf "\\n${WSL_PATH_BEGIN}%s${WSL_PATH_END}\\n" "$PATH"'`
+].join("; ");
+
+const WSL_PROCESS_WRAPPER_SCRIPT = [
+  'pw_pid_file="$1"',
+  "shift",
+  "command -v setsid >/dev/null 2>&1 || { echo 'PlanWeave WSL host requires setsid.' >&2; exit 69; }",
+  `setsid sh -c 'pw_pid_file="$1"; shift; printf "%s\\n" "$$" > "$pw_pid_file"; exec "$@"' planweave-wsl-child "$pw_pid_file" "$@"`,
+  "pw_status=$?",
+  'rm -f "$pw_pid_file"',
+  "exit $pw_status"
+].join("; ");
+
+const WSL_TERMINATE_GROUP_SCRIPT = [
+  'pw_pid_file="$1"',
+  "pw_attempt=0",
+  'while [ ! -r "$pw_pid_file" ] && [ "$pw_attempt" -lt 10 ]; do sleep 0.05; pw_attempt=$((pw_attempt + 1)); done',
+  '[ -r "$pw_pid_file" ] || exit 0',
+  'pw_pid="$(cat "$pw_pid_file")"',
+  `case "$pw_pid" in ''|*[!0-9]*) echo 'Invalid PlanWeave WSL pid file.' >&2; exit 70;; esac`,
+  '[ "$pw_pid" -gt 1 ] || { echo "Unsafe PlanWeave WSL pid: $pw_pid" >&2; exit 70; }',
+  '/bin/kill -TERM -- "-$pw_pid" 2>/dev/null || true',
+  "sleep 0.5",
+  '/bin/kill -KILL -- "-$pw_pid" 2>/dev/null || true',
+  "sleep 0.1",
+  `if /bin/kill -0 -- "-$pw_pid" 2>/dev/null; then echo "PlanWeave WSL process group $pw_pid is still running." >&2; exit 70; fi`,
+  'rm -f "$pw_pid_file"'
+].join("; ");
+
+export type WslCommandOutput = { stdout: Buffer; stderr: Buffer };
+export type WslCommandRunner = (args: readonly string[]) => Promise<WslCommandOutput>;
+
+export type WslDistributionsResult = {
+  available: boolean;
+  distributions: string[];
+  unavailableReason: string | null;
+};
+
+export type WslExecutionOptions = {
+  platform?: NodeJS.Platform;
+  run?: WslCommandRunner;
+};
+
+export type PreparedWslProcessInvocation = {
+  command: "wsl.exe";
+  args: string[];
+  sessionCwd: string;
+  pidFile: string;
+  decorateProcessTree(tree: ManagedProcessTree): ManagedProcessTree;
+};
+
+export type PreparedExecutionHostInvocation = {
+  command: string;
+  args: string[];
+  spawnCwd: string | undefined;
+  sessionCwd: string;
+  executionHost: ExecutionHost;
+  decorateProcessTree(tree: ManagedProcessTree): ManagedProcessTree;
+};
+
+export function availableExecutionHostEnvironmentVariables(
+  host: ExecutionHost,
+  environment: Readonly<Record<string, string | undefined>>
+): ReadonlySet<string> {
+  return new Set(host.kind === "native" ? Object.keys(environment) : ["PATH", "PLANWEAVE_HOME"]);
+}
+
+function defaultWslCommandRunner(args: readonly string[]): Promise<WslCommandOutput> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      "wsl.exe",
+      [...args],
+      { encoding: "buffer", timeout: 15_000, maxBuffer: 1024 * 1024, windowsHide: true },
+      (error, stdout, stderr) => {
+        const output = {
+          stdout: Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout ?? ""),
+          stderr: Buffer.isBuffer(stderr) ? stderr : Buffer.from(stderr ?? "")
+        };
+        if (error) {
+          const detail = decodeCommandOutput(output.stderr).trim();
+          reject(new Error(detail ? `${error.message}: ${detail}` : error.message, { cause: error }));
+          return;
+        }
+        resolve(output);
+      }
+    );
+  });
+}
+
+function errorCode(error: unknown): string | null {
+  if (!error || typeof error !== "object" || !("code" in error)) return null;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" ? code : null;
+}
+
+export function decodeCommandOutput(value: Buffer): string {
+  if (value.length >= 2) {
+    const startsWithBom = value[0] === 0xff && value[1] === 0xfe;
+    let nulCount = 0;
+    for (let index = 1; index < Math.min(value.length, 512); index += 2) {
+      if (value[index] === 0) nulCount += 1;
+    }
+    if (startsWithBom || nulCount >= Math.min(3, Math.floor(value.length / 4))) {
+      return value.toString("utf16le").replace(/^\uFEFF/, "");
+    }
+  }
+  return value.toString("utf8");
+}
+
+function requireWindows(platform: NodeJS.Platform): void {
+  if (platform !== "win32") {
+    throw new Error("WSL execution host is only available on Windows.");
+  }
+}
+
+function commandRunner(options: WslExecutionOptions): WslCommandRunner {
+  return options.run ?? defaultWslCommandRunner;
+}
+
+export async function listWslDistributions(
+  options: WslExecutionOptions = {}
+): Promise<WslDistributionsResult> {
+  const platform = options.platform ?? process.platform;
+  if (platform !== "win32") {
+    return {
+      available: false,
+      distributions: [],
+      unavailableReason: "WSL is only available on Windows."
+    };
+  }
+  try {
+    const { stdout } = await commandRunner(options)(["--list", "--quiet"]);
+    const distributions = decodeCommandOutput(stdout)
+      .replaceAll("\0", "")
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    return {
+      available: true,
+      distributions: [...new Set(distributions)],
+      unavailableReason:
+        distributions.length === 0 ? "No WSL distributions are installed." : null
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const missing = errorCode(error) === "ENOENT" || /ENOENT|not found|cannot find/i.test(message);
+    return {
+      available: false,
+      distributions: [],
+      unavailableReason: missing
+        ? "WSL is not installed or wsl.exe is unavailable."
+        : `WSL distributions could not be listed: ${message}`
+    };
+  }
+}
+
+type ParsedWslUncPath = { distribution: string; path: string };
+
+function parseWslUncPath(path: string): ParsedWslUncPath | null {
+  const match = /^\\\\(?:wsl(?:\.localhost|\$))\\([^\\]+)(?:\\(.*))?$/i.exec(path);
+  if (!match) return null;
+  return {
+    distribution: match[1]!,
+    path: `/${(match[2] ?? "").replaceAll("\\", "/")}`.replace(/\/$/, "") || "/"
+  };
+}
+
+export async function mapWindowsPathToWsl(
+  path: string,
+  distribution: string,
+  options: WslExecutionOptions = {}
+): Promise<string> {
+  const platform = options.platform ?? process.platform;
+  requireWindows(platform);
+  const selectedDistribution = distribution.trim();
+  if (!selectedDistribution) throw new Error("WSL distribution must be selected explicitly.");
+  if (path.startsWith("/")) return path;
+
+  const wslUnc = parseWslUncPath(path);
+  if (wslUnc) {
+    if (wslUnc.distribution.toLocaleLowerCase() !== selectedDistribution.toLocaleLowerCase()) {
+      throw new Error(
+        `Path '${path}' belongs to WSL distribution '${wslUnc.distribution}', not selected distribution '${selectedDistribution}'.`
+      );
+    }
+    return wslUnc.path;
+  }
+
+  if (!/^[A-Za-z]:[\\/]/.test(path)) {
+    throw new Error(
+      `Windows path '${path}' cannot be mapped into WSL distribution '${selectedDistribution}'.`
+    );
+  }
+  try {
+    const { stdout } = await commandRunner(options)([
+      "--distribution",
+      selectedDistribution,
+      "--exec",
+      "wslpath",
+      "-a",
+      "-u",
+      path
+    ]);
+    const mapped = decodeCommandOutput(stdout).replaceAll("\0", "").trim();
+    if (!mapped.startsWith("/")) {
+      throw new Error(`wslpath returned an invalid path: ${mapped || "<empty>"}`);
+    }
+    return mapped;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Windows path '${path}' could not be mapped in WSL distribution '${selectedDistribution}': ${detail}`,
+      { cause: error }
+    );
+  }
+}
+
+export async function readWslLoginPath(
+  distribution: string,
+  options: WslExecutionOptions = {}
+): Promise<string> {
+  const platform = options.platform ?? process.platform;
+  requireWindows(platform);
+  const selectedDistribution = distribution.trim();
+  if (!selectedDistribution) throw new Error("WSL distribution must be selected explicitly.");
+  let output: WslCommandOutput;
+  try {
+    output = await commandRunner(options)([
+      "--distribution",
+      selectedDistribution,
+      "--exec",
+      "sh",
+      "-lc",
+      WSL_LOGIN_PATH_SCRIPT
+    ]);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Login-shell PATH could not be read from WSL distribution '${selectedDistribution}': ${detail}`,
+      { cause: error }
+    );
+  }
+  const stdout = decodeCommandOutput(output.stdout).replaceAll("\0", "");
+  const begin = stdout.lastIndexOf(WSL_PATH_BEGIN);
+  const end = begin < 0 ? -1 : stdout.indexOf(WSL_PATH_END, begin + WSL_PATH_BEGIN.length);
+  if (begin < 0 || end < 0) {
+    throw new Error(
+      `Login-shell PATH probe in WSL distribution '${selectedDistribution}' did not return the expected marker.`
+    );
+  }
+  const path = stdout.slice(begin + WSL_PATH_BEGIN.length, end).trim();
+  if (!path) {
+    throw new Error(`Login-shell PATH in WSL distribution '${selectedDistribution}' is empty.`);
+  }
+  return path;
+}
+
+async function mappedPlanWeaveEnvironment(
+  env: NodeJS.ProcessEnv | undefined,
+  distribution: string,
+  options: WslExecutionOptions
+): Promise<string[]> {
+  const result: string[] = [];
+  for (const key of ["PLANWEAVE_HOME", "PLANWEAVE_REVIEW_RESULT_PATH"] as const) {
+    const value = env?.[key];
+    if (!value) continue;
+    result.push(`${key}=${await mapWindowsPathToWsl(value, distribution, options)}`);
+  }
+  for (const key of ["PLANWEAVE_REVIEW_BLOCK_REF", "PLANWEAVE_REVIEW_TASK_ID"] as const) {
+    const value = env?.[key];
+    if (value) result.push(`${key}=${value}`);
+  }
+  return result;
+}
+
+function validateToken(token: string): string {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(token)) {
+    throw new Error("WSL execution token contains unsupported characters.");
+  }
+  return token;
+}
+
+async function terminateWslProcessGroup(options: {
+  distribution: string;
+  pidFile: string;
+  run: WslCommandRunner;
+}): Promise<void> {
+  try {
+    await options.run([
+      "--distribution",
+      options.distribution,
+      "--exec",
+      "sh",
+      "-c",
+      WSL_TERMINATE_GROUP_SCRIPT,
+      "planweave-wsl-cleanup",
+      options.pidFile
+    ]);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `WSL process group cleanup failed in distribution '${options.distribution}': ${detail}`,
+      { cause: error }
+    );
+  }
+}
+
+function decorateWslProcessTree(options: {
+  tree: ManagedProcessTree;
+  distribution: string;
+  pidFile: string;
+  run: WslCommandRunner;
+}): ManagedProcessTree {
+  let termination: Promise<ProcessTerminationResult> | undefined;
+  return {
+    pid: options.tree.pid,
+    exited: options.tree.exited,
+    isAlive: () => options.tree.isAlive(),
+    terminate(reason) {
+      termination ??= (async () => {
+        const cleanup = terminateWslProcessGroup(options);
+        const nativeTermination = options.tree.terminate(reason);
+        const [cleanupResult, nativeResult] = await Promise.allSettled([
+          cleanup,
+          nativeTermination
+        ]);
+        if (cleanupResult.status === "rejected" && nativeResult.status === "rejected") {
+          throw new AggregateError(
+            [cleanupResult.reason, nativeResult.reason],
+            "WSL and Windows process-tree cleanup both failed."
+          );
+        }
+        if (cleanupResult.status === "rejected") throw cleanupResult.reason;
+        if (nativeResult.status === "rejected") throw nativeResult.reason;
+        return nativeResult.value;
+      })();
+      return termination;
+    }
+  };
+}
+
+export async function prepareWslProcessInvocation(options: {
+  host: Extract<ExecutionHost, { kind: "wsl" }>;
+  command: string;
+  args: readonly string[];
+  pathArgIndexes?: readonly number[];
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+  run?: WslCommandRunner;
+  token?: string;
+}): Promise<PreparedWslProcessInvocation> {
+  const platform = options.platform ?? process.platform;
+  requireWindows(platform);
+  const distribution = options.host.distribution.trim();
+  if (!distribution) throw new Error("WSL distribution must be selected explicitly.");
+  const executionOptions = { platform, run: options.run } satisfies WslExecutionOptions;
+  const [sessionCwd, loginPath, planweaveEnvironment] = await Promise.all([
+    mapWindowsPathToWsl(options.cwd, distribution, executionOptions),
+    readWslLoginPath(distribution, executionOptions),
+    mappedPlanWeaveEnvironment(options.env, distribution, executionOptions)
+  ]);
+  const pathIndexes = new Set(options.pathArgIndexes ?? []);
+  const args = await Promise.all(
+    options.args.map((argument, index) =>
+      pathIndexes.has(index)
+        ? mapWindowsPathToWsl(argument, distribution, executionOptions)
+        : Promise.resolve(argument)
+    )
+  );
+  const token = validateToken(options.token ?? randomUUID());
+  const pidFile = `/tmp/planweave-${token}.pid`;
+  const run = commandRunner(executionOptions);
+  return {
+    command: "wsl.exe",
+    args: [
+      "--distribution",
+      distribution,
+      "--cd",
+      sessionCwd,
+      "--exec",
+      "sh",
+      "-c",
+      WSL_PROCESS_WRAPPER_SCRIPT,
+      "planweave-wsl",
+      pidFile,
+      "env",
+      `PATH=${loginPath}`,
+      ...planweaveEnvironment,
+      options.command,
+      ...args
+    ],
+    sessionCwd,
+    pidFile,
+    decorateProcessTree: (tree) =>
+      decorateWslProcessTree({ tree, distribution, pidFile, run })
+  };
+}
+
+export async function prepareExecutionHostInvocation(options: {
+  host: ExecutionHost;
+  command: string;
+  args: readonly string[];
+  pathArgIndexes?: readonly number[];
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+  run?: WslCommandRunner;
+  token?: string;
+}): Promise<PreparedExecutionHostInvocation> {
+  if (options.host.kind === "native") {
+    return {
+      command: options.command,
+      args: [...options.args],
+      spawnCwd: options.cwd,
+      sessionCwd: options.cwd,
+      executionHost: options.host,
+      decorateProcessTree: (tree) => tree
+    };
+  }
+  const prepared = await prepareWslProcessInvocation({
+    ...options,
+    host: options.host
+  });
+  return {
+    command: prepared.command,
+    args: prepared.args,
+    spawnCwd: undefined,
+    sessionCwd: prepared.sessionCwd,
+    executionHost: options.host,
+    decorateProcessTree: prepared.decorateProcessTree
+  };
+}

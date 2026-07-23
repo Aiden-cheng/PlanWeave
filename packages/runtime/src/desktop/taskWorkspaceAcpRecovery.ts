@@ -26,7 +26,7 @@ import {
   launchInitializedAutoRun
 } from "./runApi.js";
 import { canonicalTaskWorkspaceRunIdentity } from "./taskWorkspaceRetry.js";
-import type { ProjectWorkspace } from "../types.js";
+import { executionHostSchema, type ProjectWorkspace } from "../types.js";
 import type { DesktopRunRecord } from "./types/recordsTypes.js";
 import {
   taskWorkspaceAcpRecoveryIdentitySchema,
@@ -41,6 +41,7 @@ const sourceMetadataSchema = z
     sessionId: z.string().min(1),
     agentId: z.string().min(1),
     executorProfile: z.string().min(1),
+    executionHost: executionHostSchema.optional(),
     acpLaunch: acpLaunchIdentitySchema,
     capabilities: z.object({ loadSession: z.literal(true) }).passthrough(),
     recoveryInterruptionReason: acpRecoveryInterruptionReasonSchema.nullable(),
@@ -57,6 +58,8 @@ const messages: Record<AcpRunRecoveryUnavailableReason, string> = {
   session_unavailable: "The source ACP session id is unavailable.",
   agent_mismatch: "The configured Agent no longer matches the source run.",
   executor_profile_mismatch: "The effective executor profile no longer matches the source run.",
+  execution_host_mismatch:
+    "The configured execution host or WSL distribution no longer matches the source run.",
   launch_mismatch: "The configured ACP launch no longer matches the source run.",
   load_session_unavailable: "The source or current Agent does not support session/load.",
   block_not_blocked: "Recovery requires the Block to remain blocked.",
@@ -141,6 +144,9 @@ export async function evaluateTaskWorkspaceAcpRecovery(options: {
     resolvedAgentId: profile?.agentId ?? null,
     sourceExecutorProfile: source?.executorProfile ?? null,
     resolvedExecutorProfile: profile?.name ?? null,
+    sourceExecutionHost: source?.executionHost ?? { kind: "native" },
+    resolvedExecutionHost:
+      profile && "host" in profile && profile.host ? profile.host : { kind: "native" },
     sourceLaunch: source?.acpLaunch ?? null,
     resolvedLaunch,
     loadSessionAvailable:
@@ -263,6 +269,7 @@ export async function recoverTaskWorkspaceAcpRun(
       claimRef: identity.claimRef,
       agentId: identity.agentId,
       executorProfile: identity.executorProfile,
+      executionHost: metadata.executionHost ?? { kind: "native" },
       launch: identity.launch,
       interruptionReason: metadata.recoveryInterruptionReason,
       lastToolStateSummary: projectAcpRecoveryToolSummary(record)

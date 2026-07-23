@@ -1,0 +1,261 @@
+import { describe, expect, it, vi } from "vitest";
+import {
+  availableExecutionHostEnvironmentVariables,
+  listWslDistributions,
+  mapWindowsPathToWsl,
+  prepareWslProcessInvocation
+} from "../process/wslExecutionHost.js";
+import {
+  executorProfileExecutionHost,
+  executorProfileSchema
+} from "../types/executor.js";
+
+describe("WSL execution host", () => {
+  it("does not treat native credentials as available inside WSL", () => {
+    const environment = { PATH: "native-path", PLANWEAVE_HOME: "C:\\pw", XAI_API_KEY: "secret" };
+
+    expect([
+      ...availableExecutionHostEnvironmentVariables({ kind: "native" }, environment)
+    ]).toEqual(["PATH", "PLANWEAVE_HOME", "XAI_API_KEY"]);
+    expect([
+      ...availableExecutionHostEnvironmentVariables(
+        { kind: "wsl", distribution: "Ubuntu" },
+        environment
+      )
+    ]).toEqual(["PATH", "PLANWEAVE_HOME"]);
+  });
+
+  it("keeps old agent profiles native and requires an explicit WSL distribution", () => {
+    const native = executorProfileSchema.parse({
+      adapter: "agent",
+      agent: "pi",
+      runner: { transport: "acp" }
+    });
+    expect(executorProfileExecutionHost(native)).toEqual({ kind: "native" });
+
+    const wsl = executorProfileSchema.parse({
+      adapter: "agent",
+      agent: "pi",
+      runner: { transport: "acp" },
+      host: { kind: "wsl", distribution: " Ubuntu " }
+    });
+    expect(executorProfileExecutionHost(wsl)).toEqual({
+      kind: "wsl",
+      distribution: "Ubuntu"
+    });
+    expect(() =>
+      executorProfileSchema.parse({
+        adapter: "agent",
+        agent: "pi",
+        runner: { transport: "acp" },
+        host: { kind: "wsl" }
+      })
+    ).toThrow();
+  });
+
+  it("parses UTF-16 WSL distribution output without inventing a native fallback", async () => {
+    const run = vi.fn().mockResolvedValue({
+      stdout: Buffer.from("Ubuntu\r\nDebian\r\n", "utf16le"),
+      stderr: Buffer.alloc(0)
+    });
+
+    await expect(listWslDistributions({ platform: "win32", run })).resolves.toEqual({
+      available: true,
+      distributions: ["Ubuntu", "Debian"],
+      unavailableReason: null
+    });
+    expect(run).toHaveBeenCalledWith(["--list", "--quiet"]);
+  });
+
+  it("reports WSL absence explicitly", async () => {
+    const run = vi.fn().mockRejectedValue(Object.assign(new Error("spawn wsl.exe ENOENT"), {
+      code: "ENOENT"
+    }));
+
+    await expect(listWslDistributions({ platform: "win32", run })).resolves.toEqual({
+      available: false,
+      distributions: [],
+      unavailableReason: "WSL is not installed or wsl.exe is unavailable."
+    });
+  });
+
+  it("maps drive paths and matching WSL UNC paths, rejecting distribution mismatch", async () => {
+    const run = vi.fn().mockResolvedValue({
+      stdout: Buffer.from("/mnt/c/code/PlanWeave\n"),
+      stderr: Buffer.alloc(0)
+    });
+
+    await expect(
+      mapWindowsPathToWsl("C:\\code\\PlanWeave", "Ubuntu", { platform: "win32", run })
+    ).resolves.toBe("/mnt/c/code/PlanWeave");
+    expect(run).toHaveBeenCalledWith([
+      "--distribution",
+      "Ubuntu",
+      "--exec",
+      "wslpath",
+      "-a",
+      "-u",
+      "C:\\code\\PlanWeave"
+    ]);
+
+    await expect(
+      mapWindowsPathToWsl("\\\\wsl.localhost\\Ubuntu\\home\\dev\\app", "Ubuntu", {
+        platform: "win32",
+        run
+      })
+    ).resolves.toBe("/home/dev/app");
+
+    await expect(
+      mapWindowsPathToWsl("\\\\wsl.localhost\\Debian\\home\\dev\\app", "Ubuntu", {
+        platform: "win32",
+        run
+      })
+    ).rejects.toThrow("belongs to WSL distribution 'Debian', not selected distribution 'Ubuntu'");
+  });
+
+  it("builds a structured WSL invocation with login-shell PATH and mapped path arguments", async () => {
+    const run = vi.fn(async (args: readonly string[]) => {
+      if (args.includes("wslpath")) {
+        const source = args.at(-1);
+        if (source === "C:\\work") {
+          return { stdout: Buffer.from("/mnt/c/work\n"), stderr: Buffer.alloc(0) };
+        }
+        if (source === "C:\\work\\prompt.md") {
+          return { stdout: Buffer.from("/mnt/c/work/prompt.md\n"), stderr: Buffer.alloc(0) };
+        }
+        if (source === "C:\\pw") {
+          return { stdout: Buffer.from("/mnt/c/pw\n"), stderr: Buffer.alloc(0) };
+        }
+      }
+      return {
+        stdout: Buffer.from("shell noise\n__PLANWEAVE_PATH_BEGIN__/home/dev/.local/bin:/usr/bin__PLANWEAVE_PATH_END__\n"),
+        stderr: Buffer.alloc(0)
+      };
+    });
+
+    const prepared = await prepareWslProcessInvocation({
+      host: { kind: "wsl", distribution: "Ubuntu Dev" },
+      command: "grok",
+      args: ["--prompt-file", "C:\\work\\prompt.md", "literal;$(touch nope)"],
+      pathArgIndexes: [1],
+      cwd: "C:\\work",
+      env: { PLANWEAVE_HOME: "C:\\pw", XAI_API_KEY: "must-not-cross-host" },
+      platform: "win32",
+      run,
+      token: "safe-token"
+    });
+
+    expect(prepared.command).toBe("wsl.exe");
+    expect(prepared.sessionCwd).toBe("/mnt/c/work");
+    expect(prepared.args).toEqual([
+      "--distribution",
+      "Ubuntu Dev",
+      "--cd",
+      "/mnt/c/work",
+      "--exec",
+      "sh",
+      "-c",
+      expect.any(String),
+      "planweave-wsl",
+      "/tmp/planweave-safe-token.pid",
+      "env",
+      "PATH=/home/dev/.local/bin:/usr/bin",
+      "PLANWEAVE_HOME=/mnt/c/pw",
+      "grok",
+      "--prompt-file",
+      "/mnt/c/work/prompt.md",
+      "literal;$(touch nope)"
+    ]);
+    expect(prepared.args).not.toContain("XAI_API_KEY=must-not-cross-host");
+  });
+
+  it("terminates both the WSL process group and the native wsl.exe tree exactly once", async () => {
+    const run = vi.fn(async (args: readonly string[]) => {
+      if (args.includes("wslpath")) {
+        return { stdout: Buffer.from("/mnt/c/work\n"), stderr: Buffer.alloc(0) };
+      }
+      if (args.includes("planweave-wsl-cleanup")) {
+        return { stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
+      }
+      return {
+        stdout: Buffer.from(
+          "__PLANWEAVE_PATH_BEGIN__/home/dev/.local/bin:/usr/bin__PLANWEAVE_PATH_END__\n"
+        ),
+        stderr: Buffer.alloc(0)
+      };
+    });
+    const prepared = await prepareWslProcessInvocation({
+      host: { kind: "wsl", distribution: "Ubuntu" },
+      command: "pi-acp",
+      args: [],
+      cwd: "C:\\work",
+      platform: "win32",
+      run,
+      token: "cleanup-token"
+    });
+    const nativeTerminate = vi.fn().mockResolvedValue({
+      outcome: "graceful" as const,
+      reason: "cancelled"
+    });
+    const tree = prepared.decorateProcessTree({
+      pid: 1234,
+      exited: Promise.resolve(),
+      isAlive: () => true,
+      terminate: nativeTerminate
+    });
+
+    const first = tree.terminate("cancelled");
+    const second = tree.terminate("second reason");
+    await expect(first).resolves.toEqual({ outcome: "graceful", reason: "cancelled" });
+    await expect(second).resolves.toEqual({ outcome: "graceful", reason: "cancelled" });
+
+    expect(nativeTerminate).toHaveBeenCalledTimes(1);
+    expect(nativeTerminate).toHaveBeenCalledWith("cancelled");
+    expect(run).toHaveBeenCalledWith([
+      "--distribution",
+      "Ubuntu",
+      "--exec",
+      "sh",
+      "-c",
+      expect.stringContaining("/bin/kill -TERM"),
+      "planweave-wsl-cleanup",
+      "/tmp/planweave-cleanup-token.pid"
+    ]);
+  });
+
+  it("surfaces WSL cleanup failure even if native process termination succeeds", async () => {
+    const run = vi.fn(async (args: readonly string[]) => {
+      if (args.includes("wslpath")) {
+        return { stdout: Buffer.from("/mnt/c/work\n"), stderr: Buffer.alloc(0) };
+      }
+      if (args.includes("planweave-wsl-cleanup")) {
+        throw new Error("process group still alive");
+      }
+      return {
+        stdout: Buffer.from(
+          "__PLANWEAVE_PATH_BEGIN__/usr/local/bin:/usr/bin__PLANWEAVE_PATH_END__\n"
+        ),
+        stderr: Buffer.alloc(0)
+      };
+    });
+    const prepared = await prepareWslProcessInvocation({
+      host: { kind: "wsl", distribution: "Ubuntu" },
+      command: "grok",
+      args: [],
+      cwd: "C:\\work",
+      platform: "win32",
+      run,
+      token: "cleanup-failure"
+    });
+    const tree = prepared.decorateProcessTree({
+      pid: 1234,
+      exited: Promise.resolve(),
+      isAlive: () => true,
+      terminate: vi.fn().mockResolvedValue({ outcome: "forced", reason: "cancelled" })
+    });
+
+    await expect(tree.terminate("cancelled")).rejects.toThrow(
+      "WSL process group cleanup failed in distribution 'Ubuntu'"
+    );
+  });
+});

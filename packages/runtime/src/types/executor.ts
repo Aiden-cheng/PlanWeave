@@ -55,6 +55,27 @@ export type ExecutorRuntimeLimits = z.infer<typeof executorRuntimeLimitsSchema>;
 export const runnerTransportSchema = z.enum(["cli", "acp"]);
 export type RunnerTransport = z.infer<typeof runnerTransportSchema>;
 
+export const nativeExecutionHostSchema = z.object({ kind: z.literal("native") }).strict();
+export const wslExecutionHostSchema = z
+  .object({
+    kind: z.literal("wsl"),
+    distribution: z.string().trim().min(1).max(256)
+  })
+  .strict();
+export const executionHostSchema = z.discriminatedUnion("kind", [
+  nativeExecutionHostSchema,
+  wslExecutionHostSchema
+]);
+export type ExecutionHost = z.infer<typeof executionHostSchema>;
+
+export const nativeExecutionHost: ExecutionHost = { kind: "native" };
+
+export function executorProfileExecutionHost(
+  profile: { host?: ExecutionHost }
+): ExecutionHost {
+  return profile.host ?? nativeExecutionHost;
+}
+
 export const cliRunnerSchema = z
   .object({
     transport: runnerTransportSchema.extract(["cli"]),
@@ -88,6 +109,7 @@ const agentAcpProfileSchema = z
     adapter: executorProfileAdapterSchema.extract(["agent"]),
     agent: agentFamilySchema,
     runner: acpRunnerSchema,
+    host: executionHostSchema.optional(),
     ...executorRuntimeLimitsSchema.shape
   })
   .strict();
@@ -97,6 +119,7 @@ const codexCliProfileSchema = z
     adapter: executorProfileAdapterSchema.extract(["agent"]),
     agent: agentFamilySchema.extract(["codex"]),
     runner: cliRunnerSchema,
+    host: executionHostSchema.optional(),
     command: z.string().min(1),
     args: z.array(z.string()).default(["exec", "-"]),
     sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]).optional(),
@@ -110,6 +133,7 @@ const opencodeCliProfileSchema = z
     adapter: executorProfileAdapterSchema.extract(["agent"]),
     agent: agentFamilySchema.extract(["opencode"]),
     runner: cliRunnerSchema,
+    host: executionHostSchema.optional(),
     command: z.string().min(1),
     args: z.array(z.string()).default(["run", "-"]),
     sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]).optional(),
@@ -122,6 +146,7 @@ const claudeCodeCliProfileSchema = z
     adapter: executorProfileAdapterSchema.extract(["agent"]),
     agent: agentFamilySchema.extract(["claude-code"]),
     runner: cliRunnerSchema,
+    host: executionHostSchema.optional(),
     command: z.string().min(1),
     args: z.array(z.string()).default(["-p"]),
     ...executorRuntimeLimitsSchema.shape
@@ -133,6 +158,7 @@ const piCliProfileSchema = z
     adapter: executorProfileAdapterSchema.extract(["agent"]),
     agent: agentFamilySchema.extract(["pi"]),
     runner: cliRunnerSchema,
+    host: executionHostSchema.optional(),
     command: z.string().min(1),
     args: z.array(z.string()).default(["-p"]),
     ...executorRuntimeLimitsSchema.shape
@@ -166,6 +192,7 @@ const grokCliProfileSchema = z
     adapter: executorProfileAdapterSchema.extract(["agent"]),
     agent: agentFamilySchema.extract(["grok"]),
     runner: cliRunnerSchema,
+    host: executionHostSchema.optional(),
     command: z.string().min(1),
     args: grokCliArgsSchema,
     ...executorRuntimeLimitsSchema.shape
@@ -187,6 +214,7 @@ const legacyAgentProfileSchema = z.discriminatedUnion("adapter", [
   z
     .object({
       adapter: executorIntegrationSchema.extract(["codex-exec"]),
+      host: executionHostSchema.optional(),
       command: z.string().min(1),
       args: z.array(z.string()).default(["exec", "-"]),
       sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]).optional(),
@@ -197,6 +225,7 @@ const legacyAgentProfileSchema = z.discriminatedUnion("adapter", [
   z
     .object({
       adapter: executorIntegrationSchema.extract(["opencode-exec"]),
+      host: executionHostSchema.optional(),
       command: z.string().min(1),
       args: z.array(z.string()).default(["run", "-"]),
       sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]).optional(),
@@ -206,6 +235,7 @@ const legacyAgentProfileSchema = z.discriminatedUnion("adapter", [
   z
     .object({
       adapter: executorIntegrationSchema.extract(["claude-code-exec"]),
+      host: executionHostSchema.optional(),
       command: z.string().min(1),
       args: z.array(z.string()).default(["-p"]),
       ...executorRuntimeLimitsSchema.shape
@@ -214,6 +244,7 @@ const legacyAgentProfileSchema = z.discriminatedUnion("adapter", [
   z
     .object({
       adapter: executorIntegrationSchema.extract(["pi-exec"]),
+      host: executionHostSchema.optional(),
       command: z.string().min(1),
       args: z.array(z.string()).default(["-p"]),
       ...executorRuntimeLimitsSchema.shape
@@ -222,6 +253,7 @@ const legacyAgentProfileSchema = z.discriminatedUnion("adapter", [
   z
     .object({
       adapter: executorIntegrationSchema.extract(["grok-exec"]),
+      host: executionHostSchema.optional(),
       command: z.string().min(1),
       args: grokCliArgsSchema,
       ...executorRuntimeLimitsSchema.shape

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { agentFamilySchema } from "../types/executor.js";
+import { agentFamilySchema, executionHostSchema } from "../types/executor.js";
 import {
   acpSessionIdSchema,
   claimRefSchema,
@@ -56,6 +56,7 @@ export const acpRunRecoveryExecutionSchema = z
     claimRef: claimRefSchema,
     agentId: agentFamilySchema,
     executorProfile: z.string().min(1).max(256),
+    executionHost: executionHostSchema.optional(),
     launch: acpLaunchIdentitySchema,
     interruptionReason: acpRecoveryInterruptionReasonSchema,
     lastToolStateSummary: safeRunnerEventTextSchema(4096, "Recovery tool state summary").nullable()
@@ -72,6 +73,7 @@ export const acpRunRecoveryUnavailableReasonSchema = z.enum([
   "session_unavailable",
   "agent_mismatch",
   "executor_profile_mismatch",
+  "execution_host_mismatch",
   "launch_mismatch",
   "load_session_unavailable",
   "block_not_blocked",
@@ -97,6 +99,8 @@ export type AcpRunRecoveryEligibilityInput = {
   resolvedAgentId: string | null;
   sourceExecutorProfile: string | null;
   resolvedExecutorProfile: string | null;
+  sourceExecutionHost?: z.infer<typeof executionHostSchema> | null;
+  resolvedExecutionHost?: z.infer<typeof executionHostSchema> | null;
   sourceLaunch: AcpLaunchIdentity | null;
   resolvedLaunch: AcpLaunchIdentity | null;
   loadSessionAvailable: boolean;
@@ -134,6 +138,12 @@ export function evaluateAcpRunRecovery(
     input.sourceExecutorProfile !== input.resolvedExecutorProfile
   ) {
     return { available: false, reason: "executor_profile_mismatch" };
+  }
+  if (
+    JSON.stringify(input.sourceExecutionHost ?? { kind: "native" }) !==
+    JSON.stringify(input.resolvedExecutionHost ?? { kind: "native" })
+  ) {
+    return { available: false, reason: "execution_host_mismatch" };
   }
   if (
     input.sourceLaunch === null ||

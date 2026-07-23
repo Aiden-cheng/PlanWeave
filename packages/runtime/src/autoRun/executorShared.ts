@@ -12,14 +12,17 @@ import {
   type ManagedProcessTree
 } from "../process/managedProcessTree.js";
 import { agentProcessEnv } from "../process/agentProcessEnv.js";
+import { prepareExecutionHostInvocation } from "../process/wslExecutionHost.js";
 import { isCommandTrusted, untrustedExecutorCommandError } from "../taskManager/hookTrustStore.js";
 import type {
   ClaimResult,
   ExecutorIntegrationName,
   ExecutorProfile,
+  ExecutionHost,
   PackageWorkspaceRef,
   ProjectWorkspace
 } from "../types.js";
+import { executorProfileExecutionHost } from "../types.js";
 import type { ExecutionWaveId } from "./runnerContractSchemas.js";
 import { runCommandInTmux, type TmuxSessionInfo } from "./tmuxExecutor.js";
 import { recordBlockRunInIndex } from "./blockRunIndex.js";
@@ -347,6 +350,8 @@ export async function prepareBlockRun(options: {
     adapter: options.adapter,
     agentId: options.profile.adapter === "agent" ? options.profile.agent : null,
     runnerKind: options.profile.adapter === "agent" ? options.profile.runner.transport : null,
+    executionHost:
+      options.profile.adapter === "agent" ? executorProfileExecutionHost(options.profile) : null,
     projectRoot: workspace.rootPath,
     executionCwd: workspaceExecutionCwd(workspace),
     startedAt,
@@ -422,21 +427,33 @@ export async function execWithStdin(options: {
   cwd: string;
   stdin: string;
   env?: NodeJS.ProcessEnv;
+  host?: ExecutionHost;
+  pathArgIndexes?: readonly number[];
   timeoutMs?: number;
   maxStdoutBytes?: number;
   maxStderrBytes?: number;
 }): Promise<StdinCommandResult> {
   const maxStdoutBytes = options.maxStdoutBytes ?? DEFAULT_EXECUTOR_MAX_STDOUT_BYTES;
   const maxStderrBytes = options.maxStderrBytes ?? DEFAULT_EXECUTOR_MAX_STDERR_BYTES;
+  const env = { ...agentProcessEnv(), ...(options.env ?? {}) };
+  const prepared = await prepareExecutionHostInvocation({
+    host: options.host ?? { kind: "native" },
+    command: options.command,
+    args: options.args,
+    pathArgIndexes: options.pathArgIndexes,
+    cwd: options.cwd,
+    env
+  });
   return new Promise((resolve, reject) => {
-    const env = { ...agentProcessEnv(), ...(options.env ?? {}) };
-    const { child, tree } = spawnManagedProcess({
-      command: options.command,
-      args: options.args,
-      cwd: options.cwd,
+    const managed = spawnManagedProcess({
+      command: prepared.command,
+      args: prepared.args,
+      cwd: prepared.spawnCwd,
       env,
       graceMs: EXECUTOR_FORCE_KILL_GRACE_MS
     });
+    const child = managed.child;
+    const tree = prepared.decorateProcessTree(managed.tree);
     const termination = createExecutorTermination(tree);
     let stdout = "";
     let stderr = "";
@@ -605,6 +622,8 @@ export async function execWithStreaming(options: {
   cwd: string;
   stdin: string;
   env?: NodeJS.ProcessEnv;
+  host?: ExecutionHost;
+  pathArgIndexes?: readonly number[];
   stdoutPath: string;
   stderrPath: string;
   timeoutMs?: number;
@@ -623,6 +642,9 @@ export async function execWithStreaming(options: {
   const maxStdoutBytes = options.maxStdoutBytes ?? DEFAULT_EXECUTOR_MAX_STDOUT_BYTES;
   const maxStderrBytes = options.maxStderrBytes ?? DEFAULT_EXECUTOR_MAX_STDERR_BYTES;
   if (options.tmux) {
+    if (options.host?.kind === "wsl") {
+      throw new Error("tmux monitoring is not supported for WSL execution hosts.");
+    }
     const result = await runCommandInTmux({
       command: options.command,
       args: options.args,
@@ -665,17 +687,28 @@ export async function execWithStreaming(options: {
   await mkdir(dirname(options.stdoutPath), { recursive: true });
   await mkdir(dirname(options.stderrPath), { recursive: true });
 
+  const env = { ...agentProcessEnv(), ...(options.env ?? {}) };
+  const prepared = await prepareExecutionHostInvocation({
+    host: options.host ?? { kind: "native" },
+    command: options.command,
+    args: options.args,
+    pathArgIndexes: options.pathArgIndexes,
+    cwd: options.cwd,
+    env
+  });
+
   return new Promise((resolve, reject) => {
     const stdoutStream = createWriteStream(options.stdoutPath, { flags: "w" });
     const stderrStream = createWriteStream(options.stderrPath, { flags: "w" });
-    const env = { ...agentProcessEnv(), ...(options.env ?? {}) };
-    const { child, tree } = spawnManagedProcess({
-      command: options.command,
-      args: options.args,
-      cwd: options.cwd,
+    const managed = spawnManagedProcess({
+      command: prepared.command,
+      args: prepared.args,
+      cwd: prepared.spawnCwd,
       env,
       graceMs: EXECUTOR_FORCE_KILL_GRACE_MS
     });
+    const child = managed.child;
+    const tree = prepared.decorateProcessTree(managed.tree);
     const termination = createExecutorTermination(tree);
     const heartbeat = startExecutorHeartbeat({
       path: executorHeartbeatPath(options.stdoutPath),

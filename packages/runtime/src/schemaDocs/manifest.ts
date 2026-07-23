@@ -18,12 +18,18 @@ const runtimeLimitFields = {
   maxStderrBytes: `positive integer bytes, optional; default runtime limit: ${DEFAULT_EXECUTOR_MAX_STDERR_BYTES}`
 };
 
+const executionHostField = {
+  kind: '"native" | "wsl"',
+  distribution: 'non-empty string required when kind is "wsl"'
+};
+
 const executorProfileSchema: Record<string, Record<string, unknown>> = {
   manual: { adapter: "manual" },
   "agent-cli": {
     adapter: "agent",
     agent: '"codex" | "opencode" | "claude-code" | "pi" | "grok"',
     runner: { transport: '"cli"', tmuxEnabled: "boolean, optional" },
+    host: `${JSON.stringify(executionHostField)}, optional; default: native`,
     command: "string, non-empty",
     args: "string[]; agent-specific default",
     sandbox: '"read-only" | "workspace-write" | "danger-full-access", codex/opencode only',
@@ -33,10 +39,12 @@ const executorProfileSchema: Record<string, Record<string, unknown>> = {
   "agent-acp": {
     adapter: "agent",
     agent: '"codex" | "opencode" | "claude-code" | "pi" | "grok"',
-    runner: { transport: '"acp"' }
+    runner: { transport: '"acp"' },
+    host: `${JSON.stringify(executionHostField)}, optional; default: native`
   },
   "codex-exec": {
     adapter: `${executorIntegration.codexExec} (legacy manifest input)`,
+    host: `${JSON.stringify(executionHostField)}, optional; default: native`,
     command: "string, non-empty",
     args: 'string[], default: ["exec", "-"]',
     sandbox: '"read-only" | "workspace-write" | "danger-full-access", optional',
@@ -45,6 +53,7 @@ const executorProfileSchema: Record<string, Record<string, unknown>> = {
   },
   "opencode-exec": {
     adapter: `${executorIntegration.opencodeExec} (legacy manifest input)`,
+    host: `${JSON.stringify(executionHostField)}, optional; default: native`,
     command: "string, non-empty",
     args: 'string[], default: ["run", "-"]',
     sandbox: '"read-only" | "workspace-write" | "danger-full-access", optional',
@@ -52,18 +61,21 @@ const executorProfileSchema: Record<string, Record<string, unknown>> = {
   },
   "claude-code-exec": {
     adapter: `${executorIntegration.claudeCodeExec} (legacy manifest input)`,
+    host: `${JSON.stringify(executionHostField)}, optional; default: native`,
     command: "string, non-empty",
     args: 'string[], default: ["-p"]',
     ...runtimeLimitFields
   },
   "pi-exec": {
     adapter: `${executorIntegration.piExec} (legacy manifest input)`,
+    host: `${JSON.stringify(executionHostField)}, optional; default: native`,
     command: "string, non-empty",
     args: 'string[], default: ["-p"]',
     ...runtimeLimitFields
   },
   "grok-exec": {
     adapter: `${executorIntegration.grokExec} (legacy manifest input)`,
+    host: `${JSON.stringify(executionHostField)}, optional; default: native`,
     command: "string, non-empty",
     args: 'string[]; must include "--no-auto-update" and end with exactly one "--prompt-file"; default: ["--no-auto-update", "--prompt-file"]',
     ...runtimeLimitFields

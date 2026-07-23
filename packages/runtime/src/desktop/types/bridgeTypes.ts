@@ -65,7 +65,7 @@ import type {
   DesktopRunnerRecordSubscriptionUpdate
 } from "./acpBridgeTypes.js";
 import type { ArtifactReference } from "../../autoRun/runnerContractSchemas.js";
-import type { AgentFamily, RunnerTransport } from "../../types.js";
+import type { AgentFamily, ExecutionHost, RunnerTransport } from "../../types.js";
 import type { TaskWorkspace, TaskWorkspaceInput } from "./taskWorkspaceAggregateTypes.js";
 import type {
   TaskWorkspaceListRunsInput,
@@ -119,8 +119,16 @@ export type DesktopAgentToolProfile = {
 export type DesktopAgentCliProfile = DesktopAgentToolProfile;
 
 export type DesktopAgentDetection = DesktopAgentToolProfile & {
+  executionHost?: ExecutionHost;
   installed: boolean;
   version: string | null;
+  unavailableReason: string | null;
+};
+
+export type DesktopWslEnvironment = {
+  supported: boolean;
+  available: boolean;
+  distributions: string[];
   unavailableReason: string | null;
 };
 
@@ -249,6 +257,7 @@ export type DesktopBridgeApi = {
   revealTaskCanvasInFinder(projectRoot: string, canvasId: string): Promise<void>;
   revealTaskInFinder(ref: DesktopCanvasReference, taskId: string): Promise<void>;
   detectAgentTools(): Promise<DesktopAgentDetection[]>;
+  detectWslEnvironment(): Promise<DesktopWslEnvironment>;
   detectRuntimeTools(): Promise<DesktopRuntimeToolAvailability>;
   detectTerminalApps(): Promise<DesktopTerminalAppDetection[]>;
   detectDevelopmentTools(): Promise<DesktopDevelopmentToolDetection[]>;

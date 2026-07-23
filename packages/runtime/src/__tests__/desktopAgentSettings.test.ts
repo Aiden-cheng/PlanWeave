@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { builtinAgentProfiles } from "../autoRun/agentRegistry.js";
 import {
   applyDesktopAgentSettingsToBuiltinProfiles,
+  selectedDesktopAgentHost,
   selectedDesktopAgentTransport
 } from "../autoRun/desktopAgentSettings.js";
 
@@ -81,6 +82,32 @@ describe("desktop agent transport settings", () => {
       args: ["--no-auto-update", "--prompt-file"]
     });
     expect(profiles["grok-acp"]).toMatchObject({ runner: { transport: "acp" } });
+  });
+
+  it("applies the selected host to builtins and defaults invalid settings to native", async () => {
+    await writeSettings({
+      execution: {
+        agentTransport: "acp",
+        agentHost: { kind: "wsl", distribution: " Ubuntu " }
+      }
+    });
+
+    const profiles = applyDesktopAgentSettingsToBuiltinProfiles(builtinAgentProfiles());
+
+    expect(selectedDesktopAgentHost()).toEqual({ kind: "wsl", distribution: "Ubuntu" });
+    expect(profiles.codex).toMatchObject({
+      runner: { transport: "acp" },
+      host: { kind: "wsl", distribution: "Ubuntu" }
+    });
+    expect(profiles["codex-auto"]).toMatchObject({
+      runner: { transport: "cli" },
+      host: { kind: "wsl", distribution: "Ubuntu" }
+    });
+
+    await writeSettings({
+      execution: { agentHost: { kind: "wsl", distribution: "" } }
+    });
+    expect(selectedDesktopAgentHost()).toEqual({ kind: "native" });
   });
 
   it("applies the explicit full-access setting to Grok CLI only", async () => {

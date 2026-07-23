@@ -63,6 +63,7 @@ describe("ACP interruption recovery contract", () => {
     ["sessionId", null, "session_unavailable"],
     ["resolvedAgentId", "claude", "agent_mismatch"],
     ["resolvedExecutorProfile", "claude-acp", "executor_profile_mismatch"],
+    ["resolvedExecutionHost", { kind: "wsl", distribution: "Debian" }, "execution_host_mismatch"],
     ["resolvedLaunch", { command: "codex-acp", args: [] }, "launch_mismatch"],
     ["loadSessionAvailable", false, "load_session_unavailable"],
     ["blockStatus", "completed", "block_not_blocked"],

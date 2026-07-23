@@ -12,7 +12,7 @@ import type {
   DesktopTaskDetail,
   ExecutorPreflightResult
 } from "@planweave-ai/runtime";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTranslator } from "../renderer/i18n";
 import { resetAgentCapabilityProbeSessionCache } from "../renderer/components/agentCapabilityProbeSessionCache";
 import { defaultDesktopSettings } from "../renderer/settings";
@@ -23,6 +23,7 @@ import { FloatingAutoRunControl } from "../renderer/run/FloatingAutoRunControl";
 
 const bridgeMock = vi.hoisted(() => ({
   api: {
+    detectWslEnvironment: vi.fn(),
     probeDesktopAgentCapabilities: vi.fn(),
     testExecutorProfile: vi.fn()
   }
@@ -229,11 +230,59 @@ function autoRunState(): DesktopAutoRunState {
 afterEach(() => {
   cleanup();
   resetAgentCapabilityProbeSessionCache();
+  bridgeMock.api.detectWslEnvironment.mockReset();
   bridgeMock.api.probeDesktopAgentCapabilities.mockReset();
   bridgeMock.api.testExecutorProfile.mockReset();
 });
 
+beforeEach(() => {
+  bridgeMock.api.detectWslEnvironment.mockResolvedValue({
+    supported: false,
+    available: false,
+    distributions: [],
+    unavailableReason: "WSL is only available on Windows."
+  });
+});
+
 describe("executor preflight desktop UI", () => {
+  it("selects an explicit WSL distribution before persisting the execution host", async () => {
+    installSelectDomStubs();
+    bridgeMock.api.detectWslEnvironment.mockResolvedValue({
+      supported: true,
+      available: true,
+      distributions: ["Ubuntu", "Debian"],
+      unavailableReason: null
+    });
+    const updateSettings = vi.fn();
+    const refreshAgentDetections = vi.fn().mockResolvedValue(undefined);
+    render(
+      <SettingsAgentsSection
+        agentDetectionRefreshing={false}
+        agents={[]}
+        canvasRef={canvasRef}
+        graph={graph}
+        refreshAgentDetections={refreshAgentDetections}
+        settings={defaultDesktopSettings}
+        t={t}
+        updateSettings={updateSettings}
+      />
+    );
+
+    const hostSelect = await screen.findByRole("combobox", { name: "Agent host" });
+    await userEvent.click(hostSelect);
+    await userEvent.click(screen.getByRole("option", { name: "WSL" }));
+
+    expect(updateSettings).not.toHaveBeenCalled();
+    const distributionSelect = screen.getByRole("combobox", { name: "WSL distribution" });
+    await userEvent.click(distributionSelect);
+    await userEvent.click(screen.getByRole("option", { name: "Ubuntu" }));
+
+    expect(updateSettings).toHaveBeenCalledWith({
+      execution: { agentHost: { kind: "wsl", distribution: "Ubuntu" } }
+    });
+    await waitFor(() => expect(refreshAgentDetections).toHaveBeenCalledTimes(1));
+  });
+
   it("shows only detections for the selected agent transport", () => {
     const detections = [
       {

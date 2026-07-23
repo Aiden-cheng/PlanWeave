@@ -165,7 +165,7 @@ import {
   taskWorkspaceSchema
 } from "@planweave-ai/runtime";
 import type { DesktopBridgeMainInvokeMethod } from "../shared/ipcChannels.js";
-import { detectAgentTools } from "./agentTools.js";
+import { detectAgentTools, detectWslEnvironment } from "./agentTools.js";
 import { openBlockInspectorWindow } from "./blockInspectorWindow.js";
 import { openTaskInspectorWindow } from "./taskInspectorWindow.js";
 import { detectRuntimeTools } from "./runtimeTools.js";
@@ -568,6 +568,7 @@ export const runtimeBridgeHandlers = {
     shell.showItemInFolder(await getTaskFileManagerPath(workspace, taskId));
   },
   detectAgentTools: () => detectAgentTools(),
+  detectWslEnvironment: () => detectWslEnvironment(),
   detectRuntimeTools: () => detectRuntimeTools(),
   detectTerminalApps: () => detectTerminalApps(),
   detectDevelopmentTools: () => detectDevelopmentTools(),

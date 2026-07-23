@@ -177,6 +177,7 @@ export async function preflightRealAcp(options: {
     probe = await probeInstalledAcpAgent({
       definition: definitionWithResolvedLaunch,
       cwd: options.cwd,
+      host: { kind: "native" },
       signal
     });
   } catch (error) {

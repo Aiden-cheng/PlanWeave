@@ -36,6 +36,7 @@ export const desktopBridgeInvokeChannels = {
   createProjectFromTaskCanvas: "planweave:createProjectFromTaskCanvas",
   createTaskCanvas: "planweave:createTaskCanvas",
   detectAgentTools: "planweave:detectAgentTools",
+  detectWslEnvironment: "planweave:detectWslEnvironment",
   detectRuntimeTools: "planweave:detectRuntimeTools",
   detectPackageFileChanges: "planweave:detectPackageFileChanges",
   detectTerminalApps: "planweave:detectTerminalApps",
