@@ -93,3 +93,20 @@ export {
   type HumanPolicyFacts,
   type HumanPolicySubject
 } from "./policy.js";
+
+export {
+  digestsEqual,
+  hashHumanToken,
+  mintHumanDeviceToken,
+  mintProjectInvitationToken
+} from "./crypto.js";
+
+export {
+  HumanIdentityError,
+  HumanIdentityRepository,
+  isActiveProjectMembership,
+  type AuthenticatedHumanDevice,
+  type BootstrapOwnerResult,
+  type ConsumeInvitationResult,
+  type CreateInvitationResult
+} from "./repository.js";

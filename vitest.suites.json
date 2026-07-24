@@ -482,6 +482,7 @@
         "dispatches.test.ts",
         "hostEnrollment.test.ts",
         "hostReservations.test.ts",
+        "humanIdentityRepository.test.ts",
         "lifecycle.test.ts",
         "operatorWalkthrough.test.ts",
         "realProcessAcpHarness.test.ts",

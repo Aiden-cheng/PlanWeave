@@ -653,6 +653,107 @@ CREATE UNIQUE INDEX idx_remote_attempt_lease_identity
   WHERE lease_id IS NOT NULL;
 `;
 
+const migration16 = `
+CREATE TABLE human_principals (
+  human_principal_id TEXT PRIMARY KEY CHECK(
+    length(human_principal_id) BETWEEN 1 AND 128
+    AND human_principal_id GLOB '[A-Za-z0-9]*'
+    AND human_principal_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+  ),
+  display_name TEXT NOT NULL CHECK(length(display_name) BETWEEN 1 AND 128),
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE project_memberships (
+  membership_id TEXT PRIMARY KEY CHECK(
+    length(membership_id) BETWEEN 1 AND 128
+    AND membership_id GLOB '[A-Za-z0-9]*'
+    AND membership_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+  ),
+  project_id TEXT NOT NULL CHECK(
+    length(project_id) BETWEEN 1 AND 128
+    AND project_id GLOB '[A-Za-z0-9]*'
+    AND project_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+  ),
+  human_principal_id TEXT NOT NULL REFERENCES human_principals(human_principal_id),
+  role TEXT NOT NULL CHECK(role IN ('owner','member')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  revoked_at TEXT
+);
+
+CREATE UNIQUE INDEX idx_project_memberships_active_unique
+  ON project_memberships(project_id, human_principal_id)
+  WHERE revoked_at IS NULL;
+
+CREATE INDEX idx_project_memberships_project_active
+  ON project_memberships(project_id, role)
+  WHERE revoked_at IS NULL;
+
+CREATE INDEX idx_project_memberships_principal
+  ON project_memberships(human_principal_id)
+  WHERE revoked_at IS NULL;
+
+CREATE TABLE project_invitations (
+  invitation_id TEXT PRIMARY KEY CHECK(
+    length(invitation_id) BETWEEN 1 AND 128
+    AND invitation_id GLOB '[A-Za-z0-9]*'
+    AND invitation_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+  ),
+  project_id TEXT NOT NULL CHECK(
+    length(project_id) BETWEEN 1 AND 128
+    AND project_id GLOB '[A-Za-z0-9]*'
+    AND project_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+  ),
+  role TEXT NOT NULL CHECK(role = 'member'),
+  created_by_human_principal_id TEXT NOT NULL REFERENCES human_principals(human_principal_id),
+  token_sha256 TEXT NOT NULL UNIQUE
+    CHECK(length(token_sha256)=64 AND token_sha256 NOT GLOB '*[^a-f0-9]*'),
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  revoked_at TEXT,
+  consumed_at TEXT,
+  consumed_by_human_principal_id TEXT REFERENCES human_principals(human_principal_id),
+  CHECK(
+    (consumed_at IS NULL AND consumed_by_human_principal_id IS NULL)
+    OR (consumed_at IS NOT NULL AND consumed_by_human_principal_id IS NOT NULL)
+  )
+);
+
+CREATE INDEX idx_project_invitations_project_open
+  ON project_invitations(project_id, expires_at)
+  WHERE revoked_at IS NULL AND consumed_at IS NULL;
+
+CREATE TABLE human_device_credentials (
+  device_credential_id TEXT PRIMARY KEY CHECK(
+    length(device_credential_id) BETWEEN 1 AND 128
+    AND device_credential_id GLOB '[A-Za-z0-9]*'
+    AND device_credential_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+  ),
+  human_principal_id TEXT NOT NULL REFERENCES human_principals(human_principal_id),
+  minted_for_project_id TEXT NOT NULL CHECK(
+    length(minted_for_project_id) BETWEEN 1 AND 128
+    AND minted_for_project_id GLOB '[A-Za-z0-9]*'
+    AND minted_for_project_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+  ),
+  label TEXT CHECK(label IS NULL OR length(label) BETWEEN 1 AND 64),
+  token_sha256 TEXT NOT NULL UNIQUE
+    CHECK(length(token_sha256)=64 AND token_sha256 NOT GLOB '*[^a-f0-9]*'),
+  created_at TEXT NOT NULL,
+  expires_at TEXT,
+  revoked_at TEXT,
+  last_used_at TEXT
+);
+
+CREATE INDEX idx_human_devices_principal_active
+  ON human_device_credentials(human_principal_id)
+  WHERE revoked_at IS NULL;
+
+CREATE INDEX idx_human_devices_project_minted_active
+  ON human_device_credentials(minted_for_project_id, human_principal_id)
+  WHERE revoked_at IS NULL;
+`;
+
 function validateRemoteAttemptIdentities(database: SqliteDatabase): void {
   const duplicateDispatch = database
     .prepare(
@@ -792,7 +893,8 @@ const migrations: readonly Migration[] = [
   { version: 12, sql: migration12, after: backfillMailboxPredecessors },
   { version: 13, sql: migration13, disableForeignKeys: true },
   { version: 14, sql: migration14 },
-  { version: 15, sql: migration15, before: validateRemoteAttemptIdentities }
+  { version: 15, sql: migration15, before: validateRemoteAttemptIdentities },
+  { version: 16, sql: migration16 }
 ];
 
 export const latestCentralSchemaVersion = Math.max(

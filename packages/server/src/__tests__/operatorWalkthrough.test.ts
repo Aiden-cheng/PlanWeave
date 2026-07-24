@@ -176,7 +176,7 @@ describe("remote operator walkthrough", () => {
     expect((await fetch(`${origin}/healthz`)).status).toBe(200);
     const readiness = await fetch(`${origin}/readyz`);
     expect(readiness.status).toBe(200);
-    await expect(readiness.json()).resolves.toEqual({ status: "ready", schemaVersion: 15 });
+    await expect(readiness.json()).resolves.toEqual({ status: "ready", schemaVersion: 16 });
     await expect((await fetch(`${origin}/version`)).json()).resolves.toMatchObject({
       protocolVersion: 1
     });
@@ -321,7 +321,7 @@ describe("remote operator walkthrough", () => {
     server = await startServer();
     await expect((await fetch(`${origin}/readyz`)).json()).resolves.toEqual({
       status: "ready",
-      schemaVersion: 15
+      schemaVersion: 16
     });
     const hosts = (await (
       await fetch(`${origin}/api/v1/hosts`, { headers: authorization })
