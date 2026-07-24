@@ -18,9 +18,17 @@ const packages = {
 };
 
 const versionSourceFiles = {
+  "agent-host": {
+    path: "packages/agent-host/src/packageInfo.ts",
+    pattern: /export const agentHostPackageVersion = "([^"]+)";/
+  },
   mcp: {
     path: "packages/mcp/src/packageInfo.ts",
     pattern: /export const mcpPackageVersion = "([^"]+)";/
+  },
+  server: {
+    path: "packages/server/src/packageInfo.ts",
+    pattern: /export const serverPackageVersion = "([^"]+)";/
   }
 };
 

@@ -13,6 +13,7 @@ export type HttpArtifactTransferOptions = {
   baseUrl: URL;
   hostId: string;
   token: string;
+  request?: typeof fetch;
 };
 
 export type AgentHostArtifactEvidenceRecorder = (input: {
@@ -69,7 +70,7 @@ export class HttpArtifactClient {
       .digest("hex")}`;
     let response: Response;
     try {
-      response = await fetch(this.artifactUrl(command, sha256), {
+      response = await (this.options.request ?? fetch)(this.artifactUrl(command, sha256), {
         headers: { Authorization: `Bearer ${this.options.token}` },
         signal
       });
@@ -137,7 +138,7 @@ export class HttpArtifactClient {
     let response: Response | undefined;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        response = await fetch(url, {
+        response = await (this.options.request ?? fetch)(url, {
           method: "PUT",
           headers: {
             Authorization: `Bearer ${this.options.token}`,

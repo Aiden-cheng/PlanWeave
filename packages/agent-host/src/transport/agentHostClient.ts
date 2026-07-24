@@ -42,6 +42,8 @@ export type AgentHostClientOptions = {
   executor: AgentHostExecutor;
   interactionRelay?: Pick<DurableAcpInteractionRelay, "accept">;
   allowInsecureTransport?: boolean;
+  ca?: string[];
+  request?: typeof fetch;
   reconnect?: Partial<ReconnectBackoffOptions>;
   clock?: HostTransportClock;
   random?: () => number;
@@ -130,7 +132,8 @@ export class AgentHostClient implements HostTransport {
     this.artifacts = new HttpArtifactClient({
       baseUrl: this.baseUrl,
       hostId: options.hostId,
-      token: options.token
+      token: options.token,
+      request: options.request
     });
   }
 
@@ -182,7 +185,8 @@ export class AgentHostClient implements HostTransport {
     );
     const socket = new WebSocket(url, {
       headers: { Authorization: `Bearer ${this.options.token}` },
-      maxPayload: this.limits.maxPayloadBytes
+      maxPayload: this.limits.maxPayloadBytes,
+      ca: this.options.ca
     });
     this.socket = socket;
     socket.on("open", () => {
@@ -441,10 +445,15 @@ export class AgentHostClient implements HostTransport {
 
   private async waitBounded(operation: Promise<void>): Promise<void> {
     let timer: unknown;
-    const timeout = new Promise<void>((resolve) => {
-      timer = this.clock.setTimeout(resolve, this.limits.shutdownTimeoutMs);
-    });
-    await Promise.race([operation, timeout]);
+    const timedOut = await Promise.race([
+      operation.then(() => false),
+      new Promise<true>((resolve) => {
+        timer = this.clock.setTimeout(() => resolve(true), this.limits.shutdownTimeoutMs);
+      })
+    ]);
     if (timer) this.clock.clearTimeout(timer);
+    if (timedOut) {
+      throw new Error("agent_host_transport_shutdown_timeout");
+    }
   }
 }

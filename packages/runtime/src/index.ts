@@ -243,6 +243,7 @@ export {
   runProjectDoctor,
   renderPrompt,
   createRemoteBlockRuntimePort,
+  createRemoteBlockArtifactSource,
   submitBlockResult,
   submitBlockResultFromBytes,
   submitReviewResult,
@@ -275,6 +276,8 @@ export {
   remoteBlockRefIdentitySchema,
   remoteBlockRetryAttemptInputSchema,
   remoteBlockRetryDecisionSchema,
+  remoteBlockArtifactReadInputSchema,
+  verifiedRemoteBlockArtifactSchema,
   RemoteBlockRuntimeError
 } from "./taskManager/index.js";
 export type {
@@ -294,6 +297,9 @@ export type {
   RemoteBlockRetryDecision,
   RemoteBlockRuntimeErrorCode,
   RemoteBlockRuntimePort,
+  RemoteBlockArtifactReadInput,
+  RemoteBlockArtifactSource,
+  VerifiedRemoteBlockArtifact,
   TrustedCommand,
   TrustedCommandsFile
 } from "./taskManager/index.js";

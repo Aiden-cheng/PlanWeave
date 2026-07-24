@@ -23,6 +23,7 @@ import type {
   AgentHostWorkspaceResolver,
   ResolvedAgentHostAcpProfile
 } from "./remoteAcpPorts.js";
+import { agentHostPackageVersion } from "../packageInfo.js";
 import { prepareInputArtifacts } from "./inputArtifactWorkspace.js";
 
 type RemoteAcpExecutorOptions = {
@@ -250,7 +251,7 @@ export class RemoteAcpExecutor implements AgentHostExecutor {
         },
         workspace,
         env: profile.env,
-        clientInfo: { name: "PlanWeave Agent Host", version: "0.3.0" },
+        clientInfo: { name: "PlanWeave Agent Host", version: agentHostPackageVersion },
         prompt: preparedInputs.prompt,
         sessionStart: context.sessionStart,
         authentication: profile.authentication,

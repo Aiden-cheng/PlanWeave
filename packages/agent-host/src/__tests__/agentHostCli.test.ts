@@ -165,6 +165,37 @@ describe("Agent Host operator CLI", () => {
     expect(JSON.stringify(stderr.mock.calls)).not.toContain(privateValue);
   });
 
+  it("reports a fixed CA error without exposing its path", async () => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-agent-host-ca-cli-"));
+    directories.push(root);
+    await mkdir(join(root, "workspace"), { recursive: true });
+    const privateCaPath = join(root, "private-ca.pem");
+    const configPath = join(root, "config.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: "agent-host-config/v1",
+        coordinator: {
+          url: "https://127.0.0.1:7443",
+          caCertificatePath: privateCaPath
+        },
+        dataDirectory: join(root, "data"),
+        workspaceRoot: join(root, "workspace"),
+        host: { displayName: "test-host", capacity: 1, capabilities: ["acp.test"] },
+        workspaces: [],
+        agentProfiles: []
+      })
+    );
+    const stderr = vi.fn();
+    await expect(
+      runAgentHostCli(["preflight", "--config", configPath], {
+        io: { stdout: vi.fn(), stderr }
+      })
+    ).resolves.toBe(1);
+    expect(stderr).toHaveBeenCalledWith("agent_host_ca_certificate_unreadable");
+    expect(JSON.stringify(stderr.mock.calls)).not.toContain(privateCaPath);
+  });
+
   it("binds durable stores to one Host and refuses replacement after state exists", async () => {
     const root = await mkdtemp(join(tmpdir(), "planweave-agent-host-identity-"));
     directories.push(root);

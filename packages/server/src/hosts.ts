@@ -113,6 +113,20 @@ export class AgentHostRepository {
     return host;
   }
 
+  list(limit = 100, offset = 0): AgentHost[] {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 101) {
+      throw new Error("agent_host_list_limit_invalid");
+    }
+    if (!Number.isSafeInteger(offset) || offset < 0) {
+      throw new Error("agent_host_list_offset_invalid");
+    }
+    return (
+      this.database
+        .prepare("SELECT * FROM agent_hosts ORDER BY display_name,id LIMIT ? OFFSET ?")
+        .all(limit, offset) as HostRow[]
+    ).map(toHost);
+  }
+
   authenticate(hostId: string, token: string): AgentHost | undefined {
     const row = this.database.prepare("SELECT * FROM agent_hosts WHERE id=?").get(hostId) as
       | HostRow

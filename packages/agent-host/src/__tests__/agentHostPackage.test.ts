@@ -59,7 +59,30 @@ describe("@planweave-ai/agent-host", () => {
     });
 
     await composition.start();
-    await expect(composition.shutdown()).rejects.toBe(failure);
+    await expect(composition.shutdown()).rejects.toThrow("agent_host_composition_shutdown_failed");
     expect(state.close).toHaveBeenCalledOnce();
+  });
+
+  it("keeps active-run state open when transport shutdown requires process exit", async () => {
+    const { composeAgentHost } = await import("../index.js");
+    const state = { close: vi.fn() };
+    const closeResources = vi.fn();
+    const composition = composeAgentHost({
+      state,
+      closeResources,
+      transport: {
+        start() {},
+        stop() {
+          throw new Error("agent_host_transport_shutdown_timeout");
+        }
+      }
+    });
+
+    await composition.start();
+    await expect(composition.shutdown()).rejects.toThrow(
+      "agent_host_shutdown_requires_process_exit"
+    );
+    expect(state.close).not.toHaveBeenCalled();
+    expect(closeResources).not.toHaveBeenCalled();
   });
 });

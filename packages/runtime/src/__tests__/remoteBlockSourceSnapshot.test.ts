@@ -7,6 +7,7 @@ import { updateProjectPrompt, updateProjectPromptPolicy } from "../projectPrompt
 import { readState, writeState } from "../state.js";
 import {
   claimDispatchedBlock,
+  createRemoteBlockArtifactSource,
   createRemoteBlockRuntimePort,
   renderPromptSurface,
   submitBlockResult
@@ -75,6 +76,65 @@ function claimIdentity(identity: ReturnType<typeof activeIdentity>) {
   return claim;
 }
 describe("remote block runtime inspection", () => {
+  it("reads only a currently declared verified dependency artifact", async () => {
+    const { root } = await createTestWorkspace(remoteManifest({ dependency: true }));
+    await claimDispatchedBlock({ projectRoot: root, ref: "T-001#B-001" });
+    const report = Buffer.from("verified dependency artifact\n");
+    await submitBlockResult({
+      projectRoot: root,
+      ref: "T-001#B-001",
+      reportPath: await writeReport(root, "verified-dependency.md", report.toString("utf8"))
+    });
+    const candidate = await createRemoteBlockRuntimePort({ projectRoot: root }).inspect({
+      ref: "T-001#B-002"
+    });
+    const artifact = candidate.inputArtifacts[0];
+    if (!artifact?.mediaType) throw new Error("Expected a declared input artifact.");
+    const source = createRemoteBlockArtifactSource({ projectRoot: root });
+
+    await expect(
+      source.read({
+        targetBlockRef: candidate.blockRef,
+        sourceRevision: candidate.sourceRevision,
+        artifactRef: artifact.artifactRef,
+        logicalName: artifact.logicalName,
+        mediaType: "text/markdown"
+      })
+    ).resolves.toMatchObject({
+      artifactRef: artifact.artifactRef,
+      logicalName: artifact.logicalName,
+      mediaType: "text/markdown",
+      bytes: new Uint8Array(report)
+    });
+    await expect(
+      source.read({
+        targetBlockRef: candidate.blockRef,
+        sourceRevision: "src-stale",
+        artifactRef: artifact.artifactRef,
+        logicalName: artifact.logicalName,
+        mediaType: "text/markdown"
+      })
+    ).rejects.toThrow("remote_block_artifact_source_revision_mismatch");
+    await expect(
+      source.read({
+        targetBlockRef: candidate.blockRef,
+        sourceRevision: candidate.sourceRevision,
+        artifactRef: artifact.artifactRef,
+        logicalName: "dependency-other-report",
+        mediaType: "text/markdown"
+      })
+    ).rejects.toThrow("remote_block_artifact_not_declared");
+    await expect(
+      source.read({
+        targetBlockRef: candidate.blockRef,
+        sourceRevision: candidate.sourceRevision,
+        artifactRef: `artifact:sha256:${"0".repeat(64)}`,
+        logicalName: artifact.logicalName,
+        mediaType: "text/markdown"
+      })
+    ).rejects.toThrow("remote_block_artifact_not_declared");
+  });
+
   it("returns portable ACP envelope inputs and content-addressed dependency evidence", async () => {
     const { root, init } = await createTestWorkspace(remoteManifest({ dependency: true }));
     await claimDispatchedBlock({ projectRoot: root, ref: "T-001#B-001" });

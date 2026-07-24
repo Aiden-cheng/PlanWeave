@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startPlanweaveServer } from "../lifecycle.js";
+import { latestCentralSchemaVersion } from "../migrations.js";
+import { openServerDatabase } from "../sqlite.js";
 
 const directories: string[] = [];
 
@@ -55,5 +57,29 @@ describe("server lifecycle", () => {
     } finally {
       server.close();
     }
+  });
+
+  it("rejects a future schema version and releases the database", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "planweave-server-future-"));
+    directories.push(dataDirectory);
+    const databasePath = join(dataDirectory, "server.sqlite");
+    const initialized = await startPlanweaveServer({
+      dataDirectory,
+      databasePath,
+      busyTimeoutMs: 5_000
+    });
+    initialized.close();
+
+    const future = await openServerDatabase(databasePath, 5_000);
+    future
+      .prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)")
+      .run(latestCentralSchemaVersion + 1, new Date().toISOString());
+    future.close();
+
+    await expect(
+      startPlanweaveServer({ dataDirectory, databasePath, busyTimeoutMs: 5_000 })
+    ).rejects.toThrow("server_schema_version_unsupported");
+    const reopened = await openServerDatabase(databasePath, 5_000);
+    reopened.close();
   });
 });

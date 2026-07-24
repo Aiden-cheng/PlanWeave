@@ -57,12 +57,12 @@ describe("Agent Host configuration", () => {
     expect(() =>
       parseAgentHostConfig({ ...valid, host: { ...valid.host, capabilities: ["linux", "linux"] } })
     ).toThrow();
-    expect(
+    expect(() =>
       parseAgentHostConfig({
         ...valid,
         coordinator: { url: "http://example.com", allowInsecureDevelopment: true }
       })
-    ).toBeDefined();
+    ).toThrow();
     expect(() =>
       parseAgentHostConfig({
         ...valid,
@@ -78,6 +78,15 @@ describe("Agent Host configuration", () => {
     expect(
       parseAgentHostConfig({ ...valid, coordinator: { url: "wss://coordinator.example.com" } })
     ).toBeDefined();
+    expect(() =>
+      parseAgentHostConfig({
+        ...valid,
+        coordinator: {
+          url: "https://coordinator.example.com",
+          caCertificatePath: "relative-ca.pem"
+        }
+      })
+    ).toThrow();
   });
 
   it("resolves only logical workspace ids and rejects traversal or symlink escape", async () => {

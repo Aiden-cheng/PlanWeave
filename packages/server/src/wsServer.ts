@@ -27,10 +27,12 @@ export type AgentHostWebSocketOptions = {
   heartbeatIntervalMs: number;
   leaseDurationMs: number;
   maxPayloadBytes?: number;
+  shutdownTimeoutMs?: number;
   allowInsecureTransport?: boolean;
 };
 
 export type AgentHostWebSocketServer = {
+  disconnectHost(hostId: string): void;
   close(): Promise<void>;
 };
 
@@ -74,6 +76,10 @@ export function attachAgentHostWebSocketServer(
     maxPayload: options.maxPayloadBytes ?? 256 * 1024
   });
   const sessions = new Map<string, WebSocket>();
+  const shutdownTimeoutMs = options.shutdownTimeoutMs ?? 5_000;
+  if (!Number.isSafeInteger(shutdownTimeoutMs) || shutdownTimeoutMs < 100) {
+    throw new Error("agent_host_websocket_shutdown_timeout_invalid");
+  }
 
   const handleConnection = (socket: WebSocket, hostId: string) => {
     const prior = sessions.get(hostId);
@@ -268,13 +274,38 @@ export function attachAgentHostWebSocketServer(
 
   options.server.on("upgrade", upgradeListener);
 
+  let closePromise: Promise<void> | undefined;
   return {
-    close: async () => {
-      options.server.off("upgrade", upgradeListener);
-      for (const socket of sessions.values()) socket.close(1001, "server shutdown");
-      await new Promise<void>((resolve, reject) => {
-        webSocketServer.close((error) => (error ? reject(error) : resolve()));
-      });
+    disconnectHost(hostId) {
+      sessions.get(hostId)?.close(4003, "host revoked");
+    },
+    close: () => {
+      closePromise ??= (async () => {
+        options.server.off("upgrade", upgradeListener);
+        for (const socket of sessions.values()) socket.close(1001, "server shutdown");
+        let closeError: Error | undefined;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const graceful = new Promise<void>((resolve) => {
+          webSocketServer.close((error) => {
+            closeError = error;
+            resolve();
+          });
+        });
+        const timeout = new Promise<void>((resolve) => {
+          timer = setTimeout(() => {
+            for (const socket of sessions.values()) socket.terminate();
+            resolve();
+          }, shutdownTimeoutMs);
+        });
+        await Promise.race([graceful, timeout]);
+        if (timer) clearTimeout(timer);
+        if (sessions.size > 0) {
+          for (const socket of sessions.values()) socket.terminate();
+        }
+        await graceful;
+        if (closeError) throw closeError;
+      })();
+      return closePromise;
     }
   };
 }

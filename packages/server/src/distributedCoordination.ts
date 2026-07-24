@@ -27,7 +27,7 @@ import {
   type RemoteInteractionAuthorizationPort
 } from "./remoteInteractions.js";
 import { startPlanweaveServer, type PlanweaveServer } from "./lifecycle.js";
-import type { ServerConfig } from "./config.js";
+import type { ServerStorageConfig } from "./config.js";
 
 export type DistributedCoordinationOptions = Omit<DispatchServiceOptions, "writeback"> & {
   writeback: DispatchWriteback;
@@ -47,27 +47,39 @@ export function createDistributedCoordination(
 export type RemoteBlockCoordinationOptions = {
   leaseDurationMs: number;
   hostOfflineAfterMs: number;
+  clock?: () => Date;
   runtimeResolver: RemoteBlockRuntimeResolverPort;
   inputArtifacts: RemoteInputArtifactPort;
   artifactContent: RemoteArtifactContentPort;
   checkpoints?: RemoteCoordinatorCheckpointPort;
   interactionAuthorization?: RemoteInteractionAuthorizationPort;
+  eventRetentionMaxEvents?: number;
+  eventRetentionMaxBytes?: number;
 };
 
 export function createRemoteBlockCoordination(
   database: SqliteDatabase,
   options: RemoteBlockCoordinationOptions
 ) {
-  const hosts = new AgentHostRepository(database);
+  const hosts = new AgentHostRepository(database, options.clock);
   const mailbox = new DurableMailbox(database);
   const artifactAuthorization = new ArtifactAuthorizationRepository(database);
-  const operations = new RemoteOperationRepository(database);
-  const actions = new RemoteExecutionActionRepository(database);
-  const reservations = new HostReservationRepository(database, options);
-  const acpEvents = new RemoteAcpEventRepository(database);
+  const operations = new RemoteOperationRepository(database, options.clock);
+  const actions = new RemoteExecutionActionRepository(database, options.clock);
+  const reservations = new HostReservationRepository(database, {
+    leaseDurationMs: options.leaseDurationMs,
+    hostOfflineAfterMs: options.hostOfflineAfterMs,
+    clock: options.clock
+  });
+  const acpEvents = new RemoteAcpEventRepository(database, {
+    clock: options.clock,
+    maxEvents: options.eventRetentionMaxEvents,
+    maxBytes: options.eventRetentionMaxBytes
+  });
   const interactions = new RemoteInteractionService(database, {
     authorization: options.interactionAuthorization ?? { canRespond: () => false },
-    publisher: mailbox
+    publisher: mailbox,
+    clock: options.clock
   });
   const coordinator = new RemoteBlockCoordinator({
     runtimeResolver: options.runtimeResolver,
@@ -144,7 +156,7 @@ export function createRemoteBlockCoordination(
 }
 
 export async function startRemoteBlockCoordinationServer(
-  config: ServerConfig,
+  config: ServerStorageConfig,
   createOptions: (database: SqliteDatabase) => RemoteBlockCoordinationOptions
 ): Promise<{
   server: PlanweaveServer;

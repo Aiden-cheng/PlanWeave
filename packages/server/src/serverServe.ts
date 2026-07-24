@@ -1,0 +1,154 @@
+import { readFile } from "node:fs/promises";
+import { createServer as createHttpServer } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
+import type { Server as HttpServer } from "node:http";
+import type { Socket } from "node:net";
+import type { ServerConfig } from "./config.js";
+import { serverConfigSummary } from "./config.js";
+import { serverPackageVersion } from "./packageInfo.js";
+import { ServerReadinessController, type ServerReadiness } from "./readiness.js";
+import {
+  createDistributedServerComposition,
+  type DistributedServerComposition
+} from "./serverComposition.js";
+
+export type DistributedServerProcess = {
+  readonly version: string;
+  readonly publicUrl: string;
+  readiness(): ServerReadiness;
+  close(): Promise<void>;
+};
+
+async function createListener(config: ServerConfig): Promise<HttpServer> {
+  if (config.allowInsecureDevelopment) return createHttpServer();
+  if (!config.tls) throw new Error("server_tls_configuration_required");
+  const [certificate, privateKey] = await Promise.all([
+    readFile(config.tls.certificatePath),
+    readFile(config.tls.privateKeyPath)
+  ]);
+  return createHttpsServer({ cert: certificate, key: privateKey, minVersion: "TLSv1.2" });
+}
+
+async function listen(server: HttpServer, config: ServerConfig): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const onError = (error: Error) => {
+      server.off("listening", onListening);
+      reject(error);
+    };
+    const onListening = () => {
+      server.off("error", onError);
+      resolve();
+    };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(config.bind.port, config.bind.host);
+  });
+}
+
+async function stopListenerBounded(
+  server: HttpServer,
+  sockets: ReadonlySet<Socket>,
+  timeoutMs: number
+): Promise<void> {
+  if (!server.listening) {
+    for (const socket of sockets) socket.destroy();
+    return;
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let closeError: Error | undefined;
+  let timedOut = false;
+  const closed = new Promise<void>((resolve) => {
+    server.close((error) => {
+      closeError = error;
+      resolve();
+    });
+  });
+  const timeout = new Promise<void>((resolve) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      for (const socket of sockets) socket.destroy();
+      resolve();
+    }, timeoutMs);
+  });
+  await Promise.race([closed, timeout]);
+  if (timer) clearTimeout(timer);
+  if (timedOut) {
+    for (const socket of sockets) socket.destroy();
+  }
+  await closed;
+  if (closeError) throw closeError;
+}
+
+export async function serveDistributedServer(
+  config: ServerConfig
+): Promise<DistributedServerProcess> {
+  const readiness = new ServerReadinessController();
+  const server = await createListener(config);
+  const sockets = new Set<Socket>();
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
+  });
+  let composition: DistributedServerComposition | undefined;
+  try {
+    composition = await createDistributedServerComposition({
+      httpServer: server,
+      config,
+      readiness
+    });
+    await listen(server, config);
+    const schemaVersion = composition.readiness().schemaVersion;
+    readiness.transition("listening", schemaVersion);
+    readiness.transition("ready", schemaVersion);
+  } catch (error) {
+    const cleanupErrors: unknown[] = [];
+    try {
+      await stopListenerBounded(server, sockets, config.limits.shutdownTimeoutMs);
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError);
+    }
+    try {
+      await composition?.close();
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError);
+    }
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(
+        [error, ...cleanupErrors],
+        "distributed_server_serve_startup_and_cleanup_failed",
+        { cause: error }
+      );
+    }
+    throw error;
+  }
+
+  const activeComposition = composition;
+  let closePromise: Promise<void> | undefined;
+  return {
+    version: serverPackageVersion,
+    publicUrl: serverConfigSummary(config).publicUrl,
+    readiness: () => readiness.readiness(),
+    close() {
+      closePromise ??= (async () => {
+        activeComposition.beginDrain();
+        const errors: unknown[] = [];
+        const transportResults = await Promise.allSettled([
+          stopListenerBounded(server, sockets, config.limits.shutdownTimeoutMs),
+          activeComposition.drainTransports()
+        ]);
+        for (const result of transportResults) {
+          if (result.status === "rejected") errors.push(result.reason);
+        }
+        try {
+          await activeComposition.close();
+        } catch (error) {
+          errors.push(error);
+        }
+        if (errors.length > 0) {
+          throw new AggregateError(errors, "distributed_server_serve_cleanup_failed");
+        }
+      })();
+      return closePromise;
+    }
+  };
+}

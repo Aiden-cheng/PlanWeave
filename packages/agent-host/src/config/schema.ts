@@ -52,6 +52,12 @@ export const agentHostConfigSchema = z
     coordinator: z
       .object({
         url: z.url(),
+        caCertificatePath: z
+          .string()
+          .min(1)
+          .max(4096)
+          .refine(isAbsolute, "caCertificatePath must be absolute.")
+          .optional(),
         allowInsecureDevelopment: z.boolean().default(false)
       })
       .strict(),
@@ -123,13 +129,21 @@ export const agentHostConfigSchema = z
     const secure = url.protocol === "https:" || url.protocol === "wss:";
     const development =
       config.coordinator.allowInsecureDevelopment &&
-      (url.protocol === "http:" || url.protocol === "ws:");
+      (url.protocol === "http:" || url.protocol === "ws:") &&
+      (url.hostname === "127.0.0.1" || url.hostname === "[::1]");
     if (!secure && !development) {
       context.addIssue({
         code: "custom",
         path: ["coordinator", "url"],
         message:
           "Coordinator URL requires secure transport unless explicit development mode is enabled."
+      });
+    }
+    if (development && config.coordinator.caCertificatePath) {
+      context.addIssue({
+        code: "custom",
+        path: ["coordinator", "caCertificatePath"],
+        message: "A custom CA is only supported with secure coordinator transport."
       });
     }
   });

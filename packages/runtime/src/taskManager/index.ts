@@ -13,6 +13,16 @@ export { submitBlockResult, submitBlockResultFromBytes } from "./blockSubmission
 export { createRemoteBlockRuntimePort } from "./remoteBlockRuntime.js";
 export type { RemoteBlockRuntimePort } from "./remoteBlockRuntime.js";
 export {
+  createRemoteBlockArtifactSource,
+  remoteBlockArtifactReadInputSchema,
+  verifiedRemoteBlockArtifactSchema
+} from "./remoteBlockArtifactSource.js";
+export type {
+  RemoteBlockArtifactReadInput,
+  RemoteBlockArtifactSource,
+  VerifiedRemoteBlockArtifact
+} from "./remoteBlockArtifactSource.js";
+export {
   remoteBlockActiveIdentitySchema,
   remoteBlockBindingViewSchema,
   remoteBlockClaimInputSchema,

@@ -1,4 +1,5 @@
 import { ArtifactAuthorizationRepository } from "./artifactAuthorization.js";
+import { z } from "zod";
 import { AgentHostRepository } from "./hosts.js";
 import { HostEventInbox } from "./hostEvents.js";
 import {
@@ -17,15 +18,18 @@ import {
 import { inWriteTransaction, type SqliteDatabase } from "./sqlite.js";
 import { remoteExecutionActionRequestSchema } from "./remoteExecutionLifecycle.js";
 
-export type DispatchStatus =
-  | "leased"
-  | "running"
-  | "interrupted"
-  | "cancelling"
-  | "awaiting_writeback"
-  | "completed"
-  | "failed"
-  | "cancelled";
+export const dispatchStatusSchema = z.enum([
+  "leased",
+  "running",
+  "interrupted",
+  "cancelling",
+  "awaiting_writeback",
+  "completed",
+  "failed",
+  "cancelled"
+]);
+
+export type DispatchStatus = z.infer<typeof dispatchStatusSchema>;
 
 export type DispatchResult = ProtocolDispatchResult;
 export type DispatchFailure = ProtocolDispatchFailure;

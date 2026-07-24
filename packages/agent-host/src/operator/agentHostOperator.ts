@@ -17,11 +17,13 @@ import {
   ensureDurableHostIdentity
 } from "../state/durableHostIdentity.js";
 import { AgentHostClient } from "../transport/agentHostClient.js";
+import { agentHostPackageVersion } from "../packageInfo.js";
+import { createAgentHostTlsTrust } from "../tls/trust.js";
 
 const MAX_CONFIG_BYTES = 256 * 1_024;
 
 export type AgentHostDiagnostics = {
-  version: "0.3.0";
+  version: typeof agentHostPackageVersion;
   hostId?: string;
   credential: "missing" | "pending" | "active" | "revoked" | "expired";
   capabilities: string[];
@@ -64,6 +66,8 @@ export class AgentHostOperator {
       ...config.workspaces.map((workspace) => workspaces.resolve(workspace.id)),
       ...config.agentProfiles.map((profile) => profiles.resolve(profile.id, profile.agentId))
     ]);
+    const trust = await createAgentHostTlsTrust(config.coordinator.caCertificatePath);
+    await trust.close();
     return this.diagnostics(config);
   }
 
@@ -79,14 +83,20 @@ export class AgentHostOperator {
     if (replaceExisting || !credentialDocument?.active) {
       await assertDurableStateReplacementSafe(config.dataDirectory);
     }
-    const service = new AgentHostEnrollmentService(
-      config,
-      store,
-      new HttpAgentHostEnrollmentExchange(config.coordinator.url, {
-        allowInsecureDevelopment: config.coordinator.allowInsecureDevelopment
-      })
-    );
-    await service.enroll(code, { replaceExisting });
+    const trust = await createAgentHostTlsTrust(config.coordinator.caCertificatePath);
+    try {
+      const service = new AgentHostEnrollmentService(
+        config,
+        store,
+        new HttpAgentHostEnrollmentExchange(config.coordinator.url, {
+          allowInsecureDevelopment: config.coordinator.allowInsecureDevelopment,
+          request: trust.request
+        })
+      );
+      await service.enroll(code, { replaceExisting });
+    } finally {
+      await trust.close();
+    }
     return this.diagnostics(config);
   }
 
@@ -105,36 +115,59 @@ export class AgentHostOperator {
     await this.preflight(configPath);
     const credential = await credentialStore(config).requireUsable();
     await ensureDurableHostIdentity(config.dataDirectory, credential.hostId);
-    const state = await openAgentHostState(join(config.dataDirectory, "state.sqlite"));
-    state.recoverableExecutionCount();
-    await state.importLegacyRemoteExecutionStore(
-      join(config.dataDirectory, "remote-execution.sqlite")
-    );
-    const interactionRelay = new DurableAcpInteractionRelay(state);
-    const executor = new RemoteAcpExecutor({
-      workspaceResolver: new ConfiguredWorkspaceResolver(config),
-      profileResolver: new ConfiguredAcpProfileResolver(config),
-      outbox: state,
-      interactionResponder: interactionRelay,
-      hostCapabilities: config.host.capabilities
-    });
-    const transport = new AgentHostClient({
-      serverUrl: transportOrigin(config.coordinator.url),
-      hostId: credential.hostId,
-      token: credential.credentialToken,
-      capabilities: config.host.capabilities,
-      capacity: config.host.capacity,
-      state,
-      executor,
-      interactionRelay,
-      allowInsecureTransport: config.coordinator.allowInsecureDevelopment
-    });
-    const composition = composeAgentHost({ state, transport });
-    return {
-      subscribeStatus: (listener) => composition.subscribeStatus(listener),
-      start: () => composition.start(),
-      shutdown: () => composition.shutdown()
-    };
+    const trust = await createAgentHostTlsTrust(config.coordinator.caCertificatePath);
+    let state: Awaited<ReturnType<typeof openAgentHostState>> | undefined;
+    try {
+      state = await openAgentHostState(join(config.dataDirectory, "state.sqlite"));
+      state.recoverableExecutionCount();
+      await state.importLegacyRemoteExecutionStore(
+        join(config.dataDirectory, "remote-execution.sqlite")
+      );
+      const interactionRelay = new DurableAcpInteractionRelay(state);
+      const executor = new RemoteAcpExecutor({
+        workspaceResolver: new ConfiguredWorkspaceResolver(config),
+        profileResolver: new ConfiguredAcpProfileResolver(config),
+        outbox: state,
+        interactionResponder: interactionRelay,
+        hostCapabilities: config.host.capabilities
+      });
+      const transport = new AgentHostClient({
+        serverUrl: transportOrigin(config.coordinator.url),
+        hostId: credential.hostId,
+        token: credential.credentialToken,
+        capabilities: config.host.capabilities,
+        capacity: config.host.capacity,
+        state,
+        executor,
+        interactionRelay,
+        allowInsecureTransport: config.coordinator.allowInsecureDevelopment,
+        ca: trust.ca,
+        request: trust.request
+      });
+      return composeAgentHost({ state, transport, closeResources: trust.close });
+    } catch (error) {
+      const cleanupErrors: unknown[] = [];
+      try {
+        state?.close();
+      } catch (cleanupError) {
+        cleanupErrors.push(cleanupError);
+      }
+      try {
+        await trust.close();
+      } catch (cleanupError) {
+        cleanupErrors.push(cleanupError);
+      }
+      if (cleanupErrors.length > 0) {
+        throw new AggregateError(
+          [error, ...cleanupErrors],
+          "agent_host_daemon_startup_cleanup_failed",
+          {
+            cause: error
+          }
+        );
+      }
+      throw error;
+    }
   }
 
   private async diagnostics(config: AgentHostConfig): Promise<AgentHostDiagnostics> {
@@ -172,7 +205,7 @@ export class AgentHostOperator {
       }
     }
     return {
-      version: "0.3.0",
+      version: agentHostPackageVersion,
       hostId,
       credential,
       capabilities: [...config.host.capabilities],

@@ -1,8 +1,5 @@
 import type { AgentHostStateRepository } from "../state/agentHostState.js";
-import type {
-  HostTransport,
-  HostTransportStatusListener
-} from "../transport/hostTransport.js";
+import type { HostTransport, HostTransportStatusListener } from "../transport/hostTransport.js";
 
 export interface AgentHostComposition {
   start(): Promise<void>;
@@ -13,7 +10,15 @@ export interface AgentHostComposition {
 export type AgentHostCompositionOptions = {
   state: Pick<AgentHostStateRepository, "close">;
   transport: Pick<HostTransport, "start" | "stop" | "subscribe">;
+  closeResources?: () => void | Promise<void>;
 };
+
+function containsShutdownTimeout(error: unknown): boolean {
+  if (error instanceof Error && error.message === "agent_host_transport_shutdown_timeout") {
+    return true;
+  }
+  return error instanceof AggregateError ? error.errors.some(containsShutdownTimeout) : false;
+}
 
 export function composeAgentHost(options: AgentHostCompositionOptions): AgentHostComposition {
   let startPromise: Promise<void> | undefined;
@@ -32,13 +37,32 @@ export function composeAgentHost(options: AgentHostCompositionOptions): AgentHos
     },
     shutdown() {
       shutdownPromise ??= (async () => {
+        const errors: unknown[] = [];
         try {
           if (startPromise) {
             await startPromise;
             await options.transport.stop();
           }
-        } finally {
+        } catch (error) {
+          if (containsShutdownTimeout(error)) {
+            throw new AggregateError([error], "agent_host_shutdown_requires_process_exit", {
+              cause: error
+            });
+          }
+          errors.push(error);
+        }
+        try {
           await options.state.close();
+        } catch (error) {
+          errors.push(error);
+        }
+        try {
+          await options.closeResources?.();
+        } catch (error) {
+          errors.push(error);
+        }
+        if (errors.length > 0) {
+          throw new AggregateError(errors, "agent_host_composition_shutdown_failed");
         }
       })();
       return shutdownPromise;

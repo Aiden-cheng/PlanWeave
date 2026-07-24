@@ -45,6 +45,7 @@
   "dependencies": {
     "@planweave-ai/distributed-protocol": "workspace:*",
     "@planweave-ai/runtime": "workspace:*",
+    "undici": "^7.25.0",
     "ws": "^8.21.0",
     "zod": "^4.1.12"
   },

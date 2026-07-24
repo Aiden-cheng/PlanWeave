@@ -612,4 +612,66 @@ describe("Agent Host outbound transport", () => {
       reason: "duplicate_host_connection"
     });
   });
+
+  it("fails bounded shutdown without closing durable state while an active run ignores abort", async () => {
+    const executionStarted = deferred<void>();
+    const releaseExecution = deferred<void>();
+    const protocolFailure = deferred<unknown>();
+    const httpServer = createServer();
+    httpServers.push(httpServer);
+    const webSocketServer = new WebSocketServer({ server: httpServer });
+    webSocketServers.push(webSocketServer);
+    webSocketServer.on("connection", (socket) => {
+      socket.on("message", (data) => {
+        try {
+          const event = JSON.parse(data.toString());
+          if (event.type === "host.hello") {
+            sendEvent(socket, welcome());
+            sendEvent(socket, executeDelivery());
+          }
+        } catch (error) {
+          protocolFailure.reject(error);
+        }
+      });
+    });
+    const port = await listen(httpServer);
+    const state = await openState();
+    const clock = new FakeHostTransportClock();
+    const client = new AgentHostClient({
+      serverUrl: `http://127.0.0.1:${port}`,
+      hostId: "host-client-001",
+      token: "host-token",
+      capabilities: ["test"],
+      capacity: 1,
+      state,
+      executor: {
+        async execute() {
+          executionStarted.resolve();
+          await releaseExecution.promise;
+          return {
+            summary: "Execution eventually returned after shutdown.",
+            reportArtifactRef: `artifact:sha256:${"a".repeat(64)}`,
+            artifactRefs: []
+          };
+        }
+      },
+      allowInsecureTransport: true,
+      clock,
+      limits: { shutdownTimeoutMs: 100 }
+    });
+    clients.push(client);
+    client.start();
+
+    await Promise.race([executionStarted.promise, protocolFailure.promise]);
+    const stopping = client.stop();
+    await vi.waitFor(() => expect(clock.nextDelay()).toBe(100));
+    clock.advanceBy(100);
+    await expect(stopping).rejects.toThrow("agent_host_transport_shutdown_timeout");
+    expect(state.recoverableExecutionCount()).toBe(1);
+
+    releaseExecution.resolve();
+    await vi.waitFor(async () => {
+      await expect(client.stop()).resolves.toBeUndefined();
+    });
+  });
 });

@@ -348,13 +348,19 @@ export class RemoteInteractionService {
     return interaction;
   }
 
-  listPending(operationId: string): RemoteInteractionRecord[] {
+  listPending(operationId: string, limit = 100, offset = 0): RemoteInteractionRecord[] {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 101) {
+      throw new Error("remote_interaction_list_limit_invalid");
+    }
+    if (!Number.isSafeInteger(offset) || offset < 0) {
+      throw new Error("remote_interaction_list_offset_invalid");
+    }
     return this.database
       .prepare(
         `SELECT * FROM remote_interactions
-         WHERE operation_id=? AND status='pending' ORDER BY created_at,action_id`
+         WHERE operation_id=? AND status='pending' ORDER BY created_at,action_id LIMIT ? OFFSET ?`
       )
-      .all(operationId)
+      .all(operationId, limit, offset)
       .map(toRecord);
   }
 

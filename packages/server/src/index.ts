@@ -13,7 +13,33 @@ export {
   type ArtifactHttpOptions,
   type ArtifactHttpServer
 } from "./artifactHttp.js";
-export { readServerConfig, type ServerConfig } from "./config.js";
+export {
+  loadServerConfig,
+  parseServerConfig,
+  resolveServerConfigPath,
+  serverConfigSchema,
+  serverConfigSummary,
+  serverConfigSummarySchema,
+  type ServerConfig,
+  type ServerStorageConfig
+} from "./config.js";
+export { serverPackageVersion } from "./packageInfo.js";
+export {
+  ServerReadinessController,
+  serverReadinessSchema,
+  serverReadinessStatusSchema,
+  type ServerReadiness,
+  type ServerReadinessStatus
+} from "./readiness.js";
+export {
+  serveDistributedServer,
+  type DistributedServerProcess
+} from "./serverServe.js";
+export {
+  createDistributedServerComposition,
+  type DistributedServerComposition,
+  type DistributedServerCompositionOptions
+} from "./serverComposition.js";
 export {
   createDistributedCoordination,
   createRemoteBlockCoordination,
@@ -23,6 +49,7 @@ export {
 } from "./distributedCoordination.js";
 export {
   DispatchService,
+  dispatchStatusSchema,
   type DispatchFailure,
   type DispatchInterruption,
   type DispatchRecord,
@@ -36,6 +63,20 @@ export {
   type AgentHost,
   type RegisteredAgentHost
 } from "./hosts.js";
+export {
+  hashOperatorToken,
+  operatorCredentialSchema,
+  operatorPrincipalSchema,
+  OperatorTokenRegistry,
+  type OperatorCredential,
+  type OperatorPrincipal
+} from "./operatorAuth.js";
+export {
+  handleOperatorHttpRequest,
+  operatorTransportAllowed,
+  type OperatorControlPort,
+  type OperatorHttpOptions
+} from "./operatorHttp.js";
 export {
   HostEnrollmentError,
   HostEnrollmentService
@@ -111,6 +152,16 @@ export {
   SqliteRemoteOperationCandidateRepository
 } from "./remoteCoordinatorPersistence.js";
 export { RemoteRuntimePortRegistry } from "./remoteRuntimeLocator.js";
+export {
+  ArtifactStoreRemoteContent,
+  RuntimeInputArtifactMaterializer
+} from "./runtimeArtifactAdapter.js";
+export {
+  createTrustedRuntimeRegistry,
+  trustedRuntimeProjectSchema,
+  type TrustedRuntimeProject,
+  type TrustedRuntimeRegistry
+} from "./runtimeProjectRegistry.js";
 export {
   RemoteAcpEventRepository,
   REMOTE_ACP_EVENT_RETENTION_MAX_BYTES,

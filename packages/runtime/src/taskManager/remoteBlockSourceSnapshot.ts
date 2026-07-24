@@ -45,6 +45,11 @@ export type RemoteBlockSourceSnapshot = {
   dependencyGenerations: DependencyGeneration[];
 };
 
+export type MaterializedRemoteInputArtifact = Omit<DispatchInputArtifact, "mediaType"> & {
+  mediaType: "text/markdown";
+  bytes: Uint8Array;
+};
+
 export function remoteDispatchAuthoritativeDependencies(
   context: RuntimeContext,
   ref: string
@@ -182,10 +187,13 @@ function reviewGeneration(
   };
 }
 
-export async function remoteBlockSourceSnapshot(
+export async function remoteBlockSourceSnapshotWithArtifacts(
   context: RuntimeContext,
   ref: string
-): Promise<RemoteBlockSourceSnapshot> {
+): Promise<{
+  snapshot: RemoteBlockSourceSnapshot;
+  materializedInputArtifacts: MaterializedRemoteInputArtifact[];
+}> {
   const loaded = await loadPlanGraphPackage(context.workspace, {
     snapshot: {
       workspace: context.workspace,
@@ -204,6 +212,7 @@ export async function remoteBlockSourceSnapshot(
   const dependencyGenerations: DependencyGeneration[] = [];
   const dependencySummaries: DependencyResultSummary[] = [];
   const inputArtifacts: DispatchInputArtifact[] = [];
+  const materializedInputArtifacts: MaterializedRemoteInputArtifact[] = [];
 
   for (const dependencyDescriptor of remoteDispatchAuthoritativeDependencies(context, ref)) {
     const { ref: dependencyRef } = dependencyDescriptor;
@@ -252,11 +261,13 @@ export async function remoteBlockSourceSnapshot(
         reportArtifactRef: artifactRef
       })
     );
-    inputArtifacts.push({
+    const inputArtifact = {
       artifactRef,
       logicalName: `dependency-${taskId}-${blockId}-report`,
       mediaType: "text/markdown"
-    });
+    } as const;
+    inputArtifacts.push(inputArtifact);
+    materializedInputArtifacts.push({ ...inputArtifact, bytes: new Uint8Array(bytes) });
   }
 
   const taskId = context.graph.blockTaskByRef.get(ref);
@@ -272,21 +283,31 @@ export async function remoteBlockSourceSnapshot(
     }));
   const promptDigest = sha256Hex(renderedPrompt);
   return {
-    sourceRevision: `src-${sha256Hex(
-      stableJson({
-        graphVersion: loaded.graph.graphVersion,
-        ref,
-        promptDigest,
-        dependencyGenerations,
-        taskDependencies
-      })
-    )}`,
-    graphFingerprint: loaded.graph.packageFingerprint,
-    renderedPrompt,
-    dependencySummaries,
-    inputArtifacts,
-    dependencyGenerations
+    snapshot: {
+      sourceRevision: `src-${sha256Hex(
+        stableJson({
+          graphVersion: loaded.graph.graphVersion,
+          ref,
+          promptDigest,
+          dependencyGenerations,
+          taskDependencies
+        })
+      )}`,
+      graphFingerprint: loaded.graph.packageFingerprint,
+      renderedPrompt,
+      dependencySummaries,
+      inputArtifacts,
+      dependencyGenerations
+    },
+    materializedInputArtifacts
   };
+}
+
+export async function remoteBlockSourceSnapshot(
+  context: RuntimeContext,
+  ref: string
+): Promise<RemoteBlockSourceSnapshot> {
+  return (await remoteBlockSourceSnapshotWithArtifacts(context, ref)).snapshot;
 }
 
 export function assertRemoteBlockSnapshotDependencies(

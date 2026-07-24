@@ -59,6 +59,8 @@ export {
   parseAgentHostConfig,
   type AgentHostConfig
 } from "./config/schema.js";
+export { agentHostPackageVersion } from "./packageInfo.js";
+export { createAgentHostTlsTrust, type AgentHostTlsTrust } from "./tls/trust.js";
 export {
   ConfiguredAcpProfileResolver,
   ConfiguredWorkspaceResolver
