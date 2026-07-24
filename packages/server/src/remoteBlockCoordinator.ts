@@ -2,6 +2,7 @@ import {
   OUTPUT_MAX_ARTIFACT_BYTES,
   OUTPUT_MAX_ARTIFACT_COUNT,
   agentHostProtocolVersion,
+  assertAgentHostProtocolCompatible,
   executionEnvelopeSchema,
   hashExecutionEnvelope,
   mailboxCommandSchema
@@ -58,6 +59,10 @@ export type RemoteBlockCoordinatorOptions = {
 };
 
 function buildEnvelope(operation: RemoteOperation, candidate: RemoteBlockDispatchCandidate) {
+  const protocolCheck = assertAgentHostProtocolCompatible(agentHostProtocolVersion);
+  if (!protocolCheck.ok) {
+    throw new Error(`${protocolCheck.code}:${protocolCheck.message}`);
+  }
   return executionEnvelopeSchema.parse({
     protocolVersion: agentHostProtocolVersion,
     execution: {

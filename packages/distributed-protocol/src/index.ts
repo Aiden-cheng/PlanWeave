@@ -110,6 +110,18 @@ export {
   type AgentHostProtocolVersion
 } from "./version.js";
 export {
+  PLANWEAVE_COMPATIBILITY_BOUNDS,
+  assertAgentHostProtocolCompatible,
+  assertGracefulPackageDowngrade,
+  assertMatchingPackageMajors,
+  packageVersionSchema,
+  parsePackageMajor,
+  type CompatibilityBounds,
+  type CompatibilityCheckResult,
+  type PackageRole,
+  type PackageVersion
+} from "./compatibility.js";
+export {
   ACTIVE_LEASE_MAX_COUNT,
   CANCEL_REASON_MAX_LENGTH,
   PROTOCOL_ERROR_MESSAGE_MAX_LENGTH,

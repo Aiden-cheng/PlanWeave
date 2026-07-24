@@ -456,6 +456,51 @@ PLANWEAVE_VPS_E2E=1 node scripts/vps-authenticated-e2e.mjs --profile local-tls-f
 
 同一台机器上的 Host 本地真实 agent 兼容性请复用[可选的真实 ACP smoke](#可选的真实-acp-兼容性-smoke) 门禁（`PLANWEAVE_REAL_ACP`）。VPS e2e 默认 fixture 使用 mock ACP 进程，因此本地/软门禁运行不依赖 provider 登录。
 
+### 线上发布门禁与回滚检查
+
+一个面向发布的命令区分三层门禁。**被 skip 的 live 测试绝不能当作通过**（不能用于 supported-version 或 pre-release 就绪判定）。证据只允许保存脱敏摘要与 artifact digest，不得写入基础设施密钥、端点、token、PEM 或 provider 凭据。
+
+| 层级 | 要求 | 命令 / 证据 |
+| --- | --- | --- |
+| 确定性多进程套件 | **CI 必跑** | `realProcess*.test.ts`（mock ACP，无密钥） |
+| 本地真实 ACP 兼容 | **声明 supported-version 前必过** | `planweave-agent-host real-acp-smoke` 硬门禁证据 |
+| 远程已认证 VPS | **预发布证据必过** | `planweave-server vps-e2e --profile remote-vps` 硬门禁证据（仅 `environmentClass=remote-vps`） |
+
+```bash
+# 打印检查清单（层级、回滚约束、归属）
+planweave-server release-gate --checklist
+
+# 仅 CI 层（跑确定性多进程套件）
+planweave-server release-gate --run-deterministic --report /tmp/release-gate.json
+
+# 评估脱敏证据，得到完整 pre-release 判定
+planweave-server release-gate \
+  --deterministic-evidence /tmp/det.json \
+  --real-acp-evidence /tmp/real-acp.json \
+  --vps-evidence /tmp/vps-e2e.json \
+  --report /tmp/release-gate.json
+
+# monorepo 助手
+node scripts/planweave-release-gate.mjs --checklist
+```
+
+**兼容边界**（门禁与 dispatch 前强制）：
+
+- 线协议：仅支持 `agentHostProtocolVersion`（当前为 `1`）；不兼容协议版本 fail-closed。
+- Server / Agent Host / `distributed-protocol` 的 package **主版本必须一致**。
+- 受支持 ACP Agent 必须协商 Host ACP SDK 协议版本；ACP 主版本不兼容 fail-closed，**禁止 CLI 回退**。
+- 优雅降级仅允许 **同一 package major**，且须先做状态备份。
+
+**回滚约束**（需运维确认；门禁会写入报告）：
+
+- 升级前备份 Server 与 Host 的 `dataDirectory`；回滚时恢复备份。
+- **禁止**为“干净启动”而重置数据库。
+- **禁止**静默重跑被中断的 Block；只能使用显式生命周期动作（`resume_same_session`、`retry_new_attempt`、`cancel`、`fail`、`block`）。
+- 使用 `enroll --replace` 轮换 Host 凭据，并撤销旧 grant/host。
+- 收集 live 证据后清理临时 harness，并撤销一次性 enrollment 材料。
+
+**证据规则：** live 证据 14 天后过期（`generatedAt` 或文件 mtime）。运维拥有一次性 VPS 与 Host 本地 provider 登录；CI 只拥有确定性套件。门禁输入为证据路径与 package 版本；输出为含层级状态、digest、兼容检查、回滚清单与 `releaseReady.{ci,supportedVersionRelease,preRelease}` 的 JSON 报告。
+
 ### Operator HTTP 接口
 
 鉴权路由需要 `Authorization: Bearer <operator-token>`，并使用 TLS（或 loopback 开发模式）。server-admin 可登记与吊销 Host；项目作用域凭据只能对自己的 `projectIds` 做 dispatch 与观测。

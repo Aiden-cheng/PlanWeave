@@ -131,6 +131,18 @@ Run the desktop smoke test after building:
 pnpm --filter @planweave-ai/desktop smoke
 ```
 
+## Distributed release gate
+
+Print the live release checklist (deterministic CI suite, local real ACP, remote VPS) and evaluate sanitized evidence:
+
+```bash
+node scripts/planweave-release-gate.mjs --checklist
+pnpm exec vitest run packages/server/src/__tests__/releaseGate.test.ts \
+  packages/distributed-protocol/src/__tests__/compatibility.test.ts
+```
+
+Do not treat skipped `PLANWEAVE_REAL_ACP` or `PLANWEAVE_VPS_E2E` evidence as a release pass. See the main README section **Live release gate and rollback checks**.
+
 ## ACP Verification
 
 Run the ACP contract, CLI, and Desktop tests:

@@ -456,6 +456,51 @@ Remote config schema (`planweave.vps-e2e-config/v1`) fields: `coordinatorUrl` (h
 
 For Host-local real agent compatibility on the same machine, reuse the [opt-in real ACP smoke](#opt-in-real-acp-compatibility-smoke) gates (`PLANWEAVE_REAL_ACP`). The VPS e2e default fixture uses the mock ACP process so CI-adjacent local runs do not need provider login.
 
+### Live release gate and rollback checks
+
+One release-facing command distinguishes three tiers. **A skipped live test is never a pass** for supported-version or pre-release readiness. Evidence may store only sanitized summaries and digests — never infrastructure secrets, endpoints, tokens, PEM material, or provider credentials.
+
+| Tier | Requirement | Command / evidence |
+| --- | --- | --- |
+| Deterministic multi-process suite | **Required CI** | `realProcess*.test.ts` (mock ACP, no secrets) |
+| Local real ACP compatibility | **Required before supported-version release** | `planweave-agent-host real-acp-smoke` hard gate evidence |
+| Remote authenticated VPS | **Required pre-release evidence** | `planweave-server vps-e2e --profile remote-vps` hard gate evidence (`environmentClass=remote-vps` only) |
+
+```bash
+# Print the checklist (tiers, rollback constraints, ownership)
+planweave-server release-gate --checklist
+
+# CI tier only (runs deterministic multi-process suite)
+planweave-server release-gate --run-deterministic --report /tmp/release-gate.json
+
+# Evaluate sanitized evidence for a full pre-release verdict
+planweave-server release-gate \
+  --deterministic-evidence /tmp/det.json \
+  --real-acp-evidence /tmp/real-acp.json \
+  --vps-evidence /tmp/vps-e2e.json \
+  --report /tmp/release-gate.json
+
+# Monorepo helper
+node scripts/planweave-release-gate.mjs --checklist
+```
+
+**Compatibility bounds** (enforced at the gate and before dispatch):
+
+- Wire protocol: sole supported `agentHostProtocolVersion` (currently `1`); incompatible protocol versions fail closed.
+- Server / Agent Host / `distributed-protocol` package **majors must match** for a supported matrix.
+- Supported ACP Agents must negotiate the Host ACP SDK protocol version; incompatible ACP protocol majors fail closed with **no CLI fallback**.
+- Graceful package downgrade is **same-major only** after state backup.
+
+**Rollback constraints** (operator must confirm; gate documents them):
+
+- Backup Server and Host `dataDirectory` before upgrade; restore backups on rollback.
+- Do **not** reset databases to “start clean”.
+- Do **not** silently re-run interrupted Blocks; use explicit lifecycle actions only (`resume_same_session`, `retry_new_attempt`, `cancel`, `fail`, `block`).
+- Rotate Host credentials with `enroll --replace` and revoke prior grants/hosts.
+- Clean up disposable harness state and revoke one-time enrollment materials after live evidence collection.
+
+**Evidence rules:** live evidence expires after 14 days (file mtime or `generatedAt`). Operators own disposable VPS access and Host-local provider login; CI owns only the deterministic suite. Gate inputs are evidence paths + package versions; outputs are a JSON report with tier status, digests, compatibility checks, rollback checklist, and `releaseReady.{ci,supportedVersionRelease,preRelease}`.
+
 ### Operator HTTP surface
 
 Authenticated routes require `Authorization: Bearer <operator-token>` and TLS (or loopback development mode). Server-admin credentials can enroll and revoke hosts; project-scoped credentials may only dispatch and observe operations for their `projectIds`.

@@ -35,6 +35,18 @@ export {
   type RemoteVpsE2eConfig
 } from "./vpsE2e/index.js";
 export {
+  RELEASE_GATE_EVIDENCE_MAX_AGE_HOURS,
+  RELEASE_GATE_REPORT_VERSION,
+  RELEASE_GATE_ROLLBACK_CHECKS,
+  RELEASE_GATE_TIERS,
+  buildReleaseGateReport,
+  runReleaseGateCli,
+  runDeterministicProcessSuite,
+  type ReleaseGateReport,
+  type ReleaseGateTierDefinition,
+  type ReleaseGateTierId
+} from "./releaseGate/index.js";
+export {
   ServerReadinessController,
   serverReadinessSchema,
   serverReadinessStatusSchema,

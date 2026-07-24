@@ -432,6 +432,7 @@
         "agentHostProtocol.test.ts",
         "artifactMediaType.test.ts",
         "canonicalJson.test.ts",
+        "compatibility.test.ts",
         "executionEnvelope.test.ts",
         "exports.test.ts",
         "primitives.test.ts"
@@ -463,7 +464,12 @@
     },
     {
       "root": "packages/server/src/__tests__",
-      "unit": ["artifactMediaType.test.ts", "protocolPrimitives.test.ts", "vpsE2eGate.test.ts"],
+      "unit": [
+        "artifactMediaType.test.ts",
+        "protocolPrimitives.test.ts",
+        "releaseGate.test.ts",
+        "vpsE2eGate.test.ts"
+      ],
       "integration": [
         "artifactAdversarialBoundary.test.ts",
         "artifactAdversarialPersistence.test.ts",
