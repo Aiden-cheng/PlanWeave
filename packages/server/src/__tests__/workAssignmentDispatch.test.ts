@@ -12,6 +12,10 @@ import { AgentHostRepository } from "../hosts.js";
 import { HumanIdentityRepository } from "../identity/repository.js";
 import type { HumanAuthContext } from "../identity/schemas.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
+import type {
+  RemoteCoordinatorCheckpoint,
+  RemoteCoordinatorCheckpointPort
+} from "../remoteBlockCoordinatorPorts.js";
 import { RemoteRuntimePortRegistry } from "../remoteRuntimeLocator.js";
 import {
   createActiveDispatchResolver,
@@ -47,9 +51,21 @@ function remoteManifest(): PlanPackageManifest {
   return manifest;
 }
 
+class CrashOnceCheckpoint implements RemoteCoordinatorCheckpointPort {
+  private crashed = false;
+  constructor(readonly target: RemoteCoordinatorCheckpoint) {}
+  reached(checkpoint: RemoteCoordinatorCheckpoint): void {
+    if (checkpoint === this.target && !this.crashed) {
+      this.crashed = true;
+      throw new Error(`injected_crash:${checkpoint}`);
+    }
+  }
+}
+
 async function setup(options: {
   strictGate?: boolean;
   withHosts?: Array<{ name: string; capabilities: string[]; capacity: number }>;
+  checkpoints?: RemoteCoordinatorCheckpointPort;
 } = {}) {
   const workspace = await createTestWorkspace(remoteManifest());
   directories.push(workspace.home, workspace.root);
@@ -62,29 +78,33 @@ async function setup(options: {
   servers.push(server);
 
   const locator = { projectId: workspace.init.workspace.id, canvasId: "default" };
-  const runtime = createRemoteBlockRuntimePort({ projectRoot: workspace.root });
-  const registry = new RemoteRuntimePortRegistry();
-  registry.bind(locator, runtime);
-  const artifacts = new ArtifactStore(server.database, dataDirectory, 1024 * 1024);
-
   const workAssignments = new WorkAssignmentRepository(server.database);
   const assignmentGate = createAssignmentDispatchGate({
     repository: workAssignments,
     defaultAllowHumanOverride: options.strictGate ? false : true
   });
 
-  const coordination = createRemoteBlockCoordination(server.database, {
-    leaseDurationMs: 60_000,
-    hostOfflineAfterMs: 60_000,
-    runtimeResolver: registry,
-    inputArtifacts: {
-      materialize: async (candidate) => {
-        if (candidate.inputArtifacts.length !== 0) throw new Error("unexpected_test_artifact");
-      }
-    },
-    artifactContent: { readReport: async (ref) => artifacts.read(ref) },
-    assignmentGate
-  });
+  const buildCoordination = (checkpoints?: RemoteCoordinatorCheckpointPort) => {
+    const runtime = createRemoteBlockRuntimePort({ projectRoot: workspace.root });
+    const registry = new RemoteRuntimePortRegistry();
+    registry.bind(locator, runtime);
+    const artifacts = new ArtifactStore(server.database, dataDirectory, 1024 * 1024);
+    return createRemoteBlockCoordination(server.database, {
+      leaseDurationMs: 60_000,
+      hostOfflineAfterMs: 60_000,
+      runtimeResolver: registry,
+      inputArtifacts: {
+        materialize: async (candidate) => {
+          if (candidate.inputArtifacts.length !== 0) throw new Error("unexpected_test_artifact");
+        }
+      },
+      artifactContent: { readReport: async (ref) => artifacts.read(ref) },
+      assignmentGate,
+      checkpoints
+    });
+  };
+
+  let coordination = buildCoordination(options.checkpoints);
 
   const registeredHosts: Array<{ id: string; name: string }> = [];
   for (const hostSpec of options.withHosts ?? [
@@ -165,7 +185,14 @@ async function setup(options: {
     workspace,
     server,
     locator,
-    coordination,
+    get coordination() {
+      return coordination;
+    },
+    rebuildCoordination(checkpoints?: RemoteCoordinatorCheckpointPort) {
+      // New coordinator instance drops in-memory hostSelectionByOperation (process restart).
+      coordination = buildCoordination(checkpoints);
+      return coordination;
+    },
     workAssignments,
     assignmentService,
     assignmentGate,
@@ -491,6 +518,82 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
       expectedAssignmentRevision: first.record.revision
     });
     expect(outcome.operation.attempt.hostId).toBe(hostA.id);
+  });
+
+  it("keeps durable exact Host selection after restart + reassignment before reserve", async () => {
+    const fixture = await setup({
+      withHosts: [
+        { name: "Host A", capabilities: ["acp.codex"], capacity: 1 },
+        { name: "Host B", capabilities: ["acp.codex"], capacity: 1 }
+      ],
+      checkpoints: new CrashOnceCheckpoint("after_input_materialization")
+    });
+    const hostA = fixture.hosts[0]!;
+    const hostB = fixture.hosts[1]!;
+
+    fixture.assignmentService.updateAssignment({
+      projectId: fixture.locator.projectId,
+      workItem: fixture.blockItem,
+      target: { kind: "exact_host", hostId: hostA.id },
+      expectedRevision: 0,
+      actor: fixture.ownerContext
+    });
+
+    await expect(
+      fixture.coordination.coordinator.dispatch({
+        ...fixture.locator,
+        blockRef: "T-001#B-001",
+        idempotencyKey: "durable-selection-restart",
+        expectedAssignmentRevision: 1
+      })
+    ).rejects.toThrowError("injected_crash:after_input_materialization");
+
+    const partial = fixture.coordination.operations.findByCallerIdentity({
+      ...fixture.locator,
+      blockRef: "T-001#B-001",
+      idempotencyKey: "durable-selection-restart"
+    });
+    expect(partial).toBeDefined();
+    expect(partial?.hostSelection).toMatchObject({
+      selection: "exact",
+      preferredHostId: hostA.id,
+      assignmentRevision: 1
+    });
+    expect(partial?.attempt.hostId).toBeUndefined();
+
+    // Concurrent reassignment after commit, before reservation.
+    fixture.assignmentService.updateAssignment({
+      projectId: fixture.locator.projectId,
+      workItem: fixture.blockItem,
+      target: { kind: "unassigned" },
+      expectedRevision: 1,
+      actor: fixture.ownerContext
+    });
+    // Also exercise reassignment to another exact Host path on a fresh revision.
+    fixture.assignmentService.updateAssignment({
+      projectId: fixture.locator.projectId,
+      workItem: fixture.blockItem,
+      target: { kind: "exact_host", hostId: hostB.id },
+      expectedRevision: 2,
+      actor: fixture.ownerContext
+    });
+
+    // Process restart: new coordinator loses in-memory map; must load durable fingerprint.
+    const restarted = fixture.rebuildCoordination();
+    expect(restarted.coordinator.getAuthorizedHostSelection(partial!.id)).toMatchObject({
+      preferredHostId: hostA.id,
+      selection: "exact"
+    });
+
+    const recovered = await restarted.coordinator.reenter(partial!.id);
+    expect(recovered.status).toBe("activated");
+    expect(recovered.operation.attempt.hostId).toBe(hostA.id);
+    expect(recovered.operation.attempt.hostId).not.toBe(hostB.id);
+    expect(restarted.coordinator.getAuthorizedHostSelection(partial!.id)).toMatchObject({
+      preferredHostId: hostA.id,
+      selection: "exact",
+      assignmentRevision: 1
+    });
   });
 });
 

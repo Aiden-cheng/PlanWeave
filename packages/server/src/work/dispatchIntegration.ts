@@ -1,3 +1,6 @@
+import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
+import { z } from "zod";
+import { capabilitiesSchema } from "../protocol.js";
 import type { SqliteDatabase } from "../sqlite.js";
 import {
   WORK_ASSIGNMENT_ERROR_MESSAGES,
@@ -9,9 +12,9 @@ import {
 } from "./policy.js";
 import type { WorkAssignmentRepository } from "./repository.js";
 import {
+  assignmentTargetSchema,
   workItemPackageFactsSchema,
   workItemRefSchema,
-  type AssignmentTarget,
   type WorkItemPackageFacts,
   type WorkItemRef
 } from "./schemas.js";
@@ -19,14 +22,18 @@ import {
 /**
  * Authorized Host selection snapshot captured when dispatch begins.
  * Kept separate from assignment mutations so reassignment does not migrate an active lease.
+ * Must be durable on the remote operation so restart cannot re-resolve from a later assignment.
  */
-export type DispatchHostSelectionSnapshot = {
-  assignmentRevision: number;
-  target: AssignmentTarget;
-  selection: "exact" | "automatic" | "override";
-  preferredHostId?: string;
-  requiredCapabilities: string[];
-};
+export const dispatchHostSelectionSnapshotSchema = z
+  .object({
+    assignmentRevision: z.number().int().nonnegative(),
+    target: assignmentTargetSchema,
+    selection: z.enum(["exact", "automatic", "override"]),
+    preferredHostId: opaqueIdentifierSchema.optional(),
+    requiredCapabilities: capabilitiesSchema
+  })
+  .strict();
+export type DispatchHostSelectionSnapshot = z.infer<typeof dispatchHostSelectionSnapshotSchema>;
 
 export type ResolveDispatchAssignmentInput = {
   projectId: string;

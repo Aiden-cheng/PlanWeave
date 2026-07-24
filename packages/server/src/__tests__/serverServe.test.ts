@@ -66,10 +66,10 @@ describe("distributed server listener", () => {
     });
     const server = await serveDistributedServer(config);
 
-    expect(server.readiness()).toEqual({ status: "ready", schemaVersion: 17 });
+    expect(server.readiness()).toEqual({ status: "ready", schemaVersion: 18 });
     const response = await fetch(`${config.publicUrl}/readyz`);
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ status: "ready", schemaVersion: 17 });
+    await expect(response.json()).resolves.toEqual({ status: "ready", schemaVersion: 18 });
     await server.close();
     await server.close();
     expect(server.readiness()).toMatchObject({ status: "draining" });

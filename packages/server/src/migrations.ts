@@ -828,6 +828,24 @@ CREATE INDEX idx_work_assignments_project_target_host
   WHERE target_kind = 'exact_host';
 `;
 
+/**
+ * Durable Host selection fingerprint authorized at dispatch begin.
+ * Restart/recovery must use this snapshot — never re-resolve from a later assignment.
+ * Partial upgrade fixtures may lack remote_operations (table created in v10); skip then.
+ */
+const migration18 = "SELECT 1;";
+
+function ensureHostSelectionColumn(database: SqliteDatabase): void {
+  if (!tableExists(database, "remote_operations")) return;
+  const hasColumn = database
+    .prepare(
+      "SELECT 1 AS present FROM pragma_table_info('remote_operations') WHERE name='host_selection_json'"
+    )
+    .get();
+  if (hasColumn) return;
+  database.exec("ALTER TABLE remote_operations ADD COLUMN host_selection_json TEXT");
+}
+
 function validateRemoteAttemptIdentities(database: SqliteDatabase): void {
   const duplicateDispatch = database
     .prepare(
@@ -969,7 +987,8 @@ const migrations: readonly Migration[] = [
   { version: 14, sql: migration14 },
   { version: 15, sql: migration15, before: validateRemoteAttemptIdentities },
   { version: 16, sql: migration16 },
-  { version: 17, sql: migration17 }
+  { version: 17, sql: migration17 },
+  { version: 18, sql: migration18, after: ensureHostSelectionColumn }
 ];
 
 export const latestCentralSchemaVersion = Math.max(

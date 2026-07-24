@@ -106,6 +106,7 @@ export {
   DispatchAssignmentError,
   createActiveDispatchResolver,
   createAssignmentDispatchGate,
+  dispatchHostSelectionSnapshotSchema,
   resolveActiveDispatchSnapshot,
   resolveDispatchAssignment,
   type ActiveDispatchSnapshot,

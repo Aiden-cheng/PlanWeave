@@ -302,6 +302,7 @@ export {
   createActiveDispatchResolver,
   createAssignmentDispatchGate,
   createCompiledGraphWorkItemPort,
+  dispatchHostSelectionSnapshotSchema,
   createHostAssignmentPort,
   createIdentityMembershipPort,
   createManifestWorkItemPort,

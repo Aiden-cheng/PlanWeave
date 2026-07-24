@@ -7,6 +7,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { capabilitiesSchema } from "./protocol.js";
 import { inWriteTransaction, type SqliteDatabase } from "./sqlite.js";
+import {
+  dispatchHostSelectionSnapshotSchema,
+  type DispatchHostSelectionSnapshot
+} from "./work/dispatchIntegration.js";
 
 const boundedKeySchema = z
   .string()
@@ -77,7 +81,12 @@ export const createRemoteOperationInputSchema = z
     ownershipGeneration: opaqueIdentifierSchema,
     idempotencyKey: boundedKeySchema,
     sourceFingerprint: opaqueIdentifierSchema,
-    requiredCapabilities: capabilitiesSchema
+    requiredCapabilities: capabilitiesSchema,
+    /**
+     * Authorized Host selection at dispatch begin. Optional when no assignment gate is wired.
+     * When present, persisted with the operation and never re-derived from a later assignment.
+     */
+    hostSelection: dispatchHostSelectionSnapshotSchema.optional()
   })
   .strict();
 
@@ -100,6 +109,7 @@ const operationRowSchema = z
       .regex(/^envelope:sha256:[a-f0-9]{64}$/)
       .nullable(),
     envelope_reference: boundedKeySchema.nullable(),
+    host_selection_json: z.string().nullable(),
     created_at: timestampSchema,
     updated_at: timestampSchema,
     terminal_at: timestampSchema.nullable()
@@ -166,6 +176,8 @@ export type RemoteOperation = {
   executionAttemptId: string;
   envelopeDigest?: string;
   envelopeReference?: string;
+  /** Durable Host selection authorized at dispatch begin (restart-safe). */
+  hostSelection?: DispatchHostSelectionSnapshot;
   createdAt: string;
   updatedAt: string;
   terminalAt?: string;
@@ -175,7 +187,7 @@ export type RemoteOperation = {
 const operationColumns = `
   id,project_id,canvas_id,block_ref,ownership_generation,idempotency_key,request_fingerprint,
   source_fingerprint,required_capabilities_json,state,dispatch_id,execution_attempt_id,
-  envelope_digest,envelope_reference,created_at,updated_at,terminal_at
+  envelope_digest,envelope_reference,host_selection_json,created_at,updated_at,terminal_at
 `;
 
 const attemptColumns = `
@@ -185,6 +197,7 @@ const attemptColumns = `
 `;
 
 function requestFingerprint(input: CreateRemoteOperationInput): string {
+  // hostSelection is authorization evidence at dispatch begin, not part of caller identity.
   return createHash("sha256")
     .update(
       JSON.stringify({
@@ -198,6 +211,11 @@ function requestFingerprint(input: CreateRemoteOperationInput): string {
       })
     )
     .digest("hex");
+}
+
+function parseHostSelection(raw: string | null): DispatchHostSelectionSnapshot | undefined {
+  if (raw === null || raw === undefined) return undefined;
+  return dispatchHostSelectionSnapshotSchema.parse(JSON.parse(raw));
 }
 
 function parseAttempt(row: Record<string, unknown>): RemoteExecutionAttempt {
@@ -255,13 +273,16 @@ export class RemoteOperationRepository {
       const dispatchId = dispatchIdSchema.parse(`dispatch-${randomUUID()}`);
       const executionAttemptId = executionAttemptIdSchema.parse(`attempt-${randomUUID()}`);
       const now = this.clock().toISOString();
+      const hostSelectionJson = input.hostSelection
+        ? JSON.stringify(dispatchHostSelectionSnapshotSchema.parse(input.hostSelection))
+        : null;
       this.database
         .prepare(
           `INSERT INTO remote_operations(
             id,project_id,canvas_id,block_ref,ownership_generation,idempotency_key,
             request_fingerprint,source_fingerprint,required_capabilities_json,state,
-            dispatch_id,execution_attempt_id,created_at,updated_at
-          ) VALUES (?,?,?,?,?,?,?,?,?,'preparing',?,?,?,?)`
+            dispatch_id,execution_attempt_id,host_selection_json,created_at,updated_at
+          ) VALUES (?,?,?,?,?,?,?,?,?,'preparing',?,?,?,?,?)`
         )
         .run(
           operationId,
@@ -275,6 +296,7 @@ export class RemoteOperationRepository {
           JSON.stringify(input.requiredCapabilities),
           dispatchId,
           executionAttemptId,
+          hostSelectionJson,
           now,
           now
         );
@@ -415,6 +437,7 @@ export class RemoteOperationRepository {
         executionAttemptId: parsed.execution_attempt_id,
         envelopeDigest: parsed.envelope_digest ?? undefined,
         envelopeReference: parsed.envelope_reference ?? undefined,
+        hostSelection: parseHostSelection(parsed.host_selection_json),
         createdAt: parsed.created_at,
         updatedAt: parsed.updated_at,
         terminalAt: parsed.terminal_at ?? undefined,

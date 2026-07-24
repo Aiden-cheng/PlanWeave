@@ -200,7 +200,7 @@ describe("remote coordinator migration v9", () => {
       .prepare("UPDATE agent_hosts SET capabilities_json=? WHERE id=?")
       .run('["linux"]', "host-a");
     applyMigrations(database);
-    expect(centralSchemaVersion(database)).toBe(17);
+    expect(centralSchemaVersion(database)).toBe(18);
     expect(
       database
         .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='remote_operations'")
@@ -280,7 +280,7 @@ describe("remote recovery migration v13", () => {
     `);
 
     applyMigrations(database);
-    expect(centralSchemaVersion(database)).toBe(17);
+    expect(centralSchemaVersion(database)).toBe(18);
     expect(
       database.prepare("SELECT status,state_version FROM remote_execution_attempts").get()
     ).toEqual({ status: "interrupted", state_version: 4 });
@@ -375,6 +375,6 @@ describe("remote recovery migration v13", () => {
       .prepare("UPDATE remote_execution_attempts SET dispatch_id=? WHERE execution_attempt_id=?")
       .run("dispatch-2", "attempt-2");
     applyMigrations(database);
-    expect(centralSchemaVersion(database)).toBe(17);
+    expect(centralSchemaVersion(database)).toBe(18);
   });
 });

@@ -130,11 +130,18 @@ export class RemoteBlockCoordinator {
   }
 
   /**
-   * Expose the Host that an active dispatch actually reserved (display / cancel-retry).
+   * Expose the Host selection authorized at dispatch begin (display / cancel-retry).
+   * Prefer durable operation snapshot so restart does not lose the fingerprint.
    * Never used to silently retarget after reassignment.
    */
   getAuthorizedHostSelection(operationId: string): DispatchHostSelectionSnapshot | undefined {
-    return this.hostSelectionByOperation.get(operationId);
+    const cached = this.hostSelectionByOperation.get(operationId);
+    if (cached) return cached;
+    const durable = this.options.operations.get(operationId)?.hostSelection;
+    if (durable) {
+      this.hostSelectionByOperation.set(operationId, durable);
+    }
+    return durable;
   }
 
   async dispatch(request: RemoteDispatchRequest): Promise<RemoteDispatchOutcome> {
@@ -149,7 +156,8 @@ export class RemoteBlockCoordinator {
 
     // Assignment revalidation is a separate read from dispatch persistence.
     // Capture the authorized selection before reservation so concurrent reassignment cannot
-    // redirect this operation to an arbitrary Host.
+    // redirect this operation to an arbitrary Host. Persist with the operation so restart
+    // cannot re-resolve from a later assignment.
     let selection: DispatchHostSelectionSnapshot | undefined;
     if (this.options.assignmentGate) {
       selection = this.options.assignmentGate.resolve({
@@ -171,10 +179,11 @@ export class RemoteBlockCoordinator {
       ownershipGeneration: candidate.sourceRevision,
       idempotencyKey: request.idempotencyKey,
       sourceFingerprint: candidate.graphFingerprint,
-      requiredCapabilities: candidate.requiredCapabilities
+      requiredCapabilities: candidate.requiredCapabilities,
+      hostSelection: selection
     });
-    if (selection) {
-      this.hostSelectionByOperation.set(operation.id, selection);
+    if (operation.hostSelection) {
+      this.hostSelectionByOperation.set(operation.id, operation.hostSelection);
     }
     await this.checkpoint("after_operation_commit");
     this.options.candidates.record(operation.id, candidate);
@@ -543,25 +552,20 @@ export class RemoteBlockCoordinator {
 
   /**
    * Prefer the Host selection authorized at dispatch begin.
-   * When the process lost the in-memory snapshot (restart) but a gate is configured,
-   * re-resolve from current assignment without trusting any UI cache.
+   * Durable operation.hostSelection is authoritative after restart; never re-resolve from
+   * a later assignment (that would silently migrate exact Host → automatic under override defaults).
    * Active reserved Host is never rewritten by reassignment (lease remains on reservation).
    */
   private resolvePreferredHostId(operation: RemoteOperation): string | undefined {
-    const captured = this.hostSelectionByOperation.get(operation.id);
-    if (captured) {
-      return captured.preferredHostId;
+    const durable = operation.hostSelection ?? this.hostSelectionByOperation.get(operation.id);
+    if (durable) {
+      this.hostSelectionByOperation.set(operation.id, durable);
+      return durable.preferredHostId;
     }
     if (!this.options.assignmentGate) {
       return undefined;
     }
-    const snapshot = this.options.assignmentGate.resolve({
-      projectId: operation.projectId,
-      canvasId: operation.canvasId,
-      blockRef: operation.blockRef,
-      requiredCapabilities: operation.requiredCapabilities
-    });
-    this.hostSelectionByOperation.set(operation.id, snapshot);
-    return snapshot.preferredHostId;
+    // Gate was configured at dispatch begin but the fingerprint is missing — fail closed.
+    throw new Error("remote_host_selection_missing");
   }
 }
