@@ -470,7 +470,10 @@
         "humanIdentitySchemas.test.ts",
         "protocolPrimitives.test.ts",
         "releaseGate.test.ts",
-        "vpsE2eGate.test.ts"
+        "vpsE2eGate.test.ts",
+        "workAssignmentPolicy.test.ts",
+        "workAssignmentSchemas.test.ts",
+        "workAssignmentWorkItemRef.test.ts"
       ],
       "integration": [
         "artifactAdversarialBoundary.test.ts",
@@ -494,6 +497,7 @@
         "remoteBlockCoordinatorStartup.test.ts",
         "remoteOperations.test.ts",
         "vpsE2eLive.test.ts",
+        "workAssignmentTempPackage.test.ts",
         "wsServer.test.ts"
       ],
       "platform": [],
