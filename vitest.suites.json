@@ -475,6 +475,7 @@
         "lifecycle.test.ts",
         "operatorWalkthrough.test.ts",
         "realProcessAcpHarness.test.ts",
+        "realProcessRemoteBlockLifecycle.test.ts",
         "remoteBlockCoordinator.test.ts",
         "remoteBlockCoordinatorCrash.test.ts",
         "remoteBlockCoordinatorStartup.test.ts",

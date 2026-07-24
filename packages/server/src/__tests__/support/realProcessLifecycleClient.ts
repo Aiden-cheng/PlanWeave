@@ -1,0 +1,447 @@
+/**
+ * Operator-facing lifecycle client for real-process ACP integration tests.
+ * Speaks only public HTTP APIs + harness-owned SQLite inspection (no Server source imports).
+ */
+import { createRequire } from "node:module";
+import { join } from "node:path";
+import {
+  REAL_PROCESS_ACP_HARNESS_DEFAULT_TIMEOUT_MS,
+  type RealProcessAcpHarness
+} from "./realProcessAcpHarness.js";
+
+const require = createRequire(import.meta.url);
+
+export type OperatorOperationView = {
+  operationId: string;
+  projectId: string;
+  canvasId: string;
+  blockRef: string;
+  state: string;
+  dispatchId: string;
+  executionAttemptId: string;
+  createdAt: string;
+  updatedAt: string;
+  terminalAt?: string;
+  attempt: {
+    executionAttemptId: string;
+    dispatchId: string;
+    status: string;
+    hostId?: string;
+    leaseId?: string;
+    leaseExpiresAt?: string;
+    stateVersion: number;
+  };
+  dispatchStatus?: string;
+  runtime: {
+    ref: string;
+    status: string;
+    ownership?: { phase?: string };
+    terminalReceipt?: {
+      outcome: string;
+      operationId: string;
+      sourceRevision: string;
+      graphFingerprint: string;
+      dispatchId: string;
+      executionAttemptId: string;
+      runId?: string;
+      failure?: { code: string; message: string; retryable: boolean };
+    };
+    blockedReason?: string;
+  };
+};
+
+export type OperatorEventReplay = {
+  executionAttemptId: string;
+  afterCursor: number;
+  cursor: number;
+  highWatermark: number;
+  hasMore: boolean;
+  events: Array<Record<string, unknown>>;
+  diagnostics: unknown[];
+};
+
+export type OperatorInteractionView = {
+  request: {
+    type: string;
+    actionId: string;
+    dispatchId: string;
+    leaseId: string;
+    executionAttemptId: string;
+    acpSessionId: string;
+    expiresAt: string;
+    title?: string;
+    description?: string;
+    prompt?: string;
+  };
+  operationId: string;
+  hostId: string;
+  status: string;
+  createdAt: string;
+  settlement?: Record<string, unknown>;
+  settledBy?: string;
+  settledAt?: string;
+};
+
+export type ServerDispatchRow = {
+  id: string;
+  status: string;
+  host_id: string;
+  lease_id: string;
+  execution_attempt_id: string;
+  result_json: string | null;
+  failure_json: string | null;
+};
+
+function openSqlite(path: string, readOnly = true) {
+  const { DatabaseSync } = require("node:sqlite") as {
+    DatabaseSync: new (path: string, options?: { readOnly?: boolean }) => {
+      prepare(sql: string): {
+        get(...values: unknown[]): Record<string, unknown> | undefined;
+        all(...values: unknown[]): Array<Record<string, unknown>>;
+      };
+      close(): void;
+    };
+  };
+  return new DatabaseSync(path, readOnly ? { readOnly: true } : undefined);
+}
+
+async function waitFor(
+  predicate: () => Promise<boolean> | boolean,
+  options: { timeoutMs: number; intervalMs?: number; label: string }
+): Promise<void> {
+  const deadline = Date.now() + options.timeoutMs;
+  const intervalMs = options.intervalMs ?? 50;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      if (await predicate()) return;
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error(
+    `real_process_lifecycle_timeout:${options.label}${
+      lastError instanceof Error ? `\ncause: ${lastError.message}` : ""
+    }`
+  );
+}
+
+export class RealProcessLifecycleClient {
+  constructor(
+    readonly harness: RealProcessAcpHarness,
+    readonly timeoutMs = REAL_PROCESS_ACP_HARNESS_DEFAULT_TIMEOUT_MS * 3
+  ) {}
+
+  private headers(json = false): Record<string, string> {
+    return json
+      ? {
+          ...this.harness.authorizationHeaders(),
+          "content-type": "application/json"
+        }
+      : this.harness.authorizationHeaders();
+  }
+
+  async dispatch(input: {
+    blockRef: string;
+    idempotencyKey: string;
+    canvasId?: string;
+  }): Promise<OperatorOperationView> {
+    const response = await fetch(`${this.harness.origin}/api/v1/remote-operations`, {
+      method: "POST",
+      headers: this.headers(true),
+      body: JSON.stringify({
+        projectId: this.harness.projectId,
+        canvasId: input.canvasId ?? "default",
+        blockRef: input.blockRef,
+        idempotencyKey: input.idempotencyKey
+      })
+    });
+    const body = (await response.json()) as OperatorOperationView & { error?: string };
+    if (response.status !== 202) {
+      throw new Error(
+        `real_process_lifecycle_dispatch_failed:${response.status}:${body.error ?? JSON.stringify(body)}`
+      );
+    }
+    return body;
+  }
+
+  async observe(operationId: string): Promise<OperatorOperationView> {
+    const response = await fetch(
+      `${this.harness.origin}/api/v1/remote-operations/${encodeURIComponent(operationId)}`,
+      { headers: this.headers() }
+    );
+    const body = (await response.json()) as OperatorOperationView & { error?: string };
+    if (response.status !== 200) {
+      throw new Error(
+        `real_process_lifecycle_observe_failed:${response.status}:${body.error ?? JSON.stringify(body)}`
+      );
+    }
+    return body;
+  }
+
+  async waitForOperation(
+    operationId: string,
+    predicate: (view: OperatorOperationView) => boolean,
+    label = "operation-predicate"
+  ): Promise<OperatorOperationView> {
+    let latest: OperatorOperationView | undefined;
+    await waitFor(
+      async () => {
+        latest = await this.observe(operationId);
+        return predicate(latest);
+      },
+      { timeoutMs: this.timeoutMs, label: `${label}:${operationId}` }
+    );
+    if (!latest) throw new Error(`real_process_lifecycle_wait_missing:${label}`);
+    return latest;
+  }
+
+  async waitForTerminal(operationId: string): Promise<OperatorOperationView> {
+    return this.waitForOperation(
+      operationId,
+      (view) => ["completed", "failed", "cancelled"].includes(view.state),
+      "terminal"
+    );
+  }
+
+  async waitForDispatchStatus(
+    operationId: string,
+    status: string | readonly string[]
+  ): Promise<OperatorOperationView> {
+    const allowed = new Set(Array.isArray(status) ? status : [status]);
+    return this.waitForOperation(
+      operationId,
+      (view) => typeof view.dispatchStatus === "string" && allowed.has(view.dispatchStatus),
+      `dispatch-status:${[...allowed].join("|")}`
+    );
+  }
+
+  async listEvents(operationId: string, afterCursor = 0): Promise<OperatorEventReplay> {
+    const response = await fetch(
+      `${this.harness.origin}/api/v1/remote-operations/${encodeURIComponent(operationId)}/events?afterCursor=${afterCursor}`,
+      { headers: this.headers() }
+    );
+    const body = (await response.json()) as OperatorEventReplay & { error?: string };
+    if (response.status !== 200) {
+      throw new Error(
+        `real_process_lifecycle_events_failed:${response.status}:${body.error ?? JSON.stringify(body)}`
+      );
+    }
+    return body;
+  }
+
+  async listInteractions(operationId: string): Promise<OperatorInteractionView[]> {
+    const response = await fetch(
+      `${this.harness.origin}/api/v1/remote-operations/${encodeURIComponent(operationId)}/interactions?limit=50`,
+      { headers: this.headers() }
+    );
+    const body = (await response.json()) as { items?: OperatorInteractionView[]; error?: string };
+    if (response.status !== 200) {
+      throw new Error(
+        `real_process_lifecycle_interactions_failed:${response.status}:${body.error ?? JSON.stringify(body)}`
+      );
+    }
+    return body.items ?? [];
+  }
+
+  async waitForPendingInteraction(operationId: string): Promise<OperatorInteractionView> {
+    let found: OperatorInteractionView | undefined;
+    await waitFor(
+      async () => {
+        const items = await this.listInteractions(operationId);
+        found = items.find((item) => item.status === "pending");
+        return Boolean(found);
+      },
+      { timeoutMs: this.timeoutMs, label: `pending-interaction:${operationId}` }
+    );
+    if (!found) throw new Error("real_process_lifecycle_interaction_missing");
+    return found;
+  }
+
+  async settlePermission(
+    operationId: string,
+    interaction: OperatorInteractionView,
+    decision: "allow_once" | "deny" = "allow_once"
+  ): Promise<OperatorInteractionView> {
+    const view = await this.observe(operationId);
+    const response = await fetch(
+      `${this.harness.origin}/api/v1/remote-operations/${encodeURIComponent(operationId)}/interactions/respond`,
+      {
+        method: "POST",
+        headers: this.headers(true),
+        body: JSON.stringify({
+          type: "interaction.permission_response",
+          actionId: interaction.request.actionId,
+          dispatchId: view.dispatchId,
+          leaseId: view.attempt.leaseId,
+          executionAttemptId: view.executionAttemptId,
+          acpSessionId: interaction.request.acpSessionId,
+          decision
+        })
+      }
+    );
+    const body = (await response.json()) as OperatorInteractionView & { error?: string };
+    if (response.status !== 200) {
+      throw new Error(
+        `real_process_lifecycle_settle_failed:${response.status}:${body.error ?? JSON.stringify(body)}`
+      );
+    }
+    return body;
+  }
+
+  async cancel(
+    operationId: string,
+    reason = "operator cancelled from lifecycle harness"
+  ): Promise<unknown> {
+    const view = await this.observe(operationId);
+    if (!view.attempt.leaseId) throw new Error("real_process_lifecycle_cancel_missing_lease");
+    const response = await fetch(
+      `${this.harness.origin}/api/v1/remote-operations/${encodeURIComponent(operationId)}/actions`,
+      {
+        method: "POST",
+        headers: this.headers(true),
+        body: JSON.stringify({
+          actionId: `action-cancel-${view.executionAttemptId}`,
+          operationId: view.operationId,
+          dispatchId: view.dispatchId,
+          executionAttemptId: view.executionAttemptId,
+          expectedAttemptVersion: view.attempt.stateVersion,
+          kind: "cancel",
+          leaseId: view.attempt.leaseId,
+          reason
+        })
+      }
+    );
+    const body = await response.json();
+    if (response.status !== 202) {
+      throw new Error(
+        `real_process_lifecycle_cancel_failed:${response.status}:${JSON.stringify(body)}`
+      );
+    }
+    return body;
+  }
+
+  listHosts(): Promise<{
+    items: Array<{
+      id: string;
+      displayName: string;
+      capacity: number;
+      capabilities: string[];
+      lastSeenAt?: string;
+    }>;
+  }> {
+    return fetch(`${this.harness.origin}/api/v1/hosts`, { headers: this.headers() }).then(
+      async (response) => {
+        if (!response.ok) throw new Error(`real_process_lifecycle_hosts_failed:${response.status}`);
+        return response.json() as Promise<{
+          items: Array<{
+            id: string;
+            displayName: string;
+            capacity: number;
+            capabilities: string[];
+            lastSeenAt?: string;
+          }>;
+        }>;
+      }
+    );
+  }
+
+  serverDatabasePath(): string {
+    return join(this.harness.paths.serverData, "planweave-server.sqlite");
+  }
+
+  hostDatabasePath(dataDir = this.harness.paths.hostData): string {
+    return join(dataDir, "state.sqlite");
+  }
+
+  readServerDispatch(dispatchId: string): ServerDispatchRow {
+    const database = openSqlite(this.serverDatabasePath());
+    try {
+      const row = database
+        .prepare(
+          "SELECT id,status,host_id,lease_id,execution_attempt_id,result_json,failure_json FROM dispatches WHERE id=?"
+        )
+        .get(dispatchId) as ServerDispatchRow | undefined;
+      if (!row) throw new Error(`real_process_lifecycle_dispatch_row_missing:${dispatchId}`);
+      return row;
+    } finally {
+      database.close();
+    }
+  }
+
+  readServerEnvelope(dispatchId: string): Record<string, unknown> {
+    const database = openSqlite(this.serverDatabasePath());
+    try {
+      const row = database
+        .prepare("SELECT canonical_json FROM dispatch_execution_envelopes WHERE dispatch_id=?")
+        .get(dispatchId) as { canonical_json?: string } | undefined;
+      if (!row?.canonical_json) {
+        throw new Error(`real_process_lifecycle_envelope_missing:${dispatchId}`);
+      }
+      return JSON.parse(row.canonical_json) as Record<string, unknown>;
+    } finally {
+      database.close();
+    }
+  }
+
+  readServerArtifactLinks(dispatchId: string): Array<Record<string, unknown>> {
+    const database = openSqlite(this.serverDatabasePath());
+    try {
+      return database
+        .prepare(
+          "SELECT artifact_ref,purpose,permission,grant_id FROM dispatch_artifact_links WHERE dispatch_id=?"
+        )
+        .all(dispatchId);
+    } finally {
+      database.close();
+    }
+  }
+
+  readOperationDiagnostic(operationId: string): {
+    diagnostic_code: string | null;
+    diagnostic_message: string | null;
+    state: string;
+  } {
+    const database = openSqlite(this.serverDatabasePath());
+    try {
+      const row = database
+        .prepare(
+          "SELECT diagnostic_code,diagnostic_message,state FROM remote_operations WHERE id=?"
+        )
+        .get(operationId) as
+        | { diagnostic_code: string | null; diagnostic_message: string | null; state: string }
+        | undefined;
+      if (!row) throw new Error(`real_process_lifecycle_operation_missing:${operationId}`);
+      return row;
+    } finally {
+      database.close();
+    }
+  }
+
+  readHostTerminalFailure(
+    dispatchId: string,
+    hostDataDir = this.harness.paths.hostData
+  ): { code: string; message: string; retryable: boolean } | undefined {
+    const database = openSqlite(this.hostDatabasePath(hostDataDir));
+    try {
+      const row = database
+        .prepare(
+          `SELECT event_json FROM agent_host_outbox
+           WHERE event_key LIKE ? OR event_json LIKE ?
+           ORDER BY sequence DESC LIMIT 1`
+        )
+        .get(`dispatch.failed:${dispatchId}%`, `%"dispatchId":"${dispatchId}"%`) as
+        | { event_json?: string }
+        | undefined;
+      if (!row?.event_json) return undefined;
+      const event = JSON.parse(row.event_json) as {
+        type?: string;
+        failure?: { code: string; message: string; retryable: boolean };
+      };
+      return event.failure;
+    } finally {
+      database.close();
+    }
+  }
+}

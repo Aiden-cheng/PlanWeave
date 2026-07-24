@@ -65,6 +65,26 @@ export type RealProcessAcpHarnessOptions = {
   /** When true, write intentionally invalid server config for failed-startup tests. */
   corruptServerConfigOnCreate?: boolean;
   graceMs?: number;
+  /** Override the temporary Plan Package manifest (defaults to remoteAcpManifest()). */
+  manifest?: PlanPackageManifest;
+};
+
+export type SecondaryHostOptions = {
+  key?: string;
+  displayName: string;
+  capacity?: number;
+  capabilities?: string[];
+  acpScenario?: string;
+};
+
+export type SecondaryHostHandle = {
+  key: string;
+  displayName: string;
+  capacity: number;
+  capabilities: readonly string[];
+  dataDir: string;
+  configPath: string;
+  controlDir: string;
 };
 
 export type HarnessPaths = {
@@ -116,6 +136,24 @@ export function remoteAcpManifest(): PlanPackageManifest {
     "codex-acp": { adapter: "agent", agent: "codex", runner: { transport: "acp" } }
   };
   manifest.nodes[0].blocks[0].requirements = { capabilities: ["acp.test"] };
+  return manifest;
+}
+
+/** Manifest with T-001#B-002 depending on T-001#B-001 for dependency/artifact scenarios. */
+export function remoteAcpManifestWithDependency(): PlanPackageManifest {
+  const manifest = remoteAcpManifest();
+  const task = manifest.nodes[0];
+  if (task.type !== "task") throw new Error("remote_acp_manifest_expected_task");
+  task.blocks.splice(1, 0, {
+    id: "B-002",
+    type: "implementation",
+    title: "Consume first implementation",
+    prompt: "nodes/T-001/blocks/B-002.prompt.md",
+    depends_on: ["B-001"],
+    requirements: { capabilities: ["acp.test"] }
+  });
+  const review = task.blocks.find((block) => block.id === "R-001");
+  if (review) review.depends_on = ["B-002"];
   return manifest;
 }
 
@@ -260,6 +298,10 @@ export class RealProcessAcpHarness {
   private enrolled = false;
   private disposed = false;
   private readonly ownedRoots: string[] = [];
+  private readonly secondaryHosts = new Map<
+    string,
+    { handle: SecondaryHostHandle; child: ManagedChild | undefined; enrolled: boolean }
+  >();
 
   private constructor(init: {
     paths: HarnessPaths;
@@ -301,7 +343,7 @@ export class RealProcessAcpHarness {
     const hostCapabilities = options.hostCapabilities ?? ["acp.test"];
     const graceMs = options.graceMs ?? 500;
 
-    const workspace = await createTestWorkspace(remoteAcpManifest());
+    const workspace = await createTestWorkspace(options.manifest ?? remoteAcpManifest());
     const root = await mkdtemp(join(tmpdir(), "planweave-real-process-acp-"));
     const ownedRoots = [root, workspace.home, workspace.root];
 
@@ -651,9 +693,11 @@ export class RealProcessAcpHarness {
   }
 
   async waitForHostOnline(options?: {
+    displayName?: string;
     lastSeenAtNot?: string;
-  }): Promise<{ id: string; lastSeenAt: string }> {
-    let observed: { id: string; lastSeenAt: string } | undefined;
+  }): Promise<{ id: string; lastSeenAt: string; displayName: string }> {
+    const displayName = options?.displayName ?? this.hostDisplayName;
+    let observed: { id: string; lastSeenAt: string; displayName: string } | undefined;
     await waitFor(
       async () => {
         const response = await fetch(`${this.origin}/api/v1/hosts`, {
@@ -664,23 +708,129 @@ export class RealProcessAcpHarness {
           items: Array<{ id: string; lastSeenAt?: string; displayName?: string }>;
         };
         const match = page.items.find(
-          (item) => item.displayName === this.hostDisplayName && typeof item.lastSeenAt === "string"
+          (item) => item.displayName === displayName && typeof item.lastSeenAt === "string"
         );
         if (!match?.lastSeenAt) return false;
         if (options?.lastSeenAtNot !== undefined && match.lastSeenAt === options.lastSeenAtNot) {
           return false;
         }
-        observed = { id: match.id, lastSeenAt: match.lastSeenAt };
+        observed = { id: match.id, lastSeenAt: match.lastSeenAt, displayName };
         return true;
       },
       {
         timeoutMs: this.readinessTimeoutMs,
-        label: options?.lastSeenAtNot ? "host-online-refreshed" : "host-online",
+        label: options?.lastSeenAtNot ? "host-online-refreshed" : `host-online:${displayName}`,
         diagnostics: () => this.diagnostics()
       }
     );
     if (!observed) throw new Error("real_process_harness_host_online_missing");
     return observed;
+  }
+
+  /**
+   * Enroll and start an additional Host process against the same Server.
+   * Used for capability/capacity selection scenarios. Credentials are separate.
+   */
+  async startSecondaryHost(
+    options: SecondaryHostOptions
+  ): Promise<{ id: string; lastSeenAt: string; handle: SecondaryHostHandle }> {
+    if (this.disposed) throw new Error("real_process_harness_disposed");
+    const key = options.key ?? options.displayName.replace(/\s+/g, "-").toLowerCase();
+    if (this.secondaryHosts.has(key)) throw new Error(`real_process_harness_secondary_exists:${key}`);
+    const capacity = options.capacity ?? 1;
+    const capabilities = options.capabilities ?? ["acp.test"];
+    const acpScenario = options.acpScenario ?? this.acpScenario;
+    const dataDir = join(this.paths.root, `host-data-${key}`);
+    const controlDir = join(this.paths.root, `acp-control-${key}`);
+    const configPath = join(this.paths.root, `agent-host-${key}.json`);
+    await mkdir(dataDir, { recursive: true, mode: 0o700 });
+    await mkdir(controlDir, { recursive: true });
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: "agent-host-config/v1",
+        coordinator: { url: this.origin, allowInsecureDevelopment: true },
+        dataDirectory: dataDir,
+        workspaceRoot: this.paths.workspaceRoot,
+        host: {
+          displayName: options.displayName,
+          capacity,
+          capabilities
+        },
+        workspaces: [{ id: this.projectId, path: "project" }],
+        agentProfiles: [
+          {
+            id: "codex-acp",
+            agentId: "codex",
+            command: process.execPath,
+            args: [acpMockAgentPath, acpScenario, `--control-dir=${controlDir}`],
+            environment: []
+          }
+        ]
+      }),
+      "utf8"
+    );
+    const handle: SecondaryHostHandle = {
+      key,
+      displayName: options.displayName,
+      capacity,
+      capabilities,
+      dataDir,
+      configPath,
+      controlDir
+    };
+    this.secondaryHosts.set(key, { handle, child: undefined, enrolled: false });
+
+    const enrollmentExpiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
+    const credentialExpiresAt = new Date(Date.now() + 24 * 60 * 60_000).toISOString();
+    const grantResponse = await fetch(`${this.origin}/api/v1/host-enrollments`, {
+      method: "POST",
+      headers: {
+        ...this.authorizationHeaders(),
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ expiresAt: enrollmentExpiresAt, credentialExpiresAt })
+    });
+    if (grantResponse.status !== 201) {
+      throw new Error(
+        `real_process_harness_secondary_enroll_grant_failed:${grantResponse.status}\n${this.diagnostics()}`
+      );
+    }
+    const grant = (await grantResponse.json()) as { enrollmentCode: string };
+    const enrollment = await this.runHostCommand([
+      "enroll",
+      "--config",
+      configPath,
+      "--code",
+      grant.enrollmentCode
+    ]);
+    if (enrollment.code !== 0) {
+      throw new Error(
+        `real_process_harness_secondary_enroll_failed:${enrollment.code}\n${enrollment.stderr}\n${this.diagnostics()}`
+      );
+    }
+    const entry = this.secondaryHosts.get(key)!;
+    entry.enrolled = true;
+    entry.child = this.spawnLongLived(
+      process.execPath,
+      [agentHostBinPath, "run", "--config", configPath],
+      `host-${key}`
+    );
+    const online = await this.waitForHostOnline({ displayName: options.displayName });
+    return { id: online.id, lastSeenAt: online.lastSeenAt, handle };
+  }
+
+  async stopSecondaryHost(
+    key: string,
+    reason = "harness stopSecondaryHost"
+  ): Promise<ProcessExitSnapshot | undefined> {
+    const entry = this.secondaryHosts.get(key);
+    if (!entry?.child) return undefined;
+    const handle = entry.child;
+    if (handle.tree.isAlive()) await handle.tree.terminate(reason);
+    const snapshot = await handle.exit;
+    entry.child = undefined;
+    return snapshot;
   }
 
   async stopHost(reason = "harness stopHost"): Promise<ProcessExitSnapshot | undefined> {
@@ -764,6 +914,14 @@ export class RealProcessAcpHarness {
     if (this.disposed) return;
     this.disposed = true;
     const errors: unknown[] = [];
+    for (const key of [...this.secondaryHosts.keys()]) {
+      try {
+        await this.stopSecondaryHost(key, "harness dispose");
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    this.secondaryHosts.clear();
     try {
       await this.stopHost("harness dispose");
     } catch (error) {
