@@ -3,6 +3,7 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { loadServerConfig, resolveServerConfigPath, serverConfigSummary } from "./config.js";
 import { serveDistributedServer, type DistributedServerProcess } from "./serverServe.js";
+import { runVpsE2eCli } from "./vpsE2e/cli.js";
 
 export type ServerCliIo = { stdout(value: string): void; stderr(value: string): void };
 
@@ -38,6 +39,9 @@ export async function runServerCli(
   const io = options.io ?? { stdout: console.log, stderr: console.error };
   try {
     const [command, ...args] = argv;
+    if (command === "vps-e2e") {
+      return await runVpsE2eCli(args, { io, env: options.env ? { ...options.env } : undefined });
+    }
     if (command !== "serve") throw new Error("server_cli_usage");
     const config = await loadServerConfig(resolveServerConfigPath(args, options.env));
     const server = await (options.serve ?? serveDistributedServer)(config);

@@ -415,6 +415,47 @@ PLANWEAVE_REAL_ACP=1 node scripts/real-acp-host-smoke.mjs --list-profiles
 
 文档与证据保持无密钥：preflight 只记录可执行路径、非秘密版本字符串、协议/SDK 版本与 capability 名称。不要把 API key 或登录 token 写入 PlanWeave 配置；agent 鉴权仍留在 Host 本地。若 ACP 启动或 capability 协商失败，`real-acp-smoke` **不会**回退到 CLI executor。
 
+### 可选的已鉴权 VPS / TLS 端到端
+
+PlanWeave 可将 **Coordinator + Agent Host** 的安装、证书校验传输、一次性 enrollment、有界 fixture 调度、网络中断后的事件 cursor 回放与清理，作为 **opt-in** 场景运行。普通 CI 不会启动该路径。
+
+两种明确标注的环境类别：
+
+| `environmentClass` | 含义 |
+| --- | --- |
+| `local-tls-fixture` | 一次性 **loopback** Server + Host，使用临时自签 TLS（OpenSSL）。覆盖同一套 enroll / dispatch / replay / revoke 契约。**不是**生产 VPS 声明。 |
+| `remote-vps` | 操作者提供的一次性 VPS。连接信息**只**来自仓库外的绝对配置路径与环境变量中的 token。仓库内不得硬编码主机名、SSH 或密钥。 |
+
+```bash
+# 软门禁：缺 openssl/构建产物/远程配置 → skipped 证据，exit 0
+PLANWEAVE_VPS_E2E=1 planweave-server vps-e2e --evidence /tmp/vps-e2e.json
+
+# 硬门禁
+PLANWEAVE_VPS_E2E_REQUIRE=1 planweave-server vps-e2e --require --profile local-tls-fixture
+
+# 远程 VPS（配置与 token 均在仓库外）
+export PLANWEAVE_VPS_E2E_CONFIG=/absolute/path/outside-repo/vps-e2e.json
+export PLANWEAVE_VPS_OPERATOR_TOKEN=...   # 永不提交
+PLANWEAVE_VPS_E2E=1 planweave-server vps-e2e --profile remote-vps --evidence /tmp/vps-e2e.json
+
+# monorepo helper（优先已构建 Server bin，否则 tsx）
+PLANWEAVE_VPS_E2E=1 node scripts/vps-authenticated-e2e.mjs --profile local-tls-fixture
+```
+
+环境变量：
+
+| 变量 | 含义 |
+| --- | --- |
+| `PLANWEAVE_VPS_E2E=1` | 软门禁：启用 e2e；前置条件不足则 skip |
+| `PLANWEAVE_VPS_E2E_REQUIRE=1` | 硬门禁：前置条件不足则 fail |
+| `PLANWEAVE_VPS_E2E_PROFILE` | `local-tls-fixture`（默认）或 `remote-vps` |
+| `PLANWEAVE_VPS_E2E_CONFIG` | 远程配置 JSON 的绝对路径（仅 remote-vps） |
+| `PLANWEAVE_VPS_OPERATOR_TOKEN` | 远程配置默认引用的 operator bearer token 环境变量名 |
+
+远程配置 schema（`planweave.vps-e2e-config/v1`）字段：`coordinatorUrl`（https origin）、`operatorTokenEnv`（环境变量**名**，不是 token 本身）、可选 `caCertificatePath`、`hostConfigPath`、`projectId`，以及可选 `canvasId` / `blockRef` / `evidencePath`。证据 JSON 会脱敏：仅 digests 与 identity id —— 不含 endpoint、token、PEM、enrollment code 或完整日志。
+
+同一台机器上的 Host 本地真实 agent 兼容性请复用[可选的真实 ACP smoke](#可选的真实-acp-兼容性-smoke) 门禁（`PLANWEAVE_REAL_ACP`）。VPS e2e 默认 fixture 使用 mock ACP 进程，因此本地/软门禁运行不依赖 provider 登录。
+
 ### Operator HTTP 接口
 
 鉴权路由需要 `Authorization: Bearer <operator-token>`，并使用 TLS（或 loopback 开发模式）。server-admin 可登记与吊销 Host；项目作用域凭据只能对自己的 `projectIds` 做 dispatch 与观测。

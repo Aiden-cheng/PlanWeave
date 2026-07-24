@@ -25,6 +25,16 @@ export {
 } from "./config.js";
 export { serverPackageVersion } from "./packageInfo.js";
 export {
+  parseVpsE2eGate,
+  runVpsAuthenticatedE2e,
+  runVpsE2eCli,
+  remoteVpsE2eConfigSchema,
+  redactSensitiveText,
+  type VpsE2eGate,
+  type VpsE2eEvidence,
+  type RemoteVpsE2eConfig
+} from "./vpsE2e/index.js";
+export {
   ServerReadinessController,
   serverReadinessSchema,
   serverReadinessStatusSchema,

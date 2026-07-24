@@ -415,6 +415,47 @@ Environment:
 
 Setup stays secret-free in docs and evidence: preflight records executable path, non-secret agent version strings, protocol/SDK versions, and capability names only. Do not put API keys or login tokens into PlanWeave config; agent auth remains Host-local (agent login state / provider env on the Host machine). Invoking `real-acp-smoke` never falls back to a CLI executor if ACP startup or capability negotiation fails.
 
+### Opt-in authenticated VPS / TLS end-to-end
+
+PlanWeave can exercise the **Coordinator + Agent Host** install, certificate-verified transport, one-time enrollment, bounded fixture dispatch, event cursor replay after a network interrupt, and cleanup as an **opt-in** scenario. Ordinary CI never starts this path.
+
+There are two clearly labeled environment classes:
+
+| `environmentClass` | Meaning |
+| --- | --- |
+| `local-tls-fixture` | Disposable **loopback** Server + Host with ephemeral self-signed TLS (OpenSSL). Exercises the same enroll / dispatch / replay / revoke contracts. **Not** a production VPS claim. |
+| `remote-vps` | Operator-provided disposable VPS. Connection details come **only** from an absolute config path outside the repo plus env-held tokens. Never hardcode hostnames, SSH, or secrets in the repository. |
+
+```bash
+# Soft gate: missing openssl/bins/remote config → skipped evidence, exit 0
+PLANWEAVE_VPS_E2E=1 planweave-server vps-e2e --evidence /tmp/vps-e2e.json
+
+# Hard gate
+PLANWEAVE_VPS_E2E_REQUIRE=1 planweave-server vps-e2e --require --profile local-tls-fixture
+
+# Remote VPS (config + token live outside the repo)
+export PLANWEAVE_VPS_E2E_CONFIG=/absolute/path/outside-repo/vps-e2e.json
+export PLANWEAVE_VPS_OPERATOR_TOKEN=...   # never commit
+PLANWEAVE_VPS_E2E=1 planweave-server vps-e2e --profile remote-vps --evidence /tmp/vps-e2e.json
+
+# Monorepo helper (uses built Server bin or tsx)
+PLANWEAVE_VPS_E2E=1 node scripts/vps-authenticated-e2e.mjs --profile local-tls-fixture
+```
+
+Environment:
+
+| Variable | Meaning |
+| --- | --- |
+| `PLANWEAVE_VPS_E2E=1` | Soft gate: enable e2e; missing preconditions skip |
+| `PLANWEAVE_VPS_E2E_REQUIRE=1` | Hard gate: missing preconditions fail |
+| `PLANWEAVE_VPS_E2E_PROFILE` | `local-tls-fixture` (default) or `remote-vps` |
+| `PLANWEAVE_VPS_E2E_CONFIG` | Absolute path to remote config JSON (remote-vps only) |
+| `PLANWEAVE_VPS_OPERATOR_TOKEN` | Default env name referenced by remote config for the operator bearer token |
+
+Remote config schema (`planweave.vps-e2e-config/v1`) fields: `coordinatorUrl` (https origin), `operatorTokenEnv` (env **name**, not the token), optional `caCertificatePath`, `hostConfigPath`, `projectId`, optional `canvasId` / `blockRef` / `evidencePath`. Evidence JSON is redacted: digests and identity ids only — no endpoints, tokens, PEM, enrollment codes, or full logs.
+
+For Host-local real agent compatibility on the same machine, reuse the [opt-in real ACP smoke](#opt-in-real-acp-compatibility-smoke) gates (`PLANWEAVE_REAL_ACP`). The VPS e2e default fixture uses the mock ACP process so CI-adjacent local runs do not need provider login.
+
 ### Operator HTTP surface
 
 Authenticated routes require `Authorization: Bearer <operator-token>` and TLS (or loopback development mode). Server-admin credentials can enroll and revoke hosts; project-scoped credentials may only dispatch and observe operations for their `projectIds`.

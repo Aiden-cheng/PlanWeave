@@ -463,7 +463,7 @@
     },
     {
       "root": "packages/server/src/__tests__",
-      "unit": ["artifactMediaType.test.ts", "protocolPrimitives.test.ts"],
+      "unit": ["artifactMediaType.test.ts", "protocolPrimitives.test.ts", "vpsE2eGate.test.ts"],
       "integration": [
         "artifactAdversarialBoundary.test.ts",
         "artifactAdversarialPersistence.test.ts",
@@ -484,6 +484,7 @@
         "remoteBlockCoordinatorCrash.test.ts",
         "remoteBlockCoordinatorStartup.test.ts",
         "remoteOperations.test.ts",
+        "vpsE2eLive.test.ts",
         "wsServer.test.ts"
       ],
       "platform": [],
