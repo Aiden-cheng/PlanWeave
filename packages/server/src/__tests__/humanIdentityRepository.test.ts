@@ -172,6 +172,7 @@ describe("human identity repository", () => {
     expect(again.created).toBe(false);
     expect(again.deviceToken).toBeUndefined();
     expect(again.membership.membershipId).toBe(first.membership.membershipId);
+    expect(again.device.deviceCredentialId).toBe(first.device.deviceCredentialId);
 
     expect(() =>
       repo.bootstrapOwner(localAdminProof("project-a", "human-other", "Other"))
@@ -185,6 +186,35 @@ describe("human identity repository", () => {
     const auth = repo.authenticateDevice(first.deviceToken!, "project-a");
     expect(auth?.principal.humanPrincipalId).toBe(first.principal.humanPrincipalId);
     expect(auth?.membership?.role).toBe("owner");
+  });
+
+  it("re-mints a device token on local-admin re-bootstrap after all devices are revoked", async () => {
+    const { repo } = await openMigrated();
+    const first = repo.bootstrapOwner(localAdminProof());
+    expect(first.deviceToken).toBeDefined();
+    repo.revokeDevice(first.device.deviceCredentialId, first.principal.humanPrincipalId);
+    expect(repo.authenticateDevice(first.deviceToken!, "project-a")).toBeUndefined();
+
+    const recovered = repo.bootstrapOwner(localAdminProof());
+    expect(recovered.created).toBe(false);
+    expect(recovered.deviceToken).toMatch(/^pw_hdev_/);
+    expect(recovered.device.deviceCredentialId).not.toBe(first.device.deviceCredentialId);
+    expect(recovered.device.revokedAt).toBeUndefined();
+    expect(recovered.membership.membershipId).toBe(first.membership.membershipId);
+    expect(recovered.membership.role).toBe("owner");
+
+    const auth = repo.authenticateDevice(recovered.deviceToken!, "project-a");
+    expect(auth?.principal.humanPrincipalId).toBe(first.principal.humanPrincipalId);
+    expect(auth?.membership?.role).toBe("owner");
+
+    // Healthy owner re-bootstrap remains non-minting and still conflicts for other principals.
+    const healthyAgain = repo.bootstrapOwner(localAdminProof());
+    expect(healthyAgain.created).toBe(false);
+    expect(healthyAgain.deviceToken).toBeUndefined();
+    expect(healthyAgain.device.deviceCredentialId).toBe(recovered.device.deviceCredentialId);
+    expect(() =>
+      repo.bootstrapOwner(localAdminProof("project-a", "human-other", "Other"))
+    ).toThrowError(HumanIdentityError);
   });
 
   it("rejects concurrent bootstrap of different principals for the same project", async () => {

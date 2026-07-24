@@ -451,13 +451,18 @@ export class HumanMembershipService {
         });
         if (!decision.allowed) deny(decision.code);
       } else {
+        const targetMembership = this.repository.getActiveMembership(
+          pid,
+          device.humanPrincipalId
+        );
         const decision = authorizeHumanAction({
           action: "revoke_member_device",
           subject: { kind: "human", context },
           facts: {
             targetProjectId: pid,
             targetDeviceCredentialId: deviceId,
-            targetDeviceOwnerPrincipalId: device.humanPrincipalId
+            targetDeviceOwnerPrincipalId: device.humanPrincipalId,
+            targetDeviceOwnerMembershipActive: targetMembership !== undefined
           }
         });
         if (!decision.allowed) deny(decision.code);

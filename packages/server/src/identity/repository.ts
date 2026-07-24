@@ -94,7 +94,10 @@ export type BootstrapOwnerResult = {
   principal: HumanPrincipal;
   membership: ProjectMembership;
   device: HumanDeviceCredentialMetadata;
-  /** Plaintext device secret; returned only from this call (or idempotent re-bootstrap without re-mint). */
+  /**
+   * Plaintext device secret. Returned on first bootstrap and on recovery re-bootstrap
+   * when no usable device remains. Omitted when an existing usable device is reused.
+   */
   deviceToken?: string;
   created: boolean;
 };
@@ -384,7 +387,8 @@ export class HumanIdentityRepository {
 
   /**
    * Local-admin owner bootstrap. Concurrent first owners for different principals conflict.
-   * Same principal re-bootstrap is idempotent and does not re-mint a device secret.
+   * Same principal re-bootstrap is idempotent: does not re-mint when a usable device remains;
+   * if every device is revoked/expired, mints a recovery device token (still one owner).
    */
   bootstrapOwner(
     proofInput: unknown,
@@ -624,10 +628,28 @@ export class HumanIdentityRepository {
       const principal =
         this.getPrincipal(proof.humanPrincipalId) ??
         this.insertPrincipal(proof.humanPrincipalId, proof.displayName);
+      const usable = this.findUsableDevice(proof.humanPrincipalId);
+      if (usable) {
+        return {
+          principal,
+          membership: toMembership(samePrincipal),
+          device: usable,
+          created: false
+        };
+      }
+      // Recovery: owner membership exists but no active usable device remains.
+      // Local-admin re-bootstrap mints a one-shot token without creating a second owner.
+      const recovered = this.insertDevice({
+        humanPrincipalId: principal.humanPrincipalId,
+        mintedForProjectId: projectId,
+        label: options.deviceLabel,
+        deviceTtlMs: options.deviceTtlMs
+      });
       return {
         principal,
         membership: toMembership(samePrincipal),
-        device: this.requireAnyDevice(proof.humanPrincipalId),
+        device: recovered.device,
+        deviceToken: recovered.deviceToken,
         created: false
       };
     }
@@ -942,19 +964,29 @@ export class HumanIdentityRepository {
     return { device: this.getDevice(deviceCredentialId)!, deviceToken };
   }
 
-  private requireAnyDevice(humanPrincipalId: string): HumanDeviceCredentialMetadata {
-    const row = this.database
+  /**
+   * First non-revoked, non-expired device for the principal, if any.
+   * Used by idempotent bootstrap to avoid re-minting when recovery is unnecessary.
+   */
+  private findUsableDevice(humanPrincipalId: string): HumanDeviceCredentialMetadata | undefined {
+    const rows = this.database
       .prepare(
         `SELECT * FROM human_device_credentials
          WHERE human_principal_id=?
-         ORDER BY created_at ASC, device_credential_id ASC
-         LIMIT 1`
+         ORDER BY created_at ASC, device_credential_id ASC`
       )
-      .get(humanPrincipalId) as DeviceRow | undefined;
-    if (!row) {
-      throw new HumanIdentityError("human_input_invalid", "Bootstrap principal has no device.");
+      .all(humanPrincipalId) as DeviceRow[];
+    const now = this.clock();
+    for (const row of rows) {
+      const device = toDevice(row);
+      const usability = evaluateDeviceUsability({
+        device,
+        humanPrincipalId,
+        now
+      });
+      if (usability.usable) return device;
     }
-    return toDevice(row);
+    return undefined;
   }
 }
 

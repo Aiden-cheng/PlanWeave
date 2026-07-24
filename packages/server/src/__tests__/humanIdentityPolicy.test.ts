@@ -299,9 +299,28 @@ describe("authorizeHumanAction policy table", () => {
       decide("revoke_member_device", owner, {
         targetProjectId: "project-a",
         targetDeviceOwnerPrincipalId: "human-member",
-        targetDeviceCredentialId: "device-2"
+        targetDeviceCredentialId: "device-2",
+        targetDeviceOwnerMembershipActive: true
       })
     ).toEqual({ allowed: true });
+
+    // Owner cannot revoke devices of principals with no active membership on this project.
+    expect(
+      decide("revoke_member_device", owner, {
+        targetProjectId: "project-a",
+        targetDeviceOwnerPrincipalId: "human-other-project-only",
+        targetDeviceCredentialId: "device-foreign",
+        targetDeviceOwnerMembershipActive: false
+      })
+    ).toMatchObject({ allowed: false, code: "human_membership_required" });
+
+    expect(
+      decide("revoke_member_device", owner, {
+        targetProjectId: "project-a",
+        targetDeviceOwnerPrincipalId: "human-other-project-only",
+        targetDeviceCredentialId: "device-foreign"
+      })
+    ).toMatchObject({ allowed: false, code: "human_membership_required" });
   });
 
   it("rejects Host-like subjects by requiring concrete human policy subject kinds only", () => {

@@ -269,6 +269,68 @@ describe("human membership HTTP APIs", () => {
     expect(own.status).toBe(200);
   });
 
+  it("prevents project-a owner from revoking a project-b-only device credential", async () => {
+    const { origin } = await setup();
+    const a = await bootstrap(origin, "project-a", {
+      displayName: "Owner A",
+      humanPrincipalId: "owner-a"
+    });
+    const b = await bootstrap(origin, "project-b", {
+      displayName: "Owner B",
+      humanPrincipalId: "owner-b"
+    });
+    const foreignDeviceId = b.payload.device!.deviceCredentialId;
+
+    const crossRevoke = await fetch(
+      `${origin}/api/v1/projects/project-a/human/devices/${foreignDeviceId}/revoke`,
+      { method: "POST", headers: auth(a.payload.deviceToken!) }
+    );
+    expect(crossRevoke.status).toBe(403);
+    await expect(crossRevoke.json()).resolves.toEqual({ error: "human_membership_required" });
+
+    // Foreign owner device remains usable on its own project.
+    const stillAuth = await fetch(`${origin}/api/v1/projects/project-b/human/members`, {
+      headers: auth(b.payload.deviceToken!)
+    });
+    expect(stillAuth.status).toBe(200);
+  });
+
+  it("recovers owner access via loopback re-bootstrap after last device is revoked", async () => {
+    const { origin } = await setup();
+    const first = await bootstrap(origin, "project-a", {
+      displayName: "Ada Owner",
+      humanPrincipalId: "human-owner-1"
+    });
+    expect(first.response.status).toBe(201);
+    const firstToken = first.payload.deviceToken!;
+    const firstDeviceId = first.payload.device!.deviceCredentialId;
+
+    const revoked = await fetch(
+      `${origin}/api/v1/projects/project-a/human/devices/${firstDeviceId}/revoke`,
+      { method: "POST", headers: auth(firstToken) }
+    );
+    expect(revoked.status).toBe(200);
+
+    const lockedOut = await fetch(`${origin}/api/v1/projects/project-a/human/members`, {
+      headers: auth(firstToken)
+    });
+    expect(lockedOut.status).toBe(401);
+
+    const recovered = await bootstrap(origin, "project-a", {
+      displayName: "Ada Owner",
+      humanPrincipalId: "human-owner-1"
+    });
+    expect(recovered.response.status).toBe(200);
+    expect(recovered.payload.created).toBe(false);
+    expect(recovered.payload.deviceToken).toMatch(/^pw_hdev_/);
+    expect(recovered.payload.device?.deviceCredentialId).not.toBe(firstDeviceId);
+
+    const members = await fetch(`${origin}/api/v1/projects/project-a/human/members`, {
+      headers: auth(recovered.payload.deviceToken!)
+    });
+    expect(members.status).toBe(200);
+  });
+
   it("protects last owner and supports promote/demote/remove", async () => {
     const { origin } = await setup();
     const owner = await bootstrap(origin);

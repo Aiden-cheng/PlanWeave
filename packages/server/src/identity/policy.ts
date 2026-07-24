@@ -39,6 +39,11 @@ export type HumanPolicyFacts = {
   targetDeviceCredentialId?: string;
   /** Owner of the target device (for own-vs-other checks). */
   targetDeviceOwnerPrincipalId?: string;
+  /**
+   * Whether the target device owner has an active membership on targetProjectId.
+   * Required for revoke_member_device so owners cannot revoke devices of non-members.
+   */
+  targetDeviceOwnerMembershipActive?: boolean;
   /** Active owner count for the target project (last-owner protection). */
   activeOwnerCount?: number;
   /** Role of the membership being removed/demoted/promoted. */
@@ -133,7 +138,7 @@ function protectLastOwner(facts: HumanPolicyFacts | undefined): HumanAuthDecisio
  * | list_own_devices       | deny   | deny          | allow  | allow | deny        |
  * | list_project_devices   | deny   | deny          | deny   | allow | deny        |
  * | revoke_own_device      | deny   | deny          | allow  | allow | deny        |
- * | revoke_member_device   | deny   | deny          | deny   | allow | deny        |
+ * | revoke_member_device   | deny   | deny          | deny   | allow¶ | deny        |
  * | remove_member          | deny   | deny          | self‖  | yes‖  | deny        |
  * | promote_owner          | deny   | deny          | deny   | allow | deny        |
  * | demote_owner           | deny   | deny          | deny   | yes‖  | deny        |
@@ -149,6 +154,7 @@ function protectLastOwner(facts: HumanPolicyFacts | undefined): HumanAuthDecisio
  *   after digest match (linking is an application concern, still not owner elevation).
  * ‖ Last-owner cannot be removed or demoted; owner may self-leave only when another owner remains.
  *   Member may self-leave. Only owners may remove other members.
+ * ¶ Owner may revoke devices only when the device owner has active membership on the same project.
  */
 export function authorizeHumanAction(input: AuthorizeHumanActionInput): HumanAuthDecision {
   const { action, subject, facts } = input;
@@ -320,7 +326,13 @@ function authorizeRevokeMemberDevice(
   if (ownerId === undefined) {
     return denial("human_input_invalid");
   }
-  // Owners may revoke any project-relevant device, including their own, via this action.
+  // Device owner must hold active membership on the actor's project. Without this,
+  // any project owner who learns a foreign deviceCredentialId could revoke devices
+  // of principals with no relation to that project.
+  if (facts?.targetDeviceOwnerMembershipActive !== true) {
+    return denial("human_membership_required");
+  }
+  // Owners may revoke project-member devices, including their own, via this action.
   // Prefer revoke_own_device for self-service; both are allowed for owners.
   return allowHumanAuth();
 }
