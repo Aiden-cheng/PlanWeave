@@ -835,6 +835,134 @@ CREATE INDEX idx_work_assignments_project_target_host
  */
 const migration18 = "SELECT 1;";
 
+/**
+ * Human comment attachment staged uploads + content-addressed blobs + comment bindings.
+ * Separate from dispatch artifact_blobs/artifact_grants — Host grants never authorize these rows.
+ */
+const migration19 = `
+CREATE TABLE comment_attachment_blobs (
+  digest_sha256 TEXT PRIMARY KEY CHECK(
+    length(digest_sha256) = 64 AND digest_sha256 GLOB '[0-9a-f]*'
+  ),
+  size_bytes INTEGER NOT NULL CHECK(size_bytes >= 1 AND size_bytes <= 8388608),
+  media_type TEXT NOT NULL CHECK(
+    media_type IN (
+      'image/png','image/jpeg','image/webp','image/gif',
+      'application/pdf','text/plain','text/markdown'
+    )
+  ),
+  relative_path TEXT NOT NULL CHECK(
+    length(relative_path) = 67
+    AND relative_path GLOB '[0-9a-f][0-9a-f]/[0-9a-f]*'
+  ),
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE comment_pending_uploads (
+  pending_upload_id TEXT PRIMARY KEY CHECK(
+    length(pending_upload_id) BETWEEN 1 AND 128
+    AND pending_upload_id GLOB '[A-Za-z0-9]*'
+    AND pending_upload_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+  ),
+  project_id TEXT NOT NULL CHECK(
+    length(project_id) BETWEEN 1 AND 128
+    AND project_id GLOB '[A-Za-z0-9]*'
+    AND project_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+  ),
+  uploader_human_principal_id TEXT NOT NULL CHECK(
+    length(uploader_human_principal_id) BETWEEN 1 AND 128
+    AND uploader_human_principal_id GLOB '[A-Za-z0-9]*'
+    AND uploader_human_principal_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+  ),
+  expected_digest_sha256 TEXT CHECK(
+    expected_digest_sha256 IS NULL
+    OR (length(expected_digest_sha256) = 64 AND expected_digest_sha256 GLOB '[0-9a-f]*')
+  ),
+  expected_size_bytes INTEGER NOT NULL CHECK(expected_size_bytes >= 1 AND expected_size_bytes <= 8388608),
+  media_type TEXT NOT NULL CHECK(
+    media_type IN (
+      'image/png','image/jpeg','image/webp','image/gif',
+      'application/pdf','text/plain','text/markdown'
+    )
+  ),
+  file_name TEXT CHECK(
+    file_name IS NULL
+    OR (
+      length(file_name) BETWEEN 1 AND 255
+      AND file_name NOT GLOB '*[/\\]*'
+      AND file_name NOT IN ('.','..')
+    )
+  ),
+  comment_id TEXT CHECK(
+    comment_id IS NULL
+    OR (
+      length(comment_id) BETWEEN 1 AND 128
+      AND comment_id GLOB '[A-Za-z0-9]*'
+      AND comment_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+    )
+  ),
+  status TEXT NOT NULL CHECK(status IN ('pending','uploaded','finalized','expired','aborted')),
+  digest_sha256 TEXT CHECK(
+    digest_sha256 IS NULL
+    OR (length(digest_sha256) = 64 AND digest_sha256 GLOB '[0-9a-f]*')
+  ),
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  uploaded_at TEXT,
+  finalized_at TEXT,
+  CHECK(
+    (status = 'pending' AND digest_sha256 IS NULL AND uploaded_at IS NULL AND finalized_at IS NULL)
+    OR (status = 'uploaded' AND digest_sha256 IS NOT NULL AND uploaded_at IS NOT NULL AND finalized_at IS NULL)
+    OR (status = 'finalized' AND digest_sha256 IS NOT NULL AND uploaded_at IS NOT NULL AND finalized_at IS NOT NULL)
+    OR (status IN ('expired','aborted'))
+  )
+);
+
+CREATE INDEX idx_comment_pending_uploads_project_status_expires
+  ON comment_pending_uploads(project_id, status, expires_at);
+
+CREATE INDEX idx_comment_pending_uploads_digest
+  ON comment_pending_uploads(digest_sha256)
+  WHERE digest_sha256 IS NOT NULL;
+
+CREATE TABLE comment_attachment_bindings (
+  project_id TEXT NOT NULL CHECK(
+    length(project_id) BETWEEN 1 AND 128
+    AND project_id GLOB '[A-Za-z0-9]*'
+    AND project_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+  ),
+  comment_id TEXT NOT NULL CHECK(
+    length(comment_id) BETWEEN 1 AND 128
+    AND comment_id GLOB '[A-Za-z0-9]*'
+    AND comment_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+  ),
+  digest_sha256 TEXT NOT NULL CHECK(
+    length(digest_sha256) = 64 AND digest_sha256 GLOB '[0-9a-f]*'
+  ),
+  size_bytes INTEGER NOT NULL CHECK(size_bytes >= 1 AND size_bytes <= 8388608),
+  media_type TEXT NOT NULL CHECK(
+    media_type IN (
+      'image/png','image/jpeg','image/webp','image/gif',
+      'application/pdf','text/plain','text/markdown'
+    )
+  ),
+  file_name TEXT CHECK(
+    file_name IS NULL
+    OR (
+      length(file_name) BETWEEN 1 AND 255
+      AND file_name NOT GLOB '*[/\\]*'
+      AND file_name NOT IN ('.','..')
+    )
+  ),
+  created_at TEXT NOT NULL,
+  comment_tombstoned_at TEXT,
+  PRIMARY KEY (project_id, comment_id, digest_sha256)
+);
+
+CREATE INDEX idx_comment_attachment_bindings_project_digest
+  ON comment_attachment_bindings(project_id, digest_sha256);
+`;
+
 function ensureHostSelectionColumn(database: SqliteDatabase): void {
   if (!tableExists(database, "remote_operations")) return;
   const hasColumn = database
@@ -988,7 +1116,8 @@ const migrations: readonly Migration[] = [
   { version: 15, sql: migration15, before: validateRemoteAttemptIdentities },
   { version: 16, sql: migration16 },
   { version: 17, sql: migration17 },
-  { version: 18, sql: migration18, after: ensureHostSelectionColumn }
+  { version: 18, sql: migration18, after: ensureHostSelectionColumn },
+  { version: 19, sql: migration19 }
 ];
 
 export const latestCentralSchemaVersion = Math.max(

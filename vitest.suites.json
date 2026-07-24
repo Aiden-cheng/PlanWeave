@@ -176,7 +176,10 @@
         "runtimeBrowserBoundary.test.ts",
         "smokeProcessGate.test.ts"
       ],
-      "platform": ["agentToolsWindows.test.ts", "runtimeStateWatch.test.ts"],
+      "platform": [
+        "agentToolsWindows.test.ts",
+        "runtimeStateWatch.test.ts"
+      ],
       "performance": []
     },
     {
@@ -423,7 +426,9 @@
         "managedProcessTree.test.ts",
         "stateConcurrency.test.ts"
       ],
-      "performance": ["blockRunIndexPerformance.test.ts"]
+      "performance": [
+        "blockRunIndexPerformance.test.ts"
+      ]
     },
     {
       "root": "packages/distributed-protocol/src/__tests__",
@@ -468,6 +473,7 @@
         "artifactMediaType.test.ts",
         "commentActivityPolicy.test.ts",
         "commentActivitySchemas.test.ts",
+        "commentAttachmentPolicy.test.ts",
         "humanIdentityPolicy.test.ts",
         "humanIdentitySchemas.test.ts",
         "protocolPrimitives.test.ts",
@@ -484,6 +490,7 @@
         "artifactMigrationV7.test.ts",
         "artifactQuota.test.ts",
         "artifacts.test.ts",
+        "commentAttachmentHttp.test.ts",
         "dispatches.test.ts",
         "hostEnrollment.test.ts",
         "hostReservations.test.ts",

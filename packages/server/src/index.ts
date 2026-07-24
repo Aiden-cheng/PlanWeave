@@ -420,3 +420,31 @@ export {
   type CommentTombstoneCommand,
   type CommentTombstoneDecision
 } from "./comments/index.js";
+export {
+  ATTACHMENT_ERROR_MESSAGES,
+  AttachmentRepositoryError,
+  CommentAttachmentBlobStore,
+  CommentAttachmentRepository,
+  CommentAttachmentService,
+  CommentAttachmentServiceError,
+  allowAttachment,
+  attachmentErrorCodeSchema,
+  authorizeAttachmentProjectAccess,
+  authorizeCommentAttachmentRead,
+  authorizeDigestScopedRead,
+  authorizePendingUploadMutation,
+  authorizePendingUploadRead,
+  denyAttachment,
+  evaluateAttachmentMediaAndSize,
+  evaluatePendingUploadTtlMs,
+  handleCommentAttachmentHttpRequest,
+  humanSubject,
+  resolvePendingUploadTtlMs,
+  type AttachmentAuthDecision,
+  type AttachmentErrorCode,
+  type AttachmentHttpOptions,
+  type CommentAttachmentBinding,
+  type CommentAttachmentServiceOptions,
+  type PendingUploadRecord,
+  type PendingUploadStatus
+} from "./attachments/index.js";

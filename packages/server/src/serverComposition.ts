@@ -1,6 +1,12 @@
 import type { IncomingMessage, Server as HttpServer, ServerResponse } from "node:http";
 import { ArtifactStore } from "./artifacts.js";
 import { handleAgentHostArtifactRequest } from "./artifactHttp.js";
+import {
+  CommentAttachmentBlobStore,
+  CommentAttachmentRepository,
+  CommentAttachmentService,
+  handleCommentAttachmentHttpRequest
+} from "./attachments/index.js";
 import { serverConfigSchema, type ServerConfig } from "./config.js";
 import { startRemoteBlockCoordinationServer } from "./distributedCoordination.js";
 import { HostEnrollmentService } from "./hostEnrollment.js";
@@ -127,7 +133,8 @@ function requiresAdmission(request: IncomingMessage): boolean {
     pathname === "/api/v1/remote-operations" ||
     /^\/api\/v1\/remote-operations\/[^/]+\/actions$/.test(pathname) ||
     /^\/api\/v1\/remote-operations\/[^/]+\/interactions\/respond$/.test(pathname) ||
-    /^\/api\/v1\/projects\/[^/]+\/human\//.test(pathname)
+    /^\/api\/v1\/projects\/[^/]+\/human\//.test(pathname) ||
+    /^\/api\/v1\/projects\/[^/]+\/attachments(\/|$)/.test(pathname)
   );
 }
 
@@ -186,6 +193,16 @@ export async function createDistributedServerComposition(
       repository: humanIdentity,
       clock
     });
+    const commentAttachmentRepository = new CommentAttachmentRepository(server.database);
+    const commentAttachmentBlobs = new CommentAttachmentBlobStore(
+      server.database,
+      config.dataDirectory
+    );
+    const commentAttachments = new CommentAttachmentService({
+      repository: commentAttachmentRepository,
+      blobs: commentAttachmentBlobs,
+      clock
+    });
     webSockets = attachAgentHostWebSocketServer({
       server: options.httpServer,
       hosts: coordination.hosts,
@@ -241,6 +258,16 @@ export async function createDistributedServerComposition(
         if (
           await handleHumanHttpRequest(request, response, {
             service: humanMembership,
+            repository: humanIdentity,
+            allowInsecureDevelopment: config.allowInsecureDevelopment,
+            clock
+          })
+        ) {
+          return;
+        }
+        if (
+          await handleCommentAttachmentHttpRequest(request, response, {
+            service: commentAttachments,
             repository: humanIdentity,
             allowInsecureDevelopment: config.allowInsecureDevelopment,
             clock
