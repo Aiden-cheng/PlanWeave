@@ -9,6 +9,7 @@ import {
 } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { hashOperatorToken } from "../operatorAuth.js";
 import { parseServerConfig } from "../config.js";
+import { latestCentralSchemaVersion } from "../migrations.js";
 import {
   createDistributedServerComposition,
   type DistributedServerComposition
@@ -89,7 +90,7 @@ describe("distributed server composition", () => {
     expect(fixture.composition.ownsHttpServer).toBe(false);
     await expect((await fetch(`${fixture.origin}/readyz`)).json()).resolves.toEqual({
       status: "ready",
-      schemaVersion: 18
+      schemaVersion: latestCentralSchemaVersion
     });
 
     const enrollment = await fetch(`${fixture.origin}/api/v1/host-enrollments`, {

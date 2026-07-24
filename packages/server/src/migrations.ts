@@ -963,6 +963,156 @@ CREATE INDEX idx_comment_attachment_bindings_project_digest
   ON comment_attachment_bindings(project_id, digest_sha256);
 `;
 
+/**
+ * Scoped comments + append-only activity projection (HC-003#B-003).
+ * Comments annotate WorkItemRefs; activity is a bounded read projection with source-action
+ * idempotency. Outbox supports reconciliation when projection is deferred or interrupted.
+ */
+const migration20 = `
+CREATE TABLE comments (
+  comment_id TEXT PRIMARY KEY CHECK(
+    length(comment_id) BETWEEN 1 AND 128
+    AND comment_id GLOB '[A-Za-z0-9]*'
+    AND comment_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+  ),
+  project_id TEXT NOT NULL CHECK(
+    length(project_id) BETWEEN 1 AND 128
+    AND project_id GLOB '[A-Za-z0-9]*'
+    AND project_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+  ),
+  canvas_id TEXT NOT NULL CHECK(
+    length(canvas_id) BETWEEN 1 AND 128
+    AND canvas_id GLOB '[A-Za-z0-9]*'
+    AND canvas_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+  ),
+  work_item_kind TEXT NOT NULL CHECK(work_item_kind IN ('task','block')),
+  work_item_key TEXT NOT NULL CHECK(length(work_item_key) BETWEEN 1 AND 256),
+  author_human_principal_id TEXT NOT NULL CHECK(
+    length(author_human_principal_id) BETWEEN 1 AND 128
+    AND author_human_principal_id GLOB '[A-Za-z0-9]*'
+    AND author_human_principal_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+  ),
+  body TEXT NOT NULL CHECK(length(body) BETWEEN 1 AND 16384),
+  body_format TEXT NOT NULL CHECK(body_format = 'markdown'),
+  revision INTEGER NOT NULL CHECK(revision >= 1),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  attachments_json TEXT NOT NULL CHECK(json_valid(attachments_json)),
+  tombstoned_at TEXT,
+  tombstoned_by_kind TEXT CHECK(
+    tombstoned_by_kind IS NULL
+    OR tombstoned_by_kind IN ('human','local_admin','system')
+  ),
+  tombstoned_by_id TEXT CHECK(
+    tombstoned_by_id IS NULL
+    OR (
+      length(tombstoned_by_id) BETWEEN 1 AND 128
+      AND tombstoned_by_id GLOB '[A-Za-z0-9]*'
+      AND tombstoned_by_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+    )
+  ),
+  tombstoned_by_display_name TEXT CHECK(
+    tombstoned_by_display_name IS NULL
+    OR length(tombstoned_by_display_name) BETWEEN 1 AND 128
+  ),
+  tombstone_reason TEXT CHECK(
+    tombstone_reason IS NULL OR length(tombstone_reason) BETWEEN 1 AND 512
+  ),
+  CHECK(
+    (tombstoned_at IS NULL AND tombstoned_by_kind IS NULL AND tombstoned_by_id IS NULL
+      AND tombstoned_by_display_name IS NULL AND tombstone_reason IS NULL)
+    OR (tombstoned_at IS NOT NULL AND tombstoned_by_kind IS NOT NULL AND tombstoned_by_id IS NOT NULL)
+  )
+);
+
+CREATE INDEX idx_comments_project_work_item_created
+  ON comments(project_id, canvas_id, work_item_kind, work_item_key, created_at, comment_id);
+
+CREATE INDEX idx_comments_project_author
+  ON comments(project_id, author_human_principal_id, created_at);
+
+CREATE TABLE activity_records (
+  activity_id TEXT PRIMARY KEY CHECK(
+    length(activity_id) BETWEEN 1 AND 128
+    AND activity_id GLOB '[A-Za-z0-9]*'
+    AND activity_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+  ),
+  project_id TEXT NOT NULL CHECK(
+    length(project_id) BETWEEN 1 AND 128
+    AND project_id GLOB '[A-Za-z0-9]*'
+    AND project_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+  ),
+  type TEXT NOT NULL CHECK(type IN (
+    'member_joined','member_left','member_removed','owner_promoted','owner_demoted',
+    'assignment_updated',
+    'comment_created','comment_edited','comment_tombstoned',
+    'remote_run_started','remote_run_succeeded','remote_run_failed','remote_run_interrupted'
+  )),
+  source_kind TEXT NOT NULL CHECK(source_kind IN (
+    'membership','assignment','comment','remote_run'
+  )),
+  source_id TEXT NOT NULL CHECK(
+    length(source_id) BETWEEN 1 AND 128
+    AND source_id GLOB '[A-Za-z0-9]*'
+    AND source_id NOT GLOB '*[^A-Za-z0-9._:#-]*'
+  ),
+  summary_json TEXT NOT NULL CHECK(json_valid(summary_json)),
+  subjects_json TEXT NOT NULL CHECK(json_valid(subjects_json)),
+  canvas_id TEXT CHECK(
+    canvas_id IS NULL
+    OR (
+      length(canvas_id) BETWEEN 1 AND 128
+      AND canvas_id GLOB '[A-Za-z0-9]*'
+      AND canvas_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+    )
+  ),
+  work_item_kind TEXT CHECK(work_item_kind IS NULL OR work_item_kind IN ('task','block')),
+  work_item_key TEXT CHECK(work_item_key IS NULL OR length(work_item_key) BETWEEN 1 AND 256),
+  occurred_at TEXT NOT NULL,
+  UNIQUE(project_id, source_kind, source_id),
+  CHECK(
+    (canvas_id IS NULL AND work_item_kind IS NULL AND work_item_key IS NULL)
+    OR (canvas_id IS NOT NULL AND work_item_kind IS NOT NULL AND work_item_key IS NOT NULL)
+  )
+);
+
+CREATE INDEX idx_activity_records_project_occurred
+  ON activity_records(project_id, occurred_at DESC, activity_id DESC);
+
+CREATE INDEX idx_activity_records_project_work_item
+  ON activity_records(project_id, canvas_id, work_item_kind, work_item_key, occurred_at DESC, activity_id DESC)
+  WHERE canvas_id IS NOT NULL;
+
+CREATE TABLE activity_projection_outbox (
+  outbox_id TEXT PRIMARY KEY CHECK(
+    length(outbox_id) BETWEEN 1 AND 128
+    AND outbox_id GLOB '[A-Za-z0-9]*'
+    AND outbox_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+  ),
+  project_id TEXT NOT NULL CHECK(
+    length(project_id) BETWEEN 1 AND 128
+    AND project_id GLOB '[A-Za-z0-9]*'
+    AND project_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+  ),
+  source_kind TEXT NOT NULL CHECK(source_kind IN (
+    'membership','assignment','comment','remote_run'
+  )),
+  source_id TEXT NOT NULL CHECK(
+    length(source_id) BETWEEN 1 AND 128
+    AND source_id GLOB '[A-Za-z0-9]*'
+    AND source_id NOT GLOB '*[^A-Za-z0-9._:#-]*'
+  ),
+  activity_json TEXT NOT NULL CHECK(json_valid(activity_json)),
+  created_at TEXT NOT NULL,
+  projected_at TEXT,
+  UNIQUE(project_id, source_kind, source_id)
+);
+
+CREATE INDEX idx_activity_projection_outbox_pending
+  ON activity_projection_outbox(created_at)
+  WHERE projected_at IS NULL;
+`;
+
 function ensureHostSelectionColumn(database: SqliteDatabase): void {
   if (!tableExists(database, "remote_operations")) return;
   const hasColumn = database
@@ -1117,7 +1267,8 @@ const migrations: readonly Migration[] = [
   { version: 16, sql: migration16 },
   { version: 17, sql: migration17 },
   { version: 18, sql: migration18, after: ensureHostSelectionColumn },
-  { version: 19, sql: migration19 }
+  { version: 19, sql: migration19 },
+  { version: 20, sql: migration20 }
 ];
 
 export const latestCentralSchemaVersion = Math.max(

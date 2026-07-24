@@ -8,6 +8,7 @@ import {
   createTestWorkspace
 } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { parseServerConfig } from "../config.js";
+import { latestCentralSchemaVersion } from "../migrations.js";
 import { hashOperatorToken } from "../operatorAuth.js";
 import { serveDistributedServer } from "../serverServe.js";
 
@@ -66,10 +67,16 @@ describe("distributed server listener", () => {
     });
     const server = await serveDistributedServer(config);
 
-    expect(server.readiness()).toEqual({ status: "ready", schemaVersion: 18 });
+    expect(server.readiness()).toEqual({
+      status: "ready",
+      schemaVersion: latestCentralSchemaVersion
+    });
     const response = await fetch(`${config.publicUrl}/readyz`);
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ status: "ready", schemaVersion: 18 });
+    await expect(response.json()).resolves.toEqual({
+      status: "ready",
+      schemaVersion: latestCentralSchemaVersion
+    });
     await server.close();
     await server.close();
     expect(server.readiness()).toMatchObject({ status: "draining" });

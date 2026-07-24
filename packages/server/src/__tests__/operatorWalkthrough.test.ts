@@ -12,6 +12,7 @@ import {
   createTestWorkspace
 } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { runServerCli } from "../bin.js";
+import { latestCentralSchemaVersion } from "../migrations.js";
 import { hashOperatorToken } from "../operatorAuth.js";
 
 const directories: string[] = [];
@@ -176,7 +177,10 @@ describe("remote operator walkthrough", () => {
     expect((await fetch(`${origin}/healthz`)).status).toBe(200);
     const readiness = await fetch(`${origin}/readyz`);
     expect(readiness.status).toBe(200);
-    await expect(readiness.json()).resolves.toEqual({ status: "ready", schemaVersion: 18 });
+    await expect(readiness.json()).resolves.toEqual({
+      status: "ready",
+      schemaVersion: latestCentralSchemaVersion
+    });
     await expect((await fetch(`${origin}/version`)).json()).resolves.toMatchObject({
       protocolVersion: 1
     });
@@ -321,7 +325,7 @@ describe("remote operator walkthrough", () => {
     server = await startServer();
     await expect((await fetch(`${origin}/readyz`)).json()).resolves.toEqual({
       status: "ready",
-      schemaVersion: 18
+      schemaVersion: latestCentralSchemaVersion
     });
     const hosts = (await (
       await fetch(`${origin}/api/v1/hosts`, { headers: authorization })

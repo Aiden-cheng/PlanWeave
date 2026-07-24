@@ -472,6 +472,7 @@
       "unit": [
         "artifactMediaType.test.ts",
         "commentActivityPolicy.test.ts",
+        "commentActivityProjection.test.ts",
         "commentActivitySchemas.test.ts",
         "commentAttachmentPolicy.test.ts",
         "humanIdentityPolicy.test.ts",
@@ -490,7 +491,9 @@
         "artifactMigrationV7.test.ts",
         "artifactQuota.test.ts",
         "artifacts.test.ts",
+        "commentActivityPersistence.test.ts",
         "commentAttachmentHttp.test.ts",
+        "commentService.test.ts",
         "dispatches.test.ts",
         "hostEnrollment.test.ts",
         "hostReservations.test.ts",

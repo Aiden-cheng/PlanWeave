@@ -331,6 +331,8 @@ export class CommentAttachmentRepository {
   /**
    * Bind finalized digests to a comment id for authorized download by comment scope.
    * Used by comment create (B-003) and tests; B-002 exposes it for tombstone policy.
+   * Opens its own write transaction. Prefer {@link bindCommentAttachmentsUnlocked}
+   * when the caller already holds a write transaction (comment create).
    */
   bindCommentAttachments(input: {
     projectId: string;
@@ -338,37 +340,46 @@ export class CommentAttachmentRepository {
     attachments: readonly CommentAttachmentMetadata[];
     createdAt: string;
   }): CommentAttachmentBinding[] {
-    return inWriteTransaction(this.database, () => {
-      const projectId = humanProjectIdSchema.parse(input.projectId);
-      const commentId = commentIdSchema.parse(input.commentId);
-      const bindings: CommentAttachmentBinding[] = [];
-      for (const attachment of input.attachments) {
-        this.database
-          .prepare(
-            `INSERT INTO comment_attachment_bindings(
-              project_id,comment_id,digest_sha256,size_bytes,media_type,file_name,
-              created_at,comment_tombstoned_at
-            ) VALUES (?,?,?,?,?,?,?, NULL)
-            ON CONFLICT(project_id, comment_id, digest_sha256) DO UPDATE SET
-              size_bytes=excluded.size_bytes,
-              media_type=excluded.media_type,
-              file_name=excluded.file_name`
-          )
-          .run(
-            projectId,
-            commentId,
-            attachment.digestSha256,
-            attachment.sizeBytes,
-            attachment.mediaType,
-            attachment.fileName ?? null,
-            input.createdAt
-          );
-        bindings.push(
-          this.getBindingRequired(projectId, commentId, attachment.digestSha256)
+    return inWriteTransaction(this.database, () => this.bindCommentAttachmentsUnlocked(input));
+  }
+
+  /**
+   * Same as {@link bindCommentAttachments} without opening a nested transaction.
+   * Caller must already be inside a write transaction.
+   */
+  bindCommentAttachmentsUnlocked(input: {
+    projectId: string;
+    commentId: string;
+    attachments: readonly CommentAttachmentMetadata[];
+    createdAt: string;
+  }): CommentAttachmentBinding[] {
+    const projectId = humanProjectIdSchema.parse(input.projectId);
+    const commentId = commentIdSchema.parse(input.commentId);
+    const bindings: CommentAttachmentBinding[] = [];
+    for (const attachment of input.attachments) {
+      this.database
+        .prepare(
+          `INSERT INTO comment_attachment_bindings(
+            project_id,comment_id,digest_sha256,size_bytes,media_type,file_name,
+            created_at,comment_tombstoned_at
+          ) VALUES (?,?,?,?,?,?,?, NULL)
+          ON CONFLICT(project_id, comment_id, digest_sha256) DO UPDATE SET
+            size_bytes=excluded.size_bytes,
+            media_type=excluded.media_type,
+            file_name=excluded.file_name`
+        )
+        .run(
+          projectId,
+          commentId,
+          attachment.digestSha256,
+          attachment.sizeBytes,
+          attachment.mediaType,
+          attachment.fileName ?? null,
+          input.createdAt
         );
-      }
-      return bindings;
-    });
+      bindings.push(this.getBindingRequired(projectId, commentId, attachment.digestSha256));
+    }
+    return bindings;
   }
 
   setCommentTombstoned(input: {

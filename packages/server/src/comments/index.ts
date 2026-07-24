@@ -140,3 +140,35 @@ export {
   type CommentEditDecision,
   type CommentTombstoneDecision
 } from "./policy.js";
+
+export {
+  ActivityRepository,
+  ActivityRepositoryError,
+  type ActivityInsertResult
+} from "./activityRepository.js";
+
+export {
+  assignmentActivitySourceId,
+  buildAssignmentActivity,
+  buildCommentActivity,
+  buildMembershipActivity,
+  buildRemoteRunActivity,
+  commentActivitySourceId,
+  membershipActivitySourceId,
+  opaqueWorkItemKey,
+  remoteRunActivitySourceId,
+  type AssignmentActivityInput,
+  type CommentActivityInput,
+  type MembershipActivityInput,
+  type RemoteRunActivityInput
+} from "./activityProjection.js";
+
+export { CommentRepository, CommentRepositoryError } from "./repository.js";
+
+export {
+  ActivityProjectionService,
+  CommentService,
+  CommentServiceError,
+  membershipRoleLabel,
+  type CommentServiceOptions
+} from "./service.js";
