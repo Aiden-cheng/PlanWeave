@@ -101,3 +101,18 @@ export {
   type ServerEvent,
   type ServerToHostCommand
 } from "./protocol.js";
+export {
+  dispositionForGate,
+  findSupportedHostAcpProfile,
+  listSupportedHostAcpProfiles,
+  parseRealAcpGate,
+  preflightRealAcp,
+  REAL_ACP_SMOKE_PROMPT,
+  resolveRealAcpHostProfile,
+  runRealAcpSmoke,
+  type RealAcpGate,
+  type RealAcpPrecondition,
+  type RealAcpPreflightEvidence,
+  type RealAcpSmokeEvidence,
+  type SupportedHostAcpProfile
+} from "./realAcp/index.js";

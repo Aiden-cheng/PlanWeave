@@ -834,3 +834,34 @@ export {
   acpExecutionLimitsSchema
 } from "./autoRun/acpExecutionEngineContracts.js";
 export type * from "./autoRun/acpExecutionEngineContracts.js";
+export {
+  resolveAgentDefinition,
+  registeredAgentDefinitions,
+  builtinAgentProfiles
+} from "./autoRun/agentRegistry.js";
+export type {
+  AgentDefinition,
+  AcpLaunchMetadata,
+  RunnerPreflightInput,
+  RunnerPreflightResult
+} from "./autoRun/agentRunner.js";
+export {
+  ACP_SDK_AUTHORITY,
+  AcpOperationTimeoutError,
+  AcpProcessError,
+  createAcpConnection
+} from "./autoRun/acpConnection.js";
+export type {
+  AcpConnection,
+  CreateAcpConnectionOptions,
+  TrustedAcpLaunch
+} from "./autoRun/acpConnection.js";
+export {
+  AcpPreflightCleanupError,
+  AcpPreflightPhaseError,
+  capabilitiesFromInitialize,
+  probeInstalledAcpAgent
+} from "./autoRun/acpPreflightProbe.js";
+export type { AcpPreflightPhase } from "./autoRun/acpPreflightProbe.js";
+export { acpProbeResultSchema } from "./autoRun/acpRunner.js";
+export type { AcpPreflightProbe, AcpPreflightProbeResult } from "./autoRun/acpRunner.js";

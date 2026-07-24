@@ -1,4 +1,5 @@
 import type { AgentHostComposition } from "../composition/agentHostComposition.js";
+import { runRealAcpSmokeCli } from "../realAcp/cli.js";
 import { AgentHostOperator } from "./agentHostOperator.js";
 
 export type AgentHostCliIo = { stdout(value: string): void; stderr(value: string): void };
@@ -92,10 +93,14 @@ export async function runAgentHostCli(
     operator?: AgentHostOperatorService;
     io?: AgentHostCliIo;
     processLike?: Pick<NodeJS.Process, "once" | "off">;
+    env?: Readonly<Record<string, string | undefined>>;
   } = {}
 ): Promise<number> {
   const io = options.io ?? { stdout: console.log, stderr: console.error };
   try {
+    if (argv[0] === "real-acp-smoke") {
+      return await runRealAcpSmokeCli(argv.slice(1), { io, env: options.env });
+    }
     const parsed = parseAgentHostArgs(argv);
     const operator = options.operator ?? new AgentHostOperator();
     if (parsed.command === "run") {

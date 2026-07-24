@@ -1,0 +1,203 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import {
+  ACP_SDK_AUTHORITY,
+  probeInstalledAcpAgent,
+  resolveAgentDefinition,
+  type AcpPreflightProbeResult
+} from "@planweave-ai/runtime";
+import type { RealAcpGate, RealAcpPrecondition } from "./gate.js";
+import { precondition } from "./gate.js";
+import {
+  resolveRealAcpHostProfile,
+  type ResolvedRealAcpHostProfile
+} from "./resolveProfile.js";
+
+const execFileAsync = promisify(execFile);
+
+export type RealAcpPreflightEvidence = {
+  profileId: string;
+  agentId: string;
+  commandPath: string;
+  /** Non-secret version string from --version or agentInfo; never credentials. */
+  agentVersion: string | null;
+  verifiedAdapterVersion: string;
+  protocolVersion: typeof ACP_SDK_AUTHORITY.protocolVersion;
+  sdkPackageVersion: typeof ACP_SDK_AUTHORITY.packageVersion;
+  capabilities: readonly string[];
+  authenticationStatus: string;
+  agentInfoName: string | null;
+};
+
+export type RealAcpPreflightOutcome =
+  | { status: "ready"; profile: ResolvedRealAcpHostProfile; evidence: RealAcpPreflightEvidence }
+  | { status: "precondition"; precondition: RealAcpPrecondition; evidence?: RealAcpPreflightEvidence };
+
+async function probeVersion(commandPath: string): Promise<string | null> {
+  try {
+    const result = await execFileAsync(commandPath, ["--version"], {
+      encoding: "utf8",
+      timeout: 10_000,
+      maxBuffer: 64 * 1024
+    });
+    const text = `${result.stdout}${result.stderr}`.trim();
+    return text.length > 0 ? text.split(/\r?\n/, 1)[0]!.slice(0, 256) : null;
+  } catch {
+    return null;
+  }
+}
+
+function authenticationStatus(probe: AcpPreflightProbeResult): string {
+  if (probe.kind === "ready") return probe.authentication.status;
+  if (probe.kind === "auth_required") return `action_required:${probe.authentication.reason}`;
+  if (probe.kind === "interaction_required") return `interaction_required:${probe.interaction}`;
+  return "failed";
+}
+
+function redactProbeMessage(message: string): string {
+  // Never surface env values or absolute home paths in actionable messages.
+  return message
+    .replace(/\/Users\/[^/\s]+/g, "/Users/<redacted>")
+    .replace(/\/home\/[^/\s]+/g, "/home/<redacted>")
+    .replace(/[A-Za-z0-9_\-]{20,}/g, (token) =>
+      /^(PLANWEAVE_|ACP_|error_|agent_)/.test(token) ? token : "<redacted>"
+    )
+    .slice(0, 512);
+}
+
+export async function preflightRealAcp(options: {
+  gate: RealAcpGate;
+  cwd: string;
+  env?: Readonly<Record<string, string | undefined>>;
+  pathEnv?: string;
+  signal?: AbortSignal;
+}): Promise<RealAcpPreflightOutcome> {
+  const resolved = await resolveRealAcpHostProfile({
+    gate: options.gate,
+    env: options.env,
+    pathEnv: options.pathEnv
+  });
+  if (resolved.status === "precondition") {
+    return { status: "precondition", precondition: resolved.precondition };
+  }
+
+  const { profile } = resolved;
+  const versionOutput = await probeVersion(profile.commandPath);
+  profile.versionOutput = versionOutput;
+
+  const definition = resolveAgentDefinition(profile.supported.agentId);
+  // Use resolved absolute command; never fall back to CLI transport.
+  const definitionWithResolvedLaunch = {
+    ...definition,
+    acp: {
+      ...definition.acp,
+      launch: definition.acp.launch
+        ? {
+            ...definition.acp.launch,
+            command: profile.commandPath,
+            args: profile.hostProfile.launch.args
+          }
+        : null
+    }
+  };
+
+  const signal = options.signal ?? AbortSignal.timeout(60_000);
+  let probe: AcpPreflightProbeResult;
+  try {
+    probe = await probeInstalledAcpAgent({
+      definition: definitionWithResolvedLaunch,
+      cwd: options.cwd,
+      signal
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "unknown_error";
+    return {
+      status: "precondition",
+      precondition: precondition(
+        options.gate.mode,
+        "preflight_failed",
+        `ACP preflight failed for '${profile.supported.profileId}': ${redactProbeMessage(detail)}. No CLI fallback is attempted.`,
+        profile.supported.profileId
+      ),
+      evidence: {
+        profileId: profile.supported.profileId,
+        agentId: profile.supported.agentId,
+        commandPath: profile.commandPath,
+        agentVersion: versionOutput,
+        verifiedAdapterVersion: profile.supported.verifiedAdapterVersion,
+        protocolVersion: ACP_SDK_AUTHORITY.protocolVersion,
+        sdkPackageVersion: ACP_SDK_AUTHORITY.packageVersion,
+        capabilities: [],
+        authenticationStatus: "preflight_error",
+        agentInfoName: null
+      }
+    };
+  }
+
+  const agentInfo =
+    probe.kind === "ready" || probe.kind === "auth_required" ? probe.agentInfo : null;
+  const capabilities =
+    probe.kind === "ready" || probe.kind === "auth_required" ? probe.capabilities : [];
+  const agentVersion =
+    agentInfo && typeof agentInfo.version === "string" && agentInfo.version.trim().length > 0
+      ? agentInfo.version.trim()
+      : versionOutput;
+  const evidence: RealAcpPreflightEvidence = {
+    profileId: profile.supported.profileId,
+    agentId: profile.supported.agentId,
+    commandPath: profile.commandPath,
+    agentVersion,
+    verifiedAdapterVersion: profile.supported.verifiedAdapterVersion,
+    protocolVersion: ACP_SDK_AUTHORITY.protocolVersion,
+    sdkPackageVersion: ACP_SDK_AUTHORITY.packageVersion,
+    capabilities: [...capabilities],
+    authenticationStatus: authenticationStatus(probe),
+    agentInfoName: agentInfo?.name ?? null
+  };
+
+  if (probe.kind === "auth_required") {
+    return {
+      status: "precondition",
+      precondition: precondition(
+        options.gate.mode,
+        "auth_required",
+        `ACP authentication required for '${profile.supported.profileId}' (${probe.authentication.reason}). Complete agent login outside PlanWeave; credentials are Host-local and never printed. No CLI fallback.`,
+        profile.supported.profileId
+      ),
+      evidence
+    };
+  }
+
+  if (probe.kind === "failed") {
+    const message = probe.message.toLowerCase();
+    const kind =
+      message.includes("protocol version") || message.includes("not supported")
+        ? "protocol_unsupported"
+        : "preflight_failed";
+    return {
+      status: "precondition",
+      precondition: precondition(
+        options.gate.mode,
+        kind,
+        `ACP preflight failed for '${profile.supported.profileId}': ${redactProbeMessage(probe.message)}. No CLI fallback is attempted.`,
+        profile.supported.profileId
+      ),
+      evidence
+    };
+  }
+
+  if (probe.kind === "interaction_required") {
+    return {
+      status: "precondition",
+      precondition: precondition(
+        options.gate.mode,
+        "auth_required",
+        `ACP preflight requires interactive ${probe.interaction} for '${profile.supported.profileId}'. Complete agent setup outside PlanWeave.`,
+        profile.supported.profileId
+      ),
+      evidence
+    };
+  }
+
+  return { status: "ready", profile, evidence };
+}

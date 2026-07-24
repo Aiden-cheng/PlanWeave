@@ -385,6 +385,36 @@ planweave-agent-host revoke --config /etc/planweave/agent-host.json
 
 Host 凭据保存在 Host 的 `dataDirectory`（例如 `credentials.json`）。Provider 与 Git 凭据仍只存在于 Host 本地环境或 Agent 自身配置。
 
+### 可选的真实 ACP 兼容性 smoke
+
+PlanWeave 可通过公共 ACP 接口（而非 CLI runner）对一台 **Host 本地 ACP agent** 做兼容性 smoke。该路径为 **opt-in**，普通 CI 不会启动真实 agent，也不需要 provider 凭据。
+
+支持的 Host 本地 profile id（来自 Runtime registry）：`codex-acp`、`claude-code-acp`、`opencode-acp`、`grok-acp`、`pi-acp`。版本策略遵循 Runtime ACP SDK authority（`protocolVersion` / verified adapter 元数据）；smoke 断言协议与契约结果，不断言 provider 特有回复文本。
+
+```bash
+# 列出支持的 profile（不启动 agent）
+planweave-agent-host real-acp-smoke --list-profiles
+
+# 软门禁：缺二进制/登录 → skipped 证据，exit 0
+PLANWEAVE_REAL_ACP=1 planweave-agent-host real-acp-smoke --evidence /tmp/real-acp.json
+
+# 硬门禁：缺二进制/登录 → failed 证据，exit 1
+PLANWEAVE_REAL_ACP_REQUIRE=1 planweave-agent-host real-acp-smoke --require --profile codex-acp
+
+# 可选 monorepo helper（优先使用已构建 Host bin，否则 tsx）
+PLANWEAVE_REAL_ACP=1 node scripts/real-acp-host-smoke.mjs --list-profiles
+```
+
+环境变量：
+
+| 变量 | 含义 |
+| --- | --- |
+| `PLANWEAVE_REAL_ACP=1` | 软门禁：启用 smoke；前置条件不足则 skip |
+| `PLANWEAVE_REAL_ACP_REQUIRE=1` | 硬门禁：前置条件不足则 fail |
+| `PLANWEAVE_REAL_ACP_PROFILE=<id>` | 固定 Host 本地 profile id |
+
+文档与证据保持无密钥：preflight 只记录可执行路径、非秘密版本字符串、协议/SDK 版本与 capability 名称。不要把 API key 或登录 token 写入 PlanWeave 配置；agent 鉴权仍留在 Host 本地。若 ACP 启动或 capability 协商失败，`real-acp-smoke` **不会**回退到 CLI executor。
+
 ### Operator HTTP 接口
 
 鉴权路由需要 `Authorization: Bearer <operator-token>`，并使用 TLS（或 loopback 开发模式）。server-admin 可登记与吊销 Host；项目作用域凭据只能对自己的 `projectIds` 做 dispatch 与观测。

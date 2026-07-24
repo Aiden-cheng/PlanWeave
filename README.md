@@ -385,6 +385,36 @@ planweave-agent-host revoke --config /etc/planweave/agent-host.json
 
 Host credentials live under the Host `dataDirectory` (for example `credentials.json`). Provider and Git credentials remain Host-local environment or agent configuration.
 
+### Opt-in real ACP compatibility smoke
+
+PlanWeave can exercise one **Host-local ACP agent** through the public ACP interface (not the CLI runner) to confirm adapter compatibility. This path is **opt-in** so ordinary CI never starts a real agent or needs provider credentials.
+
+Supported Host-local profile ids (from the Runtime registry): `codex-acp`, `claude-code-acp`, `opencode-acp`, `grok-acp`, `pi-acp`. Version policy follows the Runtime ACP SDK authority (`protocolVersion` / verified adapter metadata); smoke asserts protocol/contract outcomes, not provider-specific reply text.
+
+```bash
+# List supported profiles (no agent launch)
+planweave-agent-host real-acp-smoke --list-profiles
+
+# Soft gate: missing binary/login → skipped evidence, exit 0
+PLANWEAVE_REAL_ACP=1 planweave-agent-host real-acp-smoke --evidence /tmp/real-acp.json
+
+# Hard gate: missing binary/login → failed evidence, exit 1
+PLANWEAVE_REAL_ACP_REQUIRE=1 planweave-agent-host real-acp-smoke --require --profile codex-acp
+
+# Optional monorepo helper (uses built Host bin or tsx)
+PLANWEAVE_REAL_ACP=1 node scripts/real-acp-host-smoke.mjs --list-profiles
+```
+
+Environment:
+
+| Variable | Meaning |
+| --- | --- |
+| `PLANWEAVE_REAL_ACP=1` | Soft gate: enable smoke; preconditions skip |
+| `PLANWEAVE_REAL_ACP_REQUIRE=1` | Hard gate: preconditions fail |
+| `PLANWEAVE_REAL_ACP_PROFILE=<id>` | Pin a Host-local profile id |
+
+Setup stays secret-free in docs and evidence: preflight records executable path, non-secret agent version strings, protocol/SDK versions, and capability names only. Do not put API keys or login tokens into PlanWeave config; agent auth remains Host-local (agent login state / provider env on the Host machine). Invoking `real-acp-smoke` never falls back to a CLI executor if ACP startup or capability negotiation fails.
+
 ### Operator HTTP surface
 
 Authenticated routes require `Authorization: Bearer <operator-token>` and TLS (or loopback development mode). Server-admin credentials can enroll and revoke hosts; project-scoped credentials may only dispatch and observe operations for their `projectIds`.

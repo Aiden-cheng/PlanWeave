@@ -447,6 +447,7 @@
         "agentHostConfig.test.ts",
         "agentHostPackage.test.ts",
         "protocolConformance.test.ts",
+        "realAcpGate.test.ts",
         "reconnectBackoff.test.ts"
       ],
       "integration": [
@@ -454,6 +455,7 @@
         "agentHostClient.test.ts",
         "agentHostEnrollment.test.ts",
         "agentHostState.test.ts",
+        "realAcpLiveSmoke.test.ts",
         "remoteAcpExecutor.test.ts"
       ],
       "platform": [],
