@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -6,7 +7,6 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PlanPackageManifest } from "@planweave-ai/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { runAgentHostCli } from "../../../agent-host/src/operator/cli.js";
 import {
   basicManifest,
   createTestWorkspace
@@ -17,6 +17,9 @@ import { hashOperatorToken } from "../operatorAuth.js";
 const directories: string[] = [];
 const mockAgentPath = fileURLToPath(
   new URL("../../../runtime/src/__tests__/support/acpMockAgent.mjs", import.meta.url)
+);
+const agentHostBinPath = fileURLToPath(
+  new URL("../../../agent-host/dist/bin.js", import.meta.url)
 );
 
 afterEach(async () => {
@@ -49,8 +52,63 @@ type RunningCli = {
   result: Promise<number>;
 };
 
+type HostCommandResult = {
+  code: number;
+  stdout: string;
+  stderr: string;
+};
+
 async function stopCli(running: RunningCli): Promise<void> {
   running.process.emit("SIGTERM");
+  await expect(running.result).resolves.toBe(0);
+}
+
+/**
+ * Invoke the public Agent Host binary as a subprocess.
+ * Avoids importing Agent Host implementation from the Server package source root.
+ */
+function runAgentHostBin(argv: readonly string[]): Promise<HostCommandResult> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [agentHostBinPath, ...argv], {
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.once("error", reject);
+    child.once("close", (code) => {
+      resolve({ code: code ?? 1, stdout, stderr });
+    });
+  });
+}
+
+type RunningHostBin = {
+  child: ChildProcessWithoutNullStreams;
+  result: Promise<number>;
+};
+
+function startAgentHostBin(configPath: string): RunningHostBin {
+  const child = spawn(process.execPath, [agentHostBinPath, "run", "--config", configPath], {
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  const result = new Promise<number>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code) => resolve(code ?? 1));
+  });
+  return { child, result };
+}
+
+async function stopHostBin(running: RunningHostBin): Promise<void> {
+  if (!running.child.killed) {
+    running.child.kill("SIGTERM");
+  }
   await expect(running.result).resolves.toBe(0);
 }
 
@@ -93,13 +151,13 @@ describe("remote operator walkthrough", () => {
     );
 
     const startServer = async (): Promise<RunningCli> => {
-      const process = new EventEmitter();
+      const processLike = new EventEmitter();
       let resolveReady!: (value: Record<string, unknown>) => void;
       const ready = new Promise<Record<string, unknown>>((resolve) => {
         resolveReady = resolve;
       });
       const result = runServerCli(["serve", "--config", serverConfigPath], {
-        processLike: process as never,
+        processLike: processLike as never,
         io: {
           stdout(value) {
             resolveReady(JSON.parse(value));
@@ -110,7 +168,7 @@ describe("remote operator walkthrough", () => {
         }
       });
       await expect(ready).resolves.toMatchObject({ status: "ready", publicUrl: origin });
-      return { process, result };
+      return { process: processLike, result };
     };
 
     let server = await startServer();
@@ -162,51 +220,32 @@ describe("remote operator walkthrough", () => {
         ]
       })
     );
-    const runHostCommand = (argv: readonly string[]) => {
-      const stdout = vi.fn();
-      const stderr = vi.fn();
-      return {
-        stdout,
-        stderr,
-        result: runAgentHostCli(argv, { io: { stdout, stderr } })
-      };
-    };
 
-    const preflight = runHostCommand(["preflight", "--config", hostConfigPath]);
-    await expect(preflight.result).resolves.toBe(0);
-    expect(JSON.parse(preflight.stdout.mock.calls[0][0])).toMatchObject({
+    const preflight = await runAgentHostBin(["preflight", "--config", hostConfigPath]);
+    expect(preflight.code).toBe(0);
+    expect(JSON.parse(preflight.stdout)).toMatchObject({
       credential: "missing",
       capacity: 2,
       connection: "offline"
     });
 
-    const enrollment = runHostCommand([
+    const enrollment = await runAgentHostBin([
       "enroll",
       "--config",
       hostConfigPath,
       "--code",
       grant.enrollmentCode
     ]);
-    await expect(enrollment.result).resolves.toBe(0);
-    expect(JSON.parse(enrollment.stdout.mock.calls[0][0])).toMatchObject({ credential: "active" });
+    expect(enrollment.code).toBe(0);
+    expect(JSON.parse(enrollment.stdout)).toMatchObject({ credential: "active" });
 
-    const status = runHostCommand(["status", "--config", hostConfigPath]);
-    await expect(status.result).resolves.toBe(0);
-    expect(JSON.parse(status.stdout.mock.calls[0][0])).toMatchObject({
+    const status = await runAgentHostBin(["status", "--config", hostConfigPath]);
+    expect(status.code).toBe(0);
+    expect(JSON.parse(status.stdout)).toMatchObject({
       credential: "active",
       capacity: 2
     });
 
-    const startHost = (): RunningCli => {
-      const process = new EventEmitter();
-      return {
-        process,
-        result: runAgentHostCli(["run", "--config", hostConfigPath], {
-          processLike: process as never,
-          io: { stdout: vi.fn(), stderr: vi.fn() }
-        })
-      };
-    };
     const readHost = async () => {
       const response = await fetch(`${origin}/api/v1/hosts`, { headers: authorization });
       expect(response.status).toBe(200);
@@ -222,7 +261,7 @@ describe("remote operator walkthrough", () => {
       return page.items[0];
     };
 
-    let host = startHost();
+    let host = startAgentHostBin(hostConfigPath);
     let firstLastSeenAt: string | undefined;
     let hostId: string | undefined;
     await vi.waitFor(async () => {
@@ -270,13 +309,13 @@ describe("remote operator walkthrough", () => {
       blockRef: "T-001#B-001"
     });
 
-    await stopCli(host);
+    await stopHostBin(host);
 
-    host = startHost();
+    host = startAgentHostBin(hostConfigPath);
     await vi.waitFor(async () => {
       expect((await readHost()).lastSeenAt).not.toBe(firstLastSeenAt);
     });
-    await stopCli(host);
+    await stopHostBin(host);
     await stopCli(server);
 
     server = await startServer();
@@ -297,17 +336,21 @@ describe("remote operator walkthrough", () => {
       revokedAt: expect.any(String)
     });
 
-    const statusAfterServerRevocation = runHostCommand(["status", "--config", hostConfigPath]);
-    await expect(statusAfterServerRevocation.result).resolves.toBe(0);
+    const statusAfterServerRevocation = await runAgentHostBin([
+      "status",
+      "--config",
+      hostConfigPath
+    ]);
+    expect(statusAfterServerRevocation.code).toBe(0);
     // Local credential store is independent until the Host marks or replaces it.
-    expect(JSON.parse(statusAfterServerRevocation.stdout.mock.calls[0][0])).toMatchObject({
+    expect(JSON.parse(statusAfterServerRevocation.stdout)).toMatchObject({
       credential: "active"
     });
-    const localRevocation = runHostCommand(["revoke", "--config", hostConfigPath]);
-    await expect(localRevocation.result).resolves.toBe(0);
-    expect(JSON.parse(localRevocation.stdout.mock.calls[0][0])).toMatchObject({
+    const localRevocation = await runAgentHostBin(["revoke", "--config", hostConfigPath]);
+    expect(localRevocation.code).toBe(0);
+    expect(JSON.parse(localRevocation.stdout)).toMatchObject({
       credential: "revoked"
     });
     await stopCli(server);
-  }, 20_000);
+  }, 30_000);
 });
