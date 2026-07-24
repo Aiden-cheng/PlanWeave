@@ -475,6 +475,8 @@
         "lifecycle.test.ts",
         "operatorWalkthrough.test.ts",
         "realProcessAcpHarness.test.ts",
+        "realProcessAuthorizationMatrix.test.ts",
+        "realProcessCrashReplayMatrix.test.ts",
         "realProcessRemoteBlockLifecycle.test.ts",
         "remoteBlockCoordinator.test.ts",
         "remoteBlockCoordinatorCrash.test.ts",
