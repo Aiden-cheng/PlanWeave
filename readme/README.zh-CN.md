@@ -248,13 +248,236 @@ ACP 预检会协商所选 Agent 声明的认证方式，并可使用已经配置
 
 ACP run 通过 CLI 和 Desktop 提供结构化进度、产物、usage 和交互请求。
 
+## 分布式运维指南
+
+PlanWeave 可以运行 **Coordinator**（`planweave-server`），把远程 Block 调度到独立部署的 **Agent Host**（`planweave-agent-host`）上执行。远程执行仅支持 **ACP**：Host 用本地配置的 ACP agent profile，在已映射的 workspace 中启动 Agent。Provider API Key、Agent 登录态和 Git 凭据只留在 Host 机器上。Git clone/fetch/push 属于 Block 内容或 Host 侧环境准备，不是 Coordinator 功能。
+
+生产环境使用 HTTPS。明文 HTTP **仅用于开发**，且只有双方都设置 `allowInsecureDevelopment: true`、并绑定字面量 loopback（`127.0.0.1` / `::1`）时才被接受。
+
+### 安装 CLI
+
+在本 monorepo 中（完成 `pnpm install` 与 `pnpm -r build` 后）：
+
+```bash
+pnpm --filter @planweave-ai/server exec planweave-server --help
+pnpm --filter @planweave-ai/agent-host exec planweave-agent-host --help
+```
+
+发布包名为 `@planweave-ai/server`（二进制 `planweave-server`）和 `@planweave-ai/agent-host`（二进制 `planweave-agent-host`）。均需 Node.js 22.5+。
+
+### 启动 Coordinator
+
+编写绝对路径 JSON 配置（`server-config/v1`）。配置中只保存 operator bearer token 的 **SHA-256 摘要**，不要写入明文 token。
+
+```bash
+# 为 operatorCredentials 生成 tokenSha256（token 长度 32–256，字符集 [A-Za-z0-9_-]+）
+node -e "const {createHash}=require('node:crypto'); console.log(createHash('sha256').update(process.argv[1]).digest('hex'))" "$OPERATOR_TOKEN"
+```
+
+生产形态配置（仅占位符）：
+
+```json
+{
+  "version": "server-config/v1",
+  "bind": { "host": "0.0.0.0", "port": 7443 },
+  "publicUrl": "https://coordinator.example.com:7443",
+  "tls": {
+    "certificatePath": "/etc/planweave/tls/fullchain.pem",
+    "privateKeyPath": "/etc/planweave/tls/privkey.pem"
+  },
+  "dataDirectory": "/var/lib/planweave/server",
+  "trustedProjects": [
+    {
+      "projectId": "planweave-project-example",
+      "canvasId": "default",
+      "projectRoot": "/srv/planweave/projects/example"
+    }
+  ],
+  "operatorCredentials": [
+    {
+      "operatorId": "ops-admin",
+      "tokenSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "projectIds": [],
+      "serverAdmin": true
+    }
+  ]
+}
+```
+
+启动与停止：
+
+```bash
+planweave-server serve --config /etc/planweave/server.json
+# 或: PLANWEAVE_SERVER_CONFIG=/etc/planweave/server.json planweave-server serve
+# SIGINT / SIGTERM 会排空在途工作并干净退出
+```
+
+就绪后 CLI 打印安全 JSON 摘要（`status`、`publicUrl`、bind host/port、project ids），不会打印 token 或 data-directory 秘密。
+
+未鉴权健康检查：
+
+```bash
+curl -fsS https://coordinator.example.com:7443/healthz
+curl -fsS https://coordinator.example.com:7443/readyz
+curl -fsS https://coordinator.example.com:7443/version
+```
+
+仅当服务已准备好接受 operator 变更时，`/readyz` 返回 HTTP 200；迁移或对账期间可能返回 503。
+
+### TLS 与开发传输
+
+| 模式 | `publicUrl` | `tls` | `allowInsecureDevelopment` |
+| --- | --- | --- | --- |
+| 生产 | `https://…` origin（端口须与 `bind.port` 一致） | 必须提供证书与私钥绝对路径 | 省略 / `false` |
+| 仅本地开发 | `http://127.0.0.1:<port>` | 省略 | `true`（bind host 必须是 loopback） |
+
+连接开发 Coordinator 的 Host 配置需设置 `coordinator.allowInsecureDevelopment: true`，并使用同一 loopback origin。生产环境若使用私有 CA，在 Host 上设置 `coordinator.caCertificatePath` 为绝对路径 PEM。
+
+### 安装并登记 Agent Host
+
+1. 为 Host 准备绝对路径 `dataDirectory` 与 `workspaceRoot`。
+2. 在 `workspaceRoot` 下创建 `workspaces[].path` 中的相对目录（禁止 `..` 与绝对路径）。
+3. 配置 ACP profile：绝对路径 `command`、可选 `args`，以及所需环境变量**名称**（值在 preflight/run 时从 Host 进程环境读取；密钥不写入配置文件）。
+
+```json
+{
+  "version": "agent-host-config/v1",
+  "coordinator": {
+    "url": "https://coordinator.example.com:7443",
+    "caCertificatePath": "/etc/planweave/tls/ca.pem"
+  },
+  "dataDirectory": "/var/lib/planweave/agent-host",
+  "workspaceRoot": "/srv/planweave/host-workspaces",
+  "host": {
+    "displayName": "gpu-lab-01",
+    "capacity": 2,
+    "capabilities": ["acp.codex", "linux"]
+  },
+  "workspaces": [
+    { "id": "planweave-project-example", "path": "example" }
+  ],
+  "agentProfiles": [
+    {
+      "id": "codex-acp",
+      "agentId": "codex",
+      "command": "/usr/local/bin/codex-acp",
+      "args": [],
+      "environment": [{ "name": "OPENAI_API_KEY", "required": true }]
+    }
+  ]
+}
+```
+
+运维命令：
+
+```bash
+planweave-agent-host preflight --config /etc/planweave/agent-host.json
+# 由 server admin 创建一次性 enrollment grant（见下方 Operator HTTP），然后：
+planweave-agent-host enroll --config /etc/planweave/agent-host.json --code pw_enroll_...
+# 重新登记 / 轮换本地凭据（在安全时替换既有 active 凭据）：
+planweave-agent-host enroll --config /etc/planweave/agent-host.json --code pw_enroll_... --replace
+planweave-agent-host status --config /etc/planweave/agent-host.json
+planweave-agent-host run --config /etc/planweave/agent-host.json
+planweave-agent-host revoke --config /etc/planweave/agent-host.json
+```
+
+`preflight`、`enroll`、`status`、`revoke` 输出 JSON 诊断（`credential`、`capacity`、`capabilities`、`recoverableExecutions`，以及可选的 `hostId` / `actionableError`）。`run` 会持续运行守护进程，直到 SIGINT/SIGTERM，或出现终端级传输/鉴权失败。
+
+Host 凭据保存在 Host 的 `dataDirectory`（例如 `credentials.json`）。Provider 与 Git 凭据仍只存在于 Host 本地环境或 Agent 自身配置。
+
+### Operator HTTP 接口
+
+鉴权路由需要 `Authorization: Bearer <operator-token>`，并使用 TLS（或 loopback 开发模式）。server-admin 可登记与吊销 Host；项目作用域凭据只能对自己的 `projectIds` 做 dispatch 与观测。
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `POST` | `/api/v1/host-enrollments` | 创建 enrollment grant（`expiresAt`、`credentialExpiresAt`）→ `{ enrollmentCode, expiresAt }` |
+| `GET` | `/api/v1/hosts` | 列出 Host（`cursor`、`limit`）— capacity、lastSeenAt、revokedAt |
+| `GET` | `/api/v1/hosts/:hostId` | Host 详情 |
+| `POST` | `/api/v1/hosts/:hostId/revoke` | 服务端吊销 Host 凭据并断开连接 |
+| `POST` | `/api/v1/remote-operations` | 调度 Block（`projectId`、`canvasId`、`blockRef`、`idempotencyKey`）→ operation 视图（HTTP 202） |
+| `GET` | `/api/v1/remote-operations/:operationId` | 观察 operation / attempt / runtime binding |
+| `POST` | `/api/v1/remote-operations/:operationId/actions` | 生命周期动作：`cancel`、`resume_same_session`、`retry_new_attempt`、`fail`、`block` |
+| `GET` | `/api/v1/remote-operations/:operationId/events` | 回放 ACP 事件（`afterCursor`） |
+| `GET` | `/api/v1/remote-operations/:operationId/interactions` | 列出待处理交互 |
+| `POST` | `/api/v1/remote-operations/:operationId/interactions/respond` | 结算交互 |
+
+示例：创建 enrollment 并查看 Host 就绪情况：
+
+```bash
+curl -fsS -X POST "https://coordinator.example.com:7443/api/v1/host-enrollments" \
+  -H "Authorization: Bearer $OPERATOR_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{"expiresAt":"2030-01-01T00:00:00.000Z","credentialExpiresAt":"2030-01-08T00:00:00.000Z"}'
+
+curl -fsS "https://coordinator.example.com:7443/api/v1/hosts?limit=50" \
+  -H "Authorization: Bearer $OPERATOR_TOKEN"
+```
+
+示例：dispatch 并观察 Block：
+
+```bash
+curl -fsS -X POST "https://coordinator.example.com:7443/api/v1/remote-operations" \
+  -H "Authorization: Bearer $OPERATOR_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{
+    "projectId":"planweave-project-example",
+    "canvasId":"default",
+    "blockRef":"T-001#B-001",
+    "idempotencyKey":"ops-dispatch-001"
+  }'
+
+curl -fsS "https://coordinator.example.com:7443/api/v1/remote-operations/$OPERATION_ID" \
+  -H "Authorization: Bearer $OPERATOR_TOKEN"
+```
+
+取消 / 恢复使用 `POST .../actions`，请求体需包含当前 attempt 身份字段（`actionId`、`operationId`、`dispatchId`、`executionAttemptId`、`expectedAttemptVersion`、lease 字段与 `kind`）。提交前请先读取最新的 operation 观察结果。支持的 `kind`：
+
+- `cancel` — 请求协作取消进行中的 attempt
+- `resume_same_session` — 在有 fence 与恢复证据时恢复被中断的会话
+- `retry_new_attempt` — 在不可恢复中断后启动新的 dispatch/attempt
+- `fail` / `block` — 在需要操作或已中断状态下给出终端结果
+
+对同一 project/canvas/block 使用相同 `idempotencyKey` 可实现幂等 re-dispatch。
+
+### 轮换或吊销 Host 凭据
+
+1. **服务端吊销**：`POST /api/v1/hosts/:hostId/revoke`（server admin）。Host 会被断开；本机凭据材料不会自动删除。
+2. **Host 本地吊销**：`planweave-agent-host revoke --config …` 将本地凭据标记为 revoked，`run` 将不再使用它。
+3. **轮换**：创建新的 enrollment grant，再在 Host 上执行 `planweave-agent-host enroll --config … --code … --replace`（仅在 durable execution state 允许安全替换时）。
+
+### 常见故障
+
+| 现象 | 可能原因 | 排查 |
+| --- | --- | --- |
+| CLI `server_cli_usage` / `agent_host_cli_usage`（退出码 2） | 参数错误 | `serve --config <绝对路径>`；Host 命令需要 `--config`；`enroll` 需要 `--code` |
+| `server_tls_configuration_required` | 生产配置缺少 TLS | 提供 `tls` 与 `https` `publicUrl`，或使用 loopback 开发模式 |
+| `server_insecure_development_requires_literal_loopback` | 非 loopback 启用了不安全模式 | bind 与 public URL 必须是 `127.0.0.1` / `::1` |
+| `/readyz` → 503 | 未就绪 / draining / reconciling | 等待启动完成；排空期间不要 dispatch |
+| Operator HTTP 426 `operator_insecure_transport` | 未开开发模式的 HTTP | 使用 TLS，或在两端启用 loopback 不安全开发模式 |
+| Operator HTTP 401 | 缺少或错误的 bearer token | token 必须对应配置中的 `tokenSha256` |
+| Operator HTTP 403 | 作用域 / 需要 admin | enrollment 与 host 吊销需要 `serverAdmin`；项目 dispatch 需要项目作用域 |
+| Host `credential: missing` | 尚未 enroll | 使用新的 grant 执行 `enroll` |
+| Host `credential: revoked` / `expired` | 本地或服务端生命周期结束 | 用新 grant 配合 `--replace` 重新 enroll |
+| Host `run` 时 `agent_host_auth_failed` | 服务端已吊销或 token 不匹配 | 本地 revoke 后重新 enroll |
+| Host `agent_host_profile_environment_missing:…` | 缺少必需环境变量 | 在 Host 上导出 Provider key 后再 preflight/run |
+| Host `agent_host_workspace_not_configured` | workspace id 不匹配 | `workspaces[].id` 必须与 Coordinator 信任的 PlanWeave project id 一致 |
+| Dispatch 一直无法调度 | 没有在线 Host / 能力不匹配 | 确认 Host `lastSeenAt`、`capacity` 与重叠的 `capabilities` |
+| Cancel / resume 返回 409 | attempt 版本过期或 lease 错误 | 重新获取 operation 视图，使用当前 `expectedAttemptVersion` 与 lease id |
+
+Coordinator 上的项目 package 仍是 Block 内容的权威来源。远程运行后，用常规的 `planweave status` / `planweave explain <ref>` / `planweave doctor` 检查同一 package；这些 JSON 投影会包含 remote ownership，但不会暴露 Host 秘密。
+
+### 自动化 walkthrough 覆盖范围
+
+仓库集成测试 `packages/server/src/__tests__/operatorWalkthrough.test.ts` 覆盖干净的临时流程：启动 Coordinator、preflight/enroll Host、观察 Host capacity、创建/观察 remote operation、停止并重启 Host 与 Coordinator、吊销凭据并关闭。该测试不依赖 README 内容。完整 ACP 执行成功、交互权限结算与生产 TLS 证书签发仍需人工操作，或由其他包测试覆盖。
+
 ## 未来方向
 
 PlanWeave 将继续扩展三个方向：
 
 - **Auto Run**：继续改进运行控制、异常恢复和长期运行稳定性。
 - **协作规划**：让团队共同编辑和完善同一张任务画布。
-- **跨主机执行**：协调运行在不同机器上的专业 Agent。
+- **跨主机执行**：强化多 Host 机群的调度、容量与恢复能力。
 
 ## 开发
 

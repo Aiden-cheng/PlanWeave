@@ -248,13 +248,236 @@ ACP preflight negotiates the authentication methods advertised by the selected a
 
 ACP runs expose structured progress, artifacts, usage, and interaction requests through CLI and Desktop.
 
+## Distributed Operator Guide
+
+PlanWeave can run a **Coordinator** (`planweave-server`) that schedules remote Blocks onto independently deployed **Agent Hosts** (`planweave-agent-host`). Remote execution is **ACP-only**: the Host launches a local ACP agent profile against a configured workspace. Provider API keys, agent login state, and Git credentials stay on the Host machine. Git clone/fetch/push are Block content or Host-side environment setup, not Coordinator features.
+
+Use HTTPS in production. Plain HTTP is **development-only** and only accepted on literal loopback (`127.0.0.1` / `::1`) when both sides set `allowInsecureDevelopment: true`.
+
+### Install the CLIs
+
+From this monorepo (after `pnpm install` and `pnpm -r build`):
+
+```bash
+pnpm --filter @planweave-ai/server exec planweave-server --help
+pnpm --filter @planweave-ai/agent-host exec planweave-agent-host --help
+```
+
+Published package names are `@planweave-ai/server` (binary `planweave-server`) and `@planweave-ai/agent-host` (binary `planweave-agent-host`). Both require Node.js 22.5+.
+
+### Start the Coordinator
+
+Create an absolute-path JSON config (`server-config/v1`). Store only **SHA-256 digests** of operator bearer tokens (never the raw token in the config file).
+
+```bash
+# Produce tokenSha256 for operatorCredentials (token must be 32–256 chars: [A-Za-z0-9_-]+)
+node -e "const {createHash}=require('node:crypto'); console.log(createHash('sha256').update(process.argv[1]).digest('hex'))" "$OPERATOR_TOKEN"
+```
+
+Production-shaped config (placeholders only):
+
+```json
+{
+  "version": "server-config/v1",
+  "bind": { "host": "0.0.0.0", "port": 7443 },
+  "publicUrl": "https://coordinator.example.com:7443",
+  "tls": {
+    "certificatePath": "/etc/planweave/tls/fullchain.pem",
+    "privateKeyPath": "/etc/planweave/tls/privkey.pem"
+  },
+  "dataDirectory": "/var/lib/planweave/server",
+  "trustedProjects": [
+    {
+      "projectId": "planweave-project-example",
+      "canvasId": "default",
+      "projectRoot": "/srv/planweave/projects/example"
+    }
+  ],
+  "operatorCredentials": [
+    {
+      "operatorId": "ops-admin",
+      "tokenSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "projectIds": [],
+      "serverAdmin": true
+    }
+  ]
+}
+```
+
+Start and stop:
+
+```bash
+planweave-server serve --config /etc/planweave/server.json
+# or: PLANWEAVE_SERVER_CONFIG=/etc/planweave/server.json planweave-server serve
+# SIGINT / SIGTERM drains in-flight work and exits cleanly
+```
+
+On ready, the CLI prints a safe JSON summary (`status`, `publicUrl`, bind host/port, project ids). It does not print tokens or data-directory secrets.
+
+Unauthenticated health endpoints:
+
+```bash
+curl -fsS https://coordinator.example.com:7443/healthz
+curl -fsS https://coordinator.example.com:7443/readyz
+curl -fsS https://coordinator.example.com:7443/version
+```
+
+`/readyz` returns HTTP 200 only when the server is ready to accept operator mutations. While migrating or reconciling it may return 503.
+
+### TLS and development transport
+
+| Mode | `publicUrl` | `tls` | `allowInsecureDevelopment` |
+| --- | --- | --- | --- |
+| Production | `https://…` origin (port must match `bind.port`) | certificate + private key absolute paths required | omit / `false` |
+| Local development only | `http://127.0.0.1:<port>` | omit | `true` (bind host must be loopback) |
+
+Host configs that talk to a development Coordinator set `coordinator.allowInsecureDevelopment: true` and use the same loopback origin. For private CAs in production, set Host `coordinator.caCertificatePath` to an absolute PEM path.
+
+### Install and enroll an Agent Host
+
+1. Prepare absolute paths for Host `dataDirectory` and `workspaceRoot`.
+2. Under `workspaceRoot`, create relative project directories listed in `workspaces[].path` (no `..`, no absolute paths).
+3. Configure ACP profiles: absolute `command`, optional `args`, and required environment **names** (values are read from the Host process environment at preflight/run time; secrets are not stored in the config file).
+
+```json
+{
+  "version": "agent-host-config/v1",
+  "coordinator": {
+    "url": "https://coordinator.example.com:7443",
+    "caCertificatePath": "/etc/planweave/tls/ca.pem"
+  },
+  "dataDirectory": "/var/lib/planweave/agent-host",
+  "workspaceRoot": "/srv/planweave/host-workspaces",
+  "host": {
+    "displayName": "gpu-lab-01",
+    "capacity": 2,
+    "capabilities": ["acp.codex", "linux"]
+  },
+  "workspaces": [
+    { "id": "planweave-project-example", "path": "example" }
+  ],
+  "agentProfiles": [
+    {
+      "id": "codex-acp",
+      "agentId": "codex",
+      "command": "/usr/local/bin/codex-acp",
+      "args": [],
+      "environment": [{ "name": "OPENAI_API_KEY", "required": true }]
+    }
+  ]
+}
+```
+
+Operator commands:
+
+```bash
+planweave-agent-host preflight --config /etc/planweave/agent-host.json
+# Create a one-time enrollment grant as a server admin (see Operator HTTP below), then:
+planweave-agent-host enroll --config /etc/planweave/agent-host.json --code pw_enroll_...
+# Re-enroll / rotate an existing local credential (clears prior active credential when safe):
+planweave-agent-host enroll --config /etc/planweave/agent-host.json --code pw_enroll_... --replace
+planweave-agent-host status --config /etc/planweave/agent-host.json
+planweave-agent-host run --config /etc/planweave/agent-host.json
+planweave-agent-host revoke --config /etc/planweave/agent-host.json
+```
+
+`preflight`, `enroll`, `status`, and `revoke` print JSON diagnostics (`credential`, `capacity`, `capabilities`, `recoverableExecutions`, optional `hostId` / `actionableError`). `run` starts the daemon until SIGINT/SIGTERM, or until a terminal transport/auth failure.
+
+Host credentials live under the Host `dataDirectory` (for example `credentials.json`). Provider and Git credentials remain Host-local environment or agent configuration.
+
+### Operator HTTP surface
+
+Authenticated routes require `Authorization: Bearer <operator-token>` and TLS (or loopback development mode). Server-admin credentials can enroll and revoke hosts; project-scoped credentials may only dispatch and observe operations for their `projectIds`.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/v1/host-enrollments` | Create enrollment grant (`expiresAt`, `credentialExpiresAt`) → `{ enrollmentCode, expiresAt }` |
+| `GET` | `/api/v1/hosts` | List hosts (`cursor`, `limit`) — capacity, lastSeenAt, revokedAt |
+| `GET` | `/api/v1/hosts/:hostId` | Host detail |
+| `POST` | `/api/v1/hosts/:hostId/revoke` | Server-side Host credential revocation + disconnect |
+| `POST` | `/api/v1/remote-operations` | Dispatch a Block (`projectId`, `canvasId`, `blockRef`, `idempotencyKey`) → operation view (HTTP 202) |
+| `GET` | `/api/v1/remote-operations/:operationId` | Observe operation / attempt / runtime binding |
+| `POST` | `/api/v1/remote-operations/:operationId/actions` | Lifecycle action: `cancel`, `resume_same_session`, `retry_new_attempt`, `fail`, `block` |
+| `GET` | `/api/v1/remote-operations/:operationId/events` | Replay ACP events (`afterCursor`) |
+| `GET` | `/api/v1/remote-operations/:operationId/interactions` | List pending interactions |
+| `POST` | `/api/v1/remote-operations/:operationId/interactions/respond` | Settle an interaction |
+
+Example: grant enrollment and list host readiness:
+
+```bash
+curl -fsS -X POST "https://coordinator.example.com:7443/api/v1/host-enrollments" \
+  -H "Authorization: Bearer $OPERATOR_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{"expiresAt":"2030-01-01T00:00:00.000Z","credentialExpiresAt":"2030-01-08T00:00:00.000Z"}'
+
+curl -fsS "https://coordinator.example.com:7443/api/v1/hosts?limit=50" \
+  -H "Authorization: Bearer $OPERATOR_TOKEN"
+```
+
+Example: dispatch and observe a Block:
+
+```bash
+curl -fsS -X POST "https://coordinator.example.com:7443/api/v1/remote-operations" \
+  -H "Authorization: Bearer $OPERATOR_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{
+    "projectId":"planweave-project-example",
+    "canvasId":"default",
+    "blockRef":"T-001#B-001",
+    "idempotencyKey":"ops-dispatch-001"
+  }'
+
+curl -fsS "https://coordinator.example.com:7443/api/v1/remote-operations/$OPERATION_ID" \
+  -H "Authorization: Bearer $OPERATOR_TOKEN"
+```
+
+Cancel / recover use `POST .../actions` with an action body that includes the live attempt identity (`actionId`, `operationId`, `dispatchId`, `executionAttemptId`, `expectedAttemptVersion`, lease fields, and `kind`). Read those fields from the latest operation observation before posting. Supported `kind` values:
+
+- `cancel` — request cooperative cancellation of an active attempt
+- `resume_same_session` — resume after a fenced interruption with recovery evidence
+- `retry_new_attempt` — start a new dispatch/attempt after non-resumable interruption
+- `fail` / `block` — terminal operator outcomes when the attempt is in an action-required or interrupted state
+
+Idempotent re-dispatch uses the same `idempotencyKey` for the same project/canvas/block.
+
+### Rotate or revoke Host credentials
+
+1. **Server revoke**: `POST /api/v1/hosts/:hostId/revoke` (server admin). The Host is disconnected; existing local credential material is not automatically deleted on the Host.
+2. **Local Host revoke**: `planweave-agent-host revoke --config …` marks the local credential revoked so `run` will not use it.
+3. **Rotate**: create a new enrollment grant, then `planweave-agent-host enroll --config … --code … --replace` on the Host (only when durable execution state allows safe replacement).
+
+### Common failures
+
+| Symptom | Likely cause | What to check |
+| --- | --- | --- |
+| CLI `server_cli_usage` / `agent_host_cli_usage` (exit 2) | Wrong argv | `serve --config <abs>`; Host commands need `--config`; `enroll` needs `--code` |
+| `server_tls_configuration_required` | Production config without TLS | Provide `tls` + `https` `publicUrl`, or use loopback development mode |
+| `server_insecure_development_requires_literal_loopback` | Insecure mode off loopback | Bind and public URL must be `127.0.0.1` / `::1` |
+| `/readyz` → 503 | Not ready / draining / reconciling | Wait for startup; do not dispatch during drain |
+| Operator HTTP 426 `operator_insecure_transport` | HTTP without development mode | Use TLS or enable loopback insecure development on both sides |
+| Operator HTTP 401 | Bad or missing bearer token | Token must match a configured `tokenSha256` |
+| Operator HTTP 403 | Scope / admin required | Enrollment and host revoke need `serverAdmin`; project dispatch needs project scope |
+| Host `credential: missing` | Not enrolled | Run `enroll` with a fresh grant |
+| Host `credential: revoked` / `expired` | Local or server lifecycle | Re-enroll with `--replace` after a new grant |
+| Host `agent_host_auth_failed` on `run` | Server revoked or token mismatch | Revoke locally, re-enroll |
+| Host `agent_host_profile_environment_missing:…` | Required env unset | Export provider keys on the Host before preflight/run |
+| Host `agent_host_workspace_not_configured` | Workspace id mismatch | `workspaces[].id` must match the PlanWeave project id the Coordinator trusts |
+| Dispatch never schedules | No online Host / capability mismatch | Confirm Host `lastSeenAt`, `capacity`, and overlapping `capabilities` |
+| Cancel / resume 409 | Stale attempt version or wrong lease | Re-fetch operation view; use current `expectedAttemptVersion` and lease ids |
+
+Project package state on the Coordinator host remains the source of truth for Block content. After remote runs, inspect the same package with the ordinary `planweave status` / `planweave explain <ref>` / `planweave doctor` commands; remote ownership appears in those JSON projections without Host secrets.
+
+### Automated walkthrough coverage
+
+Repository integration test `packages/server/src/__tests__/operatorWalkthrough.test.ts` exercises a clean temporary loop: start Coordinator, preflight/enroll Host, observe host capacity, create/observe a remote operation, stop and restart Host and Coordinator, revoke credentials, and shut down. It does not depend on README content. Full ACP execution success, interactive permission settlement, and production TLS certificate issuance remain manual or covered by other package tests.
+
 ## Future Direction
 
 PlanWeave will continue to expand in three directions:
 
 - **Auto Run**: improve execution control, recovery, and long-running reliability.
 - **Collaborative planning**: let teams edit and refine the same task board together.
-- **Cross-host execution**: coordinate specialized agents across different machines.
+- **Cross-host execution**: harden scheduling, capacity, and recovery for multi-Host fleets.
 
 ## Development
 
