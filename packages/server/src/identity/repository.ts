@@ -266,6 +266,21 @@ export class HumanIdentityRepository {
     return row ? toInvitation(row) : undefined;
   }
 
+  /**
+   * Lookup invitation metadata by plaintext bearer. Uses constant-time digest compare.
+   * Returns undefined for unknown tokens without distinguishing prior validity.
+   */
+  findInvitationByToken(invitationToken: string): ProjectInvitationMetadata | undefined {
+    const parsed = projectInvitationTokenSchema.safeParse(invitationToken);
+    if (!parsed.success) return undefined;
+    const digest = hashHumanToken(parsed.data);
+    const row = this.database
+      .prepare("SELECT * FROM project_invitations WHERE token_sha256=?")
+      .get(digest) as InvitationRow | undefined;
+    if (!row || !digestsEqual(row.token_sha256, digest)) return undefined;
+    return toInvitation(row);
+  }
+
   getDevice(deviceCredentialId: string): HumanDeviceCredentialMetadata | undefined {
     const id = humanDeviceCredentialIdSchema.parse(deviceCredentialId);
     const row = this.database
@@ -296,6 +311,75 @@ export class HumanIdentityRepository {
         )
         .all(hid, limit, offset) as DeviceRow[]
     ).map(toDevice);
+  }
+
+  /**
+   * Devices belonging to active members of a project (owner project-device inventory).
+   * Does not include digests in higher layers; this returns repository metadata only.
+   */
+  listDevicesForProjectMembers(
+    projectId: string,
+    limit = 100,
+    offset = 0
+  ): HumanDeviceCredentialMetadata[] {
+    const pid = humanProjectIdSchema.parse(projectId);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+      throw new HumanIdentityError("human_input_invalid");
+    }
+    if (!Number.isSafeInteger(offset) || offset < 0) {
+      throw new HumanIdentityError("human_input_invalid");
+    }
+    return (
+      this.database
+        .prepare(
+          `SELECT d.* FROM human_device_credentials d
+           INNER JOIN project_memberships m
+             ON m.human_principal_id = d.human_principal_id
+            AND m.project_id = ?
+            AND m.revoked_at IS NULL
+           ORDER BY d.created_at ASC, d.device_credential_id ASC
+           LIMIT ? OFFSET ?`
+        )
+        .all(pid, limit, offset) as DeviceRow[]
+    ).map(toDevice);
+  }
+
+  listInvitations(
+    projectId: string,
+    limit = 100,
+    offset = 0,
+    options: { openOnly?: boolean } = {}
+  ): ProjectInvitationMetadata[] {
+    const pid = humanProjectIdSchema.parse(projectId);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+      throw new HumanIdentityError("human_input_invalid");
+    }
+    if (!Number.isSafeInteger(offset) || offset < 0) {
+      throw new HumanIdentityError("human_input_invalid");
+    }
+    const now = this.clock().toISOString();
+    if (options.openOnly) {
+      return (
+        this.database
+          .prepare(
+            `SELECT * FROM project_invitations
+             WHERE project_id=? AND revoked_at IS NULL AND consumed_at IS NULL AND expires_at>?
+             ORDER BY created_at ASC, invitation_id ASC
+             LIMIT ? OFFSET ?`
+          )
+          .all(pid, now, limit, offset) as InvitationRow[]
+      ).map(toInvitation);
+    }
+    return (
+      this.database
+        .prepare(
+          `SELECT * FROM project_invitations
+           WHERE project_id=?
+           ORDER BY created_at ASC, invitation_id ASC
+           LIMIT ? OFFSET ?`
+        )
+        .all(pid, limit, offset) as InvitationRow[]
+    ).map(toInvitation);
   }
 
   /**

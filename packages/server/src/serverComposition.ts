@@ -5,6 +5,11 @@ import { serverConfigSchema, type ServerConfig } from "./config.js";
 import { startRemoteBlockCoordinationServer } from "./distributedCoordination.js";
 import { HostEnrollmentService } from "./hostEnrollment.js";
 import { handleHostEnrollmentRequest } from "./hostEnrollmentHttp.js";
+import {
+  handleHumanHttpRequest,
+  HumanIdentityRepository,
+  HumanMembershipService
+} from "./identity/index.js";
 import { OperatorTokenRegistry } from "./operatorAuth.js";
 import { handleOperatorHttpRequest } from "./operatorHttp.js";
 import { serverPackageVersion } from "./packageInfo.js";
@@ -121,7 +126,8 @@ function requiresAdmission(request: IncomingMessage): boolean {
     pathname === "/api/v1/host-enrollments" ||
     pathname === "/api/v1/remote-operations" ||
     /^\/api\/v1\/remote-operations\/[^/]+\/actions$/.test(pathname) ||
-    /^\/api\/v1\/remote-operations\/[^/]+\/interactions\/respond$/.test(pathname)
+    /^\/api\/v1\/remote-operations\/[^/]+\/interactions\/respond$/.test(pathname) ||
+    /^\/api\/v1\/projects\/[^/]+\/human\//.test(pathname)
   );
 }
 
@@ -175,6 +181,11 @@ export async function createDistributedServerComposition(
     const schemaVersion = server.readiness().schemaVersion;
     readiness.transition("reconciling", schemaVersion);
     const enrollments = new HostEnrollmentService(server.database, clock);
+    const humanIdentity = new HumanIdentityRepository(server.database, clock);
+    const humanMembership = new HumanMembershipService({
+      repository: humanIdentity,
+      clock
+    });
     webSockets = attachAgentHostWebSocketServer({
       server: options.httpServer,
       hosts: coordination.hosts,
@@ -223,6 +234,16 @@ export async function createDistributedServerComposition(
             authorization: coordination.artifactAuthorization,
             artifacts: initializedArtifactStore,
             allowInsecureTransport: config.allowInsecureDevelopment
+          })
+        ) {
+          return;
+        }
+        if (
+          await handleHumanHttpRequest(request, response, {
+            service: humanMembership,
+            repository: humanIdentity,
+            allowInsecureDevelopment: config.allowInsecureDevelopment,
+            clock
           })
         ) {
           return;

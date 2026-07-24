@@ -110,3 +110,53 @@ export {
   type ConsumeInvitationResult,
   type CreateInvitationResult
 } from "./repository.js";
+
+export {
+  authenticateHumanDevice,
+  authenticateHumanForProject,
+  parseHumanDeviceBearer
+} from "./auth.js";
+
+export {
+  HumanMembershipService,
+  HumanMembershipServiceError,
+  type HumanMembershipServiceOptions
+} from "./service.js";
+
+export {
+  assertHumanDisplayDtoRedacted,
+  humanBootstrapRequestSchema,
+  humanBootstrapResponseSchema,
+  humanConsumeInvitationRequestSchema,
+  humanConsumeInvitationResponseSchema,
+  humanCreateInvitationRequestSchema,
+  humanCreateInvitationResponseSchema,
+  humanDeviceListQuerySchema,
+  humanDevicePageSchema,
+  humanDeviceTokenHandoffSchema,
+  humanDeviceViewSchema,
+  humanInvitationListQuerySchema,
+  humanInvitationPageSchema,
+  humanInvitationViewSchema,
+  humanMemberPageSchema,
+  humanMembershipViewSchema,
+  humanPageQuerySchema,
+  humanPrincipalViewSchema,
+  toDeviceView,
+  toInvitationView,
+  toMembershipView,
+  toPrincipalView,
+  type HumanDeviceTokenHandoff,
+  type HumanDeviceView,
+  type HumanInvitationView,
+  type HumanMembershipView,
+  type HumanPrincipalView
+} from "./dtos.js";
+
+export {
+  handleHumanHttpRequest,
+  humanLocalAdminBoundaryAllowed,
+  humanTransportAllowed,
+  resetHumanHttpRateLimits,
+  type HumanHttpOptions
+} from "./http.js";
