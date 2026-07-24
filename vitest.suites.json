@@ -466,6 +466,8 @@
       "root": "packages/server/src/__tests__",
       "unit": [
         "artifactMediaType.test.ts",
+        "humanIdentityPolicy.test.ts",
+        "humanIdentitySchemas.test.ts",
         "protocolPrimitives.test.ts",
         "releaseGate.test.ts",
         "vpsE2eGate.test.ts"
