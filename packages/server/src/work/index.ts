@@ -101,3 +101,17 @@ export {
   type EligibleAssigneesResult,
   type WorkAssignmentServiceOptions
 } from "./service.js";
+
+export {
+  DispatchAssignmentError,
+  createActiveDispatchResolver,
+  createAssignmentDispatchGate,
+  resolveActiveDispatchSnapshot,
+  resolveDispatchAssignment,
+  type ActiveDispatchSnapshot,
+  type AssignmentDispatchGate,
+  type CreateAssignmentDispatchGateOptions,
+  type DispatchHostSelectionSnapshot,
+  type ResolveDispatchAssignmentInput,
+  type ResolveDispatchAssignmentResult
+} from "./dispatchIntegration.js";

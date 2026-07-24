@@ -28,6 +28,11 @@ import {
 } from "./remoteInteractions.js";
 import { startPlanweaveServer, type PlanweaveServer } from "./lifecycle.js";
 import type { ServerStorageConfig } from "./config.js";
+import {
+  createAssignmentDispatchGate,
+  type AssignmentDispatchGate
+} from "./work/dispatchIntegration.js";
+import { WorkAssignmentRepository } from "./work/repository.js";
 
 export type DistributedCoordinationOptions = Omit<DispatchServiceOptions, "writeback"> & {
   writeback: DispatchWriteback;
@@ -55,6 +60,13 @@ export type RemoteBlockCoordinationOptions = {
   interactionAuthorization?: RemoteInteractionAuthorizationPort;
   eventRetentionMaxEvents?: number;
   eventRetentionMaxBytes?: number;
+  /**
+   * When true (default), wire assignment→dispatch gate with operator-compatible override default.
+   * Set false only for low-level tests that intentionally bypass assignment policy.
+   */
+  enableAssignmentDispatchGate?: boolean;
+  /** Override the default assignment gate (e.g. strict human collaboration path). */
+  assignmentGate?: AssignmentDispatchGate;
 };
 
 export function createRemoteBlockCoordination(
@@ -81,6 +93,17 @@ export function createRemoteBlockCoordination(
     publisher: mailbox,
     clock: options.clock
   });
+  const workAssignments = new WorkAssignmentRepository(database);
+  const assignmentGate =
+    options.assignmentGate ??
+    (options.enableAssignmentDispatchGate === false
+      ? undefined
+      : createAssignmentDispatchGate({
+          repository: workAssignments,
+          // Operator / existing remote paths may dispatch unassigned Blocks; exact Host
+          // assignments still pin selection. Strict callers pass allowHumanOverride:false.
+          defaultAllowHumanOverride: true
+        }));
   const coordinator = new RemoteBlockCoordinator({
     runtimeResolver: options.runtimeResolver,
     operations,
@@ -91,7 +114,8 @@ export function createRemoteBlockCoordination(
     mailbox,
     inputArtifacts: options.inputArtifacts,
     artifactContent: options.artifactContent,
-    checkpoints: options.checkpoints
+    checkpoints: options.checkpoints,
+    assignmentGate
   });
   const dispatches = new DispatchService(database, hosts, artifactAuthorization, {
     leaseDurationMs: options.leaseDurationMs,
@@ -151,6 +175,8 @@ export function createRemoteBlockCoordination(
     reservations,
     coordinator,
     dispatches,
+    workAssignments,
+    assignmentGate,
     reconcile
   };
 }

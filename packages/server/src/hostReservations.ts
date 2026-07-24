@@ -116,7 +116,17 @@ export class HostReservationRepository {
     this.clock = options.clock ?? (() => new Date());
   }
 
-  reserve(operationId: string): HostCapacityReservation {
+  /**
+   * Reserve capacity for an operation attempt.
+   * When `preferredHostId` is set (exact Host assignment or explicit override), only that Host
+   * is considered — never an arbitrary alternate from a UI eligibility cache.
+   * When omitted, uses the deterministic automatic selector (active_reservations ASC,
+   * last_seen_at DESC, id ASC) against authoritative operation.requiredCapabilities.
+   */
+  reserve(
+    operationId: string,
+    options: { preferredHostId?: string } = {}
+  ): HostCapacityReservation {
     try {
       return inWriteTransaction(this.database, () => {
         const operation = new RemoteOperationRepository(this.database, this.clock).getRequired(
@@ -134,28 +144,44 @@ export class HostReservationRepository {
         }
         const now = this.clock();
         const onlineAfter = new Date(now.getTime() - this.options.hostOfflineAfterMs).toISOString();
-        const candidates = this.database
-          .prepare(
-            `SELECT h.id,h.capabilities_json,h.capacity,h.last_seen_at,
-              (SELECT COUNT(*) FROM host_capacity_reservations r
-                WHERE r.host_id=h.id AND r.status='active') AS active_reservations
-             FROM agent_hosts h
-             WHERE h.revoked_at IS NULL AND h.last_seen_at>=?
-               AND (h.credential_expires_at IS NULL OR h.credential_expires_at>?)
-             ORDER BY active_reservations ASC,h.last_seen_at DESC,h.id ASC`
-          )
-          .all(onlineAfter, now.toISOString())
-          .map((row) => {
-            try {
-              const parsed = hostCandidateRowSchema.parse(row);
-              return {
-                ...parsed,
-                capabilities: capabilitiesSchema.parse(JSON.parse(parsed.capabilities_json))
-              };
-            } catch (error) {
-              throw new Error("agent_host_row_invalid", { cause: error });
-            }
-          });
+        const preferredHostId =
+          options.preferredHostId === undefined
+            ? undefined
+            : opaqueIdentifierSchema.parse(options.preferredHostId);
+        const candidates = (
+          preferredHostId
+            ? this.database
+                .prepare(
+                  `SELECT h.id,h.capabilities_json,h.capacity,h.last_seen_at,
+                    (SELECT COUNT(*) FROM host_capacity_reservations r
+                      WHERE r.host_id=h.id AND r.status='active') AS active_reservations
+                   FROM agent_hosts h
+                   WHERE h.id=? AND h.revoked_at IS NULL AND h.last_seen_at>=?
+                     AND (h.credential_expires_at IS NULL OR h.credential_expires_at>?)`
+                )
+                .all(preferredHostId, onlineAfter, now.toISOString())
+            : this.database
+                .prepare(
+                  `SELECT h.id,h.capabilities_json,h.capacity,h.last_seen_at,
+                    (SELECT COUNT(*) FROM host_capacity_reservations r
+                      WHERE r.host_id=h.id AND r.status='active') AS active_reservations
+                   FROM agent_hosts h
+                   WHERE h.revoked_at IS NULL AND h.last_seen_at>=?
+                     AND (h.credential_expires_at IS NULL OR h.credential_expires_at>?)
+                   ORDER BY active_reservations ASC,h.last_seen_at DESC,h.id ASC`
+                )
+                .all(onlineAfter, now.toISOString())
+        ).map((row) => {
+          try {
+            const parsed = hostCandidateRowSchema.parse(row);
+            return {
+              ...parsed,
+              capabilities: capabilitiesSchema.parse(JSON.parse(parsed.capabilities_json))
+            };
+          } catch (error) {
+            throw new Error("agent_host_row_invalid", { cause: error });
+          }
+        });
         const required = new Set(operation.requiredCapabilities);
         const host = candidates.find(
           (candidate) =>

@@ -28,10 +28,26 @@ import {
 } from "./remoteExecutionActions.js";
 import { RemoteBlockActionCoordinator } from "./remoteBlockActionCoordinator.js";
 import { remoteBlockIdentity } from "./remoteBlockIdentity.js";
+import type {
+  AssignmentDispatchGate,
+  DispatchHostSelectionSnapshot
+} from "./work/dispatchIntegration.js";
 
 export type RemoteDispatchRequest = RemoteRuntimeLocator & {
   blockRef: string;
   idempotencyKey: string;
+  /** Optional exact Host request; revalidated against assignment + live Host facts. */
+  requestedHostId?: string;
+  /**
+   * When true, allow dispatch of human/unassigned Blocks (API-level override).
+   * When assignmentGate is configured and this is false/omitted, human/unassigned deny.
+   */
+  allowHumanOverride?: boolean;
+  /**
+   * Optional assignment revision fingerprint. When set, must match durable assignment
+   * revision at dispatch begin or the call fails with a clear conflict.
+   */
+  expectedAssignmentRevision?: number;
 };
 
 export type RemoteDispatchOutcome = {
@@ -56,6 +72,12 @@ export type RemoteBlockCoordinatorOptions = {
   inputArtifacts: RemoteInputArtifactPort;
   artifactContent: RemoteArtifactContentPort;
   checkpoints?: RemoteCoordinatorCheckpointPort;
+  /**
+   * Optional assignment gate consulted before Host reservation.
+   * When set, human/unassigned Blocks require allowHumanOverride; exact Host is pinned;
+   * automatic uses the deterministic selector with package capabilities.
+   */
+  assignmentGate?: AssignmentDispatchGate;
 };
 
 function buildEnvelope(operation: RemoteOperation, candidate: RemoteBlockDispatchCandidate) {
@@ -95,10 +117,24 @@ function buildEnvelope(operation: RemoteOperation, candidate: RemoteBlockDispatc
 }
 
 export class RemoteBlockCoordinator {
+  /**
+   * Per-operation Host selection authorized at dispatch begin.
+   * Assignment and dispatch remain separate operations: reassignment does not rewrite this map.
+   */
+  private readonly hostSelectionByOperation = new Map<string, DispatchHostSelectionSnapshot>();
+
   constructor(private readonly options: RemoteBlockCoordinatorOptions) {}
 
   private async checkpoint(point: RemoteCoordinatorCheckpoint): Promise<void> {
     await this.options.checkpoints?.reached(point);
+  }
+
+  /**
+   * Expose the Host that an active dispatch actually reserved (display / cancel-retry).
+   * Never used to silently retarget after reassignment.
+   */
+  getAuthorizedHostSelection(operationId: string): DispatchHostSelectionSnapshot | undefined {
+    return this.hostSelectionByOperation.get(operationId);
   }
 
   async dispatch(request: RemoteDispatchRequest): Promise<RemoteDispatchOutcome> {
@@ -110,6 +146,23 @@ export class RemoteBlockCoordinator {
     if (candidate.projectId !== request.projectId || candidate.canvasId !== request.canvasId) {
       throw new Error("remote_runtime_locator_candidate_mismatch");
     }
+
+    // Assignment revalidation is a separate read from dispatch persistence.
+    // Capture the authorized selection before reservation so concurrent reassignment cannot
+    // redirect this operation to an arbitrary Host.
+    let selection: DispatchHostSelectionSnapshot | undefined;
+    if (this.options.assignmentGate) {
+      selection = this.options.assignmentGate.resolve({
+        projectId: candidate.projectId,
+        canvasId: candidate.canvasId,
+        blockRef: candidate.blockRef,
+        requiredCapabilities: candidate.requiredCapabilities,
+        requestedHostId: request.requestedHostId,
+        allowHumanOverride: request.allowHumanOverride,
+        expectedAssignmentRevision: request.expectedAssignmentRevision
+      });
+    }
+
     await this.checkpoint("before_operation_commit");
     const operation = this.options.operations.create({
       projectId: candidate.projectId,
@@ -120,6 +173,9 @@ export class RemoteBlockCoordinator {
       sourceFingerprint: candidate.graphFingerprint,
       requiredCapabilities: candidate.requiredCapabilities
     });
+    if (selection) {
+      this.hostSelectionByOperation.set(operation.id, selection);
+    }
     await this.checkpoint("after_operation_commit");
     this.options.candidates.record(operation.id, candidate);
     await this.checkpoint("after_candidate_persistence");
@@ -271,7 +327,8 @@ export class RemoteBlockCoordinator {
       : undefined;
     if (!reservation) {
       try {
-        reservation = this.options.reservations.reserve(operation.id);
+        const preferredHostId = this.resolvePreferredHostId(operation);
+        reservation = this.options.reservations.reserve(operation.id, { preferredHostId });
         await this.checkpoint("after_host_reservation");
         this.options.operations.clearDiagnostic(operation.id);
       } catch (error) {
@@ -482,5 +539,29 @@ export class RemoteBlockCoordinator {
       message
     );
     throw new Error("remote_persistence_inconsistent");
+  }
+
+  /**
+   * Prefer the Host selection authorized at dispatch begin.
+   * When the process lost the in-memory snapshot (restart) but a gate is configured,
+   * re-resolve from current assignment without trusting any UI cache.
+   * Active reserved Host is never rewritten by reassignment (lease remains on reservation).
+   */
+  private resolvePreferredHostId(operation: RemoteOperation): string | undefined {
+    const captured = this.hostSelectionByOperation.get(operation.id);
+    if (captured) {
+      return captured.preferredHostId;
+    }
+    if (!this.options.assignmentGate) {
+      return undefined;
+    }
+    const snapshot = this.options.assignmentGate.resolve({
+      projectId: operation.projectId,
+      canvasId: operation.canvasId,
+      blockRef: operation.blockRef,
+      requiredCapabilities: operation.requiredCapabilities
+    });
+    this.hostSelectionByOperation.set(operation.id, snapshot);
+    return snapshot.preferredHostId;
   }
 }

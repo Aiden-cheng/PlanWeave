@@ -75,7 +75,17 @@ export class RemoteControlService {
   async dispatch(principal: OperatorPrincipal, rawRequest: unknown) {
     const request = operatorDispatchRequestSchema.parse(rawRequest);
     this.options.authorization.authorizeProject(principal, request.projectId);
-    const outcome = await this.options.coordinator.dispatch(request);
+    // Assignment and dispatch remain separate operations; the coordinator revalidates
+    // current assignment before Host reservation (never trusts a UI eligibility list).
+    const outcome = await this.options.coordinator.dispatch({
+      projectId: request.projectId,
+      canvasId: request.canvasId,
+      blockRef: request.blockRef,
+      idempotencyKey: request.idempotencyKey,
+      requestedHostId: request.requestedHostId,
+      allowHumanOverride: request.allowHumanOverride,
+      expectedAssignmentRevision: request.expectedAssignmentRevision
+    });
     return this.observeOperation(principal, outcome.operation.id);
   }
 

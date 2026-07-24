@@ -35,7 +35,16 @@ export const operatorDispatchRequestSchema = z
     projectId: opaqueIdentifierSchema,
     canvasId: opaqueIdentifierSchema,
     blockRef: blockRefSchema,
-    idempotencyKey: z.string().min(1).max(256)
+    idempotencyKey: z.string().min(1).max(256),
+    /** Optional exact Host request; revalidated against assignment + live capacity. */
+    requestedHostId: opaqueIdentifierSchema.optional(),
+    /**
+     * Explicit permission to dispatch human/unassigned Blocks.
+     * When omitted, the assignment gate uses its composition default (operator-compatible true).
+     */
+    allowHumanOverride: z.boolean().optional(),
+    /** Optional assignment revision fingerprint for concurrent reassignment safety. */
+    expectedAssignmentRevision: z.number().int().nonnegative().optional()
   })
   .strict();
 

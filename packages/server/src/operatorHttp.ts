@@ -3,6 +3,7 @@ import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
 import { z } from "zod";
 import { OperatorTokenRegistry, type OperatorPrincipal } from "./operatorAuth.js";
 import { serverReadinessSchema, type ServerReadiness } from "./readiness.js";
+import { DispatchAssignmentError } from "./work/dispatchIntegration.js";
 
 const MAX_OPERATOR_BODY_BYTES = 64 * 1024;
 
@@ -155,6 +156,23 @@ function query(url: URL, allowed: readonly string[]): Record<string, string | un
 
 function safeError(error: unknown): { status: number; code: string } {
   if (error instanceof z.ZodError) return { status: 400, code: "operator_request_invalid" };
+  if (error instanceof DispatchAssignmentError) {
+    if (
+      error.code === "work_revision_conflict" ||
+      error.code === "work_dispatch_host_mismatch"
+    ) {
+      return { status: 409, code: error.code };
+    }
+    if (
+      error.code === "work_not_agent_assigned" ||
+      error.code === "work_item_kind_target_mismatch" ||
+      error.code === "work_item_not_found" ||
+      error.code === "work_input_invalid"
+    ) {
+      return { status: 409, code: error.code };
+    }
+    return { status: 400, code: error.code };
+  }
   if (!(error instanceof Error)) return { status: 500, code: "operator_request_failed" };
   if (
     [
