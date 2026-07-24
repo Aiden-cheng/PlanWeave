@@ -2,6 +2,7 @@
  * Operator-facing lifecycle client for real-process ACP integration tests.
  * Speaks only public HTTP APIs + harness-owned SQLite inspection (no Server source imports).
  */
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import {
@@ -164,6 +165,69 @@ export class RealProcessLifecycleClient {
       );
     }
     return body;
+  }
+
+  /**
+   * Raw operator HTTP call for adversarial authorization matrices.
+   * Does not throw on non-2xx; callers assert status/body.
+   */
+  async rawRequest(input: {
+    method: string;
+    path: string;
+    body?: unknown;
+    authorization?: string | null;
+    headers?: Record<string, string>;
+  }): Promise<{ status: number; body: unknown; text: string }> {
+    const headers: Record<string, string> = { ...(input.headers ?? {}) };
+    if (input.authorization === undefined) {
+      Object.assign(headers, this.harness.authorizationHeaders());
+    } else if (input.authorization !== null) {
+      headers.Authorization = input.authorization.startsWith("Bearer ")
+        ? input.authorization
+        : `Bearer ${input.authorization}`;
+    }
+    if (input.body !== undefined && !headers["content-type"] && !headers["Content-Type"]) {
+      headers["content-type"] = "application/json";
+    }
+    const response = await fetch(`${this.harness.origin}${input.path}`, {
+      method: input.method,
+      headers,
+      body:
+        input.body === undefined
+          ? undefined
+          : typeof input.body === "string"
+            ? input.body
+            : JSON.stringify(input.body)
+    });
+    const text = await response.text();
+    let body: unknown = text;
+    try {
+      body = text.length > 0 ? JSON.parse(text) : null;
+    } catch {
+      body = text;
+    }
+    return { status: response.status, body, text };
+  }
+
+  countServerRows(table: string, whereSql = "1=1", params: unknown[] = []): number {
+    const database = openSqlite(this.serverDatabasePath());
+    try {
+      const row = database
+        .prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE ${whereSql}`)
+        .get(...params) as { count?: number } | undefined;
+      return Number(row?.count ?? 0);
+    } finally {
+      database.close();
+    }
+  }
+
+  countLifecycleFragment(fragment: string): number {
+    // lifecycle.log is harness-owned ACP control evidence (not production Server logs).
+    const path = this.harness.paths.acpLifecycle;
+    if (!existsSync(path)) return 0;
+    return readFileSync(path, "utf8")
+      .split("\n")
+      .filter((line) => line.includes(fragment)).length;
   }
 
   async observe(operationId: string): Promise<OperatorOperationView> {

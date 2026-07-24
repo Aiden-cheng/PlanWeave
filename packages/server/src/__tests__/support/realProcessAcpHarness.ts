@@ -55,6 +55,13 @@ export type ManagedChild = {
   exitSnapshot: ProcessExitSnapshot | undefined;
 };
 
+export type RealProcessServerLimits = {
+  leaseDurationMs?: number;
+  hostOfflineAfterMs?: number;
+  heartbeatIntervalMs?: number;
+  busyTimeoutMs?: number;
+};
+
 export type RealProcessAcpHarnessOptions = {
   acpScenario?: string;
   hostDisplayName?: string;
@@ -67,6 +74,8 @@ export type RealProcessAcpHarnessOptions = {
   graceMs?: number;
   /** Override the temporary Plan Package manifest (defaults to remoteAcpManifest()). */
   manifest?: PlanPackageManifest;
+  /** Optional Server limits (must satisfy config invariants vs each other). */
+  serverLimits?: RealProcessServerLimits;
 };
 
 export type SecondaryHostOptions = {
@@ -154,6 +163,24 @@ export function remoteAcpManifestWithDependency(): PlanPackageManifest {
   });
   const review = task.blocks.find((block) => block.id === "R-001");
   if (review) review.depends_on = ["B-002"];
+  return manifest;
+}
+
+/** Parallel two-task manifest for capacity contention matrices. */
+export function remoteAcpManifestParallelCapacity(): PlanPackageManifest {
+  const manifest = basicManifest({ parallel: true, maxConcurrent: 2, includeSecondTask: true });
+  manifest.execution.defaultExecutor = "codex-acp";
+  manifest.executors = {
+    "codex-acp": { adapter: "agent", agent: "codex", runner: { transport: "acp" } }
+  };
+  for (const node of manifest.nodes) {
+    if (node.type !== "task") continue;
+    for (const block of node.blocks) {
+      if (block.type === "implementation") {
+        block.requirements = { capabilities: ["acp.test"] };
+      }
+    }
+  }
   return manifest;
 }
 
@@ -378,32 +405,37 @@ export class RealProcessAcpHarness {
     if (options.corruptServerConfigOnCreate) {
       await writeFile(paths.serverConfig, "{not-valid-server-config\n", "utf8");
     } else {
-      await writeFile(
-        paths.serverConfig,
-        JSON.stringify({
-          version: "server-config/v1",
-          bind: { host: "127.0.0.1", port },
-          publicUrl: origin,
-          allowInsecureDevelopment: true,
-          dataDirectory: paths.serverData,
-          trustedProjects: [
-            {
-              projectId,
-              canvasId: "default",
-              projectRoot: paths.projectRoot
-            }
-          ],
-          operatorCredentials: [
-            {
-              operatorId: "harness-operator",
-              tokenSha256: hashOperatorToken(operatorToken),
-              projectIds: [],
-              serverAdmin: true
-            }
-          ]
-        }),
-        "utf8"
-      );
+      const serverConfig: Record<string, unknown> = {
+        version: "server-config/v1",
+        bind: { host: "127.0.0.1", port },
+        publicUrl: origin,
+        allowInsecureDevelopment: true,
+        dataDirectory: paths.serverData,
+        trustedProjects: [
+          {
+            projectId,
+            canvasId: "default",
+            projectRoot: paths.projectRoot
+          }
+        ],
+        operatorCredentials: [
+          {
+            operatorId: "harness-operator",
+            tokenSha256: hashOperatorToken(operatorToken),
+            projectIds: [],
+            serverAdmin: true
+          }
+        ]
+      };
+      if (options.serverLimits) {
+        serverConfig.limits = {
+          busyTimeoutMs: options.serverLimits.busyTimeoutMs ?? 5_000,
+          leaseDurationMs: options.serverLimits.leaseDurationMs ?? 30_000,
+          hostOfflineAfterMs: options.serverLimits.hostOfflineAfterMs ?? 90_000,
+          heartbeatIntervalMs: options.serverLimits.heartbeatIntervalMs ?? 15_000
+        };
+      }
+      await writeFile(paths.serverConfig, JSON.stringify(serverConfig), "utf8");
     }
 
     await writeFile(

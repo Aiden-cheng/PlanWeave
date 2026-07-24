@@ -588,8 +588,10 @@ describe("RemoteBlockCoordinator crash reconciliation", () => {
   });
 
   it.each([
+    "after_terminal_event_persistence",
     "before_runtime_writeback",
     "after_runtime_writeback",
+    "after_dispatch_terminal_persistence",
     "after_terminal_persistence"
   ] as const)("reconciles terminal failure after %s", async (checkpoint) => {
     const harness = await CoordinatorHarness.create();
