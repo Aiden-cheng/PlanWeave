@@ -501,6 +501,8 @@ node scripts/planweave-release-gate.mjs --checklist
 
 **Evidence rules:** live evidence expires after 14 days (file mtime or `generatedAt`). Operators own disposable VPS access and Host-local provider login; CI owns only the deterministic suite. Gate inputs are evidence paths + package versions; outputs are a JSON report with tier status, digests, compatibility checks, rollback checklist, and `releaseReady.{ci,supportedVersionRelease,preRelease}`.
 
+An assembled checkpoint correlating RV-001/002/003 evidence with a re-run of the deterministic suite and honest live blockers is recorded in [readme/distributed-remote-execution-checkpoint.md](readme/distributed-remote-execution-checkpoint.md).
+
 ### Operator HTTP surface
 
 Authenticated routes require `Authorization: Bearer <operator-token>` and TLS (or loopback development mode). Server-admin credentials can enroll and revoke hosts; project-scoped credentials may only dispatch and observe operations for their `projectIds`.

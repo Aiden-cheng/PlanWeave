@@ -141,7 +141,7 @@ pnpm exec vitest run packages/server/src/__tests__/releaseGate.test.ts \
   packages/distributed-protocol/src/__tests__/compatibility.test.ts
 ```
 
-Do not treat skipped `PLANWEAVE_REAL_ACP` or `PLANWEAVE_VPS_E2E` evidence as a release pass. See the main README section **Live release gate and rollback checks**.
+Do not treat skipped `PLANWEAVE_REAL_ACP` or `PLANWEAVE_VPS_E2E` evidence as a release pass. See the main README section **Live release gate and rollback checks**. Assembled remote-execution evidence checkpoint (CI ready / live blocked): [readme/distributed-remote-execution-checkpoint.md](readme/distributed-remote-execution-checkpoint.md).
 
 ## ACP Verification
 

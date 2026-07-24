@@ -501,6 +501,8 @@ node scripts/planweave-release-gate.mjs --checklist
 
 **证据规则：** live 证据 14 天后过期（`generatedAt` 或文件 mtime）。运维拥有一次性 VPS 与 Host 本地 provider 登录；CI 只拥有确定性套件。门禁输入为证据路径与 package 版本；输出为含层级状态、digest、兼容检查、回滚清单与 `releaseReady.{ci,supportedVersionRelease,preRelease}` 的 JSON 报告。
 
+关联 RV-001/002/003 与确定性套件复跑、诚实记录 live 阻塞的证据检查点见 [distributed-remote-execution-checkpoint.md](distributed-remote-execution-checkpoint.md)。
+
 ### Operator HTTP 接口
 
 鉴权路由需要 `Authorization: Bearer <operator-token>`，并使用 TLS（或 loopback 开发模式）。server-admin 可登记与吊销 Host；项目作用域凭据只能对自己的 `projectIds` 做 dispatch 与观测。
