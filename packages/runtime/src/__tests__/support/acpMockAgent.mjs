@@ -1,5 +1,13 @@
 #!/usr/bin/env node
-import { appendFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync
+} from "node:fs";
+import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
 import {
   PROTOCOL_VERSION,
@@ -9,16 +17,97 @@ import {
   RequestError
 } from "@agentclientprotocol/sdk";
 
-const scenario = process.argv[2] ?? "success";
+function parseArgv(argv) {
+  let scenario = "success";
+  let controlDir = process.env.PLANWEAVE_ACP_TEST_CONTROL_DIR;
+  let scenarioAssigned = false;
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument.startsWith("--control-dir=")) {
+      controlDir = argument.slice("--control-dir=".length);
+      continue;
+    }
+    if (argument === "--control-dir") {
+      controlDir = argv[index + 1];
+      index += 1;
+      continue;
+    }
+    if (!argument.startsWith("-") && !scenarioAssigned) {
+      scenario = argument;
+      scenarioAssigned = true;
+    }
+  }
+  return { scenario, controlDir };
+}
+
+const { scenario, controlDir } = parseArgv(process.argv.slice(2));
 const sessions = new Map();
 let nextSession = 1;
 let authenticated = false;
-const lifecycleFile = process.env.PLANWEAVE_ACP_TEST_LIFECYCLE_FILE;
+const lifecycleFile =
+  process.env.PLANWEAVE_ACP_TEST_LIFECYCLE_FILE ??
+  (controlDir ? join(controlDir, "lifecycle.log") : undefined);
 
 function recordLifecycle(event) {
   if (lifecycleFile !== undefined) {
     appendFileSync(lifecycleFile, `${process.pid} ${event}\n`);
   }
+}
+
+function controlPath(name) {
+  if (!controlDir) return undefined;
+  return join(controlDir, name);
+}
+
+function takeControlFile(name) {
+  const path = controlPath(name);
+  if (!path || !existsSync(path)) return undefined;
+  const content = readFileSync(path, "utf8");
+  unlinkSync(path);
+  return content;
+}
+
+const pause = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+/**
+ * Harness-owned barrier: while `pause` exists under the control dir, ACP handlers block.
+ * Optional `pause-at` file content lists method labels (newline/comma separated); when present,
+ * only those methods pause. When `pause-at` is absent, every labeled checkpoint pauses.
+ */
+async function maybeBarrier(label) {
+  const pauseFile = controlPath("pause");
+  if (!pauseFile || !existsSync(pauseFile)) return;
+  const pauseAtPath = controlPath("pause-at");
+  if (pauseAtPath && existsSync(pauseAtPath)) {
+    const targets = readFileSync(pauseAtPath, "utf8")
+      .split(/[\n,]/)
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (targets.length > 0 && !targets.includes(label)) return;
+  }
+  recordLifecycle(`paused ${label}`);
+  while (existsSync(pauseFile)) {
+    const exitContent = takeControlFile("force-exit");
+    if (exitContent !== undefined) {
+      const code = Number.parseInt(exitContent.trim(), 10);
+      process.exit(Number.isFinite(code) ? code : 42);
+    }
+    await pause(15);
+  }
+  recordLifecycle(`resumed ${label}`);
+}
+
+/** Emit one malformed NDJSON frame when harness drops `corrupt-next` into the control dir. */
+function maybeCorruptStdout() {
+  if (takeControlFile("corrupt-next") === undefined) return false;
+  recordLifecycle("corrupt-next");
+  process.stdout.write("{not-json-harness-corrupt}\n");
+  return true;
+}
+
+if (controlDir) {
+  mkdirSync(controlDir, { recursive: true });
+  writeFileSync(join(controlDir, "ready"), `${process.pid}\n`, "utf8");
 }
 
 recordLifecycle("spawn");
@@ -46,10 +135,10 @@ if (scenario === "stubborn-pending") {
   setInterval(() => {}, 1_000);
 }
 
-const pause = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
-
 const app = agent({ name: "planweave-acp-mock" })
   .onRequest(methods.agent.initialize, async (ctx) => {
+    await maybeBarrier("initialize");
+    maybeCorruptStdout();
     recordLifecycle("initialize");
     const elicitation = ctx.params.clientCapabilities?.elicitation;
     if (scenario === "expect-headless-capabilities" && elicitation != null) {
@@ -197,6 +286,8 @@ const app = agent({ name: "planweave-acp-mock" })
     return {};
   })
   .onRequest(methods.agent.session.new, async () => {
+    await maybeBarrier("session/new");
+    maybeCorruptStdout();
     recordLifecycle("session/new");
     if (scenario === "action-required" && !authenticated) {
       throw RequestError.invalidParams({ reason: "session/new must not run before user action" });
@@ -352,6 +443,8 @@ const app = agent({ name: "planweave-acp-mock" })
     };
   })
   .onRequest(methods.agent.session.prompt, async (ctx) => {
+    await maybeBarrier("session/prompt");
+    maybeCorruptStdout();
     recordLifecycle("session/prompt");
     const { sessionId } = ctx.params;
     const session = sessions.get(sessionId);

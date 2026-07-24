@@ -474,6 +474,7 @@
         "hostReservations.test.ts",
         "lifecycle.test.ts",
         "operatorWalkthrough.test.ts",
+        "realProcessAcpHarness.test.ts",
         "remoteBlockCoordinator.test.ts",
         "remoteBlockCoordinatorCrash.test.ts",
         "remoteBlockCoordinatorStartup.test.ts",
