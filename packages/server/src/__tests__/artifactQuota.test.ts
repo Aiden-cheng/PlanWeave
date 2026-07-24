@@ -203,7 +203,7 @@ describe("artifact output quotas", () => {
           "SELECT COUNT(*) AS count FROM dispatch_artifact_links WHERE purpose IN ('report','output')"
         )
         .get()?.count
-    ).toBe(16);
+    ).toBe(17);
 
     for (let index = 16; index < 63; index++) {
       coordination.artifactAuthorization.createOutputGrant(grantInput(`pending-quota-${index}`));

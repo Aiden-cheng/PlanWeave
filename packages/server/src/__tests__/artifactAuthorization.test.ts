@@ -318,7 +318,7 @@ describe("artifact authorization migration", () => {
       busyTimeoutMs: 5000
     });
     servers.push(upgraded);
-    expect(upgraded.readiness().schemaVersion).toBe(16);
+    expect(upgraded.readiness().schemaVersion).toBe(17);
     expect(
       upgraded.database.prepare("SELECT COUNT(*) AS count FROM artifact_blobs").get()?.count
     ).toBe(1);
@@ -335,7 +335,7 @@ describe("artifact authorization migration", () => {
       busyTimeoutMs: 5000
     });
     servers.push(reopened);
-    expect(reopened.readiness().schemaVersion).toBe(16);
+    expect(reopened.readiness().schemaVersion).toBe(17);
     expect(
       reopened.database.prepare("SELECT COUNT(*) AS count FROM artifact_blobs").get()?.count
     ).toBe(1);

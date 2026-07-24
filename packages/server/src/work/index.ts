@@ -76,3 +76,28 @@ export {
   type CoordinationOperationKind,
   type DispatchAssignmentGateDecision
 } from "./policy.js";
+
+export {
+  createHostAssignmentPort,
+  createIdentityMembershipPort,
+  createRoutedWorkItemPackagePort,
+  type AssignmentHostPort,
+  type AssignmentHostPortFromRepositoryOptions,
+  type AssignmentMembershipPort,
+  type AssignmentMembershipPortFromIdentityOptions
+} from "./ports.js";
+
+export {
+  WorkAssignmentError,
+  WorkAssignmentRepository,
+  workItemKeyParts,
+  type WorkItemKeyParts
+} from "./repository.js";
+
+export {
+  WorkAssignmentService,
+  WorkAssignmentServiceError,
+  type AssignmentListResult,
+  type EligibleAssigneesResult,
+  type WorkAssignmentServiceOptions
+} from "./service.js";

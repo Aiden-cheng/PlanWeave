@@ -754,6 +754,80 @@ CREATE INDEX idx_human_devices_project_minted_active
   WHERE revoked_at IS NULL;
 `;
 
+/**
+ * Work assignment coordination store (HC-002#B-002).
+ * Keyed by project + exact WorkItemRef (kind/canvas/key). Target is normalized columns only —
+ * never task titles, prompts, Block lifecycle, Host presence, or capability copies.
+ * Unassign keeps a durable row with target_kind='unassigned' (revision advances; no silent delete).
+ */
+const migration17 = `
+CREATE TABLE work_assignments (
+  project_id TEXT NOT NULL CHECK(
+    length(project_id) BETWEEN 1 AND 128
+    AND project_id GLOB '[A-Za-z0-9]*'
+    AND project_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+  ),
+  canvas_id TEXT NOT NULL CHECK(
+    length(canvas_id) BETWEEN 1 AND 128
+    AND canvas_id GLOB '[A-Za-z0-9]*'
+    AND canvas_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+  ),
+  work_item_kind TEXT NOT NULL CHECK(work_item_kind IN ('task','block')),
+  work_item_key TEXT NOT NULL CHECK(length(work_item_key) BETWEEN 1 AND 256),
+  target_kind TEXT NOT NULL CHECK(target_kind IN ('unassigned','human','exact_host','automatic_host')),
+  target_human_principal_id TEXT CHECK(
+    target_human_principal_id IS NULL
+    OR (
+      length(target_human_principal_id) BETWEEN 1 AND 128
+      AND target_human_principal_id GLOB '[A-Za-z0-9]*'
+      AND target_human_principal_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+    )
+  ),
+  target_host_id TEXT CHECK(
+    target_host_id IS NULL
+    OR (
+      length(target_host_id) BETWEEN 1 AND 128
+      AND target_host_id GLOB '[A-Za-z0-9]*'
+      AND target_host_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+    )
+  ),
+  revision INTEGER NOT NULL CHECK(revision >= 1),
+  updated_by_kind TEXT NOT NULL CHECK(updated_by_kind IN ('human','local_admin','system')),
+  updated_by_id TEXT NOT NULL CHECK(
+    length(updated_by_id) BETWEEN 1 AND 128
+    AND updated_by_id GLOB '[A-Za-z0-9]*'
+    AND updated_by_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+  ),
+  updated_by_display_name TEXT CHECK(
+    updated_by_display_name IS NULL OR length(updated_by_display_name) BETWEEN 1 AND 128
+  ),
+  updated_at TEXT NOT NULL,
+  reason TEXT CHECK(reason IS NULL OR length(reason) BETWEEN 1 AND 512),
+  PRIMARY KEY (project_id, canvas_id, work_item_kind, work_item_key),
+  CHECK(
+    (target_kind = 'unassigned' AND target_human_principal_id IS NULL AND target_host_id IS NULL)
+    OR (target_kind = 'human' AND target_human_principal_id IS NOT NULL AND target_host_id IS NULL)
+    OR (target_kind = 'exact_host' AND target_host_id IS NOT NULL AND target_human_principal_id IS NULL)
+    OR (target_kind = 'automatic_host' AND target_human_principal_id IS NULL AND target_host_id IS NULL)
+  ),
+  CHECK(
+    (work_item_kind = 'task' AND target_kind IN ('unassigned','human'))
+    OR work_item_kind = 'block'
+  )
+);
+
+CREATE INDEX idx_work_assignments_project_canvas
+  ON work_assignments(project_id, canvas_id, updated_at);
+
+CREATE INDEX idx_work_assignments_project_target_human
+  ON work_assignments(project_id, target_human_principal_id)
+  WHERE target_kind = 'human';
+
+CREATE INDEX idx_work_assignments_project_target_host
+  ON work_assignments(project_id, target_host_id)
+  WHERE target_kind = 'exact_host';
+`;
+
 function validateRemoteAttemptIdentities(database: SqliteDatabase): void {
   const duplicateDispatch = database
     .prepare(
@@ -894,7 +968,8 @@ const migrations: readonly Migration[] = [
   { version: 13, sql: migration13, disableForeignKeys: true },
   { version: 14, sql: migration14 },
   { version: 15, sql: migration15, before: validateRemoteAttemptIdentities },
-  { version: 16, sql: migration16 }
+  { version: 16, sql: migration16 },
+  { version: 17, sql: migration17 }
 ];
 
 export const latestCentralSchemaVersion = Math.max(

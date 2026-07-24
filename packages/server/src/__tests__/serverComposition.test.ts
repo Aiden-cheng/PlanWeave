@@ -89,7 +89,7 @@ describe("distributed server composition", () => {
     expect(fixture.composition.ownsHttpServer).toBe(false);
     await expect((await fetch(`${fixture.origin}/readyz`)).json()).resolves.toEqual({
       status: "ready",
-      schemaVersion: 16
+      schemaVersion: 17
     });
 
     const enrollment = await fetch(`${fixture.origin}/api/v1/host-enrollments`, {
