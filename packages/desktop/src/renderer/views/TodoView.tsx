@@ -3,10 +3,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import type { AssigneeSurfaceIndex } from "../collaboration/assigneeSurfaceViewModels";
 import { TodoGroupCard } from "../components/TodoGroupCard";
 import type { createTranslator } from "../i18n";
 
 type TodoViewProps = {
+  assigneeIndex?: AssigneeSurfaceIndex | null;
   executionPlan: DesktopProjectExecutionPlan | null;
   handleBlockSelect: (ref: string, canvasId?: string | null) => Promise<void>;
   t: ReturnType<typeof createTranslator>;
@@ -52,7 +54,13 @@ const toneDot: Record<Tone, string> = {
   neutral: "bg-foreground/40"
 };
 
-export function TodoView({ executionPlan, handleBlockSelect, t, todoGroups }: TodoViewProps) {
+export function TodoView({
+  assigneeIndex = null,
+  executionPlan,
+  handleBlockSelect,
+  t,
+  todoGroups
+}: TodoViewProps) {
   const readyCount = executionPlan?.readyQueue.length ?? todoGroups?.ready.length ?? 0;
 
   const statusLabel = (status: StatusKey) =>
@@ -181,9 +189,11 @@ export function TodoView({ executionPlan, handleBlockSelect, t, todoGroups }: To
           {todoGroups
             ? visibleTodoStatuses.map((status) => (
                 <TodoGroupCard
+                  assigneeIndex={assigneeIndex}
                   items={todoGroups[status]}
                   key={status}
                   labels={{
+                    assignee: t("assignee"),
                     dependencyBlockers: t("dependencyBlockers"),
                     dispatchability: t("dispatchability"),
                     dispatchable: t("dispatchable"),

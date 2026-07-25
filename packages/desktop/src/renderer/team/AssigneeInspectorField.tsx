@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import type { WorkItemRef } from "@planweave-ai/collaboration-contracts";
+import { useCallback, useMemo, useState } from "react";
+import type { AssignmentTarget, WorkItemRef } from "@planweave-ai/collaboration-contracts";
 import { parseWorkItemKey, workItemKey } from "../../shared/collaborationReadModels.js";
 import { useAssigneePickerController } from "../hooks/useAssigneePickerController";
 import type { createTranslator } from "../i18n";
@@ -11,18 +11,27 @@ export type AssigneeInspectorFieldProps = {
   t: ReturnType<typeof createTranslator>;
   api?: PlanWeaveCollaborationApi | null;
   className?: string;
+  onAssignmentOutcome?: (outcome: {
+    ok: boolean;
+    workItem: WorkItemRef;
+    target: AssignmentTarget;
+    errorMessage?: string | null;
+  }) => void;
 };
 
 /**
  * Inspector metadata field that mounts the assignee picker for one WorkItemRef.
- * Collaboration session/read models are owned by the controller; no DOM business state.
+ * Collaboration session/read models come from the shared hub; eligible options
+ * load only while the picker popover is open.
  */
 export function AssigneeInspectorField({
   workItem,
   t,
   api,
-  className
+  className,
+  onAssignmentOutcome
 }: AssigneeInspectorFieldProps) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const workKey = workItem ? workItemKey(workItem) : null;
   const stableWorkItem = useMemo(
     () => (workKey ? parseWorkItemKey(workKey) : null),
@@ -31,8 +40,13 @@ export function AssigneeInspectorField({
   const controller = useAssigneePickerController({
     workItem: stableWorkItem,
     api,
-    detailsOpen: true
+    detailsOpen,
+    onAssignmentOutcome
   });
+
+  const handleOpenChange = useCallback((open: boolean) => {
+    setDetailsOpen(open);
+  }, []);
 
   if (!controller.viewModel) {
     return null;
@@ -47,6 +61,7 @@ export function AssigneeInspectorField({
       onSelect={controller.selectTarget}
       onRefresh={controller.refresh}
       onRetry={controller.retryLastTarget}
+      onOpenChange={handleOpenChange}
       t={t}
     />
   );

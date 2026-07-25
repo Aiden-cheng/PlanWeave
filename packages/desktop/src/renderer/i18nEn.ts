@@ -932,7 +932,16 @@ export const enCatalog = {
   assigneeReasonWorkItemMissing: "Work item is missing from the package.",
   assigneeReasonForbidden: "Permission denied for assignment.",
   assigneeReasonAuthExpired: "Credentials expired.",
-  assigneeReasonServerError: "Server error while loading assignment options."
+  assigneeReasonServerError: "Server error while loading assignment options.",
+
+  // Collaboration assignment surface integration (DX-002#B-003)
+  notifyAssignmentUpdated: "Assignment updated",
+  notifyAssignmentFailed: "Assignment update failed",
+  notifyAssignmentConfirmed: "Assignment confirmed",
+  notifyAssignmentRejected: "Assignment rejected",
+  notifyMembershipChanged: "Membership updated",
+  assigneeUpdateSucceeded: "Assignee updated",
+  assigneeUpdateFailed: "Could not update assignee"
 } as const;
 
 export type TranslationKey = keyof typeof enCatalog;

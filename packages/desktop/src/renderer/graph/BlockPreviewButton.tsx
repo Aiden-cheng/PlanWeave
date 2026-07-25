@@ -6,10 +6,13 @@ import {
   ContextMenuItem,
   ContextMenuTrigger
 } from "@/components/ui/context-menu";
+import type { CompactAssigneeChip } from "../collaboration/assigneeSurfaceViewModels";
+import { CompactAssigneeChipView } from "../team/CompactAssigneeChip";
 import type { TaskNodeData } from "../types";
 import { statusVariant } from "../viewHelpers";
 
 export function BlockPreviewButton({
+  assigneeChip = null,
   block,
   labels,
   onDelete,
@@ -18,6 +21,7 @@ export function BlockPreviewButton({
   onSelect,
   selectedBlockRef
 }: {
+  assigneeChip?: CompactAssigneeChip | null;
   block: DesktopBlockPreview;
   labels: TaskNodeData["labels"];
   onDelete: (ref: string) => void;
@@ -43,7 +47,12 @@ export function BlockPreviewButton({
             onSelect(block.ref);
           }}
         >
-          <span className="min-w-0 truncate">{block.title}</span>
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="min-w-0 truncate">{block.title}</span>
+            {assigneeChip ? (
+              <CompactAssigneeChipView chip={assigneeChip} label={labels.assignee} />
+            ) : null}
+          </span>
           <Badge className="shrink-0" variant={statusVariant[block.status]}>
             {block.blockId}
           </Badge>

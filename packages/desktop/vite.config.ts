@@ -70,6 +70,20 @@ export default defineConfig({
               name: "ui-vendor",
               test: (id) => id.includes("radix-ui") || id.includes("lucide-react"),
               priority: 10
+            },
+            {
+              // Keep collaboration surfaces out of the main shell chunk so graph/todo
+              // assignee projections can land without breaching the renderer budget.
+              name: "collaboration",
+              test: (id) =>
+                id.includes("/renderer/collaboration/") ||
+                id.includes("/renderer/team/") ||
+                id.includes("/renderer/hooks/useCollaboration") ||
+                id.includes("/renderer/hooks/useAssignee") ||
+                id.includes("/renderer/hooks/usePeople") ||
+                id.includes("/shared/collaboration") ||
+                id.includes("@planweave-ai/collaboration-contracts"),
+              priority: 12
             }
           ]
         }

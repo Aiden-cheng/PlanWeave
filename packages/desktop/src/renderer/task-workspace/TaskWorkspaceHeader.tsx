@@ -8,16 +8,22 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import type { CompactAssigneeChip } from "../collaboration/assigneeSurfaceViewModels";
+import { CompactAssigneeChipView } from "../team/CompactAssigneeChip";
 import type { TaskWorkspaceLabels } from "./contracts";
 import type { TaskWorkspaceLayout } from "./useTaskWorkspaceLayout";
 
 export function TaskWorkspaceHeader({
+  assigneeChip = null,
+  assigneeLabel,
   headerAction,
   labels,
   layout,
   onReturnToCanvas,
   workspace
 }: {
+  assigneeChip?: CompactAssigneeChip | null;
+  assigneeLabel?: string;
   headerAction: ReactNode;
   labels: TaskWorkspaceLabels;
   layout: TaskWorkspaceLayout;
@@ -67,6 +73,13 @@ export function TaskWorkspaceHeader({
           data-testid="task-workspace-title-block"
         >
           <span className="truncate text-sm leading-5 font-medium">{workspace.task.title}</span>
+          {assigneeChip && assigneeLabel ? (
+            <CompactAssigneeChipView
+              chip={assigneeChip}
+              label={assigneeLabel}
+              size="sm"
+            />
+          ) : null}
         </div>
         <div className="app-no-drag flex shrink-0 items-center gap-2">{headerAction}</div>
         <Button

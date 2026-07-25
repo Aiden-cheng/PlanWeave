@@ -12,6 +12,7 @@ import type {
   RunnerTransport
 } from "@planweave-ai/runtime";
 import type { DesktopSettingsPatch, DesktopUiSettings } from "../shared/desktopSettings";
+import type { CompactAssigneeChip } from "./collaboration/assigneeSurfaceViewModels";
 import type { TaskWorkspaceNavigationTarget } from "./taskWorkspaceNavigation";
 export type {
   AppearanceMode,
@@ -61,6 +62,7 @@ export type TaskNodeLabels = {
   sharedResource: string;
   sharedResourceActive: string;
   moreResources: (count: number) => string;
+  assignee: string;
 };
 
 export type TaskNodeData = {
@@ -83,6 +85,10 @@ export type TaskNodeData = {
   resourceHighlighted: boolean;
   dimmed: boolean;
   transitionEpochByResource: Record<string, number>;
+  /** Compact task-level assignee from shared collaboration index (no per-node subscription). */
+  assigneeChip: CompactAssigneeChip | null;
+  /** Block ref → compact assignee for block rows on the card. */
+  blockAssigneeChips: Record<string, CompactAssigneeChip | null>;
   onTitleChange: (taskId: string, value: string) => void;
   onTitleSave: (taskId: string) => void;
   onExecutorChange: (taskId: string, executorName: string | null) => void;
@@ -176,7 +182,7 @@ export type NotificationNavigationIntent =
 
 export type NotificationItemDraft =
   | (BaseNotificationItem & {
-      kind?: "fileSync" | "promptConflict" | "default";
+      kind?: "fileSync" | "promptConflict" | "default" | "collaboration";
     })
   | (BaseNotificationItem & {
       kind: "importRecovery";

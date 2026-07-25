@@ -62,6 +62,7 @@ describe("desktop renderer component interactions", () => {
       <TodoGroupCard
         items={[item]}
         labels={{
+          assignee: "Assignee",
           dependencyBlockers: "Dependency blockers",
           dispatchability: "Dispatchability",
           dispatchable: "Dispatchable",

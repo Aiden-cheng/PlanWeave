@@ -12,9 +12,6 @@ import {
   type AssigneePickerViewModel
 } from "../collaboration/assignmentViewModels";
 import { collaborationErrorMessage } from "../collaboration/formatCollaborationError";
-import {
-  type CollaborationReadBridgePort
-} from "../collaboration/CollaborationReadModelController";
 import { workItemKey } from "../../shared/collaborationReadModels.js";
 import { useCollaborationReadModels } from "./useCollaborationReadModels";
 import { useCollaborationStatus } from "./useCollaborationStatus";
@@ -23,8 +20,15 @@ import type { PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
 export type UseAssigneePickerControllerArgs = {
   workItem: WorkItemRef | null;
   api?: PlanWeaveCollaborationApi | null;
-  /** When true, load eligible assignees (picker open). */
+  /** When true, load eligible assignees (picker open). Default false for on-demand. */
   detailsOpen?: boolean;
+  /** Optional outcome callbacks for shell toasts / activity UX. */
+  onAssignmentOutcome?: (outcome: {
+    ok: boolean;
+    workItem: WorkItemRef;
+    target: AssignmentTarget;
+    errorMessage?: string | null;
+  }) => void;
 };
 
 export type UseAssigneePickerControllerResult = {
@@ -36,33 +40,17 @@ export type UseAssigneePickerControllerResult = {
   retryLastTarget: () => Promise<boolean>;
 };
 
-function toReadBridge(api: PlanWeaveCollaborationApi): CollaborationReadBridgePort {
-  return {
-    getCollaborationStatus: () => api.getCollaborationStatus(),
-    listCollaborationMembers: (input) => api.listCollaborationMembers(input),
-    listCollaborationAssignments: (input) => api.listCollaborationAssignments(input),
-    listCollaborationEligibleAssignees: (input) => api.listCollaborationEligibleAssignees(input),
-    listCollaborationComments: (input) => api.listCollaborationComments(input),
-    listCollaborationActivity: (input) => api.listCollaborationActivity(input),
-    updateCollaborationAssignment: (input) => api.updateCollaborationAssignment(input),
-    createCollaborationComment: (input) => api.createCollaborationComment(input),
-    editCollaborationComment: (input) => api.editCollaborationComment(input),
-    tombstoneCollaborationComment: (input) => api.tombstoneCollaborationComment(input),
-    onCollaborationStatusChanged: (callback) => api.onCollaborationStatusChanged(callback),
-    onCollaborationObserverSignal: (callback) => api.onCollaborationObserverSignal(callback)
-  };
-}
-
 /**
  * Task/Block assignee picker controller.
- * Sends expectedRevision on every update, disables duplicate submits, and reconciles
- * only authoritative server projections (no optimistic overwrite).
+ * Reuses the shared collaboration read-model hub. Sends expectedRevision on every
+ * update, disables duplicate submits, and reconciles only authoritative server
+ * projections (no optimistic overwrite). Eligible assignees load only when detailsOpen.
  */
 export function useAssigneePickerController(
   args: UseAssigneePickerControllerArgs
 ): UseAssigneePickerControllerResult {
   const api = args.api === undefined ? collaborationBridge : args.api;
-  const detailsOpen = args.detailsOpen ?? true;
+  const detailsOpen = args.detailsOpen ?? false;
   const { status } = useCollaborationStatus({ api });
 
   const activeProfile = useMemo(() => {
@@ -73,10 +61,8 @@ export function useAssigneePickerController(
   const sessionConnected =
     status?.session.phase === "connected" || status?.session.phase === "ready";
 
-  const readApi = useMemo(() => (api ? toReadBridge(api) : null), [api]);
-
   const { snapshot, viewModel: projectView, controller } = useCollaborationReadModels({
-    api: readApi,
+    api,
     profileId: sessionConnected ? (activeProfile?.profileId ?? null) : null,
     projectId: sessionConnected ? (activeProfile?.projectId ?? null) : null,
     canvasId: args.workItem?.canvasId ?? null
@@ -93,6 +79,8 @@ export function useAssigneePickerController(
   const generationRef = useRef(0);
   const pendingRef = useRef(false);
   const workItemKeyValue = args.workItem ? workItemKey(args.workItem) : null;
+  const onOutcomeRef = useRef(args.onAssignmentOutcome);
+  onOutcomeRef.current = args.onAssignmentOutcome;
 
   // Reset ephemeral UI when the selected work item changes rapidly.
   useEffect(() => {
@@ -105,6 +93,14 @@ export function useAssigneePickerController(
     setActionError(null);
     setLastAttemptedTarget(null);
   }, [workItemKeyValue]);
+
+  // Drop eligible options when picker closes so reconnect/auth expiry reloads on next open.
+  useEffect(() => {
+    if (!detailsOpen) {
+      setEligible(null);
+      setEligibleLoading(false);
+    }
+  }, [detailsOpen]);
 
   const loadEligible = useCallback(async () => {
     if (!api || !args.workItem || !sessionConnected) {
@@ -142,12 +138,14 @@ export function useAssigneePickerController(
     if (controller) {
       await controller.refreshAuthoritative({ reason: "assignee_picker_refresh" });
     }
-    await loadEligible();
+    if (detailsOpen) {
+      await loadEligible();
+    }
     setLocalStaleConflict(false);
     if (snapshot.syncPhase !== "stale_conflict") {
       setActionError(null);
     }
-  }, [controller, loadEligible, snapshot.syncPhase]);
+  }, [controller, detailsOpen, loadEligible, snapshot.syncPhase]);
 
   const selectTarget = useCallback(
     async (target: AssignmentTarget): Promise<boolean> => {
@@ -181,20 +179,36 @@ export function useAssigneePickerController(
           if (conflict) {
             setLocalStaleConflict(true);
           }
-          setActionError(
+          const errorMessage =
             collaborationErrorMessage(controller.getSnapshot().lastError) ??
-              "assignment_update_failed"
-          );
+            "assignment_update_failed";
+          setActionError(errorMessage);
           // Reconcile authoritative assignment without optimistic overwrite.
           await controller.refreshAuthoritative({ reason: "assignee_picker_reject" });
+          onOutcomeRef.current?.({
+            ok: false,
+            workItem,
+            target,
+            errorMessage
+          });
           return false;
         }
         setLocalStaleConflict(false);
-        await loadEligible();
+        if (detailsOpen) {
+          await loadEligible();
+        }
+        onOutcomeRef.current?.({ ok: true, workItem, target, errorMessage: null });
         return true;
       } catch (error) {
         if (generation !== generationRef.current) return false;
-        setActionError(collaborationErrorMessage(error));
+        const errorMessage = collaborationErrorMessage(error);
+        setActionError(errorMessage);
+        onOutcomeRef.current?.({
+          ok: false,
+          workItem,
+          target,
+          errorMessage
+        });
         return false;
       } finally {
         if (generation === generationRef.current) {
@@ -203,7 +217,7 @@ export function useAssigneePickerController(
         }
       }
     },
-    [api, args.workItem, controller, loadEligible, snapshot.assignmentsByWorkItem]
+    [api, args.workItem, controller, detailsOpen, loadEligible, snapshot.assignmentsByWorkItem]
   );
 
   const retryLastTarget = useCallback(async () => {
@@ -215,7 +229,7 @@ export function useAssigneePickerController(
   const pickerViewModel = useMemo((): AssigneePickerViewModel | null => {
     if (!args.workItem) return null;
     const loading =
-      eligibleLoading ||
+      (detailsOpen && eligibleLoading) ||
       snapshot.loadingKinds.includes("assignments") ||
       snapshot.loadingKinds.includes("snapshot") ||
       snapshot.syncPhase === "loading";
@@ -238,6 +252,7 @@ export function useAssigneePickerController(
     actionError,
     args.workItem,
     assignment,
+    detailsOpen,
     eligible,
     eligibleLoading,
     localStaleConflict,

@@ -56,4 +56,23 @@ export {
   type AssigneeSectionId,
   type AssigneeUnavailableReason
 } from "./assignmentViewModels.js";
+export {
+  blockWorkItemKey,
+  buildAssigneeSurfaceIndex,
+  buildCollaborationNotificationDrafts,
+  buildCompactAssigneeChip,
+  isAssigneeSurfaceActive,
+  lookupBlockAssigneeChip,
+  lookupTaskAssigneeChip,
+  lookupTaskCardAssigneeChip,
+  taskWorkItemKey,
+  type AssigneeSurfaceIndex,
+  type CollaborationNotificationDraft,
+  type CompactAssigneeChip
+} from "./assigneeSurfaceViewModels.js";
+export { toCollaborationReadBridge } from "./collaborationReadBridge.js";
+export {
+  acquireCollaborationReadModelController,
+  resetCollaborationReadModelHubForTests
+} from "./collaborationReadModelHub.js";
 export { collaborationErrorMessage } from "./formatCollaborationError.js";

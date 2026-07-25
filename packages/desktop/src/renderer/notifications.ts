@@ -4,6 +4,7 @@ import type {
   DesktopPackageFileChangeEvent,
   PendingImportTransaction
 } from "@planweave-ai/runtime";
+import type { CollaborationNotificationDraft } from "./collaboration/assigneeSurfaceViewModels";
 import type { createTranslator } from "./i18n";
 import type { PromptConflictRef } from "./hooks/usePromptDrafts";
 import type { DesktopUiSettings, NotificationItem, NotificationItemDraft } from "./types";
@@ -42,6 +43,7 @@ function directNavigationIntent(
 
 export function buildNotificationItems({
   autoRunState,
+  collaborationItems = [],
   fileSyncDiagnostics,
   graph,
   lastFileChange,
@@ -52,6 +54,7 @@ export function buildNotificationItems({
   t
 }: {
   autoRunState: DesktopAutoRunState | null;
+  collaborationItems?: readonly CollaborationNotificationDraft[];
   fileSyncDiagnostics: string[];
   graph: DesktopGraphViewModel | null;
   lastFileChange: DesktopPackageFileChangeEvent | null;
@@ -159,6 +162,15 @@ export function buildNotificationItems({
       kind: "importRecovery",
       transactionId: recovery.transactionId,
       recoveryRoot: recovery.recoveryRoot
+    });
+  }
+  for (const collaboration of collaborationItems) {
+    notificationItems.push({
+      id: collaboration.id,
+      title: collaboration.title,
+      detail: collaboration.detail,
+      tone: collaboration.tone,
+      kind: collaboration.kind
     });
   }
   return notificationItems.map(

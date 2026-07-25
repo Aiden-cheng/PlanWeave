@@ -9,8 +9,12 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import type { AssigneeSurfaceIndex } from "../collaboration/assigneeSurfaceViewModels";
+import { lookupBlockAssigneeChip } from "../collaboration/assigneeSurfaceViewModels";
+import { CompactAssigneeChipView } from "../team/CompactAssigneeChip";
 
 type TodoGroupCardLabels = {
+  assignee: string;
   dependencyBlockers: string;
   dispatchability: string;
   dispatchable: string;
@@ -66,6 +70,7 @@ const statusVisuals: Record<
 };
 
 export function TodoGroupCard({
+  assigneeIndex = null,
   items,
   labels,
   onSelect,
@@ -75,6 +80,7 @@ export function TodoGroupCard({
   items: DesktopTodoItem[];
   labels: TodoGroupCardLabels;
   onSelect: (item: DesktopTodoItem) => void;
+  assigneeIndex?: AssigneeSurfaceIndex | null;
 }) {
   const visual = statusVisuals[status] ?? statusVisuals.ready;
   const StatusIcon = visual.icon;
@@ -99,7 +105,12 @@ export function TodoGroupCard({
           {items.length}
         </Badge>
       </div>
-      {items.slice(0, 6).map((item) => (
+      {items.slice(0, 6).map((item) => {
+        const chip =
+          assigneeIndex != null
+            ? lookupBlockAssigneeChip(assigneeIndex, item.canvasId ?? "default", item.ref)
+            : null;
+        return (
         <button
           className="group flex flex-col gap-2 rounded-md border border-border/80 bg-surface-base px-3 py-2.5 text-left text-xs shadow-xs transition-colors hover:bg-surface-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           key={`${item.canvasId ?? "default"}:${item.ref}`}
@@ -108,8 +119,11 @@ export function TodoGroupCard({
         >
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
-              <div className="truncate text-sm font-medium group-hover:text-foreground">
-                {item.title}
+              <div className="flex min-w-0 items-center gap-1.5">
+                <div className="truncate text-sm font-medium group-hover:text-foreground">
+                  {item.title}
+                </div>
+                {chip ? <CompactAssigneeChipView chip={chip} label={labels.assignee} /> : null}
               </div>
               <div className="mt-0.5 font-mono text-[11px] text-muted-foreground">
                 {item.taskId} / {item.blockId}
@@ -160,7 +174,8 @@ export function TodoGroupCard({
             ) : null}
           </div>
         </button>
-      ))}
+        );
+      })}
       {items.length > 6 ? (
         <div className="pl-2 text-xs text-muted-foreground">+{items.length - 6}</div>
       ) : null}

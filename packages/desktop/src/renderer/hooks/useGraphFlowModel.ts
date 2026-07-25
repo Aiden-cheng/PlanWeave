@@ -11,7 +11,12 @@ import type {
   DesktopReviewAttemptSummary,
   RunnerTransport
 } from "@planweave-ai/runtime";
-import { graphEdges, graphNodes, type GraphSharedResourceUiState } from "../graph/flowModel";
+import {
+  graphEdges,
+  graphNodes,
+  type GraphAssigneeUiState,
+  type GraphSharedResourceUiState
+} from "../graph/flowModel";
 import { taskNodeLabels } from "../graph/taskNodeLabels";
 import type { createTranslator } from "../i18n";
 import type { AppFlowNode, TaskNodeData } from "../types";
@@ -25,6 +30,7 @@ type GraphFlowSource = {
   selectedBlock: DesktopBlockDetail | null;
   t: ReturnType<typeof createTranslator>;
   resourceUi?: GraphSharedResourceUiState;
+  assigneeUi?: GraphAssigneeUiState | null;
 };
 
 type GraphFlowDrafts = {
@@ -96,7 +102,8 @@ export function useGraphFlowModel({
     layout,
     selectedBlock,
     t,
-    resourceUi
+    resourceUi,
+    assigneeUi
   } = source;
   const { promptDrafts, saveStates, titleDrafts } = drafts;
   const activeResource = resourceUi?.activeResource ?? null;
@@ -177,12 +184,14 @@ export function useGraphFlowModel({
         saveSelectedBlockExecutor,
         saveSelectedBlockPrompt,
         handleOpenRunRecord,
-        resolvedResourceUi
+        resolvedResourceUi,
+        assigneeUi ?? null
       )
     );
     setEdges(graphEdges(graph, { activeResource }));
   }, [
     activeResource,
+    assigneeUi,
     transitionEpochByResource,
     onResourceHover,
     onResourcePin,

@@ -36,6 +36,7 @@ export function taskNodeLabels(t: ReturnType<typeof createTranslator>): TaskNode
     deleteBlockConfirm: t("deleteBlockConfirm"),
     sharedResource: t("sharedResourceHint"),
     sharedResourceActive: t("sharedResourceActive"),
-    moreResources: (count: number) => t("moreResources").replace("{count}", String(count))
+    moreResources: (count: number) => t("moreResources").replace("{count}", String(count)),
+    assignee: t("assignee")
   };
 }

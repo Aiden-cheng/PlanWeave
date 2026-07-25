@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { collaborationBridge } from "../bridge";
-import {
-  CollaborationReadModelController,
-  type CollaborationReadBridgePort
-} from "../collaboration/CollaborationReadModelController";
+import { toCollaborationReadBridge } from "../collaboration/collaborationReadBridge";
+import { acquireCollaborationReadModelController } from "../collaboration/collaborationReadModelHub";
 import {
   buildCollaborationProjectViewModel,
   type CollaborationProjectViewModel,
   type LocalRuntimeWorkItemFacts
 } from "../collaboration/collaborationViewModels";
+import type {
+  CollaborationReadBridgePort,
+  CollaborationReadModelController
+} from "../collaboration/CollaborationReadModelController";
 import type { CollaborationReadModelSnapshot } from "../../shared/collaborationReadModels.js";
+import type { PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
 
 export type UseCollaborationReadModelsArgs = {
   profileId: string | null;
@@ -17,8 +20,11 @@ export type UseCollaborationReadModelsArgs = {
   canvasId?: string | null;
   /** Optional local Runtime facts merged only in view-model functions. */
   localWorkItems?: readonly LocalRuntimeWorkItemFacts[];
-  /** Injected bridge for tests; defaults to window.planweaveCollaboration. */
-  api?: CollaborationReadBridgePort | null;
+  /**
+   * Injected read port or full collaboration API.
+   * Defaults to the shared renderer collaboration bridge.
+   */
+  api?: CollaborationReadBridgePort | PlanWeaveCollaborationApi | null;
 };
 
 export type UseCollaborationReadModelsResult = {
@@ -27,36 +33,52 @@ export type UseCollaborationReadModelsResult = {
   controller: CollaborationReadModelController | null;
 };
 
+function isFullCollaborationApi(
+  api: CollaborationReadBridgePort | PlanWeaveCollaborationApi
+): api is PlanWeaveCollaborationApi {
+  return "upsertCollaborationProfile" in api;
+}
+
+function resolveReadPort(
+  api: CollaborationReadBridgePort | PlanWeaveCollaborationApi | null | undefined
+): CollaborationReadBridgePort | null {
+  if (api === undefined) {
+    return toCollaborationReadBridge(collaborationBridge);
+  }
+  if (api === null) return null;
+  if (isFullCollaborationApi(api)) {
+    return toCollaborationReadBridge(api);
+  }
+  return api;
+}
+
 /**
- * Single shared collaboration read-model subscription for the active project.
- * Components must not open additional observer connections.
+ * Shared collaboration read-model subscription for the active project.
+ * Controllers are hub-shared per read port so people, assignee, and surfaces
+ * never open duplicate observers. Components must not open additional observer connections.
  */
 export function useCollaborationReadModels(
   args: UseCollaborationReadModelsArgs
 ): UseCollaborationReadModelsResult {
-  const api =
-    args.api === undefined
-      ? (collaborationBridge as CollaborationReadBridgePort | null)
-      : args.api;
+  const api = resolveReadPort(args.api);
 
   const controllerRef = useRef<CollaborationReadModelController | null>(null);
   const [controllerVersion, setControllerVersion] = useState(0);
 
   useEffect(() => {
     if (!api) {
-      controllerRef.current?.dispose();
       controllerRef.current = null;
       setControllerVersion((value) => value + 1);
       return;
     }
 
-    const controller = new CollaborationReadModelController({ api });
-    controllerRef.current = controller;
+    const acquired = acquireCollaborationReadModelController(api);
+    controllerRef.current = acquired.controller;
     setControllerVersion((value) => value + 1);
 
     return () => {
-      controller.dispose();
-      if (controllerRef.current === controller) {
+      acquired.release();
+      if (controllerRef.current === acquired.controller) {
         controllerRef.current = null;
       }
     };

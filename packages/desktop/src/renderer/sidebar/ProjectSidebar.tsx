@@ -59,6 +59,7 @@ type ProjectSidebarProps = {
   handleTaskPanelSelect: (taskId: string | null) => void;
   loadProject: (project: DesktopProjectSummary, canvasId?: string | null) => Promise<void>;
   notificationItems: NotificationItem[];
+  onMembershipOutcome?: (outcome: { ok: boolean; message: string }) => void;
   onResizeStart?: (event: ReactPointerEvent) => void;
   onToggleSidebar: () => void;
   onTogglePinnedProject: (projectId: string) => void;
@@ -101,6 +102,7 @@ export function ProjectSidebar({
   handleTaskPanelSelect,
   loadProject,
   notificationItems,
+  onMembershipOutcome,
   onResizeStart,
   onToggleSidebar,
   onTogglePinnedProject,
@@ -219,7 +221,7 @@ export function ProjectSidebar({
           <HistoryNavigationButtons t={t} />
         </div>
         <div className="app-no-drag">
-          <PeoplePresenceControl t={t} />
+          <PeoplePresenceControl onMembershipOutcome={onMembershipOutcome} t={t} />
         </div>
       </div>
       <SidebarNav

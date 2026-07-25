@@ -96,6 +96,8 @@
         "peopleViewModels.test.ts",
         "assignmentViewModels.test.ts",
         "assigneePicker.test.tsx",
+        "assigneeSurfaceViewModels.test.ts",
+        "collaborationReadModelHub.test.ts",
         "notificationsAndUpdates.test.tsx",
         "packageFileSyncHook.test.tsx",
         "packagedStartupSmoke.test.ts",

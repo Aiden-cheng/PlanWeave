@@ -45,6 +45,7 @@ import { cn } from "@/lib/utils";
 import { buildExecutorOptionViews, executorOptionName } from "../executors/executorOptionViewModel";
 import type { TaskFlowNode } from "../types";
 import { BlockPreviewButton } from "./BlockPreviewButton";
+import { CompactAssigneeChipView } from "../team/CompactAssigneeChip";
 import { SharedResourceBadges } from "./sharedResourceBadges";
 import { sharedResourceColor } from "./sharedResourceColors";
 import { taskNodeStatusVisual, TaskNodeStatusMarker } from "./taskNodeStatus";
@@ -77,6 +78,8 @@ export function TaskNodeCard({ data, selected }: NodeProps<TaskFlowNode>) {
     resourceHighlighted = false,
     dimmed = false,
     transitionEpochByResource = {},
+    assigneeChip = null,
+    blockAssigneeChips = {},
     onTitleChange,
     onTitleSave,
     onExecutorChange,
@@ -179,7 +182,7 @@ export function TaskNodeCard({ data, selected }: NodeProps<TaskFlowNode>) {
                 status={task.status}
               />
             </CardTitle>
-            <CardDescription className="flex items-center gap-2">
+            <CardDescription className="flex flex-wrap items-center gap-2">
               <Select
                 value={selectedExecutor}
                 onValueChange={(value) => onExecutorChange(task.taskId, value)}
@@ -218,6 +221,9 @@ export function TaskNodeCard({ data, selected }: NodeProps<TaskFlowNode>) {
                   </SelectGroup>
                 </SelectContent>
               </Select>
+              {assigneeChip ? (
+                <CompactAssigneeChipView chip={assigneeChip} label={labels.assignee} size="sm" />
+              ) : null}
             </CardDescription>
             <CardAction>
               {hasException ? (
@@ -286,6 +292,7 @@ export function TaskNodeCard({ data, selected }: NodeProps<TaskFlowNode>) {
               <div className="flex flex-col gap-1">
                 {task.blocks.map((block) => (
                   <BlockPreviewButton
+                    assigneeChip={blockAssigneeChips[block.ref] ?? null}
                     block={block}
                     key={block.ref}
                     labels={labels}

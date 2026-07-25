@@ -24,6 +24,8 @@ export type AssigneePickerProps = {
   onSelect: (target: AssignmentTarget) => Promise<boolean> | boolean;
   onRefresh: () => Promise<void> | void;
   onRetry: () => Promise<boolean> | boolean;
+  /** Notifies when the popover opens/closes so eligible options load on demand. */
+  onOpenChange?: (open: boolean) => void;
   t: ReturnType<typeof createTranslator>;
   className?: string;
 };
@@ -185,6 +187,7 @@ export function AssigneePicker({
   onSelect,
   onRefresh,
   onRetry,
+  onOpenChange,
   t,
   className
 }: AssigneePickerProps) {
@@ -193,6 +196,11 @@ export function AssigneePicker({
   const [activeIndex, setActiveIndex] = useState(0);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const options = viewModel.filteredOptions;
+
+  const setOpenState = (next: boolean) => {
+    setOpen(next);
+    onOpenChange?.(next);
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -221,7 +229,7 @@ export function AssigneePicker({
   const handleSelect = async (target: AssignmentTarget) => {
     const ok = await onSelect(target);
     if (ok) {
-      setOpen(false);
+      setOpenState(false);
       onQueryChange("");
     }
   };
@@ -257,7 +265,7 @@ export function AssigneePicker({
     }
     if (event.key === "Escape") {
       event.preventDefault();
-      setOpen(false);
+      setOpenState(false);
     }
   };
 
@@ -269,7 +277,7 @@ export function AssigneePicker({
       data-work-item={viewModel.workItemKey}
     >
       <div className="text-xs font-medium text-muted-foreground">{t("assignee")}</div>
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover open={open} onOpenChange={setOpenState}>
         <PopoverTrigger asChild>
           <Button
             type="button"

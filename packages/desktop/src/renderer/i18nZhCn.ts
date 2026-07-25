@@ -891,5 +891,14 @@ export const zhCnCatalog = {
   assigneeReasonWorkItemMissing: "工作项在包中不存在。",
   assigneeReasonForbidden: "无权限更改分配。",
   assigneeReasonAuthExpired: "凭证已过期。",
-  assigneeReasonServerError: "加载分配选项时服务器出错。"
+  assigneeReasonServerError: "加载分配选项时服务器出错。",
+
+  // Collaboration assignment surface integration (DX-002#B-003)
+  notifyAssignmentUpdated: "分配已更新",
+  notifyAssignmentFailed: "分配更新失败",
+  notifyAssignmentConfirmed: "分配已确认",
+  notifyAssignmentRejected: "分配被拒绝",
+  notifyMembershipChanged: "成员关系已更新",
+  assigneeUpdateSucceeded: "负责人已更新",
+  assigneeUpdateFailed: "无法更新负责人"
 } satisfies Record<TranslationKey, string>;

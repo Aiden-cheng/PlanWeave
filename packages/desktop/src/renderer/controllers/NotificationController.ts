@@ -5,6 +5,7 @@ import type {
   DesktopPackageFileChangeEvent,
   PendingImportTransaction
 } from "@planweave-ai/runtime";
+import type { CollaborationNotificationDraft } from "../collaboration/assigneeSurfaceViewModels";
 import type { createTranslator } from "../i18n";
 import type { PromptConflictRef } from "../hooks/usePromptDrafts";
 import { useAppNotifications } from "../hooks/useAppNotifications";
@@ -23,6 +24,7 @@ export type NotificationController = WorkspaceTabsNotificationsProps & {
 export function useNotificationController({
   applyLocalPromptConflicts,
   autoRunState,
+  collaborationItems = [],
   fileSyncDiagnostics,
   graph,
   handleRevealPathInFinder,
@@ -43,6 +45,7 @@ export function useNotificationController({
 }: {
   applyLocalPromptConflicts: () => Promise<void>;
   autoRunState: DesktopAutoRunState | null;
+  collaborationItems?: readonly CollaborationNotificationDraft[];
   fileSyncDiagnostics: string[];
   graph: DesktopGraphViewModel | null;
   handleRevealPathInFinder: (path: string | null | undefined) => Promise<void>;
@@ -67,6 +70,7 @@ export function useNotificationController({
 }): NotificationController {
   const { handleMarkNotificationRead, notificationItems } = useAppNotifications({
     autoRunState,
+    collaborationItems,
     fileSyncDiagnostics,
     graph,
     lastFileChange,

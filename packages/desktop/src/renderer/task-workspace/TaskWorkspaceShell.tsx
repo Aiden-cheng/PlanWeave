@@ -3,6 +3,7 @@ import { ArrowLeftIcon } from "lucide-react";
 import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import type { CompactAssigneeChip } from "../collaboration/assigneeSurfaceViewModels";
 import { useElementHeight } from "../hooks/useElementHeight";
 import type { TaskWorkspaceLabels } from "./contracts";
 import { TaskWorkspaceHeader } from "./TaskWorkspaceHeader";
@@ -65,6 +66,8 @@ function AnimatedWorkspacePanel({
 }
 
 export type TaskWorkspaceShellProps = {
+  assigneeChip?: CompactAssigneeChip | null;
+  assigneeLabel?: string;
   composer: ReactNode;
   conversation: ReactNode;
   headerAction: ReactNode;
@@ -116,6 +119,8 @@ export function TaskWorkspaceStateShell({
 }
 
 export function TaskWorkspaceShell({
+  assigneeChip = null,
+  assigneeLabel,
   composer,
   conversation,
   headerAction,
@@ -153,6 +158,8 @@ export function TaskWorkspaceShell({
       data-workspace-status="ready"
     >
       <TaskWorkspaceHeader
+        assigneeChip={assigneeChip}
+        assigneeLabel={assigneeLabel}
         headerAction={headerAction}
         labels={labels}
         layout={layout}

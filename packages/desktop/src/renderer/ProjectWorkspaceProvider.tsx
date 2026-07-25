@@ -61,6 +61,7 @@ import { useGraphFlowModel } from "./hooks/useGraphFlowModel";
 import { useGraphHistoryActions } from "./hooks/useGraphHistoryActions";
 import { useSharedResourceHighlight } from "./hooks/useSharedResourceHighlight";
 import { useLerpedNodeDrag } from "./hooks/useLerpedNodeDrag";
+import { useCollaborationSurface } from "./hooks/useCollaborationSurface";
 import { buildAppSettingsRouteProps } from "./AppSettingsRouteProps";
 import { useAutoRunController, useFileSyncController } from "./controllers/AutoRunController";
 import { useGraphWorkspaceController } from "./controllers/GraphWorkspaceController";
@@ -413,6 +414,10 @@ export function ProjectWorkspaceProvider({
     selectedProject,
     setError
   });
+  const collaborationSurface = useCollaborationSurface({
+    canvasId: selectedCanvasId,
+    t
+  });
   const recordNavigationSourceContextKeys = useMemo(() => {
     const selectedContext = [selectedProject?.rootPath ?? null, selectedCanvasId];
     const runContext = autoRunState
@@ -721,6 +726,16 @@ export function ProjectWorkspaceProvider({
       handleResourceOverflow
     ]
   );
+  const assigneeUi = useMemo(
+    () =>
+      selectedCanvasId
+        ? {
+            canvasId: selectedCanvasId,
+            index: collaborationSurface.assigneeIndex
+          }
+        : null,
+    [collaborationSurface.assigneeIndex, selectedCanvasId]
+  );
 
   useGraphFlowModel({
     blockActions: {
@@ -751,7 +766,8 @@ export function ProjectWorkspaceProvider({
       layout,
       selectedBlock,
       t,
-      resourceUi
+      resourceUi,
+      assigneeUi
     },
     taskActions: {
       handleDeleteBlock,
@@ -814,6 +830,7 @@ export function ProjectWorkspaceProvider({
   const notificationController = useNotificationController({
     applyLocalPromptConflicts,
     autoRunState,
+    collaborationItems: collaborationSurface.collaborationNotificationDrafts,
     fileSyncDiagnostics: fileSyncController.fileSyncDiagnostics,
     graph,
     handleRevealPathInFinder,
@@ -861,6 +878,7 @@ export function ProjectWorkspaceProvider({
   const workspaceShell = useMemo<WorkspaceTabsShellProps>(
     () => ({
       activeView,
+      assigneeIndex: collaborationSurface.assigneeIndex,
       handleOpenProject,
       handleRevealPathInFinder,
       handleRevealTaskCanvas,
@@ -872,10 +890,12 @@ export function ProjectWorkspaceProvider({
       selectedTaskPanelId,
       setActiveView,
       setError,
+      setSuccessMessage,
       t
     }),
     [
       activeView,
+      collaborationSurface.assigneeIndex,
       handleOpenProject,
       handleRevealPathInFinder,
       handleRevealTaskCanvas,
@@ -887,6 +907,7 @@ export function ProjectWorkspaceProvider({
       selectedTaskPanelId,
       setActiveView,
       setError,
+      setSuccessMessage,
       t
     ]
   );
@@ -950,10 +971,11 @@ export function ProjectWorkspaceProvider({
   );
   const planning = useMemo<WorkspaceTabsPlanningProps>(
     () => ({
+      assigneeIndex: collaborationSurface.assigneeIndex,
       statistics,
       todoGroups
     }),
-    [statistics, todoGroups]
+    [collaborationSurface.assigneeIndex, statistics, todoGroups]
   );
 
   const autoRun = useMemo(() => {
@@ -968,10 +990,16 @@ export function ProjectWorkspaceProvider({
     } = fileSyncController;
     return props;
   }, [fileSyncController]);
-  const search = useMemo(() => {
-    const { diagnostics: _searchDiagnostics, ...props } = searchController;
-    return props;
-  }, [searchController]);
+  const search = useMemo(
+    () => {
+      const { diagnostics: _searchDiagnostics, ...props } = searchController;
+      return {
+        ...props,
+        assigneeIndex: collaborationSurface.assigneeIndex
+      };
+    },
+    [collaborationSurface.assigneeIndex, searchController]
+  );
 
   const projectSidebar = useMemo(
     () => ({
@@ -1000,6 +1028,13 @@ export function ProjectWorkspaceProvider({
       handleTaskPanelSelect,
       loadProject: openProjectInSession,
       notificationItems: notificationController.notificationItems,
+      onMembershipOutcome: (outcome: { ok: boolean; message: string }) => {
+        if (outcome.ok) {
+          setSuccessMessage(outcome.message);
+        } else {
+          setError(outcome.message);
+        }
+      },
       onTogglePinnedProject: handleTogglePinnedProject,
       pinnedProjectIds,
       projectRefreshing,
@@ -1046,6 +1081,8 @@ export function ProjectWorkspaceProvider({
       selectedProject,
       selectedTaskPanelId,
       setActiveView,
+      setError,
+      setSuccessMessage,
       t
     ]
   );

@@ -1,4 +1,9 @@
+import { useMemo } from "react";
 import { bridge } from "../bridge";
+import {
+  lookupBlockAssigneeChip,
+  lookupTaskAssigneeChip
+} from "../collaboration/assigneeSurfaceViewModels";
 import { useProjectWorkspace } from "../ProjectWorkspaceProvider";
 import { TaskWorkspaceRepositoryActions } from "../task-workspace/TaskWorkspaceRepositoryActions";
 import { TaskWorkspaceRoute } from "../task-workspace/TaskWorkspaceRoute";
@@ -29,6 +34,14 @@ export function TaskWorkspaceAppRoute() {
   const repositoryRoot =
     shell.selectedProject?.sourceRoot ??
     (shell.selectedProject?.kind === "external" ? shell.selectedProject.rootPath : null);
+  const assigneeChip = useMemo(() => {
+    const index = shell.assigneeIndex;
+    if (!index || !navigation) return null;
+    if (navigation.blockRef) {
+      return lookupBlockAssigneeChip(index, navigation.canvasId, navigation.blockRef);
+    }
+    return lookupTaskAssigneeChip(index, navigation.canvasId, navigation.taskId);
+  }, [navigation, shell.assigneeIndex]);
   return (
     <TaskWorkspaceCancelRunControllerScope
       api={bridge}
@@ -88,6 +101,8 @@ export function TaskWorkspaceAppRoute() {
           : undefined;
         return (
           <TaskWorkspaceRoute
+            assigneeChip={assigneeChip}
+            assigneeLabel={shell.t("assignee")}
             controller={taskWorkspace}
             labels={taskWorkspaceLabels(shell.t)}
             slots={slots}

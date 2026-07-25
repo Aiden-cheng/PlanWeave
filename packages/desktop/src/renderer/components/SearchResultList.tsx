@@ -1,5 +1,11 @@
 import type { DesktopSearchResult } from "@planweave-ai/runtime";
 import { Badge } from "@/components/ui/badge";
+import type { AssigneeSurfaceIndex } from "../collaboration/assigneeSurfaceViewModels";
+import {
+  lookupBlockAssigneeChip,
+  lookupTaskAssigneeChip
+} from "../collaboration/assigneeSurfaceViewModels";
+import { CompactAssigneeChipView } from "../team/CompactAssigneeChip";
 
 export type SearchNavigationTarget =
   | { kind: "task"; ref: string }
@@ -74,7 +80,29 @@ export function searchMatchSourceLabel(
   return exhaustiveKind;
 }
 
+function searchResultAssigneeChip(
+  result: DesktopSearchResult,
+  assigneeIndex: AssigneeSurfaceIndex | null | undefined
+) {
+  if (!assigneeIndex) return null;
+  const canvasId = result.canvasId ?? "default";
+  const targetRef = result.targetRef ?? result.ref;
+  if (result.kind === "task" || (result.kind === "prompt" && !targetRef.includes("#"))) {
+    return lookupTaskAssigneeChip(assigneeIndex, canvasId, targetRef);
+  }
+  if (
+    result.kind === "block" ||
+    result.kind === "prompt" ||
+    targetRef.includes("#")
+  ) {
+    return lookupBlockAssigneeChip(assigneeIndex, canvasId, targetRef);
+  }
+  return null;
+}
+
 export function SearchResultList({
+  assigneeIndex = null,
+  assigneeLabel,
   canvasLabel,
   kindLabels,
   matchSourceLabels,
@@ -84,6 +112,8 @@ export function SearchResultList({
   targetLabel,
   targetMissingLabel
 }: {
+  assigneeIndex?: AssigneeSurfaceIndex | null;
+  assigneeLabel: string;
   canvasLabel: string;
   kindLabels: Record<DesktopSearchResult["kind"], string>;
   matchSourceLabels: Parameters<typeof searchMatchSourceLabel>[1];
@@ -97,6 +127,7 @@ export function SearchResultList({
     <div className="flex flex-col gap-2 pr-2">
       {results.map((result) => {
         const target = searchNavigationTarget(result);
+        const assigneeChip = searchResultAssigneeChip(result, assigneeIndex);
         let excerptOffset = 0;
         const highlightedExcerpt = highlightedSearchExcerpt(result).map((part) => {
           const offset = excerptOffset;
@@ -106,7 +137,12 @@ export function SearchResultList({
         const resultContent = (
           <>
             <div className="flex items-center justify-between gap-2">
-              <span className="truncate text-sm font-medium">{result.title}</span>
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className="truncate text-sm font-medium">{result.title}</span>
+                {assigneeChip ? (
+                  <CompactAssigneeChipView chip={assigneeChip} label={assigneeLabel} />
+                ) : null}
+              </span>
               <Badge variant={target.kind === "none" ? "destructive" : "outline"}>
                 {kindLabels[result.kind]}
               </Badge>

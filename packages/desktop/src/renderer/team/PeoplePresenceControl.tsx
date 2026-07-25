@@ -21,6 +21,8 @@ export type PeoplePresenceControlProps = {
   api?: PlanWeaveCollaborationApi | null;
   /** Optional clipboard writer; defaults to navigator.clipboard. */
   copyText?: (text: string) => Promise<void>;
+  /** Optional shell toast for membership action outcomes. */
+  onMembershipOutcome?: (outcome: { ok: boolean; message: string }) => void;
   className?: string;
 };
 
@@ -34,12 +36,14 @@ async function defaultCopyText(text: string): Promise<void> {
 
 /**
  * Compact active-project people entry for shell/header/sidebar.
+ * Shares the collaboration read-model hub with assignee surfaces.
  * Detailed invitation/device lists load only when the popover is open.
  */
 export function PeoplePresenceControl({
   t,
   api: apiProp,
   copyText = defaultCopyText,
+  onMembershipOutcome,
   className
 }: PeoplePresenceControlProps) {
   const api = apiProp === undefined ? collaborationBridge : apiProp;
@@ -55,52 +59,8 @@ export function PeoplePresenceControl({
   const sessionConnected =
     status?.session.phase === "connected" || status?.session.phase === "ready";
 
-  // Stable port identity — avoid recreating CollaborationReadModelController each render.
-  const readApi = useMemo(
-    () =>
-      api
-        ? {
-            getCollaborationStatus: () => api.getCollaborationStatus(),
-            listCollaborationMembers: (input?: Parameters<
-              PlanWeaveCollaborationApi["listCollaborationMembers"]
-            >[0]) => api.listCollaborationMembers(input),
-            listCollaborationAssignments: (input?: Parameters<
-              PlanWeaveCollaborationApi["listCollaborationAssignments"]
-            >[0]) => api.listCollaborationAssignments(input),
-            listCollaborationEligibleAssignees: (
-              input: Parameters<PlanWeaveCollaborationApi["listCollaborationEligibleAssignees"]>[0]
-            ) => api.listCollaborationEligibleAssignees(input),
-            listCollaborationComments: (
-              input: Parameters<PlanWeaveCollaborationApi["listCollaborationComments"]>[0]
-            ) => api.listCollaborationComments(input),
-            listCollaborationActivity: (input?: Parameters<
-              PlanWeaveCollaborationApi["listCollaborationActivity"]
-            >[0]) => api.listCollaborationActivity(input),
-            updateCollaborationAssignment: (
-              input: Parameters<PlanWeaveCollaborationApi["updateCollaborationAssignment"]>[0]
-            ) => api.updateCollaborationAssignment(input),
-            createCollaborationComment: (
-              input: Parameters<PlanWeaveCollaborationApi["createCollaborationComment"]>[0]
-            ) => api.createCollaborationComment(input),
-            editCollaborationComment: (
-              input: Parameters<PlanWeaveCollaborationApi["editCollaborationComment"]>[0]
-            ) => api.editCollaborationComment(input),
-            tombstoneCollaborationComment: (
-              input: Parameters<PlanWeaveCollaborationApi["tombstoneCollaborationComment"]>[0]
-            ) => api.tombstoneCollaborationComment(input),
-            onCollaborationStatusChanged: (
-              callback: Parameters<PlanWeaveCollaborationApi["onCollaborationStatusChanged"]>[0]
-            ) => api.onCollaborationStatusChanged(callback),
-            onCollaborationObserverSignal: (
-              callback: Parameters<PlanWeaveCollaborationApi["onCollaborationObserverSignal"]>[0]
-            ) => api.onCollaborationObserverSignal(callback)
-          }
-        : null,
-    [api]
-  );
-
   const { snapshot, viewModel, controller } = useCollaborationReadModels({
-    api: readApi,
+    api,
     profileId: sessionConnected ? (activeProfile?.profileId ?? null) : null,
     projectId: sessionConnected ? (activeProfile?.projectId ?? null) : null
   });
@@ -118,6 +78,10 @@ export function PeoplePresenceControl({
     if (controller && activeProfile) {
       await controller.refreshAuthoritative({ reason: "people_member_mutation" });
     }
+  };
+
+  const reportMembership = (ok: boolean, message: string) => {
+    onMembershipOutcome?.({ ok, message });
   };
 
   const triggerLabel =
@@ -183,23 +147,49 @@ export function PeoplePresenceControl({
           onCreateInvitation={panel.createInvitation}
           onCopyInvitationToken={copyText}
           onDismissPendingInvitation={panel.clearPendingInvitation}
-          onRevokeInvitation={panel.revokeInvitation}
+          onRevokeInvitation={async (invitationId) => {
+            const ok = await panel.revokeInvitation(invitationId);
+            reportMembership(
+              ok,
+              ok ? t("notifyMembershipChanged") : panel.actionError ?? t("peopleError")
+            );
+            return ok;
+          }}
           onPromoteMember={async (humanPrincipalId) => {
             const ok = await panel.promoteMember(humanPrincipalId);
             if (ok) await refreshMembers();
+            reportMembership(
+              ok,
+              ok ? t("notifyMembershipChanged") : panel.actionError ?? t("peopleError")
+            );
             return ok;
           }}
           onDemoteMember={async (humanPrincipalId) => {
             const ok = await panel.demoteMember(humanPrincipalId);
             if (ok) await refreshMembers();
+            reportMembership(
+              ok,
+              ok ? t("notifyMembershipChanged") : panel.actionError ?? t("peopleError")
+            );
             return ok;
           }}
           onRemoveMember={async (humanPrincipalId) => {
             const ok = await panel.removeMember(humanPrincipalId);
             if (ok) await refreshMembers();
+            reportMembership(
+              ok,
+              ok ? t("notifyMembershipChanged") : panel.actionError ?? t("peopleError")
+            );
             return ok;
           }}
-          onRevokeDevice={panel.revokeDevice}
+          onRevokeDevice={async (deviceCredentialId) => {
+            const ok = await panel.revokeDevice(deviceCredentialId);
+            reportMembership(
+              ok,
+              ok ? t("notifyMembershipChanged") : panel.actionError ?? t("peopleError")
+            );
+            return ok;
+          }}
           onRefreshDetails={async () => {
             await panel.refreshDetails();
             await refreshMembers();

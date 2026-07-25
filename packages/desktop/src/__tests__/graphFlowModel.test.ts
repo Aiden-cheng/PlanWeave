@@ -178,7 +178,8 @@ const labels: TaskNodeLabels = {
   unavailable: "Unavailable",
   sharedResource: "Shared resource",
   sharedResourceActive: "Active shared resource",
-  moreResources: (count: number) => `+${count}`
+  moreResources: (count: number) => `+${count}`,
+  assignee: "Assignee"
 };
 
 function graphView(

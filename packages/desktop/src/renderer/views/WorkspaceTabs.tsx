@@ -65,6 +65,7 @@ const TaskWorkspaceAppRoute = lazy(() =>
 
 export type WorkspaceTabsShellProps = {
   activeView: AppView;
+  assigneeIndex?: import("../collaboration/assigneeSurfaceViewModels").AssigneeSurfaceIndex | null;
   handleOpenProject: () => Promise<void>;
   handleRevealPathInFinder: (path: string | null | undefined) => Promise<void>;
   handleRevealTaskCanvas: (project: DesktopProjectSummary, canvasId: string) => Promise<void>;
@@ -80,6 +81,7 @@ export type WorkspaceTabsShellProps = {
   selectedTaskPanelId: string | null;
   setActiveView: Dispatch<SetStateAction<AppView>>;
   setError: (message: string | null) => void;
+  setSuccessMessage?: Dispatch<SetStateAction<string | null>>;
   t: ReturnType<typeof createTranslator>;
 };
 
@@ -148,6 +150,7 @@ export type WorkspaceTabsFileSyncProps = {
 };
 
 export type WorkspaceTabsSearchProps = {
+  assigneeIndex?: import("../collaboration/assigneeSurfaceViewModels").AssigneeSurfaceIndex | null;
   handleSearchResultOpen: (result: DesktopSearchResult) => Promise<void>;
   searchCanvasScope: DesktopSearchCanvasScope;
   searchQuery: string;
@@ -186,6 +189,7 @@ export type WorkspaceTabsNotificationsProps = {
 };
 
 export type WorkspaceTabsPlanningProps = {
+  assigneeIndex?: import("../collaboration/assigneeSurfaceViewModels").AssigneeSurfaceIndex | null;
   statistics: DesktopStatistics | null;
   todoGroups: DesktopTodoGroups | null;
 };
@@ -226,6 +230,7 @@ function TodoRoute() {
   const { graphWorkspace, planning, shell } = useProjectWorkspace();
   return (
     <TodoView
+      assigneeIndex={planning.assigneeIndex ?? shell.assigneeIndex ?? null}
       executionPlan={graphWorkspace.executionPlan}
       handleBlockSelect={graphWorkspace.handleOpenBlockInspector}
       t={shell.t}

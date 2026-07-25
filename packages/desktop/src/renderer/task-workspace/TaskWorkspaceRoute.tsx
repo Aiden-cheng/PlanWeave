@@ -111,12 +111,20 @@ function TaskWorkspaceLoadingState({ label }: { label: string }) {
 }
 
 export type TaskWorkspaceRouteProps = {
+  assigneeChip?: import("../collaboration/assigneeSurfaceViewModels").CompactAssigneeChip | null;
+  assigneeLabel?: string;
   controller: TaskWorkspaceController;
   labels: TaskWorkspaceLabels;
   slots?: Partial<TaskWorkspaceSlotRenderers>;
 };
 
-export function TaskWorkspaceRoute({ controller, labels, slots = {} }: TaskWorkspaceRouteProps) {
+export function TaskWorkspaceRoute({
+  assigneeChip = null,
+  assigneeLabel,
+  controller,
+  labels,
+  slots = {}
+}: TaskWorkspaceRouteProps) {
   const sessionKey = controller.navigation
     ? `${controller.navigation.projectRoot}\0${controller.navigation.canvasId}\0${controller.navigation.taskId}`
     : "task-workspace-unavailable";
@@ -289,6 +297,8 @@ export function TaskWorkspaceRoute({ controller, labels, slots = {} }: TaskWorks
 
   return (
     <TaskWorkspaceShell
+      assigneeChip={assigneeChip}
+      assigneeLabel={assigneeLabel}
       composer={composer}
       conversation={conversation}
       headerAction={headerAction}

@@ -5,6 +5,7 @@ import type {
   DesktopPackageFileChangeEvent,
   PendingImportTransaction
 } from "@planweave-ai/runtime";
+import type { CollaborationNotificationDraft } from "../collaboration/assigneeSurfaceViewModels";
 import type { createTranslator } from "../i18n";
 import { buildNotificationItems } from "../notifications";
 import type { DesktopSettingsUpdate, DesktopUiSettings } from "../types";
@@ -12,6 +13,7 @@ import type { PromptConflictRef } from "./usePromptDrafts";
 
 export function useAppNotifications({
   autoRunState,
+  collaborationItems = [],
   fileSyncDiagnostics,
   graph,
   lastFileChange,
@@ -23,6 +25,7 @@ export function useAppNotifications({
   updateSettings
 }: {
   autoRunState: DesktopAutoRunState | null;
+  collaborationItems?: readonly CollaborationNotificationDraft[];
   fileSyncDiagnostics: string[];
   graph: DesktopGraphViewModel | null;
   lastFileChange: DesktopPackageFileChangeEvent | null;
@@ -35,6 +38,7 @@ export function useAppNotifications({
 }) {
   const notificationItems = buildNotificationItems({
     autoRunState,
+    collaborationItems,
     fileSyncDiagnostics,
     graph,
     lastFileChange,

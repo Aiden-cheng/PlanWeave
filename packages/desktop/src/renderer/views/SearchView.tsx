@@ -8,11 +8,13 @@ import { FolderOpenIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import type { AssigneeSurfaceIndex } from "../collaboration/assigneeSurfaceViewModels";
 import { SearchResultList } from "../components/SearchResultList";
 import type { DesktopSearchCanvasScope, DesktopSearchStatus } from "../hooks/useDesktopSearch";
 import type { createTranslator } from "../i18n";
 
 type SearchViewProps = {
+  assigneeIndex?: AssigneeSurfaceIndex | null;
   handleOpenProject: () => Promise<void>;
   handleSearchResultOpen: (result: DesktopSearchResult) => Promise<void>;
   searchCanvasScope: DesktopSearchCanvasScope;
@@ -76,6 +78,7 @@ function searchStatusLabel(
 }
 
 export function SearchView({
+  assigneeIndex = null,
   handleOpenProject,
   handleSearchResultOpen,
   searchCanvasScope,
@@ -211,6 +214,8 @@ export function SearchView({
               </div>
             ) : (
               <SearchResultList
+                assigneeIndex={assigneeIndex}
+                assigneeLabel={t("assignee")}
                 canvasLabel={t("searchResultCanvas")}
                 kindLabels={kindLabels}
                 matchSourceLabels={matchSourceLabels}

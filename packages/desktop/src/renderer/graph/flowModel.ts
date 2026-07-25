@@ -8,6 +8,11 @@ import type {
   DesktopLayout,
   DesktopReviewAttemptSummary
 } from "@planweave-ai/runtime";
+import type { AssigneeSurfaceIndex } from "../collaboration/assigneeSurfaceViewModels";
+import {
+  lookupBlockAssigneeChip,
+  lookupTaskCardAssigneeChip
+} from "../collaboration/assigneeSurfaceViewModels";
 import type { AppFlowNode, TaskFlowNode, TaskNodeData } from "../types";
 import { TaskNodeCard } from "./TaskNodeCard";
 import { TaskDependencyEdge } from "./TaskDependencyEdge";
@@ -28,6 +33,11 @@ export type GraphSharedResourceUiState = {
   onResourceHover: TaskNodeData["onResourceHover"];
   onResourcePin: TaskNodeData["onResourcePin"];
   onResourceOverflow: TaskNodeData["onResourceOverflow"];
+};
+
+export type GraphAssigneeUiState = {
+  canvasId: string;
+  index: AssigneeSurfaceIndex;
 };
 
 export type AppNodeTypes = typeof nodeTypes;
@@ -194,7 +204,8 @@ export function graphNodes(
     onResourceHover: () => undefined,
     onResourcePin: () => undefined,
     onResourceOverflow: () => undefined
-  }
+  },
+  assigneeUi: GraphAssigneeUiState | null = null
 ): AppFlowNode[] {
   const layoutByNode = new Map(layout?.nodes.map((node) => [node.nodeId, node]) ?? []);
   const defaultPositions = defaultTaskNodePositions(graph);
@@ -206,6 +217,8 @@ export function graphNodes(
   const activeResourceNames = new Set(
     resourceGroups.filter((group) => group.activeBlockRefs.length > 0).map((group) => group.name)
   );
+  const canvasId = assigneeUi?.canvasId ?? "default";
+  const assigneeIndex = assigneeUi?.index ?? null;
   const taskNodes: TaskFlowNode[] = graph.tasks.map((task, index) => {
     const saved = layoutByNode.get(task.taskId);
     const defaultPosition = defaultPositions.get(task.taskId) ?? {
@@ -215,6 +228,17 @@ export function graphNodes(
     const sharedResources = task.sharedResources;
     const resourceHighlighted = resourceUi.activeResource != null && activeMembers.has(task.taskId);
     const dimmed = resourceUi.activeResource != null && !activeMembers.has(task.taskId);
+    const blockRefs = task.blocks.map((block) => block.ref);
+    const blockAssigneeChips: TaskNodeData["blockAssigneeChips"] = {};
+    if (assigneeIndex) {
+      for (const block of task.blocks) {
+        blockAssigneeChips[block.ref] = lookupBlockAssigneeChip(
+          assigneeIndex,
+          canvasId,
+          block.ref
+        );
+      }
+    }
     return {
       id: task.taskId,
       type: "task",
@@ -241,6 +265,10 @@ export function graphNodes(
         resourceHighlighted,
         dimmed,
         transitionEpochByResource: resourceUi.transitionEpochByResource,
+        assigneeChip: assigneeIndex
+          ? lookupTaskCardAssigneeChip(assigneeIndex, canvasId, task.taskId, blockRefs)
+          : null,
+        blockAssigneeChips,
         onTitleChange,
         onTitleSave,
         onExecutorChange,
