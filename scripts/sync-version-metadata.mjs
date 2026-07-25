@@ -13,6 +13,7 @@ const packages = {
   desktop: "packages/desktop/package.json",
   mcp: "packages/mcp/package.json",
   "distributed-protocol": "packages/distributed-protocol/package.json",
+  "collaboration-contracts": "packages/collaboration-contracts/package.json",
   "agent-host": "packages/agent-host/package.json",
   server: "packages/server/package.json"
 };
@@ -41,6 +42,7 @@ const versionFlagTargets = {
   "--desktop": ["desktop"],
   "--mcp": ["mcp"],
   "--distributed-protocol": ["distributed-protocol"],
+  "--collaboration-contracts": ["collaboration-contracts"],
   "--agent-host": ["agent-host"],
   "--server": ["server"],
   "--npm": ["runtime", "cli"],
@@ -51,6 +53,7 @@ const versionFlagTargets = {
     "desktop",
     "mcp",
     "distributed-protocol",
+    "collaboration-contracts",
     "agent-host",
     "server"
   ]
@@ -81,6 +84,7 @@ function usage() {
     "  --desktop   packages/desktop/package.json",
     "  --mcp       packages/mcp/package.json",
     "  --distributed-protocol packages/distributed-protocol/package.json",
+    "  --collaboration-contracts packages/collaboration-contracts/package.json",
     "  --agent-host packages/agent-host/package.json",
     "  --server    packages/server/package.json",
     "  --npm       packages/runtime/package.json and packages/cli/package.json",

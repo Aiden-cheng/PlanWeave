@@ -6,7 +6,7 @@
   "type": "module",
   "packageManager": "pnpm@10.32.1",
   "scripts": {
-    "build": "pnpm --filter @planweave-ai/distributed-protocol build && pnpm --filter @planweave-ai/runtime build && pnpm --parallel --filter @planweave-ai/mcp --filter @planweave-ai/server --filter @planweave-ai/agent-host build && pnpm --parallel --filter @planweave-ai/cli --filter @planweave-ai/desktop build:workspace",
+    "build": "pnpm --filter @planweave-ai/distributed-protocol build && pnpm --filter @planweave-ai/collaboration-contracts build && pnpm --filter @planweave-ai/runtime build && pnpm --parallel --filter @planweave-ai/mcp --filter @planweave-ai/server --filter @planweave-ai/agent-host build && pnpm --parallel --filter @planweave-ai/cli --filter @planweave-ai/desktop build:workspace",
     "biome:check": "biome check . --error-on-warnings",
     "biome:format": "biome format --write .",
     "check:dom-boundaries": "node scripts/check-renderer-dom-boundaries.mjs",
@@ -15,7 +15,7 @@
     "check:runtime-browser-boundary": "node scripts/check-runtime-browser-boundary.mjs",
     "check:versions": "node scripts/sync-version-metadata.mjs --check",
     "lint": "pnpm check:versions && pnpm check:dom-boundaries && pnpm check:runtime-browser-boundary && pnpm check:distributed-package-boundaries && pnpm typecheck",
-    "typecheck": "pnpm --filter @planweave-ai/distributed-protocol typecheck && pnpm --filter @planweave-ai/runtime typecheck && pnpm --parallel --filter @planweave-ai/mcp --filter @planweave-ai/server --filter @planweave-ai/agent-host typecheck && pnpm --filter @planweave-ai/cli typecheck && pnpm --filter @planweave-ai/desktop typecheck",
+    "typecheck": "pnpm --filter @planweave-ai/distributed-protocol typecheck && pnpm --filter @planweave-ai/collaboration-contracts typecheck && pnpm --filter @planweave-ai/runtime typecheck && pnpm --parallel --filter @planweave-ai/mcp --filter @planweave-ai/server --filter @planweave-ai/agent-host typecheck && pnpm --filter @planweave-ai/cli typecheck && pnpm --filter @planweave-ai/desktop typecheck",
     "desktop:build": "pnpm --dir packages/desktop build",
     "desktop:dist:all": "pnpm --dir packages/desktop dist:all",
     "desktop:dist:linux": "pnpm --dir packages/desktop dist:linux",

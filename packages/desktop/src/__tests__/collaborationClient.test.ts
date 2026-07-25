@@ -1,0 +1,438 @@
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
+import { afterEach, describe, expect, it } from "vitest";
+import { WebSocketServer, WebSocket } from "ws";
+import {
+  exampleAssignmentProjection,
+  exampleBootstrapResponse,
+  exampleHumanDeviceToken,
+  exampleMemberPage,
+  exampleObserverCatchupRequired,
+  exampleObserverEvent,
+  exampleObserverWelcome,
+  exampleSecretsForRedaction,
+  HUMAN_OBSERVER_PROTOCOL_VERSION
+} from "@planweave-ai/collaboration-contracts";
+import {
+  CollaborationClient,
+  CollaborationClientError,
+  redactCollaborationText
+} from "../main/collaboration/index.js";
+
+type Handler = (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
+
+async function listen(handler: Handler): Promise<{
+  server: Server;
+  origin: string;
+  close: () => Promise<void>;
+}> {
+  const server = createServer((req, res) => {
+    void Promise.resolve(handler(req, res)).catch(() => {
+      res.statusCode = 500;
+      res.end(JSON.stringify({ error: "test_handler_failed" }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  const address = server.address() as AddressInfo;
+  const origin = `http://127.0.0.1:${address.port}/`;
+  return {
+    server,
+    origin,
+    close: () =>
+      new Promise((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      })
+  };
+}
+
+function readBody(req: IncomingMessage): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
+function json(res: ServerResponse, status: number, body: unknown): void {
+  const bytes = Buffer.from(JSON.stringify(body));
+  res.writeHead(status, {
+    "content-type": "application/json; charset=utf-8",
+    "content-length": bytes.byteLength
+  });
+  res.end(bytes);
+}
+
+describe("CollaborationClient", () => {
+  const cleanups: Array<() => Promise<void>> = [];
+  afterEach(async () => {
+    while (cleanups.length > 0) {
+      const close = cleanups.pop();
+      if (close) await close();
+    }
+  });
+
+  function clientFor(
+    origin: string,
+    overrides: {
+      token?: string | undefined;
+      limits?: ConstructorParameters<typeof CollaborationClient>[0]["limits"];
+      WebSocketImpl?: ConstructorParameters<typeof CollaborationClient>[0]["WebSocketImpl"];
+    } = {}
+  ) {
+    return new CollaborationClient({
+      profile: {
+        profileId: "profile-test",
+        displayName: "Test",
+        serverBaseUrl: origin,
+        projectId: "project-demo-001",
+        allowInsecureTransport: true
+      },
+      credential: {
+        getDeviceToken: () => overrides.token
+      },
+      limits: {
+        requestTimeoutMs: 2_000,
+        jsonBodyMaxBytes: 4_096,
+        observerMaxPayloadBytes: 4_096,
+        reconnectInitialDelayMs: 10,
+        reconnectMaxDelayMs: 20,
+        ...overrides.limits
+      },
+      WebSocketImpl: overrides.WebSocketImpl,
+      random: () => 0
+    });
+  }
+
+  it("lists members through application-shaped methods and validates responses", async () => {
+    const fixture = await listen(async (req, res) => {
+      expect(req.headers.authorization).toBe(`Bearer ${exampleHumanDeviceToken}`);
+      expect(req.url).toContain("/human/members");
+      json(res, 200, exampleMemberPage);
+    });
+    cleanups.push(fixture.close);
+    const client = clientFor(fixture.origin, { token: exampleHumanDeviceToken });
+    const page = await client.listMembers({ cursor: 0, limit: 50 });
+    expect(page.items[0]?.role).toBe("owner");
+    client.dispose();
+  });
+
+  it("maps auth expiry HTTP responses to typed boundary errors", async () => {
+    const fixture = await listen((_req, res) => {
+      json(res, 401, { error: "human_auth_unauthenticated" });
+    });
+    cleanups.push(fixture.close);
+    const client = clientFor(fixture.origin, { token: exampleHumanDeviceToken });
+    await expect(client.listMembers()).rejects.toMatchObject({
+      name: "CollaborationClientError",
+      kind: "auth",
+      code: "human_auth_unauthenticated",
+      httpStatus: 401
+    });
+    client.dispose();
+  });
+
+  it("rejects malformed JSON responses", async () => {
+    const fixture = await listen((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end("{not-json");
+    });
+    cleanups.push(fixture.close);
+    const client = clientFor(fixture.origin, { token: exampleHumanDeviceToken });
+    await expect(client.listMembers()).rejects.toMatchObject({
+      kind: "protocol",
+      code: "collaboration_malformed_json"
+    });
+    client.dispose();
+  });
+
+  it("rejects oversized responses", async () => {
+    const fixture = await listen((_req, res) => {
+      const payload = JSON.stringify({ items: [], nextCursor: null, pad: "x".repeat(8_000) });
+      res.writeHead(200, {
+        "content-type": "application/json",
+        "content-length": Buffer.byteLength(payload)
+      });
+      res.end(payload);
+    });
+    cleanups.push(fixture.close);
+    const client = clientFor(fixture.origin, {
+      token: exampleHumanDeviceToken,
+      limits: { jsonBodyMaxBytes: 1_024 }
+    });
+    await expect(client.listMembers()).rejects.toMatchObject({
+      kind: "payload_too_large",
+      code: "collaboration_response_too_large"
+    });
+    client.dispose();
+  });
+
+  it("rejects schema-invalid assignment projections", async () => {
+    const fixture = await listen((_req, res) => {
+      json(res, 200, { ...exampleAssignmentProjection, revision: -1 });
+    });
+    cleanups.push(fixture.close);
+    const client = clientFor(fixture.origin, { token: exampleHumanDeviceToken });
+    await expect(
+      client.getAssignment({ kind: "task", canvasId: "canvas-1", taskId: "task-1" })
+    ).rejects.toMatchObject({
+      kind: "protocol",
+      code: "collaboration_response_invalid"
+    });
+    client.dispose();
+  });
+
+  it("maps conflict and rate-limit errors", async () => {
+    let n = 0;
+    const fixture = await listen((_req, res) => {
+      n += 1;
+      if (n === 1) json(res, 409, { error: "work_revision_conflict" });
+      else json(res, 429, { error: "human_rate_limited" });
+    });
+    cleanups.push(fixture.close);
+    const client = clientFor(fixture.origin, { token: exampleHumanDeviceToken });
+    await expect(
+      client.updateAssignment({
+        workItem: { kind: "task", canvasId: "canvas-1", taskId: "task-1" },
+        target: { kind: "unassigned" },
+        expectedRevision: 1
+      })
+    ).rejects.toMatchObject({ kind: "conflict", code: "work_revision_conflict" });
+    await expect(client.listMembers()).rejects.toMatchObject({
+      kind: "rate_limited",
+      retryable: true
+    });
+    client.dispose();
+  });
+
+  it("aborts in-flight requests on dispose", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fixture = await listen(async (_req, res) => {
+      await gate;
+      json(res, 200, exampleMemberPage);
+    });
+    cleanups.push(fixture.close);
+    const client = clientFor(fixture.origin, { token: exampleHumanDeviceToken });
+    const pending = client.listMembers();
+    client.dispose();
+    await expect(pending).rejects.toBeInstanceOf(CollaborationClientError);
+    release();
+  });
+
+  it("bootstraps without Authorization and redacts secrets in logs", async () => {
+    const fixture = await listen(async (req, res) => {
+      expect(req.headers.authorization).toBeUndefined();
+      const body = JSON.parse((await readBody(req)).toString("utf8"));
+      expect(body.displayName).toBe("Owner");
+      json(res, 201, exampleBootstrapResponse);
+    });
+    cleanups.push(fixture.close);
+    const client = clientFor(fixture.origin, { token: undefined });
+    const result = await client.bootstrapOwner({ displayName: "Owner" });
+    expect(result.deviceToken).toBe(exampleHumanDeviceToken);
+    expect(redactCollaborationText(exampleSecretsForRedaction.authorizationHeader)).toBe(
+      "Bearer [REDACTED]"
+    );
+    expect(redactCollaborationText(JSON.stringify(result))).not.toContain(exampleHumanDeviceToken);
+    client.dispose();
+  });
+
+  it("subscribes to human observer, advances cursor, and handles catch-up", async () => {
+    const http = await listen((_req, res) => {
+      res.statusCode = 404;
+      res.end();
+    });
+    cleanups.push(http.close);
+
+    const wss = new WebSocketServer({ noServer: true });
+    cleanups.push(
+      () =>
+        new Promise((resolve, reject) => {
+          wss.close((error) => (error ? reject(error) : resolve()));
+        })
+    );
+
+    http.server.on("upgrade", (request, socket, head) => {
+      if (!request.url?.includes("/human/observe")) {
+        socket.destroy();
+        return;
+      }
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        ws.on("message", (raw) => {
+          const message = JSON.parse(String(raw));
+          expect(message.type).toBe("human.observer.hello");
+          expect(message.lastCursor).toBe(0);
+          ws.send(JSON.stringify(exampleObserverWelcome));
+          ws.send(JSON.stringify(exampleObserverEvent));
+          ws.send(JSON.stringify(exampleObserverCatchupRequired));
+        });
+      });
+    });
+
+    const events: string[] = [];
+    const statuses: string[] = [];
+    const client = clientFor(http.origin, {
+      token: exampleHumanDeviceToken,
+      WebSocketImpl: WebSocket as unknown as ConstructorParameters<
+        typeof CollaborationClient
+      >[0]["WebSocketImpl"]
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("observer timeout")), 3_000);
+      client.startObserver({
+        onEvent: (event) => {
+          events.push(event.kind);
+        },
+        onCatchupRequired: (message) => {
+          events.push(message.reason);
+          expect(client.lastObserverCursor()).toBe(100);
+          clearTimeout(timer);
+          resolve();
+        },
+        onStatus: (status) => {
+          statuses.push(status.state);
+        }
+      });
+    });
+
+    expect(events).toEqual(["assignment", "retention_gap"]);
+    expect(statuses).toContain("connected");
+    expect(statuses).toContain("catching_up");
+    client.dispose();
+  });
+
+  it("reconnects observer after socket close and preserves cursor", async () => {
+    const http = await listen((_req, res) => {
+      res.statusCode = 404;
+      res.end();
+    });
+    cleanups.push(http.close);
+    const wss = new WebSocketServer({ noServer: true });
+    cleanups.push(
+      () =>
+        new Promise((resolve, reject) => {
+          wss.close((error) => (error ? reject(error) : resolve()));
+        })
+    );
+
+    let connections = 0;
+    http.server.on("upgrade", (request, socket, head) => {
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        connections += 1;
+        if (connections === 1) {
+          ws.send(
+            JSON.stringify({
+              type: "human.observer.welcome",
+              protocolVersion: HUMAN_OBSERVER_PROTOCOL_VERSION,
+              projectId: "project-demo-001",
+              serverTime: "2030-01-01T00:00:00.000Z",
+              cursor: 5
+            })
+          );
+          setTimeout(() => ws.close(4002, "forced"), 20);
+        } else {
+          ws.on("message", (raw) => {
+            const hello = JSON.parse(String(raw));
+            expect(hello.lastCursor).toBe(5);
+            ws.send(
+              JSON.stringify({
+                type: "human.observer.welcome",
+                protocolVersion: HUMAN_OBSERVER_PROTOCOL_VERSION,
+                projectId: "project-demo-001",
+                serverTime: "2030-01-01T00:00:01.000Z",
+                cursor: 5
+              })
+            );
+          });
+        }
+      });
+    });
+
+    const client = clientFor(http.origin, {
+      token: exampleHumanDeviceToken,
+      WebSocketImpl: WebSocket as unknown as ConstructorParameters<
+        typeof CollaborationClient
+      >[0]["WebSocketImpl"]
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("reconnect timeout")), 3_000);
+      let sawReconnect = false;
+      client.startObserver({
+        onStatus: (status) => {
+          if (status.state === "reconnecting") sawReconnect = true;
+          if (status.state === "connected" && sawReconnect && connections >= 2) {
+            clearTimeout(timer);
+            resolve();
+          }
+        }
+      });
+    });
+
+    expect(client.lastObserverCursor()).toBe(5);
+    client.dispose();
+  });
+
+  it("handles observer auth expiry without reconnect loop", async () => {
+    const http = await listen((_req, res) => {
+      res.statusCode = 404;
+      res.end();
+    });
+    cleanups.push(http.close);
+    const wss = new WebSocketServer({ noServer: true });
+    cleanups.push(
+      () =>
+        new Promise((resolve, reject) => {
+          wss.close((error) => (error ? reject(error) : resolve()));
+        })
+    );
+    http.server.on("upgrade", (request, socket, head) => {
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        ws.send(
+          JSON.stringify({
+            type: "human.observer.auth_expired",
+            protocolVersion: HUMAN_OBSERVER_PROTOCOL_VERSION,
+            code: "human_device_revoked"
+          })
+        );
+      });
+    });
+
+    const client = clientFor(http.origin, {
+      token: exampleHumanDeviceToken,
+      WebSocketImpl: WebSocket as unknown as ConstructorParameters<
+        typeof CollaborationClient
+      >[0]["WebSocketImpl"]
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("auth expiry timeout")), 2_000);
+      client.startObserver({
+        onAuthExpired: (message) => {
+          expect(message.code).toBe("human_device_revoked");
+        },
+        onStatus: (status) => {
+          if (status.state === "auth_expired") {
+            clearTimeout(timer);
+            resolve();
+          }
+        }
+      });
+    });
+
+    await new Promise((r) => setTimeout(r, 40));
+    expect(client.observerState().state).toBe("auth_expired");
+    client.dispose();
+  });
+
+  it("does not expose raw request(path) or socket accessors", () => {
+    const client = clientFor("http://127.0.0.1:9/", { token: exampleHumanDeviceToken });
+    expect("request" in client).toBe(false);
+    expect("socket" in client).toBe(false);
+    client.dispose();
+  });
+});

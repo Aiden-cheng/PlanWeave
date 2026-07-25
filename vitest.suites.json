@@ -60,6 +60,7 @@
         "canvasDiagnosticSeverity.test.tsx",
         "canvasMapViewLayout.test.tsx",
         "canvasMapVisuals.test.ts",
+        "collaborationClient.test.ts",
         "desktopBridgeContract.test.ts",
         "desktopDiagnostics.test.ts",
         "desktopDiagnosticsPopover.test.tsx",
@@ -447,6 +448,15 @@
       "performance": []
     },
     {
+      "root": "packages/collaboration-contracts/src/__tests__",
+      "unit": [
+        "contracts.test.ts"
+      ],
+      "integration": [],
+      "platform": [],
+      "performance": []
+    },
+    {
       "root": "packages/agent-host/src/__tests__",
       "unit": [
         "agentHostCli.test.ts",
@@ -471,6 +481,7 @@
       "root": "packages/server/src/__tests__",
       "unit": [
         "artifactMediaType.test.ts",
+        "collaborationContractsAlignment.test.ts",
         "commentActivityPolicy.test.ts",
         "commentActivityProjection.test.ts",
         "commentActivitySchemas.test.ts",
