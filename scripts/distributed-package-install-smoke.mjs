@@ -200,6 +200,12 @@ function inspectTarball(tarballPath, meta) {
   if (packageJson.engines?.node !== ">=22.5") {
     throw new Error(`tarball_engines_unexpected:${packageJson.engines?.node}`);
   }
+  if (packageJson.license !== "MIT") {
+    throw new Error(`tarball_license_unexpected:${packageJson.license}`);
+  }
+  if (!listing.includes("package/LICENSE")) {
+    throw new Error(`tarball_missing_license:${meta.name}`);
+  }
   for (const relativePath of meta.requiredPaths) {
     if (!listing.includes(`package/${relativePath}`)) {
       throw new Error(`tarball_missing_path:${meta.name}:${relativePath}`);
@@ -222,6 +228,7 @@ function inspectTarball(tarballPath, meta) {
     engines: packageJson.engines,
     bin: packageJson.bin ?? null,
     license: packageJson.license ?? null,
+    licenseFile: true,
     dependencyNames: Object.keys(packageJson.dependencies ?? {}).sort(),
     pathsPresent: meta.requiredPaths
   };

@@ -10,7 +10,8 @@
     "planweave-server": "./dist/bin.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
   "exports": {
     ".": {
@@ -18,12 +19,28 @@
       "import": "./dist/index.js"
     }
   },
+  "homepage": "https://github.com/GaosCode/PlanWeave#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GaosCode/PlanWeave.git",
+    "directory": "packages/server"
+  },
+  "bugs": {
+    "url": "https://github.com/GaosCode/PlanWeave/issues"
+  },
+  "keywords": [
+    "planweave",
+    "server",
+    "coordinator",
+    "distributed"
+  ],
   "engines": {
     "node": ">=22.5"
   },
   "publishConfig": {
     "access": "public"
   },
+  "sideEffects": false,
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -31,11 +48,11 @@
     "test": "cd ../.. && vitest run packages/server/src"
   },
   "dependencies": {
+    "@planweave-ai/collaboration-contracts": "workspace:*",
     "@planweave-ai/distributed-protocol": "workspace:*",
     "@planweave-ai/runtime": "workspace:*",
     "ws": "^8.21.0",
-    "zod": "^4.1.12",
-    "@planweave-ai/collaboration-contracts": "workspace:*"
+    "zod": "^4.1.12"
   },
   "devDependencies": {
     "@types/ws": "^8.5.14"

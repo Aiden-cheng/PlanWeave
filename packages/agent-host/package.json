@@ -10,7 +10,8 @@
     "planweave-agent-host": "./dist/bin.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
   "exports": {
     ".": {

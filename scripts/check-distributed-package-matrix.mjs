@@ -7,12 +7,14 @@ const repoRoot = resolve(fileURLToPath(import.meta.url), "..", "..");
 const rootPackage = JSON.parse(await readFile(resolve(repoRoot, "package.json"), "utf8"));
 const packages = [
   "@planweave-ai/distributed-protocol",
+  "@planweave-ai/collaboration-contracts",
   "@planweave-ai/runtime",
   "@planweave-ai/server",
   "@planweave-ai/agent-host"
 ];
 const packageDirectories = new Map([
   ["@planweave-ai/distributed-protocol", "packages/distributed-protocol"],
+  ["@planweave-ai/collaboration-contracts", "packages/collaboration-contracts"],
   ["@planweave-ai/runtime", "packages/runtime"],
   ["@planweave-ai/server", "packages/server"],
   ["@planweave-ai/agent-host", "packages/agent-host"]
@@ -29,12 +31,16 @@ function assertRootOrder(scriptName) {
     if (position.index < 0) throw new Error(`root_${scriptName}_omits:${position.packageName}`);
   }
   const protocol = positions[0].index;
-  const runtime = positions[1].index;
-  const server = positions[2].index;
+  const contracts = positions[1].index;
+  const runtime = positions[2].index;
+  const server = positions[3].index;
+  const host = positions[4].index;
   if (
+    protocol >= contracts ||
     protocol >= runtime ||
     protocol >= server ||
-    protocol >= positions[3].index ||
+    protocol >= host ||
+    contracts >= server ||
     runtime >= server
   ) {
     throw new Error(`root_${scriptName}_dependency_order_invalid`);

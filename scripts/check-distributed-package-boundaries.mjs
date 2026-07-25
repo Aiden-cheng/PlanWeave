@@ -8,10 +8,11 @@ const sourceRoots = {
   runtime: resolve(repoRoot, "packages", "runtime", "src"),
   server: resolve(repoRoot, "packages", "server", "src"),
   agentHost: resolve(repoRoot, "packages", "agent-host", "src"),
-  protocol: resolve(repoRoot, "packages", "distributed-protocol", "src")
+  protocol: resolve(repoRoot, "packages", "distributed-protocol", "src"),
+  collaborationContracts: resolve(repoRoot, "packages", "collaboration-contracts", "src")
 };
 const sourceExtensions = new Set([".ts", ".tsx", ".mts", ".cts"]);
-const protocolNodeIoModules = new Set([
+const schemaOnlyNodeIoModules = new Set([
   "child_process",
   "cluster",
   "dgram",
@@ -27,6 +28,19 @@ const protocolNodeIoModules = new Set([
   "tls",
   "worker_threads"
 ]);
+const schemaOnlyForbiddenPackages = [
+  "@planweave-ai/runtime",
+  "@planweave-ai/server",
+  "@planweave-ai/agent-host",
+  "@planweave-ai/cli",
+  "@planweave-ai/mcp",
+  "@planweave-ai/desktop",
+  "electron",
+  "ws",
+  "isomorphic-ws",
+  "better-sqlite3",
+  "sqlite3"
+];
 
 function displayPath(path) {
   return relative(repoRoot, path).split(sep).join("/") || path;
@@ -135,17 +149,19 @@ async function inspect(rootName, options = {}) {
         } else if (importsSourceRoot(path, imported.specifier, sourceRoots.agentHost)) {
           reason = "Server imports Agent Host implementation by relative path";
         }
-      } else if (rootName === "protocol") {
-        if (protocolNodeIoModules.has(imported.specifier.replace(/^node:/u, ""))) {
-          reason = "Distributed protocol imports Node I/O";
+      } else if (rootName === "protocol" || rootName === "collaborationContracts") {
+        const packageLabel =
+          rootName === "protocol" ? "Distributed protocol" : "Collaboration contracts";
+        if (schemaOnlyNodeIoModules.has(imported.specifier.replace(/^node:/u, ""))) {
+          reason = `${packageLabel} imports Node I/O`;
         } else if (
-          ["@planweave-ai/runtime", "@planweave-ai/server", "@planweave-ai/agent-host"].some(
-            (packageName) => isPackageImport(imported.specifier, packageName)
+          schemaOnlyForbiddenPackages.some((packageName) =>
+            isPackageImport(imported.specifier, packageName)
           )
         ) {
-          reason = "Distributed protocol imports an application package";
+          reason = `${packageLabel} imports an application or transport package`;
         } else if (escapesSourceRoot(path, imported.specifier, root)) {
-          reason = "Distributed protocol relative import escapes its package source root";
+          reason = `${packageLabel} relative import escapes its package source root`;
         }
       }
       if (reason) violations.push({ path, ...imported, reason });
@@ -158,7 +174,8 @@ const results = await Promise.all([
   inspect("runtime"),
   inspect("server"),
   inspect("agentHost"),
-  inspect("protocol", { productionOnly: true })
+  inspect("protocol", { productionOnly: true }),
+  inspect("collaborationContracts", { productionOnly: true })
 ]);
 const violations = results.flatMap((result) => result.violations);
 

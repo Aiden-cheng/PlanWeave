@@ -1,32 +1,58 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { agentHostProtocolVersion } from "@planweave-ai/distributed-protocol";
+import {
+  PLANWEAVE_COMPATIBILITY_BOUNDS,
+  agentHostProtocolVersion,
+  assertAgentHostProtocolCompatible,
+  assertGracefulPackageDowngrade,
+  assertMatchingPackageMajors
+} from "@planweave-ai/distributed-protocol";
 import { serverPackageVersion } from "../packageInfo.js";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
+const rootLicense = readFileSync(join(repoRoot, "LICENSE"), "utf8");
 
-function readPackageJson(relativePath: string): {
+type PackageJson = {
   name: string;
   version: string;
+  private?: boolean;
   engines?: { node?: string };
   bin?: Record<string, string>;
   files?: string[];
   publishConfig?: { access?: string };
   license?: string;
+  sideEffects?: boolean;
+  homepage?: string;
+  repository?: { type?: string; url?: string; directory?: string };
+  bugs?: { url?: string };
   dependencies?: Record<string, string>;
-} {
-  return JSON.parse(readFileSync(join(repoRoot, relativePath), "utf8")) as {
-    name: string;
-    version: string;
-    engines?: { node?: string };
-    bin?: Record<string, string>;
-    files?: string[];
-    publishConfig?: { access?: string };
-    license?: string;
-    dependencies?: Record<string, string>;
-  };
+  exports?: Record<string, unknown>;
+  scripts?: Record<string, string>;
+};
+
+function readPackageJson(relativePath: string): PackageJson {
+  return JSON.parse(readFileSync(join(repoRoot, relativePath), "utf8")) as PackageJson;
+}
+
+function expectPublishableMetadata(pkg: PackageJson, directory: string): void {
+  expect(pkg.engines?.node).toBe(">=22.5");
+  expect(pkg.license).toBe("MIT");
+  expect(pkg.files).toEqual(["dist", "LICENSE"]);
+  expect(pkg.publishConfig?.access).toBe("public");
+  expect(pkg.private).not.toBe(true);
+  expect(pkg.version).toMatch(/^\d+\.\d+\.\d+/);
+  expect(pkg.homepage).toBe("https://github.com/GaosCode/PlanWeave#readme");
+  expect(pkg.bugs?.url).toBe("https://github.com/GaosCode/PlanWeave/issues");
+  expect(pkg.repository).toEqual({
+    type: "git",
+    url: "git+https://github.com/GaosCode/PlanWeave.git",
+    directory
+  });
+  expect(pkg.sideEffects).toBe(false);
+  expect(existsSync(join(repoRoot, directory, "LICENSE"))).toBe(true);
+  expect(readFileSync(join(repoRoot, directory, "LICENSE"), "utf8")).toBe(rootLicense);
 }
 
 describe("distributed package artifact contracts", () => {
@@ -36,25 +62,75 @@ describe("distributed package artifact contracts", () => {
     const runtime = readPackageJson("packages/runtime/package.json");
     const server = readPackageJson("packages/server/package.json");
     const host = readPackageJson("packages/agent-host/package.json");
+    const cli = readPackageJson("packages/cli/package.json");
+    const mcp = readPackageJson("packages/mcp/package.json");
+    const desktop = readPackageJson("packages/desktop/package.json");
+    const root = readPackageJson("package.json");
 
-    for (const pkg of [protocol, contracts, runtime, server, host]) {
-      expect(pkg.engines?.node).toBe(">=22.5");
-      expect(pkg.license).toBe("MIT");
-      expect(pkg.files).toEqual(["dist"]);
-      expect(pkg.publishConfig?.access).toBe("public");
-      expect(pkg.version).toMatch(/^\d+\.\d+\.\d+/);
-    }
+    expectPublishableMetadata(protocol, "packages/distributed-protocol");
+    expectPublishableMetadata(contracts, "packages/collaboration-contracts");
+    expectPublishableMetadata(runtime, "packages/runtime");
+    expectPublishableMetadata(server, "packages/server");
+    expectPublishableMetadata(host, "packages/agent-host");
+    expectPublishableMetadata(cli, "packages/cli");
+    expectPublishableMetadata(mcp, "packages/mcp");
 
     expect(server.name).toBe("@planweave-ai/server");
     expect(host.name).toBe("@planweave-ai/agent-host");
     expect(server.bin?.["planweave-server"]).toBe("./dist/bin.js");
     expect(host.bin?.["planweave-agent-host"]).toBe("./dist/bin.js");
+    expect(cli.bin?.planweave).toBe("./dist/index.js");
+    expect(mcp.bin?.["planweave-mcp"]).toBe("./dist/index.js");
     expect(server.version).toBe(serverPackageVersion);
     expect(host.version).toBe(serverPackageVersion);
     expect(protocol.version).toBe(serverPackageVersion);
+    expect(contracts.version).toBe(serverPackageVersion);
+    expect(runtime.version).toBe(serverPackageVersion);
+    expect(cli.version).toBe(serverPackageVersion);
+    expect(mcp.version).toBe(serverPackageVersion);
     expect(server.dependencies?.["@planweave-ai/distributed-protocol"]).toBe("workspace:*");
     expect(host.dependencies?.["@planweave-ai/distributed-protocol"]).toBe("workspace:*");
+    expect(runtime.dependencies?.["@planweave-ai/distributed-protocol"]).toBe("workspace:*");
+    expect(contracts.dependencies?.["@planweave-ai/distributed-protocol"]).toBe("workspace:*");
+    expect(server.dependencies?.["@planweave-ai/collaboration-contracts"]).toBe("workspace:*");
     expect(agentHostProtocolVersion).toBe(1);
+
+    // Desktop is Electron-distributed, never an npm library publish target.
+    expect(desktop.private).toBe(true);
+    expect(desktop.publishConfig).toBeUndefined();
+    expect(desktop.version).toMatch(/^\d+\.\d+\.\d+/);
+    expect(desktop.license).toBe("MIT");
+    expect(existsSync(join(repoRoot, "packages/desktop/LICENSE"))).toBe(true);
+    expect(readFileSync(join(repoRoot, "packages/desktop/LICENSE"), "utf8")).toBe(rootLicense);
+
+    // Root remains private monorepo shell.
+    expect(root.private).toBe(true);
+    expect(root.scripts?.["pack:npm"]).toContain("@planweave-ai/distributed-protocol");
+    expect(root.scripts?.["publish:npm"]).toContain("@planweave-ai/distributed-protocol");
+    expect(root.scripts?.["publish:distributed"]).toContain("@planweave-ai/server");
+    expect(root.scripts?.["publish:distributed"]).toContain("@planweave-ai/agent-host");
+  });
+
+  it("keeps schema-only packages free of implementation dependencies", () => {
+    const protocol = readPackageJson("packages/distributed-protocol/package.json");
+    const contracts = readPackageJson("packages/collaboration-contracts/package.json");
+    expect(Object.keys(protocol.dependencies ?? {}).sort()).toEqual(["zod"]);
+    expect(Object.keys(contracts.dependencies ?? {}).sort()).toEqual([
+      "@planweave-ai/distributed-protocol",
+      "zod"
+    ]);
+    for (const name of [
+      "electron",
+      "ws",
+      "better-sqlite3",
+      "sqlite3",
+      "@planweave-ai/runtime",
+      "@planweave-ai/server",
+      "@planweave-ai/agent-host"
+    ]) {
+      expect(protocol.dependencies?.[name]).toBeUndefined();
+      expect(contracts.dependencies?.[name]).toBeUndefined();
+    }
   });
 
   it("keeps Server/Host free of native better-sqlite3 package dependencies", () => {
@@ -65,5 +141,33 @@ describe("distributed package artifact contracts", () => {
       expect(server.dependencies?.[name]).toBeUndefined();
       expect(host.dependencies?.[name]).toBeUndefined();
     }
+  });
+
+  it("exports explicit protocol and package-major rejection helpers", () => {
+    expect(PLANWEAVE_COMPATIBILITY_BOUNDS.agentHostProtocolVersion).toBe(1);
+    expect(assertAgentHostProtocolCompatible(1)).toEqual({ ok: true });
+    expect(assertAgentHostProtocolCompatible(2)).toMatchObject({
+      ok: false,
+      code: "protocol_version_incompatible"
+    });
+    expect(
+      assertMatchingPackageMajors({
+        server: "0.3.0",
+        agentHost: "0.3.1",
+        protocol: "0.3.2"
+      })
+    ).toEqual({ ok: true });
+    expect(
+      assertMatchingPackageMajors({
+        server: "0.3.0",
+        agentHost: "1.0.0"
+      })
+    ).toMatchObject({ ok: false, code: "package_major_mismatch" });
+    expect(
+      assertGracefulPackageDowngrade({ fromVersion: "0.3.2", toVersion: "0.3.0" })
+    ).toEqual({ ok: true });
+    expect(
+      assertGracefulPackageDowngrade({ fromVersion: "1.0.0", toVersion: "0.9.0" })
+    ).toMatchObject({ ok: false, code: "package_downgrade_major_forbidden" });
   });
 });
