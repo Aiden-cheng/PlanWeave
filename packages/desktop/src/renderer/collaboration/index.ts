@@ -36,4 +36,24 @@ export {
   type PeoplePanelMode,
   type PeoplePresenceSummary
 } from "./peopleViewModels.js";
+export {
+  assignmentTargetKey,
+  buildAssigneeCurrentDisplay,
+  buildAssigneePickerViewModel,
+  buildAssigneeSections,
+  canAssignWork,
+  filterAssigneeOptions,
+  filterAssigneeSections,
+  hostSatisfiesCapabilities,
+  mapAvailabilityToIssue,
+  resolveAssigneePickerMode,
+  targetsEqual,
+  type AssigneeCurrentDisplay,
+  type AssigneeOption,
+  type AssigneePickerMode,
+  type AssigneePickerViewModel,
+  type AssigneeSection,
+  type AssigneeSectionId,
+  type AssigneeUnavailableReason
+} from "./assignmentViewModels.js";
 export { collaborationErrorMessage } from "./formatCollaborationError.js";

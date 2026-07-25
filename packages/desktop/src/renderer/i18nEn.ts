@@ -893,7 +893,46 @@ export const enCatalog = {
   peopleInvitationBearerTrustNote:
     "Invitation tokens are bearer secrets: anyone with the token can join as a project member until it expires or is revoked. Device credentials stay in the main process (encrypted when safeStorage is available).",
   peopleSessionOnlyCredentialWarning:
-    "Electron safeStorage is unavailable. Your collaboration device credential is held only for this PlanWeave process and will not persist across restarts."
+    "Electron safeStorage is unavailable. Your collaboration device credential is held only for this PlanWeave process and will not persist across restarts.",
+
+  // Collaboration assignee picker (DX-002#B-002)
+  assignee: "Assignee",
+  assigneeCurrent: "Current",
+  assigneeSearchPlaceholder: "Search people or hosts…",
+  assigneeNoMatches: "No matching assignees.",
+  assigneeSubmitting: "Updating assignee…",
+  assigneeLoading: "Loading assignees…",
+  assigneeConnecting: "Connecting to collaboration…",
+  assigneeDisconnected: "Connect to a collaboration project to assign work.",
+  assigneeOffline: "Collaboration is offline. Showing the last known assignment.",
+  assigneeError: "Could not load or update assignment.",
+  assigneeAuthExpired: "Collaboration credentials expired. Reconnect before changing assignment.",
+  assigneeForbidden: "You do not have permission to change assignment.",
+  assigneeStaleConflict: "Assignment changed elsewhere. Refresh, then retry your change.",
+  assigneeRefresh: "Refresh",
+  assigneeRetry: "Retry",
+  assigneeRevision: "Assignment revision {revision}",
+  assigneeSectionUnassigned: "Unassigned",
+  assigneeSectionPeople: "People",
+  assigneeSectionHosts: "Agent Hosts",
+  assigneeSectionAutomatic: "Automatic",
+  assigneeReasonTaskNoMachine: "Tasks cannot be assigned to Agent Hosts.",
+  assigneeReasonHostMissing: "Host is missing from the project.",
+  assigneeReasonHostRevoked: "Host credential is revoked.",
+  assigneeReasonHostNotAuthorized: "Host is not authorized for this project.",
+  assigneeReasonHostCapability: "Host capabilities do not match this Block.",
+  assigneeReasonHostOffline: "Host is offline.",
+  assigneeReasonHostCapacity: "Host is at capacity.",
+  assigneeReasonHumanInactive: "Member is no longer active on this project.",
+  assigneeReasonRole: "Only project members can change assignment.",
+  assigneeReasonNotConnected: "Not connected to collaboration.",
+  assigneeReasonOffline: "Collaboration is offline.",
+  assigneeReasonSubmitting: "An assignment update is already in progress.",
+  assigneeReasonStale: "Assignment is out of date. Refresh and retry.",
+  assigneeReasonWorkItemMissing: "Work item is missing from the package.",
+  assigneeReasonForbidden: "Permission denied for assignment.",
+  assigneeReasonAuthExpired: "Credentials expired.",
+  assigneeReasonServerError: "Server error while loading assignment options."
 } as const;
 
 export type TranslationKey = keyof typeof enCatalog;

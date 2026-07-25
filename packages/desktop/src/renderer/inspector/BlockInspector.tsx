@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils";
 import { buildExecutorOptionViews, executorOptionName } from "../executors/executorOptionViewModel";
 import { useExecutorPreflight } from "../hooks/useExecutorPreflight";
 import type { createTranslator } from "../i18n";
+import { AssigneeInspectorField } from "../team/AssigneeInspectorField";
 import { statusVariant } from "../viewHelpers";
 import { AutoGrowingTextarea } from "./AutoGrowingTextarea";
 import { BlockConnectionsCard } from "./BlockConnectionsCard";
@@ -324,6 +325,18 @@ export function BlockInspector({
                 </Button>
               </div>
             </div>
+            <AssigneeInspectorField
+              workItem={
+                selectedBlock
+                  ? {
+                      kind: "block",
+                      canvasId: canvasRef?.canvasId ?? "default",
+                      blockRef: selectedBlock.ref
+                    }
+                  : null
+              }
+              t={t}
+            />
             <div className="shrink-0 rounded-lg border bg-card p-3 text-xs">
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">

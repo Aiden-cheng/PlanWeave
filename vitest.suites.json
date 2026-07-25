@@ -94,6 +94,8 @@
         "notificationNavigation.test.ts",
         "peoplePanel.test.tsx",
         "peopleViewModels.test.ts",
+        "assignmentViewModels.test.ts",
+        "assigneePicker.test.tsx",
         "notificationsAndUpdates.test.tsx",
         "packageFileSyncHook.test.tsx",
         "packagedStartupSmoke.test.ts",

@@ -27,6 +27,7 @@ import { cn } from "@/lib/utils";
 import { buildExecutorOptionViews, executorOptionName } from "../executors/executorOptionViewModel";
 import { useExecutorPreflight } from "../hooks/useExecutorPreflight";
 import type { createTranslator } from "../i18n";
+import { AssigneeInspectorField } from "../team/AssigneeInspectorField";
 import { statusVariant } from "../viewHelpers";
 
 type TaskInspectorProps = {
@@ -303,6 +304,18 @@ export function TaskInspector({
                 </Button>
               </div>
             </div>
+            <AssigneeInspectorField
+              workItem={
+                selectedTask
+                  ? {
+                      kind: "task",
+                      canvasId: canvasRef?.canvasId ?? "default",
+                      taskId: selectedTask.taskId
+                    }
+                  : null
+              }
+              t={t}
+            />
             <div className="rounded-lg border bg-card p-3 text-xs">
               <div className="text-sm font-semibold">{t("taskExecutionSummary")}</div>
               <div className="mt-1 text-muted-foreground">{selectedTask.taskId}</div>
