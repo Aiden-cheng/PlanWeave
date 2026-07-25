@@ -52,7 +52,10 @@ describe("DesktopSettingsStore", () => {
       terminalPreferencesFile: join(home, "config", "terminal-preferences.json"),
       mcpTunnelDir: join(home, "desktop", "mcp-tunnel"),
       mcpTunnelConfigFile: join(home, "desktop", "mcp-tunnel", "config.json"),
-      mcpTunnelDownloadsDir: join(home, "desktop", "mcp-tunnel", "downloads")
+      mcpTunnelDownloadsDir: join(home, "desktop", "mcp-tunnel", "downloads"),
+      collaborationDir: join(home, "desktop", "collaboration"),
+      collaborationProfilesFile: join(home, "desktop", "collaboration", "profiles.json"),
+      collaborationCredentialsFile: join(home, "desktop", "collaboration", "credentials.json")
     });
   });
 

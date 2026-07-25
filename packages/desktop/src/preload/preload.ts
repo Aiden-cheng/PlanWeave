@@ -20,6 +20,14 @@ import {
   runnerRecordUnsubscribeChannel,
   runtimeStateChangedChannel
 } from "../shared/ipcChannels.js";
+import type {
+  CollaborationStatus,
+  PlanWeaveCollaborationApi
+} from "../shared/collaboration.js";
+import {
+  collaborationInvokeChannels,
+  collaborationStatusChangedChannel
+} from "../shared/collaboration.js";
 import type { McpTunnelStatus, PlanWeaveMcpTunnelApi } from "../shared/mcpTunnel.js";
 import { mcpTunnelChangedChannel, mcpTunnelInvokeChannels } from "../shared/mcpTunnel.js";
 import {
@@ -181,6 +189,38 @@ const mcpTunnelApi: PlanWeaveMcpTunnelApi = {
 };
 
 contextBridge.exposeInMainWorld("planweaveMcpTunnel", mcpTunnelApi);
+
+const collaborationApi: PlanWeaveCollaborationApi = {
+  getCollaborationStatus: async () =>
+    ipcRenderer.invoke(collaborationInvokeChannels.getCollaborationStatus),
+  upsertCollaborationProfile: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.upsertCollaborationProfile, input),
+  removeCollaborationProfile: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.removeCollaborationProfile, input),
+  setActiveCollaborationProfile: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.setActiveCollaborationProfile, input),
+  clearActiveCollaborationProfile: async () =>
+    ipcRenderer.invoke(collaborationInvokeChannels.clearActiveCollaborationProfile),
+  importDeviceCredential: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.importDeviceCredential, input),
+  clearDeviceCredential: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.clearDeviceCredential, input),
+  bootstrapCollaborationOwner: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.bootstrapCollaborationOwner, input),
+  consumeCollaborationInvitation: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.consumeCollaborationInvitation, input),
+  connectCollaborationSession: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.connectCollaborationSession, input),
+  disconnectCollaborationSession: async () =>
+    ipcRenderer.invoke(collaborationInvokeChannels.disconnectCollaborationSession),
+  onCollaborationStatusChanged: (callback) => {
+    const listener = (_event: IpcRendererEvent, payload: CollaborationStatus) => callback(payload);
+    ipcRenderer.on(collaborationStatusChangedChannel, listener);
+    return () => ipcRenderer.off(collaborationStatusChangedChannel, listener);
+  }
+};
+
+contextBridge.exposeInMainWorld("planweaveCollaboration", collaborationApi);
 
 if (process.env.PLANWEAVE_DESKTOP_SMOKE === "1") {
   contextBridge.exposeInMainWorld("planweaveSmoke", {

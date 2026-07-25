@@ -8,6 +8,10 @@ import {
   packageFileChangedChannel,
   runtimeStateChangedChannel
 } from "../shared/ipcChannels";
+import {
+  collaborationInvokeChannels,
+  collaborationStatusChangedChannel
+} from "../shared/collaboration";
 import { mcpTunnelChangedChannel, mcpTunnelInvokeChannels } from "../shared/mcpTunnel";
 import { windowAppearanceInvokeChannels } from "../shared/windowAppearance";
 
@@ -99,6 +103,52 @@ describe("desktop IPC contract", () => {
     for (const channel of Object.values(mcpTunnelInvokeChannels)) {
       expect(Object.values(desktopBridgeInvokeChannels)).not.toContain(channel);
     }
+  });
+
+  it("keeps collaboration channels outside the runtime bridge registry", () => {
+    expect(collaborationInvokeChannels.getCollaborationStatus).toBe(
+      "planweave-collaboration:getStatus"
+    );
+    expect(collaborationInvokeChannels.upsertCollaborationProfile).toBe(
+      "planweave-collaboration:upsertProfile"
+    );
+    expect(collaborationInvokeChannels.removeCollaborationProfile).toBe(
+      "planweave-collaboration:removeProfile"
+    );
+    expect(collaborationInvokeChannels.setActiveCollaborationProfile).toBe(
+      "planweave-collaboration:setActiveProfile"
+    );
+    expect(collaborationInvokeChannels.clearActiveCollaborationProfile).toBe(
+      "planweave-collaboration:clearActiveProfile"
+    );
+    expect(collaborationInvokeChannels.importDeviceCredential).toBe(
+      "planweave-collaboration:importDeviceCredential"
+    );
+    expect(collaborationInvokeChannels.clearDeviceCredential).toBe(
+      "planweave-collaboration:clearDeviceCredential"
+    );
+    expect(collaborationInvokeChannels.bootstrapCollaborationOwner).toBe(
+      "planweave-collaboration:bootstrapOwner"
+    );
+    expect(collaborationInvokeChannels.consumeCollaborationInvitation).toBe(
+      "planweave-collaboration:consumeInvitation"
+    );
+    expect(collaborationInvokeChannels.connectCollaborationSession).toBe(
+      "planweave-collaboration:connectSession"
+    );
+    expect(collaborationInvokeChannels.disconnectCollaborationSession).toBe(
+      "planweave-collaboration:disconnectSession"
+    );
+    expect(collaborationStatusChangedChannel).toBe("planweave-collaboration:statusChanged");
+    expect(Object.values(desktopBridgeInvokeChannels)).not.toContain(
+      collaborationStatusChangedChannel
+    );
+    for (const channel of Object.values(collaborationInvokeChannels)) {
+      expect(Object.values(desktopBridgeInvokeChannels)).not.toContain(channel);
+    }
+    expect(new Set(Object.values(collaborationInvokeChannels)).size).toBe(
+      Object.values(collaborationInvokeChannels).length
+    );
   });
 
   it("uses the desktop canvas reference channel for canvas-scoped bridge calls", () => {

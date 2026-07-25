@@ -28,6 +28,12 @@ import {
   type DesktopBridgeInvokeMethod
 } from "../shared/ipcChannels";
 import {
+  collaborationInvokeChannels,
+  collaborationStatusChangedChannel,
+  type CollaborationStatus,
+  type PlanWeaveCollaborationApi
+} from "../shared/collaboration";
+import {
   mcpTunnelChangedChannel,
   mcpTunnelInvokeChannels,
   type McpTunnelStatus
@@ -687,7 +693,92 @@ describe("preload bridge invocation", () => {
     expect(electronMock.ipcRenderer.off).toHaveBeenCalledWith(mcpTunnelChangedChannel, listener);
   });
 
+  it("exposes the collaboration API through a separate preload surface", async () => {
+    const status: CollaborationStatus = {
+      profiles: [],
+      activeProfileId: null,
+      credentialStorage: "available",
+      nonPersistenceWarning: null,
+      session: {
+        phase: "idle",
+        activeProfileId: null,
+        detail: null,
+        lastErrorCode: null,
+        lastErrorMessage: null
+      },
+      updatedAt: "2026-07-25T00:00:00.000Z"
+    };
+    electronMock.ipcRenderer.invoke.mockResolvedValue(status);
+
+    await import("../preload/preload");
+    const api = electronMock.exposed.get("planweaveCollaboration") as PlanWeaveCollaborationApi;
+    const callback = vi.fn();
+
+    await api.getCollaborationStatus();
+    await api.upsertCollaborationProfile({
+      profileId: "profile-1",
+      displayName: "Demo",
+      serverBaseUrl: "https://collab.example.com/",
+      projectId: "project-1",
+      allowInsecureTransport: false
+    });
+    await api.removeCollaborationProfile({ profileId: "profile-1" });
+    await api.setActiveCollaborationProfile({ profileId: "profile-1" });
+    await api.clearActiveCollaborationProfile();
+    await api.importDeviceCredential({
+      profileId: "profile-1",
+      deviceToken: `pw_hdev_${"A".repeat(43)}`
+    });
+    await api.clearDeviceCredential({ profileId: "profile-1" });
+    await api.bootstrapCollaborationOwner({
+      profileId: "profile-1",
+      request: { displayName: "Owner" }
+    });
+    await api.consumeCollaborationInvitation({
+      profileId: "profile-1",
+      request: {
+        invitationToken: `pw_inv_${"A".repeat(43)}`,
+        displayName: "Member"
+      }
+    });
+    await api.connectCollaborationSession({ profileId: "profile-1" });
+    await api.disconnectCollaborationSession();
+    const unsubscribe = api.onCollaborationStatusChanged(callback);
+
+    expect(Object.keys(api).sort()).toEqual(
+      [...Object.keys(collaborationInvokeChannels), "onCollaborationStatusChanged"].sort()
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.getCollaborationStatus
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.upsertCollaborationProfile,
+      expect.objectContaining({ profileId: "profile-1" })
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.importDeviceCredential,
+      expect.objectContaining({ profileId: "profile-1" })
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.disconnectCollaborationSession
+    );
+
+    const [channel, listener] = electronMock.ipcRenderer.on.mock.calls[0] as [
+      string,
+      IpcRendererListener
+    ];
+    expect(channel).toBe(collaborationStatusChangedChannel);
+    listener({}, status);
+    expect(callback).toHaveBeenCalledWith(status);
+    unsubscribe();
+    expect(electronMock.ipcRenderer.off).toHaveBeenCalledWith(
+      collaborationStatusChangedChannel,
+      listener
+    );
+  });
+
   it("records smoke reveal requests without invoking the system file manager", async () => {
+
     process.env.PLANWEAVE_DESKTOP_SMOKE = "1";
     electronMock.ipcRenderer.invoke.mockResolvedValue(undefined);
 

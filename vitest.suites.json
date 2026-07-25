@@ -158,6 +158,7 @@
         "developmentToolDetectionCache.test.ts",
         "firstLaunchExample.test.ts",
         "importRecoveryNotifications.test.tsx",
+        "collaborationBridge.test.ts",
         "mcpTunnel.test.ts",
         "packageWatch.test.ts",
         "packageWatchControllerIdentity.test.ts",

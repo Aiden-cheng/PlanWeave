@@ -10,6 +10,10 @@ import {
   registerMcpTunnelHandlers,
   stopMcpTunnelProcesses
 } from "./mcpTunnel/mcpTunnelHandlers.js";
+import {
+  registerCollaborationHandlers,
+  shutdownCollaborationService
+} from "./collaboration/collaborationHandlers.js";
 import { registerDesktopSettingsHandlers } from "./desktopSettingsHandlers.js";
 import { applyPersistedPlanweaveHomeSetting } from "./desktopSettingsStore.js";
 import { initializeFirstLaunchExample } from "./firstLaunchExample.js";
@@ -93,6 +97,7 @@ startSingleInstanceLifecycle({
     registerWindowAppearanceHandlers();
     registerAppUpdateHandlers();
     registerMcpTunnelHandlers();
+    registerCollaborationHandlers();
     registerApplicationMenu({ checkForUpdates: checkForAppUpdate });
 
     app.whenReady().then(() => {
@@ -130,14 +135,15 @@ startSingleInstanceLifecycle({
       }
     });
 
-    let mcpTunnelCleanupComplete = false;
+    let mainCleanupComplete = false;
     app.on("before-quit", (event) => {
-      if (mcpTunnelCleanupComplete) {
+      if (mainCleanupComplete) {
         return;
       }
       event.preventDefault();
       void Promise.allSettled([
         stopMcpTunnelProcesses(),
+        shutdownCollaborationService(),
         shutdownDesktopAutoRuns("PlanWeave Desktop is quitting.")
       ])
         .then((results) => {
@@ -150,7 +156,7 @@ startSingleInstanceLifecycle({
           }
         })
         .finally(() => {
-          mcpTunnelCleanupComplete = true;
+          mainCleanupComplete = true;
           app.quit();
         });
     });

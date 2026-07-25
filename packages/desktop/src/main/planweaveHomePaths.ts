@@ -9,18 +9,25 @@ export type DesktopHomePaths = {
   mcpTunnelDir: string;
   mcpTunnelConfigFile: string;
   mcpTunnelDownloadsDir: string;
+  collaborationDir: string;
+  collaborationProfilesFile: string;
+  collaborationCredentialsFile: string;
 };
 
 export function desktopHomePaths(): DesktopHomePaths {
   const planweaveHome = resolvePlanweaveHome();
   const desktopSettingsHome = join(homedir(), ".planweave");
   const mcpTunnelDir = join(planweaveHome, "desktop", "mcp-tunnel");
+  const collaborationDir = join(planweaveHome, "desktop", "collaboration");
   return {
     planweaveHome,
     desktopSettingsFile: join(desktopSettingsHome, "config", "desktop-settings.json"),
     terminalPreferencesFile: join(planweaveHome, "config", "terminal-preferences.json"),
     mcpTunnelDir,
     mcpTunnelConfigFile: join(mcpTunnelDir, "config.json"),
-    mcpTunnelDownloadsDir: join(mcpTunnelDir, "downloads")
+    mcpTunnelDownloadsDir: join(mcpTunnelDir, "downloads"),
+    collaborationDir,
+    collaborationProfilesFile: join(collaborationDir, "profiles.json"),
+    collaborationCredentialsFile: join(collaborationDir, "credentials.json")
   };
 }
