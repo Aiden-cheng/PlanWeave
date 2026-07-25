@@ -33,6 +33,7 @@ import { buildExecutorOptionViews, executorOptionName } from "../executors/execu
 import { useExecutorPreflight } from "../hooks/useExecutorPreflight";
 import type { createTranslator } from "../i18n";
 import { AssigneeInspectorField } from "../team/AssigneeInspectorField";
+import { RemoteRunPanel } from "../team/RemoteRunPanel";
 import { WorkItemCollaborationPanel } from "../team/WorkItemCollaborationPanel";
 import { statusVariant } from "../viewHelpers";
 import { AutoGrowingTextarea } from "./AutoGrowingTextarea";
@@ -336,6 +337,19 @@ export function BlockInspector({
                     }
                   : null
               }
+              t={t}
+            />
+            <RemoteRunPanel
+              workItem={
+                selectedBlock
+                  ? {
+                      kind: "block",
+                      canvasId: canvasRef?.canvasId ?? "default",
+                      blockRef: selectedBlock.ref
+                    }
+                  : null
+              }
+              runtimeRemoteExecution={selectedBlock.remoteExecution}
               t={t}
             />
             <WorkItemCollaborationPanel

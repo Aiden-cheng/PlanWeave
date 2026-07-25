@@ -12,6 +12,11 @@ import {
   humanObserverCatchupRequiredSchema,
   humanObserverEventSchema,
   humanPageQuerySchema,
+  opaqueIdentifierSchema,
+  remoteEventQuerySchema,
+  remoteExecutionActionWireRequestSchema,
+  remoteInteractionPageQuerySchema,
+  remoteInteractionResponseSchema,
   workItemRefSchema,
   type ActivityListPage,
   type ActivityRecord,
@@ -25,6 +30,14 @@ import {
   type HumanMemberPage,
   type HumanMembershipView,
   type HumanObserverEvent,
+  type RemoteActionView,
+  type RemoteDispatchWireCommand,
+  type RemoteEventReplay,
+  type RemoteExecutionActionWireRequest,
+  type RemoteInteractionPage,
+  type RemoteInteractionResponse,
+  type RemoteInteractionView,
+  type RemoteOperationObservation,
   type WorkItemRef
 } from "@planweave-ai/collaboration-contracts";
 
@@ -176,6 +189,54 @@ export const collaborationCommentTombstoneInputSchema = commentTombstoneWireComm
 export type CollaborationCommentTombstoneInput = z.input<
   typeof collaborationCommentTombstoneInputSchema
 >;
+
+export const collaborationRemoteOperationIdInputSchema = z
+  .object({
+    operationId: opaqueIdentifierSchema
+  })
+  .strict();
+export type CollaborationRemoteOperationIdInput = z.infer<
+  typeof collaborationRemoteOperationIdInputSchema
+>;
+
+export const collaborationRemoteEventQueryInputSchema = remoteEventQuerySchema;
+export type CollaborationRemoteEventQueryInput = z.input<
+  typeof collaborationRemoteEventQueryInputSchema
+>;
+
+export const collaborationRemoteInteractionPageQueryInputSchema = remoteInteractionPageQuerySchema;
+export type CollaborationRemoteInteractionPageQueryInput = z.input<
+  typeof collaborationRemoteInteractionPageQueryInputSchema
+>;
+
+export const collaborationRemoteActionInputSchema = z
+  .object({
+    operationId: opaqueIdentifierSchema,
+    action: remoteExecutionActionWireRequestSchema
+  })
+  .strict();
+export type CollaborationRemoteActionInput = z.infer<typeof collaborationRemoteActionInputSchema>;
+
+export const collaborationRemoteInteractionRespondInputSchema = z
+  .object({
+    operationId: opaqueIdentifierSchema,
+    settlement: remoteInteractionResponseSchema
+  })
+  .strict();
+export type CollaborationRemoteInteractionRespondInput = z.infer<
+  typeof collaborationRemoteInteractionRespondInputSchema
+>;
+
+export type {
+  RemoteActionView,
+  RemoteDispatchWireCommand,
+  RemoteEventReplay,
+  RemoteExecutionActionWireRequest,
+  RemoteInteractionPage,
+  RemoteInteractionResponse,
+  RemoteInteractionView,
+  RemoteOperationObservation
+};
 
 /** Stable identity key for Task/Block work items across server + local runtime. */
 export function workItemKey(workItem: WorkItemRef): string {

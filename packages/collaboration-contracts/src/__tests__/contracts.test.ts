@@ -70,4 +70,51 @@ describe("collaboration-contracts", () => {
     expect(exampleSecretsForRedaction.deviceToken).toContain("pw_hdev_");
     expect(exampleSecretsForRedaction.authorizationHeader).toContain("Bearer ");
   });
+
+  it("validates remote operation observation and action wire shapes", async () => {
+    const {
+      remoteDispatchWireCommandSchema,
+      remoteExecutionActionWireRequestSchema,
+      remoteOperationObservationSchema
+    } = await import("../remoteRun.js");
+    expect(
+      remoteDispatchWireCommandSchema.parse({
+        canvasId: "default",
+        blockRef: "T-1#B-1",
+        idempotencyKey: "idem-1"
+      }).blockRef
+    ).toBe("T-1#B-1");
+    expect(
+      remoteOperationObservationSchema.parse({
+        operationId: "op-1",
+        projectId: "project-1",
+        canvasId: "default",
+        blockRef: "T-1#B-1",
+        state: "running",
+        dispatchId: "dispatch-1",
+        executionAttemptId: "attempt-1",
+        createdAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:00:00.000Z",
+        attempt: {
+          executionAttemptId: "attempt-1",
+          dispatchId: "dispatch-1",
+          status: "running",
+          stateVersion: 0
+        },
+        runtime: { ref: "T-1#B-1", status: "in_progress" }
+      }).state
+    ).toBe("running");
+    expect(
+      remoteExecutionActionWireRequestSchema.parse({
+        kind: "cancel",
+        actionId: "a1",
+        operationId: "op-1",
+        dispatchId: "dispatch-1",
+        executionAttemptId: "attempt-1",
+        expectedAttemptVersion: 0,
+        leaseId: "lease-1",
+        reason: "stop"
+      }).kind
+    ).toBe("cancel");
+  });
 });

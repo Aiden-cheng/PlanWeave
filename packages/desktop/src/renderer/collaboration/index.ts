@@ -105,3 +105,20 @@ export {
   uploadStagedAttachment,
   type StagedAttachment
 } from "./attachmentUpload.js";
+export {
+  adaptRemoteAcpEvents,
+  buildRemoteActionIdentity,
+  isAssignmentEligibleForRemoteDispatch,
+  projectRemoteLifecyclePhase,
+  projectRemoteRunActions,
+  projectRemoteRunIdentity,
+  projectRemoteRunPanelViewModel,
+  REMOTE_RUN_ACTION_STATE_TABLE,
+  type RemoteRunActionAvailability,
+  type RemoteRunActionStateRow,
+  type RemoteRunAuthorizedActionKind,
+  type RemoteRunIdentitySummary,
+  type RemoteRunLifecyclePhase,
+  type RemoteRunPanelViewModel,
+  type RunAuthorityKind
+} from "./remoteRunViewModels.js";

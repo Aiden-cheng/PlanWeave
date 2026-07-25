@@ -191,6 +191,30 @@ export function registerCollaborationHandlers(
     collaborationInvokeChannels.finalizeCollaborationPendingAttachment,
     (_event, input: unknown) => active.finalizePendingAttachment(input)
   );
+  ipcMain.handle(
+    collaborationInvokeChannels.dispatchCollaborationRemoteOperation,
+    (_event, input: unknown) => active.dispatchRemoteOperation(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.observeCollaborationRemoteOperation,
+    (_event, input: unknown) => active.observeRemoteOperation(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.executeCollaborationRemoteOperationAction,
+    (_event, input: unknown) => active.executeRemoteOperationAction(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.replayCollaborationRemoteOperationEvents,
+    (_event, input: unknown) => active.replayRemoteOperationEvents(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.listCollaborationRemoteOperationInteractions,
+    (_event, input: unknown) => active.listRemoteOperationInteractions(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.settleCollaborationRemoteOperationInteraction,
+    (_event, input: unknown) => active.settleRemoteOperationInteraction(input)
+  );
 
   return active;
 }

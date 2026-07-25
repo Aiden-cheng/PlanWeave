@@ -28,7 +28,15 @@ import {
   type HumanMemberPage,
   type HumanMembershipView,
   type HumanPrincipalView,
-  type PendingAttachmentView
+  type PendingAttachmentView,
+  type RemoteActionView,
+  type RemoteDispatchWireCommand,
+  type RemoteEventReplay,
+  type RemoteExecutionActionWireRequest,
+  type RemoteInteractionPage,
+  type RemoteInteractionResponse,
+  type RemoteInteractionView,
+  type RemoteOperationObservation
 } from "@planweave-ai/collaboration-contracts";
 import type {
   CollaborationActivityListQueryInput,
@@ -42,6 +50,9 @@ import type {
   CollaborationInvitationListQueryInput,
   CollaborationObserverSignal,
   CollaborationPageQueryInput,
+  CollaborationRemoteEventQueryInput,
+  CollaborationRemoteInteractionPageQueryInput,
+  CollaborationRemoteOperationIdInput,
   CollaborationWorkItemInput
 } from "./collaborationReadModels.js";
 
@@ -301,7 +312,16 @@ export const collaborationInvokeChannels = {
   tombstoneCollaborationComment: "planweave-collaboration:tombstoneComment",
   createCollaborationPendingAttachment: "planweave-collaboration:createPendingAttachment",
   uploadCollaborationPendingAttachment: "planweave-collaboration:uploadPendingAttachment",
-  finalizeCollaborationPendingAttachment: "planweave-collaboration:finalizePendingAttachment"
+  finalizeCollaborationPendingAttachment: "planweave-collaboration:finalizePendingAttachment",
+  dispatchCollaborationRemoteOperation: "planweave-collaboration:dispatchRemoteOperation",
+  observeCollaborationRemoteOperation: "planweave-collaboration:observeRemoteOperation",
+  executeCollaborationRemoteOperationAction:
+    "planweave-collaboration:executeRemoteOperationAction",
+  replayCollaborationRemoteOperationEvents: "planweave-collaboration:replayRemoteOperationEvents",
+  listCollaborationRemoteOperationInteractions:
+    "planweave-collaboration:listRemoteOperationInteractions",
+  settleCollaborationRemoteOperationInteraction:
+    "planweave-collaboration:settleRemoteOperationInteraction"
 } as const;
 
 export const collaborationStatusChangedChannel = "planweave-collaboration:statusChanged";
@@ -385,6 +405,28 @@ export type PlanWeaveCollaborationApi = {
   finalizeCollaborationPendingAttachment: (
     input: CollaborationFinalizePendingAttachmentInput
   ) => Promise<FinalizePendingAttachmentResponse>;
+  dispatchCollaborationRemoteOperation: (
+    input: RemoteDispatchWireCommand
+  ) => Promise<RemoteOperationObservation>;
+  observeCollaborationRemoteOperation: (
+    input: CollaborationRemoteOperationIdInput
+  ) => Promise<RemoteOperationObservation>;
+  executeCollaborationRemoteOperationAction: (input: {
+    operationId: string;
+    action: RemoteExecutionActionWireRequest;
+  }) => Promise<RemoteActionView>;
+  replayCollaborationRemoteOperationEvents: (input: {
+    operationId: string;
+    query?: CollaborationRemoteEventQueryInput;
+  }) => Promise<RemoteEventReplay>;
+  listCollaborationRemoteOperationInteractions: (input: {
+    operationId: string;
+    query?: CollaborationRemoteInteractionPageQueryInput;
+  }) => Promise<RemoteInteractionPage>;
+  settleCollaborationRemoteOperationInteraction: (input: {
+    operationId: string;
+    settlement: RemoteInteractionResponse;
+  }) => Promise<RemoteInteractionView>;
   onCollaborationStatusChanged: (callback: (status: CollaborationStatus) => void) => () => void;
   onCollaborationObserverSignal: (
     callback: (signal: CollaborationObserverSignal) => void

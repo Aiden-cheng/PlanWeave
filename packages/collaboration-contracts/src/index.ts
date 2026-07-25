@@ -7,4 +7,5 @@ export * from "./attachments.js";
 export * from "./observer.js";
 export * from "./connection.js";
 export * from "./errors.js";
+export * from "./remoteRun.js";
 export * from "./fixtures/collaboration.js";

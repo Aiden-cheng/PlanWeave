@@ -257,6 +257,27 @@ const collaborationApi: PlanWeaveCollaborationApi = {
     ipcRenderer.invoke(collaborationInvokeChannels.uploadCollaborationPendingAttachment, input),
   finalizeCollaborationPendingAttachment: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.finalizeCollaborationPendingAttachment, input),
+  dispatchCollaborationRemoteOperation: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.dispatchCollaborationRemoteOperation, input),
+  observeCollaborationRemoteOperation: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.observeCollaborationRemoteOperation, input),
+  executeCollaborationRemoteOperationAction: async (input) =>
+    ipcRenderer.invoke(
+      collaborationInvokeChannels.executeCollaborationRemoteOperationAction,
+      input
+    ),
+  replayCollaborationRemoteOperationEvents: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.replayCollaborationRemoteOperationEvents, input),
+  listCollaborationRemoteOperationInteractions: async (input) =>
+    ipcRenderer.invoke(
+      collaborationInvokeChannels.listCollaborationRemoteOperationInteractions,
+      input
+    ),
+  settleCollaborationRemoteOperationInteraction: async (input) =>
+    ipcRenderer.invoke(
+      collaborationInvokeChannels.settleCollaborationRemoteOperationInteraction,
+      input
+    ),
   onCollaborationStatusChanged: (callback) => {
     const listener = (_event: IpcRendererEvent, payload: CollaborationStatus) => callback(payload);
     ipcRenderer.on(collaborationStatusChangedChannel, listener);

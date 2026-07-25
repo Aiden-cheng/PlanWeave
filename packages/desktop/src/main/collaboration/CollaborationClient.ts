@@ -34,6 +34,16 @@ import {
   HUMAN_OBSERVER_PROTOCOL_VERSION,
   parseHumanObserverServerMessage,
   pendingAttachmentViewSchema,
+  remoteActionViewSchema,
+  remoteDispatchWireCommandSchema,
+  remoteEventQuerySchema,
+  remoteEventReplaySchema,
+  remoteExecutionActionWireRequestSchema,
+  remoteInteractionPageQuerySchema,
+  remoteInteractionPageSchema,
+  remoteInteractionResponseSchema,
+  remoteInteractionViewSchema,
+  remoteOperationObservationSchema,
   uploadPendingAttachmentResponseSchema,
   type ActivityListPage,
   type ActivityListWireQuery,
@@ -68,6 +78,14 @@ import {
   type HumanObserverServerMessage,
   type HumanPageQuery,
   type PendingAttachmentView,
+  type RemoteActionView,
+  type RemoteDispatchWireCommand,
+  type RemoteEventReplay,
+  type RemoteExecutionActionWireRequest,
+  type RemoteInteractionPage,
+  type RemoteInteractionResponse,
+  type RemoteInteractionView,
+  type RemoteOperationObservation,
   type WorkItemRef
 } from "@planweave-ai/collaboration-contracts";
 import type { z, ZodType } from "zod";
@@ -475,6 +493,97 @@ export class CollaborationClient {
       `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/activity?${params}`,
       activityListPageSchema,
       { signal }
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Remote ACP run observation / control (human remote_run_control)
+  // Distinct from local Runtime Auto Run and Host mailbox.
+  // ---------------------------------------------------------------------------
+
+  async dispatchRemoteOperation(
+    command: RemoteDispatchWireCommand,
+    signal?: AbortSignal
+  ): Promise<RemoteOperationObservation> {
+    const body = remoteDispatchWireCommandSchema.parse(command);
+    return this.json(
+      "POST",
+      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/remote-operations`,
+      remoteOperationObservationSchema,
+      { body, signal }
+    );
+  }
+
+  async observeRemoteOperation(
+    operationId: string,
+    signal?: AbortSignal
+  ): Promise<RemoteOperationObservation> {
+    return this.json(
+      "GET",
+      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/remote-operations/${encodeURIComponent(operationId)}`,
+      remoteOperationObservationSchema,
+      { signal }
+    );
+  }
+
+  async executeRemoteOperationAction(
+    operationId: string,
+    action: RemoteExecutionActionWireRequest,
+    signal?: AbortSignal
+  ): Promise<RemoteActionView> {
+    const body = remoteExecutionActionWireRequestSchema.parse(action);
+    return this.json(
+      "POST",
+      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/remote-operations/${encodeURIComponent(operationId)}/actions`,
+      remoteActionViewSchema,
+      { body, signal }
+    );
+  }
+
+  async replayRemoteOperationEvents(
+    operationId: string,
+    query: z.input<typeof remoteEventQuerySchema> = {},
+    signal?: AbortSignal
+  ): Promise<RemoteEventReplay> {
+    const q = remoteEventQuerySchema.parse(query);
+    const params = new URLSearchParams({ afterCursor: String(q.afterCursor) });
+    return this.json(
+      "GET",
+      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/remote-operations/${encodeURIComponent(operationId)}/events?${params}`,
+      remoteEventReplaySchema,
+      { signal }
+    );
+  }
+
+  async listRemoteOperationInteractions(
+    operationId: string,
+    query: z.input<typeof remoteInteractionPageQuerySchema> = {},
+    signal?: AbortSignal
+  ): Promise<RemoteInteractionPage> {
+    const q = remoteInteractionPageQuerySchema.parse(query);
+    const params = new URLSearchParams({
+      cursor: String(q.cursor),
+      limit: String(q.limit)
+    });
+    return this.json(
+      "GET",
+      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/remote-operations/${encodeURIComponent(operationId)}/interactions?${params}`,
+      remoteInteractionPageSchema,
+      { signal }
+    );
+  }
+
+  async settleRemoteOperationInteraction(
+    operationId: string,
+    settlement: RemoteInteractionResponse,
+    signal?: AbortSignal
+  ): Promise<RemoteInteractionView> {
+    const body = remoteInteractionResponseSchema.parse(settlement);
+    return this.json(
+      "POST",
+      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/remote-operations/${encodeURIComponent(operationId)}/interactions/respond`,
+      remoteInteractionViewSchema,
+      { body, signal }
     );
   }
 

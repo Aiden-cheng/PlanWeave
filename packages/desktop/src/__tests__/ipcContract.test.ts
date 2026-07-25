@@ -182,6 +182,24 @@ describe("desktop IPC contract", () => {
     expect(collaborationInvokeChannels.finalizeCollaborationPendingAttachment).toBe(
       "planweave-collaboration:finalizePendingAttachment"
     );
+    expect(collaborationInvokeChannels.dispatchCollaborationRemoteOperation).toBe(
+      "planweave-collaboration:dispatchRemoteOperation"
+    );
+    expect(collaborationInvokeChannels.observeCollaborationRemoteOperation).toBe(
+      "planweave-collaboration:observeRemoteOperation"
+    );
+    expect(collaborationInvokeChannels.executeCollaborationRemoteOperationAction).toBe(
+      "planweave-collaboration:executeRemoteOperationAction"
+    );
+    expect(collaborationInvokeChannels.replayCollaborationRemoteOperationEvents).toBe(
+      "planweave-collaboration:replayRemoteOperationEvents"
+    );
+    expect(collaborationInvokeChannels.listCollaborationRemoteOperationInteractions).toBe(
+      "planweave-collaboration:listRemoteOperationInteractions"
+    );
+    expect(collaborationInvokeChannels.settleCollaborationRemoteOperationInteraction).toBe(
+      "planweave-collaboration:settleRemoteOperationInteraction"
+    );
     expect(collaborationStatusChangedChannel).toBe("planweave-collaboration:statusChanged");
     expect(collaborationObserverSignalChannel).toBe("planweave-collaboration:observerSignal");
     expect(Object.values(desktopBridgeInvokeChannels)).not.toContain(

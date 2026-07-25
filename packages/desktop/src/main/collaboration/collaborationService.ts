@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
   activityListWireQuerySchema,
   assignmentListQuerySchema,
@@ -13,6 +14,10 @@ import {
   humanDeviceListQuerySchema,
   humanInvitationListQuerySchema,
   humanPageQuerySchema,
+  opaqueIdentifierSchema,
+  remoteDispatchWireCommandSchema,
+  remoteEventQuerySchema,
+  remoteInteractionPageQuerySchema,
   workItemRefSchema,
   type ActivityListPage,
   type AssignmentDisplayProjection,
@@ -30,7 +35,12 @@ import {
   type HumanInvitationPage,
   type HumanInvitationView,
   type HumanMemberPage,
-  type PendingAttachmentView
+  type PendingAttachmentView,
+  type RemoteActionView,
+  type RemoteEventReplay,
+  type RemoteInteractionPage,
+  type RemoteInteractionView,
+  type RemoteOperationObservation
 } from "@planweave-ai/collaboration-contracts";
 import {
   assertNoSmuggledCollaborationSecrets,
@@ -54,6 +64,11 @@ import {
   type CollaborationStatus,
   type CollaborationUpsertProfileInput
 } from "../../shared/collaboration.js";
+import {
+  collaborationRemoteActionInputSchema,
+  collaborationRemoteInteractionRespondInputSchema,
+  collaborationRemoteOperationIdInputSchema
+} from "../../shared/collaborationReadModels.js";
 import {
   CollaborationClient,
   type CollaborationClientOptions,
@@ -770,6 +785,57 @@ export class CollaborationService {
         mediaType: body.mediaType,
         digestSha256: body.digestSha256
       })
+    );
+  }
+
+  async dispatchRemoteOperation(input: unknown): Promise<RemoteOperationObservation> {
+    const command = remoteDispatchWireCommandSchema.parse(input);
+    return this.withActiveClient((client) => client.dispatchRemoteOperation(command));
+  }
+
+  async observeRemoteOperation(input: unknown): Promise<RemoteOperationObservation> {
+    const { operationId } = collaborationRemoteOperationIdInputSchema.parse(input);
+    return this.withActiveClient((client) => client.observeRemoteOperation(operationId));
+  }
+
+  async executeRemoteOperationAction(input: unknown): Promise<RemoteActionView> {
+    const { operationId, action } = collaborationRemoteActionInputSchema.parse(input);
+    return this.withActiveClient((client) =>
+      client.executeRemoteOperationAction(operationId, action)
+    );
+  }
+
+  async replayRemoteOperationEvents(input: unknown): Promise<RemoteEventReplay> {
+    const parsed = z
+      .object({
+        operationId: opaqueIdentifierSchema,
+        query: remoteEventQuerySchema.optional()
+      })
+      .strict()
+      .parse(input);
+    return this.withActiveClient((client) =>
+      client.replayRemoteOperationEvents(parsed.operationId, parsed.query ?? {})
+    );
+  }
+
+  async listRemoteOperationInteractions(input: unknown): Promise<RemoteInteractionPage> {
+    const parsed = z
+      .object({
+        operationId: opaqueIdentifierSchema,
+        query: remoteInteractionPageQuerySchema.optional()
+      })
+      .strict()
+      .parse(input);
+    return this.withActiveClient((client) =>
+      client.listRemoteOperationInteractions(parsed.operationId, parsed.query ?? {})
+    );
+  }
+
+  async settleRemoteOperationInteraction(input: unknown): Promise<RemoteInteractionView> {
+    const { operationId, settlement } =
+      collaborationRemoteInteractionRespondInputSchema.parse(input);
+    return this.withActiveClient((client) =>
+      client.settleRemoteOperationInteraction(operationId, settlement)
     );
   }
 
