@@ -42,7 +42,6 @@ export type DispatchRecord = {
   id: string;
   projectId: string;
   blockRef: string;
-  packageRef: string;
   hostId: string;
   requiredCapabilities: string[];
   status: DispatchStatus;
@@ -65,7 +64,6 @@ export type DispatchWriteback = {
     executionAttemptId: string;
     projectId: string;
     blockRef: string;
-    packageRef: string;
     result: DispatchResult;
   }): Promise<void>;
   fail(input: {
@@ -75,7 +73,6 @@ export type DispatchWriteback = {
     executionAttemptId: string;
     projectId: string;
     blockRef: string;
-    packageRef: string;
     failure: DispatchFailure;
   }): Promise<void>;
 };
@@ -90,7 +87,6 @@ type DispatchRow = Record<string, unknown> & {
   id: string;
   project_id: string;
   block_ref: string;
-  package_ref: string;
   host_id: string;
   required_capabilities_json: string;
   status: DispatchStatus;
@@ -112,7 +108,6 @@ function toDispatch(row: DispatchRow): DispatchRecord {
     id: dispatchIdSchema.parse(row.id),
     projectId: row.project_id,
     blockRef: row.block_ref,
-    packageRef: row.package_ref,
     hostId: row.host_id,
     requiredCapabilities: capabilitiesSchema.parse(JSON.parse(row.required_capabilities_json)),
     status: row.status,
@@ -493,7 +488,6 @@ export class DispatchService {
         executionAttemptId: dispatch.executionAttemptId,
         projectId: dispatch.projectId,
         blockRef: dispatch.blockRef,
-        packageRef: dispatch.packageRef,
         result: dispatch.result
       });
       this.finishWriteback(dispatch, "completed");
@@ -505,7 +499,6 @@ export class DispatchService {
         executionAttemptId: dispatch.executionAttemptId,
         projectId: dispatch.projectId,
         blockRef: dispatch.blockRef,
-        packageRef: dispatch.packageRef,
         failure: dispatch.failure
       });
       this.finishWriteback(

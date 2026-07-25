@@ -4,11 +4,11 @@ import {
   mailboxCommandSchema,
   type ExecutionEnvelope
 } from "@planweave-ai/distributed-protocol";
-import type { createDistributedCoordination } from "../../distributedCoordination.js";
 import { HostReservationRepository } from "../../hostReservations.js";
 import { RemoteOperationRepository } from "../../remoteOperations.js";
 import { SqliteRemoteDispatchPersistence } from "../../remoteCoordinatorPersistence.js";
 import type { SqliteDatabase } from "../../sqlite.js";
+import type { TestDispatchCoordination } from "./testDispatchCoordination.js";
 
 type FixtureOptions = {
   leaseDurationMs?: number;
@@ -17,7 +17,7 @@ type FixtureOptions = {
 
 export function createRemoteDispatchFixture(
   database: SqliteDatabase,
-  coordination: ReturnType<typeof createDistributedCoordination>,
+  coordination: Pick<TestDispatchCoordination, "mailbox" | "dispatches">,
   sourceEnvelope: ExecutionEnvelope,
   options: FixtureOptions = {}
 ) {

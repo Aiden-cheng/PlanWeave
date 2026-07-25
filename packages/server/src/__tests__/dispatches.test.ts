@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createDistributedCoordination } from "../distributedCoordination.js";
+import { createTestDispatchCoordination } from "./support/testDispatchCoordination.js";
 import { ArtifactStore } from "../artifacts.js";
 import type { DispatchRecord } from "../dispatches.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
@@ -37,7 +37,7 @@ async function createServer(): Promise<PlanweaveServer> {
 
 async function acceptReportArtifact(
   server: PlanweaveServer,
-  coordination: ReturnType<typeof createDistributedCoordination>,
+  coordination: ReturnType<typeof createTestDispatchCoordination>,
   dispatch: DispatchRecord,
   hostId: string
 ): Promise<void> {
@@ -80,7 +80,7 @@ describe("distributed dispatch coordination", () => {
     const server = await createServer();
     const complete = vi.fn(async () => {});
     const fail = vi.fn(async () => {});
-    const coordination = createDistributedCoordination(server.database, {
+    const coordination = createTestDispatchCoordination(server.database, {
       leaseDurationMs: 60_000,
       hostOfflineAfterMs: 60_000,
       writeback: { complete, fail }
@@ -164,7 +164,6 @@ describe("distributed dispatch coordination", () => {
       executionAttemptId: dispatch.executionAttemptId,
       projectId: "project-a",
       blockRef: "T-001#B-001",
-      packageRef: "runtime:project-a:default",
       result
     });
     expect(fail).not.toHaveBeenCalled();
@@ -182,7 +181,7 @@ describe("distributed dispatch coordination", () => {
   it("keeps a result pending when runtime writeback fails and retries it", async () => {
     const server = await createServer();
     let rejectWriteback = true;
-    const coordination = createDistributedCoordination(server.database, {
+    const coordination = createTestDispatchCoordination(server.database, {
       leaseDurationMs: 60_000,
       hostOfflineAfterMs: 60_000,
       writeback: {
@@ -228,7 +227,7 @@ describe("distributed dispatch coordination", () => {
 
   it("rejects mismatched leases and hosts without required capabilities", async () => {
     const server = await createServer();
-    const coordination = createDistributedCoordination(server.database, {
+    const coordination = createTestDispatchCoordination(server.database, {
       leaseDurationMs: 60_000,
       hostOfflineAfterMs: 60_000,
       writeback: { complete: async () => {}, fail: async () => {} }
@@ -279,7 +278,7 @@ describe("distributed dispatch coordination", () => {
       busyTimeoutMs: 5000
     });
     servers.push(first);
-    const coordination = createDistributedCoordination(first.database, {
+    const coordination = createTestDispatchCoordination(first.database, {
       leaseDurationMs: 60_000,
       hostOfflineAfterMs: 60_000,
       writeback: { complete: async () => {}, fail: async () => {} }
@@ -307,7 +306,7 @@ describe("distributed dispatch coordination", () => {
       busyTimeoutMs: 5000
     });
     servers.push(reopened);
-    const reopenedCoordination = createDistributedCoordination(reopened.database, {
+    const reopenedCoordination = createTestDispatchCoordination(reopened.database, {
       leaseDurationMs: 60_000,
       hostOfflineAfterMs: 60_000,
       writeback: { complete: async () => {}, fail: async () => {} }
@@ -333,7 +332,7 @@ describe("distributed dispatch coordination", () => {
       busyTimeoutMs: 5000
     });
     servers.push(persisted);
-    const persistedCoordination = createDistributedCoordination(persisted.database, {
+    const persistedCoordination = createTestDispatchCoordination(persisted.database, {
       leaseDurationMs: 60_000,
       hostOfflineAfterMs: 60_000,
       writeback: { complete: async () => {}, fail: async () => {} }
@@ -368,7 +367,7 @@ describe("distributed dispatch coordination", () => {
   it("interrupts expired work without automatic failure and rejects late results", async () => {
     const server = await createServer();
     const fail = vi.fn(async () => {});
-    const coordination = createDistributedCoordination(server.database, {
+    const coordination = createTestDispatchCoordination(server.database, {
       leaseDurationMs: 60_000,
       hostOfflineAfterMs: 60_000,
       writeback: { complete: async () => {}, fail }

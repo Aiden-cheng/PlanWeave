@@ -63,11 +63,9 @@ export {
   type DistributedServerCompositionOptions
 } from "./serverComposition.js";
 export {
-  createDistributedCoordination,
   createRemoteBlockCoordination,
   startRemoteBlockCoordinationServer,
-  type RemoteBlockCoordinationOptions,
-  type DistributedCoordinationOptions
+  type RemoteBlockCoordinationOptions
 } from "./distributedCoordination.js";
 export {
   DispatchService,

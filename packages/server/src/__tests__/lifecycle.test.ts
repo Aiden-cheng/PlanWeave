@@ -85,4 +85,45 @@ describe("server lifecycle", () => {
     const reopened = await openServerDatabase(databasePath, 5_000);
     reopened.close();
   });
+
+  it("drops residual dispatches.package_ref on upgrade and never reintroduces it", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "planweave-server-package-ref-"));
+    directories.push(dataDirectory);
+    const databasePath = join(dataDirectory, "server.sqlite");
+    const initialized = await startPlanweaveServer({
+      dataDirectory,
+      databasePath,
+      busyTimeoutMs: 5_000
+    });
+    initialized.close();
+
+    const rolledBack = await openServerDatabase(databasePath, 5_000);
+    rolledBack.prepare("DELETE FROM schema_migrations WHERE version=?").run(21);
+    // Reintroduce historical column as a v20 residual for upgrade coverage.
+    const columns = rolledBack.prepare("PRAGMA table_info(dispatches)").all();
+    if (!columns.some((row) => row.name === "package_ref")) {
+      rolledBack.exec("ALTER TABLE dispatches ADD COLUMN package_ref TEXT NOT NULL DEFAULT ''");
+    }
+    expect(
+      rolledBack.prepare("PRAGMA table_info(dispatches)").all().some((row) => row.name === "package_ref")
+    ).toBe(true);
+    rolledBack.close();
+
+    const upgraded = await startPlanweaveServer({
+      dataDirectory,
+      databasePath,
+      busyTimeoutMs: 5_000
+    });
+    try {
+      expect(upgraded.readiness().schemaVersion).toBe(latestCentralSchemaVersion);
+      expect(
+        upgraded.database
+          .prepare("PRAGMA table_info(dispatches)")
+          .all()
+          .some((row) => row.name === "package_ref")
+      ).toBe(false);
+    } finally {
+      upgraded.close();
+    }
+  });
 });

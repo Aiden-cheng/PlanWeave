@@ -59,10 +59,6 @@ export class SqliteRemoteOperationCandidateRepository implements RemoteOperation
   }
 }
 
-function locatorReference(operation: RemoteOperation): string {
-  return `runtime:${operation.projectId}:${operation.canvasId}`;
-}
-
 export class SqliteRemoteDispatchPersistence implements RemoteDispatchPersistencePort {
   private readonly artifacts: ArtifactAuthorizationRepository;
   private readonly mailbox: DurableMailbox;
@@ -193,15 +189,14 @@ export class SqliteRemoteDispatchPersistence implements RemoteDispatchPersistenc
         this.database
           .prepare(
             `INSERT INTO dispatches(
-              id,project_id,block_ref,package_ref,host_id,required_capabilities_json,
+              id,project_id,block_ref,host_id,required_capabilities_json,
               status,lease_id,execution_attempt_id,lease_expires_at,created_at
-            ) VALUES (?,?,?,?,?,?,'leased',?,?,?,?)`
+            ) VALUES (?,?,?,?,?,'leased',?,?,?,?)`
           )
           .run(
             input.operation.dispatchId,
             input.operation.projectId,
             input.operation.blockRef,
-            locatorReference(input.operation),
             input.reservation.hostId,
             JSON.stringify(input.operation.requiredCapabilities),
             input.reservation.leaseId,

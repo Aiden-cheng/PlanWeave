@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { attachAgentHostArtifactHttp, type ArtifactHttpServer } from "../artifactHttp.js";
 import { ArtifactStore } from "../artifacts.js";
-import { createDistributedCoordination } from "../distributedCoordination.js";
+import { createTestDispatchCoordination } from "./support/testDispatchCoordination.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 import { executionEnvelopeFor } from "./protocolTestFixtures.js";
 import { createRemoteDispatchFixture } from "./support/remoteDispatchFixture.js";
@@ -44,7 +44,7 @@ describe("artifact output quotas", () => {
       busyTimeoutMs: 5000
     });
     servers.push(server);
-    const coordination = createDistributedCoordination(server.database, {
+    const coordination = createTestDispatchCoordination(server.database, {
       leaseDurationMs: 60_000,
       hostOfflineAfterMs: 60_000,
       writeback: { complete: async () => {}, fail: async () => {} }
@@ -203,7 +203,7 @@ describe("artifact output quotas", () => {
           "SELECT COUNT(*) AS count FROM dispatch_artifact_links WHERE purpose IN ('report','output')"
         )
         .get()?.count
-    ).toBe(17);
+    ).toBe(16);
 
     for (let index = 16; index < 63; index++) {
       coordination.artifactAuthorization.createOutputGrant(grantInput(`pending-quota-${index}`));

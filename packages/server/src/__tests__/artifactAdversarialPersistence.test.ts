@@ -7,7 +7,7 @@ import { executionEnvelopeSchema } from "@planweave-ai/distributed-protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { attachAgentHostArtifactHttp, type ArtifactHttpServer } from "../artifactHttp.js";
 import { ArtifactStore } from "../artifacts.js";
-import { createDistributedCoordination } from "../distributedCoordination.js";
+import { createTestDispatchCoordination } from "./support/testDispatchCoordination.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 import { executionEnvelopeFor } from "./protocolTestFixtures.js";
 import { createRemoteDispatchFixture } from "./support/remoteDispatchFixture.js";
@@ -41,7 +41,7 @@ describe("artifact persistence failure boundary", () => {
     });
     servers.push(server);
     const complete = vi.fn(async () => {});
-    const coordination = createDistributedCoordination(server.database, {
+    const coordination = createTestDispatchCoordination(server.database, {
       leaseDurationMs: 60_000,
       hostOfflineAfterMs: 60_000,
       writeback: { complete, fail: async () => {} }

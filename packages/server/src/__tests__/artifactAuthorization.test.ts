@@ -5,9 +5,10 @@ import { join } from "node:path";
 import { executionEnvelopeSchema } from "@planweave-ai/distributed-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { ArtifactStore, type ArtifactMetadata } from "../artifacts.js";
-import { createDistributedCoordination } from "../distributedCoordination.js";
+import { createTestDispatchCoordination } from "./support/testDispatchCoordination.js";
 import type { DispatchRecord } from "../dispatches.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
+import { latestCentralSchemaVersion } from "../migrations.js";
 import { openServerDatabase } from "../sqlite.js";
 import { executionEnvelopeFor } from "./protocolTestFixtures.js";
 import { createRemoteDispatchFixture } from "./support/remoteDispatchFixture.js";
@@ -31,7 +32,7 @@ async function setup() {
     busyTimeoutMs: 5000
   });
   servers.push(server);
-  const coordination = createDistributedCoordination(server.database, {
+  const coordination = createTestDispatchCoordination(server.database, {
     leaseDurationMs: 60_000,
     hostOfflineAfterMs: 60_000,
     writeback: { complete: async () => {}, fail: async () => {} }
@@ -318,7 +319,7 @@ describe("artifact authorization migration", () => {
       busyTimeoutMs: 5000
     });
     servers.push(upgraded);
-    expect(upgraded.readiness().schemaVersion).toBe(18);
+    expect(upgraded.readiness().schemaVersion).toBe(latestCentralSchemaVersion);
     expect(
       upgraded.database.prepare("SELECT COUNT(*) AS count FROM artifact_blobs").get()?.count
     ).toBe(1);
@@ -335,7 +336,7 @@ describe("artifact authorization migration", () => {
       busyTimeoutMs: 5000
     });
     servers.push(reopened);
-    expect(reopened.readiness().schemaVersion).toBe(18);
+    expect(reopened.readiness().schemaVersion).toBe(latestCentralSchemaVersion);
     expect(
       reopened.database.prepare("SELECT COUNT(*) AS count FROM artifact_blobs").get()?.count
     ).toBe(1);

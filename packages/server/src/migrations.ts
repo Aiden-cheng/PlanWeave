@@ -1233,6 +1233,21 @@ function validateAgentHostsForReservations(database: SqliteDatabase): void {
   }
 }
 
+/**
+ * Drop residual dispatches.package_ref when present. Portable package identity is
+ * ExecutionEnvelope + remote operation rows. Incomplete upgrade fixtures may omit the column.
+ * Historical migrations 1–20 still create package_ref for real upgrade paths.
+ */
+function dropDispatchPackageRefColumn(database: SqliteDatabase): void {
+  const hasTable = database
+    .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='dispatches'")
+    .get();
+  if (!hasTable) return;
+  const columns = database.prepare("PRAGMA table_info(dispatches)").all();
+  if (!columns.some((row) => row.name === "package_ref")) return;
+  database.exec("ALTER TABLE dispatches DROP COLUMN package_ref");
+}
+
 type Migration = {
   version: number;
   sql: string;
@@ -1268,7 +1283,8 @@ const migrations: readonly Migration[] = [
   { version: 17, sql: migration17 },
   { version: 18, sql: migration18, after: ensureHostSelectionColumn },
   { version: 19, sql: migration19 },
-  { version: 20, sql: migration20 }
+  { version: 20, sql: migration20 },
+  { version: 21, sql: "SELECT 1;", after: dropDispatchPackageRefColumn }
 ];
 
 export const latestCentralSchemaVersion = Math.max(

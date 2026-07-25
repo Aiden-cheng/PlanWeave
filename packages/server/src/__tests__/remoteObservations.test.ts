@@ -55,15 +55,14 @@ async function setup() {
   server.database
     .prepare(
       `INSERT INTO dispatches(
-        id,project_id,block_ref,package_ref,host_id,required_capabilities_json,status,
+        id,project_id,block_ref,host_id,required_capabilities_json,status,
         lease_id,execution_attempt_id,lease_expires_at,created_at
-      ) VALUES (?,?,?,?,?,?,'running',?,?,?,?)`
+      ) VALUES (?,?,?,?,?,'running',?,?,?,?)`
     )
     .run(
       operation.dispatchId,
       operation.projectId,
       operation.blockRef,
-      "runtime:project-observation:default",
       host.id,
       JSON.stringify(operation.requiredCapabilities),
       reservation.leaseId,

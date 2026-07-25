@@ -7,7 +7,7 @@ import { executionEnvelopeSchema } from "@planweave-ai/distributed-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { attachAgentHostArtifactHttp, type ArtifactHttpServer } from "../artifactHttp.js";
 import { ArtifactStore } from "../artifacts.js";
-import { createDistributedCoordination } from "../distributedCoordination.js";
+import { createTestDispatchCoordination } from "./support/testDispatchCoordination.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 import { executionEnvelopeFor } from "./protocolTestFixtures.js";
 import { createRemoteDispatchFixture } from "./support/remoteDispatchFixture.js";
@@ -113,7 +113,7 @@ describe("content-addressed artifacts", () => {
 
   it("uploads and downloads artifacts over authenticated HTTP", async () => {
     const { dataDirectory, server, artifacts } = await setup();
-    const coordination = createDistributedCoordination(server.database, {
+    const coordination = createTestDispatchCoordination(server.database, {
       leaseDurationMs: 60_000,
       hostOfflineAfterMs: 60_000,
       writeback: { complete: async () => {}, fail: async () => {} }
@@ -269,7 +269,7 @@ describe("content-addressed artifacts", () => {
 
   it("rejects foreign scopes, invalid upload contracts, expired grants, and malformed routes", async () => {
     const { server, artifacts } = await setup();
-    const coordination = createDistributedCoordination(server.database, {
+    const coordination = createTestDispatchCoordination(server.database, {
       leaseDurationMs: 60_000,
       hostOfflineAfterMs: 60_000,
       writeback: { complete: async () => {}, fail: async () => {} }

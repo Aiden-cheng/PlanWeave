@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ArtifactStore } from "../artifacts.js";
-import { applyMigrations, centralSchemaVersion } from "../migrations.js";
+import { applyMigrations, centralSchemaVersion, latestCentralSchemaVersion } from "../migrations.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 
 const directories: string[] = [];
@@ -74,7 +74,7 @@ describe("artifact migration v7", () => {
     const mediaType = 'text/plain; charset="utf-8"';
     const { dataDirectory, database, digest } = await createV5Database(legacyMediaType);
     applyMigrations(database);
-    expect(centralSchemaVersion(database)).toBe(18);
+    expect(centralSchemaVersion(database)).toBe(latestCentralSchemaVersion);
     expect(
       new ArtifactStore(database, dataDirectory, 1024).get(`artifact:sha256:${digest}`)
     ).toMatchObject({ mediaType });
@@ -84,7 +84,7 @@ describe("artifact migration v7", () => {
     const reopened = await openServerDatabase(join(dataDirectory, "server.sqlite"), 5000);
     databases.push(reopened);
     applyMigrations(reopened);
-    expect(centralSchemaVersion(reopened)).toBe(18);
+    expect(centralSchemaVersion(reopened)).toBe(latestCentralSchemaVersion);
     expect(
       new ArtifactStore(reopened, dataDirectory, 1024).get(`artifact:sha256:${digest}`)
     ).toMatchObject({ mediaType });
@@ -154,7 +154,7 @@ describe("artifact migration v7", () => {
 
     applyMigrations(database);
 
-    expect(centralSchemaVersion(database)).toBe(18);
+    expect(centralSchemaVersion(database)).toBe(latestCentralSchemaVersion);
     expect(
       database.prepare("SELECT media_type FROM artifact_blobs WHERE ref=?").get(artifactRef)
         ?.media_type
@@ -170,7 +170,7 @@ describe("artifact migration v7", () => {
     const reopened = await openServerDatabase(databasePath, 5000);
     databases.push(reopened);
     applyMigrations(reopened);
-    expect(centralSchemaVersion(reopened)).toBe(18);
+    expect(centralSchemaVersion(reopened)).toBe(latestCentralSchemaVersion);
     expect(
       reopened.prepare("SELECT media_type FROM artifact_blobs WHERE ref=?").get(artifactRef)
         ?.media_type

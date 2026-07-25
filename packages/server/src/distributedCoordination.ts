@@ -1,8 +1,4 @@
-import {
-  DispatchService,
-  type DispatchServiceOptions,
-  type DispatchWriteback
-} from "./dispatches.js";
+import { DispatchService } from "./dispatches.js";
 import { ArtifactAuthorizationRepository } from "./artifactAuthorization.js";
 import { AgentHostRepository } from "./hosts.js";
 import { DurableMailbox } from "./mailbox.js";
@@ -33,21 +29,6 @@ import {
   type AssignmentDispatchGate
 } from "./work/dispatchIntegration.js";
 import { WorkAssignmentRepository } from "./work/repository.js";
-
-export type DistributedCoordinationOptions = Omit<DispatchServiceOptions, "writeback"> & {
-  writeback: DispatchWriteback;
-};
-
-export function createDistributedCoordination(
-  database: SqliteDatabase,
-  options: DistributedCoordinationOptions
-) {
-  const hosts = new AgentHostRepository(database);
-  const mailbox = new DurableMailbox(database);
-  const artifactAuthorization = new ArtifactAuthorizationRepository(database);
-  const dispatches = new DispatchService(database, hosts, artifactAuthorization, options);
-  return { hosts, mailbox, artifactAuthorization, dispatches };
-}
 
 export type RemoteBlockCoordinationOptions = {
   leaseDurationMs: number;
