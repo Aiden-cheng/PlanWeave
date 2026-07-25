@@ -201,7 +201,8 @@ function workspaceHeader(active: boolean): TaskWorkspace {
           blockers: []
         },
         runs: [],
-        annotations: []
+        annotations: [],
+        remoteExecution: null
       }
     ],
     activeRecordIds: active ? [recordId] : [],

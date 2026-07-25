@@ -488,15 +488,21 @@ async function executeAcpOutcome(
                 ? `${executionTerminal.message}; cleanup: ${cleanupFailures.map(diagnostic).join("; ")}`
                 : `ACP execution cleanup failed: ${cleanupFailures.map(diagnostic).join("; ")}`
             );
-      terminal = {
-        state: "failed",
-        reason: executionTerminal.state === "failed" ? executionTerminal.reason : "cleanup_failed",
-        message:
-          executionTerminal.state === "failed"
-            ? `${executionTerminal.message}; cleanup: ${cleanupFailures.map(diagnostic).join("; ")}`
-            : cleanupFailures.map(diagnostic).join("; ")
-      };
-    } else if (cleanupEventFailure !== undefined) {
+      // Caller cancellation remains authoritative. Cleanup timeout/disposal faults are
+      // reported via cleanup.completed=false without rewriting a cancelled terminal.
+      if (executionTerminal.state !== "cancelled") {
+        terminal = {
+          state: "failed",
+          reason: executionTerminal.state === "failed" ? executionTerminal.reason : "cleanup_failed",
+          message:
+            executionTerminal.state === "failed"
+              ? `${executionTerminal.message}; cleanup: ${cleanupFailures.map(diagnostic).join("; ")}`
+              : cleanupFailures.map(diagnostic).join("; ")
+        };
+      } else {
+        terminal = executionTerminal;
+      }
+    } else if (cleanupEventFailure !== undefined && executionTerminal.state !== "cancelled") {
       executionCause = cleanupEventFailure;
       terminal = {
         state: "failed",
@@ -504,6 +510,9 @@ async function executeAcpOutcome(
           sinkFailure !== undefined ? "event_sink_failed" : failureReason(cleanupEventFailure),
         message: diagnostic(cleanupEventFailure)
       };
+    } else if (cleanupEventFailure !== undefined) {
+      executionCause = cleanupEventFailure;
+      terminal = executionTerminal;
     }
     try {
       await observeLifecycle({
@@ -512,11 +521,13 @@ async function executeAcpOutcome(
       });
     } catch (error) {
       executionCause = error;
-      terminal = {
-        state: "failed",
-        reason: "unknown_error",
-        message: diagnostic(error)
-      };
+      if (terminal?.state !== "cancelled") {
+        terminal = {
+          state: "failed",
+          reason: "unknown_error",
+          message: diagnostic(error)
+        };
+      }
     }
     try {
       await emit({ kind: "terminal", terminal });

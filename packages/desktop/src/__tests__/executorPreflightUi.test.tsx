@@ -30,6 +30,7 @@ const bridgeMock = vi.hoisted(() => ({
 
 vi.mock("../renderer/bridge", () => ({
   bridge: bridgeMock.api,
+  collaborationBridge: null,
   desktopCanvasReference: (project: DesktopProjectSummary, canvasId?: string | null) => ({
     projectRoot: project.rootPath,
     canvasId

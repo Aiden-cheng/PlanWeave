@@ -276,15 +276,17 @@ describe("useActivityPanelController", () => {
       })
     );
 
+    // Wait for the panel-scoped list (includes workItem), not only hub project catch-up.
+    // Hub snapshot merge can populate rows earlier without establishing pagination cursors.
     await waitFor(() => {
+      expect(listActivity).toHaveBeenCalledWith(
+        expect.objectContaining({ workItem: taskItem })
+      );
       expect(result.current.rows.length).toBe(1);
+      expect(result.current.hasMore).toBe(true);
     });
-    expect(listActivity).toHaveBeenCalledWith(
-      expect.objectContaining({ workItem: taskItem })
-    );
     expect(result.current.rows[0]?.interactive).toBe(false);
     expect(result.current.rows[0]?.sourceLabelKey).toBe("activitySourceComment");
-    expect(result.current.hasMore).toBe(true);
 
     await act(async () => {
       await result.current.loadMore();

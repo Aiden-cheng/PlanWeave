@@ -911,10 +911,23 @@ export class AcpSessionController {
       }
       finalizationErrors.push(...eventLogErrors.filter((caught) => caught !== error));
       if (cleanupFailed || finalizationErrors.length > 0) {
+        const cleanupMarker = "Runner terminal cleanup did not complete cleanly.";
+        // Keep an already-canonical cleanup AggregateError nested (not flattened) so callers
+        // can still locate preparation/stop failures by the exact marker message.
+        if (
+          cleanupFailed &&
+          error instanceof AggregateError &&
+          error.message === cleanupMarker
+        ) {
+          if (finalizationErrors.length === 0) {
+            throw error;
+          }
+          throw new AggregateError([error, ...finalizationErrors], message);
+        }
         const executionErrors = error instanceof AggregateError ? error.errors : [error];
         throw new AggregateError(
           [...executionErrors, ...finalizationErrors],
-          cleanupFailed ? `Runner terminal cleanup did not complete cleanly. ${message}` : message
+          cleanupFailed ? `${cleanupMarker} ${message}` : message
         );
       }
       if (cancelled && !(error instanceof ExecutorCancelledError)) {

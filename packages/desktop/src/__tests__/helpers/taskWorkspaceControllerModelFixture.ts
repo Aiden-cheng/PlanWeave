@@ -194,7 +194,8 @@ function workspaceHeader(selectedRecordId: string | null): TaskWorkspace {
           blockers: []
         },
         runs: [],
-        annotations: []
+        annotations: [],
+        remoteExecution: null
       }
     ],
     activeRecordIds: [],

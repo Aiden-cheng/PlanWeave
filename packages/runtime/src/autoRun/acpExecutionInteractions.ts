@@ -1,11 +1,15 @@
 import {
   CreateElicitationRequest as CreateElicitationRequestGuard,
+  RequestError,
   type CreateElicitationRequest,
   type CreateElicitationResponse,
   type RequestPermissionRequest,
   type RequestPermissionResponse
 } from "@agentclientprotocol/sdk";
-import { createAcpElicitationSettlement } from "./acpElicitationSettlement.js";
+import {
+  AcpElicitationSettlementError,
+  createAcpElicitationSettlement
+} from "./acpElicitationSettlement.js";
 import { createAcpInteractionRequestId } from "./acpEventNormalization.js";
 import type {
   AcpEngineClock,
@@ -25,6 +29,21 @@ export class AcpEngineInteractionError extends Error {
     super(message, cause === undefined ? undefined : { cause });
     this.name = "AcpEngineInteractionError";
   }
+}
+
+/**
+ * Protocol/schema failures must keep a recoverable message (Invalid params / unsupported type).
+ * Only opaque broker faults collapse into the generic engine interaction error.
+ */
+function asInteractionFailure(error: unknown, opaqueMessage: string): AcpEngineInteractionError {
+  if (error instanceof AcpEngineInteractionError) return error;
+  if (error instanceof RequestError || error instanceof AcpElicitationSettlementError) {
+    return new AcpEngineInteractionError(false, error.message, error);
+  }
+  if (error instanceof Error && /unsupported property type|Invalid params/i.test(error.message)) {
+    return new AcpEngineInteractionError(false, error.message, error);
+  }
+  return new AcpEngineInteractionError(false, opaqueMessage, error);
 }
 
 type InteractionHandlersOptions = {
@@ -224,10 +243,7 @@ export function createAcpExecutionInteractionHandlers(options: InteractionHandle
         interaction.timeoutMs
       );
     } catch (error) {
-      failure =
-        error instanceof AcpEngineInteractionError
-          ? error
-          : new AcpEngineInteractionError(false, "ACP elicitation broker failed.", error);
+      failure = asInteractionFailure(error, "ACP elicitation broker failed.");
       throw failure;
     }
     await options.emit({

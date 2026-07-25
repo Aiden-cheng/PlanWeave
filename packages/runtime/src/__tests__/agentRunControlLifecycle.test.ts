@@ -369,7 +369,17 @@ describe("agent run control controller lifecycle", () => {
       );
       releaseStartup();
 
-      await expect(execution).rejects.toBe(ownerStateFailure);
+      const failure = await execution.catch((error: unknown) => error);
+      // Outer finalization may wrap a single cleanup root cause in AggregateError while
+      // still preserving the original failure object as the sole nested cause.
+      const rootCause =
+        failure instanceof AggregateError && failure.errors.length === 1
+          ? failure.errors[0]
+          : failure;
+      expect(rootCause).toBe(ownerStateFailure);
+      if (failure instanceof AggregateError) {
+        expect(failure.message).toMatch(/Runner terminal cleanup did not complete cleanly/);
+      }
       expect(terminalWriteAttempts).toBe(failingAttempt === 2 ? 3 : 2);
       await expectEndpointClosed(root, descriptor.address);
       expect(registry.size).toBe(0);
