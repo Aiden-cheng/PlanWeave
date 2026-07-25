@@ -1,7 +1,4 @@
-import {
-  DispatchService,
-  type DispatchServiceOptions
-} from "../../dispatches.js";
+import { DispatchService, type DispatchServiceOptions } from "../../dispatches.js";
 import { ArtifactAuthorizationRepository } from "../../artifactAuthorization.js";
 import { AgentHostRepository } from "../../hosts.js";
 import { DurableMailbox } from "../../mailbox.js";
@@ -10,10 +7,9 @@ import type { SqliteDatabase } from "../../sqlite.js";
 /**
  * Test-only thin dispatch stack (hosts/mailbox/grants/dispatches).
  * Production composition uses `createRemoteBlockCoordination` exclusively.
+ * Not a public package export.
  */
-export type TestDispatchCoordinationOptions = Omit<DispatchServiceOptions, "writeback"> & {
-  writeback: DispatchServiceOptions["writeback"];
-};
+export type TestDispatchCoordinationOptions = DispatchServiceOptions;
 
 export function createTestDispatchCoordination(
   database: SqliteDatabase,

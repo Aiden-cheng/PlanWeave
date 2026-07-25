@@ -508,6 +508,7 @@
         "humanIdentityPolicy.test.ts",
         "humanIdentitySchemas.test.ts",
         "protocolPrimitives.test.ts",
+        "publicExports.test.ts",
         "releaseGate.test.ts",
         "vpsE2eGate.test.ts",
         "workAssignmentPolicy.test.ts",

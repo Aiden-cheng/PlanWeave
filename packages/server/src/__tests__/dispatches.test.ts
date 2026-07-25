@@ -75,7 +75,7 @@ async function acceptReportArtifact(
   );
 }
 
-describe("distributed dispatch coordination", () => {
+describe("DispatchService (test-only thin stack)", () => {
   it("selects a compatible online host and writes a completed result back", async () => {
     const server = await createServer();
     const complete = vi.fn(async () => {});
@@ -166,6 +166,9 @@ describe("distributed dispatch coordination", () => {
       blockRef: "T-001#B-001",
       result
     });
+    // Writeback identity is dispatch/lease/attempt/block — not residual packageRef.
+    expect(complete.mock.calls[0]?.[0]).not.toHaveProperty("packageRef");
+    expect(dispatch).not.toHaveProperty("packageRef");
     expect(fail).not.toHaveBeenCalled();
 
     coordination.mailbox.acknowledge(

@@ -34,6 +34,13 @@ describe("server lifecycle", () => {
         schemaVersion: latestCentralSchemaVersion
       });
       expect(reconciled).toBe(true);
+      // Public schema: portable envelope identity; no residual package_ref column on fresh DBs.
+      expect(
+        server.database
+          .prepare("PRAGMA table_info(dispatches)")
+          .all()
+          .some((row) => row.name === "package_ref")
+      ).toBe(false);
       const backup = await server.createBackup("before-upgrade.sqlite");
       expect((await stat(backup)).size).toBeGreaterThan(0);
       expect((await readFile(backup)).subarray(0, 16).toString("utf8")).toBe(
