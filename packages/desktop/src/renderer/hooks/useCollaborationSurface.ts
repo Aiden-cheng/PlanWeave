@@ -5,6 +5,7 @@ import {
   buildCollaborationNotificationDrafts,
   type AssigneeSurfaceIndex
 } from "../collaboration/assigneeSurfaceViewModels";
+import { assigneeDisplayLabelsFromTranslator } from "../collaboration/assignmentViewModels";
 import type { CollaborationProjectViewModel } from "../collaboration/collaborationViewModels";
 import type { CollaborationReadModelController } from "../collaboration/CollaborationReadModelController";
 import type { createTranslator } from "../i18n";
@@ -54,14 +55,24 @@ export function useCollaborationSurface(
   const profileId = sessionConnected ? (activeProfile?.profileId ?? null) : null;
   const projectId = sessionConnected ? (activeProfile?.projectId ?? null) : null;
 
+  // Shell is the sole owner of active project/canvas binding on the shared hub.
   const { snapshot, viewModel, controller } = useCollaborationReadModels({
     api,
     profileId,
     projectId,
-    canvasId: args.canvasId ?? null
+    canvasId: args.canvasId ?? null,
+    manageActiveProject: true
   });
 
-  const assigneeIndex = useMemo(() => buildAssigneeSurfaceIndex(snapshot), [snapshot]);
+  const assigneeLabels = useMemo(
+    () => assigneeDisplayLabelsFromTranslator(args.t),
+    [args.t]
+  );
+
+  const assigneeIndex = useMemo(
+    () => buildAssigneeSurfaceIndex(snapshot, assigneeLabels),
+    [assigneeLabels, snapshot]
+  );
 
   const collaborationNotificationDrafts = useMemo(
     () =>

@@ -38,10 +38,12 @@ export {
 } from "./peopleViewModels.js";
 export {
   assignmentTargetKey,
+  assigneeDisplayLabelsFromTranslator,
   buildAssigneeCurrentDisplay,
   buildAssigneePickerViewModel,
   buildAssigneeSections,
   canAssignWork,
+  DEFAULT_ASSIGNEE_DISPLAY_LABELS,
   filterAssigneeOptions,
   filterAssigneeSections,
   hostSatisfiesCapabilities,
@@ -49,6 +51,7 @@ export {
   resolveAssigneePickerMode,
   targetsEqual,
   type AssigneeCurrentDisplay,
+  type AssigneeDisplayLabels,
   type AssigneeOption,
   type AssigneePickerMode,
   type AssigneePickerViewModel,

@@ -6,14 +6,17 @@ import type {
   WorkItemRef
 } from "@planweave-ai/collaboration-contracts";
 import {
+  assigneeDisplayLabelsFromTranslator,
   buildAssigneeCurrentDisplay,
   buildAssigneePickerViewModel,
   buildAssigneeSections,
   canAssignWork,
   filterAssigneeOptions,
   resolveAssigneePickerMode,
-  targetsEqual
+  targetsEqual,
+  type AssigneeDisplayLabels
 } from "../renderer/collaboration/assignmentViewModels";
+import { createTranslator } from "../renderer/i18n";
 import type { CollaborationHostProjection } from "../shared/collaborationReadModels";
 import type { CollaborationStatus } from "../shared/collaboration";
 
@@ -326,5 +329,83 @@ describe("assignmentViewModels", () => {
       )
     ).toBe(true);
     expect(targetsEqual({ kind: "unassigned" }, { kind: "automatic_host" })).toBe(false);
+  });
+
+  it("localizes primary labels and secondary host hints via catalog labels", () => {
+    const zhLabels: AssigneeDisplayLabels = assigneeDisplayLabelsFromTranslator(
+      createTranslator("zh-CN")
+    );
+    const enLabels = assigneeDisplayLabelsFromTranslator(createTranslator("en"));
+
+    expect(zhLabels.unassigned).toBe("未分配");
+    expect(zhLabels.automaticHost).toBe("自动 Host");
+    expect(zhLabels.automaticHostSelection).toBe("自动选择 Host");
+    expect(zhLabels.inactiveMembership).toBe("成员资格已失效");
+    expect(zhLabels.hostOffline).toBe("离线");
+    expect(zhLabels.hostAtCapacity).toBe("已满载");
+    expect(enLabels.unassigned).toBe("Unassigned");
+    expect(enLabels.automaticHost).toBe("Automatic host");
+
+    const zhCurrent = buildAssigneeCurrentDisplay(null, zhLabels);
+    expect(zhCurrent.label).toBe("未分配");
+
+    const automaticAssignment: AssignmentDisplayProjection = {
+      projectId: "project-1",
+      workItem: blockItem,
+      target: { kind: "automatic_host" },
+      revision: 1,
+      availability: { status: "pending", reason: "automatic_pending_selection" }
+    };
+    expect(buildAssigneeCurrentDisplay(automaticAssignment, zhLabels).label).toBe("自动 Host");
+
+    const sections = buildAssigneeSections({
+      workItem: blockItem,
+      assignment: null,
+      members: [],
+      hosts: [],
+      eligible: {
+        workItem: blockItem,
+        humans: [
+          {
+            projectId: "project-1",
+            humanPrincipalId: "gone",
+            membershipActive: false,
+            displayName: "Former"
+          }
+        ],
+        hosts: [
+          {
+            projectId: "project-1",
+            hostId: "host-offline",
+            exists: true,
+            revoked: false,
+            authorizedForProject: true,
+            online: false,
+            capabilities: ["shell"],
+            displayName: "Offline Host",
+            capacityRemaining: 1
+          }
+        ],
+        nextHumanCursor: null,
+        nextHostCursor: null
+      },
+      labels: zhLabels
+    });
+
+    expect(sections.find((s) => s.id === "unassigned")?.options[0]?.label).toBe("未分配");
+    expect(sections.find((s) => s.id === "automatic")?.options[0]?.label).toBe("自动选择 Host");
+    expect(sections.find((s) => s.id === "automatic")?.options[0]?.secondaryLabel).toBe(
+      "派发时由服务器选择兼容 Host"
+    );
+    expect(
+      sections
+        .find((s) => s.id === "people")
+        ?.options.find((o) => o.id === "human:gone")?.secondaryLabel
+    ).toBe("成员资格已失效");
+    expect(
+      sections
+        .find((s) => s.id === "hosts")
+        ?.options.find((o) => o.id === "exact_host:host-offline")?.secondaryLabel
+    ).toContain("离线");
   });
 });

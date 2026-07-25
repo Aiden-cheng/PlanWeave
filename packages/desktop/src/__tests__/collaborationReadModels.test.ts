@@ -559,6 +559,7 @@ describe("useCollaborationReadModels", () => {
         profileId: "profile-demo-001",
         projectId: "project-demo-001",
         canvasId: "canvas-1",
+        manageActiveProject: true,
         api: mock.api
       })
     );
@@ -580,6 +581,7 @@ describe("useCollaborationReadModels", () => {
         useCollaborationReadModels({
           profileId: props.profileId,
           projectId: props.projectId,
+          manageActiveProject: true,
           api: mock.api
         }),
       { initialProps: { profileId: "profile-demo-001", projectId: "project-demo-001" } }
@@ -594,5 +596,45 @@ describe("useCollaborationReadModels", () => {
       expect(result.current.snapshot.syncPhase).toBe("idle");
       expect(result.current.snapshot.members).toEqual([]);
     });
+  });
+
+  it("subscribe-only consumers do not rebind or clear the shell-owned hub", async () => {
+    const mock = createMockApi();
+    const { result: shell } = renderHook(() =>
+      useCollaborationReadModels({
+        profileId: "profile-demo-001",
+        projectId: "project-demo-001",
+        canvasId: "canvas-shell",
+        manageActiveProject: true,
+        api: mock.api
+      })
+    );
+
+    await waitFor(() => {
+      expect(shell.current.snapshot.syncPhase).toBe("ready");
+      expect(shell.current.snapshot.canvasId).toBe("canvas-shell");
+    });
+    const listCallsAfterShell = mock.listAssignments.mock.calls.length;
+
+    const { unmount: unmountSubscriber } = renderHook(() =>
+      useCollaborationReadModels({
+        profileId: "profile-demo-001",
+        projectId: "project-demo-001",
+        canvasId: "canvas-other",
+        manageActiveProject: false,
+        api: mock.api
+      })
+    );
+
+    await waitFor(() => {
+      expect(shell.current.controller).toBeTruthy();
+    });
+    expect(shell.current.snapshot.canvasId).toBe("canvas-shell");
+    expect(mock.listAssignments.mock.calls.length).toBe(listCallsAfterShell);
+
+    unmountSubscriber();
+    expect(shell.current.snapshot.syncPhase).toBe("ready");
+    expect(shell.current.snapshot.canvasId).toBe("canvas-shell");
+    expect(shell.current.snapshot.members).toHaveLength(1);
   });
 });

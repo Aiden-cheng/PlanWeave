@@ -7,12 +7,16 @@ import type {
 } from "@planweave-ai/collaboration-contracts";
 import { collaborationBridge } from "../bridge";
 import {
+  assigneeDisplayLabelsFromTranslator,
   buildAssigneePickerViewModel,
+  DEFAULT_ASSIGNEE_DISPLAY_LABELS,
   targetsEqual,
+  type AssigneeDisplayLabels,
   type AssigneePickerViewModel
 } from "../collaboration/assignmentViewModels";
 import { collaborationErrorMessage } from "../collaboration/formatCollaborationError";
 import { workItemKey } from "../../shared/collaborationReadModels.js";
+import type { createTranslator } from "../i18n";
 import { useCollaborationReadModels } from "./useCollaborationReadModels";
 import { useCollaborationStatus } from "./useCollaborationStatus";
 import type { PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
@@ -22,6 +26,10 @@ export type UseAssigneePickerControllerArgs = {
   api?: PlanWeaveCollaborationApi | null;
   /** When true, load eligible assignees (picker open). Default false for on-demand. */
   detailsOpen?: boolean;
+  /** Translator for primary assignee labels (en / zh-CN catalog). */
+  t?: ReturnType<typeof createTranslator>;
+  /** Optional prebuilt labels; takes precedence over t when both are provided. */
+  labels?: AssigneeDisplayLabels;
   /** Optional outcome callbacks for shell toasts / activity UX. */
   onAssignmentOutcome?: (outcome: {
     ok: boolean;
@@ -61,12 +69,20 @@ export function useAssigneePickerController(
   const sessionConnected =
     status?.session.phase === "connected" || status?.session.phase === "ready";
 
+  // Subscribe only — project/canvas binding is owned by useCollaborationSurface.
   const { snapshot, viewModel: projectView, controller } = useCollaborationReadModels({
     api,
     profileId: sessionConnected ? (activeProfile?.profileId ?? null) : null,
     projectId: sessionConnected ? (activeProfile?.projectId ?? null) : null,
-    canvasId: args.workItem?.canvasId ?? null
+    canvasId: args.workItem?.canvasId ?? null,
+    manageActiveProject: false
   });
+
+  const labels = useMemo((): AssigneeDisplayLabels => {
+    if (args.labels) return args.labels;
+    if (args.t) return assigneeDisplayLabelsFromTranslator(args.t);
+    return DEFAULT_ASSIGNEE_DISPLAY_LABELS;
+  }, [args.labels, args.t]);
 
   const [eligible, setEligible] = useState<EligibleAssigneesResponse | null>(null);
   const [eligibleLoading, setEligibleLoading] = useState(false);
@@ -152,6 +168,24 @@ export function useAssigneePickerController(
       if (!api || !args.workItem || !controller) return false;
       if (pendingRef.current) return false;
 
+      // Defense in depth: Tasks never assign to machine targets even if a caller
+      // bypasses the view-model option list.
+      if (
+        args.workItem.kind === "task" &&
+        (target.kind === "exact_host" || target.kind === "automatic_host")
+      ) {
+        const errorMessage = labels.taskDisallowsMachine;
+        setActionError(errorMessage);
+        setLastAttemptedTarget(target);
+        onOutcomeRef.current?.({
+          ok: false,
+          workItem: args.workItem,
+          target,
+          errorMessage
+        });
+        return false;
+      }
+
       const current = snapshot.assignmentsByWorkItem[workItemKey(args.workItem)] ?? null;
       const expectedRevision = current?.revision ?? 0;
       if (current && targetsEqual(current.target, target)) {
@@ -217,7 +251,15 @@ export function useAssigneePickerController(
         }
       }
     },
-    [api, args.workItem, controller, detailsOpen, loadEligible, snapshot.assignmentsByWorkItem]
+    [
+      api,
+      args.workItem,
+      controller,
+      detailsOpen,
+      labels.taskDisallowsMachine,
+      loadEligible,
+      snapshot.assignmentsByWorkItem
+    ]
   );
 
   const retryLastTarget = useCallback(async () => {
@@ -246,7 +288,8 @@ export function useAssigneePickerController(
       pending,
       staleConflict: localStaleConflict || snapshot.syncPhase === "stale_conflict",
       lastError: actionError ?? snapshot.lastError,
-      query
+      query,
+      labels
     });
   }, [
     actionError,
@@ -255,6 +298,7 @@ export function useAssigneePickerController(
     detailsOpen,
     eligible,
     eligibleLoading,
+    labels,
     localStaleConflict,
     pending,
     projectView.hosts,

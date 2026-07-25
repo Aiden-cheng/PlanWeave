@@ -11,6 +11,8 @@ import {
   lookupTaskCardAssigneeChip,
   taskWorkItemKey
 } from "../renderer/collaboration/assigneeSurfaceViewModels";
+import { assigneeDisplayLabelsFromTranslator } from "../renderer/collaboration/assignmentViewModels";
+import { createTranslator } from "../renderer/i18n";
 import type { CollaborationReadModelSnapshot } from "../shared/collaborationReadModels";
 import { workItemKey } from "../shared/collaborationReadModels";
 
@@ -82,6 +84,38 @@ describe("assigneeSurfaceViewModels", () => {
       lookupTaskCardAssigneeChip(index, "canvas-1", "T-1", ["T-1#B-001"])?.workItemKey
     ).toBe(workItemKey(assignment.workItem));
     expect(taskWorkItemKey("canvas-1", "T-1")).toBe("task:canvas-1:T-1");
+  });
+
+  it("localizes automatic host compact chips via catalog labels", () => {
+    const zhLabels = assigneeDisplayLabelsFromTranslator(createTranslator("zh-CN"));
+    const assignment = {
+      ...exampleAssignmentProjection,
+      workItem: {
+        kind: "block" as const,
+        canvasId: "canvas-1",
+        blockRef: "T-1#B-001"
+      },
+      target: { kind: "automatic_host" as const },
+      human: undefined,
+      host: undefined,
+      availability: {
+        status: "pending" as const,
+        reason: "automatic_pending_selection" as const
+      }
+    };
+    const chip = buildCompactAssigneeChip(assignment, assignment.workItem, zhLabels);
+    expect(chip.label).toBe("自动 Host");
+    expect(chip.visible).toBe(true);
+
+    const index = buildAssigneeSurfaceIndex(
+      baseSnapshot({
+        assignmentsByWorkItem: {
+          [workItemKey(assignment.workItem)]: assignment
+        }
+      }),
+      zhLabels
+    );
+    expect(lookupBlockAssigneeChip(index, "canvas-1", "T-1#B-001")?.label).toBe("自动 Host");
   });
 
   it("builds collaboration notifications from activity and confirmed/rejected mutations only", () => {

@@ -41,6 +41,7 @@ export function AssigneeInspectorField({
     workItem: stableWorkItem,
     api,
     detailsOpen,
+    t,
     onAssignmentOutcome
   });
 

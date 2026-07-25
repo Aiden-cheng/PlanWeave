@@ -59,10 +59,12 @@ export function PeoplePresenceControl({
   const sessionConnected =
     status?.session.phase === "connected" || status?.session.phase === "ready";
 
+  // Subscribe only — shell (useCollaborationSurface) owns hub project/canvas binding.
   const { snapshot, viewModel, controller } = useCollaborationReadModels({
     api,
     profileId: sessionConnected ? (activeProfile?.profileId ?? null) : null,
-    projectId: sessionConnected ? (activeProfile?.projectId ?? null) : null
+    projectId: sessionConnected ? (activeProfile?.projectId ?? null) : null,
+    manageActiveProject: false
   });
 
   const panel = usePeoplePanelController({

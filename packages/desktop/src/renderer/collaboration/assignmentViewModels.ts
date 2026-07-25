@@ -37,6 +37,64 @@ export type AssigneeUnavailableReason =
   | "auth_expired"
   | "server_error";
 
+/**
+ * Localized copy for primary assignee labels and secondary host/membership hints.
+ * Production callers should build this from the i18n catalog (en + zh-CN parity).
+ */
+export type AssigneeDisplayLabels = {
+  unassigned: string;
+  automaticHost: string;
+  automaticHostSelection: string;
+  automaticHostSecondary: string;
+  inactiveMembership: string;
+  hostOffline: string;
+  hostAtCapacity: string;
+  agentHost: string;
+  host: string;
+  taskDisallowsMachine: string;
+};
+
+/** English defaults for pure unit tests; UI must pass catalog-backed labels. */
+export const DEFAULT_ASSIGNEE_DISPLAY_LABELS: AssigneeDisplayLabels = {
+  unassigned: "Unassigned",
+  automaticHost: "Automatic host",
+  automaticHostSelection: "Automatic host selection",
+  automaticHostSecondary: "Server chooses a compatible host at dispatch time",
+  inactiveMembership: "Inactive membership",
+  hostOffline: "Offline",
+  hostAtCapacity: "At capacity",
+  agentHost: "Agent Host",
+  host: "Host",
+  taskDisallowsMachine: "Tasks cannot be assigned to Agent Hosts."
+};
+
+export function assigneeDisplayLabelsFromTranslator(
+  t: (key:
+    | "assigneeLabelUnassigned"
+    | "assigneeLabelAutomaticHost"
+    | "assigneeLabelAutomaticHostSelection"
+    | "assigneeSecondaryAutomaticHost"
+    | "assigneeSecondaryInactiveMembership"
+    | "assigneeSecondaryHostOffline"
+    | "assigneeSecondaryHostAtCapacity"
+    | "assigneeSecondaryAgentHost"
+    | "assigneeSecondaryHost"
+    | "assigneeReasonTaskNoMachine") => string
+): AssigneeDisplayLabels {
+  return {
+    unassigned: t("assigneeLabelUnassigned"),
+    automaticHost: t("assigneeLabelAutomaticHost"),
+    automaticHostSelection: t("assigneeLabelAutomaticHostSelection"),
+    automaticHostSecondary: t("assigneeSecondaryAutomaticHost"),
+    inactiveMembership: t("assigneeSecondaryInactiveMembership"),
+    hostOffline: t("assigneeSecondaryHostOffline"),
+    hostAtCapacity: t("assigneeSecondaryHostAtCapacity"),
+    agentHost: t("assigneeSecondaryAgentHost"),
+    host: t("assigneeSecondaryHost"),
+    taskDisallowsMachine: t("assigneeReasonTaskNoMachine")
+  };
+}
+
 export type AssigneeOptionKind = AssignmentTarget["kind"];
 
 export type AssigneeOption = {
@@ -203,11 +261,12 @@ export function mapAvailabilityToIssue(
 }
 
 export function buildAssigneeCurrentDisplay(
-  assignment: AssignmentDisplayProjection | null | undefined
+  assignment: AssignmentDisplayProjection | null | undefined,
+  labels: AssigneeDisplayLabels = DEFAULT_ASSIGNEE_DISPLAY_LABELS
 ): AssigneeCurrentDisplay {
   if (!assignment) {
     return {
-      label: "Unassigned",
+      label: labels.unassigned,
       targetKind: "unassigned",
       revision: 0,
       availabilityStatus: "unassigned",
@@ -223,7 +282,7 @@ export function buildAssigneeCurrentDisplay(
   switch (assignment.target.kind) {
     case "unassigned":
       return {
-        label: "Unassigned",
+        label: labels.unassigned,
         targetKind: "unassigned",
         revision: assignment.revision,
         availabilityStatus: assignment.availability.status,
@@ -265,7 +324,7 @@ export function buildAssigneeCurrentDisplay(
     }
     case "automatic_host":
       return {
-        label: "Automatic host",
+        label: labels.automaticHost,
         targetKind: "automatic_host",
         revision: assignment.revision,
         availabilityStatus: assignment.availability.status,
@@ -306,6 +365,7 @@ function evaluateHostOption(input: {
   requiredCapabilities: readonly string[];
   selected: boolean;
   allowMachineTargets: boolean;
+  labels: AssigneeDisplayLabels;
 }): AssigneeOption {
   const label = input.host.displayName?.trim() || input.host.hostId;
   const target: AssignmentTarget = { kind: "exact_host", hostId: input.host.hostId };
@@ -315,7 +375,7 @@ function evaluateHostOption(input: {
       kind: "exact_host",
       target,
       label,
-      secondaryLabel: "Host",
+      secondaryLabel: input.labels.host,
       selectable: false,
       unavailableReason: "task_disallows_machine",
       selected: input.selected,
@@ -339,8 +399,8 @@ function evaluateHostOption(input: {
   }
 
   const secondaryParts: string[] = [];
-  if (warningReason === "host_offline") secondaryParts.push("Offline");
-  if (warningReason === "host_at_capacity") secondaryParts.push("At capacity");
+  if (warningReason === "host_offline") secondaryParts.push(input.labels.hostOffline);
+  if (warningReason === "host_at_capacity") secondaryParts.push(input.labels.hostAtCapacity);
   if (input.host.capabilities.length > 0) {
     secondaryParts.push(input.host.capabilities.slice(0, 3).join(", "));
   }
@@ -350,7 +410,7 @@ function evaluateHostOption(input: {
     kind: "exact_host",
     target,
     label,
-    secondaryLabel: secondaryParts.length > 0 ? secondaryParts.join(" · ") : "Agent Host",
+    secondaryLabel: secondaryParts.length > 0 ? secondaryParts.join(" · ") : input.labels.agentHost,
     selectable: unavailableReason === null,
     unavailableReason,
     selected: input.selected,
@@ -364,6 +424,7 @@ function evaluateHumanOption(input: {
   displayName: string;
   membershipActive: boolean;
   selected: boolean;
+  labels: AssigneeDisplayLabels;
 }): AssigneeOption {
   const target: AssignmentTarget = {
     kind: "human",
@@ -377,7 +438,7 @@ function evaluateHumanOption(input: {
     kind: "human",
     target,
     label: input.displayName.trim() || input.humanPrincipalId,
-    secondaryLabel: input.membershipActive ? null : "Inactive membership",
+    secondaryLabel: input.membershipActive ? null : input.labels.inactiveMembership,
     selectable: unavailableReason === null,
     unavailableReason,
     selected: input.selected,
@@ -398,7 +459,9 @@ export function buildAssigneeSections(input: {
   hosts: readonly CollaborationHostProjection[];
   eligible: EligibleAssigneesResponse | null | undefined;
   requiredCapabilities?: readonly string[];
+  labels?: AssigneeDisplayLabels;
 }): AssigneeSection[] {
+  const labels = input.labels ?? DEFAULT_ASSIGNEE_DISPLAY_LABELS;
   const selected = input.assignment?.target ?? { kind: "unassigned" as const };
   const allowMachineTargets = input.workItem.kind === "block";
   const packageCaps = input.requiredCapabilities ?? [];
@@ -407,12 +470,12 @@ export function buildAssigneeSections(input: {
     id: "unassigned",
     kind: "unassigned",
     target: { kind: "unassigned" },
-    label: "Unassigned",
+    label: labels.unassigned,
     secondaryLabel: null,
     selectable: true,
     unavailableReason: null,
     selected: selected.kind === "unassigned",
-    searchText: "unassigned none clear",
+    searchText: `${labels.unassigned} unassigned none clear`.toLowerCase(),
     warningReason: null
   };
 
@@ -426,7 +489,8 @@ export function buildAssigneeSections(input: {
         displayName: member.displayName,
         membershipActive: true,
         selected:
-          selected.kind === "human" && selected.humanPrincipalId === member.humanPrincipalId
+          selected.kind === "human" && selected.humanPrincipalId === member.humanPrincipalId,
+        labels
       })
     );
   }
@@ -441,7 +505,8 @@ export function buildAssigneeSections(input: {
         displayName: human.displayName?.trim() || existing?.label || human.humanPrincipalId,
         membershipActive: human.membershipActive,
         selected:
-          selected.kind === "human" && selected.humanPrincipalId === human.humanPrincipalId
+          selected.kind === "human" && selected.humanPrincipalId === human.humanPrincipalId,
+        labels
       })
     );
   }
@@ -454,7 +519,8 @@ export function buildAssigneeSections(input: {
         humanPrincipalId: selected.humanPrincipalId,
         displayName: input.assignment?.human?.displayName?.trim() || selected.humanPrincipalId,
         membershipActive: input.assignment?.human?.membershipActive ?? false,
-        selected: true
+        selected: true,
+        labels
       })
     );
   }
@@ -491,7 +557,8 @@ export function buildAssigneeSections(input: {
         },
         requiredCapabilities: caps,
         selected: selected.kind === "exact_host" && selected.hostId === host.hostId,
-        allowMachineTargets: true
+        allowMachineTargets: true,
+        labels
       })
     );
   }
@@ -514,7 +581,8 @@ export function buildAssigneeSections(input: {
         },
         requiredCapabilities: caps,
         selected: selected.kind === "exact_host" && selected.hostId === host.hostId,
-        allowMachineTargets: true
+        allowMachineTargets: true,
+        labels
       })
     );
   }
@@ -536,7 +604,8 @@ export function buildAssigneeSections(input: {
         },
         requiredCapabilities: caps,
         selected: true,
-        allowMachineTargets: true
+        allowMachineTargets: true,
+        labels
       })
     );
   }
@@ -548,12 +617,12 @@ export function buildAssigneeSections(input: {
     id: "automatic_host",
     kind: "automatic_host",
     target: { kind: "automatic_host" },
-    label: "Automatic host selection",
-    secondaryLabel: "Server chooses a compatible host at dispatch time",
+    label: labels.automaticHostSelection,
+    secondaryLabel: labels.automaticHostSecondary,
     selectable: true,
     unavailableReason: null,
     selected: selected.kind === "automatic_host",
-    searchText: "automatic host selection auto machine",
+    searchText: `${labels.automaticHostSelection} automatic host selection auto machine`.toLowerCase(),
     warningReason: null
   };
   sections.push({ id: "automatic", options: [automatic] });
@@ -600,7 +669,9 @@ export function buildAssigneePickerViewModel(input: {
   lastError: CollaborationBoundaryErrorView | string | null;
   query?: string;
   pendingMutations?: readonly CollaborationMutationRecord[];
+  labels?: AssigneeDisplayLabels;
 }): AssigneePickerViewModel {
+  const labels = input.labels ?? DEFAULT_ASSIGNEE_DISPLAY_LABELS;
   const mode = resolveAssigneePickerMode({
     status: input.status,
     syncPhase: input.syncPhase,
@@ -627,7 +698,8 @@ export function buildAssigneePickerViewModel(input: {
     members: input.members,
     hosts: input.hosts,
     eligible: input.eligible,
-    requiredCapabilities: input.requiredCapabilities
+    requiredCapabilities: input.requiredCapabilities,
+    labels
   }).map((section) => ({
     ...section,
     options: section.options.map((option) => ({
@@ -656,7 +728,7 @@ export function buildAssigneePickerViewModel(input: {
     workItem: input.workItem,
     canEdit,
     editBlockedReason,
-    current: buildAssigneeCurrentDisplay(input.assignment),
+    current: buildAssigneeCurrentDisplay(input.assignment, labels),
     sections: filteredSections,
     filteredOptions,
     pending: input.pending,

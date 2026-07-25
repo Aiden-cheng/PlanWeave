@@ -18,6 +18,15 @@ export type UseCollaborationReadModelsArgs = {
   profileId: string | null;
   projectId: string | null;
   canvasId?: string | null;
+  /**
+   * When true, this hook owns hub setActiveProject/clear binding.
+   * Only the project shell (useCollaborationSurface) should enable this so
+   * People/Assignee consumers can subscribe without thrashing canvas filter
+   * or clearing shared assignment projections.
+   * Isolated tests that need binding should pass true explicitly.
+   * @default false
+   */
+  manageActiveProject?: boolean;
   /** Optional local Runtime facts merged only in view-model functions. */
   localWorkItems?: readonly LocalRuntimeWorkItemFacts[];
   /**
@@ -85,6 +94,7 @@ export function useCollaborationReadModels(
   }, [api]);
 
   useEffect(() => {
+    if (!args.manageActiveProject) return;
     const controller = controllerRef.current;
     if (!controller) return;
     if (!args.profileId || !args.projectId) {
@@ -96,7 +106,13 @@ export function useCollaborationReadModels(
       projectId: args.projectId,
       canvasId: args.canvasId
     });
-  }, [args.profileId, args.projectId, args.canvasId, controllerVersion]);
+  }, [
+    args.manageActiveProject,
+    args.profileId,
+    args.projectId,
+    args.canvasId,
+    controllerVersion
+  ]);
 
   const controller = controllerRef.current;
   const snapshot = useSyncExternalStore(

@@ -11,7 +11,9 @@ import {
 } from "../../shared/collaborationReadModels.js";
 import {
   buildAssigneeCurrentDisplay,
+  DEFAULT_ASSIGNEE_DISPLAY_LABELS,
   type AssigneeCurrentDisplay,
+  type AssigneeDisplayLabels,
   type AssigneeUnavailableReason
 } from "./assignmentViewModels.js";
 
@@ -52,9 +54,10 @@ export function isAssigneeSurfaceActive(syncPhase: CollaborationSyncPhase): bool
 
 export function buildCompactAssigneeChip(
   assignment: AssignmentDisplayProjection | null | undefined,
-  workItem: WorkItemRef
+  workItem: WorkItemRef,
+  labels: AssigneeDisplayLabels = DEFAULT_ASSIGNEE_DISPLAY_LABELS
 ): CompactAssigneeChip {
-  const current = buildAssigneeCurrentDisplay(assignment);
+  const current = buildAssigneeCurrentDisplay(assignment, labels);
   const key = workItemKey(workItem);
   const isUnassigned = current.targetKind === "unassigned";
   const hasIssue = current.issueReason != null;
@@ -76,11 +79,12 @@ export function buildCompactAssigneeChip(
  * Consumers resolve task/block keys; they never open subscriptions.
  */
 export function buildAssigneeSurfaceIndex(
-  snapshot: CollaborationReadModelSnapshot
+  snapshot: CollaborationReadModelSnapshot,
+  labels: AssigneeDisplayLabels = DEFAULT_ASSIGNEE_DISPLAY_LABELS
 ): AssigneeSurfaceIndex {
   const byWorkItemKey: Record<string, CompactAssigneeChip> = {};
   for (const [key, assignment] of Object.entries(snapshot.assignmentsByWorkItem)) {
-    byWorkItemKey[key] = buildCompactAssigneeChip(assignment, assignment.workItem);
+    byWorkItemKey[key] = buildCompactAssigneeChip(assignment, assignment.workItem, labels);
   }
   return {
     byWorkItemKey,
