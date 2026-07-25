@@ -6,9 +6,13 @@ import {
 const TOKEN_LIKE =
   /(pw_hdev_[A-Za-z0-9_-]+|pw_inv_[A-Za-z0-9_-]+|Bearer\s+[A-Za-z0-9._~+/-]+=*)/gi;
 
+/** Absolute filesystem paths that must not cross the renderer IPC boundary. */
+const ABSOLUTE_PATH_LIKE =
+  /(?:[A-Za-z]:\\|\\\\|\/(?:Users|home|var|tmp|private|root|opt|etc|Library)\/)[^\s"'`]+/g;
+
 /**
- * Redact human device / invitation tokens and Authorization headers from log text.
- * Never throw; returns a safe string for diagnostics only.
+ * Redact human device / invitation tokens, Authorization headers, and absolute paths
+ * from diagnostic / boundary error text. Never throw; returns a safe string only.
  */
 export function redactCollaborationText(value: string): string {
   return value
@@ -20,6 +24,7 @@ export function redactCollaborationText(value: string): string {
       }
       return "[REDACTED]";
     })
+    .replace(ABSOLUTE_PATH_LIKE, "<redacted-path>")
     .replace(/"deviceToken"\s*:\s*"[^"]*"/g, '"deviceToken":"[REDACTED]"')
     .replace(/"invitationToken"\s*:\s*"[^"]*"/g, '"invitationToken":"[REDACTED]"')
     .replace(/"existingDeviceToken"\s*:\s*"[^"]*"/g, '"existingDeviceToken":"[REDACTED]"');

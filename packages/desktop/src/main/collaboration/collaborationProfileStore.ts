@@ -145,21 +145,13 @@ export class CollaborationProfileStore {
         this.loaded = defaultDocument();
         return this.loaded;
       }
-      throw new Error(
-        `Failed to read collaboration profiles at ${this.paths.profilesPath}: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
+      throw new Error("Failed to read collaboration profiles.");
     }
     try {
       this.loaded = normalizeDocument(JSON.parse(raw));
       return this.loaded;
     } catch (error) {
-      throw new Error(
-        `Invalid collaboration profiles JSON at ${this.paths.profilesPath}: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
+      throw new Error("Invalid collaboration profiles JSON.");
     }
   }
 

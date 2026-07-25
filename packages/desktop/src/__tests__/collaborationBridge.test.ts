@@ -429,6 +429,109 @@ describe("CollaborationService IPC trust boundary", () => {
     await expect(service.getStatus()).rejects.toThrow(/shut down/);
   });
 
+  it("preserves validated observer cursor across dispose and resumes startObserver", async () => {
+    const root = await tempDir("planweave-collab-cursor-");
+    const startObserver = vi.fn();
+    let observerCursor = 0;
+    const service = new CollaborationService({
+      profileStore: new CollaborationProfileStore({ profilesPath: join(root, "profiles.json") }),
+      vault: new CollaborationCredentialVault({
+        paths: { credentialsPath: join(root, "credentials.json") },
+        safeStorage: mockSafeStorage({ available: true })
+      }),
+      createClient: () =>
+        ({
+          startObserver: (handlers: { onStatus?: (status: unknown) => void }, options?: { cursor?: number }) => {
+            startObserver(handlers, options);
+            if (options?.cursor !== undefined) {
+              observerCursor = options.cursor;
+            }
+            handlers.onStatus?.({
+              state: "connected",
+              cursor: observerCursor > 0 ? observerCursor : 42,
+              connectedAt: "2030-01-01T00:00:00.000Z"
+            });
+            observerCursor = observerCursor > 0 ? observerCursor : 42;
+          },
+          stopObserver: vi.fn(),
+          dispose: vi.fn(),
+          lastObserverCursor: () => observerCursor,
+          bootstrapOwner: vi.fn(),
+          consumeInvitation: vi.fn()
+        }) as never
+    });
+
+    await service.upsertProfile({
+      profileId: "profile-a",
+      displayName: "A",
+      serverBaseUrl: "https://a.example.com/",
+      projectId: "project-a",
+      allowInsecureTransport: false
+    });
+    await service.importDeviceCredential({
+      profileId: "profile-a",
+      deviceToken: exampleHumanDeviceToken
+    });
+
+    await service.connectSession({ profileId: "profile-a" });
+    expect(startObserver).toHaveBeenCalledWith(expect.any(Object), { cursor: 0 });
+
+    await service.disconnectSession();
+    startObserver.mockClear();
+    observerCursor = 0;
+
+    await service.connectSession({ profileId: "profile-a" });
+    expect(startObserver).toHaveBeenCalledWith(expect.any(Object), { cursor: 42 });
+
+    await service.shutdown();
+  });
+
+  it("does not leak absolute vault/profile paths through storage or boundary errors", async () => {
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    const root = await tempDir("planweave-collab-path-");
+    const profilesPath = join(root, "profiles.json");
+    const credentialsDir = join(root, "credentials-as-dir");
+    await writeFile(profilesPath, "{not-json", "utf8");
+    await mkdir(credentialsDir);
+
+    const profileStore = new CollaborationProfileStore({ profilesPath });
+    await expect(profileStore.read()).rejects.toMatchObject({
+      message: expect.stringMatching(/Invalid collaboration profiles JSON/)
+    });
+    try {
+      await profileStore.read();
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).not.toContain(profilesPath);
+      expect((error as Error).message).not.toContain(root);
+    }
+
+    const vault = new CollaborationCredentialVault({
+      paths: { credentialsPath: credentialsDir },
+      safeStorage: mockSafeStorage({ available: true })
+    });
+    // Directory path makes readFile fail without embedding the absolute path in the boundary message.
+    try {
+      await vault.getDeviceToken("profile-a");
+      throw new Error("vault read should fail");
+    } catch (error) {
+      if (error instanceof Error && error.message === "vault read should fail") throw error;
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toMatch(/Failed to read collaboration credentials/);
+      expect((error as Error).message).not.toContain(credentialsDir);
+      expect((error as Error).message).not.toContain(root);
+    }
+
+    const { collaborationErrorFromUnknown } = await import("../main/collaboration/collaborationErrors.js");
+    const leakedPath = join(root, "secrets", "credentials.json");
+    const leaked = collaborationErrorFromUnknown(
+      new Error(`Failed to read collaboration credentials at ${leakedPath}: EACCES`)
+    );
+    expect(leaked.message).not.toContain(leakedPath);
+    expect(leaked.message).not.toContain(root);
+    expect(leaked.message).toContain("<redacted-path>");
+  });
+
   it("registers unique collaboration invoke channels", () => {
     const channels = Object.values(collaborationInvokeChannels);
     expect(new Set(channels).size).toBe(channels.length);
@@ -437,10 +540,12 @@ describe("CollaborationService IPC trust boundary", () => {
     }
   });
 
-  it("redacts device tokens from diagnostic text", () => {
-    const raw = `Authorization: Bearer ${exampleHumanDeviceToken} body={"deviceToken":"${exampleHumanDeviceToken}"}`;
+  it("redacts device tokens and absolute paths from diagnostic text", () => {
+    const raw = `Authorization: Bearer ${exampleHumanDeviceToken} body={"deviceToken":"${exampleHumanDeviceToken}"} path=/Users/alice/.planweave/credentials.json`;
     const redacted = redactCollaborationText(raw);
     expect(redacted).not.toContain(exampleHumanDeviceToken);
     expect(redacted).toContain("[REDACTED]");
+    expect(redacted).not.toContain("/Users/alice");
+    expect(redacted).toContain("<redacted-path>");
   });
 });

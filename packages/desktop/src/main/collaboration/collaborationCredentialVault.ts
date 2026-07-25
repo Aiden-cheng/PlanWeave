@@ -150,11 +150,7 @@ export class CollaborationCredentialVault {
         this.loaded = true;
         return this.document;
       }
-      throw new Error(
-        `Failed to read collaboration credentials at ${this.paths.credentialsPath}: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
+      throw new Error("Failed to read collaboration credentials.");
     }
     try {
       const parsed = JSON.parse(raw) as unknown;
@@ -198,11 +194,7 @@ export class CollaborationCredentialVault {
       this.loaded = true;
       return this.document!;
     } catch (error) {
-      throw new Error(
-        `Invalid collaboration credentials JSON at ${this.paths.credentialsPath}: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
+      throw new Error("Invalid collaboration credentials JSON.");
     }
   }
 

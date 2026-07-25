@@ -152,6 +152,9 @@ export class CollaborationService {
   private lastErrorCode: string | null = null;
   private lastErrorMessage: string | null = null;
   private observerStatus: CollaborationObserverStatus = { state: "stopped" };
+  /** Last validated observer cursor preserved across dispose/reconnect for the same profile. */
+  private lastValidatedObserverCursor = 0;
+  private lastValidatedObserverProfileId: string | null = null;
   private disposed = false;
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -298,6 +301,8 @@ export class CollaborationService {
       const { profileId } = collaborationProfileIdInputSchema.parse(input);
       if (this.clientProfileId === profileId) {
         await this.disposeClient("profile_removed");
+      } else {
+        this.clearRememberedObserverCursor(profileId);
       }
       await this.vault.clear(profileId);
       await this.profiles.remove(profileId);
@@ -378,6 +383,8 @@ export class CollaborationService {
       const { profileId } = collaborationProfileIdInputSchema.parse(input);
       if (this.clientProfileId === profileId) {
         await this.disposeClient("logout");
+      } else {
+        this.clearRememberedObserverCursor(profileId);
       }
       await this.vault.clear(profileId);
       return this.publishStatus();
@@ -538,56 +545,65 @@ export class CollaborationService {
       this.clientProfileId = profileId;
       await this.profiles.setActiveProfileId(profileId);
       this.observerStatus = { state: "stopped" };
+      const resumeCursor =
+        this.lastValidatedObserverProfileId === profileId ? this.lastValidatedObserverCursor : 0;
       try {
         this.setSession("connecting", "observer");
-        client.startObserver({
-          onStatus: (status) => {
-            this.observerStatus = status;
-            if (status.state === "connected") {
-              this.setSession("connected", `observer:${status.state}`, null);
+        client.startObserver(
+          {
+            onStatus: (status) => {
+              this.observerStatus = status;
+              if (status.state === "connected") {
+                this.rememberObserverCursor(profileId, status.cursor);
+                this.setSession("connected", `observer:${status.state}`, null);
+                this.publishObserverSignal({
+                  type: "human.observer.cursor",
+                  profileId,
+                  projectId: profile.projectId,
+                  cursor: status.cursor
+                });
+              } else if (status.state === "auth_expired") {
+                this.setSession("error", `observer:${status.state}`, {
+                  code: status.code,
+                  message: "Collaboration device credential was rejected by the server."
+                });
+                void this.vault.clear(profileId).then(() => this.publishStatus());
+              } else if (status.state === "failed") {
+                this.setSession("error", `observer:${status.state}`, {
+                  code: status.code,
+                  message: status.code
+                });
+              } else if (status.state === "reconnecting" || status.state === "connecting") {
+                this.setSession("connecting", `observer:${status.state}`);
+              } else if (status.state === "catching_up") {
+                this.rememberObserverCursor(profileId, status.resumeCursor);
+                this.setSession("connected", `observer:${status.state}`);
+              }
+              void this.publishStatus();
+            },
+            onEvent: (message) => {
+              this.rememberObserverCursor(profileId, message.cursor);
               this.publishObserverSignal({
-                type: "human.observer.cursor",
+                type: "human.observer.event",
                 profileId,
                 projectId: profile.projectId,
-                cursor: status.cursor
+                event: message
               });
-            } else if (status.state === "auth_expired") {
-              this.setSession("error", `observer:${status.state}`, {
-                code: status.code,
-                message: "Collaboration device credential was rejected by the server."
+            },
+            onCatchupRequired: (message) => {
+              this.rememberObserverCursor(profileId, message.resumeCursor);
+              this.publishObserverSignal({
+                type: "human.observer.catchup_required",
+                profileId,
+                projectId: profile.projectId,
+                reason: message.reason,
+                resumeCursor: message.resumeCursor,
+                droppedThroughCursor: message.droppedThroughCursor
               });
-              void this.vault.clear(profileId).then(() => this.publishStatus());
-            } else if (status.state === "failed") {
-              this.setSession("error", `observer:${status.state}`, {
-                code: status.code,
-                message: status.code
-              });
-            } else if (status.state === "reconnecting" || status.state === "connecting") {
-              this.setSession("connecting", `observer:${status.state}`);
-            } else if (status.state === "catching_up") {
-              this.setSession("connected", `observer:${status.state}`);
             }
-            void this.publishStatus();
           },
-          onEvent: (message) => {
-            this.publishObserverSignal({
-              type: "human.observer.event",
-              profileId,
-              projectId: profile.projectId,
-              event: message
-            });
-          },
-          onCatchupRequired: (message) => {
-            this.publishObserverSignal({
-              type: "human.observer.catchup_required",
-              profileId,
-              projectId: profile.projectId,
-              reason: message.reason,
-              resumeCursor: message.resumeCursor,
-              droppedThroughCursor: message.droppedThroughCursor
-            });
-          }
-        });
+          { cursor: resumeCursor }
+        );
         this.setSession("connecting", "observer_started", null);
       } catch (error) {
         const mapped = collaborationErrorFromUnknown(error);
@@ -703,8 +719,36 @@ export class CollaborationService {
     this.onObserverSignal?.(signal);
   }
 
+  private rememberObserverCursor(profileId: string, cursor: number): void {
+    if (!Number.isFinite(cursor) || cursor < 0) return;
+    if (this.lastValidatedObserverProfileId !== profileId) {
+      this.lastValidatedObserverProfileId = profileId;
+      this.lastValidatedObserverCursor = cursor;
+      return;
+    }
+    if (cursor > this.lastValidatedObserverCursor) {
+      this.lastValidatedObserverCursor = cursor;
+    }
+  }
+
+  private clearRememberedObserverCursor(profileId?: string | null): void {
+    if (profileId == null || this.lastValidatedObserverProfileId === profileId) {
+      this.lastValidatedObserverCursor = 0;
+      this.lastValidatedObserverProfileId = null;
+    }
+  }
+
   private async disposeClient(reason: string): Promise<void> {
     const client = this.client;
+    const profileId = this.clientProfileId;
+    // Preserve validated cursor across dispose so the next connectSession can resume.
+    if (client && profileId) {
+      try {
+        this.rememberObserverCursor(profileId, client.lastObserverCursor());
+      } catch {
+        // ignore cursor capture races during dispose
+      }
+    }
     this.client = null;
     this.clientProfileId = null;
     this.observerStatus = { state: "stopped" };
@@ -720,6 +764,10 @@ export class CollaborationService {
         // ignore dispose errors
       }
       this.sessionDetail = reason;
+    }
+    // Drop resume continuity only when the device/profile identity is torn down.
+    if (reason === "logout" || reason === "profile_removed" || reason === "shutdown") {
+      this.clearRememberedObserverCursor(profileId);
     }
   }
 

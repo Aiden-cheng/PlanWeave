@@ -4,6 +4,7 @@ import {
   mapHttpStatusToBoundaryKind,
   type CollaborationBoundaryErrorKind
 } from "@planweave-ai/collaboration-contracts";
+import { redactCollaborationText } from "./redaction.js";
 
 export class CollaborationClientError extends Error {
   readonly kind: CollaborationBoundaryErrorKind;
@@ -54,7 +55,18 @@ export function collaborationErrorFromHttp(status: number, bodyText: string): Co
 }
 
 export function collaborationErrorFromUnknown(error: unknown): CollaborationClientError {
-  if (error instanceof CollaborationClientError) return error;
+  if (error instanceof CollaborationClientError) {
+    const redacted = redactCollaborationText(error.message);
+    if (redacted === error.message) return error;
+    return new CollaborationClientError({
+      kind: error.kind,
+      code: error.code,
+      message: redacted,
+      httpStatus: error.httpStatus,
+      retryable: error.retryable,
+      cause: error
+    });
+  }
   if (error instanceof Error && error.name === "AbortError") {
     return new CollaborationClientError({
       kind: "aborted",
@@ -85,7 +97,9 @@ export function collaborationErrorFromUnknown(error: unknown): CollaborationClie
   return new CollaborationClientError({
     kind: "unknown",
     code: "collaboration_unknown",
-    message: error instanceof Error ? error.message : "Unknown collaboration error.",
+    message: redactCollaborationText(
+      error instanceof Error ? error.message : "Unknown collaboration error."
+    ),
     retryable: false,
     cause: error
   });
