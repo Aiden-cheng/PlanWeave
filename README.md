@@ -250,9 +250,24 @@ ACP runs expose structured progress, artifacts, usage, and interaction requests 
 
 ## Distributed Operator Guide
 
-PlanWeave can run a **Coordinator** (`planweave-server`) that schedules remote Blocks onto independently deployed **Agent Hosts** (`planweave-agent-host`). Remote execution is **ACP-only**: the Host launches a local ACP agent profile against a configured workspace. Provider API keys, agent login state, and Git credentials stay on the Host machine. Git clone/fetch/push are Block content or Host-side environment setup, not Coordinator features.
+PlanWeave can run a **Coordinator** (`planweave-server`) that schedules remote Blocks onto independently deployed **Agent Hosts** (`planweave-agent-host`). The same Coordinator also hosts human project membership, assignment metadata, scoped comments, and remote-run observation for Desktop collaboration clients.
 
-Use HTTPS in production. Plain HTTP is **development-only** and only accepted on literal loopback (`127.0.0.1` / `::1`) when both sides set `allowInsecureDevelopment: true`.
+### Product boundaries
+
+| Concern | PlanWeave does | PlanWeave does **not** |
+| --- | --- | --- |
+| Work coordination | Coordinates Tasks/Blocks in a Plan Package; records claim/run/review state | Own Git branches, worktrees, merge, push policy, or repository layout |
+| Remote execution | Dispatches Blocks to enrolled Hosts over the public Agent Host protocol | Provide a remote CLI-executor fallback when ACP is unavailable |
+| Secrets | Accepts Host enrollment tokens and operator bearer digests; mints human device tokens once | Store provider API keys, Agent login state, or Git credentials on the Coordinator |
+| Workspace / profiles | Trusts configured project roots and Host workspace/profile mappings | Sync Host workspace trees or ACP profile binaries from the Coordinator |
+| Transport | **HTTPS** (HTTP APIs) and **WSS** (Agent Host connect path `/agent-hosts/:hostId/connect`) in production | Accept non-loopback plain HTTP/WS without explicit development mode |
+| Assignment vs dispatch | **Assignment** is coordination metadata (who/which Host *should* own work); **dispatch** is an explicit remote-run start | Treat assignment write as a run start, or treat Runtime claim as assignment authority |
+| Human discussion | Scoped human comments/activity on Task/Block work items | Mix human comments into Agent mailbox, ACP event streams, or Runtime claim/submit |
+| Interrupted work | Requires explicit lifecycle actions (`resume_same_session`, `retry_new_attempt`, `cancel`, `fail`, `block`) | Silently re-run interrupted Blocks after restart, reconnect, or rollback |
+
+Git clone/fetch/push remain Block content or Host-side environment preparation. PlanWeave never owns branch checkout, worktree creation, or merge decisions for you.
+
+Use HTTPS/WSS in production. Plain HTTP/WS is **development-only** and only accepted on literal loopback (`127.0.0.1` / `::1`) when both sides set `allowInsecureDevelopment: true` (Host coordinator URL may use `http://` or `ws://` only in that mode).
 
 ### Install the CLIs
 
@@ -313,6 +328,22 @@ Production-shaped config (placeholders only):
 }
 ```
 
+Optional `limits` keys (all optional; defaults shown):
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `busyTimeoutMs` | `5000` | SQLite busy timeout |
+| `leaseDurationMs` | `30000` | Host lease duration |
+| `hostOfflineAfterMs` | `90000` | Offline threshold after last heartbeat (must be `>` heartbeat) |
+| `heartbeatIntervalMs` | `15000` | Expected Host heartbeat interval (must be `<` lease and offline) |
+| `maxArtifactBytes` | `104857600` (100 MiB) | Max single remote artifact |
+| `maxWebSocketPayloadBytes` | `262144` | Max Agent Host WebSocket frame |
+| `eventRetentionMaxEvents` | `100000` | Max retained remote ACP events per retention policy |
+| `eventRetentionMaxBytes` | `33554432` (32 MiB) | Max retained remote ACP event bytes |
+| `shutdownTimeoutMs` | `5000` | Drain timeout on SIGINT/SIGTERM |
+
+The SQLite database path is always `<dataDirectory>/planweave-server.sqlite` (not configurable separately).
+
 Start and stop:
 
 ```bash
@@ -335,12 +366,12 @@ curl -fsS https://coordinator.example.com:7443/version
 
 ### TLS and development transport
 
-| Mode | `publicUrl` | `tls` | `allowInsecureDevelopment` |
+| Mode | `publicUrl` / Host `coordinator.url` | `tls` | `allowInsecureDevelopment` |
 | --- | --- | --- | --- |
-| Production | `https://…` origin (port must match `bind.port`) | certificate + private key absolute paths required | omit / `false` |
-| Local development only | `http://127.0.0.1:<port>` | omit | `true` (bind host must be loopback) |
+| Production | `https://…` origin (port must match `bind.port`); Host upgrades to **WSS** for `/agent-hosts/:hostId/connect` | certificate + private key absolute paths required | omit / `false` |
+| Local development only | `http://127.0.0.1:<port>` (or Host `ws://`/`http://` loopback) | omit | `true` (bind host must be loopback) |
 
-Host configs that talk to a development Coordinator set `coordinator.allowInsecureDevelopment: true` and use the same loopback origin. For private CAs in production, set Host `coordinator.caCertificatePath` to an absolute PEM path.
+Host configs that talk to a development Coordinator set `coordinator.allowInsecureDevelopment: true` and use the same loopback origin. For private CAs in production, set Host `coordinator.caCertificatePath` to an absolute PEM path. Agent Host mailbox and ACP control traffic use the Host WebSocket session; human observer traffic (Desktop) is a separate contract and must not be confused with Host mailbox sequences.
 
 ### Install and enroll an Agent Host
 
@@ -392,7 +423,107 @@ planweave-agent-host revoke --config /etc/planweave/agent-host.json
 
 `preflight`, `enroll`, `status`, and `revoke` print JSON diagnostics (`credential`, `capacity`, `capabilities`, `recoverableExecutions`, optional `hostId` / `actionableError`). `run` starts the daemon until SIGINT/SIGTERM, or until a terminal transport/auth failure.
 
-Host credentials live under the Host `dataDirectory` (for example `credentials.json`). Provider and Git credentials remain Host-local environment or agent configuration.
+Host credentials live under the Host `dataDirectory` (for example `credentials.json`). Provider and Git credentials remain Host-local environment or agent configuration. Workspace paths under `workspaceRoot` and ACP `agentProfiles` (command path, args, required environment **names**) stay on the Host config — the Coordinator never receives those secrets or profile binaries.
+
+Supported Host-local ACP profile ids (Runtime registry): `codex-acp`, `claude-code-acp`, `opencode-acp`, `grok-acp`, `pi-acp`. Remote dispatch fails closed when ACP protocol negotiation fails; there is **no** remote CLI fallback.
+
+### Human collaboration (identity, assignment, comments)
+
+Human collaboration is project-scoped and separate from Host enrollment, operator tokens, and Agent Host mailbox traffic.
+
+**Roles:** only `owner` and `member`. Invitations always grant `member` (never owner). Last remaining owner cannot be removed or demoted.
+
+**Credentials (never interchangeable):**
+
+| Prefix / shape | Subject | Used for |
+| --- | --- | --- |
+| Operator bearer (config stores SHA-256 only) | operator | Host enroll/revoke, operator remote-operations |
+| `pw_enroll_…` | one-time Host enrollment grant | Host `enroll` only |
+| `pw_host_…` | enrolled Agent Host | Host WSS connect + Host HTTP |
+| `pw_hdev_…` | human device | Human collaboration HTTPS |
+| `pw_inv_…` | one-shot invitation | Join project as `member` only |
+
+Host-shaped tokens return **401** on human routes. Device tokens are returned once at bootstrap/join; store them in OS-backed secure storage (Desktop uses main-process vault / `safeStorage`), not in package files, renderer `localStorage`, or Coordinator config.
+
+#### Owner bootstrap and membership HTTP
+
+First owner bootstrap is a **loopback local-admin** boundary (not a network bearer). Production still requires TLS for non-bootstrap human routes; bootstrap itself only accepts loopback clients.
+
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| `POST` | `/api/v1/projects/:projectId/human/bootstrap` | loopback local-admin | Mint first project owner + device token handoff |
+| `POST` | `/api/v1/projects/:projectId/human/invitations` | owner `pw_hdev_…` | Create invitation (TTL clamped server-side) |
+| `GET` | `/api/v1/projects/:projectId/human/invitations` | owner | List invitations |
+| `POST` | `/api/v1/projects/:projectId/human/invitations/:invitationId/revoke` | owner | Revoke invitation |
+| `POST` | `/api/v1/projects/:projectId/human/invitations/consume` | invitation body | Join as `member` + device token handoff |
+| `GET` | `/api/v1/projects/:projectId/human/members` | member/owner | List members |
+| `POST` | `/api/v1/projects/:projectId/human/members/:humanPrincipalId/remove` | self or owner | Remove membership (last-owner protected) |
+| `POST` | `/api/v1/projects/:projectId/human/members/:humanPrincipalId/promote` | owner | Promote to owner |
+| `POST` | `/api/v1/projects/:projectId/human/members/:humanPrincipalId/demote` | owner | Demote owner (last-owner protected) |
+| `GET` | `/api/v1/projects/:projectId/human/devices` | member (`scope=own`) / owner (`scope=project`) | List devices |
+| `POST` | `/api/v1/projects/:projectId/human/devices/:deviceCredentialId/revoke` | own device or owner for member device | Soft-revoke device |
+
+Sanitized bootstrap example (loopback only; placeholders):
+
+```bash
+curl -fsS -X POST "https://127.0.0.1:7443/api/v1/projects/planweave-project-example/human/bootstrap" \
+  -H "content-type: application/json" \
+  -d '{"displayName":"Ada","deviceLabel":"laptop"}'
+# Response may include deviceToken exactly once — copy into a secure vault; never commit it.
+```
+
+Invitation consume (network path; token is one-shot):
+
+```bash
+curl -fsS -X POST "https://coordinator.example.com:7443/api/v1/projects/planweave-project-example/human/invitations/consume" \
+  -H "content-type: application/json" \
+  -d '{"invitationToken":"pw_inv_...","displayName":"Grace","deviceLabel":"studio"}'
+```
+
+#### Assignment vs dispatch
+
+Assignment targets (coordination metadata only):
+
+| Target | Task | Block | Meaning |
+| --- | --- | --- | --- |
+| `unassigned` | yes | yes | No human/Host owner |
+| `human` + principal id | yes | yes | Human coordination owner (active membership required) |
+| `exact_host` + host id | **no** | yes | Pin a specific enrolled Host at dispatch |
+| `automatic_host` | **no** | yes | Host selected at dispatch from package `requiredCapabilities` |
+
+Updating assignment **never** claims a Block, never starts a remote run, and never mutates the Plan Package. Dispatch is a separate explicit action (`POST /api/v1/remote-operations` for operators, or Desktop remote-run control for project members). At dispatch begin the Coordinator snapshots Host selection; later reassignment does not rewrite an in-flight selection fingerprint.
+
+#### Comments, attachments, and activity
+
+- Human comments annotate a **Task or Block** work item (Markdown body). They are **not** Agent chat, Runtime claim/submit traffic, Host mailbox messages, or ACP token streams.
+- Comment attachments use a separate blob root and ACL (`/api/v1/projects/:projectId/attachments/*`) from remote-run artifact grants.
+- Activity is an append-only projection of membership, assignment, comment, and remote-run facts for members — not a delivery ACK channel for Host mailbox.
+
+Attachment HTTP (human device bearer):
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/v1/projects/:projectId/attachments/pending` | Stage pending upload |
+| `PUT` | `/api/v1/projects/:projectId/attachments/pending/:pendingUploadId` | Upload bytes |
+| `POST` | `/api/v1/projects/:projectId/attachments/pending/:pendingUploadId/finalize` | Finalize digest |
+| `GET` | `/api/v1/projects/:projectId/attachments/by-digest/:sha256` | Download by digest (membership ACL) |
+| `GET` | `/api/v1/projects/:projectId/attachments/comments/:commentId/:sha256` | Download bound comment attachment |
+| `POST` | `/api/v1/projects/:projectId/attachments/cleanup` | Owner cleanup of expired pending uploads |
+
+Allowed attachment media types: `image/png`, `image/jpeg`, `image/webp`, `image/gif`, `application/pdf`, `text/plain`, `text/markdown`. Max attachment size: **8 MiB**. Max attachments per comment: **8**.
+
+#### Desktop collaboration surfaces
+
+PlanWeave Desktop connects to a Coordinator with a non-secret connection profile (`serverBaseUrl` origin + `projectId`; HTTPS required unless loopback insecure mode). Device credentials stay in the main-process vault. Renderer code never sees bearer tokens and never opens raw sockets.
+
+Typical UI surfaces (domain semantics and Desktop client contracts):
+
+- **People**: members, invitations (owner), devices, Host presence/capacity (view-only for Hosts)
+- **Assignee picker**: Task/Block assignment chips; Host targets only on Blocks
+- **Comments / Activity**: scoped to the selected Task/Block; distinct from Task Workspace Agent conversation
+- **Remote run panel**: explicit dispatch / observe / interaction / resume / retry / cancel — coexists with local Auto Run but does not merge status machines; local unfinished Auto Run blocks remote dispatch on the same Block
+
+**Wire availability (honest):** Server public HTTP for human **identity** and **comment attachments** is documented above. Operator remote-operations under `/api/v1/remote-operations*` use the **operator** bearer. Project-scoped human routes that Desktop encodes for assignment/comment/activity list-update, human observer WSS (`/api/v1/projects/:projectId/human/observe`), and human-auth remote-operations are domain-ready on the client/contracts side; treat full multi-user live completion against those residual Server transport paths as **not** a public support claim until maintainer verification checkpoints record them as closed. Do not invent operator workarounds that mix Host mailbox traffic into human comments.
 
 ### Opt-in real ACP compatibility smoke
 
@@ -510,13 +641,12 @@ node scripts/planweave-release-gate.mjs --checklist
 
 **Evidence rules:** live evidence expires after 14 days (file mtime or `generatedAt`). Operators own disposable VPS access and Host-local provider login; CI owns only the deterministic suite. Gate inputs are evidence paths + package versions; outputs are a JSON report with tier status, digests, compatibility checks, rollback checklist, and `releaseReady.{ci,supportedVersionRelease,preRelease}`.
 
-An assembled checkpoint correlating RV-001/002/003 evidence with a re-run of the deterministic suite and honest live blockers is recorded in [readme/distributed-remote-execution-checkpoint.md](readme/distributed-remote-execution-checkpoint.md).
+Maintainer verification records (not end-user guides; may list residual product gaps without claiming unpublished live evidence as a pass):
 
-The release-facing **platform and packaged-artifact support matrix** (Server/Host clean-install smoke, Desktop CI cells, ACP profiles, audit/license policy, unsupported cells) is recorded in [readme/distributed-platform-support-matrix.md](readme/distributed-platform-support-matrix.md).
-
-An assembled checkpoint correlating HC-001/002/003 human collaboration evidence (identity, assignment, comments/activity) with focused re-runs and residual product-surface gaps is recorded in [readme/distributed-human-collaboration-checkpoint.md](readme/distributed-human-collaboration-checkpoint.md).
-
-An assembled checkpoint correlating DX-001/002/003 Desktop collaboration evidence (secure IPC/read models, people/assignee, Comments/Activity, remote ACP controls) with focused re-runs and residual Server wire gaps is recorded in [readme/distributed-desktop-collaboration-checkpoint.md](readme/distributed-desktop-collaboration-checkpoint.md).
+- Remote execution / live tiers: [readme/distributed-remote-execution-checkpoint.md](readme/distributed-remote-execution-checkpoint.md)
+- Platform and package support matrix: [readme/distributed-platform-support-matrix.md](readme/distributed-platform-support-matrix.md)
+- Human collaboration domain: [readme/distributed-human-collaboration-checkpoint.md](readme/distributed-human-collaboration-checkpoint.md)
+- Desktop collaboration surface: [readme/distributed-desktop-collaboration-checkpoint.md](readme/distributed-desktop-collaboration-checkpoint.md)
 
 ### Operator HTTP surface
 
@@ -609,7 +739,7 @@ Repository integration test `packages/server/src/__tests__/operatorWalkthrough.t
 PlanWeave will continue to expand in three directions:
 
 - **Auto Run**: improve execution control, recovery, and long-running reliability.
-- **Collaborative planning**: let teams edit and refine the same task board together.
+- **Collaborative planning**: deepen multi-user plan authoring on the shared task board (beyond today’s membership, assignment, comments, and remote-run observation).
 - **Cross-host execution**: harden scheduling, capacity, and recovery for multi-Host fleets.
 
 ## Development

@@ -1,19 +1,44 @@
 # Development
 
-This document is for contributors working from source. The main README is user-facing and assumes the `planweave` CLI is installed.
+This document is for contributors working from source. The main README is user-facing and assumes the `planweave` CLI is installed. Stable operator install/config/security guidance lives in the primary [README.md](README.md) (English) and [readme/README.zh-CN.md](readme/README.zh-CN.md).
 
 ## Repository Layout
 
 ```text
-packages/runtime   Core graph, package, executor, auto-run, and desktop bridge logic
-packages/cli       planweave command-line interface
-packages/desktop   Electron desktop canvas
-examples           Example PlanWeave packages
-scripts            Repository checks
-skills             Agent skills distributed from this repository
-readme             README assets and localized README content
-archive            Archived planning material
+packages/runtime                   Core graph, package, executor, auto-run, and desktop bridge logic
+packages/cli                       planweave command-line interface
+packages/mcp                       Local HTTP MCP server for plan authoring clients
+packages/desktop                   Electron desktop canvas (private package; not npm-published)
+packages/server                    Coordinator: operator HTTP, Host WSS, human collab, remote ops
+packages/agent-host                Agent Host daemon: enroll, preflight, ACP-only remote runs
+packages/distributed-protocol      Schema-only Agent Host wire / compatibility contracts
+packages/collaboration-contracts   Schema-only human collaboration wire DTOs for Desktop/Server
+examples                           Example PlanWeave packages
+scripts                            Repository checks, pack smoke, release-gate helpers
+skills                             Agent skills distributed from this repository
+readme                             README assets, localized README, maintainer evidence checkpoints
+archive                            Archived planning material (not implementation authority)
 ```
+
+## Distributed architecture contracts
+
+Final module and security boundaries (not process history):
+
+| Boundary | Authority | Non-authority |
+| --- | --- | --- |
+| Plan Package / Block content | Runtime package + project root on Coordinator | Host local git state; assignment blobs |
+| Local claim / Auto Run | Runtime taskManager + autoRun | Server assignment; Host mailbox |
+| Remote dispatch / ACP run | Server remote operation + Host ACP profile | Remote CLI executor fallback; silent rerun |
+| Host transport | WSS `/agent-hosts/:hostId/connect` + Host credential | Human device tokens; operator bearer on Host connect |
+| Human membership / devices | Server identity HTTP (`/api/v1/projects/:id/human/*`) | Host enrollment codes; operator routes |
+| Assignment metadata | Server `work_assignments` CAS revision | Claim state; auto-start of remote runs |
+| Human comments / attachments | Server comments + attachment HTTP (separate blob root) | ACP streams; Host mailbox; Runtime submit |
+| Desktop collab UI | Renderer hooks → preload → main vault/client → contracts package | DOM as business state; renderer-held secrets |
+| Compatibility | Matching package majors + `agentHostProtocolVersion` | Cross-major silent downgrade; ACP→CLI fallback |
+
+Node engines for Server/Host/protocol/contracts packages: **Node.js >= 22.5** (built-in `node:sqlite`). Production transport is HTTPS/WSS; loopback plain HTTP/WS requires explicit `allowInsecureDevelopment`.
+
+Provider API keys, Agent login state, Git credentials, and Host workspace/profile mappings remain on the Host machine. PlanWeave coordinates Blocks; it does not own Git branches, worktrees, or merge.
 
 ## Source Setup
 
@@ -131,6 +156,37 @@ Run the desktop smoke test after building:
 pnpm --filter @planweave-ai/desktop smoke
 ```
 
+## Distributed packages from source
+
+Build order for the distributed graph (also used by `pnpm pack:distributed`):
+
+```bash
+pnpm --filter @planweave-ai/distributed-protocol build
+pnpm --filter @planweave-ai/collaboration-contracts build
+pnpm --filter @planweave-ai/runtime build
+pnpm --filter @planweave-ai/server build
+pnpm --filter @planweave-ai/agent-host build
+```
+
+Run Coordinator / Host from the workspace after build:
+
+```bash
+node packages/server/dist/bin.js serve --config /absolute/path/server.json
+node packages/agent-host/dist/bin.js preflight --config /absolute/path/agent-host.json
+node packages/agent-host/dist/bin.js run --config /absolute/path/agent-host.json
+```
+
+Commands accept only absolute config paths (or `PLANWEAVE_SERVER_CONFIG` for Server). User-facing config keys, HTTP routes, recovery actions, and security rules are documented in the README Distributed Operator Guide — keep that guide aligned when contracts change.
+
+Pack and clean-install smoke (no publish):
+
+```bash
+pnpm pack:distributed
+pnpm check:distributed-package-install
+```
+
+Desktop remains `private: true` and is not part of `publish:npm` / `publish:distributed`.
+
 ## Distributed release gate
 
 Print the live release checklist (deterministic CI suite, local real ACP, remote VPS) and evaluate sanitized evidence:
@@ -141,7 +197,7 @@ pnpm exec vitest run packages/server/src/__tests__/releaseGate.test.ts \
   packages/distributed-protocol/src/__tests__/compatibility.test.ts
 ```
 
-Do not treat skipped `PLANWEAVE_REAL_ACP` or `PLANWEAVE_VPS_E2E` evidence as a release pass. See the main README section **Live release gate and rollback checks**. Assembled remote-execution evidence checkpoint (CI ready / live blocked): [readme/distributed-remote-execution-checkpoint.md](readme/distributed-remote-execution-checkpoint.md).
+Do not treat skipped `PLANWEAVE_REAL_ACP` or `PLANWEAVE_VPS_E2E` evidence as a release pass. See the main README section **Live release gate and rollback checks**. Maintainer verification checkpoints under `readme/distributed-*-checkpoint.md` and `readme/distributed-platform-support-matrix.md` record evidence and residual gaps; they are not end-user guides.
 
 ## ACP Verification
 

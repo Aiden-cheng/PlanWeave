@@ -250,9 +250,24 @@ ACP run 通过 CLI 和 Desktop 提供结构化进度、产物、usage 和交互�
 
 ## 分布式运维指南
 
-PlanWeave 可以运行 **Coordinator**（`planweave-server`），把远程 Block 调度到独立部署的 **Agent Host**（`planweave-agent-host`）上执行。远程执行仅支持 **ACP**：Host 用本地配置的 ACP agent profile，在已映射的 workspace 中启动 Agent。Provider API Key、Agent 登录态和 Git 凭据只留在 Host 机器上。Git clone/fetch/push 属于 Block 内容或 Host 侧环境准备，不是 Coordinator 功能。
+PlanWeave 可以运行 **Coordinator**（`planweave-server`），把远程 Block 调度到独立部署的 **Agent Host**（`planweave-agent-host`）上执行。同一 Coordinator 也承载人类项目成员、指派元数据、作用域评论，以及 Desktop 协作客户端的远程运行观测。
 
-生产环境使用 HTTPS。明文 HTTP **仅用于开发**，且只有双方都设置 `allowInsecureDevelopment: true`、并绑定字面量 loopback（`127.0.0.1` / `::1`）时才被接受。
+### 产品边界
+
+| 关注点 | PlanWeave 负责 | PlanWeave **不**负责 |
+| --- | --- | --- |
+| 工作协调 | 在 Plan Package 中协调 Task/Block；记录 claim/run/review 状态 | 拥有 Git 分支、worktree、merge、push 策略或仓库布局 |
+| 远程执行 | 通过公开 Agent Host 协议把 Block 调度到已登记 Host | 在 ACP 不可用时提供远程 CLI executor 回退 |
+| 密钥 | 接受 Host enrollment 与 operator bearer 摘要；一次性签发人类 device token | 在 Coordinator 上保存 provider API key、Agent 登录态或 Git 凭据 |
+| Workspace / profile | 信任配置的 project root，以及 Host 侧 workspace/profile 映射 | 从 Coordinator 同步 Host workspace 树或 ACP profile 二进制 |
+| 传输 | 生产默认 **HTTPS**（HTTP API）与 **WSS**（Host 连接路径 `/agent-hosts/:hostId/connect`） | 在未显式开启开发模式时接受非 loopback 明文 HTTP/WS |
+| 指派 vs 调度 | **指派（assignment）** 是协调元数据；**调度（dispatch）** 是显式远程运行启动 | 把指派写入当作运行开始，或把 Runtime claim 当作指派权威 |
+| 人类讨论 | 针对 Task/Block 的作用域人类评论/活动 | 把人类评论混入 Agent mailbox、ACP 事件流或 Runtime claim/submit |
+| 中断恢复 | 需要显式生命周期动作（`resume_same_session`、`retry_new_attempt`、`cancel`、`fail`、`block`） | 在重启、重连或回滚后静默重跑被中断的 Block |
+
+Git clone/fetch/push 仍属于 Block 内容或 Host 侧环境准备。PlanWeave 不会替你决定分支检出、worktree 创建或 merge。
+
+生产环境使用 HTTPS/WSS。明文 HTTP/WS **仅用于开发**，且只有双方都设置 `allowInsecureDevelopment: true`、并绑定字面量 loopback（`127.0.0.1` / `::1`）时才被接受（Host 的 coordinator URL 在该模式下才可使用 `http://` 或 `ws://`）。
 
 ### 安装 CLI
 
@@ -313,6 +328,22 @@ node -e "const {createHash}=require('node:crypto'); console.log(createHash('sha2
 }
 ```
 
+可选 `limits` 键（均可省略；下表为默认值）：
+
+| 键 | 默认 | 含义 |
+| --- | --- | --- |
+| `busyTimeoutMs` | `5000` | SQLite busy 超时 |
+| `leaseDurationMs` | `30000` | Host lease 时长 |
+| `hostOfflineAfterMs` | `90000` | 心跳超时后判离线（必须 `>` heartbeat） |
+| `heartbeatIntervalMs` | `15000` | 期望 Host 心跳间隔（必须 `<` lease 与 offline） |
+| `maxArtifactBytes` | `104857600`（100 MiB） | 单个远程产物上限 |
+| `maxWebSocketPayloadBytes` | `262144` | Agent Host WebSocket 帧上限 |
+| `eventRetentionMaxEvents` | `100000` | 远程 ACP 事件保留条数上限 |
+| `eventRetentionMaxBytes` | `33554432`（32 MiB） | 远程 ACP 事件保留字节上限 |
+| `shutdownTimeoutMs` | `5000` | SIGINT/SIGTERM 排空超时 |
+
+SQLite 路径固定为 `<dataDirectory>/planweave-server.sqlite`（不可单独配置）。
+
 启动与停止：
 
 ```bash
@@ -335,12 +366,12 @@ curl -fsS https://coordinator.example.com:7443/version
 
 ### TLS 与开发传输
 
-| 模式 | `publicUrl` | `tls` | `allowInsecureDevelopment` |
+| 模式 | `publicUrl` / Host `coordinator.url` | `tls` | `allowInsecureDevelopment` |
 | --- | --- | --- | --- |
-| 生产 | `https://…` origin（端口须与 `bind.port` 一致） | 必须提供证书与私钥绝对路径 | 省略 / `false` |
-| 仅本地开发 | `http://127.0.0.1:<port>` | 省略 | `true`（bind host 必须是 loopback） |
+| 生产 | `https://…` origin（端口须与 `bind.port` 一致）；Host 在 `/agent-hosts/:hostId/connect` 升级为 **WSS** | 必须提供证书与私钥绝对路径 | 省略 / `false` |
+| 仅本地开发 | `http://127.0.0.1:<port>`（或 Host 的 loopback `ws://`/`http://`） | 省略 | `true`（bind host 必须是 loopback） |
 
-连接开发 Coordinator 的 Host 配置需设置 `coordinator.allowInsecureDevelopment: true`，并使用同一 loopback origin。生产环境若使用私有 CA，在 Host 上设置 `coordinator.caCertificatePath` 为绝对路径 PEM。
+连接开发 Coordinator 的 Host 配置需设置 `coordinator.allowInsecureDevelopment: true`，并使用同一 loopback origin。生产环境若使用私有 CA，在 Host 上设置 `coordinator.caCertificatePath` 为绝对路径 PEM。Agent Host 的 mailbox 与 ACP 控制流量走 Host WebSocket 会话；人类 observer 流量（Desktop）是独立契约，不得与 Host mailbox 序号混用。
 
 ### 安装并登记 Agent Host
 
@@ -392,7 +423,107 @@ planweave-agent-host revoke --config /etc/planweave/agent-host.json
 
 `preflight`、`enroll`、`status`、`revoke` 输出 JSON 诊断（`credential`、`capacity`、`capabilities`、`recoverableExecutions`，以及可选的 `hostId` / `actionableError`）。`run` 会持续运行守护进程，直到 SIGINT/SIGTERM，或出现终端级传输/鉴权失败。
 
-Host 凭据保存在 Host 的 `dataDirectory`（例如 `credentials.json`）。Provider 与 Git 凭据仍只存在于 Host 本地环境或 Agent 自身配置。
+Host 凭据保存在 Host 的 `dataDirectory`（例如 `credentials.json`）。Provider 与 Git 凭据仍只存在于 Host 本地环境或 Agent 自身配置。`workspaceRoot` 下的 workspace 路径与 ACP `agentProfiles`（command 路径、args、所需环境变量**名称**）都只保存在 Host 配置中 —— Coordinator 不会接收这些密钥或 profile 二进制。
+
+支持的 Host 本地 ACP profile id（来自 Runtime registry）：`codex-acp`、`claude-code-acp`、`opencode-acp`、`grok-acp`、`pi-acp`。ACP 协议协商失败时远程调度 fail-closed；**没有**远程 CLI 回退。
+
+### 人类协作（身份、指派、评论）
+
+人类协作以项目为作用域，与 Host 登记、operator token 以及 Agent Host mailbox 流量分离。
+
+**角色：** 仅有 `owner` 与 `member`。邀请始终授予 `member`（永不授予 owner）。最后一位 owner 不能被移除或降级。
+
+**凭据（不可互换）：**
+
+| 前缀 / 形态 | 主体 | 用途 |
+| --- | --- | --- |
+| Operator bearer（配置只存 SHA-256） | operator | Host 登记/吊销、operator 远程 operation |
+| `pw_enroll_…` | 一次性 Host enrollment grant | 仅用于 Host `enroll` |
+| `pw_host_…` | 已登记 Agent Host | Host WSS 连接与 Host HTTP |
+| `pw_hdev_…` | 人类设备 | 人类协作 HTTPS |
+| `pw_inv_…` | 一次性邀请 | 仅以 `member` 加入项目 |
+
+Host 形态 token 在人类路由上返回 **401**。Device token 仅在 bootstrap/join 时返回一次；应存入 OS 安全存储（Desktop 使用 main-process vault / `safeStorage`），不要写入 package 文件、renderer `localStorage` 或 Coordinator 配置。
+
+#### Owner bootstrap 与成员 HTTP
+
+首位 owner bootstrap 是 **loopback 本地管理边界**（不是网络 bearer）。非 bootstrap 的人类路由在生产环境仍需要 TLS；bootstrap 本身只接受 loopback 客户端。
+
+| 方法 | 路径 | 鉴权 | 用途 |
+| --- | --- | --- | --- |
+| `POST` | `/api/v1/projects/:projectId/human/bootstrap` | loopback local-admin | 创建首位 owner 并一次性下发 device token |
+| `POST` | `/api/v1/projects/:projectId/human/invitations` | owner `pw_hdev_…` | 创建邀请（TTL 由服务端钳制） |
+| `GET` | `/api/v1/projects/:projectId/human/invitations` | owner | 列出邀请 |
+| `POST` | `/api/v1/projects/:projectId/human/invitations/:invitationId/revoke` | owner | 吊销邀请 |
+| `POST` | `/api/v1/projects/:projectId/human/invitations/consume` | 邀请 body | 以 `member` 加入并下发 device token |
+| `GET` | `/api/v1/projects/:projectId/human/members` | member/owner | 列出成员 |
+| `POST` | `/api/v1/projects/:projectId/human/members/:humanPrincipalId/remove` | 本人或 owner | 移除成员（保护最后一位 owner） |
+| `POST` | `/api/v1/projects/:projectId/human/members/:humanPrincipalId/promote` | owner | 提升为 owner |
+| `POST` | `/api/v1/projects/:projectId/human/members/:humanPrincipalId/demote` | owner | 降级 owner（保护最后一位 owner） |
+| `GET` | `/api/v1/projects/:projectId/human/devices` | member（`scope=own`）/ owner（`scope=project`） | 列出设备 |
+| `POST` | `/api/v1/projects/:projectId/human/devices/:deviceCredentialId/revoke` | 自有设备，或 owner 吊销成员设备 | 软吊销设备 |
+
+脱敏 bootstrap 示例（仅 loopback；占位符）：
+
+```bash
+curl -fsS -X POST "https://127.0.0.1:7443/api/v1/projects/planweave-project-example/human/bootstrap" \
+  -H "content-type: application/json" \
+  -d '{"displayName":"Ada","deviceLabel":"laptop"}'
+# 响应可能恰好一次包含 deviceToken — 复制到安全 vault；切勿提交。
+```
+
+消费邀请（网络路径；token 一次性）：
+
+```bash
+curl -fsS -X POST "https://coordinator.example.com:7443/api/v1/projects/planweave-project-example/human/invitations/consume" \
+  -H "content-type: application/json" \
+  -d '{"invitationToken":"pw_inv_...","displayName":"Grace","deviceLabel":"studio"}'
+```
+
+#### 指派 vs 调度
+
+指派目标（仅协调元数据）：
+
+| 目标 | Task | Block | 含义 |
+| --- | --- | --- | --- |
+| `unassigned` | 是 | 是 | 无人类/Host 归属 |
+| `human` + principal id | 是 | 是 | 人类协调负责人（需有效成员资格） |
+| `exact_host` + host id | **否** | 是 | 调度时钉死指定已登记 Host |
+| `automatic_host` | **否** | 是 | 调度时按 package `requiredCapabilities` 选 Host |
+
+更新指派**绝不会** claim Block、不会启动远程运行、也不会改写 Plan Package。调度是单独的显式动作（operator 使用 `POST /api/v1/remote-operations`，或项目成员通过 Desktop 远程运行控制）。调度开始时 Coordinator 会快照 Host 选择；之后的重新指派不会改写进行中的选择指纹。
+
+#### 评论、附件与活动
+
+- 人类评论标注 **Task 或 Block** 工作项（Markdown 正文）。它们**不是** Agent 聊天、Runtime claim/submit 流量、Host mailbox 消息或 ACP token 流。
+- 评论附件使用独立的 blob 根与 ACL（`/api/v1/projects/:projectId/attachments/*`），与远程运行 artifact grant 分离。
+- 活动是面向成员的追加式投影（成员、指派、评论、远程运行事实），不是 Host mailbox 的投递 ACK 通道。
+
+附件 HTTP（人类 device bearer）：
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `POST` | `/api/v1/projects/:projectId/attachments/pending` | 创建 pending 上传 |
+| `PUT` | `/api/v1/projects/:projectId/attachments/pending/:pendingUploadId` | 上传字节 |
+| `POST` | `/api/v1/projects/:projectId/attachments/pending/:pendingUploadId/finalize` | 固化 digest |
+| `GET` | `/api/v1/projects/:projectId/attachments/by-digest/:sha256` | 按 digest 下载（成员 ACL） |
+| `GET` | `/api/v1/projects/:projectId/attachments/comments/:commentId/:sha256` | 下载已绑定评论附件 |
+| `POST` | `/api/v1/projects/:projectId/attachments/cleanup` | Owner 清理过期 pending 上传 |
+
+允许的附件媒体类型：`image/png`、`image/jpeg`、`image/webp`、`image/gif`、`application/pdf`、`text/plain`、`text/markdown`。单个附件上限：**8 MiB**。每条评论附件数上限：**8**。
+
+#### Desktop 协作界面
+
+PlanWeave Desktop 使用非密钥连接配置（`serverBaseUrl` origin + `projectId`；除非 loopback 不安全模式，否则必须 HTTPS）连接 Coordinator。Device 凭据留在 main-process vault。Renderer 看不到 bearer token，也不直接打开原始 socket。
+
+常见界面（领域语义与 Desktop 客户端契约）：
+
+- **人员**：成员、邀请（owner）、设备、Host 在线/容量（Host 仅可查看）
+- **指派人选择器**：Task/Block 指派芯片；Host 目标仅出现在 Block
+- **评论 / 活动**：作用域为当前 Task/Block；与 Task Workspace 的 Agent 会话分离
+- **远程运行面板**：显式 dispatch / 观测 / 交互 / resume / retry / cancel —— 与本地 Auto Run 共存但不合并状态机；同一 Block 上未完成的本地 Auto Run 会阻止远程 dispatch
+
+**线路可用性（诚实说明）：** Server 对人类 **身份** 与 **评论附件** 的公开 HTTP 见上文。`/api/v1/remote-operations*` 使用 **operator** bearer。Desktop 已编码的项目作用域人类路由（指派/评论/活动列表与更新、人类 observer WSS `/api/v1/projects/:projectId/human/observe`、人类鉴权的 remote-operations）在 client/contracts 侧已就绪；在维护者验证检查点关闭对应 Server 传输残余之前，**不要**把完整多人 live 完成当作公开支持声明。不要发明把 Host mailbox 混入人类评论的运维绕过。
 
 ### 可选的真实 ACP 兼容性 smoke
 
@@ -510,11 +641,12 @@ node scripts/planweave-release-gate.mjs --checklist
 
 **证据规则：** live 证据 14 天后过期（`generatedAt` 或文件 mtime）。运维拥有一次性 VPS 与 Host 本地 provider 登录；CI 只拥有确定性套件。门禁输入为证据路径与 package 版本；输出为含层级状态、digest、兼容检查、回滚清单与 `releaseReady.{ci,supportedVersionRelease,preRelease}` 的 JSON 报告。
 
-关联 RV-001/002/003 与确定性套件复跑、诚实记录 live 阻塞的证据检查点见 [distributed-remote-execution-checkpoint.md](distributed-remote-execution-checkpoint.md)。
+维护者验证记录（不是最终用户指南；可能列出残余产品缺口，且不得把未完成的 live 证据当作通过）：
 
-关联 HC-001/002/003 人类协作证据（身份、指派、评论/活动）与聚焦复跑、残余产品面缺口的检查点见 [distributed-human-collaboration-checkpoint.md](distributed-human-collaboration-checkpoint.md)。
-
-关联 DX-001/002/003 Desktop 协作证据（安全 IPC/读模型、人员/指派、评论/活动、远程 ACP 控制）与聚焦复跑、残余 Server 线缺口的检查点见 [distributed-desktop-collaboration-checkpoint.md](distributed-desktop-collaboration-checkpoint.md)。
+- 远程执行 / live 分层：[distributed-remote-execution-checkpoint.md](distributed-remote-execution-checkpoint.md)
+- 平台与包支持矩阵：[distributed-platform-support-matrix.md](distributed-platform-support-matrix.md)
+- 人类协作领域：[distributed-human-collaboration-checkpoint.md](distributed-human-collaboration-checkpoint.md)
+- Desktop 协作界面：[distributed-desktop-collaboration-checkpoint.md](distributed-desktop-collaboration-checkpoint.md)
 
 ### Operator HTTP 接口
 
@@ -607,7 +739,7 @@ Coordinator 上的项目 package 仍是 Block 内容的权威来源。远程运�
 PlanWeave 将继续扩展三个方向：
 
 - **Auto Run**：继续改进运行控制、异常恢复和长期运行稳定性。
-- **协作规划**：让团队共同编辑和完善同一张任务画布。
+- **协作规划**：在现有成员、指派、评论与远程运行观测之外，深化共享任务画布上的多人计划编写。
 - **跨主机执行**：强化多 Host 机群的调度、容量与恢复能力。
 
 ## 开发
