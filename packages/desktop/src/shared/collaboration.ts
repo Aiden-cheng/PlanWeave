@@ -4,14 +4,37 @@ import {
   humanBootstrapRequestSchema,
   humanConsumeInvitationRequestSchema,
   humanDeviceTokenSchema,
+  type ActivityListPage,
+  type AssignmentDisplayProjection,
+  type AssignmentListPage,
   type CollaborationConnectionProfile,
+  type CommentDisplayProjection,
+  type CommentListPage,
+  type EligibleAssigneesResponse,
   type HumanBootstrapRequest,
   type HumanConsumeInvitationRequest,
+  type HumanDevicePage,
   type HumanDeviceView,
+  type HumanInvitationPage,
+  type HumanInvitationView,
+  type HumanMemberPage,
   type HumanMembershipView,
-  type HumanPrincipalView,
-  type HumanInvitationView
+  type HumanPrincipalView
 } from "@planweave-ai/collaboration-contracts";
+import type {
+  CollaborationActivityListQueryInput,
+  CollaborationAssignmentListQueryInput,
+  CollaborationAssignmentUpdateInput,
+  CollaborationCommentCreateInput,
+  CollaborationCommentEditInput,
+  CollaborationCommentListQueryInput,
+  CollaborationCommentTombstoneInput,
+  CollaborationDeviceListQueryInput,
+  CollaborationInvitationListQueryInput,
+  CollaborationObserverSignal,
+  CollaborationPageQueryInput,
+  CollaborationWorkItemInput
+} from "./collaborationReadModels.js";
 
 /** Whether the OS-backed encryptor can persist device credentials across restarts. */
 export type CollaborationCredentialStorage = "available" | "unavailable";
@@ -170,10 +193,24 @@ export const collaborationInvokeChannels = {
   bootstrapCollaborationOwner: "planweave-collaboration:bootstrapOwner",
   consumeCollaborationInvitation: "planweave-collaboration:consumeInvitation",
   connectCollaborationSession: "planweave-collaboration:connectSession",
-  disconnectCollaborationSession: "planweave-collaboration:disconnectSession"
+  disconnectCollaborationSession: "planweave-collaboration:disconnectSession",
+  listCollaborationMembers: "planweave-collaboration:listMembers",
+  listCollaborationDevices: "planweave-collaboration:listDevices",
+  listCollaborationInvitations: "planweave-collaboration:listInvitations",
+  listCollaborationAssignments: "planweave-collaboration:listAssignments",
+  getCollaborationAssignment: "planweave-collaboration:getAssignment",
+  listCollaborationEligibleAssignees: "planweave-collaboration:listEligibleAssignees",
+  listCollaborationComments: "planweave-collaboration:listComments",
+  listCollaborationActivity: "planweave-collaboration:listActivity",
+  updateCollaborationAssignment: "planweave-collaboration:updateAssignment",
+  createCollaborationComment: "planweave-collaboration:createComment",
+  editCollaborationComment: "planweave-collaboration:editComment",
+  tombstoneCollaborationComment: "planweave-collaboration:tombstoneComment"
 } as const;
 
 export const collaborationStatusChangedChannel = "planweave-collaboration:statusChanged";
+/** Human observer invalidation/progress/catch-up signals for a single shared renderer subscription. */
+export const collaborationObserverSignalChannel = "planweave-collaboration:observerSignal";
 
 export type PlanWeaveCollaborationApi = {
   getCollaborationStatus: () => Promise<CollaborationStatus>;
@@ -199,8 +236,60 @@ export type PlanWeaveCollaborationApi = {
     input: CollaborationProfileIdInput
   ) => Promise<CollaborationStatus>;
   disconnectCollaborationSession: () => Promise<CollaborationStatus>;
+  listCollaborationMembers: (input?: CollaborationPageQueryInput) => Promise<HumanMemberPage>;
+  listCollaborationDevices: (
+    input?: CollaborationDeviceListQueryInput
+  ) => Promise<HumanDevicePage>;
+  listCollaborationInvitations: (
+    input?: CollaborationInvitationListQueryInput
+  ) => Promise<HumanInvitationPage>;
+  listCollaborationAssignments: (
+    input?: CollaborationAssignmentListQueryInput
+  ) => Promise<AssignmentListPage>;
+  getCollaborationAssignment: (
+    input: CollaborationWorkItemInput
+  ) => Promise<AssignmentDisplayProjection>;
+  listCollaborationEligibleAssignees: (
+    input: CollaborationWorkItemInput
+  ) => Promise<EligibleAssigneesResponse>;
+  listCollaborationComments: (
+    input: CollaborationCommentListQueryInput
+  ) => Promise<CommentListPage>;
+  listCollaborationActivity: (
+    input?: CollaborationActivityListQueryInput
+  ) => Promise<ActivityListPage>;
+  updateCollaborationAssignment: (
+    input: CollaborationAssignmentUpdateInput
+  ) => Promise<AssignmentDisplayProjection>;
+  createCollaborationComment: (
+    input: CollaborationCommentCreateInput
+  ) => Promise<CommentDisplayProjection>;
+  editCollaborationComment: (
+    input: CollaborationCommentEditInput
+  ) => Promise<CommentDisplayProjection>;
+  tombstoneCollaborationComment: (
+    input: CollaborationCommentTombstoneInput
+  ) => Promise<CommentDisplayProjection>;
   onCollaborationStatusChanged: (callback: (status: CollaborationStatus) => void) => () => void;
+  onCollaborationObserverSignal: (
+    callback: (signal: CollaborationObserverSignal) => void
+  ) => () => void;
 };
 
 export const COLLABORATION_SESSION_ONLY_WARNING =
   "Electron safeStorage is unavailable, so the collaboration device credential is held only for this PlanWeave process and will not be saved.";
+
+export type {
+  CollaborationActivityListQueryInput,
+  CollaborationAssignmentListQueryInput,
+  CollaborationAssignmentUpdateInput,
+  CollaborationCommentCreateInput,
+  CollaborationCommentEditInput,
+  CollaborationCommentListQueryInput,
+  CollaborationCommentTombstoneInput,
+  CollaborationDeviceListQueryInput,
+  CollaborationInvitationListQueryInput,
+  CollaborationObserverSignal,
+  CollaborationPageQueryInput,
+  CollaborationWorkItemInput
+} from "./collaborationReadModels.js";

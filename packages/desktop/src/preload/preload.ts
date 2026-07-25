@@ -21,11 +21,13 @@ import {
   runtimeStateChangedChannel
 } from "../shared/ipcChannels.js";
 import type {
+  CollaborationObserverSignal,
   CollaborationStatus,
   PlanWeaveCollaborationApi
 } from "../shared/collaboration.js";
 import {
   collaborationInvokeChannels,
+  collaborationObserverSignalChannel,
   collaborationStatusChangedChannel
 } from "../shared/collaboration.js";
 import type { McpTunnelStatus, PlanWeaveMcpTunnelApi } from "../shared/mcpTunnel.js";
@@ -213,10 +215,40 @@ const collaborationApi: PlanWeaveCollaborationApi = {
     ipcRenderer.invoke(collaborationInvokeChannels.connectCollaborationSession, input),
   disconnectCollaborationSession: async () =>
     ipcRenderer.invoke(collaborationInvokeChannels.disconnectCollaborationSession),
+  listCollaborationMembers: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationMembers, input),
+  listCollaborationDevices: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationDevices, input),
+  listCollaborationInvitations: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationInvitations, input),
+  listCollaborationAssignments: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationAssignments, input),
+  getCollaborationAssignment: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.getCollaborationAssignment, input),
+  listCollaborationEligibleAssignees: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationEligibleAssignees, input),
+  listCollaborationComments: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationComments, input),
+  listCollaborationActivity: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationActivity, input),
+  updateCollaborationAssignment: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.updateCollaborationAssignment, input),
+  createCollaborationComment: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.createCollaborationComment, input),
+  editCollaborationComment: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.editCollaborationComment, input),
+  tombstoneCollaborationComment: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.tombstoneCollaborationComment, input),
   onCollaborationStatusChanged: (callback) => {
     const listener = (_event: IpcRendererEvent, payload: CollaborationStatus) => callback(payload);
     ipcRenderer.on(collaborationStatusChangedChannel, listener);
     return () => ipcRenderer.off(collaborationStatusChangedChannel, listener);
+  },
+  onCollaborationObserverSignal: (callback) => {
+    const listener = (_event: IpcRendererEvent, payload: CollaborationObserverSignal) =>
+      callback(payload);
+    ipcRenderer.on(collaborationObserverSignalChannel, listener);
+    return () => ipcRenderer.off(collaborationObserverSignalChannel, listener);
   }
 };
 

@@ -1,12 +1,32 @@
 import {
+  activityListWireQuerySchema,
+  assignmentListQuerySchema,
+  assignmentUpdateWireCommandSchema,
   collaborationConnectionProfileSchema,
+  commentCreateWireCommandSchema,
+  commentEditWireCommandSchema,
+  commentListWireQuerySchema,
+  commentTombstoneWireCommandSchema,
   humanBootstrapRequestSchema,
   humanConsumeInvitationRequestSchema,
+  humanDeviceListQuerySchema,
+  humanInvitationListQuerySchema,
+  humanPageQuerySchema,
+  workItemRefSchema,
+  type ActivityListPage,
+  type AssignmentDisplayProjection,
+  type AssignmentListPage,
   type CollaborationConnectionProfile,
+  type CommentDisplayProjection,
+  type CommentListPage,
+  type EligibleAssigneesResponse,
   type HumanBootstrapRequest,
   type HumanBootstrapResponse,
   type HumanConsumeInvitationRequest,
-  type HumanConsumeInvitationResponse
+  type HumanConsumeInvitationResponse,
+  type HumanDevicePage,
+  type HumanInvitationPage,
+  type HumanMemberPage
 } from "@planweave-ai/collaboration-contracts";
 import {
   assertNoSmuggledCollaborationSecrets,
@@ -17,6 +37,7 @@ import {
   collaborationProfileIdInputSchema,
   collaborationUpsertProfileInputSchema,
   type CollaborationAuthHandoffView,
+  type CollaborationObserverSignal,
   type CollaborationProfileView,
   type CollaborationSessionPhase,
   type CollaborationStatus,
@@ -27,7 +48,10 @@ import {
   type CollaborationClientOptions,
   type CollaborationObserverStatus
 } from "./CollaborationClient.js";
-import { collaborationErrorFromUnknown } from "./collaborationErrors.js";
+import {
+  CollaborationClientError,
+  collaborationErrorFromUnknown
+} from "./collaborationErrors.js";
 import {
   CollaborationCredentialVault,
   type CollaborationSafeStoragePort
@@ -54,6 +78,7 @@ export type CollaborationServiceOptions = {
   request?: typeof fetch;
   clock?: { now(): Date };
   onStatusChange?: (status: CollaborationStatus) => void;
+  onObserverSignal?: (signal: CollaborationObserverSignal) => void;
 };
 
 function nowIso(clock?: { now(): Date }): string {
@@ -118,6 +143,7 @@ export class CollaborationService {
   private readonly request?: typeof fetch;
   private readonly clock?: { now(): Date };
   private readonly onStatusChange?: (status: CollaborationStatus) => void;
+  private readonly onObserverSignal?: (signal: CollaborationObserverSignal) => void;
 
   private client: CollaborationClient | null = null;
   private clientProfileId: string | null = null;
@@ -149,6 +175,7 @@ export class CollaborationService {
     this.request = options.request;
     this.clock = options.clock;
     this.onStatusChange = options.onStatusChange;
+    this.onObserverSignal = options.onObserverSignal;
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -506,7 +533,7 @@ export class CollaborationService {
       if (!token) {
         throw new Error("Human device credential is not available for this profile.");
       }
-      const { client } = await this.clientForProfile(profileId, true);
+      const { client, profile } = await this.clientForProfile(profileId, true);
       this.client = client;
       this.clientProfileId = profileId;
       await this.profiles.setActiveProfileId(profileId);
@@ -518,6 +545,12 @@ export class CollaborationService {
             this.observerStatus = status;
             if (status.state === "connected") {
               this.setSession("connected", `observer:${status.state}`, null);
+              this.publishObserverSignal({
+                type: "human.observer.cursor",
+                profileId,
+                projectId: profile.projectId,
+                cursor: status.cursor
+              });
             } else if (status.state === "auth_expired") {
               this.setSession("error", `observer:${status.state}`, {
                 code: status.code,
@@ -535,6 +568,24 @@ export class CollaborationService {
               this.setSession("connected", `observer:${status.state}`);
             }
             void this.publishStatus();
+          },
+          onEvent: (message) => {
+            this.publishObserverSignal({
+              type: "human.observer.event",
+              profileId,
+              projectId: profile.projectId,
+              event: message
+            });
+          },
+          onCatchupRequired: (message) => {
+            this.publishObserverSignal({
+              type: "human.observer.catchup_required",
+              profileId,
+              projectId: profile.projectId,
+              reason: message.reason,
+              resumeCursor: message.resumeCursor,
+              droppedThroughCursor: message.droppedThroughCursor
+            });
           }
         });
         this.setSession("connecting", "observer_started", null);
@@ -559,6 +610,97 @@ export class CollaborationService {
       this.setSession("idle", null, null);
       return this.publishStatus();
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Session-scoped read models / mutations (require active connected client)
+  // ---------------------------------------------------------------------------
+
+  async listMembers(input: unknown = {}): Promise<HumanMemberPage> {
+    return this.withActiveClient((client) =>
+      client.listMembers(humanPageQuerySchema.parse(input ?? {}))
+    );
+  }
+
+  async listDevices(input: unknown = {}): Promise<HumanDevicePage> {
+    return this.withActiveClient((client) =>
+      client.listDevices(humanDeviceListQuerySchema.parse(input ?? {}))
+    );
+  }
+
+  async listInvitations(input: unknown = {}): Promise<HumanInvitationPage> {
+    return this.withActiveClient((client) =>
+      client.listInvitations(humanInvitationListQuerySchema.parse(input ?? {}))
+    );
+  }
+
+  async listAssignments(input: unknown = {}): Promise<AssignmentListPage> {
+    return this.withActiveClient((client) =>
+      client.listAssignments(assignmentListQuerySchema.parse(input ?? {}))
+    );
+  }
+
+  async getAssignment(input: unknown): Promise<AssignmentDisplayProjection> {
+    const { workItem } = zWorkItemPayload(input);
+    return this.withActiveClient((client) => client.getAssignment(workItem));
+  }
+
+  async listEligibleAssignees(input: unknown): Promise<EligibleAssigneesResponse> {
+    const { workItem } = zWorkItemPayload(input);
+    return this.withActiveClient((client) => client.listEligibleAssignees(workItem));
+  }
+
+  async listComments(input: unknown): Promise<CommentListPage> {
+    const query = commentListWireQuerySchema.parse(input);
+    return this.withActiveClient((client) => client.listComments(query));
+  }
+
+  async listActivity(input: unknown = {}): Promise<ActivityListPage> {
+    return this.withActiveClient((client) =>
+      client.listActivity(activityListWireQuerySchema.parse(input ?? {}))
+    );
+  }
+
+  async updateAssignment(input: unknown): Promise<AssignmentDisplayProjection> {
+    const command = assignmentUpdateWireCommandSchema.parse(input);
+    return this.withActiveClient((client) => client.updateAssignment(command));
+  }
+
+  async createComment(input: unknown): Promise<CommentDisplayProjection> {
+    const command = commentCreateWireCommandSchema.parse(input);
+    return this.withActiveClient((client) => client.createComment(command));
+  }
+
+  async editComment(input: unknown): Promise<CommentDisplayProjection> {
+    const command = commentEditWireCommandSchema.parse(input);
+    return this.withActiveClient((client) => client.editComment(command));
+  }
+
+  async tombstoneComment(input: unknown): Promise<CommentDisplayProjection> {
+    const command = commentTombstoneWireCommandSchema.parse(input);
+    return this.withActiveClient((client) => client.tombstoneComment(command));
+  }
+
+  private async withActiveClient<T>(operation: (client: CollaborationClient) => Promise<T>): Promise<T> {
+    this.assertOpen();
+    const client = this.client;
+    if (!client || !this.clientProfileId) {
+      throw new CollaborationClientError({
+        kind: "offline",
+        code: "collaboration_session_inactive",
+        message: "No active collaboration session. Connect a profile before loading read models.",
+        retryable: false
+      });
+    }
+    try {
+      return await operation(client);
+    } catch (error) {
+      throw collaborationErrorFromUnknown(error);
+    }
+  }
+
+  private publishObserverSignal(signal: CollaborationObserverSignal): void {
+    this.onObserverSignal?.(signal);
   }
 
   private async disposeClient(reason: string): Promise<void> {
@@ -590,6 +732,18 @@ export class CollaborationService {
       this.disposed = true;
     });
   }
+}
+
+function zWorkItemPayload(input: unknown): { workItem: ReturnType<typeof workItemRefSchema.parse> } {
+  if (!input || typeof input !== "object" || !("workItem" in input)) {
+    throw new CollaborationClientError({
+      kind: "validation",
+      code: "collaboration_work_item_required",
+      message: "workItem is required.",
+      retryable: false
+    });
+  }
+  return { workItem: workItemRefSchema.parse((input as { workItem: unknown }).workItem) };
 }
 
 // Re-export input type for handlers

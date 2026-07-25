@@ -61,6 +61,7 @@
         "canvasMapViewLayout.test.tsx",
         "canvasMapVisuals.test.ts",
         "collaborationClient.test.ts",
+        "collaborationReadModels.test.ts",
         "desktopBridgeContract.test.ts",
         "desktopDiagnostics.test.ts",
         "desktopDiagnosticsPopover.test.tsx",

@@ -2,7 +2,9 @@ import { BrowserWindow, ipcMain, safeStorage } from "electron";
 import WebSocket from "ws";
 import {
   collaborationInvokeChannels,
+  collaborationObserverSignalChannel,
   collaborationStatusChangedChannel,
+  type CollaborationObserverSignal,
   type CollaborationStatus
 } from "../../shared/collaboration.js";
 import {
@@ -16,10 +18,18 @@ import {
 
 let service: CollaborationService | null = null;
 
-function publishToRenderers(status: CollaborationStatus): void {
+function publishStatusToRenderers(status: CollaborationStatus): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.webContents.isDestroyed()) {
       window.webContents.send(collaborationStatusChangedChannel, status);
+    }
+  }
+}
+
+function publishObserverSignalToRenderers(signal: CollaborationObserverSignal): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.webContents.isDestroyed()) {
+      window.webContents.send(collaborationObserverSignalChannel, signal);
     }
   }
 }
@@ -42,7 +52,8 @@ function createDefaultService(options: CollaborationServiceOptions = {}): Collab
             clientOptions.WebSocketImpl ??
             (WebSocket as unknown as CollaborationWebSocketConstructor)
         })),
-    onStatusChange: options.onStatusChange ?? publishToRenderers
+    onStatusChange: options.onStatusChange ?? publishStatusToRenderers,
+    onObserverSignal: options.onObserverSignal ?? publishObserverSignalToRenderers
   });
 }
 
@@ -104,6 +115,49 @@ export function registerCollaborationHandlers(
   );
   ipcMain.handle(collaborationInvokeChannels.disconnectCollaborationSession, () =>
     active.disconnectSession()
+  );
+  ipcMain.handle(collaborationInvokeChannels.listCollaborationMembers, (_event, input: unknown) =>
+    active.listMembers(input)
+  );
+  ipcMain.handle(collaborationInvokeChannels.listCollaborationDevices, (_event, input: unknown) =>
+    active.listDevices(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.listCollaborationInvitations,
+    (_event, input: unknown) => active.listInvitations(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.listCollaborationAssignments,
+    (_event, input: unknown) => active.listAssignments(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.getCollaborationAssignment,
+    (_event, input: unknown) => active.getAssignment(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.listCollaborationEligibleAssignees,
+    (_event, input: unknown) => active.listEligibleAssignees(input)
+  );
+  ipcMain.handle(collaborationInvokeChannels.listCollaborationComments, (_event, input: unknown) =>
+    active.listComments(input)
+  );
+  ipcMain.handle(collaborationInvokeChannels.listCollaborationActivity, (_event, input: unknown) =>
+    active.listActivity(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.updateCollaborationAssignment,
+    (_event, input: unknown) => active.updateAssignment(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.createCollaborationComment,
+    (_event, input: unknown) => active.createComment(input)
+  );
+  ipcMain.handle(collaborationInvokeChannels.editCollaborationComment, (_event, input: unknown) =>
+    active.editComment(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.tombstoneCollaborationComment,
+    (_event, input: unknown) => active.tombstoneComment(input)
   );
 
   return active;

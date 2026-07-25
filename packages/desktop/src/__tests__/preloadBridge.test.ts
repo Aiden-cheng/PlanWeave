@@ -29,6 +29,7 @@ import {
 } from "../shared/ipcChannels";
 import {
   collaborationInvokeChannels,
+  collaborationObserverSignalChannel,
   collaborationStatusChangedChannel,
   type CollaborationStatus,
   type PlanWeaveCollaborationApi
@@ -743,10 +744,19 @@ describe("preload bridge invocation", () => {
     });
     await api.connectCollaborationSession({ profileId: "profile-1" });
     await api.disconnectCollaborationSession();
+    await api.listCollaborationMembers({ cursor: 0, limit: 20 });
+    await api.listCollaborationAssignments({ cursor: 0, limit: 20 });
+    await api.listCollaborationActivity({ limit: 20 });
     const unsubscribe = api.onCollaborationStatusChanged(callback);
+    const signalCallback = vi.fn();
+    const unsubscribeSignal = api.onCollaborationObserverSignal(signalCallback);
 
     expect(Object.keys(api).sort()).toEqual(
-      [...Object.keys(collaborationInvokeChannels), "onCollaborationStatusChanged"].sort()
+      [
+        ...Object.keys(collaborationInvokeChannels),
+        "onCollaborationStatusChanged",
+        "onCollaborationObserverSignal"
+      ].sort()
     );
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       collaborationInvokeChannels.getCollaborationStatus
@@ -762,18 +772,40 @@ describe("preload bridge invocation", () => {
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       collaborationInvokeChannels.disconnectCollaborationSession
     );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.listCollaborationMembers,
+      { cursor: 0, limit: 20 }
+    );
 
-    const [channel, listener] = electronMock.ipcRenderer.on.mock.calls[0] as [
-      string,
-      IpcRendererListener
-    ];
-    expect(channel).toBe(collaborationStatusChangedChannel);
-    listener({}, status);
+    const statusCall = electronMock.ipcRenderer.on.mock.calls.find(
+      (call) => call[0] === collaborationStatusChangedChannel
+    ) as [string, IpcRendererListener] | undefined;
+    expect(statusCall?.[0]).toBe(collaborationStatusChangedChannel);
+    statusCall?.[1]({}, status);
     expect(callback).toHaveBeenCalledWith(status);
     unsubscribe();
     expect(electronMock.ipcRenderer.off).toHaveBeenCalledWith(
       collaborationStatusChangedChannel,
-      listener
+      statusCall?.[1]
+    );
+
+    const signalCall = electronMock.ipcRenderer.on.mock.calls.find(
+      (call) => call[0] === collaborationObserverSignalChannel
+    ) as [string, IpcRendererListener] | undefined;
+    expect(signalCall?.[0]).toBe(collaborationObserverSignalChannel);
+    signalCall?.[1]({}, {
+      type: "human.observer.cursor",
+      profileId: "profile-1",
+      projectId: "project-1",
+      cursor: 3
+    });
+    expect(signalCallback).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "human.observer.cursor", cursor: 3 })
+    );
+    unsubscribeSignal();
+    expect(electronMock.ipcRenderer.off).toHaveBeenCalledWith(
+      collaborationObserverSignalChannel,
+      signalCall?.[1]
     );
   });
 
