@@ -251,6 +251,12 @@ const collaborationApi: PlanWeaveCollaborationApi = {
     ipcRenderer.invoke(collaborationInvokeChannels.editCollaborationComment, input),
   tombstoneCollaborationComment: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.tombstoneCollaborationComment, input),
+  createCollaborationPendingAttachment: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.createCollaborationPendingAttachment, input),
+  uploadCollaborationPendingAttachment: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.uploadCollaborationPendingAttachment, input),
+  finalizeCollaborationPendingAttachment: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.finalizeCollaborationPendingAttachment, input),
   onCollaborationStatusChanged: (callback) => {
     const listener = (_event: IpcRendererEvent, payload: CollaborationStatus) => callback(payload);
     ipcRenderer.on(collaborationStatusChangedChannel, listener);

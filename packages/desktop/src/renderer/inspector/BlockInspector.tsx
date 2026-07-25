@@ -33,6 +33,7 @@ import { buildExecutorOptionViews, executorOptionName } from "../executors/execu
 import { useExecutorPreflight } from "../hooks/useExecutorPreflight";
 import type { createTranslator } from "../i18n";
 import { AssigneeInspectorField } from "../team/AssigneeInspectorField";
+import { WorkItemCollaborationPanel } from "../team/WorkItemCollaborationPanel";
 import { statusVariant } from "../viewHelpers";
 import { AutoGrowingTextarea } from "./AutoGrowingTextarea";
 import { BlockConnectionsCard } from "./BlockConnectionsCard";
@@ -326,6 +327,18 @@ export function BlockInspector({
               </div>
             </div>
             <AssigneeInspectorField
+              workItem={
+                selectedBlock
+                  ? {
+                      kind: "block",
+                      canvasId: canvasRef?.canvasId ?? "default",
+                      blockRef: selectedBlock.ref
+                    }
+                  : null
+              }
+              t={t}
+            />
+            <WorkItemCollaborationPanel
               workItem={
                 selectedBlock
                   ? {

@@ -7,6 +7,7 @@ import {
   commentEditWireCommandSchema,
   commentListWireQuerySchema,
   commentTombstoneWireCommandSchema,
+  createPendingAttachmentRequestSchema,
   humanBootstrapRequestSchema,
   humanConsumeInvitationRequestSchema,
   humanDeviceListQuerySchema,
@@ -20,6 +21,7 @@ import {
   type CommentDisplayProjection,
   type CommentListPage,
   type EligibleAssigneesResponse,
+  type FinalizePendingAttachmentResponse,
   type HumanBootstrapRequest,
   type HumanBootstrapResponse,
   type HumanConsumeInvitationRequest,
@@ -27,7 +29,8 @@ import {
   type HumanDevicePage,
   type HumanInvitationPage,
   type HumanInvitationView,
-  type HumanMemberPage
+  type HumanMemberPage,
+  type PendingAttachmentView
 } from "@planweave-ai/collaboration-contracts";
 import {
   assertNoSmuggledCollaborationSecrets,
@@ -36,10 +39,12 @@ import {
   collaborationConsumeInvitationInputSchema,
   collaborationCreateInvitationInputSchema,
   collaborationDeviceCredentialIdInputSchema,
+  collaborationFinalizePendingAttachmentInputSchema,
   collaborationHumanPrincipalIdInputSchema,
   collaborationImportDeviceCredentialInputSchema,
   collaborationInvitationIdInputSchema,
   collaborationProfileIdInputSchema,
+  collaborationUploadPendingAttachmentInputSchema,
   collaborationUpsertProfileInputSchema,
   type CollaborationAuthHandoffView,
   type CollaborationInvitationCreateView,
@@ -731,6 +736,50 @@ export class CollaborationService {
   async tombstoneComment(input: unknown): Promise<CommentDisplayProjection> {
     const command = commentTombstoneWireCommandSchema.parse(input);
     return this.withActiveClient((client) => client.tombstoneComment(command));
+  }
+
+  async createPendingAttachment(input: unknown): Promise<PendingAttachmentView> {
+    const body = createPendingAttachmentRequestSchema.parse(input);
+    return this.withActiveClient((client) => client.createPendingAttachment(body));
+  }
+
+  async uploadPendingAttachment(input: unknown): Promise<PendingAttachmentView> {
+    const body = collaborationUploadPendingAttachmentInputSchema.parse(input);
+    let bytes: Buffer;
+    try {
+      bytes = Buffer.from(body.bodyBase64, "base64");
+    } catch {
+      throw new CollaborationClientError({
+        kind: "validation",
+        code: "collaboration_attachment_body_invalid",
+        message: "Attachment body must be valid base64.",
+        retryable: false
+      });
+    }
+    if (bytes.byteLength === 0 || bytes.byteLength > 8_388_608) {
+      throw new CollaborationClientError({
+        kind: "validation",
+        code: "collaboration_attachment_size_invalid",
+        message: "Attachment body size is outside the allowed range.",
+        retryable: false
+      });
+    }
+    return this.withActiveClient((client) =>
+      client.uploadPendingAttachment(body.pendingUploadId, {
+        body: bytes,
+        mediaType: body.mediaType,
+        digestSha256: body.digestSha256
+      })
+    );
+  }
+
+  async finalizePendingAttachment(input: unknown): Promise<FinalizePendingAttachmentResponse> {
+    const body = collaborationFinalizePendingAttachmentInputSchema.parse(input);
+    return this.withActiveClient((client) =>
+      client.finalizePendingAttachment(body.pendingUploadId, {
+        expectedDigestSha256: body.expectedDigestSha256
+      })
+    );
   }
 
   private async withActiveClient<T>(operation: (client: CollaborationClient) => Promise<T>): Promise<T> {

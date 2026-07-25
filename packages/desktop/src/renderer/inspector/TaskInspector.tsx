@@ -28,6 +28,7 @@ import { buildExecutorOptionViews, executorOptionName } from "../executors/execu
 import { useExecutorPreflight } from "../hooks/useExecutorPreflight";
 import type { createTranslator } from "../i18n";
 import { AssigneeInspectorField } from "../team/AssigneeInspectorField";
+import { WorkItemCollaborationPanel } from "../team/WorkItemCollaborationPanel";
 import { statusVariant } from "../viewHelpers";
 
 type TaskInspectorProps = {
@@ -305,6 +306,18 @@ export function TaskInspector({
               </div>
             </div>
             <AssigneeInspectorField
+              workItem={
+                selectedTask
+                  ? {
+                      kind: "task",
+                      canvasId: canvasRef?.canvasId ?? "default",
+                      taskId: selectedTask.taskId
+                    }
+                  : null
+              }
+              t={t}
+            />
+            <WorkItemCollaborationPanel
               workItem={
                 selectedTask
                   ? {

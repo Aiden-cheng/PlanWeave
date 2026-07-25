@@ -173,6 +173,15 @@ describe("desktop IPC contract", () => {
     expect(collaborationInvokeChannels.updateCollaborationAssignment).toBe(
       "planweave-collaboration:updateAssignment"
     );
+    expect(collaborationInvokeChannels.createCollaborationPendingAttachment).toBe(
+      "planweave-collaboration:createPendingAttachment"
+    );
+    expect(collaborationInvokeChannels.uploadCollaborationPendingAttachment).toBe(
+      "planweave-collaboration:uploadPendingAttachment"
+    );
+    expect(collaborationInvokeChannels.finalizeCollaborationPendingAttachment).toBe(
+      "planweave-collaboration:finalizePendingAttachment"
+    );
     expect(collaborationStatusChangedChannel).toBe("planweave-collaboration:statusChanged");
     expect(collaborationObserverSignalChannel).toBe("planweave-collaboration:observerSignal");
     expect(Object.values(desktopBridgeInvokeChannels)).not.toContain(

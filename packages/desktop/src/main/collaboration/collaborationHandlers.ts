@@ -179,6 +179,18 @@ export function registerCollaborationHandlers(
     collaborationInvokeChannels.tombstoneCollaborationComment,
     (_event, input: unknown) => active.tombstoneComment(input)
   );
+  ipcMain.handle(
+    collaborationInvokeChannels.createCollaborationPendingAttachment,
+    (_event, input: unknown) => active.createPendingAttachment(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.uploadCollaborationPendingAttachment,
+    (_event, input: unknown) => active.uploadPendingAttachment(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.finalizeCollaborationPendingAttachment,
+    (_event, input: unknown) => active.finalizePendingAttachment(input)
+  );
 
   return active;
 }

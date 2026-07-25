@@ -79,3 +79,29 @@ export {
   resetCollaborationReadModelHubForTests
 } from "./collaborationReadModelHub.js";
 export { collaborationErrorMessage } from "./formatCollaborationError.js";
+export {
+  buildActivityRowViewModel,
+  buildCommentRowViewModel,
+  buildSafeAttachmentDisplay,
+  looksLikeFilesystemPath,
+  resolveCommentActions,
+  resolveCommentsPanelMode,
+  sanitizeAttachmentFileName,
+  validateCommentBodyLength,
+  type ActivityRowViewModel,
+  type CommentRowViewModel,
+  type CommentsPanelMode,
+  type SafeAttachmentDisplay
+} from "./commentViewModels.js";
+export {
+  clearCommentDraft,
+  getCommentDraft,
+  resetCommentDraftStoreForTests,
+  setCommentDraft,
+  setCommentDraftScope
+} from "./commentDraftStore.js";
+export {
+  createStagedAttachmentFromFile,
+  uploadStagedAttachment,
+  type StagedAttachment
+} from "./attachmentUpload.js";

@@ -1,17 +1,23 @@
 import { z } from "zod";
 import {
+  COMMENT_ATTACHMENT_MAX_BYTES,
   collaborationConnectionProfileSchema,
+  commentContentSha256Schema,
+  createPendingAttachmentRequestSchema,
   humanBootstrapRequestSchema,
   humanConsumeInvitationRequestSchema,
   humanCreateInvitationRequestSchema,
   humanDeviceTokenSchema,
+  pendingAttachmentUploadIdSchema,
   type ActivityListPage,
   type AssignmentDisplayProjection,
   type AssignmentListPage,
   type CollaborationConnectionProfile,
   type CommentDisplayProjection,
   type CommentListPage,
+  type CreatePendingAttachmentRequest,
   type EligibleAssigneesResponse,
+  type FinalizePendingAttachmentResponse,
   type HumanBootstrapRequest,
   type HumanConsumeInvitationRequest,
   type HumanCreateInvitationResponse,
@@ -21,7 +27,8 @@ import {
   type HumanInvitationView,
   type HumanMemberPage,
   type HumanMembershipView,
-  type HumanPrincipalView
+  type HumanPrincipalView,
+  type PendingAttachmentView
 } from "@planweave-ai/collaboration-contracts";
 import type {
   CollaborationActivityListQueryInput,
@@ -221,6 +228,44 @@ export type CollaborationDeviceCredentialIdInput = z.infer<
   typeof collaborationDeviceCredentialIdInputSchema
 >;
 
+/** Create a staged comment attachment upload (metadata only — no bytes). */
+export const collaborationCreatePendingAttachmentInputSchema = createPendingAttachmentRequestSchema;
+export type CollaborationCreatePendingAttachmentInput = CreatePendingAttachmentRequest;
+
+/**
+ * Upload staged attachment bytes over IPC as base64.
+ * Renderer never sends filesystem paths; only basename + content + declared media type.
+ * Max payload tracks COMMENT_ATTACHMENT_MAX_BYTES (base64 expansion ~4/3).
+ */
+export const collaborationUploadPendingAttachmentInputSchema = z
+  .object({
+    pendingUploadId: pendingAttachmentUploadIdSchema,
+    mediaType: z.string().min(1).max(128),
+    bodyBase64: z
+      .string()
+      .min(1)
+      .max(Math.ceil((COMMENT_ATTACHMENT_MAX_BYTES * 4) / 3) + 8),
+    digestSha256: z
+      .string()
+      .length(64)
+      .regex(/^[a-f0-9]+$/)
+      .optional()
+  })
+  .strict();
+export type CollaborationUploadPendingAttachmentInput = z.infer<
+  typeof collaborationUploadPendingAttachmentInputSchema
+>;
+
+export const collaborationFinalizePendingAttachmentInputSchema = z
+  .object({
+    pendingUploadId: pendingAttachmentUploadIdSchema,
+    expectedDigestSha256: commentContentSha256Schema.optional()
+  })
+  .strict();
+export type CollaborationFinalizePendingAttachmentInput = z.infer<
+  typeof collaborationFinalizePendingAttachmentInputSchema
+>;
+
 /** One-shot invitation create view — token is display/copy-once only; never persisted by Desktop. */
 export type CollaborationInvitationCreateView = HumanCreateInvitationResponse;
 
@@ -253,7 +298,10 @@ export const collaborationInvokeChannels = {
   updateCollaborationAssignment: "planweave-collaboration:updateAssignment",
   createCollaborationComment: "planweave-collaboration:createComment",
   editCollaborationComment: "planweave-collaboration:editComment",
-  tombstoneCollaborationComment: "planweave-collaboration:tombstoneComment"
+  tombstoneCollaborationComment: "planweave-collaboration:tombstoneComment",
+  createCollaborationPendingAttachment: "planweave-collaboration:createPendingAttachment",
+  uploadCollaborationPendingAttachment: "planweave-collaboration:uploadPendingAttachment",
+  finalizeCollaborationPendingAttachment: "planweave-collaboration:finalizePendingAttachment"
 } as const;
 
 export const collaborationStatusChangedChannel = "planweave-collaboration:statusChanged";
@@ -328,6 +376,15 @@ export type PlanWeaveCollaborationApi = {
   tombstoneCollaborationComment: (
     input: CollaborationCommentTombstoneInput
   ) => Promise<CommentDisplayProjection>;
+  createCollaborationPendingAttachment: (
+    input: CollaborationCreatePendingAttachmentInput
+  ) => Promise<PendingAttachmentView>;
+  uploadCollaborationPendingAttachment: (
+    input: CollaborationUploadPendingAttachmentInput
+  ) => Promise<PendingAttachmentView>;
+  finalizeCollaborationPendingAttachment: (
+    input: CollaborationFinalizePendingAttachmentInput
+  ) => Promise<FinalizePendingAttachmentResponse>;
   onCollaborationStatusChanged: (callback: (status: CollaborationStatus) => void) => () => void;
   onCollaborationObserverSignal: (
     callback: (signal: CollaborationObserverSignal) => void
