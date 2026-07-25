@@ -356,6 +356,84 @@ describe("useRemoteRunPanelController", () => {
     );
   });
 
+  it("resumes from observation recovery evidence without inventing recoveryId", async () => {
+    const { api, executeAction, observe } = createApi();
+    observe.mockResolvedValue(observation("interrupted"));
+    executeAction.mockResolvedValue({
+      request: {
+        kind: "resume_same_session",
+        actionId: "id-lease",
+        operationId: "op-1",
+        dispatchId: "dispatch-1",
+        executionAttemptId: "attempt-1",
+        expectedAttemptVersion: 2,
+        priorLeaseId: "lease-1",
+        leaseId: "id-lease",
+        leaseExpiresAt: "2030-01-01T00:00:25.000Z",
+        recovery: { acpSessionId: "session-1", recoveryId: "recovery-1" },
+        reason: "resume"
+      },
+      state: "settled"
+    });
+    const bridge = api as unknown as CollaborationReadBridgePort;
+    apis.push(bridge);
+    const shell = acquireCollaborationReadModelController(bridge);
+    await shell.controller.setActiveProject({
+      profileId: "profile-1",
+      projectId: "project-1",
+      canvasId: "default"
+    });
+
+    let leaseSeq = 0;
+    const { result } = renderHook(() =>
+      useRemoteRunPanelController({
+        workItem: blockItem,
+        runtimeRemoteExecution: {
+          identity: { operationId: "op-1" },
+          phase: "active",
+          status: "interrupted",
+          actionRequired: true,
+          source: { revision: "rev-1", graphFingerprint: "fp-1" },
+          dispatchAttempt: { dispatchId: "dispatch-1", executionAttemptId: "attempt-1" }
+        },
+        open: true,
+        api,
+        t: createTranslator("en"),
+        createId: () => `id-lease-${leaseSeq++}`,
+        now: () => new Date("2030-01-01T00:00:00.000Z")
+      })
+    );
+
+    await waitFor(() => {
+      expect(result.current.viewModel.identity?.recoveryId).toBe("recovery-1");
+      expect(result.current.viewModel.phase).toBe("interrupted");
+    });
+
+    await act(async () => {
+      await result.current.resume("resume please");
+    });
+
+    expect(executeAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operationId: "op-1",
+        action: expect.objectContaining({
+          kind: "resume_same_session",
+          priorLeaseId: "lease-1",
+          leaseId: "id-lease-0",
+          recovery: { acpSessionId: "session-1", recoveryId: "recovery-1" },
+          reason: "resume please"
+        })
+      })
+    );
+    const action = executeAction.mock.calls[0]?.[0]?.action as {
+      leaseId: string;
+      recovery: { recoveryId: string };
+    };
+    expect(action.leaseId).not.toMatch(/^lease-resume-\d{10,}$/);
+    expect(action.recovery.recoveryId).toBe("recovery-1");
+    expect(action.recovery.recoveryId).not.toMatch(/^recovery-\d{10,}$/);
+  });
+
   it("clears observation state on project switch generation", async () => {
     const { api } = createApi();
     const bridge = api as unknown as CollaborationReadBridgePort;

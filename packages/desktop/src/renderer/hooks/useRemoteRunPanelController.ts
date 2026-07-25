@@ -15,6 +15,7 @@ import {
   adaptRemoteAcpEvents,
   buildRemoteActionIdentity,
   projectRemoteRunPanelViewModel,
+  resolveRemoteResumeLeaseAndRecovery,
   type RemoteRunAuthorizedActionKind,
   type RemoteRunPanelViewModel
 } from "../collaboration/remoteRunViewModels";
@@ -56,12 +57,8 @@ export type UseRemoteRunPanelControllerResult = {
   dispatch: () => Promise<void>;
   cancel: (reason: string) => Promise<void>;
   failInterruption: (reason: string) => Promise<void>;
-  resume: (input: {
-    leaseId: string;
-    leaseExpiresAt: string;
-    recovery: { acpSessionId: string; recoveryId: string };
-    reason: string;
-  }) => Promise<void>;
+  /** Resume uses observation recovery + a fresh lease; callers only supply reason. */
+  resume: (reason: string) => Promise<void>;
   retryNewAttempt: (input: {
     newDispatchId: string;
     newExecutionAttemptId: string;
@@ -379,22 +376,22 @@ export function useRemoteRunPanelController(
   );
 
   const resume = useCallback(
-    async (input: {
-      leaseId: string;
-      leaseExpiresAt: string;
-      recovery: { acpSessionId: string; recoveryId: string };
-      reason: string;
-    }) => {
+    async (reason: string) => {
       if (!api || !observation) return;
       await runAction("resume_same_session", async () => {
+        const resolved = resolveRemoteResumeLeaseAndRecovery({
+          observation,
+          createLeaseId: createId,
+          now
+        });
         const action = buildRemoteActionIdentity({
           observation,
           kind: "resume_same_session",
           actionId: createId(),
-          reason: input.reason,
-          leaseId: input.leaseId,
-          leaseExpiresAt: input.leaseExpiresAt,
-          recovery: input.recovery
+          reason,
+          leaseId: resolved.leaseId,
+          leaseExpiresAt: resolved.leaseExpiresAt,
+          recovery: resolved.recovery
         });
         await api.executeCollaborationRemoteOperationAction({
           operationId: observation.operationId,
@@ -402,7 +399,7 @@ export function useRemoteRunPanelController(
         });
       });
     },
-    [api, observation, runAction, createId]
+    [api, observation, runAction, createId, now]
   );
 
   const retryNewAttempt = useCallback(
@@ -473,9 +470,6 @@ export function useRemoteRunPanelController(
       sessionConnected
     ]
   );
-
-  // Silence unused now for future lease expiry UI.
-  void now;
 
   return {
     viewModel,

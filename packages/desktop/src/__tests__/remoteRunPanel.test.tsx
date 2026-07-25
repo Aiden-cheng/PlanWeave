@@ -240,4 +240,91 @@ describe("RemoteRunPanel", () => {
 
     expect(screen.getByTestId("remote-run-local-coexistence")).toBeInTheDocument();
   });
+
+  it("resumes with observation recovery identity instead of Date.now fabrications", async () => {
+    const user = userEvent.setup();
+    const api = createApi();
+    const observe = api.observeCollaborationRemoteOperation as ReturnType<typeof vi.fn>;
+    const executeAction = api.executeCollaborationRemoteOperationAction as ReturnType<
+      typeof vi.fn
+    >;
+    observe.mockResolvedValue({
+      operationId: "op-1",
+      projectId: "project-1",
+      canvasId: "default",
+      blockRef: "T-1#B-1",
+      state: "interrupted",
+      dispatchId: "dispatch-1",
+      executionAttemptId: "attempt-1",
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:01:00.000Z",
+      attempt: {
+        executionAttemptId: "attempt-1",
+        dispatchId: "dispatch-1",
+        status: "interrupted",
+        hostId: "host-1",
+        leaseId: "lease-1",
+        leaseExpiresAt: "2030-01-01T01:00:00.000Z",
+        stateVersion: 2
+      },
+      runtime: {
+        ref: "T-1#B-1",
+        status: "interrupted",
+        interruption: {
+          reason: "transport_lost",
+          resumable: true,
+          recovery: { acpSessionId: "session-1", recoveryId: "recovery-1" }
+        }
+      }
+    });
+    executeAction.mockResolvedValue({ request: { kind: "resume_same_session" }, state: "settled" });
+    const bridge = api as unknown as CollaborationReadBridgePort;
+    apis.push(bridge);
+    const shell = acquireCollaborationReadModelController(bridge);
+    await shell.controller.setActiveProject({
+      profileId: "profile-1",
+      projectId: "project-1",
+      canvasId: "default"
+    });
+
+    render(
+      <RemoteRunPanel
+        workItem={blockItem}
+        runtimeRemoteExecution={{
+          identity: { operationId: "op-1" },
+          phase: "active",
+          status: "interrupted",
+          actionRequired: true,
+          source: { revision: "rev-1", graphFingerprint: "fp-1" },
+          dispatchAttempt: { dispatchId: "dispatch-1", executionAttemptId: "attempt-1" }
+        }}
+        open
+        api={api}
+        t={createTranslator("en")}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("remote-run-action-resume_same_session")).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId("remote-run-action-resume_same_session"));
+    await waitFor(() => {
+      expect(executeAction).toHaveBeenCalled();
+    });
+    const action = executeAction.mock.calls[0]?.[0]?.action as {
+      kind: string;
+      priorLeaseId: string;
+      leaseId: string;
+      recovery: { acpSessionId: string; recoveryId: string };
+    };
+    expect(action.kind).toBe("resume_same_session");
+    expect(action.priorLeaseId).toBe("lease-1");
+    expect(action.recovery).toEqual({
+      acpSessionId: "session-1",
+      recoveryId: "recovery-1"
+    });
+    expect(action.leaseId).not.toMatch(/^lease-resume-\d{10,}$/);
+    expect(action.recovery.recoveryId).toBe("recovery-1");
+    expect(action.recovery.recoveryId).not.toMatch(/^recovery-\d{10,}$/);
+  });
 });

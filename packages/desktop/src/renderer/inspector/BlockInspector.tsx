@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils";
 import { buildExecutorOptionViews, executorOptionName } from "../executors/executorOptionViewModel";
 import { useExecutorPreflight } from "../hooks/useExecutorPreflight";
 import type { createTranslator } from "../i18n";
+import { isLocalAutoRunActiveFromBlockRecords } from "../collaboration/remoteRunViewModels";
 import { AssigneeInspectorField } from "../team/AssigneeInspectorField";
 import { RemoteRunPanel } from "../team/RemoteRunPanel";
 import { WorkItemCollaborationPanel } from "../team/WorkItemCollaborationPanel";
@@ -108,6 +109,10 @@ export function BlockInspector({
   tmuxAvailable = false,
   t
 }: BlockInspectorProps) {
+  const localAutoRunActive = useMemo(
+    () => isLocalAutoRunActiveFromBlockRecords(blockRunRecords),
+    [blockRunRecords]
+  );
   const latestBlockRun = blockRunRecords[0];
   const latestTmuxBlockRun = blockRunRecords.find(
     (record) => terminalAvailabilityByRecordId[record.recordId]?.available
@@ -350,6 +355,7 @@ export function BlockInspector({
                   : null
               }
               runtimeRemoteExecution={selectedBlock.remoteExecution}
+              localAutoRunActive={localAutoRunActive}
               t={t}
             />
             <WorkItemCollaborationPanel

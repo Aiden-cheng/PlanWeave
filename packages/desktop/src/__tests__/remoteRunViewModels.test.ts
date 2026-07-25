@@ -8,10 +8,14 @@ import {
   adaptRemoteAcpEvents,
   buildRemoteActionIdentity,
   isAssignmentEligibleForRemoteDispatch,
+  isLocalAutoRunActiveFromBlockRecords,
   projectRemoteLifecyclePhase,
   projectRemoteRunActions,
+  projectRemoteRunIdentity,
   projectRemoteRunPanelViewModel,
-  REMOTE_RUN_ACTION_STATE_TABLE
+  REMOTE_RESUME_LEASE_TTL_MS,
+  REMOTE_RUN_ACTION_STATE_TABLE,
+  resolveRemoteResumeLeaseAndRecovery
 } from "../renderer/collaboration/remoteRunViewModels";
 
 function assignment(overrides: Partial<AssignmentDisplayProjection> = {}): AssignmentDisplayProjection {
@@ -258,5 +262,89 @@ describe("remoteRunViewModels", () => {
       interruptionResumable: false
     });
     expect(actions.every((a) => !a.available && a.reason === "offline")).toBe(true);
+  });
+
+  it("projects recovery identity from observation interruption evidence", () => {
+    const obs = observation({
+      state: "interrupted",
+      attempt: {
+        executionAttemptId: "attempt-1",
+        dispatchId: "dispatch-1",
+        status: "interrupted",
+        hostId: "host-1",
+        leaseId: "lease-1",
+        stateVersion: 4
+      },
+      runtime: {
+        ref: "T-1#B-1",
+        status: "interrupted",
+        interruption: {
+          reason: "transport_lost",
+          resumable: true,
+          recovery: { acpSessionId: "session-1", recoveryId: "recovery-1" }
+        }
+      }
+    });
+    const identity = projectRemoteRunIdentity(obs);
+    expect(identity.acpSessionId).toBe("session-1");
+    expect(identity.recoveryId).toBe("recovery-1");
+    expect(identity.leaseId).toBe("lease-1");
+  });
+
+  it("resolves resume lease/recovery from observation without minting recovery ids", () => {
+    const obs = observation({
+      state: "interrupted",
+      attempt: {
+        executionAttemptId: "attempt-1",
+        dispatchId: "dispatch-1",
+        status: "interrupted",
+        hostId: "host-1",
+        leaseId: "lease-1",
+        leaseExpiresAt: "2030-01-01T01:00:00.000Z",
+        stateVersion: 4
+      },
+      runtime: {
+        ref: "T-1#B-1",
+        status: "interrupted",
+        interruption: {
+          reason: "transport_lost",
+          resumable: true,
+          recovery: { acpSessionId: "session-1", recoveryId: "recovery-1" }
+        }
+      }
+    });
+    const fixedNow = new Date("2030-01-01T00:30:00.000Z");
+    const resolved = resolveRemoteResumeLeaseAndRecovery({
+      observation: obs,
+      createLeaseId: () => "lease-fresh-from-controller",
+      now: () => fixedNow
+    });
+    expect(resolved.recovery).toEqual({
+      acpSessionId: "session-1",
+      recoveryId: "recovery-1"
+    });
+    expect(resolved.leaseId).toBe("lease-fresh-from-controller");
+    // Reject the old renderer Date.now() fabrications specifically.
+    expect(resolved.leaseId).not.toMatch(/^lease-resume-\d{10,}$/);
+    expect(resolved.recovery.recoveryId).toBe("recovery-1");
+    expect(resolved.recovery.recoveryId).not.toMatch(/^recovery-\d{10,}$/);
+    expect(resolved.leaseExpiresAt).toBe(
+      new Date(fixedNow.getTime() + REMOTE_RESUME_LEASE_TTL_MS).toISOString()
+    );
+    expect(() =>
+      resolveRemoteResumeLeaseAndRecovery({
+        observation: observation(),
+        createLeaseId: () => "lease-x",
+        now: () => fixedNow
+      })
+    ).toThrow("remote_resume_recovery_evidence_missing");
+  });
+
+  it("detects local Auto Run activity from unfinished block run records", () => {
+    expect(isLocalAutoRunActiveFromBlockRecords([])).toBe(false);
+    expect(
+      isLocalAutoRunActiveFromBlockRecords([{ finishedAt: "2030-01-01T00:00:00.000Z" }])
+    ).toBe(false);
+    expect(isLocalAutoRunActiveFromBlockRecords([{ finishedAt: null }])).toBe(true);
   });
 });

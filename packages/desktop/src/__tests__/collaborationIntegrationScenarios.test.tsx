@@ -840,10 +840,21 @@ describe("collaboration integration scenarios", () => {
     await waitFor(() => {
       expect(resumeScenario.executeAction).toHaveBeenCalledWith(
         expect.objectContaining({
-          action: expect.objectContaining({ kind: "resume_same_session" })
+          action: expect.objectContaining({
+            kind: "resume_same_session",
+            priorLeaseId: "lease-1",
+            recovery: { acpSessionId: "session-1", recoveryId: "recovery-1" }
+          })
         })
       );
     });
+    const resumeAction = resumeScenario.executeAction.mock.calls.at(-1)?.[0]?.action as {
+      leaseId: string;
+      recovery: { recoveryId: string };
+    };
+    expect(resumeAction.leaseId).not.toMatch(/^lease-resume-\d{10,}$/);
+    expect(resumeAction.recovery.recoveryId).toBe("recovery-1");
+    expect(resumeAction.recovery.recoveryId).not.toMatch(/^recovery-\d{10,}$/);
 
     cleanupRendererTestEnvironment();
 

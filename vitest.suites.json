@@ -61,6 +61,7 @@
         "autoRunMiniPanel.test.tsx",
         "autoRunRetrospective.test.tsx",
         "autoRunScopeControl.test.tsx",
+        "blockInspectorRemoteRunCoexistence.test.tsx",
         "canvasDiagnosticSeverity.test.tsx",
         "canvasMapViewLayout.test.tsx",
         "canvasMapVisuals.test.ts",

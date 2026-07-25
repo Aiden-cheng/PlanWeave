@@ -66,10 +66,63 @@ export type RemoteRunIdentitySummary = {
   leaseId: string | null;
   leaseExpiresAt: string | null;
   acpSessionId: string | null;
+  /** Authoritative interruption recovery id from Server observation (never UI-minted). */
+  recoveryId: string | null;
   blockRef: string;
   canvasId: string;
   projectId: string;
 };
+
+/**
+ * Fresh resume lease TTL. Must remain below typical Server `leaseDurationMs`
+ * (default 30s) or host reservation rejects with remote_resume_lease_expiry_invalid.
+ */
+export const REMOTE_RESUME_LEASE_TTL_MS = 25_000;
+
+/**
+ * Build resume_same_session lease + recovery from authoritative observation.
+ * Recovery identity is never invented in the renderer; only a fresh lease id is minted
+ * (protocol requires priorLeaseId !== leaseId).
+ */
+export function resolveRemoteResumeLeaseAndRecovery(input: {
+  observation: RemoteOperationObservation;
+  createLeaseId: () => string;
+  now: () => Date;
+  leaseTtlMs?: number;
+}): {
+  leaseId: string;
+  leaseExpiresAt: string;
+  recovery: { acpSessionId: string; recoveryId: string };
+} {
+  const recovery = input.observation.runtime.interruption?.recovery;
+  if (!recovery?.acpSessionId || !recovery.recoveryId) {
+    throw new Error("remote_resume_recovery_evidence_missing");
+  }
+  const priorLeaseId = input.observation.attempt.leaseId;
+  if (!priorLeaseId) {
+    throw new Error("remote_action_missing_lease");
+  }
+  let leaseId = input.createLeaseId();
+  if (leaseId === priorLeaseId) {
+    leaseId = `${priorLeaseId}:resume`;
+  }
+  const ttlMs = input.leaseTtlMs ?? REMOTE_RESUME_LEASE_TTL_MS;
+  return {
+    leaseId,
+    leaseExpiresAt: new Date(input.now().getTime() + ttlMs).toISOString(),
+    recovery: {
+      acpSessionId: recovery.acpSessionId,
+      recoveryId: recovery.recoveryId
+    }
+  };
+}
+
+/** True when the selected Block has an unfinished local run record (local Auto Run active). */
+export function isLocalAutoRunActiveFromBlockRecords(
+  records: readonly { finishedAt: string | null | undefined }[]
+): boolean {
+  return records.some((record) => record.finishedAt == null);
+}
 
 export type RemoteRunPanelViewModel = {
   authority: RunAuthorityKind;
@@ -259,6 +312,7 @@ export function projectRemoteRunIdentity(
     leaseId: observation.attempt.leaseId ?? null,
     leaseExpiresAt: observation.attempt.leaseExpiresAt ?? null,
     acpSessionId: recovery?.acpSessionId ?? null,
+    recoveryId: recovery?.recoveryId ?? null,
     blockRef: observation.blockRef,
     canvasId: observation.canvasId,
     projectId: observation.projectId

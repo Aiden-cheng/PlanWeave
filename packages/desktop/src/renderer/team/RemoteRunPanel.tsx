@@ -362,16 +362,10 @@ export function RemoteRunPanel({
                 return;
               }
               if (action.kind === "dispatch") void controller.dispatch();
-              if (action.kind === "resume_same_session" && identity?.acpSessionId) {
-                void controller.resume({
-                  leaseId: `lease-resume-${Date.now()}`,
-                  leaseExpiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
-                  recovery: {
-                    acpSessionId: identity.acpSessionId,
-                    recoveryId: `recovery-${Date.now()}`
-                  },
-                  reason: t("remoteRunDefaultResumeReason")
-                });
+              if (action.kind === "resume_same_session") {
+                // Recovery + prior lease come from observation inside the controller;
+                // do not mint recoveryId/leaseId in the renderer.
+                void controller.resume(t("remoteRunDefaultResumeReason"));
               }
             }}
           >
