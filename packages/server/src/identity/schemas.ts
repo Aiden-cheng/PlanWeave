@@ -32,9 +32,8 @@ export type HumanProjectId = z.infer<typeof humanProjectIdSchema>;
 export const humanPrincipalIdSchema = opaqueIdentifierSchema.brand("HumanPrincipalId");
 export type HumanPrincipalId = z.infer<typeof humanPrincipalIdSchema>;
 
-export const humanDeviceCredentialIdSchema = opaqueIdentifierSchema.brand(
-  "HumanDeviceCredentialId"
-);
+export const humanDeviceCredentialIdSchema =
+  opaqueIdentifierSchema.brand("HumanDeviceCredentialId");
 export type HumanDeviceCredentialId = z.infer<typeof humanDeviceCredentialIdSchema>;
 
 export const projectMembershipIdSchema = opaqueIdentifierSchema.brand("ProjectMembershipId");
@@ -49,11 +48,7 @@ export const humanDisplayNameSchema = z
   .min(HUMAN_DISPLAY_NAME_MIN_LENGTH)
   .max(HUMAN_DISPLAY_NAME_MAX_LENGTH);
 
-export const humanDeviceLabelSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(HUMAN_DEVICE_LABEL_MAX_LENGTH);
+export const humanDeviceLabelSchema = z.string().trim().min(1).max(HUMAN_DEVICE_LABEL_MAX_LENGTH);
 
 export const tokenSha256HexSchema = z
   .string()
@@ -67,9 +62,7 @@ export const tokenSha256HexSchema = z
 export const humanDeviceTokenSchema = z
   .string()
   .regex(
-    new RegExp(
-      `^${HUMAN_DEVICE_TOKEN_PREFIX}[A-Za-z0-9_-]{${HUMAN_TOKEN_SECRET_CHAR_LENGTH}}$`
-    )
+    new RegExp(`^${HUMAN_DEVICE_TOKEN_PREFIX}[A-Za-z0-9_-]{${HUMAN_TOKEN_SECRET_CHAR_LENGTH}}$`)
   );
 
 /**

@@ -113,8 +113,9 @@ describe("WorkItemRef against real temporary packages", () => {
     expect(block.facts.requiredCapabilities).toEqual(["workspace.git", "acp.codex"]);
 
     // Missing refs stay not-found; package files are not written by validation.
-    expect(
-      validateWorkItemRef(port, blockWorkItemRef("default", "HC-002#B-999"))
-    ).toMatchObject({ ok: false, code: "work_item_not_found" });
+    expect(validateWorkItemRef(port, blockWorkItemRef("default", "HC-002#B-999"))).toMatchObject({
+      ok: false,
+      code: "work_item_not_found"
+    });
   });
 });

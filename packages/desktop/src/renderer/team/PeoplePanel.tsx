@@ -146,7 +146,11 @@ export function PeoplePanel({
   }
 
   return (
-    <div className="flex max-h-[min(70vh,520px)] flex-col gap-2" data-testid="people-panel" data-mode={mode}>
+    <div
+      className="flex max-h-[min(70vh,520px)] flex-col gap-2"
+      data-testid="people-panel"
+      data-mode={mode}
+    >
       <div className="flex items-start justify-between gap-2">
         <div>
           <div className="text-sm font-medium text-text-strong">{t("peopleTitle")}</div>
@@ -186,7 +190,11 @@ export function PeoplePanel({
         </div>
       ) : null}
       {mode === "offline" ? (
-        <div className="text-xs text-amber-800 dark:text-amber-100" data-testid="people-offline" role="status">
+        <div
+          className="text-xs text-amber-800 dark:text-amber-100"
+          data-testid="people-offline"
+          role="status"
+        >
           {t("peopleOffline")}
         </div>
       ) : null}
@@ -449,7 +457,9 @@ export function PeoplePanel({
                     {detailsLoading ? (
                       <div className="text-xs text-muted-foreground">{t("peopleLoading")}</div>
                     ) : invitations.length === 0 ? (
-                      <div className="text-xs text-muted-foreground">{t("peopleEmptyInvitations")}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {t("peopleEmptyInvitations")}
+                      </div>
                     ) : (
                       <ul className="flex flex-col gap-1">
                         {invitations.map((invitation) => (
@@ -480,7 +490,8 @@ export function PeoplePanel({
                                 data-testid="people-invitation-revoke"
                                 disabled={actionBusy}
                                 onClick={() => {
-                                  if (!confirmDestructive(t("peopleRevokeInvitationConfirm"))) return;
+                                  if (!confirmDestructive(t("peopleRevokeInvitationConfirm")))
+                                    return;
                                   void onRevokeInvitation(invitation.invitationId);
                                 }}
                               >

@@ -39,10 +39,7 @@ export async function openAgentHostDatabase(
   return database;
 }
 
-export function openReadonlyAgentHostDatabase(
-  path: string,
-  busyTimeoutMs: number
-): SqliteDatabase {
+export function openReadonlyAgentHostDatabase(path: string, busyTimeoutMs: number): SqliteDatabase {
   const DatabaseSync = databaseConstructor();
   const database = new DatabaseSync(path, { readOnly: true });
   database.exec(`PRAGMA foreign_keys = ON; PRAGMA busy_timeout = ${busyTimeoutMs};`);

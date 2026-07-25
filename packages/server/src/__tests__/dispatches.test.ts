@@ -361,7 +361,11 @@ describe("DispatchService (test-only thin stack)", () => {
         dispatch.id,
         dispatch.leaseId,
         dispatch.executionAttemptId,
-        { code: "execution_cancelled", message: "Cancellation was not requested.", retryable: false }
+        {
+          code: "execution_cancelled",
+          message: "Cancellation was not requested.",
+          retryable: false
+        }
       )
     ).rejects.toThrow("dispatch_not_running");
     await expect(persistedCoordination.dispatches.recoverExpiredLeases()).resolves.toEqual([]);

@@ -813,8 +813,7 @@ export const zhCnCatalog = {
   peopleRevokeInvitationConfirm: "吊销此邀请？",
   peopleRevokeDeviceConfirm: "吊销此人类设备凭证？",
   peopleInvitationCopyOnceTitle: "邀请密钥（仅显示一次）",
-  peopleInvitationCopyOnceWarning:
-    "请立即复制此邀请令牌。它是持有者密钥，关闭后不会再次显示。",
+  peopleInvitationCopyOnceWarning: "请立即复制此邀请令牌。它是持有者密钥，关闭后不会再次显示。",
   peopleInvitationCopy: "复制令牌",
   peopleInvitationCopied: "已复制",
   peopleInvitationDismiss: "我已复制",

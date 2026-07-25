@@ -17,10 +17,7 @@ import {
 } from "../identity/index.js";
 import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
 import { attachmentErrorCodeSchema, type AttachmentErrorCode } from "./errors.js";
-import {
-  CommentAttachmentService,
-  CommentAttachmentServiceError
-} from "./service.js";
+import { CommentAttachmentService, CommentAttachmentServiceError } from "./service.js";
 
 export type AttachmentHttpOptions = {
   service: CommentAttachmentService;
@@ -236,10 +233,7 @@ function safeError(error: unknown): { status: number; code: string } {
   return { status: 500, code: "attachment_request_failed" };
 }
 
-function headerSingle(
-  value: string | string[] | undefined,
-  code: AttachmentErrorCode
-): string {
+function headerSingle(value: string | string[] | undefined, code: AttachmentErrorCode): string {
   if (Array.isArray(value) || !value) {
     throw new CommentAttachmentServiceError(code);
   }
@@ -315,7 +309,8 @@ export async function handleCommentAttachmentHttpRequest(
         }
         const contentLength = Number(contentLengthText);
         const mediaType = commentAttachmentMediaTypeSchema.parse(
-          headerSingle(request.headers["content-type"], "attachment_input_invalid").split(";")[0]
+          headerSingle(request.headers["content-type"], "attachment_input_invalid")
+            .split(";")[0]
             ?.trim()
         );
         const declaredDigestHeader = request.headers["x-planweave-content-sha256"];

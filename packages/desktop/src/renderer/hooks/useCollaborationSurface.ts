@@ -64,10 +64,7 @@ export function useCollaborationSurface(
     manageActiveProject: true
   });
 
-  const assigneeLabels = useMemo(
-    () => assigneeDisplayLabelsFromTranslator(args.t),
-    [args.t]
-  );
+  const assigneeLabels = useMemo(() => assigneeDisplayLabelsFromTranslator(args.t), [args.t]);
 
   const assigneeIndex = useMemo(
     () => buildAssigneeSurfaceIndex(snapshot, assigneeLabels),

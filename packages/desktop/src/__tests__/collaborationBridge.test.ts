@@ -29,10 +29,7 @@ async function tempDir(prefix: string): Promise<string> {
   return dir;
 }
 
-function mockSafeStorage(options?: {
-  available?: boolean;
-  corruptDecrypt?: boolean;
-}): {
+function mockSafeStorage(options?: { available?: boolean; corruptDecrypt?: boolean }): {
   isEncryptionAvailable: ReturnType<typeof vi.fn>;
   encryptString: ReturnType<typeof vi.fn>;
   decryptString: ReturnType<typeof vi.fn>;
@@ -238,10 +235,7 @@ describe("CollaborationService IPC trust boundary", () => {
     ).rejects.toThrow(/encryptedDeviceToken/);
 
     expect(() =>
-      assertNoSmuggledCollaborationSecrets(
-        { authorization: "Bearer x" },
-        "test"
-      )
+      assertNoSmuggledCollaborationSecrets({ authorization: "Bearer x" }, "test")
     ).toThrow(/authorization/);
   });
 
@@ -441,7 +435,10 @@ describe("CollaborationService IPC trust boundary", () => {
       }),
       createClient: () =>
         ({
-          startObserver: (handlers: { onStatus?: (status: unknown) => void }, options?: { cursor?: number }) => {
+          startObserver: (
+            handlers: { onStatus?: (status: unknown) => void },
+            options?: { cursor?: number }
+          ) => {
             startObserver(handlers, options);
             if (options?.cursor !== undefined) {
               observerCursor = options.cursor;
@@ -522,7 +519,9 @@ describe("CollaborationService IPC trust boundary", () => {
       expect((error as Error).message).not.toContain(root);
     }
 
-    const { collaborationErrorFromUnknown } = await import("../main/collaboration/collaborationErrors.js");
+    const { collaborationErrorFromUnknown } = await import(
+      "../main/collaboration/collaborationErrors.js"
+    );
     const leakedPath = join(root, "secrets", "credentials.json");
     const leaked = collaborationErrorFromUnknown(
       new Error(`Failed to read collaboration credentials at ${leakedPath}: EACCES`)

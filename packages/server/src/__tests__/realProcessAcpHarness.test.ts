@@ -160,7 +160,9 @@ describe("real-process ACP harness", () => {
     await harness.waitForServerReadyz();
 
     // Host not started: waiting for online should time out with diagnostics.
-    await expect(harness.waitForHostOnline()).rejects.toThrow(/real_process_harness_timeout:host-online/);
+    await expect(harness.waitForHostOnline()).rejects.toThrow(
+      /real_process_harness_timeout:host-online/
+    );
 
     await harness.enrollHost();
     await harness.startHost();
@@ -173,9 +175,9 @@ describe("real-process ACP harness", () => {
 
     await harness.killHost("SIGKILL");
     expect(harness.hostPid()).toBeUndefined();
-    expect(harness.hostExitSnapshot()?.signal === "SIGKILL" || harness.hostExitSnapshot()?.code !== 0).toBe(
-      true
-    );
+    expect(
+      harness.hostExitSnapshot()?.signal === "SIGKILL" || harness.hostExitSnapshot()?.code !== 0
+    ).toBe(true);
 
     expect(() => harness.advanceInjectedClock(1_000)).toThrow(
       /real_process_acp_harness_clock_not_supported/

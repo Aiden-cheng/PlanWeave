@@ -51,9 +51,7 @@ export function allowCommentActivity(): CommentActivityAllowance {
 }
 
 /** Safe messages; never include tokens, digests, filesystem paths, or package dumps. */
-export const COMMENT_ACTIVITY_ERROR_MESSAGES: Readonly<
-  Record<CommentActivityErrorCode, string>
-> = {
+export const COMMENT_ACTIVITY_ERROR_MESSAGES: Readonly<Record<CommentActivityErrorCode, string>> = {
   comment_auth_unauthenticated: "Authentication required for comment or activity actions.",
   comment_auth_forbidden: "Comment or activity action is not permitted.",
   comment_auth_project_mismatch:

@@ -9,10 +9,7 @@ import {
 } from "../renderer/collaboration/collaborationReadModelHub";
 import type { CollaborationReadBridgePort } from "../renderer/collaboration/CollaborationReadModelController";
 import { useAssigneePickerController } from "../renderer/hooks/useAssigneePickerController";
-import type {
-  CollaborationStatus,
-  PlanWeaveCollaborationApi
-} from "../shared/collaboration";
+import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../shared/collaboration";
 import { createTranslator } from "../renderer/i18n";
 
 const taskItem: WorkItemRef = { kind: "task", canvasId: "canvas-1", taskId: "T-1" };

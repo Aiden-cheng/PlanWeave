@@ -914,11 +914,7 @@ export class AcpSessionController {
         const cleanupMarker = "Runner terminal cleanup did not complete cleanly.";
         // Keep an already-canonical cleanup AggregateError nested (not flattened) so callers
         // can still locate preparation/stop failures by the exact marker message.
-        if (
-          cleanupFailed &&
-          error instanceof AggregateError &&
-          error.message === cleanupMarker
-        ) {
+        if (cleanupFailed && error instanceof AggregateError && error.message === cleanupMarker) {
           if (finalizationErrors.length === 0) {
             throw error;
           }

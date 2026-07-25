@@ -8,10 +8,7 @@ import {
 } from "@planweave-ai/runtime";
 import type { RealAcpGate, RealAcpPrecondition } from "./gate.js";
 import { precondition } from "./gate.js";
-import {
-  resolveRealAcpHostProfile,
-  type ResolvedRealAcpHostProfile
-} from "./resolveProfile.js";
+import { resolveRealAcpHostProfile, type ResolvedRealAcpHostProfile } from "./resolveProfile.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -31,7 +28,11 @@ export type RealAcpPreflightEvidence = {
 
 export type RealAcpPreflightOutcome =
   | { status: "ready"; profile: ResolvedRealAcpHostProfile; evidence: RealAcpPreflightEvidence }
-  | { status: "precondition"; precondition: RealAcpPrecondition; evidence?: RealAcpPreflightEvidence };
+  | {
+      status: "precondition";
+      precondition: RealAcpPrecondition;
+      evidence?: RealAcpPreflightEvidence;
+    };
 
 async function probeVersion(commandPath: string): Promise<string | null> {
   try {
@@ -59,7 +60,7 @@ function redactProbeMessage(message: string): string {
   return message
     .replace(/\/Users\/[^/\s]+/g, "/Users/<redacted>")
     .replace(/\/home\/[^/\s]+/g, "/home/<redacted>")
-    .replace(/[A-Za-z0-9_\-]{20,}/g, (token) =>
+    .replace(/[A-Za-z0-9_-]{20,}/g, (token) =>
       /^(PLANWEAVE_|ACP_|error_|agent_)/.test(token) ? token : "<redacted>"
     )
     .slice(0, 512);

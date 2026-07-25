@@ -78,14 +78,14 @@ export class AgentHostEventOutbox {
     if (existing) {
       const stored = parseAgentHostEvent(JSON.parse(String(existing.event_json)));
       if (!existing.acknowledged_at && sameEventPayload(stored, heartbeat)) return stored;
-      this.database
-        .prepare("DELETE FROM agent_host_outbox WHERE event_key='host.heartbeat'")
-        .run();
+      this.database.prepare("DELETE FROM agent_host_outbox WHERE event_key='host.heartbeat'").run();
     }
     return this.queue("host.heartbeat", heartbeat);
   }
 
-  acknowledge(messageId: string):
+  acknowledge(
+    messageId: string
+  ):
     | { found: false }
     | { found: true; alreadyAcknowledged: true }
     | { found: true; alreadyAcknowledged: false; event: HostEvent; acknowledgedAt: string } {

@@ -62,7 +62,14 @@ export type UseCommentsPanelControllerResult = {
   submitComment: () => Promise<boolean>;
   editComment: (commentId: string, body: string, expectedRevision: number) => Promise<boolean>;
   tombstoneComment: (commentId: string, expectedRevision: number) => Promise<boolean>;
-  stageFiles: (files: Array<{ name: string; type: string; size: number; arrayBuffer: () => Promise<ArrayBuffer> }>) => Promise<void>;
+  stageFiles: (
+    files: Array<{
+      name: string;
+      type: string;
+      size: number;
+      arrayBuffer: () => Promise<ArrayBuffer>;
+    }>
+  ) => Promise<void>;
   cancelAttachment: (localId: string) => void;
   removeAttachment: (localId: string) => void;
 };
@@ -141,6 +148,7 @@ export function useCommentsPanelController(
   const cancelledUploads = useRef(new Set<string>());
   const generationRef = useRef(0);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: workKey remounts draft identity
   const draft = useMemo(() => {
     void draftTick;
     return args.workItem ? getCommentDraft(args.workItem) : { body: "", showPreview: false };
@@ -195,6 +203,9 @@ export function useCommentsPanelController(
     [api, args.open, args.workItem, controller, nextCursor, sessionConnected]
   );
 
+  // Intentionally reset when work item / open / connection changes.
+  // loadPage depends on nextCursor; initial replace must not re-fire when cursor advances.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scope-driven reload only
   useEffect(() => {
     generationRef.current += 1;
     setComments([]);
@@ -205,11 +216,12 @@ export function useCommentsPanelController(
     if (!args.open || !args.workItem || !sessionConnected || !api) return;
     void loadPage("replace");
     // Intentionally reset when work item / open / connection changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadPage depends on nextCursor; initial replace must not.
+    // loadPage depends on nextCursor; initial replace must not re-fire when cursor advances.
   }, [args.open, workKey, sessionConnected, api, scopeKey]);
 
   // Reconcile hub invalidations (first page) into the open list without dropping loaded history
   // when the hub page is a subset — full refresh only when snapshot comments advance.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: updatedAt forces hub merge
   useEffect(() => {
     if (!args.open || !workKey) return;
     const hubItems = snapshot.commentsByWorkItem[workKey];
@@ -284,7 +296,11 @@ export function useCommentsPanelController(
       return false;
     }
     const ready = stagedAttachments.filter((a) => a.phase === "ready" && a.input);
-    if (stagedAttachments.some((a) => a.phase === "creating" || a.phase === "uploading" || a.phase === "finalizing")) {
+    if (
+      stagedAttachments.some(
+        (a) => a.phase === "creating" || a.phase === "uploading" || a.phase === "finalizing"
+      )
+    ) {
       setActionError(args.t("commentsAttachmentsPending"));
       return false;
     }
@@ -355,9 +371,7 @@ export function useCommentsPanelController(
           );
           return false;
         }
-        setComments((prev) =>
-          prev.map((c) => (c.commentId === result.commentId ? result : c))
-        );
+        setComments((prev) => prev.map((c) => (c.commentId === result.commentId ? result : c)));
         return true;
       } catch (error) {
         setActionError(collaborationErrorMessage(mapBoundaryError(error)));
@@ -385,9 +399,7 @@ export function useCommentsPanelController(
           );
           return false;
         }
-        setComments((prev) =>
-          prev.map((c) => (c.commentId === result.commentId ? result : c))
-        );
+        setComments((prev) => prev.map((c) => (c.commentId === result.commentId ? result : c)));
         return true;
       } catch (error) {
         setActionError(collaborationErrorMessage(mapBoundaryError(error)));
@@ -412,7 +424,9 @@ export function useCommentsPanelController(
         setActionError(args.t("commentsOffline"));
         return;
       }
-      const remaining = COMMENT_ATTACHMENTS_MAX_COUNT - stagedAttachments.filter((a) => a.phase !== "cancelled" && a.phase !== "error").length;
+      const remaining =
+        COMMENT_ATTACHMENTS_MAX_COUNT -
+        stagedAttachments.filter((a) => a.phase !== "cancelled" && a.phase !== "error").length;
       if (remaining <= 0) {
         setActionError(args.t("commentsAttachmentsTooMany"));
         return;

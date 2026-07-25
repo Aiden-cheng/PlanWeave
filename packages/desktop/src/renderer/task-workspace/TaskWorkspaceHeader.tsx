@@ -74,11 +74,7 @@ export function TaskWorkspaceHeader({
         >
           <span className="truncate text-sm leading-5 font-medium">{workspace.task.title}</span>
           {assigneeChip && assigneeLabel ? (
-            <CompactAssigneeChipView
-              chip={assigneeChip}
-              label={assigneeLabel}
-              size="sm"
-            />
+            <CompactAssigneeChipView chip={assigneeChip} label={assigneeLabel} size="sm" />
           ) : null}
         </div>
         <div className="app-no-drag flex shrink-0 items-center gap-2">{headerAction}</div>

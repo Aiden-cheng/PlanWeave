@@ -22,7 +22,13 @@ export type MemberRoleAction = "promote" | "demote" | "remove";
 export type MemberActionAvailability = {
   action: MemberRoleAction;
   allowed: boolean;
-  reason: "ok" | "not_owner" | "last_owner" | "self_only_owner" | "already_owner" | "already_member";
+  reason:
+    | "ok"
+    | "not_owner"
+    | "last_owner"
+    | "self_only_owner"
+    | "already_owner"
+    | "already_member";
 };
 
 export type PeopleMemberRow = {
@@ -94,10 +100,7 @@ export type PeoplePresenceSummary = {
 };
 
 export function memberInitials(displayName: string): string {
-  const parts = displayName
-    .trim()
-    .split(/\s+/u)
-    .filter(Boolean);
+  const parts = displayName.trim().split(/\s+/u).filter(Boolean);
   if (parts.length === 0) return "?";
   if (parts.length === 1) {
     return parts[0]!.slice(0, 2).toUpperCase();
@@ -116,7 +119,10 @@ export function deriveHostPresenceStatus(host: CollaborationHostProjection): Hos
   return host.online ? "online" : "offline";
 }
 
-export function isInvitationOpen(invitation: HumanInvitationView, nowMs: number = Date.now()): boolean {
+export function isInvitationOpen(
+  invitation: HumanInvitationView,
+  nowMs: number = Date.now()
+): boolean {
   if (invitation.revokedAt || invitation.consumedAt) return false;
   const expires = Date.parse(invitation.expiresAt);
   if (Number.isFinite(expires) && expires <= nowMs) return false;
@@ -172,16 +178,15 @@ export function buildPeopleMemberRows(input: {
   currentUserIsOwner: boolean;
 }): PeopleMemberRow[] {
   return input.members.map((member) => {
-    const actions: MemberActionAvailability[] = (
-      ["promote", "demote", "remove"] as const
-    ).map((action) =>
-      evaluateMemberAction({
-        action,
-        member,
-        members: input.members,
-        currentUserIsOwner: input.currentUserIsOwner,
-        currentHumanPrincipalId: input.currentHumanPrincipalId
-      })
+    const actions: MemberActionAvailability[] = (["promote", "demote", "remove"] as const).map(
+      (action) =>
+        evaluateMemberAction({
+          action,
+          member,
+          members: input.members,
+          currentUserIsOwner: input.currentUserIsOwner,
+          currentHumanPrincipalId: input.currentHumanPrincipalId
+        })
     );
     return {
       membershipId: member.membershipId,
@@ -195,7 +200,9 @@ export function buildPeopleMemberRows(input: {
   });
 }
 
-export function buildPeopleHostRows(hosts: readonly CollaborationHostProjection[]): PeopleHostRow[] {
+export function buildPeopleHostRows(
+  hosts: readonly CollaborationHostProjection[]
+): PeopleHostRow[] {
   return hosts.map((host) => ({
     hostId: host.hostId,
     displayName: host.displayName?.trim() || host.hostId,
@@ -329,8 +336,7 @@ export function formatUnknownCollaborationError(error: unknown): string {
         ? (error as { code: string }).code
         : null;
     const safeMessage =
-      message &&
-      !/pw_hdev_|pw_inv_|tokenSha256|token_sha256|Authorization|Bearer\s+/i.test(message)
+      message && !/pw_hdev_|pw_inv_|tokenSha256|token_sha256|Authorization|Bearer\s+/i.test(message)
         ? message
         : null;
     if (code && safeMessage && safeMessage !== code) {
@@ -349,8 +355,7 @@ export function formatUnknownCollaborationError(error: unknown): string {
   const message = typeof record.message === "string" ? record.message : null;
   // Drop anything that looks like a token/digest fragment.
   const safeMessage =
-    message &&
-    !/pw_hdev_|pw_inv_|tokenSha256|token_sha256|Authorization|Bearer\s+/i.test(message)
+    message && !/pw_hdev_|pw_inv_|tokenSha256|token_sha256|Authorization|Bearer\s+/i.test(message)
       ? message
       : null;
   if (code && safeMessage && safeMessage !== code) {

@@ -115,17 +115,14 @@ export async function runReleaseGateCli(
     if (!deterministicEvidencePath) {
       const dir = await mkdtemp(join(tmpdir(), "planweave-release-gate-"));
       deterministicEvidencePath = join(dir, "deterministic.json");
-      await writeFile(
-        deterministicEvidencePath,
-        `${JSON.stringify(evidence, null, 2)}\n`,
-        { mode: 0o600 }
-      );
+      await writeFile(deterministicEvidencePath, `${JSON.stringify(evidence, null, 2)}\n`, {
+        mode: 0o600
+      });
     }
   }
 
   const agentHostVersion =
-    option(argv, "--agent-host-version") ??
-    (await readMonorepoPackageVersion("agent-host"));
+    option(argv, "--agent-host-version") ?? (await readMonorepoPackageVersion("agent-host"));
   const protocolPackageVersion =
     option(argv, "--protocol-version") ??
     (await readMonorepoPackageVersion("distributed-protocol"));

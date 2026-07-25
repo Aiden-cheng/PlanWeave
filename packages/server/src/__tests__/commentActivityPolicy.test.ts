@@ -214,9 +214,9 @@ describe("comment and activity policy", () => {
       }).code
     ).toBe("comment_not_author");
 
-    expect(
-      evaluateCommentRevision({ expectedRevision: 1, currentRevision: 2 }).code
-    ).toBe("comment_revision_conflict");
+    expect(evaluateCommentRevision({ expectedRevision: 1, currentRevision: 2 }).code).toBe(
+      "comment_revision_conflict"
+    );
 
     const conflict = decideCommentEdit({
       command: {

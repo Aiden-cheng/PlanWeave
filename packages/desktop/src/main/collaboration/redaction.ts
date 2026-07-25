@@ -3,8 +3,7 @@ import {
   PROJECT_INVITATION_TOKEN_PREFIX
 } from "@planweave-ai/collaboration-contracts";
 
-const TOKEN_LIKE =
-  /(pw_hdev_[A-Za-z0-9_-]+|pw_inv_[A-Za-z0-9_-]+|Bearer\s+[A-Za-z0-9._~+/-]+=*)/gi;
+const TOKEN_LIKE = /(pw_hdev_[A-Za-z0-9_-]+|pw_inv_[A-Za-z0-9_-]+|Bearer\s+[A-Za-z0-9._~+/-]+=*)/gi;
 
 /** Absolute filesystem paths that must not cross the renderer IPC boundary. */
 const ABSOLUTE_PATH_LIKE =
@@ -18,7 +17,8 @@ export function redactCollaborationText(value: string): string {
   return value
     .replace(TOKEN_LIKE, (match) => {
       if (match.toLowerCase().startsWith("bearer ")) return "Bearer [REDACTED]";
-      if (match.startsWith(HUMAN_DEVICE_TOKEN_PREFIX)) return `${HUMAN_DEVICE_TOKEN_PREFIX}[REDACTED]`;
+      if (match.startsWith(HUMAN_DEVICE_TOKEN_PREFIX))
+        return `${HUMAN_DEVICE_TOKEN_PREFIX}[REDACTED]`;
       if (match.startsWith(PROJECT_INVITATION_TOKEN_PREFIX)) {
         return `${PROJECT_INVITATION_TOKEN_PREFIX}[REDACTED]`;
       }

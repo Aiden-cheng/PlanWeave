@@ -115,10 +115,7 @@ async function readJsonFile(path: string): Promise<{ value: unknown; mtimeIso: s
   }
 }
 
-function resolveObservedAt(
-  explicit: string | null | undefined,
-  mtimeIso: string
-): string {
+function resolveObservedAt(explicit: string | null | undefined, mtimeIso: string): string {
   if (explicit && Number.isFinite(Date.parse(explicit))) return explicit;
   return mtimeIso;
 }
@@ -439,7 +436,8 @@ export async function buildReleaseGateReport(
         ? { ok: true }
         : {
             ok: false,
-            code: "code" in packageMajorCheck ? packageMajorCheck.code : "package_major_check_failed",
+            code:
+              "code" in packageMajorCheck ? packageMajorCheck.code : "package_major_check_failed",
             message:
               "message" in packageMajorCheck
                 ? packageMajorCheck.message

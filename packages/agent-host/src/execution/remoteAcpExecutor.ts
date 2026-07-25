@@ -242,6 +242,7 @@ export class RemoteAcpExecutor implements AgentHostExecutor {
       DEFAULT_ACP_EXECUTION_LIMITS.interactionTimeoutMs;
     let result: Awaited<ReturnType<typeof executeAcp>>;
     let resumedSessionLoaded = false;
+    let cleanupError: unknown;
     try {
       result = await executeAcp({
         launch: {
@@ -299,12 +300,15 @@ export class RemoteAcpExecutor implements AgentHostExecutor {
     } finally {
       try {
         await preparedInputs.cleanup();
-      } catch {
-        throw failure(
-          "workspace_input_cleanup_failed",
-          "The Agent Host could not clean up dispatch input artifacts."
-        );
+      } catch (error) {
+        cleanupError = error;
       }
+    }
+    if (cleanupError !== undefined) {
+      throw failure(
+        "workspace_input_cleanup_failed",
+        "The Agent Host could not clean up dispatch input artifacts."
+      );
     }
 
     if (result.terminal.state !== "succeeded") {

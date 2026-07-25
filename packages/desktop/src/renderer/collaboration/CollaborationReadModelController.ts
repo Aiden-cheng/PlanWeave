@@ -4,10 +4,7 @@ import type {
   HumanObserverEvent,
   WorkItemRef
 } from "@planweave-ai/collaboration-contracts";
-import type {
-  CollaborationStatus,
-  PlanWeaveCollaborationApi
-} from "../../shared/collaboration.js";
+import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
 import {
   workItemKey,
   type CollaborationActivityListQueryInput,
@@ -142,7 +139,10 @@ function mapSessionPhaseToSync(
   if (status.session.lastErrorCode === "human_device_expired" || detail.includes("auth_expired")) {
     return "auth_expired";
   }
-  if (status.session.lastErrorCode?.includes("forbidden") || status.session.lastErrorCode === "http_403") {
+  if (
+    status.session.lastErrorCode?.includes("forbidden") ||
+    status.session.lastErrorCode === "http_403"
+  ) {
     return "forbidden";
   }
   if (phase === "idle") return "disconnected";
@@ -167,9 +167,7 @@ function mapSessionPhaseToSync(
   return current;
 }
 
-function remoteStatusFromActivityType(
-  type: string
-): CollaborationRemoteRunStatus | null {
+function remoteStatusFromActivityType(type: string): CollaborationRemoteRunStatus | null {
   switch (type) {
     case "remote_run_started":
       return "started";

@@ -216,8 +216,7 @@ function authorizeBootstrap(
     return denial("human_auth_project_mismatch");
   }
 
-  const targetHumanPrincipalId =
-    facts?.targetHumanPrincipalId ?? subject.proof.humanPrincipalId;
+  const targetHumanPrincipalId = facts?.targetHumanPrincipalId ?? subject.proof.humanPrincipalId;
   if (subject.proof.humanPrincipalId !== targetHumanPrincipalId) {
     return denial("human_input_invalid");
   }

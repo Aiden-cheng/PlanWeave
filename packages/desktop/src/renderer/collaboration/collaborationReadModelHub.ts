@@ -15,9 +15,7 @@ type HubEntry = {
  */
 const hubs = new WeakMap<CollaborationReadBridgePort, HubEntry>();
 
-export function acquireCollaborationReadModelController(
-  api: CollaborationReadBridgePort
-): {
+export function acquireCollaborationReadModelController(api: CollaborationReadBridgePort): {
   controller: CollaborationReadModelController;
   release: () => void;
 } {

@@ -10,10 +10,7 @@ import {
 import type { CollaborationReadBridgePort } from "../renderer/collaboration/CollaborationReadModelController";
 import { useRemoteRunPanelController } from "../renderer/hooks/useRemoteRunPanelController";
 import { createTranslator } from "../renderer/i18n";
-import type {
-  CollaborationStatus,
-  PlanWeaveCollaborationApi
-} from "../shared/collaboration";
+import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../shared/collaboration";
 
 const blockItem: WorkItemRef = {
   kind: "block",
@@ -138,23 +135,25 @@ function createApi() {
     ],
     nextCursor: null
   });
-  const settle = vi.fn().mockImplementation(async (input: { settlement: { actionId: string } }) => ({
-    request: {
-      type: "interaction.permission_requested",
-      title: "Write",
-      description: "Allow write",
-      actionId: input.settlement.actionId,
-      dispatchId: "dispatch-1",
-      leaseId: "lease-1",
-      executionAttemptId: "attempt-1",
-      acpSessionId: "session-1",
-      expiresAt: "2030-01-01T02:00:00.000Z"
-    },
-    operationId: "op-1",
-    hostId: "host-1",
-    status: "settled",
-    createdAt: "2030-01-01T00:30:00.000Z"
-  }));
+  const settle = vi
+    .fn()
+    .mockImplementation(async (input: { settlement: { actionId: string } }) => ({
+      request: {
+        type: "interaction.permission_requested",
+        title: "Write",
+        description: "Allow write",
+        actionId: input.settlement.actionId,
+        dispatchId: "dispatch-1",
+        leaseId: "lease-1",
+        executionAttemptId: "attempt-1",
+        acpSessionId: "session-1",
+        expiresAt: "2030-01-01T02:00:00.000Z"
+      },
+      operationId: "op-1",
+      hostId: "host-1",
+      status: "settled",
+      createdAt: "2030-01-01T00:30:00.000Z"
+    }));
 
   const api = {
     getCollaborationStatus: vi.fn().mockResolvedValue(status),

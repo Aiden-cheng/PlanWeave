@@ -32,6 +32,15 @@ import {
   workItemRefSchema
 } from "./primitives.js";
 
+/** True when `value` contains ASCII C0 controls or DEL (U+0000–U+001F, U+007F). */
+function hasAsciiControlCharacter(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
+}
+
 export const commentBodyFormatSchema = z.literal(COMMENT_BODY_FORMAT);
 
 export const commentAttachmentFileNameSchema = z
@@ -45,7 +54,7 @@ export const commentAttachmentFileNameSchema = z
       !value.includes("/") &&
       !value.includes("\\") &&
       !value.includes("\0") &&
-      !/[\u0000-\u001f\u007f]/.test(value),
+      !hasAsciiControlCharacter(value),
     { message: "Attachment file name must not be a path or contain control characters." }
   );
 
@@ -125,7 +134,10 @@ export const commentCreateWireCommandSchema = z
   .object({
     workItem: workItemRefSchema,
     body: humanCommentBodySchema,
-    attachments: z.array(commentAttachmentInputSchema).max(COMMENT_ATTACHMENTS_MAX_COUNT).default([])
+    attachments: z
+      .array(commentAttachmentInputSchema)
+      .max(COMMENT_ATTACHMENTS_MAX_COUNT)
+      .default([])
   })
   .strict();
 export type CommentCreateWireCommand = z.infer<typeof commentCreateWireCommandSchema>;

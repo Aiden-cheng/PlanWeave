@@ -112,7 +112,10 @@ describe("server lifecycle", () => {
       rolledBack.exec("ALTER TABLE dispatches ADD COLUMN package_ref TEXT NOT NULL DEFAULT ''");
     }
     expect(
-      rolledBack.prepare("PRAGMA table_info(dispatches)").all().some((row) => row.name === "package_ref")
+      rolledBack
+        .prepare("PRAGMA table_info(dispatches)")
+        .all()
+        .some((row) => row.name === "package_ref")
     ).toBe(true);
     rolledBack.close();
 

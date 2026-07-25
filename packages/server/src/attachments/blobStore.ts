@@ -209,9 +209,7 @@ export class CommentAttachmentBlobStore {
   }
 
   private async resolveBlobPath(digestSha256: string): Promise<string> {
-    const relativePath = relativePathSchema.parse(
-      `${digestSha256.slice(0, 2)}/${digestSha256}`
-    );
+    const relativePath = relativePathSchema.parse(`${digestSha256.slice(0, 2)}/${digestSha256}`);
     const candidate = join(this.blobsDirectory, relativePath);
     await assertPathInsideRoot(this.blobsDirectory, candidate);
     return candidate;

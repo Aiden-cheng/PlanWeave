@@ -40,12 +40,7 @@ const searchResultListLabels = {
   targetLabel: "Target"
 } satisfies Pick<
   ComponentProps<typeof SearchResultList>,
-  | "assigneeLabel"
-  | "canvasLabel"
-  | "kindLabels"
-  | "matchSourceLabels"
-  | "refLabel"
-  | "targetLabel"
+  "assigneeLabel" | "canvasLabel" | "kindLabels" | "matchSourceLabels" | "refLabel" | "targetLabel"
 >;
 
 describe("desktop renderer component interactions", () => {

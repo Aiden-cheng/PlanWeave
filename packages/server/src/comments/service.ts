@@ -11,10 +11,7 @@ import {
 import { inWriteTransaction } from "../sqlite.js";
 import type { WorkItemPackageFacts, WorkItemRef } from "../work/schemas.js";
 import type { WorkItemPackagePort } from "../work/workItemFacts.js";
-import {
-  ActivityRepository,
-  ActivityRepositoryError
-} from "./activityRepository.js";
+import { ActivityRepository, ActivityRepositoryError } from "./activityRepository.js";
 import {
   buildAssignmentActivity,
   buildCommentActivity,
@@ -25,10 +22,7 @@ import {
   type RemoteRunActivityInput
 } from "./activityProjection.js";
 import { nextActivityCursor, nextCommentCursor } from "./cursor.js";
-import {
-  COMMENT_ACTIVITY_ERROR_MESSAGES,
-  type CommentActivityErrorCode
-} from "./errors.js";
+import { COMMENT_ACTIVITY_ERROR_MESSAGES, type CommentActivityErrorCode } from "./errors.js";
 import { ACTIVITY_LIST_PAGE_DEFAULT, COMMENT_LIST_PAGE_DEFAULT } from "./limits.js";
 import {
   authorizeActivityList,
@@ -410,10 +404,7 @@ export class CommentService {
    * Role on the context must still match the active membership role.
    */
   private assertActiveMembership(actor: HumanAuthContext, projectId: string): void {
-    const membership = this.identity.getActiveMembership(
-      projectId,
-      actor.humanPrincipalId
-    );
+    const membership = this.identity.getActiveMembership(projectId, actor.humanPrincipalId);
     if (!membership) {
       deny("comment_auth_forbidden");
     }
@@ -504,9 +495,7 @@ export class ActivityProjectionService {
     const limit = options.limit ?? ACTIVITY_LIST_PAGE_DEFAULT;
     const fetchLimit = limit + 1;
     const cursor =
-      options.cursor === undefined
-        ? undefined
-        : activityListCursorSchema.parse(options.cursor);
+      options.cursor === undefined ? undefined : activityListCursorSchema.parse(options.cursor);
     const rows = this.activity.list({
       projectId: pid,
       workItem: options.workItem,

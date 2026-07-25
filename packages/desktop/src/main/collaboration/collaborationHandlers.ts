@@ -11,10 +11,7 @@ import {
   CollaborationClient,
   type CollaborationWebSocketConstructor
 } from "./CollaborationClient.js";
-import {
-  CollaborationService,
-  type CollaborationServiceOptions
-} from "./collaborationService.js";
+import { CollaborationService, type CollaborationServiceOptions } from "./collaborationService.js";
 
 let service: CollaborationService | null = null;
 
@@ -150,9 +147,8 @@ export function registerCollaborationHandlers(
     collaborationInvokeChannels.listCollaborationAssignments,
     (_event, input: unknown) => active.listAssignments(input)
   );
-  ipcMain.handle(
-    collaborationInvokeChannels.getCollaborationAssignment,
-    (_event, input: unknown) => active.getAssignment(input)
+  ipcMain.handle(collaborationInvokeChannels.getCollaborationAssignment, (_event, input: unknown) =>
+    active.getAssignment(input)
   );
   ipcMain.handle(
     collaborationInvokeChannels.listCollaborationEligibleAssignees,
@@ -168,9 +164,8 @@ export function registerCollaborationHandlers(
     collaborationInvokeChannels.updateCollaborationAssignment,
     (_event, input: unknown) => active.updateAssignment(input)
   );
-  ipcMain.handle(
-    collaborationInvokeChannels.createCollaborationComment,
-    (_event, input: unknown) => active.createComment(input)
+  ipcMain.handle(collaborationInvokeChannels.createCollaborationComment, (_event, input: unknown) =>
+    active.createComment(input)
   );
   ipcMain.handle(collaborationInvokeChannels.editCollaborationComment, (_event, input: unknown) =>
     active.editComment(input)

@@ -136,7 +136,12 @@ export function digestJson(value: unknown): string {
 }
 
 function columns(database: SqliteDatabase, table: string): Set<string> {
-  return new Set(database.prepare(`PRAGMA table_info(${table})`).all().map((row) => String(row.name)));
+  return new Set(
+    database
+      .prepare(`PRAGMA table_info(${table})`)
+      .all()
+      .map((row) => String(row.name))
+  );
 }
 
 function assertSupportedSchemaVersion(database: SqliteDatabase): void {

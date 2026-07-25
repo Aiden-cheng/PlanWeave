@@ -87,7 +87,11 @@ export type CollaborationHostProjection = {
   capacityRemaining?: number;
 };
 
-export type CollaborationMutationKind = "assignment" | "comment_create" | "comment_edit" | "comment_tombstone";
+export type CollaborationMutationKind =
+  | "assignment"
+  | "comment_create"
+  | "comment_edit"
+  | "comment_tombstone";
 
 /**
  * Mutation confirmation model — never treat unconfirmed/rejected results as success.

@@ -10,16 +10,14 @@ import {
 
 describe("distributed compatibility bounds", () => {
   it("pins a single wire protocol version and fail-closed rollback rules", () => {
-    expect(PLANWEAVE_COMPATIBILITY_BOUNDS.agentHostProtocolVersion).toBe(
-      agentHostProtocolVersion
-    );
+    expect(PLANWEAVE_COMPATIBILITY_BOUNDS.agentHostProtocolVersion).toBe(agentHostProtocolVersion);
     expect(PLANWEAVE_COMPATIBILITY_BOUNDS.rollbackConstraints.resetDatabases).toBe(false);
-    expect(
-      PLANWEAVE_COMPATIBILITY_BOUNDS.rollbackConstraints.silentRerunInterruptedBlocks
-    ).toBe(false);
-    expect(
-      PLANWEAVE_COMPATIBILITY_BOUNDS.rollbackConstraints.requireStateBackupBeforeUpgrade
-    ).toBe(true);
+    expect(PLANWEAVE_COMPATIBILITY_BOUNDS.rollbackConstraints.silentRerunInterruptedBlocks).toBe(
+      false
+    );
+    expect(PLANWEAVE_COMPATIBILITY_BOUNDS.rollbackConstraints.requireStateBackupBeforeUpgrade).toBe(
+      true
+    );
   });
 
   it("accepts the supported protocol version and rejects other majors", () => {
@@ -49,9 +47,9 @@ describe("distributed compatibility bounds", () => {
   });
 
   it("allows same-major downgrade only", () => {
-    expect(
-      assertGracefulPackageDowngrade({ fromVersion: "0.3.2", toVersion: "0.3.0" })
-    ).toEqual({ ok: true });
+    expect(assertGracefulPackageDowngrade({ fromVersion: "0.3.2", toVersion: "0.3.0" })).toEqual({
+      ok: true
+    });
     expect(
       assertGracefulPackageDowngrade({ fromVersion: "1.0.0", toVersion: "0.9.0" })
     ).toMatchObject({ ok: false, code: "package_downgrade_major_forbidden" });

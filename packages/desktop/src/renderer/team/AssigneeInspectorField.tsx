@@ -33,10 +33,7 @@ export function AssigneeInspectorField({
 }: AssigneeInspectorFieldProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const workKey = workItem ? workItemKey(workItem) : null;
-  const stableWorkItem = useMemo(
-    () => (workKey ? parseWorkItemKey(workKey) : null),
-    [workKey]
-  );
+  const stableWorkItem = useMemo(() => (workKey ? parseWorkItemKey(workKey) : null), [workKey]);
   const controller = useAssigneePickerController({
     workItem: stableWorkItem,
     api,

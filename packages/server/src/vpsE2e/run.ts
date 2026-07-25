@@ -17,7 +17,11 @@ export type RunVpsE2eOptions = {
   evidencePath?: string;
 };
 
-function skippedEvidence(gate: VpsE2eGate, message: string, disposition: "skip" | "fail"): VpsE2eEvidence {
+function skippedEvidence(
+  gate: VpsE2eGate,
+  message: string,
+  disposition: "skip" | "fail"
+): VpsE2eEvidence {
   return {
     version: "planweave.vps-authenticated-e2e/v1",
     environmentClass: "unavailable",
@@ -79,11 +83,7 @@ export async function runVpsAuthenticatedE2e(
   const target = await resolveVpsE2eTarget(gate, env);
   let evidence: VpsE2eEvidence;
   if (target.kind === "precondition") {
-    evidence = skippedEvidence(
-      gate,
-      target.precondition.message,
-      target.precondition.disposition
-    );
+    evidence = skippedEvidence(gate, target.precondition.message, target.precondition.disposition);
   } else if (target.kind === "local-tls-fixture") {
     evidence = await runLocalTlsFixture({ gate, env });
   } else {

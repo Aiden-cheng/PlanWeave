@@ -94,9 +94,9 @@ describe("assignmentViewModels", () => {
       eligible: null
     });
     expect(sections.map((section) => section.id)).toEqual(["unassigned", "people"]);
-    expect(sections.flatMap((section) => section.options).some((o) => o.kind === "exact_host")).toBe(
-      false
-    );
+    expect(
+      sections.flatMap((section) => section.options).some((o) => o.kind === "exact_host")
+    ).toBe(false);
     expect(
       sections.flatMap((section) => section.options).some((o) => o.kind === "automatic_host")
     ).toBe(false);
@@ -242,9 +242,7 @@ describe("assignmentViewModels", () => {
       hosts: [],
       eligible: null
     });
-    const option = sections
-      .flatMap((s) => s.options)
-      .find((o) => o.id === "human:gone");
+    const option = sections.flatMap((s) => s.options).find((o) => o.id === "human:gone");
     expect(option?.selectable).toBe(false);
     expect(option?.unavailableReason).toBe("human_membership_inactive");
     expect(option?.selected).toBe(true);
@@ -398,9 +396,8 @@ describe("assignmentViewModels", () => {
       "派发时由服务器选择兼容 Host"
     );
     expect(
-      sections
-        .find((s) => s.id === "people")
-        ?.options.find((o) => o.id === "human:gone")?.secondaryLabel
+      sections.find((s) => s.id === "people")?.options.find((o) => o.id === "human:gone")
+        ?.secondaryLabel
     ).toBe("成员资格已失效");
     expect(
       sections

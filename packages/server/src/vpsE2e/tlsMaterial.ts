@@ -72,9 +72,13 @@ export async function generateLocalTlsMaterial(
   }
 
   // Restrict key material immediately.
-  await writeFile(join(directory, "README.redacted.txt"), "ephemeral local-tls-fixture material\n", {
-    mode: 0o600
-  });
+  await writeFile(
+    join(directory, "README.redacted.txt"),
+    "ephemeral local-tls-fixture material\n",
+    {
+      mode: 0o600
+    }
+  );
 
   return {
     directory,

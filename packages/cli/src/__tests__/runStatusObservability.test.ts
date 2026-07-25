@@ -89,7 +89,7 @@ describe("run-status liveness and run-sessions events", () => {
       await mkdir(join(init.workspace.resultsDir, "auto-runs", runId), { recursive: true });
       await writeFile(
         logPath,
-        [
+        `${[
           JSON.stringify({
             timestamp: "2026-07-09T00:00:00.000Z",
             runId,
@@ -106,7 +106,7 @@ describe("run-status liveness and run-sessions events", () => {
             stepCount: 1,
             currentRef: "T-001#B-001"
           })
-        ].join("\n") + "\n",
+        ].join("\n")}\n`,
         "utf8"
       );
 

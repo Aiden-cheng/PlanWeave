@@ -91,9 +91,7 @@ describe("comment/activity migration v20", () => {
 
     for (const table of ["comments", "activity_records", "activity_projection_outbox"]) {
       expect(
-        database
-          .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?")
-          .get(table)
+        database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)
       ).toBeDefined();
     }
   });

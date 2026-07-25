@@ -1,10 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  exampleExecuteDelivery,
-  mailboxDeliverySchema
-} from "@planweave-ai/distributed-protocol";
+import { exampleExecuteDelivery, mailboxDeliverySchema } from "@planweave-ai/distributed-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { DurableAcpInteractionRelay } from "../execution/durableAcpRelay.js";
 import { openAgentHostState, type AgentHostState } from "../state/agentHostState.js";
@@ -348,14 +345,10 @@ describe("durable ACP relay", () => {
       deadline: "2020-01-01T00:00:00.000Z"
     });
     const cancelledRelay = new DurableAcpInteractionRelay(cancelledSetup.state);
-    const cancelled = cancelledRelay.requestElicitation(
-      cancelledSetup.identity,
-      cancelledRequest,
-      {
-        signal: new AbortController().signal,
-        deadline: new Date("2030-01-01T00:00:00.000Z")
-      }
-    );
+    const cancelled = cancelledRelay.requestElicitation(cancelledSetup.identity, cancelledRequest, {
+      signal: new AbortController().signal,
+      deadline: new Date("2030-01-01T00:00:00.000Z")
+    });
     const cancelledDelivery = mailboxDeliverySchema.parse({
       type: "mailbox.message",
       protocolVersion: 1,

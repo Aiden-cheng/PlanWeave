@@ -198,10 +198,7 @@
         "runtimeBrowserBoundary.test.ts",
         "smokeProcessGate.test.ts"
       ],
-      "platform": [
-        "agentToolsWindows.test.ts",
-        "runtimeStateWatch.test.ts"
-      ],
+      "platform": ["agentToolsWindows.test.ts", "runtimeStateWatch.test.ts"],
       "performance": []
     },
     {
@@ -448,9 +445,7 @@
         "managedProcessTree.test.ts",
         "stateConcurrency.test.ts"
       ],
-      "performance": [
-        "blockRunIndexPerformance.test.ts"
-      ]
+      "performance": ["blockRunIndexPerformance.test.ts"]
     },
     {
       "root": "packages/distributed-protocol/src/__tests__",
@@ -470,9 +465,7 @@
     },
     {
       "root": "packages/collaboration-contracts/src/__tests__",
-      "unit": [
-        "contracts.test.ts"
-      ],
+      "unit": ["contracts.test.ts"],
       "integration": [],
       "platform": [],
       "performance": []

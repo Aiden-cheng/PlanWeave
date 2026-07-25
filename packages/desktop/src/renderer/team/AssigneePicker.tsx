@@ -3,11 +3,7 @@ import type { AssignmentTarget } from "@planweave-ai/collaboration-contracts";
 import { ChevronDownIcon, RefreshCwIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import type {
   AssigneeOption,
@@ -75,10 +71,7 @@ function reasonLabel(
   }
 }
 
-function sectionHeading(
-  section: AssigneeSection,
-  t: ReturnType<typeof createTranslator>
-): string {
+function sectionHeading(section: AssigneeSection, t: ReturnType<typeof createTranslator>): string {
   switch (section.id) {
     case "unassigned":
       return t("assigneeSectionUnassigned");
@@ -134,7 +127,7 @@ function OptionRow({
 }) {
   const reason = reasonLabel(option.unavailableReason ?? option.warningReason, t);
   return (
-    <li role="presentation">
+    <div>
       <button
         type="button"
         id={optionId}
@@ -160,19 +153,24 @@ function OptionRow({
         <span className="flex w-full min-w-0 items-center justify-between gap-2">
           <span className="min-w-0 truncate font-medium">{option.label}</span>
           {option.selected ? (
-            <span className="shrink-0 text-[10px] text-muted-foreground">{t("assigneeCurrent")}</span>
+            <span className="shrink-0 text-[10px] text-muted-foreground">
+              {t("assigneeCurrent")}
+            </span>
           ) : null}
         </span>
         {option.secondaryLabel ? (
           <span className="text-[11px] text-muted-foreground">{option.secondaryLabel}</span>
         ) : null}
         {reason ? (
-          <span className="text-[11px] text-amber-800 dark:text-amber-100" data-testid="assignee-option-reason">
+          <span
+            className="text-[11px] text-amber-800 dark:text-amber-100"
+            data-testid="assignee-option-reason"
+          >
             {reason}
           </span>
         ) : null}
       </button>
-    </li>
+    </div>
   );
 }
 
@@ -202,6 +200,7 @@ export function AssigneePicker({
     onOpenChange?.(next);
   };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: remount focus when work item changes
   useEffect(() => {
     if (!open) return;
     setActiveIndex(0);
@@ -323,7 +322,7 @@ export function AssigneePicker({
               aria-activedescendant={activeOptionId}
               autoComplete="off"
             />
-            <ul
+            <div
               id={listboxId}
               role="listbox"
               aria-label={t("assignee")}
@@ -331,34 +330,39 @@ export function AssigneePicker({
               className="max-h-64 space-y-2 overflow-auto"
             >
               {viewModel.sections.length === 0 ? (
-                <li className="px-2 py-3 text-xs text-muted-foreground" data-testid="assignee-empty">
+                <div
+                  className="px-2 py-3 text-xs text-muted-foreground"
+                  data-testid="assignee-empty"
+                >
                   {t("assigneeNoMatches")}
-                </li>
+                </div>
               ) : (
                 viewModel.sections.map((section) => (
-                  <li key={section.id} role="presentation" data-testid={`assignee-section-${section.id}`}>
-                    <div className="px-2 pb-1 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+                  <fieldset
+                    key={section.id}
+                    data-testid={`assignee-section-${section.id}`}
+                    className="m-0 min-w-0 space-y-0.5 border-0 p-0"
+                  >
+                    <legend className="float-left w-full px-2 pb-1 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
                       {sectionHeading(section, t)}
-                    </div>
-                    <ul role="group" aria-label={sectionHeading(section, t)} className="space-y-0.5">
-                      {section.options.map((option) => {
-                        const flatIndex = options.findIndex((item) => item.id === option.id);
-                        return (
-                          <OptionRow
-                            key={option.id}
-                            option={option}
-                            active={flatIndex === activeIndex}
-                            optionId={`${listboxId}-opt-${option.id}`}
-                            t={t}
-                            onSelect={() => void handleSelect(option.target)}
-                          />
-                        );
-                      })}
-                    </ul>
-                  </li>
+                    </legend>
+                    {section.options.map((option) => {
+                      const flatIndex = options.findIndex((item) => item.id === option.id);
+                      return (
+                        <OptionRow
+                          key={option.id}
+                          option={option}
+                          active={flatIndex === activeIndex}
+                          optionId={`${listboxId}-opt-${option.id}`}
+                          t={t}
+                          onSelect={() => void handleSelect(option.target)}
+                        />
+                      );
+                    })}
+                  </fieldset>
                 ))
               )}
-            </ul>
+            </div>
           </div>
         </PopoverContent>
       </Popover>
@@ -389,7 +393,11 @@ export function AssigneePicker({
       ) : null}
 
       {viewModel.lastError && viewModel.mode !== "error" ? (
-        <p className="text-[11px] text-destructive" data-testid="assignee-action-error" role="alert">
+        <p
+          className="text-[11px] text-destructive"
+          data-testid="assignee-action-error"
+          role="alert"
+        >
           {viewModel.lastError}
         </p>
       ) : null}

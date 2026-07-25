@@ -1,11 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { UsersIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { createTranslator } from "../i18n";
 import { collaborationBridge } from "../bridge";
 import { useCollaborationStatus } from "../hooks/useCollaborationStatus";
@@ -106,7 +102,11 @@ export function PeoplePresenceControl({
         >
           <span className="flex items-center gap-1">
             {panel.presence.avatarMembers.length > 0 ? (
-              <span className="flex -space-x-1.5" data-testid="people-presence-avatars" aria-hidden="true">
+              <span
+                className="flex -space-x-1.5"
+                data-testid="people-presence-avatars"
+                aria-hidden="true"
+              >
                 {panel.presence.avatarMembers.slice(0, 3).map((member) => (
                   <span
                     key={member.humanPrincipalId}
@@ -153,7 +153,7 @@ export function PeoplePresenceControl({
             const ok = await panel.revokeInvitation(invitationId);
             reportMembership(
               ok,
-              ok ? t("notifyMembershipChanged") : panel.actionError ?? t("peopleError")
+              ok ? t("notifyMembershipChanged") : (panel.actionError ?? t("peopleError"))
             );
             return ok;
           }}
@@ -162,7 +162,7 @@ export function PeoplePresenceControl({
             if (ok) await refreshMembers();
             reportMembership(
               ok,
-              ok ? t("notifyMembershipChanged") : panel.actionError ?? t("peopleError")
+              ok ? t("notifyMembershipChanged") : (panel.actionError ?? t("peopleError"))
             );
             return ok;
           }}
@@ -171,7 +171,7 @@ export function PeoplePresenceControl({
             if (ok) await refreshMembers();
             reportMembership(
               ok,
-              ok ? t("notifyMembershipChanged") : panel.actionError ?? t("peopleError")
+              ok ? t("notifyMembershipChanged") : (panel.actionError ?? t("peopleError"))
             );
             return ok;
           }}
@@ -180,7 +180,7 @@ export function PeoplePresenceControl({
             if (ok) await refreshMembers();
             reportMembership(
               ok,
-              ok ? t("notifyMembershipChanged") : panel.actionError ?? t("peopleError")
+              ok ? t("notifyMembershipChanged") : (panel.actionError ?? t("peopleError"))
             );
             return ok;
           }}
@@ -188,7 +188,7 @@ export function PeoplePresenceControl({
             const ok = await panel.revokeDevice(deviceCredentialId);
             reportMembership(
               ok,
-              ok ? t("notifyMembershipChanged") : panel.actionError ?? t("peopleError")
+              ok ? t("notifyMembershipChanged") : (panel.actionError ?? t("peopleError"))
             );
             return ok;
           }}

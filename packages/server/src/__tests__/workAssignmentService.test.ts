@@ -7,15 +7,9 @@ import { HumanIdentityRepository } from "../identity/repository.js";
 import type { HumanAuthContext } from "../identity/schemas.js";
 import { applyMigrations } from "../migrations.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
-import {
-  createHostAssignmentPort,
-  createIdentityMembershipPort
-} from "../work/ports.js";
+import { createHostAssignmentPort, createIdentityMembershipPort } from "../work/ports.js";
 import { WorkAssignmentRepository } from "../work/repository.js";
-import {
-  WorkAssignmentService,
-  WorkAssignmentServiceError
-} from "../work/service.js";
+import { WorkAssignmentService, WorkAssignmentServiceError } from "../work/service.js";
 import type {
   AssignmentHostFacts,
   AssignmentMembershipFacts,
@@ -428,14 +422,8 @@ describe("work assignment service API", () => {
   });
 
   it("authorizes viewers and lists eligible assignees + batch projections", async () => {
-    const {
-      service,
-      ownerContext,
-      memberContext,
-      member,
-      capableHost,
-      weakHost
-    } = await openStack();
+    const { service, ownerContext, memberContext, member, capableHost, weakHost } =
+      await openStack();
 
     service.updateAssignment({
       projectId,
@@ -455,9 +443,9 @@ describe("work assignment service API", () => {
     const eligibleTask = service.listEligibleAssignees(ownerContext, projectId, taskItem);
     expect(eligibleTask.humans.length).toBeGreaterThanOrEqual(2);
     expect(eligibleTask.hosts).toEqual([]);
-    expect(
-      eligibleTask.humans.every((h: AssignmentMembershipFacts) => h.membershipActive)
-    ).toBe(true);
+    expect(eligibleTask.humans.every((h: AssignmentMembershipFacts) => h.membershipActive)).toBe(
+      true
+    );
 
     const eligibleBlock = service.listEligibleAssignees(memberContext, projectId, blockItem);
     expect(eligibleBlock.hosts.some((h) => h.hostId === capableHost.host.id)).toBe(true);
@@ -534,9 +522,7 @@ describe("work assignment service API", () => {
       service.getAssignment(bogus, projectId, taskItem);
       expect.fail("cross project view");
     } catch (error) {
-      expect((error as WorkAssignmentServiceError).code).toMatch(
-        /work_auth|work_input_invalid/
-      );
+      expect((error as WorkAssignmentServiceError).code).toMatch(/work_auth|work_input_invalid/);
     }
 
     try {

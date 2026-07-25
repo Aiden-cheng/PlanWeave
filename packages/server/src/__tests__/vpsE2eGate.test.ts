@@ -15,7 +15,9 @@ import {
 const roots: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+  await Promise.all(
+    roots.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
+  );
 });
 
 describe("VPS e2e gate and redaction (unit)", () => {

@@ -112,7 +112,11 @@ export function validateWorkItemRef(
   workItem: WorkItemRef
 ):
   | { ok: true; facts: WorkItemPackageFacts }
-  | { ok: false; code: "work_item_not_found" | "work_input_invalid"; facts?: WorkItemPackageFacts } {
+  | {
+      ok: false;
+      code: "work_item_not_found" | "work_input_invalid";
+      facts?: WorkItemPackageFacts;
+    } {
   const parsed = workItemRefSchema.safeParse(workItem);
   if (!parsed.success) {
     return { ok: false, code: "work_input_invalid" };

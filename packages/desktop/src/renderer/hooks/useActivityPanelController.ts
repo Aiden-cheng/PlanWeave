@@ -126,6 +126,7 @@ export function useActivityPanelController(
     [api, args.open, args.workItem, nextCursor, sessionConnected]
   );
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional scope-driven reload
   useEffect(() => {
     generationRef.current += 1;
     setItems([]);
@@ -133,10 +134,11 @@ export function useActivityPanelController(
     setActionError(null);
     if (!args.open || !sessionConnected || !api) return;
     void loadPage("replace");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // workKey/projectId remount the page; loadPage is stable enough via generation guard.
   }, [args.open, workKey, sessionConnected, api, snapshot.projectId]);
 
   // Merge hub project activity snapshots for the open scope (typed summaries only).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: updatedAt forces hub merge without churn
   useEffect(() => {
     if (!args.open) return;
     if (!snapshot.activity.length) return;

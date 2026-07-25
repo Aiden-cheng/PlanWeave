@@ -799,12 +799,15 @@ describe("preload bridge invocation", () => {
       (call) => call[0] === collaborationObserverSignalChannel
     ) as [string, IpcRendererListener] | undefined;
     expect(signalCall?.[0]).toBe(collaborationObserverSignalChannel);
-    signalCall?.[1]({}, {
-      type: "human.observer.cursor",
-      profileId: "profile-1",
-      projectId: "project-1",
-      cursor: 3
-    });
+    signalCall?.[1](
+      {},
+      {
+        type: "human.observer.cursor",
+        profileId: "profile-1",
+        projectId: "project-1",
+        cursor: 3
+      }
+    );
     expect(signalCallback).toHaveBeenCalledWith(
       expect.objectContaining({ type: "human.observer.cursor", cursor: 3 })
     );
@@ -816,7 +819,6 @@ describe("preload bridge invocation", () => {
   });
 
   it("records smoke reveal requests without invoking the system file manager", async () => {
-
     process.env.PLANWEAVE_DESKTOP_SMOKE = "1";
     electronMock.ipcRenderer.invoke.mockResolvedValue(undefined);
 

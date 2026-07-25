@@ -95,7 +95,10 @@ export type ServerDispatchRow = {
 
 function openSqlite(path: string, readOnly = true) {
   const { DatabaseSync } = require("node:sqlite") as {
-    DatabaseSync: new (path: string, options?: { readOnly?: boolean }) => {
+    DatabaseSync: new (
+      path: string,
+      options?: { readOnly?: boolean }
+    ) => {
       prepare(sql: string): {
         get(...values: unknown[]): Record<string, unknown> | undefined;
         all(...values: unknown[]): Array<Record<string, unknown>>;

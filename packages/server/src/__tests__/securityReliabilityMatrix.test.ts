@@ -120,10 +120,9 @@ describe("security reliability matrix", () => {
       { name: "control char", value: "evil\n.png" }
     ];
     for (const entry of cases) {
-      expect(
-        commentAttachmentFileNameSchema.safeParse(entry.value).success,
-        entry.name
-      ).toBe(false);
+      expect(commentAttachmentFileNameSchema.safeParse(entry.value).success, entry.name).toBe(
+        false
+      );
     }
     expect(commentAttachmentFileNameSchema.parse("notes.md")).toBe("notes.md");
   });

@@ -6,11 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { hashOperatorToken } from "../operatorAuth.js";
 import { serverPackageVersion } from "../packageInfo.js";
-import {
-  emptyChecks,
-  emptyIdentities,
-  type VpsE2eEvidence
-} from "./evidence.js";
+import { emptyChecks, emptyIdentities, type VpsE2eEvidence } from "./evidence.js";
 import { createFixtureWorkspace } from "./fixtureWorkspace.js";
 import type { VpsE2eGate } from "./gate.js";
 import { precondition } from "./gate.js";
@@ -272,11 +268,7 @@ export async function runLocalTlsFixture(options: {
             id: "codex-acp",
             agentId: "codex",
             command: process.execPath,
-            args: [
-              acpMockAgentPath,
-              "success",
-              `--control-dir=${join(root, "acp-control")}`
-            ],
+            args: [acpMockAgentPath, "success", `--control-dir=${join(root, "acp-control")}`],
             environment: []
           }
         ]
@@ -358,10 +350,14 @@ export async function runLocalTlsFixture(options: {
     const grant = (await grantResponse.json()) as { enrollmentCode: string };
     checks.enrollmentOneTimeToken = grant.enrollmentCode.startsWith("pw_enroll_");
 
-    const preflight = await runNodeBin(agentHostBinPath, ["preflight", "--config", hostConfigPath], {
-      ...process.env,
-      PLANWEAVE_HOME: workspace.home
-    });
+    const preflight = await runNodeBin(
+      agentHostBinPath,
+      ["preflight", "--config", hostConfigPath],
+      {
+        ...process.env,
+        PLANWEAVE_HOME: workspace.home
+      }
+    );
     if (preflight.code !== 0) {
       throw new Error(`vps_e2e_host_preflight_failed:${preflight.stderr || preflight.stdout}`);
     }
@@ -383,7 +379,9 @@ export async function runLocalTlsFixture(options: {
       env: { ...process.env, PLANWEAVE_HOME: workspace.home }
     });
 
-    let hostOnline: { id: string; lastSeenAt: string; capacity: number; capabilities: string[] } | undefined;
+    let hostOnline:
+      | { id: string; lastSeenAt: string; capacity: number; capabilities: string[] }
+      | undefined;
     await waitFor(
       async () => {
         const response = await request(`${origin}/api/v1/hosts`, {

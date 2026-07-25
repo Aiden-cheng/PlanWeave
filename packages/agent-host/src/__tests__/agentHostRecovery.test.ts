@@ -101,9 +101,7 @@ describe("Agent Host explicit recovery", () => {
     const staleHeartbeat = state.queueHeartbeat(state.activeLeases());
     expect(staleHeartbeat).toMatchObject({
       type: "host.heartbeat",
-      activeLeases: [
-        expect.objectContaining({ leaseId: exampleExecuteDelivery.command.leaseId })
-      ]
+      activeLeases: [expect.objectContaining({ leaseId: exampleExecuteDelivery.command.leaseId })]
     });
     state.close();
     states.pop();
@@ -116,9 +114,9 @@ describe("Agent Host explicit recovery", () => {
     expect(recoveredHeartbeat.messageId).not.toBe(staleHeartbeat.messageId);
     expect(recoveredHeartbeat).toMatchObject({ type: "host.heartbeat", activeLeases: [] });
     expect(reopened.acknowledgeEvent(staleHeartbeat.messageId)).toBe(false);
-    expect(
-      reopened.pendingEvents().filter((event) => event.type === "host.heartbeat")
-    ).toEqual([recoveredHeartbeat]);
+    expect(reopened.pendingEvents().filter((event) => event.type === "host.heartbeat")).toEqual([
+      recoveredHeartbeat
+    ]);
     expect(reopened.pendingEvents()).toEqual(
       expect.arrayContaining([expect.objectContaining({ type: "dispatch.interrupted" })])
     );

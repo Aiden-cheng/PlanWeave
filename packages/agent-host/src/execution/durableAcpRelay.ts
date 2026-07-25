@@ -1,7 +1,4 @@
-import type {
-  InteractionSettlement,
-  MailboxCommand
-} from "@planweave-ai/distributed-protocol";
+import type { InteractionSettlement, MailboxCommand } from "@planweave-ai/distributed-protocol";
 import type {
   AcpEngineElicitationRequest,
   AcpEngineInteractionContext,
@@ -56,9 +53,7 @@ export class DurableAcpInteractionRelay implements AgentHostRemoteInteractionRes
     }
     const settlement = this.state.interactionSettlement(command);
     if (settlement === undefined) throw new Error("interaction_settlement_not_durable");
-    const pending = this.pending.get(
-      key(command, command.acpSessionId, command.actionId)
-    );
+    const pending = this.pending.get(key(command, command.acpSessionId, command.actionId));
     pending?.resolve(command);
     return command.type === "interaction.authentication_action" && command.action === "cancel"
       ? {
@@ -80,7 +75,9 @@ export class DurableAcpInteractionRelay implements AgentHostRemoteInteractionRes
     }
     if (settlement.decision === "deny") {
       const denied = request.options.find((option) => option.decision === "deny");
-      return denied ? { kind: "select" as const, optionId: denied.optionId } : { kind: "cancel" as const };
+      return denied
+        ? { kind: "select" as const, optionId: denied.optionId }
+        : { kind: "cancel" as const };
     }
     const allowed = request.options.find((option) => option.decision === "approve");
     if (!allowed) throw new Error("interaction_permission_allow_unavailable");

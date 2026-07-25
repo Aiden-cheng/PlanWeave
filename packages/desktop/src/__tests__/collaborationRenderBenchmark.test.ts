@@ -24,10 +24,7 @@ import { useCommentsPanelController } from "../renderer/hooks/useCommentsPanelCo
 import { usePeoplePanelController } from "../renderer/hooks/usePeoplePanelController";
 import { useRemoteRunPanelController } from "../renderer/hooks/useRemoteRunPanelController";
 import { createTranslator } from "../renderer/i18n";
-import type {
-  CollaborationStatus,
-  PlanWeaveCollaborationApi
-} from "../shared/collaboration";
+import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../shared/collaboration";
 
 /** Align with Task Workspace virtualization guidance: keep a product page well under 200 DOM rows. */
 const VIRTUALIZATION_DOM_ROW_THRESHOLD = 200;

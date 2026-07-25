@@ -4,9 +4,7 @@
  */
 
 /** Reuse identity comment body budget (UTF-16 code units). */
-export {
-  HUMAN_COMMENT_BODY_MAX_LENGTH as COMMENT_BODY_MAX_LENGTH
-} from "../identity/limits.js";
+export { HUMAN_COMMENT_BODY_MAX_LENGTH as COMMENT_BODY_MAX_LENGTH } from "../identity/limits.js";
 
 export const COMMENT_BODY_MIN_LENGTH = 1 as const;
 

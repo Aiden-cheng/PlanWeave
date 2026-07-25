@@ -160,9 +160,9 @@ describe("human membership HTTP APIs", () => {
     });
     expect(listed.status).toBe(200);
     const listedBody = (await listed.json()) as { items: Array<{ invitationId: string }> };
-    expect(listedBody.items.some((item) => item.invitationId === invite.invitation.invitationId)).toBe(
-      true
-    );
+    expect(
+      listedBody.items.some((item) => item.invitationId === invite.invitation.invitationId)
+    ).toBe(true);
     expect(JSON.stringify(listedBody)).not.toContain("tokenSha256");
 
     const joined = await fetch(`${origin}/api/v1/projects/project-a/human/invitations/consume`, {

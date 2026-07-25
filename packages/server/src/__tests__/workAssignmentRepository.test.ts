@@ -8,10 +8,7 @@ import {
   latestCentralSchemaVersion
 } from "../migrations.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
-import {
-  WorkAssignmentError,
-  WorkAssignmentRepository
-} from "../work/repository.js";
+import { WorkAssignmentError, WorkAssignmentRepository } from "../work/repository.js";
 import type { AssignmentRecord, WorkItemRef } from "../work/schemas.js";
 
 const directories: string[] = [];
@@ -251,9 +248,7 @@ describe("work assignment repository CAS", () => {
     });
 
     const batch = repo.getMany("project-a", [taskItem, otherTask, blockItem]);
-    expect(batch.map((row) => row.workItem)).toEqual(
-      expect.arrayContaining([taskItem, otherTask])
-    );
+    expect(batch.map((row) => row.workItem)).toEqual(expect.arrayContaining([taskItem, otherTask]));
     expect(batch).toHaveLength(2);
 
     const canvasDefault = repo.listByProject("project-a", { canvasId: "default", limit: 10 });

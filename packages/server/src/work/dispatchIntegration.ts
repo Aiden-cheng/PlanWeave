@@ -2,10 +2,7 @@ import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
 import { z } from "zod";
 import { capabilitiesSchema } from "../protocol.js";
 import type { SqliteDatabase } from "../sqlite.js";
-import {
-  WORK_ASSIGNMENT_ERROR_MESSAGES,
-  type WorkAssignmentErrorCode
-} from "./errors.js";
+import { WORK_ASSIGNMENT_ERROR_MESSAGES, type WorkAssignmentErrorCode } from "./errors.js";
 import {
   evaluateDispatchAgainstAssignment,
   type DispatchAssignmentGateDecision

@@ -489,9 +489,7 @@ describe("CommentService", () => {
       );
     const recon = stack.projection.reconcileOutbox(20);
     expect(recon.processed).toBeGreaterThanOrEqual(1);
-    expect(
-      stack.activity.getBySource(projectId, "remote_run", "dispatch-2:failed")
-    ).toBeDefined();
+    expect(stack.activity.getBySource(projectId, "remote_run", "dispatch-2:failed")).toBeDefined();
 
     const full = stack.service.listActivity({
       projectId,

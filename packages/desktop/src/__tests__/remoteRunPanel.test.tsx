@@ -12,10 +12,7 @@ import {
 import type { CollaborationReadBridgePort } from "../renderer/collaboration/CollaborationReadModelController";
 import { createTranslator } from "../renderer/i18n";
 import { RemoteRunPanel } from "../renderer/team/RemoteRunPanel";
-import type {
-  CollaborationStatus,
-  PlanWeaveCollaborationApi
-} from "../shared/collaboration";
+import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../shared/collaboration";
 
 const blockItem: WorkItemRef = {
   kind: "block",
@@ -169,7 +166,9 @@ describe("RemoteRunPanel", () => {
     });
     expect(screen.getByTestId("remote-run-events")).toBeInTheDocument();
     expect(screen.getByText(/remote hello/)).toBeInTheDocument();
-    expect(screen.getByTestId("remote-run-notice")).toHaveTextContent(/Separate from local Auto Run/i);
+    expect(screen.getByTestId("remote-run-notice")).toHaveTextContent(
+      /Separate from local Auto Run/i
+    );
   });
 
   it("requires confirmation before cancel", async () => {
@@ -245,9 +244,7 @@ describe("RemoteRunPanel", () => {
     const user = userEvent.setup();
     const api = createApi();
     const observe = api.observeCollaborationRemoteOperation as ReturnType<typeof vi.fn>;
-    const executeAction = api.executeCollaborationRemoteOperationAction as ReturnType<
-      typeof vi.fn
-    >;
+    const executeAction = api.executeCollaborationRemoteOperationAction as ReturnType<typeof vi.fn>;
     observe.mockResolvedValue({
       operationId: "op-1",
       projectId: "project-1",

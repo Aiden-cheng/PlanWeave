@@ -17,10 +17,7 @@ import { CommentsPanel } from "../renderer/team/CommentsPanel";
 import { PeoplePanel } from "../renderer/team/PeoplePanel";
 import { RemoteRunPanel } from "../renderer/team/RemoteRunPanel";
 import { WorkItemCollaborationPanel } from "../renderer/team/WorkItemCollaborationPanel";
-import type {
-  CollaborationStatus,
-  PlanWeaveCollaborationApi
-} from "../shared/collaboration";
+import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../shared/collaboration";
 import { cleanupRendererTestEnvironment } from "./helpers/rendererTestEnvironment";
 
 const t = createTranslator("en");
@@ -247,9 +244,7 @@ describe("collaboration accessibility", () => {
             memberCount: 1,
             hostCount: 0,
             onlineHostCount: 0,
-            avatarMembers: [
-              { humanPrincipalId: "human-1", displayName: "Ada", initials: "AD" }
-            ],
+            avatarMembers: [{ humanPrincipalId: "human-1", displayName: "Ada", initials: "AD" }],
             sessionPhase: "connected",
             syncPhase: "ready",
             currentUserIsOwner: true,
@@ -339,9 +334,7 @@ describe("collaboration accessibility", () => {
       canvasId: "default"
     });
 
-    render(
-      <WorkItemCollaborationPanel workItem={taskItem} open api={api} t={t} />
-    );
+    render(<WorkItemCollaborationPanel workItem={taskItem} open api={api} t={t} />);
 
     const tablist = screen.getByRole("tablist");
     expect(tablist).toBeInTheDocument();

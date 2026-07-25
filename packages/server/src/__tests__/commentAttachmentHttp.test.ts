@@ -401,7 +401,15 @@ describe("comment attachment HTTP and blob authorization", () => {
         expectedDigestSha256: digest
       });
       const pendingUploadId = created.payload.pendingUploadId as string;
-      await uploadPending(origin, token, "project-a", pendingUploadId, bytes, "text/markdown", digest);
+      await uploadPending(
+        origin,
+        token,
+        "project-a",
+        pendingUploadId,
+        bytes,
+        "text/markdown",
+        digest
+      );
       return pendingUploadId;
     }
 
@@ -453,10 +461,18 @@ describe("comment attachment HTTP and blob authorization", () => {
     };
     const results = await Promise.allSettled([
       Promise.resolve(
-        attachmentService.finalize({ actor: { ...actor, deviceCredentialId: "d1", membershipId: "m1" }, projectId: "project-a", attachment })
+        attachmentService.finalize({
+          actor: { ...actor, deviceCredentialId: "d1", membershipId: "m1" },
+          projectId: "project-a",
+          attachment
+        })
       ),
       Promise.resolve(
-        attachmentService.finalize({ actor: { ...actor, deviceCredentialId: "d1", membershipId: "m1" }, projectId: "project-a", attachment })
+        attachmentService.finalize({
+          actor: { ...actor, deviceCredentialId: "d1", membershipId: "m1" },
+          projectId: "project-a",
+          attachment
+        })
       )
     ]);
     const fulfilled = results.filter((r) => r.status === "fulfilled");
@@ -486,13 +502,13 @@ describe("comment attachment HTTP and blob authorization", () => {
       mediaType: "text/plain",
       fileName: "keep.txt"
     });
-    const metadata = (finalized.payload.attachment as {
+    const metadata = finalized.payload.attachment as {
       digestSha256: string;
       sizeBytes: number;
       mediaType: "text/plain";
       fileName?: string;
       createdAt: string;
-    });
+    };
 
     const actor = {
       humanPrincipalId: "human-owner-1",

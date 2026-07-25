@@ -46,9 +46,7 @@ describe("collaboration-contracts", () => {
     expect(parseHumanObserverServerMessage(exampleObserverWelcome).type).toBe(
       "human.observer.welcome"
     );
-    expect(parseHumanObserverServerMessage(exampleObserverEvent).type).toBe(
-      "human.observer.event"
-    );
+    expect(parseHumanObserverServerMessage(exampleObserverEvent).type).toBe("human.observer.event");
     expect(exampleObserverCatchupRequired.reason).toBe("retention_gap");
     expect(() =>
       humanObserverEventSchema.parse({

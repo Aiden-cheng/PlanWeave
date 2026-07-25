@@ -69,17 +69,19 @@ export const DEFAULT_ASSIGNEE_DISPLAY_LABELS: AssigneeDisplayLabels = {
 };
 
 export function assigneeDisplayLabelsFromTranslator(
-  t: (key:
-    | "assigneeLabelUnassigned"
-    | "assigneeLabelAutomaticHost"
-    | "assigneeLabelAutomaticHostSelection"
-    | "assigneeSecondaryAutomaticHost"
-    | "assigneeSecondaryInactiveMembership"
-    | "assigneeSecondaryHostOffline"
-    | "assigneeSecondaryHostAtCapacity"
-    | "assigneeSecondaryAgentHost"
-    | "assigneeSecondaryHost"
-    | "assigneeReasonTaskNoMachine") => string
+  t: (
+    key:
+      | "assigneeLabelUnassigned"
+      | "assigneeLabelAutomaticHost"
+      | "assigneeLabelAutomaticHostSelection"
+      | "assigneeSecondaryAutomaticHost"
+      | "assigneeSecondaryInactiveMembership"
+      | "assigneeSecondaryHostOffline"
+      | "assigneeSecondaryHostAtCapacity"
+      | "assigneeSecondaryAgentHost"
+      | "assigneeSecondaryHost"
+      | "assigneeReasonTaskNoMachine"
+  ) => string
 ): AssigneeDisplayLabels {
   return {
     unassigned: t("assigneeLabelUnassigned"),
@@ -293,9 +295,7 @@ export function buildAssigneeCurrentDisplay(
         initials: null
       };
     case "human": {
-      const name =
-        assignment.human?.displayName?.trim() ||
-        assignment.target.humanPrincipalId;
+      const name = assignment.human?.displayName?.trim() || assignment.target.humanPrincipalId;
       return {
         label: name,
         targetKind: "human",
@@ -504,8 +504,7 @@ export function buildAssigneeSections(input: {
         humanPrincipalId: human.humanPrincipalId,
         displayName: human.displayName?.trim() || existing?.label || human.humanPrincipalId,
         membershipActive: human.membershipActive,
-        selected:
-          selected.kind === "human" && selected.humanPrincipalId === human.humanPrincipalId,
+        selected: selected.kind === "human" && selected.humanPrincipalId === human.humanPrincipalId,
         labels
       })
     );
@@ -595,7 +594,7 @@ export function buildAssigneeSections(input: {
         host: {
           hostId: selected.hostId,
           displayName: hostDisplay?.displayName,
-          exists: hostDisplay ? true : false,
+          exists: !!hostDisplay,
           revoked: hostDisplay?.revoked ?? true,
           authorizedForProject: hostDisplay?.authorizedForProject ?? false,
           online: hostDisplay?.online ?? false,
@@ -622,7 +621,8 @@ export function buildAssigneeSections(input: {
     selectable: true,
     unavailableReason: null,
     selected: selected.kind === "automatic_host",
-    searchText: `${labels.automaticHostSelection} automatic host selection auto machine`.toLowerCase(),
+    searchText:
+      `${labels.automaticHostSelection} automatic host selection auto machine`.toLowerCase(),
     warningReason: null
   };
   sections.push({ id: "automatic", options: [automatic] });
@@ -645,7 +645,8 @@ export function filterAssigneeSections(
   query: string
 ): AssigneeSection[] {
   const normalized = query.trim().toLowerCase();
-  if (!normalized) return sections.map((section) => ({ ...section, options: [...section.options] }));
+  if (!normalized)
+    return sections.map((section) => ({ ...section, options: [...section.options] }));
   return sections
     .map((section) => ({
       ...section,
@@ -706,9 +707,7 @@ export function buildAssigneePickerViewModel(input: {
       ...option,
       selectable: canEdit && option.selectable,
       unavailableReason:
-        !canEdit && option.selectable
-          ? editBlockedReason
-          : option.unavailableReason
+        !canEdit && option.selectable ? editBlockedReason : option.unavailableReason
     }))
   }));
 

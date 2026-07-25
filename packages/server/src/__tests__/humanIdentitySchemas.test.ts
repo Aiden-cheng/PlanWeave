@@ -1,4 +1,7 @@
-import { hostCredentialTokenSchema, hostEnrollmentCodeSchema } from "@planweave-ai/distributed-protocol";
+import {
+  hostCredentialTokenSchema,
+  hostEnrollmentCodeSchema
+} from "@planweave-ai/distributed-protocol";
 import { describe, expect, it } from "vitest";
 import {
   actorRefFromHuman,

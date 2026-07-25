@@ -6,11 +6,7 @@ import { precondition } from "./gate.js";
 
 const MAX_REMOTE_CONFIG_BYTES = 64 * 1024;
 
-const absolutePathSchema = z
-  .string()
-  .min(1)
-  .max(4096)
-  .refine(isAbsolute, "Path must be absolute.");
+const absolutePathSchema = z.string().min(1).max(4096).refine(isAbsolute, "Path must be absolute.");
 
 /**
  * External remote-VPS operator config.

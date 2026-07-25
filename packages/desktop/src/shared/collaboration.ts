@@ -315,8 +315,7 @@ export const collaborationInvokeChannels = {
   finalizeCollaborationPendingAttachment: "planweave-collaboration:finalizePendingAttachment",
   dispatchCollaborationRemoteOperation: "planweave-collaboration:dispatchRemoteOperation",
   observeCollaborationRemoteOperation: "planweave-collaboration:observeRemoteOperation",
-  executeCollaborationRemoteOperationAction:
-    "planweave-collaboration:executeRemoteOperationAction",
+  executeCollaborationRemoteOperationAction: "planweave-collaboration:executeRemoteOperationAction",
   replayCollaborationRemoteOperationEvents: "planweave-collaboration:replayRemoteOperationEvents",
   listCollaborationRemoteOperationInteractions:
     "planweave-collaboration:listRemoteOperationInteractions",
@@ -348,14 +347,10 @@ export type PlanWeaveCollaborationApi = {
   consumeCollaborationInvitation: (
     input: CollaborationConsumeInvitationInput
   ) => Promise<CollaborationAuthHandoffView>;
-  connectCollaborationSession: (
-    input: CollaborationProfileIdInput
-  ) => Promise<CollaborationStatus>;
+  connectCollaborationSession: (input: CollaborationProfileIdInput) => Promise<CollaborationStatus>;
   disconnectCollaborationSession: () => Promise<CollaborationStatus>;
   listCollaborationMembers: (input?: CollaborationPageQueryInput) => Promise<HumanMemberPage>;
-  listCollaborationDevices: (
-    input?: CollaborationDeviceListQueryInput
-  ) => Promise<HumanDevicePage>;
+  listCollaborationDevices: (input?: CollaborationDeviceListQueryInput) => Promise<HumanDevicePage>;
   listCollaborationInvitations: (
     input?: CollaborationInvitationListQueryInput
   ) => Promise<HumanInvitationPage>;

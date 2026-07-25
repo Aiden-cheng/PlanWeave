@@ -159,6 +159,8 @@ export function buildCollaborationProjectViewModel(input: {
 }
 
 /** Whether UI may present a mutation outcome as success. */
-export function mutationAppearsSuccessful(record: CollaborationMutationRecord | undefined): boolean {
+export function mutationAppearsSuccessful(
+  record: CollaborationMutationRecord | undefined
+): boolean {
   return record?.status === "confirmed";
 }

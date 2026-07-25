@@ -87,9 +87,7 @@ describe("human identity migration v16", () => {
       "human_device_credentials"
     ]) {
       expect(
-        database
-          .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?")
-          .get(table)
+        database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)
       ).toBeDefined();
     }
 
@@ -486,7 +484,7 @@ describe("human identity repository", () => {
   });
 
   it("protects last owner under remove/demote races and isolates project scope on remove", async () => {
-    const { database, repo } = await openMigrated();
+    const { repo } = await openMigrated();
     const owner = repo.bootstrapOwner(localAdminProof());
     const invite = repo.createInvitation({
       projectId: "project-a",

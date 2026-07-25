@@ -3,7 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ArtifactStore } from "../artifacts.js";
-import { applyMigrations, centralSchemaVersion, latestCentralSchemaVersion } from "../migrations.js";
+import {
+  applyMigrations,
+  centralSchemaVersion,
+  latestCentralSchemaVersion
+} from "../migrations.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 
 const directories: string[] = [];

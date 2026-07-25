@@ -63,9 +63,7 @@ export const PLANWEAVE_COMPATIBILITY_BOUNDS: CompatibilityBounds = {
   }
 };
 
-export type CompatibilityCheckResult =
-  | { ok: true }
-  | { ok: false; code: string; message: string };
+export type CompatibilityCheckResult = { ok: true } | { ok: false; code: string; message: string };
 
 export function parsePackageMajor(version: string): number {
   const parsed = packageVersionSchema.parse(version);

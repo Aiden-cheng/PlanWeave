@@ -135,9 +135,7 @@ function startupReportFailure(output) {
       ) {
         return payload.diagnostic;
       }
-    } catch {
-      continue;
-    }
+    } catch {}
   }
   return null;
 }

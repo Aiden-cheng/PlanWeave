@@ -48,9 +48,14 @@ function profileIdFor(agent: AgentFamily): string {
   }
 }
 
-function environmentFor(definition: AgentDefinition): readonly { name: string; required: boolean }[] {
+function environmentFor(
+  definition: AgentDefinition
+): readonly { name: string; required: boolean }[] {
   const preferred = definition.acp.authentication?.preferredMethodIds ?? [];
-  if (definition.agent === "grok" || preferred.some((id) => id.includes("api_key") || id.includes("xai"))) {
+  if (
+    definition.agent === "grok" ||
+    preferred.some((id) => id.includes("api_key") || id.includes("xai"))
+  ) {
     return [{ name: "XAI_API_KEY", required: false }];
   }
   return [];
@@ -83,9 +88,7 @@ export function findSupportedHostAcpProfile(
   return listSupportedHostAcpProfiles().find((profile) => profile.profileId === profileId);
 }
 
-export function launchMetadataForProfile(
-  profile: SupportedHostAcpProfile
-): AcpLaunchMetadata {
+export function launchMetadataForProfile(profile: SupportedHostAcpProfile): AcpLaunchMetadata {
   return {
     command: profile.command,
     args: profile.args,

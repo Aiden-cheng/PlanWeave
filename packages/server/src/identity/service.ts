@@ -1,9 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { authorizeHumanAction } from "./policy.js";
-import {
-  HUMAN_AUTH_ERROR_MESSAGES,
-  type HumanAuthErrorCode
-} from "./errors.js";
+import { HUMAN_AUTH_ERROR_MESSAGES, type HumanAuthErrorCode } from "./errors.js";
 import {
   toDeviceView,
   toInvitationView,
@@ -20,10 +17,7 @@ import {
   type HumanMembershipView,
   type HumanPrincipalView
 } from "./dtos.js";
-import {
-  HumanIdentityError,
-  type HumanIdentityRepository
-} from "./repository.js";
+import { HumanIdentityError, type HumanIdentityRepository } from "./repository.js";
 import {
   humanProjectIdSchema,
   humanPrincipalIdSchema,
@@ -451,10 +445,7 @@ export class HumanMembershipService {
         });
         if (!decision.allowed) deny(decision.code);
       } else {
-        const targetMembership = this.repository.getActiveMembership(
-          pid,
-          device.humanPrincipalId
-        );
+        const targetMembership = this.repository.getActiveMembership(pid, device.humanPrincipalId);
         const decision = authorizeHumanAction({
           action: "revoke_member_device",
           subject: { kind: "human", context },

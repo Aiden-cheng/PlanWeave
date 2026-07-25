@@ -32,6 +32,15 @@ import {
 
 const timestampSchema = z.iso.datetime();
 
+/** True when `value` contains ASCII C0 controls or DEL (U+0000–U+001F, U+007F). */
+function hasAsciiControlCharacter(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
+}
+
 /** SHA-256 digest as lowercase hex (content-addressed blob identity). */
 export const commentContentSha256Schema = z
   .string()
@@ -74,7 +83,7 @@ export const commentAttachmentFileNameSchema = z
       !value.includes("/") &&
       !value.includes("\\") &&
       !value.includes("\0") &&
-      !/[\u0000-\u001f\u007f]/.test(value),
+      !hasAsciiControlCharacter(value),
     { message: "Attachment file name must not be a path or contain control characters." }
   );
 export type CommentAttachmentFileName = z.infer<typeof commentAttachmentFileNameSchema>;

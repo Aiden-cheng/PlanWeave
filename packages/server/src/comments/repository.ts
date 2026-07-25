@@ -8,10 +8,7 @@ import {
 import { inWriteTransaction, type SqliteDatabase } from "../sqlite.js";
 import { workItemKeyParts } from "../work/repository.js";
 import { workItemRefSchema, type WorkItemRef } from "../work/schemas.js";
-import {
-  COMMENT_ACTIVITY_ERROR_MESSAGES,
-  type CommentActivityErrorCode
-} from "./errors.js";
+import { COMMENT_ACTIVITY_ERROR_MESSAGES, type CommentActivityErrorCode } from "./errors.js";
 import {
   commentAttachmentMetadataSchema,
   commentIdSchema,
@@ -67,9 +64,7 @@ function tombstonedByFromRow(row: CommentRow): ActorRef | undefined {
   return actorRefSchema.parse({
     kind: row.tombstoned_by_kind,
     id: row.tombstoned_by_id,
-    ...(row.tombstoned_by_display_name
-      ? { displayName: row.tombstoned_by_display_name }
-      : {})
+    ...(row.tombstoned_by_display_name ? { displayName: row.tombstoned_by_display_name } : {})
   });
 }
 
@@ -223,10 +218,7 @@ export class CommentRepository {
     return this.getRequired(record.projectId, record.commentId);
   }
 
-  applyCasUpdate(input: {
-    record: CommentRecord;
-    expectedRevision: number;
-  }): CommentRecord {
+  applyCasUpdate(input: { record: CommentRecord; expectedRevision: number }): CommentRecord {
     return inWriteTransaction(this.database, () => this.applyCasUpdateUnlocked(input));
   }
 
@@ -304,9 +296,7 @@ export class CommentRepository {
   ): void {
     const parsed = commentAttachmentMetadataSchema.array().parse(attachments);
     this.database
-      .prepare(
-        `UPDATE comments SET attachments_json=? WHERE project_id=? AND comment_id=?`
-      )
+      .prepare(`UPDATE comments SET attachments_json=? WHERE project_id=? AND comment_id=?`)
       .run(
         JSON.stringify(parsed),
         humanProjectIdSchema.parse(projectId),

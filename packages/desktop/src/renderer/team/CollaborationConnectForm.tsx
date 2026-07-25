@@ -3,10 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { createTranslator } from "../i18n";
-import type {
-  CollaborationStatus,
-  PlanWeaveCollaborationApi
-} from "../../shared/collaboration.js";
+import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
 import { collaborationErrorMessage } from "../collaboration/formatCollaborationError";
 
 export type CollaborationConnectFormProps = {
@@ -51,7 +48,9 @@ export function CollaborationConnectForm({
 
   const profiles = status?.profiles ?? [];
   const activeProfile =
-    profiles.find((profile) => profile.profileId === status?.activeProfileId) ?? profiles[0] ?? null;
+    profiles.find((profile) => profile.profileId === status?.activeProfileId) ??
+    profiles[0] ??
+    null;
 
   const submit = async () => {
     if (!api || busy) return;
@@ -88,7 +87,10 @@ export function CollaborationConnectForm({
           profileId,
           request: { displayName: profileDisplayName }
         });
-        if (handoff.nonPersistenceWarning || handoff.deviceCredentialPersistence === "session-only") {
+        if (
+          handoff.nonPersistenceWarning ||
+          handoff.deviceCredentialPersistence === "session-only"
+        ) {
           setInfo(t("peopleSessionOnlyCredentialWarning"));
         }
       } else {
@@ -99,7 +101,10 @@ export function CollaborationConnectForm({
             displayName: profileDisplayName
           }
         });
-        if (handoff.nonPersistenceWarning || handoff.deviceCredentialPersistence === "session-only") {
+        if (
+          handoff.nonPersistenceWarning ||
+          handoff.deviceCredentialPersistence === "session-only"
+        ) {
           setInfo(t("peopleSessionOnlyCredentialWarning"));
         }
       }

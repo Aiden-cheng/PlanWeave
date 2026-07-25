@@ -79,7 +79,8 @@ export function assertTargetAllowedForWorkItem(
   if (workItem.kind === "task" && isMachineAssignmentTarget(target)) {
     return {
       ok: false,
-      message: "Tasks may only be unassigned or assigned to a human member; Host targets are invalid."
+      message:
+        "Tasks may only be unassigned or assigned to a human member; Host targets are invalid."
     };
   }
   return { ok: true };
@@ -196,7 +197,13 @@ export const assignmentAvailabilitySchema = z.discriminatedUnion("status", [
   z
     .object({
       status: z.literal("invalid"),
-      reason: assignmentAvailabilityReasonSchema.exclude(["ready", "unassigned", "automatic_pending_selection", "host_offline", "host_at_capacity"])
+      reason: assignmentAvailabilityReasonSchema.exclude([
+        "ready",
+        "unassigned",
+        "automatic_pending_selection",
+        "host_offline",
+        "host_at_capacity"
+      ])
     })
     .strict(),
   z

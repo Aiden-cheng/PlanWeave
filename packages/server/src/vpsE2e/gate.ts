@@ -32,7 +32,8 @@ export function parseVpsE2eGate(
 ): VpsE2eGate {
   const profileId = parseProfile(env.PLANWEAVE_VPS_E2E_PROFILE);
   const configPath =
-    typeof env.PLANWEAVE_VPS_E2E_CONFIG === "string" && env.PLANWEAVE_VPS_E2E_CONFIG.trim().length > 0
+    typeof env.PLANWEAVE_VPS_E2E_CONFIG === "string" &&
+    env.PLANWEAVE_VPS_E2E_CONFIG.trim().length > 0
       ? env.PLANWEAVE_VPS_E2E_CONFIG.trim()
       : null;
   if (truthy(env.PLANWEAVE_VPS_E2E_REQUIRE)) {
@@ -62,7 +63,9 @@ export type VpsE2ePrecondition = {
   message: string;
 };
 
-export function dispositionForGate(mode: VpsE2eGateMode): VpsE2ePreconditionDisposition | "disabled" {
+export function dispositionForGate(
+  mode: VpsE2eGateMode
+): VpsE2ePreconditionDisposition | "disabled" {
   if (mode === "disabled") return "disabled";
   return mode === "require" ? "fail" : "skip";
 }

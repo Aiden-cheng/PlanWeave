@@ -160,9 +160,7 @@ describe("HttpArtifactClient", () => {
         purpose: "report",
         operationKey: "report"
       })
-    ).resolves.toBe(
-      `artifact:sha256:${createHash("sha256").update(bytes).digest("hex")}`
-    );
+    ).resolves.toBe(`artifact:sha256:${createHash("sha256").update(bytes).digest("hex")}`);
     expect(evidence).toHaveLength(1);
     returnMismatch = true;
     await expect(

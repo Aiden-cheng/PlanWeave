@@ -1,9 +1,6 @@
 import { Button } from "@/components/ui/button";
 import type { createTranslator } from "../i18n";
-import type {
-  ActivityRowViewModel,
-  CommentsPanelMode
-} from "../collaboration/commentViewModels";
+import type { ActivityRowViewModel, CommentsPanelMode } from "../collaboration/commentViewModels";
 
 export type ActivityPanelProps = {
   mode: CommentsPanelMode;

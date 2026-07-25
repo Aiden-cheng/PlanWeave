@@ -232,11 +232,7 @@ export function graphNodes(
     const blockAssigneeChips: TaskNodeData["blockAssigneeChips"] = {};
     if (assigneeIndex) {
       for (const block of task.blocks) {
-        blockAssigneeChips[block.ref] = lookupBlockAssigneeChip(
-          assigneeIndex,
-          canvasId,
-          block.ref
-        );
+        blockAssigneeChips[block.ref] = lookupBlockAssigneeChip(assigneeIndex, canvasId, block.ref);
       }
     }
     return {

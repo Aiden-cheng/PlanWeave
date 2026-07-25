@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AssignmentDisplayProjection,
   RemoteEventReplay,
-  RemoteExecutionActionWireRequest,
   RemoteInteractionResponse,
   RemoteInteractionView,
   RemoteOperationObservation,
@@ -157,9 +156,7 @@ export function useRemoteRunPanelController(
   const [loading, setLoading] = useState(false);
   const [loadingEvents, setLoadingEvents] = useState(false);
   const [loadingInteractions, setLoadingInteractions] = useState(false);
-  const [actionInFlight, setActionInFlight] = useState<RemoteRunAuthorizedActionKind | null>(
-    null
-  );
+  const [actionInFlight, setActionInFlight] = useState<RemoteRunAuthorizedActionKind | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmKind, setConfirmKind] = useState<
     "cancel" | "retry_new_attempt" | "fail_interruption" | null
@@ -257,11 +254,13 @@ export function useRemoteRunPanelController(
     observerRun
   ]);
 
+  // Refresh when observer remote-run milestones advance for this work item.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: observer milestone-driven refresh
   useEffect(() => {
     if (!args.open) return;
     void refresh();
     // Refresh when observer remote-run milestones advance for this work item.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberate on observer status only
+    // deliberate on observer status only — not every refresh identity churn
   }, [
     args.open,
     workKey,
@@ -294,10 +293,7 @@ export function useRemoteRunPanelController(
   }, [api, observation, eventsHasMore, eventCursor]);
 
   const runAction = useCallback(
-    async (
-      kind: RemoteRunAuthorizedActionKind,
-      execute: () => Promise<void>
-    ): Promise<void> => {
+    async (kind: RemoteRunAuthorizedActionKind, execute: () => Promise<void>): Promise<void> => {
       if (actionInFlight) return;
       setActionInFlight(kind);
       setActionError(null);
@@ -403,11 +399,7 @@ export function useRemoteRunPanelController(
   );
 
   const retryNewAttempt = useCallback(
-    async (input: {
-      newDispatchId: string;
-      newExecutionAttemptId: string;
-      reason: string;
-    }) => {
+    async (input: { newDispatchId: string; newExecutionAttemptId: string; reason: string }) => {
       if (!api || !observation) return;
       await runAction("retry_new_attempt", async () => {
         const action = buildRemoteActionIdentity({

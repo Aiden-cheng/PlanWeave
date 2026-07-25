@@ -210,9 +210,7 @@ describe("authoritative Agent Host execution state", () => {
     expect(state.recordArtifactTransfer(1, identity().leaseId, artifact)).toBe(false);
     expect(() =>
       state.recordArtifactTransfer(1, identity().leaseId, { ...artifact, sizeBytes: 43 })
-    ).toThrow(
-      "execution_artifact_identity_conflict"
-    );
+    ).toThrow("execution_artifact_identity_conflict");
     expect(state.executionEvidence(1)).toMatchObject({
       acpSessionId: "acp-session-1",
       recoveryId: "recovery-1",

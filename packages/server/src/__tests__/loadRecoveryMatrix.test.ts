@@ -80,196 +80,178 @@ async function directoryBytes(root: string): Promise<number> {
 }
 
 describe("load / recovery matrix (moderate intended scale)", () => {
-  it(
-    "two Hosts capacity 1: concurrent blocks complete without duplicate ACP or silent double attempt",
-    async () => {
-      const { harness, client } = await createHarness({
-        hostCapacity: LOAD_RECOVERY_THRESHOLDS.hostCapacityEach,
-        hostDisplayName: "Load Host A",
-        manifest: remoteAcpManifestParallelCapacity()
-      });
-      await harness.startAll();
-      const secondary = await harness.startSecondaryHost({
-        key: "load-b",
-        displayName: "Load Host B",
-        capacity: LOAD_RECOVERY_THRESHOLDS.hostCapacityEach,
-        capabilities: ["acp.test"],
-        acpScenario: "success"
-      });
-      expect(secondary.id).toEqual(expect.any(String));
+  it("two Hosts capacity 1: concurrent blocks complete without duplicate ACP or silent double attempt", async () => {
+    const { harness, client } = await createHarness({
+      hostCapacity: LOAD_RECOVERY_THRESHOLDS.hostCapacityEach,
+      hostDisplayName: "Load Host A",
+      manifest: remoteAcpManifestParallelCapacity()
+    });
+    await harness.startAll();
+    const secondary = await harness.startSecondaryHost({
+      key: "load-b",
+      displayName: "Load Host B",
+      capacity: LOAD_RECOVERY_THRESHOLDS.hostCapacityEach,
+      capabilities: ["acp.test"],
+      acpScenario: "success"
+    });
+    expect(secondary.id).toEqual(expect.any(String));
 
-      const hosts = await client.listHosts();
-      expect(hosts.items.length).toBeGreaterThanOrEqual(LOAD_RECOVERY_THRESHOLDS.hosts);
+    const hosts = await client.listHosts();
+    expect(hosts.items.length).toBeGreaterThanOrEqual(LOAD_RECOVERY_THRESHOLDS.hosts);
 
-      const t0 = Date.now();
-      const [first, second] = await Promise.all([
-        client.dispatch({
-          blockRef: "T-001#B-001",
-          idempotencyKey: "load-concurrent-1"
-        }),
-        client.dispatch({
-          blockRef: "T-002#B-001",
-          idempotencyKey: "load-concurrent-2"
-        })
-      ]);
-      expect(first.operationId).not.toBe(second.operationId);
-      expect(first.dispatchId).not.toBe(second.dispatchId);
-
-      const terminalFirst = await client.waitForTerminal(first.operationId);
-      const terminalSecond = await client.waitForTerminal(second.operationId);
-      const terminalMs = Date.now() - t0;
-      expect(terminalMs, `terminal wall ${terminalMs}ms`).toBeLessThanOrEqual(
-        LOAD_RECOVERY_THRESHOLDS.maxTerminalMs
-      );
-      expect(terminalFirst.state).toBe("completed");
-      expect(terminalSecond.state).toBe("completed");
-
-      // No silent double execution: one attempt row and one session/new per block.
-      expect(
-        client.countServerRows(
-          "remote_execution_attempts",
-          "operation_id IN (?,?)",
-          [first.operationId, second.operationId]
-        )
-      ).toBe(2);
-      // lifecycle.log is primary host only; count total ACP sessions via attempt rows instead
-      // and ensure dispatches did not complete twice.
-      expect(
-        client.countServerRows(
-          "dispatches",
-          "id IN (?,?) AND status='completed'",
-          [first.dispatchId, second.dispatchId]
-        )
-      ).toBe(2);
-
-      const replayStart = Date.now();
-      const events = await client.listEvents(first.operationId, 0);
-      const replayMs = Date.now() - replayStart;
-      expect(replayMs, `event replay ${replayMs}ms`).toBeLessThanOrEqual(
-        LOAD_RECOVERY_THRESHOLDS.maxEventReplayMs
-      );
-      expect(events.cursor).toBeGreaterThanOrEqual(0);
-      expect(events.highWatermark).toBeGreaterThanOrEqual(events.cursor);
-      // Monotonic: replaying from high watermark returns empty continuation.
-      const empty = await client.listEvents(first.operationId, events.highWatermark);
-      expect(empty.events).toEqual([]);
-
-      const rootBytes = await directoryBytes(harness.paths.root);
-      expect(rootBytes, `harness root ${rootBytes} bytes`).toBeLessThanOrEqual(
-        LOAD_RECOVERY_THRESHOLDS.maxHarnessRootBytes
-      );
-    },
-    180_000
-  );
-
-  it(
-    "capacity contention (1 Host, cap 1, 2 blocks): serializes without data loss or duplicate attempt",
-    async () => {
-      const { harness, client } = await createHarness({
-        hostCapacity: 1,
-        manifest: remoteAcpManifestParallelCapacity()
-      });
-      await harness.startAll();
-      await harness.acpControl.pause(["session/prompt"]);
-
-      const t0 = Date.now();
-      const first = await client.dispatch({
+    const t0 = Date.now();
+    const [first, second] = await Promise.all([
+      client.dispatch({
         blockRef: "T-001#B-001",
-        idempotencyKey: "load-cap-1"
-      });
-      await client.waitForDispatchStatus(first.operationId, ["leased", "running"]);
-      const leasedMs = Date.now() - t0;
-      expect(leasedMs, `first leased ${leasedMs}ms`).toBeLessThanOrEqual(
-        LOAD_RECOVERY_THRESHOLDS.maxDispatchLeasedMs
-      );
-
-      const second = await client.dispatch({
+        idempotencyKey: "load-concurrent-1"
+      }),
+      client.dispatch({
         blockRef: "T-002#B-001",
-        idempotencyKey: "load-cap-2"
-      });
-      // Second remains claimed/awaiting capacity while first holds the only reservation.
-      expect(["claimed", "activated"]).toContain(second.state);
-      if (second.state === "claimed") {
-        expect(second.dispatchStatus).toBeUndefined();
+        idempotencyKey: "load-concurrent-2"
+      })
+    ]);
+    expect(first.operationId).not.toBe(second.operationId);
+    expect(first.dispatchId).not.toBe(second.dispatchId);
+
+    const terminalFirst = await client.waitForTerminal(first.operationId);
+    const terminalSecond = await client.waitForTerminal(second.operationId);
+    const terminalMs = Date.now() - t0;
+    expect(terminalMs, `terminal wall ${terminalMs}ms`).toBeLessThanOrEqual(
+      LOAD_RECOVERY_THRESHOLDS.maxTerminalMs
+    );
+    expect(terminalFirst.state).toBe("completed");
+    expect(terminalSecond.state).toBe("completed");
+
+    // No silent double execution: one attempt row and one session/new per block.
+    expect(
+      client.countServerRows("remote_execution_attempts", "operation_id IN (?,?)", [
+        first.operationId,
+        second.operationId
+      ])
+    ).toBe(2);
+    // lifecycle.log is primary host only; count total ACP sessions via attempt rows instead
+    // and ensure dispatches did not complete twice.
+    expect(
+      client.countServerRows("dispatches", "id IN (?,?) AND status='completed'", [
+        first.dispatchId,
+        second.dispatchId
+      ])
+    ).toBe(2);
+
+    const replayStart = Date.now();
+    const events = await client.listEvents(first.operationId, 0);
+    const replayMs = Date.now() - replayStart;
+    expect(replayMs, `event replay ${replayMs}ms`).toBeLessThanOrEqual(
+      LOAD_RECOVERY_THRESHOLDS.maxEventReplayMs
+    );
+    expect(events.cursor).toBeGreaterThanOrEqual(0);
+    expect(events.highWatermark).toBeGreaterThanOrEqual(events.cursor);
+    // Monotonic: replaying from high watermark returns empty continuation.
+    const empty = await client.listEvents(first.operationId, events.highWatermark);
+    expect(empty.events).toEqual([]);
+
+    const rootBytes = await directoryBytes(harness.paths.root);
+    expect(rootBytes, `harness root ${rootBytes} bytes`).toBeLessThanOrEqual(
+      LOAD_RECOVERY_THRESHOLDS.maxHarnessRootBytes
+    );
+  }, 180_000);
+
+  it("capacity contention (1 Host, cap 1, 2 blocks): serializes without data loss or duplicate attempt", async () => {
+    const { harness, client } = await createHarness({
+      hostCapacity: 1,
+      manifest: remoteAcpManifestParallelCapacity()
+    });
+    await harness.startAll();
+    await harness.acpControl.pause(["session/prompt"]);
+
+    const t0 = Date.now();
+    const first = await client.dispatch({
+      blockRef: "T-001#B-001",
+      idempotencyKey: "load-cap-1"
+    });
+    await client.waitForDispatchStatus(first.operationId, ["leased", "running"]);
+    const leasedMs = Date.now() - t0;
+    expect(leasedMs, `first leased ${leasedMs}ms`).toBeLessThanOrEqual(
+      LOAD_RECOVERY_THRESHOLDS.maxDispatchLeasedMs
+    );
+
+    const second = await client.dispatch({
+      blockRef: "T-002#B-001",
+      idempotencyKey: "load-cap-2"
+    });
+    // Second remains claimed/awaiting capacity while first holds the only reservation.
+    expect(["claimed", "activated"]).toContain(second.state);
+    if (second.state === "claimed") {
+      expect(second.dispatchStatus).toBeUndefined();
+    }
+    expect(client.countServerRows("host_capacity_reservations")).toBe(1);
+    expect(client.countServerRows("mailbox_messages")).toBe(1);
+
+    await harness.acpControl.resume();
+    const term1 = await client.waitForTerminal(first.operationId);
+    expect(term1.state).toBe("completed");
+
+    // After capacity frees, idempotent re-dispatch must progress the same operation (no drop, no fork).
+    const waitStart = Date.now();
+    const secondActivated = await client.dispatch({
+      blockRef: "T-002#B-001",
+      idempotencyKey: "load-cap-2"
+    });
+    expect(secondActivated.operationId).toBe(second.operationId);
+    const term2 = await client.waitForTerminal(second.operationId);
+    expect(Date.now() - waitStart).toBeLessThanOrEqual(
+      LOAD_RECOVERY_THRESHOLDS.maxCapacityWaitMs + LOAD_RECOVERY_THRESHOLDS.maxTerminalMs
+    );
+    expect(term2.state).toBe("completed");
+    expect(term2.operationId).not.toBe(first.operationId);
+
+    expect(
+      client.countServerRows("remote_execution_attempts", "operation_id IN (?,?)", [
+        first.operationId,
+        second.operationId
+      ])
+    ).toBe(2);
+    expect(
+      client.countServerRows("dispatches", "id IN (?,?) AND status='completed'", [
+        first.dispatchId,
+        term2.dispatchId
+      ])
+    ).toBe(2);
+  }, 180_000);
+
+  it("cancel at barrier + short lease still fail-closed (no false complete, no extra attempt)", async () => {
+    const { harness, client } = await createHarness({
+      hostCapacity: 1,
+      serverLimits: {
+        leaseDurationMs: 5_000,
+        hostOfflineAfterMs: 20_000,
+        heartbeatIntervalMs: 1_000
       }
-      expect(client.countServerRows("host_capacity_reservations")).toBe(1);
-      expect(client.countServerRows("mailbox_messages")).toBe(1);
+    });
+    await harness.startAll();
+    await harness.acpControl.pause(["session/prompt"]);
 
-      await harness.acpControl.resume();
-      const term1 = await client.waitForTerminal(first.operationId);
-      expect(term1.state).toBe("completed");
+    const dispatched = await client.dispatch({
+      blockRef: "T-001#B-001",
+      idempotencyKey: "load-cancel-lease-1"
+    });
+    await client.waitForDispatchStatus(dispatched.operationId, ["leased", "running"]);
+    await harness.acpControl.waitUntilLifecycleContains("paused session/prompt", 30_000);
 
-      // After capacity frees, idempotent re-dispatch must progress the same operation (no drop, no fork).
-      const waitStart = Date.now();
-      const secondActivated = await client.dispatch({
-        blockRef: "T-002#B-001",
-        idempotencyKey: "load-cap-2"
-      });
-      expect(secondActivated.operationId).toBe(second.operationId);
-      const term2 = await client.waitForTerminal(second.operationId);
-      expect(Date.now() - waitStart).toBeLessThanOrEqual(
-        LOAD_RECOVERY_THRESHOLDS.maxCapacityWaitMs + LOAD_RECOVERY_THRESHOLDS.maxTerminalMs
-      );
-      expect(term2.state).toBe("completed");
-      expect(term2.operationId).not.toBe(first.operationId);
+    const sessionNewBefore = client.countLifecycleFragment("session/new");
+    expect(sessionNewBefore).toBe(LOAD_RECOVERY_THRESHOLDS.maxSessionNewPerAttempt);
 
-      expect(
-        client.countServerRows(
-          "remote_execution_attempts",
-          "operation_id IN (?,?)",
-          [first.operationId, second.operationId]
-        )
-      ).toBe(2);
-      expect(
-        client.countServerRows(
-          "dispatches",
-          "id IN (?,?) AND status='completed'",
-          [first.dispatchId, term2.dispatchId]
-        )
-      ).toBe(2);
-    },
-    180_000
-  );
+    await client.cancel(dispatched.operationId, "load recovery cancel");
+    await harness.acpControl.resume();
 
-  it(
-    "cancel at barrier + short lease still fail-closed (no false complete, no extra attempt)",
-    async () => {
-      const { harness, client } = await createHarness({
-        hostCapacity: 1,
-        serverLimits: {
-          leaseDurationMs: 5_000,
-          hostOfflineAfterMs: 20_000,
-          heartbeatIntervalMs: 1_000
-        }
-      });
-      await harness.startAll();
-      await harness.acpControl.pause(["session/prompt"]);
-
-      const dispatched = await client.dispatch({
-        blockRef: "T-001#B-001",
-        idempotencyKey: "load-cancel-lease-1"
-      });
-      await client.waitForDispatchStatus(dispatched.operationId, ["leased", "running"]);
-      await harness.acpControl.waitUntilLifecycleContains("paused session/prompt", 30_000);
-
-      const sessionNewBefore = client.countLifecycleFragment("session/new");
-      expect(sessionNewBefore).toBe(LOAD_RECOVERY_THRESHOLDS.maxSessionNewPerAttempt);
-
-      await client.cancel(dispatched.operationId, "load recovery cancel");
-      await harness.acpControl.resume();
-
-      const terminal = await client.waitForTerminal(dispatched.operationId);
-      expect(terminal.state).toBe("cancelled");
-      expect(terminal.state).not.toBe("completed");
-      expect(client.countLifecycleFragment("session/new")).toBe(sessionNewBefore);
-      expect(
-        client.countServerRows(
-          "remote_execution_attempts",
-          "operation_id=?",
-          [dispatched.operationId]
-        )
-      ).toBe(1);
-    },
-    120_000
-  );
+    const terminal = await client.waitForTerminal(dispatched.operationId);
+    expect(terminal.state).toBe("cancelled");
+    expect(terminal.state).not.toBe("completed");
+    expect(client.countLifecycleFragment("session/new")).toBe(sessionNewBefore);
+    expect(
+      client.countServerRows("remote_execution_attempts", "operation_id=?", [
+        dispatched.operationId
+      ])
+    ).toBe(1);
+  }, 120_000);
 });

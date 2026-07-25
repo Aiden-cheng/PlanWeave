@@ -6,10 +6,7 @@ import type {
   CommentListCursor,
   CommentRecord
 } from "./schemas.js";
-import {
-  activityListCursorSchema,
-  commentListCursorSchema
-} from "./schemas.js";
+import { activityListCursorSchema, commentListCursorSchema } from "./schemas.js";
 
 /**
  * Comment thread order: createdAt ASC, commentId ASC (stable chronological).
@@ -34,7 +31,9 @@ export function commentIsAfterCursor(
   return compareCommentOrder(item, cursor) > 0;
 }
 
-export function commentCursorFromRecord(record: Pick<CommentRecord, "createdAt" | "commentId">): CommentListCursor {
+export function commentCursorFromRecord(
+  record: Pick<CommentRecord, "createdAt" | "commentId">
+): CommentListCursor {
   return commentListCursorSchema.parse({
     createdAt: record.createdAt,
     commentId: record.commentId

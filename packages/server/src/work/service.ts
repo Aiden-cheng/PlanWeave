@@ -5,10 +5,7 @@ import {
   humanProjectIdSchema,
   type HumanAuthContext
 } from "../identity/schemas.js";
-import {
-  WORK_ASSIGNMENT_ERROR_MESSAGES,
-  type WorkAssignmentErrorCode
-} from "./errors.js";
+import { WORK_ASSIGNMENT_ERROR_MESSAGES, type WorkAssignmentErrorCode } from "./errors.js";
 import { WORK_ASSIGNMENT_BATCH_MAX } from "./limits.js";
 import { decideAssignmentUpdate, projectAssignmentDisplay } from "./policy.js";
 import type { AssignmentHostPort, AssignmentMembershipPort } from "./ports.js";
@@ -148,7 +145,9 @@ export class WorkAssignmentService {
       // Package truth before mutation — deleted/renamed items fail closed.
       const packageCheck = validateWorkItemRef(this.packagePort, command.workItem);
       if (!packageCheck.ok) {
-        deny(packageCheck.code === "work_input_invalid" ? "work_input_invalid" : "work_item_not_found");
+        deny(
+          packageCheck.code === "work_input_invalid" ? "work_input_invalid" : "work_item_not_found"
+        );
       }
       const packageFacts = packageCheck.facts;
 
@@ -243,9 +242,7 @@ export class WorkAssignmentService {
       const pid = humanProjectIdSchema.parse(projectId);
       this.assertCanView(context, pid);
 
-      const limit = workAssignmentBatchLimitSchema.parse(
-        query.limit ?? WORK_ASSIGNMENT_BATCH_MAX
-      );
+      const limit = workAssignmentBatchLimitSchema.parse(query.limit ?? WORK_ASSIGNMENT_BATCH_MAX);
       const cursor = query.cursor ?? 0;
       if (!Number.isSafeInteger(cursor) || cursor < 0) {
         deny("work_input_invalid");
@@ -269,7 +266,12 @@ export class WorkAssignmentService {
         );
         const items = workItems.map((workItem) => {
           const packageFacts = this.packagePort.resolveWorkItem(workItem);
-          return this.projectOne(pid, workItem, byKey.get(workItemStableKey(workItem)), packageFacts);
+          return this.projectOne(
+            pid,
+            workItem,
+            byKey.get(workItemStableKey(workItem)),
+            packageFacts
+          );
         });
         return { items, nextCursor: null };
       }
@@ -298,7 +300,12 @@ export class WorkAssignmentService {
     actor: HumanAuthContext,
     projectId: string,
     workItemInput: unknown,
-    query: { humanLimit?: number; humanCursor?: number; hostLimit?: number; hostCursor?: number } = {}
+    query: {
+      humanLimit?: number;
+      humanCursor?: number;
+      hostLimit?: number;
+      hostCursor?: number;
+    } = {}
   ): EligibleAssigneesResult {
     try {
       const context = humanAuthContextSchema.parse(actor);
@@ -308,7 +315,9 @@ export class WorkAssignmentService {
 
       const packageCheck = validateWorkItemRef(this.packagePort, workItem);
       if (!packageCheck.ok) {
-        deny(packageCheck.code === "work_input_invalid" ? "work_input_invalid" : "work_item_not_found");
+        deny(
+          packageCheck.code === "work_input_invalid" ? "work_input_invalid" : "work_item_not_found"
+        );
       }
       const packageFacts = packageCheck.facts;
 

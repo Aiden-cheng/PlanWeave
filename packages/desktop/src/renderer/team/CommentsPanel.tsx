@@ -4,10 +4,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { createTranslator } from "../i18n";
 import { SafeMarkdown } from "../inspector/SafeMarkdown";
 import type { StagedAttachment } from "../collaboration/attachmentUpload";
-import type {
-  CommentRowViewModel,
-  CommentsPanelMode
-} from "../collaboration/commentViewModels";
+import type { CommentRowViewModel, CommentsPanelMode } from "../collaboration/commentViewModels";
 import type { CommentComposerDraft } from "../collaboration/commentDraftStore";
 
 export type CommentsPanelProps = {
@@ -161,7 +158,9 @@ function CommentItem({
               className="flex items-center gap-2 rounded border border-border/50 px-2 py-1 text-[11px] text-muted-foreground"
               data-testid="comments-attachment"
             >
-              <span className="min-w-0 truncate font-medium text-text">{attachment.displayName}</span>
+              <span className="min-w-0 truncate font-medium text-text">
+                {attachment.displayName}
+              </span>
               <span>{attachment.mediaType}</span>
               <span>{attachment.sizeBytes} B</span>
               <span title={t("commentsAttachmentDigest")}>{attachment.digestShort}</span>
@@ -268,11 +267,7 @@ export function CommentsPanel({
         </Button>
       </div>
 
-      <div
-        aria-live="polite"
-        className="sr-only"
-        data-testid="comments-live-region"
-      >
+      <div aria-live="polite" className="sr-only" data-testid="comments-live-region">
         {actionError ?? (loading ? t("commentsLoading") : "")}
       </div>
 
@@ -443,7 +438,9 @@ export function CommentsPanel({
           </Button>
         </div>
         {!canCompose ? (
-          <p className="mt-1 text-[11px] text-muted-foreground">{t("commentsComposeUnavailable")}</p>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            {t("commentsComposeUnavailable")}
+          </p>
         ) : null}
       </div>
     </section>

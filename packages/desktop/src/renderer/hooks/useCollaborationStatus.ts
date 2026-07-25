@@ -1,9 +1,6 @@
 import { useEffect, useState } from "react";
 import { collaborationBridge } from "../bridge";
-import type {
-  CollaborationStatus,
-  PlanWeaveCollaborationApi
-} from "../../shared/collaboration.js";
+import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
 
 export type UseCollaborationStatusArgs = {
   /** Injected bridge for tests; defaults to window.planweaveCollaboration. */
@@ -49,9 +46,7 @@ export function useCollaborationStatus(
         }
       } catch (loadError) {
         if (!cancelled) {
-          setError(
-            loadError instanceof Error ? loadError.message : "collaboration_status_failed"
-          );
+          setError(loadError instanceof Error ? loadError.message : "collaboration_status_failed");
         }
       } finally {
         if (!cancelled) {

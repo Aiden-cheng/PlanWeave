@@ -18,10 +18,7 @@ import {
 } from "../renderer/collaboration/collaborationViewModels";
 import { useCollaborationReadModels } from "../renderer/hooks/useCollaborationReadModels";
 import { workItemKey } from "../shared/collaborationReadModels";
-import type {
-  CollaborationObserverSignal,
-  CollaborationStatus
-} from "../shared/collaboration";
+import type { CollaborationObserverSignal, CollaborationStatus } from "../shared/collaboration";
 import type { CollaborationReadBridgePort } from "../renderer/collaboration/CollaborationReadModelController";
 
 const workItem = exampleAssignmentProjection.workItem;
@@ -47,7 +44,7 @@ function idleStatus(overrides?: Partial<CollaborationStatus>): CollaborationStat
 
 function createMockApi(options?: {
   members?: typeof exampleMemberPage;
-  assignments?: { items: typeof exampleAssignmentProjection[]; nextCursor: number | null };
+  assignments?: { items: (typeof exampleAssignmentProjection)[]; nextCursor: number | null };
   activity?: typeof exampleActivityListPage;
   comments?: typeof exampleCommentListPage;
   onUpdateAssignment?: ReturnType<typeof vi.fn>;
@@ -65,9 +62,11 @@ function createMockApi(options?: {
   const statusListeners: Array<(status: CollaborationStatus) => void> = [];
   const signalListeners: Array<(signal: CollaborationObserverSignal) => void> = [];
   const listMembers = vi.fn().mockResolvedValue(options?.members ?? exampleMemberPage);
-  const listAssignments = vi.fn().mockResolvedValue(
-    options?.assignments ?? { items: [exampleAssignmentProjection], nextCursor: null }
-  );
+  const listAssignments = vi
+    .fn()
+    .mockResolvedValue(
+      options?.assignments ?? { items: [exampleAssignmentProjection], nextCursor: null }
+    );
   const listActivity = vi.fn().mockResolvedValue(options?.activity ?? exampleActivityListPage);
   const listComments = vi.fn().mockResolvedValue(options?.comments ?? exampleCommentListPage);
   const listEligible = vi.fn().mockResolvedValue({
@@ -481,9 +480,7 @@ describe("CollaborationReadModelController", () => {
       profileId: "profile-demo-001",
       projectId: "project-demo-001"
     });
-    expect(controller.getSnapshot().remoteRunsByDispatchId["dispatch-001"]?.status).toBe(
-      "started"
-    );
+    expect(controller.getSnapshot().remoteRunsByDispatchId["dispatch-001"]?.status).toBe("started");
 
     controller.handleObserverSignalForTests({
       type: "human.observer.event",

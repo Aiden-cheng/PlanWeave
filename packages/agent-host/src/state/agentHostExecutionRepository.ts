@@ -27,7 +27,9 @@ SELECT inbox_sequence,dispatch_id,lease_id,execution_attempt_id,protocol_version
 FROM agent_host_executions`;
 
 const terminalStatuses = new Set<AgentHostExecutionStatus>(["completed", "failed", "cancelled"]);
-const transitions: Readonly<Record<AgentHostExecutionStatus, ReadonlySet<AgentHostExecutionStatus>>> = {
+const transitions: Readonly<
+  Record<AgentHostExecutionStatus, ReadonlySet<AgentHostExecutionStatus>>
+> = {
   accepted: new Set(["preparing", "interrupted", "failed", "cancelled"]),
   preparing: new Set(["running", "interrupted", "failed", "cancelled"]),
   running: new Set(["interaction_wait", "interrupted", "completed", "failed", "cancelled"]),
@@ -108,8 +110,7 @@ function safeLateSettlement(response: unknown): boolean {
   const value = response as Record<string, unknown>;
   return (
     (value.type === "interaction.permission_response" && value.decision === "deny") ||
-    (value.type === "interaction.elicitation_response" &&
-      value.outcome === "cancelled") ||
+    (value.type === "interaction.elicitation_response" && value.outcome === "cancelled") ||
     (value.type === "interaction.authentication_action" && value.action === "cancel")
   );
 }
@@ -238,7 +239,9 @@ export class AgentHostExecutionRepository {
     const limitSql = limit === undefined ? "" : " LIMIT ?";
     const values = limit === undefined ? statuses : [...statuses, limit];
     return this.database
-      .prepare(`${executionSelect} WHERE e.status IN (${placeholders}) ORDER BY i.sequence${limitSql}`)
+      .prepare(
+        `${executionSelect} WHERE e.status IN (${placeholders}) ORDER BY i.sequence${limitSql}`
+      )
       .all(...values)
       .map(toExecution);
   }
@@ -262,7 +265,9 @@ export class AgentHostExecutionRepository {
           : terminalStatuses.has(to)
             ? ",finished_at=?"
             : "";
-    const values = timestamps ? [to, occurredAt, sequence, current.status] : [to, sequence, current.status];
+    const values = timestamps
+      ? [to, occurredAt, sequence, current.status]
+      : [to, sequence, current.status];
     const updated = this.database
       .prepare(
         `UPDATE agent_host_executions SET status=?${timestamps}
@@ -322,7 +327,8 @@ export class AgentHostExecutionRepository {
     const parsed = actionEvidenceSchema.parse(input);
     const current = this.requireEvidence(sequence);
     if (current.leaseId !== parsed.leaseId) throw new Error("execution_action_stale_lease");
-    if (current.acpSessionId !== parsed.sessionId) throw new Error("execution_action_stale_session");
+    if (current.acpSessionId !== parsed.sessionId)
+      throw new Error("execution_action_stale_session");
     const existing = this.database
       .prepare(
         `SELECT lease_id,action_kind,deadline,request_digest FROM agent_host_execution_actions
@@ -343,7 +349,9 @@ export class AgentHostExecutionRepository {
     if (current.actionCursor !== parsed.afterCursor || parsed.cursor !== parsed.afterCursor + 1) {
       throw new Error("execution_action_cursor_conflict");
     }
-    if (this.count("agent_host_execution_actions", sequence) >= this.limits.maxActionsPerExecution) {
+    if (
+      this.count("agent_host_execution_actions", sequence) >= this.limits.maxActionsPerExecution
+    ) {
       throw new Error("execution_action_retention_limit_exceeded");
     }
     this.database
@@ -416,11 +424,7 @@ export class AgentHostExecutionRepository {
     return true;
   }
 
-  actionSettlement(
-    sequence: number,
-    sessionId: string,
-    actionId: string
-  ): unknown | undefined {
+  actionSettlement(sequence: number, sessionId: string, actionId: string): unknown | undefined {
     const row = this.database
       .prepare(
         `SELECT response_json FROM agent_host_execution_actions
@@ -451,7 +455,9 @@ export class AgentHostExecutionRepository {
       }
       return false;
     }
-    if (this.count("agent_host_execution_artifacts", sequence) >= this.limits.maxArtifactsPerExecution) {
+    if (
+      this.count("agent_host_execution_artifacts", sequence) >= this.limits.maxArtifactsPerExecution
+    ) {
       throw new Error("execution_artifact_retention_limit_exceeded");
     }
     this.database
@@ -483,7 +489,8 @@ export class AgentHostExecutionRepository {
     const current = this.requireEvidence(sequence);
     const existing = kind === "cancellation" ? current.cancellationIntent : current.recoveryIntent;
     if (existing !== undefined) {
-      if (JSON.stringify(existing) !== serialized) throw new Error(`execution_${kind}_intent_conflict`);
+      if (JSON.stringify(existing) !== serialized)
+        throw new Error(`execution_${kind}_intent_conflict`);
       return current;
     }
     this.database
@@ -599,13 +606,7 @@ export class AgentHostExecutionRepository {
          SET lease_id=?,lease_expires_at=?,recovery_intent_json=?,status='preparing'
          WHERE inbox_sequence=? AND status='interrupted' AND lease_id=?`
       )
-      .run(
-        input.leaseId,
-        input.leaseExpiresAt,
-        JSON.stringify(intent),
-        sequence,
-        current.leaseId
-      );
+      .run(input.leaseId, input.leaseExpiresAt, JSON.stringify(intent), sequence, current.leaseId);
     if (updated.changes !== 1) throw new Error("execution_resume_raced");
     this.recordTransition(sequence, "interrupted", "preparing", "resume_authorized", at);
     return { execution: this.require(sequence), newlyAuthorized: true };

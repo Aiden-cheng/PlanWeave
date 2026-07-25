@@ -73,7 +73,10 @@ export class AgentHostState implements AgentHostStateRepository {
   private readonly remoteRelay: AgentHostRemoteRecordRelay;
   private readonly interactions: AgentHostInteractionSettlements;
 
-  constructor(private readonly database: SqliteDatabase, limits: Partial<AgentHostStateLimits> = {}) {
+  constructor(
+    private readonly database: SqliteDatabase,
+    limits: Partial<AgentHostStateLimits> = {}
+  ) {
     this.limits = Object.fromEntries(
       Object.entries(DEFAULT_AGENT_HOST_STATE_LIMITS).map(([name, fallback]) => [
         name,
@@ -139,7 +142,9 @@ export class AgentHostState implements AgentHostStateRepository {
           throw new Error("mailbox_message_conflict");
         }
       } else {
-        const latest = this.database.prepare("SELECT MAX(sequence) AS sequence FROM agent_host_inbox").get();
+        const latest = this.database
+          .prepare("SELECT MAX(sequence) AS sequence FROM agent_host_inbox")
+          .get();
         if (event.previousSequence !== Number(latest?.sequence ?? 0)) {
           throw new Error("mailbox_message_out_of_order");
         }
@@ -214,7 +219,9 @@ export class AgentHostState implements AgentHostStateRepository {
 
   lastAcknowledgedSequence(): number {
     const row = this.database
-      .prepare("SELECT MAX(sequence) AS sequence FROM agent_host_inbox WHERE acknowledged_at IS NOT NULL")
+      .prepare(
+        "SELECT MAX(sequence) AS sequence FROM agent_host_inbox WHERE acknowledged_at IS NOT NULL"
+      )
       .get();
     return Number(row?.sequence ?? 0);
   }
@@ -238,7 +245,9 @@ export class AgentHostState implements AgentHostStateRepository {
       if (acknowledgement.alreadyAcknowledged) return true;
       if (acknowledgement.event.type === "mailbox.ack") {
         this.database
-          .prepare("UPDATE agent_host_inbox SET acknowledged_at=COALESCE(acknowledged_at,?) WHERE sequence=?")
+          .prepare(
+            "UPDATE agent_host_inbox SET acknowledged_at=COALESCE(acknowledged_at,?) WHERE sequence=?"
+          )
           .run(acknowledgement.acknowledgedAt, acknowledgement.event.sequence);
       }
       this.executions.acknowledgeTerminalEvent(messageId, acknowledgement.acknowledgedAt);

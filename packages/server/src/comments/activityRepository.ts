@@ -3,10 +3,7 @@ import { humanProjectIdSchema } from "../identity/schemas.js";
 import { inWriteTransaction, type SqliteDatabase } from "../sqlite.js";
 import { workItemKeyParts } from "../work/repository.js";
 import { workItemRefSchema, type WorkItemRef } from "../work/schemas.js";
-import {
-  COMMENT_ACTIVITY_ERROR_MESSAGES,
-  type CommentActivityErrorCode
-} from "./errors.js";
+import { COMMENT_ACTIVITY_ERROR_MESSAGES, type CommentActivityErrorCode } from "./errors.js";
 import {
   activityIdSchema,
   activityRecordSchema,
@@ -131,11 +128,7 @@ export class ActivityRepository {
    */
   insertIdempotentUnlocked(record: ActivityRecord): ActivityInsertResult {
     const parsed = activityRecordSchema.parse(record);
-    const existing = this.getBySource(
-      parsed.projectId,
-      parsed.source.kind,
-      parsed.source.sourceId
-    );
+    const existing = this.getBySource(parsed.projectId, parsed.source.kind, parsed.source.sourceId);
     if (existing) {
       return { inserted: false, record: existing, code: "activity_source_duplicate" };
     }
@@ -175,11 +168,7 @@ export class ActivityRepository {
       }
       throw error;
     }
-    const stored = this.getBySource(
-      parsed.projectId,
-      parsed.source.kind,
-      parsed.source.sourceId
-    );
+    const stored = this.getBySource(parsed.projectId, parsed.source.kind, parsed.source.sourceId);
     if (!stored) {
       throw new ActivityRepositoryError("activity_input_invalid", "Activity missing after insert.");
     }
@@ -219,12 +208,7 @@ export class ActivityRepository {
          SET projected_at=?
          WHERE project_id=? AND source_kind=? AND source_id=? AND projected_at IS NULL`
       )
-      .run(
-        parsed.occurredAt,
-        parsed.projectId,
-        parsed.source.kind,
-        parsed.source.sourceId
-      );
+      .run(parsed.occurredAt, parsed.projectId, parsed.source.kind, parsed.source.sourceId);
     return result;
   }
 
@@ -264,19 +248,19 @@ export class ActivityRepository {
     }));
   }
 
-  markOutboxProjected(projectId: string, sourceKind: string, sourceId: string, projectedAt: string): void {
+  markOutboxProjected(
+    projectId: string,
+    sourceKind: string,
+    sourceId: string,
+    projectedAt: string
+  ): void {
     this.database
       .prepare(
         `UPDATE activity_projection_outbox
          SET projected_at=?
          WHERE project_id=? AND source_kind=? AND source_id=?`
       )
-      .run(
-        projectedAt,
-        humanProjectIdSchema.parse(projectId),
-        sourceKind,
-        sourceId
-      );
+      .run(projectedAt, humanProjectIdSchema.parse(projectId), sourceKind, sourceId);
   }
 
   /**
@@ -350,7 +334,13 @@ export class ActivityRepository {
            ORDER BY occurred_at DESC, activity_id DESC
            LIMIT ?`
         )
-        .all(projectId, parts.canvasId, parts.workItemKind, parts.workItemKey, limit) as ActivityRow[];
+        .all(
+          projectId,
+          parts.canvasId,
+          parts.workItemKind,
+          parts.workItemKey,
+          limit
+        ) as ActivityRow[];
       return rows.map(toRecord);
     }
 

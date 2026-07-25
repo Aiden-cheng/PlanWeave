@@ -129,12 +129,14 @@ describe("WorkItemRef validation against real package graphs", () => {
       ok: false,
       code: "work_item_not_found"
     });
-    expect(
-      validateWorkItemRef(port, blockWorkItemRef("default", "T-001#B-999"))
-    ).toMatchObject({ ok: false, code: "work_item_not_found" });
-    expect(
-      validateWorkItemRef(port, taskWorkItemRef("other-canvas", "T-001"))
-    ).toMatchObject({ ok: false, code: "work_item_not_found" });
+    expect(validateWorkItemRef(port, blockWorkItemRef("default", "T-001#B-999"))).toMatchObject({
+      ok: false,
+      code: "work_item_not_found"
+    });
+    expect(validateWorkItemRef(port, taskWorkItemRef("other-canvas", "T-001"))).toMatchObject({
+      ok: false,
+      code: "work_item_not_found"
+    });
   });
 
   it("keeps automatic Host selection requirements on the Block, not on assignment targets", () => {

@@ -15,10 +15,7 @@ import {
   humanObserverEventSchema as contractObserverEvent,
   humanObserverWelcomeSchema as contractObserverWelcome
 } from "@planweave-ai/collaboration-contracts";
-import {
-  humanBootstrapResponseSchema,
-  humanMemberPageSchema
-} from "../identity/dtos.js";
+import { humanBootstrapResponseSchema, humanMemberPageSchema } from "../identity/dtos.js";
 import { assignmentDisplayProjectionSchema } from "../work/schemas.js";
 import { activityRecordSchema, commentDisplayProjectionSchema } from "../comments/schemas.js";
 

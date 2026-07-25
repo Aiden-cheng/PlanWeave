@@ -159,7 +159,9 @@ export class CollaborationCredentialVault {
       } else {
         const record = parsed as Record<string, unknown>;
         const credentialsRaw =
-          record.credentials && typeof record.credentials === "object" && !Array.isArray(record.credentials)
+          record.credentials &&
+          typeof record.credentials === "object" &&
+          !Array.isArray(record.credentials)
             ? (record.credentials as Record<string, unknown>)
             : {};
         const credentials: Record<string, PersistedCredentialRecord> = {};
@@ -193,7 +195,7 @@ export class CollaborationCredentialVault {
       }
       this.loaded = true;
       return this.document!;
-    } catch (error) {
+    } catch {
       throw new Error("Invalid collaboration credentials JSON.");
     }
   }

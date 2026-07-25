@@ -51,9 +51,7 @@ describe("activity projection builders", () => {
       occurredAt: "2026-07-24T12:01:00.000Z"
     });
     expect(assignment.type).toBe("assignment_updated");
-    expect(assignment.source.sourceId).toBe(
-      assignmentActivitySourceId(block, 3)
-    );
+    expect(assignment.source.sourceId).toBe(assignmentActivitySourceId(block, 3));
     expect(assignment.source.sourceId).not.toContain("#");
     expect(JSON.stringify(assignment)).not.toMatch(/prompt|token|tool_call/i);
 
@@ -85,9 +83,7 @@ describe("activity projection builders", () => {
       revision: 1,
       occurredAt: "2026-07-24T12:03:00.000Z"
     });
-    expect(created.source.sourceId).toBe(
-      commentActivitySourceId("comment-1", "comment_created")
-    );
+    expect(created.source.sourceId).toBe(commentActivitySourceId("comment-1", "comment_created"));
     expect(created.summary.commentId).toBe("comment-1");
 
     const edited = buildCommentActivity({
@@ -100,8 +96,6 @@ describe("activity projection builders", () => {
       revision: 2,
       occurredAt: "2026-07-24T12:04:00.000Z"
     });
-    expect(edited.source.sourceId).toBe(
-      commentActivitySourceId("comment-1", "comment_edited", 2)
-    );
+    expect(edited.source.sourceId).toBe(commentActivitySourceId("comment-1", "comment_edited", 2));
   });
 });

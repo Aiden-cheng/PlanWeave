@@ -182,9 +182,7 @@ export function humanTransportAllowed(
  * Local administrative boundary for owner bootstrap: only loopback clients may mint the
  * first project owner. This is not a network bearer and not Host/operator auth.
  */
-export function humanLocalAdminBoundaryAllowed(socket: {
-  remoteAddress?: string;
-}): boolean {
+export function humanLocalAdminBoundaryAllowed(socket: { remoteAddress?: string }): boolean {
   return isLoopback(socket.remoteAddress);
 }
 

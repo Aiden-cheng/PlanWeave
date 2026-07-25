@@ -28,9 +28,7 @@ function humanContext(
   });
 }
 
-function humanSubject(
-  overrides?: Parameters<typeof humanContext>[0]
-): HumanPolicySubject {
+function humanSubject(overrides?: Parameters<typeof humanContext>[0]): HumanPolicySubject {
   return { kind: "human", context: humanContext(overrides) };
 }
 
@@ -330,11 +328,7 @@ describe("authorizeHumanAction policy table", () => {
     ).toMatchObject({ allowed: false, code: "human_auth_unauthenticated" });
 
     expect(
-      decide(
-        "join_project",
-        { kind: "unauthenticated" },
-        { targetProjectId: "project-a" }
-      )
+      decide("join_project", { kind: "unauthenticated" }, { targetProjectId: "project-a" })
     ).toMatchObject({ allowed: false, code: "human_auth_unauthenticated" });
 
     // Invitation bearer cannot perform member project actions (credential-kind mismatch at subject boundary).

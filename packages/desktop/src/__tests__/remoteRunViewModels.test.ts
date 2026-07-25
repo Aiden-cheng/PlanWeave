@@ -18,7 +18,9 @@ import {
   resolveRemoteResumeLeaseAndRecovery
 } from "../renderer/collaboration/remoteRunViewModels";
 
-function assignment(overrides: Partial<AssignmentDisplayProjection> = {}): AssignmentDisplayProjection {
+function assignment(
+  overrides: Partial<AssignmentDisplayProjection> = {}
+): AssignmentDisplayProjection {
   return {
     projectId: "project-1",
     workItem: { kind: "block", canvasId: "default", blockRef: "T-1#B-1" },
@@ -170,9 +172,9 @@ describe("remoteRunViewModels", () => {
         }
       }
     });
-    expect(projectRemoteLifecyclePhase({ observation: obs, runtime: null, canDispatch: false })).toBe(
-      "interrupted"
-    );
+    expect(
+      projectRemoteLifecyclePhase({ observation: obs, runtime: null, canDispatch: false })
+    ).toBe("interrupted");
     const actions = projectRemoteRunActions({
       observation: obs,
       pendingInteractions: [],
@@ -342,9 +344,9 @@ describe("remoteRunViewModels", () => {
 
   it("detects local Auto Run activity from unfinished block run records", () => {
     expect(isLocalAutoRunActiveFromBlockRecords([])).toBe(false);
-    expect(
-      isLocalAutoRunActiveFromBlockRecords([{ finishedAt: "2030-01-01T00:00:00.000Z" }])
-    ).toBe(false);
+    expect(isLocalAutoRunActiveFromBlockRecords([{ finishedAt: "2030-01-01T00:00:00.000Z" }])).toBe(
+      false
+    );
     expect(isLocalAutoRunActiveFromBlockRecords([{ finishedAt: null }])).toBe(true);
   });
 });

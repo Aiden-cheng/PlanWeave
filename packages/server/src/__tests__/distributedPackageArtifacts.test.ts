@@ -163,9 +163,9 @@ describe("distributed package artifact contracts", () => {
         agentHost: "1.0.0"
       })
     ).toMatchObject({ ok: false, code: "package_major_mismatch" });
-    expect(
-      assertGracefulPackageDowngrade({ fromVersion: "0.3.2", toVersion: "0.3.0" })
-    ).toEqual({ ok: true });
+    expect(assertGracefulPackageDowngrade({ fromVersion: "0.3.2", toVersion: "0.3.0" })).toEqual({
+      ok: true
+    });
     expect(
       assertGracefulPackageDowngrade({ fromVersion: "1.0.0", toVersion: "0.9.0" })
     ).toMatchObject({ ok: false, code: "package_downgrade_major_forbidden" });

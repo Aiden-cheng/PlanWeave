@@ -19,9 +19,7 @@ const directories: string[] = [];
 const mockAgentPath = fileURLToPath(
   new URL("../../../runtime/src/__tests__/support/acpMockAgent.mjs", import.meta.url)
 );
-const agentHostBinPath = fileURLToPath(
-  new URL("../../../agent-host/dist/bin.js", import.meta.url)
-);
+const agentHostBinPath = fileURLToPath(new URL("../../../agent-host/dist/bin.js", import.meta.url));
 
 afterEach(async () => {
   await Promise.all(

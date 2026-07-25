@@ -70,7 +70,11 @@ export function useAssigneePickerController(
     status?.session.phase === "connected" || status?.session.phase === "ready";
 
   // Subscribe only — project/canvas binding is owned by useCollaborationSurface.
-  const { snapshot, viewModel: projectView, controller } = useCollaborationReadModels({
+  const {
+    snapshot,
+    viewModel: projectView,
+    controller
+  } = useCollaborationReadModels({
     api,
     profileId: sessionConnected ? (activeProfile?.profileId ?? null) : null,
     projectId: sessionConnected ? (activeProfile?.projectId ?? null) : null,
@@ -99,6 +103,7 @@ export function useAssigneePickerController(
   onOutcomeRef.current = args.onAssignmentOutcome;
 
   // Reset ephemeral UI when the selected work item changes rapidly.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: workItemKeyValue is the intentional remount key
   useEffect(() => {
     generationRef.current += 1;
     setEligible(null);
@@ -140,6 +145,7 @@ export function useAssigneePickerController(
     }
   }, [api, args.workItem, sessionConnected]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: workItemKeyValue remounts eligible load
   useEffect(() => {
     if (!detailsOpen || !sessionConnected || !args.workItem) return;
     void loadEligible();

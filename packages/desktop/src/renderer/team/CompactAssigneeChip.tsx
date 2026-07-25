@@ -20,11 +20,9 @@ export function CompactAssigneeChipView({
   size = "xs"
 }: CompactAssigneeChipProps) {
   if (!chip.visible) return null;
-  const sizeClass =
-    size === "sm"
-      ? "h-5 gap-1 px-1.5 text-[11px]"
-      : "h-4 gap-0.5 px-1 text-[10px]";
+  const sizeClass = size === "sm" ? "h-5 gap-1 px-1.5 text-[11px]" : "h-4 gap-0.5 px-1 text-[10px]";
   const avatarClass = size === "sm" ? "size-4 text-[8px]" : "size-3.5 text-[7px]";
+  const accessibleName = `${label}: ${chip.label}`;
   return (
     <span
       className={cn(
@@ -40,8 +38,9 @@ export function CompactAssigneeChipView({
       data-testid="compact-assignee-chip"
       data-work-item={chip.workItemKey}
       data-tone={chip.tone}
-      title={`${label}: ${chip.label}`}
-      aria-label={`${label}: ${chip.label}`}
+      title={accessibleName}
+      role="img"
+      aria-label={accessibleName}
     >
       {chip.initials ? (
         <span
@@ -54,7 +53,9 @@ export function CompactAssigneeChipView({
           {chip.initials}
         </span>
       ) : null}
-      <span className="min-w-0 truncate">{chip.label}</span>
+      <span aria-hidden="true" className="min-w-0 truncate">
+        {chip.label}
+      </span>
     </span>
   );
 }

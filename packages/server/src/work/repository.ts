@@ -1,10 +1,7 @@
 import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
 import { humanProjectIdSchema, type ActorRef } from "../identity/schemas.js";
 import { inWriteTransaction, type SqliteDatabase } from "../sqlite.js";
-import {
-  WORK_ASSIGNMENT_ERROR_MESSAGES,
-  type WorkAssignmentErrorCode
-} from "./errors.js";
+import { WORK_ASSIGNMENT_ERROR_MESSAGES, type WorkAssignmentErrorCode } from "./errors.js";
 import { WORK_ASSIGNMENT_BATCH_MAX } from "./limits.js";
 import {
   assignmentConcurrencyFactsSchema,
@@ -97,7 +94,10 @@ function targetFromRow(row: AssignmentRow): AssignmentTarget {
     case "automatic_host":
       return assignmentTargetSchema.parse({ kind: "automatic_host" });
     default:
-      throw new WorkAssignmentError("work_input_invalid", "Unknown assignment target kind in storage.");
+      throw new WorkAssignmentError(
+        "work_input_invalid",
+        "Unknown assignment target kind in storage."
+      );
   }
 }
 
@@ -147,9 +147,7 @@ function toRecord(row: AssignmentRow): AssignmentRecord {
   const updatedBy: ActorRef = {
     kind: row.updated_by_kind as ActorRef["kind"],
     id: row.updated_by_id,
-    ...(row.updated_by_display_name
-      ? { displayName: row.updated_by_display_name }
-      : {})
+    ...(row.updated_by_display_name ? { displayName: row.updated_by_display_name } : {})
   };
   return assignmentRecordSchema.parse({
     projectId: row.project_id,
@@ -177,9 +175,7 @@ export class WorkAssignmentRepository {
         `SELECT * FROM work_assignments
          WHERE project_id=? AND canvas_id=? AND work_item_kind=? AND work_item_key=?`
       )
-      .get(pid, parts.canvasId, parts.workItemKind, parts.workItemKey) as
-      | AssignmentRow
-      | undefined;
+      .get(pid, parts.canvasId, parts.workItemKind, parts.workItemKey) as AssignmentRow | undefined;
     return row ? toRecord(row) : undefined;
   }
 
@@ -269,10 +265,7 @@ export class WorkAssignmentRepository {
    * Compare-and-set write. expectedRevision must match current (0 = no row).
    * Always runs in a write transaction. Concurrent losers receive work_revision_conflict.
    */
-  applyCasUpdate(input: {
-    record: AssignmentRecord;
-    expectedRevision: number;
-  }): AssignmentRecord {
+  applyCasUpdate(input: { record: AssignmentRecord; expectedRevision: number }): AssignmentRecord {
     const record = assignmentRecordSchema.parse(input.record);
     if (
       !Number.isInteger(input.expectedRevision) ||

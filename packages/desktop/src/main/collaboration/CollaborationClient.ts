@@ -46,10 +46,8 @@ import {
   remoteOperationObservationSchema,
   uploadPendingAttachmentResponseSchema,
   type ActivityListPage,
-  type ActivityListWireQuery,
   type AssignmentDisplayProjection,
   type AssignmentListPage,
-  type AssignmentListQuery,
   type AssignmentUpdateWireCommand,
   type CollaborationClientLimits,
   type CollaborationConnectionProfile,
@@ -66,17 +64,13 @@ import {
   type HumanBootstrapResponse,
   type HumanConsumeInvitationRequest,
   type HumanConsumeInvitationResponse,
-  type HumanCreateInvitationRequest,
   type HumanCreateInvitationResponse,
-  type HumanDeviceListQuery,
   type HumanDevicePage,
-  type HumanInvitationListQuery,
   type HumanInvitationPage,
   type HumanInvitationView,
   type HumanMemberPage,
   type HumanObserverCursor,
   type HumanObserverServerMessage,
-  type HumanPageQuery,
   type PendingAttachmentView,
   type RemoteActionView,
   type RemoteDispatchWireCommand,
@@ -111,7 +105,11 @@ export type CollaborationClientClock = {
 export type CollaborationObserverStatus =
   | { readonly state: "stopped" }
   | { readonly state: "connecting"; readonly attempt: number }
-  | { readonly state: "connected"; readonly cursor: HumanObserverCursor; readonly connectedAt: string }
+  | {
+      readonly state: "connected";
+      readonly cursor: HumanObserverCursor;
+      readonly connectedAt: string;
+    }
   | { readonly state: "catching_up"; readonly resumeCursor: HumanObserverCursor }
   | { readonly state: "reconnecting"; readonly attempt: number; readonly delayMs: number }
   | { readonly state: "auth_expired"; readonly code: string }
@@ -132,7 +130,10 @@ export type CollaborationWebSocketLike = {
   readonly readyState: number;
   send(data: string): void;
   close(code?: number, reason?: string): void;
-  addEventListener(type: "open" | "message" | "error" | "close", listener: (event: unknown) => void): void;
+  addEventListener(
+    type: "open" | "message" | "error" | "close",
+    listener: (event: unknown) => void
+  ): void;
   removeEventListener(
     type: "open" | "message" | "error" | "close",
     listener: (event: unknown) => void
@@ -271,10 +272,7 @@ export class CollaborationClient {
     );
   }
 
-  async revokeInvitation(
-    invitationId: string,
-    signal?: AbortSignal
-  ): Promise<HumanInvitationView> {
+  async revokeInvitation(invitationId: string, signal?: AbortSignal): Promise<HumanInvitationView> {
     return this.json(
       "POST",
       `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/human/invitations/${encodeURIComponent(invitationId)}/revoke`,
@@ -416,10 +414,7 @@ export class CollaborationClient {
   // Comments / activity
   // ---------------------------------------------------------------------------
 
-  async listComments(
-    query: CommentListWireQuery,
-    signal?: AbortSignal
-  ): Promise<CommentListPage> {
+  async listComments(query: CommentListWireQuery, signal?: AbortSignal): Promise<CommentListPage> {
     const q = commentListWireQuerySchema.parse(query);
     const params = new URLSearchParams({
       workItem: JSON.stringify(q.workItem),
@@ -912,7 +907,11 @@ export class CollaborationClient {
               typeof event === "object" && event !== null && "data" in event
                 ? (event as { data: unknown }).data
                 : event;
-            if (typeof data !== "string" && !(data instanceof ArrayBuffer) && !ArrayBuffer.isView(data)) {
+            if (
+              typeof data !== "string" &&
+              !(data instanceof ArrayBuffer) &&
+              !ArrayBuffer.isView(data)
+            ) {
               throw new CollaborationClientError({
                 kind: "protocol",
                 code: "collaboration_observer_payload_type",
@@ -923,11 +922,11 @@ export class CollaborationClient {
               typeof data === "string"
                 ? data
                 : Buffer.from(
-                    data instanceof ArrayBuffer
-                      ? data
-                      : (data as ArrayBufferView).buffer,
+                    data instanceof ArrayBuffer ? data : (data as ArrayBufferView).buffer,
                     data instanceof ArrayBuffer ? 0 : (data as ArrayBufferView).byteOffset,
-                    data instanceof ArrayBuffer ? data.byteLength : (data as ArrayBufferView).byteLength
+                    data instanceof ArrayBuffer
+                      ? data.byteLength
+                      : (data as ArrayBufferView).byteLength
                   ).toString("utf8");
             if (Buffer.byteLength(text, "utf8") > this.limits.observerMaxPayloadBytes) {
               throw new CollaborationClientError({
@@ -972,7 +971,9 @@ export class CollaborationClient {
         socket.addEventListener("error", onError);
       } catch (error) {
         this.options.logger?.error?.(
-          redactCollaborationText(error instanceof Error ? error.message : "observer connect failed")
+          redactCollaborationText(
+            error instanceof Error ? error.message : "observer connect failed"
+          )
         );
         if (this.observerWanted && !this.disposed) this.scheduleObserverReconnect();
       }

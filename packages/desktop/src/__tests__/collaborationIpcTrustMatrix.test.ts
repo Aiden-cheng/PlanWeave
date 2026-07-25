@@ -195,7 +195,10 @@ describe("Desktop collaboration IPC trust matrix", () => {
       allowInsecureTransport: false
     });
     // Adjacent hostile file must not be treated as vault input.
-    await writeFile(join(root, "leak.json"), JSON.stringify({ deviceToken: exampleHumanDeviceToken }));
+    await writeFile(
+      join(root, "leak.json"),
+      JSON.stringify({ deviceToken: exampleHumanDeviceToken })
+    );
     const profiles = await readFile(join(root, "profiles.json"), "utf8");
     expect(profiles).not.toContain(exampleHumanDeviceToken);
     expect(profiles).not.toContain("deviceToken");

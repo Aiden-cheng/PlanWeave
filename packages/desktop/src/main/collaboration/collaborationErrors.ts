@@ -32,7 +32,10 @@ export class CollaborationClientError extends Error {
   }
 }
 
-export function collaborationErrorFromHttp(status: number, bodyText: string): CollaborationClientError {
+export function collaborationErrorFromHttp(
+  status: number,
+  bodyText: string
+): CollaborationClientError {
   let code = `http_${status}`;
   let message: string | undefined;
   try {

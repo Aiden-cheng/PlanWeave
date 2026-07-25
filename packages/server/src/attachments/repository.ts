@@ -13,20 +13,10 @@ import {
   type CommentId,
   type PendingAttachmentUploadId
 } from "../comments/schemas.js";
-import {
-  humanPrincipalIdSchema,
-  humanProjectIdSchema
-} from "../identity/schemas.js";
+import { humanPrincipalIdSchema, humanProjectIdSchema } from "../identity/schemas.js";
 import { inWriteTransaction, type SqliteDatabase } from "../sqlite.js";
-import {
-  ATTACHMENT_ERROR_MESSAGES,
-  type AttachmentErrorCode
-} from "./errors.js";
-import type {
-  CommentAttachmentBinding,
-  PendingUploadRecord,
-  PendingUploadStatus
-} from "./policy.js";
+import { ATTACHMENT_ERROR_MESSAGES, type AttachmentErrorCode } from "./errors.js";
+import type { CommentAttachmentBinding, PendingUploadRecord } from "./policy.js";
 
 export class AttachmentRepositoryError extends Error {
   constructor(
@@ -38,13 +28,7 @@ export class AttachmentRepositoryError extends Error {
   }
 }
 
-const pendingStatusSchema = z.enum([
-  "pending",
-  "uploaded",
-  "finalized",
-  "expired",
-  "aborted"
-]);
+const pendingStatusSchema = z.enum(["pending", "uploaded", "finalized", "expired", "aborted"]);
 
 type PendingRow = {
   pending_upload_id: string;
@@ -103,9 +87,7 @@ function toBinding(row: BindingRow): CommentAttachmentBinding {
     digestSha256: commentContentSha256Schema.parse(row.digest_sha256),
     sizeBytes: row.size_bytes,
     mediaType: commentAttachmentMediaTypeSchema.parse(row.media_type),
-    fileName: row.file_name
-      ? commentAttachmentFileNameSchema.parse(row.file_name)
-      : undefined,
+    fileName: row.file_name ? commentAttachmentFileNameSchema.parse(row.file_name) : undefined,
     createdAt: row.created_at,
     commentTombstonedAt: row.comment_tombstoned_at ?? undefined
   };
@@ -127,16 +109,12 @@ export class CommentAttachmentRepository {
   }): PendingUploadRecord {
     const pendingUploadId = pendingAttachmentUploadIdSchema.parse(randomUUID());
     const projectId = humanProjectIdSchema.parse(input.projectId);
-    const uploaderHumanPrincipalId = humanPrincipalIdSchema.parse(
-      input.uploaderHumanPrincipalId
-    );
+    const uploaderHumanPrincipalId = humanPrincipalIdSchema.parse(input.uploaderHumanPrincipalId);
     const mediaType = commentAttachmentMediaTypeSchema.parse(input.mediaType);
     const expectedDigestSha256 = input.expectedDigestSha256
       ? commentContentSha256Schema.parse(input.expectedDigestSha256)
       : null;
-    const fileName = input.fileName
-      ? commentAttachmentFileNameSchema.parse(input.fileName)
-      : null;
+    const fileName = input.fileName ? commentAttachmentFileNameSchema.parse(input.fileName) : null;
     const commentId = input.commentId ? commentIdSchema.parse(input.commentId) : null;
 
     this.database
@@ -163,10 +141,7 @@ export class CommentAttachmentRepository {
     return this.getPendingRequired(projectId, pendingUploadId);
   }
 
-  getPending(
-    projectId: string,
-    pendingUploadId: string
-  ): PendingUploadRecord | undefined {
+  getPending(projectId: string, pendingUploadId: string): PendingUploadRecord | undefined {
     const raw = this.database
       .prepare(
         `SELECT * FROM comment_pending_uploads
@@ -177,10 +152,7 @@ export class CommentAttachmentRepository {
     return toPendingRecord(raw as PendingRow);
   }
 
-  getPendingRequired(
-    projectId: string,
-    pendingUploadId: string
-  ): PendingUploadRecord {
+  getPendingRequired(projectId: string, pendingUploadId: string): PendingUploadRecord {
     const record = this.getPending(projectId, pendingUploadId);
     if (!record) {
       throw new AttachmentRepositoryError("attachment_pending_not_found");
@@ -464,7 +436,10 @@ export class CommentAttachmentRepository {
     return rows.map(toPendingRecord);
   }
 
-  deletePending(projectId: string, pendingUploadId: PendingAttachmentUploadId | string): {
+  deletePending(
+    projectId: string,
+    pendingUploadId: PendingAttachmentUploadId | string
+  ): {
     digestSha256?: string;
   } {
     const record = this.getPending(projectId, pendingUploadId);

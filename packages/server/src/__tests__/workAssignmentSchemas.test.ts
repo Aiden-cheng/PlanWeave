@@ -57,9 +57,10 @@ describe("work assignment schemas", () => {
 
   it("rejects generic assignee strings and nullable target combinations", () => {
     expect(assignmentTargetSchema.parse({ kind: "unassigned" })).toEqual({ kind: "unassigned" });
-    expect(
-      assignmentTargetSchema.parse({ kind: "human", humanPrincipalId: "human-1" })
-    ).toEqual({ kind: "human", humanPrincipalId: "human-1" });
+    expect(assignmentTargetSchema.parse({ kind: "human", humanPrincipalId: "human-1" })).toEqual({
+      kind: "human",
+      humanPrincipalId: "human-1"
+    });
     expect(assignmentTargetSchema.parse({ kind: "exact_host", hostId: "host-1" })).toEqual({
       kind: "exact_host",
       hostId: "host-1"
@@ -170,9 +171,9 @@ describe("work assignment schemas", () => {
   });
 
   it("models availability as a discriminated union without masking stale readiness", () => {
-    expect(
-      assignmentAvailabilitySchema.parse({ status: "ready", reason: "ready" }).status
-    ).toBe("ready");
+    expect(assignmentAvailabilitySchema.parse({ status: "ready", reason: "ready" }).status).toBe(
+      "ready"
+    );
     expect(
       assignmentAvailabilitySchema.parse({
         status: "invalid",
@@ -222,12 +223,10 @@ describe("work assignment schemas", () => {
   });
 
   it("requires concurrency facts to stay consistent with optional current record", () => {
-    expect(
-      assignmentConcurrencyFactsSchema.parse({ currentRevision: 0 })
-    ).toEqual({ currentRevision: 0 });
-    expect(() =>
-      assignmentConcurrencyFactsSchema.parse({ currentRevision: 1 })
-    ).toThrow();
+    expect(assignmentConcurrencyFactsSchema.parse({ currentRevision: 0 })).toEqual({
+      currentRevision: 0
+    });
+    expect(() => assignmentConcurrencyFactsSchema.parse({ currentRevision: 1 })).toThrow();
     const current = assignmentRecordSchema.parse({
       projectId: "project-a",
       workItem: blockRef,
@@ -239,8 +238,6 @@ describe("work assignment schemas", () => {
     expect(
       assignmentConcurrencyFactsSchema.parse({ currentRevision: 3, current }).currentRevision
     ).toBe(3);
-    expect(() =>
-      assignmentConcurrencyFactsSchema.parse({ currentRevision: 2, current })
-    ).toThrow();
+    expect(() => assignmentConcurrencyFactsSchema.parse({ currentRevision: 2, current })).toThrow();
   });
 });

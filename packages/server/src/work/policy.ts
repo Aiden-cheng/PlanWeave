@@ -1,11 +1,5 @@
-import {
-  authorizeHumanAction,
-  type HumanPolicySubject
-} from "../identity/policy.js";
-import {
-  actorRefFromHuman,
-  type HumanAuthContext
-} from "../identity/schemas.js";
+import { authorizeHumanAction, type HumanPolicySubject } from "../identity/policy.js";
+import { actorRefFromHuman, type HumanAuthContext } from "../identity/schemas.js";
 import {
   WORK_ASSIGNMENT_ERROR_MESSAGES,
   allowWorkAssignment,
@@ -140,9 +134,7 @@ export function evaluateAssignmentTarget(input: {
         return denial("work_host_not_authorized");
       }
       // Capabilities come from current Block requirements (packageFacts), never from assignment blob.
-      if (
-        !hostSatisfiesCapabilities(host.capabilities, input.packageFacts.requiredCapabilities)
-      ) {
+      if (!hostSatisfiesCapabilities(host.capabilities, input.packageFacts.requiredCapabilities)) {
         return denial("work_host_capability_mismatch");
       }
       return allowWorkAssignment();
@@ -266,10 +258,7 @@ export function decideAssignmentUpdate(input: {
     workItem: command.workItem,
     target: command.target,
     packageFacts: input.packageFacts,
-    membership:
-      command.target.kind === "human"
-        ? input.membership
-        : undefined,
+    membership: command.target.kind === "human" ? input.membership : undefined,
     host: command.target.kind === "exact_host" ? input.host : undefined
   });
   if (!targetDecision.allowed) {
@@ -550,10 +539,7 @@ export function evaluateDispatchAgainstAssignment(input: {
       };
     }
     case "exact_host": {
-      if (
-        input.requestedHostId !== undefined &&
-        input.requestedHostId !== target.hostId
-      ) {
+      if (input.requestedHostId !== undefined && input.requestedHostId !== target.hostId) {
         return {
           allowed: false,
           code: "work_dispatch_host_mismatch",

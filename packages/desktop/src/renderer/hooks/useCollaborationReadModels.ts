@@ -93,6 +93,8 @@ export function useCollaborationReadModels(
     };
   }, [api]);
 
+  // controllerVersion rebinds after hub acquire without capturing the controller instance.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: controllerVersion is the rebind signal
   useEffect(() => {
     if (!args.manageActiveProject) return;
     const controller = controllerRef.current;
@@ -106,13 +108,8 @@ export function useCollaborationReadModels(
       projectId: args.projectId,
       canvasId: args.canvasId
     });
-  }, [
-    args.manageActiveProject,
-    args.profileId,
-    args.projectId,
-    args.canvasId,
-    controllerVersion
-  ]);
+    // controllerVersion rebinds after hub acquire without capturing the controller instance.
+  }, [args.manageActiveProject, args.profileId, args.projectId, args.canvasId, controllerVersion]);
 
   const controller = controllerRef.current;
   const snapshot = useSyncExternalStore(

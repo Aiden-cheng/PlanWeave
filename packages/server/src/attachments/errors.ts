@@ -38,10 +38,7 @@ export type AttachmentAllowance = {
 
 export type AttachmentAuthDecision = AttachmentAllowance | AttachmentDenial;
 
-export function denyAttachment(
-  code: AttachmentErrorCode,
-  message: string
-): AttachmentDenial {
+export function denyAttachment(code: AttachmentErrorCode, message: string): AttachmentDenial {
   return { allowed: false, code, message };
 }
 

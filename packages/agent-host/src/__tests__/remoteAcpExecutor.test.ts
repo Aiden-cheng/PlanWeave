@@ -25,10 +25,7 @@ import {
   AgentHostExecutionError,
   AgentHostSessionLoadError
 } from "../execution/agentHostExecutor.js";
-import {
-  AGENT_HOST_RESUME_PROMPT,
-  RemoteAcpExecutor
-} from "../execution/remoteAcpExecutor.js";
+import { AGENT_HOST_RESUME_PROMPT, RemoteAcpExecutor } from "../execution/remoteAcpExecutor.js";
 import {
   openAgentHostRemoteExecutionOutbox,
   type AgentHostSqliteRemoteExecutionOutbox
@@ -349,7 +346,9 @@ describe("RemoteAcpExecutor", () => {
     expect(
       outbox
         .records(identity(input))
-        .filter((record) => record.kind === "engine_event" && record.event.kind === "session_started")
+        .filter(
+          (record) => record.kind === "engine_event" && record.event.kind === "session_started"
+        )
     ).toEqual([]);
   });
 

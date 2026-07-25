@@ -133,7 +133,8 @@ export async function allocateEphemeralPort(): Promise<number> {
   const probe = createServer();
   await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
   const address = probe.address();
-  if (!address || typeof address === "string") throw new Error("real_process_harness_port_unavailable");
+  if (!address || typeof address === "string")
+    throw new Error("real_process_harness_port_unavailable");
   await new Promise<void>((resolve) => probe.close(() => resolve()));
   return address.port;
 }
@@ -560,8 +561,16 @@ export class RealProcessAcpHarness {
         JSON.stringify({ ...snapshot, at: new Date().toISOString() }, null, 2),
         "utf8"
       );
-      await writeFile(join(this.paths.logs, `${label}.stdout.log`), redactLogText(logs.stdout), "utf8");
-      await writeFile(join(this.paths.logs, `${label}.stderr.log`), redactLogText(logs.stderr), "utf8");
+      await writeFile(
+        join(this.paths.logs, `${label}.stdout.log`),
+        redactLogText(logs.stdout),
+        "utf8"
+      );
+      await writeFile(
+        join(this.paths.logs, `${label}.stderr.log`),
+        redactLogText(logs.stderr),
+        "utf8"
+      );
     });
     return handle;
   }
@@ -768,7 +777,8 @@ export class RealProcessAcpHarness {
   ): Promise<{ id: string; lastSeenAt: string; handle: SecondaryHostHandle }> {
     if (this.disposed) throw new Error("real_process_harness_disposed");
     const key = options.key ?? options.displayName.replace(/\s+/g, "-").toLowerCase();
-    if (this.secondaryHosts.has(key)) throw new Error(`real_process_harness_secondary_exists:${key}`);
+    if (this.secondaryHosts.has(key))
+      throw new Error(`real_process_harness_secondary_exists:${key}`);
     const capacity = options.capacity ?? 1;
     const capabilities = options.capabilities ?? ["acp.test"];
     const acpScenario = options.acpScenario ?? this.acpScenario;
@@ -882,9 +892,7 @@ export class RealProcessAcpHarness {
   }> {
     const previousLastSeenAt =
       options?.previousLastSeenAt ??
-      (
-        await this.waitForHostOnline().catch(() => undefined)
-      )?.lastSeenAt;
+      (await this.waitForHostOnline().catch(() => undefined))?.lastSeenAt;
     await this.stopHost("harness restartHost");
     // Credential remains in host dataDirectory; do not re-enroll.
     this.host = this.spawnLongLived(

@@ -53,7 +53,11 @@ export const RELEASE_GATE_TIERS: readonly ReleaseGateTierDefinition[] = [
       "Required before declaring a supported ACP Agent version. Host-local public ACP only; soft skip is not a release pass.",
     command:
       "PLANWEAVE_REAL_ACP_REQUIRE=1 planweave-agent-host real-acp-smoke --require --evidence <sanitized-path>",
-    environment: ["PLANWEAVE_REAL_ACP=1", "PLANWEAVE_REAL_ACP_REQUIRE=1", "PLANWEAVE_REAL_ACP_PROFILE"],
+    environment: [
+      "PLANWEAVE_REAL_ACP=1",
+      "PLANWEAVE_REAL_ACP_REQUIRE=1",
+      "PLANWEAVE_REAL_ACP_PROFILE"
+    ],
     evidenceVersion: "planweave.real-acp-host-smoke/v1",
     ownership:
       "Release operator machine with the supported ACP Agent binary and Host-local provider login/env (never committed)",

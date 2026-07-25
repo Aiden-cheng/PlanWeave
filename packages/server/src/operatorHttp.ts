@@ -157,10 +157,7 @@ function query(url: URL, allowed: readonly string[]): Record<string, string | un
 function safeError(error: unknown): { status: number; code: string } {
   if (error instanceof z.ZodError) return { status: 400, code: "operator_request_invalid" };
   if (error instanceof DispatchAssignmentError) {
-    if (
-      error.code === "work_revision_conflict" ||
-      error.code === "work_dispatch_host_mismatch"
-    ) {
+    if (error.code === "work_revision_conflict" || error.code === "work_dispatch_host_mismatch") {
       return { status: 409, code: error.code };
     }
     if (

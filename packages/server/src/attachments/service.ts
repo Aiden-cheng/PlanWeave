@@ -27,10 +27,7 @@ import {
   type CommentAttachmentBinding,
   type PendingUploadRecord
 } from "./policy.js";
-import {
-  AttachmentRepositoryError,
-  CommentAttachmentRepository
-} from "./repository.js";
+import { AttachmentRepositoryError, CommentAttachmentRepository } from "./repository.js";
 
 export class CommentAttachmentServiceError extends Error {
   constructor(
@@ -43,10 +40,7 @@ export class CommentAttachmentServiceError extends Error {
 }
 
 function deny(code: AttachmentErrorCode, message?: string): never {
-  throw new CommentAttachmentServiceError(
-    code,
-    message ?? ATTACHMENT_ERROR_MESSAGES[code]
-  );
+  throw new CommentAttachmentServiceError(code, message ?? ATTACHMENT_ERROR_MESSAGES[code]);
 }
 
 function mapUnknown(error: unknown): never {
@@ -361,10 +355,7 @@ export class CommentAttachmentService {
         deny("attachment_auth_project_mismatch");
       }
       const digest = commentContentSha256Schema.parse(input.digestSha256);
-      const referenced = this.options.repository.hasProjectReference(
-        input.projectId,
-        digest
-      );
+      const referenced = this.options.repository.hasProjectReference(input.projectId, digest);
       const auth = authorizeDigestScopedRead({
         subject,
         projectId: input.projectId,

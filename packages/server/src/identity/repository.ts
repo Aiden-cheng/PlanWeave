@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { inWriteTransaction, type SqliteDatabase } from "../sqlite.js";
-import { digestsEqual, hashHumanToken, mintHumanDeviceToken, mintProjectInvitationToken } from "./crypto.js";
 import {
-  HUMAN_AUTH_ERROR_MESSAGES,
-  type HumanAuthErrorCode
-} from "./errors.js";
+  digestsEqual,
+  hashHumanToken,
+  mintHumanDeviceToken,
+  mintProjectInvitationToken
+} from "./crypto.js";
+import { HUMAN_AUTH_ERROR_MESSAGES, type HumanAuthErrorCode } from "./errors.js";
 import {
   HUMAN_MAX_DEVICES_PER_PRINCIPAL,
   HUMAN_MAX_MEMBERS_PER_PROJECT,
@@ -204,10 +206,7 @@ export class HumanIdentityRepository {
     return row ? toMembership(row) : undefined;
   }
 
-  getActiveMembership(
-    projectId: string,
-    humanPrincipalId: string
-  ): ProjectMembership | undefined {
+  getActiveMembership(projectId: string, humanPrincipalId: string): ProjectMembership | undefined {
     const pid = humanProjectIdSchema.parse(projectId);
     const hid = humanPrincipalIdSchema.parse(humanPrincipalId);
     const row = this.database
@@ -500,7 +499,10 @@ export class HumanIdentityRepository {
     return { principal, device: refreshed, membership };
   }
 
-  revokeDevice(deviceCredentialId: string, ownerHumanPrincipalId?: string): HumanDeviceCredentialMetadata {
+  revokeDevice(
+    deviceCredentialId: string,
+    ownerHumanPrincipalId?: string
+  ): HumanDeviceCredentialMetadata {
     return inWriteTransaction(this.database, () => {
       const id = humanDeviceCredentialIdSchema.parse(deviceCredentialId);
       const row = this.database
@@ -720,15 +722,7 @@ export class HumanIdentityRepository {
             created_at,expires_at
           ) VALUES (?,?,?,?,?,?,?)`
         )
-        .run(
-          invitationId,
-          projectId,
-          "member",
-          createdBy,
-          tokenSha256,
-          createdAt,
-          expiresAt
-        );
+        .run(invitationId, projectId, "member", createdBy, tokenSha256, createdAt, expiresAt);
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new HumanIdentityError("human_input_invalid", "Invitation token digest conflict.");
@@ -892,14 +886,7 @@ export class HumanIdentityRepository {
             membership_id,project_id,human_principal_id,role,created_at,updated_at
           ) VALUES (?,?,?,?,?,?)`
         )
-        .run(
-          membershipId,
-          input.projectId,
-          input.humanPrincipalId,
-          input.role,
-          now,
-          now
-        );
+        .run(membershipId, input.projectId, input.humanPrincipalId, input.role, now, now);
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new HumanIdentityError("human_input_invalid", "Active membership already exists.");
@@ -930,12 +917,13 @@ export class HumanIdentityRepository {
     const deviceToken = mintHumanDeviceToken();
     const tokenSha256 = hashHumanToken(deviceToken);
     const createdAt = this.clock().toISOString();
-    const label =
-      input.label === undefined ? null : humanDeviceLabelSchema.parse(input.label);
+    const label = input.label === undefined ? null : humanDeviceLabelSchema.parse(input.label);
     const expiresAt =
       input.deviceTtlMs === undefined
         ? null
-        : new Date(this.clock().getTime() + humanDeviceTtlMsSchema.parse(input.deviceTtlMs)).toISOString();
+        : new Date(
+            this.clock().getTime() + humanDeviceTtlMsSchema.parse(input.deviceTtlMs)
+          ).toISOString();
 
     try {
       this.database

@@ -62,11 +62,13 @@ class CrashOnceCheckpoint implements RemoteCoordinatorCheckpointPort {
   }
 }
 
-async function setup(options: {
-  strictGate?: boolean;
-  withHosts?: Array<{ name: string; capabilities: string[]; capacity: number }>;
-  checkpoints?: RemoteCoordinatorCheckpointPort;
-} = {}) {
+async function setup(
+  options: {
+    strictGate?: boolean;
+    withHosts?: Array<{ name: string; capabilities: string[]; capacity: number }>;
+    checkpoints?: RemoteCoordinatorCheckpointPort;
+  } = {}
+) {
   const workspace = await createTestWorkspace(remoteManifest());
   directories.push(workspace.home, workspace.root);
   const dataDirectory = join(workspace.root, "server-data");
@@ -81,7 +83,7 @@ async function setup(options: {
   const workAssignments = new WorkAssignmentRepository(server.database);
   const assignmentGate = createAssignmentDispatchGate({
     repository: workAssignments,
-    defaultAllowHumanOverride: options.strictGate ? false : true
+    defaultAllowHumanOverride: !options.strictGate
   });
 
   const buildCoordination = (checkpoints?: RemoteCoordinatorCheckpointPort) => {
@@ -213,7 +215,9 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
         idempotencyKey: "deny-unassigned",
         allowHumanOverride: false
       })
-    ).rejects.toMatchObject({ code: "work_not_agent_assigned" } satisfies Partial<DispatchAssignmentError>);
+    ).rejects.toMatchObject({
+      code: "work_not_agent_assigned"
+    } satisfies Partial<DispatchAssignmentError>);
 
     const activated = await fixture.coordination.coordinator.dispatch({
       ...fixture.locator,
@@ -261,7 +265,9 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
     });
     expect(outcome.status).toBe("activated");
     expect(outcome.operation.attempt.hostId).toBe(hostA.id);
-    expect(fixture.coordination.coordinator.getAuthorizedHostSelection(outcome.operation.id)).toMatchObject({
+    expect(
+      fixture.coordination.coordinator.getAuthorizedHostSelection(outcome.operation.id)
+    ).toMatchObject({
       selection: "exact",
       preferredHostId: hostA.id,
       assignmentRevision: 1
@@ -364,7 +370,9 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
 
     const reentered = await fixture.coordination.coordinator.reenter(dispatched.operation.id);
     expect(reentered.operation.attempt.hostId).toBe(hostA.id);
-    expect(fixture.coordination.coordinator.getAuthorizedHostSelection(dispatched.operation.id)).toMatchObject({
+    expect(
+      fixture.coordination.coordinator.getAuthorizedHostSelection(dispatched.operation.id)
+    ).toMatchObject({
       preferredHostId: hostA.id
     });
 
@@ -411,10 +419,7 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
       fixture.ownerContext,
       fixture.locator.projectId,
       {
-        workItems: [
-          { kind: "task", canvasId: "default", taskId: "T-001" },
-          fixture.blockItem
-        ]
+        workItems: [{ kind: "task", canvasId: "default", taskId: "T-001" }, fixture.blockItem]
       }
     );
     expect(batch.items).toHaveLength(2);

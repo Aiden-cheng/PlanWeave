@@ -1,7 +1,4 @@
-import {
-  authorizeHumanAction,
-  type HumanPolicySubject
-} from "../identity/policy.js";
+import { authorizeHumanAction, type HumanPolicySubject } from "../identity/policy.js";
 import type { HumanAuthContext } from "../identity/schemas.js";
 import {
   COMMENT_ATTACHMENT_MAX_BYTES,
@@ -22,12 +19,7 @@ import {
   type AttachmentErrorCode
 } from "./errors.js";
 
-export type PendingUploadStatus =
-  | "pending"
-  | "uploaded"
-  | "finalized"
-  | "expired"
-  | "aborted";
+export type PendingUploadStatus = "pending" | "uploaded" | "finalized" | "expired" | "aborted";
 
 export type PendingUploadRecord = PendingAttachmentUpload & {
   status: PendingUploadStatus;

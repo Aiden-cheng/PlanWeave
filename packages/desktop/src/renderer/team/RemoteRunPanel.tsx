@@ -132,11 +132,7 @@ export function RemoteRunPanel({
         </Badge>
       </div>
 
-      <div
-        aria-live="polite"
-        className="sr-only"
-        data-testid="remote-run-live-region"
-      >
+      <div aria-live="polite" className="sr-only" data-testid="remote-run-live-region">
         {controller.actionError ?? phaseLabel(viewModel.phase, t)}
       </div>
 

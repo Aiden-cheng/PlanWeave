@@ -24,9 +24,7 @@ export function smokeOutputFailure(output: string): string | null {
           ? `${parsed.event}: ${parsed.message}`
           : parsed.event;
       }
-    } catch {
-      continue;
-    }
+    } catch {}
   }
   return null;
 }

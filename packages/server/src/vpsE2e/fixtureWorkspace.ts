@@ -60,10 +60,7 @@ export function remoteAcpFixtureManifest(): PlanPackageManifest {
   };
 }
 
-async function writePromptFiles(
-  packageDir: string,
-  manifest: PlanPackageManifest
-): Promise<void> {
+async function writePromptFiles(packageDir: string, manifest: PlanPackageManifest): Promise<void> {
   for (const node of manifest.nodes) {
     if (node.type !== "task") continue;
     await mkdir(join(packageDir, "nodes", node.id, "blocks"), { recursive: true });

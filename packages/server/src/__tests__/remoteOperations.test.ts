@@ -3,7 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
-import { applyMigrations, centralSchemaVersion, latestCentralSchemaVersion } from "../migrations.js";
+import {
+  applyMigrations,
+  centralSchemaVersion,
+  latestCentralSchemaVersion
+} from "../migrations.js";
 import { AgentHostRepository } from "../hosts.js";
 import { HostReservationRepository } from "../hostReservations.js";
 import { RemoteOperationRepository } from "../remoteOperations.js";

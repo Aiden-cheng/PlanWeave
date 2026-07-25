@@ -201,7 +201,9 @@ describe("Agent Host operator CLI", () => {
     directories.push(root);
     const dataDirectory = join(root, "data");
     await ensureDurableHostIdentity(dataDirectory, "host-original");
-    await expect(ensureDurableHostIdentity(dataDirectory, "host-original")).resolves.toBeUndefined();
+    await expect(
+      ensureDurableHostIdentity(dataDirectory, "host-original")
+    ).resolves.toBeUndefined();
     await expect(ensureDurableHostIdentity(dataDirectory, "host-replacement")).rejects.toThrow(
       "agent_host_durable_identity_mismatch"
     );

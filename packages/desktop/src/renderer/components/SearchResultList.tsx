@@ -90,11 +90,7 @@ function searchResultAssigneeChip(
   if (result.kind === "task" || (result.kind === "prompt" && !targetRef.includes("#"))) {
     return lookupTaskAssigneeChip(assigneeIndex, canvasId, targetRef);
   }
-  if (
-    result.kind === "block" ||
-    result.kind === "prompt" ||
-    targetRef.includes("#")
-  ) {
+  if (result.kind === "block" || result.kind === "prompt" || targetRef.includes("#")) {
     return lookupBlockAssigneeChip(assigneeIndex, canvasId, targetRef);
   }
   return null;

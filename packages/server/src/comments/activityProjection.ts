@@ -1,7 +1,4 @@
-import {
-  humanPrincipalIdSchema,
-  type ProjectMemberRole
-} from "../identity/schemas.js";
+import { humanPrincipalIdSchema, type ProjectMemberRole } from "../identity/schemas.js";
 import type { WorkItemRef } from "../work/schemas.js";
 import { ACTIVITY_HEADLINE_MAX_LENGTH } from "./limits.js";
 import {
@@ -22,12 +19,7 @@ export function opaqueWorkItemKey(workItem: WorkItemRef): string {
 
 export function membershipActivitySourceId(
   membershipId: string,
-  type:
-    | "member_joined"
-    | "member_left"
-    | "member_removed"
-    | "owner_promoted"
-    | "owner_demoted"
+  type: "member_joined" | "member_left" | "member_removed" | "owner_promoted" | "owner_demoted"
 ): string {
   switch (type) {
     case "member_joined":
@@ -58,10 +50,7 @@ export function commentActivitySourceId(
   }
 }
 
-export function assignmentActivitySourceId(
-  workItem: WorkItemRef,
-  revision: number
-): string {
+export function assignmentActivitySourceId(workItem: WorkItemRef, revision: number): string {
   return `${workItem.canvasId}:${workItem.kind}:${opaqueWorkItemKey(workItem)}:r${revision}`;
 }
 
@@ -79,18 +68,13 @@ export function remoteRunActivitySourceId(
 
 function clipHeadline(value: string): string {
   if (value.length <= ACTIVITY_HEADLINE_MAX_LENGTH) return value;
-  return value.slice(0, ACTIVITY_HEADLINE_MAX_LENGTH - 1) + "…";
+  return `${value.slice(0, ACTIVITY_HEADLINE_MAX_LENGTH - 1)}…`;
 }
 
 export type MembershipActivityInput = {
   activityId: string;
   projectId: string;
-  type:
-    | "member_joined"
-    | "member_left"
-    | "member_removed"
-    | "owner_promoted"
-    | "owner_demoted";
+  type: "member_joined" | "member_left" | "member_removed" | "owner_promoted" | "owner_demoted";
   membershipId: string;
   humanPrincipalId: string;
   displayName?: string;

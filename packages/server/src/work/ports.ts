@@ -127,9 +127,7 @@ export function createHostAssignmentPort(
       online,
       capabilities: [...host.capabilities],
       displayName: host.displayName,
-      ...(active !== undefined
-        ? { capacityRemaining: Math.max(0, host.capacity - active) }
-        : {})
+      ...(active !== undefined ? { capacityRemaining: Math.max(0, host.capacity - active) } : {})
     });
   }
 
@@ -153,7 +151,9 @@ export function createHostAssignmentPort(
       const limit = listOptions.limit ?? 100;
       const offset = listOptions.offset ?? 0;
       // Pull a page of hosts; filter capabilities in application (Host list is already ordered).
-      const hosts = options.hosts.list(Math.min(limit + offset, 100), 0).slice(offset, offset + limit);
+      const hosts = options.hosts
+        .list(Math.min(limit + offset, 100), 0)
+        .slice(offset, offset + limit);
       const required = listOptions.requiredCapabilities ?? [];
       return hosts
         .map((host) => toFacts(projectId, host))

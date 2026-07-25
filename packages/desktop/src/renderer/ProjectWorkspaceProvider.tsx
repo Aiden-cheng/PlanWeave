@@ -990,16 +990,13 @@ export function ProjectWorkspaceProvider({
     } = fileSyncController;
     return props;
   }, [fileSyncController]);
-  const search = useMemo(
-    () => {
-      const { diagnostics: _searchDiagnostics, ...props } = searchController;
-      return {
-        ...props,
-        assigneeIndex: collaborationSurface.assigneeIndex
-      };
-    },
-    [collaborationSurface.assigneeIndex, searchController]
-  );
+  const search = useMemo(() => {
+    const { diagnostics: _searchDiagnostics, ...props } = searchController;
+    return {
+      ...props,
+      assigneeIndex: collaborationSurface.assigneeIndex
+    };
+  }, [collaborationSurface.assigneeIndex, searchController]);
 
   const projectSidebar = useMemo(
     () => ({

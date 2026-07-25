@@ -40,7 +40,9 @@ const blockItem: WorkItemRef = {
 
 const taskItem: WorkItemRef = { kind: "task", canvasId: "default", taskId: "T-1" };
 
-function connectedStatus(phase: CollaborationStatus["session"]["phase"] = "connected"): CollaborationStatus {
+function connectedStatus(
+  phase: CollaborationStatus["session"]["phase"] = "connected"
+): CollaborationStatus {
   return {
     profiles: [
       {
@@ -161,21 +163,23 @@ function createScenarioApi(state: ScenarioState) {
         createdAt: `2030-01-01T00:00:0${index}.000Z`,
         updatedAt: `2030-01-01T00:00:0${index}.000Z`,
         tombstoned: comment.tombstoned,
-        attachments: comment.commentId === "comment-1"
-          ? [
-              {
-                digestSha256: "a".repeat(64),
-                fileName: "notes.txt",
-                mediaType: "text/plain" as const,
-                sizeBytes: 12
-              }
-            ]
-          : [],
+        attachments:
+          comment.commentId === "comment-1"
+            ? [
+                {
+                  digestSha256: "a".repeat(64),
+                  fileName: "notes.txt",
+                  mediaType: "text/plain" as const,
+                  sizeBytes: 12
+                }
+              ]
+            : [],
         workItemPresence: "present" as const
       })),
-      nextCursor: state.comments.length > 1
-        ? { createdAt: "2030-01-01T00:00:00.000Z", commentId: "comment-1" }
-        : null
+      nextCursor:
+        state.comments.length > 1
+          ? { createdAt: "2030-01-01T00:00:00.000Z", commentId: "comment-1" }
+          : null
     };
   });
 
@@ -231,28 +235,26 @@ function createScenarioApi(state: ScenarioState) {
     return observation();
   });
 
-  const executeAction = vi
-    .fn()
-    .mockImplementation(async (input: { action: { kind: string } }) => {
-      if (input.action.kind === "cancel") state.observationState = "cancelled";
-      if (input.action.kind === "resume_same_session") state.observationState = "running";
-      if (input.action.kind === "retry_new_attempt") state.observationState = "running";
-      if (input.action.kind === "fail_interruption") state.observationState = "failed";
-      return {
-        request: {
-          kind: input.action.kind,
-          actionId: "a1",
-          operationId: "op-1",
-          dispatchId: "dispatch-1",
-          executionAttemptId: "attempt-1",
-          expectedAttemptVersion: 2,
-          leaseId: "lease-1",
-          reason: "scenario"
-        },
-        state: "recorded",
-        createdAt: "2030-01-01T00:02:00.000Z"
-      };
-    });
+  const executeAction = vi.fn().mockImplementation(async (input: { action: { kind: string } }) => {
+    if (input.action.kind === "cancel") state.observationState = "cancelled";
+    if (input.action.kind === "resume_same_session") state.observationState = "running";
+    if (input.action.kind === "retry_new_attempt") state.observationState = "running";
+    if (input.action.kind === "fail_interruption") state.observationState = "failed";
+    return {
+      request: {
+        kind: input.action.kind,
+        actionId: "a1",
+        operationId: "op-1",
+        dispatchId: "dispatch-1",
+        executionAttemptId: "attempt-1",
+        expectedAttemptVersion: 2,
+        leaseId: "lease-1",
+        reason: "scenario"
+      },
+      state: "recorded",
+      createdAt: "2030-01-01T00:02:00.000Z"
+    };
+  });
 
   const settle = vi.fn().mockResolvedValue({
     request: {
@@ -297,13 +299,15 @@ function createScenarioApi(state: ScenarioState) {
         if (index >= 0) statusListeners.splice(index, 1);
       };
     }),
-    onCollaborationObserverSignal: vi.fn((listener: (signal: CollaborationObserverSignal) => void) => {
-      signalListeners.push(listener);
-      return () => {
-        const index = signalListeners.indexOf(listener);
-        if (index >= 0) signalListeners.splice(index, 1);
-      };
-    }),
+    onCollaborationObserverSignal: vi.fn(
+      (listener: (signal: CollaborationObserverSignal) => void) => {
+        signalListeners.push(listener);
+        return () => {
+          const index = signalListeners.indexOf(listener);
+          if (index >= 0) signalListeners.splice(index, 1);
+        };
+      }
+    ),
     upsertCollaborationProfile: vi.fn().mockResolvedValue(undefined),
     consumeCollaborationInvitation: vi.fn().mockResolvedValue({
       deviceCredentialPersistence: "persisted",
@@ -652,9 +656,7 @@ describe("collaboration integration scenarios", () => {
       canvasId: "default"
     });
 
-    render(
-      <WorkItemCollaborationPanel workItem={taskItem} open api={scenario.api} t={t} />
-    );
+    render(<WorkItemCollaborationPanel workItem={taskItem} open api={scenario.api} t={t} />);
 
     expect(screen.getByTestId("work-item-collaboration-panel")).toHaveAttribute(
       "data-work-item-kind",

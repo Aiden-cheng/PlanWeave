@@ -155,7 +155,13 @@ export function resolveCommentActions(input: {
 export function sanitizeAttachmentFileName(fileName: string | undefined): string {
   if (!fileName) return "attachment";
   const base = fileName.split(/[/\\]/).pop()?.trim() ?? "";
-  const cleaned = base.replace(/[\u0000-\u001f\u007f]/g, "").trim();
+  let cleaned = "";
+  for (let index = 0; index < base.length; index += 1) {
+    const code = base.charCodeAt(index);
+    if (code <= 0x1f || code === 0x7f) continue;
+    cleaned += base[index];
+  }
+  cleaned = cleaned.trim();
   if (!cleaned || cleaned === "." || cleaned === "..") return "attachment";
   return cleaned.slice(0, 255);
 }

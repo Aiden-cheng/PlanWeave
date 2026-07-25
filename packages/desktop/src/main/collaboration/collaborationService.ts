@@ -74,10 +74,7 @@ import {
   type CollaborationClientOptions,
   type CollaborationObserverStatus
 } from "./CollaborationClient.js";
-import {
-  CollaborationClientError,
-  collaborationErrorFromUnknown
-} from "./collaborationErrors.js";
+import { CollaborationClientError, collaborationErrorFromUnknown } from "./collaborationErrors.js";
 import {
   CollaborationCredentialVault,
   type CollaborationSafeStoragePort
@@ -188,9 +185,7 @@ export class CollaborationService {
     const safeStorage = options.safeStorage;
     this.profiles =
       options.profileStore ??
-      new CollaborationProfileStore(
-        options.profileStorePaths ?? collaborationProfileStorePaths()
-      );
+      new CollaborationProfileStore(options.profileStorePaths ?? collaborationProfileStorePaths());
     this.vault =
       options.vault ??
       new CollaborationCredentialVault({
@@ -452,9 +447,7 @@ export class CollaborationService {
     return this.enqueue(async () => {
       this.assertOpen();
       assertNoSmuggledCollaborationSecrets(
-        input && typeof input === "object"
-          ? { ...(input as object), request: undefined }
-          : input,
+        input && typeof input === "object" ? { ...(input as object), request: undefined } : input,
         "bootstrapCollaborationOwner"
       );
       if (input && typeof input === "object" && "request" in (input as object)) {
@@ -479,8 +472,7 @@ export class CollaborationService {
         await this.profiles.setActiveProfileId(parsed.profileId);
         this.setSession("ready", "bootstrap_complete", null);
         await this.publishStatus();
-        const warning =
-          persistence === "session-only" ? COLLABORATION_SESSION_ONLY_WARNING : null;
+        const warning = persistence === "session-only" ? COLLABORATION_SESSION_ONLY_WARNING : null;
         return stripAuthHandoff(response, persistence, warning);
       } catch (error) {
         const mapped = collaborationErrorFromUnknown(error);
@@ -513,7 +505,10 @@ export class CollaborationService {
         "consumeCollaborationInvitation"
       );
       if (outer.request && typeof outer.request === "object") {
-        assertNoSmuggledCollaborationSecrets(outer.request, "consumeCollaborationInvitation.request");
+        assertNoSmuggledCollaborationSecrets(
+          outer.request,
+          "consumeCollaborationInvitation.request"
+        );
       }
       const parsed = collaborationConsumeInvitationInputSchema.parse(input);
       const existing = await this.vault.getDeviceToken(parsed.profileId);
@@ -536,8 +531,7 @@ export class CollaborationService {
         await this.profiles.setActiveProfileId(parsed.profileId);
         this.setSession("ready", "consume_invitation_complete", null);
         await this.publishStatus();
-        const warning =
-          persistence === "session-only" ? COLLABORATION_SESSION_ONLY_WARNING : null;
+        const warning = persistence === "session-only" ? COLLABORATION_SESSION_ONLY_WARNING : null;
         return stripAuthHandoff(response, persistence, warning);
       } catch (error) {
         const mapped = collaborationErrorFromUnknown(error);
@@ -848,7 +842,9 @@ export class CollaborationService {
     );
   }
 
-  private async withActiveClient<T>(operation: (client: CollaborationClient) => Promise<T>): Promise<T> {
+  private async withActiveClient<T>(
+    operation: (client: CollaborationClient) => Promise<T>
+  ): Promise<T> {
     this.assertOpen();
     const client = this.client;
     if (!client || !this.clientProfileId) {
@@ -933,7 +929,9 @@ export class CollaborationService {
   }
 }
 
-function zWorkItemPayload(input: unknown): { workItem: ReturnType<typeof workItemRefSchema.parse> } {
+function zWorkItemPayload(input: unknown): {
+  workItem: ReturnType<typeof workItemRefSchema.parse>;
+} {
   if (!input || typeof input !== "object" || !("workItem" in input)) {
     throw new CollaborationClientError({
       kind: "validation",

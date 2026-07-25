@@ -1,7 +1,4 @@
-import {
-  authorizeHumanAction,
-  type HumanPolicySubject
-} from "../identity/policy.js";
+import { authorizeHumanAction, type HumanPolicySubject } from "../identity/policy.js";
 import {
   actorRefFromHuman,
   type HumanAuthContext,

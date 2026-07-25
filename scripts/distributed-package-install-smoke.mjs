@@ -16,14 +16,7 @@
  */
 import { createHash } from "node:crypto";
 import { spawn, execFileSync } from "node:child_process";
-import {
-  existsSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync
-} from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdir, cp, writeFile, access } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -309,13 +302,15 @@ async function main() {
 
     writeFileSync(
       join(installDir, "package.json"),
-      JSON.stringify({ name: "planweave-distributed-install-smoke", private: true, type: "module" }, null, 2)
+      JSON.stringify(
+        { name: "planweave-distributed-install-smoke", private: true, type: "module" },
+        null,
+        2
+      )
     );
-    run(
-      "npm",
-      ["install", "--no-fund", "--no-audit", ...tarballs.map((item) => item.path)],
-      { cwd: installDir }
-    );
+    run("npm", ["install", "--no-fund", "--no-audit", ...tarballs.map((item) => item.path)], {
+      cwd: installDir
+    });
 
     const serverPackageRoot = join(installDir, "node_modules/@planweave-ai/server");
     const hostPackageRoot = join(installDir, "node_modules/@planweave-ai/agent-host");
@@ -374,9 +369,7 @@ async function main() {
         publicUrl: `http://127.0.0.1:${port}`,
         allowInsecureDevelopment: true,
         dataDirectory: join(smokeDir, "server-data"),
-        trustedProjects: [
-          { projectId: init.workspace.id, canvasId: "default", projectRoot }
-        ],
+        trustedProjects: [{ projectId: init.workspace.id, canvasId: "default", projectRoot }],
         operatorCredentials: [
           {
             operatorId: "admin",
@@ -423,7 +416,11 @@ async function main() {
     const hostBin = join(hostPackageRoot, "dist/bin.js");
     const server = spawnNode(serverBin, ["serve", "--config", serverConfigPath]);
     try {
-      const ready = await waitForStdout(server, (stdout) => stdout.includes('"status":"ready"'), 20_000);
+      const ready = await waitForStdout(
+        server,
+        (stdout) => stdout.includes('"status":"ready"'),
+        20_000
+      );
       const readyLine = ready.stdout
         .split("\n")
         .map((line) => line.trim())

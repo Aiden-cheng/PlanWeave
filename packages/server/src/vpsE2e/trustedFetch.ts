@@ -69,7 +69,9 @@ function httpsRequest(
   }
 
   const isIpLiteral =
-    /^(?:\d{1,3}\.){3}\d{1,3}$/.test(url.hostname) || url.hostname === "[::1]" || url.hostname === "::1";
+    /^(?:\d{1,3}\.){3}\d{1,3}$/.test(url.hostname) ||
+    url.hostname === "[::1]" ||
+    url.hostname === "::1";
 
   return new Promise((resolve, reject) => {
     const request = https.request(
@@ -92,7 +94,9 @@ function httpsRequest(
           chunks.push(chunk);
         });
         response.on("end", () => {
-          resolve(new SimpleResponse(response.statusCode ?? 0, Buffer.concat(chunks).toString("utf8")));
+          resolve(
+            new SimpleResponse(response.statusCode ?? 0, Buffer.concat(chunks).toString("utf8"))
+          );
         });
       }
     );

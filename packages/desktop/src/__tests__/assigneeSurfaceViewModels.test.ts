@@ -80,9 +80,9 @@ describe("assigneeSurfaceViewModels", () => {
     );
     expect(index.surfaceActive).toBe(true);
     expect(lookupBlockAssigneeChip(index, "canvas-1", "T-1#B-001")?.label).toBe("Ada");
-    expect(
-      lookupTaskCardAssigneeChip(index, "canvas-1", "T-1", ["T-1#B-001"])?.workItemKey
-    ).toBe(workItemKey(assignment.workItem));
+    expect(lookupTaskCardAssigneeChip(index, "canvas-1", "T-1", ["T-1#B-001"])?.workItemKey).toBe(
+      workItemKey(assignment.workItem)
+    );
     expect(taskWorkItemKey("canvas-1", "T-1")).toBe("task:canvas-1:T-1");
   });
 
@@ -178,8 +178,6 @@ describe("assigneeSurfaceViewModels", () => {
     });
     expect(drafts.some((item) => item.id === "collab-mutation:mut-ok")).toBe(true);
     expect(drafts.some((item) => item.id === "collab-mutation:mut-pending")).toBe(false);
-    expect(drafts.find((item) => item.id === "collab-mutation:mut-bad")?.tone).toBe(
-      "destructive"
-    );
+    expect(drafts.find((item) => item.id === "collab-mutation:mut-bad")?.tone).toBe("destructive");
   });
 });

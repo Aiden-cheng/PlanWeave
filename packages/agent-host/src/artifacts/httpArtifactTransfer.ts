@@ -66,7 +66,15 @@ export class HttpArtifactClient {
   ) {
     const sha256 = input.artifactRef.slice("artifact:sha256:".length);
     const operationId = `artifact-download:${createHash("sha256")
-      .update(JSON.stringify([command.dispatchId, command.leaseId, command.executionAttemptId, input.logicalName, input.artifactRef]))
+      .update(
+        JSON.stringify([
+          command.dispatchId,
+          command.leaseId,
+          command.executionAttemptId,
+          input.logicalName,
+          input.artifactRef
+        ])
+      )
       .digest("hex")}`;
     let response: Response;
     try {

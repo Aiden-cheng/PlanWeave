@@ -325,9 +325,7 @@ export async function runRealAcpSmoke(options: {
       const evidence: RealAcpSmokeEvidence = {
         version: "planweave.real-acp-host-smoke/v1",
         gateMode: options.gate.mode,
-        preflight:
-          preflight.evidence ??
-          emptyEvidence(preflight.precondition.kind),
+        preflight: preflight.evidence ?? emptyEvidence(preflight.precondition.kind),
         hostVersion: agentHostPackageVersion,
         stages: { hostExecute: null, cancellation: null },
         checks: {
@@ -368,8 +366,7 @@ export async function runRealAcpSmoke(options: {
       protocolNegotiated: hostRun.stage.hasCapabilities,
       sessionCreated:
         hostRun.stage.hasSessionStarted && typeof hostRun.stage.sessionId === "string",
-      normalizedEvents:
-        hostRun.stage.eventKinds.includes("lifecycle") && hostRun.stage.hasTerminal,
+      normalizedEvents: hostRun.stage.eventKinds.includes("lifecycle") && hostRun.stage.hasTerminal,
       terminalSucceeded:
         hostRun.stage.terminalState === "succeeded" && hostRun.errorCode === undefined,
       artifactContract: hostRun.stage.reportUploaded && hostRun.stage.outputBytes > 0,

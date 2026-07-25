@@ -11,7 +11,10 @@ import {
   type AssigneePickerViewModel
 } from "../renderer/collaboration/assignmentViewModels";
 import { AssigneePicker } from "../renderer/team/AssigneePicker";
-import { cleanupRendererTestEnvironment, stubSelectLayoutApis } from "./helpers/rendererTestEnvironment";
+import {
+  cleanupRendererTestEnvironment,
+  stubSelectLayoutApis
+} from "./helpers/rendererTestEnvironment";
 import type { CollaborationStatus } from "../shared/collaboration";
 import type { HumanMembershipView } from "@planweave-ai/collaboration-contracts";
 
@@ -64,7 +67,9 @@ function connectedStatus(principalId = "human-1"): CollaborationStatus {
   };
 }
 
-function taskViewModel(overrides: Partial<Parameters<typeof buildAssigneePickerViewModel>[0]> = {}) {
+function taskViewModel(
+  overrides: Partial<Parameters<typeof buildAssigneePickerViewModel>[0]> = {}
+) {
   return buildAssigneePickerViewModel({
     workItem: taskItem,
     assignment: {
@@ -219,9 +224,7 @@ describe("AssigneePicker", () => {
       .getAllByTestId("assignee-option")
       .find((node) => node.getAttribute("data-option-id") === "exact_host:host-bad");
     expect(revoked).toHaveAttribute("data-selectable", "false");
-    expect(within(revoked!).getByTestId("assignee-option-reason")).toHaveTextContent(
-      /revoked/i
-    );
+    expect(within(revoked!).getByTestId("assignee-option-reason")).toHaveTextContent(/revoked/i);
 
     const auto = screen
       .getAllByTestId("assignee-option")

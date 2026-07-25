@@ -358,9 +358,7 @@ export function isAssignmentEligibleForRemoteDispatch(
   if (assignment.host && assignment.host.online === false) return false;
   if (assignment.host && assignment.host.revoked) return false;
   if (assignment.host && assignment.host.capabilitiesSatisfied === false) return false;
-  return (
-    assignment.target.kind === "exact_host" || assignment.target.kind === "automatic_host"
-  );
+  return assignment.target.kind === "exact_host" || assignment.target.kind === "automatic_host";
 }
 
 export function projectRemoteRunActions(input: {

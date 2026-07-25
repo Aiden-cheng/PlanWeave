@@ -111,69 +111,69 @@ export function TodoGroupCard({
             ? lookupBlockAssigneeChip(assigneeIndex, item.canvasId ?? "default", item.ref)
             : null;
         return (
-        <button
-          className="group flex flex-col gap-2 rounded-md border border-border/80 bg-surface-base px-3 py-2.5 text-left text-xs shadow-xs transition-colors hover:bg-surface-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-          key={`${item.canvasId ?? "default"}:${item.ref}`}
-          type="button"
-          onClick={() => onSelect(item)}
-        >
-          <div className="flex items-center justify-between gap-2">
-            <div className="min-w-0">
-              <div className="flex min-w-0 items-center gap-1.5">
-                <div className="truncate text-sm font-medium group-hover:text-foreground">
-                  {item.title}
+          <button
+            className="group flex flex-col gap-2 rounded-md border border-border/80 bg-surface-base px-3 py-2.5 text-left text-xs shadow-xs transition-colors hover:bg-surface-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            key={`${item.canvasId ?? "default"}:${item.ref}`}
+            type="button"
+            onClick={() => onSelect(item)}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <div className="truncate text-sm font-medium group-hover:text-foreground">
+                    {item.title}
+                  </div>
+                  {chip ? <CompactAssigneeChipView chip={chip} label={labels.assignee} /> : null}
                 </div>
-                {chip ? <CompactAssigneeChipView chip={chip} label={labels.assignee} /> : null}
+                <div className="mt-0.5 font-mono text-[11px] text-muted-foreground">
+                  {item.taskId} / {item.blockId}
+                </div>
               </div>
-              <div className="mt-0.5 font-mono text-[11px] text-muted-foreground">
-                {item.taskId} / {item.blockId}
-              </div>
+              <Badge className="shrink-0" variant={item.dispatchable ? "secondary" : "destructive"}>
+                {item.dispatchable ? labels.dispatchable : labels.notDispatchable}
+              </Badge>
             </div>
-            <Badge className="shrink-0" variant={item.dispatchable ? "secondary" : "destructive"}>
-              {item.dispatchable ? labels.dispatchable : labels.notDispatchable}
-            </Badge>
-          </div>
-          <div className="grid grid-cols-[96px_minmax(0,1fr)] gap-x-3 gap-y-1.5 rounded-md bg-surface-muted/70 p-2 text-muted-foreground">
-            <span className="font-medium text-foreground/70">{labels.dependencyBlockers}</span>
-            <span className="truncate font-mono">
-              {item.dependencyBlockers.length
-                ? item.dependencyBlockers.join(", ")
-                : labels.noBlockers}
-            </span>
-            <span className="font-medium text-foreground/70">{labels.dispatchability}</span>
-            <span>{item.dispatchable ? labels.dispatchable : labels.notDispatchable}</span>
-            <span className="font-medium text-foreground/70">{labels.sharedResources}</span>
-            <span className="truncate font-mono">
-              {item.sharedResources.length
-                ? item.sharedResources.join(", ")
-                : labels.noSharedResources}
-            </span>
-            {item.reviewGate ? (
-              <>
-                <span className="font-medium text-foreground/70">{labels.reviewGate}</span>
-                <span>
-                  {item.reviewGate.required
-                    ? labels.reviewRequired
-                    : item.reviewGate.requiredReason}
-                </span>
-                <span className="font-medium text-foreground/70">{labels.reviewExecutor}</span>
-                <span className="font-mono">{item.reviewGate.executorRole}</span>
-                <span className="font-medium text-foreground/70">{labels.reviewUnlocks}</span>
-                <span className="truncate font-mono">
-                  {item.reviewGate.unlocksTasks.length
-                    ? item.reviewGate.unlocksTasks.join(", ")
-                    : labels.noBlockers}
-                </span>
-                <span className="font-medium text-foreground/70">
-                  {labels.reviewNeedsChangesReturnsTo}
-                </span>
-                <span className="truncate font-mono">
-                  {item.reviewGate.needsChangesReturnsTo.join(", ")}
-                </span>
-              </>
-            ) : null}
-          </div>
-        </button>
+            <div className="grid grid-cols-[96px_minmax(0,1fr)] gap-x-3 gap-y-1.5 rounded-md bg-surface-muted/70 p-2 text-muted-foreground">
+              <span className="font-medium text-foreground/70">{labels.dependencyBlockers}</span>
+              <span className="truncate font-mono">
+                {item.dependencyBlockers.length
+                  ? item.dependencyBlockers.join(", ")
+                  : labels.noBlockers}
+              </span>
+              <span className="font-medium text-foreground/70">{labels.dispatchability}</span>
+              <span>{item.dispatchable ? labels.dispatchable : labels.notDispatchable}</span>
+              <span className="font-medium text-foreground/70">{labels.sharedResources}</span>
+              <span className="truncate font-mono">
+                {item.sharedResources.length
+                  ? item.sharedResources.join(", ")
+                  : labels.noSharedResources}
+              </span>
+              {item.reviewGate ? (
+                <>
+                  <span className="font-medium text-foreground/70">{labels.reviewGate}</span>
+                  <span>
+                    {item.reviewGate.required
+                      ? labels.reviewRequired
+                      : item.reviewGate.requiredReason}
+                  </span>
+                  <span className="font-medium text-foreground/70">{labels.reviewExecutor}</span>
+                  <span className="font-mono">{item.reviewGate.executorRole}</span>
+                  <span className="font-medium text-foreground/70">{labels.reviewUnlocks}</span>
+                  <span className="truncate font-mono">
+                    {item.reviewGate.unlocksTasks.length
+                      ? item.reviewGate.unlocksTasks.join(", ")
+                      : labels.noBlockers}
+                  </span>
+                  <span className="font-medium text-foreground/70">
+                    {labels.reviewNeedsChangesReturnsTo}
+                  </span>
+                  <span className="truncate font-mono">
+                    {item.reviewGate.needsChangesReturnsTo.join(", ")}
+                  </span>
+                </>
+              ) : null}
+            </div>
+          </button>
         );
       })}
       {items.length > 6 ? (

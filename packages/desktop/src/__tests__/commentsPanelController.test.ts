@@ -12,10 +12,7 @@ import type { CollaborationReadBridgePort } from "../renderer/collaboration/Coll
 import { useCommentsPanelController } from "../renderer/hooks/useCommentsPanelController";
 import { useActivityPanelController } from "../renderer/hooks/useActivityPanelController";
 import { createTranslator } from "../renderer/i18n";
-import type {
-  CollaborationStatus,
-  PlanWeaveCollaborationApi
-} from "../shared/collaboration";
+import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../shared/collaboration";
 
 const taskItem: WorkItemRef = { kind: "task", canvasId: "canvas-1", taskId: "T-1" };
 
@@ -279,9 +276,7 @@ describe("useActivityPanelController", () => {
     // Wait for the panel-scoped list (includes workItem), not only hub project catch-up.
     // Hub snapshot merge can populate rows earlier without establishing pagination cursors.
     await waitFor(() => {
-      expect(listActivity).toHaveBeenCalledWith(
-        expect.objectContaining({ workItem: taskItem })
-      );
+      expect(listActivity).toHaveBeenCalledWith(expect.objectContaining({ workItem: taskItem }));
       expect(result.current.rows.length).toBe(1);
       expect(result.current.hasMore).toBe(true);
     });

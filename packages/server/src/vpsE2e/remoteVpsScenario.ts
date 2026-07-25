@@ -1,9 +1,5 @@
 import type { RemoteVpsE2eConfig } from "./config.js";
-import {
-  emptyChecks,
-  emptyIdentities,
-  type VpsE2eEvidence
-} from "./evidence.js";
+import { emptyChecks, emptyIdentities, type VpsE2eEvidence } from "./evidence.js";
 import type { VpsE2eGate } from "./gate.js";
 import { precondition } from "./gate.js";
 import { digestLabel, redactSensitiveText } from "./redaction.js";
@@ -91,9 +87,7 @@ export async function runRemoteVpsScenario(options: {
     checks.certificateVerifiedTransport = origin.startsWith("https:");
 
     const version = await trusted.request(`${origin}/version`);
-    const versionBody = version.ok
-      ? ((await version.json()) as { protocolVersion?: number })
-      : {};
+    const versionBody = version.ok ? ((await version.json()) as { protocolVersion?: number }) : {};
 
     const hosts = await trusted.request(`${origin}/api/v1/hosts`, {
       headers: { Authorization: `Bearer ${options.operatorToken}` }
@@ -273,9 +267,7 @@ export async function runRemoteVpsScenario(options: {
 
     return base({
       result: passed ? "passed" : "failed",
-      diagnostic: passed
-        ? null
-        : "remote_vps_scenario_incomplete_or_non_success_terminal",
+      diagnostic: passed ? null : "remote_vps_scenario_incomplete_or_non_success_terminal",
       componentVersions: {
         server: serverPackageVersion,
         agentHost: null,

@@ -174,9 +174,7 @@ export function buildCollaborationNotificationDrafts(input: {
   const activityLimit = input.activityLimit ?? 12;
 
   const relevantActivity = input.activity
-    .filter(
-      (item) => item.type === "assignment_updated" || MEMBERSHIP_ACTIVITY.has(item.type)
-    )
+    .filter((item) => item.type === "assignment_updated" || MEMBERSHIP_ACTIVITY.has(item.type))
     .slice(0, activityLimit);
 
   for (const item of relevantActivity) {
@@ -206,10 +204,7 @@ export function buildCollaborationNotificationDrafts(input: {
       drafts.push({
         id: `collab-mutation:${mutation.mutationId}`,
         title: input.labels.mutationRejected,
-        detail:
-          mutation.errorMessage ??
-          mutation.errorCode ??
-          input.labels.assignmentFailed,
+        detail: mutation.errorMessage ?? mutation.errorCode ?? input.labels.assignmentFailed,
         tone: "destructive",
         kind: "collaboration"
       });

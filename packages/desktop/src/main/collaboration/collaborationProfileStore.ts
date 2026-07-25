@@ -150,7 +150,7 @@ export class CollaborationProfileStore {
     try {
       this.loaded = normalizeDocument(JSON.parse(raw));
       return this.loaded;
-    } catch (error) {
+    } catch {
       throw new Error("Invalid collaboration profiles JSON.");
     }
   }

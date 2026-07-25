@@ -493,7 +493,8 @@ async function executeAcpOutcome(
       if (executionTerminal.state !== "cancelled") {
         terminal = {
           state: "failed",
-          reason: executionTerminal.state === "failed" ? executionTerminal.reason : "cleanup_failed",
+          reason:
+            executionTerminal.state === "failed" ? executionTerminal.reason : "cleanup_failed",
           message:
             executionTerminal.state === "failed"
               ? `${executionTerminal.message}; cleanup: ${cleanupFailures.map(diagnostic).join("; ")}`

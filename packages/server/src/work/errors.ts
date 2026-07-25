@@ -49,9 +49,7 @@ export function allowWorkAssignment(): WorkAssignmentAllowance {
 }
 
 /** Safe messages; never include tokens, digests, filesystem paths, or full package dumps. */
-export const WORK_ASSIGNMENT_ERROR_MESSAGES: Readonly<
-  Record<WorkAssignmentErrorCode, string>
-> = {
+export const WORK_ASSIGNMENT_ERROR_MESSAGES: Readonly<Record<WorkAssignmentErrorCode, string>> = {
   work_auth_unauthenticated: "Authentication required to change work assignment.",
   work_auth_forbidden: "Work assignment action is not permitted.",
   work_auth_project_mismatch: "Authenticated project scope does not match the assignment project.",
@@ -69,7 +67,6 @@ export const WORK_ASSIGNMENT_ERROR_MESSAGES: Readonly<
   work_revision_conflict: "Assignment revision does not match the expected revision.",
   work_not_agent_assigned:
     "Block is not assigned to an Agent Host target; remote dispatch requires an agent assignment or explicit override.",
-  work_dispatch_host_mismatch:
-    "Dispatch Host does not match the current exact Host assignment.",
+  work_dispatch_host_mismatch: "Dispatch Host does not match the current exact Host assignment.",
   work_cross_project_forbidden: "Cross-project work assignment access is not permitted."
 };

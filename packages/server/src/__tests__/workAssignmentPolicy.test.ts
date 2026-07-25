@@ -40,9 +40,7 @@ const taskRef = {
   taskId: "T-001"
 };
 
-function packageBlock(
-  overrides: Partial<WorkItemPackageFacts> = {}
-): WorkItemPackageFacts {
+function packageBlock(overrides: Partial<WorkItemPackageFacts> = {}): WorkItemPackageFacts {
   return {
     canvasId: "default",
     kind: "block",
@@ -65,9 +63,7 @@ function packageTask(): WorkItemPackageFacts {
   };
 }
 
-function membership(
-  overrides: Partial<AssignmentMembershipFacts> = {}
-): AssignmentMembershipFacts {
+function membership(overrides: Partial<AssignmentMembershipFacts> = {}): AssignmentMembershipFacts {
   return {
     projectId: "project-a",
     humanPrincipalId: "human-2",
@@ -178,12 +174,13 @@ describe("work assignment policy", () => {
   });
 
   it("enforces optimistic concurrency without applying arbitrary targets", () => {
-    expect(
-      evaluateAssignmentRevision({ expectedRevision: 0, currentRevision: 0 })
-    ).toEqual({ allowed: true });
-    expect(
-      evaluateAssignmentRevision({ expectedRevision: 1, currentRevision: 2 })
-    ).toMatchObject({ allowed: false, code: "work_revision_conflict" });
+    expect(evaluateAssignmentRevision({ expectedRevision: 0, currentRevision: 0 })).toEqual({
+      allowed: true
+    });
+    expect(evaluateAssignmentRevision({ expectedRevision: 1, currentRevision: 2 })).toMatchObject({
+      allowed: false,
+      code: "work_revision_conflict"
+    });
 
     const command = assignmentUpdateCommandSchema.parse({
       projectId: "project-a",
