@@ -92,15 +92,24 @@ jobs:
   integration-tests:
     name: Integration tests (${{ matrix.label }})
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # Distributed realProcess suites need more wall time than CLI/core shards.
+    timeout-minutes: ${{ matrix.job_timeout_minutes }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - shard: cli
             label: CLI
+            job_timeout_minutes: 25
+            test_timeout_minutes: 15
           - shard: core
             label: Runtime, Desktop, and MCP
+            job_timeout_minutes: 25
+            test_timeout_minutes: 15
+          - shard: distributed
+            label: Server and Agent Host
+            job_timeout_minutes: 40
+            test_timeout_minutes: 30
 
     steps:
       - name: Checkout
@@ -129,7 +138,7 @@ jobs:
 
       - name: Run integration tests
         id: integration-tests
-        timeout-minutes: 15
+        timeout-minutes: ${{ matrix.test_timeout_minutes }}
         run: pnpm test:integration:${{ matrix.shard }} --maxWorkers=2 --reporter=default --reporter=junit --outputFile.junit=reports/integration-${{ matrix.shard }}.xml
 
       - name: Report slowest integration tests

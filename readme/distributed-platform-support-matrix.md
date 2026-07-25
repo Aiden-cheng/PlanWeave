@@ -31,7 +31,7 @@ Linked prior checkpoint (live tiers, no secret copy): [distributed-remote-execut
 | OS | Arch | Node | Install method | Contents | Migrations-in-JS | Serve/preflight smoke | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | macOS (Darwin) | arm64 | v26.3.0 | `pnpm pack` → clean `npm install` of tarballs | bins + `dist/` | yes (`schemaVersion=21` on ready) | `planweave-server serve` + `planweave-agent-host preflight` | **verified (this block)** |
-| Linux | x64 (ubuntu-latest) | 26 (CI) | monorepo `pnpm install --frozen-lockfile` + build + unit/integration | CI build graph | exercised via lifecycle/realProcess suites | operator walkthrough / realProcess (mock ACP) | **verified via CI policy** (workspace, not consumer tarball) |
+| Linux | x64 (ubuntu-latest) | 26 (CI) | monorepo `pnpm install --frozen-lockfile` + build + unit + CLI/core integration | CI builds Server/Host packages; **does not** by itself prove multi-process install | unit/build only for Server/Host until a green distributed integration job exists on tip | **not** a substitute for realProcess / operator walkthrough | **unverified for Server/Host multi-process & consumer tarball** — Ubuntu CI historically ran only `test:unit` + `test:integration:cli` + `test:integration:core` (Runtime/Desktop/MCP). `packages/server` / `packages/agent-host` integration (`realProcess*`, `loadRecoveryMatrix`, `operatorWalkthrough`, `lifecycle`, …) was **not** in those shards. Darwin arm64 realProcess evidence does **not** count as Linux. A `test:integration:distributed` CI shard may be present on tip to *produce* Linux evidence later; until that job is green and recorded here, **do not** claim public Linux Server/Host support. |
 | Linux | aarch64 | — | — | — | — | — | **unverified** — do not claim public support until clean tarball install+smoke runs |
 | Windows | x64 | 26 (CI platform suite) | monorepo platform tests | limited surface | not a Server install claim | not Server/Host packaged install | **not a Server/Host support cell** |
 | Linux container (docker linux/amd64) | x64 | — | clean tarball install | — | — | — | **unverified this block** (Docker daemon unavailable on operator host) |
@@ -111,12 +111,12 @@ Source: [distributed-remote-execution-checkpoint.md](./distributed-remote-execut
 
 | Tier | Requirement | Checkpoint status | Counts as pass? |
 | --- | --- | --- | --- |
-| Deterministic multi-process | CI required | **passed** (25/25 on checkpoint tip; re-affirmed by REL-002#B-001/B-002 matrices) | yes for `releaseReady.ci` |
+| Deterministic multi-process | required for `releaseReady.ci` (release-gate CI tier) | **passed on Darwin arm64** operator re-runs (25/25; REL-002#B-001/B-002). That is **not** a Linux platform support claim. Historical GitHub Actions `cli`/`core` integration shards did **not** execute `packages/server` realProcess suites. | yes for `releaseReady.ci` when evidence is re-run; **not** a public Linux Server/Host support cell |
 | Local real ACP | required before supported-version release | **failed / blocked** (`codex-acp` preflight auth ok, execute failed with host ACP process error / provider limit) | **no** |
 | Remote authenticated VPS | required pre-release | **blocked / skipped** (no `PLANWEAVE_VPS_E2E_CONFIG` / disposable VPS) | **no** |
 | local-tls-fixture e2e | CI-adjacent only | passed with **mock** ACP | **not** a remote-vps pass |
 
-**Release readiness implication:** `supportedVersionRelease=false`, `preRelease=false` until fresh hard-gate REAL_ACP and remote-vps evidence are supplied (14-day evidence TTL).
+**Release readiness implication:** `supportedVersionRelease=false`, `preRelease=false` until fresh hard-gate REAL_ACP and remote-vps evidence are supplied (14-day evidence TTL). Monorepo unit/build success on Ubuntu alone never promotes REAL_ACP/VPS or Linux multi-process support.
 
 ---
 
@@ -138,7 +138,8 @@ Residual monorepo desktop-toolchain highs are tracked as release hygiene risk fo
 | --- | --- | --- |
 | Node 22.5+ for Server/Host/CLI libraries | **yes** | engines field + `node:sqlite` |
 | Server/Host on macOS arm64 via packed tarballs | **yes** (this block) | re-run `pnpm check:distributed-package-install` after pack changes |
-| Server/Host on Linux x64 via monorepo/CI | **yes** for CI/dev path | consumer tarball Linux cell still recommended before calling “production Linux package” fully dual-path verified |
+| Server/Host multi-process on Linux x64 (realProcess / operator / load recovery) | **no** — **unverified** | requires green Ubuntu execution of Server/Host multi-process suites (or consumer tarball install+smoke) recorded on tip; monorepo unit/build and CLI/core integration alone are insufficient |
+| Server/Host monorepo unit/build on Linux x64 | **compile/unit only** (not a multi-process support claim) | Ubuntu `ubuntu-gate` unit job; does not authorize public “Linux Server/Host supported” wording |
 | Server/Host on Linux aarch64 | **no** until verified | remove from any public matrix row |
 | Desktop macOS packaged | **yes** when Desktop Smoke CI green | packaged smoke workflow |
 | Desktop Windows packaged | **yes** when Windows packaged smoke CI green | CI job |
@@ -147,4 +148,4 @@ Residual monorepo desktop-toolchain highs are tracked as release hygiene risk fo
 | REAL_ACP hard gate | **not satisfied** | blocks supported-version release |
 | remote-vps hard gate | **not satisfied** | blocks pre-release |
 
-Any required cell that remains unsupported or unverified **blocks release** or must be removed from public support claims. This matrix intentionally leaves Linux aarch64 Server/Host and Desktop Linux packaged-start **out** of the public “supported” set until evidence exists.
+Any required cell that remains unsupported or unverified **blocks release** or must be removed from public support claims. This matrix intentionally leaves **Linux Server/Host multi-process (x64 and aarch64)**, Linux aarch64 install, and Desktop Linux packaged-start **out** of the public “supported” set until OS-specific evidence exists.

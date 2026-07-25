@@ -272,7 +272,7 @@ pnpm pack:distributed
 pnpm check:distributed-package-install
 ```
 
-**Supported platform claims** are derived from produced artifacts and executed evidence only (not from TypeScript compile success). The living matrix — Coordinator/Host OS/arch cells, Desktop packaged smoke, ACP profile pins, dependency audit policy, and honest REAL_ACP/VPS blockers — is recorded in [readme/distributed-platform-support-matrix.md](readme/distributed-platform-support-matrix.md). Linux aarch64 Server/Host and Desktop Linux packaged-start are **not** public support claims until that matrix shows verified evidence.
+**Supported platform claims** are derived from produced artifacts and executed evidence only (not from TypeScript compile success). The living matrix — Coordinator/Host OS/arch cells, Desktop packaged smoke, ACP profile pins, dependency audit policy, and honest REAL_ACP/VPS blockers — is recorded in [readme/distributed-platform-support-matrix.md](readme/distributed-platform-support-matrix.md). Linux x64 Server/Host multi-process (realProcess / operator walkthrough), Linux aarch64 Server/Host, and Desktop Linux packaged-start are **not** public support claims until that matrix shows OS-specific verified evidence. Monorepo unit/build on Ubuntu alone is not a multi-process support claim.
 
 ### Start the Coordinator
 

@@ -272,7 +272,7 @@ pnpm pack:distributed
 pnpm check:distributed-package-install
 ```
 
-**受支持平台声明**只来自已产出制品与已执行证据（不能因为 TypeScript 能编译就宣称平台支持）。当前矩阵（Coordinator/Host OS/架构、Desktop 打包 smoke、ACP profile、依赖审计策略，以及 REAL_ACP/VPS 的诚实阻塞项）见 [distributed-platform-support-matrix.md](./distributed-platform-support-matrix.md)。在该矩阵给出可验证证据之前，**不**将 Linux aarch64 Server/Host 与 Desktop Linux 打包启动列为公开支持范围。
+**受支持平台声明**只来自已产出制品与已执行证据（不能因为 TypeScript 能编译就宣称平台支持）。当前矩阵（Coordinator/Host OS/架构、Desktop 打包 smoke、ACP profile、依赖审计策略，以及 REAL_ACP/VPS 的诚实阻塞项）见 [distributed-platform-support-matrix.md](./distributed-platform-support-matrix.md)。在该矩阵给出对应 OS 的可验证证据之前，**不**将 Linux x64 Server/Host 多进程路径（realProcess / operator walkthrough）、Linux aarch64 Server/Host 与 Desktop Linux 打包启动列为公开支持范围。Ubuntu 上仅 monorepo unit/build 通过，不能当作多进程支持声明。
 
 ### 启动 Coordinator
 
