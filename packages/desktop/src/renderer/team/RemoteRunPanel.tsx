@@ -132,6 +132,14 @@ export function RemoteRunPanel({
         </Badge>
       </div>
 
+      <div
+        aria-live="polite"
+        className="sr-only"
+        data-testid="remote-run-live-region"
+      >
+        {controller.actionError ?? phaseLabel(viewModel.phase, t)}
+      </div>
+
       {viewModel.localAutoRunCoexisting ? (
         <p
           className="rounded-md border border-border/70 bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground"

@@ -254,7 +254,8 @@ export function taskWorkspaceInspectorFixture(
       blockers: []
     },
     runs: [item],
-    annotations: []
+    annotations: [],
+    remoteExecution: null
   });
   const workspace = taskWorkspaceSchema.parse({
     version: "planweave.task-workspace/v1",

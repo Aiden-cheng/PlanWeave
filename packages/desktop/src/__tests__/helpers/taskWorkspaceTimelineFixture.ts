@@ -143,7 +143,8 @@ export function timelineBlockFixture(options: {
       blockers: []
     },
     runs: options.runs ?? [],
-    annotations: options.annotations ?? []
+    annotations: options.annotations ?? [],
+    remoteExecution: null
   });
 }
 
