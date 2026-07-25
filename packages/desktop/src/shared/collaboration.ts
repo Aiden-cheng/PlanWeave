@@ -3,6 +3,7 @@ import {
   collaborationConnectionProfileSchema,
   humanBootstrapRequestSchema,
   humanConsumeInvitationRequestSchema,
+  humanCreateInvitationRequestSchema,
   humanDeviceTokenSchema,
   type ActivityListPage,
   type AssignmentDisplayProjection,
@@ -13,6 +14,7 @@ import {
   type EligibleAssigneesResponse,
   type HumanBootstrapRequest,
   type HumanConsumeInvitationRequest,
+  type HumanCreateInvitationResponse,
   type HumanDevicePage,
   type HumanDeviceView,
   type HumanInvitationPage,
@@ -182,6 +184,46 @@ export type HumanConsumeInvitationRequestInput = Omit<
   "existingDeviceToken"
 >;
 
+/**
+ * Create-invitation request from renderer.
+ * Response includes a one-shot invitationToken (shareable secret) — never a device token.
+ */
+export const collaborationCreateInvitationInputSchema = humanCreateInvitationRequestSchema;
+export type CollaborationCreateInvitationInput = z.input<
+  typeof collaborationCreateInvitationInputSchema
+>;
+
+/** IPC identity payloads use plain opaque ids; main re-validates against wire schemas. */
+const collaborationOpaqueIdSchema = z.string().trim().min(1).max(128);
+
+export const collaborationInvitationIdInputSchema = z
+  .object({
+    invitationId: collaborationOpaqueIdSchema
+  })
+  .strict();
+export type CollaborationInvitationIdInput = z.infer<typeof collaborationInvitationIdInputSchema>;
+
+export const collaborationHumanPrincipalIdInputSchema = z
+  .object({
+    humanPrincipalId: collaborationOpaqueIdSchema
+  })
+  .strict();
+export type CollaborationHumanPrincipalIdInput = z.infer<
+  typeof collaborationHumanPrincipalIdInputSchema
+>;
+
+export const collaborationDeviceCredentialIdInputSchema = z
+  .object({
+    deviceCredentialId: collaborationOpaqueIdSchema
+  })
+  .strict();
+export type CollaborationDeviceCredentialIdInput = z.infer<
+  typeof collaborationDeviceCredentialIdInputSchema
+>;
+
+/** One-shot invitation create view — token is display/copy-once only; never persisted by Desktop. */
+export type CollaborationInvitationCreateView = HumanCreateInvitationResponse;
+
 export const collaborationInvokeChannels = {
   getCollaborationStatus: "planweave-collaboration:getStatus",
   upsertCollaborationProfile: "planweave-collaboration:upsertProfile",
@@ -197,6 +239,12 @@ export const collaborationInvokeChannels = {
   listCollaborationMembers: "planweave-collaboration:listMembers",
   listCollaborationDevices: "planweave-collaboration:listDevices",
   listCollaborationInvitations: "planweave-collaboration:listInvitations",
+  createCollaborationInvitation: "planweave-collaboration:createInvitation",
+  revokeCollaborationInvitation: "planweave-collaboration:revokeInvitation",
+  removeCollaborationMember: "planweave-collaboration:removeMember",
+  promoteCollaborationOwner: "planweave-collaboration:promoteOwner",
+  demoteCollaborationOwner: "planweave-collaboration:demoteOwner",
+  revokeCollaborationDevice: "planweave-collaboration:revokeDevice",
   listCollaborationAssignments: "planweave-collaboration:listAssignments",
   getCollaborationAssignment: "planweave-collaboration:getAssignment",
   listCollaborationEligibleAssignees: "planweave-collaboration:listEligibleAssignees",
@@ -243,6 +291,16 @@ export type PlanWeaveCollaborationApi = {
   listCollaborationInvitations: (
     input?: CollaborationInvitationListQueryInput
   ) => Promise<HumanInvitationPage>;
+  createCollaborationInvitation: (
+    input?: CollaborationCreateInvitationInput
+  ) => Promise<CollaborationInvitationCreateView>;
+  revokeCollaborationInvitation: (
+    input: CollaborationInvitationIdInput
+  ) => Promise<HumanInvitationView>;
+  removeCollaborationMember: (input: CollaborationHumanPrincipalIdInput) => Promise<void>;
+  promoteCollaborationOwner: (input: CollaborationHumanPrincipalIdInput) => Promise<void>;
+  demoteCollaborationOwner: (input: CollaborationHumanPrincipalIdInput) => Promise<void>;
+  revokeCollaborationDevice: (input: CollaborationDeviceCredentialIdInput) => Promise<void>;
   listCollaborationAssignments: (
     input?: CollaborationAssignmentListQueryInput
   ) => Promise<AssignmentListPage>;

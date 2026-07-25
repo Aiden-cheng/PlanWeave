@@ -143,6 +143,24 @@ describe("desktop IPC contract", () => {
     expect(collaborationInvokeChannels.listCollaborationMembers).toBe(
       "planweave-collaboration:listMembers"
     );
+    expect(collaborationInvokeChannels.createCollaborationInvitation).toBe(
+      "planweave-collaboration:createInvitation"
+    );
+    expect(collaborationInvokeChannels.revokeCollaborationInvitation).toBe(
+      "planweave-collaboration:revokeInvitation"
+    );
+    expect(collaborationInvokeChannels.removeCollaborationMember).toBe(
+      "planweave-collaboration:removeMember"
+    );
+    expect(collaborationInvokeChannels.promoteCollaborationOwner).toBe(
+      "planweave-collaboration:promoteOwner"
+    );
+    expect(collaborationInvokeChannels.demoteCollaborationOwner).toBe(
+      "planweave-collaboration:demoteOwner"
+    );
+    expect(collaborationInvokeChannels.revokeCollaborationDevice).toBe(
+      "planweave-collaboration:revokeDevice"
+    );
     expect(collaborationInvokeChannels.listCollaborationAssignments).toBe(
       "planweave-collaboration:listAssignments"
     );

@@ -1,0 +1,281 @@
+/* @vitest-environment jsdom */
+
+import "@testing-library/jest-dom/vitest";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createTranslator } from "../renderer/i18n";
+import { PeoplePanel } from "../renderer/team/PeoplePanel";
+import type {
+  PeopleDeviceRow,
+  PeopleHostRow,
+  PeopleInvitationRow,
+  PeopleMemberRow,
+  PeoplePresenceSummary
+} from "../renderer/collaboration/peopleViewModels";
+import { cleanupRendererTestEnvironment } from "./helpers/rendererTestEnvironment";
+
+const t = createTranslator("en");
+
+const presence: PeoplePresenceSummary = {
+  memberCount: 2,
+  hostCount: 1,
+  onlineHostCount: 1,
+  avatarMembers: [
+    { humanPrincipalId: "human-1", displayName: "Owner", initials: "OW" },
+    { humanPrincipalId: "human-2", displayName: "Member", initials: "ME" }
+  ],
+  sessionPhase: "connected",
+  syncPhase: "ready",
+  currentUserIsOwner: true,
+  credentialPersistence: "persisted",
+  nonPersistenceWarning: null
+};
+
+const members: PeopleMemberRow[] = [
+  {
+    membershipId: "m-1",
+    humanPrincipalId: "human-1",
+    displayName: "Owner",
+    role: "owner",
+    isCurrentUser: true,
+    initials: "OW",
+    actions: [
+      { action: "promote", allowed: false, reason: "already_owner" },
+      { action: "demote", allowed: false, reason: "last_owner" },
+      { action: "remove", allowed: false, reason: "last_owner" }
+    ]
+  },
+  {
+    membershipId: "m-2",
+    humanPrincipalId: "human-2",
+    displayName: "Member",
+    role: "member",
+    isCurrentUser: false,
+    initials: "ME",
+    actions: [
+      { action: "promote", allowed: true, reason: "ok" },
+      { action: "demote", allowed: false, reason: "already_member" },
+      { action: "remove", allowed: true, reason: "ok" }
+    ]
+  }
+];
+
+const hosts: PeopleHostRow[] = [
+  {
+    hostId: "host-1",
+    displayName: "Builder",
+    status: "online",
+    capacityRemaining: 3,
+    capabilities: ["shell", "git"],
+    revoked: false,
+    authorizedForProject: true,
+    exists: true,
+    versionSummary: null,
+    lastSeenSummary: null
+  }
+];
+
+const invitations: PeopleInvitationRow[] = [
+  {
+    invitationId: "inv-1",
+    role: "member",
+    createdAt: "2030-01-01T00:00:00.000Z",
+    expiresAt: "2030-01-08T00:00:00.000Z",
+    open: true
+  }
+];
+
+const devices: PeopleDeviceRow[] = [
+  {
+    deviceCredentialId: "device-1",
+    humanPrincipalId: "human-1",
+    label: "Desktop",
+    createdAt: "2030-01-01T00:00:00.000Z",
+    lastSeenAt: "2030-01-02T00:00:00.000Z",
+    isRevoked: false
+  }
+];
+
+afterEach(() => {
+  cleanupRendererTestEnvironment();
+  vi.restoreAllMocks();
+});
+
+describe("PeoplePanel", () => {
+  it("renders members and hosts separately and supports owner invite/copy-once", async () => {
+    const onCreateInvitation = vi.fn().mockResolvedValue({
+      invitation: {
+        invitationId: "inv-new",
+        projectId: "project-1",
+        role: "member",
+        createdByHumanPrincipalId: "human-1",
+        createdAt: "2030-01-01T00:00:00.000Z",
+        expiresAt: "2030-01-08T00:00:00.000Z"
+      },
+      invitationToken: `pw_inv_${"A".repeat(43)}`
+    });
+    const onCopy = vi.fn().mockResolvedValue(undefined);
+    const onPromote = vi.fn().mockResolvedValue(true);
+    const onRemove = vi.fn().mockResolvedValue(true);
+    const onRevokeInvitation = vi.fn().mockResolvedValue(true);
+    const onRevokeDevice = vi.fn().mockResolvedValue(true);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    const { rerender } = render(
+      <PeoplePanel
+        mode="ready"
+        presence={presence}
+        members={members}
+        hosts={hosts}
+        invitations={invitations}
+        devices={devices}
+        detailsLoading={false}
+        detailsError={null}
+        actionError={null}
+        actionBusy={false}
+        pendingInvitation={null}
+        t={t}
+        onCreateInvitation={onCreateInvitation}
+        onCopyInvitationToken={onCopy}
+        onDismissPendingInvitation={vi.fn()}
+        onRevokeInvitation={onRevokeInvitation}
+        onPromoteMember={onPromote}
+        onDemoteMember={vi.fn()}
+        onRemoveMember={onRemove}
+        onRevokeDevice={onRevokeDevice}
+        onRefreshDetails={vi.fn()}
+      />
+    );
+
+    expect(screen.getByTestId("people-panel")).toHaveAttribute("data-mode", "ready");
+    expect(screen.getByTestId("people-members-section")).toBeVisible();
+    expect(screen.getByTestId("people-hosts-section")).toBeVisible();
+    expect(screen.getByTestId("people-host-status")).toHaveAttribute("data-status", "online");
+    expect(screen.getByTestId("people-host-version")).toHaveTextContent("not in projection");
+    expect(screen.getByTestId("people-last-owner-guard")).toHaveTextContent("Last owner protected");
+
+    await userEvent.click(screen.getByTestId("people-member-promote"));
+    expect(onPromote).toHaveBeenCalledWith("human-2");
+
+    await userEvent.click(screen.getByTestId("people-owner-toggle"));
+    expect(screen.getByTestId("people-invitations-list")).toBeVisible();
+    expect(screen.getByTestId("people-devices-list")).toBeVisible();
+
+    await userEvent.click(screen.getByTestId("people-create-invitation"));
+    expect(onCreateInvitation).toHaveBeenCalled();
+
+    rerender(
+      <PeoplePanel
+        mode="ready"
+        presence={presence}
+        members={members}
+        hosts={hosts}
+        invitations={invitations}
+        devices={devices}
+        detailsLoading={false}
+        detailsError={null}
+        actionError={null}
+        actionBusy={false}
+        pendingInvitation={{
+          invitation: {
+            invitationId: "inv-new",
+            projectId: "project-1",
+            role: "member",
+            createdByHumanPrincipalId: "human-1",
+            createdAt: "2030-01-01T00:00:00.000Z",
+            expiresAt: "2030-01-08T00:00:00.000Z"
+          },
+          invitationToken: `pw_inv_${"A".repeat(43)}`
+        }}
+        t={t}
+        onCreateInvitation={onCreateInvitation}
+        onCopyInvitationToken={onCopy}
+        onDismissPendingInvitation={vi.fn()}
+        onRevokeInvitation={onRevokeInvitation}
+        onPromoteMember={onPromote}
+        onDemoteMember={vi.fn()}
+        onRemoveMember={onRemove}
+        onRevokeDevice={onRevokeDevice}
+        onRefreshDetails={vi.fn()}
+      />
+    );
+
+    const secret = screen.getByTestId("people-invitation-secret-once");
+    expect(secret).toBeVisible();
+    expect(within(secret).getByTestId("people-invitation-token-value")).toHaveValue(
+      `pw_inv_${"A".repeat(43)}`
+    );
+    await userEvent.click(screen.getByTestId("people-invitation-copy"));
+    expect(onCopy).toHaveBeenCalledWith(`pw_inv_${"A".repeat(43)}`);
+
+    await userEvent.click(screen.getByTestId("people-invitation-revoke"));
+    expect(onRevokeInvitation).toHaveBeenCalledWith("inv-1");
+    await userEvent.click(screen.getByTestId("people-device-revoke"));
+    expect(onRevokeDevice).toHaveBeenCalledWith("device-1");
+  });
+
+  it("shows connect slot when disconnected and surfaces typed errors", () => {
+    render(
+      <PeoplePanel
+        mode="disconnected"
+        presence={{ ...presence, memberCount: 0, currentUserIsOwner: false }}
+        members={[]}
+        hosts={[]}
+        invitations={[]}
+        devices={[]}
+        detailsLoading={false}
+        detailsError={null}
+        actionError={null}
+        actionBusy={false}
+        pendingInvitation={null}
+        t={t}
+        onCreateInvitation={vi.fn()}
+        onCopyInvitationToken={vi.fn()}
+        onDismissPendingInvitation={vi.fn()}
+        onRevokeInvitation={vi.fn()}
+        onPromoteMember={vi.fn()}
+        onDemoteMember={vi.fn()}
+        onRemoveMember={vi.fn()}
+        onRevokeDevice={vi.fn()}
+        onRefreshDetails={vi.fn()}
+        connectSlot={<div data-testid="people-connect-form">connect</div>}
+      />
+    );
+
+    expect(screen.getByTestId("people-panel")).toHaveAttribute("data-mode", "disconnected");
+    expect(screen.getByTestId("people-connect-form")).toBeVisible();
+    expect(screen.getByText(/Not connected/i)).toBeVisible();
+  });
+
+  it("shows forbidden state without owner mutation controls", () => {
+    render(
+      <PeoplePanel
+        mode="forbidden"
+        presence={{ ...presence, currentUserIsOwner: false }}
+        members={members}
+        hosts={hosts}
+        invitations={[]}
+        devices={[]}
+        detailsLoading={false}
+        detailsError={null}
+        actionError="human_forbidden: not allowed"
+        actionBusy={false}
+        pendingInvitation={null}
+        t={t}
+        onCreateInvitation={vi.fn()}
+        onCopyInvitationToken={vi.fn()}
+        onDismissPendingInvitation={vi.fn()}
+        onRevokeInvitation={vi.fn()}
+        onPromoteMember={vi.fn()}
+        onDemoteMember={vi.fn()}
+        onRemoveMember={vi.fn()}
+        onRevokeDevice={vi.fn()}
+        onRefreshDetails={vi.fn()}
+      />
+    );
+
+    expect(screen.getByTestId("people-panel-auth-error")).toHaveTextContent(/permission/i);
+    expect(screen.queryByTestId("people-owner-section")).not.toBeInTheDocument();
+  });
+});

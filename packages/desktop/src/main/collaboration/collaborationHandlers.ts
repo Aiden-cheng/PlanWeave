@@ -127,6 +127,26 @@ export function registerCollaborationHandlers(
     (_event, input: unknown) => active.listInvitations(input)
   );
   ipcMain.handle(
+    collaborationInvokeChannels.createCollaborationInvitation,
+    (_event, input: unknown) => active.createInvitation(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.revokeCollaborationInvitation,
+    (_event, input: unknown) => active.revokeInvitation(input)
+  );
+  ipcMain.handle(collaborationInvokeChannels.removeCollaborationMember, (_event, input: unknown) =>
+    active.removeMember(input)
+  );
+  ipcMain.handle(collaborationInvokeChannels.promoteCollaborationOwner, (_event, input: unknown) =>
+    active.promoteOwner(input)
+  );
+  ipcMain.handle(collaborationInvokeChannels.demoteCollaborationOwner, (_event, input: unknown) =>
+    active.demoteOwner(input)
+  );
+  ipcMain.handle(collaborationInvokeChannels.revokeCollaborationDevice, (_event, input: unknown) =>
+    active.revokeDevice(input)
+  );
+  ipcMain.handle(
     collaborationInvokeChannels.listCollaborationAssignments,
     (_event, input: unknown) => active.listAssignments(input)
   );

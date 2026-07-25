@@ -221,6 +221,18 @@ const collaborationApi: PlanWeaveCollaborationApi = {
     ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationDevices, input),
   listCollaborationInvitations: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationInvitations, input),
+  createCollaborationInvitation: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.createCollaborationInvitation, input),
+  revokeCollaborationInvitation: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.revokeCollaborationInvitation, input),
+  removeCollaborationMember: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.removeCollaborationMember, input),
+  promoteCollaborationOwner: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.promoteCollaborationOwner, input),
+  demoteCollaborationOwner: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.demoteCollaborationOwner, input),
+  revokeCollaborationDevice: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.revokeCollaborationDevice, input),
   listCollaborationAssignments: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationAssignments, input),
   getCollaborationAssignment: async (input) =>

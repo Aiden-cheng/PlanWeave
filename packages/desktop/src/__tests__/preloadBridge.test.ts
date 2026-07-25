@@ -745,6 +745,12 @@ describe("preload bridge invocation", () => {
     await api.connectCollaborationSession({ profileId: "profile-1" });
     await api.disconnectCollaborationSession();
     await api.listCollaborationMembers({ cursor: 0, limit: 20 });
+    await api.createCollaborationInvitation({});
+    await api.revokeCollaborationInvitation({ invitationId: "inv-1" });
+    await api.removeCollaborationMember({ humanPrincipalId: "human-1" });
+    await api.promoteCollaborationOwner({ humanPrincipalId: "human-2" });
+    await api.demoteCollaborationOwner({ humanPrincipalId: "human-2" });
+    await api.revokeCollaborationDevice({ deviceCredentialId: "device-1" });
     await api.listCollaborationAssignments({ cursor: 0, limit: 20 });
     await api.listCollaborationActivity({ limit: 20 });
     const unsubscribe = api.onCollaborationStatusChanged(callback);

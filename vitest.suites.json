@@ -92,6 +92,8 @@
         "localMcpProcess.test.ts",
         "notificationController.test.tsx",
         "notificationNavigation.test.ts",
+        "peoplePanel.test.tsx",
+        "peopleViewModels.test.ts",
         "notificationsAndUpdates.test.tsx",
         "packageFileSyncHook.test.tsx",
         "packagedStartupSmoke.test.ts",

@@ -26,6 +26,7 @@ import {
   type HumanConsumeInvitationResponse,
   type HumanDevicePage,
   type HumanInvitationPage,
+  type HumanInvitationView,
   type HumanMemberPage
 } from "@planweave-ai/collaboration-contracts";
 import {
@@ -33,10 +34,15 @@ import {
   COLLABORATION_SESSION_ONLY_WARNING,
   collaborationBootstrapInputSchema,
   collaborationConsumeInvitationInputSchema,
+  collaborationCreateInvitationInputSchema,
+  collaborationDeviceCredentialIdInputSchema,
+  collaborationHumanPrincipalIdInputSchema,
   collaborationImportDeviceCredentialInputSchema,
+  collaborationInvitationIdInputSchema,
   collaborationProfileIdInputSchema,
   collaborationUpsertProfileInputSchema,
   type CollaborationAuthHandoffView,
+  type CollaborationInvitationCreateView,
   type CollaborationObserverSignal,
   type CollaborationProfileView,
   type CollaborationSessionPhase,
@@ -648,6 +654,36 @@ export class CollaborationService {
     return this.withActiveClient((client) =>
       client.listInvitations(humanInvitationListQuerySchema.parse(input ?? {}))
     );
+  }
+
+  async createInvitation(input: unknown = {}): Promise<CollaborationInvitationCreateView> {
+    const parsed = collaborationCreateInvitationInputSchema.parse(input ?? {});
+    return this.withActiveClient((client) => client.createInvitation(parsed));
+  }
+
+  async revokeInvitation(input: unknown): Promise<HumanInvitationView> {
+    const { invitationId } = collaborationInvitationIdInputSchema.parse(input);
+    return this.withActiveClient((client) => client.revokeInvitation(invitationId));
+  }
+
+  async removeMember(input: unknown): Promise<void> {
+    const { humanPrincipalId } = collaborationHumanPrincipalIdInputSchema.parse(input);
+    return this.withActiveClient((client) => client.removeMember(humanPrincipalId));
+  }
+
+  async promoteOwner(input: unknown): Promise<void> {
+    const { humanPrincipalId } = collaborationHumanPrincipalIdInputSchema.parse(input);
+    return this.withActiveClient((client) => client.promoteOwner(humanPrincipalId));
+  }
+
+  async demoteOwner(input: unknown): Promise<void> {
+    const { humanPrincipalId } = collaborationHumanPrincipalIdInputSchema.parse(input);
+    return this.withActiveClient((client) => client.demoteOwner(humanPrincipalId));
+  }
+
+  async revokeDevice(input: unknown): Promise<void> {
+    const { deviceCredentialId } = collaborationDeviceCredentialIdInputSchema.parse(input);
+    return this.withActiveClient((client) => client.revokeDevice(deviceCredentialId));
   }
 
   async listAssignments(input: unknown = {}): Promise<AssignmentListPage> {
