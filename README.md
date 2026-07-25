@@ -503,6 +503,8 @@ node scripts/planweave-release-gate.mjs --checklist
 
 An assembled checkpoint correlating RV-001/002/003 evidence with a re-run of the deterministic suite and honest live blockers is recorded in [readme/distributed-remote-execution-checkpoint.md](readme/distributed-remote-execution-checkpoint.md).
 
+An assembled checkpoint correlating HC-001/002/003 human collaboration evidence (identity, assignment, comments/activity) with focused re-runs and residual product-surface gaps is recorded in [readme/distributed-human-collaboration-checkpoint.md](readme/distributed-human-collaboration-checkpoint.md).
+
 ### Operator HTTP surface
 
 Authenticated routes require `Authorization: Bearer <operator-token>` and TLS (or loopback development mode). Server-admin credentials can enroll and revoke hosts; project-scoped credentials may only dispatch and observe operations for their `projectIds`.
