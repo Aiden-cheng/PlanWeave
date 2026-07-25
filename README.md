@@ -505,6 +505,8 @@ An assembled checkpoint correlating RV-001/002/003 evidence with a re-run of the
 
 An assembled checkpoint correlating HC-001/002/003 human collaboration evidence (identity, assignment, comments/activity) with focused re-runs and residual product-surface gaps is recorded in [readme/distributed-human-collaboration-checkpoint.md](readme/distributed-human-collaboration-checkpoint.md).
 
+An assembled checkpoint correlating DX-001/002/003 Desktop collaboration evidence (secure IPC/read models, people/assignee, Comments/Activity, remote ACP controls) with focused re-runs and residual Server wire gaps is recorded in [readme/distributed-desktop-collaboration-checkpoint.md](readme/distributed-desktop-collaboration-checkpoint.md).
+
 ### Operator HTTP surface
 
 Authenticated routes require `Authorization: Bearer <operator-token>` and TLS (or loopback development mode). Server-admin credentials can enroll and revoke hosts; project-scoped credentials may only dispatch and observe operations for their `projectIds`.

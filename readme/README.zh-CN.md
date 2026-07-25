@@ -505,6 +505,8 @@ node scripts/planweave-release-gate.mjs --checklist
 
 关联 HC-001/002/003 人类协作证据（身份、指派、评论/活动）与聚焦复跑、残余产品面缺口的检查点见 [distributed-human-collaboration-checkpoint.md](distributed-human-collaboration-checkpoint.md)。
 
+关联 DX-001/002/003 Desktop 协作证据（安全 IPC/读模型、人员/指派、评论/活动、远程 ACP 控制）与聚焦复跑、残余 Server 线缺口的检查点见 [distributed-desktop-collaboration-checkpoint.md](distributed-desktop-collaboration-checkpoint.md)。
+
 ### Operator HTTP 接口
 
 鉴权路由需要 `Authorization: Bearer <operator-token>`，并使用 TLS（或 loopback 开发模式）。server-admin 可登记与吊销 Host；项目作用域凭据只能对自己的 `projectIds` 做 dispatch 与观测。
