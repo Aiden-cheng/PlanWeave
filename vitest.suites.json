@@ -533,6 +533,7 @@
         "commentService.test.ts",
         "config.test.ts",
         "dispatches.test.ts",
+        "distributedPackageArtifacts.test.ts",
         "hostEnrollment.test.ts",
         "hostReservations.test.ts",
         "humanIdentityHttp.test.ts",

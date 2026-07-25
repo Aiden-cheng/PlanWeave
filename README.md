@@ -263,7 +263,16 @@ pnpm --filter @planweave-ai/server exec planweave-server --help
 pnpm --filter @planweave-ai/agent-host exec planweave-agent-host --help
 ```
 
-Published package names are `@planweave-ai/server` (binary `planweave-server`) and `@planweave-ai/agent-host` (binary `planweave-agent-host`). Both require Node.js 22.5+.
+Published package names are `@planweave-ai/server` (binary `planweave-server`) and `@planweave-ai/agent-host` (binary `planweave-agent-host`). Both require Node.js 22.5+ (they use the built-in `node:sqlite` module; no `better-sqlite3` native binding).
+
+Pack the distributed publish graph and run a clean temporary install/start smoke:
+
+```bash
+pnpm pack:distributed
+pnpm check:distributed-package-install
+```
+
+**Supported platform claims** are derived from produced artifacts and executed evidence only (not from TypeScript compile success). The living matrix — Coordinator/Host OS/arch cells, Desktop packaged smoke, ACP profile pins, dependency audit policy, and honest REAL_ACP/VPS blockers — is recorded in [readme/distributed-platform-support-matrix.md](readme/distributed-platform-support-matrix.md). Linux aarch64 Server/Host and Desktop Linux packaged-start are **not** public support claims until that matrix shows verified evidence.
 
 ### Start the Coordinator
 
@@ -502,6 +511,8 @@ node scripts/planweave-release-gate.mjs --checklist
 **Evidence rules:** live evidence expires after 14 days (file mtime or `generatedAt`). Operators own disposable VPS access and Host-local provider login; CI owns only the deterministic suite. Gate inputs are evidence paths + package versions; outputs are a JSON report with tier status, digests, compatibility checks, rollback checklist, and `releaseReady.{ci,supportedVersionRelease,preRelease}`.
 
 An assembled checkpoint correlating RV-001/002/003 evidence with a re-run of the deterministic suite and honest live blockers is recorded in [readme/distributed-remote-execution-checkpoint.md](readme/distributed-remote-execution-checkpoint.md).
+
+The release-facing **platform and packaged-artifact support matrix** (Server/Host clean-install smoke, Desktop CI cells, ACP profiles, audit/license policy, unsupported cells) is recorded in [readme/distributed-platform-support-matrix.md](readme/distributed-platform-support-matrix.md).
 
 An assembled checkpoint correlating HC-001/002/003 human collaboration evidence (identity, assignment, comments/activity) with focused re-runs and residual product-surface gaps is recorded in [readme/distributed-human-collaboration-checkpoint.md](readme/distributed-human-collaboration-checkpoint.md).
 
