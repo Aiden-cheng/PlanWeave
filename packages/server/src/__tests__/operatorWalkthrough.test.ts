@@ -247,7 +247,7 @@ describe("remote operator walkthrough", () => {
             id: "codex-acp",
             agentId: "codex",
             command: process.execPath,
-            args: [mockAgentPath, "artifact-implementation"],
+            args: [mockAgentPath, "success"],
             environment: []
           }
         ]
@@ -309,8 +309,8 @@ describe("remote operator walkthrough", () => {
     });
     expect(hostId).toBeTruthy();
 
-    // Operator client surface: create a remote operation (execution completion is host/ACP
-    // dependent and is covered by execution lifecycle tests, not this operator lifecycle walkthrough).
+    // Operator dispatch proof: HTTP 202 only means the Coordinator accepted the request.
+    // Production success requires Host acceptance (leased/running) and a terminal outcome.
     const dispatchResponse = await fetch(`${origin}/api/v1/remote-operations`, {
       method: "POST",
       headers: { ...authorization, "content-type": "application/json" },
@@ -326,20 +326,57 @@ describe("remote operator walkthrough", () => {
       operationId: string;
       projectId: string;
       blockRef: string;
+      dispatchStatus?: string;
+      state?: string;
     };
     expect(dispatched).toMatchObject({
       projectId: workspace.init.workspace.id,
       blockRef: "T-001#B-001",
       operationId: expect.any(String)
     });
-    const observeResponse = await fetch(
-      `${origin}/api/v1/remote-operations/${encodeURIComponent(dispatched.operationId)}`,
-      { headers: authorization }
+
+    type OperatorOperationView = {
+      operationId: string;
+      blockRef: string;
+      state: string;
+      dispatchStatus?: string;
+      attempt?: { status?: string; hostId?: string };
+    };
+
+    const observeOperation = async (operationId: string): Promise<OperatorOperationView> => {
+      const response = await fetch(
+        `${origin}/api/v1/remote-operations/${encodeURIComponent(operationId)}`,
+        { headers: authorization }
+      );
+      expect(response.status).toBe(200);
+      return (await response.json()) as OperatorOperationView;
+    };
+
+    // Host accepted: dispatch.accepted surfaces as leased/running (may already be terminal).
+    const accepted = await vi.waitFor(
+      async () => {
+        const view = await observeOperation(dispatched.operationId);
+        expect(["leased", "running", "completed"]).toContain(view.dispatchStatus);
+        return view;
+      },
+      { timeout: 20_000 }
     );
-    expect(observeResponse.status).toBe(200);
-    await expect(observeResponse.json()).resolves.toMatchObject({
+    expect(accepted.attempt?.hostId).toBe(hostId);
+
+    // Terminal: request acceptance is not success; wait for completed/failed/cancelled.
+    const terminal = await vi.waitFor(
+      async () => {
+        const view = await observeOperation(dispatched.operationId);
+        expect(["completed", "failed", "cancelled"]).toContain(view.state);
+        return view;
+      },
+      { timeout: 30_000 }
+    );
+    expect(terminal).toMatchObject({
       operationId: dispatched.operationId,
-      blockRef: "T-001#B-001"
+      blockRef: "T-001#B-001",
+      state: "completed",
+      dispatchStatus: "completed"
     });
 
     await stopPublicBin(host);
@@ -385,5 +422,5 @@ describe("remote operator walkthrough", () => {
       credential: "revoked"
     });
     await stopPublicBin(server);
-  }, 30_000);
+  }, 60_000);
 });
