@@ -268,31 +268,49 @@ describe("server lifecycle", () => {
     reopened.close();
   });
 
-  it("drops residual dispatches.package_ref on upgrade and never reintroduces it", async () => {
+  it("upgrades a populated v20 database and never reintroduces dispatches.package_ref", async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), "planweave-server-package-ref-"));
     directories.push(dataDirectory);
     const databasePath = join(dataDirectory, "server.sqlite");
-    const initialized = await startPlanweaveServer({
-      dataDirectory,
-      databasePath,
-      busyTimeoutMs: 5_000
-    });
-    initialized.close();
-
-    const rolledBack = await openServerDatabase(databasePath, 5_000);
-    rolledBack.prepare("DELETE FROM schema_migrations WHERE version=?").run(21);
-    // Reintroduce historical column as a v20 residual for upgrade coverage.
-    const columns = rolledBack.prepare("PRAGMA table_info(dispatches)").all();
-    if (!columns.some((row) => row.name === "package_ref")) {
-      rolledBack.exec("ALTER TABLE dispatches ADD COLUMN package_ref TEXT NOT NULL DEFAULT ''");
-    }
+    const version20 = await openServerDatabase(databasePath, 5_000);
+    version20.exec(`
+      CREATE TABLE schema_migrations (
+        version INTEGER PRIMARY KEY,
+        applied_at TEXT NOT NULL
+      );
+      CREATE TRIGGER stop_after_migration_20
+      BEFORE INSERT ON schema_migrations
+      WHEN NEW.version = 21
+      BEGIN
+        SELECT RAISE(ABORT, 'stop_after_migration_20');
+      END;
+    `);
+    expect(() => applyMigrations(version20)).toThrow("stop_after_migration_20");
+    expect(centralSchemaVersion(version20)).toBe(20);
     expect(
-      rolledBack
+      version20
         .prepare("PRAGMA table_info(dispatches)")
         .all()
         .some((row) => row.name === "package_ref")
     ).toBe(true);
-    rolledBack.close();
+    version20.exec(`
+      INSERT INTO agent_hosts(
+        id,display_name,credential_hash,capabilities_json,capacity,created_at
+      ) VALUES (
+        'host-upgrade-v20','Upgrade host','credential-hash','["test"]',1,
+        '2020-01-01T00:00:00.000Z'
+      );
+      INSERT INTO dispatches(
+        id,project_id,block_ref,package_ref,host_id,required_capabilities_json,status,
+        lease_id,execution_attempt_id,lease_expires_at,created_at
+      ) VALUES (
+        'dispatch-upgrade-v20','project-upgrade','TASK#B-001','legacy-package-ref',
+        'host-upgrade-v20','["test"]','running','lease-upgrade-v20',
+        'attempt-upgrade-v20','2099-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'
+      );
+      DROP TRIGGER stop_after_migration_20;
+    `);
+    version20.close();
 
     const upgraded = await startPlanweaveServer({
       dataDirectory,
@@ -307,6 +325,18 @@ describe("server lifecycle", () => {
           .all()
           .some((row) => row.name === "package_ref")
       ).toBe(false);
+      expect(
+        upgraded.database
+          .prepare(
+            "SELECT project_id,block_ref,host_id,status FROM dispatches WHERE id=?"
+          )
+          .get("dispatch-upgrade-v20")
+      ).toEqual({
+        project_id: "project-upgrade",
+        block_ref: "TASK#B-001",
+        host_id: "host-upgrade-v20",
+        status: "running"
+      });
     } finally {
       upgraded.close();
     }
