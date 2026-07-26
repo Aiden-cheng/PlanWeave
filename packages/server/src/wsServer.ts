@@ -15,6 +15,7 @@ import {
   serverEventSchema,
   type HostEvent
 } from "./protocol.js";
+import type { WebSocketUpgradeRouter } from "./webSocketUpgradeRouter.js";
 
 export type AgentHostWebSocketOptions = {
   server: HttpServer;
@@ -29,6 +30,7 @@ export type AgentHostWebSocketOptions = {
   maxPayloadBytes?: number;
   shutdownTimeoutMs?: number;
   allowInsecureTransport?: boolean;
+  upgradeRouter?: WebSocketUpgradeRouter;
 };
 
 export type AgentHostWebSocketServer = {
@@ -272,7 +274,15 @@ export function attachAgentHostWebSocketServer(
     });
   };
 
-  options.server.on("upgrade", upgradeListener);
+  const unregisterUpgrade = options.upgradeRouter
+    ? options.upgradeRouter.register({
+        matches: (request) => hostIdFromUrl(request.url) !== undefined,
+        handle: upgradeListener
+      })
+    : (() => {
+        options.server.on("upgrade", upgradeListener);
+        return () => options.server.off("upgrade", upgradeListener);
+      })();
 
   let closePromise: Promise<void> | undefined;
   return {
@@ -281,7 +291,7 @@ export function attachAgentHostWebSocketServer(
     },
     close: () => {
       closePromise ??= (async () => {
-        options.server.off("upgrade", upgradeListener);
+        unregisterUpgrade();
         for (const socket of sessions.values()) socket.close(1001, "server shutdown");
         let closeError: Error | undefined;
         let timer: ReturnType<typeof setTimeout> | undefined;

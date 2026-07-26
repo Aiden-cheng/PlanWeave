@@ -28,6 +28,15 @@ export class AttachmentRepositoryError extends Error {
   }
 }
 
+export type CommentAttachmentRepositoryOptions = {
+  onMutationInTransaction?: (input: {
+    projectId: string;
+    pendingUploadId?: string;
+    commentId?: string;
+    occurredAt: string;
+  }) => void;
+};
+
 const pendingStatusSchema = z.enum(["pending", "uploaded", "finalized", "expired", "aborted"]);
 
 type PendingRow = {
@@ -94,7 +103,10 @@ function toBinding(row: BindingRow): CommentAttachmentBinding {
 }
 
 export class CommentAttachmentRepository {
-  constructor(private readonly database: SqliteDatabase) {}
+  constructor(
+    private readonly database: SqliteDatabase,
+    private readonly options: CommentAttachmentRepositoryOptions = {}
+  ) {}
 
   createPendingUpload(input: {
     projectId: string;
@@ -206,7 +218,14 @@ export class CommentAttachmentRepository {
       if (result.changes !== 1) {
         throw new AttachmentRepositoryError("attachment_status_conflict");
       }
-      return this.getPendingRequired(input.projectId, input.pendingUploadId);
+      const record = this.getPendingRequired(input.projectId, input.pendingUploadId);
+      this.options.onMutationInTransaction?.({
+        projectId: record.projectId,
+        pendingUploadId: record.pendingUploadId,
+        commentId: record.commentId,
+        occurredAt: input.uploadedAt
+      });
+      return record;
     });
   }
 
@@ -274,6 +293,12 @@ export class CommentAttachmentRepository {
         throw new AttachmentRepositoryError("attachment_status_conflict");
       }
       const record = this.getPendingRequired(input.projectId, input.pendingUploadId);
+      this.options.onMutationInTransaction?.({
+        projectId: record.projectId,
+        pendingUploadId: record.pendingUploadId,
+        commentId: record.commentId,
+        occurredAt: input.finalizedAt
+      });
       return {
         record,
         metadata: commentAttachmentMetadataSchema.parse({

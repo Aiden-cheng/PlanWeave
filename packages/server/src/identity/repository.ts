@@ -67,8 +67,14 @@ export type MembershipTransition = {
   principal: HumanPrincipal;
 };
 
+export type InvitationTransition = {
+  type: "invitation_created" | "invitation_revoked" | "invitation_consumed";
+  invitation: ProjectInvitationMetadata;
+};
+
 export type HumanIdentityRepositoryOptions = {
   onMembershipTransitionInTransaction?: (transition: MembershipTransition) => void;
+  onInvitationTransitionInTransaction?: (transition: InvitationTransition) => void;
 };
 
 /**
@@ -188,13 +194,25 @@ export class HumanIdentityRepository {
     createdByHumanPrincipalId: string;
     ttlMs?: number;
   }): CreateInvitationResult {
-    return inWriteTransaction(this.database, () => this.createInvitationLocked(input));
+    return inWriteTransaction(this.database, () => {
+      const result = this.createInvitationLocked(input);
+      this.options.onInvitationTransitionInTransaction?.({
+        type: "invitation_created",
+        invitation: result.invitation
+      });
+      return result;
+    });
   }
 
   revokeInvitation(invitationId: string, projectId: string): ProjectInvitationMetadata {
-    return inWriteTransaction(this.database, () =>
-      this.invitations.revokeInvitation(invitationId, projectId)
-    );
+    return inWriteTransaction(this.database, () => {
+      const invitation = this.invitations.revokeInvitation(invitationId, projectId);
+      this.options.onInvitationTransitionInTransaction?.({
+        type: "invitation_revoked",
+        invitation
+      });
+      return invitation;
+    });
   }
 
   /**
@@ -219,6 +237,10 @@ export class HumanIdentityRepository {
         type: "member_joined",
         membership: result.membership,
         principal: result.principal
+      });
+      this.options.onInvitationTransitionInTransaction?.({
+        type: "invitation_consumed",
+        invitation: result.invitation
       });
       return result;
     });

@@ -88,7 +88,7 @@ describe("work assignment migration v17", () => {
     }
     applyMigrations(database);
     expect(centralSchemaVersion(database)).toBe(latestCentralSchemaVersion);
-    expect(latestCentralSchemaVersion).toBe(25);
+    expect(latestCentralSchemaVersion).toBe(26);
 
     expect(
       database

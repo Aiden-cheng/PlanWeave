@@ -10,6 +10,19 @@ CREATE TABLE server_metadata (
 );
 `;
 
+const migration26 = `
+CREATE TABLE human_observer_events (
+  cursor INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id TEXT NOT NULL,
+  previous_cursor INTEGER NOT NULL CHECK(previous_cursor >= 0),
+  event_json TEXT NOT NULL CHECK(json_valid(event_json)),
+  occurred_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_human_observer_project_cursor
+  ON human_observer_events(project_id,cursor);
+`;
+
 const migration2 = `
 CREATE TABLE agent_hosts (
   id TEXT PRIMARY KEY,
@@ -1419,7 +1432,8 @@ const migrations: readonly Migration[] = [
   },
   { version: 23, sql: "SELECT 1;", after: ensureServerInstanceAndRemoteActionClaims },
   { version: 24, sql: "SELECT 1;", after: ensureMembershipRevision },
-  { version: 25, sql: "SELECT 1;", after: ensureActivityRetentionIndexes }
+  { version: 25, sql: "SELECT 1;", after: ensureActivityRetentionIndexes },
+  { version: 26, sql: migration26 }
 ];
 
 export const latestCentralSchemaVersion = Math.max(

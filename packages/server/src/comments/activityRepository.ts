@@ -96,11 +96,18 @@ export type ActivityInsertResult =
   | { inserted: true; record: ActivityRecord }
   | { inserted: false; record: ActivityRecord; code: "activity_source_duplicate" };
 
+export type ActivityRepositoryOptions = {
+  onInsertedInTransaction?: (record: ActivityRecord) => void;
+};
+
 /**
  * Append-only activity projection store with source-action idempotency and outbox recovery.
  */
 export class ActivityRepository {
-  constructor(readonly database: SqliteDatabase) {}
+  constructor(
+    readonly database: SqliteDatabase,
+    private readonly options: ActivityRepositoryOptions = {}
+  ) {}
 
   allocateActivityId(): ActivityId {
     return activityIdSchema.parse(randomUUID());
@@ -174,6 +181,7 @@ export class ActivityRepository {
     if (!stored) {
       throw new ActivityRepositoryError("activity_input_invalid", "Activity missing after insert.");
     }
+    this.options.onInsertedInTransaction?.(stored);
     return { inserted: true, record: stored };
   }
 

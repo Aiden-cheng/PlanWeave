@@ -87,7 +87,7 @@ describe("comment/activity migration v20", () => {
     }
     applyMigrations(database);
     expect(centralSchemaVersion(database)).toBe(latestCentralSchemaVersion);
-    expect(latestCentralSchemaVersion).toBe(25);
+    expect(latestCentralSchemaVersion).toBe(26);
 
     for (const table of ["comments", "activity_records", "activity_projection_outbox"]) {
       expect(

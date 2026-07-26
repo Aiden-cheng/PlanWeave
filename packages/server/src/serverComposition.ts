@@ -32,12 +32,19 @@ import { ServerReadinessController, type ServerReadiness } from "./readiness.js"
 import { RemoteControlService } from "./remoteControlService.js";
 import { HumanRemoteControlService } from "./humanRemoteControlService.js";
 import { handleHumanRemoteHttpRequest } from "./humanRemoteHttp.js";
+import { observerEventsForActivity } from "./humanObserverActivity.js";
+import { HumanObserverJournal } from "./humanObserverJournal.js";
 import {
   ArtifactStoreRemoteContent,
   RuntimeInputArtifactMaterializer
 } from "./runtimeArtifactAdapter.js";
 import { createTrustedRuntimeRegistry } from "./runtimeProjectRegistry.js";
 import { attachAgentHostWebSocketServer, type AgentHostWebSocketServer } from "./wsServer.js";
+import {
+  attachHumanObserverWebSocketServer,
+  type HumanObserverWebSocketServer
+} from "./humanObserverWs.js";
+import { WebSocketUpgradeRouter } from "./webSocketUpgradeRouter.js";
 import {
   createActiveDispatchResolver,
   createHostAssignmentPort,
@@ -84,6 +91,8 @@ async function drainCompositionTransports(input: {
   httpServer: HttpServer;
   requestListener?: (request: IncomingMessage, response: ServerResponse) => void;
   webSockets?: AgentHostWebSocketServer;
+  humanObserverWebSockets?: HumanObserverWebSocketServer;
+  upgradeRouter?: WebSocketUpgradeRouter;
   inflightRequests: ReadonlySet<Promise<void>>;
   shutdownTimeoutMs: number;
 }): Promise<void> {
@@ -94,6 +103,12 @@ async function drainCompositionTransports(input: {
   } catch (error) {
     errors.push(error);
   }
+  try {
+    await input.humanObserverWebSockets?.close();
+  } catch (error) {
+    errors.push(error);
+  }
+  input.upgradeRouter?.close();
   try {
     await waitForInflightRequests(input.inflightRequests, input.shutdownTimeoutMs);
   } catch (error) {
@@ -171,8 +186,11 @@ export async function createDistributedServerComposition(
   let activityProjection: ActivityProjectionService | undefined;
   let activityRetention: ActivityRetentionMaintenance | undefined;
   let webSockets: AgentHostWebSocketServer | undefined;
+  let humanObserverWebSockets: HumanObserverWebSocketServer | undefined;
+  let upgradeRouter: WebSocketUpgradeRouter | undefined;
   let requestListener: ((request: IncomingMessage, response: ServerResponse) => void) | undefined;
   let humanIdentityForInteractions: HumanIdentityRepository | undefined;
+  let humanObserverJournal: HumanObserverJournal | undefined;
   const inflightRequests = new Set<Promise<void>>();
   try {
     const authorization = new OperatorTokenRegistry(config.operatorCredentials);
@@ -190,7 +208,19 @@ export async function createDistributedServerComposition(
           config.dataDirectory,
           config.limits.maxArtifactBytes
         );
-        const projectionRepository = new ActivityRepository(database);
+        const observerJournal = new HumanObserverJournal(
+          database,
+          config.limits.eventRetentionMaxEvents,
+          clock
+        );
+        humanObserverJournal = observerJournal;
+        const projectionRepository = new ActivityRepository(database, {
+          onInsertedInTransaction: (record) => {
+            for (const event of observerEventsForActivity(record)) {
+              observerJournal.appendInCallerTransaction(record.projectId, event, record.occurredAt);
+            }
+          }
+        });
         const projection = new ActivityProjectionService({
           activity: projectionRepository,
           clock
@@ -276,9 +306,11 @@ export async function createDistributedServerComposition(
     if (!activityRepository || !activityProjection) {
       throw new Error("activity_projection_not_initialized");
     }
+    if (!humanObserverJournal) throw new Error("human_observer_journal_not_initialized");
     const initializedArtifactStore = artifactStore;
     const initializedActivityRepository = activityRepository;
     const initializedActivityProjection = activityProjection;
+    const initializedHumanObserverJournal = humanObserverJournal;
     const { coordination, server } = lifecycle;
     const schemaVersion = server.readiness().schemaVersion;
     readiness.transition("reconciling", schemaVersion);
@@ -295,6 +327,13 @@ export async function createDistributedServerComposition(
           membershipRole: membership.role,
           occurredAt: membership.updatedAt
         });
+      },
+      onInvitationTransitionInTransaction: ({ invitation }) => {
+        initializedHumanObserverJournal.appendInCallerTransaction(
+          invitation.projectId,
+          { kind: "invitation" },
+          invitation.consumedAt ?? invitation.revokedAt ?? invitation.createdAt
+        );
       }
     });
     humanIdentityForInteractions = humanIdentity;
@@ -303,7 +342,18 @@ export async function createDistributedServerComposition(
       projectAuthority: runtimeRegistry,
       clock
     });
-    const commentAttachmentRepository = new CommentAttachmentRepository(server.database);
+    const commentAttachmentRepository = new CommentAttachmentRepository(server.database, {
+      onMutationInTransaction: (input) => {
+        initializedHumanObserverJournal.appendInCallerTransaction(
+          input.projectId,
+          {
+            kind: "attachment",
+            ...(input.commentId ? { commentId: input.commentId } : {})
+          },
+          input.occurredAt
+        );
+      }
+    });
     const commentRepository = new CommentRepository(server.database);
     const commentAttachmentBlobs = new CommentAttachmentBlobStore(
       server.database,
@@ -358,8 +408,10 @@ export async function createDistributedServerComposition(
         })
       );
     }
+    upgradeRouter = new WebSocketUpgradeRouter(options.httpServer);
     webSockets = attachAgentHostWebSocketServer({
       server: options.httpServer,
+      upgradeRouter,
       hosts: coordination.hosts,
       mailbox: coordination.mailbox,
       dispatches: coordination.dispatches,
@@ -371,6 +423,16 @@ export async function createDistributedServerComposition(
       maxPayloadBytes: config.limits.maxWebSocketPayloadBytes,
       shutdownTimeoutMs: config.limits.shutdownTimeoutMs,
       allowInsecureTransport: config.allowInsecureDevelopment
+    });
+    humanObserverWebSockets = attachHumanObserverWebSocketServer({
+      upgradeRouter,
+      journal: initializedHumanObserverJournal,
+      repository: humanIdentity,
+      projectAuthority: runtimeRegistry,
+      maxPayloadBytes: config.limits.maxWebSocketPayloadBytes,
+      shutdownTimeoutMs: config.limits.shutdownTimeoutMs,
+      allowInsecureTransport: config.allowInsecureDevelopment,
+      clock
     });
     const attachedWebSockets = webSockets;
     const control = new RemoteControlService({
@@ -508,6 +570,8 @@ export async function createDistributedServerComposition(
         httpServer: options.httpServer,
         requestListener: attachedRequestListener,
         webSockets: attachedWebSockets,
+        humanObserverWebSockets,
+        upgradeRouter,
         inflightRequests,
         shutdownTimeoutMs: config.limits.shutdownTimeoutMs
       });
@@ -565,6 +629,8 @@ export async function createDistributedServerComposition(
         httpServer: options.httpServer,
         requestListener,
         webSockets,
+        humanObserverWebSockets,
+        upgradeRouter,
         inflightRequests,
         shutdownTimeoutMs: config.limits.shutdownTimeoutMs
       });
