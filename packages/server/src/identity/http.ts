@@ -19,6 +19,8 @@ const MAX_HUMAN_BODY_BYTES = 16_384;
 /** Soft admission limit for human auth-sensitive routes (per remote address). */
 const HUMAN_RATE_WINDOW_MS = 60_000;
 const HUMAN_RATE_MAX_REQUESTS = 60;
+/** Bounds untrusted remote-address/project pairs retained by the in-process limiter. */
+export const HUMAN_RATE_MAX_BUCKETS = 1_000;
 
 export type HumanHttpOptions = {
   service: HumanMembershipService;
@@ -193,12 +195,23 @@ function rateLimitKey(request: IncomingMessage, projectId: string): string {
 function checkRateLimit(request: IncomingMessage, projectId: string, now: number): boolean {
   const key = rateLimitKey(request, projectId);
   const bucket = rateBuckets.get(key);
-  if (!bucket || now - bucket.windowStartedAt >= HUMAN_RATE_WINDOW_MS) {
-    rateBuckets.set(key, { windowStartedAt: now, count: 1 });
+  if (bucket && now - bucket.windowStartedAt < HUMAN_RATE_WINDOW_MS) {
+    if (bucket.count >= HUMAN_RATE_MAX_REQUESTS) return false;
+    bucket.count += 1;
     return true;
   }
-  if (bucket.count >= HUMAN_RATE_MAX_REQUESTS) return false;
-  bucket.count += 1;
+
+  for (const [candidateKey, candidate] of rateBuckets) {
+    if (now - candidate.windowStartedAt >= HUMAN_RATE_WINDOW_MS) {
+      rateBuckets.delete(candidateKey);
+    }
+  }
+  if (rateBuckets.size >= HUMAN_RATE_MAX_BUCKETS) {
+    const oldestKey = rateBuckets.keys().next().value;
+    if (oldestKey !== undefined) rateBuckets.delete(oldestKey);
+  }
+
+  rateBuckets.set(key, { windowStartedAt: now, count: 1 });
   return true;
 }
 

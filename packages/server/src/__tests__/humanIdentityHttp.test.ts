@@ -12,6 +12,7 @@ import {
 } from "../identity/index.js";
 import { applyMigrations } from "../migrations.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
+import { HUMAN_RATE_MAX_BUCKETS } from "../identity/http.js";
 
 const servers: HttpServer[] = [];
 const directories: string[] = [];
@@ -34,7 +35,7 @@ afterEach(async () => {
   );
 });
 
-async function setup(allowInsecureDevelopment = true) {
+async function setup(allowInsecureDevelopment = true, clock?: () => Date) {
   const directory = await mkdtemp(join(tmpdir(), "planweave-human-http-"));
   directories.push(directory);
   const database = await openServerDatabase(join(directory, "server.sqlite"), 5_000);
@@ -46,7 +47,8 @@ async function setup(allowInsecureDevelopment = true) {
     void handleHumanHttpRequest(request, response, {
       service,
       repository,
-      allowInsecureDevelopment
+      allowInsecureDevelopment,
+      clock
     });
   });
   servers.push(server);
@@ -567,5 +569,32 @@ describe("human membership HTTP APIs", () => {
       body: "ttlMs=60000"
     });
     expect(formPost.status).toBe(400);
+  });
+
+  it("keeps fixed-window rate limits while expiring and bounding untrusted keys", async () => {
+    let now = new Date("2026-07-26T10:00:00.000Z");
+    const { origin } = await setup(true, () => now);
+    const limitedUrl = `${origin}/api/v1/projects/oldest-project/human/members`;
+
+    for (let request = 0; request < 60; request += 1) {
+      const response = await fetch(limitedUrl);
+      expect(response.status).toBe(401);
+    }
+    const limited = await fetch(limitedUrl);
+    expect(limited.status).toBe(429);
+
+    now = new Date(now.getTime() + 60_000);
+    const afterWindow = await fetch(limitedUrl);
+    expect(afterWindow.status).toBe(401);
+
+    for (let bucket = 0; bucket < HUMAN_RATE_MAX_BUCKETS; bucket += 1) {
+      const response = await fetch(
+        `${origin}/api/v1/projects/capacity-project-${bucket}/human/members`
+      );
+      expect(response.status).toBe(401);
+    }
+
+    const afterCapacityEviction = await fetch(limitedUrl);
+    expect(afterCapacityEviction.status).toBe(401);
   });
 });
