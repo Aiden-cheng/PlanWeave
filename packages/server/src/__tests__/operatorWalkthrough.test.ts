@@ -1,48 +1,46 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PlanPackageManifest } from "@planweave-ai/runtime";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   basicManifest,
   createTestWorkspace
 } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { latestCentralSchemaVersion } from "../migrations.js";
 import { hashOperatorToken } from "../operatorAuth.js";
+import { buildIsolatedPublicPackageBins } from "./support/publicPackageBinHarness.js";
 
 const directories: string[] = [];
 const mockAgentPath = fileURLToPath(
   new URL("../../../runtime/src/__tests__/support/acpMockAgent.mjs", import.meta.url)
 );
 
-/**
- * Resolve a package's public bin entry from package.json (not a hardcoded dist path).
- * The walkthrough must exercise the same bin surface operators install.
- */
-function resolvePublicPackageBin(packageRoot: string, binName: string): string {
-  const packageJsonPath = join(packageRoot, "package.json");
-  const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
-    bin?: string | Record<string, string>;
-  };
-  const relative = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.[binName];
-  if (!relative) {
-    throw new Error(`public_bin_field_missing:${binName}`);
-  }
-  const absolute = join(packageRoot, relative);
-  if (!existsSync(absolute)) {
-    throw new Error(`public_bin_missing:${binName}:${absolute}`);
-  }
-  return absolute;
-}
-
+const repositoryRoot = fileURLToPath(new URL("../../../..", import.meta.url));
 const serverPackageRoot = fileURLToPath(new URL("../..", import.meta.url));
 const agentHostPackageRoot = fileURLToPath(new URL("../../../agent-host", import.meta.url));
-const serverBinPath = resolvePublicPackageBin(serverPackageRoot, "planweave-server");
-const agentHostBinPath = resolvePublicPackageBin(agentHostPackageRoot, "planweave-agent-host");
+let publicBinRoot: string | undefined;
+let serverBinPath: string;
+let agentHostBinPath: string;
+
+beforeAll(async () => {
+  const isolated = await buildIsolatedPublicPackageBins(repositoryRoot, [
+    { packageRoot: serverPackageRoot, binName: "planweave-server" },
+    { packageRoot: agentHostPackageRoot, binName: "planweave-agent-host" }
+  ]);
+  publicBinRoot = isolated.root;
+  serverBinPath = isolated.binPaths["planweave-server"];
+  agentHostBinPath = isolated.binPaths["planweave-agent-host"];
+});
+
+afterAll(async () => {
+  if (publicBinRoot) {
+    await rm(publicBinRoot, { recursive: true, force: true });
+  }
+});
 
 afterEach(async () => {
   await Promise.all(
@@ -164,7 +162,9 @@ async function stopPublicBin(running: RunningPublicBin): Promise<void> {
 }
 
 describe("remote operator walkthrough", () => {
-  it("starts Server, preflights/enrolls Host, observes capacity, and stops/restarts cleanly", async () => {
+  it("builds clean public bins, then starts Server and exercises the Host lifecycle", async () => {
+    expect(serverBinPath).toContain(publicBinRoot);
+    expect(agentHostBinPath).toContain(publicBinRoot);
     const workspace = await createTestWorkspace(remoteManifest());
     directories.push(workspace.home, workspace.root);
     const temporaryRoot = await mkdtemp(join(tmpdir(), "planweave-operator-walkthrough-"));
