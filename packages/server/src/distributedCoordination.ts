@@ -22,7 +22,7 @@ import {
   RemoteInteractionService,
   type RemoteInteractionAuthorizationPort
 } from "./remoteInteractions.js";
-import { startPlanweaveServer, type PlanweaveServer } from "./lifecycle.js";
+import { startPlanweaveServer, type PlanweaveServer, type StartupContext } from "./lifecycle.js";
 import type { ServerStorageConfig } from "./config.js";
 import {
   createAssignmentDispatchGate,
@@ -52,7 +52,8 @@ export type RemoteBlockCoordinationOptions = {
 
 export function createRemoteBlockCoordination(
   database: SqliteDatabase,
-  options: RemoteBlockCoordinationOptions
+  options: RemoteBlockCoordinationOptions,
+  startupContext: StartupContext
 ) {
   const hosts = new AgentHostRepository(database, options.clock);
   const mailbox = new DurableMailbox(database);
@@ -96,7 +97,8 @@ export function createRemoteBlockCoordination(
     inputArtifacts: options.inputArtifacts,
     artifactContent: options.artifactContent,
     checkpoints: options.checkpoints,
-    assignmentGate
+    assignmentGate,
+    serverInstanceOwnerToken: startupContext.serverInstanceOwnerToken
   });
   const dispatches = new DispatchService(database, hosts, artifactAuthorization, {
     leaseDurationMs: options.leaseDurationMs,
@@ -138,11 +140,11 @@ export function createRemoteBlockCoordination(
       }
     }
   });
-  const reconcile = async () => {
+  const reconcile = async (context?: StartupContext) => {
     await dispatches.recoverExpiredLeases();
     reservations.expireDue();
     interactions.expireDue();
-    await coordinator.reconcileActions();
+    await coordinator.reconcileActions(context);
     return coordinator.reenterPending();
   };
   return {
@@ -171,9 +173,13 @@ export async function startRemoteBlockCoordinationServer(
 }> {
   let coordination: ReturnType<typeof createRemoteBlockCoordination> | undefined;
   const server = await startPlanweaveServer(config, [
-    async (database) => {
-      const created = createRemoteBlockCoordination(database, createOptions(database));
-      await created.reconcile();
+    async (database, startupContext) => {
+      const created = createRemoteBlockCoordination(
+        database,
+        createOptions(database),
+        startupContext
+      );
+      await created.reconcile(startupContext);
       coordination = created;
     }
   ]);

@@ -15,10 +15,13 @@ import type {
 import type { MailboxMessage } from "./mailbox.js";
 import {
   DispatchAssignmentError,
+  dispatchHostSelectionSnapshotSchema,
   type DispatchHostSelectionSnapshot
 } from "./work/dispatchIntegration.js";
 
 export class RemoteBlockActionCoordinator {
+  private readonly actionService: RemoteExecutionActionService;
+
   constructor(
     private readonly options: RemoteBlockCoordinatorOptions,
     private readonly lifecycle: {
@@ -26,14 +29,31 @@ export class RemoteBlockActionCoordinator {
       fail(operationId: string): Promise<void>;
       checkpoint(): Promise<void>;
     }
-  ) {}
-
-  execute(rawAction: unknown): Promise<RemoteExecutionActionRecord> {
-    return this.service().execute(rawAction);
+  ) {
+    this.actionService = new RemoteExecutionActionService(
+      this.options.actions,
+      {
+        snapshot: (action) => {
+          const operation = this.options.operations.getRequired(action.operationId);
+          return this.options.dispatches.actionSnapshot(operation);
+        },
+        recover: (action) => this.recover(action),
+        prepare: (action, decision) => this.prepare(action, decision),
+        apply: (action, decision, context) => this.apply(action, decision, context),
+        afterApply: () => this.lifecycle.checkpoint()
+      },
+      this.options.serverInstanceOwnerToken
+    );
   }
 
-  reconcile(): Promise<RemoteExecutionActionRecord[]> {
-    return this.service().reconcile();
+  execute(rawAction: unknown): Promise<RemoteExecutionActionRecord> {
+    return this.actionService.execute(rawAction);
+  }
+
+  reconcile(startupContext?: {
+    serverInstanceOwnerToken: string;
+  }): Promise<RemoteExecutionActionRecord[]> {
+    return this.actionService.reconcile(startupContext);
   }
 
   async requestCancel(operationId: string, reason: string): Promise<void> {
@@ -48,18 +68,6 @@ export class RemoteBlockActionCoordinator {
       kind: "cancel",
       leaseId: operation.attempt.leaseId,
       reason
-    });
-  }
-
-  private service(): RemoteExecutionActionService {
-    return new RemoteExecutionActionService(this.options.actions, {
-      snapshot: (action) => {
-        const operation = this.options.operations.getRequired(action.operationId);
-        return this.options.dispatches.actionSnapshot(operation);
-      },
-      recover: (action) => this.recover(action),
-      apply: (action, decision) => this.apply(action, decision),
-      afterApply: () => this.lifecycle.checkpoint()
     });
   }
 
@@ -121,7 +129,8 @@ export class RemoteBlockActionCoordinator {
 
   private async apply(
     action: RemoteExecutionActionRequest,
-    decision: RemoteExecutionActionDecision
+    decision: RemoteExecutionActionDecision,
+    context?: unknown
   ): Promise<"delivered" | "settled"> {
     let operation = this.options.operations.getRequired(action.operationId);
     const runtime = this.options.runtimeResolver.resolve(operation);
@@ -163,26 +172,8 @@ export class RemoteBlockActionCoordinator {
       }
       case "retry": {
         if (action.kind !== "retry_new_attempt") throw new Error("remote_action_decision_mismatch");
-        // New attempt is a fresh dispatch: revalidate current assignment and resnapshot.
-        // Do not reuse the prior attempt's host_selection_json (stale after reassignment).
-        let hostSelection: DispatchHostSelectionSnapshot | undefined;
-        try {
-          hostSelection = this.options.assignmentGate?.resolve({
-            projectId: operation.projectId,
-            canvasId: operation.canvasId,
-            blockRef: operation.blockRef,
-            requiredCapabilities: operation.requiredCapabilities,
-            allowHumanOverride: false
-          });
-        } catch (error) {
-          if (
-            error instanceof DispatchAssignmentError &&
-            error.code === "work_not_agent_assigned"
-          ) {
-            throw new RemoteExecutionActionRejectedError(error.code, { cause: error });
-          }
-          throw error;
-        }
+        const hostSelection =
+          context === undefined ? undefined : dispatchHostSelectionSnapshotSchema.parse(context);
         await runtime.retryAttempt({
           ...remoteBlockIdentity(operation),
           newDispatchId: action.newDispatchId,
@@ -199,6 +190,29 @@ export class RemoteBlockActionCoordinator {
         await this.lifecycle.reenter(operation.id);
         return "settled";
       }
+    }
+  }
+
+  private prepare(
+    action: RemoteExecutionActionRequest,
+    decision: RemoteExecutionActionDecision
+  ): DispatchHostSelectionSnapshot | undefined {
+    if (decision.transition !== "retry") return undefined;
+    if (action.kind !== "retry_new_attempt") throw new Error("remote_action_decision_mismatch");
+    const operation = this.options.operations.getRequired(action.operationId);
+    try {
+      return this.options.assignmentGate?.resolve({
+        projectId: operation.projectId,
+        canvasId: operation.canvasId,
+        blockRef: operation.blockRef,
+        requiredCapabilities: operation.requiredCapabilities,
+        allowHumanOverride: false
+      });
+    } catch (error) {
+      if (error instanceof DispatchAssignmentError && error.code === "work_not_agent_assigned") {
+        throw new RemoteExecutionActionRejectedError(error.code, { cause: error });
+      }
+      throw error;
     }
   }
 

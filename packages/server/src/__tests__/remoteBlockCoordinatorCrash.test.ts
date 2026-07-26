@@ -120,12 +120,32 @@ class CoordinatorHarness {
       artifactContent: { readReport: async (ref) => this.requireArtifacts().read(ref) },
       checkpoints
     };
-    this.coordination = createRemoteBlockCoordination(this.server.database, options);
+    this.coordination = createRemoteBlockCoordination(this.server.database, options, {
+      serverInstanceOwnerToken: this.server.serverInstanceOwnerToken
+    });
     return this.coordination;
   }
 
   close(): void {
-    this.server?.close();
+    if (this.server) {
+      const activeAction = this.server.database
+        .prepare(
+          `SELECT 1 AS active FROM remote_execution_actions
+           WHERE application_owner_token=? LIMIT 1`
+        )
+        .get(this.server.serverInstanceOwnerToken);
+      if (activeAction) {
+        this.server.database
+          .prepare(
+            `UPDATE server_instance_ownership SET process_id=2147483647
+             WHERE singleton=1 AND owner_token=?`
+          )
+          .run(this.server.serverInstanceOwnerToken);
+        this.server.database.close();
+      } else {
+        this.server.close();
+      }
+    }
     this.server = undefined;
     this.coordination = undefined;
     this.runtime = undefined;
@@ -261,7 +281,9 @@ describe("RemoteBlockCoordinator crash reconciliation", () => {
       "injected_crash:after_action_side_effect"
     );
     coordination = await harness.restart();
-    await coordination.reconcile();
+    await coordination.reconcile({
+      serverInstanceOwnerToken: harness.requireServer().serverInstanceOwnerToken
+    });
     expect(coordination.actions.getRequired(request.actionId).state).toBe("settled");
   });
 
@@ -287,7 +309,9 @@ describe("RemoteBlockCoordinator crash reconciliation", () => {
       "injected_crash:after_action_side_effect"
     );
     coordination = await harness.restart();
-    await coordination.reconcile();
+    await coordination.reconcile({
+      serverInstanceOwnerToken: harness.requireServer().serverInstanceOwnerToken
+    });
     expect(coordination.actions.getRequired(request.actionId).state).toBe("delivered");
     expect(
       harness
@@ -359,7 +383,9 @@ describe("RemoteBlockCoordinator crash reconciliation", () => {
     expect(coordination.actions.getRequired(request.actionId).state).toBe("recorded");
 
     coordination = await harness.restart();
-    await coordination.reconcile();
+    await coordination.reconcile({
+      serverInstanceOwnerToken: harness.requireServer().serverInstanceOwnerToken
+    });
     const action = coordination.actions.getRequired(request.actionId);
 
     expect(action.state).toBe("settled");

@@ -95,17 +95,21 @@ async function createWsCoordination() {
   const locator = { projectId: workspace.init.workspace.id, canvasId: "default" };
   const registry = new RemoteRuntimePortRegistry();
   registry.bind(locator, createRemoteBlockRuntimePort({ projectRoot: workspace.root }));
-  const coordination = createRemoteBlockCoordination(database.database, {
-    leaseDurationMs: 60_000,
-    hostOfflineAfterMs: 60_000,
-    runtimeResolver: registry,
-    inputArtifacts: {
-      materialize: async (candidate) => {
-        if (candidate.inputArtifacts.length > 0) throw new Error("unexpected_test_artifact");
-      }
+  const coordination = createRemoteBlockCoordination(
+    database.database,
+    {
+      leaseDurationMs: 60_000,
+      hostOfflineAfterMs: 60_000,
+      runtimeResolver: registry,
+      inputArtifacts: {
+        materialize: async (candidate) => {
+          if (candidate.inputArtifacts.length > 0) throw new Error("unexpected_test_artifact");
+        }
+      },
+      artifactContent: { readReport: async () => new Uint8Array() }
     },
-    artifactContent: { readReport: async () => new Uint8Array() }
-  });
+    { serverInstanceOwnerToken: database.serverInstanceOwnerToken }
+  );
   return { database, coordination, locator };
 }
 

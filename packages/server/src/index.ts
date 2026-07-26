@@ -117,6 +117,7 @@ export {
 export {
   startPlanweaveServer,
   type PlanweaveServer,
+  type StartupContext,
   type StartupReconciliationHook
 } from "./lifecycle.js";
 export { DurableMailbox, type MailboxMessage } from "./mailbox.js";

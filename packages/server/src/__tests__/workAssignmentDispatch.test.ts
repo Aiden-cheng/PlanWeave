@@ -1,6 +1,10 @@
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import { createRemoteBlockRuntimePort, type PlanPackageManifest } from "@planweave-ai/runtime";
+import {
+  createRemoteBlockRuntimePort,
+  type PlanPackageManifest,
+  type RemoteBlockRuntimePort
+} from "@planweave-ai/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createTestWorkspace,
@@ -62,11 +66,20 @@ class CrashOnceCheckpoint implements RemoteCoordinatorCheckpointPort {
   }
 }
 
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
+
 async function setup(
   options: {
     strictGate?: boolean;
     withHosts?: Array<{ name: string; capabilities: string[]; capacity: number }>;
     checkpoints?: RemoteCoordinatorCheckpointPort;
+    decorateRuntime?: (runtime: RemoteBlockRuntimePort) => RemoteBlockRuntimePort;
   } = {}
 ) {
   const workspace = await createTestWorkspace(remoteManifest());
@@ -89,23 +102,28 @@ async function setup(
     : undefined;
 
   const buildCoordination = (checkpoints?: RemoteCoordinatorCheckpointPort) => {
-    const runtime = createRemoteBlockRuntimePort({ projectRoot: workspace.root });
+    const baseRuntime = createRemoteBlockRuntimePort({ projectRoot: workspace.root });
+    const runtime = options.decorateRuntime?.(baseRuntime) ?? baseRuntime;
     const registry = new RemoteRuntimePortRegistry();
     registry.bind(locator, runtime);
     const artifacts = new ArtifactStore(server.database, dataDirectory, 1024 * 1024);
-    return createRemoteBlockCoordination(server.database, {
-      leaseDurationMs: 60_000,
-      hostOfflineAfterMs: 60_000,
-      runtimeResolver: registry,
-      inputArtifacts: {
-        materialize: async (candidate) => {
-          if (candidate.inputArtifacts.length !== 0) throw new Error("unexpected_test_artifact");
-        }
+    return createRemoteBlockCoordination(
+      server.database,
+      {
+        leaseDurationMs: 60_000,
+        hostOfflineAfterMs: 60_000,
+        runtimeResolver: registry,
+        inputArtifacts: {
+          materialize: async (candidate) => {
+            if (candidate.inputArtifacts.length !== 0) throw new Error("unexpected_test_artifact");
+          }
+        },
+        artifactContent: { readReport: async (ref) => artifacts.read(ref) },
+        assignmentGate,
+        checkpoints
       },
-      artifactContent: { readReport: async (ref) => artifacts.read(ref) },
-      assignmentGate,
-      checkpoints
-    });
+      { serverInstanceOwnerToken: server.serverInstanceOwnerToken }
+    );
   };
 
   let coordination = buildCoordination(options.checkpoints);
@@ -627,6 +645,107 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
       preferredHostId: hostB.id,
       assignmentRevision: 2
     });
+  });
+
+  it("keeps one retry decision authoritative while assignment changes concurrently", async () => {
+    const retryEntered = deferred();
+    const resumeRetry = deferred();
+    const fixture = await setup({
+      withHosts: [{ name: "Host A", capabilities: ["acp.codex"], capacity: 1 }],
+      decorateRuntime: (runtime) => ({
+        ...runtime,
+        retryAttempt: async (input) => {
+          retryEntered.resolve();
+          await resumeRetry.promise;
+          return runtime.retryAttempt(input);
+        }
+      })
+    });
+    const hostA = fixture.hosts[0]!;
+    fixture.assignmentService.updateAssignment({
+      projectId: fixture.locator.projectId,
+      workItem: fixture.blockItem,
+      target: { kind: "exact_host", hostId: hostA.id },
+      expectedRevision: 0,
+      actor: fixture.ownerContext
+    });
+    const dispatched = await fixture.coordination.coordinator.dispatch({
+      ...fixture.locator,
+      blockRef: "T-001#B-001",
+      idempotencyKey: "retry-concurrent-assignment",
+      expectedAssignmentRevision: 1
+    });
+    const dispatch = fixture.coordination.dispatches.getRequired(dispatched.operation.dispatchId);
+    fixture.coordination.dispatches.accept(
+      hostA.id,
+      "retry-concurrent-accepted",
+      dispatch.id,
+      dispatch.leaseId,
+      dispatch.executionAttemptId
+    );
+    fixture.coordination.dispatches.interrupt(hostA.id, "retry-concurrent-interrupted", {
+      type: "dispatch.interrupted",
+      protocolVersion: 1,
+      messageId: "retry-concurrent-interrupted",
+      dispatchId: dispatch.id,
+      leaseId: dispatch.leaseId,
+      executionAttemptId: dispatch.executionAttemptId,
+      reason: "acp_session_lost",
+      resumable: false
+    });
+    const lease = fixture.coordination.reservations.getRequired(dispatch.leaseId);
+    fixture.coordination.reservations.release({
+      leaseId: lease.leaseId,
+      fencingToken: lease.fencingToken,
+      expectedVersion: lease.version,
+      reason: "expired"
+    });
+    await fixture.coordination.coordinator.reenter(dispatched.operation.id);
+    const interrupted = fixture.coordination.operations.getRequired(dispatched.operation.id);
+    const action = {
+      actionId: "retry-concurrent-assignment-action",
+      operationId: interrupted.id,
+      dispatchId: interrupted.dispatchId,
+      executionAttemptId: interrupted.executionAttemptId,
+      expectedAttemptVersion: interrupted.attempt.stateVersion,
+      kind: "retry_new_attempt" as const,
+      priorLeaseId: dispatch.leaseId,
+      newDispatchId: "dispatch-retry-concurrent-2",
+      newExecutionAttemptId: "attempt-retry-concurrent-2",
+      reason: "retry while assignment changes"
+    };
+
+    const winner = fixture.coordination.coordinator.executeAction(action);
+    await retryEntered.promise;
+    fixture.assignmentService.updateAssignment({
+      projectId: fixture.locator.projectId,
+      workItem: fixture.blockItem,
+      target: { kind: "human", humanPrincipalId: fixture.ownerContext.humanPrincipalId },
+      expectedRevision: 1,
+      actor: fixture.ownerContext
+    });
+    const competingCoordinator = fixture.rebuildCoordination();
+    await expect(competingCoordinator.coordinator.executeAction(action)).rejects.toThrow(
+      "remote_action_in_progress"
+    );
+    expect(fixture.coordination.actions.getRequired(action.actionId)).toMatchObject({
+      state: "recorded",
+      rejectionCode: undefined
+    });
+
+    resumeRetry.resolve();
+    await expect(winner).resolves.toMatchObject({ state: "settled" });
+    expect(fixture.coordination.actions.getRequired(action.actionId)).toMatchObject({
+      state: "settled",
+      rejectionCode: undefined
+    });
+    expect(
+      fixture.server.database
+        .prepare(
+          "SELECT COUNT(*) AS count FROM remote_execution_attempts WHERE execution_attempt_id=?"
+        )
+        .get(action.newExecutionAttemptId)?.count
+    ).toBe(1);
   });
 
   it.each([

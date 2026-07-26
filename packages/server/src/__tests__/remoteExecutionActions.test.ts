@@ -17,6 +17,7 @@ import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 
 const directories: string[] = [];
 const databases: SqliteDatabase[] = [];
+const serverInstanceOwnerToken = "00000000-0000-4000-8000-000000000023";
 
 afterEach(async () => {
   for (const database of databases.splice(0)) database.close();
@@ -45,7 +46,22 @@ async function setup() {
       acknowledged_at TEXT,
       settled_at TEXT,
       rejected_at TEXT,
-      rejection_code TEXT
+      rejection_code TEXT,
+      application_owner_token TEXT,
+      application_claimed_at TEXT,
+      application_decision_json TEXT
+    );
+    CREATE TABLE server_instance_ownership(
+      singleton INTEGER PRIMARY KEY,
+      owner_token TEXT NOT NULL,
+      process_id INTEGER NOT NULL,
+      hostname TEXT NOT NULL,
+      acquired_at TEXT NOT NULL
+    );
+    INSERT INTO server_instance_ownership(
+      singleton,owner_token,process_id,hostname,acquired_at
+    ) VALUES (
+      1,'${serverInstanceOwnerToken}',1,'test-host','2030-01-01T00:00:00.000Z'
     );
   `);
   let now = Date.parse("2030-01-01T00:00:00.000Z");
@@ -65,6 +81,27 @@ const cancelAction = {
   leaseId: "lease-1",
   reason: "operator requested cancellation"
 } as const;
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
+
+function runningSnapshot() {
+  return {
+    operationId: cancelAction.operationId,
+    dispatchId: cancelAction.dispatchId,
+    executionAttemptId: cancelAction.executionAttemptId,
+    attemptStatus: "running" as const,
+    attemptVersion: cancelAction.expectedAttemptVersion,
+    leaseId: cancelAction.leaseId,
+    leaseFenced: false,
+    hostCapabilities: []
+  };
+}
 
 describe("RemoteExecutionActionRepository", () => {
   it("replays an identical action and rejects an action-id payload conflict", async () => {
@@ -93,22 +130,26 @@ describe("RemoteExecutionActionRepository", () => {
   it("persists policy rejection as a terminal non-replayable action", async () => {
     const { repository } = await setup();
     let applications = 0;
-    const service = new RemoteExecutionActionService(repository, {
-      snapshot: (request) => ({
-        operationId: request.operationId,
-        dispatchId: request.dispatchId,
-        executionAttemptId: request.executionAttemptId,
-        attemptStatus: "running",
-        attemptVersion: request.expectedAttemptVersion,
-        leaseId: request.kind === "cancel" ? request.leaseId : undefined,
-        leaseFenced: false,
-        hostCapabilities: []
-      }),
-      apply: () => {
-        applications += 1;
-        throw new RemoteExecutionActionRejectedError("work_not_agent_assigned");
-      }
-    });
+    const service = new RemoteExecutionActionService(
+      repository,
+      {
+        snapshot: (request) => ({
+          operationId: request.operationId,
+          dispatchId: request.dispatchId,
+          executionAttemptId: request.executionAttemptId,
+          attemptStatus: "running",
+          attemptVersion: request.expectedAttemptVersion,
+          leaseId: request.kind === "cancel" ? request.leaseId : undefined,
+          leaseFenced: false,
+          hostCapabilities: []
+        }),
+        apply: () => {
+          applications += 1;
+          throw new RemoteExecutionActionRejectedError("work_not_agent_assigned");
+        }
+      },
+      serverInstanceOwnerToken
+    );
 
     await expect(service.execute(cancelAction)).rejects.toMatchObject({
       code: "work_not_agent_assigned"
@@ -145,16 +186,20 @@ describe("RemoteExecutionActionRepository", () => {
   it("recovers an application effect before stale snapshot validation", async () => {
     const { repository } = await setup();
     let snapshots = 0;
-    const service = new RemoteExecutionActionService(repository, {
-      recover: () => "settled",
-      snapshot: () => {
-        snapshots += 1;
-        throw new Error("stale_snapshot_must_not_be_read");
+    const service = new RemoteExecutionActionService(
+      repository,
+      {
+        recover: () => "settled",
+        snapshot: () => {
+          snapshots += 1;
+          throw new Error("stale_snapshot_must_not_be_read");
+        },
+        apply: () => {
+          throw new Error("effect_must_not_be_reapplied");
+        }
       },
-      apply: () => {
-        throw new Error("effect_must_not_be_reapplied");
-      }
-    });
+      serverInstanceOwnerToken
+    );
     await expect(service.execute(cancelAction)).resolves.toMatchObject({ state: "settled" });
     expect(snapshots).toBe(0);
   });
@@ -176,32 +221,180 @@ describe("RemoteExecutionActionRepository", () => {
   it("persists an exact action before invoking its application side effect", async () => {
     const { repository, database } = await setup();
     const applied: string[] = [];
-    const service = new RemoteExecutionActionService(repository, {
-      snapshot: (request) => ({
-        operationId: request.operationId,
-        dispatchId: request.dispatchId,
-        executionAttemptId: request.executionAttemptId,
-        attemptStatus: "running",
-        attemptVersion: request.expectedAttemptVersion,
-        leaseId: request.kind === "cancel" ? request.leaseId : undefined,
-        leaseFenced: false,
-        hostCapabilities: []
-      }),
-      apply: (request, decision) => {
-        expect(
-          database
-            .prepare("SELECT state FROM remote_execution_actions WHERE action_id=?")
-            .get(request.actionId)?.state
-        ).toBe("recorded");
-        expect(decision).toEqual({ transition: "cancel", sendsCommand: true });
-        applied.push(request.actionId);
-        return "delivered";
-      }
-    });
+    const service = new RemoteExecutionActionService(
+      repository,
+      {
+        snapshot: (request) => ({
+          operationId: request.operationId,
+          dispatchId: request.dispatchId,
+          executionAttemptId: request.executionAttemptId,
+          attemptStatus: "running",
+          attemptVersion: request.expectedAttemptVersion,
+          leaseId: request.kind === "cancel" ? request.leaseId : undefined,
+          leaseFenced: false,
+          hostCapabilities: []
+        }),
+        apply: (request, decision) => {
+          expect(
+            database
+              .prepare("SELECT state FROM remote_execution_actions WHERE action_id=?")
+              .get(request.actionId)?.state
+          ).toBe("recorded");
+          expect(decision).toEqual({ transition: "cancel", sendsCommand: true });
+          applied.push(request.actionId);
+          return "delivered";
+        }
+      },
+      serverInstanceOwnerToken
+    );
 
     await expect(service.execute(cancelAction)).resolves.toMatchObject({ state: "delivered" });
     await expect(service.execute(cancelAction)).resolves.toMatchObject({ state: "delivered" });
     expect(applied).toEqual([cancelAction.actionId]);
+  });
+
+  it("joins identical concurrent execution within one service", async () => {
+    const { repository } = await setup();
+    const entered = deferred<void>();
+    const resume = deferred<void>();
+    let applications = 0;
+    const service = new RemoteExecutionActionService(
+      repository,
+      {
+        snapshot: runningSnapshot,
+        apply: async () => {
+          applications += 1;
+          entered.resolve();
+          await resume.promise;
+          return "delivered";
+        }
+      },
+      serverInstanceOwnerToken
+    );
+
+    const first = service.execute(cancelAction);
+    await entered.promise;
+    const second = service.execute(cancelAction);
+    expect(second).toBe(first);
+    resume.resolve();
+    await expect(Promise.all([first, second])).resolves.toMatchObject([
+      { state: "delivered" },
+      { state: "delivered" }
+    ]);
+    expect(applications).toBe(1);
+  });
+
+  it("uses the database claim as authority across service and repository instances", async () => {
+    const { repository, database } = await setup();
+    const entered = deferred<void>();
+    const resume = deferred<void>();
+    const winner = new RemoteExecutionActionService(
+      repository,
+      {
+        snapshot: runningSnapshot,
+        apply: async () => {
+          entered.resolve();
+          await resume.promise;
+          return "delivered";
+        }
+      },
+      serverInstanceOwnerToken
+    );
+    const loser = new RemoteExecutionActionService(
+      new RemoteExecutionActionRepository(database),
+      {
+        snapshot: () => {
+          throw new Error("loser_must_not_snapshot");
+        },
+        apply: () => {
+          throw new Error("loser_must_not_apply");
+        }
+      },
+      serverInstanceOwnerToken
+    );
+
+    const winning = winner.execute(cancelAction);
+    await entered.promise;
+    await expect(loser.execute(cancelAction)).rejects.toThrow("remote_action_in_progress");
+    resume.resolve();
+    await expect(winning).resolves.toMatchObject({ state: "delivered" });
+  });
+
+  it("allows an explicit startup owner to recover a claim left by a crashed owner", async () => {
+    const { repository, database } = await setup();
+    repository.record(cancelAction);
+    repository.claimApplication(cancelAction.actionId, serverInstanceOwnerToken);
+    const restartedOwnerToken = "00000000-0000-4000-8000-000000000024";
+    database
+      .prepare(
+        `UPDATE server_instance_ownership SET owner_token=?
+         WHERE singleton=1 AND owner_token=?`
+      )
+      .run(restartedOwnerToken, serverInstanceOwnerToken);
+    let recovered = 0;
+    const restarted = new RemoteExecutionActionService(
+      new RemoteExecutionActionRepository(database),
+      {
+        recover: () => {
+          recovered += 1;
+          return "settled";
+        },
+        snapshot: () => {
+          throw new Error("startup_recovery_must_precede_snapshot");
+        },
+        apply: () => {
+          throw new Error("startup_recovery_must_not_reapply");
+        }
+      },
+      restartedOwnerToken
+    );
+
+    await expect(
+      restarted.reconcile({ serverInstanceOwnerToken: restartedOwnerToken })
+    ).resolves.toMatchObject([{ state: "settled" }]);
+    expect(recovered).toBe(1);
+  });
+
+  it("reuses the durable decision after startup takeover instead of resnapshotting", async () => {
+    const { repository, database } = await setup();
+    repository.record(cancelAction);
+    repository.claimApplication(cancelAction.actionId, serverInstanceOwnerToken);
+    repository.recordApplicationPlan(
+      cancelAction.actionId,
+      serverInstanceOwnerToken,
+      { transition: "cancel", sendsCommand: true },
+      { authorizedHostId: "host-before-crash", assignmentRevision: 7 }
+    );
+    const restartedOwnerToken = "00000000-0000-4000-8000-000000000025";
+    database
+      .prepare("UPDATE server_instance_ownership SET owner_token=? WHERE singleton=1")
+      .run(restartedOwnerToken);
+    let appliedDecision: unknown;
+    let appliedContext: unknown;
+    const restarted = new RemoteExecutionActionService(
+      new RemoteExecutionActionRepository(database),
+      {
+        recover: () => undefined,
+        snapshot: () => {
+          throw new Error("durable_decision_must_skip_changed_snapshot");
+        },
+        apply: (_request, decision, context) => {
+          appliedDecision = decision;
+          appliedContext = context;
+          return "delivered";
+        }
+      },
+      restartedOwnerToken
+    );
+
+    await expect(
+      restarted.reconcile({ serverInstanceOwnerToken: restartedOwnerToken })
+    ).resolves.toMatchObject([{ state: "delivered" }]);
+    expect(appliedDecision).toEqual({ transition: "cancel", sendsCommand: true });
+    expect(appliedContext).toEqual({
+      authorizedHostId: "host-before-crash",
+      assignmentRevision: 7
+    });
   });
 });
 
@@ -262,7 +455,7 @@ describe("remote execution action migration v22", () => {
     applyMigrations(database);
 
     expect(centralSchemaVersion(database)).toBe(latestCentralSchemaVersion);
-    expect(latestCentralSchemaVersion).toBe(22);
+    expect(latestCentralSchemaVersion).toBe(23);
     expect(
       new RemoteExecutionActionRepository(database).getRequired(cancelAction.actionId)
     ).toMatchObject({

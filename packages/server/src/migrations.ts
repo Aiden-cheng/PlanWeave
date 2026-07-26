@@ -1180,6 +1180,29 @@ function ensureRemoteActionRejectionState(database: SqliteDatabase): void {
   `);
 }
 
+function ensureServerInstanceAndRemoteActionClaims(database: SqliteDatabase): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS server_instance_ownership (
+      singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+      owner_token TEXT NOT NULL,
+      process_id INTEGER NOT NULL CHECK(process_id > 0),
+      hostname TEXT NOT NULL,
+      acquired_at TEXT NOT NULL
+    );
+  `);
+  if (!tableExists(database, "remote_execution_actions")) return;
+  const columns = database.prepare("PRAGMA table_info(remote_execution_actions)").all();
+  if (!columns.some((column) => column.name === "application_owner_token")) {
+    database.exec("ALTER TABLE remote_execution_actions ADD COLUMN application_owner_token TEXT");
+  }
+  if (!columns.some((column) => column.name === "application_claimed_at")) {
+    database.exec("ALTER TABLE remote_execution_actions ADD COLUMN application_claimed_at TEXT");
+  }
+  if (!columns.some((column) => column.name === "application_decision_json")) {
+    database.exec("ALTER TABLE remote_execution_actions ADD COLUMN application_decision_json TEXT");
+  }
+}
+
 function ensureHostSelectionColumn(database: SqliteDatabase): void {
   if (!tableExists(database, "remote_operations")) return;
   const hasColumn = database
@@ -1358,7 +1381,8 @@ const migrations: readonly Migration[] = [
     sql: "SELECT 1;",
     disableForeignKeys: true,
     after: ensureRemoteActionRejectionState
-  }
+  },
+  { version: 23, sql: "SELECT 1;", after: ensureServerInstanceAndRemoteActionClaims }
 ];
 
 export const latestCentralSchemaVersion = Math.max(

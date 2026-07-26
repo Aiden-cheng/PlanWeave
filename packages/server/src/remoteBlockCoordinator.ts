@@ -79,6 +79,7 @@ export type RemoteBlockCoordinatorOptions = {
    * automatic uses the deterministic selector with package capabilities.
    */
   assignmentGate?: AssignmentDispatchGate;
+  serverInstanceOwnerToken: string;
 };
 
 function buildEnvelope(operation: RemoteOperation, candidate: RemoteBlockDispatchCandidate) {
@@ -123,6 +124,7 @@ export class RemoteBlockCoordinator {
    * Assignment and dispatch remain separate operations: reassignment does not rewrite this map.
    */
   private readonly hostSelectionByOperation = new Map<string, DispatchHostSelectionSnapshot>();
+  private actionsCoordinator: RemoteBlockActionCoordinator | undefined;
 
   constructor(private readonly options: RemoteBlockCoordinatorOptions) {}
 
@@ -421,8 +423,10 @@ export class RemoteBlockCoordinator {
     return this.actionCoordinator().execute(rawAction);
   }
 
-  async reconcileActions(): Promise<RemoteExecutionActionRecord[]> {
-    return this.actionCoordinator().reconcile();
+  async reconcileActions(startupContext?: {
+    serverInstanceOwnerToken: string;
+  }): Promise<RemoteExecutionActionRecord[]> {
+    return this.actionCoordinator().reconcile(startupContext);
   }
 
   async requestCancel(operationId: string, reason: string): Promise<void> {
@@ -430,11 +434,12 @@ export class RemoteBlockCoordinator {
   }
 
   private actionCoordinator(): RemoteBlockActionCoordinator {
-    return new RemoteBlockActionCoordinator(this.options, {
+    this.actionsCoordinator ??= new RemoteBlockActionCoordinator(this.options, {
       reenter: (operationId) => this.reenter(operationId),
       fail: (operationId) => this.fail(operationId),
       checkpoint: () => this.checkpoint("after_action_side_effect")
     });
+    return this.actionsCoordinator;
   }
 
   async complete(operationId: string): Promise<void> {

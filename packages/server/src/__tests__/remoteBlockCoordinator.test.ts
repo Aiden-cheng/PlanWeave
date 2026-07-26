@@ -50,17 +50,21 @@ async function setup(withHost: boolean) {
   const registry = new RemoteRuntimePortRegistry();
   registry.bind(locator, runtime);
   const artifacts = new ArtifactStore(server.database, dataDirectory, 1024 * 1024);
-  const coordination = createRemoteBlockCoordination(server.database, {
-    leaseDurationMs: 60_000,
-    hostOfflineAfterMs: 60_000,
-    runtimeResolver: registry,
-    inputArtifacts: {
-      materialize: async (candidate) => {
-        if (candidate.inputArtifacts.length !== 0) throw new Error("unexpected_test_artifact");
-      }
+  const coordination = createRemoteBlockCoordination(
+    server.database,
+    {
+      leaseDurationMs: 60_000,
+      hostOfflineAfterMs: 60_000,
+      runtimeResolver: registry,
+      inputArtifacts: {
+        materialize: async (candidate) => {
+          if (candidate.inputArtifacts.length !== 0) throw new Error("unexpected_test_artifact");
+        }
+      },
+      artifactContent: { readReport: async (ref) => artifacts.read(ref) }
     },
-    artifactContent: { readReport: async (ref) => artifacts.read(ref) }
-  });
+    { serverInstanceOwnerToken: server.serverInstanceOwnerToken }
+  );
   const host = withHost ? coordination.hosts.register("Coordinator Host").host : undefined;
   if (host) coordination.hosts.reportOnline(host.id, ["acp.codex"], 1);
   return {
