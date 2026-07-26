@@ -1,6 +1,10 @@
 import { app, BrowserWindow } from "electron";
 import { realpath, writeFile } from "node:fs/promises";
 import { z } from "zod";
+import {
+  summarizeChromiumAccessibilityTree,
+  type ChromiumAxTree
+} from "./chromiumAccessibility.js";
 
 export const packagedStartupSmokeEvent = "PLANWEAVE_DESKTOP_STARTUP_SMOKE_READY";
 
@@ -907,14 +911,6 @@ async function waitForCollaborationInspectorWindow(mainWindow: BrowserWindow): P
   throw new Error("Collaboration accessibility smoke did not open the block inspector window.");
 }
 
-type ChromiumAxNode = {
-  role?: { value?: unknown };
-  name?: { value?: unknown };
-  properties?: Array<{ name?: unknown; value?: { value?: unknown } | unknown }>;
-};
-
-type ChromiumAxTree = { nodes?: ChromiumAxNode[] };
-
 async function readChromiumAccessibilityTree(window: BrowserWindow): Promise<ChromiumAxTree> {
   const debuggerSession = window.webContents.debugger;
   const attachedHere = !debuggerSession.isAttached();
@@ -924,38 +920,6 @@ async function readChromiumAccessibilityTree(window: BrowserWindow): Promise<Chr
   } finally {
     if (attachedHere && debuggerSession.isAttached()) debuggerSession.detach();
   }
-}
-
-function summarizeChromiumAccessibilityTree(tree: ChromiumAxTree, names: string[]): {
-  nodeCount: number;
-  namedRegion: boolean;
-  liveRegion: boolean;
-  roleNamePairs: number;
-} {
-  const nodes = tree.nodes ?? [];
-  const normalizedNames = names.map((name) => name.toLocaleLowerCase());
-  let namedRegion = false;
-  let liveRegion = false;
-  let roleNamePairs = 0;
-  for (const node of nodes) {
-    const role = String(node.role?.value ?? "").trim();
-    const name = String(node.name?.value ?? "").trim();
-    if (role && name) roleNamePairs += 1;
-    if (role && normalizedNames.some((expected) => name.toLocaleLowerCase().includes(expected))) {
-      namedRegion = true;
-    }
-    for (const property of node.properties ?? []) {
-      const propertyName = String(property.name ?? "");
-      const propertyValue =
-        typeof property.value === "object" && property.value !== null && "value" in property.value
-          ? String(property.value.value ?? "")
-          : String(property.value ?? "");
-      if (propertyName === "live" && propertyValue && propertyValue !== "off") {
-        liveRegion = true;
-      }
-    }
-  }
-  return { nodeCount: nodes.length, namedRegion, liveRegion, roleNamePairs };
 }
 
 async function runCollaborationAccessibilitySmoke(
@@ -1052,7 +1016,8 @@ async function runCollaborationAccessibilitySmoke(
   if (!commentsKeyboardAction) throw new Error("Comments tab keyboard action was not reflected.");
   const commentsAx = summarizeChromiumAccessibilityTree(
     await readChromiumAccessibilityTree(inspector),
-    ["评论", "Comments"]
+    ["评论", "Comments"],
+    { allowedRoles: ["group", "region"] }
   );
 
   const burst = (await inspector.webContents.executeJavaScript(`
@@ -1135,11 +1100,13 @@ async function runCollaborationAccessibilitySmoke(
   if (!activityKeyboardAction) throw new Error("Activity tab keyboard action was not reflected.");
   const activityAx = summarizeChromiumAccessibilityTree(
     await readChromiumAccessibilityTree(inspector),
-    ["活动", "Activity"]
+    ["活动", "Activity"],
+    { allowedRoles: ["group", "region"] }
   );
   const peopleAx = summarizeChromiumAccessibilityTree(
     await readChromiumAccessibilityTree(mainWindow),
-    ["成员", "People"]
+    ["成员", "People"],
+    { allowedRoles: ["dialog", "group", "region"] }
   );
   for (const [label, summary] of Object.entries({ people: peopleAx, comments: commentsAx, activity: activityAx })) {
     if (!summary.namedRegion || !summary.liveRegion || summary.roleNamePairs === 0) {

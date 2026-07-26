@@ -127,6 +127,7 @@ export function PeoplePresenceControl({
         align="start"
         className="w-[360px] p-3"
         data-testid="people-presence-popover"
+        aria-label={t("peopleTitle")}
         onCloseAutoFocus={(event) => {
           // Focus restoration only — not business state.
           event.preventDefault();
