@@ -4,6 +4,7 @@ import { handleAgentHostArtifactRequest } from "./artifactHttp.js";
 import {
   ActivityRepository,
   ActivityProjectionService,
+  ActivityRetentionMaintenance,
   activitySubjectSchema,
   CommentRepository,
   CommentService,
@@ -166,6 +167,7 @@ export async function createDistributedServerComposition(
   let artifactStore: ArtifactStore | undefined;
   let activityRepository: ActivityRepository | undefined;
   let activityProjection: ActivityProjectionService | undefined;
+  let activityRetention: ActivityRetentionMaintenance | undefined;
   let webSockets: AgentHostWebSocketServer | undefined;
   let requestListener: ((request: IncomingMessage, response: ServerResponse) => void) | undefined;
   const inflightRequests = new Set<Promise<void>>();
@@ -313,6 +315,8 @@ export async function createDistributedServerComposition(
         })
       );
     }
+    activityRetention = new ActivityRetentionMaintenance(initializedActivityRepository, clock);
+    await activityRetention.start();
     const membershipPort = createIdentityMembershipPort({ identity: humanIdentity });
     const hostPort = createHostAssignmentPort({
       hosts: coordination.hosts,
@@ -483,6 +487,11 @@ export async function createDistributedServerComposition(
         closePromise ??= (async () => {
           const errors: unknown[] = [];
           try {
+            await activityRetention?.close();
+          } catch (error) {
+            errors.push(error);
+          }
+          try {
             await drainTransports();
           } catch (error) {
             if (containsCleanupError(error, "server_http_inflight_drain_timeout")) {
@@ -510,6 +519,11 @@ export async function createDistributedServerComposition(
   } catch (error) {
     if (readiness.readiness().status !== "draining") readiness.transition("draining");
     const cleanupErrors: unknown[] = [];
+    try {
+      await activityRetention?.close();
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError);
+    }
     try {
       await drainCompositionTransports({
         httpServer: options.httpServer,

@@ -478,8 +478,9 @@ describe("CommentService", () => {
     stack.activity.database
       .prepare(
         `INSERT INTO activity_projection_outbox(
-          outbox_id,project_id,source_kind,source_id,activity_json,created_at,projected_at
-        ) VALUES (?,?,?,?,?,?, NULL)`
+          outbox_id,project_id,source_kind,source_id,activity_json,activity_occurred_at,
+          created_at,projected_at
+        ) VALUES (?,?,?,?,?,?,?, NULL)`
       )
       .run(
         "outbox-manual",
@@ -487,6 +488,7 @@ describe("CommentService", () => {
         "remote_run",
         "dispatch-2:failed",
         JSON.stringify(gapRecord),
+        gapRecord.occurredAt,
         gapRecord.occurredAt
       );
     const recon = stack.projection.reconcileOutbox(20);

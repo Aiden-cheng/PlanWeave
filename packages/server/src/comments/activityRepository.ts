@@ -4,6 +4,7 @@ import { inWriteTransaction, type SqliteDatabase } from "../sqlite.js";
 import { workItemKeyParts } from "../work/repository.js";
 import { workItemRefSchema, type WorkItemRef } from "../work/schemas.js";
 import { COMMENT_ACTIVITY_ERROR_MESSAGES, type CommentActivityErrorCode } from "./errors.js";
+import { ACTIVITY_RETENTION_MAX_AGE_MS } from "./limits.js";
 import {
   activityIdSchema,
   activityRecordSchema,
@@ -44,6 +45,7 @@ type OutboxRow = {
   source_kind: string;
   source_id: string;
   activity_json: string;
+  activity_occurred_at: string | null;
   created_at: string;
   projected_at: string | null;
 };
@@ -188,8 +190,9 @@ export class ActivityRepository {
     this.database
       .prepare(
         `INSERT INTO activity_projection_outbox(
-          outbox_id,project_id,source_kind,source_id,activity_json,created_at,projected_at
-        ) VALUES (?,?,?,?,?,?, NULL)
+          outbox_id,project_id,source_kind,source_id,activity_json,activity_occurred_at,
+          created_at,projected_at
+        ) VALUES (?,?,?,?,?,?,?, NULL)
         ON CONFLICT(project_id, source_kind, source_id) DO NOTHING`
       )
       .run(
@@ -198,6 +201,7 @@ export class ActivityRepository {
         parsed.source.kind,
         parsed.source.sourceId,
         JSON.stringify(parsed),
+        parsed.occurredAt,
         createdAt
       );
 
@@ -219,7 +223,10 @@ export class ActivityRepository {
   }
 
   /** List unprojected outbox rows oldest-first for reconciliation. */
-  listPendingOutbox(limit: number): Array<{
+  listPendingOutbox(
+    limit: number,
+    cutoff?: string
+  ): Array<{
     outboxId: string;
     projectId: string;
     sourceKind: ActivitySourceKind;
@@ -230,14 +237,25 @@ export class ActivityRepository {
     if (!Number.isSafeInteger(limit) || limit < 1) {
       throw new ActivityRepositoryError("activity_input_invalid");
     }
-    const rows = this.database
-      .prepare(
-        `SELECT * FROM activity_projection_outbox
-         WHERE projected_at IS NULL
-         ORDER BY created_at ASC, outbox_id ASC
-         LIMIT ?`
-      )
-      .all(limit) as OutboxRow[];
+    const rows = (
+      cutoff
+        ? this.database
+            .prepare(
+              `SELECT * FROM activity_projection_outbox
+             WHERE projected_at IS NULL AND activity_occurred_at >= ?
+             ORDER BY created_at ASC, outbox_id ASC
+             LIMIT ?`
+            )
+            .all(cutoff, limit)
+        : this.database
+            .prepare(
+              `SELECT * FROM activity_projection_outbox
+             WHERE projected_at IS NULL
+             ORDER BY created_at ASC, outbox_id ASC
+             LIMIT ?`
+            )
+            .all(limit)
+    ) as OutboxRow[];
     return rows.map((row) => ({
       outboxId: row.outbox_id,
       projectId: row.project_id,
@@ -266,9 +284,12 @@ export class ActivityRepository {
   /**
    * Project any pending outbox rows (idempotent insert). Returns counts for recovery metrics.
    */
-  reconcileOutbox(limit = 100): { processed: number; inserted: number; duplicates: number } {
+  reconcileOutbox(
+    limit = 100,
+    cutoff = new Date(Date.now() - ACTIVITY_RETENTION_MAX_AGE_MS).toISOString()
+  ): { processed: number; inserted: number; duplicates: number } {
     return inWriteTransaction(this.database, () => {
-      const pending = this.listPendingOutbox(limit);
+      const pending = this.listPendingOutbox(limit, cutoff);
       let inserted = 0;
       let duplicates = 0;
       for (const item of pending) {
@@ -283,6 +304,38 @@ export class ActivityRepository {
         );
       }
       return { processed: pending.length, inserted, duplicates };
+    });
+  }
+
+  /** Delete at most `limit` expired activity rows and outbox rows in one transaction. */
+  purgeExpired(cutoff: string, limit = 100): { records: number; outbox: number } {
+    if (Number.isNaN(Date.parse(cutoff)) || !Number.isSafeInteger(limit) || limit < 1) {
+      throw new ActivityRepositoryError("activity_input_invalid");
+    }
+    return inWriteTransaction(this.database, () => {
+      const outbox = this.database
+        .prepare(
+          `DELETE FROM activity_projection_outbox
+           WHERE outbox_id IN (
+             SELECT outbox_id FROM activity_projection_outbox
+             WHERE activity_occurred_at < ?
+             ORDER BY activity_occurred_at ASC, outbox_id ASC
+             LIMIT ?
+           )`
+        )
+        .run(cutoff, limit).changes;
+      const records = this.database
+        .prepare(
+          `DELETE FROM activity_records
+           WHERE activity_id IN (
+             SELECT activity_id FROM activity_records
+             WHERE occurred_at < ?
+             ORDER BY occurred_at ASC, activity_id ASC
+             LIMIT ?
+           )`
+        )
+        .run(cutoff, limit).changes;
+      return { records, outbox };
     });
   }
 

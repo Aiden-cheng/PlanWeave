@@ -23,7 +23,11 @@ import {
 } from "./activityProjection.js";
 import { nextActivityCursor, nextCommentCursor } from "./cursor.js";
 import { COMMENT_ACTIVITY_ERROR_MESSAGES, type CommentActivityErrorCode } from "./errors.js";
-import { ACTIVITY_LIST_PAGE_DEFAULT, COMMENT_LIST_PAGE_DEFAULT } from "./limits.js";
+import {
+  ACTIVITY_LIST_PAGE_DEFAULT,
+  ACTIVITY_RETENTION_MAX_AGE_MS,
+  COMMENT_LIST_PAGE_DEFAULT
+} from "./limits.js";
 import {
   authorizeActivityList,
   authorizeCommentList,
@@ -522,7 +526,8 @@ export class ActivityProjectionService {
 
   /** Recover projection gaps: flush unprojected outbox rows (idempotent). */
   reconcileOutbox(limit = 100): { processed: number; inserted: number; duplicates: number } {
-    return this.activity.reconcileOutbox(limit);
+    const cutoff = new Date(this.clock().getTime() - ACTIVITY_RETENTION_MAX_AGE_MS).toISOString();
+    return this.activity.reconcileOutbox(limit, cutoff);
   }
 
   listForActor(

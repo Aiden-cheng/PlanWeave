@@ -174,6 +174,12 @@ export {
 } from "./service.js";
 
 export {
+  ACTIVITY_RETENTION_SWEEP_INTERVAL_MS,
+  ACTIVITY_RETENTION_SWEEP_LIMIT,
+  ActivityRetentionMaintenance
+} from "./retention.js";
+
+export {
   handleCommentActivityHttpRequest,
   resetCommentActivityHttpRateLimits,
   type CommentActivityHttpOptions

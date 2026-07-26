@@ -12,8 +12,22 @@ const cleanupSpies = vi.hoisted(() => ({
   webSocketClose: vi.fn(async () => {
     throw new Error("websocket_close_failed");
   }),
+  retentionStart: vi.fn(async () => {}),
+  retentionClose: vi.fn(async () => {}),
   runtimeRegistryClose: vi.fn()
 }));
+
+vi.mock("../comments/index.js", async () => {
+  const actual =
+    await vi.importActual<typeof import("../comments/index.js")>("../comments/index.js");
+  return {
+    ...actual,
+    ActivityRetentionMaintenance: class {
+      start = cleanupSpies.retentionStart;
+      close = cleanupSpies.retentionClose;
+    }
+  };
+});
 
 vi.mock("../wsServer.js", async () => {
   const actual = await vi.importActual<typeof import("../wsServer.js")>("../wsServer.js");
@@ -55,6 +69,8 @@ const directories: string[] = [];
 
 afterEach(async () => {
   cleanupSpies.webSocketClose.mockClear();
+  cleanupSpies.retentionStart.mockClear();
+  cleanupSpies.retentionClose.mockClear();
   cleanupSpies.runtimeRegistryClose.mockClear();
   await Promise.all(
     directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
@@ -103,10 +119,13 @@ describe("distributed server composition cleanup", () => {
 
     await expect(composition.close()).rejects.toThrow("distributed_server_cleanup_failed");
     expect(cleanupSpies.webSocketClose).toHaveBeenCalledOnce();
+    expect(cleanupSpies.retentionStart).toHaveBeenCalledOnce();
+    expect(cleanupSpies.retentionClose).toHaveBeenCalledOnce();
     expect(cleanupSpies.runtimeRegistryClose).toHaveBeenCalledOnce();
     expect(composition.readiness()).toMatchObject({ status: "draining" });
     await expect(composition.close()).rejects.toThrow("distributed_server_cleanup_failed");
     expect(cleanupSpies.webSocketClose).toHaveBeenCalledOnce();
+    expect(cleanupSpies.retentionClose).toHaveBeenCalledOnce();
     expect(cleanupSpies.runtimeRegistryClose).toHaveBeenCalledOnce();
   });
 });

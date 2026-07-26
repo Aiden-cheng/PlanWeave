@@ -1351,6 +1351,29 @@ function ensureMembershipRevision(database: SqliteDatabase): void {
   );
 }
 
+function ensureActivityRetentionIndexes(database: SqliteDatabase): void {
+  if (tableExists(database, "activity_records")) {
+    database.exec(
+      "CREATE INDEX IF NOT EXISTS idx_activity_records_retention ON activity_records(occurred_at, activity_id)"
+    );
+  }
+  if (!tableExists(database, "activity_projection_outbox")) return;
+  const columns = database.prepare("PRAGMA table_info(activity_projection_outbox)").all();
+  if (!columns.some((row) => row.name === "activity_occurred_at")) {
+    database.exec("ALTER TABLE activity_projection_outbox ADD COLUMN activity_occurred_at TEXT");
+  }
+  if (columns.some((row) => row.name === "activity_json")) {
+    database.exec(`
+      UPDATE activity_projection_outbox
+      SET activity_occurred_at=json_extract(activity_json, '$.occurredAt')
+      WHERE activity_occurred_at IS NULL
+    `);
+  }
+  database.exec(
+    "CREATE INDEX IF NOT EXISTS idx_activity_outbox_retention ON activity_projection_outbox(activity_occurred_at, outbox_id)"
+  );
+}
+
 type Migration = {
   version: number;
   sql: string;
@@ -1395,7 +1418,8 @@ const migrations: readonly Migration[] = [
     after: ensureRemoteActionRejectionState
   },
   { version: 23, sql: "SELECT 1;", after: ensureServerInstanceAndRemoteActionClaims },
-  { version: 24, sql: "SELECT 1;", after: ensureMembershipRevision }
+  { version: 24, sql: "SELECT 1;", after: ensureMembershipRevision },
+  { version: 25, sql: "SELECT 1;", after: ensureActivityRetentionIndexes }
 ];
 
 export const latestCentralSchemaVersion = Math.max(

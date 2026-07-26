@@ -87,11 +87,23 @@ describe("comment/activity migration v20", () => {
     }
     applyMigrations(database);
     expect(centralSchemaVersion(database)).toBe(latestCentralSchemaVersion);
-    expect(latestCentralSchemaVersion).toBe(24);
+    expect(latestCentralSchemaVersion).toBe(25);
 
     for (const table of ["comments", "activity_records", "activity_projection_outbox"]) {
       expect(
         database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)
+      ).toBeDefined();
+    }
+    expect(
+      database
+        .prepare(
+          "SELECT 1 FROM pragma_table_info('activity_projection_outbox') WHERE name='activity_occurred_at'"
+        )
+        .get()
+    ).toBeDefined();
+    for (const index of ["idx_activity_records_retention", "idx_activity_outbox_retention"]) {
+      expect(
+        database.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name=?").get(index)
       ).toBeDefined();
     }
   });
@@ -216,6 +228,45 @@ describe("comment repository", () => {
 });
 
 describe("activity repository", () => {
+  it("purges expired records and outbox rows in bounded batches without reviving them", async () => {
+    const { activity } = await openMigrated();
+    const cutoff = "2025-07-26T12:00:00.000Z";
+    for (const [activityId, commentId, occurredAt] of [
+      ["act-expired-1", "comment-expired-1", "2025-07-25T12:00:00.000Z"],
+      ["act-expired-2", "comment-expired-2", "2025-07-26T11:59:59.999Z"],
+      ["act-boundary", "comment-boundary", cutoff]
+    ] as const) {
+      const record = buildCommentActivity({
+        activityId,
+        projectId: "project-a",
+        type: "comment_created",
+        commentId,
+        workItem: taskItem,
+        authorHumanPrincipalId: "human-1",
+        revision: 1,
+        occurredAt
+      });
+      activity.enqueueAndProject(record, occurredAt);
+    }
+    activity.database
+      .prepare(
+        "UPDATE activity_projection_outbox SET projected_at=NULL WHERE activity_occurred_at < ?"
+      )
+      .run(cutoff);
+
+    expect(activity.purgeExpired(cutoff, 1)).toEqual({ records: 1, outbox: 1 });
+    expect(activity.reconcileOutbox(10, cutoff)).toEqual({
+      processed: 0,
+      inserted: 0,
+      duplicates: 0
+    });
+    expect(activity.purgeExpired(cutoff, 1)).toEqual({ records: 1, outbox: 1 });
+    expect(activity.list({ projectId: "project-a", limit: 10 })).toHaveLength(1);
+    expect(activity.getBySource("project-a", "comment", "comment-boundary")?.activityId).toBe(
+      "act-boundary"
+    );
+  });
+
   it("inserts idempotently by source and supports outbox reconciliation", async () => {
     const { activity } = await openMigrated();
     const record = buildMembershipActivity({
@@ -253,8 +304,9 @@ describe("activity repository", () => {
     activity.database
       .prepare(
         `INSERT INTO activity_projection_outbox(
-          outbox_id,project_id,source_kind,source_id,activity_json,created_at,projected_at
-        ) VALUES (?,?,?,?,?,?, NULL)`
+          outbox_id,project_id,source_kind,source_id,activity_json,activity_occurred_at,
+          created_at,projected_at
+        ) VALUES (?,?,?,?,?,?,?, NULL)`
       )
       .run(
         "outbox-gap",
@@ -262,6 +314,7 @@ describe("activity repository", () => {
         gap.source.kind,
         gap.source.sourceId,
         JSON.stringify(gap),
+        gap.occurredAt,
         gap.occurredAt
       );
 
