@@ -30,6 +30,8 @@ import { handleOperatorHttpRequest } from "./operatorHttp.js";
 import { serverPackageVersion } from "./packageInfo.js";
 import { ServerReadinessController, type ServerReadiness } from "./readiness.js";
 import { RemoteControlService } from "./remoteControlService.js";
+import { HumanRemoteControlService } from "./humanRemoteControlService.js";
+import { handleHumanRemoteHttpRequest } from "./humanRemoteHttp.js";
 import {
   ArtifactStoreRemoteContent,
   RuntimeInputArtifactMaterializer
@@ -170,6 +172,7 @@ export async function createDistributedServerComposition(
   let activityRetention: ActivityRetentionMaintenance | undefined;
   let webSockets: AgentHostWebSocketServer | undefined;
   let requestListener: ((request: IncomingMessage, response: ServerResponse) => void) | undefined;
+  let humanIdentityForInteractions: HumanIdentityRepository | undefined;
   const inflightRequests = new Set<Promise<void>>();
   try {
     const authorization = new OperatorTokenRegistry(config.operatorCredentials);
@@ -204,7 +207,20 @@ export async function createDistributedServerComposition(
             artifactStore
           ),
           artifactContent: new ArtifactStoreRemoteContent(artifactStore),
-          interactionAuthorization: authorization,
+          interactionAuthorization: {
+            canRespond: (input) => {
+              if (authorization.canRespond(input)) return true;
+              if (!humanIdentityForInteractions) {
+                throw new Error("human_identity_not_initialized");
+              }
+              return (
+                humanIdentityForInteractions.getActiveMembership(
+                  input.projectId,
+                  input.responderId
+                ) !== undefined
+              );
+            }
+          },
           eventRetentionMaxEvents: config.limits.eventRetentionMaxEvents,
           eventRetentionMaxBytes: config.limits.eventRetentionMaxBytes,
           onAssignmentUpdatedInTransaction: (record) => {
@@ -281,6 +297,7 @@ export async function createDistributedServerComposition(
         });
       }
     });
+    humanIdentityForInteractions = humanIdentity;
     const humanMembership = new HumanMembershipService({
       repository: humanIdentity,
       projectAuthority: runtimeRegistry,
@@ -367,11 +384,29 @@ export async function createDistributedServerComposition(
       interactions: coordination.interactions,
       disconnectHost: (hostId) => attachedWebSockets.disconnectHost(hostId)
     });
+    const humanRemoteControl = new HumanRemoteControlService({
+      operations: coordination.operations,
+      dispatches: coordination.dispatches,
+      coordinator: coordination.coordinator,
+      events: coordination.acpEvents,
+      interactions: coordination.interactions
+    });
     requestListener = (request: IncomingMessage, response: ServerResponse) => {
       const operation = (async () => {
         if (requiresAdmission(request) && readiness.readiness().status !== "ready") {
           request.resume();
           respond(response, 503, "server_not_accepting_mutations");
+          return;
+        }
+        if (
+          await handleHumanRemoteHttpRequest(request, response, {
+            service: humanRemoteControl,
+            repository: humanIdentity,
+            projectAuthority: runtimeRegistry,
+            readiness: () => readiness.readiness(),
+            allowInsecureDevelopment: config.allowInsecureDevelopment
+          })
+        ) {
           return;
         }
         if (

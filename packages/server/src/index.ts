@@ -1,6 +1,16 @@
 export { ArtifactStore, type ArtifactMetadata } from "./artifacts.js";
 export { artifactMediaTypeSchema } from "./artifactMediaType.js";
 export {
+  HumanRemoteControlError,
+  HumanRemoteControlService,
+  type HumanRemoteControlServiceOptions
+} from "./humanRemoteControlService.js";
+export {
+  handleHumanRemoteHttpRequest,
+  type HumanRemoteHttpOptions
+} from "./humanRemoteHttp.js";
+
+export {
   ArtifactAuthorizationRepository,
   type AcceptedArtifactProvenance,
   type ArtifactGrant,
