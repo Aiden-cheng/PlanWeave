@@ -176,6 +176,7 @@
         "collaborationBridge.test.ts",
         "collaborationClient.test.ts",
         "collaborationPresence.test.ts",
+        "collaborationPresenceTwoClientE2E.test.ts",
         "collaborationIpcTrustMatrix.test.ts",
         "collaborationServerE2E.test.ts",
         "desktopImportRecoveryHook.test.tsx",
