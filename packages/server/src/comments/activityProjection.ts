@@ -12,12 +12,6 @@ import {
   type ActivityType
 } from "./schemas.js";
 
-/** Replace block-ref `#` so composite source ids stay opaque-identifier-safe. */
-export function opaqueWorkItemKey(workItem: WorkItemRef): string {
-  if (workItem.kind === "task") return workItem.taskId;
-  return workItem.blockRef.replaceAll("#", "--");
-}
-
 type ActivitySourceIdentity = string | number | readonly ActivitySourceIdentity[];
 
 function versionedActivitySourceId(

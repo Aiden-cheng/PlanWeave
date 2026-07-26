@@ -155,7 +155,6 @@ export {
   buildRemoteRunActivity,
   commentActivitySourceId,
   membershipActivitySourceId,
-  opaqueWorkItemKey,
   remoteRunActivitySourceId,
   type AssignmentActivityInput,
   type CommentActivityInput,
