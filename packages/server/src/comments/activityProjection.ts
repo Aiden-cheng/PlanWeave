@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { humanPrincipalIdSchema, type ProjectMemberRole } from "../identity/schemas.js";
 import type { WorkItemRef } from "../work/schemas.js";
 import { ACTIVITY_HEADLINE_MAX_LENGTH } from "./limits.js";
@@ -15,6 +16,18 @@ import {
 export function opaqueWorkItemKey(workItem: WorkItemRef): string {
   if (workItem.kind === "task") return workItem.taskId;
   return workItem.blockRef.replaceAll("#", "--");
+}
+
+type ActivitySourceIdentity = string | number | readonly ActivitySourceIdentity[];
+
+function versionedActivitySourceId(
+  kind: "assignment" | "membership",
+  identity: readonly ActivitySourceIdentity[]
+): string {
+  const digest = createHash("sha256")
+    .update(JSON.stringify(["activity-source/v1", kind, identity]))
+    .digest("hex");
+  return `${kind}:v1:${digest}`;
 }
 
 export function membershipActivitySourceId(
@@ -51,8 +64,16 @@ export function commentActivitySourceId(
   }
 }
 
-export function assignmentActivitySourceId(workItem: WorkItemRef, revision: number): string {
-  return `${workItem.canvasId}:${workItem.kind}:${opaqueWorkItemKey(workItem)}:r${revision}`;
+export function assignmentActivitySourceId(
+  projectId: string,
+  workItem: WorkItemRef,
+  revision: number
+): string {
+  const structuredWorkItem: readonly ActivitySourceIdentity[] =
+    workItem.kind === "task"
+      ? [workItem.kind, workItem.canvasId, workItem.taskId]
+      : [workItem.kind, workItem.canvasId, workItem.blockRef];
+  return versionedActivitySourceId("assignment", [projectId, structuredWorkItem, revision]);
 }
 
 export function remoteRunActivitySourceId(
@@ -145,7 +166,11 @@ export function buildAssignmentActivity(input: AssignmentActivityInput): Activit
     type: "assignment_updated",
     source: {
       kind: "assignment",
-      sourceId: assignmentActivitySourceId(input.workItem, input.assignmentRevision)
+      sourceId: assignmentActivitySourceId(
+        input.projectId,
+        input.workItem,
+        input.assignmentRevision
+      )
     },
     summary,
     subjects,

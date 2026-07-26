@@ -37,8 +37,7 @@ afterEach(async () => {
   );
 });
 
-async function setup() {
-  const manifest = basicManifest();
+async function setup(manifest: PlanPackageManifest = basicManifest()) {
   const projectA = await createTestWorkspace(manifest);
   const projectBRoot = await mkdtemp(join(tmpdir(), "planweave-project-b-"));
   const projectBInit: InitWorkspaceResult = await initWorkspace({ projectRoot: projectBRoot });
@@ -404,5 +403,80 @@ describe("comment and activity production HTTP", () => {
       { headers: { Authorization: `Bearer ${otherToken}` } }
     );
     expect(crossProject.status).toBe(401);
+  });
+
+  it("commits distinct CAS assignments for work-item refs that previously shared a source key", async () => {
+    const manifest = basicManifest();
+    manifest.nodes.push(
+      {
+        id: "A",
+        type: "task",
+        title: "Collision prefix task",
+        prompt: "nodes/A/prompt.md",
+        acceptance: ["Assignment succeeds."],
+        blocks: [
+          {
+            id: "B--C",
+            type: "implementation",
+            title: "First collision block",
+            prompt: "nodes/A/blocks/B--C.prompt.md",
+            depends_on: []
+          }
+        ]
+      },
+      {
+        id: "A--B",
+        type: "task",
+        title: "Collision suffix task",
+        prompt: "nodes/A--B/prompt.md",
+        acceptance: ["Assignment succeeds."],
+        blocks: [
+          {
+            id: "C",
+            type: "implementation",
+            title: "Second collision block",
+            prompt: "nodes/A--B/blocks/C.prompt.md",
+            depends_on: []
+          }
+        ]
+      }
+    );
+    const fixture = await setup(manifest);
+    const projectId = fixture.projectA.init.workspace.id;
+    const ownerToken = await bootstrap(fixture.origin, projectId, "collision-owner");
+    const workItems = [
+      { kind: "block" as const, canvasId: "default", blockRef: "A#B--C" },
+      { kind: "block" as const, canvasId: "default", blockRef: "A--B#C" }
+    ];
+
+    for (const workItem of workItems) {
+      const response = await fetch(
+        `${fixture.origin}/api/v1/projects/${projectId}/assignments`,
+        {
+          method: "POST",
+          headers: jsonHeaders(ownerToken),
+          body: JSON.stringify({
+            workItem,
+            target: { kind: "unassigned" },
+            expectedRevision: 0
+          })
+        }
+      );
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({ workItem, revision: 1 });
+    }
+
+    const feed = await fetch(`${fixture.origin}/api/v1/projects/${projectId}/activity?limit=20`, {
+      headers: { Authorization: `Bearer ${ownerToken}` }
+    });
+    expect(feed.status).toBe(200);
+    const body = (await feed.json()) as {
+      items: Array<{ type: string; source: { kind: string; sourceId: string } }>;
+    };
+    const assignmentSources = body.items
+      .filter((item) => item.type === "assignment_updated")
+      .map((item) => item.source.sourceId);
+    expect(assignmentSources).toHaveLength(2);
+    expect(new Set(assignmentSources).size).toBe(2);
   });
 });

@@ -55,7 +55,7 @@ describe("activity projection builders", () => {
       occurredAt: "2026-07-24T12:01:00.000Z"
     });
     expect(assignment.type).toBe("assignment_updated");
-    expect(assignment.source.sourceId).toBe(assignmentActivitySourceId(block, 3));
+    expect(assignment.source.sourceId).toBe(assignmentActivitySourceId("project-a", block, 3));
     expect(assignment.source.sourceId).not.toContain("#");
     expect(JSON.stringify(assignment)).not.toMatch(/prompt|token|tool_call/i);
 
@@ -73,6 +73,41 @@ describe("activity projection builders", () => {
     );
     expect(remote.summary.dispatchId).toBe("dispatch-1");
     expect(remote.subjects.some((s) => s.kind === "host")).toBe(true);
+  });
+
+  it("uses bounded collision-resistant assignment source ids for complete work-item refs", () => {
+    const first = {
+      kind: "block" as const,
+      canvasId: "default",
+      blockRef: "A#B--C"
+    };
+    const second = {
+      kind: "block" as const,
+      canvasId: "default",
+      blockRef: "A--B#C"
+    };
+    expect(assignmentActivitySourceId("project-a", first, 1)).not.toBe(
+      assignmentActivitySourceId("project-a", second, 1)
+    );
+    expect(assignmentActivitySourceId("project-b", first, 1)).not.toBe(
+      assignmentActivitySourceId("project-a", first, 1)
+    );
+
+    const maximalTask = {
+      kind: "task" as const,
+      canvasId: "c".repeat(128),
+      taskId: "t".repeat(128)
+    };
+    const maximal = buildAssignmentActivity({
+      activityId: "act-max",
+      projectId: "p".repeat(128),
+      workItem: maximalTask,
+      assignmentRevision: Number.MAX_SAFE_INTEGER,
+      targetHeadline: "Assignment updated",
+      occurredAt: "2026-07-24T12:01:00.000Z"
+    });
+    expect(maximal.source.sourceId).toMatch(/^assignment:v1:[0-9a-f]{64}$/);
+    expect(maximal.source.sourceId.length).toBeLessThanOrEqual(128);
   });
 
   it("builds comment activities keyed by comment lifecycle", () => {
