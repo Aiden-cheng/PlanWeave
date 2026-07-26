@@ -474,7 +474,9 @@ export class RealProcessLifecycleClient {
     try {
       return database
         .prepare(
-          "SELECT artifact_ref,purpose,permission,grant_id FROM dispatch_artifact_links WHERE dispatch_id=?"
+          `SELECT project_id,host_id,dispatch_id,lease_id,execution_attempt_id,artifact_ref,
+                  purpose,permission,logical_name,grant_id,produced_by_host_id,linked_at
+           FROM dispatch_artifact_links WHERE dispatch_id=? ORDER BY link_id`
         )
         .all(dispatchId);
     } finally {
@@ -574,6 +576,15 @@ export class RealProcessLifecycleClient {
     const digest = createHash("sha256").update(bytes).digest("hex");
     if (digest !== sha256) throw new Error("real_process_lifecycle_artifact_digest_mismatch");
     return bytes;
+  }
+
+  serverArtifactBlobExists(artifactRef: string): boolean {
+    const match = /^artifact:sha256:([a-f0-9]{64})$/.exec(artifactRef);
+    if (!match) throw new Error(`real_process_lifecycle_artifact_ref_invalid:${artifactRef}`);
+    const sha256 = match[1];
+    return existsSync(
+      join(this.harness.paths.serverData, "artifacts", "sha256", sha256.slice(0, 2), sha256)
+    );
   }
 
   readServerEnvelopeCanonical(dispatchId: string): string {

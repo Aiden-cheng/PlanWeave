@@ -8,9 +8,12 @@
  */
 import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
+import { claimDispatchedBlock, submitBlockResult } from "@planweave-ai/runtime";
 import { afterEach, describe, expect, it } from "vitest";
+import { writeReport } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import {
   RealProcessAcpHarness,
+  remoteAcpManifestWithDependency,
   type RealProcessAcpHarnessOptions
 } from "./support/realProcessAcpHarness.js";
 import { RealProcessLifecycleClient } from "./support/realProcessLifecycleClient.js";
@@ -487,11 +490,36 @@ describe("real-process adversarial authorization matrix", () => {
     expect(terminal.state).toBe("completed");
   }, 120_000);
 
-  it("process auth matrix: cross-host/project, artifact, envelope, lease, revoke, oversize", async () => {
-    const { harness, client } = await createHarness({ hostCapacity: 2 });
+  it("process artifact auth matrix proves positive seams before exact denials", async () => {
+    const { harness, client } = await createHarness({
+      hostCapacity: 2,
+      manifest: remoteAcpManifestWithDependency()
+    });
+    const inputContent = "authorization matrix upstream input\n";
+    const previousPlanWeaveHome = process.env.PLANWEAVE_HOME;
+    try {
+      process.env.PLANWEAVE_HOME = harness.paths.projectHome;
+      await claimDispatchedBlock({
+        projectRoot: harness.paths.projectRoot,
+        ref: "T-001#B-001"
+      });
+      const reportPath = await writeReport(
+        harness.paths.projectRoot,
+        "authorization-input.md",
+        inputContent
+      );
+      await submitBlockResult({
+        projectRoot: harness.paths.projectRoot,
+        ref: "T-001#B-001",
+        reportPath
+      });
+    } finally {
+      if (previousPlanWeaveHome === undefined) delete process.env.PLANWEAVE_HOME;
+      else process.env.PLANWEAVE_HOME = previousPlanWeaveHome;
+    }
+
     await harness.startAll();
     await harness.acpControl.pause(["session/prompt"]);
-
     const ownerHost = await harness.waitForHostOnline();
     const ownerCredential = client.readHostCredential();
     expect(ownerCredential.hostId).toBe(ownerHost.id);
@@ -508,7 +536,7 @@ describe("real-process adversarial authorization matrix", () => {
     expect(foreignCredential.hostId).not.toBe(ownerCredential.hostId);
 
     const dispatched = await client.dispatch({
-      blockRef: "T-001#B-001",
+      blockRef: "T-001#B-002",
       idempotencyKey: "auth-matrix-process-scope-1"
     });
     await client.waitForDispatchStatus(dispatched.operationId, ["leased", "running"]);
@@ -519,228 +547,339 @@ describe("real-process adversarial authorization matrix", () => {
     expect(view.attempt.hostId).toBe(ownerHost.id);
 
     const envelopeBefore = client.readServerEnvelopeCanonical(view.dispatchId);
-    expect(envelopeBefore.length).toBeGreaterThan(0);
     const envelope = client.readServerEnvelope(view.dispatchId);
     expect(envelope).toMatchObject({
       projectId: harness.projectId,
-      blockRef: "T-001#B-001",
+      blockRef: "T-001#B-002",
       execution: {
         dispatchId: view.dispatchId,
         attemptId: view.executionAttemptId
       }
     });
+    const inputArtifacts = envelope.inputArtifacts as Array<{
+      artifactRef: string;
+      logicalName: string;
+    }>;
+    expect(inputArtifacts).toHaveLength(1);
+    const inputArtifact = inputArtifacts[0];
+    const inputSha = inputArtifact.artifactRef.slice("artifact:sha256:".length);
+    expect(client.readServerArtifactBytes(inputArtifact.artifactRef)).toEqual(
+      Buffer.from(inputContent)
+    );
 
-    const probeBytes = Buffer.from("auth-matrix-probe-payload\n", "utf8");
-    const probeSha = createHash("sha256").update(probeBytes).digest("hex");
-    const artifactUrl = (overrides?: {
-      hostId?: string;
-      leaseId?: string;
-      executionAttemptId?: string;
-      sha256?: string;
-    }) =>
+    const artifactFixture = (label: string) => {
+      const bytes = Buffer.from(`auth-matrix-${label}\n`, "utf8");
+      const sha256 = createHash("sha256").update(bytes).digest("hex");
+      return { bytes, sha256, ref: `artifact:sha256:${sha256}` };
+    };
+    const artifactUrl = (
+      sha256: string,
+      overrides?: { hostId?: string; leaseId?: string; executionAttemptId?: string }
+    ) =>
       client.artifactUrl({
         hostId: overrides?.hostId ?? ownerCredential.hostId,
         dispatchId: view.dispatchId,
         leaseId: overrides?.leaseId ?? leaseId!,
         executionAttemptId: overrides?.executionAttemptId ?? view.executionAttemptId,
-        sha256: overrides?.sha256 ?? probeSha
+        sha256
       });
-
+    const parseBody = (text: string): unknown => {
+      if (text.length === 0) return null;
+      try {
+        return JSON.parse(text);
+      } catch {
+        return text;
+      }
+    };
     const putArtifact = async (
       url: string,
       token: string,
-      bytes: Buffer
+      artifact: ReturnType<typeof artifactFixture>
     ): Promise<{ status: number; body: unknown }> => {
       const response = await fetch(url, {
         method: "PUT",
         headers: {
           Authorization: `Bearer ${token}`,
           "content-type": "text/plain",
-          "content-length": String(bytes.byteLength),
-          "x-planweave-artifact-operation-id": `auth-probe-${probeSha.slice(0, 12)}`,
+          "content-length": String(artifact.bytes.byteLength),
+          "x-planweave-artifact-operation-id": `auth-probe-${artifact.sha256.slice(0, 12)}`,
           "x-planweave-artifact-purpose": "report"
         },
-        body: bytes
+        body: artifact.bytes
       });
-      const text = await response.text();
-      let body: unknown = text;
-      try {
-        body = text.length > 0 ? JSON.parse(text) : null;
-      } catch {
-        body = text;
-      }
-      return { status: response.status, body };
+      return { status: response.status, body: parseBody(await response.text()) };
     };
-
     const getArtifact = async (
       url: string,
       token: string
-    ): Promise<{ status: number; body: unknown }> => {
+    ): Promise<{ status: number; body: unknown; etag: string | null }> => {
       const response = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      const text = await response.text();
-      let body: unknown = text;
-      try {
-        body = text.length > 0 ? JSON.parse(text) : null;
-      } catch {
-        body = text;
-      }
-      return { status: response.status, body };
+      return {
+        status: response.status,
+        body: parseBody(await response.text()),
+        etag: response.headers.get("etag")
+      };
+    };
+    const persistenceBaseline = async () => ({
+      operation: await client.observe(view.operationId),
+      dispatch: client.readServerDispatch(view.dispatchId),
+      attemptCount: client.countServerRows("remote_execution_attempts", "operation_id=?", [
+        view.operationId
+      ]),
+      grantCount: client.countServerRows("artifact_grants", "dispatch_id=?", [view.dispatchId]),
+      blobCount: client.countServerRows("artifact_blobs"),
+      links: client.readServerArtifactLinks(view.dispatchId),
+      envelope: client.readServerEnvelopeCanonical(view.dispatchId)
+    });
+    const expectDeniedWithoutMutation = async (
+      probe: () => Promise<{ status: number; body: unknown }>,
+      expected: { status: 401 | 403; error: string },
+      absentArtifactRef?: string
+    ) => {
+      const before = await persistenceBaseline();
+      if (absentArtifactRef) expect(client.serverArtifactBlobExists(absentArtifactRef)).toBe(false);
+      const response = await probe();
+      expect(response).toEqual({ status: expected.status, body: { error: expected.error } });
+      expect(await persistenceBaseline()).toEqual(before);
+      if (absentArtifactRef) expect(client.serverArtifactBlobExists(absentArtifactRef)).toBe(false);
     };
 
-    // --- cross-host: foreign Host token on owner dispatch artifact path ---
-    const crossHostPut = await putArtifact(
-      artifactUrl({ hostId: foreignCredential.hostId }),
-      foreignCredential.credentialToken,
-      probeBytes
+    // Positive PUT proves owner credential + bound lease/attempt reaches persistence.
+    const ownerReport = artifactFixture("owner-positive-report");
+    const ownerReportUrl = artifactUrl(ownerReport.sha256);
+    const ownerPut = await putArtifact(
+      ownerReportUrl,
+      ownerCredential.credentialToken,
+      ownerReport
     );
-    assertDenied(crossHostPut, [401, 403, 404, 500]);
-    const crossHostGet = await getArtifact(
-      artifactUrl({ hostId: foreignCredential.hostId }),
-      foreignCredential.credentialToken
-    );
-    assertDenied(crossHostGet, [401, 403, 404, 500]);
-
-    // --- cross-project: create remote-op for foreign projectId (no trusted project) ---
-    const beforeOps = client.countServerRows("remote_operations");
-    const crossProject = await client.rawRequest({
-      method: "POST",
-      path: "/api/v1/remote-operations",
-      body: {
-        projectId: "foreign-project-not-trusted",
-        canvasId: "default",
-        blockRef: "T-001#B-001",
-        idempotencyKey: "auth-matrix-cross-project"
-      }
+    expect(ownerPut).toEqual({
+      status: 201,
+      body: expect.objectContaining({
+        ref: ownerReport.ref,
+        sha256: ownerReport.sha256,
+        sizeBytes: ownerReport.bytes.byteLength,
+        mediaType: "text/plain"
+      })
     });
-    assertDenied(crossProject, [403, 404, 500]);
-    expect(client.countServerRows("remote_operations")).toBe(beforeOps);
-
-    // --- lease: wrong lease on artifact path ---
-    const wrongLease = await putArtifact(
-      artifactUrl({ leaseId: "lease-foreign-not-bound" }),
-      ownerCredential.credentialToken,
-      probeBytes
+    expect(client.readServerArtifactBytes(ownerReport.ref)).toEqual(ownerReport.bytes);
+    expect(client.readServerArtifactLinks(view.dispatchId)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          project_id: harness.projectId,
+          host_id: ownerHost.id,
+          dispatch_id: view.dispatchId,
+          lease_id: leaseId,
+          execution_attempt_id: view.executionAttemptId,
+          artifact_ref: ownerReport.ref,
+          purpose: "report",
+          permission: "report_write",
+          grant_id: `auth-probe-${ownerReport.sha256.slice(0, 12)}`,
+          produced_by_host_id: ownerHost.id
+        })
+      ])
     );
-    assertDenied(wrongLease, [401, 403, 404, 500]);
 
-    // --- lease: wrong attempt on artifact path ---
-    const wrongAttempt = await putArtifact(
-      artifactUrl({ executionAttemptId: "attempt-foreign-not-bound" }),
-      ownerCredential.credentialToken,
-      probeBytes
+    // Positive GET proves the production-created input grant and exact bytes.
+    const ownerGet = await getArtifact(artifactUrl(inputSha), ownerCredential.credentialToken);
+    expect(ownerGet).toEqual({
+      status: 200,
+      body: inputContent,
+      etag: `"sha256:${inputSha}"`
+    });
+    expect(client.readServerArtifactLinks(view.dispatchId)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          project_id: harness.projectId,
+          host_id: ownerHost.id,
+          dispatch_id: view.dispatchId,
+          lease_id: leaseId,
+          execution_attempt_id: view.executionAttemptId,
+          artifact_ref: inputArtifact.artifactRef,
+          purpose: "input",
+          permission: "input_read",
+          logical_name: inputArtifact.logicalName,
+          produced_by_host_id: null
+        })
+      ])
     );
-    assertDenied(wrongAttempt, [401, 403, 404, 500]);
 
-    // --- artifact: missing/wrong Host token on owner artifact path ---
-    const missingHostToken = await putArtifact(artifactUrl(), "not-a-host-token", probeBytes);
-    assertDenied(missingHostToken, [401, 403, 404, 500]);
-    const operatorAsHost = await putArtifact(
-      artifactUrl(),
-      harness.operatorToken,
-      probeBytes
+    const crossHostPutArtifact = artifactFixture("cross-host-put");
+    await expectDeniedWithoutMutation(
+      () =>
+        putArtifact(
+          artifactUrl(crossHostPutArtifact.sha256, { hostId: foreignCredential.hostId }),
+          foreignCredential.credentialToken,
+          crossHostPutArtifact
+        ),
+      { status: 403, error: "artifact_scope_forbidden" },
+      crossHostPutArtifact.ref
     );
-    assertDenied(operatorAsHost, [401, 403, 404, 500]);
+    await expectDeniedWithoutMutation(
+      async () => {
+        const { etag: _etag, ...response } = await getArtifact(
+          artifactUrl(inputSha, { hostId: foreignCredential.hostId }),
+          foreignCredential.credentialToken
+        );
+        return response;
+      },
+      { status: 403, error: "artifact_scope_forbidden" }
+    );
 
-    // --- oversize: operator body exceeds limit ---
+    const wrongLeaseArtifact = artifactFixture("wrong-lease");
+    await expectDeniedWithoutMutation(
+      () =>
+        putArtifact(
+          artifactUrl(wrongLeaseArtifact.sha256, { leaseId: "lease-foreign-not-bound" }),
+          ownerCredential.credentialToken,
+          wrongLeaseArtifact
+        ),
+      { status: 403, error: "artifact_scope_forbidden" },
+      wrongLeaseArtifact.ref
+    );
+    const wrongAttemptArtifact = artifactFixture("wrong-attempt");
+    await expectDeniedWithoutMutation(
+      () =>
+        putArtifact(
+          artifactUrl(wrongAttemptArtifact.sha256, {
+            executionAttemptId: "attempt-foreign-not-bound"
+          }),
+          ownerCredential.credentialToken,
+          wrongAttemptArtifact
+        ),
+      { status: 403, error: "artifact_scope_forbidden" },
+      wrongAttemptArtifact.ref
+    );
+
+    const invalidTokenArtifact = artifactFixture("invalid-host-token");
+    await expectDeniedWithoutMutation(
+      () =>
+        putArtifact(
+          artifactUrl(invalidTokenArtifact.sha256),
+          "not-a-host-token",
+          invalidTokenArtifact
+        ),
+      { status: 401, error: "Unauthorized" },
+      invalidTokenArtifact.ref
+    );
+    const operatorTokenArtifact = artifactFixture("operator-as-host");
+    await expectDeniedWithoutMutation(
+      () =>
+        putArtifact(
+          artifactUrl(operatorTokenArtifact.sha256),
+          harness.operatorToken,
+          operatorTokenArtifact
+        ),
+      { status: 401, error: "Unauthorized" },
+      operatorTokenArtifact.ref
+    );
+
     const oversizedBody = "x".repeat(300 * 1024);
-    const oversize = await client.rawRequest({
+    const oversizeOperatorBaseline = await persistenceBaseline();
+    const oversizeOperator = await client.rawRequest({
       method: "POST",
       path: "/api/v1/remote-operations",
       body: oversizedBody,
       headers: { "content-type": "application/json" }
     });
-    expect(oversize.status).toBe(413);
+    expect(oversizeOperator).toMatchObject({
+      status: 413,
+      body: { error: "operator_body_too_large" }
+    });
+    expect(await persistenceBaseline()).toEqual(oversizeOperatorBaseline);
 
-    // Artifact oversize: declare Content-Length above Server maxArtifactBytes (default 100MiB).
-    // Use node:http so undici cannot reject a deliberate length/body mismatch client-side.
-    const oversizeUrl = new URL(artifactUrl());
-    const oversizeArtifactStatus = await new Promise<number>((resolve, reject) => {
-      const req = httpRequest(
-        {
-          protocol: oversizeUrl.protocol,
-          hostname: oversizeUrl.hostname,
-          port: oversizeUrl.port,
-          path: oversizeUrl.pathname,
-          method: "PUT",
-          headers: {
-            Authorization: `Bearer ${ownerCredential.credentialToken}`,
-            "content-type": "text/plain",
-            "content-length": String(200 * 1024 * 1024),
-            "x-planweave-artifact-operation-id": "auth-oversize-artifact",
-            "x-planweave-artifact-purpose": "report"
+    const oversizedArtifact = artifactFixture("oversized-artifact");
+    const oversizeUrl = new URL(artifactUrl(oversizedArtifact.sha256));
+    const oversizeBaseline = await persistenceBaseline();
+    expect(client.serverArtifactBlobExists(oversizedArtifact.ref)).toBe(false);
+    const oversizeResponse = await new Promise<{ status: number; body: unknown }>(
+      (resolve, reject) => {
+        const req = httpRequest(
+          {
+            protocol: oversizeUrl.protocol,
+            hostname: oversizeUrl.hostname,
+            port: oversizeUrl.port,
+            path: oversizeUrl.pathname,
+            method: "PUT",
+            headers: {
+              Authorization: `Bearer ${ownerCredential.credentialToken}`,
+              "content-type": "text/plain",
+              "content-length": String(200 * 1024 * 1024),
+              "x-planweave-artifact-operation-id": "auth-oversize-artifact",
+              "x-planweave-artifact-purpose": "report"
+            }
+          },
+          (response) => {
+            const chunks: Buffer[] = [];
+            response.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+            response.on("end", () =>
+              resolve({
+                status: response.statusCode ?? 0,
+                body: parseBody(Buffer.concat(chunks).toString("utf8"))
+              })
+            );
           }
-        },
-        (response) => {
-          response.resume();
-          response.on("end", () => resolve(response.statusCode ?? 0));
-        }
-      );
-      req.on("error", reject);
-      req.end();
-    });
-    // 413 when size check hits maxArtifactBytes; 400/403/500 also fail-closed.
-    expect([400, 403, 413, 500]).toContain(oversizeArtifactStatus);
-    expect(oversizeArtifactStatus).not.toBe(201);
-
-    // --- envelope: canonical envelope must remain immutable under adversarial probes ---
-    const envelopeAfterProbes = client.readServerEnvelopeCanonical(view.dispatchId);
-    expect(envelopeAfterProbes).toBe(envelopeBefore);
-    // No public operator rewrite surface for envelopes; malformed action must not rewrite.
-    const envelopeTamper = await client.rawRequest({
-      method: "POST",
-      path: `/api/v1/remote-operations/${encodeURIComponent(view.operationId)}/actions`,
-      body: {
-        actionId: "auth-envelope-tamper",
-        operationId: view.operationId,
-        dispatchId: view.dispatchId,
-        executionAttemptId: view.executionAttemptId,
-        expectedAttemptVersion: view.attempt.stateVersion,
-        kind: "cancel",
-        leaseId: "lease-tamper-envelope",
-        reason: "attempt envelope rewrite via wrong lease"
+        );
+        req.on("error", reject);
+        req.end();
       }
-    });
-    assertDenied(envelopeTamper, [400, 409, 422, 500]);
-    expect(client.readServerEnvelopeCanonical(view.dispatchId)).toBe(envelopeBefore);
+    );
+    expect(oversizeResponse).toEqual({ status: 413, body: { error: "artifact_too_large" } });
+    expect(await persistenceBaseline()).toEqual(oversizeBaseline);
+    expect(client.serverArtifactBlobExists(oversizedArtifact.ref)).toBe(false);
 
-    // --- revoke: revoke owner Host; further Host artifact auth must fail closed ---
+    // Revoke seam positive controls: the exact same owner PUT/GET still succeeds immediately before revoke.
+    expect(
+      await putArtifact(ownerReportUrl, ownerCredential.credentialToken, ownerReport)
+    ).toMatchObject({ status: 201, body: { ref: ownerReport.ref } });
+    expect(await getArtifact(artifactUrl(inputSha), ownerCredential.credentialToken)).toEqual({
+      status: 200,
+      body: inputContent,
+      etag: `"sha256:${inputSha}"`
+    });
     const revoke = await client.rawRequest({
       method: "POST",
       path: `/api/v1/hosts/${encodeURIComponent(ownerHost.id)}/revoke`
     });
-    expect(revoke.status).toBe(200);
-    const afterRevoke = await putArtifact(
-      artifactUrl(),
-      ownerCredential.credentialToken,
-      probeBytes
-    );
-    assertDenied(afterRevoke, [401, 403, 404, 500]);
+    expect(revoke).toMatchObject({
+      status: 200,
+      body: { id: ownerHost.id, revokedAt: expect.any(String) }
+    });
 
-    // Operation must not complete successfully via adversarial artifact writes.
+    const revokedPutArtifact = artifactFixture("revoked-put");
+    await expectDeniedWithoutMutation(
+      () =>
+        putArtifact(
+          artifactUrl(revokedPutArtifact.sha256),
+          ownerCredential.credentialToken,
+          revokedPutArtifact
+        ),
+      { status: 401, error: "Unauthorized" },
+      revokedPutArtifact.ref
+    );
+    await expectDeniedWithoutMutation(
+      async () => {
+        const { etag: _etag, ...response } = await getArtifact(
+          artifactUrl(inputSha),
+          ownerCredential.credentialToken
+        );
+        return response;
+      },
+      { status: 401, error: "Unauthorized" }
+    );
+
     const stillLive = await client.observe(dispatched.operationId);
     expect(stillLive.state).not.toBe("completed");
+    expect(stillLive.runtime.terminalReceipt?.outcome).not.toBe("completed");
+    expect(client.readServerEnvelopeCanonical(view.dispatchId)).toBe(envelopeBefore);
+    expect(
+      client.countServerRows("remote_execution_attempts", "operation_id=?", [view.operationId])
+    ).toBe(1);
     expect(
       client.countServerRows("dispatch_artifact_links", "dispatch_id=? AND purpose='report'", [
         view.dispatchId
       ])
-    ).toBe(0);
-    // Envelope remains the original canonical payload after revoke + probes.
-    expect(client.readServerEnvelopeCanonical(view.dispatchId)).toBe(envelopeBefore);
-
-    // Revoke fences Host writes; it does not by itself force every live attempt terminal.
-    // Resume ACP only so the child can exit; do not require terminalization for this matrix.
-    await harness.acpControl.resume();
-    const afterResume = await client.observe(dispatched.operationId);
-    // Probe artifacts must never produce a false Runtime/Server success writeback.
-    expect(afterResume.state).not.toBe("completed");
-    expect(afterResume.runtime.terminalReceipt?.outcome).not.toBe("completed");
-    expect(
-      client.countServerRows("dispatch_artifact_links", "dispatch_id=? AND purpose='report'", [
-        view.dispatchId
-      ])
-    ).toBe(0);
-    expect(client.readServerEnvelopeCanonical(view.dispatchId)).toBe(envelopeBefore);
+    ).toBe(1);
   }, 180_000);
 });
