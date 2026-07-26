@@ -1,8 +1,8 @@
 # Distributed remote execution evidence checkpoint
 
-**Checkpoint id:** `RV-CHECKPOINT#B-001`  
-**Assembled at (UTC):** `2026-07-24T05:16:41Z`  
-**Branch tip:** `feat/distributed-collaboration` @ `d07e9338842036b08d883fcfb86a0ba9fb296ea6`  
+**Checkpoint id:** `RV-CHECKPOINT#B-001`
+**Assembled at (UTC):** `2026-07-24T05:16:41Z`
+**Branch tip:** `feat/distributed-collaboration` @ `d07e9338842036b08d883fcfb86a0ba9fb296ea6`
 **Verdict:** **Ready for deterministic CI; blocked for supported-version release and pre-release.**
 
 This document correlates RV-001 / RV-002 / RV-003 deliverables with a re-run of the release-gate tiers on the same monorepo tip. It does **not** invent or relabel live evidence. Unavailable required live conditions are recorded as **blocked / not passed**.
@@ -80,10 +80,10 @@ Paths are relative to the PlanWeave canvas `results/` tree (not committed to thi
 
 ### Operator surfaces (stable)
 
-**Server:** `planweave-server serve --config <abs>` (or `PLANWEAVE_SERVER_CONFIG`)  
-**Host:** `planweave-agent-host preflight|enroll|status|run|revoke --config <abs>`  
-**Probes:** `GET /healthz`, `/readyz`, `/version`  
-**Operator API:** host enrollments/list/get/revoke; remote-operations create/get/actions/events/interactions/respond  
+**Server:** `planweave-server serve --config <abs>` (or `PLANWEAVE_SERVER_CONFIG`)
+**Host:** `planweave-agent-host preflight|enroll|status|run|revoke --config <abs>`
+**Probes:** `GET /healthz`, `/readyz`, `/version`
+**Operator API:** host enrollments/list/get/revoke; remote-operations create/get/actions/events/interactions/respond
 
 Provider/Git credentials stay on Host. Remote execution is ACP-only.
 
@@ -205,8 +205,8 @@ PLANWEAVE_REAL_ACP=1 node scripts/real-acp-host-smoke.mjs --evidence <path>
 | cleanup | `true` |
 | diagnostic | `hostError=acp_process_error` (provider usage limit on this Host; preflight auth still works) |
 
-**Release-gate tier:** `local_real_acp_compatibility` → status **`failed`**, `countsAsPass: false`  
-**evidenceDigest (gate):** `sha256:3a60e127196a3c6c624d3f3939ee54151d8baff81d5a199f367dbf2d3b28e6e6`  
+**Release-gate tier:** `local_real_acp_compatibility` → status **`failed`**, `countsAsPass: false`
+**evidenceDigest (gate):** `sha256:3a60e127196a3c6c624d3f3939ee54151d8baff81d5a199f367dbf2d3b28e6e6`
 **raw file sha256:** `ff8a68c4e66e61fc1b14719af379fef6fb5b98c9a718e58fffe0e553b00d7d8b`
 
 **Interpretation:** infrastructure and public ACP path exercised; **execute is not green**. Do **not** treat as supported-version release pass. Re-run hard gate when provider quota is healthy:
@@ -243,7 +243,7 @@ PLANWEAVE_VPS_E2E=1 node scripts/vps-authenticated-e2e.mjs \
 
 **Release-gate tier when this file is supplied as VPS evidence:** status **`invalid`**, `countsAsPass: false` — gate correctly rejects `local-tls-fixture` for pre-release.
 
-**evidenceDigest (gate):** `sha256:62db1ce366355d25371e055831be379ee22bac5052fec5a6c8d2a97fadeff530`  
+**evidenceDigest (gate):** `sha256:62db1ce366355d25371e055831be379ee22bac5052fec5a6c8d2a97fadeff530`
 **raw file sha256:** `a1b1fe2e2b782206b7080389bc4469a4c69bc6bbc4579423bfe9455f1ba13e35`
 
 ### 7b. `remote-vps` — **BLOCKED (not run)**
@@ -366,7 +366,7 @@ Rollback checklist: all items `status=documented`, `operatorMustConfirm=true` (s
 | Supported-version release | **BLOCKED** | real ACP execute failed |
 | Pre-release (remote authenticated VPS) | **BLOCKED** | remote-vps not run; local-tls-fixture correctly non-counting |
 
-**Honest label for this checkpoint:**  
+**Honest label for this checkpoint:**
 `ready for deterministic CI / blocked for live pre-release`
 
 ---

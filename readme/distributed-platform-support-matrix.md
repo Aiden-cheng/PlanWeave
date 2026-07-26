@@ -1,7 +1,7 @@
 # Distributed platform and package support matrix
 
-**Matrix id:** `REL-002#B-003`  
-**Assembled for tip:** `feat/distributed-collaboration` (post REL-002#B-001 / B-002)  
+**Matrix id:** `REL-002#B-003`
+**Assembled for tip:** `feat/distributed-collaboration` (post REL-002#B-001 / B-002)
 **Policy:** support cells are declared only from **produced artifacts + executed evidence**. TypeScript compilation alone is not a platform claim. A skipped or unavailable live cell is **not** a pass.
 
 Linked prior checkpoint (live tiers, no secret copy): [distributed-remote-execution-checkpoint.md](./distributed-remote-execution-checkpoint.md) (`RV-CHECKPOINT#B-001`).
@@ -60,14 +60,14 @@ node scripts/distributed-package-install-smoke.mjs --report /tmp/distributed-ins
 
 What the smoke asserts:
 
-1. Pack order: protocol → collaboration-contracts → runtime → server → agent-host  
-2. Tarballs rewrite `workspace:*` to concrete versions  
-3. Required paths: Server `dist/bin.js` + `dist/migrations.js`; Host `dist/bin.js`  
-4. No `.node` native bindings inside Server/Host packages  
-5. `node:sqlite` works in the consumer install  
-6. `GET /healthz`, `/readyz`, `/version` after `serve`  
-7. Host `preflight` succeeds without exposing local paths in diagnostics  
-8. `real-acp-smoke --list-profiles` returns the five Host-local ACP profile ids  
+1. Pack order: protocol → collaboration-contracts → runtime → server → agent-host
+2. Tarballs rewrite `workspace:*` to concrete versions
+3. Required paths: Server `dist/bin.js` + `dist/migrations.js`; Host `dist/bin.js`
+4. No `.node` native bindings inside Server/Host packages
+5. `node:sqlite` works in the consumer install
+6. `GET /healthz`, `/readyz`, `/version` after `serve`
+7. Host `preflight` succeeds without exposing local paths in diagnostics
+8. `real-acp-smoke --list-profiles` returns the five Host-local ACP profile ids
 
 Pack helper: `pnpm pack:distributed`.
 
@@ -99,9 +99,9 @@ Host-local profile ids (Runtime registry + `planweave-agent-host real-acp-smoke 
 
 Protocol rejection coverage:
 
-- `assertAgentHostProtocolCompatible` rejects non-literal wire versions (`packages/distributed-protocol`)  
-- ACP engine/elicitation unsupported schema paths fail closed (REL-002#B-001 fixes)  
-- Live **execute** compatibility is **not** green on RV-CHECKPOINT (provider/runtime failure); see §5  
+- `assertAgentHostProtocolCompatible` rejects non-literal wire versions (`packages/distributed-protocol`)
+- ACP engine/elicitation unsupported schema paths fail closed (REL-002#B-001 fixes)
+- Live **execute** compatibility is **not** green on RV-CHECKPOINT (provider/runtime failure); see §5
 
 ---
 

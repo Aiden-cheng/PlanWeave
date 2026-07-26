@@ -1,8 +1,8 @@
 # Distributed Desktop collaboration evidence checkpoint
 
-**Checkpoint id:** `DX-CHECKPOINT#B-001`  
-**Assembled at (UTC):** `2026-07-25T17:31:13Z`  
-**Branch tip:** `feat/distributed-collaboration` @ `96323a94b4eecb36da4c94f0149c22fdca628718`  
+**Checkpoint id:** `DX-CHECKPOINT#B-001`
+**Assembled at (UTC):** `2026-07-25T17:31:13Z`
+**Branch tip:** `feat/distributed-collaboration` @ `96323a94b4eecb36da4c94f0149c22fdca628718`
 **Verdict:** **Desktop client collaboration surface ready** (trust boundary, typed IPC/read models, people/assignee, scoped Comments/Activity, explicit remote ACP controls, local Auto Run coexistence), with environment-limited live multi-user evidence.
 
 This document correlates DX-001 / DX-002 / DX-003 deliverables with a re-run of focused contracts/safeStorage-bridge/IPC/hook/component/i18n/a11y/performance/DOM-boundary/build/Electron smoke checks on the monorepo tip. It does **not** invent UI, fallback data, roles, chat rooms, or workflows to satisfy the gate.
@@ -392,5 +392,5 @@ These are **not** silent failures of the reviewed Desktop tasks. No new UI or fa
 
 **Conclusion:** Desktop collaboration is **trust-bounded, typed, and integrated into the existing workspace** across DX-001–003. The Server exposes the project-scoped human collaboration HTTP and observer WSS transports; live multi-user Desktop E2E and packaging remain separate environment gates.
 
-**Honest label:**  
+**Honest label:**
 `ready for Desktop collaboration client CI, local smoke, and Server wire integration; live multi-user Desktop E2E and packaged installer smoke remain environment gates.`
