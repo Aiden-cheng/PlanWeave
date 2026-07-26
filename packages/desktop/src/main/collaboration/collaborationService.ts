@@ -178,6 +178,7 @@ export class CollaborationService {
   /** Last validated observer cursor preserved across dispose/reconnect for the same profile. */
   private lastValidatedObserverCursor = 0;
   private lastValidatedObserverProfileId: string | null = null;
+  private observerGeneration = 0;
   private disposed = false;
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -571,6 +572,11 @@ export class CollaborationService {
       const { client, profile } = await this.clientForProfile(profileId, true);
       this.client = client;
       this.clientProfileId = profileId;
+      const observerGeneration = this.observerGeneration;
+      const isCurrentObserver = () =>
+        this.client === client &&
+        this.clientProfileId === profileId &&
+        this.observerGeneration === observerGeneration;
       await this.profiles.setActiveProfileId(profileId);
       this.observerStatus = { state: "stopped" };
       const resumeCursor =
@@ -580,6 +586,7 @@ export class CollaborationService {
         client.startObserver(
           {
             onStatus: (status) => {
+              if (!isCurrentObserver()) return;
               this.observerStatus = status;
               if (status.state === "connected") {
                 this.rememberObserverCursor(profileId, status.cursor);
@@ -610,6 +617,7 @@ export class CollaborationService {
               void this.publishStatus();
             },
             onEvent: (message) => {
+              if (!isCurrentObserver()) return;
               this.rememberObserverCursor(profileId, message.cursor);
               this.publishObserverSignal({
                 type: "human.observer.event",
@@ -619,6 +627,7 @@ export class CollaborationService {
               });
             },
             onCatchupRequired: (message) => {
+              if (!isCurrentObserver()) return;
               this.rememberObserverCursor(profileId, message.resumeCursor);
               this.publishObserverSignal({
                 type: "human.observer.catchup_required",
@@ -896,6 +905,7 @@ export class CollaborationService {
   private async disposeClient(reason: string): Promise<void> {
     const client = this.client;
     const profileId = this.clientProfileId;
+    this.observerGeneration += 1;
     // Preserve validated cursor across dispose so the next connectSession can resume.
     if (client && profileId) {
       try {

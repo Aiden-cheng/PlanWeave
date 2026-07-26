@@ -7,7 +7,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   exampleBootstrapResponse,
   exampleHumanDeviceToken,
-  exampleInvitationToken
+  exampleInvitationToken,
+  exampleObserverCatchupRequired,
+  exampleObserverEvent
 } from "@planweave-ai/collaboration-contracts";
 import {
   CollaborationCredentialVault,
@@ -450,6 +452,11 @@ describe("CollaborationService IPC trust boundary", () => {
   it("preserves validated observer cursor across dispose and resumes startObserver", async () => {
     const root = await tempDir("planweave-collab-cursor-");
     const startObserver = vi.fn();
+    const observerHandlers: Array<{
+      onStatus?: (status: unknown) => void;
+      onEvent?: (event: typeof exampleObserverEvent) => void;
+      onCatchupRequired?: (message: typeof exampleObserverCatchupRequired) => void;
+    }> = [];
     let observerCursor = 0;
     const service = new CollaborationService({
       profileStore: new CollaborationProfileStore({ profilesPath: join(root, "profiles.json") }),
@@ -460,10 +467,15 @@ describe("CollaborationService IPC trust boundary", () => {
       createClient: () =>
         ({
           startObserver: (
-            handlers: { onStatus?: (status: unknown) => void },
+            handlers: {
+              onStatus?: (status: unknown) => void;
+              onEvent?: (event: typeof exampleObserverEvent) => void;
+              onCatchupRequired?: (message: typeof exampleObserverCatchupRequired) => void;
+            },
             options?: { cursor?: number }
           ) => {
             startObserver(handlers, options);
+            observerHandlers.push(handlers);
             if (options?.cursor !== undefined) {
               observerCursor = options.cursor;
             }
@@ -510,6 +522,20 @@ describe("CollaborationService IPC trust boundary", () => {
       serverBaseUrl: "https://moved.example.com/",
       projectId: "project-moved",
       allowInsecureTransport: false
+    });
+    observerHandlers.at(-1)?.onStatus?.({
+      state: "connected",
+      cursor: 88,
+      connectedAt: "2030-01-01T00:00:00.000Z"
+    });
+    observerHandlers.at(-1)?.onCatchupRequired?.({
+      ...exampleObserverCatchupRequired,
+      resumeCursor: 98
+    });
+    observerHandlers.at(-1)?.onEvent?.({
+      ...exampleObserverEvent,
+      cursor: 99,
+      previousCursor: 42
     });
     startObserver.mockClear();
     observerCursor = 0;
