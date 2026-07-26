@@ -9,6 +9,7 @@ import {
   ensureDurableHostIdentity
 } from "../state/durableHostIdentity.js";
 import {
+  AGENT_HOST_CLI_USAGE,
   type AgentHostOperatorService,
   parseAgentHostArgs,
   runAgentHostCli,
@@ -104,6 +105,18 @@ describe("Agent Host operator CLI", () => {
     expect(JSON.stringify(stdout.mock.calls)).not.toContain("/private/config.json");
     await expect(runAgentHostCli(["unknown"], { io: { stdout, stderr } })).resolves.toBe(2);
     expect(stderr).toHaveBeenLastCalledWith("agent_host_cli_usage");
+  });
+
+  it.each([
+    { argv: [] as string[] },
+    { argv: ["--help"] },
+    { argv: ["-h"] }
+  ])("prints public usage and exits 0 for $argv", async ({ argv }) => {
+    const stdout = vi.fn();
+    const stderr = vi.fn();
+    await expect(runAgentHostCli(argv, { io: { stdout, stderr } })).resolves.toBe(0);
+    expect(stdout).toHaveBeenCalledWith(AGENT_HOST_CLI_USAGE);
+    expect(stderr).not.toHaveBeenCalled();
   });
 
   it.each(["SIGINT", "SIGTERM"] as const)("shuts down once after %s", async (signal) => {

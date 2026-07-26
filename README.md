@@ -271,11 +271,18 @@ Use HTTPS/WSS in production. Plain HTTP/WS is **development-only** and only acce
 
 ### Install the CLIs
 
-From this monorepo (after `pnpm install` and `pnpm -r build`):
+From this monorepo (after `pnpm install` and `pnpm -r build`), invoke the public package bin entries directly:
 
 ```bash
-pnpm --filter @planweave-ai/server exec planweave-server --help
-pnpm --filter @planweave-ai/agent-host exec planweave-agent-host --help
+node packages/server/dist/bin.js --help
+node packages/agent-host/dist/bin.js --help
+```
+
+Those paths are the `planweave-server` and `planweave-agent-host` bin targets declared in each package's `package.json`. After a published install, the same entry points are on `PATH` as:
+
+```bash
+planweave-server --help
+planweave-agent-host --help
 ```
 
 Published package names are `@planweave-ai/server` (binary `planweave-server`) and `@planweave-ai/agent-host` (binary `planweave-agent-host`). Both require Node.js 22.5+ (they use the built-in `node:sqlite` module; no `better-sqlite3` native binding).

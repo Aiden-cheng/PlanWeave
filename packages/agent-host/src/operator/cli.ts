@@ -4,6 +4,19 @@ import { AgentHostOperator } from "./agentHostOperator.js";
 
 export type AgentHostCliIo = { stdout(value: string): void; stderr(value: string): void };
 
+/** Public usage text for `planweave-agent-host --help` (stdout, exit 0). */
+export const AGENT_HOST_CLI_USAGE = [
+  "Usage: planweave-agent-host <command> [options]",
+  "",
+  "Commands:",
+  "  preflight --config <absolute-path>",
+  "  enroll --config <absolute-path> --code <enrollment-code> [--replace]",
+  "  status --config <absolute-path>",
+  "  run --config <absolute-path>",
+  "  revoke --config <absolute-path>",
+  "  real-acp-smoke [options]"
+].join("\n");
+
 type ParsedCommand = {
   command: "preflight" | "enroll" | "run" | "status" | "revoke";
   configPath: string;
@@ -98,6 +111,10 @@ export async function runAgentHostCli(
 ): Promise<number> {
   const io = options.io ?? { stdout: console.log, stderr: console.error };
   try {
+    if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") {
+      io.stdout(AGENT_HOST_CLI_USAGE);
+      return 0;
+    }
     if (argv[0] === "real-acp-smoke") {
       return await runRealAcpSmokeCli(argv.slice(1), { io, env: options.env });
     }

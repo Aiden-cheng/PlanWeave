@@ -510,6 +510,7 @@
         "humanIdentitySchemas.test.ts",
         "protocolPrimitives.test.ts",
         "publicExports.test.ts",
+        "serverCliHelp.test.ts",
         "workAssignmentPolicy.test.ts",
         "workAssignmentSchemas.test.ts",
         "workAssignmentWorkItemRef.test.ts"

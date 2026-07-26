@@ -271,11 +271,18 @@ Git clone/fetch/push 仍属于 Block 内容或 Host 侧环境准备。PlanWeave 
 
 ### 安装 CLI
 
-在本 monorepo 中（完成 `pnpm install` 与 `pnpm -r build` 后）：
+在本 monorepo 中（完成 `pnpm install` 与 `pnpm -r build` 后），直接调用各包公开的 bin 入口：
 
 ```bash
-pnpm --filter @planweave-ai/server exec planweave-server --help
-pnpm --filter @planweave-ai/agent-host exec planweave-agent-host --help
+node packages/server/dist/bin.js --help
+node packages/agent-host/dist/bin.js --help
+```
+
+上述路径即各包 `package.json` 中声明的 `planweave-server` / `planweave-agent-host` bin 目标。发布安装后，同一入口会出现在 `PATH` 上：
+
+```bash
+planweave-server --help
+planweave-agent-host --help
 ```
 
 发布包名为 `@planweave-ai/server`（二进制 `planweave-server`）和 `@planweave-ai/agent-host`（二进制 `planweave-agent-host`）。均需 Node.js 22.5+（使用内置 `node:sqlite`，不依赖 `better-sqlite3` 等原生绑定）。

@@ -8,6 +8,19 @@ import { runVpsE2eCli } from "./vpsE2e/cli.js";
 
 export type ServerCliIo = { stdout(value: string): void; stderr(value: string): void };
 
+/** Public usage text for `planweave-server --help` (stdout, exit 0). */
+export const SERVER_CLI_USAGE = [
+  "Usage: planweave-server <command> [options]",
+  "",
+  "Commands:",
+  "  serve --config <absolute-path>",
+  "  vps-e2e [options]",
+  "  release-gate [options]",
+  "",
+  "Environment:",
+  "  PLANWEAVE_SERVER_CONFIG  absolute config path (alternative to serve --config)"
+].join("\n");
+
 export async function waitForServerSignal(
   server: Pick<DistributedServerProcess, "close">,
   processLike: Pick<NodeJS.Process, "once" | "off">
@@ -40,6 +53,10 @@ export async function runServerCli(
   const io = options.io ?? { stdout: console.log, stderr: console.error };
   try {
     const [command, ...args] = argv;
+    if (!command || command === "--help" || command === "-h") {
+      io.stdout(SERVER_CLI_USAGE);
+      return 0;
+    }
     if (command === "vps-e2e") {
       return await runVpsE2eCli(args, { io, env: options.env ? { ...options.env } : undefined });
     }
