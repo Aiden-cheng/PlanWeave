@@ -152,8 +152,8 @@ export function attachCanvasPresenceWebSocketServer(
     const expireAuthorization = () => {
       if (authorizationExpired) return;
       authorizationExpired = true;
-      if (sessionId) hub.leave(sessionId, "revoked");
       sendError("unauthorized");
+      if (sessionId) hub.leave(sessionId, "revoked");
       socket.close(4001, "presence authorization expired");
     };
     const authTimer = setInterval(() => {

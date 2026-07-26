@@ -200,6 +200,7 @@ describe("canvas presence WebSocket", () => {
     await nextMessage(revokedSocket);
     hello(peerSocket, fixture.projectId);
     await nextMessage(peerSocket);
+    const revokedError = nextMessage(revokedSocket);
     const peerLeave = nextMessage(peerSocket);
 
     const revokeResponse = await fetch(
@@ -207,6 +208,10 @@ describe("canvas presence WebSocket", () => {
       { method: "POST", headers: { Authorization: `Bearer ${owner.deviceToken}` } }
     );
     expect(revokeResponse.status).toBe(200);
+    await expect(revokedError).resolves.toMatchObject({
+      type: "canvas.presence.error",
+      code: "unauthorized"
+    });
     await expect(peerLeave).resolves.toMatchObject({
       type: "canvas.presence.leave"
     });
