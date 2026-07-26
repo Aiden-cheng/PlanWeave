@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DispatchRecord, DispatchWriteback } from "../dispatches.js";
+import type { CommentActivityHttpOptions } from "../index.js";
 import * as serverApi from "../index.js";
 
 /** Compile-time guard: residual packageRef must not return to public DTOs. */
@@ -15,6 +16,9 @@ void _dispatchRecordHasNoPackageRef;
 void _writebackCompleteHasNoPackageRef;
 void _writebackFailHasNoPackageRef;
 
+const _commentActivityHttpOptions: CommentActivityHttpOptions | undefined = undefined;
+void _commentActivityHttpOptions;
+
 describe("server public export surface", () => {
   it("exports remote coordination and omits the retired thin dual factory", () => {
     expect(typeof serverApi.createRemoteBlockCoordination).toBe("function");
@@ -26,5 +30,10 @@ describe("server public export surface", () => {
   it("keeps DispatchService as the application-layer host-facing dispatch authority", () => {
     expect(typeof serverApi.DispatchService).toBe("function");
     expect(serverApi.dispatchStatusSchema).toBeDefined();
+  });
+
+  it("exports the comment and activity HTTP adapter from the package root", () => {
+    expect(typeof serverApi.handleCommentActivityHttpRequest).toBe("function");
+    expect(typeof serverApi.resetCommentActivityHttpRateLimits).toBe("function");
   });
 });
