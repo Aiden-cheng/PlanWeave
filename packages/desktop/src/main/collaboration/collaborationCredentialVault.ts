@@ -1,6 +1,11 @@
 import { chmod, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { humanDeviceTokenSchema } from "@planweave-ai/collaboration-contracts";
+import {
+  humanDeviceTokenSchema,
+  opaqueIdentifierSchema,
+  timestampSchema
+} from "@planweave-ai/collaboration-contracts";
+import { z } from "zod";
 import type {
   CollaborationCredentialPersistence,
   CollaborationCredentialStorage
@@ -19,17 +24,23 @@ export type StoredCredentialMetadata = {
   updatedAt: string;
 };
 
-type PersistedCredentialRecord = {
-  encryptedDeviceToken: string;
-  deviceCredentialId: string | null;
-  humanPrincipalId: string | null;
-  updatedAt: string;
-};
+const persistedCredentialRecordSchema = z
+  .object({
+    encryptedDeviceToken: z.string().trim().min(1),
+    deviceCredentialId: opaqueIdentifierSchema.nullable(),
+    humanPrincipalId: opaqueIdentifierSchema.nullable(),
+    updatedAt: timestampSchema
+  })
+  .strict();
 
-type CredentialsDocument = {
-  version: 1;
-  credentials: Record<string, PersistedCredentialRecord>;
-};
+const credentialsDocumentSchema = z
+  .object({
+    version: z.literal(1),
+    credentials: z.record(opaqueIdentifierSchema, persistedCredentialRecordSchema)
+  })
+  .strict();
+
+type CredentialsDocument = z.infer<typeof credentialsDocumentSchema>;
 
 type SessionCredential = {
   deviceToken: string;
@@ -153,56 +164,18 @@ export class CollaborationCredentialVault {
       throw new Error("Failed to read collaboration credentials.");
     }
     try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        this.document = defaultDocument();
-      } else {
-        const record = parsed as Record<string, unknown>;
-        const credentialsRaw =
-          record.credentials &&
-          typeof record.credentials === "object" &&
-          !Array.isArray(record.credentials)
-            ? (record.credentials as Record<string, unknown>)
-            : {};
-        const credentials: Record<string, PersistedCredentialRecord> = {};
-        for (const [profileId, entry] of Object.entries(credentialsRaw)) {
-          if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-            continue;
-          }
-          const item = entry as Record<string, unknown>;
-          const encrypted =
-            typeof item.encryptedDeviceToken === "string" ? item.encryptedDeviceToken.trim() : "";
-          if (!encrypted) {
-            continue;
-          }
-          credentials[profileId] = {
-            encryptedDeviceToken: encrypted,
-            deviceCredentialId:
-              typeof item.deviceCredentialId === "string" && item.deviceCredentialId.trim()
-                ? item.deviceCredentialId.trim()
-                : null,
-            humanPrincipalId:
-              typeof item.humanPrincipalId === "string" && item.humanPrincipalId.trim()
-                ? item.humanPrincipalId.trim()
-                : null,
-            updatedAt:
-              typeof item.updatedAt === "string" && item.updatedAt.trim()
-                ? item.updatedAt.trim()
-                : nowIso()
-          };
-        }
-        this.document = { version: 1, credentials };
-      }
+      this.document = credentialsDocumentSchema.parse(JSON.parse(raw));
       this.loaded = true;
-      return this.document!;
+      return this.document;
     } catch {
       throw new Error("Invalid collaboration credentials JSON.");
     }
   }
 
   private async persist(document: CredentialsDocument): Promise<void> {
-    await writePrivateJson(this.paths.credentialsPath, document);
-    this.document = document;
+    const parsed = credentialsDocumentSchema.parse(document);
+    await writePrivateJson(this.paths.credentialsPath, parsed);
+    this.document = parsed;
     this.loaded = true;
   }
 

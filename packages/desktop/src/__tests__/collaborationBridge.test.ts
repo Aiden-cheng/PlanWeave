@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -184,6 +184,30 @@ describe("collaboration credential vault + profile store", () => {
       credentials: Record<string, unknown>;
     };
     expect(remaining.credentials["profile-1"]).toBeUndefined();
+  });
+
+  it("rejects valid JSON with unsupported versions or invalid store shapes", async () => {
+    const root = await tempDir("planweave-collab-invalid-store-");
+    const profilesPath = join(root, "profiles.json");
+    const credentialsPath = join(root, "credentials.json");
+
+    await writeFile(
+      profilesPath,
+      JSON.stringify({ version: 2, profiles: [], activeProfileId: null }),
+      "utf8"
+    );
+    await expect(new CollaborationProfileStore({ profilesPath }).read()).rejects.toThrow(
+      "Invalid collaboration profiles JSON."
+    );
+
+    await writeFile(credentialsPath, JSON.stringify({ version: 1, credentials: [] }), "utf8");
+    const vault = new CollaborationCredentialVault({
+      paths: { credentialsPath },
+      safeStorage: mockSafeStorage({ available: true })
+    });
+    await expect(vault.getDeviceToken("profile-1")).rejects.toThrow(
+      "Invalid collaboration credentials JSON."
+    );
   });
 });
 

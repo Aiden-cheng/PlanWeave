@@ -2,19 +2,50 @@ import { chmod, mkdir, readFile, rename, stat, writeFile } from "node:fs/promise
 import { dirname } from "node:path";
 import {
   collaborationConnectionProfileSchema,
+  opaqueIdentifierSchema,
+  timestampSchema,
   type CollaborationConnectionProfile
 } from "@planweave-ai/collaboration-contracts";
+import { z } from "zod";
 import { desktopHomePaths } from "../planweaveHomePaths.js";
 
-export type StoredCollaborationProfile = CollaborationConnectionProfile & {
-  updatedAt: string;
-};
+const storedCollaborationProfileSchema = collaborationConnectionProfileSchema.extend({
+  updatedAt: timestampSchema
+});
 
-export type CollaborationProfilesDocument = {
-  version: 1;
-  profiles: StoredCollaborationProfile[];
-  activeProfileId: string | null;
-};
+const collaborationProfilesDocumentSchema = z
+  .object({
+    version: z.literal(1),
+    profiles: z.array(storedCollaborationProfileSchema),
+    activeProfileId: opaqueIdentifierSchema.nullable()
+  })
+  .strict()
+  .superRefine((document, ctx) => {
+    const seen = new Set<string>();
+    for (const [index, profile] of document.profiles.entries()) {
+      if (seen.has(profile.profileId)) {
+        ctx.addIssue({
+          code: "custom",
+          message: "duplicate collaboration profile id",
+          path: ["profiles", index, "profileId"]
+        });
+      }
+      seen.add(profile.profileId);
+    }
+    if (
+      document.activeProfileId !== null &&
+      !document.profiles.some((profile) => profile.profileId === document.activeProfileId)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "active collaboration profile is missing",
+        path: ["activeProfileId"]
+      });
+    }
+  });
+
+export type StoredCollaborationProfile = z.infer<typeof storedCollaborationProfileSchema>;
+export type CollaborationProfilesDocument = z.infer<typeof collaborationProfilesDocumentSchema>;
 
 function defaultDocument(): CollaborationProfilesDocument {
   return {
@@ -30,64 +61,6 @@ function isMissingFileError(error: unknown): boolean {
 
 function nowIso(): string {
   return new Date().toISOString();
-}
-
-function normalizeProfile(value: unknown): StoredCollaborationProfile | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-  const record = value as Record<string, unknown>;
-  // Drop non-schema and secret fields before strict schema parse.
-  const profileCandidate = {
-    profileId: record.profileId,
-    displayName: record.displayName,
-    serverBaseUrl: record.serverBaseUrl,
-    projectId: record.projectId,
-    allowInsecureTransport: record.allowInsecureTransport
-  };
-
-  const parsed = collaborationConnectionProfileSchema.safeParse(profileCandidate);
-  if (!parsed.success) {
-    return null;
-  }
-  const updatedAt =
-    typeof record.updatedAt === "string" && record.updatedAt.trim()
-      ? record.updatedAt.trim()
-      : nowIso();
-  return {
-    ...parsed.data,
-    updatedAt
-  };
-}
-
-function normalizeDocument(value: unknown): CollaborationProfilesDocument {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return defaultDocument();
-  }
-  const record = value as Record<string, unknown>;
-  const rawProfiles = Array.isArray(record.profiles) ? record.profiles : [];
-  const profiles: StoredCollaborationProfile[] = [];
-  const seen = new Set<string>();
-  for (const entry of rawProfiles) {
-    const profile = normalizeProfile(entry);
-    if (!profile || seen.has(profile.profileId)) {
-      continue;
-    }
-    seen.add(profile.profileId);
-    profiles.push(profile);
-  }
-  const activeProfileId =
-    typeof record.activeProfileId === "string" && record.activeProfileId.trim()
-      ? record.activeProfileId.trim()
-      : null;
-  return {
-    version: 1,
-    profiles,
-    activeProfileId:
-      activeProfileId && profiles.some((profile) => profile.profileId === activeProfileId)
-        ? activeProfileId
-        : null
-  };
 }
 
 export type CollaborationProfileStorePaths = {
@@ -148,7 +121,7 @@ export class CollaborationProfileStore {
       throw new Error("Failed to read collaboration profiles.");
     }
     try {
-      this.loaded = normalizeDocument(JSON.parse(raw));
+      this.loaded = collaborationProfilesDocumentSchema.parse(JSON.parse(raw));
       return this.loaded;
     } catch {
       throw new Error("Invalid collaboration profiles JSON.");
@@ -156,10 +129,10 @@ export class CollaborationProfileStore {
   }
 
   async write(document: CollaborationProfilesDocument): Promise<CollaborationProfilesDocument> {
-    const normalized = normalizeDocument(document);
-    await writePrivateJson(this.paths.profilesPath, normalized);
-    this.loaded = normalized;
-    return normalized;
+    const parsed = collaborationProfilesDocumentSchema.parse(document);
+    await writePrivateJson(this.paths.profilesPath, parsed);
+    this.loaded = parsed;
+    return parsed;
   }
 
   async list(): Promise<StoredCollaborationProfile[]> {
