@@ -377,6 +377,64 @@ describe("CollaborationClient", () => {
     client.dispose();
   });
 
+  it("rejects observer events that do not continue from the validated cursor", async () => {
+    const http = await listen((_req, res) => {
+      res.statusCode = 404;
+      res.end();
+    });
+    cleanups.push(http.close);
+    const wss = new WebSocketServer({ noServer: true });
+    cleanups.push(
+      () =>
+        new Promise((resolve, reject) => {
+          wss.close((error) => (error ? reject(error) : resolve()));
+        })
+    );
+
+    const protocolClose = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("observer cursor validation timeout")), 2_000);
+      http.server.on("upgrade", (request, socket, head) => {
+        wss.handleUpgrade(request, socket, head, (ws) => {
+          ws.on("message", () => {
+            ws.send(
+              JSON.stringify({
+                ...exampleObserverWelcome,
+                cursor: 5
+              })
+            );
+            ws.send(
+              JSON.stringify({
+                ...exampleObserverEvent,
+                cursor: 7,
+                previousCursor: 6
+              })
+            );
+          });
+          ws.on("close", (code) => {
+            clearTimeout(timer);
+            expect(code).toBe(4000);
+            resolve();
+          });
+        });
+      });
+    });
+
+    const onEvent = () => {
+      throw new Error("discontinuous observer event must not be delivered");
+    };
+    const client = clientFor(http.origin, {
+      token: exampleHumanDeviceToken,
+      WebSocketImpl: WebSocket as unknown as ConstructorParameters<
+        typeof CollaborationClient
+      >[0]["WebSocketImpl"]
+    });
+    client.startObserver({ onEvent });
+
+    await protocolClose;
+    expect(client.lastObserverCursor()).toBe(5);
+    client.dispose();
+  });
+
   it("handles observer auth expiry without reconnect loop", async () => {
     const http = await listen((_req, res) => {
       res.statusCode = 404;

@@ -992,6 +992,13 @@ export class CollaborationClient {
         });
         break;
       case "human.observer.event":
+        if (message.previousCursor !== this.observerCursor) {
+          throw new CollaborationClientError({
+            kind: "protocol",
+            code: "collaboration_observer_cursor_gap",
+            message: "Observer event did not continue from the last validated cursor."
+          });
+        }
         this.observerCursor = message.cursor;
         this.observerHandlers?.onEvent?.(message);
         break;
