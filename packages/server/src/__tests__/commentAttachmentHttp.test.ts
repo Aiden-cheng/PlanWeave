@@ -486,8 +486,11 @@ describe("comment attachment HTTP and blob authorization", () => {
 
   it("allows read of tombstoned comment attachments for members and cleans expired staged uploads", async () => {
     let now = new Date("2026-07-24T12:00:00.000Z");
-    const { origin, attachmentService, directory } = await setup({ clock: () => now });
+    const { origin, attachmentService, attachmentRepository, blobs, directory } = await setup({
+      clock: () => now
+    });
     const token = await bootstrap(origin);
+    const projectBToken = await bootstrap(origin, "project-b", "human-owner-b");
     const memberToken = await inviteAndJoin(origin, token, "project-a", "Member One");
     const bytes = Buffer.from("tombstone-bytes");
     const digest = createHash("sha256").update(bytes).digest("hex");
@@ -560,6 +563,22 @@ describe("comment attachment HTTP and blob authorization", () => {
       "text/plain",
       createHash("sha256").update(ephemeralBytes).digest("hex")
     );
+    const projectBEphemeral = await createPending(origin, projectBToken, "project-b", {
+      expectedSizeBytes: ephemeralBytes.byteLength,
+      mediaType: "text/plain",
+      expectedDigestSha256: createHash("sha256").update(ephemeralBytes).digest("hex"),
+      ttlMs: 60_000
+    });
+    const projectBEphemeralId = projectBEphemeral.payload.pendingUploadId as string;
+    await uploadPending(
+      origin,
+      projectBToken,
+      "project-b",
+      projectBEphemeralId,
+      ephemeralBytes,
+      "text/plain",
+      createHash("sha256").update(ephemeralBytes).digest("hex")
+    );
 
     now = new Date("2026-07-24T14:00:00.000Z");
     const cleanup = await fetch(`${origin}/api/v1/projects/project-a/attachments/cleanup`, {
@@ -568,7 +587,14 @@ describe("comment attachment HTTP and blob authorization", () => {
     });
     expect(cleanup.status).toBe(200);
     const cleanupPayload = (await cleanup.json()) as { removedPending: number };
-    expect(cleanupPayload.removedPending).toBeGreaterThanOrEqual(1);
+    expect(cleanupPayload.removedPending).toBe(1);
+
+    expect(attachmentRepository.getPending("project-b", projectBEphemeralId)?.status).toBe(
+      "uploaded"
+    );
+    await expect(
+      blobs.read(createHash("sha256").update(ephemeralBytes).digest("hex"))
+    ).resolves.toEqual(ephemeralBytes);
 
     // Finalized/bound blob remains.
     const boundRead = await fetch(

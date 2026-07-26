@@ -423,16 +423,22 @@ export class CommentAttachmentRepository {
    * Expired staged uploads that are not finalized and not comment-bound.
    * Returns digests that may become unreferenced after row deletion.
    */
-  listExpiredStagedForCleanup(nowIso: string, limit = 100): PendingUploadRecord[] {
+  listExpiredStagedForCleanup(
+    projectId: string,
+    nowIso: string,
+    limit = 100
+  ): PendingUploadRecord[] {
+    const project = humanProjectIdSchema.parse(projectId);
     const rows = this.database
       .prepare(
         `SELECT * FROM comment_pending_uploads
-         WHERE status IN ('pending','uploaded')
+         WHERE project_id=?
+           AND status IN ('pending','uploaded')
            AND expires_at <= ?
          ORDER BY expires_at ASC
          LIMIT ?`
       )
-      .all(nowIso, limit) as PendingRow[];
+      .all(project, nowIso, limit) as PendingRow[];
     return rows.map(toPendingRecord);
   }
 

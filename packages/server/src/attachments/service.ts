@@ -7,7 +7,7 @@ import {
   type CommentAttachmentInput,
   type CommentAttachmentMetadata
 } from "../comments/schemas.js";
-import type { HumanAuthContext } from "../identity/schemas.js";
+import { humanProjectIdSchema, type HumanAuthContext } from "../identity/schemas.js";
 import {
   ATTACHMENT_ERROR_MESSAGES,
   attachmentErrorCodeSchema,
@@ -429,12 +429,16 @@ export class CommentAttachmentService {
    * Retention: expire and delete staged uploads past expires_at that are not finalized.
    * Finalized rows and comment bindings are retained for comment lifecycle (B-003).
    */
-  async cleanupExpiredStaged(limit = 100): Promise<{
+  async cleanupExpiredStaged(
+    projectId: string,
+    limit = 100
+  ): Promise<{
     removedPending: number;
     removedBlobs: number;
   }> {
+    const project = humanProjectIdSchema.parse(projectId);
     const nowIso = this.clock().toISOString();
-    const expired = this.options.repository.listExpiredStagedForCleanup(nowIso, limit);
+    const expired = this.options.repository.listExpiredStagedForCleanup(project, nowIso, limit);
     let removedPending = 0;
     let removedBlobs = 0;
     for (const record of expired) {

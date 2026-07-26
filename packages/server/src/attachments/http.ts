@@ -430,14 +430,12 @@ export async function handleCommentAttachmentHttpRequest(
         return true;
       }
       case "cleanup": {
-        // Project members may trigger retention cleanup for their project scope
-        // (service currently cleans global expired staged rows; membership gates the endpoint).
         const authActor = actor;
         if (authActor.projectId !== matched.projectId) {
           respondJson(response, 403, { error: "attachment_auth_project_mismatch" });
           return true;
         }
-        const result = await options.service.cleanupExpiredStaged();
+        const result = await options.service.cleanupExpiredStaged(matched.projectId);
         respondJson(response, 200, result);
         return true;
       }
