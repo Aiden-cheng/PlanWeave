@@ -281,6 +281,10 @@ export async function createDistributedServerComposition(
             service: control,
             readiness: () => readiness.readiness(),
             serverVersion: serverPackageVersion,
+            limits: {
+              maxArtifactBytes: config.limits.maxArtifactBytes,
+              maxWebSocketPayloadBytes: config.limits.maxWebSocketPayloadBytes
+            },
             allowInsecureDevelopment: config.allowInsecureDevelopment
           })
         ) {

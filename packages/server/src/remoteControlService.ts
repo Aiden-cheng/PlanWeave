@@ -104,6 +104,8 @@ export class RemoteControlService {
       state: operation.state,
       dispatchId: operation.dispatchId,
       executionAttemptId: operation.executionAttemptId,
+      envelopeDigest: operation.envelopeDigest,
+      reportArtifactRef: dispatch?.result?.reportArtifactRef,
       createdAt: operation.createdAt,
       updatedAt: operation.updatedAt,
       terminalAt: operation.terminalAt,

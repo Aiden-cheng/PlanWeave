@@ -11,6 +11,81 @@ import {
 
 const roots: string[] = [];
 
+function deterministicPassed(generatedAt = new Date().toISOString()) {
+  return {
+    version: "planweave.release-gate.deterministic/v1",
+    result: "passed",
+    generatedAt,
+    suite: "server-real-process",
+    exitCode: 0,
+    tests: { total: 10, passed: 10, failed: 0 }
+  };
+}
+
+function vpsEvidence(input: {
+  result: "passed" | "failed" | "skipped";
+  environmentClass: "local-tls-fixture" | "remote-vps" | "unavailable";
+  generatedAt?: string;
+}) {
+  const passed = input.result === "passed";
+  return {
+    version: "planweave.vps-authenticated-e2e/v1",
+    generatedAt: input.generatedAt ?? new Date().toISOString(),
+    environmentClass: input.environmentClass,
+    gateMode: "require",
+    profileId: input.environmentClass === "local-tls-fixture" ? "local-tls-fixture" : "remote-vps",
+    componentVersions: { server: "0.3.0", agentHost: "0.3.0", protocol: 1, node: "v24" },
+    commandsSanitized: [],
+    identities: {
+      operationId: passed ? "op-1" : null,
+      dispatchId: passed ? "dispatch-1" : null,
+      executionAttemptId: passed ? "attempt-1" : null,
+      leaseId: passed ? "lease-1" : null,
+      hostId: passed ? "host-1" : null,
+      sessionId: null
+    },
+    envelopeDigest: passed ? `envelope:sha256:${"a".repeat(64)}` : null,
+    eventCursor: passed ? { afterCursor: 0, highWatermark: 4, eventCount: 4 } : null,
+    artifactHash: passed ? `sha256:${"b".repeat(64)}` : null,
+    runtimeOutcome: passed ? "completed" : null,
+    interaction: { attempted: false, status: null },
+    heartbeat: { hostLastSeenAtPresent: passed },
+    networkInterrupt: {
+      performed: passed,
+      kind: passed ? "packaged_host_restart" : null,
+      replayOk: passed,
+      reconnectOk: passed
+    },
+    resourceBounds: {
+      maxArtifactBytes: passed ? 1024 : null,
+      maxWebSocketPayloadBytes: passed ? 2048 : null,
+      hostCapacity: passed ? 1 : null
+    },
+    checks: {
+      certificateVerifiedTransport: passed,
+      enrollmentOneTimeToken: passed,
+      hostCapacityAdvertised: passed,
+      hostCapabilitiesAdvertised: passed,
+      envelopeDigestCaptured: passed,
+      identitiesCaptured: passed,
+      eventsCaptured: passed,
+      heartbeatObserved: passed,
+      artifactHashCaptured: passed,
+      runtimeResultAuthoritative: passed,
+      networkInterruptReplay: passed,
+      resourceBoundsConfirmed: passed,
+      cleanupCompleted: passed,
+      credentialsRevoked: passed
+    },
+    result: input.result,
+    diagnostic: passed ? null : "external_blocker",
+    cleanup: {
+      harnessStateRemoved: passed && input.environmentClass === "local-tls-fixture",
+      credentialsRevoked: passed
+    }
+  };
+}
+
 afterEach(async () => {
   await Promise.all(
     roots.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
@@ -58,23 +133,10 @@ describe("release gate checklist and evaluation", () => {
     const root = await tempDir();
     const deterministicPath = join(root, "det.json");
     const localVpsPath = join(root, "local-vps.json");
-    await writeFile(
-      deterministicPath,
-      JSON.stringify({
-        version: "planweave.release-gate.deterministic/v1",
-        result: "passed",
-        generatedAt: new Date().toISOString(),
-        suite: "server-real-process"
-      })
-    );
+    await writeFile(deterministicPath, JSON.stringify(deterministicPassed()));
     await writeFile(
       localVpsPath,
-      JSON.stringify({
-        version: "planweave.vps-authenticated-e2e/v1",
-        result: "passed",
-        environmentClass: "local-tls-fixture",
-        generatedAt: new Date().toISOString()
-      })
+      JSON.stringify(vpsEvidence({ result: "passed", environmentClass: "local-tls-fixture" }))
     );
 
     const missingLive = await buildReleaseGateReport({
@@ -120,15 +182,7 @@ describe("release gate checklist and evaluation", () => {
     const deterministicPath = join(root, "det.json");
     const realAcpPath = join(root, "acp.json");
     const vpsPath = join(root, "vps.json");
-    await writeFile(
-      deterministicPath,
-      JSON.stringify({
-        version: "planweave.release-gate.deterministic/v1",
-        result: "passed",
-        generatedAt: new Date().toISOString(),
-        suite: "server-real-process"
-      })
-    );
+    await writeFile(deterministicPath, JSON.stringify(deterministicPassed()));
     await writeFile(
       realAcpPath,
       JSON.stringify({
@@ -140,12 +194,7 @@ describe("release gate checklist and evaluation", () => {
     );
     await writeFile(
       vpsPath,
-      JSON.stringify({
-        version: "planweave.vps-authenticated-e2e/v1",
-        result: "skipped",
-        generatedAt: new Date().toISOString(),
-        environmentClass: "unavailable"
-      })
+      JSON.stringify(vpsEvidence({ result: "skipped", environmentClass: "unavailable" }))
     );
 
     const report = await buildReleaseGateReport({
@@ -173,12 +222,7 @@ describe("release gate checklist and evaluation", () => {
     const vpsPath = join(root, "vps.json");
     await writeFile(
       vpsPath,
-      JSON.stringify({
-        version: "planweave.vps-authenticated-e2e/v1",
-        result: "passed",
-        environmentClass: "local-tls-fixture",
-        generatedAt: new Date().toISOString()
-      })
+      JSON.stringify(vpsEvidence({ result: "passed", environmentClass: "local-tls-fixture" }))
     );
     const report = await buildReleaseGateReport({
       vpsEvidencePath: vpsPath,
@@ -351,6 +395,37 @@ describe("release gate checklist and evaluation", () => {
     }
   });
 
+  it("rejects self-reported VPS pass when producer evidence contradicts checks", async () => {
+    const root = await tempDir();
+    const runtimeMismatchPath = join(root, "runtime-mismatch.json");
+    const unknownFieldPath = join(root, "unknown-field.json");
+    await writeFile(
+      runtimeMismatchPath,
+      JSON.stringify({
+        ...vpsEvidence({ result: "passed", environmentClass: "remote-vps" }),
+        runtimeOutcome: "failed"
+      })
+    );
+    await writeFile(
+      unknownFieldPath,
+      JSON.stringify({
+        ...vpsEvidence({ result: "passed", environmentClass: "remote-vps" }),
+        selfReportedPass: true
+      })
+    );
+
+    for (const vpsEvidencePath of [runtimeMismatchPath, unknownFieldPath]) {
+      const report = await buildReleaseGateReport({
+        vpsEvidencePath,
+        agentHostVersion: "0.3.0",
+        protocolPackageVersion: "0.3.0"
+      });
+      expect(report.tiers.find((tier) => tier.tierId === "remote_authenticated_vps")).toMatchObject(
+        { status: "invalid", countsAsPass: false }
+      );
+    }
+  });
+
   it("becomes pre-release ready only when all three tiers pass and majors match", async () => {
     const root = await tempDir();
     const now = new Date().toISOString();
@@ -390,37 +465,9 @@ describe("release gate checklist and evaluation", () => {
     );
     await writeFile(
       vpsPath,
-      JSON.stringify({
-        version: "planweave.vps-authenticated-e2e/v1",
-        result: "passed",
-        environmentClass: "remote-vps",
-        generatedAt: now,
-        componentVersions: { server: "0.3.0", agentHost: "0.3.0", protocol: 1 },
-        identities: {
-          operationId: "op-1",
-          dispatchId: "dispatch-1",
-          executionAttemptId: "attempt-1",
-          hostId: "host-1",
-          leaseId: "lease-1",
-          sessionId: null
-        },
-        checks: {
-          certificateVerifiedTransport: true,
-          enrollmentOneTimeToken: true,
-          hostCapacityAdvertised: true,
-          hostCapabilitiesAdvertised: true,
-          envelopeDigestCaptured: true,
-          identitiesCaptured: true,
-          eventsCaptured: true,
-          heartbeatObserved: true,
-          artifactHashCaptured: true,
-          runtimeResultAuthoritative: true,
-          networkInterruptReplay: true,
-          resourceBoundsConfirmed: true,
-          cleanupCompleted: true,
-          credentialsRevoked: true
-        }
-      })
+      JSON.stringify(
+        vpsEvidence({ result: "passed", environmentClass: "remote-vps", generatedAt: now })
+      )
     );
 
     const report = await buildReleaseGateReport({
@@ -468,15 +515,7 @@ describe("release gate checklist and evaluation", () => {
   it("CLI evaluates evidence and exits non-zero when live tiers are missing", async () => {
     const root = await tempDir();
     const deterministicPath = join(root, "det.json");
-    await writeFile(
-      deterministicPath,
-      JSON.stringify({
-        version: "planweave.release-gate.deterministic/v1",
-        result: "passed",
-        generatedAt: new Date().toISOString(),
-        suite: "server-real-process"
-      })
-    );
+    await writeFile(deterministicPath, JSON.stringify(deterministicPassed()));
     const code = await runReleaseGateCli(
       [
         "--deterministic-evidence",

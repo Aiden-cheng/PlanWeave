@@ -16,6 +16,7 @@ import {
   type RollbackCheckDefinition
 } from "./checklist.js";
 import { redactSensitiveText } from "../vpsE2e/redaction.js";
+import { vpsE2eEvidenceSchema } from "../vpsE2e/evidence.js";
 
 export const RELEASE_GATE_REPORT_VERSION = "planweave.release-gate/v1" as const;
 
@@ -93,33 +94,6 @@ const realAcpPassedChecksSchema = z
     noCliFallback: z.literal(true)
   })
   .strict();
-
-const vpsPassedChecksSchema = z
-  .object({
-    certificateVerifiedTransport: z.literal(true),
-    enrollmentOneTimeToken: z.literal(true),
-    hostCapacityAdvertised: z.literal(true),
-    hostCapabilitiesAdvertised: z.literal(true),
-    envelopeDigestCaptured: z.literal(true),
-    identitiesCaptured: z.literal(true),
-    eventsCaptured: z.literal(true),
-    heartbeatObserved: z.literal(true),
-    runtimeResultAuthoritative: z.literal(true),
-    networkInterruptReplay: z.literal(true),
-    resourceBoundsConfirmed: z.literal(true),
-    cleanupCompleted: z.literal(true),
-    credentialsRevoked: z.literal(true)
-  })
-  .passthrough();
-
-const vpsPassedIdentitiesSchema = z
-  .object({
-    operationId: z.string().min(1),
-    dispatchId: z.string().min(1),
-    executionAttemptId: z.string().min(1),
-    hostId: z.string().min(1)
-  })
-  .passthrough();
 
 function digestJson(value: unknown): string {
   const body = JSON.stringify(value);
@@ -202,9 +176,9 @@ export async function evaluateDeterministicEvidence(
         exitCode: z.number().int().optional(),
         tests: z
           .object({
-            total: z.number().int().nonnegative().optional(),
-            passed: z.number().int().nonnegative().optional(),
-            failed: z.number().int().nonnegative().optional()
+            total: z.number().int().nonnegative(),
+            passed: z.number().int().nonnegative(),
+            failed: z.number().int().nonnegative()
           })
           .optional()
       })
@@ -217,23 +191,26 @@ export async function evaluateDeterministicEvidence(
         status: "invalid",
         countsAsPass: false,
         evidenceDigest: digestJson(raw),
-        diagnostic: "Deterministic evidence schema mismatch (generatedAt required; mtime is not used).",
+        diagnostic:
+          "Deterministic evidence schema mismatch (generatedAt required; mtime is not used).",
         observedAt: null,
         environmentClass: "ci"
       };
     }
     if (parsed.data.result === "passed") {
       const suiteOk = parsed.data.suite === "server-real-process";
-      const exitOk = parsed.data.exitCode === 0 || parsed.data.exitCode === undefined;
-      const failedOk =
-        parsed.data.tests?.failed === undefined || parsed.data.tests.failed === 0;
-      // Bare { result: "passed" } without suite identity is forgeable and invalid.
-      if (!suiteOk || !exitOk || !failedOk) {
+      const exitOk = parsed.data.exitCode === 0;
+      const testsOk =
+        parsed.data.tests !== undefined &&
+        parsed.data.tests.total > 0 &&
+        parsed.data.tests.failed === 0 &&
+        parsed.data.tests.passed === parsed.data.tests.total;
+      if (!suiteOk || !exitOk || !testsOk) {
         return rejectForgedPassed(
           tierId,
           "required_ci",
           parsed.data,
-          "Deterministic passed evidence requires suite=server-real-process and zero failed tests (forged result rejected).",
+          "Deterministic passed evidence requires suite=server-real-process, exitCode=0, and a complete passing test count (forged result rejected).",
           "ci"
         );
       }
@@ -380,25 +357,7 @@ export async function evaluateVpsEvidence(
   if (!path) return notProvided(tierId);
   try {
     const raw = await readJsonFile(path);
-    const schema = z
-      .object({
-        version: z.literal("planweave.vps-authenticated-e2e/v1"),
-        result: tierResultSchema,
-        environmentClass: z.enum(["local-tls-fixture", "remote-vps", "unavailable"]),
-        componentVersions: z
-          .object({
-            server: z.string().optional(),
-            agentHost: z.string().nullable().optional(),
-            protocol: z.number().nullable().optional()
-          })
-          .passthrough()
-          .optional(),
-        checks: z.record(z.string(), z.unknown()).optional(),
-        identities: z.record(z.string(), z.unknown()).optional(),
-        generatedAt: z.string().datetime()
-      })
-      .passthrough();
-    const parsed = schema.safeParse(raw);
+    const parsed = vpsE2eEvidenceSchema.safeParse(raw);
     if (!parsed.success) {
       return {
         tierId,
@@ -406,7 +365,8 @@ export async function evaluateVpsEvidence(
         status: "invalid",
         countsAsPass: false,
         evidenceDigest: digestJson(raw),
-        diagnostic: "VPS e2e evidence schema mismatch (generatedAt required; mtime is not used).",
+        diagnostic:
+          "VPS e2e evidence schema mismatch: complete strict producer evidence is required (forged result rejected; generatedAt required and mtime is not used).",
         observedAt: null,
         environmentClass: null
       };
@@ -423,19 +383,6 @@ export async function evaluateVpsEvidence(
         observedAt,
         environmentClass: parsed.data.environmentClass
       };
-    }
-    if (parsed.data.result === "passed") {
-      const checksOk = vpsPassedChecksSchema.safeParse(parsed.data.checks);
-      const identitiesOk = vpsPassedIdentitiesSchema.safeParse(parsed.data.identities);
-      if (!checksOk.success || !identitiesOk.success) {
-        return rejectForgedPassed(
-          tierId,
-          "required_pre_release_evidence",
-          parsed.data,
-          "VPS passed evidence requires all remote checks true and non-null operation/dispatch/attempt/host identities (forged result rejected).",
-          "remote-vps"
-        );
-      }
     }
     if (parsed.data.result === "passed" && isExpired(observedAt, now)) {
       return {

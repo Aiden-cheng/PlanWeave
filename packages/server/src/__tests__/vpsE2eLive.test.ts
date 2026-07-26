@@ -62,7 +62,7 @@ describe.skipIf(!liveEnabled)("authenticated VPS / local-TLS e2e (opt-in)", () =
         expect(evidence.checks.artifactHashCaptured).toBe(true);
         expect(evidence.checks.networkInterruptReplay).toBe(true);
         expect(evidence.checks.credentialsRevoked).toBe(true);
-        expect(evidence.envelopeDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
+        expect(evidence.envelopeDigest).toMatch(/^envelope:sha256:[a-f0-9]{64}$/);
       }
     }
   }, 180_000);

@@ -509,7 +509,7 @@ export async function runLocalTlsFixture(options: {
       if (envelopeRow?.canonical_json) {
         evidencePartial = {
           ...evidencePartial,
-          envelopeDigest: digestLabel("sha256", sha256Hex(envelopeRow.canonical_json))
+          envelopeDigest: `envelope:${digestLabel("sha256", sha256Hex(envelopeRow.canonical_json))}`
         };
         checks.envelopeDigestCaptured = true;
       }

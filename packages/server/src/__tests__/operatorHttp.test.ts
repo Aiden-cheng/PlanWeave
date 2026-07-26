@@ -60,6 +60,7 @@ async function setup(
       service,
       readiness: () => ({ status: readiness, schemaVersion: 1 }),
       serverVersion: "test",
+      limits: { maxArtifactBytes: 1024, maxWebSocketPayloadBytes: 2048 },
       allowInsecureDevelopment
     });
   });
@@ -131,6 +132,9 @@ describe("operator HTTP boundary", () => {
       expect.objectContaining({ operatorId: "operator-1" }),
       { cursor: "0", limit: "50" }
     );
+    await expect((await fetch(`${fixture.origin}/version`)).json()).resolves.toMatchObject({
+      limits: { maxArtifactBytes: 1024, maxWebSocketPayloadBytes: 2048 }
+    });
   });
 
   it("returns 503 readiness while startup reconciliation is incomplete", async () => {

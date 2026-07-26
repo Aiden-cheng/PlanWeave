@@ -9,7 +9,16 @@ const MAX_OPERATOR_BODY_BYTES = 64 * 1024;
 
 const healthResponseSchema = z.object({ status: z.literal("ok") }).strict();
 const versionResponseSchema = z
-  .object({ serverVersion: z.string().min(1).max(64), protocolVersion: z.literal(1) })
+  .object({
+    serverVersion: z.string().min(1).max(64),
+    protocolVersion: z.literal(1),
+    limits: z
+      .object({
+        maxArtifactBytes: z.number().int().positive(),
+        maxWebSocketPayloadBytes: z.number().int().positive()
+      })
+      .strict()
+  })
   .strict();
 
 export type OperatorHttpOptions = {
@@ -17,6 +26,10 @@ export type OperatorHttpOptions = {
   service: OperatorControlPort;
   readiness(): ServerReadiness;
   serverVersion: string;
+  limits: {
+    maxArtifactBytes: number;
+    maxWebSocketPayloadBytes: number;
+  };
   allowInsecureDevelopment?: boolean;
 };
 
@@ -257,7 +270,11 @@ export async function handleOperatorHttpRequest(
       respond(
         response,
         200,
-        versionResponseSchema.parse({ serverVersion: options.serverVersion, protocolVersion: 1 })
+        versionResponseSchema.parse({
+          serverVersion: options.serverVersion,
+          protocolVersion: 1,
+          limits: options.limits
+        })
       );
       return true;
     }

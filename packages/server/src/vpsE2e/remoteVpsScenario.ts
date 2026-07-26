@@ -10,13 +10,7 @@ import { precondition } from "./gate.js";
 import { digestLabel, redactSensitiveText } from "./redaction.js";
 import { createTrustedFetch } from "./trustedFetch.js";
 import { serverPackageVersion } from "../packageInfo.js";
-import {
-  runNodeBin,
-  sha256Hex,
-  spawnLongLived,
-  waitFor,
-  type ManagedChild
-} from "./processSupport.js";
+import { runNodeBin, spawnLongLived, waitFor, type ManagedChild } from "./processSupport.js";
 
 const DEFAULT_TIMEOUT_MS = 90_000;
 const DISPATCH_TIMEOUT_MS = 180_000;
@@ -45,9 +39,7 @@ export function findOnlineHostById(
   items: readonly OnlineHost[],
   packagedHostId: string
 ): OnlineHost | undefined {
-  return items.find(
-    (item) => item.id === packagedHostId && typeof item.lastSeenAt === "string"
-  );
+  return items.find((item) => item.id === packagedHostId && typeof item.lastSeenAt === "string");
 }
 
 export function assertCoordinatorOrigin(configuredUrl: string, expectedOrigin: string): void {
@@ -211,7 +203,11 @@ export async function runRemoteVpsScenario(options: {
 
     const version = await trusted.request(`${origin}/version`);
     const versionBody = version.ok
-      ? ((await version.json()) as { protocolVersion?: number; serverVersion?: string })
+      ? ((await version.json()) as {
+          protocolVersion?: number;
+          serverVersion?: string;
+          limits?: { maxArtifactBytes?: number; maxWebSocketPayloadBytes?: number };
+        })
       : {};
     protocolVersion = versionBody.protocolVersion ?? null;
 
@@ -299,9 +295,7 @@ export async function runRemoteVpsScenario(options: {
       if (grantResponse.status !== 201) {
         return base({
           result: "failed",
-          diagnostic: redactSensitiveText(
-            `remote_vps_enroll_grant_failed:${grantResponse.status}`
-          ),
+          diagnostic: redactSensitiveText(`remote_vps_enroll_grant_failed:${grantResponse.status}`),
           componentVersions: {
             server: serverPackageVersion,
             agentHost: agentHostVersion,
@@ -468,6 +462,8 @@ export async function runRemoteVpsScenario(options: {
     let terminal: {
       state: string;
       attempt?: { hostId?: string };
+      envelopeDigest?: string;
+      reportArtifactRef?: string;
       runtime?: { status?: string };
     } = { state: view.state ?? "activated" };
     await waitFor(
@@ -515,12 +511,17 @@ export async function runRemoteVpsScenario(options: {
       };
     }
 
-    const envelopeDigest = digestLabel(
-      "sha256",
-      sha256Hex(`${view.dispatchId}:${view.executionAttemptId}`)
+    const envelopeDigest = terminal.envelopeDigest ?? null;
+    const artifactHash = terminal.reportArtifactRef?.startsWith("artifact:sha256:")
+      ? digestLabel("sha256", terminal.reportArtifactRef.slice("artifact:sha256:".length))
+      : null;
+    checks.envelopeDigestCaptured = envelopeDigest !== null;
+    checks.artifactHashCaptured = artifactHash !== null;
+    const maxArtifactBytes = versionBody.limits?.maxArtifactBytes ?? null;
+    const maxWebSocketPayloadBytes = versionBody.limits?.maxWebSocketPayloadBytes ?? null;
+    checks.resourceBoundsConfirmed = Boolean(
+      maxArtifactBytes && maxWebSocketPayloadBytes && hostCapacity
     );
-    checks.envelopeDigestCaptured = true;
-    checks.resourceBoundsConfirmed = checks.hostCapacityAdvertised;
 
     // Network interrupt: stop packaged Host, restart with same hostConfigPath, verify heartbeat + cursor replay.
     networkInterruptPerformed = true;
@@ -596,6 +597,7 @@ export async function runRemoteVpsScenario(options: {
       checks.identitiesCaptured &&
       checks.eventsCaptured &&
       checks.heartbeatObserved &&
+      checks.artifactHashCaptured &&
       checks.runtimeResultAuthoritative &&
       checks.networkInterruptReplay &&
       checks.resourceBoundsConfirmed &&
@@ -616,12 +618,13 @@ export async function runRemoteVpsScenario(options: {
         node: process.version
       },
       envelopeDigest,
+      artifactHash,
       eventCursor,
       runtimeOutcome: terminal.runtime?.status ?? terminal.state,
       heartbeat: { hostLastSeenAtPresent: checks.heartbeatObserved },
       resourceBounds: {
-        maxArtifactBytes: null,
-        maxWebSocketPayloadBytes: null,
+        maxArtifactBytes,
+        maxWebSocketPayloadBytes,
         hostCapacity
       },
       networkInterrupt: {
