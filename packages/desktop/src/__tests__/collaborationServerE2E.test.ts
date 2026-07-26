@@ -254,9 +254,22 @@ describe("Desktop CollaborationClient against the Server composition", () => {
         memberBootstrap.principal.humanPrincipalId
       ])
     );
-    await expect(member.createInvitation()).rejects.toMatchObject({
-      kind: "forbidden",
-      httpStatus: 403
+    const projectDevices = await owner.listDevices({ scope: "project" });
+    expect(projectDevices.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ deviceCredentialId: memberBootstrap.device.deviceCredentialId })
+      ])
+    );
+    await owner.revokeDevice(memberBootstrap.device.deviceCredentialId);
+    expect(
+      (await owner.listDevices({ scope: "project" })).items.find(
+        (device) => device.deviceCredentialId === memberBootstrap.device.deviceCredentialId
+      )?.revokedAt
+    ).toBeDefined();
+    await expect(member.listAssignments({ canvasId: "default" })).rejects.toMatchObject({
+      kind: "auth",
+      code: "work_auth_unauthenticated",
+      httpStatus: 401
     });
 
     const assignment = await owner.updateAssignment({
@@ -319,19 +332,6 @@ describe("Desktop CollaborationClient against the Server composition", () => {
         })
       ])
     );
-
-    const projectDevices = await owner.listDevices({ scope: "project" });
-    expect(projectDevices.items).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ deviceCredentialId: memberBootstrap.device.deviceCredentialId })
-      ])
-    );
-    await owner.revokeDevice(memberBootstrap.device.deviceCredentialId);
-    expect(
-      (await owner.listDevices({ scope: "project" })).items.find(
-        (device) => device.deviceCredentialId === memberBootstrap.device.deviceCredentialId
-      )?.revokedAt
-    ).toBeDefined();
 
     await owner.promoteOwner(memberBootstrap.principal.humanPrincipalId);
     expect(
@@ -410,6 +410,19 @@ describe("Desktop CollaborationClient against the Server composition", () => {
       remote.operationId
     );
 
+    const replayedEvents = await owner.replayRemoteOperationEvents(remote.operationId, {
+      afterCursor: 0
+    });
+    expect(replayedEvents.afterCursor).toBe(0);
+    expect(replayedEvents.cursor).toBe(1);
+    expect(replayedEvents.highWatermark).toBe(1);
+    expect(replayedEvents.events).toEqual([
+      expect.objectContaining({
+        cursor: 1,
+        kind: "agent_message",
+        text: "desktop e2e event"
+      })
+    ]);
     const events = await owner.replayRemoteOperationEvents(remote.operationId, { afterCursor: 1 });
     expect(events).toMatchObject({ afterCursor: 1, cursor: 1, events: [], hasMore: false });
     const interactions = await owner.listRemoteOperationInteractions(remote.operationId, {
