@@ -93,6 +93,29 @@ describe("distributed server composition", () => {
       schemaVersion: latestCentralSchemaVersion
     });
 
+    const trustedBootstrap = await fetch(
+      `${fixture.origin}/api/v1/projects/${fixture.projectId}/human/bootstrap`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ displayName: "Trusted Owner", humanPrincipalId: "trusted-owner" })
+      }
+    );
+    expect(trustedBootstrap.status).toBe(201);
+
+    const unknownBootstrap = await fetch(
+      `${fixture.origin}/api/v1/projects/unknown-project/human/bootstrap`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ displayName: "Unknown Owner", humanPrincipalId: "unknown-owner" })
+      }
+    );
+    expect(unknownBootstrap.status).toBe(403);
+    await expect(unknownBootstrap.json()).resolves.toEqual({
+      error: "human_cross_project_forbidden"
+    });
+
     const enrollment = await fetch(`${fixture.origin}/api/v1/host-enrollments`, {
       method: "POST",
       headers: jsonHeaders(adminToken),

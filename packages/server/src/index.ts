@@ -269,6 +269,7 @@ export {
   type HumanDeviceCredentialMetadata,
   type HumanDeviceTokenHandoff,
   type HumanHttpOptions,
+  type HumanProjectAuthority,
   type HumanMembershipServiceOptions,
   type HumanPolicyFacts,
   type HumanPolicySubject,

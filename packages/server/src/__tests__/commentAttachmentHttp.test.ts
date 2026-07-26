@@ -50,6 +50,9 @@ async function setup(options?: { clock?: () => Date }) {
   const humanRepository = new HumanIdentityRepository(database, options?.clock);
   const humanService = new HumanMembershipService({
     repository: humanRepository,
+    projectAuthority: {
+      hasProject: (projectId) => projectId === "project-a" || projectId === "project-b"
+    },
     clock: options?.clock
   });
   const attachmentRepository = new CommentAttachmentRepository(database);

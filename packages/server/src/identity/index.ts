@@ -120,6 +120,7 @@ export {
 export {
   HumanMembershipService,
   HumanMembershipServiceError,
+  type HumanProjectAuthority,
   type HumanMembershipServiceOptions
 } from "./service.js";
 

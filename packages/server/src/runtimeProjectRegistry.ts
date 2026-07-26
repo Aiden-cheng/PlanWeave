@@ -21,6 +21,7 @@ export type TrustedRuntimeProject = z.infer<typeof trustedRuntimeProjectSchema>;
 export type TrustedRuntimeRegistry = {
   registry: RemoteRuntimePortRegistry;
   locators: Array<{ projectId: string; canvasId: string }>;
+  hasProject(projectId: string): boolean;
   close(): void;
 };
 
@@ -49,9 +50,13 @@ export async function createTrustedRuntimeRegistry(
     for (const release of unbind.reverse()) release();
     throw error;
   }
+  const projectIds = new Set(locators.map((locator) => locator.projectId));
   return {
     registry,
     locators,
+    hasProject(projectId) {
+      return projectIds.has(projectId);
+    },
     close() {
       for (const release of unbind.splice(0).reverse()) release();
     }

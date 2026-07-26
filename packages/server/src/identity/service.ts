@@ -52,7 +52,12 @@ function mapIdentityError(error: unknown): never {
 
 export type HumanMembershipServiceOptions = {
   repository: HumanIdentityRepository;
+  projectAuthority: HumanProjectAuthority;
   clock?: () => Date;
+};
+
+export type HumanProjectAuthority = {
+  hasProject(projectId: string): boolean;
 };
 
 /**
@@ -60,11 +65,19 @@ export type HumanMembershipServiceOptions = {
  */
 export class HumanMembershipService {
   private readonly repository: HumanIdentityRepository;
+  private readonly projectAuthority: HumanProjectAuthority;
   private readonly clock: () => Date;
 
   constructor(options: HumanMembershipServiceOptions) {
     this.repository = options.repository;
+    this.projectAuthority = options.projectAuthority;
     this.clock = options.clock ?? (() => new Date());
+  }
+
+  private requireProject(projectId: string): string {
+    const pid = humanProjectIdSchema.parse(projectId);
+    if (!this.projectAuthority.hasProject(pid)) deny("human_cross_project_forbidden");
+    return pid;
   }
 
   /**
@@ -83,7 +96,7 @@ export class HumanMembershipService {
     created: boolean;
   } {
     try {
-      const pid = humanProjectIdSchema.parse(projectId);
+      const pid = this.requireProject(projectId);
       const body = humanBootstrapRequestSchema.parse(request);
       const humanPrincipalId = body.humanPrincipalId ?? humanPrincipalIdSchema.parse(randomUUID());
       const proof = localAdministrativeProofSchema.parse({
@@ -131,7 +144,7 @@ export class HumanMembershipService {
     request: unknown
   ): { invitation: HumanInvitationView; invitationToken: string } {
     try {
-      const pid = humanProjectIdSchema.parse(projectId);
+      const pid = this.requireProject(projectId);
       const body = humanCreateInvitationRequestSchema.parse(request ?? {});
       const decision = authorizeHumanAction({
         action: "create_invitation",
@@ -160,7 +173,7 @@ export class HumanMembershipService {
     query: unknown
   ): { items: HumanInvitationView[]; nextCursor: number | null } {
     try {
-      const pid = humanProjectIdSchema.parse(projectId);
+      const pid = this.requireProject(projectId);
       const page = humanInvitationListQuerySchema.parse(query);
       // Listing invitations is an owner management surface (same as create/revoke).
       const decision = authorizeHumanAction({
@@ -187,7 +200,7 @@ export class HumanMembershipService {
     invitationId: string
   ): HumanInvitationView {
     try {
-      const pid = humanProjectIdSchema.parse(projectId);
+      const pid = this.requireProject(projectId);
       const id = projectInvitationIdSchema.parse(invitationId);
       const decision = authorizeHumanAction({
         action: "revoke_invitation",
@@ -226,7 +239,7 @@ export class HumanMembershipService {
     principalCreated: boolean;
   } {
     try {
-      const pid = humanProjectIdSchema.parse(projectId);
+      const pid = this.requireProject(projectId);
       const body = humanConsumeInvitationRequestSchema.parse(request);
 
       const matched = this.repository.findInvitationByToken(body.invitationToken);
@@ -274,7 +287,7 @@ export class HumanMembershipService {
     query: unknown
   ): { items: HumanMembershipView[]; nextCursor: number | null } {
     try {
-      const pid = humanProjectIdSchema.parse(projectId);
+      const pid = this.requireProject(projectId);
       const page = humanPageQuerySchema.parse(query);
       const decision = authorizeHumanAction({
         action: "view_members",
@@ -301,7 +314,7 @@ export class HumanMembershipService {
     targetHumanPrincipalId: string
   ): HumanMembershipView {
     try {
-      const pid = humanProjectIdSchema.parse(projectId);
+      const pid = this.requireProject(projectId);
       const target = humanPrincipalIdSchema.parse(targetHumanPrincipalId);
       const membership = this.repository.getActiveMembership(pid, target);
       if (!membership) deny("human_membership_required");
@@ -332,7 +345,7 @@ export class HumanMembershipService {
     targetHumanPrincipalId: string
   ): HumanMembershipView {
     try {
-      const pid = humanProjectIdSchema.parse(projectId);
+      const pid = this.requireProject(projectId);
       const target = humanPrincipalIdSchema.parse(targetHumanPrincipalId);
       const decision = authorizeHumanAction({
         action: "promote_owner",
@@ -355,7 +368,7 @@ export class HumanMembershipService {
     targetHumanPrincipalId: string
   ): HumanMembershipView {
     try {
-      const pid = humanProjectIdSchema.parse(projectId);
+      const pid = this.requireProject(projectId);
       const target = humanPrincipalIdSchema.parse(targetHumanPrincipalId);
       const membership = this.repository.getActiveMembership(pid, target);
       if (!membership) deny("human_membership_required");
@@ -386,7 +399,7 @@ export class HumanMembershipService {
     query: unknown
   ): { items: HumanDeviceView[]; nextCursor: number | null } {
     try {
-      const pid = humanProjectIdSchema.parse(projectId);
+      const pid = this.requireProject(projectId);
       const page = humanDeviceListQuerySchema.parse(query);
 
       if (page.scope === "project") {
@@ -428,7 +441,7 @@ export class HumanMembershipService {
     deviceCredentialId: string
   ): HumanDeviceView {
     try {
-      const pid = humanProjectIdSchema.parse(projectId);
+      const pid = this.requireProject(projectId);
       const deviceId = humanDeviceCredentialIdSchema.parse(deviceCredentialId);
       const device = this.repository.getDevice(deviceId);
       if (!device) deny("human_input_invalid");

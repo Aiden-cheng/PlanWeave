@@ -191,6 +191,7 @@ export async function createDistributedServerComposition(
     const humanIdentity = new HumanIdentityRepository(server.database, clock);
     const humanMembership = new HumanMembershipService({
       repository: humanIdentity,
+      projectAuthority: runtimeRegistry,
       clock
     });
     const commentAttachmentRepository = new CommentAttachmentRepository(server.database);

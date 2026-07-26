@@ -17,6 +17,7 @@ import { HUMAN_RATE_MAX_BUCKETS } from "../identity/http.js";
 const servers: HttpServer[] = [];
 const directories: string[] = [];
 const databases: SqliteDatabase[] = [];
+const testProjectIds = new Set(["project-a", "project-b", "project-exp", "project-ttl"]);
 
 afterEach(async () => {
   resetHumanHttpRateLimits();
@@ -42,7 +43,10 @@ async function setup(allowInsecureDevelopment = true, clock?: () => Date) {
   databases.push(database);
   applyMigrations(database);
   const repository = new HumanIdentityRepository(database);
-  const service = new HumanMembershipService({ repository });
+  const service = new HumanMembershipService({
+    repository,
+    projectAuthority: { hasProject: (projectId) => testProjectIds.has(projectId) }
+  });
   const server = createServer((request, response) => {
     void handleHumanHttpRequest(request, response, {
       service,
@@ -117,6 +121,28 @@ describe("human membership HTTP APIs", () => {
     });
     expect(conflict.response.status).toBe(409);
     expect(conflict.payload.error).toBe("human_bootstrap_conflict");
+  });
+
+  it("rejects unknown projects before service persistence, including direct service calls", async () => {
+    const { origin, service, database } = await setup();
+    expect(() =>
+      service.bootstrapOwner("unknown-project", {
+        displayName: "Unknown Owner",
+        humanPrincipalId: "unknown-owner"
+      })
+    ).toThrowError(expect.objectContaining({ code: "human_cross_project_forbidden" }));
+
+    const response = await bootstrap(origin, "unknown-project", {
+      displayName: "Unknown Owner",
+      humanPrincipalId: "unknown-owner"
+    });
+    expect(response.response.status).toBe(403);
+    expect(response.payload.error).toBe("human_cross_project_forbidden");
+    expect(
+      (database.prepare("SELECT COUNT(*) AS count FROM project_memberships").get() as {
+        count: number;
+      }).count
+    ).toBe(0);
   });
 
   it("rejects host/operator-shaped credentials and unknown device tokens uniformly", async () => {
@@ -574,7 +600,7 @@ describe("human membership HTTP APIs", () => {
   it("keeps fixed-window rate limits while expiring and bounding untrusted keys", async () => {
     let now = new Date("2026-07-26T10:00:00.000Z");
     const { origin } = await setup(true, () => now);
-    const limitedUrl = `${origin}/api/v1/projects/oldest-project/human/members`;
+    const limitedUrl = `${origin}/api/v1/projects/project-a/human/members`;
 
     for (let request = 0; request < 60; request += 1) {
       const response = await fetch(limitedUrl);
