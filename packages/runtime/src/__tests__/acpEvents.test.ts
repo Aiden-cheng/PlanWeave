@@ -21,6 +21,7 @@ import {
 } from "../autoRun/normalizedEventContract.js";
 import { replayNormalizedRunnerEvents } from "../autoRun/runnerEventReplay.js";
 import { runnerIdentitySchema, runnerRunIdentitySchema } from "../autoRun/runnerContractSchemas.js";
+import { redactAcpProtocolPayload } from "../autoRun/runnerEventRedaction.js";
 import { projectAcpConversation } from "../autoRun/acpConversationProjection.js";
 import { writeAcpConversationProjection } from "../autoRun/acpConversationPersistence.js";
 import { event, identity, projectionEvent } from "./acpEvents.helpers.js";
@@ -102,6 +103,38 @@ function retentionBoundaryCount(events: readonly NormalizedRunnerEvent[]): numbe
 }
 
 describe("ACP event normalization", () => {
+  it("preserves ordinary Basic text in a complete tool update payload", () => {
+    const notification = {
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "tool_call_update" as const,
+        toolCallId: "tool-1",
+        status: "completed" as const,
+        rawOutput: {
+          formatted_output:
+            '{"project":{"title":"Basic PlanWeave Example"},"description":"The basic workflow is clear"}',
+          exit_code: 0
+        }
+      }
+    };
+    const payload = {
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: notification
+    };
+
+    expect(redactAcpProtocolPayload(payload)).toEqual(payload);
+    expect(normalizeAcpSessionNotification(notification)).toMatchObject({
+      kind: "tool_update",
+      callId: "tool-1",
+      status: "completed",
+      rawOutput: {
+        content: expect.stringContaining("Basic PlanWeave Example"),
+        redaction: { classes: [], replaced: 0 }
+      }
+    });
+  });
+
   it("preserves message, tool, plan, and usage semantics while redacting", () => {
     expect(
       normalizeAcpSessionNotification({

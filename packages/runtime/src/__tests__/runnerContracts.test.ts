@@ -35,6 +35,7 @@ import {
 import { adaptLegacyDesktopRunnerEvents } from "../desktop/legacyRunnerEventAdapter.js";
 import {
   redactAcpProtocolPayload,
+  redactRunnerEventText,
   redactRunnerEventPayload
 } from "../autoRun/runnerEventRedaction.js";
 
@@ -293,6 +294,9 @@ describe("runner event redaction and UTF-8 limits", () => {
   it.each([
     ["Authorization: Basic dXNlcjpwYXNz", ["dXNlcjpwYXNz"]],
     ["Authorization: Bearer abc.def.ghi", ["abc.def.ghi"]],
+    ["Basic dXNlcjpwYXNz", ["dXNlcjpwYXNz"]],
+    ["Bearer abc.def.ghi", ["abc.def.ghi"]],
+    ["Bearer abcdefghijklmnopqrstuvwx", ["abcdefghijklmnopqrstuvwx"]],
     ["api_key=alpha beta", ["alpha", "beta"]],
     ['password: "hunter two"', ["hunter", "two"]],
     ["client_secret='hello world'", ["hello", "world"]],
@@ -335,6 +339,28 @@ describe("runner event redaction and UTF-8 limits", () => {
       expect(JSON.stringify(replay)).not.toContain(fragment);
       expect(JSON.stringify(legacy)).not.toContain(fragment);
     }
+  });
+
+  it.each([
+    "Basic PlanWeave Example",
+    "Basic PlanWeave",
+    "basic experience overview",
+    "The basic workflow is clear",
+    "Bearer responsibilities overview",
+    "Bearer abcdefgh overview",
+    "Bearer plan-weave overview",
+    "basic abcdefg overview",
+    "basic abcdefgh overview"
+  ])("preserves ordinary authorization-like prose: %s", (content) => {
+    expect(redactRunnerEventText(content)).toEqual({
+      text: content,
+      classes: [],
+      replaced: 0
+    });
+    expect(normalizedOutputBody("stdout", content)).toMatchObject({
+      content,
+      redaction: { classes: [], replaced: 0 }
+    });
   });
 
   it("rejects unredacted and incompletely redacted direct schema inputs without echoing secrets", () => {

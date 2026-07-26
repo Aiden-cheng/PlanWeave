@@ -536,6 +536,55 @@ describe("ACP event controller durability and producers", () => {
     ]);
   });
 
+  it("does not classify protocol redaction failures as transport loss", async () => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-acp-redaction-failure-"));
+    const controller = new AcpSessionController(
+      new ActiveAgentRunRegistry(),
+      (options) => {
+        const connection: AcpConnection = {
+          processId: 42,
+          pendingOperationCount: 0,
+          pendingOperations: new Map(),
+          stderr: [],
+          closed: Promise.resolve(),
+          initialize: vi.fn(async () => ({
+            protocolVersion: 1,
+            agentCapabilities: {},
+            agentInfo: { name: "redaction-failure-agent", version: "1.0.0" }
+          })),
+          authenticate: vi.fn(async () => ({})),
+          newSession: vi.fn(async () => ({ sessionId: "redaction-failure-session" })),
+          loadSession: vi.fn(async () => ({})),
+          prompt: vi.fn(async () => {
+            options.observer?.redact({
+              message: "[REDACTED:CREDENTIAL] remaining-secret-fragment"
+            });
+            return { stopReason: "end_turn" };
+          }),
+          cancel: vi.fn(async () => undefined),
+          closeSession: vi.fn(async () => ({})),
+          setSessionMode: vi.fn(async () => ({})),
+          setSessionConfigOption: vi.fn(async () => ({ configOptions: [] })),
+          dispose: vi.fn(async () => undefined)
+        };
+        return connection;
+      },
+      new AcpEventReadModelRegistry()
+    );
+
+    await expect(controller.execute(run(root, "redaction-failure"))).rejects.toThrow(
+      "Runner event redaction left credential material"
+    );
+    const metadata = JSON.parse(await readFile(join(root, "metadata.json"), "utf8")) as {
+      recoveryInterruptionReason: string | null;
+      failureReason: string;
+    };
+    expect(metadata.failureReason).toContain(
+      "Runner event redaction left credential material in normalized content."
+    );
+    expect(metadata.recoveryInterruptionReason).toBeNull();
+  });
+
   it("loads the exact recovery session and never falls back to a new session", async () => {
     const root = await mkdtemp(join(tmpdir(), "planweave-acp-recovery-load-"));
     const loadFailure = new Error("scripted session/load failure");

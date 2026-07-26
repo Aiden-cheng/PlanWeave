@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { safeRunnerEventTextSchema, utf8ByteLength } from "../autoRun/runnerEventRedaction.js";
+import {
+  redactRunnerEventText,
+  safeRunnerEventTextSchema,
+  utf8ByteLength
+} from "../autoRun/runnerEventRedaction.js";
 
 describe("runner event redaction browser compatibility", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -10,5 +14,10 @@ describe("runner event redaction browser compatibility", () => {
     expect(utf8ByteLength("PlanWeave 界")).toBe(13);
     expect(safeRunnerEventTextSchema(3, "message").safeParse("界").success).toBe(true);
     expect(safeRunnerEventTextSchema(2, "message").safeParse("界").success).toBe(false);
+    expect(redactRunnerEventText("Basic dXNlcjpwYXNz")).toMatchObject({
+      text: "[REDACTED:CREDENTIAL]",
+      classes: ["credential"],
+      replaced: 1
+    });
   });
 });
