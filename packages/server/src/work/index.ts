@@ -91,6 +91,7 @@ export {
   WorkAssignmentError,
   WorkAssignmentRepository,
   workItemKeyParts,
+  type WorkAssignmentRepositoryOptions,
   type WorkItemKeyParts
 } from "./repository.js";
 
@@ -116,3 +117,9 @@ export {
   type ResolveDispatchAssignmentInput,
   type ResolveDispatchAssignmentResult
 } from "./dispatchIntegration.js";
+
+export {
+  handleWorkAssignmentHttpRequest,
+  resetWorkAssignmentHttpRateLimits,
+  type WorkAssignmentHttpOptions
+} from "./http.js";

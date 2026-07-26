@@ -61,6 +61,16 @@ export type AuthenticatedHumanDevice = {
   membership?: ProjectMembership;
 };
 
+export type MembershipTransition = {
+  type: "member_joined" | "member_removed" | "owner_promoted" | "owner_demoted";
+  membership: ProjectMembership;
+  principal: HumanPrincipal;
+};
+
+export type HumanIdentityRepositoryOptions = {
+  onMembershipTransitionInTransaction?: (transition: MembershipTransition) => void;
+};
+
 /**
  * SQLite repositories for human principals, project memberships, invitations, and devices.
  * Stores only token digests and safe metadata. Plaintext secrets leave this layer at most once.
@@ -72,7 +82,8 @@ export class HumanIdentityRepository {
 
   constructor(
     private readonly database: SqliteDatabase,
-    private readonly clock: () => Date = () => new Date()
+    private readonly clock: () => Date = () => new Date(),
+    private readonly options: HumanIdentityRepositoryOptions = {}
   ) {
     this.memberships = new MembershipStore(database, clock);
     this.devices = new DeviceCredentialStore(database, clock);
@@ -159,7 +170,17 @@ export class HumanIdentityRepository {
     options: { deviceLabel?: string; deviceTtlMs?: number } = {}
   ): BootstrapOwnerResult {
     const proof = localAdministrativeProofSchema.parse(proofInput);
-    return inWriteTransaction(this.database, () => this.bootstrapOwnerLocked(proof, options));
+    return inWriteTransaction(this.database, () => {
+      const result = this.bootstrapOwnerLocked(proof, options);
+      if (result.created) {
+        this.options.onMembershipTransitionInTransaction?.({
+          type: "member_joined",
+          membership: result.membership,
+          principal: result.principal
+        });
+      }
+      return result;
+    });
   }
 
   createInvitation(input: {
@@ -192,7 +213,15 @@ export class HumanIdentityRepository {
     deviceTtlMs?: number;
     existingDeviceToken?: string;
   }): ConsumeInvitationResult {
-    return inWriteTransaction(this.database, () => this.consumeInvitationLocked(input));
+    return inWriteTransaction(this.database, () => {
+      const result = this.consumeInvitationLocked(input);
+      this.options.onMembershipTransitionInTransaction?.({
+        type: "member_joined",
+        membership: result.membership,
+        principal: result.principal
+      });
+      return result;
+    });
   }
 
   /**
@@ -250,20 +279,46 @@ export class HumanIdentityRepository {
         removed.membership.projectId,
         removed.revokedAt
       );
+      const principal = this.getPrincipal(removed.membership.humanPrincipalId);
+      if (!principal) throw new HumanIdentityError("human_input_invalid");
+      this.options.onMembershipTransitionInTransaction?.({
+        type: "member_removed",
+        membership: removed.membership,
+        principal
+      });
       return removed.membership;
     });
   }
 
   promoteToOwner(projectId: string, targetHumanPrincipalId: string): ProjectMembership {
-    return inWriteTransaction(this.database, () =>
-      this.memberships.promoteToOwner(projectId, targetHumanPrincipalId)
-    );
+    return inWriteTransaction(this.database, () => {
+      const before = this.memberships.getActiveMembership(projectId, targetHumanPrincipalId);
+      const membership = this.memberships.promoteToOwner(projectId, targetHumanPrincipalId);
+      if (before && membership.revision !== before.revision) {
+        const principal = this.getPrincipal(membership.humanPrincipalId);
+        if (!principal) throw new HumanIdentityError("human_input_invalid");
+        this.options.onMembershipTransitionInTransaction?.({
+          type: "owner_promoted",
+          membership,
+          principal
+        });
+      }
+      return membership;
+    });
   }
 
   demoteOwner(projectId: string, targetHumanPrincipalId: string): ProjectMembership {
-    return inWriteTransaction(this.database, () =>
-      this.memberships.demoteOwner(projectId, targetHumanPrincipalId)
-    );
+    return inWriteTransaction(this.database, () => {
+      const membership = this.memberships.demoteOwner(projectId, targetHumanPrincipalId);
+      const principal = this.getPrincipal(membership.humanPrincipalId);
+      if (!principal) throw new HumanIdentityError("human_input_invalid");
+      this.options.onMembershipTransitionInTransaction?.({
+        type: "owner_demoted",
+        membership,
+        principal
+      });
+      return membership;
+    });
   }
 
   private bootstrapOwnerLocked(

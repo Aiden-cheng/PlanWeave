@@ -108,7 +108,9 @@ export {
   type AuthenticatedHumanDevice,
   type BootstrapOwnerResult,
   type ConsumeInvitationResult,
-  type CreateInvitationResult
+  type CreateInvitationResult,
+  type HumanIdentityRepositoryOptions,
+  type MembershipTransition
 } from "./repository.js";
 
 export {

@@ -9,6 +9,8 @@ import type { DispatchRecord } from "../dispatches.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 import { executionEnvelopeFor } from "./protocolTestFixtures.js";
 import { createRemoteDispatchFixture } from "./support/remoteDispatchFixture.js";
+import { ActivityRepository } from "../comments/activityRepository.js";
+import { ActivityProjectionService } from "../comments/service.js";
 
 const directories: string[] = [];
 const servers: PlanweaveServer[] = [];
@@ -76,6 +78,179 @@ async function acceptReportArtifact(
 }
 
 describe("DispatchService (test-only thin stack)", () => {
+  it("rolls back a durable dispatch transition when activity projection fails", async () => {
+    const server = await createServer();
+    const activity = new ActivityRepository(server.database);
+    const projection = new ActivityProjectionService({ activity });
+    const coordination = createTestDispatchCoordination(server.database, {
+      leaseDurationMs: 60_000,
+      hostOfflineAfterMs: 60_000,
+      writeback: { complete: async () => {}, fail: async () => {} },
+      onActivityTransitionInTransaction: (input) => {
+        projection.projectRemoteRunEventInCallerTransaction({
+          projectId: input.dispatch.projectId,
+          type: input.type,
+          dispatchId: input.dispatch.id,
+          hostId: input.dispatch.hostId,
+          occurredAt: input.occurredAt
+        });
+        throw new Error("activity_projection_failed");
+      }
+    });
+    const registration = coordination.hosts.register("Projection Failure Host");
+    coordination.hosts.reportOnline(registration.host.id, ["linux"], 1);
+    const dispatch = createRemoteDispatchFixture(
+      server.database,
+      coordination,
+      executionEnvelopeFor("T-001#B-ROLLBACK", ["linux"])
+    );
+
+    expect(() =>
+      coordination.dispatches.accept(
+        registration.host.id,
+        "accept-projection-failure",
+        dispatch.id,
+        dispatch.leaseId,
+        dispatch.executionAttemptId
+      )
+    ).toThrow("activity_projection_failed");
+    expect(coordination.dispatches.getRequired(dispatch.id).status).toBe("leased");
+    expect(
+      server.database
+        .prepare("SELECT 1 FROM host_event_receipts WHERE message_id=?")
+        .get("accept-projection-failure")
+    ).toBeUndefined();
+    expect(server.database.prepare("SELECT COUNT(*) AS count FROM activity_records").get()).toEqual(
+      {
+        count: 0
+      }
+    );
+    expect(
+      server.database.prepare("SELECT COUNT(*) AS count FROM activity_projection_outbox").get()
+    ).toEqual({ count: 0 });
+  });
+
+  it("projects started, interrupted, succeeded, and failed durable transitions but not cancellation", async () => {
+    const server = await createServer();
+    const activity = new ActivityRepository(server.database);
+    const projection = new ActivityProjectionService({ activity });
+    const coordination = createTestDispatchCoordination(server.database, {
+      leaseDurationMs: 60_000,
+      hostOfflineAfterMs: 60_000,
+      writeback: { complete: async () => {}, fail: async () => {} },
+      onActivityTransitionInTransaction: (input) => {
+        projection.projectRemoteRunEventInCallerTransaction({
+          projectId: input.dispatch.projectId,
+          type: input.type,
+          dispatchId: input.dispatch.id,
+          hostId: input.dispatch.hostId,
+          occurredAt: input.occurredAt
+        });
+      }
+    });
+    const registration = coordination.hosts.register("Activity Host");
+    coordination.hosts.reportOnline(registration.host.id, ["linux"], 4);
+
+    const interrupted = createRemoteDispatchFixture(
+      server.database,
+      coordination,
+      executionEnvelopeFor("T-001#B-INTERRUPTED", ["linux"])
+    );
+    coordination.dispatches.accept(
+      registration.host.id,
+      "activity-accept-interrupted",
+      interrupted.id,
+      interrupted.leaseId,
+      interrupted.executionAttemptId
+    );
+    coordination.dispatches.interrupt(registration.host.id, "activity-interrupt", {
+      type: "dispatch.interrupted",
+      dispatchId: interrupted.id,
+      leaseId: interrupted.leaseId,
+      executionAttemptId: interrupted.executionAttemptId,
+      reason: "host_restart",
+      resumable: false
+    });
+
+    const succeeded = createRemoteDispatchFixture(
+      server.database,
+      coordination,
+      executionEnvelopeFor("T-001#B-SUCCEEDED", ["linux"])
+    );
+    coordination.dispatches.accept(
+      registration.host.id,
+      "activity-accept-succeeded",
+      succeeded.id,
+      succeeded.leaseId,
+      succeeded.executionAttemptId
+    );
+    await acceptReportArtifact(server, coordination, succeeded, registration.host.id);
+    await coordination.dispatches.complete(
+      registration.host.id,
+      "activity-complete",
+      succeeded.id,
+      succeeded.leaseId,
+      succeeded.executionAttemptId,
+      { summary: "Done", reportArtifactRef, artifactRefs: [reportArtifactRef] }
+    );
+
+    const failed = createRemoteDispatchFixture(
+      server.database,
+      coordination,
+      executionEnvelopeFor("T-001#B-FAILED", ["linux"])
+    );
+    coordination.dispatches.accept(
+      registration.host.id,
+      "activity-accept-failed",
+      failed.id,
+      failed.leaseId,
+      failed.executionAttemptId
+    );
+    await coordination.dispatches.fail(
+      registration.host.id,
+      "activity-fail",
+      failed.id,
+      failed.leaseId,
+      failed.executionAttemptId,
+      { code: "agent_error", message: "Failed", retryable: false }
+    );
+
+    const cancelled = createRemoteDispatchFixture(
+      server.database,
+      coordination,
+      executionEnvelopeFor("T-001#B-CANCELLED", ["linux"])
+    );
+    coordination.dispatches.accept(
+      registration.host.id,
+      "activity-accept-cancelled",
+      cancelled.id,
+      cancelled.leaseId,
+      cancelled.executionAttemptId
+    );
+    await coordination.dispatches.fail(
+      registration.host.id,
+      "activity-cancel",
+      cancelled.id,
+      cancelled.leaseId,
+      cancelled.executionAttemptId,
+      { code: "execution_cancelled", message: "Cancelled", retryable: false }
+    );
+
+    const events = activity.list({ projectId: "project-a", limit: 20 });
+    const byDispatch = (dispatchId: string) =>
+      events.filter((event) => event.summary.dispatchId === dispatchId).map((event) => event.type);
+    expect(byDispatch(interrupted.id)).toEqual(
+      expect.arrayContaining(["remote_run_started", "remote_run_interrupted"])
+    );
+    expect(byDispatch(succeeded.id)).toEqual(
+      expect.arrayContaining(["remote_run_started", "remote_run_succeeded"])
+    );
+    expect(byDispatch(failed.id)).toEqual(
+      expect.arrayContaining(["remote_run_started", "remote_run_failed"])
+    );
+    expect(byDispatch(cancelled.id)).toEqual(["remote_run_started"]);
+  });
+
   it("selects a compatible online host and writes a completed result back", async () => {
     const server = await createServer();
     const complete = vi.fn(async () => {});

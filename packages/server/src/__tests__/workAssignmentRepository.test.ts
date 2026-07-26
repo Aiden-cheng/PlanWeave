@@ -2,6 +2,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { ActivityRepository } from "../comments/activityRepository.js";
+import { ActivityProjectionService } from "../comments/service.js";
 import {
   applyMigrations,
   centralSchemaVersion,
@@ -152,6 +154,34 @@ describe("work assignment migration v17", () => {
 });
 
 describe("work assignment repository CAS", () => {
+  it("rolls back assignment CAS when transactional activity projection fails", async () => {
+    const { database } = await openMigrated();
+    const activity = new ActivityRepository(database);
+    const projection = new ActivityProjectionService({ activity });
+    const repo = new WorkAssignmentRepository(database, {
+      onAssignmentUpdatedInTransaction: (record) => {
+        projection.projectAssignmentEventInCallerTransaction({
+          projectId: record.projectId,
+          workItem: record.workItem,
+          assignmentRevision: record.revision,
+          targetHeadline: "Assignment updated",
+          occurredAt: record.updatedAt
+        });
+        throw new Error("activity_projection_failed");
+      }
+    });
+    expect(() =>
+      repo.applyCasUpdate({ record: humanRecord({ revision: 1 }), expectedRevision: 0 })
+    ).toThrow("activity_projection_failed");
+    expect(repo.get("project-a", taskItem)).toBeUndefined();
+    expect(database.prepare("SELECT COUNT(*) AS count FROM activity_records").get()).toEqual({
+      count: 0
+    });
+    expect(
+      database.prepare("SELECT COUNT(*) AS count FROM activity_projection_outbox").get()
+    ).toEqual({ count: 0 });
+  });
+
   it("inserts first revision and compare-and-sets subsequent updates", async () => {
     const { repo } = await openMigrated();
     const first = repo.applyCasUpdate({

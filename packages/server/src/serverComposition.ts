@@ -3,6 +3,8 @@ import { ArtifactStore } from "./artifacts.js";
 import { handleAgentHostArtifactRequest } from "./artifactHttp.js";
 import {
   ActivityRepository,
+  ActivityProjectionService,
+  activitySubjectSchema,
   CommentRepository,
   CommentService,
   handleCommentActivityHttpRequest
@@ -33,6 +35,13 @@ import {
 } from "./runtimeArtifactAdapter.js";
 import { createTrustedRuntimeRegistry } from "./runtimeProjectRegistry.js";
 import { attachAgentHostWebSocketServer, type AgentHostWebSocketServer } from "./wsServer.js";
+import {
+  createActiveDispatchResolver,
+  createHostAssignmentPort,
+  createIdentityMembershipPort,
+  handleWorkAssignmentHttpRequest,
+  WorkAssignmentService
+} from "./work/index.js";
 
 export type DistributedServerCompositionOptions = {
   httpServer: HttpServer;
@@ -140,6 +149,7 @@ function requiresAdmission(request: IncomingMessage): boolean {
     /^\/api\/v1\/remote-operations\/[^/]+\/actions$/.test(pathname) ||
     /^\/api\/v1\/remote-operations\/[^/]+\/interactions\/respond$/.test(pathname) ||
     /^\/api\/v1\/projects\/[^/]+\/human\//.test(pathname) ||
+    /^\/api\/v1\/projects\/[^/]+\/assignments(\/|$)/.test(pathname) ||
     /^\/api\/v1\/projects\/[^/]+\/comments(\/|$)/.test(pathname) ||
     /^\/api\/v1\/projects\/[^/]+\/attachments(\/|$)/.test(pathname)
   );
@@ -154,6 +164,8 @@ export async function createDistributedServerComposition(
   const runtimeRegistry = await createTrustedRuntimeRegistry(config.trustedProjects);
   let lifecycle: Awaited<ReturnType<typeof startRemoteBlockCoordinationServer>> | undefined;
   let artifactStore: ArtifactStore | undefined;
+  let activityRepository: ActivityRepository | undefined;
+  let activityProjection: ActivityProjectionService | undefined;
   let webSockets: AgentHostWebSocketServer | undefined;
   let requestListener: ((request: IncomingMessage, response: ServerResponse) => void) | undefined;
   const inflightRequests = new Set<Promise<void>>();
@@ -173,6 +185,13 @@ export async function createDistributedServerComposition(
           config.dataDirectory,
           config.limits.maxArtifactBytes
         );
+        const projectionRepository = new ActivityRepository(database);
+        const projection = new ActivityProjectionService({
+          activity: projectionRepository,
+          clock
+        });
+        activityRepository = projectionRepository;
+        activityProjection = projection;
         return {
           leaseDurationMs: config.limits.leaseDurationMs,
           hostOfflineAfterMs: config.limits.hostOfflineAfterMs,
@@ -185,17 +204,81 @@ export async function createDistributedServerComposition(
           artifactContent: new ArtifactStoreRemoteContent(artifactStore),
           interactionAuthorization: authorization,
           eventRetentionMaxEvents: config.limits.eventRetentionMaxEvents,
-          eventRetentionMaxBytes: config.limits.eventRetentionMaxBytes
+          eventRetentionMaxBytes: config.limits.eventRetentionMaxBytes,
+          onAssignmentUpdatedInTransaction: (record) => {
+            const actor = activitySubjectSchema.parse(
+              record.updatedBy.kind === "human"
+                ? {
+                    kind: "human" as const,
+                    humanPrincipalId: record.updatedBy.id,
+                    ...(record.updatedBy.displayName
+                      ? { displayName: record.updatedBy.displayName }
+                      : {})
+                  }
+                : record.updatedBy.kind === "local_admin"
+                  ? {
+                      kind: "local_admin" as const,
+                      humanPrincipalId: record.updatedBy.id,
+                      ...(record.updatedBy.displayName
+                        ? { displayName: record.updatedBy.displayName }
+                        : {})
+                    }
+                  : { kind: "system" as const }
+            );
+            const targetHeadline =
+              record.target.kind === "unassigned"
+                ? "Assignment cleared"
+                : record.target.kind === "human"
+                  ? "Assigned work item to a project member"
+                  : record.target.kind === "exact_host"
+                    ? "Assigned work item to an Agent Host"
+                    : "Assigned work item to automatic Host selection";
+            projection.projectAssignmentEventInCallerTransaction({
+              projectId: record.projectId,
+              workItem: record.workItem,
+              assignmentRevision: record.revision,
+              actor,
+              targetHeadline,
+              occurredAt: record.updatedAt
+            });
+          },
+          onDispatchActivityTransitionInTransaction: (input) => {
+            projection.projectRemoteRunEventInCallerTransaction({
+              projectId: input.dispatch.projectId,
+              type: input.type,
+              dispatchId: input.dispatch.id,
+              hostId: input.dispatch.hostId,
+              occurredAt: input.occurredAt
+            });
+          }
         };
       }
     );
     if (!artifactStore) throw new Error("artifact_store_not_initialized");
+    if (!activityRepository || !activityProjection) {
+      throw new Error("activity_projection_not_initialized");
+    }
     const initializedArtifactStore = artifactStore;
+    const initializedActivityRepository = activityRepository;
+    const initializedActivityProjection = activityProjection;
     const { coordination, server } = lifecycle;
     const schemaVersion = server.readiness().schemaVersion;
     readiness.transition("reconciling", schemaVersion);
     const enrollments = new HostEnrollmentService(server.database, clock);
-    const humanIdentity = new HumanIdentityRepository(server.database, clock);
+    const humanIdentity = new HumanIdentityRepository(server.database, clock, {
+      onMembershipTransitionInTransaction: ({ type, membership, principal }) => {
+        initializedActivityProjection.projectMembershipEventInCallerTransaction({
+          projectId: membership.projectId,
+          type,
+          membershipId: membership.membershipId,
+          transitionRevision: membership.revision,
+          humanPrincipalId: membership.humanPrincipalId,
+          displayName: principal.displayName,
+          membershipRole: membership.role,
+          occurredAt: membership.updatedAt
+        });
+      }
+    });
     const humanMembership = new HumanMembershipService({
       repository: humanIdentity,
       projectAuthority: runtimeRegistry,
@@ -203,7 +286,6 @@ export async function createDistributedServerComposition(
     });
     const commentAttachmentRepository = new CommentAttachmentRepository(server.database);
     const commentRepository = new CommentRepository(server.database);
-    const activityRepository = new ActivityRepository(server.database);
     const commentAttachmentBlobs = new CommentAttachmentBlobStore(
       server.database,
       config.dataDirectory
@@ -222,11 +304,35 @@ export async function createDistributedServerComposition(
         projectId,
         new CommentService({
           comments: commentRepository,
-          activity: activityRepository,
+          activity: initializedActivityRepository,
           packagePort,
           identity: humanIdentity,
           attachments: commentAttachments,
           attachmentRepository: commentAttachmentRepository,
+          clock
+        })
+      );
+    }
+    const membershipPort = createIdentityMembershipPort({ identity: humanIdentity });
+    const hostPort = createHostAssignmentPort({
+      hosts: coordination.hosts,
+      hostOfflineAfterMs: config.limits.hostOfflineAfterMs,
+      clock
+    });
+    const activeDispatch = createActiveDispatchResolver(server.database);
+    const assignmentServices = new Map<string, WorkAssignmentService>();
+    for (const { projectId } of runtimeRegistry.locators) {
+      if (assignmentServices.has(projectId)) continue;
+      const packagePort = runtimeRegistry.workItemPackagePort(projectId);
+      if (!packagePort) throw new Error("trusted_project_work_item_port_missing");
+      assignmentServices.set(
+        projectId,
+        new WorkAssignmentService({
+          repository: coordination.workAssignments,
+          packagePort,
+          membershipPort,
+          hostPort,
+          resolveActiveDispatch: activeDispatch,
           clock
         })
       );
@@ -262,6 +368,17 @@ export async function createDistributedServerComposition(
         if (requiresAdmission(request) && readiness.readiness().status !== "ready") {
           request.resume();
           respond(response, 503, "server_not_accepting_mutations");
+          return;
+        }
+        if (
+          await handleWorkAssignmentHttpRequest(request, response, {
+            resolveService: (projectId) => assignmentServices.get(projectId),
+            repository: humanIdentity,
+            projectAuthority: runtimeRegistry,
+            allowInsecureDevelopment: config.allowInsecureDevelopment,
+            clock
+          })
+        ) {
           return;
         }
         if (

@@ -81,6 +81,15 @@ export type DispatchServiceOptions = {
   leaseDurationMs: number;
   hostOfflineAfterMs: number;
   writeback: DispatchWriteback;
+  onActivityTransitionInTransaction?: (input: {
+    type:
+      | "remote_run_started"
+      | "remote_run_succeeded"
+      | "remote_run_failed"
+      | "remote_run_interrupted";
+    dispatch: DispatchRecord;
+    occurredAt: string;
+  }) => void;
 };
 
 type DispatchRow = Record<string, unknown> & {
@@ -187,6 +196,11 @@ export class DispatchService {
           .prepare("UPDATE dispatches SET status='running',accepted_at=? WHERE id=?")
           .run(acceptedAt, dispatchId);
         this.appendEvent(dispatchId, "dispatch.accepted", { hostId, leaseId });
+        this.options.onActivityTransitionInTransaction?.({
+          type: "remote_run_started",
+          dispatch: this.getRequired(dispatchId),
+          occurredAt: acceptedAt
+        });
       }
     );
     return this.getRequired(dispatchId);
@@ -304,10 +318,16 @@ export class DispatchService {
           event.recovery ? JSON.stringify(event.recovery) : null,
           dispatch.id
         );
+      const occurredAt = new Date().toISOString();
       this.appendEvent(dispatch.id, event.type, {
         reason: event.reason,
         resumable: event.resumable,
         recovery: event.recovery
+      });
+      this.options.onActivityTransitionInTransaction?.({
+        type: "remote_run_interrupted",
+        dispatch: this.getRequired(dispatch.id),
+        occurredAt
       });
     });
     return this.getRequired(event.dispatchId);
@@ -449,10 +469,16 @@ export class DispatchService {
              WHERE id=?`
           )
           .run(dispatchId);
+        const occurredAt = now.toISOString();
         this.appendEvent(dispatchId, "dispatch.interrupted", {
           reason: "lease_lost",
           resumable: false,
           source: "lease_expiry"
+        });
+        this.options.onActivityTransitionInTransaction?.({
+          type: "remote_run_interrupted",
+          dispatch: this.getRequired(dispatchId),
+          occurredAt
         });
       });
       recovered.push(this.getRequired(dispatchId));
@@ -519,13 +545,21 @@ export class DispatchService {
       if (current.status !== "awaiting_writeback") {
         throw new Error("dispatch_writeback_state_changed");
       }
+      const finishedAt = new Date().toISOString();
       const updated = this.database
         .prepare(
           "UPDATE dispatches SET status=?,finished_at=? WHERE id=? AND status='awaiting_writeback' AND lease_id=?"
         )
-        .run(status, new Date().toISOString(), dispatch.id, dispatch.leaseId);
+        .run(status, finishedAt, dispatch.id, dispatch.leaseId);
       if (updated.changes !== 1) throw new Error("dispatch_writeback_state_changed");
       this.appendEvent(dispatch.id, `dispatch.${status}`, {});
+      if (status !== "cancelled") {
+        this.options.onActivityTransitionInTransaction?.({
+          type: status === "completed" ? "remote_run_succeeded" : "remote_run_failed",
+          dispatch: this.getRequired(dispatch.id),
+          occurredAt: finishedAt
+        });
+      }
     });
   }
 

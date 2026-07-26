@@ -46,6 +46,10 @@ export type WorkItemKeyParts = {
   workItemKey: string;
 };
 
+export type WorkAssignmentRepositoryOptions = {
+  onAssignmentUpdatedInTransaction?: (record: AssignmentRecord) => void;
+};
+
 export function workItemKeyParts(workItem: WorkItemRef): WorkItemKeyParts {
   const parsed = workItemRefSchema.parse(workItem);
   if (parsed.kind === "task") {
@@ -165,7 +169,10 @@ function toRecord(row: AssignmentRow): AssignmentRecord {
  * Does not authorize actors or resolve package facts — callers (application service) do that first.
  */
 export class WorkAssignmentRepository {
-  constructor(private readonly database: SqliteDatabase) {}
+  constructor(
+    private readonly database: SqliteDatabase,
+    private readonly options: WorkAssignmentRepositoryOptions = {}
+  ) {}
 
   get(projectId: string, workItem: WorkItemRef): AssignmentRecord | undefined {
     const pid = humanProjectIdSchema.parse(projectId);
@@ -372,6 +379,7 @@ export class WorkAssignmentRepository {
       if (!stored) {
         throw new WorkAssignmentError("work_input_invalid", "Assignment row missing after write.");
       }
+      this.options.onAssignmentUpdatedInTransaction?.(stored);
       return stored;
     });
   }

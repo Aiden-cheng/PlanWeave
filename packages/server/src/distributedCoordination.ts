@@ -1,4 +1,4 @@
-import { DispatchService } from "./dispatches.js";
+import { DispatchService, type DispatchRecord } from "./dispatches.js";
 import { ArtifactAuthorizationRepository } from "./artifactAuthorization.js";
 import { AgentHostRepository } from "./hosts.js";
 import { DurableMailbox } from "./mailbox.js";
@@ -29,6 +29,7 @@ import {
   type AssignmentDispatchGate
 } from "./work/dispatchIntegration.js";
 import { WorkAssignmentRepository } from "./work/repository.js";
+import type { AssignmentRecord } from "./work/schemas.js";
 
 export type RemoteBlockCoordinationOptions = {
   leaseDurationMs: number;
@@ -48,6 +49,16 @@ export type RemoteBlockCoordinationOptions = {
   enableAssignmentDispatchGate?: boolean;
   /** Override the default assignment gate (e.g. strict human collaboration path). */
   assignmentGate?: AssignmentDispatchGate;
+  onAssignmentUpdatedInTransaction?: (record: AssignmentRecord) => void;
+  onDispatchActivityTransitionInTransaction?: (input: {
+    type:
+      | "remote_run_started"
+      | "remote_run_succeeded"
+      | "remote_run_failed"
+      | "remote_run_interrupted";
+    dispatch: DispatchRecord;
+    occurredAt: string;
+  }) => void;
 };
 
 export function createRemoteBlockCoordination(
@@ -75,7 +86,9 @@ export function createRemoteBlockCoordination(
     publisher: mailbox,
     clock: options.clock
   });
-  const workAssignments = new WorkAssignmentRepository(database);
+  const workAssignments = new WorkAssignmentRepository(database, {
+    onAssignmentUpdatedInTransaction: options.onAssignmentUpdatedInTransaction
+  });
   const assignmentGate =
     options.assignmentGate ??
     (options.enableAssignmentDispatchGate === false
@@ -138,7 +151,8 @@ export function createRemoteBlockCoordination(
         }
         await coordinator.fail(operation.id);
       }
-    }
+    },
+    onActivityTransitionInTransaction: options.onDispatchActivityTransitionInTransaction
   });
   const reconcile = async (context?: StartupContext) => {
     await dispatches.recoverExpiredLeases();

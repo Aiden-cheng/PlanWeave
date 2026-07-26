@@ -3,6 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { ActivityRepository } from "../comments/activityRepository.js";
+import { ActivityProjectionService } from "../comments/service.js";
 import {
   digestsEqual,
   hashHumanToken,
@@ -191,6 +193,50 @@ describe("human identity migration v16", () => {
 });
 
 describe("human identity repository", () => {
+  it("rolls back membership creation when transactional activity projection fails", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "planweave-human-projector-failure-"));
+    directories.push(directory);
+    const database = await openServerDatabase(join(directory, "server.sqlite"), 5_000);
+    databases.push(database);
+    applyMigrations(database);
+    const activity = new ActivityRepository(database);
+    const projection = new ActivityProjectionService({ activity });
+    const repo = new HumanIdentityRepository(database, () => new Date(), {
+      onMembershipTransitionInTransaction: ({ membership, principal, type }) => {
+        projection.projectMembershipEventInCallerTransaction({
+          projectId: membership.projectId,
+          type,
+          membershipId: membership.membershipId,
+          transitionRevision: membership.revision,
+          humanPrincipalId: principal.humanPrincipalId,
+          displayName: principal.displayName,
+          membershipRole: membership.role,
+          occurredAt: membership.updatedAt
+        });
+        throw new Error("activity_projection_failed");
+      }
+    });
+
+    expect(() => repo.bootstrapOwner(localAdminProof())).toThrow("activity_projection_failed");
+    expect(database.prepare("SELECT COUNT(*) AS count FROM human_principals").get()).toEqual({
+      count: 0
+    });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM project_memberships").get()).toEqual({
+      count: 0
+    });
+    expect(
+      database.prepare("SELECT COUNT(*) AS count FROM human_device_credentials").get()
+    ).toEqual({
+      count: 0
+    });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM activity_records").get()).toEqual({
+      count: 0
+    });
+    expect(
+      database.prepare("SELECT COUNT(*) AS count FROM activity_projection_outbox").get()
+    ).toEqual({ count: 0 });
+  });
+
   it("increments membership revision only for real role and removal transitions", async () => {
     const { repo } = await openMigrated();
     const owner = repo.bootstrapOwner(localAdminProof());

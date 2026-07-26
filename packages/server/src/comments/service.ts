@@ -442,6 +442,22 @@ export class ActivityProjectionService {
     return { record: result.record, inserted: result.inserted };
   }
 
+  /** Caller must already own the SQLite write transaction for the domain transition. */
+  projectMembershipEventInCallerTransaction(
+    input: Omit<MembershipActivityInput, "activityId" | "occurredAt"> & {
+      occurredAt?: string;
+    }
+  ): { record: ActivityRecord; inserted: boolean } {
+    const occurredAt = input.occurredAt ?? this.clock().toISOString();
+    const record = buildMembershipActivity({
+      ...input,
+      activityId: this.activity.allocateActivityId(),
+      occurredAt
+    });
+    const result = this.activity.enqueueAndProjectUnlocked(record, occurredAt);
+    return { record: result.record, inserted: result.inserted };
+  }
+
   projectAssignmentEvent(
     input: Omit<AssignmentActivityInput, "activityId" | "occurredAt"> & {
       occurredAt?: string;
@@ -457,6 +473,22 @@ export class ActivityProjectionService {
     return { record: result.record, inserted: result.inserted };
   }
 
+  /** Caller must already own the SQLite write transaction for the domain transition. */
+  projectAssignmentEventInCallerTransaction(
+    input: Omit<AssignmentActivityInput, "activityId" | "occurredAt"> & {
+      occurredAt?: string;
+    }
+  ): { record: ActivityRecord; inserted: boolean } {
+    const occurredAt = input.occurredAt ?? this.clock().toISOString();
+    const record = buildAssignmentActivity({
+      ...input,
+      activityId: this.activity.allocateActivityId(),
+      occurredAt
+    });
+    const result = this.activity.enqueueAndProjectUnlocked(record, occurredAt);
+    return { record: result.record, inserted: result.inserted };
+  }
+
   projectRemoteRunEvent(
     input: Omit<RemoteRunActivityInput, "activityId" | "occurredAt"> & {
       occurredAt?: string;
@@ -469,6 +501,22 @@ export class ActivityProjectionService {
       occurredAt
     });
     const result = this.activity.enqueueAndProject(record, occurredAt);
+    return { record: result.record, inserted: result.inserted };
+  }
+
+  /** Caller must already own the SQLite write transaction for the domain transition. */
+  projectRemoteRunEventInCallerTransaction(
+    input: Omit<RemoteRunActivityInput, "activityId" | "occurredAt"> & {
+      occurredAt?: string;
+    }
+  ): { record: ActivityRecord; inserted: boolean } {
+    const occurredAt = input.occurredAt ?? this.clock().toISOString();
+    const record = buildRemoteRunActivity({
+      ...input,
+      activityId: this.activity.allocateActivityId(),
+      occurredAt
+    });
+    const result = this.activity.enqueueAndProjectUnlocked(record, occurredAt);
     return { record: result.record, inserted: result.inserted };
   }
 

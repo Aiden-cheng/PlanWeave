@@ -258,7 +258,8 @@ describe("comment and activity production HTTP", () => {
     expect(activityBody.items.map((item) => item.type)).toEqual([
       "comment_tombstoned",
       "comment_edited",
-      "comment_created"
+      "comment_created",
+      "member_joined"
     ]);
 
     const crossProject = await fetch(
@@ -281,5 +282,127 @@ describe("comment and activity production HTTP", () => {
       );
       expect(denied.status).toBe(401);
     }
+  });
+
+  it("projects membership and assignment transitions from production mutations", async () => {
+    const fixture = await setup();
+    const projectId = fixture.projectA.init.workspace.id;
+    const otherProjectId = fixture.projectB.init.workspace.id;
+    const ownerToken = await bootstrap(fixture.origin, projectId, "activity-owner-a");
+    const otherToken = await bootstrap(fixture.origin, otherProjectId, "activity-owner-b");
+
+    const invitation = await fetch(
+      `${fixture.origin}/api/v1/projects/${projectId}/human/invitations`,
+      { method: "POST", headers: jsonHeaders(ownerToken), body: JSON.stringify({}) }
+    );
+    const invitationBody = (await invitation.json()) as { invitationToken: string };
+    expect(invitation.status).toBe(201);
+    const joined = await fetch(
+      `${fixture.origin}/api/v1/projects/${projectId}/human/invitations/consume`,
+      {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({
+          invitationToken: invitationBody.invitationToken,
+          displayName: "Activity Member"
+        })
+      }
+    );
+    const joinedBody = (await joined.json()) as {
+      principal: { humanPrincipalId: string };
+      deviceToken: string;
+    };
+    expect(joined.status).toBe(201);
+
+    const workItem = { kind: "task", canvasId: "default", taskId: "T-001" };
+    const assignment = await fetch(`${fixture.origin}/api/v1/projects/${projectId}/assignments`, {
+      method: "POST",
+      headers: jsonHeaders(ownerToken),
+      body: JSON.stringify({
+        workItem,
+        target: { kind: "human", humanPrincipalId: joinedBody.principal.humanPrincipalId },
+        expectedRevision: 0,
+        reason: "Coordinate task ownership"
+      })
+    });
+    expect(assignment.status).toBe(200);
+    await expect(assignment.json()).resolves.toMatchObject({
+      revision: 1,
+      target: { kind: "human" }
+    });
+
+    const staleAssignment = await fetch(
+      `${fixture.origin}/api/v1/projects/${projectId}/assignments`,
+      {
+        method: "POST",
+        headers: jsonHeaders(ownerToken),
+        body: JSON.stringify({ workItem, target: { kind: "unassigned" }, expectedRevision: 0 })
+      }
+    );
+    expect(staleAssignment.status).toBe(409);
+
+    const workItemParameter = encodeURIComponent(JSON.stringify(workItem));
+    const getAssignment = await fetch(
+      `${fixture.origin}/api/v1/projects/${projectId}/assignments?workItem=${workItemParameter}`,
+      { headers: { Authorization: `Bearer ${ownerToken}` } }
+    );
+    expect(getAssignment.status).toBe(200);
+    await expect(getAssignment.json()).resolves.toMatchObject({ revision: 1 });
+    const listAssignments = await fetch(
+      `${fixture.origin}/api/v1/projects/${projectId}/assignments/list?cursor=0&limit=50`,
+      { headers: { Authorization: `Bearer ${ownerToken}` } }
+    );
+    expect(listAssignments.status).toBe(200);
+    await expect(listAssignments.json()).resolves.toMatchObject({ items: [{ revision: 1 }] });
+    const eligible = await fetch(
+      `${fixture.origin}/api/v1/projects/${projectId}/assignments/eligible-assignees?workItem=${workItemParameter}`,
+      { headers: { Authorization: `Bearer ${ownerToken}` } }
+    );
+    expect(eligible.status).toBe(200);
+    await expect(eligible.json()).resolves.toMatchObject({
+      humans: expect.arrayContaining([
+        expect.objectContaining({ humanPrincipalId: joinedBody.principal.humanPrincipalId })
+      ])
+    });
+
+    for (const action of ["promote", "demote", "remove"] as const) {
+      const response = await fetch(
+        `${fixture.origin}/api/v1/projects/${projectId}/human/members/${joinedBody.principal.humanPrincipalId}/${action}`,
+        { method: "POST", headers: { Authorization: `Bearer ${ownerToken}` } }
+      );
+      expect(response.status).toBe(200);
+    }
+
+    const feed = await fetch(`${fixture.origin}/api/v1/projects/${projectId}/activity?limit=20`, {
+      headers: { Authorization: `Bearer ${ownerToken}` }
+    });
+    const feedBody = (await feed.json()) as {
+      items: Array<{ type: string; source: { kind: string; sourceId: string } }>;
+    };
+    expect(feed.status).toBe(200);
+    expect(feedBody.items.map((item) => item.type)).toEqual(
+      expect.arrayContaining([
+        "member_joined",
+        "assignment_updated",
+        "owner_promoted",
+        "owner_demoted",
+        "member_removed"
+      ])
+    );
+    const memberSources = feedBody.items
+      .filter((item) => item.source.kind === "membership")
+      .map((item) => item.source.sourceId);
+    expect(new Set(memberSources).size).toBe(memberSources.length);
+
+    const unknown = await fetch(
+      `${fixture.origin}/api/v1/projects/unknown-project/assignments?workItem=${workItemParameter}`,
+      { headers: { Authorization: `Bearer ${ownerToken}` } }
+    );
+    expect(unknown.status).toBe(403);
+    const crossProject = await fetch(
+      `${fixture.origin}/api/v1/projects/${projectId}/assignments?workItem=${workItemParameter}`,
+      { headers: { Authorization: `Bearer ${otherToken}` } }
+    );
+    expect(crossProject.status).toBe(401);
   });
 });
