@@ -68,6 +68,8 @@ export type RealProcessAcpHarnessOptions = {
   hostCapacity?: number;
   hostCapabilities?: string[];
   operatorToken?: string;
+  /** Optional non-admin operator credential scoped to the harness project. */
+  projectOperatorToken?: string;
   readinessTimeoutMs?: number;
   /** When true, write intentionally invalid server config for failed-startup tests. */
   corruptServerConfigOnCreate?: boolean;
@@ -486,7 +488,17 @@ export class RealProcessAcpHarness {
             tokenSha256: hashOperatorToken(operatorToken),
             projectIds: [],
             serverAdmin: true
-          }
+          },
+          ...(options.projectOperatorToken
+            ? [
+                {
+                  operatorId: "harness-project-operator",
+                  tokenSha256: hashOperatorToken(options.projectOperatorToken),
+                  projectIds: [projectId],
+                  serverAdmin: false
+                }
+              ]
+            : [])
         ]
       };
       if (options.serverLimits) {

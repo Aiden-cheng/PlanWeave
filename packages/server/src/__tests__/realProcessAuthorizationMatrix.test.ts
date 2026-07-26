@@ -7,7 +7,9 @@
  * oversize fences with sensitivity checks (safe vs unsafe variants).
  */
 import { createHash } from "node:crypto";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
+import { join, relative } from "node:path";
 import { claimDispatchedBlock, submitBlockResult } from "@planweave-ai/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { writeReport } from "../../../runtime/src/__tests__/promptTestHelpers.js";
@@ -80,9 +82,35 @@ function assertActionNotEffected(
   expect(client.readServerDispatch(dispatchId).status).not.toBe("completed");
 }
 
+function artifactFileSystemSnapshot(root: string): Array<{
+  path: string;
+  sizeBytes: number;
+  sha256: string;
+}> {
+  if (!existsSync(root)) return [];
+  const files: string[] = [];
+  const visit = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) visit(path);
+      else if (entry.isFile()) files.push(path);
+    }
+  };
+  visit(root);
+  return files.sort().map((path) => {
+    const bytes = readFileSync(path);
+    return {
+      path: relative(root, path),
+      sizeBytes: bytes.byteLength,
+      sha256: createHash("sha256").update(bytes).digest("hex")
+    };
+  });
+}
+
 describe("real-process adversarial authorization matrix", () => {
   it("operator and action identity fence matrix (wrong principal/scope/lease/version/schema/cursor)", async () => {
-    const { harness, client } = await createHarness();
+    const projectOperatorToken = "harness_project_operator_token_abcdefghijklmnopqrstuvwxyz";
+    const { harness, client } = await createHarness({ projectOperatorToken });
     await harness.startAll();
     await harness.acpControl.pause(["session/prompt"]);
 
@@ -143,25 +171,12 @@ describe("real-process adversarial authorization matrix", () => {
       },
       {
         name: "wrong projectId on create",
-        run: async ({ client: c }) => {
-          const before = c.countServerRows("remote_operations");
-          const denied = await c.rawRequest({
-            method: "POST",
-            path: "/api/v1/remote-operations",
-            body: {
-              projectId: "foreign-project-id",
-              canvasId: "default",
-              blockRef: "T-001#B-001",
-              idempotencyKey: "auth-wrong-project"
-            }
-          });
-          // serverAdmin bypasses project scope; unknown project fails closed (often 500/404).
-          assertDenied(denied, [403, 404, 500]);
-          expect(c.countServerRows("remote_operations")).toBe(before);
-          // Sensitivity: trusted project idempotent replay succeeds.
+        run: async ({ client: c, operationId, dispatchId }) => {
+          // Positive control: the non-admin principal reaches the real project/runtime seam.
           const trusted = await c.rawRequest({
             method: "POST",
             path: "/api/v1/remote-operations",
+            authorization: projectOperatorToken,
             body: {
               projectId: c.harness.projectId,
               canvasId: "default",
@@ -169,7 +184,41 @@ describe("real-process adversarial authorization matrix", () => {
               idempotencyKey: "auth-matrix-1"
             }
           });
-          expect(trusted.status).toBe(202);
+          expect(trusted).toMatchObject({
+            status: 202,
+            body: { operationId, dispatchId }
+          });
+
+          const durableBaseline = async () => ({
+            operation: await c.observe(operationId),
+            dispatch: c.readServerDispatch(dispatchId),
+            operationCount: c.countServerRows("remote_operations"),
+            dispatchCount: c.countServerRows("dispatches"),
+            attemptCount: c.countServerRows("remote_execution_attempts"),
+            grantCount: c.countServerRows("artifact_grants"),
+            linkCount: c.countServerRows("dispatch_artifact_links"),
+            blobCount: c.countServerRows("artifact_blobs"),
+            links: c.readServerArtifactLinks(dispatchId),
+            envelope: c.readServerEnvelopeCanonical(dispatchId),
+            artifactFiles: artifactFileSystemSnapshot(join(c.harness.paths.serverData, "artifacts"))
+          });
+          const before = await durableBaseline();
+          const denied = await c.rawRequest({
+            method: "POST",
+            path: "/api/v1/remote-operations",
+            authorization: projectOperatorToken,
+            body: {
+              projectId: "foreign-project-id",
+              canvasId: "default",
+              blockRef: "T-001#B-001",
+              idempotencyKey: "auth-wrong-project"
+            }
+          });
+          expect({ status: denied.status, body: denied.body }).toEqual({
+            status: 403,
+            body: { error: "operator_scope_forbidden" }
+          });
+          expect(await durableBaseline()).toEqual(before);
         }
       },
       {
