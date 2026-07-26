@@ -57,7 +57,7 @@ function skippedEvidence(
     result: disposition === "skip" ? "skipped" : "failed",
     disposition,
     diagnostic: message,
-    cleanup: { harnessStateRemoved: false, credentialsRevoked: false }
+    cleanup: { harnessStateRemoved: false, credentialsRevoked: false, diagnostics: [] }
   };
 }
 

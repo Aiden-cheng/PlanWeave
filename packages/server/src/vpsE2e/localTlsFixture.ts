@@ -145,7 +145,8 @@ export async function runLocalTlsFixture(options: {
       diagnostic: null,
       cleanup: {
         harnessStateRemoved,
-        credentialsRevoked
+        credentialsRevoked,
+        diagnostics: []
       },
       ...evidencePartial
     }) as VpsE2eEvidence;

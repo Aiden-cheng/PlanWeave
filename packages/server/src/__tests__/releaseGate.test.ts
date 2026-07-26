@@ -81,7 +81,8 @@ function vpsEvidence(input: {
     diagnostic: passed ? null : "external_blocker",
     cleanup: {
       harnessStateRemoved: passed && input.environmentClass === "local-tls-fixture",
-      credentialsRevoked: passed
+      credentialsRevoked: passed,
+      diagnostics: []
     }
   };
 }

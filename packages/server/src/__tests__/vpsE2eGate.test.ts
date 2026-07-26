@@ -14,6 +14,7 @@ import {
 import {
   assertCoordinatorOrigin,
   findOnlineHostById,
+  revokeRemoteHostCredentials,
   runRemoteVpsScenario
 } from "../vpsE2e/remoteVpsScenario.js";
 
@@ -190,10 +191,7 @@ describe("VPS e2e gate and redaction (unit)", () => {
   it("never accepts another online Host for the packaged Host identity", () => {
     expect(
       findOnlineHostById(
-        [
-          { id: "host-other", lastSeenAt: "2030-01-01T00:00:00.000Z" },
-          { id: "host-packaged" }
-        ],
+        [{ id: "host-other", lastSeenAt: "2030-01-01T00:00:00.000Z" }, { id: "host-packaged" }],
         "host-packaged"
       )
     ).toBeUndefined();
@@ -215,5 +213,29 @@ describe("VPS e2e gate and redaction (unit)", () => {
         "https://coordinator.example.test"
       )
     ).not.toThrow();
+  });
+
+  it("attempts both revocation sides and exposes compensation failures", async () => {
+    const calls: string[] = [];
+    const outcome = await revokeRemoteHostCredentials({
+      revokeServer: async () => {
+        calls.push("server");
+        throw new Error("server unavailable");
+      },
+      revokeLocal: async () => {
+        calls.push("local");
+        throw new Error("credential store locked");
+      }
+    });
+
+    expect(calls).toEqual(["server", "local"]);
+    expect(outcome).toMatchObject({
+      serverRevoked: false,
+      localRevoked: false,
+      diagnostics: [
+        expect.stringMatching(/server_revoke_failed/),
+        expect.stringMatching(/host_local_revoke_failed/)
+      ]
+    });
   });
 });

@@ -6,6 +6,9 @@ import { WebSocket } from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRemoteBlockCoordination } from "../distributedCoordination.js";
 import { RemoteRuntimePortRegistry } from "../remoteRuntimeLocator.js";
+import { HostEnrollmentService } from "../hostEnrollment.js";
+import { hashOperatorToken, OperatorTokenRegistry } from "../operatorAuth.js";
+import { RemoteControlService } from "../remoteControlService.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 import { serverEventSchema, type ServerEvent } from "../protocol.js";
 import { attachAgentHostWebSocketServer, type AgentHostWebSocketServer } from "../wsServer.js";
@@ -107,6 +110,98 @@ async function createWsCoordination() {
 }
 
 describe("agent host WebSocket transport", () => {
+  it("disconnects a server-revoked Host, rejects its old credential, and fences dispatch", async () => {
+    const { database, coordination, locator } = await createWsCoordination();
+    const registration = coordination.hosts.register("Revocation Host");
+    const httpServer = createServer();
+    httpServers.push(httpServer);
+    await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
+    const address = httpServer.address();
+    if (!address || typeof address === "string") throw new Error("Expected an HTTP port.");
+    const transport = attachAgentHostWebSocketServer({
+      server: httpServer,
+      hosts: coordination.hosts,
+      mailbox: coordination.mailbox,
+      dispatches: coordination.dispatches,
+      acpEvents: coordination.acpEvents,
+      interactions: coordination.interactions,
+      actions: coordination.actions,
+      heartbeatIntervalMs: 30_000,
+      leaseDurationMs: 60_000,
+      allowInsecureTransport: true
+    });
+    webSocketServers.push(transport);
+    const url = `ws://127.0.0.1:${address.port}/agent-hosts/${registration.host.id}/connect`;
+    const socket = await openSocket(url, registration.token);
+    const events = eventStream(socket);
+    socket.send(
+      JSON.stringify({
+        type: "host.hello",
+        protocolVersion: 1,
+        lastAcknowledgedSequence: 0,
+        capabilities: ["acp.codex"],
+        capacity: 1
+      })
+    );
+    await expect(events.next()).resolves.toMatchObject({ type: "host.welcome" });
+
+    const operatorToken = "operator_revoke_test_token_1234567890";
+    const authorization = new OperatorTokenRegistry([
+      {
+        operatorId: "operator-revoke",
+        tokenSha256: hashOperatorToken(operatorToken),
+        projectIds: [],
+        serverAdmin: true
+      }
+    ]);
+    const principal = authorization.authenticate(`Bearer ${operatorToken}`);
+    if (!principal) throw new Error("Expected operator principal.");
+    const control = new RemoteControlService({
+      authorization,
+      enrollments: new HostEnrollmentService(database.database),
+      hosts: coordination.hosts,
+      operations: coordination.operations,
+      dispatches: coordination.dispatches,
+      coordinator: coordination.coordinator,
+      events: coordination.acpEvents,
+      interactions: coordination.interactions,
+      disconnectHost: transport.disconnectHost
+    });
+    const closed = new Promise<{ code: number; reason: string }>((resolve) => {
+      socket.once("close", (code, reason) => resolve({ code, reason: reason.toString() }));
+    });
+    expect(control.revokeHost(principal, registration.host.id)).toMatchObject({
+      id: registration.host.id,
+      revokedAt: expect.any(String)
+    });
+    await expect(closed).resolves.toEqual({ code: 4003, reason: "host revoked" });
+
+    const reconnect = new WebSocket(url, {
+      headers: { Authorization: `Bearer ${registration.token}` }
+    });
+    sockets.push(reconnect);
+    reconnect.on("error", () => {});
+    const rejectedStatus = await new Promise<number>((resolve) => {
+      reconnect.once("unexpected-response", (_request, response) => {
+        response.resume();
+        resolve(response.statusCode ?? 0);
+      });
+      reconnect.once("open", () => resolve(101));
+    });
+    expect(rejectedStatus).toBe(401);
+    const afterRevoke = await coordination.coordinator.dispatch({
+      ...locator,
+      blockRef: "T-001#B-001",
+      idempotencyKey: "revoked-host-dispatch",
+      requestedHostId: registration.host.id
+    });
+    expect(afterRevoke).toMatchObject({
+      status: "awaiting_host",
+      operation: { attempt: { hostId: undefined } }
+    });
+    expect(coordination.mailbox.listAfter(registration.host.id, 0)).toEqual([]);
+  });
+
   it("settles fresh-lease resume acceptance and terminalizes cancellation after load interruption", async () => {
     const { coordination, locator } = await createWsCoordination();
     const registration = coordination.hosts.register("Action Lifecycle Host");

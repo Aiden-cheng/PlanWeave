@@ -35,6 +35,47 @@ type OnlineHost = {
   capabilities?: string[];
 };
 
+export type RemoteHostRevocationResult = {
+  serverRevoked: boolean;
+  serverRevocationVerified: boolean;
+  localRevoked: boolean;
+  diagnostics: string[];
+};
+
+export async function revokeRemoteHostCredentials(input: {
+  revokeServer(): Promise<void>;
+  verifyServerRevocation?(): Promise<void>;
+  revokeLocal(): Promise<void>;
+}): Promise<RemoteHostRevocationResult> {
+  const result: RemoteHostRevocationResult = {
+    serverRevoked: false,
+    serverRevocationVerified: false,
+    localRevoked: false,
+    diagnostics: []
+  };
+  try {
+    await input.revokeServer();
+    result.serverRevoked = true;
+    if (input.verifyServerRevocation) {
+      await input.verifyServerRevocation();
+    }
+    result.serverRevocationVerified = true;
+  } catch (error) {
+    result.diagnostics.push(
+      `server_revoke_failed:${redactSensitiveText(error instanceof Error ? error.message : String(error))}`
+    );
+  }
+  try {
+    await input.revokeLocal();
+    result.localRevoked = true;
+  } catch (error) {
+    result.diagnostics.push(
+      `host_local_revoke_failed:${redactSensitiveText(error instanceof Error ? error.message : String(error))}`
+    );
+  }
+  return result;
+}
+
 export function findOnlineHostById(
   items: readonly OnlineHost[],
   packagedHostId: string
@@ -94,6 +135,11 @@ export async function runRemoteVpsScenario(options: {
 }): Promise<VpsE2eEvidence> {
   const checks = emptyChecks();
   const identities = emptyIdentities();
+  const cleanupEvidence: VpsE2eEvidence["cleanup"] = {
+    harnessStateRemoved: false,
+    credentialsRevoked: false,
+    diagnostics: []
+  };
   const commandsSanitized = [
     "curl -fsS https://<redacted-coordinator>/healthz",
     "POST /api/v1/host-enrollments (admin token from env var name only)",
@@ -136,7 +182,7 @@ export async function runRemoteVpsScenario(options: {
     checks,
     result: "failed",
     diagnostic: null,
-    cleanup: { harnessStateRemoved: false, credentialsRevoked: false },
+    cleanup: cleanupEvidence,
     ...partial
   });
 
@@ -150,9 +196,63 @@ export async function runRemoteVpsScenario(options: {
   let reconnectOk = false;
   let replayOk = false;
   let networkInterruptPerformed = false;
+  let enrollmentEstablished = false;
+  let packagedHostId: string | undefined;
+  let hostConfigPath: string | undefined;
+  let origin: string | undefined;
+  let serverRevoked = false;
+  let serverRevocationVerified = false;
+  let localRevoked = false;
+
+  const revokeCredentials = async (verifyTransport: boolean): Promise<void> => {
+    if (!enrollmentEstablished || !trusted || !packagedHostId || !hostConfigPath || !origin) return;
+    const outcome = await revokeRemoteHostCredentials({
+      revokeServer: async () => {
+        const response = await trusted!.request(
+          `${origin}/api/v1/hosts/${encodeURIComponent(packagedHostId!)}/revoke`,
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${options.operatorToken}` }
+          }
+        );
+        if (!response.ok) throw new Error(`http_${response.status}`);
+        const body = (await response.json()) as { id?: string; revokedAt?: string };
+        if (body.id !== packagedHostId || typeof body.revokedAt !== "string") {
+          throw new Error("response_identity_invalid");
+        }
+      },
+      verifyServerRevocation: verifyTransport
+        ? async () => {
+            if (!host) throw new Error("host_process_missing");
+            await waitFor(() => host?.exitSnapshot !== undefined, {
+              timeoutMs: DEFAULT_TIMEOUT_MS,
+              label: "remote-vps-host-revoked-disconnect"
+            });
+            const exited = await host.exit;
+            if (exited.code === 0 || !/agent_host_auth_failed/.test(host.logs.stderr)) {
+              throw new Error("old_credential_reconnect_not_rejected");
+            }
+            host = undefined;
+          }
+        : undefined,
+      revokeLocal: async () => {
+        const revoke = await runNodeBin(agentHostBinPath, ["revoke", "--config", hostConfigPath!]);
+        if (revoke.code !== 0) {
+          throw new Error(revoke.stderr || revoke.stdout || `exit_${revoke.code}`);
+        }
+      }
+    });
+    cleanupEvidence.diagnostics.push(...outcome.diagnostics);
+    serverRevoked ||= outcome.serverRevoked;
+    serverRevocationVerified ||= outcome.serverRevocationVerified;
+    localRevoked ||= outcome.localRevoked;
+    credentialsRevoked = serverRevoked && serverRevocationVerified && localRevoked;
+    cleanupEvidence.credentialsRevoked = credentialsRevoked;
+    checks.credentialsRevoked = credentialsRevoked;
+  };
 
   try {
-    const hostConfigPath = options.config.hostConfigPath;
+    hostConfigPath = options.config.hostConfigPath;
     if (!isAbsolute(hostConfigPath)) {
       return base({
         result: "failed",
@@ -184,7 +284,7 @@ export async function runRemoteVpsScenario(options: {
     trusted = await createTrustedFetch({
       caCertificatePath: options.config.caCertificatePath
     });
-    const origin = new URL(options.config.coordinatorUrl).origin;
+    origin = new URL(options.config.coordinatorUrl).origin;
     await assertHostConfigCoordinatorOrigin(hostConfigPath, origin);
     const health = await trusted.request(`${origin}/healthz`);
     if (!health.ok) {
@@ -338,6 +438,7 @@ export async function runRemoteVpsScenario(options: {
       // Active credential means a prior one-time enrollment already succeeded for this Host config.
       checks.enrollmentOneTimeToken = true;
     }
+    enrollmentEstablished = true;
 
     const status = await runNodeBin(agentHostBinPath, ["status", "--config", hostConfigPath]);
     if (status.code !== 0) {
@@ -348,7 +449,6 @@ export async function runRemoteVpsScenario(options: {
         )
       });
     }
-    let packagedHostId: string;
     try {
       packagedHostId = packagedHostStatusSchema.parse(JSON.parse(status.stdout)).hostId;
     } catch {
@@ -372,7 +472,7 @@ export async function runRemoteVpsScenario(options: {
         });
         if (!response.ok) return false;
         const page = (await response.json()) as { items: OnlineHost[] };
-        const match = findOnlineHostById(page.items, packagedHostId);
+        const match = findOnlineHostById(page.items, packagedHostId!);
         if (!match?.lastSeenAt) return false;
         hostOnline = {
           id: match.id,
@@ -573,10 +673,9 @@ export async function runRemoteVpsScenario(options: {
     }
     checks.networkInterruptReplay = replayOk && reconnectOk;
 
-    // Revoke via packaged Host + hostConfigPath; only then may credentialsRevoked be true.
-    const revoke = await runNodeBin(agentHostBinPath, ["revoke", "--config", hostConfigPath]);
-    credentialsRevoked = revoke.code === 0;
-    checks.credentialsRevoked = credentialsRevoked;
+    // Server revoke closes the live WSS session. The daemon retries with the old
+    // credential and must exit auth-failed before Host-local revocation succeeds.
+    await revokeCredentials(true);
 
     if (host?.tree.isAlive()) {
       await host.tree.terminate("remote-vps cleanup");
@@ -633,12 +732,10 @@ export async function runRemoteVpsScenario(options: {
         replayOk,
         reconnectOk
       },
-      cleanup: {
-        harnessStateRemoved: false,
-        credentialsRevoked
-      }
+      cleanup: cleanupEvidence
     });
   } catch (error) {
+    await revokeCredentials(false);
     const message = error instanceof Error ? error.message : String(error);
     if (/ENOTFOUND|ECONNREFUSED|certificate|UNABLE_TO_VERIFY|vps_e2e_timeout/i.test(message)) {
       const pre = precondition(
@@ -656,7 +753,7 @@ export async function runRemoteVpsScenario(options: {
           replayOk,
           reconnectOk
         },
-        cleanup: { harnessStateRemoved: false, credentialsRevoked }
+        cleanup: cleanupEvidence
       });
     }
     return base({
@@ -668,14 +765,25 @@ export async function runRemoteVpsScenario(options: {
         replayOk,
         reconnectOk
       },
-      cleanup: { harnessStateRemoved: false, credentialsRevoked }
+      cleanup: cleanupEvidence
     });
   } finally {
+    if (enrollmentEstablished && !cleanupEvidence.credentialsRevoked) {
+      await revokeCredentials(false);
+    }
     try {
       if (host?.tree.isAlive()) await host.tree.terminate("remote-vps finally");
-    } catch {
-      /* best-effort */
+    } catch (error) {
+      cleanupEvidence.diagnostics.push(
+        `host_process_cleanup_failed:${redactSensitiveText(error instanceof Error ? error.message : String(error))}`
+      );
     }
-    await trusted?.close().catch(() => {});
+    try {
+      await trusted?.close();
+    } catch (error) {
+      cleanupEvidence.diagnostics.push(
+        `transport_cleanup_failed:${redactSensitiveText(error instanceof Error ? error.message : String(error))}`
+      );
+    }
   }
 }

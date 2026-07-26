@@ -87,7 +87,11 @@ export const vpsE2eEvidenceSchema = z
     disposition: z.enum(["skip", "fail"]).optional(),
     diagnostic: z.string().nullable(),
     cleanup: z
-      .object({ harnessStateRemoved: z.boolean(), credentialsRevoked: z.boolean() })
+      .object({
+        harnessStateRemoved: z.boolean(),
+        credentialsRevoked: z.boolean(),
+        diagnostics: z.array(z.string().min(1)).max(32)
+      })
       .strict()
   })
   .strict()
