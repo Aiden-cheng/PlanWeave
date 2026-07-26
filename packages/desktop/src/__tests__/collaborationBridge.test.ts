@@ -553,11 +553,15 @@ describe("CollaborationService IPC trust boundary", () => {
   });
 
   it("redacts device tokens and absolute paths from diagnostic text", () => {
-    const raw = `Authorization: Bearer ${exampleHumanDeviceToken} body={"deviceToken":"${exampleHumanDeviceToken}"} path=/Users/alice/.planweave/credentials.json`;
+    const raw = `Authorization: Bearer ${exampleHumanDeviceToken} body={"deviceToken":"${exampleHumanDeviceToken}"} home=/Users/alice/.planweave/credentials.json service=/srv/planweave/config.json workspace=/workspace/project/token mount=/mnt/data/secret url=https://collab.example.com/api/v1`;
     const redacted = redactCollaborationText(raw);
     expect(redacted).not.toContain(exampleHumanDeviceToken);
     expect(redacted).toContain("[REDACTED]");
     expect(redacted).not.toContain("/Users/alice");
+    expect(redacted).not.toContain("/srv/planweave");
+    expect(redacted).not.toContain("/workspace/project");
+    expect(redacted).not.toContain("/mnt/data");
     expect(redacted).toContain("<redacted-path>");
+    expect(redacted).toContain("https://collab.example.com/api/v1");
   });
 });

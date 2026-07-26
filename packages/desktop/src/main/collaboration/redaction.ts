@@ -6,8 +6,8 @@ import {
 const TOKEN_LIKE = /(pw_hdev_[A-Za-z0-9_-]+|pw_inv_[A-Za-z0-9_-]+|Bearer\s+[A-Za-z0-9._~+/-]+=*)/gi;
 
 /** Absolute filesystem paths that must not cross the renderer IPC boundary. */
-const ABSOLUTE_PATH_LIKE =
-  /(?:[A-Za-z]:\\|\\\\|\/(?:Users|home|var|tmp|private|root|opt|etc|Library)\/)[^\s"'`]+/g;
+const WINDOWS_ABSOLUTE_PATH_LIKE = /(?:[A-Za-z]:\\|\\\\)[^\s"'`]+/g;
+const UNIX_ABSOLUTE_PATH_LIKE = /(^|[^A-Za-z0-9+.:/])\/[^\s"'`]+/gm;
 
 /**
  * Redact human device / invitation tokens, Authorization headers, and absolute paths
@@ -24,7 +24,11 @@ export function redactCollaborationText(value: string): string {
       }
       return "[REDACTED]";
     })
-    .replace(ABSOLUTE_PATH_LIKE, "<redacted-path>")
+    .replace(WINDOWS_ABSOLUTE_PATH_LIKE, "<redacted-path>")
+    .replace(
+      UNIX_ABSOLUTE_PATH_LIKE,
+      (_match, boundary: string) => `${boundary}<redacted-path>`
+    )
     .replace(/"deviceToken"\s*:\s*"[^"]*"/g, '"deviceToken":"[REDACTED]"')
     .replace(/"invitationToken"\s*:\s*"[^"]*"/g, '"invitationToken":"[REDACTED]"')
     .replace(/"existingDeviceToken"\s*:\s*"[^"]*"/g, '"existingDeviceToken":"[REDACTED]"');
