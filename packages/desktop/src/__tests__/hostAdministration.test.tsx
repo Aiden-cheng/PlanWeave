@@ -56,11 +56,13 @@ const host = {
   credentialExpiresAt: "2030-01-02T00:00:00.000Z"
 };
 
+const enrollmentCode = `pw_enroll_${"A".repeat(43)}`;
+
 beforeEach(() => {
   bridgeMock.getOperatorControlStatus.mockResolvedValue(status());
   bridgeMock.listOperatorHosts.mockResolvedValue({ items: [host], nextCursor: null });
   bridgeMock.createOperatorEnrollmentGrant.mockResolvedValue({
-    enrollmentCode: "pw_enroll_one_time",
+    enrollmentCode,
     expiresAt: "2030-01-01T00:15:00.000Z"
   });
   bridgeMock.revokeOperatorHost.mockResolvedValue({
@@ -113,7 +115,7 @@ describe("Host administration surface", () => {
 
     await user.click(screen.getByTestId("host-admin-create-grant"));
     expect(await screen.findByTestId("host-admin-grant-once")).toBeInTheDocument();
-    expect(screen.getByTestId("host-admin-enrollment-secret")).toHaveValue("pw_enroll_one_time");
+    expect(screen.getByTestId("host-admin-enrollment-secret")).toHaveValue(enrollmentCode);
     const configText = (screen.getByTestId("host-admin-bootstrap-config") as HTMLTextAreaElement)
       .value;
     const config = JSON.parse(configText) as Record<string, unknown>;
@@ -135,7 +137,7 @@ describe("Host administration surface", () => {
     expect(parseAgentHostArgs(commandLines[1].slice(1))).toMatchObject({
       command: "enroll",
       configPath: "/etc/planweave/agent-host.json",
-      code: "pw_enroll_one_time"
+      code: enrollmentCode
     });
     expect(parseAgentHostArgs(commandLines[2].slice(1))).toMatchObject({
       command: "run",

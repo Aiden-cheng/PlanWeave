@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { capabilitiesSchema } from "./capabilities.js";
+import { hostEnrollmentCodeSchema } from "./agentHostEnrollment.js";
 import { opaqueIdentifierSchema } from "./identifiers.js";
 
 /** Bounded operator credential accepted by Server and held only by Desktop main. */
@@ -28,7 +29,7 @@ export const operatorEnrollmentGrantRequestSchema = z
 
 export const operatorEnrollmentGrantResponseSchema = z
   .object({
-    enrollmentCode: z.string().min(1).max(256),
+    enrollmentCode: hostEnrollmentCodeSchema,
     expiresAt: timestampSchema
   })
   .strict();

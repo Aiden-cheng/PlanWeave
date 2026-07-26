@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   operatorEnrollmentGrantRequestSchema,
+  operatorEnrollmentGrantResponseSchema,
   operatorHostPageSchema,
   operatorPageQuerySchema,
   operatorTokenSchema
@@ -61,5 +62,17 @@ describe("operator control wire contracts", () => {
         operatorToken: "operator_token_abcdefghijklmnopqrstuvwxyz_1234"
       })
     ).toThrow();
+    expect(() =>
+      operatorEnrollmentGrantResponseSchema.parse({
+        enrollmentCode: "pw_enroll_one_time",
+        expiresAt: "2030-01-01T00:15:00.000Z"
+      })
+    ).toThrow();
+    expect(
+      operatorEnrollmentGrantResponseSchema.parse({
+        enrollmentCode: `pw_enroll_${"A".repeat(43)}`,
+        expiresAt: "2030-01-01T00:15:00.000Z"
+      }).enrollmentCode
+    ).toBe(`pw_enroll_${"A".repeat(43)}`);
   });
 });
