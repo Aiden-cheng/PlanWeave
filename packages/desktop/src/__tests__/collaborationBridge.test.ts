@@ -480,6 +480,19 @@ describe("CollaborationService IPC trust boundary", () => {
     await service.connectSession({ profileId: "profile-a" });
     expect(startObserver).toHaveBeenCalledWith(expect.any(Object), { cursor: 42 });
 
+    await service.upsertProfile({
+      profileId: "profile-a",
+      displayName: "A moved",
+      serverBaseUrl: "https://moved.example.com/",
+      projectId: "project-moved",
+      allowInsecureTransport: false
+    });
+    startObserver.mockClear();
+    observerCursor = 0;
+
+    await service.connectSession({ profileId: "profile-a" });
+    expect(startObserver).toHaveBeenCalledWith(expect.any(Object), { cursor: 0 });
+
     await service.shutdown();
   });
 

@@ -306,10 +306,18 @@ export class CollaborationService {
       this.assertOpen();
       assertNoSmuggledCollaborationSecrets(input, "upsertCollaborationProfile");
       const profile = collaborationUpsertProfileInputSchema.parse(input);
+      const existing = await this.profiles.get(profile.profileId);
       await this.profiles.upsert(profile);
       if (this.clientProfileId === profile.profileId) {
         // Profile identity changed; drop live client so callers reconnect explicitly.
         await this.disposeClient("profile_updated");
+      }
+      if (
+        existing &&
+        (existing.serverBaseUrl !== profile.serverBaseUrl ||
+          existing.projectId !== profile.projectId)
+      ) {
+        this.clearRememberedObserverCursor(profile.profileId);
       }
       return this.publishStatus();
     });
