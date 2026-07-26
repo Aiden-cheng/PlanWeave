@@ -178,6 +178,12 @@ export class CanvasPresenceController {
   private handleSignal(signal: CollaborationPresenceSignal): void {
     const scope = this.scope;
     if (!scope || signal.profileId !== scope.profileId) return;
+    if ("reset" in signal) {
+      if (signal.reset.canvasId !== scope.canvasId) return;
+      this.sessions.clear();
+      this.publishSnapshot(EMPTY_SNAPSHOT);
+      return;
+    }
     const message = signal.message;
     if (!sameScope(message, scope)) return;
     switch (message.type) {

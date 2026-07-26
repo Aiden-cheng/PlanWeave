@@ -13,8 +13,10 @@ import {
   CollaborationClient,
   CollaborationCredentialVault,
   CollaborationProfileStore,
-  CollaborationService
+  CollaborationService,
+  type CollaborationPresenceHandlers
 } from "../main/collaboration/index.js";
+import type { CollaborationPresenceSignal } from "../shared/collaboration.js";
 
 type Fixture = { server: Server; close(): Promise<void>; origin: string };
 
@@ -172,17 +174,15 @@ describe("desktop canvas presence transport", () => {
     };
     const startPresence = [] as string[];
     const stopPresence = [] as number[];
-    let activeHandlers:
-      | {
-          onSnapshot?(message: unknown): void;
-        }
-      | undefined;
+    let activeHandlers: CollaborationPresenceHandlers | undefined;
+    const presenceSignals: CollaborationPresenceSignal[] = [];
     const service = new CollaborationService({
       profileStore: new CollaborationProfileStore({ profilesPath: join(root, "profiles.json") }),
       vault: new CollaborationCredentialVault({
         paths: { credentialsPath: join(root, "credentials.json") },
         safeStorage
       }),
+      onPresenceSignal: (signal) => presenceSignals.push(signal),
       createClient: () =>
         ({
           projectId: "project-demo-001",
@@ -221,6 +221,16 @@ describe("desktop canvas presence transport", () => {
       projectId: "project-demo-001",
       canvasId: "default",
       sessions: []
+    });
+    activeHandlers?.onStatus?.({
+      state: "reconnecting",
+      canvasId: "default",
+      attempt: 1,
+      delayMs: 10
+    });
+    expect(presenceSignals.at(-1)).toEqual({
+      profileId: "profile-test",
+      reset: { canvasId: "default", reason: "disconnected" }
     });
     await service.stopPresence();
     expect(stopPresence).toHaveLength(1);

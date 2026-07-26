@@ -132,6 +132,13 @@ describe("CanvasPresenceController", () => {
     expect(controller.getSnapshot().sessions).toEqual([]);
     transport.emit(update("canvas-main"));
     expect(controller.getSnapshot().sessions).toHaveLength(1);
+    transport.emit({
+      profileId: "profile-1",
+      reset: { canvasId: "canvas-main", reason: "disconnected" }
+    });
+    expect(controller.getSnapshot().sessions).toEqual([]);
+    transport.emit(update("canvas-main"));
+    expect(controller.getSnapshot().sessions).toHaveLength(1);
     transport.emit(
       signal({
         type: "canvas.presence.leave",

@@ -302,10 +302,18 @@ export type CollaborationPresenceUpdateInput = z.infer<
   typeof collaborationPresenceUpdateInputSchema
 >;
 
-export type CollaborationPresenceSignal = {
-  profileId: string;
-  message: CanvasPresenceServerMessage;
-};
+export type CollaborationPresenceSignal =
+  | {
+      profileId: string;
+      message: CanvasPresenceServerMessage;
+    }
+  | {
+      profileId: string;
+      reset: {
+        canvasId: string;
+        reason: "disconnected" | "auth_expired" | "error";
+      };
+    };
 
 export const collaborationInvokeChannels = {
   getCollaborationStatus: "planweave-collaboration:getStatus",

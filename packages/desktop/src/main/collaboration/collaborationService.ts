@@ -716,6 +716,19 @@ export class CollaborationService {
         },
         onStatus: (status: CollaborationPresenceStatus) => {
           if (!isCurrent()) return;
+          if (status.state === "reconnecting") {
+            this.publishPresenceSignal({
+              profileId,
+              reset: { canvasId, reason: "disconnected" }
+            });
+          } else if (status.state === "auth_expired") {
+            this.publishPresenceSignal({
+              profileId,
+              reset: { canvasId, reason: "auth_expired" }
+            });
+          } else if (status.state === "error") {
+            this.publishPresenceSignal({ profileId, reset: { canvasId, reason: "error" } });
+          }
           if (status.state === "auth_expired") {
             this.presenceCanvasId = null;
             this.presenceGeneration += 1;
