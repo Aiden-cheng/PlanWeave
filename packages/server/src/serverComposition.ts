@@ -260,6 +260,7 @@ export async function createDistributedServerComposition(
           await handleHumanHttpRequest(request, response, {
             service: humanMembership,
             repository: humanIdentity,
+            projectAuthority: runtimeRegistry,
             allowInsecureDevelopment: config.allowInsecureDevelopment,
             clock
           })

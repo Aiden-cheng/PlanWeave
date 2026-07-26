@@ -17,7 +17,7 @@ import { HUMAN_RATE_MAX_BUCKETS } from "../identity/http.js";
 const servers: HttpServer[] = [];
 const directories: string[] = [];
 const databases: SqliteDatabase[] = [];
-const testProjectIds = new Set(["project-a", "project-b", "project-exp", "project-ttl"]);
+const defaultTestProjectIds = ["project-a", "project-b", "project-exp", "project-ttl"];
 
 afterEach(async () => {
   resetHumanHttpRateLimits();
@@ -36,21 +36,30 @@ afterEach(async () => {
   );
 });
 
-async function setup(allowInsecureDevelopment = true, clock?: () => Date) {
+async function setup(
+  allowInsecureDevelopment = true,
+  clock?: () => Date,
+  additionalProjectIds: readonly string[] = []
+) {
   const directory = await mkdtemp(join(tmpdir(), "planweave-human-http-"));
   directories.push(directory);
   const database = await openServerDatabase(join(directory, "server.sqlite"), 5_000);
   databases.push(database);
   applyMigrations(database);
   const repository = new HumanIdentityRepository(database);
+  const authorizedProjectIds = new Set([...defaultTestProjectIds, ...additionalProjectIds]);
+  const projectAuthority = {
+    hasProject: (projectId: string) => authorizedProjectIds.has(projectId)
+  };
   const service = new HumanMembershipService({
     repository,
-    projectAuthority: { hasProject: (projectId) => testProjectIds.has(projectId) }
+    projectAuthority
   });
   const server = createServer((request, response) => {
     void handleHumanHttpRequest(request, response, {
       service,
       repository,
+      projectAuthority,
       allowInsecureDevelopment,
       clock
     });
@@ -142,6 +151,24 @@ describe("human membership HTTP APIs", () => {
     });
     expect(response.response.status).toBe(403);
     expect(response.payload.error).toBe("human_cross_project_forbidden");
+
+    const trustedUrl = `${origin}/api/v1/projects/project-a/human/members`;
+    for (let request = 0; request < 60; request += 1) {
+      expect((await fetch(trustedUrl)).status).toBe(401);
+    }
+
+    const repeatedUnknownUrl = `${origin}/api/v1/projects/unknown-project/human/members`;
+    for (let request = 0; request < 65; request += 1) {
+      expect((await fetch(repeatedUnknownUrl)).status).toBe(403);
+    }
+    for (let bucket = 0; bucket <= HUMAN_RATE_MAX_BUCKETS; bucket += 1) {
+      const unknown = await fetch(
+        `${origin}/api/v1/projects/unknown-project-${bucket}/human/members`
+      );
+      expect(unknown.status).toBe(403);
+    }
+
+    expect((await fetch(trustedUrl)).status).toBe(429);
     expect(
       (database.prepare("SELECT COUNT(*) AS count FROM project_memberships").get() as {
         count: number;
@@ -637,9 +664,13 @@ describe("human membership HTTP APIs", () => {
     expect(formPost.status).toBe(400);
   });
 
-  it("keeps fixed-window rate limits while expiring and bounding untrusted keys", async () => {
+  it("keeps fixed-window rate limits while expiring and bounding admitted keys", async () => {
     let now = new Date("2026-07-26T10:00:00.000Z");
-    const { origin } = await setup(true, () => now);
+    const capacityProjectIds = Array.from(
+      { length: HUMAN_RATE_MAX_BUCKETS },
+      (_, bucket) => `capacity-project-${bucket}`
+    );
+    const { origin } = await setup(true, () => now, capacityProjectIds);
     const limitedUrl = `${origin}/api/v1/projects/project-a/human/members`;
 
     for (let request = 0; request < 60; request += 1) {
@@ -653,10 +684,8 @@ describe("human membership HTTP APIs", () => {
     const afterWindow = await fetch(limitedUrl);
     expect(afterWindow.status).toBe(401);
 
-    for (let bucket = 0; bucket < HUMAN_RATE_MAX_BUCKETS; bucket += 1) {
-      const response = await fetch(
-        `${origin}/api/v1/projects/capacity-project-${bucket}/human/members`
-      );
+    for (const projectId of capacityProjectIds) {
+      const response = await fetch(`${origin}/api/v1/projects/${projectId}/human/members`);
       expect(response.status).toBe(401);
     }
 

@@ -48,11 +48,12 @@ async function setup(options?: { clock?: () => Date }) {
   applyMigrations(database);
 
   const humanRepository = new HumanIdentityRepository(database, options?.clock);
+  const projectAuthority = {
+    hasProject: (projectId: string) => projectId === "project-a" || projectId === "project-b"
+  };
   const humanService = new HumanMembershipService({
     repository: humanRepository,
-    projectAuthority: {
-      hasProject: (projectId) => projectId === "project-a" || projectId === "project-b"
-    },
+    projectAuthority,
     clock: options?.clock
   });
   const attachmentRepository = new CommentAttachmentRepository(database);
@@ -69,6 +70,7 @@ async function setup(options?: { clock?: () => Date }) {
         await handleHumanHttpRequest(request, response, {
           service: humanService,
           repository: humanRepository,
+          projectAuthority,
           allowInsecureDevelopment: true,
           clock: options?.clock
         })

@@ -8,7 +8,11 @@ import {
   type HumanAuthErrorCode
 } from "./errors.js";
 import { HumanIdentityRepository } from "./repository.js";
-import { HumanMembershipService, HumanMembershipServiceError } from "./service.js";
+import {
+  HumanMembershipService,
+  HumanMembershipServiceError,
+  type HumanProjectAuthority
+} from "./service.js";
 import {
   HUMAN_DEVICE_TOKEN_PREFIX,
   HUMAN_TOKEN_SECRET_CHAR_LENGTH,
@@ -25,6 +29,7 @@ export const HUMAN_RATE_MAX_BUCKETS = 1_000;
 export type HumanHttpOptions = {
   service: HumanMembershipService;
   repository: HumanIdentityRepository;
+  projectAuthority: HumanProjectAuthority;
   allowInsecureDevelopment?: boolean;
   clock?: () => Date;
 };
@@ -323,6 +328,12 @@ export async function handleHumanHttpRequest(
     if (!humanTransportAllowed(request.socket, options.allowInsecureDevelopment)) {
       request.resume();
       respond(response, 426, { error: "human_insecure_transport" });
+      return true;
+    }
+
+    if (!options.projectAuthority.hasProject(matched.projectId)) {
+      request.resume();
+      respond(response, 403, { error: "human_cross_project_forbidden" });
       return true;
     }
 
