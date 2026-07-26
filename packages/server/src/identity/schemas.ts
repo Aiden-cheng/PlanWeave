@@ -126,6 +126,7 @@ export const projectMembershipSchema = z
     projectId: humanProjectIdSchema,
     humanPrincipalId: humanPrincipalIdSchema,
     role: projectMemberRoleSchema,
+    revision: z.number().int().positive(),
     createdAt: timestampSchema,
     updatedAt: timestampSchema,
     revokedAt: timestampSchema.optional()

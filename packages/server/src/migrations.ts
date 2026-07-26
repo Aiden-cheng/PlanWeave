@@ -1339,6 +1339,18 @@ function dropDispatchPackageRefColumn(database: SqliteDatabase): void {
   database.exec("ALTER TABLE dispatches DROP COLUMN package_ref");
 }
 
+function ensureMembershipRevision(database: SqliteDatabase): void {
+  const hasTable = database
+    .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='project_memberships'")
+    .get();
+  if (!hasTable) return;
+  const columns = database.prepare("PRAGMA table_info(project_memberships)").all();
+  if (columns.some((row) => row.name === "revision")) return;
+  database.exec(
+    "ALTER TABLE project_memberships ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1)"
+  );
+}
+
 type Migration = {
   version: number;
   sql: string;
@@ -1382,7 +1394,8 @@ const migrations: readonly Migration[] = [
     disableForeignKeys: true,
     after: ensureRemoteActionRejectionState
   },
-  { version: 23, sql: "SELECT 1;", after: ensureServerInstanceAndRemoteActionClaims }
+  { version: 23, sql: "SELECT 1;", after: ensureServerInstanceAndRemoteActionClaims },
+  { version: 24, sql: "SELECT 1;", after: ensureMembershipRevision }
 ];
 
 export const latestCentralSchemaVersion = Math.max(

@@ -24,6 +24,7 @@ describe("activity projection builders", () => {
       projectId: "project-a",
       type: "member_joined",
       membershipId: "membership-1",
+      transitionRevision: 1,
       humanPrincipalId: "human-1",
       displayName: "Ada",
       membershipRole: "member",
@@ -31,13 +32,16 @@ describe("activity projection builders", () => {
     });
     expect(joined.source).toEqual({
       kind: "membership",
-      sourceId: membershipActivitySourceId("membership-1", "member_joined")
+      sourceId: membershipActivitySourceId("membership-1", "member_joined", 1)
     });
     expect(joined.summary.humanPrincipalId).toBe("human-1");
     expect(joined.summary.headline).toContain("Ada");
 
-    expect(membershipActivitySourceId("m1", "owner_promoted")).toBe("m1:promoted");
-    expect(membershipActivitySourceId("m1", "member_removed")).toBe("m1:removed");
+    expect(membershipActivitySourceId("m1", "owner_promoted", 2)).toBe("m1:promoted:r2");
+    expect(membershipActivitySourceId("m1", "member_removed", 4)).toBe("m1:removed:r4");
+    expect(membershipActivitySourceId("m1", "owner_promoted", 4)).not.toBe(
+      membershipActivitySourceId("m1", "owner_promoted", 2)
+    );
   });
 
   it("builds assignment and remote-run activities without embedding prompts", () => {

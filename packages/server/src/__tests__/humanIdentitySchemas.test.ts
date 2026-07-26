@@ -42,6 +42,7 @@ function membership(role: "owner" | "member" = "member") {
     projectId: "project-a",
     humanPrincipalId: "human-1",
     role,
+    revision: 1,
     createdAt: "2026-07-24T10:00:00.000Z",
     updatedAt: "2026-07-24T10:00:00.000Z"
   });
@@ -75,6 +76,7 @@ describe("human identity schemas", () => {
   it("accepts strict human principal, membership, invitation, and device metadata", () => {
     expect(principal().displayName).toBe("Ada");
     expect(membership("owner").role).toBe("owner");
+    expect(membership("owner").revision).toBe(1);
     expect(invitation().role).toBe("member");
     expect(device().tokenSha256).toHaveLength(64);
     expect(

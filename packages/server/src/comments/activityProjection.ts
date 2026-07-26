@@ -19,19 +19,20 @@ export function opaqueWorkItemKey(workItem: WorkItemRef): string {
 
 export function membershipActivitySourceId(
   membershipId: string,
-  type: "member_joined" | "member_left" | "member_removed" | "owner_promoted" | "owner_demoted"
+  type: "member_joined" | "member_left" | "member_removed" | "owner_promoted" | "owner_demoted",
+  transitionRevision: number
 ): string {
   switch (type) {
     case "member_joined":
-      return membershipId;
+      return `${membershipId}:joined:r${transitionRevision}`;
     case "member_left":
-      return `${membershipId}:left`;
+      return `${membershipId}:left:r${transitionRevision}`;
     case "member_removed":
-      return `${membershipId}:removed`;
+      return `${membershipId}:removed:r${transitionRevision}`;
     case "owner_promoted":
-      return `${membershipId}:promoted`;
+      return `${membershipId}:promoted:r${transitionRevision}`;
     case "owner_demoted":
-      return `${membershipId}:demoted`;
+      return `${membershipId}:demoted:r${transitionRevision}`;
   }
 }
 
@@ -76,6 +77,7 @@ export type MembershipActivityInput = {
   projectId: string;
   type: "member_joined" | "member_left" | "member_removed" | "owner_promoted" | "owner_demoted";
   membershipId: string;
+  transitionRevision: number;
   humanPrincipalId: string;
   displayName?: string;
   membershipRole?: ProjectMemberRole;
@@ -86,7 +88,7 @@ export type MembershipActivityInput = {
 export function buildMembershipActivity(input: MembershipActivityInput): ActivityRecord {
   const source: ActivitySource = {
     kind: "membership",
-    sourceId: membershipActivitySourceId(input.membershipId, input.type)
+    sourceId: membershipActivitySourceId(input.membershipId, input.type, input.transitionRevision)
   };
   const verb: Record<MembershipActivityInput["type"], string> = {
     member_joined: "joined the project",

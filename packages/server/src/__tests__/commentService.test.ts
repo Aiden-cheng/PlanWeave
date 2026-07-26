@@ -425,6 +425,7 @@ describe("CommentService", () => {
       projectId,
       type: "member_joined",
       membershipId: stack.member.membership.membershipId,
+      transitionRevision: stack.member.membership.revision,
       humanPrincipalId: stack.memberContext.humanPrincipalId,
       displayName: stack.memberContext.displayName,
       membershipRole: "member"
@@ -435,6 +436,7 @@ describe("CommentService", () => {
       projectId,
       type: "member_joined",
       membershipId: stack.member.membership.membershipId,
+      transitionRevision: stack.member.membership.revision,
       humanPrincipalId: stack.memberContext.humanPrincipalId,
       displayName: stack.memberContext.displayName,
       membershipRole: "member"

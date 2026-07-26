@@ -24,6 +24,7 @@ type MembershipRow = {
   project_id: string;
   human_principal_id: string;
   role: string;
+  revision: number;
   created_at: string;
   updated_at: string;
   revoked_at: string | null;
@@ -43,6 +44,7 @@ function toProjectMembership(row: MembershipRow): ProjectMembership {
     projectId: row.project_id,
     humanPrincipalId: row.human_principal_id,
     role: row.role,
+    revision: Number(row.revision),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     revokedAt: row.revoked_at ?? undefined
@@ -171,8 +173,8 @@ export class MembershipStore {
       this.database
         .prepare(
           `INSERT INTO project_memberships(
-            membership_id,project_id,human_principal_id,role,created_at,updated_at
-          ) VALUES (?,?,?,?,?,?)`
+            membership_id,project_id,human_principal_id,role,revision,created_at,updated_at
+          ) VALUES (?,?,?,?,1,?,?)`
         )
         .run(membershipId, input.projectId, input.humanPrincipalId, input.role, now, now);
     } catch (error) {
@@ -199,7 +201,7 @@ export class MembershipStore {
     const revokedAt = this.clock().toISOString();
     const updated = this.database
       .prepare(
-        `UPDATE project_memberships SET revoked_at=?, updated_at=?
+        `UPDATE project_memberships SET revoked_at=?, updated_at=?, revision=revision+1
          WHERE membership_id=? AND revoked_at IS NULL`
       )
       .run(revokedAt, revokedAt, membership.membershipId);
@@ -215,7 +217,7 @@ export class MembershipStore {
     if (membership.role === "owner") return membership;
     const updated = this.database
       .prepare(
-        `UPDATE project_memberships SET role='owner', updated_at=?
+        `UPDATE project_memberships SET role='owner', updated_at=?, revision=revision+1
          WHERE membership_id=? AND revoked_at IS NULL AND role='member'`
       )
       .run(this.clock().toISOString(), membership.membershipId);
@@ -234,7 +236,7 @@ export class MembershipStore {
     }
     const updated = this.database
       .prepare(
-        `UPDATE project_memberships SET role='member', updated_at=?
+        `UPDATE project_memberships SET role='member', updated_at=?, revision=revision+1
          WHERE membership_id=? AND revoked_at IS NULL AND role='owner'`
       )
       .run(this.clock().toISOString(), membership.membershipId);

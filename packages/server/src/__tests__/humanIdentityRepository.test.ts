@@ -58,6 +58,49 @@ function localAdminProof(
 }
 
 describe("human identity migration v16", () => {
+  it("backfills membership revision deterministically when upgrading from v23", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "planweave-human-revision-mig-"));
+    directories.push(directory);
+    const database = await openServerDatabase(join(directory, "server.sqlite"), 5_000);
+    databases.push(database);
+    database.exec(`
+      CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+      CREATE TABLE project_memberships (
+        membership_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        human_principal_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        revoked_at TEXT
+      );
+      INSERT INTO project_memberships(
+        membership_id,project_id,human_principal_id,role,created_at,updated_at
+      ) VALUES (
+        'membership-old','project-a','human-old','member',
+        '2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z'
+      );
+    `);
+    for (let version = 1; version <= 23; version += 1) {
+      database
+        .prepare("INSERT INTO schema_migrations(version,applied_at) VALUES (?,?)")
+        .run(version, "2026-01-01T00:00:00.000Z");
+    }
+
+    applyMigrations(database);
+
+    expect(
+      database.prepare("SELECT revision FROM project_memberships WHERE membership_id=?").get(
+        "membership-old"
+      )
+    ).toEqual({ revision: 1 });
+    expect(() =>
+      database
+        .prepare("UPDATE project_memberships SET revision=0 WHERE membership_id=?")
+        .run("membership-old")
+    ).toThrow(/CHECK/i);
+  });
+
   it("creates normalized identity tables on upgrade from v15", async () => {
     const directory = await mkdtemp(join(tmpdir(), "planweave-human-mig-"));
     directories.push(directory);
@@ -78,7 +121,7 @@ describe("human identity migration v16", () => {
     // Minimal tables required only if later migrations depend on them — v16 is additive.
     applyMigrations(database);
     expect(centralSchemaVersion(database)).toBe(latestCentralSchemaVersion);
-    expect(latestCentralSchemaVersion).toBe(23);
+    expect(latestCentralSchemaVersion).toBe(24);
 
     for (const table of [
       "human_principals",
@@ -148,6 +191,30 @@ describe("human identity migration v16", () => {
 });
 
 describe("human identity repository", () => {
+  it("increments membership revision only for real role and removal transitions", async () => {
+    const { repo } = await openMigrated();
+    const owner = repo.bootstrapOwner(localAdminProof());
+    const invitation = repo.createInvitation({
+      projectId: "project-a",
+      createdByHumanPrincipalId: owner.principal.humanPrincipalId
+    });
+    const member = repo.consumeInvitation({
+      invitationToken: invitation.invitationToken,
+      projectId: "project-a",
+      displayName: "Revision Member"
+    });
+    expect(owner.membership.revision).toBe(1);
+    expect(member.membership.revision).toBe(1);
+
+    const promoted = repo.promoteToOwner("project-a", member.principal.humanPrincipalId);
+    expect(promoted.revision).toBe(2);
+    expect(repo.promoteToOwner("project-a", member.principal.humanPrincipalId).revision).toBe(2);
+    const demoted = repo.demoteOwner("project-a", member.principal.humanPrincipalId);
+    expect(demoted.revision).toBe(3);
+    expect(repo.promoteToOwner("project-a", member.principal.humanPrincipalId).revision).toBe(4);
+    expect(repo.removeMember("project-a", member.principal.humanPrincipalId).revision).toBe(5);
+  });
+
   it("bootstraps owner once, stores only digests, and returns device secret once", async () => {
     const { database, repo } = await openMigrated();
     const first = repo.bootstrapOwner(localAdminProof(), { deviceLabel: "laptop" });

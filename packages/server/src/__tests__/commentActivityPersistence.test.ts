@@ -87,7 +87,7 @@ describe("comment/activity migration v20", () => {
     }
     applyMigrations(database);
     expect(centralSchemaVersion(database)).toBe(latestCentralSchemaVersion);
-    expect(latestCentralSchemaVersion).toBe(23);
+    expect(latestCentralSchemaVersion).toBe(24);
 
     for (const table of ["comments", "activity_records", "activity_projection_outbox"]) {
       expect(
@@ -223,6 +223,7 @@ describe("activity repository", () => {
       projectId: "project-a",
       type: "member_joined",
       membershipId: "membership-1",
+      transitionRevision: 1,
       humanPrincipalId: "human-1",
       displayName: "Ada",
       membershipRole: "member",
