@@ -111,7 +111,7 @@ export async function runAgentHostCli(
 ): Promise<number> {
   const io = options.io ?? { stdout: console.log, stderr: console.error };
   try {
-    if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") {
+    if (argv[0] === "--help" || argv[0] === "-h") {
       io.stdout(AGENT_HOST_CLI_USAGE);
       return 0;
     }

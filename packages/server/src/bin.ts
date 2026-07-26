@@ -53,7 +53,7 @@ export async function runServerCli(
   const io = options.io ?? { stdout: console.log, stderr: console.error };
   try {
     const [command, ...args] = argv;
-    if (!command || command === "--help" || command === "-h") {
+    if (command === "--help" || command === "-h") {
       io.stdout(SERVER_CLI_USAGE);
       return 0;
     }

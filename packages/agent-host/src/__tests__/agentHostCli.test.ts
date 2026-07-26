@@ -107,16 +107,20 @@ describe("Agent Host operator CLI", () => {
     expect(stderr).toHaveBeenLastCalledWith("agent_host_cli_usage");
   });
 
-  it.each([
-    { argv: [] as string[] },
-    { argv: ["--help"] },
-    { argv: ["-h"] }
-  ])("prints public usage and exits 0 for $argv", async ({ argv }) => {
+  it.each(["--help", "-h"])("prints public usage and exits 0 for %s", async (argument) => {
     const stdout = vi.fn();
     const stderr = vi.fn();
-    await expect(runAgentHostCli(argv, { io: { stdout, stderr } })).resolves.toBe(0);
+    await expect(runAgentHostCli([argument], { io: { stdout, stderr } })).resolves.toBe(0);
     expect(stdout).toHaveBeenCalledWith(AGENT_HOST_CLI_USAGE);
     expect(stderr).not.toHaveBeenCalled();
+  });
+
+  it("reports usage on stderr and exits 2 when no command is provided", async () => {
+    const stdout = vi.fn();
+    const stderr = vi.fn();
+    await expect(runAgentHostCli([], { io: { stdout, stderr } })).resolves.toBe(2);
+    expect(stderr).toHaveBeenCalledExactlyOnceWith("agent_host_cli_usage");
+    expect(stdout).not.toHaveBeenCalled();
   });
 
   it.each(["SIGINT", "SIGTERM"] as const)("shuts down once after %s", async (signal) => {
