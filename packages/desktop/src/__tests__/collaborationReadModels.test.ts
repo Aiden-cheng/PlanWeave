@@ -292,6 +292,52 @@ describe("CollaborationReadModelController", () => {
     controller.dispose();
   });
 
+  it("replaces assignments and Hosts when an authoritative refresh shrinks the page", async () => {
+    const block = blockAssignment("task-1#B-001", "host-assigned-1");
+    const mock = createMockApi({
+      assignments: {
+        items: [block],
+        nextCursor: null
+      }
+    });
+    mock.listEligible.mockResolvedValue({
+      workItem: block.workItem,
+      humans: [],
+      hosts: [
+        {
+          projectId: "project-demo-001",
+          hostId: "host-eligible-1",
+          exists: true,
+          revoked: false,
+          authorizedForProject: true,
+          online: true,
+          capabilities: ["acp"],
+          displayName: "Eligible One"
+        }
+      ],
+      nextHumanCursor: null,
+      nextHostCursor: null
+    });
+
+    const controller = new CollaborationReadModelController({ api: mock.api });
+    await controller.setActiveProject({
+      profileId: "profile-demo-001",
+      projectId: "project-demo-001"
+    });
+    expect(controller.getSnapshot().assignmentsByWorkItem[workItemKey(block.workItem)]).toBeTruthy();
+    expect(new Set(controller.getSnapshot().hosts.map((host) => host.hostId))).toEqual(
+      new Set(["host-assigned-1", "host-eligible-1"])
+    );
+
+    mock.listAssignments.mockResolvedValueOnce({ items: [], nextCursor: null });
+    await controller.refreshAuthoritative({ reason: "authoritative_shrink" });
+
+    expect(controller.getSnapshot().assignmentsByWorkItem).toEqual({});
+    expect(controller.getSnapshot().hosts).toEqual([]);
+    expect(controller.getSnapshot().syncPhase).toBe("ready");
+    controller.dispose();
+  });
+
   it("surfaces eligible Host failures through authoritative refresh state", async () => {
     const block = blockAssignment("task-1#B-001", "host-assigned-1");
     const mock = createMockApi({
@@ -318,7 +364,88 @@ describe("CollaborationReadModelController", () => {
       })
     );
     expect(controller.getSnapshot().loadingKinds).not.toContain("assignments");
-    expect(controller.getSnapshot().assignmentsByWorkItem[workItemKey(block.workItem)]).toBeTruthy();
+    expect(controller.getSnapshot().assignmentsByWorkItem).toEqual({});
+    expect(controller.getSnapshot().hosts).toEqual([]);
+    controller.dispose();
+  });
+
+  it("keeps reliable assignments and Hosts on eligible failure, then replaces them after recovery", async () => {
+    const initialBlock = blockAssignment("task-1#B-001", "host-assigned-old");
+    const nextBlock = blockAssignment("task-1#B-002", "host-assigned-new");
+    const mock = createMockApi({
+      assignments: {
+        items: [initialBlock],
+        nextCursor: null
+      }
+    });
+    const eligibleHost = (hostId: string) => ({
+      projectId: "project-demo-001",
+      hostId,
+      exists: true,
+      revoked: false,
+      authorizedForProject: true,
+      online: true,
+      capabilities: ["acp"],
+      displayName: `Eligible ${hostId}`
+    });
+    mock.listEligible.mockResolvedValue({
+      workItem: initialBlock.workItem,
+      humans: [],
+      hosts: [eligibleHost("host-eligible-old")],
+      nextHumanCursor: null,
+      nextHostCursor: null
+    });
+
+    const controller = new CollaborationReadModelController({ api: mock.api });
+    await controller.setActiveProject({
+      profileId: "profile-demo-001",
+      projectId: "project-demo-001"
+    });
+    const initialAssignmentKey = workItemKey(initialBlock.workItem);
+    expect(controller.getSnapshot().assignmentsByWorkItem[initialAssignmentKey]).toBeTruthy();
+
+    const failure = {
+      kind: "network",
+      code: "eligible_reload_failed",
+      message: "Eligible Host reload failed.",
+      retryable: true
+    };
+    mock.listAssignments.mockResolvedValueOnce({ items: [nextBlock], nextCursor: null });
+    mock.listEligible.mockRejectedValueOnce(failure);
+    await controller.refreshAuthoritative({ reason: "eligible_failure" });
+
+    const failedSnapshot = controller.getSnapshot();
+    expect(failedSnapshot.syncPhase).toBe("degraded");
+    expect(failedSnapshot.lastError).toEqual(
+      expect.objectContaining({
+        code: "eligible_reload_failed",
+        message: "Eligible Host reload failed."
+      })
+    );
+    expect(failedSnapshot.assignmentsByWorkItem[initialAssignmentKey]).toBeTruthy();
+    expect(failedSnapshot.assignmentsByWorkItem[workItemKey(nextBlock.workItem)]).toBeUndefined();
+    expect(new Set(failedSnapshot.hosts.map((host) => host.hostId))).toEqual(
+      new Set(["host-assigned-old", "host-eligible-old"])
+    );
+
+    mock.listAssignments.mockResolvedValueOnce({ items: [nextBlock], nextCursor: null });
+    mock.listEligible.mockResolvedValueOnce({
+      workItem: nextBlock.workItem,
+      humans: [],
+      hosts: [eligibleHost("host-eligible-new")],
+      nextHumanCursor: null,
+      nextHostCursor: null
+    });
+    await controller.refreshAuthoritative({ reason: "eligible_recovery" });
+
+    const recoveredSnapshot = controller.getSnapshot();
+    expect(recoveredSnapshot.syncPhase).toBe("ready");
+    expect(recoveredSnapshot.lastError).toBeNull();
+    expect(recoveredSnapshot.assignmentsByWorkItem[initialAssignmentKey]).toBeUndefined();
+    expect(recoveredSnapshot.assignmentsByWorkItem[workItemKey(nextBlock.workItem)]).toBeTruthy();
+    expect(new Set(recoveredSnapshot.hosts.map((host) => host.hostId))).toEqual(
+      new Set(["host-assigned-new", "host-eligible-new"])
+    );
     controller.dispose();
   });
 

@@ -654,6 +654,12 @@ export class CollaborationReadModelController {
   private async reloadAssignments(generation: number): Promise<void> {
     this.setLoading("assignments", true);
     this.emit();
+    const profileId = this.state.profileId;
+    const projectId = this.state.projectId;
+    const isCurrentProject = () =>
+      generation === this.state.generation &&
+      profileId === this.state.profileId &&
+      projectId === this.state.projectId;
     try {
       const query: CollaborationAssignmentListQueryInput = {
         cursor: 0,
@@ -661,11 +667,13 @@ export class CollaborationReadModelController {
         ...(this.state.canvasId ? { canvasId: this.state.canvasId } : {})
       };
       const page = await this.api.listCollaborationAssignments(query);
-      if (generation !== this.state.generation) return;
-      this.state.assignments.clear();
+      if (!isCurrentProject()) return;
+
+      const nextAssignments = new Map<string, AssignmentDisplayProjection>();
+      const nextHosts = new Map<string, CollaborationHostProjection>();
       for (const item of page.items) {
-        this.state.assignments.set(workItemKey(item.workItem), item);
-        this.ingestHostsFromAssignment(item);
+        nextAssignments.set(workItemKey(item.workItem), item);
+        this.ingestHostFromAssignment(nextHosts, item);
       }
       // Hosts are filtered by each Block's package capabilities. Query every Block in this
       // bounded assignment page (never Tasks), then union/dedupe by Host id. Any eligible
@@ -677,9 +685,9 @@ export class CollaborationReadModelController {
         const eligible = await this.api.listCollaborationEligibleAssignees({
           workItem: item.workItem
         });
-        if (generation !== this.state.generation) return;
+        if (!isCurrentProject()) return;
         for (const host of eligible.hosts) {
-          this.state.hosts.set(host.hostId, {
+          nextHosts.set(host.hostId, {
             hostId: host.hostId,
             projectId: host.projectId,
             displayName: host.displayName,
@@ -692,10 +700,13 @@ export class CollaborationReadModelController {
           });
         }
       }
+      if (!isCurrentProject()) return;
+      this.state.assignments = nextAssignments;
+      this.state.hosts = nextHosts;
       this.setLoading("assignments", false);
       this.emit();
     } catch (error) {
-      if (generation === this.state.generation) {
+      if (isCurrentProject()) {
         this.setLoading("assignments", false);
       }
       throw error;
@@ -879,9 +890,16 @@ export class CollaborationReadModelController {
   }
 
   private ingestHostsFromAssignment(assignment: AssignmentDisplayProjection): void {
+    this.ingestHostFromAssignment(this.state.hosts, assignment);
+  }
+
+  private ingestHostFromAssignment(
+    hosts: Map<string, CollaborationHostProjection>,
+    assignment: AssignmentDisplayProjection
+  ): void {
     if (!assignment.host) return;
-    const existing = this.state.hosts.get(assignment.host.hostId);
-    this.state.hosts.set(assignment.host.hostId, {
+    const existing = hosts.get(assignment.host.hostId);
+    hosts.set(assignment.host.hostId, {
       hostId: assignment.host.hostId,
       projectId: assignment.projectId,
       displayName: assignment.host.displayName,
