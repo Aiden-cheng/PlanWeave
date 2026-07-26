@@ -4,7 +4,8 @@
  * Spawns Server + Agent Host dist bins + fake ACP, drives operator HTTP APIs,
  * and asserts exact identities across Server/Host/Runtime read models.
  */
-import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   claimBlock,
@@ -168,18 +169,48 @@ describe("real-process remote Block lifecycle", () => {
     expect(events.events.some((event) => event.kind === "agent_message")).toBe(true);
 
     // Authoritative Runtime results land under the project home.
-    const statePath = join(
+    const canvasHome = join(
       harness.paths.projectHome,
       "projects",
       harness.projectId,
       "canvases",
-      "default",
-      "state.json"
+      "default"
     );
+    const statePath = join(canvasHome, "state.json");
     const state = JSON.parse(await readFile(statePath, "utf8")) as {
-      blocks: Record<string, { status?: string }>;
+      blocks: Record<string, { status?: string; lastRunId?: string }>;
+      current?: { ref?: string } | null;
     };
-    expect(state.blocks["T-001#B-001"]?.status ?? state.blocks["B-001"]).toBeTruthy();
+    const blockState = state.blocks["T-001#B-001"] ?? state.blocks["B-001"];
+    expect(blockState?.status).toBe("completed");
+    const runId = terminal.runtime.terminalReceipt?.runId ?? blockState?.lastRunId;
+    expect(runId).toEqual(expect.stringMatching(/^RUN-/));
+
+    // Byte-level: Runtime report.md must match Server artifact blob and digest.
+    const reportPath = join(
+      canvasHome,
+      "results",
+      "T-001",
+      "blocks",
+      "B-001",
+      "runs",
+      String(runId),
+      "report.md"
+    );
+    const runtimeReportBytes = await readFile(reportPath);
+    expect(runtimeReportBytes.byteLength).toBeGreaterThan(0);
+    expect(runtimeReportBytes.toString("utf8")).toMatch(/hello from mock-session/);
+    const runtimeDigest = createHash("sha256").update(runtimeReportBytes).digest("hex");
+    expect(result.reportArtifactRef).toBe(`artifact:sha256:${runtimeDigest}`);
+
+    const serverArtifactBytes = client.readServerArtifactBytes(result.reportArtifactRef);
+    expect(Buffer.compare(serverArtifactBytes, runtimeReportBytes)).toBe(0);
+    expect(createHash("sha256").update(serverArtifactBytes).digest("hex")).toBe(runtimeDigest);
+
+    // Sensitivity: result index / run directory exists for the claimed runId only.
+    const runsDir = join(canvasHome, "results", "T-001", "blocks", "B-001", "runs");
+    const runEntries = await readdir(runsDir);
+    expect(runEntries).toContain(String(runId));
   }, 90_000);
 
   it("ACP-declared failure (refusal) terminalizes with matching identities", async () => {
