@@ -1108,6 +1108,18 @@ async function runCollaborationAccessibilitySmoke(
     ["活动", "Activity"],
     { allowedRoles: ["group", "region"] }
   );
+  await mainWindow.webContents.executeJavaScript(`
+    (async () => {
+      const trigger = document.querySelector('[data-testid="people-presence-trigger"]');
+      if (!(trigger instanceof HTMLElement)) throw new Error("Missing People trigger for AX smoke.");
+      trigger.click();
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        if (document.querySelector('[data-testid="people-presence-popover"]')) return true;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error("Timed out opening People surface for AX smoke.");
+    })()
+  `);
   const peopleAx = summarizeChromiumAccessibilityTree(
     await readChromiumAccessibilityTree(mainWindow),
     ["成员", "People"],
