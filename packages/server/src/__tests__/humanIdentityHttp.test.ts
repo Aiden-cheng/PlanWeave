@@ -94,7 +94,11 @@ async function bootstrap(
     principal?: { humanPrincipalId: string };
     membership?: { role: string };
     created?: boolean;
-    device?: { deviceCredentialId: string; tokenSha256?: string };
+    device?: {
+      deviceCredentialId: string;
+      mintedForProjectId?: string;
+      tokenSha256?: string;
+    };
   };
   return { response, payload };
 }
@@ -388,6 +392,42 @@ describe("human membership HTTP APIs", () => {
       headers: auth(recovered.payload.deviceToken!)
     });
     expect(members.status).toBe(200);
+  });
+
+  it("recovers project-b while the same owner still has a usable project-a device", async () => {
+    const { origin } = await setup();
+    const principalId = "shared-recovery-owner";
+    const projectA = await bootstrap(origin, "project-a", {
+      displayName: "Shared Owner",
+      humanPrincipalId: principalId
+    });
+    const projectB = await bootstrap(origin, "project-b", {
+      displayName: "Shared Owner",
+      humanPrincipalId: principalId
+    });
+
+    const revokeB = await fetch(
+      `${origin}/api/v1/projects/project-b/human/devices/${projectB.payload.device!.deviceCredentialId}/revoke`,
+      { method: "POST", headers: auth(projectB.payload.deviceToken!) }
+    );
+    expect(revokeB.status).toBe(200);
+
+    const recoveredB = await bootstrap(origin, "project-b", {
+      displayName: "Shared Owner",
+      humanPrincipalId: principalId
+    });
+    expect(recoveredB.response.status).toBe(200);
+    expect(recoveredB.payload.deviceToken).toMatch(/^pw_hdev_/);
+    expect(recoveredB.payload.device?.mintedForProjectId).toBe("project-b");
+
+    const bAccess = await fetch(`${origin}/api/v1/projects/project-b/human/members`, {
+      headers: auth(recoveredB.payload.deviceToken!)
+    });
+    expect(bAccess.status).toBe(200);
+    const aAccess = await fetch(`${origin}/api/v1/projects/project-a/human/members`, {
+      headers: auth(projectA.payload.deviceToken!)
+    });
+    expect(aAccess.status).toBe(200);
   });
 
   it("protects last owner and supports promote/demote/remove", async () => {

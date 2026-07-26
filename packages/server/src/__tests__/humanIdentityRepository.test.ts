@@ -219,6 +219,28 @@ describe("human identity repository", () => {
     ).toThrowError(HumanIdentityError);
   });
 
+  it("recovers the target project when another project still has a usable device", async () => {
+    const { repo } = await openMigrated();
+    const principalId = "shared-owner";
+    const projectA = repo.bootstrapOwner(localAdminProof("project-a", principalId, "Shared Owner"));
+    const projectB = repo.bootstrapOwner(localAdminProof("project-b", principalId, "Shared Owner"));
+
+    repo.revokeDevice(projectB.device.deviceCredentialId, "project-b", principalId);
+    expect(repo.authenticateDevice(projectA.deviceToken!, "project-a")).toBeDefined();
+    expect(repo.authenticateDevice(projectA.deviceToken!, "project-b")).toBeUndefined();
+
+    const recoveredB = repo.bootstrapOwner(
+      localAdminProof("project-b", principalId, "Shared Owner")
+    );
+    expect(recoveredB.created).toBe(false);
+    expect(recoveredB.deviceToken).toMatch(/^pw_hdev_/);
+    expect(recoveredB.device.mintedForProjectId).toBe("project-b");
+    expect(recoveredB.device.deviceCredentialId).not.toBe(projectA.device.deviceCredentialId);
+    expect(repo.authenticateDevice(recoveredB.deviceToken!, "project-b")?.membership?.role).toBe(
+      "owner"
+    );
+  });
+
   it("rejects concurrent bootstrap of different principals for the same project", async () => {
     const directory = await mkdtemp(join(tmpdir(), "planweave-human-boot-race-"));
     directories.push(directory);

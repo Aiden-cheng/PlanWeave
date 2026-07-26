@@ -284,7 +284,10 @@ export class HumanIdentityRepository {
       const principal =
         this.getPrincipal(proof.humanPrincipalId) ??
         this.memberships.insertPrincipal(proof.humanPrincipalId, proof.displayName);
-      const usable = this.devices.findUsableDevice(proof.humanPrincipalId);
+      const usable = this.devices.findUsableDeviceForProject(
+        proof.humanPrincipalId,
+        projectId
+      );
       if (usable) {
         return {
           principal,

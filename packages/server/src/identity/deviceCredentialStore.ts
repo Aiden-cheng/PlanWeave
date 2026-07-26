@@ -231,15 +231,19 @@ export class DeviceCredentialStore {
     return { device: this.getDevice(deviceCredentialId)!, deviceToken };
   }
 
-  findUsableDevice(humanPrincipalId: string): HumanDeviceCredentialMetadata | undefined {
+  findUsableDeviceForProject(
+    humanPrincipalId: string,
+    projectId: string
+  ): HumanDeviceCredentialMetadata | undefined {
     const hid = humanPrincipalIdSchema.parse(humanPrincipalId);
+    const pid = humanProjectIdSchema.parse(projectId);
     const rows = this.database
       .prepare(
         `SELECT * FROM human_device_credentials
-         WHERE human_principal_id=?
+         WHERE human_principal_id=? AND minted_for_project_id=?
          ORDER BY created_at ASC, device_credential_id ASC`
       )
-      .all(hid) as DeviceRow[];
+      .all(hid, pid) as DeviceRow[];
     const now = this.clock();
     for (const row of rows) {
       const device = toDevice(row);
