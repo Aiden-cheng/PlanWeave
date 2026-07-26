@@ -131,15 +131,19 @@ describe("remote execution lifecycle policy", () => {
     ).toThrowError("remote_action_lease_mismatch");
   });
 
-  it("models requested, delivered, acknowledged, and terminal settlement without shortcuts", () => {
+  it("models delivery, settlement, and terminal rejection without shortcuts", () => {
     expect(nextRemoteExecutionActionState("recorded", "delivered")).toBe("delivered");
     expect(nextRemoteExecutionActionState("delivered", "acknowledged")).toBe("acknowledged");
     expect(nextRemoteExecutionActionState("acknowledged", "settled")).toBe("settled");
     expect(nextRemoteExecutionActionState("recorded", "settled")).toBe("settled");
+    expect(nextRemoteExecutionActionState("recorded", "rejected")).toBe("rejected");
     expect(() => nextRemoteExecutionActionState("recorded", "acknowledged")).toThrowError(
       "remote_action_state_transition_invalid"
     );
     expect(() => nextRemoteExecutionActionState("settled", "delivered")).toThrowError(
+      "remote_action_state_transition_invalid"
+    );
+    expect(() => nextRemoteExecutionActionState("rejected", "settled")).toThrowError(
       "remote_action_state_transition_invalid"
     );
   });

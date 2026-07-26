@@ -134,7 +134,9 @@ export class RemoteControlService {
       createdAt: record.createdAt,
       deliveredAt: record.deliveredAt,
       acknowledgedAt: record.acknowledgedAt,
-      settledAt: record.settledAt
+      settledAt: record.settledAt,
+      rejectedAt: record.rejectedAt,
+      rejectionCode: record.rejectionCode
     });
   }
 

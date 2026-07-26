@@ -1,11 +1,18 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   RemoteExecutionActionRepository,
+  RemoteExecutionActionRejectedError,
   RemoteExecutionActionService
 } from "../remoteExecutionActions.js";
+import {
+  applyMigrations,
+  centralSchemaVersion,
+  latestCentralSchemaVersion
+} from "../migrations.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 
 const directories: string[] = [];
@@ -36,7 +43,9 @@ async function setup() {
       created_at TEXT NOT NULL,
       delivered_at TEXT,
       acknowledged_at TEXT,
-      settled_at TEXT
+      settled_at TEXT,
+      rejected_at TEXT,
+      rejection_code TEXT
     );
   `);
   let now = Date.parse("2030-01-01T00:00:00.000Z");
@@ -79,6 +88,42 @@ describe("RemoteExecutionActionRepository", () => {
     expect(settled).toMatchObject({ state: "settled" });
     expect(settled.settledAt).toBeDefined();
     expect(repository.listUnsettled()).toEqual([]);
+  });
+
+  it("persists policy rejection as a terminal non-replayable action", async () => {
+    const { repository } = await setup();
+    let applications = 0;
+    const service = new RemoteExecutionActionService(repository, {
+      snapshot: (request) => ({
+        operationId: request.operationId,
+        dispatchId: request.dispatchId,
+        executionAttemptId: request.executionAttemptId,
+        attemptStatus: "running",
+        attemptVersion: request.expectedAttemptVersion,
+        leaseId: request.kind === "cancel" ? request.leaseId : undefined,
+        leaseFenced: false,
+        hostCapabilities: []
+      }),
+      apply: () => {
+        applications += 1;
+        throw new RemoteExecutionActionRejectedError("work_not_agent_assigned");
+      }
+    });
+
+    await expect(service.execute(cancelAction)).rejects.toMatchObject({
+      code: "work_not_agent_assigned"
+    });
+    expect(repository.getRequired(cancelAction.actionId)).toMatchObject({
+      state: "rejected",
+      rejectionCode: "work_not_agent_assigned"
+    });
+    expect(repository.getRequired(cancelAction.actionId).rejectedAt).toBeDefined();
+    expect(repository.listUnsettled()).toEqual([]);
+
+    await expect(service.execute(cancelAction)).rejects.toMatchObject({
+      code: "work_not_agent_assigned"
+    });
+    expect(applications).toBe(1);
   });
 
   it("advances command actions from mailbox acknowledgement to attempt settlement", async () => {
@@ -157,5 +202,73 @@ describe("RemoteExecutionActionRepository", () => {
     await expect(service.execute(cancelAction)).resolves.toMatchObject({ state: "delivered" });
     await expect(service.execute(cancelAction)).resolves.toMatchObject({ state: "delivered" });
     expect(applied).toEqual([cancelAction.actionId]);
+  });
+});
+
+describe("remote execution action migration v22", () => {
+  it("preserves historical action states without inferring rejection", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "planweave-remote-actions-v22-"));
+    directories.push(directory);
+    const database = await openServerDatabase(join(directory, "server.sqlite"), 5_000);
+    databases.push(database);
+    const requestJson = JSON.stringify(cancelAction);
+    const fingerprint = createHash("sha256").update(requestJson).digest("hex");
+    database.exec(`
+      CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+      CREATE TABLE remote_operations(id TEXT PRIMARY KEY);
+      CREATE TABLE remote_execution_attempts(execution_attempt_id TEXT PRIMARY KEY);
+      CREATE TABLE remote_execution_actions(
+        action_id TEXT PRIMARY KEY,
+        operation_id TEXT NOT NULL REFERENCES remote_operations(id),
+        dispatch_id TEXT NOT NULL,
+        execution_attempt_id TEXT NOT NULL REFERENCES remote_execution_attempts(execution_attempt_id),
+        kind TEXT NOT NULL,
+        request_fingerprint TEXT NOT NULL,
+        request_json TEXT NOT NULL,
+        state TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        delivered_at TEXT,
+        acknowledged_at TEXT,
+        settled_at TEXT
+      );
+      CREATE INDEX idx_remote_execution_actions_operation_state
+        ON remote_execution_actions(operation_id,state,created_at);
+      INSERT INTO remote_operations(id) VALUES ('operation-1');
+      INSERT INTO remote_execution_attempts(execution_attempt_id) VALUES ('attempt-1');
+    `);
+    for (let version = 1; version <= 21; version += 1) {
+      database
+        .prepare("INSERT INTO schema_migrations(version,applied_at) VALUES (?,?)")
+        .run(version, "2020-01-01T00:00:00.000Z");
+    }
+    database
+      .prepare(
+        `INSERT INTO remote_execution_actions(
+          action_id,operation_id,dispatch_id,execution_attempt_id,kind,
+          request_fingerprint,request_json,state,created_at
+        ) VALUES (?,?,?,?,?,?,?,'recorded',?)`
+      )
+      .run(
+        cancelAction.actionId,
+        cancelAction.operationId,
+        cancelAction.dispatchId,
+        cancelAction.executionAttemptId,
+        cancelAction.kind,
+        fingerprint,
+        requestJson,
+        "2030-01-01T00:00:00.000Z"
+      );
+
+    applyMigrations(database);
+
+    expect(centralSchemaVersion(database)).toBe(latestCentralSchemaVersion);
+    expect(latestCentralSchemaVersion).toBe(22);
+    expect(
+      new RemoteExecutionActionRepository(database).getRequired(cancelAction.actionId)
+    ).toMatchObject({
+      state: "recorded",
+      rejectedAt: undefined,
+      rejectionCode: undefined
+    });
   });
 });

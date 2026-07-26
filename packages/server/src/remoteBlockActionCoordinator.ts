@@ -1,4 +1,5 @@
 import {
+  RemoteExecutionActionRejectedError,
   RemoteExecutionActionService,
   type RemoteExecutionActionRecord
 } from "./remoteExecutionActions.js";
@@ -12,6 +13,10 @@ import type {
   RemoteDispatchOutcome
 } from "./remoteBlockCoordinator.js";
 import type { MailboxMessage } from "./mailbox.js";
+import {
+  DispatchAssignmentError,
+  type DispatchHostSelectionSnapshot
+} from "./work/dispatchIntegration.js";
 
 export class RemoteBlockActionCoordinator {
   constructor(
@@ -160,15 +165,24 @@ export class RemoteBlockActionCoordinator {
         if (action.kind !== "retry_new_attempt") throw new Error("remote_action_decision_mismatch");
         // New attempt is a fresh dispatch: revalidate current assignment and resnapshot.
         // Do not reuse the prior attempt's host_selection_json (stale after reassignment).
-        const hostSelection = this.options.assignmentGate
-          ? this.options.assignmentGate.resolve({
-              projectId: operation.projectId,
-              canvasId: operation.canvasId,
-              blockRef: operation.blockRef,
-              requiredCapabilities: operation.requiredCapabilities,
-              allowHumanOverride: false
-            })
-          : undefined;
+        let hostSelection: DispatchHostSelectionSnapshot | undefined;
+        try {
+          hostSelection = this.options.assignmentGate?.resolve({
+            projectId: operation.projectId,
+            canvasId: operation.canvasId,
+            blockRef: operation.blockRef,
+            requiredCapabilities: operation.requiredCapabilities,
+            allowHumanOverride: false
+          });
+        } catch (error) {
+          if (
+            error instanceof DispatchAssignmentError &&
+            error.code === "work_not_agent_assigned"
+          ) {
+            throw new RemoteExecutionActionRejectedError(error.code, { cause: error });
+          }
+          throw error;
+        }
         await runtime.retryAttempt({
           ...remoteBlockIdentity(operation),
           newDispatchId: action.newDispatchId,

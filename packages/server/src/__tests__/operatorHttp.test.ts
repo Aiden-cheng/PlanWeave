@@ -1,6 +1,7 @@
 import { createServer, type Server as HttpServer } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { hashOperatorToken, OperatorTokenRegistry } from "../operatorAuth.js";
+import { RemoteExecutionActionRejectedError } from "../remoteExecutionActions.js";
 import {
   handleOperatorHttpRequest,
   operatorTransportAllowed,
@@ -111,6 +112,20 @@ describe("operator HTTP boundary", () => {
       body: "{}"
     });
     expect(stale.status).toBe(409);
+
+    vi.mocked(fixture.service.executeAction).mockRejectedValueOnce(
+      new RemoteExecutionActionRejectedError("work_not_agent_assigned")
+    );
+    const policyRejected = await fetch(
+      `${fixture.origin}/api/v1/remote-operations/operation-1/actions`,
+      {
+        method: "POST",
+        headers: { ...authorization, "content-type": "application/json" },
+        body: "{}"
+      }
+    );
+    expect(policyRejected.status).toBe(409);
+    await expect(policyRejected.json()).resolves.toEqual({ error: "work_not_agent_assigned" });
 
     const invalidPage = await fetch(`${fixture.origin}/api/v1/hosts?limit=1&limit=2`, {
       headers: authorization

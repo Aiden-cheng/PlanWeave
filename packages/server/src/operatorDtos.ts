@@ -17,6 +17,7 @@ import { remoteBlockBindingViewSchema } from "@planweave-ai/runtime";
 import { z } from "zod";
 import { dispatchStatusSchema } from "./dispatches.js";
 import {
+  remoteExecutionActionRejectionCodeSchema,
   remoteExecutionActionRequestSchema,
   remoteExecutionActionStateSchema
 } from "./remoteExecutionLifecycle.js";
@@ -122,9 +123,21 @@ export const operatorActionViewSchema = z
     createdAt: timestampSchema,
     deliveredAt: timestampSchema.optional(),
     acknowledgedAt: timestampSchema.optional(),
-    settledAt: timestampSchema.optional()
+    settledAt: timestampSchema.optional(),
+    rejectedAt: timestampSchema.optional(),
+    rejectionCode: remoteExecutionActionRejectionCodeSchema.optional()
   })
-  .strict();
+  .strict()
+  .superRefine((action, context) => {
+    const hasRejection = action.rejectedAt !== undefined || action.rejectionCode !== undefined;
+    if (
+      (action.state === "rejected" &&
+        (action.rejectedAt === undefined || action.rejectionCode === undefined)) ||
+      (action.state !== "rejected" && hasRejection)
+    ) {
+      context.addIssue({ code: "custom", message: "operator_action_rejection_state_mismatch" });
+    }
+  });
 
 export const operatorEventReplaySchema = z
   .object({

@@ -358,7 +358,8 @@ export class DispatchService {
     return this.database
       .prepare(
         `SELECT request_json FROM remote_execution_actions
-         WHERE dispatch_id=? AND execution_attempt_id=? AND kind='cancel' AND state<>'settled'
+         WHERE dispatch_id=? AND execution_attempt_id=? AND kind='cancel'
+           AND state IN ('recorded','delivered','acknowledged')
          ORDER BY created_at,action_id`
       )
       .all(dispatch.id, dispatch.executionAttemptId)

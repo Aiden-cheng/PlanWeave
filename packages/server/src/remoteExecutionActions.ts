@@ -3,9 +3,11 @@ import { z } from "zod";
 import {
   decideRemoteExecutionAction,
   nextRemoteExecutionActionState,
+  remoteExecutionActionRejectionCodeSchema,
   remoteExecutionActionRequestSchema,
   remoteExecutionActionStateSchema,
   type RemoteExecutionActionRequest,
+  type RemoteExecutionActionRejectionCode,
   type RemoteExecutionActionDecision,
   type RemoteExecutionActionState,
   type RemoteExecutionLifecycleSnapshot
@@ -28,7 +30,9 @@ const actionRowSchema = z
     created_at: timestampSchema,
     delivered_at: timestampSchema.nullable(),
     acknowledged_at: timestampSchema.nullable(),
-    settled_at: timestampSchema.nullable()
+    settled_at: timestampSchema.nullable(),
+    rejected_at: timestampSchema.nullable(),
+    rejection_code: remoteExecutionActionRejectionCodeSchema.nullable()
   })
   .strict();
 
@@ -40,6 +44,8 @@ export type RemoteExecutionActionRecord = {
   deliveredAt?: string;
   acknowledgedAt?: string;
   settledAt?: string;
+  rejectedAt?: string;
+  rejectionCode?: RemoteExecutionActionRejectionCode;
 };
 
 function serializeRequest(request: RemoteExecutionActionRequest): {
@@ -55,6 +61,12 @@ function serializeRequest(request: RemoteExecutionActionRequest): {
 
 function toRecord(row: Record<string, unknown>): RemoteExecutionActionRecord {
   const parsed = actionRowSchema.parse(row);
+  if (
+    (parsed.state === "rejected" && (!parsed.rejected_at || !parsed.rejection_code)) ||
+    (parsed.state !== "rejected" && (parsed.rejected_at || parsed.rejection_code))
+  ) {
+    throw new Error("remote_action_row_rejection_mismatch");
+  }
   const request = remoteExecutionActionRequestSchema.parse(JSON.parse(parsed.request_json));
   if (
     request.actionId !== parsed.action_id ||
@@ -79,8 +91,20 @@ function toRecord(row: Record<string, unknown>): RemoteExecutionActionRecord {
     createdAt: parsed.created_at,
     deliveredAt: parsed.delivered_at ?? undefined,
     acknowledgedAt: parsed.acknowledged_at ?? undefined,
-    settledAt: parsed.settled_at ?? undefined
+    settledAt: parsed.settled_at ?? undefined,
+    rejectedAt: parsed.rejected_at ?? undefined,
+    rejectionCode: parsed.rejection_code ?? undefined
   };
+}
+
+export class RemoteExecutionActionRejectedError extends Error {
+  constructor(
+    readonly code: RemoteExecutionActionRejectionCode,
+    options?: ErrorOptions
+  ) {
+    super(code, options);
+    this.name = "RemoteExecutionActionRejectedError";
+  }
 }
 
 export class RemoteExecutionActionRepository {
@@ -137,7 +161,10 @@ export class RemoteExecutionActionRepository {
     return action;
   }
 
-  transition(actionId: string, next: RemoteExecutionActionState): RemoteExecutionActionRecord {
+  transition(
+    actionId: string,
+    next: Exclude<RemoteExecutionActionState, "rejected">
+  ): RemoteExecutionActionRecord {
     const parsedNext = remoteExecutionActionStateSchema.parse(next);
     return inWriteTransaction(this.database, () => {
       const action = this.getRequired(actionId);
@@ -161,10 +188,34 @@ export class RemoteExecutionActionRepository {
     });
   }
 
+  reject(
+    actionId: string,
+    rawCode: RemoteExecutionActionRejectionCode
+  ): RemoteExecutionActionRecord {
+    const code = remoteExecutionActionRejectionCodeSchema.parse(rawCode);
+    return inWriteTransaction(this.database, () => {
+      const action = this.getRequired(actionId);
+      if (action.state === "rejected") {
+        if (action.rejectionCode !== code) throw new Error("remote_action_rejection_conflict");
+        return action;
+      }
+      nextRemoteExecutionActionState(action.state, "rejected");
+      const updated = this.database
+        .prepare(
+          `UPDATE remote_execution_actions SET state='rejected',rejected_at=?,rejection_code=?
+           WHERE action_id=? AND state=?`
+        )
+        .run(this.clock().toISOString(), code, action.request.actionId, action.state);
+      if (updated.changes !== 1) throw new Error("remote_action_state_conflict");
+      return this.getRequired(action.request.actionId);
+    });
+  }
+
   listUnsettled(): RemoteExecutionActionRecord[] {
     return this.database
       .prepare(
-        "SELECT * FROM remote_execution_actions WHERE state<>'settled' ORDER BY created_at,action_id"
+        `SELECT * FROM remote_execution_actions
+         WHERE state IN ('recorded','delivered','acknowledged') ORDER BY created_at,action_id`
       )
       .all()
       .map(toRecord);
@@ -191,7 +242,8 @@ export class RemoteExecutionActionRepository {
     const rows = this.database
       .prepare(
         `SELECT action_id FROM remote_execution_actions
-         WHERE dispatch_id=? AND execution_attempt_id=? AND state<>'settled'
+         WHERE dispatch_id=? AND execution_attempt_id=?
+           AND state IN ('recorded','delivered','acknowledged')
          ORDER BY created_at,action_id`
       )
       .all(input.dispatchId, input.executionAttemptId);
@@ -228,12 +280,24 @@ export class RemoteExecutionActionService {
 
   async execute(rawRequest: unknown): Promise<RemoteExecutionActionRecord> {
     const action = this.actions.record(rawRequest);
+    if (action.state === "rejected") {
+      if (!action.rejectionCode) throw new Error("remote_action_row_rejection_mismatch");
+      throw new RemoteExecutionActionRejectedError(action.rejectionCode);
+    }
     if (action.state === "settled" || action.state === "delivered") return action;
     const recovered = await this.application.recover?.(action.request);
     if (recovered) return this.actions.transition(action.request.actionId, recovered);
     const snapshot = await this.application.snapshot(action.request);
     const decision = decideRemoteExecutionAction(action.request, snapshot);
-    const next = await this.application.apply(action.request, decision);
+    let next: "delivered" | "settled";
+    try {
+      next = await this.application.apply(action.request, decision);
+    } catch (error) {
+      if (error instanceof RemoteExecutionActionRejectedError) {
+        this.actions.reject(action.request.actionId, error.code);
+      }
+      throw error;
+    }
     await this.application.afterApply?.(action.request);
     return this.actions.transition(action.request.actionId, next);
   }

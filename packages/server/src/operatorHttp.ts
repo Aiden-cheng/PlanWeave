@@ -4,6 +4,7 @@ import { z } from "zod";
 import { OperatorTokenRegistry, type OperatorPrincipal } from "./operatorAuth.js";
 import { serverReadinessSchema, type ServerReadiness } from "./readiness.js";
 import { DispatchAssignmentError } from "./work/dispatchIntegration.js";
+import { RemoteExecutionActionRejectedError } from "./remoteExecutionActions.js";
 
 const MAX_OPERATOR_BODY_BYTES = 64 * 1024;
 
@@ -169,6 +170,9 @@ function query(url: URL, allowed: readonly string[]): Record<string, string | un
 
 function safeError(error: unknown): { status: number; code: string } {
   if (error instanceof z.ZodError) return { status: 400, code: "operator_request_invalid" };
+  if (error instanceof RemoteExecutionActionRejectedError) {
+    return { status: 409, code: error.code };
+  }
   if (error instanceof DispatchAssignmentError) {
     if (error.code === "work_revision_conflict" || error.code === "work_dispatch_host_mismatch") {
       return { status: 409, code: error.code };

@@ -695,9 +695,10 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
     const reservationCount = fixture.server.database
       .prepare("SELECT COUNT(*) AS count FROM host_capacity_reservations")
       .get()?.count;
+    const actionId = `retry-deny-${targetKind}-action`;
     await expect(
       fixture.coordination.coordinator.executeAction({
-        actionId: `retry-deny-${targetKind}-action`,
+        actionId,
         operationId: interrupted.id,
         dispatchId: interrupted.dispatchId,
         executionAttemptId: interrupted.executionAttemptId,
@@ -710,6 +711,15 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
       })
     ).rejects.toMatchObject({ code: "work_not_agent_assigned" });
 
+    expect(fixture.coordination.actions.getRequired(actionId)).toMatchObject({
+      state: "rejected",
+      rejectionCode: "work_not_agent_assigned"
+    });
+    expect(fixture.coordination.actions.getRequired(actionId).rejectedAt).toBeDefined();
+    expect(fixture.coordination.actions.listUnsettled()).not.toContainEqual(
+      expect.objectContaining({ request: expect.objectContaining({ actionId }) })
+    );
+
     const unchanged = fixture.coordination.operations.getRequired(dispatched.operation.id);
     expect(unchanged.dispatchId).toBe(interrupted.dispatchId);
     expect(unchanged.executionAttemptId).toBe(interrupted.executionAttemptId);
@@ -719,6 +729,37 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
         .prepare("SELECT COUNT(*) AS count FROM host_capacity_reservations")
         .get()?.count
     ).toBe(reservationCount);
+
+    fixture.assignmentService.updateAssignment({
+      projectId: fixture.locator.projectId,
+      workItem: fixture.blockItem,
+      target: { kind: "exact_host", hostId: hostA.id },
+      expectedRevision: 2,
+      actor: fixture.ownerContext
+    });
+    const restarted = fixture.rebuildCoordination();
+    await expect(restarted.coordinator.reconcileActions()).resolves.toEqual([]);
+    await expect(
+      restarted.coordinator.executeAction({
+        actionId,
+        operationId: interrupted.id,
+        dispatchId: interrupted.dispatchId,
+        executionAttemptId: interrupted.executionAttemptId,
+        expectedAttemptVersion: interrupted.attempt.stateVersion,
+        kind: "retry_new_attempt",
+        priorLeaseId: dispatch.leaseId,
+        newDispatchId: `dispatch-retry-deny-${targetKind}-2`,
+        newExecutionAttemptId: `attempt-retry-deny-${targetKind}-2`,
+        reason: `retry should fail closed after ${targetKind} assignment`
+      })
+    ).rejects.toMatchObject({ code: "work_not_agent_assigned" });
+    expect(
+      fixture.server.database
+        .prepare(
+          "SELECT COUNT(*) AS count FROM remote_execution_attempts WHERE execution_attempt_id=?"
+        )
+        .get(`attempt-retry-deny-${targetKind}-2`)?.count
+    ).toBe(0);
   });
 
   it("recovers null host_selection on reenter without blocking and persists a fresh snapshot", async () => {

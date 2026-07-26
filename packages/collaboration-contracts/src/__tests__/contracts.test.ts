@@ -71,6 +71,7 @@ describe("collaboration-contracts", () => {
 
   it("validates remote operation observation and action wire shapes", async () => {
     const {
+      remoteActionViewSchema,
       remoteDispatchWireCommandSchema,
       remoteExecutionActionWireRequestSchema,
       remoteOperationObservationSchema
@@ -114,5 +115,27 @@ describe("collaboration-contracts", () => {
         reason: "stop"
       }).kind
     ).toBe("cancel");
+    const rejectedAction = {
+      request: {
+        kind: "cancel",
+        actionId: "a1",
+        operationId: "op-1",
+        dispatchId: "dispatch-1",
+        executionAttemptId: "attempt-1",
+        expectedAttemptVersion: 0,
+        leaseId: "lease-1",
+        reason: "stop"
+      },
+      state: "rejected",
+      createdAt: "2030-01-01T00:00:00.000Z"
+    } as const;
+    expect(() => remoteActionViewSchema.parse(rejectedAction)).toThrow();
+    expect(
+      remoteActionViewSchema.parse({
+        ...rejectedAction,
+        rejectedAt: "2030-01-01T00:00:01.000Z",
+        rejectionCode: "work_not_agent_assigned"
+      }).state
+    ).toBe("rejected");
   });
 });

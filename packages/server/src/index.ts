@@ -135,6 +135,7 @@ export {
 } from "./remoteOperations.js";
 export {
   RemoteExecutionActionRepository,
+  RemoteExecutionActionRejectedError,
   RemoteExecutionActionService,
   type RemoteExecutionActionApplicationPort,
   type RemoteExecutionActionRecord
@@ -142,10 +143,12 @@ export {
 export {
   decideRemoteExecutionAction,
   nextRemoteExecutionActionState,
+  remoteExecutionActionRejectionCodeSchema,
   remoteExecutionActionRequestSchema,
   remoteExecutionActionStateSchema,
   type RemoteExecutionActionDecision,
   type RemoteExecutionActionRequest,
+  type RemoteExecutionActionRejectionCode,
   type RemoteExecutionActionState,
   type RemoteExecutionLifecycleSnapshot
 } from "./remoteExecutionLifecycle.js";

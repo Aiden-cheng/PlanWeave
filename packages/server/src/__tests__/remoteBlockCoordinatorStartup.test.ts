@@ -165,14 +165,14 @@ class StartupHarness {
     return { ...this.locator, blockRef: "T-001#B-001", idempotencyKey };
   }
 
-  assign(blockRef: string, target: AssignmentTarget): void {
+  assign(blockRef: string, target: AssignmentTarget, expectedRevision = 0): void {
     new WorkAssignmentRepository(this.requireServer().database).applyCasUpdate({
-      expectedRevision: 0,
+      expectedRevision,
       record: {
         projectId: this.locator.projectId,
         workItem: { kind: "block", canvasId: this.locator.canvasId, blockRef },
         target,
-        revision: 1,
+        revision: expectedRevision + 1,
         updatedBy: { kind: "system", id: "startup-test" },
         updatedAt: "2030-01-01T00:00:00.000Z"
       }
@@ -210,6 +210,99 @@ function eventCount(database: PlanweaveServer["database"], table: string, type: 
 }
 
 describe("RemoteBlockCoordinator startup reconciliation", () => {
+  it("does not replay a rejected retry and still reconciles other pending work", async () => {
+    const harness = await StartupHarness.create({ includeSecondTask: true });
+    const coordination = harness.requireCoordination();
+    const legalPending = await coordination.coordinator.dispatch({
+      ...harness.locator,
+      blockRef: "T-002#B-001",
+      idempotencyKey: "pending-beside-rejected-retry"
+    });
+    expect(legalPending.status).toBe("awaiting_host");
+
+    const hostId = harness.registerHost();
+    harness.assign("T-001#B-001", { kind: "exact_host", hostId });
+    const denied = await coordination.coordinator.dispatch({
+      ...harness.request("retry-rejected-before-startup"),
+      expectedAssignmentRevision: 1
+    });
+    const dispatch = coordination.dispatches.getRequired(denied.operation.dispatchId);
+    coordination.dispatches.accept(
+      hostId,
+      "retry-rejected-accepted",
+      dispatch.id,
+      dispatch.leaseId,
+      dispatch.executionAttemptId
+    );
+    coordination.dispatches.interrupt(hostId, "retry-rejected-interrupted", {
+      type: "dispatch.interrupted",
+      protocolVersion: 1,
+      messageId: "retry-rejected-interrupted",
+      dispatchId: dispatch.id,
+      leaseId: dispatch.leaseId,
+      executionAttemptId: dispatch.executionAttemptId,
+      reason: "acp_session_lost",
+      resumable: false
+    });
+    const lease = coordination.reservations.getRequired(dispatch.leaseId);
+    coordination.reservations.release({
+      leaseId: lease.leaseId,
+      fencingToken: lease.fencingToken,
+      expectedVersion: lease.version,
+      reason: "expired"
+    });
+    await coordination.coordinator.reenter(denied.operation.id);
+
+    harness.assign("T-001#B-001", { kind: "unassigned" }, 1);
+    const interrupted = coordination.operations.getRequired(denied.operation.id);
+    const action = {
+      actionId: "retry-rejected-startup-action",
+      operationId: interrupted.id,
+      dispatchId: interrupted.dispatchId,
+      executionAttemptId: interrupted.executionAttemptId,
+      expectedAttemptVersion: interrupted.attempt.stateVersion,
+      kind: "retry_new_attempt",
+      priorLeaseId: dispatch.leaseId,
+      newDispatchId: "dispatch-rejected-must-not-replay",
+      newExecutionAttemptId: "attempt-rejected-must-not-replay",
+      reason: "retry denied before server restart"
+    } as const;
+    await expect(coordination.coordinator.executeAction(action)).rejects.toMatchObject({
+      code: "work_not_agent_assigned"
+    });
+    expect(coordination.actions.getRequired(action.actionId)).toMatchObject({
+      state: "rejected",
+      rejectionCode: "work_not_agent_assigned"
+    });
+
+    harness.assign("T-001#B-001", { kind: "exact_host", hostId }, 2);
+    const restarted = await harness.start();
+
+    expect(restarted.actions.getRequired(action.actionId)).toMatchObject({
+      state: "rejected",
+      rejectionCode: "work_not_agent_assigned"
+    });
+    expect(restarted.actions.listUnsettled()).not.toContainEqual(
+      expect.objectContaining({ request: expect.objectContaining({ actionId: action.actionId }) })
+    );
+    expect(restarted.operations.getRequired(denied.operation.id)).toMatchObject({
+      dispatchId: interrupted.dispatchId,
+      executionAttemptId: interrupted.executionAttemptId
+    });
+    expect(
+      harness
+        .requireServer()
+        .database.prepare(
+          "SELECT COUNT(*) AS count FROM remote_execution_attempts WHERE execution_attempt_id=?"
+        )
+        .get(action.newExecutionAttemptId)?.count
+    ).toBe(0);
+    expect(restarted.operations.getRequired(legalPending.operation.id)).toMatchObject({
+      state: "activated",
+      attempt: { hostId }
+    });
+  });
+
   it.each([
     "human",
     "unassigned"

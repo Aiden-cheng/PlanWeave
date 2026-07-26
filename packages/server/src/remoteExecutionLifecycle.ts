@@ -86,11 +86,17 @@ export const remoteExecutionActionStateSchema = z.enum([
   "recorded",
   "delivered",
   "acknowledged",
-  "settled"
+  "settled",
+  "rejected"
 ]);
+
+export const remoteExecutionActionRejectionCodeSchema = z.enum(["work_not_agent_assigned"]);
 
 export type RemoteExecutionActionRequest = z.infer<typeof remoteExecutionActionRequestSchema>;
 export type RemoteExecutionActionState = z.infer<typeof remoteExecutionActionStateSchema>;
+export type RemoteExecutionActionRejectionCode = z.infer<
+  typeof remoteExecutionActionRejectionCodeSchema
+>;
 
 export type RemoteExecutionLifecycleSnapshot = {
   operationId: string;
@@ -213,10 +219,11 @@ export function nextRemoteExecutionActionState(
   const allowed: Readonly<
     Record<RemoteExecutionActionState, readonly RemoteExecutionActionState[]>
   > = {
-    recorded: ["delivered", "settled"],
+    recorded: ["delivered", "settled", "rejected"],
     delivered: ["acknowledged", "settled"],
     acknowledged: ["settled"],
-    settled: []
+    settled: [],
+    rejected: []
   };
   if (!allowed[current].includes(next)) throw new Error("remote_action_state_transition_invalid");
   return next;

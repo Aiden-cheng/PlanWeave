@@ -1119,6 +1119,67 @@ CREATE INDEX idx_activity_projection_outbox_pending
   WHERE projected_at IS NULL;
 `;
 
+function ensureRemoteActionRejectionState(database: SqliteDatabase): void {
+  if (!tableExists(database, "remote_execution_actions")) return;
+  const hasRejectedAt = database
+    .prepare(
+      "SELECT 1 AS present FROM pragma_table_info('remote_execution_actions') WHERE name='rejected_at'"
+    )
+    .get();
+  if (hasRejectedAt) return;
+  database.exec(`
+    CREATE TABLE remote_execution_actions_v22 (
+      action_id TEXT PRIMARY KEY,
+      operation_id TEXT NOT NULL REFERENCES remote_operations(id),
+      dispatch_id TEXT NOT NULL,
+      execution_attempt_id TEXT NOT NULL REFERENCES remote_execution_attempts(execution_attempt_id),
+      kind TEXT NOT NULL CHECK(kind IN ('resume_same_session','retry_new_attempt','fail','block','cancel')),
+      request_fingerprint TEXT NOT NULL CHECK(
+        length(request_fingerprint)=64 AND request_fingerprint NOT GLOB '*[^a-f0-9]*'
+      ),
+      request_json TEXT NOT NULL,
+      state TEXT NOT NULL CHECK(state IN ('recorded','delivered','acknowledged','settled','rejected')),
+      created_at TEXT NOT NULL,
+      delivered_at TEXT,
+      acknowledged_at TEXT,
+      settled_at TEXT,
+      rejected_at TEXT,
+      rejection_code TEXT CHECK(
+        rejection_code IS NULL OR rejection_code='work_not_agent_assigned'
+      ),
+      CHECK(
+        (state='recorded' AND delivered_at IS NULL AND acknowledged_at IS NULL
+          AND settled_at IS NULL AND rejected_at IS NULL AND rejection_code IS NULL)
+        OR (state='delivered' AND delivered_at IS NOT NULL AND acknowledged_at IS NULL
+          AND settled_at IS NULL AND rejected_at IS NULL AND rejection_code IS NULL)
+        OR (state='acknowledged' AND delivered_at IS NOT NULL AND acknowledged_at IS NOT NULL
+          AND settled_at IS NULL AND rejected_at IS NULL AND rejection_code IS NULL)
+        OR (state='settled' AND settled_at IS NOT NULL
+          AND rejected_at IS NULL AND rejection_code IS NULL)
+        OR (state='rejected' AND delivered_at IS NULL AND acknowledged_at IS NULL
+          AND settled_at IS NULL AND rejected_at IS NOT NULL AND rejection_code IS NOT NULL)
+      )
+    );
+
+    INSERT INTO remote_execution_actions_v22(
+      action_id,operation_id,dispatch_id,execution_attempt_id,kind,
+      request_fingerprint,request_json,state,created_at,delivered_at,acknowledged_at,settled_at,
+      rejected_at,rejection_code
+    )
+    SELECT
+      action_id,operation_id,dispatch_id,execution_attempt_id,kind,
+      request_fingerprint,request_json,state,created_at,delivered_at,acknowledged_at,settled_at,
+      NULL,NULL
+    FROM remote_execution_actions;
+
+    DROP INDEX idx_remote_execution_actions_operation_state;
+    DROP TABLE remote_execution_actions;
+    ALTER TABLE remote_execution_actions_v22 RENAME TO remote_execution_actions;
+    CREATE INDEX idx_remote_execution_actions_operation_state
+      ON remote_execution_actions(operation_id,state,created_at);
+  `);
+}
+
 function ensureHostSelectionColumn(database: SqliteDatabase): void {
   if (!tableExists(database, "remote_operations")) return;
   const hasColumn = database
@@ -1291,7 +1352,13 @@ const migrations: readonly Migration[] = [
   { version: 18, sql: migration18, after: ensureHostSelectionColumn },
   { version: 19, sql: migration19 },
   { version: 20, sql: migration20 },
-  { version: 21, sql: "SELECT 1;", after: dropDispatchPackageRefColumn }
+  { version: 21, sql: "SELECT 1;", after: dropDispatchPackageRefColumn },
+  {
+    version: 22,
+    sql: "SELECT 1;",
+    disableForeignKeys: true,
+    after: ensureRemoteActionRejectionState
+  }
 ];
 
 export const latestCentralSchemaVersion = Math.max(

@@ -224,9 +224,14 @@ export const remoteExecutionActionStateSchema = z.enum([
   "recorded",
   "delivered",
   "acknowledged",
-  "settled"
+  "settled",
+  "rejected"
 ]);
 export type RemoteExecutionActionState = z.infer<typeof remoteExecutionActionStateSchema>;
+export const remoteExecutionActionRejectionCodeSchema = z.enum(["work_not_agent_assigned"]);
+export type RemoteExecutionActionRejectionCode = z.infer<
+  typeof remoteExecutionActionRejectionCodeSchema
+>;
 
 export const remoteActionViewSchema = z
   .object({
@@ -235,9 +240,21 @@ export const remoteActionViewSchema = z
     createdAt: timestampSchema,
     deliveredAt: timestampSchema.optional(),
     acknowledgedAt: timestampSchema.optional(),
-    settledAt: timestampSchema.optional()
+    settledAt: timestampSchema.optional(),
+    rejectedAt: timestampSchema.optional(),
+    rejectionCode: remoteExecutionActionRejectionCodeSchema.optional()
   })
-  .strict();
+  .strict()
+  .superRefine((action, context) => {
+    const hasRejection = action.rejectedAt !== undefined || action.rejectionCode !== undefined;
+    if (
+      (action.state === "rejected" &&
+        (action.rejectedAt === undefined || action.rejectionCode === undefined)) ||
+      (action.state !== "rejected" && hasRejection)
+    ) {
+      context.addIssue({ code: "custom", message: "remote_action_rejection_state_mismatch" });
+    }
+  });
 export type RemoteActionView = z.infer<typeof remoteActionViewSchema>;
 
 export const remoteEventReplaySchema = z

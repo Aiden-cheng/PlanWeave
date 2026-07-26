@@ -105,7 +105,7 @@ describe("server lifecycle", () => {
     initialized.close();
 
     const rolledBack = await openServerDatabase(databasePath, 5_000);
-    rolledBack.prepare("DELETE FROM schema_migrations WHERE version=?").run(21);
+    rolledBack.prepare("DELETE FROM schema_migrations WHERE version>=?").run(21);
     // Reintroduce historical column as a v20 residual for upgrade coverage.
     const columns = rolledBack.prepare("PRAGMA table_info(dispatches)").all();
     if (!columns.some((row) => row.name === "package_ref")) {
