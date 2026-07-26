@@ -704,6 +704,173 @@ async function runRendererManualSmoke(window: BrowserWindow): Promise<Record<str
   `) as Promise<Record<string, unknown>>;
 }
 
+async function runLiveCollaborationSmoke(window: BrowserWindow): Promise<Record<string, unknown>> {
+  const serverBaseUrl = process.env.PLANWEAVE_DESKTOP_SMOKE_COLLABORATION_SERVER_URL;
+  const projectId = process.env.PLANWEAVE_DESKTOP_SMOKE_COLLABORATION_PROJECT_ID;
+  const invitationToken = process.env.PLANWEAVE_DESKTOP_SMOKE_COLLABORATION_INVITATION_TOKEN;
+  if (!serverBaseUrl || !projectId || !invitationToken) {
+    throw new Error("Live collaboration smoke fixture configuration is incomplete.");
+  }
+
+  // Exercise the real renderer control with a real Chromium keyboard event before
+  // the form invokes the typed preload bridge methods.
+  await window.webContents.executeJavaScript(`
+    (() => {
+      const trigger = document.querySelector('[data-testid="people-presence-trigger"]');
+      if (!(trigger instanceof HTMLElement)) {
+        throw new Error("People presence trigger was not rendered.");
+      }
+      trigger.focus();
+      return true;
+    })()
+  `);
+  window.webContents.sendInputEvent({ type: "keyDown", keyCode: "ENTER" });
+  window.webContents.sendInputEvent({ type: "keyUp", keyCode: "ENTER" });
+  await window.webContents.executeJavaScript(`
+    (() => {
+      if (document.querySelector('[data-testid="people-connect-form"]')) return true;
+      const trigger = document.querySelector('[data-testid="people-presence-trigger"]');
+      if (!(trigger instanceof HTMLElement)) {
+        throw new Error("People presence trigger disappeared before opening the panel.");
+      }
+      trigger.click();
+      return true;
+    })()
+  `);
+
+  const connection = await window.webContents.executeJavaScript(`
+    (async () => {
+      const waitFor = async (predicate, label) => {
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const value = predicate();
+          if (value) return value;
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        throw new Error("Timed out waiting for " + label);
+      };
+      const visible = (element) => {
+        if (!(element instanceof HTMLElement)) return false;
+        const style = window.getComputedStyle(element);
+        return style.visibility !== "hidden" && style.display !== "none" && element.offsetParent !== null;
+      };
+      const setInput = (testId, value) => {
+        const input = document.querySelector('[data-testid="' + testId + '"]');
+        if (!(input instanceof HTMLInputElement)) throw new Error("Missing collaboration input: " + testId);
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        setter?.call(input, value);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      };
+      const click = async (testId) => {
+        const target = await waitFor(() => {
+          const element = document.querySelector('[data-testid="' + testId + '"]');
+          return element && visible(element) ? element : null;
+        }, testId);
+        target.focus?.();
+        target.click();
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      };
+
+      await waitFor(
+        () => document.querySelector('[data-testid="people-connect-form"]'),
+        "People connect form"
+      );
+      setInput("people-connect-display-name", "Desktop smoke member");
+      setInput("people-connect-server-url", ${JSON.stringify(serverBaseUrl)});
+      setInput("people-connect-project-id", ${JSON.stringify(projectId)});
+      setInput("people-connect-invitation-token", ${JSON.stringify(invitationToken)});
+      const allowInsecure = document.querySelector('[data-testid="people-connect-allow-insecure"]');
+      if (!(allowInsecure instanceof HTMLInputElement)) throw new Error("Missing insecure transport control");
+      if (!allowInsecure.checked) allowInsecure.click();
+      await click("people-connect-submit");
+
+      const panel = await waitFor(
+        () => {
+          const element = document.querySelector('[data-testid="people-panel"]');
+          return element instanceof HTMLElement && element.getAttribute("data-mode") === "ready"
+            ? element
+            : null;
+        },
+        "connected People panel"
+      );
+      const memberRows = [...document.querySelectorAll('[data-testid="people-member-row"]')];
+      if (memberRows.length < 2) throw new Error("Connected People panel did not show owner and member rows.");
+      const status = await window.planweaveCollaboration?.getCollaborationStatus();
+      if (!status || !["connected", "ready"].includes(status.session.phase)) {
+        throw new Error("Typed collaboration bridge did not reach a connected session.");
+      }
+      return {
+        panelMode: panel.getAttribute("data-mode"),
+        memberCount: memberRows.length,
+        sessionPhase: status.session.phase
+      };
+    })()
+  `) as Record<string, unknown>;
+
+  const collaborationResult = await window.webContents.executeJavaScript(`
+    (async () => {
+      const waitFor = async (predicate, label) => {
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const value = predicate();
+          if (value) return value;
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        throw new Error("Timed out waiting for " + label);
+      };
+      const workItem = { kind: "block", canvasId: "default", blockRef: "T-001#B-001" };
+      const collaboration = window.planweaveCollaboration;
+      if (!collaboration) throw new Error("Inspector collaboration bridge is unavailable.");
+      let observerEventCount = 0;
+      let firstObserverEventAt = null;
+      const stopObserving = collaboration.onCollaborationObserverSignal((signal) => {
+        if (signal.type === "human.observer.event") {
+          observerEventCount += 1;
+          firstObserverEventAt ??= performance.now();
+        }
+      });
+      const burstStartedAt = performance.now();
+      const bodies = Array.from({ length: 6 }, (_, index) =>
+        "Desktop smoke live collaboration burst " + index
+      );
+      for (const body of bodies) {
+        await collaboration.createCollaborationComment({ workItem, body });
+      }
+      await waitFor(
+        () => observerEventCount > 0,
+        "human observer event after comment burst"
+      );
+      const comments = await collaboration.listCollaborationComments({ workItem, limit: 50 });
+      const activity = await collaboration.listCollaborationActivity({
+        workItem,
+        limit: 50
+      });
+      if (comments.items.length < bodies.length || activity.items.length < bodies.length) {
+        throw new Error("Live collaboration bridge did not expose the comment/activity mutation.");
+      }
+      const observerRenderMs = firstObserverEventAt === null
+        ? null
+        : Math.round(performance.now() - firstObserverEventAt);
+      stopObserving();
+      return {
+        commentCount: comments.items.length,
+        activityCount: activity.items.length,
+        observerEventCount,
+        observerRenderMs,
+        burstDurationMs: Math.round(performance.now() - burstStartedAt),
+        commentsVisible: comments.items.length >= bodies.length,
+        activityVisible: activity.items.length >= bodies.length
+      };
+    })()
+  `) as Record<string, unknown>;
+  return {
+    ...connection,
+    ...collaborationResult,
+    liveServer: true,
+    typedBridge: true,
+    rendererObserverSignal: true
+  };
+}
+
 async function writeExternalPromptSmokeChange(): Promise<void> {
   const promptPath = process.env.PLANWEAVE_DESKTOP_SMOKE_EXTERNAL_PROMPT_PATH;
   if (!promptPath) {
@@ -756,6 +923,13 @@ export async function runSmokeCheck(window: BrowserWindow): Promise<void> {
         await reloadSmokeRenderer(window);
         await writeExternalPromptSmokeChange();
         rendererManual = await runRendererManualSmoke(window);
+        const liveCollaboration =
+          process.env.PLANWEAVE_DESKTOP_SMOKE_COLLABORATION_SERVER_URL &&
+          process.env.PLANWEAVE_DESKTOP_SMOKE_COLLABORATION_PROJECT_ID &&
+          process.env.PLANWEAVE_DESKTOP_SMOKE_COLLABORATION_INVITATION_TOKEN
+            ? await runLiveCollaborationSmoke(window)
+            : null;
+        workflow = { ...workflow, liveCollaboration };
       } catch (error) {
         console.error(
           JSON.stringify({
