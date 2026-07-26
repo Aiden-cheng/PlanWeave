@@ -192,16 +192,17 @@ describe("Agent Host transport load and recovery boundaries", () => {
     expect(delays).toEqual(Array(8).fill(1));
   });
 
-  it("closes the connection when an inbound burst exceeds the queue budget", async () => {
+  it("rejects only the over-budget delivery when an inbound burst exceeds the queue", async () => {
     const degraded = deferred<void>();
     const httpServer = createServer();
     httpServers.push(httpServer);
     const webSocketServer = new WebSocketServer({ server: httpServer });
     webSocketServers.push(webSocketServer);
     webSocketServer.on("connection", (socket) => {
+      let sequence = 0;
       socket.on("message", () => {
         socket.send(JSON.stringify(welcome()));
-        socket.send(JSON.stringify(delivery(1)));
+        socket.send(JSON.stringify(delivery(++sequence)));
       });
     });
     const port = await listen(httpServer);
@@ -216,7 +217,8 @@ describe("Agent Host transport load and recovery boundaries", () => {
     client.start();
 
     await degraded.promise;
-    expect(execute).not.toHaveBeenCalled();
+    expect(execute).toHaveBeenCalledOnce();
+    expect(execute.mock.calls[0]?.[0]).toMatchObject({ dispatchId: "dispatch-load-001" });
   });
 
   it("rejects a frame above maxPayloadBytes without invoking the executor", async () => {
