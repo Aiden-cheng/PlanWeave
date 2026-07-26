@@ -134,6 +134,7 @@ describe("release gate checklist and evaluation", () => {
       JSON.stringify({
         version: "planweave.real-acp-host-smoke/v1",
         result: "skipped",
+        generatedAt: new Date().toISOString(),
         preflight: { profileId: "codex-acp", protocolVersion: 1, agentVersion: null }
       })
     );
@@ -142,6 +143,7 @@ describe("release gate checklist and evaluation", () => {
       JSON.stringify({
         version: "planweave.vps-authenticated-e2e/v1",
         result: "skipped",
+        generatedAt: new Date().toISOString(),
         environmentClass: "unavailable"
       })
     );
@@ -221,6 +223,79 @@ describe("release gate checklist and evaluation", () => {
     expect(report.tiers.find((t) => t.tierId === "local_real_acp_compatibility")).toMatchObject({
       status: "expired",
       countsAsPass: false
+    });
+  });
+
+  it("rejects live evidence without generatedAt and ignores file mtime for TTL", async () => {
+    const root = await tempDir();
+    const missingGeneratedAt = join(root, "no-generated-at.json");
+    const oldGeneratedAt = join(root, "old-generated-at.json");
+    await writeFile(
+      missingGeneratedAt,
+      JSON.stringify({
+        version: "planweave.real-acp-host-smoke/v1",
+        result: "passed",
+        preflight: { profileId: "codex-acp", protocolVersion: 1, agentVersion: "1.0.0" },
+        checks: {
+          preflightReady: true,
+          protocolNegotiated: true,
+          sessionCreated: true,
+          normalizedEvents: true,
+          terminalSucceeded: true,
+          artifactContract: true,
+          cancellationObserved: true,
+          cleanup: true,
+          noCliFallback: true
+        }
+      })
+    );
+    const old = new Date(Date.now() - 400 * 60 * 60 * 1000).toISOString();
+    await writeFile(
+      oldGeneratedAt,
+      JSON.stringify({
+        version: "planweave.real-acp-host-smoke/v1",
+        result: "passed",
+        generatedAt: old,
+        preflight: { profileId: "codex-acp", protocolVersion: 1, agentVersion: "1.0.0" },
+        checks: {
+          preflightReady: true,
+          protocolNegotiated: true,
+          sessionCreated: true,
+          normalizedEvents: true,
+          terminalSucceeded: true,
+          artifactContract: true,
+          cancellationObserved: true,
+          cleanup: true,
+          noCliFallback: true
+        }
+      })
+    );
+    // Freshen file mtime without changing generatedAt — must still expire.
+    const { utimes } = await import("node:fs/promises");
+    const now = new Date();
+    await utimes(oldGeneratedAt, now, now);
+
+    const missing = await buildReleaseGateReport({
+      realAcpEvidencePath: missingGeneratedAt,
+      agentHostVersion: "0.3.0",
+      protocolPackageVersion: "0.3.0"
+    });
+    expect(missing.tiers.find((t) => t.tierId === "local_real_acp_compatibility")).toMatchObject({
+      status: "invalid",
+      countsAsPass: false,
+      diagnostic: expect.stringMatching(/generatedAt required|mtime is not used/)
+    });
+
+    const stale = await buildReleaseGateReport({
+      realAcpEvidencePath: oldGeneratedAt,
+      agentHostVersion: "0.3.0",
+      protocolPackageVersion: "0.3.0",
+      now: new Date()
+    });
+    expect(stale.tiers.find((t) => t.tierId === "local_real_acp_compatibility")).toMatchObject({
+      status: "expired",
+      countsAsPass: false,
+      observedAt: old
     });
   });
 

@@ -111,6 +111,7 @@ export async function runLocalTlsFixture(options: {
   const base = (): VpsE2eEvidence =>
     ({
       version: "planweave.vps-authenticated-e2e/v1",
+      generatedAt: new Date().toISOString(),
       environmentClass: "local-tls-fixture",
       gateMode: options.gate.mode,
       profileId: "local-tls-fixture",

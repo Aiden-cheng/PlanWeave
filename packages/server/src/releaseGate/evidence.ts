@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { z } from "zod";
 import {
   PLANWEAVE_COMPATIBILITY_BOUNDS,
@@ -168,21 +168,22 @@ function notProvided(tierId: ReleaseGateTierId): TierEvaluation {
   };
 }
 
-async function readJsonFile(path: string): Promise<{ value: unknown; mtimeIso: string }> {
-  const [raw, fileStat] = await Promise.all([readFile(path, "utf8"), stat(path)]);
+async function readJsonFile(path: string): Promise<unknown> {
+  const raw = await readFile(path, "utf8");
   try {
-    return {
-      value: JSON.parse(raw) as unknown,
-      mtimeIso: fileStat.mtime.toISOString()
-    };
+    return JSON.parse(raw) as unknown;
   } catch {
     throw new Error(`release_gate_evidence_json_invalid:${path}`);
   }
 }
 
-function resolveObservedAt(explicit: string | null | undefined, mtimeIso: string): string {
-  if (explicit && Number.isFinite(Date.parse(explicit))) return explicit;
-  return mtimeIso;
+/**
+ * TTL uses only evidence.generatedAt written by the producer.
+ * File mtime is intentionally ignored so `touch` cannot freshen evidence.
+ */
+function resolveObservedAt(generatedAt: string | undefined): string | null {
+  if (!generatedAt || !Number.isFinite(Date.parse(generatedAt))) return null;
+  return generatedAt;
 }
 
 export async function evaluateDeterministicEvidence(
@@ -191,12 +192,12 @@ export async function evaluateDeterministicEvidence(
   const tierId = "deterministic_process_suite" as const;
   if (!path) return notProvided(tierId);
   try {
-    const { value: raw, mtimeIso } = await readJsonFile(path);
+    const raw = await readJsonFile(path);
     const schema = z
       .object({
         version: z.literal("planweave.release-gate.deterministic/v1"),
         result: tierResultSchema,
-        generatedAt: z.string().datetime().optional(),
+        generatedAt: z.string().datetime(),
         suite: z.string().min(1).max(256).optional(),
         exitCode: z.number().int().optional(),
         tests: z
@@ -216,7 +217,7 @@ export async function evaluateDeterministicEvidence(
         status: "invalid",
         countsAsPass: false,
         evidenceDigest: digestJson(raw),
-        diagnostic: "Deterministic evidence schema mismatch.",
+        diagnostic: "Deterministic evidence schema mismatch (generatedAt required; mtime is not used).",
         observedAt: null,
         environmentClass: "ci"
       };
@@ -245,7 +246,7 @@ export async function evaluateDeterministicEvidence(
       countsAsPass: countsAsPass(status),
       evidenceDigest: digestJson(parsed.data),
       diagnostic: status === "passed" ? null : `Deterministic suite result=${status}`,
-      observedAt: resolveObservedAt(parsed.data.generatedAt, mtimeIso),
+      observedAt: resolveObservedAt(parsed.data.generatedAt),
       environmentClass: "ci"
     };
   } catch (error) {
@@ -279,7 +280,7 @@ export async function evaluateRealAcpEvidence(
   const tierId = "local_real_acp_compatibility" as const;
   if (!path) return notProvided(tierId);
   try {
-    const { value: raw, mtimeIso } = await readJsonFile(path);
+    const raw = await readJsonFile(path);
     const schema = z
       .object({
         version: z.literal("planweave.real-acp-host-smoke/v1"),
@@ -293,7 +294,7 @@ export async function evaluateRealAcpEvidence(
           .passthrough()
           .optional(),
         checks: z.record(z.string(), z.unknown()).optional(),
-        generatedAt: z.string().datetime().optional()
+        generatedAt: z.string().datetime()
       })
       .passthrough();
     const parsed = schema.safeParse(raw);
@@ -304,7 +305,7 @@ export async function evaluateRealAcpEvidence(
         status: "invalid",
         countsAsPass: false,
         evidenceDigest: digestJson(raw),
-        diagnostic: "Real ACP evidence schema mismatch.",
+        diagnostic: "Real ACP evidence schema mismatch (generatedAt required; mtime is not used).",
         observedAt: null,
         environmentClass: "host-local"
       };
@@ -325,7 +326,7 @@ export async function evaluateRealAcpEvidence(
         );
       }
     }
-    const observedAt = resolveObservedAt(parsed.data.generatedAt, mtimeIso);
+    const observedAt = resolveObservedAt(parsed.data.generatedAt);
     if (parsed.data.result === "passed" && isExpired(observedAt, now)) {
       return {
         tierId,
@@ -378,7 +379,7 @@ export async function evaluateVpsEvidence(
   const tierId = "remote_authenticated_vps" as const;
   if (!path) return notProvided(tierId);
   try {
-    const { value: raw, mtimeIso } = await readJsonFile(path);
+    const raw = await readJsonFile(path);
     const schema = z
       .object({
         version: z.literal("planweave.vps-authenticated-e2e/v1"),
@@ -394,7 +395,7 @@ export async function evaluateVpsEvidence(
           .optional(),
         checks: z.record(z.string(), z.unknown()).optional(),
         identities: z.record(z.string(), z.unknown()).optional(),
-        generatedAt: z.string().datetime().optional()
+        generatedAt: z.string().datetime()
       })
       .passthrough();
     const parsed = schema.safeParse(raw);
@@ -405,12 +406,12 @@ export async function evaluateVpsEvidence(
         status: "invalid",
         countsAsPass: false,
         evidenceDigest: digestJson(raw),
-        diagnostic: "VPS e2e evidence schema mismatch.",
+        diagnostic: "VPS e2e evidence schema mismatch (generatedAt required; mtime is not used).",
         observedAt: null,
         environmentClass: null
       };
     }
-    const observedAt = resolveObservedAt(parsed.data.generatedAt, mtimeIso);
+    const observedAt = resolveObservedAt(parsed.data.generatedAt);
     if (parsed.data.environmentClass !== "remote-vps") {
       return {
         tierId,

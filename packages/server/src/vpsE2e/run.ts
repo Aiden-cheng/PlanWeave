@@ -24,6 +24,7 @@ function skippedEvidence(
 ): VpsE2eEvidence {
   return {
     version: "planweave.vps-authenticated-e2e/v1",
+    generatedAt: new Date().toISOString(),
     environmentClass: "unavailable",
     gateMode: gate.mode,
     profileId: gate.profileId,

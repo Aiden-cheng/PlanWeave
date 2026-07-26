@@ -62,6 +62,7 @@ export async function runRemoteVpsScenario(options: {
 
   const base = (partial: Partial<VpsE2eEvidence> = {}): VpsE2eEvidence => ({
     version: "planweave.vps-authenticated-e2e/v1",
+    generatedAt: new Date().toISOString(),
     environmentClass: "remote-vps",
     gateMode: options.gate.mode,
     profileId: "remote-vps",

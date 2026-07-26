@@ -646,7 +646,7 @@ node scripts/planweave-release-gate.mjs --checklist
 - 使用 `enroll --replace` 轮换 Host 凭据，并撤销旧 grant/host。
 - 收集 live 证据后清理临时 harness，并撤销一次性 enrollment 材料。
 
-**证据规则：** live 证据 14 天后过期（`generatedAt` 或文件 mtime）。运维拥有一次性 VPS 与 Host 本地 provider 登录；CI 只拥有确定性套件。门禁输入为证据路径与 package 版本；输出为含层级状态、digest、兼容检查、回滚清单与 `releaseReady.{ci,supportedVersionRelease,preRelease}` 的 JSON 报告。
+**证据规则：** live 证据 14 天后过期，仅以生产者写入的 `generatedAt` 为准（忽略文件 mtime）。运维拥有一次性 VPS 与 Host 本地 provider 登录；CI 只拥有确定性套件。门禁输入为证据路径与 package 版本；输出为含层级状态、digest、兼容检查、回滚清单与 `releaseReady.{ci,supportedVersionRelease,preRelease}` 的 JSON 报告。
 
 维护者验证记录（不是最终用户指南；可能列出残余产品缺口，且不得把未完成的 live 证据当作通过）：
 

@@ -46,6 +46,8 @@ export type RealAcpSmokeStageResult = {
 
 export type RealAcpSmokeEvidence = {
   version: "planweave.real-acp-host-smoke/v1";
+  /** Authoritative evidence timestamp for release-gate TTL; never derived from file mtime. */
+  generatedAt: string;
   gateMode: RealAcpGate["mode"];
   preflight: RealAcpPreflightEvidence;
   hostVersion: string;
@@ -324,6 +326,7 @@ export async function runRealAcpSmoke(options: {
     if (preflight.status === "precondition") {
       const evidence: RealAcpSmokeEvidence = {
         version: "planweave.real-acp-host-smoke/v1",
+        generatedAt: new Date().toISOString(),
         gateMode: options.gate.mode,
         preflight: preflight.evidence ?? emptyEvidence(preflight.precondition.kind),
         hostVersion: agentHostPackageVersion,
@@ -378,6 +381,7 @@ export async function runRealAcpSmoke(options: {
     const passed = Object.values(checks).every(Boolean);
     const evidence: RealAcpSmokeEvidence = {
       version: "planweave.real-acp-host-smoke/v1",
+      generatedAt: new Date().toISOString(),
       gateMode: options.gate.mode,
       preflight: preflight.evidence,
       hostVersion: agentHostPackageVersion,

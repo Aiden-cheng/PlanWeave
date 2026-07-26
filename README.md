@@ -646,7 +646,7 @@ node scripts/planweave-release-gate.mjs --checklist
 - Rotate Host credentials with `enroll --replace` and revoke prior grants/hosts.
 - Clean up disposable harness state and revoke one-time enrollment materials after live evidence collection.
 
-**Evidence rules:** live evidence expires after 14 days (file mtime or `generatedAt`). Operators own disposable VPS access and Host-local provider login; CI owns only the deterministic suite. Gate inputs are evidence paths + package versions; outputs are a JSON report with tier status, digests, compatibility checks, rollback checklist, and `releaseReady.{ci,supportedVersionRelease,preRelease}`.
+**Evidence rules:** live evidence expires after 14 days based on producer `generatedAt` only (file mtime is ignored). Operators own disposable VPS access and Host-local provider login; CI owns only the deterministic suite. Gate inputs are evidence paths + package versions; outputs are a JSON report with tier status, digests, compatibility checks, rollback checklist, and `releaseReady.{ci,supportedVersionRelease,preRelease}`.
 
 Maintainer verification records (not end-user guides; may list residual product gaps without claiming unpublished live evidence as a pass):
 

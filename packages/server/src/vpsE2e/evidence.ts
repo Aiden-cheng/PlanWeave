@@ -32,6 +32,8 @@ export type VpsE2eIdentityEvidence = {
 
 export type VpsE2eEvidence = {
   version: "planweave.vps-authenticated-e2e/v1";
+  /** Authoritative evidence timestamp for release-gate TTL; never derived from file mtime. */
+  generatedAt: string;
   environmentClass: VpsE2eEnvironmentClass;
   gateMode: VpsE2eGate["mode"];
   profileId: VpsE2eGate["profileId"];

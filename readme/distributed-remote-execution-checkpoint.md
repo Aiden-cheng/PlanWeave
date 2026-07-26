@@ -346,7 +346,7 @@ Rollback checklist: all items `status=documented`, `operatorMustConfirm=true` (s
 ### Residual risks (accepted for CI readiness; not cleared)
 
 1. local-tls-fixture uses **mock ACP**, not a live provider agent.
-2. Live evidence formats may lack first-class `generatedAt` on some producers (mtime fallback for 14-day expiry) — deterministic evidence includes `generatedAt`.
+2. Live evidence requires producer `generatedAt` for the 14-day expiry window; file mtime is not used.
 3. Package major matrix is evaluate-time package.json versions, not wire hello package fields (wire is protocol version only).
 4. HTTP status mapping for some fail-closed domain errors remains 500 in operator HTTP.
 5. Real multi-process suite depends on built dist bins.
@@ -397,4 +397,4 @@ node scripts/planweave-release-gate.mjs \
   --report /tmp/release-gate.json
 ```
 
-Live evidence expires after **14 days** (`generatedAt` or file mtime).
+Live evidence expires after **14 days** (`generatedAt` only; file mtime ignored).
