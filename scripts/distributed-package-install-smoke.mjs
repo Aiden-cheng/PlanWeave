@@ -97,6 +97,57 @@ function runCapture(command, commandArgs, options = {}) {
   });
 }
 
+function parseConsumerAudit(raw) {
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error("consumer_audit_response_invalid", { cause: error });
+  }
+  const vulnerabilities = parsed?.metadata?.vulnerabilities;
+  for (const severity of ["info", "low", "moderate", "high", "critical", "total"]) {
+    if (!Number.isInteger(vulnerabilities?.[severity]) || vulnerabilities[severity] < 0) {
+      throw new Error(`consumer_audit_count_invalid:${severity}`);
+    }
+  }
+  return {
+    productionOnly: true,
+    auditLevel: "high",
+    vulnerabilities: {
+      info: vulnerabilities.info,
+      low: vulnerabilities.low,
+      moderate: vulnerabilities.moderate,
+      high: vulnerabilities.high,
+      critical: vulnerabilities.critical,
+      total: vulnerabilities.total
+    }
+  };
+}
+
+function auditInstalledConsumer(installDir) {
+  try {
+    const audit = parseConsumerAudit(
+      runCapture("npm", ["audit", "--json", "--omit=dev", "--audit-level=high"], {
+        cwd: installDir
+      })
+    );
+    if (audit.vulnerabilities.total !== 0) {
+      throw new Error(`consumer_audit_vulnerabilities:${audit.vulnerabilities.total}`);
+    }
+    return audit;
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("consumer_audit_")) throw error;
+    const stdout = typeof error?.stdout === "string" ? error.stdout : error?.stdout?.toString();
+    if (stdout) {
+      const audit = parseConsumerAudit(stdout);
+      throw new Error(`consumer_audit_vulnerabilities:${audit.vulnerabilities.total}`, {
+        cause: error
+      });
+    }
+    throw new Error("consumer_audit_command_failed", { cause: error });
+  }
+}
+
 async function availablePort() {
   const probe = createServer();
   await new Promise((resolveListen) => probe.listen(0, "127.0.0.1", resolveListen));
@@ -311,6 +362,7 @@ async function main() {
     run("npm", ["install", "--no-fund", "--no-audit", ...tarballs.map((item) => item.path)], {
       cwd: installDir
     });
+    const consumerAudit = auditInstalledConsumer(installDir);
 
     const serverPackageRoot = join(installDir, "node_modules/@planweave-ai/server");
     const hostPackageRoot = join(installDir, "node_modules/@planweave-ai/agent-host");
@@ -349,6 +401,7 @@ async function main() {
     report.install = {
       manager: "npm",
       root: installDir,
+      audit: consumerAudit,
       bins: {
         "planweave-server": existsSync(join(installDir, "node_modules/.bin/planweave-server")),
         "planweave-agent-host": existsSync(
