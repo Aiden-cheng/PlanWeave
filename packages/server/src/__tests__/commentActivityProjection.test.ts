@@ -126,6 +126,22 @@ describe("activity projection builders", () => {
     expect(maximal.source.sourceId.length).toBeLessThanOrEqual(128);
   });
 
+  it("distinguishes schema-level delimiter boundaries outside manifest canvas routing", () => {
+    const first = {
+      kind: "task" as const,
+      canvasId: "A",
+      taskId: "B:task:C"
+    };
+    const second = {
+      kind: "task" as const,
+      canvasId: "A:task:B",
+      taskId: "C"
+    };
+    expect(assignmentActivitySourceId("project-a", first, 1)).not.toBe(
+      assignmentActivitySourceId("project-a", second, 1)
+    );
+  });
+
   it("builds comment activities keyed by comment lifecycle", () => {
     const created = buildCommentActivity({
       activityId: "act-4",

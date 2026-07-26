@@ -406,8 +406,9 @@ describe("comment and activity production HTTP", () => {
     expect(crossProject.status).toBe(401);
   });
 
-  it("commits distinct CAS assignments for work-item refs that previously shared a source key", async () => {
+  it("commits boundary work-item assignments with distinct bounded activity source keys", async () => {
     const manifest = basicManifest();
+    const maximalTaskId = "M".repeat(128);
     manifest.nodes.push(
       {
         id: "A",
@@ -440,6 +441,22 @@ describe("comment and activity production HTTP", () => {
             depends_on: []
           }
         ]
+      },
+      {
+        id: maximalTaskId,
+        type: "task",
+        title: "Maximum identifier task",
+        prompt: `nodes/${maximalTaskId}/prompt.md`,
+        acceptance: ["Assignment succeeds."],
+        blocks: [
+          {
+            id: "B-001",
+            type: "implementation",
+            title: "Maximum identifier block",
+            prompt: `nodes/${maximalTaskId}/blocks/B-001.prompt.md`,
+            depends_on: []
+          }
+        ]
       }
     );
     const fixture = await setup(manifest);
@@ -447,7 +464,8 @@ describe("comment and activity production HTTP", () => {
     const ownerToken = await bootstrap(fixture.origin, projectId, "collision-owner");
     const workItems = [
       { kind: "block" as const, canvasId: "default", blockRef: "A#B--C" },
-      { kind: "block" as const, canvasId: "default", blockRef: "A--B#C" }
+      { kind: "block" as const, canvasId: "default", blockRef: "A--B#C" },
+      { kind: "task" as const, canvasId: "default", taskId: maximalTaskId }
     ];
 
     for (const workItem of workItems) {
@@ -465,6 +483,14 @@ describe("comment and activity production HTTP", () => {
       );
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toMatchObject({ workItem, revision: 1 });
+
+      const workItemParameter = encodeURIComponent(JSON.stringify(workItem));
+      const persisted = await fetch(
+        `${fixture.origin}/api/v1/projects/${projectId}/assignments?workItem=${workItemParameter}`,
+        { headers: { Authorization: `Bearer ${ownerToken}` } }
+      );
+      expect(persisted.status).toBe(200);
+      await expect(persisted.json()).resolves.toMatchObject({ workItem, revision: 1 });
     }
 
     const feed = await fetch(`${fixture.origin}/api/v1/projects/${projectId}/activity?limit=20`, {
@@ -477,7 +503,7 @@ describe("comment and activity production HTTP", () => {
     const assignmentSources = body.items
       .filter((item) => item.type === "assignment_updated")
       .map((item) => item.source.sourceId);
-    expect(assignmentSources).toHaveLength(2);
-    expect(new Set(assignmentSources).size).toBe(2);
+    expect(assignmentSources).toHaveLength(workItems.length);
+    expect(new Set(assignmentSources).size).toBe(workItems.length);
   });
 });
