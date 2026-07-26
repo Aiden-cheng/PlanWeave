@@ -530,7 +530,7 @@ PlanWeave Desktop 使用非密钥连接配置（`serverBaseUrl` origin + `projec
 - **评论 / 活动**：作用域为当前 Task/Block；与 Task Workspace 的 Agent 会话分离
 - **远程运行面板**：显式 dispatch / 观测 / 交互 / resume / retry / cancel —— 与本地 Auto Run 共存但不合并状态机；同一 Block 上未完成的本地 Auto Run 会阻止远程 dispatch
 
-**线路可用性：** Server 对人类 **身份** 与 **评论附件** 的公开 HTTP 见上文。`/api/v1/remote-operations*` 使用 **operator** bearer。Desktop client/contracts 中的指派、评论/活动更新、人类 observer WSS（`/api/v1/projects/:projectId/human/observe`）和人类鉴权 remote-operations 本身不能证明 Server 传输已受支持。不要把 Host mailbox 流量混入人类评论作为运维绕过。
+**线路可用性：** Server 提供项目作用域的人类身份、指派、评论/活动、附件和远程 operation HTTP，以及 `/api/v1/projects/:projectId/human/observe` 人类 observer WSS。人类路由要求有效的项目 device credential 与成员资格；其 bearer 绝不能与 `/api/v1/remote-operations*` 使用的 operator bearer 混用。Observer 事件是用于权威重载的有界失效信号，不是 Host mailbox 流量或 Agent 聊天消息。
 
 ### 可选的真实 ACP 兼容性 smoke
 

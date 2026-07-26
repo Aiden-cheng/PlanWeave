@@ -530,7 +530,7 @@ Typical UI surfaces (domain semantics and Desktop client contracts):
 - **Comments / Activity**: scoped to the selected Task/Block; distinct from Task Workspace Agent conversation
 - **Remote run panel**: explicit dispatch / observe / interaction / resume / retry / cancel — coexists with local Auto Run but does not merge status machines; local unfinished Auto Run blocks remote dispatch on the same Block
 
-**Wire availability:** Server public HTTP for human **identity** and **comment attachments** is documented above. Operator remote-operations under `/api/v1/remote-operations*` use the **operator** bearer. Desktop client/contracts for assignment, comment/activity updates, human observer WSS (`/api/v1/projects/:projectId/human/observe`), and human-auth remote-operations do not by themselves establish a supported Server transport. Do not mix Host mailbox traffic into human comments as an operator workaround.
+**Wire availability:** Server exposes project-scoped human HTTP for identity, assignments, comments/activity, attachments, and remote operations, plus the human observer WSS at `/api/v1/projects/:projectId/human/observe`. Human routes require an active project device credential and membership; their bearer is never interchangeable with the operator bearer used by `/api/v1/remote-operations*`. Observer events are bounded invalidation signals for authoritative reload, not Host mailbox traffic or Agent chat messages.
 
 ### Opt-in real ACP compatibility smoke
 
