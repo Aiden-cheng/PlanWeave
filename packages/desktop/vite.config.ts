@@ -84,6 +84,16 @@ export default defineConfig({
                 id.includes("/shared/collaboration") ||
                 id.includes("@planweave-ai/collaboration-contracts"),
               priority: 12
+            },
+            {
+              // Settings is a secondary route with several independent administration
+              // surfaces. Keep it out of the startup shell while preserving its lazy
+              // Host administration boundary.
+              name: "settings",
+              test: (id) =>
+                id.includes("/renderer/settings/") ||
+                id.endsWith("/renderer/views/SettingsView.tsx"),
+              priority: 11
             }
           ]
         }
