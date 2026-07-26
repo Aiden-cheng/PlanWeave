@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type {
   DesktopAgentDetection,
@@ -17,6 +17,12 @@ import { SettingsMcpSection } from "../settings/SettingsMcpSection";
 import { SettingsReviewSection } from "../settings/SettingsReviewSection";
 import type { createTranslator, Language } from "../i18n";
 import type { AppView, DesktopSettingsUpdate, DesktopUiSettings } from "../types";
+
+const HostAdministrationSection = lazy(() =>
+  import("../settings/HostAdministrationSection").then((module) => ({
+    default: module.HostAdministrationSection
+  }))
+);
 
 type SettingsViewProps = {
   agentDetectionRefreshing: boolean;
@@ -162,6 +168,17 @@ export function SettingsView({
               />
             ) : null}
             {section === "mcp" ? <SettingsMcpSection setError={setError} t={t} /> : null}
+            {section === "hosts" ? (
+              <Suspense
+                fallback={
+                  <div className="text-sm text-text-muted" data-testid="host-admin-loading">
+                    {t("hostAdminLoading")}
+                  </div>
+                }
+              >
+                <HostAdministrationSection t={t} />
+              </Suspense>
+            ) : null}
           </div>
         </ScrollArea>
       </section>
