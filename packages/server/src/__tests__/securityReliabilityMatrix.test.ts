@@ -267,6 +267,9 @@ describe("security reliability matrix", () => {
       "commentAttachmentHttp+Policy: human vs host, digest isolation, staged TTL, tombstone read",
       "workAssignmentDispatch: exact host pin, CAS revision, preferred host offline",
       "collaborationBridge IPC: secret smuggle, path redaction, vault encrypt, project switch dispose",
+      "agentHostClientLoad.test.ts: reconnect storm, inbound backpressure, max payload, shutdown load",
+      "remoteObservations.test.ts+humanObserverWs.test.ts: event gaps and bounded retention",
+      "realProcessCrashReplayMatrix.test.ts: long interruption without false success",
       "agentHostClientAdversarial+Recovery: executor failure, no silent auto-rerun",
       "agentHostConfig: workspace symlink escape",
       "realProcessCrashReplayMatrix: host/server kill, capacity, cancel race, idempotency"
