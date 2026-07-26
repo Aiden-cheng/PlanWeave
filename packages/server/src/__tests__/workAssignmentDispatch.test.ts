@@ -81,10 +81,12 @@ async function setup(
 
   const locator = { projectId: workspace.init.workspace.id, canvasId: "default" };
   const workAssignments = new WorkAssignmentRepository(server.database);
-  const assignmentGate = createAssignmentDispatchGate({
-    repository: workAssignments,
-    defaultAllowHumanOverride: !options.strictGate
-  });
+  const assignmentGate = options.strictGate
+    ? createAssignmentDispatchGate({
+        repository: workAssignments,
+        defaultAllowHumanOverride: false
+      })
+    : undefined;
 
   const buildCoordination = (checkpoints?: RemoteCoordinatorCheckpointPort) => {
     const runtime = createRemoteBlockRuntimePort({ projectRoot: workspace.root });
@@ -627,9 +629,11 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
     });
   });
 
-  it("retry_new_attempt fails closed when current assignment no longer allows Host dispatch", async () => {
+  it.each([
+    "human",
+    "unassigned"
+  ] as const)("retry_new_attempt fails closed for %s assignment with the production default gate", async (targetKind) => {
     const fixture = await setup({
-      strictGate: true,
       withHosts: [{ name: "Host A", capabilities: ["acp.codex"], capacity: 1 }]
     });
     const hostA = fixture.hosts[0]!;
@@ -678,25 +682,31 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
     fixture.assignmentService.updateAssignment({
       projectId: fixture.locator.projectId,
       workItem: fixture.blockItem,
-      target: { kind: "human", humanPrincipalId: fixture.ownerContext.humanPrincipalId },
+      target:
+        targetKind === "human"
+          ? { kind: "human", humanPrincipalId: fixture.ownerContext.humanPrincipalId }
+          : { kind: "unassigned" },
       expectedRevision: 1,
       actor: fixture.ownerContext
     });
 
     const interrupted = fixture.coordination.operations.getRequired(dispatched.operation.id);
     const priorSelection = interrupted.hostSelection;
+    const reservationCount = fixture.server.database
+      .prepare("SELECT COUNT(*) AS count FROM host_capacity_reservations")
+      .get()?.count;
     await expect(
       fixture.coordination.coordinator.executeAction({
-        actionId: "retry-deny-action",
+        actionId: `retry-deny-${targetKind}-action`,
         operationId: interrupted.id,
         dispatchId: interrupted.dispatchId,
         executionAttemptId: interrupted.executionAttemptId,
         expectedAttemptVersion: interrupted.attempt.stateVersion,
         kind: "retry_new_attempt",
         priorLeaseId: dispatch.leaseId,
-        newDispatchId: "dispatch-retry-deny-2",
-        newExecutionAttemptId: "attempt-retry-deny-2",
-        reason: "retry should fail closed after human assignment"
+        newDispatchId: `dispatch-retry-deny-${targetKind}-2`,
+        newExecutionAttemptId: `attempt-retry-deny-${targetKind}-2`,
+        reason: `retry should fail closed after ${targetKind} assignment`
       })
     ).rejects.toMatchObject({ code: "work_not_agent_assigned" });
 
@@ -704,6 +714,11 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
     expect(unchanged.dispatchId).toBe(interrupted.dispatchId);
     expect(unchanged.executionAttemptId).toBe(interrupted.executionAttemptId);
     expect(unchanged.hostSelection).toEqual(priorSelection);
+    expect(
+      fixture.server.database
+        .prepare("SELECT COUNT(*) AS count FROM host_capacity_reservations")
+        .get()?.count
+    ).toBe(reservationCount);
   });
 
   it("recovers null host_selection on reenter without blocking and persists a fresh snapshot", async () => {

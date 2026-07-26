@@ -165,7 +165,8 @@ export class RemoteBlockActionCoordinator {
               projectId: operation.projectId,
               canvasId: operation.canvasId,
               blockRef: operation.blockRef,
-              requiredCapabilities: operation.requiredCapabilities
+              requiredCapabilities: operation.requiredCapabilities,
+              allowHumanOverride: false
             })
           : undefined;
         await runtime.retryAttempt({
