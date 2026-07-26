@@ -156,8 +156,18 @@ export class RemoteBlockActionCoordinator {
         this.publish(message);
         return "delivered";
       }
-      case "retry":
+      case "retry": {
         if (action.kind !== "retry_new_attempt") throw new Error("remote_action_decision_mismatch");
+        // New attempt is a fresh dispatch: revalidate current assignment and resnapshot.
+        // Do not reuse the prior attempt's host_selection_json (stale after reassignment).
+        const hostSelection = this.options.assignmentGate
+          ? this.options.assignmentGate.resolve({
+              projectId: operation.projectId,
+              canvasId: operation.canvasId,
+              blockRef: operation.blockRef,
+              requiredCapabilities: operation.requiredCapabilities
+            })
+          : undefined;
         await runtime.retryAttempt({
           ...remoteBlockIdentity(operation),
           newDispatchId: action.newDispatchId,
@@ -168,10 +178,12 @@ export class RemoteBlockActionCoordinator {
           priorExecutionAttemptId: operation.executionAttemptId,
           newDispatchId: action.newDispatchId,
           newExecutionAttemptId: action.newExecutionAttemptId,
-          expectedAttemptVersion: action.expectedAttemptVersion
+          expectedAttemptVersion: action.expectedAttemptVersion,
+          hostSelection
         });
         await this.lifecycle.reenter(operation.id);
         return "settled";
+      }
     }
   }
 

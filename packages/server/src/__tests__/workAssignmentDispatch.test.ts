@@ -525,6 +525,187 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
     expect(outcome.operation.attempt.hostId).toBe(hostA.id);
   });
 
+  it("retry_new_attempt revalidates current assignment and resnapshots host selection", async () => {
+    const fixture = await setup({
+      withHosts: [
+        { name: "Host A", capabilities: ["acp.codex"], capacity: 1 },
+        { name: "Host B", capabilities: ["acp.codex"], capacity: 1 }
+      ]
+    });
+    const hostA = fixture.hosts[0]!;
+    const hostB = fixture.hosts[1]!;
+
+    fixture.assignmentService.updateAssignment({
+      projectId: fixture.locator.projectId,
+      workItem: fixture.blockItem,
+      target: { kind: "exact_host", hostId: hostA.id },
+      expectedRevision: 0,
+      actor: fixture.ownerContext
+    });
+
+    const dispatched = await fixture.coordination.coordinator.dispatch({
+      ...fixture.locator,
+      blockRef: "T-001#B-001",
+      idempotencyKey: "retry-revalidate",
+      expectedAssignmentRevision: 1
+    });
+    expect(dispatched.operation.attempt.hostId).toBe(hostA.id);
+    expect(dispatched.operation.hostSelection).toMatchObject({
+      selection: "exact",
+      preferredHostId: hostA.id,
+      assignmentRevision: 1
+    });
+
+    const dispatch = fixture.coordination.dispatches.getRequired(dispatched.operation.dispatchId);
+    fixture.coordination.dispatches.accept(
+      hostA.id,
+      "retry-revalidate-accepted",
+      dispatch.id,
+      dispatch.leaseId,
+      dispatch.executionAttemptId
+    );
+    fixture.coordination.dispatches.interrupt(hostA.id, "retry-revalidate-interrupted", {
+      type: "dispatch.interrupted",
+      protocolVersion: 1,
+      messageId: "retry-revalidate-interrupted",
+      dispatchId: dispatch.id,
+      leaseId: dispatch.leaseId,
+      executionAttemptId: dispatch.executionAttemptId,
+      reason: "acp_session_lost",
+      resumable: false
+    });
+    const lease = fixture.coordination.reservations.getRequired(dispatch.leaseId);
+    fixture.coordination.reservations.release({
+      leaseId: lease.leaseId,
+      fencingToken: lease.fencingToken,
+      expectedVersion: lease.version,
+      reason: "expired"
+    });
+    await fixture.coordination.coordinator.reenter(dispatched.operation.id);
+
+    // Reassignment before explicit retry: new attempt must follow current assignment, not A.
+    fixture.assignmentService.updateAssignment({
+      projectId: fixture.locator.projectId,
+      workItem: fixture.blockItem,
+      target: { kind: "exact_host", hostId: hostB.id },
+      expectedRevision: 1,
+      actor: fixture.ownerContext
+    });
+
+    const interrupted = fixture.coordination.operations.getRequired(dispatched.operation.id);
+    await fixture.coordination.coordinator.executeAction({
+      actionId: "retry-revalidate-action",
+      operationId: interrupted.id,
+      dispatchId: interrupted.dispatchId,
+      executionAttemptId: interrupted.executionAttemptId,
+      expectedAttemptVersion: interrupted.attempt.stateVersion,
+      kind: "retry_new_attempt",
+      priorLeaseId: dispatch.leaseId,
+      newDispatchId: "dispatch-retry-revalidate-2",
+      newExecutionAttemptId: "attempt-retry-revalidate-2",
+      reason: "retry after reassignment to Host B"
+    });
+
+    const retried = fixture.coordination.operations.getRequired(dispatched.operation.id);
+    expect(retried).toMatchObject({
+      state: "activated",
+      dispatchId: "dispatch-retry-revalidate-2",
+      executionAttemptId: "attempt-retry-revalidate-2",
+      hostSelection: {
+        selection: "exact",
+        preferredHostId: hostB.id,
+        assignmentRevision: 2
+      },
+      attempt: { hostId: hostB.id }
+    });
+    expect(retried.hostSelection?.preferredHostId).not.toBe(hostA.id);
+    expect(
+      fixture.coordination.coordinator.getAuthorizedHostSelection(dispatched.operation.id)
+    ).toMatchObject({
+      preferredHostId: hostB.id,
+      assignmentRevision: 2
+    });
+  });
+
+  it("retry_new_attempt fails closed when current assignment no longer allows Host dispatch", async () => {
+    const fixture = await setup({
+      strictGate: true,
+      withHosts: [{ name: "Host A", capabilities: ["acp.codex"], capacity: 1 }]
+    });
+    const hostA = fixture.hosts[0]!;
+
+    fixture.assignmentService.updateAssignment({
+      projectId: fixture.locator.projectId,
+      workItem: fixture.blockItem,
+      target: { kind: "exact_host", hostId: hostA.id },
+      expectedRevision: 0,
+      actor: fixture.ownerContext
+    });
+
+    const dispatched = await fixture.coordination.coordinator.dispatch({
+      ...fixture.locator,
+      blockRef: "T-001#B-001",
+      idempotencyKey: "retry-deny-human",
+      expectedAssignmentRevision: 1
+    });
+    const dispatch = fixture.coordination.dispatches.getRequired(dispatched.operation.dispatchId);
+    fixture.coordination.dispatches.accept(
+      hostA.id,
+      "retry-deny-accepted",
+      dispatch.id,
+      dispatch.leaseId,
+      dispatch.executionAttemptId
+    );
+    fixture.coordination.dispatches.interrupt(hostA.id, "retry-deny-interrupted", {
+      type: "dispatch.interrupted",
+      protocolVersion: 1,
+      messageId: "retry-deny-interrupted",
+      dispatchId: dispatch.id,
+      leaseId: dispatch.leaseId,
+      executionAttemptId: dispatch.executionAttemptId,
+      reason: "acp_session_lost",
+      resumable: false
+    });
+    const lease = fixture.coordination.reservations.getRequired(dispatch.leaseId);
+    fixture.coordination.reservations.release({
+      leaseId: lease.leaseId,
+      fencingToken: lease.fencingToken,
+      expectedVersion: lease.version,
+      reason: "expired"
+    });
+    await fixture.coordination.coordinator.reenter(dispatched.operation.id);
+
+    fixture.assignmentService.updateAssignment({
+      projectId: fixture.locator.projectId,
+      workItem: fixture.blockItem,
+      target: { kind: "human", humanPrincipalId: fixture.ownerContext.humanPrincipalId },
+      expectedRevision: 1,
+      actor: fixture.ownerContext
+    });
+
+    const interrupted = fixture.coordination.operations.getRequired(dispatched.operation.id);
+    const priorSelection = interrupted.hostSelection;
+    await expect(
+      fixture.coordination.coordinator.executeAction({
+        actionId: "retry-deny-action",
+        operationId: interrupted.id,
+        dispatchId: interrupted.dispatchId,
+        executionAttemptId: interrupted.executionAttemptId,
+        expectedAttemptVersion: interrupted.attempt.stateVersion,
+        kind: "retry_new_attempt",
+        priorLeaseId: dispatch.leaseId,
+        newDispatchId: "dispatch-retry-deny-2",
+        newExecutionAttemptId: "attempt-retry-deny-2",
+        reason: "retry should fail closed after human assignment"
+      })
+    ).rejects.toMatchObject({ code: "work_not_agent_assigned" });
+
+    const unchanged = fixture.coordination.operations.getRequired(dispatched.operation.id);
+    expect(unchanged.dispatchId).toBe(interrupted.dispatchId);
+    expect(unchanged.executionAttemptId).toBe(interrupted.executionAttemptId);
+    expect(unchanged.hostSelection).toEqual(priorSelection);
+  });
+
   it("keeps durable exact Host selection after restart + reassignment before reserve", async () => {
     const fixture = await setup({
       withHosts: [

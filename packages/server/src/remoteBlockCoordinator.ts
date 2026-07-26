@@ -130,18 +130,17 @@ export class RemoteBlockCoordinator {
   }
 
   /**
-   * Expose the Host selection authorized at dispatch begin (display / cancel-retry).
-   * Prefer durable operation snapshot so restart does not lose the fingerprint.
-   * Never used to silently retarget after reassignment.
+   * Expose the Host selection authorized at dispatch begin (or last retry resnapshot).
+   * Prefer durable operation snapshot so restart and retry do not lose the fingerprint.
+   * Same-attempt reenter never re-derives from a later assignment; retry_new_attempt does.
    */
   getAuthorizedHostSelection(operationId: string): DispatchHostSelectionSnapshot | undefined {
-    const cached = this.hostSelectionByOperation.get(operationId);
-    if (cached) return cached;
     const durable = this.options.operations.get(operationId)?.hostSelection;
     if (durable) {
       this.hostSelectionByOperation.set(operationId, durable);
+      return durable;
     }
-    return durable;
+    return this.hostSelectionByOperation.get(operationId);
   }
 
   async dispatch(request: RemoteDispatchRequest): Promise<RemoteDispatchOutcome> {

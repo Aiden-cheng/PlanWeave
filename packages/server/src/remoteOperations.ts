@@ -498,10 +498,20 @@ export class RemoteOperationRepository {
     newDispatchId: string;
     newExecutionAttemptId: string;
     expectedAttemptVersion: number;
+    /**
+     * Revalidated Host selection for the new attempt. When provided, replaces the prior
+     * attempt's host_selection_json so retry does not pin a stale assignment snapshot.
+     * Omitted only when no assignment gate is wired.
+     */
+    hostSelection?: DispatchHostSelectionSnapshot;
   }): RemoteOperation {
     const priorExecutionAttemptId = executionAttemptIdSchema.parse(input.priorExecutionAttemptId);
     const newDispatchId = dispatchIdSchema.parse(input.newDispatchId);
     const newExecutionAttemptId = executionAttemptIdSchema.parse(input.newExecutionAttemptId);
+    const hostSelectionJson =
+      input.hostSelection === undefined
+        ? undefined
+        : JSON.stringify(dispatchHostSelectionSnapshotSchema.parse(input.hostSelection));
     if (priorExecutionAttemptId === newExecutionAttemptId) {
       throw new Error("remote_retry_attempt_identity_reused");
     }
@@ -579,13 +589,23 @@ export class RemoteOperationRepository {
           now,
           now
         );
-      this.database
-        .prepare(
-          `UPDATE remote_operations
-           SET state='claimed',dispatch_id=?,execution_attempt_id=?,envelope_digest=NULL,
-             envelope_reference=NULL,updated_at=? WHERE id=?`
-        )
-        .run(newDispatchId, newExecutionAttemptId, now, operation.id);
+      if (hostSelectionJson !== undefined) {
+        this.database
+          .prepare(
+            `UPDATE remote_operations
+             SET state='claimed',dispatch_id=?,execution_attempt_id=?,envelope_digest=NULL,
+               envelope_reference=NULL,host_selection_json=?,updated_at=? WHERE id=?`
+          )
+          .run(newDispatchId, newExecutionAttemptId, hostSelectionJson, now, operation.id);
+      } else {
+        this.database
+          .prepare(
+            `UPDATE remote_operations
+             SET state='claimed',dispatch_id=?,execution_attempt_id=?,envelope_digest=NULL,
+               envelope_reference=NULL,updated_at=? WHERE id=?`
+          )
+          .run(newDispatchId, newExecutionAttemptId, now, operation.id);
+      }
       this.appendEvent(operation.id, priorExecutionAttemptId, "remote.attempt.superseded", now);
       this.appendEvent(operation.id, newExecutionAttemptId, "remote.attempt.retry_created", now);
       return this.getRequired(operation.id);
