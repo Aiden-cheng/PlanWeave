@@ -72,18 +72,26 @@ describe("real-process crash/replay fault matrix", () => {
 
     await harness.killHost("SIGKILL");
     // Sensitivity: if Host auto-reran ACP on restart without operator resume, session/new would increase.
+    // restartHost waits for a refreshed lastSeenAt so the Host has reconnected before we judge recovery.
     await harness.restartHost();
 
     // Host recovery reports interruption rather than inventing terminal success.
+    // Do not accept pre-durable states (running/leased) or awaiting_writeback without interruption —
+    // those can appear before the Host durable boundary is reconciled.
     const after = await client.waitForOperation(
       dispatched.operationId,
-      (view) =>
-        ["interrupted", "action_required", "failed", "cancelled"].includes(view.state) ||
-        ["interrupted", "failed", "cancelled", "awaiting_writeback"].includes(
+      (view) => {
+        if (view.state === "completed" || view.dispatchStatus === "completed") return false;
+        const durableState = ["interrupted", "action_required", "failed", "cancelled"].includes(
+          view.state
+        );
+        const durableDispatch = ["interrupted", "failed", "cancelled"].includes(
           String(view.dispatchStatus)
-        ) ||
-        view.attempt.status === "interrupted" ||
-        view.attempt.status === "action_required",
+        );
+        const durableAttempt =
+          view.attempt.status === "interrupted" || view.attempt.status === "action_required";
+        return durableState || durableDispatch || durableAttempt;
+      },
       "host-kill-reconciled"
     );
     assertNotFalseSuccess(after);
@@ -120,12 +128,15 @@ describe("real-process crash/replay fault matrix", () => {
 
     // After Server restart, either the same attempt progresses to a real terminal or stays non-success.
     // Poll until Server is queryable and the operation is not falsely completed without evidence.
+    // Critical: countLifecycleFragment("session/prompt") matches "paused session/prompt" at the
+    // barrier and would satisfy too early — require the exact post-barrier session/prompt event.
     const view = await client.waitForOperation(
       dispatched.operationId,
       (current) => {
         if (current.state === "completed") {
-          // Completing after Server restart is allowed only if ACP actually finished (prompt present).
-          return client.countLifecycleFragment("session/prompt") >= 1;
+          const promptCompleted = client.countLifecycleExactEvent("session/prompt") >= 1;
+          const receiptOk = current.runtime.terminalReceipt?.outcome === "completed";
+          return promptCompleted && receiptOk;
         }
         return [
           "failed",
@@ -144,11 +155,14 @@ describe("real-process crash/replay fault matrix", () => {
       expect(view.dispatchId).toBe(dispatched.dispatchId);
       expect(view.executionAttemptId).toBe(dispatched.executionAttemptId);
       expect(client.countServerRows("remote_execution_attempts")).toBe(1);
-      expect(client.countLifecycleFragment("session/new")).toBe(1);
+      expect(client.countLifecycleExactEvent("session/new")).toBe(1);
+      expect(client.countLifecycleExactEvent("session/prompt")).toBeGreaterThanOrEqual(1);
+      // Barrier lines must not be mistaken for completion evidence.
+      expect(client.countLifecycleExactEvent("paused session/prompt")).toBeGreaterThanOrEqual(1);
     } else {
       assertNotFalseSuccess(view);
       // No second ACP turn invented while Server was down.
-      expect(client.countLifecycleFragment("session/new")).toBe(sessionNewBefore);
+      expect(client.countLifecycleExactEvent("session/new")).toBe(sessionNewBefore);
     }
   }, 120_000);
 

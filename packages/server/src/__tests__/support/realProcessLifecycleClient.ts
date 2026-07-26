@@ -233,6 +233,22 @@ export class RealProcessLifecycleClient {
       .filter((line) => line.includes(fragment)).length;
   }
 
+  /**
+   * Count exact ACP lifecycle events (`"<pid> <event>"`), not substring matches.
+   * Critical for restart predicates: `"paused session/prompt"` must not satisfy `"session/prompt"`.
+   */
+  countLifecycleExactEvent(event: string): number {
+    const path = this.harness.paths.acpLifecycle;
+    if (!existsSync(path)) return 0;
+    return readFileSync(path, "utf8")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => {
+        const match = /^(\d+)\s+(.+)$/.exec(line);
+        return match?.[2] === event;
+      }).length;
+  }
+
   async observe(operationId: string): Promise<OperatorOperationView> {
     const response = await fetch(
       `${this.harness.origin}/api/v1/remote-operations/${encodeURIComponent(operationId)}`,
