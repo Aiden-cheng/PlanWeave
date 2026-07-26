@@ -30,6 +30,7 @@ export type ReleaseGateTierDefinition = {
 };
 
 export const RELEASE_GATE_EVIDENCE_MAX_AGE_HOURS = 336 as const; // 14 days
+export const RELEASE_GATE_EVIDENCE_MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 export const RELEASE_GATE_TIERS: readonly ReleaseGateTierDefinition[] = [
   {

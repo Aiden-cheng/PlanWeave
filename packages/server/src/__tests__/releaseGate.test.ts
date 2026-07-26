@@ -271,6 +271,59 @@ describe("release gate checklist and evaluation", () => {
     });
   });
 
+  it("rejects ACP and VPS generatedAt beyond the allowed future clock skew", async () => {
+    const root = await tempDir();
+    const now = new Date("2030-01-01T00:00:00.000Z");
+    const future = new Date(now.getTime() + 10 * 60_000).toISOString();
+    const realAcpPath = join(root, "future-acp.json");
+    const vpsPath = join(root, "future-vps.json");
+    await writeFile(
+      realAcpPath,
+      JSON.stringify({
+        version: "planweave.real-acp-host-smoke/v1",
+        result: "passed",
+        generatedAt: future,
+        preflight: { profileId: "codex-acp", protocolVersion: 1, agentVersion: "1.0.0" },
+        checks: {
+          preflightReady: true,
+          protocolNegotiated: true,
+          sessionCreated: true,
+          normalizedEvents: true,
+          terminalSucceeded: true,
+          artifactContract: true,
+          cancellationObserved: true,
+          cleanup: true,
+          noCliFallback: true
+        }
+      })
+    );
+    await writeFile(
+      vpsPath,
+      JSON.stringify(
+        vpsEvidence({
+          result: "passed",
+          environmentClass: "remote-vps",
+          generatedAt: future
+        })
+      )
+    );
+
+    const report = await buildReleaseGateReport({
+      realAcpEvidencePath: realAcpPath,
+      vpsEvidencePath: vpsPath,
+      agentHostVersion: "0.3.0",
+      protocolPackageVersion: "0.3.0",
+      now
+    });
+    for (const tierId of ["local_real_acp_compatibility", "remote_authenticated_vps"]) {
+      expect(report.tiers.find((tier) => tier.tierId === tierId)).toMatchObject({
+        status: "invalid",
+        countsAsPass: false,
+        diagnostic: expect.stringMatching(/clock skew/)
+      });
+    }
+  });
+
   it("rejects live evidence without generatedAt and ignores file mtime for TTL", async () => {
     const root = await tempDir();
     const missingGeneratedAt = join(root, "no-generated-at.json");

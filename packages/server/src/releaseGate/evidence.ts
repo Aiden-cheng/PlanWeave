@@ -10,6 +10,7 @@ import {
 import { serverPackageVersion } from "../packageInfo.js";
 import {
   RELEASE_GATE_EVIDENCE_MAX_AGE_HOURS,
+  RELEASE_GATE_EVIDENCE_MAX_CLOCK_SKEW_MS,
   RELEASE_GATE_ROLLBACK_CHECKS,
   RELEASE_GATE_TIERS,
   type ReleaseGateTierId,
@@ -242,12 +243,16 @@ export async function evaluateDeterministicEvidence(
   }
 }
 
-function isExpired(observedAt: string | null | undefined, now: Date): boolean {
-  if (!observedAt) return true;
+function evidenceFreshness(
+  observedAt: string | null | undefined,
+  now: Date
+): "fresh" | "expired" | "future" | "invalid" {
+  if (!observedAt) return "invalid";
   const ts = Date.parse(observedAt);
-  if (!Number.isFinite(ts)) return true;
+  if (!Number.isFinite(ts)) return "invalid";
+  if (ts - now.getTime() > RELEASE_GATE_EVIDENCE_MAX_CLOCK_SKEW_MS) return "future";
   const maxMs = RELEASE_GATE_EVIDENCE_MAX_AGE_HOURS * 60 * 60 * 1000;
-  return now.getTime() - ts > maxMs;
+  return now.getTime() - ts > maxMs ? "expired" : "fresh";
 }
 
 export async function evaluateRealAcpEvidence(
@@ -304,7 +309,20 @@ export async function evaluateRealAcpEvidence(
       }
     }
     const observedAt = resolveObservedAt(parsed.data.generatedAt);
-    if (parsed.data.result === "passed" && isExpired(observedAt, now)) {
+    const freshness = evidenceFreshness(observedAt, now);
+    if (parsed.data.result === "passed" && freshness === "future") {
+      return {
+        tierId,
+        requirement: "required_supported_version_release",
+        status: "invalid",
+        countsAsPass: false,
+        evidenceDigest: digestJson(parsed.data),
+        diagnostic: "Real ACP evidence generatedAt exceeds the allowed clock skew.",
+        observedAt,
+        environmentClass: "host-local"
+      };
+    }
+    if (parsed.data.result === "passed" && freshness === "expired") {
       return {
         tierId,
         requirement: "required_supported_version_release",
@@ -384,7 +402,20 @@ export async function evaluateVpsEvidence(
         environmentClass: parsed.data.environmentClass
       };
     }
-    if (parsed.data.result === "passed" && isExpired(observedAt, now)) {
+    const freshness = evidenceFreshness(observedAt, now);
+    if (parsed.data.result === "passed" && freshness === "future") {
+      return {
+        tierId,
+        requirement: "required_pre_release_evidence",
+        status: "invalid",
+        countsAsPass: false,
+        evidenceDigest: digestJson(parsed.data),
+        diagnostic: "VPS evidence generatedAt exceeds the allowed clock skew.",
+        observedAt,
+        environmentClass: "remote-vps"
+      };
+    }
+    if (parsed.data.result === "passed" && freshness === "expired") {
       return {
         tierId,
         requirement: "required_pre_release_evidence",
