@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -12,7 +12,11 @@ import {
 } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { latestCentralSchemaVersion } from "../migrations.js";
 import { hashOperatorToken } from "../operatorAuth.js";
-import { buildIsolatedPublicPackageBins } from "./support/publicPackageBinHarness.js";
+import {
+  buildIsolatedPublicPackageBins,
+  PublicBinProcessRegistry,
+  type RunningPublicBin
+} from "./support/publicPackageBinHarness.js";
 
 const directories: string[] = [];
 const mockAgentPath = fileURLToPath(
@@ -25,6 +29,7 @@ const agentHostPackageRoot = fileURLToPath(new URL("../../../agent-host", import
 let publicBinRoot: string | undefined;
 let serverBinPath: string;
 let agentHostBinPath: string;
+const publicBinProcesses = new PublicBinProcessRegistry();
 
 beforeAll(async () => {
   const isolated = await buildIsolatedPublicPackageBins(repositoryRoot, [
@@ -43,9 +48,16 @@ afterAll(async () => {
 });
 
 afterEach(async () => {
-  await Promise.all(
-    directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
-  );
+  const results = await Promise.allSettled([
+    publicBinProcesses.stopAll(),
+    ...directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
+  ]);
+  const errors = results
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => result.reason);
+  if (errors.length > 0) {
+    throw new AggregateError(errors, "operator_walkthrough_cleanup_failed");
+  }
 });
 
 function remoteManifest(): PlanPackageManifest {
@@ -71,12 +83,6 @@ type HostCommandResult = {
   code: number;
   stdout: string;
   stderr: string;
-};
-
-type RunningPublicBin = {
-  child: ChildProcessWithoutNullStreams;
-  result: Promise<number>;
-  logs: { stdout: string; stderr: string };
 };
 
 /**
@@ -110,23 +116,7 @@ function runAgentHostBin(argv: readonly string[]): Promise<HostCommandResult> {
 }
 
 function startPublicBin(binPath: string, argv: readonly string[]): RunningPublicBin {
-  const child = spawn(process.execPath, [binPath, ...argv], {
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-  const logs = { stdout: "", stderr: "" };
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
-  child.stdout.on("data", (chunk: string) => {
-    logs.stdout += chunk;
-  });
-  child.stderr.on("data", (chunk: string) => {
-    logs.stderr += chunk;
-  });
-  const result = new Promise<number>((resolve, reject) => {
-    child.once("error", reject);
-    child.once("close", (code) => resolve(code ?? 1));
-  });
-  return { child, result, logs };
+  return publicBinProcesses.start(binPath, argv);
 }
 
 async function startServerBin(configPath: string, publicUrl: string): Promise<RunningPublicBin> {
@@ -155,13 +145,34 @@ function startAgentHostBin(configPath: string): RunningPublicBin {
 }
 
 async function stopPublicBin(running: RunningPublicBin): Promise<void> {
-  if (!running.child.killed) {
-    running.child.kill("SIGTERM");
-  }
-  await expect(running.result).resolves.toBe(0);
+  await publicBinProcesses.stop(running);
 }
 
 describe("remote operator walkthrough", () => {
+  it("reaps a registered process when an intermediate assertion fails", async () => {
+    const registry = new PublicBinProcessRegistry();
+    const temporaryRoot = await mkdtemp(join(tmpdir(), "planweave-cleanup-injection-"));
+    directories.push(temporaryRoot);
+    const fixturePath = join(temporaryRoot, "long-running-bin.mjs");
+    await writeFile(
+      fixturePath,
+      "process.on('SIGTERM',()=>process.exit(0));setInterval(()=>{},1000);"
+    );
+    const running = registry.start(fixturePath, []);
+    const pid = running.child.pid;
+    if (!pid) throw new Error("cleanup_injection_pid_missing");
+    let injectedFailure: Error | undefined;
+    try {
+      throw new Error("injected_walkthrough_failure");
+    } catch (error) {
+      injectedFailure = error as Error;
+    } finally {
+      await registry.stopAll();
+    }
+    expect(injectedFailure?.message).toBe("injected_walkthrough_failure");
+    expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
+  });
+
   it("builds clean public bins, then starts Server and exercises the Host lifecycle", async () => {
     expect(serverBinPath).toContain(publicBinRoot);
     expect(agentHostBinPath).toContain(publicBinRoot);
