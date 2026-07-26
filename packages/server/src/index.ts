@@ -229,6 +229,23 @@ export {
   type AgentHostWebSocketServer
 } from "./wsServer.js";
 export {
+  CanvasPresenceHub,
+  CanvasPresenceHubError,
+  type CanvasPresenceHubConnectInput,
+  type CanvasPresenceHubErrorCode,
+  type CanvasPresenceHubOptions,
+  type CanvasPresenceHubSession,
+  type CanvasPresenceRemovalReason,
+  type CanvasPresenceScope
+} from "./presenceHub.js";
+export {
+  attachCanvasPresenceWebSocketServer,
+  canvasPresenceRouteFromUrl,
+  type CanvasPresenceProjectAuthority,
+  type CanvasPresenceWebSocketOptions,
+  type CanvasPresenceWebSocketServer
+} from "./presenceWebSocket.js";
+export {
   HUMAN_AUTH_ERROR_MESSAGES,
   HUMAN_DEVICE_TOKEN_PREFIX,
   PROJECT_INVITATION_TOKEN_PREFIX,

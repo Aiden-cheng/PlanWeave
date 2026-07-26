@@ -44,6 +44,10 @@ import {
   attachHumanObserverWebSocketServer,
   type HumanObserverWebSocketServer
 } from "./humanObserverWs.js";
+import {
+  attachCanvasPresenceWebSocketServer,
+  type CanvasPresenceWebSocketServer
+} from "./presenceWebSocket.js";
 import { WebSocketUpgradeRouter } from "./webSocketUpgradeRouter.js";
 import {
   createActiveDispatchResolver,
@@ -92,6 +96,7 @@ async function drainCompositionTransports(input: {
   requestListener?: (request: IncomingMessage, response: ServerResponse) => void;
   webSockets?: AgentHostWebSocketServer;
   humanObserverWebSockets?: HumanObserverWebSocketServer;
+  canvasPresenceWebSockets?: CanvasPresenceWebSocketServer;
   upgradeRouter?: WebSocketUpgradeRouter;
   inflightRequests: ReadonlySet<Promise<void>>;
   shutdownTimeoutMs: number;
@@ -105,6 +110,11 @@ async function drainCompositionTransports(input: {
   }
   try {
     await input.humanObserverWebSockets?.close();
+  } catch (error) {
+    errors.push(error);
+  }
+  try {
+    await input.canvasPresenceWebSockets?.close();
   } catch (error) {
     errors.push(error);
   }
@@ -187,6 +197,7 @@ export async function createDistributedServerComposition(
   let activityRetention: ActivityRetentionMaintenance | undefined;
   let webSockets: AgentHostWebSocketServer | undefined;
   let humanObserverWebSockets: HumanObserverWebSocketServer | undefined;
+  let canvasPresenceWebSockets: CanvasPresenceWebSocketServer | undefined;
   let upgradeRouter: WebSocketUpgradeRouter | undefined;
   let requestListener: ((request: IncomingMessage, response: ServerResponse) => void) | undefined;
   let humanIdentityForInteractions: HumanIdentityRepository | undefined;
@@ -434,6 +445,15 @@ export async function createDistributedServerComposition(
       allowInsecureTransport: config.allowInsecureDevelopment,
       clock
     });
+    canvasPresenceWebSockets = attachCanvasPresenceWebSocketServer({
+      upgradeRouter,
+      repository: humanIdentity,
+      projectAuthority: runtimeRegistry,
+      maxPayloadBytes: config.limits.maxWebSocketPayloadBytes,
+      shutdownTimeoutMs: config.limits.shutdownTimeoutMs,
+      allowInsecureTransport: config.allowInsecureDevelopment,
+      clock
+    });
     const attachedWebSockets = webSockets;
     const control = new RemoteControlService({
       authorization,
@@ -571,6 +591,7 @@ export async function createDistributedServerComposition(
         requestListener: attachedRequestListener,
         webSockets: attachedWebSockets,
         humanObserverWebSockets,
+        canvasPresenceWebSockets,
         upgradeRouter,
         inflightRequests,
         shutdownTimeoutMs: config.limits.shutdownTimeoutMs
@@ -630,6 +651,7 @@ export async function createDistributedServerComposition(
         requestListener,
         webSockets,
         humanObserverWebSockets,
+        canvasPresenceWebSockets,
         upgradeRouter,
         inflightRequests,
         shutdownTimeoutMs: config.limits.shutdownTimeoutMs
