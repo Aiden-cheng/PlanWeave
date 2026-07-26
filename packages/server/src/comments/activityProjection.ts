@@ -15,7 +15,7 @@ import {
 type ActivitySourceIdentity = string | number | readonly ActivitySourceIdentity[];
 
 function versionedActivitySourceId(
-  kind: "assignment" | "membership",
+  kind: "assignment" | "membership" | "remote_run",
   identity: readonly ActivitySourceIdentity[]
 ): string {
   const digest = createHash("sha256")
@@ -73,8 +73,7 @@ export function remoteRunActivitySourceId(
     | "remote_run_failed"
     | "remote_run_interrupted"
 ): string {
-  const suffix = type.replace("remote_run_", "");
-  return `${dispatchId}:${suffix}`;
+  return versionedActivitySourceId("remote_run", [dispatchId, type]);
 }
 
 function clipHeadline(value: string): string {

@@ -11,6 +11,8 @@ import {
   basicManifest
 } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { ArtifactStore } from "../artifacts.js";
+import { ActivityRepository } from "../comments/activityRepository.js";
+import { ActivityProjectionService } from "../comments/service.js";
 import { createRemoteBlockCoordination } from "../distributedCoordination.js";
 import { AgentHostRepository } from "../hosts.js";
 import { HumanIdentityRepository } from "../identity/repository.js";
@@ -80,6 +82,7 @@ async function setup(
     withHosts?: Array<{ name: string; capabilities: string[]; capacity: number }>;
     checkpoints?: RemoteCoordinatorCheckpointPort;
     decorateRuntime?: (runtime: RemoteBlockRuntimePort) => RemoteBlockRuntimePort;
+    projectActivity?: boolean;
   } = {}
 ) {
   const workspace = await createTestWorkspace(remoteManifest());
@@ -91,6 +94,8 @@ async function setup(
     busyTimeoutMs: 5_000
   });
   servers.push(server);
+  const activity = options.projectActivity ? new ActivityRepository(server.database) : undefined;
+  const activityProjection = activity ? new ActivityProjectionService({ activity }) : undefined;
 
   const locator = { projectId: workspace.init.workspace.id, canvasId: "default" };
   const workAssignments = new WorkAssignmentRepository(server.database);
@@ -122,7 +127,20 @@ async function setup(
         },
         artifactContent: { readReport: async (ref) => artifacts.read(ref) },
         assignmentGate,
-        checkpoints
+        checkpoints,
+        ...(activityProjection
+          ? {
+              onDispatchActivityTransitionInTransaction: (input) => {
+                activityProjection.projectRemoteRunEventInCallerTransaction({
+                  projectId: input.dispatch.projectId,
+                  type: input.type,
+                  dispatchId: input.dispatch.id,
+                  hostId: input.dispatch.hostId,
+                  occurredAt: input.occurredAt
+                });
+              }
+            }
+          : {})
       },
       { serverInstanceOwnerToken: server.serverInstanceOwnerToken }
     );
@@ -224,6 +242,7 @@ async function setup(
     workAssignments,
     assignmentService,
     assignmentGate,
+    activity,
     ownerContext,
     blockItem,
     hosts: registeredHosts
@@ -553,6 +572,7 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
 
   it("retry_new_attempt revalidates current assignment and resnapshots host selection", async () => {
     const fixture = await setup({
+      projectActivity: true,
       withHosts: [
         { name: "Host A", capabilities: ["acp.codex"], capacity: 1 },
         { name: "Host B", capabilities: ["acp.codex"], capacity: 1 }
@@ -652,6 +672,30 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
       preferredHostId: hostB.id,
       assignmentRevision: 2
     });
+
+    const retryDispatch = fixture.coordination.dispatches.getRequired(maximalRetryDispatchId);
+    expect(
+      fixture.coordination.dispatches.accept(
+        hostB.id,
+        "retry-revalidate-max-id-accepted",
+        retryDispatch.id,
+        retryDispatch.leaseId,
+        retryDispatch.executionAttemptId
+      ).status
+    ).toBe("running");
+    if (!fixture.activity) throw new Error("activity_projection_not_configured");
+    const retryActivity = fixture.activity
+      .list({ projectId: fixture.locator.projectId, limit: 20 })
+      .filter((record) => record.summary.dispatchId === maximalRetryDispatchId);
+    expect(retryActivity).toHaveLength(1);
+    expect(retryActivity[0]).toMatchObject({ type: "remote_run_started" });
+    expect(retryActivity[0]?.source.sourceId).toMatch(/^remote_run:v1:[0-9a-f]{64}$/);
+    expect(retryActivity[0]?.source.sourceId.length).toBeLessThanOrEqual(128);
+    expect(
+      fixture.server.database
+        .prepare("SELECT 1 FROM host_event_receipts WHERE message_id=?")
+        .get("retry-revalidate-max-id-accepted")
+    ).toBeDefined();
   });
 
   it("keeps one retry decision authoritative while assignment changes concurrently", async () => {

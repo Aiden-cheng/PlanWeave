@@ -91,6 +91,32 @@ describe("activity projection builders", () => {
     expect(remote.subjects.some((s) => s.kind === "host")).toBe(true);
   });
 
+  it("uses bounded distinct source ids for maximal remote-run dispatch ids", () => {
+    const dispatchId = "d".repeat(128);
+    const types = [
+      "remote_run_started",
+      "remote_run_succeeded",
+      "remote_run_failed",
+      "remote_run_interrupted"
+    ] as const;
+    const sourceIds = types.map((type) => remoteRunActivitySourceId(dispatchId, type));
+
+    expect(new Set(sourceIds).size).toBe(types.length);
+    for (const sourceId of sourceIds) {
+      expect(sourceId).toMatch(/^remote_run:v1:[0-9a-f]{64}$/);
+      expect(sourceId.length).toBeLessThanOrEqual(128);
+    }
+    expect(
+      buildRemoteRunActivity({
+        activityId: "act-max-remote-run",
+        projectId: "project-a",
+        type: "remote_run_started",
+        dispatchId,
+        occurredAt: "2026-07-24T12:02:00.000Z"
+      }).source.sourceId
+    ).toBe(sourceIds[0]);
+  });
+
   it("uses bounded collision-resistant assignment source ids for complete work-item refs", () => {
     const first = {
       kind: "block" as const,
