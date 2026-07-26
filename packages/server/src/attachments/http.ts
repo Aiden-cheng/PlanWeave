@@ -13,7 +13,8 @@ import {
 import {
   authenticateHumanForProject,
   humanTransportAllowed,
-  type HumanIdentityRepository
+  type HumanIdentityRepository,
+  type HumanProjectAuthority
 } from "../identity/index.js";
 import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
 import { attachmentErrorCodeSchema, type AttachmentErrorCode } from "./errors.js";
@@ -22,6 +23,7 @@ import { CommentAttachmentService, CommentAttachmentServiceError } from "./servi
 export type AttachmentHttpOptions = {
   service: CommentAttachmentService;
   repository: HumanIdentityRepository;
+  projectAuthority: HumanProjectAuthority;
   allowInsecureDevelopment?: boolean;
   clock?: () => Date;
 };
@@ -261,6 +263,11 @@ export async function handleCommentAttachmentHttpRequest(
 
   if (!humanTransportAllowed(request.socket, options.allowInsecureDevelopment ?? false)) {
     respondJson(response, 403, { error: "attachment_auth_forbidden" });
+    request.resume();
+    return true;
+  }
+  if (!options.projectAuthority.hasProject(matched.projectId)) {
+    respondJson(response, 403, { error: "attachment_cross_project_forbidden" });
     request.resume();
     return true;
   }

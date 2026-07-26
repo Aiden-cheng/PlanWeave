@@ -81,6 +81,7 @@ async function setup(options?: { clock?: () => Date }) {
         await handleCommentAttachmentHttpRequest(request, response, {
           service: attachmentService,
           repository: humanRepository,
+          projectAuthority,
           allowInsecureDevelopment: true,
           clock: options?.clock
         })
@@ -213,6 +214,32 @@ async function finalizePending(
 }
 
 describe("comment attachment HTTP and blob authorization", () => {
+  it("rejects projects outside the trusted authority before human authentication", async () => {
+    const { origin } = await setup();
+    const trustedToken = await bootstrap(origin);
+
+    const trusted = await createPending(origin, trustedToken, "project-a", {
+      expectedSizeBytes: 1,
+      mediaType: "text/plain"
+    });
+    expect(trusted.response.status).toBe(201);
+
+    const untrusted = await createPending(origin, trustedToken, "project-unknown", {
+      expectedSizeBytes: 1,
+      mediaType: "text/plain"
+    });
+    expect(untrusted.response.status).toBe(403);
+    expect(untrusted.payload.error).toBe("attachment_cross_project_forbidden");
+
+    const projectBToken = await bootstrap(origin, "project-b", "human-owner-b");
+    const crossProject = await createPending(origin, projectBToken, "project-a", {
+      expectedSizeBytes: 1,
+      mediaType: "text/plain"
+    });
+    expect(crossProject.response.status).toBe(401);
+    expect(crossProject.payload.error).toBe("attachment_auth_unauthenticated");
+  });
+
   it("stages, streams with hash verification, finalizes, and downloads with safe headers", async () => {
     const { origin } = await setup();
     const token = await bootstrap(origin);

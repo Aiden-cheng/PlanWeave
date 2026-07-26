@@ -430,6 +430,7 @@ export async function createDistributedServerComposition(
           await handleCommentAttachmentHttpRequest(request, response, {
             service: commentAttachments,
             repository: humanIdentity,
+            projectAuthority: runtimeRegistry,
             allowInsecureDevelopment: config.allowInsecureDevelopment,
             clock
           })
