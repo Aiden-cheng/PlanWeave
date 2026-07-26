@@ -583,7 +583,8 @@ export class RemoteBlockCoordinator {
       projectId: operation.projectId,
       canvasId: operation.canvasId,
       blockRef: operation.blockRef,
-      requiredCapabilities: operation.requiredCapabilities
+      requiredCapabilities: operation.requiredCapabilities,
+      allowHumanOverride: false
     });
     const persisted = this.options.operations.persistHostSelection(operation.id, snapshot);
     const authorized = persisted.hostSelection ?? snapshot;

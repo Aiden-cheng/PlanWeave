@@ -13,11 +13,14 @@ import {
   type RemoteBlockCoordinationOptions
 } from "../distributedCoordination.js";
 import type { PlanweaveServer } from "../lifecycle.js";
+import { centralSchemaVersion, latestCentralSchemaVersion } from "../migrations.js";
 import type {
   RemoteCoordinatorCheckpoint,
   RemoteCoordinatorCheckpointPort
 } from "../remoteBlockCoordinatorPorts.js";
 import { RemoteRuntimePortRegistry } from "../remoteRuntimeLocator.js";
+import { WorkAssignmentRepository } from "../work/repository.js";
+import type { AssignmentTarget } from "../work/schemas.js";
 
 type StartedCoordination = Awaited<ReturnType<typeof startRemoteBlockCoordinationServer>>;
 type Coordination = StartedCoordination["coordination"];
@@ -41,6 +44,14 @@ class CrashOnce implements RemoteCoordinatorCheckpointPort {
   }
 }
 
+class CrashEveryTime implements RemoteCoordinatorCheckpointPort {
+  constructor(readonly target: RemoteCoordinatorCheckpoint) {}
+
+  reached(checkpoint: RemoteCoordinatorCheckpoint): void {
+    if (checkpoint === this.target) throw new Error(`injected_crash:${checkpoint}`);
+  }
+}
+
 class StartupHarness {
   private server?: PlanweaveServer;
   coordination?: Coordination;
@@ -54,8 +65,12 @@ class StartupHarness {
     readonly locator: { projectId: string; canvasId: string }
   ) {}
 
-  static async create(): Promise<StartupHarness> {
-    const manifest = basicManifest();
+  static async create(options: { includeSecondTask?: boolean } = {}): Promise<StartupHarness> {
+    const manifest = basicManifest({
+      includeSecondTask: options.includeSecondTask,
+      parallel: options.includeSecondTask,
+      maxConcurrent: options.includeSecondTask ? 2 : undefined
+    });
     manifest.execution.defaultExecutor = "codex-acp";
     manifest.executors = {
       "codex-acp": {
@@ -149,6 +164,43 @@ class StartupHarness {
   request(idempotencyKey: string) {
     return { ...this.locator, blockRef: "T-001#B-001", idempotencyKey };
   }
+
+  assign(blockRef: string, target: AssignmentTarget): void {
+    new WorkAssignmentRepository(this.requireServer().database).applyCasUpdate({
+      expectedRevision: 0,
+      record: {
+        projectId: this.locator.projectId,
+        workItem: { kind: "block", canvasId: this.locator.canvasId, blockRef },
+        target,
+        revision: 1,
+        updatedBy: { kind: "system", id: "startup-test" },
+        updatedAt: "2030-01-01T00:00:00.000Z"
+      }
+    });
+  }
+
+  restoreV17Schema(): void {
+    const database = this.requireServer().database;
+    database.exec(`
+      DROP TABLE activity_projection_outbox;
+      DROP TABLE activity_records;
+      DROP TABLE comments;
+      DROP TABLE comment_attachment_bindings;
+      DROP TABLE comment_pending_uploads;
+      DROP TABLE comment_attachment_blobs;
+      ALTER TABLE dispatches ADD COLUMN package_ref TEXT NOT NULL DEFAULT '';
+      ALTER TABLE remote_operations DROP COLUMN host_selection_json;
+      DELETE FROM schema_migrations WHERE version >= 18;
+    `);
+    expect(centralSchemaVersion(database)).toBe(17);
+    expect(
+      database
+        .prepare(
+          "SELECT 1 AS present FROM pragma_table_info('remote_operations') WHERE name='host_selection_json'"
+        )
+        .get()
+    ).toBeUndefined();
+  }
 }
 
 function eventCount(database: PlanweaveServer["database"], table: string, type: string): number {
@@ -158,6 +210,108 @@ function eventCount(database: PlanweaveServer["database"], table: string, type: 
 }
 
 describe("RemoteBlockCoordinator startup reconciliation", () => {
+  it.each([
+    "human",
+    "unassigned"
+  ] as const)("upgrades a v17 database and denies %s NULL snapshot recovery without blocking legal work", async (deniedTargetKind) => {
+    const harness = await StartupHarness.create({ includeSecondTask: true });
+    const hostId = harness.registerHost();
+    await harness.start(new CrashEveryTime("after_input_materialization"));
+    const coordination = harness.requireCoordination();
+
+    await expect(
+      coordination.coordinator.dispatch({
+        ...harness.locator,
+        blockRef: "T-001#B-001",
+        idempotencyKey: `v17-denied-${deniedTargetKind}`
+      })
+    ).rejects.toThrowError("injected_crash:after_input_materialization");
+    await expect(
+      coordination.coordinator.dispatch({
+        ...harness.locator,
+        blockRef: "T-002#B-001",
+        idempotencyKey: `v17-legal-${deniedTargetKind}`
+      })
+    ).rejects.toThrowError("injected_crash:after_input_materialization");
+
+    const denied = coordination.operations.findByCallerIdentity({
+      ...harness.locator,
+      blockRef: "T-001#B-001",
+      idempotencyKey: `v17-denied-${deniedTargetKind}`
+    })!;
+    const legal = coordination.operations.findByCallerIdentity({
+      ...harness.locator,
+      blockRef: "T-002#B-001",
+      idempotencyKey: `v17-legal-${deniedTargetKind}`
+    })!;
+    harness.assign(
+      denied.blockRef,
+      deniedTargetKind === "human"
+        ? { kind: "human", humanPrincipalId: "human-startup" }
+        : { kind: "unassigned" }
+    );
+    harness.assign(legal.blockRef, { kind: "exact_host", hostId });
+    harness.restoreV17Schema();
+
+    const restarted = await harness.start();
+    expect(harness.requireServer().readiness().schemaVersion).toBe(latestCentralSchemaVersion);
+
+    const deniedAfterStartup = restarted.operations.getRequired(denied.id);
+    expect(deniedAfterStartup).toMatchObject({
+      state: "claimed",
+      dispatchId: denied.dispatchId,
+      executionAttemptId: denied.executionAttemptId
+    });
+    expect(deniedAfterStartup.hostSelection).toBeUndefined();
+    expect(deniedAfterStartup.attempt.hostId).toBeUndefined();
+    expect(deniedAfterStartup.attempt.leaseId).toBeUndefined();
+    expect(
+      harness
+        .requireServer()
+        .database.prepare("SELECT host_selection_json FROM remote_operations WHERE id=?")
+        .get(denied.id)?.host_selection_json
+    ).toBeNull();
+    expect(
+      harness
+        .requireServer()
+        .database.prepare(
+          "SELECT COUNT(*) AS count FROM host_capacity_reservations WHERE execution_attempt_id=?"
+        )
+        .get(denied.executionAttemptId)?.count
+    ).toBe(0);
+    expect(
+      harness
+        .requireServer()
+        .database.prepare("SELECT COUNT(*) AS count FROM dispatches WHERE id=?")
+        .get(denied.dispatchId)?.count
+    ).toBe(0);
+    expect(
+      harness
+        .requireServer()
+        .database.prepare("SELECT diagnostic_code FROM remote_operations WHERE id=?")
+        .get(denied.id)?.diagnostic_code
+    ).toBe("work_not_agent_assigned");
+
+    expect(restarted.operations.getRequired(legal.id)).toMatchObject({
+      state: "activated",
+      hostSelection: {
+        selection: "exact",
+        preferredHostId: hostId,
+        assignmentRevision: 1
+      },
+      attempt: { hostId }
+    });
+    expect(
+      harness
+        .requireServer()
+        .database.prepare(
+          "SELECT host_id,status FROM host_capacity_reservations WHERE execution_attempt_id=?"
+        )
+        .get(legal.executionAttemptId)
+    ).toEqual({ host_id: hostId, status: "active" });
+    expect(restarted.dispatches.getRequired(legal.dispatchId).status).toBe("leased");
+  });
+
   it.each([
     ["complete", "after_terminal_event_persistence"],
     ["complete", "after_dispatch_terminal_persistence"],
