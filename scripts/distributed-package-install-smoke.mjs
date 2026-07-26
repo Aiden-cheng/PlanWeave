@@ -112,7 +112,8 @@ function parseConsumerAudit(raw) {
   }
   return {
     productionOnly: true,
-    auditLevel: "high",
+    policy: "zero-vulnerabilities",
+    auditLevel: "info",
     vulnerabilities: {
       info: vulnerabilities.info,
       low: vulnerabilities.low,
@@ -127,7 +128,7 @@ function parseConsumerAudit(raw) {
 function auditInstalledConsumer(installDir) {
   try {
     const audit = parseConsumerAudit(
-      runCapture("npm", ["audit", "--json", "--omit=dev", "--audit-level=high"], {
+      runCapture("npm", ["audit", "--json", "--omit=dev", "--audit-level=info"], {
         cwd: installDir
       })
     );

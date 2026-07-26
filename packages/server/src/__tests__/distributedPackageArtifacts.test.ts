@@ -70,6 +70,9 @@ describe("distributed package artifact contracts", () => {
     expect(smokeScript).toContain('replaceAll(workRoot, "<temporary-root>")');
     expect(smokeScript).toContain("platform: process.platform");
     expect(smokeScript).toContain("arch: process.arch");
+    expect(smokeScript).toContain('policy: "zero-vulnerabilities"');
+    expect(smokeScript).toContain('auditLevel: "info"');
+    expect(smokeScript).toContain('"--audit-level=info"');
   });
 
   it("pins engines, bins, licenses, and publish metadata for shippable packages", () => {
