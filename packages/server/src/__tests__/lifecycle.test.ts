@@ -3,7 +3,11 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startPlanweaveServer } from "../lifecycle.js";
-import { latestCentralSchemaVersion } from "../migrations.js";
+import {
+  applyMigrations,
+  centralSchemaVersion,
+  latestCentralSchemaVersion
+} from "../migrations.js";
 import { openServerDatabase } from "../sqlite.js";
 import { releaseServerInstanceOwnership } from "../serverInstanceOwnership.js";
 
@@ -276,7 +280,7 @@ describe("server lifecycle", () => {
     initialized.close();
 
     const rolledBack = await openServerDatabase(databasePath, 5_000);
-    rolledBack.prepare("DELETE FROM schema_migrations WHERE version>=?").run(21);
+    rolledBack.prepare("DELETE FROM schema_migrations WHERE version=?").run(21);
     // Reintroduce historical column as a v20 residual for upgrade coverage.
     const columns = rolledBack.prepare("PRAGMA table_info(dispatches)").all();
     if (!columns.some((row) => row.name === "package_ref")) {
@@ -305,6 +309,26 @@ describe("server lifecycle", () => {
       ).toBe(false);
     } finally {
       upgraded.close();
+    }
+  });
+
+  it("fails closed when migration v21 cannot find the residual package_ref column", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "planweave-server-package-ref-missing-"));
+    directories.push(dataDirectory);
+    const database = await openServerDatabase(join(dataDirectory, "server.sqlite"), 5_000);
+    try {
+      applyMigrations(database);
+      database.prepare("DELETE FROM schema_migrations WHERE version>=?").run(21);
+
+      expect(() => applyMigrations(database)).toThrowError(
+        "migration_dispatches_package_ref_missing"
+      );
+      expect(centralSchemaVersion(database)).toBe(20);
+      expect(
+        database.prepare("SELECT 1 FROM schema_migrations WHERE version=21").get()
+      ).toBeUndefined();
+    } finally {
+      database.close();
     }
   });
 });

@@ -85,6 +85,9 @@ describe("comment/activity migration v20", () => {
         .prepare("INSERT INTO schema_migrations(version,applied_at) VALUES (?,?)")
         .run(version, "2020-01-01T00:00:00.000Z");
     }
+    database.exec(
+      "CREATE TABLE dispatches(id TEXT PRIMARY KEY, package_ref TEXT NOT NULL)"
+    );
     applyMigrations(database);
     expect(centralSchemaVersion(database)).toBe(latestCentralSchemaVersion);
     expect(latestCentralSchemaVersion).toBe(26);

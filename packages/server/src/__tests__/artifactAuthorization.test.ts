@@ -292,7 +292,7 @@ describe("artifact authorization migration", () => {
         created_at TEXT NOT NULL
       );
       CREATE TABLE dispatches(
-        id TEXT PRIMARY KEY,project_id TEXT NOT NULL,host_id TEXT NOT NULL,
+        id TEXT PRIMARY KEY,project_id TEXT NOT NULL,package_ref TEXT NOT NULL,host_id TEXT NOT NULL,
         lease_id TEXT NOT NULL,execution_attempt_id TEXT NOT NULL
       );
       CREATE TABLE mailbox_messages(

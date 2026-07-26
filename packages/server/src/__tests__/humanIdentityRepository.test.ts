@@ -120,6 +120,9 @@ describe("human identity migration v16", () => {
         .prepare("INSERT INTO schema_migrations(version,applied_at) VALUES (?,?)")
         .run(version, "2020-01-01T00:00:00.000Z");
     }
+    database.exec(
+      "CREATE TABLE dispatches(id TEXT PRIMARY KEY, package_ref TEXT NOT NULL)"
+    );
     // Minimal tables required only if later migrations depend on them — v16 is additive.
     applyMigrations(database);
     expect(centralSchemaVersion(database)).toBe(latestCentralSchemaVersion);

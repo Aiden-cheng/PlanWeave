@@ -1346,9 +1346,11 @@ function dropDispatchPackageRefColumn(database: SqliteDatabase): void {
   const hasTable = database
     .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='dispatches'")
     .get();
-  if (!hasTable) return;
+  if (!hasTable) throw new Error("migration_dispatches_table_missing");
   const columns = database.prepare("PRAGMA table_info(dispatches)").all();
-  if (!columns.some((row) => row.name === "package_ref")) return;
+  if (!columns.some((row) => row.name === "package_ref")) {
+    throw new Error("migration_dispatches_package_ref_missing");
+  }
   database.exec("ALTER TABLE dispatches DROP COLUMN package_ref");
 }
 

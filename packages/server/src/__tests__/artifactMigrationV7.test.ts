@@ -40,7 +40,7 @@ async function createV5Database(mediaType: string) {
       created_at TEXT NOT NULL
     );
     CREATE TABLE dispatches(
-      id TEXT PRIMARY KEY,project_id TEXT NOT NULL,host_id TEXT NOT NULL,
+      id TEXT PRIMARY KEY,project_id TEXT NOT NULL,package_ref TEXT NOT NULL,host_id TEXT NOT NULL,
       lease_id TEXT NOT NULL,execution_attempt_id TEXT NOT NULL
     );
     CREATE TABLE mailbox_messages(
@@ -134,6 +134,7 @@ describe("artifact migration v7", () => {
       INSERT INTO agent_hosts(
         id,display_name,credential_hash,capabilities_json,capacity,created_at
       ) VALUES ('host-v7','Host v7','credential-hash','["test"]',1,'2020-01-01T00:00:00.000Z');
+      CREATE TABLE dispatches(id TEXT PRIMARY KEY, package_ref TEXT NOT NULL);
       CREATE TABLE mailbox_messages(
         sequence INTEGER PRIMARY KEY AUTOINCREMENT,message_id TEXT NOT NULL UNIQUE,
         host_id TEXT NOT NULL REFERENCES agent_hosts(id),command_json TEXT NOT NULL,

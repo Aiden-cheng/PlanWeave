@@ -174,6 +174,7 @@ describe("remote coordinator migration v9", () => {
         (3,'2020-01-01T00:00:00.000Z'),(4,'2020-01-01T00:00:00.000Z'),
         (5,'2020-01-01T00:00:00.000Z'),(6,'2020-01-01T00:00:00.000Z'),
         (7,'2020-01-01T00:00:00.000Z'),(8,'2020-01-01T00:00:00.000Z');
+      CREATE TABLE dispatches(id TEXT PRIMARY KEY, package_ref TEXT NOT NULL);
       CREATE TABLE agent_hosts(
         id TEXT PRIMARY KEY,display_name TEXT NOT NULL,credential_hash TEXT NOT NULL,
         capabilities_json TEXT NOT NULL,capacity INTEGER NOT NULL,last_seen_at TEXT,
@@ -228,6 +229,7 @@ describe("remote recovery migration v13", () => {
         (7,'2020-01-01T00:00:00.000Z'),(8,'2020-01-01T00:00:00.000Z'),
         (9,'2020-01-01T00:00:00.000Z'),(10,'2020-01-01T00:00:00.000Z'),
         (11,'2020-01-01T00:00:00.000Z'),(12,'2020-01-01T00:00:00.000Z');
+      CREATE TABLE dispatches(id TEXT PRIMARY KEY, package_ref TEXT NOT NULL);
       CREATE TABLE agent_hosts(
         id TEXT PRIMARY KEY,display_name TEXT NOT NULL,credential_hash TEXT NOT NULL,
         capabilities_json TEXT NOT NULL,capacity INTEGER NOT NULL,last_seen_at TEXT,
@@ -363,7 +365,8 @@ describe("remote recovery migration v13", () => {
     database.exec(`
       CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY,applied_at TEXT NOT NULL);
       INSERT INTO schema_migrations(version,applied_at)
-      SELECT value,'2020-01-01T00:00:00.000Z' FROM json_each('[1,2,3,4,5,6,7,8,9,10,11,12,13,14]');
+        SELECT value,'2020-01-01T00:00:00.000Z' FROM json_each('[1,2,3,4,5,6,7,8,9,10,11,12,13,14]');
+      CREATE TABLE dispatches(id TEXT PRIMARY KEY, package_ref TEXT NOT NULL);
       CREATE TABLE remote_execution_attempts(
         execution_attempt_id TEXT PRIMARY KEY,dispatch_id TEXT NOT NULL,lease_id TEXT
       );
@@ -394,7 +397,8 @@ describe("remote operation host_selection migration v18", () => {
     database.exec(`
       CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY,applied_at TEXT NOT NULL);
       INSERT INTO schema_migrations(version,applied_at)
-      SELECT value,'2020-01-01T00:00:00.000Z' FROM json_each('[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]');
+        SELECT value,'2020-01-01T00:00:00.000Z' FROM json_each('[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]');
+      CREATE TABLE dispatches(id TEXT PRIMARY KEY, package_ref TEXT NOT NULL);
       CREATE TABLE agent_hosts(
         id TEXT PRIMARY KEY,display_name TEXT NOT NULL,credential_hash TEXT NOT NULL,
         capabilities_json TEXT NOT NULL,capacity INTEGER NOT NULL,last_seen_at TEXT,
