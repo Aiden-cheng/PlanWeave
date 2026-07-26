@@ -194,20 +194,27 @@ describe("Agent Host transport load and recovery boundaries", () => {
 
   it("rejects only the over-budget delivery when an inbound burst exceeds the queue", async () => {
     const degraded = deferred<void>();
+    const executed = deferred<void>();
     const httpServer = createServer();
     httpServers.push(httpServer);
     const webSocketServer = new WebSocketServer({ server: httpServer });
     webSocketServers.push(webSocketServer);
     webSocketServer.on("connection", (socket) => {
-      let sequence = 0;
-      socket.on("message", () => {
-        socket.send(JSON.stringify(welcome()));
-        socket.send(JSON.stringify(delivery(++sequence)));
+      socket.on("message", (data) => {
+        const event = JSON.parse(data.toString()) as { type?: string };
+        if (event.type === "host.hello") {
+          socket.send(JSON.stringify(welcome()));
+          return;
+        }
+        if (event.type === "host.heartbeat") {
+          socket.send(JSON.stringify(delivery(1)));
+          socket.send(JSON.stringify(delivery(2)));
+        }
       });
     });
     const port = await listen(httpServer);
     const state = await openState();
-    const execute = vi.fn();
+    const execute = vi.fn(async () => executed.resolve());
     const client = createClient(port, state, { execute }, { limits: { maxQueuedMessages: 1 } });
     client.subscribe((status) => {
       if (status.state === "degraded" && status.reason === "inbound_backpressure") {
@@ -216,7 +223,7 @@ describe("Agent Host transport load and recovery boundaries", () => {
     });
     client.start();
 
-    await degraded.promise;
+    await Promise.all([degraded.promise, executed.promise]);
     expect(execute).toHaveBeenCalledOnce();
     expect(execute.mock.calls[0]?.[0]).toMatchObject({ dispatchId: "dispatch-load-001" });
   });
