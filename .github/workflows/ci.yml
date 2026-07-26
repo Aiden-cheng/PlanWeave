@@ -57,6 +57,9 @@ jobs:
       - name: Build packages
         run: pnpm build
 
+      - name: Audit installed distributed tarballs
+        run: node scripts/distributed-package-install-smoke.mjs --skip-build
+
       # Distinct from typecheck so style/format failures are easy to spot in CI logs.
       - name: Biome check
         run: pnpm biome:check
