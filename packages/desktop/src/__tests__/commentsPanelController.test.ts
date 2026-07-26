@@ -158,6 +158,25 @@ afterEach(() => {
 });
 
 describe("useCommentsPanelController", () => {
+  it("binds an idle secondary-window hub to the connected profile", async () => {
+    const { api } = createApi();
+
+    renderHook(() =>
+      useCommentsPanelController({
+        workItem: taskItem,
+        open: true,
+        api,
+        t: createTranslator("en")
+      })
+    );
+
+    await waitFor(() => {
+      expect(api.listCollaborationMembers).toHaveBeenCalled();
+      expect(api.listCollaborationAssignments).toHaveBeenCalled();
+      expect(api.listCollaborationActivity).toHaveBeenCalled();
+    });
+  });
+
   it("loads pages, preserves drafts by work item, and mutates with expected revision", async () => {
     const { api, listComments, createComment, editComment, tombstoneComment } = createApi();
     const shell = acquireCollaborationReadModelController(api);

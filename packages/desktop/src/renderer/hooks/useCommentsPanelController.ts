@@ -148,6 +148,16 @@ export function useCommentsPanelController(
   const cancelledUploads = useRef(new Set<string>());
   const generationRef = useRef(0);
 
+  useEffect(() => {
+    if (!controller || !activeProfile || !sessionConnected) return;
+    const current = controller.getSnapshot();
+    if (current.profileId || current.projectId) return;
+    void controller.setActiveProject({
+      profileId: activeProfile.profileId,
+      projectId: activeProfile.projectId
+    });
+  }, [activeProfile, controller, sessionConnected]);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: workKey remounts draft identity
   const draft = useMemo(() => {
     void draftTick;
