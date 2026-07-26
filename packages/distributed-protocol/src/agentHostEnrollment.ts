@@ -3,10 +3,9 @@ import { capabilitiesSchema } from "./capabilities.js";
 import { hostCapacitySchema } from "./agentHostProtocol.js";
 import { opaqueIdentifierSchema } from "./identifiers.js";
 import { agentHostProtocolVersionSchema } from "./version.js";
+import { hostCredentialTokenSchema, hostEnrollmentCodeSchema } from "./agentHostCredentials.js";
 
 export const HOST_DISPLAY_NAME_MAX_LENGTH = 128 as const;
-export const hostEnrollmentCodeSchema = z.string().regex(/^pw_enroll_[A-Za-z0-9_-]{43}$/);
-export const hostCredentialTokenSchema = z.string().regex(/^pw_host_[A-Za-z0-9_-]{43}$/);
 
 const versioned = z.object({ protocolVersion: agentHostProtocolVersionSchema }).strict();
 

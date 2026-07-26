@@ -14,6 +14,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./operator-control": {
+      "types": "./dist/operatorControl.d.ts",
+      "import": "./dist/operatorControl.js"
     }
   },
   "homepage": "https://github.com/GaosCode/PlanWeave#readme",

@@ -6,7 +6,7 @@ import {
   type OperatorEnrollmentGrantResponse,
   type OperatorHostPage,
   type OperatorHostView
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/distributed-protocol/operator-control";
 import { z } from "zod";
 
 const operatorProfileIdSchema = z.string().trim().min(1).max(128);

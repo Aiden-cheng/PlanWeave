@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { capabilitiesSchema } from "./capabilities.js";
-import { hostEnrollmentCodeSchema } from "./agentHostEnrollment.js";
+import { hostEnrollmentCodeSchema } from "./agentHostCredentials.js";
 import { opaqueIdentifierSchema } from "./identifiers.js";
 
 /** Bounded operator credential accepted by Server and held only by Desktop main. */

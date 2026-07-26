@@ -152,9 +152,11 @@ export {
   type ServerToHostCommand
 } from "./agentHostProtocol.js";
 export {
-  HOST_DISPLAY_NAME_MAX_LENGTH,
   hostCredentialTokenSchema,
-  hostEnrollmentCodeSchema,
+  hostEnrollmentCodeSchema
+} from "./agentHostCredentials.js";
+export {
+  HOST_DISPLAY_NAME_MAX_LENGTH,
   hostEnrollmentCompletedSchema,
   hostEnrollmentErrorCodeSchema,
   hostEnrollmentErrorSchema,
