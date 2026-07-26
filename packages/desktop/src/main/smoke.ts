@@ -714,6 +714,11 @@ async function runLiveCollaborationSmoke(window: BrowserWindow): Promise<Record<
 
   // Exercise the real renderer control with a real Chromium keyboard event before
   // the form invokes the typed preload bridge methods.
+  app.focus({ steal: true });
+  window.show();
+  window.focus();
+  window.webContents.focus();
+  await wait(50);
   await window.webContents.executeJavaScript(`
     (() => {
       const trigger = document.querySelector('[data-testid="people-presence-trigger"]');
@@ -724,11 +729,29 @@ async function runLiveCollaborationSmoke(window: BrowserWindow): Promise<Record<
       return true;
     })()
   `);
+  const keyboardFocusedTestId = (await window.webContents.executeJavaScript(`
+    document.activeElement instanceof HTMLElement ? document.activeElement.dataset.testid ?? null : null
+  `)) as string | null;
   window.webContents.sendInputEvent({ type: "keyDown", keyCode: "ENTER" });
+  window.webContents.sendInputEvent({ type: "char", keyCode: "\r" });
   window.webContents.sendInputEvent({ type: "keyUp", keyCode: "ENTER" });
+  const keyboardOpenedPeoplePopover = (await window.webContents.executeJavaScript(`
+    (async () => {
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        if (document.querySelector('[data-testid="people-presence-popover"]')) return true;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      return false;
+    })()
+  `)) as boolean;
+  if (!keyboardOpenedPeoplePopover) {
+    throw new Error(
+      `People keyboard action did not open the presence popover in Chromium (activeElement=${keyboardFocusedTestId ?? "none"}).`
+    );
+  }
   await window.webContents.executeJavaScript(`
     (() => {
-      if (document.querySelector('[data-testid="people-connect-form"]')) return true;
+      if (document.querySelector('[data-testid="people-presence-popover"]')) return true;
       const trigger = document.querySelector('[data-testid="people-presence-trigger"]');
       if (!(trigger instanceof HTMLElement)) {
         throw new Error("People presence trigger disappeared before opening the panel.");
@@ -802,7 +825,8 @@ async function runLiveCollaborationSmoke(window: BrowserWindow): Promise<Record<
       return {
         panelMode: panel.getAttribute("data-mode"),
         memberCount: memberRows.length,
-        sessionPhase: status.session.phase
+        sessionPhase: status.session.phase,
+        keyboardOpenedPeoplePopover: ${JSON.stringify(keyboardOpenedPeoplePopover)}
       };
     })()
   `) as Record<string, unknown>;
@@ -871,6 +895,274 @@ async function runLiveCollaborationSmoke(window: BrowserWindow): Promise<Record<
   };
 }
 
+async function waitForCollaborationInspectorWindow(mainWindow: BrowserWindow): Promise<BrowserWindow> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const inspector = BrowserWindow.getAllWindows().find((candidate) => {
+      if (candidate === mainWindow || candidate.isDestroyed()) return false;
+      return candidate.webContents.getURL().includes("window=block-inspector");
+    });
+    if (inspector) return inspector;
+    await wait(50);
+  }
+  throw new Error("Collaboration accessibility smoke did not open the block inspector window.");
+}
+
+type ChromiumAxNode = {
+  role?: { value?: unknown };
+  name?: { value?: unknown };
+  properties?: Array<{ name?: unknown; value?: { value?: unknown } | unknown }>;
+};
+
+type ChromiumAxTree = { nodes?: ChromiumAxNode[] };
+
+async function readChromiumAccessibilityTree(window: BrowserWindow): Promise<ChromiumAxTree> {
+  const debuggerSession = window.webContents.debugger;
+  const attachedHere = !debuggerSession.isAttached();
+  if (attachedHere) debuggerSession.attach("1.3");
+  try {
+    return (await debuggerSession.sendCommand("Accessibility.getFullAXTree")) as ChromiumAxTree;
+  } finally {
+    if (attachedHere && debuggerSession.isAttached()) debuggerSession.detach();
+  }
+}
+
+function summarizeChromiumAccessibilityTree(tree: ChromiumAxTree, names: string[]): {
+  nodeCount: number;
+  namedRegion: boolean;
+  liveRegion: boolean;
+  roleNamePairs: number;
+} {
+  const nodes = tree.nodes ?? [];
+  const normalizedNames = names.map((name) => name.toLocaleLowerCase());
+  let namedRegion = false;
+  let liveRegion = false;
+  let roleNamePairs = 0;
+  for (const node of nodes) {
+    const role = String(node.role?.value ?? "").trim();
+    const name = String(node.name?.value ?? "").trim();
+    if (role && name) roleNamePairs += 1;
+    if (role && normalizedNames.some((expected) => name.toLocaleLowerCase().includes(expected))) {
+      namedRegion = true;
+    }
+    for (const property of node.properties ?? []) {
+      const propertyName = String(property.name ?? "");
+      const propertyValue =
+        typeof property.value === "object" && property.value !== null && "value" in property.value
+          ? String(property.value.value ?? "")
+          : String(property.value ?? "");
+      if (propertyName === "live" && propertyValue && propertyValue !== "off") {
+        liveRegion = true;
+      }
+    }
+  }
+  return { nodeCount: nodes.length, namedRegion, liveRegion, roleNamePairs };
+}
+
+async function runCollaborationAccessibilitySmoke(
+  mainWindow: BrowserWindow,
+  liveCollaboration: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  if (liveCollaboration.keyboardOpenedPeoplePopover !== true) {
+    throw new Error("People keyboard action did not open the presence popover in Chromium.");
+  }
+  const waitForLocalizedPeopleLabel = async (prefix: string): Promise<string> =>
+    (await mainWindow.webContents.executeJavaScript(`
+      (async () => {
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const trigger = document.querySelector('[data-testid="people-presence-trigger"]');
+          const label = trigger?.getAttribute("aria-label") ?? "";
+          if (label.startsWith(${JSON.stringify(prefix)})) return label;
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        throw new Error("Timed out waiting for localized People accessible name: " + ${JSON.stringify(prefix)});
+      })()
+    `)) as string;
+  await mainWindow.webContents.executeJavaScript(`
+    window.planweaveDesktopSettings.saveDesktopSettings({ language: "en" })
+  `);
+  await reloadSmokeRenderer(mainWindow, { requireCollaborationShell: true });
+  const enAccessibleName = await waitForLocalizedPeopleLabel("People");
+  await mainWindow.webContents.executeJavaScript(`
+    window.planweaveDesktopSettings.saveDesktopSettings({ language: "zh-CN" })
+  `);
+  await reloadSmokeRenderer(mainWindow, { requireCollaborationShell: true });
+  const zhAccessibleName = await waitForLocalizedPeopleLabel("成员");
+  const localization = {
+    stableTestId: "people-presence-trigger",
+    enAccessibleName,
+    zhAccessibleName,
+    enVisible: true,
+    zhVisible: true
+  };
+
+  const projectRoot = process.env.PLANWEAVE_DESKTOP_SMOKE_PROJECT_ROOT;
+  if (!projectRoot) throw new Error("PLANWEAVE_DESKTOP_SMOKE_PROJECT_ROOT is required for AX smoke.");
+  const resolvedProjectRoot = await realpath(projectRoot);
+  await mainWindow.webContents.executeJavaScript(`
+    window.planweave.openBlockInspectorWindow({
+      blockRef: "T-001#B-001",
+      canvas: { projectRoot: ${JSON.stringify(resolvedProjectRoot)}, canvasId: "default" },
+      language: "zh-CN"
+    })
+  `);
+  const inspector = await waitForCollaborationInspectorWindow(mainWindow);
+  await inspector.webContents.executeJavaScript(`
+    new Promise((resolve, reject) => {
+      let attempt = 0;
+      const check = () => {
+        const panel = document.querySelector('[data-testid="work-item-collaboration-panel"]');
+        if (panel) {
+          resolve(true);
+          return;
+        }
+        attempt += 1;
+        if (attempt >= 100) {
+          reject(new Error("Inspector collaboration panel did not render."));
+          return;
+        }
+        setTimeout(check, 50);
+      };
+      check();
+    })
+  `);
+
+  const focusTabAndPressEnter = async (testId: string): Promise<boolean> => {
+    await inspector.webContents.executeJavaScript(`
+      (() => {
+        const tab = document.querySelector('[data-testid="${testId}"]');
+        if (!(tab instanceof HTMLElement)) throw new Error("Missing collaboration tab: ${testId}");
+        tab.focus();
+        return true;
+      })()
+    `);
+    inspector.focus();
+    inspector.webContents.sendInputEvent({ type: "keyDown", keyCode: "Enter" });
+    inspector.webContents.sendInputEvent({ type: "keyUp", keyCode: "Enter" });
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const selected = (await inspector.webContents.executeJavaScript(`
+        document.querySelector('[data-testid="${testId}"]')?.getAttribute("aria-selected") === "true"
+      `)) as boolean;
+      if (selected) return true;
+      await wait(25);
+    }
+    return false;
+  };
+
+  const commentsKeyboardAction = await focusTabAndPressEnter("collaboration-tab-comments");
+  if (!commentsKeyboardAction) throw new Error("Comments tab keyboard action was not reflected.");
+  const commentsAx = summarizeChromiumAccessibilityTree(
+    await readChromiumAccessibilityTree(inspector),
+    ["评论", "Comments"]
+  );
+
+  const burst = (await inspector.webContents.executeJavaScript(`
+    (async () => {
+      const waitFor = async (predicate, label) => {
+        for (let attempt = 0; attempt < 200; attempt += 1) {
+          const value = predicate();
+          if (value) return value;
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        throw new Error("Timed out waiting for " + label);
+      };
+      const collaboration = window.planweaveCollaboration;
+      if (!collaboration) throw new Error("Inspector collaboration bridge is unavailable.");
+      const workItem = { kind: "block", canvasId: "default", blockRef: "T-001#B-001" };
+      const burstSize = 12;
+      const marker = "Desktop smoke bounded burst ";
+      let observerEventCount = 0;
+      let firstObserverEventAt = null;
+      const stopObserving = collaboration.onCollaborationObserverSignal((signal) => {
+        if (signal.type === "human.observer.event") {
+          observerEventCount += 1;
+          firstObserverEventAt ??= performance.now();
+        }
+      });
+      const burstStartedAt = performance.now();
+      await Promise.all(
+        Array.from({ length: burstSize }, (_, index) =>
+          collaboration.createCollaborationComment({
+            workItem,
+            body: marker + String(index)
+          })
+        )
+      );
+      await waitFor(() => observerEventCount >= burstSize, "observer burst events");
+      await waitFor(
+        () => [...document.querySelectorAll('[data-testid="comments-item-body"]')].some(
+          (row) => (row.textContent ?? "").includes(marker)
+        ),
+        "authoritative comment refresh in renderer"
+      );
+      const observerToRenderMs =
+        firstObserverEventAt === null ? null : Math.round(performance.now() - firstObserverEventAt);
+      if (observerToRenderMs === null || observerToRenderMs > 5_000) {
+        throw new Error("Observer to authoritative renderer refresh exceeded 5000ms.");
+      }
+      const readAllComments = async () => {
+        const items = [];
+        let cursor;
+        for (let pageIndex = 0; pageIndex < 4; pageIndex += 1) {
+          const query = { workItem, limit: 50 };
+          if (cursor) query.cursor = cursor;
+          const page = await collaboration.listCollaborationComments(query);
+          items.push(...page.items);
+          if (!page.nextCursor) break;
+          cursor = page.nextCursor;
+        }
+        return items;
+      };
+      const comments = await readAllComments();
+      if (comments.length < burstSize) throw new Error("Authoritative comment count was below burst size.");
+      const activity = await collaboration.listCollaborationActivity({ workItem, limit: 50 });
+      const domRowCount = document.querySelectorAll('[data-testid="comments-item"]').length;
+      if (domRowCount === 0 || domRowCount > 50) throw new Error("Comment DOM row bound was violated.");
+      stopObserving();
+      return {
+        burstSize,
+        authoritativeCommentCount: comments.length,
+        authoritativeActivityCount: activity.items.length,
+        observerEventCount,
+        observerToRenderMs,
+        domRowCount,
+        burstDurationMs: Math.round(performance.now() - burstStartedAt),
+        budgetMs: 5_000
+      };
+    })()
+  `)) as Record<string, unknown>;
+
+  const activityKeyboardAction = await focusTabAndPressEnter("collaboration-tab-activity");
+  if (!activityKeyboardAction) throw new Error("Activity tab keyboard action was not reflected.");
+  const activityAx = summarizeChromiumAccessibilityTree(
+    await readChromiumAccessibilityTree(inspector),
+    ["活动", "Activity"]
+  );
+  const peopleAx = summarizeChromiumAccessibilityTree(
+    await readChromiumAccessibilityTree(mainWindow),
+    ["成员", "People"]
+  );
+  for (const [label, summary] of Object.entries({ people: peopleAx, comments: commentsAx, activity: activityAx })) {
+    if (!summary.namedRegion || !summary.liveRegion || summary.roleNamePairs === 0) {
+      throw new Error("Chromium accessibility tree did not expose a named live region for " + label);
+    }
+  }
+  return {
+    locale: localization,
+    keyboard: {
+      peopleAction: liveCollaboration.keyboardOpenedPeoplePopover === true,
+      commentsAction: commentsKeyboardAction,
+      activityAction: activityKeyboardAction
+    },
+    chromiumAxTree: {
+      people: peopleAx,
+      comments: commentsAx,
+      activity: activityAx
+    },
+    boundedBurst: burst,
+    osVoiceOverOrNvda: "not_run"
+  };
+}
+
 async function writeExternalPromptSmokeChange(): Promise<void> {
   const promptPath = process.env.PLANWEAVE_DESKTOP_SMOKE_EXTERNAL_PROMPT_PATH;
   if (!promptPath) {
@@ -879,7 +1171,10 @@ async function writeExternalPromptSmokeChange(): Promise<void> {
   await writeFile(promptPath, "# Smoke external prompt change\n", "utf8");
 }
 
-async function reloadSmokeRenderer(window: BrowserWindow): Promise<void> {
+async function reloadSmokeRenderer(
+  window: BrowserWindow,
+  options: { requireCollaborationShell?: boolean } = {}
+): Promise<void> {
   await new Promise<void>((resolve) => {
     window.webContents.once("did-finish-load", resolve);
     window.webContents.reload();
@@ -889,13 +1184,28 @@ async function reloadSmokeRenderer(window: BrowserWindow): Promise<void> {
       let attempt = 0;
       const checkReady = () => {
         const graph = document.querySelector('[data-graph-surface][data-project-loading="false"]');
-        if (graph && document.querySelector('[data-auto-run-control]')) {
+        const graphReady = graph && document.querySelector('[data-auto-run-control]');
+        const collaborationShellReady =
+          ${JSON.stringify(options.requireCollaborationShell === true)} &&
+          document.querySelector('[data-testid="people-presence-trigger"]');
+        if (graphReady || collaborationShellReady) {
           resolve(true);
           return;
         }
         attempt += 1;
         if (attempt >= 100) {
-          reject(new Error("Reloaded renderer did not finish loading the smoke project."));
+          reject(
+            new Error(
+              "Reloaded renderer did not finish loading the smoke project: " +
+                JSON.stringify({
+                  rootMounted: Boolean(document.querySelector("#root")?.childElementCount),
+                  graphReady: Boolean(graphReady),
+                  collaborationShellReady: Boolean(collaborationShellReady),
+                  autoRunControl: Boolean(document.querySelector("[data-auto-run-control]")),
+                  peopleTrigger: Boolean(document.querySelector('[data-testid="people-presence-trigger"]'))
+                })
+            )
+          );
           return;
         }
         setTimeout(checkReady, 100);
@@ -929,7 +1239,10 @@ export async function runSmokeCheck(window: BrowserWindow): Promise<void> {
           process.env.PLANWEAVE_DESKTOP_SMOKE_COLLABORATION_INVITATION_TOKEN
             ? await runLiveCollaborationSmoke(window)
             : null;
-        workflow = { ...workflow, liveCollaboration };
+        const collaborationAccessibility = liveCollaboration
+          ? await runCollaborationAccessibilitySmoke(window, liveCollaboration)
+          : null;
+        workflow = { ...workflow, liveCollaboration, collaborationAccessibility };
       } catch (error) {
         console.error(
           JSON.stringify({
