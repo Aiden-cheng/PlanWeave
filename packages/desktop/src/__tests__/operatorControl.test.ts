@@ -61,6 +61,28 @@ describe("Desktop operator control trust boundary", () => {
     ).toThrow();
   });
 
+  it("rejects cyclic, deeply nested, and oversized IPC payloads without recursion", () => {
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    expect(() => assertNoSmuggledOperatorSecrets(cyclic, "cyclic")).toThrow(/cyclic/);
+
+    let deeplyNested: Record<string, unknown> = {};
+    const root = deeplyNested;
+    for (let depth = 0; depth < 20; depth += 1) {
+      const next: Record<string, unknown> = {};
+      deeplyNested.next = next;
+      deeplyNested = next;
+    }
+    expect(() => assertNoSmuggledOperatorSecrets(root, "deep")).toThrow(/too deep/);
+
+    expect(() =>
+      assertNoSmuggledOperatorSecrets(
+        { values: Array.from({ length: 300 }, (_, index) => ({ index })) },
+        "large"
+      )
+    ).toThrow(/too many/);
+  });
+
   it("uses safeStorage or explicit session-only persistence without plaintext", async () => {
     const directory = await root("planweave-operator-vault-");
     const durablePath = join(directory, "credentials.json");

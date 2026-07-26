@@ -177,28 +177,49 @@ const forbiddenSecretKeys = [
   "command"
 ] as const;
 
+const OPERATOR_IPC_MAX_DEPTH = 16;
+const OPERATOR_IPC_MAX_NODES = 256;
+
+function operatorIpcValidationError(context: string, detail: string): OperatorControlError {
+  return new OperatorControlError({
+    kind: "validation",
+    code: "operator_ipc_payload_forbidden",
+    message: `Operator IPC rejected ${context}: ${detail}`
+  });
+}
+
 /** Reject secrets and transport escapes crossing the renderer IPC boundary. */
 export function assertNoSmuggledOperatorSecrets(value: unknown, context: string): void {
-  const visit = (candidate: unknown, path: string): void => {
-    if (Array.isArray(candidate)) {
-      candidate.forEach((entry, index) => {
-        visit(entry, `${path}[${index}]`);
-      });
-      return;
+  const stack: Array<{ candidate: unknown; depth: number }> = [{ candidate: value, depth: 0 }];
+  const seen = new WeakSet<object>();
+  let visited = 0;
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current || !current.candidate || typeof current.candidate !== "object") continue;
+    if (current.depth > OPERATOR_IPC_MAX_DEPTH) {
+      throw operatorIpcValidationError(context, "payload nesting is too deep.");
     }
-    if (!candidate || typeof candidate !== "object") return;
-    for (const [key, nested] of Object.entries(candidate)) {
+    if (seen.has(current.candidate)) {
+      throw operatorIpcValidationError(context, "cyclic payloads are not allowed.");
+    }
+    seen.add(current.candidate);
+    visited += 1;
+    if (visited > OPERATOR_IPC_MAX_NODES) {
+      throw operatorIpcValidationError(context, "payload contains too many values.");
+    }
+    const entries = Array.isArray(current.candidate)
+      ? current.candidate.map((nested, index) => [String(index), nested] as const)
+      : Object.entries(current.candidate);
+    if (visited + entries.length > OPERATOR_IPC_MAX_NODES) {
+      throw operatorIpcValidationError(context, "payload contains too many values.");
+    }
+    for (const [key, nested] of entries) {
       if ((forbiddenSecretKeys as readonly string[]).includes(key) && nested !== undefined) {
-        throw new OperatorControlError({
-          kind: "validation",
-          code: "operator_ipc_payload_forbidden",
-          message: `Operator IPC rejected ${context}: field "${key}" is not allowed.`
-        });
+        throw operatorIpcValidationError(context, `field "${key}" is not allowed.`);
       }
-      visit(nested, `${path}.${key}`);
+      stack.push({ candidate: nested, depth: current.depth + 1 });
     }
-  };
-  visit(value, context);
+  }
 }
 
 export const operatorControlInvokeChannels = {
