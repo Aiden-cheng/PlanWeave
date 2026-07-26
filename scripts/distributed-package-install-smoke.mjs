@@ -20,7 +20,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { mkdir, cp, writeFile, access } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import { createRequire } from "node:module";
@@ -281,6 +281,8 @@ function inspectTarball(tarballPath, meta) {
 async function main() {
   const startedAt = new Date().toISOString();
   const workRoot = mkdtempSync(join(tmpdir(), "planweave-distributed-pack-smoke-"));
+  const redactEvidenceText = (value) =>
+    value.replaceAll(repoRoot, "<repo-root>").replaceAll(workRoot, "<temporary-root>");
   const packDir = join(workRoot, "pack");
   const installDir = join(workRoot, "install");
   const smokeDir = join(workRoot, "smoke");
@@ -297,7 +299,7 @@ async function main() {
       arch: process.arch,
       node: process.version,
       pnpm: null,
-      cwd: repoRoot
+      cwd: "<redacted>"
     },
     packages: [],
     install: null,
@@ -348,7 +350,13 @@ async function main() {
         inspection
       };
       tarballs.push(artifact);
-      report.packages.push(artifact);
+      report.packages.push({
+        key: artifact.key,
+        fileName: basename(artifact.path),
+        sha256: artifact.sha256,
+        bytes: artifact.bytes,
+        inspection: artifact.inspection
+      });
     }
 
     writeFileSync(
@@ -400,7 +408,7 @@ async function main() {
 
     report.install = {
       manager: "npm",
-      root: installDir,
+      root: "<redacted>",
       audit: consumerAudit,
       bins: {
         "planweave-server": existsSync(join(installDir, "node_modules/.bin/planweave-server")),
@@ -551,7 +559,7 @@ async function main() {
     process.exitCode = 0;
   } catch (error) {
     report.result = "failed";
-    report.error = error instanceof Error ? error.message : String(error);
+    report.error = redactEvidenceText(error instanceof Error ? error.message : String(error));
     report.finishedAt = new Date().toISOString();
     const serialized = `${JSON.stringify(report, null, 2)}\n`;
     if (reportPath) {

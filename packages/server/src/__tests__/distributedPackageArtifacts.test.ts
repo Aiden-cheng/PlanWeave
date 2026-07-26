@@ -56,6 +56,22 @@ function expectPublishableMetadata(pkg: PackageJson, directory: string): void {
 }
 
 describe("distributed package artifact contracts", () => {
+  it("keeps install evidence portable without local absolute paths", () => {
+    const smokeScript = readFileSync(
+      join(repoRoot, "scripts/distributed-package-install-smoke.mjs"),
+      "utf8"
+    );
+
+    expect(smokeScript).toContain('cwd: "<redacted>"');
+    expect(smokeScript).toContain("fileName: basename(artifact.path)");
+    expect(smokeScript).toContain('root: "<redacted>"');
+    expect(smokeScript).not.toContain("report.packages.push(artifact)");
+    expect(smokeScript).toContain('replaceAll(repoRoot, "<repo-root>")');
+    expect(smokeScript).toContain('replaceAll(workRoot, "<temporary-root>")');
+    expect(smokeScript).toContain("platform: process.platform");
+    expect(smokeScript).toContain("arch: process.arch");
+  });
+
   it("pins engines, bins, licenses, and publish metadata for shippable packages", () => {
     const protocol = readPackageJson("packages/distributed-protocol/package.json");
     const contracts = readPackageJson("packages/collaboration-contracts/package.json");
