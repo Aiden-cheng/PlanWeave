@@ -1,3 +1,4 @@
+import { operatorTokenSchema } from "@planweave-ai/distributed-protocol";
 import {
   assertNoSmuggledOperatorSecrets,
   operatorControlProfileSchema,
@@ -27,6 +28,10 @@ import {
   OperatorProfileStore,
   type OperatorProfileStorePaths
 } from "./operatorProfileStore.js";
+
+const operatorCredentialMaterialInputSchema = operatorImportCredentialInputSchema.extend({
+  operatorToken: operatorTokenSchema
+});
 
 export const OPERATOR_SESSION_ONLY_WARNING =
   "Operator credential is held for this session only because OS secure storage is unavailable.";
@@ -232,7 +237,7 @@ export class OperatorControlService {
           });
         }
       }
-      const parsed = operatorImportCredentialInputSchema.parse(input);
+      const parsed = operatorCredentialMaterialInputSchema.parse(input);
       if (!(await this.profiles.get(parsed.profileId))) {
         throw new OperatorControlError({ kind: "validation", code: "operator_profile_not_found" });
       }

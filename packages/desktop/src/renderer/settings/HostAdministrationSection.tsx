@@ -76,7 +76,6 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
   const [displayName, setDisplayName] = useState("");
   const [serverBaseUrl, setServerBaseUrl] = useState("");
   const [allowInsecureTransport, setAllowInsecureTransport] = useState(false);
-  const [operatorToken, setOperatorToken] = useState("");
   const [operatorId, setOperatorId] = useState("");
 
   useEffect(() => {
@@ -101,10 +100,9 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
 
   const handleImportCredential = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!activeProfile || !operatorToken) return;
-    const imported = await importCredential(activeProfile.profileId, operatorToken, operatorId);
+    if (!activeProfile) return;
+    const imported = await importCredential(activeProfile.profileId, operatorId);
     if (imported) {
-      setOperatorToken("");
       setOperatorId("");
     }
   };
@@ -327,7 +325,7 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
                   ? t("hostAdminCredentialAvailable")
                   : t("hostAdminCredentialMissing")}
               </p>
-              <div className="grid gap-1.5 sm:grid-cols-2">
+              <div className="grid gap-1.5">
                 <div className="grid gap-1.5">
                   <Label htmlFor="host-admin-operator-id">{t("hostAdminOperatorId")}</Label>
                   <Input
@@ -338,25 +336,15 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
                     autoComplete="off"
                   />
                 </div>
-                <div className="grid gap-1.5">
-                  <Label htmlFor="host-admin-operator-token">
-                    {t("hostAdminOperatorCredential")}
-                  </Label>
-                  <Input
-                    id="host-admin-operator-token"
-                    data-testid="host-admin-operator-token"
-                    type="password"
-                    value={operatorToken}
-                    onChange={(event) => setOperatorToken(event.target.value)}
-                    autoComplete="new-password"
-                  />
-                </div>
               </div>
+              <p className="text-xs text-text-muted">
+                {t("hostAdminOperatorCredential")}
+              </p>
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="submit"
                   data-testid="host-admin-import-credential"
-                  disabled={busy || Boolean(grant) || !operatorToken}
+                  disabled={busy || Boolean(grant)}
                 >
                   {t("hostAdminImportCredential")}
                 </Button>

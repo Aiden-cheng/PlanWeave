@@ -11,7 +11,8 @@ import { OperatorControlService } from "../main/operatorControl/operatorControlS
 import { OperatorProfileStore } from "../main/operatorControl/operatorProfileStore.js";
 import {
   assertNoSmuggledOperatorSecrets,
-  operatorControlProfileSchema
+  operatorControlProfileSchema,
+  operatorImportCredentialInputSchema
 } from "../shared/operatorControl.js";
 
 const tokenA = "operator_a_token_abcdefghijklmnopqrstuvwxyz_1234";
@@ -45,6 +46,18 @@ const profile = (profileId: string, serverBaseUrl = "https://operator.example.te
 });
 
 describe("Desktop operator control trust boundary", () => {
+  it("keeps credential material out of the renderer import contract", () => {
+    expect(operatorImportCredentialInputSchema.parse({ profileId: "profile-a" })).toEqual({
+      profileId: "profile-a"
+    });
+    expect(() =>
+      operatorImportCredentialInputSchema.parse({
+        profileId: "profile-a",
+        operatorToken: tokenA
+      })
+    ).toThrow();
+  });
+
   it("uses safeStorage or explicit session-only persistence without plaintext", async () => {
     const directory = await root("planweave-operator-vault-");
     const durablePath = join(directory, "credentials.json");

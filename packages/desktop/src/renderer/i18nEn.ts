@@ -491,8 +491,9 @@ export const enCatalog = {
   hostAdminCredentialDescription:
     "Import a credential into the protected Desktop main-process vault. Only availability and persistence are shown.",
   hostAdminOperatorId: "Operator ID (optional)",
-  hostAdminOperatorCredential: "Operator credential",
-  hostAdminImportCredential: "Import credential",
+  hostAdminOperatorCredential:
+    "Copy the operator token to the system clipboard. PlanWeave imports it directly in the main process and never exposes it to this page.",
+  hostAdminImportCredential: "Import token from clipboard",
   hostAdminClearCredential: "Clear credential",
   hostAdminCredentialAvailable: "Credential available",
   hostAdminCredentialMissing: "Credential unavailable",

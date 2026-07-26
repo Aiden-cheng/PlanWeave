@@ -164,21 +164,17 @@ describe("Host administration surface", () => {
     );
   });
 
-  it("imports operator credentials without retaining or displaying the token", async () => {
+  it("requests a main-process clipboard import without accepting the token", async () => {
     const user = userEvent.setup();
     render(<HostAdministrationSection t={createTranslator("en")} />);
     await screen.findByTestId("host-administration");
 
-    const token = "fixture_token_abcdefghijklmnopqrstuvwxyz_1234";
-    await user.type(screen.getByTestId("host-admin-operator-token"), token);
+    expect(screen.queryByTestId("host-admin-operator-token")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("host-admin-import-credential"));
 
     expect(bridgeMock.importOperatorCredential).toHaveBeenCalledWith({
-      profileId: "profile-a",
-      operatorToken: token
+      profileId: "profile-a"
     });
-    await waitFor(() => expect(screen.getByTestId("host-admin-operator-token")).toHaveValue(""));
-    expect(screen.queryByText(token)).not.toBeInTheDocument();
   });
 
   it("maps a plain IPC error code to an honest forbidden state", async () => {

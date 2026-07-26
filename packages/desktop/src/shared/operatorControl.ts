@@ -3,7 +3,6 @@ import {
   operatorHostPageSchema,
   operatorHostViewSchema,
   operatorPageQuerySchema,
-  operatorTokenSchema,
   type OperatorEnrollmentGrantResponse,
   type OperatorHostPage,
   type OperatorHostView
@@ -76,7 +75,6 @@ export type OperatorProfileIdInput = z.infer<typeof operatorProfileIdInputSchema
 export const operatorImportCredentialInputSchema = z
   .object({
     profileId: operatorProfileIdSchema,
-    operatorToken: operatorTokenSchema,
     operatorId: operatorProfileIdSchema.optional()
   })
   .strict();

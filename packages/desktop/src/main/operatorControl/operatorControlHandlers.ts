@@ -1,6 +1,8 @@
-import { BrowserWindow, ipcMain, safeStorage } from "electron";
+import { BrowserWindow, clipboard, ipcMain, safeStorage } from "electron";
 import {
+  assertNoSmuggledOperatorSecrets,
   operatorControlInvokeChannels,
+  operatorImportCredentialInputSchema,
   operatorControlStatusChangedChannel,
   type OperatorControlStatus,
   type PlanWeaveOperatorControlApi
@@ -11,6 +13,10 @@ import {
 } from "./operatorControlService.js";
 
 let service: OperatorControlService | null = null;
+
+export type OperatorControlHandlerOptions = OperatorControlServiceOptions & {
+  readOperatorToken?: () => string;
+};
 
 function publishStatusToRenderers(status: OperatorControlStatus): void {
   for (const window of BrowserWindow.getAllWindows()) {
@@ -48,9 +54,10 @@ export function setOperatorControlServiceForTests(next: OperatorControlService |
 }
 
 export function registerOperatorControlHandlers(
-  options: OperatorControlServiceOptions = {}
+  options: OperatorControlHandlerOptions = {}
 ): OperatorControlService {
-  service = createDefaultService(options);
+  const { readOperatorToken = () => clipboard.readText(), ...serviceOptions } = options;
+  service = createDefaultService(serviceOptions);
   const active = service;
   ipcMain.handle(operatorControlInvokeChannels.getStatus, () => active.getStatus());
   ipcMain.handle(operatorControlInvokeChannels.upsertProfile, (_event, input: unknown) =>
@@ -65,9 +72,14 @@ export function registerOperatorControlHandlers(
   ipcMain.handle(operatorControlInvokeChannels.clearActiveProfile, () =>
     active.clearActiveProfile()
   );
-  ipcMain.handle(operatorControlInvokeChannels.importCredential, (_event, input: unknown) =>
-    active.importCredential(input)
-  );
+  ipcMain.handle(operatorControlInvokeChannels.importCredential, (_event, input: unknown) => {
+    assertNoSmuggledOperatorSecrets(input, "importOperatorCredential");
+    const parsed = operatorImportCredentialInputSchema.parse(input);
+    return active.importCredential({
+      ...parsed,
+      operatorToken: readOperatorToken().trim()
+    });
+  });
   ipcMain.handle(operatorControlInvokeChannels.clearCredential, (_event, input: unknown) =>
     active.clearCredential(input)
   );

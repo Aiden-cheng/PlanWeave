@@ -29,11 +29,7 @@ export type HostAdministrationController = {
   removeProfile: (profileId: string) => Promise<boolean>;
   selectProfile: (profileId: string) => Promise<boolean>;
   clearActiveProfile: () => Promise<boolean>;
-  importCredential: (
-    profileId: string,
-    operatorToken: string,
-    operatorId?: string
-  ) => Promise<boolean>;
+  importCredential: (profileId: string, operatorId?: string) => Promise<boolean>;
   clearCredential: (profileId: string) => Promise<boolean>;
   createGrant: () => Promise<OperatorEnrollmentGrantResponse | null>;
   revokeHost: (hostId: string) => Promise<OperatorHostView | null>;
@@ -174,11 +170,10 @@ export function useHostAdministrationController(): HostAdministrationController 
   );
 
   const importCredential = useCallback(
-    (profileId: string, operatorToken: string, operatorId?: string) =>
+    (profileId: string, operatorId?: string) =>
       runStatusAction(() =>
         operatorControlBridge!.importOperatorCredential({
           profileId,
-          operatorToken,
           ...(operatorId?.trim() ? { operatorId: operatorId.trim() } : {})
         })
       ),

@@ -483,8 +483,9 @@ export const zhCnCatalog = {
   hostAdminCredentialDescription:
     "将凭证导入受保护的 Desktop main vault；这里只显示可用性和持久化状态。",
   hostAdminOperatorId: "操作员 ID（可选）",
-  hostAdminOperatorCredential: "操作员凭证",
-  hostAdminImportCredential: "导入凭证",
+  hostAdminOperatorCredential:
+    "先将操作员令牌复制到系统剪贴板。PlanWeave 会在主进程中直接导入，不会将令牌暴露给此页面。",
+  hostAdminImportCredential: "从剪贴板导入令牌",
   hostAdminClearCredential: "清除凭证",
   hostAdminCredentialAvailable: "凭证可用",
   hostAdminCredentialMissing: "凭证不可用",
