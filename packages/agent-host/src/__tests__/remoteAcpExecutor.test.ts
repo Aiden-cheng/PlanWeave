@@ -543,4 +543,54 @@ describe("RemoteAcpExecutor", () => {
       expect((error as AgentHostExecutionError).message).not.toContain("raw-secret");
     }
   });
+
+  it("preserves both failures when ACP execution and input cleanup fail", async () => {
+    const executionError = new Error("execution failed");
+    const cleanupError = new Error("cleanup failed");
+    vi.resetModules();
+    vi.doMock("@planweave-ai/runtime", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("@planweave-ai/runtime")>()),
+      executeAcp: vi.fn(async () => {
+        throw executionError;
+      })
+    }));
+    vi.doMock("../execution/inputArtifactWorkspace.js", () => ({
+      prepareInputArtifacts: vi.fn(async () => ({
+        prompt: "prepared prompt",
+        cleanup: vi.fn(async () => {
+          throw cleanupError;
+        })
+      }))
+    }));
+
+    try {
+      const { RemoteAcpExecutor: IsolatedRemoteAcpExecutor } = await import(
+        "../execution/remoteAcpExecutor.js"
+      );
+      const { outbox } = await openOutbox();
+      const input = command();
+      const executor = new IsolatedRemoteAcpExecutor({
+        workspaceResolver: { resolve: () => ({ cwd: process.cwd() }) },
+        profileResolver: profileResolver("success"),
+        outbox,
+        hostCapabilities: ["linux", "acp.test"]
+      });
+
+      try {
+        await executor.execute(input, artifactContext(input).context);
+        throw new Error("expected_combined_execution_cleanup_failure");
+      } catch (error) {
+        expect(error).toBeInstanceOf(AggregateError);
+        expect((error as AggregateError).message).toBe(
+          "remote_acp_execution_and_input_cleanup_failed"
+        );
+        expect((error as AggregateError).errors).toEqual([executionError, cleanupError]);
+        expect((error as AggregateError).cause).toBe(executionError);
+      }
+    } finally {
+      vi.doUnmock("@planweave-ai/runtime");
+      vi.doUnmock("../execution/inputArtifactWorkspace.js");
+      vi.resetModules();
+    }
+  });
 });

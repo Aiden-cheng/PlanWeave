@@ -240,69 +240,88 @@ export class RemoteAcpExecutor implements AgentHostExecutor {
     const interactionTimeoutMs =
       this.options.limits?.interactionTimeoutMs ??
       DEFAULT_ACP_EXECUTION_LIMITS.interactionTimeoutMs;
-    let result: Awaited<ReturnType<typeof executeAcp>>;
+    let executionOutcome:
+      | { status: "succeeded"; result: Awaited<ReturnType<typeof executeAcp>> }
+      | { status: "failed"; error: unknown };
     let resumedSessionLoaded = false;
     let cleanupError: unknown;
     try {
-      result = await executeAcp({
-        launch: {
-          command: profile.launch.command,
-          args: profile.launch.args,
-          trusted: true
-        },
-        workspace,
-        env: profile.env,
-        clientInfo: { name: "PlanWeave Agent Host", version: agentHostPackageVersion },
-        prompt: preparedInputs.prompt,
-        sessionStart: context.sessionStart,
-        authentication: profile.authentication,
-        interactionBroker: interactionBroker({
-          identity,
-          outbox: this.options.outbox,
-          responder: this.options.interactionResponder
-        }),
-        interactionDeadline: () =>
-          new Date(Math.min(Date.parse(command.leaseExpiresAt), Date.now() + interactionTimeoutMs)),
-        lifecycleObserver: async (event) => {
-          if (event.kind !== "session_ready") return;
-          try {
-            await configureSession(event, profile, command.envelope.session);
-          } catch {
-            sessionConfigurationFailed = true;
-            throw sessionCapabilityError();
+      executionOutcome = {
+        status: "succeeded",
+        result: await executeAcp({
+          launch: {
+            command: profile.launch.command,
+            args: profile.launch.args,
+            trusted: true
+          },
+          workspace,
+          env: profile.env,
+          clientInfo: { name: "PlanWeave Agent Host", version: agentHostPackageVersion },
+          prompt: preparedInputs.prompt,
+          sessionStart: context.sessionStart,
+          authentication: profile.authentication,
+          interactionBroker: interactionBroker({
+            identity,
+            outbox: this.options.outbox,
+            responder: this.options.interactionResponder
+          }),
+          interactionDeadline: () =>
+            new Date(
+              Math.min(Date.parse(command.leaseExpiresAt), Date.now() + interactionTimeoutMs)
+            ),
+          lifecycleObserver: async (event) => {
+            if (event.kind !== "session_ready") return;
+            try {
+              await configureSession(event, profile, command.envelope.session);
+            } catch {
+              sessionConfigurationFailed = true;
+              throw sessionCapabilityError();
+            }
+          },
+          eventSink: async (event) => {
+            await this.options.outbox.append({ kind: "engine_event", identity, event });
+            if (
+              context.sessionStart.kind === "load" &&
+              event.kind === "session_started" &&
+              event.loaded &&
+              event.sessionId === context.sessionStart.sessionId
+            ) {
+              resumedSessionLoaded = true;
+            }
+          },
+          signal: context.signal,
+          limits: {
+            ...this.options.limits,
+            outputMaxBytes: Math.min(
+              this.options.limits?.outputMaxBytes ?? DEFAULT_ACP_EXECUTION_LIMITS.outputMaxBytes,
+              command.envelope.output.maxArtifactBytes
+            )
           }
-        },
-        eventSink: async (event) => {
-          await this.options.outbox.append({ kind: "engine_event", identity, event });
-          if (
-            context.sessionStart.kind === "load" &&
-            event.kind === "session_started" &&
-            event.loaded &&
-            event.sessionId === context.sessionStart.sessionId
-          ) {
-            resumedSessionLoaded = true;
-          }
-        },
-        signal: context.signal,
-        limits: {
-          ...this.options.limits,
-          outputMaxBytes: Math.min(
-            this.options.limits?.outputMaxBytes ?? DEFAULT_ACP_EXECUTION_LIMITS.outputMaxBytes,
-            command.envelope.output.maxArtifactBytes
-          )
-        }
-      });
+        })
+      };
     } catch (error) {
-      if (context.sessionStart.kind === "load" && !resumedSessionLoaded) {
-        throw new AgentHostSessionLoadError();
+      executionOutcome = {
+        status: "failed",
+        error:
+          context.sessionStart.kind === "load" && !resumedSessionLoaded
+            ? new AgentHostSessionLoadError()
+            : error
+      };
+    }
+    try {
+      await preparedInputs.cleanup();
+    } catch (error) {
+      cleanupError = error;
+    }
+    if (executionOutcome.status === "failed") {
+      if (cleanupError !== undefined) {
+        throw new AggregateError(
+          [executionOutcome.error, cleanupError],
+          "remote_acp_execution_and_input_cleanup_failed",
+          { cause: executionOutcome.error }
+        );
       }
-      throw error;
-    } finally {
-      try {
-        await preparedInputs.cleanup();
-      } catch (error) {
-        cleanupError = error;
-      }
+      throw executionOutcome.error;
     }
     if (cleanupError !== undefined) {
       throw failure(
@@ -310,6 +329,7 @@ export class RemoteAcpExecutor implements AgentHostExecutor {
         "The Agent Host could not clean up dispatch input artifacts."
       );
     }
+    const result = executionOutcome.result;
 
     if (result.terminal.state !== "succeeded") {
       if (context.sessionStart.kind === "load" && !resumedSessionLoaded) {
