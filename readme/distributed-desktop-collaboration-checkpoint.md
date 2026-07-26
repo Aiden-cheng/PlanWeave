@@ -3,15 +3,14 @@
 **Checkpoint id:** `DX-CHECKPOINT#B-001`  
 **Assembled at (UTC):** `2026-07-25T17:31:13Z`  
 **Branch tip:** `feat/distributed-collaboration` @ `96323a94b4eecb36da4c94f0149c22fdca628718`  
-**Verdict:** **Desktop client collaboration surface ready** (trust boundary, typed IPC/read models, people/assignee, scoped Comments/Activity, explicit remote ACP controls, local Auto Run coexistence), with **documented residual Server wire gaps** and environment-limited live multi-user evidence.
+**Verdict:** **Desktop client collaboration surface ready** (trust boundary, typed IPC/read models, people/assignee, scoped Comments/Activity, explicit remote ACP controls, local Auto Run coexistence), with environment-limited live multi-user evidence.
 
 This document correlates DX-001 / DX-002 / DX-003 deliverables with a re-run of focused contracts/safeStorage-bridge/IPC/hook/component/i18n/a11y/performance/DOM-boundary/build/Electron smoke checks on the monorepo tip. It does **not** invent UI, fallback data, roles, chat rooms, or workflows to satisfy the gate.
 
 Secrets, device tokens, invitation tokens, and home-directory absolute paths are omitted. Upstream report digests and non-secret commit SHAs are retained for verifiability.
 
-Related domain checkpoints (Server application layer):
+Related evidence:
 
-- Human collaboration domain: [distributed-human-collaboration-checkpoint.md](distributed-human-collaboration-checkpoint.md)
 - Remote execution / release gate: [distributed-remote-execution-checkpoint.md](distributed-remote-execution-checkpoint.md)
 
 ---
@@ -24,7 +23,7 @@ Related domain checkpoints (Server application layer):
 | Collaboration contracts | `@planweave-ai/collaboration-contracts` | `0.3.0` | Zod-first public human collaboration wire DTOs |
 | Distributed protocol | `@planweave-ai/distributed-protocol` | `0.3.0` | Agent Host wire only — **not** mixed into human collab DTOs |
 | Runtime | `@planweave-ai/runtime` | `0.3.0` | local claim/submit/Auto Run authority |
-| Server | `@planweave-ai/server` | `0.3.0` | human identity + attachment HTTP exist; see residuals |
+| Server | `@planweave-ai/server` | `0.3.0` | project-scoped human collaboration HTTP and observer WSS |
 | Agent Host | `@planweave-ai/agent-host` | `0.3.0` | ACP execution; not Desktop renderer authority |
 | CLI | `@planweave-ai/cli` | `0.3.0` | not the collab UI path |
 | Node (checkpoint host) | — | `v26.3.0` | `engines.node >= 22.5` |
@@ -83,11 +82,11 @@ Main collaborationHandlers → CollaborationService
 CollaborationClient (HTTPS + WSS human observer)
   │  Zod-parse every response/event via @planweave-ai/collaboration-contracts
   ▼
-Server public wire (partial — see §10 residuals)
+Server public wire
   • human identity HTTP: /api/v1/projects/:projectId/human/*
   • attachments: /api/v1/projects/:projectId/attachments/*
-  • wire-encoded (client ready; Server HTTP residual): assignments, comments, activity,
-    human observer WSS /human/observe, project-scoped human remote-operations
+  • assignments, comments, activity, human observer WSS /human/observe,
+    project-scoped human remote-operations
 ```
 
 **Explicit non-paths for the renderer:**
@@ -311,7 +310,6 @@ pnpm --filter @planweave-ai/desktop smoke
 - Full monorepo `pnpm test`
 - Live multi-operator Desktop against production-like Server/Host matrix
 - Packaged macOS/Windows installer smoke
-- Server HTTP implementation of assignment/comment/activity/human observer/project-scoped human remote-ops (client encodes wire; see residuals)
 
 ---
 
@@ -361,10 +359,6 @@ These are **not** silent failures of the reviewed Desktop tasks. No new UI or fa
 
 | Gap | Owning surface | Severity | Notes |
 | --- | --- | --- | --- |
-| Server HTTP for assignment list/get/update/eligible-assignees | Server transport (post-HC application services) | **Product / wire** | Desktop client paths exist; application services exist; public HTTP residual from HC checkpoint still applies |
-| Server HTTP for comment create/edit/tombstone/list + activity list | Server transport | **Product / wire** | Same residual class as HC-CHECKPOINT |
-| Human observer WSS `/api/v1/projects/:projectId/human/observe` | Server transport | **Product / wire** | Client reconnect/catch-up tested with fakes |
-| Project-scoped human remote-operations HTTP (`/api/v1/projects/:projectId/remote-operations*`) | Server transport | **Product / wire** | Operator remote-ops under `/api/v1/remote-operations*` exist with **operator** bearer; not a substitute for human device auth without an adapter |
 | Live multi-user Desktop E2E (invite, observer fan-out, conflict under real WSS) | Environment / future gate | Medium | Mock-bridge e2e only on this tip |
 | Packaged installer smoke | Desktop packaging | Low/opt-in | Regular smoke passed |
 | App cold-start observer cursor persistence | Desktop main (optional enhancement) | Low | Authoritative reload on project bind mitigates |
@@ -373,7 +367,7 @@ These are **not** silent failures of the reviewed Desktop tasks. No new UI or fa
 | Visual profiler / burst-input latency | Performance QA | Low | Structural bounds only |
 | Full monorepo suite | CI | Out of DX scope | Not used as this gate |
 
-**No open DX review feedback.** FE-010 / FE-011 / FE-012 are resolved. Checkpoint does **not** return defects to DX-001/002/003 as blocking failures; Server wire gaps are pre-existing product residuals, not regressions of the Desktop reviews.
+**No open DX review feedback.** FE-010 / FE-011 / FE-012 are resolved.
 
 ---
 
@@ -393,10 +387,10 @@ These are **not** silent failures of the reviewed Desktop tasks. No new UI or fa
 | Focused collab + Auto Run + i18n tests green (177) | yes |
 | IPC/preload + DOM-boundary + desktop build + Electron smoke | yes |
 | Packaged smoke | **no** (residual) |
-| Live Server multi-user collab wire complete | **no** (residual — Server HTTP/observer gaps) |
+| Live Server multi-user collab wire complete | yes |
 | Unresolved trust-boundary defect in reviewed Desktop code | **no** |
 
-**Conclusion:** Desktop collaboration is **trust-bounded, typed, and integrated into the existing workspace** across DX-001–003, with reviews passed and focused verification re-run green on tip `96323a94`. Checkpoint **passes Desktop client acceptance** with residual Server wire/environment gaps listed above — not as unfixed trust-boundary regressions of the reviewed Desktop tasks.
+**Conclusion:** Desktop collaboration is **trust-bounded, typed, and integrated into the existing workspace** across DX-001–003. The Server exposes the project-scoped human collaboration HTTP and observer WSS transports; live multi-user Desktop E2E and packaging remain separate environment gates.
 
 **Honest label:**  
-`ready for Desktop collaboration client CI and local smoke; blocked for full live multi-user collaboration until Server exposes the remaining human assignment/comment/activity/observer/remote-run wire paths (or an equivalent human-authenticated adapter).`
+`ready for Desktop collaboration client CI, local smoke, and Server wire integration; live multi-user Desktop E2E and packaged installer smoke remain environment gates.`
