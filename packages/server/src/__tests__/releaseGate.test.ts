@@ -8,6 +8,7 @@ import {
   buildReleaseGateReport,
   runReleaseGateCli
 } from "../releaseGate/index.js";
+import { runBoundedReleaseGateCommand } from "../releaseGate/runDeterministic.js";
 
 const roots: string[] = [];
 
@@ -582,5 +583,21 @@ describe("release gate checklist and evaluation", () => {
       { io: { stdout: () => {}, stderr: () => {} } }
     );
     expect(code).toBe(1);
+  });
+
+  it("terminates a stalled deterministic command at the configured deadline", async () => {
+    const startedAt = Date.now();
+    const result = await runBoundedReleaseGateCommand({
+      command: process.execPath,
+      args: ["-e", "setInterval(() => undefined, 1_000)"],
+      cwd: process.cwd(),
+      env: { ...process.env },
+      timeoutMs: 50,
+      graceMs: 10
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.timedOut).toBe(true);
+    expect(Date.now() - startedAt).toBeLessThan(2_000);
   });
 });

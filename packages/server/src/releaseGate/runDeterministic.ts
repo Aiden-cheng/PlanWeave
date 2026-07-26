@@ -1,7 +1,7 @@
-import { spawn } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawnManagedProcess } from "@planweave-ai/runtime";
 import { serverPackageVersion } from "../packageInfo.js";
 
 const DETERMINISTIC_TEST_FILES = [
@@ -10,6 +10,74 @@ const DETERMINISTIC_TEST_FILES = [
   "packages/server/src/__tests__/realProcessCrashReplayMatrix.test.ts",
   "packages/server/src/__tests__/realProcessAuthorizationMatrix.test.ts"
 ] as const;
+
+export const DETERMINISTIC_SUITE_TIMEOUT_MS = 180_000;
+
+export async function runBoundedReleaseGateCommand(options: {
+  command: string;
+  args: readonly string[];
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  timeoutMs: number;
+  graceMs?: number;
+}): Promise<{
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+}> {
+  if (!Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0) {
+    throw new Error(`release_gate_timeout_invalid:${String(options.timeoutMs)}`);
+  }
+  const managed = spawnManagedProcess({
+    command: options.command,
+    args: options.args,
+    cwd: options.cwd,
+    env: options.env,
+    graceMs: options.graceMs
+  });
+  const { child } = managed;
+  child.stdin.end();
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk: string) => {
+    stderr += chunk;
+  });
+
+  const exit = new Promise<number>((resolveExit) => {
+    child.once("error", (error) => {
+      stderr += `${stderr ? "\n" : ""}${error.message}`;
+      resolveExit(1);
+    });
+    child.once("close", (code) => resolveExit(code ?? 1));
+  });
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  const timeout = new Promise<"timed_out">((resolveTimeout) => {
+    timeoutHandle = setTimeout(() => resolveTimeout("timed_out"), options.timeoutMs);
+  });
+  const outcome = await Promise.race([
+    exit.then((exitCode) => ({ kind: "exited" as const, exitCode })),
+    timeout.then(() => ({ kind: "timed_out" as const }))
+  ]);
+  if (timeoutHandle) clearTimeout(timeoutHandle);
+
+  if (outcome.kind === "exited") {
+    return { exitCode: outcome.exitCode, stdout, stderr, timedOut: false };
+  }
+
+  try {
+    await managed.tree.terminate("release gate deterministic suite timeout");
+  } catch (error) {
+    stderr += `${stderr ? "\n" : ""}${error instanceof Error ? error.message : String(error)}`;
+  }
+  await exit;
+  return { exitCode: 1, stdout, stderr, timedOut: true };
+}
 
 export type DeterministicSuiteEvidence = {
   version: "planweave.release-gate.deterministic/v1";
@@ -43,7 +111,14 @@ export async function runDeterministicProcessSuite(options: {
 }): Promise<DeterministicSuiteEvidence> {
   const repoRoot = options.repoRoot ?? defaultRepoRoot();
   const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-  const args = ["exec", "vitest", "run", "--reporter=json", ...DETERMINISTIC_TEST_FILES];
+  const args = [
+    "exec",
+    "vitest",
+    "run",
+    "--reporter=json",
+    "--maxWorkers=2",
+    ...DETERMINISTIC_TEST_FILES
+  ];
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     ...options.env,
@@ -54,40 +129,12 @@ export async function runDeterministicProcessSuite(options: {
     PLANWEAVE_VPS_E2E_REQUIRE: undefined
   };
 
-  const { exitCode, stdout, stderr } = await new Promise<{
-    exitCode: number;
-    stdout: string;
-    stderr: string;
-  }>((resolvePromise) => {
-    const child = spawn(pnpm, args, {
-      cwd: repoRoot,
-      env,
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-    let stdoutBuf = "";
-    let stderrBuf = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      stdoutBuf += chunk;
-    });
-    child.stderr.on("data", (chunk: string) => {
-      stderrBuf += chunk;
-    });
-    child.on("error", (error) => {
-      resolvePromise({
-        exitCode: 1,
-        stdout: stdoutBuf,
-        stderr: `${stderrBuf}\n${error.message}`
-      });
-    });
-    child.on("close", (code) => {
-      resolvePromise({
-        exitCode: code ?? 1,
-        stdout: stdoutBuf,
-        stderr: stderrBuf
-      });
-    });
+  const { exitCode, stdout, stderr, timedOut } = await runBoundedReleaseGateCommand({
+    command: pnpm,
+    args,
+    cwd: repoRoot,
+    env,
+    timeoutMs: DETERMINISTIC_SUITE_TIMEOUT_MS
   });
 
   let total: number | null = null;
@@ -115,13 +162,15 @@ export async function runDeterministicProcessSuite(options: {
     generatedAt: new Date().toISOString(),
     suite: "server-real-process",
     serverVersion: serverPackageVersion,
-    commandSanitized: `pnpm exec vitest run ${DETERMINISTIC_TEST_FILES.join(" ")}`,
+    commandSanitized: `pnpm exec vitest run --maxWorkers=2 ${DETERMINISTIC_TEST_FILES.join(" ")}`,
     exitCode,
     tests: { total, passed, failed },
     diagnostic:
       exitCode === 0
         ? null
-        : `Deterministic suite failed (exit ${exitCode}). ${stderr.trim().slice(0, 400)}`
+        : timedOut
+          ? `Deterministic suite timed out after ${DETERMINISTIC_SUITE_TIMEOUT_MS}ms and its process tree was terminated.`
+          : `Deterministic suite failed (exit ${exitCode}). ${stderr.trim().slice(0, 400)}`
   };
 
   if (options.evidencePath) {
