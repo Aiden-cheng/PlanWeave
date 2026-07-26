@@ -11,6 +11,7 @@ import {
   resolveVpsE2eTarget,
   runVpsE2eCli
 } from "../vpsE2e/index.js";
+import { runRemoteVpsScenario } from "../vpsE2e/remoteVpsScenario.js";
 
 const roots: string[] = [];
 
@@ -149,5 +150,36 @@ describe("VPS e2e gate and redaction (unit)", () => {
       env: { PLANWEAVE_VPS_E2E: "1" }
     });
     expect(code).toBe(2);
+  });
+
+  it("remote-vps requires hostConfigPath and never fakes cleanup/reconnect/revoke", async () => {
+    const missingPath = join(tmpdir(), `planweave-missing-host-config-${Date.now()}.json`);
+    const evidence = await runRemoteVpsScenario({
+      gate: {
+        enabled: true,
+        mode: "require",
+        profileId: "remote-vps",
+        configPath: null
+      },
+      config: {
+        version: "planweave.vps-e2e-config/v1",
+        environmentClass: "remote-vps",
+        coordinatorUrl: "https://127.0.0.1:1",
+        operatorTokenEnv: "PLANWEAVE_VPS_OPERATOR_TOKEN",
+        hostConfigPath: missingPath,
+        projectId: "project-example",
+        canvasId: "default",
+        blockRef: "T-001#B-001"
+      },
+      operatorToken: "token-not-used-when-config-missing"
+    });
+    expect(evidence.environmentClass).toBe("remote-vps");
+    expect(evidence.result).toBe("failed");
+    expect(evidence.checks.cleanupCompleted).toBe(false);
+    expect(evidence.checks.credentialsRevoked).toBe(false);
+    expect(evidence.checks.networkInterruptReplay).toBe(false);
+    expect(evidence.networkInterrupt.reconnectOk).toBe(false);
+    expect(evidence.cleanup.credentialsRevoked).toBe(false);
+    expect(evidence.diagnostic).toMatch(/hostConfigPath|unreadable|packaged Host/i);
   });
 });
