@@ -14,6 +14,10 @@ import {
   registerCollaborationHandlers,
   shutdownCollaborationService
 } from "./collaboration/collaborationHandlers.js";
+import {
+  registerOperatorControlHandlers,
+  shutdownOperatorControlService
+} from "./operatorControl/operatorControlHandlers.js";
 import { registerDesktopSettingsHandlers } from "./desktopSettingsHandlers.js";
 import { applyPersistedPlanweaveHomeSetting } from "./desktopSettingsStore.js";
 import { initializeFirstLaunchExample } from "./firstLaunchExample.js";
@@ -98,6 +102,7 @@ startSingleInstanceLifecycle({
     registerAppUpdateHandlers();
     registerMcpTunnelHandlers();
     registerCollaborationHandlers();
+    registerOperatorControlHandlers();
     registerApplicationMenu({ checkForUpdates: checkForAppUpdate });
 
     app.whenReady().then(() => {
@@ -144,6 +149,7 @@ startSingleInstanceLifecycle({
       void Promise.allSettled([
         stopMcpTunnelProcesses(),
         shutdownCollaborationService(),
+        shutdownOperatorControlService(),
         shutdownDesktopAutoRuns("PlanWeave Desktop is quitting.")
       ])
         .then((results) => {

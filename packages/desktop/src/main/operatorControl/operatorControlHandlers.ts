@@ -1,0 +1,94 @@
+import { BrowserWindow, ipcMain, safeStorage } from "electron";
+import {
+  operatorControlInvokeChannels,
+  operatorControlStatusChangedChannel,
+  type OperatorControlStatus,
+  type PlanWeaveOperatorControlApi
+} from "../../shared/operatorControl.js";
+import {
+  OperatorControlService,
+  type OperatorControlServiceOptions
+} from "./operatorControlService.js";
+
+let service: OperatorControlService | null = null;
+
+function publishStatusToRenderers(status: OperatorControlStatus): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.webContents.isDestroyed()) {
+      window.webContents.send(operatorControlStatusChangedChannel, status);
+    }
+  }
+}
+
+function createDefaultService(options: OperatorControlServiceOptions = {}): OperatorControlService {
+  return new OperatorControlService({
+    ...options,
+    safeStorage: options.safeStorage ?? {
+      isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+      encryptString: (value) => safeStorage.encryptString(value),
+      decryptString: (value) => safeStorage.decryptString(value)
+    },
+    onStatusChange: options.onStatusChange ?? publishStatusToRenderers
+  });
+}
+
+export function getOperatorControlService(): OperatorControlService {
+  if (!service) service = createDefaultService();
+  return service;
+}
+
+export function createOperatorControlService(
+  options: OperatorControlServiceOptions = {}
+): OperatorControlService {
+  return createDefaultService(options);
+}
+
+export function setOperatorControlServiceForTests(next: OperatorControlService | null): void {
+  service = next;
+}
+
+export function registerOperatorControlHandlers(
+  options: OperatorControlServiceOptions = {}
+): OperatorControlService {
+  service = createDefaultService(options);
+  const active = service;
+  ipcMain.handle(operatorControlInvokeChannels.getStatus, () => active.getStatus());
+  ipcMain.handle(operatorControlInvokeChannels.upsertProfile, (_event, input: unknown) =>
+    active.upsertProfile(input)
+  );
+  ipcMain.handle(operatorControlInvokeChannels.removeProfile, (_event, input: unknown) =>
+    active.removeProfile(input)
+  );
+  ipcMain.handle(operatorControlInvokeChannels.setActiveProfile, (_event, input: unknown) =>
+    active.setActiveProfile(input)
+  );
+  ipcMain.handle(operatorControlInvokeChannels.clearActiveProfile, () =>
+    active.clearActiveProfile()
+  );
+  ipcMain.handle(operatorControlInvokeChannels.importCredential, (_event, input: unknown) =>
+    active.importCredential(input)
+  );
+  ipcMain.handle(operatorControlInvokeChannels.clearCredential, (_event, input: unknown) =>
+    active.clearCredential(input)
+  );
+  ipcMain.handle(operatorControlInvokeChannels.listHosts, (_event, input: unknown) =>
+    active.listHosts(input)
+  );
+  ipcMain.handle(operatorControlInvokeChannels.createEnrollmentGrant, (_event, input: unknown) =>
+    active.createEnrollmentGrant(input)
+  );
+  ipcMain.handle(operatorControlInvokeChannels.revokeHost, (_event, input: unknown) =>
+    active.revokeHost(input)
+  );
+  return active;
+}
+
+export async function shutdownOperatorControlService(): Promise<void> {
+  if (!service) return;
+  const active = service;
+  service = null;
+  await active.shutdown();
+}
+
+/** Preload-side shape is declared here only to keep the main registration auditable. */
+export type OperatorControlBridgeApi = PlanWeaveOperatorControlApi;

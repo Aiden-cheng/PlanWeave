@@ -186,6 +186,20 @@ export {
   type InteractionSettlement
 } from "./interactions.js";
 export {
+  operatorEnrollmentGrantRequestSchema,
+  operatorEnrollmentGrantResponseSchema,
+  operatorHostPageSchema,
+  operatorHostRevokeResponseSchema,
+  operatorHostViewSchema,
+  operatorPageQuerySchema,
+  operatorTokenSchema,
+  type OperatorEnrollmentGrantRequest,
+  type OperatorEnrollmentGrantResponse,
+  type OperatorHostPage,
+  type OperatorHostView,
+  type OperatorPageQuery
+} from "./operatorControl.js";
+export {
   PROGRESS_MESSAGE_MAX_LENGTH,
   RESULT_ARTIFACT_MAX_COUNT,
   RESULT_SUMMARY_MAX_LENGTH,

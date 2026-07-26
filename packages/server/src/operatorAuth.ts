@@ -1,13 +1,8 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
+import { opaqueIdentifierSchema, operatorTokenSchema } from "@planweave-ai/distributed-protocol";
 import { z } from "zod";
 import type { RemoteInteractionAuthorizationPort } from "./remoteInteractions.js";
 
-const operatorTokenSchema = z
-  .string()
-  .min(32)
-  .max(256)
-  .regex(/^[A-Za-z0-9_-]+$/);
 const operatorTokenSha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 
 export const operatorCredentialSchema = z

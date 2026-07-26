@@ -93,6 +93,9 @@ importers:
       '@planweave-ai/collaboration-contracts':
         specifier: workspace:*
         version: link:../collaboration-contracts
+      '@planweave-ai/distributed-protocol':
+        specifier: workspace:*
+        version: link:../distributed-protocol
       '@planweave-ai/mcp':
         specifier: workspace:*
         version: link:../mcp

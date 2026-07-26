@@ -3,7 +3,6 @@ import {
   acpEventCursorSchema,
   blockRefSchema,
   artifactRefSchema,
-  capabilitiesSchema,
   dispatchIdSchema,
   executionAttemptIdSchema,
   executionEnvelopeDigestSchema,
@@ -11,7 +10,12 @@ import {
   interactionSettlementSchema,
   leaseIdSchema,
   normalizedAcpEventSchema,
-  opaqueIdentifierSchema
+  opaqueIdentifierSchema,
+  operatorEnrollmentGrantRequestSchema,
+  operatorEnrollmentGrantResponseSchema,
+  operatorHostPageSchema,
+  operatorHostViewSchema,
+  operatorPageQuerySchema
 } from "@planweave-ai/distributed-protocol";
 import { remoteBlockBindingViewSchema } from "@planweave-ai/runtime";
 import { z } from "zod";
@@ -23,15 +27,15 @@ import {
 } from "./remoteExecutionLifecycle.js";
 import { remoteAttemptStatusSchema, remoteOperationStateSchema } from "./remoteOperations.js";
 
+export {
+  operatorEnrollmentGrantRequestSchema,
+  operatorEnrollmentGrantResponseSchema,
+  operatorHostPageSchema,
+  operatorHostViewSchema,
+  operatorPageQuerySchema
+};
+
 const timestampSchema = z.iso.datetime();
-
-export const operatorEnrollmentGrantRequestSchema = z
-  .object({ expiresAt: timestampSchema, credentialExpiresAt: timestampSchema })
-  .strict();
-
-export const operatorEnrollmentGrantResponseSchema = z
-  .object({ enrollmentCode: z.string().min(1).max(256), expiresAt: timestampSchema })
-  .strict();
 
 export const operatorDispatchRequestSchema = z
   .object({
@@ -56,32 +60,6 @@ export const operatorInteractionResponseSchema = interactionSettlementSchema;
 
 export const operatorEventQuerySchema = z
   .object({ afterCursor: z.coerce.number().int().nonnegative().default(0) })
-  .strict();
-
-export const operatorPageQuerySchema = z
-  .object({
-    cursor: z.coerce.number().int().nonnegative().default(0),
-    limit: z.coerce.number().int().min(1).max(100).default(50)
-  })
-  .strict();
-
-export const operatorHostViewSchema = z
-  .object({
-    id: opaqueIdentifierSchema,
-    displayName: z.string().min(1).max(128),
-    capabilities: capabilitiesSchema,
-    capacity: z.number().int().min(1).max(128),
-    lastSeenAt: timestampSchema.optional(),
-    revokedAt: timestampSchema.optional(),
-    credentialExpiresAt: timestampSchema.optional()
-  })
-  .strict();
-
-export const operatorHostPageSchema = z
-  .object({
-    items: z.array(operatorHostViewSchema).max(100),
-    nextCursor: z.number().int().positive().nullable()
-  })
   .strict();
 
 const operatorAttemptViewSchema = z

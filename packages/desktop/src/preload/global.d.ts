@@ -3,6 +3,7 @@ import type { PlanWeaveAppUpdateApi } from "../shared/appUpdate";
 import type { PlanWeaveCollaborationApi } from "../shared/collaboration";
 import type { PlanWeaveDesktopSettingsApi } from "../shared/desktopSettings";
 import type { PlanWeaveMcpTunnelApi } from "../shared/mcpTunnel";
+import type { PlanWeaveOperatorControlApi } from "../shared/operatorControl";
 import type { PlanWeaveWindowApi } from "../shared/windowAppearance";
 
 declare global {
@@ -12,6 +13,7 @@ declare global {
     planweaveCollaboration?: PlanWeaveCollaborationApi;
     planweaveDesktopSettings?: PlanWeaveDesktopSettingsApi;
     planweaveMcpTunnel?: PlanWeaveMcpTunnelApi;
+    planweaveOperatorControl?: PlanWeaveOperatorControlApi;
     planweaveWindow?: PlanWeaveWindowApi;
   }
 }

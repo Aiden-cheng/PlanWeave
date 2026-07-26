@@ -30,6 +30,14 @@ import {
   collaborationObserverSignalChannel,
   collaborationStatusChangedChannel
 } from "../shared/collaboration.js";
+import type {
+  PlanWeaveOperatorControlApi,
+  OperatorControlStatus
+} from "../shared/operatorControl.js";
+import {
+  operatorControlInvokeChannels,
+  operatorControlStatusChangedChannel
+} from "../shared/operatorControl.js";
 import type { McpTunnelStatus, PlanWeaveMcpTunnelApi } from "../shared/mcpTunnel.js";
 import { mcpTunnelChangedChannel, mcpTunnelInvokeChannels } from "../shared/mcpTunnel.js";
 import {
@@ -292,6 +300,36 @@ const collaborationApi: PlanWeaveCollaborationApi = {
 };
 
 contextBridge.exposeInMainWorld("planweaveCollaboration", collaborationApi);
+
+const operatorControlApi: PlanWeaveOperatorControlApi = {
+  getOperatorControlStatus: async () => ipcRenderer.invoke(operatorControlInvokeChannels.getStatus),
+  upsertOperatorProfile: async (input) =>
+    ipcRenderer.invoke(operatorControlInvokeChannels.upsertProfile, input),
+  removeOperatorProfile: async (input) =>
+    ipcRenderer.invoke(operatorControlInvokeChannels.removeProfile, input),
+  setActiveOperatorProfile: async (input) =>
+    ipcRenderer.invoke(operatorControlInvokeChannels.setActiveProfile, input),
+  clearActiveOperatorProfile: async () =>
+    ipcRenderer.invoke(operatorControlInvokeChannels.clearActiveProfile),
+  importOperatorCredential: async (input) =>
+    ipcRenderer.invoke(operatorControlInvokeChannels.importCredential, input),
+  clearOperatorCredential: async (input) =>
+    ipcRenderer.invoke(operatorControlInvokeChannels.clearCredential, input),
+  listOperatorHosts: async (input) =>
+    ipcRenderer.invoke(operatorControlInvokeChannels.listHosts, input),
+  createOperatorEnrollmentGrant: async (input) =>
+    ipcRenderer.invoke(operatorControlInvokeChannels.createEnrollmentGrant, input),
+  revokeOperatorHost: async (input) =>
+    ipcRenderer.invoke(operatorControlInvokeChannels.revokeHost, input),
+  onOperatorControlStatusChanged: (callback) => {
+    const listener = (_event: IpcRendererEvent, payload: OperatorControlStatus) =>
+      callback(payload);
+    ipcRenderer.on(operatorControlStatusChangedChannel, listener);
+    return () => ipcRenderer.off(operatorControlStatusChangedChannel, listener);
+  }
+};
+
+contextBridge.exposeInMainWorld("planweaveOperatorControl", operatorControlApi);
 
 if (process.env.PLANWEAVE_DESKTOP_SMOKE === "1") {
   contextBridge.exposeInMainWorld("planweaveSmoke", {

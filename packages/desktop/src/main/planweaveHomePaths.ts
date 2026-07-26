@@ -12,6 +12,9 @@ export type DesktopHomePaths = {
   collaborationDir: string;
   collaborationProfilesFile: string;
   collaborationCredentialsFile: string;
+  operatorControlDir: string;
+  operatorProfilesFile: string;
+  operatorCredentialsFile: string;
 };
 
 export function desktopHomePaths(): DesktopHomePaths {
@@ -19,6 +22,7 @@ export function desktopHomePaths(): DesktopHomePaths {
   const desktopSettingsHome = join(homedir(), ".planweave");
   const mcpTunnelDir = join(planweaveHome, "desktop", "mcp-tunnel");
   const collaborationDir = join(planweaveHome, "desktop", "collaboration");
+  const operatorControlDir = join(planweaveHome, "desktop", "operator-control");
   return {
     planweaveHome,
     desktopSettingsFile: join(desktopSettingsHome, "config", "desktop-settings.json"),
@@ -28,6 +32,9 @@ export function desktopHomePaths(): DesktopHomePaths {
     mcpTunnelDownloadsDir: join(mcpTunnelDir, "downloads"),
     collaborationDir,
     collaborationProfilesFile: join(collaborationDir, "profiles.json"),
-    collaborationCredentialsFile: join(collaborationDir, "credentials.json")
+    collaborationCredentialsFile: join(collaborationDir, "credentials.json"),
+    operatorControlDir,
+    operatorProfilesFile: join(operatorControlDir, "profiles.json"),
+    operatorCredentialsFile: join(operatorControlDir, "credentials.json")
   };
 }

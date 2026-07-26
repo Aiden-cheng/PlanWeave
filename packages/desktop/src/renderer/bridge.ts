@@ -5,6 +5,7 @@ import type {
 } from "@planweave-ai/runtime";
 import type { PlanWeaveCollaborationApi } from "../shared/collaboration";
 import type { PlanWeaveDesktopSettingsApi } from "../shared/desktopSettings";
+import type { PlanWeaveOperatorControlApi } from "../shared/operatorControl";
 
 export const bridge: DesktopBridgeApi | null =
   typeof window !== "undefined" && "planweave" in window ? window.planweave : null;
@@ -15,6 +16,10 @@ export const settingsBridge: PlanWeaveDesktopSettingsApi | null =
 export const collaborationBridge: PlanWeaveCollaborationApi | null =
   typeof window !== "undefined" && "planweaveCollaboration" in window
     ? (window.planweaveCollaboration ?? null)
+    : null;
+export const operatorControlBridge: PlanWeaveOperatorControlApi | null =
+  typeof window !== "undefined" && "planweaveOperatorControl" in window
+    ? (window.planweaveOperatorControl ?? null)
     : null;
 
 export function desktopCanvasReference(
