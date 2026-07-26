@@ -172,3 +172,9 @@ export {
   membershipRoleLabel,
   type CommentServiceOptions
 } from "./service.js";
+
+export {
+  handleCommentActivityHttpRequest,
+  resetCommentActivityHttpRateLimits,
+  type CommentActivityHttpOptions
+} from "./http.js";

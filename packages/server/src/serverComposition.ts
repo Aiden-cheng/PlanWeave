@@ -2,6 +2,12 @@ import type { IncomingMessage, Server as HttpServer, ServerResponse } from "node
 import { ArtifactStore } from "./artifacts.js";
 import { handleAgentHostArtifactRequest } from "./artifactHttp.js";
 import {
+  ActivityRepository,
+  CommentRepository,
+  CommentService,
+  handleCommentActivityHttpRequest
+} from "./comments/index.js";
+import {
   CommentAttachmentBlobStore,
   CommentAttachmentRepository,
   CommentAttachmentService,
@@ -125,7 +131,7 @@ function respond(response: ServerResponse, status: number, code: string): void {
 }
 
 function requiresAdmission(request: IncomingMessage): boolean {
-  if (request.method !== "POST") return false;
+  if (request.method !== "POST" && request.method !== "PATCH") return false;
   const pathname = new URL(request.url ?? "/", "http://planweave.invalid").pathname;
   return (
     pathname === "/agent-hosts/enrollments/exchange" ||
@@ -134,6 +140,7 @@ function requiresAdmission(request: IncomingMessage): boolean {
     /^\/api\/v1\/remote-operations\/[^/]+\/actions$/.test(pathname) ||
     /^\/api\/v1\/remote-operations\/[^/]+\/interactions\/respond$/.test(pathname) ||
     /^\/api\/v1\/projects\/[^/]+\/human\//.test(pathname) ||
+    /^\/api\/v1\/projects\/[^/]+\/comments(\/|$)/.test(pathname) ||
     /^\/api\/v1\/projects\/[^/]+\/attachments(\/|$)/.test(pathname)
   );
 }
@@ -195,6 +202,8 @@ export async function createDistributedServerComposition(
       clock
     });
     const commentAttachmentRepository = new CommentAttachmentRepository(server.database);
+    const commentRepository = new CommentRepository(server.database);
+    const activityRepository = new ActivityRepository(server.database);
     const commentAttachmentBlobs = new CommentAttachmentBlobStore(
       server.database,
       config.dataDirectory
@@ -204,6 +213,24 @@ export async function createDistributedServerComposition(
       blobs: commentAttachmentBlobs,
       clock
     });
+    const commentServices = new Map<string, CommentService>();
+    for (const { projectId } of runtimeRegistry.locators) {
+      if (commentServices.has(projectId)) continue;
+      const packagePort = runtimeRegistry.workItemPackagePort(projectId);
+      if (!packagePort) throw new Error("trusted_project_work_item_port_missing");
+      commentServices.set(
+        projectId,
+        new CommentService({
+          comments: commentRepository,
+          activity: activityRepository,
+          packagePort,
+          identity: humanIdentity,
+          attachments: commentAttachments,
+          attachmentRepository: commentAttachmentRepository,
+          clock
+        })
+      );
+    }
     webSockets = attachAgentHostWebSocketServer({
       server: options.httpServer,
       hosts: coordination.hosts,
@@ -235,6 +262,17 @@ export async function createDistributedServerComposition(
         if (requiresAdmission(request) && readiness.readiness().status !== "ready") {
           request.resume();
           respond(response, 503, "server_not_accepting_mutations");
+          return;
+        }
+        if (
+          await handleCommentActivityHttpRequest(request, response, {
+            resolveService: (projectId) => commentServices.get(projectId),
+            repository: humanIdentity,
+            projectAuthority: runtimeRegistry,
+            allowInsecureDevelopment: config.allowInsecureDevelopment,
+            clock
+          })
+        ) {
           return;
         }
         if (

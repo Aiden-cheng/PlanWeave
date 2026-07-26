@@ -1,12 +1,19 @@
 import {
   createRemoteBlockArtifactSource,
   createRemoteBlockRuntimePort,
+  manifestSchema,
   resolveProjectCanvasWorkspace
 } from "@planweave-ai/runtime";
 import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
+import { readFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { RemoteRuntimePortRegistry } from "./remoteRuntimeLocator.js";
+import {
+  createManifestWorkItemPort,
+  createRoutedWorkItemPackagePort,
+  type WorkItemPackagePort
+} from "./work/index.js";
 
 export const trustedRuntimeProjectSchema = z
   .object({
@@ -22,6 +29,7 @@ export type TrustedRuntimeRegistry = {
   registry: RemoteRuntimePortRegistry;
   locators: Array<{ projectId: string; canvasId: string }>;
   hasProject(projectId: string): boolean;
+  workItemPackagePort(projectId: string): WorkItemPackagePort | undefined;
   close(): void;
 };
 
@@ -32,11 +40,28 @@ export async function createTrustedRuntimeRegistry(
   const registry = new RemoteRuntimePortRegistry();
   const unbind: Array<() => void> = [];
   const locators: Array<{ projectId: string; canvasId: string }> = [];
+  const canvasWorkItemPorts = new Map<string, Map<string, WorkItemPackagePort>>();
   try {
     for (const project of projects) {
       const workspace = await resolveProjectCanvasWorkspace(project.projectRoot, project.canvasId);
       if (workspace.id !== project.projectId) throw new Error("trusted_project_identity_mismatch");
       const locator = { projectId: project.projectId, canvasId: project.canvasId };
+      let projectPorts = canvasWorkItemPorts.get(project.projectId);
+      if (!projectPorts) {
+        projectPorts = new Map();
+        canvasWorkItemPorts.set(project.projectId, projectPorts);
+      }
+      projectPorts.set(
+        project.canvasId,
+        {
+          resolveWorkItem(workItem) {
+            const manifest = manifestSchema.parse(
+              JSON.parse(readFileSync(workspace.manifestFile, "utf8"))
+            );
+            return createManifestWorkItemPort(manifest, project.canvasId).resolveWorkItem(workItem);
+          }
+        }
+      );
       unbind.push(
         registry.bind(
           locator,
@@ -51,11 +76,20 @@ export async function createTrustedRuntimeRegistry(
     throw error;
   }
   const projectIds = new Set(locators.map((locator) => locator.projectId));
+  const projectWorkItemPorts = new Map(
+    [...canvasWorkItemPorts].map(([projectId, ports]) => [
+      projectId,
+      createRoutedWorkItemPackagePort((canvasId) => ports.get(canvasId))
+    ])
+  );
   return {
     registry,
     locators,
     hasProject(projectId) {
       return projectIds.has(projectId);
+    },
+    workItemPackagePort(projectId) {
+      return projectWorkItemPorts.get(projectId);
     },
     close() {
       for (const release of unbind.splice(0).reverse()) release();
