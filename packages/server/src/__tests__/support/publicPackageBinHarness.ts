@@ -2,7 +2,8 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 type PublicPackageSpec = {
@@ -42,26 +43,52 @@ function publicBinFailure(running: RunningPublicBin, exit: PublicBinExit): Error
   );
 }
 
-function signalProcessTree(running: RunningPublicBin, signal: NodeJS.Signals): Promise<void> {
+function signalPosixProcessGroup(running: RunningPublicBin, signal: NodeJS.Signals): void {
   const pid = running.child.pid;
   if (!pid) {
-    return Promise.reject(new Error(`public_bin_pid_missing:${running.command}`));
+    throw new Error(`public_bin_pid_missing:${running.command}`);
   }
-  if (process.platform !== "win32") {
-    try {
-      process.kill(-pid, signal);
-      return Promise.resolve();
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ESRCH") return Promise.resolve();
-      return Promise.reject(error);
-    }
+  try {
+    process.kill(-pid, signal);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
   }
+}
+
+function isPosixProcessGroupAlive(running: RunningPublicBin): boolean {
+  const pid = running.child.pid;
+  if (!pid) throw new Error(`public_bin_pid_missing:${running.command}`);
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ESRCH") return false;
+    if (code === "EPERM") return true;
+    throw error;
+  }
+}
+
+async function waitForPosixProcessGroupExit(
+  running: RunningPublicBin,
+  timeoutMs: number
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (isPosixProcessGroupAlive(running)) {
+    if (Date.now() >= deadline) return false;
+    await delay(Math.min(25, Math.max(1, deadline - Date.now())));
+  }
+  return true;
+}
+
+function runWindowsTaskkill(running: RunningPublicBin, force: boolean): Promise<void> {
+  const pid = running.child.pid;
+  if (!pid) return Promise.reject(new Error(`public_bin_pid_missing:${running.command}`));
   return new Promise((resolveSignal, rejectSignal) => {
-    const killer = spawn(
-      "taskkill",
-      ["/pid", String(pid), "/t", ...(signal === "SIGKILL" ? ["/f"] : [])],
-      { stdio: "ignore", windowsHide: true }
-    );
+    const killer = spawn("taskkill", ["/pid", String(pid), "/t", ...(force ? ["/f"] : [])], {
+      stdio: "ignore",
+      windowsHide: true
+    });
     killer.once("error", rejectSignal);
     killer.once("close", (code) => {
       if (code === 0 || running.child.exitCode !== null) resolveSignal();
@@ -89,6 +116,13 @@ async function waitForExit(
 
 export class PublicBinProcessRegistry {
   readonly #running = new Set<RunningPublicBin>();
+  readonly #gracefulTimeoutMs: number;
+  readonly #forceTimeoutMs: number;
+
+  constructor(options: { gracefulTimeoutMs?: number; forceTimeoutMs?: number } = {}) {
+    this.#gracefulTimeoutMs = options.gracefulTimeoutMs ?? 5_000;
+    this.#forceTimeoutMs = options.forceTimeoutMs ?? 5_000;
+  }
 
   start(binPath: string, argv: readonly string[]): RunningPublicBin {
     const child = spawn(process.execPath, [binPath, ...argv], {
@@ -129,7 +163,9 @@ export class PublicBinProcessRegistry {
   }
 
   async stopAll(): Promise<void> {
-    const results = await Promise.allSettled([...this.#running].map((running) => this.stop(running)));
+    const results = await Promise.allSettled(
+      [...this.#running].map((running) => this.stop(running))
+    );
     const errors = results
       .filter((result): result is PromiseRejectedResult => result.status === "rejected")
       .map((result) => result.reason);
@@ -140,15 +176,28 @@ export class PublicBinProcessRegistry {
 
   async #stop(running: RunningPublicBin): Promise<void> {
     let exit: PublicBinExit | undefined;
+    let treeGone = false;
     try {
       exit = await waitForExit(running.result, 0);
-      if (!exit) {
-        await signalProcessTree(running, "SIGTERM");
-        exit = await waitForExit(running.result, 5_000);
-      }
-      if (!exit) {
-        await signalProcessTree(running, "SIGKILL");
-        exit = await waitForExit(running.result, 5_000);
+      if (process.platform === "win32") {
+        await runWindowsTaskkill(running, false);
+        await delay(this.#gracefulTimeoutMs);
+        await runWindowsTaskkill(running, true);
+        exit ??= await waitForExit(running.result, this.#forceTimeoutMs);
+        treeGone = true;
+      } else {
+        if (isPosixProcessGroupAlive(running)) {
+          signalPosixProcessGroup(running, "SIGTERM");
+        }
+        treeGone = await waitForPosixProcessGroupExit(running, this.#gracefulTimeoutMs);
+        if (!treeGone) {
+          signalPosixProcessGroup(running, "SIGKILL");
+          treeGone = await waitForPosixProcessGroupExit(running, this.#forceTimeoutMs);
+        }
+        if (!treeGone) {
+          throw new Error(`public_bin_process_tree_did_not_exit:${running.command}`);
+        }
+        exit ??= await waitForExit(running.result, this.#forceTimeoutMs);
       }
       if (!exit) {
         throw new Error(
@@ -169,7 +218,7 @@ export class PublicBinProcessRegistry {
         { cause: error }
       );
     } finally {
-      if (exit) this.#running.delete(running);
+      if (exit && treeGone) this.#running.delete(running);
     }
   }
 }

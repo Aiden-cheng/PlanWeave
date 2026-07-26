@@ -149,18 +149,41 @@ async function stopPublicBin(running: RunningPublicBin): Promise<void> {
 }
 
 describe("remote operator walkthrough", () => {
-  it("reaps a registered process when an intermediate assertion fails", async () => {
-    const registry = new PublicBinProcessRegistry();
+  it("reaps a process group with a descendant that ignores graceful termination", async () => {
+    if (process.platform === "win32") return;
+    const registry = new PublicBinProcessRegistry({
+      gracefulTimeoutMs: 100,
+      forceTimeoutMs: 2_000
+    });
     const temporaryRoot = await mkdtemp(join(tmpdir(), "planweave-cleanup-injection-"));
     directories.push(temporaryRoot);
-    const fixturePath = join(temporaryRoot, "long-running-bin.mjs");
+    const descendantPath = join(temporaryRoot, "stubborn-descendant.mjs");
+    await writeFile(
+      descendantPath,
+      "process.on('SIGTERM',()=>{});process.send?.('ready');setInterval(()=>{},1000);"
+    );
+    const fixturePath = join(temporaryRoot, "parent-bin.mjs");
     await writeFile(
       fixturePath,
-      "process.on('SIGTERM',()=>process.exit(0));setInterval(()=>{},1000);"
+      [
+        "import { spawn } from 'node:child_process';",
+        "const child=spawn(process.execPath,[process.argv[2]],{stdio:['ignore','ignore','ignore','ipc']});",
+        "child.once('message',()=>console.log(JSON.stringify({descendantPid:child.pid})));",
+        "process.on('SIGTERM',()=>process.exit(0));",
+        "setInterval(()=>{},1000);"
+      ].join("\n")
     );
-    const running = registry.start(fixturePath, []);
-    const pid = running.child.pid;
-    if (!pid) throw new Error("cleanup_injection_pid_missing");
+    const running = registry.start(fixturePath, [descendantPath]);
+    const rootPid = running.child.pid;
+    if (!rootPid) throw new Error("cleanup_injection_root_pid_missing");
+    let descendantPid: number | undefined;
+    await vi.waitFor(() => {
+      const line = running.logs.stdout.trim();
+      if (!line) throw new Error("cleanup_injection_descendant_not_ready");
+      descendantPid = (JSON.parse(line) as { descendantPid: number }).descendantPid;
+      expect(descendantPid).toBeGreaterThan(0);
+    });
+    if (!descendantPid) throw new Error("cleanup_injection_descendant_pid_missing");
     let injectedFailure: Error | undefined;
     try {
       throw new Error("injected_walkthrough_failure");
@@ -170,8 +193,12 @@ describe("remote operator walkthrough", () => {
       await registry.stopAll();
     }
     expect(injectedFailure?.message).toBe("injected_walkthrough_failure");
-    expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
-  });
+    expect(() => process.kill(rootPid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
+    expect(() => process.kill(descendantPid, 0)).toThrow(
+      expect.objectContaining({ code: "ESRCH" })
+    );
+    expect(() => process.kill(-rootPid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
+  }, 5_000);
 
   it("builds clean public bins, then starts Server and exercises the Host lifecycle", async () => {
     expect(serverBinPath).toContain(publicBinRoot);
