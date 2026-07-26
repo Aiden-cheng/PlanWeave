@@ -14,6 +14,7 @@ import {
 import {
   assertCoordinatorOrigin,
   findOnlineHostById,
+  resolvePackagedHostId,
   revokeRemoteHostCredentials,
   runRemoteVpsScenario
 } from "../vpsE2e/remoteVpsScenario.js";
@@ -237,5 +238,14 @@ describe("VPS e2e gate and redaction (unit)", () => {
         expect.stringMatching(/host_local_revoke_failed/)
       ]
     });
+  });
+
+  it("keeps enrollment and status Host identities consistent", () => {
+    const diagnostics = (hostId: string) =>
+      JSON.stringify({ hostId, credential: "active", version: "0.3.0" });
+    expect(resolvePackagedHostId(undefined, diagnostics("host-packaged"))).toBe("host-packaged");
+    expect(() => resolvePackagedHostId("host-enrolled", diagnostics("host-other"))).toThrow(
+      "remote_vps_host_status_identity_mismatch"
+    );
   });
 });

@@ -89,6 +89,17 @@ export function assertCoordinatorOrigin(configuredUrl: string, expectedOrigin: s
   }
 }
 
+export function resolvePackagedHostId(
+  currentHostId: string | undefined,
+  diagnosticsJson: string
+): string {
+  const nextHostId = packagedHostStatusSchema.parse(JSON.parse(diagnosticsJson)).hostId;
+  if (currentHostId && currentHostId !== nextHostId) {
+    throw new Error("remote_vps_host_status_identity_mismatch");
+  }
+  return nextHostId;
+}
+
 async function assertHostConfigCoordinatorOrigin(
   hostConfigPath: string,
   expectedOrigin: string
@@ -205,9 +216,12 @@ export async function runRemoteVpsScenario(options: {
   let localRevoked = false;
 
   const revokeCredentials = async (verifyTransport: boolean): Promise<void> => {
-    if (!enrollmentEstablished || !trusted || !packagedHostId || !hostConfigPath || !origin) return;
+    if (!enrollmentEstablished || !hostConfigPath) return;
     const outcome = await revokeRemoteHostCredentials({
       revokeServer: async () => {
+        if (!trusted || !packagedHostId || !origin) {
+          throw new Error("host_identity_unavailable");
+        }
         const response = await trusted!.request(
           `${origin}/api/v1/hosts/${encodeURIComponent(packagedHostId!)}/revoke`,
           {
@@ -434,11 +448,17 @@ export async function runRemoteVpsScenario(options: {
           }
         });
       }
+      enrollmentEstablished = true;
+      try {
+        packagedHostId = resolvePackagedHostId(undefined, enrollment.stdout);
+      } catch {
+        return base({ result: "failed", diagnostic: "remote_vps_host_enrollment_output_invalid" });
+      }
     } else {
       // Active credential means a prior one-time enrollment already succeeded for this Host config.
       checks.enrollmentOneTimeToken = true;
+      enrollmentEstablished = true;
     }
-    enrollmentEstablished = true;
 
     const status = await runNodeBin(agentHostBinPath, ["status", "--config", hostConfigPath]);
     if (status.code !== 0) {
@@ -450,7 +470,7 @@ export async function runRemoteVpsScenario(options: {
       });
     }
     try {
-      packagedHostId = packagedHostStatusSchema.parse(JSON.parse(status.stdout)).hostId;
+      packagedHostId = resolvePackagedHostId(packagedHostId, status.stdout);
     } catch {
       return base({ result: "failed", diagnostic: "remote_vps_host_status_invalid" });
     }
