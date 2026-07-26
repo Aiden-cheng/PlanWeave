@@ -270,6 +270,23 @@
   }
 }
 
+.presence-cursor {
+  display: inline-flex;
+  align-items: flex-start;
+  transform: translate3d(0, 0, 0);
+  transform-origin: top left;
+  transition:
+    left 80ms linear,
+    top 80ms linear;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .presence-cursor {
+    transition: none;
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

@@ -36,7 +36,7 @@ import type {
   DesktopProjectSummary,
   DesktopRuntimeToolAvailability
 } from "@planweave-ai/runtime";
-import { bridge, desktopCanvasReference } from "./bridge";
+import { bridge, collaborationBridge, desktopCanvasReference } from "./bridge";
 import { edgeTypes, nodeTypes } from "./graph/flowModel";
 import type { createTranslator } from "./i18n";
 import { orderProjectsByPinnedIds } from "./settings";
@@ -62,6 +62,7 @@ import { useGraphHistoryActions } from "./hooks/useGraphHistoryActions";
 import { useSharedResourceHighlight } from "./hooks/useSharedResourceHighlight";
 import { useLerpedNodeDrag } from "./hooks/useLerpedNodeDrag";
 import { useCollaborationSurface } from "./hooks/useCollaborationSurface";
+import { useCollaborationCanvasPresence } from "./hooks/useCollaborationCanvasPresence";
 import { buildAppSettingsRouteProps } from "./AppSettingsRouteProps";
 import { useAutoRunController, useFileSyncController } from "./controllers/AutoRunController";
 import { useGraphWorkspaceController } from "./controllers/GraphWorkspaceController";
@@ -417,6 +418,12 @@ export function ProjectWorkspaceProvider({
   const collaborationSurface = useCollaborationSurface({
     canvasId: selectedCanvasId,
     t
+  });
+  const collaborationPresence = useCollaborationCanvasPresence({
+    api: collaborationBridge,
+    canvasId: selectedCanvasId,
+    enabled: activeView === "graph" && Boolean(selectedProject),
+    profileId: collaborationSurface.activeProfileId
   });
   const recordNavigationSourceContextKeys = useMemo(() => {
     const selectedContext = [selectedProject?.rootPath ?? null, selectedCanvasId];
@@ -939,7 +946,8 @@ export function ProjectWorkspaceProvider({
     pinnedResource,
     onResourceHover,
     onResourcePin,
-    clearPinnedResource
+    clearPinnedResource,
+    presence: collaborationPresence
   });
   const review = useMemo<WorkspaceTabsReviewProps>(
     () => ({

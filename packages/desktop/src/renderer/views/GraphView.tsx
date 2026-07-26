@@ -42,6 +42,7 @@ import {
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import { styleDependencyEdgesForInteraction } from "../graph/dependencyEdgeVisual";
+import { CanvasPresenceOverlay } from "../graph/CanvasPresenceOverlay";
 import type { AppEdgeTypes, AppNodeTypes } from "../graph/flowModel";
 import { sharedResourceColor } from "../graph/sharedResourceColors";
 import { useEdgeReconnect } from "../hooks/useEdgeReconnect";
@@ -52,6 +53,7 @@ import { GraphEmptyState } from "./GraphEmptyState";
 import { FloatingAutoRunControl } from "../run/FloatingAutoRunControl";
 import type { AutoRunNextActionDescriptor } from "../run/autoRunNextActions";
 import type { AppFlowNode, AutoRunScopeMode } from "../types";
+import type { CollaborationCanvasPresenceResult } from "../hooks/useCollaborationCanvasPresence";
 
 type GraphViewProps = {
   autoRunControlStyle: CSSProperties;
@@ -110,6 +112,7 @@ type GraphViewProps = {
   onResourceHover: (name: string | null) => void;
   onResourcePin: (name: string | null) => void;
   clearPinnedResource: () => void;
+  presence?: CollaborationCanvasPresenceResult;
 };
 
 export function GraphView({
@@ -168,7 +171,8 @@ export function GraphView({
   pinnedResource,
   onResourceHover,
   onResourcePin,
-  clearPinnedResource
+  clearPinnedResource,
+  presence
 }: GraphViewProps) {
   const fittedGraphScopeId = useRef<string | null>(null);
   const [localFlowInstance, setLocalFlowInstance] = useState<ReactFlowInstance<
@@ -205,6 +209,15 @@ export function GraphView({
       setFlowInstance(instance);
     },
     [setFlowInstance]
+  );
+  const handlePaneMouseMove = useCallback(
+    (event: MouseEvent) => {
+      if (!presence || !localFlowInstance) return;
+      presence.onPointerMove(
+        localFlowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY })
+      );
+    },
+    [localFlowInstance, presence]
   );
   const { handleReconnect, handleReconnectEnd, handleReconnectStart } = useEdgeReconnect({
     handleEdgesDelete,
@@ -328,9 +341,12 @@ export function GraphView({
             setHoveredEdgeId(null);
             setHoveredNodeId(null);
           }}
+          onPaneMouseMove={handlePaneMouseMove}
+          onPaneMouseLeave={() => presence?.onPointerLeave()}
           onPaneClick={() => {
             clearPinnedResource();
           }}
+          onSelectionChange={presence?.onSelectionChange}
           onNodeDragStop={(event, node) => void onNodeDragStop(event, node)}
           onInit={handleFlowInit}
           proOptions={{ hideAttribution: true }}
@@ -339,6 +355,13 @@ export function GraphView({
           <Background color="var(--border)" gap={24} />
           <Controls />
           <MiniMap pannable zoomable />
+          {presence && presence.remoteSessions.length > 0 ? (
+            <CanvasPresenceOverlay
+              edges={visibleEdges}
+              nodes={visibleNodes}
+              sessions={presence.remoteSessions}
+            />
+          ) : null}
         </ReactFlow>
       )}
       {graph ? (

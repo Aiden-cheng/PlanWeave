@@ -12,7 +12,11 @@ import type { AppFlowNode } from "../renderer/types";
 
 const reactFlowMock = vi.hoisted(() => ({
   flowInstance: {
-    fitView: vi.fn()
+    fitView: vi.fn(),
+    screenToFlowPosition: vi.fn((position: { x: number; y: number }) => ({
+      x: position.x - 10,
+      y: position.y - 20
+    }))
   },
   props: [] as Array<Record<string, unknown>>
 }));
@@ -187,6 +191,7 @@ function defaultProps(
 afterEach(() => {
   cleanup();
   reactFlowMock.flowInstance.fitView.mockClear();
+  reactFlowMock.flowInstance.screenToFlowPosition.mockClear();
   reactFlowMock.props = [];
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -392,5 +397,38 @@ describe("GraphView viewport fitting", () => {
     });
 
     expect(onTaskWorkspaceOpen).not.toHaveBeenCalled();
+  });
+});
+
+describe("GraphView canvas presence wiring", () => {
+  it("converts pane pointer events to flow coordinates and forwards stable selections", async () => {
+    const presence = {
+      remoteSessions: [],
+      error: null,
+      onPointerMove: vi.fn(),
+      onPointerLeave: vi.fn(),
+      onSelectionChange: vi.fn()
+    };
+    const node = flowNode();
+    render(<GraphView {...defaultProps({ nodes: [node], presence })} />);
+
+    await waitFor(() => expect(reactFlowMock.props.length).toBeGreaterThan(0));
+    const latestProps = reactFlowMock.props.at(-1) as {
+      onPaneMouseLeave: () => void;
+      onPaneMouseMove: (event: MouseEvent) => void;
+      onSelectionChange: (selection: { nodes: AppFlowNode[]; edges: [] }) => void;
+    };
+    const pointer = new MouseEvent("mousemove", { clientX: 100, clientY: 200 });
+    act(() => latestProps.onPaneMouseMove(pointer));
+    expect(reactFlowMock.flowInstance.screenToFlowPosition).toHaveBeenCalledWith({
+      x: 100,
+      y: 200
+    });
+    expect(presence.onPointerMove).toHaveBeenCalledWith({ x: 90, y: 180 });
+
+    act(() => latestProps.onSelectionChange({ nodes: [node], edges: [] }));
+    expect(presence.onSelectionChange).toHaveBeenCalledWith({ nodes: [node], edges: [] });
+    act(() => latestProps.onPaneMouseLeave());
+    expect(presence.onPointerLeave).toHaveBeenCalledTimes(1);
   });
 });

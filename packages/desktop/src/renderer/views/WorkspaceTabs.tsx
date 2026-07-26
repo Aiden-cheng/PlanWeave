@@ -38,6 +38,7 @@ import type { DesktopSearchCanvasScope, DesktopSearchStatus } from "../hooks/use
 import type { AppEdgeTypes, AppNodeTypes } from "../graph/flowModel";
 import type { AutoRunNextActionDescriptor } from "../run/autoRunNextActions";
 import type { AppFlowNode, AppView, AutoRunScopeMode, NotificationItem } from "../types";
+import type { CollaborationCanvasPresenceResult } from "../hooks/useCollaborationCanvasPresence";
 import { useProjectWorkspace } from "../ProjectWorkspaceProvider";
 
 const CanvasMapView = lazy(() =>
@@ -118,6 +119,7 @@ export type WorkspaceTabsGraphWorkspaceProps = {
   onResourceHover: (name: string | null) => void;
   onResourcePin: (name: string | null) => void;
   clearPinnedResource: () => void;
+  presence?: CollaborationCanvasPresenceResult;
 };
 
 export type WorkspaceTabsAutoRunProps = {
@@ -209,6 +211,7 @@ function GraphWorkspaceRoute() {
       selectedTaskPanelId={shell.selectedTaskPanelId}
       setActiveView={shell.setActiveView}
       t={shell.t}
+      presence={graphWorkspace.presence}
     />
   );
 }

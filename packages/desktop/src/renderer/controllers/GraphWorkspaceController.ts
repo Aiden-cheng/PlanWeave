@@ -16,6 +16,7 @@ import type { AppFlowNode } from "../types";
 import type { AppEdgeTypes, AppNodeTypes } from "../graph/flowModel";
 import type { createTranslator } from "../i18n";
 import { useVisibleGraphTasks } from "../hooks/useVisibleGraphTasks";
+import type { CollaborationCanvasPresenceResult } from "../hooks/useCollaborationCanvasPresence";
 import type { WorkspaceTabsGraphWorkspaceProps } from "../views/WorkspaceTabs";
 
 export type GraphWorkspaceControllerInput = Omit<
@@ -70,7 +71,8 @@ export function useGraphWorkspaceController({
   pinnedResource,
   onResourceHover,
   onResourcePin,
-  clearPinnedResource
+  clearPinnedResource,
+  presence
 }: {
   edges: Edge[];
   edgeTypes: AppEdgeTypes;
@@ -103,6 +105,7 @@ export function useGraphWorkspaceController({
   onResourceHover: (name: string | null) => void;
   onResourcePin: (name: string | null) => void;
   clearPinnedResource: () => void;
+  presence?: CollaborationCanvasPresenceResult;
 }): GraphWorkspaceController {
   const { visibleTaskIds, visibleTasks } = useVisibleGraphTasks(graph, searchQuery);
 
@@ -135,6 +138,7 @@ export function useGraphWorkspaceController({
     pinnedResource,
     onResourceHover,
     onResourcePin,
-    clearPinnedResource
+    clearPinnedResource,
+    presence
   });
 }
