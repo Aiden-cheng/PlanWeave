@@ -80,6 +80,47 @@ export type ReleaseGateReport = {
 
 const tierResultSchema = z.enum(["passed", "failed", "skipped"]);
 
+const realAcpPassedChecksSchema = z
+  .object({
+    preflightReady: z.literal(true),
+    protocolNegotiated: z.literal(true),
+    sessionCreated: z.literal(true),
+    normalizedEvents: z.literal(true),
+    terminalSucceeded: z.literal(true),
+    artifactContract: z.literal(true),
+    cancellationObserved: z.literal(true),
+    cleanup: z.literal(true),
+    noCliFallback: z.literal(true)
+  })
+  .strict();
+
+const vpsPassedChecksSchema = z
+  .object({
+    certificateVerifiedTransport: z.literal(true),
+    enrollmentOneTimeToken: z.literal(true),
+    hostCapacityAdvertised: z.literal(true),
+    hostCapabilitiesAdvertised: z.literal(true),
+    envelopeDigestCaptured: z.literal(true),
+    identitiesCaptured: z.literal(true),
+    eventsCaptured: z.literal(true),
+    heartbeatObserved: z.literal(true),
+    runtimeResultAuthoritative: z.literal(true),
+    networkInterruptReplay: z.literal(true),
+    resourceBoundsConfirmed: z.literal(true),
+    cleanupCompleted: z.literal(true),
+    credentialsRevoked: z.literal(true)
+  })
+  .passthrough();
+
+const vpsPassedIdentitiesSchema = z
+  .object({
+    operationId: z.string().min(1),
+    dispatchId: z.string().min(1),
+    executionAttemptId: z.string().min(1),
+    hostId: z.string().min(1)
+  })
+  .passthrough();
+
 function digestJson(value: unknown): string {
   const body = JSON.stringify(value);
   return `sha256:${createHash("sha256").update(body).digest("hex")}`;
@@ -87,6 +128,26 @@ function digestJson(value: unknown): string {
 
 function countsAsPass(status: TierEvaluationStatus): boolean {
   return status === "passed";
+}
+
+/** Reject forged `result: "passed"` payloads that omit substantive proof fields. */
+function rejectForgedPassed(
+  tierId: ReleaseGateTierId,
+  requirement: TierEvaluation["requirement"],
+  raw: unknown,
+  diagnostic: string,
+  environmentClass: string | null
+): TierEvaluation {
+  return {
+    tierId,
+    requirement,
+    status: "invalid",
+    countsAsPass: false,
+    evidenceDigest: digestJson(raw),
+    diagnostic,
+    observedAt: null,
+    environmentClass
+  };
 }
 
 function notProvided(tierId: ReleaseGateTierId): TierEvaluation {
@@ -137,6 +198,7 @@ export async function evaluateDeterministicEvidence(
         result: tierResultSchema,
         generatedAt: z.string().datetime().optional(),
         suite: z.string().min(1).max(256).optional(),
+        exitCode: z.number().int().optional(),
         tests: z
           .object({
             total: z.number().int().nonnegative().optional(),
@@ -158,6 +220,22 @@ export async function evaluateDeterministicEvidence(
         observedAt: null,
         environmentClass: "ci"
       };
+    }
+    if (parsed.data.result === "passed") {
+      const suiteOk = parsed.data.suite === "server-real-process";
+      const exitOk = parsed.data.exitCode === 0 || parsed.data.exitCode === undefined;
+      const failedOk =
+        parsed.data.tests?.failed === undefined || parsed.data.tests.failed === 0;
+      // Bare { result: "passed" } without suite identity is forgeable and invalid.
+      if (!suiteOk || !exitOk || !failedOk) {
+        return rejectForgedPassed(
+          tierId,
+          "required_ci",
+          parsed.data,
+          "Deterministic passed evidence requires suite=server-real-process and zero failed tests (forged result rejected).",
+          "ci"
+        );
+      }
     }
     const status = parsed.data.result;
     return {
@@ -208,12 +286,13 @@ export async function evaluateRealAcpEvidence(
         result: tierResultSchema,
         preflight: z
           .object({
-            profileId: z.string(),
+            profileId: z.string().min(1),
             protocolVersion: z.union([z.number(), z.string()]).optional(),
             agentVersion: z.string().nullable().optional()
           })
           .passthrough()
           .optional(),
+        checks: z.record(z.string(), z.unknown()).optional(),
         generatedAt: z.string().datetime().optional()
       })
       .passthrough();
@@ -229,6 +308,22 @@ export async function evaluateRealAcpEvidence(
         observedAt: null,
         environmentClass: "host-local"
       };
+    }
+    if (parsed.data.result === "passed") {
+      const checksOk = realAcpPassedChecksSchema.safeParse(parsed.data.checks);
+      const preflightOk =
+        typeof parsed.data.preflight?.profileId === "string" &&
+        parsed.data.preflight.profileId.length > 0 &&
+        parsed.data.preflight.profileId !== "unresolved";
+      if (!checksOk.success || !preflightOk) {
+        return rejectForgedPassed(
+          tierId,
+          "required_supported_version_release",
+          parsed.data,
+          "Real ACP passed evidence requires all smoke checks true and a resolved preflight.profileId (forged result rejected).",
+          "host-local"
+        );
+      }
     }
     const observedAt = resolveObservedAt(parsed.data.generatedAt, mtimeIso);
     if (parsed.data.result === "passed" && isExpired(observedAt, now)) {
@@ -297,6 +392,8 @@ export async function evaluateVpsEvidence(
           })
           .passthrough()
           .optional(),
+        checks: z.record(z.string(), z.unknown()).optional(),
+        identities: z.record(z.string(), z.unknown()).optional(),
         generatedAt: z.string().datetime().optional()
       })
       .passthrough();
@@ -325,6 +422,19 @@ export async function evaluateVpsEvidence(
         observedAt,
         environmentClass: parsed.data.environmentClass
       };
+    }
+    if (parsed.data.result === "passed") {
+      const checksOk = vpsPassedChecksSchema.safeParse(parsed.data.checks);
+      const identitiesOk = vpsPassedIdentitiesSchema.safeParse(parsed.data.identities);
+      if (!checksOk.success || !identitiesOk.success) {
+        return rejectForgedPassed(
+          tierId,
+          "required_pre_release_evidence",
+          parsed.data,
+          "VPS passed evidence requires all remote checks true and non-null operation/dispatch/attempt/host identities (forged result rejected).",
+          "remote-vps"
+        );
+      }
     }
     if (parsed.data.result === "passed" && isExpired(observedAt, now)) {
       return {

@@ -198,7 +198,18 @@ describe("release gate checklist and evaluation", () => {
         version: "planweave.real-acp-host-smoke/v1",
         result: "passed",
         generatedAt: old,
-        preflight: { profileId: "codex-acp", protocolVersion: 1, agentVersion: "1.0.0" }
+        preflight: { profileId: "codex-acp", protocolVersion: 1, agentVersion: "1.0.0" },
+        checks: {
+          preflightReady: true,
+          protocolNegotiated: true,
+          sessionCreated: true,
+          normalizedEvents: true,
+          terminalSucceeded: true,
+          artifactContract: true,
+          cancellationObserved: true,
+          cleanup: true,
+          noCliFallback: true
+        }
       })
     );
     const report = await buildReleaseGateReport({
@@ -213,6 +224,58 @@ describe("release gate checklist and evaluation", () => {
     });
   });
 
+  it("rejects forged passed evidence without substantive checks", async () => {
+    const root = await tempDir();
+    const now = new Date().toISOString();
+    const forgedDet = join(root, "forged-det.json");
+    const forgedAcp = join(root, "forged-acp.json");
+    const forgedVps = join(root, "forged-vps.json");
+    await writeFile(
+      forgedDet,
+      JSON.stringify({
+        version: "planweave.release-gate.deterministic/v1",
+        result: "passed",
+        generatedAt: now
+      })
+    );
+    await writeFile(
+      forgedAcp,
+      JSON.stringify({
+        version: "planweave.real-acp-host-smoke/v1",
+        result: "passed",
+        generatedAt: now,
+        preflight: { profileId: "codex-acp" }
+      })
+    );
+    await writeFile(
+      forgedVps,
+      JSON.stringify({
+        version: "planweave.vps-authenticated-e2e/v1",
+        result: "passed",
+        environmentClass: "remote-vps",
+        generatedAt: now
+      })
+    );
+
+    const report = await buildReleaseGateReport({
+      deterministicEvidencePath: forgedDet,
+      realAcpEvidencePath: forgedAcp,
+      vpsEvidencePath: forgedVps,
+      agentHostVersion: "0.3.0",
+      protocolPackageVersion: "0.3.0"
+    });
+    expect(report.releaseReady).toEqual({
+      ci: false,
+      supportedVersionRelease: false,
+      preRelease: false
+    });
+    for (const tier of report.tiers) {
+      expect(tier.countsAsPass).toBe(false);
+      expect(tier.status).toBe("invalid");
+      expect(tier.diagnostic).toMatch(/forged result rejected|requires/);
+    }
+  });
+
   it("becomes pre-release ready only when all three tiers pass and majors match", async () => {
     const root = await tempDir();
     const now = new Date().toISOString();
@@ -225,7 +288,9 @@ describe("release gate checklist and evaluation", () => {
         version: "planweave.release-gate.deterministic/v1",
         result: "passed",
         generatedAt: now,
-        suite: "server-real-process"
+        suite: "server-real-process",
+        exitCode: 0,
+        tests: { total: 10, passed: 10, failed: 0 }
       })
     );
     await writeFile(
@@ -234,7 +299,18 @@ describe("release gate checklist and evaluation", () => {
         version: "planweave.real-acp-host-smoke/v1",
         result: "passed",
         generatedAt: now,
-        preflight: { profileId: "codex-acp", protocolVersion: 1, agentVersion: "0.1.0" }
+        preflight: { profileId: "codex-acp", protocolVersion: 1, agentVersion: "0.1.0" },
+        checks: {
+          preflightReady: true,
+          protocolNegotiated: true,
+          sessionCreated: true,
+          normalizedEvents: true,
+          terminalSucceeded: true,
+          artifactContract: true,
+          cancellationObserved: true,
+          cleanup: true,
+          noCliFallback: true
+        }
       })
     );
     await writeFile(
@@ -244,7 +320,31 @@ describe("release gate checklist and evaluation", () => {
         result: "passed",
         environmentClass: "remote-vps",
         generatedAt: now,
-        componentVersions: { server: "0.3.0", agentHost: "0.3.0", protocol: 1 }
+        componentVersions: { server: "0.3.0", agentHost: "0.3.0", protocol: 1 },
+        identities: {
+          operationId: "op-1",
+          dispatchId: "dispatch-1",
+          executionAttemptId: "attempt-1",
+          hostId: "host-1",
+          leaseId: "lease-1",
+          sessionId: null
+        },
+        checks: {
+          certificateVerifiedTransport: true,
+          enrollmentOneTimeToken: true,
+          hostCapacityAdvertised: true,
+          hostCapabilitiesAdvertised: true,
+          envelopeDigestCaptured: true,
+          identitiesCaptured: true,
+          eventsCaptured: true,
+          heartbeatObserved: true,
+          artifactHashCaptured: true,
+          runtimeResultAuthoritative: true,
+          networkInterruptReplay: true,
+          resourceBoundsConfirmed: true,
+          cleanupCompleted: true,
+          credentialsRevoked: true
+        }
       })
     );
 
