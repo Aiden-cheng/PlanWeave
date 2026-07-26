@@ -2,7 +2,10 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { OperatorControlClient } from "../main/operatorControl/OperatorControlClient.js";
+import {
+  OPERATOR_CONTROL_JSON_BODY_MAX_BYTES,
+  OperatorControlClient
+} from "../main/operatorControl/OperatorControlClient.js";
 import {
   OperatorCredentialVault,
   type OperatorSafeStoragePort
@@ -136,6 +139,44 @@ describe("Desktop operator control trust boundary", () => {
     request.mockResolvedValueOnce(new Response("not-json", { status: 200 }));
     await expect(client.listHosts()).rejects.toMatchObject({ code: "operator_malformed_json" });
     expect(JSON.stringify(requests)).toContain(tokenA);
+  });
+
+  it("stops reading declared and chunked responses at the byte limit", async () => {
+    const request = vi.fn<typeof fetch>();
+    const client = new OperatorControlClient({
+      profile: profile("profile-a"),
+      credential: { getOperatorToken: () => tokenA },
+      request
+    });
+    request.mockResolvedValueOnce(
+      new Response(null, {
+        status: 200,
+        headers: { "content-length": String(OPERATOR_CONTROL_JSON_BODY_MAX_BYTES + 1) }
+      })
+    );
+    await expect(client.listHosts()).rejects.toMatchObject({
+      code: "operator_response_too_large"
+    });
+
+    let canceled = false;
+    const oversizedChunk = new Uint8Array(40 * 1024);
+    request.mockResolvedValueOnce(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            controller.enqueue(oversizedChunk);
+          },
+          cancel() {
+            canceled = true;
+          }
+        }),
+        { status: 200 }
+      )
+    );
+    await expect(client.listHosts()).rejects.toMatchObject({
+      code: "operator_response_too_large"
+    });
+    expect(canceled).toBe(true);
   });
 
   it("isolates profile credentials in the main service", async () => {

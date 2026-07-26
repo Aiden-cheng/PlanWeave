@@ -230,21 +230,32 @@ export class OperatorControlClient {
   private async readTextLimited(response: Response): Promise<string> {
     const declared = response.headers.get("content-length");
     if (declared && /^\d+$/.test(declared) && Number(declared) > OPERATOR_JSON_BODY_MAX_BYTES) {
+      await response.body?.cancel();
       throw new OperatorControlError({
         kind: "payload_too_large",
         code: "operator_response_too_large",
         httpStatus: response.status
       });
     }
-    const body = await response.arrayBuffer();
-    if (body.byteLength > OPERATOR_JSON_BODY_MAX_BYTES) {
-      throw new OperatorControlError({
-        kind: "payload_too_large",
-        code: "operator_response_too_large",
-        httpStatus: response.status
-      });
+    const reader = response.body?.getReader();
+    if (!reader) return "";
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > OPERATOR_JSON_BODY_MAX_BYTES) {
+        await reader.cancel();
+        throw new OperatorControlError({
+          kind: "payload_too_large",
+          code: "operator_response_too_large",
+          httpStatus: response.status
+        });
+      }
+      chunks.push(value);
     }
-    return Buffer.from(body).toString("utf8");
+    return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), totalBytes).toString("utf8");
   }
 }
 
