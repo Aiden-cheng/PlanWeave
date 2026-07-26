@@ -45,10 +45,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # pnpm 11 uses the bulk advisory endpoint required by the npm registry.
-      # Block CI when the resolved dependency graph contains high or critical advisories.
+      # Audit the production dependency graph at the high/critical threshold. Do not
+      # ignore package-manager failures: registry transport and audit-parser errors must
+      # fail this gate instead of being reported as a clean audit.
       - name: Audit dependencies (high/critical)
-        run: npx --yes pnpm@11.4.0 --pm-on-fail=ignore audit --audit-level=high
+        run: npx --yes pnpm@11.4.0 audit --prod --audit-level=high
 
       # cli/desktop/mcp resolve @planweave-ai/runtime (and desktop also mcp) from
       # package exports that point at dist/. The root build prepares shared
