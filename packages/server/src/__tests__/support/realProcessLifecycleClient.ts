@@ -2,6 +2,7 @@
  * Operator-facing lifecycle client for real-process ACP integration tests.
  * Speaks only public HTTP APIs + harness-owned SQLite inspection (no Server source imports).
  */
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
@@ -523,6 +524,68 @@ export class RealProcessLifecycleClient {
         failure?: { code: string; message: string; retryable: boolean };
       };
       return event.failure;
+    } finally {
+      database.close();
+    }
+  }
+
+  /** Read Host credential token from the harness-owned Host data directory (not Server). */
+  readHostCredential(hostDataDir = this.harness.paths.hostData): {
+    hostId: string;
+    credentialToken: string;
+  } {
+    const path = join(hostDataDir, "credentials.json");
+    if (!existsSync(path)) throw new Error(`real_process_lifecycle_host_credential_missing:${path}`);
+    const document = JSON.parse(readFileSync(path, "utf8")) as {
+      active?: { hostId?: string; credentialToken?: string };
+    };
+    const hostId = document.active?.hostId;
+    const credentialToken = document.active?.credentialToken;
+    if (typeof hostId !== "string" || typeof credentialToken !== "string") {
+      throw new Error("real_process_lifecycle_host_credential_inactive");
+    }
+    return { hostId, credentialToken };
+  }
+
+  artifactUrl(input: {
+    hostId: string;
+    dispatchId: string;
+    leaseId: string;
+    executionAttemptId: string;
+    sha256: string;
+  }): string {
+    return (
+      `${this.harness.origin}/agent-hosts/${encodeURIComponent(input.hostId)}` +
+      `/dispatches/${encodeURIComponent(input.dispatchId)}` +
+      `/leases/${encodeURIComponent(input.leaseId)}` +
+      `/attempts/${encodeURIComponent(input.executionAttemptId)}` +
+      `/artifacts/${encodeURIComponent(input.sha256)}`
+    );
+  }
+
+  /** Read content-addressed artifact bytes from the Server data directory. */
+  readServerArtifactBytes(artifactRef: string): Buffer {
+    const match = /^artifact:sha256:([a-f0-9]{64})$/.exec(artifactRef);
+    if (!match) throw new Error(`real_process_lifecycle_artifact_ref_invalid:${artifactRef}`);
+    const sha256 = match[1];
+    const path = join(this.harness.paths.serverData, "artifacts", "sha256", sha256.slice(0, 2), sha256);
+    if (!existsSync(path)) throw new Error(`real_process_lifecycle_artifact_blob_missing:${sha256}`);
+    const bytes = readFileSync(path);
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    if (digest !== sha256) throw new Error("real_process_lifecycle_artifact_digest_mismatch");
+    return bytes;
+  }
+
+  readServerEnvelopeCanonical(dispatchId: string): string {
+    const database = openSqlite(this.serverDatabasePath());
+    try {
+      const row = database
+        .prepare("SELECT canonical_json FROM dispatch_execution_envelopes WHERE dispatch_id=?")
+        .get(dispatchId) as { canonical_json?: string } | undefined;
+      if (!row?.canonical_json) {
+        throw new Error(`real_process_lifecycle_envelope_missing:${dispatchId}`);
+      }
+      return row.canonical_json;
     } finally {
       database.close();
     }

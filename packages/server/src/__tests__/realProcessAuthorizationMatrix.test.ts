@@ -1,11 +1,13 @@
 /**
- * Real multi-process adversarial authorization matrix (RV-002#B-003).
+ * Real multi-process adversarial authorization matrix (RV-002#B-003 / FIX-RV-002).
  *
- * Exercises public operator HTTP APIs against a live Server + Host topology.
- * Complementary Host/artifact matrices live in artifactAdversarialBoundary.test.ts
- * and agent-host unit recovery/auth suites; this file proves process-level operator
- * and action identity fences with sensitivity checks (safe vs unsafe variants).
+ * Exercises public operator HTTP APIs and Host artifact routes against a live
+ * Server + Host topology. Complements artifactAdversarialBoundary (in-process)
+ * by proving process-level cross-host/project, lease, revoke, envelope, and
+ * oversize fences with sensitivity checks (safe vs unsafe variants).
  */
+import { createHash } from "node:crypto";
+import { request as httpRequest } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   RealProcessAcpHarness,
@@ -484,4 +486,261 @@ describe("real-process adversarial authorization matrix", () => {
     const terminal = await client.waitForTerminal(owner.operationId);
     expect(terminal.state).toBe("completed");
   }, 120_000);
+
+  it("process auth matrix: cross-host/project, artifact, envelope, lease, revoke, oversize", async () => {
+    const { harness, client } = await createHarness({ hostCapacity: 2 });
+    await harness.startAll();
+    await harness.acpControl.pause(["session/prompt"]);
+
+    const ownerHost = await harness.waitForHostOnline();
+    const ownerCredential = client.readHostCredential();
+    expect(ownerCredential.hostId).toBe(ownerHost.id);
+
+    const secondary = await harness.startSecondaryHost({
+      key: "foreign",
+      displayName: "Foreign Auth Host",
+      capabilities: ["other.capability"],
+      capacity: 1,
+      acpScenario: "success"
+    });
+    const foreignCredential = client.readHostCredential(secondary.handle.dataDir);
+    expect(foreignCredential.hostId).toBe(secondary.id);
+    expect(foreignCredential.hostId).not.toBe(ownerCredential.hostId);
+
+    const dispatched = await client.dispatch({
+      blockRef: "T-001#B-001",
+      idempotencyKey: "auth-matrix-process-scope-1"
+    });
+    await client.waitForDispatchStatus(dispatched.operationId, ["leased", "running"]);
+    await harness.acpControl.waitUntilLifecycleContains("paused session/prompt", 30_000);
+    const view = await client.observe(dispatched.operationId);
+    const leaseId = view.attempt.leaseId;
+    expect(leaseId).toEqual(expect.any(String));
+    expect(view.attempt.hostId).toBe(ownerHost.id);
+
+    const envelopeBefore = client.readServerEnvelopeCanonical(view.dispatchId);
+    expect(envelopeBefore.length).toBeGreaterThan(0);
+    const envelope = client.readServerEnvelope(view.dispatchId);
+    expect(envelope).toMatchObject({
+      projectId: harness.projectId,
+      blockRef: "T-001#B-001",
+      execution: {
+        dispatchId: view.dispatchId,
+        attemptId: view.executionAttemptId
+      }
+    });
+
+    const probeBytes = Buffer.from("auth-matrix-probe-payload\n", "utf8");
+    const probeSha = createHash("sha256").update(probeBytes).digest("hex");
+    const artifactUrl = (overrides?: {
+      hostId?: string;
+      leaseId?: string;
+      executionAttemptId?: string;
+      sha256?: string;
+    }) =>
+      client.artifactUrl({
+        hostId: overrides?.hostId ?? ownerCredential.hostId,
+        dispatchId: view.dispatchId,
+        leaseId: overrides?.leaseId ?? leaseId!,
+        executionAttemptId: overrides?.executionAttemptId ?? view.executionAttemptId,
+        sha256: overrides?.sha256 ?? probeSha
+      });
+
+    const putArtifact = async (
+      url: string,
+      token: string,
+      bytes: Buffer
+    ): Promise<{ status: number; body: unknown }> => {
+      const response = await fetch(url, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "content-type": "text/plain",
+          "content-length": String(bytes.byteLength),
+          "x-planweave-artifact-operation-id": `auth-probe-${probeSha.slice(0, 12)}`,
+          "x-planweave-artifact-purpose": "report"
+        },
+        body: bytes
+      });
+      const text = await response.text();
+      let body: unknown = text;
+      try {
+        body = text.length > 0 ? JSON.parse(text) : null;
+      } catch {
+        body = text;
+      }
+      return { status: response.status, body };
+    };
+
+    const getArtifact = async (
+      url: string,
+      token: string
+    ): Promise<{ status: number; body: unknown }> => {
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const text = await response.text();
+      let body: unknown = text;
+      try {
+        body = text.length > 0 ? JSON.parse(text) : null;
+      } catch {
+        body = text;
+      }
+      return { status: response.status, body };
+    };
+
+    // --- cross-host: foreign Host token on owner dispatch artifact path ---
+    const crossHostPut = await putArtifact(
+      artifactUrl({ hostId: foreignCredential.hostId }),
+      foreignCredential.credentialToken,
+      probeBytes
+    );
+    assertDenied(crossHostPut, [401, 403, 404, 500]);
+    const crossHostGet = await getArtifact(
+      artifactUrl({ hostId: foreignCredential.hostId }),
+      foreignCredential.credentialToken
+    );
+    assertDenied(crossHostGet, [401, 403, 404, 500]);
+
+    // --- cross-project: create remote-op for foreign projectId (no trusted project) ---
+    const beforeOps = client.countServerRows("remote_operations");
+    const crossProject = await client.rawRequest({
+      method: "POST",
+      path: "/api/v1/remote-operations",
+      body: {
+        projectId: "foreign-project-not-trusted",
+        canvasId: "default",
+        blockRef: "T-001#B-001",
+        idempotencyKey: "auth-matrix-cross-project"
+      }
+    });
+    assertDenied(crossProject, [403, 404, 500]);
+    expect(client.countServerRows("remote_operations")).toBe(beforeOps);
+
+    // --- lease: wrong lease on artifact path ---
+    const wrongLease = await putArtifact(
+      artifactUrl({ leaseId: "lease-foreign-not-bound" }),
+      ownerCredential.credentialToken,
+      probeBytes
+    );
+    assertDenied(wrongLease, [401, 403, 404, 500]);
+
+    // --- lease: wrong attempt on artifact path ---
+    const wrongAttempt = await putArtifact(
+      artifactUrl({ executionAttemptId: "attempt-foreign-not-bound" }),
+      ownerCredential.credentialToken,
+      probeBytes
+    );
+    assertDenied(wrongAttempt, [401, 403, 404, 500]);
+
+    // --- artifact: missing/wrong Host token on owner artifact path ---
+    const missingHostToken = await putArtifact(artifactUrl(), "not-a-host-token", probeBytes);
+    assertDenied(missingHostToken, [401, 403, 404, 500]);
+    const operatorAsHost = await putArtifact(
+      artifactUrl(),
+      harness.operatorToken,
+      probeBytes
+    );
+    assertDenied(operatorAsHost, [401, 403, 404, 500]);
+
+    // --- oversize: operator body exceeds limit ---
+    const oversizedBody = "x".repeat(300 * 1024);
+    const oversize = await client.rawRequest({
+      method: "POST",
+      path: "/api/v1/remote-operations",
+      body: oversizedBody,
+      headers: { "content-type": "application/json" }
+    });
+    expect(oversize.status).toBe(413);
+
+    // Artifact oversize: declare Content-Length above Server maxArtifactBytes (default 100MiB).
+    // Use node:http so undici cannot reject a deliberate length/body mismatch client-side.
+    const oversizeUrl = new URL(artifactUrl());
+    const oversizeArtifactStatus = await new Promise<number>((resolve, reject) => {
+      const req = httpRequest(
+        {
+          protocol: oversizeUrl.protocol,
+          hostname: oversizeUrl.hostname,
+          port: oversizeUrl.port,
+          path: oversizeUrl.pathname,
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${ownerCredential.credentialToken}`,
+            "content-type": "text/plain",
+            "content-length": String(200 * 1024 * 1024),
+            "x-planweave-artifact-operation-id": "auth-oversize-artifact",
+            "x-planweave-artifact-purpose": "report"
+          }
+        },
+        (response) => {
+          response.resume();
+          response.on("end", () => resolve(response.statusCode ?? 0));
+        }
+      );
+      req.on("error", reject);
+      req.end();
+    });
+    // 413 when size check hits maxArtifactBytes; 400/403/500 also fail-closed.
+    expect([400, 403, 413, 500]).toContain(oversizeArtifactStatus);
+    expect(oversizeArtifactStatus).not.toBe(201);
+
+    // --- envelope: canonical envelope must remain immutable under adversarial probes ---
+    const envelopeAfterProbes = client.readServerEnvelopeCanonical(view.dispatchId);
+    expect(envelopeAfterProbes).toBe(envelopeBefore);
+    // No public operator rewrite surface for envelopes; malformed action must not rewrite.
+    const envelopeTamper = await client.rawRequest({
+      method: "POST",
+      path: `/api/v1/remote-operations/${encodeURIComponent(view.operationId)}/actions`,
+      body: {
+        actionId: "auth-envelope-tamper",
+        operationId: view.operationId,
+        dispatchId: view.dispatchId,
+        executionAttemptId: view.executionAttemptId,
+        expectedAttemptVersion: view.attempt.stateVersion,
+        kind: "cancel",
+        leaseId: "lease-tamper-envelope",
+        reason: "attempt envelope rewrite via wrong lease"
+      }
+    });
+    assertDenied(envelopeTamper, [400, 409, 422, 500]);
+    expect(client.readServerEnvelopeCanonical(view.dispatchId)).toBe(envelopeBefore);
+
+    // --- revoke: revoke owner Host; further Host artifact auth must fail closed ---
+    const revoke = await client.rawRequest({
+      method: "POST",
+      path: `/api/v1/hosts/${encodeURIComponent(ownerHost.id)}/revoke`
+    });
+    expect(revoke.status).toBe(200);
+    const afterRevoke = await putArtifact(
+      artifactUrl(),
+      ownerCredential.credentialToken,
+      probeBytes
+    );
+    assertDenied(afterRevoke, [401, 403, 404, 500]);
+
+    // Operation must not complete successfully via adversarial artifact writes.
+    const stillLive = await client.observe(dispatched.operationId);
+    expect(stillLive.state).not.toBe("completed");
+    expect(
+      client.countServerRows("dispatch_artifact_links", "dispatch_id=? AND purpose='report'", [
+        view.dispatchId
+      ])
+    ).toBe(0);
+    // Envelope remains the original canonical payload after revoke + probes.
+    expect(client.readServerEnvelopeCanonical(view.dispatchId)).toBe(envelopeBefore);
+
+    // Revoke fences Host writes; it does not by itself force every live attempt terminal.
+    // Resume ACP only so the child can exit; do not require terminalization for this matrix.
+    await harness.acpControl.resume();
+    const afterResume = await client.observe(dispatched.operationId);
+    // Probe artifacts must never produce a false Runtime/Server success writeback.
+    expect(afterResume.state).not.toBe("completed");
+    expect(afterResume.runtime.terminalReceipt?.outcome).not.toBe("completed");
+    expect(
+      client.countServerRows("dispatch_artifact_links", "dispatch_id=? AND purpose='report'", [
+        view.dispatchId
+      ])
+    ).toBe(0);
+    expect(client.readServerEnvelopeCanonical(view.dispatchId)).toBe(envelopeBefore);
+  }, 180_000);
 });
