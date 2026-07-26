@@ -577,29 +577,29 @@ export class CollaborationReadModelController {
         this.state.assignments.set(workItemKey(item.workItem), item);
         this.ingestHostsFromAssignment(item);
       }
-      // Hosts: pull eligible assignees for first assignment when available (bounded).
-      const first = page.items[0];
-      if (first) {
-        try {
-          const eligible = await this.api.listCollaborationEligibleAssignees({
-            workItem: first.workItem
+      // Hosts are filtered by each Block's package capabilities. Query every Block in this
+      // bounded assignment page (never Tasks), then union/dedupe by Host id. Any eligible
+      // failure remains an authoritative refresh failure instead of a partial success.
+      const blockItems = page.items
+        .filter((item) => item.workItem.kind === "block")
+        .slice(0, this.pageLimit);
+      for (const item of blockItems) {
+        const eligible = await this.api.listCollaborationEligibleAssignees({
+          workItem: item.workItem
+        });
+        if (generation !== this.state.generation) return;
+        for (const host of eligible.hosts) {
+          this.state.hosts.set(host.hostId, {
+            hostId: host.hostId,
+            projectId: host.projectId,
+            displayName: host.displayName,
+            online: host.online,
+            revoked: host.revoked,
+            authorizedForProject: host.authorizedForProject,
+            exists: host.exists,
+            capabilities: host.capabilities,
+            capacityRemaining: host.capacityRemaining
           });
-          if (generation !== this.state.generation) return;
-          for (const host of eligible.hosts) {
-            this.state.hosts.set(host.hostId, {
-              hostId: host.hostId,
-              projectId: host.projectId,
-              displayName: host.displayName,
-              online: host.online,
-              revoked: host.revoked,
-              authorizedForProject: host.authorizedForProject,
-              exists: host.exists,
-              capabilities: host.capabilities,
-              capacityRemaining: host.capacityRemaining
-            });
-          }
-        } catch {
-          // Host listing is best-effort; assignments remain authoritative.
         }
       }
       this.setLoading("assignments", false);

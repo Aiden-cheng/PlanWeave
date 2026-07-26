@@ -3,13 +3,15 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
+  assignmentDisplayProjectionSchema,
   exampleActivityListPage,
   exampleAssignmentProjection,
   exampleCommentListPage,
   exampleCommentProjection,
   exampleMemberPage,
   exampleObserverCatchupRequired,
-  exampleObserverEvent
+  exampleObserverEvent,
+  type AssignmentDisplayProjection
 } from "@planweave-ai/collaboration-contracts";
 import { CollaborationReadModelController } from "../renderer/collaboration/CollaborationReadModelController";
 import {
@@ -23,6 +25,25 @@ import type { CollaborationReadBridgePort } from "../renderer/collaboration/Coll
 
 const workItem = exampleAssignmentProjection.workItem;
 const workKey = workItemKey(workItem);
+
+function blockAssignment(blockRef: string, hostId: string): AssignmentDisplayProjection {
+  return assignmentDisplayProjectionSchema.parse({
+    projectId: "project-demo-001",
+    workItem: { kind: "block", canvasId: "canvas-1", blockRef },
+    target: { kind: "exact_host", hostId },
+    revision: 1,
+    updatedAt: "2030-01-01T00:01:00.000Z",
+    host: {
+      hostId,
+      displayName: `Assigned ${hostId}`,
+      online: true,
+      authorizedForProject: true,
+      revoked: false,
+      capabilitiesSatisfied: true
+    },
+    availability: { status: "ready", reason: "ready" }
+  });
+}
 
 function idleStatus(overrides?: Partial<CollaborationStatus>): CollaborationStatus {
   return {
@@ -163,12 +184,117 @@ describe("CollaborationReadModelController", () => {
     expect(snapshot.syncPhase).toBe("ready");
     expect(snapshot.members).toEqual(exampleMemberPage.items);
     expect(snapshot.assignmentsByWorkItem[workKey]?.revision).toBe(1);
-    expect(snapshot.hosts[0]?.hostId).toBe("host-001");
+    expect(snapshot.hosts).toEqual([]);
     expect(snapshot.activity).toEqual(exampleActivityListPage.items);
     expect(listMembers).toHaveBeenCalledTimes(1);
     expect(listAssignments).toHaveBeenCalledTimes(1);
     expect(listActivity).toHaveBeenCalledTimes(1);
-    expect(listEligible).toHaveBeenCalledTimes(1);
+    expect(listEligible).not.toHaveBeenCalled();
+    controller.dispose();
+  });
+
+  it("queries every bounded Block for eligible Hosts and dedupes the Host union", async () => {
+    const firstBlockRef = "task-1#B-001";
+    const secondBlockRef = "task-1#B-002";
+    const firstBlock = blockAssignment(firstBlockRef, "host-assigned-1");
+    const secondBlock = blockAssignment(secondBlockRef, "host-assigned-2");
+    const mock = createMockApi({
+      assignments: {
+        items: [exampleAssignmentProjection, firstBlock, secondBlock],
+        nextCursor: null
+      }
+    });
+    mock.listEligible.mockImplementation(
+      async (input: { workItem: AssignmentDisplayProjection["workItem"] }) => {
+        const hostId =
+          input.workItem.kind === "block" && input.workItem.blockRef === firstBlockRef
+            ? "host-eligible-1"
+            : "host-eligible-2";
+        return {
+          workItem: input.workItem,
+          humans: [],
+          hosts: [
+            {
+              projectId: "project-demo-001",
+              hostId,
+              exists: true,
+              revoked: false,
+              authorizedForProject: true,
+              online: true,
+              capabilities: ["acp"]
+            },
+            ...(hostId === "host-eligible-1"
+              ? [
+                  {
+                    projectId: "project-demo-001",
+                    hostId: "host-assigned-1",
+                    exists: true,
+                    revoked: false,
+                    authorizedForProject: true,
+                    online: true,
+                    capabilities: ["acp", "shell"]
+                  }
+                ]
+              : [])
+          ],
+          nextHumanCursor: null,
+          nextHostCursor: null
+        };
+      }
+    );
+
+    const controller = new CollaborationReadModelController({ api: mock.api });
+    await controller.setActiveProject({
+      profileId: "profile-demo-001",
+      projectId: "project-demo-001"
+    });
+
+    expect(mock.listEligible).toHaveBeenCalledTimes(2);
+    expect(mock.listEligible).toHaveBeenNthCalledWith(1, { workItem: firstBlock.workItem });
+    expect(mock.listEligible).toHaveBeenNthCalledWith(2, { workItem: secondBlock.workItem });
+    const hostIds = controller.getSnapshot().hosts.map((host) => host.hostId);
+    expect(hostIds).toHaveLength(4);
+    expect(new Set(hostIds)).toEqual(
+      new Set([
+        "host-assigned-1",
+        "host-assigned-2",
+        "host-eligible-1",
+        "host-eligible-2"
+      ])
+    );
+    expect(controller.getSnapshot().hosts.find((host) => host.hostId === "host-assigned-1")).toEqual(
+      expect.objectContaining({ capabilities: ["acp", "shell"] })
+    );
+    controller.dispose();
+  });
+
+  it("surfaces eligible Host failures through authoritative refresh state", async () => {
+    const block = blockAssignment("task-1#B-001", "host-assigned-1");
+    const mock = createMockApi({
+      assignments: { items: [block], nextCursor: null }
+    });
+    mock.listEligible.mockRejectedValueOnce({
+      kind: "network",
+      code: "eligible_hosts_unavailable",
+      message: "Eligible Host query failed.",
+      retryable: true
+    });
+    const controller = new CollaborationReadModelController({ api: mock.api });
+
+    await controller.setActiveProject({
+      profileId: "profile-demo-001",
+      projectId: "project-demo-001"
+    });
+
+    expect(controller.getSnapshot().syncPhase).toBe("degraded");
+    expect(controller.getSnapshot().lastError).toEqual(
+      expect.objectContaining({
+        code: "eligible_hosts_unavailable",
+        message: "Eligible Host query failed."
+      })
+    );
+    expect(controller.getSnapshot().loadingKinds).not.toContain("assignments");
+    expect(controller.getSnapshot().assignmentsByWorkItem[workItemKey(block.workItem)]).toBeTruthy();
     controller.dispose();
   });
 
