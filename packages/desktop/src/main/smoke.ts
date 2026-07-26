@@ -991,6 +991,11 @@ async function runCollaborationAccessibilitySmoke(
   `);
 
   const focusTabAndPressEnter = async (testId: string): Promise<boolean> => {
+    app.focus({ steal: true });
+    inspector.show();
+    inspector.focus();
+    inspector.webContents.focus();
+    await wait(50);
     await inspector.webContents.executeJavaScript(`
       (() => {
         const tab = document.querySelector('[data-testid="${testId}"]');
@@ -999,9 +1004,9 @@ async function runCollaborationAccessibilitySmoke(
         return true;
       })()
     `);
-    inspector.focus();
-    inspector.webContents.sendInputEvent({ type: "keyDown", keyCode: "Enter" });
-    inspector.webContents.sendInputEvent({ type: "keyUp", keyCode: "Enter" });
+    inspector.webContents.sendInputEvent({ type: "keyDown", keyCode: "ENTER" });
+    inspector.webContents.sendInputEvent({ type: "char", keyCode: "\r" });
+    inspector.webContents.sendInputEvent({ type: "keyUp", keyCode: "ENTER" });
     for (let attempt = 0; attempt < 40; attempt += 1) {
       const selected = (await inspector.webContents.executeJavaScript(`
         document.querySelector('[data-testid="${testId}"]')?.getAttribute("aria-selected") === "true"
