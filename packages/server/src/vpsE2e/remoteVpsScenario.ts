@@ -1,7 +1,8 @@
 import { existsSync } from "node:fs";
-import { access } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
+import { z } from "zod";
 import type { RemoteVpsE2eConfig } from "./config.js";
 import { emptyChecks, emptyIdentities, type VpsE2eEvidence } from "./evidence.js";
 import type { VpsE2eGate } from "./gate.js";
@@ -19,6 +20,55 @@ import {
 
 const DEFAULT_TIMEOUT_MS = 90_000;
 const DISPATCH_TIMEOUT_MS = 180_000;
+
+const packagedHostStatusSchema = z
+  .object({
+    hostId: z.string().min(1),
+    credential: z.literal("active")
+  })
+  .passthrough();
+
+const hostConfigCoordinatorSchema = z
+  .object({
+    coordinator: z.object({ url: z.url() }).passthrough()
+  })
+  .passthrough();
+
+type OnlineHost = {
+  id: string;
+  lastSeenAt?: string;
+  capacity?: number;
+  capabilities?: string[];
+};
+
+export function findOnlineHostById(
+  items: readonly OnlineHost[],
+  packagedHostId: string
+): OnlineHost | undefined {
+  return items.find(
+    (item) => item.id === packagedHostId && typeof item.lastSeenAt === "string"
+  );
+}
+
+export function assertCoordinatorOrigin(configuredUrl: string, expectedOrigin: string): void {
+  if (new URL(configuredUrl).origin !== expectedOrigin) {
+    throw new Error("remote_vps_host_coordinator_origin_mismatch");
+  }
+}
+
+async function assertHostConfigCoordinatorOrigin(
+  hostConfigPath: string,
+  expectedOrigin: string
+): Promise<void> {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await readFile(hostConfigPath, "utf8")) as unknown;
+  } catch (error) {
+    throw new Error("remote_vps_host_config_json_invalid", { cause: error });
+  }
+  const config = hostConfigCoordinatorSchema.parse(raw);
+  assertCoordinatorOrigin(config.coordinator.url, expectedOrigin);
+}
 
 function firstExisting(paths: readonly string[]): string | null {
   for (const path of paths) {
@@ -143,6 +193,7 @@ export async function runRemoteVpsScenario(options: {
       caCertificatePath: options.config.caCertificatePath
     });
     const origin = new URL(options.config.coordinatorUrl).origin;
+    await assertHostConfigCoordinatorOrigin(hostConfigPath, origin);
     const health = await trusted.request(`${origin}/healthz`);
     if (!health.ok) {
       const pre = precondition(
@@ -294,6 +345,22 @@ export async function runRemoteVpsScenario(options: {
       checks.enrollmentOneTimeToken = true;
     }
 
+    const status = await runNodeBin(agentHostBinPath, ["status", "--config", hostConfigPath]);
+    if (status.code !== 0) {
+      return base({
+        result: "failed",
+        diagnostic: redactSensitiveText(
+          `remote_vps_host_status_failed:${status.stderr || status.stdout}`
+        )
+      });
+    }
+    let packagedHostId: string;
+    try {
+      packagedHostId = packagedHostStatusSchema.parse(JSON.parse(status.stdout)).hostId;
+    } catch {
+      return base({ result: "failed", diagnostic: "remote_vps_host_status_invalid" });
+    }
+
     host = spawnLongLived({
       command: process.execPath,
       args: [agentHostBinPath, "run", "--config", hostConfigPath],
@@ -310,20 +377,8 @@ export async function runRemoteVpsScenario(options: {
           headers: { Authorization: `Bearer ${options.operatorToken}` }
         });
         if (!response.ok) return false;
-        const page = (await response.json()) as {
-          items: Array<{
-            id: string;
-            capacity?: number;
-            capabilities?: string[];
-            lastSeenAt?: string;
-          }>;
-        };
-        // Prefer hostId from local preflight/status when present; else any live heartbeat.
-        const preferredId = preflightBody.hostId;
-        const match =
-          (preferredId
-            ? page.items.find((item) => item.id === preferredId && typeof item.lastSeenAt === "string")
-            : undefined) ?? page.items.find((item) => typeof item.lastSeenAt === "string");
+        const page = (await response.json()) as { items: OnlineHost[] };
+        const match = findOnlineHostById(page.items, packagedHostId);
         if (!match?.lastSeenAt) return false;
         hostOnline = {
           id: match.id,
@@ -364,6 +419,7 @@ export async function runRemoteVpsScenario(options: {
         projectId: options.config.projectId,
         canvasId: options.config.canvasId,
         blockRef: options.config.blockRef,
+        requestedHostId: packagedHostId,
         idempotencyKey: `vps-e2e-remote-${Date.now()}`
       })
     });
@@ -391,10 +447,16 @@ export async function runRemoteVpsScenario(options: {
       operationId: string;
       dispatchId: string;
       executionAttemptId: string;
-      attempt?: { leaseId?: string };
+      attempt?: { leaseId?: string; hostId?: string };
       state?: string;
       runtime?: { status?: string };
     };
+    if (view.attempt?.hostId !== packagedHostId) {
+      return base({
+        result: "failed",
+        diagnostic: "remote_vps_dispatch_host_identity_mismatch"
+      });
+    }
     identities.operationId = view.operationId;
     identities.dispatchId = view.dispatchId;
     identities.executionAttemptId = view.executionAttemptId;
@@ -405,6 +467,7 @@ export async function runRemoteVpsScenario(options: {
 
     let terminal: {
       state: string;
+      attempt?: { hostId?: string };
       runtime?: { status?: string };
     } = { state: view.state ?? "activated" };
     await waitFor(
@@ -415,6 +478,9 @@ export async function runRemoteVpsScenario(options: {
         );
         if (!observe.ok) return false;
         terminal = (await observe.json()) as typeof terminal;
+        if (terminal.attempt?.hostId !== packagedHostId) {
+          throw new Error("remote_vps_terminal_host_identity_mismatch");
+        }
         return ["completed", "failed", "cancelled"].includes(terminal.state);
       },
       {

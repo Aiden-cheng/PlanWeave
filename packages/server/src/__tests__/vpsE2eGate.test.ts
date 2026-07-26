@@ -11,7 +11,11 @@ import {
   resolveVpsE2eTarget,
   runVpsE2eCli
 } from "../vpsE2e/index.js";
-import { runRemoteVpsScenario } from "../vpsE2e/remoteVpsScenario.js";
+import {
+  assertCoordinatorOrigin,
+  findOnlineHostById,
+  runRemoteVpsScenario
+} from "../vpsE2e/remoteVpsScenario.js";
 
 const roots: string[] = [];
 
@@ -181,5 +185,35 @@ describe("VPS e2e gate and redaction (unit)", () => {
     expect(evidence.networkInterrupt.reconnectOk).toBe(false);
     expect(evidence.cleanup.credentialsRevoked).toBe(false);
     expect(evidence.diagnostic).toMatch(/hostConfigPath|unreadable|packaged Host/i);
+  });
+
+  it("never accepts another online Host for the packaged Host identity", () => {
+    expect(
+      findOnlineHostById(
+        [
+          { id: "host-other", lastSeenAt: "2030-01-01T00:00:00.000Z" },
+          { id: "host-packaged" }
+        ],
+        "host-packaged"
+      )
+    ).toBeUndefined();
+    expect(
+      findOnlineHostById(
+        [
+          { id: "host-other", lastSeenAt: "2030-01-01T00:00:00.000Z" },
+          { id: "host-packaged", lastSeenAt: "2030-01-01T00:00:01.000Z" }
+        ],
+        "host-packaged"
+      )
+    ).toMatchObject({ id: "host-packaged" });
+    expect(() =>
+      assertCoordinatorOrigin("https://other.example.test", "https://coordinator.example.test")
+    ).toThrow("remote_vps_host_coordinator_origin_mismatch");
+    expect(() =>
+      assertCoordinatorOrigin(
+        "https://coordinator.example.test/path",
+        "https://coordinator.example.test"
+      )
+    ).not.toThrow();
   });
 });
