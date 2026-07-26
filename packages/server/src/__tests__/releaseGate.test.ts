@@ -54,6 +54,67 @@ describe("release gate checklist and evaluation", () => {
     expect(report.compatibility.bounds.rollbackConstraints.resetDatabases).toBe(false);
   });
 
+  it("keeps live ACP/VPS as external blockers when evidence is missing or local-only", async () => {
+    const root = await tempDir();
+    const deterministicPath = join(root, "det.json");
+    const localVpsPath = join(root, "local-vps.json");
+    await writeFile(
+      deterministicPath,
+      JSON.stringify({
+        version: "planweave.release-gate.deterministic/v1",
+        result: "passed",
+        generatedAt: new Date().toISOString(),
+        suite: "server-real-process"
+      })
+    );
+    await writeFile(
+      localVpsPath,
+      JSON.stringify({
+        version: "planweave.vps-authenticated-e2e/v1",
+        result: "passed",
+        environmentClass: "local-tls-fixture",
+        generatedAt: new Date().toISOString()
+      })
+    );
+
+    const missingLive = await buildReleaseGateReport({
+      deterministicEvidencePath: deterministicPath,
+      agentHostVersion: "0.3.0",
+      protocolPackageVersion: "0.3.0"
+    });
+    expect(missingLive.releaseReady.ci).toBe(true);
+    expect(missingLive.releaseReady.supportedVersionRelease).toBe(false);
+    expect(missingLive.releaseReady.preRelease).toBe(false);
+    expect(
+      missingLive.tiers.find((tier) => tier.tierId === "local_real_acp_compatibility")
+    ).toMatchObject({
+      status: "not_provided",
+      countsAsPass: false,
+      diagnostic: expect.stringMatching(/external_blocker/)
+    });
+    expect(
+      missingLive.tiers.find((tier) => tier.tierId === "remote_authenticated_vps")
+    ).toMatchObject({
+      status: "not_provided",
+      countsAsPass: false,
+      diagnostic: expect.stringMatching(/external_blocker/)
+    });
+
+    const localFixture = await buildReleaseGateReport({
+      deterministicEvidencePath: deterministicPath,
+      vpsEvidencePath: localVpsPath,
+      agentHostVersion: "0.3.0",
+      protocolPackageVersion: "0.3.0"
+    });
+    expect(localFixture.releaseReady.preRelease).toBe(false);
+    expect(
+      localFixture.tiers.find((tier) => tier.tierId === "remote_authenticated_vps")
+    ).toMatchObject({
+      countsAsPass: false,
+      diagnostic: expect.stringMatching(/external_blocker|remote-vps|local-tls-fixture/)
+    });
+  });
+
   it("does not treat skipped live evidence as a pass", async () => {
     const root = await tempDir();
     const deterministicPath = join(root, "det.json");

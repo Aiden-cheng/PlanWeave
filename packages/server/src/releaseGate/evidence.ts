@@ -91,13 +91,17 @@ function countsAsPass(status: TierEvaluationStatus): boolean {
 
 function notProvided(tierId: ReleaseGateTierId): TierEvaluation {
   const tier = RELEASE_GATE_TIERS.find((item) => item.id === tierId)!;
+  const liveExternalBlocker =
+    tierId === "local_real_acp_compatibility" || tierId === "remote_authenticated_vps";
   return {
     tierId,
     requirement: tier.requirement,
     status: "not_provided",
     countsAsPass: false,
     evidenceDigest: null,
-    diagnostic: "No evidence path provided for this tier.",
+    diagnostic: liveExternalBlocker
+      ? `external_blocker: no ${tier.evidenceVersion ?? tierId} evidence path. Live ACP/VPS infrastructure is operator-owned; mock or local fixtures must not be substituted as a pass.`
+      : "No evidence path provided for this tier.",
     observedAt: null,
     environmentClass: null
   };
@@ -249,7 +253,7 @@ export async function evaluateRealAcpEvidence(
       evidenceDigest: digestJson(parsed.data),
       diagnostic:
         status === "skipped"
-          ? "Skipped live ACP smoke is not a pass for supported-version release."
+          ? "external_blocker: skipped live ACP smoke is not a pass for supported-version release. Real Host-local ACP agent + login required; mock ACP must not be substituted."
           : status === "passed"
             ? null
             : `Real ACP result=${status}`,
@@ -317,7 +321,7 @@ export async function evaluateVpsEvidence(
         status: parsed.data.result === "skipped" ? "skipped" : "invalid",
         countsAsPass: false,
         evidenceDigest: digestJson(parsed.data),
-        diagnostic: `Pre-release VPS evidence requires environmentClass=remote-vps (got ${parsed.data.environmentClass}). local-tls-fixture is not a production VPS claim.`,
+        diagnostic: `external_blocker: pre-release VPS evidence requires environmentClass=remote-vps (got ${parsed.data.environmentClass}). local-tls-fixture and mock fixtures are not a production VPS claim.`,
         observedAt,
         environmentClass: parsed.data.environmentClass
       };
@@ -343,7 +347,7 @@ export async function evaluateVpsEvidence(
       evidenceDigest: digestJson(parsed.data),
       diagnostic:
         status === "skipped"
-          ? "Skipped VPS e2e is not a pass for pre-release evidence."
+          ? "external_blocker: skipped VPS e2e is not a pass for pre-release evidence. Disposable remote VPS + outside-repo config required; local-tls-fixture must not be relabeled."
           : status === "passed"
             ? null
             : `VPS e2e result=${status}`,
