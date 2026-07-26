@@ -502,13 +502,15 @@ export const enCatalog = {
   hostAdminCredentialPersistence_missing: "not configured",
   hostAdminInventoryTitle: "Authoritative Host inventory",
   hostAdminInventoryDescription:
-    "Status is based on the server projection: revoked state and recorded heartbeat are shown without guessing stale hosts as online.",
+    "Status is based on the server projection, including current liveness, capacity, capabilities, and credential expiry.",
   hostAdminStatusAuthorityGap:
-    "The current server projection does not include an authoritative online/offline boolean; Desktop will not infer one from an old heartbeat.",
+    "Online and offline are computed by the server from its configured heartbeat window.",
   hostAdminNoHosts: "No Hosts are currently returned by the server.",
   hostAdminStatusRevoked: "Revoked",
   hostAdminStatusAwaitingHeartbeat: "Awaiting heartbeat",
   hostAdminStatusHeartbeatReceived: "Heartbeat received",
+  hostAdminStatusOnline: "Online",
+  hostAdminStatusOffline: "Offline",
   hostAdminCapacity: "Capacity",
   hostAdminCapabilities: "Capabilities",
   hostAdminCapabilitiesNone: "none",

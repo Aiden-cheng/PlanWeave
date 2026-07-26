@@ -51,6 +51,7 @@ const host = {
   displayName: "Build Host",
   capabilities: ["linux.x64", "codex"],
   capacity: 4,
+  online: false,
   lastSeenAt: undefined,
   credentialExpiresAt: "2030-01-02T00:00:00.000Z"
 };
@@ -99,7 +100,7 @@ describe("Host administration surface", () => {
     render(<HostAdministrationSection t={createTranslator("en")} />);
 
     expect(await screen.findByTestId("host-administration")).toBeInTheDocument();
-    expect(await screen.findByText("Awaiting heartbeat")).toBeInTheDocument();
+    expect(await screen.findByText("Offline")).toBeInTheDocument();
     expect(screen.getByText("Credential available · OS vault")).toBeInTheDocument();
     expect(screen.getByText("linux.x64, codex")).toBeInTheDocument();
     expect(screen.queryByText(/operator_a_token|Bearer/i)).not.toBeInTheDocument();

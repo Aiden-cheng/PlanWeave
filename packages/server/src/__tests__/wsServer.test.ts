@@ -176,6 +176,7 @@ describe("agent host WebSocket transport", () => {
     });
     expect(control.revokeHost(principal, registration.host.id)).toMatchObject({
       id: registration.host.id,
+      online: false,
       revokedAt: expect.any(String)
     });
     await expect(closed).resolves.toEqual({ code: 4003, reason: "host revoked" });

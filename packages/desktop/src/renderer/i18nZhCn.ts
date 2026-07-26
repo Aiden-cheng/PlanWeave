@@ -494,13 +494,15 @@ export const zhCnCatalog = {
   hostAdminCredentialPersistence_missing: "未配置",
   hostAdminInventoryTitle: "权威 Host 清单",
   hostAdminInventoryDescription:
-    "状态来自 server 投影：显示吊销和已记录心跳，不把过期的 lastSeen 猜成在线。",
+    "状态来自 server 投影，包括当前在线状态、容量、能力和凭证到期时间。",
   hostAdminStatusAuthorityGap:
-    "当前 server 投影没有权威 online/offline 布尔值；Desktop 不会根据旧心跳推断在线。",
+    "在线和离线状态由 server 根据其配置的心跳窗口统一计算。",
   hostAdminNoHosts: "服务器当前没有返回 Host。",
   hostAdminStatusRevoked: "已吊销",
   hostAdminStatusAwaitingHeartbeat: "等待心跳",
   hostAdminStatusHeartbeatReceived: "已收到心跳",
+  hostAdminStatusOnline: "在线",
+  hostAdminStatusOffline: "离线",
   hostAdminCapacity: "容量",
   hostAdminCapabilities: "能力",
   hostAdminCapabilitiesNone: "无",

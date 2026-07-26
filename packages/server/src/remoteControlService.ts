@@ -16,7 +16,12 @@ import {
   type OperatorOperationView
 } from "./operatorDtos.js";
 import { HostEnrollmentService } from "./hostEnrollment.js";
-import { AgentHostRepository, type AgentHost } from "./hosts.js";
+import {
+  DEFAULT_HOST_OFFLINE_AFTER_MS,
+  AgentHostRepository,
+  isAgentHostOnline,
+  type AgentHost
+} from "./hosts.js";
 import { OperatorTokenRegistry, type OperatorPrincipal } from "./operatorAuth.js";
 import { RemoteAcpEventRepository } from "./remoteAcpEvents.js";
 import { RemoteBlockCoordinator } from "./remoteBlockCoordinator.js";
@@ -34,10 +39,18 @@ export type RemoteControlServiceOptions = {
   events: RemoteAcpEventRepository;
   interactions: RemoteInteractionService;
   disconnectHost(hostId: string): void;
+  hostOfflineAfterMs?: number;
+  clock?: () => Date;
 };
 
 export class RemoteControlService {
-  constructor(private readonly options: RemoteControlServiceOptions) {}
+  private readonly clock: () => Date;
+  private readonly hostOfflineAfterMs: number;
+
+  constructor(private readonly options: RemoteControlServiceOptions) {
+    this.clock = options.clock ?? (() => new Date());
+    this.hostOfflineAfterMs = options.hostOfflineAfterMs ?? DEFAULT_HOST_OFFLINE_AFTER_MS;
+  }
 
   createEnrollmentGrant(principal: OperatorPrincipal, rawRequest: unknown) {
     this.options.authorization.requireServerAdmin(principal);
@@ -55,21 +68,21 @@ export class RemoteControlService {
     const query = operatorPageQuerySchema.parse(rawQuery);
     const hosts = this.options.hosts.list(query.limit + 1, query.cursor);
     return operatorHostPageSchema.parse({
-      items: hosts.slice(0, query.limit).map(toOperatorHostView),
+      items: hosts.slice(0, query.limit).map((host) => this.toOperatorHostView(host)),
       nextCursor: hosts.length > query.limit ? query.cursor + query.limit : null
     });
   }
 
   getHost(principal: OperatorPrincipal, hostId: string) {
     this.options.authorization.requireServerAdmin(principal);
-    return toOperatorHostView(this.options.hosts.getRequired(hostId));
+    return this.toOperatorHostView(this.options.hosts.getRequired(hostId));
   }
 
   revokeHost(principal: OperatorPrincipal, hostId: string) {
     this.options.authorization.requireServerAdmin(principal);
     this.options.hosts.revoke(hostId);
     this.options.disconnectHost(hostId);
-    return toOperatorHostView(this.options.hosts.getRequired(hostId));
+    return this.toOperatorHostView(this.options.hosts.getRequired(hostId));
   }
 
   async dispatch(principal: OperatorPrincipal, rawRequest: unknown) {
@@ -185,14 +198,19 @@ export class RemoteControlService {
     this.options.authorization.authorizeProject(principal, operation.projectId);
     return operation;
   }
+
+  private toOperatorHostView(host: AgentHost) {
+    return toOperatorHostView(host, this.clock(), this.hostOfflineAfterMs);
+  }
 }
 
-function toOperatorHostView(host: AgentHost) {
+function toOperatorHostView(host: AgentHost, now: Date, hostOfflineAfterMs: number) {
   return operatorHostViewSchema.parse({
     id: host.id,
     displayName: host.displayName,
     capabilities: host.capabilities,
     capacity: host.capacity,
+    online: isAgentHostOnline(host, { now, hostOfflineAfterMs }),
     lastSeenAt: host.lastSeenAt,
     revokedAt: host.revokedAt,
     credentialExpiresAt: host.credentialExpiresAt

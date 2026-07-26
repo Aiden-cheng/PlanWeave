@@ -19,6 +19,26 @@ export type RegisteredAgentHost = {
   token: string;
 };
 
+export const DEFAULT_HOST_OFFLINE_AFTER_MS = 60_000;
+
+/** Server-authoritative Host liveness shared by assignment and operator projections. */
+export function isAgentHostOnline(
+  host: AgentHost,
+  options: { now?: Date; hostOfflineAfterMs?: number } = {}
+): boolean {
+  const now = (options.now ?? new Date()).getTime();
+  const hostOfflineAfterMs = options.hostOfflineAfterMs ?? DEFAULT_HOST_OFFLINE_AFTER_MS;
+  if (!Number.isFinite(hostOfflineAfterMs) || hostOfflineAfterMs <= 0) {
+    throw new Error("host_offline_after_invalid");
+  }
+  return (
+    host.revokedAt === undefined &&
+    (host.credentialExpiresAt === undefined || Date.parse(host.credentialExpiresAt) > now) &&
+    host.lastSeenAt !== undefined &&
+    Date.parse(host.lastSeenAt) >= now - hostOfflineAfterMs
+  );
+}
+
 type HostRow = Record<string, unknown> & {
   id: string;
   display_name: string;

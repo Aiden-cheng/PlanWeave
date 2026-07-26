@@ -17,6 +17,20 @@ describe("operator control wire contracts", () => {
       limit: 100
     });
     expect(() => operatorPageQuerySchema.parse({ cursor: 0, limit: 101 })).toThrow();
+    expect(
+      operatorHostPageSchema.parse({
+        items: [
+          {
+            id: "host-1",
+            displayName: "Host",
+            capabilities: [],
+            capacity: 1,
+            online: false
+          }
+        ],
+        nextCursor: null
+      }).items[0]?.online
+    ).toBe(false);
     expect(() =>
       operatorHostPageSchema.parse({
         items: [

@@ -464,7 +464,9 @@ export async function createDistributedServerComposition(
       coordinator: coordination.coordinator,
       events: coordination.acpEvents,
       interactions: coordination.interactions,
-      disconnectHost: (hostId) => attachedWebSockets.disconnectHost(hostId)
+      disconnectHost: (hostId) => attachedWebSockets.disconnectHost(hostId),
+      hostOfflineAfterMs: config.limits.hostOfflineAfterMs,
+      clock
     });
     const humanRemoteControl = new HumanRemoteControlService({
       operations: coordination.operations,

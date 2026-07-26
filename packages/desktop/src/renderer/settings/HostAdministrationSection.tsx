@@ -12,11 +12,11 @@ type HostAdministrationSectionProps = {
   t: ReturnType<typeof createTranslator>;
 };
 
-type HostHeartbeatState = "revoked" | "awaiting-heartbeat" | "heartbeat-received";
+type HostHeartbeatState = "revoked" | "offline" | "online";
 
 function heartbeatState(host: OperatorHostView): HostHeartbeatState {
   if (host.revokedAt) return "revoked";
-  return host.lastSeenAt ? "heartbeat-received" : "awaiting-heartbeat";
+  return host.online ? "online" : "offline";
 }
 
 function formatDate(value: string | undefined, locale: string, fallback: string): string {
@@ -371,7 +371,7 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
             <div>
               <CardTitle>{t("hostAdminInventoryTitle")}</CardTitle>
               <CardDescription>{t("hostAdminInventoryDescription")}</CardDescription>
-              <p className="mt-1 text-xs text-amber-700 dark:text-amber-200">
+              <p className="mt-1 text-xs text-text-muted">
                 {t("hostAdminStatusAuthorityGap")}
               </p>
             </div>
@@ -432,9 +432,9 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
                   >
                     {state === "revoked"
                       ? t("hostAdminStatusRevoked")
-                      : state === "awaiting-heartbeat"
-                        ? t("hostAdminStatusAwaitingHeartbeat")
-                        : t("hostAdminStatusHeartbeatReceived")}
+                      : state === "online"
+                        ? t("hostAdminStatusOnline")
+                        : t("hostAdminStatusOffline")}
                   </span>
                 </div>
                 <dl className="mt-3 grid gap-2 text-xs text-text-muted sm:grid-cols-2">

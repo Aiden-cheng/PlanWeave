@@ -1,4 +1,9 @@
-import type { AgentHost, AgentHostRepository } from "../hosts.js";
+import {
+  DEFAULT_HOST_OFFLINE_AFTER_MS,
+  isAgentHostOnline,
+  type AgentHost,
+  type AgentHostRepository
+} from "../hosts.js";
 import type { HumanIdentityRepository } from "../identity/repository.js";
 import { isActiveMembership } from "../identity/schemas.js";
 import {
@@ -106,17 +111,13 @@ export function createHostAssignmentPort(
   options: AssignmentHostPortFromRepositoryOptions
 ): AssignmentHostPort {
   const clock = options.clock ?? (() => new Date());
-  const hostOfflineAfterMs = options.hostOfflineAfterMs ?? 60_000;
+  const hostOfflineAfterMs = options.hostOfflineAfterMs ?? DEFAULT_HOST_OFFLINE_AFTER_MS;
   const isAuthorized =
     options.isHostAuthorizedForProject ??
     ((_projectId: string, host: AgentHost) => host.revokedAt === undefined);
 
   function toFacts(projectId: string, host: AgentHost): AssignmentHostFacts {
-    const now = clock().getTime();
-    const online =
-      host.revokedAt === undefined &&
-      host.lastSeenAt !== undefined &&
-      Date.parse(host.lastSeenAt) >= now - hostOfflineAfterMs;
+    const online = isAgentHostOnline(host, { now: clock(), hostOfflineAfterMs });
     const active = options.countActiveDispatches?.(host.id);
     return assignmentHostFactsSchema.parse({
       projectId,

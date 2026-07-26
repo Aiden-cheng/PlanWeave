@@ -39,6 +39,7 @@ export const operatorHostViewSchema = z
     displayName: z.string().min(1).max(128),
     capabilities: capabilitiesSchema,
     capacity: z.number().int().min(1).max(128),
+    online: z.boolean(),
     lastSeenAt: timestampSchema.optional(),
     revokedAt: timestampSchema.optional(),
     credentialExpiresAt: timestampSchema.optional()

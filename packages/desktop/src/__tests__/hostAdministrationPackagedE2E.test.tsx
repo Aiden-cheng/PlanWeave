@@ -321,6 +321,7 @@ describe("packaged Host administration control plane", () => {
 
     const firstProcess = startPackagedHost(hostConfigPath);
     const firstHost = await waitForHost(service, profileId, "UI Generated Host");
+    expect(firstHost.online).toBe(true);
     expect(firstHost.lastSeenAt).toEqual(expect.any(String));
     const firstHostId = firstHost.id;
     expect(firstHost.credentialExpiresAt).toEqual(expect.any(String));
@@ -340,7 +341,11 @@ describe("packaged Host administration control plane", () => {
     expect(reconnectedHost.lastSeenAt).not.toBe(firstHost.lastSeenAt);
 
     const revoked = await service.revokeHost({ profileId, hostId: firstHostId });
-    expect(revoked).toMatchObject({ id: firstHostId, revokedAt: expect.any(String) });
+    expect(revoked).toMatchObject({
+      id: firstHostId,
+      online: false,
+      revokedAt: expect.any(String)
+    });
     const exited = await waitForProcessExit(reconnectProcess);
     expect(exited.code).not.toBe(0);
     expect(reconnectProcess.logs.stderr).toContain("agent_host_auth_failed");
