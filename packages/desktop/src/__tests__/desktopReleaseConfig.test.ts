@@ -541,8 +541,15 @@ process.exit(2);
     expect(workflow).toContain("pnpm test:unit --maxWorkers=2");
     expect(workflow).not.toContain("pnpm test:unit -- --maxWorkers=2");
     expect(workflow).toContain("name: Integration tests (${{ matrix.label }})");
-    expect(workflow).toContain("pnpm test:integration:${{ matrix.shard }} --maxWorkers=2");
+    expect(workflow).toContain("pnpm test:integration:${{ matrix.shard }} --maxWorkers=${{ matrix.max_workers }}");
     expect(workflow).not.toContain("pnpm test:integration --maxWorkers=2");
+    // Distributed realProcess multi-process suites must stay on the required CI shard
+    // and run serially (max_workers: 1) so loopback ports and process trees stay stable.
+    expect(workflow).toContain("shard: distributed");
+    expect(workflow).toContain("label: Server and Agent Host");
+    expect(workflow).toMatch(/shard:\s*distributed[\s\S]*?max_workers:\s*1/);
+    expect(workflow).toMatch(/shard:\s*cli[\s\S]*?max_workers:\s*2/);
+    expect(workflow).toMatch(/shard:\s*core[\s\S]*?max_workers:\s*2/);
     expect(workflow).toContain("name: Block Run Index performance regression");
     expect(workflow).toContain("pnpm test:performance --maxWorkers=1");
     expect(workflow).not.toContain("pnpm test:performance --maxWorkers=2");

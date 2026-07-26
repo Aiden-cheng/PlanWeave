@@ -539,6 +539,7 @@
         "readiness.test.ts",
         "realProcessAcpHarness.test.ts",
         "realProcessAuthorizationMatrix.test.ts",
+        "realProcessCiGate.test.ts",
         "realProcessCrashReplayMatrix.test.ts",
         "realProcessRemoteBlockLifecycle.test.ts",
         "releaseGate.test.ts",
