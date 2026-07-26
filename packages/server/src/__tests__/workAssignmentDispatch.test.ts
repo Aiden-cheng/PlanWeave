@@ -101,9 +101,11 @@ async function setup(
       })
     : undefined;
 
+  let activeRuntime: RemoteBlockRuntimePort | undefined;
   const buildCoordination = (checkpoints?: RemoteCoordinatorCheckpointPort) => {
     const baseRuntime = createRemoteBlockRuntimePort({ projectRoot: workspace.root });
     const runtime = options.decorateRuntime?.(baseRuntime) ?? baseRuntime;
+    activeRuntime = runtime;
     const registry = new RemoteRuntimePortRegistry();
     registry.bind(locator, runtime);
     const artifacts = new ArtifactStore(server.database, dataDirectory, 1024 * 1024);
@@ -209,6 +211,10 @@ async function setup(
     locator,
     get coordination() {
       return coordination;
+    },
+    get runtime() {
+      if (!activeRuntime) throw new Error("test_runtime_not_initialized");
+      return activeRuntime;
     },
     rebuildCoordination(checkpoints?: RemoteCoordinatorCheckpointPort) {
       // New coordinator instance drops in-memory hostSelectionByOperation (process restart).
@@ -746,6 +752,132 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
         )
         .get(action.newExecutionAttemptId)?.count
     ).toBe(1);
+  });
+
+  it("reuses the exact Host plan after Runtime retry succeeds before the DB step fails", async () => {
+    const fixture = await setup({
+      withHosts: [{ name: "Host A", capabilities: ["acp.codex"], capacity: 1 }]
+    });
+    const hostA = fixture.hosts[0]!;
+    fixture.assignmentService.updateAssignment({
+      projectId: fixture.locator.projectId,
+      workItem: fixture.blockItem,
+      target: { kind: "exact_host", hostId: hostA.id },
+      expectedRevision: 0,
+      actor: fixture.ownerContext
+    });
+    const dispatched = await fixture.coordination.coordinator.dispatch({
+      ...fixture.locator,
+      blockRef: "T-001#B-001",
+      idempotencyKey: "retry-runtime-only-failure",
+      expectedAssignmentRevision: 1
+    });
+    const dispatch = fixture.coordination.dispatches.getRequired(dispatched.operation.dispatchId);
+    fixture.coordination.dispatches.accept(
+      hostA.id,
+      "retry-runtime-only-accepted",
+      dispatch.id,
+      dispatch.leaseId,
+      dispatch.executionAttemptId
+    );
+    fixture.coordination.dispatches.interrupt(hostA.id, "retry-runtime-only-interrupted", {
+      type: "dispatch.interrupted",
+      protocolVersion: 1,
+      messageId: "retry-runtime-only-interrupted",
+      dispatchId: dispatch.id,
+      leaseId: dispatch.leaseId,
+      executionAttemptId: dispatch.executionAttemptId,
+      reason: "acp_session_lost",
+      resumable: false
+    });
+    const lease = fixture.coordination.reservations.getRequired(dispatch.leaseId);
+    fixture.coordination.reservations.release({
+      leaseId: lease.leaseId,
+      fencingToken: lease.fencingToken,
+      expectedVersion: lease.version,
+      reason: "expired"
+    });
+    await fixture.coordination.coordinator.reenter(dispatched.operation.id);
+    const interrupted = fixture.coordination.operations.getRequired(dispatched.operation.id);
+    const action = {
+      actionId: "retry-runtime-only-action",
+      operationId: interrupted.id,
+      dispatchId: interrupted.dispatchId,
+      executionAttemptId: interrupted.executionAttemptId,
+      expectedAttemptVersion: interrupted.attempt.stateVersion,
+      kind: "retry_new_attempt" as const,
+      priorLeaseId: dispatch.leaseId,
+      newDispatchId: "dispatch-retry-runtime-only-2",
+      newExecutionAttemptId: "attempt-retry-runtime-only-2",
+      reason: "retry after Runtime-only partial effect"
+    };
+    const operations = fixture.coordination.operations;
+    const persistRetry = operations.retryAttempt.bind(operations);
+    let failDatabaseStep = true;
+    operations.retryAttempt = (input) => {
+      if (failDatabaseStep) {
+        failDatabaseStep = false;
+        throw new Error("injected_retry_database_failure");
+      }
+      return persistRetry(input);
+    };
+
+    await expect(fixture.coordination.coordinator.executeAction(action)).rejects.toThrow(
+      "injected_retry_database_failure"
+    );
+    expect(
+      await fixture.runtime.query({ ref: interrupted.blockRef, operationId: interrupted.id })
+    ).toMatchObject({
+      ownership: {
+        dispatchId: action.newDispatchId,
+        executionAttemptId: action.newExecutionAttemptId
+      }
+    });
+    expect(fixture.coordination.operations.getRequired(interrupted.id)).toMatchObject({
+      dispatchId: interrupted.dispatchId,
+      executionAttemptId: interrupted.executionAttemptId
+    });
+    const pendingAction = fixture.server.database
+      .prepare(
+        `SELECT application_owner_token,application_claimed_at,application_decision_json
+         FROM remote_execution_actions WHERE action_id=?`
+      )
+      .get(action.actionId);
+    expect(pendingAction).toMatchObject({
+      application_owner_token: null,
+      application_claimed_at: null
+    });
+    expect(JSON.parse(String(pendingAction?.application_decision_json))).toMatchObject({
+      context: { preferredHostId: hostA.id, assignmentRevision: 1 }
+    });
+
+    fixture.assignmentService.updateAssignment({
+      projectId: fixture.locator.projectId,
+      workItem: fixture.blockItem,
+      target: { kind: "human", humanPrincipalId: fixture.ownerContext.humanPrincipalId },
+      expectedRevision: 1,
+      actor: fixture.ownerContext
+    });
+    const recovered = fixture.rebuildCoordination();
+    await expect(recovered.coordinator.executeAction(action)).resolves.toMatchObject({
+      state: "settled"
+    });
+
+    const operation = recovered.operations.getRequired(interrupted.id);
+    expect(operation).toMatchObject({
+      dispatchId: action.newDispatchId,
+      executionAttemptId: action.newExecutionAttemptId,
+      hostSelection: {
+        preferredHostId: hostA.id,
+        assignmentRevision: 1
+      },
+      attempt: { hostId: hostA.id }
+    });
+    expect(operation.hostSelection?.target).toEqual({ kind: "exact_host", hostId: hostA.id });
+    expect(recovered.actions.getRequired(action.actionId).state).toBe("settled");
+    if (!operation.attempt.leaseId) throw new Error("recovered_attempt_not_reserved");
+    const reservation = recovered.reservations.getRequired(operation.attempt.leaseId);
+    expect(reservation).toMatchObject({ hostId: hostA.id, status: "active" });
   });
 
   it.each([

@@ -14,6 +14,7 @@ import {
   latestCentralSchemaVersion
 } from "../migrations.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
+import { dispatchHostSelectionSnapshotSchema } from "../work/dispatchIntegration.js";
 
 const directories: string[] = [];
 const databases: SqliteDatabase[] = [];
@@ -31,33 +32,9 @@ async function setup() {
   directories.push(directory);
   const database = await openServerDatabase(join(directory, "server.sqlite"), 5_000);
   databases.push(database);
+  applyMigrations(database);
+  database.exec("PRAGMA foreign_keys=OFF");
   database.exec(`
-    CREATE TABLE remote_execution_actions(
-      action_id TEXT PRIMARY KEY,
-      operation_id TEXT NOT NULL,
-      dispatch_id TEXT NOT NULL,
-      execution_attempt_id TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      request_fingerprint TEXT NOT NULL,
-      request_json TEXT NOT NULL,
-      state TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      delivered_at TEXT,
-      acknowledged_at TEXT,
-      settled_at TEXT,
-      rejected_at TEXT,
-      rejection_code TEXT,
-      application_owner_token TEXT,
-      application_claimed_at TEXT,
-      application_decision_json TEXT
-    );
-    CREATE TABLE server_instance_ownership(
-      singleton INTEGER PRIMARY KEY,
-      owner_token TEXT NOT NULL,
-      process_id INTEGER NOT NULL,
-      hostname TEXT NOT NULL,
-      acquired_at TEXT NOT NULL
-    );
     INSERT INTO server_instance_ownership(
       singleton,owner_token,process_id,hostname,acquired_at
     ) VALUES (
@@ -82,6 +59,35 @@ const cancelAction = {
   reason: "operator requested cancellation"
 } as const;
 
+const retryAction = {
+  actionId: "retry-action-1",
+  operationId: "operation-retry-1",
+  dispatchId: "dispatch-retry-1",
+  executionAttemptId: "attempt-retry-1",
+  expectedAttemptVersion: 4,
+  kind: "retry_new_attempt",
+  priorLeaseId: "lease-retry-1",
+  newDispatchId: "dispatch-retry-2",
+  newExecutionAttemptId: "attempt-retry-2",
+  reason: "retry after lost session"
+} as const;
+
+const hostASelection = dispatchHostSelectionSnapshotSchema.parse({
+  assignmentRevision: 1,
+  target: { kind: "exact_host", hostId: "host-a" },
+  selection: "exact",
+  preferredHostId: "host-a",
+  requiredCapabilities: ["acp.codex"]
+});
+
+const hostBSelection = dispatchHostSelectionSnapshotSchema.parse({
+  assignmentRevision: 2,
+  target: { kind: "exact_host", hostId: "host-b" },
+  selection: "exact",
+  preferredHostId: "host-b",
+  requiredCapabilities: ["acp.codex"]
+});
+
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   const promise = new Promise<T>((complete) => {
@@ -100,6 +106,20 @@ function runningSnapshot() {
     leaseId: cancelAction.leaseId,
     leaseFenced: false,
     hostCapabilities: []
+  };
+}
+
+function retrySnapshot() {
+  return {
+    operationId: retryAction.operationId,
+    dispatchId: retryAction.dispatchId,
+    executionAttemptId: retryAction.executionAttemptId,
+    attemptStatus: "interrupted" as const,
+    attemptVersion: retryAction.expectedAttemptVersion,
+    leaseId: retryAction.priorLeaseId,
+    leaseFenced: true,
+    interruption: { resumable: false },
+    hostCapabilities: ["acp.codex"]
   };
 }
 
@@ -394,6 +414,136 @@ describe("RemoteExecutionActionRepository", () => {
     expect(appliedContext).toEqual({
       authorizedHostId: "host-before-crash",
       assignmentRevision: 7
+    });
+  });
+
+  it.each([
+    "same_service",
+    "new_service",
+    "startup"
+  ] as const)("retains a retry plan after an apply error for %s recovery", async (recoveryMode) => {
+    const { repository, database } = await setup();
+    let snapshots = 0;
+    let preparations = 0;
+    let firstApply = true;
+    let currentSelection = hostASelection;
+    const appliedSelections: string[] = [];
+    const application = {
+      recover: () => undefined,
+      snapshot: () => {
+        snapshots += 1;
+        return retrySnapshot();
+      },
+      prepare: () => {
+        preparations += 1;
+        return currentSelection;
+      },
+      apply: (_request: unknown, _decision: unknown, context?: unknown) => {
+        const selection = dispatchHostSelectionSnapshotSchema.parse(context);
+        appliedSelections.push(selection.preferredHostId ?? "");
+        if (firstApply) {
+          firstApply = false;
+          throw new Error("injected_after_external_side_effect");
+        }
+        return "settled" as const;
+      }
+    };
+    const firstService = new RemoteExecutionActionService(
+      repository,
+      application,
+      serverInstanceOwnerToken
+    );
+
+    await expect(firstService.execute(retryAction)).rejects.toThrow(
+      "injected_after_external_side_effect"
+    );
+    const row = database
+      .prepare(
+        `SELECT application_owner_token,application_claimed_at,application_decision_json
+           FROM remote_execution_actions WHERE action_id=?`
+      )
+      .get(retryAction.actionId);
+    expect(row).toMatchObject({
+      application_owner_token: null,
+      application_claimed_at: null
+    });
+    expect(JSON.parse(String(row?.application_decision_json))).toMatchObject({
+      decision: { transition: "retry" },
+      context: { preferredHostId: "host-a", assignmentRevision: 1 }
+    });
+
+    currentSelection = hostBSelection;
+    let recoveryService = firstService;
+    let recoveryOwnerToken = serverInstanceOwnerToken;
+    if (recoveryMode !== "same_service") {
+      if (recoveryMode === "startup") {
+        recoveryOwnerToken = "00000000-0000-4000-8000-000000000026";
+        database
+          .prepare("UPDATE server_instance_ownership SET owner_token=? WHERE singleton=1")
+          .run(recoveryOwnerToken);
+      }
+      recoveryService = new RemoteExecutionActionService(
+        new RemoteExecutionActionRepository(database),
+        {
+          recover: () => undefined,
+          snapshot: () => {
+            throw new Error("retained_plan_must_skip_snapshot");
+          },
+          prepare: () => {
+            throw new Error("retained_plan_must_skip_prepare");
+          },
+          apply: application.apply
+        },
+        recoveryOwnerToken
+      );
+    }
+
+    const recovered =
+      recoveryMode === "startup"
+        ? await recoveryService.reconcile({ serverInstanceOwnerToken: recoveryOwnerToken })
+        : [await recoveryService.execute(retryAction)];
+    expect(recovered).toMatchObject([{ state: "settled" }]);
+    expect(appliedSelections).toEqual(["host-a", "host-a"]);
+    expect(snapshots).toBe(1);
+    expect(preparations).toBe(1);
+  });
+
+  it.each([
+    "snapshot",
+    "prepare"
+  ] as const)("discards the claim and plan when %s fails before apply", async (failureStage) => {
+    const { repository, database } = await setup();
+    const service = new RemoteExecutionActionService(
+      repository,
+      {
+        recover: () => undefined,
+        snapshot: () => {
+          if (failureStage === "snapshot") throw new Error("injected_snapshot_failure");
+          return retrySnapshot();
+        },
+        prepare: () => {
+          if (failureStage === "prepare") throw new Error("injected_prepare_failure");
+          return hostASelection;
+        },
+        apply: () => {
+          throw new Error("apply_must_not_run");
+        }
+      },
+      serverInstanceOwnerToken
+    );
+
+    await expect(service.execute(retryAction)).rejects.toThrow(`injected_${failureStage}_failure`);
+    expect(
+      database
+        .prepare(
+          `SELECT application_owner_token,application_claimed_at,application_decision_json
+             FROM remote_execution_actions WHERE action_id=?`
+        )
+        .get(retryAction.actionId)
+    ).toEqual({
+      application_owner_token: null,
+      application_claimed_at: null,
+      application_decision_json: null
     });
   });
 });

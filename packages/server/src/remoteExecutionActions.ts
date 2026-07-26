@@ -93,7 +93,7 @@ function toRecord(row: Record<string, unknown>): RemoteExecutionActionRecord {
   if (
     (parsed.application_owner_token === null) !== (parsed.application_claimed_at === null) ||
     (parsed.application_owner_token !== null && parsed.state !== "recorded") ||
-    (parsed.application_decision_json !== null && parsed.application_owner_token === null)
+    (parsed.application_decision_json !== null && parsed.state !== "recorded")
   ) {
     throw new Error("remote_action_row_claim_mismatch");
   }
@@ -334,7 +334,10 @@ export class RemoteExecutionActionRepository {
     });
   }
 
-  releaseApplication(actionId: string, ownerToken: string): RemoteExecutionActionRecord {
+  releaseApplicationAndDiscardPlan(
+    actionId: string,
+    ownerToken: string
+  ): RemoteExecutionActionRecord {
     return inWriteTransaction(this.database, () => {
       assertServerInstanceOwnership(this.database, ownerToken);
       const updated = this.database
@@ -343,6 +346,25 @@ export class RemoteExecutionActionRepository {
            SET application_owner_token=NULL,application_claimed_at=NULL,
                application_decision_json=NULL
            WHERE action_id=? AND state='recorded' AND application_owner_token=?`
+        )
+        .run(actionId, ownerToken);
+      if (updated.changes !== 1) throw new Error("remote_action_application_claim_lost");
+      return this.getRequired(actionId);
+    });
+  }
+
+  releaseApplicationPreservingPlan(
+    actionId: string,
+    ownerToken: string
+  ): RemoteExecutionActionRecord {
+    return inWriteTransaction(this.database, () => {
+      assertServerInstanceOwnership(this.database, ownerToken);
+      const updated = this.database
+        .prepare(
+          `UPDATE remote_execution_actions
+           SET application_owner_token=NULL,application_claimed_at=NULL
+           WHERE action_id=? AND state='recorded' AND application_owner_token=?
+             AND application_decision_json IS NOT NULL`
         )
         .run(actionId, ownerToken);
       if (updated.changes !== 1) throw new Error("remote_action_application_claim_lost");
@@ -497,7 +519,10 @@ export class RemoteExecutionActionService {
             error.code
           );
         } else {
-          this.actions.releaseApplication(action.request.actionId, this.serverInstanceOwnerToken);
+          this.actions.releaseApplicationAndDiscardPlan(
+            action.request.actionId,
+            this.serverInstanceOwnerToken
+          );
         }
         throw error;
       }
@@ -513,7 +538,10 @@ export class RemoteExecutionActionService {
           error.code
         );
       } else {
-        this.actions.releaseApplication(action.request.actionId, this.serverInstanceOwnerToken);
+        this.actions.releaseApplicationPreservingPlan(
+          action.request.actionId,
+          this.serverInstanceOwnerToken
+        );
       }
       throw error;
     }
