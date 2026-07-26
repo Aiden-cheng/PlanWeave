@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { DispatchRecord, DispatchWriteback } from "../dispatches.js";
 import type { CommentActivityHttpOptions } from "../index.js";
 import * as serverApi from "../index.js";
+// @ts-expect-error Dispatch construction options are intentionally internal to the coordinator.
+import type { DispatchServiceOptions } from "../index.js";
+// @ts-expect-error Dispatch writeback is intentionally internal to the coordinator.
+import type { DispatchWriteback as PublicDispatchWriteback } from "../index.js";
 
 /** Compile-time guard: residual packageRef must not return to public DTOs. */
 type AssertNoPackageRefKey<T> = "packageRef" extends keyof T ? never : true;
@@ -15,6 +19,7 @@ const _writebackFailHasNoPackageRef: AssertNoPackageRefKey<
 void _dispatchRecordHasNoPackageRef;
 void _writebackCompleteHasNoPackageRef;
 void _writebackFailHasNoPackageRef;
+void (undefined as DispatchServiceOptions | PublicDispatchWriteback | undefined);
 
 const _commentActivityHttpOptions: CommentActivityHttpOptions | undefined = undefined;
 void _commentActivityHttpOptions;
@@ -27,8 +32,8 @@ describe("server public export surface", () => {
     expect(serverApi).not.toHaveProperty("DistributedCoordinationOptions");
   });
 
-  it("keeps DispatchService as the application-layer host-facing dispatch authority", () => {
-    expect(typeof serverApi.DispatchService).toBe("function");
+  it("keeps dispatch construction and writeback behind the coordinator", () => {
+    expect(serverApi).not.toHaveProperty("DispatchService");
     expect(serverApi.dispatchStatusSchema).toBeDefined();
   });
 

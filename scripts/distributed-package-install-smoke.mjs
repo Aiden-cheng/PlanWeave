@@ -323,6 +323,16 @@ async function main() {
     assertNoNativeBindings(serverPackageRoot);
     assertNoNativeBindings(hostPackageRoot);
 
+    const serverPublicApi = await import(
+      pathToFileURL(join(serverPackageRoot, "dist/index.js")).href
+    );
+    if ("DispatchService" in serverPublicApi) {
+      throw new Error("server_public_dispatch_service_bypasses_coordinator");
+    }
+    if (typeof serverPublicApi.createRemoteBlockCoordination !== "function") {
+      throw new Error("server_public_coordinator_missing");
+    }
+
     const require = createRequire(join(installDir, "package.json"));
     const { DatabaseSync } = require("node:sqlite");
     const memoryDb = new DatabaseSync(":memory:");

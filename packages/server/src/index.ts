@@ -78,15 +78,12 @@ export {
   type RemoteBlockCoordinationOptions
 } from "./distributedCoordination.js";
 export {
-  DispatchService,
   dispatchStatusSchema,
   type DispatchFailure,
   type DispatchInterruption,
   type DispatchRecord,
   type DispatchResult,
-  type DispatchServiceOptions,
-  type DispatchStatus,
-  type DispatchWriteback
+  type DispatchStatus
 } from "./dispatches.js";
 export {
   AgentHostRepository,
