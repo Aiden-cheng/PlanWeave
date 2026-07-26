@@ -34,10 +34,9 @@ describe.skipIf(!liveEnabled)("real ACP Host-local live smoke", () => {
     }
 
     if (evidence.result === "failed" && evidence.disposition === "fail") {
-      // Hard gate precondition failure is an intentional fail (actionable).
       expect(gate.mode).toBe("require");
       expect(evidence.diagnostic).toBeTruthy();
-      return;
+      throw new Error("real_acp_hard_gate_failed");
     }
 
     expect(evidence.version).toBe("planweave.real-acp-host-smoke/v1");

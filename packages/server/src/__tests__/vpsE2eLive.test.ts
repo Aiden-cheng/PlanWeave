@@ -35,7 +35,7 @@ describe.skipIf(!liveEnabled)("authenticated VPS / local-TLS e2e (opt-in)", () =
     if (evidence.result === "failed" && evidence.disposition === "fail") {
       expect(gate.mode).toBe("require");
       expect(evidence.diagnostic).toBeTruthy();
-      return;
+      throw new Error("vps_e2e_hard_gate_failed");
     }
 
     expect(evidence.version).toBe("planweave.vps-authenticated-e2e/v1");
