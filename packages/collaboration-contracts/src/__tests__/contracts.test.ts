@@ -13,8 +13,10 @@ import {
   exampleObserverEvent,
   exampleObserverWelcome,
   exampleSecretsForRedaction,
+  COLLABORATION_JSON_BODY_MAX_BYTES,
   humanObserverEventSchema,
   mapHttpStatusToBoundaryKind,
+  parseCollaborationClientLimits,
   parseCollaborationConnectionProfile,
   parseHumanObserverServerMessage
 } from "../index.js";
@@ -32,6 +34,12 @@ describe("collaboration-contracts", () => {
         allowInsecureTransport: true
       })
     ).toThrow();
+  });
+
+  it("defaults the client JSON response budget to the bounded page envelope", () => {
+    const limits = parseCollaborationClientLimits();
+    expect(COLLABORATION_JSON_BODY_MAX_BYTES).toBe(4 * 1_024 * 1_024);
+    expect(limits.jsonBodyMaxBytes).toBe(COLLABORATION_JSON_BODY_MAX_BYTES);
   });
 
   it("loads shared fixtures without digest fields", () => {

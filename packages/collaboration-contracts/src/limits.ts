@@ -55,8 +55,14 @@ export const ACTIVITY_HEADLINE_MAX_LENGTH = 256 as const;
 export const ACTIVITY_SUBJECTS_MAX_COUNT = 8 as const;
 export const COMMENT_TOMBSTONE_REASON_MAX_LENGTH = 512 as const;
 
-/** Default JSON body admission limit for human collaboration HTTP. */
-export const COLLABORATION_JSON_BODY_MAX_BYTES = 16_384 as const;
+/** Default JSON response body budget for human collaboration HTTP clients. */
+export const COLLABORATION_JSON_RESPONSE_MAX_BYTES = 4 * 1_024 * 1_024;
+
+/**
+ * Backward-compatible public name for the collaboration JSON response budget.
+ * Server request admission limits are enforced independently at their HTTP boundaries.
+ */
+export const COLLABORATION_JSON_BODY_MAX_BYTES = COLLABORATION_JSON_RESPONSE_MAX_BYTES;
 
 /** Default max WebSocket frame size for the human observer channel. */
 export const HUMAN_OBSERVER_MAX_PAYLOAD_BYTES = 262_144 as const;

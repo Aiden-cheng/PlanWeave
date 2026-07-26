@@ -167,6 +167,58 @@ describe("CollaborationClient", () => {
     client.dispose();
   });
 
+  it("reads valid pages above 16 KiB and fails closed above the response budget", async () => {
+    const responseBudgetBytes = 4 * 1_024 * 1_024;
+    const template = exampleMemberPage.items[0];
+    if (!template) throw new Error("member fixture is empty");
+    const largePage = {
+      items: Array.from({ length: 100 }, (_, index) => ({
+        ...template,
+        membershipId: `membership-${String(index).padStart(3, "0")}`,
+        humanPrincipalId: `human-owner-${String(index).padStart(3, "0")}`
+      })),
+      nextCursor: null
+    };
+    const largePayload = JSON.stringify(largePage);
+    expect(Buffer.byteLength(largePayload)).toBeGreaterThan(16 * 1_024);
+    expect(Buffer.byteLength(largePayload)).toBeLessThan(responseBudgetBytes);
+    const oversizedPayload = JSON.stringify({
+      ...largePage,
+      pad: "x".repeat(responseBudgetBytes)
+    });
+    let requestCount = 0;
+    const fixture = await listen((_req, res) => {
+      requestCount += 1;
+      if (requestCount === 1) {
+        res.writeHead(200, {
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(largePayload)
+        });
+        res.end(largePayload);
+        return;
+      }
+      res.writeHead(200, {
+        "content-type": "application/json",
+        "content-length": Buffer.byteLength(oversizedPayload)
+      });
+      res.end(oversizedPayload);
+    });
+    cleanups.push(fixture.close);
+    const client = clientFor(fixture.origin, {
+      token: exampleHumanDeviceToken,
+      limits: { jsonBodyMaxBytes: responseBudgetBytes }
+    });
+    await expect(client.listMembers({ limit: 100 })).resolves.toMatchObject({
+      items: expect.any(Array),
+      nextCursor: null
+    });
+    await expect(client.listMembers({ limit: 100 })).rejects.toMatchObject({
+      kind: "payload_too_large",
+      code: "collaboration_response_too_large"
+    });
+    client.dispose();
+  });
+
   it("rejects schema-invalid assignment projections", async () => {
     const fixture = await listen((_req, res) => {
       json(res, 200, { ...exampleAssignmentProjection, revision: -1 });
