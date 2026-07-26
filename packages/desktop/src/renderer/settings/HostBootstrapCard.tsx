@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { createTranslator } from "../i18n";
 import type { OperatorProfileView } from "../../shared/operatorControl";
+import { buildAgentHostBootstrapCommand } from "./hostBootstrapCommand";
 
 type HostBootstrapCardProps = {
   activeProfile: OperatorProfileView | null;
@@ -124,13 +125,10 @@ export function HostBootstrapCard({
 
   const bootstrapCommand = useMemo(() => {
     if (!grant || !bootstrapConfig) return null;
-    const config = JSON.stringify(configPath.trim());
-    const code = JSON.stringify(grant.enrollmentCode);
-    return [
-      `planweave-agent-host preflight --config ${config}`,
-      `planweave-agent-host enroll --config ${config} --code ${code}`,
-      `planweave-agent-host run --config ${config}`
-    ].join("\n");
+    return buildAgentHostBootstrapCommand({
+      configPath,
+      enrollmentCode: grant.enrollmentCode
+    });
   }, [bootstrapConfig, configPath, grant]);
 
   const copyText = async (kind: string, value: string) => {

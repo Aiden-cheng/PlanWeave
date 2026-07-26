@@ -187,6 +187,7 @@
         "firstLaunchExample.test.ts",
         "importRecoveryNotifications.test.tsx",
         "hostAdministrationPackagedE2E.test.tsx",
+        "hostBootstrapCommand.test.ts",
         "operatorControlHandlers.test.ts",
         "operatorControl.test.ts",
         "mcpTunnel.test.ts",

@@ -5,9 +5,9 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { agentHostConfigSchema } from "../../../agent-host/src/config/schema";
-import { parseAgentHostArgs } from "../../../agent-host/src/operator/cli";
 import { createTranslator } from "../renderer/i18n";
 import { HostAdministrationSection } from "../renderer/settings/HostAdministrationSection";
+import { buildAgentHostBootstrapCommand } from "../renderer/settings/hostBootstrapCommand";
 
 const bridgeMock = vi.hoisted(() => ({
   getOperatorControlStatus: vi.fn(),
@@ -121,28 +121,12 @@ describe("Host administration surface", () => {
     const config = JSON.parse(configText) as Record<string, unknown>;
     expect(agentHostConfigSchema.parse(config)).toEqual(config);
     expect(config).not.toHaveProperty("enrollmentCode");
-    const commandLines = (
-      screen.getByTestId("host-admin-bootstrap-command") as HTMLTextAreaElement
-    ).value
-      .split("\n")
-      .map(
-        (line) =>
-          line.match(/(?:[^\s"]+|"[^"]*")+/g)?.map((token) => token.replace(/^"|"$/g, "")) ?? []
-      );
-    expect(commandLines).toHaveLength(3);
-    expect(parseAgentHostArgs(commandLines[0].slice(1))).toMatchObject({
-      command: "preflight",
-      configPath: "/etc/planweave/agent-host.json"
-    });
-    expect(parseAgentHostArgs(commandLines[1].slice(1))).toMatchObject({
-      command: "enroll",
-      configPath: "/etc/planweave/agent-host.json",
-      code: enrollmentCode
-    });
-    expect(parseAgentHostArgs(commandLines[2].slice(1))).toMatchObject({
-      command: "run",
-      configPath: "/etc/planweave/agent-host.json"
-    });
+    expect(screen.getByTestId("host-admin-bootstrap-command")).toHaveValue(
+      buildAgentHostBootstrapCommand({
+        configPath: "/etc/planweave/agent-host.json",
+        enrollmentCode
+      })
+    );
 
     await user.click(screen.getByTestId("host-admin-close-grant"));
     expect(screen.queryByTestId("host-admin-enrollment-secret")).not.toBeInTheDocument();
