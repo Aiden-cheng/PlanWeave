@@ -182,6 +182,7 @@ class StartupHarness {
   restoreV17Schema(): void {
     const database = this.requireServer().database;
     database.exec(`
+      DROP TABLE human_observer_events;
       DROP TABLE activity_projection_outbox;
       DROP TABLE activity_records;
       DROP TABLE comments;
