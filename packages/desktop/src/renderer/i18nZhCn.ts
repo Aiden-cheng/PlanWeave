@@ -1128,8 +1128,5 @@ export const zhCnCatalog = {
   canvasPresenceCursor: "{name} 的光标",
   canvasPresenceCursorSelected: "{name} 的光标；已选择 {count} 项",
   canvasPresenceEdgesSelected: "{name} 选择了图中的连线",
-  canvasPresenceUnknownSession: "未知会话",
-  canvasPresenceUnknownMember: "未知成员",
-  canvasPresenceCollaborator: "协作者",
   canvasPresenceError: "画布在线状态错误：{code}"
 } satisfies Record<TranslationKey, string>;

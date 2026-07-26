@@ -10,9 +10,6 @@ import { createTranslator } from "../renderer/i18n";
 const labels = (language: "en" | "zh-CN") => {
   const t = createTranslator(language);
   return {
-    unknownSession: t("canvasPresenceUnknownSession"),
-    unknownMember: t("canvasPresenceUnknownMember"),
-    collaborator: t("canvasPresenceCollaborator"),
     error: (code: string) => t("canvasPresenceError").replace("{code}", code)
   };
 };
@@ -54,7 +51,7 @@ function createBridge() {
 describe("CanvasPresenceController", () => {
   beforeEach(() => vi.useRealTimers());
 
-  it("keeps two real client read models scoped, sanitized, and remote-only", async () => {
+  it("keeps two client read models scoped, validated, and remote-only", async () => {
     const transport = createBridge();
     const first = new CanvasPresenceController({ api: transport.bridge, labels: labels("en") });
     const second = new CanvasPresenceController({ api: transport.bridge, labels: labels("en") });
@@ -84,7 +81,7 @@ describe("CanvasPresenceController", () => {
         protocolVersion: 1,
         projectId: "project-1",
         canvasId: "canvas-main",
-        sessions: [session("session-a", "human-a", "  Alice\u0000 ")]
+        sessions: [session("session-a", "human-a", "  Alice ")]
       })
     );
 

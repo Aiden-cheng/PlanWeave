@@ -3,16 +3,18 @@ import type {
   CanvasPresenceServerMessage,
   CanvasPresenceSession
 } from "@planweave-ai/collaboration-contracts";
+import {
+  CANVAS_PRESENCE_MAX_SELECTION_IDS,
+  CANVAS_PRESENCE_MAX_SESSIONS_PER_CANVAS,
+  canvasPresencePointerSchema,
+  canvasPresenceSelectionIdSchema,
+  canvasPresenceSessionSchema
+} from "@planweave-ai/collaboration-contracts";
 import type {
   CollaborationPresenceSignal,
   CollaborationPresenceUpdateInput,
   PlanWeaveCollaborationApi
 } from "../../shared/collaboration.js";
-
-const MAX_REMOTE_SESSIONS = 32;
-const MAX_SELECTION_IDS = 32;
-const MAX_DISPLAY_NAME_LENGTH = 64;
-const MAX_SELECTION_ID_LENGTH = 128;
 
 export type CanvasPresenceBridge = Pick<
   PlanWeaveCollaborationApi,
@@ -41,9 +43,6 @@ export type CanvasPresenceScope = {
 };
 
 export type CanvasPresenceLabels = {
-  unknownSession: string;
-  unknownMember: string;
-  collaborator: string;
   error: (code: string) => string;
 };
 
@@ -51,30 +50,9 @@ type TrackedSession = CanvasPresenceRemoteSession;
 
 const EMPTY_SNAPSHOT: CanvasPresenceSnapshot = { sessions: [], error: null };
 
-function cleanText(value: unknown, maxLength: number, fallback: string): string {
-  if (typeof value !== "string") return fallback;
-  const cleaned = value
-    .normalize("NFKC")
-    .replace(/\p{Cc}/gu, "")
-    .trim()
-    .slice(0, maxLength);
-  return cleaned || fallback;
-}
-
 function cleanPointer(value: unknown): CanvasPresencePointer | null {
-  if (!value || typeof value !== "object") return null;
-  const pointer = value as { x?: unknown; y?: unknown };
-  if (
-    typeof pointer.x !== "number" ||
-    typeof pointer.y !== "number" ||
-    !Number.isFinite(pointer.x) ||
-    !Number.isFinite(pointer.y) ||
-    Math.abs(pointer.x) > 1_000_000 ||
-    Math.abs(pointer.y) > 1_000_000
-  ) {
-    return null;
-  }
-  return { x: pointer.x, y: pointer.y };
+  const parsed = canvasPresencePointerSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }
 
 function cleanSelectionIds(value: unknown): string[] {
@@ -82,29 +60,27 @@ function cleanSelectionIds(value: unknown): string[] {
   const ids: string[] = [];
   const seen = new Set<string>();
   for (const item of value) {
-    const id = cleanText(item, MAX_SELECTION_ID_LENGTH, "");
-    if (!id || seen.has(id)) continue;
+    const parsed = canvasPresenceSelectionIdSchema.safeParse(item);
+    if (!parsed.success || seen.has(parsed.data)) continue;
+    const id = parsed.data;
     seen.add(id);
     ids.push(id);
-    if (ids.length >= MAX_SELECTION_IDS) break;
+    if (ids.length >= CANVAS_PRESENCE_MAX_SELECTION_IDS) break;
   }
   return ids;
 }
 
 function sanitizeSession(
-  session: CanvasPresenceSession,
-  labels: CanvasPresenceLabels
-): CanvasPresenceRemoteSession {
+  session: CanvasPresenceSession
+): CanvasPresenceRemoteSession | null {
+  const parsed = canvasPresenceSessionSchema.safeParse(session);
+  if (!parsed.success) return null;
   return {
-    sessionId: cleanText(session.identity.sessionId, MAX_SELECTION_ID_LENGTH, labels.unknownSession),
-    humanPrincipalId: cleanText(
-      session.identity.humanPrincipalId,
-      MAX_SELECTION_ID_LENGTH,
-      labels.unknownMember
-    ),
-    displayName: cleanText(session.identity.displayName, MAX_DISPLAY_NAME_LENGTH, labels.collaborator),
-    pointer: cleanPointer(session.pointer),
-    selectionIds: cleanSelectionIds(session.selectionIds)
+    sessionId: parsed.data.identity.sessionId,
+    humanPrincipalId: parsed.data.identity.humanPrincipalId,
+    displayName: parsed.data.identity.displayName,
+    pointer: parsed.data.pointer,
+    selectionIds: parsed.data.selectionIds
   };
 }
 
@@ -228,8 +204,12 @@ export class CanvasPresenceController {
   private upsertSession(session: CanvasPresenceSession): void {
     const scope = this.scope;
     if (!scope) return;
-    const sanitized = sanitizeSession(session, this.labels);
-    if (!this.sessions.has(sanitized.sessionId) && this.sessions.size >= MAX_REMOTE_SESSIONS) {
+    const sanitized = sanitizeSession(session);
+    if (!sanitized) return;
+    if (
+      !this.sessions.has(sanitized.sessionId) &&
+      this.sessions.size >= CANVAS_PRESENCE_MAX_SESSIONS_PER_CANVAS
+    ) {
       return;
     }
     this.sessions.set(sanitized.sessionId, sanitized);

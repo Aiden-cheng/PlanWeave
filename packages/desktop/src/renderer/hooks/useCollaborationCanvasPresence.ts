@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { XYPosition, OnSelectionChangeParams } from "@xyflow/react";
+import {
+  CANVAS_PRESENCE_MAX_SELECTION_IDS,
+  canvasPresenceSelectionIdSchema
+} from "@planweave-ai/collaboration-contracts";
 import { collaborationBridge } from "../bridge";
 import {
   CanvasPresenceController,
@@ -9,7 +13,6 @@ import {
 } from "../collaboration/CanvasPresenceController";
 import type { createTranslator } from "../i18n";
 
-const MAX_SELECTION_IDS = 32;
 const POINTER_INTERVAL_MS = 50;
 
 export type CollaborationCanvasPresenceResult = {
@@ -27,9 +30,10 @@ function sameIds(left: string[], right: string[]): boolean {
 function normalizeSelectionIds(selection: OnSelectionChangeParams): string[] {
   const ids = [...selection.nodes, ...selection.edges]
     .map((item) => item.id)
-    .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
-    .map((id) => id.trim());
-  return [...new Set(ids)].sort().slice(0, MAX_SELECTION_IDS);
+    .map((id) => canvasPresenceSelectionIdSchema.safeParse(id))
+    .filter((result) => result.success)
+    .map((result) => result.data);
+  return [...new Set(ids)].sort().slice(0, CANVAS_PRESENCE_MAX_SELECTION_IDS);
 }
 
 /**
@@ -52,9 +56,6 @@ export function useCollaborationCanvasPresence(input: {
     input.selectedProjectId === input.activeProjectId;
   const labels = useMemo<CanvasPresenceLabels>(
     () => ({
-      unknownSession: input.t("canvasPresenceUnknownSession"),
-      unknownMember: input.t("canvasPresenceUnknownMember"),
-      collaborator: input.t("canvasPresenceCollaborator"),
       error: (code) => input.t("canvasPresenceError").replace("{code}", code)
     }),
     [input.t]

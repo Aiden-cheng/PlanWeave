@@ -1177,9 +1177,6 @@ export const enCatalog = {
   canvasPresenceCursor: "{name} cursor",
   canvasPresenceCursorSelected: "{name} cursor; selected {count} items",
   canvasPresenceEdgesSelected: "{name} has selected graph edges",
-  canvasPresenceUnknownSession: "Unknown session",
-  canvasPresenceUnknownMember: "Unknown member",
-  canvasPresenceCollaborator: "Collaborator",
   canvasPresenceError: "Canvas presence error: {code}"
 } as const;
 

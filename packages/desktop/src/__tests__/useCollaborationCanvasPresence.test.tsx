@@ -95,7 +95,7 @@ describe("useCollaborationCanvasPresence", () => {
     });
   });
 
-  it("renders sanitized remote snapshots and clears them when the canvas is hidden", async () => {
+  it("renders validated remote snapshots and clears them when the canvas is hidden", async () => {
     const fixture = bridgeFixture();
     const { result, rerender } = renderHook(
       ({ enabled }) =>
@@ -124,7 +124,7 @@ describe("useCollaborationCanvasPresence", () => {
               identity: {
                 sessionId: "session-b",
                 humanPrincipalId: "human-b",
-                displayName: "  Bob\u0000 "
+                displayName: "  Bob "
               },
               pointer: { x: 10, y: 20 },
               selectionIds: ["T-001"]

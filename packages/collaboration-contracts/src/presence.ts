@@ -54,12 +54,17 @@ export const canvasPresencePointerSchema = z
   .strict();
 export type CanvasPresencePointer = z.infer<typeof canvasPresencePointerSchema>;
 
+export const canvasPresenceDisplayNameSchema = humanDisplayNameSchema.refine(
+  (value) => !/[\u0000-\u001f\u007f]/u.test(value),
+  "presence display name must not contain control characters"
+);
+
 /** Server-created public identity; device credential ids and secrets are never projected. */
 export const canvasPresenceSessionIdentitySchema = z
   .object({
     sessionId: canvasPresenceSessionIdSchema,
     humanPrincipalId: humanPrincipalIdSchema,
-    displayName: humanDisplayNameSchema
+    displayName: canvasPresenceDisplayNameSchema
   })
   .strict();
 export type CanvasPresenceSessionIdentity = z.infer<

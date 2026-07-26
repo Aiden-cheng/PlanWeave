@@ -112,6 +112,16 @@ describe("canvas presence contracts", () => {
         sessions: [session, session]
       })
     ).toThrow();
+    expect(() =>
+      canvasPresenceServerMessageSchema.parse({
+        type: "canvas.presence.update",
+        ...scope,
+        session: {
+          ...session,
+          identity: { ...identity, displayName: "Ada\u0000" }
+        }
+      })
+    ).toThrow();
   });
 
   it("keeps errors bounded to stable codes without free-form payloads", () => {
