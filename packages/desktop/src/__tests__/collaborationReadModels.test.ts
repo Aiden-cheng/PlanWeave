@@ -45,6 +45,30 @@ function blockAssignment(blockRef: string, hostId: string): AssignmentDisplayPro
   });
 }
 
+function assignmentObserverSignal(
+  cursor: number,
+  workItem?: AssignmentDisplayProjection["workItem"]
+): CollaborationObserverSignal {
+  const baseEvent = {
+    ...exampleObserverEvent,
+    cursor,
+    previousCursor: cursor - 1
+  };
+  const event = workItem
+    ? { ...baseEvent, workItem }
+    : (() => {
+        const withoutWorkItem = { ...baseEvent };
+        delete withoutWorkItem.workItem;
+        return withoutWorkItem;
+      })();
+  return {
+    type: "human.observer.event",
+    profileId: "profile-demo-001",
+    projectId: "project-demo-001",
+    event
+  };
+}
+
 function idleStatus(overrides?: Partial<CollaborationStatus>): CollaborationStatus {
   return {
     profiles: [],
@@ -427,6 +451,141 @@ describe("CollaborationReadModelController", () => {
     await Promise.resolve();
     expect(mock.listAssignments.mock.calls.length).toBe(assignmentCallsAfterFirst);
 
+    controller.dispose();
+  });
+
+  it("surfaces observer assignment reload failures and retries the failed cursor", async () => {
+    const mock = createMockApi();
+    const controller = new CollaborationReadModelController({ api: mock.api });
+    await controller.setActiveProject({
+      profileId: "profile-demo-001",
+      projectId: "project-demo-001"
+    });
+    const observerListener = mock.signalListeners[0]!;
+    const failure = {
+      kind: "network",
+      code: "assignment_reload_failed",
+      message: "Assignment reload failed.",
+      retryable: true
+    };
+    const unhandledRejections: unknown[] = [];
+    const unhandledRejectionListener = (reason: unknown) => {
+      unhandledRejections.push(reason);
+    };
+    process.on("unhandledRejection", unhandledRejectionListener);
+    try {
+      mock.listAssignments.mockRejectedValueOnce(failure);
+      observerListener(assignmentObserverSignal(21, workItem));
+      await waitFor(() => {
+        expect(controller.getSnapshot().syncPhase).toBe("degraded");
+      });
+      expect(controller.getSnapshot().lastError).toEqual(
+        expect.objectContaining({
+          code: "assignment_reload_failed",
+          message: "Assignment reload failed."
+        })
+      );
+      expect(controller.getSnapshot().loadingKinds).not.toContain("assignments");
+      expect(unhandledRejections).toEqual([]);
+
+      mock.listAssignments.mockResolvedValueOnce({
+        items: [exampleAssignmentProjection],
+        nextCursor: null
+      });
+      observerListener(assignmentObserverSignal(21, workItem));
+      await waitFor(() => {
+        expect(controller.getSnapshot().observerCursor).toBe(21);
+      });
+      await controller.refreshAuthoritative({ reason: "observer_retry_recovery" });
+      expect(controller.getSnapshot().syncPhase).toBe("ready");
+      expect(controller.getSnapshot().lastError).toBeNull();
+    } finally {
+      process.off("unhandledRejection", unhandledRejectionListener);
+      controller.dispose();
+    }
+  });
+
+  it("surfaces full assignment refresh eligibility failures and recovers on retry", async () => {
+    const block = blockAssignment("task-1#B-001", "host-assigned-1");
+    const mock = createMockApi();
+    const controller = new CollaborationReadModelController({ api: mock.api });
+    await controller.setActiveProject({
+      profileId: "profile-demo-001",
+      projectId: "project-demo-001"
+    });
+    const observerListener = mock.signalListeners[0]!;
+    const failure = {
+      kind: "network",
+      code: "eligible_reload_failed",
+      message: "Eligible Host reload failed.",
+      retryable: true
+    };
+
+    mock.listAssignments.mockResolvedValueOnce({ items: [block], nextCursor: null });
+    mock.listEligible.mockRejectedValueOnce(failure);
+    observerListener(assignmentObserverSignal(31));
+    await waitFor(() => {
+      expect(controller.getSnapshot().syncPhase).toBe("degraded");
+    });
+    expect(controller.getSnapshot().lastError).toEqual(
+      expect.objectContaining({
+        code: "eligible_reload_failed",
+        message: "Eligible Host reload failed."
+      })
+    );
+    expect(controller.getSnapshot().loadingKinds).not.toContain("assignments");
+
+    mock.listAssignments.mockResolvedValueOnce({ items: [block], nextCursor: null });
+    mock.listEligible.mockResolvedValueOnce({
+      workItem: block.workItem,
+      humans: [],
+      hosts: [],
+      nextHumanCursor: null,
+      nextHostCursor: null
+    });
+    observerListener(assignmentObserverSignal(31));
+    await waitFor(() => {
+      expect(controller.getSnapshot().observerCursor).toBe(31);
+    });
+    await controller.refreshAuthoritative({ reason: "observer_retry_recovery" });
+    expect(controller.getSnapshot().syncPhase).toBe("ready");
+    expect(controller.getSnapshot().lastError).toBeNull();
+    controller.dispose();
+  });
+
+  it("does not let a stale observer failure contaminate a new project generation", async () => {
+    const mock = createMockApi();
+    const controller = new CollaborationReadModelController({ api: mock.api });
+    await controller.setActiveProject({
+      profileId: "profile-demo-001",
+      projectId: "project-demo-001"
+    });
+    const staleObserverListener = mock.signalListeners[0]!;
+    let rejectStaleReload!: (reason: unknown) => void;
+    const staleReload = new Promise<never>((_, reject) => {
+      rejectStaleReload = reject;
+    });
+    mock.listAssignments.mockImplementationOnce(() => staleReload);
+    staleObserverListener(assignmentObserverSignal(41, workItem));
+    await waitFor(() => {
+      expect(mock.listAssignments).toHaveBeenCalledTimes(2);
+    });
+
+    const switchProject = controller.setActiveProject({
+      profileId: "profile-next",
+      projectId: "project-next"
+    });
+    rejectStaleReload({
+      kind: "network",
+      code: "stale_assignment_reload_failed",
+      message: "Stale assignment reload failed.",
+      retryable: true
+    });
+    await switchProject;
+    expect(controller.getSnapshot().projectId).toBe("project-next");
+    expect(controller.getSnapshot().syncPhase).toBe("ready");
+    expect(controller.getSnapshot().lastError).toBeNull();
+    expect(controller.getSnapshot().loadingKinds).not.toContain("assignments");
     controller.dispose();
   });
 

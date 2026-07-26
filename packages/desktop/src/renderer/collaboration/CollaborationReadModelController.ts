@@ -69,6 +69,10 @@ type InternalState = {
   trackedCommentWorkItems: Map<string, WorkItemRef>;
   /** Event cursors already applied (dedupe out-of-order/duplicate observer events). */
   appliedEventCursors: Set<number>;
+  /** Event cursors currently being invalidated (dedupe concurrent observer deliveries). */
+  inFlightEventCursors: Map<number, number>;
+  /** Event cursors whose invalidation failed and may be retried despite a later high-water mark. */
+  failedEventCursors: Set<number>;
   generation: number;
   updatedAt: string;
 };
@@ -93,6 +97,8 @@ function emptyState(now: string): InternalState {
     loadingKinds: new Set(),
     trackedCommentWorkItems: new Map(),
     appliedEventCursors: new Set(),
+    inFlightEventCursors: new Map(),
+    failedEventCursors: new Set(),
     generation: 0,
     updatedAt: now
   };
@@ -196,6 +202,7 @@ export class CollaborationReadModelController {
   private unsubscribers: Array<() => void> = [];
   private disposed = false;
   private mutationSeq = 0;
+  private observerAttemptSeq = 0;
   private refreshQueue: Promise<void> = Promise.resolve();
   /** Cached for useSyncExternalStore — must be referentially stable between emissions. */
   private cachedSnapshot: CollaborationReadModelSnapshot;
@@ -384,7 +391,10 @@ export class CollaborationReadModelController {
 
   /** Test / advanced: inject observer signal without bridge. */
   handleObserverSignalForTests(signal: CollaborationObserverSignal): void {
-    void this.handleObserverSignal(signal);
+    const generation = this.state.generation;
+    void this.handleObserverSignal(signal).catch((error: unknown) => {
+      this.handleObserverSignalFailure(error, signal, generation);
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -395,9 +405,62 @@ export class CollaborationReadModelController {
     this.unsubscribers.push(
       this.api.onCollaborationStatusChanged((status) => this.handleStatus(status)),
       this.api.onCollaborationObserverSignal((signal) => {
-        void this.handleObserverSignal(signal);
+        const generation = this.state.generation;
+        void this.handleObserverSignal(signal).catch((error: unknown) => {
+          this.handleObserverSignalFailure(error, signal, generation);
+        });
       })
     );
+  }
+
+  private handleObserverSignalFailure(
+    error: unknown,
+    signal: CollaborationObserverSignal,
+    generation: number
+  ): void {
+    if (
+      this.disposed ||
+      generation !== this.state.generation ||
+      this.state.profileId !== signal.profileId ||
+      this.state.projectId !== signal.projectId
+    ) {
+      return;
+    }
+    this.clearObserverLoading(signal);
+    this.applyBoundaryError(errorFromUnknown(error));
+    this.emit();
+  }
+
+  private clearObserverLoading(signal: CollaborationObserverSignal): void {
+    switch (signal.type) {
+      case "human.observer.event":
+        switch (signal.event.kind) {
+          case "membership":
+          case "invitation":
+          case "project":
+            this.setLoading("members", false);
+            break;
+          case "assignment":
+            this.setLoading("assignments", false);
+            break;
+          case "comment":
+          case "attachment":
+            if (signal.event.workItem) {
+              this.setLoading(`comments:${workItemKey(signal.event.workItem)}`, false);
+            }
+            break;
+          case "activity":
+          case "remote_run":
+            this.setLoading("activity", false);
+            break;
+          default:
+            break;
+        }
+        break;
+      case "human.observer.catchup_required":
+      case "human.observer.cursor":
+        break;
+    }
   }
 
   private teardownSubscriptions(): void {
@@ -452,8 +515,11 @@ export class CollaborationReadModelController {
 
     if (signal.type === "human.observer.catchup_required") {
       // Retention gap / cursor reset: drop cached projections and reload bounded APIs.
+      this.state.generation += 1;
       this.state.observerCursor = signal.resumeCursor;
       this.state.appliedEventCursors.clear();
+      this.state.inFlightEventCursors.clear();
+      this.state.failedEventCursors.clear();
       this.state.assignments.clear();
       this.state.comments.clear();
       this.state.activity = [];
@@ -462,7 +528,7 @@ export class CollaborationReadModelController {
       this.state.members = [];
       this.state.syncPhase = "loading";
       this.emit();
-      await this.refreshAuthoritative({ reason: "catchup_required" }, generation);
+      await this.refreshAuthoritative({ reason: "catchup_required" }, this.state.generation);
       return;
     }
 
@@ -471,19 +537,41 @@ export class CollaborationReadModelController {
     if (this.state.appliedEventCursors.has(event.cursor)) {
       return;
     }
+    if (this.state.inFlightEventCursors.has(event.cursor)) {
+      return;
+    }
     if (event.cursor <= this.state.observerCursor && this.state.observerCursor > 0) {
       // Out-of-order or stale duplicate relative to validated high-water mark.
-      if (event.previousCursor < this.state.observerCursor) {
+      if (
+        event.previousCursor < this.state.observerCursor &&
+        !this.state.failedEventCursors.has(event.cursor)
+      ) {
         this.state.appliedEventCursors.add(event.cursor);
         return;
       }
     }
-    this.state.appliedEventCursors.add(event.cursor);
-    if (event.cursor > this.state.observerCursor) {
-      this.state.observerCursor = event.cursor;
+    this.observerAttemptSeq += 1;
+    const attemptToken = this.observerAttemptSeq;
+    this.state.inFlightEventCursors.set(event.cursor, attemptToken);
+    try {
+      await this.invalidateFromEvent(event.kind, event, generation);
+      if (generation !== this.state.generation) return;
+      this.state.appliedEventCursors.add(event.cursor);
+      this.state.failedEventCursors.delete(event.cursor);
+      if (event.cursor > this.state.observerCursor) {
+        this.state.observerCursor = event.cursor;
+      }
+      this.emit();
+    } catch (error) {
+      if (generation === this.state.generation) {
+        this.state.failedEventCursors.add(event.cursor);
+      }
+      throw error;
+    } finally {
+      if (this.state.inFlightEventCursors.get(event.cursor) === attemptToken) {
+        this.state.inFlightEventCursors.delete(event.cursor);
+      }
     }
-
-    await this.invalidateFromEvent(event.kind, event, generation);
   }
 
   private async invalidateFromEvent(
@@ -556,7 +644,9 @@ export class CollaborationReadModelController {
       this.setLoading("members", false);
       this.emit();
     } catch (error) {
-      this.setLoading("members", false);
+      if (generation === this.state.generation) {
+        this.setLoading("members", false);
+      }
       throw error;
     }
   }
@@ -605,7 +695,9 @@ export class CollaborationReadModelController {
       this.setLoading("assignments", false);
       this.emit();
     } catch (error) {
-      this.setLoading("assignments", false);
+      if (generation === this.state.generation) {
+        this.setLoading("assignments", false);
+      }
       throw error;
     }
   }
@@ -632,7 +724,9 @@ export class CollaborationReadModelController {
       this.setLoading("assignments", false);
       this.emit();
     } catch (error) {
-      this.setLoading("assignments", false);
+      if (generation === this.state.generation) {
+        this.setLoading("assignments", false);
+      }
       throw error;
     }
   }
@@ -653,7 +747,9 @@ export class CollaborationReadModelController {
       this.setLoading(`comments:${key}`, false);
       this.emit();
     } catch (error) {
-      this.setLoading(`comments:${key}`, false);
+      if (generation === this.state.generation) {
+        this.setLoading(`comments:${key}`, false);
+      }
       throw error;
     }
   }
@@ -691,7 +787,9 @@ export class CollaborationReadModelController {
       this.setLoading("activity", false);
       this.emit();
     } catch (error) {
-      this.setLoading("activity", false);
+      if (generation === this.state.generation) {
+        this.setLoading("activity", false);
+      }
       throw error;
     }
   }
