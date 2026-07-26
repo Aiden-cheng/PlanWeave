@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   acpRecoveryIdentitySchema,
   agentHostProtocolVersion,
@@ -22,6 +23,13 @@ import { DurableMailbox } from "./mailbox.js";
 import { RemoteOperationRepository, type RemoteOperation } from "./remoteOperations.js";
 import type { RemoteExecutionActionRequest } from "./remoteExecutionLifecycle.js";
 import { inWriteTransaction, type SqliteDatabase } from "./sqlite.js";
+
+function executeMailboxMessageId(dispatchId: string): string {
+  const digest = createHash("sha256")
+    .update(JSON.stringify(["execute-mailbox-message/v1", dispatchId]))
+    .digest("hex");
+  return `execute:v1:${digest}`;
+}
 
 export class SqliteRemoteOperationCandidateRepository implements RemoteOperationCandidatePort {
   constructor(private readonly database: SqliteDatabase) {}
@@ -91,7 +99,7 @@ export class SqliteRemoteDispatchPersistence implements RemoteDispatchPersistenc
         `SELECT message_id,host_id,command_json,published_at FROM mailbox_messages
          WHERE message_id=?`
       )
-      .get(`execute-${operation.dispatchId}`);
+      .get(executeMailboxMessageId(operation.dispatchId));
     const mailbox = mailboxRow
       ? (() => {
           const command = mailboxCommandSchema.parse(JSON.parse(String(mailboxRow.command_json)));
@@ -254,7 +262,7 @@ export class SqliteRemoteDispatchPersistence implements RemoteDispatchPersistenc
     return inWriteTransaction(this.database, () => {
       const operation = this.operations.getRequired(input.operation.id);
       const delivery = this.mailbox.enqueueOnce(
-        `execute-${operation.dispatchId}`,
+        executeMailboxMessageId(operation.dispatchId),
         input.reservation.hostId,
         command
       );

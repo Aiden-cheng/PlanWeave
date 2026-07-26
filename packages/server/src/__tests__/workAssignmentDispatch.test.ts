@@ -619,6 +619,7 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
     });
 
     const interrupted = fixture.coordination.operations.getRequired(dispatched.operation.id);
+    const maximalRetryDispatchId = "d".repeat(128);
     await fixture.coordination.coordinator.executeAction({
       actionId: "retry-revalidate-action",
       operationId: interrupted.id,
@@ -627,7 +628,7 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
       expectedAttemptVersion: interrupted.attempt.stateVersion,
       kind: "retry_new_attempt",
       priorLeaseId: dispatch.leaseId,
-      newDispatchId: "dispatch-retry-revalidate-2",
+      newDispatchId: maximalRetryDispatchId,
       newExecutionAttemptId: "attempt-retry-revalidate-2",
       reason: "retry after reassignment to Host B"
     });
@@ -635,7 +636,7 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
     const retried = fixture.coordination.operations.getRequired(dispatched.operation.id);
     expect(retried).toMatchObject({
       state: "activated",
-      dispatchId: "dispatch-retry-revalidate-2",
+      dispatchId: maximalRetryDispatchId,
       executionAttemptId: "attempt-retry-revalidate-2",
       hostSelection: {
         selection: "exact",
