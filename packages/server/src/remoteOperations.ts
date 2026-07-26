@@ -612,6 +612,42 @@ export class RemoteOperationRepository {
     });
   }
 
+  /**
+   * Persist (or replace) the Host selection fingerprint for a non-terminal operation.
+   * Used by legacy pre-v18 recovery when host_selection_json is NULL, and by callers that
+   * must not leave a configured gate without durable authorization evidence.
+   */
+  persistHostSelection(
+    operationId: string,
+    hostSelection: DispatchHostSelectionSnapshot
+  ): RemoteOperation {
+    const json = JSON.stringify(dispatchHostSelectionSnapshotSchema.parse(hostSelection));
+    return inWriteTransaction(this.database, () => {
+      const operation = this.getRequired(operationId);
+      if (["completed", "failed", "cancelled"].includes(operation.state)) {
+        throw new Error("remote_operation_not_actionable");
+      }
+      if (operation.hostSelection) {
+        // Already durable — do not overwrite during same-attempt reenter recovery.
+        // Explicit retry writes via retryAttempt instead.
+        return operation;
+      }
+      const now = this.clock().toISOString();
+      const updated = this.database
+        .prepare(
+          `UPDATE remote_operations SET host_selection_json=?,updated_at=?
+           WHERE id=? AND host_selection_json IS NULL
+             AND state NOT IN ('completed','failed','cancelled')`
+        )
+        .run(json, now, operation.id);
+      if (updated.changes !== 1) {
+        // Concurrent fill won — reload.
+        return this.getRequired(operation.id);
+      }
+      return this.getRequired(operation.id);
+    });
+  }
+
   isRetryApplied(input: {
     operationId: string;
     priorExecutionAttemptId: string;

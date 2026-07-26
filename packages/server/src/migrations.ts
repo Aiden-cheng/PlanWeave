@@ -830,8 +830,14 @@ CREATE INDEX idx_work_assignments_project_target_host
 
 /**
  * Durable Host selection fingerprint authorized at dispatch begin.
- * Restart/recovery must use this snapshot — never re-resolve from a later assignment.
- * Partial upgrade fixtures may lack remote_operations (table created in v10); skip then.
+ * Restart/recovery must use this snapshot — never re-resolve from a later assignment
+ * while a snapshot exists. Partial upgrade fixtures may lack remote_operations
+ * (table created in v10); skip then.
+ *
+ * Pre-v18 pending rows upgrade with host_selection_json NULL. That is intentional:
+ * inventing a fingerprint from a later assignment or reserved host would silently
+ * retarget. Startup reconciliation recovers NULL once via current-assignment
+ * revalidation + persist (see RemoteBlockCoordinator.resolvePreferredHostId).
  */
 const migration18 = "SELECT 1;";
 
@@ -1121,6 +1127,7 @@ function ensureHostSelectionColumn(database: SqliteDatabase): void {
     )
     .get();
   if (hasColumn) return;
+  // Nullable column: existing non-terminal rows keep NULL without blocking migration.
   database.exec("ALTER TABLE remote_operations ADD COLUMN host_selection_json TEXT");
 }
 

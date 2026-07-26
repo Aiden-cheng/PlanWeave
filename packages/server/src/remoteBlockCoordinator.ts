@@ -28,9 +28,10 @@ import {
 } from "./remoteExecutionActions.js";
 import { RemoteBlockActionCoordinator } from "./remoteBlockActionCoordinator.js";
 import { remoteBlockIdentity } from "./remoteBlockIdentity.js";
-import type {
-  AssignmentDispatchGate,
-  DispatchHostSelectionSnapshot
+import {
+  DispatchAssignmentError,
+  type AssignmentDispatchGate,
+  type DispatchHostSelectionSnapshot
 } from "./work/dispatchIntegration.js";
 
 export type RemoteDispatchRequest = RemoteRuntimeLocator & {
@@ -351,6 +352,16 @@ export class RemoteBlockCoordinator {
             status: "awaiting_host"
           };
         }
+        // Legacy null host_selection recovery may revalidate assignment and find it no longer
+        // agent-dispatchable. Record diagnostics and leave non-terminal — never abort other
+        // operations' startup reconciliation.
+        if (error instanceof DispatchAssignmentError) {
+          this.options.operations.recordDiagnostic(operation.id, error.code, error.message);
+          return {
+            operation: this.options.operations.getRequired(operation.id),
+            status: "awaiting_host"
+          };
+        }
         throw error;
       }
     }
@@ -550,10 +561,14 @@ export class RemoteBlockCoordinator {
   }
 
   /**
-   * Prefer the Host selection authorized at dispatch begin.
-   * Durable operation.hostSelection is authoritative after restart; never re-resolve from
-   * a later assignment (that would silently migrate exact Host → automatic under override defaults).
+   * Prefer the Host selection authorized at dispatch begin (or last retry resnapshot).
+   * Durable operation.hostSelection is authoritative for same-attempt reenter after restart;
+   * never re-resolve from a later assignment while a snapshot exists.
    * Active reserved Host is never rewritten by reassignment (lease remains on reservation).
+   *
+   * Pre-v18 rows may have host_selection_json NULL after migration. Recover once by
+   * revalidating current assignment and persisting — do not throw and block startup.
+   * Post-v18 creates always snapshot at dispatch begin; this null path is legacy-only.
    */
   private resolvePreferredHostId(operation: RemoteOperation): string | undefined {
     const durable = operation.hostSelection ?? this.hostSelectionByOperation.get(operation.id);
@@ -564,7 +579,15 @@ export class RemoteBlockCoordinator {
     if (!this.options.assignmentGate) {
       return undefined;
     }
-    // Gate was configured at dispatch begin but the fingerprint is missing — fail closed.
-    throw new Error("remote_host_selection_missing");
+    const snapshot = this.options.assignmentGate.resolve({
+      projectId: operation.projectId,
+      canvasId: operation.canvasId,
+      blockRef: operation.blockRef,
+      requiredCapabilities: operation.requiredCapabilities
+    });
+    const persisted = this.options.operations.persistHostSelection(operation.id, snapshot);
+    const authorized = persisted.hostSelection ?? snapshot;
+    this.hostSelectionByOperation.set(operation.id, authorized);
+    return authorized.preferredHostId;
   }
 }

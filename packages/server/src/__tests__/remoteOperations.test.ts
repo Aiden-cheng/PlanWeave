@@ -382,3 +382,115 @@ describe("remote recovery migration v13", () => {
     expect(centralSchemaVersion(database)).toBe(latestCentralSchemaVersion);
   });
 });
+
+describe("remote operation host_selection migration v18", () => {
+  it("adds nullable host_selection_json for populated pending ops without inventing a snapshot", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "planweave-remote-v18-migration-"));
+    directories.push(directory);
+    const database = await openServerDatabase(join(directory, "server.sqlite"), 5_000);
+    databases.push(database);
+
+    // Pre-v18 shape: remote_operations present without host_selection_json, with a pending row.
+    database.exec(`
+      CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY,applied_at TEXT NOT NULL);
+      INSERT INTO schema_migrations(version,applied_at)
+      SELECT value,'2020-01-01T00:00:00.000Z' FROM json_each('[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]');
+      CREATE TABLE agent_hosts(
+        id TEXT PRIMARY KEY,display_name TEXT NOT NULL,credential_hash TEXT NOT NULL,
+        capabilities_json TEXT NOT NULL,capacity INTEGER NOT NULL,last_seen_at TEXT,
+        last_acknowledged_sequence INTEGER NOT NULL DEFAULT 0,revoked_at TEXT,
+        created_at TEXT NOT NULL,credential_expires_at TEXT
+      );
+      INSERT INTO agent_hosts(
+        id,display_name,credential_hash,capabilities_json,capacity,created_at
+      ) VALUES (
+        'host-1','Host','${"a".repeat(64)}','["acp.codex"]',1,'2020-01-01T00:00:00.000Z'
+      );
+      CREATE TABLE remote_operations(
+        id TEXT PRIMARY KEY,project_id TEXT NOT NULL,canvas_id TEXT NOT NULL,
+        block_ref TEXT NOT NULL,ownership_generation TEXT NOT NULL,idempotency_key TEXT NOT NULL,
+        request_fingerprint TEXT NOT NULL,source_fingerprint TEXT NOT NULL,
+        required_capabilities_json TEXT NOT NULL,state TEXT NOT NULL,dispatch_id TEXT NOT NULL UNIQUE,
+        execution_attempt_id TEXT NOT NULL UNIQUE,envelope_digest TEXT,envelope_reference TEXT,
+        created_at TEXT NOT NULL,updated_at TEXT NOT NULL,terminal_at TEXT,
+        diagnostic_code TEXT,diagnostic_message TEXT
+      );
+      INSERT INTO remote_operations VALUES (
+        'operation-pending','project-1','default','FIX-HC-002#B-001','generation-1','request-1',
+        '${"b".repeat(64)}','graph-1','["acp.codex"]','claimed','dispatch-pending','attempt-pending',
+        NULL,NULL,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:01.000Z',NULL,NULL,NULL
+      );
+      CREATE TABLE remote_execution_attempts(
+        execution_attempt_id TEXT PRIMARY KEY,operation_id TEXT NOT NULL REFERENCES remote_operations(id),
+        dispatch_id TEXT NOT NULL UNIQUE,project_id TEXT NOT NULL,canvas_id TEXT NOT NULL,
+        block_ref TEXT NOT NULL,ownership_generation TEXT NOT NULL,status TEXT NOT NULL,
+        host_id TEXT REFERENCES agent_hosts(id),lease_id TEXT UNIQUE,lease_fencing_token INTEGER NOT NULL DEFAULT 0,
+        lease_expires_at TEXT,state_version INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,terminal_at TEXT
+      );
+      INSERT INTO remote_execution_attempts VALUES (
+        'attempt-pending','operation-pending','dispatch-pending','project-1','default','FIX-HC-002#B-001',
+        'generation-1','prepared',NULL,NULL,0,NULL,0,
+        '2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z',NULL
+      );
+    `);
+
+    expect(
+      database
+        .prepare(
+          "SELECT 1 AS present FROM pragma_table_info('remote_operations') WHERE name='host_selection_json'"
+        )
+        .get()
+    ).toBeUndefined();
+
+    applyMigrations(database);
+    expect(centralSchemaVersion(database)).toBe(latestCentralSchemaVersion);
+    expect(
+      database
+        .prepare(
+          "SELECT 1 AS present FROM pragma_table_info('remote_operations') WHERE name='host_selection_json'"
+        )
+        .get()
+    ).toBeDefined();
+
+    const row = database
+      .prepare("SELECT state,host_selection_json FROM remote_operations WHERE id=?")
+      .get("operation-pending") as { state: string; host_selection_json: string | null };
+    expect(row.state).toBe("claimed");
+    // Must remain NULL: migration must not invent a fingerprint that retargets Hosts.
+    expect(row.host_selection_json).toBeNull();
+
+    const operations = new RemoteOperationRepository(database);
+    const loaded = operations.getRequired("operation-pending");
+    expect(loaded.hostSelection).toBeUndefined();
+    expect(loaded.state).toBe("claimed");
+  });
+
+  it("persistHostSelection fills NULL once and is idempotent against concurrent fill", async () => {
+    const server = await setup();
+    const operations = new RemoteOperationRepository(server.database);
+    const created = operations.markClaimed(operations.create(operationInput).id);
+    expect(created.hostSelection).toBeUndefined();
+
+    const snapshot = {
+      assignmentRevision: 3,
+      target: { kind: "exact_host" as const, hostId: "host-exact-1" },
+      selection: "exact" as const,
+      preferredHostId: "host-exact-1",
+      requiredCapabilities: ["linux", "acp.codex"]
+    };
+    const filled = operations.persistHostSelection(created.id, snapshot);
+    expect(filled.hostSelection).toMatchObject(snapshot);
+
+    // Second call with a different snapshot must not overwrite durable evidence.
+    const again = operations.persistHostSelection(created.id, {
+      ...snapshot,
+      preferredHostId: "host-other",
+      assignmentRevision: 99
+    });
+    expect(again.hostSelection).toMatchObject({
+      preferredHostId: "host-exact-1",
+      assignmentRevision: 3
+    });
+  });
+});

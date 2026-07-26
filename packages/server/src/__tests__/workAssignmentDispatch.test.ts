@@ -706,6 +706,140 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
     expect(unchanged.hostSelection).toEqual(priorSelection);
   });
 
+  it("recovers null host_selection on reenter without blocking and persists a fresh snapshot", async () => {
+    const fixture = await setup({
+      withHosts: [
+        { name: "Host A", capabilities: ["acp.codex"], capacity: 1 },
+        { name: "Host B", capabilities: ["acp.codex"], capacity: 1 }
+      ],
+      checkpoints: new CrashOnceCheckpoint("after_input_materialization")
+    });
+    const hostA = fixture.hosts[0]!;
+    const hostB = fixture.hosts[1]!;
+
+    fixture.assignmentService.updateAssignment({
+      projectId: fixture.locator.projectId,
+      workItem: fixture.blockItem,
+      target: { kind: "exact_host", hostId: hostA.id },
+      expectedRevision: 0,
+      actor: fixture.ownerContext
+    });
+
+    await expect(
+      fixture.coordination.coordinator.dispatch({
+        ...fixture.locator,
+        blockRef: "T-001#B-001",
+        idempotencyKey: "legacy-null-selection",
+        expectedAssignmentRevision: 1
+      })
+    ).rejects.toThrowError("injected_crash:after_input_materialization");
+
+    const partial = fixture.coordination.operations.findByCallerIdentity({
+      ...fixture.locator,
+      blockRef: "T-001#B-001",
+      idempotencyKey: "legacy-null-selection"
+    });
+    expect(partial).toBeDefined();
+    expect(partial?.hostSelection).toMatchObject({ preferredHostId: hostA.id });
+    expect(partial?.attempt.hostId).toBeUndefined();
+
+    // Simulate pre-v18 upgrade residue: column present but snapshot missing.
+    fixture.server.database
+      .prepare("UPDATE remote_operations SET host_selection_json=NULL WHERE id=?")
+      .run(partial!.id);
+    expect(fixture.coordination.operations.getRequired(partial!.id).hostSelection).toBeUndefined();
+
+    // Concurrent reassignment after upgrade: legacy null recovery revalidates current assignment.
+    fixture.assignmentService.updateAssignment({
+      projectId: fixture.locator.projectId,
+      workItem: fixture.blockItem,
+      target: { kind: "exact_host", hostId: hostB.id },
+      expectedRevision: 1,
+      actor: fixture.ownerContext
+    });
+
+    const restarted = fixture.rebuildCoordination();
+    const recovered = await restarted.coordinator.reenter(partial!.id);
+    expect(recovered.status).toBe("activated");
+    expect(recovered.operation.attempt.hostId).toBe(hostB.id);
+    expect(recovered.operation.hostSelection).toMatchObject({
+      selection: "exact",
+      preferredHostId: hostB.id,
+      assignmentRevision: 2
+    });
+    // Durable row must be filled so a second restart does not re-resolve again.
+    const durable = fixture.server.database
+      .prepare("SELECT host_selection_json FROM remote_operations WHERE id=?")
+      .get(partial!.id) as { host_selection_json: string };
+    expect(durable.host_selection_json).toContain(hostB.id);
+
+    // Same-attempt reenter after another reassignment must keep the recovered snapshot (Host B).
+    fixture.assignmentService.updateAssignment({
+      projectId: fixture.locator.projectId,
+      workItem: fixture.blockItem,
+      target: { kind: "unassigned" },
+      expectedRevision: 2,
+      actor: fixture.ownerContext
+    });
+    const again = fixture.rebuildCoordination();
+    const reentered = await again.coordinator.reenter(partial!.id);
+    expect(reentered.operation.attempt.hostId).toBe(hostB.id);
+    expect(reentered.operation.hostSelection?.preferredHostId).toBe(hostB.id);
+  });
+
+  it("null host_selection recovery records assignment denial without aborting reenter", async () => {
+    const fixture = await setup({
+      strictGate: true,
+      withHosts: [{ name: "Host A", capabilities: ["acp.codex"], capacity: 1 }],
+      checkpoints: new CrashOnceCheckpoint("after_input_materialization")
+    });
+    const hostA = fixture.hosts[0]!;
+
+    fixture.assignmentService.updateAssignment({
+      projectId: fixture.locator.projectId,
+      workItem: fixture.blockItem,
+      target: { kind: "exact_host", hostId: hostA.id },
+      expectedRevision: 0,
+      actor: fixture.ownerContext
+    });
+
+    await expect(
+      fixture.coordination.coordinator.dispatch({
+        ...fixture.locator,
+        blockRef: "T-001#B-001",
+        idempotencyKey: "legacy-null-deny",
+        expectedAssignmentRevision: 1
+      })
+    ).rejects.toThrowError("injected_crash:after_input_materialization");
+
+    const partial = fixture.coordination.operations.findByCallerIdentity({
+      ...fixture.locator,
+      blockRef: "T-001#B-001",
+      idempotencyKey: "legacy-null-deny"
+    })!;
+    fixture.server.database
+      .prepare("UPDATE remote_operations SET host_selection_json=NULL WHERE id=?")
+      .run(partial.id);
+
+    fixture.assignmentService.updateAssignment({
+      projectId: fixture.locator.projectId,
+      workItem: fixture.blockItem,
+      target: { kind: "human", humanPrincipalId: fixture.ownerContext.humanPrincipalId },
+      expectedRevision: 1,
+      actor: fixture.ownerContext
+    });
+
+    const restarted = fixture.rebuildCoordination();
+    await expect(restarted.coordinator.reenter(partial.id)).resolves.toMatchObject({
+      status: "awaiting_host"
+    });
+    const row = fixture.server.database
+      .prepare("SELECT diagnostic_code,state FROM remote_operations WHERE id=?")
+      .get(partial.id) as { diagnostic_code: string; state: string };
+    expect(row.diagnostic_code).toBe("work_not_agent_assigned");
+    expect(row.state).toBe("claimed");
+  });
+
   it("keeps durable exact Host selection after restart + reassignment before reserve", async () => {
     const fixture = await setup({
       withHosts: [
