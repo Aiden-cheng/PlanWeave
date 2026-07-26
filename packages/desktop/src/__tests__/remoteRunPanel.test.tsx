@@ -240,7 +240,7 @@ describe("RemoteRunPanel", () => {
     expect(screen.getByTestId("remote-run-local-coexistence")).toBeInTheDocument();
   });
 
-  it("resumes with observation recovery identity instead of Date.now fabrications", async () => {
+  it("submits only human resume intent while the Server owns recovery identities", async () => {
     const user = userEvent.setup();
     const api = createApi();
     const observe = api.observeCollaborationRemoteOperation as ReturnType<typeof vi.fn>;
@@ -311,17 +311,12 @@ describe("RemoteRunPanel", () => {
     const action = executeAction.mock.calls[0]?.[0]?.action as {
       kind: string;
       priorLeaseId: string;
-      leaseId: string;
-      recovery: { acpSessionId: string; recoveryId: string };
+      leaseId?: string;
+      recovery?: { acpSessionId: string; recoveryId: string };
     };
     expect(action.kind).toBe("resume_same_session");
     expect(action.priorLeaseId).toBe("lease-1");
-    expect(action.recovery).toEqual({
-      acpSessionId: "session-1",
-      recoveryId: "recovery-1"
-    });
-    expect(action.leaseId).not.toMatch(/^lease-resume-\d{10,}$/);
-    expect(action.recovery.recoveryId).toBe("recovery-1");
-    expect(action.recovery.recoveryId).not.toMatch(/^recovery-\d{10,}$/);
+    expect(action).not.toHaveProperty("leaseId");
+    expect(action).not.toHaveProperty("recovery");
   });
 });
