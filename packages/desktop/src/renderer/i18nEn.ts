@@ -1171,7 +1171,16 @@ export const enCatalog = {
   remoteRunPhaseFailed: "Failed",
   remoteRunPhaseCancelled: "Cancelled",
   remoteRunPhaseStale: "Source drift",
-  remoteRunPhaseUnavailable: "Unavailable"
+  remoteRunPhaseUnavailable: "Unavailable",
+  canvasPresenceRemoteCollaborators: "Remote collaborators",
+  canvasPresenceNodeSelected: "{name} selected {id}",
+  canvasPresenceCursor: "{name} cursor",
+  canvasPresenceCursorSelected: "{name} cursor; selected {count} items",
+  canvasPresenceEdgesSelected: "{name} has selected graph edges",
+  canvasPresenceUnknownSession: "Unknown session",
+  canvasPresenceUnknownMember: "Unknown member",
+  canvasPresenceCollaborator: "Collaborator",
+  canvasPresenceError: "Canvas presence error: {code}"
 } as const;
 
 export type TranslationKey = keyof typeof enCatalog;

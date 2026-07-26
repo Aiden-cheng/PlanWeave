@@ -5,6 +5,17 @@ import {
   type CanvasPresenceBridge
 } from "../renderer/collaboration/CanvasPresenceController";
 import type { CollaborationPresenceSignal } from "../shared/collaboration";
+import { createTranslator } from "../renderer/i18n";
+
+const labels = (language: "en" | "zh-CN") => {
+  const t = createTranslator(language);
+  return {
+    unknownSession: t("canvasPresenceUnknownSession"),
+    unknownMember: t("canvasPresenceUnknownMember"),
+    collaborator: t("canvasPresenceCollaborator"),
+    error: (code: string) => t("canvasPresenceError").replace("{code}", code)
+  };
+};
 
 function session(sessionId: string, humanPrincipalId: string, displayName: string) {
   return {
@@ -45,8 +56,8 @@ describe("CanvasPresenceController", () => {
 
   it("keeps two real client read models scoped, sanitized, and remote-only", async () => {
     const transport = createBridge();
-    const first = new CanvasPresenceController({ api: transport.bridge });
-    const second = new CanvasPresenceController({ api: transport.bridge });
+    const first = new CanvasPresenceController({ api: transport.bridge, labels: labels("en") });
+    const second = new CanvasPresenceController({ api: transport.bridge, labels: labels("en") });
     await first.start({
       profileId: "profile-1",
       canvasId: "canvas-main"
@@ -115,7 +126,10 @@ describe("CanvasPresenceController", () => {
 
   it("keeps a quiet session until the server sends leave and ignores another canvas", async () => {
     const transport = createBridge();
-    const controller = new CanvasPresenceController({ api: transport.bridge });
+    const controller = new CanvasPresenceController({
+      api: transport.bridge,
+      labels: labels("zh-CN")
+    });
     await controller.start({
       profileId: "profile-1",
       canvasId: "canvas-main"

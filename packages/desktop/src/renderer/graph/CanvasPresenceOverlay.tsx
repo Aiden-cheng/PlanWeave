@@ -1,5 +1,6 @@
 import { ViewportPortal, type Edge, type Node } from "@xyflow/react";
 import type { CanvasPresenceRemoteSession } from "../collaboration/CanvasPresenceController";
+import type { createTranslator } from "../i18n";
 
 const presenceColors = [
   { background: "#075985", foreground: "#ffffff" },
@@ -29,10 +30,18 @@ type CanvasPresenceOverlayProps = {
   sessions: CanvasPresenceRemoteSession[];
   nodes: Node[];
   edges: Edge[];
+  t: ReturnType<typeof createTranslator>;
 };
 
+function format(template: string, values: Record<string, string | number>): string {
+  return Object.entries(values).reduce(
+    (result, [key, value]) => result.replace(`{${key}}`, String(value)),
+    template
+  );
+}
+
 /** Render-only remote cursors and selection outlines in ReactFlow's flow coordinate system. */
-export function CanvasPresenceOverlay({ sessions, nodes, edges }: CanvasPresenceOverlayProps) {
+export function CanvasPresenceOverlay({ sessions, nodes, edges, t }: CanvasPresenceOverlayProps) {
   if (sessions.length === 0) return null;
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const edgeIds = new Set(edges.map((edge) => edge.id));
@@ -40,7 +49,7 @@ export function CanvasPresenceOverlay({ sessions, nodes, edges }: CanvasPresence
   return (
     <ViewportPortal>
       <section
-        aria-label="Remote collaborators"
+        aria-label={t("canvasPresenceRemoteCollaborators")}
         className="pointer-events-none absolute inset-0 z-50"
         data-testid="canvas-presence-overlay"
       >
@@ -70,7 +79,10 @@ export function CanvasPresenceOverlay({ sessions, nodes, edges }: CanvasPresence
                 const size = nodeSize(node);
                 return (
                   <div
-                    aria-label={`${session.displayName} selected ${selectionId}`}
+                    aria-label={format(t("canvasPresenceNodeSelected"), {
+                      name: session.displayName,
+                      id: selectionId
+                    })}
                     className="absolute rounded-md border-2"
                     data-presence-selection-id={selectionId}
                     data-presence-selection-session={session.sessionId}
@@ -88,7 +100,14 @@ export function CanvasPresenceOverlay({ sessions, nodes, edges }: CanvasPresence
               })}
               {session.pointer ? (
                 <div
-                  aria-label={`${session.displayName} cursor${session.selectionIds.length > 0 ? `; selected ${session.selectionIds.length} item${session.selectionIds.length === 1 ? "" : "s"}` : ""}`}
+                  aria-label={
+                    session.selectionIds.length > 0
+                      ? format(t("canvasPresenceCursorSelected"), {
+                          name: session.displayName,
+                          count: session.selectionIds.length
+                        })
+                      : format(t("canvasPresenceCursor"), { name: session.displayName })
+                  }
                   className="presence-cursor absolute"
                   data-presence-cursor="true"
                   data-presence-color={color.background}
@@ -124,7 +143,9 @@ export function CanvasPresenceOverlay({ sessions, nodes, edges }: CanvasPresence
               ) : null}
               {selectedEdge ? (
                 <span
-                  aria-label={`${session.displayName} has selected graph edges`}
+                  aria-label={format(t("canvasPresenceEdgesSelected"), {
+                    name: session.displayName
+                  })}
                   className="absolute rounded px-1.5 py-0.5 text-[11px] font-medium shadow-sm"
                   data-presence-edge-selection="true"
                   role="img"

@@ -1122,5 +1122,14 @@ export const zhCnCatalog = {
   remoteRunPhaseFailed: "已失败",
   remoteRunPhaseCancelled: "已取消",
   remoteRunPhaseStale: "源漂移",
-  remoteRunPhaseUnavailable: "不可用"
+  remoteRunPhaseUnavailable: "不可用",
+  canvasPresenceRemoteCollaborators: "远程协作者",
+  canvasPresenceNodeSelected: "{name} 选择了 {id}",
+  canvasPresenceCursor: "{name} 的光标",
+  canvasPresenceCursorSelected: "{name} 的光标；已选择 {count} 项",
+  canvasPresenceEdgesSelected: "{name} 选择了图中的连线",
+  canvasPresenceUnknownSession: "未知会话",
+  canvasPresenceUnknownMember: "未知成员",
+  canvasPresenceCollaborator: "协作者",
+  canvasPresenceError: "画布在线状态错误：{code}"
 } satisfies Record<TranslationKey, string>;

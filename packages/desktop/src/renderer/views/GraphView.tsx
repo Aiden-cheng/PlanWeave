@@ -360,6 +360,7 @@ export function GraphView({
               edges={visibleEdges}
               nodes={visibleNodes}
               sessions={presence.remoteSessions}
+              t={t}
             />
           ) : null}
         </ReactFlow>

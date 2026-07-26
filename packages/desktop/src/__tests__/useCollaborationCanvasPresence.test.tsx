@@ -6,6 +6,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useCollaborationCanvasPresence } from "../renderer/hooks/useCollaborationCanvasPresence";
 import type { CanvasPresenceBridge } from "../renderer/collaboration/CanvasPresenceController";
 import type { CollaborationPresenceSignal } from "../shared/collaboration";
+import { createTranslator } from "../renderer/i18n";
+
+const t = createTranslator("en");
 
 afterEach(() => {
   cleanup();
@@ -55,7 +58,8 @@ describe("useCollaborationCanvasPresence", () => {
         enabled: true,
         profileId: "profile-1",
         selectedProjectId: "project-1",
-        activeProjectId: "project-1"
+        activeProjectId: "project-1",
+        t
       })
     );
     await act(async () => {
@@ -101,7 +105,8 @@ describe("useCollaborationCanvasPresence", () => {
           enabled,
           profileId: "profile-1",
           selectedProjectId: "project-1",
-          activeProjectId: "project-1"
+          activeProjectId: "project-1",
+          t
         }),
       { initialProps: { enabled: true } }
     );
@@ -144,7 +149,8 @@ describe("useCollaborationCanvasPresence", () => {
           enabled: true,
           profileId: "profile-1",
           selectedProjectId: "project-a",
-          activeProjectId
+          activeProjectId,
+          t
         }),
       { initialProps: { activeProjectId: "project-b" } }
     );

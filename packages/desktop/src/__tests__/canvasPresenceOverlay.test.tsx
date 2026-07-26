@@ -10,6 +10,7 @@ vi.mock("@xyflow/react", () => ({
 }));
 
 import { CanvasPresenceOverlay } from "../renderer/graph/CanvasPresenceOverlay";
+import { createTranslator } from "../renderer/i18n";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -32,7 +33,7 @@ describe("CanvasPresenceOverlay", () => {
       ]
     } as const;
 
-    const { rerender } = render(<CanvasPresenceOverlay {...props} />);
+    const { rerender } = render(<CanvasPresenceOverlay {...props} t={createTranslator("en")} />);
     const cursor = screen
       .getByTestId("canvas-presence-overlay")
       .querySelector('[data-presence-cursor="true"]');
@@ -52,7 +53,12 @@ describe("CanvasPresenceOverlay", () => {
     });
     expect(screen.getByLabelText("Bob has selected graph edges")).toBeInTheDocument();
 
-    rerender(<CanvasPresenceOverlay {...props} />);
+    rerender(<CanvasPresenceOverlay {...props} t={createTranslator("zh-CN")} />);
+    expect(screen.getByLabelText("Bob 的光标；已选择 2 项")).toBeInTheDocument();
+    expect(screen.getByTestId("canvas-presence-overlay")).toHaveAttribute(
+      "aria-label",
+      "远程协作者"
+    );
     expect(
       screen
         .getByTestId("canvas-presence-overlay")

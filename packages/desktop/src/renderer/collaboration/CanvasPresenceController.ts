@@ -40,6 +40,13 @@ export type CanvasPresenceScope = {
   canvasId: string;
 };
 
+export type CanvasPresenceLabels = {
+  unknownSession: string;
+  unknownMember: string;
+  collaborator: string;
+  error: (code: string) => string;
+};
+
 type TrackedSession = CanvasPresenceRemoteSession;
 
 const EMPTY_SNAPSHOT: CanvasPresenceSnapshot = { sessions: [], error: null };
@@ -84,15 +91,18 @@ function cleanSelectionIds(value: unknown): string[] {
   return ids;
 }
 
-function sanitizeSession(session: CanvasPresenceSession): CanvasPresenceRemoteSession {
+function sanitizeSession(
+  session: CanvasPresenceSession,
+  labels: CanvasPresenceLabels
+): CanvasPresenceRemoteSession {
   return {
-    sessionId: cleanText(session.identity.sessionId, MAX_SELECTION_ID_LENGTH, "unknown-session"),
+    sessionId: cleanText(session.identity.sessionId, MAX_SELECTION_ID_LENGTH, labels.unknownSession),
     humanPrincipalId: cleanText(
       session.identity.humanPrincipalId,
       MAX_SELECTION_ID_LENGTH,
-      "unknown-member"
+      labels.unknownMember
     ),
-    displayName: cleanText(session.identity.displayName, MAX_DISPLAY_NAME_LENGTH, "Collaborator"),
+    displayName: cleanText(session.identity.displayName, MAX_DISPLAY_NAME_LENGTH, labels.collaborator),
     pointer: cleanPointer(session.pointer),
     selectionIds: cleanSelectionIds(session.selectionIds)
   };
@@ -103,14 +113,16 @@ function sameScope(message: CanvasPresenceServerMessage, scope: CanvasPresenceSc
 }
 
 function toErrorMessage(
-  message: Extract<CanvasPresenceServerMessage, { type: "canvas.presence.error" }>
+  message: Extract<CanvasPresenceServerMessage, { type: "canvas.presence.error" }>,
+  labels: CanvasPresenceLabels
 ): string {
-  return `Canvas presence error: ${message.code}`;
+  return labels.error(message.code);
 }
 
 /** Renderer read model for one ephemeral canvas presence scope. */
 export class CanvasPresenceController {
   private readonly api: CanvasPresenceBridge;
+  private readonly labels: CanvasPresenceLabels;
   private scope: CanvasPresenceScope | null = null;
   private sessions = new Map<string, TrackedSession>();
   private listeners = new Set<(snapshot: CanvasPresenceSnapshot) => void>();
@@ -118,8 +130,9 @@ export class CanvasPresenceController {
   private generation = 0;
   private snapshot: CanvasPresenceSnapshot = EMPTY_SNAPSHOT;
 
-  constructor(options: { api: CanvasPresenceBridge }) {
+  constructor(options: { api: CanvasPresenceBridge; labels: CanvasPresenceLabels }) {
     this.api = options.api;
+    this.labels = options.labels;
   }
 
   getSnapshot(): CanvasPresenceSnapshot {
@@ -203,7 +216,7 @@ export class CanvasPresenceController {
         return;
       case "canvas.presence.error":
         this.sessions.clear();
-        this.publishSnapshot({ sessions: [], error: toErrorMessage(message) });
+        this.publishSnapshot({ sessions: [], error: toErrorMessage(message, this.labels) });
         return;
       default: {
         const _exhaustive: never = message;
@@ -215,7 +228,7 @@ export class CanvasPresenceController {
   private upsertSession(session: CanvasPresenceSession): void {
     const scope = this.scope;
     if (!scope) return;
-    const sanitized = sanitizeSession(session);
+    const sanitized = sanitizeSession(session, this.labels);
     if (!this.sessions.has(sanitized.sessionId) && this.sessions.size >= MAX_REMOTE_SESSIONS) {
       return;
     }

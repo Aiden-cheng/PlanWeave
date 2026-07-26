@@ -4,8 +4,10 @@ import { collaborationBridge } from "../bridge";
 import {
   CanvasPresenceController,
   type CanvasPresenceBridge,
+  type CanvasPresenceLabels,
   type CanvasPresenceRemoteSession
 } from "../collaboration/CanvasPresenceController";
+import type { createTranslator } from "../i18n";
 
 const MAX_SELECTION_IDS = 32;
 const POINTER_INTERVAL_MS = 50;
@@ -40,6 +42,7 @@ export function useCollaborationCanvasPresence(input: {
   profileId: string | null;
   selectedProjectId: string | null;
   activeProjectId: string | null;
+  t: ReturnType<typeof createTranslator>;
   api?: CanvasPresenceBridge | null;
 }): CollaborationCanvasPresenceResult {
   const api = input.api === undefined ? collaborationBridge : input.api;
@@ -47,6 +50,15 @@ export function useCollaborationCanvasPresence(input: {
     input.enabled &&
     input.selectedProjectId !== null &&
     input.selectedProjectId === input.activeProjectId;
+  const labels = useMemo<CanvasPresenceLabels>(
+    () => ({
+      unknownSession: input.t("canvasPresenceUnknownSession"),
+      unknownMember: input.t("canvasPresenceUnknownMember"),
+      collaborator: input.t("canvasPresenceCollaborator"),
+      error: (code) => input.t("canvasPresenceError").replace("{code}", code)
+    }),
+    [input.t]
+  );
   const controllerRef = useRef<CanvasPresenceController | null>(null);
   const desiredPointerRef = useRef<XYPosition | null>(null);
   const desiredSelectionRef = useRef<string[]>([]);
@@ -65,7 +77,7 @@ export function useCollaborationCanvasPresence(input: {
       setError(null);
       return undefined;
     }
-    const controller = new CanvasPresenceController({ api });
+    const controller = new CanvasPresenceController({ api, labels });
     controllerRef.current = controller;
     const unsubscribe = controller.subscribe((snapshot) => {
       setRemoteSessions(snapshot.sessions);
@@ -82,7 +94,7 @@ export function useCollaborationCanvasPresence(input: {
       setRemoteSessions([]);
       setError(null);
     };
-  }, [api]);
+  }, [api, labels]);
 
   useEffect(() => {
     const controller = controllerRef.current;
