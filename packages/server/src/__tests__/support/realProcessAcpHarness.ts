@@ -885,6 +885,7 @@ export class RealProcessAcpHarness {
   async waitForHostOnline(options?: {
     displayName?: string;
     lastSeenAtNot?: string;
+    timeoutMs?: number;
   }): Promise<{ id: string; lastSeenAt: string; displayName: string }> {
     const displayName = options?.displayName ?? this.hostDisplayName;
     let observed: { id: string; lastSeenAt: string; displayName: string } | undefined;
@@ -908,7 +909,7 @@ export class RealProcessAcpHarness {
         return true;
       },
       {
-        timeoutMs: this.readinessTimeoutMs,
+        timeoutMs: options?.timeoutMs ?? this.readinessTimeoutMs,
         label: options?.lastSeenAtNot ? "host-online-refreshed" : `host-online:${displayName}`,
         diagnostics: () => this.diagnostics()
       }

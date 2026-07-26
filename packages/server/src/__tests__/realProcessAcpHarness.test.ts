@@ -173,12 +173,12 @@ describe("real-process ACP harness", () => {
   }, 45_000);
 
   it("exposes timeout diagnostics and kill/close transport fault controls", async () => {
-    const harness = await createHarness({ readinessTimeoutMs: 800 });
+    const harness = await createHarness();
     await harness.startServer();
     await harness.waitForServerReadyz();
 
     // Host not started: waiting for online should time out with diagnostics.
-    await expect(harness.waitForHostOnline()).rejects.toThrow(
+    await expect(harness.waitForHostOnline({ timeoutMs: 800 })).rejects.toThrow(
       /real_process_harness_timeout:host-online/
     );
 
