@@ -190,7 +190,11 @@ describe("human identity repository", () => {
     const { repo } = await openMigrated();
     const first = repo.bootstrapOwner(localAdminProof());
     expect(first.deviceToken).toBeDefined();
-    repo.revokeDevice(first.device.deviceCredentialId, first.principal.humanPrincipalId);
+    repo.revokeDevice(
+      first.device.deviceCredentialId,
+      "project-a",
+      first.principal.humanPrincipalId
+    );
     expect(repo.authenticateDevice(first.deviceToken!, "project-a")).toBeUndefined();
 
     const recovered = repo.bootstrapOwner(localAdminProof());
@@ -313,11 +317,9 @@ describe("human identity repository", () => {
     expect(linked.principalCreated).toBe(false);
     expect(linked.principal.humanPrincipalId).toBe(joined.principal.humanPrincipalId);
     expect(linked.membership.projectId).toBe("project-b");
-    // Access is membership-gated for the principal, not bound to the minting project alone:
-    // any valid device of that principal works on projects they actively belong to.
-    expect(repo.authenticateDevice(joined.deviceToken, "project-b")?.membership?.role).toBe(
-      "member"
-    );
+    // Each device remains bound to the project that minted it, even when its principal has
+    // active memberships in both projects.
+    expect(repo.authenticateDevice(joined.deviceToken, "project-b")).toBeUndefined();
     expect(repo.authenticateDevice(linked.deviceToken, "project-b")?.membership?.role).toBe(
       "member"
     );
@@ -326,9 +328,26 @@ describe("human identity repository", () => {
     );
     // No implicit privilege on a project without membership.
     expect(repo.authenticateDevice(joined.deviceToken, "project-unrelated")).toBeUndefined();
-    expect(repo.authenticateDevice(linked.deviceToken, "project-a")?.membership?.role).toBe(
-      "member"
-    );
+    expect(repo.authenticateDevice(linked.deviceToken, "project-a")).toBeUndefined();
+    expect(
+      repo
+        .listDevicesForPrincipal(joined.principal.humanPrincipalId, "project-a")
+        .map((device) => device.deviceCredentialId)
+    ).toContain(joined.device.deviceCredentialId);
+    expect(
+      repo
+        .listDevicesForPrincipal(joined.principal.humanPrincipalId, "project-a")
+        .map((device) => device.deviceCredentialId)
+    ).not.toContain(linked.device.deviceCredentialId);
+    expect(
+      repo.listDevicesForProjectMembers("project-b").map((device) => device.deviceCredentialId)
+    ).toContain(linked.device.deviceCredentialId);
+    expect(
+      repo.listDevicesForProjectMembers("project-b").map((device) => device.deviceCredentialId)
+    ).not.toContain(joined.device.deviceCredentialId);
+    expect(() =>
+      repo.revokeDevice(linked.device.deviceCredentialId, "project-a")
+    ).toThrowError(expect.objectContaining({ code: "human_cross_project_forbidden" }));
 
     // Invalid existing device token does not enumerate or create.
     const inviteC = repo.createInvitation({
@@ -479,7 +498,11 @@ describe("human identity repository", () => {
     const revDevice = repo.bootstrapOwner(localAdminProof("project-rev", "owner-rev", "Rev"), {
       deviceLabel: "phone"
     });
-    repo.revokeDevice(revDevice.device.deviceCredentialId, revDevice.principal.humanPrincipalId);
+    repo.revokeDevice(
+      revDevice.device.deviceCredentialId,
+      "project-rev",
+      revDevice.principal.humanPrincipalId
+    );
     expect(repo.authenticateDevice(revDevice.deviceToken!, "project-rev")).toBeUndefined();
   });
 

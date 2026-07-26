@@ -293,10 +293,12 @@ export class HumanIdentityRepository {
 
   listDevicesForPrincipal(
     humanPrincipalId: string,
+    projectId: string,
     limit = 100,
     offset = 0
   ): HumanDeviceCredentialMetadata[] {
     const hid = humanPrincipalIdSchema.parse(humanPrincipalId);
+    const pid = humanProjectIdSchema.parse(projectId);
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
       throw new HumanIdentityError("human_input_invalid");
     }
@@ -307,11 +309,11 @@ export class HumanIdentityRepository {
       this.database
         .prepare(
           `SELECT * FROM human_device_credentials
-           WHERE human_principal_id=?
+           WHERE human_principal_id=? AND minted_for_project_id=?
            ORDER BY created_at ASC, device_credential_id ASC
            LIMIT ? OFFSET ?`
         )
-        .all(hid, limit, offset) as DeviceRow[]
+        .all(hid, pid, limit, offset) as DeviceRow[]
     ).map(toDevice);
   }
 
@@ -339,10 +341,11 @@ export class HumanIdentityRepository {
              ON m.human_principal_id = d.human_principal_id
             AND m.project_id = ?
             AND m.revoked_at IS NULL
+           WHERE d.minted_for_project_id = ?
            ORDER BY d.created_at ASC, d.device_credential_id ASC
            LIMIT ? OFFSET ?`
         )
-        .all(pid, limit, offset) as DeviceRow[]
+        .all(pid, pid, limit, offset) as DeviceRow[]
     ).map(toDevice);
   }
 
@@ -456,7 +459,7 @@ export class HumanIdentityRepository {
 
   /**
    * Authenticate a human device bearer. Constant-time digest check after hash lookup.
-   * Optionally resolve active membership for a project (project isolation is membership-gated).
+   * Optionally resolve active membership for the immutable project that minted the device.
    */
   authenticateDevice(
     deviceToken: string,
@@ -484,7 +487,9 @@ export class HumanIdentityRepository {
 
     let membership: ProjectMembership | undefined;
     if (projectId !== undefined) {
-      membership = this.getActiveMembership(projectId, principal.humanPrincipalId);
+      const pid = humanProjectIdSchema.parse(projectId);
+      if (device.mintedForProjectId !== pid) return undefined;
+      membership = this.getActiveMembership(pid, principal.humanPrincipalId);
       if (!membership) return undefined;
     }
 
@@ -501,14 +506,19 @@ export class HumanIdentityRepository {
 
   revokeDevice(
     deviceCredentialId: string,
+    projectId: string,
     ownerHumanPrincipalId?: string
   ): HumanDeviceCredentialMetadata {
     return inWriteTransaction(this.database, () => {
       const id = humanDeviceCredentialIdSchema.parse(deviceCredentialId);
+      const pid = humanProjectIdSchema.parse(projectId);
       const row = this.database
         .prepare("SELECT * FROM human_device_credentials WHERE device_credential_id=?")
         .get(id) as DeviceRow | undefined;
       if (!row) throw new HumanIdentityError("human_input_invalid");
+      if (row.minted_for_project_id !== pid) {
+        throw new HumanIdentityError("human_cross_project_forbidden");
+      }
       if (
         ownerHumanPrincipalId !== undefined &&
         row.human_principal_id !== humanPrincipalIdSchema.parse(ownerHumanPrincipalId)
@@ -520,9 +530,9 @@ export class HumanIdentityRepository {
       const updated = this.database
         .prepare(
           `UPDATE human_device_credentials SET revoked_at=?
-           WHERE device_credential_id=? AND revoked_at IS NULL`
+           WHERE device_credential_id=? AND minted_for_project_id=? AND revoked_at IS NULL`
         )
-        .run(now, id);
+        .run(now, id, pid);
       if (updated.changes !== 1) throw new HumanIdentityError("human_device_revoked");
       return this.getDevice(id)!;
     });

@@ -410,6 +410,7 @@ export class HumanMembershipService {
       if (!decision.allowed) deny(decision.code);
       const rows = this.repository.listDevicesForPrincipal(
         context.humanPrincipalId,
+        pid,
         page.limit,
         page.cursor
       );
@@ -431,6 +432,7 @@ export class HumanMembershipService {
       const deviceId = humanDeviceCredentialIdSchema.parse(deviceCredentialId);
       const device = this.repository.getDevice(deviceId);
       if (!device) deny("human_input_invalid");
+      if (device.mintedForProjectId !== pid) deny("human_cross_project_forbidden");
 
       const isOwn = device.humanPrincipalId === context.humanPrincipalId;
       if (isOwn) {
@@ -465,9 +467,11 @@ export class HumanMembershipService {
       }
 
       if (isOwn) {
-        return toDeviceView(this.repository.revokeDevice(deviceId, context.humanPrincipalId));
+        return toDeviceView(
+          this.repository.revokeDevice(deviceId, pid, context.humanPrincipalId)
+        );
       }
-      return toDeviceView(this.repository.revokeDevice(deviceId));
+      return toDeviceView(this.repository.revokeDevice(deviceId, pid));
     } catch (error) {
       mapIdentityError(error);
     }

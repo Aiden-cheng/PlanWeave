@@ -246,15 +246,15 @@ describe("human membership HTTP APIs", () => {
     await expect(consumeRevoked.json()).resolves.toEqual({ error: "human_invitation_revoked" });
   });
 
-  it("enforces project isolation for device tokens and memberships", async () => {
+  it("binds authentication and device inventories to the mint project", async () => {
     const { origin } = await setup();
     const a = await bootstrap(origin, "project-a", {
-      displayName: "Owner A",
-      humanPrincipalId: "owner-a"
+      displayName: "Shared Owner",
+      humanPrincipalId: "shared-owner"
     });
     const b = await bootstrap(origin, "project-b", {
-      displayName: "Owner B",
-      humanPrincipalId: "owner-b"
+      displayName: "Shared Owner",
+      humanPrincipalId: "shared-owner"
     });
 
     const cross = await fetch(`${origin}/api/v1/projects/project-b/human/members`, {
@@ -267,30 +267,61 @@ describe("human membership HTTP APIs", () => {
       headers: auth(b.payload.deviceToken!)
     });
     expect(own.status).toBe(200);
+
+    const ownDevices = await fetch(
+      `${origin}/api/v1/projects/project-b/human/devices?scope=own`,
+      { headers: auth(b.payload.deviceToken!) }
+    );
+    expect(ownDevices.status).toBe(200);
+    const ownBody = (await ownDevices.json()) as {
+      items: Array<{ deviceCredentialId: string; mintedForProjectId: string }>;
+    };
+    expect(ownBody.items).toEqual([
+      expect.objectContaining({
+        deviceCredentialId: b.payload.device!.deviceCredentialId,
+        mintedForProjectId: "project-b"
+      })
+    ]);
+
+    const projectDevices = await fetch(
+      `${origin}/api/v1/projects/project-b/human/devices?scope=project`,
+      { headers: auth(b.payload.deviceToken!) }
+    );
+    expect(projectDevices.status).toBe(200);
+    const projectBody = (await projectDevices.json()) as {
+      items: Array<{ deviceCredentialId: string; mintedForProjectId: string }>;
+    };
+    expect(projectBody.items).toEqual([
+      expect.objectContaining({
+        deviceCredentialId: b.payload.device!.deviceCredentialId,
+        mintedForProjectId: "project-b"
+      })
+    ]);
   });
 
-  it("prevents project-a owner from revoking a project-b-only device credential", async () => {
+  it("prevents cross-project revoke for devices owned by the same principal", async () => {
     const { origin } = await setup();
     const a = await bootstrap(origin, "project-a", {
-      displayName: "Owner A",
-      humanPrincipalId: "owner-a"
+      displayName: "Shared Owner",
+      humanPrincipalId: "shared-owner"
     });
     const b = await bootstrap(origin, "project-b", {
-      displayName: "Owner B",
-      humanPrincipalId: "owner-b"
+      displayName: "Shared Owner",
+      humanPrincipalId: "shared-owner"
     });
-    const foreignDeviceId = b.payload.device!.deviceCredentialId;
+    const projectADeviceId = a.payload.device!.deviceCredentialId;
 
     const crossRevoke = await fetch(
-      `${origin}/api/v1/projects/project-a/human/devices/${foreignDeviceId}/revoke`,
-      { method: "POST", headers: auth(a.payload.deviceToken!) }
+      `${origin}/api/v1/projects/project-b/human/devices/${projectADeviceId}/revoke`,
+      { method: "POST", headers: auth(b.payload.deviceToken!) }
     );
     expect(crossRevoke.status).toBe(403);
-    await expect(crossRevoke.json()).resolves.toEqual({ error: "human_membership_required" });
+    await expect(crossRevoke.json()).resolves.toEqual({
+      error: "human_cross_project_forbidden"
+    });
 
-    // Foreign owner device remains usable on its own project.
-    const stillAuth = await fetch(`${origin}/api/v1/projects/project-b/human/members`, {
-      headers: auth(b.payload.deviceToken!)
+    const stillAuth = await fetch(`${origin}/api/v1/projects/project-a/human/members`, {
+      headers: auth(a.payload.deviceToken!)
     });
     expect(stillAuth.status).toBe(200);
   });
@@ -475,7 +506,7 @@ describe("human membership HTTP APIs", () => {
       issuedAt: "2026-07-24T10:00:00.000Z"
     });
     expect(short.deviceToken).toBeDefined();
-    repository.revokeDevice(short.device.deviceCredentialId);
+    repository.revokeDevice(short.device.deviceCredentialId, "project-exp");
     const expiredAuth = await fetch(`${origin}/api/v1/projects/project-exp/human/members`, {
       headers: auth(short.deviceToken!)
     });
