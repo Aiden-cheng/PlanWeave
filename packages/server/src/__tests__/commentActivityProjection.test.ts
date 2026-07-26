@@ -32,16 +32,32 @@ describe("activity projection builders", () => {
     });
     expect(joined.source).toEqual({
       kind: "membership",
-      sourceId: membershipActivitySourceId("membership-1", "member_joined", 1)
+      sourceId: membershipActivitySourceId("project-a", "membership-1", "member_joined", 1)
     });
     expect(joined.summary.humanPrincipalId).toBe("human-1");
     expect(joined.summary.headline).toContain("Ada");
 
-    expect(membershipActivitySourceId("m1", "owner_promoted", 2)).toBe("m1:promoted:r2");
-    expect(membershipActivitySourceId("m1", "member_removed", 4)).toBe("m1:removed:r4");
-    expect(membershipActivitySourceId("m1", "owner_promoted", 4)).not.toBe(
-      membershipActivitySourceId("m1", "owner_promoted", 2)
+    expect(membershipActivitySourceId("project-a", "m1", "owner_promoted", 2)).toMatch(
+      /^membership:v1:[0-9a-f]{64}$/
     );
+    expect(membershipActivitySourceId("project-a", "m1", "member_removed", 4)).not.toBe(
+      membershipActivitySourceId("project-a", "m1", "owner_promoted", 4)
+    );
+    expect(membershipActivitySourceId("project-a", "m1", "owner_promoted", 4)).not.toBe(
+      membershipActivitySourceId("project-a", "m1", "owner_promoted", 2)
+    );
+
+    const maximal = buildMembershipActivity({
+      activityId: "act-max-membership",
+      projectId: "p".repeat(128),
+      type: "owner_promoted",
+      membershipId: "m".repeat(128),
+      transitionRevision: Number.MAX_SAFE_INTEGER,
+      humanPrincipalId: "human-max",
+      occurredAt: "2026-07-24T12:00:00.000Z"
+    });
+    expect(maximal.source.sourceId).toMatch(/^membership:v1:[0-9a-f]{64}$/);
+    expect(maximal.source.sourceId.length).toBeLessThanOrEqual(128);
   });
 
   it("builds assignment and remote-run activities without embedding prompts", () => {

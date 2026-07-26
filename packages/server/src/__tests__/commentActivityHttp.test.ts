@@ -364,7 +364,7 @@ describe("comment and activity production HTTP", () => {
       ])
     });
 
-    for (const action of ["promote", "demote", "remove"] as const) {
+    for (const action of ["promote", "promote", "demote", "remove"] as const) {
       const response = await fetch(
         `${fixture.origin}/api/v1/projects/${projectId}/human/members/${joinedBody.principal.humanPrincipalId}/${action}`,
         { method: "POST", headers: { Authorization: `Bearer ${ownerToken}` } }
@@ -388,6 +388,7 @@ describe("comment and activity production HTTP", () => {
         "member_removed"
       ])
     );
+    expect(feedBody.items.filter((item) => item.type === "owner_promoted")).toHaveLength(1);
     const memberSources = feedBody.items
       .filter((item) => item.source.kind === "membership")
       .map((item) => item.source.sourceId);

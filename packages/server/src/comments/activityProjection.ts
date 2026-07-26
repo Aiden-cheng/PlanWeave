@@ -31,22 +31,17 @@ function versionedActivitySourceId(
 }
 
 export function membershipActivitySourceId(
+  projectId: string,
   membershipId: string,
   type: "member_joined" | "member_left" | "member_removed" | "owner_promoted" | "owner_demoted",
   transitionRevision: number
 ): string {
-  switch (type) {
-    case "member_joined":
-      return `${membershipId}:joined:r${transitionRevision}`;
-    case "member_left":
-      return `${membershipId}:left:r${transitionRevision}`;
-    case "member_removed":
-      return `${membershipId}:removed:r${transitionRevision}`;
-    case "owner_promoted":
-      return `${membershipId}:promoted:r${transitionRevision}`;
-    case "owner_demoted":
-      return `${membershipId}:demoted:r${transitionRevision}`;
-  }
+  return versionedActivitySourceId("membership", [
+    projectId,
+    membershipId,
+    type,
+    transitionRevision
+  ]);
 }
 
 export function commentActivitySourceId(
@@ -109,7 +104,12 @@ export type MembershipActivityInput = {
 export function buildMembershipActivity(input: MembershipActivityInput): ActivityRecord {
   const source: ActivitySource = {
     kind: "membership",
-    sourceId: membershipActivitySourceId(input.membershipId, input.type, input.transitionRevision)
+    sourceId: membershipActivitySourceId(
+      input.projectId,
+      input.membershipId,
+      input.type,
+      input.transitionRevision
+    )
   };
   const verb: Record<MembershipActivityInput["type"], string> = {
     member_joined: "joined the project",
