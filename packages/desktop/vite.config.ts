@@ -46,7 +46,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         codeSplitting: {
-          includeDependenciesRecursively: false,
+          includeDependenciesRecursively: true,
           groups: [
             {
               name: "react-vendor",
@@ -63,7 +63,7 @@ export default defineConfig({
             },
             {
               name: "flow-vendor",
-              test: (id) => id.includes("@xyflow/react"),
+              test: (id) => id.includes("/node_modules/@xyflow/"),
               priority: 20
             },
             {
