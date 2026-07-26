@@ -27,12 +27,22 @@ import {
 } from "../../../../runtime/src/__tests__/promptTestHelpers.js";
 import { hashOperatorToken } from "../../operatorAuth.js";
 
-const serverBinPath = fileURLToPath(new URL("../../../dist/bin.js", import.meta.url));
-const agentHostBinPath = fileURLToPath(
-  new URL("../../../../agent-host/dist/bin.js", import.meta.url)
+function resolveHarnessPath(relativeUrl: string, workspacePath: string): string {
+  try {
+    return fileURLToPath(new URL(relativeUrl, import.meta.url));
+  } catch {
+    return join(process.cwd(), workspacePath);
+  }
+}
+
+const serverBinPath = resolveHarnessPath("../../../dist/bin.js", "packages/server/dist/bin.js");
+const agentHostBinPath = resolveHarnessPath(
+  "../../../../agent-host/dist/bin.js",
+  "packages/agent-host/dist/bin.js"
 );
-export const acpMockAgentPath = fileURLToPath(
-  new URL("../../../../runtime/src/__tests__/support/acpMockAgent.mjs", import.meta.url)
+export const acpMockAgentPath = resolveHarnessPath(
+  "../../../../runtime/src/__tests__/support/acpMockAgent.mjs",
+  "packages/runtime/src/__tests__/support/acpMockAgent.mjs"
 );
 
 export const REAL_PROCESS_ACP_HARNESS_DEFAULT_TIMEOUT_MS = 15_000;

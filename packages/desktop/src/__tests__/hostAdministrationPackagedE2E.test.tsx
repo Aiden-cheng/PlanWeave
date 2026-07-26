@@ -1,0 +1,359 @@
+/* @vitest-environment jsdom */
+
+import "@testing-library/jest-dom/vitest";
+import { spawnManagedProcess, type ManagedProcessTree } from "@planweave-ai/runtime";
+import { agentHostConfigSchema } from "../../../agent-host/src/config/schema.js";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  RealProcessAcpHarness,
+  type ProcessExitSnapshot
+} from "../../../server/src/__tests__/support/realProcessAcpHarness.js";
+import { OperatorControlService } from "../main/operatorControl/operatorControlService.js";
+import type { OperatorSafeStoragePort } from "../main/operatorControl/operatorCredentialVault.js";
+import { createTranslator } from "../renderer/i18n.js";
+import { HostBootstrapCard } from "../renderer/settings/HostBootstrapCard.js";
+
+const agentHostBinPath = join(process.cwd(), "packages/agent-host/dist/bin.js");
+const roots: string[] = [];
+const harnesses: RealProcessAcpHarness[] = [];
+const processes: RunningProcess[] = [];
+
+type RunningProcess = {
+  tree: ManagedProcessTree;
+  logs: { stdout: string; stderr: string };
+  exit: Promise<ProcessExitSnapshot>;
+  exitSnapshot: ProcessExitSnapshot | undefined;
+};
+
+const unavailableSafeStorage: OperatorSafeStoragePort = {
+  isEncryptionAvailable: () => false,
+  encryptString: () => {
+    throw new Error("safeStorage_unavailable");
+  },
+  decryptString: () => {
+    throw new Error("safeStorage_unavailable");
+  }
+};
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function startPackagedHost(configPath: string): RunningProcess {
+  const managed = spawnManagedProcess({
+    command: process.execPath,
+    args: [agentHostBinPath, "run", "--config", configPath],
+    env: { ...process.env },
+    graceMs: 500
+  });
+  const logs = { stdout: "", stderr: "" };
+  managed.child.stdout.setEncoding("utf8");
+  managed.child.stderr.setEncoding("utf8");
+  managed.child.stdout.on("data", (chunk: string) => {
+    logs.stdout += chunk;
+  });
+  managed.child.stderr.on("data", (chunk: string) => {
+    logs.stderr += chunk;
+  });
+  let snapshot: ProcessExitSnapshot | undefined;
+  const exit = new Promise<ProcessExitSnapshot>((resolve) => {
+    managed.child.once("exit", (code, signal) => {
+      snapshot = { code, signal };
+      resolve(snapshot);
+    });
+    managed.child.once("error", () => {
+      snapshot = { code: null, signal: null };
+      resolve(snapshot);
+    });
+  });
+  const processHandle: RunningProcess = {
+    tree: managed.tree,
+    logs,
+    exit,
+    get exitSnapshot() {
+      return snapshot;
+    }
+  };
+  processes.push(processHandle);
+  return processHandle;
+}
+
+async function waitForProcessExit(
+  processHandle: RunningProcess,
+  timeoutMs = 12_000
+): Promise<ProcessExitSnapshot> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (processHandle.exitSnapshot) return processHandle.exit;
+    await wait(100);
+  }
+  throw new Error("packaged_host_exit_timeout");
+}
+
+async function waitForHost(
+  service: OperatorControlService,
+  profileId: string,
+  displayName: string,
+  timeoutMs = 15_000,
+  lastSeenAtNot?: string
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const page = await service.listHosts({ profileId });
+    const host = page.items.find(
+      (candidate) =>
+        candidate.displayName === displayName &&
+        candidate.lastSeenAt &&
+        (lastSeenAtNot === undefined || candidate.lastSeenAt !== lastSeenAtNot)
+    );
+    if (host) return host;
+    await wait(100);
+  }
+  throw new Error(`packaged_host_online_timeout:${displayName}`);
+}
+
+async function writeHostConfig(
+  harness: RealProcessAcpHarness,
+  config: Record<string, unknown>,
+  name: string
+): Promise<string> {
+  const path = join(harness.paths.root, name);
+  await writeFile(path, JSON.stringify(config, null, 2), "utf8");
+  return path;
+}
+
+afterEach(async () => {
+  cleanup();
+  const cleanupErrors: unknown[] = [];
+  for (const processHandle of processes.splice(0)) {
+    try {
+      if (processHandle.tree.isAlive()) await processHandle.tree.terminate("test cleanup");
+      await processHandle.exit;
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  }
+  for (const harness of harnesses.splice(0)) {
+    try {
+      await harness.dispose();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  }
+  for (const root of roots.splice(0)) {
+    try {
+      await rm(root, { recursive: true, force: true });
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(cleanupErrors, "host_administration_e2e_cleanup_failed");
+  }
+});
+
+describe("packaged Host administration control plane", () => {
+  it("uses Desktop main operator authority to enroll, reconnect, observe, and revoke a packaged Host", async () => {
+    const projectOperatorToken = "harness_project_operator_token_abcdefghijklmnopqrstuvwxyz";
+    const harness = await RealProcessAcpHarness.create({
+      hostDisplayName: "Harness Host",
+      operatorToken: "harness_operator_token_abcdefghijklmnopqrstuvwxyz",
+      projectOperatorToken,
+      readinessTimeoutMs: 15_000,
+      serverLimits: {
+        heartbeatIntervalMs: 1_000,
+        hostOfflineAfterMs: 4_000,
+        leaseDurationMs: 5_000
+      }
+    });
+    harnesses.push(harness);
+    await harness.startServer();
+    await harness.waitForServerReadyz();
+
+    const desktopRoot = await mkdtemp(join(tmpdir(), "planweave-desktop-host-admin-"));
+    roots.push(desktopRoot);
+    const profileId = "desktop-packaged-host";
+    const profile = {
+      profileId,
+      displayName: "UI Generated Host",
+      serverBaseUrl: `${harness.origin}/`,
+      allowInsecureTransport: true
+    } as const;
+    const service = new OperatorControlService({
+      profileStorePaths: { profilesPath: join(desktopRoot, "profiles.json") },
+      credentialsPath: join(desktopRoot, "credentials.json"),
+      safeStorage: unavailableSafeStorage,
+      request: fetch
+    });
+    await service.upsertProfile(profile);
+    await service.importCredential({ profileId, operatorToken: harness.operatorToken });
+
+    const status = await service.getStatus();
+    expect(status.credentialStorage).toBe("unavailable");
+    expect(status.nonPersistenceWarning).toContain("session only");
+    expect(JSON.stringify(status)).not.toContain(harness.operatorToken);
+    expect(await readFile(join(desktopRoot, "profiles.json"), "utf8")).not.toContain(
+      harness.operatorToken
+    );
+    expect(existsSync(join(desktopRoot, "credentials.json"))).toBe(false);
+
+    const roleRejected = await fetch(`${harness.origin}/api/v1/host-enrollments`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${projectOperatorToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        credentialExpiresAt: new Date(Date.now() + 120_000).toISOString()
+      })
+    });
+    expect(roleRejected.status).toBe(403);
+    await expect(roleRejected.json()).resolves.toEqual({ error: "operator_admin_required" });
+
+    const grant = await service.createEnrollmentGrant({
+      profileId,
+      request: {
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        credentialExpiresAt: new Date(Date.now() + 3_600_000).toISOString()
+      }
+    });
+    expect(grant.enrollmentCode).toMatch(/^pw_enroll_/);
+
+    const profileView = (await service.getStatus()).profiles[0];
+    if (!profileView) throw new Error("operator_profile_view_missing");
+    render(
+      <HostBootstrapCard
+        activeProfile={profileView}
+        busy={false}
+        createGrant={async () => grant}
+        dismissGrant={() => undefined}
+        grant={grant}
+        t={createTranslator("en")}
+      />
+    );
+    const uiConfigElement = await screen.findByTestId("host-admin-bootstrap-config");
+    const uiConfig = JSON.parse((uiConfigElement as HTMLTextAreaElement).value) as Record<
+      string,
+      unknown
+    >;
+    expect(uiConfig).not.toHaveProperty("enrollmentCode");
+    expect(agentHostConfigSchema.parse(uiConfig)).toEqual(uiConfig);
+
+    const uiHost = uiConfig.host as Record<string, unknown>;
+    const generatedConfig = {
+      ...uiConfig,
+      dataDirectory: join(harness.paths.root, "ui-host-data"),
+      workspaceRoot: harness.paths.workspaceRoot,
+      host: {
+        ...uiHost,
+        displayName: "UI Generated Host",
+        capabilities: ["acp.test"]
+      },
+      workspaces: [],
+      agentProfiles: []
+    };
+    const hostConfigPath = await writeHostConfig(harness, generatedConfig, "ui-agent-host.json");
+    expect(agentHostConfigSchema.parse(JSON.parse(await readFile(hostConfigPath, "utf8")))).toEqual(
+      generatedConfig
+    );
+
+    const preflight = await harness.runHostCommand(["preflight", "--config", hostConfigPath]);
+    expect(preflight).toMatchObject({ code: 0 });
+    expect(JSON.parse(preflight.stdout)).toMatchObject({
+      credential: "missing",
+      connection: "offline"
+    });
+    const enrollment = await harness.runHostCommand([
+      "enroll",
+      "--config",
+      hostConfigPath,
+      "--code",
+      grant.enrollmentCode
+    ]);
+    expect(enrollment.code).toBe(0);
+    expect(JSON.parse(enrollment.stdout)).toMatchObject({ credential: "active" });
+
+    const reusedConfig = {
+      ...generatedConfig,
+      dataDirectory: join(harness.paths.root, "reused-host-data")
+    };
+    const reusedConfigPath = await writeHostConfig(harness, reusedConfig, "reused-agent-host.json");
+    const reused = await harness.runHostCommand([
+      "enroll",
+      "--config",
+      reusedConfigPath,
+      "--code",
+      grant.enrollmentCode
+    ]);
+    expect(reused.code).not.toBe(0);
+    expect(reused.stderr).toContain("agent_host_enrollment_rejected");
+    expect(reused.stderr).not.toContain(grant.enrollmentCode);
+
+    const expiringGrant = await service.createEnrollmentGrant({
+      profileId,
+      request: {
+        expiresAt: new Date(Date.now() + 1_000).toISOString(),
+        credentialExpiresAt: new Date(Date.now() + 60_000).toISOString()
+      }
+    });
+    await wait(1_500);
+    const expiredConfig = {
+      ...generatedConfig,
+      dataDirectory: join(harness.paths.root, "expired-host-data")
+    };
+    const expiredConfigPath = await writeHostConfig(harness, expiredConfig, "expired-agent-host.json");
+    const expired = await harness.runHostCommand([
+      "enroll",
+      "--config",
+      expiredConfigPath,
+      "--code",
+      expiringGrant.enrollmentCode
+    ]);
+    expect(expired.code).not.toBe(0);
+    expect(expired.stderr).toContain("agent_host_enrollment_rejected");
+    expect(expired.stderr).not.toContain(expiringGrant.enrollmentCode);
+
+    const firstProcess = startPackagedHost(hostConfigPath);
+    const firstHost = await waitForHost(service, profileId, "UI Generated Host");
+    expect(firstHost.lastSeenAt).toEqual(expect.any(String));
+    const firstHostId = firstHost.id;
+    expect(firstHost.credentialExpiresAt).toEqual(expect.any(String));
+
+    await firstProcess.tree.terminate("reconnect test");
+    await firstProcess.exit;
+    await wait(1_100);
+    const reconnectProcess = startPackagedHost(hostConfigPath);
+    const reconnectedHost = await waitForHost(
+      service,
+      profileId,
+      "UI Generated Host",
+      15_000,
+      firstHost.lastSeenAt
+    );
+    expect(reconnectedHost.id).toBe(firstHostId);
+    expect(reconnectedHost.lastSeenAt).not.toBe(firstHost.lastSeenAt);
+
+    const revoked = await service.revokeHost({ profileId, hostId: firstHostId });
+    expect(revoked).toMatchObject({ id: firstHostId, revokedAt: expect.any(String) });
+    const exited = await waitForProcessExit(reconnectProcess);
+    expect(exited.code).not.toBe(0);
+    expect(reconnectProcess.logs.stderr).toContain("agent_host_auth_failed");
+    expect(reconnectProcess.logs.stderr).not.toContain(harness.operatorToken);
+
+    const staleReconnect = startPackagedHost(hostConfigPath);
+    const staleExit = await waitForProcessExit(staleReconnect);
+    expect(staleExit.code).not.toBe(0);
+    expect(staleReconnect.logs.stderr).toContain("agent_host_auth_failed");
+    expect(
+      JSON.parse(
+        (await harness.runHostCommand(["status", "--config", hostConfigPath])).stdout
+      )
+    ).toMatchObject({ credential: "active" });
+  }, 60_000);
+});
