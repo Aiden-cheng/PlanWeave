@@ -598,6 +598,28 @@ describe("release gate checklist and evaluation", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.timedOut).toBe(true);
+    expect(result.terminationConfirmed).toBe(true);
     expect(Date.now() - startedAt).toBeLessThan(2_000);
+  });
+
+  it("does not wait forever or claim cleanup when process-tree termination rejects", async () => {
+    const startedAt = Date.now();
+    const result = await runBoundedReleaseGateCommand({
+      command: process.execPath,
+      args: ["-e", "setTimeout(() => process.exit(0), 200)"],
+      cwd: process.cwd(),
+      env: { ...process.env },
+      timeoutMs: 20,
+      postTerminationWaitMs: 20,
+      terminateProcessTree: async () => {
+        throw new Error("simulated_tree_termination_failure");
+      }
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.timedOut).toBe(true);
+    expect(result.terminationConfirmed).toBe(false);
+    expect(result.stderr).toContain("simulated_tree_termination_failure");
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
   });
 });

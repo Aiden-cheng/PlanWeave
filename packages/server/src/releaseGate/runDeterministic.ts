@@ -1,7 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnManagedProcess } from "@planweave-ai/runtime";
+import { spawnManagedProcess, type ManagedProcessTree } from "@planweave-ai/runtime";
 import { serverPackageVersion } from "../packageInfo.js";
 
 const DETERMINISTIC_TEST_FILES = [
@@ -20,11 +20,14 @@ export async function runBoundedReleaseGateCommand(options: {
   env: NodeJS.ProcessEnv;
   timeoutMs: number;
   graceMs?: number;
+  postTerminationWaitMs?: number;
+  terminateProcessTree?: (tree: ManagedProcessTree, reason: string) => Promise<unknown>;
 }): Promise<{
   exitCode: number;
   stdout: string;
   stderr: string;
   timedOut: boolean;
+  terminationConfirmed: boolean;
 }> {
   if (!Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0) {
     throw new Error(`release_gate_timeout_invalid:${String(options.timeoutMs)}`);
@@ -67,16 +70,33 @@ export async function runBoundedReleaseGateCommand(options: {
   if (timeoutHandle) clearTimeout(timeoutHandle);
 
   if (outcome.kind === "exited") {
-    return { exitCode: outcome.exitCode, stdout, stderr, timedOut: false };
+    return {
+      exitCode: outcome.exitCode,
+      stdout,
+      stderr,
+      timedOut: false,
+      terminationConfirmed: true
+    };
   }
 
+  const terminate = options.terminateProcessTree ?? ((tree, reason) => tree.terminate(reason));
   try {
-    await managed.tree.terminate("release gate deterministic suite timeout");
+    await terminate(managed.tree, "release gate deterministic suite timeout");
   } catch (error) {
     stderr += `${stderr ? "\n" : ""}${error instanceof Error ? error.message : String(error)}`;
   }
-  await exit;
-  return { exitCode: 1, stdout, stderr, timedOut: true };
+  let postTerminationTimer: NodeJS.Timeout | undefined;
+  const terminationConfirmed = await Promise.race([
+    exit.then(() => true),
+    new Promise<false>((resolveWait) => {
+      postTerminationTimer = setTimeout(
+        () => resolveWait(false),
+        options.postTerminationWaitMs ?? 1_000
+      );
+    })
+  ]);
+  if (postTerminationTimer) clearTimeout(postTerminationTimer);
+  return { exitCode: 1, stdout, stderr, timedOut: true, terminationConfirmed };
 }
 
 export type DeterministicSuiteEvidence = {
@@ -129,13 +149,14 @@ export async function runDeterministicProcessSuite(options: {
     PLANWEAVE_VPS_E2E_REQUIRE: undefined
   };
 
-  const { exitCode, stdout, stderr, timedOut } = await runBoundedReleaseGateCommand({
-    command: pnpm,
-    args,
-    cwd: repoRoot,
-    env,
-    timeoutMs: DETERMINISTIC_SUITE_TIMEOUT_MS
-  });
+  const { exitCode, stdout, stderr, timedOut, terminationConfirmed } =
+    await runBoundedReleaseGateCommand({
+      command: pnpm,
+      args,
+      cwd: repoRoot,
+      env,
+      timeoutMs: DETERMINISTIC_SUITE_TIMEOUT_MS
+    });
 
   let total: number | null = null;
   let passed: number | null = null;
@@ -169,7 +190,7 @@ export async function runDeterministicProcessSuite(options: {
       exitCode === 0
         ? null
         : timedOut
-          ? `Deterministic suite timed out after ${DETERMINISTIC_SUITE_TIMEOUT_MS}ms and its process tree was terminated.`
+          ? `Deterministic suite timed out after ${DETERMINISTIC_SUITE_TIMEOUT_MS}ms; process tree termination ${terminationConfirmed ? "was confirmed" : "could not be confirmed"}.`
           : `Deterministic suite failed (exit ${exitCode}). ${stderr.trim().slice(0, 400)}`
   };
 
