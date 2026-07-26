@@ -117,9 +117,26 @@ describe("real-process crash/replay fault matrix", () => {
       idempotencyKey: "fault-server-kill-1"
     });
     await harness.acpControl.waitUntilLifecycleContains("paused session/prompt", 30_000);
-    await client.waitForDispatchStatus(dispatched.operationId, ["running", "leased"]);
-    const sessionNewBefore = client.countLifecycleFragment("session/new");
-    expect(sessionNewBefore).toBe(1);
+    const beforeRestart = await client.waitForDispatchStatus(dispatched.operationId, [
+      "running",
+      "leased"
+    ]);
+    const baseline = {
+      operationId: beforeRestart.operationId,
+      dispatchId: beforeRestart.dispatchId,
+      executionAttemptId: beforeRestart.executionAttemptId,
+      updatedAt: beforeRestart.updatedAt,
+      attemptStateVersion: beforeRestart.attempt.stateVersion,
+      attemptCount: client.countServerRows("remote_execution_attempts"),
+      sessionNew: client.countLifecycleExactEvent("session/new"),
+      sessionPrompt: client.countLifecycleExactEvent("session/prompt")
+    };
+    expect(baseline.operationId).toBe(dispatched.operationId);
+    expect(baseline.dispatchId).toBe(dispatched.dispatchId);
+    expect(baseline.executionAttemptId).toBe(dispatched.executionAttemptId);
+    expect(baseline.attemptCount).toBe(1);
+    expect(baseline.sessionNew).toBe(1);
+    expect(baseline.sessionPrompt).toBe(0);
 
     await harness.killServer("SIGKILL");
     await harness.restartServer();
@@ -133,10 +150,17 @@ describe("real-process crash/replay fault matrix", () => {
     const view = await client.waitForOperation(
       dispatched.operationId,
       (current) => {
+        const reconciliationAdvanced =
+          current.attempt.stateVersion > baseline.attemptStateVersion ||
+          Date.parse(current.updatedAt) > Date.parse(baseline.updatedAt);
+        if (!reconciliationAdvanced) return false;
         if (current.state === "completed") {
-          const promptCompleted = client.countLifecycleExactEvent("session/prompt") >= 1;
+          const sameSession =
+            client.countLifecycleExactEvent("session/new") === baseline.sessionNew;
+          const promptCompleted =
+            client.countLifecycleExactEvent("session/prompt") === baseline.sessionPrompt + 1;
           const receiptOk = current.runtime.terminalReceipt?.outcome === "completed";
-          return promptCompleted && receiptOk;
+          return sameSession && promptCompleted && receiptOk;
         }
         return [
           "failed",
@@ -150,19 +174,25 @@ describe("real-process crash/replay fault matrix", () => {
       "server-kill-reconciled"
     );
 
+    expect(view.operationId).toBe(baseline.operationId);
+    expect(view.dispatchId).toBe(baseline.dispatchId);
+    expect(view.executionAttemptId).toBe(baseline.executionAttemptId);
+    expect(view.attempt.executionAttemptId).toBe(baseline.executionAttemptId);
+    expect(view.attempt.dispatchId).toBe(baseline.dispatchId);
+    expect(client.countServerRows("remote_execution_attempts")).toBe(baseline.attemptCount);
+    expect(client.countLifecycleExactEvent("session/new")).toBe(baseline.sessionNew);
+
     if (view.state === "completed") {
       // Real success path: identities stable, single attempt, single report link.
-      expect(view.dispatchId).toBe(dispatched.dispatchId);
-      expect(view.executionAttemptId).toBe(dispatched.executionAttemptId);
-      expect(client.countServerRows("remote_execution_attempts")).toBe(1);
-      expect(client.countLifecycleExactEvent("session/new")).toBe(1);
-      expect(client.countLifecycleExactEvent("session/prompt")).toBeGreaterThanOrEqual(1);
+      expect(client.countLifecycleExactEvent("session/prompt")).toBe(
+        baseline.sessionPrompt + 1
+      );
       // Barrier lines must not be mistaken for completion evidence.
       expect(client.countLifecycleExactEvent("paused session/prompt")).toBeGreaterThanOrEqual(1);
     } else {
       assertNotFalseSuccess(view);
       // No second ACP turn invented while Server was down.
-      expect(client.countLifecycleExactEvent("session/new")).toBe(sessionNewBefore);
+      expect(client.countLifecycleExactEvent("session/new")).toBe(baseline.sessionNew);
     }
   }, 120_000);
 
