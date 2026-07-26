@@ -8,6 +8,7 @@ import {
   REAL_PROCESS_ACP_HARNESS_DEFAULT_TIMEOUT_MS,
   acpMockAgentPath,
   allocateEphemeralPort,
+  stopManagedChildForCleanup,
   type ManagedChild
 } from "./support/realProcessAcpHarness.js";
 import { createServer } from "node:http";
@@ -37,6 +38,29 @@ async function createHarness(
 }
 
 describe("real-process ACP harness", () => {
+  it("falls back to root termination when process-group cleanup is denied", async () => {
+    const harness = await createHarness();
+    await mkdir(harness.paths.control, { recursive: true });
+    const child = harness.spawnFakeAcpDirect();
+    managedChildren.push(child);
+    const denied = Object.assign(new Error("process-group cleanup denied"), { code: "EPERM" });
+
+    await expect(
+      stopManagedChildForCleanup(
+        {
+          ...child,
+          tree: {
+            ...child.tree,
+            isAlive: () => true,
+            terminate: async () => Promise.reject(denied)
+          }
+        },
+        "fallback contract test"
+      )
+    ).resolves.toBeUndefined();
+    await expect(child.exit).resolves.toMatchObject({ signal: "SIGKILL" });
+  });
+
   it("allocates exclusive loopback ports without leaking the probe listener", async () => {
     for (let index = 0; index < 5; index++) {
       const port = await allocateEphemeralPort();

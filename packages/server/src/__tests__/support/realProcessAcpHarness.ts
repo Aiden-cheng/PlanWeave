@@ -65,6 +65,35 @@ export type ManagedChild = {
   exitSnapshot: ProcessExitSnapshot | undefined;
 };
 
+export async function stopManagedChildForCleanup(
+  child: ManagedChild,
+  reason: string
+): Promise<void> {
+  try {
+    if (child.tree.isAlive()) {
+      await child.tree.terminate(reason);
+    }
+    await child.exit;
+    return;
+  } catch (treeError) {
+    if (child.child.exitCode !== null || child.child.signalCode !== null) {
+      await child.exit;
+      return;
+    }
+    try {
+      if (!child.child.kill("SIGKILL")) {
+        throw new Error("root_sigkill_not_sent");
+      }
+      await child.exit;
+    } catch (fallbackError) {
+      throw new AggregateError(
+        [treeError, fallbackError],
+        `real_process_harness_cleanup_failed:${reason}`
+      );
+    }
+  }
+}
+
 export type RealProcessServerLimits = {
   leaseDurationMs?: number;
   hostOfflineAfterMs?: number;
@@ -1120,18 +1149,8 @@ export class RealProcessAcpHarness {
     ): Promise<void> => {
       if (!child) return;
       try {
-        if (child.tree.isAlive()) {
-          await child.tree.terminate(reason);
-        }
-        await child.exit;
+        await stopManagedChildForCleanup(child, reason);
       } catch (error) {
-        // Last resort: SIGKILL root pid if tree terminate failed mid-flight.
-        try {
-          const pid = child.child.pid;
-          if (typeof pid === "number" && pid > 0) process.kill(pid, "SIGKILL");
-        } catch {
-          // already gone
-        }
         errors.push(error);
       }
     };
