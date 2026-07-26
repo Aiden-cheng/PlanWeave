@@ -75,3 +75,17 @@ export const HUMAN_AUTH_ERROR_MESSAGES: Readonly<Record<HumanAuthErrorCode, stri
   human_input_invalid: "Request input failed validation.",
   human_limit_exceeded: "A project or principal limit would be exceeded."
 };
+
+export class HumanIdentityError extends Error {
+  constructor(
+    readonly code: HumanAuthErrorCode,
+    message: string = HUMAN_AUTH_ERROR_MESSAGES[code]
+  ) {
+    super(message);
+    this.name = "HumanIdentityError";
+  }
+}
+
+export function isHumanIdentityUniqueViolation(error: unknown): boolean {
+  return error instanceof Error && /UNIQUE constraint failed/i.test(error.message);
+}
