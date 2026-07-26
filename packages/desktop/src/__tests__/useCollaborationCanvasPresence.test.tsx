@@ -53,7 +53,9 @@ describe("useCollaborationCanvasPresence", () => {
         api: fixture.api,
         canvasId: "canvas-main",
         enabled: true,
-        profileId: "profile-1"
+        profileId: "profile-1",
+        selectedProjectId: "project-1",
+        activeProjectId: "project-1"
       })
     );
     await act(async () => {
@@ -97,7 +99,9 @@ describe("useCollaborationCanvasPresence", () => {
           api: fixture.api,
           canvasId: "canvas-main",
           enabled,
-          profileId: "profile-1"
+          profileId: "profile-1",
+          selectedProjectId: "project-1",
+          activeProjectId: "project-1"
         }),
       { initialProps: { enabled: true } }
     );
@@ -128,5 +132,31 @@ describe("useCollaborationCanvasPresence", () => {
     rerender({ enabled: false });
     await waitFor(() => expect(result.current.remoteSessions).toEqual([]));
     expect(fixture.api.stopCollaborationPresence).toHaveBeenCalled();
+  });
+
+  it("does not connect or publish when the selected project differs from the active profile", async () => {
+    const fixture = bridgeFixture();
+    const { result, rerender } = renderHook(
+      ({ activeProjectId }) =>
+        useCollaborationCanvasPresence({
+          api: fixture.api,
+          canvasId: "default",
+          enabled: true,
+          profileId: "profile-1",
+          selectedProjectId: "project-a",
+          activeProjectId
+        }),
+      { initialProps: { activeProjectId: "project-b" } }
+    );
+
+    await act(async () => Promise.resolve());
+    expect(fixture.api.startCollaborationPresence).not.toHaveBeenCalled();
+    act(() => result.current.onSelectionChange(selection));
+    expect(fixture.api.publishCollaborationPresence).not.toHaveBeenCalled();
+
+    rerender({ activeProjectId: "project-a" });
+    await waitFor(() => expect(fixture.api.startCollaborationPresence).toHaveBeenCalledTimes(1));
+    rerender({ activeProjectId: "project-b" });
+    await waitFor(() => expect(fixture.api.stopCollaborationPresence).toHaveBeenCalled());
   });
 });

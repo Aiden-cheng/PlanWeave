@@ -423,7 +423,9 @@ export function ProjectWorkspaceProvider({
     api: collaborationBridge,
     canvasId: selectedCanvasId,
     enabled: activeView === "graph" && Boolean(selectedProject),
-    profileId: collaborationSurface.activeProfileId
+    profileId: collaborationSurface.activeProfileId,
+    selectedProjectId: selectedProject?.projectId ?? null,
+    activeProjectId: collaborationSurface.activeProjectId
   });
   const recordNavigationSourceContextKeys = useMemo(() => {
     const selectedContext = [selectedProject?.rootPath ?? null, selectedCanvasId];

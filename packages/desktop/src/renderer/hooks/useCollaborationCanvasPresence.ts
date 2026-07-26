@@ -38,9 +38,15 @@ export function useCollaborationCanvasPresence(input: {
   enabled: boolean;
   canvasId: string | null;
   profileId: string | null;
+  selectedProjectId: string | null;
+  activeProjectId: string | null;
   api?: CanvasPresenceBridge | null;
 }): CollaborationCanvasPresenceResult {
   const api = input.api === undefined ? collaborationBridge : input.api;
+  const scopeEnabled =
+    input.enabled &&
+    input.selectedProjectId !== null &&
+    input.selectedProjectId === input.activeProjectId;
   const controllerRef = useRef<CanvasPresenceController | null>(null);
   const desiredPointerRef = useRef<XYPosition | null>(null);
   const desiredSelectionRef = useRef<string[]>([]);
@@ -80,7 +86,7 @@ export function useCollaborationCanvasPresence(input: {
 
   useEffect(() => {
     const controller = controllerRef.current;
-    const shouldRun = Boolean(controller && input.enabled && input.canvasId && input.profileId);
+    const shouldRun = Boolean(controller && scopeEnabled && input.canvasId && input.profileId);
     if (!controller || !shouldRun) {
       desiredPointerRef.current = null;
       desiredSelectionRef.current = [];
@@ -108,11 +114,11 @@ export function useCollaborationCanvasPresence(input: {
       lastPublishedRef.current = null;
       setRemoteSessions([]);
     };
-  }, [input.canvasId, input.enabled, input.profileId]);
+  }, [input.canvasId, input.profileId, scopeEnabled]);
 
   const publish = useCallback(
     (pointer: XYPosition | null, selectionIds: string[]) => {
-      if (!input.enabled || !input.canvasId || !input.profileId) return;
+      if (!scopeEnabled || !input.canvasId || !input.profileId) return;
       const controller = controllerRef.current;
       if (!controller) return;
       const previous = lastPublishedRef.current;
@@ -131,7 +137,7 @@ export function useCollaborationCanvasPresence(input: {
           setError(caught instanceof Error ? caught.message : String(caught))
         );
     },
-    [input.canvasId, input.enabled, input.profileId]
+    [input.canvasId, input.profileId, scopeEnabled]
   );
 
   const flushPointer = useCallback(() => {
