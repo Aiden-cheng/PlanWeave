@@ -1,5 +1,5 @@
-import { EventEmitter } from "node:events";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -11,7 +11,6 @@ import {
   basicManifest,
   createTestWorkspace
 } from "../../../runtime/src/__tests__/promptTestHelpers.js";
-import { runServerCli } from "../bin.js";
 import { latestCentralSchemaVersion } from "../migrations.js";
 import { hashOperatorToken } from "../operatorAuth.js";
 
@@ -19,7 +18,31 @@ const directories: string[] = [];
 const mockAgentPath = fileURLToPath(
   new URL("../../../runtime/src/__tests__/support/acpMockAgent.mjs", import.meta.url)
 );
-const agentHostBinPath = fileURLToPath(new URL("../../../agent-host/dist/bin.js", import.meta.url));
+
+/**
+ * Resolve a package's public bin entry from package.json (not a hardcoded dist path).
+ * The walkthrough must exercise the same bin surface operators install.
+ */
+function resolvePublicPackageBin(packageRoot: string, binName: string): string {
+  const packageJsonPath = join(packageRoot, "package.json");
+  const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
+    bin?: string | Record<string, string>;
+  };
+  const relative = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.[binName];
+  if (!relative) {
+    throw new Error(`public_bin_field_missing:${binName}`);
+  }
+  const absolute = join(packageRoot, relative);
+  if (!existsSync(absolute)) {
+    throw new Error(`public_bin_missing:${binName}:${absolute}`);
+  }
+  return absolute;
+}
+
+const serverPackageRoot = fileURLToPath(new URL("../..", import.meta.url));
+const agentHostPackageRoot = fileURLToPath(new URL("../../../agent-host", import.meta.url));
+const serverBinPath = resolvePublicPackageBin(serverPackageRoot, "planweave-server");
+const agentHostBinPath = resolvePublicPackageBin(agentHostPackageRoot, "planweave-agent-host");
 
 afterEach(async () => {
   await Promise.all(
@@ -46,29 +69,25 @@ async function availablePort(): Promise<number> {
   return address.port;
 }
 
-type RunningCli = {
-  process: EventEmitter;
-  result: Promise<number>;
-};
-
 type HostCommandResult = {
   code: number;
   stdout: string;
   stderr: string;
 };
 
-async function stopCli(running: RunningCli): Promise<void> {
-  running.process.emit("SIGTERM");
-  await expect(running.result).resolves.toBe(0);
-}
+type RunningPublicBin = {
+  child: ChildProcessWithoutNullStreams;
+  result: Promise<number>;
+  logs: { stdout: string; stderr: string };
+};
 
 /**
- * Invoke the public Agent Host binary as a subprocess.
- * Avoids importing Agent Host implementation from the Server package source root.
+ * Invoke a public package binary as a subprocess (planweave-server / planweave-agent-host).
+ * Avoids in-process Server CLI imports and Host source imports across package boundaries.
  */
-function runAgentHostBin(argv: readonly string[]): Promise<HostCommandResult> {
+function runPublicBin(binPath: string, argv: readonly string[]): Promise<HostCommandResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [agentHostBinPath, ...argv], {
+    const child = spawn(process.execPath, [binPath, ...argv], {
       stdio: ["ignore", "pipe", "pipe"]
     });
     let stdout = "";
@@ -88,23 +107,56 @@ function runAgentHostBin(argv: readonly string[]): Promise<HostCommandResult> {
   });
 }
 
-type RunningHostBin = {
-  child: ChildProcessWithoutNullStreams;
-  result: Promise<number>;
-};
+function runAgentHostBin(argv: readonly string[]): Promise<HostCommandResult> {
+  return runPublicBin(agentHostBinPath, argv);
+}
 
-function startAgentHostBin(configPath: string): RunningHostBin {
-  const child = spawn(process.execPath, [agentHostBinPath, "run", "--config", configPath], {
+function startPublicBin(binPath: string, argv: readonly string[]): RunningPublicBin {
+  const child = spawn(process.execPath, [binPath, ...argv], {
     stdio: ["ignore", "pipe", "pipe"]
+  });
+  const logs = { stdout: "", stderr: "" };
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => {
+    logs.stdout += chunk;
+  });
+  child.stderr.on("data", (chunk: string) => {
+    logs.stderr += chunk;
   });
   const result = new Promise<number>((resolve, reject) => {
     child.once("error", reject);
     child.once("close", (code) => resolve(code ?? 1));
   });
-  return { child, result };
+  return { child, result, logs };
 }
 
-async function stopHostBin(running: RunningHostBin): Promise<void> {
+async function startServerBin(configPath: string, publicUrl: string): Promise<RunningPublicBin> {
+  const running = startPublicBin(serverBinPath, ["serve", "--config", configPath]);
+  await vi.waitFor(
+    () => {
+      const line = running.logs.stdout
+        .split("\n")
+        .map((value) => value.trim())
+        .find((value) => value.startsWith("{") && value.includes("status"));
+      if (!line) {
+        throw new Error(
+          `server_not_ready:${running.logs.stderr || running.logs.stdout || "no_output"}`
+        );
+      }
+      const parsed = JSON.parse(line) as { status?: string; publicUrl?: string };
+      expect(parsed).toMatchObject({ status: "ready", publicUrl });
+    },
+    { timeout: 15_000 }
+  );
+  return running;
+}
+
+function startAgentHostBin(configPath: string): RunningPublicBin {
+  return startPublicBin(agentHostBinPath, ["run", "--config", configPath]);
+}
+
+async function stopPublicBin(running: RunningPublicBin): Promise<void> {
   if (!running.child.killed) {
     running.child.kill("SIGTERM");
   }
@@ -149,28 +201,7 @@ describe("remote operator walkthrough", () => {
       })
     );
 
-    const startServer = async (): Promise<RunningCli> => {
-      const processLike = new EventEmitter();
-      let resolveReady!: (value: Record<string, unknown>) => void;
-      const ready = new Promise<Record<string, unknown>>((resolve) => {
-        resolveReady = resolve;
-      });
-      const result = runServerCli(["serve", "--config", serverConfigPath], {
-        processLike: processLike as never,
-        io: {
-          stdout(value) {
-            resolveReady(JSON.parse(value));
-          },
-          stderr(value) {
-            throw new Error(value);
-          }
-        }
-      });
-      await expect(ready).resolves.toMatchObject({ status: "ready", publicUrl: origin });
-      return { process: processLike, result };
-    };
-
-    let server = await startServer();
+    let server = await startServerBin(serverConfigPath, origin);
     const authorization = { Authorization: `Bearer ${operatorToken}` };
     expect((await fetch(`${origin}/healthz`)).status).toBe(200);
     const readiness = await fetch(`${origin}/readyz`);
@@ -311,16 +342,16 @@ describe("remote operator walkthrough", () => {
       blockRef: "T-001#B-001"
     });
 
-    await stopHostBin(host);
+    await stopPublicBin(host);
 
     host = startAgentHostBin(hostConfigPath);
     await vi.waitFor(async () => {
       expect((await readHost()).lastSeenAt).not.toBe(firstLastSeenAt);
     });
-    await stopHostBin(host);
-    await stopCli(server);
+    await stopPublicBin(host);
+    await stopPublicBin(server);
 
-    server = await startServer();
+    server = await startServerBin(serverConfigPath, origin);
     await expect((await fetch(`${origin}/readyz`)).json()).resolves.toEqual({
       status: "ready",
       schemaVersion: latestCentralSchemaVersion
@@ -353,6 +384,6 @@ describe("remote operator walkthrough", () => {
     expect(JSON.parse(localRevocation.stdout)).toMatchObject({
       credential: "revoked"
     });
-    await stopCli(server);
+    await stopPublicBin(server);
   }, 30_000);
 });
