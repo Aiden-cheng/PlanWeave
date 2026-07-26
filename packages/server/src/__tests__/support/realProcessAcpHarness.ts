@@ -129,14 +129,73 @@ function redactLogText(value: string): string {
   }
 }
 
-export async function allocateEphemeralPort(): Promise<number> {
-  const probe = createServer();
-  await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
-  const address = probe.address();
-  if (!address || typeof address === "string")
-    throw new Error("real_process_harness_port_unavailable");
-  await new Promise<void>((resolve) => probe.close(() => resolve()));
-  return address.port;
+async function closeHttpServer(server: ReturnType<typeof createServer>): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+}
+
+/**
+ * Allocate a free loopback port for a not-yet-started Server process.
+ * Narrows classic listen(0)/close TOCTOU races by re-binding the chosen port
+ * exclusively once before returning; callers should still retry on EADDRINUSE.
+ */
+export async function allocateEphemeralPort(maxAttempts = 16): Promise<number> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const probe = createServer();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        probe.once("error", reject);
+        probe.listen(0, "127.0.0.1", () => resolve());
+      });
+      const address = probe.address();
+      if (!address || typeof address === "string") {
+        throw new Error("real_process_harness_port_unavailable");
+      }
+      const port = address.port;
+      await closeHttpServer(probe);
+
+      // Re-claim exclusively then release so we do not hand out a still-busy port.
+      const verify = createServer();
+      try {
+        await new Promise<void>((resolve, reject) => {
+          verify.once("error", reject);
+          verify.listen(port, "127.0.0.1", () => resolve());
+        });
+        await closeHttpServer(verify);
+        return port;
+      } catch (error) {
+        await closeHttpServer(verify).catch(() => undefined);
+        lastError = error;
+      }
+    } catch (error) {
+      await closeHttpServer(probe).catch(() => undefined);
+      lastError = error;
+    }
+  }
+  throw new Error(
+    `real_process_harness_port_unavailable:${
+      lastError instanceof Error ? lastError.message : String(lastError ?? "exhausted")
+    }`
+  );
+}
+
+async function removeDirectoryWithRetries(directory: string, attempts = 8): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      await rm(directory, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      lastError = error;
+      // Child log writers or antivirus may briefly hold files after process exit.
+      await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`real_process_harness_cleanup_failed:${String(lastError)}`);
 }
 
 export function remoteAcpManifest(): PlanPackageManifest {
@@ -310,8 +369,9 @@ export class FakeAcpControl {
 export class RealProcessAcpHarness {
   readonly paths: HarnessPaths;
   readonly operatorToken: string;
-  readonly origin: string;
-  readonly port: number;
+  /** Mutable so startServer can rebind after EADDRINUSE without recreating the harness. */
+  origin: string;
+  port: number;
   readonly projectId: string;
   readonly acpControl: FakeAcpControl;
   readonly acpScenario: string;
@@ -326,6 +386,7 @@ export class RealProcessAcpHarness {
   private enrolled = false;
   private disposed = false;
   private readonly ownedRoots: string[] = [];
+  private readonly logFlushTasks = new Set<Promise<void>>();
   private readonly secondaryHosts = new Map<
     string,
     { handle: SecondaryHostHandle; child: ManagedChild | undefined; enrolled: boolean }
@@ -555,24 +616,69 @@ export class RealProcessAcpHarness {
         return getSnapshot();
       }
     };
-    void exit.then(async (snapshot) => {
-      await writeFile(
-        join(this.paths.logs, `${label}-exit.json`),
-        JSON.stringify({ ...snapshot, at: new Date().toISOString() }, null, 2),
-        "utf8"
-      );
-      await writeFile(
-        join(this.paths.logs, `${label}.stdout.log`),
-        redactLogText(logs.stdout),
-        "utf8"
-      );
-      await writeFile(
-        join(this.paths.logs, `${label}.stderr.log`),
-        redactLogText(logs.stderr),
-        "utf8"
-      );
-    });
+    // Track log flush so dispose does not race ENOTEMPTY against async writers.
+    const flush = exit
+      .then(async (snapshot) => {
+        if (this.disposed && !existsSync(this.paths.logs)) return;
+        await mkdir(this.paths.logs, { recursive: true }).catch(() => undefined);
+        await writeFile(
+          join(this.paths.logs, `${label}-exit.json`),
+          JSON.stringify({ ...snapshot, at: new Date().toISOString() }, null, 2),
+          "utf8"
+        );
+        await writeFile(
+          join(this.paths.logs, `${label}.stdout.log`),
+          redactLogText(logs.stdout),
+          "utf8"
+        );
+        await writeFile(
+          join(this.paths.logs, `${label}.stderr.log`),
+          redactLogText(logs.stderr),
+          "utf8"
+        );
+      })
+      .catch(() => undefined);
+    this.logFlushTasks.add(flush);
+    void flush.finally(() => this.logFlushTasks.delete(flush));
     return handle;
+  }
+
+  private async rebindEphemeralPort(): Promise<void> {
+    const port = await allocateEphemeralPort();
+    const origin = `http://127.0.0.1:${port}`;
+    this.port = port;
+    this.origin = origin;
+    if (existsSync(this.paths.serverConfig)) {
+      const raw = await readFile(this.paths.serverConfig, "utf8");
+      if (raw.startsWith("{")) {
+        try {
+          const config = JSON.parse(raw) as Record<string, unknown>;
+          config.bind = { host: "127.0.0.1", port };
+          config.publicUrl = origin;
+          await writeFile(this.paths.serverConfig, JSON.stringify(config), "utf8");
+        } catch {
+          // Corrupt configs are intentional for failure tests; leave them alone.
+        }
+      }
+    }
+    if (existsSync(this.paths.hostConfig)) {
+      try {
+        const hostConfig = JSON.parse(await readFile(this.paths.hostConfig, "utf8")) as {
+          coordinator?: { url?: string };
+        };
+        if (hostConfig.coordinator) {
+          hostConfig.coordinator.url = origin;
+          await writeFile(this.paths.hostConfig, JSON.stringify(hostConfig), "utf8");
+        }
+      } catch {
+        // Host config may be intentionally corrupt.
+      }
+    }
+  }
+
+  private serverLogsIndicatePortBusy(): boolean {
+    const combined = `${this.server?.logs.stdout ?? ""}\n${this.server?.logs.stderr ?? ""}`;
+    return /EADDRINUSE|address already in use|listen EADDRINUSE/i.test(combined);
   }
 
   async startServer(): Promise<void> {
@@ -580,32 +686,63 @@ export class RealProcessAcpHarness {
     if (this.server?.tree.isAlive()) throw new Error("real_process_harness_server_already_running");
     // Drop a dead handle from a previous failed start so callers can retry after fixing config.
     this.server = undefined;
-    this.server = this.spawnLongLived(
-      process.execPath,
-      [serverBinPath, "serve", "--config", this.paths.serverConfig],
-      "server"
-    );
-    await waitFor(
-      () => {
-        if (this.server?.exitSnapshot) return false;
-        try {
-          const line = this.server?.logs.stdout
-            .split("\n")
-            .map((value) => value.trim())
-            .find((value) => value.startsWith("{") && value.includes("status"));
-          if (!line) return false;
-          const parsed = JSON.parse(line) as { status?: string; publicUrl?: string };
-          return parsed.status === "ready" && parsed.publicUrl === this.origin;
-        } catch {
-          return false;
-        }
-      },
-      {
-        timeoutMs: this.readinessTimeoutMs,
-        label: "server-ready",
-        diagnostics: () => this.diagnostics()
+
+    const maxBindAttempts = 5;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < maxBindAttempts; attempt++) {
+      if (attempt > 0) {
+        await this.rebindEphemeralPort();
       }
-    );
+      this.server = this.spawnLongLived(
+        process.execPath,
+        [serverBinPath, "serve", "--config", this.paths.serverConfig],
+        "server"
+      );
+      try {
+        await waitFor(
+          () => {
+            if (this.server?.exitSnapshot) {
+              if (this.serverLogsIndicatePortBusy()) return false;
+              return false;
+            }
+            try {
+              const line = this.server?.logs.stdout
+                .split("\n")
+                .map((value) => value.trim())
+                .find((value) => value.startsWith("{") && value.includes("status"));
+              if (!line) return false;
+              const parsed = JSON.parse(line) as { status?: string; publicUrl?: string };
+              return parsed.status === "ready" && parsed.publicUrl === this.origin;
+            } catch {
+              return false;
+            }
+          },
+          {
+            timeoutMs: this.readinessTimeoutMs,
+            label: "server-ready",
+            diagnostics: () => this.diagnostics()
+          }
+        );
+        return;
+      } catch (error) {
+        lastError = error;
+        const busy = this.serverLogsIndicatePortBusy();
+        const snapshot = this.server?.exitSnapshot;
+        if (this.server?.tree.isAlive()) {
+          await this.stopServer("harness rebind after bind failure").catch(() => undefined);
+        } else {
+          this.server = undefined;
+        }
+        if (!busy && snapshot) {
+          // Config/corruption failures should not consume all rebind attempts silently.
+          throw error;
+        }
+        if (!busy && attempt === maxBindAttempts - 1) throw error;
+      }
+    }
+    throw lastError instanceof Error
+      ? lastError
+      : new Error(`real_process_harness_server_bind_failed:${String(lastError)}`);
   }
 
   async waitForServerReadyz(): Promise<void> {
@@ -954,28 +1091,58 @@ export class RealProcessAcpHarness {
     if (this.disposed) return;
     this.disposed = true;
     const errors: unknown[] = [];
-    for (const key of [...this.secondaryHosts.keys()]) {
+    const forceStop = async (
+      child: ManagedChild | undefined,
+      reason: string
+    ): Promise<void> => {
+      if (!child) return;
       try {
-        await this.stopSecondaryHost(key, "harness dispose");
+        if (child.tree.isAlive()) {
+          await child.tree.terminate(reason);
+        }
+        await child.exit;
+      } catch (error) {
+        // Last resort: SIGKILL root pid if tree terminate failed mid-flight.
+        try {
+          const pid = child.child.pid;
+          if (typeof pid === "number" && pid > 0) process.kill(pid, "SIGKILL");
+        } catch {
+          // already gone
+        }
+        errors.push(error);
+      }
+    };
+
+    for (const [key, entry] of [...this.secondaryHosts.entries()]) {
+      try {
+        await forceStop(entry.child, `harness dispose secondary:${key}`);
       } catch (error) {
         errors.push(error);
       }
+      entry.child = undefined;
     }
     this.secondaryHosts.clear();
     try {
-      await this.stopHost("harness dispose");
+      await forceStop(this.host, "harness dispose host");
     } catch (error) {
       errors.push(error);
     }
+    this.host = undefined;
     try {
-      await this.stopServer("harness dispose");
+      await forceStop(this.server, "harness dispose server");
     } catch (error) {
       errors.push(error);
     }
+    this.server = undefined;
+
+    // Drain async log writers so recursive rm does not race ENOTEMPTY.
+    await Promise.allSettled([...this.logFlushTasks]);
+    this.logFlushTasks.clear();
+
     // Best-effort: only remove harness-created roots.
     for (const directory of this.ownedRoots.splice(0)) {
       try {
-        await rm(directory, { recursive: true, force: true });
+        await removeDirectoryWithRetries(directory);
       } catch (error) {
         errors.push(error);
       }

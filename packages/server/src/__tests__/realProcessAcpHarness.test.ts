@@ -7,8 +7,10 @@ import {
   RealProcessAcpHarness,
   REAL_PROCESS_ACP_HARNESS_DEFAULT_TIMEOUT_MS,
   acpMockAgentPath,
+  allocateEphemeralPort,
   type ManagedChild
 } from "./support/realProcessAcpHarness.js";
+import { createServer } from "node:http";
 
 const harnesses: RealProcessAcpHarness[] = [];
 const managedChildren: ManagedChild[] = [];
@@ -35,6 +37,22 @@ async function createHarness(
 }
 
 describe("real-process ACP harness", () => {
+  it("allocates exclusive loopback ports without leaking the probe listener", async () => {
+    for (let index = 0; index < 5; index++) {
+      const port = await allocateEphemeralPort();
+      expect(port).toBeGreaterThan(0);
+      // Port must be free for a real process bind after allocation returns.
+      const server = createServer();
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(port, "127.0.0.1", () => resolve());
+      });
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("starts Server and Host as real processes, enrolls via public API, and reaches readiness", async () => {
     const harness = await createHarness();
     await harness.startAll();
