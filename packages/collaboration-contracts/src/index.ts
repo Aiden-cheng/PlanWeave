@@ -5,6 +5,7 @@ export * from "./assignment.js";
 export * from "./comments.js";
 export * from "./attachments.js";
 export * from "./observer.js";
+export * from "./presence.js";
 export * from "./connection.js";
 export * from "./errors.js";
 export * from "./remoteRun.js";

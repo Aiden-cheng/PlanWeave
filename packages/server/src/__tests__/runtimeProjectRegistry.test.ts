@@ -31,8 +31,12 @@ describe("createTrustedRuntimeRegistry", () => {
     expect(trusted.locators).toEqual([locator]);
     expect(trusted.hasProject(locator.projectId)).toBe(true);
     expect(trusted.hasProject("unknown-project")).toBe(false);
+    expect(trusted.hasCanvas(locator.projectId, locator.canvasId)).toBe(true);
+    expect(trusted.hasCanvas(locator.projectId, "unknown-canvas")).toBe(false);
+    expect(trusted.hasCanvas("unknown-project", locator.canvasId)).toBe(false);
     trusted.locators.push({ projectId: "unknown-project", canvasId: "default" });
     expect(trusted.hasProject("unknown-project")).toBe(false);
+    expect(trusted.hasCanvas("unknown-project", "default")).toBe(false);
     expect(() => trusted.registry.resolve(locator)).not.toThrow();
     trusted.close();
     expect(() => trusted.registry.resolve(locator)).toThrow("remote_runtime_locator_unresolved");

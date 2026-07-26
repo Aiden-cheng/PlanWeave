@@ -70,5 +70,15 @@ export const HUMAN_OBSERVER_MAX_PAYLOAD_BYTES = 262_144 as const;
 /** Human observer protocol version (distinct from Agent Host protocol). */
 export const HUMAN_OBSERVER_PROTOCOL_VERSION = 1 as const;
 
+/** Ephemeral canvas presence protocol and admission budgets. */
+export const CANVAS_PRESENCE_PROTOCOL_VERSION = 1 as const;
+export const CANVAS_PRESENCE_MAX_FRAME_BYTES = 262_144 as const;
+export const CANVAS_PRESENCE_COORDINATE_ABS_MAX = 1_000_000 as const;
+export const CANVAS_PRESENCE_SELECTION_ID_MAX_LENGTH = 128 as const;
+export const CANVAS_PRESENCE_MAX_SELECTION_IDS = 32 as const;
+export const CANVAS_PRESENCE_MAX_SESSIONS_PER_CANVAS = 32 as const;
+export const CANVAS_PRESENCE_MAX_UPDATES_PER_SECOND = 30 as const;
+export const CANVAS_PRESENCE_SESSION_TTL_MS = 15_000 as const;
+
 /** Default HTTPS request timeout. */
 export const COLLABORATION_REQUEST_TIMEOUT_MS = 30_000 as const;

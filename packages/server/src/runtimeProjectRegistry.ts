@@ -29,6 +29,7 @@ export type TrustedRuntimeRegistry = {
   registry: RemoteRuntimePortRegistry;
   locators: Array<{ projectId: string; canvasId: string }>;
   hasProject(projectId: string): boolean;
+  hasCanvas(projectId: string, canvasId: string): boolean;
   workItemPackagePort(projectId: string): WorkItemPackagePort | undefined;
   close(): void;
 };
@@ -76,6 +77,9 @@ export async function createTrustedRuntimeRegistry(
     throw error;
   }
   const projectIds = new Set(locators.map((locator) => locator.projectId));
+  const canvasIdsByProject = new Map(
+    [...canvasWorkItemPorts].map(([projectId, ports]) => [projectId, new Set(ports.keys())])
+  );
   const projectWorkItemPorts = new Map(
     [...canvasWorkItemPorts].map(([projectId, ports]) => [
       projectId,
@@ -87,6 +91,9 @@ export async function createTrustedRuntimeRegistry(
     locators,
     hasProject(projectId) {
       return projectIds.has(projectId);
+    },
+    hasCanvas(projectId, canvasId) {
+      return canvasIdsByProject.get(projectId)?.has(canvasId) ?? false;
     },
     workItemPackagePort(projectId) {
       return projectWorkItemPorts.get(projectId);
