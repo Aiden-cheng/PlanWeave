@@ -744,6 +744,9 @@ describe("preload bridge invocation", () => {
     });
     await api.connectCollaborationSession({ profileId: "profile-1" });
     await api.disconnectCollaborationSession();
+    await api.startCollaborationPresence({ canvasId: "default" });
+    await api.publishCollaborationPresence({ pointer: { x: 1, y: 2 }, selectionIds: [] });
+    await api.stopCollaborationPresence();
     await api.listCollaborationMembers({ cursor: 0, limit: 20 });
     await api.createCollaborationInvitation({});
     await api.revokeCollaborationInvitation({ invitationId: "inv-1" });
@@ -756,12 +759,15 @@ describe("preload bridge invocation", () => {
     const unsubscribe = api.onCollaborationStatusChanged(callback);
     const signalCallback = vi.fn();
     const unsubscribeSignal = api.onCollaborationObserverSignal(signalCallback);
+    const presenceSignalCallback = vi.fn();
+    const unsubscribePresenceSignal = api.onCollaborationPresenceSignal(presenceSignalCallback);
 
     expect(Object.keys(api).sort()).toEqual(
       [
         ...Object.keys(collaborationInvokeChannels),
         "onCollaborationStatusChanged",
-        "onCollaborationObserverSignal"
+        "onCollaborationObserverSignal",
+        "onCollaborationPresenceSignal"
       ].sort()
     );
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
@@ -812,6 +818,7 @@ describe("preload bridge invocation", () => {
       expect.objectContaining({ type: "human.observer.cursor", cursor: 3 })
     );
     unsubscribeSignal();
+    unsubscribePresenceSignal();
     expect(electronMock.ipcRenderer.off).toHaveBeenCalledWith(
       collaborationObserverSignalChannel,
       signalCall?.[1]

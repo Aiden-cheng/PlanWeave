@@ -3,6 +3,7 @@ import WebSocket from "ws";
 import {
   collaborationInvokeChannels,
   collaborationObserverSignalChannel,
+  collaborationPresenceSignalChannel,
   collaborationStatusChangedChannel,
   type CollaborationObserverSignal,
   type CollaborationStatus
@@ -31,6 +32,16 @@ function publishObserverSignalToRenderers(signal: CollaborationObserverSignal): 
   }
 }
 
+function publishPresenceSignalToRenderers(
+  signal: Parameters<NonNullable<CollaborationServiceOptions["onPresenceSignal"]>>[0]
+): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.webContents.isDestroyed()) {
+      window.webContents.send(collaborationPresenceSignalChannel, signal);
+    }
+  }
+}
+
 function createDefaultService(options: CollaborationServiceOptions = {}): CollaborationService {
   const userCreateClient = options.createClient;
   return new CollaborationService({
@@ -50,7 +61,8 @@ function createDefaultService(options: CollaborationServiceOptions = {}): Collab
             (WebSocket as unknown as CollaborationWebSocketConstructor)
         })),
     onStatusChange: options.onStatusChange ?? publishStatusToRenderers,
-    onObserverSignal: options.onObserverSignal ?? publishObserverSignalToRenderers
+    onObserverSignal: options.onObserverSignal ?? publishObserverSignalToRenderers,
+    onPresenceSignal: options.onPresenceSignal ?? publishPresenceSignalToRenderers
   });
 }
 
@@ -112,6 +124,16 @@ export function registerCollaborationHandlers(
   );
   ipcMain.handle(collaborationInvokeChannels.disconnectCollaborationSession, () =>
     active.disconnectSession()
+  );
+  ipcMain.handle(collaborationInvokeChannels.startCollaborationPresence, (_event, input: unknown) =>
+    active.startPresence(input)
+  );
+  ipcMain.handle(collaborationInvokeChannels.stopCollaborationPresence, () =>
+    active.stopPresence()
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.publishCollaborationPresence,
+    (_event, input: unknown) => active.publishPresence(input)
   );
   ipcMain.handle(collaborationInvokeChannels.listCollaborationMembers, (_event, input: unknown) =>
     active.listMembers(input)

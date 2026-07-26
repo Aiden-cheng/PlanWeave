@@ -1,6 +1,8 @@
 import { z } from "zod";
 import {
   COMMENT_ATTACHMENT_MAX_BYTES,
+  canvasPresencePointerSchema,
+  canvasPresenceSelectionIdsSchema,
   collaborationConnectionProfileSchema,
   commentContentSha256Schema,
   createPendingAttachmentRequestSchema,
@@ -29,6 +31,7 @@ import {
   type HumanMembershipView,
   type HumanPrincipalView,
   type PendingAttachmentView,
+  type CanvasPresenceServerMessage,
   type RemoteActionView,
   type RemoteDispatchWireCommand,
   type RemoteEventReplay,
@@ -280,6 +283,30 @@ export type CollaborationFinalizePendingAttachmentInput = z.infer<
 /** One-shot invitation create view — token is display/copy-once only; never persisted by Desktop. */
 export type CollaborationInvitationCreateView = HumanCreateInvitationResponse;
 
+/** Selected canvas binding for the ephemeral presence socket. */
+export const collaborationPresenceCanvasInputSchema = z
+  .object({ canvasId: z.string().trim().min(1).max(128) })
+  .strict();
+export type CollaborationPresenceCanvasInput = z.infer<
+  typeof collaborationPresenceCanvasInputSchema
+>;
+
+/** Renderer may publish only bounded pointer/selection state; identity and scope stay in main. */
+export const collaborationPresenceUpdateInputSchema = z
+  .object({
+    pointer: canvasPresencePointerSchema.nullable(),
+    selectionIds: canvasPresenceSelectionIdsSchema
+  })
+  .strict();
+export type CollaborationPresenceUpdateInput = z.infer<
+  typeof collaborationPresenceUpdateInputSchema
+>;
+
+export type CollaborationPresenceSignal = {
+  profileId: string;
+  message: CanvasPresenceServerMessage;
+};
+
 export const collaborationInvokeChannels = {
   getCollaborationStatus: "planweave-collaboration:getStatus",
   upsertCollaborationProfile: "planweave-collaboration:upsertProfile",
@@ -292,6 +319,9 @@ export const collaborationInvokeChannels = {
   consumeCollaborationInvitation: "planweave-collaboration:consumeInvitation",
   connectCollaborationSession: "planweave-collaboration:connectSession",
   disconnectCollaborationSession: "planweave-collaboration:disconnectSession",
+  startCollaborationPresence: "planweave-collaboration:startPresence",
+  stopCollaborationPresence: "planweave-collaboration:stopPresence",
+  publishCollaborationPresence: "planweave-collaboration:publishPresence",
   listCollaborationMembers: "planweave-collaboration:listMembers",
   listCollaborationDevices: "planweave-collaboration:listDevices",
   listCollaborationInvitations: "planweave-collaboration:listInvitations",
@@ -326,6 +356,8 @@ export const collaborationInvokeChannels = {
 export const collaborationStatusChangedChannel = "planweave-collaboration:statusChanged";
 /** Human observer invalidation/progress/catch-up signals for a single shared renderer subscription. */
 export const collaborationObserverSignalChannel = "planweave-collaboration:observerSignal";
+/** Sanitized ephemeral canvas presence messages from the main-process socket. */
+export const collaborationPresenceSignalChannel = "planweave-collaboration:presenceSignal";
 
 export type PlanWeaveCollaborationApi = {
   getCollaborationStatus: () => Promise<CollaborationStatus>;
@@ -349,6 +381,9 @@ export type PlanWeaveCollaborationApi = {
   ) => Promise<CollaborationAuthHandoffView>;
   connectCollaborationSession: (input: CollaborationProfileIdInput) => Promise<CollaborationStatus>;
   disconnectCollaborationSession: () => Promise<CollaborationStatus>;
+  startCollaborationPresence: (input: CollaborationPresenceCanvasInput) => Promise<void>;
+  stopCollaborationPresence: () => Promise<void>;
+  publishCollaborationPresence: (input: CollaborationPresenceUpdateInput) => Promise<void>;
   listCollaborationMembers: (input?: CollaborationPageQueryInput) => Promise<HumanMemberPage>;
   listCollaborationDevices: (input?: CollaborationDeviceListQueryInput) => Promise<HumanDevicePage>;
   listCollaborationInvitations: (
@@ -425,6 +460,9 @@ export type PlanWeaveCollaborationApi = {
   onCollaborationStatusChanged: (callback: (status: CollaborationStatus) => void) => () => void;
   onCollaborationObserverSignal: (
     callback: (signal: CollaborationObserverSignal) => void
+  ) => () => void;
+  onCollaborationPresenceSignal: (
+    callback: (signal: CollaborationPresenceSignal) => void
   ) => () => void;
 };
 

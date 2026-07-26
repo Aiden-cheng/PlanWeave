@@ -22,12 +22,14 @@ import {
 } from "../shared/ipcChannels.js";
 import type {
   CollaborationObserverSignal,
+  CollaborationPresenceSignal,
   CollaborationStatus,
   PlanWeaveCollaborationApi
 } from "../shared/collaboration.js";
 import {
   collaborationInvokeChannels,
   collaborationObserverSignalChannel,
+  collaborationPresenceSignalChannel,
   collaborationStatusChangedChannel
 } from "../shared/collaboration.js";
 import type {
@@ -223,6 +225,12 @@ const collaborationApi: PlanWeaveCollaborationApi = {
     ipcRenderer.invoke(collaborationInvokeChannels.connectCollaborationSession, input),
   disconnectCollaborationSession: async () =>
     ipcRenderer.invoke(collaborationInvokeChannels.disconnectCollaborationSession),
+  startCollaborationPresence: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.startCollaborationPresence, input),
+  stopCollaborationPresence: async () =>
+    ipcRenderer.invoke(collaborationInvokeChannels.stopCollaborationPresence),
+  publishCollaborationPresence: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.publishCollaborationPresence, input),
   listCollaborationMembers: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationMembers, input),
   listCollaborationDevices: async (input) =>
@@ -296,6 +304,12 @@ const collaborationApi: PlanWeaveCollaborationApi = {
       callback(payload);
     ipcRenderer.on(collaborationObserverSignalChannel, listener);
     return () => ipcRenderer.off(collaborationObserverSignalChannel, listener);
+  },
+  onCollaborationPresenceSignal: (callback) => {
+    const listener = (_event: IpcRendererEvent, payload: CollaborationPresenceSignal) =>
+      callback(payload);
+    ipcRenderer.on(collaborationPresenceSignalChannel, listener);
+    return () => ipcRenderer.off(collaborationPresenceSignalChannel, listener);
   }
 };
 

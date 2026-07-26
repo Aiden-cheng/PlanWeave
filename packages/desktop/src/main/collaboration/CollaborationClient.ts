@@ -49,6 +49,12 @@ import {
   type AssignmentDisplayProjection,
   type AssignmentListPage,
   type AssignmentUpdateWireCommand,
+  type CanvasPresenceError,
+  type CanvasPresenceLeave,
+  type CanvasPresencePointer,
+  type CanvasPresenceSelectionId,
+  type CanvasPresenceSnapshot,
+  type CanvasPresenceUpdate,
   type CollaborationClientLimits,
   type CollaborationConnectionProfile,
   type CommentCreateWireCommand,
@@ -90,6 +96,7 @@ import {
 } from "./collaborationErrors.js";
 import { reconnectDelay } from "./reconnectBackoff.js";
 import { redactCollaborationText } from "./redaction.js";
+import { CanvasPresenceClient } from "./CanvasPresenceClient.js";
 
 export type CollaborationCredentialPort = {
   /** Returns the current human device bearer (`pw_hdev_…`) or undefined when unauthenticated. */
@@ -124,6 +131,27 @@ export type CollaborationObserverHandlers = {
     message: Extract<HumanObserverServerMessage, { type: "human.observer.auth_expired" }>
   ): void;
   onStatus?(status: CollaborationObserverStatus): void;
+};
+
+export type CollaborationPresenceStatus =
+  | { readonly state: "stopped" }
+  | { readonly state: "connecting"; readonly canvasId: string; readonly attempt: number }
+  | { readonly state: "connected"; readonly canvasId: string }
+  | {
+      readonly state: "reconnecting";
+      readonly canvasId: string;
+      readonly attempt: number;
+      readonly delayMs: number;
+    }
+  | { readonly state: "auth_expired"; readonly canvasId: string; readonly code: string }
+  | { readonly state: "error"; readonly canvasId: string; readonly code: string };
+
+export type CollaborationPresenceHandlers = {
+  onSnapshot?(message: CanvasPresenceSnapshot): void;
+  onUpdate?(message: CanvasPresenceUpdate): void;
+  onLeave?(message: CanvasPresenceLeave): void;
+  onError?(message: CanvasPresenceError): void;
+  onStatus?(status: CollaborationPresenceStatus): void;
 };
 
 export type CollaborationWebSocketLike = {
@@ -187,12 +215,24 @@ export class CollaborationClient {
   private observerReconnectTimer?: unknown;
   private observerWanted = false;
 
+  private readonly presence: CanvasPresenceClient;
+
   constructor(private readonly options: CollaborationClientOptions) {
     this.profile = collaborationConnectionProfileSchema.parse(options.profile);
     this.limits = collaborationClientLimitsSchema.parse(options.limits ?? {});
     this.fetchImpl = options.request ?? fetch;
     this.clock = options.clock ?? systemClock;
     this.random = options.random ?? Math.random;
+    this.presence = new CanvasPresenceClient({
+      profile: this.profile,
+      credential: options.credential,
+      WebSocketImpl: options.WebSocketImpl,
+      clock: this.clock,
+      random: this.random,
+      reconnectInitialDelayMs: this.limits.reconnectInitialDelayMs,
+      reconnectMaxDelayMs: this.limits.reconnectMaxDelayMs,
+      logger: options.logger
+    });
   }
 
   get projectId(): string {
@@ -209,6 +249,14 @@ export class CollaborationClient {
 
   lastObserverCursor(): HumanObserverCursor {
     return this.observerCursor;
+  }
+
+  presenceState(): CollaborationPresenceStatus {
+    return this.presence.state();
+  }
+
+  presenceCanvas(): string | null {
+    return this.presence.canvas();
   }
 
   // ---------------------------------------------------------------------------
@@ -650,6 +698,25 @@ export class CollaborationClient {
   }
 
   // ---------------------------------------------------------------------------
+  // Ephemeral canvas presence subscription
+  // ---------------------------------------------------------------------------
+
+  startPresence(canvasId: string, handlers: CollaborationPresenceHandlers = {}): void {
+    this.ensureOpen();
+    this.presence.start(canvasId, handlers);
+  }
+
+  /** Publish only bounded pointer/selection state for the currently selected canvas. */
+  publishPresence(input: { pointer: CanvasPresencePointer | null; selectionIds: CanvasPresenceSelectionId[] }): void {
+    this.ensureOpen();
+    this.presence.publish(input);
+  }
+
+  stopPresence(): void {
+    this.presence.stop();
+  }
+
+  // ---------------------------------------------------------------------------
   // Human observer subscription
   // ---------------------------------------------------------------------------
 
@@ -695,6 +762,7 @@ export class CollaborationClient {
     if (this.disposed) return;
     this.disposed = true;
     this.stopObserver();
+    this.stopPresence();
     this.rootController.abort();
   }
 

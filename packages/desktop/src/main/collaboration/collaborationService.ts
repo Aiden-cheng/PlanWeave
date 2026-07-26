@@ -53,12 +53,15 @@ import {
   collaborationHumanPrincipalIdInputSchema,
   collaborationImportDeviceCredentialInputSchema,
   collaborationInvitationIdInputSchema,
+  collaborationPresenceCanvasInputSchema,
+  collaborationPresenceUpdateInputSchema,
   collaborationProfileIdInputSchema,
   collaborationUploadPendingAttachmentInputSchema,
   collaborationUpsertProfileInputSchema,
   type CollaborationAuthHandoffView,
   type CollaborationInvitationCreateView,
   type CollaborationObserverSignal,
+  type CollaborationPresenceSignal,
   type CollaborationProfileView,
   type CollaborationSessionPhase,
   type CollaborationStatus,
@@ -72,6 +75,7 @@ import {
 import {
   CollaborationClient,
   type CollaborationClientOptions,
+  type CollaborationPresenceStatus,
   type CollaborationObserverStatus
 } from "./CollaborationClient.js";
 import { CollaborationClientError, collaborationErrorFromUnknown } from "./collaborationErrors.js";
@@ -102,6 +106,7 @@ export type CollaborationServiceOptions = {
   clock?: { now(): Date };
   onStatusChange?: (status: CollaborationStatus) => void;
   onObserverSignal?: (signal: CollaborationObserverSignal) => void;
+  onPresenceSignal?: (signal: CollaborationPresenceSignal) => void;
 };
 
 function nowIso(clock?: { now(): Date }): string {
@@ -167,6 +172,7 @@ export class CollaborationService {
   private readonly clock?: { now(): Date };
   private readonly onStatusChange?: (status: CollaborationStatus) => void;
   private readonly onObserverSignal?: (signal: CollaborationObserverSignal) => void;
+  private readonly onPresenceSignal?: (signal: CollaborationPresenceSignal) => void;
 
   private client: CollaborationClient | null = null;
   private clientProfileId: string | null = null;
@@ -179,6 +185,8 @@ export class CollaborationService {
   private lastValidatedObserverCursor = 0;
   private lastValidatedObserverProfileId: string | null = null;
   private observerGeneration = 0;
+  private presenceCanvasId: string | null = null;
+  private presenceGeneration = 0;
   private disposed = false;
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -201,6 +209,7 @@ export class CollaborationService {
     this.clock = options.clock;
     this.onStatusChange = options.onStatusChange;
     this.onObserverSignal = options.onObserverSignal;
+    this.onPresenceSignal = options.onPresenceSignal;
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -665,6 +674,102 @@ export class CollaborationService {
     });
   }
 
+  /** Bind ephemeral presence to the active profile/project and selected canvas. */
+  async startPresence(input: unknown): Promise<void> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      const { canvasId } = collaborationPresenceCanvasInputSchema.parse(input);
+      const client = this.client;
+      const profileId = this.clientProfileId;
+      if (!client || !profileId) {
+        throw new CollaborationClientError({
+          kind: "aborted",
+          code: "collaboration_session_not_connected",
+          message: "Collaboration session is not connected."
+        });
+      }
+      if (this.presenceCanvasId === canvasId && client.presenceCanvas() === canvasId) return;
+      this.presenceGeneration += 1;
+      const generation = this.presenceGeneration;
+      this.presenceCanvasId = canvasId;
+      const isCurrent = () =>
+        this.client === client &&
+        this.clientProfileId === profileId &&
+        this.presenceCanvasId === canvasId &&
+        this.presenceGeneration === generation;
+      client.startPresence(canvasId, {
+        onSnapshot: (message) => {
+          if (!isCurrent()) return;
+          this.publishPresenceSignal({ profileId, message });
+        },
+        onUpdate: (message) => {
+          if (!isCurrent()) return;
+          this.publishPresenceSignal({ profileId, message });
+        },
+        onLeave: (message) => {
+          if (!isCurrent()) return;
+          this.publishPresenceSignal({ profileId, message });
+        },
+        onError: (message) => {
+          if (!isCurrent()) return;
+          this.publishPresenceSignal({ profileId, message });
+        },
+        onStatus: (status: CollaborationPresenceStatus) => {
+          if (!isCurrent()) return;
+          if (status.state === "auth_expired") {
+            this.presenceCanvasId = null;
+            this.presenceGeneration += 1;
+            try {
+              client.stopPresence();
+            } catch {
+              // ignore close races during auth invalidation
+            }
+            this.setSession("error", "presence:auth_expired", {
+              code: status.code,
+              message: "Collaboration device credential was rejected by the server."
+            });
+            void this.vault.clear(profileId).then(() => this.publishStatus());
+          } else if (status.state === "error") {
+            this.setSession("error", `presence:${status.state}`, {
+              code: status.code,
+              message: status.code
+            });
+            void this.publishStatus();
+          }
+        }
+      });
+    });
+  }
+
+  async stopPresence(): Promise<void> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      this.presenceGeneration += 1;
+      this.presenceCanvasId = null;
+      try {
+        this.client?.stopPresence();
+      } catch {
+        // ignore close races during scope teardown
+      }
+    });
+  }
+
+  async publishPresence(input: unknown): Promise<void> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      const parsed = collaborationPresenceUpdateInputSchema.parse(input);
+      const client = this.client;
+      if (!client || !this.clientProfileId || !this.presenceCanvasId) {
+        throw new CollaborationClientError({
+          kind: "aborted",
+          code: "collaboration_presence_not_connected",
+          message: "Canvas presence is not connected."
+        });
+      }
+      client.publishPresence(parsed);
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // Session-scoped read models / mutations (require active connected client)
   // ---------------------------------------------------------------------------
@@ -883,6 +988,10 @@ export class CollaborationService {
     this.onObserverSignal?.(signal);
   }
 
+  private publishPresenceSignal(signal: CollaborationPresenceSignal): void {
+    this.onPresenceSignal?.(signal);
+  }
+
   private rememberObserverCursor(profileId: string, cursor: number): void {
     if (!Number.isFinite(cursor) || cursor < 0) return;
     if (this.lastValidatedObserverProfileId !== profileId) {
@@ -906,6 +1015,8 @@ export class CollaborationService {
     const client = this.client;
     const profileId = this.clientProfileId;
     this.observerGeneration += 1;
+    this.presenceGeneration += 1;
+    this.presenceCanvasId = null;
     // Preserve validated cursor across dispose so the next connectSession can resume.
     if (client && profileId) {
       try {
@@ -918,6 +1029,11 @@ export class CollaborationService {
     this.clientProfileId = null;
     this.observerStatus = { state: "stopped" };
     if (client) {
+      try {
+        client.stopPresence();
+      } catch {
+        // ignore stop errors during dispose
+      }
       try {
         client.stopObserver();
       } catch {

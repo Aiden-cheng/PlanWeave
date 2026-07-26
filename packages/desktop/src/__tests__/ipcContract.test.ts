@@ -11,6 +11,7 @@ import {
 import {
   collaborationInvokeChannels,
   collaborationObserverSignalChannel,
+  collaborationPresenceSignalChannel,
   collaborationStatusChangedChannel
 } from "../shared/collaboration";
 import { mcpTunnelChangedChannel, mcpTunnelInvokeChannels } from "../shared/mcpTunnel";
@@ -202,14 +203,21 @@ describe("desktop IPC contract", () => {
     );
     expect(collaborationStatusChangedChannel).toBe("planweave-collaboration:statusChanged");
     expect(collaborationObserverSignalChannel).toBe("planweave-collaboration:observerSignal");
+    expect(collaborationPresenceSignalChannel).toBe("planweave-collaboration:presenceSignal");
     expect(Object.values(desktopBridgeInvokeChannels)).not.toContain(
       collaborationStatusChangedChannel
     );
     expect(Object.values(desktopBridgeInvokeChannels)).not.toContain(
       collaborationObserverSignalChannel
     );
+    expect(Object.values(desktopBridgeInvokeChannels)).not.toContain(
+      collaborationPresenceSignalChannel
+    );
     expect(Object.values(collaborationInvokeChannels)).not.toContain(
       collaborationObserverSignalChannel
+    );
+    expect(Object.values(collaborationInvokeChannels)).not.toContain(
+      collaborationPresenceSignalChannel
     );
     for (const channel of Object.values(collaborationInvokeChannels)) {
       expect(Object.values(desktopBridgeInvokeChannels)).not.toContain(channel);

@@ -5,9 +5,12 @@ export {
   type CollaborationCredentialPort,
   type CollaborationObserverHandlers,
   type CollaborationObserverStatus,
+  type CollaborationPresenceHandlers,
+  type CollaborationPresenceStatus,
   type CollaborationWebSocketConstructor,
   type CollaborationWebSocketLike
 } from "./CollaborationClient.js";
+export { CanvasPresenceClient, type CanvasPresenceClientOptions } from "./CanvasPresenceClient.js";
 export {
   CollaborationClientError,
   collaborationErrorFromHttp,
