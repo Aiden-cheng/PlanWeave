@@ -65,6 +65,9 @@ describe("desktop release configuration", () => {
     expect(cliScripts.build).toBe("tsx ../../scripts/run-workspace-consumer-build.ts cli");
     expect(desktopScripts.build).toBe("tsx ../../scripts/run-workspace-consumer-build.ts desktop");
     expect(desktopScripts["build:standalone"]).toContain(
+      "pnpm --filter @planweave-ai/collaboration-contracts build"
+    );
+    expect(desktopScripts["build:standalone"]).toContain(
       "pnpm --filter @planweave-ai/runtime build"
     );
     expect(desktopScripts["build:standalone"]).toContain("pnpm build:workspace");
