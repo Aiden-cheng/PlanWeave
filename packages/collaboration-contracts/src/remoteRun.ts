@@ -220,6 +220,68 @@ export type RemoteExecutionActionWireRequest = z.infer<
   typeof remoteExecutionActionWireRequestSchema
 >;
 
+/**
+ * Human Desktop action intent. Server-owned resume lease and recovery fields are
+ * deliberately excluded; the Server materializes the complete action request
+ * after revalidating the observed operation state.
+ */
+export const remoteHumanExecutionActionCommandSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      ...actionIdentityShape,
+      kind: z.literal("resume_same_session"),
+      priorLeaseId: leaseIdSchema,
+      reason: actionReasonSchema
+    })
+    .strict(),
+  z
+    .object({
+      ...actionIdentityShape,
+      kind: z.literal("retry_new_attempt"),
+      priorLeaseId: leaseIdSchema,
+      newDispatchId: dispatchIdSchema,
+      newExecutionAttemptId: executionAttemptIdSchema,
+      reason: actionReasonSchema
+    })
+    .strict()
+    .refine((action) => action.executionAttemptId !== action.newExecutionAttemptId, {
+      message: "Retry requires a new execution attempt identity.",
+      path: ["newExecutionAttemptId"]
+    })
+    .refine((action) => action.dispatchId !== action.newDispatchId, {
+      message: "Retry requires a new dispatch identity.",
+      path: ["newDispatchId"]
+    }),
+  z
+    .object({
+      ...actionIdentityShape,
+      kind: z.literal("fail"),
+      leaseId: leaseIdSchema,
+      failure: normalizedFailureSchema,
+      reason: actionReasonSchema
+    })
+    .strict(),
+  z
+    .object({
+      ...actionIdentityShape,
+      kind: z.literal("block"),
+      leaseId: leaseIdSchema,
+      reason: actionReasonSchema
+    })
+    .strict(),
+  z
+    .object({
+      ...actionIdentityShape,
+      kind: z.literal("cancel"),
+      leaseId: leaseIdSchema,
+      reason: actionReasonSchema
+    })
+    .strict()
+]);
+export type RemoteHumanExecutionActionCommand = z.infer<
+  typeof remoteHumanExecutionActionCommandSchema
+>;
+
 export const remoteExecutionActionStateSchema = z.enum([
   "recorded",
   "delivered",

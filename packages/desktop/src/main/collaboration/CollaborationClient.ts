@@ -38,7 +38,7 @@ import {
   remoteDispatchWireCommandSchema,
   remoteEventQuerySchema,
   remoteEventReplaySchema,
-  remoteExecutionActionWireRequestSchema,
+  remoteHumanExecutionActionCommandSchema,
   remoteInteractionPageQuerySchema,
   remoteInteractionPageSchema,
   remoteInteractionResponseSchema,
@@ -75,7 +75,7 @@ import {
   type RemoteActionView,
   type RemoteDispatchWireCommand,
   type RemoteEventReplay,
-  type RemoteExecutionActionWireRequest,
+  type RemoteHumanExecutionActionCommand,
   type RemoteInteractionPage,
   type RemoteInteractionResponse,
   type RemoteInteractionView,
@@ -523,10 +523,10 @@ export class CollaborationClient {
 
   async executeRemoteOperationAction(
     operationId: string,
-    action: RemoteExecutionActionWireRequest,
+    action: RemoteHumanExecutionActionCommand,
     signal?: AbortSignal
   ): Promise<RemoteActionView> {
-    const body = remoteExecutionActionWireRequestSchema.parse(action);
+    const body = remoteHumanExecutionActionCommandSchema.parse(action);
     return this.json(
       "POST",
       `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/remote-operations/${encodeURIComponent(operationId)}/actions`,

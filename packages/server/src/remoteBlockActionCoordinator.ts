@@ -3,9 +3,17 @@ import {
   RemoteExecutionActionService,
   type RemoteExecutionActionRecord
 } from "./remoteExecutionActions.js";
+import {
+  remoteHumanExecutionActionCommandSchema,
+  type RemoteHumanExecutionActionCommand
+} from "@planweave-ai/collaboration-contracts";
 import type {
   RemoteExecutionActionDecision,
   RemoteExecutionActionRequest
+} from "./remoteExecutionLifecycle.js";
+import {
+  decideRemoteExecutionAction,
+  remoteExecutionActionRequestSchema
 } from "./remoteExecutionLifecycle.js";
 import { remoteBlockIdentity } from "./remoteBlockIdentity.js";
 import type {
@@ -48,6 +56,17 @@ export class RemoteBlockActionCoordinator {
 
   execute(rawAction: unknown): Promise<RemoteExecutionActionRecord> {
     return this.actionService.execute(rawAction);
+  }
+
+  executeHuman(rawCommand: unknown): Promise<RemoteExecutionActionRecord> {
+    const command = remoteHumanExecutionActionCommandSchema.parse(rawCommand);
+    const existing = this.options.actions.get(command.actionId);
+    if (existing) {
+      assertHumanActionMatches(command, existing.request);
+      return this.actionService.execute(existing.request);
+    }
+    if (command.kind !== "resume_same_session") return this.execute(command);
+    return this.execute(this.materializeResumeAction(command));
   }
 
   reconcile(startupContext?: {
@@ -125,6 +144,37 @@ export class RemoteBlockActionCoordinator {
       return "settled";
     }
     return undefined;
+  }
+
+  private materializeResumeAction(
+    command: Extract<RemoteHumanExecutionActionCommand, { kind: "resume_same_session" }>
+  ): RemoteExecutionActionRequest {
+    const operation = this.options.operations.getRequired(command.operationId);
+    const snapshot = this.options.dispatches.actionSnapshot(operation);
+    const recovery = snapshot.interruption?.recovery;
+    if (!recovery) throw new Error("remote_resume_recovery_evidence_missing");
+
+    // Validate the human intent against the authoritative interruption/CAS snapshot before
+    // issuing a fresh lease. The placeholder is never persisted or sent to a Host mailbox.
+    const validationLeaseId =
+      command.priorLeaseId === "lease-resume-validation"
+        ? "lease-resume-validation-2"
+        : "lease-resume-validation";
+    const provisional = remoteExecutionActionRequestSchema.parse({
+      ...command,
+      leaseId: validationLeaseId,
+      leaseExpiresAt: "1970-01-01T00:00:00.000Z",
+      recovery
+    });
+    decideRemoteExecutionAction(provisional, snapshot);
+
+    const lease = this.options.reservations.createResumeLease();
+    return remoteExecutionActionRequestSchema.parse({
+      ...command,
+      leaseId: lease.leaseId,
+      leaseExpiresAt: lease.leaseExpiresAt,
+      recovery
+    });
   }
 
   private async apply(
@@ -220,5 +270,58 @@ export class RemoteBlockActionCoordinator {
     if (message.publishedAt) return;
     this.options.mailbox.publish(message);
     this.options.dispatches.markMailboxPublished(message.messageId);
+  }
+}
+
+function assertHumanActionMatches(
+  command: RemoteHumanExecutionActionCommand,
+  request: RemoteExecutionActionRequest
+): void {
+  if (command.kind !== request.kind) throw new Error("remote_action_idempotency_conflict");
+  if (
+    command.actionId !== request.actionId ||
+    command.operationId !== request.operationId ||
+    command.dispatchId !== request.dispatchId ||
+    command.executionAttemptId !== request.executionAttemptId ||
+    command.expectedAttemptVersion !== request.expectedAttemptVersion ||
+    command.reason !== request.reason
+  ) {
+    throw new Error("remote_action_idempotency_conflict");
+  }
+  switch (command.kind) {
+    case "resume_same_session":
+      if (request.kind !== "resume_same_session" || command.priorLeaseId !== request.priorLeaseId) {
+        throw new Error("remote_action_idempotency_conflict");
+      }
+      return;
+    case "retry_new_attempt":
+      if (
+        request.kind !== "retry_new_attempt" ||
+        command.priorLeaseId !== request.priorLeaseId ||
+        command.newDispatchId !== request.newDispatchId ||
+        command.newExecutionAttemptId !== request.newExecutionAttemptId
+      ) {
+        throw new Error("remote_action_idempotency_conflict");
+      }
+      return;
+    case "fail":
+      if (
+        request.kind !== "fail" ||
+        command.leaseId !== request.leaseId ||
+        JSON.stringify(command.failure) !== JSON.stringify(request.failure)
+      ) {
+        throw new Error("remote_action_idempotency_conflict");
+      }
+      return;
+    case "block":
+      if (request.kind !== "block" || command.leaseId !== request.leaseId) {
+        throw new Error("remote_action_idempotency_conflict");
+      }
+      return;
+    case "cancel":
+      if (request.kind !== "cancel" || command.leaseId !== request.leaseId) {
+        throw new Error("remote_action_idempotency_conflict");
+      }
+      return;
   }
 }

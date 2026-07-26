@@ -14,7 +14,6 @@ import {
   adaptRemoteAcpEvents,
   buildRemoteActionIdentity,
   projectRemoteRunPanelViewModel,
-  resolveRemoteResumeLeaseAndRecovery,
   type RemoteRunAuthorizedActionKind,
   type RemoteRunPanelViewModel
 } from "../collaboration/remoteRunViewModels";
@@ -39,7 +38,6 @@ export type UseRemoteRunPanelControllerArgs = {
   t: ReturnType<typeof createTranslator>;
   /** Optional clock/random for deterministic tests. */
   createId?: () => string;
-  now?: () => Date;
 };
 
 export type UseRemoteRunPanelControllerResult = {
@@ -56,7 +54,7 @@ export type UseRemoteRunPanelControllerResult = {
   dispatch: () => Promise<void>;
   cancel: (reason: string) => Promise<void>;
   failInterruption: (reason: string) => Promise<void>;
-  /** Resume uses observation recovery + a fresh lease; callers only supply reason. */
+  /** Resume sends only the human intent; Server materializes lease and recovery fields. */
   resume: (reason: string) => Promise<void>;
   retryNewAttempt: (input: {
     newDispatchId: string;
@@ -112,8 +110,6 @@ export function useRemoteRunPanelController(
       }
       return `remote-action-${Date.now()}`;
     });
-  const now = args.now ?? (() => new Date());
-
   const { status } = useCollaborationStatus({ api });
   const { snapshot } = useCollaborationReadModels({
     api,
@@ -375,19 +371,11 @@ export function useRemoteRunPanelController(
     async (reason: string) => {
       if (!api || !observation) return;
       await runAction("resume_same_session", async () => {
-        const resolved = resolveRemoteResumeLeaseAndRecovery({
-          observation,
-          createLeaseId: createId,
-          now
-        });
         const action = buildRemoteActionIdentity({
           observation,
           kind: "resume_same_session",
           actionId: createId(),
-          reason,
-          leaseId: resolved.leaseId,
-          leaseExpiresAt: resolved.leaseExpiresAt,
-          recovery: resolved.recovery
+          reason
         });
         await api.executeCollaborationRemoteOperationAction({
           operationId: observation.operationId,
@@ -395,7 +383,7 @@ export function useRemoteRunPanelController(
         });
       });
     },
-    [api, observation, runAction, createId, now]
+    [api, observation, runAction, createId]
   );
 
   const retryNewAttempt = useCallback(

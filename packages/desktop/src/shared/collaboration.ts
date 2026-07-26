@@ -32,7 +32,7 @@ import {
   type RemoteActionView,
   type RemoteDispatchWireCommand,
   type RemoteEventReplay,
-  type RemoteExecutionActionWireRequest,
+  type RemoteHumanExecutionActionCommand,
   type RemoteInteractionPage,
   type RemoteInteractionResponse,
   type RemoteInteractionView,
@@ -408,7 +408,7 @@ export type PlanWeaveCollaborationApi = {
   ) => Promise<RemoteOperationObservation>;
   executeCollaborationRemoteOperationAction: (input: {
     operationId: string;
-    action: RemoteExecutionActionWireRequest;
+    action: RemoteHumanExecutionActionCommand;
   }) => Promise<RemoteActionView>;
   replayCollaborationRemoteOperationEvents: (input: {
     operationId: string;

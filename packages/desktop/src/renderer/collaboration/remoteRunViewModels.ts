@@ -1,9 +1,9 @@
 import {
-  remoteExecutionActionWireRequestSchema,
+  remoteHumanExecutionActionCommandSchema,
   type AssignmentDisplayProjection,
   type RemoteAttemptStatus,
   type RemoteEventReplay,
-  type RemoteExecutionActionWireRequest,
+  type RemoteHumanExecutionActionCommand,
   type RemoteInteractionView,
   type RemoteOperationObservation,
   type RemoteOperationState
@@ -72,50 +72,6 @@ export type RemoteRunIdentitySummary = {
   canvasId: string;
   projectId: string;
 };
-
-/**
- * Fresh resume lease TTL. Must remain below typical Server `leaseDurationMs`
- * (default 30s) or host reservation rejects with remote_resume_lease_expiry_invalid.
- */
-export const REMOTE_RESUME_LEASE_TTL_MS = 25_000;
-
-/**
- * Build resume_same_session lease + recovery from authoritative observation.
- * Recovery identity is never invented in the renderer; only a fresh lease id is minted
- * (protocol requires priorLeaseId !== leaseId).
- */
-export function resolveRemoteResumeLeaseAndRecovery(input: {
-  observation: RemoteOperationObservation;
-  createLeaseId: () => string;
-  now: () => Date;
-  leaseTtlMs?: number;
-}): {
-  leaseId: string;
-  leaseExpiresAt: string;
-  recovery: { acpSessionId: string; recoveryId: string };
-} {
-  const recovery = input.observation.runtime.interruption?.recovery;
-  if (!recovery?.acpSessionId || !recovery.recoveryId) {
-    throw new Error("remote_resume_recovery_evidence_missing");
-  }
-  const priorLeaseId = input.observation.attempt.leaseId;
-  if (!priorLeaseId) {
-    throw new Error("remote_action_missing_lease");
-  }
-  let leaseId = input.createLeaseId();
-  if (leaseId === priorLeaseId) {
-    leaseId = `${priorLeaseId}:resume`;
-  }
-  const ttlMs = input.leaseTtlMs ?? REMOTE_RESUME_LEASE_TTL_MS;
-  return {
-    leaseId,
-    leaseExpiresAt: new Date(input.now().getTime() + ttlMs).toISOString(),
-    recovery: {
-      acpSessionId: recovery.acpSessionId,
-      recoveryId: recovery.recoveryId
-    }
-  };
-}
 
 /** True when the selected Block has an unfinished local run record (local Auto Run active). */
 export function isLocalAutoRunActiveFromBlockRecords(
@@ -559,17 +515,13 @@ export function projectRemoteRunPanelViewModel(input: {
 
 export function buildRemoteActionIdentity(input: {
   observation: RemoteOperationObservation;
-  kind: RemoteExecutionActionWireRequest["kind"];
+  kind: RemoteHumanExecutionActionCommand["kind"];
   actionId: string;
   reason: string;
-  /** Fresh lease for resume; otherwise prior lease. */
-  leaseId?: string;
-  leaseExpiresAt?: string;
-  recovery?: { acpSessionId: string; recoveryId: string };
   newDispatchId?: string;
   newExecutionAttemptId?: string;
   failure?: { code: string; message: string; retryable: boolean };
-}): RemoteExecutionActionWireRequest {
+}): RemoteHumanExecutionActionCommand {
   const base = {
     actionId: input.actionId,
     operationId: input.observation.operationId,
@@ -586,13 +538,13 @@ export function buildRemoteActionIdentity(input: {
 
   switch (input.kind) {
     case "cancel":
-      return remoteExecutionActionWireRequestSchema.parse({
+      return remoteHumanExecutionActionCommandSchema.parse({
         ...base,
         kind: "cancel",
         leaseId: priorLease
       });
     case "fail":
-      return remoteExecutionActionWireRequestSchema.parse({
+      return remoteHumanExecutionActionCommandSchema.parse({
         ...base,
         kind: "fail",
         leaseId: priorLease,
@@ -603,29 +555,23 @@ export function buildRemoteActionIdentity(input: {
         }
       });
     case "block":
-      return remoteExecutionActionWireRequestSchema.parse({
+      return remoteHumanExecutionActionCommandSchema.parse({
         ...base,
         kind: "block",
         leaseId: priorLease
       });
     case "resume_same_session": {
-      if (!input.leaseId || !input.leaseExpiresAt || !input.recovery) {
-        throw new Error("remote_resume_requires_fresh_lease_and_recovery");
-      }
-      return remoteExecutionActionWireRequestSchema.parse({
+      return remoteHumanExecutionActionCommandSchema.parse({
         ...base,
         kind: "resume_same_session",
-        priorLeaseId: priorLease,
-        leaseId: input.leaseId,
-        leaseExpiresAt: input.leaseExpiresAt,
-        recovery: input.recovery
+        priorLeaseId: priorLease
       });
     }
     case "retry_new_attempt": {
       if (!input.newDispatchId || !input.newExecutionAttemptId) {
         throw new Error("remote_retry_requires_new_identities");
       }
-      return remoteExecutionActionWireRequestSchema.parse({
+      return remoteHumanExecutionActionCommandSchema.parse({
         ...base,
         kind: "retry_new_attempt",
         priorLeaseId: priorLease,

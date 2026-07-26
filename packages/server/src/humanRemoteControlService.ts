@@ -3,6 +3,7 @@ import {
   remoteDispatchWireCommandSchema,
   remoteEventQuerySchema,
   remoteEventReplaySchema,
+  remoteHumanExecutionActionCommandSchema,
   remoteInteractionPageQuerySchema,
   remoteInteractionPageSchema,
   remoteInteractionResponseSchema,
@@ -108,11 +109,11 @@ export class HumanRemoteControlService {
     rawAction: unknown
   ) {
     const operation = this.operationFor(context, projectId, operationId);
-    const action = remoteActionViewSchema.shape.request.parse(rawAction);
-    if (action.operationId !== operation.id) {
+    const command = remoteHumanExecutionActionCommandSchema.parse(rawAction);
+    if (command.operationId !== operation.id) {
       throw new HumanRemoteControlError("human_remote_operation_mismatch");
     }
-    const record = await this.options.coordinator.executeAction(action);
+    const record = await this.options.coordinator.executeHumanAction(command);
     return remoteActionViewSchema.parse({
       request: record.request,
       state: record.state,

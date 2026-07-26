@@ -117,6 +117,19 @@ export class HostReservationRepository {
   }
 
   /**
+   * Materialize the Server-owned lease identity used by a same-attempt resume.
+   * The identity is persisted with the action before reservation application; the
+   * reservation transition later reuses this exact expiry and fencing identity.
+   */
+  createResumeLease(): { leaseId: string; leaseExpiresAt: string } {
+    const now = this.clock();
+    return {
+      leaseId: leaseIdSchema.parse(`lease-${randomUUID()}`),
+      leaseExpiresAt: new Date(now.getTime() + this.options.leaseDurationMs).toISOString()
+    };
+  }
+
+  /**
    * Reserve capacity for an operation attempt.
    * When `preferredHostId` is set (exact Host assignment or explicit override), only that Host
    * is considered — never an arbitrary alternate from a UI eligibility cache.

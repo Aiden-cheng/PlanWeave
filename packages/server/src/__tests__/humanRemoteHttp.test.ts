@@ -94,7 +94,7 @@ async function setup() {
     { serverInstanceOwnerToken: storage.serverInstanceOwnerToken }
   );
   const host = coordination.hosts.register("Human Remote Host").host;
-  coordination.hosts.reportOnline(host.id, ["acp.codex"], 1);
+  coordination.hosts.reportOnline(host.id, ["acp.codex", "acp.session.load"], 1);
   const service = new HumanRemoteControlService({
     operations: coordination.operations,
     dispatches: coordination.dispatches,
@@ -353,5 +353,100 @@ describe("human remote operation HTTP", () => {
     });
     expect(draining.status).toBe(503);
     await expect(draining.json()).resolves.toEqual({ error: "server_not_accepting_mutations" });
+  });
+
+  it("materializes resume lease and recovery on the Server and replays by actionId", async () => {
+    const fixture = await setup();
+    const token = await bootstrap(fixture.origin, fixture.projectId, "resume-owner");
+    const collection = `${fixture.origin}/api/v1/projects/${fixture.projectId}/remote-operations`;
+    const dispatched = await fetch(collection, {
+      method: "POST",
+      headers: headers(token),
+      body: JSON.stringify({
+        canvasId: "default",
+        blockRef: "T-001#B-001",
+        idempotencyKey: "human-resume-dispatch"
+      })
+    });
+    const operation = (await dispatched.json()) as {
+      operationId: string;
+      dispatchId: string;
+      executionAttemptId: string;
+      attempt: { leaseId: string; stateVersion: number };
+    };
+    const dispatch = fixture.coordination.dispatches.getRequired(operation.dispatchId);
+    fixture.coordination.dispatches.accept(
+      fixture.host.id,
+      "human-resume-accept",
+      dispatch.id,
+      dispatch.leaseId,
+      dispatch.executionAttemptId
+    );
+    fixture.coordination.dispatches.interrupt(fixture.host.id, "human-resume-interrupt", {
+      type: "dispatch.interrupted",
+      protocolVersion: 1,
+      messageId: "human-resume-interrupt",
+      dispatchId: dispatch.id,
+      leaseId: dispatch.leaseId,
+      executionAttemptId: dispatch.executionAttemptId,
+      reason: "acp_session_lost",
+      resumable: true,
+      recovery: { acpSessionId: "session-human-resume", recoveryId: "recovery-human-resume" }
+    });
+    const reservation = fixture.coordination.reservations.getRequired(dispatch.leaseId);
+    fixture.coordination.reservations.release({
+      leaseId: reservation.leaseId,
+      fencingToken: reservation.fencingToken,
+      expectedVersion: reservation.version,
+      reason: "expired"
+    });
+    await fixture.coordination.coordinator.reenter(operation.operationId);
+    const interrupted = fixture.coordination.operations.getRequired(operation.operationId);
+
+    const command = {
+      kind: "resume_same_session",
+      actionId: "human-resume-action-1",
+      operationId: operation.operationId,
+      dispatchId: operation.dispatchId,
+      executionAttemptId: operation.executionAttemptId,
+      expectedAttemptVersion: interrupted.attempt.stateVersion,
+      priorLeaseId: operation.attempt.leaseId,
+      reason: "resume after transport loss"
+    };
+    const resumed = await fetch(`${collection}/${operation.operationId}/actions`, {
+      method: "POST",
+      headers: headers(token),
+      body: JSON.stringify(command)
+    });
+    const resumedBody = (await resumed.json()) as {
+      request: Record<string, unknown>;
+      state: string;
+    };
+    expect(resumed.status).toBe(202);
+    expect(resumedBody.state).toBe("delivered");
+    expect(resumedBody.request).toMatchObject({
+      kind: "resume_same_session",
+      priorLeaseId: reservation.leaseId,
+      recovery: { acpSessionId: "session-human-resume", recoveryId: "recovery-human-resume" }
+    });
+    expect(resumedBody.request.leaseId).not.toBe(reservation.leaseId);
+    expect(resumedBody.request.leaseExpiresAt).toEqual(expect.any(String));
+    expect(resumedBody.request).not.toHaveProperty("leaseTtlMs");
+
+    const replay = await fetch(`${collection}/${operation.operationId}/actions`, {
+      method: "POST",
+      headers: headers(token),
+      body: JSON.stringify(command)
+    });
+    await expect(replay.json()).resolves.toMatchObject({ state: "delivered" });
+    expect(replay.status).toBe(202);
+
+    const conflict = await fetch(`${collection}/${operation.operationId}/actions`, {
+      method: "POST",
+      headers: headers(token),
+      body: JSON.stringify({ ...command, reason: "different payload" })
+    });
+    expect(conflict.status).toBe(409);
+    await expect(conflict.json()).resolves.toMatchObject({ error: "human_remote_operation_conflict" });
   });
 });

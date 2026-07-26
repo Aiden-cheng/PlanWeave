@@ -355,7 +355,7 @@ describe("useRemoteRunPanelController", () => {
     );
   });
 
-  it("resumes from observation recovery evidence without inventing recoveryId", async () => {
+  it("sends server-owned resume intent without minting lease or recovery", async () => {
     const { api, executeAction, observe } = createApi();
     observe.mockResolvedValue(observation("interrupted"));
     executeAction.mockResolvedValue({
@@ -398,8 +398,7 @@ describe("useRemoteRunPanelController", () => {
         open: true,
         api,
         t: createTranslator("en"),
-        createId: () => `id-lease-${leaseSeq++}`,
-        now: () => new Date("2030-01-01T00:00:00.000Z")
+        createId: () => `id-lease-${leaseSeq++}`
       })
     );
 
@@ -418,19 +417,14 @@ describe("useRemoteRunPanelController", () => {
         action: expect.objectContaining({
           kind: "resume_same_session",
           priorLeaseId: "lease-1",
-          leaseId: "id-lease-0",
-          recovery: { acpSessionId: "session-1", recoveryId: "recovery-1" },
           reason: "resume please"
         })
       })
     );
-    const action = executeAction.mock.calls[0]?.[0]?.action as {
-      leaseId: string;
-      recovery: { recoveryId: string };
-    };
-    expect(action.leaseId).not.toMatch(/^lease-resume-\d{10,}$/);
-    expect(action.recovery.recoveryId).toBe("recovery-1");
-    expect(action.recovery.recoveryId).not.toMatch(/^recovery-\d{10,}$/);
+    const action = executeAction.mock.calls[0]?.[0]?.action as Record<string, unknown>;
+    expect(action).not.toHaveProperty("leaseId");
+    expect(action).not.toHaveProperty("leaseExpiresAt");
+    expect(action).not.toHaveProperty("recovery");
   });
 
   it("clears observation state on project switch generation", async () => {

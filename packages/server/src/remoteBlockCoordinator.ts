@@ -423,6 +423,10 @@ export class RemoteBlockCoordinator {
     return this.actionCoordinator().execute(rawAction);
   }
 
+  async executeHumanAction(rawCommand: unknown): Promise<RemoteExecutionActionRecord> {
+    return this.actionCoordinator().executeHuman(rawCommand);
+  }
+
   async reconcileActions(startupContext?: {
     serverInstanceOwnerToken: string;
   }): Promise<RemoteExecutionActionRecord[]> {

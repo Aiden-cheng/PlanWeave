@@ -13,9 +13,7 @@ import {
   projectRemoteRunActions,
   projectRemoteRunIdentity,
   projectRemoteRunPanelViewModel,
-  REMOTE_RESUME_LEASE_TTL_MS,
   REMOTE_RUN_ACTION_STATE_TABLE,
-  resolveRemoteResumeLeaseAndRecovery
 } from "../renderer/collaboration/remoteRunViewModels";
 
 function assignment(
@@ -293,7 +291,7 @@ describe("remoteRunViewModels", () => {
     expect(identity.leaseId).toBe("lease-1");
   });
 
-  it("resolves resume lease/recovery from observation without minting recovery ids", () => {
+  it("builds a server-owned resume command from observation CAS identity", () => {
     const obs = observation({
       state: "interrupted",
       attempt: {
@@ -315,31 +313,25 @@ describe("remoteRunViewModels", () => {
         }
       }
     });
-    const fixedNow = new Date("2030-01-01T00:30:00.000Z");
-    const resolved = resolveRemoteResumeLeaseAndRecovery({
+    const action = buildRemoteActionIdentity({
       observation: obs,
-      createLeaseId: () => "lease-fresh-from-controller",
-      now: () => fixedNow
+      kind: "resume_same_session",
+      actionId: "resume-command-1",
+      reason: "continue"
     });
-    expect(resolved.recovery).toEqual({
-      acpSessionId: "session-1",
-      recoveryId: "recovery-1"
+    expect(action).toEqual({
+      actionId: "resume-command-1",
+      operationId: "op-1",
+      dispatchId: "dispatch-1",
+      executionAttemptId: "attempt-1",
+      expectedAttemptVersion: 4,
+      kind: "resume_same_session",
+      priorLeaseId: "lease-1",
+      reason: "continue"
     });
-    expect(resolved.leaseId).toBe("lease-fresh-from-controller");
-    // Reject the old renderer Date.now() fabrications specifically.
-    expect(resolved.leaseId).not.toMatch(/^lease-resume-\d{10,}$/);
-    expect(resolved.recovery.recoveryId).toBe("recovery-1");
-    expect(resolved.recovery.recoveryId).not.toMatch(/^recovery-\d{10,}$/);
-    expect(resolved.leaseExpiresAt).toBe(
-      new Date(fixedNow.getTime() + REMOTE_RESUME_LEASE_TTL_MS).toISOString()
-    );
-    expect(() =>
-      resolveRemoteResumeLeaseAndRecovery({
-        observation: observation(),
-        createLeaseId: () => "lease-x",
-        now: () => fixedNow
-      })
-    ).toThrow("remote_resume_recovery_evidence_missing");
+    expect(action).not.toHaveProperty("leaseId");
+    expect(action).not.toHaveProperty("leaseExpiresAt");
+    expect(action).not.toHaveProperty("recovery");
   });
 
   it("detects local Auto Run activity from unfinished block run records", () => {

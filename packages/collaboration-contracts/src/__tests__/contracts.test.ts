@@ -74,6 +74,7 @@ describe("collaboration-contracts", () => {
       remoteActionViewSchema,
       remoteDispatchWireCommandSchema,
       remoteExecutionActionWireRequestSchema,
+      remoteHumanExecutionActionCommandSchema,
       remoteOperationObservationSchema
     } = await import("../remoteRun.js");
     expect(
@@ -115,6 +116,23 @@ describe("collaboration-contracts", () => {
         reason: "stop"
       }).kind
     ).toBe("cancel");
+    const resumeCommand = remoteHumanExecutionActionCommandSchema.parse({
+      kind: "resume_same_session",
+      actionId: "resume-1",
+      operationId: "op-1",
+      dispatchId: "dispatch-1",
+      executionAttemptId: "attempt-1",
+      expectedAttemptVersion: 4,
+      priorLeaseId: "lease-1",
+      reason: "continue"
+    });
+    expect(resumeCommand).not.toHaveProperty("leaseId");
+    expect(() =>
+      remoteHumanExecutionActionCommandSchema.parse({
+        ...resumeCommand,
+        leaseId: "lease-server-generated"
+      })
+    ).toThrow();
     const rejectedAction = {
       request: {
         kind: "cancel",

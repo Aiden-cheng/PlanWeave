@@ -14,7 +14,7 @@ import {
   humanPageQuerySchema,
   opaqueIdentifierSchema,
   remoteEventQuerySchema,
-  remoteExecutionActionWireRequestSchema,
+  remoteHumanExecutionActionCommandSchema,
   remoteInteractionPageQuerySchema,
   remoteInteractionResponseSchema,
   workItemRefSchema,
@@ -33,7 +33,7 @@ import {
   type RemoteActionView,
   type RemoteDispatchWireCommand,
   type RemoteEventReplay,
-  type RemoteExecutionActionWireRequest,
+  type RemoteHumanExecutionActionCommand,
   type RemoteInteractionPage,
   type RemoteInteractionResponse,
   type RemoteInteractionView,
@@ -216,7 +216,7 @@ export type CollaborationRemoteInteractionPageQueryInput = z.input<
 export const collaborationRemoteActionInputSchema = z
   .object({
     operationId: opaqueIdentifierSchema,
-    action: remoteExecutionActionWireRequestSchema
+    action: remoteHumanExecutionActionCommandSchema
   })
   .strict();
 export type CollaborationRemoteActionInput = z.infer<typeof collaborationRemoteActionInputSchema>;
@@ -235,7 +235,7 @@ export type {
   RemoteActionView,
   RemoteDispatchWireCommand,
   RemoteEventReplay,
-  RemoteExecutionActionWireRequest,
+  RemoteHumanExecutionActionCommand,
   RemoteInteractionPage,
   RemoteInteractionResponse,
   RemoteInteractionView,
