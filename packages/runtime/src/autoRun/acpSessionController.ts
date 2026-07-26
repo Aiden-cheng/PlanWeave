@@ -229,6 +229,14 @@ export class AcpSessionController {
       if (handle) this.registry.notifyInteractionChanged(handle);
     };
     let protocolObserverError: unknown;
+    const redactProtocolPayload = (payload: unknown): unknown => {
+      try {
+        return redactAcpProtocolPayload(payload);
+      } catch (error) {
+        protocolObserverError ??= error;
+        throw error;
+      }
+    };
     const terminalOutputHandler = run.terminalOutputHandler;
     const ownerState = new AcpOwnerStateWriter({
       heartbeatPath,
@@ -494,7 +502,7 @@ export class AcpSessionController {
         ...(eventStore
           ? {
               observer: {
-                redact: redactAcpProtocolPayload,
+                redact: redactProtocolPayload,
                 observe: (observation: { direction: string; payload: unknown }) => {
                   void eventStore
                     .appendProtocol(observation.direction, observation.payload)

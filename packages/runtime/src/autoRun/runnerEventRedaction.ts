@@ -15,7 +15,10 @@ const jsonEnvironmentCredentialPattern =
   /["'](?:[A-Z_][A-Z0-9_]*_)?(?:API_KEY|TOKEN|SECRET|PASSWORD)["']\s*:\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}]+)/gi;
 const sensitiveLabelPattern =
   /\b(?:client[_-]?secret|session[_-]?cookie|set-cookie|cookie)\s*[:=]\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\r\n,;]+)/gi;
-const standaloneAuthorizationPattern = /\b(?:basic|bearer)\s+[A-Za-z0-9._~+/=-]{8,}/gi;
+const standaloneBasicAuthorizationPattern = /\bbasic\s+[A-Za-z0-9+/]+={0,2}/gi;
+const standaloneBearerAuthorizationPattern = /\bbearer\s+[A-Za-z0-9._~+/=-]{8,}/gi;
+const minimumOpaqueBearerTokenLength = 24;
+const minimumBearerTokenSeparators = 2;
 const privateKeyPattern =
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)/g;
 const privateKeyMarkerPattern = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/i;
@@ -26,7 +29,33 @@ type RedactionRule = {
   pattern: RegExp;
   classification: RedactionClass;
   replacement: string;
+  shouldRedact?: (match: string) => boolean;
 };
+
+function authorizationToken(match: string): string {
+  return match.replace(/^\s*(?:basic|bearer)\s+/i, "");
+}
+
+function isBasicCredential(match: string): boolean {
+  const token = authorizationToken(match);
+  if (token.length < 8 || token.length % 4 === 1) return false;
+  try {
+    const decoded = atob(token.padEnd(Math.ceil(token.length / 4) * 4, "="));
+    return decoded.includes(":");
+  } catch {
+    return false;
+  }
+}
+
+function isBearerCredential(match: string): boolean {
+  const token = authorizationToken(match);
+  const separators = token.match(/[._~+/=-]/g)?.length ?? 0;
+  return (
+    token.length >= minimumOpaqueBearerTokenLength ||
+    /[0-9]/.test(token) ||
+    separators >= minimumBearerTokenSeparators
+  );
+}
 
 const redactionRules: readonly RedactionRule[] = [
   {
@@ -65,9 +94,16 @@ const redactionRules: readonly RedactionRule[] = [
     replacement: "[REDACTED:SENSITIVE_CONTENT]"
   },
   {
-    pattern: standaloneAuthorizationPattern,
+    pattern: standaloneBasicAuthorizationPattern,
     classification: "credential",
-    replacement: "[REDACTED:CREDENTIAL]"
+    replacement: "[REDACTED:CREDENTIAL]",
+    shouldRedact: isBasicCredential
+  },
+  {
+    pattern: standaloneBearerAuthorizationPattern,
+    classification: "credential",
+    replacement: "[REDACTED:CREDENTIAL]",
+    shouldRedact: isBearerCredential
   }
 ];
 
@@ -76,10 +112,24 @@ function patternMatches(pattern: RegExp, value: string): boolean {
   return pattern.test(value);
 }
 
+function ruleMatches(rule: RedactionRule, value: string): boolean {
+  rule.pattern.lastIndex = 0;
+  let match = rule.pattern.exec(value);
+  while (match !== null) {
+    if (!rule.shouldRedact || rule.shouldRedact(match[0])) {
+      rule.pattern.lastIndex = 0;
+      return true;
+    }
+    match = rule.pattern.exec(value);
+  }
+  rule.pattern.lastIndex = 0;
+  return false;
+}
+
 export function containsUnredactedRunnerSecret(value: string): boolean {
   const decodedNewlines = value.replaceAll("\\n", "\n");
   return (
-    redactionRules.some((rule) => patternMatches(rule.pattern, decodedNewlines)) ||
+    redactionRules.some((rule) => ruleMatches(rule, decodedNewlines)) ||
     patternMatches(privateKeyMarkerPattern, decodedNewlines) ||
     patternMatches(incompleteRedactionPattern, decodedNewlines)
   );
@@ -95,7 +145,8 @@ export function redactRunnerEventText(value: string): {
   const classes = new Set<RedactionClass>();
   for (const rule of redactionRules) {
     rule.pattern.lastIndex = 0;
-    text = text.replace(rule.pattern, () => {
+    text = text.replace(rule.pattern, (match) => {
+      if (rule.shouldRedact && !rule.shouldRedact(match)) return match;
       replaced += 1;
       classes.add(rule.classification);
       return rule.replacement;
