@@ -21,6 +21,7 @@ import type {
 } from "../remoteBlockCoordinatorPorts.js";
 import { RemoteRuntimePortRegistry } from "../remoteRuntimeLocator.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
+import { WorkAssignmentRepository } from "../work/repository.js";
 
 type Coordination = ReturnType<typeof createRemoteBlockCoordination>;
 
@@ -300,6 +301,17 @@ describe("RemoteBlockCoordinator crash reconciliation", () => {
     const harness = await CoordinatorHarness.create();
     const hostId = harness.registerHost();
     let coordination = harness.requireCoordination();
+    new WorkAssignmentRepository(harness.requireServer().database).applyCasUpdate({
+      expectedRevision: 0,
+      record: {
+        projectId: harness.locator.projectId,
+        workItem: { kind: "block", canvasId: harness.locator.canvasId, blockRef: "T-001#B-001" },
+        target: { kind: "exact_host", hostId },
+        revision: 1,
+        updatedBy: { kind: "system", id: "retry-crash-test" },
+        updatedAt: "2030-01-01T00:00:00.000Z"
+      }
+    });
     const outcome = await coordination.coordinator.dispatch(harness.request());
     const dispatch = coordination.dispatches.getRequired(outcome.operation.dispatchId);
     coordination.dispatches.accept(
