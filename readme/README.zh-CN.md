@@ -294,7 +294,7 @@ pnpm pack:distributed
 pnpm check:distributed-package-install
 ```
 
-**受支持平台声明**只来自已产出制品与已执行证据（不能因为 TypeScript 能编译就宣称平台支持）。当前矩阵（Coordinator/Host OS/架构、Desktop 打包 smoke、ACP profile、依赖审计策略，以及 REAL_ACP/VPS 的诚实阻塞项）见 [distributed-platform-support-matrix.md](./distributed-platform-support-matrix.md)。在该矩阵给出对应 OS 的可验证证据之前，**不**将 Linux x64 Server/Host 多进程路径（realProcess / operator walkthrough）、Linux aarch64 Server/Host 与 Desktop Linux 打包启动列为公开支持范围。Ubuntu 上仅 monorepo unit/build 通过，不能当作多进程支持声明。
+**受支持平台声明**要求在对应 OS 和架构上产出制品，并通过干净安装、打包启动以及相关多进程/live 门禁。仅有 TypeScript 编译或 monorepo 单元测试不足以证明平台支持。
 
 ### 启动 Coordinator
 
@@ -530,7 +530,7 @@ PlanWeave Desktop 使用非密钥连接配置（`serverBaseUrl` origin + `projec
 - **评论 / 活动**：作用域为当前 Task/Block；与 Task Workspace 的 Agent 会话分离
 - **远程运行面板**：显式 dispatch / 观测 / 交互 / resume / retry / cancel —— 与本地 Auto Run 共存但不合并状态机；同一 Block 上未完成的本地 Auto Run 会阻止远程 dispatch
 
-**线路可用性（诚实说明）：** Server 对人类 **身份** 与 **评论附件** 的公开 HTTP 见上文。`/api/v1/remote-operations*` 使用 **operator** bearer。Desktop 已编码的项目作用域人类路由（指派/评论/活动列表与更新、人类 observer WSS `/api/v1/projects/:projectId/human/observe`、人类鉴权的 remote-operations）在 client/contracts 侧已就绪；在维护者验证检查点关闭对应 Server 传输残余之前，**不要**把完整多人 live 完成当作公开支持声明。不要发明把 Host mailbox 混入人类评论的运维绕过。
+**线路可用性：** Server 对人类 **身份** 与 **评论附件** 的公开 HTTP 见上文。`/api/v1/remote-operations*` 使用 **operator** bearer。Desktop client/contracts 中的指派、评论/活动更新、人类 observer WSS（`/api/v1/projects/:projectId/human/observe`）和人类鉴权 remote-operations 本身不能证明 Server 传输已受支持。不要把 Host mailbox 流量混入人类评论作为运维绕过。
 
 ### 可选的真实 ACP 兼容性 smoke
 
@@ -647,13 +647,6 @@ node scripts/planweave-release-gate.mjs --checklist
 - 收集 live 证据后清理临时 harness，并撤销一次性 enrollment 材料。
 
 **证据规则：** live 证据 14 天后过期，仅以生产者写入的 `generatedAt` 为准（忽略文件 mtime）。运维拥有一次性 VPS 与 Host 本地 provider 登录；CI 只拥有确定性套件。门禁输入为证据路径与 package 版本；输出为含层级状态、digest、兼容检查、回滚清单与 `releaseReady.{ci,supportedVersionRelease,preRelease}` 的 JSON 报告。
-
-维护者验证记录（不是最终用户指南；可能列出残余产品缺口，且不得把未完成的 live 证据当作通过）：
-
-- 远程执行 / live 分层：[distributed-remote-execution-checkpoint.md](distributed-remote-execution-checkpoint.md)
-- 平台与包支持矩阵：[distributed-platform-support-matrix.md](distributed-platform-support-matrix.md)
-- 人类协作领域：[distributed-human-collaboration-checkpoint.md](distributed-human-collaboration-checkpoint.md)
-- Desktop 协作界面：[distributed-desktop-collaboration-checkpoint.md](distributed-desktop-collaboration-checkpoint.md)
 
 ### Operator HTTP 接口
 

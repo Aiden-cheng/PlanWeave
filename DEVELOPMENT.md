@@ -16,7 +16,7 @@ packages/collaboration-contracts   Schema-only human collaboration wire DTOs for
 examples                           Example PlanWeave packages
 scripts                            Repository checks, pack smoke, release-gate helpers
 skills                             Agent skills distributed from this repository
-readme                             README assets, localized README, maintainer evidence checkpoints
+readme                             README assets and localized README content
 archive                            Archived planning material (not implementation authority)
 ```
 
@@ -197,7 +197,7 @@ pnpm exec vitest run packages/server/src/__tests__/releaseGate.test.ts \
   packages/distributed-protocol/src/__tests__/compatibility.test.ts
 ```
 
-Do not treat skipped `PLANWEAVE_REAL_ACP` or `PLANWEAVE_VPS_E2E` evidence as a release pass. See the main README section **Live release gate and rollback checks**. Maintainer verification checkpoints under `readme/distributed-*-checkpoint.md` and `readme/distributed-platform-support-matrix.md` record evidence and residual gaps; they are not end-user guides.
+Do not treat skipped `PLANWEAVE_REAL_ACP` or `PLANWEAVE_VPS_E2E` evidence as a release pass. Run both live tiers in hard mode and evaluate their current sanitized evidence with the release gate command documented in the main README section **Live release gate and rollback checks**.
 
 ## ACP Verification
 

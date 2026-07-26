@@ -294,7 +294,7 @@ pnpm pack:distributed
 pnpm check:distributed-package-install
 ```
 
-**Supported platform claims** are derived from produced artifacts and executed evidence only (not from TypeScript compile success). The living matrix — Coordinator/Host OS/arch cells, Desktop packaged smoke, ACP profile pins, dependency audit policy, and honest REAL_ACP/VPS blockers — is recorded in [readme/distributed-platform-support-matrix.md](readme/distributed-platform-support-matrix.md). Linux x64 Server/Host multi-process (realProcess / operator walkthrough), Linux aarch64 Server/Host, and Desktop Linux packaged-start are **not** public support claims until that matrix shows OS-specific verified evidence. Monorepo unit/build on Ubuntu alone is not a multi-process support claim.
+**Supported platform claims** require produced artifacts plus clean-install, packaged-start, and relevant multi-process/live gate evidence on that OS and architecture. TypeScript compilation or monorepo unit tests alone are not sufficient evidence of platform support.
 
 ### Start the Coordinator
 
@@ -530,7 +530,7 @@ Typical UI surfaces (domain semantics and Desktop client contracts):
 - **Comments / Activity**: scoped to the selected Task/Block; distinct from Task Workspace Agent conversation
 - **Remote run panel**: explicit dispatch / observe / interaction / resume / retry / cancel — coexists with local Auto Run but does not merge status machines; local unfinished Auto Run blocks remote dispatch on the same Block
 
-**Wire availability (honest):** Server public HTTP for human **identity** and **comment attachments** is documented above. Operator remote-operations under `/api/v1/remote-operations*` use the **operator** bearer. Project-scoped human routes that Desktop encodes for assignment/comment/activity list-update, human observer WSS (`/api/v1/projects/:projectId/human/observe`), and human-auth remote-operations are domain-ready on the client/contracts side; treat full multi-user live completion against those residual Server transport paths as **not** a public support claim until maintainer verification checkpoints record them as closed. Do not invent operator workarounds that mix Host mailbox traffic into human comments.
+**Wire availability:** Server public HTTP for human **identity** and **comment attachments** is documented above. Operator remote-operations under `/api/v1/remote-operations*` use the **operator** bearer. Desktop client/contracts for assignment, comment/activity updates, human observer WSS (`/api/v1/projects/:projectId/human/observe`), and human-auth remote-operations do not by themselves establish a supported Server transport. Do not mix Host mailbox traffic into human comments as an operator workaround.
 
 ### Opt-in real ACP compatibility smoke
 
@@ -647,13 +647,6 @@ node scripts/planweave-release-gate.mjs --checklist
 - Clean up disposable harness state and revoke one-time enrollment materials after live evidence collection.
 
 **Evidence rules:** live evidence expires after 14 days based on producer `generatedAt` only (file mtime is ignored). Operators own disposable VPS access and Host-local provider login; CI owns only the deterministic suite. Gate inputs are evidence paths + package versions; outputs are a JSON report with tier status, digests, compatibility checks, rollback checklist, and `releaseReady.{ci,supportedVersionRelease,preRelease}`.
-
-Maintainer verification records (not end-user guides; may list residual product gaps without claiming unpublished live evidence as a pass):
-
-- Remote execution / live tiers: [readme/distributed-remote-execution-checkpoint.md](readme/distributed-remote-execution-checkpoint.md)
-- Platform and package support matrix: [readme/distributed-platform-support-matrix.md](readme/distributed-platform-support-matrix.md)
-- Human collaboration domain: [readme/distributed-human-collaboration-checkpoint.md](readme/distributed-human-collaboration-checkpoint.md)
-- Desktop collaboration surface: [readme/distributed-desktop-collaboration-checkpoint.md](readme/distributed-desktop-collaboration-checkpoint.md)
 
 ### Operator HTTP surface
 
