@@ -72,6 +72,9 @@ describe("desktop release configuration", () => {
     );
     expect(desktopScripts["build:standalone"]).toContain("pnpm build:workspace");
     expect(desktopScripts["build:workspace"]).toContain("copy-windows-job-helper.mjs");
+    expect(desktopScripts["verify:packaged:mac"]).toBe(
+      "pnpm pack:mac && pnpm smoke:packaged:mac && node scripts/verify-packaged-app.mjs"
+    );
     expect(rootScripts.build).toContain(
       "@planweave-ai/cli --filter @planweave-ai/desktop build:workspace"
     );
