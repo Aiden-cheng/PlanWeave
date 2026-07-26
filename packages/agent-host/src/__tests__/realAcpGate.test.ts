@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { parseRealAcpGate, precondition } from "../realAcp/gate.js";
+import { evidenceCommandLabel, preflightRealAcp } from "../realAcp/preflight.js";
 import { resolveRealAcpHostProfile } from "../realAcp/resolveProfile.js";
 import { listSupportedHostAcpProfiles } from "../realAcp/supportedProfiles.js";
 import { runRealAcpSmokeCli } from "../realAcp/cli.js";
@@ -161,5 +162,41 @@ describe("real ACP gate and profile resolution", () => {
     };
     expect(evidence.result).toBe("failed");
     expect(evidence.disposition).toBe("fail");
+  });
+
+  it("never stores absolute executable paths in preflight evidence", async () => {
+    expect(evidenceCommandLabel("/Users/alice/.local/bin/codex-acp")).toBe("codex-acp");
+    expect(evidenceCommandLabel("C:\\\\Tools\\\\pi-acp.exe")).toBe("pi-acp.exe");
+    expect(evidenceCommandLabel("unresolved")).toBe("unresolved");
+
+    const root = await mkdtemp(join(tmpdir(), "planweave-real-acp-evidence-path-"));
+    tempRoots.push(root);
+    const command = join(root, "codex-acp");
+    await writeFile(
+      command,
+      "#!/bin/sh\necho 'not a real acp agent'\nexit 1\n",
+      "utf8"
+    );
+    await chmod(command, 0o755);
+
+    const outcome = await preflightRealAcp({
+      gate: { enabled: true, mode: "soft", preferredProfileId: "codex-acp" },
+      cwd: root,
+      env: { PATH: root },
+      pathEnv: root
+    });
+    // Preflight may fail (binary is a stub) but any evidence must use basename only.
+    const evidence =
+      outcome.status === "ready"
+        ? outcome.evidence
+        : outcome.status === "precondition"
+          ? outcome.evidence
+          : undefined;
+    if (evidence) {
+      expect(evidence.commandPath).toBe("codex-acp");
+      expect(evidence.commandPath).not.toContain("/");
+      expect(evidence.commandPath).not.toContain(root);
+      expect(JSON.stringify(evidence)).not.toMatch(/\/Users\/|\/home\/|\\\\Users\\\\/);
+    }
   });
 });

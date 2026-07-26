@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { basename } from "node:path";
 import { promisify } from "node:util";
 import {
   ACP_SDK_AUTHORITY,
@@ -12,9 +13,23 @@ import { resolveRealAcpHostProfile, type ResolvedRealAcpHostProfile } from "./re
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Durable smoke evidence never stores absolute Host executable paths.
+ * Use basename-only command labels (or "unresolved") so evidence JSON is portable and non-leaking.
+ */
+export function evidenceCommandLabel(commandPath: string): string {
+  if (!commandPath || commandPath === "unresolved") return "unresolved";
+  const leaf = basename(commandPath.replace(/\\/g, "/"));
+  return leaf.length > 0 ? leaf : "unresolved";
+}
+
 export type RealAcpPreflightEvidence = {
   profileId: string;
   agentId: string;
+  /**
+   * Basename-only command label for evidence (never an absolute Host path).
+   * Runtime resolution still uses the full local path internally.
+   */
   commandPath: string;
   /** Non-secret version string from --version or agentInfo; never credentials. */
   agentVersion: string | null;
@@ -123,7 +138,7 @@ export async function preflightRealAcp(options: {
       evidence: {
         profileId: profile.supported.profileId,
         agentId: profile.supported.agentId,
-        commandPath: profile.commandPath,
+        commandPath: evidenceCommandLabel(profile.commandPath),
         agentVersion: versionOutput,
         verifiedAdapterVersion: profile.supported.verifiedAdapterVersion,
         protocolVersion: ACP_SDK_AUTHORITY.protocolVersion,
@@ -146,7 +161,7 @@ export async function preflightRealAcp(options: {
   const evidence: RealAcpPreflightEvidence = {
     profileId: profile.supported.profileId,
     agentId: profile.supported.agentId,
-    commandPath: profile.commandPath,
+    commandPath: evidenceCommandLabel(profile.commandPath),
     agentVersion,
     verifiedAdapterVersion: profile.supported.verifiedAdapterVersion,
     protocolVersion: ACP_SDK_AUTHORITY.protocolVersion,
