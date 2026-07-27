@@ -152,6 +152,19 @@ export type HumanDeviceCredentialId = z.infer<typeof humanDeviceCredentialIdSche
 export const projectMembershipIdSchema = opaqueIdentifierSchema.brand("ProjectMembershipId");
 export type ProjectMembershipId = z.infer<typeof projectMembershipIdSchema>;
 
+/** Server-issued opaque references used by the collaboration registry. */
+export const projectRegistryIdSchema = opaqueIdentifierSchema.brand("ProjectRegistryId");
+export type ProjectRegistryId = z.infer<typeof projectRegistryIdSchema>;
+
+export const canvasRegistryIdSchema = opaqueIdentifierSchema.brand("CanvasRegistryId");
+export type CanvasRegistryId = z.infer<typeof canvasRegistryIdSchema>;
+
+export const packageSnapshotIdSchema = opaqueIdentifierSchema.brand("PackageSnapshotId");
+export type PackageSnapshotId = z.infer<typeof packageSnapshotIdSchema>;
+
+export const membershipGrantIdSchema = opaqueIdentifierSchema.brand("MembershipGrantId");
+export type MembershipGrantId = z.infer<typeof membershipGrantIdSchema>;
+
 export const projectInvitationIdSchema = opaqueIdentifierSchema.brand("ProjectInvitationId");
 export type ProjectInvitationId = z.infer<typeof projectInvitationIdSchema>;
 

@@ -82,3 +82,14 @@ export const CANVAS_PRESENCE_SESSION_TTL_MS = 15_000 as const;
 
 /** Default HTTPS request timeout. */
 export const COLLABORATION_REQUEST_TIMEOUT_MS = 30_000 as const;
+
+/** Bounded project/canvas ACL and Plan Package registry metadata budgets. */
+export const PROJECT_ACCESS_MAX_GRANTS = 1_000 as const;
+export const PROJECT_ACCESS_MAX_PROJECTS_PER_PAGE = 100 as const;
+export const PROJECT_ACCESS_MAX_CANVASES_PER_PAGE = 100 as const;
+export const PACKAGE_SNAPSHOT_MAX_PROMPT_DIGESTS = 4_096 as const;
+export const PACKAGE_SNAPSHOT_MAX_PATH_LENGTH = 512 as const;
+export const PACKAGE_SNAPSHOT_MAX_SOURCE_REVISION_LENGTH = 256 as const;
+export const PACKAGE_SNAPSHOT_MAX_TOTAL_BYTES = 256 * 1_024 * 1_024;
+export const PACKAGE_SNAPSHOT_MAX_FILE_BYTES = 64 * 1_024 * 1_024;
+export const PACKAGE_SNAPSHOT_MAX_RETAINED = 256 as const;

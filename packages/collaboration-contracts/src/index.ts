@@ -2,6 +2,8 @@ export * from "./limits.js";
 export * from "./primitives.js";
 export * from "./identity.js";
 export * from "./migration.js";
+export * from "./projectAccess.js";
+export * from "./packageSnapshot.js";
 export * from "./assignment.js";
 export * from "./comments.js";
 export * from "./attachments.js";

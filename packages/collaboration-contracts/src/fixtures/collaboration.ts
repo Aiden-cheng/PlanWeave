@@ -37,6 +37,8 @@ import {
   humanObserverEventSchema,
   humanObserverWelcomeSchema
 } from "../observer.js";
+import { canvasAccessRecordSchema, projectAccessRecordSchema } from "../projectAccess.js";
+import { packageSnapshotSchema } from "../packageSnapshot.js";
 import { humanDeviceTokenSchema, projectInvitationTokenSchema } from "../primitives.js";
 
 /** Deterministic 43-char base64url secret segment (test-only; not a real secret). */
@@ -78,6 +80,66 @@ export const exampleWorkspace = workspaceSchema.parse({
   displayName: "PlanWeave Demo",
   createdAt: "2030-01-01T00:00:00.000Z",
   archivedAt: null
+});
+
+export const exampleProjectAccessRecord = projectAccessRecordSchema.parse({
+  schemaVersion: "project-access/v1",
+  registry: {
+    projectRegistryId: "registry-project-demo-001",
+    workspaceId: "workspace-demo-001",
+    projectId: "project-demo-001"
+  },
+  visibility: "private",
+  acl: { revision: 1, updatedAt: "2030-01-01T00:00:00.000Z" },
+  owner: "human-owner-001",
+  updatedAt: "2030-01-01T00:00:00.000Z"
+});
+
+export const exampleCanvasAccessRecord = canvasAccessRecordSchema.parse({
+  schemaVersion: "project-access/v1",
+  registry: {
+    projectRegistryId: "registry-project-demo-001",
+    canvasRegistryId: "registry-canvas-demo-001",
+    workspaceId: "workspace-demo-001",
+    projectId: "project-demo-001",
+    canvasId: "canvas-default"
+  },
+  visibility: "shared",
+  acl: { revision: 2, updatedAt: "2030-01-01T00:00:00.000Z" },
+  owner: "human-owner-001",
+  updatedAt: "2030-01-01T00:00:00.000Z"
+});
+
+export const examplePackageSnapshot = packageSnapshotSchema.parse({
+  schemaVersion: "package-snapshot/v1",
+  immutable: {
+    snapshotId: "snapshot-demo-001",
+    registry: {
+      projectRegistryId: "registry-project-demo-001",
+      canvasRegistryId: "registry-canvas-demo-001",
+      workspaceId: "workspace-demo-001",
+      projectId: "project-demo-001",
+      canvasId: "canvas-default"
+    },
+    sourceRevision: "git:demo-revision",
+    createdAt: "2030-01-01T00:00:00.000Z",
+    creator: { kind: "human", id: "human-owner-001", displayName: "Owner" },
+    digestManifest: {
+      manifest: { digestSha256: "a".repeat(64), sizeBytes: 128 },
+      prompts: [],
+      totalBytes: 128
+    },
+    migrationMarker: "digest_verified"
+  },
+  mutable: {
+    state: "available",
+    aclRevision: 2,
+    visibility: { project: "private", canvas: "shared" },
+    updatedAt: "2030-01-01T00:00:00.000Z",
+    revokedAt: null,
+    retentionOrder: 1,
+    restoreMarker: "none"
+  }
 });
 
 export const exampleWorkspacePrincipal = humanPrincipalSchema.parse({
