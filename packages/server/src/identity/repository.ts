@@ -23,6 +23,7 @@ import {
   type ProjectInvitationMetadata,
   type ProjectMembership
 } from "./schemas.js";
+import { WorkspaceIdentityRepository } from "./workspaceRepository.js";
 
 export { HumanIdentityError } from "./errors.js";
 
@@ -85,6 +86,7 @@ export class HumanIdentityRepository {
   private readonly memberships: MembershipStore;
   private readonly devices: DeviceCredentialStore;
   private readonly invitations: InvitationStore;
+  private readonly workspaceIdentity: WorkspaceIdentityRepository;
 
   constructor(
     private readonly database: SqliteDatabase,
@@ -94,6 +96,7 @@ export class HumanIdentityRepository {
     this.memberships = new MembershipStore(database, clock);
     this.devices = new DeviceCredentialStore(database, clock);
     this.invitations = new InvitationStore(database, clock);
+    this.workspaceIdentity = new WorkspaceIdentityRepository(database);
   }
 
   getPrincipal(humanPrincipalId: string): HumanPrincipal | undefined {
@@ -272,6 +275,32 @@ export class HumanIdentityRepository {
       if (device.mintedForProjectId !== pid) return undefined;
       membership = this.getActiveMembership(pid, principal.humanPrincipalId);
       if (!membership) return undefined;
+      const workspaceId = this.workspaceIdentity.workspaceForLegacyProject(pid);
+      if (!workspaceId) return undefined;
+      try {
+        this.workspaceIdentity.assertReadCutover(workspaceId);
+      } catch {
+        return undefined;
+      }
+      const workspaceDevice = this.database
+        .prepare(
+          `SELECT d.revoked_at,d.expires_at,m.revoked_at AS membership_revoked_at
+           FROM workspace_device_sessions d
+           JOIN workspace_memberships m
+             ON m.workspace_id=d.workspace_id AND m.human_principal_id=d.human_principal_id
+           WHERE d.workspace_id=? AND d.device_session_id=? AND d.human_principal_id=?
+             AND m.membership_id=?`
+        )
+        .get(workspaceId, device.deviceCredentialId, principal.humanPrincipalId, membership.membershipId);
+      if (!workspaceDevice || workspaceDevice.revoked_at || workspaceDevice.membership_revoked_at) {
+        return undefined;
+      }
+      if (
+        workspaceDevice.expires_at !== null &&
+        Date.parse(String(workspaceDevice.expires_at)) <= this.clock().getTime()
+      ) {
+        return undefined;
+      }
     }
 
     const refreshed = this.devices.recordLastUsed(device.deviceCredentialId);
@@ -283,9 +312,12 @@ export class HumanIdentityRepository {
     projectId: string,
     ownerHumanPrincipalId?: string
   ): HumanDeviceCredentialMetadata {
-    return inWriteTransaction(this.database, () =>
-      this.devices.revokeDevice(deviceCredentialId, projectId, ownerHumanPrincipalId)
-    );
+    return inWriteTransaction(this.database, () => {
+      const revoked = this.devices.revokeDevice(deviceCredentialId, projectId, ownerHumanPrincipalId);
+      const workspaceId = this.workspaceIdentity.ensureWorkspaceForLegacyProject(projectId);
+      this.syncWorkspaceProject(workspaceId, projectId);
+      return revoked;
+    });
   }
 
   /**
@@ -303,6 +335,8 @@ export class HumanIdentityRepository {
       );
       const principal = this.getPrincipal(removed.membership.humanPrincipalId);
       if (!principal) throw new HumanIdentityError("human_input_invalid");
+      const workspaceId = this.workspaceIdentity.ensureWorkspaceForLegacyProject(projectId);
+      this.syncWorkspaceProject(workspaceId, projectId);
       this.options.onMembershipTransitionInTransaction?.({
         type: "member_removed",
         membership: removed.membership,
@@ -325,6 +359,8 @@ export class HumanIdentityRepository {
           principal
         });
       }
+      const workspaceId = this.workspaceIdentity.ensureWorkspaceForLegacyProject(projectId);
+      this.syncWorkspaceProject(workspaceId, projectId);
       return membership;
     });
   }
@@ -334,6 +370,8 @@ export class HumanIdentityRepository {
       const membership = this.memberships.demoteOwner(projectId, targetHumanPrincipalId);
       const principal = this.getPrincipal(membership.humanPrincipalId);
       if (!principal) throw new HumanIdentityError("human_input_invalid");
+      const workspaceId = this.workspaceIdentity.ensureWorkspaceForLegacyProject(projectId);
+      this.syncWorkspaceProject(workspaceId, projectId);
       this.options.onMembershipTransitionInTransaction?.({
         type: "owner_demoted",
         membership,
@@ -348,6 +386,7 @@ export class HumanIdentityRepository {
     options: { deviceLabel?: string; deviceTtlMs?: number }
   ): BootstrapOwnerResult {
     const projectId = proof.projectId;
+    const workspaceId = this.workspaceIdentity.ensureWorkspaceForLegacyProject(projectId);
     const existingOwners = this.memberships.listActiveOwners(projectId);
 
     const samePrincipal = existingOwners.find(
@@ -366,6 +405,7 @@ export class HumanIdentityRepository {
         projectId
       );
       if (usable) {
+        this.syncWorkspaceProject(workspaceId, projectId);
         return {
           principal,
           membership: samePrincipal,
@@ -381,6 +421,7 @@ export class HumanIdentityRepository {
         label: options.deviceLabel,
         deviceTtlMs: options.deviceTtlMs
       });
+      this.syncWorkspaceProject(workspaceId, projectId);
       return {
         principal,
         membership: samePrincipal,
@@ -405,6 +446,7 @@ export class HumanIdentityRepository {
       label: options.deviceLabel,
       deviceTtlMs: options.deviceTtlMs
     });
+    this.syncWorkspaceProject(workspaceId, projectId);
 
     return {
       principal,
@@ -449,6 +491,7 @@ export class HumanIdentityRepository {
     existingDeviceToken?: string;
   }): ConsumeInvitationResult {
     const projectId = humanProjectIdSchema.parse(input.projectId);
+    const workspaceId = this.workspaceIdentity.ensureWorkspaceForLegacyProject(projectId);
     const invitation = this.invitations.findInvitationByToken(input.invitationToken);
     if (!invitation) throw new HumanIdentityError("human_invitation_invalid");
     const usability = evaluateInvitationUsability({
@@ -518,6 +561,7 @@ export class HumanIdentityRepository {
       invitation.invitationId,
       principal.humanPrincipalId
     );
+    this.syncWorkspaceProject(workspaceId, projectId);
 
     return {
       principal,
@@ -527,6 +571,73 @@ export class HumanIdentityRepository {
       invitation: consumed,
       principalCreated
     };
+  }
+
+  private syncWorkspaceProject(workspaceId: string, projectId: string): void {
+    const principals = this.database
+      .prepare(
+        `SELECT DISTINCT p.human_principal_id,p.display_name,p.created_at
+         FROM human_principals p JOIN project_memberships m
+           ON m.human_principal_id=p.human_principal_id WHERE m.project_id=?`
+      )
+      .all(projectId);
+    for (const principal of principals) {
+      this.database
+        .prepare(
+          `INSERT OR IGNORE INTO workspace_principals(
+            workspace_id,human_principal_id,display_name,created_at,revoked_at
+          ) VALUES(?,?,?,?,NULL)`
+        )
+        .run(workspaceId, principal.human_principal_id, principal.display_name, principal.created_at);
+    }
+    const memberships = this.database
+      .prepare("SELECT * FROM project_memberships WHERE project_id=?")
+      .all(projectId);
+    for (const membership of memberships) {
+      this.database
+        .prepare(
+          `INSERT INTO workspace_memberships(
+            workspace_id,membership_id,human_principal_id,role,revision,created_at,updated_at,revoked_at
+          ) VALUES(?,?,?,?,?,?,?,?)
+          ON CONFLICT(workspace_id,membership_id) DO UPDATE SET
+            role=excluded.role,revision=excluded.revision,updated_at=excluded.updated_at,
+            revoked_at=excluded.revoked_at`
+        )
+        .run(
+          workspaceId,
+          membership.membership_id,
+          membership.human_principal_id,
+          membership.role,
+          Number(membership.revision ?? 1),
+          membership.created_at,
+          membership.updated_at,
+          membership.revoked_at
+        );
+    }
+    const devices = this.database
+      .prepare("SELECT * FROM human_device_credentials WHERE minted_for_project_id=?")
+      .all(projectId);
+    for (const device of devices) {
+      this.database
+        .prepare(
+          `INSERT INTO workspace_device_sessions(
+            workspace_id,device_session_id,human_principal_id,credential_sha256,issued_at,
+            expires_at,revoked_at,last_used_at
+          ) VALUES(?,?,?,?,?,?,?,?)
+          ON CONFLICT(workspace_id,device_session_id) DO UPDATE SET
+            expires_at=excluded.expires_at,revoked_at=excluded.revoked_at,last_used_at=excluded.last_used_at`
+        )
+        .run(
+          workspaceId,
+          device.device_credential_id,
+          device.human_principal_id,
+          device.token_sha256,
+          device.created_at,
+          device.expires_at,
+          device.revoked_at,
+          device.last_used_at
+        );
+    }
   }
 }
 

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { AgentHostRepository } from "../hosts.js";
 import { HostEnrollmentService } from "../hostEnrollment.js";
 import { attachHostEnrollmentHttp } from "../hostEnrollmentHttp.js";
+import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 
 const directories: string[] = [];
@@ -77,16 +78,22 @@ describe("Agent Host enrollment", () => {
 
     const first = service.exchange(input);
     const replay = service.exchange(input);
+    const workspaceId = new WorkspaceIdentityRepository(store.database).ensureWorkspaceForLegacyProject(
+      "project-enrollment"
+    );
+    const hosts = new AgentHostRepository(store.database);
+    hosts.bindToWorkspace(first.hostId, workspaceId);
+    service.bindGrantToWorkspace(grant.enrollmentCode, workspaceId);
 
     expect(replay).toEqual(first);
     expect(
-      new AgentHostRepository(store.database).authenticate(first.hostId, credentialToken)?.id
+      hosts.authenticate(first.hostId, credentialToken, workspaceId)?.id
     ).toBe(first.hostId);
     store.database
       .prepare("UPDATE agent_hosts SET credential_expires_at=? WHERE id=?")
       .run(new Date(Date.now() - 1).toISOString(), first.hostId);
     expect(
-      new AgentHostRepository(store.database).authenticate(first.hostId, credentialToken)
+      hosts.authenticate(first.hostId, credentialToken, workspaceId)
     ).toBeUndefined();
     const persisted = JSON.stringify({
       grants: store.database.prepare("SELECT * FROM agent_host_enrollment_grants").all(),
@@ -94,6 +101,30 @@ describe("Agent Host enrollment", () => {
     });
     expect(persisted).not.toContain(grant.enrollmentCode);
     expect(persisted).not.toContain(credentialToken);
+  });
+
+  it("fails closed for unbound Hosts across zero and multiple workspaces", async () => {
+    const store = await setup();
+    const hosts = new AgentHostRepository(store.database);
+    const registration = hosts.register("Unbound Host");
+    expect(hosts.authenticate(registration.host.id, registration.token)).toBeUndefined();
+
+    const identity = new WorkspaceIdentityRepository(store.database);
+    const firstWorkspace = identity.ensureWorkspaceForLegacyProject("project-one");
+    const secondWorkspace = identity.ensureWorkspaceForLegacyProject("project-two");
+    expect(hosts.authenticate(registration.host.id, registration.token)).toBeUndefined();
+
+    hosts.bindToWorkspace(registration.host.id, firstWorkspace);
+    expect(hosts.authenticate(registration.host.id, registration.token, firstWorkspace)?.id).toBe(
+      registration.host.id
+    );
+    expect(hosts.authenticate(registration.host.id, registration.token, secondWorkspace)).toBeUndefined();
+
+    hosts.bindToWorkspace(registration.host.id, secondWorkspace);
+    expect(hosts.authenticate(registration.host.id, registration.token)).toBeUndefined();
+    expect(hosts.authenticate(registration.host.id, registration.token, firstWorkspace)?.id).toBe(
+      registration.host.id
+    );
   });
 
   it("rejects conflicting replay, expired and revoked grants without leaking secrets", async () => {

@@ -11,6 +11,7 @@ import { executionEnvelopeFor } from "./protocolTestFixtures.js";
 import { createRemoteDispatchFixture } from "./support/remoteDispatchFixture.js";
 import { ActivityRepository } from "../comments/activityRepository.js";
 import { ActivityProjectionService } from "../comments/service.js";
+import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 
 const directories: string[] = [];
 const servers: PlanweaveServer[] = [];
@@ -261,6 +262,10 @@ describe("DispatchService (test-only thin stack)", () => {
       writeback: { complete, fail }
     });
     const registration = coordination.hosts.register("Linux Builder");
+    const workspaceId = new WorkspaceIdentityRepository(server.database).ensureWorkspaceForLegacyProject(
+      "project-a"
+    );
+    coordination.hosts.bindToWorkspace(registration.host.id, workspaceId);
 
     expect(registration.token).toMatch(/^pw_host_/);
     expect(coordination.hosts.authenticate(registration.host.id, registration.token)?.id).toBe(

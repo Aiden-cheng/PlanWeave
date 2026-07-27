@@ -8,6 +8,7 @@ import {
   type HostEnrollmentRequest
 } from "@planweave-ai/distributed-protocol";
 import { AgentHostRepository } from "./hosts.js";
+import { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
 import { inWriteTransaction, type SqliteDatabase } from "./sqlite.js";
 
 type EnrollmentGrantRow = {
@@ -19,6 +20,7 @@ type EnrollmentGrantRow = {
   used_attempt_id: string | null;
   used_request_hash: string | null;
   host_id: string | null;
+  created_at: string;
 };
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -32,12 +34,14 @@ export class HostEnrollmentError extends Error {
 
 export class HostEnrollmentService {
   private readonly hosts: AgentHostRepository;
+  private readonly workspaceIdentity: WorkspaceIdentityRepository;
 
   constructor(
     private readonly database: SqliteDatabase,
     private readonly clock: () => Date = () => new Date()
   ) {
     this.hosts = new AgentHostRepository(database, clock);
+    this.workspaceIdentity = new WorkspaceIdentityRepository(database);
   }
 
   createGrant(options: { expiresAt: Date; credentialExpiresAt: Date }): {
@@ -64,16 +68,24 @@ export class HostEnrollmentService {
         options.credentialExpiresAt.toISOString(),
         now.toISOString()
       );
+    this.workspaceIdentity.synchronizeEnrollment(hash(enrollmentCode));
     return { enrollmentCode, expiresAt: options.expiresAt.toISOString() };
   }
 
   revokeGrant(enrollmentCode: string): void {
+    const codeHash = hash(enrollmentCode);
     const updated = this.database
       .prepare(
         "UPDATE agent_host_enrollment_grants SET revoked_at=? WHERE code_hash=? AND revoked_at IS NULL"
       )
-      .run(this.clock().toISOString(), hash(enrollmentCode));
+      .run(this.clock().toISOString(), codeHash);
     if (updated.changes !== 1) throw new Error("host_enrollment_grant_not_found_or_revoked");
+    this.workspaceIdentity.synchronizeEnrollment(codeHash);
+  }
+
+  /** Explicitly authorize an enrollment grant for one workspace. */
+  bindGrantToWorkspace(enrollmentCode: string, workspaceId: string): void {
+    this.workspaceIdentity.bindEnrollmentToWorkspace(hash(enrollmentCode), workspaceId);
   }
 
   exchange(input: unknown): HostEnrollmentCompleted {
@@ -135,6 +147,7 @@ export class HostEnrollmentService {
         row.code_hash
       );
     if (updated.changes !== 1) throw new HostEnrollmentError("conflict");
+    this.workspaceIdentity.synchronizeEnrollment(row.code_hash);
     return hostEnrollmentCompletedSchema.parse({
       type: "host.enrollment.completed",
       protocolVersion: 1,

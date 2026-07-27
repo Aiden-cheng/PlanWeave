@@ -1,5 +1,6 @@
 import { hostCredentialTokenSchema } from "@planweave-ai/distributed-protocol";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
 import { capabilitiesSchema } from "./protocol.js";
 import type { SqliteDatabase } from "./sqlite.js";
 
@@ -72,7 +73,20 @@ export class AgentHostRepository {
   constructor(
     private readonly database: SqliteDatabase,
     private readonly clock: () => Date = () => new Date()
-  ) {}
+  ) {
+    this.workspaceIdentity = new WorkspaceIdentityRepository(database);
+  }
+
+  private readonly workspaceIdentity: WorkspaceIdentityRepository;
+
+  private syncWorkspaceHost(hostId: string): void {
+    this.workspaceIdentity.synchronizeHost(hostId);
+  }
+
+  /** Explicitly authorize a Host for one workspace. */
+  bindToWorkspace(hostId: string, workspaceId: string): void {
+    this.workspaceIdentity.bindHostToWorkspace(hostId, workspaceId);
+  }
 
   register(displayName: string): RegisteredAgentHost {
     const token = `pw_host_${randomBytes(32).toString("base64url")}`;
@@ -117,7 +131,9 @@ export class AgentHostRepository {
         credentialExpiresAt ?? null,
         createdAt
       );
-    return { host: this.getRequired(id), token: parsedToken };
+    const host = this.getRequired(id);
+    this.syncWorkspaceHost(id);
+    return { host, token: parsedToken };
   }
 
   get(hostId: string): AgentHost | undefined {
@@ -147,7 +163,7 @@ export class AgentHostRepository {
     ).map(toHost);
   }
 
-  authenticate(hostId: string, token: string): AgentHost | undefined {
+  authenticate(hostId: string, token: string, workspaceId?: string): AgentHost | undefined {
     const row = this.database.prepare("SELECT * FROM agent_hosts WHERE id=?").get(hostId) as
       | HostRow
       | undefined;
@@ -157,6 +173,7 @@ export class AgentHostRepository {
       (row.credential_expires_at && Date.parse(row.credential_expires_at) <= this.clock().getTime())
     )
       return undefined;
+    if (!this.workspaceIdentity.hostUsable(hostId, this.clock(), workspaceId)) return undefined;
     const expected = Buffer.from(row.credential_hash, "hex");
     const actual = hashToken(token);
     if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return undefined;
@@ -174,7 +191,9 @@ export class AgentHostRepository {
       )
       .run(JSON.stringify(parsedCapabilities), capacity, now, hostId, now);
     if (updated.changes !== 1) throw new Error("agent_host_not_found_or_revoked");
-    return this.getRequired(hostId);
+    const host = this.getRequired(hostId);
+    this.syncWorkspaceHost(hostId);
+    return host;
   }
 
   touch(hostId: string, at = new Date()): void {
@@ -186,6 +205,8 @@ export class AgentHostRepository {
       )
       .run(at.toISOString(), hostId, this.clock().toISOString());
     if (updated.changes !== 1) throw new Error("agent_host_not_found_or_revoked");
+    const host = this.getRequired(hostId);
+    this.syncWorkspaceHost(hostId);
   }
 
   revoke(hostId: string): void {
@@ -193,6 +214,8 @@ export class AgentHostRepository {
       .prepare("UPDATE agent_hosts SET revoked_at=? WHERE id=? AND revoked_at IS NULL")
       .run(this.clock().toISOString(), hostId);
     if (updated.changes !== 1) throw new Error("agent_host_not_found_or_revoked");
+    const host = this.getRequired(hostId);
+    this.syncWorkspaceHost(hostId);
   }
 
   listAvailable(
