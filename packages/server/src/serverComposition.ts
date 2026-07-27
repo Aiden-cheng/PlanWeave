@@ -371,6 +371,11 @@ export async function createDistributedServerComposition(
         });
         projectAccess.markCanvasCutover(workspaceId, projectId, canvas.canvasId);
       }
+      projectAccess.reconcileRuntimeCanvases(
+        workspaceId,
+        projectId,
+        project.canvases.map((canvas) => canvas.canvasId)
+      );
       projectAccess.finalizeProjectCutover(workspaceId, projectId);
     }
     packageSnapshots = new PackageSnapshotRepository(

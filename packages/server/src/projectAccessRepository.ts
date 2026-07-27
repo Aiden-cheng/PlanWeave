@@ -159,6 +159,13 @@ export class ProjectAccessRepository {
   finalizeProjectCutover(workspaceId: string, projectId: string): void {
     this.registry.finalizeProjectCutover(workspaceId, projectId);
   }
+  reconcileRuntimeCanvases(
+    workspaceId: string,
+    projectId: string,
+    trustedCanvasIds: readonly string[]
+  ): void {
+    this.registry.reconcileRuntimeCanvases(workspaceId, projectId, trustedCanvasIds);
+  }
 
   resolveAuthorizedCanvas(input: {
     workspaceId: string;

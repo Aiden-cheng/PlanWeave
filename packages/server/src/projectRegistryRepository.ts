@@ -557,6 +557,30 @@ export class ProjectRegistryRepository {
     }
   }
 
+  /** Revoke active canvas rows that are no longer trusted by the current Runtime registry. */
+  reconcileRuntimeCanvases(
+    workspaceId: string,
+    projectId: string,
+    trustedCanvasIds: readonly string[]
+  ): void {
+    const canvasIds = z.array(identifierSchema).min(1).parse(trustedCanvasIds);
+    inWriteTransaction(this.database, () => {
+      const project = this.projectInternal(workspaceId, projectId);
+      if (!project || project.revokedAt !== null) throw new Error("project_registry_not_found");
+      assertNoPendingSnapshotRestore(this.database, { workspaceId, projectId });
+      const placeholders = canvasIds.map(() => "?").join(",");
+      const at = this.clock().toISOString();
+      this.database
+        .prepare(
+          `UPDATE canvas_registry
+           SET revoked_at=?,updated_at=?
+           WHERE workspace_id=? AND project_id=? AND revoked_at IS NULL
+             AND canvas_id NOT IN (${placeholders})`
+        )
+        .run(at, at, workspaceId, projectId, ...canvasIds);
+    });
+  }
+
   resolveCanvasPath(input: { workspaceId: string; projectId: string; canvasId: string }): {
     scope: z.infer<typeof canvasScopeRefSchema>;
     projectRoot: string;
@@ -565,6 +589,8 @@ export class ProjectRegistryRepository {
   } {
     const project = this.projectInternal(input.workspaceId, input.projectId);
     const canvas = this.canvasInternal(input.workspaceId, input.projectId, input.canvasId);
+    if (project?.revokedAt !== null || canvas?.revokedAt !== null)
+      throw new Error("runtime_canvas_revoked");
     if (!project || !canvas || !project.projectRoot || !canvas.packageDir)
       throw new Error("runtime_location_unbound");
     const migration = readAclRegistryMigration(this.database, {

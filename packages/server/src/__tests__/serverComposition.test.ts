@@ -17,6 +17,7 @@ import {
 import { writeJsonFile } from "../../../runtime/src/json.js";
 import { hashOperatorToken } from "../operatorAuth.js";
 import { parseServerConfig } from "../config.js";
+import { ProjectAccessRepository } from "../projectAccessRepository.js";
 import {
   aclMigrationIdFor,
   applyMigrations,
@@ -465,5 +466,98 @@ describe("distributed server composition", () => {
     expect(await readFile(workspace.init.workspace.stateFile)).toEqual(beforeState);
     expect(await readFile(resultsFile)).toEqual(beforeResults);
     reopened.close();
+  });
+
+  it("revokes Runtime canvases removed between composition startups", async () => {
+    const workspace = await createTestWorkspace(remoteManifest());
+    directories.push(workspace.home, workspace.root);
+    await addSecondaryCanvas(workspace.root);
+    const projectId = workspace.init.workspace.id;
+    const dataDirectory = join(workspace.root, "reconcile-server-data");
+    const loaded = await loadProjectGraph(workspace.root);
+    const secondaryCanvas = loaded.manifest.canvases.find((canvas) => canvas.id === "secondary");
+    if (!secondaryCanvas) throw new Error("Expected secondary canvas");
+    const secondaryWorkspace = projectCanvasWorkspace(loaded.workspace, secondaryCanvas);
+    const secondaryManifestBefore = await readFile(secondaryWorkspace.manifestFile);
+    const secondaryResultPath = join(secondaryWorkspace.resultsDir, "existing-result.json");
+    await mkdir(secondaryWorkspace.resultsDir, { recursive: true });
+    await writeFile(secondaryResultPath, '{"result":"preserve"}\n', "utf8");
+    const secondaryResultsBefore = await readFile(secondaryResultPath);
+
+    const startComposition = async () => {
+      const httpServer = createServer();
+      httpServers.push(httpServer);
+      const config = parseServerConfig({
+        version: "server-config/v1",
+        bind: { host: "127.0.0.1", port: 7_443 },
+        publicUrl: "http://127.0.0.1:7443",
+        allowInsecureDevelopment: true,
+        dataDirectory,
+        trustedProjects: [
+          { projectId, projectRoot: workspace.root, trustAllDeclaredCanvases: true }
+        ],
+        operatorCredentials: [
+          {
+            operatorId: "admin",
+            tokenSha256: hashOperatorToken(adminToken),
+            projectIds: [],
+            serverAdmin: true
+          }
+        ]
+      });
+      const composition = await createDistributedServerComposition({ httpServer, config });
+      compositions.push(composition);
+      return composition;
+    };
+
+    const first = await startComposition();
+    await first.close();
+    compositions.splice(compositions.indexOf(first), 1);
+    const current = await loadProjectGraph(workspace.root);
+    const defaultCanvas = current.manifest.canvases.find((canvas) => canvas.id === "default");
+    if (!defaultCanvas) throw new Error("Expected default canvas");
+    await writeProjectGraph(current.workspace, {
+      version: "plan-project/v1",
+      canvases: [defaultCanvas],
+      edges: [],
+      crossTaskEdges: []
+    });
+
+    const second = await startComposition();
+    await second.close();
+    compositions.splice(compositions.indexOf(second), 1);
+    const database = await openServerDatabase(
+      join(dataDirectory, "planweave-server.sqlite"),
+      5_000
+    );
+    const workspaceId = new WorkspaceIdentityRepository(database).workspaceForLegacyProject(
+      projectId
+    );
+    if (!workspaceId) throw new Error("Expected workspace mapping");
+    expect(
+      database
+        .prepare(
+          "SELECT revoked_at FROM canvas_registry WHERE workspace_id=? AND project_id=? AND canvas_id=?"
+        )
+        .get(workspaceId, projectId, "default")
+    ).toMatchObject({ revoked_at: null });
+    expect(
+      database
+        .prepare(
+          "SELECT revoked_at FROM canvas_registry WHERE workspace_id=? AND project_id=? AND canvas_id=?"
+        )
+        .get(workspaceId, projectId, "secondary")
+    ).toMatchObject({ revoked_at: expect.any(String) });
+    const access = new ProjectAccessRepository(database);
+    expect(() =>
+      access.registry.resolveCanvasPath({
+        workspaceId,
+        projectId,
+        canvasId: "secondary"
+      })
+    ).toThrow("runtime_canvas_revoked");
+    database.close();
+    expect(await readFile(secondaryWorkspace.manifestFile)).toEqual(secondaryManifestBefore);
+    expect(await readFile(secondaryResultPath)).toEqual(secondaryResultsBefore);
   });
 });
