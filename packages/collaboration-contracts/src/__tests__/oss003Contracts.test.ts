@@ -11,7 +11,8 @@ import {
   mapLegacyAssignmentTarget,
   remoteDispatchIntentSchema,
   responsibilityUpdateWireCommandSchema,
-  reviewAssignmentUpdateWireCommandSchema
+  reviewAssignmentUpdateWireCommandSchema,
+  workAuthorityProjectionSchema
 } from "../index.js";
 
 const taskScope = {
@@ -267,6 +268,105 @@ describe("OSS-003 collaboration authority contracts", () => {
       remoteDispatchIntentSchema.parse({ ...command, actor: { kind: "human", id: "h" } })
     ).toThrow();
     expect(() => remoteDispatchIntentSchema.parse({ ...command, taskId: "task-1" })).toThrow();
+  });
+
+  it("projects redacted Task/Block authority without secrets or Task Host targets", () => {
+    const taskProjection = workAuthorityProjectionSchema.parse({
+      schemaVersion: "work-authority/v1",
+      scope: taskScope,
+      responsibility: {
+        schemaVersion: "responsibility/v1",
+        scope: taskScope,
+        principal: { kind: "human", humanPrincipalId: "member-1" },
+        revision: 1,
+        updatedAt: "2030-01-01T00:00:00.000Z",
+        availability: "active"
+      },
+      reviewer: {
+        schemaVersion: "review-assignment/v1",
+        scope: taskScope,
+        principal: { kind: "human", humanPrincipalId: "member-2" },
+        revision: 2,
+        updatedAt: "2030-01-01T00:00:00.000Z",
+        availability: "active"
+      },
+      executionTarget: null,
+      revisions: {
+        responsibilityRevision: 1,
+        reviewerRevision: 2,
+        executionTargetRevision: 0
+      },
+      selectedHost: null,
+      evaluatedAt: "2030-01-01T00:00:00.000Z"
+    });
+    expect(taskProjection.executionTarget).toBeNull();
+    expect(() =>
+      workAuthorityProjectionSchema.parse({
+        ...taskProjection,
+        executionTarget: {
+          schemaVersion: "execution-target/v1",
+          scope: blockScope,
+          target: { kind: "exact_host", hostId: "host-1" },
+          revision: 1,
+          updatedAt: "2030-01-01T00:00:00.000Z",
+          availability: { status: "ready", reason: "ready" }
+        }
+      })
+    ).toThrow();
+    const blockProjection = workAuthorityProjectionSchema.parse({
+      schemaVersion: "work-authority/v1",
+      scope: blockScope,
+      responsibility: {
+        schemaVersion: "responsibility/v1",
+        scope: blockScope,
+        principal: null,
+        revision: 0,
+        updatedAt: "2030-01-01T00:00:00.000Z",
+        availability: "unassigned"
+      },
+      reviewer: {
+        schemaVersion: "review-assignment/v1",
+        scope: blockScope,
+        principal: null,
+        revision: 0,
+        updatedAt: "2030-01-01T00:00:00.000Z",
+        availability: "unassigned"
+      },
+      executionTarget: {
+        schemaVersion: "execution-target/v1",
+        scope: blockScope,
+        target: { kind: "exact_host", hostId: "host-1" },
+        revision: 3,
+        updatedAt: "2030-01-01T00:00:00.000Z",
+        availability: { status: "ready", reason: "ready" }
+      },
+      revisions: {
+        responsibilityRevision: 0,
+        reviewerRevision: 0,
+        executionTargetRevision: 3
+      },
+      selectedHost: {
+        hostId: "host-1",
+        availabilityReason: "ready",
+        lease: { status: "none", leaseId: null, expiresAt: null },
+        authorization: {
+          schemaVersion: "host-authorization/v1",
+          scope: blockScope,
+          hostId: "host-1",
+          decision: "deny",
+          reason: "lease_missing",
+          currentRevisions: {
+            responsibilityRevision: 0,
+            reviewerRevision: 0,
+            executionTargetRevision: 3
+          },
+          evaluatedAt: "2030-01-01T00:00:00.000Z"
+        }
+      },
+      evaluatedAt: "2030-01-01T00:00:00.000Z"
+    });
+    expect(blockProjection.selectedHost?.lease.status).toBe("none");
+    expect(JSON.stringify(blockProjection)).not.toMatch(/pw_|\/tmp|secret|token/i);
   });
 
   it("requires explicit, domain-preserving legacy assignment migration", () => {

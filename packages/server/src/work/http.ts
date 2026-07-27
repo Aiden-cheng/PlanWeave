@@ -31,6 +31,7 @@ type AssignmentRoute = {
     | "update"
     | "eligible"
     | "authority_get"
+    | "authority_projection"
     | "responsibility"
     | "reviewer"
     | "execution_target";
@@ -76,6 +77,9 @@ function route(request: IncomingMessage, pathname: string): AssignmentRoute | un
     "/execution-target": "execution_target",
     "/execution-targets": "execution_target"
   };
+  if (request.method === "GET" && (rest === "/authority" || rest === "/work-authority")) {
+    return { kind: "authority_projection", projectId };
+  }
   const authority = authorityPaths[rest];
   if (authority) {
     if (request.method === "POST") return { kind: authority, projectId, authority };
@@ -271,7 +275,8 @@ export async function handleWorkAssignmentHttpRequest(
       matched.kind !== "responsibility" &&
       matched.kind !== "reviewer" &&
       matched.kind !== "execution_target" &&
-      matched.kind !== "authority_get"
+      matched.kind !== "authority_get" &&
+      matched.kind !== "authority_projection"
     ) {
       throw new WorkAssignmentServiceError("work_cross_project_forbidden");
     }
@@ -386,7 +391,19 @@ export async function handleWorkAssignmentHttpRequest(
               : matched.authority === "reviewer"
                 ? handle.service.getReviewer(actor, scope)
                 : handle.service.getExecutionTarget(actor, scope);
-          respond(response, 200, result);
+          respond(response, 200, result ?? null);
+        } finally {
+          handle.release();
+        }
+        return true;
+      }
+      case "authority_projection": {
+        const parameters = query(url, ["scope"]);
+        const scope = authorityScopeSchema.parse(parseJsonParameter(parameters.scope));
+        const handle = options.acquireAuthorityService?.(matched.projectId, scope.canvasId);
+        if (!handle) throw new WorkAssignmentServiceError("work_cross_project_forbidden");
+        try {
+          respond(response, 200, handle.service.getWorkAuthorityProjection(actor, scope));
         } finally {
           handle.release();
         }

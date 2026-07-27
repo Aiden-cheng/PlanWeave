@@ -176,6 +176,22 @@ export function registerCollaborationHandlers(
     collaborationInvokeChannels.listCollaborationEligibleAssignees,
     (_event, input: unknown) => active.listEligibleAssignees(input)
   );
+  ipcMain.handle(
+    collaborationInvokeChannels.getCollaborationWorkAuthority,
+    (_event, input: unknown) => active.getWorkAuthority(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.updateCollaborationResponsibility,
+    (_event, input: unknown) => active.updateResponsibility(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.updateCollaborationReviewer,
+    (_event, input: unknown) => active.updateReviewer(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.updateCollaborationExecutionTarget,
+    (_event, input: unknown) => active.updateExecutionTarget(input)
+  );
   ipcMain.handle(collaborationInvokeChannels.listCollaborationComments, (_event, input: unknown) =>
     active.listComments(input)
   );

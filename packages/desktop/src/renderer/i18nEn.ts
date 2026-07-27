@@ -1051,6 +1051,15 @@ export const enCatalog = {
   notifyAssignmentRejected: "Assignment rejected",
   notifyMembershipChanged: "Membership updated",
   assigneeUpdateSucceeded: "Assignee updated",
+  // Independent responsibility / reviewer / Host execution (OSS-003#B-003)
+  authorityResponsibility: "Responsible",
+  authorityReviewer: "Reviewer",
+  authorityExecutionHost: "Execution Host",
+  authorityHostReason: "Host status",
+  authorityLeaseNone: "No active lease",
+  authorityLeaseActive: "Lease active",
+  authorityLeaseExpired: "Lease expired",
+  authorityLeaseRevoked: "Lease revoked",
   assigneeUpdateFailed: "Could not update assignee",
 
   // Human comments + activity (DX-003#B-001) — distinct from Agent conversation

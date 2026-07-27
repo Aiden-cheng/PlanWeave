@@ -16,6 +16,8 @@ import {
   commentTombstoneWireCommandSchema,
   createPendingAttachmentRequestSchema,
   eligibleAssigneesResponseSchema,
+  executionTargetReadModelSchema,
+  executionTargetUpdateWireCommandSchema,
   finalizePendingAttachmentResponseSchema,
   humanBootstrapRequestSchema,
   humanBootstrapResponseSchema,
@@ -35,6 +37,7 @@ import {
   parseHumanObserverServerMessage,
   pendingAttachmentViewSchema,
   remoteActionViewSchema,
+  remoteDispatchIntentSchema,
   remoteDispatchWireCommandSchema,
   remoteEventQuerySchema,
   remoteEventReplaySchema,
@@ -44,11 +47,19 @@ import {
   remoteInteractionResponseSchema,
   remoteInteractionViewSchema,
   remoteOperationObservationSchema,
+  responsibilityReadModelSchema,
+  responsibilityUpdateWireCommandSchema,
+  reviewAssignmentReadModelSchema,
+  reviewAssignmentUpdateWireCommandSchema,
   uploadPendingAttachmentResponseSchema,
+  workAuthorityProjectionSchema,
   type ActivityListPage,
   type AssignmentDisplayProjection,
   type AssignmentListPage,
   type AssignmentUpdateWireCommand,
+  type CollaborationWorkScope,
+  type ExecutionTargetReadModel,
+  type ExecutionTargetUpdateWireCommand,
   type CanvasPresenceError,
   type CanvasPresenceLeave,
   type CanvasPresencePointer,
@@ -79,6 +90,7 @@ import {
   type HumanObserverServerMessage,
   type PendingAttachmentView,
   type RemoteActionView,
+  type RemoteDispatchIntent,
   type RemoteDispatchWireCommand,
   type RemoteEventReplay,
   type RemoteHumanExecutionActionCommand,
@@ -86,6 +98,11 @@ import {
   type RemoteInteractionResponse,
   type RemoteInteractionView,
   type RemoteOperationObservation,
+  type ResponsibilityReadModel,
+  type ResponsibilityUpdateWireCommand,
+  type ReviewAssignmentReadModel,
+  type ReviewAssignmentUpdateWireCommand,
+  type WorkAuthorityProjection,
   type WorkItemRef
 } from "@planweave-ai/collaboration-contracts";
 import type { z, ZodType } from "zod";
@@ -471,6 +488,101 @@ export class CollaborationClient {
   }
 
   // ---------------------------------------------------------------------------
+  // Separated responsibility / reviewer / execution-target authorities (OSS-003)
+  // ---------------------------------------------------------------------------
+
+  async getWorkAuthority(
+    scope: CollaborationWorkScope,
+    signal?: AbortSignal
+  ): Promise<WorkAuthorityProjection> {
+    const params = new URLSearchParams({ scope: JSON.stringify(scope) });
+    return this.json(
+      "GET",
+      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/assignments/authority?${params}`,
+      workAuthorityProjectionSchema,
+      { signal }
+    );
+  }
+
+  async getResponsibility(
+    scope: CollaborationWorkScope,
+    signal?: AbortSignal
+  ): Promise<ResponsibilityReadModel | null> {
+    const params = new URLSearchParams({ scope: JSON.stringify(scope) });
+    return this.jsonNullable(
+      "GET",
+      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/assignments/responsibility?${params}`,
+      responsibilityReadModelSchema,
+      { signal }
+    );
+  }
+
+  async updateResponsibility(
+    command: ResponsibilityUpdateWireCommand,
+    signal?: AbortSignal
+  ): Promise<ResponsibilityReadModel> {
+    const body = responsibilityUpdateWireCommandSchema.parse(command);
+    return this.json(
+      "POST",
+      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/assignments/responsibility`,
+      responsibilityReadModelSchema,
+      { body, signal }
+    );
+  }
+
+  async getReviewer(
+    scope: CollaborationWorkScope,
+    signal?: AbortSignal
+  ): Promise<ReviewAssignmentReadModel | null> {
+    const params = new URLSearchParams({ scope: JSON.stringify(scope) });
+    return this.jsonNullable(
+      "GET",
+      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/assignments/reviewer?${params}`,
+      reviewAssignmentReadModelSchema,
+      { signal }
+    );
+  }
+
+  async updateReviewer(
+    command: ReviewAssignmentUpdateWireCommand,
+    signal?: AbortSignal
+  ): Promise<ReviewAssignmentReadModel> {
+    const body = reviewAssignmentUpdateWireCommandSchema.parse(command);
+    return this.json(
+      "POST",
+      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/assignments/reviewer`,
+      reviewAssignmentReadModelSchema,
+      { body, signal }
+    );
+  }
+
+  async getExecutionTarget(
+    scope: CollaborationWorkScope,
+    signal?: AbortSignal
+  ): Promise<ExecutionTargetReadModel | null> {
+    const params = new URLSearchParams({ scope: JSON.stringify(scope) });
+    return this.jsonNullable(
+      "GET",
+      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/assignments/execution-target?${params}`,
+      executionTargetReadModelSchema,
+      { signal }
+    );
+  }
+
+  async updateExecutionTarget(
+    command: ExecutionTargetUpdateWireCommand,
+    signal?: AbortSignal
+  ): Promise<ExecutionTargetReadModel> {
+    const body = executionTargetUpdateWireCommandSchema.parse(command);
+    return this.json(
+      "POST",
+      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/assignments/execution-target`,
+      executionTargetReadModelSchema,
+      { body, signal }
+    );
+  }
+
+  // ---------------------------------------------------------------------------
   // Comments / activity
   // ---------------------------------------------------------------------------
 
@@ -557,10 +669,13 @@ export class CollaborationClient {
   // ---------------------------------------------------------------------------
 
   async dispatchRemoteOperation(
-    command: RemoteDispatchWireCommand,
+    command: RemoteDispatchIntent | RemoteDispatchWireCommand,
     signal?: AbortSignal
   ): Promise<RemoteOperationObservation> {
-    const body = remoteDispatchWireCommandSchema.parse(command);
+    const body =
+      "schemaVersion" in command && command.schemaVersion === "remote-run/v2"
+        ? remoteDispatchIntentSchema.parse(command)
+        : remoteDispatchWireCommandSchema.parse(command);
     return this.json(
       "POST",
       `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/remote-operations`,
@@ -865,6 +980,57 @@ export class CollaborationClient {
         message: "Response was not valid JSON."
       });
     }
+    try {
+      const parsed = schema.parse(value);
+      assertHumanDisplayDtoRedacted(parsed);
+      return parsed;
+    } catch (error) {
+      throw new CollaborationClientError({
+        kind: "protocol",
+        code: "collaboration_response_invalid",
+        message: "Response failed contract validation.",
+        cause: error
+      });
+    }
+  }
+
+  private async jsonNullable<T>(
+    method: JsonMethod,
+    path: string,
+    schema: ZodType<T>,
+    options: { body?: unknown; auth?: boolean; signal?: AbortSignal }
+  ): Promise<T | null> {
+    this.ensureOpen();
+    const headers: Record<string, string> = {
+      accept: "application/json"
+    };
+    if (options.body !== undefined) {
+      headers["content-type"] = "application/json; charset=utf-8";
+    }
+    if (options.auth !== false) {
+      await this.applyAuth(headers);
+    }
+    const response = await this.send(path, {
+      method,
+      headers,
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      signal: options.signal
+    });
+    const text = await this.readTextLimited(response);
+    if (!response.ok) {
+      throw collaborationErrorFromHttp(response.status, text);
+    }
+    let value: unknown;
+    try {
+      value = text.length === 0 ? null : JSON.parse(text);
+    } catch {
+      throw new CollaborationClientError({
+        kind: "protocol",
+        code: "collaboration_malformed_json",
+        message: "Response was not valid JSON."
+      });
+    }
+    if (value === null) return null;
     try {
       const parsed = schema.parse(value);
       assertHumanDisplayDtoRedacted(parsed);

@@ -136,6 +136,55 @@ function createAuditApi() {
     listCollaborationActivity: listActivity,
     listCollaborationComments: listComments,
     listCollaborationEligibleAssignees: vi.fn().mockResolvedValue({ humans: [], hosts: [] }),
+    getCollaborationWorkAuthority: vi.fn().mockResolvedValue({
+      schemaVersion: "work-authority/v1",
+      scope: {
+        kind: "task",
+        workspaceId: "w",
+        projectId: "project-1",
+        canvasId: "canvas-1",
+        taskId: "T-1"
+      },
+      responsibility: {
+        schemaVersion: "responsibility/v1",
+        scope: {
+          kind: "task",
+          workspaceId: "w",
+          projectId: "project-1",
+          canvasId: "canvas-1",
+          taskId: "T-1"
+        },
+        principal: null,
+        revision: 0,
+        updatedAt: "2030-01-01T00:00:00.000Z",
+        availability: "unassigned"
+      },
+      reviewer: {
+        schemaVersion: "review-assignment/v1",
+        scope: {
+          kind: "task",
+          workspaceId: "w",
+          projectId: "project-1",
+          canvasId: "canvas-1",
+          taskId: "T-1"
+        },
+        principal: null,
+        revision: 0,
+        updatedAt: "2030-01-01T00:00:00.000Z",
+        availability: "unassigned"
+      },
+      executionTarget: null,
+      revisions: {
+        responsibilityRevision: 0,
+        reviewerRevision: 0,
+        executionTargetRevision: 0
+      },
+      selectedHost: null,
+      evaluatedAt: "2030-01-01T00:00:00.000Z"
+    }),
+    updateCollaborationResponsibility: vi.fn(),
+    updateCollaborationReviewer: vi.fn(),
+    updateCollaborationExecutionTarget: vi.fn(),
     listCollaborationInvitations: listInvitations,
     listCollaborationDevices: listDevices,
     observeCollaborationRemoteOperation: observe,

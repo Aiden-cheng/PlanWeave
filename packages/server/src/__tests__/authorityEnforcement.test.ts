@@ -180,6 +180,63 @@ describe("separated assignment authorities", () => {
       })
     ).toThrow();
   });
+
+  it("projects redacted work authority without coupling reviewer to Host execution", async () => {
+    const { service, actor, host } = await fixture();
+    const blockScope = {
+      kind: "block" as const,
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: "c",
+      blockRef: "T-001#B-001"
+    };
+    service.updateResponsibility(actor, {
+      schemaVersion: "responsibility/v1",
+      scope: blockScope,
+      principal: { kind: "human", humanPrincipalId: "member" },
+      expectedRevision: 0
+    });
+    service.updateReviewer(actor, {
+      schemaVersion: "review-assignment/v1",
+      scope: blockScope,
+      principal: { kind: "human", humanPrincipalId: "owner" },
+      expectedRevision: 0
+    });
+    service.updateExecutionTarget(actor, {
+      schemaVersion: "execution-target/v1",
+      scope: blockScope,
+      target: { kind: "exact_host", hostId: host.id },
+      expectedRevision: 0
+    });
+    // Reviewer change must not rewrite execution target revision.
+    service.updateReviewer(actor, {
+      schemaVersion: "review-assignment/v1",
+      scope: blockScope,
+      principal: { kind: "human", humanPrincipalId: "member" },
+      expectedRevision: 1
+    });
+    const projection = service.getWorkAuthorityProjection(actor, blockScope);
+    expect(projection.responsibility.principal).toEqual({
+      kind: "human",
+      humanPrincipalId: "member"
+    });
+    expect(projection.reviewer.principal).toEqual({
+      kind: "human",
+      humanPrincipalId: "member"
+    });
+    expect(projection.executionTarget?.target).toEqual({
+      kind: "exact_host",
+      hostId: host.id
+    });
+    expect(projection.revisions).toEqual({
+      responsibilityRevision: 1,
+      reviewerRevision: 2,
+      executionTargetRevision: 1
+    });
+    expect(projection.selectedHost?.availabilityReason).toBe("ready");
+    expect(projection.selectedHost?.lease.status).toBe("none");
+    expect(JSON.stringify(projection)).not.toMatch(/pw_|\/tmp|secret/i);
+  });
 });
 
 describe("strict Host dispatch authority", () => {

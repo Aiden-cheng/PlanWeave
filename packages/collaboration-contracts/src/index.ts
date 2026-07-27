@@ -9,6 +9,7 @@ export * from "./responsibility.js";
 export * from "./review.js";
 export * from "./executionTarget.js";
 export * from "./hostAuthorization.js";
+export * from "./workAuthority.js";
 export * from "./assignmentMigration.js";
 export * from "./comments.js";
 export * from "./attachments.js";

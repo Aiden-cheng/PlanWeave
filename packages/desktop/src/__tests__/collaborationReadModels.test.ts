@@ -152,6 +152,65 @@ function createMockApi(options?: {
     listCollaborationMembers: listMembers,
     listCollaborationAssignments: listAssignments,
     listCollaborationEligibleAssignees: listEligible,
+    getCollaborationWorkAuthority: vi.fn().mockImplementation(async ({ workItem: item }) => {
+      const scope =
+        item.kind === "task"
+          ? {
+              kind: "task" as const,
+              workspaceId: "workspace-1",
+              projectId: "project-demo-001",
+              canvasId: item.canvasId,
+              taskId: item.taskId
+            }
+          : {
+              kind: "block" as const,
+              workspaceId: "workspace-1",
+              projectId: "project-demo-001",
+              canvasId: item.canvasId,
+              blockRef: item.blockRef
+            };
+      return {
+        schemaVersion: "work-authority/v1",
+        scope,
+        responsibility: {
+          schemaVersion: "responsibility/v1",
+          scope,
+          principal: null,
+          revision: 0,
+          updatedAt: "2030-01-01T00:00:00.000Z",
+          availability: "unassigned"
+        },
+        reviewer: {
+          schemaVersion: "review-assignment/v1",
+          scope,
+          principal: null,
+          revision: 0,
+          updatedAt: "2030-01-01T00:00:00.000Z",
+          availability: "unassigned"
+        },
+        executionTarget:
+          item.kind === "block"
+            ? {
+                schemaVersion: "execution-target/v1",
+                scope,
+                target: { kind: "unassigned" },
+                revision: 0,
+                updatedAt: "2030-01-01T00:00:00.000Z",
+                availability: { status: "unassigned", reason: "unassigned" }
+              }
+            : null,
+        revisions: {
+          responsibilityRevision: 0,
+          reviewerRevision: 0,
+          executionTargetRevision: 0
+        },
+        selectedHost: null,
+        evaluatedAt: "2030-01-01T00:00:00.000Z"
+      };
+    }),
+    updateCollaborationResponsibility: vi.fn(),
+    updateCollaborationReviewer: vi.fn(),
+    updateCollaborationExecutionTarget: vi.fn(),
     listCollaborationComments: listComments,
     listCollaborationActivity: listActivity,
     updateCollaborationAssignment: updateAssignment,
@@ -549,8 +608,9 @@ describe("CollaborationReadModelController", () => {
       projectId: "project-demo-001",
       event: baseEvent
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitFor(() => {
+      expect(controller.getSnapshot().observerCursor).toBe(baseEvent.cursor);
+    });
 
     const assignmentCallsAfterFirst = mock.listAssignments.mock.calls.length;
 

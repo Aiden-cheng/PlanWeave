@@ -1,7 +1,11 @@
 import type {
   AssignmentDisplayProjection,
   CommentDisplayProjection,
+  ExecutionTargetReadModel,
   HumanObserverEvent,
+  ResponsibilityReadModel,
+  ReviewAssignmentReadModel,
+  WorkAuthorityProjection,
   WorkItemRef
 } from "@planweave-ai/collaboration-contracts";
 import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
@@ -15,12 +19,15 @@ import {
   type CollaborationCommentEditInput,
   type CollaborationCommentListQueryInput,
   type CollaborationCommentTombstoneInput,
+  type CollaborationExecutionTargetUpdateInput,
   type CollaborationHostProjection,
   type CollaborationMutationRecord,
   type CollaborationObserverSignal,
   type CollaborationReadModelSnapshot,
   type CollaborationRemoteRunProjection,
   type CollaborationRemoteRunStatus,
+  type CollaborationResponsibilityUpdateInput,
+  type CollaborationReviewerUpdateInput,
   type CollaborationSyncPhase,
   type HumanMembershipView
 } from "../../shared/collaborationReadModels.js";
@@ -31,6 +38,10 @@ export type CollaborationReadBridgePort = Pick<
   | "listCollaborationMembers"
   | "listCollaborationAssignments"
   | "listCollaborationEligibleAssignees"
+  | "getCollaborationWorkAuthority"
+  | "updateCollaborationResponsibility"
+  | "updateCollaborationReviewer"
+  | "updateCollaborationExecutionTarget"
   | "listCollaborationComments"
   | "listCollaborationActivity"
   | "updateCollaborationAssignment"
@@ -59,6 +70,7 @@ type InternalState = {
   members: HumanMembershipView[];
   hosts: Map<string, CollaborationHostProjection>;
   assignments: Map<string, AssignmentDisplayProjection>;
+  workAuthorities: Map<string, WorkAuthorityProjection>;
   comments: Map<string, CommentDisplayProjection[]>;
   activity: CollaborationReadModelSnapshot["activity"];
   remoteRuns: Map<string, CollaborationRemoteRunProjection>;
@@ -67,6 +79,8 @@ type InternalState = {
   loadingKinds: Set<string>;
   /** Work items whose comments are actively tracked (invalidate/reload). */
   trackedCommentWorkItems: Map<string, WorkItemRef>;
+  /** Work items whose independent authorities are actively tracked. */
+  trackedAuthorityWorkItems: Map<string, WorkItemRef>;
   /** Event cursors already applied (dedupe out-of-order/duplicate observer events). */
   appliedEventCursors: Set<number>;
   /** Event cursors currently being invalidated (dedupe concurrent observer deliveries). */
@@ -89,6 +103,7 @@ function emptyState(now: string): InternalState {
     members: [],
     hosts: new Map(),
     assignments: new Map(),
+    workAuthorities: new Map(),
     comments: new Map(),
     activity: [],
     remoteRuns: new Map(),
@@ -96,6 +111,7 @@ function emptyState(now: string): InternalState {
     lastError: null,
     loadingKinds: new Set(),
     trackedCommentWorkItems: new Map(),
+    trackedAuthorityWorkItems: new Map(),
     appliedEventCursors: new Set(),
     inFlightEventCursors: new Map(),
     failedEventCursors: new Set(),
@@ -310,6 +326,9 @@ export class CollaborationReadModelController {
           this.reloadActivity(generation),
           ...[...this.state.trackedCommentWorkItems.values()].map((workItem) =>
             this.reloadComments(workItem, generation)
+          ),
+          ...[...this.state.trackedAuthorityWorkItems.values()].map((workItem) =>
+            this.reloadWorkAuthority(workItem, generation)
           )
         ]);
 
@@ -343,6 +362,75 @@ export class CollaborationReadModelController {
         this.ingestHostsFromAssignment(projection);
       }
     });
+  }
+
+  async updateResponsibility(
+    command: CollaborationResponsibilityUpdateInput
+  ): Promise<ResponsibilityReadModel | null> {
+    const result = await this.runMutation({
+      kind: "responsibility",
+      workItem: command.workItem,
+      expectedRevision: command.expectedRevision,
+      execute: () => this.api.updateCollaborationResponsibility(command),
+      onConfirmed: () => undefined
+    });
+    if (result) {
+      try {
+        await this.reloadWorkAuthority(command.workItem, this.state.generation);
+      } catch {
+        // Mutation succeeded; projection refresh errors surface via lastError on next load.
+      }
+    }
+    return result;
+  }
+
+  async updateReviewer(
+    command: CollaborationReviewerUpdateInput
+  ): Promise<ReviewAssignmentReadModel | null> {
+    const result = await this.runMutation({
+      kind: "reviewer",
+      workItem: command.workItem,
+      expectedRevision: command.expectedRevision,
+      execute: () => this.api.updateCollaborationReviewer(command),
+      onConfirmed: () => undefined
+    });
+    if (result) {
+      try {
+        await this.reloadWorkAuthority(command.workItem, this.state.generation);
+      } catch {
+        // Mutation succeeded; projection refresh errors surface via lastError on next load.
+      }
+    }
+    return result;
+  }
+
+  async updateExecutionTarget(
+    command: CollaborationExecutionTargetUpdateInput
+  ): Promise<ExecutionTargetReadModel | null> {
+    const result = await this.runMutation({
+      kind: "execution_target",
+      workItem: command.workItem,
+      expectedRevision: command.expectedRevision,
+      execute: () => this.api.updateCollaborationExecutionTarget(command),
+      onConfirmed: () => undefined
+    });
+    if (result) {
+      try {
+        await this.reloadWorkAuthority(command.workItem, this.state.generation);
+      } catch {
+        // Mutation succeeded; projection refresh errors surface via lastError on next load.
+      }
+    }
+    return result;
+  }
+
+  /** Track and load the independent authority projection for one work item. */
+  async ensureWorkAuthority(workItem: WorkItemRef): Promise<WorkAuthorityProjection | null> {
+    this.assertOpen();
+    const key = workItemKey(workItem);
+    this.state.trackedAuthorityWorkItems.set(key, workItem);
+    await this.reloadWorkAuthority(workItem, this.state.generation);
+    return this.state.workAuthorities.get(key) ?? null;
   }
 
   async createComment(
@@ -521,6 +609,7 @@ export class CollaborationReadModelController {
       this.state.inFlightEventCursors.clear();
       this.state.failedEventCursors.clear();
       this.state.assignments.clear();
+      this.state.workAuthorities.clear();
       this.state.comments.clear();
       this.state.activity = [];
       this.state.remoteRuns.clear();
@@ -734,9 +823,31 @@ export class CollaborationReadModelController {
       }
       this.setLoading("assignments", false);
       this.emit();
+      // Keep independent authorities in sync when assignment events fire.
+      this.state.trackedAuthorityWorkItems.set(key, workItem);
+      await this.reloadWorkAuthority(workItem, generation);
     } catch (error) {
       if (generation === this.state.generation) {
         this.setLoading("assignments", false);
+      }
+      throw error;
+    }
+  }
+
+  private async reloadWorkAuthority(workItem: WorkItemRef, generation: number): Promise<void> {
+    const key = workItemKey(workItem);
+    this.setLoading(`authority:${key}`, true);
+    this.emit();
+    try {
+      const projection = await this.api.getCollaborationWorkAuthority({ workItem });
+      if (generation !== this.state.generation) return;
+      this.state.workAuthorities.set(key, projection);
+      this.state.trackedAuthorityWorkItems.set(key, workItem);
+      this.setLoading(`authority:${key}`, false);
+      this.emit();
+    } catch (error) {
+      if (generation === this.state.generation) {
+        this.setLoading(`authority:${key}`, false);
       }
       throw error;
     }
@@ -937,6 +1048,7 @@ export class CollaborationReadModelController {
       members: this.state.members,
       hosts: [...this.state.hosts.values()],
       assignmentsByWorkItem: Object.fromEntries(this.state.assignments),
+      workAuthorityByWorkItem: Object.fromEntries(this.state.workAuthorities),
       commentsByWorkItem: Object.fromEntries(this.state.comments),
       activity: this.state.activity,
       remoteRunsByDispatchId: Object.fromEntries(this.state.remoteRuns),

@@ -45,8 +45,92 @@ function connectedStatus(): CollaborationStatus {
   };
 }
 
-function createApi(updateAssignment = vi.fn()) {
+function createApi() {
   const status = connectedStatus();
+  const updateResponsibility = vi.fn().mockResolvedValue({
+    schemaVersion: "responsibility/v1",
+    scope: {
+      kind: "task",
+      workspaceId: "w",
+      projectId: "project-1",
+      canvasId: "canvas-1",
+      taskId: "T-1"
+    },
+    principal: { kind: "human", humanPrincipalId: "human-1" },
+    revision: 1,
+    updatedAt: "2030-01-01T00:00:00.000Z",
+    availability: "active"
+  });
+  const updateExecutionTarget = vi.fn().mockResolvedValue({
+    schemaVersion: "execution-target/v1",
+    scope: {
+      kind: "block",
+      workspaceId: "w",
+      projectId: "project-1",
+      canvasId: "canvas-1",
+      blockRef: "T-1#B-001"
+    },
+    target: { kind: "automatic_host" },
+    revision: 1,
+    updatedAt: "2030-01-01T00:00:00.000Z",
+    availability: { status: "pending", reason: "automatic_pending_selection" }
+  });
+  const getWorkAuthority = vi.fn().mockImplementation(async ({ workItem }: { workItem: WorkItemRef }) => {
+    const scope =
+      workItem.kind === "task"
+        ? {
+            kind: "task" as const,
+            workspaceId: "w",
+            projectId: "project-1",
+            canvasId: workItem.canvasId,
+            taskId: workItem.taskId
+          }
+        : {
+            kind: "block" as const,
+            workspaceId: "w",
+            projectId: "project-1",
+            canvasId: workItem.canvasId,
+            blockRef: workItem.blockRef
+          };
+    return {
+      schemaVersion: "work-authority/v1",
+      scope,
+      responsibility: {
+        schemaVersion: "responsibility/v1",
+        scope,
+        principal: null,
+        revision: 0,
+        updatedAt: "2030-01-01T00:00:00.000Z",
+        availability: "unassigned"
+      },
+      reviewer: {
+        schemaVersion: "review-assignment/v1",
+        scope,
+        principal: null,
+        revision: 0,
+        updatedAt: "2030-01-01T00:00:00.000Z",
+        availability: "unassigned"
+      },
+      executionTarget:
+        workItem.kind === "block"
+          ? {
+              schemaVersion: "execution-target/v1",
+              scope,
+              target: { kind: "unassigned" },
+              revision: 0,
+              updatedAt: "2030-01-01T00:00:00.000Z",
+              availability: { status: "unassigned", reason: "unassigned" }
+            }
+          : null,
+      revisions: {
+        responsibilityRevision: 0,
+        reviewerRevision: 0,
+        executionTargetRevision: 0
+      },
+      selectedHost: null,
+      evaluatedAt: "2030-01-01T00:00:00.000Z"
+    };
+  });
   const api = {
     getCollaborationStatus: vi.fn().mockResolvedValue(status),
     listCollaborationMembers: vi.fn().mockResolvedValue({
@@ -71,16 +155,20 @@ function createApi(updateAssignment = vi.fn()) {
       nextHumanCursor: null,
       nextHostCursor: null
     }),
+    getCollaborationWorkAuthority: getWorkAuthority,
+    updateCollaborationResponsibility: updateResponsibility,
+    updateCollaborationReviewer: vi.fn(),
+    updateCollaborationExecutionTarget: updateExecutionTarget,
     listCollaborationComments: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
     listCollaborationActivity: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
-    updateCollaborationAssignment: updateAssignment,
+    updateCollaborationAssignment: vi.fn(),
     createCollaborationComment: vi.fn(),
     editCollaborationComment: vi.fn(),
     tombstoneCollaborationComment: vi.fn(),
     onCollaborationStatusChanged: vi.fn(() => () => undefined),
     onCollaborationObserverSignal: vi.fn(() => () => undefined)
   } as unknown as PlanWeaveCollaborationApi & CollaborationReadBridgePort;
-  return { api, updateAssignment };
+  return { api, updateResponsibility, updateExecutionTarget };
 }
 
 afterEach(() => {
@@ -88,8 +176,8 @@ afterEach(() => {
 });
 
 describe("useAssigneePickerController", () => {
-  it("hard-rejects Task machine targets without calling the bridge", async () => {
-    const { api, updateAssignment } = createApi();
+  it("hard-rejects Host targets on the responsibility axis without calling Host mutation", async () => {
+    const { api, updateResponsibility, updateExecutionTarget } = createApi();
     const shell = acquireCollaborationReadModelController(api);
     await shell.controller.setActiveProject({
       profileId: "profile-1",
@@ -100,6 +188,7 @@ describe("useAssigneePickerController", () => {
     const { result } = renderHook(() =>
       useAssigneePickerController({
         workItem: taskItem,
+        authorityRole: "responsibility",
         api,
         detailsOpen: false,
         t: createTranslator("zh-CN")
@@ -115,7 +204,8 @@ describe("useAssigneePickerController", () => {
       ok = await result.current.selectTarget({ kind: "automatic_host" });
     });
     expect(ok).toBe(false);
-    expect(updateAssignment).not.toHaveBeenCalled();
+    expect(updateResponsibility).not.toHaveBeenCalled();
+    expect(updateExecutionTarget).not.toHaveBeenCalled();
     expect(result.current.viewModel?.lastError).toBe("Task 不能分配给 Agent Host。");
 
     await act(async () => {
@@ -125,21 +215,14 @@ describe("useAssigneePickerController", () => {
       });
     });
     expect(ok).toBe(false);
-    expect(updateAssignment).not.toHaveBeenCalled();
+    expect(updateExecutionTarget).not.toHaveBeenCalled();
 
     shell.release();
     resetCollaborationReadModelHubForTests(api);
   });
 
-  it("still allows Block automatic_host through the bridge path", async () => {
-    const updateAssignment = vi.fn().mockResolvedValue({
-      projectId: "project-1",
-      workItem: blockItem,
-      target: { kind: "automatic_host" },
-      revision: 1,
-      availability: { status: "pending", reason: "automatic_pending_selection" }
-    });
-    const { api } = createApi(updateAssignment);
+  it("routes Block automatic_host only through the execution_target authority", async () => {
+    const { api, updateResponsibility, updateExecutionTarget } = createApi();
     const shell = acquireCollaborationReadModelController(api);
     await shell.controller.setActiveProject({
       profileId: "profile-1",
@@ -150,6 +233,7 @@ describe("useAssigneePickerController", () => {
     const { result } = renderHook(() =>
       useAssigneePickerController({
         workItem: blockItem,
+        authorityRole: "execution_target",
         api,
         detailsOpen: false,
         t: createTranslator("en")
@@ -165,12 +249,13 @@ describe("useAssigneePickerController", () => {
       ok = await result.current.selectTarget({ kind: "automatic_host" });
     });
     expect(ok).toBe(true);
-    expect(updateAssignment).toHaveBeenCalledWith(
+    expect(updateExecutionTarget).toHaveBeenCalledWith(
       expect.objectContaining({
         workItem: blockItem,
         target: { kind: "automatic_host" }
       })
     );
+    expect(updateResponsibility).not.toHaveBeenCalled();
 
     shell.release();
     resetCollaborationReadModelHubForTests(api);

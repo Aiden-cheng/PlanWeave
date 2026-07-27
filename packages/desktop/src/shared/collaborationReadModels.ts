@@ -3,10 +3,12 @@ import {
   activityListWireQuerySchema,
   assignmentListQuerySchema,
   assignmentUpdateWireCommandSchema,
+  collaborationRevisionSchema,
   commentCreateWireCommandSchema,
   commentEditWireCommandSchema,
   commentListWireQuerySchema,
   commentTombstoneWireCommandSchema,
+  executionTargetSchema,
   humanDeviceListQuerySchema,
   humanInvitationListQuerySchema,
   humanObserverCatchupRequiredSchema,
@@ -17,6 +19,7 @@ import {
   remoteHumanExecutionActionCommandSchema,
   remoteInteractionPageQuerySchema,
   remoteInteractionResponseSchema,
+  workspaceMemberPrincipalSchema,
   workItemRefSchema,
   type ActivityListPage,
   type ActivityRecord,
@@ -38,6 +41,7 @@ import {
   type RemoteInteractionResponse,
   type RemoteInteractionView,
   type RemoteOperationObservation,
+  type WorkAuthorityProjection,
   type WorkItemRef
 } from "@planweave-ai/collaboration-contracts";
 
@@ -89,6 +93,9 @@ export type CollaborationHostProjection = {
 
 export type CollaborationMutationKind =
   | "assignment"
+  | "responsibility"
+  | "reviewer"
+  | "execution_target"
   | "comment_create"
   | "comment_edit"
   | "comment_tombstone";
@@ -183,6 +190,66 @@ export type CollaborationAssignmentUpdateInput = z.input<
   typeof collaborationAssignmentUpdateInputSchema
 >;
 
+/**
+ * Renderer work-item identity for authority reads/mutations.
+ * Main injects workspaceId + projectId into Server scopes; renderer never supplies remote roots.
+ */
+export const collaborationWorkAuthorityScopeInputSchema = z
+  .object({
+    workItem: workItemRefSchema
+  })
+  .strict();
+export type CollaborationWorkAuthorityScopeInput = z.infer<
+  typeof collaborationWorkAuthorityScopeInputSchema
+>;
+
+const collaborationReasonInputSchema = z.string().trim().min(1).max(512).optional();
+
+export const collaborationResponsibilityUpdateInputSchema = z
+  .object({
+    workItem: workItemRefSchema,
+    principal: workspaceMemberPrincipalSchema.nullable(),
+    expectedRevision: collaborationRevisionSchema,
+    reason: collaborationReasonInputSchema
+  })
+  .strict();
+export type CollaborationResponsibilityUpdateInput = z.infer<
+  typeof collaborationResponsibilityUpdateInputSchema
+>;
+
+export const collaborationReviewerUpdateInputSchema = z
+  .object({
+    workItem: workItemRefSchema,
+    principal: workspaceMemberPrincipalSchema.nullable(),
+    expectedRevision: collaborationRevisionSchema,
+    reason: collaborationReasonInputSchema
+  })
+  .strict();
+export type CollaborationReviewerUpdateInput = z.infer<
+  typeof collaborationReviewerUpdateInputSchema
+>;
+
+export const collaborationExecutionTargetUpdateInputSchema = z
+  .object({
+    workItem: workItemRefSchema,
+    target: executionTargetSchema,
+    expectedRevision: collaborationRevisionSchema,
+    reason: collaborationReasonInputSchema
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.workItem.kind !== "block") {
+      context.addIssue({
+        code: "custom",
+        message: "execution_target_requires_exact_block",
+        path: ["workItem"]
+      });
+    }
+  });
+export type CollaborationExecutionTargetUpdateInput = z.infer<
+  typeof collaborationExecutionTargetUpdateInputSchema
+>;
+
 export const collaborationCommentCreateInputSchema = commentCreateWireCommandSchema;
 export type CollaborationCommentCreateInput = z.input<typeof collaborationCommentCreateInputSchema>;
 
@@ -271,6 +338,8 @@ export type CollaborationReadModelSnapshot = {
   members: HumanMembershipView[];
   hosts: CollaborationHostProjection[];
   assignmentsByWorkItem: Record<string, AssignmentDisplayProjection>;
+  /** Independent OSS-003 authority projections keyed by workItemKey. */
+  workAuthorityByWorkItem: Record<string, WorkAuthorityProjection>;
   commentsByWorkItem: Record<string, CommentDisplayProjection[]>;
   activity: ActivityRecord[];
   remoteRunsByDispatchId: Record<string, CollaborationRemoteRunProjection>;

@@ -28,6 +28,7 @@ function baseSnapshot(
     members: [],
     hosts: [],
     assignmentsByWorkItem: {},
+    workAuthorityByWorkItem: {},
     commentsByWorkItem: {},
     activity: [],
     remoteRunsByDispatchId: {},

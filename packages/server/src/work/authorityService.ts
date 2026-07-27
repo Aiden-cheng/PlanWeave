@@ -1,15 +1,19 @@
 import {
   executionTargetReadModelSchema,
+  hostAuthorizationReadModelSchema,
   responsibilityReadModelSchema,
   reviewAssignmentReadModelSchema,
+  workAuthorityProjectionSchema,
   type ExecutionTargetReadModel,
   type ResponsibilityReadModel,
-  type ReviewAssignmentReadModel
+  type ReviewAssignmentReadModel,
+  type WorkAuthorityProjection
 } from "@planweave-ai/collaboration-contracts";
 import type { HumanAuthContext, HumanIdentityRepository } from "../identity/index.js";
 import type { ProjectAccessRepository } from "../projectAccessRepository.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
-import type { AgentHostRepository } from "../hosts.js";
+import type { AgentHost, AgentHostRepository } from "../hosts.js";
+import { isAgentHostOnline } from "../hosts.js";
 import { AuthorityRepository } from "./authorityRepository.js";
 import {
   executionTargetMutationSchema,
@@ -52,6 +56,24 @@ export type AuthorityServiceOptions = {
   workspaceIdentity: WorkspaceIdentityRepository;
   hosts: AgentHostRepository;
   clock?: () => Date;
+  /** Optional online window for Host selection projections (ms). */
+  hostOfflineAfterMs?: number;
+  /**
+   * Optional active-dispatch lease snapshot for UI only.
+   * Never used as mutation or dispatch authority.
+   */
+  resolveActiveLease?: (input: {
+    projectId: string;
+    canvasId: string;
+    blockRef: string;
+    hostId: string;
+  }) =>
+    | {
+        status: "active" | "expired" | "revoked";
+        leaseId: string;
+        expiresAt: string;
+      }
+    | undefined;
 };
 
 /** Server application boundary for independent responsibility/reviewer/Host mutations. */
@@ -82,7 +104,8 @@ export class AuthorityService {
         identity: this.options.identity
       });
     }
-    return this.options.repository.applyResponsibility({ mutation: intent, actor: actorOf(actor) });
+    this.options.repository.applyResponsibility({ mutation: intent, actor: actorOf(actor) });
+    return this.getResponsibility(actor, scope)!;
   }
 
   updateReviewer(actor: HumanAuthContext, rawIntent: unknown) {
@@ -105,7 +128,8 @@ export class AuthorityService {
         identity: this.options.identity
       });
     }
-    return this.options.repository.applyReviewer({ mutation: intent, actor: actorOf(actor) });
+    this.options.repository.applyReviewer({ mutation: intent, actor: actorOf(actor) });
+    return this.getReviewer(actor, scope)!;
   }
 
   updateExecutionTarget(actor: HumanAuthContext, rawIntent: unknown) {
@@ -123,10 +147,11 @@ export class AuthorityService {
       hosts: this.options.hosts,
       packageFacts
     });
-    return this.options.repository.applyExecutionTarget({
+    this.options.repository.applyExecutionTarget({
       mutation: intent,
       actor: actorOf(actor)
     });
+    return this.getExecutionTarget(actor, scope)!;
   }
 
   getResponsibility(
@@ -199,6 +224,199 @@ export class AuthorityService {
     return this.options.repository.currentRevisions(scope);
   }
 
+  /**
+   * Redacted composite projection for Desktop.
+   * Missing durable rows surface as unassigned revision 0 so clients can CAS cleanly.
+   * Task scopes never include Host execution targets.
+   */
+  getWorkAuthorityProjection(actor: HumanAuthContext, rawScope: unknown): WorkAuthorityProjection {
+    const scope = this.authorizeRead(actor, rawScope);
+    this.assertPackageScope(scope);
+    const evaluatedAt = this.clock().toISOString();
+    const revisions = this.options.repository.currentRevisions(scope);
+    const responsibility =
+      this.getResponsibility(actor, scope) ??
+      responsibilityReadModelSchema.parse({
+        schemaVersion: "responsibility/v1",
+        scope,
+        principal: null,
+        revision: 0,
+        updatedAt: evaluatedAt,
+        availability: "unassigned"
+      });
+    const reviewer =
+      this.getReviewer(actor, scope) ??
+      reviewAssignmentReadModelSchema.parse({
+        schemaVersion: "review-assignment/v1",
+        scope,
+        principal: null,
+        revision: 0,
+        updatedAt: evaluatedAt,
+        availability: "unassigned"
+      });
+
+    if (scope.kind === "task") {
+      return workAuthorityProjectionSchema.parse({
+        schemaVersion: "work-authority/v1",
+        scope,
+        responsibility,
+        reviewer,
+        executionTarget: null,
+        revisions,
+        selectedHost: null,
+        evaluatedAt
+      });
+    }
+
+    const executionTarget =
+      this.getExecutionTarget(actor, scope) ??
+      executionTargetReadModelSchema.parse({
+        schemaVersion: "execution-target/v1",
+        scope,
+        target: { kind: "unassigned" },
+        revision: 0,
+        updatedAt: evaluatedAt,
+        availability: { status: "unassigned", reason: "unassigned" }
+      });
+    const selectedHost = this.projectSelectedHost({
+      scope,
+      executionTarget,
+      revisions,
+      evaluatedAt
+    });
+
+    return workAuthorityProjectionSchema.parse({
+      schemaVersion: "work-authority/v1",
+      scope,
+      responsibility,
+      reviewer,
+      executionTarget,
+      revisions,
+      selectedHost,
+      evaluatedAt
+    });
+  }
+
+  private projectSelectedHost(input: {
+    scope: Extract<AuthorityScope, { kind: "block" }>;
+    executionTarget: ExecutionTargetReadModel;
+    revisions: ReturnType<AuthorityRepository["currentRevisions"]>;
+    evaluatedAt: string;
+  }) {
+    const { scope, executionTarget, revisions, evaluatedAt } = input;
+    if (executionTarget.target.kind !== "exact_host") {
+      return null;
+    }
+
+    const hostId = executionTarget.target.hostId;
+    const host = this.options.hosts.get(hostId);
+    const packageFacts = this.options.packagePort.resolveWorkItem(workItem(scope));
+    const availabilityReason = this.selectionAvailabilityReason({
+      host,
+      hostId,
+      scope,
+      requiredCapabilities: packageFacts.requiredCapabilities
+    });
+    const lease = this.resolveLeaseProjection({
+      projectId: scope.projectId,
+      canvasId: scope.canvasId,
+      blockRef: scope.blockRef,
+      hostId
+    });
+    // Selection readiness (availabilityReason) is independent of active lease.
+    // Authorization reason stays deny/lease_missing until a live attempt holds a lease.
+    const authorizationReason =
+      availabilityReason === "host_missing"
+        ? ("host_missing" as const)
+        : availabilityReason === "host_revoked"
+          ? ("host_revoked" as const)
+          : availabilityReason === "host_offline"
+            ? ("host_offline" as const)
+            : availabilityReason === "host_at_capacity"
+              ? ("host_at_capacity" as const)
+              : availabilityReason === "host_capability_mismatch"
+                ? ("capability_mismatch" as const)
+                : availabilityReason === "host_not_authorized"
+                  ? ("workspace_acl_denied" as const)
+                  : lease.status === "active"
+                    ? ("authorized" as const)
+                    : ("lease_missing" as const);
+    const authorization = hostAuthorizationReadModelSchema.parse({
+      schemaVersion: "host-authorization/v1",
+      scope,
+      hostId,
+      decision: authorizationReason === "authorized" ? "allow" : "deny",
+      reason: authorizationReason,
+      currentRevisions: revisions,
+      evaluatedAt
+    });
+
+    return {
+      hostId,
+      availabilityReason,
+      lease,
+      authorization
+    };
+  }
+
+  private selectionAvailabilityReason(input: {
+    host: AgentHost | undefined;
+    hostId: string;
+    scope: Extract<AuthorityScope, { kind: "block" }>;
+    requiredCapabilities: readonly string[];
+  }):
+    | "ready"
+    | "host_missing"
+    | "host_revoked"
+    | "host_offline"
+    | "host_at_capacity"
+    | "host_capability_mismatch"
+    | "host_not_authorized" {
+    const { host, scope, requiredCapabilities } = input;
+    if (!host) return "host_missing";
+    if (host.revokedAt !== undefined) return "host_revoked";
+    const hostWorkspace = this.options.workspaceIdentity.workspaceForHost(host.id);
+    if (!hostWorkspace || hostWorkspace !== scope.workspaceId) return "host_not_authorized";
+    const project = this.options.access.registry.projectInternal(
+      scope.workspaceId,
+      scope.projectId
+    );
+    const canvas = this.options.access.registry.canvasInternal(
+      scope.workspaceId,
+      scope.projectId,
+      scope.canvasId
+    );
+    if (!project || project.revokedAt !== null || !canvas || canvas.revokedAt !== null) {
+      return "host_not_authorized";
+    }
+    const offlineAfterMs = this.options.hostOfflineAfterMs ?? 60_000;
+    if (!isAgentHostOnline(host, { now: this.clock(), hostOfflineAfterMs: offlineAfterMs })) {
+      return "host_offline";
+    }
+    if (host.capacity < 1) return "host_at_capacity";
+    if (!requiredCapabilities.every((capability) => host.capabilities.includes(capability))) {
+      return "host_capability_mismatch";
+    }
+    return "ready";
+  }
+
+  private resolveLeaseProjection(input: {
+    projectId: string;
+    canvasId: string;
+    blockRef: string;
+    hostId: string;
+  }) {
+    const snapshot = this.options.resolveActiveLease?.(input);
+    if (!snapshot) {
+      return { status: "none" as const, leaseId: null, expiresAt: null };
+    }
+    return {
+      status: snapshot.status,
+      leaseId: snapshot.leaseId,
+      expiresAt: snapshot.expiresAt
+    };
+  }
+
   private authorizeRead(actor: HumanAuthContext, rawScope: unknown): AuthorityScope {
     const scope = authorityScopeSchema.parse(rawScope);
     this.assertActorScope(actor, scope);
@@ -216,7 +434,6 @@ export class AuthorityService {
     if (actor.projectId !== scope.projectId) throw new Error("authority_project_mismatch");
     if (!this.options.workspaceIdentity.workspaceExists(scope.workspaceId))
       throw new Error("authority_workspace_mismatch");
-    void this.clock;
   }
 
   private assertPackageScope(scope: AuthorityScope): void {

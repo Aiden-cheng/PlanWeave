@@ -111,7 +111,7 @@ export function useRemoteRunPanelController(
       return `remote-action-${Date.now()}`;
     });
   const { status } = useCollaborationStatus({ api });
-  const { snapshot } = useCollaborationReadModels({
+  const { snapshot, controller: readModelController } = useCollaborationReadModels({
     api,
     profileId: null,
     projectId: null,
@@ -132,6 +132,17 @@ export function useRemoteRunPanelController(
     workKey && snapshot.assignmentsByWorkItem[workKey]
       ? snapshot.assignmentsByWorkItem[workKey]!
       : null;
+  const workAuthority =
+    workKey && snapshot.workAuthorityByWorkItem[workKey]
+      ? snapshot.workAuthorityByWorkItem[workKey]!
+      : null;
+
+  // Ensure independent authority projections are available for dispatch CAS.
+  useEffect(() => {
+    if (!args.open || !args.workItem || args.workItem.kind !== "block" || !readModelController)
+      return;
+    void readModelController.ensureWorkAuthority(args.workItem).catch(() => undefined);
+  }, [args.open, args.workItem, readModelController]);
 
   const observerRun = useMemo(() => {
     if (!args.workItem) return null;
@@ -313,16 +324,43 @@ export function useRemoteRunPanelController(
   const dispatch = useCallback(async () => {
     const workItem = args.workItem;
     if (!api || !workItem || workItem.kind !== "block") return;
+    const projectId =
+      snapshot.projectId ??
+      status?.profiles.find((profile) => profile.profileId === status.activeProfileId)?.projectId ??
+      null;
+    if (!projectId) {
+      setActionError("collaboration_project_unavailable");
+      return;
+    }
     await runAction("dispatch", async () => {
+      // Prefer independent authority revisions; never invent Host authority from DOM/paths.
+      const revisions = workAuthority?.revisions ?? {
+        responsibilityRevision: 0,
+        reviewerRevision: 0,
+        executionTargetRevision: assignment?.revision ?? 0
+      };
       const result = await api.dispatchCollaborationRemoteOperation({
+        schemaVersion: "remote-run/v2",
+        projectId,
         canvasId: workItem.canvasId,
         blockRef: workItem.blockRef,
         idempotencyKey: `desktop-dispatch-${createId()}`,
-        expectedAssignmentRevision: assignment?.revision
+        expectedResponsibilityRevision: revisions.responsibilityRevision,
+        expectedReviewerRevision: revisions.reviewerRevision,
+        expectedExecutionTargetRevision: revisions.executionTargetRevision
       });
       setObservation(result);
     });
-  }, [api, args.workItem, runAction, createId, assignment?.revision]);
+  }, [
+    api,
+    args.workItem,
+    runAction,
+    createId,
+    snapshot.projectId,
+    status,
+    workAuthority?.revisions,
+    assignment?.revision
+  ]);
 
   const cancel = useCallback(
     async (reason: string) => {

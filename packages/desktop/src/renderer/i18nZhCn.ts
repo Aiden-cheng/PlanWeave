@@ -1005,6 +1005,15 @@ export const zhCnCatalog = {
   notifyAssignmentRejected: "分配被拒绝",
   notifyMembershipChanged: "成员关系已更新",
   assigneeUpdateSucceeded: "负责人已更新",
+  // Independent responsibility / reviewer / Host execution (OSS-003#B-003)
+  authorityResponsibility: "负责人",
+  authorityReviewer: "评审人",
+  authorityExecutionHost: "执行 Host",
+  authorityHostReason: "Host 状态",
+  authorityLeaseNone: "无活动租约",
+  authorityLeaseActive: "租约有效",
+  authorityLeaseExpired: "租约已过期",
+  authorityLeaseRevoked: "租约已吊销",
   assigneeUpdateFailed: "无法更新负责人",
 
   // Human comments + activity (DX-003#B-001) — distinct from Agent conversation

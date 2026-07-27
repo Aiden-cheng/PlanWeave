@@ -39,6 +39,7 @@ import {
   type RegistryPageQuery,
   type CanvasPresenceServerMessage,
   type RemoteActionView,
+  type RemoteDispatchIntent,
   type RemoteDispatchWireCommand,
   type RemoteEventReplay,
   type RemoteHumanExecutionActionCommand,
@@ -46,8 +47,12 @@ import {
   type RemoteInteractionResponse,
   type RemoteInteractionView,
   type RemoteOperationObservation,
+  type ResponsibilityReadModel,
   type RestorePackageSnapshotRequest,
-  type RestorePackageSnapshotResult
+  type RestorePackageSnapshotResult,
+  type ReviewAssignmentReadModel,
+  type ExecutionTargetReadModel,
+  type WorkAuthorityProjection
 } from "@planweave-ai/collaboration-contracts";
 import type {
   CollaborationActivityListQueryInput,
@@ -58,12 +63,16 @@ import type {
   CollaborationCommentListQueryInput,
   CollaborationCommentTombstoneInput,
   CollaborationDeviceListQueryInput,
+  CollaborationExecutionTargetUpdateInput,
   CollaborationInvitationListQueryInput,
   CollaborationObserverSignal,
   CollaborationPageQueryInput,
   CollaborationRemoteEventQueryInput,
   CollaborationRemoteInteractionPageQueryInput,
   CollaborationRemoteOperationIdInput,
+  CollaborationResponsibilityUpdateInput,
+  CollaborationReviewerUpdateInput,
+  CollaborationWorkAuthorityScopeInput,
   CollaborationWorkItemInput
 } from "./collaborationReadModels.js";
 
@@ -359,6 +368,10 @@ export const collaborationInvokeChannels = {
   listCollaborationAssignments: "planweave-collaboration:listAssignments",
   getCollaborationAssignment: "planweave-collaboration:getAssignment",
   listCollaborationEligibleAssignees: "planweave-collaboration:listEligibleAssignees",
+  getCollaborationWorkAuthority: "planweave-collaboration:getWorkAuthority",
+  updateCollaborationResponsibility: "planweave-collaboration:updateResponsibility",
+  updateCollaborationReviewer: "planweave-collaboration:updateReviewer",
+  updateCollaborationExecutionTarget: "planweave-collaboration:updateExecutionTarget",
   listCollaborationComments: "planweave-collaboration:listComments",
   listCollaborationActivity: "planweave-collaboration:listActivity",
   listCollaborationAuthorizedProjects: "planweave-collaboration:listAuthorizedProjects",
@@ -438,6 +451,18 @@ export type PlanWeaveCollaborationApi = {
   listCollaborationEligibleAssignees: (
     input: CollaborationWorkItemInput
   ) => Promise<EligibleAssigneesResponse>;
+  getCollaborationWorkAuthority: (
+    input: CollaborationWorkAuthorityScopeInput
+  ) => Promise<WorkAuthorityProjection>;
+  updateCollaborationResponsibility: (
+    input: CollaborationResponsibilityUpdateInput
+  ) => Promise<ResponsibilityReadModel>;
+  updateCollaborationReviewer: (
+    input: CollaborationReviewerUpdateInput
+  ) => Promise<ReviewAssignmentReadModel>;
+  updateCollaborationExecutionTarget: (
+    input: CollaborationExecutionTargetUpdateInput
+  ) => Promise<ExecutionTargetReadModel>;
   listCollaborationComments: (
     input: CollaborationCommentListQueryInput
   ) => Promise<CommentListPage>;
@@ -481,7 +506,7 @@ export type PlanWeaveCollaborationApi = {
     input: CollaborationFinalizePendingAttachmentInput
   ) => Promise<FinalizePendingAttachmentResponse>;
   dispatchCollaborationRemoteOperation: (
-    input: RemoteDispatchWireCommand
+    input: RemoteDispatchIntent | RemoteDispatchWireCommand
   ) => Promise<RemoteOperationObservation>;
   observeCollaborationRemoteOperation: (
     input: CollaborationRemoteOperationIdInput
@@ -523,8 +548,12 @@ export type {
   CollaborationCommentListQueryInput,
   CollaborationCommentTombstoneInput,
   CollaborationDeviceListQueryInput,
+  CollaborationExecutionTargetUpdateInput,
   CollaborationInvitationListQueryInput,
   CollaborationObserverSignal,
   CollaborationPageQueryInput,
+  CollaborationResponsibilityUpdateInput,
+  CollaborationReviewerUpdateInput,
+  CollaborationWorkAuthorityScopeInput,
   CollaborationWorkItemInput
 } from "./collaborationReadModels.js";

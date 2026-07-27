@@ -142,6 +142,7 @@ const IDLE_SNAPSHOT: CollaborationReadModelSnapshot = {
   members: [],
   hosts: [],
   assignmentsByWorkItem: {},
+  workAuthorityByWorkItem: {},
   commentsByWorkItem: {},
   activity: [],
   remoteRunsByDispatchId: {},

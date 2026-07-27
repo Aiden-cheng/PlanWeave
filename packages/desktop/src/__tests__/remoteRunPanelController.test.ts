@@ -186,6 +186,91 @@ function createApi() {
       humans: [],
       hosts: []
     }),
+    getCollaborationWorkAuthority: vi.fn().mockResolvedValue({
+      schemaVersion: "work-authority/v1",
+      scope: {
+        kind: "block",
+        workspaceId: "workspace-1",
+        projectId: "project-1",
+        canvasId: "default",
+        blockRef: "T-1#B-001"
+      },
+      responsibility: {
+        schemaVersion: "responsibility/v1",
+        scope: {
+          kind: "block",
+          workspaceId: "workspace-1",
+          projectId: "project-1",
+          canvasId: "default",
+          blockRef: "T-1#B-001"
+        },
+        principal: null,
+        revision: 0,
+        updatedAt: "2030-01-01T00:00:00.000Z",
+        availability: "unassigned"
+      },
+      reviewer: {
+        schemaVersion: "review-assignment/v1",
+        scope: {
+          kind: "block",
+          workspaceId: "workspace-1",
+          projectId: "project-1",
+          canvasId: "default",
+          blockRef: "T-1#B-001"
+        },
+        principal: null,
+        revision: 0,
+        updatedAt: "2030-01-01T00:00:00.000Z",
+        availability: "unassigned"
+      },
+      executionTarget: {
+        schemaVersion: "execution-target/v1",
+        scope: {
+          kind: "block",
+          workspaceId: "workspace-1",
+          projectId: "project-1",
+          canvasId: "default",
+          blockRef: "T-1#B-001"
+        },
+        target: { kind: "exact_host", hostId: "host-1" },
+        revision: 1,
+        updatedAt: "2030-01-01T00:00:00.000Z",
+        availability: { status: "ready", reason: "ready" }
+      },
+      revisions: {
+        responsibilityRevision: 0,
+        reviewerRevision: 0,
+        executionTargetRevision: 1
+      },
+      selectedHost: {
+        hostId: "host-1",
+        availabilityReason: "ready",
+        lease: { status: "none", leaseId: null, expiresAt: null },
+        authorization: {
+          schemaVersion: "host-authorization/v1",
+          scope: {
+            kind: "block",
+            workspaceId: "workspace-1",
+            projectId: "project-1",
+            canvasId: "default",
+            blockRef: "T-1#B-001"
+          },
+          hostId: "host-1",
+          decision: "deny",
+          reason: "lease_missing",
+          currentRevisions: {
+            responsibilityRevision: 0,
+            reviewerRevision: 0,
+            executionTargetRevision: 1
+          },
+          evaluatedAt: "2030-01-01T00:00:00.000Z"
+        }
+      },
+      evaluatedAt: "2030-01-01T00:00:00.000Z"
+    }),
+    updateCollaborationResponsibility: vi.fn(),
+    updateCollaborationReviewer: vi.fn(),
+    updateCollaborationExecutionTarget: vi.fn(),
     observeCollaborationRemoteOperation: observe,
     dispatchCollaborationRemoteOperation: dispatch,
     executeCollaborationRemoteOperationAction: executeAction,

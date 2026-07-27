@@ -15,6 +15,7 @@ import {
   humanInvitationListQuerySchema,
   humanPageQuerySchema,
   opaqueIdentifierSchema,
+  remoteDispatchIntentSchema,
   remoteDispatchWireCommandSchema,
   remoteEventQuerySchema,
   remoteInteractionPageQuerySchema,
@@ -23,9 +24,11 @@ import {
   type AssignmentDisplayProjection,
   type AssignmentListPage,
   type CollaborationConnectionProfile,
+  type CollaborationWorkScope,
   type CommentDisplayProjection,
   type CommentListPage,
   type EligibleAssigneesResponse,
+  type ExecutionTargetReadModel,
   type FinalizePendingAttachmentResponse,
   type HumanBootstrapRequest,
   type HumanBootstrapResponse,
@@ -40,7 +43,11 @@ import {
   type RemoteEventReplay,
   type RemoteInteractionPage,
   type RemoteInteractionView,
-  type RemoteOperationObservation
+  type RemoteOperationObservation,
+  type ResponsibilityReadModel,
+  type ReviewAssignmentReadModel,
+  type WorkAuthorityProjection,
+  type WorkItemRef
 } from "@planweave-ai/collaboration-contracts";
 import {
   assertNoSmuggledCollaborationSecrets,
@@ -68,9 +75,13 @@ import {
   type CollaborationUpsertProfileInput
 } from "../../shared/collaboration.js";
 import {
+  collaborationExecutionTargetUpdateInputSchema,
   collaborationRemoteActionInputSchema,
   collaborationRemoteInteractionRespondInputSchema,
-  collaborationRemoteOperationIdInputSchema
+  collaborationRemoteOperationIdInputSchema,
+  collaborationResponsibilityUpdateInputSchema,
+  collaborationReviewerUpdateInputSchema,
+  collaborationWorkAuthorityScopeInputSchema
 } from "../../shared/collaborationReadModels.js";
 import {
   CollaborationClient,
@@ -858,6 +869,70 @@ export class CollaborationService {
     return this.withActiveClient((client) => client.listEligibleAssignees(workItem));
   }
 
+  async getWorkAuthority(input: unknown): Promise<WorkAuthorityProjection> {
+    const { workItem } = collaborationWorkAuthorityScopeInputSchema.parse(input);
+    return this.withActiveClient(async (client) => {
+      const scope = await this.toAuthorityScope(client, workItem);
+      return client.getWorkAuthority(scope);
+    });
+  }
+
+  async updateResponsibility(input: unknown): Promise<ResponsibilityReadModel> {
+    const command = collaborationResponsibilityUpdateInputSchema.parse(input);
+    return this.withActiveClient(async (client) => {
+      const scope = await this.toAuthorityScope(client, command.workItem);
+      return client.updateResponsibility({
+        schemaVersion: "responsibility/v1",
+        scope,
+        principal: command.principal,
+        expectedRevision: command.expectedRevision,
+        ...(command.reason === undefined ? {} : { reason: command.reason })
+      });
+    });
+  }
+
+  async updateReviewer(input: unknown): Promise<ReviewAssignmentReadModel> {
+    const command = collaborationReviewerUpdateInputSchema.parse(input);
+    return this.withActiveClient(async (client) => {
+      const scope = await this.toAuthorityScope(client, command.workItem);
+      return client.updateReviewer({
+        schemaVersion: "review-assignment/v1",
+        scope,
+        principal: command.principal,
+        expectedRevision: command.expectedRevision,
+        ...(command.reason === undefined ? {} : { reason: command.reason })
+      });
+    });
+  }
+
+  async updateExecutionTarget(input: unknown): Promise<ExecutionTargetReadModel> {
+    const command = collaborationExecutionTargetUpdateInputSchema.parse(input);
+    if (command.workItem.kind !== "block") {
+      throw new CollaborationClientError({
+        kind: "validation",
+        code: "execution_target_requires_exact_block",
+        message: "Host execution targets accept only exact Task#Block refs."
+      });
+    }
+    return this.withActiveClient(async (client) => {
+      const scope = await this.toAuthorityScope(client, command.workItem);
+      if (scope.kind !== "block") {
+        throw new CollaborationClientError({
+          kind: "validation",
+          code: "execution_target_requires_exact_block",
+          message: "Host execution targets accept only exact Task#Block refs."
+        });
+      }
+      return client.updateExecutionTarget({
+        schemaVersion: "execution-target/v1",
+        scope,
+        target: command.target,
+        expectedRevision: command.expectedRevision,
+        ...(command.reason === undefined ? {} : { reason: command.reason })
+      });
+    });
+  }
+
   async listComments(input: unknown): Promise<CommentListPage> {
     const query = commentListWireQuerySchema.parse(input);
     return this.withActiveClient((client) => client.listComments(query));
@@ -925,7 +1000,13 @@ export class CollaborationService {
   }
 
   async dispatchRemoteOperation(input: unknown): Promise<RemoteOperationObservation> {
-    const command = remoteDispatchWireCommandSchema.parse(input);
+    const command =
+      input &&
+      typeof input === "object" &&
+      "schemaVersion" in input &&
+      (input as { schemaVersion?: string }).schemaVersion === "remote-run/v2"
+        ? remoteDispatchIntentSchema.parse(input)
+        : remoteDispatchWireCommandSchema.parse(input);
     return this.withActiveClient((client) => client.dispatchRemoteOperation(command));
   }
 
@@ -1002,6 +1083,44 @@ export class CollaborationService {
     } catch (error) {
       throw collaborationErrorFromUnknown(error);
     }
+  }
+
+  /**
+   * Build a Server authority scope from a work item.
+   * Workspace ID is resolved from the registry for the active project — never from local paths.
+   */
+  private async toAuthorityScope(
+    client: CollaborationClient,
+    workItem: WorkItemRef
+  ): Promise<CollaborationWorkScope> {
+    const page = await client.registry().listProjects({ limit: 100, cursor: 0 });
+    const match = page.items.find((item) => item.registry.projectId === client.projectId);
+    if (!match) {
+      throw new CollaborationClientError({
+        kind: "forbidden",
+        code: "collaboration_workspace_unresolved",
+        message: "Active project has no authorized Workspace registry entry.",
+        retryable: false
+      });
+    }
+    const workspaceId = match.registry.workspaceId;
+    const projectId = client.projectId;
+    if (workItem.kind === "task") {
+      return {
+        kind: "task",
+        workspaceId,
+        projectId,
+        canvasId: workItem.canvasId,
+        taskId: workItem.taskId
+      };
+    }
+    return {
+      kind: "block",
+      workspaceId,
+      projectId,
+      canvasId: workItem.canvasId,
+      blockRef: workItem.blockRef
+    };
   }
 
   private publishObserverSignal(signal: CollaborationObserverSignal): void {
