@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import type { Migration } from "./types.js";
 import type { SqliteDatabase } from "../sqlite.js";
+import {
+  projectWorkspaceMemberships,
+  workspaceMembershipProjections
+} from "../identity/workspaceMembershipProjection.js";
 import { tableExists } from "./legacyTail.js";
 
 const migration27Sql = `
@@ -67,6 +71,9 @@ CREATE TABLE IF NOT EXISTS workspace_memberships (
   FOREIGN KEY(workspace_id,human_principal_id)
     REFERENCES workspace_principals(workspace_id,human_principal_id)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_memberships_active_unique
+  ON workspace_memberships(workspace_id,human_principal_id) WHERE revoked_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS workspace_device_sessions (
   workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
@@ -527,35 +534,17 @@ export function backfillProjectIdentity(
       )
     ) {
       unresolvedSourceIdentity = true;
-      continue;
     }
-    insertOrVerify(
-      database,
-      "SELECT workspace_id,membership_id,human_principal_id,role,revision,created_at,updated_at,revoked_at FROM workspace_memberships WHERE workspace_id=? AND membership_id=?",
-      `INSERT INTO workspace_memberships(workspace_id,membership_id,human_principal_id,role,revision,created_at,updated_at,revoked_at) VALUES(?,?,?,?,?,?,?,?)`,
-      [workspaceId, membership.membership_id],
-      [
-        workspaceId,
-        membership.membership_id,
-        membership.human_principal_id,
-        membership.role,
-        Number(membership.revision ?? 1),
-        membership.created_at,
-        membership.updated_at,
-        membership.revoked_at
-      ],
-      {
-        workspace_id: workspaceId,
-        membership_id: membership.membership_id,
-        human_principal_id: membership.human_principal_id,
-        role: membership.role,
-        revision: Number(membership.revision ?? 1),
-        created_at: membership.created_at,
-        updated_at: membership.updated_at,
-        revoked_at: membership.revoked_at
-      },
-      "workspace_membership_projection_conflict"
-    );
+  }
+  try {
+    projectWorkspaceMemberships(database, workspaceId, projectId, {
+      strictSourceConflicts: true
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "workspace_membership_projection_conflict") {
+      throw new WorkspaceIdentityMigrationFailure(error.message, "partial_backfill_failed", true);
+    }
+    throw error;
   }
   updateMigrationStep(database, projectId, "backfill_memberships", "memberships_backfilled", at);
 
@@ -755,21 +744,6 @@ function assertProjectParity(
   projectId: string,
   workspaceId: string
 ): void {
-  const sourceMemberships = tableExists(database, "project_memberships")
-    ? database
-        .prepare("SELECT * FROM project_memberships WHERE project_id=? ORDER BY membership_id")
-        .all(projectId)
-    : [];
-  const sourcePrincipals =
-    tableExists(database, "human_principals") && sourceMemberships.length > 0
-      ? database
-          .prepare(
-            `SELECT DISTINCT p.human_principal_id,p.display_name,p.created_at
-         FROM human_principals p JOIN project_memberships m
-           ON m.human_principal_id=p.human_principal_id WHERE m.project_id=? ORDER BY p.human_principal_id`
-          )
-          .all(projectId)
-      : [];
   const sourceDevices = tableExists(database, "human_device_credentials")
     ? database
         .prepare(
@@ -780,19 +754,21 @@ function assertProjectParity(
   const projectedPrincipalCount = database
     .prepare("SELECT COUNT(*) AS count FROM workspace_principals WHERE workspace_id=?")
     .get(workspaceId);
+  const expectedMemberships = workspaceMembershipProjections(database, workspaceId, projectId);
+  const expectedPrincipalIds = new Set(
+    expectedMemberships.map((membership) => membership.humanPrincipalId)
+  );
   const projectedMembershipCount = database
-    .prepare(
-      "SELECT COUNT(*) AS count FROM workspace_memberships WHERE workspace_id=? AND membership_id IN (SELECT membership_id FROM project_memberships WHERE project_id=?)"
-    )
-    .get(workspaceId, projectId);
+    .prepare("SELECT COUNT(*) AS count FROM workspace_memberships WHERE workspace_id=?")
+    .get(workspaceId);
   const projectedDeviceCount = database
     .prepare(
       "SELECT COUNT(*) AS count FROM workspace_device_sessions WHERE workspace_id=? AND device_session_id IN (SELECT device_credential_id FROM human_device_credentials WHERE minted_for_project_id=?)"
     )
     .get(workspaceId, projectId);
   if (
-    Number(projectedPrincipalCount?.count ?? 0) !== sourcePrincipals.length ||
-    Number(projectedMembershipCount?.count ?? 0) !== sourceMemberships.length ||
+    Number(projectedPrincipalCount?.count ?? 0) !== expectedPrincipalIds.size ||
+    Number(projectedMembershipCount?.count ?? 0) !== expectedMemberships.length ||
     Number(projectedDeviceCount?.count ?? 0) !== sourceDevices.length
   ) {
     throw new WorkspaceIdentityMigrationFailure(
@@ -801,12 +777,22 @@ function assertProjectParity(
       true
     );
   }
-  for (const principal of sourcePrincipals) {
+  for (const humanPrincipalId of expectedPrincipalIds) {
+    const principal = database
+      .prepare("SELECT display_name,created_at FROM human_principals WHERE human_principal_id=?")
+      .get(humanPrincipalId);
+    if (!principal) {
+      throw new WorkspaceIdentityMigrationFailure(
+        "identity_projection_parity_mismatch",
+        "partial_backfill_failed",
+        true
+      );
+    }
     const row = database
       .prepare(
         "SELECT display_name,created_at,revoked_at FROM workspace_principals WHERE workspace_id=? AND human_principal_id=?"
       )
-      .get(workspaceId, principal.human_principal_id);
+      .get(workspaceId, humanPrincipalId);
     if (!row)
       throw new WorkspaceIdentityMigrationFailure(
         "identity_projection_parity_mismatch",
@@ -819,12 +805,12 @@ function assertProjectParity(
       "identity_projection_parity_mismatch"
     );
   }
-  for (const membership of sourceMemberships) {
+  for (const membership of expectedMemberships) {
     const row = database
       .prepare(
         "SELECT human_principal_id,role,revision,created_at,updated_at,revoked_at FROM workspace_memberships WHERE workspace_id=? AND membership_id=?"
       )
-      .get(workspaceId, membership.membership_id);
+      .get(workspaceId, membership.membershipId);
     if (!row)
       throw new WorkspaceIdentityMigrationFailure(
         "identity_projection_parity_mismatch",
@@ -834,12 +820,12 @@ function assertProjectParity(
     assertEqualRow(
       row,
       {
-        human_principal_id: membership.human_principal_id,
+        human_principal_id: membership.humanPrincipalId,
         role: membership.role,
-        revision: Number(membership.revision ?? 1),
-        created_at: membership.created_at,
-        updated_at: membership.updated_at,
-        revoked_at: membership.revoked_at
+        revision: membership.revision,
+        created_at: membership.createdAt,
+        updated_at: membership.updatedAt,
+        revoked_at: membership.revokedAt
       },
       "identity_projection_parity_mismatch"
     );

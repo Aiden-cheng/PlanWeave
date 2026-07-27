@@ -5,6 +5,7 @@ import { HumanIdentityError } from "./errors.js";
 import { InvitationStore } from "./invitationStore.js";
 import { HUMAN_MAX_MEMBERS_PER_PROJECT, HUMAN_MAX_OPEN_INVITATIONS_PER_PROJECT } from "./limits.js";
 import { MembershipStore } from "./membershipStore.js";
+import { projectWorkspaceMemberships } from "./workspaceMembershipProjection.js";
 import {
   evaluateDeviceUsability,
   evaluateInvitationUsability,
@@ -277,7 +278,13 @@ export class HumanIdentityRepository {
     let membership: ProjectMembership | undefined;
     if (projectId !== undefined) {
       const pid = humanProjectIdSchema.parse(projectId);
-      if (device.mintedForProjectId !== pid) return undefined;
+      const targetWorkspace = this.workspaceIdentity.workspaceForLegacyProject(pid);
+      if (targetWorkspace !== workspaceId) return undefined;
+      try {
+        this.workspaceIdentity.assertReadCutover(targetWorkspace);
+      } catch {
+        return undefined;
+      }
       membership = this.getActiveMembership(pid, principal.humanPrincipalId);
       if (!membership) return undefined;
       const workspaceDevice = this.database
@@ -287,14 +294,9 @@ export class HumanIdentityRepository {
            JOIN workspace_memberships m
              ON m.workspace_id=d.workspace_id AND m.human_principal_id=d.human_principal_id
            WHERE d.workspace_id=? AND d.device_session_id=? AND d.human_principal_id=?
-             AND m.membership_id=?`
+             AND m.revoked_at IS NULL`
         )
-        .get(
-          workspaceId,
-          device.deviceCredentialId,
-          principal.humanPrincipalId,
-          membership.membershipId
-        );
+        .get(workspaceId, device.deviceCredentialId, principal.humanPrincipalId);
       if (!workspaceDevice || workspaceDevice.revoked_at || workspaceDevice.membership_revoked_at) {
         return undefined;
       }
@@ -627,30 +629,7 @@ export class HumanIdentityRepository {
           );
       }
     }
-    const memberships = this.database
-      .prepare("SELECT * FROM project_memberships WHERE project_id=?")
-      .all(projectId);
-    for (const membership of memberships) {
-      this.database
-        .prepare(
-          `INSERT INTO workspace_memberships(
-            workspace_id,membership_id,human_principal_id,role,revision,created_at,updated_at,revoked_at
-          ) VALUES(?,?,?,?,?,?,?,?)
-          ON CONFLICT(workspace_id,membership_id) DO UPDATE SET
-            role=excluded.role,revision=excluded.revision,updated_at=excluded.updated_at,
-            revoked_at=excluded.revoked_at`
-        )
-        .run(
-          workspaceId,
-          membership.membership_id,
-          membership.human_principal_id,
-          membership.role,
-          Number(membership.revision ?? 1),
-          membership.created_at,
-          membership.updated_at,
-          membership.revoked_at
-        );
-    }
+    projectWorkspaceMemberships(this.database, workspaceId, projectId);
     const devices = this.database
       .prepare("SELECT * FROM human_device_credentials WHERE minted_for_project_id=?")
       .all(projectId);

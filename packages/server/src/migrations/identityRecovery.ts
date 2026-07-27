@@ -6,6 +6,7 @@ import {
   type WorkspaceIdentityBackfillOptions,
   type WorkspaceIdentityRecoveryResult
 } from "./identity.js";
+import { projectWorkspaceMemberships } from "../identity/workspaceMembershipProjection.js";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -103,14 +104,9 @@ function sourceIds(
   database: SqliteDatabase,
   legacyProjectId: string
 ): {
-  membershipIds: string[];
   principalIds: string[];
   deviceIds: string[];
 } {
-  const membershipIds = database
-    .prepare("SELECT membership_id FROM project_memberships WHERE project_id=?")
-    .all(legacyProjectId)
-    .map((row) => String(row.membership_id));
   const principalIds = database
     .prepare(`SELECT DISTINCT human_principal_id FROM project_memberships WHERE project_id=?`)
     .all(legacyProjectId)
@@ -121,7 +117,7 @@ function sourceIds(
     )
     .all(legacyProjectId)
     .map((row) => String(row.device_credential_id));
-  return { membershipIds, principalIds, deviceIds };
+  return { principalIds, deviceIds };
 }
 
 /** Logical rollback: remove only v27 rows sourced from this legacy project. */
@@ -133,11 +129,6 @@ export function rollbackWorkspaceIdentityMigration(
     const state = projectState(database, legacyProjectId);
     const workspaceId = String(state.workspace_id);
     const ids = sourceIds(database, legacyProjectId);
-    for (const membershipId of ids.membershipIds) {
-      database
-        .prepare("DELETE FROM workspace_memberships WHERE workspace_id=? AND membership_id=?")
-        .run(workspaceId, membershipId);
-    }
     for (const deviceId of ids.deviceIds) {
       database
         .prepare(
@@ -145,6 +136,14 @@ export function rollbackWorkspaceIdentityMigration(
         )
         .run(workspaceId, deviceId);
     }
+    database
+      .prepare(
+        `UPDATE workspace_identity_migrations
+       SET status='rolled_back',step='verify_cutover',interruption_marker='rollback_complete',failure_code=NULL,updated_at=?
+       WHERE legacy_project_id=?`
+      )
+      .run(nowIso(), legacyProjectId);
+    projectWorkspaceMemberships(database, workspaceId);
     for (const principalId of ids.principalIds) {
       const usedElsewhere = database
         .prepare(
@@ -169,13 +168,6 @@ export function rollbackWorkspaceIdentityMigration(
         )
         .run(workspaceId, deviceId);
     }
-    database
-      .prepare(
-        `UPDATE workspace_identity_migrations
-       SET status='rolled_back',step='verify_cutover',interruption_marker='rollback_complete',failure_code=NULL,updated_at=?
-       WHERE legacy_project_id=?`
-      )
-      .run(nowIso(), legacyProjectId);
     return migrationRecoveryResult(database, legacyProjectId, "rollback_to_legacy");
   });
 }

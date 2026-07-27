@@ -18,6 +18,10 @@ import {
   OperatorSessionStore
 } from "../identity/operatorSessionStore.js";
 import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
+import {
+  projectWorkspaceMemberships,
+  workspaceMembershipIdFor
+} from "../identity/workspaceMembershipProjection.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 
 const directories: string[] = [];
@@ -507,6 +511,93 @@ describe("workspace identity migration recovery", () => {
     });
   });
 
+  it("keeps a shared workspace membership until the final mapped project rolls back", async () => {
+    const database = await openDatabaseAtV26();
+    const now = "2026-07-27T00:00:00.000Z";
+    database
+      .prepare(
+        "INSERT INTO human_principals(human_principal_id,display_name,created_at) VALUES(?,?,?)"
+      )
+      .run("human-shared", "Shared", now);
+    database
+      .prepare(
+        `INSERT INTO project_memberships(
+          membership_id,project_id,human_principal_id,role,created_at,updated_at,revision
+        ) VALUES(?,?,?,?,?,?,?)`
+      )
+      .run("membership-shared-a", "project-shared-a", "human-shared", "owner", now, now, 1);
+    applyMigrations(database);
+    const workspaceId = String(
+      database
+        .prepare(
+          "SELECT workspace_id FROM legacy_project_workspace_mappings WHERE legacy_project_id=?"
+        )
+        .get("project-shared-a")?.workspace_id
+    );
+    database
+      .prepare(
+        `INSERT INTO project_memberships(
+          membership_id,project_id,human_principal_id,role,created_at,updated_at,revision
+        ) VALUES(?,?,?,?,?,?,?)`
+      )
+      .run("membership-shared-b", "project-shared-b", "human-shared", "member", now, now, 1);
+    database
+      .prepare(
+        `INSERT INTO legacy_project_workspace_mappings(
+          legacy_project_id,normalized_legacy_project_identity,workspace_id,mapped_at
+        ) VALUES(?,?,?,?)`
+      )
+      .run("project-shared-b", "legacy-project:project-shared-b", workspaceId, now);
+    database
+      .prepare(
+        `INSERT INTO workspace_identity_migrations(
+          migration_id,legacy_project_id,workspace_id,from_version,to_version,step,status,
+          interruption_marker,authoritative_read_version,failure_code,updated_at
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?)`
+      )
+      .run(
+        "migration-project-shared-b",
+        "project-shared-b",
+        workspaceId,
+        0,
+        1,
+        "verify_cutover",
+        "completed",
+        "read_cutover_complete",
+        "workspace-identity/v1",
+        null,
+        now
+      );
+    projectWorkspaceMemberships(database, workspaceId, "project-shared-b");
+    const sharedMembershipId = workspaceMembershipIdFor(workspaceId, "human-shared");
+    expect(
+      database
+        .prepare("SELECT COUNT(*) AS count FROM workspace_memberships WHERE workspace_id=?")
+        .get(workspaceId)
+    ).toEqual({ count: 1 });
+
+    rollbackWorkspaceIdentityMigration(database, "project-shared-a");
+    expect(
+      database
+        .prepare(
+          "SELECT human_principal_id FROM workspace_memberships WHERE workspace_id=? AND membership_id=?"
+        )
+        .get(workspaceId, sharedMembershipId)
+    ).toEqual({ human_principal_id: "human-shared" });
+
+    rollbackWorkspaceIdentityMigration(database, "project-shared-b");
+    expect(
+      database
+        .prepare("SELECT COUNT(*) AS count FROM workspace_memberships WHERE workspace_id=?")
+        .get(workspaceId)
+    ).toEqual({ count: 0 });
+    expect(
+      database
+        .prepare("SELECT COUNT(*) AS count FROM workspace_principals WHERE workspace_id=?")
+        .get(workspaceId)
+    ).toEqual({ count: 0 });
+  });
+
   it("marks projection conflicts as repair-required and recovers after the source is repaired", async () => {
     const database = await openDatabaseAtV26();
     const now = "2026-07-27T00:00:00.000Z";
@@ -522,9 +613,6 @@ describe("workspace identity migration recovery", () => {
       )
       .run("membership-parity", "project-parity", "human-parity", "member", now, now, 1);
     applyMigrations(database);
-    database
-      .prepare("UPDATE project_memberships SET role='owner' WHERE membership_id=?")
-      .run("membership-parity");
     const workspaceId = String(
       database
         .prepare(
@@ -532,6 +620,11 @@ describe("workspace identity migration recovery", () => {
         )
         .get("project-parity")?.workspace_id
     );
+    database
+      .prepare(
+        "UPDATE workspace_memberships SET role='owner' WHERE workspace_id=? AND membership_id=?"
+      )
+      .run(workspaceId, workspaceMembershipIdFor(workspaceId, "human-parity"));
     database
       .prepare(
         "UPDATE workspace_identity_migrations SET status='repair_required',interruption_marker='partial_backfill_failed',failure_code='manual_parity_failure' WHERE legacy_project_id=?"
@@ -550,10 +643,8 @@ describe("workspace identity migration recovery", () => {
       failure_code: "workspace_membership_projection_conflict"
     });
     database
-      .prepare(
-        "UPDATE workspace_memberships SET role='owner' WHERE workspace_id=? AND membership_id=?"
-      )
-      .run(workspaceId, "membership-parity");
+      .prepare("UPDATE project_memberships SET role='owner' WHERE membership_id=?")
+      .run("membership-parity");
     expect(repairWorkspaceIdentityMigration(database, "project-parity").status).toBe("completed");
   });
 

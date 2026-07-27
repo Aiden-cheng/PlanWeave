@@ -383,7 +383,9 @@ describe("human identity repository", () => {
 
     repo.revokeDevice(projectB.device.deviceCredentialId, "project-b", principalId);
     expect(repo.authenticateDevice(projectA.deviceToken!, "project-a")).toBeDefined();
-    expect(repo.authenticateDevice(projectA.deviceToken!, "project-b")).toBeUndefined();
+    expect(repo.authenticateDevice(projectA.deviceToken!, "project-b")?.membership?.role).toBe(
+      "owner"
+    );
 
     const recoveredB = repo.bootstrapOwner(
       localAdminProof("project-b", principalId, "Shared Owner")
@@ -532,18 +534,44 @@ describe("human identity repository", () => {
     expect(linked.principalCreated).toBe(false);
     expect(linked.principal.humanPrincipalId).toBe(joined.principal.humanPrincipalId);
     expect(linked.membership.projectId).toBe("project-b");
-    // Each device remains bound to the project that minted it, even when its principal has
-    // active memberships in both projects.
-    expect(repo.authenticateDevice(joined.deviceToken, "project-b")).toBeUndefined();
+    // A workspace-scoped device can authenticate any mapped project where its principal has
+    // an active membership; device inventory remains keyed by the project that minted it.
+    expect(repo.authenticateDevice(joined.deviceToken, "project-b")?.membership?.role).toBe(
+      "member"
+    );
     expect(repo.authenticateDevice(linked.deviceToken, "project-b")?.membership?.role).toBe(
       "member"
     );
     expect(repo.authenticateDevice(joined.deviceToken, "project-a")?.membership?.role).toBe(
       "member"
     );
+    repo.promoteToOwner("project-a", joined.principal.humanPrincipalId);
+    const workspaceId = String(
+      database
+        .prepare(
+          "SELECT workspace_id FROM legacy_project_workspace_mappings WHERE legacy_project_id=?"
+        )
+        .get("project-a")?.workspace_id
+    );
+    expect(
+      database
+        .prepare(
+          "SELECT COUNT(*) AS count FROM workspace_memberships WHERE workspace_id=? AND human_principal_id=? AND revoked_at IS NULL"
+        )
+        .get(workspaceId, joined.principal.humanPrincipalId)
+    ).toEqual({ count: 1 });
+    expect(
+      database
+        .prepare(
+          "SELECT role FROM workspace_memberships WHERE workspace_id=? AND human_principal_id=? AND revoked_at IS NULL"
+        )
+        .get(workspaceId, joined.principal.humanPrincipalId)
+    ).toEqual({ role: "owner" });
     // No implicit privilege on a project without membership.
     expect(repo.authenticateDevice(joined.deviceToken, "project-unrelated")).toBeUndefined();
-    expect(repo.authenticateDevice(linked.deviceToken, "project-a")).toBeUndefined();
+    expect(repo.authenticateDevice(linked.deviceToken, "project-a")?.membership?.role).toBe(
+      "owner"
+    );
     expect(
       repo
         .listDevicesForPrincipal(joined.principal.humanPrincipalId, "project-a")
