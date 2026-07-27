@@ -6,6 +6,7 @@ import type {
   DesktopRunRecord
 } from "@planweave-ai/runtime";
 import { bridge, desktopCanvasReference } from "../bridge";
+import type { SharedCanvasCommandsResult } from "./useSharedCanvasCommands";
 
 type UseGraphDeleteActionsArgs = {
   clearReviewTaskSelection: (taskId?: string | null) => void;
@@ -23,6 +24,7 @@ type UseGraphDeleteActionsArgs = {
   setError: (message: string | null) => void;
   setSelectedBlock: Dispatch<SetStateAction<DesktopBlockDetail | null>>;
   setSelectedRunRecord: Dispatch<SetStateAction<DesktopRunRecord | null>>;
+  sharedCanvas?: SharedCanvasCommandsResult | null;
 };
 
 export function useGraphDeleteActions({
@@ -40,7 +42,8 @@ export function useGraphDeleteActions({
   setBlockInspectorOpen,
   setError,
   setSelectedBlock,
-  setSelectedRunRecord
+  setSelectedRunRecord,
+  sharedCanvas = null
 }: UseGraphDeleteActionsArgs) {
   const clearBlockSelection = useCallback(() => {
     setSelectedBlock(null);
@@ -51,17 +54,28 @@ export function useGraphDeleteActions({
 
   const handleDeleteTaskNode = useCallback(
     async (taskId: string) => {
-      if (!bridge || !selectedProject || !window.confirm(deleteTaskConfirm)) {
+      if (!selectedProject || !window.confirm(deleteTaskConfirm)) {
         return;
       }
       try {
-        const result = await bridge.removeTaskNode(
-          desktopCanvasReference(selectedProject, selectedCanvasId),
-          taskId
-        );
-        if (!result.ok) {
-          setError(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
-          return;
+        if (sharedCanvas?.enabled) {
+          const result = await sharedCanvas.submit({
+            intent: { kind: "remove_task", taskId }
+          });
+          if (!result.ok) {
+            setError(result.error);
+            return;
+          }
+        } else {
+          if (!bridge) return;
+          const result = await bridge.removeTaskNode(
+            desktopCanvasReference(selectedProject, selectedCanvasId),
+            taskId
+          );
+          if (!result.ok) {
+            setError(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+            return;
+          }
         }
         clearReviewTaskSelection(taskId);
         if (selectedTaskPanelId === taskId || selectedBlock?.taskId === taskId) {
@@ -83,23 +97,35 @@ export function useGraphDeleteActions({
       selectedCanvasId,
       selectedProject,
       selectedTaskPanelId,
-      setError
+      setError,
+      sharedCanvas
     ]
   );
 
   const handleDeleteBlock = useCallback(
     async (ref: string) => {
-      if (!bridge || !selectedProject || !window.confirm(deleteBlockConfirm)) {
+      if (!selectedProject || !window.confirm(deleteBlockConfirm)) {
         return;
       }
       try {
-        const result = await bridge.removeBlock(
-          desktopCanvasReference(selectedProject, selectedCanvasId),
-          ref
-        );
-        if (!result.ok) {
-          setError(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
-          return;
+        if (sharedCanvas?.enabled) {
+          const result = await sharedCanvas.submit({
+            intent: { kind: "remove_block", blockRef: ref }
+          });
+          if (!result.ok) {
+            setError(result.error);
+            return;
+          }
+        } else {
+          if (!bridge) return;
+          const result = await bridge.removeBlock(
+            desktopCanvasReference(selectedProject, selectedCanvasId),
+            ref
+          );
+          if (!result.ok) {
+            setError(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+            return;
+          }
         }
         if (selectedBlock?.ref === ref) {
           clearBlockSelection();
@@ -116,7 +142,8 @@ export function useGraphDeleteActions({
       selectedBlock,
       selectedCanvasId,
       selectedProject,
-      setError
+      setError,
+      sharedCanvas
     ]
   );
 

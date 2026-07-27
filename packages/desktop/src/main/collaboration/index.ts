@@ -12,6 +12,22 @@ export {
 } from "./CollaborationClient.js";
 export { CanvasPresenceClient, type CanvasPresenceClientOptions } from "./CanvasPresenceClient.js";
 export {
+  CanvasCommandClient,
+  type CanvasCommandReconnectInput,
+  type CanvasCommandSubmitInput
+} from "./CanvasCommandClient.js";
+export {
+  CanvasCommandSessionState,
+  type CanvasCommandSessionSnapshot
+} from "./canvasCommandSession.js";
+export {
+  CollaborationCanvasCommandFacade,
+  type CollaborationCanvasCommandSubmitResult,
+  type CollaborationCanvasReconnectResult,
+  type CollaborationCanvasCommandSessionView
+} from "./collaborationCanvasCommands.js";
+export { CollaborationHttpTransport } from "./collaborationHttpTransport.js";
+export {
   CollaborationRegistryClient,
   type CollaborationRegistryClientOptions,
   type CollaborationRegistryReadSnapshotInput,

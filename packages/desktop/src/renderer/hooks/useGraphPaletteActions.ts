@@ -7,6 +7,7 @@ import type {
   DesktopLayout,
   DesktopProjectSummary
 } from "@planweave-ai/runtime";
+import type { CanvasCommandIntent } from "@planweave-ai/collaboration-contracts";
 import { bridge, desktopCanvasReference } from "../bridge";
 import {
   dependencyConnectionToManifestEndpoints,
@@ -21,6 +22,7 @@ import type {
   PaletteDropPosition
 } from "../types";
 import { defaultBlockTitleForUi } from "../viewHelpers";
+import type { SharedCanvasCommandsResult } from "./useSharedCanvasCommands";
 
 type UseGraphPaletteActionsArgs = {
   flowInstance: ReactFlowInstance<AppFlowNode, Edge> | null;
@@ -39,7 +41,41 @@ type UseGraphPaletteActionsArgs = {
   selectTaskPanel: (taskId: string | null) => void;
   settings: DesktopUiSettings;
   t: ReturnType<typeof createTranslator>;
+  /** When enabled, durable graph writes go through server-authoritative canvas commands. */
+  sharedCanvas?: SharedCanvasCommandsResult | null;
 };
+
+function nextClientTaskId(graph: DesktopGraphViewModel | null): string {
+  const existing = new Set(graph?.tasks.map((task) => task.taskId) ?? []);
+  let index = existing.size + 1;
+  while (existing.has(`T-${String(index).padStart(3, "0")}`)) index += 1;
+  return `T-${String(index).padStart(3, "0")}`;
+}
+
+function nextClientBlockId(
+  graph: DesktopGraphViewModel | null,
+  taskId: string,
+  type: "implementation" | "review"
+): string {
+  const task = graph?.tasks.find((item) => item.taskId === taskId);
+  const existing = new Set(task?.blocks.map((block) => block.blockId) ?? []);
+  const prefix = type === "review" ? "R" : "B";
+  let index = 1;
+  while (existing.has(`${prefix}-${String(index).padStart(3, "0")}`)) index += 1;
+  return `${prefix}-${String(index).padStart(3, "0")}`;
+}
+
+async function submitSharedIntent(
+  sharedCanvas: SharedCanvasCommandsResult,
+  intent: CanvasCommandIntent,
+  setError: (message: string | null) => void
+): Promise<boolean> {
+  const result = await sharedCanvas.submit({ intent });
+  if (!result.ok) {
+    setError(result.error);
+  }
+  return result.ok;
+}
 
 function currentLayoutSnapshot(
   graph: DesktopGraphViewModel | null,
@@ -77,7 +113,8 @@ export function useGraphPaletteActions({
   setLayout,
   selectTaskPanel,
   settings,
-  t
+  t,
+  sharedCanvas = null
 }: UseGraphPaletteActionsArgs) {
   const getPersistableLayoutNodes = useCallback(
     (dragStopNode?: Node) => getLayoutNodes?.(dragStopNode) ?? nodes,
@@ -86,19 +123,36 @@ export function useGraphPaletteActions({
 
   const handleNodeDragStop = useCallback(
     async (_event: React.MouseEvent, node: Node) => {
-      if (!bridge || !selectedProject) {
+      if (!selectedProject) {
         return;
       }
+      const layoutNodes = getPersistableLayoutNodes(node).map((item) => ({
+        nodeId: item.id,
+        x: item.id === node.id && !getLayoutNodes ? node.position.x : item.position.x,
+        y: item.id === node.id && !getLayoutNodes ? node.position.y : item.position.y
+      }));
+      if (sharedCanvas?.enabled) {
+        const ok = await submitSharedIntent(
+          sharedCanvas,
+          { kind: "update_layout", nodes: layoutNodes },
+          setError
+        );
+        if (ok) {
+          setLayout({
+            version: "desktop-layout/v1",
+            projectId: layout?.projectId ?? graph?.projectId ?? selectedProject.projectId,
+            nodes: layoutNodes,
+            updatedAt: new Date().toISOString()
+          });
+        }
+        return;
+      }
+      if (!bridge) return;
       const canvas = desktopCanvasReference(selectedProject, selectedCanvasId);
       const baseLayout = layout ?? (await bridge.getDesktopLayout(canvas));
-      const layoutNodes = getPersistableLayoutNodes(node);
       const nextLayout: DesktopLayout = {
         ...baseLayout,
-        nodes: layoutNodes.map((item) => ({
-          nodeId: item.id,
-          x: item.id === node.id && !getLayoutNodes ? node.position.x : item.position.x,
-          y: item.id === node.id && !getLayoutNodes ? node.position.y : item.position.y
-        }))
+        nodes: layoutNodes
       };
       const saved = await bridge.saveDesktopLayout(canvas, nextLayout);
       setLayout(saved);
@@ -106,10 +160,13 @@ export function useGraphPaletteActions({
     [
       getLayoutNodes,
       getPersistableLayoutNodes,
+      graph?.projectId,
       layout,
       selectedCanvasId,
       selectedProject,
-      setLayout
+      setError,
+      setLayout,
+      sharedCanvas
     ]
   );
 
@@ -125,10 +182,24 @@ export function useGraphPaletteActions({
   const handleConnect = useCallback(
     async (connection: Connection) => {
       const manifestEdge = dependencyConnectionToManifestEndpoints(connection);
-      if (!bridge || !selectedProject || !manifestEdge) {
+      if (!selectedProject || !manifestEdge) {
         return;
       }
       try {
+        if (sharedCanvas?.enabled) {
+          const ok = await submitSharedIntent(
+            sharedCanvas,
+            {
+              kind: "add_task_dependency",
+              fromTaskId: manifestEdge.from,
+              toTaskId: manifestEdge.to
+            },
+            setError
+          );
+          if (ok) await refreshProjectDerivedState();
+          return;
+        }
+        if (!bridge) return;
         const result = await bridge.addDependencyEdge(
           desktopCanvasReference(selectedProject, selectedCanvasId),
           manifestEdge.from,
@@ -152,29 +223,43 @@ export function useGraphPaletteActions({
       refreshProjectDerivedState,
       selectedCanvasId,
       selectedProject,
-      setError
+      setError,
+      sharedCanvas
     ]
   );
 
   const handleEdgesDelete = useCallback(
     async (deletedEdges: Edge[]) => {
-      if (!bridge || !selectedProject) {
+      if (!selectedProject) {
         return;
       }
       for (const edge of deletedEdges) {
         const manifestEdge = dependencyDisplayEdgeToManifestEndpoints(edge);
-        if (manifestEdge) {
-          const result = await bridge.removeDependencyEdge(
-            desktopCanvasReference(selectedProject, selectedCanvasId),
-            manifestEdge.from,
-            manifestEdge.to,
-            graph?.graphVersion,
-            currentLayoutSnapshot(graph, layout, getPersistableLayoutNodes())
+        if (!manifestEdge) continue;
+        if (sharedCanvas?.enabled) {
+          const ok = await submitSharedIntent(
+            sharedCanvas,
+            {
+              kind: "remove_task_dependency",
+              fromTaskId: manifestEdge.from,
+              toTaskId: manifestEdge.to
+            },
+            setError
           );
-          if (!result.ok) {
-            setError(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
-            return;
-          }
+          if (!ok) return;
+          continue;
+        }
+        if (!bridge) return;
+        const result = await bridge.removeDependencyEdge(
+          desktopCanvasReference(selectedProject, selectedCanvasId),
+          manifestEdge.from,
+          manifestEdge.to,
+          graph?.graphVersion,
+          currentLayoutSnapshot(graph, layout, getPersistableLayoutNodes())
+        );
+        if (!result.ok) {
+          setError(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+          return;
         }
       }
       await refreshProjectDerivedState();
@@ -186,7 +271,8 @@ export function useGraphPaletteActions({
       refreshProjectDerivedState,
       selectedCanvasId,
       selectedProject,
-      setError
+      setError,
+      sharedCanvas
     ]
   );
 
@@ -194,10 +280,27 @@ export function useGraphPaletteActions({
     async (oldEdge: Edge, connection: Connection) => {
       const oldManifestEdge = dependencyDisplayEdgeToManifestEndpoints(oldEdge);
       const newManifestEdge = dependencyConnectionToManifestEndpoints(connection);
-      if (!bridge || !selectedProject || !oldManifestEdge || !newManifestEdge) {
+      if (!selectedProject || !oldManifestEdge || !newManifestEdge) {
         return;
       }
       try {
+        if (sharedCanvas?.enabled) {
+          const ok = await submitSharedIntent(
+            sharedCanvas,
+            {
+              kind: "reconnect_task_dependency",
+              fromTaskId: oldManifestEdge.from,
+              oldToTaskId: oldManifestEdge.to,
+              newFromTaskId:
+                newManifestEdge.from !== oldManifestEdge.from ? newManifestEdge.from : undefined,
+              newToTaskId: newManifestEdge.to
+            },
+            setError
+          );
+          if (ok) await refreshProjectDerivedState();
+          return;
+        }
+        if (!bridge) return;
         const result = await bridge.reconnectDependencyEdge(
           desktopCanvasReference(selectedProject, selectedCanvasId),
           oldManifestEdge.from,
@@ -223,16 +326,65 @@ export function useGraphPaletteActions({
       refreshProjectDerivedState,
       selectedCanvasId,
       selectedProject,
-      setError
+      setError,
+      sharedCanvas
     ]
   );
 
   const addPaletteComponent = useCallback(
     async (type: PaletteDropComponent, dropPosition?: PaletteDropPosition) => {
-      if (!bridge || !selectedProject) {
+      if (!selectedProject) {
         return;
       }
       try {
+        if (sharedCanvas?.enabled) {
+          if (type === "task") {
+            const taskId = nextClientTaskId(graph);
+            const ok = await submitSharedIntent(
+              sharedCanvas,
+              {
+                kind: "add_task",
+                taskId,
+                title: t("defaultTaskTitle"),
+                promptMarkdown: t("defaultTaskPrompt"),
+                acceptance: [t("defaultTaskAcceptance")],
+                executor: settings.defaultExecutor.trim() || undefined,
+                layout: dropPosition
+                  ? { nodeId: taskId, x: dropPosition.x, y: dropPosition.y }
+                  : undefined
+              },
+              setError
+            );
+            if (ok) {
+              selectTaskPanel(taskId);
+              await loadProject(selectedProject, selectedCanvasId);
+            }
+            return;
+          }
+          const targetTaskId =
+            selectedBlock?.taskId ?? selectedTaskPanelId ?? graph?.tasks[0]?.taskId;
+          if (!targetTaskId) {
+            setError(t("selectTaskBeforeBlock"));
+            return;
+          }
+          const blockId = nextClientBlockId(graph, targetTaskId, type);
+          const ok = await submitSharedIntent(
+            sharedCanvas,
+            {
+              kind: "add_block",
+              taskId: targetTaskId,
+              blockId,
+              blockType: type,
+              title: defaultBlockTitleForUi(type, t),
+              promptMarkdown: `# ${defaultBlockTitleForUi(type, t)}\n`,
+              executor: settings.defaultExecutor.trim() || undefined
+            },
+            setError
+          );
+          if (ok) await loadProject(selectedProject, selectedCanvasId);
+          return;
+        }
+        if (!bridge) return;
         const canvas = desktopCanvasReference(selectedProject, selectedCanvasId);
         if (type === "task") {
           const result = await bridge.addTaskNode(canvas, {
@@ -291,6 +443,7 @@ export function useGraphPaletteActions({
       setError,
       selectTaskPanel,
       settings,
+      sharedCanvas,
       t
     ]
   );

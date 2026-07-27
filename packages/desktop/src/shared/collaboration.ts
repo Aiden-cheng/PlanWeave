@@ -1,6 +1,8 @@
 import { z } from "zod";
 import {
   COMMENT_ATTACHMENT_MAX_BYTES,
+  canvasCommandIntentSchema,
+  canvasCommandOperationIdSchema,
   canvasPresencePointerSchema,
   canvasPresenceSelectionIdsSchema,
   collaborationConnectionProfileSchema,
@@ -37,6 +39,9 @@ import {
   type PendingAttachmentView,
   type ProjectAccessPage,
   type RegistryPageQuery,
+  type CanvasCommandOutcome,
+  type CanvasJournalEntry,
+  type CanvasReconnectResponse,
   type CanvasPresenceServerMessage,
   type RemoteActionView,
   type RemoteDispatchIntent,
@@ -341,6 +346,66 @@ export type CollaborationPresenceSignal =
       };
     };
 
+
+/** Renderer → main: submit one durable canvas command intent (no actor/path/revision override authority). */
+export const collaborationCanvasCommandSubmitInputSchema = z
+  .object({
+    canvasId: z.string().trim().min(1).max(128),
+    intent: canvasCommandIntentSchema,
+    operationId: canvasCommandOperationIdSchema.optional(),
+    expectedRevision: z.number().int().nonnegative().optional()
+  })
+  .strict();
+export type CollaborationCanvasCommandSubmitInput = z.infer<
+  typeof collaborationCanvasCommandSubmitInputSchema
+>;
+
+export const collaborationCanvasReconnectInputSchema = z
+  .object({
+    canvasId: z.string().trim().min(1).max(128),
+    afterRevision: z.number().int().nonnegative().optional(),
+    afterContentDigest: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional()
+  })
+  .strict();
+export type CollaborationCanvasReconnectInput = z.infer<
+  typeof collaborationCanvasReconnectInputSchema
+>;
+
+export const collaborationCanvasSessionInputSchema = z
+  .object({ canvasId: z.string().trim().min(1).max(128) })
+  .strict();
+export type CollaborationCanvasSessionInput = z.infer<typeof collaborationCanvasSessionInputSchema>;
+
+export type CollaborationCanvasCommandSessionView = {
+  canvasId: string;
+  revision: number;
+  contentDigest: string | null;
+  lastOperationId: string | null;
+  lastJournalEntryId: string | null;
+  pendingOperationId: string | null;
+  lastConflict: {
+    expectedRevision: number;
+    authoritativeRevision: number;
+    authoritativeContentDigest: string;
+  } | null;
+  lastRejectCode: string | null;
+};
+
+export type CollaborationCanvasCommandSubmitResult = {
+  outcome: CanvasCommandOutcome;
+  session: CollaborationCanvasCommandSessionView | null;
+};
+
+export type CollaborationCanvasReconnectResult = {
+  response: CanvasReconnectResponse;
+  entriesToApply: CanvasJournalEntry[];
+  snapshotRequired: boolean;
+  session: CollaborationCanvasCommandSessionView | null;
+};
+
 export const collaborationInvokeChannels = {
   getCollaborationStatus: "planweave-collaboration:getStatus",
   upsertCollaborationProfile: "planweave-collaboration:upsertProfile",
@@ -356,6 +421,10 @@ export const collaborationInvokeChannels = {
   startCollaborationPresence: "planweave-collaboration:startPresence",
   stopCollaborationPresence: "planweave-collaboration:stopPresence",
   publishCollaborationPresence: "planweave-collaboration:publishPresence",
+  submitCollaborationCanvasCommand: "planweave-collaboration:submitCanvasCommand",
+  reconnectCollaborationCanvas: "planweave-collaboration:reconnectCanvas",
+  bindCollaborationCanvasCommandSession: "planweave-collaboration:bindCanvasCommandSession",
+  getCollaborationCanvasCommandSession: "planweave-collaboration:getCanvasCommandSession",
   listCollaborationMembers: "planweave-collaboration:listMembers",
   listCollaborationDevices: "planweave-collaboration:listDevices",
   listCollaborationInvitations: "planweave-collaboration:listInvitations",
@@ -427,6 +496,16 @@ export type PlanWeaveCollaborationApi = {
   startCollaborationPresence: (input: CollaborationPresenceCanvasInput) => Promise<void>;
   stopCollaborationPresence: () => Promise<void>;
   publishCollaborationPresence: (input: CollaborationPresenceUpdateInput) => Promise<void>;
+  submitCollaborationCanvasCommand: (
+    input: CollaborationCanvasCommandSubmitInput
+  ) => Promise<CollaborationCanvasCommandSubmitResult>;
+  reconnectCollaborationCanvas: (
+    input: CollaborationCanvasReconnectInput
+  ) => Promise<CollaborationCanvasReconnectResult>;
+  bindCollaborationCanvasCommandSession: (
+    input: CollaborationCanvasSessionInput
+  ) => Promise<CollaborationCanvasCommandSessionView | null>;
+  getCollaborationCanvasCommandSession: () => Promise<CollaborationCanvasCommandSessionView | null>;
   listCollaborationMembers: (input?: CollaborationPageQueryInput) => Promise<HumanMemberPage>;
   listCollaborationDevices: (input?: CollaborationDeviceListQueryInput) => Promise<HumanDevicePage>;
   listCollaborationInvitations: (

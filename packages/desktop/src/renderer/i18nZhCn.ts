@@ -1137,5 +1137,9 @@ export const zhCnCatalog = {
   canvasPresenceCursor: "{name} 的光标",
   canvasPresenceCursorSelected: "{name} 的光标；已选择 {count} 项",
   canvasPresenceEdgesSelected: "{name} 选择了图中的连线",
-  canvasPresenceError: "画布在线状态错误：{code}"
+  canvasPresenceError: "画布在线状态错误：{code}",
+  canvasCommandStaleRevision: "画布版本已过期（本地期望 {expected}，服务端为 {authoritative}）。请重连后重试。",
+  canvasCommandRejected: "画布命令被拒绝：{code}",
+  canvasCommandReconnectFailed: "画布重连失败：{code}",
+  canvasCommandNotConnected: "共享画布命令会话未连接。"
 } satisfies Record<TranslationKey, string>;

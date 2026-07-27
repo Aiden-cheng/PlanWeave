@@ -1186,7 +1186,11 @@ export const enCatalog = {
   canvasPresenceCursor: "{name} cursor",
   canvasPresenceCursorSelected: "{name} cursor; selected {count} items",
   canvasPresenceEdgesSelected: "{name} has selected graph edges",
-  canvasPresenceError: "Canvas presence error: {code}"
+  canvasPresenceError: "Canvas presence error: {code}",
+  canvasCommandStaleRevision: "Canvas is out of date (expected revision {expected}, server is at {authoritative}). Reconnect and retry.",
+  canvasCommandRejected: "Canvas command rejected: {code}",
+  canvasCommandReconnectFailed: "Canvas reconnect failed: {code}",
+  canvasCommandNotConnected: "Shared canvas command session is not connected."
 } as const;
 
 export type TranslationKey = keyof typeof enCatalog;

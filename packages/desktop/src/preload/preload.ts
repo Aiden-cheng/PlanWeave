@@ -231,6 +231,14 @@ const collaborationApi: PlanWeaveCollaborationApi = {
     ipcRenderer.invoke(collaborationInvokeChannels.stopCollaborationPresence),
   publishCollaborationPresence: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.publishCollaborationPresence, input),
+  submitCollaborationCanvasCommand: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.submitCollaborationCanvasCommand, input),
+  reconnectCollaborationCanvas: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.reconnectCollaborationCanvas, input),
+  bindCollaborationCanvasCommandSession: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.bindCollaborationCanvasCommandSession, input),
+  getCollaborationCanvasCommandSession: async () =>
+    ipcRenderer.invoke(collaborationInvokeChannels.getCollaborationCanvasCommandSession),
   listCollaborationMembers: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationMembers, input),
   listCollaborationDevices: async (input) =>

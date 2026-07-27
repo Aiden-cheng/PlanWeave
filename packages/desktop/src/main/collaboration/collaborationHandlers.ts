@@ -135,6 +135,21 @@ export function registerCollaborationHandlers(
     collaborationInvokeChannels.publishCollaborationPresence,
     (_event, input: unknown) => active.publishPresence(input)
   );
+  ipcMain.handle(
+    collaborationInvokeChannels.submitCollaborationCanvasCommand,
+    (_event, input: unknown) => active.submitCanvasCommand(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.reconnectCollaborationCanvas,
+    (_event, input: unknown) => active.reconnectCanvas(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.bindCollaborationCanvasCommandSession,
+    (_event, input: unknown) => active.bindCanvasCommandSession(input)
+  );
+  ipcMain.handle(collaborationInvokeChannels.getCollaborationCanvasCommandSession, () =>
+    active.getCanvasCommandSession()
+  );
   ipcMain.handle(collaborationInvokeChannels.listCollaborationMembers, (_event, input: unknown) =>
     active.listMembers(input)
   );

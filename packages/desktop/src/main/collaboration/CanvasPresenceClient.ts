@@ -19,7 +19,7 @@ import type {
   CollaborationPresenceStatus,
   CollaborationWebSocketConstructor,
   CollaborationWebSocketLike
-} from "./CollaborationClient.js";
+} from "./collaborationClientTypes.js";
 
 export type CanvasPresenceClientOptions = {
   profile: CollaborationConnectionProfile;

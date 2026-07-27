@@ -106,6 +106,12 @@ export {
   type StagedAttachment
 } from "./attachmentUpload.js";
 export {
+  CanvasCommandController,
+  type CanvasCommandBridge,
+  type CanvasCommandControllerSnapshot,
+  type CanvasCommandLabels
+} from "./CanvasCommandController.js";
+export {
   adaptRemoteAcpEvents,
   buildRemoteActionIdentity,
   isAssignmentEligibleForRemoteDispatch,

@@ -1,25 +1,10 @@
-import { z } from "zod";
 import {
-  activityListWireQuerySchema,
-  assignmentListQuerySchema,
-  assignmentUpdateWireCommandSchema,
   collaborationConnectionProfileSchema,
-  commentCreateWireCommandSchema,
-  commentEditWireCommandSchema,
-  commentListWireQuerySchema,
-  commentTombstoneWireCommandSchema,
-  createPendingAttachmentRequestSchema,
   humanBootstrapRequestSchema,
   humanConsumeInvitationRequestSchema,
   humanDeviceListQuerySchema,
   humanInvitationListQuerySchema,
   humanPageQuerySchema,
-  opaqueIdentifierSchema,
-  remoteDispatchIntentSchema,
-  remoteDispatchWireCommandSchema,
-  remoteEventQuerySchema,
-  remoteInteractionPageQuerySchema,
-  workItemRefSchema,
   type ActivityListPage,
   type AssignmentDisplayProjection,
   type AssignmentListPage,
@@ -56,14 +41,10 @@ import {
   collaborationConsumeInvitationInputSchema,
   collaborationCreateInvitationInputSchema,
   collaborationDeviceCredentialIdInputSchema,
-  collaborationFinalizePendingAttachmentInputSchema,
   collaborationHumanPrincipalIdInputSchema,
   collaborationImportDeviceCredentialInputSchema,
   collaborationInvitationIdInputSchema,
-  collaborationPresenceCanvasInputSchema,
-  collaborationPresenceUpdateInputSchema,
   collaborationProfileIdInputSchema,
-  collaborationUploadPendingAttachmentInputSchema,
   collaborationUpsertProfileInputSchema,
   type CollaborationAuthHandoffView,
   type CollaborationInvitationCreateView,
@@ -75,21 +56,20 @@ import {
   type CollaborationUpsertProfileInput
 } from "../../shared/collaboration.js";
 import {
-  collaborationExecutionTargetUpdateInputSchema,
-  collaborationRemoteActionInputSchema,
-  collaborationRemoteInteractionRespondInputSchema,
-  collaborationRemoteOperationIdInputSchema,
-  collaborationResponsibilityUpdateInputSchema,
-  collaborationReviewerUpdateInputSchema,
-  collaborationWorkAuthorityScopeInputSchema
-} from "../../shared/collaborationReadModels.js";
-import {
   CollaborationClient,
   type CollaborationClientOptions,
-  type CollaborationPresenceStatus,
   type CollaborationObserverStatus
 } from "./CollaborationClient.js";
 import { CollaborationRegistryService } from "./CollaborationRegistryService.js";
+import {
+  CollaborationCanvasCommandFacade,
+  type CollaborationCanvasCommandSubmitResult,
+  type CollaborationCanvasReconnectResult,
+  type CollaborationCanvasCommandSessionView
+} from "./collaborationCanvasCommands.js";
+import { CollaborationRemoteOperationsFacade } from "./collaborationRemoteOperations.js";
+import { CollaborationPresenceSession } from "./collaborationPresenceSession.js";
+import { CollaborationReadMutationsFacade } from "./collaborationReadMutations.js";
 import { CollaborationClientError, collaborationErrorFromUnknown } from "./collaborationErrors.js";
 import {
   CollaborationCredentialVault,
@@ -186,6 +166,9 @@ export class CollaborationService {
   private readonly onObserverSignal?: (signal: CollaborationObserverSignal) => void;
   private readonly onPresenceSignal?: (signal: CollaborationPresenceSignal) => void;
   private readonly registryService: CollaborationRegistryService;
+  private readonly canvasCommands: CollaborationCanvasCommandFacade;
+  private readonly remoteOperations: CollaborationRemoteOperationsFacade;
+  private readonly readMutations: CollaborationReadMutationsFacade;
 
   private client: CollaborationClient | null = null;
   private clientProfileId: string | null = null;
@@ -198,8 +181,7 @@ export class CollaborationService {
   private lastValidatedObserverCursor = 0;
   private lastValidatedObserverProfileId: string | null = null;
   private observerGeneration = 0;
-  private presenceCanvasId: string | null = null;
-  private presenceGeneration = 0;
+  private readonly presenceSession: CollaborationPresenceSession;
   private disposed = false;
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -224,6 +206,22 @@ export class CollaborationService {
     this.onObserverSignal = options.onObserverSignal;
     this.onPresenceSignal = options.onPresenceSignal;
     this.registryService = new CollaborationRegistryService(() => this.client);
+    this.canvasCommands = new CollaborationCanvasCommandFacade(() => this.client);
+    this.remoteOperations = new CollaborationRemoteOperationsFacade((operation) =>
+      this.withActiveClient(operation)
+    );
+    this.presenceSession = new CollaborationPresenceSession({
+      getClient: () => this.client,
+      getClientProfileId: () => this.clientProfileId,
+      publishPresenceSignal: (signal) => this.publishPresenceSignal(signal),
+      setSessionError: (detail, error) => this.setSession("error", detail, error),
+      clearDeviceCredential: (profileId) => this.vault.clear(profileId),
+      publishStatus: () => this.publishStatus()
+    });
+    this.readMutations = new CollaborationReadMutationsFacade(
+      (operation) => this.withActiveClient(operation),
+      (client, workItem) => this.toAuthorityScope(client, workItem)
+    );
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -692,108 +690,57 @@ export class CollaborationService {
   async startPresence(input: unknown): Promise<void> {
     return this.enqueue(async () => {
       this.assertOpen();
-      const { canvasId } = collaborationPresenceCanvasInputSchema.parse(input);
-      const client = this.client;
-      const profileId = this.clientProfileId;
-      if (!client || !profileId) {
-        throw new CollaborationClientError({
-          kind: "aborted",
-          code: "collaboration_session_not_connected",
-          message: "Collaboration session is not connected."
-        });
-      }
-      if (this.presenceCanvasId === canvasId && client.presenceCanvas() === canvasId) return;
-      this.presenceGeneration += 1;
-      const generation = this.presenceGeneration;
-      this.presenceCanvasId = canvasId;
-      const isCurrent = () =>
-        this.client === client &&
-        this.clientProfileId === profileId &&
-        this.presenceCanvasId === canvasId &&
-        this.presenceGeneration === generation;
-      client.startPresence(canvasId, {
-        onSnapshot: (message) => {
-          if (!isCurrent()) return;
-          this.publishPresenceSignal({ profileId, message });
-        },
-        onUpdate: (message) => {
-          if (!isCurrent()) return;
-          this.publishPresenceSignal({ profileId, message });
-        },
-        onLeave: (message) => {
-          if (!isCurrent()) return;
-          this.publishPresenceSignal({ profileId, message });
-        },
-        onError: (message) => {
-          if (!isCurrent()) return;
-          this.publishPresenceSignal({ profileId, message });
-        },
-        onStatus: (status: CollaborationPresenceStatus) => {
-          if (!isCurrent()) return;
-          if (status.state === "reconnecting") {
-            this.publishPresenceSignal({
-              profileId,
-              reset: { canvasId, reason: "disconnected" }
-            });
-          } else if (status.state === "auth_expired") {
-            this.publishPresenceSignal({
-              profileId,
-              reset: { canvasId, reason: "auth_expired" }
-            });
-          } else if (status.state === "error") {
-            this.publishPresenceSignal({ profileId, reset: { canvasId, reason: "error" } });
-          }
-          if (status.state === "auth_expired") {
-            this.presenceCanvasId = null;
-            this.presenceGeneration += 1;
-            try {
-              client.stopPresence();
-            } catch {
-              // ignore close races during auth invalidation
-            }
-            this.setSession("error", "presence:auth_expired", {
-              code: status.code,
-              message: "Collaboration device credential was rejected by the server."
-            });
-            void this.vault.clear(profileId).then(() => this.publishStatus());
-          } else if (status.state === "error") {
-            this.setSession("error", `presence:${status.state}`, {
-              code: status.code,
-              message: status.code
-            });
-            void this.publishStatus();
-          }
-        }
-      });
+      await this.presenceSession.start(input);
     });
   }
 
   async stopPresence(): Promise<void> {
     return this.enqueue(async () => {
       this.assertOpen();
-      this.presenceGeneration += 1;
-      this.presenceCanvasId = null;
-      try {
-        this.client?.stopPresence();
-      } catch {
-        // ignore close races during scope teardown
-      }
+      await this.presenceSession.stop();
     });
   }
 
   async publishPresence(input: unknown): Promise<void> {
     return this.enqueue(async () => {
       this.assertOpen();
-      const parsed = collaborationPresenceUpdateInputSchema.parse(input);
-      const client = this.client;
-      if (!client || !this.clientProfileId || !this.presenceCanvasId) {
-        throw new CollaborationClientError({
-          kind: "aborted",
-          code: "collaboration_presence_not_connected",
-          message: "Canvas presence is not connected."
-        });
-      }
-      client.publishPresence(parsed);
+      await this.presenceSession.publish(input);
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Server-authoritative canvas commands (durable; independent of presence)
+  // ---------------------------------------------------------------------------
+
+  async submitCanvasCommand(input: unknown): Promise<CollaborationCanvasCommandSubmitResult> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      assertNoSmuggledCollaborationSecrets(input, "submitCollaborationCanvasCommand");
+      return this.canvasCommands.submit(input);
+    });
+  }
+
+  async reconnectCanvas(input: unknown): Promise<CollaborationCanvasReconnectResult> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      assertNoSmuggledCollaborationSecrets(input, "reconnectCollaborationCanvas");
+      return this.canvasCommands.reconnect(input);
+    });
+  }
+
+  async bindCanvasCommandSession(
+    input: unknown
+  ): Promise<CollaborationCanvasCommandSessionView> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      return this.canvasCommands.bind(input);
+    });
+  }
+
+  async getCanvasCommandSession(): Promise<CollaborationCanvasCommandSessionView> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      return this.canvasCommands.session();
     });
   }
 
@@ -854,215 +801,91 @@ export class CollaborationService {
   }
 
   async listAssignments(input: unknown = {}): Promise<AssignmentListPage> {
-    return this.withActiveClient((client) =>
-      client.listAssignments(assignmentListQuerySchema.parse(input ?? {}))
-    );
+    return this.readMutations.listAssignments(input);
   }
 
   async getAssignment(input: unknown): Promise<AssignmentDisplayProjection> {
-    const { workItem } = zWorkItemPayload(input);
-    return this.withActiveClient((client) => client.getAssignment(workItem));
+    return this.readMutations.getAssignment(input);
   }
 
   async listEligibleAssignees(input: unknown): Promise<EligibleAssigneesResponse> {
-    const { workItem } = zWorkItemPayload(input);
-    return this.withActiveClient((client) => client.listEligibleAssignees(workItem));
+    return this.readMutations.listEligibleAssignees(input);
   }
 
   async getWorkAuthority(input: unknown): Promise<WorkAuthorityProjection> {
-    const { workItem } = collaborationWorkAuthorityScopeInputSchema.parse(input);
-    return this.withActiveClient(async (client) => {
-      const scope = await this.toAuthorityScope(client, workItem);
-      return client.getWorkAuthority(scope);
-    });
+    return this.readMutations.getWorkAuthority(input);
   }
 
   async updateResponsibility(input: unknown): Promise<ResponsibilityReadModel> {
-    const command = collaborationResponsibilityUpdateInputSchema.parse(input);
-    return this.withActiveClient(async (client) => {
-      const scope = await this.toAuthorityScope(client, command.workItem);
-      return client.updateResponsibility({
-        schemaVersion: "responsibility/v1",
-        scope,
-        principal: command.principal,
-        expectedRevision: command.expectedRevision,
-        ...(command.reason === undefined ? {} : { reason: command.reason })
-      });
-    });
+    return this.readMutations.updateResponsibility(input);
   }
 
   async updateReviewer(input: unknown): Promise<ReviewAssignmentReadModel> {
-    const command = collaborationReviewerUpdateInputSchema.parse(input);
-    return this.withActiveClient(async (client) => {
-      const scope = await this.toAuthorityScope(client, command.workItem);
-      return client.updateReviewer({
-        schemaVersion: "review-assignment/v1",
-        scope,
-        principal: command.principal,
-        expectedRevision: command.expectedRevision,
-        ...(command.reason === undefined ? {} : { reason: command.reason })
-      });
-    });
+    return this.readMutations.updateReviewer(input);
   }
 
   async updateExecutionTarget(input: unknown): Promise<ExecutionTargetReadModel> {
-    const command = collaborationExecutionTargetUpdateInputSchema.parse(input);
-    if (command.workItem.kind !== "block") {
-      throw new CollaborationClientError({
-        kind: "validation",
-        code: "execution_target_requires_exact_block",
-        message: "Host execution targets accept only exact Task#Block refs."
-      });
-    }
-    return this.withActiveClient(async (client) => {
-      const scope = await this.toAuthorityScope(client, command.workItem);
-      if (scope.kind !== "block") {
-        throw new CollaborationClientError({
-          kind: "validation",
-          code: "execution_target_requires_exact_block",
-          message: "Host execution targets accept only exact Task#Block refs."
-        });
-      }
-      return client.updateExecutionTarget({
-        schemaVersion: "execution-target/v1",
-        scope,
-        target: command.target,
-        expectedRevision: command.expectedRevision,
-        ...(command.reason === undefined ? {} : { reason: command.reason })
-      });
-    });
+    return this.readMutations.updateExecutionTarget(input);
   }
 
   async listComments(input: unknown): Promise<CommentListPage> {
-    const query = commentListWireQuerySchema.parse(input);
-    return this.withActiveClient((client) => client.listComments(query));
+    return this.readMutations.listComments(input);
   }
 
   async listActivity(input: unknown = {}): Promise<ActivityListPage> {
-    return this.withActiveClient((client) =>
-      client.listActivity(activityListWireQuerySchema.parse(input ?? {}))
-    );
+    return this.readMutations.listActivity(input);
   }
 
   async updateAssignment(input: unknown): Promise<AssignmentDisplayProjection> {
-    const command = assignmentUpdateWireCommandSchema.parse(input);
-    return this.withActiveClient((client) => client.updateAssignment(command));
+    return this.readMutations.updateAssignment(input);
   }
 
   async createComment(input: unknown): Promise<CommentDisplayProjection> {
-    const command = commentCreateWireCommandSchema.parse(input);
-    return this.withActiveClient((client) => client.createComment(command));
+    return this.readMutations.createComment(input);
   }
 
   async editComment(input: unknown): Promise<CommentDisplayProjection> {
-    const command = commentEditWireCommandSchema.parse(input);
-    return this.withActiveClient((client) => client.editComment(command));
+    return this.readMutations.editComment(input);
   }
 
   async tombstoneComment(input: unknown): Promise<CommentDisplayProjection> {
-    const command = commentTombstoneWireCommandSchema.parse(input);
-    return this.withActiveClient((client) => client.tombstoneComment(command));
+    return this.readMutations.tombstoneComment(input);
   }
 
   async createPendingAttachment(input: unknown): Promise<PendingAttachmentView> {
-    const body = createPendingAttachmentRequestSchema.parse(input);
-    return this.withActiveClient((client) => client.createPendingAttachment(body));
+    return this.readMutations.createPendingAttachment(input);
   }
 
   async uploadPendingAttachment(input: unknown): Promise<PendingAttachmentView> {
-    const body = collaborationUploadPendingAttachmentInputSchema.parse(input);
-    let bytes: Buffer;
-    try {
-      bytes = Buffer.from(body.bodyBase64, "base64");
-    } catch {
-      throw new CollaborationClientError({
-        kind: "validation",
-        code: "collaboration_attachment_body_invalid",
-        message: "Attachment body must be valid base64.",
-        retryable: false
-      });
-    }
-    if (bytes.byteLength === 0 || bytes.byteLength > 8_388_608) {
-      throw new CollaborationClientError({
-        kind: "validation",
-        code: "collaboration_attachment_size_invalid",
-        message: "Attachment body size is outside the allowed range.",
-        retryable: false
-      });
-    }
-    return this.withActiveClient((client) =>
-      client.uploadPendingAttachment(body.pendingUploadId, {
-        body: bytes,
-        mediaType: body.mediaType,
-        digestSha256: body.digestSha256
-      })
-    );
+    return this.readMutations.uploadPendingAttachment(input);
   }
 
   async dispatchRemoteOperation(input: unknown): Promise<RemoteOperationObservation> {
-    const command =
-      input &&
-      typeof input === "object" &&
-      "schemaVersion" in input &&
-      (input as { schemaVersion?: string }).schemaVersion === "remote-run/v2"
-        ? remoteDispatchIntentSchema.parse(input)
-        : remoteDispatchWireCommandSchema.parse(input);
-    return this.withActiveClient((client) => client.dispatchRemoteOperation(command));
+    return this.remoteOperations.dispatch(input);
   }
 
   async observeRemoteOperation(input: unknown): Promise<RemoteOperationObservation> {
-    const { operationId } = collaborationRemoteOperationIdInputSchema.parse(input);
-    return this.withActiveClient((client) => client.observeRemoteOperation(operationId));
+    return this.remoteOperations.observe(input);
   }
 
   async executeRemoteOperationAction(input: unknown): Promise<RemoteActionView> {
-    const { operationId, action } = collaborationRemoteActionInputSchema.parse(input);
-    return this.withActiveClient((client) =>
-      client.executeRemoteOperationAction(operationId, action)
-    );
+    return this.remoteOperations.executeAction(input);
   }
 
   async replayRemoteOperationEvents(input: unknown): Promise<RemoteEventReplay> {
-    const parsed = z
-      .object({
-        operationId: opaqueIdentifierSchema,
-        query: remoteEventQuerySchema.optional()
-      })
-      .strict()
-      .parse(input);
-    return this.withActiveClient((client) =>
-      client.replayRemoteOperationEvents(parsed.operationId, parsed.query ?? {})
-    );
+    return this.remoteOperations.replayEvents(input);
   }
 
   async listRemoteOperationInteractions(input: unknown): Promise<RemoteInteractionPage> {
-    const parsed = z
-      .object({
-        operationId: opaqueIdentifierSchema,
-        query: remoteInteractionPageQuerySchema.optional()
-      })
-      .strict()
-      .parse(input);
-    return this.withActiveClient((client) =>
-      client.listRemoteOperationInteractions(parsed.operationId, parsed.query ?? {})
-    );
+    return this.remoteOperations.listInteractions(input);
   }
 
   async settleRemoteOperationInteraction(input: unknown): Promise<RemoteInteractionView> {
-    const { operationId, settlement } =
-      collaborationRemoteInteractionRespondInputSchema.parse(input);
-    return this.withActiveClient((client) =>
-      client.settleRemoteOperationInteraction(operationId, settlement)
-    );
+    return this.remoteOperations.settleInteraction(input);
   }
 
   async finalizePendingAttachment(input: unknown): Promise<FinalizePendingAttachmentResponse> {
-    const body = collaborationFinalizePendingAttachmentInputSchema.parse(input);
-    return this.withActiveClient((client) =>
-      client.finalizePendingAttachment(body.pendingUploadId, {
-        expectedDigestSha256: body.expectedDigestSha256
-      })
-    );
+    return this.readMutations.finalizePendingAttachment(input);
   }
 
   private async withActiveClient<T>(
@@ -1154,8 +977,7 @@ export class CollaborationService {
     const client = this.client;
     const profileId = this.clientProfileId;
     this.observerGeneration += 1;
-    this.presenceGeneration += 1;
-    this.presenceCanvasId = null;
+    this.presenceSession.reset();
     // Preserve validated cursor across dispose so the next connectSession can resume.
     if (client && profileId) {
       try {
@@ -1202,19 +1024,6 @@ export class CollaborationService {
   }
 }
 
-function zWorkItemPayload(input: unknown): {
-  workItem: ReturnType<typeof workItemRefSchema.parse>;
-} {
-  if (!input || typeof input !== "object" || !("workItem" in input)) {
-    throw new CollaborationClientError({
-      kind: "validation",
-      code: "collaboration_work_item_required",
-      message: "workItem is required.",
-      retryable: false
-    });
-  }
-  return { workItem: workItemRefSchema.parse((input as { workItem: unknown }).workItem) };
-}
 
 // Re-export input type for handlers
 export type { CollaborationUpsertProfileInput };

@@ -1,13 +1,10 @@
 import {
   activityListPageSchema,
   activityListWireQuerySchema,
-  assertHumanDisplayDtoRedacted,
   assignmentDisplayProjectionSchema,
   assignmentListPageSchema,
   assignmentListQuerySchema,
   assignmentUpdateWireCommandSchema,
-  collaborationClientLimitsSchema,
-  collaborationConnectionProfileSchema,
   commentCreateWireCommandSchema,
   commentDisplayProjectionSchema,
   commentEditWireCommandSchema,
@@ -57,15 +54,12 @@ import {
   type AssignmentDisplayProjection,
   type AssignmentListPage,
   type AssignmentUpdateWireCommand,
+  type CanvasCommandOutcome,
   type CollaborationWorkScope,
   type ExecutionTargetReadModel,
   type ExecutionTargetUpdateWireCommand,
-  type CanvasPresenceError,
-  type CanvasPresenceLeave,
   type CanvasPresencePointer,
   type CanvasPresenceSelectionId,
-  type CanvasPresenceSnapshot,
-  type CanvasPresenceUpdate,
   type CollaborationClientLimits,
   type CollaborationConnectionProfile,
   type CommentCreateWireCommand,
@@ -108,88 +102,41 @@ import {
 import type { z, ZodType } from "zod";
 import {
   CollaborationClientError,
-  collaborationErrorFromHttp,
-  collaborationErrorFromUnknown
+  collaborationErrorFromHttp
 } from "./collaborationErrors.js";
 import { reconnectDelay } from "./reconnectBackoff.js";
 import { redactCollaborationText } from "./redaction.js";
 import { CanvasPresenceClient } from "./CanvasPresenceClient.js";
 import { CollaborationRegistryClient } from "./CollaborationRegistryClient.js";
+import type {
+  CollaborationClientClock,
+  CollaborationCredentialPort,
+  CollaborationObserverHandlers,
+  CollaborationObserverStatus,
+  CollaborationPresenceHandlers,
+  CollaborationPresenceStatus,
+  CollaborationWebSocketConstructor,
+  CollaborationWebSocketLike
+} from "./collaborationClientTypes.js";
+import { systemCollaborationClock } from "./collaborationClientTypes.js";
+import { CollaborationHttpTransport } from "./collaborationHttpTransport.js";
+import {
+  CanvasCommandClient,
+  type CanvasCommandReconnectInput,
+  type CanvasCommandSubmitInput
+} from "./CanvasCommandClient.js";
+import type { CanvasCommandSessionSnapshot } from "./canvasCommandSession.js";
 
-export type CollaborationCredentialPort = {
-  /** Returns the current human device bearer (`pw_hdev_…`) or undefined when unauthenticated. */
-  getDeviceToken(): string | undefined | Promise<string | undefined>;
-};
-
-export type CollaborationClientClock = {
-  now(): Date;
-  setTimeout(callback: () => void, delayMs: number): unknown;
-  clearTimeout(timer: unknown): void;
-};
-
-export type CollaborationObserverStatus =
-  | { readonly state: "stopped" }
-  | { readonly state: "connecting"; readonly attempt: number }
-  | {
-      readonly state: "connected";
-      readonly cursor: HumanObserverCursor;
-      readonly connectedAt: string;
-    }
-  | { readonly state: "catching_up"; readonly resumeCursor: HumanObserverCursor }
-  | { readonly state: "reconnecting"; readonly attempt: number; readonly delayMs: number }
-  | { readonly state: "auth_expired"; readonly code: string }
-  | { readonly state: "failed"; readonly code: string };
-
-export type CollaborationObserverHandlers = {
-  onEvent?(message: Extract<HumanObserverServerMessage, { type: "human.observer.event" }>): void;
-  onCatchupRequired?(
-    message: Extract<HumanObserverServerMessage, { type: "human.observer.catchup_required" }>
-  ): void;
-  onAuthExpired?(
-    message: Extract<HumanObserverServerMessage, { type: "human.observer.auth_expired" }>
-  ): void;
-  onStatus?(status: CollaborationObserverStatus): void;
-};
-
-export type CollaborationPresenceStatus =
-  | { readonly state: "stopped" }
-  | { readonly state: "connecting"; readonly canvasId: string; readonly attempt: number }
-  | { readonly state: "connected"; readonly canvasId: string }
-  | {
-      readonly state: "reconnecting";
-      readonly canvasId: string;
-      readonly attempt: number;
-      readonly delayMs: number;
-    }
-  | { readonly state: "auth_expired"; readonly canvasId: string; readonly code: string }
-  | { readonly state: "error"; readonly canvasId: string; readonly code: string };
-
-export type CollaborationPresenceHandlers = {
-  onSnapshot?(message: CanvasPresenceSnapshot): void;
-  onUpdate?(message: CanvasPresenceUpdate): void;
-  onLeave?(message: CanvasPresenceLeave): void;
-  onError?(message: CanvasPresenceError): void;
-  onStatus?(status: CollaborationPresenceStatus): void;
-};
-
-export type CollaborationWebSocketLike = {
-  readonly readyState: number;
-  send(data: string): void;
-  close(code?: number, reason?: string): void;
-  addEventListener(
-    type: "open" | "message" | "error" | "close",
-    listener: (event: unknown) => void
-  ): void;
-  removeEventListener(
-    type: "open" | "message" | "error" | "close",
-    listener: (event: unknown) => void
-  ): void;
-};
-
-export type CollaborationWebSocketConstructor = new (
-  url: string,
-  protocolsOrOptions?: string | string[] | { headers?: Record<string, string> }
-) => CollaborationWebSocketLike;
+export type {
+  CollaborationClientClock,
+  CollaborationCredentialPort,
+  CollaborationObserverHandlers,
+  CollaborationObserverStatus,
+  CollaborationPresenceHandlers,
+  CollaborationPresenceStatus,
+  CollaborationWebSocketConstructor,
+  CollaborationWebSocketLike
+} from "./collaborationClientTypes.js";
 
 export type CollaborationClientOptions = {
   profile: CollaborationConnectionProfile;
@@ -202,14 +149,6 @@ export type CollaborationClientOptions = {
   logger?: { warn?(message: string): void; error?(message: string): void };
 };
 
-type JsonMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
-
-const systemClock: CollaborationClientClock = {
-  now: () => new Date(),
-  setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
-  clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>)
-};
-
 /**
  * Electron-main human collaboration client.
  *
@@ -217,12 +156,9 @@ const systemClock: CollaborationClientClock = {
  * Validates every JSON response/event with collaboration-contracts Zod schemas.
  */
 export class CollaborationClient {
-  private readonly profile: CollaborationConnectionProfile;
-  private readonly limits: CollaborationClientLimits;
-  private readonly fetchImpl: typeof fetch;
+  private readonly transport: CollaborationHttpTransport;
   private readonly clock: CollaborationClientClock;
   private readonly random: () => number;
-  private readonly rootController = new AbortController();
   private disposed = false;
 
   private observerSocket?: CollaborationWebSocketLike;
@@ -235,37 +171,51 @@ export class CollaborationClient {
 
   private readonly presence: CanvasPresenceClient;
   private readonly registryClient: CollaborationRegistryClient;
+  private readonly canvasCommands: CanvasCommandClient;
 
   constructor(private readonly options: CollaborationClientOptions) {
-    this.profile = collaborationConnectionProfileSchema.parse(options.profile);
-    this.limits = collaborationClientLimitsSchema.parse(options.limits ?? {});
-    this.fetchImpl = options.request ?? fetch;
-    this.clock = options.clock ?? systemClock;
+    this.transport = new CollaborationHttpTransport({
+      profile: options.profile,
+      credential: options.credential,
+      limits: options.limits,
+      request: options.request,
+      clock: options.clock
+    });
+    this.clock = options.clock ?? systemCollaborationClock;
     this.random = options.random ?? Math.random;
     this.presence = new CanvasPresenceClient({
-      profile: this.profile,
+      profile: this.transport.profile,
       credential: options.credential,
       WebSocketImpl: options.WebSocketImpl,
       clock: this.clock,
       random: this.random,
-      reconnectInitialDelayMs: this.limits.reconnectInitialDelayMs,
-      reconnectMaxDelayMs: this.limits.reconnectMaxDelayMs,
+      reconnectInitialDelayMs: this.transport.limits.reconnectInitialDelayMs,
+      reconnectMaxDelayMs: this.transport.limits.reconnectMaxDelayMs,
       logger: options.logger
     });
     this.registryClient = new CollaborationRegistryClient((method, path, schema, requestOptions) =>
-      this.json(method, path, schema, {
+      this.transport.json(method, path, schema, {
         ...requestOptions,
         auth: true
       })
     );
+    this.canvasCommands = new CanvasCommandClient(this.transport);
   }
 
   get projectId(): string {
-    return this.profile.projectId;
+    return this.transport.profile.projectId;
   }
 
   get connectionProfile(): CollaborationConnectionProfile {
-    return this.profile;
+    return this.transport.profile;
+  }
+
+  private get profile(): CollaborationConnectionProfile {
+    return this.transport.profile;
+  }
+
+  private get limits(): CollaborationClientLimits {
+    return this.transport.limits;
   }
 
   registry(): CollaborationRegistryClient {
@@ -788,14 +738,24 @@ export class CollaborationClient {
       "content-length": String(input.body.byteLength)
     };
     if (input.digestSha256) headers["x-planweave-content-sha256"] = input.digestSha256;
-    await this.applyAuth(headers);
-    const response = await this.send(path, {
+    await this.transport.applyAuth(headers);
+    const response = await this.transport.send(path, {
       method: "PUT",
       headers,
       body: input.body,
       signal
     });
-    const text = await this.readTextLimited(response);
+    // Reuse transport JSON body budget via a raw send + manual size check path.
+    const buffer = await response.arrayBuffer();
+    if (buffer.byteLength > this.limits.jsonBodyMaxBytes) {
+      throw new CollaborationClientError({
+        kind: "payload_too_large",
+        code: "collaboration_response_too_large",
+        message: "Response exceeded body size limit.",
+        httpStatus: response.status
+      });
+    }
+    const text = Buffer.from(buffer).toString("utf8");
     if (!response.ok) throw collaborationErrorFromHttp(response.status, text);
     const parsed = uploadPendingAttachmentResponseSchema.parse(JSON.parse(text));
     return pendingAttachmentViewSchema.parse({
@@ -847,6 +807,35 @@ export class CollaborationClient {
   }
 
   // ---------------------------------------------------------------------------
+  // Server-authoritative canvas commands (durable; not presence)
+  // ---------------------------------------------------------------------------
+
+  canvasCommandSession(): CanvasCommandSessionSnapshot | null {
+    return this.canvasCommands.sessionSnapshot();
+  }
+
+  bindCanvasCommandSession(canvasId: string): void {
+    this.ensureOpen();
+    this.canvasCommands.bindCanvas(canvasId);
+  }
+
+  async submitCanvasCommand(
+    input: CanvasCommandSubmitInput,
+    signal?: AbortSignal
+  ): Promise<CanvasCommandOutcome> {
+    this.ensureOpen();
+    return this.canvasCommands.submit(input, signal);
+  }
+
+  async reconnectCanvasCommands(
+    input: CanvasCommandReconnectInput,
+    signal?: AbortSignal
+  ): Promise<ReturnType<CanvasCommandClient["reconnect"]>> {
+    this.ensureOpen();
+    return this.canvasCommands.reconnect(input, signal);
+  }
+
+  // ---------------------------------------------------------------------------
   // Human observer subscription
   // ---------------------------------------------------------------------------
 
@@ -893,7 +882,8 @@ export class CollaborationClient {
     this.disposed = true;
     this.stopObserver();
     this.stopPresence();
-    this.rootController.abort();
+    this.canvasCommands.clearSession();
+    this.transport.dispose();
   }
 
   // ---------------------------------------------------------------------------
@@ -901,214 +891,45 @@ export class CollaborationClient {
   // ---------------------------------------------------------------------------
 
   private ensureOpen(): void {
-    if (this.disposed || this.rootController.signal.aborted) {
+    if (this.disposed) {
       throw new CollaborationClientError({
         kind: "aborted",
         code: "collaboration_disposed",
         message: "CollaborationClient has been disposed."
       });
     }
-  }
-
-  private async applyAuth(headers: Record<string, string>): Promise<void> {
-    const token = await this.options.credential.getDeviceToken();
-    if (!token) {
-      throw new CollaborationClientError({
-        kind: "auth",
-        code: "collaboration_credential_missing",
-        message: "Human device credential is not available."
-      });
-    }
-    headers.authorization = `Bearer ${token}`;
+    this.transport.ensureOpen();
   }
 
   private async jsonEmpty(
-    method: JsonMethod,
+    method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE",
     path: string,
     options: { body?: unknown; auth?: boolean; signal?: AbortSignal }
   ): Promise<void> {
-    await this.json(method, path, undefined, options);
+    await this.transport.jsonEmpty(method, path, options);
   }
 
   private async json<T>(
-    method: JsonMethod,
+    method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE",
     path: string,
     schema: ZodType<T> | undefined,
-    options: { body?: unknown; auth?: boolean; signal?: AbortSignal; acceptedStatus?: number }
+    options: {
+      body?: unknown;
+      auth?: boolean;
+      signal?: AbortSignal;
+      acceptedStatus?: number | number[];
+    }
   ): Promise<T> {
-    this.ensureOpen();
-    const headers: Record<string, string> = {
-      accept: "application/json"
-    };
-    if (options.body !== undefined) {
-      headers["content-type"] = "application/json; charset=utf-8";
-    }
-    if (options.auth !== false) {
-      await this.applyAuth(headers);
-    }
-    const response = await this.send(path, {
-      method,
-      headers,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
-      signal: options.signal
-    });
-    const text = await this.readTextLimited(response);
-    if (!response.ok && response.status !== options.acceptedStatus) {
-      throw collaborationErrorFromHttp(response.status, text);
-    }
-    if (schema === undefined) {
-      if (text.length === 0) return undefined as T;
-      // Some membership mutations return empty or opaque ack bodies.
-      try {
-        JSON.parse(text);
-      } catch {
-        throw new CollaborationClientError({
-          kind: "protocol",
-          code: "collaboration_malformed_json",
-          message: "Response was not valid JSON."
-        });
-      }
-      return undefined as T;
-    }
-    let value: unknown;
-    try {
-      value = text.length === 0 ? null : JSON.parse(text);
-    } catch {
-      throw new CollaborationClientError({
-        kind: "protocol",
-        code: "collaboration_malformed_json",
-        message: "Response was not valid JSON."
-      });
-    }
-    try {
-      const parsed = schema.parse(value);
-      assertHumanDisplayDtoRedacted(parsed);
-      return parsed;
-    } catch (error) {
-      throw new CollaborationClientError({
-        kind: "protocol",
-        code: "collaboration_response_invalid",
-        message: "Response failed contract validation.",
-        cause: error
-      });
-    }
+    return this.transport.json(method, path, schema, options);
   }
 
   private async jsonNullable<T>(
-    method: JsonMethod,
+    method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE",
     path: string,
     schema: ZodType<T>,
     options: { body?: unknown; auth?: boolean; signal?: AbortSignal }
   ): Promise<T | null> {
-    this.ensureOpen();
-    const headers: Record<string, string> = {
-      accept: "application/json"
-    };
-    if (options.body !== undefined) {
-      headers["content-type"] = "application/json; charset=utf-8";
-    }
-    if (options.auth !== false) {
-      await this.applyAuth(headers);
-    }
-    const response = await this.send(path, {
-      method,
-      headers,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
-      signal: options.signal
-    });
-    const text = await this.readTextLimited(response);
-    if (!response.ok) {
-      throw collaborationErrorFromHttp(response.status, text);
-    }
-    let value: unknown;
-    try {
-      value = text.length === 0 ? null : JSON.parse(text);
-    } catch {
-      throw new CollaborationClientError({
-        kind: "protocol",
-        code: "collaboration_malformed_json",
-        message: "Response was not valid JSON."
-      });
-    }
-    if (value === null) return null;
-    try {
-      const parsed = schema.parse(value);
-      assertHumanDisplayDtoRedacted(parsed);
-      return parsed;
-    } catch (error) {
-      throw new CollaborationClientError({
-        kind: "protocol",
-        code: "collaboration_response_invalid",
-        message: "Response failed contract validation.",
-        cause: error
-      });
-    }
-  }
-
-  private async send(
-    path: string,
-    init: {
-      method: string;
-      headers: Record<string, string>;
-      body?: string | Uint8Array;
-      signal?: AbortSignal;
-    }
-  ): Promise<Response> {
-    const url = new URL(path, this.profile.serverBaseUrl);
-    const timeout = new AbortController();
-    const timer = this.clock.setTimeout(() => timeout.abort(), this.limits.requestTimeoutMs);
-    const signals = [this.rootController.signal, timeout.signal];
-    if (init.signal) signals.push(init.signal);
-    const signal = AbortSignal.any(signals);
-    try {
-      const body: BodyInit | undefined =
-        init.body === undefined
-          ? undefined
-          : typeof init.body === "string"
-            ? init.body
-            : Buffer.from(init.body);
-      return await this.fetchImpl(url, {
-        method: init.method,
-        headers: init.headers,
-        body,
-        signal
-      });
-    } catch (error) {
-      if (signal.aborted && timeout.signal.aborted && !this.rootController.signal.aborted) {
-        throw new CollaborationClientError({
-          kind: "timeout",
-          code: "collaboration_timeout",
-          message: "Collaboration request timed out.",
-          retryable: true,
-          cause: error
-        });
-      }
-      throw collaborationErrorFromUnknown(error);
-    } finally {
-      this.clock.clearTimeout(timer);
-    }
-  }
-
-  private async readTextLimited(response: Response): Promise<string> {
-    const declared = response.headers.get("content-length");
-    if (declared && /^\d+$/.test(declared) && Number(declared) > this.limits.jsonBodyMaxBytes) {
-      throw new CollaborationClientError({
-        kind: "payload_too_large",
-        code: "collaboration_response_too_large",
-        message: "Response exceeded body size limit.",
-        httpStatus: response.status
-      });
-    }
-    const buffer = await response.arrayBuffer();
-    if (buffer.byteLength > this.limits.jsonBodyMaxBytes) {
-      throw new CollaborationClientError({
-        kind: "payload_too_large",
-        code: "collaboration_response_too_large",
-        message: "Response exceeded body size limit.",
-        httpStatus: response.status
-      });
-    }
-    return Buffer.from(buffer).toString("utf8");
+    return this.transport.jsonNullable(method, path, schema, options);
   }
 
   private connectObserver(): void {

@@ -63,6 +63,7 @@ import { useSharedResourceHighlight } from "./hooks/useSharedResourceHighlight";
 import { useLerpedNodeDrag } from "./hooks/useLerpedNodeDrag";
 import { useCollaborationSurface } from "./hooks/useCollaborationSurface";
 import { useCollaborationCanvasPresence } from "./hooks/useCollaborationCanvasPresence";
+import { useSharedCanvasCommands } from "./hooks/useSharedCanvasCommands";
 import { buildAppSettingsRouteProps } from "./AppSettingsRouteProps";
 import { useAutoRunController, useFileSyncController } from "./controllers/AutoRunController";
 import { useGraphWorkspaceController } from "./controllers/GraphWorkspaceController";
@@ -428,6 +429,18 @@ export function ProjectWorkspaceProvider({
     activeProjectId: collaborationSurface.activeProjectId,
     t
   });
+  const sharedCanvasCommands = useSharedCanvasCommands({
+    api: collaborationBridge,
+    canvasId: selectedCanvasId,
+    enabled: collaborationSurface.sessionConnected && Boolean(selectedProject),
+    profileId: collaborationSurface.activeProfileId,
+    selectedProjectId: selectedProject?.projectId ?? null,
+    activeProjectId: collaborationSurface.activeProjectId,
+    t,
+    onAuthoritativeChange: async () => {
+      await refreshProjectDerivedState();
+    }
+  });
   const recordNavigationSourceContextKeys = useMemo(() => {
     const selectedContext = [selectedProject?.rootPath ?? null, selectedCanvasId];
     const runContext = autoRunState
@@ -545,7 +558,8 @@ export function ProjectWorkspaceProvider({
     setBlockInspectorOpen,
     setError,
     setSelectedBlock,
-    setSelectedRunRecord
+    setSelectedRunRecord,
+    sharedCanvas: sharedCanvasCommands
   });
 
   const {
@@ -826,7 +840,8 @@ export function ProjectWorkspaceProvider({
     setLayout,
     selectTaskPanel: handleTaskPanelSelect,
     settings,
-    t
+    t,
+    sharedCanvas: sharedCanvasCommands
   });
   const fileSyncController = useFileSyncController({
     projectDiagnostics: visibleProjectDiagnostics,
