@@ -161,11 +161,11 @@ export class ProjectRegistryRepository {
         | Record<string, unknown>
         | undefined;
       if (row) {
-        const canvas = parseCanvas(row);
+        let canvas = parseCanvas(row);
         const expectedOwner = input.ownerHumanPrincipalId ?? project.ownerHumanPrincipalId;
         if (
           canvas.canvasRegistryId !== canvasRegistryId ||
-          canvas.packageDir !== input.packageDir ||
+          (canvas.packageDir !== null && canvas.packageDir !== input.packageDir) ||
           canvas.visibility !== input.visibility
         )
           throw new Error("canvas_registry_conflict");
@@ -176,6 +176,42 @@ export class ProjectRegistryRepository {
               : "canvas_registry_conflict"
           );
         if (canvas.revokedAt !== null) throw new Error("canvas_registry_revoked");
+        if (canvas.packageDir === null) {
+          const migration = readAclRegistryMigration(this.database, {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            canvasId: input.canvasId,
+            sourceKind: "trusted_canvas"
+          });
+          if (migration?.status === "completed")
+            throw new Error("canvas_registry_migration_conflict");
+          this.database
+            .prepare(
+              "UPDATE canvas_registry SET package_dir_internal=?,updated_at=? WHERE canvas_registry_id=? AND package_dir_internal IS NULL"
+            )
+            .run(input.packageDir, at, canvas.canvasRegistryId);
+          upsertAclRegistryMigration(this.database, {
+            migrationId: aclMigrationIdFor(
+              "trusted_canvas",
+              input.workspaceId,
+              input.projectId,
+              input.canvasId
+            ),
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            canvasId: input.canvasId,
+            sourceKind: "trusted_canvas",
+            marker: "path_bound",
+            status: "in_progress",
+            failureCode: null,
+            updatedAt: at
+          });
+          canvas = parseCanvas(
+            this.database
+              .prepare("SELECT * FROM canvas_registry WHERE canvas_registry_id=?")
+              .get(canvas.canvasRegistryId) as Record<string, unknown>
+          );
+        }
         return canvas;
       }
       const ownerHumanPrincipalId = input.ownerHumanPrincipalId ?? project.ownerHumanPrincipalId;
@@ -484,11 +520,35 @@ export class ProjectRegistryRepository {
     if (!canvas) throw new Error("canvas_registry_not_found");
     if (canvas.packageDir !== null && canvas.packageDir !== packageDir)
       throw new Error("canvas_registry_conflict");
-    this.database
-      .prepare(
-        "UPDATE canvas_registry SET package_dir_internal=?,updated_at=? WHERE canvas_registry_id=?"
-      )
-      .run(packageDir, this.clock().toISOString(), canvas.canvasRegistryId);
+    inWriteTransaction(this.database, () => {
+      const at = this.clock().toISOString();
+      this.database
+        .prepare(
+          "UPDATE canvas_registry SET package_dir_internal=?,updated_at=? WHERE canvas_registry_id=?"
+        )
+        .run(packageDir, at, canvas.canvasRegistryId);
+      const migration = readAclRegistryMigration(this.database, {
+        workspaceId,
+        projectId,
+        canvasId,
+        sourceKind: "trusted_canvas"
+      });
+      if (canvas.packageDir === null && migration?.status === "completed")
+        throw new Error("canvas_registry_migration_conflict");
+      if (!migration || migration.status !== "completed") {
+        upsertAclRegistryMigration(this.database, {
+          migrationId: aclMigrationIdFor("trusted_canvas", workspaceId, projectId, canvasId),
+          workspaceId,
+          projectId,
+          canvasId,
+          sourceKind: "trusted_canvas",
+          marker: "path_bound",
+          status: "in_progress",
+          failureCode: null,
+          updatedAt: at
+        });
+      }
+    });
   }
 
   markCanvasCutover(workspaceId: string, projectId: string, canvasId: string): void {

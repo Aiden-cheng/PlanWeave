@@ -21,6 +21,11 @@ import { startRemoteBlockCoordinationServer } from "./distributedCoordination.js
 import { HostEnrollmentService } from "./hostEnrollment.js";
 import { handleHostEnrollmentRequest } from "./hostEnrollmentHttp.js";
 import {
+  readAclRegistryMigration,
+  repairAclRegistryMigration,
+  retryAclRegistryMigration
+} from "./migrations.js";
+import {
   handleHumanHttpRequest,
   HumanIdentityRepository,
   HumanMembershipService,
@@ -190,6 +195,27 @@ function requiresAdmission(request: IncomingMessage): boolean {
   );
 }
 
+function prepareAclRegistryMigrationForStartup(input: {
+  database: Parameters<typeof readAclRegistryMigration>[0];
+  workspaceId: string;
+  projectId: string;
+  canvasId?: string;
+  sourceKind: "trusted_project" | "trusted_canvas";
+}): void {
+  const scope = {
+    workspaceId: input.workspaceId,
+    projectId: input.projectId,
+    ...(input.canvasId === undefined ? {} : { canvasId: input.canvasId }),
+    sourceKind: input.sourceKind
+  } as const;
+  const migration = readAclRegistryMigration(input.database, scope);
+  if (!migration || migration.status === "completed") return;
+  if (migration.status === "interrupted" || migration.status === "repair_required") {
+    repairAclRegistryMigration(input.database, scope);
+  }
+  retryAclRegistryMigration(input.database, scope);
+}
+
 export async function createDistributedServerComposition(
   options: DistributedServerCompositionOptions
 ): Promise<DistributedServerComposition> {
@@ -354,6 +380,12 @@ export async function createDistributedServerComposition(
     }
     for (const [projectId, project] of canvasesByProject) {
       const workspaceId = workspaceIdentity.ensureWorkspaceForLegacyProject(projectId);
+      prepareAclRegistryMigrationForStartup({
+        database: server.database,
+        workspaceId,
+        projectId,
+        sourceKind: "trusted_project"
+      });
       const existingProject = projectAccess.registry.projectInternal(workspaceId, projectId);
       if (existingProject?.projectRoot === null)
         projectAccess.bindProjectPath(workspaceId, projectId, project.projectRoot);
@@ -363,6 +395,13 @@ export async function createDistributedServerComposition(
         projectRoot: project.projectRoot
       });
       for (const canvas of project.canvases) {
+        prepareAclRegistryMigrationForStartup({
+          database: server.database,
+          workspaceId,
+          projectId,
+          canvasId: canvas.canvasId,
+          sourceKind: "trusted_canvas"
+        });
         projectAccess.registerCanvasInternal({
           workspaceId,
           projectId,
