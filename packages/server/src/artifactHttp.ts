@@ -141,18 +141,26 @@ export async function handleAgentHostArtifactRequest(
     }
     return false;
   }
+  const dispatch = options.dispatches.get(matched.dispatchId);
+  const workspaceId = dispatch
+    ? options.hosts.workspaceForLegacyProject(dispatch.projectId)
+    : undefined;
   const authentication = authenticateAgentHostRequest(
     request,
     options.hosts,
     matched.hostId,
-    options.allowInsecureTransport ?? false
+    options.allowInsecureTransport ?? false,
+    workspaceId
   );
   if (!authentication.ok) {
+    if (authentication.reason === "workspace_mismatch" || authentication.status === 403) {
+      forbidden(response);
+      return true;
+    }
     respond(response, authentication.status, { error: authentication.message });
     return true;
   }
 
-  const dispatch = options.dispatches.get(matched.dispatchId);
   if (!dispatch) {
     forbidden(response);
     request.resume();

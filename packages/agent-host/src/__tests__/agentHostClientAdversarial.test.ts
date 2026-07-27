@@ -54,7 +54,8 @@ describe("Agent Host adversarial executor failure", () => {
       execution: { dispatchId: "dispatch-adversarial", attemptId: "attempt-adversarial" },
       projectId: "project-adversarial",
       taskId: "T-001",
-      blockRef: "T-001#B-001"
+      blockRef: "T-001#B-001",
+      workspaceId: "workspace-client"
     });
     const delivery = mailboxDeliverySchema.parse({
       type: "mailbox.message",
@@ -115,6 +116,7 @@ describe("Agent Host adversarial executor failure", () => {
     const client = new AgentHostClient({
       serverUrl: `http://127.0.0.1:${address.port}`,
       hostId: "host-adversarial",
+      workspaceId: "workspace-client",
       token: "host-token",
       capabilities: ["test"],
       capacity: 1,

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { capabilitiesSchema } from "./protocol.js";
 import { RemoteOperationRepository } from "./remoteOperations.js";
 import { inWriteTransaction, type SqliteDatabase } from "./sqlite.js";
+import { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
 
 const timestampSchema = z.iso.datetime();
 const hostCandidateRowSchema = z
@@ -102,6 +103,7 @@ function toReservation(row: Record<string, unknown>): HostCapacityReservation {
 
 export class HostReservationRepository {
   private readonly clock: () => Date;
+  private readonly workspaceIdentity: WorkspaceIdentityRepository;
 
   constructor(
     private readonly database: SqliteDatabase,
@@ -114,6 +116,7 @@ export class HostReservationRepository {
       throw new Error("leaseDurationMs must be an integer of at least 1000.");
     }
     this.clock = options.clock ?? (() => new Date());
+    this.workspaceIdentity = new WorkspaceIdentityRepository(database);
   }
 
   /**
@@ -157,6 +160,8 @@ export class HostReservationRepository {
         }
         const now = this.clock();
         const onlineAfter = new Date(now.getTime() - this.options.hostOfflineAfterMs).toISOString();
+        const workspaceId = this.workspaceIdentity.workspaceForLegacyProject(operation.projectId);
+        if (!workspaceId) throw new Error("no_compatible_agent_host");
         const preferredHostId =
           options.preferredHostId === undefined
             ? undefined
@@ -169,32 +174,42 @@ export class HostReservationRepository {
                     (SELECT COUNT(*) FROM host_capacity_reservations r
                       WHERE r.host_id=h.id AND r.status='active') AS active_reservations
                    FROM agent_hosts h
+                   JOIN workspace_agent_hosts wh
+                     ON wh.host_id=h.id AND wh.workspace_id=?
                    WHERE h.id=? AND h.revoked_at IS NULL AND h.last_seen_at>=?
                      AND (h.credential_expires_at IS NULL OR h.credential_expires_at>?)`
                 )
-                .all(preferredHostId, onlineAfter, now.toISOString())
+                .all(workspaceId, preferredHostId, onlineAfter, now.toISOString())
             : this.database
                 .prepare(
                   `SELECT h.id,h.capabilities_json,h.capacity,h.last_seen_at,
                     (SELECT COUNT(*) FROM host_capacity_reservations r
                       WHERE r.host_id=h.id AND r.status='active') AS active_reservations
                    FROM agent_hosts h
+                   JOIN workspace_agent_hosts wh
+                     ON wh.host_id=h.id AND wh.workspace_id=?
                    WHERE h.revoked_at IS NULL AND h.last_seen_at>=?
                      AND (h.credential_expires_at IS NULL OR h.credential_expires_at>?)
                    ORDER BY active_reservations ASC,h.last_seen_at DESC,h.id ASC`
                 )
-                .all(onlineAfter, now.toISOString())
-        ).map((row) => {
-          try {
-            const parsed = hostCandidateRowSchema.parse(row);
-            return {
-              ...parsed,
-              capabilities: capabilitiesSchema.parse(JSON.parse(parsed.capabilities_json))
-            };
-          } catch (error) {
-            throw new Error("agent_host_row_invalid", { cause: error });
-          }
-        });
+                .all(workspaceId, onlineAfter, now.toISOString())
+        )
+          .map((row) => {
+            try {
+              const parsed = hostCandidateRowSchema.parse(row);
+              return {
+                ...parsed,
+                capabilities: capabilitiesSchema.parse(JSON.parse(parsed.capabilities_json))
+              };
+            } catch (error) {
+              throw new Error("agent_host_row_invalid", { cause: error });
+            }
+          })
+          .filter(
+            (candidate) =>
+              this.workspaceIdentity.hostUsable(candidate.id, now) &&
+              this.workspaceIdentity.hostUsable(candidate.id, now, workspaceId)
+          );
         const required = new Set(operation.requiredCapabilities);
         const host = candidates.find(
           (candidate) =>

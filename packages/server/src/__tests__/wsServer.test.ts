@@ -70,6 +70,22 @@ async function openSocket(url: string, token: string): Promise<WebSocket> {
   return socket;
 }
 
+async function upgradeStatus(url: string, token: string): Promise<number> {
+  const socket = new WebSocket(url, { headers: { Authorization: `Bearer ${token}` } });
+  sockets.push(socket);
+  socket.on("error", () => {});
+  return new Promise<number>((resolve) => {
+    socket.once("unexpected-response", (_request, response) => {
+      response.resume();
+      resolve(response.statusCode ?? 0);
+    });
+    socket.once("open", () => {
+      socket.terminate();
+      resolve(101);
+    });
+  });
+}
+
 function remoteManifest(): PlanPackageManifest {
   const manifest = basicManifest();
   manifest.execution.defaultExecutor = "codex-acp";
@@ -117,6 +133,61 @@ async function createWsCoordination() {
 }
 
 describe("agent host WebSocket transport", () => {
+  it("requires an explicit, unambiguous Workspace scope for Host authentication", async () => {
+    const { coordination, workspaceIdentity, workspaceId } = await createWsCoordination();
+    const registration = coordination.hosts.register("Scoped Host");
+    const otherWorkspace = workspaceIdentity.ensureWorkspaceForLegacyProject("project-other");
+    const httpServer = createServer();
+    httpServers.push(httpServer);
+    await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
+    const address = httpServer.address();
+    if (!address || typeof address === "string") throw new Error("Expected an HTTP port.");
+    webSocketServers.push(
+      attachAgentHostWebSocketServer({
+        server: httpServer,
+        hosts: coordination.hosts,
+        mailbox: coordination.mailbox,
+        dispatches: coordination.dispatches,
+        acpEvents: coordination.acpEvents,
+        interactions: coordination.interactions,
+        actions: coordination.actions,
+        heartbeatIntervalMs: 30_000,
+        leaseDurationMs: 60_000,
+        allowInsecureTransport: true
+      })
+    );
+    const base = `ws://127.0.0.1:${address.port}/agent-hosts/${registration.host.id}/connect`;
+    expect(await upgradeStatus(base, registration.token)).toBe(403);
+    expect(
+      await upgradeStatus(
+        `${base}?workspaceId=${encodeURIComponent(workspaceId)}`,
+        registration.token
+      )
+    ).toBe(401);
+
+    workspaceIdentity.bindHostToWorkspace(registration.host.id, workspaceId);
+    expect(
+      await upgradeStatus(
+        `${base}?workspaceId=${encodeURIComponent(otherWorkspace)}`,
+        registration.token
+      )
+    ).toBe(401);
+    expect(
+      await upgradeStatus(
+        `${base}?workspaceId=${encodeURIComponent(workspaceId)}`,
+        registration.token
+      )
+    ).toBe(101);
+
+    workspaceIdentity.bindHostToWorkspace(registration.host.id, otherWorkspace);
+    expect(
+      await upgradeStatus(
+        `${base}?workspaceId=${encodeURIComponent(workspaceId)}`,
+        registration.token
+      )
+    ).toBe(401);
+  });
+
   it("disconnects a server-revoked Host, rejects its old credential, and fences dispatch", async () => {
     const { database, coordination, locator, workspaceIdentity, workspaceId } =
       await createWsCoordination();
@@ -140,7 +211,9 @@ describe("agent host WebSocket transport", () => {
       allowInsecureTransport: true
     });
     webSocketServers.push(transport);
-    const url = `ws://127.0.0.1:${address.port}/agent-hosts/${registration.host.id}/connect`;
+    const url =
+      `ws://127.0.0.1:${address.port}/agent-hosts/${registration.host.id}/connect` +
+      `?workspaceId=${encodeURIComponent(workspaceId)}`;
     const socket = await openSocket(url, registration.token);
     const events = eventStream(socket);
     socket.send(
@@ -237,7 +310,8 @@ describe("agent host WebSocket transport", () => {
       })
     );
     const socket = await openSocket(
-      `ws://127.0.0.1:${address.port}/agent-hosts/${registration.host.id}/connect`,
+      `ws://127.0.0.1:${address.port}/agent-hosts/${registration.host.id}/connect` +
+        `?workspaceId=${encodeURIComponent(workspaceId)}`,
       registration.token
     );
     const events = eventStream(socket);
@@ -394,7 +468,9 @@ describe("agent host WebSocket transport", () => {
       allowInsecureTransport: true
     });
     webSocketServers.push(transport);
-    const url = `ws://127.0.0.1:${address.port}/agent-hosts/${registration.host.id}/connect`;
+    const url =
+      `ws://127.0.0.1:${address.port}/agent-hosts/${registration.host.id}/connect` +
+      `?workspaceId=${encodeURIComponent(workspaceId)}`;
 
     const firstSocket = await openSocket(url, registration.token);
     const firstEvents = eventStream(firstSocket);
@@ -571,7 +647,9 @@ describe("agent host WebSocket transport", () => {
         allowInsecureTransport: true
       })
     );
-    const url = `ws://127.0.0.1:${address.port}/agent-hosts/${registration.host.id}/connect`;
+    const url =
+      `ws://127.0.0.1:${address.port}/agent-hosts/${registration.host.id}/connect` +
+      `?workspaceId=${encodeURIComponent(workspaceId)}`;
     const first = await openSocket(url, registration.token);
     const firstEvents = eventStream(first);
     first.send(
@@ -706,7 +784,8 @@ describe("agent host WebSocket transport", () => {
       })
     );
     const socket = await openSocket(
-      `ws://127.0.0.1:${address.port}/agent-hosts/${registration.host.id}/connect`,
+      `ws://127.0.0.1:${address.port}/agent-hosts/${registration.host.id}/connect` +
+        `?workspaceId=${encodeURIComponent(workspaceId)}`,
       registration.token
     );
     const events = eventStream(socket);

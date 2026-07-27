@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { HostReservationRepository } from "../hostReservations.js";
 import { AgentHostRepository } from "../hosts.js";
+import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 import { RemoteOperationRepository } from "../remoteOperations.js";
 
@@ -26,16 +27,18 @@ async function setup(): Promise<PlanweaveServer> {
     busyTimeoutMs: 5_000
   });
   servers.push(server);
+  new WorkspaceIdentityRepository(server.database).ensureWorkspaceForLegacyProject("project-a");
   return server;
 }
 
 function createOperation(
   repository: RemoteOperationRepository,
   suffix: string,
-  capabilities = ["linux"]
+  capabilities = ["linux"],
+  projectId = "project-a"
 ) {
   const operation = repository.create({
-    projectId: "project-a",
+    projectId,
     canvasId: "default",
     blockRef: `RC-002#${suffix}`,
     ownershipGeneration: "generation-1",
@@ -47,11 +50,52 @@ function createOperation(
 }
 
 describe("HostReservationRepository", () => {
+  it("scopes automatic and exact reservations to the operation Workspace", async () => {
+    const server = await setup();
+    const identity = new WorkspaceIdentityRepository(server.database);
+    const workspaceA = identity.workspaceForLegacyProject("project-a");
+    const workspaceB = identity.ensureWorkspaceForLegacyProject("project-b");
+    if (!workspaceA) throw new Error("workspace_mapping_missing");
+    const hosts = new AgentHostRepository(server.database);
+    const hostA = hosts.register("Workspace A").host;
+    const hostB = hosts.register("Workspace B").host;
+    hosts.bindToWorkspace(hostA.id, workspaceA);
+    hosts.bindToWorkspace(hostB.id, workspaceB);
+    hosts.reportOnline(hostA.id, ["linux"], 1);
+    hosts.reportOnline(hostB.id, ["linux"], 1);
+    const operations = new RemoteOperationRepository(server.database);
+    const reservations = new HostReservationRepository(server.database, {
+      hostOfflineAfterMs: 60_000,
+      leaseDurationMs: 60_000
+    });
+
+    const automaticA = reservations.reserve(createOperation(operations, "scope-a").id);
+    expect(automaticA.hostId).toBe(hostA.id);
+    expect(() =>
+      reservations.reserve(
+        createOperation(operations, "scope-a-exact", ["linux"], "project-a").id,
+        {
+          preferredHostId: hostB.id
+        }
+      )
+    ).toThrowError("no_compatible_agent_host");
+    const automaticB = reservations.reserve(
+      createOperation(operations, "scope-b", ["linux"], "project-b").id
+    );
+    expect(automaticB.hostId).toBe(hostB.id);
+  });
+
   it("selects deterministically under capacity and prevents a capacity race", async () => {
     const server = await setup();
     const hosts = new AgentHostRepository(server.database);
     const first = hosts.register("First").host;
     const second = hosts.register("Second").host;
+    const workspaceId = new WorkspaceIdentityRepository(server.database).workspaceForLegacyProject(
+      "project-a"
+    );
+    if (!workspaceId) throw new Error("workspace_mapping_missing");
+    hosts.bindToWorkspace(first.id, workspaceId);
+    hosts.bindToWorkspace(second.id, workspaceId);
     hosts.reportOnline(first.id, ["linux"], 1);
     hosts.reportOnline(second.id, ["linux"], 1);
     server.database
@@ -75,13 +119,20 @@ describe("HostReservationRepository", () => {
     const server = await setup();
     let now = new Date("2030-01-01T00:00:00.000Z");
     const hosts = new AgentHostRepository(server.database, () => now);
+    const workspaceId = new WorkspaceIdentityRepository(server.database).workspaceForLegacyProject(
+      "project-a"
+    );
+    if (!workspaceId) throw new Error("workspace_mapping_missing");
     const offline = hosts.register("Offline").host;
+    hosts.bindToWorkspace(offline.id, workspaceId);
     hosts.reportOnline(offline.id, ["linux"], 1);
     now = new Date("2030-01-01T00:02:00.000Z");
     const revoked = hosts.register("Revoked").host;
+    hosts.bindToWorkspace(revoked.id, workspaceId);
     hosts.reportOnline(revoked.id, ["linux"], 1);
     hosts.revoke(revoked.id);
     const incompatible = hosts.register("Incompatible").host;
+    hosts.bindToWorkspace(incompatible.id, workspaceId);
     hosts.reportOnline(incompatible.id, ["macos"], 1);
     const operations = new RemoteOperationRepository(server.database, () => now);
     const reservations = new HostReservationRepository(server.database, {
@@ -99,6 +150,11 @@ describe("HostReservationRepository", () => {
     const server = await setup();
     const hosts = new AgentHostRepository(server.database);
     const host = hosts.register("Only Host").host;
+    const workspaceId = new WorkspaceIdentityRepository(server.database).workspaceForLegacyProject(
+      "project-a"
+    );
+    if (!workspaceId) throw new Error("workspace_mapping_missing");
+    hosts.bindToWorkspace(host.id, workspaceId);
     hosts.reportOnline(host.id, ["linux"], 1);
     const operations = new RemoteOperationRepository(server.database);
     const reservations = new HostReservationRepository(server.database, {
@@ -173,6 +229,11 @@ describe("HostReservationRepository", () => {
     const clock = () => now;
     const hosts = new AgentHostRepository(server.database, clock);
     const host = hosts.register("Resumable Host").host;
+    const workspaceId = new WorkspaceIdentityRepository(server.database).workspaceForLegacyProject(
+      "project-a"
+    );
+    if (!workspaceId) throw new Error("workspace_mapping_missing");
+    hosts.bindToWorkspace(host.id, workspaceId);
     hosts.reportOnline(host.id, ["linux", "acp.session.load"], 1);
     const operations = new RemoteOperationRepository(server.database, clock);
     const reservations = new HostReservationRepository(server.database, {
@@ -241,6 +302,11 @@ describe("HostReservationRepository", () => {
     const server = await setup();
     const hosts = new AgentHostRepository(server.database);
     const host = hosts.register("Fenced terminal Host").host;
+    const workspaceId = new WorkspaceIdentityRepository(server.database).workspaceForLegacyProject(
+      "project-a"
+    );
+    if (!workspaceId) throw new Error("workspace_mapping_missing");
+    hosts.bindToWorkspace(host.id, workspaceId);
     hosts.reportOnline(host.id, ["linux"], 1);
     const operations = new RemoteOperationRepository(server.database);
     const reservations = new HostReservationRepository(server.database, {
@@ -281,6 +347,11 @@ describe("HostReservationRepository", () => {
     const clock = () => now;
     const hosts = new AgentHostRepository(server.database, clock);
     const host = hosts.register("Capacity Host").host;
+    const workspaceId = new WorkspaceIdentityRepository(server.database).workspaceForLegacyProject(
+      "project-a"
+    );
+    if (!workspaceId) throw new Error("workspace_mapping_missing");
+    hosts.bindToWorkspace(host.id, workspaceId);
     hosts.reportOnline(host.id, ["linux", "acp.session.load"], 1);
     const operations = new RemoteOperationRepository(server.database, clock);
     const reservations = new HostReservationRepository(server.database, {

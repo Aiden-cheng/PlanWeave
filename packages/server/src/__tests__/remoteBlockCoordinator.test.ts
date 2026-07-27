@@ -11,6 +11,7 @@ import { ArtifactStore } from "../artifacts.js";
 import { createRemoteBlockCoordination } from "../distributedCoordination.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 import { RemoteRuntimePortRegistry } from "../remoteRuntimeLocator.js";
+import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 
 const directories: string[] = [];
 const servers: PlanweaveServer[] = [];
@@ -46,6 +47,9 @@ async function setup(withHost: boolean) {
   });
   servers.push(server);
   const locator = { projectId: workspace.init.workspace.id, canvasId: "default" };
+  new WorkspaceIdentityRepository(server.database).ensureWorkspaceForLegacyProject(
+    locator.projectId
+  );
   const runtime = createRemoteBlockRuntimePort({ projectRoot: workspace.root });
   const registry = new RemoteRuntimePortRegistry();
   registry.bind(locator, runtime);
@@ -66,7 +70,14 @@ async function setup(withHost: boolean) {
     { serverInstanceOwnerToken: server.serverInstanceOwnerToken }
   );
   const host = withHost ? coordination.hosts.register("Coordinator Host").host : undefined;
-  if (host) coordination.hosts.reportOnline(host.id, ["acp.codex"], 1);
+  if (host) {
+    const workspaceId = new WorkspaceIdentityRepository(server.database).workspaceForLegacyProject(
+      locator.projectId
+    );
+    if (!workspaceId) throw new Error("workspace_mapping_missing");
+    coordination.hosts.bindToWorkspace(host.id, workspaceId);
+    coordination.hosts.reportOnline(host.id, ["acp.codex"], 1);
+  }
   return {
     workspace,
     server,
@@ -140,6 +151,11 @@ describe("RemoteBlockCoordinator", () => {
     ).toBe("no_compatible_agent_host");
 
     const host = fixture.hosts.register("Late Host").host;
+    const workspaceId = new WorkspaceIdentityRepository(
+      fixture.server.database
+    ).workspaceForLegacyProject(fixture.locator.projectId);
+    if (!workspaceId) throw new Error("workspace_mapping_missing");
+    fixture.hosts.bindToWorkspace(host.id, workspaceId);
     fixture.hosts.reportOnline(host.id, ["acp.codex"], 1);
     await expect(fixture.coordinator.reenter(pending.operation.id)).resolves.toMatchObject({
       status: "activated"

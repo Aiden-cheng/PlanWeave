@@ -88,6 +88,10 @@ export class AgentHostRepository {
     this.workspaceIdentity.bindHostToWorkspace(hostId, workspaceId);
   }
 
+  workspaceForLegacyProject(projectId: string): string | undefined {
+    return this.workspaceIdentity.workspaceForLegacyProject(projectId);
+  }
+
   register(displayName: string): RegisteredAgentHost {
     const token = `pw_host_${randomBytes(32).toString("base64url")}`;
     return this.registerWithCredential(displayName, token, [], 1);

@@ -134,6 +134,7 @@ function createClient(
   const client = new AgentHostClient({
     serverUrl: `http://127.0.0.1:${port}`,
     hostId: "host-load-001",
+    workspaceId: "workspace-load",
     token: "host-token",
     capabilities: ["test"],
     capacity: 1,

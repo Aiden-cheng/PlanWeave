@@ -8,6 +8,7 @@ import { HostReservationRepository } from "../../hostReservations.js";
 import { RemoteOperationRepository } from "../../remoteOperations.js";
 import { SqliteRemoteDispatchPersistence } from "../../remoteCoordinatorPersistence.js";
 import type { SqliteDatabase } from "../../sqlite.js";
+import { WorkspaceIdentityRepository } from "../../identity/workspaceRepository.js";
 import type { TestDispatchCoordination } from "./testDispatchCoordination.js";
 
 type FixtureOptions = {
@@ -17,10 +18,21 @@ type FixtureOptions = {
 
 export function createRemoteDispatchFixture(
   database: SqliteDatabase,
-  coordination: Pick<TestDispatchCoordination, "mailbox" | "dispatches">,
+  coordination: Pick<TestDispatchCoordination, "mailbox" | "dispatches" | "hosts">,
   sourceEnvelope: ExecutionEnvelope,
   options: FixtureOptions = {}
 ) {
+  const workspaceIdentity = new WorkspaceIdentityRepository(database);
+  const workspaceId = workspaceIdentity.ensureWorkspaceForLegacyProject(sourceEnvelope.projectId);
+  const requiredCapabilities = new Set(sourceEnvelope.requiredCapabilities);
+  const candidateHost = coordination.hosts
+    .list()
+    .find(
+      (host) =>
+        workspaceIdentity.workspaceForHost(host.id) === undefined &&
+        [...requiredCapabilities].every((capability) => host.capabilities.includes(capability))
+    );
+  if (candidateHost) coordination.hosts.bindToWorkspace(candidateHost.id, workspaceId);
   const operations = new RemoteOperationRepository(database);
   let operation = operations.create({
     projectId: sourceEnvelope.projectId,

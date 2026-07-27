@@ -181,6 +181,7 @@ describe("Agent Host outbound transport", () => {
         new AgentHostClient({
           serverUrl: "http://127.0.0.1:3000",
           hostId: "host-client-001",
+          workspaceId: "workspace-client",
           token: "host-token",
           capabilities: ["test"],
           capacity: 1,
@@ -188,6 +189,52 @@ describe("Agent Host outbound transport", () => {
           executor
         })
     ).toThrow("agent_host_secure_transport_required");
+  });
+
+  it("rejects an execution envelope outside the local credential Workspace before execution", async () => {
+    const failed = deferred<Extract<HostEvent, { type: "dispatch.failed" }>>();
+    const executor: AgentHostExecutor = { execute: vi.fn() };
+    const httpServer = createServer();
+    httpServers.push(httpServer);
+    const webSocketServer = new WebSocketServer({ server: httpServer });
+    webSocketServers.push(webSocketServer);
+    webSocketServer.on("connection", (socket) => {
+      socket.on("message", (data) => {
+        const raw = JSON.parse(data.toString());
+        if (raw.type === "host.hello") {
+          hostHelloSchema.parse(raw);
+          sendEvent(socket, welcome());
+          sendEvent(socket, executeDelivery());
+          return;
+        }
+        const event = hostEventSchema.parse(raw);
+        acknowledge(socket, event);
+        if (event.type === "dispatch.failed") failed.resolve(event);
+      });
+    });
+    const port = await listen(httpServer);
+    const state = await openState();
+    const client = new AgentHostClient({
+      serverUrl: `http://127.0.0.1:${port}`,
+      hostId: "host-client-001",
+      workspaceId: "workspace-other",
+      token: "host-token",
+      capabilities: ["test"],
+      capacity: 1,
+      state,
+      executor,
+      allowInsecureTransport: true
+    });
+    clients.push(client);
+    client.start();
+
+    await expect(failed.promise).resolves.toMatchObject({
+      failure: {
+        code: "host_workspace_mismatch",
+        retryable: false
+      }
+    });
+    expect(executor.execute).not.toHaveBeenCalled();
   });
 
   it("executes a dispatch and retries a dispatch-scoped artifact upload", async () => {
@@ -230,7 +277,7 @@ describe("Agent Host outbound transport", () => {
     const webSocketServer = new WebSocketServer({ server: httpServer });
     webSocketServers.push(webSocketServer);
     webSocketServer.on("connection", (socket, request) => {
-      expect(request.url).toBe("/agent-hosts/host-client-001/connect");
+      expect(request.url).toBe("/agent-hosts/host-client-001/connect?workspaceId=workspace-client");
       expect(request.headers.authorization).toBe("Bearer host-token");
       socket.on("message", (data) => {
         try {
@@ -276,6 +323,7 @@ describe("Agent Host outbound transport", () => {
     const client = new AgentHostClient({
       serverUrl: `http://127.0.0.1:${port}`,
       hostId: "host-client-001",
+      workspaceId: "workspace-client",
       token: "host-token",
       capabilities: ["test"],
       capacity: 1,
@@ -301,7 +349,7 @@ describe("Agent Host outbound transport", () => {
       contentType: "text/markdown; charset=utf-8",
       path:
         "/agent-hosts/host-client-001/dispatches/dispatch-client-001/leases/lease-client-001/attempts/attempt-client-001/artifacts/" +
-        digest,
+        `${digest}?workspaceId=workspace-client`,
       purpose: "report"
     });
     expect(uploads[1]?.operationId).toMatch(/^artifact-upload:[a-f0-9]{64}$/);
@@ -347,6 +395,7 @@ describe("Agent Host outbound transport", () => {
     const client = new AgentHostClient({
       serverUrl: `http://127.0.0.1:${port}`,
       hostId: "host-client-001",
+      workspaceId: "workspace-client",
       token: "host-token",
       capabilities: ["test"],
       capacity: 1,
@@ -408,6 +457,7 @@ describe("Agent Host outbound transport", () => {
     const client = new AgentHostClient({
       serverUrl: `http://127.0.0.1:${port}`,
       hostId: "host-client-001",
+      workspaceId: "workspace-client",
       token: "host-token",
       capabilities: ["test"],
       capacity: 1,
@@ -490,6 +540,7 @@ describe("Agent Host outbound transport", () => {
     const client = new AgentHostClient({
       serverUrl: `http://127.0.0.1:${port}`,
       hostId: "host-client-001",
+      workspaceId: "workspace-client",
       token: "host-token",
       capabilities: ["test"],
       capacity: 1,
@@ -544,6 +595,7 @@ describe("Agent Host outbound transport", () => {
     const client = new AgentHostClient({
       serverUrl: `http://127.0.0.1:${port}`,
       hostId: "host-client-001",
+      workspaceId: "workspace-client",
       token: "host-token",
       capabilities: ["test"],
       capacity: 1,
@@ -587,6 +639,7 @@ describe("Agent Host outbound transport", () => {
     const client = new AgentHostClient({
       serverUrl: `http://127.0.0.1:${port}`,
       hostId: "host-client-001",
+      workspaceId: "workspace-client",
       token: "host-token",
       capabilities: ["test"],
       capacity: 1,
@@ -640,6 +693,7 @@ describe("Agent Host outbound transport", () => {
     const client = new AgentHostClient({
       serverUrl: `http://127.0.0.1:${port}`,
       hostId: "host-client-001",
+      workspaceId: "workspace-client",
       token: "host-token",
       capabilities: ["test"],
       capacity: 1,

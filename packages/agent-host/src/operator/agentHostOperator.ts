@@ -115,7 +115,11 @@ export class AgentHostOperator {
     const config = await loadAgentHostConfig(configPath);
     await this.preflight(configPath);
     const credential = await credentialStore(config).requireUsable();
-    await ensureDurableHostIdentity(config.dataDirectory, credential.hostId, credential.workspaceId);
+    await ensureDurableHostIdentity(
+      config.dataDirectory,
+      credential.hostId,
+      credential.workspaceId
+    );
     const trust = await createAgentHostTlsTrust(config.coordinator.caCertificatePath);
     let state: Awaited<ReturnType<typeof openAgentHostState>> | undefined;
     try {
@@ -135,6 +139,7 @@ export class AgentHostOperator {
       const transport = new AgentHostClient({
         serverUrl: transportOrigin(config.coordinator.url),
         hostId: credential.hostId,
+        workspaceId: credential.workspaceId,
         token: credential.credentialToken,
         capabilities: config.host.capabilities,
         capacity: config.host.capacity,

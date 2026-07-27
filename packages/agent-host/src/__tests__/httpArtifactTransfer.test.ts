@@ -31,6 +31,7 @@ async function listen(
     client: new HttpArtifactClient({
       baseUrl: new URL(origin),
       hostId: "host-artifact-test",
+      workspaceId: "workspace-artifact-test",
       token: "host-token"
     })
   };
