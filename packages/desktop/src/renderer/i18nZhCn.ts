@@ -1141,5 +1141,7 @@ export const zhCnCatalog = {
   canvasCommandStaleRevision: "画布版本已过期（本地期望 {expected}，服务端为 {authoritative}）。请重连后重试。",
   canvasCommandRejected: "画布命令被拒绝：{code}",
   canvasCommandReconnectFailed: "画布重连失败：{code}",
-  canvasCommandNotConnected: "共享画布命令会话未连接。"
+  canvasCommandNotConnected: "共享画布命令会话未连接。",
+  canvasCommandUnsupportedLocalOnly:
+    "共享画布已连接时无法执行此编辑。请断开协作连接，或改用受支持的共享命令。"
 } satisfies Record<TranslationKey, string>;

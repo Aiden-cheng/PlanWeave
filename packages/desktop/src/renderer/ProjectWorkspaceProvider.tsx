@@ -243,6 +243,24 @@ export function ProjectWorkspaceProvider({
     updateProjectPromptPolicy
   } = desktopProject;
 
+  // Shared canvas command session must be available before any durable package write hooks.
+  const collaborationSurface = useCollaborationSurface({
+    canvasId: selectedCanvasId,
+    t
+  });
+  const sharedCanvasCommands = useSharedCanvasCommands({
+    api: collaborationBridge,
+    canvasId: selectedCanvasId,
+    enabled: collaborationSurface.sessionConnected && Boolean(selectedProject),
+    profileId: collaborationSurface.activeProfileId,
+    selectedProjectId: selectedProject?.projectId ?? null,
+    activeProjectId: collaborationSurface.activeProjectId,
+    t,
+    onAuthoritativeChange: async () => {
+      await refreshProjectDerivedState();
+    }
+  });
+
   const pinnedProjectIds = useMemo(
     () => new Set(settings.pinnedProjectIds),
     [settings.pinnedProjectIds]
@@ -283,7 +301,8 @@ export function ProjectWorkspaceProvider({
     selectedCanvasId,
     selectedProject,
     setActiveView,
-    setError
+    setError,
+    sharedCanvas: sharedCanvasCommands
   });
 
   const {
@@ -347,7 +366,10 @@ export function ProjectWorkspaceProvider({
     selectedProject,
     setError
   });
-  const taskWorkspace = useTaskWorkspaceController({ history: appHistory });
+  const taskWorkspace = useTaskWorkspaceController({
+    history: appHistory,
+    sharedCanvas: sharedCanvasCommands
+  });
   const currentRouteRef = useRef(appHistory.route);
   currentRouteRef.current = appHistory.route;
   const recordWorkspaceNavigationRef = useRef<
@@ -416,10 +438,6 @@ export function ProjectWorkspaceProvider({
     selectedProject,
     setError
   });
-  const collaborationSurface = useCollaborationSurface({
-    canvasId: selectedCanvasId,
-    t
-  });
   const collaborationPresence = useCollaborationCanvasPresence({
     api: collaborationBridge,
     canvasId: selectedCanvasId,
@@ -428,18 +446,6 @@ export function ProjectWorkspaceProvider({
     selectedProjectId: selectedProject?.projectId ?? null,
     activeProjectId: collaborationSurface.activeProjectId,
     t
-  });
-  const sharedCanvasCommands = useSharedCanvasCommands({
-    api: collaborationBridge,
-    canvasId: selectedCanvasId,
-    enabled: collaborationSurface.sessionConnected && Boolean(selectedProject),
-    profileId: collaborationSurface.activeProfileId,
-    selectedProjectId: selectedProject?.projectId ?? null,
-    activeProjectId: collaborationSurface.activeProjectId,
-    t,
-    onAuthoritativeChange: async () => {
-      await refreshProjectDerivedState();
-    }
   });
   const recordNavigationSourceContextKeys = useMemo(() => {
     const selectedContext = [selectedProject?.rootPath ?? null, selectedCanvasId];
@@ -540,7 +546,8 @@ export function ProjectWorkspaceProvider({
     selectedCanvasId,
     selectedProject,
     setError,
-    t
+    t,
+    sharedCanvas: sharedCanvasCommands
   });
 
   const { handleDeleteBlock, handleDeleteTaskNode } = useGraphDeleteActions({
@@ -574,7 +581,14 @@ export function ProjectWorkspaceProvider({
     reloadPromptConflicts,
     saveStates,
     titleDrafts
-  } = usePromptDrafts({ graph, refreshGraph, selectedCanvasId, selectedProject, setError });
+  } = usePromptDrafts({
+    graph,
+    refreshGraph,
+    selectedCanvasId,
+    selectedProject,
+    setError,
+    sharedCanvas: sharedCanvasCommands
+  });
 
   const {
     activeResource,
@@ -604,7 +618,8 @@ export function ProjectWorkspaceProvider({
     refreshGraph,
     selectedCanvasId,
     selectedProject,
-    setError
+    setError,
+    sharedCanvas: sharedCanvasCommands
   });
 
   const {

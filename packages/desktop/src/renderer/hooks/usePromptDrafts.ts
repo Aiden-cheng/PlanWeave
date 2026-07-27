@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DesktopGraphViewModel, DesktopProjectSummary } from "@planweave-ai/runtime";
 import { bridge, desktopCanvasReference } from "../bridge";
+import { runDurablePackageWrite } from "../collaboration/packageWriteAdapter";
 import type { TaskNodeData } from "../types";
+import type { SharedCanvasCommandsResult } from "./useSharedCanvasCommands";
 
 type UsePromptDraftsArgs = {
   graph: DesktopGraphViewModel | null;
@@ -9,6 +11,8 @@ type UsePromptDraftsArgs = {
   selectedCanvasId: string | null;
   selectedProject: DesktopProjectSummary | null;
   setError: (message: string | null) => void;
+  /** When enabled, task title/prompt writes go through shared canvas commands. */
+  sharedCanvas?: SharedCanvasCommandsResult | null;
 };
 
 export type PromptConflictRef = {
@@ -27,7 +31,8 @@ export function usePromptDrafts({
   refreshGraph,
   selectedCanvasId,
   selectedProject,
-  setError
+  setError,
+  sharedCanvas = null
 }: UsePromptDraftsArgs) {
   const draftScopeId = useRef<string | null>(null);
   const [titleDrafts, setTitleDrafts] = useState<Record<string, string>>({});
@@ -205,21 +210,35 @@ export function usePromptDrafts({
 
   const handleTitleSave = useCallback(
     async (taskId: string) => {
-      if (!bridge || !selectedProject) {
+      if (!selectedProject) {
         return;
       }
       try {
-        await bridge.updateTaskTitle(
-          desktopCanvasReference(selectedProject, selectedCanvasId),
-          taskId,
-          titleDrafts[taskId] ?? ""
-        );
+        const title = titleDrafts[taskId] ?? "";
+        const mode = await runDurablePackageWrite({
+          sharedCanvas,
+          intent: {
+            kind: "update_task_fields",
+            taskId,
+            fields: { title }
+          },
+          onError: setError,
+          localWrite: async () => {
+            if (!bridge) return;
+            await bridge.updateTaskTitle(
+              desktopCanvasReference(selectedProject, selectedCanvasId),
+              taskId,
+              title
+            );
+          }
+        });
+        if (mode === "failed") return;
         await refreshGraph();
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : String(caught));
       }
     },
-    [refreshGraph, selectedCanvasId, selectedProject, setError, titleDrafts]
+    [refreshGraph, selectedCanvasId, selectedProject, setError, sharedCanvas, titleDrafts]
   );
 
   const handlePromptChange = useCallback((taskId: string, value: string) => {
@@ -233,7 +252,7 @@ export function usePromptDrafts({
 
   const handlePromptSave = useCallback(
     async (taskId: string) => {
-      if (!bridge || !selectedProject) {
+      if (!selectedProject) {
         return;
       }
       setSaveStates((current) => ({ ...current, [taskId]: "saving" }));
@@ -248,34 +267,54 @@ export function usePromptDrafts({
                 markdown: task.promptMarkdown
               }
             : undefined);
-        const result = await bridge.updateTaskPrompt(
-          desktopCanvasReference(selectedProject, selectedCanvasId),
-          taskId,
-          promptDrafts[taskId] ?? "",
-          {
-            baseGraphVersion: base?.graphVersion,
-            basePromptHash: base?.promptHash
-          }
-        );
-        if (!result.ok) {
-          setSaveStates((current) => ({ ...current, [taskId]: "error" }));
-          if (
-            result.diagnostics.some((diagnostic) => diagnostic.code === "graph_version_conflict")
-          ) {
-            setPromptConflicts((current) => ({
-              ...current,
-              [taskId]: {
-                taskId,
-                title: task?.title ?? taskId,
-                draft: promptDrafts[taskId] ?? "",
-                remote: task?.promptMarkdown ?? base?.markdown ?? ""
+        const markdown = promptDrafts[taskId] ?? "";
+        const mode = await runDurablePackageWrite({
+          sharedCanvas,
+          intent: {
+            kind: "update_task_prompt",
+            taskId,
+            promptMarkdown: markdown
+          },
+          onError: (message) => {
+            setSaveStates((current) => ({ ...current, [taskId]: "error" }));
+            setError(message);
+          },
+          localWrite: async () => {
+            if (!bridge) return;
+            const result = await bridge.updateTaskPrompt(
+              desktopCanvasReference(selectedProject, selectedCanvasId),
+              taskId,
+              markdown,
+              {
+                baseGraphVersion: base?.graphVersion,
+                basePromptHash: base?.promptHash
               }
-            }));
+            );
+            if (!result.ok) {
+              setSaveStates((current) => ({ ...current, [taskId]: "error" }));
+              if (
+                result.diagnostics.some(
+                  (diagnostic) => diagnostic.code === "graph_version_conflict"
+                )
+              ) {
+                setPromptConflicts((current) => ({
+                  ...current,
+                  [taskId]: {
+                    taskId,
+                    title: task?.title ?? taskId,
+                    draft: markdown,
+                    remote: task?.promptMarkdown ?? base?.markdown ?? ""
+                  }
+                }));
+              }
+              throw new Error(
+                result.diagnostics.map((diagnostic) => diagnostic.message).join("\n")
+              );
+            }
           }
-          setError(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
-          return;
-        }
-        const savedMarkdown = promptDrafts[taskId] ?? "";
+        });
+        if (mode === "failed") return;
+        const savedMarkdown = markdown;
         setPromptBase((current) => ({
           ...current,
           [taskId]: {
@@ -295,7 +334,16 @@ export function usePromptDrafts({
         setError(caught instanceof Error ? caught.message : String(caught));
       }
     },
-    [graph, promptBase, promptDrafts, refreshGraph, selectedCanvasId, selectedProject, setError]
+    [
+      graph,
+      promptBase,
+      promptDrafts,
+      refreshGraph,
+      selectedCanvasId,
+      selectedProject,
+      setError,
+      sharedCanvas
+    ]
   );
 
   const reloadPromptConflicts = useCallback(async () => {
@@ -348,23 +396,42 @@ export function usePromptDrafts({
   }, [promptConflicts]);
 
   const applyLocalPromptConflicts = useCallback(async () => {
-    if (!bridge || !selectedProject) {
+    if (!selectedProject) {
       return;
     }
     for (const conflict of Object.values(promptConflicts)) {
-      const result = await bridge.updateTaskPrompt(
-        desktopCanvasReference(selectedProject, selectedCanvasId),
-        conflict.taskId,
-        conflict.draft
-      );
-      if (!result.ok) {
-        setError(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
-        return;
-      }
+      const mode = await runDurablePackageWrite({
+        sharedCanvas,
+        intent: {
+          kind: "update_task_prompt",
+          taskId: conflict.taskId,
+          promptMarkdown: conflict.draft
+        },
+        onError: setError,
+        localWrite: async () => {
+          if (!bridge) return;
+          const result = await bridge.updateTaskPrompt(
+            desktopCanvasReference(selectedProject, selectedCanvasId),
+            conflict.taskId,
+            conflict.draft
+          );
+          if (!result.ok) {
+            throw new Error(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+          }
+        }
+      });
+      if (mode === "failed") return;
     }
     setPromptConflicts({});
     await refreshGraph();
-  }, [promptConflicts, refreshGraph, selectedCanvasId, selectedProject, setError]);
+  }, [
+    promptConflicts,
+    refreshGraph,
+    selectedCanvasId,
+    selectedProject,
+    setError,
+    sharedCanvas
+  ]);
 
   useEffect(() => {
     if (!bridge || !selectedProject || !graph) {

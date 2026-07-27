@@ -12,11 +12,14 @@ import type {
   DesktopTerminalAppId
 } from "@planweave-ai/runtime";
 import { autoRunEventMatchesCanvas } from "./autoRunEvents";
-import { bridge } from "./bridge";
+import { bridge, collaborationBridge } from "./bridge";
+import { runDurablePackageWrite } from "./collaboration/packageWriteAdapter";
 import { createTranslator, type Language } from "./i18n";
 import { BlockInspector } from "./inspector/BlockInspector";
+import { useCollaborationStatus } from "./hooks/useCollaborationStatus";
 import { useDetectedAgents } from "./hooks/useDetectedAgents";
 import { useDesktopSettingsBridge } from "./hooks/useDesktopSettingsBridge";
+import { useSharedCanvasCommands } from "./hooks/useSharedCanvasCommands";
 
 function supportedLanguage(value: string | null): Language {
   return value === "en" || value === "zh-CN" ? value : "zh-CN";
@@ -183,6 +186,38 @@ export function BlockInspectorWindow() {
     await loadBlock(blockRef);
   }, [blockRef, loadBlock]);
 
+  const { status: collaborationStatus } = useCollaborationStatus({ api: collaborationBridge });
+  const activeCollaborationProfile = useMemo(() => {
+    if (!collaborationStatus?.activeProfileId) return null;
+    return (
+      collaborationStatus.profiles.find(
+        (profile) => profile.profileId === collaborationStatus.activeProfileId
+      ) ?? null
+    );
+  }, [collaborationStatus]);
+  const sessionConnected =
+    collaborationStatus?.session.phase === "connected" ||
+    collaborationStatus?.session.phase === "ready";
+  const sharedProjectId = activeCollaborationProfile?.projectId ?? null;
+  const graphProjectId = graph?.projectId ?? null;
+  const sharedCanvasEnabled =
+    sessionConnected &&
+    sharedProjectId !== null &&
+    graphProjectId !== null &&
+    sharedProjectId === graphProjectId;
+  const sharedCanvas = useSharedCanvasCommands({
+    api: collaborationBridge,
+    canvasId,
+    enabled: sharedCanvasEnabled,
+    profileId: activeCollaborationProfile?.profileId ?? null,
+    selectedProjectId: sharedProjectId,
+    activeProjectId: sharedProjectId,
+    t,
+    onAuthoritativeChange: async () => {
+      await refreshBlock();
+    }
+  });
+
   const handleBlockSelect = useCallback(
     async (ref: string) => {
       setBlockRef(ref);
@@ -298,59 +333,109 @@ export function BlockInspectorWindow() {
   ]);
 
   const saveSelectedBlockTitle = useCallback(async () => {
-    if (!bridge || !projectRoot || !selectedBlock) {
+    if (!projectRoot || !selectedBlock) {
       return;
     }
-    const result = await bridge.updateBlockTitle(
-      { projectRoot, canvasId },
-      selectedBlock.ref,
-      selectedBlock.title
-    );
-    if (!result.ok) {
-      setError(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
-      return;
+    try {
+      const mode = await runDurablePackageWrite({
+        sharedCanvas,
+        intent: {
+          kind: "update_block_fields",
+          blockRef: selectedBlock.ref,
+          fields: { title: selectedBlock.title }
+        },
+        onError: setError,
+        localWrite: async () => {
+          if (!bridge) return;
+          const result = await bridge.updateBlockTitle(
+            { projectRoot, canvasId },
+            selectedBlock.ref,
+            selectedBlock.title
+          );
+          if (!result.ok) {
+            throw new Error(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+          }
+        }
+      });
+      if (mode === "failed") return;
+      await refreshBlock();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
     }
-    await refreshBlock();
-  }, [canvasId, projectRoot, refreshBlock, selectedBlock]);
+  }, [canvasId, projectRoot, refreshBlock, selectedBlock, sharedCanvas]);
 
   const saveSelectedBlockExecutor = useCallback(
     async (executorName: string | null) => {
-      if (!bridge || !projectRoot || !selectedBlock) {
+      if (!projectRoot || !selectedBlock) {
         return;
       }
-      const result = await bridge.updateBlockExecutor(
-        { projectRoot, canvasId },
-        selectedBlock.ref,
-        executorName
-      );
-      if (!result.ok) {
-        setError(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
-        return;
+      try {
+        const mode = await runDurablePackageWrite({
+          sharedCanvas,
+          intent: {
+            kind: "update_block_fields",
+            blockRef: selectedBlock.ref,
+            fields: { executor: executorName }
+          },
+          onError: setError,
+          localWrite: async () => {
+            if (!bridge) return;
+            const result = await bridge.updateBlockExecutor(
+              { projectRoot, canvasId },
+              selectedBlock.ref,
+              executorName
+            );
+            if (!result.ok) {
+              throw new Error(
+                result.diagnostics.map((diagnostic) => diagnostic.message).join("\n")
+              );
+            }
+          }
+        });
+        if (mode === "failed") return;
+        await refreshBlock();
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : String(caught));
       }
-      await refreshBlock();
     },
-    [canvasId, projectRoot, refreshBlock, selectedBlock]
+    [canvasId, projectRoot, refreshBlock, selectedBlock, sharedCanvas]
   );
 
   const saveSelectedBlockPrompt = useCallback(async () => {
-    if (!bridge || !projectRoot || !selectedBlock) {
+    if (!projectRoot || !selectedBlock) {
       return;
     }
-    const result = await bridge.updateBlockPrompt(
-      { projectRoot, canvasId },
-      selectedBlock.ref,
-      selectedBlock.promptMarkdown,
-      {
-        baseGraphVersion: selectedBlock.graphVersion,
-        basePromptHash: selectedBlock.promptHash
-      }
-    );
-    if (!result.ok) {
-      setError(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
-      return;
+    try {
+      const mode = await runDurablePackageWrite({
+        sharedCanvas,
+        intent: {
+          kind: "update_block_prompt",
+          blockRef: selectedBlock.ref,
+          promptMarkdown: selectedBlock.promptMarkdown
+        },
+        onError: setError,
+        localWrite: async () => {
+          if (!bridge) return;
+          const result = await bridge.updateBlockPrompt(
+            { projectRoot, canvasId },
+            selectedBlock.ref,
+            selectedBlock.promptMarkdown,
+            {
+              baseGraphVersion: selectedBlock.graphVersion,
+              basePromptHash: selectedBlock.promptHash
+            }
+          );
+          if (!result.ok) {
+            throw new Error(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+          }
+        }
+      });
+      if (mode === "failed") return;
+      await refreshBlock();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
     }
-    await refreshBlock();
-  }, [canvasId, projectRoot, refreshBlock, selectedBlock]);
+  }, [canvasId, projectRoot, refreshBlock, selectedBlock, sharedCanvas]);
 
   return (
     <BlockInspector

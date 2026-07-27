@@ -2,11 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DesktopAutoRunEvent } from "@planweave-ai/runtime";
 import type { DesktopGraphViewModel, DesktopTaskDetail } from "@planweave-ai/runtime";
 import { autoRunEventMatchesCanvas } from "./autoRunEvents";
-import { bridge } from "./bridge";
+import { bridge, collaborationBridge } from "./bridge";
+import { runDurablePackageWrite } from "./collaboration/packageWriteAdapter";
 import { createTranslator, type Language } from "./i18n";
 import { TaskInspector } from "./inspector/TaskInspector";
+import { useCollaborationStatus } from "./hooks/useCollaborationStatus";
 import { useDetectedAgents } from "./hooks/useDetectedAgents";
 import { useDesktopSettingsBridge } from "./hooks/useDesktopSettingsBridge";
+import { useSharedCanvasCommands } from "./hooks/useSharedCanvasCommands";
 
 function supportedLanguage(value: string | null): Language {
   return value === "en" || value === "zh-CN" ? value : "zh-CN";
@@ -91,6 +94,38 @@ export function TaskInspectorWindow() {
     [canvasId, projectRoot, taskId]
   );
 
+  const { status: collaborationStatus } = useCollaborationStatus({ api: collaborationBridge });
+  const activeCollaborationProfile = useMemo(() => {
+    if (!collaborationStatus?.activeProfileId) return null;
+    return (
+      collaborationStatus.profiles.find(
+        (profile) => profile.profileId === collaborationStatus.activeProfileId
+      ) ?? null
+    );
+  }, [collaborationStatus]);
+  const sessionConnected =
+    collaborationStatus?.session.phase === "connected" ||
+    collaborationStatus?.session.phase === "ready";
+  const sharedProjectId = activeCollaborationProfile?.projectId ?? null;
+  const graphProjectId = graph?.projectId ?? null;
+  const sharedCanvasEnabled =
+    sessionConnected &&
+    sharedProjectId !== null &&
+    graphProjectId !== null &&
+    sharedProjectId === graphProjectId;
+  const sharedCanvas = useSharedCanvasCommands({
+    api: collaborationBridge,
+    canvasId,
+    enabled: sharedCanvasEnabled,
+    profileId: activeCollaborationProfile?.profileId ?? null,
+    selectedProjectId: sharedProjectId,
+    activeProjectId: sharedProjectId,
+    t,
+    onAuthoritativeChange: async () => {
+      await loadTask();
+    }
+  });
+
   useEffect(() => {
     void loadTask();
   }, [loadTask]);
@@ -111,59 +146,109 @@ export function TaskInspectorWindow() {
   }, [canvasId, draftDirty, graph, loadTask, projectRoot, selectedTask, taskId]);
 
   const saveSelectedTaskTitle = useCallback(async () => {
-    if (!bridge || !projectRoot || !selectedTask) {
+    if (!projectRoot || !selectedTask) {
       return;
     }
-    const result = await bridge.updateTaskTitle(
-      { projectRoot, canvasId },
-      selectedTask.taskId,
-      selectedTask.title
-    );
-    if (!result.ok) {
-      setError(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
-      return;
+    try {
+      const mode = await runDurablePackageWrite({
+        sharedCanvas,
+        intent: {
+          kind: "update_task_fields",
+          taskId: selectedTask.taskId,
+          fields: { title: selectedTask.title }
+        },
+        onError: setError,
+        localWrite: async () => {
+          if (!bridge) return;
+          const result = await bridge.updateTaskTitle(
+            { projectRoot, canvasId },
+            selectedTask.taskId,
+            selectedTask.title
+          );
+          if (!result.ok) {
+            throw new Error(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+          }
+        }
+      });
+      if (mode === "failed") return;
+      await loadTask();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
     }
-    await loadTask();
-  }, [canvasId, loadTask, projectRoot, selectedTask]);
+  }, [canvasId, loadTask, projectRoot, selectedTask, sharedCanvas]);
 
   const saveSelectedTaskExecutor = useCallback(
     async (executorName: string | null) => {
-      if (!bridge || !projectRoot || !selectedTask) {
+      if (!projectRoot || !selectedTask) {
         return;
       }
-      const result = await bridge.updateTaskExecutor(
-        { projectRoot, canvasId },
-        selectedTask.taskId,
-        executorName
-      );
-      if (!result.ok) {
-        setError(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
-        return;
+      try {
+        const mode = await runDurablePackageWrite({
+          sharedCanvas,
+          intent: {
+            kind: "update_task_fields",
+            taskId: selectedTask.taskId,
+            fields: { executor: executorName }
+          },
+          onError: setError,
+          localWrite: async () => {
+            if (!bridge) return;
+            const result = await bridge.updateTaskExecutor(
+              { projectRoot, canvasId },
+              selectedTask.taskId,
+              executorName
+            );
+            if (!result.ok) {
+              throw new Error(
+                result.diagnostics.map((diagnostic) => diagnostic.message).join("\n")
+              );
+            }
+          }
+        });
+        if (mode === "failed") return;
+        await loadTask();
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : String(caught));
       }
-      await loadTask();
     },
-    [canvasId, loadTask, projectRoot, selectedTask]
+    [canvasId, loadTask, projectRoot, selectedTask, sharedCanvas]
   );
 
   const saveSelectedTaskPrompt = useCallback(async () => {
-    if (!bridge || !projectRoot || !selectedTask) {
+    if (!projectRoot || !selectedTask) {
       return;
     }
-    const result = await bridge.updateTaskPrompt(
-      { projectRoot, canvasId },
-      selectedTask.taskId,
-      selectedTask.promptMarkdown,
-      {
-        baseGraphVersion: selectedTask.graphVersion,
-        basePromptHash: selectedTask.promptHash
-      }
-    );
-    if (!result.ok) {
-      setError(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
-      return;
+    try {
+      const mode = await runDurablePackageWrite({
+        sharedCanvas,
+        intent: {
+          kind: "update_task_prompt",
+          taskId: selectedTask.taskId,
+          promptMarkdown: selectedTask.promptMarkdown
+        },
+        onError: setError,
+        localWrite: async () => {
+          if (!bridge) return;
+          const result = await bridge.updateTaskPrompt(
+            { projectRoot, canvasId },
+            selectedTask.taskId,
+            selectedTask.promptMarkdown,
+            {
+              baseGraphVersion: selectedTask.graphVersion,
+              basePromptHash: selectedTask.promptHash
+            }
+          );
+          if (!result.ok) {
+            throw new Error(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+          }
+        }
+      });
+      if (mode === "failed") return;
+      await loadTask();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
     }
-    await loadTask();
-  }, [canvasId, loadTask, projectRoot, selectedTask]);
+  }, [canvasId, loadTask, projectRoot, selectedTask, sharedCanvas]);
 
   return (
     <TaskInspector

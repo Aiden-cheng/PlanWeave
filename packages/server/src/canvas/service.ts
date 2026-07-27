@@ -533,12 +533,16 @@ export class CanvasCommandService {
   }
 
   /**
-   * Crash-safe recovery: clear interrupted pending rows after verifying journal/head consistency.
+   * Crash-safe recovery after apply/commit interruption.
    * Package FS is source of truth for content digest; journal is authoritative for revision.
+   * When package digest advanced past journal head (apply succeeded, commit failed), advance
+   * the journal with a recovery commit so clients do not double-apply on retry.
+   * When package still matches head, drop pending so the client can retry safely.
    */
-  recoverInterrupted(): { cleared: number } {
+  async recoverInterrupted(): Promise<{ cleared: number; recovered: number }> {
     const pending = this.options.repository.listNeedsRecovery();
     let cleared = 0;
+    let recovered = 0;
     for (const item of pending) {
       const op = this.options.repository.getOperation(item.scope, item.operationId);
       if (op) {
@@ -546,11 +550,53 @@ export class CanvasCommandService {
         cleared += 1;
         continue;
       }
-      // Incomplete apply without journal outcome — drop pending so clients can retry with new CAS.
+
+      const head = this.options.repository.head(item.scope);
+      let packageDigest: string | null = null;
+      try {
+        const location = this.options.access.registry.resolveCanvasPath({
+          workspaceId: item.scope.workspaceId,
+          projectId: item.scope.projectId,
+          canvasId: item.scope.canvasId
+        });
+        const digest = await this.options.runtime.readDigest({
+          projectRoot: location.projectRoot,
+          canvasId: item.scope.canvasId,
+          expectedPackageDir: location.packageDir
+        });
+        if (digest.ok) {
+          packageDigest = digest.contentDigest;
+        }
+      } catch {
+        packageDigest = null;
+      }
+
+      if (
+        packageDigest !== null &&
+        packageDigest !== head.contentDigest &&
+        head.revision === item.expectedRevision
+      ) {
+        // Apply mutated package; journal never committed — align revision to package.
+        this.options.repository.commitAccepted({
+          scope: item.scope,
+          operationId: item.operationId,
+          intent: item.intent,
+          intentDigest: item.intentDigest,
+          actor: item.actor,
+          previousRevision: head.revision,
+          revision: head.revision + 1,
+          contentDigest: packageDigest
+        });
+        recovered += 1;
+        cleared += 1;
+        continue;
+      }
+
+      // Apply did not change package (or location unavailable) — drop pending for safe retry.
       this.options.repository.clearPending(item.scope, item.operationId);
       cleared += 1;
     }
-    return { cleared };
+    return { cleared, recovered };
   }
 
   /** Test/diagnostic head read; not a presence cursor. */

@@ -249,22 +249,41 @@ export class CanvasCommandRepository {
     scope: CanvasScopeKey;
     operationId: string;
     expectedRevision: number;
+    intent: CanvasCommandIntent;
+    intentDigest: string;
+    actor: ActorRef;
   }> {
     const rows = this.database
       .prepare(
-        `SELECT workspace_id,project_id,canvas_id,operation_id,expected_revision
+        `SELECT workspace_id,project_id,canvas_id,operation_id,expected_revision,
+                intent_json,intent_digest,actor_kind,actor_id,actor_display_name
          FROM canvas_command_pending WHERE status IN ('applying','needs_recovery')`
       )
       .all() as Array<Record<string, unknown>>;
-    return rows.map((row) => ({
-      scope: {
-        workspaceId: String(row.workspace_id),
-        projectId: String(row.project_id),
-        canvasId: String(row.canvas_id)
-      },
-      operationId: String(row.operation_id),
-      expectedRevision: Number(row.expected_revision)
-    }));
+    return rows.map((row) => {
+      const kindRaw = String(row.actor_kind);
+      const kind =
+        kindRaw === "local_admin" || kindRaw === "system" || kindRaw === "human"
+          ? kindRaw
+          : "human";
+      const actor: ActorRef = {
+        kind,
+        id: String(row.actor_id),
+        ...(row.actor_display_name != null ? { displayName: String(row.actor_display_name) } : {})
+      };
+      return {
+        scope: {
+          workspaceId: String(row.workspace_id),
+          projectId: String(row.project_id),
+          canvasId: String(row.canvas_id)
+        },
+        operationId: String(row.operation_id),
+        expectedRevision: Number(row.expected_revision),
+        intent: JSON.parse(String(row.intent_json)) as CanvasCommandIntent,
+        intentDigest: String(row.intent_digest),
+        actor
+      };
+    });
   }
 
   markPendingNeedsRecovery(scope: CanvasScopeKey, operationId: string): void {

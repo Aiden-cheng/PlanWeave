@@ -392,7 +392,7 @@ describe("canvas command service (OSS-004 B-002)", () => {
       { workspaceId: "w", projectId: "p", canvasId: "default" },
       "pending-crash"
     );
-    expect(service.recoverInterrupted().cleared).toBe(1);
+    expect((await service.recoverInterrupted()).cleared).toBe(1);
   });
 
   it("rejects forbidden shared-mode features and ignores presence as mutation authority", async () => {
@@ -446,5 +446,162 @@ describe("canvas command service (OSS-004 B-002)", () => {
     }
     expect(outcome.revision).toBe(1);
     expect(outcome.contentDigest).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("recovers crash after apply by aligning journal to package digest without double mutation", async () => {
+    const scope = { workspaceId: "w", projectId: "p", canvasId: "default" };
+    let digest = digestOf("empty");
+    let applyCalls = 0;
+    const runtime: CanvasRuntimeMutationPort = {
+      async apply(input) {
+        applyCalls += 1;
+        digest = digestOf(`${digest}:applied:${JSON.stringify(input.intent)}`);
+        return {
+          ok: true,
+          contentDigest: digest,
+          digestManifest: {
+            manifest: { digestSha256: digest, sizeBytes: 10 },
+            prompts: [],
+            totalBytes: 10
+          },
+          packageDir: String(input.projectRoot),
+          sizeBytes: 10
+        };
+      },
+      async readDigest(input) {
+        return {
+          ok: true,
+          contentDigest: digest,
+          digestManifest: {
+            manifest: { digestSha256: digest, sizeBytes: 10 },
+            prompts: [],
+            totalBytes: 10
+          },
+          packageDir: String(input.projectRoot),
+          sizeBytes: 10
+        };
+      }
+    };
+    const { service, repository } = await fixture({ runtime });
+
+    // Simulate: accept path reserved pending, apply mutated package, commit never ran.
+    const intent: CanvasCommandIntent = {
+      kind: "update_task_prompt",
+      taskId: "T-001",
+      promptMarkdown: "# crash recovery\n"
+    };
+    await runtime.apply({
+      projectRoot: "/tmp",
+      canvasId: "default",
+      intent
+    });
+    expect(applyCalls).toBe(1);
+    const packageDigestAfterApply = digest;
+
+    repository.reservePending({
+      scope,
+      operationId: "op-crash-apply",
+      expectedRevision: 0,
+      intent,
+      intentDigest: digestCanvasIntent(intent),
+      actor: { kind: "human", id: "owner" }
+    });
+    repository.markPendingNeedsRecovery(scope, "op-crash-apply");
+
+    const recovery = await service.recoverInterrupted();
+    expect(recovery).toMatchObject({ cleared: 1, recovered: 1 });
+    const head = repository.head(scope);
+    expect(head.revision).toBe(1);
+    expect(head.contentDigest).toBe(packageDigestAfterApply);
+
+    // Same operationId replays accepted outcome — no second apply.
+    const replay = await service.submit(actor("owner"), submitBody("op-crash-apply", 0, intent));
+    expect(replay.type).toBe("canvas.command.accepted");
+    if (replay.type === "canvas.command.accepted") {
+      expect(replay.idempotentReplay).toBe(true);
+      expect(replay.revision).toBe(1);
+      expect(replay.contentDigest).toBe(packageDigestAfterApply);
+    }
+    expect(applyCalls).toBe(1);
+
+    // Fresh opId at stale revision is rejected (no double mutation).
+    const staleRetry = await service.submit(
+      actor("owner"),
+      submitBody("op-crash-retry", 0, {
+        kind: "update_task_prompt",
+        taskId: "T-001",
+        promptMarkdown: "# would double apply\n"
+      })
+    );
+    expect(staleRetry).toMatchObject({
+      type: "canvas.command.rejected",
+      code: "stale_revision",
+      conflict: { expectedRevision: 0, authoritativeRevision: 1 }
+    });
+    expect(applyCalls).toBe(1);
+  });
+
+  it("returns snapshot_malformed when reconnect needs a snapshot that is corrupt", async () => {
+    const { service, repository } = await fixture();
+    const accepted = await service.submit(actor("owner"), submitBody("op-snap-1", 0));
+    expect(accepted.type).toBe("canvas.command.accepted");
+    const scope = { workspaceId: "w", projectId: "p", canvasId: "default" };
+    const head = repository.head(scope);
+    repository.markSnapshotCorrupt(scope, head.revision);
+
+    const response = await service.reconnect(actor("editor"), {
+      type: "canvas.reconnect.request",
+      protocolVersion: CANVAS_COMMAND_PROTOCOL_VERSION,
+      schemaVersion: "canvas-command/v1",
+      projectId: "p",
+      canvasId: "default",
+      afterRevision: 0
+    });
+    // Retention may still return delta for afterRevision 0; force gap path.
+    const forced = await service.reconnect(actor("editor"), {
+      type: "canvas.reconnect.request",
+      protocolVersion: CANVAS_COMMAND_PROTOCOL_VERSION,
+      schemaVersion: "canvas-command/v1",
+      projectId: "p",
+      canvasId: "default",
+      afterRevision: 99
+    });
+    expect(forced.type).toBe("canvas.reconnect.error");
+    if (forced.type === "canvas.reconnect.error") {
+      expect(forced.code).toBe("snapshot_malformed");
+    }
+    void response;
+  });
+
+  it("keeps presence probe independent under concurrent command load", async () => {
+    const { service } = await fixture();
+    const results = await Promise.all(
+      Array.from({ length: 8 }, (_, index) =>
+        service.submit(
+          actor("owner"),
+          submitBody(`op-presence-load-${index}`, 0, {
+            kind: "update_task_prompt",
+            taskId: "T-001",
+            promptMarkdown: `# presence load ${index}\n`
+          })
+        )
+      )
+    );
+    const accepted = results.filter((item) => item.type === "canvas.command.accepted");
+    const rejected = results.filter((item) => item.type === "canvas.command.rejected");
+    expect(accepted.length).toBeGreaterThanOrEqual(1);
+    expect(accepted.length + rejected.length).toBe(8);
+    for (const item of accepted) {
+      if (item.type === "canvas.command.accepted") {
+        // presenceHeadProbe returns 999; durable revision never uses presence.
+        expect(item.revision).not.toBe(999);
+        expect(item.revision).toBeGreaterThanOrEqual(1);
+      }
+    }
+    for (const item of rejected) {
+      if (item.type === "canvas.command.rejected") {
+        expect(["stale_revision", "operation_conflict"]).toContain(item.code);
+      }
+    }
   });
 });

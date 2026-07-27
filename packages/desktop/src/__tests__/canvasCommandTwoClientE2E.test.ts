@@ -273,6 +273,7 @@ describe("Desktop canvas command dual-client E2E (OSS-004 B-003)", () => {
     ).rejects.toThrow();
 
     // Forbidden directory/watch/upload/download/sync under canvas namespace are rejected.
+    // routeCanvasCommandHttp owns these paths and must fail closed with exact 404 + detail.
     for (const path of [
       `/api/v1/projects/${fixture.projectId}/fs/list`,
       `/api/v1/projects/${fixture.projectId}/files`,
@@ -292,15 +293,10 @@ describe("Desktop canvas command dual-client E2E (OSS-004 B-003)", () => {
         },
         body: "{}"
       });
-      // routeCanvasCommandHttp answers forbidden features with 404 feature_not_supported;
-      // unknown paths may fall through to other handlers — assert not a silent success.
-      expect(response.status, path).not.toBe(200);
-      if (response.status === 404) {
-        const body = (await response.json()) as { detail?: string };
-        if (body.detail) {
-          expect(body.detail).toBe("canvas_feature_not_supported");
-        }
-      }
+      expect(response.status, path).toBe(404);
+      const body = (await response.json()) as { detail?: string; error?: string };
+      expect(body.detail, path).toBe("canvas_feature_not_supported");
+      expect(body.error, path).toBe("not_found");
     }
 
     // Presence remains independent: command protocol version constant is stable.

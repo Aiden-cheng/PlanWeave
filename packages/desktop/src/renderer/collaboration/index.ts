@@ -112,6 +112,13 @@ export {
   type CanvasCommandLabels
 } from "./CanvasCommandController.js";
 export {
+  runDurablePackageWrite,
+  runLocalOnlyWhenOffline,
+  submitSharedPackageIntent,
+  type DurablePackageWriteResult,
+  type SharedPackageWriteGate
+} from "./packageWriteAdapter.js";
+export {
   adaptRemoteAcpEvents,
   buildRemoteActionIdentity,
   isAssignmentEligibleForRemoteDispatch,

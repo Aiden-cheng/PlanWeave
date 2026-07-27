@@ -6,8 +6,10 @@ import type {
   DesktopReviewPipelineStepInput
 } from "@planweave-ai/runtime";
 import { bridge, desktopCanvasReference } from "../bridge";
+import { runLocalOnlyWhenOffline } from "../collaboration/packageWriteAdapter";
 import type { createTranslator } from "../i18n";
 import { normalizeReviewPipelineDraft } from "./reviewPipelineDraft";
+import type { SharedCanvasCommandsResult } from "./useSharedCanvasCommands";
 
 type UseReviewPipelineArgs = {
   graph: DesktopGraphViewModel | null;
@@ -16,6 +18,11 @@ type UseReviewPipelineArgs = {
   selectedProject: DesktopProjectSummary | null;
   setError: (message: string | null) => void;
   t: ReturnType<typeof createTranslator>;
+  /**
+   * Review pipeline has no canvas command intent yet.
+   * While shared is enabled, refuse local package writes (fail closed).
+   */
+  sharedCanvas?: SharedCanvasCommandsResult | null;
 };
 
 function missingReviewTaskError(caught: unknown, taskId: string): boolean {
@@ -29,7 +36,8 @@ export function useReviewPipeline({
   selectedCanvasId,
   selectedProject,
   setError,
-  t
+  t,
+  sharedCanvas = null
 }: UseReviewPipelineArgs) {
   const [reviewTaskId, setReviewTaskId] = useState<string | null>(null);
   const [reviewPipeline, setReviewPipeline] = useState<DesktopReviewPipeline | null>(null);
@@ -150,24 +158,34 @@ export function useReviewPipeline({
   }, []);
 
   const saveReviewPipeline = useCallback(async () => {
-    if (!bridge || !selectedProject || !reviewTaskId) {
+    if (!selectedProject || !reviewTaskId) {
       return;
     }
     try {
       const canvas = desktopCanvasReference(selectedProject, selectedCanvasId);
-      const result = await bridge.updateReviewPipeline(
-        canvas,
-        reviewTaskId,
-        normalizeReviewPipelineDraft({
-          packageDefaults: {
-            maxFeedbackCycles: reviewDefaultCyclesDraft,
-            completionPolicy: "strict"
-          },
-          steps: reviewDraft
-        })
-      );
-      if (!result.ok) {
-        setError(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+      const mode = await runLocalOnlyWhenOffline({
+        sharedCanvas,
+        onError: setError,
+        unsupportedMessage: t("canvasCommandUnsupportedLocalOnly"),
+        localWrite: async () => {
+          if (!bridge) return;
+          const result = await bridge.updateReviewPipeline(
+            canvas,
+            reviewTaskId,
+            normalizeReviewPipelineDraft({
+              packageDefaults: {
+                maxFeedbackCycles: reviewDefaultCyclesDraft,
+                completionPolicy: "strict"
+              },
+              steps: reviewDraft
+            })
+          );
+          if (!result.ok) {
+            throw new Error(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+          }
+        }
+      });
+      if (mode !== "local" || !bridge) {
         return;
       }
       const pipeline = await bridge.getReviewPipeline(canvas, reviewTaskId);
@@ -190,7 +208,9 @@ export function useReviewPipeline({
     reviewTaskId,
     selectedCanvasId,
     selectedProject,
-    setError
+    setError,
+    sharedCanvas,
+    t
   ]);
 
   return {

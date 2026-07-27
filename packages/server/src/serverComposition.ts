@@ -716,7 +716,7 @@ export async function createDistributedServerComposition(
       runtime: createDefaultCanvasRuntimePort(),
       clock
     });
-    canvasCommandService.recoverInterrupted();
+    await canvasCommandService.recoverInterrupted();
     canvasCommandWebSockets = attachCanvasCommandWebSocketServer({
       upgradeRouter,
       service: canvasCommandService,

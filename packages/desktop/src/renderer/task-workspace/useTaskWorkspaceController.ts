@@ -11,7 +11,9 @@ import type {
   TaskWorkspaceRunsCursor
 } from "@planweave-ai/runtime";
 import { bridge } from "../bridge";
+import { runDurablePackageWrite } from "../collaboration/packageWriteAdapter";
 import type { AppViewHistoryController } from "../hooks/useAppViewHistory";
+import type { SharedCanvasCommandsResult } from "../hooks/useSharedCanvasCommands";
 import { useRunnerRecordMonitor } from "../hooks/useRunnerRecordMonitor";
 import {
   taskWorkspaceNavigationTargetSchema,
@@ -134,8 +136,10 @@ function initialRunForNavigation(
 export function useTaskWorkspaceController(options: {
   api?: TaskWorkspaceApi | null;
   history: AppViewHistoryController;
+  /** When enabled, task/block prompt and executor writes use shared canvas commands. */
+  sharedCanvas?: SharedCanvasCommandsResult | null;
 }): TaskWorkspaceController {
-  const { api = bridge, history } = options;
+  const { api = bridge, history, sharedCanvas = null } = options;
   const navigation = history.taskWorkspaceNavigation;
   const [refreshVersion, setRefreshVersion] = useState(0);
   const refresh = useCallback(() => setRefreshVersion((current) => current + 1), []);
@@ -675,21 +679,41 @@ export function useTaskWorkspaceController(options: {
           "The Task prompt changed outside this editor. Reload the page and merge your changes before saving."
         );
       }
-      if (current.graphVersion === undefined || current.promptHash === undefined) {
+      if (
+        !sharedCanvas?.enabled &&
+        (current.graphVersion === undefined || current.promptHash === undefined)
+      ) {
         throw new Error(
           "The Task prompt cannot be saved safely because its revision is unavailable."
         );
       }
-      const result = await api.updateTaskPrompt(canvasRef, navigation.taskId, markdown, {
-        baseGraphVersion: current.graphVersion,
-        basePromptHash: current.promptHash
+      let sharedError: string | null = null;
+      const mode = await runDurablePackageWrite({
+        sharedCanvas,
+        intent: {
+          kind: "update_task_prompt",
+          taskId: navigation.taskId,
+          promptMarkdown: markdown
+        },
+        onError: (message) => {
+          sharedError = message;
+        },
+        localWrite: async () => {
+          const result = await api.updateTaskPrompt(canvasRef, navigation.taskId, markdown, {
+            baseGraphVersion: current.graphVersion,
+            basePromptHash: current.promptHash
+          });
+          if (!result.ok) {
+            throw new Error(graphEditError(result));
+          }
+        }
       });
-      if (!result.ok) {
-        throw new Error(graphEditError(result));
+      if (mode === "failed") {
+        throw new Error(sharedError ?? "Shared canvas command failed.");
       }
       refresh();
     },
-    [api, navigation, refresh]
+    [api, navigation, refresh, sharedCanvas]
   );
 
   const saveBlockPrompt = useCallback<TaskWorkspaceController["saveBlockPrompt"]>(
@@ -710,27 +734,48 @@ export function useTaskWorkspaceController(options: {
           "The Block prompt changed outside this editor. Reload the page and merge your changes before saving."
         );
       }
-      if (current.graphVersion === undefined || current.promptHash === undefined) {
+      if (
+        !sharedCanvas?.enabled &&
+        (current.graphVersion === undefined || current.promptHash === undefined)
+      ) {
         throw new Error(
           "The Block prompt cannot be saved safely because its revision is unavailable."
         );
       }
-      const result = await api.updateBlockPrompt(canvasRef, blockRef, markdown, {
-        baseGraphVersion: current.graphVersion,
-        basePromptHash: current.promptHash
+      let sharedError: string | null = null;
+      const mode = await runDurablePackageWrite({
+        sharedCanvas,
+        intent: {
+          kind: "update_block_prompt",
+          blockRef,
+          promptMarkdown: markdown
+        },
+        onError: (message) => {
+          sharedError = message;
+        },
+        localWrite: async () => {
+          const result = await api.updateBlockPrompt(canvasRef, blockRef, markdown, {
+            baseGraphVersion: current.graphVersion,
+            basePromptHash: current.promptHash
+          });
+          if (!result.ok) {
+            throw new Error(graphEditError(result));
+          }
+        }
       });
-      if (!result.ok) {
-        throw new Error(graphEditError(result));
+      if (mode === "failed") {
+        throw new Error(sharedError ?? "Shared canvas command failed.");
       }
       refresh();
     },
-    [api, navigation, refresh]
+    [api, navigation, refresh, sharedCanvas]
   );
 
   const { saveBlockExecutor, saveTaskExecutor } = useTaskWorkspaceExecutorActions({
     api,
     navigation,
-    onSaved: refresh
+    onSaved: refresh,
+    sharedCanvas
   });
 
   const liveStatus = useMemo<TaskWorkspaceLiveStatus>(() => {

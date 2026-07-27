@@ -1190,7 +1190,9 @@ export const enCatalog = {
   canvasCommandStaleRevision: "Canvas is out of date (expected revision {expected}, server is at {authoritative}). Reconnect and retry.",
   canvasCommandRejected: "Canvas command rejected: {code}",
   canvasCommandReconnectFailed: "Canvas reconnect failed: {code}",
-  canvasCommandNotConnected: "Shared canvas command session is not connected."
+  canvasCommandNotConnected: "Shared canvas command session is not connected.",
+  canvasCommandUnsupportedLocalOnly:
+    "This edit is not available while the shared canvas is connected. Disconnect collaboration or use a supported shared command."
 } as const;
 
 export type TranslationKey = keyof typeof enCatalog;

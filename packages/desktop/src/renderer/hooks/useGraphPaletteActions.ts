@@ -171,13 +171,65 @@ export function useGraphPaletteActions({
   );
 
   const resetLayout = useCallback(async () => {
-    if (!bridge || !selectedProject) {
+    if (!selectedProject) {
+      return;
+    }
+    if (sharedCanvas?.enabled) {
+      // Shared mode has no reset_layout intent; materialize default grid positions via update_layout.
+      const layoutNodes =
+        graph && graph.tasks.length > 0
+          ? graph.tasks.map((task, index) => ({
+              nodeId: task.taskId,
+              x: 80 + (index % 4) * 320,
+              y: 80 + Math.floor(index / 4) * 180
+            }))
+          : nodes.length > 0
+            ? nodes.map((node, index) => ({
+                nodeId: node.id,
+                x: 80 + (index % 4) * 320,
+                y: 80 + Math.floor(index / 4) * 180
+              }))
+            : null;
+      if (!layoutNodes || layoutNodes.length === 0) {
+        setLayout({
+          version: "desktop-layout/v1",
+          projectId: layout?.projectId ?? graph?.projectId ?? selectedProject.projectId,
+          nodes: [],
+          updatedAt: new Date().toISOString()
+        });
+        return;
+      }
+      const ok = await submitSharedIntent(
+        sharedCanvas,
+        { kind: "update_layout", nodes: layoutNodes },
+        setError
+      );
+      if (ok) {
+        setLayout({
+          version: "desktop-layout/v1",
+          projectId: layout?.projectId ?? graph?.projectId ?? selectedProject.projectId,
+          nodes: layoutNodes,
+          updatedAt: new Date().toISOString()
+        });
+      }
+      return;
+    }
+    if (!bridge) {
       return;
     }
     setLayout(
       await bridge.resetDesktopLayout(desktopCanvasReference(selectedProject, selectedCanvasId))
     );
-  }, [selectedCanvasId, selectedProject, setLayout]);
+  }, [
+    graph,
+    layout?.projectId,
+    nodes,
+    selectedCanvasId,
+    selectedProject,
+    setError,
+    setLayout,
+    sharedCanvas
+  ]);
 
   const handleConnect = useCallback(
     async (connection: Connection) => {
