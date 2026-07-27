@@ -4,7 +4,12 @@ import {
   COLLABORATION_REQUEST_TIMEOUT_MS,
   HUMAN_OBSERVER_MAX_PAYLOAD_BYTES
 } from "./limits.js";
-import { humanProjectIdSchema, opaqueIdentifierSchema } from "./primitives.js";
+import {
+  humanProjectIdSchema,
+  opaqueIdentifierSchema,
+  workspaceIdSchema,
+  workspaceNameSchema
+} from "./primitives.js";
 
 /**
  * Validated Desktop connection profile for a logical project/server pair.
@@ -56,6 +61,62 @@ export const collaborationConnectionProfileSchema = z
     }
   });
 export type CollaborationConnectionProfile = z.infer<typeof collaborationConnectionProfileSchema>;
+
+/**
+ * Workspace-first connection profile. Unlike the legacy project profile above,
+ * this profile cannot be created without an opaque Workspace authority. It never
+ * carries a device/operator/Host secret; callers inject credentials through a
+ * separate secure transport port.
+ */
+export const workspaceConnectionProfileSchema = z
+  .object({
+    schemaVersion: z.literal("workspace-identity/v1"),
+    profileId: opaqueIdentifierSchema,
+    displayName: workspaceNameSchema,
+    serverBaseUrl: z
+      .string()
+      .url()
+      .refine((value) => {
+        try {
+          const url = new URL(value);
+          return (url.protocol === "https:" || url.protocol === "http:") && url.pathname === "/";
+        } catch {
+          return false;
+        }
+      }, "serverBaseUrl must be an http(s) origin without a path"),
+    workspaceId: workspaceIdSchema,
+    allowInsecureTransport: z.boolean()
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const url = new URL(value.serverBaseUrl);
+    if (url.protocol !== "https:" && !value.allowInsecureTransport) {
+      ctx.addIssue({
+        code: "custom",
+        message: "HTTPS is required unless allowInsecureTransport is true",
+        path: ["serverBaseUrl"]
+      });
+    }
+    if (value.allowInsecureTransport && url.protocol === "http:") {
+      const loopback =
+        url.hostname === "localhost" ||
+        url.hostname === "127.0.0.1" ||
+        url.hostname === "::1" ||
+        url.hostname.endsWith(".localhost");
+      if (!loopback) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Insecure HTTP is only allowed for loopback hosts",
+          path: ["serverBaseUrl"]
+        });
+      }
+    }
+  });
+export type WorkspaceConnectionProfile = z.infer<typeof workspaceConnectionProfileSchema>;
+
+export function parseWorkspaceConnectionProfile(input: unknown): WorkspaceConnectionProfile {
+  return workspaceConnectionProfileSchema.parse(input);
+}
 
 export const collaborationClientLimitsSchema = z
   .object({

@@ -18,6 +18,127 @@ import {
 
 export const timestampSchema = z.iso.datetime();
 
+/**
+ * Version marker for the Workspace identity contract.  It is deliberately
+ * independent from the Agent Host transport protocol version.
+ */
+export const workspaceIdentitySchemaVersion = "workspace-identity/v1" as const;
+export const workspaceIdentitySchemaVersionSchema = z.literal(workspaceIdentitySchemaVersion);
+export type WorkspaceIdentitySchemaVersion = z.infer<
+  typeof workspaceIdentitySchemaVersionSchema
+>;
+
+export const workspaceIdentityMigrationSchemaVersion =
+  "workspace-identity-migration/v1" as const;
+export const workspaceIdentityMigrationSchemaVersionSchema = z.literal(
+  workspaceIdentityMigrationSchemaVersion
+);
+export type WorkspaceIdentityMigrationSchemaVersion = z.infer<
+  typeof workspaceIdentityMigrationSchemaVersionSchema
+>;
+
+export const workspaceIdSchema = opaqueIdentifierSchema.brand("WorkspaceId");
+export type WorkspaceId = z.infer<typeof workspaceIdSchema>;
+
+export const humanMembershipIdSchema = opaqueIdentifierSchema.brand("HumanMembershipId");
+export type HumanMembershipId = z.infer<typeof humanMembershipIdSchema>;
+
+export const deviceSessionIdSchema = opaqueIdentifierSchema.brand("DeviceSessionId");
+export type DeviceSessionId = z.infer<typeof deviceSessionIdSchema>;
+
+export const operatorIdSchema = opaqueIdentifierSchema.brand("OperatorId");
+export type OperatorId = z.infer<typeof operatorIdSchema>;
+
+export const operatorSessionIdSchema = opaqueIdentifierSchema.brand("OperatorSessionId");
+export type OperatorSessionId = z.infer<typeof operatorSessionIdSchema>;
+
+export const agentHostIdSchema = opaqueIdentifierSchema.brand("AgentHostId");
+export type AgentHostId = z.infer<typeof agentHostIdSchema>;
+
+export const hostEnrollmentIdSchema = opaqueIdentifierSchema.brand("HostEnrollmentId");
+export type HostEnrollmentId = z.infer<typeof hostEnrollmentIdSchema>;
+
+export const identityRevocationIdSchema = opaqueIdentifierSchema.brand("IdentityRevocationId");
+export type IdentityRevocationId = z.infer<typeof identityRevocationIdSchema>;
+
+export const workspaceNameSchema = z.string().trim().min(1).max(128);
+export const operatorDisplayNameSchema = z.string().trim().min(1).max(128);
+
+/** Stored credential digests are the only credential representation allowed in durable rows. */
+export const credentialSha256Schema = z.string().length(64).regex(/^[a-f0-9]+$/);
+export const tokenSha256HexSchema = credentialSha256Schema;
+
+/** Operator bearer credentials are a separate trust domain from human and Host credentials. */
+export const operatorCredentialTokenSchema = z.string().regex(/^pw_operator_[A-Za-z0-9_-]{43}$/);
+
+export const workspaceRoleSchema = z.enum(["owner", "member"]);
+export type WorkspaceRole = z.infer<typeof workspaceRoleSchema>;
+
+export const identityCredentialStateSchema = z.enum(["active", "expired", "revoked"]);
+export type IdentityCredentialState = z.infer<typeof identityCredentialStateSchema>;
+
+/** Workspace-only scope reference.  No paths, commands, or credentials can be carried here. */
+export const workspaceScopeRefSchema = z
+  .object({ workspaceId: workspaceIdSchema })
+  .strict();
+export type WorkspaceScopeRef = z.infer<typeof workspaceScopeRefSchema>;
+
+export const projectScopeRefSchema = z
+  .object({
+    workspaceId: workspaceIdSchema,
+    projectId: opaqueIdentifierSchema
+  })
+  .strict();
+export type ProjectScopeRef = z.infer<typeof projectScopeRefSchema>;
+
+export const canvasScopeRefSchema = z
+  .object({
+    workspaceId: workspaceIdSchema,
+    projectId: opaqueIdentifierSchema,
+    canvasId: opaqueIdentifierSchema
+  })
+  .strict();
+export type CanvasScopeRef = z.infer<typeof canvasScopeRefSchema>;
+
+export const blockScopeRefSchema = z
+  .object({
+    workspaceId: workspaceIdSchema,
+    projectId: opaqueIdentifierSchema,
+    canvasId: opaqueIdentifierSchema,
+    blockRef: blockRefSchema
+  })
+  .strict();
+export type BlockScopeRef = z.infer<typeof blockScopeRefSchema>;
+
+/**
+ * Shared boundary helper used by Server authorization and projections.  A scope
+ * mismatch is an authorization failure, not a value to coerce or default.
+ */
+export function assertSameWorkspace(
+  expectedWorkspaceId: string,
+  ...references: readonly WorkspaceScopeRef[]
+): void {
+  if (references.some((reference) => reference.workspaceId !== expectedWorkspaceId)) {
+    throw new Error("cross_workspace_reference");
+  }
+}
+
+export function assertCredentialUsable(input: {
+  workspaceId: string;
+  expectedWorkspaceId: string;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  now: Date;
+}): void {
+  if (input.workspaceId !== input.expectedWorkspaceId) {
+    throw new Error("cross_workspace_credential");
+  }
+  if (input.revokedAt !== null) throw new Error("credential_revoked");
+  if (input.expiresAt !== null && Date.parse(input.expiresAt) <= input.now.getTime()) {
+    throw new Error("credential_expired");
+  }
+}
+
 export const humanProjectIdSchema = opaqueIdentifierSchema;
 export type HumanProjectId = z.infer<typeof humanProjectIdSchema>;
 
