@@ -1,4 +1,23 @@
-import { humanBootstrapResponseSchema, humanMemberPageSchema } from "../identity.js";
+import {
+  agentHostEnrollmentSchema,
+  agentHostIdentitySchema,
+  agentHostIdentityViewSchema,
+  deviceSessionSchema,
+  humanBootstrapResponseSchema,
+  humanPrincipalSchema,
+  operatorSessionSchema,
+  workspaceIdentityViewSchema,
+  workspaceHumanPrincipalViewSchema,
+  workspaceMembershipSchema,
+  workspaceMembershipViewSchema,
+  workspaceSchema,
+  humanMemberPageSchema
+} from "../identity.js";
+import {
+  identityMigrationMatrixSchema,
+  identityMigrationStateSchema,
+  legacyProjectWorkspaceMappingSchema
+} from "../migration.js";
 import {
   assignmentDisplayProjectionSchema,
   assignmentUpdateWireCommandSchema
@@ -9,7 +28,10 @@ import {
   commentDisplayProjectionSchema,
   commentListPageSchema
 } from "../comments.js";
-import { parseCollaborationConnectionProfile } from "../connection.js";
+import {
+  parseCollaborationConnectionProfile,
+  parseWorkspaceConnectionProfile
+} from "../connection.js";
 import {
   humanObserverCatchupRequiredSchema,
   humanObserverEventSchema,
@@ -40,6 +62,198 @@ export const exampleLoopbackConnectionProfile = parseCollaborationConnectionProf
   projectId: "project-demo-001",
   allowInsecureTransport: true
 });
+
+export const exampleWorkspaceConnectionProfile = parseWorkspaceConnectionProfile({
+  schemaVersion: "workspace-identity/v1",
+  profileId: "profile-workspace-001",
+  displayName: "Workspace collaboration server",
+  serverBaseUrl: "https://collab.example.com/",
+  workspaceId: "workspace-demo-001",
+  allowInsecureTransport: false
+});
+
+export const exampleWorkspace = workspaceSchema.parse({
+  schemaVersion: "workspace-identity/v1",
+  workspaceId: "workspace-demo-001",
+  displayName: "PlanWeave Demo",
+  createdAt: "2030-01-01T00:00:00.000Z",
+  archivedAt: null
+});
+
+export const exampleWorkspacePrincipal = humanPrincipalSchema.parse({
+  schemaVersion: "workspace-identity/v1",
+  workspaceId: "workspace-demo-001",
+  humanPrincipalId: "human-owner-001",
+  displayName: "Owner",
+  createdAt: "2030-01-01T00:00:00.000Z",
+  revokedAt: null
+});
+
+export const exampleWorkspaceMembership = workspaceMembershipSchema.parse({
+  schemaVersion: "workspace-identity/v1",
+  workspaceId: "workspace-demo-001",
+  membershipId: "membership-workspace-001",
+  humanPrincipalId: "human-owner-001",
+  role: "owner",
+  revision: 1,
+  createdAt: "2030-01-01T00:00:00.000Z",
+  updatedAt: "2030-01-01T00:00:00.000Z",
+  revokedAt: null
+});
+
+export const exampleDeviceSession = deviceSessionSchema.parse({
+  schemaVersion: "workspace-identity/v1",
+  workspaceId: "workspace-demo-001",
+  deviceSessionId: "device-session-001",
+  humanPrincipalId: "human-owner-001",
+  credentialSha256: "a".repeat(64),
+  issuedAt: "2030-01-01T00:00:00.000Z",
+  expiresAt: "2030-01-02T00:00:00.000Z",
+  revokedAt: null,
+  lastUsedAt: null
+});
+
+export const exampleOperatorSession = operatorSessionSchema.parse({
+  schemaVersion: "workspace-identity/v1",
+  workspaceId: "workspace-demo-001",
+  operatorSessionId: "operator-session-001",
+  operatorId: "operator-001",
+  credentialSha256: "b".repeat(64),
+  issuedAt: "2030-01-01T00:00:00.000Z",
+  expiresAt: "2030-01-02T00:00:00.000Z",
+  revokedAt: null
+});
+
+export const exampleAgentHostIdentity = agentHostIdentitySchema.parse({
+  schemaVersion: "workspace-identity/v1",
+  workspaceId: "workspace-demo-001",
+  hostId: "host-001",
+  displayName: "Build Host",
+  capabilities: ["acp.codex", "workspace.git"],
+  capacity: 2,
+  credentialSha256: "c".repeat(64),
+  createdAt: "2030-01-01T00:00:00.000Z",
+  lastSeenAt: "2030-01-01T00:01:00.000Z",
+  credentialExpiresAt: "2030-01-02T00:00:00.000Z",
+  revokedAt: null
+});
+
+export const exampleAgentHostEnrollment = agentHostEnrollmentSchema.parse({
+  schemaVersion: "workspace-identity/v1",
+  workspaceId: "workspace-demo-001",
+  enrollmentId: "enrollment-001",
+  enrollmentCodeSha256: "d".repeat(64),
+  credentialExpiresAt: "2030-01-03T00:00:00.000Z",
+  expiresAt: "2030-01-02T00:00:00.000Z",
+  usedAt: null,
+  hostId: null,
+  revokedAt: null,
+  createdAt: "2030-01-01T00:00:00.000Z"
+});
+
+export const exampleIdentityMigrationState = identityMigrationStateSchema.parse({
+  schemaVersion: "workspace-identity-migration/v1",
+  migrationId: "migration-001",
+  legacyProjectId: "project-demo-001",
+  workspaceId: "workspace-demo-001",
+  fromVersion: 0,
+  toVersion: 1,
+  step: "map_legacy_project",
+  status: "in_progress",
+  interruptionMarker: "mapping_written",
+  authoritativeReadVersion: "workspace-identity/v1",
+  failureCode: null,
+  updatedAt: "2030-01-01T00:01:00.000Z"
+});
+
+export const exampleLegacyProjectWorkspaceMapping = legacyProjectWorkspaceMappingSchema.parse({
+  schemaVersion: "workspace-identity-migration/v1",
+  mappingVersion: "legacy-project-workspace/v1",
+  legacyProjectId: "project-demo-001",
+  normalizedLegacyProjectIdentity: "legacy-project:project-demo-001",
+  workspaceId: "workspace-demo-001",
+  mappedAt: "2030-01-01T00:00:00.000Z"
+});
+
+export const exampleIdentityMigrationMatrix = identityMigrationMatrixSchema.parse({
+  schemaVersion: "workspace-identity-migration/v1",
+  migrationVersion: 1,
+  readCutoverVersion: "workspace-identity/v1",
+  entries: [
+    {
+      legacyVersion: 0,
+      migrationStep: "map_legacy_project",
+      authoritativeReadVersion: "workspace-identity/v1",
+      interruptionMarker: "mapping_written",
+      retryResult: "retry_idempotent",
+      repairResult: "repair_required",
+      rollbackResult: "rollback_to_legacy",
+      readCutover: "legacy",
+      partialFailureReadPolicy: "fail_closed"
+    },
+    {
+      legacyVersion: 1,
+      migrationStep: "cutover_authoritative_reads",
+      authoritativeReadVersion: "workspace-identity/v1",
+      interruptionMarker: "read_cutover_complete",
+      retryResult: "resume_from_marker",
+      repairResult: "repair_required",
+      rollbackResult: "rollback_to_legacy",
+      readCutover: "workspace",
+      partialFailureReadPolicy: "fail_closed"
+    }
+  ]
+});
+
+export const exampleIdentityMigrationStateFixtures = [
+  exampleIdentityMigrationState,
+  identityMigrationStateSchema.parse({
+    ...exampleIdentityMigrationState,
+    status: "completed",
+    step: "verify_cutover",
+    interruptionMarker: "read_cutover_complete",
+    failureCode: null
+  }),
+  identityMigrationStateSchema.parse({
+    ...exampleIdentityMigrationState,
+    status: "interrupted",
+    interruptionMarker: "partial_backfill_failed",
+    failureCode: "membership_backfill_failed"
+  }),
+  identityMigrationStateSchema.parse({
+    ...exampleIdentityMigrationState,
+    status: "repair_required",
+    interruptionMarker: "partial_backfill_failed",
+    failureCode: "repair_required"
+  }),
+  identityMigrationStateSchema.parse({
+    ...exampleIdentityMigrationState,
+    status: "rolled_back",
+    step: "verify_cutover",
+    interruptionMarker: "rollback_complete",
+    failureCode: null
+  })
+] as const;
+
+export const exampleWorkspaceRedactedViews = {
+  workspace: workspaceIdentityViewSchema.parse(exampleWorkspace),
+  principal: workspaceHumanPrincipalViewSchema.parse(exampleWorkspacePrincipal),
+  membership: workspaceMembershipViewSchema.parse({
+    ...exampleWorkspaceMembership,
+    displayName: "Owner"
+  }),
+  host: agentHostIdentityViewSchema.parse({
+    schemaVersion: exampleAgentHostIdentity.schemaVersion,
+    workspaceId: exampleAgentHostIdentity.workspaceId,
+    hostId: exampleAgentHostIdentity.hostId,
+    displayName: exampleAgentHostIdentity.displayName,
+    capabilities: exampleAgentHostIdentity.capabilities,
+    capacity: exampleAgentHostIdentity.capacity,
+    lastSeenAt: exampleAgentHostIdentity.lastSeenAt,
+    credentialExpiresAt: exampleAgentHostIdentity.credentialExpiresAt,
+    revokedAt: exampleAgentHostIdentity.revokedAt
+  })
+};
 
 export const exampleBootstrapResponse = humanBootstrapResponseSchema.parse({
   principal: {
