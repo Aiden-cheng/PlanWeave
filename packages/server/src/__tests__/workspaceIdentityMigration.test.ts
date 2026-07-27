@@ -10,6 +10,7 @@ import {
   retryWorkspaceIdentityMigration,
   rollbackWorkspaceIdentityMigration
 } from "../migrations.js";
+import { retryWorkspaceIdentityMigrationForTesting } from "../migrations/identityRecovery.js";
 import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 
@@ -369,7 +370,7 @@ describe("workspace identity migration recovery", () => {
         .get(workspaceId)
     ).toEqual({ count: 0 });
 
-    const interrupted = retryWorkspaceIdentityMigration(database, "project-recovery", {
+    const interrupted = retryWorkspaceIdentityMigrationForTesting(database, "project-recovery", {
       failAtStep: "backfill_devices"
     });
     expect(interrupted).toMatchObject({ status: "interrupted", outcome: "resume_from_marker" });
@@ -444,5 +445,73 @@ describe("workspace identity migration recovery", () => {
       )
       .run(workspaceId, "membership-parity");
     expect(repairWorkspaceIdentityMigration(database, "project-parity").status).toBe("completed");
+  });
+
+  it("propagates unknown projection errors and rolls back recovery state", async () => {
+    const database = await openDatabaseAtV26();
+    const now = "2026-07-27T00:00:00.000Z";
+    database
+      .prepare(
+        "INSERT INTO human_principals(human_principal_id,display_name,created_at) VALUES(?,?,?)"
+      )
+      .run("human-trigger", "Trigger", now);
+    database
+      .prepare(
+        `INSERT INTO project_memberships(
+          membership_id,project_id,human_principal_id,role,created_at,updated_at,revision
+        ) VALUES(?,?,?,?,?,?,?)`
+      )
+      .run("membership-trigger", "project-trigger", "human-trigger", "member", now, now, 1);
+    database
+      .prepare(
+        `INSERT INTO human_device_credentials(
+          device_credential_id,human_principal_id,minted_for_project_id,token_sha256,created_at
+        ) VALUES(?,?,?,?,?)`
+      )
+      .run("device-trigger", "human-trigger", "project-trigger", "f".repeat(64), now);
+    applyMigrations(database);
+    const workspaceId = String(
+      database
+        .prepare(
+          "SELECT workspace_id FROM legacy_project_workspace_mappings WHERE legacy_project_id=?"
+        )
+        .get("project-trigger")?.workspace_id
+    );
+    database
+      .prepare("DELETE FROM workspace_device_sessions WHERE workspace_id=? AND device_session_id=?")
+      .run(workspaceId, "device-trigger");
+    database
+      .prepare(
+        "UPDATE workspace_identity_migrations SET status='repair_required',interruption_marker='partial_backfill_failed',failure_code='manual_retry' WHERE legacy_project_id=?"
+      )
+      .run("project-trigger");
+    database.exec(
+      `CREATE TRIGGER identity_retry_unknown_failure
+       BEFORE INSERT ON workspace_device_sessions
+       BEGIN SELECT RAISE(ABORT, 'unknown_retry_failure'); END;`
+    );
+
+    expect(() => retryWorkspaceIdentityMigration(database, "project-trigger")).toThrow(
+      "unknown_retry_failure"
+    );
+    expect(
+      database
+        .prepare(
+          "SELECT status,interruption_marker,failure_code FROM workspace_identity_migrations WHERE legacy_project_id=?"
+        )
+        .get("project-trigger")
+    ).toEqual({
+      status: "repair_required",
+      interruption_marker: "partial_backfill_failed",
+      failure_code: "manual_retry"
+    });
+    expect(
+      database
+        .prepare(
+          "SELECT COUNT(*) AS count FROM workspace_device_sessions WHERE workspace_id=? AND device_session_id=?"
+        )
+        .get(workspaceId, "device-trigger")
+    ).toEqual({ count: 0 });
+    database.exec("DROP TRIGGER identity_retry_unknown_failure");
   });
 });

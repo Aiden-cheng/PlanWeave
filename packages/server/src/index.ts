@@ -134,7 +134,6 @@ export {
   repairWorkspaceIdentityMigration,
   retryWorkspaceIdentityMigration,
   rollbackWorkspaceIdentityMigration,
-  type WorkspaceIdentityBackfillOptions,
   type WorkspaceIdentityRecoveryResult
 } from "./migrations.js";
 export {

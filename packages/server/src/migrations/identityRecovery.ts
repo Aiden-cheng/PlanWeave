@@ -41,10 +41,10 @@ function projectState(database: SqliteDatabase, legacyProjectId: string): Record
 }
 
 /** Retry an interrupted or repair-required v27 project backfill. */
-export function retryWorkspaceIdentityMigration(
+function retryWorkspaceIdentityMigrationCore(
   database: SqliteDatabase,
   legacyProjectId: string,
-  options: WorkspaceIdentityBackfillOptions = {}
+  options: WorkspaceIdentityBackfillOptions
 ): WorkspaceIdentityRecoveryResult {
   return inWriteTransaction(database, () => {
     const state = projectState(database, legacyProjectId);
@@ -70,13 +70,29 @@ export function retryWorkspaceIdentityMigration(
   });
 }
 
+/** Production retry entry point; fault injection is intentionally unavailable. */
+export function retryWorkspaceIdentityMigration(
+  database: SqliteDatabase,
+  legacyProjectId: string
+): WorkspaceIdentityRecoveryResult {
+  return retryWorkspaceIdentityMigrationCore(database, legacyProjectId, {});
+}
+
+/** @internal Test-only recovery seam for deterministic fault injection. */
+export function retryWorkspaceIdentityMigrationForTesting(
+  database: SqliteDatabase,
+  legacyProjectId: string,
+  options: WorkspaceIdentityBackfillOptions
+): WorkspaceIdentityRecoveryResult {
+  return retryWorkspaceIdentityMigrationCore(database, legacyProjectId, options);
+}
+
 /** Re-run parity and projection repair after an operator fixes the legacy source/binding. */
 export function repairWorkspaceIdentityMigration(
   database: SqliteDatabase,
-  legacyProjectId: string,
-  options: WorkspaceIdentityBackfillOptions = {}
+  legacyProjectId: string
 ): WorkspaceIdentityRecoveryResult {
-  const result = retryWorkspaceIdentityMigration(database, legacyProjectId, options);
+  const result = retryWorkspaceIdentityMigrationCore(database, legacyProjectId, {});
   return {
     ...result,
     outcome: result.status === "completed" ? "resume_from_marker" : "repair_required"

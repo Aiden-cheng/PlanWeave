@@ -3,7 +3,6 @@ import { migrations } from "./migrations/registry.js";
 
 export {
   backfillWorkspaceIdentity,
-  type WorkspaceIdentityBackfillOptions,
   type WorkspaceIdentityRecoveryResult
 } from "./migrations/identity.js";
 export {
