@@ -88,6 +88,15 @@ export class ProjectAccessRepository {
       ownerHumanPrincipalId
     );
   }
+  synchronizeHumanMembershipOwnerInCallerTransaction(input: {
+    workspaceId: string;
+    projectId: string;
+    humanPrincipalId: string;
+    transition: "member_joined" | "member_removed" | "owner_promoted" | "owner_demoted";
+    membershipRole: "owner" | "member";
+  }): void {
+    this.registry.synchronizeHumanMembershipOwnerInCallerTransaction(input);
+  }
   registerProject(input: unknown): ProjectAccessRecord | undefined {
     return this.registry.registerProject(input);
   }

@@ -419,6 +419,15 @@ export async function createDistributedServerComposition(
     });
     const humanIdentity = new HumanIdentityRepository(server.database, clock, {
       onMembershipTransitionInTransaction: ({ type, membership, principal }) => {
+        const workspaceId = workspaceIdentity.workspaceForLegacyProject(membership.projectId);
+        if (!workspaceId) throw new Error("workspace_not_found");
+        projectAccess!.synchronizeHumanMembershipOwnerInCallerTransaction({
+          workspaceId,
+          projectId: membership.projectId,
+          humanPrincipalId: principal.humanPrincipalId,
+          transition: type,
+          membershipRole: membership.role
+        });
         initializedActivityProjection.projectMembershipEventInCallerTransaction({
           projectId: membership.projectId,
           type,
