@@ -183,6 +183,26 @@ export function registerCollaborationHandlers(
     active.listActivity(input)
   );
   ipcMain.handle(
+    collaborationInvokeChannels.listCollaborationAuthorizedProjects,
+    (_event, input: unknown) => active.registry().listAuthorizedProjects(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.listCollaborationAuthorizedCanvases,
+    (_event, input: unknown) => active.registry().listAuthorizedCanvases(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.readCollaborationPackageSnapshot,
+    (_event, input: unknown) => active.registry().readSnapshot(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.createCollaborationPackageSnapshot,
+    (_event, input: unknown) => active.registry().createSnapshot(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.restoreCollaborationPackageSnapshot,
+    (_event, input: unknown) => active.registry().restoreSnapshot(input)
+  );
+  ipcMain.handle(
     collaborationInvokeChannels.updateCollaborationAssignment,
     (_event, input: unknown) => active.updateAssignment(input)
   );

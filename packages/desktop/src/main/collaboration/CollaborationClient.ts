@@ -97,6 +97,7 @@ import {
 import { reconnectDelay } from "./reconnectBackoff.js";
 import { redactCollaborationText } from "./redaction.js";
 import { CanvasPresenceClient } from "./CanvasPresenceClient.js";
+import { CollaborationRegistryClient } from "./CollaborationRegistryClient.js";
 
 export type CollaborationCredentialPort = {
   /** Returns the current human device bearer (`pw_hdev_…`) or undefined when unauthenticated. */
@@ -216,6 +217,7 @@ export class CollaborationClient {
   private observerWanted = false;
 
   private readonly presence: CanvasPresenceClient;
+  private readonly registryClient: CollaborationRegistryClient;
 
   constructor(private readonly options: CollaborationClientOptions) {
     this.profile = collaborationConnectionProfileSchema.parse(options.profile);
@@ -233,6 +235,12 @@ export class CollaborationClient {
       reconnectMaxDelayMs: this.limits.reconnectMaxDelayMs,
       logger: options.logger
     });
+    this.registryClient = new CollaborationRegistryClient((method, path, schema, requestOptions) =>
+      this.json(method, path, schema, {
+        ...requestOptions,
+        auth: true
+      })
+    );
   }
 
   get projectId(): string {
@@ -241,6 +249,10 @@ export class CollaborationClient {
 
   get connectionProfile(): CollaborationConnectionProfile {
     return this.profile;
+  }
+
+  registry(): CollaborationRegistryClient {
+    return this.registryClient;
   }
 
   observerState(): CollaborationObserverStatus {
@@ -707,7 +719,10 @@ export class CollaborationClient {
   }
 
   /** Publish only bounded pointer/selection state for the currently selected canvas. */
-  publishPresence(input: { pointer: CanvasPresencePointer | null; selectionIds: CanvasPresenceSelectionId[] }): void {
+  publishPresence(input: {
+    pointer: CanvasPresencePointer | null;
+    selectionIds: CanvasPresenceSelectionId[];
+  }): void {
     this.ensureOpen();
     this.presence.publish(input);
   }
@@ -804,7 +819,7 @@ export class CollaborationClient {
     method: JsonMethod,
     path: string,
     schema: ZodType<T> | undefined,
-    options: { body?: unknown; auth?: boolean; signal?: AbortSignal }
+    options: { body?: unknown; auth?: boolean; signal?: AbortSignal; acceptedStatus?: number }
   ): Promise<T> {
     this.ensureOpen();
     const headers: Record<string, string> = {
@@ -823,7 +838,9 @@ export class CollaborationClient {
       signal: options.signal
     });
     const text = await this.readTextLimited(response);
-    if (!response.ok) throw collaborationErrorFromHttp(response.status, text);
+    if (!response.ok && response.status !== options.acceptedStatus) {
+      throw collaborationErrorFromHttp(response.status, text);
+    }
     if (schema === undefined) {
       if (text.length === 0) return undefined as T;
       // Some membership mutations return empty or opaque ack bodies.

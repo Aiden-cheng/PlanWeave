@@ -78,6 +78,7 @@ import {
   type CollaborationPresenceStatus,
   type CollaborationObserverStatus
 } from "./CollaborationClient.js";
+import { CollaborationRegistryService } from "./CollaborationRegistryService.js";
 import { CollaborationClientError, collaborationErrorFromUnknown } from "./collaborationErrors.js";
 import {
   CollaborationCredentialVault,
@@ -173,6 +174,7 @@ export class CollaborationService {
   private readonly onStatusChange?: (status: CollaborationStatus) => void;
   private readonly onObserverSignal?: (signal: CollaborationObserverSignal) => void;
   private readonly onPresenceSignal?: (signal: CollaborationPresenceSignal) => void;
+  private readonly registryService: CollaborationRegistryService;
 
   private client: CollaborationClient | null = null;
   private clientProfileId: string | null = null;
@@ -210,6 +212,7 @@ export class CollaborationService {
     this.onStatusChange = options.onStatusChange;
     this.onObserverSignal = options.onObserverSignal;
     this.onPresenceSignal = options.onPresenceSignal;
+    this.registryService = new CollaborationRegistryService(() => this.client);
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -791,6 +794,10 @@ export class CollaborationService {
     return this.withActiveClient((client) =>
       client.listMembers(humanPageQuerySchema.parse(input ?? {}))
     );
+  }
+
+  registry(): CollaborationRegistryService {
+    return this.registryService;
   }
 
   async listDevices(input: unknown = {}): Promise<HumanDevicePage> {

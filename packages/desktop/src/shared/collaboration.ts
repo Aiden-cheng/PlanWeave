@@ -6,6 +6,9 @@ import {
   collaborationConnectionProfileSchema,
   commentContentSha256Schema,
   createPendingAttachmentRequestSchema,
+  type CanvasAccessPage,
+  type CreatePackageSnapshotRequest,
+  type CreatePackageSnapshotResult,
   humanBootstrapRequestSchema,
   humanConsumeInvitationRequestSchema,
   humanCreateInvitationRequestSchema,
@@ -30,7 +33,10 @@ import {
   type HumanMemberPage,
   type HumanMembershipView,
   type HumanPrincipalView,
+  type PackageSnapshot,
   type PendingAttachmentView,
+  type ProjectAccessPage,
+  type RegistryPageQuery,
   type CanvasPresenceServerMessage,
   type RemoteActionView,
   type RemoteDispatchWireCommand,
@@ -39,7 +45,9 @@ import {
   type RemoteInteractionPage,
   type RemoteInteractionResponse,
   type RemoteInteractionView,
-  type RemoteOperationObservation
+  type RemoteOperationObservation,
+  type RestorePackageSnapshotRequest,
+  type RestorePackageSnapshotResult
 } from "@planweave-ai/collaboration-contracts";
 import type {
   CollaborationActivityListQueryInput,
@@ -302,6 +310,15 @@ export type CollaborationPresenceUpdateInput = z.infer<
   typeof collaborationPresenceUpdateInputSchema
 >;
 
+export type CollaborationRegistryPageInput = Partial<RegistryPageQuery>;
+export type CollaborationAuthorizedCanvasesInput = CollaborationRegistryPageInput & {
+  projectId: string;
+};
+export type CollaborationRegistryReadSnapshotInput = Pick<
+  RestorePackageSnapshotRequest,
+  "projectId" | "canvasId" | "snapshotId"
+>;
+
 export type CollaborationPresenceSignal =
   | {
       profileId: string;
@@ -344,6 +361,11 @@ export const collaborationInvokeChannels = {
   listCollaborationEligibleAssignees: "planweave-collaboration:listEligibleAssignees",
   listCollaborationComments: "planweave-collaboration:listComments",
   listCollaborationActivity: "planweave-collaboration:listActivity",
+  listCollaborationAuthorizedProjects: "planweave-collaboration:listAuthorizedProjects",
+  listCollaborationAuthorizedCanvases: "planweave-collaboration:listAuthorizedCanvases",
+  readCollaborationPackageSnapshot: "planweave-collaboration:readPackageSnapshot",
+  createCollaborationPackageSnapshot: "planweave-collaboration:createPackageSnapshot",
+  restoreCollaborationPackageSnapshot: "planweave-collaboration:restorePackageSnapshot",
   updateCollaborationAssignment: "planweave-collaboration:updateAssignment",
   createCollaborationComment: "planweave-collaboration:createComment",
   editCollaborationComment: "planweave-collaboration:editComment",
@@ -422,6 +444,21 @@ export type PlanWeaveCollaborationApi = {
   listCollaborationActivity: (
     input?: CollaborationActivityListQueryInput
   ) => Promise<ActivityListPage>;
+  listCollaborationAuthorizedProjects: (
+    input?: CollaborationRegistryPageInput
+  ) => Promise<ProjectAccessPage>;
+  listCollaborationAuthorizedCanvases: (
+    input: CollaborationAuthorizedCanvasesInput
+  ) => Promise<CanvasAccessPage>;
+  readCollaborationPackageSnapshot: (
+    input: CollaborationRegistryReadSnapshotInput
+  ) => Promise<PackageSnapshot>;
+  createCollaborationPackageSnapshot: (
+    input: CreatePackageSnapshotRequest
+  ) => Promise<CreatePackageSnapshotResult>;
+  restoreCollaborationPackageSnapshot: (
+    input: RestorePackageSnapshotRequest
+  ) => Promise<RestorePackageSnapshotResult>;
   updateCollaborationAssignment: (
     input: CollaborationAssignmentUpdateInput
   ) => Promise<AssignmentDisplayProjection>;

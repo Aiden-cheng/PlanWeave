@@ -259,6 +259,16 @@ const collaborationApi: PlanWeaveCollaborationApi = {
     ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationComments, input),
   listCollaborationActivity: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationActivity, input),
+  listCollaborationAuthorizedProjects: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationAuthorizedProjects, input),
+  listCollaborationAuthorizedCanvases: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationAuthorizedCanvases, input),
+  readCollaborationPackageSnapshot: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.readCollaborationPackageSnapshot, input),
+  createCollaborationPackageSnapshot: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.createCollaborationPackageSnapshot, input),
+  restoreCollaborationPackageSnapshot: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.restoreCollaborationPackageSnapshot, input),
   updateCollaborationAssignment: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.updateCollaborationAssignment, input),
   createCollaborationComment: async (input) =>

@@ -110,6 +110,11 @@ export {
   type OperatorHttpOptions
 } from "./operatorHttp.js";
 export {
+  handleRegistryHttpRequest,
+  type RegistryHttpOptions,
+  type RegistryHttpService
+} from "./registryHttp.js";
+export {
   HostEnrollmentError,
   HostEnrollmentService
 } from "./hostEnrollment.js";

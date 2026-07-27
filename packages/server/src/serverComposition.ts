@@ -31,6 +31,7 @@ import { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
 import { provisionConfiguredOperatorSessions } from "./identity/operatorSessionProvisioning.js";
 import { OperatorTokenRegistry } from "./operatorAuth.js";
 import { handleOperatorHttpRequest } from "./operatorHttp.js";
+import { handleRegistryHttpRequest, type RegistryHttpService } from "./registryHttp.js";
 import { serverPackageVersion } from "./packageInfo.js";
 import { ServerReadinessController, type ServerReadiness } from "./readiness.js";
 import { RemoteControlService } from "./remoteControlService.js";
@@ -185,7 +186,8 @@ function requiresAdmission(request: IncomingMessage): boolean {
     /^\/api\/v1\/projects\/[^/]+\/human\//.test(pathname) ||
     /^\/api\/v1\/projects\/[^/]+\/assignments(\/|$)/.test(pathname) ||
     /^\/api\/v1\/projects\/[^/]+\/comments(\/|$)/.test(pathname) ||
-    /^\/api\/v1\/projects\/[^/]+\/attachments(\/|$)/.test(pathname)
+    /^\/api\/v1\/projects\/[^/]+\/attachments(\/|$)/.test(pathname) ||
+    /^\/api\/v1\/registry\/projects\/[^/]+\/canvases\/[^/]+\/snapshots(\/|$)/.test(pathname)
   );
 }
 
@@ -370,6 +372,42 @@ export async function createDistributedServerComposition(
     );
     if (!projectAccess || !packageSnapshots)
       throw new Error("project_access_services_not_initialized");
+    const registryService: RegistryHttpService = {
+      listProjects(input) {
+        const items = projectAccess!.listAuthorizedProjects({
+          workspaceId: input.workspaceId,
+          actor: input.actor,
+          limit: input.limit,
+          offset: input.cursor
+        });
+        return {
+          items,
+          nextCursor: items.length === input.limit ? input.cursor + input.limit : null
+        };
+      },
+      listCanvases(input) {
+        const items = projectAccess!.listAuthorizedCanvases({
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          actor: input.actor,
+          limit: input.limit,
+          offset: input.cursor
+        });
+        return {
+          items,
+          nextCursor: items.length === input.limit ? input.cursor + input.limit : null
+        };
+      },
+      readSnapshot(input) {
+        return packageSnapshots!.read(input);
+      },
+      createSnapshot(input) {
+        return packageSnapshots!.create(input);
+      },
+      restoreSnapshot(input) {
+        return packageSnapshots!.restore(input);
+      }
+    };
     authorization = new OperatorTokenRegistry(server.database, config.operatorCredentials, clock);
     provisionConfiguredOperatorSessions({
       database: server.database,
@@ -534,6 +572,17 @@ export async function createDistributedServerComposition(
         if (requiresAdmission(request) && readiness.readiness().status !== "ready") {
           request.resume();
           respond(response, 503, "server_not_accepting_mutations");
+          return;
+        }
+        if (
+          await handleRegistryHttpRequest(request, response, {
+            repository: humanIdentity,
+            workspaceIdentity,
+            service: registryService,
+            readiness: () => readiness.readiness(),
+            allowInsecureDevelopment: config.allowInsecureDevelopment
+          })
+        ) {
           return;
         }
         if (

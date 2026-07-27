@@ -6,6 +6,7 @@ import {
   projectAccessRecordSchema,
   projectAccessDecisionSchema,
   projectAccessRequestSchema,
+  registryPageQuerySchema,
   registryClientCommandSchema,
   serverAccessContextSchema
 } from "../projectAccess.js";
@@ -137,6 +138,17 @@ describe("project and canvas access contracts", () => {
     expect(registryClientCommandSchema.parse({ operation: "list_authorized_projects" })).toEqual({
       operation: "list_authorized_projects"
     });
+    expect(registryPageQuerySchema.parse({})).toEqual({ cursor: 0, limit: 100 });
+    expect(
+      registryClientCommandSchema.parse({
+        operation: "list_authorized_canvases",
+        projectId: registry.projectId,
+        cursor: 10,
+        limit: 20
+      })
+    ).toMatchObject({ operation: "list_authorized_canvases", cursor: 10, limit: 20 });
+    expect(() => registryPageQuerySchema.parse({ limit: 101 })).toThrow();
+    expect(() => registryPageQuerySchema.parse({ cursor: -1 })).toThrow();
     expect(
       registryClientCommandSchema.parse({
         operation: "create_snapshot",

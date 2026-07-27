@@ -271,6 +271,17 @@ export const canvasAccessPageSchema = z
   .strict();
 export type CanvasAccessPage = z.infer<typeof canvasAccessPageSchema>;
 
+/** Bounded cursor pagination shared by registry collection reads. */
+const registryCursorSchema = z.number().int().nonnegative();
+const registryLimitSchema = z.number().int().min(1).max(PROJECT_ACCESS_MAX_PROJECTS_PER_PAGE);
+export const registryPageQuerySchema = z
+  .object({
+    cursor: registryCursorSchema.default(0),
+    limit: registryLimitSchema.default(PROJECT_ACCESS_MAX_PROJECTS_PER_PAGE)
+  })
+  .strict();
+export type RegistryPageQuery = z.infer<typeof registryPageQuerySchema>;
+
 export const membershipGrantPageSchema = z
   .object({
     items: z.array(membershipGrantSchema).max(PROJECT_ACCESS_MAX_GRANTS),
@@ -298,11 +309,19 @@ const registryProjectIdSchema = z
 const registryCanvasIdSchema = registryProjectIdSchema;
 
 export const registryClientCommandSchema = z.discriminatedUnion("operation", [
-  z.object({ operation: z.literal("list_authorized_projects") }).strict(),
+  z
+    .object({
+      operation: z.literal("list_authorized_projects"),
+      cursor: registryCursorSchema.optional(),
+      limit: registryLimitSchema.optional()
+    })
+    .strict(),
   z
     .object({
       operation: z.literal("list_authorized_canvases"),
-      projectId: registryProjectIdSchema
+      projectId: registryProjectIdSchema,
+      cursor: registryCursorSchema.optional(),
+      limit: registryLimitSchema.optional()
     })
     .strict(),
   z

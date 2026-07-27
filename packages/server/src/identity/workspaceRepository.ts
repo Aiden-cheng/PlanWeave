@@ -226,6 +226,21 @@ export class WorkspaceIdentityRepository {
     return rows.map((row) => workspaceIdSchema.parse(String(row.workspace_id)));
   }
 
+  /** Resolve only workspaces with an active projected principal and membership. */
+  activeWorkspaceIdsForHumanPrincipal(humanPrincipalId: string): string[] {
+    const rows = this.database
+      .prepare(
+        `SELECT DISTINCT p.workspace_id
+         FROM workspace_principals p
+         JOIN workspace_memberships m
+           ON m.workspace_id=p.workspace_id AND m.human_principal_id=p.human_principal_id
+         WHERE p.human_principal_id=? AND p.revoked_at IS NULL AND m.revoked_at IS NULL
+         ORDER BY p.workspace_id`
+      )
+      .all(humanPrincipalId);
+    return rows.map((row) => workspaceIdSchema.parse(String(row.workspace_id)));
+  }
+
   listHostViews(workspaceId: string, limit: number, offset: number): AgentHostIdentityView[] {
     const parsedWorkspaceId = workspaceIdSchema.parse(workspaceId);
     this.assertReadCutover(parsedWorkspaceId);
