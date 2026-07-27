@@ -10,7 +10,6 @@ import {
 import { hashOperatorToken } from "../operatorAuth.js";
 import { parseServerConfig } from "../config.js";
 import { latestCentralSchemaVersion } from "../migrations.js";
-import { seedOperatorSessions } from "./support/operatorAuthFixture.js";
 import {
   createDistributedServerComposition,
   type DistributedServerComposition
@@ -67,7 +66,7 @@ async function setup() {
       {
         operatorId: "project-operator",
         tokenSha256: hashOperatorToken(projectToken),
-        projectIds: ["different-project"]
+        projectIds: [projectId]
       }
     ]
   });
@@ -76,7 +75,6 @@ async function setup() {
     config
   });
   compositions.push(composition);
-  await seedOperatorSessions(config.databasePath, config.operatorCredentials);
   await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
   const address = httpServer.address();
   if (!address || typeof address === "string") throw new Error("Expected HTTP address");
@@ -152,7 +150,7 @@ describe("distributed server composition", () => {
     const secondBody = await second.json();
     expect(secondBody.operationId).toBe(firstBody.operationId);
 
-    const forbidden = await dispatch(projectToken);
+    const forbidden = await dispatch(projectToken, { ...request, projectId: "different-project" });
     expect(forbidden.status).toBe(403);
     const hosts = await fetch(`${fixture.origin}/api/v1/hosts?limit=1`, {
       headers: { Authorization: `Bearer ${adminToken}` }

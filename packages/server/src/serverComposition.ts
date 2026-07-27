@@ -27,6 +27,7 @@ import {
   handleWorkspaceIdentityHttpRequest
 } from "./identity/index.js";
 import { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
+import { provisionConfiguredOperatorSessions } from "./identity/operatorSessionProvisioning.js";
 import { OperatorTokenRegistry } from "./operatorAuth.js";
 import { handleOperatorHttpRequest } from "./operatorHttp.js";
 import { serverPackageVersion } from "./packageInfo.js";
@@ -333,6 +334,14 @@ export async function createDistributedServerComposition(
       workspaceIdentity.ensureWorkspaceForLegacyProject(projectId);
     }
     authorization = new OperatorTokenRegistry(server.database, config.operatorCredentials, clock);
+    provisionConfiguredOperatorSessions({
+      database: server.database,
+      credentials: config.operatorCredentials,
+      trustedProjectIds: config.trustedProjects.map((project) => project.projectId),
+      workspaceForProject: (projectId) => workspaceIdentity.workspaceForLegacyProject(projectId),
+      operatorSessionTtlMs: config.operatorSessionTtlMs,
+      clock
+    });
     const humanIdentity = new HumanIdentityRepository(server.database, clock, {
       onMembershipTransitionInTransaction: ({ type, membership, principal }) => {
         initializedActivityProjection.projectMembershipEventInCallerTransaction({

@@ -48,6 +48,7 @@ describe("server config", () => {
     const config = parseServerConfig(input);
 
     expect(config.databasePath).toBe(join(input.dataDirectory, "planweave-server.sqlite"));
+    expect(config.operatorSessionTtlMs).toBe(30 * 24 * 60 * 60 * 1_000);
     expect(serverConfigSummary(config)).toEqual({
       version: "server-config/v1",
       bindHost: "127.0.0.1",
@@ -81,6 +82,16 @@ describe("server config", () => {
         limits: { heartbeatIntervalMs: 90_000, hostOfflineAfterMs: 90_000 }
       })
     ).toThrow("server_heartbeat_must_precede_offline");
+  });
+
+  it("bounds the configured operator session lifetime", async () => {
+    const input = await secureConfig();
+    expect(() =>
+      parseServerConfig({ ...input, operatorSessionTtlMs: 60 * 60 * 1_000 - 1 })
+    ).toThrow();
+    expect(() =>
+      parseServerConfig({ ...input, operatorSessionTtlMs: 365 * 24 * 60 * 60 * 1_000 + 1 })
+    ).toThrow();
   });
 
   it("allows insecure transport only on literal loopback", async () => {

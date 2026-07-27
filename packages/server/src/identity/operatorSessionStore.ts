@@ -74,25 +74,8 @@ export class OperatorSessionStore {
   }
 
   authenticateDigest(credentialSha256: string): OperatorSession | undefined {
-    const digest = credentialSha256Schema.parse(credentialSha256);
-    const row = this.database
-      .prepare(
-        `SELECT workspace_id,operator_session_id,operator_id,credential_sha256,
-                issued_at,expires_at,revoked_at
-         FROM workspace_operator_sessions WHERE credential_sha256=?`
-      )
-      .get(digest);
-    if (!row) return undefined;
-    const session = operatorSessionSchema.parse({
-      schemaVersion: "workspace-identity/v1",
-      workspaceId: row.workspace_id,
-      operatorSessionId: row.operator_session_id,
-      operatorId: row.operator_id,
-      credentialSha256: row.credential_sha256,
-      issuedAt: row.issued_at,
-      expiresAt: row.expires_at,
-      revokedAt: row.revoked_at
-    });
+    const session = this.findByCredentialDigest(credentialSha256);
+    if (!session) return undefined;
     const usability = evaluateOperatorSessionUsability({
       session,
       workspaceId: session.workspaceId,
@@ -107,6 +90,45 @@ export class OperatorSessionStore {
     return session;
   }
 
+  findByCredentialDigest(credentialSha256: string): OperatorSession | undefined {
+    const digest = credentialSha256Schema.parse(credentialSha256);
+    const row = this.database
+      .prepare(
+        `SELECT workspace_id,operator_session_id,operator_id,credential_sha256,
+                issued_at,expires_at,revoked_at
+         FROM workspace_operator_sessions WHERE credential_sha256=?`
+      )
+      .get(digest);
+    return row ? this.parseRow(row) : undefined;
+  }
+
+  findBySessionId(workspaceId: string, operatorSessionId: string): OperatorSession | undefined {
+    const parsedWorkspaceId = workspaceIdSchema.parse(workspaceId);
+    const parsedSessionId = operatorSessionIdSchema.parse(operatorSessionId);
+    const row = this.database
+      .prepare(
+        `SELECT workspace_id,operator_session_id,operator_id,credential_sha256,
+                issued_at,expires_at,revoked_at
+         FROM workspace_operator_sessions
+         WHERE workspace_id=? AND operator_session_id=?`
+      )
+      .get(parsedWorkspaceId, parsedSessionId);
+    return row ? this.parseRow(row) : undefined;
+  }
+
+  private parseRow(row: Record<string, unknown>): OperatorSession {
+    return operatorSessionSchema.parse({
+      schemaVersion: "workspace-identity/v1",
+      workspaceId: row.workspace_id,
+      operatorSessionId: row.operator_session_id,
+      operatorId: row.operator_id,
+      credentialSha256: row.credential_sha256,
+      issuedAt: row.issued_at,
+      expiresAt: row.expires_at,
+      revokedAt: row.revoked_at
+    });
+  }
+
   isActive(workspaceId: string, operatorSessionId: string): boolean {
     const session = this.database
       .prepare(
@@ -117,10 +139,17 @@ export class OperatorSessionStore {
       )
       .get(workspaceId, operatorSessionId);
     if (!session) return false;
-    return this.authenticateDigest(String(session.credential_sha256))?.operatorSessionId === operatorSessionId;
+    return (
+      this.authenticateDigest(String(session.credential_sha256))?.operatorSessionId ===
+      operatorSessionId
+    );
   }
 
-  revoke(workspaceId: string, operatorSessionId: string, revokedAt = this.clock().toISOString()): void {
+  revoke(
+    workspaceId: string,
+    operatorSessionId: string,
+    revokedAt = this.clock().toISOString()
+  ): void {
     const parsedWorkspaceId = workspaceIdSchema.parse(workspaceId);
     const parsedSessionId = operatorSessionIdSchema.parse(operatorSessionId);
     const parsedRevokedAt = timestampSchema.parse(revokedAt);

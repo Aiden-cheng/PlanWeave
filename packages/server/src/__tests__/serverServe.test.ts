@@ -11,7 +11,6 @@ import { parseServerConfig } from "../config.js";
 import { latestCentralSchemaVersion } from "../migrations.js";
 import { hashOperatorToken } from "../operatorAuth.js";
 import { serveDistributedServer } from "../serverServe.js";
-import { seedOperatorSessions } from "./support/operatorAuthFixture.js";
 
 const directories: string[] = [];
 
@@ -67,7 +66,6 @@ describe("distributed server listener", () => {
       ]
     });
     const server = await serveDistributedServer(config);
-    await seedOperatorSessions(config.databasePath, config.operatorCredentials);
 
     expect(server.readiness()).toEqual({
       status: "ready",
@@ -79,6 +77,10 @@ describe("distributed server listener", () => {
       status: "ready",
       schemaVersion: latestCentralSchemaVersion
     });
+    const authenticated = await fetch(`${config.publicUrl}/api/v1/hosts?limit=1`, {
+      headers: { Authorization: `Bearer pw_operator_${"S".repeat(43)}` }
+    });
+    expect(authenticated.status).toBe(200);
     await server.close();
     await server.close();
     expect(server.readiness()).toMatchObject({ status: "draining" });

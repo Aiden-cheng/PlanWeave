@@ -14,6 +14,9 @@ import { operatorCredentialSchema } from "./operatorAuth.js";
 import { trustedRuntimeProjectSchema } from "./runtimeProjectRegistry.js";
 
 const MAX_CONFIG_BYTES = 256 * 1024;
+const DEFAULT_OPERATOR_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
+const MIN_OPERATOR_SESSION_TTL_MS = 60 * 60 * 1_000;
+const MAX_OPERATOR_SESSION_TTL_MS = 365 * 24 * 60 * 60 * 1_000;
 const absolutePathSchema = z.string().min(1).max(4096).refine(isAbsolute, "Path must be absolute.");
 const bindHostSchema = z
   .string()
@@ -76,6 +79,12 @@ const serverConfigInputSchema = z
     dataDirectory: absolutePathSchema,
     trustedProjects: z.array(trustedRuntimeProjectSchema).min(1).max(256),
     operatorCredentials: z.array(operatorCredentialSchema).min(1).max(1_024),
+    operatorSessionTtlMs: z
+      .number()
+      .int()
+      .min(MIN_OPERATOR_SESSION_TTL_MS)
+      .max(MAX_OPERATOR_SESSION_TTL_MS)
+      .default(DEFAULT_OPERATOR_SESSION_TTL_MS),
     limits: serverLimitsSchema.default({
       busyTimeoutMs: 5_000,
       leaseDurationMs: 30_000,
