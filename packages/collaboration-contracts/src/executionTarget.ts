@@ -60,6 +60,7 @@ export type ExecutionTargetUpdateWireCommand = ExecutionTargetUpdateIntent;
 
 export const executionTargetAvailabilityReasonSchema = z.enum([
   "unassigned",
+  "automatic_pending_selection",
   "ready",
   "host_missing",
   "host_revoked",
@@ -79,9 +80,16 @@ export const executionTargetReadModelSchema = executionTargetRecordSchema
       z.object({ status: z.literal("ready"), reason: z.literal("ready") }).strict(),
       z.object({ status: z.literal("unassigned"), reason: z.literal("unassigned") }).strict(),
       z
+        .object({ status: z.literal("pending"), reason: z.literal("automatic_pending_selection") })
+        .strict(),
+      z
         .object({
           status: z.enum(["invalid", "unavailable"]),
-          reason: executionTargetAvailabilityReasonSchema.exclude(["ready", "unassigned"])
+          reason: executionTargetAvailabilityReasonSchema.exclude([
+            "ready",
+            "unassigned",
+            "automatic_pending_selection"
+          ])
         })
         .strict()
     ])

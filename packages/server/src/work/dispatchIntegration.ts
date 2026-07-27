@@ -1,5 +1,6 @@
 import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
 import { z } from "zod";
+import { workspaceIdSchema } from "@planweave-ai/collaboration-contracts";
 import { capabilitiesSchema } from "../protocol.js";
 import type { SqliteDatabase } from "../sqlite.js";
 import { WORK_ASSIGNMENT_ERROR_MESSAGES, type WorkAssignmentErrorCode } from "./errors.js";
@@ -8,6 +9,11 @@ import {
   type DispatchAssignmentGateDecision
 } from "./policy.js";
 import type { WorkAssignmentRepository } from "./repository.js";
+import { AuthorityRepository } from "./authorityRepository.js";
+import { hostCanSatisfyBlock } from "./authorityPolicy.js";
+import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
+import type { AgentHostRepository } from "../hosts.js";
+import type { ProjectAccessRepository } from "../projectAccessRepository.js";
 import {
   assignmentTargetSchema,
   workItemPackageFactsSchema,
@@ -24,6 +30,14 @@ import {
 export const dispatchHostSelectionSnapshotSchema = z
   .object({
     assignmentRevision: z.number().int().nonnegative(),
+    authorityRevisions: z
+      .object({
+        responsibilityRevision: z.number().int().nonnegative(),
+        reviewerRevision: z.number().int().nonnegative(),
+        executionTargetRevision: z.number().int().nonnegative()
+      })
+      .strict()
+      .optional(),
     target: assignmentTargetSchema,
     selection: z.enum(["exact", "automatic", "override"]),
     preferredHostId: opaqueIdentifierSchema.optional(),
@@ -128,6 +142,9 @@ export type AssignmentDispatchGate = {
     requestedHostId?: string;
     allowHumanOverride?: boolean;
     expectedAssignmentRevision?: number;
+    expectedResponsibilityRevision?: number;
+    expectedReviewerRevision?: number;
+    expectedExecutionTargetRevision?: number;
   }): DispatchHostSelectionSnapshot;
 };
 
@@ -175,6 +192,137 @@ export function createAssignmentDispatchGate(
         throw new DispatchAssignmentError(result.code, result.message);
       }
       return result.snapshot;
+    }
+  };
+}
+
+export type CreateAuthorityDispatchGateOptions = {
+  repository: AuthorityRepository;
+  database: SqliteDatabase;
+  workspaceIdentity: WorkspaceIdentityRepository;
+  hosts: AgentHostRepository;
+  access: ProjectAccessRepository;
+  hostOfflineAfterMs: number;
+  clock?: () => Date;
+};
+
+/**
+ * Strict OSS-003 gate.  It reads only the separated authority tables, verifies all
+ * three revision fingerprints, and resolves an eligible Host immediately before
+ * reservation.  Legacy assignment rows are never consulted on this path.
+ */
+export function createAuthorityDispatchGate(
+  options: CreateAuthorityDispatchGateOptions
+): AssignmentDispatchGate {
+  const clock = options.clock ?? (() => new Date());
+  const scopeFor = (input: { projectId: string; canvasId: string; blockRef: string }) => {
+    const workspaceId = options.workspaceIdentity.workspaceForLegacyProject(input.projectId) ?? "";
+    return {
+      kind: "block" as const,
+      workspaceId,
+      projectId: input.projectId,
+      canvasId: input.canvasId,
+      blockRef: input.blockRef
+    };
+  };
+  return {
+    resolve(input) {
+      if (
+        input.expectedResponsibilityRevision === undefined ||
+        input.expectedReviewerRevision === undefined ||
+        input.expectedExecutionTargetRevision === undefined
+      ) {
+        throw new DispatchAssignmentError("work_revision_conflict");
+      }
+      const scope = {
+        ...scopeFor(input),
+        workspaceId: workspaceIdSchema.parse(scopeFor(input).workspaceId)
+      };
+      if (!scope.workspaceId || !options.workspaceIdentity.workspaceExists(scope.workspaceId)) {
+        throw new DispatchAssignmentError("work_host_not_authorized");
+      }
+      const project = options.access.registry.projectInternal(scope.workspaceId, scope.projectId);
+      const canvas = options.access.registry.canvasInternal(
+        scope.workspaceId,
+        scope.projectId,
+        scope.canvasId
+      );
+      if (!project || project.revokedAt !== null || !canvas || canvas.revokedAt !== null) {
+        throw new DispatchAssignmentError("work_host_not_authorized");
+      }
+      const current = options.repository.currentRevisions(scope);
+      if (
+        current.responsibilityRevision !== input.expectedResponsibilityRevision ||
+        current.reviewerRevision !== input.expectedReviewerRevision ||
+        current.executionTargetRevision !== input.expectedExecutionTargetRevision
+      ) {
+        throw new DispatchAssignmentError("work_revision_conflict");
+      }
+      const target = options.repository.getExecutionTarget(scope)?.target;
+      if (!target || target.kind === "unassigned") {
+        throw new DispatchAssignmentError("work_not_agent_assigned");
+      }
+      const now = clock();
+      const activeReservations = (hostId: string): number => {
+        const row = options.database
+          .prepare(
+            "SELECT COUNT(*) AS count FROM host_capacity_reservations WHERE host_id=? AND status='active'"
+          )
+          .get(hostId) as { count: number };
+        return Number(row.count);
+      };
+      const requiredCapabilities = [...input.requiredCapabilities];
+      const eligible = (hostId: string): boolean => {
+        const host = options.hosts.get(hostId);
+        return (
+          !!host &&
+          hostCanSatisfyBlock(host, {
+            scope,
+            requiredCapabilities,
+            workspaceIdentity: options.workspaceIdentity,
+            now,
+            hostOfflineAfterMs: options.hostOfflineAfterMs,
+            activeReservations: activeReservations(hostId)
+          })
+        );
+      };
+      let hostId: string | undefined;
+      let selection: "exact" | "automatic";
+      if (target.kind === "exact_host") {
+        if (input.requestedHostId !== undefined && input.requestedHostId !== target.hostId) {
+          throw new DispatchAssignmentError("work_dispatch_host_mismatch");
+        }
+        hostId = target.hostId;
+        selection = "exact";
+        if (!eligible(hostId)) throw new DispatchAssignmentError("work_host_not_authorized");
+      } else {
+        selection = "automatic";
+        const candidates = options.hosts
+          .list()
+          .filter(
+            (host) => input.requestedHostId === undefined || host.id === input.requestedHostId
+          )
+          .filter((host) => eligible(host.id))
+          .sort((a, b) => {
+            const activeA = activeReservations(a.id);
+            const activeB = activeReservations(b.id);
+            return (
+              activeA - activeB ||
+              (b.lastSeenAt ?? "").localeCompare(a.lastSeenAt ?? "") ||
+              a.id.localeCompare(b.id)
+            );
+          });
+        hostId = candidates[0]?.id;
+        if (!hostId) throw new DispatchAssignmentError("work_host_not_authorized");
+      }
+      return {
+        assignmentRevision: current.executionTargetRevision,
+        authorityRevisions: current,
+        target,
+        selection,
+        preferredHostId: hostId,
+        requiredCapabilities
+      };
     }
   };
 }

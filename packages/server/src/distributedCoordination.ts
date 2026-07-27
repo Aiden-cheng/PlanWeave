@@ -1,6 +1,6 @@
 import { DispatchService, type DispatchRecord } from "./dispatches.js";
 import { ArtifactAuthorizationRepository } from "./artifactAuthorization.js";
-import { AgentHostRepository } from "./hosts.js";
+import { AgentHostRepository, isAgentHostOnline } from "./hosts.js";
 import { DurableMailbox } from "./mailbox.js";
 import type { SqliteDatabase } from "./sqlite.js";
 import { RemoteBlockCoordinator } from "./remoteBlockCoordinator.js";
@@ -26,10 +26,16 @@ import { startPlanweaveServer, type PlanweaveServer, type StartupContext } from 
 import type { ServerStorageConfig } from "./config.js";
 import {
   createAssignmentDispatchGate,
+  createAuthorityDispatchGate,
   type AssignmentDispatchGate
 } from "./work/dispatchIntegration.js";
 import { WorkAssignmentRepository } from "./work/repository.js";
 import type { AssignmentRecord } from "./work/schemas.js";
+import { AuthorityRepository } from "./work/authorityRepository.js";
+import { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
+import { ProjectAccessRepository } from "./projectAccessRepository.js";
+import { evaluateHostAuthorization } from "./work/authorityPolicy.js";
+import { hostAuthorizationFactsSchema } from "@planweave-ai/collaboration-contracts";
 
 export type RemoteBlockCoordinationOptions = {
   leaseDurationMs: number;
@@ -89,7 +95,7 @@ export function createRemoteBlockCoordination(
   const workAssignments = new WorkAssignmentRepository(database, {
     onAssignmentUpdatedInTransaction: options.onAssignmentUpdatedInTransaction
   });
-  const assignmentGate =
+  const legacyAssignmentGate =
     options.assignmentGate ??
     (options.enableAssignmentDispatchGate === false
       ? undefined
@@ -99,6 +105,136 @@ export function createRemoteBlockCoordination(
           // assignments still pin selection. Strict callers pass allowHumanOverride:false.
           defaultAllowHumanOverride: true
         }));
+  const authorityGate = createAuthorityDispatchGate({
+    repository: new AuthorityRepository(database, { clock: options.clock }),
+    database,
+    workspaceIdentity: new WorkspaceIdentityRepository(database),
+    hosts,
+    access: new ProjectAccessRepository(database, options.clock),
+    hostOfflineAfterMs: options.hostOfflineAfterMs,
+    clock: options.clock
+  });
+  const authorityRepository = new AuthorityRepository(database, { clock: options.clock });
+  const workspaceIdentity = new WorkspaceIdentityRepository(database);
+  const projectAccess = new ProjectAccessRepository(database, options.clock);
+  const assignmentGate: AssignmentDispatchGate | undefined = legacyAssignmentGate
+    ? {
+        resolve(input) {
+          return input.expectedResponsibilityRevision !== undefined ||
+            input.expectedReviewerRevision !== undefined ||
+            input.expectedExecutionTargetRevision !== undefined
+            ? authorityGate.resolve(input)
+            : legacyAssignmentGate.resolve(input);
+        }
+      }
+    : authorityGate;
+  const finalAuthorize = ({
+    operation,
+    reservation
+  }: {
+    operation: import("./remoteOperations.js").RemoteOperation;
+    reservation: import("./hostReservations.js").HostCapacityReservation;
+  }) => {
+    try {
+      const expected = operation.hostSelection?.authorityRevisions;
+      if (!expected) return;
+      const scope = {
+        kind: "block" as const,
+        workspaceId: workspaceIdentity.workspaceForLegacyProject(operation.projectId) ?? "",
+        projectId: operation.projectId,
+        canvasId: operation.canvasId,
+        blockRef: operation.blockRef
+      };
+      const host = hosts.get(reservation.hostId);
+      const project = projectAccess.registry.projectInternal(scope.workspaceId, scope.projectId);
+      const canvas = projectAccess.registry.canvasInternal(
+        scope.workspaceId,
+        scope.projectId,
+        scope.canvasId
+      );
+      const currentRevisions = authorityRepository.currentRevisions(scope);
+      const now = (options.clock ?? (() => new Date()))();
+      const activeReservations = Number(
+        (
+          database
+            .prepare(
+              "SELECT COUNT(*) AS count FROM host_capacity_reservations WHERE host_id=? AND status='active'"
+            )
+            .get(reservation.hostId) as { count: number }
+        ).count
+      );
+      const capacityRemaining = host
+        ? Math.max(0, host.capacity - Math.max(0, activeReservations - 1))
+        : 0;
+      const facts = hostAuthorizationFactsSchema.parse({
+        schemaVersion: "host-authorization/v1",
+        scope,
+        hostId: reservation.hostId,
+        hostWorkspaceId: host ? (workspaceIdentity.workspaceForHost(host.id) ?? "") : "",
+        workspaceAcl: {
+          revision: 0,
+          allowed: workspaceIdentity.workspaceExists(scope.workspaceId)
+        },
+        projectAcl: {
+          revision: project?.aclRevision ?? 0,
+          allowed: !!project && project.revokedAt === null
+        },
+        canvasAcl: {
+          revision: canvas?.aclRevision ?? 0,
+          allowed: !!canvas && canvas.revokedAt === null
+        },
+        requiredCapabilities: operation.requiredCapabilities,
+        advertisedCapabilities: host?.capabilities ?? [],
+        revoked: !host || host.revokedAt !== undefined,
+        online:
+          !!host &&
+          isAgentHostOnline(host, { now, hostOfflineAfterMs: options.hostOfflineAfterMs }),
+        capacityRemaining,
+        lease:
+          reservation.status === "active" && Date.parse(reservation.leaseExpiresAt) > now.getTime()
+            ? {
+                status: "active",
+                leaseId: reservation.leaseId,
+                expiresAt: reservation.leaseExpiresAt
+              }
+            : {
+                status: "expired",
+                leaseId: reservation.leaseId,
+                expiresAt: reservation.leaseExpiresAt
+              },
+        attempt: ["reserved", "activated", "running", "awaiting_writeback"].includes(
+          operation.attempt.status
+        )
+          ? {
+              status: operation.attempt.status,
+              dispatchId: operation.dispatchId,
+              executionAttemptId: operation.executionAttemptId
+            }
+          : {
+              status: "prepared",
+              dispatchId: operation.dispatchId,
+              executionAttemptId: operation.executionAttemptId
+            },
+        expectedRevisions: expected,
+        currentRevisions,
+        evaluatedAt: now.toISOString()
+      });
+      const decision = evaluateHostAuthorization({ facts });
+      if (decision.decision !== "allow") {
+        throw new Error(`host_authorization_denied:${decision.reason}`);
+      }
+    } catch (error) {
+      if (reservation.status === "active") {
+        reservations.release({
+          leaseId: reservation.leaseId,
+          fencingToken: reservation.fencingToken,
+          expectedVersion: reservation.version,
+          reason: "expired"
+        });
+      }
+      throw error;
+    }
+  };
   const coordinator = new RemoteBlockCoordinator({
     runtimeResolver: options.runtimeResolver,
     operations,
@@ -111,6 +247,7 @@ export function createRemoteBlockCoordination(
     artifactContent: options.artifactContent,
     checkpoints: options.checkpoints,
     assignmentGate,
+    finalAuthorize,
     serverInstanceOwnerToken: startupContext.serverInstanceOwnerToken
   });
   const dispatches = new DispatchService(database, hosts, artifactAuthorization, {

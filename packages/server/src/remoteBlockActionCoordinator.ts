@@ -20,6 +20,7 @@ import type {
   RemoteBlockCoordinatorOptions,
   RemoteDispatchOutcome
 } from "./remoteBlockCoordinator.js";
+import type { RemoteBlockRuntimePort } from "@planweave-ai/runtime";
 import type { MailboxMessage } from "./mailbox.js";
 import {
   DispatchAssignmentError,
@@ -183,7 +184,6 @@ export class RemoteBlockActionCoordinator {
     context?: unknown
   ): Promise<"delivered" | "settled"> {
     let operation = this.options.operations.getRequired(action.operationId);
-    const runtime = this.options.runtimeResolver.resolve(operation);
     switch (decision.transition) {
       case "cancel": {
         if (action.kind !== "cancel") throw new Error("remote_action_decision_mismatch");
@@ -208,7 +208,9 @@ export class RemoteBlockActionCoordinator {
       case "resume": {
         if (action.kind !== "resume_same_session")
           throw new Error("remote_action_decision_mismatch");
-        await runtime.resumeAttempt(remoteBlockIdentity(operation));
+        await this.withRuntime(operation, (runtime) =>
+          runtime.resumeAttempt(remoteBlockIdentity(operation))
+        );
         this.options.reservations.resumeSameAttempt({
           priorLeaseId: action.priorLeaseId,
           leaseId: action.leaseId,
@@ -224,11 +226,13 @@ export class RemoteBlockActionCoordinator {
         if (action.kind !== "retry_new_attempt") throw new Error("remote_action_decision_mismatch");
         const hostSelection =
           context === undefined ? undefined : dispatchHostSelectionSnapshotSchema.parse(context);
-        await runtime.retryAttempt({
-          ...remoteBlockIdentity(operation),
-          newDispatchId: action.newDispatchId,
-          newExecutionAttemptId: action.newExecutionAttemptId
-        });
+        await this.withRuntime(operation, (runtime) =>
+          runtime.retryAttempt({
+            ...remoteBlockIdentity(operation),
+            newDispatchId: action.newDispatchId,
+            newExecutionAttemptId: action.newExecutionAttemptId
+          })
+        );
         this.options.operations.retryAttempt({
           operationId: operation.id,
           priorExecutionAttemptId: operation.executionAttemptId,
@@ -240,6 +244,19 @@ export class RemoteBlockActionCoordinator {
         await this.lifecycle.reenter(operation.id);
         return "settled";
       }
+    }
+  }
+
+  private async withRuntime<T>(
+    locator: { projectId: string; canvasId: string },
+    operation: (runtime: RemoteBlockRuntimePort) => Promise<T>
+  ): Promise<T> {
+    const acquired = await this.options.runtimeResolver.acquire?.(locator);
+    if (!acquired) return operation(this.options.runtimeResolver.resolve(locator));
+    try {
+      return await operation(acquired.runtime);
+    } finally {
+      acquired.release();
     }
   }
 

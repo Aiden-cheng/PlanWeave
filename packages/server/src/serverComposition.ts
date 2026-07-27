@@ -1,4 +1,12 @@
 import type { IncomingMessage, Server as HttpServer, ServerResponse } from "node:http";
+import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import {
+  createRemoteBlockArtifactSource,
+  createRemoteBlockRuntimePort,
+  manifestSchema,
+  resolveProjectCanvasWorkspace
+} from "@planweave-ai/runtime";
 import { ArtifactStore } from "./artifacts.js";
 import { handleAgentHostArtifactRequest } from "./artifactHttp.js";
 import {
@@ -48,6 +56,7 @@ import {
   RuntimeInputArtifactMaterializer
 } from "./runtimeArtifactAdapter.js";
 import { createTrustedRuntimeRegistry } from "./runtimeProjectRegistry.js";
+import { createManifestWorkItemPort } from "./work/workItemFacts.js";
 import { ProjectAccessRepository } from "./projectAccessRepository.js";
 import { PackageSnapshotRepository } from "./packageSnapshotRepository.js";
 import { attachAgentHostWebSocketServer, type AgentHostWebSocketServer } from "./wsServer.js";
@@ -64,6 +73,9 @@ import {
   createActiveDispatchResolver,
   createHostAssignmentPort,
   createIdentityMembershipPort,
+  AuthorityRepository,
+  AuthorityService,
+  assertHumanScopeAuthorized,
   handleWorkAssignmentHttpRequest,
   WorkAssignmentService
 } from "./work/index.js";
@@ -363,6 +375,50 @@ export async function createDistributedServerComposition(
     const enrollments = new HostEnrollmentService(server.database, clock);
     const workspaceIdentity = new WorkspaceIdentityRepository(server.database);
     projectAccess = new ProjectAccessRepository(server.database, clock);
+    runtimeRegistry.setScopedPackageResolver((input) => {
+      if (!workspaceIdentity.workspaceExists(input.workspaceId)) return undefined;
+      const canvas = projectAccess!.registry.canvasInternal(
+        input.workspaceId,
+        input.projectId,
+        input.canvasId
+      );
+      if (!canvas || canvas.revokedAt !== null || !canvas.packageDir) return undefined;
+      const manifest = manifestSchema.parse(
+        JSON.parse(readFileSync(join(canvas.packageDir, "manifest.json"), "utf8"))
+      );
+      return createManifestWorkItemPort(manifest, input.canvasId);
+    });
+    runtimeRegistry.registry.setScopedResolver(async (locator) => {
+      const workspaceId = workspaceIdentity.workspaceForLegacyProject(locator.projectId);
+      if (!workspaceId || !workspaceIdentity.workspaceExists(workspaceId)) {
+        throw new Error("remote_runtime_workspace_unresolved");
+      }
+      const project = projectAccess!.registry.projectInternal(workspaceId, locator.projectId);
+      const canvas = projectAccess!.registry.canvasInternal(
+        workspaceId,
+        locator.projectId,
+        locator.canvasId
+      );
+      if (
+        !project ||
+        project.revokedAt !== null ||
+        !project.projectRoot ||
+        !canvas ||
+        canvas.revokedAt !== null ||
+        !canvas.packageDir
+      ) {
+        throw new Error("remote_runtime_scope_unavailable");
+      }
+      const workspace = await resolveProjectCanvasWorkspace(project.projectRoot, locator.canvasId);
+      if (resolve(workspace.packageDir) !== resolve(canvas.packageDir)) {
+        throw new Error("remote_runtime_registry_path_mismatch");
+      }
+      return {
+        runtime: createRemoteBlockRuntimePort({ projectRoot: workspace }),
+        artifacts: createRemoteBlockArtifactSource({ projectRoot: workspace }),
+        release() {}
+      };
+    });
     const canvasesByProject = new Map<
       string,
       { projectRoot: string; canvases: typeof runtimeRegistry.expansions }
@@ -556,6 +612,36 @@ export async function createDistributedServerComposition(
     });
     const activeDispatch = createActiveDispatchResolver(server.database);
     const assignmentServices = new Map<string, WorkAssignmentService>();
+    const authorityRepository = new AuthorityRepository(server.database, { clock });
+    const initializedProjectAccess = projectAccess;
+    const acquireAuthorityService = (projectId: string, canvasId: string) => {
+      const workspaceId = workspaceIdentity.workspaceForLegacyProject(projectId);
+      if (!workspaceId || !workspaceIdentity.workspaceExists(workspaceId)) return undefined;
+      const project = initializedProjectAccess.registry.projectInternal(workspaceId, projectId);
+      const canvas = initializedProjectAccess.registry.canvasInternal(
+        workspaceId,
+        projectId,
+        canvasId
+      );
+      if (!project || project.revokedAt !== null || !canvas || canvas.revokedAt !== null)
+        return undefined;
+      const acquired = runtimeRegistry.acquireScopedWorkItemPackagePort({
+        workspaceId,
+        projectId,
+        canvasId
+      });
+      if (!acquired) return undefined;
+      const service = new AuthorityService({
+        repository: authorityRepository,
+        packagePort: acquired.port,
+        identity: humanIdentity,
+        access: initializedProjectAccess,
+        workspaceIdentity,
+        hosts: coordination.hosts,
+        clock
+      });
+      return { service, release: acquired.release };
+    };
     for (const { projectId } of runtimeRegistry.locators) {
       if (assignmentServices.has(projectId)) continue;
       const packagePort = runtimeRegistry.workItemPackagePort(projectId);
@@ -627,7 +713,17 @@ export async function createDistributedServerComposition(
       dispatches: coordination.dispatches,
       coordinator: coordination.coordinator,
       events: coordination.acpEvents,
-      interactions: coordination.interactions
+      interactions: coordination.interactions,
+      authorizeCanvas: (context, scope) => {
+        const workspaceId = workspaceIdentity.workspaceForLegacyProject(scope.projectId);
+        if (!workspaceId) throw new Error("authority_workspace_mismatch");
+        assertHumanScopeAuthorized({
+          actor: context,
+          scope: { workspaceId, ...scope },
+          access: initializedProjectAccess,
+          workspaceIdentity
+        });
+      }
     });
     requestListener = (request: IncomingMessage, response: ServerResponse) => {
       const operation = (async () => {
@@ -661,6 +757,7 @@ export async function createDistributedServerComposition(
         if (
           await handleWorkAssignmentHttpRequest(request, response, {
             resolveService: (projectId) => assignmentServices.get(projectId),
+            acquireAuthorityService,
             repository: humanIdentity,
             projectAuthority: runtimeRegistry,
             allowInsecureDevelopment: config.allowInsecureDevelopment,

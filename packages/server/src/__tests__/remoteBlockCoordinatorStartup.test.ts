@@ -14,6 +14,7 @@ import {
 } from "../distributedCoordination.js";
 import type { PlanweaveServer } from "../lifecycle.js";
 import { centralSchemaVersion, latestCentralSchemaVersion } from "../migrations.js";
+import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import type {
   RemoteCoordinatorCheckpoint,
   RemoteCoordinatorCheckpointPort
@@ -157,6 +158,10 @@ class StartupHarness {
 
   registerHost(): string {
     const host = this.requireCoordination().hosts.register("Startup Reconciliation Host").host;
+    const workspaceId = new WorkspaceIdentityRepository(
+      this.requireServer().database
+    ).ensureWorkspaceForLegacyProject(this.locator.projectId);
+    this.requireCoordination().hosts.bindToWorkspace(host.id, workspaceId);
     this.requireCoordination().hosts.reportOnline(host.id, ["acp.codex"], 1);
     return host.id;
   }

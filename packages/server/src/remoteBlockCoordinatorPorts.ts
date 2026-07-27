@@ -44,6 +44,11 @@ export type RemoteRuntimeLocator = {
 
 export interface RemoteBlockRuntimeResolverPort {
   resolve(locator: RemoteRuntimeLocator): RemoteBlockRuntimePort;
+  acquire?(
+    locator: RemoteRuntimeLocator
+  ):
+    | { runtime: RemoteBlockRuntimePort; release(): void }
+    | Promise<{ runtime: RemoteBlockRuntimePort; release(): void }>;
 }
 
 export interface RemoteOperationCandidatePort {

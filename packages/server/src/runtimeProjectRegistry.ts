@@ -13,6 +13,7 @@ import { RemoteRuntimePortRegistry } from "./remoteRuntimeLocator.js";
 import {
   createManifestWorkItemPort,
   createRoutedWorkItemPackagePort,
+  workItemPackageFactsSchema,
   type WorkItemPackagePort
 } from "./work/index.js";
 
@@ -55,6 +56,24 @@ export type TrustedRuntimeRegistry = {
   hasProject(projectId: string): boolean;
   hasCanvas(projectId: string, canvasId: string): boolean;
   workItemPackagePort(projectId: string): WorkItemPackagePort | undefined;
+  /** Resolve a package port for one request-scoped workspace/project/canvas tuple. */
+  scopedWorkItemPackagePort(input: {
+    workspaceId: string;
+    projectId: string;
+    canvasId: string;
+  }): WorkItemPackagePort | undefined;
+  acquireScopedWorkItemPackagePort(input: {
+    workspaceId: string;
+    projectId: string;
+    canvasId: string;
+  }): { port: WorkItemPackagePort; release(): void } | undefined;
+  setScopedPackageResolver(
+    resolver: (input: {
+      workspaceId: string;
+      projectId: string;
+      canvasId: string;
+    }) => WorkItemPackagePort | undefined
+  ): void;
   close(): void;
 };
 
@@ -131,6 +150,43 @@ export async function createTrustedRuntimeRegistry(
       createRoutedWorkItemPackagePort((canvasId) => ports.get(canvasId))
     ])
   );
+  const scopedPackagePort = (input: {
+    workspaceId: string;
+    projectId: string;
+    canvasId: string;
+  }): WorkItemPackagePort | undefined => {
+    if (
+      !projectIds.has(input.projectId) ||
+      !canvasIdsByProject.get(input.projectId)?.has(input.canvasId)
+    ) {
+      return undefined;
+    }
+    const port = projectWorkItemPorts.get(input.projectId);
+    if (!port) return undefined;
+    return {
+      resolveWorkItem(workItem) {
+        if (workItem.canvasId !== input.canvasId) {
+          return workItemPackageFactsSchema.parse({
+            canvasId: input.canvasId,
+            kind: workItem.kind,
+            exists: false,
+            ...(workItem.kind === "task"
+              ? { taskId: workItem.taskId }
+              : { blockRef: workItem.blockRef }),
+            requiredCapabilities: []
+          });
+        }
+        return port.resolveWorkItem(workItem);
+      }
+    };
+  };
+  let externalScopedResolver:
+    | ((input: {
+        workspaceId: string;
+        projectId: string;
+        canvasId: string;
+      }) => WorkItemPackagePort | undefined)
+    | undefined;
   return {
     registry,
     locators,
@@ -143,6 +199,30 @@ export async function createTrustedRuntimeRegistry(
     },
     workItemPackagePort(projectId) {
       return projectWorkItemPorts.get(projectId);
+    },
+    scopedWorkItemPackagePort(input) {
+      return externalScopedResolver ? externalScopedResolver(input) : scopedPackagePort(input);
+    },
+    acquireScopedWorkItemPackagePort(input) {
+      const port = externalScopedResolver
+        ? externalScopedResolver(input)
+        : scopedPackagePort(input);
+      if (!port) return undefined;
+      let released = false;
+      return {
+        port: {
+          resolveWorkItem(workItem) {
+            if (released) throw new Error("runtime_package_scope_released");
+            return port.resolveWorkItem(workItem);
+          }
+        },
+        release() {
+          released = true;
+        }
+      };
+    },
+    setScopedPackageResolver(resolver) {
+      externalScopedResolver = resolver;
     },
     close() {
       for (const release of unbind.splice(0).reverse()) release();

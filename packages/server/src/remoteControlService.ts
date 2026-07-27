@@ -1,7 +1,6 @@
 import {
   operatorActionRequestSchema,
   operatorActionViewSchema,
-  operatorDispatchRequestSchema,
   operatorEnrollmentGrantRequestSchema,
   operatorEnrollmentGrantResponseSchema,
   operatorEventQuerySchema,
@@ -15,6 +14,7 @@ import {
   operatorPageQuerySchema,
   type OperatorOperationView
 } from "./operatorDtos.js";
+import { remoteDispatchIntentSchema } from "@planweave-ai/collaboration-contracts";
 import { HostEnrollmentService } from "./hostEnrollment.js";
 import {
   DEFAULT_HOST_OFFLINE_AFTER_MS,
@@ -77,9 +77,11 @@ export class RemoteControlService {
       query.cursor
     );
     return operatorHostPageSchema.parse({
-      items: hosts.slice(0, query.limit).map((host) =>
-        this.toOperatorHostView(this.options.hosts.getRequired(host.hostId), workspaceId)
-      ),
+      items: hosts
+        .slice(0, query.limit)
+        .map((host) =>
+          this.toOperatorHostView(this.options.hosts.getRequired(host.hostId), workspaceId)
+        ),
       nextCursor: hosts.length > query.limit ? query.cursor + query.limit : null
     });
   }
@@ -101,7 +103,7 @@ export class RemoteControlService {
   }
 
   async dispatch(principal: OperatorPrincipal, rawRequest: unknown) {
-    const request = operatorDispatchRequestSchema.parse(rawRequest);
+    const request = remoteDispatchIntentSchema.parse(rawRequest);
     this.options.authorization.authorizeProject(principal, request.projectId);
     const workspaceId = this.options.workspaceIdentity.workspaceForLegacyProject(request.projectId);
     if (!workspaceId) throw new Error("operator_workspace_unmapped");
@@ -113,9 +115,10 @@ export class RemoteControlService {
       canvasId: request.canvasId,
       blockRef: request.blockRef,
       idempotencyKey: request.idempotencyKey,
-      requestedHostId: request.requestedHostId,
-      allowHumanOverride: request.allowHumanOverride,
-      expectedAssignmentRevision: request.expectedAssignmentRevision
+      expectedResponsibilityRevision: request.expectedResponsibilityRevision,
+      expectedReviewerRevision: request.expectedReviewerRevision,
+      expectedExecutionTargetRevision: request.expectedExecutionTargetRevision,
+      strictAuthority: true
     });
     return this.observeOperation(principal, outcome.operation.id);
   }
@@ -214,7 +217,9 @@ export class RemoteControlService {
   private operationFor(principal: OperatorPrincipal, operationId: string): RemoteOperation {
     const operation = this.options.operations.getRequired(operationId);
     this.options.authorization.authorizeProject(principal, operation.projectId);
-    const workspaceId = this.options.workspaceIdentity.workspaceForLegacyProject(operation.projectId);
+    const workspaceId = this.options.workspaceIdentity.workspaceForLegacyProject(
+      operation.projectId
+    );
     if (!workspaceId) throw new Error("operator_workspace_unmapped");
     this.authorizeWorkspace(principal, workspaceId);
     return operation;
@@ -225,10 +230,8 @@ export class RemoteControlService {
   }
 
   private authorizeWorkspace(principal: OperatorPrincipal, workspaceId: string): void {
-    this.options.authorization.authorizeWorkspace(
-      principal,
-      workspaceId,
-      (projectId) => this.options.workspaceIdentity.workspaceForLegacyProject(projectId)
+    this.options.authorization.authorizeWorkspace(principal, workspaceId, (projectId) =>
+      this.options.workspaceIdentity.workspaceForLegacyProject(projectId)
     );
   }
 

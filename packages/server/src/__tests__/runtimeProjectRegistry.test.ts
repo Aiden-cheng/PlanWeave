@@ -1,6 +1,6 @@
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   basicManifest,
   createTestWorkspace,
@@ -49,6 +49,51 @@ describe("createTrustedRuntimeRegistry", () => {
     expect(() => trusted.registry.resolve(locator)).not.toThrow();
     trusted.close();
     expect(() => trusted.registry.resolve(locator)).toThrow("remote_runtime_locator_unresolved");
+  });
+
+  it("treats an installed scoped package resolver as authoritative", async () => {
+    const workspace = await createTestWorkspace(basicManifest());
+    directories.push(workspace.home, workspace.root);
+    const locator = { projectId: workspace.init.workspace.id, canvasId: "default" };
+    const trusted = await createTrustedRuntimeRegistry([
+      { ...locator, projectRoot: workspace.root }
+    ]);
+    const scope = { workspaceId: "workspace-1", ...locator };
+
+    expect(trusted.scopedWorkItemPackagePort(scope)).toBeDefined();
+    trusted.setScopedPackageResolver(() => undefined);
+    expect(trusted.scopedWorkItemPackagePort(scope)).toBeUndefined();
+    expect(trusted.acquireScopedWorkItemPackagePort(scope)).toBeUndefined();
+    trusted.close();
+  });
+
+  it("acquires and releases scoped runtime and artifact bindings", async () => {
+    const workspace = await createTestWorkspace(basicManifest());
+    directories.push(workspace.home, workspace.root);
+    const locator = { projectId: workspace.init.workspace.id, canvasId: "default" };
+    const trusted = await createTrustedRuntimeRegistry([
+      { ...locator, projectRoot: workspace.root }
+    ]);
+    const runtime = trusted.registry.resolve(locator);
+    const artifacts = trusted.registry.resolveArtifactSource(locator);
+    const release = vi.fn();
+    const resolveScoped = vi.fn(() => ({ runtime, artifacts, release }));
+    trusted.registry.setScopedResolver(resolveScoped);
+
+    const runtimeHandle = await trusted.registry.acquire({
+      projectId: locator.projectId,
+      canvasId: "dynamically-registered"
+    });
+    expect(runtimeHandle.runtime).toBe(runtime);
+    runtimeHandle.release();
+    runtimeHandle.release();
+    const artifactHandle = await trusted.registry.acquireArtifactSource(locator);
+    expect(artifactHandle.source).toBe(artifacts);
+    artifactHandle.release();
+
+    expect(resolveScoped).toHaveBeenCalledTimes(2);
+    expect(release).toHaveBeenCalledTimes(2);
+    trusted.close();
   });
 
   it("expands every Runtime-declared canvas from one trusted project root", async () => {

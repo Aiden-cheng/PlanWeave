@@ -1,6 +1,9 @@
 import {
   assignmentListQuerySchema,
-  assignmentUpdateWireCommandSchema
+  assignmentUpdateWireCommandSchema,
+  executionTargetUpdateWireCommandSchema,
+  reviewAssignmentUpdateWireCommandSchema,
+  responsibilityUpdateWireCommandSchema
 } from "@planweave-ai/collaboration-contracts";
 import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -12,7 +15,9 @@ import {
   type HumanProjectAuthority
 } from "../identity/index.js";
 import { WorkAssignmentService, WorkAssignmentServiceError } from "./service.js";
+import { AuthorityService } from "./authorityService.js";
 import { workItemRefSchema } from "./schemas.js";
+import { authorityScopeSchema } from "./authoritySchemas.js";
 
 const MAX_ASSIGNMENT_BODY_BYTES = 65_536;
 const ASSIGNMENT_RATE_WINDOW_MS = 60_000;
@@ -20,8 +25,17 @@ const ASSIGNMENT_RATE_MAX_REQUESTS = 120;
 const ASSIGNMENT_RATE_MAX_BUCKETS = 1_000;
 
 type AssignmentRoute = {
-  kind: "get" | "list" | "update" | "eligible";
+  kind:
+    | "get"
+    | "list"
+    | "update"
+    | "eligible"
+    | "authority_get"
+    | "responsibility"
+    | "reviewer"
+    | "execution_target";
   projectId: string;
+  authority?: "responsibility" | "reviewer" | "execution_target";
 };
 
 type RateBucket = { windowStartedAt: number; count: number };
@@ -29,6 +43,10 @@ const rateBuckets = new Map<string, RateBucket>();
 
 export type WorkAssignmentHttpOptions = {
   resolveService(projectId: string): WorkAssignmentService | undefined;
+  acquireAuthorityService?(
+    projectId: string,
+    canvasId: string
+  ): { service: AuthorityService; release(): void } | undefined;
   repository: HumanIdentityRepository;
   projectAuthority: HumanProjectAuthority;
   allowInsecureDevelopment?: boolean;
@@ -49,6 +67,20 @@ function route(request: IncomingMessage, pathname: string): AssignmentRoute | un
   const projectId = decodeIdentifier(match[1]);
   if (!projectId) return undefined;
   const rest = match[2] ?? "";
+  const authorityPaths: Record<string, AssignmentRoute["authority"]> = {
+    "/responsibility": "responsibility",
+    "/responsibilities": "responsibility",
+    "/review-assignment": "reviewer",
+    "/reviewer": "reviewer",
+    "/reviewers": "reviewer",
+    "/execution-target": "execution_target",
+    "/execution-targets": "execution_target"
+  };
+  const authority = authorityPaths[rest];
+  if (authority) {
+    if (request.method === "POST") return { kind: authority, projectId, authority };
+    if (request.method === "GET") return { kind: "authority_get", projectId, authority };
+  }
   if (request.method === "GET" && rest === "") return { kind: "get", projectId };
   if (request.method === "GET" && rest === "/list") return { kind: "list", projectId };
   if (request.method === "POST" && rest === "") return { kind: "update", projectId };
@@ -161,6 +193,8 @@ function statusFor(error: WorkAssignmentServiceError): number {
     case "work_not_agent_assigned":
     case "work_dispatch_host_mismatch":
       return 400;
+    default:
+      return 400;
   }
 }
 
@@ -171,6 +205,19 @@ function safeError(error: unknown): { status: number; code: string } {
   }
   if (error instanceof Error && error.message === "assignment_body_too_large") {
     return { status: 413, code: "assignment_body_too_large" };
+  }
+  if (error instanceof Error && error.message.startsWith("authority_")) {
+    const status = error.message.includes("revision_conflict")
+      ? 409
+      : error.message.includes("not_found")
+        ? 404
+        : error.message.includes("scope_forbidden") ||
+            error.message.includes("project_mismatch") ||
+            error.message.includes("workspace_mismatch") ||
+            error.message.includes("membership_required")
+          ? 403
+          : 400;
+    return { status, code: error.message };
   }
   return { status: 500, code: "assignment_request_failed" };
 }
@@ -219,7 +266,15 @@ export async function handleWorkAssignmentHttpRequest(
     );
     if (!actor) throw new WorkAssignmentServiceError("work_auth_unauthenticated");
     const service = options.resolveService(matched.projectId);
-    if (!service) throw new WorkAssignmentServiceError("work_cross_project_forbidden");
+    if (
+      !service &&
+      matched.kind !== "responsibility" &&
+      matched.kind !== "reviewer" &&
+      matched.kind !== "execution_target" &&
+      matched.kind !== "authority_get"
+    ) {
+      throw new WorkAssignmentServiceError("work_cross_project_forbidden");
+    }
 
     switch (matched.kind) {
       case "update": {
@@ -228,14 +283,14 @@ export async function handleWorkAssignmentHttpRequest(
         respond(
           response,
           200,
-          service.updateAssignment({ ...body, actor, projectId: matched.projectId }).display
+          service!.updateAssignment({ ...body, actor, projectId: matched.projectId }).display
         );
         return true;
       }
       case "get": {
         const parameters = query(url, ["workItem"]);
         const workItem = workItemRefSchema.parse(parseJsonParameter(parameters.workItem));
-        respond(response, 200, service.getAssignment(actor, matched.projectId, workItem));
+        respond(response, 200, service!.getAssignment(actor, matched.projectId, workItem));
         return true;
       }
       case "list": {
@@ -248,7 +303,7 @@ export async function handleWorkAssignmentHttpRequest(
           ...(parameters.cursor === undefined ? {} : { cursor: Number(parameters.cursor) }),
           ...(parameters.limit === undefined ? {} : { limit: Number(parameters.limit) })
         });
-        respond(response, 200, service.listAssignments(actor, matched.projectId, parsed));
+        respond(response, 200, service!.listAssignments(actor, matched.projectId, parsed));
         return true;
       }
       case "eligible": {
@@ -260,7 +315,7 @@ export async function handleWorkAssignmentHttpRequest(
           "hostCursor"
         ]);
         const workItem = workItemRefSchema.parse(parseJsonParameter(parameters.workItem));
-        const result = service.listEligibleAssignees(actor, matched.projectId, workItem, {
+        const result = service!.listEligibleAssignees(actor, matched.projectId, workItem, {
           ...(parameters.humanLimit === undefined
             ? {}
             : { humanLimit: Number(parameters.humanLimit) }),
@@ -281,6 +336,60 @@ export async function handleWorkAssignmentHttpRequest(
           nextHumanCursor: result.nextHumanCursor,
           nextHostCursor: result.nextHostCursor
         });
+        return true;
+      }
+      case "responsibility": {
+        query(url, []);
+        const body = responsibilityUpdateWireCommandSchema.parse(await readJson(request));
+        const handle = options.acquireAuthorityService?.(matched.projectId, body.scope.canvasId);
+        if (!handle) throw new WorkAssignmentServiceError("work_cross_project_forbidden");
+        try {
+          respond(response, 200, handle.service.updateResponsibility(actor, body));
+        } finally {
+          handle.release();
+        }
+        return true;
+      }
+      case "reviewer": {
+        query(url, []);
+        const body = reviewAssignmentUpdateWireCommandSchema.parse(await readJson(request));
+        const handle = options.acquireAuthorityService?.(matched.projectId, body.scope.canvasId);
+        if (!handle) throw new WorkAssignmentServiceError("work_cross_project_forbidden");
+        try {
+          respond(response, 200, handle.service.updateReviewer(actor, body));
+        } finally {
+          handle.release();
+        }
+        return true;
+      }
+      case "execution_target": {
+        query(url, []);
+        const body = executionTargetUpdateWireCommandSchema.parse(await readJson(request));
+        const handle = options.acquireAuthorityService?.(matched.projectId, body.scope.canvasId);
+        if (!handle) throw new WorkAssignmentServiceError("work_cross_project_forbidden");
+        try {
+          respond(response, 200, handle.service.updateExecutionTarget(actor, body));
+        } finally {
+          handle.release();
+        }
+        return true;
+      }
+      case "authority_get": {
+        const parameters = query(url, ["scope"]);
+        const scope = authorityScopeSchema.parse(parseJsonParameter(parameters.scope));
+        const handle = options.acquireAuthorityService?.(matched.projectId, scope.canvasId);
+        if (!handle) throw new WorkAssignmentServiceError("work_cross_project_forbidden");
+        try {
+          const result =
+            matched.authority === "responsibility"
+              ? handle.service.getResponsibility(actor, scope)
+              : matched.authority === "reviewer"
+                ? handle.service.getReviewer(actor, scope)
+                : handle.service.getExecutionTarget(actor, scope);
+          respond(response, 200, result);
+        } finally {
+          handle.release();
+        }
         return true;
       }
     }

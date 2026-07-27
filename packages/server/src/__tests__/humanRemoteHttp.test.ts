@@ -17,10 +17,13 @@ import {
   HumanIdentityRepository,
   HumanMembershipService
 } from "../identity/index.js";
+import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { HumanRemoteControlService } from "../humanRemoteControlService.js";
 import { handleHumanRemoteHttpRequest } from "../humanRemoteHttp.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
+import { ProjectAccessRepository } from "../projectAccessRepository.js";
 import { RemoteRuntimePortRegistry } from "../remoteRuntimeLocator.js";
+import { AuthorityRepository } from "../work/authorityRepository.js";
 
 const directories: string[] = [];
 const storageServers: PlanweaveServer[] = [];
@@ -63,18 +66,34 @@ async function setup() {
   storageServers.push(storage);
 
   const projectId = workspace.init.workspace.id;
+  const canvasId = "default";
+  const blockRef = "T-001#B-001";
   const otherProjectId = "trusted-other-project";
-  const authority = {
+  const projectAuthority = {
     hasProject: (candidate: string) => candidate === projectId || candidate === otherProjectId
   };
   const identity = new HumanIdentityRepository(storage.database);
   const membership = new HumanMembershipService({
     repository: identity,
-    projectAuthority: authority
+    projectAuthority
+  });
+  const workspaceIdentity = new WorkspaceIdentityRepository(storage.database);
+  const workspaceId = workspaceIdentity.ensureWorkspaceForLegacyProject(projectId);
+  const access = new ProjectAccessRepository(storage.database);
+  access.registerProjectInternal({
+    workspaceId,
+    projectId,
+    projectRoot: workspace.root
+  });
+  access.registerCanvasInternal({
+    workspaceId,
+    projectId,
+    canvasId,
+    packageDir: workspace.init.workspace.packageDir
   });
   const registry = new RemoteRuntimePortRegistry();
   registry.bind(
-    { projectId, canvasId: "default" },
+    { projectId, canvasId },
     createRemoteBlockRuntimePort({ projectRoot: workspace.root })
   );
   const artifacts = new ArtifactStore(storage.database, dataDirectory, 1024 * 1024);
@@ -94,7 +113,18 @@ async function setup() {
     { serverInstanceOwnerToken: storage.serverInstanceOwnerToken }
   );
   const host = coordination.hosts.register("Human Remote Host").host;
+  coordination.hosts.bindToWorkspace(host.id, workspaceId);
   coordination.hosts.reportOnline(host.id, ["acp.codex", "acp.session.load"], 1);
+  const authority = new AuthorityRepository(storage.database);
+  const executionTarget = authority.applyExecutionTarget({
+    mutation: {
+      schemaVersion: "execution-target/v1",
+      scope: { kind: "block", workspaceId, projectId, canvasId, blockRef },
+      target: { kind: "exact_host", hostId: host.id },
+      expectedRevision: 0
+    },
+    actor: { kind: "system", id: "human-remote-http-test" }
+  });
   const service = new HumanRemoteControlService({
     operations: coordination.operations,
     dispatches: coordination.dispatches,
@@ -110,7 +140,7 @@ async function setup() {
         await handleHumanHttpRequest(request, response, {
           service: membership,
           repository: identity,
-          projectAuthority: authority,
+          projectAuthority,
           allowInsecureDevelopment: true
         })
       ) {
@@ -120,7 +150,7 @@ async function setup() {
         await handleHumanRemoteHttpRequest(request, response, {
           service,
           repository: identity,
-          projectAuthority: authority,
+          projectAuthority,
           readiness: () =>
             acceptingMutations
               ? { status: "ready", schemaVersion: 1 }
@@ -148,12 +178,31 @@ async function setup() {
   return {
     origin: `http://127.0.0.1:${address.port}`,
     projectId,
+    canvasId,
+    blockRef,
     otherProjectId,
     host,
     coordination,
+    executionTargetRevision: executionTarget.revision,
     setAcceptingMutations(value: boolean) {
       acceptingMutations = value;
     }
+  };
+}
+
+function remoteDispatchBody(
+  fixture: Awaited<ReturnType<typeof setup>>,
+  idempotencyKey: string
+): Record<string, unknown> {
+  return {
+    schemaVersion: "remote-run/v2",
+    projectId: fixture.projectId,
+    canvasId: fixture.canvasId,
+    blockRef: fixture.blockRef,
+    idempotencyKey,
+    expectedResponsibilityRevision: 0,
+    expectedReviewerRevision: 0,
+    expectedExecutionTargetRevision: fixture.executionTargetRevision
   };
 }
 
@@ -206,11 +255,7 @@ describe("human remote operation HTTP", () => {
     const dispatched = await fetch(collection, {
       method: "POST",
       headers: headers(member.deviceToken),
-      body: JSON.stringify({
-        canvasId: "default",
-        blockRef: "T-001#B-001",
-        idempotencyKey: "human-remote-dispatch-1"
-      })
+      body: JSON.stringify(remoteDispatchBody(fixture, "human-remote-dispatch-1"))
     });
     const operation = (await dispatched.json()) as {
       operationId: string;
@@ -317,11 +362,7 @@ describe("human remote operation HTTP", () => {
     const token = await bootstrap(fixture.origin, fixture.projectId, "boundary-owner");
     const otherToken = await bootstrap(fixture.origin, fixture.otherProjectId, "other-owner");
     const path = `${fixture.origin}/api/v1/projects/${fixture.projectId}/remote-operations`;
-    const body = JSON.stringify({
-      canvasId: "default",
-      blockRef: "T-001#B-001",
-      idempotencyKey: "boundary-dispatch"
-    });
+    const body = JSON.stringify(remoteDispatchBody(fixture, "boundary-dispatch"));
 
     for (const invalidToken of ["pw_host_not_human", "operator-token-not-human"]) {
       const denied = await fetch(path, {
@@ -362,18 +403,16 @@ describe("human remote operation HTTP", () => {
     const dispatched = await fetch(collection, {
       method: "POST",
       headers: headers(token),
-      body: JSON.stringify({
-        canvasId: "default",
-        blockRef: "T-001#B-001",
-        idempotencyKey: "human-resume-dispatch"
-      })
+      body: JSON.stringify(remoteDispatchBody(fixture, "human-resume-dispatch"))
     });
+    expect(dispatched.status).toBe(202);
     const operation = (await dispatched.json()) as {
       operationId: string;
       dispatchId: string;
       executionAttemptId: string;
       attempt: { leaseId: string; stateVersion: number };
     };
+    expect(operation.dispatchId).toBeTruthy();
     const dispatch = fixture.coordination.dispatches.getRequired(operation.dispatchId);
     fixture.coordination.dispatches.accept(
       fixture.host.id,

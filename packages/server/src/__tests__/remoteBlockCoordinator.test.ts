@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 import { appendFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { createRemoteBlockRuntimePort, type PlanPackageManifest } from "@planweave-ai/runtime";
+import {
+  createRemoteBlockArtifactSource,
+  createRemoteBlockRuntimePort,
+  type PlanPackageManifest
+} from "@planweave-ai/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createTestWorkspace,
@@ -12,6 +16,8 @@ import { createRemoteBlockCoordination } from "../distributedCoordination.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 import { RemoteRuntimePortRegistry } from "../remoteRuntimeLocator.js";
 import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
+import { ProjectAccessRepository } from "../projectAccessRepository.js";
+import { AuthorityRepository } from "../work/authorityRepository.js";
 
 const directories: string[] = [];
 const servers: PlanweaveServer[] = [];
@@ -162,8 +168,78 @@ describe("RemoteBlockCoordinator", () => {
     });
   });
 
+  it("rechecks separated authority revisions before reentering an active Host attempt", async () => {
+    const fixture = await setup(true);
+    if (!fixture.host) throw new Error("expected_test_host");
+    const workspaceId = new WorkspaceIdentityRepository(
+      fixture.server.database
+    ).workspaceForLegacyProject(fixture.locator.projectId);
+    if (!workspaceId) throw new Error("workspace_mapping_missing");
+    const access = new ProjectAccessRepository(fixture.server.database);
+    access.registerProjectInternal({
+      workspaceId,
+      projectId: fixture.locator.projectId,
+      projectRoot: fixture.workspace.root
+    });
+    access.registerCanvasInternal({
+      workspaceId,
+      projectId: fixture.locator.projectId,
+      canvasId: fixture.locator.canvasId,
+      packageDir: fixture.workspace.init.workspace.packageDir
+    });
+    const authority = new AuthorityRepository(fixture.server.database);
+    const scope = {
+      kind: "block" as const,
+      workspaceId,
+      ...fixture.locator,
+      blockRef: "T-001#B-001"
+    };
+    authority.applyExecutionTarget({
+      mutation: {
+        schemaVersion: "execution-target/v1",
+        scope,
+        target: { kind: "exact_host", hostId: fixture.host.id },
+        expectedRevision: 0
+      },
+      actor: { kind: "system", id: "test-system" }
+    });
+    const outcome = await fixture.coordinator.dispatch({
+      ...fixture.locator,
+      blockRef: scope.blockRef,
+      idempotencyKey: "strict-authority-recheck",
+      expectedResponsibilityRevision: 0,
+      expectedReviewerRevision: 0,
+      expectedExecutionTargetRevision: 1,
+      strictAuthority: true
+    });
+    authority.applyReviewer({
+      mutation: {
+        schemaVersion: "review-assignment/v1",
+        scope,
+        principal: null,
+        expectedRevision: 0
+      },
+      actor: { kind: "system", id: "test-system" }
+    });
+
+    await expect(fixture.coordinator.reenter(outcome.operation.id)).rejects.toThrow(
+      "host_authorization_denied:stale_reviewer_revision"
+    );
+    expect(
+      fixture.server.database
+        .prepare("SELECT status FROM host_capacity_reservations WHERE lease_id=?")
+        .get(outcome.operation.attempt.leaseId)
+    ).toEqual({ status: "expired" });
+  });
+
   it("fails closed on source drift and on a missing restart locator", async () => {
     const fixture = await setup(false);
+    const acquireScoped = vi.fn(() => ({
+      runtime: fixture.runtime,
+      artifacts: createRemoteBlockArtifactSource({ projectRoot: fixture.workspace.root }),
+      release: vi.fn()
+    }));
+    fixture.registry.setScopedResolver(acquireScoped);
     const pending = await fixture.coordinator.dispatch({
       ...fixture.locator,
       blockRef: "T-001#B-001",
@@ -179,6 +255,10 @@ describe("RemoteBlockCoordinator", () => {
     await expect(fixture.coordinator.reenter(pending.operation.id)).rejects.toThrowError(
       "remote_source_changed"
     );
+    expect(acquireScoped).toHaveBeenCalled();
+    for (const binding of acquireScoped.mock.results) {
+      expect(binding.value.release).toHaveBeenCalledOnce();
+    }
     expect(
       fixture.server.database
         .prepare("SELECT diagnostic_code FROM remote_operations WHERE id=?")

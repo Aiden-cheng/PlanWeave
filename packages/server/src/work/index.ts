@@ -123,3 +123,35 @@ export {
   resetWorkAssignmentHttpRateLimits,
   type WorkAssignmentHttpOptions
 } from "./http.js";
+
+export {
+  AuthorityRepository,
+  type AuthorityRepositoryOptions
+} from "./authorityRepository.js";
+export {
+  AuthorityService,
+  type AuthorityServiceOptions
+} from "./authorityService.js";
+export {
+  authorityScopeSchema,
+  authorityRevisionSnapshotSchema,
+  authorityActorSchema,
+  responsibilityMutationSchema,
+  reviewerMutationSchema,
+  executionTargetMutationSchema,
+  exactBlockScopeSchema,
+  type AuthorityScope,
+  type AuthorityActor,
+  type AuthorityRevisionSnapshot,
+  type ResponsibilityMutation,
+  type ReviewerMutation,
+  type ExecutionTargetMutation
+} from "./authoritySchemas.js";
+export {
+  assertHumanScopeAuthorized,
+  assertAssignmentPrincipalActive,
+  assertExecutionTargetMutation,
+  hostCanSatisfyBlock,
+  evaluateHostAuthorization,
+  type AuthorityPolicyErrorCode
+} from "./authorityPolicy.js";

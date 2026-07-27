@@ -44,6 +44,7 @@ export const hostAuthorizationAttemptFactSchema = z.discriminatedUnion("status",
   z.object({ status: z.literal("reserved"), ...attemptIdentityShape }).strict(),
   z.object({ status: z.literal("activated"), ...attemptIdentityShape }).strict(),
   z.object({ status: z.literal("running"), ...attemptIdentityShape }).strict(),
+  z.object({ status: z.literal("awaiting_writeback"), ...attemptIdentityShape }).strict(),
   z.object({ status: z.literal("interrupted"), ...attemptIdentityShape }).strict(),
   z.object({ status: z.literal("completed"), ...attemptIdentityShape }).strict(),
   z.object({ status: z.literal("failed"), ...attemptIdentityShape }).strict(),
@@ -160,7 +161,7 @@ export const hostAuthorizationDecisionSchema = z
       const capabilitiesCompatible = facts.requiredCapabilities.every((capability) =>
         facts.advertisedCapabilities.includes(capability)
       );
-      const activeAttempt = ["reserved", "activated", "running"].includes(
+      const activeAttempt = ["reserved", "activated", "running", "awaiting_writeback"].includes(
         attemptResult.data.status
       );
       if (

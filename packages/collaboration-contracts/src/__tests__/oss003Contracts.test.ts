@@ -137,6 +137,17 @@ describe("OSS-003 collaboration authority contracts", () => {
     });
     expect(facts.currentRevisions.executionTargetRevision).toBe(4);
     expect(
+      hostAuthorizationFactsSchema.parse({
+        ...facts,
+        lease: { status: "active", leaseId: "lease-1", expiresAt: "2030-01-01T00:00:00.000Z" },
+        attempt: {
+          status: "awaiting_writeback",
+          dispatchId: "dispatch-1",
+          executionAttemptId: "attempt-1"
+        }
+      }).attempt.status
+    ).toBe("awaiting_writeback");
+    expect(
       hostAuthorizationDecisionSchema.parse({
         schemaVersion: "host-authorization/v1",
         decision: "deny",

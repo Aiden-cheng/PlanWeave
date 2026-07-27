@@ -1,6 +1,6 @@
 import {
   remoteActionViewSchema,
-  remoteDispatchWireCommandSchema,
+  remoteDispatchIntentSchema,
   remoteEventQuerySchema,
   remoteEventReplaySchema,
   remoteHumanExecutionActionCommandSchema,
@@ -31,6 +31,10 @@ export type HumanRemoteControlServiceOptions = {
   coordinator: RemoteBlockCoordinator;
   events: RemoteAcpEventRepository;
   interactions: RemoteInteractionService;
+  authorizeCanvas?: (
+    context: HumanAuthContext,
+    scope: { projectId: string; canvasId: string }
+  ) => void;
 };
 
 export class HumanRemoteControlService {
@@ -38,8 +42,23 @@ export class HumanRemoteControlService {
 
   async dispatch(context: HumanAuthContext, projectId: string, rawRequest: unknown) {
     this.authorize(context, projectId);
-    const request = remoteDispatchWireCommandSchema.parse(rawRequest);
-    const outcome = await this.options.coordinator.dispatch({ projectId, ...request });
+    const request = remoteDispatchIntentSchema.parse(rawRequest);
+    if (request.projectId !== projectId)
+      throw new HumanRemoteControlError("human_remote_project_mismatch");
+    this.options.authorizeCanvas?.(context, {
+      projectId: request.projectId,
+      canvasId: request.canvasId
+    });
+    const outcome = await this.options.coordinator.dispatch({
+      projectId: request.projectId,
+      canvasId: request.canvasId,
+      blockRef: request.blockRef,
+      idempotencyKey: request.idempotencyKey,
+      expectedResponsibilityRevision: request.expectedResponsibilityRevision,
+      expectedReviewerRevision: request.expectedReviewerRevision,
+      expectedExecutionTargetRevision: request.expectedExecutionTargetRevision,
+      strictAuthority: true
+    });
     return this.observeOperation(context, projectId, outcome.operation.id);
   }
 
@@ -199,13 +218,15 @@ export class HumanRemoteControlService {
     if (operation.projectId !== projectId) {
       throw new HumanRemoteControlError("human_cross_project_forbidden");
     }
+    this.options.authorizeCanvas?.(context, {
+      projectId: operation.projectId,
+      canvasId: operation.canvasId
+    });
     return operation;
   }
 }
 
-function toHumanInteractionView(
-  interaction: ReturnType<RemoteInteractionService["getRequired"]>
-) {
+function toHumanInteractionView(interaction: ReturnType<RemoteInteractionService["getRequired"]>) {
   return remoteInteractionViewSchema.parse({
     request: interaction.request,
     operationId: interaction.operationId,

@@ -20,9 +20,7 @@ describe("HumanObserverJournal", () => {
     applyMigrations(database);
 
     expect(
-      database
-        .prepare("SELECT version FROM schema_migrations WHERE version=26")
-        .get()?.version
+      database.prepare("SELECT version FROM schema_migrations WHERE version=26").get()?.version
     ).toBe(26);
     expect(
       database
@@ -37,7 +35,7 @@ describe("HumanObserverJournal", () => {
     const database = await openServerDatabase(":memory:", 5_000);
     databases.push(database);
     applyMigrations(database);
-    expect(latestCentralSchemaVersion).toBe(27);
+    expect(latestCentralSchemaVersion).toBe(29);
     const journal = new HumanObserverJournal(database, 2);
 
     const first = journal.appendInCallerTransaction("project-a", { kind: "membership" });

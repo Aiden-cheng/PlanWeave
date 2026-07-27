@@ -8,11 +8,26 @@ function locatorKey(locator: RemoteRuntimeLocator): string {
   return `${locator.projectId}\0${locator.canvasId}`;
 }
 
+export type ScopedRemoteRuntimeBinding = {
+  runtime: RemoteBlockRuntimePort;
+  artifacts: RemoteBlockArtifactSource;
+  release(): void;
+};
+
+type ScopedRemoteRuntimeResolver = (
+  locator: RemoteRuntimeLocator
+) => ScopedRemoteRuntimeBinding | Promise<ScopedRemoteRuntimeBinding>;
+
 export class RemoteRuntimePortRegistry implements RemoteBlockRuntimeResolverPort {
   private readonly ports = new Map<
     string,
     { runtime: RemoteBlockRuntimePort; artifacts?: RemoteBlockArtifactSource }
   >();
+  private scopedResolver: ScopedRemoteRuntimeResolver | undefined;
+
+  setScopedResolver(resolver: ScopedRemoteRuntimeResolver): void {
+    this.scopedResolver = resolver;
+  }
 
   bind(
     locator: RemoteRuntimeLocator,
@@ -36,6 +51,27 @@ export class RemoteRuntimePortRegistry implements RemoteBlockRuntimeResolverPort
     return binding.runtime;
   }
 
+  /** Acquire one request-scoped binding. An installed scoped resolver is authoritative. */
+  async acquire(
+    locator: RemoteRuntimeLocator
+  ): Promise<{ runtime: RemoteBlockRuntimePort; release(): void }> {
+    if (this.scopedResolver) {
+      const binding = await this.scopedResolver(locator);
+      return runtimeHandle(binding.runtime, binding.release);
+    }
+    return runtimeHandle(this.resolve(locator), () => undefined);
+  }
+
+  async acquireArtifactSource(
+    locator: RemoteRuntimeLocator
+  ): Promise<{ source: RemoteBlockArtifactSource; release(): void }> {
+    if (this.scopedResolver) {
+      const binding = await this.scopedResolver(locator);
+      return artifactHandle(binding.artifacts, binding.release);
+    }
+    return artifactHandle(this.resolveArtifactSource(locator), () => undefined);
+  }
+
   resolveArtifactSource(locator: RemoteRuntimeLocator): RemoteBlockArtifactSource {
     const binding = this.ports.get(locatorKey(locator));
     if (!binding) {
@@ -48,4 +84,27 @@ export class RemoteRuntimePortRegistry implements RemoteBlockRuntimeResolverPort
     }
     return binding.artifacts;
   }
+}
+
+function once(releaseBinding: () => void): () => void {
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    releaseBinding();
+  };
+}
+
+function runtimeHandle(
+  runtime: RemoteBlockRuntimePort,
+  releaseBinding: () => void
+): { runtime: RemoteBlockRuntimePort; release(): void } {
+  return { runtime, release: once(releaseBinding) };
+}
+
+function artifactHandle(
+  source: RemoteBlockArtifactSource,
+  releaseBinding: () => void
+): { source: RemoteBlockArtifactSource; release(): void } {
+  return { source, release: once(releaseBinding) };
 }

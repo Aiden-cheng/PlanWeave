@@ -23,40 +23,44 @@ export class RuntimeInputArtifactMaterializer implements RemoteInputArtifactPort
 
   async materialize(rawCandidate: RemoteBlockDispatchCandidate): Promise<void> {
     const candidate = remoteBlockDispatchCandidateSchema.parse(rawCandidate);
-    const source = this.runtimes.resolveArtifactSource(candidate);
-    for (const declared of candidate.inputArtifacts) {
-      if (!declared.mediaType) throw new Error("remote_input_artifact_media_type_required");
-      const artifact = verifiedRemoteBlockArtifactSchema.parse(
-        await source.read({
-          targetBlockRef: candidate.blockRef,
-          sourceRevision: candidate.sourceRevision,
-          artifactRef: declared.artifactRef,
-          logicalName: declared.logicalName,
-          mediaType: declared.mediaType
-        })
-      );
-      if (
-        artifact.artifactRef !== declared.artifactRef ||
-        artifact.logicalName !== declared.logicalName ||
-        artifact.mediaType !== declared.mediaType
-      ) {
-        throw new Error("remote_input_artifact_identity_mismatch");
+    const acquired = await this.runtimes.acquireArtifactSource(candidate);
+    try {
+      for (const declared of candidate.inputArtifacts) {
+        if (!declared.mediaType) throw new Error("remote_input_artifact_media_type_required");
+        const artifact = verifiedRemoteBlockArtifactSchema.parse(
+          await acquired.source.read({
+            targetBlockRef: candidate.blockRef,
+            sourceRevision: candidate.sourceRevision,
+            artifactRef: declared.artifactRef,
+            logicalName: declared.logicalName,
+            mediaType: declared.mediaType
+          })
+        );
+        if (
+          artifact.artifactRef !== declared.artifactRef ||
+          artifact.logicalName !== declared.logicalName ||
+          artifact.mediaType !== declared.mediaType
+        ) {
+          throw new Error("remote_input_artifact_identity_mismatch");
+        }
+        const digest = createHash("sha256").update(artifact.bytes).digest("hex");
+        if (digest !== digestFromRef(declared.artifactRef)) {
+          throw new Error("remote_input_artifact_digest_mismatch");
+        }
+        const stored = await this.artifacts.put({
+          expectedSha256: digest,
+          expectedSizeBytes: artifact.bytes.byteLength,
+          mediaType: artifact.mediaType,
+          chunks: (async function* () {
+            yield artifact.bytes;
+          })()
+        });
+        if (stored.ref !== declared.artifactRef || stored.mediaType !== declared.mediaType) {
+          throw new Error("remote_input_artifact_store_conflict");
+        }
       }
-      const digest = createHash("sha256").update(artifact.bytes).digest("hex");
-      if (digest !== digestFromRef(declared.artifactRef)) {
-        throw new Error("remote_input_artifact_digest_mismatch");
-      }
-      const stored = await this.artifacts.put({
-        expectedSha256: digest,
-        expectedSizeBytes: artifact.bytes.byteLength,
-        mediaType: artifact.mediaType,
-        chunks: (async function* () {
-          yield artifact.bytes;
-        })()
-      });
-      if (stored.ref !== declared.artifactRef || stored.mediaType !== declared.mediaType) {
-        throw new Error("remote_input_artifact_store_conflict");
-      }
+    } finally {
+      acquired.release();
     }
   }
 }

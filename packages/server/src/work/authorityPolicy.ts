@@ -1,0 +1,298 @@
+import {
+  hostAuthorizationDecisionSchema,
+  hostAuthorizationFactsSchema,
+  type HostAuthorizationDecision,
+  type HostAuthorizationFacts,
+  type HostAuthorizationCurrentRevisions,
+  type HostAuthorizationDecisionReason,
+  type ExactBlockExecutionScope,
+  type ExecutionTarget
+} from "@planweave-ai/collaboration-contracts";
+import type { AgentHost } from "../hosts.js";
+import { isAgentHostOnline } from "../hosts.js";
+import type { ProjectAccessRepository } from "../projectAccessRepository.js";
+import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
+import type { HumanAuthContext } from "../identity/schemas.js";
+import type { WorkItemPackageFacts } from "./schemas.js";
+
+export type AuthorityPolicyErrorCode =
+  | "authority_input_invalid"
+  | "authority_scope_forbidden"
+  | "authority_project_mismatch"
+  | "authority_workspace_mismatch"
+  | "authority_membership_required"
+  | "authority_revision_conflict"
+  | "authority_host_not_found"
+  | "authority_host_revoked"
+  | "authority_host_workspace_mismatch"
+  | "authority_host_capability_mismatch"
+  | "authority_migration_repair_required"
+  | "host_cross_workspace"
+  | "host_workspace_acl_denied"
+  | "host_project_acl_denied"
+  | "host_canvas_acl_denied"
+  | "host_missing"
+  | "host_revoked"
+  | "host_offline"
+  | "host_at_capacity"
+  | "host_capability_mismatch"
+  | "host_lease_missing"
+  | "host_attempt_mismatch"
+  | "host_stale_responsibility_revision"
+  | "host_stale_reviewer_revision"
+  | "host_stale_execution_target_revision";
+
+export function assertHumanScopeAuthorized(input: {
+  actor: HumanAuthContext;
+  scope: { workspaceId: string; projectId: string; canvasId: string };
+  access: ProjectAccessRepository;
+  workspaceIdentity: WorkspaceIdentityRepository;
+}): void {
+  const { actor, scope } = input;
+  if (actor.projectId !== scope.projectId) throw new Error("authority_project_mismatch");
+  const workspace = input.workspaceIdentity.workspaceForLegacyProject(scope.projectId);
+  if (!workspace || workspace !== scope.workspaceId)
+    throw new Error("authority_workspace_mismatch");
+  const subject = { kind: "human" as const, id: actor.humanPrincipalId };
+  const project = input.access.decideProjectAccess({
+    workspaceId: scope.workspaceId,
+    projectId: scope.projectId,
+    actor: subject
+  });
+  if (project.decision !== "allow") throw new Error("authority_scope_forbidden");
+  const canvas = input.access.decideCanvasAccess({
+    workspaceId: scope.workspaceId,
+    projectId: scope.projectId,
+    canvasId: scope.canvasId,
+    actor: subject
+  });
+  if (canvas.decision !== "allow") throw new Error("authority_scope_forbidden");
+}
+
+export function assertAssignmentPrincipalActive(input: {
+  actor: HumanAuthContext;
+  projectId: string;
+  humanPrincipalId: string;
+  identity: { getActiveMembership(projectId: string, humanPrincipalId: string): unknown };
+}): void {
+  if (!input.identity.getActiveMembership(input.projectId, input.humanPrincipalId)) {
+    throw new Error("authority_membership_required");
+  }
+}
+
+export function assertExecutionTargetMutation(input: {
+  actor: HumanAuthContext;
+  scope: ExactBlockExecutionScope;
+  target: ExecutionTarget;
+  access: ProjectAccessRepository;
+  workspaceIdentity: WorkspaceIdentityRepository;
+  hosts: { get(hostId: string): AgentHost | undefined };
+  packageFacts: WorkItemPackageFacts;
+}): void {
+  assertHumanScopeAuthorized({ ...input, scope: input.scope });
+  if (!input.packageFacts.exists || input.packageFacts.kind !== "block")
+    throw new Error("authority_input_invalid");
+  if (input.target.kind !== "exact_host") return;
+  const host = input.hosts.get(input.target.hostId);
+  if (!host) throw new Error("authority_host_not_found");
+  if (host.revokedAt !== undefined) throw new Error("authority_host_revoked");
+  const workspace = input.workspaceIdentity.workspaceForHost(host.id);
+  if (!workspace || workspace !== input.scope.workspaceId)
+    throw new Error("authority_host_workspace_mismatch");
+  if (
+    !input.packageFacts.requiredCapabilities.every((capability) =>
+      host.capabilities.includes(capability)
+    )
+  ) {
+    throw new Error("authority_host_capability_mismatch");
+  }
+}
+
+export function hostCanSatisfyBlock(
+  host: AgentHost,
+  input: {
+    scope: ExactBlockExecutionScope;
+    requiredCapabilities: readonly string[];
+    workspaceIdentity: WorkspaceIdentityRepository;
+    now: Date;
+    hostOfflineAfterMs: number;
+    activeReservations: number;
+  }
+): boolean {
+  const workspace = input.workspaceIdentity.workspaceForHost(host.id);
+  return (
+    workspace === input.scope.workspaceId &&
+    host.revokedAt === undefined &&
+    isAgentHostOnline(host, { now: input.now, hostOfflineAfterMs: input.hostOfflineAfterMs }) &&
+    host.capacity > input.activeReservations &&
+    input.requiredCapabilities.every((capability) => host.capabilities.includes(capability))
+  );
+}
+
+function denyDecision(input: {
+  scope: ExactBlockExecutionScope;
+  hostId: string;
+  reason: HostAuthorizationDecisionReason;
+  currentRevisions: HostAuthorizationCurrentRevisions;
+  evaluatedAt: string;
+  facts?: HostAuthorizationFacts;
+}): HostAuthorizationDecision {
+  return hostAuthorizationDecisionSchema.parse({
+    schemaVersion: "host-authorization/v1",
+    decision: "deny",
+    scope: input.scope,
+    hostId: input.hostId,
+    hostWorkspaceId: input.facts?.hostWorkspaceId ?? input.scope.workspaceId,
+    reason: input.reason,
+    currentRevisions: input.currentRevisions,
+    evaluatedAt: input.evaluatedAt,
+    ...(input.facts ? { facts: input.facts } : {})
+  });
+}
+
+/** Final execution/resolve check. Selection must use `hostCanSatisfyBlock` instead. */
+export function evaluateHostAuthorization(input: {
+  facts: HostAuthorizationFacts;
+}): HostAuthorizationDecision {
+  const facts = hostAuthorizationFactsSchema.parse(input.facts);
+  const { scope, hostId, currentRevisions, evaluatedAt } = facts;
+  if (facts.hostWorkspaceId !== scope.workspaceId)
+    return denyDecision({
+      scope,
+      hostId,
+      reason: "cross_workspace",
+      currentRevisions,
+      evaluatedAt,
+      facts
+    });
+  if (!facts.workspaceAcl.allowed)
+    return denyDecision({
+      scope,
+      hostId,
+      reason: "workspace_acl_denied",
+      currentRevisions,
+      evaluatedAt,
+      facts
+    });
+  if (!facts.projectAcl.allowed)
+    return denyDecision({
+      scope,
+      hostId,
+      reason: "project_acl_denied",
+      currentRevisions,
+      evaluatedAt,
+      facts
+    });
+  if (!facts.canvasAcl.allowed)
+    return denyDecision({
+      scope,
+      hostId,
+      reason: "canvas_acl_denied",
+      currentRevisions,
+      evaluatedAt,
+      facts
+    });
+  if (facts.revoked)
+    return denyDecision({
+      scope,
+      hostId,
+      reason: "host_revoked",
+      currentRevisions,
+      evaluatedAt,
+      facts
+    });
+  if (!facts.online)
+    return denyDecision({
+      scope,
+      hostId,
+      reason: "host_offline",
+      currentRevisions,
+      evaluatedAt,
+      facts
+    });
+  if (facts.capacityRemaining < 1)
+    return denyDecision({
+      scope,
+      hostId,
+      reason: "host_at_capacity",
+      currentRevisions,
+      evaluatedAt,
+      facts
+    });
+  if (
+    !facts.requiredCapabilities.every((capability) =>
+      facts.advertisedCapabilities.includes(capability)
+    )
+  )
+    return denyDecision({
+      scope,
+      hostId,
+      reason: "capability_mismatch",
+      currentRevisions,
+      evaluatedAt,
+      facts
+    });
+  if (facts.lease.status !== "active")
+    return denyDecision({
+      scope,
+      hostId,
+      reason: "lease_missing",
+      currentRevisions,
+      evaluatedAt,
+      facts
+    });
+  if (
+    !(
+      facts.attempt.status === "reserved" ||
+      facts.attempt.status === "activated" ||
+      facts.attempt.status === "running" ||
+      facts.attempt.status === "awaiting_writeback"
+    )
+  )
+    return denyDecision({
+      scope,
+      hostId,
+      reason: "attempt_mismatch",
+      currentRevisions,
+      evaluatedAt,
+      facts
+    });
+  if (facts.expectedRevisions.responsibilityRevision !== currentRevisions.responsibilityRevision)
+    return denyDecision({
+      scope,
+      hostId,
+      reason: "stale_responsibility_revision",
+      currentRevisions,
+      evaluatedAt,
+      facts
+    });
+  if (facts.expectedRevisions.reviewerRevision !== currentRevisions.reviewerRevision)
+    return denyDecision({
+      scope,
+      hostId,
+      reason: "stale_reviewer_revision",
+      currentRevisions,
+      evaluatedAt,
+      facts
+    });
+  if (facts.expectedRevisions.executionTargetRevision !== currentRevisions.executionTargetRevision)
+    return denyDecision({
+      scope,
+      hostId,
+      reason: "stale_execution_target_revision",
+      currentRevisions,
+      evaluatedAt,
+      facts
+    });
+  return hostAuthorizationDecisionSchema.parse({
+    schemaVersion: "host-authorization/v1",
+    decision: "allow",
+    scope,
+    hostId,
+    hostWorkspaceId: facts.hostWorkspaceId,
+    reason: "authorized",
+    currentRevisions,
+    evaluatedAt,
+    facts
+  });
+}

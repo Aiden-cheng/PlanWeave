@@ -98,6 +98,11 @@ describe("human identity migration v16", () => {
     databases.push(database);
     database.exec(`
       CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+      CREATE TABLE human_principals (
+        human_principal_id TEXT PRIMARY KEY,
+        display_name TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
       CREATE TABLE project_memberships (
         membership_id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,
@@ -107,6 +112,19 @@ describe("human identity migration v16", () => {
         updated_at TEXT NOT NULL,
         revoked_at TEXT
       );
+      CREATE TABLE human_device_credentials (
+        device_credential_id TEXT PRIMARY KEY,
+        human_principal_id TEXT NOT NULL,
+        minted_for_project_id TEXT NOT NULL,
+        label TEXT,
+        token_sha256 TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL,
+        expires_at TEXT,
+        revoked_at TEXT,
+        last_used_at TEXT
+      );
+      INSERT INTO human_principals(human_principal_id,display_name,created_at)
+      VALUES ('human-old','Old Human','2026-01-01T00:00:00.000Z');
       INSERT INTO project_memberships(
         membership_id,project_id,human_principal_id,role,created_at,updated_at
       ) VALUES (
@@ -155,7 +173,7 @@ describe("human identity migration v16", () => {
     // Minimal tables required only if later migrations depend on them — v16 is additive.
     applyMigrations(database);
     expect(centralSchemaVersion(database)).toBe(latestCentralSchemaVersion);
-    expect(latestCentralSchemaVersion).toBe(27);
+    expect(latestCentralSchemaVersion).toBe(29);
 
     for (const table of [
       "human_principals",

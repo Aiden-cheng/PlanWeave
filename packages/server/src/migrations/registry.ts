@@ -3,6 +3,7 @@ import { coreMigrations } from "./core.js";
 import { identityMigrations } from "./identity.js";
 import { migration26 } from "./legacyTail.js";
 import { aclRegistryMigration } from "./aclRegistry.js";
+import { assignmentAuthorityMigration } from "./assignment.js";
 import type { Migration, MigrationModule } from "./types.js";
 
 const identityModule: MigrationModule = { name: "identity", migrations: identityMigrations };
@@ -17,7 +18,8 @@ export const migrationModules: readonly MigrationModule[] = [
   collaborationMigrations,
   observerMigrations,
   identityModule,
-  { name: "acl-registry", migrations: [aclRegistryMigration] }
+  { name: "acl-registry", migrations: [aclRegistryMigration] },
+  { name: "assignment-authority", migrations: [assignmentAuthorityMigration] }
 ];
 
 const flattened = migrationModules.flatMap((module) => module.migrations);
