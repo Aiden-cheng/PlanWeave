@@ -118,11 +118,8 @@ export function SearchView({
     taskTitle: t("searchSourceTaskTitle")
   };
   return (
-    <section className="flex h-full min-h-0 flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-normal text-text-strong">{t("search")}</h1>
-        <p className="mt-1 text-sm text-text-muted">{t("searchPlaceholder")}</p>
-      </div>
+    <section aria-label={t("search")} className="flex h-full min-h-0 flex-col gap-4">
+      <p className="text-sm text-text-muted">{t("searchPlaceholder")}</p>
       <div className="flex flex-col gap-4 rounded-md border border-border/80 bg-surface-raised p-4 shadow-sm">
         <div className="flex flex-col gap-2">
           <div className="text-sm font-medium text-text-strong">{t("query")}</div>

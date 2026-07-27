@@ -75,7 +75,7 @@ export function PeopleView({
 
   return (
     <section
-      className="mx-auto flex h-full min-h-0 w-full max-w-5xl flex-col rounded-xl border border-border/80 bg-surface p-5 shadow-sm"
+      className="flex h-full min-h-0 w-full flex-col"
       data-testid="people-view"
       aria-label={t("peopleTitle")}
     >
@@ -91,6 +91,7 @@ export function PeopleView({
         actionError={panel.actionError}
         actionBusy={panel.actionBusy}
         pendingInvitation={panel.pendingInvitation}
+        showTitle={false}
         t={t}
         onCreateInvitation={panel.createInvitation}
         onCopyInvitationToken={copyText}

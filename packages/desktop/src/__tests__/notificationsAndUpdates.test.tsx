@@ -69,7 +69,8 @@ describe("desktop renderer component interactions", () => {
       />
     );
 
-    expect(screen.getByText("通知").closest("[data-slot='card']")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "通知" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "通知" })).toBeInTheDocument();
     expect(screen.getByText("未读")).toBeInTheDocument();
     expect(screen.getByText("已读")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "标记为已读: 最新记录" }));

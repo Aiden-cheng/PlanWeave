@@ -72,6 +72,8 @@ describe("SearchView", () => {
 
     expect(screen.getByText("Open a project to search")).toBeInTheDocument();
     expect(screen.getByText(/Search can find tasks, blocks, prompts/)).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Search" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Search" })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Open Project" }));
 
     expect(handleOpenProject).toHaveBeenCalledTimes(1);

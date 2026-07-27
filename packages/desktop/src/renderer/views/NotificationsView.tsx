@@ -64,11 +64,12 @@ export function NotificationsView({
   };
 
   return (
-    <section className="flex h-full min-h-0 flex-col gap-4" data-testid="notifications-view">
+    <section
+      aria-label={t("notifications")}
+      className="flex h-full min-h-0 flex-col gap-4"
+      data-testid="notifications-view"
+    >
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-normal text-text-strong">
-          {t("notifications")}
-        </h1>
         <div className="text-sm text-text-muted">
           {notificationItems.length > 0
             ? `${t("unreadNotifications")}: ${unreadCount} / ${notificationItems.length}`

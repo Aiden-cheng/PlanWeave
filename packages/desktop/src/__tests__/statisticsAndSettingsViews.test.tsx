@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsSwitchRow } from "../renderer/components/SettingsSwitchRow";
 import { createTranslator } from "../renderer/i18n";
 import { StatisticsView } from "../renderer/views/StatisticsView";
+import { TodoView } from "../renderer/views/TodoView";
 import { cleanupRendererTestEnvironment } from "./helpers/rendererTestEnvironment";
 
 afterEach(cleanupRendererTestEnvironment);
@@ -59,6 +60,23 @@ describe("desktop renderer component interactions", () => {
     expect(screen.getByText("Total Recorded Time")).toBeInTheDocument();
     expect(screen.getByText("1h 50m 08s")).toBeInTheDocument();
     expect(screen.getByText("13 timed runs")).toBeInTheDocument();
+    expect(screen.queryByText("Statistics")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Statistics" })).toBeInTheDocument();
+  });
+
+  it("does not repeat the selected Todo navigation label in the content", () => {
+    render(
+      <TodoView
+        executionPlan={null}
+        handleBlockSelect={vi.fn().mockResolvedValue(undefined)}
+        t={createTranslator("en")}
+        todoGroups={null}
+      />
+    );
+
+    expect(screen.queryByText("Todo")).not.toBeInTheDocument();
+    expect(screen.getByText("Ready queue")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Todo" })).toBeInTheDocument();
   });
 
   it("renders settings rows as switch controls", async () => {

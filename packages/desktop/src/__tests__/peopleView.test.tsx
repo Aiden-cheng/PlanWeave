@@ -14,7 +14,8 @@ describe("PeopleView", () => {
     render(<PeopleView api={null} t={createTranslator("en")} />);
 
     expect(screen.getByTestId("people-view")).toHaveAccessibleName("Project people");
-    expect(screen.getByRole("heading", { level: 1, name: "Project people" })).toBeInTheDocument();
+    expect(screen.getByTestId("people-view")).not.toHaveClass("border");
+    expect(screen.queryByRole("heading", { name: "Project people" })).not.toBeInTheDocument();
     expect(screen.getByTestId("people-panel")).toHaveAttribute("data-mode", "disconnected");
     expect(screen.getByTestId("people-connect-form")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument();

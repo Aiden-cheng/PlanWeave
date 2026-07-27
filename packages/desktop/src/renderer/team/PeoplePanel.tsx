@@ -35,6 +35,8 @@ export type PeoplePanelProps = {
   onRefreshDetails: () => Promise<void>;
   /** Optional connect form when disconnected. */
   connectSlot?: ReactNode;
+  /** Page shells may already expose the selected destination. */
+  showTitle?: boolean;
 };
 
 function MemberAvatar({ initials, label }: { initials: string; label: string }) {
@@ -101,7 +103,8 @@ export function PeoplePanel({
   onRemoveMember,
   onRevokeDevice,
   onRefreshDetails,
-  connectSlot
+  connectSlot,
+  showTitle = true
 }: PeoplePanelProps) {
   const [showOwnerDetails, setShowOwnerDetails] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -120,7 +123,9 @@ export function PeoplePanel({
   if (mode === "disconnected" || mode === "connecting") {
     return (
       <div className="flex flex-col gap-2" data-testid="people-panel" data-mode={mode}>
-        <h1 className="text-lg font-semibold text-text-strong">{t("peopleTitle")}</h1>
+        {showTitle ? (
+          <h1 className="text-lg font-semibold text-text-strong">{t("peopleTitle")}</h1>
+        ) : null}
         <p className="text-xs text-muted-foreground">
           {mode === "connecting" ? t("peopleConnecting") : t("peopleDisconnected")}
         </p>
@@ -132,7 +137,9 @@ export function PeoplePanel({
   if (mode === "auth_expired" || mode === "forbidden") {
     return (
       <div className="flex flex-col gap-2" data-testid="people-panel" data-mode={mode}>
-        <h1 className="text-lg font-semibold text-text-strong">{t("peopleTitle")}</h1>
+        {showTitle ? (
+          <h1 className="text-lg font-semibold text-text-strong">{t("peopleTitle")}</h1>
+        ) : null}
         <div
           className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-xs text-destructive"
           role="alert"
@@ -149,7 +156,9 @@ export function PeoplePanel({
     <div className="flex h-full min-h-0 flex-col gap-3" data-testid="people-panel" data-mode={mode}>
       <div className="flex items-start justify-between gap-2">
         <div>
-          <h1 className="text-lg font-semibold text-text-strong">{t("peopleTitle")}</h1>
+          {showTitle ? (
+            <h1 className="text-lg font-semibold text-text-strong">{t("peopleTitle")}</h1>
+          ) : null}
           <p className="text-xs text-muted-foreground" data-testid="people-presence-summary">
             {t("peopleMemberCount").replace("{count}", String(presence.memberCount))}
             {" · "}

@@ -66,15 +66,11 @@ export function StatisticsView({
   const reviewPercent = clampPercent(statistics.reviewPassedRatio * 100);
 
   return (
-    <ScrollArea className="h-full">
+    <ScrollArea aria-label={t("statistics")} className="h-full" role="region">
       <div className="flex min-h-full flex-col gap-3 pr-3 pb-2">
         <section className="animate-in fade-in slide-in-from-bottom-2 overflow-hidden rounded-md border border-border/80 bg-surface-raised text-text shadow-sm duration-500">
           <div className="grid lg:grid-cols-[minmax(0,1fr)_minmax(0,0.95fr)]">
-            <div className="flex flex-col justify-between gap-7 p-6">
-              <div className="flex items-center gap-2 text-[11px] font-medium tracking-[0.18em] text-muted-foreground uppercase">
-                <span className="size-1.5 rounded-full bg-foreground" />
-                {t("statistics")}
-              </div>
+            <div className="flex flex-col justify-center p-6">
               <div>
                 <div className="flex items-end gap-3">
                   <span className="font-mono text-6xl leading-none font-semibold tracking-tight tabular-nums">
