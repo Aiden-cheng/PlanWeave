@@ -10,6 +10,7 @@ import { HostEnrollmentService } from "../hostEnrollment.js";
 import { hashOperatorToken, OperatorTokenRegistry } from "../operatorAuth.js";
 import { RemoteControlService } from "../remoteControlService.js";
 import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
+import { OperatorSessionStore } from "../identity/operatorSessionStore.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 import { serverEventSchema, type ServerEvent } from "../protocol.js";
 import { attachAgentHostWebSocketServer, type AgentHostWebSocketServer } from "../wsServer.js";
@@ -227,8 +228,15 @@ describe("agent host WebSocket transport", () => {
     );
     await expect(events.next()).resolves.toMatchObject({ type: "host.welcome" });
 
-    const operatorToken = "operator_revoke_test_token_1234567890";
-    const authorization = new OperatorTokenRegistry([
+    const operatorToken = `pw_operator_${"R".repeat(43)}`;
+    new OperatorSessionStore(database.database).create({
+      workspaceId,
+      operatorId: "operator-revoke",
+      credentialSha256: hashOperatorToken(operatorToken),
+      issuedAt: "2026-01-01T00:00:00.000Z",
+      expiresAt: "2030-01-01T00:00:00.000Z"
+    });
+    const authorization = new OperatorTokenRegistry(database.database, [
       {
         operatorId: "operator-revoke",
         tokenSha256: hashOperatorToken(operatorToken),

@@ -34,7 +34,7 @@ async function secureConfig() {
     operatorCredentials: [
       {
         operatorId: "admin",
-        tokenSha256: hashOperatorToken("config_admin_token_abcdefghijklmnopqrstuvwxyz"),
+        tokenSha256: hashOperatorToken(`pw_operator_${"C".repeat(43)}`),
         projectIds: [],
         serverAdmin: true
       }

@@ -5,6 +5,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { hashOperatorToken } from "../operatorAuth.js";
+import { OperatorSessionStore } from "../identity/operatorSessionStore.js";
+import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
+import { openServerDatabase } from "../sqlite.js";
 import { serverPackageVersion } from "../packageInfo.js";
 import { emptyChecks, emptyIdentities, type VpsE2eEvidence } from "./evidence.js";
 import { createFixtureWorkspace } from "./fixtureWorkspace.js";
@@ -59,6 +62,27 @@ const DEFAULT_TIMEOUT_MS = 45_000;
 const HOST_CAPACITY = 2;
 const HOST_CAPABILITIES = ["acp.test"] as const;
 const HOST_DISPLAY_NAME = "local-tls-fixture-host";
+
+async function seedOperatorSession(databasePath: string, projectId: string, token: string) {
+  const database = await openServerDatabase(databasePath, 5_000);
+  try {
+    const workspaceId = new WorkspaceIdentityRepository(database).workspaceForLegacyProject(projectId);
+    if (!workspaceId) throw new Error("vps_e2e_workspace_missing");
+    const existing = database
+      .prepare("SELECT 1 FROM workspace_operator_sessions WHERE operator_id=?")
+      .get("vps-e2e-operator");
+    if (existing) return;
+    new OperatorSessionStore(database).create({
+      workspaceId,
+      operatorId: "vps-e2e-operator",
+      credentialSha256: hashOperatorToken(token),
+      issuedAt: "2026-01-01T00:00:00.000Z",
+      expiresAt: "2030-01-01T00:00:00.000Z"
+    });
+  } finally {
+    database.close();
+  }
+}
 
 type OperatorView = {
   operationId: string;
@@ -199,7 +223,7 @@ export async function runLocalTlsFixture(options: {
 
     const port = await allocateEphemeralPort();
     const origin = `https://127.0.0.1:${port}`;
-    const operatorToken = `vps_e2e_operator_${randomBytes(24).toString("hex")}`;
+    const operatorToken = `pw_operator_${randomBytes(32).toString("base64url").slice(0, 43)}`;
     const maxArtifactBytes = 8 * 1024 * 1024;
     const maxWebSocketPayloadBytes = 256 * 1024;
 
@@ -317,6 +341,7 @@ export async function runLocalTlsFixture(options: {
         diagnostics: () => redactSensitiveText(server?.logs.stderr ?? "")
       }
     );
+    await seedOperatorSession(join(root, "server-data", "planweave-server.sqlite"), workspace.projectId, operatorToken);
 
     const versionResponse = await request(`${origin}/version`);
     const versionBody = (await versionResponse.json()) as {
@@ -619,6 +644,7 @@ export async function runLocalTlsFixture(options: {
       },
       { timeoutMs: DEFAULT_TIMEOUT_MS, label: "server-reconnect-ready" }
     );
+    await seedOperatorSession(join(root, "server-data", "planweave-server.sqlite"), workspace.projectId, operatorToken);
 
     // Host should re-advertise heartbeat after transport recovery.
     let reconnectOk = false;

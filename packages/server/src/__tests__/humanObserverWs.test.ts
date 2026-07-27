@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket, type RawData } from "ws";
 import { parseServerConfig } from "../config.js";
 import { hashOperatorToken } from "../operatorAuth.js";
+import { seedOperatorSessions } from "./support/operatorAuthFixture.js";
 import {
   createDistributedServerComposition,
   type DistributedServerComposition
@@ -32,35 +33,36 @@ async function setup() {
   directories.push(workspace.home, workspace.root);
   const httpServer = createServer();
   servers.push(httpServer);
+  const operatorToken = `pw_operator_${"O".repeat(43)}`;
+  const config = parseServerConfig({
+    version: "server-config/v1",
+    bind: { host: "127.0.0.1", port: 7_443 },
+    publicUrl: "http://127.0.0.1:7443",
+    allowInsecureDevelopment: true,
+    dataDirectory: join(workspace.root, "server-data"),
+    trustedProjects: [
+      {
+        projectId: workspace.init.workspace.id,
+        canvasId: "default",
+        projectRoot: workspace.root
+      }
+    ],
+    operatorCredentials: [
+      {
+        operatorId: "observer-admin",
+        tokenSha256: hashOperatorToken(operatorToken),
+        projectIds: [],
+        serverAdmin: true
+      }
+    ],
+    limits: { eventRetentionMaxEvents: 3 }
+  });
   const composition = await createDistributedServerComposition({
     httpServer,
-    config: parseServerConfig({
-      version: "server-config/v1",
-      bind: { host: "127.0.0.1", port: 7_443 },
-      publicUrl: "http://127.0.0.1:7443",
-      allowInsecureDevelopment: true,
-      dataDirectory: join(workspace.root, "server-data"),
-      trustedProjects: [
-        {
-          projectId: workspace.init.workspace.id,
-          canvasId: "default",
-          projectRoot: workspace.root
-        }
-      ],
-      operatorCredentials: [
-        {
-          operatorId: "observer-admin",
-          tokenSha256: hashOperatorToken(
-            "observer_admin_token_abcdefghijklmnopqrstuvwxyz"
-          ),
-          projectIds: [],
-          serverAdmin: true
-        }
-      ],
-      limits: { eventRetentionMaxEvents: 3 }
-    })
+    config
   });
   compositions.push(composition);
+  await seedOperatorSessions(config.databasePath, config.operatorCredentials);
   await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
   const address = httpServer.address();
   if (!address || typeof address === "string") throw new Error("Expected HTTP address");
@@ -68,6 +70,7 @@ async function setup() {
     origin: `http://127.0.0.1:${address.port}`,
     wsOrigin: `ws://127.0.0.1:${address.port}`,
     projectId: workspace.init.workspace.id,
+    operatorToken,
     composition
   };
 }

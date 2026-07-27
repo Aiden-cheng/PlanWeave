@@ -116,7 +116,7 @@ describe("real-process ACP harness", () => {
     expect(message).toContain("serverPid=");
     expect(message).toMatch(/server\.(stdout|stderr):/);
     // Operator token material must not appear unredacted in diagnostics even if echoed.
-    expect(message).not.toMatch(/harness_operator_token_abcdefghijklmnopqrstuvwxyz/);
+    expect(message).not.toMatch(/pw_operator_H{43}/);
   }, 15_000);
 
   it("controls fake ACP barriers and resume without production debug endpoints", async () => {

@@ -206,7 +206,7 @@ export async function createDistributedServerComposition(
   let humanObserverJournal: HumanObserverJournal | undefined;
   const inflightRequests = new Set<Promise<void>>();
   try {
-    const authorization = new OperatorTokenRegistry(config.operatorCredentials);
+    let authorization: OperatorTokenRegistry;
     readiness.transition("migrating");
     lifecycle = await startRemoteBlockCoordinationServer(
       {
@@ -332,6 +332,7 @@ export async function createDistributedServerComposition(
     for (const { projectId } of runtimeRegistry.locators) {
       workspaceIdentity.ensureWorkspaceForLegacyProject(projectId);
     }
+    authorization = new OperatorTokenRegistry(server.database, config.operatorCredentials, clock);
     const humanIdentity = new HumanIdentityRepository(server.database, clock, {
       onMembershipTransitionInTransaction: ({ type, membership, principal }) => {
         initializedActivityProjection.projectMembershipEventInCallerTransaction({

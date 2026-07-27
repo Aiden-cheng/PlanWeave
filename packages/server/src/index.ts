@@ -99,6 +99,11 @@ export {
   type OperatorPrincipal
 } from "./operatorAuth.js";
 export {
+  hashOperatorSessionToken,
+  OperatorSessionStore,
+  type OperatorSessionInput
+} from "./identity/operatorSessionStore.js";
+export {
   handleOperatorHttpRequest,
   operatorTransportAllowed,
   type OperatorControlPort,

@@ -64,6 +64,7 @@ vi.mock("../runtimeProjectRegistry.js", async () => {
 import { hashOperatorToken } from "../operatorAuth.js";
 import { parseServerConfig } from "../config.js";
 import { createDistributedServerComposition } from "../serverComposition.js";
+import { seedOperatorSessions } from "./support/operatorAuthFixture.js";
 
 const directories: string[] = [];
 
@@ -91,31 +92,33 @@ describe("distributed server composition cleanup", () => {
     const workspace = await createTestWorkspace(remoteManifest());
     directories.push(workspace.home, workspace.root);
     const dataDirectory = join(workspace.root, "server-data");
+    const config = parseServerConfig({
+      version: "server-config/v1",
+      bind: { host: "127.0.0.1", port: 7_443 },
+      publicUrl: "http://127.0.0.1:7443",
+      allowInsecureDevelopment: true,
+      dataDirectory,
+      trustedProjects: [
+        {
+          projectId: workspace.init.workspace.id,
+          canvasId: "default",
+          projectRoot: workspace.root
+        }
+      ],
+      operatorCredentials: [
+        {
+          operatorId: "admin",
+          tokenSha256: hashOperatorToken(`pw_operator_${"C".repeat(43)}`),
+          projectIds: [],
+          serverAdmin: true
+        }
+      ]
+    });
     const composition = await createDistributedServerComposition({
       httpServer: createServer(),
-      config: parseServerConfig({
-        version: "server-config/v1",
-        bind: { host: "127.0.0.1", port: 7_443 },
-        publicUrl: "http://127.0.0.1:7443",
-        allowInsecureDevelopment: true,
-        dataDirectory,
-        trustedProjects: [
-          {
-            projectId: workspace.init.workspace.id,
-            canvasId: "default",
-            projectRoot: workspace.root
-          }
-        ],
-        operatorCredentials: [
-          {
-            operatorId: "admin",
-            tokenSha256: hashOperatorToken("cleanup_admin_token_abcdefghijklmnopqrstuvwxyz"),
-            projectIds: [],
-            serverAdmin: true
-          }
-        ]
-      })
+      config
     });
+    await seedOperatorSessions(config.databasePath, config.operatorCredentials);
 
     await expect(composition.close()).rejects.toThrow("distributed_server_cleanup_failed");
     expect(cleanupSpies.webSocketClose).toHaveBeenCalledOnce();

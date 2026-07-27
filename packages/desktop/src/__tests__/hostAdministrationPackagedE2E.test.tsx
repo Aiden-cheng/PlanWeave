@@ -159,10 +159,10 @@ afterEach(async () => {
 
 describe("packaged Host administration control plane", () => {
   it("uses Desktop main operator authority to enroll, reconnect, observe, and revoke a packaged Host", async () => {
-    const projectOperatorToken = "harness_project_operator_token_abcdefghijklmnopqrstuvwxyz";
+    const projectOperatorToken = `pw_operator_${"K".repeat(43)}`;
     const harness = await RealProcessAcpHarness.create({
       hostDisplayName: "Harness Host",
-      operatorToken: "harness_operator_token_abcdefghijklmnopqrstuvwxyz",
+      operatorToken: `pw_operator_${"L".repeat(43)}`,
       projectOperatorToken,
       readinessTimeoutMs: 15_000,
       serverLimits: {

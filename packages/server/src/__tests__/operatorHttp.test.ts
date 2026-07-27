@@ -1,7 +1,11 @@
 import { createServer, type Server as HttpServer } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { applyMigrations } from "../migrations.js";
+import { OperatorSessionStore } from "../identity/operatorSessionStore.js";
+import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { hashOperatorToken, OperatorTokenRegistry } from "../operatorAuth.js";
 import { RemoteExecutionActionRejectedError } from "../remoteExecutionActions.js";
+import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 import {
   handleOperatorHttpRequest,
   operatorTransportAllowed,
@@ -9,12 +13,14 @@ import {
 } from "../operatorHttp.js";
 
 const servers: HttpServer[] = [];
-const token = "operator_test_token_abcdefghijklmnopqrstuvwxyz";
+const databases: SqliteDatabase[] = [];
+const token = `pw_operator_${"T".repeat(43)}`;
 
 afterEach(async () => {
   await Promise.all(
     servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve())))
   );
+  for (const database of databases.splice(0)) database.close();
 });
 
 function control(): OperatorControlPort {
@@ -47,7 +53,20 @@ async function setup(
   readiness: "ready" | "reconciling" = "ready"
 ) {
   const service = control();
-  const authorization = new OperatorTokenRegistry([
+  const database = await openServerDatabase(":memory:", 5_000);
+  databases.push(database);
+  applyMigrations(database);
+  const workspaceId = new WorkspaceIdentityRepository(database).ensureWorkspaceForLegacyProject(
+    "project-a"
+  );
+  new OperatorSessionStore(database).create({
+    workspaceId,
+    operatorId: "operator-1",
+    credentialSha256: hashOperatorToken(token),
+    issuedAt: "2030-01-01T00:00:00.000Z",
+    expiresAt: "2030-01-02T00:00:00.000Z"
+  });
+  const authorization = new OperatorTokenRegistry(database, [
     {
       operatorId: "operator-1",
       tokenSha256: hashOperatorToken(token),

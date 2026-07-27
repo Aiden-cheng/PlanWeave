@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { AgentHostRepository } from "../hosts.js";
 import { handleWorkspaceIdentityHttpRequest } from "../identity/workspaceIdentityHttp.js";
 import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
+import { OperatorSessionStore } from "../identity/operatorSessionStore.js";
 import { applyMigrations } from "../migrations.js";
 import { hashOperatorToken, OperatorTokenRegistry } from "../operatorAuth.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
@@ -50,9 +51,24 @@ async function setup() {
   repository.bindHostToWorkspace(revokedHost.host.id, workspaceId);
   hosts.revoke(revokedHost.host.id);
   repository.synchronizeHost(revokedHost.host.id);
-  const adminToken = "operator_identity_admin_token_123456789";
-  const scopedToken = "operator_identity_scoped_token_123456789";
-  const authorization = new OperatorTokenRegistry([
+  const adminToken = `pw_operator_${"A".repeat(43)}`;
+  const scopedToken = `pw_operator_${"B".repeat(43)}`;
+  const sessions = new OperatorSessionStore(database);
+  sessions.create({
+    workspaceId,
+    operatorId: "identity-admin",
+    credentialSha256: hashOperatorToken(adminToken),
+    issuedAt: "2026-01-01T00:00:00.000Z",
+    expiresAt: "2030-01-01T00:00:00.000Z"
+  });
+  sessions.create({
+    workspaceId,
+    operatorId: "identity-scoped",
+    credentialSha256: hashOperatorToken(scopedToken),
+    issuedAt: "2026-01-01T00:00:00.000Z",
+    expiresAt: "2030-01-01T00:00:00.000Z"
+  });
+  const authorization = new OperatorTokenRegistry(database, [
     {
       operatorId: "identity-admin",
       tokenSha256: hashOperatorToken(adminToken),
@@ -126,7 +142,7 @@ describe("workspace identity HTTP", () => {
   });
 
   it("does not disclose unknown workspaces or cross-workspace scopes", async () => {
-    const { origin, workspaceId, otherWorkspaceId, adminToken, scopedToken } = await setup();
+    const { origin, otherWorkspaceId, adminToken, scopedToken } = await setup();
     const unknown = await fetch(`${origin}/api/v1/workspaces/workspace-unknown/identity`, {
       headers: { Authorization: `Bearer ${adminToken}` }
     });

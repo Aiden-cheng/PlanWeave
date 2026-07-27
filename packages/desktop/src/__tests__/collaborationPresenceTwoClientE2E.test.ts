@@ -10,6 +10,7 @@ import {
 } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { parseServerConfig } from "../../../server/src/config.js";
 import { hashOperatorToken } from "../../../server/src/operatorAuth.js";
+import { seedOperatorSessions } from "../../../server/src/__tests__/support/operatorAuthFixture.js";
 import {
   createDistributedServerComposition,
   type DistributedServerComposition
@@ -55,29 +56,32 @@ async function setup() {
   const secondProjectId = second.init.workspace.id;
   const httpServer = createServer();
   servers.push(httpServer);
+  const adminToken = `pw_operator_${"E".repeat(43)}`;
+  const config = parseServerConfig({
+    version: "server-config/v1",
+    bind: { host: "127.0.0.1", port: 7_443 },
+    publicUrl: "http://127.0.0.1:7443",
+    allowInsecureDevelopment: true,
+    dataDirectory: join(first.root, "server-data"),
+    trustedProjects: [
+      { projectId: firstProjectId, canvasId: "default", projectRoot: first.root },
+      { projectId: secondProjectId, canvasId: "default", projectRoot: second.root }
+    ],
+    operatorCredentials: [
+      {
+        operatorId: "presence-e2e-admin",
+        tokenSha256: hashOperatorToken(adminToken),
+        projectIds: [],
+        serverAdmin: true
+      }
+    ]
+  });
   const composition = await createDistributedServerComposition({
     httpServer,
-    config: parseServerConfig({
-      version: "server-config/v1",
-      bind: { host: "127.0.0.1", port: 7_443 },
-      publicUrl: "http://127.0.0.1:7443",
-      allowInsecureDevelopment: true,
-      dataDirectory: join(first.root, "server-data"),
-      trustedProjects: [
-        { projectId: firstProjectId, canvasId: "default", projectRoot: first.root },
-        { projectId: secondProjectId, canvasId: "default", projectRoot: second.root }
-      ],
-      operatorCredentials: [
-        {
-          operatorId: "presence-e2e-admin",
-          tokenSha256: hashOperatorToken("presence_e2e_admin_token_abcdefghijklmnopqrstuvwxyz"),
-          projectIds: [],
-          serverAdmin: true
-        }
-      ]
-    })
+    config
   });
   compositions.push(composition);
+  await seedOperatorSessions(config.databasePath, config.operatorCredentials);
   await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
   const address = httpServer.address();
   if (!address || typeof address === "string") throw new Error("Expected HTTP address");

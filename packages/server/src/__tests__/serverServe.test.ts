@@ -11,6 +11,7 @@ import { parseServerConfig } from "../config.js";
 import { latestCentralSchemaVersion } from "../migrations.js";
 import { hashOperatorToken } from "../operatorAuth.js";
 import { serveDistributedServer } from "../serverServe.js";
+import { seedOperatorSessions } from "./support/operatorAuthFixture.js";
 
 const directories: string[] = [];
 
@@ -59,13 +60,14 @@ describe("distributed server listener", () => {
       operatorCredentials: [
         {
           operatorId: "admin",
-          tokenSha256: hashOperatorToken("serve_admin_token_abcdefghijklmnopqrstuvwxyz"),
+          tokenSha256: hashOperatorToken(`pw_operator_${"S".repeat(43)}`),
           projectIds: [],
           serverAdmin: true
         }
       ]
     });
     const server = await serveDistributedServer(config);
+    await seedOperatorSessions(config.databasePath, config.operatorCredentials);
 
     expect(server.readiness()).toEqual({
       status: "ready",

@@ -109,7 +109,7 @@ function artifactFileSystemSnapshot(root: string): Array<{
 
 describe("real-process adversarial authorization matrix", () => {
   it("operator and action identity fence matrix (wrong principal/scope/lease/version/schema/cursor)", async () => {
-    const projectOperatorToken = "harness_project_operator_token_abcdefghijklmnopqrstuvwxyz";
+    const projectOperatorToken = `pw_operator_${"J".repeat(43)}`;
     const { harness, client } = await createHarness({ projectOperatorToken });
     await harness.startAll();
     await harness.acpControl.pause(["session/prompt"]);

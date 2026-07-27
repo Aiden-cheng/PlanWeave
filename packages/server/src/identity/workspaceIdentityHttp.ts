@@ -4,7 +4,7 @@ import {
   opaqueIdentifierSchema
 } from "@planweave-ai/collaboration-contracts";
 import { z } from "zod";
-import { OperatorTokenRegistry } from "../operatorAuth.js";
+import { OperatorTokenRegistry, type OperatorPrincipal } from "../operatorAuth.js";
 import {
   workspaceIdentityReadModelSchema,
   type WorkspaceIdentityReadModel
@@ -56,11 +56,14 @@ function route(request: IncomingMessage): string | undefined {
 }
 
 function authorizeWorkspace(
-  principal: { serverAdmin: boolean; projectIds: string[] },
+  principal: OperatorPrincipal,
   workspaceId: string,
   repository: WorkspaceIdentityRepository
 ): void {
   if (principal.serverAdmin) return;
+  if (principal.workspaceId !== workspaceId) {
+    throw new Error("operator_workspace_forbidden");
+  }
   if (
     !principal.projectIds.some(
       (projectId) => repository.workspaceForLegacyProject(projectId) === workspaceId

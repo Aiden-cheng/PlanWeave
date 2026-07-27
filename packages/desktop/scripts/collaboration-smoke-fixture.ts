@@ -6,9 +6,10 @@ import { WebSocket } from "ws";
 import { CollaborationClient, type CollaborationWebSocketConstructor } from "../src/main/collaboration/CollaborationClient.js";
 import { parseServerConfig } from "../../server/src/config.js";
 import { hashOperatorToken } from "../../server/src/operatorAuth.js";
+import { seedOperatorSessions } from "../../server/src/__tests__/support/operatorAuthFixture.js";
 import { createDistributedServerComposition, type DistributedServerComposition } from "../../server/src/serverComposition.js";
 
-const smokeAdminToken = "planweave_desktop_smoke_admin_token_abcdefghijklmnopqrstuvwxyz";
+const smokeAdminToken = `pw_operator_${"M".repeat(43)}`;
 
 export type CollaborationSmokeFixture = {
   origin: string;
@@ -78,25 +79,27 @@ export async function startCollaborationSmokeFixture(
   let ownerClient: CollaborationClient | undefined;
 
   try {
+    const config = parseServerConfig({
+      version: "server-config/v1",
+      bind: { host: "127.0.0.1", port: 7_443 },
+      publicUrl: "http://127.0.0.1:7443",
+      allowInsecureDevelopment: true,
+      dataDirectory,
+      trustedProjects: [{ projectId: input.projectId, canvasId: "default", projectRoot: input.projectRoot }],
+      operatorCredentials: [
+        {
+          operatorId: "desktop-smoke-admin",
+          tokenSha256: hashOperatorToken(smokeAdminToken),
+          projectIds: [],
+          serverAdmin: true
+        }
+      ]
+    });
     composition = await createDistributedServerComposition({
       httpServer,
-      config: parseServerConfig({
-        version: "server-config/v1",
-        bind: { host: "127.0.0.1", port: 7_443 },
-        publicUrl: "http://127.0.0.1:7443",
-        allowInsecureDevelopment: true,
-        dataDirectory,
-        trustedProjects: [{ projectId: input.projectId, canvasId: "default", projectRoot: input.projectRoot }],
-        operatorCredentials: [
-          {
-            operatorId: "desktop-smoke-admin",
-            tokenSha256: hashOperatorToken(smokeAdminToken),
-            projectIds: [],
-            serverAdmin: true
-          }
-        ]
-      })
+      config
     });
+    await seedOperatorSessions(config.databasePath, config.operatorCredentials);
     const listening = await listen(httpServer);
     serverClose = listening.close;
 

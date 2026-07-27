@@ -15,6 +15,7 @@ import {
 } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { parseServerConfig } from "../../../server/src/config.js";
 import { hashOperatorToken } from "../../../server/src/operatorAuth.js";
+import { seedOperatorSessions } from "../../../server/src/__tests__/support/operatorAuthFixture.js";
 import {
   createDistributedServerComposition,
   type DistributedServerComposition
@@ -25,7 +26,7 @@ const servers: HttpServer[] = [];
 const compositions: DistributedServerComposition[] = [];
 const clients: CollaborationClient[] = [];
 const hostSockets: WebSocket[] = [];
-const compositionAdminToken = "desktop_e2e_admin_token_abcdefghijklmnopqrstuvwxyz";
+const compositionAdminToken = `pw_operator_${"D".repeat(43)}`;
 
 afterEach(async () => {
   for (const client of clients.splice(0)) client.dispose();
@@ -64,26 +65,28 @@ async function setup() {
   const projectId = workspace.init.workspace.id;
   const httpServer = createServer();
   servers.push(httpServer);
+  const config = parseServerConfig({
+    version: "server-config/v1",
+    bind: { host: "127.0.0.1", port: 7_443 },
+    publicUrl: "http://127.0.0.1:7443",
+    allowInsecureDevelopment: true,
+    dataDirectory: join(workspace.root, "server-data"),
+    trustedProjects: [{ projectId, canvasId: "default", projectRoot: workspace.root }],
+    operatorCredentials: [
+      {
+        operatorId: "desktop-e2e-admin",
+        tokenSha256: hashOperatorToken(compositionAdminToken),
+        projectIds: [],
+        serverAdmin: true
+      }
+    ]
+  });
   const composition = await createDistributedServerComposition({
     httpServer,
-    config: parseServerConfig({
-      version: "server-config/v1",
-      bind: { host: "127.0.0.1", port: 7_443 },
-      publicUrl: "http://127.0.0.1:7443",
-      allowInsecureDevelopment: true,
-      dataDirectory: join(workspace.root, "server-data"),
-      trustedProjects: [{ projectId, canvasId: "default", projectRoot: workspace.root }],
-      operatorCredentials: [
-        {
-          operatorId: "desktop-e2e-admin",
-          tokenSha256: hashOperatorToken(compositionAdminToken),
-          projectIds: [],
-          serverAdmin: true
-        }
-      ]
-    })
+    config
   });
   compositions.push(composition);
+  await seedOperatorSessions(config.databasePath, config.operatorCredentials);
   await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
   const address = httpServer.address();
   if (!address || typeof address === "string") throw new Error("Expected HTTP address");

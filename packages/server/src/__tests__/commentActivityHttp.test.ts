@@ -17,6 +17,7 @@ import {
 } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { parseServerConfig } from "../config.js";
 import { hashOperatorToken } from "../operatorAuth.js";
+import { seedOperatorSessions } from "./support/operatorAuthFixture.js";
 import {
   createDistributedServerComposition,
   type DistributedServerComposition
@@ -25,7 +26,7 @@ import {
 const servers: HttpServer[] = [];
 const compositions: DistributedServerComposition[] = [];
 const directories: string[] = [];
-const operatorToken = "comment_http_operator_token_abcdefghijklmnopqrstuvwxyz";
+const operatorToken = `pw_operator_${"H".repeat(43)}`;
 
 afterEach(async () => {
   for (const composition of compositions.splice(0)) await composition.close();
@@ -62,29 +63,31 @@ async function setup(manifest: PlanPackageManifest = basicManifest()) {
   directories.push(projectA.home, projectA.root, projectB.root);
   const httpServer = createServer();
   servers.push(httpServer);
+  const config = parseServerConfig({
+    version: "server-config/v1",
+    bind: { host: "127.0.0.1", port: 7_443 },
+    publicUrl: "http://127.0.0.1:7443",
+    allowInsecureDevelopment: true,
+    dataDirectory: join(projectA.root, "server-data"),
+    trustedProjects: [
+      { projectId: projectA.init.workspace.id, canvasId: "default", projectRoot: projectA.root },
+      { projectId: projectB.init.workspace.id, canvasId: "default", projectRoot: projectB.root }
+    ],
+    operatorCredentials: [
+      {
+        operatorId: "admin",
+        tokenSha256: hashOperatorToken(operatorToken),
+        projectIds: [],
+        serverAdmin: true
+      }
+    ]
+  });
   const composition = await createDistributedServerComposition({
     httpServer,
-    config: parseServerConfig({
-      version: "server-config/v1",
-      bind: { host: "127.0.0.1", port: 7_443 },
-      publicUrl: "http://127.0.0.1:7443",
-      allowInsecureDevelopment: true,
-      dataDirectory: join(projectA.root, "server-data"),
-      trustedProjects: [
-        { projectId: projectA.init.workspace.id, canvasId: "default", projectRoot: projectA.root },
-        { projectId: projectB.init.workspace.id, canvasId: "default", projectRoot: projectB.root }
-      ],
-      operatorCredentials: [
-        {
-          operatorId: "admin",
-          tokenSha256: hashOperatorToken(operatorToken),
-          projectIds: [],
-          serverAdmin: true
-        }
-      ]
-    })
+    config
   });
   compositions.push(composition);
+  await seedOperatorSessions(config.databasePath, config.operatorCredentials);
   await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
   const address = httpServer.address();
   if (!address || typeof address === "string") throw new Error("Expected HTTP address");

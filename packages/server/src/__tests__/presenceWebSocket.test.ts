@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { parseServerConfig } from "../config.js";
 import { hashOperatorToken } from "../operatorAuth.js";
+import { seedOperatorSessions } from "./support/operatorAuthFixture.js";
 import {
   createDistributedServerComposition,
   type DistributedServerComposition
@@ -34,28 +35,31 @@ async function setup() {
   directories.push(workspace.home, workspace.root);
   const httpServer = createServer();
   servers.push(httpServer);
+  const operatorToken = `pw_operator_${"P".repeat(43)}`;
+  const config = parseServerConfig({
+    version: "server-config/v1",
+    bind: { host: "127.0.0.1", port: 7_443 },
+    publicUrl: "http://127.0.0.1:7443",
+    allowInsecureDevelopment: true,
+    dataDirectory: join(workspace.root, "server-data"),
+    trustedProjects: [
+      { projectId: workspace.init.workspace.id, canvasId: "default", projectRoot: workspace.root }
+    ],
+    operatorCredentials: [
+      {
+        operatorId: "presence-test-admin",
+        tokenSha256: hashOperatorToken(operatorToken),
+        projectIds: [],
+        serverAdmin: true
+      }
+    ]
+  });
   const composition = await createDistributedServerComposition({
     httpServer,
-    config: parseServerConfig({
-      version: "server-config/v1",
-      bind: { host: "127.0.0.1", port: 7_443 },
-      publicUrl: "http://127.0.0.1:7443",
-      allowInsecureDevelopment: true,
-      dataDirectory: join(workspace.root, "server-data"),
-      trustedProjects: [
-        { projectId: workspace.init.workspace.id, canvasId: "default", projectRoot: workspace.root }
-      ],
-      operatorCredentials: [
-        {
-          operatorId: "presence-test-admin",
-          tokenSha256: hashOperatorToken("presence_test_admin_token_abcdefghijklmnopqrstuvwxyz"),
-          projectIds: [],
-          serverAdmin: true
-        }
-      ]
-    })
+    config
   });
   compositions.push(composition);
+  await seedOperatorSessions(config.databasePath, config.operatorCredentials);
   await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
   const address = httpServer.address();
   if (!address || typeof address === "string") throw new Error("Expected HTTP address");

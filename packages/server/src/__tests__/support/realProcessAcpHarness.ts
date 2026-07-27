@@ -26,6 +26,8 @@ import {
   createTestWorkspace
 } from "../../../../runtime/src/__tests__/promptTestHelpers.js";
 import { hashOperatorToken } from "../../operatorAuth.js";
+import { parseServerConfig } from "../../config.js";
+import { seedOperatorSessions } from "./operatorAuthFixture.js";
 
 function resolveHarnessPath(relativeUrl: string, workspacePath: string): string {
   try {
@@ -464,7 +466,7 @@ export class RealProcessAcpHarness {
 
   static async create(options: RealProcessAcpHarnessOptions = {}): Promise<RealProcessAcpHarness> {
     const operatorToken =
-      options.operatorToken ?? "harness_operator_token_abcdefghijklmnopqrstuvwxyz";
+      options.operatorToken ?? `pw_operator_${"H".repeat(43)}`;
     const acpScenario = options.acpScenario ?? "artifact-implementation";
     const readinessTimeoutMs =
       options.readinessTimeoutMs ?? REAL_PROCESS_ACP_HARNESS_DEFAULT_TIMEOUT_MS;
@@ -774,6 +776,8 @@ export class RealProcessAcpHarness {
             diagnostics: () => this.diagnostics()
           }
         );
+        const config = parseServerConfig(JSON.parse(await readFile(this.paths.serverConfig, "utf8")));
+        await seedOperatorSessions(config.databasePath, config.operatorCredentials);
         return;
       } catch (error) {
         lastError = error;

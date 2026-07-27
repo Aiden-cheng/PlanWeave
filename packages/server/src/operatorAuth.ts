@@ -1,6 +1,13 @@
-import { createHash, timingSafeEqual } from "node:crypto";
-import { opaqueIdentifierSchema, operatorTokenSchema } from "@planweave-ai/distributed-protocol";
+import { timingSafeEqual } from "node:crypto";
+import {
+  credentialSha256Schema,
+  operatorSessionIdSchema,
+  type OperatorSession
+} from "@planweave-ai/collaboration-contracts";
+import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
 import { z } from "zod";
+import type { SqliteDatabase } from "./sqlite.js";
+import { OperatorSessionStore, hashOperatorSessionToken } from "./identity/operatorSessionStore.js";
 import type { RemoteInteractionAuthorizationPort } from "./remoteInteractions.js";
 
 const operatorTokenSha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -14,47 +21,76 @@ export const operatorCredentialSchema = z
   })
   .strict();
 
-export const operatorPrincipalSchema = operatorCredentialSchema.omit({ tokenSha256: true });
-export type OperatorPrincipal = z.infer<typeof operatorPrincipalSchema>;
+const operatorCredentialPrincipalSchema = operatorCredentialSchema.omit({ tokenSha256: true });
+export const authenticatedOperatorPrincipalSchema = operatorCredentialPrincipalSchema.extend({
+  workspaceId: opaqueIdentifierSchema,
+  operatorSessionId: operatorSessionIdSchema,
+  expiresAt: z.iso.datetime()
+}).strict();
+export const operatorPrincipalSchema = authenticatedOperatorPrincipalSchema;
+export type OperatorPrincipal = z.infer<typeof authenticatedOperatorPrincipalSchema>;
 export type OperatorCredential = z.input<typeof operatorCredentialSchema>;
 
 export function hashOperatorToken(token: string): string {
-  return createHash("sha256").update(operatorTokenSchema.parse(token)).digest("hex");
-}
-
-function bearerToken(value: string | string[] | undefined): string | undefined {
-  if (Array.isArray(value)) return undefined;
-  const match = /^Bearer ([A-Za-z0-9_-]{32,256})$/.exec(value ?? "");
-  return match?.[1];
+  return hashOperatorSessionToken(token);
 }
 
 export class OperatorTokenRegistry implements RemoteInteractionAuthorizationPort {
-  private readonly credentials: Array<{ principal: OperatorPrincipal; digest: Buffer }>;
-  private readonly principals = new Map<string, OperatorPrincipal>();
+  private readonly credentials: Array<{ credential: OperatorCredential; digest: Buffer }>;
+  private readonly principals = new Map<string, Map<string, OperatorPrincipal>>();
+  private readonly sessions: OperatorSessionStore;
 
-  constructor(rawCredentials: readonly OperatorCredential[]) {
+  constructor(
+    database: SqliteDatabase,
+    rawCredentials: readonly OperatorCredential[],
+    clock: () => Date = () => new Date()
+  ) {
+    this.sessions = new OperatorSessionStore(database, clock);
     const credentials = z.array(operatorCredentialSchema).min(1).max(1024).parse(rawCredentials);
     const tokenDigests = new Set<string>();
+    const operatorIds = new Set<string>();
     this.credentials = credentials.map(({ tokenSha256, ...rawPrincipal }) => {
-      const principal = operatorPrincipalSchema.parse(rawPrincipal);
-      if (this.principals.has(principal.operatorId)) {
+      const credential = operatorCredentialSchema.parse({ tokenSha256, ...rawPrincipal });
+      if (operatorIds.has(credential.operatorId)) {
         throw new Error("operator_id_duplicate");
       }
       if (tokenDigests.has(tokenSha256)) throw new Error("operator_token_duplicate");
-      this.principals.set(principal.operatorId, principal);
+      operatorIds.add(credential.operatorId);
       tokenDigests.add(tokenSha256);
-      return { principal, digest: Buffer.from(tokenSha256, "hex") };
+      return { credential, digest: Buffer.from(credentialSha256Schema.parse(tokenSha256), "hex") };
     });
   }
 
   authenticate(authorization: string | string[] | undefined): OperatorPrincipal | undefined {
-    const token = bearerToken(authorization);
-    if (!token) return undefined;
-    const digest = Buffer.from(hashOperatorToken(token), "hex");
-    return this.credentials.find(
-      (credential) =>
-        credential.digest.length === digest.length && timingSafeEqual(credential.digest, digest)
-    )?.principal;
+    if (Array.isArray(authorization)) return undefined;
+    const match = /^Bearer (pw_operator_[A-Za-z0-9_-]{43})$/.exec(authorization ?? "");
+    if (!match) return undefined;
+    let session: OperatorSession | undefined;
+    try {
+      session = this.sessions.authenticate(match[1]);
+    } catch {
+      return undefined;
+    }
+    if (!session) return undefined;
+    const digest = Buffer.from(session.credentialSha256, "hex");
+    const credential = this.credentials.find(
+      (candidate) =>
+        candidate.digest.length === digest.length && timingSafeEqual(candidate.digest, digest) &&
+        candidate.credential.operatorId === session.operatorId
+    )?.credential;
+    if (!credential) return undefined;
+    const principal = authenticatedOperatorPrincipalSchema.parse({
+      operatorId: credential.operatorId,
+      projectIds: credential.projectIds,
+      serverAdmin: credential.serverAdmin,
+      workspaceId: session.workspaceId,
+      operatorSessionId: session.operatorSessionId,
+      expiresAt: session.expiresAt
+    });
+    const sessions = this.principals.get(principal.operatorId) ?? new Map();
+    sessions.set(principal.operatorSessionId, principal);
+    this.principals.set(principal.operatorId, sessions);
+    return principal;
   }
 
   authorizeProject(principal: OperatorPrincipal, projectId: string): void {
@@ -69,6 +105,9 @@ export class OperatorTokenRegistry implements RemoteInteractionAuthorizationPort
     workspaceForProject: (projectId: string) => string | undefined
   ): void {
     if (principal.serverAdmin) return;
+    if (principal.workspaceId !== workspaceId) {
+      throw new Error("operator_workspace_forbidden");
+    }
     const allowed = principal.projectIds.some(
       (projectId) => workspaceForProject(projectId) === workspaceId
     );
@@ -80,9 +119,14 @@ export class OperatorTokenRegistry implements RemoteInteractionAuthorizationPort
   }
 
   canRespond(input: { responderId: string; projectId: string }): boolean {
-    const principal = this.principals.get(input.responderId);
+    const sessions = this.principals.get(input.responderId);
     return Boolean(
-      principal && (principal.serverAdmin || principal.projectIds.includes(input.projectId))
+      sessions &&
+      [...sessions.values()].some(
+        (principal) =>
+          this.sessions.isActive(principal.workspaceId, principal.operatorSessionId) &&
+          (principal.serverAdmin || principal.projectIds.includes(input.projectId))
+      )
     );
   }
 }

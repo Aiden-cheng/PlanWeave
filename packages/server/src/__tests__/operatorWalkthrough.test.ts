@@ -12,6 +12,7 @@ import {
 } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { latestCentralSchemaVersion } from "../migrations.js";
 import { hashOperatorToken } from "../operatorAuth.js";
+import { seedOperatorSessions } from "./support/operatorAuthFixture.js";
 import {
   buildIsolatedPublicPackageBins,
   PublicBinProcessRegistry,
@@ -211,7 +212,7 @@ describe("remote operator walkthrough", () => {
     await mkdir(join(hostWorkspaceRoot, "project"), { recursive: true });
     const port = await availablePort();
     const origin = `http://127.0.0.1:${port}`;
-    const operatorToken = "walkthrough_operator_token_abcdefghijklmnopqrstuvwxyz";
+    const operatorToken = `pw_operator_${"W".repeat(43)}`;
     const serverConfigPath = join(temporaryRoot, "server.json");
     await writeFile(
       serverConfigPath,
@@ -240,6 +241,14 @@ describe("remote operator walkthrough", () => {
     );
 
     let server = await startServerBin(serverConfigPath, origin);
+    await seedOperatorSessions(join(temporaryRoot, "server-data", "planweave-server.sqlite"), [
+      {
+        operatorId: "walkthrough-operator",
+        tokenSha256: hashOperatorToken(operatorToken),
+        projectIds: [],
+        serverAdmin: true
+      }
+    ]);
     const authorization = { Authorization: `Bearer ${operatorToken}` };
     expect((await fetch(`${origin}/healthz`)).status).toBe(200);
     const readiness = await fetch(`${origin}/readyz`);
