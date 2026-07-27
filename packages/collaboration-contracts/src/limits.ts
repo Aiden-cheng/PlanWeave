@@ -125,3 +125,16 @@ export const PACKAGE_SNAPSHOT_MAX_SOURCE_REVISION_LENGTH = 256 as const;
 export const PACKAGE_SNAPSHOT_MAX_TOTAL_BYTES = 256 * 1_024 * 1_024;
 export const PACKAGE_SNAPSHOT_MAX_FILE_BYTES = 64 * 1_024 * 1_024;
 export const PACKAGE_SNAPSHOT_MAX_RETAINED = 256 as const;
+
+/**
+ * One-time Workspace setup code budgets.
+ * Distinct from host enrollment (`pw_enroll_`), human device (`pw_hdev_`), and invitation tokens.
+ */
+export const SETUP_CODE_TOKEN_PREFIX = "pw_setup_" as const;
+export const SETUP_CODE_MIN_TTL_MS = 60_000 as const;
+export const SETUP_CODE_MAX_TTL_MS = 86_400_000 as const;
+export const SETUP_CODE_DEFAULT_TTL_MS = 3_600_000 as const;
+export const SETUP_CODE_MAX_LISTED_PER_PAGE = 100 as const;
+export const SETUP_CODE_REASON_MAX_LENGTH = 512 as const;
+export const WORKSPACE_PICKER_MAX_ITEMS_PER_PAGE = 100 as const;
+export const HOST_BOOTSTRAP_HANDOFF_REASON_MAX_LENGTH = 512 as const;

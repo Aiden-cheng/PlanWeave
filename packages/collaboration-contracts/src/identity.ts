@@ -217,13 +217,34 @@ export const identityRevocationSchema = z
     schemaVersion: workspaceIdentitySchemaVersionSchema,
     revocationId: identityRevocationIdSchema,
     workspaceId: workspaceIdSchema,
-    subjectKind: z.enum(["human_principal", "device_session", "operator_session", "agent_host", "enrollment"]),
+    /**
+     * Includes setup_code so Server can audit one-time onboarding grants alongside
+     * durable identity subjects. Setup-code lifecycle details live in setup.ts.
+     */
+    subjectKind: z.enum([
+      "human_principal",
+      "device_session",
+      "operator_session",
+      "agent_host",
+      "enrollment",
+      "setup_code"
+    ]),
     subjectId: z.string().min(1).max(128),
     revokedAt: timestampSchema,
     reason: z.string().trim().min(1).max(512)
   })
   .strict();
 export type IdentityRevocation = z.infer<typeof identityRevocationSchema>;
+
+/**
+ * Maps a setup-code purpose to the durable credential domain it may mint.
+ * Used by Server redeem paths and contract tests to reject type confusion.
+ */
+export const setupPurposeCredentialDomain = {
+  device_session: "human_device",
+  operator_session: "operator",
+  host_enrollment: "agent_host"
+} as const;
 
 /** Desktop-facing projections contain identity metadata only, never digests or bearer secrets. */
 export const workspaceIdentityViewSchema = z

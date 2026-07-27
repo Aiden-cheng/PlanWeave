@@ -13,7 +13,10 @@ import {
   HUMAN_TOKEN_SECRET_CHAR_LENGTH,
   PROJECT_INVITATION_MAX_TTL_MS,
   PROJECT_INVITATION_MIN_TTL_MS,
-  PROJECT_INVITATION_TOKEN_PREFIX
+  PROJECT_INVITATION_TOKEN_PREFIX,
+  SETUP_CODE_MAX_TTL_MS,
+  SETUP_CODE_MIN_TTL_MS,
+  SETUP_CODE_TOKEN_PREFIX
 } from "./limits.js";
 
 export const timestampSchema = z.iso.datetime();
@@ -60,6 +63,40 @@ export type HostEnrollmentId = z.infer<typeof hostEnrollmentIdSchema>;
 
 export const identityRevocationIdSchema = opaqueIdentifierSchema.brand("IdentityRevocationId");
 export type IdentityRevocationId = z.infer<typeof identityRevocationIdSchema>;
+
+/**
+ * Version marker for one-time Workspace setup-code contracts. Independent from
+ * workspace-identity and Host transport protocol versions.
+ */
+export const workspaceSetupSchemaVersion = "workspace-setup/v1" as const;
+export const workspaceSetupSchemaVersionSchema = z.literal(workspaceSetupSchemaVersion);
+export type WorkspaceSetupSchemaVersion = z.infer<typeof workspaceSetupSchemaVersionSchema>;
+
+export const setupCodeIdSchema = opaqueIdentifierSchema.brand("SetupCodeId");
+export type SetupCodeId = z.infer<typeof setupCodeIdSchema>;
+
+export const setupCodeRevocationIdSchema = opaqueIdentifierSchema.brand("SetupCodeRevocationId");
+export type SetupCodeRevocationId = z.infer<typeof setupCodeRevocationIdSchema>;
+
+/**
+ * Credential purpose bound to a setup code at issue time. A code redeems into
+ * exactly one of these outcomes and never mixes human/operator/Host secrets.
+ */
+export const setupCredentialPurposeSchema = z.enum([
+  "device_session",
+  "operator_session",
+  "host_enrollment"
+]);
+export type SetupCredentialPurpose = z.infer<typeof setupCredentialPurposeSchema>;
+
+export const setupCodeLifecycleStateSchema = z.enum([
+  "issued",
+  "displayed",
+  "redeemed",
+  "expired",
+  "revoked"
+]);
+export type SetupCodeLifecycleState = z.infer<typeof setupCodeLifecycleStateSchema>;
 
 export const workspaceNameSchema = z.string().trim().min(1).max(128);
 export const operatorDisplayNameSchema = z.string().trim().min(1).max(128);
@@ -208,6 +245,17 @@ export const projectInvitationTokenSchema = z
     )
   );
 
+/**
+ * One-time setup code plaintext. Distinct from device, invitation, Host enrollment,
+ * Host credential, and operator bearer prefixes. Displayed at most once and redeemed
+ * at most once for a single purpose.
+ */
+export const setupCodeTokenSchema = z
+  .string()
+  .regex(
+    new RegExp(`^${SETUP_CODE_TOKEN_PREFIX}[A-Za-z0-9_-]{${HUMAN_TOKEN_SECRET_CHAR_LENGTH}}$`)
+  );
+
 export const projectMemberRoleSchema = z.enum(["owner", "member"]);
 export type ProjectMemberRole = z.infer<typeof projectMemberRoleSchema>;
 
@@ -224,6 +272,12 @@ export const humanDeviceTtlMsSchema = z
   .int()
   .min(HUMAN_DEVICE_MIN_TTL_MS)
   .max(HUMAN_DEVICE_MAX_TTL_MS);
+
+export const setupCodeTtlMsSchema = z
+  .number()
+  .int()
+  .min(SETUP_CODE_MIN_TTL_MS)
+  .max(SETUP_CODE_MAX_TTL_MS);
 
 export const actorRefSchema = z
   .object({

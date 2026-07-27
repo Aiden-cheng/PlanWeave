@@ -29,8 +29,10 @@ import {
   commentListPageSchema
 } from "../comments.js";
 import {
+  activeWorkspaceConnectionViewSchema,
   parseCollaborationConnectionProfile,
-  parseWorkspaceConnectionProfile
+  parseWorkspaceConnectionProfile,
+  workspacePickerPageSchema
 } from "../connection.js";
 import {
   humanObserverCatchupRequiredSchema,
@@ -39,7 +41,23 @@ import {
 } from "../observer.js";
 import { canvasAccessRecordSchema, projectAccessRecordSchema } from "../projectAccess.js";
 import { packageSnapshotSchema } from "../packageSnapshot.js";
-import { humanDeviceTokenSchema, projectInvitationTokenSchema } from "../primitives.js";
+import {
+  humanDeviceTokenSchema,
+  operatorCredentialTokenSchema,
+  projectInvitationTokenSchema,
+  setupCodeTokenSchema
+} from "../primitives.js";
+import {
+  hostBootstrapEnrollmentSecretSchema,
+  hostBootstrapHandoffViewSchema,
+  setupCodeGrantSchema,
+  setupCodeGrantViewSchema,
+  setupCodeIssueResponseSchema,
+  setupCodeRedeemDeviceResponseSchema,
+  setupCodeRedeemHostResponseSchema,
+  setupCodeRedeemOperatorResponseSchema,
+  setupCodeRevocationSchema
+} from "../setup.js";
 import {
   canvasCommandAcceptedSchema,
   canvasCommandRejectedSchema,
@@ -624,9 +642,230 @@ export const exampleCanvasReconnectRequest = canvasReconnectRequestSchema.parse(
   afterContentDigest: canvasDigestA
 });
 
+export const exampleSetupCode = setupCodeTokenSchema.parse(`pw_setup_${SECRET_SEGMENT}`);
+export const exampleOperatorCredentialToken = operatorCredentialTokenSchema.parse(
+  `pw_operator_${SECRET_SEGMENT}`
+);
+export const exampleHostCredentialToken = `pw_host_${SECRET_SEGMENT}` as const;
+export const exampleHostEnrollmentCode = `pw_enroll_${SECRET_SEGMENT}` as const;
+
+export const exampleSetupCodeGrant = setupCodeGrantSchema.parse({
+  schemaVersion: "workspace-setup/v1",
+  setupCodeId: "setup-code-001",
+  workspaceId: "workspace-demo-001",
+  purpose: "device_session",
+  codeSha256: "e".repeat(64),
+  issuedAt: "2030-01-01T00:00:00.000Z",
+  expiresAt: "2030-01-01T01:00:00.000Z",
+  displayedAt: "2030-01-01T00:00:01.000Z",
+  redeemedAt: null,
+  revokedAt: null,
+  redemptionSubjectId: null
+});
+
+export const exampleSetupCodeGrantView = setupCodeGrantViewSchema.parse({
+  schemaVersion: "workspace-setup/v1",
+  setupCodeId: exampleSetupCodeGrant.setupCodeId,
+  workspaceId: exampleSetupCodeGrant.workspaceId,
+  purpose: exampleSetupCodeGrant.purpose,
+  state: "displayed",
+  issuedAt: exampleSetupCodeGrant.issuedAt,
+  expiresAt: exampleSetupCodeGrant.expiresAt,
+  displayedAt: exampleSetupCodeGrant.displayedAt,
+  redeemedAt: null,
+  revokedAt: null
+});
+
+export const exampleSetupCodeIssueResponse = setupCodeIssueResponseSchema.parse({
+  schemaVersion: "workspace-setup/v1",
+  grant: exampleSetupCodeGrantView,
+  setupCode: exampleSetupCode,
+  displayOnce: true
+});
+
+export const exampleSetupCodeRedeemDeviceResponse = setupCodeRedeemDeviceResponseSchema.parse({
+  schemaVersion: "workspace-setup/v1",
+  purpose: "device_session",
+  workspaceId: "workspace-demo-001",
+  workspaceDisplayName: "PlanWeave Demo",
+  connectionProfile: exampleWorkspaceConnectionProfile,
+  humanPrincipalId: "human-owner-001",
+  membershipId: "membership-workspace-001",
+  role: "owner",
+  deviceSessionId: "device-session-001",
+  deviceToken: exampleHumanDeviceToken,
+  deviceExpiresAt: "2030-01-02T00:00:00.000Z"
+});
+
+export const exampleSetupCodeRedeemOperatorResponse = setupCodeRedeemOperatorResponseSchema.parse({
+  schemaVersion: "workspace-setup/v1",
+  purpose: "operator_session",
+  workspaceId: "workspace-demo-001",
+  workspaceDisplayName: "PlanWeave Demo",
+  connectionProfile: exampleWorkspaceConnectionProfile,
+  operatorId: "operator-001",
+  operatorSessionId: "operator-session-001",
+  operatorToken: exampleOperatorCredentialToken,
+  sessionExpiresAt: "2030-01-02T00:00:00.000Z"
+});
+
+export const exampleSetupCodeRedeemHostResponse = setupCodeRedeemHostResponseSchema.parse({
+  schemaVersion: "workspace-setup/v1",
+  purpose: "host_enrollment",
+  workspaceId: "workspace-demo-001",
+  workspaceDisplayName: "PlanWeave Demo",
+  connectionProfile: exampleWorkspaceConnectionProfile,
+  enrollmentId: "enrollment-001",
+  hostId: "host-001",
+  hostCredentialExpiresAt: "2030-01-03T00:00:00.000Z"
+});
+
+export const exampleSetupCodeRevocation = setupCodeRevocationSchema.parse({
+  schemaVersion: "workspace-setup/v1",
+  revocationId: "setup-revocation-001",
+  setupCodeId: "setup-code-001",
+  workspaceId: "workspace-demo-001",
+  purpose: "device_session",
+  revokedAt: "2030-01-01T00:30:00.000Z",
+  reason: "operator rotated onboarding code"
+});
+
+export const exampleWorkspacePickerPage = workspacePickerPageSchema.parse({
+  schemaVersion: "workspace-setup/v1",
+  items: [
+    {
+      schemaVersion: "workspace-setup/v1",
+      workspaceId: "workspace-demo-001",
+      displayName: "PlanWeave Demo",
+      role: "owner",
+      archivedAt: null,
+      membershipActive: true
+    },
+    {
+      schemaVersion: "workspace-setup/v1",
+      workspaceId: "workspace-other-001",
+      displayName: "Other Workspace",
+      role: "member",
+      archivedAt: null,
+      membershipActive: true
+    }
+  ],
+  nextCursor: null
+});
+
+export const exampleActiveWorkspaceConnectionLocalOnly = activeWorkspaceConnectionViewSchema.parse({
+  schemaVersion: "workspace-setup/v1",
+  status: "local_only",
+  profile: null,
+  workspaceId: null,
+  workspaceDisplayName: null,
+  connectedAt: null,
+  error: null
+});
+
+export const exampleActiveWorkspaceConnectionConnected = activeWorkspaceConnectionViewSchema.parse({
+  schemaVersion: "workspace-setup/v1",
+  status: "connected",
+  profile: exampleWorkspaceConnectionProfile,
+  workspaceId: "workspace-demo-001",
+  workspaceDisplayName: "PlanWeave Demo",
+  connectedAt: "2030-01-01T00:05:00.000Z",
+  error: null
+});
+
+export const exampleHostBootstrapHandoffView = hostBootstrapHandoffViewSchema.parse({
+  schemaVersion: "workspace-setup/v1",
+  workspaceId: "workspace-demo-001",
+  workspaceDisplayName: "PlanWeave Demo",
+  serverBaseUrl: "https://collab.example.com/",
+  allowInsecureTransport: false,
+  state: "pending",
+  hostId: null,
+  enrollmentId: null,
+  reason: null,
+  updatedAt: "2030-01-01T00:06:00.000Z"
+});
+
+export const exampleHostBootstrapEnrollmentSecret = hostBootstrapEnrollmentSecretSchema.parse({
+  schemaVersion: "workspace-setup/v1",
+  workspaceId: "workspace-demo-001",
+  serverBaseUrl: "https://collab.example.com/",
+  allowInsecureTransport: false,
+  kind: "setup_code",
+  setupCode: exampleSetupCode
+});
+
+/** Negative fixtures for redeem/expiry/replay/malformed/wrong-credential coverage. */
+export const exampleSetupCodeNegativeFixtures = {
+  expiredGrant: setupCodeGrantSchema.parse({
+    ...exampleSetupCodeGrant,
+    setupCodeId: "setup-code-expired",
+    expiresAt: "2030-01-01T00:30:00.000Z",
+    displayedAt: "2030-01-01T00:00:01.000Z"
+  }),
+  revokedGrant: setupCodeGrantSchema.parse({
+    ...exampleSetupCodeGrant,
+    setupCodeId: "setup-code-revoked",
+    revokedAt: "2030-01-01T00:10:00.000Z"
+  }),
+  redeemedGrant: setupCodeGrantSchema.parse({
+    ...exampleSetupCodeGrant,
+    setupCodeId: "setup-code-redeemed",
+    redeemedAt: "2030-01-01T00:20:00.000Z",
+    redemptionSubjectId: "device-session-001"
+  }),
+  crossWorkspaceGrant: setupCodeGrantSchema.parse({
+    ...exampleSetupCodeGrant,
+    setupCodeId: "setup-code-cross-ws",
+    workspaceId: "workspace-other-001"
+  }),
+  hostPurposeGrant: setupCodeGrantSchema.parse({
+    ...exampleSetupCodeGrant,
+    setupCodeId: "setup-code-host",
+    purpose: "host_enrollment"
+  }),
+  malformedIssueRequest: {
+    schemaVersion: "workspace-setup/v1",
+    workspaceId: "workspace-demo-001",
+    purpose: "device_session",
+    projectRoot: "/srv/planweave",
+    command: "curl https://evil.example"
+  },
+  mixedCredentialRedeem: {
+    schemaVersion: "workspace-setup/v1",
+    setupCode: exampleSetupCode,
+    purpose: "device_session",
+    displayName: "Owner",
+    operatorToken: exampleOperatorCredentialToken,
+    hostCredentialToken: exampleHostCredentialToken
+  },
+  wrongCredentialPrefix: {
+    schemaVersion: "workspace-setup/v1",
+    setupCode: exampleHumanDeviceToken,
+    purpose: "device_session",
+    displayName: "Owner"
+  },
+  arbitraryUrlHandoff: {
+    schemaVersion: "workspace-setup/v1",
+    workspaceId: "workspace-demo-001",
+    workspaceDisplayName: "PlanWeave Demo",
+    serverBaseUrl: "https://collab.example.com/admin/shell?cmd=id",
+    allowInsecureTransport: false,
+    state: "pending",
+    hostId: null,
+    enrollmentId: null,
+    reason: null,
+    updatedAt: "2030-01-01T00:06:00.000Z"
+  }
+} as const;
+
 /** Fixtures that must never appear in redacted logs. */
 export const exampleSecretsForRedaction = {
   deviceToken: exampleHumanDeviceToken,
   invitationToken: exampleInvitationToken,
+  setupCode: exampleSetupCode,
+  operatorToken: exampleOperatorCredentialToken,
+  hostCredentialToken: exampleHostCredentialToken,
+  hostEnrollmentCode: exampleHostEnrollmentCode,
   authorizationHeader: `Bearer ${exampleHumanDeviceToken}`
 } as const;

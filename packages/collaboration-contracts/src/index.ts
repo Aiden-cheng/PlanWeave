@@ -17,6 +17,7 @@ export * from "./observer.js";
 export * from "./presence.js";
 export * from "./canvasCommands.js";
 export * from "./connection.js";
+export * from "./setup.js";
 export * from "./errors.js";
 export * from "./remoteRun.js";
 export * from "./fixtures/collaboration.js";
