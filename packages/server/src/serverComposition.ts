@@ -1,5 +1,4 @@
 import type { IncomingMessage, Server as HttpServer, ServerResponse } from "node:http";
-import { resolveTaskCanvasWorkspace } from "@planweave-ai/runtime";
 import { ArtifactStore } from "./artifacts.js";
 import { handleAgentHostArtifactRequest } from "./artifactHttp.js";
 import {
@@ -338,31 +337,41 @@ export async function createDistributedServerComposition(
     const enrollments = new HostEnrollmentService(server.database, clock);
     const workspaceIdentity = new WorkspaceIdentityRepository(server.database);
     projectAccess = new ProjectAccessRepository(server.database, clock);
-    for (const trusted of config.trustedProjects) {
-      const workspaceId = workspaceIdentity.ensureWorkspaceForLegacyProject(trusted.projectId);
-      const existingProject = projectAccess.registry.projectInternal(
-        workspaceId,
-        trusted.projectId
-      );
+    const canvasesByProject = new Map<
+      string,
+      { projectRoot: string; canvases: typeof runtimeRegistry.expansions }
+    >();
+    for (const expansion of runtimeRegistry.expansions) {
+      const current = canvasesByProject.get(expansion.projectId);
+      if (current) {
+        current.canvases = [...current.canvases, expansion];
+      } else {
+        canvasesByProject.set(expansion.projectId, {
+          projectRoot: expansion.projectRoot,
+          canvases: [expansion]
+        });
+      }
+    }
+    for (const [projectId, project] of canvasesByProject) {
+      const workspaceId = workspaceIdentity.ensureWorkspaceForLegacyProject(projectId);
+      const existingProject = projectAccess.registry.projectInternal(workspaceId, projectId);
       if (existingProject?.projectRoot === null)
-        projectAccess.bindProjectPath(workspaceId, trusted.projectId, trusted.projectRoot);
+        projectAccess.bindProjectPath(workspaceId, projectId, project.projectRoot);
       projectAccess.registerProjectInternal({
         workspaceId,
-        projectId: trusted.projectId,
-        projectRoot: trusted.projectRoot
+        projectId,
+        projectRoot: project.projectRoot
       });
-      const canvasWorkspace = await resolveTaskCanvasWorkspace(
-        trusted.projectRoot,
-        trusted.canvasId
-      );
-      projectAccess.registerCanvasInternal({
-        workspaceId,
-        projectId: trusted.projectId,
-        canvasId: trusted.canvasId,
-        packageDir: canvasWorkspace.packageDir
-      });
-      projectAccess.markCanvasCutover(workspaceId, trusted.projectId, trusted.canvasId);
-      projectAccess.finalizeProjectCutover(workspaceId, trusted.projectId);
+      for (const canvas of project.canvases) {
+        projectAccess.registerCanvasInternal({
+          workspaceId,
+          projectId,
+          canvasId: canvas.canvasId,
+          packageDir: canvas.packageDir
+        });
+        projectAccess.markCanvasCutover(workspaceId, projectId, canvas.canvasId);
+      }
+      projectAccess.finalizeProjectCutover(workspaceId, projectId);
     }
     packageSnapshots = new PackageSnapshotRepository(
       server.database,
@@ -412,7 +421,7 @@ export async function createDistributedServerComposition(
     provisionConfiguredOperatorSessions({
       database: server.database,
       credentials: config.operatorCredentials,
-      trustedProjectIds: config.trustedProjects.map((project) => project.projectId),
+      trustedProjectIds: [...new Set(runtimeRegistry.expansions.map((canvas) => canvas.projectId))],
       workspaceForProject: (projectId) => workspaceIdentity.workspaceForLegacyProject(projectId),
       operatorSessionTtlMs: config.operatorSessionTtlMs,
       clock

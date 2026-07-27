@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   aclMigrationIdFor,
+  repairAclRegistryMigration,
   readAclRegistryMigration,
   retryAclRegistryMigration,
   rollbackAclRegistryMigration,
@@ -100,5 +101,66 @@ describe("ACL registry migration", () => {
         updatedAt: at
       })
     ).toThrow("acl_registry_migration_conflict");
+  });
+
+  it("recovers an interrupted migration through repair, retry, and rollback", async () => {
+    const database = await openMigrated();
+    const at = "2026-01-01T00:00:00.000Z";
+    const migration = {
+      migrationId: aclMigrationIdFor("trusted_canvas", "w", "p", "canvas-a"),
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: "canvas-a",
+      sourceKind: "trusted_canvas" as const,
+      marker: "canvas_registered" as const,
+      status: "interrupted" as const,
+      failureCode: "process_crash",
+      updatedAt: at
+    };
+    upsertAclRegistryMigration(database, migration);
+    expect(
+      readAclRegistryMigration(database, {
+        workspaceId: "w",
+        projectId: "p",
+        canvasId: "canvas-a",
+        sourceKind: "trusted_canvas"
+      })
+    ).toMatchObject({
+      status: "interrupted",
+      marker: "canvas_registered",
+      failureCode: "process_crash"
+    });
+
+    expect(
+      repairAclRegistryMigration(database, {
+        workspaceId: "w",
+        projectId: "p",
+        canvasId: "canvas-a",
+        sourceKind: "trusted_canvas"
+      })
+    ).toMatchObject({ status: "repair_required", failureCode: "process_crash" });
+    expect(
+      retryAclRegistryMigration(database, {
+        workspaceId: "w",
+        projectId: "p",
+        canvasId: "canvas-a",
+        sourceKind: "trusted_canvas"
+      })
+    ).toMatchObject({ status: "pending", marker: "canvas_registered", failureCode: null });
+
+    rollbackAclRegistryMigration(database, {
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: "canvas-a",
+      sourceKind: "trusted_canvas"
+    });
+    expect(
+      readAclRegistryMigration(database, {
+        workspaceId: "w",
+        projectId: "p",
+        canvasId: "canvas-a",
+        sourceKind: "trusted_canvas"
+      })
+    ).toMatchObject({ status: "rolled_back", marker: "none", failureCode: null });
   });
 });

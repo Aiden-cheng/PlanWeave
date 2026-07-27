@@ -1,12 +1,20 @@
 import { createServer, type Server as HttpServer } from "node:http";
-import { readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { PlanPackageManifest } from "@planweave-ai/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   basicManifest,
-  createTestWorkspace
+  createTestWorkspace,
+  writePromptFiles
 } from "../../../runtime/src/__tests__/promptTestHelpers.js";
+import {
+  canonicalProjectCanvasNode,
+  loadProjectGraph,
+  projectCanvasWorkspace,
+  writeProjectGraph
+} from "../../../runtime/src/projectGraph/index.js";
+import { writeJsonFile } from "../../../runtime/src/json.js";
 import { hashOperatorToken } from "../operatorAuth.js";
 import { parseServerConfig } from "../config.js";
 import {
@@ -88,6 +96,33 @@ async function setup() {
   return { composition, projectId, origin: `http://127.0.0.1:${address.port}` };
 }
 
+async function addSecondaryCanvas(root: string): Promise<void> {
+  const loaded = await loadProjectGraph(root);
+  const secondaryCanvas = canonicalProjectCanvasNode({
+    id: "secondary",
+    title: "Secondary canvas"
+  });
+  const secondaryWorkspace = projectCanvasWorkspace(loaded.workspace, secondaryCanvas);
+  const manifest = remoteManifest();
+  await mkdir(secondaryWorkspace.packageDir, { recursive: true });
+  await writeJsonFile(secondaryWorkspace.manifestFile, manifest);
+  await writePromptFiles(secondaryWorkspace.packageDir, manifest);
+  await writeFile(secondaryWorkspace.stateFile, await readFile(loaded.workspace.stateFile));
+  await mkdir(secondaryWorkspace.resultsDir, { recursive: true });
+  await mkdir(join(loaded.workspace.workspaceRoot, "canvases", "undeclared"), {
+    recursive: true
+  });
+  await writeProjectGraph(loaded.workspace, {
+    version: "plan-project/v1",
+    canvases: [
+      canonicalProjectCanvasNode({ id: "default", title: "Default canvas" }),
+      secondaryCanvas
+    ],
+    edges: [],
+    crossTaskEdges: []
+  });
+}
+
 function jsonHeaders(token: string) {
   return { Authorization: `Bearer ${token}`, "content-type": "application/json" };
 }
@@ -147,6 +182,70 @@ describe("distributed server composition", () => {
       }
     );
     expect(snapshot.status).toBe(201);
+  });
+
+  it("registers every Runtime canvas from one trusted entry and ignores undeclared paths", async () => {
+    const workspace = await createTestWorkspace(remoteManifest());
+    directories.push(workspace.home, workspace.root);
+    await addSecondaryCanvas(workspace.root);
+    const dataDirectory = join(workspace.root, "multi-canvas-server-data");
+    const httpServer = createServer();
+    httpServers.push(httpServer);
+    const projectId = workspace.init.workspace.id;
+    const config = parseServerConfig({
+      version: "server-config/v1",
+      bind: { host: "127.0.0.1", port: 7_443 },
+      publicUrl: "http://127.0.0.1:7443",
+      allowInsecureDevelopment: true,
+      dataDirectory,
+      trustedProjects: [{ projectId, projectRoot: workspace.root, canvasId: "default" }],
+      operatorCredentials: [
+        {
+          operatorId: "admin",
+          tokenSha256: hashOperatorToken(adminToken),
+          projectIds: [],
+          serverAdmin: true
+        }
+      ]
+    });
+    const composition = await createDistributedServerComposition({ httpServer, config });
+    compositions.push(composition);
+    await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
+    const address = httpServer.address();
+    if (!address || typeof address === "string") throw new Error("Expected HTTP address");
+    const origin = `http://127.0.0.1:${address.port}`;
+    const bootstrap = await fetch(`${origin}/api/v1/projects/${projectId}/human/bootstrap`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ displayName: "Trusted Owner", humanPrincipalId: "trusted-owner" })
+    });
+    expect(bootstrap.status).toBe(201);
+    const { deviceToken } = (await bootstrap.json()) as { deviceToken: string };
+    const canvases = await fetch(`${origin}/api/v1/registry/projects/${projectId}/canvases`, {
+      headers: { Authorization: `Bearer ${deviceToken}` }
+    });
+    expect(canvases.status).toBe(200);
+    await expect(canvases.json()).resolves.toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          registry: expect.objectContaining({ canvasId: "default" })
+        }),
+        expect.objectContaining({
+          registry: expect.objectContaining({ canvasId: "secondary" })
+        })
+      ])
+    });
+    const secondaryDispatch = await fetch(`${origin}/api/v1/remote-operations`, {
+      method: "POST",
+      headers: jsonHeaders(adminToken),
+      body: JSON.stringify({
+        projectId,
+        canvasId: "secondary",
+        blockRef: "T-001#B-001",
+        idempotencyKey: "secondary-dispatch"
+      })
+    });
+    expect(secondaryDispatch.status).toBe(202);
   });
 
   it("wires health, enrollment, scoped dispatch, idempotency, pagination, and shutdown", async () => {
@@ -262,6 +361,9 @@ describe("distributed server composition", () => {
       );
     const beforeManifest = await readFile(workspace.init.workspace.manifestFile);
     const beforeState = await readFile(workspace.init.workspace.stateFile);
+    const resultsFile = join(workspace.init.workspace.resultsDir, "existing-result.json");
+    await writeFile(resultsFile, '{"result":"preserve"}\n', "utf8");
+    const beforeResults = await readFile(resultsFile);
     database.close();
     const httpServer = createServer();
     httpServers.push(httpServer);
@@ -300,6 +402,7 @@ describe("distributed server composition", () => {
     ).toEqual({ status: "completed", marker: "cutover_complete" });
     expect(await readFile(workspace.init.workspace.manifestFile)).toEqual(beforeManifest);
     expect(await readFile(workspace.init.workspace.stateFile)).toEqual(beforeState);
+    expect(await readFile(resultsFile)).toEqual(beforeResults);
     reopened.close();
   });
 });

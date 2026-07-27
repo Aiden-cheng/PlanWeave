@@ -141,12 +141,10 @@ export const serverConfigSchema = serverConfigInputSchema
       context.addIssue({ code: "custom", message: "server_heartbeat_must_precede_lease" });
     }
     const projectRoots = new Set(config.trustedProjects.map((project) => project.projectRoot));
-    const projectLocators = new Set(
-      config.trustedProjects.map((project) => `${project.projectId}\0${project.canvasId}`)
-    );
+    const projectIds = new Set(config.trustedProjects.map((project) => project.projectId));
     if (
       projectRoots.size !== config.trustedProjects.length ||
-      projectLocators.size !== config.trustedProjects.length
+      projectIds.size !== config.trustedProjects.length
     ) {
       context.addIssue({ code: "custom", message: "server_trusted_project_duplicate" });
     }

@@ -111,7 +111,7 @@ describe("server config", () => {
     );
   });
 
-  it("rejects duplicate roots, duplicate locators, and crafted database paths", async () => {
+  it("rejects duplicate roots, duplicate project ids, and crafted database paths", async () => {
     const input = await secureConfig();
     const duplicateRoot = {
       ...input,
@@ -125,6 +125,27 @@ describe("server config", () => {
       ]
     };
     expect(() => parseServerConfig(duplicateRoot)).toThrow("server_trusted_project_duplicate");
+
+    const duplicateProjectId = {
+      ...input,
+      trustedProjects: [
+        ...input.trustedProjects,
+        { projectId: "project-1", projectRoot: join(input.dataDirectory, "other-project") }
+      ]
+    };
+    expect(() => parseServerConfig(duplicateProjectId)).toThrow("server_trusted_project_duplicate");
+
+    expect(
+      parseServerConfig({ ...input, trustedProjects: [{ ...input.trustedProjects[0] }] })
+    ).toMatchObject({ trustedProjects: [{ projectId: "project-1", canvasId: "default" }] });
+    expect(
+      parseServerConfig({
+        ...input,
+        trustedProjects: [
+          { projectId: "project-1", projectRoot: input.trustedProjects[0].projectRoot }
+        ]
+      }).trustedProjects[0].canvasId
+    ).toBeUndefined();
 
     const parsed = parseServerConfig(input);
     expect(() =>
