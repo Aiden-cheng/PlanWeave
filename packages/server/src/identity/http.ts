@@ -246,6 +246,7 @@ function httpStatusForCode(code: HumanAuthErrorCode): number {
     case "human_device_not_owner":
     case "human_credential_kind_mismatch":
     case "human_cross_project_forbidden":
+    case "human_identity_workspace_mismatch":
       return 403;
     case "human_bootstrap_conflict":
     case "human_limit_exceeded":

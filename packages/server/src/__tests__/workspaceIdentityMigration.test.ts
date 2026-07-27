@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { applyMigrations } from "../migrations.js";
 import { backfillWorkspaceIdentity } from "../migrations/identity.js";
+import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 
 const directories: string[] = [];
@@ -203,5 +204,111 @@ describe("workspace identity migration v27 Host repair markers", () => {
       status: "repair_required",
       reason: "host_requires_reenrollment"
     });
+  });
+});
+
+describe("workspace identity migration v27 human scope repair", () => {
+  it("does not clone a legacy principal across workspaces and is idempotent", async () => {
+    const database = await openDatabaseAtV26();
+    const now = "2026-07-27T00:00:00.000Z";
+    database
+      .prepare(
+        "INSERT INTO human_principals(human_principal_id,display_name,created_at) VALUES(?,?,?)"
+      )
+      .run("human-shared", "Shared", now);
+    for (const project of ["project-a", "project-b"]) {
+      database
+        .prepare(
+          `INSERT INTO project_memberships(
+            membership_id,project_id,human_principal_id,role,created_at,updated_at,revision
+          ) VALUES(?,?,?,?,?,?,?)`
+        )
+        .run(`membership-${project}`, project, "human-shared", "member", now, now, 1);
+    }
+    database
+      .prepare(
+        `INSERT INTO human_device_credentials(
+          device_credential_id,human_principal_id,minted_for_project_id,token_sha256,created_at
+        ) VALUES(?,?,?,?,?)`
+      )
+      .run("device-a", "human-shared", "project-a", "a".repeat(64), now);
+    database
+      .prepare(
+        `INSERT INTO human_device_credentials(
+          device_credential_id,human_principal_id,minted_for_project_id,token_sha256,created_at
+        ) VALUES(?,?,?,?,?)`
+      )
+      .run("device-b", "human-shared", "project-b", "b".repeat(64), now);
+
+    applyMigrations(database);
+
+    const mappings = database
+      .prepare(
+        "SELECT legacy_project_id,workspace_id FROM legacy_project_workspace_mappings ORDER BY legacy_project_id"
+      )
+      .all();
+    const workspaceA = String(mappings[0].workspace_id);
+    const workspaceB = String(mappings[1].workspace_id);
+    expect(workspaceA).not.toBe(workspaceB);
+    expect(
+      database
+        .prepare("SELECT COUNT(*) AS count FROM workspace_principals WHERE workspace_id=?")
+        .get(workspaceA)
+    ).toEqual({ count: 1 });
+    expect(
+      database
+        .prepare("SELECT COUNT(*) AS count FROM workspace_principals WHERE workspace_id=?")
+        .get(workspaceB)
+    ).toEqual({ count: 0 });
+    expect(
+      database
+        .prepare("SELECT COUNT(*) AS count FROM workspace_memberships WHERE workspace_id=?")
+        .get(workspaceB)
+    ).toEqual({ count: 0 });
+    expect(
+      database
+        .prepare("SELECT COUNT(*) AS count FROM workspace_device_sessions WHERE workspace_id=?")
+        .get(workspaceB)
+    ).toEqual({ count: 0 });
+    expect(
+      database
+        .prepare(
+          `SELECT subject_kind,subject_id,reason FROM workspace_identity_repairs
+           ORDER BY subject_kind,subject_id`
+        )
+        .all()
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          subject_kind: "human_principal",
+          subject_id: "human-shared",
+          reason: "human_principal_requires_reenrollment"
+        },
+        {
+          subject_kind: "device_session",
+          subject_id: "device-b",
+          reason: "device_session_requires_reenrollment"
+        }
+      ])
+    );
+    expect(
+      database
+        .prepare(
+          "SELECT status,interruption_marker,failure_code FROM workspace_identity_migrations WHERE workspace_id=?"
+        )
+        .get(workspaceB)
+    ).toEqual({
+      status: "repair_required",
+      interruption_marker: "partial_backfill_failed",
+      failure_code: "human_principal_workspace_conflict"
+    });
+    expect(() => new WorkspaceIdentityRepository(database).listPrincipalViews(workspaceB)).toThrow(
+      "workspace_identity_read_cutover_incomplete"
+    );
+
+    backfillWorkspaceIdentity(database);
+    expect(
+      database.prepare("SELECT COUNT(*) AS count FROM workspace_identity_repairs").get()
+    ).toEqual({ count: 2 });
   });
 });

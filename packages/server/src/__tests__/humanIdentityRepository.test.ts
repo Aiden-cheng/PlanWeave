@@ -59,6 +59,37 @@ function localAdminProof(
   };
 }
 
+function bindProjectToWorkspace(database: SqliteDatabase, projectId: string, workspaceId: string) {
+  const at = "2026-07-24T10:00:00.000Z";
+  database
+    .prepare(
+      `INSERT INTO legacy_project_workspace_mappings(
+        legacy_project_id,normalized_legacy_project_identity,workspace_id,mapped_at
+      ) VALUES(?,?,?,?)`
+    )
+    .run(projectId, `legacy-project:${projectId}`, workspaceId, at);
+  database
+    .prepare(
+      `INSERT INTO workspace_identity_migrations(
+        migration_id,legacy_project_id,workspace_id,from_version,to_version,step,status,
+        interruption_marker,authoritative_read_version,failure_code,updated_at
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?)`
+    )
+    .run(
+      `identity-migration-${createHash("sha256").update(projectId).digest("hex").slice(0, 32)}`,
+      projectId,
+      workspaceId,
+      0,
+      1,
+      "verify_cutover",
+      "completed",
+      "read_cutover_complete",
+      "workspace-identity/v1",
+      null,
+      at
+    );
+}
+
 describe("human identity migration v16", () => {
   it("backfills membership revision deterministically when upgrading from v23", async () => {
     const directory = await mkdtemp(join(tmpdir(), "planweave-human-revision-mig-"));
@@ -92,9 +123,9 @@ describe("human identity migration v16", () => {
     applyMigrations(database);
 
     expect(
-      database.prepare("SELECT revision FROM project_memberships WHERE membership_id=?").get(
-        "membership-old"
-      )
+      database
+        .prepare("SELECT revision FROM project_memberships WHERE membership_id=?")
+        .get("membership-old")
     ).toEqual({ revision: 1 });
     expect(() =>
       database
@@ -120,9 +151,7 @@ describe("human identity migration v16", () => {
         .prepare("INSERT INTO schema_migrations(version,applied_at) VALUES (?,?)")
         .run(version, "2020-01-01T00:00:00.000Z");
     }
-    database.exec(
-      "CREATE TABLE dispatches(id TEXT PRIMARY KEY, package_ref TEXT NOT NULL)"
-    );
+    database.exec("CREATE TABLE dispatches(id TEXT PRIMARY KEY, package_ref TEXT NOT NULL)");
     // Minimal tables required only if later migrations depend on them — v16 is additive.
     applyMigrations(database);
     expect(centralSchemaVersion(database)).toBe(latestCentralSchemaVersion);
@@ -336,9 +365,20 @@ describe("human identity repository", () => {
   });
 
   it("recovers the target project when another project still has a usable device", async () => {
-    const { repo } = await openMigrated();
+    const { repo, database } = await openMigrated();
     const principalId = "shared-owner";
     const projectA = repo.bootstrapOwner(localAdminProof("project-a", principalId, "Shared Owner"));
+    bindProjectToWorkspace(
+      database,
+      "project-b",
+      String(
+        database
+          .prepare(
+            "SELECT workspace_id FROM legacy_project_workspace_mappings WHERE legacy_project_id=?"
+          )
+          .get("project-a")?.workspace_id
+      )
+    );
     const projectB = repo.bootstrapOwner(localAdminProof("project-b", principalId, "Shared Owner"));
 
     repo.revokeDevice(projectB.device.deviceCredentialId, "project-b", principalId);
@@ -355,6 +395,32 @@ describe("human identity repository", () => {
     expect(repo.authenticateDevice(recoveredB.deviceToken!, "project-b")?.membership?.role).toBe(
       "owner"
     );
+  });
+
+  it("rejects an existing device token when the invitation belongs to another workspace", async () => {
+    const { repo, database } = await openMigrated();
+    const ownerA = repo.bootstrapOwner(localAdminProof("workspace-a-project", "owner-a", "A"));
+    const ownerB = repo.bootstrapOwner(localAdminProof("workspace-b-project", "owner-b", "B"));
+    const invitation = repo.createInvitation({
+      projectId: "workspace-b-project",
+      createdByHumanPrincipalId: ownerB.principal.humanPrincipalId
+    });
+
+    expect(() =>
+      repo.consumeInvitation({
+        invitationToken: invitation.invitationToken,
+        projectId: "workspace-b-project",
+        displayName: "ignored",
+        existingDeviceToken: ownerA.deviceToken
+      })
+    ).toThrowError(expect.objectContaining({ code: "human_identity_workspace_mismatch" }));
+    expect(
+      database
+        .prepare(
+          "SELECT COUNT(*) AS count FROM project_memberships WHERE project_id=? AND revoked_at IS NULL"
+        )
+        .get("workspace-b-project")
+    ).toEqual({ count: 1 });
   });
 
   it("rejects concurrent bootstrap of different principals for the same project", async () => {
@@ -440,6 +506,17 @@ describe("human identity repository", () => {
       createdByHumanPrincipalId: owner.principal.humanPrincipalId
     });
     // Promote is separate; join always member. Create second project for link test.
+    bindProjectToWorkspace(
+      database,
+      "project-b",
+      String(
+        database
+          .prepare(
+            "SELECT workspace_id FROM legacy_project_workspace_mappings WHERE legacy_project_id=?"
+          )
+          .get("project-a")?.workspace_id
+      )
+    );
     const ownerB = repo.bootstrapOwner(localAdminProof("project-b", "human-owner-1", "Ada Owner"));
     expect(ownerB.created).toBe(true);
     const inviteB = repo.createInvitation({
@@ -483,9 +560,9 @@ describe("human identity repository", () => {
     expect(
       repo.listDevicesForProjectMembers("project-b").map((device) => device.deviceCredentialId)
     ).not.toContain(joined.device.deviceCredentialId);
-    expect(() =>
-      repo.revokeDevice(linked.device.deviceCredentialId, "project-a")
-    ).toThrowError(expect.objectContaining({ code: "human_cross_project_forbidden" }));
+    expect(() => repo.revokeDevice(linked.device.deviceCredentialId, "project-a")).toThrowError(
+      expect.objectContaining({ code: "human_cross_project_forbidden" })
+    );
 
     // Invalid existing device token does not enumerate or create.
     const inviteC = repo.createInvitation({
@@ -645,7 +722,7 @@ describe("human identity repository", () => {
   });
 
   it("protects last owner under remove/demote races and isolates project scope on remove", async () => {
-    const { repo } = await openMigrated();
+    const { repo, database } = await openMigrated();
     const owner = repo.bootstrapOwner(localAdminProof());
     const invite = repo.createInvitation({
       projectId: "project-a",
@@ -659,6 +736,17 @@ describe("human identity repository", () => {
 
     // Member also joins project-b as owner bootstrap would be different principal; instead
     // bootstrap project-b with owner and link Bob.
+    bindProjectToWorkspace(
+      database,
+      "project-b",
+      String(
+        database
+          .prepare(
+            "SELECT workspace_id FROM legacy_project_workspace_mappings WHERE legacy_project_id=?"
+          )
+          .get("project-a")?.workspace_id
+      )
+    );
     const ownerB = repo.bootstrapOwner(localAdminProof("project-b", "owner-b", "Owner B"));
     const inviteB = repo.createInvitation({
       projectId: "project-b",

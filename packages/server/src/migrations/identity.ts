@@ -68,9 +68,6 @@ CREATE TABLE IF NOT EXISTS workspace_memberships (
     REFERENCES workspace_principals(workspace_id,human_principal_id)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_memberships_active_unique
-  ON workspace_memberships(workspace_id,human_principal_id) WHERE revoked_at IS NULL;
-
 CREATE TABLE IF NOT EXISTS workspace_device_sessions (
   workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
   device_session_id TEXT NOT NULL,
@@ -141,10 +138,12 @@ CREATE TABLE IF NOT EXISTS workspace_identity_revocations (
 
 CREATE TABLE IF NOT EXISTS workspace_identity_repairs (
   repair_id TEXT PRIMARY KEY,
-  subject_kind TEXT NOT NULL CHECK(subject_kind IN ('agent_host','enrollment')),
+  subject_kind TEXT NOT NULL CHECK(subject_kind IN ('human_principal','device_session','agent_host','enrollment')),
   subject_id TEXT NOT NULL,
   status TEXT NOT NULL CHECK(status='repair_required'),
   reason TEXT NOT NULL CHECK(reason IN (
+    'human_principal_requires_reenrollment',
+    'device_session_requires_reenrollment',
     'host_requires_reenrollment',
     'enrollment_requires_reenrollment',
     'enrollment_requires_workspace_binding'
@@ -191,6 +190,10 @@ function ensureWorkspaceForProject(
   projectId: string,
   at: string
 ): string {
+  const existing = database
+    .prepare("SELECT workspace_id FROM legacy_project_workspace_mappings WHERE legacy_project_id=?")
+    .get(projectId);
+  if (existing) return String(existing.workspace_id);
   const workspaceId = workspaceIdForLegacyProject(projectId);
   database
     .prepare(
@@ -233,9 +236,9 @@ function backfillProjectIdentity(
   projectId: string,
   workspaceId: string,
   at: string
-): void {
+): boolean {
   if (!tableExists(database, "human_principals") || !tableExists(database, "project_memberships")) {
-    return;
+    return false;
   }
   const principals = database
     .prepare(
@@ -244,7 +247,25 @@ function backfillProjectIdentity(
          ON m.human_principal_id=p.human_principal_id WHERE m.project_id=?`
     )
     .all(projectId);
+  const conflictingPrincipals = new Set<string>();
   for (const principal of principals) {
+    const existingWorkspaces = database
+      .prepare(
+        "SELECT workspace_id FROM workspace_principals WHERE human_principal_id=? ORDER BY workspace_id"
+      )
+      .all(principal.human_principal_id)
+      .map((row) => String(row.workspace_id));
+    if (existingWorkspaces.some((candidate) => candidate !== workspaceId)) {
+      conflictingPrincipals.add(String(principal.human_principal_id));
+      recordIdentityRepair(
+        database,
+        "human_principal",
+        String(principal.human_principal_id),
+        "human_principal_requires_reenrollment",
+        at
+      );
+      continue;
+    }
     database
       .prepare(
         `INSERT OR IGNORE INTO workspace_principals(
@@ -258,6 +279,7 @@ function backfillProjectIdentity(
     .prepare("SELECT * FROM project_memberships WHERE project_id=? ORDER BY membership_id")
     .all(projectId);
   for (const membership of memberships) {
+    if (conflictingPrincipals.has(String(membership.human_principal_id))) continue;
     database
       .prepare(
         `INSERT OR IGNORE INTO workspace_memberships(
@@ -284,6 +306,16 @@ function backfillProjectIdentity(
         .all(projectId)
     : [];
   for (const device of devices) {
+    if (conflictingPrincipals.has(String(device.human_principal_id))) {
+      recordIdentityRepair(
+        database,
+        "device_session",
+        String(device.device_credential_id),
+        "device_session_requires_reenrollment",
+        at
+      );
+      continue;
+    }
     database
       .prepare(
         `INSERT OR IGNORE INTO workspace_device_sessions(
@@ -302,16 +334,35 @@ function backfillProjectIdentity(
       );
   }
 
-  database
-    .prepare(
-      `UPDATE workspace_identity_migrations
-       SET step='verify_cutover',status='completed',interruption_marker='read_cutover_complete',
-           failure_code=NULL,updated_at=? WHERE legacy_project_id=?`
-    )
-    .run(at, projectId);
+  if (conflictingPrincipals.size > 0) {
+    database
+      .prepare(
+        `UPDATE workspace_identity_migrations
+         SET step='verify_cutover',status='repair_required',interruption_marker='partial_backfill_failed',
+             failure_code='human_principal_workspace_conflict',updated_at=? WHERE legacy_project_id=?`
+      )
+      .run(at, projectId);
+    return true;
+  }
+  const state = database
+    .prepare("SELECT status FROM workspace_identity_migrations WHERE legacy_project_id=?")
+    .get(projectId);
+  if (state?.status !== "repair_required") {
+    database
+      .prepare(
+        `UPDATE workspace_identity_migrations
+         SET step='verify_cutover',status='completed',interruption_marker='read_cutover_complete',
+             failure_code=NULL,updated_at=? WHERE legacy_project_id=?`
+      )
+      .run(at, projectId);
+  }
+  return false;
 }
 
-function repairIdForSubject(subjectKind: "agent_host" | "enrollment", subjectId: string): string {
+function repairIdForSubject(
+  subjectKind: "human_principal" | "device_session" | "agent_host" | "enrollment",
+  subjectId: string
+): string {
   return `identity-repair-${createHash("sha256")
     .update(`${subjectKind}:${subjectId}`)
     .digest("hex")
@@ -324,9 +375,11 @@ function enrollmentSubjectId(codeHash: string): string {
 
 function recordIdentityRepair(
   database: SqliteDatabase,
-  subjectKind: "agent_host" | "enrollment",
+  subjectKind: "human_principal" | "device_session" | "agent_host" | "enrollment",
   subjectId: string,
   reason:
+    | "human_principal_requires_reenrollment"
+    | "device_session_requires_reenrollment"
     | "host_requires_reenrollment"
     | "enrollment_requires_reenrollment"
     | "enrollment_requires_workspace_binding",

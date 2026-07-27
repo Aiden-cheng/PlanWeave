@@ -13,7 +13,13 @@ import type { SqliteDatabase } from "../sqlite.js";
 
 export type WorkspaceIdentityReadState = {
   workspaceId: string;
-  status: "pending" | "in_progress" | "completed" | "interrupted" | "repair_required" | "rolled_back";
+  status:
+    | "pending"
+    | "in_progress"
+    | "completed"
+    | "interrupted"
+    | "repair_required"
+    | "rolled_back";
   interruptionMarker: string;
   failureCode: string | null;
 };
@@ -85,9 +91,16 @@ export class WorkspaceIdentityRepository {
   workspaceView(workspaceId: string): WorkspaceIdentityView {
     const parsed = workspaceIdSchema.parse(workspaceId);
     const row = this.database
-      .prepare("SELECT workspace_id,display_name,created_at,archived_at FROM workspaces WHERE workspace_id=?")
+      .prepare(
+        "SELECT workspace_id,display_name,created_at,archived_at FROM workspaces WHERE workspace_id=?"
+      )
       .get(parsed) as
-      | { workspace_id: string; display_name: string; created_at: string; archived_at: string | null }
+      | {
+          workspace_id: string;
+          display_name: string;
+          created_at: string;
+          archived_at: string | null;
+        }
       | undefined;
     if (!row) throw new Error("workspace_not_found");
     this.assertReadCutover(parsed);
@@ -179,7 +192,9 @@ export class WorkspaceIdentityRepository {
 
   workspaceForHost(hostId: string): string | undefined {
     const rows = this.database
-      .prepare("SELECT workspace_id FROM workspace_agent_hosts WHERE host_id=? ORDER BY workspace_id")
+      .prepare(
+        "SELECT workspace_id FROM workspace_agent_hosts WHERE host_id=? ORDER BY workspace_id"
+      )
       .all(hostId);
     if (rows.length !== 1) return undefined;
     return workspaceIdSchema.parse(String(rows[0].workspace_id));
@@ -193,6 +208,22 @@ export class WorkspaceIdentityRepository {
       .all(enrollmentCodeSha256);
     if (rows.length !== 1) return undefined;
     return workspaceIdSchema.parse(String(rows[0].workspace_id));
+  }
+
+  workspaceIdsForHumanPrincipal(humanPrincipalId: string): string[] {
+    const rows = this.database
+      .prepare(
+        `SELECT DISTINCT workspace_id FROM (
+           SELECT workspace_id FROM workspace_principals WHERE human_principal_id=?
+           UNION
+           SELECT m.workspace_id
+           FROM project_memberships p
+           JOIN legacy_project_workspace_mappings m ON m.legacy_project_id=p.project_id
+           WHERE p.human_principal_id=?
+         ) ORDER BY workspace_id`
+      )
+      .all(humanPrincipalId, humanPrincipalId);
+    return rows.map((row) => workspaceIdSchema.parse(String(row.workspace_id)));
   }
 
   listHostViews(workspaceId: string, limit: number, offset: number): AgentHostIdentityView[] {
@@ -295,7 +326,11 @@ export class WorkspaceIdentityRepository {
 
   assertReadCutover(workspaceId: string): void {
     const state = this.getReadState(workspaceId);
-    if (!state || state.status !== "completed" || state.interruptionMarker !== "read_cutover_complete") {
+    if (
+      !state ||
+      state.status !== "completed" ||
+      state.interruptionMarker !== "read_cutover_complete"
+    ) {
       throw new Error("workspace_identity_read_cutover_incomplete");
     }
   }
@@ -317,7 +352,9 @@ export class WorkspaceIdentityRepository {
       | undefined;
     if (!host) return;
     const bindings = this.database
-      .prepare("SELECT workspace_id FROM workspace_agent_hosts WHERE host_id=? ORDER BY workspace_id")
+      .prepare(
+        "SELECT workspace_id FROM workspace_agent_hosts WHERE host_id=? ORDER BY workspace_id"
+      )
       .all(hostId);
     for (const binding of bindings) this.writeHostProjection(String(binding.workspace_id), host);
   }
@@ -344,11 +381,18 @@ export class WorkspaceIdentityRepository {
     const row = rows[0];
     const boundWorkspaceId = String(row.workspace_id);
     const state = this.getReadState(boundWorkspaceId);
-    if (!state || state.status !== "completed" || state.interruptionMarker !== "read_cutover_complete") {
+    if (
+      !state ||
+      state.status !== "completed" ||
+      state.interruptionMarker !== "read_cutover_complete"
+    ) {
       return false;
     }
     if (row.revoked_at !== null) return false;
-    return row.credential_expires_at === null || Date.parse(String(row.credential_expires_at)) > now.getTime();
+    return (
+      row.credential_expires_at === null ||
+      Date.parse(String(row.credential_expires_at)) > now.getTime()
+    );
   }
 
   /** Bind an enrollment grant to a workspace, preserving its original created_at. */
@@ -373,7 +417,8 @@ export class WorkspaceIdentityRepository {
          WHERE enrollment_code_sha256=? ORDER BY workspace_id`
       )
       .all(enrollmentCodeSha256);
-    for (const binding of bindings) this.writeEnrollmentProjection(String(binding.workspace_id), grant);
+    for (const binding of bindings)
+      this.writeEnrollmentProjection(String(binding.workspace_id), grant);
   }
 
   private assertWorkspace(workspaceId: string): void {
@@ -414,9 +459,7 @@ export class WorkspaceIdentityRepository {
   private writeEnrollmentProjection(workspaceId: string, grant: LegacyEnrollmentRow): void {
     const hostId = grant.host_id
       ? this.database
-          .prepare(
-            "SELECT host_id FROM workspace_agent_hosts WHERE workspace_id=? AND host_id=?"
-          )
+          .prepare("SELECT host_id FROM workspace_agent_hosts WHERE workspace_id=? AND host_id=?")
           .get(workspaceId, grant.host_id)
       : undefined;
     if (grant.used_at && !hostId) throw new Error("workspace_host_binding_required");

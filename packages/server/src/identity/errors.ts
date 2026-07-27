@@ -24,6 +24,7 @@ export const humanAuthErrorCodeSchema = z.enum([
   "human_device_not_owner",
   "human_credential_kind_mismatch",
   "human_cross_project_forbidden",
+  "human_identity_workspace_mismatch",
   "human_input_invalid",
   "human_limit_exceeded"
 ]);
@@ -72,6 +73,7 @@ export const HUMAN_AUTH_ERROR_MESSAGES: Readonly<Record<HumanAuthErrorCode, stri
   human_device_not_owner: "Device credential is not owned by the acting principal.",
   human_credential_kind_mismatch: "Credential kind is not valid for human authentication.",
   human_cross_project_forbidden: "Cross-project access is not permitted.",
+  human_identity_workspace_mismatch: "Human identity is bound to a different workspace.",
   human_input_invalid: "Request input failed validation.",
   human_limit_exceeded: "A project or principal limit would be exceeded."
 };

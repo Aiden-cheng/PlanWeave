@@ -3,10 +3,7 @@ import { inWriteTransaction, type SqliteDatabase } from "../sqlite.js";
 import { DeviceCredentialStore } from "./deviceCredentialStore.js";
 import { HumanIdentityError } from "./errors.js";
 import { InvitationStore } from "./invitationStore.js";
-import {
-  HUMAN_MAX_MEMBERS_PER_PROJECT,
-  HUMAN_MAX_OPEN_INVITATIONS_PER_PROJECT
-} from "./limits.js";
+import { HUMAN_MAX_MEMBERS_PER_PROJECT, HUMAN_MAX_OPEN_INVITATIONS_PER_PROJECT } from "./limits.js";
 import { MembershipStore } from "./membershipStore.js";
 import {
   evaluateDeviceUsability,
@@ -291,7 +288,12 @@ export class HumanIdentityRepository {
            WHERE d.workspace_id=? AND d.device_session_id=? AND d.human_principal_id=?
              AND m.membership_id=?`
         )
-        .get(workspaceId, device.deviceCredentialId, principal.humanPrincipalId, membership.membershipId);
+        .get(
+          workspaceId,
+          device.deviceCredentialId,
+          principal.humanPrincipalId,
+          membership.membershipId
+        );
       if (!workspaceDevice || workspaceDevice.revoked_at || workspaceDevice.membership_revoked_at) {
         return undefined;
       }
@@ -313,7 +315,11 @@ export class HumanIdentityRepository {
     ownerHumanPrincipalId?: string
   ): HumanDeviceCredentialMetadata {
     return inWriteTransaction(this.database, () => {
-      const revoked = this.devices.revokeDevice(deviceCredentialId, projectId, ownerHumanPrincipalId);
+      const revoked = this.devices.revokeDevice(
+        deviceCredentialId,
+        projectId,
+        ownerHumanPrincipalId
+      );
       const workspaceId = this.workspaceIdentity.ensureWorkspaceForLegacyProject(projectId);
       this.syncWorkspaceProject(workspaceId, projectId);
       return revoked;
@@ -387,6 +393,8 @@ export class HumanIdentityRepository {
   ): BootstrapOwnerResult {
     const projectId = proof.projectId;
     const workspaceId = this.workspaceIdentity.ensureWorkspaceForLegacyProject(projectId);
+    this.workspaceIdentity.assertReadCutover(workspaceId);
+    this.assertPrincipalWorkspace(proof.humanPrincipalId, workspaceId);
     const existingOwners = this.memberships.listActiveOwners(projectId);
 
     const samePrincipal = existingOwners.find(
@@ -400,10 +408,7 @@ export class HumanIdentityRepository {
       const principal =
         this.getPrincipal(proof.humanPrincipalId) ??
         this.memberships.insertPrincipal(proof.humanPrincipalId, proof.displayName);
-      const usable = this.devices.findUsableDeviceForProject(
-        proof.humanPrincipalId,
-        projectId
-      );
+      const usable = this.devices.findUsableDeviceForProject(proof.humanPrincipalId, projectId);
       if (usable) {
         this.syncWorkspaceProject(workspaceId, projectId);
         return {
@@ -470,8 +475,7 @@ export class HumanIdentityRepository {
     }
 
     if (
-      this.invitations.countOpenInvitations(projectId) >=
-      HUMAN_MAX_OPEN_INVITATIONS_PER_PROJECT
+      this.invitations.countOpenInvitations(projectId) >= HUMAN_MAX_OPEN_INVITATIONS_PER_PROJECT
     ) {
       throw new HumanIdentityError("human_limit_exceeded");
     }
@@ -492,6 +496,7 @@ export class HumanIdentityRepository {
   }): ConsumeInvitationResult {
     const projectId = humanProjectIdSchema.parse(input.projectId);
     const workspaceId = this.workspaceIdentity.ensureWorkspaceForLegacyProject(projectId);
+    this.workspaceIdentity.assertReadCutover(workspaceId);
     const invitation = this.invitations.findInvitationByToken(input.invitationToken);
     if (!invitation) throw new HumanIdentityError("human_invitation_invalid");
     const usability = evaluateInvitationUsability({
@@ -526,6 +531,14 @@ export class HumanIdentityRepository {
       if (!deviceUsability.usable) {
         throw new HumanIdentityError(deviceUsability.code);
       }
+      const sourceWorkspace = this.workspaceIdentity.workspaceForLegacyProject(
+        existingDevice.mintedForProjectId
+      );
+      if (!sourceWorkspace || sourceWorkspace !== workspaceId) {
+        throw new HumanIdentityError("human_identity_workspace_mismatch");
+      }
+      this.workspaceIdentity.assertReadCutover(sourceWorkspace);
+      this.assertPrincipalWorkspace(existingPrincipal.humanPrincipalId, workspaceId);
       principal = existingPrincipal;
     } else {
       const displayName = humanDisplayNameSchema.parse(input.displayName);
@@ -574,6 +587,7 @@ export class HumanIdentityRepository {
   }
 
   private syncWorkspaceProject(workspaceId: string, projectId: string): void {
+    this.workspaceIdentity.assertReadCutover(workspaceId);
     const principals = this.database
       .prepare(
         `SELECT DISTINCT p.human_principal_id,p.display_name,p.created_at
@@ -582,13 +596,19 @@ export class HumanIdentityRepository {
       )
       .all(projectId);
     for (const principal of principals) {
+      this.assertPrincipalWorkspace(String(principal.human_principal_id), workspaceId);
       this.database
         .prepare(
           `INSERT OR IGNORE INTO workspace_principals(
             workspace_id,human_principal_id,display_name,created_at,revoked_at
           ) VALUES(?,?,?,?,NULL)`
         )
-        .run(workspaceId, principal.human_principal_id, principal.display_name, principal.created_at);
+        .run(
+          workspaceId,
+          principal.human_principal_id,
+          principal.display_name,
+          principal.created_at
+        );
     }
     const memberships = this.database
       .prepare("SELECT * FROM project_memberships WHERE project_id=?")
@@ -637,6 +657,13 @@ export class HumanIdentityRepository {
           device.revoked_at,
           device.last_used_at
         );
+    }
+  }
+
+  private assertPrincipalWorkspace(humanPrincipalId: string, workspaceId: string): void {
+    const bound = this.workspaceIdentity.workspaceIdsForHumanPrincipal(humanPrincipalId);
+    if (bound.some((candidate) => candidate !== workspaceId)) {
+      throw new HumanIdentityError("human_identity_workspace_mismatch");
     }
   }
 }
