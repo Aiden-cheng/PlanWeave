@@ -130,7 +130,11 @@ describe("server config", () => {
       ...input,
       trustedProjects: [
         ...input.trustedProjects,
-        { projectId: "project-1", projectRoot: join(input.dataDirectory, "other-project") }
+        {
+          projectId: "project-1",
+          canvasId: "default",
+          projectRoot: join(input.dataDirectory, "other-project")
+        }
       ]
     };
     expect(() => parseServerConfig(duplicateProjectId)).toThrow("server_trusted_project_duplicate");
@@ -138,14 +142,42 @@ describe("server config", () => {
     expect(
       parseServerConfig({ ...input, trustedProjects: [{ ...input.trustedProjects[0] }] })
     ).toMatchObject({ trustedProjects: [{ projectId: "project-1", canvasId: "default" }] });
-    expect(
+    const allDeclared = parseServerConfig({
+      ...input,
+      trustedProjects: [
+        {
+          projectId: "project-1",
+          projectRoot: input.trustedProjects[0].projectRoot,
+          trustAllDeclaredCanvases: true
+        }
+      ]
+    });
+    expect(allDeclared.trustedProjects[0]).toMatchObject({
+      projectId: "project-1",
+      trustAllDeclaredCanvases: true
+    });
+    expect(allDeclared.trustedProjects[0].canvasId).toBeUndefined();
+    expect(() =>
       parseServerConfig({
         ...input,
         trustedProjects: [
           { projectId: "project-1", projectRoot: input.trustedProjects[0].projectRoot }
         ]
-      }).trustedProjects[0].canvasId
-    ).toBeUndefined();
+      })
+    ).toThrow("trusted_project_canvas_required");
+    expect(() =>
+      parseServerConfig({
+        ...input,
+        trustedProjects: [
+          {
+            projectId: "project-1",
+            canvasId: "default",
+            projectRoot: input.trustedProjects[0].projectRoot,
+            trustAllDeclaredCanvases: true
+          }
+        ]
+      })
+    ).toThrow("trusted_project_canvas_scope_conflict");
 
     const parsed = parseServerConfig(input);
     expect(() =>

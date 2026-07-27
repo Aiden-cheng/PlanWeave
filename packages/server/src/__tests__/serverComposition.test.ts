@@ -198,7 +198,7 @@ describe("distributed server composition", () => {
       publicUrl: "http://127.0.0.1:7443",
       allowInsecureDevelopment: true,
       dataDirectory,
-      trustedProjects: [{ projectId, projectRoot: workspace.root, canvasId: "default" }],
+      trustedProjects: [{ projectId, projectRoot: workspace.root, trustAllDeclaredCanvases: true }],
       operatorCredentials: [
         {
           operatorId: "admin",
@@ -246,6 +246,67 @@ describe("distributed server composition", () => {
       })
     });
     expect(secondaryDispatch.status).toBe(202);
+  });
+
+  it("does not expose secondary canvases through legacy canvas trust", async () => {
+    const workspace = await createTestWorkspace(remoteManifest());
+    directories.push(workspace.home, workspace.root);
+    await addSecondaryCanvas(workspace.root);
+    const dataDirectory = join(workspace.root, "legacy-canvas-scope-server-data");
+    const httpServer = createServer();
+    httpServers.push(httpServer);
+    const projectId = workspace.init.workspace.id;
+    const config = parseServerConfig({
+      version: "server-config/v1",
+      bind: { host: "127.0.0.1", port: 7_443 },
+      publicUrl: "http://127.0.0.1:7443",
+      allowInsecureDevelopment: true,
+      dataDirectory,
+      trustedProjects: [{ projectId, projectRoot: workspace.root, canvasId: "default" }],
+      operatorCredentials: [
+        {
+          operatorId: "admin",
+          tokenSha256: hashOperatorToken(adminToken),
+          projectIds: [],
+          serverAdmin: true
+        }
+      ]
+    });
+    const composition = await createDistributedServerComposition({ httpServer, config });
+    compositions.push(composition);
+    await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
+    const address = httpServer.address();
+    if (!address || typeof address === "string") throw new Error("Expected HTTP address");
+    const origin = `http://127.0.0.1:${address.port}`;
+    const bootstrap = await fetch(`${origin}/api/v1/projects/${projectId}/human/bootstrap`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ displayName: "Trusted Owner", humanPrincipalId: "trusted-owner" })
+    });
+    expect(bootstrap.status).toBe(201);
+    const { deviceToken } = (await bootstrap.json()) as { deviceToken: string };
+    const canvases = await fetch(`${origin}/api/v1/registry/projects/${projectId}/canvases`, {
+      headers: { Authorization: `Bearer ${deviceToken}` }
+    });
+    expect(canvases.status).toBe(200);
+    await expect(canvases.json()).resolves.toMatchObject({
+      items: [
+        expect.objectContaining({
+          registry: expect.objectContaining({ canvasId: "default" })
+        })
+      ]
+    });
+    const secondaryDispatch = await fetch(`${origin}/api/v1/remote-operations`, {
+      method: "POST",
+      headers: jsonHeaders(adminToken),
+      body: JSON.stringify({
+        projectId,
+        canvasId: "secondary",
+        blockRef: "T-001#B-001",
+        idempotencyKey: "legacy-secondary-dispatch"
+      })
+    });
+    expect(secondaryDispatch.status).not.toBe(202);
   });
 
   it("wires health, enrollment, scoped dispatch, idempotency, pagination, and shutdown", async () => {

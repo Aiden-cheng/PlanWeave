@@ -79,7 +79,7 @@ describe("createTrustedRuntimeRegistry", () => {
 
     const projectId = workspace.init.workspace.id;
     const trusted = await createTrustedRuntimeRegistry([
-      { projectId, projectRoot: workspace.root, canvasId: "default" }
+      { projectId, projectRoot: workspace.root, trustAllDeclaredCanvases: true }
     ]);
     expect(trusted.locators).toEqual([
       { projectId, canvasId: "default" },
@@ -99,6 +99,42 @@ describe("createTrustedRuntimeRegistry", () => {
     expect(trusted.hasCanvas(projectId, "secondary")).toBe(true);
     expect(trusted.hasCanvas(projectId, "undeclared")).toBe(false);
     expect(() => trusted.registry.resolve({ projectId, canvasId: "secondary" })).not.toThrow();
+    trusted.close();
+  });
+
+  it("keeps legacy canvas trust scoped to the configured canvas", async () => {
+    const workspace = await createTestWorkspace(basicManifest());
+    directories.push(workspace.home, workspace.root);
+    const loaded = await loadProjectGraph(workspace.root);
+    const secondaryCanvas = canonicalProjectCanvasNode({
+      id: "secondary",
+      title: "Secondary canvas"
+    });
+    const secondaryWorkspace = projectCanvasWorkspace(loaded.workspace, secondaryCanvas);
+    await mkdir(secondaryWorkspace.packageDir, { recursive: true });
+    await writeJsonFile(secondaryWorkspace.manifestFile, basicManifest());
+    await writePromptFiles(secondaryWorkspace.packageDir, basicManifest());
+    await mkdir(secondaryWorkspace.resultsDir, { recursive: true });
+    await writeProjectGraph(loaded.workspace, {
+      version: "plan-project/v1",
+      canvases: [
+        canonicalProjectCanvasNode({ id: "default", title: "Default canvas" }),
+        secondaryCanvas
+      ],
+      edges: [],
+      crossTaskEdges: []
+    });
+
+    const projectId = workspace.init.workspace.id;
+    const trusted = await createTrustedRuntimeRegistry([
+      { projectId, projectRoot: workspace.root, canvasId: "default" }
+    ]);
+    expect(trusted.locators).toEqual([{ projectId, canvasId: "default" }]);
+    expect(trusted.hasCanvas(projectId, "default")).toBe(true);
+    expect(trusted.hasCanvas(projectId, "secondary")).toBe(false);
+    expect(() => trusted.registry.resolve({ projectId, canvasId: "secondary" })).toThrow(
+      "remote_runtime_locator_unresolved"
+    );
     trusted.close();
   });
 

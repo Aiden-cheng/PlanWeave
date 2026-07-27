@@ -19,15 +19,25 @@ import {
 export const trustedRuntimeProjectSchema = z
   .object({
     projectId: opaqueIdentifierSchema,
-    /**
-     * Legacy compatibility hint. Runtime graph canvases are always trusted as
-     * a whole; when supplied this value is validated but does not narrow the
-     * expanded canvas set.
-     */
+    /** Legacy configuration: trust exactly this declared canvas. */
     canvasId: opaqueIdentifierSchema.optional(),
+    /** Explicit opt-in to trust every canvas declared by the Runtime graph. */
+    trustAllDeclaredCanvases: z.boolean().default(false),
     projectRoot: z.string().min(1).max(4096).refine(isAbsolute, "projectRoot must be absolute")
   })
-  .strict();
+  .strict()
+  .superRefine((project, context) => {
+    if (project.trustAllDeclaredCanvases && project.canvasId !== undefined) {
+      context.addIssue({
+        code: "custom",
+        message: "trusted_project_canvas_scope_conflict"
+      });
+      return;
+    }
+    if (!project.trustAllDeclaredCanvases && project.canvasId === undefined) {
+      context.addIssue({ code: "custom", message: "trusted_project_canvas_required" });
+    }
+  });
 
 export type TrustedRuntimeProject = z.infer<typeof trustedRuntimeProjectSchema>;
 
@@ -67,10 +77,10 @@ export async function createTrustedRuntimeRegistry(
       }
       if (loaded.workspace.id !== project.projectId)
         throw new Error("trusted_project_identity_mismatch");
-      if (
-        project.canvasId !== undefined &&
-        !loaded.manifest.canvases.some((canvas) => canvas.id === project.canvasId)
-      ) {
+      const selectedCanvases = project.trustAllDeclaredCanvases
+        ? loaded.manifest.canvases
+        : loaded.manifest.canvases.filter((canvas) => canvas.id === project.canvasId);
+      if (!project.trustAllDeclaredCanvases && selectedCanvases.length !== 1) {
         throw new Error("trusted_project_canvas_not_declared");
       }
       let projectPorts = canvasWorkItemPorts.get(project.projectId);
@@ -78,7 +88,7 @@ export async function createTrustedRuntimeRegistry(
         projectPorts = new Map();
         canvasWorkItemPorts.set(project.projectId, projectPorts);
       }
-      for (const canvas of loaded.manifest.canvases) {
+      for (const canvas of selectedCanvases) {
         const workspace = projectCanvasWorkspace(loaded.workspace, canvas);
         const locator = { projectId: project.projectId, canvasId: canvas.id };
         projectPorts.set(canvas.id, {
