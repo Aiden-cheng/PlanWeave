@@ -435,6 +435,60 @@ describe("package snapshot repository", () => {
     }
   });
 
+  it("returns stale ACL conflict when the revision changes before commit", async () => {
+    const { database, snapshots, workspace } = await fixture();
+    const created = await snapshots.create({
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: "default",
+      actor: owner,
+      expectedAclRevision: 0
+    });
+    const originalManifest = await readFile(workspace.init.workspace.manifestFile, "utf8");
+    await writeFile(workspace.init.workspace.manifestFile, "{}", "utf8");
+    const entered = deferred<void>();
+    const release = deferred<void>();
+    const originalRestore = runtime.restorePackageSnapshot;
+    const restoreSpy = vi
+      .spyOn(runtime, "restorePackageSnapshot")
+      .mockImplementation(async (restoreInput) => {
+        const beforeCommit = restoreInput.beforeCommit;
+        return originalRestore({
+          ...restoreInput,
+          beforeCommit: async () => {
+            entered.resolve();
+            await release.promise;
+            await beforeCommit?.();
+          }
+        });
+      });
+    try {
+      const restorePromise = snapshots.restore({
+        workspaceId: "w",
+        projectId: "p",
+        canvasId: "default",
+        snapshotId: created.snapshot.immutable.snapshotId,
+        actor: owner,
+        expectedAclRevision: 0
+      });
+      await entered.promise;
+      database
+        .prepare(
+          "UPDATE canvas_registry SET acl_revision=acl_revision+1,updated_at=? WHERE workspace_id=? AND project_id=? AND canvas_id=?"
+        )
+        .run("2026-01-03T00:00:00.000Z", "w", "p", "default");
+      release.resolve();
+      await expect(restorePromise).resolves.toMatchObject({
+        outcome: "conflict",
+        detail: "stale_acl_revision"
+      });
+      expect(await readFile(workspace.init.workspace.manifestFile, "utf8")).toBe("{}");
+      expect(originalManifest).not.toBe("{}");
+    } finally {
+      restoreSpy.mockRestore();
+    }
+  });
+
   it("fences grant mutations until restore commit", async () => {
     const { access, database, snapshots, workspace } = await fixture();
     const created = await snapshots.create({
