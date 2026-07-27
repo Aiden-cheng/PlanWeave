@@ -10,6 +10,17 @@ export {
   retryWorkspaceIdentityMigration,
   rollbackWorkspaceIdentityMigration
 } from "./migrations/identityRecovery.js";
+export {
+  aclMigrationIdFor,
+  canvasRegistryIdFor,
+  projectRegistryIdFor,
+  readAclRegistryMigration,
+  repairAclRegistryMigration,
+  retryAclRegistryMigration,
+  rollbackAclRegistryMigration,
+  upsertAclRegistryMigration,
+  type AclRegistryMigrationState
+} from "./migrations/aclRegistry.js";
 
 export const latestCentralSchemaVersion = Math.max(
   ...migrations.map((migration) => migration.version)

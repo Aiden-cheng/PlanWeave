@@ -1,4 +1,5 @@
 import type { IncomingMessage, Server as HttpServer, ServerResponse } from "node:http";
+import { resolveTaskCanvasWorkspace } from "@planweave-ai/runtime";
 import { ArtifactStore } from "./artifacts.js";
 import { handleAgentHostArtifactRequest } from "./artifactHttp.js";
 import {
@@ -42,6 +43,8 @@ import {
   RuntimeInputArtifactMaterializer
 } from "./runtimeArtifactAdapter.js";
 import { createTrustedRuntimeRegistry } from "./runtimeProjectRegistry.js";
+import { ProjectAccessRepository } from "./projectAccessRepository.js";
+import { PackageSnapshotRepository } from "./packageSnapshotRepository.js";
 import { attachAgentHostWebSocketServer, type AgentHostWebSocketServer } from "./wsServer.js";
 import {
   attachHumanObserverWebSocketServer,
@@ -205,6 +208,8 @@ export async function createDistributedServerComposition(
   let requestListener: ((request: IncomingMessage, response: ServerResponse) => void) | undefined;
   let humanIdentityForInteractions: HumanIdentityRepository | undefined;
   let humanObserverJournal: HumanObserverJournal | undefined;
+  let projectAccess: ProjectAccessRepository | undefined;
+  let packageSnapshots: PackageSnapshotRepository | undefined;
   const inflightRequests = new Set<Promise<void>>();
   try {
     let authorization: OperatorTokenRegistry;
@@ -330,9 +335,41 @@ export async function createDistributedServerComposition(
     readiness.transition("reconciling", schemaVersion);
     const enrollments = new HostEnrollmentService(server.database, clock);
     const workspaceIdentity = new WorkspaceIdentityRepository(server.database);
-    for (const { projectId } of runtimeRegistry.locators) {
-      workspaceIdentity.ensureWorkspaceForLegacyProject(projectId);
+    projectAccess = new ProjectAccessRepository(server.database, clock);
+    for (const trusted of config.trustedProjects) {
+      const workspaceId = workspaceIdentity.ensureWorkspaceForLegacyProject(trusted.projectId);
+      const existingProject = projectAccess.registry.projectInternal(
+        workspaceId,
+        trusted.projectId
+      );
+      if (existingProject?.projectRoot === null)
+        projectAccess.bindProjectPath(workspaceId, trusted.projectId, trusted.projectRoot);
+      projectAccess.registerProjectInternal({
+        workspaceId,
+        projectId: trusted.projectId,
+        projectRoot: trusted.projectRoot
+      });
+      const canvasWorkspace = await resolveTaskCanvasWorkspace(
+        trusted.projectRoot,
+        trusted.canvasId
+      );
+      projectAccess.registerCanvasInternal({
+        workspaceId,
+        projectId: trusted.projectId,
+        canvasId: trusted.canvasId,
+        packageDir: canvasWorkspace.packageDir
+      });
+      projectAccess.markCanvasCutover(workspaceId, trusted.projectId, trusted.canvasId);
+      projectAccess.finalizeProjectCutover(workspaceId, trusted.projectId);
     }
+    packageSnapshots = new PackageSnapshotRepository(
+      server.database,
+      projectAccess,
+      config.dataDirectory,
+      clock
+    );
+    if (!projectAccess || !packageSnapshots)
+      throw new Error("project_access_services_not_initialized");
     authorization = new OperatorTokenRegistry(server.database, config.operatorCredentials, clock);
     provisionConfiguredOperatorSessions({
       database: server.database,

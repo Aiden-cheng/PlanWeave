@@ -75,6 +75,13 @@ export { editBlock, editTask } from "./package/manifestEdit.js";
 export { readMarkdown } from "./package/readMarkdown.js";
 export { resolvePackagePath, PackagePathError } from "./package/resolvePackagePath.js";
 export {
+  capturePackageSnapshot,
+  restorePackageSnapshot,
+  type CapturePackageSnapshotResult,
+  type CapturedPackageSnapshot,
+  type PackageSnapshotFile
+} from "./package/packageSnapshot.js";
+export {
   exportCanvasPackageFiles,
   packageFileEntrySchema,
   readPackageFiles,

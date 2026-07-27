@@ -1,5 +1,5 @@
 import { createServer, type Server as HttpServer } from "node:http";
-import { rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { PlanPackageManifest } from "@planweave-ai/runtime";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,7 +9,14 @@ import {
 } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { hashOperatorToken } from "../operatorAuth.js";
 import { parseServerConfig } from "../config.js";
-import { latestCentralSchemaVersion } from "../migrations.js";
+import {
+  aclMigrationIdFor,
+  applyMigrations,
+  latestCentralSchemaVersion,
+  projectRegistryIdFor
+} from "../migrations.js";
+import { openServerDatabase } from "../sqlite.js";
+import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import {
   createDistributedServerComposition,
   type DistributedServerComposition
@@ -162,5 +169,81 @@ describe("distributed server composition", () => {
     await fixture.composition.close();
     expect(fixture.composition.readiness()).toMatchObject({ status: "draining" });
     compositions.splice(compositions.indexOf(fixture.composition), 1);
+  });
+
+  it("binds an unbound legacy registry row without rewriting package/state/results", async () => {
+    const workspace = await createTestWorkspace(remoteManifest());
+    directories.push(workspace.home, workspace.root);
+    const dataDirectory = join(workspace.root, "legacy-server-data");
+    const databasePath = join(dataDirectory, "planweave-server.sqlite");
+    const database = await openServerDatabase(databasePath, 5_000);
+    applyMigrations(database);
+    const workspaceIdentity = new WorkspaceIdentityRepository(database);
+    const workspaceId = workspaceIdentity.ensureWorkspaceForLegacyProject(
+      workspace.init.workspace.id
+    );
+    const at = "2026-01-01T00:00:00.000Z";
+    database
+      .prepare(
+        `INSERT INTO project_registry(project_registry_id,workspace_id,project_id,project_root_internal,visibility,owner_human_principal_id,acl_revision,created_at,updated_at,revoked_at) VALUES(?,?,?,NULL,'private',NULL,0,?,?,NULL)`
+      )
+      .run(
+        projectRegistryIdFor(workspaceId, workspace.init.workspace.id),
+        workspaceId,
+        workspace.init.workspace.id,
+        at,
+        at
+      );
+    database
+      .prepare(
+        `INSERT INTO acl_registry_migrations(migration_id,workspace_id,project_id,canvas_id,source_kind,marker,status,failure_code,updated_at) VALUES(?,?,?,NULL,'legacy_project','project_registered','pending',NULL,?)`
+      )
+      .run(
+        aclMigrationIdFor("legacy_project", workspaceId, workspace.init.workspace.id),
+        workspaceId,
+        workspace.init.workspace.id,
+        at
+      );
+    const beforeManifest = await readFile(workspace.init.workspace.manifestFile);
+    const beforeState = await readFile(workspace.init.workspace.stateFile);
+    database.close();
+    const httpServer = createServer();
+    httpServers.push(httpServer);
+    const config = parseServerConfig({
+      version: "server-config/v1",
+      bind: { host: "127.0.0.1", port: 7_443 },
+      publicUrl: "http://127.0.0.1:7443",
+      allowInsecureDevelopment: true,
+      dataDirectory,
+      trustedProjects: [
+        { projectId: workspace.init.workspace.id, canvasId: "default", projectRoot: workspace.root }
+      ],
+      operatorCredentials: [
+        {
+          operatorId: "admin",
+          tokenSha256: hashOperatorToken(adminToken),
+          projectIds: [],
+          serverAdmin: true
+        }
+      ]
+    });
+    const composition = await createDistributedServerComposition({ httpServer, config });
+    compositions.push(composition);
+    const reopened = await openServerDatabase(databasePath, 5_000);
+    expect(
+      reopened
+        .prepare("SELECT project_root_internal FROM project_registry WHERE project_id=?")
+        .get(workspace.init.workspace.id)?.project_root_internal
+    ).toBe(workspace.root);
+    expect(
+      reopened
+        .prepare(
+          "SELECT status,marker FROM acl_registry_migrations WHERE workspace_id=? AND project_id=? AND source_kind='legacy_project'"
+        )
+        .get(workspaceId, workspace.init.workspace.id)
+    ).toEqual({ status: "completed", marker: "cutover_complete" });
+    expect(await readFile(workspace.init.workspace.manifestFile)).toEqual(beforeManifest);
+    expect(await readFile(workspace.init.workspace.stateFile)).toEqual(beforeState);
+    reopened.close();
   });
 });
