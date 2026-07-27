@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { applyMigrations } from "../migrations.js";
-import { backfillWorkspaceIdentity } from "../migrations/identity.js";
+import {
+  backfillWorkspaceIdentity,
+  repairWorkspaceIdentityMigration,
+  retryWorkspaceIdentityMigration,
+  rollbackWorkspaceIdentityMigration
+} from "../migrations.js";
 import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 
@@ -310,5 +315,134 @@ describe("workspace identity migration v27 human scope repair", () => {
     expect(
       database.prepare("SELECT COUNT(*) AS count FROM workspace_identity_repairs").get()
     ).toEqual({ count: 2 });
+  });
+});
+
+describe("workspace identity migration recovery", () => {
+  it("records interruption, retries idempotently, repairs parity, and rolls back only projections", async () => {
+    const database = await openDatabaseAtV26();
+    const now = "2026-07-27T00:00:00.000Z";
+    database
+      .prepare(
+        "INSERT INTO human_principals(human_principal_id,display_name,created_at) VALUES(?,?,?)"
+      )
+      .run("human-recovery", "Recovery", now);
+    database
+      .prepare(
+        `INSERT INTO project_memberships(
+          membership_id,project_id,human_principal_id,role,created_at,updated_at,revision
+        ) VALUES(?,?,?,?,?,?,?)`
+      )
+      .run("membership-recovery", "project-recovery", "human-recovery", "member", now, now, 1);
+    database
+      .prepare(
+        `INSERT INTO human_device_credentials(
+          device_credential_id,human_principal_id,minted_for_project_id,token_sha256,created_at
+        ) VALUES(?,?,?,?,?)`
+      )
+      .run("device-recovery", "human-recovery", "project-recovery", "e".repeat(64), now);
+
+    applyMigrations(database);
+    const workspaceId = String(
+      database
+        .prepare(
+          "SELECT workspace_id FROM legacy_project_workspace_mappings WHERE legacy_project_id=?"
+        )
+        .get("project-recovery")?.workspace_id
+    );
+
+    const rolledBack = rollbackWorkspaceIdentityMigration(database, "project-recovery");
+    expect(rolledBack).toMatchObject({ status: "rolled_back", outcome: "rollback_to_legacy" });
+    expect(
+      database
+        .prepare("SELECT 1 FROM legacy_project_workspace_mappings WHERE legacy_project_id=?")
+        .get("project-recovery")
+    ).toBeDefined();
+    expect(
+      database
+        .prepare("SELECT 1 FROM project_memberships WHERE project_id=?")
+        .get("project-recovery")
+    ).toBeDefined();
+    expect(
+      database
+        .prepare("SELECT COUNT(*) AS count FROM workspace_memberships WHERE workspace_id=?")
+        .get(workspaceId)
+    ).toEqual({ count: 0 });
+
+    const interrupted = retryWorkspaceIdentityMigration(database, "project-recovery", {
+      failAtStep: "backfill_devices"
+    });
+    expect(interrupted).toMatchObject({ status: "interrupted", outcome: "resume_from_marker" });
+    expect(
+      database
+        .prepare(
+          "SELECT status,interruption_marker,failure_code FROM workspace_identity_migrations WHERE legacy_project_id=?"
+        )
+        .get("project-recovery")
+    ).toEqual({
+      status: "interrupted",
+      interruption_marker: "memberships_backfilled",
+      failure_code: "injected_backfill_devices_failure"
+    });
+    expect(() =>
+      new WorkspaceIdentityRepository(database).listMembershipViews(workspaceId)
+    ).toThrow("workspace_identity_read_cutover_incomplete");
+
+    const repaired = repairWorkspaceIdentityMigration(database, "project-recovery");
+    expect(repaired).toMatchObject({ status: "completed", outcome: "resume_from_marker" });
+    expect(retryWorkspaceIdentityMigration(database, "project-recovery")).toMatchObject({
+      status: "completed",
+      outcome: "retry_idempotent"
+    });
+  });
+
+  it("marks projection conflicts as repair-required and recovers after the source is repaired", async () => {
+    const database = await openDatabaseAtV26();
+    const now = "2026-07-27T00:00:00.000Z";
+    database
+      .prepare(
+        "INSERT INTO human_principals(human_principal_id,display_name,created_at) VALUES(?,?,?)"
+      )
+      .run("human-parity", "Parity", now);
+    database
+      .prepare(
+        `INSERT INTO project_memberships(membership_id,project_id,human_principal_id,role,created_at,updated_at,revision)
+         VALUES(?,?,?,?,?,?,?)`
+      )
+      .run("membership-parity", "project-parity", "human-parity", "member", now, now, 1);
+    applyMigrations(database);
+    database
+      .prepare("UPDATE project_memberships SET role='owner' WHERE membership_id=?")
+      .run("membership-parity");
+    const workspaceId = String(
+      database
+        .prepare(
+          "SELECT workspace_id FROM legacy_project_workspace_mappings WHERE legacy_project_id=?"
+        )
+        .get("project-parity")?.workspace_id
+    );
+    database
+      .prepare(
+        "UPDATE workspace_identity_migrations SET status='repair_required',interruption_marker='partial_backfill_failed',failure_code='manual_parity_failure' WHERE legacy_project_id=?"
+      )
+      .run("project-parity");
+    const failed = retryWorkspaceIdentityMigration(database, "project-parity");
+    expect(failed.status).toBe("repair_required");
+    expect(
+      database
+        .prepare(
+          "SELECT status,failure_code FROM workspace_identity_migrations WHERE legacy_project_id=?"
+        )
+        .get("project-parity")
+    ).toEqual({
+      status: "repair_required",
+      failure_code: "workspace_membership_projection_conflict"
+    });
+    database
+      .prepare(
+        "UPDATE workspace_memberships SET role='owner' WHERE workspace_id=? AND membership_id=?"
+      )
+      .run(workspaceId, "membership-parity");
+    expect(repairWorkspaceIdentityMigration(database, "project-parity").status).toBe("completed");
   });
 });

@@ -131,6 +131,13 @@ export {
   type WorkspaceIdentityHttpOptions
 } from "./identity/workspaceIdentityHttp.js";
 export {
+  repairWorkspaceIdentityMigration,
+  retryWorkspaceIdentityMigration,
+  rollbackWorkspaceIdentityMigration,
+  type WorkspaceIdentityBackfillOptions,
+  type WorkspaceIdentityRecoveryResult
+} from "./migrations.js";
+export {
   startPlanweaveServer,
   type PlanweaveServer,
   type StartupContext,

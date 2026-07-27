@@ -1,6 +1,17 @@
 import type { SqliteDatabase } from "./sqlite.js";
 import { migrations } from "./migrations/registry.js";
 
+export {
+  backfillWorkspaceIdentity,
+  type WorkspaceIdentityBackfillOptions,
+  type WorkspaceIdentityRecoveryResult
+} from "./migrations/identity.js";
+export {
+  repairWorkspaceIdentityMigration,
+  retryWorkspaceIdentityMigration,
+  rollbackWorkspaceIdentityMigration
+} from "./migrations/identityRecovery.js";
+
 export const latestCentralSchemaVersion = Math.max(
   ...migrations.map((migration) => migration.version)
 );

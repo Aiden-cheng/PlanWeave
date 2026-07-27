@@ -271,22 +271,35 @@ export class WorkspaceIdentityRepository {
 
     const workspaceId = workspaceIdForLegacyProject(projectId);
     const at = nowIso();
-    this.database
+    const workspace = this.database
       .prepare(
-        `INSERT OR IGNORE INTO workspaces(workspace_id,display_name,created_at,archived_at)
-         VALUES(?,?,?,NULL)`
+        "SELECT workspace_id,display_name,created_at,archived_at FROM workspaces WHERE workspace_id=?"
       )
-      .run(workspaceId, `Legacy workspace ${projectId}`, at);
+      .get(workspaceId);
+    if (workspace) {
+      if (
+        workspace.display_name !== `Legacy workspace ${projectId}` ||
+        workspace.archived_at !== null
+      ) {
+        throw new Error("workspace_projection_conflict");
+      }
+    } else {
+      this.database
+        .prepare(
+          "INSERT INTO workspaces(workspace_id,display_name,created_at,archived_at) VALUES(?,?,?,NULL)"
+        )
+        .run(workspaceId, `Legacy workspace ${projectId}`, at);
+    }
     this.database
       .prepare(
-        `INSERT OR IGNORE INTO legacy_project_workspace_mappings(
+        `INSERT INTO legacy_project_workspace_mappings(
           legacy_project_id,normalized_legacy_project_identity,workspace_id,mapped_at
         ) VALUES(?,?,?,?)`
       )
       .run(projectId, `legacy-project:${projectId}`, workspaceId, at);
     this.database
       .prepare(
-        `INSERT OR IGNORE INTO workspace_identity_migrations(
+        `INSERT INTO workspace_identity_migrations(
           migration_id,legacy_project_id,workspace_id,from_version,to_version,step,status,
           interruption_marker,authoritative_read_version,failure_code,updated_at
         ) VALUES(?,?,?,?,?,?,?,?,?,?,?)`

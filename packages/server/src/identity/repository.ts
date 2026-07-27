@@ -266,19 +266,20 @@ export class HumanIdentityRepository {
     });
     if (!usability.usable) return undefined;
 
+    const workspaceId = this.workspaceIdentity.workspaceForLegacyProject(device.mintedForProjectId);
+    if (!workspaceId) return undefined;
+    try {
+      this.workspaceIdentity.assertReadCutover(workspaceId);
+    } catch {
+      return undefined;
+    }
+
     let membership: ProjectMembership | undefined;
     if (projectId !== undefined) {
       const pid = humanProjectIdSchema.parse(projectId);
       if (device.mintedForProjectId !== pid) return undefined;
       membership = this.getActiveMembership(pid, principal.humanPrincipalId);
       if (!membership) return undefined;
-      const workspaceId = this.workspaceIdentity.workspaceForLegacyProject(pid);
-      if (!workspaceId) return undefined;
-      try {
-        this.workspaceIdentity.assertReadCutover(workspaceId);
-      } catch {
-        return undefined;
-      }
       const workspaceDevice = this.database
         .prepare(
           `SELECT d.revoked_at,d.expires_at,m.revoked_at AS membership_revoked_at
@@ -597,18 +598,34 @@ export class HumanIdentityRepository {
       .all(projectId);
     for (const principal of principals) {
       this.assertPrincipalWorkspace(String(principal.human_principal_id), workspaceId);
-      this.database
+      const existingPrincipal = this.database
         .prepare(
-          `INSERT OR IGNORE INTO workspace_principals(
-            workspace_id,human_principal_id,display_name,created_at,revoked_at
-          ) VALUES(?,?,?,?,NULL)`
+          `SELECT display_name,created_at,revoked_at FROM workspace_principals
+           WHERE workspace_id=? AND human_principal_id=?`
         )
-        .run(
-          workspaceId,
-          principal.human_principal_id,
-          principal.display_name,
-          principal.created_at
-        );
+        .get(workspaceId, principal.human_principal_id);
+      if (existingPrincipal) {
+        if (
+          existingPrincipal.display_name !== principal.display_name ||
+          existingPrincipal.created_at !== principal.created_at ||
+          existingPrincipal.revoked_at !== null
+        ) {
+          throw new Error("workspace_principal_projection_conflict");
+        }
+      } else {
+        this.database
+          .prepare(
+            `INSERT INTO workspace_principals(
+              workspace_id,human_principal_id,display_name,created_at,revoked_at
+            ) VALUES(?,?,?,?,NULL)`
+          )
+          .run(
+            workspaceId,
+            principal.human_principal_id,
+            principal.display_name,
+            principal.created_at
+          );
+      }
     }
     const memberships = this.database
       .prepare("SELECT * FROM project_memberships WHERE project_id=?")
