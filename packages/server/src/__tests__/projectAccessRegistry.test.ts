@@ -269,4 +269,52 @@ describe("project access registry", () => {
     expect(access.canvas("w", "p", "inherited")?.owner).toBe("viewer");
     expect(access.canvas("w", "p", "independent")?.owner).toBe("viewer");
   });
+
+  it("transfers independent canvas ownership when a member is removed", async () => {
+    const { database, access } = await openFixture();
+    database.exec(`
+      INSERT INTO human_principals(human_principal_id,display_name,created_at) VALUES
+        ('owner','Owner','2026-01-01'),('editor','Editor','2026-01-01');
+      INSERT INTO project_memberships(
+        membership_id,project_id,human_principal_id,role,revision,created_at,updated_at
+      ) VALUES
+        ('m-owner','p','owner','owner',1,'2026-01-01','2026-01-01'),
+        ('m-member','p','editor','member',1,'2026-01-02','2026-01-02');
+    `);
+    access.registerProjectInternal({
+      workspaceId: "w",
+      projectId: "p",
+      projectRoot: "/tmp/member-removal-project",
+      ownerHumanPrincipalId: "owner"
+    });
+    access.registerCanvasInternal({
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: "independent",
+      packageDir: "/tmp/member-removal-project-independent",
+      ownerHumanPrincipalId: "editor"
+    });
+
+    inWriteTransaction(database, () => {
+      database
+        .prepare(
+          "UPDATE project_memberships SET revoked_at='2026-01-04',updated_at='2026-01-04',revision=revision+1 WHERE membership_id=?"
+        )
+        .run("m-member");
+      database
+        .prepare(
+          "UPDATE workspace_memberships SET revoked_at='2026-01-04',updated_at='2026-01-04',revision=revision+1 WHERE workspace_id=? AND human_principal_id=?"
+        )
+        .run("w", "editor");
+      access.synchronizeHumanMembershipOwnerInCallerTransaction({
+        workspaceId: "w",
+        projectId: "p",
+        humanPrincipalId: "editor",
+        transition: "member_removed",
+        membershipRole: "member"
+      });
+    });
+
+    expect(access.canvas("w", "p", "independent")?.owner).toBe("owner");
+  });
 });

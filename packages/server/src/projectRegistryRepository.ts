@@ -311,6 +311,28 @@ export class ProjectRegistryRepository {
       );
       if (!replacement) throw new Error("project_registry_owner_transfer_required");
       this.transferProjectOwnerInCallerTransaction(project, replacement);
+      return;
+    }
+
+    if (
+      input.transition === "member_removed" &&
+      project.ownerHumanPrincipalId !== input.humanPrincipalId
+    ) {
+      const currentProjectOwner = project.ownerHumanPrincipalId;
+      if (currentProjectOwner === null) throw new Error("project_registry_owner_missing");
+      if (!activeWorkspacePrincipal(this.database, input.workspaceId, currentProjectOwner)) {
+        throw new Error("project_registry_owner_not_active");
+      }
+      this.database
+        .prepare(
+          "UPDATE canvas_registry SET owner_human_principal_id=?,updated_at=? WHERE project_registry_id=? AND owner_human_principal_id=? AND revoked_at IS NULL"
+        )
+        .run(
+          currentProjectOwner,
+          this.clock().toISOString(),
+          project.projectRegistryId,
+          input.humanPrincipalId
+        );
     }
   }
 
