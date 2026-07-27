@@ -83,6 +83,10 @@ export {
   resolveHostEnrollmentEndpoint
 } from "./enrollment/httpEnrollmentExchange.js";
 export {
+  HttpAgentHostSetupCodeRedeem,
+  resolveSetupCodeRedeemEndpoint
+} from "./enrollment/httpSetupCodeRedeem.js";
+export {
   parseAgentHostArtifactRef,
   parseAgentHostCapabilities,
   parseAgentHostDispatchResult,

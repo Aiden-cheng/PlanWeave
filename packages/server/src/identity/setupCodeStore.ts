@@ -1,0 +1,238 @@
+import { randomUUID } from "node:crypto";
+import {
+  deriveSetupCodeLifecycleState,
+  setupCodeGrantSchema,
+  setupCodeGrantViewSchema,
+  setupCodeIdSchema,
+  setupCodeRevocationIdSchema,
+  setupCodeRevocationSchema,
+  setupCodeTtlMsSchema,
+  setupCredentialPurposeSchema,
+  defaultSetupCodeTtlMs,
+  type SetupCodeGrant,
+  type SetupCodeGrantView,
+  type SetupCodeRevocation,
+  type SetupCredentialPurpose
+} from "@planweave-ai/collaboration-contracts";
+import type { SqliteDatabase } from "../sqlite.js";
+import { hashSetupCode, mintSetupCodeToken } from "./setupCodeCrypto.js";
+
+type SetupCodeGrantRow = {
+  setup_code_id: string;
+  workspace_id: string;
+  purpose: string;
+  code_sha256: string;
+  issued_at: string;
+  expires_at: string;
+  displayed_at: string | null;
+  redeemed_at: string | null;
+  revoked_at: string | null;
+  redemption_subject_id: string | null;
+  issued_by_operator_id: string | null;
+  issued_by_operator_session_id: string | null;
+  credential_expires_at: string | null;
+};
+
+function toGrant(row: SetupCodeGrantRow): SetupCodeGrant {
+  return setupCodeGrantSchema.parse({
+    schemaVersion: "workspace-setup/v1",
+    setupCodeId: row.setup_code_id,
+    workspaceId: row.workspace_id,
+    purpose: row.purpose,
+    codeSha256: row.code_sha256,
+    issuedAt: row.issued_at,
+    expiresAt: row.expires_at,
+    displayedAt: row.displayed_at,
+    redeemedAt: row.redeemed_at,
+    revokedAt: row.revoked_at,
+    redemptionSubjectId: row.redemption_subject_id
+  });
+}
+
+export function toSetupCodeGrantView(grant: SetupCodeGrant, now: Date): SetupCodeGrantView {
+  return setupCodeGrantViewSchema.parse({
+    schemaVersion: "workspace-setup/v1",
+    setupCodeId: grant.setupCodeId,
+    workspaceId: grant.workspaceId,
+    purpose: grant.purpose,
+    state: deriveSetupCodeLifecycleState({ grant, now }),
+    issuedAt: grant.issuedAt,
+    expiresAt: grant.expiresAt,
+    displayedAt: grant.displayedAt,
+    redeemedAt: grant.redeemedAt,
+    revokedAt: grant.revokedAt
+  });
+}
+
+export type SetupCodeIssuer = {
+  operatorId: string;
+  operatorSessionId: string;
+};
+
+export class SetupCodeStore {
+  constructor(
+    private readonly database: SqliteDatabase,
+    private readonly clock: () => Date = () => new Date()
+  ) {}
+
+  insertGrant(input: {
+    workspaceId: string;
+    purpose: SetupCredentialPurpose;
+    ttlMs?: number;
+    issuer?: SetupCodeIssuer;
+    credentialExpiresAt?: string | null;
+  }): { grant: SetupCodeGrant; setupCode: string } {
+    const purpose = setupCredentialPurposeSchema.parse(input.purpose);
+    const ttlMs =
+      input.ttlMs === undefined ? defaultSetupCodeTtlMs() : setupCodeTtlMsSchema.parse(input.ttlMs);
+    const now = this.clock();
+    const issuedAt = now.toISOString();
+    const expiresAt = new Date(now.getTime() + ttlMs).toISOString();
+    const setupCode = mintSetupCodeToken();
+    const codeSha256 = hashSetupCode(setupCode);
+    const setupCodeId = setupCodeIdSchema.parse(`setup-code-${randomUUID()}`);
+    const displayedAt = issuedAt;
+    this.database
+      .prepare(
+        `INSERT INTO setup_code_grants(
+          setup_code_id,workspace_id,purpose,code_sha256,issued_at,expires_at,displayed_at,
+          redeemed_at,revoked_at,redemption_subject_id,issued_by_operator_id,
+          issued_by_operator_session_id,credential_expires_at
+        ) VALUES(?,?,?,?,?,?,?,NULL,NULL,NULL,?,?,?)`
+      )
+      .run(
+        setupCodeId,
+        input.workspaceId,
+        purpose,
+        codeSha256,
+        issuedAt,
+        expiresAt,
+        displayedAt,
+        input.issuer?.operatorId ?? null,
+        input.issuer?.operatorSessionId ?? null,
+        input.credentialExpiresAt ?? null
+      );
+    return {
+      grant: toGrant(
+        this.database
+          .prepare("SELECT * FROM setup_code_grants WHERE setup_code_id=?")
+          .get(setupCodeId) as SetupCodeGrantRow
+      ),
+      setupCode
+    };
+  }
+
+  findByToken(setupCode: string): (SetupCodeGrant & { issuer?: SetupCodeIssuer; credentialExpiresAt: string | null }) | undefined {
+    let digest: string;
+    try {
+      digest = hashSetupCode(setupCode);
+    } catch {
+      return undefined;
+    }
+    const row = this.database
+      .prepare("SELECT * FROM setup_code_grants WHERE code_sha256=?")
+      .get(digest) as SetupCodeGrantRow | undefined;
+    if (!row) return undefined;
+    return this.enrich(row);
+  }
+
+  getById(setupCodeId: string): (SetupCodeGrant & { issuer?: SetupCodeIssuer; credentialExpiresAt: string | null }) | undefined {
+    const id = setupCodeIdSchema.parse(setupCodeId);
+    const row = this.database
+      .prepare("SELECT * FROM setup_code_grants WHERE setup_code_id=?")
+      .get(id) as SetupCodeGrantRow | undefined;
+    if (!row) return undefined;
+    return this.enrich(row);
+  }
+
+  listForWorkspace(
+    workspaceId: string,
+    options: { cursor: number; limit: number; openOnly?: boolean }
+  ): SetupCodeGrant[] {
+    const rows = (
+      options.openOnly
+        ? (this.database
+            .prepare(
+              `SELECT * FROM setup_code_grants
+               WHERE workspace_id=? AND redeemed_at IS NULL AND revoked_at IS NULL AND expires_at>?
+               ORDER BY issued_at ASC, setup_code_id ASC
+               LIMIT ? OFFSET ?`
+            )
+            .all(workspaceId, this.clock().toISOString(), options.limit, options.cursor) as SetupCodeGrantRow[])
+        : (this.database
+            .prepare(
+              `SELECT * FROM setup_code_grants
+               WHERE workspace_id=?
+               ORDER BY issued_at ASC, setup_code_id ASC
+               LIMIT ? OFFSET ?`
+            )
+            .all(workspaceId, options.limit, options.cursor) as SetupCodeGrantRow[])
+    );
+    return rows.map(toGrant);
+  }
+
+  markRedeemed(setupCodeId: string, redemptionSubjectId: string): SetupCodeGrant {
+    const now = this.clock().toISOString();
+    const updated = this.database
+      .prepare(
+        `UPDATE setup_code_grants
+         SET redeemed_at=?, redemption_subject_id=?
+         WHERE setup_code_id=? AND redeemed_at IS NULL AND revoked_at IS NULL`
+      )
+      .run(now, redemptionSubjectId, setupCodeId);
+    if (updated.changes !== 1) throw new Error("setup_code_redeem_conflict");
+    const grant = this.getById(setupCodeId);
+    if (!grant) throw new Error("setup_code_not_found");
+    return grant;
+  }
+
+  revoke(setupCodeId: string, reason: string): SetupCodeRevocation {
+    const grant = this.getById(setupCodeId);
+    if (!grant) throw new Error("setup_code_not_found");
+    if (grant.revokedAt) throw new Error("setup_code_already_revoked");
+    if (grant.redeemedAt) throw new Error("setup_code_already_redeemed");
+    const now = this.clock().toISOString();
+    const updated = this.database
+      .prepare(
+        `UPDATE setup_code_grants SET revoked_at=?
+         WHERE setup_code_id=? AND revoked_at IS NULL AND redeemed_at IS NULL`
+      )
+      .run(now, setupCodeId);
+    if (updated.changes !== 1) throw new Error("setup_code_revoke_conflict");
+    const revocationId = setupCodeRevocationIdSchema.parse(`setup-revocation-${randomUUID()}`);
+    this.database
+      .prepare(
+        `INSERT INTO setup_code_revocations(
+          revocation_id,setup_code_id,workspace_id,purpose,revoked_at,reason
+        ) VALUES(?,?,?,?,?,?)`
+      )
+      .run(revocationId, grant.setupCodeId, grant.workspaceId, grant.purpose, now, reason);
+    return setupCodeRevocationSchema.parse({
+      schemaVersion: "workspace-setup/v1",
+      revocationId,
+      setupCodeId: grant.setupCodeId,
+      workspaceId: grant.workspaceId,
+      purpose: grant.purpose,
+      revokedAt: now,
+      reason
+    });
+  }
+
+  private enrich(row: SetupCodeGrantRow): SetupCodeGrant & {
+    issuer?: SetupCodeIssuer;
+    credentialExpiresAt: string | null;
+  } {
+    const grant = toGrant(row);
+    return {
+      ...grant,
+      credentialExpiresAt: row.credential_expires_at,
+      issuer:
+        row.issued_by_operator_id && row.issued_by_operator_session_id
+          ? {
+              operatorId: row.issued_by_operator_id,
+              operatorSessionId: row.issued_by_operator_session_id
+            }
+          : undefined
+    };
+  }
+}

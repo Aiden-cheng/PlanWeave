@@ -10,7 +10,7 @@ export const AGENT_HOST_CLI_USAGE = [
   "",
   "Commands:",
   "  preflight --config <absolute-path>",
-  "  enroll --config <absolute-path> --code <enrollment-code> [--replace]",
+  "  enroll --config <absolute-path> --code <enrollment-or-setup-code> [--replace]",
   "  status --config <absolute-path>",
   "  run --config <absolute-path>",
   "  revoke --config <absolute-path>",

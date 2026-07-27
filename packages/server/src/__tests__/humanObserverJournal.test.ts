@@ -35,7 +35,7 @@ describe("HumanObserverJournal", () => {
     const database = await openServerDatabase(":memory:", 5_000);
     databases.push(database);
     applyMigrations(database);
-    expect(latestCentralSchemaVersion).toBe(30);
+    expect(latestCentralSchemaVersion).toBe(31);
     const journal = new HumanObserverJournal(database, 2);
 
     const first = journal.appendInCallerTransaction("project-a", { kind: "membership" });

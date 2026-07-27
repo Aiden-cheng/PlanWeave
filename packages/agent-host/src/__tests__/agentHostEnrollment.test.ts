@@ -14,6 +14,10 @@ import {
   HttpAgentHostEnrollmentExchange,
   resolveHostEnrollmentEndpoint
 } from "../enrollment/httpEnrollmentExchange.js";
+import {
+  HttpAgentHostSetupCodeRedeem,
+  resolveSetupCodeRedeemEndpoint
+} from "../enrollment/httpSetupCodeRedeem.js";
 
 const directories: string[] = [];
 const servers: Server[] = [];
@@ -27,7 +31,7 @@ afterEach(async () => {
   );
 });
 
-const secret = (prefix: "pw_enroll_" | "pw_host_") =>
+const secret = (prefix: "pw_enroll_" | "pw_host_" | "pw_setup_") =>
   `${prefix}${randomBytes(32).toString("base64url")}`;
 
 async function setup() {
@@ -211,6 +215,7 @@ describe("Agent Host enrollment and protected credentials", () => {
     const { store } = await setup();
     await store.begin(
       {
+        kind: "host_enrollment_code",
         enrollmentAttemptId: "attempt-001",
         enrollmentCode: secret("pw_enroll_"),
         credentialToken: secret("pw_host_"),
@@ -229,6 +234,68 @@ describe("Agent Host enrollment and protected credentials", () => {
     await chmod(store.path, 0o644);
     await expect(store.read()).rejects.toThrow("permissions_unsafe");
     expect(await readFile(store.path, "utf8")).not.toContain("pw_host_");
+  });
+
+  it("redeems setup codes through the setup route and never mixes enrollment codes", async () => {
+    const { config, store } = await setup();
+    const server = createServer((request, response) => {
+      expect(request.url).toBe("/api/v1/setup-codes/redeem");
+      let body = "";
+      request.on("data", (chunk) => {
+        body += chunk;
+      });
+      request.on("end", () => {
+        const parsed = JSON.parse(body) as {
+          purpose: string;
+          setupCode: string;
+          hostCredentialToken: string;
+        };
+        expect(parsed.purpose).toBe("host_enrollment");
+        expect(parsed.setupCode).toMatch(/^pw_setup_/);
+        expect(parsed.hostCredentialToken).toMatch(/^pw_host_/);
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            schemaVersion: "workspace-setup/v1",
+            purpose: "host_enrollment",
+            workspaceId: "workspace-001",
+            workspaceDisplayName: "Demo",
+            connectionProfile: {
+              schemaVersion: "workspace-identity/v1",
+              profileId: "profile-001",
+              displayName: "Demo",
+              serverBaseUrl: "http://127.0.0.1/",
+              workspaceId: "workspace-001",
+              allowInsecureTransport: true
+            },
+            enrollmentId: "enrollment-setup-001",
+            hostId: "host-setup-001",
+            hostCredentialExpiresAt: new Date(Date.now() + 60_000).toISOString()
+          })
+        );
+      });
+    });
+    servers.push(server);
+    const port = await listen(server);
+    const setupRedeem = new HttpAgentHostSetupCodeRedeem(`http://127.0.0.1:${port}`, {
+      allowInsecureDevelopment: true
+    });
+    const active = await new AgentHostEnrollmentService(
+      config,
+      store,
+      {
+        exchange: async () => {
+          throw new Error("legacy enrollment path must not run for setup codes");
+        }
+      },
+      () => new Date(),
+      setupRedeem
+    ).enroll(secret("pw_setup_"));
+    expect(active.hostId).toBe("host-setup-001");
+    expect((await store.read())?.pending).toBeUndefined();
+    expect(resolveSetupCodeRedeemEndpoint("https://coordinator.example.com").href).toBe(
+      "https://coordinator.example.com/api/v1/setup-codes/redeem"
+    );
   });
 
   it("maps coordinator schemes once and bounds or normalizes HTTP exchange failures", async () => {

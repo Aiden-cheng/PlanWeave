@@ -173,3 +173,19 @@ export {
   WorkspaceIdentityRepository,
   type WorkspaceIdentityReadState
 } from "./workspaceRepository.js";
+export {
+  SetupCodeService,
+  SetupCodeError,
+  mintHostCredentialTokenForTests,
+  type SetupCodeServiceOptions
+} from "./setupCodeService.js";
+export {
+  handleSetupCodeHttpRequest,
+  type SetupCodeHttpOptions
+} from "./setupCodeHttp.js";
+export { SetupCodeStore, toSetupCodeGrantView, type SetupCodeIssuer } from "./setupCodeStore.js";
+export {
+  hashSetupCode,
+  mintSetupCodeToken,
+  mintOperatorCredentialToken
+} from "./setupCodeCrypto.js";

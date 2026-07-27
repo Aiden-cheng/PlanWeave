@@ -9,6 +9,7 @@ import {
 import { FileHostCredentialStore } from "../credentials/fileCredentialStore.js";
 import { AgentHostEnrollmentService } from "../enrollment/enrollmentService.js";
 import { HttpAgentHostEnrollmentExchange } from "../enrollment/httpEnrollmentExchange.js";
+import { HttpAgentHostSetupCodeRedeem } from "../enrollment/httpSetupCodeRedeem.js";
 import { RemoteAcpExecutor } from "../execution/remoteAcpExecutor.js";
 import { DurableAcpInteractionRelay } from "../execution/durableAcpRelay.js";
 import { openAgentHostState } from "../state/agentHostState.js";
@@ -86,13 +87,16 @@ export class AgentHostOperator {
     }
     const trust = await createAgentHostTlsTrust(config.coordinator.caCertificatePath);
     try {
+      const exchangeOptions = {
+        allowInsecureDevelopment: config.coordinator.allowInsecureDevelopment,
+        request: trust.request
+      };
       const service = new AgentHostEnrollmentService(
         config,
         store,
-        new HttpAgentHostEnrollmentExchange(config.coordinator.url, {
-          allowInsecureDevelopment: config.coordinator.allowInsecureDevelopment,
-          request: trust.request
-        })
+        new HttpAgentHostEnrollmentExchange(config.coordinator.url, exchangeOptions),
+        () => new Date(),
+        new HttpAgentHostSetupCodeRedeem(config.coordinator.url, exchangeOptions)
       );
       await service.enroll(code, { replaceExisting });
     } finally {

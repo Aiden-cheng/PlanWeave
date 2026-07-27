@@ -78,11 +78,12 @@ export class OperatorTokenRegistry implements RemoteInteractionAuthorizationPort
         candidate.digest.length === digest.length && timingSafeEqual(candidate.digest, digest) &&
         candidate.credential.operatorId === session.operatorId
     )?.credential;
-    if (!credential) return undefined;
+    // Setup-code operator sessions are durable without a static config credential.
+    // They receive workspace-scoped, non-admin principals only.
     const principal = authenticatedOperatorPrincipalSchema.parse({
-      operatorId: credential.operatorId,
-      projectIds: credential.projectIds,
-      serverAdmin: credential.serverAdmin,
+      operatorId: session.operatorId,
+      projectIds: credential?.projectIds ?? [],
+      serverAdmin: credential?.serverAdmin ?? false,
       workspaceId: session.workspaceId,
       operatorSessionId: session.operatorSessionId,
       expiresAt: session.expiresAt

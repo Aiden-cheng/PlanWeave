@@ -56,7 +56,11 @@ export class FileHostCredentialStore {
     now = new Date()
   ): Promise<ActiveHostCredential> {
     const current = await this.read();
-    if (!current?.pending || current.pending.enrollmentAttemptId !== response.enrollmentAttemptId) {
+    if (
+      !current?.pending ||
+      current.pending.kind !== "host_enrollment_code" ||
+      current.pending.enrollmentAttemptId !== response.enrollmentAttemptId
+    ) {
       throw new Error("agent_host_enrollment_response_mismatch");
     }
     if (Date.parse(response.credentialExpiresAt) <= now.getTime()) {
@@ -68,6 +72,28 @@ export class FileHostCredentialStore {
       credentialToken: current.pending.credentialToken,
       issuedAt: now.toISOString(),
       expiresAt: response.credentialExpiresAt
+    };
+    await this.write({ version: "agent-host-credentials/v1", active });
+    return active;
+  }
+
+  async promoteSetup(
+    response: { hostId: string; workspaceId: string; hostCredentialExpiresAt: string },
+    now = new Date()
+  ): Promise<ActiveHostCredential> {
+    const current = await this.read();
+    if (!current?.pending || current.pending.kind !== "setup_code") {
+      throw new Error("agent_host_enrollment_response_mismatch");
+    }
+    if (Date.parse(response.hostCredentialExpiresAt) <= now.getTime()) {
+      throw new Error("agent_host_enrollment_response_expired");
+    }
+    const active = {
+      hostId: response.hostId,
+      workspaceId: response.workspaceId,
+      credentialToken: current.pending.credentialToken,
+      issuedAt: now.toISOString(),
+      expiresAt: response.hostCredentialExpiresAt
     };
     await this.write({ version: "agent-host-credentials/v1", active });
     return active;

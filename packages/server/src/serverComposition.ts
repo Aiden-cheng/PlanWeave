@@ -39,6 +39,8 @@ import {
   HumanMembershipService,
   handleWorkspaceIdentityHttpRequest
 } from "./identity/index.js";
+import { handleSetupCodeHttpRequest } from "./identity/setupCodeHttp.js";
+import { SetupCodeService } from "./identity/setupCodeService.js";
 import { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
 import { provisionConfiguredOperatorSessions } from "./identity/operatorSessionProvisioning.js";
 import { OperatorTokenRegistry } from "./operatorAuth.js";
@@ -210,6 +212,8 @@ function requiresAdmission(request: IncomingMessage): boolean {
   return (
     pathname === "/agent-hosts/enrollments/exchange" ||
     pathname === "/api/v1/host-enrollments" ||
+    pathname === "/api/v1/setup-codes/redeem" ||
+    pathname.startsWith("/api/v1/workspaces/") && pathname.includes("/setup-codes") ||
     pathname === "/api/v1/remote-operations" ||
     /^\/api\/v1\/remote-operations\/[^/]+\/actions$/.test(pathname) ||
     /^\/api\/v1\/remote-operations\/[^/]+\/interactions\/respond$/.test(pathname) ||
@@ -388,6 +392,13 @@ export async function createDistributedServerComposition(
     const schemaVersion = server.readiness().schemaVersion;
     readiness.transition("reconciling", schemaVersion);
     const enrollments = new HostEnrollmentService(server.database, clock);
+    const setupCodes = new SetupCodeService({
+      database: server.database,
+      serverBaseUrl: config.publicUrl.endsWith("/") ? config.publicUrl : `${config.publicUrl}/`,
+      allowInsecureTransport: config.allowInsecureDevelopment,
+      clock,
+      operatorSessionTtlMs: config.operatorSessionTtlMs
+    });
     const workspaceIdentity = new WorkspaceIdentityRepository(server.database);
     projectAccess = new ProjectAccessRepository(server.database, clock);
     runtimeRegistry.setScopedPackageResolver((input) => {
@@ -825,6 +836,15 @@ export async function createDistributedServerComposition(
         if (
           await handleHostEnrollmentRequest(request, response, {
             service: enrollments,
+            allowInsecureDevelopment: config.allowInsecureDevelopment
+          })
+        ) {
+          return;
+        }
+        if (
+          await handleSetupCodeHttpRequest(request, response, {
+            service: setupCodes,
+            authorization,
             allowInsecureDevelopment: config.allowInsecureDevelopment
           })
         ) {

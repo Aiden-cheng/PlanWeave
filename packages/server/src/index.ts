@@ -136,6 +136,13 @@ export {
   type WorkspaceIdentityHttpOptions
 } from "./identity/workspaceIdentityHttp.js";
 export {
+  SetupCodeService,
+  SetupCodeError,
+  handleSetupCodeHttpRequest,
+  type SetupCodeServiceOptions,
+  type SetupCodeHttpOptions
+} from "./identity/index.js";
+export {
   repairWorkspaceIdentityMigration,
   retryWorkspaceIdentityMigration,
   rollbackWorkspaceIdentityMigration,

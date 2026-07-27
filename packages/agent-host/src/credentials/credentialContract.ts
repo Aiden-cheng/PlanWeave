@@ -3,16 +3,31 @@ import {
   hostEnrollmentCodeSchema,
   opaqueIdentifierSchema
 } from "@planweave-ai/distributed-protocol";
+import { setupCodeTokenSchema } from "@planweave-ai/collaboration-contracts";
 import { z } from "zod";
 
-export const pendingHostEnrollmentSchema = z
-  .object({
-    enrollmentAttemptId: opaqueIdentifierSchema,
-    enrollmentCode: hostEnrollmentCodeSchema,
-    credentialToken: hostCredentialTokenSchema,
-    createdAt: z.string().datetime()
-  })
-  .strict();
+const pendingBase = {
+  enrollmentAttemptId: opaqueIdentifierSchema,
+  credentialToken: hostCredentialTokenSchema,
+  createdAt: z.string().datetime()
+} as const;
+
+export const pendingHostEnrollmentSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      ...pendingBase,
+      kind: z.literal("host_enrollment_code"),
+      enrollmentCode: hostEnrollmentCodeSchema
+    })
+    .strict(),
+  z
+    .object({
+      ...pendingBase,
+      kind: z.literal("setup_code"),
+      setupCode: setupCodeTokenSchema
+    })
+    .strict()
+]);
 
 export const activeHostCredentialSchema = z
   .object({
