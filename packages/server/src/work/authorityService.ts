@@ -211,11 +211,24 @@ export class AuthorityService {
         ...record,
         availability: { status: "pending", reason: "automatic_pending_selection" }
       });
-    const reason = !host ? "host_missing" : host.revokedAt ? "host_revoked" : "ready";
+    // Align exact_host availability with selection readiness (offline/capacity/capability/ACL),
+    // not only missing/revoked — Desktop assignmentProjectionFromAuthority uses this field.
+    const packageFacts = this.options.packagePort.resolveWorkItem(workItem(scope));
+    const reason = this.selectionAvailabilityReason({
+      host,
+      hostId: target.hostId,
+      scope,
+      requiredCapabilities: packageFacts.requiredCapabilities
+    });
+    const availability =
+      reason === "ready"
+        ? ({ status: "ready", reason: "ready" } as const)
+        : reason === "host_offline" || reason === "host_at_capacity"
+          ? ({ status: "unavailable", reason } as const)
+          : ({ status: "invalid", reason } as const);
     return executionTargetReadModelSchema.parse({
       ...record,
-      availability:
-        reason === "ready" ? { status: "ready", reason: "ready" } : { status: "invalid", reason }
+      availability
     });
   }
 

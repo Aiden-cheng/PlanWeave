@@ -267,13 +267,18 @@ export class RemoteBlockActionCoordinator {
     if (decision.transition !== "retry") return undefined;
     if (action.kind !== "retry_new_attempt") throw new Error("remote_action_decision_mismatch");
     const operation = this.options.operations.getRequired(action.operationId);
+    // Prior authority-backed attempts must re-resolve against current OSS-003 tables, not
+    // legacy work_assignments. Omit expected*Revision so the authority gate takes current
+    // revisions (follow reassignment) and persists authorityRevisions on the new snapshot.
+    const preferAuthority = operation.hostSelection?.authorityRevisions !== undefined;
     try {
       return this.options.assignmentGate?.resolve({
         projectId: operation.projectId,
         canvasId: operation.canvasId,
         blockRef: operation.blockRef,
         requiredCapabilities: operation.requiredCapabilities,
-        allowHumanOverride: false
+        allowHumanOverride: false,
+        preferAuthority
       });
     } catch (error) {
       if (error instanceof DispatchAssignmentError && error.code === "work_not_agent_assigned") {

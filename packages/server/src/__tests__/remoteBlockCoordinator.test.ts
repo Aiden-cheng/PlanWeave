@@ -97,6 +97,7 @@ async function setup(withHost: boolean) {
     operations: coordination.operations,
     coordinator: coordination.coordinator,
     dispatches: coordination.dispatches,
+    reservations: coordination.reservations,
     artifactAuthorization: coordination.artifactAuthorization
   };
 }
@@ -230,6 +231,146 @@ describe("RemoteBlockCoordinator", () => {
         .prepare("SELECT status FROM host_capacity_reservations WHERE lease_id=?")
         .get(outcome.operation.attempt.leaseId)
     ).toEqual({ status: "expired" });
+  });
+
+  it("retry_new_attempt follows authority tables after execution target change (not legacy)", async () => {
+    const fixture = await setup(true);
+    if (!fixture.host) throw new Error("expected_test_host");
+    const workspaceId = new WorkspaceIdentityRepository(
+      fixture.server.database
+    ).workspaceForLegacyProject(fixture.locator.projectId);
+    if (!workspaceId) throw new Error("workspace_mapping_missing");
+    const access = new ProjectAccessRepository(fixture.server.database);
+    access.registerProjectInternal({
+      workspaceId,
+      projectId: fixture.locator.projectId,
+      projectRoot: fixture.workspace.root
+    });
+    access.registerCanvasInternal({
+      workspaceId,
+      projectId: fixture.locator.projectId,
+      canvasId: fixture.locator.canvasId,
+      packageDir: fixture.workspace.init.workspace.packageDir
+    });
+
+    const hostA = fixture.host;
+    const hostB = fixture.hosts.register("Authority Host B").host;
+    fixture.hosts.bindToWorkspace(hostB.id, workspaceId);
+    fixture.hosts.reportOnline(hostB.id, ["acp.codex"], 1);
+
+    const authority = new AuthorityRepository(fixture.server.database);
+    const scope = {
+      kind: "block" as const,
+      workspaceId,
+      ...fixture.locator,
+      blockRef: "T-001#B-001"
+    };
+    // Authority-only: no work_assignments dual-write.
+    authority.applyExecutionTarget({
+      mutation: {
+        schemaVersion: "execution-target/v1",
+        scope,
+        target: { kind: "exact_host", hostId: hostA.id },
+        expectedRevision: 0
+      },
+      actor: { kind: "system", id: "test-system" }
+    });
+    expect(
+      fixture.server.database
+        .prepare("SELECT COUNT(*) AS count FROM work_assignments")
+        .get() as { count: number }
+    ).toEqual({ count: 0 });
+
+    const dispatched = await fixture.coordinator.dispatch({
+      ...fixture.locator,
+      blockRef: scope.blockRef,
+      idempotencyKey: "retry-authority-only",
+      expectedResponsibilityRevision: 0,
+      expectedReviewerRevision: 0,
+      expectedExecutionTargetRevision: 1,
+      strictAuthority: true
+    });
+    expect(dispatched.operation.attempt.hostId).toBe(hostA.id);
+    expect(dispatched.operation.hostSelection?.authorityRevisions).toEqual({
+      responsibilityRevision: 0,
+      reviewerRevision: 0,
+      executionTargetRevision: 1
+    });
+
+    const dispatch = fixture.dispatches.getRequired(dispatched.operation.dispatchId);
+    fixture.dispatches.accept(
+      hostA.id,
+      "retry-authority-accepted",
+      dispatch.id,
+      dispatch.leaseId,
+      dispatch.executionAttemptId
+    );
+    fixture.dispatches.interrupt(hostA.id, "retry-authority-interrupted", {
+      type: "dispatch.interrupted",
+      protocolVersion: 1,
+      messageId: "retry-authority-interrupted",
+      dispatchId: dispatch.id,
+      leaseId: dispatch.leaseId,
+      executionAttemptId: dispatch.executionAttemptId,
+      reason: "acp_session_lost",
+      resumable: false
+    });
+    const lease = fixture.reservations.getRequired(dispatch.leaseId);
+    fixture.reservations.release({
+      leaseId: lease.leaseId,
+      fencingToken: lease.fencingToken,
+      expectedVersion: lease.version,
+      reason: "expired"
+    });
+    await fixture.coordinator.reenter(dispatched.operation.id);
+
+    // Change execution target to Host B via authority tables only (no legacy dual-write).
+    authority.applyExecutionTarget({
+      mutation: {
+        schemaVersion: "execution-target/v1",
+        scope,
+        target: { kind: "exact_host", hostId: hostB.id },
+        expectedRevision: 1
+      },
+      actor: { kind: "system", id: "test-system" }
+    });
+
+    const interrupted = fixture.operations.getRequired(dispatched.operation.id);
+    await fixture.coordinator.executeAction({
+      actionId: "retry-authority-only-action",
+      operationId: interrupted.id,
+      dispatchId: interrupted.dispatchId,
+      executionAttemptId: interrupted.executionAttemptId,
+      expectedAttemptVersion: interrupted.attempt.stateVersion,
+      kind: "retry_new_attempt",
+      priorLeaseId: dispatch.leaseId,
+      newDispatchId: "dispatch-retry-authority-2",
+      newExecutionAttemptId: "attempt-retry-authority-2",
+      reason: "retry after authority execution target moved to Host B"
+    });
+
+    const retried = fixture.operations.getRequired(dispatched.operation.id);
+    expect(retried).toMatchObject({
+      state: "activated",
+      dispatchId: "dispatch-retry-authority-2",
+      executionAttemptId: "attempt-retry-authority-2",
+      attempt: { hostId: hostB.id },
+      hostSelection: {
+        selection: "exact",
+        preferredHostId: hostB.id,
+        authorityRevisions: {
+          responsibilityRevision: 0,
+          reviewerRevision: 0,
+          executionTargetRevision: 2
+        }
+      }
+    });
+    expect(retried.hostSelection?.preferredHostId).not.toBe(hostA.id);
+    expect(
+      fixture.server.database
+        .prepare("SELECT COUNT(*) AS count FROM work_assignments")
+        .get() as { count: number }
+    ).toEqual({ count: 0 });
   });
 
   it("fails closed on source drift and on a missing restart locator", async () => {

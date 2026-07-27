@@ -300,4 +300,192 @@ describe("strict Host dispatch authority", () => {
       })
     ).toThrow(DispatchAssignmentError);
   });
+
+  it.each([
+    {
+      name: "capability_mismatch",
+      setup: (ctx: Awaited<ReturnType<typeof fixture>>) => {
+        // Host online but missing required capability.
+        ctx.hosts.reportOnline(ctx.host.id, ["acp.other"], 1);
+      }
+    },
+    {
+      name: "host_offline",
+      setup: (ctx: Awaited<ReturnType<typeof fixture>>) => {
+        // lastSeen far in the past relative to clock.
+        ctx.database
+          .prepare("UPDATE agent_hosts SET last_seen_at=? WHERE id=?")
+          .run("2020-01-01T00:00:00.000Z", ctx.host.id);
+      }
+    },
+    {
+      name: "host_revoked",
+      setup: (ctx: Awaited<ReturnType<typeof fixture>>) => {
+        ctx.hosts.revoke(ctx.host.id);
+      }
+    },
+    {
+      name: "cross_workspace",
+      setup: (ctx: Awaited<ReturnType<typeof fixture>>) => {
+        ctx.database.exec(`
+          INSERT INTO workspaces(workspace_id,display_name,created_at)
+            VALUES ('other','Other','2026-07-27T00:00:00.000Z');
+        `);
+        ctx.hosts.bindToWorkspace(ctx.host.id, "other");
+      }
+    }
+  ])("denies dispatch for $name at authority gate", async ({ setup }) => {
+    const ctx = await fixture();
+    const scope = {
+      kind: "block" as const,
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: "c",
+      blockRef: "T-001#B-001"
+    };
+    ctx.repository.applyExecutionTarget({
+      mutation: {
+        schemaVersion: "execution-target/v1",
+        scope,
+        target: { kind: "exact_host", hostId: ctx.host.id },
+        expectedRevision: 0
+      },
+      actor: { kind: "human", id: "owner" }
+    });
+    setup(ctx);
+    const gate = createAuthorityDispatchGate({
+      repository: ctx.repository,
+      database: ctx.database,
+      workspaceIdentity: ctx.workspaceIdentity,
+      hosts: ctx.hosts,
+      access: ctx.access,
+      hostOfflineAfterMs: 60_000,
+      clock: now
+    });
+    expect(() =>
+      gate.resolve({
+        projectId: "p",
+        canvasId: "c",
+        blockRef: "T-001#B-001",
+        requiredCapabilities: ["acp.codex"],
+        expectedResponsibilityRevision: 0,
+        expectedReviewerRevision: 0,
+        expectedExecutionTargetRevision: 1
+      })
+    ).toThrow(DispatchAssignmentError);
+  });
+
+  it("resolves current authority when expected revisions are omitted (retry re-snapshot)", async () => {
+    const { database, access, workspaceIdentity, hosts, host, repository } = await fixture();
+    const scope = {
+      kind: "block" as const,
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: "c",
+      blockRef: "T-001#B-001"
+    };
+    repository.applyExecutionTarget({
+      mutation: {
+        schemaVersion: "execution-target/v1",
+        scope,
+        target: { kind: "exact_host", hostId: host.id },
+        expectedRevision: 0
+      },
+      actor: { kind: "human", id: "owner" }
+    });
+    const gate = createAuthorityDispatchGate({
+      repository,
+      database,
+      workspaceIdentity,
+      hosts,
+      access,
+      hostOfflineAfterMs: 60_000,
+      clock: now
+    });
+    expect(
+      gate.resolve({
+        projectId: "p",
+        canvasId: "c",
+        blockRef: "T-001#B-001",
+        requiredCapabilities: ["acp.codex"],
+        preferAuthority: true
+      })
+    ).toMatchObject({
+      selection: "exact",
+      preferredHostId: host.id,
+      authorityRevisions: {
+        responsibilityRevision: 0,
+        reviewerRevision: 0,
+        executionTargetRevision: 1
+      }
+    });
+  });
+
+  it("keeps responsibility/reviewer humans independent of Block Host execution target", async () => {
+    const { service, actor, host } = await fixture();
+    const blockScope = {
+      kind: "block" as const,
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: "c",
+      blockRef: "T-001#B-001"
+    };
+    service.updateResponsibility(actor, {
+      schemaVersion: "responsibility/v1",
+      scope: blockScope,
+      principal: { kind: "human", humanPrincipalId: "member" },
+      expectedRevision: 0
+    });
+    service.updateReviewer(actor, {
+      schemaVersion: "review-assignment/v1",
+      scope: blockScope,
+      principal: { kind: "human", humanPrincipalId: "owner" },
+      expectedRevision: 0
+    });
+    service.updateExecutionTarget(actor, {
+      schemaVersion: "execution-target/v1",
+      scope: blockScope,
+      target: { kind: "exact_host", hostId: host.id },
+      expectedRevision: 0
+    });
+    const projection = service.getWorkAuthorityProjection(actor, blockScope);
+    expect(projection.responsibility.principal?.humanPrincipalId).toBe("member");
+    expect(projection.reviewer.principal?.humanPrincipalId).toBe("owner");
+    expect(projection.executionTarget?.target).toEqual({
+      kind: "exact_host",
+      hostId: host.id
+    });
+    expect(projection.responsibility.principal?.humanPrincipalId).not.toBe(host.id);
+    expect(projection.reviewer.principal?.humanPrincipalId).not.toBe(host.id);
+    expect(projection.selectedHost?.hostId).toBe(host.id);
+    expect(projection.selectedHost?.availabilityReason).toBe("ready");
+  });
+
+  it("surfaces offline Host on executionTarget availability, not only selectedHost", async () => {
+    const ctx = await fixture();
+    const blockScope = {
+      kind: "block" as const,
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: "c",
+      blockRef: "T-001#B-001"
+    };
+    ctx.service.updateExecutionTarget(ctx.actor, {
+      schemaVersion: "execution-target/v1",
+      scope: blockScope,
+      target: { kind: "exact_host", hostId: ctx.host.id },
+      expectedRevision: 0
+    });
+    ctx.database
+      .prepare("UPDATE agent_hosts SET last_seen_at=? WHERE id=?")
+      .run("2020-01-01T00:00:00.000Z", ctx.host.id);
+    const execution = ctx.service.getExecutionTarget(ctx.actor, blockScope);
+    expect(execution?.availability).toEqual({
+      status: "unavailable",
+      reason: "host_offline"
+    });
+    const projection = ctx.service.getWorkAuthorityProjection(ctx.actor, blockScope);
+    expect(projection.selectedHost?.availabilityReason).toBe("host_offline");
+    expect(projection.executionTarget?.availability.reason).toBe("host_offline");
+  });
 });

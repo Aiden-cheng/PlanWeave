@@ -145,6 +145,11 @@ export type AssignmentDispatchGate = {
     expectedResponsibilityRevision?: number;
     expectedReviewerRevision?: number;
     expectedExecutionTargetRevision?: number;
+    /**
+     * Force the dual assignment/authority router onto OSS-003 authority tables even when
+     * expected*Revision fingerprints are omitted (retry_new_attempt re-snapshot path).
+     */
+    preferAuthority?: boolean;
   }): DispatchHostSelectionSnapshot;
 };
 
@@ -227,11 +232,14 @@ export function createAuthorityDispatchGate(
   };
   return {
     resolve(input) {
-      if (
-        input.expectedResponsibilityRevision === undefined ||
-        input.expectedReviewerRevision === undefined ||
-        input.expectedExecutionTargetRevision === undefined
-      ) {
+      const hasResponsibility = input.expectedResponsibilityRevision !== undefined;
+      const hasReviewer = input.expectedReviewerRevision !== undefined;
+      const hasExecutionTarget = input.expectedExecutionTargetRevision !== undefined;
+      const hasAnyExpected = hasResponsibility || hasReviewer || hasExecutionTarget;
+      const hasAllExpected = hasResponsibility && hasReviewer && hasExecutionTarget;
+      // Partial fingerprints are never "don't care" — require all three or none.
+      // None means resolve against current authority tables (retry re-snapshot).
+      if (hasAnyExpected && !hasAllExpected) {
         throw new DispatchAssignmentError("work_revision_conflict");
       }
       const scope = {
@@ -252,9 +260,10 @@ export function createAuthorityDispatchGate(
       }
       const current = options.repository.currentRevisions(scope);
       if (
-        current.responsibilityRevision !== input.expectedResponsibilityRevision ||
-        current.reviewerRevision !== input.expectedReviewerRevision ||
-        current.executionTargetRevision !== input.expectedExecutionTargetRevision
+        hasAllExpected &&
+        (current.responsibilityRevision !== input.expectedResponsibilityRevision ||
+          current.reviewerRevision !== input.expectedReviewerRevision ||
+          current.executionTargetRevision !== input.expectedExecutionTargetRevision)
       ) {
         throw new DispatchAssignmentError("work_revision_conflict");
       }

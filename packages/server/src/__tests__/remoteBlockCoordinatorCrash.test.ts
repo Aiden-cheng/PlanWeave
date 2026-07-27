@@ -21,6 +21,7 @@ import type {
 } from "../remoteBlockCoordinatorPorts.js";
 import { RemoteRuntimePortRegistry } from "../remoteRuntimeLocator.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
+import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { WorkAssignmentRepository } from "../work/repository.js";
 
 type Coordination = ReturnType<typeof createRemoteBlockCoordination>;
@@ -175,6 +176,10 @@ class CoordinatorHarness {
   registerHost(capacity = 1): string {
     const coordination = this.requireCoordination();
     const host = coordination.hosts.register("Crash Matrix Host").host;
+    const workspaceId = new WorkspaceIdentityRepository(
+      this.requireServer().database
+    ).ensureWorkspaceForLegacyProject(this.locator.projectId);
+    coordination.hosts.bindToWorkspace(host.id, workspaceId);
     coordination.hosts.reportOnline(host.id, ["acp.codex"], capacity);
     return host.id;
   }

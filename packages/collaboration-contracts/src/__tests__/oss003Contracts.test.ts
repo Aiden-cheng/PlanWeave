@@ -260,10 +260,17 @@ describe("OSS-003 collaboration authority contracts", () => {
       blockRef: blockScope.blockRef,
       idempotencyKey: "dispatch-1",
       expectedResponsibilityRevision: 2,
-      expectedReviewerRevision: null,
+      expectedReviewerRevision: 0,
       expectedExecutionTargetRevision: 4
     });
     expect(command.blockRef).toBe(blockScope.blockRef);
+    expect(command.expectedReviewerRevision).toBe(0);
+    expect(() =>
+      remoteDispatchIntentSchema.parse({
+        ...command,
+        expectedReviewerRevision: null
+      })
+    ).toThrow();
     expect(() =>
       remoteDispatchIntentSchema.parse({ ...command, actor: { kind: "human", id: "h" } })
     ).toThrow();

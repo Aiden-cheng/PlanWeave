@@ -162,7 +162,8 @@ export const remoteDispatchIntentSchema = z
     blockRef: blockRefSchema,
     idempotencyKey: z.string().trim().min(1).max(256),
     expectedResponsibilityRevision: collaborationRevisionSchema,
-    expectedReviewerRevision: collaborationRevisionSchema.nullable(),
+    /** 0 when no reviewer is assigned; never null — null is not "don't care". */
+    expectedReviewerRevision: collaborationRevisionSchema,
     expectedExecutionTargetRevision: collaborationRevisionSchema
   })
   .strict();

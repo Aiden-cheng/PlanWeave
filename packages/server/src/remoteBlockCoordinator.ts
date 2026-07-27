@@ -38,7 +38,7 @@ export type RemoteDispatchRequest = RemoteRuntimeLocator & {
   blockRef: string;
   idempotencyKey: string;
   expectedResponsibilityRevision?: number;
-  expectedReviewerRevision?: number | null;
+  expectedReviewerRevision?: number;
   expectedExecutionTargetRevision?: number;
   strictAuthority?: boolean;
   /** Optional exact Host request; revalidated against assignment + live Host facts. */
@@ -204,8 +204,9 @@ export class RemoteBlockCoordinator {
         ...(request.strictAuthority
           ? {
               expectedResponsibilityRevision: request.expectedResponsibilityRevision,
-              expectedReviewerRevision: request.expectedReviewerRevision ?? 0,
-              expectedExecutionTargetRevision: request.expectedExecutionTargetRevision
+              expectedReviewerRevision: request.expectedReviewerRevision,
+              expectedExecutionTargetRevision: request.expectedExecutionTargetRevision,
+              preferAuthority: true
             }
           : {})
       });

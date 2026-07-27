@@ -17,6 +17,7 @@ import { createRemoteBlockCoordination } from "../distributedCoordination.js";
 import { AgentHostRepository } from "../hosts.js";
 import { HumanIdentityRepository } from "../identity/repository.js";
 import type { HumanAuthContext } from "../identity/schemas.js";
+import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 import type {
   RemoteCoordinatorCheckpoint,
@@ -148,11 +149,19 @@ async function setup(
 
   let coordination = buildCoordination(options.checkpoints);
 
+  // Host reservation is workspace-scoped; map the legacy project and bind hosts so
+  // preferred-host selection can resolve online capacity (same as production enrollment).
+  const workspaceIdentity = new WorkspaceIdentityRepository(server.database);
+  const workspaceId =
+    workspaceIdentity.workspaceForLegacyProject(locator.projectId) ??
+    workspaceIdentity.ensureWorkspaceForLegacyProject(locator.projectId);
+
   const registeredHosts: Array<{ id: string; name: string }> = [];
   for (const hostSpec of options.withHosts ?? [
     { name: "Primary Host", capabilities: ["acp.codex"], capacity: 2 }
   ]) {
     const host = coordination.hosts.register(hostSpec.name).host;
+    coordination.hosts.bindToWorkspace(host.id, workspaceId);
     coordination.hosts.reportOnline(host.id, hostSpec.capabilities, hostSpec.capacity);
     registeredHosts.push({ id: host.id, name: hostSpec.name });
   }
@@ -1281,9 +1290,13 @@ describe("HostReservationRepository preferred Host selection", () => {
     });
     servers.push(server);
 
+    const workspaceIdentity = new WorkspaceIdentityRepository(server.database);
+    const workspaceId = workspaceIdentity.ensureWorkspaceForLegacyProject("project-a");
     const hosts = new AgentHostRepository(server.database);
     const preferred = hosts.register("Preferred").host;
     const alternate = hosts.register("Alternate").host;
+    hosts.bindToWorkspace(preferred.id, workspaceId);
+    hosts.bindToWorkspace(alternate.id, workspaceId);
     hosts.reportOnline(preferred.id, ["linux"], 1);
     hosts.reportOnline(alternate.id, ["linux"], 1);
     // Make preferred offline.

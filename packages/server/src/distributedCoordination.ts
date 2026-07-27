@@ -120,9 +120,20 @@ export function createRemoteBlockCoordination(
   const assignmentGate: AssignmentDispatchGate | undefined = legacyAssignmentGate
     ? {
         resolve(input) {
-          return input.expectedResponsibilityRevision !== undefined ||
+          const preferAuthority =
+            input.preferAuthority === true ||
+            input.expectedResponsibilityRevision !== undefined ||
             input.expectedReviewerRevision !== undefined ||
-            input.expectedExecutionTargetRevision !== undefined
+            input.expectedExecutionTargetRevision !== undefined ||
+            (() => {
+              const workspaceId = workspaceIdentity.workspaceForLegacyProject(input.projectId);
+              if (!workspaceId) return false;
+              return (
+                authorityRepository.migrationState(workspaceId, input.projectId)
+                  ?.authoritativeReadVersion === "oss003_authorities"
+              );
+            })();
+          return preferAuthority
             ? authorityGate.resolve(input)
             : legacyAssignmentGate.resolve(input);
         }
