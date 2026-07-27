@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { applyMigrations } from "../migrations.js";
+import { HumanIdentityRepository } from "../identity/repository.js";
 import { ProjectAccessRepository } from "../projectAccessRepository.js";
 import { inWriteTransaction, openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 
@@ -315,6 +316,62 @@ describe("project access registry", () => {
       });
     });
 
+    expect(access.canvas("w", "p", "independent")?.owner).toBe("owner");
+  });
+
+  it("transfers independent canvas ownership through HumanIdentityRepository removal", async () => {
+    const { database, access } = await openFixture();
+    database.exec(`
+      UPDATE workspace_principals SET created_at='2026-01-01T00:00:00.000Z' WHERE workspace_id='w';
+      UPDATE workspace_memberships
+      SET created_at='2026-01-01T00:00:00.000Z',updated_at='2026-01-01T00:00:00.000Z'
+      WHERE workspace_id='w';
+    `);
+    database.exec(`
+      INSERT INTO human_principals(human_principal_id,display_name,created_at) VALUES
+        ('owner','Owner','2026-01-01T00:00:00.000Z'),('editor','Editor','2026-01-01T00:00:00.000Z');
+      INSERT INTO project_memberships(
+        membership_id,project_id,human_principal_id,role,revision,created_at,updated_at
+      ) VALUES
+        ('m-owner','p','owner','owner',1,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z'),
+        ('m-member','p','editor','member',1,'2026-01-02T00:00:00.000Z','2026-01-02T00:00:00.000Z');
+      INSERT INTO legacy_project_workspace_mappings(
+        legacy_project_id,normalized_legacy_project_identity,workspace_id,mapped_at
+      ) VALUES ('p','legacy-project:p','w','2026-01-01T00:00:00.000Z');
+      INSERT INTO workspace_identity_migrations(
+        migration_id,legacy_project_id,workspace_id,from_version,to_version,step,status,
+        interruption_marker,authoritative_read_version,failure_code,updated_at
+      ) VALUES(
+        'identity-migration-p','p','w',0,1,'verify_cutover','completed',
+        'read_cutover_complete','workspace-identity/v1',NULL,'2026-01-01T00:00:00.000Z'
+      );
+    `);
+    access.registerProjectInternal({
+      workspaceId: "w",
+      projectId: "p",
+      projectRoot: "/tmp/identity-removal-project",
+      ownerHumanPrincipalId: "owner"
+    });
+    access.registerCanvasInternal({
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: "independent",
+      packageDir: "/tmp/identity-removal-project-independent",
+      ownerHumanPrincipalId: "editor"
+    });
+    const identity = new HumanIdentityRepository(database, () => new Date("2026-01-04T00:00:00Z"), {
+      onMembershipTransitionInTransaction: ({ membership, principal, type }) => {
+        access.synchronizeHumanMembershipOwnerInCallerTransaction({
+          workspaceId: "w",
+          projectId: membership.projectId,
+          humanPrincipalId: principal.humanPrincipalId,
+          transition: type,
+          membershipRole: membership.role
+        });
+      }
+    });
+
+    expect(identity.removeMember("p", "editor").humanPrincipalId).toBe("editor");
     expect(access.canvas("w", "p", "independent")?.owner).toBe("owner");
   });
 });
