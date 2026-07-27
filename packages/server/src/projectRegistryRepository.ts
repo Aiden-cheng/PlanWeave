@@ -21,6 +21,7 @@ import {
   type InternalProjectRecord
 } from "./projectRegistryRecords.js";
 import { inWriteTransaction, type SqliteDatabase } from "./sqlite.js";
+import { assertNoPendingSnapshotRestore } from "./authorizationFence.js";
 
 export {
   canvasAccessRecord,
@@ -147,6 +148,11 @@ export class ProjectRegistryRepository {
       const project = this.projectInternal(input.workspaceId, input.projectId);
       if (!project) throw new Error("project_registry_not_found");
       if (project.revokedAt !== null) throw new Error("project_registry_revoked");
+      assertNoPendingSnapshotRestore(this.database, {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        canvasId: input.canvasId
+      });
       const row = this.database
         .prepare(
           "SELECT * FROM canvas_registry WHERE workspace_id=? AND project_id=? AND canvas_id=?"
@@ -234,6 +240,7 @@ export class ProjectRegistryRepository {
     return inWriteTransaction(this.database, () => {
       const project = this.projectInternal(workspaceId, projectId);
       if (!project || project.revokedAt !== null) throw new Error("project_registry_not_found");
+      assertNoPendingSnapshotRestore(this.database, { workspaceId, projectId });
       if (project.ownerHumanPrincipalId !== null) {
         if (project.ownerHumanPrincipalId !== ownerHumanPrincipalId)
           throw new Error("project_registry_owner_conflict");
@@ -270,13 +277,16 @@ export class ProjectRegistryRepository {
         throw new Error("canvas_registry_owner_conflict");
       return canvas;
     }
-    const result = this.database
-      .prepare(
-        "UPDATE canvas_registry SET owner_human_principal_id=?,updated_at=? WHERE canvas_registry_id=? AND owner_human_principal_id IS NULL AND revoked_at IS NULL"
-      )
-      .run(ownerHumanPrincipalId, this.clock().toISOString(), canvas.canvasRegistryId);
-    if (result.changes !== 1) throw new Error("canvas_registry_owner_conflict");
-    return this.canvasInternal(workspaceId, projectId, canvasId) as InternalCanvasRecord;
+    return inWriteTransaction(this.database, () => {
+      assertNoPendingSnapshotRestore(this.database, { workspaceId, projectId, canvasId });
+      const result = this.database
+        .prepare(
+          "UPDATE canvas_registry SET owner_human_principal_id=?,updated_at=? WHERE canvas_registry_id=? AND owner_human_principal_id IS NULL AND revoked_at IS NULL"
+        )
+        .run(ownerHumanPrincipalId, this.clock().toISOString(), canvas.canvasRegistryId);
+      if (result.changes !== 1) throw new Error("canvas_registry_owner_conflict");
+      return this.canvasInternal(workspaceId, projectId, canvasId) as InternalCanvasRecord;
+    });
   }
 
   /**
@@ -292,6 +302,10 @@ export class ProjectRegistryRepository {
   }): void {
     const project = this.projectInternal(input.workspaceId, input.projectId);
     if (!project || project.revokedAt !== null) throw new Error("project_registry_not_found");
+    assertNoPendingSnapshotRestore(this.database, {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId
+    });
 
     if (
       (input.transition === "member_joined" && input.membershipRole === "owner") ||

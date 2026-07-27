@@ -11,6 +11,7 @@ import {
 } from "@planweave-ai/collaboration-contracts";
 import { z } from "zod";
 import { inWriteTransaction, type SqliteDatabase } from "./sqlite.js";
+import { assertNoPendingSnapshotRestore } from "./authorizationFence.js";
 import { ProjectAccessPolicy } from "./projectAccessPolicy.js";
 import {
   ProjectRegistryRepository,
@@ -192,6 +193,11 @@ export class ProjectAccessRepository {
       actor: input.grantedBy
     });
     return inWriteTransaction(this.database, () => {
+      assertNoPendingSnapshotRestore(this.database, {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        canvasId: input.canvasId
+      });
       const project = this.registry.projectInternal(input.workspaceId, input.projectId);
       if (!project || project.revokedAt !== null) throw new Error("project_registry_not_found");
       if (!activeWorkspacePrincipal(this.database, input.workspaceId, input.humanPrincipalId))
@@ -264,6 +270,11 @@ export class ProjectAccessRepository {
     const id = input.grantId;
     const expected = input.expectedAclRevision;
     return inWriteTransaction(this.database, () => {
+      assertNoPendingSnapshotRestore(this.database, {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        canvasId: input.canvasId
+      });
       this.policy.assertCanManage({
         workspaceId: input.workspaceId,
         projectId: input.projectId,

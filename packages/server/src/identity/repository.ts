@@ -22,6 +22,7 @@ import {
   type ProjectMembership
 } from "./schemas.js";
 import { WorkspaceIdentityRepository } from "./workspaceRepository.js";
+import { assertNoPendingSnapshotRestore } from "../authorizationFence.js";
 
 export { HumanIdentityError } from "./errors.js";
 
@@ -178,6 +179,7 @@ export class HumanIdentityRepository {
   ): BootstrapOwnerResult {
     const proof = localAdministrativeProofSchema.parse(proofInput);
     return inWriteTransaction(this.database, () => {
+      this.assertNoPendingProjectRestore(proof.projectId);
       const result = this.bootstrapOwnerLocked(proof, options);
       if (result.created) {
         this.options.onMembershipTransitionInTransaction?.({
@@ -233,6 +235,7 @@ export class HumanIdentityRepository {
     existingDeviceToken?: string;
   }): ConsumeInvitationResult {
     return inWriteTransaction(this.database, () => {
+      this.assertNoPendingProjectRestore(input.projectId);
       const result = this.consumeInvitationLocked(input);
       this.options.onMembershipTransitionInTransaction?.({
         type: "member_joined",
@@ -336,6 +339,7 @@ export class HumanIdentityRepository {
    */
   removeMember(projectId: string, targetHumanPrincipalId: string): ProjectMembership {
     return inWriteTransaction(this.database, () => {
+      this.assertNoPendingProjectRestore(projectId);
       const removed = this.memberships.removeMember(projectId, targetHumanPrincipalId);
       this.devices.revokeProjectDevicesForPrincipal(
         removed.membership.humanPrincipalId,
@@ -357,6 +361,7 @@ export class HumanIdentityRepository {
 
   promoteToOwner(projectId: string, targetHumanPrincipalId: string): ProjectMembership {
     return inWriteTransaction(this.database, () => {
+      this.assertNoPendingProjectRestore(projectId);
       const before = this.memberships.getActiveMembership(projectId, targetHumanPrincipalId);
       const membership = this.memberships.promoteToOwner(projectId, targetHumanPrincipalId);
       if (before && membership.revision !== before.revision) {
@@ -376,6 +381,7 @@ export class HumanIdentityRepository {
 
   demoteOwner(projectId: string, targetHumanPrincipalId: string): ProjectMembership {
     return inWriteTransaction(this.database, () => {
+      this.assertNoPendingProjectRestore(projectId);
       const membership = this.memberships.demoteOwner(projectId, targetHumanPrincipalId);
       const principal = this.getPrincipal(membership.humanPrincipalId);
       if (!principal) throw new HumanIdentityError("human_input_invalid");
@@ -654,6 +660,11 @@ export class HumanIdentityRepository {
           device.last_used_at
         );
     }
+  }
+
+  private assertNoPendingProjectRestore(projectId: string): void {
+    const workspaceId = this.workspaceIdentity.workspaceForLegacyProject(projectId);
+    if (workspaceId) assertNoPendingSnapshotRestore(this.database, { workspaceId, projectId });
   }
 
   private assertPrincipalWorkspace(humanPrincipalId: string, workspaceId: string): void {

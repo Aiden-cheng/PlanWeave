@@ -418,28 +418,29 @@ export class PackageSnapshotRepository {
       });
     }
     try {
+      const assertRestoreAuthorization = () => {
+        const currentDecision = this.access.decideCanvasAccess(input);
+        if (currentDecision.decision !== "allow")
+          throw new Error("snapshot_restore_authorization_conflict");
+        try {
+          this.access.policy.assertCanManage({
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            canvasId: input.canvasId,
+            actor: input.actor
+          });
+        } catch {
+          throw new Error("snapshot_restore_authorization_conflict");
+        }
+        if (currentDecision.aclRevision !== input.expectedAclRevision)
+          throw new Error("snapshot_restore_acl_conflict");
+      };
       await restorePackageSnapshot({
         projectRoot: location.projectRoot,
         canvasId: input.canvasId,
         expectedPackageDir: location.packageDir,
         snapshot: captured,
-        beforeCommit: () => {
-          const currentDecision = this.access.decideCanvasAccess(input);
-          if (currentDecision.decision !== "allow")
-            throw new Error("snapshot_restore_authorization_conflict");
-          try {
-            this.access.policy.assertCanManage({
-              workspaceId: input.workspaceId,
-              projectId: input.projectId,
-              canvasId: input.canvasId,
-              actor: input.actor
-            });
-          } catch {
-            throw new Error("snapshot_restore_authorization_conflict");
-          }
-          if (currentDecision.aclRevision !== input.expectedAclRevision)
-            throw new Error("snapshot_restore_acl_conflict");
-        }
+        beforeCommit: assertRestoreAuthorization
       });
     } catch (error) {
       const aggregate = error instanceof AggregateError;

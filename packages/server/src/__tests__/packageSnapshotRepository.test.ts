@@ -6,6 +6,7 @@ import { createTestWorkspace } from "../../../runtime/src/__tests__/promptTestHe
 import { applyMigrations } from "../migrations.js";
 import { PackageSnapshotRepository } from "../packageSnapshotRepository.js";
 import { ProjectAccessRepository } from "../projectAccessRepository.js";
+import { HumanIdentityRepository } from "../identity/repository.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 
 const databases: SqliteDatabase[] = [];
@@ -28,9 +29,9 @@ async function fixture() {
   database.exec(`
     INSERT INTO workspaces(workspace_id,display_name,created_at) VALUES ('w','Workspace','2026-01-01');
     INSERT INTO workspace_principals(workspace_id,human_principal_id,display_name,created_at,revoked_at) VALUES
-      ('w','owner','Owner','2026-01-01',NULL),('w','viewer','Viewer','2026-01-01',NULL);
+      ('w','owner','Owner','2026-01-01T00:00:00.000Z',NULL),('w','viewer','Viewer','2026-01-01T00:00:00.000Z',NULL);
     INSERT INTO workspace_memberships(workspace_id,membership_id,human_principal_id,role,revision,created_at,updated_at,revoked_at) VALUES
-      ('w','m-owner','owner','owner',1,'2026-01-01','2026-01-01',NULL),('w','m-viewer','viewer','member',1,'2026-01-01','2026-01-01',NULL);
+      ('w','m-owner','owner','owner',1,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',NULL),('w','m-viewer','viewer','member',1,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',NULL);
   `);
   const access = new ProjectAccessRepository(database, () => new Date("2026-01-02T00:00:00.000Z"));
   access.registerProjectInternal({
@@ -401,9 +402,9 @@ describe("package snapshot repository", () => {
         return originalRestore({
           ...restoreInput,
           beforeCommit: async () => {
+            await beforeCommit?.();
             entered.resolve();
             await release.promise;
-            await beforeCommit?.();
           }
         });
       });
@@ -434,8 +435,8 @@ describe("package snapshot repository", () => {
     }
   });
 
-  it("returns a conflict when ACL revision changes before commit and keeps the package", async () => {
-    const { access, snapshots, workspace } = await fixture();
+  it("fences grant mutations until restore commit", async () => {
+    const { access, database, snapshots, workspace } = await fixture();
     const created = await snapshots.create({
       workspaceId: "w",
       projectId: "p",
@@ -455,9 +456,9 @@ describe("package snapshot repository", () => {
         return originalRestore({
           ...restoreInput,
           beforeCommit: async () => {
+            await beforeCommit?.();
             entered.resolve();
             await release.promise;
-            await beforeCommit?.();
           }
         });
       });
@@ -471,21 +472,39 @@ describe("package snapshot repository", () => {
         expectedAclRevision: 0
       });
       await entered.promise;
-      access.grant({
-        workspaceId: "w",
-        projectId: "p",
-        canvasId: "default",
-        humanPrincipalId: "viewer",
-        role: "viewer",
-        grantedBy: owner
-      });
+      database.exec(`
+        INSERT INTO legacy_project_workspace_mappings(
+          legacy_project_id,normalized_legacy_project_identity,workspace_id,mapped_at
+        ) VALUES('p','legacy-project:p','w','2026-01-01');
+        INSERT INTO workspace_identity_migrations(
+          migration_id,legacy_project_id,workspace_id,from_version,to_version,step,status,
+          interruption_marker,authoritative_read_version,failure_code,updated_at
+        ) VALUES('identity-migration-p','p','w',0,1,'verify_cutover','completed',
+          'read_cutover_complete','workspace-identity/v1',NULL,'2026-01-01');
+        INSERT INTO human_principals(human_principal_id,display_name,created_at) VALUES
+          ('owner','Owner','2026-01-01T00:00:00.000Z'),('viewer','Viewer','2026-01-01T00:00:00.000Z');
+        INSERT INTO project_memberships(
+          membership_id,project_id,human_principal_id,role,revision,created_at,updated_at,revoked_at
+        ) VALUES
+          ('membership-owner','p','owner','owner',1,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',NULL),
+          ('membership-viewer','p','viewer','owner',1,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',NULL);
+      `);
+      const identity = new HumanIdentityRepository(database);
+      expect(() => identity.removeMember("p", "owner")).toThrow("snapshot_restore_pending");
+      expect(() =>
+        access.grant({
+          workspaceId: "w",
+          projectId: "p",
+          canvasId: "default",
+          humanPrincipalId: "viewer",
+          role: "viewer",
+          grantedBy: owner
+        })
+      ).toThrow("snapshot_restore_pending");
       release.resolve();
-      await expect(restorePromise).resolves.toMatchObject({
-        outcome: "conflict",
-        detail: "stale_acl_revision"
-      });
-      expect(await readFile(workspace.init.workspace.manifestFile, "utf8")).toBe("{}");
-      expect(originalManifest).not.toBe("{}");
+      await expect(restorePromise).resolves.toMatchObject({ outcome: "restored" });
+      expect(await readFile(workspace.init.workspace.manifestFile, "utf8")).toBe(originalManifest);
+      expect(identity.removeMember("p", "owner").humanPrincipalId).toBe("owner");
     } finally {
       restoreSpy.mockRestore();
     }
