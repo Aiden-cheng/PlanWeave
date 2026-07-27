@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { applyMigrations } from "../migrations.js";
 import { ProjectAccessRepository } from "../projectAccessRepository.js";
-import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
+import { inWriteTransaction, openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 
 const databases: SqliteDatabase[] = [];
 
@@ -188,5 +188,85 @@ describe("project access registry", () => {
       "project_registry_owner_conflict"
     );
     expect(access.project("w", "ownerless")?.owner).toBe("owner");
+  });
+
+  it("transfers registry ownership and preserves independent canvas owners", async () => {
+    const { database, access } = await openFixture();
+    database.exec(`
+      INSERT INTO human_principals(human_principal_id,display_name,created_at) VALUES
+        ('owner','Owner','2026-01-01'),('editor','Editor','2026-01-01'),('viewer','Viewer','2026-01-01');
+      INSERT INTO project_memberships(
+        membership_id,project_id,human_principal_id,role,revision,created_at,updated_at
+      ) VALUES
+        ('m-owner','p','owner','owner',1,'2026-01-01','2026-01-01'),
+        ('m-editor','p','editor','owner',1,'2026-01-02','2026-01-02'),
+        ('m-viewer','p','viewer','owner',1,'2026-01-03','2026-01-03');
+    `);
+    access.registerProjectInternal({
+      workspaceId: "w",
+      projectId: "p",
+      projectRoot: "/tmp/transfer-project",
+      ownerHumanPrincipalId: "owner"
+    });
+    access.registerCanvasInternal({
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: "inherited",
+      packageDir: "/tmp/transfer-project-inherited",
+      ownerHumanPrincipalId: "owner"
+    });
+    access.registerCanvasInternal({
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: "independent",
+      packageDir: "/tmp/transfer-project-independent",
+      ownerHumanPrincipalId: "viewer"
+    });
+
+    inWriteTransaction(database, () => {
+      database
+        .prepare(
+          "UPDATE project_memberships SET role='member',revision=revision+1 WHERE membership_id=?"
+        )
+        .run("m-owner");
+      database
+        .prepare(
+          "UPDATE workspace_memberships SET role='member',revision=revision+1 WHERE workspace_id=? AND human_principal_id=?"
+        )
+        .run("w", "owner");
+      access.synchronizeHumanMembershipOwnerInCallerTransaction({
+        workspaceId: "w",
+        projectId: "p",
+        humanPrincipalId: "owner",
+        transition: "owner_demoted",
+        membershipRole: "member"
+      });
+    });
+    expect(access.project("w", "p")?.owner).toBe("editor");
+    expect(access.canvas("w", "p", "inherited")?.owner).toBe("editor");
+    expect(access.canvas("w", "p", "independent")?.owner).toBe("viewer");
+
+    inWriteTransaction(database, () => {
+      database
+        .prepare(
+          "UPDATE project_memberships SET revoked_at='2026-01-04',updated_at='2026-01-04',revision=revision+1 WHERE membership_id=?"
+        )
+        .run("m-editor");
+      database
+        .prepare(
+          "UPDATE workspace_memberships SET revoked_at='2026-01-04',updated_at='2026-01-04',revision=revision+1 WHERE workspace_id=? AND human_principal_id=?"
+        )
+        .run("w", "editor");
+      access.synchronizeHumanMembershipOwnerInCallerTransaction({
+        workspaceId: "w",
+        projectId: "p",
+        humanPrincipalId: "editor",
+        transition: "member_removed",
+        membershipRole: "owner"
+      });
+    });
+    expect(access.project("w", "p")?.owner).toBe("viewer");
+    expect(access.canvas("w", "p", "inherited")?.owner).toBe("viewer");
+    expect(access.canvas("w", "p", "independent")?.owner).toBe("viewer");
   });
 });

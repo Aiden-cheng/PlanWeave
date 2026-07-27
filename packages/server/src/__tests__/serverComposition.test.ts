@@ -93,6 +93,62 @@ function jsonHeaders(token: string) {
 }
 
 describe("distributed server composition", () => {
+  it("materializes trusted registry owners during bootstrap for listing and management", async () => {
+    const fixture = await setup();
+    const bootstrap = await fetch(
+      `${fixture.origin}/api/v1/projects/${fixture.projectId}/human/bootstrap`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ displayName: "Trusted Owner", humanPrincipalId: "trusted-owner" })
+      }
+    );
+    expect(bootstrap.status).toBe(201);
+    const bootstrapBody = (await bootstrap.json()) as { deviceToken: string };
+    const headers = { Authorization: `Bearer ${bootstrapBody.deviceToken}` };
+
+    const projects = await fetch(`${fixture.origin}/api/v1/registry/projects`, { headers });
+    expect(projects.status).toBe(200);
+    await expect(projects.json()).resolves.toMatchObject({
+      items: [
+        expect.objectContaining({
+          registry: expect.objectContaining({ projectId: fixture.projectId }),
+          owner: "trusted-owner"
+        })
+      ]
+    });
+
+    const canvases = await fetch(
+      `${fixture.origin}/api/v1/registry/projects/${fixture.projectId}/canvases`,
+      { headers }
+    );
+    expect(canvases.status).toBe(200);
+    const canvasesBody = (await canvases.json()) as {
+      items: Array<{ registry: { canvasId: string }; owner: string; acl: { revision: number } }>;
+    };
+    expect(canvasesBody.items).toEqual([
+      expect.objectContaining({
+        registry: expect.objectContaining({ canvasId: "default" }),
+        owner: "trusted-owner",
+        acl: { revision: 0, updatedAt: expect.any(String) }
+      })
+    ]);
+
+    const snapshot = await fetch(
+      `${fixture.origin}/api/v1/registry/projects/${fixture.projectId}/canvases/default/snapshots`,
+      {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify({
+          projectId: fixture.projectId,
+          canvasId: "default",
+          expectedAclRevision: canvasesBody.items[0].acl.revision
+        })
+      }
+    );
+    expect(snapshot.status).toBe(201);
+  });
+
   it("wires health, enrollment, scoped dispatch, idempotency, pagination, and shutdown", async () => {
     const fixture = await setup();
     expect(fixture.composition.ownsHttpServer).toBe(false);
