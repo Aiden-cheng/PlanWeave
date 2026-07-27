@@ -18,6 +18,9 @@ vi.mock("../renderer/views/CanvasMapView", () => ({
 vi.mock("../renderer/views/NotificationsView", () => ({
   NotificationsView: () => <div data-testid="notifications-route">Notifications route</div>
 }));
+vi.mock("../renderer/views/PeopleView", () => ({
+  PeopleView: () => <div data-testid="people-route">People route</div>
+}));
 vi.mock("../renderer/views/ReviewPipelineView", () => ({
   ReviewPipelineView: () => <div data-testid="review-pipeline-route">Review pipeline route</div>
 }));
@@ -41,6 +44,7 @@ describe("WorkspaceTabs lazy routes", () => {
     ["graph", "graph-route"],
     ["canvas-map", "canvas-map-route"],
     ["notifications", "notifications-route"],
+    ["people", "people-route"],
     ["review-pipeline", "review-pipeline-route"],
     ["search", "search-route"],
     ["statistics", "statistics-route"],

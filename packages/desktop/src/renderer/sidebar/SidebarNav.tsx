@@ -4,7 +4,8 @@ import {
   ListTodoIcon,
   NetworkIcon,
   SearchIcon,
-  SettingsIcon
+  SettingsIcon,
+  UsersIcon
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -80,6 +81,15 @@ export function SidebarNav({
         {unreadNotificationCount > 0 ? (
           <Badge variant="destructive">{unreadNotificationCount}</Badge>
         ) : null}
+      </Button>
+      <Button
+        data-testid="sidebar-people"
+        className={navButtonClass}
+        variant={activeView === "people" ? "secondary" : "ghost"}
+        onClick={() => onSelectView("people")}
+      >
+        <UsersIcon data-icon="inline-start" />
+        {t("people")}
       </Button>
       <Button
         data-testid="sidebar-settings"

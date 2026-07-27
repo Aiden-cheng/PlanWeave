@@ -1,0 +1,134 @@
+import { useMemo } from "react";
+import type { PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
+import { collaborationBridge } from "../bridge";
+import type { createTranslator } from "../i18n";
+import { useCollaborationReadModels } from "../hooks/useCollaborationReadModels";
+import { useCollaborationStatus } from "../hooks/useCollaborationStatus";
+import { usePeoplePanelController } from "../hooks/usePeoplePanelController";
+import { CollaborationConnectForm } from "../team/CollaborationConnectForm";
+import { PeoplePanel } from "../team/PeoplePanel";
+
+export type PeopleViewProps = {
+  t: ReturnType<typeof createTranslator>;
+  /** Injected API for tests. */
+  api?: PlanWeaveCollaborationApi | null;
+  /** Optional clipboard writer; defaults to navigator.clipboard. */
+  copyText?: (text: string) => Promise<void>;
+  onMembershipOutcome?: (outcome: { ok: boolean; message: string }) => void;
+};
+
+async function defaultCopyText(text: string): Promise<void> {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  throw new Error("clipboard_unavailable");
+}
+
+/** Active-project member administration surface. */
+export function PeopleView({
+  t,
+  api: apiProp,
+  copyText = defaultCopyText,
+  onMembershipOutcome
+}: PeopleViewProps) {
+  const api = apiProp === undefined ? collaborationBridge : apiProp;
+  const { status } = useCollaborationStatus({ api });
+
+  const activeProfile = useMemo(() => {
+    if (!status?.activeProfileId) return null;
+    return status.profiles.find((profile) => profile.profileId === status.activeProfileId) ?? null;
+  }, [status]);
+
+  const sessionConnected =
+    status?.session.phase === "connected" || status?.session.phase === "ready";
+
+  // Subscribe only: the project shell owns the shared hub's active project/canvas binding.
+  const { snapshot, viewModel, controller } = useCollaborationReadModels({
+    api,
+    profileId: sessionConnected ? (activeProfile?.profileId ?? null) : null,
+    projectId: sessionConnected ? (activeProfile?.projectId ?? null) : null,
+    manageActiveProject: false
+  });
+
+  const panel = usePeoplePanelController({
+    api,
+    status,
+    members: viewModel.members,
+    hosts: viewModel.hosts,
+    syncPhase: snapshot.syncPhase,
+    detailsOpen: true
+  });
+
+  const refreshMembers = async () => {
+    if (controller && activeProfile) {
+      await controller.refreshAuthoritative({ reason: "people_member_mutation" });
+    }
+  };
+
+  const reportMembership = (ok: boolean, message: string) => {
+    onMembershipOutcome?.({ ok, message });
+  };
+
+  const membershipResult = (ok: boolean) =>
+    ok ? t("notifyMembershipChanged") : (panel.actionError ?? t("peopleError"));
+
+  return (
+    <section
+      className="mx-auto flex h-full min-h-0 w-full max-w-5xl flex-col rounded-xl border border-border/80 bg-surface p-5 shadow-sm"
+      data-testid="people-view"
+      aria-label={t("peopleTitle")}
+    >
+      <PeoplePanel
+        mode={panel.mode}
+        presence={panel.presence}
+        members={panel.members}
+        hosts={panel.hosts}
+        invitations={panel.invitations}
+        devices={panel.devices}
+        detailsLoading={panel.detailsLoading}
+        detailsError={panel.detailsError}
+        actionError={panel.actionError}
+        actionBusy={panel.actionBusy}
+        pendingInvitation={panel.pendingInvitation}
+        t={t}
+        onCreateInvitation={panel.createInvitation}
+        onCopyInvitationToken={copyText}
+        onDismissPendingInvitation={panel.clearPendingInvitation}
+        onRevokeInvitation={async (invitationId) => {
+          const ok = await panel.revokeInvitation(invitationId);
+          reportMembership(ok, membershipResult(ok));
+          return ok;
+        }}
+        onPromoteMember={async (humanPrincipalId) => {
+          const ok = await panel.promoteMember(humanPrincipalId);
+          if (ok) await refreshMembers();
+          reportMembership(ok, membershipResult(ok));
+          return ok;
+        }}
+        onDemoteMember={async (humanPrincipalId) => {
+          const ok = await panel.demoteMember(humanPrincipalId);
+          if (ok) await refreshMembers();
+          reportMembership(ok, membershipResult(ok));
+          return ok;
+        }}
+        onRemoveMember={async (humanPrincipalId) => {
+          const ok = await panel.removeMember(humanPrincipalId);
+          if (ok) await refreshMembers();
+          reportMembership(ok, membershipResult(ok));
+          return ok;
+        }}
+        onRevokeDevice={async (deviceCredentialId) => {
+          const ok = await panel.revokeDevice(deviceCredentialId);
+          reportMembership(ok, membershipResult(ok));
+          return ok;
+        }}
+        onRefreshDetails={async () => {
+          await panel.refreshDetails();
+          await refreshMembers();
+        }}
+        connectSlot={<CollaborationConnectForm api={api} status={status} t={t} />}
+      />
+    </section>
+  );
+}

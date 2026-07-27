@@ -26,7 +26,7 @@ vi.mock("../renderer/AppSidebars", () => ({
 
 afterEach(cleanupRendererTestEnvironment);
 
-function renderChrome(activeView: "graph" | "task-workspace") {
+function renderChrome(activeView: "graph" | "people" | "task-workspace") {
   const setLeftSidebarCollapsedPreference = vi.fn();
   const setRightSidebarCollapsedPreference = vi.fn();
   useProjectWorkspace.mockReturnValue({
@@ -70,5 +70,13 @@ describe("Task Workspace app chrome", () => {
     expect(screen.getByTestId("project-sidebar")).toBeInTheDocument();
     expect(screen.getByTestId("right-palette-sidebar")).toBeInTheDocument();
     expect(screen.getByTestId("collapsed-sidebar-controls")).toBeInTheDocument();
+  });
+
+  it("keeps project navigation but removes the unrelated palette from the People page", () => {
+    renderChrome("people");
+
+    expect(screen.getByTestId("project-sidebar")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-tabs")).toBeInTheDocument();
+    expect(screen.queryByTestId("right-palette-sidebar")).not.toBeInTheDocument();
   });
 });

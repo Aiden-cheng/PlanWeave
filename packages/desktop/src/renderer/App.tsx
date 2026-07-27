@@ -44,6 +44,7 @@ export function AppWorkspaceChrome({
 }) {
   const { palette, projectSidebar, shell } = useProjectWorkspace();
   const activeView = shell.activeView;
+  const hasRightPalette = activeView !== "canvas-map" && activeView !== "people";
 
   if (activeView === "task-workspace") {
     return (
@@ -64,7 +65,7 @@ export function AppWorkspaceChrome({
           width={leftSidebarWidth}
         />
         <WorkspaceTabs />
-        {activeView === "canvas-map" ? null : (
+        {hasRightPalette ? (
           <RightPaletteSidebar
             addPaletteComponent={palette.addPaletteComponent}
             handlePaletteDragStart={palette.handlePaletteDragStart}
@@ -75,11 +76,11 @@ export function AppWorkspaceChrome({
             width={rightSidebarWidth}
             t={shell.t}
           />
-        )}
+        ) : null}
       </main>
       <CollapsedSidebarControls
         leftSidebarCollapsed={leftSidebarCollapsed}
-        rightSidebarCollapsed={activeView === "canvas-map" ? false : rightSidebarCollapsed}
+        rightSidebarCollapsed={hasRightPalette ? rightSidebarCollapsed : false}
         setLeftSidebarCollapsed={setLeftSidebarCollapsedPreference}
         setRightSidebarCollapsed={setRightSidebarCollapsedPreference}
         t={shell.t}

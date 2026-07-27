@@ -50,6 +50,9 @@ const GraphView = lazy(() =>
 const NotificationsView = lazy(() =>
   import("./NotificationsView").then((module) => ({ default: module.NotificationsView }))
 );
+const PeopleView = lazy(() =>
+  import("./PeopleView").then((module) => ({ default: module.PeopleView }))
+);
 const ReviewPipelineView = lazy(() =>
   import("./ReviewPipelineView").then((module) => ({ default: module.ReviewPipelineView }))
 );
@@ -271,6 +274,22 @@ function NotificationsRoute() {
   );
 }
 
+function PeopleRoute() {
+  const { shell } = useProjectWorkspace();
+  return (
+    <PeopleView
+      t={shell.t}
+      onMembershipOutcome={(outcome) => {
+        if (outcome.ok) {
+          shell.setSuccessMessage?.(outcome.message);
+        } else {
+          shell.setError(outcome.message);
+        }
+      }}
+    />
+  );
+}
+
 function CanvasMapRoute() {
   const { fileSync, graphWorkspace, shell } = useProjectWorkspace();
   return (
@@ -307,6 +326,8 @@ export function WorkspaceTabs() {
         return <SearchRoute />;
       case "notifications":
         return <NotificationsRoute />;
+      case "people":
+        return <PeopleRoute />;
       case "canvas-map":
         return <CanvasMapRoute />;
       case "graph":

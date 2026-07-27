@@ -261,11 +261,13 @@ describe("desktop renderer interface interactions", () => {
       "sidebar-statistics",
       "sidebar-search",
       "sidebar-notifications",
+      "sidebar-people",
       "sidebar-settings"
     ]);
 
     await userEvent.click(screen.getByTestId("sidebar-todo"));
     await userEvent.click(screen.getByTestId("sidebar-canvas-map"));
+    await userEvent.click(screen.getByTestId("sidebar-people"));
     await userEvent.click(screen.getByTestId("sidebar-settings"));
     await userEvent.click(screen.getByRole("button", { name: "Demo" }));
     await userEvent.click(screen.getByRole("button", { name: /Main canvas\s*2/ }));
@@ -273,6 +275,7 @@ describe("desktop renderer interface interactions", () => {
 
     expect(setActiveView).toHaveBeenCalledWith("todo");
     expect(setActiveView).toHaveBeenCalledWith("canvas-map");
+    expect(setActiveView).toHaveBeenCalledWith("people");
     expect(setActiveView).toHaveBeenCalledWith("settings");
     expect(loadProject).toHaveBeenCalledWith(project);
     expect(loadProject).toHaveBeenCalledWith(project, "canvas-main");

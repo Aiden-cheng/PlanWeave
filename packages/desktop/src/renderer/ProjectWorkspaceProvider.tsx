@@ -1036,13 +1036,6 @@ export function ProjectWorkspaceProvider({
       handleTaskPanelSelect,
       loadProject: openProjectInSession,
       notificationItems: notificationController.notificationItems,
-      onMembershipOutcome: (outcome: { ok: boolean; message: string }) => {
-        if (outcome.ok) {
-          setSuccessMessage(outcome.message);
-        } else {
-          setError(outcome.message);
-        }
-      },
       onTogglePinnedProject: handleTogglePinnedProject,
       pinnedProjectIds,
       projectRefreshing,
@@ -1089,8 +1082,6 @@ export function ProjectWorkspaceProvider({
       selectedProject,
       selectedTaskPanelId,
       setActiveView,
-      setError,
-      setSuccessMessage,
       t
     ]
   );

@@ -716,8 +716,8 @@ async function runLiveCollaborationSmoke(window: BrowserWindow): Promise<Record<
     throw new Error("Live collaboration smoke fixture configuration is incomplete.");
   }
 
-  // Exercise the real renderer control with a real Chromium keyboard event before
-  // the form invokes the typed preload bridge methods.
+  // Exercise the real workspace navigation with a real Chromium keyboard event before
+  // the page invokes the typed preload bridge methods.
   app.focus({ steal: true });
   window.show();
   window.focus();
@@ -725,11 +725,11 @@ async function runLiveCollaborationSmoke(window: BrowserWindow): Promise<Record<
   await wait(50);
   await window.webContents.executeJavaScript(`
     (() => {
-      const trigger = document.querySelector('[data-testid="people-presence-trigger"]');
-      if (!(trigger instanceof HTMLElement)) {
-        throw new Error("People presence trigger was not rendered.");
+      const navigation = document.querySelector('[data-testid="sidebar-people"]');
+      if (!(navigation instanceof HTMLElement)) {
+        throw new Error("People navigation was not rendered.");
       }
-      trigger.focus();
+      navigation.focus();
       return true;
     })()
   `);
@@ -739,33 +739,33 @@ async function runLiveCollaborationSmoke(window: BrowserWindow): Promise<Record<
   window.webContents.sendInputEvent({ type: "keyDown", keyCode: "ENTER" });
   window.webContents.sendInputEvent({ type: "char", keyCode: "\r" });
   window.webContents.sendInputEvent({ type: "keyUp", keyCode: "ENTER" });
-  const keyboardOpenedPeoplePopover = (await window.webContents.executeJavaScript(`
+  const keyboardOpenedPeopleView = (await window.webContents.executeJavaScript(`
     (async () => {
       for (let attempt = 0; attempt < 100; attempt += 1) {
-        if (document.querySelector('[data-testid="people-presence-popover"]')) return true;
+        if (document.querySelector('[data-testid="people-view"]')) return true;
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
       return false;
     })()
   `)) as boolean;
-  if (!keyboardOpenedPeoplePopover) {
+  if (!keyboardOpenedPeopleView) {
     throw new Error(
-      `People keyboard action did not open the presence popover in Chromium (activeElement=${keyboardFocusedTestId ?? "none"}).`
+      `People keyboard action did not open the member page in Chromium (activeElement=${keyboardFocusedTestId ?? "none"}).`
     );
   }
   await window.webContents.executeJavaScript(`
     (() => {
-      if (document.querySelector('[data-testid="people-presence-popover"]')) return true;
-      const trigger = document.querySelector('[data-testid="people-presence-trigger"]');
-      if (!(trigger instanceof HTMLElement)) {
-        throw new Error("People presence trigger disappeared before opening the panel.");
+      if (document.querySelector('[data-testid="people-view"]')) return true;
+      const navigation = document.querySelector('[data-testid="sidebar-people"]');
+      if (!(navigation instanceof HTMLElement)) {
+        throw new Error("People navigation disappeared before opening the page.");
       }
-      trigger.click();
+      navigation.click();
       return true;
     })()
   `);
 
-  const connection = await window.webContents.executeJavaScript(`
+  const connection = (await window.webContents.executeJavaScript(`
     (async () => {
       const waitFor = async (predicate, label) => {
         for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -830,12 +830,12 @@ async function runLiveCollaborationSmoke(window: BrowserWindow): Promise<Record<
         panelMode: panel.getAttribute("data-mode"),
         memberCount: memberRows.length,
         sessionPhase: status.session.phase,
-        keyboardOpenedPeoplePopover: ${JSON.stringify(keyboardOpenedPeoplePopover)}
+        keyboardOpenedPeopleView: ${JSON.stringify(keyboardOpenedPeopleView)}
       };
     })()
-  `) as Record<string, unknown>;
+  `)) as Record<string, unknown>;
 
-  const collaborationResult = await window.webContents.executeJavaScript(`
+  const collaborationResult = (await window.webContents.executeJavaScript(`
     (async () => {
       const waitFor = async (predicate, label) => {
         for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -889,7 +889,7 @@ async function runLiveCollaborationSmoke(window: BrowserWindow): Promise<Record<
         activityVisible: activity.items.length >= bodies.length
       };
     })()
-  `) as Record<string, unknown>;
+  `)) as Record<string, unknown>;
   return {
     ...connection,
     ...collaborationResult,
@@ -899,7 +899,9 @@ async function runLiveCollaborationSmoke(window: BrowserWindow): Promise<Record<
   };
 }
 
-async function waitForCollaborationInspectorWindow(mainWindow: BrowserWindow): Promise<BrowserWindow> {
+async function waitForCollaborationInspectorWindow(
+  mainWindow: BrowserWindow
+): Promise<BrowserWindow> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const inspector = BrowserWindow.getAllWindows().find((candidate) => {
       if (candidate === mainWindow || candidate.isDestroyed()) return false;
@@ -926,15 +928,15 @@ async function runCollaborationAccessibilitySmoke(
   mainWindow: BrowserWindow,
   liveCollaboration: Record<string, unknown>
 ): Promise<Record<string, unknown>> {
-  if (liveCollaboration.keyboardOpenedPeoplePopover !== true) {
-    throw new Error("People keyboard action did not open the presence popover in Chromium.");
+  if (liveCollaboration.keyboardOpenedPeopleView !== true) {
+    throw new Error("People keyboard action did not open the member page in Chromium.");
   }
   const waitForLocalizedPeopleLabel = async (prefix: string): Promise<string> =>
     (await mainWindow.webContents.executeJavaScript(`
       (async () => {
         for (let attempt = 0; attempt < 100; attempt += 1) {
-          const trigger = document.querySelector('[data-testid="people-presence-trigger"]');
-          const label = trigger?.getAttribute("aria-label") ?? "";
+          const navigation = document.querySelector('[data-testid="sidebar-people"]');
+          const label = navigation?.textContent?.trim() ?? "";
           if (label.startsWith(${JSON.stringify(prefix)})) return label;
           await new Promise((resolve) => setTimeout(resolve, 50));
         }
@@ -952,7 +954,7 @@ async function runCollaborationAccessibilitySmoke(
   await reloadSmokeRenderer(mainWindow, { requireCollaborationShell: true });
   const zhAccessibleName = await waitForLocalizedPeopleLabel("成员");
   const localization = {
-    stableTestId: "people-presence-trigger",
+    stableTestId: "sidebar-people",
     enAccessibleName,
     zhAccessibleName,
     enVisible: true,
@@ -960,7 +962,8 @@ async function runCollaborationAccessibilitySmoke(
   };
 
   const projectRoot = process.env.PLANWEAVE_DESKTOP_SMOKE_PROJECT_ROOT;
-  if (!projectRoot) throw new Error("PLANWEAVE_DESKTOP_SMOKE_PROJECT_ROOT is required for AX smoke.");
+  if (!projectRoot)
+    throw new Error("PLANWEAVE_DESKTOP_SMOKE_PROJECT_ROOT is required for AX smoke.");
   const resolvedProjectRoot = await realpath(projectRoot);
   await mainWindow.webContents.executeJavaScript(`
     window.planweave.openBlockInspectorWindow({
@@ -1110,11 +1113,11 @@ async function runCollaborationAccessibilitySmoke(
   );
   await mainWindow.webContents.executeJavaScript(`
     (async () => {
-      const trigger = document.querySelector('[data-testid="people-presence-trigger"]');
-      if (!(trigger instanceof HTMLElement)) throw new Error("Missing People trigger for AX smoke.");
-      trigger.click();
+      const navigation = document.querySelector('[data-testid="sidebar-people"]');
+      if (!(navigation instanceof HTMLElement)) throw new Error("Missing People navigation for AX smoke.");
+      navigation.click();
       for (let attempt = 0; attempt < 100; attempt += 1) {
-        if (document.querySelector('[data-testid="people-presence-popover"]')) return true;
+        if (document.querySelector('[data-testid="people-view"]')) return true;
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
       throw new Error("Timed out opening People surface for AX smoke.");
@@ -1125,15 +1128,21 @@ async function runCollaborationAccessibilitySmoke(
     ["成员", "People"],
     { allowedRoles: ["dialog", "group", "region"] }
   );
-  for (const [label, summary] of Object.entries({ people: peopleAx, comments: commentsAx, activity: activityAx })) {
+  for (const [label, summary] of Object.entries({
+    people: peopleAx,
+    comments: commentsAx,
+    activity: activityAx
+  })) {
     if (!summary.namedRegion || !summary.liveRegion || summary.roleNamePairs === 0) {
-      throw new Error("Chromium accessibility tree did not expose a named live region for " + label);
+      throw new Error(
+        `Chromium accessibility tree did not expose a named live region for ${label}`
+      );
     }
   }
   return {
     locale: localization,
     keyboard: {
-      peopleAction: liveCollaboration.keyboardOpenedPeoplePopover === true,
+      peopleAction: liveCollaboration.keyboardOpenedPeopleView === true,
       commentsAction: commentsKeyboardAction,
       activityAction: activityKeyboardAction
     },
@@ -1171,7 +1180,7 @@ async function reloadSmokeRenderer(
         const graphReady = graph && document.querySelector('[data-auto-run-control]');
         const collaborationShellReady =
           ${JSON.stringify(options.requireCollaborationShell === true)} &&
-          document.querySelector('[data-testid="people-presence-trigger"]');
+          document.querySelector('[data-testid="sidebar-people"]');
         if (graphReady || collaborationShellReady) {
           resolve(true);
           return;
@@ -1186,7 +1195,7 @@ async function reloadSmokeRenderer(
                   graphReady: Boolean(graphReady),
                   collaborationShellReady: Boolean(collaborationShellReady),
                   autoRunControl: Boolean(document.querySelector("[data-auto-run-control]")),
-                  peopleTrigger: Boolean(document.querySelector('[data-testid="people-presence-trigger"]'))
+                  peopleNavigation: Boolean(document.querySelector('[data-testid="sidebar-people"]'))
                 })
             )
           );

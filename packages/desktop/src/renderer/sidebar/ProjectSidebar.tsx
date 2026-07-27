@@ -12,7 +12,6 @@ import type { createTranslator } from "../i18n";
 import type { AppView, NotificationItem } from "../types";
 import { HistoryNavigationButtons } from "../components/HistoryNavigationButtons";
 import { VerticalResizeHandle } from "../components/VerticalResizeHandle";
-import { PeoplePresenceControl } from "../team/PeoplePresenceControl";
 import { ProjectTree } from "./ProjectTree";
 import { SidebarNav } from "./SidebarNav";
 
@@ -59,7 +58,6 @@ type ProjectSidebarProps = {
   handleTaskPanelSelect: (taskId: string | null) => void;
   loadProject: (project: DesktopProjectSummary, canvasId?: string | null) => Promise<void>;
   notificationItems: NotificationItem[];
-  onMembershipOutcome?: (outcome: { ok: boolean; message: string }) => void;
   onResizeStart?: (event: ReactPointerEvent) => void;
   onToggleSidebar: () => void;
   onTogglePinnedProject: (projectId: string) => void;
@@ -102,7 +100,6 @@ export function ProjectSidebar({
   handleTaskPanelSelect,
   loadProject,
   notificationItems,
-  onMembershipOutcome,
   onResizeStart,
   onToggleSidebar,
   onTogglePinnedProject,
@@ -208,7 +205,7 @@ export function ProjectSidebar({
 
   return (
     <aside className="relative flex shrink-0 flex-col overflow-hidden text-text" style={{ width }}>
-      <div className="app-drag-region window-titlebar-leading flex h-11 shrink-0 items-center justify-between border-b border-border/80 px-3">
+      <div className="app-drag-region window-titlebar-leading flex h-11 shrink-0 items-center border-b border-border/80 px-3">
         <div className="app-no-drag flex items-center gap-1">
           <Button
             size="icon-sm"
@@ -219,9 +216,6 @@ export function ProjectSidebar({
             <PanelLeftCloseIcon data-icon="inline-start" />
           </Button>
           <HistoryNavigationButtons t={t} />
-        </div>
-        <div className="app-no-drag">
-          <PeoplePresenceControl onMembershipOutcome={onMembershipOutcome} t={t} />
         </div>
       </div>
       <SidebarNav
