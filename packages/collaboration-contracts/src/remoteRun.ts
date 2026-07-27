@@ -13,6 +13,8 @@ import {
   opaqueIdentifierSchema
 } from "@planweave-ai/distributed-protocol";
 import { z } from "zod";
+import { collaborationRevisionSchema, responsibilitySchemaVersion } from "./responsibility.js";
+import { executionTargetSchemaVersion } from "./executionTarget.js";
 import { timestampSchema, workItemRefSchema } from "./primitives.js";
 
 /**
@@ -143,6 +145,41 @@ export const remoteDispatchWireCommandSchema = z
   })
   .strict();
 export type RemoteDispatchWireCommand = z.infer<typeof remoteDispatchWireCommandSchema>;
+
+/**
+ * Legacy v1 input retained solely for migration. It mixes human and Host targets
+ * through optional fields and must not be used as the new dispatch authority.
+ */
+export const legacyRemoteDispatchWireCommandSchema = remoteDispatchWireCommandSchema;
+export type LegacyRemoteDispatchWireCommand = RemoteDispatchWireCommand;
+
+/** Strict Desktop intent for one exact Task#Block. Actor/auth/lease are Server-owned. */
+export const remoteDispatchIntentSchema = z
+  .object({
+    schemaVersion: z.literal("remote-run/v2"),
+    projectId: opaqueIdentifierSchema,
+    canvasId: opaqueIdentifierSchema,
+    blockRef: blockRefSchema,
+    idempotencyKey: z.string().trim().min(1).max(256),
+    expectedResponsibilityRevision: collaborationRevisionSchema,
+    expectedReviewerRevision: collaborationRevisionSchema.nullable(),
+    expectedExecutionTargetRevision: collaborationRevisionSchema
+  })
+  .strict();
+export type RemoteDispatchIntent = z.infer<typeof remoteDispatchIntentSchema>;
+export const remoteDispatchWireCommandV2Schema = remoteDispatchIntentSchema;
+export const remoteBlockDispatchIntentSchema = remoteDispatchIntentSchema;
+export type RemoteDispatchWireCommandV2 = RemoteDispatchIntent;
+
+/** Version markers carried by the three independent assignment authorities. */
+export const remoteDispatchAuthorityVersionsSchema = z
+  .object({
+    responsibility: z.literal(responsibilitySchemaVersion),
+    reviewer: z.literal("review-assignment/v1"),
+    executionTarget: z.literal(executionTargetSchemaVersion)
+  })
+  .strict();
+export type RemoteDispatchAuthorityVersions = z.infer<typeof remoteDispatchAuthorityVersionsSchema>;
 
 const actionReasonSchema = z.string().trim().min(1).max(4_096);
 const actionIdSchema = opaqueIdentifierSchema;

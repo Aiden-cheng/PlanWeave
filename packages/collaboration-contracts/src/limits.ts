@@ -30,6 +30,11 @@ export const WORK_HOST_DISPLAY_NAME_MIN_LENGTH = 1 as const;
 export const WORK_HOST_DISPLAY_NAME_MAX_LENGTH = 128 as const;
 export const WORK_ASSIGNMENT_BATCH_MAX = 100 as const;
 
+/** Bounded revisions and public collaboration assignment reason text. */
+export const COLLABORATION_REVISION_MAX = 9_007_199_254_740_991 as const;
+export const COLLABORATION_REASON_MAX_LENGTH = 512 as const;
+export const HOST_AUTHORIZATION_CAPABILITIES_MAX = 128 as const;
+
 export const COMMENT_BODY_FORMAT = "markdown" as const;
 export const COMMENT_ATTACHMENTS_MAX_COUNT = 8 as const;
 export const COMMENT_ATTACHMENT_MAX_BYTES = 8_388_608 as const;

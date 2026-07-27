@@ -15,6 +15,10 @@ import {
   workItemRefSchema
 } from "./primitives.js";
 
+/**
+ * @deprecated Legacy migration input only. New writes must use the independent
+ * responsibility, review assignment, and execution target contracts.
+ */
 export const assignmentTargetSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("unassigned") }).strict(),
   z
