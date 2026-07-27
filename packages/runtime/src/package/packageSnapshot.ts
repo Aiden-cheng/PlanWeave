@@ -129,6 +129,7 @@ export async function restorePackageSnapshot(input: {
   canvasId?: string | null;
   expectedPackageDir?: string;
   snapshot: CapturedPackageSnapshot;
+  beforeCommit?: () => Promise<void> | void;
 }): Promise<void> {
   const snapshot = input.snapshot;
   sourceRevisionSchema.parse(snapshot.sourceRevision);
@@ -176,6 +177,7 @@ export async function restorePackageSnapshot(input: {
       manifestFile: join(staging, "manifest.json")
     };
     await loadPackage(stagedWorkspace);
+    await input.beforeCommit?.();
     await transaction.replacePath(workspace.packageDir, staging);
     await transaction.commit();
   } catch (error) {

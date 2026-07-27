@@ -47,4 +47,25 @@ describe("package snapshots", () => {
       "Test Plan"
     );
   });
+
+  it("runs the before-commit fence after staged validation and preserves the original on failure", async () => {
+    const { root, init } = await createTestWorkspace();
+    roots.push(root);
+    const captured = await capturePackageSnapshot({ projectRoot: root });
+    const beforeCommit = vi.fn(() => {
+      throw new Error("before-commit-failure");
+    });
+    await expect(
+      restorePackageSnapshot({
+        projectRoot: root,
+        expectedPackageDir: init.workspace.packageDir,
+        snapshot: captured.snapshot,
+        beforeCommit
+      })
+    ).rejects.toThrow("before-commit-failure");
+    expect(beforeCommit).toHaveBeenCalledOnce();
+    expect(JSON.parse(await readFile(init.workspace.manifestFile, "utf8")).project.title).toBe(
+      "Test Plan"
+    );
+  });
 });

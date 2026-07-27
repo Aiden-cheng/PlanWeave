@@ -1,6 +1,7 @@
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import * as runtime from "@planweave-ai/runtime";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestWorkspace } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { applyMigrations } from "../migrations.js";
 import { PackageSnapshotRepository } from "../packageSnapshotRepository.js";
@@ -11,6 +12,7 @@ const databases: SqliteDatabase[] = [];
 const directories: string[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const database of databases.splice(0)) database.close();
   await Promise.all(
     directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
@@ -45,7 +47,16 @@ async function fixture() {
     visibility: "shared",
     ownerHumanPrincipalId: "owner"
   });
+  access.registerCanvasInternal({
+    workspaceId: "w",
+    projectId: "p",
+    canvasId: "other",
+    packageDir: workspace.init.workspace.packageDir,
+    visibility: "shared",
+    ownerHumanPrincipalId: "owner"
+  });
   access.markCanvasCutover("w", "p", "default");
+  access.markCanvasCutover("w", "p", "other");
   access.finalizeProjectCutover("w", "p");
   const snapshots = new PackageSnapshotRepository(
     database,
@@ -58,6 +69,14 @@ async function fixture() {
 
 const owner = { kind: "human", id: "owner" } as const;
 const viewer = { kind: "human", id: "viewer" } as const;
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 describe("package snapshot repository", () => {
   it("persists bounded payloads without package paths and restores through ACL", async () => {
@@ -91,6 +110,51 @@ describe("package snapshot repository", () => {
     expect(
       JSON.parse(await readFile(workspace.init.workspace.manifestFile, "utf8")).project.title
     ).toBe("Test Plan");
+  });
+
+  it("does not resolve a snapshot id across projects or canvases", async () => {
+    const { access, snapshots, workspace } = await fixture();
+    access.registerProjectInternal({
+      workspaceId: "w",
+      projectId: "other-project",
+      projectRoot: join(workspace.root, "other-project"),
+      ownerHumanPrincipalId: "owner"
+    });
+    access.registerCanvasInternal({
+      workspaceId: "w",
+      projectId: "other-project",
+      canvasId: "other-canvas",
+      packageDir: join(workspace.root, "other-project", "package"),
+      visibility: "shared",
+      ownerHumanPrincipalId: "owner"
+    });
+    access.markCanvasCutover("w", "other-project", "other-canvas");
+    access.finalizeProjectCutover("w", "other-project");
+    const created = await snapshots.create({
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: "default",
+      actor: owner,
+      expectedAclRevision: 0
+    });
+    expect(() =>
+      snapshots.read({
+        workspaceId: "w",
+        projectId: "p",
+        canvasId: "other",
+        snapshotId: created.snapshot.immutable.snapshotId,
+        actor: owner
+      })
+    ).toThrow("package_snapshot_not_found");
+    expect(() =>
+      snapshots.read({
+        workspaceId: "w",
+        projectId: "other-project",
+        canvasId: "other-canvas",
+        snapshotId: created.snapshot.immutable.snapshotId,
+        actor: owner
+      })
+    ).toThrow("package_snapshot_not_found");
   });
 
   it("rejects viewer mutation, stale ACL, and tampered backing paths", async () => {
@@ -174,6 +238,44 @@ describe("package snapshot repository", () => {
     ).toEqual({ state: "malformed", restore_marker: "none" });
   });
 
+  it("marks snapshots malformed when backing source revision is tampered", async () => {
+    const { database, workspace, snapshots } = await fixture();
+    const created = await snapshots.create({
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: "default",
+      actor: owner,
+      expectedAclRevision: 0
+    });
+    const backing = join(
+      workspace.root,
+      "snapshot-data",
+      "snapshots",
+      created.snapshot.immutable.snapshotId,
+      "package.json"
+    );
+    const payload = JSON.parse(await readFile(backing, "utf8")) as { sourceRevision: string };
+    payload.sourceRevision = "snapshot:tampered-source-revision";
+    await writeFile(backing, JSON.stringify(payload), "utf8");
+    const result = await snapshots.restore({
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: "default",
+      snapshotId: created.snapshot.immutable.snapshotId,
+      actor: owner,
+      expectedAclRevision: 0
+    });
+    expect(result).toMatchObject({
+      outcome: "malformed",
+      detail: "snapshot_source_revision_mismatch"
+    });
+    expect(
+      database
+        .prepare("SELECT state,restore_marker FROM package_snapshots WHERE snapshot_id=?")
+        .get(created.snapshot.immutable.snapshotId)
+    ).toEqual({ state: "malformed", restore_marker: "none" });
+  });
+
   it("blocks revoke while restore is pending and is idempotent afterwards", async () => {
     const { database, snapshots } = await fixture();
     const created = await snapshots.create({
@@ -217,6 +319,203 @@ describe("package snapshot repository", () => {
         expectedAclRevision: 0
       })
     ).resolves.toBeUndefined();
+  });
+
+  it("fences project and canvas grant revocation while a restore lease is pending", async () => {
+    const { access, database, snapshots } = await fixture();
+    const created = await snapshots.create({
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: "default",
+      actor: owner,
+      expectedAclRevision: 0
+    });
+    const projectGrant = access.grant({
+      workspaceId: "w",
+      projectId: "p",
+      humanPrincipalId: "viewer",
+      role: "viewer",
+      grantedBy: owner
+    });
+    const canvasGrant = access.grant({
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: "default",
+      humanPrincipalId: "viewer",
+      role: "viewer",
+      grantedBy: owner
+    });
+    database
+      .prepare("UPDATE package_snapshots SET restore_marker='restore_pending' WHERE snapshot_id=?")
+      .run(created.snapshot.immutable.snapshotId);
+    expect(() =>
+      access.revoke({
+        workspaceId: "w",
+        projectId: "p",
+        canvasId: null,
+        grantId: projectGrant.grantId,
+        actor: owner,
+        expectedAclRevision: 1
+      })
+    ).toThrow("snapshot_restore_pending");
+    expect(() =>
+      access.revoke({
+        workspaceId: "w",
+        projectId: "p",
+        canvasId: "default",
+        grantId: canvasGrant.grantId,
+        actor: owner,
+        expectedAclRevision: 1
+      })
+    ).toThrow("snapshot_restore_pending");
+  });
+
+  it("blocks a concurrent project revoke at the before-commit fence and then restores", async () => {
+    const { access, database, snapshots } = await fixture();
+    const created = await snapshots.create({
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: "default",
+      actor: owner,
+      expectedAclRevision: 0
+    });
+    const projectGrant = access.grant({
+      workspaceId: "w",
+      projectId: "p",
+      humanPrincipalId: "viewer",
+      role: "viewer",
+      grantedBy: owner
+    });
+    database
+      .prepare(
+        "UPDATE package_snapshots SET restore_marker='none',state='available' WHERE snapshot_id=?"
+      )
+      .run(created.snapshot.immutable.snapshotId);
+    const entered = deferred<void>();
+    const release = deferred<void>();
+    const originalRestore = runtime.restorePackageSnapshot;
+    const restoreSpy = vi
+      .spyOn(runtime, "restorePackageSnapshot")
+      .mockImplementation(async (restoreInput) => {
+        const beforeCommit = restoreInput.beforeCommit;
+        return originalRestore({
+          ...restoreInput,
+          beforeCommit: async () => {
+            entered.resolve();
+            await release.promise;
+            await beforeCommit?.();
+          }
+        });
+      });
+    try {
+      const restorePromise = snapshots.restore({
+        workspaceId: "w",
+        projectId: "p",
+        canvasId: "default",
+        snapshotId: created.snapshot.immutable.snapshotId,
+        actor: owner,
+        expectedAclRevision: 0
+      });
+      await entered.promise;
+      expect(() =>
+        access.revoke({
+          workspaceId: "w",
+          projectId: "p",
+          canvasId: null,
+          grantId: projectGrant.grantId,
+          actor: owner,
+          expectedAclRevision: 1
+        })
+      ).toThrow("snapshot_restore_pending");
+      release.resolve();
+      await expect(restorePromise).resolves.toMatchObject({ outcome: "restored" });
+    } finally {
+      restoreSpy.mockRestore();
+    }
+  });
+
+  it("returns a conflict when ACL revision changes before commit and keeps the package", async () => {
+    const { access, snapshots, workspace } = await fixture();
+    const created = await snapshots.create({
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: "default",
+      actor: owner,
+      expectedAclRevision: 0
+    });
+    const originalManifest = await readFile(workspace.init.workspace.manifestFile, "utf8");
+    await writeFile(workspace.init.workspace.manifestFile, "{}", "utf8");
+    const entered = deferred<void>();
+    const release = deferred<void>();
+    const originalRestore = runtime.restorePackageSnapshot;
+    const restoreSpy = vi
+      .spyOn(runtime, "restorePackageSnapshot")
+      .mockImplementation(async (restoreInput) => {
+        const beforeCommit = restoreInput.beforeCommit;
+        return originalRestore({
+          ...restoreInput,
+          beforeCommit: async () => {
+            entered.resolve();
+            await release.promise;
+            await beforeCommit?.();
+          }
+        });
+      });
+    try {
+      const restorePromise = snapshots.restore({
+        workspaceId: "w",
+        projectId: "p",
+        canvasId: "default",
+        snapshotId: created.snapshot.immutable.snapshotId,
+        actor: owner,
+        expectedAclRevision: 0
+      });
+      await entered.promise;
+      access.grant({
+        workspaceId: "w",
+        projectId: "p",
+        canvasId: "default",
+        humanPrincipalId: "viewer",
+        role: "viewer",
+        grantedBy: owner
+      });
+      release.resolve();
+      await expect(restorePromise).resolves.toMatchObject({
+        outcome: "conflict",
+        detail: "stale_acl_revision"
+      });
+      expect(await readFile(workspace.init.workspace.manifestFile, "utf8")).toBe("{}");
+      expect(originalManifest).not.toBe("{}");
+    } finally {
+      restoreSpy.mockRestore();
+    }
+  });
+
+  it("clears the restore lease after a runtime restore failure", async () => {
+    const { database, snapshots } = await fixture();
+    const created = await snapshots.create({
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: "default",
+      actor: owner,
+      expectedAclRevision: 0
+    });
+    vi.spyOn(runtime, "restorePackageSnapshot").mockRejectedValue(new Error("restore-failure"));
+    await expect(
+      snapshots.restore({
+        workspaceId: "w",
+        projectId: "p",
+        canvasId: "default",
+        snapshotId: created.snapshot.immutable.snapshotId,
+        actor: owner,
+        expectedAclRevision: 0
+      })
+    ).resolves.toMatchObject({ outcome: "malformed", detail: "snapshot_restore_failed" });
+    expect(
+      database
+        .prepare("SELECT state,restore_marker FROM package_snapshots WHERE snapshot_id=?")
+        .get(created.snapshot.immutable.snapshotId)
+    ).toEqual({ state: "available", restore_marker: "none" });
   });
 
   it("retains the newest bounded snapshots with a fixed clock", async () => {

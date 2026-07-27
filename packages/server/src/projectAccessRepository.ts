@@ -298,6 +298,25 @@ export class ProjectAccessRepository {
           return this.grantFromRow(row);
         throw new Error("access_grant_stale_revision");
       }
+      const pendingSnapshot =
+        row.scope_kind === "canvas"
+          ? this.database
+              .prepare(
+                `SELECT snapshot_id FROM package_snapshots
+                 WHERE workspace_id=? AND project_id=? AND canvas_id=?
+                   AND state='available' AND restore_marker='restore_pending'
+                 LIMIT 1`
+              )
+              .get(input.workspaceId, input.projectId, row.canvas_id)
+          : this.database
+              .prepare(
+                `SELECT snapshot_id FROM package_snapshots
+                 WHERE workspace_id=? AND project_id=?
+                   AND state='available' AND restore_marker='restore_pending'
+                 LIMIT 1`
+              )
+              .get(input.workspaceId, input.projectId);
+      if (pendingSnapshot) throw new Error("snapshot_restore_pending");
       if (!scope || Number(scope.acl_revision) !== expected)
         throw new Error("access_grant_stale_revision");
       const at = this.clock().toISOString();

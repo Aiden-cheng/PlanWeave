@@ -327,8 +327,61 @@ export class PackageSnapshotRepository {
         restoredAt: null,
         detail: "restore_pending"
       });
-    const location = this.access.resolveAuthorizedCanvas(input);
+
+    const recoverMarker = (state: "available" | "malformed"): boolean => {
+      try {
+        const recovered = this.database
+          .prepare(
+            `UPDATE package_snapshots SET state=?,restore_marker='none',updated_at=?
+             WHERE snapshot_id=? AND workspace_id=? AND project_id=? AND canvas_id=?
+               AND state='available' AND restore_marker='restore_pending'`
+          )
+          .run(
+            state,
+            this.clock().toISOString(),
+            input.snapshotId,
+            input.workspaceId,
+            input.projectId,
+            input.canvasId
+          );
+        return recovered.changes === 1;
+      } catch {
+        return false;
+      }
+    };
+
+    const resultAfterFailure = (input: {
+      outcome: "conflict" | "malformed";
+      detail: string;
+      state: "available" | "malformed";
+      aggregate: boolean;
+    }): RestorePackageSnapshotResult => {
+      const recovered = input.aggregate ? false : recoverMarker(input.state);
+      return restorePackageSnapshotResultSchema.parse({
+        ...base,
+        outcome: recovered && !input.aggregate ? input.outcome : "malformed",
+        migrationMarker: snapshot.immutable.migrationMarker,
+        sourceRevision: snapshot.immutable.sourceRevision,
+        restoredAt: null,
+        detail: recovered && !input.aggregate ? input.detail : "snapshot_restore_recovery_required"
+      });
+    };
+
+    let location: ReturnType<ProjectAccessRepository["resolveAuthorizedCanvas"]>;
     let captured: CapturedPackageSnapshot;
+    try {
+      location = this.access.resolveAuthorizedCanvas(input);
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "";
+      return resultAfterFailure({
+        outcome: code.startsWith("canvas_access_denied:") ? "conflict" : "malformed",
+        detail: code.startsWith("canvas_access_denied:")
+          ? "canvas_access_denied"
+          : "snapshot_restore_location_failed",
+        state: "available",
+        aggregate: false
+      });
+    }
     try {
       const expectedBackingRoot = backingPath(this.dataDirectory, input.snapshotId);
       if (String(row.content_root_internal) !== expectedBackingRoot)
@@ -338,34 +391,30 @@ export class PackageSnapshotRepository {
       if (metadata.size > maxBackingBytes) throw new Error("snapshot_backing_too_large");
       captured = capturedSnapshotSchema.parse(JSON.parse(await readFile(packageFile, "utf8")));
       if (
+        captured.sourceRevision !== String(row.source_revision) ||
         fingerprint(captured.digestManifest) !== row.digest_fingerprint ||
         stableStringify(captured.digestManifest) !== row.digest_manifest_json
       )
-        throw new Error("snapshot_digest_mismatch");
-    } catch (error) {
-      const code =
-        error instanceof Error &&
-        ["snapshot_backing_too_large", "snapshot_digest_mismatch"].includes(error.message)
-          ? error.message
-          : "snapshot_backing_missing";
-      this.database
-        .prepare(
-          "UPDATE package_snapshots SET state='malformed',restore_marker='none',updated_at=? WHERE snapshot_id=? AND workspace_id=? AND project_id=? AND canvas_id=? AND state='available'"
-        )
-        .run(
-          this.clock().toISOString(),
-          input.snapshotId,
-          input.workspaceId,
-          input.projectId,
-          input.canvasId
+        throw new Error(
+          captured.sourceRevision !== String(row.source_revision)
+            ? "snapshot_source_revision_mismatch"
+            : "snapshot_digest_mismatch"
         );
-      return restorePackageSnapshotResultSchema.parse({
-        ...base,
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "";
+      const detail = [
+        "snapshot_backing_too_large",
+        "snapshot_source_revision_mismatch",
+        "snapshot_digest_mismatch",
+        "snapshot_backing_mismatch"
+      ].includes(code)
+        ? code
+        : "snapshot_backing_missing";
+      return resultAfterFailure({
         outcome: "malformed",
-        migrationMarker: snapshot.immutable.migrationMarker,
-        sourceRevision: snapshot.immutable.sourceRevision,
-        restoredAt: null,
-        detail: code
+        detail,
+        state: "malformed",
+        aggregate: false
       });
     }
     try {
@@ -373,29 +422,49 @@ export class PackageSnapshotRepository {
         projectRoot: location.projectRoot,
         canvasId: input.canvasId,
         expectedPackageDir: location.packageDir,
-        snapshot: captured
+        snapshot: captured,
+        beforeCommit: () => {
+          const currentDecision = this.access.decideCanvasAccess(input);
+          if (currentDecision.decision !== "allow")
+            throw new Error("snapshot_restore_authorization_conflict");
+          try {
+            this.access.policy.assertCanManage({
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              canvasId: input.canvasId,
+              actor: input.actor
+            });
+          } catch {
+            throw new Error("snapshot_restore_authorization_conflict");
+          }
+          if (currentDecision.aclRevision !== input.expectedAclRevision)
+            throw new Error("snapshot_restore_acl_conflict");
+        }
       });
     } catch (error) {
-      if (!(error instanceof AggregateError)) {
-        this.database
-          .prepare(
-            "UPDATE package_snapshots SET restore_marker='none',updated_at=? WHERE snapshot_id=? AND workspace_id=? AND project_id=? AND canvas_id=? AND restore_marker='restore_pending'"
-          )
-          .run(
-            this.clock().toISOString(),
-            input.snapshotId,
-            input.workspaceId,
-            input.projectId,
-            input.canvasId
-          );
+      const aggregate = error instanceof AggregateError;
+      const code = error instanceof Error ? error.message : "";
+      if (code === "snapshot_restore_authorization_conflict") {
+        return resultAfterFailure({
+          outcome: "conflict",
+          detail: "authorization_changed",
+          state: "available",
+          aggregate
+        });
       }
-      return restorePackageSnapshotResultSchema.parse({
-        ...base,
+      if (code === "snapshot_restore_acl_conflict") {
+        return resultAfterFailure({
+          outcome: "conflict",
+          detail: "stale_acl_revision",
+          state: "available",
+          aggregate
+        });
+      }
+      return resultAfterFailure({
         outcome: "malformed",
-        migrationMarker: snapshot.immutable.migrationMarker,
-        sourceRevision: snapshot.immutable.sourceRevision,
-        restoredAt: null,
-        detail: "snapshot_restore_failed"
+        detail: "snapshot_restore_failed",
+        state: "available",
+        aggregate
       });
     }
     const restoredAt = this.clock().toISOString();
