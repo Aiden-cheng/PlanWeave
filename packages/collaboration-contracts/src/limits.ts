@@ -85,6 +85,33 @@ export const CANVAS_PRESENCE_MAX_SESSIONS_PER_CANVAS = 32 as const;
 export const CANVAS_PRESENCE_MAX_UPDATES_PER_SECOND = 30 as const;
 export const CANVAS_PRESENCE_SESSION_TTL_MS = 15_000 as const;
 
+/**
+ * Durable server-authoritative Canvas command / journal / snapshot budgets.
+ * Presence limits above are independent and must not be reused as mutation cursors.
+ */
+export const CANVAS_COMMAND_PROTOCOL_VERSION = 1 as const;
+/** Max UTF-16 code units for one command/journal/reconnect wire frame. */
+export const CANVAS_COMMAND_MAX_FRAME_BYTES = 1_048_576 as const;
+export const CANVAS_COMMAND_MAX_PROMPT_MARKDOWN_CHARS = 262_144 as const;
+export const CANVAS_COMMAND_MAX_TITLE_LENGTH = 256 as const;
+export const CANVAS_COMMAND_MAX_ACCEPTANCE_ITEMS = 64 as const;
+export const CANVAS_COMMAND_MAX_ACCEPTANCE_ITEM_LENGTH = 512 as const;
+export const CANVAS_COMMAND_MAX_DEPENDS_ON = 128 as const;
+export const CANVAS_COMMAND_MAX_BULK_UPDATES = 64 as const;
+export const CANVAS_COMMAND_MAX_LAYOUT_NODES = 512 as const;
+export const CANVAS_COMMAND_MAX_BLOCK_PROMPT_ENTRIES = 64 as const;
+export const CANVAS_COMMAND_MAX_SHARED_RESOURCES = 32 as const;
+export const CANVAS_COMMAND_MAX_SHARED_RESOURCE_LENGTH = 128 as const;
+export const CANVAS_COMMAND_MAX_CAPABILITIES = 32 as const;
+export const CANVAS_COMMAND_MAX_CAPABILITY_LENGTH = 128 as const;
+export const CANVAS_COMMAND_MAX_REASON_LENGTH = 512 as const;
+/** Max journal entries returned in one reconnect delta response. */
+export const CANVAS_COMMAND_MAX_JOURNAL_DELTA_ENTRIES = 256 as const;
+/** Contract-level retention bound for Server journal policy documentation/tests. */
+export const CANVAS_COMMAND_MAX_JOURNAL_RETAINED = 10_000 as const;
+/** Coordinate bounds for layout nodes on the shared canvas (same scale as presence). */
+export const CANVAS_COMMAND_LAYOUT_COORDINATE_ABS_MAX = CANVAS_PRESENCE_COORDINATE_ABS_MAX;
+
 /** Default HTTPS request timeout. */
 export const COLLABORATION_REQUEST_TIMEOUT_MS = 30_000 as const;
 

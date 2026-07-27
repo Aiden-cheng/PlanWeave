@@ -13,6 +13,12 @@ import {
   opaqueIdentifierSchema
 } from "./primitives.js";
 
+/**
+ * Ephemeral multi-cursor / selection presence only.
+ * Messages never carry operationId, expectedRevision, journal entries, content digests,
+ * or durable graph mutation intents. Durable shared Canvas edits use `canvasCommands.ts`.
+ */
+
 export const canvasPresenceProtocolVersionSchema = z.literal(CANVAS_PRESENCE_PROTOCOL_VERSION);
 
 export const canvasPresenceSessionIdSchema = opaqueIdentifierSchema.brand(

@@ -40,6 +40,16 @@ import {
 import { canvasAccessRecordSchema, projectAccessRecordSchema } from "../projectAccess.js";
 import { packageSnapshotSchema } from "../packageSnapshot.js";
 import { humanDeviceTokenSchema, projectInvitationTokenSchema } from "../primitives.js";
+import {
+  canvasCommandAcceptedSchema,
+  canvasCommandRejectedSchema,
+  canvasCommandSubmitSchema,
+  canvasJournalEntrySchema,
+  canvasReconnectDeltaSchema,
+  canvasReconnectRequestSchema,
+  canvasReconnectSnapshotSchema,
+  canvasSnapshotContentSchema
+} from "../canvasCommands.js";
 
 /** Deterministic 43-char base64url secret segment (test-only; not a real secret). */
 const SECRET_SEGMENT = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -455,6 +465,163 @@ export const exampleObserverCatchupRequired = humanObserverCatchupRequiredSchema
   reason: "retention_gap",
   resumeCursor: 100,
   droppedThroughCursor: 50
+});
+
+const canvasDigestA = "a".repeat(64);
+const canvasDigestB = "b".repeat(64);
+const canvasDigestC = "c".repeat(64);
+
+const exampleCanvasAuthorizedScope = {
+  workspaceId: "workspace-demo-001",
+  projectId: "project-demo-001",
+  canvasId: "canvas-default"
+} as const;
+
+const exampleCanvasIntent = {
+  kind: "update_task_prompt" as const,
+  taskId: "task-1",
+  promptMarkdown: "# Updated task prompt"
+};
+
+/** Happy-path client submit (no actor / auth / path / revision override). */
+export const exampleCanvasCommandSubmit = canvasCommandSubmitSchema.parse({
+  type: "canvas.command.submit",
+  protocolVersion: 1,
+  schemaVersion: "canvas-command/v1",
+  projectId: "project-demo-001",
+  canvasId: "canvas-default",
+  operationId: "op-canvas-001",
+  expectedRevision: 3,
+  intent: exampleCanvasIntent
+});
+
+export const exampleCanvasCommandAccepted = canvasCommandAcceptedSchema.parse({
+  type: "canvas.command.accepted",
+  protocolVersion: 1,
+  schemaVersion: "canvas-command/v1",
+  scope: exampleCanvasAuthorizedScope,
+  operationId: "op-canvas-001",
+  revision: 4,
+  previousRevision: 3,
+  contentDigest: canvasDigestB,
+  journalEntryId: "journal-entry-004",
+  actor: { kind: "human", id: "human-owner-001", displayName: "Owner" },
+  acceptedAt: "2030-01-01T00:04:00.000Z",
+  idempotentReplay: false
+});
+
+/** Duplicate operationId with identical intent → same accepted outcome, replay flag set. */
+export const exampleCanvasCommandDuplicateOperationIdReplay = canvasCommandAcceptedSchema.parse({
+  ...exampleCanvasCommandAccepted,
+  idempotentReplay: true
+});
+
+/** Stale expectedRevision CAS rejection with authoritative conflict details. */
+export const exampleCanvasCommandStaleRevisionRejected = canvasCommandRejectedSchema.parse({
+  type: "canvas.command.rejected",
+  protocolVersion: 1,
+  schemaVersion: "canvas-command/v1",
+  projectId: "project-demo-001",
+  canvasId: "canvas-default",
+  operationId: "op-canvas-stale-001",
+  code: "stale_revision",
+  conflict: {
+    expectedRevision: 2,
+    authoritativeRevision: 4,
+    authoritativeContentDigest: canvasDigestB
+  }
+});
+
+/** ACL denial after Server authorization (client never supplies actor). */
+export const exampleCanvasCommandRejectedAcl = canvasCommandRejectedSchema.parse({
+  type: "canvas.command.rejected",
+  protocolVersion: 1,
+  schemaVersion: "canvas-command/v1",
+  projectId: "project-demo-001",
+  canvasId: "canvas-default",
+  operationId: "op-canvas-acl-001",
+  code: "forbidden",
+  detail: "canvas_write_denied"
+});
+
+export const exampleCanvasJournalEntry = canvasJournalEntrySchema.parse({
+  schemaVersion: "canvas-journal/v1",
+  entryId: "journal-entry-004",
+  scope: exampleCanvasAuthorizedScope,
+  revision: 4,
+  previousRevision: 3,
+  operationId: "op-canvas-001",
+  intent: exampleCanvasIntent,
+  intentDigest: canvasDigestC,
+  contentDigest: canvasDigestB,
+  actor: { kind: "human", id: "human-owner-001", displayName: "Owner" },
+  acceptedAt: "2030-01-01T00:04:00.000Z"
+});
+
+/** Journal truncated: client afterRevision is before retained history → full snapshot. */
+export const exampleCanvasReconnectTruncatedJournal = canvasReconnectSnapshotSchema.parse({
+  type: "canvas.reconnect.snapshot",
+  protocolVersion: 1,
+  schemaVersion: "canvas-command/v1",
+  scope: exampleCanvasAuthorizedScope,
+  reason: "truncated_journal",
+  afterRevision: 1,
+  snapshot: canvasSnapshotContentSchema.parse({
+    metadata: {
+      schemaVersion: "canvas-snapshot/v1",
+      scope: exampleCanvasAuthorizedScope,
+      revision: 4,
+      contentDigest: canvasDigestB,
+      createdAt: "2030-01-01T00:04:00.000Z",
+      packageSnapshotId: "snapshot-demo-001",
+      sizeBytes: 4096
+    },
+    encoding: "package_snapshot_ref",
+    packageSnapshotId: "snapshot-demo-001"
+  })
+});
+
+/** Malformed snapshot fixture for negative Server recovery tests (invalid digest length). */
+export const exampleCanvasMalformedSnapshotInput = {
+  type: "canvas.reconnect.snapshot",
+  protocolVersion: 1,
+  schemaVersion: "canvas-command/v1",
+  scope: exampleCanvasAuthorizedScope,
+  reason: "digest_mismatch",
+  afterRevision: 0,
+  snapshot: {
+    metadata: {
+      schemaVersion: "canvas-snapshot/v1",
+      scope: exampleCanvasAuthorizedScope,
+      revision: 4,
+      contentDigest: "not-a-sha256",
+      createdAt: "2030-01-01T00:04:00.000Z"
+    },
+    encoding: "package_snapshot_ref",
+    packageSnapshotId: "snapshot-demo-001"
+  }
+} as const;
+
+/** Reconnect after disconnect with contiguous journal delta. */
+export const exampleCanvasReconnectAfterDisconnect = canvasReconnectDeltaSchema.parse({
+  type: "canvas.reconnect.delta",
+  protocolVersion: 1,
+  schemaVersion: "canvas-command/v1",
+  scope: exampleCanvasAuthorizedScope,
+  afterRevision: 3,
+  headRevision: 4,
+  headContentDigest: canvasDigestB,
+  entries: [exampleCanvasJournalEntry]
+});
+
+export const exampleCanvasReconnectRequest = canvasReconnectRequestSchema.parse({
+  type: "canvas.reconnect.request",
+  protocolVersion: 1,
+  schemaVersion: "canvas-command/v1",
+  projectId: "project-demo-001",
+  canvasId: "canvas-default",
+  afterRevision: 3,
+  afterContentDigest: canvasDigestA
 });
 
 /** Fixtures that must never appear in redacted logs. */
