@@ -28,6 +28,11 @@ export {
   undoDesktopPlanGraphCommand,
   validateGraphEdit
 } from "./graph/editModel.js";
+/** Narrow Server collaboration port; re-exported for desktop/shared adapter discovery. */
+export {
+  applyAuthorizedCanvasCommand,
+  readAuthorizedCanvasContentDigest
+} from "../graph/canvasCommandPort.js";
 export {
   getBlockDetail,
   getGraphViewModel,

@@ -177,6 +177,15 @@ export {
   updatePromptSurface
 } from "./graph/editGraph.js";
 export {
+  applyAuthorizedCanvasCommand,
+  contentDigestFromManifest,
+  readAuthorizedCanvasContentDigest,
+  type ApplyAuthorizedCanvasCommandFailure,
+  type ApplyAuthorizedCanvasCommandInput,
+  type ApplyAuthorizedCanvasCommandResult,
+  type ApplyAuthorizedCanvasCommandSuccess
+} from "./graph/canvasCommandPort.js";
+export {
   createPackageFileSnapshot,
   detectPackageFileChanges,
   refreshChangedPackagePrompts

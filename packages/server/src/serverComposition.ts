@@ -68,6 +68,14 @@ import {
   attachCanvasPresenceWebSocketServer,
   type CanvasPresenceWebSocketServer
 } from "./presenceWebSocket.js";
+import {
+  attachCanvasCommandWebSocketServer,
+  CanvasCommandRepository,
+  CanvasCommandService,
+  createDefaultCanvasRuntimePort,
+  handleCanvasCommandHttpRequest,
+  type CanvasCommandWebSocketServer
+} from "./canvas/index.js";
 import { WebSocketUpgradeRouter } from "./webSocketUpgradeRouter.js";
 import {
   createActiveDispatchResolver,
@@ -120,6 +128,7 @@ async function drainCompositionTransports(input: {
   webSockets?: AgentHostWebSocketServer;
   humanObserverWebSockets?: HumanObserverWebSocketServer;
   canvasPresenceWebSockets?: CanvasPresenceWebSocketServer;
+  canvasCommandWebSockets?: CanvasCommandWebSocketServer;
   upgradeRouter?: WebSocketUpgradeRouter;
   inflightRequests: ReadonlySet<Promise<void>>;
   shutdownTimeoutMs: number;
@@ -138,6 +147,11 @@ async function drainCompositionTransports(input: {
   }
   try {
     await input.canvasPresenceWebSockets?.close();
+  } catch (error) {
+    errors.push(error);
+  }
+  try {
+    await input.canvasCommandWebSockets?.close();
   } catch (error) {
     errors.push(error);
   }
@@ -243,6 +257,7 @@ export async function createDistributedServerComposition(
   let webSockets: AgentHostWebSocketServer | undefined;
   let humanObserverWebSockets: HumanObserverWebSocketServer | undefined;
   let canvasPresenceWebSockets: CanvasPresenceWebSocketServer | undefined;
+  let canvasCommandWebSockets: CanvasCommandWebSocketServer | undefined;
   let upgradeRouter: WebSocketUpgradeRouter | undefined;
   let requestListener: ((request: IncomingMessage, response: ServerResponse) => void) | undefined;
   let humanIdentityForInteractions: HumanIdentityRepository | undefined;
@@ -693,6 +708,25 @@ export async function createDistributedServerComposition(
       allowInsecureTransport: config.allowInsecureDevelopment,
       clock
     });
+    const canvasCommandRepository = new CanvasCommandRepository(server.database, { clock });
+    const canvasCommandService = new CanvasCommandService({
+      repository: canvasCommandRepository,
+      access: initializedProjectAccess,
+      workspaceIdentity,
+      runtime: createDefaultCanvasRuntimePort(),
+      clock
+    });
+    canvasCommandService.recoverInterrupted();
+    canvasCommandWebSockets = attachCanvasCommandWebSocketServer({
+      upgradeRouter,
+      service: canvasCommandService,
+      repository: humanIdentity,
+      projectAuthority: runtimeRegistry,
+      maxPayloadBytes: config.limits.maxWebSocketPayloadBytes,
+      shutdownTimeoutMs: config.limits.shutdownTimeoutMs,
+      allowInsecureTransport: config.allowInsecureDevelopment,
+      clock
+    });
     const attachedWebSockets = webSockets;
     const control = new RemoteControlService({
       authorization,
@@ -758,6 +792,17 @@ export async function createDistributedServerComposition(
           await handleWorkAssignmentHttpRequest(request, response, {
             resolveService: (projectId) => assignmentServices.get(projectId),
             acquireAuthorityService,
+            repository: humanIdentity,
+            projectAuthority: runtimeRegistry,
+            allowInsecureDevelopment: config.allowInsecureDevelopment,
+            clock
+          })
+        ) {
+          return;
+        }
+        if (
+          await handleCanvasCommandHttpRequest(request, response, {
+            service: canvasCommandService,
             repository: humanIdentity,
             projectAuthority: runtimeRegistry,
             allowInsecureDevelopment: config.allowInsecureDevelopment,
@@ -865,6 +910,7 @@ export async function createDistributedServerComposition(
         webSockets: attachedWebSockets,
         humanObserverWebSockets,
         canvasPresenceWebSockets,
+        canvasCommandWebSockets,
         upgradeRouter,
         inflightRequests,
         shutdownTimeoutMs: config.limits.shutdownTimeoutMs
@@ -925,6 +971,7 @@ export async function createDistributedServerComposition(
         webSockets,
         humanObserverWebSockets,
         canvasPresenceWebSockets,
+        canvasCommandWebSockets,
         upgradeRouter,
         inflightRequests,
         shutdownTimeoutMs: config.limits.shutdownTimeoutMs

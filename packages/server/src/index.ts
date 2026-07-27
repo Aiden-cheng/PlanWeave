@@ -495,6 +495,20 @@ export {
   type CommentTombstoneDecision
 } from "./comments/index.js";
 export {
+  CanvasCommandRepository,
+  CanvasCommandService,
+  attachCanvasCommandWebSocketServer,
+  createDefaultCanvasRuntimePort,
+  handleCanvasCommandHttpRequest,
+  routeCanvasCommandHttp,
+  type CanvasCommandHttpOptions,
+  type CanvasCommandServiceOptions,
+  type CanvasCommandWebSocketOptions,
+  type CanvasCommandWebSocketServer,
+  type CanvasRuntimeMutationPort,
+  type CanvasScopeKey
+} from "./canvas/index.js";
+export {
   ATTACHMENT_ERROR_MESSAGES,
   AttachmentRepositoryError,
   CommentAttachmentBlobStore,

@@ -1,0 +1,34 @@
+export {
+  CANVAS_COMMAND_HTTP_BODY_MAX_BYTES,
+  CANVAS_COMMAND_JOURNAL_RETAINED_DEFAULT,
+  CANVAS_COMMAND_RATE_MAX_REQUESTS,
+  CANVAS_COMMAND_RATE_WINDOW_MS,
+  CANVAS_COMMAND_RECONNECT_DELTA_MAX,
+  CANVAS_COMMAND_SNAPSHOT_EVERY_REVISION,
+  CANVAS_COMMAND_SNAPSHOT_RETAINED_DEFAULT,
+  CANVAS_COMMAND_WS_MAX_FRAME_BYTES
+} from "./limits.js";
+export { authorizeCanvasRead, authorizeCanvasWrite } from "./policy.js";
+export {
+  CanvasCommandRepository,
+  digestCanvasIntent,
+  rejectedOutcome,
+  type CanvasHead,
+  type CanvasOperationRecord,
+  type CanvasScopeKey
+} from "./repository.js";
+export {
+  createDefaultCanvasRuntimePort,
+  type CanvasRuntimeMutationPort
+} from "./runtimePort.js";
+export { CanvasCommandService, type CanvasCommandServiceOptions } from "./service.js";
+export {
+  handleCanvasCommandHttpRequest,
+  routeCanvasCommandHttp,
+  type CanvasCommandHttpOptions
+} from "./http.js";
+export {
+  attachCanvasCommandWebSocketServer,
+  type CanvasCommandWebSocketOptions,
+  type CanvasCommandWebSocketServer
+} from "./ws.js";
