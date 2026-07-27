@@ -463,13 +463,16 @@ export function assertHumanDisplayDtoRedacted(value: unknown): void {
 }
 
 export function assertWorkspaceIdentityViewRedacted(value: unknown): void {
-  const text = JSON.stringify(value);
-  if (
-    /(?:credential|token|secret|password)(?:Sha256|Hash|Token)?/i.test(text) ||
-    /(?:projectRoot|executable|command|args|environment|env)/i.test(text)
-  ) {
-    throw new Error("workspace_identity_view_not_redacted");
-  }
+  const forbiddenKey = /^(?:credential(?:Sha256|Hash|Token)|credential[_-](?:sha256|hash|token)|token(?:Sha256|Hash|Token)?|token[_-](?:sha256|hash|token)|secret|password|enrollment(?:Code|Hash)|enrollment[_-](?:code|hash)|projectRoot|executable|command|args|environment|env)$/i;
+  const visit = (current: unknown): boolean => {
+    if (Array.isArray(current)) return current.some(visit);
+    if (!current || typeof current !== "object") return false;
+    return Object.entries(current).some(([key, nested]) => {
+      if (forbiddenKey.test(key)) return true;
+      return visit(nested);
+    });
+  };
+  if (visit(value)) throw new Error("workspace_identity_view_not_redacted");
 }
 
 export type IdentityCredentialUsability =

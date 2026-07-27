@@ -23,8 +23,10 @@ import { handleHostEnrollmentRequest } from "./hostEnrollmentHttp.js";
 import {
   handleHumanHttpRequest,
   HumanIdentityRepository,
-  HumanMembershipService
+  HumanMembershipService,
+  handleWorkspaceIdentityHttpRequest
 } from "./identity/index.js";
+import { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
 import { OperatorTokenRegistry } from "./operatorAuth.js";
 import { handleOperatorHttpRequest } from "./operatorHttp.js";
 import { serverPackageVersion } from "./packageInfo.js";
@@ -326,6 +328,10 @@ export async function createDistributedServerComposition(
     const schemaVersion = server.readiness().schemaVersion;
     readiness.transition("reconciling", schemaVersion);
     const enrollments = new HostEnrollmentService(server.database, clock);
+    const workspaceIdentity = new WorkspaceIdentityRepository(server.database);
+    for (const { projectId } of runtimeRegistry.locators) {
+      workspaceIdentity.ensureWorkspaceForLegacyProject(projectId);
+    }
     const humanIdentity = new HumanIdentityRepository(server.database, clock, {
       onMembershipTransitionInTransaction: ({ type, membership, principal }) => {
         initializedActivityProjection.projectMembershipEventInCallerTransaction({
@@ -465,6 +471,7 @@ export async function createDistributedServerComposition(
       events: coordination.acpEvents,
       interactions: coordination.interactions,
       disconnectHost: (hostId) => attachedWebSockets.disconnectHost(hostId),
+      workspaceIdentity,
       hostOfflineAfterMs: config.limits.hostOfflineAfterMs,
       clock
     });
@@ -552,6 +559,15 @@ export async function createDistributedServerComposition(
             projectAuthority: runtimeRegistry,
             allowInsecureDevelopment: config.allowInsecureDevelopment,
             clock
+          })
+        ) {
+          return;
+        }
+        if (
+          await handleWorkspaceIdentityHttpRequest(request, response, {
+            authorization,
+            repository: workspaceIdentity,
+            allowInsecureDevelopment: config.allowInsecureDevelopment
           })
         ) {
           return;

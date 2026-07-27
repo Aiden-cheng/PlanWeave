@@ -149,11 +149,13 @@ export {
   toInvitationView,
   toMembershipView,
   toPrincipalView,
+  workspaceIdentityReadModelSchema,
   type HumanDeviceTokenHandoff,
   type HumanDeviceView,
   type HumanInvitationView,
   type HumanMembershipView,
-  type HumanPrincipalView
+  type HumanPrincipalView,
+  type WorkspaceIdentityReadModel
 } from "./dtos.js";
 
 export {
@@ -163,3 +165,11 @@ export {
   resetHumanHttpRateLimits,
   type HumanHttpOptions
 } from "./http.js";
+export {
+  handleWorkspaceIdentityHttpRequest,
+  type WorkspaceIdentityHttpOptions
+} from "./workspaceIdentityHttp.js";
+export {
+  WorkspaceIdentityRepository,
+  type WorkspaceIdentityReadState
+} from "./workspaceRepository.js";

@@ -102,6 +102,12 @@ describe("Workspace identity contracts", () => {
 
   it("keeps trust domains separate and only exposes redacted views", () => {
     expect(() =>
+      assertWorkspaceIdentityViewRedacted({
+        workspaceId: exampleWorkspace.workspaceId,
+        credentialExpiresAt: "2030-01-02T00:00:00.000Z"
+      })
+    ).not.toThrow();
+    expect(() =>
       agentHostCredentialBindingSchema.parse({
         schemaVersion: "workspace-identity/v1",
         workspaceId: exampleWorkspace.workspaceId,
@@ -110,18 +116,20 @@ describe("Workspace identity contracts", () => {
         credentialExpiresAt: "2030-01-02T00:00:00.000Z"
       })
     ).toThrow();
-    expect(() =>
-      assertWorkspaceIdentityViewRedacted({
-        workspaceId: exampleWorkspace.workspaceId,
-        credentialSha256: "a".repeat(64)
-      })
-    ).toThrow("workspace_identity_view_not_redacted");
-    expect(() =>
-      assertWorkspaceIdentityViewRedacted({
-        workspaceId: exampleWorkspace.workspaceId,
-        projectRoot: "workspace-root"
-      })
-    ).toThrow("workspace_identity_view_not_redacted");
+    for (const value of [
+      { credentialSha256: "a".repeat(64) },
+      { nested: { credential_hash: "a".repeat(64) } },
+      { credentialToken: `pw_host_${"A".repeat(43)}` },
+      { enrollmentCode: `pw_enroll_${"A".repeat(43)}` },
+      { projectRoot: "workspace-root" },
+      { command: "codex" },
+      { args: ["--version"] },
+      { environment: { HOME: "/tmp" } }
+    ]) {
+      expect(() => assertWorkspaceIdentityViewRedacted(value)).toThrow(
+        "workspace_identity_view_not_redacted"
+      );
+    }
   });
 
   it("requires explicit migration versions, markers, cutover, and fail-closed policy", () => {

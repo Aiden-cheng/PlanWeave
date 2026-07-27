@@ -68,8 +68,12 @@ async function listen(server: Server): Promise<number> {
 describe("Agent Host enrollment", () => {
   it("exchanges once, replays identically, stores only hashes, and authenticates the bound host", async () => {
     const store = await setup();
+    const workspaceId = new WorkspaceIdentityRepository(store.database).ensureWorkspaceForLegacyProject(
+      "project-enrollment"
+    );
     const service = new HostEnrollmentService(store.database);
     const grant = service.createGrant({
+      workspaceId,
       expiresAt: new Date(Date.now() + 60_000),
       credentialExpiresAt: new Date(Date.now() + 3_600_000)
     });
@@ -78,12 +82,7 @@ describe("Agent Host enrollment", () => {
 
     const first = service.exchange(input);
     const replay = service.exchange(input);
-    const workspaceId = new WorkspaceIdentityRepository(store.database).ensureWorkspaceForLegacyProject(
-      "project-enrollment"
-    );
     const hosts = new AgentHostRepository(store.database);
-    hosts.bindToWorkspace(first.hostId, workspaceId);
-    service.bindGrantToWorkspace(grant.enrollmentCode, workspaceId);
 
     expect(replay).toEqual(first);
     expect(
@@ -129,9 +128,13 @@ describe("Agent Host enrollment", () => {
 
   it("rejects conflicting replay, expired and revoked grants without leaking secrets", async () => {
     const store = await setup();
+    const workspaceId = new WorkspaceIdentityRepository(store.database).ensureWorkspaceForLegacyProject(
+      "project-enrollment"
+    );
     const service = new HostEnrollmentService(store.database);
     const create = () =>
       service.createGrant({
+        workspaceId,
         expiresAt: new Date(Date.now() + 60_000),
         credentialExpiresAt: new Date(Date.now() + 3_600_000)
       });
@@ -159,8 +162,12 @@ describe("Agent Host enrollment", () => {
 
   it("serves the strict exchange over real loopback HTTP only with explicit development opt-in", async () => {
     const store = await setup();
+    const workspaceId = new WorkspaceIdentityRepository(store.database).ensureWorkspaceForLegacyProject(
+      "project-enrollment"
+    );
     const service = new HostEnrollmentService(store.database);
     const grant = service.createGrant({
+      workspaceId,
       expiresAt: new Date(Date.now() + 60_000),
       credentialExpiresAt: new Date(Date.now() + 3_600_000)
     });
@@ -208,6 +215,7 @@ describe("Agent Host enrollment", () => {
     expect(await conflict.json()).toMatchObject({ code: "conflict", retryable: false });
 
     const revokedGrant = service.createGrant({
+      workspaceId,
       expiresAt: new Date(Date.now() + 60_000),
       credentialExpiresAt: new Date(Date.now() + 3_600_000)
     });
@@ -221,6 +229,7 @@ describe("Agent Host enrollment", () => {
     expect(await revoked.json()).toMatchObject({ code: "revoked", retryable: false });
 
     const expiredGrant = service.createGrant({
+      workspaceId,
       expiresAt: new Date(Date.now() + 60_000),
       credentialExpiresAt: new Date(Date.now() + 3_600_000)
     });

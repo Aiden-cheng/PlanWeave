@@ -1,5 +1,12 @@
 import { z } from "zod";
 import {
+  agentHostIdentityViewSchema,
+  identityMigrationStateSchema,
+  workspaceHumanPrincipalViewSchema,
+  workspaceIdentityViewSchema,
+  workspaceMembershipViewSchema
+} from "@planweave-ai/collaboration-contracts";
+import {
   HUMAN_DEVICE_LABEL_MAX_LENGTH,
   HUMAN_DISPLAY_NAME_MAX_LENGTH,
   HUMAN_DISPLAY_NAME_MIN_LENGTH,
@@ -27,6 +34,19 @@ import {
 } from "./schemas.js";
 
 const timestampSchema = z.iso.datetime();
+
+/** Redacted, workspace-authoritative identity read model for trusted Server clients. */
+export const workspaceIdentityReadModelSchema = z
+  .object({
+    schemaVersion: z.literal("workspace-identity/v1"),
+    workspace: workspaceIdentityViewSchema,
+    principals: z.array(workspaceHumanPrincipalViewSchema).max(1_000),
+    memberships: z.array(workspaceMembershipViewSchema).max(1_000),
+    hosts: z.array(agentHostIdentityViewSchema).max(1_000),
+    migration: identityMigrationStateSchema
+  })
+  .strict();
+export type WorkspaceIdentityReadModel = z.infer<typeof workspaceIdentityReadModelSchema>;
 
 /**
  * Bounded display projections for human membership HTTP APIs.

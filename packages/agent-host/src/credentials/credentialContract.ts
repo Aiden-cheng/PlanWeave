@@ -17,6 +17,7 @@ export const pendingHostEnrollmentSchema = z
 export const activeHostCredentialSchema = z
   .object({
     hostId: opaqueIdentifierSchema,
+    workspaceId: opaqueIdentifierSchema,
     credentialToken: hostCredentialTokenSchema,
     issuedAt: z.string().datetime(),
     expiresAt: z.string().datetime(),

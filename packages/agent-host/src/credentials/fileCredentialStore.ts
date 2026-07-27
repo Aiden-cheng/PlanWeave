@@ -64,6 +64,7 @@ export class FileHostCredentialStore {
     }
     const active = {
       hostId: response.hostId,
+      workspaceId: response.workspaceId,
       credentialToken: current.pending.credentialToken,
       issuedAt: now.toISOString(),
       expiresAt: response.credentialExpiresAt

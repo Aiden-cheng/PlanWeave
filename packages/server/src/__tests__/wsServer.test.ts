@@ -9,6 +9,7 @@ import { RemoteRuntimePortRegistry } from "../remoteRuntimeLocator.js";
 import { HostEnrollmentService } from "../hostEnrollment.js";
 import { hashOperatorToken, OperatorTokenRegistry } from "../operatorAuth.js";
 import { RemoteControlService } from "../remoteControlService.js";
+import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 import { serverEventSchema, type ServerEvent } from "../protocol.js";
 import { attachAgentHostWebSocketServer, type AgentHostWebSocketServer } from "../wsServer.js";
@@ -93,6 +94,8 @@ async function createWsCoordination() {
   });
   databases.push(database);
   const locator = { projectId: workspace.init.workspace.id, canvasId: "default" };
+  const workspaceIdentity = new WorkspaceIdentityRepository(database.database);
+  const workspaceId = workspaceIdentity.ensureWorkspaceForLegacyProject(locator.projectId);
   const registry = new RemoteRuntimePortRegistry();
   registry.bind(locator, createRemoteBlockRuntimePort({ projectRoot: workspace.root }));
   const coordination = createRemoteBlockCoordination(
@@ -110,13 +113,15 @@ async function createWsCoordination() {
     },
     { serverInstanceOwnerToken: database.serverInstanceOwnerToken }
   );
-  return { database, coordination, locator };
+  return { database, coordination, locator, workspaceIdentity, workspaceId };
 }
 
 describe("agent host WebSocket transport", () => {
   it("disconnects a server-revoked Host, rejects its old credential, and fences dispatch", async () => {
-    const { database, coordination, locator } = await createWsCoordination();
+    const { database, coordination, locator, workspaceIdentity, workspaceId } =
+      await createWsCoordination();
     const registration = coordination.hosts.register("Revocation Host");
+    workspaceIdentity.bindHostToWorkspace(registration.host.id, workspaceId);
     const httpServer = createServer();
     httpServers.push(httpServer);
     await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
@@ -169,7 +174,8 @@ describe("agent host WebSocket transport", () => {
       coordinator: coordination.coordinator,
       events: coordination.acpEvents,
       interactions: coordination.interactions,
-      disconnectHost: transport.disconnectHost
+      disconnectHost: transport.disconnectHost,
+      workspaceIdentity
     });
     const closed = new Promise<{ code: number; reason: string }>((resolve) => {
       socket.once("close", (code, reason) => resolve({ code, reason: reason.toString() }));
@@ -208,8 +214,9 @@ describe("agent host WebSocket transport", () => {
   });
 
   it("settles fresh-lease resume acceptance and terminalizes cancellation after load interruption", async () => {
-    const { coordination, locator } = await createWsCoordination();
+    const { coordination, locator, workspaceIdentity, workspaceId } = await createWsCoordination();
     const registration = coordination.hosts.register("Action Lifecycle Host");
+    workspaceIdentity.bindHostToWorkspace(registration.host.id, workspaceId);
     const httpServer = createServer();
     httpServers.push(httpServer);
     await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
@@ -364,8 +371,10 @@ describe("agent host WebSocket transport", () => {
   });
 
   it("authenticates a host and replays unacknowledged mailbox messages", async () => {
-    const { database, coordination, locator } = await createWsCoordination();
+    const { database, coordination, locator, workspaceIdentity, workspaceId } =
+      await createWsCoordination();
     const registration = coordination.hosts.register("Remote Linux Host");
+    workspaceIdentity.bindHostToWorkspace(registration.host.id, workspaceId);
 
     const httpServer = createServer();
     httpServers.push(httpServer);
@@ -539,8 +548,10 @@ describe("agent host WebSocket transport", () => {
   });
 
   it("expires an offline interaction on reconnect heartbeat and replays its unacknowledged cancel", async () => {
-    const { database, coordination, locator } = await createWsCoordination();
+    const { database, coordination, locator, workspaceIdentity, workspaceId } =
+      await createWsCoordination();
     const registration = coordination.hosts.register("Reconnect Expiry Host");
+    workspaceIdentity.bindHostToWorkspace(registration.host.id, workspaceId);
     const httpServer = createServer();
     httpServers.push(httpServer);
     await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
@@ -671,8 +682,10 @@ describe("agent host WebSocket transport", () => {
   });
 
   it("persists interruption before ACK and rejects unsupported live events without ACK", async () => {
-    const { database, coordination, locator } = await createWsCoordination();
+    const { database, coordination, locator, workspaceIdentity, workspaceId } =
+      await createWsCoordination();
     const registration = coordination.hosts.register("Interruption Host");
+    workspaceIdentity.bindHostToWorkspace(registration.host.id, workspaceId);
     const httpServer = createServer();
     httpServers.push(httpServer);
     await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));

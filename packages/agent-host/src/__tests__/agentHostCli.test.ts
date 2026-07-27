@@ -217,13 +217,13 @@ describe("Agent Host operator CLI", () => {
     const root = await mkdtemp(join(tmpdir(), "planweave-agent-host-identity-"));
     directories.push(root);
     const dataDirectory = join(root, "data");
-    await ensureDurableHostIdentity(dataDirectory, "host-original");
+    await ensureDurableHostIdentity(dataDirectory, "host-original", "workspace-001");
     await expect(
-      ensureDurableHostIdentity(dataDirectory, "host-original")
+      ensureDurableHostIdentity(dataDirectory, "host-original", "workspace-001")
     ).resolves.toBeUndefined();
-    await expect(ensureDurableHostIdentity(dataDirectory, "host-replacement")).rejects.toThrow(
-      "agent_host_durable_identity_mismatch"
-    );
+    await expect(
+      ensureDurableHostIdentity(dataDirectory, "host-replacement", "workspace-001")
+    ).rejects.toThrow("agent_host_durable_identity_mismatch");
     await expect(assertDurableStateReplacementSafe(dataDirectory)).rejects.toThrow(
       "agent_host_reenrollment_requires_durable_state_export"
     );
@@ -232,9 +232,9 @@ describe("Agent Host operator CLI", () => {
     const orphanData = join(orphanRoot, "data");
     await mkdir(orphanData, { recursive: true, mode: 0o700 });
     await writeFile(join(orphanData, "state.sqlite"), "legacy-state");
-    await expect(ensureDurableHostIdentity(orphanData, "host-new")).rejects.toThrow(
-      "agent_host_durable_identity_unbound"
-    );
+    await expect(
+      ensureDurableHostIdentity(orphanData, "host-new", "workspace-001")
+    ).rejects.toThrow("agent_host_durable_identity_unbound");
     const configPath = join(orphanRoot, "config.json");
     await writeFile(
       configPath,

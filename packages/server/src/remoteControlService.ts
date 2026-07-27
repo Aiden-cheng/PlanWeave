@@ -28,6 +28,7 @@ import { RemoteBlockCoordinator } from "./remoteBlockCoordinator.js";
 import { RemoteInteractionService } from "./remoteInteractions.js";
 import { RemoteOperationRepository, type RemoteOperation } from "./remoteOperations.js";
 import { DispatchService } from "./dispatches.js";
+import { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
 
 export type RemoteControlServiceOptions = {
   authorization: OperatorTokenRegistry;
@@ -41,6 +42,7 @@ export type RemoteControlServiceOptions = {
   disconnectHost(hostId: string): void;
   hostOfflineAfterMs?: number;
   clock?: () => Date;
+  workspaceIdentity: WorkspaceIdentityRepository;
 };
 
 export class RemoteControlService {
@@ -55,8 +57,10 @@ export class RemoteControlService {
   createEnrollmentGrant(principal: OperatorPrincipal, rawRequest: unknown) {
     this.options.authorization.requireServerAdmin(principal);
     const request = operatorEnrollmentGrantRequestSchema.parse(rawRequest);
+    const workspaceId = this.resolveWorkspace(principal, request.workspaceId);
     return operatorEnrollmentGrantResponseSchema.parse(
       this.options.enrollments.createGrant({
+        workspaceId,
         expiresAt: new Date(request.expiresAt),
         credentialExpiresAt: new Date(request.credentialExpiresAt)
       })
@@ -66,28 +70,42 @@ export class RemoteControlService {
   listHosts(principal: OperatorPrincipal, rawQuery: unknown) {
     this.options.authorization.requireServerAdmin(principal);
     const query = operatorPageQuerySchema.parse(rawQuery);
-    const hosts = this.options.hosts.list(query.limit + 1, query.cursor);
+    const workspaceId = this.resolveWorkspace(principal, query.workspaceId);
+    const hosts = this.options.workspaceIdentity.listHostViews(
+      workspaceId,
+      query.limit + 1,
+      query.cursor
+    );
     return operatorHostPageSchema.parse({
-      items: hosts.slice(0, query.limit).map((host) => this.toOperatorHostView(host)),
+      items: hosts.slice(0, query.limit).map((host) =>
+        this.toOperatorHostView(this.options.hosts.getRequired(host.hostId), workspaceId)
+      ),
       nextCursor: hosts.length > query.limit ? query.cursor + query.limit : null
     });
   }
 
   getHost(principal: OperatorPrincipal, hostId: string) {
     this.options.authorization.requireServerAdmin(principal);
-    return this.toOperatorHostView(this.options.hosts.getRequired(hostId));
+    const workspaceId = this.requireHostWorkspace(hostId);
+    this.authorizeWorkspace(principal, workspaceId);
+    return this.toOperatorHostView(this.options.hosts.getRequired(hostId), workspaceId);
   }
 
   revokeHost(principal: OperatorPrincipal, hostId: string) {
     this.options.authorization.requireServerAdmin(principal);
+    const workspaceId = this.requireHostWorkspace(hostId);
+    this.authorizeWorkspace(principal, workspaceId);
     this.options.hosts.revoke(hostId);
     this.options.disconnectHost(hostId);
-    return this.toOperatorHostView(this.options.hosts.getRequired(hostId));
+    return this.toOperatorHostView(this.options.hosts.getRequired(hostId), workspaceId);
   }
 
   async dispatch(principal: OperatorPrincipal, rawRequest: unknown) {
     const request = operatorDispatchRequestSchema.parse(rawRequest);
     this.options.authorization.authorizeProject(principal, request.projectId);
+    const workspaceId = this.options.workspaceIdentity.workspaceForLegacyProject(request.projectId);
+    if (!workspaceId) throw new Error("operator_workspace_unmapped");
+    this.authorizeWorkspace(principal, workspaceId);
     // Assignment and dispatch remain separate operations; the coordinator revalidates
     // current assignment before Host reservation (never trusts a UI eligibility list).
     const outcome = await this.options.coordinator.dispatch({
@@ -196,17 +214,59 @@ export class RemoteControlService {
   private operationFor(principal: OperatorPrincipal, operationId: string): RemoteOperation {
     const operation = this.options.operations.getRequired(operationId);
     this.options.authorization.authorizeProject(principal, operation.projectId);
+    const workspaceId = this.options.workspaceIdentity.workspaceForLegacyProject(operation.projectId);
+    if (!workspaceId) throw new Error("operator_workspace_unmapped");
+    this.authorizeWorkspace(principal, workspaceId);
     return operation;
   }
 
-  private toOperatorHostView(host: AgentHost) {
-    return toOperatorHostView(host, this.clock(), this.hostOfflineAfterMs);
+  private toOperatorHostView(host: AgentHost, workspaceId: string) {
+    return toOperatorHostView(host, workspaceId, this.clock(), this.hostOfflineAfterMs);
+  }
+
+  private authorizeWorkspace(principal: OperatorPrincipal, workspaceId: string): void {
+    this.options.authorization.authorizeWorkspace(
+      principal,
+      workspaceId,
+      (projectId) => this.options.workspaceIdentity.workspaceForLegacyProject(projectId)
+    );
+  }
+
+  private resolveWorkspace(principal: OperatorPrincipal, requestedWorkspaceId?: string): string {
+    const workspaceIds = this.options.workspaceIdentity.listWorkspaceIds();
+    let workspaceId = requestedWorkspaceId;
+    if (!workspaceId) {
+      const scoped = principal.projectIds
+        .map((projectId) => this.options.workspaceIdentity.workspaceForLegacyProject(projectId))
+        .filter((id): id is string => id !== undefined);
+      const candidates = [...new Set(scoped)];
+      if (candidates.length === 1) workspaceId = candidates[0];
+      else if (principal.serverAdmin && workspaceIds.length === 1) workspaceId = workspaceIds[0];
+    }
+    if (!workspaceId || !workspaceIds.includes(workspaceId)) {
+      throw new Error("operator_workspace_required");
+    }
+    this.options.workspaceIdentity.assertReadCutover(workspaceId);
+    this.authorizeWorkspace(principal, workspaceId);
+    return workspaceId;
+  }
+
+  private requireHostWorkspace(hostId: string): string {
+    const workspaceId = this.options.workspaceIdentity.workspaceForHost(hostId);
+    if (!workspaceId) throw new Error("operator_host_workspace_ambiguous");
+    return workspaceId;
   }
 }
 
-function toOperatorHostView(host: AgentHost, now: Date, hostOfflineAfterMs: number) {
+function toOperatorHostView(
+  host: AgentHost,
+  workspaceId: string,
+  now: Date,
+  hostOfflineAfterMs: number
+) {
   return operatorHostViewSchema.parse({
     id: host.id,
+    workspaceId,
     displayName: host.displayName,
     capabilities: host.capabilities,
     capacity: host.capacity,

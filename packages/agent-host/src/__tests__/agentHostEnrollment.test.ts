@@ -65,6 +65,7 @@ describe("Agent Host enrollment and protected credentials", () => {
         protocolVersion: 1,
         enrollmentAttemptId: request.enrollmentAttemptId,
         hostId: "host-001",
+        workspaceId: "workspace-001",
         credentialExpiresAt: new Date(Date.now() + 60_000).toISOString()
       }))
     };
@@ -95,6 +96,7 @@ describe("Agent Host enrollment and protected credentials", () => {
         protocolVersion: 1,
         enrollmentAttemptId: request.enrollmentAttemptId,
         hostId: "host-resumed",
+        workspaceId: "workspace-001",
         credentialExpiresAt: new Date(Date.now() + 60_000).toISOString()
       }))
     };
@@ -118,6 +120,7 @@ describe("Agent Host enrollment and protected credentials", () => {
           protocolVersion: 1,
           enrollmentAttemptId: "another-attempt",
           hostId: "host-mismatch",
+          workspaceId: "workspace-001",
           credentialExpiresAt: new Date(Date.now() + 60_000).toISOString()
         })
       );
@@ -179,6 +182,7 @@ describe("Agent Host enrollment and protected credentials", () => {
         protocolVersion: 1,
         enrollmentAttemptId: request.enrollmentAttemptId,
         hostId: "host-original",
+        workspaceId: "workspace-001",
         credentialExpiresAt: new Date(Date.now() + 60_000).toISOString()
       })
     };

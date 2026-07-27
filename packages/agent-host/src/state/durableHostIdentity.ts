@@ -6,7 +6,8 @@ import { z } from "zod";
 const durableHostIdentitySchema = z
   .object({
     version: z.literal("agent-host-durable-identity/v1"),
-    hostId: opaqueIdentifierSchema
+    hostId: opaqueIdentifierSchema,
+    workspaceId: opaqueIdentifierSchema
   })
   .strict();
 
@@ -56,9 +57,11 @@ async function pathExists(path: string): Promise<boolean> {
 
 export async function ensureDurableHostIdentity(
   dataDirectory: string,
-  hostId: string
+  hostId: string,
+  workspaceId: string
 ): Promise<void> {
   const parsedHostId = opaqueIdentifierSchema.parse(hostId);
+  const parsedWorkspaceId = opaqueIdentifierSchema.parse(workspaceId);
   await mkdir(dataDirectory, { recursive: true, mode: 0o700 });
   await assertSecure(dataDirectory, "directory");
   const path = join(dataDirectory, identityFileName);
@@ -75,7 +78,8 @@ export async function ensureDurableHostIdentity(
       await handle.writeFile(
         `${JSON.stringify({
           version: "agent-host-durable-identity/v1",
-          hostId: parsedHostId
+          hostId: parsedHostId,
+          workspaceId: parsedWorkspaceId
         })}\n`,
         "utf8"
       );
@@ -87,7 +91,7 @@ export async function ensureDurableHostIdentity(
     if (!exists(error)) throw error;
   }
   const identity = await readIdentity(path);
-  if (identity.hostId !== parsedHostId) {
+  if (identity.hostId !== parsedHostId || identity.workspaceId !== parsedWorkspaceId) {
     throw new Error("agent_host_durable_identity_mismatch");
   }
 }

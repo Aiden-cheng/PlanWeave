@@ -15,6 +15,8 @@ const timestampSchema = z.iso.datetime();
 /** Shared pagination contract for bounded operator collection endpoints. */
 export const operatorPageQuerySchema = z
   .object({
+    /** Optional scope selector; Server verifies it against authenticated authority. */
+    workspaceId: opaqueIdentifierSchema.optional(),
     cursor: z.coerce.number().int().nonnegative().default(0),
     limit: z.coerce.number().int().min(1).max(100).default(50)
   })
@@ -22,6 +24,8 @@ export const operatorPageQuerySchema = z
 
 export const operatorEnrollmentGrantRequestSchema = z
   .object({
+    /** Target scope selector; Server validates it against the authenticated operator. */
+    workspaceId: opaqueIdentifierSchema.optional(),
     expiresAt: timestampSchema,
     credentialExpiresAt: timestampSchema
   })
@@ -30,6 +34,7 @@ export const operatorEnrollmentGrantRequestSchema = z
 export const operatorEnrollmentGrantResponseSchema = z
   .object({
     enrollmentCode: hostEnrollmentCodeSchema,
+    workspaceId: opaqueIdentifierSchema,
     expiresAt: timestampSchema
   })
   .strict();
@@ -37,6 +42,7 @@ export const operatorEnrollmentGrantResponseSchema = z
 export const operatorHostViewSchema = z
   .object({
     id: opaqueIdentifierSchema,
+    workspaceId: opaqueIdentifierSchema,
     displayName: z.string().min(1).max(128),
     capabilities: capabilitiesSchema,
     capacity: z.number().int().min(1).max(128),

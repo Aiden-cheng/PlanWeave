@@ -63,6 +63,18 @@ export class OperatorTokenRegistry implements RemoteInteractionAuthorizationPort
     }
   }
 
+  authorizeWorkspace(
+    principal: OperatorPrincipal,
+    workspaceId: string,
+    workspaceForProject: (projectId: string) => string | undefined
+  ): void {
+    if (principal.serverAdmin) return;
+    const allowed = principal.projectIds.some(
+      (projectId) => workspaceForProject(projectId) === workspaceId
+    );
+    if (!allowed) throw new Error("operator_workspace_forbidden");
+  }
+
   requireServerAdmin(principal: OperatorPrincipal): void {
     if (!principal.serverAdmin) throw new Error("operator_server_admin_required");
   }

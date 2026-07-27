@@ -205,6 +205,16 @@ function safeError(error: unknown): { status: number; code: string } {
   if (error.message.startsWith("operator_project_forbidden")) {
     return { status: 403, code: "operator_scope_forbidden" };
   }
+  if (
+    error.message === "operator_workspace_forbidden" ||
+    error.message === "operator_workspace_unmapped" ||
+    error.message === "operator_host_workspace_ambiguous"
+  ) {
+    return { status: 403, code: "operator_workspace_forbidden" };
+  }
+  if (error.message === "operator_workspace_required") {
+    return { status: 400, code: "operator_workspace_required" };
+  }
   if (error.message === "operator_server_admin_required") {
     return { status: 403, code: "operator_admin_required" };
   }
@@ -306,7 +316,7 @@ export async function handleOperatorHttpRequest(
         respond(
           response,
           200,
-          options.service.listHosts(principal, query(url, ["cursor", "limit"]))
+          options.service.listHosts(principal, query(url, ["workspaceId", "cursor", "limit"]))
         );
         break;
       case "get_host":

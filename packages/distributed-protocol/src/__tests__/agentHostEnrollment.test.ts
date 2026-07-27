@@ -31,6 +31,7 @@ describe("Agent Host enrollment protocol", () => {
         protocolVersion: 1,
         enrollmentAttemptId: "attempt-enrollment-001",
         hostId: "host-enrolled-001",
+        workspaceId: "workspace-enrolled-001",
         credentialExpiresAt: new Date(Date.now() + 60_000).toISOString()
       }).hostId
     ).toBe("host-enrolled-001");

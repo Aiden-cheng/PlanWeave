@@ -1,4 +1,14 @@
 import { createHash } from "node:crypto";
+import {
+  agentHostIdentityViewSchema,
+  identityMigrationStateSchema,
+  workspaceIdentityViewSchema,
+  workspaceIdSchema,
+  workspaceHumanPrincipalViewSchema,
+  workspaceMembershipViewSchema,
+  type AgentHostIdentityView,
+  type WorkspaceIdentityView
+} from "@planweave-ai/collaboration-contracts";
 import type { SqliteDatabase } from "../sqlite.js";
 
 export type WorkspaceIdentityReadState = {
@@ -56,6 +66,168 @@ export class WorkspaceIdentityRepository {
       )
       .get(projectId);
     return row ? String(row.workspace_id) : undefined;
+  }
+
+  listWorkspaceIds(): string[] {
+    return this.database
+      .prepare("SELECT workspace_id FROM workspaces ORDER BY workspace_id")
+      .all()
+      .map((row) => workspaceIdSchema.parse(String(row.workspace_id)));
+  }
+
+  workspaceExists(workspaceId: string): boolean {
+    const parsed = workspaceIdSchema.parse(workspaceId);
+    return Boolean(
+      this.database.prepare("SELECT 1 FROM workspaces WHERE workspace_id=?").get(parsed)
+    );
+  }
+
+  workspaceView(workspaceId: string): WorkspaceIdentityView {
+    const parsed = workspaceIdSchema.parse(workspaceId);
+    const row = this.database
+      .prepare("SELECT workspace_id,display_name,created_at,archived_at FROM workspaces WHERE workspace_id=?")
+      .get(parsed) as
+      | { workspace_id: string; display_name: string; created_at: string; archived_at: string | null }
+      | undefined;
+    if (!row) throw new Error("workspace_not_found");
+    this.assertReadCutover(parsed);
+    return workspaceIdentityViewSchema.parse({
+      schemaVersion: "workspace-identity/v1",
+      workspaceId: row.workspace_id,
+      displayName: row.display_name,
+      createdAt: row.created_at,
+      archivedAt: row.archived_at
+    });
+  }
+
+  migrationStateView(workspaceId: string) {
+    const parsed = workspaceIdSchema.parse(workspaceId);
+    const row = this.database
+      .prepare(
+        `SELECT migration_id,legacy_project_id,workspace_id,from_version,to_version,step,status,
+                interruption_marker,authoritative_read_version,failure_code,updated_at
+         FROM workspace_identity_migrations
+         WHERE workspace_id=? ORDER BY updated_at DESC LIMIT 1`
+      )
+      .get(parsed) as Record<string, unknown> | undefined;
+    if (!row) throw new Error("workspace_identity_migration_not_found");
+    return identityMigrationStateSchema.parse({
+      schemaVersion: "workspace-identity-migration/v1",
+      migrationId: row.migration_id,
+      legacyProjectId: row.legacy_project_id,
+      workspaceId: row.workspace_id,
+      fromVersion: Number(row.from_version),
+      toVersion: Number(row.to_version),
+      step: row.step,
+      status: row.status,
+      interruptionMarker: row.interruption_marker,
+      authoritativeReadVersion: row.authoritative_read_version,
+      failureCode: row.failure_code,
+      updatedAt: row.updated_at
+    });
+  }
+
+  listPrincipalViews(workspaceId: string) {
+    const parsed = workspaceIdSchema.parse(workspaceId);
+    this.assertReadCutover(parsed);
+    return this.database
+      .prepare(
+        `SELECT workspace_id,human_principal_id,display_name,created_at,revoked_at
+         FROM workspace_principals WHERE workspace_id=? ORDER BY human_principal_id`
+      )
+      .all(parsed)
+      .map((row) =>
+        workspaceHumanPrincipalViewSchema.parse({
+          schemaVersion: "workspace-identity/v1",
+          workspaceId: row.workspace_id,
+          humanPrincipalId: row.human_principal_id,
+          displayName: row.display_name,
+          createdAt: row.created_at,
+          revokedAt: row.revoked_at
+        })
+      );
+  }
+
+  listMembershipViews(workspaceId: string) {
+    const parsed = workspaceIdSchema.parse(workspaceId);
+    this.assertReadCutover(parsed);
+    return this.database
+      .prepare(
+        `SELECT m.workspace_id,m.membership_id,m.human_principal_id,p.display_name,m.role,
+                m.revision,m.created_at,m.updated_at,m.revoked_at
+         FROM workspace_memberships m
+         JOIN workspace_principals p
+           ON p.workspace_id=m.workspace_id AND p.human_principal_id=m.human_principal_id
+         WHERE m.workspace_id=? ORDER BY m.membership_id`
+      )
+      .all(parsed)
+      .map((row) =>
+        workspaceMembershipViewSchema.parse({
+          schemaVersion: "workspace-identity/v1",
+          workspaceId: row.workspace_id,
+          membershipId: row.membership_id,
+          humanPrincipalId: row.human_principal_id,
+          displayName: row.display_name,
+          role: row.role,
+          revision: Number(row.revision),
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+          revokedAt: row.revoked_at
+        })
+      );
+  }
+
+  workspaceForHost(hostId: string): string | undefined {
+    const rows = this.database
+      .prepare("SELECT workspace_id FROM workspace_agent_hosts WHERE host_id=? ORDER BY workspace_id")
+      .all(hostId);
+    if (rows.length !== 1) return undefined;
+    return workspaceIdSchema.parse(String(rows[0].workspace_id));
+  }
+
+  workspaceForEnrollment(enrollmentCodeSha256: string): string | undefined {
+    const rows = this.database
+      .prepare(
+        "SELECT workspace_id FROM workspace_host_enrollments WHERE enrollment_code_sha256=? ORDER BY workspace_id"
+      )
+      .all(enrollmentCodeSha256);
+    if (rows.length !== 1) return undefined;
+    return workspaceIdSchema.parse(String(rows[0].workspace_id));
+  }
+
+  listHostViews(workspaceId: string, limit: number, offset: number): AgentHostIdentityView[] {
+    const parsedWorkspaceId = workspaceIdSchema.parse(workspaceId);
+    this.assertReadCutover(parsedWorkspaceId);
+    const rows = this.database
+      .prepare(
+        `SELECT workspace_id,host_id,display_name,capabilities_json,capacity,last_seen_at,
+                credential_expires_at,revoked_at
+         FROM workspace_agent_hosts
+         WHERE workspace_id=? ORDER BY display_name,host_id LIMIT ? OFFSET ?`
+      )
+      .all(parsedWorkspaceId, limit, offset) as Array<{
+      workspace_id: string;
+      host_id: string;
+      display_name: string;
+      capabilities_json: string;
+      capacity: number;
+      last_seen_at: string | null;
+      credential_expires_at: string | null;
+      revoked_at: string | null;
+    }>;
+    return rows.map((row) =>
+      agentHostIdentityViewSchema.parse({
+        schemaVersion: "workspace-identity/v1",
+        workspaceId: row.workspace_id,
+        hostId: row.host_id,
+        displayName: row.display_name,
+        capabilities: JSON.parse(row.capabilities_json),
+        capacity: Number(row.capacity),
+        lastSeenAt: row.last_seen_at,
+        credentialExpiresAt: row.credential_expires_at,
+        revokedAt: row.revoked_at
+      })
+    );
   }
 
   /**

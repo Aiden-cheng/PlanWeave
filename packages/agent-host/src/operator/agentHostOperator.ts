@@ -25,6 +25,7 @@ const MAX_CONFIG_BYTES = 256 * 1_024;
 export type AgentHostDiagnostics = {
   version: typeof agentHostPackageVersion;
   hostId?: string;
+  workspaceId?: string;
   credential: "missing" | "pending" | "active" | "revoked" | "expired";
   capabilities: string[];
   capacity: number;
@@ -114,7 +115,7 @@ export class AgentHostOperator {
     const config = await loadAgentHostConfig(configPath);
     await this.preflight(configPath);
     const credential = await credentialStore(config).requireUsable();
-    await ensureDurableHostIdentity(config.dataDirectory, credential.hostId);
+    await ensureDurableHostIdentity(config.dataDirectory, credential.hostId, credential.workspaceId);
     const trust = await createAgentHostTlsTrust(config.coordinator.caCertificatePath);
     let state: Awaited<ReturnType<typeof openAgentHostState>> | undefined;
     try {
@@ -173,12 +174,14 @@ export class AgentHostOperator {
   private async diagnostics(config: AgentHostConfig): Promise<AgentHostDiagnostics> {
     let credential: AgentHostDiagnostics["credential"] = "missing";
     let hostId: string | undefined;
+    let workspaceId: string | undefined;
     let actionableError: string | undefined;
     try {
       const document = await credentialStore(config).read();
       if (document?.pending) credential = "pending";
       if (document?.active) {
         hostId = document.active.hostId;
+        workspaceId = document.active.workspaceId;
         credential = document.active.revokedAt
           ? "revoked"
           : Date.parse(document.active.expiresAt) <= Date.now()
@@ -207,6 +210,7 @@ export class AgentHostOperator {
     return {
       version: agentHostPackageVersion,
       hostId,
+      workspaceId,
       credential,
       capabilities: [...config.host.capabilities],
       capacity: config.host.capacity,

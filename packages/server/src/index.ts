@@ -122,6 +122,10 @@ export {
   type HostEnrollmentHttpOptions
 } from "./hostEnrollmentHttp.js";
 export {
+  handleWorkspaceIdentityHttpRequest,
+  type WorkspaceIdentityHttpOptions
+} from "./identity/workspaceIdentityHttp.js";
+export {
   startPlanweaveServer,
   type PlanweaveServer,
   type StartupContext,
