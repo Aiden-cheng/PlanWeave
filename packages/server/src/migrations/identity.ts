@@ -138,6 +138,24 @@ CREATE TABLE IF NOT EXISTS workspace_identity_revocations (
   revoked_at TEXT NOT NULL,
   reason TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS workspace_identity_repairs (
+  repair_id TEXT PRIMARY KEY,
+  subject_kind TEXT NOT NULL CHECK(subject_kind IN ('agent_host','enrollment')),
+  subject_id TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status='repair_required'),
+  reason TEXT NOT NULL CHECK(reason IN (
+    'host_requires_reenrollment',
+    'enrollment_requires_reenrollment',
+    'enrollment_requires_workspace_binding'
+  )),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(subject_kind,subject_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_workspace_identity_repairs_status
+  ON workspace_identity_repairs(status,subject_kind,subject_id);
 `;
 
 function workspaceIdForLegacyProject(projectId: string): string {
@@ -168,16 +186,11 @@ function legacyProjectIds(database: SqliteDatabase): string[] {
   return rows.map((row) => String(row.project_id));
 }
 
-function hasColumn(database: SqliteDatabase, table: string, column: string): boolean {
-  if (!tableExists(database, table)) return false;
-  return Boolean(
-    database
-      .prepare(`SELECT 1 FROM pragma_table_info(?) WHERE name=?`)
-      .get(table, column)
-  );
-}
-
-function ensureWorkspaceForProject(database: SqliteDatabase, projectId: string, at: string): string {
+function ensureWorkspaceForProject(
+  database: SqliteDatabase,
+  projectId: string,
+  at: string
+): string {
   const workspaceId = workspaceIdForLegacyProject(projectId);
   database
     .prepare(
@@ -215,7 +228,12 @@ function ensureWorkspaceForProject(database: SqliteDatabase, projectId: string, 
   return workspaceId;
 }
 
-function backfillProjectIdentity(database: SqliteDatabase, projectId: string, workspaceId: string, at: string): void {
+function backfillProjectIdentity(
+  database: SqliteDatabase,
+  projectId: string,
+  workspaceId: string,
+  at: string
+): void {
   if (!tableExists(database, "human_principals") || !tableExists(database, "project_memberships")) {
     return;
   }
@@ -260,7 +278,9 @@ function backfillProjectIdentity(database: SqliteDatabase, projectId: string, wo
 
   const devices = tableExists(database, "human_device_credentials")
     ? database
-        .prepare("SELECT * FROM human_device_credentials WHERE minted_for_project_id=? ORDER BY device_credential_id")
+        .prepare(
+          "SELECT * FROM human_device_credentials WHERE minted_for_project_id=? ORDER BY device_credential_id"
+        )
         .all(projectId)
     : [];
   for (const device of devices) {
@@ -291,74 +311,76 @@ function backfillProjectIdentity(database: SqliteDatabase, projectId: string, wo
     .run(at, projectId);
 }
 
-function backfillHostIdentities(database: SqliteDatabase, at: string): void {
-  if (
-    !hasColumn(database, "dispatches", "project_id") ||
-    !tableExists(database, "agent_hosts")
-  )
-    return;
-  const rows = database
-    .prepare(
-      `SELECT DISTINCT d.project_id,h.id,h.display_name,h.capabilities_json,h.capacity,h.credential_hash,
-         h.created_at,h.last_seen_at,h.credential_expires_at,h.revoked_at
-       FROM dispatches d JOIN agent_hosts h ON h.id=d.host_id`
-    )
-    .all();
-  for (const row of rows) {
-    const mapping = database
-      .prepare("SELECT workspace_id FROM legacy_project_workspace_mappings WHERE legacy_project_id=?")
-      .get(row.project_id);
-    if (!mapping) continue;
-    database
-      .prepare(
-        `INSERT OR IGNORE INTO workspace_agent_hosts(
-          workspace_id,host_id,display_name,capabilities_json,capacity,credential_sha256,
-          created_at,last_seen_at,credential_expires_at,revoked_at
-        ) VALUES(?,?,?,?,?,?,?,?,?,?)`
-      )
-      .run(
-        mapping.workspace_id,
-        row.id,
-        row.display_name,
-        row.capabilities_json,
-        row.capacity,
-        row.credential_hash,
-        row.created_at,
-        row.last_seen_at,
-        row.credential_expires_at,
-        row.revoked_at
-      );
-  }
+function repairIdForSubject(subjectKind: "agent_host" | "enrollment", subjectId: string): string {
+  return `identity-repair-${createHash("sha256")
+    .update(`${subjectKind}:${subjectId}`)
+    .digest("hex")
+    .slice(0, 32)}`;
 }
 
-function backfillHostEnrollments(database: SqliteDatabase, at: string): void {
-  if (!tableExists(database, "agent_host_enrollment_grants")) return;
-  const rows = database.prepare("SELECT * FROM agent_host_enrollment_grants ORDER BY code_hash").all();
-  for (const row of rows) {
-    if (!row.host_id) continue;
-    const hosts = database
-      .prepare("SELECT workspace_id FROM workspace_agent_hosts WHERE host_id=? ORDER BY workspace_id")
-      .all(row.host_id);
-    if (hosts.length !== 1) continue;
-    const workspaceId = String(hosts[0].workspace_id);
-    database
-      .prepare(
-        `INSERT OR IGNORE INTO workspace_host_enrollments(
-          workspace_id,enrollment_id,enrollment_code_sha256,credential_expires_at,expires_at,
-          used_at,host_id,revoked_at,created_at
-        ) VALUES(?,?,?,?,?,?,?,?,?)`
-      )
-      .run(
-        workspaceId,
-        `enrollment-${String(row.code_hash).slice(0, 32)}`,
-        row.code_hash,
-        row.credential_expires_at,
-        row.expires_at,
-        row.used_at,
-        row.host_id,
-        row.revoked_at,
-        row.created_at ?? at
+function enrollmentSubjectId(codeHash: string): string {
+  return `legacy-enrollment-${createHash("sha256").update(codeHash).digest("hex").slice(0, 32)}`;
+}
+
+function recordIdentityRepair(
+  database: SqliteDatabase,
+  subjectKind: "agent_host" | "enrollment",
+  subjectId: string,
+  reason:
+    | "host_requires_reenrollment"
+    | "enrollment_requires_reenrollment"
+    | "enrollment_requires_workspace_binding",
+  at: string
+): void {
+  database
+    .prepare(
+      `INSERT INTO workspace_identity_repairs(
+        repair_id,subject_kind,subject_id,status,reason,created_at,updated_at
+      ) VALUES(?,?,?,?,?,?,?)
+      ON CONFLICT(subject_kind,subject_id) DO UPDATE SET
+        status=excluded.status,reason=excluded.reason,updated_at=excluded.updated_at`
+    )
+    .run(
+      repairIdForSubject(subjectKind, subjectId),
+      subjectKind,
+      subjectId,
+      "repair_required",
+      reason,
+      at,
+      at
+    );
+}
+
+/**
+ * Legacy Host credentials have no persisted Workspace binding. Dispatch history
+ * is execution history only, so it cannot authorize a Host or enrollment grant.
+ * Keep every legacy identity unbound and leave an explicit repair marker for the
+ * later Server Admin enrollment/bind flow.
+ */
+function recordHostIdentityRepairs(database: SqliteDatabase, at: string): void {
+  if (tableExists(database, "agent_hosts")) {
+    const hosts = database.prepare("SELECT id FROM agent_hosts ORDER BY id").all();
+    for (const host of hosts) {
+      recordIdentityRepair(
+        database,
+        "agent_host",
+        String(host.id),
+        "host_requires_reenrollment",
+        at
       );
+    }
+  }
+
+  if (!tableExists(database, "agent_host_enrollment_grants")) return;
+  const grants = database
+    .prepare("SELECT code_hash,used_at FROM agent_host_enrollment_grants ORDER BY code_hash")
+    .all();
+  for (const grant of grants) {
+    const subjectId = enrollmentSubjectId(String(grant.code_hash));
+    const reason = grant.used_at
+      ? "enrollment_requires_reenrollment"
+      : "enrollment_requires_workspace_binding";
+    recordIdentityRepair(database, "enrollment", subjectId, reason, at);
   }
 }
 
@@ -368,8 +390,7 @@ export function backfillWorkspaceIdentity(database: SqliteDatabase): void {
     const workspaceId = ensureWorkspaceForProject(database, projectId, at);
     backfillProjectIdentity(database, projectId, workspaceId, at);
   }
-  backfillHostIdentities(database, at);
-  backfillHostEnrollments(database, at);
+  recordHostIdentityRepairs(database, at);
 }
 
 export const identityMigrations: readonly Migration[] = [
