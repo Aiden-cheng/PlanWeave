@@ -10,7 +10,13 @@ import {
   retryWorkspaceIdentityMigration,
   rollbackWorkspaceIdentityMigration
 } from "../migrations.js";
+import { HostEnrollmentService } from "../hostEnrollment.js";
+import { AgentHostRepository } from "../hosts.js";
 import { retryWorkspaceIdentityMigrationForTesting } from "../migrations/identityRecovery.js";
+import {
+  hashOperatorSessionToken,
+  OperatorSessionStore
+} from "../identity/operatorSessionStore.js";
 import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 
@@ -352,8 +358,64 @@ describe("workspace identity migration recovery", () => {
         .get("project-recovery")?.workspace_id
     );
 
+    const identityClock = () => new Date(now);
+    const hosts = new AgentHostRepository(database, identityClock);
+    const registeredHost = hosts.register("Rollback Host");
+    hosts.bindToWorkspace(registeredHost.host.id, workspaceId);
+    const enrollmentService = new HostEnrollmentService(database, identityClock);
+    const enrollment = enrollmentService.createGrant({
+      workspaceId,
+      expiresAt: new Date("2030-01-01T00:00:00.000Z"),
+      credentialExpiresAt: new Date("2030-01-02T00:00:00.000Z")
+    });
+    const operatorToken = `pw_operator_${"R".repeat(43)}`;
+    const operatorSessions = new OperatorSessionStore(database, identityClock);
+    const operatorSession = operatorSessions.create({
+      workspaceId,
+      operatorId: "rollback-operator",
+      credentialSha256: hashOperatorSessionToken(operatorToken),
+      issuedAt: now,
+      expiresAt: "2030-01-01T00:00:00.000Z"
+    });
+    const enrollmentCodeSha256 = createHash("sha256")
+      .update(enrollment.enrollmentCode)
+      .digest("hex");
+    const scopedIdentityRows = {
+      operator: database
+        .prepare(
+          `SELECT workspace_id,operator_session_id,operator_id,credential_sha256
+           FROM workspace_operator_sessions
+           WHERE workspace_id=? AND operator_session_id=?`
+        )
+        .get(workspaceId, operatorSession.operatorSessionId),
+      host: database
+        .prepare(
+          `SELECT workspace_id,host_id,credential_sha256
+           FROM workspace_agent_hosts WHERE workspace_id=? AND host_id=?`
+        )
+        .get(workspaceId, registeredHost.host.id),
+      enrollment: database
+        .prepare(
+          `SELECT workspace_id,enrollment_id,enrollment_code_sha256,credential_expires_at,expires_at,
+                  used_at,host_id,revoked_at
+           FROM workspace_host_enrollments
+           WHERE workspace_id=? AND enrollment_code_sha256=?`
+        )
+        .get(workspaceId, enrollmentCodeSha256)
+    };
+    expect(scopedIdentityRows.operator).toBeDefined();
+    expect(scopedIdentityRows.host).toBeDefined();
+    expect(scopedIdentityRows.enrollment).toBeDefined();
+
     const rolledBack = rollbackWorkspaceIdentityMigration(database, "project-recovery");
     expect(rolledBack).toMatchObject({ status: "rolled_back", outcome: "rollback_to_legacy" });
+    expect(
+      database
+        .prepare(
+          "SELECT status,interruption_marker FROM workspace_identity_migrations WHERE legacy_project_id=?"
+        )
+        .get("project-recovery")
+    ).toEqual({ status: "rolled_back", interruption_marker: "rollback_complete" });
     expect(
       database
         .prepare("SELECT 1 FROM legacy_project_workspace_mappings WHERE legacy_project_id=?")
@@ -369,6 +431,54 @@ describe("workspace identity migration recovery", () => {
         .prepare("SELECT COUNT(*) AS count FROM workspace_memberships WHERE workspace_id=?")
         .get(workspaceId)
     ).toEqual({ count: 0 });
+    expect(
+      database
+        .prepare("SELECT COUNT(*) AS count FROM workspace_principals WHERE workspace_id=?")
+        .get(workspaceId)
+    ).toEqual({ count: 0 });
+    expect(
+      database
+        .prepare("SELECT COUNT(*) AS count FROM workspace_device_sessions WHERE workspace_id=?")
+        .get(workspaceId)
+    ).toEqual({ count: 0 });
+    expect(
+      database
+        .prepare(
+          `SELECT workspace_id,operator_session_id,operator_id,credential_sha256
+           FROM workspace_operator_sessions
+           WHERE workspace_id=? AND operator_session_id=?`
+        )
+        .get(workspaceId, operatorSession.operatorSessionId)
+    ).toEqual(scopedIdentityRows.operator);
+    expect(
+      database
+        .prepare(
+          `SELECT workspace_id,host_id,credential_sha256
+           FROM workspace_agent_hosts WHERE workspace_id=? AND host_id=?`
+        )
+        .get(workspaceId, registeredHost.host.id)
+    ).toEqual(scopedIdentityRows.host);
+    expect(
+      database
+        .prepare(
+          `SELECT workspace_id,enrollment_id,enrollment_code_sha256,credential_expires_at,expires_at,
+                  used_at,host_id,revoked_at
+           FROM workspace_host_enrollments
+           WHERE workspace_id=? AND enrollment_code_sha256=?`
+        )
+        .get(workspaceId, enrollmentCodeSha256)
+    ).toEqual(scopedIdentityRows.enrollment);
+    const identityRepository = new WorkspaceIdentityRepository(database);
+    expect(() => identityRepository.workspaceView(workspaceId)).toThrow(
+      "workspace_identity_read_cutover_incomplete"
+    );
+    expect(() => identityRepository.listMembershipViews(workspaceId)).toThrow(
+      "workspace_identity_read_cutover_incomplete"
+    );
+    expect(operatorSessions.authenticate(operatorToken)).toBeUndefined();
+    expect(
+      hosts.authenticate(registeredHost.host.id, registeredHost.token, workspaceId)
+    ).toBeUndefined();
 
     const interrupted = retryWorkspaceIdentityMigrationForTesting(database, "project-recovery", {
       failAtStep: "backfill_devices"
