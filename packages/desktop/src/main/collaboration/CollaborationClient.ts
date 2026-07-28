@@ -50,6 +50,10 @@ import {
   reviewAssignmentUpdateWireCommandSchema,
   uploadPendingAttachmentResponseSchema,
   workAuthorityProjectionSchema,
+  authoritativeContentVersionSchema,
+  contentVersionAcknowledgementSchema,
+  contentVersionAuthorityDiscoveryResultSchema,
+  firstContentVersionPublishResultSchema,
   type ActivityListPage,
   type AssignmentDisplayProjection,
   type AssignmentListPage,
@@ -97,7 +101,13 @@ import {
   type ReviewAssignmentReadModel,
   type ReviewAssignmentUpdateWireCommand,
   type WorkAuthorityProjection,
-  type WorkItemRef
+  type WorkItemRef,
+  type AuthoritativeContentVersion,
+  type CompleteContentVersion,
+  type CompletedContentVersionRef,
+  type ContentVersionAcknowledgement,
+  type ContentVersionAuthorityDiscoveryResult,
+  type FirstContentVersionPublishResult
 } from "@planweave-ai/collaboration-contracts";
 import type { z, ZodType } from "zod";
 import {
@@ -836,6 +846,62 @@ export class CollaborationClient {
   ): Promise<ReturnType<CanvasCommandClient["reconnect"]>> {
     this.ensureOpen();
     return this.canvasCommands.reconnect(input, signal, hooks);
+  }
+
+  async discoverContentAuthority(input: {
+    canvasId: string;
+    localReplica: CompletedContentVersionRef | null;
+    knownRevision: number | null;
+  }): Promise<ContentVersionAuthorityDiscoveryResult> {
+    return this.transport.json(
+      "POST",
+      `/api/v1/projects/${encodeURIComponent(this.projectId)}/canvases/${encodeURIComponent(input.canvasId)}/content/head`,
+      contentVersionAuthorityDiscoveryResultSchema,
+      { body: input }
+    );
+  }
+
+  async publishInitialContent(input: {
+    canvasId: string;
+    content: CompleteContentVersion;
+  }): Promise<FirstContentVersionPublishResult> {
+    return this.transport.json(
+      "POST",
+      `/api/v1/projects/${encodeURIComponent(this.projectId)}/canvases/${encodeURIComponent(input.canvasId)}/content/initial-publish`,
+      firstContentVersionPublishResultSchema,
+      {
+        body: {
+          expectedHeadRevision: 0,
+          expectedHeadVersionId: null,
+          content: input.content
+        },
+        acceptedStatus: 409
+      }
+    );
+  }
+
+  async fetchContentVersion(input: {
+    canvasId: string;
+    content: CompletedContentVersionRef;
+  }): Promise<AuthoritativeContentVersion> {
+    return this.transport.json(
+      "POST",
+      `/api/v1/projects/${encodeURIComponent(this.projectId)}/canvases/${encodeURIComponent(input.canvasId)}/content/fetch`,
+      authoritativeContentVersionSchema,
+      { body: { content: input.content } }
+    );
+  }
+
+  async acknowledgeContentVersion(input: {
+    canvasId: string;
+    content: CompletedContentVersionRef;
+  }): Promise<ContentVersionAcknowledgement> {
+    return this.transport.json(
+      "POST",
+      `/api/v1/projects/${encodeURIComponent(this.projectId)}/canvases/${encodeURIComponent(input.canvasId)}/content/acknowledgements`,
+      contentVersionAcknowledgementSchema,
+      { body: { content: input.content } }
+    );
   }
 
   // ---------------------------------------------------------------------------

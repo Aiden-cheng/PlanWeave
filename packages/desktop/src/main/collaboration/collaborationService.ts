@@ -68,6 +68,7 @@ import {
   type CollaborationCanvasReconnectResult,
   type CollaborationCanvasCommandSessionView
 } from "./collaborationCanvasCommands.js";
+import { ContentVersionFacade } from "./ContentVersionFacade.js";
 import { CollaborationRemoteOperationsFacade } from "./collaborationRemoteOperations.js";
 import { CollaborationPresenceSession } from "./collaborationPresenceSession.js";
 import { CollaborationReadMutationsFacade } from "./collaborationReadMutations.js";
@@ -151,6 +152,7 @@ export class CollaborationService {
   private readonly onPresenceSignal?: (signal: CollaborationPresenceSignal) => void;
   private readonly registryService: CollaborationRegistryService;
   private readonly canvasCommands: CollaborationCanvasCommandFacade;
+  private readonly contentVersions: ContentVersionFacade;
   private readonly remoteOperations: CollaborationRemoteOperationsFacade;
   private readonly readMutations: CollaborationReadMutationsFacade;
   private readonly workspaceConnection: CollaborationWorkspaceConnection;
@@ -194,6 +196,7 @@ export class CollaborationService {
     this.onPresenceSignal = options.onPresenceSignal;
     this.registryService = new CollaborationRegistryService(() => this.client);
     this.canvasCommands = new CollaborationCanvasCommandFacade(() => this.client);
+    this.contentVersions = new ContentVersionFacade(() => this.client);
     this.remoteOperations = new CollaborationRemoteOperationsFacade((operation) =>
       this.withActiveClient(operation)
     );
@@ -769,6 +772,42 @@ export class CollaborationService {
     return this.enqueue(async () => {
       this.assertOpen();
       return this.canvasCommands.session();
+    });
+  }
+
+  async bindContentAuthority(input: unknown) {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      assertNoSmuggledCollaborationSecrets(input, "bindCollaborationContentAuthority");
+      return this.contentVersions.bind(input);
+    });
+  }
+
+  async getContentAuthority() {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      return this.contentVersions.read();
+    });
+  }
+
+  async refreshContentAuthority() {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      return this.contentVersions.refresh();
+    });
+  }
+
+  async publishInitialContent() {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      return this.contentVersions.publishInitial();
+    });
+  }
+
+  async materializeContentHead() {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      return this.contentVersions.materializeHead();
     });
   }
 

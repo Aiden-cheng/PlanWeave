@@ -93,8 +93,10 @@ export function useCollaborationSurface(
     viewModel,
     controller,
     assigneeIndex,
-    activeProfileId: profileId,
-    activeProjectId: projectId,
+    // Keep the durable-write fence scoped while a selected collaboration profile is offline.
+    // The read model still connects only after an authenticated session is available.
+    activeProfileId: activeProfile?.profileId ?? null,
+    activeProjectId: activeProfile?.projectId ?? null,
     sessionConnected,
     collaborationNotificationDrafts
   };

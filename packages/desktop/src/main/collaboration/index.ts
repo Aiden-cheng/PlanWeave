@@ -88,3 +88,4 @@ export {
 } from "./collaborationHandlers.js";
 export { redactCollaborationText, redactCollaborationValue } from "./redaction.js";
 export { reconnectDelay } from "./reconnectBackoff.js";
+export { ContentVersionFacade } from "./ContentVersionFacade.js";

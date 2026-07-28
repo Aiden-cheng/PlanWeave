@@ -279,6 +279,7 @@ function PeopleRoute() {
   return (
     <PeopleView
       t={shell.t}
+      canvasId={shell.selectedCanvasId}
       onMembershipOutcome={(outcome) => {
         if (outcome.ok) {
           shell.setSuccessMessage?.(outcome.message);

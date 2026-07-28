@@ -253,6 +253,16 @@ const collaborationApi: PlanWeaveCollaborationApi = {
     ipcRenderer.invoke(collaborationInvokeChannels.bindCollaborationCanvasCommandSession, input),
   getCollaborationCanvasCommandSession: async () =>
     ipcRenderer.invoke(collaborationInvokeChannels.getCollaborationCanvasCommandSession),
+  bindCollaborationContentAuthority: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.bindCollaborationContentAuthority, input),
+  getCollaborationContentAuthority: async () =>
+    ipcRenderer.invoke(collaborationInvokeChannels.getCollaborationContentAuthority),
+  refreshCollaborationContentAuthority: async () =>
+    ipcRenderer.invoke(collaborationInvokeChannels.refreshCollaborationContentAuthority),
+  publishCollaborationInitialContent: async () =>
+    ipcRenderer.invoke(collaborationInvokeChannels.publishCollaborationInitialContent),
+  materializeCollaborationContentHead: async () =>
+    ipcRenderer.invoke(collaborationInvokeChannels.materializeCollaborationContentHead),
   listCollaborationMembers: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationMembers, input),
   listCollaborationDevices: async (input) =>

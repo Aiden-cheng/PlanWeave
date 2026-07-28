@@ -7,6 +7,7 @@ import { useCollaborationStatus } from "../hooks/useCollaborationStatus";
 import { usePeoplePanelController } from "../hooks/usePeoplePanelController";
 import { CollaborationConnectForm } from "../team/CollaborationConnectForm";
 import { PeoplePanel } from "../team/PeoplePanel";
+import { ContentAuthorityPanel } from "../collaboration/ContentAuthorityPanel";
 
 export type PeopleViewProps = {
   t: ReturnType<typeof createTranslator>;
@@ -14,6 +15,7 @@ export type PeopleViewProps = {
   api?: PlanWeaveCollaborationApi | null;
   /** Optional clipboard writer; defaults to navigator.clipboard. */
   copyText?: (text: string) => Promise<void>;
+  canvasId?: string | null;
   onMembershipOutcome?: (outcome: { ok: boolean; message: string }) => void;
 };
 
@@ -30,6 +32,7 @@ export function PeopleView({
   t,
   api: apiProp,
   copyText = defaultCopyText,
+  canvasId = null,
   onMembershipOutcome
 }: PeopleViewProps) {
   const api = apiProp === undefined ? collaborationBridge : apiProp;
@@ -130,6 +133,7 @@ export function PeopleView({
         }}
         connectSlot={<CollaborationConnectForm api={api} status={status} t={t} />}
       />
+      <ContentAuthorityPanel api={api ?? null} canvasId={canvasId} connected={sessionConnected} t={t} />
     </section>
   );
 }

@@ -173,6 +173,21 @@ export function registerCollaborationHandlers(
   ipcMain.handle(collaborationInvokeChannels.getCollaborationCanvasCommandSession, () =>
     active.getCanvasCommandSession()
   );
+  ipcMain.handle(collaborationInvokeChannels.bindCollaborationContentAuthority, (_event, input: unknown) =>
+    active.bindContentAuthority(input)
+  );
+  ipcMain.handle(collaborationInvokeChannels.getCollaborationContentAuthority, () =>
+    active.getContentAuthority()
+  );
+  ipcMain.handle(collaborationInvokeChannels.refreshCollaborationContentAuthority, () =>
+    active.refreshContentAuthority()
+  );
+  ipcMain.handle(collaborationInvokeChannels.publishCollaborationInitialContent, () =>
+    active.publishInitialContent()
+  );
+  ipcMain.handle(collaborationInvokeChannels.materializeCollaborationContentHead, () =>
+    active.materializeContentHead()
+  );
   ipcMain.handle(collaborationInvokeChannels.listCollaborationMembers, (_event, input: unknown) =>
     active.listMembers(input)
   );

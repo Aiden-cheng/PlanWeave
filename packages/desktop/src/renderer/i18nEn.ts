@@ -1217,7 +1217,17 @@ export const enCatalog = {
   canvasCommandReconnectFailed: "Canvas reconnect failed: {code}",
   canvasCommandNotConnected: "Shared canvas command session is not connected.",
   canvasCommandUnsupportedLocalOnly:
-    "This edit is not available while the shared canvas is connected. Disconnect collaboration or use a supported shared command."
+    "This edit is not available while the shared canvas is connected. Disconnect collaboration or use a supported shared command.",
+  contentAuthorityTitle: "Authoritative content",
+  contentAuthorityRevision: "Revision: {revision}",
+  contentAuthorityStatus: "Replica: {status}",
+  contentAuthorityAcknowledged: "This device acknowledged the current version.",
+  contentAuthorityWaiting: "waiting for first publish",
+  contentAuthorityOffline: "offline",
+  contentAuthorityRetry: "Retry",
+  contentAuthorityPublish: "Publish initial version",
+  contentAuthorityMaterialize: "Materialize",
+  contentAuthorityRecover: "Recover"
 } as const;
 
 export type TranslationKey = keyof typeof enCatalog;

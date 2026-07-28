@@ -1166,5 +1166,15 @@ export const zhCnCatalog = {
   canvasCommandReconnectFailed: "画布重连失败：{code}",
   canvasCommandNotConnected: "共享画布命令会话未连接。",
   canvasCommandUnsupportedLocalOnly:
-    "共享画布已连接时无法执行此编辑。请断开协作连接，或改用受支持的共享命令。"
+    "共享画布已连接时无法执行此编辑。请断开协作连接，或改用受支持的共享命令。",
+  contentAuthorityTitle: "权威内容版本",
+  contentAuthorityRevision: "修订：{revision}",
+  contentAuthorityStatus: "副本状态：{status}",
+  contentAuthorityAcknowledged: "此设备已确认当前版本。",
+  contentAuthorityWaiting: "等待首个发布",
+  contentAuthorityOffline: "离线",
+  contentAuthorityRetry: "重试",
+  contentAuthorityPublish: "发布首个版本",
+  contentAuthorityMaterialize: "物化",
+  contentAuthorityRecover: "恢复"
 } satisfies Record<TranslationKey, string>;

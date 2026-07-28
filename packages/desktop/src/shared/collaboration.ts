@@ -63,7 +63,8 @@ import {
   type ReviewAssignmentReadModel,
   type ExecutionTargetReadModel,
   type WorkAuthorityProjection,
-  type WorkspacePickerPage
+  type WorkspacePickerPage,
+  type ContentVersionDesktopReadModel
 } from "@planweave-ai/collaboration-contracts";
 import type {
   CollaborationActivityListQueryInput,
@@ -454,6 +455,10 @@ export type CollaborationCanvasReconnectResult = {
   session: CollaborationCanvasCommandSessionView | null;
 };
 
+/** Renderer input is limited to an opaque canvas id; main resolves all local paths. */
+export type CollaborationContentAuthorityCanvasInput = { canvasId: string };
+export type CollaborationContentAuthorityView = ContentVersionDesktopReadModel;
+
 export const collaborationInvokeChannels = {
   getCollaborationStatus: "planweave-collaboration:getStatus",
   upsertCollaborationProfile: "planweave-collaboration:upsertProfile",
@@ -480,6 +485,11 @@ export const collaborationInvokeChannels = {
   reconnectCollaborationCanvas: "planweave-collaboration:reconnectCanvas",
   bindCollaborationCanvasCommandSession: "planweave-collaboration:bindCanvasCommandSession",
   getCollaborationCanvasCommandSession: "planweave-collaboration:getCanvasCommandSession",
+  bindCollaborationContentAuthority: "planweave-collaboration:bindContentAuthority",
+  getCollaborationContentAuthority: "planweave-collaboration:getContentAuthority",
+  refreshCollaborationContentAuthority: "planweave-collaboration:refreshContentAuthority",
+  publishCollaborationInitialContent: "planweave-collaboration:publishInitialContent",
+  materializeCollaborationContentHead: "planweave-collaboration:materializeContentHead",
   listCollaborationMembers: "planweave-collaboration:listMembers",
   listCollaborationDevices: "planweave-collaboration:listDevices",
   listCollaborationInvitations: "planweave-collaboration:listInvitations",
@@ -576,6 +586,13 @@ export type PlanWeaveCollaborationApi = {
     input: CollaborationCanvasSessionInput
   ) => Promise<CollaborationCanvasCommandSessionView | null>;
   getCollaborationCanvasCommandSession: () => Promise<CollaborationCanvasCommandSessionView | null>;
+  bindCollaborationContentAuthority: (
+    input: CollaborationContentAuthorityCanvasInput
+  ) => Promise<CollaborationContentAuthorityView>;
+  getCollaborationContentAuthority: () => Promise<CollaborationContentAuthorityView | null>;
+  refreshCollaborationContentAuthority: () => Promise<CollaborationContentAuthorityView>;
+  publishCollaborationInitialContent: () => Promise<CollaborationContentAuthorityView>;
+  materializeCollaborationContentHead: () => Promise<CollaborationContentAuthorityView>;
   listCollaborationMembers: (input?: CollaborationPageQueryInput) => Promise<HumanMemberPage>;
   listCollaborationDevices: (input?: CollaborationDeviceListQueryInput) => Promise<HumanDevicePage>;
   listCollaborationInvitations: (

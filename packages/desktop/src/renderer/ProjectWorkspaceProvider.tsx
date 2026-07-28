@@ -251,7 +251,9 @@ export function ProjectWorkspaceProvider({
   const sharedCanvasCommands = useSharedCanvasCommands({
     api: collaborationBridge,
     canvasId: selectedCanvasId,
-    enabled: collaborationSurface.sessionConnected && Boolean(selectedProject),
+    // A configured shared project remains read-only while offline; package writers must not
+    // fall through to local direct writes merely because its session disconnected.
+    enabled: Boolean(selectedProject),
     profileId: collaborationSurface.activeProfileId,
     selectedProjectId: selectedProject?.projectId ?? null,
     activeProjectId: collaborationSurface.activeProjectId,
