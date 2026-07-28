@@ -349,7 +349,7 @@ describe("preload bridge invocation", () => {
         options: { tmuxEnabled: false },
         error: null,
         startedAt: "2026-06-16T00:00:00.000Z",
-        updatedAt: "2026-06-16T00:00:01.000Z"
+        updatedAt: "2026-06-16T00:00:01.000Z",
       },
       currentRef: "T-001#B-001",
       latestRecordId: null,
@@ -499,7 +499,17 @@ describe("preload bridge invocation", () => {
       error: null,
       progress: null,
       update: { version: "0.1.2", releaseDate: null, releaseName: null },
-      updatedAt: "2026-06-19T00:00:01.000Z"
+      updatedAt: "2026-06-19T00:00:01.000Z",
+    workspaceConnection: {
+      schemaVersion: "workspace-setup/v1",
+      status: "local_only",
+      profile: null,
+      workspaceId: null,
+      workspaceDisplayName: null,
+      connectedAt: null,
+      error: null
+    },
+    workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
     };
     electronMock.ipcRenderer.invoke.mockResolvedValue(state);
 
@@ -620,7 +630,17 @@ describe("preload bridge invocation", () => {
         autoStart: true
       },
       downloadUrl: "https://github.com/openai/tunnel-client/releases/latest",
-      updatedAt: "2026-06-19T00:00:00.000Z"
+      updatedAt: "2026-06-19T00:00:00.000Z",
+    workspaceConnection: {
+      schemaVersion: "workspace-setup/v1",
+      status: "local_only",
+      profile: null,
+      workspaceId: null,
+      workspaceDisplayName: null,
+      connectedAt: null,
+      error: null
+    },
+    workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
     };
     electronMock.ipcRenderer.invoke.mockResolvedValue(status);
 
@@ -707,7 +727,17 @@ describe("preload bridge invocation", () => {
         lastErrorCode: null,
         lastErrorMessage: null
       },
-      updatedAt: "2026-07-25T00:00:00.000Z"
+      updatedAt: "2026-07-25T00:00:00.000Z",
+    workspaceConnection: {
+      schemaVersion: "workspace-setup/v1",
+      status: "local_only",
+      profile: null,
+      workspaceId: null,
+      workspaceDisplayName: null,
+      connectedAt: null,
+      error: null
+    },
+    workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
     };
     electronMock.ipcRenderer.invoke.mockResolvedValue(status);
 
@@ -744,6 +774,18 @@ describe("preload bridge invocation", () => {
     });
     await api.connectCollaborationSession({ profileId: "profile-1" });
     await api.disconnectCollaborationSession();
+    await api.redeemCollaborationSetupCode({
+      serverBaseUrl: "https://collab.example.com/",
+      allowInsecureTransport: false,
+      setupCode: `pw_setup_${"A".repeat(43)}`,
+      displayName: "Demo"
+    });
+    await api.getActiveWorkspaceConnection();
+    await api.listWorkspacePicker({ cursor: 0, limit: 20 });
+    await api.selectWorkspaceConnection({ workspaceId: "workspace-1" });
+    await api.connectWorkspaceConnection();
+    await api.disconnectWorkspaceConnection();
+    await api.retryWorkspaceConnection();
     await api.startCollaborationPresence({ canvasId: "default" });
     await api.publishCollaborationPresence({ pointer: { x: 1, y: 2 }, selectionIds: [] });
     await api.stopCollaborationPresence();
@@ -783,6 +825,17 @@ describe("preload bridge invocation", () => {
     );
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       collaborationInvokeChannels.disconnectCollaborationSession
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.redeemCollaborationSetupCode,
+      expect.objectContaining({ displayName: "Demo" })
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.selectWorkspaceConnection,
+      { workspaceId: "workspace-1" }
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.retryWorkspaceConnection
     );
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       collaborationInvokeChannels.listCollaborationMembers,

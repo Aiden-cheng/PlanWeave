@@ -51,7 +51,7 @@ function connectedStatus(): CollaborationStatus {
         deviceCredentialPersistence: "persisted",
         deviceCredentialId: "device-1",
         humanPrincipalId: "human-1",
-        updatedAt: "2030-01-01T00:00:00.000Z"
+        updatedAt: "2030-01-01T00:00:00.000Z",
       }
     ],
     activeProfileId: "profile-1",
@@ -64,7 +64,17 @@ function connectedStatus(): CollaborationStatus {
       lastErrorCode: null,
       lastErrorMessage: null
     },
-    updatedAt: "2030-01-01T00:00:00.000Z"
+    updatedAt: "2030-01-01T00:00:00.000Z",
+  workspaceConnection: {
+    schemaVersion: "workspace-setup/v1",
+    status: "local_only",
+    profile: null,
+    workspaceId: null,
+    workspaceDisplayName: null,
+    connectedAt: null,
+    error: null
+  },
+  workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
   };
 }
 

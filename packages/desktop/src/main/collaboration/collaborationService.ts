@@ -32,7 +32,9 @@ import {
   type ResponsibilityReadModel,
   type ReviewAssignmentReadModel,
   type WorkAuthorityProjection,
-  type WorkItemRef
+  type WorkItemRef,
+  type ActiveWorkspaceConnectionView,
+  type WorkspacePickerPage
 } from "@planweave-ai/collaboration-contracts";
 import {
   assertNoSmuggledCollaborationSecrets,
@@ -50,7 +52,6 @@ import {
   type CollaborationInvitationCreateView,
   type CollaborationObserverSignal,
   type CollaborationPresenceSignal,
-  type CollaborationProfileView,
   type CollaborationSessionPhase,
   type CollaborationStatus,
   type CollaborationUpsertProfileInput
@@ -81,6 +82,14 @@ import {
 } from "./collaborationProfileStore.js";
 import { collaborationCredentialVaultPaths } from "./collaborationCredentialVault.js";
 import { collaborationProfileStorePaths } from "./collaborationProfileStore.js";
+import { CollaborationWorkspaceConnection } from "./collaborationWorkspaceConnection.js";
+import { CollaborationWorkspaceConnectionFacade } from "./collaborationWorkspaceConnectionFacade.js";
+import { buildCollaborationStatus } from "./collaborationStatusView.js";
+import {
+  WorkspaceConnectionProfileStore,
+  type WorkspaceConnectionProfileStorePaths,
+  workspaceConnectionProfileStorePaths
+} from "./workspaceConnectionProfileStore.js";
 import { redactCollaborationText } from "./redaction.js";
 
 export type CollaborationClientFactory = (
@@ -92,6 +101,8 @@ export type CollaborationServiceOptions = {
   vault?: CollaborationCredentialVault;
   safeStorage?: CollaborationSafeStoragePort;
   profileStorePaths?: CollaborationProfileStorePaths;
+  workspaceProfileStore?: WorkspaceConnectionProfileStore;
+  workspaceProfileStorePaths?: WorkspaceConnectionProfileStorePaths;
   credentialsPath?: string;
   createClient?: CollaborationClientFactory;
   request?: typeof fetch;
@@ -100,33 +111,6 @@ export type CollaborationServiceOptions = {
   onObserverSignal?: (signal: CollaborationObserverSignal) => void;
   onPresenceSignal?: (signal: CollaborationPresenceSignal) => void;
 };
-
-function nowIso(clock?: { now(): Date }): string {
-  return (clock?.now() ?? new Date()).toISOString();
-}
-
-function toPublicProfile(
-  profile: CollaborationConnectionProfile & { updatedAt: string },
-  credential: {
-    hasDeviceCredential: boolean;
-    deviceCredentialPersistence: CollaborationProfileView["deviceCredentialPersistence"];
-    deviceCredentialId: string | null;
-    humanPrincipalId: string | null;
-  }
-): CollaborationProfileView {
-  return {
-    profileId: profile.profileId,
-    displayName: profile.displayName,
-    serverBaseUrl: profile.serverBaseUrl,
-    projectId: profile.projectId,
-    allowInsecureTransport: profile.allowInsecureTransport,
-    hasDeviceCredential: credential.hasDeviceCredential,
-    deviceCredentialPersistence: credential.deviceCredentialPersistence,
-    deviceCredentialId: credential.deviceCredentialId,
-    humanPrincipalId: credential.humanPrincipalId,
-    updatedAt: profile.updatedAt
-  };
-}
 
 function stripAuthHandoff(
   response: HumanBootstrapResponse | HumanConsumeInvitationResponse,
@@ -169,6 +153,9 @@ export class CollaborationService {
   private readonly canvasCommands: CollaborationCanvasCommandFacade;
   private readonly remoteOperations: CollaborationRemoteOperationsFacade;
   private readonly readMutations: CollaborationReadMutationsFacade;
+  private readonly workspaceConnection: CollaborationWorkspaceConnection;
+  private readonly workspaceConnectionFacade: CollaborationWorkspaceConnectionFacade;
+  private workspaceHydrated = false;
 
   private client: CollaborationClient | null = null;
   private clientProfileId: string | null = null;
@@ -222,6 +209,27 @@ export class CollaborationService {
       (operation) => this.withActiveClient(operation),
       (client, workItem) => this.toAuthorityScope(client, workItem)
     );
+    this.workspaceConnection = new CollaborationWorkspaceConnection({
+      store:
+        options.workspaceProfileStore ??
+        new WorkspaceConnectionProfileStore(
+          options.workspaceProfileStorePaths ?? workspaceConnectionProfileStorePaths()
+        ),
+      vault: this.vault,
+      request: options.request,
+      clock: options.clock
+    });
+    this.workspaceConnectionFacade = new CollaborationWorkspaceConnectionFacade({
+      connection: this.workspaceConnection,
+      publishStatus: () => this.publishStatus(),
+      setSession: (phase, detail, error) => this.setSession(phase, detail, error)
+    });
+  }
+
+  private async ensureWorkspaceHydrated(): Promise<void> {
+    if (this.workspaceHydrated) return;
+    await this.workspaceConnection.hydrate();
+    this.workspaceHydrated = true;
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -256,58 +264,22 @@ export class CollaborationService {
   }
 
   private async buildStatus(): Promise<CollaborationStatus> {
-    const documentProfiles = await this.profiles.list();
-    const activeProfileId = await this.profiles.getActiveProfileId();
-    const profiles: CollaborationProfileView[] = [];
-    for (const profile of documentProfiles) {
-      const persistence = await this.vault.persistenceFor(profile.profileId);
-      const metadata = await this.vault.getMetadata(profile.profileId);
-      profiles.push(
-        toPublicProfile(profile, {
-          hasDeviceCredential: persistence !== "missing",
-          deviceCredentialPersistence: persistence,
-          deviceCredentialId: metadata?.deviceCredentialId ?? null,
-          humanPrincipalId: metadata?.humanPrincipalId ?? null
-        })
-      );
-    }
-
-    const hasSessionOnly = await this.vault.hasAnySessionOnlyCredential();
-    // Also warn when active profile has session-only credential.
-    let nonPersistenceWarning: string | null = null;
-    if (this.vault.storageAvailability() === "unavailable") {
-      const anyCredential = profiles.some((profile) => profile.hasDeviceCredential);
-      if (anyCredential || hasSessionOnly) {
-        nonPersistenceWarning = COLLABORATION_SESSION_ONLY_WARNING;
-      }
-    } else {
-      const sessionOnlyProfile = profiles.find(
-        (profile) => profile.deviceCredentialPersistence === "session-only"
-      );
-      if (sessionOnlyProfile) {
-        nonPersistenceWarning = COLLABORATION_SESSION_ONLY_WARNING;
-      }
-    }
-
-    let detail = this.sessionDetail;
-    if (this.observerStatus.state !== "stopped" && this.client) {
-      detail = `observer:${this.observerStatus.state}`;
-    }
-
-    return {
-      profiles,
-      activeProfileId,
-      credentialStorage: this.vault.storageAvailability(),
-      nonPersistenceWarning,
+    await this.ensureWorkspaceHydrated();
+    return buildCollaborationStatus({
+      profiles: this.profiles,
+      vault: this.vault,
+      workspaceConnection: this.workspaceConnection,
       session: {
         phase: this.sessionPhase,
-        activeProfileId: this.clientProfileId ?? activeProfileId,
-        detail,
+        detail: this.sessionDetail,
         lastErrorCode: this.lastErrorCode,
-        lastErrorMessage: this.lastErrorMessage
+        lastErrorMessage: this.lastErrorMessage,
+        clientProfileId: this.clientProfileId,
+        observerStatus: this.observerStatus,
+        client: this.client
       },
-      updatedAt: nowIso(this.clock)
-    };
+      clock: this.clock
+    });
   }
 
   private async publishStatus(): Promise<CollaborationStatus> {
@@ -683,6 +655,62 @@ export class CollaborationService {
       await this.disposeClient("disconnect");
       this.setSession("idle", null, null);
       return this.publishStatus();
+    });
+  }
+
+  async redeemSetupCode(input: unknown): Promise<CollaborationStatus> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      await this.ensureWorkspaceHydrated();
+      return this.workspaceConnectionFacade.redeemSetupCode(input);
+    });
+  }
+
+  async getActiveWorkspaceConnection(): Promise<ActiveWorkspaceConnectionView> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      await this.ensureWorkspaceHydrated();
+      return this.workspaceConnectionFacade.getActiveWorkspaceConnection();
+    });
+  }
+
+  async listWorkspacePicker(input: unknown = {}): Promise<WorkspacePickerPage> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      await this.ensureWorkspaceHydrated();
+      return this.workspaceConnectionFacade.listWorkspacePicker(input);
+    });
+  }
+
+  async selectWorkspaceConnection(input: unknown): Promise<CollaborationStatus> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      await this.ensureWorkspaceHydrated();
+      return this.workspaceConnectionFacade.selectWorkspaceConnection(input);
+    });
+  }
+
+  async connectWorkspaceConnection(): Promise<CollaborationStatus> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      await this.ensureWorkspaceHydrated();
+      return this.workspaceConnectionFacade.connectWorkspaceConnection();
+    });
+  }
+
+  async disconnectWorkspaceConnection(): Promise<CollaborationStatus> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      await this.ensureWorkspaceHydrated();
+      return this.workspaceConnectionFacade.disconnectWorkspaceConnection();
+    });
+  }
+
+  async retryWorkspaceConnection(): Promise<CollaborationStatus> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      await this.ensureWorkspaceHydrated();
+      return this.workspaceConnectionFacade.retryWorkspaceConnection();
     });
   }
 

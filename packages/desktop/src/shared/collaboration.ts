@@ -6,8 +6,13 @@ import {
   canvasPresencePointerSchema,
   canvasPresenceSelectionIdsSchema,
   collaborationConnectionProfileSchema,
+  collaborationServerOriginSchema,
   commentContentSha256Schema,
   createPendingAttachmentRequestSchema,
+  humanDisplayNameSchema,
+  humanDeviceLabelSchema,
+  setupCodeTokenSchema,
+  type ActiveWorkspaceConnectionView,
   type CanvasAccessPage,
   type CreatePackageSnapshotRequest,
   type CreatePackageSnapshotResult,
@@ -57,7 +62,8 @@ import {
   type RestorePackageSnapshotResult,
   type ReviewAssignmentReadModel,
   type ExecutionTargetReadModel,
-  type WorkAuthorityProjection
+  type WorkAuthorityProjection,
+  type WorkspacePickerPage
 } from "@planweave-ai/collaboration-contracts";
 import type {
   CollaborationActivityListQueryInput,
@@ -125,6 +131,14 @@ export type CollaborationStatus = {
    */
   nonPersistenceWarning: string | null;
   session: CollaborationSessionView;
+  /**
+   * Single Server/Workspace connection. Defaults to local_only until the user
+   * explicitly redeems a setup code or connects a stored Workspace profile.
+   * Never includes secrets.
+   */
+  workspaceConnection: ActiveWorkspaceConnectionView;
+  /** Redacted Workspace picker rows derived from stored connection profiles. */
+  workspacePicker: WorkspacePickerPage;
   updatedAt: string;
 };
 
@@ -149,7 +163,13 @@ const forbiddenSecretKeys = [
   "Authorization",
   "credentialPath",
   "credentialsPath",
-  "existingDeviceToken"
+  "existingDeviceToken",
+  "setupCode",
+  "operatorToken",
+  "hostCredentialToken",
+  "hostEnrollmentCode",
+  "enrollmentCode",
+  "projectRoot"
 ] as const;
 
 /**
@@ -206,6 +226,33 @@ export const collaborationBootstrapInputSchema = z
   })
   .strict();
 export type CollaborationBootstrapInput = z.infer<typeof collaborationBootstrapInputSchema>;
+
+/**
+ * Dedicated setup-code redeem input. `setupCode` is accepted only on this method;
+ * main stores the resulting device token and never returns secrets.
+ */
+export const collaborationRedeemSetupCodeInputSchema = z
+  .object({
+    serverBaseUrl: collaborationServerOriginSchema,
+    allowInsecureTransport: z.boolean().default(false),
+    setupCode: setupCodeTokenSchema,
+    displayName: humanDisplayNameSchema,
+    deviceLabel: humanDeviceLabelSchema.optional()
+  })
+  .strict();
+export type CollaborationRedeemSetupCodeInput = z.infer<
+  typeof collaborationRedeemSetupCodeInputSchema
+>;
+
+export const collaborationWorkspacePickerQuerySchema = z
+  .object({
+    cursor: z.number().int().nonnegative().default(0),
+    limit: z.number().int().min(1).max(100).default(50)
+  })
+  .strict();
+export type CollaborationWorkspacePickerQuery = z.infer<
+  typeof collaborationWorkspacePickerQuerySchema
+>;
 
 /**
  * Invitation consume from renderer.
@@ -418,6 +465,13 @@ export const collaborationInvokeChannels = {
   consumeCollaborationInvitation: "planweave-collaboration:consumeInvitation",
   connectCollaborationSession: "planweave-collaboration:connectSession",
   disconnectCollaborationSession: "planweave-collaboration:disconnectSession",
+  redeemCollaborationSetupCode: "planweave-collaboration:redeemSetupCode",
+  getActiveWorkspaceConnection: "planweave-collaboration:getActiveWorkspaceConnection",
+  listWorkspacePicker: "planweave-collaboration:listWorkspacePicker",
+  selectWorkspaceConnection: "planweave-collaboration:selectWorkspaceConnection",
+  connectWorkspaceConnection: "planweave-collaboration:connectWorkspaceConnection",
+  disconnectWorkspaceConnection: "planweave-collaboration:disconnectWorkspaceConnection",
+  retryWorkspaceConnection: "planweave-collaboration:retryWorkspaceConnection",
   startCollaborationPresence: "planweave-collaboration:startPresence",
   stopCollaborationPresence: "planweave-collaboration:stopPresence",
   publishCollaborationPresence: "planweave-collaboration:publishPresence",
@@ -493,6 +547,23 @@ export type PlanWeaveCollaborationApi = {
   ) => Promise<CollaborationAuthHandoffView>;
   connectCollaborationSession: (input: CollaborationProfileIdInput) => Promise<CollaborationStatus>;
   disconnectCollaborationSession: () => Promise<CollaborationStatus>;
+  /**
+   * Redeem a one-time device setup code. Accepts setupCode once; never returns
+   * device tokens or the submitted code.
+   */
+  redeemCollaborationSetupCode: (
+    input: CollaborationRedeemSetupCodeInput
+  ) => Promise<CollaborationStatus>;
+  getActiveWorkspaceConnection: () => Promise<ActiveWorkspaceConnectionView>;
+  listWorkspacePicker: (
+    input?: CollaborationWorkspacePickerQuery
+  ) => Promise<WorkspacePickerPage>;
+  selectWorkspaceConnection: (
+    input: CollaborationProfileIdInput | { workspaceId: string }
+  ) => Promise<CollaborationStatus>;
+  connectWorkspaceConnection: () => Promise<CollaborationStatus>;
+  disconnectWorkspaceConnection: () => Promise<CollaborationStatus>;
+  retryWorkspaceConnection: () => Promise<CollaborationStatus>;
   startCollaborationPresence: (input: CollaborationPresenceCanvasInput) => Promise<void>;
   stopCollaborationPresence: () => Promise<void>;
   publishCollaborationPresence: (input: CollaborationPresenceUpdateInput) => Promise<void>;

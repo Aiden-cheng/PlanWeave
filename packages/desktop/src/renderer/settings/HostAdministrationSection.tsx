@@ -493,6 +493,11 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
         createGrant={createGrant}
         dismissGrant={dismissGrant}
         grant={grant}
+        handoffState={busy ? "pending" : grant ? "ready" : error ? "failed" : "idle"}
+        handoffError={error}
+        onRetry={() => {
+          void createGrant();
+        }}
         t={t}
       />
     </div>

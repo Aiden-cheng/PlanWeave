@@ -21,7 +21,17 @@ function mockPort(): CollaborationReadBridgePort {
         lastErrorCode: null,
         lastErrorMessage: null
       },
-      updatedAt: "2030-01-01T00:00:00.000Z"
+      updatedAt: "2030-01-01T00:00:00.000Z",
+    workspaceConnection: {
+      schemaVersion: "workspace-setup/v1",
+      status: "local_only",
+      profile: null,
+      workspaceId: null,
+      workspaceDisplayName: null,
+      connectedAt: null,
+      error: null
+    },
+    workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
     }),
     listCollaborationMembers: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
     listCollaborationAssignments: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),

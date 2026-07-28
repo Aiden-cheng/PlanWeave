@@ -1,4 +1,8 @@
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
+import type {
+  ActiveWorkspaceConnectionView,
+  WorkspacePickerItem
+} from "@planweave-ai/collaboration-contracts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,7 +19,7 @@ export type CollaborationConnectFormProps = {
   onRequestClose?: () => void;
 };
 
-type ConnectMode = "join" | "bootstrap" | "connect";
+type ConnectMode = "setup" | "join" | "bootstrap" | "connect";
 
 function newProfileId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -24,9 +28,32 @@ function newProfileId(): string {
   return `profile-${Date.now()}`;
 }
 
+function workspaceStatusLabel(
+  connection: ActiveWorkspaceConnectionView | null | undefined,
+  t: ReturnType<typeof createTranslator>
+): string {
+  if (!connection) return t("peopleWorkspaceLocalOnly");
+  switch (connection.status) {
+    case "local_only":
+      return t("peopleWorkspaceLocalOnly");
+    case "connecting":
+      return t("peopleWorkspaceConnecting");
+    case "connected":
+      return t("peopleWorkspaceConnected");
+    case "reconnecting":
+      return t("peopleWorkspaceReconnecting");
+    case "error":
+      return t("peopleWorkspaceError");
+    case "disconnected":
+      return t("peopleWorkspaceDisconnected");
+    default:
+      return connection.status;
+  }
+}
+
 /**
- * Minimal join / bootstrap / connect onboarding.
- * Honest about invitation bearer trust and safeStorage/session-only status.
+ * Join / bootstrap / setup-code / connect onboarding.
+ * Setup codes and device tokens are never retained in renderer state.
  */
 export function CollaborationConnectForm({
   api,
@@ -36,11 +63,12 @@ export function CollaborationConnectForm({
   onRequestClose
 }: CollaborationConnectFormProps) {
   const formId = useId();
-  const [mode, setMode] = useState<ConnectMode>("join");
+  const [mode, setMode] = useState<ConnectMode>("setup");
   const [displayName, setDisplayName] = useState("");
   const [serverBaseUrl, setServerBaseUrl] = useState("https://");
   const [projectId, setProjectId] = useState("");
   const [invitationToken, setInvitationToken] = useState("");
+  const setupCodeInputRef = useRef<HTMLInputElement>(null);
   const [allowInsecureTransport, setAllowInsecureTransport] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +79,8 @@ export function CollaborationConnectForm({
     profiles.find((profile) => profile.profileId === status?.activeProfileId) ??
     profiles[0] ??
     null;
+  const workspaceConnection = status?.workspaceConnection ?? null;
+  const workspacePickerItems: WorkspacePickerItem[] = status?.workspacePicker?.items ?? [];
 
   const submit = async () => {
     if (!api || busy) return;
@@ -58,7 +88,30 @@ export function CollaborationConnectForm({
     setError(null);
     setInfo(null);
     try {
+      if (mode === "setup") {
+        const setupCodeInput = setupCodeInputRef.current;
+        if (!setupCodeInput) {
+          throw new Error("Setup code input is unavailable.");
+        }
+        const code = setupCodeInput.value.trim();
+        // Keep the one-time code out of React state and clear the element before IPC.
+        setupCodeInput.value = "";
+        await api.redeemCollaborationSetupCode({
+          serverBaseUrl: serverBaseUrl.trim(),
+          allowInsecureTransport,
+          setupCode: code,
+          displayName: displayName.trim() || t("peopleDefaultProfileName")
+        });
+        onConnected?.();
+        return;
+      }
+
       if (mode === "connect") {
+        if (workspaceConnection?.status === "disconnected" || workspaceConnection?.status === "error") {
+          await api.connectWorkspaceConnection();
+          onConnected?.();
+          return;
+        }
         if (!activeProfile) {
           throw new Error(t("peopleNoProfileToConnect"));
         }
@@ -119,10 +172,129 @@ export function CollaborationConnectForm({
     }
   };
 
+  const selectWorkspace = async (workspaceId: string) => {
+    if (!api || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.selectWorkspaceConnection({ workspaceId });
+      onConnected?.();
+    } catch (selectError) {
+      setError(collaborationErrorMessage(selectError));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const disconnectWorkspace = async () => {
+    if (!api || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.disconnectWorkspaceConnection();
+    } catch (disconnectError) {
+      setError(collaborationErrorMessage(disconnectError));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const retryWorkspace = async () => {
+    if (!api || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.retryWorkspaceConnection();
+      onConnected?.();
+    } catch (retryError) {
+      setError(collaborationErrorMessage(retryError));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-3" data-testid="people-connect-form">
+      <div
+        className="rounded-md border border-border/70 bg-muted/20 px-2 py-1.5 text-xs"
+        data-testid="people-workspace-connection-status"
+        data-status={workspaceConnection?.status ?? "local_only"}
+        role="status"
+      >
+        <div className="font-medium text-text-strong">
+          {workspaceStatusLabel(workspaceConnection, t)}
+        </div>
+        {workspaceConnection?.workspaceDisplayName ? (
+          <div className="text-muted-foreground">{workspaceConnection.workspaceDisplayName}</div>
+        ) : (
+          <div className="text-muted-foreground">{t("peopleWorkspaceLocalOnlyHint")}</div>
+        )}
+        {workspaceConnection?.profile?.serverBaseUrl ? (
+          <div className="text-muted-foreground">{workspaceConnection.profile.serverBaseUrl}</div>
+        ) : null}
+        {workspaceConnection?.status === "error" && workspaceConnection.error ? (
+          <div className="mt-1 text-destructive" data-testid="people-workspace-connection-error">
+            {workspaceConnection.error.message ?? workspaceConnection.error.code}
+          </div>
+        ) : null}
+        <div className="mt-2 flex flex-wrap gap-1">
+          {workspaceConnection?.status === "error" && workspaceConnection.error?.retryable ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              data-testid="people-workspace-retry"
+              disabled={busy || !api}
+              onClick={() => void retryWorkspace()}
+            >
+              {t("peopleWorkspaceRetry")}
+            </Button>
+          ) : null}
+          {workspaceConnection && workspaceConnection.status !== "local_only" ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              data-testid="people-workspace-disconnect"
+              disabled={busy || !api}
+              onClick={() => void disconnectWorkspace()}
+            >
+              {t("peopleWorkspaceStayLocal")}
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      {workspacePickerItems.length > 0 ? (
+        <div
+          className="flex flex-col gap-1"
+          data-testid="people-workspace-picker"
+          role="listbox"
+          aria-label={t("peopleWorkspacePicker")}
+        >
+          <div className="text-xs font-medium text-text-strong">{t("peopleWorkspacePicker")}</div>
+          {workspacePickerItems.map((item) => (
+            <button
+              key={item.workspaceId}
+              type="button"
+              role="option"
+              data-testid={`people-workspace-picker-item-${item.workspaceId}`}
+              className="rounded-md border border-border/70 bg-background px-2 py-1.5 text-left text-xs hover:bg-muted/40"
+              disabled={busy || !api}
+              onClick={() => void selectWorkspace(item.workspaceId)}
+            >
+              <div className="font-medium text-text-strong">{item.displayName}</div>
+              <div className="text-muted-foreground">
+                {item.role ?? t("peopleWorkspaceRoleUnknown")}
+                {item.membershipActive ? "" : ` · ${t("peopleWorkspaceMembershipInactive")}`}
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       <p className="text-xs text-muted-foreground" data-testid="people-invite-trust-note">
-        {t("peopleInvitationBearerTrustNote")}
+        {mode === "setup" ? t("peopleSetupCodeTrustNote") : t("peopleInvitationBearerTrustNote")}
       </p>
       {status?.credentialStorage === "unavailable" || status?.nonPersistenceWarning ? (
         <p
@@ -137,6 +309,7 @@ export function CollaborationConnectForm({
       <div className="flex flex-wrap gap-1" role="tablist" aria-label={t("peopleConnectModes")}>
         {(
           [
+            ["setup", "peopleConnectSetupCode"],
             ["join", "peopleConnectJoin"],
             ["bootstrap", "peopleConnectBootstrap"],
             ["connect", "peopleConnectExisting"]
@@ -156,7 +329,7 @@ export function CollaborationConnectForm({
         ))}
       </div>
 
-      {mode !== "connect" ? (
+      {mode === "setup" ? (
         <div className="flex flex-col gap-2">
           <div className="flex flex-col gap-1">
             <Label htmlFor={`${formId}-name`}>{t("peopleDisplayName")}</Label>
@@ -172,6 +345,51 @@ export function CollaborationConnectForm({
             <Label htmlFor={`${formId}-url`}>{t("peopleServerUrl")}</Label>
             <Input
               id={`${formId}-url`}
+              data-testid="people-connect-server-url"
+              value={serverBaseUrl}
+              onChange={(event) => setServerBaseUrl(event.target.value)}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label htmlFor={`${formId}-setup`}>{t("peopleSetupCode")}</Label>
+            <Input
+              id={`${formId}-setup`}
+              data-testid="people-connect-setup-code"
+              ref={setupCodeInputRef}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </div>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              data-testid="people-connect-allow-insecure"
+              checked={allowInsecureTransport}
+              onChange={(event) => setAllowInsecureTransport(event.target.checked)}
+            />
+            {t("peopleAllowInsecureTransport")}
+          </label>
+        </div>
+      ) : null}
+
+      {mode === "join" || mode === "bootstrap" ? (
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-1">
+            <Label htmlFor={`${formId}-name-legacy`}>{t("peopleDisplayName")}</Label>
+            <Input
+              id={`${formId}-name-legacy`}
+              data-testid="people-connect-display-name"
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+              autoComplete="nickname"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label htmlFor={`${formId}-url-legacy`}>{t("peopleServerUrl")}</Label>
+            <Input
+              id={`${formId}-url-legacy`}
               data-testid="people-connect-server-url"
               value={serverBaseUrl}
               onChange={(event) => setServerBaseUrl(event.target.value)}
@@ -213,15 +431,28 @@ export function CollaborationConnectForm({
             {t("peopleAllowInsecureTransport")}
           </label>
         </div>
-      ) : (
+      ) : null}
+
+      {mode === "connect" ? (
         <div className="rounded-md border border-border/70 bg-muted/20 px-2 py-1.5 text-xs">
-          {activeProfile ? (
+          {activeProfile || workspaceConnection?.profile ? (
             <div data-testid="people-connect-active-profile">
-              <div className="font-medium text-text-strong">{activeProfile.displayName}</div>
-              <div className="text-muted-foreground">{activeProfile.serverBaseUrl}</div>
-              <div className="text-muted-foreground">{activeProfile.projectId}</div>
+              <div className="font-medium text-text-strong">
+                {workspaceConnection?.workspaceDisplayName ?? activeProfile?.displayName}
+              </div>
               <div className="text-muted-foreground">
-                {activeProfile.hasDeviceCredential
+                {workspaceConnection?.profile?.serverBaseUrl ?? activeProfile?.serverBaseUrl}
+              </div>
+              {activeProfile?.projectId ? (
+                <div className="text-muted-foreground">{activeProfile.projectId}</div>
+              ) : null}
+              {workspaceConnection?.workspaceId ? (
+                <div className="text-muted-foreground">{workspaceConnection.workspaceId}</div>
+              ) : null}
+              <div className="text-muted-foreground">
+                {activeProfile?.hasDeviceCredential ||
+                workspaceConnection?.status === "connected" ||
+                workspaceConnection?.status === "disconnected"
                   ? t("peopleCredentialPresent")
                   : t("peopleMissingCredential")}
               </div>
@@ -230,7 +461,7 @@ export function CollaborationConnectForm({
             <div data-testid="people-connect-no-profile">{t("peopleNoProfileToConnect")}</div>
           )}
         </div>
-      )}
+      ) : null}
 
       {error ? (
         <div

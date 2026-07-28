@@ -523,6 +523,13 @@ export const enCatalog = {
   hostAdminBootstrapTitle: "Self-managed VPS bootstrap",
   hostAdminBootstrapDescription:
     "Generate a bounded enrollment handoff for an operator to run on a VPS you control.",
+  hostAdminBootstrapIdle: "Host bootstrap is idle.",
+  hostAdminBootstrapPending: "Creating Host enrollment handoff…",
+  hostAdminBootstrapReady: "Host enrollment handoff is ready (shown once).",
+  hostAdminBootstrapFailed: "Host bootstrap failed.",
+  hostAdminBootstrapExpired: "Host enrollment handoff expired.",
+  hostAdminBootstrapRevoked: "Host enrollment handoff was revoked.",
+  hostAdminBootstrapRetry: "Retry bootstrap",
   hostAdminConfigPath: "Absolute config path on the Host",
   hostAdminDataDirectory: "Absolute data directory on the Host",
   hostAdminWorkspaceRoot: "Absolute workspace root on the Host",
@@ -976,6 +983,7 @@ export const enCatalog = {
   peopleDeviceLastSeen: "Last seen",
   peopleDeviceRevoked: "Revoked",
   peopleConnectModes: "Connection mode",
+  peopleConnectSetupCode: "Setup code",
   peopleConnectJoin: "Join with invitation",
   peopleConnectBootstrap: "Bootstrap owner",
   peopleConnectExisting: "Connect existing",
@@ -985,6 +993,7 @@ export const enCatalog = {
   peopleDisplayName: "Display name",
   peopleServerUrl: "Server URL",
   peopleProjectId: "Project ID",
+  peopleSetupCode: "Setup code",
   peopleAllowInsecureTransport: "Allow insecure loopback HTTP",
   peopleDefaultProfileName: "Collaboration",
   peopleNoProfileToConnect: "No collaboration profile yet. Join or bootstrap first.",
@@ -992,8 +1001,23 @@ export const enCatalog = {
   peopleCredentialPresent: "Device credential available",
   peopleInvitationBearerTrustNote:
     "Invitation tokens are bearer secrets: anyone with the token can join as a project member until it expires or is revoked. Device credentials stay in the main process (encrypted when safeStorage is available).",
+  peopleSetupCodeTrustNote:
+    "Setup codes are one-time and Workspace-scoped. Desktop main redeems the code and stores the device credential; the code is cleared from this form immediately and never written to logs or URLs.",
   peopleSessionOnlyCredentialWarning:
     "Electron safeStorage is unavailable. Your collaboration device credential is held only for this PlanWeave process and will not persist across restarts.",
+  peopleWorkspaceLocalOnly: "Local only",
+  peopleWorkspaceLocalOnlyHint:
+    "This project stays local until you explicitly connect with a setup code or stored Workspace.",
+  peopleWorkspaceConnecting: "Connecting to Workspace…",
+  peopleWorkspaceConnected: "Connected to Workspace",
+  peopleWorkspaceReconnecting: "Reconnecting to Workspace…",
+  peopleWorkspaceError: "Workspace connection error",
+  peopleWorkspaceDisconnected: "Workspace disconnected",
+  peopleWorkspaceRetry: "Retry connection",
+  peopleWorkspaceStayLocal: "Stay local",
+  peopleWorkspacePicker: "Workspaces",
+  peopleWorkspaceRoleUnknown: "Role unknown",
+  peopleWorkspaceMembershipInactive: "membership inactive",
 
   // Collaboration assignee picker (DX-002#B-002)
   assignee: "Assignee",

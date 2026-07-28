@@ -9,7 +9,9 @@ import {
   exampleHumanDeviceToken,
   exampleInvitationToken,
   exampleObserverCatchupRequired,
-  exampleObserverEvent
+  exampleObserverEvent,
+  exampleSetupCode,
+  exampleSetupCodeRedeemDeviceResponse
 } from "@planweave-ai/collaboration-contracts";
 import {
   CollaborationCredentialVault,
@@ -222,6 +224,7 @@ describe("CollaborationService IPC trust boundary", () => {
         paths: { credentialsPath: join(root, "credentials.json") },
         safeStorage
       }),
+      workspaceProfileStorePaths: { profilesPath: join(root, "workspace-profiles.json") },
       safeStorage
     });
   }
@@ -320,6 +323,47 @@ describe("CollaborationService IPC trust boundary", () => {
     expect(JSON.stringify(status)).not.toContain(exampleHumanDeviceToken);
     expect(JSON.stringify(status)).not.toContain("encryptedDeviceToken");
     expect(JSON.stringify(status)).not.toContain(join(root, "credentials.json"));
+  });
+
+  it("redeems a setup code in main and exposes only a redacted Workspace connection", async () => {
+    const root = await tempDir("planweave-collab-workspace-setup-");
+    const request = vi.fn(async () =>
+      new Response(JSON.stringify(exampleSetupCodeRedeemDeviceResponse), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    const service = new CollaborationService({
+      profileStore: new CollaborationProfileStore({ profilesPath: join(root, "profiles.json") }),
+      workspaceProfileStorePaths: { profilesPath: join(root, "workspace-profiles.json") },
+      vault: new CollaborationCredentialVault({
+        paths: { credentialsPath: join(root, "credentials.json") },
+        safeStorage: mockSafeStorage({ available: true })
+      }),
+      request
+    });
+
+    const status = await service.redeemSetupCode({
+      serverBaseUrl: "http://127.0.0.1:8787/",
+      allowInsecureTransport: true,
+      setupCode: exampleSetupCode,
+      displayName: "Ada"
+    });
+
+    expect(request).toHaveBeenCalledOnce();
+    expect(status.workspaceConnection.status).toBe("connected");
+    expect(status.workspaceConnection.workspaceId).toBe(
+      exampleSetupCodeRedeemDeviceResponse.connectionProfile.workspaceId
+    );
+    const statusJson = JSON.stringify(status);
+    expect(statusJson).not.toContain(exampleSetupCode);
+    expect(statusJson).not.toContain(exampleSetupCodeRedeemDeviceResponse.deviceToken);
+    expect(statusJson).not.toContain("encryptedDeviceToken");
+
+    const profileJson = await readFile(join(root, "workspace-profiles.json"), "utf8");
+    expect(profileJson).not.toContain(exampleSetupCodeRedeemDeviceResponse.deviceToken);
+    await service.disconnectWorkspaceConnection();
+    expect((await service.getStatus()).workspaceConnection.status).toBe("local_only");
   });
 
   it("bootstraps owner through main, stores token, and strips deviceToken from handoff", async () => {

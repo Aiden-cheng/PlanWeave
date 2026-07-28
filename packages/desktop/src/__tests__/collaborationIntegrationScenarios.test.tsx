@@ -55,7 +55,7 @@ function connectedStatus(
         deviceCredentialPersistence: "persisted",
         deviceCredentialId: "device-1",
         humanPrincipalId: "human-1",
-        updatedAt: "2030-01-01T00:00:00.000Z"
+        updatedAt: "2030-01-01T00:00:00.000Z",
       }
     ],
     activeProfileId: phase === "idle" ? null : "profile-1",
@@ -68,7 +68,17 @@ function connectedStatus(
       lastErrorCode: null,
       lastErrorMessage: null
     },
-    updatedAt: "2030-01-01T00:00:00.000Z"
+    updatedAt: "2030-01-01T00:00:00.000Z",
+  workspaceConnection: {
+    schemaVersion: "workspace-setup/v1",
+    status: "local_only",
+    profile: null,
+    workspaceId: null,
+    workspaceDisplayName: null,
+    connectedAt: null,
+    error: null
+  },
+  workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
   };
 }
 
@@ -333,7 +343,7 @@ function createScenarioApi(state: ScenarioState) {
           displayName: "Ada",
           role: "owner",
           createdAt: "2030-01-01T00:00:00.000Z",
-          updatedAt: "2030-01-01T00:00:00.000Z"
+          updatedAt: "2030-01-01T00:00:00.000Z",
         },
         {
           membershipId: "m-2",
@@ -342,7 +352,7 @@ function createScenarioApi(state: ScenarioState) {
           displayName: "Grace",
           role: "member",
           createdAt: "2030-01-01T00:00:00.000Z",
-          updatedAt: "2030-01-01T00:00:00.000Z"
+          updatedAt: "2030-01-01T00:00:00.000Z",
         }
       ],
       nextCursor: null
@@ -384,7 +394,7 @@ function createScenarioApi(state: ScenarioState) {
           displayName: "Grace",
           role: "member",
           createdAt: "2030-01-01T00:00:00.000Z",
-          updatedAt: "2030-01-01T00:00:00.000Z"
+          updatedAt: "2030-01-01T00:00:00.000Z",
         }
       ],
       hosts: [
@@ -571,7 +581,17 @@ describe("collaboration integration scenarios", () => {
             lastErrorCode: null,
             lastErrorMessage: null
           },
-          updatedAt: "2030-01-01T00:00:00.000Z"
+          workspaceConnection: {
+            schemaVersion: "workspace-setup/v1",
+            status: "local_only",
+            profile: null,
+            workspaceId: null,
+            workspaceDisplayName: null,
+            connectedAt: null,
+            error: null
+          },
+          workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null },
+          updatedAt: "2030-01-01T00:00:00.000Z",
         }}
         t={t}
         onConnected={onConnected}
@@ -579,6 +599,7 @@ describe("collaboration integration scenarios", () => {
     );
 
     expect(screen.getByTestId("people-connect-form")).toBeInTheDocument();
+    await user.click(screen.getByTestId("people-connect-mode-join"));
     await user.type(screen.getByTestId("people-connect-display-name"), "Ada");
     await user.clear(screen.getByTestId("people-connect-server-url"));
     await user.type(screen.getByTestId("people-connect-server-url"), "https://example.test");
@@ -594,6 +615,54 @@ describe("collaboration integration scenarios", () => {
       expect(api.connectCollaborationSession).toHaveBeenCalled();
       expect(onConnected).toHaveBeenCalled();
     });
+  });
+
+  it("redeems a setup code without retaining it in renderer state", async () => {
+    const user = userEvent.setup();
+    const redeemCollaborationSetupCode = vi.fn().mockResolvedValue(undefined);
+    const api = { redeemCollaborationSetupCode } as unknown as PlanWeaveCollaborationApi;
+
+    render(
+      <CollaborationConnectForm
+        api={api}
+        status={{
+          profiles: [],
+          activeProfileId: null,
+          credentialStorage: "available",
+          nonPersistenceWarning: null,
+          session: {
+            phase: "idle",
+            activeProfileId: null,
+            detail: null,
+            lastErrorCode: null,
+            lastErrorMessage: null
+          },
+          workspaceConnection: {
+            schemaVersion: "workspace-setup/v1",
+            status: "local_only",
+            profile: null,
+            workspaceId: null,
+            workspaceDisplayName: null,
+            connectedAt: null,
+            error: null
+          },
+          workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null },
+          updatedAt: "2030-01-01T00:00:00.000Z"
+        }}
+        t={t}
+      />
+    );
+
+    const setupCodeInput = screen.getByTestId("people-connect-setup-code");
+    await user.type(setupCodeInput, "pw_setup_test_code");
+    await user.click(screen.getByTestId("people-connect-submit"));
+
+    await waitFor(() => {
+      expect(redeemCollaborationSetupCode).toHaveBeenCalledWith(
+        expect.objectContaining({ setupCode: "pw_setup_test_code" })
+      );
+    });
+    expect(setupCodeInput).toHaveValue("");
   });
 
   it("covers members/Hosts and assignment-ready work surfaces", async () => {

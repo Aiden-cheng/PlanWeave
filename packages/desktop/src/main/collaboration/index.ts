@@ -56,6 +56,21 @@ export {
   type StoredCollaborationProfile
 } from "./collaborationProfileStore.js";
 export {
+  CollaborationSetupCodeClient,
+  setupCodeFailureMessage
+} from "./collaborationSetupCodeClient.js";
+export {
+  CollaborationWorkspaceConnection,
+  type CollaborationWorkspaceConnectionOptions
+} from "./collaborationWorkspaceConnection.js";
+export {
+  WorkspaceConnectionProfileStore,
+  workspaceConnectionProfileStorePaths,
+  type StoredWorkspaceConnectionProfile,
+  type WorkspaceConnectionProfilesDocument,
+  type WorkspaceConnectionProfileStorePaths
+} from "./workspaceConnectionProfileStore.js";
+export {
   CollaborationService,
   type CollaborationClientFactory,
   type CollaborationServiceOptions

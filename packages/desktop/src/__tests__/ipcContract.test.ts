@@ -141,6 +141,27 @@ describe("desktop IPC contract", () => {
     expect(collaborationInvokeChannels.disconnectCollaborationSession).toBe(
       "planweave-collaboration:disconnectSession"
     );
+    expect(collaborationInvokeChannels.redeemCollaborationSetupCode).toBe(
+      "planweave-collaboration:redeemSetupCode"
+    );
+    expect(collaborationInvokeChannels.getActiveWorkspaceConnection).toBe(
+      "planweave-collaboration:getActiveWorkspaceConnection"
+    );
+    expect(collaborationInvokeChannels.listWorkspacePicker).toBe(
+      "planweave-collaboration:listWorkspacePicker"
+    );
+    expect(collaborationInvokeChannels.selectWorkspaceConnection).toBe(
+      "planweave-collaboration:selectWorkspaceConnection"
+    );
+    expect(collaborationInvokeChannels.connectWorkspaceConnection).toBe(
+      "planweave-collaboration:connectWorkspaceConnection"
+    );
+    expect(collaborationInvokeChannels.disconnectWorkspaceConnection).toBe(
+      "planweave-collaboration:disconnectWorkspaceConnection"
+    );
+    expect(collaborationInvokeChannels.retryWorkspaceConnection).toBe(
+      "planweave-collaboration:retryWorkspaceConnection"
+    );
     expect(collaborationInvokeChannels.listCollaborationMembers).toBe(
       "planweave-collaboration:listMembers"
     );

@@ -32,8 +32,16 @@ export function HostBootstrapCard({
   createGrant,
   dismissGrant,
   grant,
-  t
-}: HostBootstrapCardProps) {
+  t,
+  handoffState = "idle",
+  handoffError = null,
+  onRetry
+}: HostBootstrapCardProps & {
+  /** Honest Host bootstrap lifecycle for pending/error/retry UI. */
+  handoffState?: "idle" | "pending" | "ready" | "failed" | "expired" | "revoked";
+  handoffError?: string | null;
+  onRetry?: () => void;
+}) {
   const locale = t("hostAdminLocale");
   const [configPath, setConfigPath] = useState("/etc/planweave/agent-host.json");
   const [dataDirectory, setDataDirectory] = useState("/var/lib/planweave-agent-host");
@@ -45,6 +53,16 @@ export function HostBootstrapCard({
   const [capabilities, setCapabilities] = useState("linux.x64");
   const [copied, setCopied] = useState<string | null>(null);
   const grantSecretRef = useRef<HTMLInputElement>(null);
+  const resolvedHandoffState =
+    handoffState !== "idle"
+      ? handoffState
+      : busy
+        ? "pending"
+        : grant
+          ? "ready"
+          : handoffError
+            ? "failed"
+            : "idle";
 
   useEffect(() => {
     if (grant && grantSecretRef.current) {
@@ -141,13 +159,49 @@ export function HostBootstrapCard({
   };
 
   return (
-    <Card data-testid="host-admin-bootstrap">
+    <Card data-testid="host-admin-bootstrap" data-handoff-state={resolvedHandoffState}>
       <CardHeader>
         <CardTitle>{t("hostAdminBootstrapTitle")}</CardTitle>
         <CardDescription>{t("hostAdminBootstrapDescription")}</CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
         <p className="text-xs text-text-muted">{t("hostAdminBootstrapBoundary")}</p>
+        <div
+          className="rounded-md border border-border/70 bg-muted/20 px-2 py-1.5 text-xs"
+          data-testid="host-admin-bootstrap-status"
+          data-state={resolvedHandoffState}
+          role="status"
+        >
+          {resolvedHandoffState === "pending"
+            ? t("hostAdminBootstrapPending")
+            : resolvedHandoffState === "ready"
+              ? t("hostAdminBootstrapReady")
+              : resolvedHandoffState === "failed"
+                ? t("hostAdminBootstrapFailed")
+                : resolvedHandoffState === "expired"
+                  ? t("hostAdminBootstrapExpired")
+                  : resolvedHandoffState === "revoked"
+                    ? t("hostAdminBootstrapRevoked")
+                    : t("hostAdminBootstrapIdle")}
+          {handoffError ? (
+            <div className="mt-1 text-destructive" data-testid="host-admin-bootstrap-error">
+              {handoffError}
+            </div>
+          ) : null}
+          {resolvedHandoffState === "failed" && onRetry ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="mt-2"
+              data-testid="host-admin-bootstrap-retry"
+              disabled={busy}
+              onClick={() => onRetry()}
+            >
+              {t("hostAdminBootstrapRetry")}
+            </Button>
+          ) : null}
+        </div>
         <div className="grid gap-3 rounded-md border border-border/70 p-3">
           <div className="grid gap-1.5">
             <Label htmlFor="host-admin-config-path">{t("hostAdminConfigPath")}</Label>

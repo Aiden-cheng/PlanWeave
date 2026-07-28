@@ -125,6 +125,29 @@ export function registerCollaborationHandlers(
   ipcMain.handle(collaborationInvokeChannels.disconnectCollaborationSession, () =>
     active.disconnectSession()
   );
+  ipcMain.handle(
+    collaborationInvokeChannels.redeemCollaborationSetupCode,
+    (_event, input: unknown) => active.redeemSetupCode(input)
+  );
+  ipcMain.handle(collaborationInvokeChannels.getActiveWorkspaceConnection, () =>
+    active.getActiveWorkspaceConnection()
+  );
+  ipcMain.handle(collaborationInvokeChannels.listWorkspacePicker, (_event, input: unknown) =>
+    active.listWorkspacePicker(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.selectWorkspaceConnection,
+    (_event, input: unknown) => active.selectWorkspaceConnection(input)
+  );
+  ipcMain.handle(collaborationInvokeChannels.connectWorkspaceConnection, () =>
+    active.connectWorkspaceConnection()
+  );
+  ipcMain.handle(collaborationInvokeChannels.disconnectWorkspaceConnection, () =>
+    active.disconnectWorkspaceConnection()
+  );
+  ipcMain.handle(collaborationInvokeChannels.retryWorkspaceConnection, () =>
+    active.retryWorkspaceConnection()
+  );
   ipcMain.handle(collaborationInvokeChannels.startCollaborationPresence, (_event, input: unknown) =>
     active.startPresence(input)
   );
