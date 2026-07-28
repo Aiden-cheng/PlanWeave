@@ -4,21 +4,15 @@ import {
   deploymentCopyHandoffViewSchema,
   deploymentOriginHeader,
   desktopDeploymentActionRequestSchema,
-  deploymentActionScopeSchema,
   deploymentGuidanceViewSchema,
-  deploymentConnectionProfileSchema,
-  type DeploymentConnectionProfile,
+  deploymentTargetDraftSchema,
+  type DeploymentTargetDraft,
   type DeploymentGuidanceView,
   type ConnectivityValidationView
 } from "@planweave-ai/collaboration-contracts";
 
 const composePreview =
   "PLANWEAVE_SERVER_CONFIG_PATH=./server.json PLANWEAVE_SERVER_TLS_DIRECTORY=./tls PLANWEAVE_SERVER_PROJECTS_ROOT=./projects docker compose -f packages/server/compose.yaml up --detach --wait";
-
-type DeploymentActionScope = {
-  workspace: { workspaceId: string };
-  profile: DeploymentConnectionProfile;
-};
 
 export type DeploymentActionsOptions = {
   request?: typeof fetch;
@@ -30,19 +24,19 @@ function nowIso(now: () => Date): string {
   return now().toISOString();
 }
 
-function requirements(profile: DeploymentConnectionProfile) {
+function requirements(target: DeploymentTargetDraft) {
   return {
     durableState: "required" as const,
     healthcheck: { required: true as const },
     publicIngress:
-      profile.endpoint.topology === "public_https"
+      target.endpoint.topology === "public_https"
         ? { tls: "direct" as const, port: 443 as const }
         : null
   };
 }
 
-function handoff(profile: DeploymentConnectionProfile) {
-  if (profile.endpoint.topology === "loopback_http") {
+function handoff(target: DeploymentTargetDraft) {
+  if (target.endpoint.topology === "loopback_http") {
     return {
       state: "not_applicable" as const,
       copyAction: null,
@@ -66,8 +60,8 @@ function handoff(profile: DeploymentConnectionProfile) {
   };
 }
 
-function assertGuidanceCapability(profile: DeploymentConnectionProfile): void {
-  if (!profile.capabilities.includes("deployment_guidance")) {
+function assertGuidanceCapability(target: DeploymentTargetDraft): void {
+  if (!target.capabilities.includes("deployment_guidance")) {
     throw new Error("deployment_guidance_not_supported");
   }
 }
@@ -96,22 +90,19 @@ function isKnownTlsFailure(error: unknown): boolean {
   );
 }
 
-function scopeFromAction(
+function targetFromAction(
   input: unknown,
   expectedAction:
     | "request_deployment_guidance"
     | "copy_supported_compose_handoff"
     | "validate_connectivity"
-): DeploymentActionScope {
+): DeploymentTargetDraft {
   const action = desktopDeploymentActionRequestSchema.parse(input);
   if (action.action !== expectedAction) throw new Error("deployment_action_mismatch");
-  return deploymentActionScopeSchema.parse({
-    workspace: action.workspace,
-    profile: action.profile
-  });
+  return deploymentTargetDraftSchema.parse(action.target);
 }
 
-/** Main-owned deployment actions. The renderer supplies only a validated, closed profile scope. */
+/** Main-owned deployment actions. The renderer supplies only a validated, non-secret target draft. */
 export class DeploymentActions {
   private readonly request: typeof fetch;
   private readonly writeClipboard?: (value: string) => void;
@@ -124,15 +115,14 @@ export class DeploymentActions {
   }
 
   guidance(input: unknown): DeploymentGuidanceView {
-    const scope = scopeFromAction(input, "request_deployment_guidance");
-    assertGuidanceCapability(scope.profile);
+    const target = targetFromAction(input, "request_deployment_guidance");
+    assertGuidanceCapability(target);
     const view = deploymentGuidanceViewSchema.parse({
-      schemaVersion: "deployment-connection/v1",
-      workspace: scope.workspace,
-      profileId: scope.profile.profileId,
+      schemaVersion: "deployment-target-draft/v1",
+      target,
       state: "ready",
-      requirements: requirements(scope.profile),
-      handoff: handoff(scope.profile),
+      requirements: requirements(target),
+      handoff: handoff(target),
       generatedAt: nowIso(this.now),
       unavailableReason: null
     });
@@ -141,9 +131,9 @@ export class DeploymentActions {
   }
 
   copyComposeHandoff(input: unknown): { state: "copied"; copiedAt: string } {
-    const scope = scopeFromAction(input, "copy_supported_compose_handoff");
-    assertGuidanceCapability(scope.profile);
-    const generated = handoff(scope.profile);
+    const target = targetFromAction(input, "copy_supported_compose_handoff");
+    assertGuidanceCapability(target);
+    const generated = handoff(target);
     if (generated.copyAction === null || generated.preview === null) {
       throw new Error("deployment_compose_handoff_not_supported");
     }
@@ -160,27 +150,22 @@ export class DeploymentActions {
     if (parsed.data.action !== "validate_connectivity") {
       throw new Error("deployment_action_mismatch");
     }
-    const scope = deploymentActionScopeSchema.parse({
-      workspace: parsed.data.workspace,
-      profile: parsed.data.profile
-    });
-    const profile = deploymentConnectionProfileSchema.parse(scope.profile);
+    const target = deploymentTargetDraftSchema.parse(parsed.data.target);
     const checkedAt = nowIso(this.now);
     const base = {
-      schemaVersion: "deployment-connection/v1" as const,
-      workspace: scope.workspace,
-      profileId: profile.profileId,
-      endpoint: profile.endpoint,
+      schemaVersion: "deployment-target-draft/v1" as const,
+      target,
+      endpoint: target.endpoint,
       checkedAt
     };
-    if (!profile.capabilities.includes("connectivity_validation")) {
+    if (!target.capabilities.includes("connectivity_validation")) {
       return connectivityValidationViewSchema.parse({
         ...base,
         status: "invalid_configuration",
         failureCode: "connectivity_validation_not_supported"
       });
     }
-    const origin = deploymentOriginHeader(profile.endpoint);
+    const origin = deploymentOriginHeader(target.endpoint);
     if (!origin) {
       return connectivityValidationViewSchema.parse({
         ...base,
@@ -189,7 +174,7 @@ export class DeploymentActions {
       });
     }
     try {
-      const response = await this.request(new URL("/readyz", profile.endpoint.serverOrigin), {
+      const response = await this.request(new URL("/readyz", target.endpoint.serverOrigin), {
         headers: { Origin: origin },
         signal: AbortSignal.timeout(5_000)
       });

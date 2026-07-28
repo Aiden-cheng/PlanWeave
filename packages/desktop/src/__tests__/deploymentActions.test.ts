@@ -1,29 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { DeploymentActions } from "../main/collaboration/deploymentActions.js";
 
-const profile = {
-  schemaVersion: "deployment-connection/v1" as const,
-  profileId: "profile-001",
-  displayName: "Workspace",
-  workspace: { workspaceId: "workspace-001" },
+const target = {
+  schemaVersion: "deployment-target-draft/v1" as const,
+  displayName: "Self-hosted Server",
   endpoint: {
     topology: "public_https" as const,
     serverOrigin: "https://collab.example.test/",
     allowedClientOrigins: ["https://collab.example.test/"],
     tlsTrust: "system_ca" as const
   },
-  capabilities: [
-    "workspace_connection",
-    "deployment_guidance",
-    "connectivity_validation",
-    "agent_host_availability"
-  ]
+  capabilities: ["deployment_guidance", "connectivity_validation"]
 };
 
 function request(
   action: "request_deployment_guidance" | "copy_supported_compose_handoff" | "validate_connectivity"
 ) {
-  return { action, workspace: profile.workspace, profile };
+  return { action, target };
 }
 
 describe("DeploymentActions", () => {
@@ -46,7 +39,7 @@ describe("DeploymentActions", () => {
   it("keeps loopback out of the Compose handoff", () => {
     const actions = new DeploymentActions();
     const loopback = {
-      ...profile,
+      ...target,
       endpoint: {
         topology: "loopback_http" as const,
         serverOrigin: "http://127.0.0.1:7443/",
@@ -57,15 +50,13 @@ describe("DeploymentActions", () => {
     expect(
       actions.guidance({
         action: "request_deployment_guidance",
-        workspace: loopback.workspace,
-        profile: loopback
+        target: loopback
       }).handoff.state
     ).toBe("not_applicable");
     expect(() =>
       actions.copyComposeHandoff({
         action: "copy_supported_compose_handoff",
-        workspace: loopback.workspace,
-        profile: loopback
+        target: loopback
       })
     ).toThrow("deployment_compose_handoff_not_supported");
   });
@@ -75,14 +66,13 @@ describe("DeploymentActions", () => {
       request: async () => new Response(null, { status: 200 })
     });
     const mismatched = {
-      ...profile,
-      endpoint: { ...profile.endpoint, allowedClientOrigins: ["https://desktop.example.test/"] }
+      ...target,
+      endpoint: { ...target.endpoint, allowedClientOrigins: ["https://desktop.example.test/"] }
     };
     await expect(
       actions.validateConnectivity({
         action: "validate_connectivity",
-        workspace: mismatched.workspace,
-        profile: mismatched
+        target: mismatched
       })
     ).resolves.toMatchObject({
       status: "invalid_origin",

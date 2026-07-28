@@ -9,6 +9,14 @@ export type DeploymentConnectionSchemaVersion = z.infer<
   typeof deploymentConnectionSchemaVersionSchema
 >;
 
+export const deploymentTargetDraftSchemaVersion = "deployment-target-draft/v1" as const;
+export const deploymentTargetDraftSchemaVersionSchema = z.literal(
+  deploymentTargetDraftSchemaVersion
+);
+export type DeploymentTargetDraftSchemaVersion = z.infer<
+  typeof deploymentTargetDraftSchemaVersionSchema
+>;
+
 /** The three supported server exposure topologies. */
 export const deploymentTopologySchema = z.enum(["loopback_http", "lan_https", "public_https"]);
 export type DeploymentTopology = z.infer<typeof deploymentTopologySchema>;
@@ -135,6 +143,20 @@ export function deploymentOriginHeader(endpoint: DeploymentEndpoint): string | n
 }
 
 /**
+ * A non-persistent target used to review and validate a Server before any
+ * Workspace authentication exists. It is never an authenticated connection.
+ */
+export const deploymentTargetDraftSchema = z
+  .object({
+    schemaVersion: deploymentTargetDraftSchemaVersionSchema,
+    displayName: z.string().trim().min(1).max(128),
+    endpoint: deploymentEndpointSchema,
+    capabilities: deploymentConnectionCapabilitiesSchema
+  })
+  .strict();
+export type DeploymentTargetDraft = z.infer<typeof deploymentTargetDraftSchema>;
+
+/**
  * Single Desktop connection profile for both self-hosted and future hosted
  * endpoints. Workspace authority and capabilities remain opaque and portable.
  */
@@ -223,18 +245,29 @@ export const deploymentActionScopeSchema = z
  * SSH target, secret, or provider/provisioning instruction.
  */
 export const desktopDeploymentActionRequestSchema = z.discriminatedUnion("action", [
-  deploymentActionScopeSchema.extend({ action: z.literal("request_deployment_guidance") }),
-  deploymentActionScopeSchema.extend({ action: z.literal("copy_supported_compose_handoff") }),
-  deploymentActionScopeSchema.extend({ action: z.literal("validate_connectivity") }),
+  z
+    .object({
+      target: deploymentTargetDraftSchema,
+      action: z.literal("request_deployment_guidance")
+    })
+    .strict(),
+  z
+    .object({
+      target: deploymentTargetDraftSchema,
+      action: z.literal("copy_supported_compose_handoff")
+    })
+    .strict(),
+  z
+    .object({ target: deploymentTargetDraftSchema, action: z.literal("validate_connectivity") })
+    .strict(),
   deploymentActionScopeSchema.extend({ action: z.literal("query_agent_host_availability") })
 ]);
 export type DesktopDeploymentActionRequest = z.infer<typeof desktopDeploymentActionRequestSchema>;
 
 export const deploymentGuidanceViewSchema = z
   .object({
-    schemaVersion: deploymentConnectionSchemaVersionSchema,
-    workspace: workspaceScopeRefSchema,
-    profileId: opaqueIdentifierSchema,
+    schemaVersion: deploymentTargetDraftSchemaVersionSchema,
+    target: deploymentTargetDraftSchema,
     state: z.enum(["ready", "unavailable"]),
     requirements: deploymentOperationalRequirementsSchema,
     handoff: deploymentComposeHandoffSchema,
@@ -251,9 +284,8 @@ export type DeploymentGuidanceView = z.infer<typeof deploymentGuidanceViewSchema
 
 export const connectivityValidationViewSchema = z
   .object({
-    schemaVersion: deploymentConnectionSchemaVersionSchema,
-    workspace: workspaceScopeRefSchema,
-    profileId: opaqueIdentifierSchema,
+    schemaVersion: deploymentTargetDraftSchemaVersionSchema,
+    target: deploymentTargetDraftSchema,
     endpoint: deploymentEndpointSchema,
     status: z.enum([
       "reachable",

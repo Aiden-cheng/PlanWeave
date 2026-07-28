@@ -631,7 +631,9 @@ export type PlanWeaveCollaborationApi = {
   connectWorkspaceConnection: () => Promise<CollaborationStatus>;
   disconnectWorkspaceConnection: () => Promise<CollaborationStatus>;
   retryWorkspaceConnection: () => Promise<CollaborationStatus>;
-  getDeploymentGuidance: (input: DesktopDeploymentActionRequest) => Promise<DeploymentGuidanceView>;
+  getDeploymentGuidance: (
+    input: Extract<DesktopDeploymentActionRequest, { action: "request_deployment_guidance" }>
+  ) => Promise<DeploymentGuidanceView>;
   copyDeploymentComposeHandoff: (
     input: Extract<DesktopDeploymentActionRequest, { action: "copy_supported_compose_handoff" }>
   ) => Promise<{ state: "copied"; copiedAt: string }>;

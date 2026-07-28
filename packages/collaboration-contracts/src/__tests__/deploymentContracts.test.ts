@@ -5,6 +5,7 @@ import {
   connectivityValidationViewSchema,
   deploymentConnectionProfileSchema,
   deploymentGuidanceViewSchema,
+  deploymentTargetDraftSchema,
   deploymentWebSocketOrigin,
   desktopDeploymentActionRequestSchema
 } from "../index.js";
@@ -28,6 +29,13 @@ const selfHostedProfile = {
     tlsTrust: "system_ca"
   },
   capabilities
+};
+
+const deploymentTarget = {
+  schemaVersion: "deployment-target-draft/v1",
+  displayName: "Self-hosted Server",
+  endpoint: selfHostedProfile.endpoint,
+  capabilities: ["deployment_guidance", "connectivity_validation"]
 };
 
 describe("OSS-009 deployment and Host availability contracts", () => {
@@ -133,9 +141,8 @@ describe("OSS-009 deployment and Host availability contracts", () => {
 
   it("requires durable state, healthchecks, and direct TLS on public guidance", () => {
     const guidance = deploymentGuidanceViewSchema.parse({
-      schemaVersion: "deployment-connection/v1",
-      workspace: { workspaceId: "workspace-001" },
-      profileId: selfHostedProfile.profileId,
+      schemaVersion: "deployment-target-draft/v1",
+      target: deploymentTarget,
       state: "ready",
       requirements: {
         durableState: "required",
@@ -172,10 +179,17 @@ describe("OSS-009 deployment and Host availability contracts", () => {
   it("limits renderer requests to reviewable guidance, validation, and Host availability", () => {
     const request = desktopDeploymentActionRequestSchema.parse({
       action: "validate_connectivity",
-      workspace: { workspaceId: "workspace-001" },
-      profile: selfHostedProfile
+      target: deploymentTarget
     });
     expect(request.action).toBe("validate_connectivity");
+    expect(deploymentTargetDraftSchema.parse(request.target)).toEqual(deploymentTarget);
+    expect(() =>
+      desktopDeploymentActionRequestSchema.parse({
+        action: "validate_connectivity",
+        target: deploymentTarget,
+        workspace: { workspaceId: "workspace-001" }
+      })
+    ).toThrow();
     expect(() =>
       desktopDeploymentActionRequestSchema.parse({
         ...request,
@@ -193,9 +207,8 @@ describe("OSS-009 deployment and Host availability contracts", () => {
 
   it("keeps connectivity and native Agent Host availability views redacted", () => {
     const connectivity = connectivityValidationViewSchema.parse({
-      schemaVersion: "deployment-connection/v1",
-      workspace: { workspaceId: "workspace-001" },
-      profileId: selfHostedProfile.profileId,
+      schemaVersion: "deployment-target-draft/v1",
+      target: deploymentTarget,
       endpoint: selfHostedProfile.endpoint,
       status: "reachable",
       checkedAt: "2030-01-01T00:00:00.000Z",
@@ -237,9 +250,8 @@ describe("OSS-009 deployment and Host availability contracts", () => {
   it("requires an explicit failure code for every non-reachable connectivity state", () => {
     expect(() =>
       connectivityValidationViewSchema.parse({
-        schemaVersion: "deployment-connection/v1",
-        workspace: { workspaceId: "workspace-001" },
-        profileId: selfHostedProfile.profileId,
+        schemaVersion: "deployment-target-draft/v1",
+        target: deploymentTarget,
         endpoint: selfHostedProfile.endpoint,
         status: "invalid_origin",
         checkedAt: "2030-01-01T00:00:00.000Z",
@@ -248,9 +260,8 @@ describe("OSS-009 deployment and Host availability contracts", () => {
     ).toThrow("connectivity_status_failure_mismatch");
     expect(() =>
       connectivityValidationViewSchema.parse({
-        schemaVersion: "deployment-connection/v1",
-        workspace: { workspaceId: "workspace-001" },
-        profileId: selfHostedProfile.profileId,
+        schemaVersion: "deployment-target-draft/v1",
+        target: deploymentTarget,
         endpoint: selfHostedProfile.endpoint,
         status: "invalid_tls",
         checkedAt: "2030-01-01T00:00:00.000Z",
