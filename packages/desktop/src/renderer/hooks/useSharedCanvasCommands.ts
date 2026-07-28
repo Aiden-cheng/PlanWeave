@@ -146,10 +146,13 @@ export function useSharedCanvasCommands(input: {
     return false;
   }, [scopeEnabled]);
 
-  return {
-    enabled: Boolean(scopeEnabled),
-    snapshot,
-    submit,
-    reconnect
-  };
+  return useMemo(
+    () => ({
+      enabled: Boolean(scopeEnabled),
+      snapshot,
+      submit,
+      reconnect
+    }),
+    [reconnect, scopeEnabled, snapshot, submit]
+  );
 }
