@@ -226,6 +226,8 @@ describe("packaged Host administration control plane", () => {
           configPath: "/etc/planweave/agent-host.json",
           dataDirectory: join(harness.paths.root, "ui-host-data"),
           workspaceRoot: harness.paths.workspaceRoot,
+          workspacePath: "project",
+          acpProfilePreset: "codex-acp",
           host: { displayName: "UI Generated Host", capacity: 1, capabilities: ["acp.test"] }
         }
       },

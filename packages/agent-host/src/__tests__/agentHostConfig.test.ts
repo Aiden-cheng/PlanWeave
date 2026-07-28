@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ConfiguredAcpProfileResolver, ConfiguredWorkspaceResolver } from "../config/resolvers.js";
+import { observeHostReadiness } from "../config/readiness.js";
 import { parseAgentHostConfig } from "../config/schema.js";
 
 const directories: string[] = [];
@@ -113,6 +114,25 @@ describe("Agent Host configuration", () => {
     await expect(new ConfiguredWorkspaceResolver(escaped).resolve("escape")).rejects.toThrow(
       "workspace_escape"
     );
+  });
+
+  it("reports only redacted local readiness facts", async () => {
+    const { directory, workspaceRoot } = await setup();
+    const config = parseAgentHostConfig(input(directory, workspaceRoot));
+    await expect(observeHostReadiness(config, { SAFE_API_KEY: "present" })).resolves.toEqual({
+      workspaceMappings: [{ workspaceId: "workspace.core", status: "ready" }],
+      acpProfiles: [
+        {
+          profileId: "acp.test",
+          agentId: "test-agent",
+          status: "ready",
+          capabilities: ["acp.test-agent"]
+        }
+      ]
+    });
+    await expect(observeHostReadiness(config, {})).resolves.toMatchObject({
+      acpProfiles: [{ profileId: "acp.test", status: "invalid" }]
+    });
   });
 
   it("resolves trusted local launch and copies only explicitly allowed environment names", async () => {

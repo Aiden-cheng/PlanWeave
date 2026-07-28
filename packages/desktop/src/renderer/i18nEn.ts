@@ -508,6 +508,40 @@ export const enCatalog = {
   deploymentHostCapabilitiesNone: "No capabilities reported",
   deploymentHostUnavailable:
     "Unavailable: the Server does not yet report workspace mapping or ACP profile readiness.",
+  hostAvailabilityTitle: "Agent Host availability",
+  hostAvailabilityDescription:
+    "The Server combines authenticated target-machine observations with Host liveness and revocation. Paths, commands, and credentials are never displayed.",
+  hostAvailabilityEmpty: "No Agent Hosts are currently reported by the Server.",
+  hostAvailabilityWorkspace: "Workspace mapping",
+  hostAvailabilityProfiles: "ACP profiles",
+  hostAvailabilityProfile_ready: "ready",
+  hostAvailabilityProfile_missing: "missing",
+  hostAvailabilityProfile_invalid: "invalid",
+  hostAvailability_ready: "Available",
+  hostAvailability_revoked: "Unavailable: revoked",
+  hostAvailability_offline: "Unavailable: offline",
+  hostAvailability_readiness_not_reported: "Unavailable: Host has not reported readiness",
+  hostAvailability_workspace_mapping_missing: "Unavailable: workspace mapping missing",
+  hostAvailability_workspace_mapping_invalid: "Unavailable: workspace mapping invalid",
+  hostAvailability_acp_profile_missing: "Unavailable: ACP profile missing",
+  hostAvailability_acp_profile_invalid: "Unavailable: ACP profile invalid",
+  hostAvailability_capability_mismatch: "Unavailable: capability mismatch",
+  hostAvailabilityAction_revoked:
+    "Create a new enrollment handoff after the Host is authorized again.",
+  hostAvailabilityAction_offline:
+    "Start the native Agent Host and refresh after its authenticated heartbeat arrives.",
+  hostAvailabilityAction_readiness_not_reported:
+    "Run the current Host handoff so the target machine can report its local readiness.",
+  hostAvailabilityAction_workspace_mapping_missing:
+    "Create a Host handoff with the correct relative workspace path, then run it on the target machine.",
+  hostAvailabilityAction_workspace_mapping_invalid:
+    "Correct the target Host workspace path, then rerun the native Host handoff.",
+  hostAvailabilityAction_acp_profile_missing:
+    "Use the codex-acp preset handoff and ensure its adapter is installed on the target Host.",
+  hostAvailabilityAction_acp_profile_invalid:
+    "Repair the target Host's codex-acp installation or login, then restart the native Host.",
+  hostAvailabilityAction_capability_mismatch:
+    "Restart the Host after the configured ACP preset is available so it can publish matching capabilities.",
   hostAdminRefresh: "Refresh",
   hostAdminLoading: "Loading…",
   hostAdminBridgeUnavailable: "Host administration is unavailable in this Desktop session.",

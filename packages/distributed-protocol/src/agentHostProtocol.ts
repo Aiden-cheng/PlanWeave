@@ -30,6 +30,36 @@ export const CANCEL_REASON_MAX_LENGTH = 4_096 as const;
 export const ACTIVE_LEASE_MAX_COUNT = 128 as const;
 export const hostCapacitySchema = z.number().int().min(1).max(128);
 
+/** Redacted target-machine result of resolving one configured workspace mapping. */
+export const hostWorkspaceMappingObservationSchema = z
+  .object({
+    workspaceId: opaqueIdentifierSchema,
+    status: z.enum(["ready", "missing", "invalid"])
+  })
+  .strict();
+
+/** Redacted target-machine result of resolving one configured ACP profile. */
+export const hostAcpProfileObservationSchema = z
+  .object({
+    profileId: opaqueIdentifierSchema,
+    agentId: opaqueIdentifierSchema,
+    status: z.enum(["ready", "missing", "invalid"]),
+    capabilities: capabilitiesSchema
+  })
+  .strict();
+
+/**
+ * Host-local readiness facts. Paths, commands, arguments, and environment are
+ * intentionally excluded: Server combines these observations with its own
+ * liveness and revocation facts before exposing an operator view.
+ */
+export const hostReadinessObservationSchema = z
+  .object({
+    workspaceMappings: z.array(hostWorkspaceMappingObservationSchema).max(128),
+    acpProfiles: z.array(hostAcpProfileObservationSchema).max(128)
+  })
+  .strict();
+
 const versionedSchema = z.object({ protocolVersion: agentHostProtocolVersionSchema }).strict();
 const durableHostEventSchema = versionedSchema.extend({ messageId: mailboxMessageIdSchema });
 
@@ -37,7 +67,8 @@ export const hostHelloSchema = versionedSchema.extend({
   type: z.literal("host.hello"),
   lastAcknowledgedSequence: mailboxSequenceSchema,
   capabilities: capabilitiesSchema,
-  capacity: hostCapacitySchema
+  capacity: hostCapacitySchema,
+  readiness: hostReadinessObservationSchema.optional()
 });
 
 export const hostWelcomeSchema = versionedSchema.extend({
@@ -120,7 +151,8 @@ export const mailboxAcknowledgementSchema = durableHostEventSchema.extend({
 
 const hostHeartbeatSchema = durableHostEventSchema.extend({
   type: z.literal("host.heartbeat"),
-  activeLeases: z.array(dispatchLifecycleIdentitySchema).max(ACTIVE_LEASE_MAX_COUNT)
+  activeLeases: z.array(dispatchLifecycleIdentitySchema).max(ACTIVE_LEASE_MAX_COUNT),
+  readiness: hostReadinessObservationSchema.optional()
 });
 
 const dispatchAcceptedSchema = durableHostEventSchema.extend({
@@ -201,9 +233,14 @@ export const serverEventSchema = z.discriminatedUnion("type", [
 ]);
 
 export type HostHello = z.infer<typeof hostHelloSchema>;
+export type HostAcpProfileObservation = z.infer<typeof hostAcpProfileObservationSchema>;
+export type HostReadinessObservation = z.infer<typeof hostReadinessObservationSchema>;
 export type ServerToHostCommand = z.infer<typeof serverToHostCommandSchema>;
 export type MailboxCommand = z.infer<typeof mailboxCommandSchema>;
 export type HostToServerEvent = z.infer<typeof hostToServerEventSchema>;
 export type ObservationEvent = z.infer<typeof observationEventSchema>;
 export type HostEvent = z.infer<typeof hostEventSchema>;
 export type ServerEvent = z.infer<typeof serverEventSchema>;
+export type HostWorkspaceMappingObservation = z.infer<
+  typeof hostWorkspaceMappingObservationSchema
+>;

@@ -20,6 +20,7 @@ import {
   DEFAULT_HOST_OFFLINE_AFTER_MS,
   AgentHostRepository,
   isAgentHostOnline,
+  operatorHostAvailability,
   type AgentHost
 } from "./hosts.js";
 import { OperatorTokenRegistry, type OperatorPrincipal } from "./operatorAuth.js";
@@ -267,16 +268,19 @@ function toOperatorHostView(
   now: Date,
   hostOfflineAfterMs: number
 ) {
+  const online = isAgentHostOnline(host, { now, hostOfflineAfterMs });
   return operatorHostViewSchema.parse({
     id: host.id,
     workspaceId,
     displayName: host.displayName,
     capabilities: host.capabilities,
     capacity: host.capacity,
-    online: isAgentHostOnline(host, { now, hostOfflineAfterMs }),
+    online,
     lastSeenAt: host.lastSeenAt,
     revokedAt: host.revokedAt,
-    credentialExpiresAt: host.credentialExpiresAt
+    credentialExpiresAt: host.credentialExpiresAt,
+    readinessObservation: host.readinessObservation,
+    availability: operatorHostAvailability(host, workspaceId, online)
   });
 }
 

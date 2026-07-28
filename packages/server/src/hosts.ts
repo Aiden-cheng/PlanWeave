@@ -1,4 +1,9 @@
-import { hostCredentialTokenSchema } from "@planweave-ai/distributed-protocol";
+import {
+  hostCredentialTokenSchema,
+  hostReadinessObservationSchema,
+  type HostReadinessObservation,
+  type OperatorHostAvailability
+} from "@planweave-ai/distributed-protocol";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
 import { capabilitiesSchema } from "./protocol.js";
@@ -13,6 +18,7 @@ export type AgentHost = {
   lastAcknowledgedSequence: number;
   revokedAt?: string;
   credentialExpiresAt?: string;
+  readinessObservation?: HostReadinessObservation;
 };
 
 export type RegisteredAgentHost = {
@@ -21,6 +27,45 @@ export type RegisteredAgentHost = {
 };
 
 export const DEFAULT_HOST_OFFLINE_AFTER_MS = 60_000;
+
+/** Server-authoritative readiness derived from liveness and redacted Host observations. */
+export function operatorHostAvailability(
+  host: AgentHost,
+  workspaceId: string,
+  online: boolean
+): OperatorHostAvailability {
+  if (host.revokedAt) return { status: "unavailable", reason: "revoked" };
+  if (!online) return { status: "unavailable", reason: "offline" };
+  const observation = host.readinessObservation;
+  if (!observation) return { status: "unavailable", reason: "readiness_not_reported" };
+  const workspace = observation.workspaceMappings.find(
+    (mapping) => mapping.workspaceId === workspaceId
+  );
+  if (!workspace || workspace.status === "missing") {
+    return { status: "unavailable", reason: "workspace_mapping_missing" };
+  }
+  if (workspace.status === "invalid") {
+    return { status: "unavailable", reason: "workspace_mapping_invalid" };
+  }
+  if (observation.acpProfiles.length === 0) {
+    return { status: "unavailable", reason: "acp_profile_missing" };
+  }
+  if (observation.acpProfiles.some((profile) => profile.status === "invalid")) {
+    return { status: "unavailable", reason: "acp_profile_invalid" };
+  }
+  const readyProfiles = observation.acpProfiles.filter((profile) => profile.status === "ready");
+  if (readyProfiles.length === 0) {
+    return { status: "unavailable", reason: "acp_profile_missing" };
+  }
+  if (
+    !readyProfiles.some((profile) =>
+      profile.capabilities.every((capability) => host.capabilities.includes(capability))
+    )
+  ) {
+    return { status: "unavailable", reason: "capability_mismatch" };
+  }
+  return { status: "available", reason: null };
+}
 
 /** Server-authoritative Host liveness shared by assignment and operator projections. */
 export function isAgentHostOnline(
@@ -50,6 +95,7 @@ type HostRow = Record<string, unknown> & {
   last_acknowledged_sequence: number;
   revoked_at: string | null;
   credential_expires_at: string | null;
+  readiness_json?: string | null;
 };
 
 function hashToken(token: string): Buffer {
@@ -65,7 +111,10 @@ function toHost(row: HostRow): AgentHost {
     lastSeenAt: row.last_seen_at ?? undefined,
     lastAcknowledgedSequence: Number(row.last_acknowledged_sequence),
     revokedAt: row.revoked_at ?? undefined,
-    credentialExpiresAt: row.credential_expires_at ?? undefined
+    credentialExpiresAt: row.credential_expires_at ?? undefined,
+    readinessObservation: row.readiness_json
+      ? hostReadinessObservationSchema.parse(JSON.parse(row.readiness_json))
+      : undefined
   };
 }
 
@@ -184,30 +233,49 @@ export class AgentHostRepository {
     return toHost(row);
   }
 
-  reportOnline(hostId: string, capabilities: readonly string[], capacity: number): AgentHost {
+  reportOnline(
+    hostId: string,
+    capabilities: readonly string[],
+    capacity: number,
+    readiness?: HostReadinessObservation
+  ): AgentHost {
     const parsedCapabilities = capabilitiesSchema.parse(capabilities);
     const now = this.clock().toISOString();
     const updated = this.database
       .prepare(
-        `UPDATE agent_hosts SET capabilities_json=?,capacity=?,last_seen_at=?
+        `UPDATE agent_hosts SET capabilities_json=?,capacity=?,last_seen_at=?,readiness_json=?
          WHERE id=? AND revoked_at IS NULL
            AND (credential_expires_at IS NULL OR credential_expires_at>?)`
       )
-      .run(JSON.stringify(parsedCapabilities), capacity, now, hostId, now);
+      .run(
+        JSON.stringify(parsedCapabilities),
+        capacity,
+        now,
+        readiness === undefined
+          ? null
+          : JSON.stringify(hostReadinessObservationSchema.parse(readiness)),
+        hostId,
+        now
+      );
     if (updated.changes !== 1) throw new Error("agent_host_not_found_or_revoked");
     const host = this.getRequired(hostId);
     this.syncWorkspaceHost(hostId);
     return host;
   }
 
-  touch(hostId: string, at = new Date()): void {
+  touch(hostId: string, at = new Date(), readiness?: HostReadinessObservation): void {
     const updated = this.database
       .prepare(
-        `UPDATE agent_hosts SET last_seen_at=?
+        `UPDATE agent_hosts SET last_seen_at=?,readiness_json=COALESCE(?,readiness_json)
          WHERE id=? AND revoked_at IS NULL
            AND (credential_expires_at IS NULL OR credential_expires_at>?)`
       )
-      .run(at.toISOString(), hostId, this.clock().toISOString());
+      .run(
+        at.toISOString(),
+        readiness ? JSON.stringify(hostReadinessObservationSchema.parse(readiness)) : null,
+        hostId,
+        this.clock().toISOString()
+      );
     if (updated.changes !== 1) throw new Error("agent_host_not_found_or_revoked");
     const host = this.getRequired(hostId);
     this.syncWorkspaceHost(hostId);

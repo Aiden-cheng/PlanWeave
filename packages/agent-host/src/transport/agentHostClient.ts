@@ -1,4 +1,5 @@
 import { WebSocket } from "ws";
+import type { HostReadinessObservation } from "@planweave-ai/distributed-protocol";
 import {
   parseAgentHostCapabilities,
   parseAgentHostDispatchResult,
@@ -39,6 +40,7 @@ export type AgentHostClientOptions = {
   token: string;
   capabilities: readonly string[];
   capacity: number;
+  readiness: HostReadinessObservation;
   state: AgentHostStateRepository;
   executor: AgentHostExecutor;
   interactionRelay?: Pick<DurableAcpInteractionRelay, "accept">;
@@ -199,7 +201,8 @@ export class AgentHostClient implements HostTransport {
         protocolVersion: 1,
         lastAcknowledgedSequence: this.options.state.lastAcknowledgedSequence(),
         capabilities: this.capabilities,
-        capacity: this.options.capacity
+        capacity: this.options.capacity,
+        readiness: this.options.readiness
       });
       socket.send(hello);
     });
@@ -316,7 +319,9 @@ export class AgentHostClient implements HostTransport {
     if (this.heartbeatTimer) this.clock.clearTimeout(this.heartbeatTimer);
     const send = () => {
       this.abandonExpiredExecutions();
-      this.send(this.options.state.queueHeartbeat(this.options.state.activeLeases()));
+      this.send(
+        this.options.state.queueHeartbeat(this.options.state.activeLeases(), this.options.readiness)
+      );
       this.heartbeatTimer = this.clock.setTimeout(send, intervalMs);
     };
     send();

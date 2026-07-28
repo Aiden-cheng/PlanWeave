@@ -115,7 +115,12 @@ export function attachAgentHostWebSocketServer(
           break;
         case "host.heartbeat": {
           options.interactions.expireDue();
-          const renewed = options.dispatches.heartbeat(hostId, event.messageId, event.activeLeases);
+          const renewed = options.dispatches.heartbeat(
+            hostId,
+            event.messageId,
+            event.activeLeases,
+            event.readiness
+          );
           for (const lease of renewed)
             sendEvent(socket, {
               type: "lease.renewed",
@@ -212,7 +217,7 @@ export function attachAgentHostWebSocketServer(
             if (hello.lastAcknowledgedSequence > storedHost.lastAcknowledgedSequence) {
               throw new Error("mailbox_cursor_not_acknowledged");
             }
-            options.hosts.reportOnline(hostId, hello.capabilities, hello.capacity);
+            options.hosts.reportOnline(hostId, hello.capabilities, hello.capacity, hello.readiness);
             initialized = true;
             clearTimeout(helloTimeout);
             unsubscribe = options.mailbox.subscribe(hostId, (message) =>

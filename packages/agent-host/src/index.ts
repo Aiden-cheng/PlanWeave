@@ -65,6 +65,7 @@ export {
   ConfiguredAcpProfileResolver,
   ConfiguredWorkspaceResolver
 } from "./config/resolvers.js";
+export { observeHostReadiness } from "./config/readiness.js";
 export {
   activeHostCredentialSchema,
   hostCredentialDocumentSchema,

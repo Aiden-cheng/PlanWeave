@@ -68,9 +68,9 @@ async function listen(server: Server): Promise<number> {
 describe("Agent Host enrollment", () => {
   it("exchanges once, replays identically, stores only hashes, and authenticates the bound host", async () => {
     const store = await setup();
-    const workspaceId = new WorkspaceIdentityRepository(store.database).ensureWorkspaceForLegacyProject(
-      "project-enrollment"
-    );
+    const workspaceId = new WorkspaceIdentityRepository(
+      store.database
+    ).ensureWorkspaceForLegacyProject("project-enrollment");
     const service = new HostEnrollmentService(store.database);
     const grant = service.createGrant({
       workspaceId,
@@ -85,15 +85,11 @@ describe("Agent Host enrollment", () => {
     const hosts = new AgentHostRepository(store.database);
 
     expect(replay).toEqual(first);
-    expect(
-      hosts.authenticate(first.hostId, credentialToken, workspaceId)?.id
-    ).toBe(first.hostId);
+    expect(hosts.authenticate(first.hostId, credentialToken, workspaceId)?.id).toBe(first.hostId);
     store.database
       .prepare("UPDATE agent_hosts SET credential_expires_at=? WHERE id=?")
       .run(new Date(Date.now() - 1).toISOString(), first.hostId);
-    expect(
-      hosts.authenticate(first.hostId, credentialToken, workspaceId)
-    ).toBeUndefined();
+    expect(hosts.authenticate(first.hostId, credentialToken, workspaceId)).toBeUndefined();
     const persisted = JSON.stringify({
       grants: store.database.prepare("SELECT * FROM agent_host_enrollment_grants").all(),
       hosts: store.database.prepare("SELECT * FROM agent_hosts").all()
@@ -117,7 +113,9 @@ describe("Agent Host enrollment", () => {
     expect(hosts.authenticate(registration.host.id, registration.token, firstWorkspace)?.id).toBe(
       registration.host.id
     );
-    expect(hosts.authenticate(registration.host.id, registration.token, secondWorkspace)).toBeUndefined();
+    expect(
+      hosts.authenticate(registration.host.id, registration.token, secondWorkspace)
+    ).toBeUndefined();
 
     hosts.bindToWorkspace(registration.host.id, secondWorkspace);
     expect(hosts.authenticate(registration.host.id, registration.token)).toBeUndefined();
@@ -126,11 +124,43 @@ describe("Agent Host enrollment", () => {
     );
   });
 
+  it("persists only the redacted target Host readiness observation from authenticated reports", async () => {
+    const store = await setup();
+    const hosts = new AgentHostRepository(store.database);
+    const registered = hosts.register("Readiness Host");
+    const reported = {
+      workspaceMappings: [{ workspaceId: "workspace-readiness", status: "ready" as const }],
+      acpProfiles: [
+        {
+          profileId: "codex-acp",
+          agentId: "codex",
+          status: "ready" as const,
+          capabilities: ["acp.codex"]
+        }
+      ]
+    };
+
+    hosts.reportOnline(registered.host.id, ["acp.codex"], 1, reported);
+    expect(hosts.getRequired(registered.host.id).readinessObservation).toEqual(reported);
+
+    const missingProfile = {
+      workspaceMappings: [{ workspaceId: "workspace-readiness", status: "ready" as const }],
+      acpProfiles: []
+    };
+    hosts.touch(registered.host.id, new Date(), missingProfile);
+    expect(hosts.getRequired(registered.host.id).readinessObservation).toEqual(missingProfile);
+    hosts.reportOnline(registered.host.id, ["acp.codex"], 1);
+    expect(hosts.getRequired(registered.host.id).readinessObservation).toBeUndefined();
+    expect(
+      JSON.stringify(store.database.prepare("SELECT readiness_json FROM agent_hosts").all())
+    ).not.toContain("/private/");
+  });
+
   it("rejects conflicting replay, expired and revoked grants without leaking secrets", async () => {
     const store = await setup();
-    const workspaceId = new WorkspaceIdentityRepository(store.database).ensureWorkspaceForLegacyProject(
-      "project-enrollment"
-    );
+    const workspaceId = new WorkspaceIdentityRepository(
+      store.database
+    ).ensureWorkspaceForLegacyProject("project-enrollment");
     const service = new HostEnrollmentService(store.database);
     const create = () =>
       service.createGrant({
@@ -162,9 +192,9 @@ describe("Agent Host enrollment", () => {
 
   it("serves the strict exchange over real loopback HTTP only with explicit development opt-in", async () => {
     const store = await setup();
-    const workspaceId = new WorkspaceIdentityRepository(store.database).ensureWorkspaceForLegacyProject(
-      "project-enrollment"
-    );
+    const workspaceId = new WorkspaceIdentityRepository(
+      store.database
+    ).ensureWorkspaceForLegacyProject("project-enrollment");
     const service = new HostEnrollmentService(store.database);
     const grant = service.createGrant({
       workspaceId,

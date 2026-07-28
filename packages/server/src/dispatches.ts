@@ -1,5 +1,6 @@
 import { ArtifactAuthorizationRepository } from "./artifactAuthorization.js";
 import { z } from "zod";
+import type { HostReadinessObservation } from "@planweave-ai/distributed-protocol";
 import { AgentHostRepository } from "./hosts.js";
 import { HostEventInbox } from "./hostEvents.js";
 import {
@@ -213,16 +214,17 @@ export class DispatchService {
       dispatchId: string;
       leaseId: string;
       executionAttemptId: string;
-    }>
+    }>,
+    readiness?: HostReadinessObservation
   ): Array<{
     dispatchId: string;
     leaseId: string;
     executionAttemptId: string;
     leaseExpiresAt: string;
   }> {
-    this.inbox.process(hostId, messageId, "host.heartbeat", { activeLeases }, () => {
+    this.inbox.process(hostId, messageId, "host.heartbeat", { activeLeases, readiness }, () => {
       const now = new Date();
-      this.hosts.touch(hostId, now);
+      this.hosts.touch(hostId, now, readiness);
       for (const lease of activeLeases) {
         const dispatch = this.get(lease.dispatchId);
         if (

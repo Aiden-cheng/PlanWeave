@@ -2,6 +2,7 @@ import { z } from "zod";
 import { capabilitiesSchema } from "./capabilities.js";
 import { hostEnrollmentCodeSchema } from "./agentHostCredentials.js";
 import { opaqueIdentifierSchema } from "./identifiers.js";
+import { hostReadinessObservationSchema } from "./agentHostProtocol.js";
 
 /** Bounded operator credential accepted by Server and held only by Desktop main. */
 export const operatorTokenSchema = z
@@ -39,6 +40,32 @@ export const operatorEnrollmentGrantResponseSchema = z
   })
   .strict();
 
+export const operatorHostAvailabilityReasonSchema = z.enum([
+  "revoked",
+  "offline",
+  "readiness_not_reported",
+  "workspace_mapping_missing",
+  "workspace_mapping_invalid",
+  "acp_profile_missing",
+  "acp_profile_invalid",
+  "capability_mismatch"
+]);
+
+export const operatorHostAvailabilitySchema = z
+  .object({
+    status: z.enum(["available", "unavailable"]),
+    reason: operatorHostAvailabilityReasonSchema.nullable()
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (
+      (value.status === "available" && value.reason !== null) ||
+      (value.status === "unavailable" && value.reason === null)
+    ) {
+      context.addIssue({ code: "custom", message: "operator_host_availability_reason_mismatch" });
+    }
+  });
+
 export const operatorHostViewSchema = z
   .object({
     id: opaqueIdentifierSchema,
@@ -49,7 +76,9 @@ export const operatorHostViewSchema = z
     online: z.boolean(),
     lastSeenAt: timestampSchema.optional(),
     revokedAt: timestampSchema.optional(),
-    credentialExpiresAt: timestampSchema.optional()
+    credentialExpiresAt: timestampSchema.optional(),
+    readinessObservation: hostReadinessObservationSchema.optional(),
+    availability: operatorHostAvailabilitySchema
   })
   .strict();
 
@@ -66,5 +95,7 @@ export const operatorHostRevokeResponseSchema = operatorHostViewSchema;
 export type OperatorEnrollmentGrantRequest = z.infer<typeof operatorEnrollmentGrantRequestSchema>;
 export type OperatorEnrollmentGrantResponse = z.infer<typeof operatorEnrollmentGrantResponseSchema>;
 export type OperatorHostView = z.infer<typeof operatorHostViewSchema>;
+export type OperatorHostAvailability = z.infer<typeof operatorHostAvailabilitySchema>;
+export type OperatorHostAvailabilityReason = z.infer<typeof operatorHostAvailabilityReasonSchema>;
 export type OperatorHostPage = z.infer<typeof operatorHostPageSchema>;
 export type OperatorPageQuery = z.infer<typeof operatorPageQuerySchema>;

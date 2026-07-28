@@ -21,6 +21,8 @@ describe("main-owned Host bootstrap handoff", () => {
           configPath: "/etc/planweave/agent-host.json",
           dataDirectory: "/var/lib/planweave-agent-host",
           workspaceRoot: "/var/lib/planweave-agent-host/workspaces",
+          workspacePath: "project",
+          acpProfilePreset: "codex-acp",
           host: { displayName: "Host A", capacity: 1, capabilities: ["linux.x64"] }
         }
       },
@@ -29,6 +31,16 @@ describe("main-owned Host bootstrap handoff", () => {
 
     expect(handoff).toContain(`--code '${enrollmentCode}'`);
     expect(handoff).toContain("base64 --decode > '/etc/planweave/agent-host.json'");
+    expect(handoff).toContain(
+      "planweave-agent-host config-init --config '/etc/planweave/agent-host.json' --preset codex-acp"
+    );
     expect(handoff).toContain("planweave-agent-host run");
+    const encodedConfig = handoff.match(/printf %s '([^']+)'/)?.[1];
+    expect(encodedConfig).toBeDefined();
+    if (!encodedConfig) throw new Error("host_bootstrap_config_missing");
+    expect(JSON.parse(Buffer.from(encodedConfig, "base64").toString("utf8"))).toMatchObject({
+      workspaces: [{ id: "workspace-a", path: "project" }],
+      agentProfiles: []
+    });
   });
 });

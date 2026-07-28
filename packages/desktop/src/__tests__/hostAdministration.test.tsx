@@ -21,7 +21,10 @@ const bridgeMock = vi.hoisted(() => ({
   revokeOperatorHost: vi.fn()
 }));
 
-vi.mock("../renderer/bridge", () => ({ operatorControlBridge: bridgeMock }));
+vi.mock("../renderer/bridge", () => ({
+  collaborationBridge: null,
+  operatorControlBridge: bridgeMock
+}));
 
 const status = () => ({
   profiles: [
@@ -34,16 +37,16 @@ const status = () => ({
       hasOperatorCredential: true,
       operatorCredentialPersistence: "persisted" as const,
       updatedAt: "2030-01-01T00:00:00.000Z",
-    workspaceConnection: {
-      schemaVersion: "workspace-setup/v1",
-      status: "local_only",
-      profile: null,
-      workspaceId: null,
-      workspaceDisplayName: null,
-      connectedAt: null,
-      error: null
-    },
-    workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
+      workspaceConnection: {
+        schemaVersion: "workspace-setup/v1",
+        status: "local_only",
+        profile: null,
+        workspaceId: null,
+        workspaceDisplayName: null,
+        connectedAt: null,
+        error: null
+      },
+      workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
     }
   ],
   activeProfileId: "profile-a",
@@ -52,24 +55,26 @@ const status = () => ({
   lastErrorCode: null,
   lastErrorMessage: null,
   updatedAt: "2030-01-01T00:00:00.000Z",
-workspaceConnection: {
-  schemaVersion: "workspace-setup/v1",
-  status: "local_only",
-  profile: null,
-  workspaceId: null,
-  workspaceDisplayName: null,
-  connectedAt: null,
-  error: null
-},
-workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
+  workspaceConnection: {
+    schemaVersion: "workspace-setup/v1",
+    status: "local_only",
+    profile: null,
+    workspaceId: null,
+    workspaceDisplayName: null,
+    connectedAt: null,
+    error: null
+  },
+  workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
 });
 
 const host = {
   id: "host-1",
+  workspaceId: "workspace-a",
   displayName: "Build Host",
   capabilities: ["linux.x64", "codex"],
   capacity: 4,
   online: false,
+  availability: { status: "unavailable" as const, reason: "offline" as const },
   lastSeenAt: undefined,
   credentialExpiresAt: "2030-01-02T00:00:00.000Z"
 };
@@ -116,10 +121,78 @@ describe("Host administration surface", () => {
     render(<HostAdministrationSection t={createTranslator("en")} />);
 
     expect(await screen.findByTestId("host-administration")).toBeInTheDocument();
-    expect(await screen.findByText("Offline")).toBeInTheDocument();
+    expect(await screen.findByTestId("host-availability-status-host-1")).toHaveTextContent(
+      "Unavailable: offline"
+    );
     expect(screen.getByText("Credential available · OS vault")).toBeInTheDocument();
     expect(screen.getByText("linux.x64, codex")).toBeInTheDocument();
     expect(screen.queryByText(/operator_a_token|Bearer/i)).not.toBeInTheDocument();
+  });
+
+  it("shows the Server-projected native Host readiness without target-machine details", async () => {
+    bridgeMock.listOperatorHosts.mockResolvedValueOnce({
+      items: [
+        {
+          ...host,
+          online: true,
+          capabilities: ["linux.x64", "acp.codex"],
+          availability: { status: "available", reason: null },
+          readinessObservation: {
+            workspaceMappings: [{ workspaceId: "workspace-a", status: "ready" }],
+            acpProfiles: [
+              {
+                profileId: "codex-acp",
+                agentId: "codex",
+                status: "ready",
+                capabilities: ["acp.codex"]
+              }
+            ]
+          }
+        }
+      ],
+      nextCursor: null
+    });
+
+    render(<HostAdministrationSection t={createTranslator("en")} />);
+
+    expect(await screen.findByTestId("host-availability-status-host-1")).toHaveTextContent(
+      "Available"
+    );
+    expect(screen.queryByText(/\/var\/lib|codex-acp --|PATH=/)).not.toBeInTheDocument();
+  });
+
+  it("renders the Server availability result instead of recomputing readiness in the renderer", async () => {
+    bridgeMock.listOperatorHosts.mockResolvedValueOnce({
+      items: [
+        {
+          ...host,
+          online: true,
+          capabilities: ["linux.x64", "acp.codex"],
+          availability: { status: "unavailable", reason: "capability_mismatch" },
+          readinessObservation: {
+            workspaceMappings: [{ workspaceId: "workspace-a", status: "ready" }],
+            acpProfiles: [
+              {
+                profileId: "codex-acp",
+                agentId: "codex",
+                status: "ready",
+                capabilities: ["acp.codex"]
+              }
+            ]
+          }
+        }
+      ],
+      nextCursor: null
+    });
+
+    render(<HostAdministrationSection t={createTranslator("en")} />);
+
+    expect(await screen.findByTestId("host-availability-status-host-1")).toHaveTextContent(
+      "Unavailable: capability mismatch"
+    );
+    expect(
+      screen.getByText(/Restart the Host after the configured ACP preset/i)
+    ).toBeInTheDocument();
   });
 
   it("keeps enrollment secrets out of renderer state while showing redacted main-owned handoff status", async () => {
@@ -139,6 +212,8 @@ describe("Host administration surface", () => {
         configPath: "/etc/planweave/agent-host.json",
         dataDirectory: "/var/lib/planweave-agent-host",
         workspaceRoot: "/var/lib/planweave-agent-host/workspaces",
+        workspacePath: "project",
+        acpProfilePreset: "codex-acp",
         host: { displayName: "Production admin", capacity: 1, capabilities: ["linux.x64"] }
       }
     });

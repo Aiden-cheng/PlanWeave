@@ -4,6 +4,7 @@ import type {
   NormalizedFailure as ProtocolDispatchFailure,
   ServerEvent
 } from "../protocol.js";
+import type { HostReadinessObservation } from "@planweave-ai/distributed-protocol";
 import type {
   AgentHostExecution,
   AgentHostExecutionEvidence,
@@ -52,7 +53,8 @@ export interface AgentHostStateRepository {
       dispatchId: string;
       leaseId: string;
       executionAttemptId: string;
-    }>
+    }>,
+    readiness?: HostReadinessObservation
   ): HostEvent;
   acknowledgeEvent(messageId: string): boolean;
   recoverInterruptedExecutions(): number;

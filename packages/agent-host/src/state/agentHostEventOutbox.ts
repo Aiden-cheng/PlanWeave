@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { HostReadinessObservation } from "@planweave-ai/distributed-protocol";
 import { parseAgentHostEvent, type HostEvent } from "../protocol.js";
 import { outboxRowSchema } from "./agentHostStateRecords.js";
 import type { SqliteDatabase } from "./sqliteDatabase.js";
@@ -62,13 +63,15 @@ export class AgentHostEventOutbox {
       dispatchId: string;
       leaseId: string;
       executionAttemptId: string;
-    }>
+    }>,
+    readiness?: HostReadinessObservation
   ): HostEvent {
     const heartbeat = parseAgentHostEvent({
       type: "host.heartbeat",
       protocolVersion: 1,
       messageId: randomUUID(),
-      activeLeases
+      activeLeases,
+      ...(readiness ? { readiness } : {})
     });
     const existing = this.database
       .prepare(

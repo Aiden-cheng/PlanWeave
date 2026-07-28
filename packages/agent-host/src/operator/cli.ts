@@ -9,6 +9,7 @@ export const AGENT_HOST_CLI_USAGE = [
   "Usage: planweave-agent-host <command> [options]",
   "",
   "Commands:",
+  "  config-init --config <absolute-path> --preset codex-acp",
   "  preflight --config <absolute-path>",
   "  enroll --config <absolute-path> --code <enrollment-or-setup-code> [--replace]",
   "  status --config <absolute-path>",
@@ -18,9 +19,10 @@ export const AGENT_HOST_CLI_USAGE = [
 ].join("\n");
 
 type ParsedCommand = {
-  command: "preflight" | "enroll" | "run" | "status" | "revoke";
+  command: "config-init" | "preflight" | "enroll" | "run" | "status" | "revoke";
   configPath: string;
   code?: string;
+  preset?: "codex-acp";
   replace: boolean;
 };
 
@@ -28,13 +30,17 @@ export interface AgentHostOperatorService {
   preflight(configPath: string): Promise<unknown>;
   enroll(configPath: string, code: string, replaceExisting?: boolean): Promise<unknown>;
   createDaemon(configPath: string): Promise<AgentHostComposition>;
+  initializePreset(configPath: string, presetId: string): Promise<unknown>;
   status(configPath: string): Promise<unknown>;
   revoke(configPath: string): Promise<unknown>;
 }
 
 export function parseAgentHostArgs(argv: readonly string[]): ParsedCommand {
   const [command, ...args] = argv;
-  if (!command || !["preflight", "enroll", "run", "status", "revoke"].includes(command)) {
+  if (
+    !command ||
+    !["config-init", "preflight", "enroll", "run", "status", "revoke"].includes(command)
+  ) {
     throw new Error("agent_host_cli_usage");
   }
   const option = (name: string) => {
@@ -44,11 +50,18 @@ export function parseAgentHostArgs(argv: readonly string[]): ParsedCommand {
   const configPath = option("--config");
   if (!configPath) throw new Error("agent_host_cli_config_required");
   const code = option("--code");
+  const preset = option("--preset");
   if (command === "enroll" && !code) throw new Error("agent_host_cli_enrollment_code_required");
-  if (command !== "enroll" && (code || args.includes("--replace"))) {
+  if (command === "config-init" && preset !== "codex-acp") {
+    throw new Error("agent_host_cli_preset_required");
+  }
+  if (
+    (command !== "enroll" && (code || args.includes("--replace"))) ||
+    (command !== "config-init" && preset)
+  ) {
     throw new Error("agent_host_cli_usage");
   }
-  const known = new Set(["--config", "--code", "--replace"]);
+  const known = new Set(["--config", "--code", "--preset", "--replace"]);
   for (let index = 0; index < args.length; index++) {
     const value = args[index];
     if (!known.has(value)) throw new Error("agent_host_cli_usage");
@@ -58,6 +71,7 @@ export function parseAgentHostArgs(argv: readonly string[]): ParsedCommand {
     command: command as ParsedCommand["command"],
     configPath,
     code,
+    preset: preset === "codex-acp" ? preset : undefined,
     replace: args.includes("--replace")
   };
 }
@@ -127,14 +141,20 @@ export async function runAgentHostCli(
       );
       return 0;
     }
-    const result =
-      parsed.command === "enroll"
-        ? await operator.enroll(parsed.configPath, parsed.code ?? "", parsed.replace)
-        : parsed.command === "revoke"
-          ? await operator.revoke(parsed.configPath)
-          : parsed.command === "preflight"
-            ? await operator.preflight(parsed.configPath)
-            : await operator.status(parsed.configPath);
+    let result: unknown;
+    if (parsed.command === "config-init") {
+      if (!parsed.preset) throw new Error("agent_host_cli_preset_required");
+      result = await operator.initializePreset(parsed.configPath, parsed.preset);
+    } else if (parsed.command === "enroll") {
+      if (!parsed.code) throw new Error("agent_host_cli_enrollment_code_required");
+      result = await operator.enroll(parsed.configPath, parsed.code, parsed.replace);
+    } else if (parsed.command === "revoke") {
+      result = await operator.revoke(parsed.configPath);
+    } else if (parsed.command === "preflight") {
+      result = await operator.preflight(parsed.configPath);
+    } else {
+      result = await operator.status(parsed.configPath);
+    }
     io.stdout(JSON.stringify(result));
     return 0;
   } catch (error) {

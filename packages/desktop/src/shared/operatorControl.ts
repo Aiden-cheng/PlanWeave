@@ -104,11 +104,26 @@ const hostBootstrapAbsolutePathSchema = z
   .max(4096)
   .refine((value) => /^(?:\/|[A-Za-z]:[\\/])/.test(value), "path must be absolute");
 
+const hostBootstrapRelativeWorkspacePathSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(1024)
+  .refine(
+    (value) =>
+      !/^(?:\/|[A-Za-z]:[\\/])/.test(value) &&
+      !value.includes("\\") &&
+      value.split("/").every((segment) => segment !== "" && segment !== "." && segment !== ".."),
+    "workspacePath must be a safe relative path"
+  );
+
 export const operatorHostBootstrapConfigSchema = z
   .object({
     configPath: hostBootstrapAbsolutePathSchema,
     dataDirectory: hostBootstrapAbsolutePathSchema,
     workspaceRoot: hostBootstrapAbsolutePathSchema,
+    workspacePath: hostBootstrapRelativeWorkspacePathSchema,
+    acpProfilePreset: z.literal("codex-acp"),
     host: z
       .object({
         displayName: z.string().trim().min(1).max(128),

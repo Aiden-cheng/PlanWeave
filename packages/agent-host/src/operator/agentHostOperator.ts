@@ -1,6 +1,8 @@
-import { mkdir, readFile, realpath, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { access, mkdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { delimiter, isAbsolute, join } from "node:path";
 import { parseAgentHostConfig, type AgentHostConfig } from "../config/schema.js";
+import { observeHostReadiness } from "../config/readiness.js";
 import { ConfiguredAcpProfileResolver, ConfiguredWorkspaceResolver } from "../config/resolvers.js";
 import {
   composeAgentHost,
@@ -20,6 +22,7 @@ import {
 import { AgentHostClient } from "../transport/agentHostClient.js";
 import { agentHostPackageVersion } from "../packageInfo.js";
 import { createAgentHostTlsTrust } from "../tls/trust.js";
+import { findSupportedHostAcpProfile } from "../realAcp/supportedProfiles.js";
 
 const MAX_CONFIG_BYTES = 256 * 1_024;
 
@@ -45,6 +48,33 @@ export async function loadAgentHostConfig(path: string): Promise<AgentHostConfig
   }
 }
 
+async function resolvePresetCommand(command: string, pathEnv: string | undefined): Promise<string> {
+  const candidates = isAbsolute(command)
+    ? [command]
+    : (pathEnv ?? "")
+        .split(delimiter)
+        .filter(Boolean)
+        .map((directory) => join(directory, command));
+  for (const candidate of candidates) {
+    try {
+      const resolved = await realpath(candidate);
+      await access(resolved, constants.X_OK);
+      return resolved;
+    } catch (error) {
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        (error.code === "ENOENT" || error.code === "EACCES")
+      ) {
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error("agent_host_preset_binary_missing");
+}
+
 function credentialStore(config: AgentHostConfig): FileHostCredentialStore {
   return new FileHostCredentialStore(join(config.dataDirectory, "credentials.json"));
 }
@@ -57,6 +87,40 @@ function transportOrigin(value: string): string {
 }
 
 export class AgentHostOperator {
+  async initializePreset(configPath: string, presetId: string): Promise<AgentHostConfig> {
+    if (presetId !== "codex-acp") throw new Error("agent_host_preset_unsupported");
+    const config = await loadAgentHostConfig(configPath);
+    const preset = findSupportedHostAcpProfile(presetId);
+    if (!preset) throw new Error("agent_host_preset_unsupported");
+    const command = await resolvePresetCommand(preset.command, process.env.PATH);
+    const profile = {
+      id: preset.profileId,
+      agentId: preset.agentId,
+      command,
+      args: [...preset.args],
+      environment: [...preset.environment]
+    };
+    const existing = config.agentProfiles.find((candidate) => candidate.id === profile.id);
+    if (
+      existing &&
+      (existing.agentId !== profile.agentId || existing.command !== profile.command)
+    ) {
+      throw new Error("agent_host_preset_profile_conflict");
+    }
+    const next = parseAgentHostConfig({
+      ...config,
+      host: {
+        ...config.host,
+        capabilities: [...new Set([...config.host.capabilities, `acp.${preset.agentId}`])]
+      },
+      agentProfiles: existing ? config.agentProfiles : [...config.agentProfiles, profile]
+    });
+    const temporaryPath = `${configPath}.preset-${process.pid}-${Date.now()}`;
+    await writeFile(temporaryPath, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+    await rename(temporaryPath, configPath);
+    return next;
+  }
+
   async preflight(configPath: string): Promise<AgentHostDiagnostics> {
     const config = await loadAgentHostConfig(configPath);
     await realpath(config.workspaceRoot);
@@ -117,8 +181,11 @@ export class AgentHostOperator {
 
   async createDaemon(configPath: string): Promise<AgentHostComposition> {
     const config = await loadAgentHostConfig(configPath);
-    await this.preflight(configPath);
+    await realpath(config.workspaceRoot);
+    await mkdir(config.dataDirectory, { recursive: true, mode: 0o700 });
+    await credentialStore(config).read();
     const credential = await credentialStore(config).requireUsable();
+    const readiness = await observeHostReadiness(config);
     await ensureDurableHostIdentity(
       config.dataDirectory,
       credential.hostId,
@@ -147,6 +214,7 @@ export class AgentHostOperator {
         token: credential.credentialToken,
         capabilities: config.host.capabilities,
         capacity: config.host.capacity,
+        readiness,
         state,
         executor,
         interactionRelay,

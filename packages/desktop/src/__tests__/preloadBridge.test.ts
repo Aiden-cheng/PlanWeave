@@ -221,6 +221,8 @@ describe("preload bridge invocation", () => {
         configPath: "/etc/planweave/agent-host.json",
         dataDirectory: "/var/lib/planweave-agent-host",
         workspaceRoot: "/var/lib/planweave-agent-host/workspaces",
+        workspacePath: "project",
+        acpProfilePreset: "codex-acp",
         host: { displayName: "Host A", capacity: 1, capabilities: ["linux.x64"] }
       }
     };

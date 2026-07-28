@@ -26,6 +26,7 @@ afterEach(async () => {
 
 function operator(overrides: Partial<AgentHostOperatorService> = {}): AgentHostOperatorService {
   return {
+    initializePreset: vi.fn(),
     preflight: vi.fn(),
     enroll: vi.fn(),
     createDaemon: vi.fn(),
@@ -83,12 +84,41 @@ describe("Agent Host operator CLI", () => {
     expect(
       parseAgentHostArgs(["enroll", "--config", "/config.json", "--code", "once", "--replace"])
     ).toMatchObject({ command: "enroll", code: "once", replace: true });
+    expect(
+      parseAgentHostArgs(["config-init", "--config", "/config.json", "--preset", "codex-acp"])
+    ).toEqual({
+      command: "config-init",
+      configPath: "/config.json",
+      preset: "codex-acp",
+      code: undefined,
+      replace: false
+    });
     expect(() => parseAgentHostArgs(["enroll", "--config", "/config.json"])).toThrow(
       "agent_host_cli_enrollment_code_required"
     );
     expect(() => parseAgentHostArgs(["status", "--config", "/config.json", "--unknown"])).toThrow(
       "agent_host_cli_usage"
     );
+    expect(() => parseAgentHostArgs(["config-init", "--config", "/config.json"])).toThrow(
+      "agent_host_cli_preset_required"
+    );
+  });
+
+  it("initializes only the fixed ACP preset through the operator service", async () => {
+    const stdout = vi.fn();
+    const stderr = vi.fn();
+    const initializePreset = vi.fn().mockResolvedValue({ host: { capabilities: ["acp.codex"] } });
+    await expect(
+      runAgentHostCli(
+        ["config-init", "--config", "/private/config.json", "--preset", "codex-acp"],
+        {
+          operator: operator({ initializePreset }),
+          io: { stdout, stderr }
+        }
+      )
+    ).resolves.toBe(0);
+    expect(initializePreset).toHaveBeenCalledWith("/private/config.json", "codex-acp");
+    expect(JSON.stringify(stdout.mock.calls)).not.toContain("/private/config.json");
   });
 
   it("uses service methods and maps usage and operational failures to exit codes", async () => {

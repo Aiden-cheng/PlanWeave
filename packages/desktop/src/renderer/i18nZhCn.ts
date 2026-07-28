@@ -499,6 +499,37 @@ export const zhCnCatalog = {
   deploymentHostCapabilities: "能力",
   deploymentHostCapabilitiesNone: "未报告能力",
   deploymentHostUnavailable: "不可用：Server 尚未报告工作区映射或 ACP profile 就绪状态。",
+  hostAvailabilityTitle: "Agent Host 可用性",
+  hostAvailabilityDescription:
+    "Server 将已认证的目标机观察与 Host 在线和吊销状态合成；绝不显示路径、命令或凭证。",
+  hostAvailabilityEmpty: "Server 当前未报告 Agent Host。",
+  hostAvailabilityWorkspace: "Workspace 映射",
+  hostAvailabilityProfiles: "ACP profile",
+  hostAvailabilityProfile_ready: "就绪",
+  hostAvailabilityProfile_missing: "缺失",
+  hostAvailabilityProfile_invalid: "无效",
+  hostAvailability_ready: "可用",
+  hostAvailability_revoked: "不可用：已吊销",
+  hostAvailability_offline: "不可用：离线",
+  hostAvailability_readiness_not_reported: "不可用：Host 尚未报告就绪状态",
+  hostAvailability_workspace_mapping_missing: "不可用：缺少 workspace 映射",
+  hostAvailability_workspace_mapping_invalid: "不可用：workspace 映射无效",
+  hostAvailability_acp_profile_missing: "不可用：缺少 ACP profile",
+  hostAvailability_acp_profile_invalid: "不可用：ACP profile 无效",
+  hostAvailability_capability_mismatch: "不可用：能力不匹配",
+  hostAvailabilityAction_revoked: "重新获得授权后，创建新的入驻交接。",
+  hostAvailabilityAction_offline: "启动原生 Agent Host；收到已认证心跳后刷新。",
+  hostAvailabilityAction_readiness_not_reported: "运行当前 Host 交接，让目标机报告本机就绪状态。",
+  hostAvailabilityAction_workspace_mapping_missing:
+    "使用正确的相对 workspace 路径创建 Host 交接，并在目标机运行。",
+  hostAvailabilityAction_workspace_mapping_invalid:
+    "修正目标 Host 的 workspace 路径后，重新运行原生 Host 交接。",
+  hostAvailabilityAction_acp_profile_missing:
+    "使用 codex-acp preset 交接，并确保目标 Host 已安装其适配器。",
+  hostAvailabilityAction_acp_profile_invalid:
+    "修复目标 Host 的 codex-acp 安装或登录，再重启原生 Host。",
+  hostAvailabilityAction_capability_mismatch:
+    "配置 ACP preset 可用后重启 Host，使其发布匹配的能力。",
   hostAdminRefresh: "刷新",
   hostAdminLoading: "加载中…",
   hostAdminBridgeUnavailable: "当前 Desktop 会话无法使用 Host 管理。",

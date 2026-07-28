@@ -50,6 +50,7 @@ export function HostBootstrapCard({
   const [configPath, setConfigPath] = useState("/etc/planweave/agent-host.json");
   const [dataDirectory, setDataDirectory] = useState("/var/lib/planweave-agent-host");
   const [workspaceRoot, setWorkspaceRoot] = useState("/var/lib/planweave-agent-host/workspaces");
+  const [workspacePath, setWorkspacePath] = useState("project");
   const [hostDisplayName, setHostDisplayName] = useState(
     activeProfile?.displayName ?? "Agent Host"
   );
@@ -93,14 +94,20 @@ export function HostBootstrapCard({
           !isAbsolutePath(dataDirectory) ||
           !isAbsolutePath(workspaceRoot)
         ? "hostAdminBootstrapAbsolutePaths"
-        : !hostDisplayName.trim()
-          ? "hostAdminBootstrapHostName"
-          : !Number.isInteger(parsedCapacity) || parsedCapacity < 1 || parsedCapacity > 128
-            ? "hostAdminBootstrapCapacity"
-            : capabilityValues.length === 0 ||
-                capabilityValues.some((value) => !/^[a-z0-9][a-z0-9._:-]*$/.test(value))
-              ? "hostAdminBootstrapCapabilities"
-              : null;
+        : !workspacePath.trim() ||
+            workspacePath.includes("\\") ||
+            workspacePath
+              .split("/")
+              .some((segment) => !segment || segment === "." || segment === "..")
+          ? "hostAdminBootstrapWorkspacePath"
+          : !hostDisplayName.trim()
+            ? "hostAdminBootstrapHostName"
+            : !Number.isInteger(parsedCapacity) || parsedCapacity < 1 || parsedCapacity > 128
+              ? "hostAdminBootstrapCapacity"
+              : capabilityValues.length === 0 ||
+                  capabilityValues.some((value) => !/^[a-z0-9][a-z0-9._:-]*$/.test(value))
+                ? "hostAdminBootstrapCapabilities"
+                : null;
 
   const bootstrap = useMemo<OperatorHostBootstrapConfig | null>(() => {
     if (configValidationError) return null;
@@ -108,6 +115,8 @@ export function HostBootstrapCard({
       configPath: configPath.trim(),
       dataDirectory: dataDirectory.trim(),
       workspaceRoot: workspaceRoot.trim(),
+      workspacePath: workspacePath.trim(),
+      acpProfilePreset: "codex-acp",
       host: {
         displayName: hostDisplayName.trim(),
         capacity: parsedCapacity,
@@ -121,7 +130,8 @@ export function HostBootstrapCard({
     dataDirectory,
     hostDisplayName,
     parsedCapacity,
-    workspaceRoot
+    workspaceRoot,
+    workspacePath
   ]);
 
   return (
@@ -199,6 +209,15 @@ export function HostBootstrapCard({
                 onChange={(event) => setWorkspaceRoot(event.target.value)}
               />
             </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="host-admin-workspace-path">{t("hostAdminWorkspacePath")}</Label>
+              <Input
+                id="host-admin-workspace-path"
+                data-testid="host-admin-workspace-path"
+                value={workspacePath}
+                onChange={(event) => setWorkspacePath(event.target.value)}
+              />
+            </div>
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="grid gap-1.5">
@@ -233,7 +252,7 @@ export function HostBootstrapCard({
               />
             </div>
           </div>
-          <p className="text-xs text-text-muted">{t("hostAdminBootstrapListsEmpty")}</p>
+          <p className="text-xs text-text-muted">{t("hostAdminBootstrapCodexPreset")}</p>
           {configValidationError ? (
             <p
               className="text-xs text-destructive"

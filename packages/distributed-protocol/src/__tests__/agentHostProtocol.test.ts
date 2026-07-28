@@ -52,6 +52,44 @@ describe("versioned Agent Host protocol", () => {
     ).toThrow("Command identity must match the Execution Envelope");
   });
 
+  it("accepts only redacted target-machine readiness observations", () => {
+    expect(
+      hostHelloSchema.parse({
+        ...agentHostProtocolGoldenFixtures.hello,
+        readiness: {
+          workspaceMappings: [{ workspaceId: "workspace-a", status: "ready" }],
+          acpProfiles: [
+            {
+              profileId: "codex-acp",
+              agentId: "codex",
+              status: "ready",
+              capabilities: ["acp.codex"]
+            }
+          ]
+        }
+      }).readiness
+    ).toEqual({
+      workspaceMappings: [{ workspaceId: "workspace-a", status: "ready" }],
+      acpProfiles: [
+        {
+          profileId: "codex-acp",
+          agentId: "codex",
+          status: "ready",
+          capabilities: ["acp.codex"]
+        }
+      ]
+    });
+    expect(() =>
+      hostHelloSchema.parse({
+        ...agentHostProtocolGoldenFixtures.hello,
+        readiness: {
+          workspaceMappings: [{ workspaceId: "workspace-a", status: "ready", path: "/secret" }],
+          acpProfiles: []
+        }
+      })
+    ).toThrow();
+  });
+
   it("rejects an execute command whose digest does not bind its canonical envelope", () => {
     expect(() =>
       serverEventSchema.parse({

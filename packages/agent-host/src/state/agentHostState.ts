@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import type { InteractionSettlement } from "@planweave-ai/distributed-protocol";
+import type {
+  HostReadinessObservation,
+  InteractionSettlement
+} from "@planweave-ai/distributed-protocol";
 import type {
   AgentHostRemoteExecutionIdentity,
   AgentHostRemoteExecutionRecord
@@ -234,8 +237,11 @@ export class AgentHostState implements AgentHostStateRepository {
     return this.events.pendingCount();
   }
 
-  queueHeartbeat(activeLeases: ReadonlyArray<AgentHostRemoteExecutionIdentity>): HostEvent {
-    return inWriteTransaction(this.database, () => this.events.queueHeartbeat(activeLeases));
+  queueHeartbeat(
+    activeLeases: ReadonlyArray<AgentHostRemoteExecutionIdentity>,
+    readiness?: HostReadinessObservation
+  ): HostEvent {
+    return inWriteTransaction(this.database, () => this.events.queueHeartbeat(activeLeases, readiness));
   }
 
   acknowledgeEvent(messageId: string): boolean {

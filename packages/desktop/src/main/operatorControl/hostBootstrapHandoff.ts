@@ -25,7 +25,7 @@ export function buildHostBootstrapHandoff(
     dataDirectory: input.bootstrap.dataDirectory,
     workspaceRoot: input.bootstrap.workspaceRoot,
     host: input.bootstrap.host,
-    workspaces: [],
+    workspaces: [{ id: grant.workspaceId, path: input.bootstrap.workspacePath }],
     agentProfiles: []
   };
   const encodedConfig = Buffer.from(JSON.stringify(config, null, 2), "utf8").toString("base64");
@@ -34,6 +34,7 @@ export function buildHostBootstrapHandoff(
 
   return [
     `printf %s '${encodedConfig}' | base64 --decode > ${configPath}`,
+    `planweave-agent-host config-init --config ${configPath} --preset ${input.bootstrap.acpProfilePreset}`,
     `planweave-agent-host preflight --config ${configPath}`,
     `planweave-agent-host enroll --config ${configPath} --code ${enrollmentCode}`,
     `planweave-agent-host run --config ${configPath}`
