@@ -93,6 +93,7 @@ export function assertTargetAllowedForWorkItem(
  */
 export const assignmentRecordSchema = z
   .object({
+    workspaceId: opaqueIdentifierSchema,
     projectId: humanProjectIdSchema,
     workItem: workItemRefSchema,
     target: assignmentTargetSchema,
@@ -343,12 +344,15 @@ export type AssignmentMembershipFacts = z.infer<typeof assignmentMembershipFacts
  */
 export const assignmentHostFactsSchema = z
   .object({
+    workspaceId: opaqueIdentifierSchema,
     projectId: humanProjectIdSchema,
     hostId: opaqueIdentifierSchema,
     exists: z.boolean(),
     revoked: z.boolean(),
     authorizedForProject: z.boolean(),
     online: z.boolean(),
+    /** Server-authoritative workspace/profile readiness; false fails closed. */
+    ready: z.boolean(),
     capabilities: z.array(z.string().min(1)).max(128),
     displayName: z
       .string()

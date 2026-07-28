@@ -16,6 +16,7 @@ export const workAssignmentErrorCodeSchema = z.enum([
   "work_host_not_found",
   "work_host_revoked",
   "work_host_not_authorized",
+  "work_host_not_ready",
   "work_host_capability_mismatch",
   "work_revision_conflict",
   "work_not_agent_assigned",
@@ -62,6 +63,7 @@ export const WORK_ASSIGNMENT_ERROR_MESSAGES: Readonly<Record<WorkAssignmentError
   work_host_not_found: "Exact Host target was not found.",
   work_host_revoked: "Exact Host target has been revoked.",
   work_host_not_authorized: "Exact Host is not authorized to serve this project.",
+  work_host_not_ready: "Exact Host has not reported ready workspace and ACP profile state.",
   work_host_capability_mismatch:
     "Exact Host does not satisfy the Block's current capability requirements.",
   work_revision_conflict: "Assignment revision does not match the expected revision.",

@@ -23,6 +23,23 @@ async function legacyFixture() {
     INSERT INTO legacy_project_workspace_mappings(legacy_project_id,normalized_legacy_project_identity,workspace_id,mapped_at)
       VALUES ('p','legacy-project:p','w','2026-07-27T00:00:00.000Z');
     DELETE FROM schema_migrations WHERE version=29;
+    DROP TABLE work_assignments;
+    CREATE TABLE work_assignments (
+      project_id TEXT NOT NULL,
+      canvas_id TEXT NOT NULL,
+      work_item_kind TEXT NOT NULL,
+      work_item_key TEXT NOT NULL,
+      target_kind TEXT NOT NULL,
+      target_human_principal_id TEXT,
+      target_host_id TEXT,
+      revision INTEGER NOT NULL,
+      updated_by_kind TEXT NOT NULL,
+      updated_by_id TEXT NOT NULL,
+      updated_by_display_name TEXT,
+      updated_at TEXT NOT NULL,
+      reason TEXT,
+      PRIMARY KEY(project_id,canvas_id,work_item_kind,work_item_key)
+    );
     DROP TABLE assignment_authority_migrations;
     DROP TABLE execution_target_records;
     DROP TABLE review_assignment_records;
@@ -162,16 +179,19 @@ describe("assignment authority migration", () => {
     expect(
       rollbackAssignmentAuthorityMigration(database, { workspaceId: "w", projectId: "p" })
     ).toMatchObject({ status: "repair_required", outcome: "rollback_to_legacy" });
-    expect(
-      database.prepare("SELECT COUNT(*) AS count FROM responsibility_records").get()
-    ).toEqual({ count: 0 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM responsibility_records").get()).toEqual({
+      count: 0
+    });
     expect(
       database
         .prepare(
           "SELECT authoritative_read_version,failure_code FROM assignment_authority_migrations WHERE workspace_id='w' AND project_id='p'"
         )
         .get()
-    ).toEqual({ authoritative_read_version: "legacy_assignment", failure_code: "rollback_to_legacy" });
+    ).toEqual({
+      authoritative_read_version: "legacy_assignment",
+      failure_code: "rollback_to_legacy"
+    });
 
     expect(
       repairAssignmentAuthorityMigration(database, { workspaceId: "w", projectId: "p" })
@@ -193,5 +213,80 @@ describe("assignment authority migration", () => {
         )
         .get()
     ).toEqual({ authoritative_read_version: "oss003_authorities" });
+  });
+
+  it("keeps retry and rollback scoped when workspaces share a project and canvas", async () => {
+    const database = await openServerDatabase(":memory:", 5_000);
+    databases.push(database);
+    applyMigrations(database);
+    database.exec(`
+      INSERT INTO workspaces(workspace_id,display_name,created_at) VALUES
+        ('workspace-a','Workspace A','2026-07-27T00:00:00.000Z'),
+        ('workspace-b','Workspace B','2026-07-27T00:00:00.000Z');
+      INSERT INTO work_assignments(
+        workspace_id,project_id,canvas_id,work_item_kind,work_item_key,target_kind,
+        target_human_principal_id,target_host_id,revision,updated_by_kind,updated_by_id,
+        updated_by_display_name,updated_at,reason
+      ) VALUES
+        ('workspace-a','shared-project','shared-canvas','task','T-001','human','member-a',NULL,1,'human','owner',NULL,'2026-07-27T00:00:00.000Z',NULL),
+        ('workspace-b','shared-project','shared-canvas','task','T-001','human','member-b',NULL,1,'human','owner',NULL,'2026-07-27T00:00:00.000Z',NULL);
+      INSERT INTO assignment_authority_migrations(
+        migration_id,workspace_id,project_id,marker,status,authoritative_read_version,failure_code,updated_at
+      ) VALUES
+        ('assignment-authority-workspace-a-shared-project','workspace-a','shared-project','repair_required','repair_required','legacy_assignment','source_requires_repair','2026-07-27T00:00:00.000Z'),
+        ('assignment-authority-workspace-b-shared-project','workspace-b','shared-project','repair_required','repair_required','legacy_assignment','source_requires_repair','2026-07-27T00:00:00.000Z');
+    `);
+
+    expect(
+      retryAssignmentAuthorityMigration(database, {
+        workspaceId: "workspace-a",
+        projectId: "shared-project"
+      })
+    ).toMatchObject({ status: "completed", outcome: "repair_completed" });
+    expect(
+      database
+        .prepare(
+          `SELECT workspace_id,principal_id FROM responsibility_records
+           WHERE project_id='shared-project' ORDER BY workspace_id`
+        )
+        .all()
+    ).toEqual([{ workspace_id: "workspace-a", principal_id: "member-a" }]);
+    expect(
+      database
+        .prepare(
+          `SELECT status FROM assignment_authority_migrations
+           WHERE workspace_id='workspace-b' AND project_id='shared-project'`
+        )
+        .get()
+    ).toEqual({ status: "repair_required" });
+
+    expect(
+      repairAssignmentAuthorityMigration(database, {
+        workspaceId: "workspace-b",
+        projectId: "shared-project"
+      })
+    ).toMatchObject({ status: "completed", outcome: "repair_completed" });
+    expect(
+      rollbackAssignmentAuthorityMigration(database, {
+        workspaceId: "workspace-a",
+        projectId: "shared-project"
+      })
+    ).toMatchObject({ status: "repair_required", outcome: "rollback_to_legacy" });
+    expect(
+      database
+        .prepare(
+          `SELECT workspace_id,principal_id FROM responsibility_records
+           WHERE project_id='shared-project' ORDER BY workspace_id`
+        )
+        .all()
+    ).toEqual([{ workspace_id: "workspace-b", principal_id: "member-b" }]);
+    expect(
+      database
+        .prepare(
+          `SELECT status FROM assignment_authority_migrations
+           WHERE project_id='shared-project' ORDER BY workspace_id`
+        )
+        .all()
+    ).toEqual([{ status: "repair_required" }, { status: "completed" }]);
   });
 });

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { AgentHostRepository } from "../hosts.js";
 import { HumanIdentityRepository } from "../identity/repository.js";
 import type { HumanAuthContext } from "../identity/schemas.js";
+import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { applyMigrations } from "../migrations.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 import { createHostAssignmentPort, createIdentityMembershipPort } from "../work/ports.js";
@@ -53,6 +54,20 @@ const renamedItem: WorkItemRef = {
   canvasId: "default",
   taskId: "T-RENAMED"
 };
+
+function readyObservation(workspaceId: string, capabilities: readonly string[]) {
+  return {
+    workspaceMappings: [{ workspaceId, status: "ready" as const }],
+    acpProfiles: [
+      {
+        profileId: "codex-acp",
+        agentId: "codex",
+        status: "ready" as const,
+        capabilities: [...capabilities]
+      }
+    ]
+  };
+}
 
 function packageFactsFor(workItem: WorkItemRef): WorkItemPackageFacts {
   if (workItem.kind === "task" && workItem.taskId === "T-001") {
@@ -136,6 +151,10 @@ async function openStack() {
     role: "member",
     membershipId: member.membership.membershipId
   };
+  const workspaceId = new WorkspaceIdentityRepository(database).workspaceForLegacyProject(
+    projectId
+  );
+  if (!workspaceId) throw new Error("test_workspace_missing");
 
   const capableHost = hosts.registerWithCredential(
     "Capable Host",
@@ -143,7 +162,13 @@ async function openStack() {
     ["acp.codex", "linux", "git.read"],
     2
   );
-  hosts.reportOnline(capableHost.host.id, ["acp.codex", "linux", "git.read"], 2);
+  hosts.bindToWorkspace(capableHost.host.id, workspaceId);
+  hosts.reportOnline(
+    capableHost.host.id,
+    ["acp.codex", "linux", "git.read"],
+    2,
+    readyObservation(workspaceId, ["acp.codex", "linux", "git.read"])
+  );
 
   const weakHost = hosts.registerWithCredential(
     "Weak Host",
@@ -151,7 +176,13 @@ async function openStack() {
     ["git.read"],
     1
   );
-  hosts.reportOnline(weakHost.host.id, ["git.read"], 1);
+  hosts.bindToWorkspace(weakHost.host.id, workspaceId);
+  hosts.reportOnline(
+    weakHost.host.id,
+    ["git.read"],
+    1,
+    readyObservation(workspaceId, ["git.read"])
+  );
 
   const offlineHost = hosts.registerWithCredential(
     "Offline Host",
@@ -159,6 +190,7 @@ async function openStack() {
     ["acp.codex", "linux"],
     1
   );
+  hosts.bindToWorkspace(offlineHost.host.id, workspaceId);
   // No reportOnline → offline.
 
   const revokedHost = hosts.registerWithCredential(
@@ -167,10 +199,17 @@ async function openStack() {
     ["acp.codex", "linux"],
     1
   );
-  hosts.reportOnline(revokedHost.host.id, ["acp.codex", "linux"], 1);
+  hosts.bindToWorkspace(revokedHost.host.id, workspaceId);
+  hosts.reportOnline(
+    revokedHost.host.id,
+    ["acp.codex", "linux"],
+    1,
+    readyObservation(workspaceId, ["acp.codex", "linux"])
+  );
   hosts.revoke(revokedHost.host.id);
 
   const service = new WorkAssignmentService({
+    workspaceId,
     repository,
     packagePort,
     membershipPort: createIdentityMembershipPort({ identity }),
@@ -192,6 +231,7 @@ async function openStack() {
     ownerContext,
     memberContext,
     member,
+    workspaceId,
     capableHost,
     weakHost,
     offlineHost,
@@ -313,13 +353,15 @@ describe("work assignment service API", () => {
     const {
       service,
       identity,
+      hosts,
       ownerContext,
       memberContext,
       member,
       capableHost,
       weakHost,
       offlineHost,
-      revokedHost
+      revokedHost,
+      workspaceId
     } = await openStack();
 
     // Remove member, then try assign.
@@ -365,25 +407,50 @@ describe("work assignment service API", () => {
       expect((error as WorkAssignmentServiceError).code).toBe("work_host_revoked");
     }
 
-    // Offline host is still structurally assignable (write allows; read shows unavailable).
-    const offlineAssign = service.updateAssignment({
-      projectId,
-      workItem: blockItem,
-      target: { kind: "exact_host", hostId: offlineHost.host.id },
-      expectedRevision: 0,
-      actor: ownerContext
+    // Exact Host assignment fails closed when the Host is not ready.
+    expect(() =>
+      service.updateAssignment({
+        projectId,
+        workItem: blockItem,
+        target: { kind: "exact_host", hostId: offlineHost.host.id },
+        expectedRevision: 0,
+        actor: ownerContext
+      })
+    ).toThrow(/ready workspace and ACP profile state/);
+
+    hosts.reportOnline(capableHost.host.id, ["acp.codex", "linux", "git.read"], 2, {
+      workspaceMappings: [],
+      acpProfiles: [
+        {
+          profileId: "codex-acp",
+          agentId: "codex",
+          status: "ready",
+          capabilities: ["acp.codex", "linux", "git.read"]
+        }
+      ]
     });
-    expect(offlineAssign.display.availability).toEqual({
-      status: "unavailable",
-      reason: "host_offline"
-    });
+    expect(() =>
+      service.updateAssignment({
+        projectId,
+        workItem: blockItem,
+        target: { kind: "exact_host", hostId: capableHost.host.id },
+        expectedRevision: 0,
+        actor: ownerContext
+      })
+    ).toThrow(/ready workspace and ACP profile state/);
+    hosts.reportOnline(
+      capableHost.host.id,
+      ["acp.codex", "linux", "git.read"],
+      2,
+      readyObservation(workspaceId, ["acp.codex", "linux", "git.read"])
+    );
 
     // Reassign to capable online host.
     const online = service.updateAssignment({
       projectId,
       workItem: blockItem,
       target: { kind: "exact_host", hostId: capableHost.host.id },
-      expectedRevision: 1,
+      expectedRevision: 0,
       actor: ownerContext
     });
     expect(online.display.availability).toEqual({ status: "ready", reason: "ready" });
@@ -568,21 +635,61 @@ describe("work assignment host port facts", () => {
       countActiveDispatches: () => 0
     });
 
-    const online = port.getHostFacts(projectId, stack.capableHost.host.id)!;
+    const online = port.getHostFacts(stack.workspaceId, projectId, stack.capableHost.host.id)!;
     expect(online.online).toBe(true);
     expect(online.authorizedForProject).toBe(true);
 
-    const offline = port.getHostFacts(projectId, stack.offlineHost.host.id)!;
+    const offline = port.getHostFacts(stack.workspaceId, projectId, stack.offlineHost.host.id)!;
     expect(offline.online).toBe(false);
     expect(offline.exists).toBe(true);
 
-    const revoked = port.getHostFacts(projectId, stack.revokedHost.host.id)!;
+    const revoked = port.getHostFacts(stack.workspaceId, projectId, stack.revokedHost.host.id)!;
     expect(revoked.revoked).toBe(true);
 
-    const eligible = port.listHostFacts(projectId, {
+    const eligible = port.listHostFacts(stack.workspaceId, projectId, {
       requiredCapabilities: ["acp.codex", "linux"]
     });
     expect(eligible.every((h: AssignmentHostFacts) => !h.revoked)).toBe(true);
     expect(eligible.some((h) => h.hostId === stack.weakHost.host.id)).toBe(false);
+    expect(eligible.some((h) => h.hostId === stack.offlineHost.host.id)).toBe(false);
+
+    const capabilities = ["acp.codex", "linux", "git.read"];
+    stack.hosts.reportOnline(stack.capableHost.host.id, capabilities, 2, {
+      workspaceMappings: [],
+      acpProfiles: [
+        {
+          profileId: "codex-acp",
+          agentId: "codex",
+          status: "ready",
+          capabilities
+        }
+      ]
+    });
+    expect(
+      port
+        .listHostFacts(stack.workspaceId, projectId)
+        .some((host) => host.hostId === stack.capableHost.host.id)
+    ).toBe(false);
+
+    stack.hosts.reportOnline(stack.capableHost.host.id, capabilities, 2, {
+      workspaceMappings: [{ workspaceId: stack.workspaceId, status: "ready" }],
+      acpProfiles: []
+    });
+    expect(
+      port
+        .listHostFacts(stack.workspaceId, projectId)
+        .some((host) => host.hostId === stack.capableHost.host.id)
+    ).toBe(false);
+
+    const stalePort = createHostAssignmentPort({
+      hosts: stack.hosts,
+      hostOfflineAfterMs: 60_000,
+      clock: () => new Date(now.getTime() + 60_001)
+    });
+    expect(
+      stalePort
+        .listHostFacts(stack.workspaceId, projectId)
+        .some((host) => host.hostId === stack.weakHost.host.id)
+    ).toBe(false);
   });
 });

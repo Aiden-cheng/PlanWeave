@@ -1,11 +1,13 @@
 import {
   DEFAULT_HOST_OFFLINE_AFTER_MS,
   isAgentHostOnline,
+  operatorHostAvailability,
   type AgentHost,
   type AgentHostRepository
 } from "../hosts.js";
 import type { HumanIdentityRepository } from "../identity/repository.js";
 import { isActiveMembership } from "../identity/schemas.js";
+import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import {
   assignmentHostFactsSchema,
   assignmentMembershipFactsSchema,
@@ -22,10 +24,12 @@ import type { WorkItemPackagePort } from "./workItemFacts.js";
  */
 export type AssignmentMembershipPort = {
   getMembershipFacts(
+    workspaceId: string,
     projectId: string,
     humanPrincipalId: string
   ): AssignmentMembershipFacts | undefined;
   listActiveMemberFacts(
+    workspaceId: string,
     projectId: string,
     limit: number,
     offset: number
@@ -37,8 +41,13 @@ export type AssignmentMembershipPort = {
  * Host presence/capabilities are never stored on the assignment row.
  */
 export type AssignmentHostPort = {
-  getHostFacts(projectId: string, hostId: string): AssignmentHostFacts | undefined;
+  getHostFacts(
+    workspaceId: string,
+    projectId: string,
+    hostId: string
+  ): AssignmentHostFacts | undefined;
   listHostFacts(
+    workspaceId: string,
     projectId: string,
     options?: {
       requiredCapabilities?: readonly string[];
@@ -48,16 +57,53 @@ export type AssignmentHostPort = {
   ): AssignmentHostFacts[];
 };
 
-export type AssignmentMembershipPortFromIdentityOptions = {
-  identity: HumanIdentityRepository;
-};
+export type AssignmentMembershipPortFromIdentityOptions =
+  | {
+      identity: HumanIdentityRepository;
+      workspaceIdentity?: never;
+    }
+  | {
+      identity?: never;
+      workspaceIdentity: WorkspaceIdentityRepository;
+    };
 
 export function createIdentityMembershipPort(
   options: AssignmentMembershipPortFromIdentityOptions
 ): AssignmentMembershipPort {
+  if (options.workspaceIdentity) {
+    const { workspaceIdentity } = options;
+    return {
+      getMembershipFacts(workspaceId, projectId, humanPrincipalId) {
+        const membership = workspaceIdentity
+          .listMembershipViews(workspaceId)
+          .find((candidate) => candidate.humanPrincipalId === humanPrincipalId);
+        if (!membership) return undefined;
+        return assignmentMembershipFactsSchema.parse({
+          projectId,
+          humanPrincipalId,
+          membershipActive: membership.revokedAt === null,
+          displayName: membership.displayName
+        });
+      },
+      listActiveMemberFacts(workspaceId, projectId, limit, offset) {
+        return workspaceIdentity
+          .listMembershipViews(workspaceId)
+          .filter((membership) => membership.revokedAt === null)
+          .slice(offset, offset + limit)
+          .map((membership) =>
+            assignmentMembershipFactsSchema.parse({
+              projectId,
+              humanPrincipalId: membership.humanPrincipalId,
+              membershipActive: true,
+              displayName: membership.displayName
+            })
+          );
+      }
+    };
+  }
   const { identity } = options;
   return {
-    getMembershipFacts(projectId, humanPrincipalId) {
+    getMembershipFacts(_workspaceId, projectId, humanPrincipalId) {
       const membership = identity.getActiveMembership(projectId, humanPrincipalId);
       const principal = identity.getPrincipal(humanPrincipalId);
       if (membership) {
@@ -79,7 +125,7 @@ export function createIdentityMembershipPort(
       }
       return undefined;
     },
-    listActiveMemberFacts(projectId, limit, offset) {
+    listActiveMemberFacts(_workspaceId, projectId, limit, offset) {
       return identity.listActiveMembers(projectId, limit, offset).map((membership) => {
         const principal = identity.getPrincipal(membership.humanPrincipalId);
         return assignmentMembershipFactsSchema.parse({
@@ -99,7 +145,7 @@ export type AssignmentHostPortFromRepositoryOptions = {
    * Hosts without a project binding table default to authorized when not revoked.
    * Callers may override when a project↔host authorization model is introduced.
    */
-  isHostAuthorizedForProject?: (projectId: string, host: AgentHost) => boolean;
+  isHostAuthorizedForProject?: (workspaceId: string, projectId: string, host: AgentHost) => boolean;
   /** Hosts with lastSeenAt after this threshold (ms ago) count as online. Default 60s. */
   hostOfflineAfterMs?: number;
   clock?: () => Date;
@@ -114,18 +160,23 @@ export function createHostAssignmentPort(
   const hostOfflineAfterMs = options.hostOfflineAfterMs ?? DEFAULT_HOST_OFFLINE_AFTER_MS;
   const isAuthorized =
     options.isHostAuthorizedForProject ??
-    ((_projectId: string, host: AgentHost) => host.revokedAt === undefined);
+    ((_workspaceId: string, _projectId: string, host: AgentHost) => host.revokedAt === undefined);
 
-  function toFacts(projectId: string, host: AgentHost): AssignmentHostFacts {
+  function toFacts(workspaceId: string, projectId: string, host: AgentHost): AssignmentHostFacts {
     const online = isAgentHostOnline(host, { now: clock(), hostOfflineAfterMs });
+    const availability = operatorHostAvailability(host, workspaceId, online);
     const active = options.countActiveDispatches?.(host.id);
     return assignmentHostFactsSchema.parse({
+      workspaceId,
       projectId,
       hostId: host.id,
       exists: true,
       revoked: host.revokedAt !== undefined,
-      authorizedForProject: isAuthorized(projectId, host),
+      authorizedForProject:
+        options.hosts.workspaceForHost(host.id) === workspaceId &&
+        isAuthorized(workspaceId, projectId, host),
       online,
+      ready: availability.status === "available",
       capabilities: [...host.capabilities],
       displayName: host.displayName,
       ...(active !== undefined ? { capacityRemaining: Math.max(0, host.capacity - active) } : {})
@@ -133,22 +184,24 @@ export function createHostAssignmentPort(
   }
 
   return {
-    getHostFacts(projectId, hostId) {
+    getHostFacts(workspaceId, projectId, hostId) {
       const host = options.hosts.get(hostId);
       if (!host) {
         return assignmentHostFactsSchema.parse({
+          workspaceId,
           projectId,
           hostId,
           exists: false,
           revoked: false,
           authorizedForProject: false,
           online: false,
+          ready: false,
           capabilities: []
         });
       }
-      return toFacts(projectId, host);
+      return toFacts(workspaceId, projectId, host);
     },
-    listHostFacts(projectId, listOptions = {}) {
+    listHostFacts(workspaceId, projectId, listOptions = {}) {
       const limit = listOptions.limit ?? 100;
       const offset = listOptions.offset ?? 0;
       // Pull a page of hosts; filter capabilities in application (Host list is already ordered).
@@ -157,9 +210,11 @@ export function createHostAssignmentPort(
         .slice(offset, offset + limit);
       const required = listOptions.requiredCapabilities ?? [];
       return hosts
-        .map((host) => toFacts(projectId, host))
+        .map((host) => toFacts(workspaceId, projectId, host))
         .filter((facts) => {
-          if (!facts.exists || facts.revoked || !facts.authorizedForProject) return false;
+          if (!facts.exists || facts.revoked || !facts.authorizedForProject || !facts.ready) {
+            return false;
+          }
           if (required.length === 0) return true;
           const available = new Set(facts.capabilities);
           return required.every((capability) => available.has(capability));

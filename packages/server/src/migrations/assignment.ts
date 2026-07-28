@@ -86,6 +86,7 @@ function migrationId(workspaceId: string, projectId: string): string {
 }
 
 type LegacyRow = {
+  workspace_id?: string;
   project_id: string;
   canvas_id: string;
   work_item_kind: string;
@@ -99,32 +100,89 @@ type LegacyRow = {
   updated_at: string;
 };
 
+export type LegacyAssignmentMigrationScope = {
+  workspaceId: string;
+  projectId: string;
+};
+
+function workAssignmentsHaveWorkspaceScope(database: SqliteDatabase): boolean {
+  return database
+    .prepare("PRAGMA table_info(work_assignments)")
+    .all()
+    .some((column) => column.name === "workspace_id");
+}
+
+function migrationSourceRows(
+  database: SqliteDatabase,
+  scope?: LegacyAssignmentMigrationScope
+): readonly LegacyRow[] {
+  const hasWorkspaceScope = workAssignmentsHaveWorkspaceScope(database);
+  if (hasWorkspaceScope) {
+    if (scope) {
+      return database
+        .prepare(
+          `SELECT * FROM work_assignments
+           WHERE workspace_id=? AND project_id=?
+           ORDER BY workspace_id,project_id,canvas_id,work_item_key`
+        )
+        .all(scope.workspaceId, scope.projectId) as LegacyRow[];
+    }
+    return database
+      .prepare(
+        "SELECT * FROM work_assignments ORDER BY workspace_id,project_id,canvas_id,work_item_key"
+      )
+      .all() as LegacyRow[];
+  }
+  if (scope) {
+    return database
+      .prepare(
+        "SELECT * FROM work_assignments WHERE project_id=? ORDER BY project_id,canvas_id,work_item_key"
+      )
+      .all(scope.projectId) as LegacyRow[];
+  }
+  return database
+    .prepare("SELECT * FROM work_assignments ORDER BY project_id,canvas_id,work_item_key")
+    .all() as LegacyRow[];
+}
+
+function workspaceForLegacyRow(
+  database: SqliteDatabase,
+  row: LegacyRow,
+  scope: LegacyAssignmentMigrationScope | undefined
+): string {
+  if (workAssignmentsHaveWorkspaceScope(database)) {
+    if (!row.workspace_id) throw new Error("assignment_migration_workspace_missing");
+    if (scope && row.workspace_id !== scope.workspaceId) {
+      throw new Error("assignment_migration_workspace_scope_mismatch");
+    }
+    return row.workspace_id;
+  }
+  const workspace = database
+    .prepare("SELECT workspace_id FROM legacy_project_workspace_mappings WHERE legacy_project_id=?")
+    .get(row.project_id) as { workspace_id: string } | undefined;
+  if (!workspace) throw new Error(`assignment_migration_workspace_unmapped:${row.project_id}`);
+  if (scope && workspace.workspace_id !== scope.workspaceId) {
+    throw new Error("assignment_migration_workspace_scope_mismatch");
+  }
+  return String(workspace.workspace_id);
+}
+
 /**
  * Backfill is intentionally fail-closed.  A Host target on a Task or an
  * unknown legacy kind makes the project `repair_required`; no new authority is
  * made authoritative and no Host identity is ever mapped to a human.
  */
-export function migrateLegacyAssignments(database: SqliteDatabase, projectId?: string): void {
+export function migrateLegacyAssignments(
+  database: SqliteDatabase,
+  scope?: LegacyAssignmentMigrationScope
+): void {
   if (!tableExists(database, "work_assignments")) return;
-  const rows: readonly LegacyRow[] = (projectId
-    ? database
-        .prepare(
-          "SELECT * FROM work_assignments WHERE project_id=? ORDER BY project_id,canvas_id,work_item_key"
-        )
-        .all(projectId)
-    : database
-        .prepare("SELECT * FROM work_assignments ORDER BY project_id,canvas_id,work_item_key")
-        .all()) as LegacyRow[];
+  const rows = migrationSourceRows(database, scope);
   const projects = new Map<string, { workspaceId: string; projectId: string; invalid?: string }>();
   for (const row of rows) {
-    const workspace = database
-      .prepare(
-        "SELECT workspace_id FROM legacy_project_workspace_mappings WHERE legacy_project_id=?"
-      )
-      .get(row.project_id) as { workspace_id: string } | undefined;
-    if (!workspace) throw new Error(`assignment_migration_workspace_unmapped:${row.project_id}`);
-    const workspaceId = String(workspace.workspace_id);
-    const project = projects.get(row.project_id) ?? { workspaceId, projectId: row.project_id };
+    const workspaceId = workspaceForLegacyRow(database, row, scope);
+    const projectKey = JSON.stringify([workspaceId, row.project_id]);
+    const project = projects.get(projectKey) ?? { workspaceId, projectId: row.project_id };
     if (
       row.target_kind !== "unassigned" &&
       row.target_kind !== "human" &&
@@ -139,7 +197,7 @@ export function migrateLegacyAssignments(database: SqliteDatabase, projectId?: s
     ) {
       project.invalid = "legacy_task_host_target_requires_repair";
     }
-    projects.set(row.project_id, project);
+    projects.set(projectKey, project);
   }
   const assertSame = (
     table: string,
@@ -263,15 +321,10 @@ export function migrateLegacyAssignments(database: SqliteDatabase, projectId?: s
       );
   };
   for (const row of rows) {
-    const workspace = database
-      .prepare(
-        "SELECT workspace_id FROM legacy_project_workspace_mappings WHERE legacy_project_id=?"
-      )
-      .get(row.project_id) as { workspace_id: string } | undefined;
-    if (!workspace) throw new Error(`assignment_migration_workspace_unmapped:${row.project_id}`);
-    const invalid = projects.get(row.project_id)?.invalid;
+    const workspaceId = workspaceForLegacyRow(database, row, scope);
+    const projectKey = JSON.stringify([workspaceId, row.project_id]);
+    const invalid = projects.get(projectKey)?.invalid;
     if (invalid) continue;
-    const workspaceId = String(workspace.workspace_id);
     if (row.target_kind === "human") {
       insertResponsibility({
         workspaceId,

@@ -271,8 +271,11 @@ export class RemoteBlockActionCoordinator {
     // legacy work_assignments. Omit expected*Revision so the authority gate takes current
     // revisions (follow reassignment) and persists authorityRevisions on the new snapshot.
     const preferAuthority = operation.hostSelection?.authorityRevisions !== undefined;
+    const workspaceId = operation.hostSelection?.workspaceId;
+    if (!workspaceId) throw new DispatchAssignmentError("work_host_not_authorized");
     try {
       return this.options.assignmentGate?.resolve({
+        workspaceId,
         projectId: operation.projectId,
         canvasId: operation.canvasId,
         blockRef: operation.blockRef,

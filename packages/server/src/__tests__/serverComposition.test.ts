@@ -199,6 +199,7 @@ describe("distributed server composition", () => {
   it("keeps identical project and canvas IDs isolated across configured Workspace sessions", async () => {
     const workspace = await createTestWorkspace(remoteManifest());
     directories.push(workspace.home, workspace.root);
+    await addSecondaryCanvas(workspace.root);
     const httpServer = createServer();
     httpServers.push(httpServer);
     const projectId = workspace.init.workspace.id;
@@ -211,8 +212,18 @@ describe("distributed server composition", () => {
       allowInsecureDevelopment: true,
       dataDirectory: join(workspace.root, "same-id-server-data"),
       trustedProjects: [
-        { workspaceId: workspaceA, projectId, canvasId: "default", projectRoot: workspace.root },
-        { workspaceId: workspaceB, projectId, canvasId: "default", projectRoot: workspace.root }
+        {
+          workspaceId: workspaceA,
+          projectId,
+          trustAllDeclaredCanvases: true,
+          projectRoot: workspace.root
+        },
+        {
+          workspaceId: workspaceB,
+          projectId,
+          trustAllDeclaredCanvases: true,
+          projectRoot: workspace.root
+        }
       ],
       operatorCredentials: [
         {
@@ -295,13 +306,210 @@ describe("distributed server composition", () => {
       scope: { workspaceId: workspaceB, projectId, canvasId: "default" }
     });
 
+    const deviceAViewer = await redeemDevice(workspaceA, "Workspace A Viewer");
+    const assignmentsUrl = `${origin}/api/v1/projects/${projectId}/assignments`;
+    const legacyTask = { kind: "task", canvasId: "default", taskId: "T-001" };
+    const legacyTaskQuery = `?workItem=${encodeURIComponent(JSON.stringify(legacyTask))}`;
+    const privateAssignmentRead = await fetch(`${assignmentsUrl}${legacyTaskQuery}`, {
+      headers: { Authorization: `Bearer ${deviceAViewer.token}` }
+    });
+    expect(privateAssignmentRead.status).toBe(403);
+
+    const viewerGrant = await fetch(accessUrl, {
+      method: "POST",
+      headers: jsonHeaders(tokenA),
+      body: JSON.stringify({
+        operation: "grant",
+        scope: { scopeKind: "canvas", workspaceId: workspaceA, projectId, canvasId: "default" },
+        expectedAclRevision: 0,
+        humanPrincipalId: deviceAViewer.humanPrincipalId,
+        role: "viewer"
+      })
+    });
+    expect(viewerGrant.status).toBe(200);
+    const viewerAssignmentRead = await fetch(`${assignmentsUrl}${legacyTaskQuery}`, {
+      headers: { Authorization: `Bearer ${deviceAViewer.token}` }
+    });
+    expect(viewerAssignmentRead.status).toBe(200);
+    const accessWithGrant = (await (
+      await fetch(accessUrl, {
+        headers: { Authorization: `Bearer ${tokenA}` }
+      })
+    ).json()) as {
+      people: Array<{ humanPrincipalId: string; grants: Array<{ grantId: string }> }>;
+    };
+    const viewerGrantId = accessWithGrant.people.find(
+      (person) => person.humanPrincipalId === deviceAViewer.humanPrincipalId
+    )?.grants[0]?.grantId;
+    if (!viewerGrantId) throw new Error("Expected viewer grant");
+    const revokeViewerGrant = await fetch(accessUrl, {
+      method: "POST",
+      headers: jsonHeaders(tokenA),
+      body: JSON.stringify({
+        operation: "revoke",
+        scope: { scopeKind: "canvas", workspaceId: workspaceA, projectId, canvasId: "default" },
+        expectedAclRevision: 1,
+        grantId: viewerGrantId
+      })
+    });
+    expect(revokeViewerGrant.status).toBe(200);
+    const revokedAssignmentRead = await fetch(`${assignmentsUrl}${legacyTaskQuery}`, {
+      headers: { Authorization: `Bearer ${deviceAViewer.token}` }
+    });
+    expect(revokedAssignmentRead.status).toBe(403);
+    const privateTargetAssignment = await fetch(assignmentsUrl, {
+      method: "POST",
+      headers: jsonHeaders(tokenA),
+      body: JSON.stringify({
+        workItem: legacyTask,
+        target: { kind: "human", humanPrincipalId: deviceAViewer.humanPrincipalId },
+        expectedRevision: 0
+      })
+    });
+    expect(privateTargetAssignment.status).toBe(403);
+
+    const [legacyAssignmentA, legacyAssignmentB] = await Promise.all([
+      fetch(assignmentsUrl, {
+        method: "POST",
+        headers: jsonHeaders(tokenA),
+        body: JSON.stringify({
+          workItem: legacyTask,
+          target: { kind: "human", humanPrincipalId: deviceA.humanPrincipalId },
+          expectedRevision: 0
+        })
+      }),
+      fetch(assignmentsUrl, {
+        method: "POST",
+        headers: jsonHeaders(tokenB),
+        body: JSON.stringify({
+          workItem: legacyTask,
+          target: { kind: "human", humanPrincipalId: deviceB.humanPrincipalId },
+          expectedRevision: 0
+        })
+      })
+    ]);
+    expect(legacyAssignmentA.status).toBe(200);
+    expect(legacyAssignmentB.status).toBe(200);
+    const [legacyReadA, legacyReadB] = await Promise.all([
+      fetch(`${assignmentsUrl}${legacyTaskQuery}`, {
+        headers: { Authorization: `Bearer ${tokenA}` }
+      }),
+      fetch(`${assignmentsUrl}${legacyTaskQuery}`, {
+        headers: { Authorization: `Bearer ${tokenB}` }
+      })
+    ]);
+    expect(legacyReadA.status).toBe(200);
+    expect(legacyReadB.status).toBe(200);
+    await expect(legacyReadA.json()).resolves.toMatchObject({
+      target: { kind: "human", humanPrincipalId: deviceA.humanPrincipalId }
+    });
+    await expect(legacyReadB.json()).resolves.toMatchObject({
+      target: { kind: "human", humanPrincipalId: deviceB.humanPrincipalId }
+    });
+    const listQuery = `?workItems=${encodeURIComponent(JSON.stringify([legacyTask]))}`;
+    const [legacyListA, legacyListB, eligibleA, eligibleB] = await Promise.all([
+      fetch(`${assignmentsUrl}/list${listQuery}`, {
+        headers: { Authorization: `Bearer ${tokenA}` }
+      }),
+      fetch(`${assignmentsUrl}/list${listQuery}`, {
+        headers: { Authorization: `Bearer ${tokenB}` }
+      }),
+      fetch(`${assignmentsUrl}/eligible-assignees${legacyTaskQuery}`, {
+        headers: { Authorization: `Bearer ${tokenA}` }
+      }),
+      fetch(`${assignmentsUrl}/eligible-assignees${legacyTaskQuery}`, {
+        headers: { Authorization: `Bearer ${tokenB}` }
+      })
+    ]);
+    expect(legacyListA.status).toBe(200);
+    expect(legacyListB.status).toBe(200);
+    expect(eligibleA.status).toBe(200);
+    expect(eligibleB.status).toBe(200);
+    await expect(legacyListA.json()).resolves.toMatchObject({
+      items: [
+        expect.objectContaining({
+          target: { kind: "human", humanPrincipalId: deviceA.humanPrincipalId }
+        })
+      ]
+    });
+    await expect(legacyListB.json()).resolves.toMatchObject({
+      items: [
+        expect.objectContaining({
+          target: { kind: "human", humanPrincipalId: deviceB.humanPrincipalId }
+        })
+      ]
+    });
+    const eligibleABody = (await eligibleA.json()) as {
+      humans: Array<{ humanPrincipalId: string }>;
+    };
+    const eligibleBBody = (await eligibleB.json()) as {
+      humans: Array<{ humanPrincipalId: string }>;
+    };
+    expect(eligibleABody.humans.map((human) => human.humanPrincipalId)).toEqual([
+      deviceA.humanPrincipalId
+    ]);
+    expect(eligibleBBody.humans.map((human) => human.humanPrincipalId)).toEqual([
+      deviceB.humanPrincipalId
+    ]);
+
+    const secondaryTask = { kind: "task", canvasId: "secondary", taskId: "T-001" };
+    const secondaryAssignment = await fetch(assignmentsUrl, {
+      method: "POST",
+      headers: jsonHeaders(tokenA),
+      body: JSON.stringify({
+        workItem: secondaryTask,
+        target: { kind: "human", humanPrincipalId: deviceA.humanPrincipalId },
+        expectedRevision: 0
+      })
+    });
+    expect(secondaryAssignment.status).toBe(200);
+    const secondaryQuery = `?workItem=${encodeURIComponent(JSON.stringify(secondaryTask))}`;
+    const [secondaryReadA, secondaryReadB] = await Promise.all([
+      fetch(`${assignmentsUrl}${secondaryQuery}`, {
+        headers: { Authorization: `Bearer ${tokenA}` }
+      }),
+      fetch(`${assignmentsUrl}${secondaryQuery}`, {
+        headers: { Authorization: `Bearer ${tokenB}` }
+      })
+    ]);
+    expect(secondaryReadA.status).toBe(200);
+    expect(secondaryReadB.status).toBe(200);
+    await expect(secondaryReadA.json()).resolves.toMatchObject({
+      target: { kind: "human", humanPrincipalId: deviceA.humanPrincipalId }
+    });
+    await expect(secondaryReadB.json()).resolves.toMatchObject({ target: { kind: "unassigned" } });
+
+    const restoreViewerGrant = await fetch(accessUrl, {
+      method: "POST",
+      headers: jsonHeaders(tokenA),
+      body: JSON.stringify({
+        operation: "grant",
+        scope: { scopeKind: "canvas", workspaceId: workspaceA, projectId, canvasId: "default" },
+        expectedAclRevision: 2,
+        humanPrincipalId: deviceAViewer.humanPrincipalId,
+        role: "viewer"
+      })
+    });
+    expect(restoreViewerGrant.status).toBe(200);
+    const viewerAllAssignments = await fetch(`${assignmentsUrl}/list`, {
+      headers: { Authorization: `Bearer ${deviceAViewer.token}` }
+    });
+    expect(viewerAllAssignments.status).toBe(200);
+    const viewerAllAssignmentsBody = (await viewerAllAssignments.json()) as {
+      items: Array<{ workItem: { canvasId: string } }>;
+      nextCursor: number | null;
+    };
+    expect(viewerAllAssignmentsBody.items).toHaveLength(1);
+    expect(viewerAllAssignmentsBody.items[0]?.workItem.canvasId).toBe("default");
+    expect(viewerAllAssignmentsBody.nextCursor).toBeNull();
+
     const mutateA = await fetch(accessUrl, {
       method: "POST",
       headers: { Authorization: `Bearer ${tokenA}`, "content-type": "application/json" },
       body: JSON.stringify({
         operation: "visibility",
         scope: { scopeKind: "canvas", workspaceId: workspaceA, projectId, canvasId: "default" },
-        expectedAclRevision: 0,
+        expectedAclRevision: 3,
         visibility: "shared"
       })
     });
@@ -376,6 +584,114 @@ describe("distributed server composition", () => {
       })
     });
     expect(forgedAssignment.status).toBe(403);
+
+    const taskScopeA = {
+      kind: "task",
+      workspaceId: workspaceA,
+      projectId,
+      canvasId: "default",
+      taskId: "T-001"
+    };
+    const taskScopeB = { ...taskScopeA, workspaceId: workspaceB };
+    const [taskAssignmentA, taskAssignmentB] = await Promise.all([
+      fetch(responsibilityUrl, {
+        method: "POST",
+        headers: jsonHeaders(tokenA),
+        body: JSON.stringify({
+          schemaVersion: "responsibility/v1",
+          scope: taskScopeA,
+          principal: { kind: "human", humanPrincipalId: deviceA.humanPrincipalId },
+          expectedRevision: 0
+        })
+      }),
+      fetch(responsibilityUrl, {
+        method: "POST",
+        headers: jsonHeaders(tokenB),
+        body: JSON.stringify({
+          schemaVersion: "responsibility/v1",
+          scope: taskScopeB,
+          principal: { kind: "human", humanPrincipalId: deviceB.humanPrincipalId },
+          expectedRevision: 0
+        })
+      })
+    ]);
+    expect(taskAssignmentA.status).toBe(200);
+    expect(taskAssignmentB.status).toBe(200);
+    const taskQueryA = `${responsibilityUrl}?scope=${encodeURIComponent(JSON.stringify(taskScopeA))}`;
+    const taskQueryB = `${responsibilityUrl}?scope=${encodeURIComponent(JSON.stringify(taskScopeB))}`;
+    const [taskReadA, taskReadB] = await Promise.all([
+      fetch(taskQueryA, { headers: { Authorization: `Bearer ${tokenA}` } }),
+      fetch(taskQueryB, { headers: { Authorization: `Bearer ${tokenB}` } })
+    ]);
+    expect(taskReadA.status).toBe(200);
+    expect(taskReadB.status).toBe(200);
+    await expect(taskReadA.json()).resolves.toMatchObject({
+      scope: taskScopeA,
+      principal: { humanPrincipalId: deviceA.humanPrincipalId }
+    });
+    await expect(taskReadB.json()).resolves.toMatchObject({
+      scope: taskScopeB,
+      principal: { humanPrincipalId: deviceB.humanPrincipalId }
+    });
+
+    const executionTargetUrl = `${origin}/api/v1/projects/${projectId}/assignments/execution-target`;
+    const executionScopeA = responsibilityScopeA;
+    const executionScopeB = responsibilityScopeB;
+    const [blockAssignmentA, blockAssignmentB] = await Promise.all([
+      fetch(executionTargetUrl, {
+        method: "POST",
+        headers: jsonHeaders(tokenA),
+        body: JSON.stringify({
+          schemaVersion: "execution-target/v1",
+          scope: executionScopeA,
+          target: { kind: "automatic_host" },
+          expectedRevision: 0
+        })
+      }),
+      fetch(executionTargetUrl, {
+        method: "POST",
+        headers: jsonHeaders(tokenB),
+        body: JSON.stringify({
+          schemaVersion: "execution-target/v1",
+          scope: executionScopeB,
+          target: { kind: "unassigned" },
+          expectedRevision: 0
+        })
+      })
+    ]);
+    expect(blockAssignmentA.status).toBe(200);
+    expect(blockAssignmentB.status).toBe(200);
+    const blockQueryA = `${executionTargetUrl}?scope=${encodeURIComponent(JSON.stringify(executionScopeA))}`;
+    const blockQueryB = `${executionTargetUrl}?scope=${encodeURIComponent(JSON.stringify(executionScopeB))}`;
+    const [blockReadA, blockReadB] = await Promise.all([
+      fetch(blockQueryA, { headers: { Authorization: `Bearer ${tokenA}` } }),
+      fetch(blockQueryB, { headers: { Authorization: `Bearer ${tokenB}` } })
+    ]);
+    expect(blockReadA.status).toBe(200);
+    expect(blockReadB.status).toBe(200);
+    await expect(blockReadA.json()).resolves.toMatchObject({
+      scope: executionScopeA,
+      target: { kind: "automatic_host" }
+    });
+    await expect(blockReadB.json()).resolves.toMatchObject({
+      scope: executionScopeB,
+      target: { kind: "unassigned" }
+    });
+    const [crossTaskRead, crossBlockWrite] = await Promise.all([
+      fetch(taskQueryB, { headers: { Authorization: `Bearer ${tokenA}` } }),
+      fetch(executionTargetUrl, {
+        method: "POST",
+        headers: jsonHeaders(tokenA),
+        body: JSON.stringify({
+          schemaVersion: "execution-target/v1",
+          scope: executionScopeB,
+          target: { kind: "automatic_host" },
+          expectedRevision: 1
+        })
+      })
+    ]);
+    expect(crossTaskRead.status).toBe(403);
+    expect(crossBlockWrite.status).toBe(403);
 
     const reconnectUrl = `${origin}/api/v1/projects/${projectId}/canvases/default/reconnect`;
     const [reconnectA, reconnectB] = await Promise.all([

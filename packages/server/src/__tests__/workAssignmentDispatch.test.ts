@@ -103,6 +103,10 @@ async function setup(
   const assignmentGate = options.strictGate
     ? createAssignmentDispatchGate({
         repository: workAssignments,
+        hostPort: createHostAssignmentPort({
+          hosts: new AgentHostRepository(server.database),
+          hostOfflineAfterMs: 60_000
+        }),
         defaultAllowHumanOverride: false
       })
     : undefined;
@@ -152,9 +156,10 @@ async function setup(
   // Host reservation is workspace-scoped; map the legacy project and bind hosts so
   // preferred-host selection can resolve online capacity (same as production enrollment).
   const workspaceIdentity = new WorkspaceIdentityRepository(server.database);
-  const workspaceId =
-    workspaceIdentity.workspaceForLegacyProject(locator.projectId) ??
-    workspaceIdentity.ensureWorkspaceForLegacyProject(locator.projectId);
+  const workspaceId = workspaceIdentity.ensureLegacyProjectAdapter(
+    locator.projectId,
+    workspace.init.workspace.id
+  );
 
   const registeredHosts: Array<{ id: string; name: string }> = [];
   for (const hostSpec of options.withHosts ?? [
@@ -162,7 +167,17 @@ async function setup(
   ]) {
     const host = coordination.hosts.register(hostSpec.name).host;
     coordination.hosts.bindToWorkspace(host.id, workspaceId);
-    coordination.hosts.reportOnline(host.id, hostSpec.capabilities, hostSpec.capacity);
+    coordination.hosts.reportOnline(host.id, hostSpec.capabilities, hostSpec.capacity, {
+      workspaceMappings: [{ workspaceId, status: "ready" }],
+      acpProfiles: [
+        {
+          profileId: "codex-acp",
+          agentId: "codex",
+          status: "ready",
+          capabilities: hostSpec.capabilities
+        }
+      ]
+    });
     registeredHosts.push({ id: host.id, name: hostSpec.name });
   }
 
@@ -184,6 +199,7 @@ async function setup(
   };
 
   const assignmentService = new WorkAssignmentService({
+    workspaceId,
     repository: workAssignments,
     packagePort: {
       resolveWorkItem(workItem) {
@@ -234,6 +250,7 @@ async function setup(
 
   return {
     workspace,
+    workspaceId,
     server,
     locator,
     get coordination() {
@@ -328,6 +345,62 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
     });
   });
 
+  it("revalidates exact Host authorization, revocation, readiness, and capabilities at dispatch", async () => {
+    const fixture = await setup({ strictGate: true });
+    const hostId = fixture.hosts[0]!.id;
+    fixture.assignmentService.updateAssignment({
+      projectId: fixture.locator.projectId,
+      workItem: fixture.blockItem,
+      target: { kind: "exact_host", hostId },
+      expectedRevision: 0,
+      actor: fixture.ownerContext
+    });
+
+    let facts = {
+      workspaceId: fixture.workspaceId,
+      projectId: fixture.locator.projectId,
+      hostId,
+      exists: true,
+      revoked: false,
+      authorizedForProject: false,
+      online: true,
+      ready: true,
+      capabilities: ["acp.codex"]
+    };
+    const gate = createAssignmentDispatchGate({
+      repository: fixture.workAssignments,
+      hostPort: {
+        getHostFacts: () => facts,
+        listHostFacts: () => []
+      },
+      defaultAllowHumanOverride: false
+    });
+    const resolve = () =>
+      gate.resolve({
+        workspaceId: fixture.workspaceId,
+        projectId: fixture.locator.projectId,
+        canvasId: "default",
+        blockRef: "T-001#B-001",
+        requiredCapabilities: ["acp.codex"]
+      });
+    const expectDenied = (code: string) => {
+      try {
+        resolve();
+        expect.fail(`expected ${code}`);
+      } catch (error) {
+        expect(error).toMatchObject({ code });
+      }
+    };
+
+    expectDenied("work_host_not_authorized");
+    facts = { ...facts, authorizedForProject: true, revoked: true };
+    expectDenied("work_host_revoked");
+    facts = { ...facts, revoked: false, ready: false };
+    expectDenied("work_host_not_ready");
+    facts = { ...facts, ready: true, capabilities: [] };
+    expectDenied("work_host_capability_mismatch");
+  });
+
   it("uses automatic selection against package capabilities with the deterministic selector", async () => {
     const fixture = await setup({
       withHosts: [
@@ -362,6 +435,7 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
     // Use a second block ref is not in package; re-use same block is blocked by active attempt.
     // Validate pure resolve + preferred reserve instead.
     const pure = resolveDispatchAssignment(fixture.workAssignments, {
+      workspaceId: fixture.workspaceId,
       projectId: fixture.locator.projectId,
       workItem: fixture.blockItem,
       packageFacts: {
@@ -497,7 +571,7 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
     });
   });
 
-  it("reserves only the preferred Host and surfaces awaiting_host when that Host is offline", async () => {
+  it("rejects dispatch when an exact Host becomes offline", async () => {
     const fixture = await setup({
       withHosts: [
         { name: "Pinned", capabilities: ["acp.codex"], capacity: 1 },
@@ -505,7 +579,6 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
       ]
     });
     const pinned = fixture.hosts[0]!;
-    const other = fixture.hosts[1]!;
 
     fixture.assignmentService.updateAssignment({
       projectId: fixture.locator.projectId,
@@ -520,21 +593,13 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
       .prepare("UPDATE agent_hosts SET last_seen_at=? WHERE id=?")
       .run("2000-01-01T00:00:00.000Z", pinned.id);
 
-    const pending = await fixture.coordination.coordinator.dispatch({
-      ...fixture.locator,
-      blockRef: "T-001#B-001",
-      idempotencyKey: "exact-offline"
-    });
-    expect(pending.status).toBe("awaiting_host");
-    expect(pending.operation.attempt.hostId).toBeUndefined();
-    // Must not fall through to the other online Host.
-    expect(pending.operation.attempt.hostId).not.toBe(other.id);
-
-    // Bring preferred Host back online → reenter reserves it, not the other.
-    fixture.coordination.hosts.reportOnline(pinned.id, ["acp.codex"], 1);
-    const activated = await fixture.coordination.coordinator.reenter(pending.operation.id);
-    expect(activated.status).toBe("activated");
-    expect(activated.operation.attempt.hostId).toBe(pinned.id);
+    await expect(
+      fixture.coordination.coordinator.dispatch({
+        ...fixture.locator,
+        blockRef: "T-001#B-001",
+        idempotencyKey: "exact-offline"
+      })
+    ).rejects.toMatchObject({ code: "work_host_not_ready" });
   });
 
   it("keeps assignment and reservation transactions separate under concurrent CAS", async () => {
@@ -566,7 +631,11 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
       })
     ).toThrowError(/revision|conflict/i);
 
-    const stillA = fixture.workAssignments.get(fixture.locator.projectId, fixture.blockItem);
+    const stillA = fixture.workAssignments.get(
+      fixture.workspaceId,
+      fixture.locator.projectId,
+      fixture.blockItem
+    );
     expect(stillA?.target).toEqual({ kind: "exact_host", hostId: hostA.id });
     expect(stillA?.revision).toBe(first.record.revision);
 
@@ -1297,8 +1366,18 @@ describe("HostReservationRepository preferred Host selection", () => {
     const alternate = hosts.register("Alternate").host;
     hosts.bindToWorkspace(preferred.id, workspaceId);
     hosts.bindToWorkspace(alternate.id, workspaceId);
-    hosts.reportOnline(preferred.id, ["linux"], 1);
-    hosts.reportOnline(alternate.id, ["linux"], 1);
+    hosts.reportOnline(preferred.id, ["linux"], 1, {
+      workspaceMappings: [{ workspaceId, status: "ready" }],
+      acpProfiles: [
+        { profileId: "codex-acp", agentId: "codex", status: "ready", capabilities: ["linux"] }
+      ]
+    });
+    hosts.reportOnline(alternate.id, ["linux"], 1, {
+      workspaceMappings: [{ workspaceId, status: "ready" }],
+      acpProfiles: [
+        { profileId: "codex-acp", agentId: "codex", status: "ready", capabilities: ["linux"] }
+      ]
+    });
     // Make preferred offline.
     server.database
       .prepare("UPDATE agent_hosts SET last_seen_at=? WHERE id=?")

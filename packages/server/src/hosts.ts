@@ -141,6 +141,10 @@ export class AgentHostRepository {
     return this.workspaceIdentity.workspaceForLegacyProject(projectId);
   }
 
+  workspaceForHost(hostId: string): string | undefined {
+    return this.workspaceIdentity.workspaceForHost(hostId);
+  }
+
   register(displayName: string): RegisteredAgentHost {
     const token = `pw_host_${randomBytes(32).toString("base64url")}`;
     return this.registerWithCredential(displayName, token, [], 1);
@@ -277,7 +281,7 @@ export class AgentHostRepository {
         this.clock().toISOString()
       );
     if (updated.changes !== 1) throw new Error("agent_host_not_found_or_revoked");
-    const host = this.getRequired(hostId);
+    this.getRequired(hostId);
     this.syncWorkspaceHost(hostId);
   }
 
@@ -286,7 +290,7 @@ export class AgentHostRepository {
       .prepare("UPDATE agent_hosts SET revoked_at=? WHERE id=? AND revoked_at IS NULL")
       .run(this.clock().toISOString(), hostId);
     if (updated.changes !== 1) throw new Error("agent_host_not_found_or_revoked");
-    const host = this.getRequired(hostId);
+    this.getRequired(hostId);
     this.syncWorkspaceHost(hostId);
   }
 

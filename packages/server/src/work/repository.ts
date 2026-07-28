@@ -25,6 +25,7 @@ export class WorkAssignmentError extends Error {
 }
 
 type AssignmentRow = {
+  workspace_id: string;
   project_id: string;
   canvas_id: string;
   work_item_kind: string;
@@ -154,6 +155,7 @@ function toRecord(row: AssignmentRow): AssignmentRecord {
     ...(row.updated_by_display_name ? { displayName: row.updated_by_display_name } : {})
   };
   return assignmentRecordSchema.parse({
+    workspaceId: row.workspace_id,
     projectId: row.project_id,
     workItem,
     target: targetFromRow(row),
@@ -174,20 +176,27 @@ export class WorkAssignmentRepository {
     private readonly options: WorkAssignmentRepositoryOptions = {}
   ) {}
 
-  get(projectId: string, workItem: WorkItemRef): AssignmentRecord | undefined {
+  get(workspaceId: string, projectId: string, workItem: WorkItemRef): AssignmentRecord | undefined {
+    const wid = opaqueIdentifierSchema.parse(workspaceId);
     const pid = humanProjectIdSchema.parse(projectId);
     const parts = workItemKeyParts(workItem);
     const row = this.database
       .prepare(
         `SELECT * FROM work_assignments
-         WHERE project_id=? AND canvas_id=? AND work_item_kind=? AND work_item_key=?`
+         WHERE workspace_id=? AND project_id=? AND canvas_id=? AND work_item_kind=? AND work_item_key=?`
       )
-      .get(pid, parts.canvasId, parts.workItemKind, parts.workItemKey) as AssignmentRow | undefined;
+      .get(wid, pid, parts.canvasId, parts.workItemKind, parts.workItemKey) as
+      | AssignmentRow
+      | undefined;
     return row ? toRecord(row) : undefined;
   }
 
-  getConcurrency(projectId: string, workItem: WorkItemRef): AssignmentConcurrencyFacts {
-    const current = this.get(projectId, workItem);
+  getConcurrency(
+    workspaceId: string,
+    projectId: string,
+    workItem: WorkItemRef
+  ): AssignmentConcurrencyFacts {
+    const current = this.get(workspaceId, projectId, workItem);
     if (!current) {
       return assignmentConcurrencyFactsSchema.parse({ currentRevision: 0 });
     }
@@ -201,7 +210,12 @@ export class WorkAssignmentRepository {
    * Batch fetch by exact WorkItemRef list. Missing refs are omitted (caller synthesizes revision 0).
    * Order of returned records is not guaranteed to match input order.
    */
-  getMany(projectId: string, workItems: readonly WorkItemRef[]): AssignmentRecord[] {
+  getMany(
+    workspaceId: string,
+    projectId: string,
+    workItems: readonly WorkItemRef[]
+  ): AssignmentRecord[] {
+    const wid = opaqueIdentifierSchema.parse(workspaceId);
     const pid = humanProjectIdSchema.parse(projectId);
     if (workItems.length === 0) return [];
     if (workItems.length > WORK_ASSIGNMENT_BATCH_MAX) {
@@ -212,11 +226,11 @@ export class WorkAssignmentRepository {
     // SQLite has no array bind; iterate with prepared statement for exact keys.
     const stmt = this.database.prepare(
       `SELECT * FROM work_assignments
-       WHERE project_id=? AND canvas_id=? AND work_item_kind=? AND work_item_key=?`
+       WHERE workspace_id=? AND project_id=? AND canvas_id=? AND work_item_kind=? AND work_item_key=?`
     );
     for (const workItem of workItems) {
       const parts = workItemKeyParts(workItem);
-      const row = stmt.get(pid, parts.canvasId, parts.workItemKind, parts.workItemKey) as
+      const row = stmt.get(wid, pid, parts.canvasId, parts.workItemKind, parts.workItemKey) as
         | AssignmentRow
         | undefined;
       if (row) results.push(toRecord(row));
@@ -225,6 +239,7 @@ export class WorkAssignmentRepository {
   }
 
   listByProject(
+    workspaceId: string,
     projectId: string,
     options: {
       canvasId?: string;
@@ -232,6 +247,7 @@ export class WorkAssignmentRepository {
       offset?: number;
     } = {}
   ): AssignmentRecord[] {
+    const wid = opaqueIdentifierSchema.parse(workspaceId);
     const pid = humanProjectIdSchema.parse(projectId);
     const limit = options.limit ?? WORK_ASSIGNMENT_BATCH_MAX;
     const offset = options.offset ?? 0;
@@ -248,11 +264,11 @@ export class WorkAssignmentRepository {
         this.database
           .prepare(
             `SELECT * FROM work_assignments
-             WHERE project_id=? AND canvas_id=?
+             WHERE workspace_id=? AND project_id=? AND canvas_id=?
              ORDER BY updated_at ASC, work_item_kind ASC, work_item_key ASC
              LIMIT ? OFFSET ?`
           )
-          .all(pid, canvasId, limit, offset) as AssignmentRow[]
+          .all(wid, pid, canvasId, limit, offset) as AssignmentRow[]
       ).map(toRecord);
     }
 
@@ -260,11 +276,11 @@ export class WorkAssignmentRepository {
       this.database
         .prepare(
           `SELECT * FROM work_assignments
-           WHERE project_id=?
+           WHERE workspace_id=? AND project_id=?
            ORDER BY canvas_id ASC, updated_at ASC, work_item_kind ASC, work_item_key ASC
            LIMIT ? OFFSET ?`
         )
-        .all(pid, limit, offset) as AssignmentRow[]
+        .all(wid, pid, limit, offset) as AssignmentRow[]
     ).map(toRecord);
   }
 
@@ -290,11 +306,15 @@ export class WorkAssignmentRepository {
       const existing = this.database
         .prepare(
           `SELECT revision FROM work_assignments
-           WHERE project_id=? AND canvas_id=? AND work_item_kind=? AND work_item_key=?`
+           WHERE workspace_id=? AND project_id=? AND canvas_id=? AND work_item_kind=? AND work_item_key=?`
         )
-        .get(record.projectId, parts.canvasId, parts.workItemKind, parts.workItemKey) as
-        | { revision: number }
-        | undefined;
+        .get(
+          record.workspaceId,
+          record.projectId,
+          parts.canvasId,
+          parts.workItemKind,
+          parts.workItemKey
+        ) as { revision: number } | undefined;
 
       const currentRevision = existing ? Number(existing.revision) : 0;
       if (currentRevision !== input.expectedRevision) {
@@ -310,13 +330,14 @@ export class WorkAssignmentRepository {
           this.database
             .prepare(
               `INSERT INTO work_assignments(
-                project_id,canvas_id,work_item_kind,work_item_key,
+                workspace_id,project_id,canvas_id,work_item_kind,work_item_key,
                 target_kind,target_human_principal_id,target_host_id,
                 revision,updated_by_kind,updated_by_id,updated_by_display_name,
                 updated_at,reason
-              ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
+              ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
             )
             .run(
+              record.workspaceId,
               record.projectId,
               parts.canvasId,
               parts.workItemKind,
@@ -351,7 +372,7 @@ export class WorkAssignmentRepository {
               updated_by_display_name=?,
               updated_at=?,
               reason=?
-             WHERE project_id=? AND canvas_id=? AND work_item_kind=? AND work_item_key=?
+             WHERE workspace_id=? AND project_id=? AND canvas_id=? AND work_item_kind=? AND work_item_key=?
                AND revision=?`
           )
           .run(
@@ -364,6 +385,7 @@ export class WorkAssignmentRepository {
             updatedByDisplayName,
             record.updatedAt,
             reason,
+            record.workspaceId,
             record.projectId,
             parts.canvasId,
             parts.workItemKind,
@@ -375,7 +397,7 @@ export class WorkAssignmentRepository {
         }
       }
 
-      const stored = this.get(record.projectId, record.workItem);
+      const stored = this.get(record.workspaceId, record.projectId, record.workItem);
       if (!stored) {
         throw new WorkAssignmentError("work_input_invalid", "Assignment row missing after write.");
       }

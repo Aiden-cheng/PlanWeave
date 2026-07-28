@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { canvasCommandMigrationSql } from "../migrations/canvas.js";
+import { migration17 } from "../migrations/collaborationLegacy.js";
 import { migrationModules } from "../migrations/registry.js";
 import {
   setupCodeHostEnrollmentOutcomeMigration,
@@ -52,10 +53,13 @@ async function openDatabaseAtV26(): Promise<SqliteDatabase> {
     "workspace_principals",
     "workspace_identity_migrations",
     "legacy_project_workspace_mappings",
-    "workspaces"
+    "workspaces",
+    "work_assignments_unscoped_legacy"
   ]) {
     database.exec(`DROP TABLE IF EXISTS ${table}`);
   }
+  database.exec("DROP TABLE work_assignments");
+  database.exec(migration17);
   database.prepare("DELETE FROM schema_migrations WHERE version>=27").run();
   database.exec("PRAGMA foreign_keys=ON");
   return database;
@@ -153,9 +157,10 @@ describe("collaboration migration reconciliation", () => {
       { name: "content-versions", versions: [33] },
       { name: "setup-code", versions: [31, 32] },
       { name: "comment-workspace-scope", versions: [35] },
-      { name: "host-readiness", versions: [36] }
+      { name: "host-readiness", versions: [36] },
+      { name: "assignment-workspace-scope", versions: [37] }
     ]);
-    expect(latestCentralSchemaVersion).toBe(36);
+    expect(latestCentralSchemaVersion).toBe(37);
   });
 
   it("maps a representative v26 project to one stable Workspace and package registry key", async () => {
@@ -173,6 +178,29 @@ describe("collaboration migration reconciliation", () => {
         ) VALUES(?,?,?,?,?,?,?)`
       )
       .run("membership-owner", "legacy-project", "owner", "owner", at, at, 1);
+    database
+      .prepare(
+        `INSERT INTO work_assignments(
+          project_id,canvas_id,work_item_kind,work_item_key,target_kind,
+          target_human_principal_id,target_host_id,revision,updated_by_kind,
+          updated_by_id,updated_by_display_name,updated_at,reason
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`
+      )
+      .run(
+        "legacy-project",
+        "default",
+        "task",
+        "T-001",
+        "human",
+        "owner",
+        null,
+        1,
+        "human",
+        "owner",
+        "Owner",
+        at,
+        null
+      );
 
     applyMigrations(database);
     const mapping = database
@@ -206,6 +234,20 @@ describe("collaboration migration reconciliation", () => {
         )
         .get(workspaceId, "legacy-project")
     ).toEqual({ workspace_id: workspaceId, project_root_internal: null, visibility: "private" });
+    expect(
+      database
+        .prepare(
+          `SELECT workspace_id,project_id,canvas_id,work_item_kind,work_item_key
+           FROM work_assignments WHERE project_id=?`
+        )
+        .get("legacy-project")
+    ).toEqual({
+      workspace_id: workspaceId,
+      project_id: "legacy-project",
+      canvas_id: "default",
+      work_item_kind: "task",
+      work_item_key: "T-001"
+    });
     applyMigrations(database);
     expect(
       database
@@ -214,6 +256,54 @@ describe("collaboration migration reconciliation", () => {
         )
         .get("legacy-project")
     ).toEqual({ workspace_id: workspaceId });
+  });
+
+  it("quarantines unmapped v36 assignment rows and remains reentrant", async () => {
+    const database = await openDatabase();
+    applyMigrations(database);
+    database.exec("DROP TABLE work_assignments");
+    database.exec("DROP TABLE work_assignments_unscoped_legacy");
+    database.exec(migration17);
+    database.prepare("DELETE FROM schema_migrations WHERE version=37").run();
+    database
+      .prepare(
+        `INSERT INTO work_assignments(
+          project_id,canvas_id,work_item_kind,work_item_key,target_kind,
+          target_human_principal_id,target_host_id,revision,updated_by_kind,
+          updated_by_id,updated_by_display_name,updated_at,reason
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`
+      )
+      .run(
+        "unmapped-project",
+        "default",
+        "task",
+        "T-001",
+        "unassigned",
+        null,
+        null,
+        1,
+        "system",
+        "migration",
+        null,
+        "2026-07-28T00:00:00.000Z",
+        null
+      );
+
+    applyMigrations(database);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM work_assignments").get()).toEqual({
+      count: 0
+    });
+    expect(
+      database
+        .prepare(
+          "SELECT project_id,work_item_key FROM work_assignments_unscoped_legacy WHERE project_id=?"
+        )
+        .get("unmapped-project")
+    ).toEqual({ project_id: "unmapped-project", work_item_key: "T-001" });
+    applyMigrations(database);
+    expect(
+      database.prepare("SELECT COUNT(*) AS count FROM work_assignments_unscoped_legacy").get()
+    ).toEqual({ count: 1 });
   });
 
   it("rolls canvas and setup schema writes back atomically, then retries from the registry", async () => {

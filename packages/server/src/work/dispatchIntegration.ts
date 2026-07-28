@@ -6,9 +6,11 @@ import type { SqliteDatabase } from "../sqlite.js";
 import { WORK_ASSIGNMENT_ERROR_MESSAGES, type WorkAssignmentErrorCode } from "./errors.js";
 import {
   evaluateDispatchAgainstAssignment,
+  evaluateAssignmentTarget,
   type DispatchAssignmentGateDecision
 } from "./policy.js";
 import type { WorkAssignmentRepository } from "./repository.js";
+import type { AssignmentHostPort } from "./ports.js";
 import { AuthorityRepository } from "./authorityRepository.js";
 import { hostCanSatisfyBlock } from "./authorityPolicy.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
@@ -29,6 +31,7 @@ import {
  */
 export const dispatchHostSelectionSnapshotSchema = z
   .object({
+    workspaceId: opaqueIdentifierSchema.optional(),
     assignmentRevision: z.number().int().nonnegative(),
     authorityRevisions: z
       .object({
@@ -47,6 +50,7 @@ export const dispatchHostSelectionSnapshotSchema = z
 export type DispatchHostSelectionSnapshot = z.infer<typeof dispatchHostSelectionSnapshotSchema>;
 
 export type ResolveDispatchAssignmentInput = {
+  workspaceId: string;
   projectId: string;
   workItem: WorkItemRef;
   /** Authoritative Block requirements from Runtime/package — never a UI eligibility cache. */
@@ -83,7 +87,7 @@ export function resolveDispatchAssignment(
     };
   }
 
-  const concurrency = repository.getConcurrency(input.projectId, workItem);
+  const concurrency = repository.getConcurrency(input.workspaceId, input.projectId, workItem);
   if (
     input.expectedAssignmentRevision !== undefined &&
     input.expectedAssignmentRevision !== concurrency.currentRevision
@@ -110,6 +114,7 @@ export function resolveDispatchAssignment(
   return {
     ok: true,
     snapshot: {
+      workspaceId: input.workspaceId,
       assignmentRevision: concurrency.currentRevision,
       target,
       selection: gate.selection,
@@ -135,6 +140,7 @@ export type AssignmentDispatchGate = {
    * Callers must not pass UI eligibility lists as authority — only package capabilities.
    */
   resolve(input: {
+    workspaceId: string;
     projectId: string;
     canvasId: string;
     blockRef: string;
@@ -155,6 +161,8 @@ export type AssignmentDispatchGate = {
 
 export type CreateAssignmentDispatchGateOptions = {
   repository: WorkAssignmentRepository;
+  /** Recheck the exact Host at dispatch time; assignment rows are not liveness snapshots. */
+  hostPort: AssignmentHostPort;
   /**
    * When the request omits allowHumanOverride, use this default.
    * Operator-backed paths may set true for backward-compatible unassigned dispatch;
@@ -186,6 +194,7 @@ export function createAssignmentDispatchGate(
         requiredCapabilities: [...input.requiredCapabilities]
       });
       const result = resolveDispatchAssignment(options.repository, {
+        workspaceId: input.workspaceId,
         projectId: input.projectId,
         workItem,
         packageFacts,
@@ -195,6 +204,20 @@ export function createAssignmentDispatchGate(
       });
       if (!result.ok) {
         throw new DispatchAssignmentError(result.code, result.message);
+      }
+      if (result.snapshot.selection === "exact" && result.snapshot.preferredHostId) {
+        const host = options.hostPort.getHostFacts(
+          input.workspaceId,
+          input.projectId,
+          result.snapshot.preferredHostId
+        );
+        const target = evaluateAssignmentTarget({
+          workItem,
+          target: result.snapshot.target,
+          packageFacts,
+          host
+        });
+        if (!target.allowed) throw new DispatchAssignmentError(target.code, target.message);
       }
       return result.snapshot;
     }
@@ -308,6 +331,7 @@ export function createAuthorityDispatchGate(
         selection = "automatic";
         if (input.requestedHostId === undefined) {
           return {
+            workspaceId: scope.workspaceId,
             assignmentRevision: current.executionTargetRevision,
             authorityRevisions: current,
             target,
@@ -332,6 +356,7 @@ export function createAuthorityDispatchGate(
         if (!hostId) throw new DispatchAssignmentError("work_host_not_authorized");
       }
       return {
+        workspaceId: scope.workspaceId,
         assignmentRevision: current.executionTargetRevision,
         authorityRevisions: current,
         target,

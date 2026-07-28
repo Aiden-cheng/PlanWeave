@@ -9,7 +9,7 @@ import {
   type ExecutionTarget
 } from "@planweave-ai/collaboration-contracts";
 import type { AgentHost } from "../hosts.js";
-import { isAgentHostOnline } from "../hosts.js";
+import { isAgentHostOnline, operatorHostAvailability } from "../hosts.js";
 import type { ProjectAccessRepository } from "../projectAccessRepository.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import type { CollaborationAuthContext } from "../identity/auth.js";
@@ -97,6 +97,8 @@ export function assertExecutionTargetMutation(input: {
   workspaceIdentity: WorkspaceIdentityRepository;
   hosts: { get(hostId: string): AgentHost | undefined };
   packageFacts: WorkItemPackageFacts;
+  now: Date;
+  hostOfflineAfterMs: number;
 }): void {
   assertHumanScopeAuthorized({ ...input, scope: input.scope, capability: "assignment" });
   if (!input.packageFacts.exists || input.packageFacts.kind !== "block")
@@ -108,6 +110,18 @@ export function assertExecutionTargetMutation(input: {
   const workspace = input.workspaceIdentity.workspaceForHost(host.id);
   if (!workspace || workspace !== input.scope.workspaceId)
     throw new Error("authority_host_workspace_mismatch");
+  if (
+    operatorHostAvailability(
+      host,
+      input.scope.workspaceId,
+      isAgentHostOnline(host, {
+        now: input.now,
+        hostOfflineAfterMs: input.hostOfflineAfterMs
+      })
+    ).status !== "available"
+  ) {
+    throw new Error("authority_host_not_ready");
+  }
   if (
     !input.packageFacts.requiredCapabilities.every((capability) =>
       host.capabilities.includes(capability)
@@ -129,10 +143,15 @@ export function hostCanSatisfyBlock(
   }
 ): boolean {
   const workspace = input.workspaceIdentity.workspaceForHost(host.id);
+  const online = isAgentHostOnline(host, {
+    now: input.now,
+    hostOfflineAfterMs: input.hostOfflineAfterMs
+  });
   return (
     workspace === input.scope.workspaceId &&
     host.revokedAt === undefined &&
-    isAgentHostOnline(host, { now: input.now, hostOfflineAfterMs: input.hostOfflineAfterMs }) &&
+    online &&
+    operatorHostAvailability(host, input.scope.workspaceId, online).status === "available" &&
     host.capacity > input.activeReservations &&
     input.requiredCapabilities.every((capability) => host.capabilities.includes(capability))
   );

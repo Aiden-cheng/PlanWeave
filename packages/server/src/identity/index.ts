@@ -118,6 +118,7 @@ export {
   authenticateHumanForProject,
   authenticateCollaborationForProject,
   authenticateCollaborationForScope,
+  workspaceDeviceSessionHumanContext,
   hasAuthenticatedCollaborationDevice,
   type AuthenticatedCollaborationScope,
   type CollaborationAuthContext,

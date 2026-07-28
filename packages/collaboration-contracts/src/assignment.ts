@@ -171,12 +171,14 @@ export const assignmentMembershipFactsSchema = z
 
 export const assignmentHostFactsSchema = z
   .object({
+    workspaceId: opaqueIdentifierSchema,
     projectId: humanProjectIdSchema,
     hostId: opaqueIdentifierSchema,
     exists: z.boolean(),
     revoked: z.boolean(),
     authorizedForProject: z.boolean(),
     online: z.boolean(),
+    ready: z.boolean(),
     capabilities: z.array(z.string().min(1)).max(128),
     displayName: z
       .string()

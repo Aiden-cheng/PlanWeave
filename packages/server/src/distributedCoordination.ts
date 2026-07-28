@@ -30,6 +30,7 @@ import {
   type AssignmentDispatchGate
 } from "./work/dispatchIntegration.js";
 import { WorkAssignmentRepository } from "./work/repository.js";
+import { createHostAssignmentPort } from "./work/ports.js";
 import type { AssignmentRecord } from "./work/schemas.js";
 import { AuthorityRepository } from "./work/authorityRepository.js";
 import { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
@@ -101,6 +102,11 @@ export function createRemoteBlockCoordination(
       ? undefined
       : createAssignmentDispatchGate({
           repository: workAssignments,
+          hostPort: createHostAssignmentPort({
+            hosts,
+            hostOfflineAfterMs: options.hostOfflineAfterMs,
+            clock: options.clock
+          }),
           // Operator / existing remote paths may dispatch unassigned Blocks; exact Host
           // assignments still pin selection. Strict callers pass allowHumanOverride:false.
           defaultAllowHumanOverride: true

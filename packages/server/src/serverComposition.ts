@@ -291,6 +291,10 @@ function uniqueConfiguredWorkspaceId(input: {
   return workspaceIds.length === 1 ? workspaceIds[0] : undefined;
 }
 
+function assignmentServiceKey(workspaceId: string, projectId: string): string {
+  return JSON.stringify([workspaceId, projectId]);
+}
+
 export async function createDistributedServerComposition(
   options: DistributedServerCompositionOptions
 ): Promise<DistributedServerComposition> {
@@ -343,6 +347,22 @@ export async function createDistributedServerComposition(
           activity: projectionRepository,
           clock
         });
+        const assignmentActivityProjections = new Map<string, ActivityProjectionService>();
+        const assignmentActivityProjection = (workspaceId: string) => {
+          let scoped = assignmentActivityProjections.get(workspaceId);
+          if (!scoped) {
+            scoped = new ActivityProjectionService({
+              activity: new ActivityRepository(database, {
+                workspaceId,
+                onInsertedInTransaction: (record) =>
+                  appendHumanObserverActivity(observerJournal, record)
+              }),
+              clock
+            });
+            assignmentActivityProjections.set(workspaceId, scoped);
+          }
+          return scoped;
+        };
         activityRepository = projectionRepository;
         activityProjection = projection;
         return {
@@ -399,7 +419,9 @@ export async function createDistributedServerComposition(
                   : record.target.kind === "exact_host"
                     ? "Assigned work item to an Agent Host"
                     : "Assigned work item to automatic Host selection";
-            projection.projectAssignmentEventInCallerTransaction({
+            assignmentActivityProjection(
+              record.workspaceId
+            ).projectAssignmentEventInCallerTransaction({
               projectId: record.projectId,
               workItem: record.workItem,
               assignmentRevision: record.revision,
@@ -751,7 +773,7 @@ export async function createDistributedServerComposition(
     }
     activityRetention = new ActivityRetentionMaintenance(initializedActivityRepository, clock);
     await activityRetention.start();
-    const membershipPort = createIdentityMembershipPort({ identity: humanIdentity });
+    const membershipPort = createIdentityMembershipPort({ workspaceIdentity });
     const hostPort = createHostAssignmentPort({
       hosts: coordination.hosts,
       hostOfflineAfterMs: config.limits.hostOfflineAfterMs,
@@ -787,19 +809,18 @@ export async function createDistributedServerComposition(
       });
       return { service, release: acquired.release };
     };
-    for (const { projectId, canvasId } of runtimeRegistry.locators) {
-      if (assignmentServices.has(projectId)) continue;
-      const workspaceId = uniqueConfiguredWorkspaceId({ runtimeRegistry, projectId, canvasId });
-      if (!workspaceId) continue;
-      const packagePort = runtimeRegistry.scopedWorkItemPackagePort({
+    for (const { workspaceId, projectId } of runtimeRegistry.locators) {
+      const serviceKey = assignmentServiceKey(workspaceId, projectId);
+      if (assignmentServices.has(serviceKey)) continue;
+      const packagePort = runtimeRegistry.scopedProjectWorkItemPackagePort({
         workspaceId,
-        projectId,
-        canvasId
+        projectId
       });
       if (!packagePort) throw new Error("trusted_project_work_item_port_missing");
       assignmentServices.set(
-        projectId,
+        serviceKey,
         new WorkAssignmentService({
+          workspaceId,
           repository: coordination.workAssignments,
           packagePort,
           membershipPort,
@@ -967,7 +988,8 @@ export async function createDistributedServerComposition(
         }
         if (
           await handleWorkAssignmentHttpRequest(request, response, {
-            resolveService: (projectId) => assignmentServices.get(projectId),
+            resolveService: (workspaceId, projectId) =>
+              assignmentServices.get(assignmentServiceKey(workspaceId, projectId)),
             acquireAuthorityService,
             repository: humanIdentity,
             workspaceIdentity,

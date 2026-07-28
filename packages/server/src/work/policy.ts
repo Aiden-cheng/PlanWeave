@@ -133,6 +133,9 @@ export function evaluateAssignmentTarget(input: {
       if (!host.authorizedForProject) {
         return denial("work_host_not_authorized");
       }
+      if (!host.ready) {
+        return denial("work_host_not_ready");
+      }
       // Capabilities come from current Block requirements (packageFacts), never from assignment blob.
       if (!hostSatisfiesCapabilities(host.capabilities, input.packageFacts.requiredCapabilities)) {
         return denial("work_host_capability_mismatch");
@@ -191,6 +194,7 @@ export type AssignmentUpdateDecision =
  * Plan Package is never mutated here.
  */
 export function decideAssignmentUpdate(input: {
+  workspaceId: string;
   command: AssignmentUpdateCommand;
   concurrency: AssignmentConcurrencyFacts;
   packageFacts: WorkItemPackageFacts;
@@ -271,6 +275,7 @@ export function decideAssignmentUpdate(input: {
 
   const nextRevision = input.concurrency.currentRevision + 1;
   const record = assignmentRecordSchema.parse({
+    workspaceId: input.workspaceId,
     projectId: command.projectId,
     workItem: command.workItem,
     target: command.target,
@@ -338,6 +343,12 @@ export function evaluateAssignmentAvailability(input: {
         return assignmentAvailabilitySchema.parse({
           status: "invalid",
           reason: "host_not_authorized"
+        });
+      }
+      if (!input.host.ready) {
+        return assignmentAvailabilitySchema.parse({
+          status: "unavailable",
+          reason: "host_offline"
         });
       }
       if (

@@ -194,6 +194,7 @@ export class RemoteBlockCoordinator {
     let selection: DispatchHostSelectionSnapshot | undefined;
     if (this.options.assignmentGate) {
       selection = this.options.assignmentGate.resolve({
+        workspaceId: candidate.workspaceId,
         projectId: candidate.projectId,
         canvasId: candidate.canvasId,
         blockRef: candidate.blockRef,
@@ -240,9 +241,12 @@ export class RemoteBlockCoordinator {
     // Recheck Host authority only while an active attempt still holds a lease.
     // Interrupted / action_required recovery releases the prior lease and waits for
     // resume/retry; a new reservation path re-authorizes after it acquires a lease.
-    const activeAuthorityAttempt = ["reserved", "activated", "running", "awaiting_writeback"].includes(
-      operation.attempt.status
-    );
+    const activeAuthorityAttempt = [
+      "reserved",
+      "activated",
+      "running",
+      "awaiting_writeback"
+    ].includes(operation.attempt.status);
     if (activeAuthorityAttempt && operation.attempt.leaseId && this.options.finalAuthorize) {
       this.options.finalAuthorize({
         operation,
@@ -396,7 +400,7 @@ export class RemoteBlockCoordinator {
       : undefined;
     if (!reservation) {
       try {
-        const preferredHostId = this.resolvePreferredHostId(operation);
+        const preferredHostId = this.resolvePreferredHostId(operation, candidate.workspaceId);
         reservation = this.options.reservations.reserve(operation.id, { preferredHostId });
         this.options.finalAuthorize?.({
           operation: this.options.operations.getRequired(operation.id),
@@ -659,7 +663,10 @@ export class RemoteBlockCoordinator {
    * revalidating current assignment and persisting — do not throw and block startup.
    * Post-v18 creates always snapshot at dispatch begin; this null path is legacy-only.
    */
-  private resolvePreferredHostId(operation: RemoteOperation): string | undefined {
+  private resolvePreferredHostId(
+    operation: RemoteOperation,
+    workspaceId: string
+  ): string | undefined {
     const durable = operation.hostSelection ?? this.hostSelectionByOperation.get(operation.id);
     if (durable) {
       this.hostSelectionByOperation.set(operation.id, durable);
@@ -669,6 +676,7 @@ export class RemoteBlockCoordinator {
       return undefined;
     }
     const snapshot = this.options.assignmentGate.resolve({
+      workspaceId,
       projectId: operation.projectId,
       canvasId: operation.canvasId,
       blockRef: operation.blockRef,

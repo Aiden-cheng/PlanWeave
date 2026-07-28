@@ -13,6 +13,7 @@ import {
   authenticateCollaborationForProject,
   hasAuthenticatedCollaborationDevice,
   humanTransportAllowed,
+  workspaceDeviceSessionHumanContext,
   type CollaborationAuthContext,
   type HumanIdentityRepository,
   type HumanProjectAuthority
@@ -21,7 +22,7 @@ import type { WorkspaceIdentityRepository } from "../identity/workspaceRepositor
 import type { ProjectAccessRepository } from "../projectAccessRepository.js";
 import { WorkAssignmentService, WorkAssignmentServiceError } from "./service.js";
 import { AuthorityService } from "./authorityService.js";
-import { workItemRefSchema } from "./schemas.js";
+import { workItemRefSchema, type AssignmentDisplayProjection } from "./schemas.js";
 import { authorityScopeSchema } from "./authoritySchemas.js";
 
 const MAX_ASSIGNMENT_BODY_BYTES = 65_536;
@@ -48,7 +49,7 @@ type RateBucket = { windowStartedAt: number; count: number };
 const rateBuckets = new Map<string, RateBucket>();
 
 export type WorkAssignmentHttpOptions = {
-  resolveService(projectId: string): WorkAssignmentService | undefined;
+  resolveService(workspaceId: string, projectId: string): WorkAssignmentService | undefined;
   acquireAuthorityService?(
     workspaceId: string,
     projectId: string,
@@ -70,26 +71,71 @@ function isWorkspaceDeviceContext(
 
 function assertAccessCapability(input: {
   actor: CollaborationAuthContext;
+  workspaceId: string;
   projectId: string;
-  canvasId: string;
+  canvasId?: string;
   capability: "assignment" | "read";
   access: ProjectAccessRepository;
-  workspaceIdentity: WorkspaceIdentityRepository;
 }): void {
-  const workspaceId = isWorkspaceDeviceContext(input.actor)
-    ? input.actor.workspaceId
-    : input.workspaceIdentity.workspaceForLegacyProject(input.projectId);
-  if (!workspaceId) throw new WorkAssignmentServiceError("work_auth_forbidden");
+  assertPrincipalAccessCapability({
+    workspaceId: input.workspaceId,
+    projectId: input.projectId,
+    ...(input.canvasId === undefined ? {} : { canvasId: input.canvasId }),
+    humanPrincipalId: input.actor.humanPrincipalId,
+    capability: input.capability,
+    access: input.access
+  });
+}
+
+function assertPrincipalAccessCapability(input: {
+  workspaceId: string;
+  projectId: string;
+  canvasId?: string;
+  humanPrincipalId: string;
+  capability: "assignment" | "read";
+  access: ProjectAccessRepository;
+}): void {
   try {
     input.access.policy.assertCapability({
-      workspaceId,
+      workspaceId: input.workspaceId,
       projectId: input.projectId,
       canvasId: input.canvasId,
-      actor: { kind: "human", id: input.actor.humanPrincipalId },
+      actor: { kind: "human", id: input.humanPrincipalId },
       capability: input.capability
     });
   } catch {
     throw new WorkAssignmentServiceError("work_auth_forbidden");
+  }
+}
+
+function hasAccessCapability(input: Parameters<typeof assertAccessCapability>[0]): boolean {
+  try {
+    assertAccessCapability(input);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function hasPrincipalAccessCapability(
+  input: Parameters<typeof assertPrincipalAccessCapability>[0]
+): boolean {
+  try {
+    assertPrincipalAccessCapability(input);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function assertTrustedScope(input: {
+  projectAuthority: HumanProjectAuthority;
+  workspaceId: string;
+  projectId: string;
+  canvasId?: string;
+}): void {
+  if (!input.projectAuthority.hasScope(input)) {
+    throw new WorkAssignmentServiceError("work_cross_project_forbidden");
   }
 }
 
@@ -232,6 +278,7 @@ function statusFor(error: WorkAssignmentServiceError): number {
     case "work_human_not_member":
     case "work_host_revoked":
     case "work_host_not_authorized":
+    case "work_host_not_ready":
     case "work_host_capability_mismatch":
     case "work_not_agent_assigned":
     case "work_dispatch_host_mismatch":
@@ -322,7 +369,7 @@ export async function handleWorkAssignmentHttpRequest(
     );
     if (!authenticated) throw new WorkAssignmentServiceError("work_cross_project_forbidden");
     const actor = authenticated.actor;
-    const service = options.resolveService(matched.projectId);
+    const service = options.resolveService(authenticated.workspaceId, matched.projectId);
     if (
       !service &&
       matched.kind !== "responsibility" &&
@@ -333,42 +380,64 @@ export async function handleWorkAssignmentHttpRequest(
     ) {
       throw new WorkAssignmentServiceError("work_cross_project_forbidden");
     }
-    const legacyActor = isWorkspaceDeviceContext(actor) ? undefined : actor;
-    if (
-      legacyActor === undefined &&
-      (matched.kind === "update" ||
-        matched.kind === "get" ||
-        matched.kind === "list" ||
-        matched.kind === "eligible")
-    ) {
-      throw new WorkAssignmentServiceError("work_auth_forbidden");
-    }
+    const serviceActor = workspaceDeviceSessionHumanContext(actor, options.workspaceIdentity);
 
     switch (matched.kind) {
       case "update": {
         query(url, []);
         const body = assignmentUpdateWireCommandSchema.parse(await readJson(request));
-        if (!legacyActor) throw new WorkAssignmentServiceError("work_auth_forbidden");
+        if (!serviceActor) throw new WorkAssignmentServiceError("work_auth_forbidden");
+        assertTrustedScope({
+          projectAuthority: options.projectAuthority,
+          workspaceId: authenticated.workspaceId,
+          projectId: matched.projectId,
+          canvasId: body.workItem.canvasId
+        });
         assertAccessCapability({
           actor,
+          workspaceId: authenticated.workspaceId,
           projectId: matched.projectId,
           canvasId: body.workItem.canvasId,
           capability: "assignment",
-          access: options.access,
-          workspaceIdentity: options.workspaceIdentity
+          access: options.access
         });
+        if (body.target.kind === "human") {
+          assertPrincipalAccessCapability({
+            workspaceId: authenticated.workspaceId,
+            projectId: matched.projectId,
+            canvasId: body.workItem.canvasId,
+            humanPrincipalId: body.target.humanPrincipalId,
+            capability: "read",
+            access: options.access
+          });
+        }
         respond(
           response,
           200,
-          service!.updateAssignment({ ...body, actor, projectId: matched.projectId }).display
+          service!.updateAssignment({ ...body, actor: serviceActor, projectId: matched.projectId })
+            .display
         );
         return true;
       }
       case "get": {
         const parameters = query(url, ["workItem"]);
         const workItem = workItemRefSchema.parse(parseJsonParameter(parameters.workItem));
-        if (!legacyActor) throw new WorkAssignmentServiceError("work_auth_forbidden");
-        respond(response, 200, service!.getAssignment(legacyActor, matched.projectId, workItem));
+        if (!serviceActor) throw new WorkAssignmentServiceError("work_auth_forbidden");
+        assertTrustedScope({
+          projectAuthority: options.projectAuthority,
+          workspaceId: authenticated.workspaceId,
+          projectId: matched.projectId,
+          canvasId: workItem.canvasId
+        });
+        assertAccessCapability({
+          actor,
+          workspaceId: authenticated.workspaceId,
+          projectId: matched.projectId,
+          canvasId: workItem.canvasId,
+          capability: "read",
+          access: options.access
+        });
+        respond(response, 200, service!.getAssignment(serviceActor, matched.projectId, workItem));
         return true;
       }
       case "list": {
@@ -381,8 +450,78 @@ export async function handleWorkAssignmentHttpRequest(
           ...(parameters.cursor === undefined ? {} : { cursor: Number(parameters.cursor) }),
           ...(parameters.limit === undefined ? {} : { limit: Number(parameters.limit) })
         });
-        if (!legacyActor) throw new WorkAssignmentServiceError("work_auth_forbidden");
-        respond(response, 200, service!.listAssignments(legacyActor, matched.projectId, parsed));
+        if (!serviceActor) throw new WorkAssignmentServiceError("work_auth_forbidden");
+        if (parsed.workItems) {
+          for (const canvasId of new Set(parsed.workItems.map((workItem) => workItem.canvasId))) {
+            assertTrustedScope({
+              projectAuthority: options.projectAuthority,
+              workspaceId: authenticated.workspaceId,
+              projectId: matched.projectId,
+              canvasId
+            });
+            assertAccessCapability({
+              actor,
+              workspaceId: authenticated.workspaceId,
+              projectId: matched.projectId,
+              canvasId,
+              capability: "read",
+              access: options.access
+            });
+          }
+        } else if (isWorkspaceDeviceContext(actor) && parsed.canvasId === undefined) {
+          const items: AssignmentDisplayProjection[] = [];
+          let cursor = parsed.cursor;
+          let nextCursor: number | null = null;
+          while (items.length < parsed.limit) {
+            const page = service!.listAssignments(serviceActor, matched.projectId, {
+              cursor,
+              limit: 1
+            });
+            const item = page.items[0];
+            if (!item) {
+              nextCursor = null;
+              break;
+            }
+            cursor += 1;
+            if (
+              options.projectAuthority.hasScope({
+                workspaceId: authenticated.workspaceId,
+                projectId: matched.projectId,
+                canvasId: item.workItem.canvasId
+              }) &&
+              hasAccessCapability({
+                actor,
+                workspaceId: authenticated.workspaceId,
+                projectId: matched.projectId,
+                canvasId: item.workItem.canvasId,
+                capability: "read",
+                access: options.access
+              })
+            ) {
+              items.push(item);
+            }
+            if (page.nextCursor === null) break;
+            nextCursor = cursor;
+          }
+          respond(response, 200, { items, nextCursor });
+          return true;
+        } else {
+          assertTrustedScope({
+            projectAuthority: options.projectAuthority,
+            workspaceId: authenticated.workspaceId,
+            projectId: matched.projectId,
+            ...(parsed.canvasId === undefined ? {} : { canvasId: parsed.canvasId })
+          });
+          assertAccessCapability({
+            actor,
+            workspaceId: authenticated.workspaceId,
+            projectId: matched.projectId,
+            ...(parsed.canvasId === undefined ? {} : { canvasId: parsed.canvasId }),
+            capability: "read",
+            access: options.access
+          });
+        }
+        respond(response, 200, service!.listAssignments(serviceActor, matched.projectId, parsed));
         return true;
       }
       case "eligible": {
@@ -394,8 +533,22 @@ export async function handleWorkAssignmentHttpRequest(
           "hostCursor"
         ]);
         const workItem = workItemRefSchema.parse(parseJsonParameter(parameters.workItem));
-        if (!legacyActor) throw new WorkAssignmentServiceError("work_auth_forbidden");
-        const result = service!.listEligibleAssignees(legacyActor, matched.projectId, workItem, {
+        if (!serviceActor) throw new WorkAssignmentServiceError("work_auth_forbidden");
+        assertTrustedScope({
+          projectAuthority: options.projectAuthority,
+          workspaceId: authenticated.workspaceId,
+          projectId: matched.projectId,
+          canvasId: workItem.canvasId
+        });
+        assertAccessCapability({
+          actor,
+          workspaceId: authenticated.workspaceId,
+          projectId: matched.projectId,
+          canvasId: workItem.canvasId,
+          capability: "read",
+          access: options.access
+        });
+        const result = service!.listEligibleAssignees(serviceActor, matched.projectId, workItem, {
           ...(parameters.humanLimit === undefined
             ? {}
             : { humanLimit: Number(parameters.humanLimit) }),
@@ -411,7 +564,16 @@ export async function handleWorkAssignmentHttpRequest(
         });
         respond(response, 200, {
           workItem: result.workItem,
-          humans: result.humans,
+          humans: result.humans.filter((human) =>
+            hasPrincipalAccessCapability({
+              workspaceId: authenticated.workspaceId,
+              projectId: matched.projectId,
+              canvasId: workItem.canvasId,
+              humanPrincipalId: human.humanPrincipalId,
+              capability: "read",
+              access: options.access
+            })
+          ),
           hosts: result.hosts,
           nextHumanCursor: result.nextHumanCursor,
           nextHostCursor: result.nextHostCursor
@@ -423,11 +585,11 @@ export async function handleWorkAssignmentHttpRequest(
         const body = responsibilityUpdateWireCommandSchema.parse(await readJson(request));
         assertAccessCapability({
           actor,
+          workspaceId: authenticated.workspaceId,
           projectId: matched.projectId,
           canvasId: body.scope.canvasId,
           capability: "assignment",
-          access: options.access,
-          workspaceIdentity: options.workspaceIdentity
+          access: options.access
         });
         if (!options.projectAuthority.hasScope({ ...authenticated, canvasId: body.scope.canvasId }))
           throw new WorkAssignmentServiceError("work_cross_project_forbidden");
@@ -449,11 +611,11 @@ export async function handleWorkAssignmentHttpRequest(
         const body = reviewAssignmentUpdateWireCommandSchema.parse(await readJson(request));
         assertAccessCapability({
           actor,
+          workspaceId: authenticated.workspaceId,
           projectId: matched.projectId,
           canvasId: body.scope.canvasId,
           capability: "assignment",
-          access: options.access,
-          workspaceIdentity: options.workspaceIdentity
+          access: options.access
         });
         if (!options.projectAuthority.hasScope({ ...authenticated, canvasId: body.scope.canvasId }))
           throw new WorkAssignmentServiceError("work_cross_project_forbidden");
@@ -475,11 +637,11 @@ export async function handleWorkAssignmentHttpRequest(
         const body = executionTargetUpdateWireCommandSchema.parse(await readJson(request));
         assertAccessCapability({
           actor,
+          workspaceId: authenticated.workspaceId,
           projectId: matched.projectId,
           canvasId: body.scope.canvasId,
           capability: "assignment",
-          access: options.access,
-          workspaceIdentity: options.workspaceIdentity
+          access: options.access
         });
         if (!options.projectAuthority.hasScope({ ...authenticated, canvasId: body.scope.canvasId }))
           throw new WorkAssignmentServiceError("work_cross_project_forbidden");

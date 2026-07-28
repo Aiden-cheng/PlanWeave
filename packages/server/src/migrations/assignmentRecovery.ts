@@ -79,11 +79,9 @@ export function retryAssignmentAuthorityMigration(
   return inWriteTransaction(database, () => {
     const before = migrationState(database, input);
     if (before.status === "completed") return recoveryResult(database, input, "retry_idempotent");
-    migrateLegacyAssignments(database, input.projectId);
+    migrateLegacyAssignments(database, input);
     const result = recoveryResult(database, input, "repair_required");
-    return result.status === "completed"
-      ? { ...result, outcome: "repair_completed" }
-      : result;
+    return result.status === "completed" ? { ...result, outcome: "repair_completed" } : result;
   });
 }
 
@@ -97,11 +95,27 @@ export function repairAssignmentAuthorityMigration(
 
 function legacyRows(
   database: SqliteDatabase,
-  projectId: string
+  input: AssignmentMigrationRecoveryInput
 ): readonly LegacyAssignmentRow[] {
+  const columns = database.prepare("PRAGMA table_info(work_assignments)").all();
+  if (columns.some((column) => column.name === "workspace_id")) {
+    return database
+      .prepare(
+        `SELECT * FROM work_assignments
+         WHERE workspace_id=? AND project_id=?
+         ORDER BY canvas_id,work_item_key`
+      )
+      .all(input.workspaceId, input.projectId) as LegacyAssignmentRow[];
+  }
+  const mapping = database
+    .prepare("SELECT workspace_id FROM legacy_project_workspace_mappings WHERE legacy_project_id=?")
+    .get(input.projectId) as { workspace_id: string } | undefined;
+  if (!mapping || mapping.workspace_id !== input.workspaceId) {
+    throw new Error("assignment_rollback_workspace_scope_unavailable");
+  }
   return database
     .prepare("SELECT * FROM work_assignments WHERE project_id=? ORDER BY canvas_id,work_item_key")
-    .all(projectId) as LegacyAssignmentRow[];
+    .all(input.projectId) as LegacyAssignmentRow[];
 }
 
 function assertProjection(
@@ -162,7 +176,12 @@ function projectionValues(
       ...values,
       executionTarget: {
         keys: [workspaceId, row.project_id, row.canvas_id, row.work_item_key],
-        expected: { ...base, block_ref: row.work_item_key, target_kind: "unassigned", host_id: null }
+        expected: {
+          ...base,
+          block_ref: row.work_item_key,
+          target_kind: "unassigned",
+          host_id: null
+        }
       }
     };
   }
@@ -198,7 +217,7 @@ export function rollbackAssignmentAuthorityMigration(
     if (state.status === "repair_required") {
       return recoveryResult(database, input, "already_legacy");
     }
-    const rows = legacyRows(database, input.projectId);
+    const rows = legacyRows(database, input);
     if (rows.length === 0) throw new Error("assignment_rollback_source_missing");
     const projections = rows.map((row) => projectionValues(input.workspaceId, row));
     for (const projection of projections) {

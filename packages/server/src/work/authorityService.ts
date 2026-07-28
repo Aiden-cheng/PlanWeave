@@ -13,7 +13,7 @@ import type { CollaborationAuthContext } from "../identity/index.js";
 import type { ProjectAccessRepository } from "../projectAccessRepository.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import type { AgentHost, AgentHostRepository } from "../hosts.js";
-import { isAgentHostOnline } from "../hosts.js";
+import { isAgentHostOnline, operatorHostAvailability } from "../hosts.js";
 import { AuthorityRepository } from "./authorityRepository.js";
 import {
   executionTargetMutationSchema,
@@ -146,7 +146,9 @@ export class AuthorityService {
       access: this.options.access,
       workspaceIdentity: this.options.workspaceIdentity,
       hosts: this.options.hosts,
-      packageFacts
+      packageFacts,
+      now: this.clock(),
+      hostOfflineAfterMs: this.options.hostOfflineAfterMs ?? 60_000
     });
     this.options.repository.applyExecutionTarget({
       mutation: intent,
@@ -171,7 +173,10 @@ export class AuthorityService {
     return responsibilityReadModelSchema.parse({ ...record, availability });
   }
 
-  getReviewer(actor: CollaborationAuthContext, rawScope: unknown): ReviewAssignmentReadModel | undefined {
+  getReviewer(
+    actor: CollaborationAuthContext,
+    rawScope: unknown
+  ): ReviewAssignmentReadModel | undefined {
     const scope = this.authorizeRead(actor, rawScope);
     const record = this.options.repository.getReviewer(scope);
     if (!record) return undefined;
@@ -237,7 +242,10 @@ export class AuthorityService {
    * Missing durable rows surface as unassigned revision 0 so clients can CAS cleanly.
    * Task scopes never include Host execution targets.
    */
-  getWorkAuthorityProjection(actor: CollaborationAuthContext, rawScope: unknown): WorkAuthorityProjection {
+  getWorkAuthorityProjection(
+    actor: CollaborationAuthContext,
+    rawScope: unknown
+  ): WorkAuthorityProjection {
     const scope = this.authorizeRead(actor, rawScope);
     this.assertPackageScope(scope);
     const evaluatedAt = this.clock().toISOString();
@@ -398,7 +406,14 @@ export class AuthorityService {
       return "host_not_authorized";
     }
     const offlineAfterMs = this.options.hostOfflineAfterMs ?? 60_000;
-    if (!isAgentHostOnline(host, { now: this.clock(), hostOfflineAfterMs: offlineAfterMs })) {
+    const online = isAgentHostOnline(host, {
+      now: this.clock(),
+      hostOfflineAfterMs: offlineAfterMs
+    });
+    if (!online) {
+      return "host_offline";
+    }
+    if (operatorHostAvailability(host, scope.workspaceId, online).status !== "available") {
       return "host_offline";
     }
     if (host.capacity < 1) return "host_at_capacity";

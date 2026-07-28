@@ -68,6 +68,11 @@ export type TrustedRuntimeRegistry = {
     projectId: string;
     canvasId: string;
   }): WorkItemPackagePort | undefined;
+  /** Resolve one exact Workspace/project port that routes each declared canvas by WorkItemRef. */
+  scopedProjectWorkItemPackagePort(input: {
+    workspaceId: string;
+    projectId: string;
+  }): WorkItemPackagePort | undefined;
   acquireScopedWorkItemPackagePort(input: {
     workspaceId: string;
     projectId: string;
@@ -153,7 +158,10 @@ export async function createTrustedRuntimeRegistry(
     throw error;
   }
   const canvasIdsByProjectScope = new Map(
-    [...canvasWorkItemPorts].map(([projectScopeKey, ports]) => [projectScopeKey, new Set(ports.keys())])
+    [...canvasWorkItemPorts].map(([projectScopeKey, ports]) => [
+      projectScopeKey,
+      new Set(ports.keys())
+    ])
   );
   const projectWorkItemPorts = new Map(
     [...canvasWorkItemPorts].map(([projectScopeKey, ports]) => [
@@ -206,7 +214,9 @@ export async function createTrustedRuntimeRegistry(
     expansions: Object.freeze(expansions),
     hasScope(input) {
       const canvases = canvasIdsByProjectScope.get(scopeKey(input.workspaceId, input.projectId));
-      return canvases !== undefined && (input.canvasId === undefined || canvases.has(input.canvasId));
+      return (
+        canvases !== undefined && (input.canvasId === undefined || canvases.has(input.canvasId))
+      );
     },
     hasProject(projectId) {
       return uniqueProjectScope(projectId, configuredLocators) !== undefined;
@@ -220,6 +230,9 @@ export async function createTrustedRuntimeRegistry(
     },
     scopedWorkItemPackagePort(input) {
       return externalScopedResolver ? externalScopedResolver(input) : scopedPackagePort(input);
+    },
+    scopedProjectWorkItemPackagePort(input) {
+      return projectWorkItemPorts.get(scopeKey(input.workspaceId, input.projectId));
     },
     acquireScopedWorkItemPackagePort(input) {
       const port = externalScopedResolver

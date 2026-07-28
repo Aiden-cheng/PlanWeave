@@ -68,6 +68,7 @@ function mapHumanAuthCode(code: string): WorkAssignmentErrorCode {
 }
 
 export type WorkAssignmentServiceOptions = {
+  workspaceId: string;
   repository: WorkAssignmentRepository;
   packagePort: WorkItemPackagePort;
   membershipPort: AssignmentMembershipPort;
@@ -112,6 +113,7 @@ export type AssignmentListResult = {
  */
 export class WorkAssignmentService {
   private readonly repository: WorkAssignmentRepository;
+  private readonly workspaceId: string;
   private readonly packagePort: WorkItemPackagePort;
   private readonly membershipPort: AssignmentMembershipPort;
   private readonly hostPort: AssignmentHostPort;
@@ -119,6 +121,7 @@ export class WorkAssignmentService {
   private readonly resolveActiveDispatch?: WorkAssignmentServiceOptions["resolveActiveDispatch"];
 
   constructor(options: WorkAssignmentServiceOptions) {
+    this.workspaceId = options.workspaceId;
     this.repository = options.repository;
     this.packagePort = options.packagePort;
     this.membershipPort = options.membershipPort;
@@ -151,11 +154,16 @@ export class WorkAssignmentService {
       }
       const packageFacts = packageCheck.facts;
 
-      const concurrency = this.repository.getConcurrency(command.projectId, command.workItem);
+      const concurrency = this.repository.getConcurrency(
+        this.workspaceId,
+        command.projectId,
+        command.workItem
+      );
 
       let membership: AssignmentMembershipFacts | undefined;
       if (command.target.kind === "human") {
         membership = this.membershipPort.getMembershipFacts(
+          this.workspaceId,
           command.projectId,
           command.target.humanPrincipalId
         );
@@ -172,10 +180,15 @@ export class WorkAssignmentService {
 
       let host: AssignmentHostFacts | undefined;
       if (command.target.kind === "exact_host") {
-        host = this.hostPort.getHostFacts(command.projectId, command.target.hostId);
+        host = this.hostPort.getHostFacts(
+          this.workspaceId,
+          command.projectId,
+          command.target.hostId
+        );
       }
 
       const decision = decideAssignmentUpdate({
+        workspaceId: this.workspaceId,
         command,
         concurrency,
         packageFacts,
@@ -215,7 +228,7 @@ export class WorkAssignmentService {
       this.assertCanView(context, pid);
       const workItem = workItemRefSchema.parse(workItemInput);
       const packageFacts = this.packagePort.resolveWorkItem(workItem);
-      const record = this.repository.get(pid, workItem);
+      const record = this.repository.get(this.workspaceId, pid, workItem);
       return this.projectOne(pid, workItem, record, packageFacts);
     } catch (error) {
       mapRepositoryError(error);
@@ -260,7 +273,7 @@ export class WorkAssignmentService {
             }
           }
         }
-        const records = this.repository.getMany(pid, workItems);
+        const records = this.repository.getMany(this.workspaceId, pid, workItems);
         const byKey = new Map(
           records.map((record) => [workItemStableKey(record.workItem), record] as const)
         );
@@ -276,7 +289,7 @@ export class WorkAssignmentService {
         return { items, nextCursor: null };
       }
 
-      const records = this.repository.listByProject(pid, {
+      const records = this.repository.listByProject(this.workspaceId, pid, {
         canvasId: query.canvasId,
         limit,
         offset: cursor
@@ -326,7 +339,12 @@ export class WorkAssignmentService {
       if (!Number.isSafeInteger(humanCursor) || humanCursor < 0) {
         deny("work_input_invalid");
       }
-      const humans = this.membershipPort.listActiveMemberFacts(pid, humanLimit, humanCursor);
+      const humans = this.membershipPort.listActiveMemberFacts(
+        this.workspaceId,
+        pid,
+        humanLimit,
+        humanCursor
+      );
       const nextHumanCursor = humans.length === humanLimit ? humanCursor + humans.length : null;
 
       let hosts: AssignmentHostFacts[] = [];
@@ -337,7 +355,7 @@ export class WorkAssignmentService {
         if (!Number.isSafeInteger(hostCursor) || hostCursor < 0) {
           deny("work_input_invalid");
         }
-        hosts = this.hostPort.listHostFacts(pid, {
+        hosts = this.hostPort.listHostFacts(this.workspaceId, pid, {
           requiredCapabilities: packageFacts.requiredCapabilities,
           limit: hostLimit,
           offset: hostCursor
@@ -378,7 +396,11 @@ export class WorkAssignmentService {
     const target = record?.target ?? { kind: "unassigned" as const };
     let membership: AssignmentMembershipFacts | undefined;
     if (target.kind === "human") {
-      membership = this.membershipPort.getMembershipFacts(projectId, target.humanPrincipalId);
+      membership = this.membershipPort.getMembershipFacts(
+        this.workspaceId,
+        projectId,
+        target.humanPrincipalId
+      );
       if (!membership) {
         membership = {
           projectId,
@@ -389,7 +411,7 @@ export class WorkAssignmentService {
     }
     let host: AssignmentHostFacts | undefined;
     if (target.kind === "exact_host") {
-      host = this.hostPort.getHostFacts(projectId, target.hostId);
+      host = this.hostPort.getHostFacts(this.workspaceId, projectId, target.hostId);
     }
     const activeDispatch = this.resolveActiveDispatch?.({ projectId, workItem });
     return projectAssignmentDisplay({

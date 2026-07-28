@@ -72,7 +72,12 @@ async function fixture() {
     1
   ).host;
   hosts.bindToWorkspace(host.id, "w");
-  hosts.reportOnline(host.id, ["acp.codex"], 1);
+  hosts.reportOnline(host.id, ["acp.codex"], 1, {
+    workspaceMappings: [{ workspaceId: "w", status: "ready" }],
+    acpProfiles: [
+      { profileId: "codex-acp", agentId: "codex", status: "ready", capabilities: ["acp.codex"] }
+    ]
+  });
   const repository = new AuthorityRepository(database, { clock: now });
   const packagePort = {
     resolveWorkItem(workItem: WorkItemRef) {
@@ -313,7 +318,17 @@ describe("strict Host dispatch authority", () => {
       name: "capability_mismatch",
       setup: (ctx: Awaited<ReturnType<typeof fixture>>) => {
         // Host online but missing required capability.
-        ctx.hosts.reportOnline(ctx.host.id, ["acp.other"], 1);
+        ctx.hosts.reportOnline(ctx.host.id, ["acp.other"], 1, {
+          workspaceMappings: [{ workspaceId: "w", status: "ready" }],
+          acpProfiles: [
+            {
+              profileId: "codex-acp",
+              agentId: "codex",
+              status: "ready",
+              capabilities: ["acp.other"]
+            }
+          ]
+        });
       }
     },
     {
@@ -329,6 +344,31 @@ describe("strict Host dispatch authority", () => {
       name: "host_revoked",
       setup: (ctx: Awaited<ReturnType<typeof fixture>>) => {
         ctx.hosts.revoke(ctx.host.id);
+      }
+    },
+    {
+      name: "workspace_mapping_missing",
+      setup: (ctx: Awaited<ReturnType<typeof fixture>>) => {
+        ctx.hosts.reportOnline(ctx.host.id, ["acp.codex"], 1, {
+          workspaceMappings: [],
+          acpProfiles: [
+            {
+              profileId: "codex-acp",
+              agentId: "codex",
+              status: "ready",
+              capabilities: ["acp.codex"]
+            }
+          ]
+        });
+      }
+    },
+    {
+      name: "acp_profile_missing",
+      setup: (ctx: Awaited<ReturnType<typeof fixture>>) => {
+        ctx.hosts.reportOnline(ctx.host.id, ["acp.codex"], 1, {
+          workspaceMappings: [{ workspaceId: "w", status: "ready" }],
+          acpProfiles: []
+        });
       }
     },
     {
@@ -400,7 +440,12 @@ describe("strict Host dispatch authority", () => {
       },
       actor: { kind: "human", id: "owner" }
     });
-    hosts.reportOnline(host.id, ["acp.other"], 1);
+    hosts.reportOnline(host.id, ["acp.other"], 1, {
+      workspaceMappings: [{ workspaceId: "w", status: "ready" }],
+      acpProfiles: [
+        { profileId: "codex-acp", agentId: "codex", status: "ready", capabilities: ["acp.other"] }
+      ]
+    });
     const gate = createAuthorityDispatchGate({
       repository,
       database,

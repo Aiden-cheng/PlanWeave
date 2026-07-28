@@ -53,6 +53,7 @@ const blockItem: WorkItemRef = {
   canvasId: "default",
   blockRef: "T-001#B-001"
 };
+const workspaceId = "workspace-a";
 
 function humanRecord(
   overrides: Partial<AssignmentRecord> & { revision: number; workItem?: WorkItemRef } = {
@@ -60,6 +61,7 @@ function humanRecord(
   }
 ): AssignmentRecord {
   return {
+    workspaceId,
     projectId: "project-a",
     workItem: overrides.workItem ?? taskItem,
     target: { kind: "human", humanPrincipalId: "human-2" },
@@ -89,7 +91,7 @@ describe("work assignment migration v17", () => {
     database.exec("CREATE TABLE dispatches(id TEXT PRIMARY KEY, package_ref TEXT NOT NULL)");
     applyMigrations(database);
     expect(centralSchemaVersion(database)).toBe(latestCentralSchemaVersion);
-    expect(latestCentralSchemaVersion).toBe(36);
+    expect(latestCentralSchemaVersion).toBe(37);
 
     expect(
       database
@@ -131,12 +133,13 @@ describe("work assignment migration v17", () => {
       database
         .prepare(
           `INSERT INTO work_assignments(
-            project_id,canvas_id,work_item_kind,work_item_key,
+            workspace_id,project_id,canvas_id,work_item_kind,work_item_key,
             target_kind,target_human_principal_id,target_host_id,
             revision,updated_by_kind,updated_by_id,updated_by_display_name,updated_at
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
         )
         .run(
+          workspaceId,
           "project-a",
           "default",
           "task",
@@ -174,7 +177,7 @@ describe("work assignment repository CAS", () => {
     expect(() =>
       repo.applyCasUpdate({ record: humanRecord({ revision: 1 }), expectedRevision: 0 })
     ).toThrow("activity_projection_failed");
-    expect(repo.get("project-a", taskItem)).toBeUndefined();
+    expect(repo.get(workspaceId, "project-a", taskItem)).toBeUndefined();
     expect(database.prepare("SELECT COUNT(*) AS count FROM activity_records").get()).toEqual({
       count: 0
     });
@@ -190,7 +193,7 @@ describe("work assignment repository CAS", () => {
       expectedRevision: 0
     });
     expect(first.revision).toBe(1);
-    expect(repo.getConcurrency("project-a", taskItem).currentRevision).toBe(1);
+    expect(repo.getConcurrency(workspaceId, "project-a", taskItem).currentRevision).toBe(1);
 
     const second = repo.applyCasUpdate({
       record: humanRecord({
@@ -278,28 +281,32 @@ describe("work assignment repository CAS", () => {
       expectedRevision: 0
     });
 
-    const batch = repo.getMany("project-a", [taskItem, otherTask, blockItem]);
+    const batch = repo.getMany(workspaceId, "project-a", [taskItem, otherTask, blockItem]);
     expect(batch.map((row) => row.workItem)).toEqual(expect.arrayContaining([taskItem, otherTask]));
     expect(batch).toHaveLength(2);
 
-    const canvasDefault = repo.listByProject("project-a", { canvasId: "default", limit: 10 });
+    const canvasDefault = repo.listByProject(workspaceId, "project-a", {
+      canvasId: "default",
+      limit: 10
+    });
     expect(canvasDefault).toHaveLength(2);
     expect(canvasDefault.every((row) => row.workItem.canvasId === "default")).toBe(true);
 
-    const page = repo.listByProject("project-a", { limit: 1, offset: 0 });
+    const page = repo.listByProject(workspaceId, "project-a", { limit: 1, offset: 0 });
     expect(page).toHaveLength(1);
-    const page2 = repo.listByProject("project-a", { limit: 1, offset: 1 });
+    const page2 = repo.listByProject(workspaceId, "project-a", { limit: 1, offset: 1 });
     expect(page2).toHaveLength(1);
     expect(page[0]!.workItem).not.toEqual(page2[0]!.workItem);
 
-    expect(repo.get("project-a", otherProject)?.projectId).toBe("project-a");
-    expect(repo.get("project-b", otherProject)?.projectId).toBe("project-b");
+    expect(repo.get(workspaceId, "project-a", otherProject)?.projectId).toBe("project-a");
+    expect(repo.get(workspaceId, "project-b", otherProject)?.projectId).toBe("project-b");
   });
 
   it("persists block exact_host and automatic_host targets without capability columns", async () => {
     const { database, repo } = await openMigrated();
     const exact = repo.applyCasUpdate({
       record: {
+        workspaceId,
         projectId: "project-a",
         workItem: blockItem,
         target: { kind: "exact_host", hostId: "host-1" },
@@ -313,6 +320,7 @@ describe("work assignment repository CAS", () => {
 
     const auto = repo.applyCasUpdate({
       record: {
+        workspaceId,
         projectId: "project-a",
         workItem: blockItem,
         target: { kind: "automatic_host" },

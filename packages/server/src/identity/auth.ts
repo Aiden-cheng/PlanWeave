@@ -31,6 +31,36 @@ export type AuthenticatedCollaborationScope = {
 };
 
 /**
+ * Convert an already-authenticated Workspace device session into the human
+ * context required by legacy application services. Role and membership identity
+ * are read from the current Workspace membership projection, never from request
+ * fields or a legacy project mapping.
+ */
+export function workspaceDeviceSessionHumanContext(
+  actor: CollaborationAuthContext,
+  workspaceIdentity: WorkspaceIdentityRepository
+): HumanAuthContext | undefined {
+  if (!("kind" in actor) || actor.kind !== "workspace_device") {
+    return humanAuthContextSchema.parse(actor);
+  }
+  const membership = workspaceIdentity
+    .listMembershipViews(actor.workspaceId)
+    .find(
+      (candidate) =>
+        candidate.humanPrincipalId === actor.humanPrincipalId && candidate.revokedAt === null
+    );
+  if (!membership) return undefined;
+  return humanAuthContextSchema.parse({
+    humanPrincipalId: actor.humanPrincipalId,
+    displayName: actor.displayName,
+    deviceCredentialId: actor.deviceSessionId,
+    projectId: actor.projectId,
+    role: membership.role,
+    membershipId: membership.membershipId
+  });
+}
+
+/**
  * Human-specific authentication adapter.
  *
  * Parses only `pw_hdev_` device bearer credentials. Host (`pw_host_`), enrollment,
