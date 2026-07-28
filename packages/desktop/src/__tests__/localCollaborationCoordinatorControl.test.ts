@@ -38,6 +38,7 @@ const nextProject: DesktopProjectSummary = {
   sourceRoot: "/test/next-project",
   workspaceRoot: "/test/next-project"
 };
+const authorityProjectId = "authority-project-1";
 
 const safeStorage = {
   isEncryptionAvailable: () => false,
@@ -48,6 +49,7 @@ const safeStorage = {
 function fakeControl(options: {
   scopes?: readonly LoopbackTrustedProjectScope[];
   pauseStop?: boolean;
+  startFailures?: number;
 } = {}) {
   let status: LoopbackServerStatus = {
     profile: null,
@@ -56,8 +58,9 @@ function fakeControl(options: {
     reason: null
   };
   const scopes = options.scopes ?? [
-    { workspaceId: "workspace-2", projectId: "project-1", canvasId: "canvas-1" }
+    { workspaceId: "workspace-2", projectId: authorityProjectId, canvasId: "canvas-1" }
   ];
+  let startFailures = options.startFailures ?? 0;
   let releaseStop: (() => void) | null = null;
   const stopGate = options.pauseStop
     ? new Promise<void>((resolve) => {
@@ -67,6 +70,11 @@ function fakeControl(options: {
   const apply = vi.fn(async (input: unknown) => {
     const request = loopbackServerLifecycleRequestSchema.parse(input);
     if (request.action === "start") {
+      if (startFailures > 0) {
+        startFailures -= 1;
+        status = { profile: request.profile, state: "error", startedAt: null, reason: "start_failed" };
+        return status;
+      }
       status = {
         profile: request.profile,
         state: "running",
@@ -106,26 +114,27 @@ function fakeControl(options: {
 describe("LocalCollaborationCoordinatorControl", () => {
   it("resolves opaque selection, registers its exact trusted scope, and waits for clear stop", async () => {
     const fake = fakeControl({ pauseStop: true });
-    const assertCanvasWorkspace = vi.fn().mockResolvedValue(undefined);
+    const resolveAuthorityProjectId = vi.fn().mockResolvedValue(authorityProjectId);
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
-      projects: { listProjects: async () => [project], assertCanvasWorkspace },
-      createController: () => fake.control
+      projects: { listProjects: async () => [project], resolveAuthorityProjectId },
+      createController: () => fake.control,
+      allocatePort: async () => 18_787
     });
 
     await control.setCurrentSelection({ projectId: project.projectId, canvasId: "canvas-1" });
     await control.start();
     expect(control.listActiveTrustedScopes()).toEqual([
-      { workspaceId: "workspace-2", projectId: "project-1", canvasId: "canvas-1" }
+      { workspaceId: "workspace-2", projectId: authorityProjectId, canvasId: "canvas-1" }
     ]);
     expect(control.registerCurrentProject({ kind: "human", id: "owner-1" })).toMatchObject({
       workspaceId: "workspace-2",
-      projectId: "project-1",
+      projectId: authorityProjectId,
       canvasId: "canvas-1"
     });
     expect(fake.registerTrustedProject).toHaveBeenCalledWith(
       { kind: "human", id: "owner-1" },
-      expect.objectContaining({ workspaceId: "workspace-2", projectId: "project-1", canvasId: "canvas-1" })
+      expect.objectContaining({ workspaceId: "workspace-2", projectId: authorityProjectId, canvasId: "canvas-1" })
     );
 
     const clear = control.clearCurrentSelection();
@@ -136,21 +145,22 @@ describe("LocalCollaborationCoordinatorControl", () => {
     fake.releaseStop();
     await clear;
     expect(control.status().state).toBe("stopped");
-    expect(assertCanvasWorkspace).toHaveBeenCalledWith("/test/project", "canvas-1");
+    expect(resolveAuthorityProjectId).toHaveBeenCalledWith("/test/project", "canvas-1");
   });
 
   it("rejects unknown, ambiguous, or duplicate trusted opaque selections", async () => {
-    const duplicateScope = { workspaceId: "workspace-3", projectId: "project-1", canvasId: "canvas-1" };
+    const duplicateScope = { workspaceId: "workspace-3", projectId: authorityProjectId, canvasId: "canvas-1" };
     const fake = fakeControl({
       scopes: [
-        { workspaceId: "workspace-2", projectId: "project-1", canvasId: "canvas-1" },
+        { workspaceId: "workspace-2", projectId: authorityProjectId, canvasId: "canvas-1" },
         duplicateScope
       ]
     });
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
-      projects: { listProjects: async () => [project, project], assertCanvasWorkspace: async () => undefined },
-      createController: () => fake.control
+      projects: { listProjects: async () => [project, project], resolveAuthorityProjectId: async () => authorityProjectId },
+      createController: () => fake.control,
+      allocatePort: async () => 18_787
     });
 
     await expect(
@@ -162,8 +172,9 @@ describe("LocalCollaborationCoordinatorControl", () => {
 
     const unambiguousControl = new LocalCollaborationCoordinatorControl({
       safeStorage,
-      projects: { listProjects: async () => [project], assertCanvasWorkspace: async () => undefined },
-      createController: () => fake.control
+      projects: { listProjects: async () => [project], resolveAuthorityProjectId: async () => authorityProjectId },
+      createController: () => fake.control,
+      allocatePort: async () => 18_787
     });
     await unambiguousControl.setCurrentSelection({ projectId: project.projectId, canvasId: "canvas-1" });
     await unambiguousControl.start();
@@ -174,14 +185,18 @@ describe("LocalCollaborationCoordinatorControl", () => {
 
   it("waits for the active local server to stop before switching selections", async () => {
     const fake = fakeControl({ pauseStop: true });
-    const assertCanvasWorkspace = vi.fn().mockResolvedValue(undefined);
+    const resolveAuthorityProjectId = vi
+      .fn()
+      .mockResolvedValueOnce(authorityProjectId)
+      .mockResolvedValueOnce("authority-project-2");
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
       projects: {
         listProjects: async () => [project, nextProject],
-        assertCanvasWorkspace
+        resolveAuthorityProjectId
       },
-      createController: () => fake.control
+      createController: () => fake.control,
+      allocatePort: async () => 18_787
     });
     await control.setCurrentSelection({ projectId: project.projectId, canvasId: "canvas-1" });
     await control.start();
@@ -195,11 +210,64 @@ describe("LocalCollaborationCoordinatorControl", () => {
         expect.objectContaining({ action: "stop", profileId: "planweave-local-loopback" })
       );
     });
-    expect(control.localProfile()?.projectId).toBe(project.projectId);
+    expect(control.localProfile()?.projectId).toBe(authorityProjectId);
     fake.releaseStop();
     await switchSelection;
 
-    expect(control.localProfile()?.projectId).toBe(nextProject.projectId);
-    expect(assertCanvasWorkspace).toHaveBeenLastCalledWith("/test/next-project", "canvas-1");
+    expect(control.localProfile()?.projectId).toBe("authority-project-2");
+    expect(resolveAuthorityProjectId).toHaveBeenLastCalledWith("/test/next-project", "canvas-1");
+  });
+
+  it("retries a failed loopback start with a fresh literal-loopback port and controller", async () => {
+    const first = fakeControl({ startFailures: 1 });
+    const second = fakeControl();
+    const createController = vi.fn()
+      .mockReturnValueOnce(first.control)
+      .mockReturnValueOnce(second.control);
+    const allocatePort = vi.fn()
+      .mockResolvedValueOnce(18_788)
+      .mockResolvedValueOnce(18_789);
+    const control = new LocalCollaborationCoordinatorControl({
+      safeStorage,
+      projects: { listProjects: async () => [project], resolveAuthorityProjectId: async () => authorityProjectId },
+      createController,
+      allocatePort
+    });
+    await control.setCurrentSelection({ projectId: project.projectId, canvasId: "canvas-1" });
+
+    await expect(control.start()).resolves.toMatchObject({ state: "running" });
+    expect(allocatePort).toHaveBeenCalledTimes(2);
+    expect(createController).toHaveBeenCalledTimes(2);
+    expect(first.apply).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "start", profile: expect.objectContaining({ serverBaseUrl: "http://127.0.0.1:18788/" }) })
+    );
+    expect(second.apply).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "start", profile: expect.objectContaining({ serverBaseUrl: "http://127.0.0.1:18789/" }) })
+    );
+  });
+
+  it("reports start failure after the bounded loopback allocation retries are exhausted", async () => {
+    const controls = [fakeControl({ startFailures: 1 }), fakeControl({ startFailures: 1 }), fakeControl({ startFailures: 1 })];
+    const createController = vi.fn(() => {
+      const next = controls.shift();
+      if (!next) throw new Error("unexpected_loopback_controller_creation");
+      return next.control;
+    });
+    const allocatePort = vi.fn()
+      .mockResolvedValueOnce(18_790)
+      .mockResolvedValueOnce(18_791)
+      .mockResolvedValueOnce(18_792);
+    const control = new LocalCollaborationCoordinatorControl({
+      safeStorage,
+      projects: { listProjects: async () => [project], resolveAuthorityProjectId: async () => authorityProjectId },
+      createController,
+      allocatePort
+    });
+    await control.setCurrentSelection({ projectId: project.projectId, canvasId: "canvas-1" });
+
+    await expect(control.start()).resolves.toMatchObject({ state: "error", reason: "start_failed" });
+    expect(allocatePort).toHaveBeenCalledTimes(3);
+    expect(createController).toHaveBeenCalledTimes(3);
+    expect(control.localProfile()).toBeNull();
   });
 });

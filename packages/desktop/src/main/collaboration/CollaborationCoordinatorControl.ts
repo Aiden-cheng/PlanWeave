@@ -14,6 +14,7 @@ import {
 } from "@planweave-ai/collaboration-contracts";
 import { listProjects, resolveTaskCanvasWorkspace } from "@planweave-ai/runtime";
 import { randomBytes } from "node:crypto";
+import { createServer } from "node:net";
 import { join } from "node:path";
 import type { OperatorSafeStoragePort } from "../operatorControl/operatorCredentialVault.js";
 import { OperatorCredentialVault } from "../operatorControl/operatorCredentialVault.js";
@@ -21,14 +22,15 @@ import { desktopHomePaths } from "../planweaveHomePaths.js";
 import { collaborationCurrentSelectionInputSchema } from "../../shared/collaboration.js";
 
 type ResolvedSelection = {
-  projectId: string;
+  desktopProjectId: string;
+  authorityProjectId: string;
   canvasId: string;
   projectRoot: string;
 };
 
 type ProjectCatalogPort = {
   listProjects: typeof listProjects;
-  assertCanvasWorkspace(projectRoot: string, canvasId: string): Promise<void>;
+  resolveAuthorityProjectId(projectRoot: string, canvasId: string): Promise<string>;
 };
 
 type LoopbackServerControlPort = Pick<
@@ -37,7 +39,22 @@ type LoopbackServerControlPort = Pick<
 >;
 
 const localProfileId = "planweave-local-loopback";
-const localPort = 8787;
+const localStartAttempts = 3;
+
+async function allocateLoopbackPort(): Promise<number> {
+  const listener = createServer();
+  return new Promise<number>((resolve, reject) => {
+    listener.once("error", reject);
+    listener.listen(0, "127.0.0.1", () => {
+      const address = listener.address();
+      if (!address || typeof address === "string") {
+        listener.close(() => reject(new Error("local_collaboration_port_allocation_failed")));
+        return;
+      }
+      listener.close((error) => (error ? reject(error) : resolve(address.port)));
+    });
+  });
+}
 
 /** Main-only coordination seam: local process today, replaceable remote adapter later. */
 export interface CollaborationCoordinatorControl {
@@ -54,27 +71,31 @@ export interface CollaborationCoordinatorControl {
 export class LocalCollaborationCoordinatorControl implements CollaborationCoordinatorControl {
   private selection: ResolvedSelection | null = null;
   private controller: LoopbackServerControlPort | null = null;
+  private localPort: number | null = null;
   private operatorToken: string | null = null;
   private readonly vault: OperatorCredentialVault;
 
   private readonly projects: ProjectCatalogPort;
   private readonly createController: (createConfig: (profile: LoopbackServerProfile) => ServerConfig) => LoopbackServerControlPort;
+  private readonly allocatePort: () => Promise<number>;
 
   constructor(options: {
     safeStorage: OperatorSafeStoragePort;
     projects?: ProjectCatalogPort;
     createController?: (createConfig: (profile: LoopbackServerProfile) => ServerConfig) => LoopbackServerControlPort;
+    allocatePort?: () => Promise<number>;
   }) {
     this.vault = new OperatorCredentialVault({ safeStorage: options.safeStorage });
     this.projects = options.projects ?? {
       listProjects,
-      assertCanvasWorkspace: async (projectRoot, canvasId) => {
-        await resolveTaskCanvasWorkspace(projectRoot, canvasId);
+      resolveAuthorityProjectId: async (projectRoot, canvasId) => {
+        return (await resolveTaskCanvasWorkspace(projectRoot, canvasId)).id;
       }
     };
     this.createController =
       options.createController ??
       ((createConfig) => new LoopbackServerController({ createConfig }));
+    this.allocatePort = options.allocatePort ?? allocateLoopbackPort;
   }
 
   async setCurrentSelection(input: unknown): Promise<void> {
@@ -85,12 +106,21 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     if (!project.taskCanvases.some((canvas) => canvas.canvasId === selected.canvasId)) {
       throw new Error("local_collaboration_canvas_selection_mismatch");
     }
-    await this.projects.assertCanvasWorkspace(project.rootPath, selected.canvasId);
-    const next = { projectId: project.projectId, canvasId: selected.canvasId, projectRoot: project.rootPath };
+    const authorityProjectId = await this.projects.resolveAuthorityProjectId(
+      project.rootPath,
+      selected.canvasId
+    );
+    const next = {
+      desktopProjectId: project.projectId,
+      authorityProjectId,
+      canvasId: selected.canvasId,
+      projectRoot: project.rootPath
+    };
     if (
       this.controller?.status().profile &&
       this.selection &&
-      (this.selection.projectId !== next.projectId || this.selection.canvasId !== next.canvasId)
+      (this.selection.desktopProjectId !== next.desktopProjectId ||
+        this.selection.canvasId !== next.canvasId)
     ) {
       await this.stop();
     }
@@ -109,8 +139,23 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   async start(): Promise<LoopbackServerStatus> {
     const selection = this.requireSelection();
     await this.ensureOperatorToken();
-    this.controller ??= this.createController((profile) => this.createConfig(profile, this.requireSelection()));
-    return this.controller.apply({ action: "start", profile: this.profileFor(selection) });
+    const current = this.status();
+    if (current.state === "running") return current;
+    let lastStatus = current;
+    for (let attempt = 0; attempt < localStartAttempts; attempt += 1) {
+      this.localPort = await this.allocatePort();
+      const controller = this.createController((profile) =>
+        this.createConfig(profile, this.requireSelection())
+      );
+      this.controller = controller;
+      const status = await controller.apply({ action: "start", profile: this.profileFor(selection) });
+      if (status.state === "running") return status;
+      lastStatus = status;
+      this.controller = null;
+      this.localPort = null;
+      if (status.reason !== "start_failed") return status;
+    }
+    return lastStatus;
   }
 
   async stop(): Promise<LoopbackServerStatus> {
@@ -129,7 +174,10 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     const profile = this.requireRunningProfile();
     const matches = this.controller!
       .listTrustedProjectScopes({ profileId: profile.profileId })
-      .filter((scope) => scope.projectId === selection.projectId && scope.canvasId === selection.canvasId);
+      .filter(
+        (scope) =>
+          scope.projectId === selection.authorityProjectId && scope.canvasId === selection.canvasId
+      );
     if (matches.length !== 1) throw new Error("local_collaboration_trusted_scope_ambiguous");
     const scope = matches[0];
     return loopbackProjectRegistrationViewSchema.parse(
@@ -144,9 +192,9 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
 
   localProfile() {
     const selection = this.selection;
-    if (!selection) return null;
+    if (!selection || this.localPort === null) return null;
     const profile = this.profileFor(selection);
-    return { ...profile, projectId: selection.projectId };
+    return { ...profile, projectId: selection.authorityProjectId };
   }
 
   private requireSelection(): ResolvedSelection {
@@ -161,6 +209,8 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   }
 
   private profileFor(_selection: ResolvedSelection): LoopbackServerProfile {
+    const localPort = this.localPort;
+    if (localPort === null) throw new Error("local_collaboration_port_allocation_required");
     return loopbackServerProfileSchema.parse({
       profileId: localProfileId,
       displayName: "Local collaboration server",
@@ -180,6 +230,8 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
 
   private createConfig(profile: LoopbackServerProfile, selection: ResolvedSelection): ServerConfig {
     if (!this.operatorToken) throw new Error("local_collaboration_operator_credential_unavailable");
+    const localPort = this.localPort;
+    if (localPort === null) throw new Error("local_collaboration_port_allocation_required");
     const dataDirectory = join(desktopHomePaths().planweaveHome, "desktop", "local-collaboration-server");
     return parseServerConfig({
       version: "server-config/v1" as const,
@@ -187,9 +239,20 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
       publicUrl: profile.serverBaseUrl,
       allowInsecureDevelopment: true,
       dataDirectory,
-      trustedProjects: [{ projectId: selection.projectId, canvasId: selection.canvasId, projectRoot: selection.projectRoot }],
+      trustedProjects: [
+        {
+          projectId: selection.authorityProjectId,
+          canvasId: selection.canvasId,
+          projectRoot: selection.projectRoot
+        }
+      ],
       operatorCredentials: [
-        { operatorId: "desktop-local-admin", tokenSha256: hashOperatorToken(this.operatorToken), projectIds: [selection.projectId], serverAdmin: true }
+        {
+          operatorId: "desktop-local-admin",
+          tokenSha256: hashOperatorToken(this.operatorToken),
+          projectIds: [selection.authorityProjectId],
+          serverAdmin: false
+        }
       ]
     });
   }

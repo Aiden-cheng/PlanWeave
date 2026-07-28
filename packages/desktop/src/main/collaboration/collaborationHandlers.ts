@@ -220,6 +220,7 @@ export function registerCollaborationHandlers(
   ipcMain.handle(collaborationInvokeChannels.getLocalCollaborationServerStatus, () => local.status());
   ipcMain.handle(collaborationInvokeChannels.startLocalCollaborationServer, async () => {
     const status = await local.start();
+    if (status.state !== "running") return status;
     const profile = local.localProfile();
     if (!profile) throw new Error("local_collaboration_selection_required");
     await active.upsertProfile(profile);
