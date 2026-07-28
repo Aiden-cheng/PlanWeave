@@ -208,10 +208,16 @@ function containsCleanupError(error: unknown, code: string): boolean {
 
 function appendHumanObserverActivity(
   journal: HumanObserverJournal,
+  workspaceId: string | undefined,
   record: ActivityRecord
 ): void {
+  if (!workspaceId) throw new Error("human_observer_workspace_scope_unresolved");
   for (const event of observerEventsForActivity(record)) {
-    journal.appendInCallerTransaction(record.projectId, event, record.occurredAt);
+    journal.appendInCallerTransaction(
+      { workspaceId, projectId: record.projectId },
+      event,
+      record.occurredAt
+    );
   }
 }
 
@@ -341,7 +347,12 @@ export async function createDistributedServerComposition(
         );
         humanObserverJournal = observerJournal;
         const projectionRepository = new ActivityRepository(database, {
-          onInsertedInTransaction: (record) => appendHumanObserverActivity(observerJournal, record)
+          onInsertedInTransaction: (record) =>
+            appendHumanObserverActivity(
+              observerJournal,
+              new WorkspaceIdentityRepository(database).workspaceForLegacyProject(record.projectId),
+              record
+            )
         });
         const projection = new ActivityProjectionService({
           activity: projectionRepository,
@@ -355,7 +366,7 @@ export async function createDistributedServerComposition(
               activity: new ActivityRepository(database, {
                 workspaceId,
                 onInsertedInTransaction: (record) =>
-                  appendHumanObserverActivity(observerJournal, record)
+                  appendHumanObserverActivity(observerJournal, workspaceId, record)
               }),
               clock
             });
@@ -682,7 +693,14 @@ export async function createDistributedServerComposition(
       },
       onInvitationTransitionInTransaction: ({ invitation }) => {
         initializedHumanObserverJournal.appendInCallerTransaction(
-          invitation.projectId,
+          {
+            workspaceId:
+              workspaceIdentity.workspaceForLegacyProject(invitation.projectId) ??
+              (() => {
+                throw new Error("human_observer_workspace_scope_unresolved");
+              })(),
+            projectId: invitation.projectId
+          },
           { kind: "invitation" },
           invitation.consumedAt ?? invitation.revokedAt ?? invitation.createdAt
         );
@@ -697,7 +715,10 @@ export async function createDistributedServerComposition(
     const commentAttachmentRepository = new CommentAttachmentRepository(server.database, {
       onMutationInTransaction: (input) => {
         initializedHumanObserverJournal.appendInCallerTransaction(
-          input.projectId,
+          {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId
+          },
           {
             kind: "attachment",
             ...(input.commentId ? { commentId: input.commentId } : {})
@@ -731,11 +752,12 @@ export async function createDistributedServerComposition(
       const scopedActivityRepository = new ActivityRepository(server.database, {
         workspaceId,
         onInsertedInTransaction: (record) =>
-          appendHumanObserverActivity(initializedHumanObserverJournal, record)
+          appendHumanObserverActivity(initializedHumanObserverJournal, workspaceId, record)
       });
       commentServices.set(
         serviceKey,
         new CommentService({
+          workspaceId,
           comments: scopedCommentRepository,
           activity: scopedActivityRepository,
           packagePort,
@@ -754,6 +776,14 @@ export async function createDistributedServerComposition(
             } catch {
               throw new CommentServiceError("comment_auth_forbidden");
             }
+          },
+          authorMembershipActive(humanPrincipalId) {
+            return workspaceIdentity
+              .listMembershipViews(workspaceId)
+              .some(
+                (candidate) =>
+                  candidate.humanPrincipalId === humanPrincipalId && candidate.revokedAt === null
+              );
           },
           assertMembership(actor) {
             const membership = workspaceIdentity
@@ -850,6 +880,8 @@ export async function createDistributedServerComposition(
       upgradeRouter,
       journal: initializedHumanObserverJournal,
       repository: humanIdentity,
+      workspaceIdentity,
+      projectAccess: initializedProjectAccess,
       projectAuthority: runtimeRegistry,
       maxPayloadBytes: config.limits.maxWebSocketPayloadBytes,
       shutdownTimeoutMs: config.limits.shutdownTimeoutMs,
@@ -1080,6 +1112,7 @@ export async function createDistributedServerComposition(
           await handleCommentAttachmentHttpRequest(request, response, {
             service: commentAttachments,
             repository: humanIdentity,
+            workspaceIdentity,
             projectAuthority: runtimeRegistry,
             allowInsecureDevelopment: config.allowInsecureDevelopment,
             clock

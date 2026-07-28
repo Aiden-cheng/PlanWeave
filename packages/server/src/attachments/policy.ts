@@ -18,10 +18,12 @@ import {
   type AttachmentAuthDecision,
   type AttachmentErrorCode
 } from "./errors.js";
+import type { WorkspaceId } from "@planweave-ai/collaboration-contracts";
 
 export type PendingUploadStatus = "pending" | "uploaded" | "finalized" | "expired" | "aborted";
 
 export type PendingUploadRecord = PendingAttachmentUpload & {
+  workspaceId: WorkspaceId;
   status: PendingUploadStatus;
   digestSha256?: string;
   uploadedAt?: string;
@@ -29,6 +31,7 @@ export type PendingUploadRecord = PendingAttachmentUpload & {
 };
 
 export type CommentAttachmentBinding = {
+  workspaceId: WorkspaceId;
   projectId: string;
   commentId: string;
   digestSha256: string;

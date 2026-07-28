@@ -8,6 +8,7 @@ import {
   type CommentAttachmentMetadata
 } from "../comments/schemas.js";
 import { humanProjectIdSchema, type HumanAuthContext } from "../identity/schemas.js";
+import { workspaceIdSchema } from "@planweave-ai/collaboration-contracts";
 import {
   ATTACHMENT_ERROR_MESSAGES,
   attachmentErrorCodeSchema,
@@ -86,6 +87,7 @@ export class CommentAttachmentService {
 
   createPendingUpload(input: {
     actor: HumanAuthContext;
+    workspaceId: string;
     projectId: string;
     expectedSizeBytes: number;
     mediaType: string;
@@ -120,11 +122,13 @@ export class CommentAttachmentService {
       }
 
       const now = this.clock();
+      const workspaceId = workspaceIdSchema.parse(input.workspaceId);
       const ttlMs = resolvePendingUploadTtlMs(input.ttlMs);
       const createdAt = now.toISOString();
       const expiresAt = new Date(now.getTime() + ttlMs).toISOString();
 
       return this.options.repository.createPendingUpload({
+        workspaceId,
         projectId: input.projectId,
         uploaderHumanPrincipalId: input.actor.humanPrincipalId,
         expectedSizeBytes: input.expectedSizeBytes,
@@ -142,6 +146,7 @@ export class CommentAttachmentService {
 
   async uploadBody(input: {
     actor: HumanAuthContext;
+    workspaceId: string;
     projectId: string;
     pendingUploadId: string;
     declaredDigestSha256?: string;
@@ -156,6 +161,7 @@ export class CommentAttachmentService {
       }
 
       const record = this.options.repository.getPendingRequired(
+        input.workspaceId,
         input.projectId,
         input.pendingUploadId
       );
@@ -213,6 +219,7 @@ export class CommentAttachmentService {
       });
 
       return this.options.repository.markUploaded({
+        workspaceId: input.workspaceId,
         projectId: input.projectId,
         pendingUploadId: input.pendingUploadId,
         digestSha256: digest,
@@ -227,6 +234,7 @@ export class CommentAttachmentService {
 
   finalize(input: {
     actor: HumanAuthContext;
+    workspaceId: string;
     projectId: string;
     attachment: CommentAttachmentInput;
   }): { record: PendingUploadRecord; metadata: CommentAttachmentMetadata } {
@@ -238,6 +246,7 @@ export class CommentAttachmentService {
       }
 
       const record = this.options.repository.getPendingRequired(
+        input.workspaceId,
         input.projectId,
         attachment.pendingUploadId
       );
@@ -251,6 +260,7 @@ export class CommentAttachmentService {
       if (!auth.allowed) deny(auth.code, auth.message);
 
       return this.options.repository.finalize({
+        workspaceId: input.workspaceId,
         projectId: input.projectId,
         pendingUploadId: attachment.pendingUploadId,
         expected: attachment,
@@ -263,6 +273,7 @@ export class CommentAttachmentService {
 
   async openPendingRead(input: {
     actor: HumanAuthContext;
+    workspaceId: string;
     projectId: string;
     pendingUploadId: string;
   }): Promise<{
@@ -276,6 +287,7 @@ export class CommentAttachmentService {
         deny("attachment_auth_project_mismatch");
       }
       const record = this.options.repository.getPendingRequired(
+        input.workspaceId,
         input.projectId,
         input.pendingUploadId
       );
@@ -306,6 +318,7 @@ export class CommentAttachmentService {
 
   async openCommentAttachmentRead(input: {
     actor: HumanAuthContext;
+    workspaceId: string;
     projectId: string;
     commentId: string;
     digestSha256: string;
@@ -319,6 +332,7 @@ export class CommentAttachmentService {
         deny("attachment_auth_project_mismatch");
       }
       const binding = this.options.repository.getBinding(
+        input.workspaceId,
         input.projectId,
         input.commentId,
         input.digestSha256
@@ -341,6 +355,7 @@ export class CommentAttachmentService {
 
   async openDigestRead(input: {
     actor: HumanAuthContext;
+    workspaceId: string;
     projectId: string;
     digestSha256: string;
   }): Promise<{
@@ -355,7 +370,11 @@ export class CommentAttachmentService {
         deny("attachment_auth_project_mismatch");
       }
       const digest = commentContentSha256Schema.parse(input.digestSha256);
-      const referenced = this.options.repository.hasProjectReference(input.projectId, digest);
+      const referenced = this.options.repository.hasProjectReference(
+        input.workspaceId,
+        input.projectId,
+        digest
+      );
       const auth = authorizeDigestScopedRead({
         subject,
         projectId: input.projectId,
@@ -377,6 +396,7 @@ export class CommentAttachmentService {
 
   bindCommentAttachments(input: {
     actor: HumanAuthContext;
+    workspaceId: string;
     projectId: string;
     commentId: string;
     attachments: readonly CommentAttachmentMetadata[];
@@ -392,6 +412,7 @@ export class CommentAttachmentService {
         deny("attachment_auth_project_mismatch");
       }
       return this.options.repository.bindCommentAttachments({
+        workspaceId: input.workspaceId,
         projectId: input.projectId,
         commentId: input.commentId,
         attachments: input.attachments,
@@ -403,11 +424,13 @@ export class CommentAttachmentService {
   }
 
   setCommentTombstoned(input: {
+    workspaceId: string;
     projectId: string;
     commentId: string;
     tombstonedAt?: string;
   }): void {
     this.options.repository.setCommentTombstoned({
+      workspaceId: input.workspaceId,
       projectId: input.projectId,
       commentId: input.commentId,
       tombstonedAt: input.tombstonedAt ?? this.clock().toISOString()
@@ -415,11 +438,12 @@ export class CommentAttachmentService {
   }
 
   resolveFinalizedAttachment(
+    workspaceId: string,
     projectId: string,
     input: CommentAttachmentInput
   ): CommentAttachmentMetadata {
     try {
-      return this.options.repository.resolveFinalizedForCommentInput(projectId, input);
+      return this.options.repository.resolveFinalizedForCommentInput(workspaceId, projectId, input);
     } catch (error) {
       mapUnknown(error);
     }
@@ -430,20 +454,28 @@ export class CommentAttachmentService {
    * Finalized rows and comment bindings are retained for comment lifecycle (B-003).
    */
   async cleanupExpiredStaged(
+    workspaceId: string,
     projectId: string,
     limit = 100
   ): Promise<{
     removedPending: number;
     removedBlobs: number;
   }> {
+    const workspace = workspaceIdSchema.parse(workspaceId);
     const project = humanProjectIdSchema.parse(projectId);
     const nowIso = this.clock().toISOString();
-    const expired = this.options.repository.listExpiredStagedForCleanup(project, nowIso, limit);
+    const expired = this.options.repository.listExpiredStagedForCleanup(
+      workspace,
+      project,
+      nowIso,
+      limit
+    );
     let removedPending = 0;
     let removedBlobs = 0;
     for (const record of expired) {
-      this.options.repository.markExpired(record.projectId, record.pendingUploadId);
+      this.options.repository.markExpired(workspace, record.projectId, record.pendingUploadId);
       const { digestSha256 } = this.options.repository.deletePending(
+        workspace,
         record.projectId,
         record.pendingUploadId
       );

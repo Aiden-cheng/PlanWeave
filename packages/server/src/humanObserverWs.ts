@@ -6,19 +6,25 @@ import {
 } from "@planweave-ai/collaboration-contracts";
 import { WebSocket, WebSocketServer } from "ws";
 import {
-  authenticateHumanForProject,
+  authenticateCollaborationForProject,
+  authenticateCollaborationForScope,
+  hasAuthenticatedCollaborationDevice,
   humanTransportAllowed,
   type HumanIdentityRepository,
   type HumanProjectAuthority
 } from "./identity/index.js";
 import { isAllowedClientOrigin } from "./clientOrigin.js";
-import type { HumanObserverJournal } from "./humanObserverJournal.js";
+import type { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
+import type { HumanObserverJournal, HumanObserverScope } from "./humanObserverJournal.js";
+import type { ProjectAccessRepository } from "./projectAccessRepository.js";
 import type { WebSocketUpgradeRouter } from "./webSocketUpgradeRouter.js";
 
 export type HumanObserverWebSocketOptions = {
   upgradeRouter: WebSocketUpgradeRouter;
   journal: HumanObserverJournal;
   repository: HumanIdentityRepository;
+  workspaceIdentity: WorkspaceIdentityRepository;
+  projectAccess: ProjectAccessRepository;
   projectAuthority: HumanProjectAuthority;
   maxPayloadBytes: number;
   shutdownTimeoutMs: number;
@@ -62,9 +68,31 @@ export function attachHumanObserverWebSocketServer(
   const sessions = new Set<WebSocket>();
   const clock = options.clock ?? (() => new Date());
 
+  const authenticateScope = (authorization: string | string[] | undefined, projectId: string) => {
+    const authenticated = authenticateCollaborationForScope(
+      options.repository,
+      options.workspaceIdentity,
+      options.projectAuthority,
+      authorization,
+      projectId
+    );
+    if (!authenticated) return undefined;
+    try {
+      options.projectAccess.policy.assertCapability({
+        workspaceId: authenticated.workspaceId,
+        projectId,
+        actor: { kind: "human", id: authenticated.actor.humanPrincipalId },
+        capability: "read"
+      });
+      return authenticated;
+    } catch {
+      return undefined;
+    }
+  };
+
   const handleConnection = (
     socket: WebSocket,
-    projectId: string,
+    scope: HumanObserverScope,
     authorization: string | string[] | undefined
   ) => {
     sessions.add(socket);
@@ -72,7 +100,7 @@ export function attachHumanObserverWebSocketServer(
     let authorizationExpired = false;
     let unsubscribe = () => {};
     const stillAuthorized = () =>
-      authenticateHumanForProject(options.repository, authorization, projectId) !== undefined;
+      authenticateScope(authorization, scope.projectId)?.workspaceId === scope.workspaceId;
     const expireAuthorization = () => {
       if (authorizationExpired) return;
       authorizationExpired = true;
@@ -97,19 +125,19 @@ export function attachHumanObserverWebSocketServer(
         }
         const message = humanObserverClientMessageSchema.parse(JSON.parse(data.toString()));
         if (!initialized) {
-          if (message.type !== "human.observer.hello" || message.projectId !== projectId) {
+          if (message.type !== "human.observer.hello" || message.projectId !== scope.projectId) {
             throw new Error("human_observer_hello_invalid");
           }
           initialized = true;
           clearTimeout(helloTimer);
-          unsubscribe = options.journal.subscribe(projectId, (event) => {
+          unsubscribe = options.journal.subscribe(scope, (event) => {
             if (!stillAuthorized()) {
               expireAuthorization();
               return;
             }
             send(socket, event);
           });
-          const replay = options.journal.replay(projectId, message.lastCursor);
+          const replay = options.journal.replay(scope, message.lastCursor);
           if (replay.kind === "gap") {
             send(socket, {
               type: "human.observer.catchup_required",
@@ -126,7 +154,7 @@ export function attachHumanObserverWebSocketServer(
           send(socket, {
             type: "human.observer.welcome",
             protocolVersion: 1,
-            projectId,
+            projectId: scope.projectId,
             serverTime: clock().toISOString(),
             cursor: replay.headCursor
           });
@@ -156,7 +184,7 @@ export function attachHumanObserverWebSocketServer(
     matches: (request) => projectIdFromUrl(request.url) !== undefined,
     handle: (request: IncomingMessage, socket: Duplex, head: Buffer) => {
       const projectId = projectIdFromUrl(request.url);
-      if (!projectId || !options.projectAuthority.hasProject(projectId)) {
+      if (!projectId) {
         reject(socket, 403, "Forbidden");
         return;
       }
@@ -168,14 +196,30 @@ export function attachHumanObserverWebSocketServer(
         reject(socket, 403, "Forbidden");
         return;
       }
-      if (
-        !authenticateHumanForProject(options.repository, request.headers.authorization, projectId)
-      ) {
-        reject(socket, 401, "Unauthorized");
+      const authenticated = authenticateScope(request.headers.authorization, projectId);
+      if (!authenticated) {
+        const credentialActor = authenticateCollaborationForProject(
+          options.repository,
+          options.workspaceIdentity,
+          request.headers.authorization,
+          projectId
+        );
+        const hasDevice =
+          credentialActor !== undefined ||
+          hasAuthenticatedCollaborationDevice(
+            options.repository,
+            options.workspaceIdentity,
+            request.headers.authorization
+          );
+        reject(socket, hasDevice ? 403 : 401, hasDevice ? "Forbidden" : "Unauthorized");
         return;
       }
       webSocketServer.handleUpgrade(request, socket, head, (webSocket) =>
-        handleConnection(webSocket, projectId, request.headers.authorization)
+        handleConnection(
+          webSocket,
+          { workspaceId: authenticated.workspaceId, projectId },
+          request.headers.authorization
+        )
       );
     }
   });

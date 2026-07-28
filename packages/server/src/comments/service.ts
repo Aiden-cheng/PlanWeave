@@ -1,4 +1,5 @@
 import { ZodError } from "zod";
+import { workspaceIdSchema } from "@planweave-ai/collaboration-contracts";
 import type { CommentAttachmentRepository } from "../attachments/repository.js";
 import type { CommentAttachmentService } from "../attachments/service.js";
 import type { HumanIdentityRepository } from "../identity/repository.js";
@@ -103,6 +104,8 @@ function mapUnknown(error: unknown): never {
 }
 
 export type CommentServiceOptions = {
+  /** Workspace scope for attachment finalization and binding. */
+  workspaceId: string;
   comments: CommentRepository;
   activity: ActivityRepository;
   packagePort: WorkItemPackagePort;
@@ -113,6 +116,8 @@ export type CommentServiceOptions = {
   attachmentRepository?: CommentAttachmentRepository;
   /** Server-owned ACL check at the exact canvas scope before any durable comment write. */
   authorizeMutation(actor: HumanAuthContext, workItem: WorkItemRef): void;
+  /** Exact workspace membership projection for comment author display state. */
+  authorMembershipActive(humanPrincipalId: string): boolean;
   assertMembership?: (actor: HumanAuthContext, projectId: string) => void;
   clock?: () => Date;
 };
@@ -137,7 +142,9 @@ export class CommentService {
   private readonly attachments?: CommentAttachmentService;
   private readonly attachmentRepository?: CommentAttachmentRepository;
   private readonly authorizeMutation: CommentServiceOptions["authorizeMutation"];
+  private readonly authorMembershipActive: CommentServiceOptions["authorMembershipActive"];
   private readonly membershipAssertion?: CommentServiceOptions["assertMembership"];
+  private readonly workspaceId: string;
   private readonly clock: () => Date;
 
   constructor(options: CommentServiceOptions) {
@@ -148,7 +155,9 @@ export class CommentService {
     this.attachments = options.attachments;
     this.attachmentRepository = options.attachmentRepository;
     this.authorizeMutation = options.authorizeMutation;
+    this.authorMembershipActive = options.authorMembershipActive;
     this.membershipAssertion = options.assertMembership;
+    this.workspaceId = workspaceIdSchema.parse(options.workspaceId);
     this.clock = options.clock ?? (() => new Date());
   }
 
@@ -174,6 +183,7 @@ export class CommentService {
         }
         const { metadata } = this.attachments.finalize({
           actor: command.actor,
+          workspaceId: this.workspaceId,
           projectId: command.projectId,
           attachment
         });
@@ -198,6 +208,7 @@ export class CommentService {
             deny("comment_input_invalid", "Attachment repository is not configured.");
           }
           this.attachmentRepository.bindCommentAttachmentsUnlocked({
+            workspaceId: this.workspaceId,
             projectId: inserted.projectId,
             commentId: inserted.commentId,
             attachments: inserted.attachments,
@@ -299,6 +310,7 @@ export class CommentService {
         });
         if (this.attachmentRepository && updated.tombstonedAt) {
           this.attachmentRepository.setCommentTombstoned({
+            workspaceId: this.workspaceId,
             projectId: updated.projectId,
             commentId: updated.commentId,
             tombstonedAt: updated.tombstonedAt
@@ -401,14 +413,10 @@ export class CommentService {
     packageFacts: WorkItemPackageFacts
   ): CommentDisplayProjection {
     const principal = this.identity.getPrincipal(record.authorHumanPrincipalId);
-    const membership = this.identity.getActiveMembership(
-      record.projectId,
-      record.authorHumanPrincipalId
-    );
     return projectCommentDisplay({
       record,
       authorDisplayName: principal?.displayName ?? record.authorHumanPrincipalId,
-      authorMembershipActive: membership !== undefined,
+      authorMembershipActive: this.authorMembershipActive(record.authorHumanPrincipalId),
       packageFacts
     });
   }

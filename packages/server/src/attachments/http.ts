@@ -11,10 +11,12 @@ import {
   pendingUploadTtlMsSchema
 } from "../comments/schemas.js";
 import {
-  authenticateHumanForProject,
+  authenticateCollaborationForScope,
   humanTransportAllowed,
+  workspaceDeviceSessionHumanContext,
   type HumanIdentityRepository,
-  type HumanProjectAuthority
+  type HumanProjectAuthority,
+  type WorkspaceIdentityRepository
 } from "../identity/index.js";
 import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
 import { attachmentErrorCodeSchema, type AttachmentErrorCode } from "./errors.js";
@@ -23,6 +25,7 @@ import { CommentAttachmentService, CommentAttachmentServiceError } from "./servi
 export type AttachmentHttpOptions = {
   service: CommentAttachmentService;
   repository: HumanIdentityRepository;
+  workspaceIdentity: WorkspaceIdentityRepository;
   projectAuthority: HumanProjectAuthority;
   allowInsecureDevelopment?: boolean;
   clock?: () => Date;
@@ -266,29 +269,36 @@ export async function handleCommentAttachmentHttpRequest(
     request.resume();
     return true;
   }
-  if (!options.projectAuthority.hasProject(matched.projectId)) {
-    respondJson(response, 403, { error: "attachment_cross_project_forbidden" });
-    request.resume();
-    return true;
-  }
-
   try {
-    const actor = authenticateHumanForProject(
+    const authenticated = authenticateCollaborationForScope(
       options.repository,
+      options.workspaceIdentity,
+      options.projectAuthority,
       request.headers.authorization,
       matched.projectId
+    );
+    if (!authenticated) {
+      respondJson(response, 401, { error: "attachment_auth_unauthenticated" });
+      request.resume();
+      return true;
+    }
+    const actor = workspaceDeviceSessionHumanContext(
+      authenticated.actor,
+      options.workspaceIdentity
     );
     if (!actor) {
       respondJson(response, 401, { error: "attachment_auth_unauthenticated" });
       request.resume();
       return true;
     }
+    const workspaceId = authenticated.workspaceId;
 
     switch (matched.kind) {
       case "create_pending": {
         const body = createPendingBodySchema.parse(await readJson(request, 16_384));
         const record = options.service.createPendingUpload({
           actor,
+          workspaceId,
           projectId: matched.projectId,
           ...body
         });
@@ -330,6 +340,7 @@ export async function handleCommentAttachmentHttpRequest(
 
         const record = await options.service.uploadBody({
           actor,
+          workspaceId,
           projectId: matched.projectId,
           pendingUploadId: matched.pendingUploadId,
           declaredDigestSha256,
@@ -369,6 +380,7 @@ export async function handleCommentAttachmentHttpRequest(
 
         const result = options.service.finalize({
           actor,
+          workspaceId,
           projectId: matched.projectId,
           attachment: parsedBody
         });
@@ -382,6 +394,7 @@ export async function handleCommentAttachmentHttpRequest(
       case "read_pending": {
         const opened = await options.service.openPendingRead({
           actor,
+          workspaceId,
           projectId: matched.projectId,
           pendingUploadId: matched.pendingUploadId
         });
@@ -401,6 +414,7 @@ export async function handleCommentAttachmentHttpRequest(
       case "read_digest": {
         const opened = await options.service.openDigestRead({
           actor,
+          workspaceId,
           projectId: matched.projectId,
           digestSha256: matched.digestSha256
         });
@@ -419,6 +433,7 @@ export async function handleCommentAttachmentHttpRequest(
       case "read_comment_attachment": {
         const opened = await options.service.openCommentAttachmentRead({
           actor,
+          workspaceId,
           projectId: matched.projectId,
           commentId: matched.commentId,
           digestSha256: matched.digestSha256
@@ -442,7 +457,7 @@ export async function handleCommentAttachmentHttpRequest(
           respondJson(response, 403, { error: "attachment_auth_project_mismatch" });
           return true;
         }
-        const result = await options.service.cleanupExpiredStaged(matched.projectId);
+        const result = await options.service.cleanupExpiredStaged(workspaceId, matched.projectId);
         respondJson(response, 200, result);
         return true;
       }

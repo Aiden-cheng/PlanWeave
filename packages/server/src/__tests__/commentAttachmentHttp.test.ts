@@ -14,6 +14,9 @@ import {
   handleHumanHttpRequest,
   HumanIdentityRepository,
   HumanMembershipService,
+  WorkspaceIdentityRepository,
+  hashHumanToken,
+  mintHumanDeviceToken,
   resetHumanHttpRateLimits
 } from "../identity/index.js";
 import { applyMigrations } from "../migrations.js";
@@ -48,8 +51,17 @@ async function setup(options?: { clock?: () => Date }) {
   applyMigrations(database);
 
   const humanRepository = new HumanIdentityRepository(database, options?.clock);
+  const workspaceIdentity = new WorkspaceIdentityRepository(database);
+  const workspaceA = workspaceIdentity.ensureWorkspaceForLegacyProject("project-a");
+  const workspaceB = workspaceIdentity.ensureWorkspaceForLegacyProject("project-b");
+  const authorizedScopes = new Set([
+    `${workspaceA}\u0000project-a`,
+    `${workspaceB}\u0000project-b`
+  ]);
   const projectAuthority = {
-    hasProject: (projectId: string) => projectId === "project-a" || projectId === "project-b"
+    hasProject: (projectId: string) => projectId === "project-a" || projectId === "project-b",
+    hasScope: (scope: { workspaceId: string; projectId: string }) =>
+      authorizedScopes.has(`${scope.workspaceId}\u0000${scope.projectId}`)
   };
   const humanService = new HumanMembershipService({
     repository: humanRepository,
@@ -81,6 +93,7 @@ async function setup(options?: { clock?: () => Date }) {
         await handleCommentAttachmentHttpRequest(request, response, {
           service: attachmentService,
           repository: humanRepository,
+          workspaceIdentity,
           projectAuthority,
           allowInsecureDevelopment: true,
           clock: options?.clock
@@ -109,8 +122,60 @@ async function setup(options?: { clock?: () => Date }) {
     database,
     attachmentService,
     attachmentRepository,
-    blobs
+    blobs,
+    workspaceA,
+    workspaceB,
+    workspaceIdentity,
+    authorizeScope(workspaceId: string, projectId: string) {
+      authorizedScopes.add(`${workspaceId}\u0000${projectId}`);
+    }
   };
+}
+
+function createWorkspaceDevice(input: {
+  database: SqliteDatabase;
+  workspaceIdentity: WorkspaceIdentityRepository;
+  authorizeScope(workspaceId: string, projectId: string): void;
+  workspaceId: string;
+  projectId: string;
+  suffix: string;
+}) {
+  input.workspaceIdentity.ensureConfiguredWorkspace(input.workspaceId);
+  input.authorizeScope(input.workspaceId, input.projectId);
+  const token = mintHumanDeviceToken();
+  const now = new Date().toISOString();
+  const principalId = `human-workspace-${input.suffix}`;
+  const sessionId = `device-workspace-${input.suffix}`;
+  input.database
+    .prepare(
+      `INSERT INTO workspace_principals(
+        workspace_id,human_principal_id,display_name,created_at,revoked_at
+      ) VALUES(?,?,?,?,NULL)`
+    )
+    .run(input.workspaceId, principalId, `Workspace ${input.suffix}`, now);
+  input.database
+    .prepare(
+      `INSERT INTO workspace_memberships(
+        workspace_id,membership_id,human_principal_id,role,revision,created_at,updated_at,revoked_at
+      ) VALUES(?,?,?,?,1,?,?,NULL)`
+    )
+    .run(input.workspaceId, `membership-workspace-${input.suffix}`, principalId, "owner", now, now);
+  input.database
+    .prepare(
+      `INSERT INTO workspace_device_sessions(
+        workspace_id,device_session_id,human_principal_id,credential_sha256,issued_at,
+        expires_at,revoked_at,last_used_at
+      ) VALUES(?,?,?,?,?,?,NULL,NULL)`
+    )
+    .run(
+      input.workspaceId,
+      sessionId,
+      principalId,
+      hashHumanToken(token),
+      now,
+      new Date(Date.now() + 60_000).toISOString()
+    );
+  return { token, sessionId, principalId };
 }
 
 function auth(token: string) {
@@ -228,8 +293,8 @@ describe("comment attachment HTTP and blob authorization", () => {
       expectedSizeBytes: 1,
       mediaType: "text/plain"
     });
-    expect(untrusted.response.status).toBe(403);
-    expect(untrusted.payload.error).toBe("attachment_cross_project_forbidden");
+    expect(untrusted.response.status).toBe(401);
+    expect(untrusted.payload.error).toBe("attachment_auth_unauthenticated");
 
     const projectBToken = await bootstrap(origin, "project-b", "human-owner-b");
     const crossProject = await createPending(origin, projectBToken, "project-a", {
@@ -347,6 +412,159 @@ describe("comment attachment HTTP and blob authorization", () => {
     expect(((await guessed.json()) as { error: string }).error).toBe("attachment_not_found");
   });
 
+  it("isolates same-project workspace uploads, bindings, downloads, and revoked sessions", async () => {
+    const { origin, database, workspaceIdentity, authorizeScope, attachmentService } =
+      await setup();
+    const projectId = "project-shared";
+    const workspaceOne = "workspace-shared-one";
+    const workspaceTwo = "workspace-shared-two";
+    const first = createWorkspaceDevice({
+      database,
+      workspaceIdentity,
+      authorizeScope,
+      workspaceId: workspaceOne,
+      projectId,
+      suffix: "one"
+    });
+    const second = createWorkspaceDevice({
+      database,
+      workspaceIdentity,
+      authorizeScope,
+      workspaceId: workspaceTwo,
+      projectId,
+      suffix: "two"
+    });
+    const bytes = Buffer.from("workspace-isolated");
+    const digest = createHash("sha256").update(bytes).digest("hex");
+
+    const firstPending = await createPending(origin, first.token, projectId, {
+      expectedSizeBytes: bytes.byteLength,
+      mediaType: "text/plain",
+      expectedDigestSha256: digest
+    });
+    expect(firstPending.response.status).toBe(201);
+    const firstPendingId = firstPending.payload.pendingUploadId as string;
+    expect(
+      (
+        await fetch(
+          `${origin}/api/v1/projects/${projectId}/attachments/pending/${firstPendingId}`,
+          { headers: auth(second.token) }
+        )
+      ).status
+    ).toBe(404);
+
+    expect(
+      (
+        await uploadPending(
+          origin,
+          first.token,
+          projectId,
+          firstPendingId,
+          bytes,
+          "text/plain",
+          digest
+        )
+      ).response.status
+    ).toBe(201);
+    const firstFinalized = await finalizePending(origin, first.token, projectId, firstPendingId, {
+      pendingUploadId: firstPendingId,
+      digestSha256: digest,
+      sizeBytes: bytes.byteLength,
+      mediaType: "text/plain"
+    });
+    expect(firstFinalized.response.status).toBe(200);
+    const firstActor = {
+      humanPrincipalId: first.principalId,
+      displayName: "Workspace one",
+      deviceCredentialId: first.sessionId,
+      projectId,
+      role: "owner" as const,
+      membershipId: "membership-workspace-one"
+    };
+    const metadata = firstFinalized.payload.attachment as {
+      digestSha256: string;
+      sizeBytes: number;
+      mediaType: "text/plain";
+      createdAt: string;
+    };
+    attachmentService.bindCommentAttachments({
+      actor: firstActor,
+      workspaceId: workspaceOne,
+      projectId,
+      commentId: "comment-shared",
+      attachments: [metadata]
+    });
+
+    const secondCannotReadFirstBinding = await fetch(
+      `${origin}/api/v1/projects/${projectId}/attachments/comments/comment-shared/${digest}`,
+      { headers: auth(second.token) }
+    );
+    expect(secondCannotReadFirstBinding.status).toBe(404);
+
+    const secondPending = await createPending(origin, second.token, projectId, {
+      expectedSizeBytes: bytes.byteLength,
+      mediaType: "text/plain",
+      expectedDigestSha256: digest
+    });
+    expect(secondPending.response.status).toBe(201);
+    const secondPendingId = secondPending.payload.pendingUploadId as string;
+    expect(
+      (
+        await uploadPending(
+          origin,
+          second.token,
+          projectId,
+          secondPendingId,
+          bytes,
+          "text/plain",
+          digest
+        )
+      ).response.status
+    ).toBe(201);
+    const secondFinalized = await finalizePending(
+      origin,
+      second.token,
+      projectId,
+      secondPendingId,
+      {
+        pendingUploadId: secondPendingId,
+        digestSha256: digest,
+        sizeBytes: bytes.byteLength,
+        mediaType: "text/plain"
+      }
+    );
+    expect(secondFinalized.response.status).toBe(200);
+    attachmentService.bindCommentAttachments({
+      actor: {
+        humanPrincipalId: second.principalId,
+        displayName: "Workspace two",
+        deviceCredentialId: second.sessionId,
+        projectId,
+        role: "owner",
+        membershipId: "membership-workspace-two"
+      },
+      workspaceId: workspaceTwo,
+      projectId,
+      commentId: "comment-shared",
+      attachments: [secondFinalized.payload.attachment as typeof metadata]
+    });
+    const secondRead = await fetch(
+      `${origin}/api/v1/projects/${projectId}/attachments/comments/comment-shared/${digest}`,
+      { headers: auth(second.token) }
+    );
+    expect(secondRead.status).toBe(200);
+    expect(Buffer.from(await secondRead.arrayBuffer())).toEqual(bytes);
+
+    database
+      .prepare("UPDATE workspace_device_sessions SET revoked_at=? WHERE device_session_id=?")
+      .run(new Date().toISOString(), second.sessionId);
+    const revoked = await fetch(
+      `${origin}/api/v1/projects/${projectId}/attachments/comments/comment-shared/${digest}`,
+      { headers: auth(second.token) }
+    );
+    expect(revoked.status).toBe(401);
+  });
+
   it("rejects digest/size/media mismatches and expired staged uploads", async () => {
     let now = new Date("2026-07-24T12:00:00.000Z");
     const { origin } = await setup({ clock: () => now });
@@ -421,7 +639,7 @@ describe("comment attachment HTTP and blob authorization", () => {
   });
 
   it("deduplicates identical content and handles concurrent finalize races", async () => {
-    const { origin, attachmentService } = await setup();
+    const { origin, attachmentService, workspaceA } = await setup();
     const token = await bootstrap(origin);
     const bytes = Buffer.from("duplicate-body");
     const digest = createHash("sha256").update(bytes).digest("hex");
@@ -495,6 +713,7 @@ describe("comment attachment HTTP and blob authorization", () => {
       Promise.resolve(
         attachmentService.finalize({
           actor: { ...actor, deviceCredentialId: "d1", membershipId: "m1" },
+          workspaceId: workspaceA,
           projectId: "project-a",
           attachment
         })
@@ -502,6 +721,7 @@ describe("comment attachment HTTP and blob authorization", () => {
       Promise.resolve(
         attachmentService.finalize({
           actor: { ...actor, deviceCredentialId: "d1", membershipId: "m1" },
+          workspaceId: workspaceA,
           projectId: "project-a",
           attachment
         })
@@ -513,7 +733,15 @@ describe("comment attachment HTTP and blob authorization", () => {
 
   it("allows read of tombstoned comment attachments for members and cleans expired staged uploads", async () => {
     let now = new Date("2026-07-24T12:00:00.000Z");
-    const { origin, attachmentService, attachmentRepository, blobs, directory } = await setup({
+    const {
+      origin,
+      attachmentService,
+      attachmentRepository,
+      blobs,
+      directory,
+      workspaceA,
+      workspaceB
+    } = await setup({
       clock: () => now
     });
     const token = await bootstrap(origin);
@@ -555,11 +783,13 @@ describe("comment attachment HTTP and blob authorization", () => {
     };
     attachmentService.bindCommentAttachments({
       actor,
+      workspaceId: workspaceA,
       projectId: "project-a",
       commentId: "comment-1",
       attachments: [metadata]
     });
     attachmentService.setCommentTombstoned({
+      workspaceId: workspaceA,
       projectId: "project-a",
       commentId: "comment-1",
       tombstonedAt: now.toISOString()
@@ -616,9 +846,9 @@ describe("comment attachment HTTP and blob authorization", () => {
     const cleanupPayload = (await cleanup.json()) as { removedPending: number };
     expect(cleanupPayload.removedPending).toBe(1);
 
-    expect(attachmentRepository.getPending("project-b", projectBEphemeralId)?.status).toBe(
-      "uploaded"
-    );
+    expect(
+      attachmentRepository.getPending(workspaceB, "project-b", projectBEphemeralId)?.status
+    ).toBe("uploaded");
     await expect(
       blobs.read(createHash("sha256").update(ephemeralBytes).digest("hex"))
     ).resolves.toEqual(ephemeralBytes);

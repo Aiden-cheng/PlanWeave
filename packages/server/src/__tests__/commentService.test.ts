@@ -39,6 +39,7 @@ afterEach(async () => {
 });
 
 const projectId = "project-a";
+const workspaceId = "workspace-a";
 const now = new Date("2026-07-24T15:00:00.000Z");
 const taskItem: WorkItemRef = { kind: "task", canvasId: "default", taskId: "T-001" };
 const missingItem: WorkItemRef = {
@@ -126,6 +127,7 @@ async function openStack() {
   });
 
   const service = new CommentService({
+    workspaceId,
     comments,
     activity,
     packagePort,
@@ -133,6 +135,9 @@ async function openStack() {
     attachments: attachmentService,
     attachmentRepository,
     authorizeMutation() {},
+    authorMembershipActive(humanPrincipalId) {
+      return identity.getActiveMembership(projectId, humanPrincipalId) !== undefined;
+    },
     clock: () => now
   });
   const projection = new ActivityProjectionService({ activity, clock: () => now });
@@ -163,6 +168,7 @@ async function stageAttachment(
   const digest = createHash("sha256").update(bytes).digest("hex");
   const pending = stack.attachmentService.createPendingUpload({
     actor,
+    workspaceId,
     projectId,
     expectedSizeBytes: bytes.byteLength,
     mediaType: "text/plain",
@@ -171,6 +177,7 @@ async function stageAttachment(
   });
   await stack.attachmentService.uploadBody({
     actor,
+    workspaceId,
     projectId,
     pendingUploadId: pending.pendingUploadId,
     declaredDigestSha256: digest,
@@ -207,6 +214,7 @@ describe("CommentService", () => {
     expect(created.display.workItemPresence).toBe("present");
 
     const binding = stack.attachmentRepository.getBinding(
+      workspaceId,
       projectId,
       created.record.commentId,
       attachment.digestSha256
@@ -350,11 +358,15 @@ describe("CommentService", () => {
       }
     };
     const orphanService = new CommentService({
+      workspaceId,
       comments: stack.comments,
       activity: stack.activity,
       packagePort: missingPort,
       identity: stack.identity,
       authorizeMutation() {},
+      authorMembershipActive(humanPrincipalId) {
+        return stack.identity.getActiveMembership(projectId, humanPrincipalId) !== undefined;
+      },
       clock: () => now
     });
     const page = orphanService.listComments({
@@ -402,11 +414,15 @@ describe("CommentService", () => {
       membershipId: otherBoot.membership.membershipId
     };
     const otherComments = new CommentService({
+      workspaceId: "workspace-b",
       comments: stack.comments,
       activity: stack.activity,
       packagePort,
       identity: stack.identity,
       authorizeMutation() {},
+      authorMembershipActive(humanPrincipalId) {
+        return stack.identity.getActiveMembership("project-b", humanPrincipalId) !== undefined;
+      },
       clock: () => now
     });
     // packagePort allows T-001 for any project id (facts are package-local).

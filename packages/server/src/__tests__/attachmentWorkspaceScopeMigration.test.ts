@@ -1,0 +1,154 @@
+import { afterEach, describe, expect, it } from "vitest";
+import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
+import { attachmentWorkspaceScopeMigration } from "../migrations/attachmentWorkspaceScope.js";
+import { applyMigrations } from "../migrations.js";
+import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
+
+const databases: SqliteDatabase[] = [];
+
+afterEach(() => {
+  for (const database of databases.splice(0)) database.close();
+});
+
+async function openDatabase(): Promise<SqliteDatabase> {
+  const database = await openServerDatabase(":memory:", 5_000);
+  databases.push(database);
+  applyMigrations(database);
+  database.exec(`
+    DROP TABLE comment_pending_uploads;
+    DROP TABLE comment_attachment_bindings;
+    DROP TABLE comment_pending_uploads_unscoped_legacy;
+    DROP TABLE comment_attachment_bindings_unscoped_legacy;
+    CREATE TABLE comment_pending_uploads (
+      pending_upload_id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      uploader_human_principal_id TEXT NOT NULL,
+      expected_digest_sha256 TEXT,
+      expected_size_bytes INTEGER NOT NULL,
+      media_type TEXT NOT NULL,
+      file_name TEXT,
+      comment_id TEXT,
+      status TEXT NOT NULL,
+      digest_sha256 TEXT,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      uploaded_at TEXT,
+      finalized_at TEXT
+    );
+    CREATE TABLE comment_attachment_bindings (
+      project_id TEXT NOT NULL,
+      comment_id TEXT NOT NULL,
+      digest_sha256 TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      media_type TEXT NOT NULL,
+      file_name TEXT,
+      created_at TEXT NOT NULL,
+      comment_tombstoned_at TEXT,
+      PRIMARY KEY(project_id,comment_id,digest_sha256)
+    );
+  `);
+  return database;
+}
+
+function registerProject(database: SqliteDatabase, workspaceId: string, projectId: string): void {
+  const now = new Date().toISOString();
+  database
+    .prepare(
+      `INSERT INTO project_registry(
+        project_registry_id,workspace_id,project_id,project_root_internal,visibility,
+        owner_human_principal_id,acl_revision,created_at,updated_at,revoked_at
+      ) VALUES(?,?,?,NULL,'private',NULL,0,?,?,NULL)`
+    )
+    .run(`registry-${workspaceId}-${projectId}`, workspaceId, projectId, now, now);
+}
+
+function insertLegacyPending(
+  database: SqliteDatabase,
+  pendingUploadId: string,
+  projectId: string
+): void {
+  database
+    .prepare(
+      `INSERT INTO comment_pending_uploads(
+        pending_upload_id,project_id,uploader_human_principal_id,expected_digest_sha256,
+        expected_size_bytes,media_type,file_name,comment_id,status,digest_sha256,created_at,
+        expires_at,uploaded_at,finalized_at
+      ) VALUES(?,?,?,NULL,1,'text/plain',NULL,NULL,'pending',NULL,?,?,NULL,NULL)`
+    )
+    .run(
+      pendingUploadId,
+      projectId,
+      "human-owner",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-02T00:00:00.000Z"
+    );
+}
+
+function insertLegacyBinding(database: SqliteDatabase, projectId: string, commentId: string): void {
+  database
+    .prepare(
+      `INSERT INTO comment_attachment_bindings(
+        project_id,comment_id,digest_sha256,size_bytes,media_type,file_name,created_at,
+        comment_tombstoned_at
+      ) VALUES(?,?,?,1,'text/plain',NULL,'2026-01-01T00:00:00.000Z',NULL)`
+    )
+    .run(projectId, commentId, "a".repeat(64));
+}
+
+describe("attachment workspace scope migration", () => {
+  it("migrates uniquely mapped rows and quarantines ambiguous project-only rows", async () => {
+    const database = await openDatabase();
+    const workspaces = new WorkspaceIdentityRepository(database);
+    workspaces.ensureConfiguredWorkspace("workspace-one");
+    workspaces.ensureConfiguredWorkspace("workspace-two");
+    workspaces.ensureConfiguredWorkspace("workspace-three");
+    registerProject(database, "workspace-one", "project-unique");
+    registerProject(database, "workspace-two", "project-ambiguous");
+    registerProject(database, "workspace-three", "project-ambiguous");
+    insertLegacyPending(database, "pending-unique", "project-unique");
+    insertLegacyPending(database, "pending-ambiguous", "project-ambiguous");
+    insertLegacyBinding(database, "project-unique", "comment-unique");
+    insertLegacyBinding(database, "project-ambiguous", "comment-ambiguous");
+
+    attachmentWorkspaceScopeMigration.before?.(database);
+
+    expect(
+      database
+        .prepare(
+          "SELECT workspace_id FROM comment_pending_uploads WHERE project_id=? AND pending_upload_id=?"
+        )
+        .get("project-unique", "pending-unique")
+    ).toMatchObject({ workspace_id: "workspace-one" });
+    expect(
+      database
+        .prepare("SELECT 1 FROM comment_pending_uploads WHERE pending_upload_id=?")
+        .get("pending-ambiguous")
+    ).toBeUndefined();
+    expect(
+      database
+        .prepare(
+          "SELECT project_id FROM comment_pending_uploads_unscoped_legacy WHERE pending_upload_id=?"
+        )
+        .get("pending-ambiguous")
+    ).toMatchObject({ project_id: "project-ambiguous" });
+    expect(
+      database
+        .prepare(
+          "SELECT workspace_id FROM comment_attachment_bindings WHERE project_id=? AND comment_id=?"
+        )
+        .get("project-unique", "comment-unique")
+    ).toMatchObject({ workspace_id: "workspace-one" });
+    expect(
+      database
+        .prepare("SELECT 1 FROM comment_attachment_bindings WHERE comment_id=?")
+        .get("comment-ambiguous")
+    ).toBeUndefined();
+    expect(
+      database
+        .prepare(
+          "SELECT project_id FROM comment_attachment_bindings_unscoped_legacy WHERE comment_id=?"
+        )
+        .get("comment-ambiguous")
+    ).toMatchObject({ project_id: "project-ambiguous" });
+  });
+});

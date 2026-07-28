@@ -8,8 +8,17 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket, type RawData } from "ws";
 import { parseServerConfig } from "../config.js";
+import { hashHumanToken } from "../identity/crypto.js";
+import { HumanIdentityRepository } from "../identity/repository.js";
+import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
+import { HumanObserverJournal } from "../humanObserverJournal.js";
+import { attachHumanObserverWebSocketServer } from "../humanObserverWs.js";
+import { applyMigrations } from "../migrations.js";
 import { hashOperatorToken } from "../operatorAuth.js";
+import { ProjectAccessRepository } from "../projectAccessRepository.js";
 import { seedOperatorSessions } from "./support/operatorAuthFixture.js";
+import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
+import { WebSocketUpgradeRouter } from "../webSocketUpgradeRouter.js";
 import {
   createDistributedServerComposition,
   type DistributedServerComposition
@@ -18,9 +27,13 @@ import {
 const directories: string[] = [];
 const servers: HttpServer[] = [];
 const compositions: DistributedServerComposition[] = [];
+const databases: SqliteDatabase[] = [];
+const observerServers: Array<{ close(): Promise<void> }> = [];
 
 afterEach(async () => {
   for (const composition of compositions.splice(0)) await composition.close();
+  for (const observer of observerServers.splice(0)) await observer.close();
+  for (const database of databases.splice(0)) database.close();
   await Promise.all(
     servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve())))
   );
@@ -87,6 +100,59 @@ async function setup(options: { allowedClientOrigins?: string[] } = {}) {
   };
 }
 
+function seedWorkspaceObserverPrincipal(input: {
+  database: SqliteDatabase;
+  workspaceId: string;
+  suffix: string;
+}): string {
+  const { database } = input;
+  const principalId = `observer-principal-${input.suffix}`;
+  const createdAt = new Date().toISOString();
+  database
+    .prepare(
+      "INSERT INTO workspace_principals(workspace_id,human_principal_id,display_name,created_at,revoked_at) VALUES(?,?,?,?,NULL)"
+    )
+    .run(input.workspaceId, principalId, `Observer ${input.suffix}`, createdAt);
+  database
+    .prepare(
+      "INSERT INTO workspace_memberships(workspace_id,membership_id,human_principal_id,role,revision,created_at,updated_at,revoked_at) VALUES(?,?,?,?,1,?,?,NULL)"
+    )
+    .run(
+      input.workspaceId,
+      `observer-membership-${input.suffix}`,
+      principalId,
+      "owner",
+      createdAt,
+      createdAt
+    );
+  return principalId;
+}
+
+function seedWorkspaceObserverDevice(input: {
+  database: SqliteDatabase;
+  workspaceId: string;
+  suffix: string;
+}): { token: string; principalId: string } {
+  const { database } = input;
+  const now = new Date();
+  const issuedAt = now.toISOString();
+  const token = `pw_hdev_${input.suffix.repeat(43)}`;
+  const principalId = seedWorkspaceObserverPrincipal(input);
+  database
+    .prepare(
+      "INSERT INTO workspace_device_sessions(workspace_id,device_session_id,human_principal_id,credential_sha256,issued_at,expires_at,revoked_at,last_used_at) VALUES(?,?,?,?,?,?,NULL,NULL)"
+    )
+    .run(
+      input.workspaceId,
+      `observer-device-${input.suffix}`,
+      principalId,
+      hashHumanToken(token),
+      issuedAt,
+      new Date(now.getTime() + 60_000).toISOString()
+    );
+  return { token, principalId };
+}
+
 function jsonHeaders(token?: string): Record<string, string> {
   return {
     "content-type": "application/json",
@@ -131,6 +197,13 @@ async function connect(url: string, token: string): Promise<WebSocket> {
   return socket;
 }
 
+async function websocketUpgradeStatus(url: string, token: string): Promise<number> {
+  const socket = new WebSocket(url, { headers: { Authorization: `Bearer ${token}` } });
+  return new Promise((resolve) => {
+    socket.once("unexpected-response", (_request, response) => resolve(response.statusCode));
+  });
+}
+
 function nextMessage(socket: WebSocket): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("observer_message_timeout")), 3_000);
@@ -169,6 +242,125 @@ function sendHello(socket: WebSocket, projectId: string, lastCursor: number): vo
 }
 
 describe("human observer WSS", () => {
+  it("isolates same-project workspace subscriptions, cursors, replay, and revoked sessions", async () => {
+    const database = await openServerDatabase(":memory:", 5_000);
+    databases.push(database);
+    applyMigrations(database);
+    const workspaceIdentity = new WorkspaceIdentityRepository(database);
+    workspaceIdentity.ensureConfiguredWorkspace("observer-workspace");
+    workspaceIdentity.ensureConfiguredWorkspace("observer-workspace-b");
+    const first = seedWorkspaceObserverDevice({
+      database,
+      workspaceId: "observer-workspace",
+      suffix: "a"
+    });
+    const second = seedWorkspaceObserverDevice({
+      database,
+      workspaceId: "observer-workspace-b",
+      suffix: "b"
+    });
+    const firstOwner = seedWorkspaceObserverPrincipal({
+      database,
+      workspaceId: "observer-workspace",
+      suffix: "owner-a"
+    });
+    const secondOwner = seedWorkspaceObserverPrincipal({
+      database,
+      workspaceId: "observer-workspace-b",
+      suffix: "owner-b"
+    });
+    const projectAccess = new ProjectAccessRepository(database);
+    for (const [workspaceId, ownerHumanPrincipalId] of [
+      ["observer-workspace", firstOwner],
+      ["observer-workspace-b", secondOwner]
+    ] as const) {
+      projectAccess.registerProjectInternal({
+        workspaceId,
+        projectId: "shared-project",
+        projectRoot: `/tmp/${workspaceId}/shared-project`,
+        ownerHumanPrincipalId
+      });
+    }
+    const httpServer = createServer();
+    servers.push(httpServer);
+    const journal = new HumanObserverJournal(database, 3);
+    const observer = attachHumanObserverWebSocketServer({
+      upgradeRouter: new WebSocketUpgradeRouter(httpServer),
+      journal,
+      repository: new HumanIdentityRepository(database),
+      workspaceIdentity,
+      projectAccess,
+      projectAuthority: {
+        hasScope: ({ workspaceId, projectId }) =>
+          projectId === "shared-project" &&
+          (workspaceId === "observer-workspace" || workspaceId === "observer-workspace-b"),
+        hasProject: () => false
+      },
+      maxPayloadBytes: 16_384,
+      shutdownTimeoutMs: 1_000,
+      allowInsecureTransport: true
+    });
+    observerServers.push(observer);
+    await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
+    const address = httpServer.address();
+    if (!address || typeof address === "string") throw new Error("observer_test_address_missing");
+    const url = `ws://127.0.0.1:${address.port}/api/v1/projects/shared-project/human/observe`;
+    await expect(websocketUpgradeStatus(url, first.token)).resolves.toBe(403);
+    projectAccess.grant({
+      workspaceId: "observer-workspace",
+      projectId: "shared-project",
+      humanPrincipalId: first.principalId,
+      role: "viewer",
+      grantedBy: { kind: "human", id: firstOwner }
+    });
+    projectAccess.grant({
+      workspaceId: "observer-workspace-b",
+      projectId: "shared-project",
+      humanPrincipalId: second.principalId,
+      role: "viewer",
+      grantedBy: { kind: "human", id: secondOwner }
+    });
+    const firstSocket = await connect(url, first.token);
+    const secondSocket = await connect(url, second.token);
+    sendHello(firstSocket, "shared-project", 0);
+    sendHello(secondSocket, "shared-project", 0);
+    await Promise.all([nextMessage(firstSocket), nextMessage(secondSocket)]);
+
+    const firstEvent = nextMessage(firstSocket);
+    const secondEvent = nextMessage(secondSocket);
+    journal.appendInCallerTransaction(
+      { workspaceId: "observer-workspace", projectId: "shared-project" },
+      { kind: "membership" }
+    );
+    journal.appendInCallerTransaction(
+      { workspaceId: "observer-workspace-b", projectId: "shared-project" },
+      { kind: "invitation" }
+    );
+    await expect(firstEvent).resolves.toMatchObject({ kind: "membership" });
+    const observedSecond = await secondEvent;
+    expect(observedSecond).toMatchObject({ kind: "invitation" });
+
+    firstSocket.close();
+    journal.appendInCallerTransaction(
+      { workspaceId: "observer-workspace", projectId: "shared-project" },
+      { kind: "assignment" }
+    );
+    const replay = await connect(url, second.token);
+    sendHello(replay, "shared-project", Number(observedSecond.cursor));
+    await expect(nextMessage(replay)).resolves.toMatchObject({
+      type: "human.observer.welcome",
+      cursor: observedSecond.cursor
+    });
+    replay.close();
+
+    const expired = nextMessage(secondSocket);
+    database
+      .prepare("UPDATE workspace_device_sessions SET revoked_at=? WHERE device_session_id=?")
+      .run(new Date().toISOString(), "observer-device-b");
+    await expect(expired).resolves.toMatchObject({ type: "human.observer.auth_expired" });
+    secondSocket.close();
+  });
+
   it("authenticates, pings, fans out durable events, replays, and reports retention gaps", async () => {
     const fixture = await setup();
     const owner = await bootstrap(fixture.origin, fixture.projectId, "observer-owner");
@@ -270,6 +462,26 @@ describe("human observer WSS", () => {
       principal: { humanPrincipalId: string };
     };
     expect(joined.status).toBe(201);
+    const grant = await fetch(
+      `${fixture.origin}/api/v1/projects/${fixture.projectId}/canvases/default/access`,
+      {
+        method: "POST",
+        headers: jsonHeaders(owner.deviceToken),
+        body: JSON.stringify({
+          operation: "grant",
+          scope: {
+            scopeKind: "project",
+            workspaceId: "observer-workspace",
+            projectId: fixture.projectId,
+            canvasId: null
+          },
+          expectedAclRevision: 0,
+          humanPrincipalId: member.principal.humanPrincipalId,
+          role: "viewer"
+        })
+      }
+    );
+    expect(grant.status).toBe(200);
     const memberSocket = await connect(url, member.deviceToken);
     const memberWelcome = nextMessage(memberSocket);
     sendHello(memberSocket, fixture.projectId, 0);
