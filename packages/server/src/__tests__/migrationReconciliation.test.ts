@@ -152,9 +152,10 @@ describe("collaboration migration reconciliation", () => {
       { name: "canvas-command", versions: [30] },
       { name: "content-versions", versions: [33] },
       { name: "setup-code", versions: [31, 32] },
-      { name: "comment-workspace-scope", versions: [35] }
+      { name: "comment-workspace-scope", versions: [35] },
+      { name: "host-readiness", versions: [36] }
     ]);
-    expect(latestCentralSchemaVersion).toBe(35);
+    expect(latestCentralSchemaVersion).toBe(36);
   });
 
   it("maps a representative v26 project to one stable Workspace and package registry key", async () => {

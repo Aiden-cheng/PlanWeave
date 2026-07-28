@@ -89,7 +89,7 @@ describe("work assignment migration v17", () => {
     database.exec("CREATE TABLE dispatches(id TEXT PRIMARY KEY, package_ref TEXT NOT NULL)");
     applyMigrations(database);
     expect(centralSchemaVersion(database)).toBe(latestCentralSchemaVersion);
-    expect(latestCentralSchemaVersion).toBe(35);
+    expect(latestCentralSchemaVersion).toBe(36);
 
     expect(
       database
