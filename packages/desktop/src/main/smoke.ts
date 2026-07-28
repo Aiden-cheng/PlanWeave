@@ -802,6 +802,7 @@ async function runLiveCollaborationSmoke(window: BrowserWindow): Promise<Record<
         () => document.querySelector('[data-testid="people-connect-form"]'),
         "People connect form"
       );
+      await click("people-connect-mode-join");
       setInput("people-connect-display-name", "Desktop smoke member");
       setInput("people-connect-server-url", ${JSON.stringify(serverBaseUrl)});
       setInput("people-connect-project-id", ${JSON.stringify(projectId)});
