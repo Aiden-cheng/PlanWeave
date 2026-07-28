@@ -12,6 +12,7 @@ import {
   CanvasCommandService,
   ContentVersionRepository,
   ContentVersionService,
+  SqliteAuthoritativeCanvasCommitStore,
   createDefaultCanvasRuntimePort,
   digestCanvasIntent,
   routeCanvasCommandHttp,
@@ -149,6 +150,9 @@ async function fixture(options?: {
     workspaceIdentity: new WorkspaceIdentityRepository(database),
     runtime,
     contentVersions,
+    authoritativeCommits: contentVersions
+      ? new SqliteAuthoritativeCanvasCommitStore(database, contentVersions, repository)
+      : undefined,
     clock: () => new Date("2026-01-02T00:00:00.000Z"),
     presenceHeadProbe: () => 999
   });

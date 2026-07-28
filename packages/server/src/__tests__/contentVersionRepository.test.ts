@@ -365,11 +365,7 @@ describe("authoritative content version repository", () => {
       createdBy: { kind: "human", id: "owner" }
     });
     inWriteTransaction(database, () => {
-      repository.advanceHeadInCallerTransaction({
-        scope,
-        expectedRevision: 1,
-        content: advanced.completed
-      });
+      repository.advanceHeadForSqliteCommit({ scope, expectedRevision: 1, content: advanced.completed });
     });
     expect(
       service.discoverAuthority(member, {
@@ -500,7 +496,7 @@ describe("authoritative content version repository", () => {
       createdBy: { kind: "human", id: "owner" }
     });
     inWriteTransaction(database, () => {
-      repository.advanceHeadInCallerTransaction({ scope, expectedRevision: 1, content: advanced.completed });
+      repository.advanceHeadForSqliteCommit({ scope, expectedRevision: 1, content: advanced.completed });
     });
     database
       .prepare(

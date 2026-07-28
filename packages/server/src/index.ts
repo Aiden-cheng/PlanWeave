@@ -511,6 +511,7 @@ export {
   CanvasCommandService,
   ContentVersionRepository,
   ContentVersionService,
+  SqliteAuthoritativeCanvasCommitStore,
   attachCanvasCommandWebSocketServer,
   createDefaultCanvasRuntimePort,
   handleCanvasCommandHttpRequest,
@@ -523,6 +524,9 @@ export {
   type CanvasCommandWebSocketOptions,
   type CanvasCommandWebSocketServer,
   type CanvasRuntimeMutationPort,
+  type AuthoritativeCanvasAcceptedCommit,
+  type AuthoritativeCanvasCommitPort,
+  type ContentAuthorityStore,
   type CanvasScopeKey
 } from "./canvas/index.js";
 export {

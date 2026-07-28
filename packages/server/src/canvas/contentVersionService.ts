@@ -15,7 +15,7 @@ import type { CollaborationAuthContext } from "../identity/auth.js";
 import type { ProjectAccessRepository } from "../projectAccessRepository.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { authorizeCanvasRead, authorizeCanvasWrite } from "./policy.js";
-import { ContentVersionRepository } from "./contentVersionRepository.js";
+import type { ContentAuthorityStore } from "./contentAuthorityStore.js";
 
 function actor(context: CollaborationAuthContext) {
   return { kind: "human" as const, id: context.humanPrincipalId, displayName: context.displayName };
@@ -26,7 +26,7 @@ function deviceSessionId(context: CollaborationAuthContext): string {
 }
 
 export type ContentVersionServiceOptions = {
-  repository: ContentVersionRepository;
+  repository: ContentAuthorityStore;
   access: ProjectAccessRepository;
   workspaceIdentity: WorkspaceIdentityRepository;
 };

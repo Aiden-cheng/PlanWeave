@@ -16,6 +16,7 @@ import {
 } from "@planweave-ai/collaboration-contracts";
 import { validateAuthoritativeCanvasContent } from "@planweave-ai/runtime";
 import { inWriteTransaction, type SqliteDatabase } from "../sqlite.js";
+import type { ContentAuthorityStore } from "./contentAuthorityStore.js";
 import type { CanvasScopeKey } from "./repository.js";
 
 type VersionRow = Record<string, unknown>;
@@ -32,7 +33,7 @@ function contentRef(content: CompleteContentVersion): CompletedContentVersionRef
  * Durable immutable content objects and their scoped heads. The storage is authoritative;
  * working directories are deliberately absent from the schema and API.
  */
-export class ContentVersionRepository {
+export class ContentVersionRepository implements ContentAuthorityStore {
   constructor(
     private readonly database: SqliteDatabase,
     private readonly clock: () => Date = () => new Date()
@@ -196,8 +197,8 @@ export class ContentVersionRepository {
     });
   }
 
-  /** Caller must already hold the same SQLite write transaction as any bound journal/head update. */
-  advanceHeadInCallerTransaction(input: {
+  /** SQLite adapter operation; application services use AuthoritativeCanvasCommitPort instead. */
+  advanceHeadForSqliteCommit(input: {
     scope: CanvasScopeKey;
     expectedRevision: number;
     content: CompletedContentVersionRef;
@@ -259,13 +260,15 @@ export class ContentVersionRepository {
     head: AuthoritativeContentHead;
   } {
     const version = this.persistImmutable(input);
-    const head = inWriteTransaction(this.database, () =>
-      this.advanceHeadInCallerTransaction({
+    inWriteTransaction(this.database, () => {
+      this.advanceHeadForSqliteCommit({
         scope: input.scope,
         expectedRevision: 0,
         content: version.completed
-      })
-    );
+      });
+    });
+    const head = this.head(input.scope);
+    if (!head) throw new Error("content_version_head_missing");
     return { version, head };
   }
 

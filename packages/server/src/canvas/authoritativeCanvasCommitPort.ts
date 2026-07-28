@@ -1,0 +1,34 @@
+import type {
+  ActorRef,
+  CanvasCommandAccepted,
+  CanvasCommandIntent,
+  CompletedContentVersionRef,
+  PackageSnapshotDigestManifest
+} from "@planweave-ai/collaboration-contracts";
+import type { CanvasScopeKey } from "./repository.js";
+
+export type AuthoritativeCanvasAcceptedCommit = {
+  scope: CanvasScopeKey;
+  operationId: string;
+  intent: CanvasCommandIntent;
+  intentDigest: string;
+  actor: ActorRef;
+  previousRevision: number;
+  revision: number;
+  contentDigest: string;
+  digestManifest?: PackageSnapshotDigestManifest;
+  sizeBytes?: number;
+  packageSnapshotId?: string;
+};
+
+/** Coordinates an immutable content head with an accepted canvas command. */
+export type AuthoritativeCanvasCommitPort = {
+  commit(input: {
+    content: {
+      scope: CanvasScopeKey;
+      expectedRevision: number;
+      version: CompletedContentVersionRef;
+    };
+    accepted: AuthoritativeCanvasAcceptedCommit;
+  }): CanvasCommandAccepted;
+};

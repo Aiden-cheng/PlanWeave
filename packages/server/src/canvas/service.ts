@@ -26,7 +26,8 @@ import {
   type CanvasScopeKey
 } from "./repository.js";
 import type { CanvasRuntimeMutationPort } from "./runtimePort.js";
-import type { ContentVersionRepository } from "./contentVersionRepository.js";
+import type { ContentAuthorityStore } from "./contentAuthorityStore.js";
+import type { AuthoritativeCanvasCommitPort } from "./authoritativeCanvasCommitPort.js";
 
 export type CanvasCommandServiceOptions = {
   repository: CanvasCommandRepository;
@@ -34,7 +35,8 @@ export type CanvasCommandServiceOptions = {
   workspaceIdentity: WorkspaceIdentityRepository;
   runtime: CanvasRuntimeMutationPort;
   /** When configured, commands are only visible after a complete immutable content version advances. */
-  contentVersions?: ContentVersionRepository;
+  contentVersions?: ContentAuthorityStore;
+  authoritativeCommits?: AuthoritativeCanvasCommitPort;
   clock?: () => Date;
   /**
    * Optional presence hub probe — only used in negative tests to prove presence is never
@@ -136,25 +138,25 @@ export class CanvasCommandService {
     content: AuthoritativeContentVersion;
     expectedContentHeadRevision: number;
   }): CanvasCommandAccepted {
-    const contentVersions = this.options.contentVersions;
-    if (!contentVersions) throw new Error("content_commit_unavailable");
-    return this.options.repository.commitAccepted({
-      scope: input.scope,
-      operationId: input.operationId,
-      intent: input.intent,
-      intentDigest: input.intentDigest,
-      actor: input.actor,
-      previousRevision: input.previousRevision,
-      revision: input.previousRevision + 1,
-      contentDigest: input.content.completed.canonicalDigest,
-      digestManifest: input.digestManifest,
-      sizeBytes: input.content.content.totalBytes,
-      beforeCommitInTransaction: () => {
-        contentVersions.advanceHeadInCallerTransaction({
+    const authoritativeCommits = this.options.authoritativeCommits;
+    if (!authoritativeCommits) throw new Error("content_commit_unavailable");
+    return authoritativeCommits.commit({
+      content: {
+        scope: input.scope,
+        expectedRevision: input.expectedContentHeadRevision,
+        version: input.content.completed
+      },
+      accepted: {
           scope: input.scope,
-          expectedRevision: input.expectedContentHeadRevision,
-          content: input.content.completed
-        });
+          operationId: input.operationId,
+          intent: input.intent,
+          intentDigest: input.intentDigest,
+          actor: input.actor,
+          previousRevision: input.previousRevision,
+          revision: input.previousRevision + 1,
+          contentDigest: input.content.completed.canonicalDigest,
+          digestManifest: input.digestManifest,
+          sizeBytes: input.content.content.totalBytes
       }
     });
   }

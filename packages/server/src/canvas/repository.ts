@@ -322,8 +322,23 @@ export class CanvasCommandRepository {
     digestManifest?: PackageSnapshotDigestManifest;
     sizeBytes?: number;
     packageSnapshotId?: string;
-    /** B-002 content head/journal is advanced in this transaction before command visibility. */
-    beforeCommitInTransaction?: () => void;
+  }): CanvasCommandAccepted {
+    return inWriteTransaction(this.database, () => this.commitAcceptedInCallerTransaction(input));
+  }
+
+  /** Storage adapter boundary for coordinated authority commits. */
+  commitAcceptedInCallerTransaction(input: {
+    scope: CanvasScopeKey;
+    operationId: string;
+    intent: CanvasCommandIntent;
+    intentDigest: string;
+    actor: ActorRef;
+    previousRevision: number;
+    revision: number;
+    contentDigest: string;
+    digestManifest?: PackageSnapshotDigestManifest;
+    sizeBytes?: number;
+    packageSnapshotId?: string;
   }): CanvasCommandAccepted {
     const acceptedAt = this.clock().toISOString();
     const entryId = `journal-${randomUUID()}`;
@@ -359,9 +374,7 @@ export class CanvasCommandRepository {
       idempotentReplay: false
     });
 
-    inWriteTransaction(this.database, () => {
-      input.beforeCommitInTransaction?.();
-      this.database
+    this.database
         .prepare(
           `INSERT INTO canvas_command_journal(
             workspace_id,project_id,canvas_id,entry_id,revision,previous_revision,operation_id,
@@ -387,7 +400,7 @@ export class CanvasCommandRepository {
           JSON.stringify(journalEntry)
         );
 
-      this.database
+    this.database
         .prepare(
           `INSERT INTO canvas_command_heads(workspace_id,project_id,canvas_id,revision,content_digest,updated_at)
            VALUES(?,?,?,?,?,?)
@@ -405,7 +418,7 @@ export class CanvasCommandRepository {
           acceptedAt
         );
 
-      this.database
+    this.database
         .prepare(
           `INSERT INTO canvas_command_operations(
             workspace_id,project_id,canvas_id,operation_id,intent_digest,intent_json,outcome_json,
@@ -426,8 +439,8 @@ export class CanvasCommandRepository {
           acceptedAt
         );
 
-      const encoding = input.packageSnapshotId ? "package_snapshot_ref" : "digest_manifest_only";
-      this.database
+    const encoding = input.packageSnapshotId ? "package_snapshot_ref" : "digest_manifest_only";
+    this.database
         .prepare(
           `INSERT INTO canvas_command_snapshots(
             workspace_id,project_id,canvas_id,revision,content_digest,created_at,
@@ -455,10 +468,9 @@ export class CanvasCommandRepository {
           encoding
         );
 
-      this.trimJournal(input.scope);
-      this.trimSnapshots(input.scope);
-      this.clearPending(input.scope, input.operationId);
-    });
+    this.trimJournal(input.scope);
+    this.trimSnapshots(input.scope);
+    this.clearPending(input.scope, input.operationId);
 
     return accepted;
   }

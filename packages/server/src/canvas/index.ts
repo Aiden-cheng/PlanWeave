@@ -10,6 +10,12 @@ export {
 } from "./limits.js";
 export { authorizeCanvasRead, authorizeCanvasWrite } from "./policy.js";
 export { ContentVersionRepository } from "./contentVersionRepository.js";
+export type { ContentAuthorityStore } from "./contentAuthorityStore.js";
+export type {
+  AuthoritativeCanvasAcceptedCommit,
+  AuthoritativeCanvasCommitPort
+} from "./authoritativeCanvasCommitPort.js";
+export { SqliteAuthoritativeCanvasCommitStore } from "./sqliteAuthoritativeCanvasCommitStore.js";
 export { ContentVersionService, type ContentVersionServiceOptions } from "./contentVersionService.js";
 export { handleContentVersionHttpRequest, type ContentVersionHttpOptions } from "./contentVersionHttp.js";
 export {

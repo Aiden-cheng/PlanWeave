@@ -77,6 +77,7 @@ import {
   CanvasCommandRepository,
   CanvasCommandService,
   ContentVersionRepository,
+  SqliteAuthoritativeCanvasCommitStore,
   ContentVersionService,
   createDefaultCanvasRuntimePort,
   handleCanvasCommandHttpRequest,
@@ -730,6 +731,11 @@ export async function createDistributedServerComposition(
     });
     const canvasCommandRepository = new CanvasCommandRepository(server.database, { clock });
     const contentVersionRepository = new ContentVersionRepository(server.database, clock);
+    const authoritativeCanvasCommits = new SqliteAuthoritativeCanvasCommitStore(
+      server.database,
+      contentVersionRepository,
+      canvasCommandRepository
+    );
     const contentVersionService = new ContentVersionService({
       repository: contentVersionRepository,
       access: initializedProjectAccess,
@@ -741,6 +747,7 @@ export async function createDistributedServerComposition(
       workspaceIdentity,
       runtime: createDefaultCanvasRuntimePort(),
       contentVersions: contentVersionRepository,
+      authoritativeCommits: authoritativeCanvasCommits,
       clock
     });
     await canvasCommandService.recoverInterrupted();
