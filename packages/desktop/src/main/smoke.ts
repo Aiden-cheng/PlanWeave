@@ -711,8 +711,7 @@ async function runRendererManualSmoke(window: BrowserWindow): Promise<Record<str
 async function runLiveCollaborationSmoke(window: BrowserWindow): Promise<Record<string, unknown>> {
   const serverBaseUrl = process.env.PLANWEAVE_DESKTOP_SMOKE_COLLABORATION_SERVER_URL;
   const projectId = process.env.PLANWEAVE_DESKTOP_SMOKE_COLLABORATION_PROJECT_ID;
-  const invitationToken = process.env.PLANWEAVE_DESKTOP_SMOKE_COLLABORATION_INVITATION_TOKEN;
-  if (!serverBaseUrl || !projectId || !invitationToken) {
+  if (!serverBaseUrl || !projectId) {
     throw new Error("Live collaboration smoke fixture configuration is incomplete.");
   }
 
@@ -802,11 +801,10 @@ async function runLiveCollaborationSmoke(window: BrowserWindow): Promise<Record<
         () => document.querySelector('[data-testid="people-connect-form"]'),
         "People connect form"
       );
-      await click("people-connect-mode-join");
-      setInput("people-connect-display-name", "Desktop smoke member");
+      await click("people-connect-mode-bootstrap");
+      setInput("people-connect-display-name", "Desktop smoke owner");
       setInput("people-connect-server-url", ${JSON.stringify(serverBaseUrl)});
       setInput("people-connect-project-id", ${JSON.stringify(projectId)});
-      setInput("people-connect-invitation-token", ${JSON.stringify(invitationToken)});
       const allowInsecure = document.querySelector('[data-testid="people-connect-allow-insecure"]');
       if (!(allowInsecure instanceof HTMLInputElement)) throw new Error("Missing insecure transport control");
       if (!allowInsecure.checked) allowInsecure.click();
@@ -822,7 +820,7 @@ async function runLiveCollaborationSmoke(window: BrowserWindow): Promise<Record<
         "connected People panel"
       );
       const memberRows = [...document.querySelectorAll('[data-testid="people-member-row"]')];
-      if (memberRows.length < 2) throw new Error("Connected People panel did not show owner and member rows.");
+      if (memberRows.length < 1) throw new Error("Connected People panel did not show the bootstrapped owner.");
       const status = await window.planweaveCollaboration?.getCollaborationStatus();
       if (!status || !["connected", "ready"].includes(status.session.phase)) {
         throw new Error("Typed collaboration bridge did not reach a connected session.");
@@ -1320,8 +1318,7 @@ export async function runSmokeCheck(window: BrowserWindow): Promise<void> {
         rendererManual = await runRendererManualSmoke(window);
         const liveCollaboration =
           process.env.PLANWEAVE_DESKTOP_SMOKE_COLLABORATION_SERVER_URL &&
-          process.env.PLANWEAVE_DESKTOP_SMOKE_COLLABORATION_PROJECT_ID &&
-          process.env.PLANWEAVE_DESKTOP_SMOKE_COLLABORATION_INVITATION_TOKEN
+          process.env.PLANWEAVE_DESKTOP_SMOKE_COLLABORATION_PROJECT_ID
             ? await runLiveCollaborationSmoke(window)
             : null;
         const collaborationAccessibility = liveCollaboration

@@ -2,8 +2,6 @@ import { createServer, type Server as HttpServer } from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WebSocket } from "ws";
-import { CollaborationClient, type CollaborationWebSocketConstructor } from "../src/main/collaboration/CollaborationClient.js";
 import { parseServerConfig } from "../../server/src/config.js";
 import { hashOperatorToken } from "../../server/src/operatorAuth.js";
 import { seedOperatorSessions } from "../../server/src/__tests__/support/operatorAuthFixture.js";
@@ -14,7 +12,6 @@ const smokeAdminToken = `pw_operator_${"M".repeat(43)}`;
 export type CollaborationSmokeFixture = {
   origin: string;
   projectId: string;
-  invitationToken: string;
   close: () => Promise<void>;
 };
 
@@ -22,18 +19,6 @@ type FixtureInput = {
   projectRoot: string;
   projectId: string;
 };
-
-const websocketConstructor = WebSocket as unknown as CollaborationWebSocketConstructor;
-
-function profile(origin: string, projectId: string, profileId: string) {
-  return {
-    profileId,
-    displayName: "Desktop smoke fixture",
-    serverBaseUrl: `${origin}/`,
-    projectId,
-    allowInsecureTransport: true
-  } as const;
-}
 
 async function listen(server: HttpServer): Promise<{ origin: string; close: () => Promise<void> }> {
   await new Promise<void>((resolve, reject) => {
@@ -76,7 +61,6 @@ export async function startCollaborationSmokeFixture(
   const httpServer = createServer();
   let composition: DistributedServerComposition | undefined;
   let serverClose: (() => Promise<void>) | undefined;
-  let ownerClient: CollaborationClient | undefined;
 
   try {
     const config = parseServerConfig({
@@ -85,7 +69,14 @@ export async function startCollaborationSmokeFixture(
       publicUrl: "http://127.0.0.1:7443",
       allowInsecureDevelopment: true,
       dataDirectory,
-      trustedProjects: [{ projectId: input.projectId, canvasId: "default", projectRoot: input.projectRoot }],
+      trustedProjects: [
+        {
+          workspaceId: "desktop-smoke-workspace",
+          projectId: input.projectId,
+          canvasId: "default",
+          projectRoot: input.projectRoot
+        }
+      ],
       operatorCredentials: [
         {
           operatorId: "desktop-smoke-admin",
@@ -103,32 +94,10 @@ export async function startCollaborationSmokeFixture(
     const listening = await listen(httpServer);
     serverClose = listening.close;
 
-    const anonymous = new CollaborationClient({
-      profile: profile(listening.origin, input.projectId, "desktop-smoke-anonymous"),
-      credential: { getDeviceToken: () => undefined }
-    });
-    const bootstrap = await anonymous.bootstrapOwner({
-      displayName: "Desktop smoke owner",
-      humanPrincipalId: "desktop-smoke-owner"
-    });
-    anonymous.dispose();
-    if (!bootstrap.deviceToken) {
-      throw new Error("collaboration_smoke_owner_credential_missing");
-    }
-    ownerClient = new CollaborationClient({
-      profile: profile(listening.origin, input.projectId, "desktop-smoke-owner"),
-      credential: { getDeviceToken: () => bootstrap.deviceToken },
-      WebSocketImpl: websocketConstructor
-    });
-    const invitation = await ownerClient.createInvitation();
-
     return {
       origin: listening.origin,
       projectId: input.projectId,
-      invitationToken: invitation.invitationToken,
       close: async () => {
-        ownerClient?.dispose();
-        ownerClient = undefined;
         await composition?.close();
         composition = undefined;
         await serverClose?.();
@@ -137,7 +106,6 @@ export async function startCollaborationSmokeFixture(
       }
     };
   } catch (error) {
-    ownerClient?.dispose();
     try {
       await composition?.close();
     } finally {

@@ -75,9 +75,7 @@ try {
           }
         : {
             PLANWEAVE_DESKTOP_SMOKE_COLLABORATION_SERVER_URL: collaborationFixture.origin,
-            PLANWEAVE_DESKTOP_SMOKE_COLLABORATION_PROJECT_ID: collaborationFixture.projectId,
-            PLANWEAVE_DESKTOP_SMOKE_COLLABORATION_INVITATION_TOKEN:
-              collaborationFixture.invitationToken
+            PLANWEAVE_DESKTOP_SMOKE_COLLABORATION_PROJECT_ID: collaborationFixture.projectId
           })
     },
     stdio: ["ignore", "pipe", "pipe"],
