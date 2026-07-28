@@ -270,6 +270,43 @@ describe("distributed server composition", () => {
     await expect(connectionB.json()).resolves.toMatchObject({
       items: [expect.objectContaining({ workspaceId: workspaceB })]
     });
+    const accessUrl = `${origin}/api/v1/projects/${projectId}/canvases/default/access`;
+    const [accessA, accessB] = await Promise.all([
+      fetch(accessUrl, { headers: { Authorization: `Bearer ${tokenA}` } }),
+      fetch(accessUrl, { headers: { Authorization: `Bearer ${tokenB}` } })
+    ]);
+    expect(accessA.status).toBe(200);
+    expect(accessB.status).toBe(200);
+    await expect(accessA.json()).resolves.toMatchObject({
+      scope: { workspaceId: workspaceA, projectId, canvasId: "default" }
+    });
+    await expect(accessB.json()).resolves.toMatchObject({
+      scope: { workspaceId: workspaceB, projectId, canvasId: "default" }
+    });
+
+    const mutateA = await fetch(accessUrl, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${tokenA}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        operation: "visibility",
+        scope: { scopeKind: "canvas", workspaceId: workspaceA, projectId, canvasId: "default" },
+        expectedAclRevision: 0,
+        visibility: "shared"
+      })
+    });
+    expect(mutateA.status).toBe(200);
+    const forgedWorkspace = await fetch(accessUrl, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${tokenA}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        operation: "visibility",
+        scope: { scopeKind: "canvas", workspaceId: workspaceB, projectId, canvasId: "default" },
+        expectedAclRevision: 0,
+        visibility: "shared"
+      })
+    });
+    expect(forgedWorkspace.status).toBe(403);
+    await expect(forgedWorkspace.json()).resolves.toEqual({ error: "cross_workspace" });
     expect(composition.trustedProjectControl.resolveTrustedProjectScope({
       workspaceId: workspaceA,
       projectId,

@@ -76,7 +76,8 @@ export function authenticateHumanForProject(
 /**
  * Authenticate a collaboration request through either the legacy project-device
  * credential or a Workspace-scoped setup-code device session. Workspace sessions
- * are bound to exactly one mapped project workspace before downstream ACL checks.
+ * establish their authority from the session workspace; legacy credentials resolve
+ * through the uniquely mapped legacy-project adapter before downstream ACL checks.
  */
 export function authenticateCollaborationForProject(
   repository: HumanIdentityRepository,
@@ -87,32 +88,17 @@ export function authenticateCollaborationForProject(
   const token = parseHumanDeviceBearer(authorization);
   if (!token) return undefined;
   const workspaceSession = workspaceIdentity.authenticateWorkspaceDeviceSession(token);
-  const legacyDevice = repository.authenticateDevice(token);
-  if (workspaceSession && legacyDevice) {
-    const legacyWorkspace = workspaceIdentity.workspaceForLegacyProject(
-      legacyDevice.device.mintedForProjectId
-    );
-    if (
-      legacyDevice.principal.humanPrincipalId !== workspaceSession.humanPrincipalId ||
-      legacyWorkspace !== workspaceSession.workspaceId
-    ) {
-      return undefined;
-    }
+  if (workspaceSession) {
+    return {
+      kind: "workspace_device",
+      workspaceId: workspaceSession.workspaceId,
+      deviceSessionId: workspaceSession.deviceSessionId,
+      humanPrincipalId: workspaceSession.humanPrincipalId,
+      displayName: workspaceSession.displayName,
+      projectId
+    };
   }
-  const legacy = authenticateHumanForProject(repository, authorization, projectId);
-  if (legacy) return legacy;
-  if (!workspaceSession) return undefined;
-  if (workspaceIdentity.workspaceForLegacyProject(projectId) !== workspaceSession.workspaceId) {
-    return undefined;
-  }
-  return {
-    kind: "workspace_device",
-    workspaceId: workspaceSession.workspaceId,
-    deviceSessionId: workspaceSession.deviceSessionId,
-    humanPrincipalId: workspaceSession.humanPrincipalId,
-    displayName: workspaceSession.displayName,
-    projectId
-  };
+  return authenticateHumanForProject(repository, authorization, projectId);
 }
 
 /**
