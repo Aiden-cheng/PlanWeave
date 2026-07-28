@@ -10,6 +10,8 @@ import { createTestWorkspace } from "../../../runtime/src/__tests__/promptTestHe
 import {
   CanvasCommandRepository,
   CanvasCommandService,
+  ContentVersionRepository,
+  ContentVersionService,
   createDefaultCanvasRuntimePort,
   digestCanvasIntent,
   routeCanvasCommandHttp,
@@ -79,6 +81,7 @@ function fakeRuntime(initialDigest = digestOf("empty")): CanvasRuntimeMutationPo
 async function fixture(options?: {
   journalRetention?: number;
   runtime?: CanvasRuntimeMutationPort;
+  contentVersions?: boolean;
 }) {
   const workspace = await createTestWorkspace();
   directories.push(workspace.home, workspace.root);
@@ -137,15 +140,19 @@ async function fixture(options?: {
     maxJournalEntries: options?.journalRetention ?? 3
   });
   const runtime = options?.runtime ?? fakeRuntime();
+  const contentVersions = options?.contentVersions
+    ? new ContentVersionRepository(database, () => new Date("2026-01-02T00:00:00.000Z"))
+    : undefined;
   const service = new CanvasCommandService({
     repository,
     access,
     workspaceIdentity: new WorkspaceIdentityRepository(database),
     runtime,
+    contentVersions,
     clock: () => new Date("2026-01-02T00:00:00.000Z"),
     presenceHeadProbe: () => 999
   });
-  return { workspace, database, access, repository, service, runtime };
+  return { workspace, database, access, repository, service, runtime, contentVersions };
 }
 
 function actor(id: "owner" | "editor" | "viewer"): HumanAuthContext {
@@ -539,6 +546,82 @@ describe("canvas command service (OSS-004 B-002)", () => {
       conflict: { expectedRevision: 0, authoritativeRevision: 1 }
     });
     expect(applyCalls).toBe(1);
+  });
+
+  it("recovers immutable content and both authority heads in one accepted commit", async () => {
+    const runtime = createDefaultCanvasRuntimePort();
+    const { workspace, database, access, repository, service, contentVersions } = await fixture({
+      runtime,
+      contentVersions: true
+    });
+    if (!contentVersions || !runtime.captureContent) throw new Error("content version fixture unavailable");
+    const scope = { workspaceId: "w", projectId: "p", canvasId: "default" };
+    const runtimeApi = await import("@planweave-ai/runtime");
+    await runtimeApi.saveDesktopLayout(workspace.root, {
+      version: "desktop-layout/v1",
+      projectId: workspace.init.workspace.id,
+      nodes: [],
+      updatedAt: "2026-01-02T00:00:00.000Z"
+    });
+    const initialCapture = await runtime.captureContent({
+      projectRoot: workspace.root,
+      canvasId: "default",
+      expectedPackageDir: workspace.init.workspace.packageDir
+    });
+    if (!initialCapture.ok) throw new Error(initialCapture.detail);
+    contentVersions.publishInitial({
+      scope,
+      content: initialCapture.content,
+      createdBy: { kind: "human", id: "owner" }
+    });
+
+    const intent: CanvasCommandIntent = {
+      kind: "update_task_prompt",
+      taskId: "T-001",
+      promptMarkdown: "# recovered authoritative prompt\n"
+    };
+    const applied = await runtime.apply({
+      projectRoot: workspace.root,
+      canvasId: "default",
+      expectedPackageDir: workspace.init.workspace.packageDir,
+      intent
+    });
+    if (!applied.ok) throw new Error(applied.detail);
+    repository.reservePending({
+      scope,
+      operationId: "op-content-recovery",
+      expectedRevision: 0,
+      intent,
+      intentDigest: digestCanvasIntent(intent),
+      actor: { kind: "human", id: "owner" }
+    });
+    repository.markPendingNeedsRecovery(scope, "op-content-recovery");
+
+    expect(await service.recoverInterrupted()).toEqual({ cleared: 1, recovered: 1, deferred: 0 });
+    const canvasHead = repository.head(scope);
+    const contentHead = contentVersions.head(scope);
+    expect(canvasHead).toMatchObject({ revision: 1 });
+    expect(contentHead).toMatchObject({ revision: 2 });
+    if (!contentHead) throw new Error("content head missing");
+    expect(canvasHead.contentDigest).toBe(contentHead.content.canonicalDigest);
+    expect(contentVersions.journalAfter(scope, 1)).toEqual([
+      expect.objectContaining({ revision: 2, content: contentHead.content })
+    ]);
+    expect(repository.getOperation(scope, "op-content-recovery")?.outcome).toMatchObject({
+      type: "canvas.command.accepted",
+      contentDigest: contentHead.content.canonicalDigest
+    });
+
+    const fetched = new ContentVersionService({
+      repository: contentVersions,
+      access,
+      workspaceIdentity: new WorkspaceIdentityRepository(database)
+    }).fetch(actor("editor"), {
+      projectId: "p",
+      canvasId: "default",
+      content: contentHead.content
+    });
+    expect(fetched.completed).toEqual(contentHead.content);
   });
 
   it("keeps an unreadable crash-recovery package pending and fences writes until it reconciles", async () => {
