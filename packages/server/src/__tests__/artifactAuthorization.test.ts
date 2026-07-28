@@ -66,6 +66,7 @@ async function putArtifact(
 
 function scope(dispatch: DispatchRecord) {
   return {
+    workspaceId: dispatch.workspaceId,
     projectId: dispatch.projectId,
     hostId: dispatch.hostId,
     dispatchId: dispatch.id,
@@ -292,9 +293,19 @@ describe("artifact authorization migration", () => {
         created_at TEXT NOT NULL
       );
       CREATE TABLE dispatches(
-        id TEXT PRIMARY KEY,project_id TEXT NOT NULL,package_ref TEXT NOT NULL,host_id TEXT NOT NULL,
-        lease_id TEXT NOT NULL,execution_attempt_id TEXT NOT NULL
+        id TEXT PRIMARY KEY,project_id TEXT NOT NULL,block_ref TEXT NOT NULL,
+        package_ref TEXT NOT NULL,host_id TEXT NOT NULL REFERENCES agent_hosts(id),
+        required_capabilities_json TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN (
+          'leased','running','interrupted','cancelling','awaiting_writeback','completed','failed','cancelled'
+        )),
+        lease_id TEXT NOT NULL UNIQUE,execution_attempt_id TEXT NOT NULL,
+        lease_expires_at TEXT NOT NULL,created_at TEXT NOT NULL,accepted_at TEXT,finished_at TEXT,
+        result_json TEXT,failure_json TEXT,interruption_reason TEXT,interruption_resumable INTEGER,
+        interruption_recovery_json TEXT
       );
+      CREATE INDEX idx_dispatches_host_status ON dispatches(host_id,status);
+      CREATE INDEX idx_dispatches_writeback ON dispatches(status,created_at);
       CREATE TABLE mailbox_messages(
         sequence INTEGER PRIMARY KEY AUTOINCREMENT,message_id TEXT NOT NULL UNIQUE,
         host_id TEXT NOT NULL REFERENCES agent_hosts(id),command_json TEXT NOT NULL,

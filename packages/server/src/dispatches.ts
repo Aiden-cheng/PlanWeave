@@ -41,6 +41,7 @@ export type DispatchInterruption = Pick<
 
 export type DispatchRecord = {
   id: string;
+  workspaceId: string;
   projectId: string;
   blockRef: string;
   hostId: string;
@@ -95,6 +96,7 @@ export type DispatchServiceOptions = {
 
 type DispatchRow = Record<string, unknown> & {
   id: string;
+  workspace_id: string;
   project_id: string;
   block_ref: string;
   host_id: string;
@@ -116,6 +118,7 @@ type DispatchRow = Record<string, unknown> & {
 function toDispatch(row: DispatchRow): DispatchRecord {
   return {
     id: dispatchIdSchema.parse(row.id),
+    workspaceId: row.workspace_id,
     projectId: row.project_id,
     blockRef: row.block_ref,
     hostId: row.host_id,
@@ -222,7 +225,8 @@ export class DispatchService {
     executionAttemptId: string;
     leaseExpiresAt: string;
   }> {
-    this.inbox.process(hostId, messageId, "host.heartbeat", { activeLeases, readiness }, () => {
+    const payload = readiness === undefined ? { activeLeases } : { activeLeases, readiness };
+    this.inbox.process(hostId, messageId, "host.heartbeat", payload, () => {
       const now = new Date();
       this.hosts.touch(hostId, now, readiness);
       for (const lease of activeLeases) {
@@ -357,6 +361,7 @@ export class DispatchService {
         }
         this.artifactAuthorization.requireResultProvenance(
           {
+            workspaceId: dispatch.workspaceId,
             projectId: dispatch.projectId,
             hostId,
             dispatchId,

@@ -103,16 +103,16 @@ describe("createTrustedRuntimeRegistry", () => {
       }
     ]);
 
-    expect(
-      trusted.hasScope({ workspaceId: "workspace-a", projectId, canvasId: "default" })
-    ).toBe(true);
-    expect(
-      trusted.hasScope({ workspaceId: "workspace-b", projectId, canvasId: "default" })
-    ).toBe(true);
-    expect(trusted.hasCanvas(projectId, "default")).toBe(false);
-    expect(() => trusted.registry.resolve({ projectId, canvasId: "default" })).toThrow(
-      "remote_runtime_locator_unresolved"
+    expect(trusted.hasScope({ workspaceId: "workspace-a", projectId, canvasId: "default" })).toBe(
+      true
     );
+    expect(trusted.hasScope({ workspaceId: "workspace-b", projectId, canvasId: "default" })).toBe(
+      true
+    );
+    expect(trusted.hasCanvas(projectId, "default")).toBe(false);
+    expect(() =>
+      trusted.registry.resolve({ workspaceId: "workspace-missing", projectId, canvasId: "default" })
+    ).toThrow("remote_runtime_locator_unresolved");
     expect(() =>
       trusted.registry.resolve({ workspaceId: "workspace-a", projectId, canvasId: "default" })
     ).not.toThrow();
@@ -206,9 +206,9 @@ describe("createTrustedRuntimeRegistry", () => {
     ]);
     expect(Object.isFrozen(trusted.expansions)).toBe(true);
     expect(Object.isFrozen(trusted.expansions[0])).toBe(true);
-    expect(trusted.hasScope({ workspaceId: "workspace-one", projectId, canvasId: "secondary" })).toBe(
-      true
-    );
+    expect(
+      trusted.hasScope({ workspaceId: "workspace-one", projectId, canvasId: "secondary" })
+    ).toBe(true);
     expect(trusted.hasCanvas(projectId, "undeclared")).toBe(false);
     expect(() =>
       trusted.registry.resolve({ workspaceId: "workspace-one", projectId, canvasId: "secondary" })
@@ -243,14 +243,14 @@ describe("createTrustedRuntimeRegistry", () => {
     const trusted = await createTrustedRuntimeRegistry([
       { workspaceId: "workspace-one", projectId, projectRoot: workspace.root, canvasId: "default" }
     ]);
-    expect(trusted.locators).toEqual([{ workspaceId: "workspace-one", projectId, canvasId: "default" }]);
+    expect(trusted.locators).toEqual([
+      { workspaceId: "workspace-one", projectId, canvasId: "default" }
+    ]);
     expect(trusted.hasCanvas(projectId, "default")).toBe(true);
     expect(trusted.hasCanvas(projectId, "secondary")).toBe(false);
     expect(() =>
       trusted.registry.resolve({ workspaceId: "workspace-one", projectId, canvasId: "secondary" })
-    ).toThrow(
-      "remote_runtime_locator_unresolved"
-    );
+    ).toThrow("remote_runtime_locator_unresolved");
     trusted.close();
   });
 

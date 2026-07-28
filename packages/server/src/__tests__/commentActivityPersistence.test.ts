@@ -11,11 +11,37 @@ import {
   centralSchemaVersion,
   latestCentralSchemaVersion
 } from "../migrations.js";
+import { migrations } from "../migrations/registry.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 import type { WorkItemRef } from "../work/schemas.js";
 
 const directories: string[] = [];
 const databases: SqliteDatabase[] = [];
+
+function prepareHistoricalSchema(database: SqliteDatabase, throughVersion: number): void {
+  database.exec(
+    "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
+  );
+  for (const migration of migrations) {
+    if (migration.version > throughVersion) break;
+    if (migration.disableForeignKeys) database.exec("PRAGMA foreign_keys = OFF");
+    try {
+      database.exec("BEGIN IMMEDIATE");
+      migration.before?.(database);
+      database.exec(migration.sql);
+      migration.after?.(database);
+      database
+        .prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)")
+        .run(migration.version, "2020-01-01T00:00:00.000Z");
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    } finally {
+      if (migration.disableForeignKeys) database.exec("PRAGMA foreign_keys = ON");
+    }
+  }
+}
 
 afterEach(async () => {
   for (const database of databases.splice(0)) {
@@ -96,18 +122,10 @@ describe("comment/activity migration v20", () => {
     const database = await openServerDatabase(join(directory, "server.sqlite"), 5_000);
     databases.push(database);
 
-    database.exec(`
-      CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
-    `);
-    for (let version = 1; version <= 19; version += 1) {
-      database
-        .prepare("INSERT INTO schema_migrations(version,applied_at) VALUES (?,?)")
-        .run(version, "2020-01-01T00:00:00.000Z");
-    }
-    database.exec("CREATE TABLE dispatches(id TEXT PRIMARY KEY, package_ref TEXT NOT NULL)");
+    prepareHistoricalSchema(database, 19);
     applyMigrations(database);
     expect(centralSchemaVersion(database)).toBe(latestCentralSchemaVersion);
-    expect(latestCentralSchemaVersion).toBe(37);
+    expect(latestCentralSchemaVersion).toBe(40);
 
     for (const table of ["comments", "activity_records", "activity_projection_outbox"]) {
       expect(

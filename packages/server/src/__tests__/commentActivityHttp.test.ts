@@ -340,6 +340,46 @@ describe("comment and activity production HTTP", () => {
     };
     expect(joined.status).toBe(201);
 
+    const shared = await fetch(
+      `${fixture.origin}/api/v1/projects/${projectId}/canvases/default/access`,
+      {
+        method: "POST",
+        headers: jsonHeaders(ownerToken),
+        body: JSON.stringify({
+          operation: "visibility",
+          scope: {
+            scopeKind: "project",
+            workspaceId: projectAWorkspaceId,
+            projectId,
+            canvasId: null
+          },
+          expectedAclRevision: 0,
+          visibility: "shared"
+        })
+      }
+    );
+    expect(shared.status).toBe(200);
+    const memberAccess = await fetch(
+      `${fixture.origin}/api/v1/projects/${projectId}/canvases/default/access`,
+      {
+        method: "POST",
+        headers: jsonHeaders(ownerToken),
+        body: JSON.stringify({
+          operation: "grant",
+          scope: {
+            scopeKind: "canvas",
+            workspaceId: projectAWorkspaceId,
+            projectId,
+            canvasId: "default"
+          },
+          expectedAclRevision: 0,
+          humanPrincipalId: joinedBody.principal.humanPrincipalId,
+          role: "viewer"
+        })
+      }
+    );
+    expect(memberAccess.status).toBe(200);
+
     const workItem = { kind: "task", canvasId: "default", taskId: "T-001" };
     const assignment = await fetch(`${fixture.origin}/api/v1/projects/${projectId}/assignments`, {
       method: "POST",

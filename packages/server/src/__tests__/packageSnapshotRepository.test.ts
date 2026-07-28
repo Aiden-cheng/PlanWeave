@@ -175,7 +175,7 @@ describe("package snapshot repository", () => {
         actor: viewer,
         expectedAclRevision: 0
       })
-    ).rejects.toThrow("grantor_role_insufficient");
+    ).rejects.toThrow("access_capability_denied:capability_denied");
     const created = await snapshots.create({
       workspaceId: "w",
       projectId: "p",

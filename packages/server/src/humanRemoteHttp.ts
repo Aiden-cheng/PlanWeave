@@ -2,7 +2,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
 import { z } from "zod";
 import {
-  authenticateCollaborationForProject,
+  authenticateCollaborationForScope,
+  hasAuthenticatedCollaborationDevice,
   humanTransportAllowed,
   type HumanIdentityRepository,
   type HumanProjectAuthority
@@ -44,9 +45,10 @@ function decodeIdentifier(value: string): string | undefined {
 }
 
 function route(request: IncomingMessage, pathname: string): HumanRemoteRoute | undefined {
-  const match = /^\/api\/v1\/projects\/([^/]+)\/remote-operations(?:\/([^/]+)(?:\/(actions|events|interactions)(\/respond)?)?)?$/.exec(
-    pathname
-  );
+  const match =
+    /^\/api\/v1\/projects\/([^/]+)\/remote-operations(?:\/([^/]+)(?:\/(actions|events|interactions)(\/respond)?)?)?$/.exec(
+      pathname
+    );
   if (!match) return undefined;
   const projectId = decodeIdentifier(match[1]);
   if (!projectId) return undefined;
@@ -179,11 +181,6 @@ export async function handleHumanRemoteHttpRequest(
       respond(response, 426, { error: "human_insecure_transport" });
       return true;
     }
-    if (!options.projectAuthority.hasProject(matched.projectId)) {
-      request.resume();
-      respond(response, 403, { error: "human_cross_project_forbidden" });
-      return true;
-    }
     if (
       (matched.kind === "dispatch" ||
         matched.kind === "action" ||
@@ -194,50 +191,42 @@ export async function handleHumanRemoteHttpRequest(
       respond(response, 503, { error: "server_not_accepting_mutations" });
       return true;
     }
-    const context = authenticateCollaborationForProject(
+    const scope = authenticateCollaborationForScope(
       options.repository,
       options.workspaceIdentity,
+      options.projectAuthority,
       request.headers.authorization,
       matched.projectId
     );
-    if (!context) {
+    if (!scope) {
+      const authenticated = hasAuthenticatedCollaborationDevice(
+        options.repository,
+        options.workspaceIdentity,
+        request.headers.authorization
+      );
+      const forbidden = authenticated && !options.projectAuthority.hasProject(matched.projectId);
       request.resume();
-      respond(response, 401, { error: "human_auth_unauthenticated" });
+      respond(response, forbidden ? 403 : 401, {
+        error: forbidden ? "human_cross_project_forbidden" : "human_auth_unauthenticated"
+      });
       return true;
     }
 
     switch (matched.kind) {
       case "dispatch":
         query(url, []);
-        respond(
-          response,
-          202,
-          await options.service.dispatch(context, matched.projectId, await readJson(request))
-        );
+        respond(response, 202, await options.service.dispatch(scope, await readJson(request)));
         break;
       case "get":
         query(url, []);
-        respond(
-          response,
-          200,
-          await options.service.observeOperation(
-            context,
-            matched.projectId,
-            matched.operationId
-          )
-        );
+        respond(response, 200, await options.service.observeOperation(scope, matched.operationId));
         break;
       case "action":
         query(url, []);
         respond(
           response,
           202,
-          await options.service.executeAction(
-            context,
-            matched.projectId,
-            matched.operationId,
-            await readJson(request)
-          )
+          await options.service.executeAction(scope, matched.operationId, await readJson(request))
         );
         break;
       case "events": {
@@ -245,7 +234,7 @@ export async function handleHumanRemoteHttpRequest(
         respond(
           response,
           200,
-          options.service.replayEvents(context, matched.projectId, matched.operationId, {
+          options.service.replayEvents(scope, matched.operationId, {
             ...(parameters.afterCursor === undefined
               ? {}
               : { afterCursor: Number(parameters.afterCursor) })
@@ -258,7 +247,7 @@ export async function handleHumanRemoteHttpRequest(
         respond(
           response,
           200,
-          options.service.listPendingInteractions(context, matched.projectId, matched.operationId, {
+          options.service.listPendingInteractions(scope, matched.operationId, {
             ...(parameters.cursor === undefined ? {} : { cursor: Number(parameters.cursor) }),
             ...(parameters.limit === undefined ? {} : { limit: Number(parameters.limit) })
           })
@@ -270,12 +259,7 @@ export async function handleHumanRemoteHttpRequest(
         respond(
           response,
           200,
-          options.service.settleInteraction(
-            context,
-            matched.projectId,
-            matched.operationId,
-            await readJson(request)
-          )
+          options.service.settleInteraction(scope, matched.operationId, await readJson(request))
         );
         break;
     }

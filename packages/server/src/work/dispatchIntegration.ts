@@ -243,11 +243,15 @@ export function createAuthorityDispatchGate(
   options: CreateAuthorityDispatchGateOptions
 ): AssignmentDispatchGate {
   const clock = options.clock ?? (() => new Date());
-  const scopeFor = (input: { projectId: string; canvasId: string; blockRef: string }) => {
-    const workspaceId = options.workspaceIdentity.workspaceForLegacyProject(input.projectId) ?? "";
+  const scopeFor = (input: {
+    workspaceId: string;
+    projectId: string;
+    canvasId: string;
+    blockRef: string;
+  }) => {
     return {
       kind: "block" as const,
-      workspaceId,
+      workspaceId: workspaceIdSchema.parse(input.workspaceId),
       projectId: input.projectId,
       canvasId: input.canvasId,
       blockRef: input.blockRef
@@ -265,10 +269,7 @@ export function createAuthorityDispatchGate(
       if (hasAnyExpected && !hasAllExpected) {
         throw new DispatchAssignmentError("work_revision_conflict");
       }
-      const scope = {
-        ...scopeFor(input),
-        workspaceId: workspaceIdSchema.parse(scopeFor(input).workspaceId)
-      };
+      const scope = scopeFor(input);
       if (!scope.workspaceId || !options.workspaceIdentity.workspaceExists(scope.workspaceId)) {
         throw new DispatchAssignmentError("work_host_not_authorized");
       }

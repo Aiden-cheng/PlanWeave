@@ -248,7 +248,7 @@ export class RemoteBlockActionCoordinator {
   }
 
   private async withRuntime<T>(
-    locator: { projectId: string; canvasId: string },
+    locator: { workspaceId: string; projectId: string; canvasId: string },
     operation: (runtime: RemoteBlockRuntimePort) => Promise<T>
   ): Promise<T> {
     const acquired = await this.options.runtimeResolver.acquire?.(locator);

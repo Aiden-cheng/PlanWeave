@@ -35,6 +35,7 @@ export function createRemoteDispatchFixture(
   if (candidateHost) coordination.hosts.bindToWorkspace(candidateHost.id, workspaceId);
   const operations = new RemoteOperationRepository(database);
   let operation = operations.create({
+    workspaceId,
     projectId: sourceEnvelope.projectId,
     canvasId: sourceEnvelope.canvasId,
     blockRef: sourceEnvelope.blockRef,

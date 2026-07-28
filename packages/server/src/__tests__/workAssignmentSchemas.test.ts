@@ -94,6 +94,7 @@ describe("work assignment schemas", () => {
   it("rejects Host targets on Task assignment records and commands", () => {
     expect(() =>
       assignmentRecordSchema.parse({
+        workspaceId: "workspace-a",
         projectId: "project-a",
         workItem: taskRef,
         target: { kind: "exact_host", hostId: "host-1" },
@@ -105,6 +106,7 @@ describe("work assignment schemas", () => {
 
     expect(() =>
       assignmentRecordSchema.parse({
+        workspaceId: "workspace-a",
         projectId: "project-a",
         workItem: taskRef,
         target: { kind: "automatic_host" },
@@ -116,6 +118,7 @@ describe("work assignment schemas", () => {
 
     expect(
       assignmentRecordSchema.parse({
+        workspaceId: "workspace-a",
         projectId: "project-a",
         workItem: taskRef,
         target: { kind: "human", humanPrincipalId: "human-1" },
@@ -160,6 +163,7 @@ describe("work assignment schemas", () => {
 
     expect(() =>
       assignmentRecordSchema.parse({
+        workspaceId: "workspace-a",
         projectId: "project-a",
         workItem: blockRef,
         target: { kind: "automatic_host", capabilities: ["linux"] },
@@ -228,6 +232,7 @@ describe("work assignment schemas", () => {
     });
     expect(() => assignmentConcurrencyFactsSchema.parse({ currentRevision: 1 })).toThrow();
     const current = assignmentRecordSchema.parse({
+      workspaceId: "workspace-a",
       projectId: "project-a",
       workItem: blockRef,
       target: { kind: "unassigned" },

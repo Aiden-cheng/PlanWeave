@@ -72,7 +72,7 @@ class CoordinatorHarness {
     readonly workspace: Awaited<ReturnType<typeof createTestWorkspace>>,
     readonly dataDirectory: string,
     readonly databasePath: string,
-    readonly locator: { projectId: string; canvasId: string }
+    readonly locator: { workspaceId: string; projectId: string; canvasId: string }
   ) {}
 
   static async create(includeSecondTask = false): Promise<CoordinatorHarness> {
@@ -82,7 +82,11 @@ class CoordinatorHarness {
       workspace,
       dataDirectory,
       join(dataDirectory, "server.sqlite"),
-      { projectId: workspace.init.workspace.id, canvasId: "default" }
+      {
+        workspaceId: "workspace-pending-crash",
+        projectId: workspace.init.workspace.id,
+        canvasId: "default"
+      }
     );
     cleanups.push(async () => {
       harness.close();
@@ -110,6 +114,9 @@ class CoordinatorHarness {
     this.runtime = decorateRuntime(
       createRemoteBlockRuntimePort({ projectRoot: this.workspace.root })
     );
+    this.locator.workspaceId = new WorkspaceIdentityRepository(
+      this.server.database
+    ).ensureWorkspaceForLegacyProject(this.locator.projectId);
     const registry = new RemoteRuntimePortRegistry();
     registry.bind(this.locator, this.runtime);
     this.artifacts = new ArtifactStore(this.server.database, this.dataDirectory, 1024 * 1024);
@@ -180,7 +187,17 @@ class CoordinatorHarness {
       this.requireServer().database
     ).ensureWorkspaceForLegacyProject(this.locator.projectId);
     coordination.hosts.bindToWorkspace(host.id, workspaceId);
-    coordination.hosts.reportOnline(host.id, ["acp.codex"], capacity);
+    coordination.hosts.reportOnline(host.id, ["acp.codex"], capacity, {
+      workspaceMappings: [{ workspaceId, status: "ready" }],
+      acpProfiles: [
+        {
+          profileId: "codex-acp",
+          agentId: "codex",
+          status: "ready",
+          capabilities: ["acp.codex"]
+        }
+      ]
+    });
     return host.id;
   }
 
@@ -217,7 +234,17 @@ async function prepareInterruptedAction(harness: CoordinatorHarness, resumable: 
   const hostId = harness.registerHost();
   const coordination = harness.requireCoordination();
   if (resumable) {
-    coordination.hosts.reportOnline(hostId, ["acp.codex", "acp.session.load"], 1);
+    coordination.hosts.reportOnline(hostId, ["acp.codex", "acp.session.load"], 1, {
+      workspaceMappings: [{ workspaceId: harness.locator.workspaceId, status: "ready" }],
+      acpProfiles: [
+        {
+          profileId: "codex-acp",
+          agentId: "codex",
+          status: "ready",
+          capabilities: ["acp.codex", "acp.session.load"]
+        }
+      ]
+    });
   }
   const outcome = await coordination.coordinator.dispatch(
     harness.request("T-001#B-001", `action-crash-${resumable}`)
@@ -333,6 +360,7 @@ describe("RemoteBlockCoordinator crash reconciliation", () => {
     new WorkAssignmentRepository(harness.requireServer().database).applyCasUpdate({
       expectedRevision: 0,
       record: {
+        workspaceId: harness.locator.workspaceId,
         projectId: harness.locator.projectId,
         workItem: { kind: "block", canvasId: harness.locator.canvasId, blockRef: "T-001#B-001" },
         target: { kind: "exact_host", hostId },

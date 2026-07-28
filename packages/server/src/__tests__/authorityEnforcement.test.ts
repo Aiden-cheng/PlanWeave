@@ -252,6 +252,95 @@ describe("separated assignment authorities", () => {
 });
 
 describe("strict Host dispatch authority", () => {
+  it("isolates identical project and canvas identifiers by requested workspace", async () => {
+    const { database, access, workspaceIdentity, hosts, host, repository } = await fixture();
+    database.exec(
+      "INSERT INTO workspaces(workspace_id,display_name,created_at) VALUES ('w2','Workspace 2','2026-07-27T00:00:00.000Z')"
+    );
+    access.registerProjectInternal({
+      workspaceId: "w2",
+      projectId: "p",
+      projectRoot: "/tmp/project-p-w2"
+    });
+    access.registerCanvasInternal({
+      workspaceId: "w2",
+      projectId: "p",
+      canvasId: "c",
+      packageDir: "/tmp/project-p-w2/canvas-c"
+    });
+    const host2 = hosts.registerWithCredential(
+      "Host 2",
+      `pw_host_${"b".repeat(43)}`,
+      ["acp.codex"],
+      1
+    ).host;
+    hosts.bindToWorkspace(host2.id, "w2");
+    hosts.reportOnline(host2.id, ["acp.codex"], 1, {
+      workspaceMappings: [{ workspaceId: "w2", status: "ready" }],
+      acpProfiles: [
+        {
+          profileId: "codex-acp",
+          agentId: "codex",
+          status: "ready",
+          capabilities: ["acp.codex"]
+        }
+      ]
+    });
+    for (const [workspaceId, hostId] of [
+      ["w", host.id],
+      ["w2", host2.id]
+    ] as const) {
+      repository.applyExecutionTarget({
+        mutation: {
+          schemaVersion: "execution-target/v1",
+          scope: {
+            kind: "block",
+            workspaceId,
+            projectId: "p",
+            canvasId: "c",
+            blockRef: "T-001#B-001"
+          },
+          target: { kind: "exact_host", hostId },
+          expectedRevision: 0
+        },
+        actor: { kind: "human", id: "owner" }
+      });
+    }
+    const gate = createAuthorityDispatchGate({
+      repository,
+      database,
+      workspaceIdentity,
+      hosts,
+      access,
+      hostOfflineAfterMs: 60_000,
+      clock: now
+    });
+    expect(
+      gate.resolve({
+        workspaceId: "w",
+        projectId: "p",
+        canvasId: "c",
+        blockRef: "T-001#B-001",
+        requiredCapabilities: ["acp.codex"],
+        expectedResponsibilityRevision: 0,
+        expectedReviewerRevision: 0,
+        expectedExecutionTargetRevision: 1
+      })
+    ).toMatchObject({ workspaceId: "w", preferredHostId: host.id });
+    expect(
+      gate.resolve({
+        workspaceId: "w2",
+        projectId: "p",
+        canvasId: "c",
+        blockRef: "T-001#B-001",
+        requiredCapabilities: ["acp.codex"],
+        expectedResponsibilityRevision: 0,
+        expectedReviewerRevision: 0,
+        expectedExecutionTargetRevision: 1
+      })
+    ).toMatchObject({ workspaceId: "w2", preferredHostId: host2.id });
+  });
+
   it("selects only an eligible workspace Host and rejects stale revisions", async () => {
     const { database, access, workspaceIdentity, hosts, host, repository } = await fixture();
     const scope = {
@@ -281,6 +370,7 @@ describe("strict Host dispatch authority", () => {
     });
     expect(
       gate.resolve({
+        workspaceId: "w",
         projectId: "p",
         canvasId: "c",
         blockRef: "T-001#B-001",
@@ -302,6 +392,7 @@ describe("strict Host dispatch authority", () => {
     });
     expect(() =>
       gate.resolve({
+        workspaceId: "w",
         projectId: "p",
         canvasId: "c",
         blockRef: "T-001#B-001",
@@ -411,6 +502,7 @@ describe("strict Host dispatch authority", () => {
     });
     expect(() =>
       gate.resolve({
+        workspaceId: "w",
         projectId: "p",
         canvasId: "c",
         blockRef: "T-001#B-001",
@@ -456,6 +548,7 @@ describe("strict Host dispatch authority", () => {
       clock: now
     });
     const request = {
+      workspaceId: "w",
       projectId: "p",
       canvasId: "c",
       blockRef: "T-001#B-001",
@@ -505,6 +598,7 @@ describe("strict Host dispatch authority", () => {
     });
     expect(
       gate.resolve({
+        workspaceId: "w",
         projectId: "p",
         canvasId: "c",
         blockRef: "T-001#B-001",

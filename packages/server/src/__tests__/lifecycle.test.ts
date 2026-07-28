@@ -268,7 +268,7 @@ describe("server lifecycle", () => {
     reopened.close();
   });
 
-  it("upgrades a populated v20 database and never reintroduces dispatches.package_ref", async () => {
+  it("quarantines an unmapped v20 dispatch and never reintroduces dispatches.package_ref", async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), "planweave-server-package-ref-"));
     directories.push(dataDirectory);
     const databasePath = join(dataDirectory, "server.sqlite");
@@ -327,15 +327,27 @@ describe("server lifecycle", () => {
       ).toBe(false);
       expect(
         upgraded.database
-          .prepare(
-            "SELECT project_id,block_ref,host_id,status FROM dispatches WHERE id=?"
-          )
+          .prepare("SELECT project_id,block_ref,host_id,status FROM dispatches WHERE id=?")
           .get("dispatch-upgrade-v20")
-      ).toEqual({
-        project_id: "project-upgrade",
-        block_ref: "TASK#B-001",
-        host_id: "host-upgrade-v20",
-        status: "running"
+      ).toBeUndefined();
+      const quarantined = upgraded.database
+        .prepare(
+          "SELECT dispatch_id,project_id,payload_json FROM dispatches_unscoped_legacy WHERE dispatch_id=?"
+        )
+        .get("dispatch-upgrade-v20") as {
+        dispatch_id: string;
+        project_id: string;
+        payload_json: string;
+      };
+      expect(quarantined).toMatchObject({
+        dispatch_id: "dispatch-upgrade-v20",
+        project_id: "project-upgrade"
+      });
+      expect(JSON.parse(quarantined.payload_json)).toEqual({
+        blockRef: "TASK#B-001",
+        hostId: "host-upgrade-v20",
+        leaseId: "lease-upgrade-v20",
+        executionAttemptId: "attempt-upgrade-v20"
       });
     } finally {
       upgraded.close();

@@ -251,6 +251,7 @@ describe("adversarial artifact HTTP boundary", () => {
     ).toBe(403);
 
     const inputGrant = fixture.coordination.artifactAuthorization.authorizeInputRead({
+      workspaceId: fixture.dispatchA.workspaceId,
       projectId: fixture.dispatchA.projectId,
       hostId: fixture.dispatchA.hostId,
       dispatchId: fixture.dispatchA.id,
@@ -310,6 +311,7 @@ describe("adversarial artifact HTTP boundary", () => {
     ).toBe(413);
 
     const revoked = fixture.coordination.artifactAuthorization.createOutputGrant({
+      workspaceId: fixture.dispatchA2.workspaceId,
       projectId: fixture.dispatchA2.projectId,
       hostId: fixture.dispatchA2.hostId,
       dispatchId: fixture.dispatchA2.id,
@@ -333,6 +335,7 @@ describe("adversarial artifact HTTP boundary", () => {
       ).status
     ).toBe(403);
     const expired = fixture.coordination.artifactAuthorization.createOutputGrant({
+      workspaceId: fixture.dispatchA2.workspaceId,
       projectId: fixture.dispatchA2.projectId,
       hostId: fixture.dispatchA2.hostId,
       dispatchId: fixture.dispatchA2.id,
@@ -446,6 +449,7 @@ describe("adversarial dispatch result provenance", () => {
       const bytes = Buffer.from(text);
       const sha256 = createHash("sha256").update(bytes).digest("hex");
       const grant = fixture.coordination.artifactAuthorization.createOutputGrant({
+        workspaceId: dispatch.workspaceId,
         projectId: dispatch.projectId,
         hostId: dispatch.hostId,
         dispatchId: dispatch.id,
@@ -460,6 +464,7 @@ describe("adversarial dispatch result provenance", () => {
       const artifact = await put(fixture.artifacts, bytes);
       fixture.coordination.artifactAuthorization.acceptOutputUpload(
         {
+          workspaceId: dispatch.workspaceId,
           projectId: dispatch.projectId,
           hostId: dispatch.hostId,
           dispatchId: dispatch.id,

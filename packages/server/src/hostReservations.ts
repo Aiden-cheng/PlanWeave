@@ -160,8 +160,7 @@ export class HostReservationRepository {
         }
         const now = this.clock();
         const onlineAfter = new Date(now.getTime() - this.options.hostOfflineAfterMs).toISOString();
-        const workspaceId = this.workspaceIdentity.workspaceForLegacyProject(operation.projectId);
-        if (!workspaceId) throw new Error("no_compatible_agent_host");
+        const workspaceId = operation.workspaceId;
         const preferredHostId =
           options.preferredHostId === undefined
             ? undefined
@@ -265,7 +264,7 @@ export class HostReservationRepository {
     } catch (error) {
       if (
         error instanceof Error &&
-        /UNIQUE constraint failed: remote_execution_attempts\.(project_id|canvas_id|block_ref|ownership_generation)/.test(
+        /UNIQUE constraint failed: remote_execution_attempts\.(workspace_id|project_id|canvas_id|block_ref|ownership_generation)/.test(
           error.message
         )
       ) {

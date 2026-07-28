@@ -197,12 +197,13 @@ export class SqliteRemoteDispatchPersistence implements RemoteDispatchPersistenc
         this.database
           .prepare(
             `INSERT INTO dispatches(
-              id,project_id,block_ref,host_id,required_capabilities_json,
+              id,workspace_id,project_id,block_ref,host_id,required_capabilities_json,
               status,lease_id,execution_attempt_id,lease_expires_at,created_at
-            ) VALUES (?,?,?,?,?,'leased',?,?,?,?)`
+            ) VALUES (?,?,?,?,?,?,'leased',?,?,?,?)`
           )
           .run(
             input.operation.dispatchId,
+            input.operation.workspaceId,
             input.operation.projectId,
             input.operation.blockRef,
             input.reservation.hostId,
@@ -228,6 +229,7 @@ export class SqliteRemoteDispatchPersistence implements RemoteDispatchPersistenc
           );
       } else if (
         existing.project_id !== input.operation.projectId ||
+        existing.workspace_id !== input.operation.workspaceId ||
         existing.block_ref !== input.operation.blockRef ||
         existing.host_id !== input.reservation.hostId ||
         existing.lease_id !== input.reservation.leaseId ||
@@ -242,6 +244,7 @@ export class SqliteRemoteDispatchPersistence implements RemoteDispatchPersistenc
       );
       this.artifacts.grantDispatchInputs(
         {
+          workspaceId: input.operation.workspaceId,
           projectId: input.operation.projectId,
           hostId: input.reservation.hostId,
           dispatchId: input.operation.dispatchId,

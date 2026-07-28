@@ -1,11 +1,15 @@
 import type { RemoteBlockArtifactSource, RemoteBlockRuntimePort } from "@planweave-ai/runtime";
+import { workspaceIdSchema } from "@planweave-ai/collaboration-contracts";
+import { canonicalRemoteRuntimePort } from "./canonicalRemoteRuntimePort.js";
 import type {
   RemoteBlockRuntimeResolverPort,
   RemoteRuntimeLocator
 } from "./remoteBlockCoordinatorPorts.js";
 
 function locatorKey(locator: RemoteRuntimeLocator): string {
-  return `${locator.workspaceId ?? "legacy-unscoped"}\0${locator.projectId}\0${locator.canvasId}`;
+  const workspaceId = workspaceIdSchema.safeParse(locator.workspaceId);
+  if (!workspaceId.success) throw new Error("remote_runtime_workspace_required");
+  return `${workspaceId.data}\0${locator.projectId}\0${locator.canvasId}`;
 }
 
 export type ScopedRemoteRuntimeBinding = {
@@ -36,7 +40,10 @@ export class RemoteRuntimePortRegistry implements RemoteBlockRuntimeResolverPort
   ): () => void {
     const key = locatorKey(locator);
     if (this.ports.has(key)) throw new Error("remote_runtime_locator_already_bound");
-    const binding = { runtime, artifacts };
+    const binding = {
+      runtime: canonicalRemoteRuntimePort(runtime, locator.workspaceId),
+      artifacts
+    };
     this.ports.set(key, binding);
     return () => {
       if (this.ports.get(key) === binding) this.ports.delete(key);
@@ -88,11 +95,7 @@ export class RemoteRuntimePortRegistry implements RemoteBlockRuntimeResolverPort
   private bindingFor(
     locator: RemoteRuntimeLocator
   ): { runtime: RemoteBlockRuntimePort; artifacts?: RemoteBlockArtifactSource } | undefined {
-    if (locator.workspaceId) return this.ports.get(locatorKey(locator));
-    const matches = [...this.ports.entries()].filter(([key]) =>
-      key.endsWith(`\0${locator.projectId}\0${locator.canvasId}`)
-    );
-    return matches.length === 1 ? matches[0][1] : undefined;
+    return this.ports.get(locatorKey(locator));
   }
 }
 

@@ -46,6 +46,7 @@ async function acceptReportArtifact(
 ): Promise<void> {
   const grant = coordination.artifactAuthorization.createOutputGrant({
     operationId: `report:${dispatch.id}`,
+    workspaceId: dispatch.workspaceId,
     projectId: dispatch.projectId,
     hostId,
     dispatchId: dispatch.id,
@@ -67,6 +68,7 @@ async function acceptReportArtifact(
   });
   coordination.artifactAuthorization.acceptOutputUpload(
     {
+      workspaceId: dispatch.workspaceId,
       projectId: dispatch.projectId,
       hostId,
       dispatchId: dispatch.id,
@@ -262,9 +264,9 @@ describe("DispatchService (test-only thin stack)", () => {
       writeback: { complete, fail }
     });
     const registration = coordination.hosts.register("Linux Builder");
-    const workspaceId = new WorkspaceIdentityRepository(server.database).ensureWorkspaceForLegacyProject(
-      "project-a"
-    );
+    const workspaceId = new WorkspaceIdentityRepository(
+      server.database
+    ).ensureWorkspaceForLegacyProject("project-a");
     coordination.hosts.bindToWorkspace(registration.host.id, workspaceId);
 
     expect(registration.token).toMatch(/^pw_host_/);

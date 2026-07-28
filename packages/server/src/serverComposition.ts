@@ -392,12 +392,13 @@ export async function createDistributedServerComposition(
               if (!humanIdentityForInteractions) {
                 throw new Error("human_identity_not_initialized");
               }
-              return (
-                humanIdentityForInteractions.getActiveMembership(
-                  input.projectId,
-                  input.responderId
-                ) !== undefined
-              );
+              return workspaceIdentity
+                .listMembershipViews(input.workspaceId)
+                .some(
+                  (membership) =>
+                    membership.humanPrincipalId === input.responderId &&
+                    membership.revokedAt === null
+                );
             }
           },
           eventRetentionMaxEvents: config.limits.eventRetentionMaxEvents,
@@ -442,7 +443,9 @@ export async function createDistributedServerComposition(
             });
           },
           onDispatchActivityTransitionInTransaction: (input) => {
-            projection.projectRemoteRunEventInCallerTransaction({
+            assignmentActivityProjection(
+              input.dispatch.workspaceId
+            ).projectRemoteRunEventInCallerTransaction({
               projectId: input.dispatch.projectId,
               type: input.type,
               dispatchId: input.dispatch.id,
@@ -503,14 +506,8 @@ export async function createDistributedServerComposition(
       return createManifestWorkItemPort(manifest, input.canvasId);
     });
     runtimeRegistry.registry.setScopedResolver(async (locator) => {
-      const workspaceId =
-        locator.workspaceId ??
-        uniqueConfiguredWorkspaceId({
-          runtimeRegistry,
-          projectId: locator.projectId,
-          canvasId: locator.canvasId
-        });
-      if (!workspaceId || !workspaceIdentity.workspaceExists(workspaceId)) {
+      const workspaceId = locator.workspaceId;
+      if (!workspaceIdentity.workspaceExists(workspaceId)) {
         throw new Error("remote_runtime_workspace_unresolved");
       }
       const project = projectAccess!.registry.projectInternal(workspaceId, locator.projectId);
@@ -956,14 +953,9 @@ export async function createDistributedServerComposition(
       events: coordination.acpEvents,
       interactions: coordination.interactions,
       authorizeCanvas: (context, scope) => {
-        const workspaceId =
-          "kind" in context && context.kind === "workspace_device"
-            ? context.workspaceId
-            : workspaceIdentity.workspaceForLegacyProject(scope.projectId);
-        if (!workspaceId) throw new Error("authority_workspace_mismatch");
         assertHumanScopeAuthorized({
           actor: context,
-          scope: { workspaceId, ...scope },
+          scope,
           access: initializedProjectAccess,
           workspaceIdentity
         });

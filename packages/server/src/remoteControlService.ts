@@ -106,12 +106,12 @@ export class RemoteControlService {
   async dispatch(principal: OperatorPrincipal, rawRequest: unknown) {
     const request = remoteDispatchIntentSchema.parse(rawRequest);
     this.options.authorization.authorizeProject(principal, request.projectId);
-    const workspaceId = this.options.workspaceIdentity.workspaceForLegacyProject(request.projectId);
-    if (!workspaceId) throw new Error("operator_workspace_unmapped");
+    const workspaceId = this.resolveWorkspace(principal, principal.workspaceId);
     this.authorizeWorkspace(principal, workspaceId);
     // Assignment and dispatch remain separate operations; the coordinator revalidates
     // current assignment before Host reservation (never trusts a UI eligibility list).
     const outcome = await this.options.coordinator.dispatch({
+      workspaceId,
       projectId: request.projectId,
       canvasId: request.canvasId,
       blockRef: request.blockRef,
@@ -216,13 +216,12 @@ export class RemoteControlService {
   }
 
   private operationFor(principal: OperatorPrincipal, operationId: string): RemoteOperation {
-    const operation = this.options.operations.getRequired(operationId);
-    this.options.authorization.authorizeProject(principal, operation.projectId);
-    const workspaceId = this.options.workspaceIdentity.workspaceForLegacyProject(
-      operation.projectId
+    const operation = this.options.operations.getRequiredInWorkspace(
+      principal.workspaceId,
+      operationId
     );
-    if (!workspaceId) throw new Error("operator_workspace_unmapped");
-    this.authorizeWorkspace(principal, workspaceId);
+    this.options.authorization.authorizeProject(principal, operation.projectId);
+    this.authorizeWorkspace(principal, operation.workspaceId);
     return operation;
   }
 
@@ -232,21 +231,13 @@ export class RemoteControlService {
 
   private authorizeWorkspace(principal: OperatorPrincipal, workspaceId: string): void {
     this.options.authorization.authorizeWorkspace(principal, workspaceId, (projectId) =>
-      this.options.workspaceIdentity.workspaceForLegacyProject(projectId)
+      principal.projectIds.includes(projectId) ? principal.workspaceId : undefined
     );
   }
 
   private resolveWorkspace(principal: OperatorPrincipal, requestedWorkspaceId?: string): string {
     const workspaceIds = this.options.workspaceIdentity.listWorkspaceIds();
-    let workspaceId = requestedWorkspaceId;
-    if (!workspaceId) {
-      const scoped = principal.projectIds
-        .map((projectId) => this.options.workspaceIdentity.workspaceForLegacyProject(projectId))
-        .filter((id): id is string => id !== undefined);
-      const candidates = [...new Set(scoped)];
-      if (candidates.length === 1) workspaceId = candidates[0];
-      else if (principal.serverAdmin && workspaceIds.length === 1) workspaceId = workspaceIds[0];
-    }
+    const workspaceId = requestedWorkspaceId ?? principal.workspaceId;
     if (!workspaceId || !workspaceIds.includes(workspaceId)) {
       throw new Error("operator_workspace_required");
     }

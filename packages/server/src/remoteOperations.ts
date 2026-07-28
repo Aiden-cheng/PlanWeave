@@ -3,6 +3,7 @@ import {
   executionAttemptIdSchema,
   opaqueIdentifierSchema
 } from "@planweave-ai/distributed-protocol";
+import { workspaceIdSchema } from "@planweave-ai/collaboration-contracts";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { capabilitiesSchema } from "./protocol.js";
@@ -75,6 +76,7 @@ export const remotePersistenceEventTypeSchema = z.enum([
 
 export const createRemoteOperationInputSchema = z
   .object({
+    workspaceId: workspaceIdSchema,
     projectId: opaqueIdentifierSchema,
     canvasId: opaqueIdentifierSchema,
     blockRef: blockRefSchema,
@@ -93,6 +95,7 @@ export const createRemoteOperationInputSchema = z
 const operationRowSchema = z
   .object({
     id: opaqueIdentifierSchema,
+    workspace_id: workspaceIdSchema,
     project_id: opaqueIdentifierSchema,
     canvas_id: opaqueIdentifierSchema,
     block_ref: blockRefSchema,
@@ -121,6 +124,7 @@ const attemptRowSchema = z
     execution_attempt_id: executionAttemptIdSchema,
     operation_id: opaqueIdentifierSchema,
     dispatch_id: dispatchIdSchema,
+    workspace_id: workspaceIdSchema,
     project_id: opaqueIdentifierSchema,
     canvas_id: opaqueIdentifierSchema,
     block_ref: blockRefSchema,
@@ -146,6 +150,7 @@ export type RemoteExecutionAttempt = {
   executionAttemptId: string;
   operationId: string;
   dispatchId: string;
+  workspaceId: string;
   projectId: string;
   canvasId: string;
   blockRef: string;
@@ -163,6 +168,7 @@ export type RemoteExecutionAttempt = {
 
 export type RemoteOperation = {
   id: string;
+  workspaceId: string;
   projectId: string;
   canvasId: string;
   blockRef: string;
@@ -185,13 +191,13 @@ export type RemoteOperation = {
 };
 
 const operationColumns = `
-  id,project_id,canvas_id,block_ref,ownership_generation,idempotency_key,request_fingerprint,
+  id,workspace_id,project_id,canvas_id,block_ref,ownership_generation,idempotency_key,request_fingerprint,
   source_fingerprint,required_capabilities_json,state,dispatch_id,execution_attempt_id,
   envelope_digest,envelope_reference,host_selection_json,created_at,updated_at,terminal_at
 `;
 
 const attemptColumns = `
-  execution_attempt_id,operation_id,dispatch_id,project_id,canvas_id,block_ref,
+  execution_attempt_id,operation_id,dispatch_id,workspace_id,project_id,canvas_id,block_ref,
   ownership_generation,status,host_id,lease_id,lease_fencing_token,lease_expires_at,
   state_version,created_at,updated_at,terminal_at
 `;
@@ -201,6 +207,7 @@ function requestFingerprint(input: CreateRemoteOperationInput): string {
   return createHash("sha256")
     .update(
       JSON.stringify({
+        workspaceId: input.workspaceId,
         projectId: input.projectId,
         canvasId: input.canvasId,
         blockRef: input.blockRef,
@@ -224,6 +231,7 @@ function parseAttempt(row: Record<string, unknown>): RemoteExecutionAttempt {
     executionAttemptId: parsed.execution_attempt_id,
     operationId: parsed.operation_id,
     dispatchId: parsed.dispatch_id,
+    workspaceId: parsed.workspace_id,
     projectId: parsed.project_id,
     canvasId: parsed.canvas_id,
     blockRef: parsed.block_ref,
@@ -279,13 +287,14 @@ export class RemoteOperationRepository {
       this.database
         .prepare(
           `INSERT INTO remote_operations(
-            id,project_id,canvas_id,block_ref,ownership_generation,idempotency_key,
+            id,workspace_id,project_id,canvas_id,block_ref,ownership_generation,idempotency_key,
             request_fingerprint,source_fingerprint,required_capabilities_json,state,
             dispatch_id,execution_attempt_id,host_selection_json,created_at,updated_at
-          ) VALUES (?,?,?,?,?,?,?,?,?,'preparing',?,?,?,?,?)`
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,'preparing',?,?,?,?,?)`
         )
         .run(
           operationId,
+          input.workspaceId,
           input.projectId,
           input.canvasId,
           input.blockRef,
@@ -303,14 +312,15 @@ export class RemoteOperationRepository {
       this.database
         .prepare(
           `INSERT INTO remote_execution_attempts(
-            execution_attempt_id,operation_id,dispatch_id,project_id,canvas_id,block_ref,
+            execution_attempt_id,operation_id,dispatch_id,workspace_id,project_id,canvas_id,block_ref,
             ownership_generation,status,created_at,updated_at
-          ) VALUES (?,?,?,?,?,?,?,'prepared',?,?)`
+          ) VALUES (?,?,?,?,?,?,?,?,'prepared',?,?)`
         )
         .run(
           executionAttemptId,
           operationId,
           dispatchId,
+          input.workspaceId,
           input.projectId,
           input.canvasId,
           input.blockRef,
@@ -415,6 +425,7 @@ export class RemoteOperationRepository {
       if (
         attempt.executionAttemptId !== parsed.execution_attempt_id ||
         attempt.dispatchId !== parsed.dispatch_id ||
+        attempt.workspaceId !== parsed.workspace_id ||
         attempt.projectId !== parsed.project_id ||
         attempt.canvasId !== parsed.canvas_id ||
         attempt.blockRef !== parsed.block_ref ||
@@ -424,6 +435,7 @@ export class RemoteOperationRepository {
       }
       return {
         id: parsed.id,
+        workspaceId: parsed.workspace_id,
         projectId: parsed.project_id,
         canvasId: parsed.canvas_id,
         blockRef: parsed.block_ref,
@@ -454,6 +466,19 @@ export class RemoteOperationRepository {
     return operation;
   }
 
+  getInWorkspace(workspaceId: string, operationId: string): RemoteOperation | undefined {
+    const row = this.database
+      .prepare(`SELECT id FROM remote_operations WHERE workspace_id=? AND id=?`)
+      .get(workspaceIdSchema.parse(workspaceId), opaqueIdentifierSchema.parse(operationId));
+    return typeof row?.id === "string" ? this.getRequired(row.id) : undefined;
+  }
+
+  getRequiredInWorkspace(workspaceId: string, operationId: string): RemoteOperation {
+    const operation = this.getInWorkspace(workspaceId, operationId);
+    if (!operation) throw new Error("remote_operation_not_found");
+    return operation;
+  }
+
   getByDispatchId(dispatchId: string): RemoteOperation | undefined {
     const row = this.database
       .prepare("SELECT id FROM remote_operations WHERE dispatch_id=?")
@@ -462,6 +487,7 @@ export class RemoteOperationRepository {
   }
 
   findByCallerIdentity(input: {
+    workspaceId: string;
     projectId: string;
     canvasId: string;
     blockRef: string;
@@ -470,10 +496,16 @@ export class RemoteOperationRepository {
     const rows = this.database
       .prepare(
         `SELECT id FROM remote_operations
-         WHERE project_id=? AND canvas_id=? AND block_ref=? AND idempotency_key=?
+         WHERE workspace_id=? AND project_id=? AND canvas_id=? AND block_ref=? AND idempotency_key=?
          ORDER BY created_at DESC,id DESC LIMIT 2`
       )
-      .all(input.projectId, input.canvasId, input.blockRef, input.idempotencyKey);
+      .all(
+        input.workspaceId,
+        input.projectId,
+        input.canvasId,
+        input.blockRef,
+        input.idempotencyKey
+      );
     if (rows.length > 1) throw new Error("remote_operation_generation_ambiguous");
     const id = rows[0]?.id;
     return typeof id === "string" ? this.getRequired(id) : undefined;
@@ -574,14 +606,15 @@ export class RemoteOperationRepository {
       this.database
         .prepare(
           `INSERT INTO remote_execution_attempts(
-            execution_attempt_id,operation_id,dispatch_id,project_id,canvas_id,block_ref,
-            ownership_generation,status,created_at,updated_at
-          ) VALUES (?,?,?,?,?,?,?,'prepared',?,?)`
+            execution_attempt_id,operation_id,dispatch_id,workspace_id,project_id,canvas_id,
+            block_ref,ownership_generation,status,created_at,updated_at
+          ) VALUES (?,?,?,?,?,?,?,?,'prepared',?,?)`
         )
         .run(
           newExecutionAttemptId,
           operation.id,
           newDispatchId,
+          operation.workspaceId,
           operation.projectId,
           operation.canvasId,
           operation.blockRef,
@@ -742,10 +775,11 @@ export class RemoteOperationRepository {
     const row = this.database
       .prepare(
         `SELECT id FROM remote_operations
-         WHERE project_id=? AND canvas_id=? AND block_ref=? AND ownership_generation=?
+         WHERE workspace_id=? AND project_id=? AND canvas_id=? AND block_ref=? AND ownership_generation=?
            AND idempotency_key=?`
       )
       .get(
+        input.workspaceId,
         input.projectId,
         input.canvasId,
         input.blockRef,

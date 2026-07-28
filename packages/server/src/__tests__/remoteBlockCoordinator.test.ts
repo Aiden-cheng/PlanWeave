@@ -12,6 +12,7 @@ import {
   basicManifest
 } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { ArtifactStore } from "../artifacts.js";
+import { canonicalRemoteRuntimePort } from "../canonicalRemoteRuntimePort.js";
 import { createRemoteBlockCoordination } from "../distributedCoordination.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 import { RemoteRuntimePortRegistry } from "../remoteRuntimeLocator.js";
@@ -52,10 +53,14 @@ async function setup(withHost: boolean) {
     busyTimeoutMs: 5_000
   });
   servers.push(server);
-  const locator = { projectId: workspace.init.workspace.id, canvasId: "default" };
-  new WorkspaceIdentityRepository(server.database).ensureWorkspaceForLegacyProject(
-    locator.projectId
-  );
+  const workspaceId = new WorkspaceIdentityRepository(
+    server.database
+  ).ensureWorkspaceForLegacyProject(workspace.init.workspace.id);
+  const locator = {
+    workspaceId,
+    projectId: workspace.init.workspace.id,
+    canvasId: "default"
+  };
   const runtime = createRemoteBlockRuntimePort({ projectRoot: workspace.root });
   const registry = new RemoteRuntimePortRegistry();
   registry.bind(locator, runtime);
@@ -77,12 +82,18 @@ async function setup(withHost: boolean) {
   );
   const host = withHost ? coordination.hosts.register("Coordinator Host").host : undefined;
   if (host) {
-    const workspaceId = new WorkspaceIdentityRepository(server.database).workspaceForLegacyProject(
-      locator.projectId
-    );
-    if (!workspaceId) throw new Error("workspace_mapping_missing");
     coordination.hosts.bindToWorkspace(host.id, workspaceId);
-    coordination.hosts.reportOnline(host.id, ["acp.codex"], 1);
+    coordination.hosts.reportOnline(host.id, ["acp.codex"], 1, {
+      workspaceMappings: [{ workspaceId, status: "ready" }],
+      acpProfiles: [
+        {
+          profileId: "codex-acp",
+          agentId: "codex",
+          status: "ready",
+          capabilities: ["acp.codex"]
+        }
+      ]
+    });
   }
   return {
     workspace,
@@ -256,7 +267,17 @@ describe("RemoteBlockCoordinator", () => {
     const hostA = fixture.host;
     const hostB = fixture.hosts.register("Authority Host B").host;
     fixture.hosts.bindToWorkspace(hostB.id, workspaceId);
-    fixture.hosts.reportOnline(hostB.id, ["acp.codex"], 1);
+    fixture.hosts.reportOnline(hostB.id, ["acp.codex"], 1, {
+      workspaceMappings: [{ workspaceId, status: "ready" }],
+      acpProfiles: [
+        {
+          profileId: "codex-acp",
+          agentId: "codex",
+          status: "ready",
+          capabilities: ["acp.codex"]
+        }
+      ]
+    });
 
     const authority = new AuthorityRepository(fixture.server.database);
     const scope = {
@@ -276,9 +297,9 @@ describe("RemoteBlockCoordinator", () => {
       actor: { kind: "system", id: "test-system" }
     });
     expect(
-      fixture.server.database
-        .prepare("SELECT COUNT(*) AS count FROM work_assignments")
-        .get() as { count: number }
+      fixture.server.database.prepare("SELECT COUNT(*) AS count FROM work_assignments").get() as {
+        count: number;
+      }
     ).toEqual({ count: 0 });
 
     const dispatched = await fixture.coordinator.dispatch({
@@ -367,16 +388,16 @@ describe("RemoteBlockCoordinator", () => {
     });
     expect(retried.hostSelection?.preferredHostId).not.toBe(hostA.id);
     expect(
-      fixture.server.database
-        .prepare("SELECT COUNT(*) AS count FROM work_assignments")
-        .get() as { count: number }
+      fixture.server.database.prepare("SELECT COUNT(*) AS count FROM work_assignments").get() as {
+        count: number;
+      }
     ).toEqual({ count: 0 });
   });
 
   it("fails closed on source drift and on a missing restart locator", async () => {
     const fixture = await setup(false);
     const acquireScoped = vi.fn(() => ({
-      runtime: fixture.runtime,
+      runtime: canonicalRemoteRuntimePort(fixture.runtime, fixture.locator.workspaceId),
       artifacts: createRemoteBlockArtifactSource({ projectRoot: fixture.workspace.root }),
       release: vi.fn()
     }));
@@ -438,6 +459,7 @@ describe("RemoteBlockCoordinator", () => {
     );
     const grant = fixture.artifactAuthorization.createOutputGrant({
       operationId: "coordinator-completion-report",
+      workspaceId: dispatch.workspaceId,
       projectId: dispatch.projectId,
       hostId: dispatch.hostId,
       dispatchId: dispatch.id,
@@ -450,6 +472,7 @@ describe("RemoteBlockCoordinator", () => {
     });
     fixture.artifactAuthorization.acceptOutputUpload(
       {
+        workspaceId: dispatch.workspaceId,
         projectId: dispatch.projectId,
         hostId: dispatch.hostId,
         dispatchId: dispatch.id,

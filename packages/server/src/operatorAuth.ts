@@ -22,11 +22,13 @@ export const operatorCredentialSchema = z
   .strict();
 
 const operatorCredentialPrincipalSchema = operatorCredentialSchema.omit({ tokenSha256: true });
-export const authenticatedOperatorPrincipalSchema = operatorCredentialPrincipalSchema.extend({
-  workspaceId: opaqueIdentifierSchema,
-  operatorSessionId: operatorSessionIdSchema,
-  expiresAt: z.iso.datetime()
-}).strict();
+export const authenticatedOperatorPrincipalSchema = operatorCredentialPrincipalSchema
+  .extend({
+    workspaceId: opaqueIdentifierSchema,
+    operatorSessionId: operatorSessionIdSchema,
+    expiresAt: z.iso.datetime()
+  })
+  .strict();
 export const operatorPrincipalSchema = authenticatedOperatorPrincipalSchema;
 export type OperatorPrincipal = z.infer<typeof authenticatedOperatorPrincipalSchema>;
 export type OperatorCredential = z.input<typeof operatorCredentialSchema>;
@@ -75,7 +77,8 @@ export class OperatorTokenRegistry implements RemoteInteractionAuthorizationPort
     const digest = Buffer.from(session.credentialSha256, "hex");
     const credential = this.credentials.find(
       (candidate) =>
-        candidate.digest.length === digest.length && timingSafeEqual(candidate.digest, digest) &&
+        candidate.digest.length === digest.length &&
+        timingSafeEqual(candidate.digest, digest) &&
         candidate.credential.operatorId === session.operatorId
     )?.credential;
     // Setup-code operator sessions are durable without a static config credential.
@@ -119,15 +122,17 @@ export class OperatorTokenRegistry implements RemoteInteractionAuthorizationPort
     if (!principal.serverAdmin) throw new Error("operator_server_admin_required");
   }
 
-  canRespond(input: { responderId: string; projectId: string }): boolean {
+  canRespond(input: { responderId: string; workspaceId: string; projectId: string }): boolean {
     const sessions = this.principals.get(input.responderId);
     return Boolean(
       sessions &&
-      [...sessions.values()].some(
-        (principal) =>
-          this.sessions.isActive(principal.workspaceId, principal.operatorSessionId) &&
-          (principal.serverAdmin || principal.projectIds.includes(input.projectId))
-      )
+        [...sessions.values()].some(
+          (principal) =>
+            this.sessions.isActive(principal.workspaceId, principal.operatorSessionId) &&
+            (principal.serverAdmin ||
+              (principal.workspaceId === input.workspaceId &&
+                principal.projectIds.includes(input.projectId)))
+        )
     );
   }
 }

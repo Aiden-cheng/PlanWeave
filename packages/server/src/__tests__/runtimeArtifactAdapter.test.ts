@@ -62,7 +62,11 @@ describe("RuntimeInputArtifactMaterializer", () => {
     });
     const runtime = createRemoteBlockRuntimePort({ projectRoot: workspace.root });
     const candidate = await runtime.inspect({ ref: "T-001#B-002" });
-    const locator = { projectId: candidate.projectId, canvasId: candidate.canvasId };
+    const locator = {
+      workspaceId: candidate.workspaceId,
+      projectId: candidate.projectId,
+      canvasId: candidate.canvasId
+    };
     const registry = new RemoteRuntimePortRegistry();
     registry.bind(
       locator,

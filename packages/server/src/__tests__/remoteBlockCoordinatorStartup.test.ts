@@ -64,7 +64,7 @@ class StartupHarness {
     readonly workspace: Awaited<ReturnType<typeof createTestWorkspace>>,
     readonly dataDirectory: string,
     readonly databasePath: string,
-    readonly locator: { projectId: string; canvasId: string }
+    readonly locator: { workspaceId: string; projectId: string; canvasId: string }
   ) {}
 
   static async create(options: { includeSecondTask?: boolean } = {}): Promise<StartupHarness> {
@@ -87,7 +87,11 @@ class StartupHarness {
       workspace,
       dataDirectory,
       join(dataDirectory, "server.sqlite"),
-      { projectId: workspace.init.workspace.id, canvasId: "default" }
+      {
+        workspaceId: "workspace-pending-startup",
+        projectId: workspace.init.workspace.id,
+        canvasId: "default"
+      }
     );
     cleanups.push(async () => {
       harness.close();
@@ -109,8 +113,8 @@ class StartupHarness {
     this.runtime = decorateRuntime(
       createRemoteBlockRuntimePort({ projectRoot: this.workspace.root })
     );
+    const runtime = this.runtime;
     const registry = new RemoteRuntimePortRegistry();
-    registry.bind(this.locator, this.runtime);
     const started = await startRemoteBlockCoordinationServer(
       {
         dataDirectory: this.dataDirectory,
@@ -118,11 +122,16 @@ class StartupHarness {
         busyTimeoutMs: 5_000
       },
       (database): RemoteBlockCoordinationOptions => {
-        const workspaceId = new WorkspaceIdentityRepository(database).ensureWorkspaceForLegacyProject(
+        const workspaceId = new WorkspaceIdentityRepository(
+          database
+        ).ensureWorkspaceForLegacyProject(this.locator.projectId);
+        this.locator.workspaceId = workspaceId;
+        registry.bind({ ...this.locator, workspaceId }, runtime);
+        const access = new ProjectAccessRepository(database);
+        const existingProject = access.registry.projectInternal(
+          workspaceId,
           this.locator.projectId
         );
-        const access = new ProjectAccessRepository(database);
-        const existingProject = access.registry.projectInternal(workspaceId, this.locator.projectId);
         if (existingProject?.projectRoot === null) {
           access.bindProjectPath(workspaceId, this.locator.projectId, this.workspace.root);
         }
@@ -182,18 +191,33 @@ class StartupHarness {
       this.requireServer().database
     ).ensureWorkspaceForLegacyProject(this.locator.projectId);
     this.requireCoordination().hosts.bindToWorkspace(host.id, workspaceId);
-    this.requireCoordination().hosts.reportOnline(host.id, ["acp.codex"], 1);
+    this.requireCoordination().hosts.reportOnline(host.id, ["acp.codex"], 1, {
+      workspaceMappings: [{ workspaceId, status: "ready" }],
+      acpProfiles: [
+        {
+          profileId: "codex-acp",
+          agentId: "codex",
+          status: "ready",
+          capabilities: ["acp.codex"]
+        }
+      ]
+    });
     return host.id;
   }
 
   request(idempotencyKey: string) {
-    return { ...this.locator, blockRef: "T-001#B-001", idempotencyKey };
+    return {
+      ...this.locator,
+      blockRef: "T-001#B-001",
+      idempotencyKey
+    };
   }
 
   assign(blockRef: string, target: AssignmentTarget, expectedRevision = 0): void {
     new WorkAssignmentRepository(this.requireServer().database).applyCasUpdate({
       expectedRevision,
       record: {
+        workspaceId: this.locator.workspaceId,
         projectId: this.locator.projectId,
         workItem: { kind: "block", canvasId: this.locator.canvasId, blockRef },
         target,
@@ -214,6 +238,12 @@ class StartupHarness {
       DROP TABLE comment_attachment_bindings;
       DROP TABLE comment_pending_uploads;
       DROP TABLE comment_attachment_blobs;
+      DROP TABLE work_assignments_unscoped_legacy;
+      DROP TABLE human_observer_events_unscoped_legacy;
+      DROP TABLE comment_pending_uploads_unscoped_legacy;
+      DROP TABLE comment_attachment_bindings_unscoped_legacy;
+      DROP TABLE remote_operations_unscoped_legacy;
+      DROP TABLE dispatches_unscoped_legacy;
       DELETE FROM project_access_grants;
       DELETE FROM canvas_registry;
       DELETE FROM project_registry;
@@ -485,6 +515,7 @@ describe("RemoteBlockCoordinator startup reconciliation", () => {
       });
       const grant = coordination.artifactAuthorization.createOutputGrant({
         operationId: `terminal-${action}-grant`,
+        workspaceId: dispatch.workspaceId,
         projectId: dispatch.projectId,
         hostId,
         dispatchId: dispatch.id,
@@ -497,6 +528,7 @@ describe("RemoteBlockCoordinator startup reconciliation", () => {
       });
       coordination.artifactAuthorization.acceptOutputUpload(
         {
+          workspaceId: dispatch.workspaceId,
           projectId: dispatch.projectId,
           hostId,
           dispatchId: dispatch.id,

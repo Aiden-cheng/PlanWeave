@@ -13,12 +13,43 @@ import {
   centralSchemaVersion,
   latestCentralSchemaVersion
 } from "../migrations.js";
+import { migrations } from "../migrations/registry.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 import { dispatchHostSelectionSnapshotSchema } from "../work/dispatchIntegration.js";
 
 const directories: string[] = [];
 const databases: SqliteDatabase[] = [];
 const serverInstanceOwnerToken = "00000000-0000-4000-8000-000000000023";
+
+function prepareHistoricalSchema(database: SqliteDatabase, throughVersion: number): void {
+  database.exec(
+    "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
+  );
+  for (const migration of migrations) {
+    if (migration.version > throughVersion) break;
+    if (
+      database.prepare("SELECT 1 FROM schema_migrations WHERE version=?").get(migration.version)
+    ) {
+      continue;
+    }
+    if (migration.disableForeignKeys) database.exec("PRAGMA foreign_keys = OFF");
+    try {
+      database.exec("BEGIN IMMEDIATE");
+      migration.before?.(database);
+      database.exec(migration.sql);
+      migration.after?.(database);
+      database
+        .prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)")
+        .run(migration.version, "2020-01-01T00:00:00.000Z");
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    } finally {
+      if (migration.disableForeignKeys) database.exec("PRAGMA foreign_keys = ON");
+    }
+  }
+}
 
 afterEach(async () => {
   for (const database of databases.splice(0)) database.close();
@@ -556,34 +587,48 @@ describe("remote execution action migration v22", () => {
     databases.push(database);
     const requestJson = JSON.stringify(cancelAction);
     const fingerprint = createHash("sha256").update(requestJson).digest("hex");
-    database.exec(`
-      CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
-      CREATE TABLE remote_operations(id TEXT PRIMARY KEY);
-      CREATE TABLE remote_execution_attempts(execution_attempt_id TEXT PRIMARY KEY);
-      CREATE TABLE remote_execution_actions(
-        action_id TEXT PRIMARY KEY,
-        operation_id TEXT NOT NULL REFERENCES remote_operations(id),
-        dispatch_id TEXT NOT NULL,
-        execution_attempt_id TEXT NOT NULL REFERENCES remote_execution_attempts(execution_attempt_id),
-        kind TEXT NOT NULL,
-        request_fingerprint TEXT NOT NULL,
-        request_json TEXT NOT NULL,
-        state TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        delivered_at TEXT,
-        acknowledged_at TEXT,
-        settled_at TEXT
+    prepareHistoricalSchema(database, 21);
+    database
+      .prepare(
+        `INSERT INTO remote_operations(
+          id,project_id,canvas_id,block_ref,ownership_generation,idempotency_key,
+          request_fingerprint,source_fingerprint,required_capabilities_json,state,dispatch_id,
+          execution_attempt_id,created_at,updated_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,'preparing',?,?,?,?)`
+      )
+      .run(
+        cancelAction.operationId,
+        "project-a",
+        "default",
+        "T-001#B-001",
+        "generation-1",
+        "key-1",
+        fingerprint,
+        "source-1",
+        "[]",
+        cancelAction.dispatchId,
+        cancelAction.executionAttemptId,
+        "2030-01-01T00:00:00.000Z",
+        "2030-01-01T00:00:00.000Z"
       );
-      CREATE INDEX idx_remote_execution_actions_operation_state
-        ON remote_execution_actions(operation_id,state,created_at);
-      INSERT INTO remote_operations(id) VALUES ('operation-1');
-      INSERT INTO remote_execution_attempts(execution_attempt_id) VALUES ('attempt-1');
-    `);
-    for (let version = 1; version <= 21; version += 1) {
-      database
-        .prepare("INSERT INTO schema_migrations(version,applied_at) VALUES (?,?)")
-        .run(version, "2020-01-01T00:00:00.000Z");
-    }
+    database
+      .prepare(
+        `INSERT INTO remote_execution_attempts(
+          execution_attempt_id,operation_id,dispatch_id,project_id,canvas_id,block_ref,
+          ownership_generation,status,created_at,updated_at
+        ) VALUES (?,?,?,?,?,?,?,'prepared',?,?)`
+      )
+      .run(
+        cancelAction.executionAttemptId,
+        cancelAction.operationId,
+        cancelAction.dispatchId,
+        "project-a",
+        "default",
+        "T-001#B-001",
+        "generation-1",
+        "2030-01-01T00:00:00.000Z",
+        "2030-01-01T00:00:00.000Z"
+      );
     database
       .prepare(
         `INSERT INTO remote_execution_actions(
@@ -602,10 +647,23 @@ describe("remote execution action migration v22", () => {
         "2030-01-01T00:00:00.000Z"
       );
 
+    prepareHistoricalSchema(database, 28);
+    database.exec(`
+      INSERT INTO workspaces(workspace_id,display_name,created_at,archived_at)
+      VALUES ('workspace-a','Workspace A','2030-01-01T00:00:00.000Z',NULL);
+      INSERT INTO project_registry(
+        project_registry_id,workspace_id,project_id,project_root_internal,visibility,
+        owner_human_principal_id,acl_revision,created_at,updated_at,revoked_at
+      ) VALUES (
+        'registry-a','workspace-a','project-a',NULL,'private',NULL,0,
+        '2030-01-01T00:00:00.000Z','2030-01-01T00:00:00.000Z',NULL
+      );
+    `);
+
     applyMigrations(database);
 
     expect(centralSchemaVersion(database)).toBe(latestCentralSchemaVersion);
-    expect(latestCentralSchemaVersion).toBe(37);
+    expect(latestCentralSchemaVersion).toBe(40);
     expect(
       new RemoteExecutionActionRepository(database).getRequired(cancelAction.actionId)
     ).toMatchObject({

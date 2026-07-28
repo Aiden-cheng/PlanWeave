@@ -7,6 +7,7 @@ import {
   hashExecutionEnvelope,
   mailboxCommandSchema
 } from "@planweave-ai/distributed-protocol";
+import { workspaceIdSchema } from "@planweave-ai/collaboration-contracts";
 import type { RemoteBlockDispatchCandidate, RemoteBlockRuntimePort } from "@planweave-ai/runtime";
 import { remoteBlockFailureInputSchema } from "@planweave-ai/runtime";
 import type {
@@ -183,7 +184,11 @@ export class RemoteBlockCoordinator {
     const candidate = await this.withRuntime(request, (runtime) =>
       runtime.inspect({ ref: request.blockRef })
     );
-    if (candidate.projectId !== request.projectId || candidate.canvasId !== request.canvasId) {
+    if (
+      candidate.workspaceId !== request.workspaceId ||
+      candidate.projectId !== request.projectId ||
+      candidate.canvasId !== request.canvasId
+    ) {
       throw new Error("remote_runtime_locator_candidate_mismatch");
     }
 
@@ -215,6 +220,7 @@ export class RemoteBlockCoordinator {
 
     await this.checkpoint("before_operation_commit");
     const operation = this.options.operations.create({
+      workspaceId: workspaceIdSchema.parse(candidate.workspaceId),
       projectId: candidate.projectId,
       canvasId: candidate.canvasId,
       blockRef: candidate.blockRef,

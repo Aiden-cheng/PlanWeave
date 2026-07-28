@@ -93,6 +93,7 @@ export type AcceptedArtifactProvenance = {
 };
 
 type DispatchScope = {
+  workspaceId: string;
   projectId: string;
   hostId: string;
   dispatchId: string;
@@ -558,13 +559,14 @@ export class ArtifactAuthorizationRepository {
   ): Record<string, unknown> {
     const row = this.database
       .prepare(
-        `SELECT d.project_id,d.host_id,d.lease_id,d.execution_attempt_id,d.lease_expires_at,d.status,
+        `SELECT d.workspace_id,d.project_id,d.host_id,d.lease_id,d.execution_attempt_id,d.lease_expires_at,d.status,
                 h.revoked_at AS host_revoked_at
          FROM dispatches d JOIN agent_hosts h ON h.id=d.host_id WHERE d.id=?`
       )
       .get(scope.dispatchId);
     if (!row) throw new Error("artifact_dispatch_not_found");
     if (
+      row.workspace_id !== scope.workspaceId ||
       row.project_id !== scope.projectId ||
       row.host_id !== scope.hostId ||
       row.lease_id !== scope.leaseId ||

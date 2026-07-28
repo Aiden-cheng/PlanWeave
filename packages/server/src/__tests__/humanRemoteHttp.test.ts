@@ -1,10 +1,7 @@
 import { createServer, type Server as HttpServer } from "node:http";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import {
-  createRemoteBlockRuntimePort,
-  type PlanPackageManifest
-} from "@planweave-ai/runtime";
+import { createRemoteBlockRuntimePort, type PlanPackageManifest } from "@planweave-ai/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   basicManifest,
@@ -32,9 +29,9 @@ const httpServers: HttpServer[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    httpServers.splice(0).map(
-      (server) => new Promise<void>((resolve) => server.close(() => resolve()))
-    )
+    httpServers
+      .splice(0)
+      .map((server) => new Promise<void>((resolve) => server.close(() => resolve())))
   );
   for (const server of storageServers.splice(0)) server.close();
   await Promise.all(
@@ -70,16 +67,19 @@ async function setup() {
   const canvasId = "default";
   const blockRef = "T-001#B-001";
   const otherProjectId = "trusted-other-project";
-  const projectAuthority = {
-    hasProject: (candidate: string) => candidate === projectId || candidate === otherProjectId
-  };
   const identity = new HumanIdentityRepository(storage.database);
+  const workspaceIdentity = new WorkspaceIdentityRepository(storage.database);
+  const workspaceId = workspaceIdentity.ensureWorkspaceForLegacyProject(projectId);
+  const projectAuthority = {
+    hasProject: (candidate: string) => candidate === projectId || candidate === otherProjectId,
+    hasScope: (scope: { workspaceId: string; projectId: string }) =>
+      scope.workspaceId === workspaceId &&
+      (scope.projectId === projectId || scope.projectId === otherProjectId)
+  };
   const membership = new HumanMembershipService({
     repository: identity,
     projectAuthority
   });
-  const workspaceIdentity = new WorkspaceIdentityRepository(storage.database);
-  const workspaceId = workspaceIdentity.ensureWorkspaceForLegacyProject(projectId);
   const access = new ProjectAccessRepository(storage.database);
   access.registerProjectInternal({
     workspaceId,
@@ -94,7 +94,7 @@ async function setup() {
   });
   const registry = new RemoteRuntimePortRegistry();
   registry.bind(
-    { projectId, canvasId },
+    { workspaceId, projectId, canvasId },
     canonicalRemoteRuntimePort(
       createRemoteBlockRuntimePort({ projectRoot: workspace.root }),
       workspaceId
@@ -118,7 +118,17 @@ async function setup() {
   );
   const host = coordination.hosts.register("Human Remote Host").host;
   coordination.hosts.bindToWorkspace(host.id, workspaceId);
-  coordination.hosts.reportOnline(host.id, ["acp.codex", "acp.session.load"], 1);
+  coordination.hosts.reportOnline(host.id, ["acp.codex", "acp.session.load"], 1, {
+    workspaceMappings: [{ workspaceId, status: "ready" }],
+    acpProfiles: [
+      {
+        profileId: "codex-acp",
+        agentId: "codex",
+        status: "ready",
+        capabilities: ["acp.codex", "acp.session.load"]
+      }
+    ]
+  });
   const authority = new AuthorityRepository(storage.database);
   const executionTarget = authority.applyExecutionTarget({
     mutation: {
@@ -491,6 +501,8 @@ describe("human remote operation HTTP", () => {
       body: JSON.stringify({ ...command, reason: "different payload" })
     });
     expect(conflict.status).toBe(409);
-    await expect(conflict.json()).resolves.toMatchObject({ error: "human_remote_operation_conflict" });
+    await expect(conflict.json()).resolves.toMatchObject({
+      error: "human_remote_operation_conflict"
+    });
   });
 });

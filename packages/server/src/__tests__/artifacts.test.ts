@@ -247,6 +247,7 @@ describe("content-addressed artifacts", () => {
     });
     expect(outputRead.status).toBe(403);
     const inputGrant = coordination.artifactAuthorization.authorizeInputRead({
+      workspaceId: dispatch.workspaceId,
       projectId: dispatch.projectId,
       hostId: dispatch.hostId,
       dispatchId: dispatch.id,
@@ -338,6 +339,7 @@ describe("content-addressed artifacts", () => {
 
     coordination.artifactAuthorization.createOutputGrant({
       ...{
+        workspaceId: dispatch.workspaceId,
         projectId: dispatch.projectId,
         hostId: dispatch.hostId,
         dispatchId: dispatch.id,
@@ -364,6 +366,7 @@ describe("content-addressed artifacts", () => {
     ).toBe(403);
 
     const revokedGrant = coordination.artifactAuthorization.createOutputGrant({
+      workspaceId: dispatch.workspaceId,
       projectId: dispatch.projectId,
       hostId: dispatch.hostId,
       dispatchId: dispatch.id,

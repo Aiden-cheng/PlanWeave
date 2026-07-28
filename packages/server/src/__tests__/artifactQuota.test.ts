@@ -131,6 +131,7 @@ describe("artifact output quotas", () => {
     ).toBe(1);
 
     const grantInput = (operationId: string, digest = sha256, sizeBytes = bytes.byteLength) => ({
+      workspaceId: dispatch.workspaceId,
       projectId: dispatch.projectId,
       hostId: dispatch.hostId,
       dispatchId: dispatch.id,
@@ -158,6 +159,7 @@ describe("artifact output quotas", () => {
       });
       coordination.artifactAuthorization.acceptOutputUpload(
         {
+          workspaceId: dispatch.workspaceId,
           projectId: dispatch.projectId,
           hostId: dispatch.hostId,
           dispatchId: dispatch.id,
@@ -184,6 +186,7 @@ describe("artifact output quotas", () => {
     expect(() =>
       coordination.artifactAuthorization.acceptOutputUpload(
         {
+          workspaceId: dispatch.workspaceId,
           projectId: dispatch.projectId,
           hostId: dispatch.hostId,
           dispatchId: dispatch.id,

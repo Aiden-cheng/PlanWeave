@@ -75,12 +75,14 @@ function membership(overrides: Partial<AssignmentMembershipFacts> = {}): Assignm
 
 function host(overrides: Partial<AssignmentHostFacts> = {}): AssignmentHostFacts {
   return {
+    workspaceId: "workspace-a",
     projectId: "project-a",
     hostId: "host-1",
     exists: true,
     revoked: false,
     authorizedForProject: true,
     online: true,
+    ready: true,
     capabilities: ["acp.codex", "linux", "git.read"],
     displayName: "Builder",
     capacityRemaining: 1,
@@ -192,6 +194,7 @@ describe("work assignment policy", () => {
     });
 
     const first = decideAssignmentUpdate({
+      workspaceId: "workspace-a",
       command,
       concurrency: { currentRevision: 0 },
       packageFacts: packageBlock(),
@@ -204,6 +207,7 @@ describe("work assignment policy", () => {
     expect(first.record.target).toEqual({ kind: "exact_host", hostId: "host-1" });
 
     const stale = decideAssignmentUpdate({
+      workspaceId: "workspace-a",
       command: { ...command, expectedRevision: 0, target: { kind: "unassigned" } },
       concurrency: { currentRevision: 1, current: first.record },
       packageFacts: packageBlock(),
@@ -212,6 +216,7 @@ describe("work assignment policy", () => {
     expect(stale).toMatchObject({ ok: false, code: "work_revision_conflict" });
 
     const next = decideAssignmentUpdate({
+      workspaceId: "workspace-a",
       command: {
         ...command,
         expectedRevision: 1,

@@ -40,9 +40,19 @@ async function createV5Database(mediaType: string) {
       created_at TEXT NOT NULL
     );
     CREATE TABLE dispatches(
-      id TEXT PRIMARY KEY,project_id TEXT NOT NULL,package_ref TEXT NOT NULL,host_id TEXT NOT NULL,
-      lease_id TEXT NOT NULL,execution_attempt_id TEXT NOT NULL
+      id TEXT PRIMARY KEY,project_id TEXT NOT NULL,block_ref TEXT NOT NULL,
+      package_ref TEXT NOT NULL,host_id TEXT NOT NULL REFERENCES agent_hosts(id),
+      required_capabilities_json TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN (
+        'leased','running','interrupted','cancelling','awaiting_writeback','completed','failed','cancelled'
+      )),
+      lease_id TEXT NOT NULL UNIQUE,execution_attempt_id TEXT NOT NULL,
+      lease_expires_at TEXT NOT NULL,created_at TEXT NOT NULL,accepted_at TEXT,finished_at TEXT,
+      result_json TEXT,failure_json TEXT,interruption_reason TEXT,interruption_resumable INTEGER,
+      interruption_recovery_json TEXT
     );
+    CREATE INDEX idx_dispatches_host_status ON dispatches(host_id,status);
+    CREATE INDEX idx_dispatches_writeback ON dispatches(status,created_at);
     CREATE TABLE mailbox_messages(
       sequence INTEGER PRIMARY KEY AUTOINCREMENT,message_id TEXT NOT NULL UNIQUE,
       host_id TEXT NOT NULL REFERENCES agent_hosts(id),command_json TEXT NOT NULL,
@@ -134,7 +144,20 @@ describe("artifact migration v7", () => {
       INSERT INTO agent_hosts(
         id,display_name,credential_hash,capabilities_json,capacity,created_at
       ) VALUES ('host-v7','Host v7','credential-hash','["test"]',1,'2020-01-01T00:00:00.000Z');
-      CREATE TABLE dispatches(id TEXT PRIMARY KEY, package_ref TEXT NOT NULL);
+      CREATE TABLE dispatches(
+        id TEXT PRIMARY KEY,project_id TEXT NOT NULL,block_ref TEXT NOT NULL,
+        package_ref TEXT NOT NULL,host_id TEXT NOT NULL REFERENCES agent_hosts(id),
+        required_capabilities_json TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN (
+          'leased','running','interrupted','cancelling','awaiting_writeback','completed','failed','cancelled'
+        )),
+        lease_id TEXT NOT NULL UNIQUE,execution_attempt_id TEXT NOT NULL,
+        lease_expires_at TEXT NOT NULL,created_at TEXT NOT NULL,accepted_at TEXT,finished_at TEXT,
+        result_json TEXT,failure_json TEXT,interruption_reason TEXT,interruption_resumable INTEGER,
+        interruption_recovery_json TEXT
+      );
+      CREATE INDEX idx_dispatches_host_status ON dispatches(host_id,status);
+      CREATE INDEX idx_dispatches_writeback ON dispatches(status,created_at);
       CREATE TABLE mailbox_messages(
         sequence INTEGER PRIMARY KEY AUTOINCREMENT,message_id TEXT NOT NULL UNIQUE,
         host_id TEXT NOT NULL REFERENCES agent_hosts(id),command_json TEXT NOT NULL,

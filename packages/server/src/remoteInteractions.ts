@@ -39,6 +39,7 @@ export type RemoteInteractionRecord = {
 export interface RemoteInteractionAuthorizationPort {
   canRespond(input: {
     responderId: string;
+    workspaceId: string;
     projectId: string;
     operationId: string;
     actionId: string;
@@ -198,7 +199,7 @@ export class RemoteInteractionService {
     };
     const interaction = this.getRequired(identity);
     const operation = this.database
-      .prepare("SELECT project_id FROM remote_operations WHERE id=?")
+      .prepare("SELECT workspace_id,project_id FROM remote_operations WHERE id=?")
       .get(interaction.operationId);
     if (!operation || typeof operation.project_id !== "string") {
       throw new Error("remote_interaction_operation_not_found");
@@ -206,6 +207,7 @@ export class RemoteInteractionService {
     if (
       !this.options.authorization.canRespond({
         responderId: input.responderId,
+        workspaceId: String(operation.workspace_id),
         projectId: operation.project_id,
         operationId: interaction.operationId,
         actionId: settlement.actionId

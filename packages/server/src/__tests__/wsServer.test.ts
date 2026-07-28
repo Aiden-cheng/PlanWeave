@@ -110,9 +110,15 @@ async function createWsCoordination() {
     busyTimeoutMs: 5000
   });
   databases.push(database);
-  const locator = { projectId: workspace.init.workspace.id, canvasId: "default" };
   const workspaceIdentity = new WorkspaceIdentityRepository(database.database);
-  const workspaceId = workspaceIdentity.ensureWorkspaceForLegacyProject(locator.projectId);
+  const workspaceId = workspaceIdentity.ensureWorkspaceForLegacyProject(
+    workspace.init.workspace.id
+  );
+  const locator = {
+    workspaceId,
+    projectId: workspace.init.workspace.id,
+    canvasId: "default"
+  };
   const registry = new RemoteRuntimePortRegistry();
   registry.bind(locator, createRemoteBlockRuntimePort({ projectRoot: workspace.root }));
   const coordination = createRemoteBlockCoordination(

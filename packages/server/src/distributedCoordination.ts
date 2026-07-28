@@ -283,6 +283,7 @@ export function createRemoteBlockCoordination(
         }
         artifactAuthorization.requireResultProvenance(
           {
+            workspaceId: operation.workspaceId,
             projectId: input.projectId,
             hostId: input.hostId,
             dispatchId: input.dispatchId,

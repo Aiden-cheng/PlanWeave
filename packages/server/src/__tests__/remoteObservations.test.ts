@@ -41,6 +41,7 @@ async function setup() {
   const operations = new RemoteOperationRepository(server.database, clock);
   let operation = operations.markClaimed(
     operations.create({
+      workspaceId,
       projectId: "project-observation",
       canvasId: "default",
       blockRef: "RC-003#B-002",
@@ -60,12 +61,13 @@ async function setup() {
   server.database
     .prepare(
       `INSERT INTO dispatches(
-        id,project_id,block_ref,host_id,required_capabilities_json,status,
+        id,workspace_id,project_id,block_ref,host_id,required_capabilities_json,status,
         lease_id,execution_attempt_id,lease_expires_at,created_at
-      ) VALUES (?,?,?,?,?,'running',?,?,?,?)`
+      ) VALUES (?,?,?,?,?,?,'running',?,?,?,?)`
     )
     .run(
       operation.dispatchId,
+      operation.workspaceId,
       operation.projectId,
       operation.blockRef,
       host.id,

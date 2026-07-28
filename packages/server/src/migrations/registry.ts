@@ -12,6 +12,7 @@ import { hostReadinessMigration } from "./hostReadiness.js";
 import { assignmentWorkspaceScopeMigration } from "./assignmentWorkspaceScope.js";
 import { observerWorkspaceScopeMigration } from "./observerWorkspaceScope.js";
 import { attachmentWorkspaceScopeMigration } from "./attachmentWorkspaceScope.js";
+import { remoteWorkspaceScopeMigration } from "./remoteWorkspaceScope.js";
 import type { Migration, MigrationModule } from "./types.js";
 
 const identityModule: MigrationModule = { name: "identity", migrations: identityMigrations };
@@ -35,7 +36,8 @@ export const migrationModules: readonly MigrationModule[] = [
   { name: "host-readiness", migrations: [hostReadinessMigration] },
   { name: "assignment-workspace-scope", migrations: [assignmentWorkspaceScopeMigration] },
   { name: "observer-workspace-scope", migrations: [observerWorkspaceScopeMigration] },
-  { name: "attachment-workspace-scope", migrations: [attachmentWorkspaceScopeMigration] }
+  { name: "attachment-workspace-scope", migrations: [attachmentWorkspaceScopeMigration] },
+  { name: "remote-workspace-scope", migrations: [remoteWorkspaceScopeMigration] }
 ];
 
 const flattened = migrationModules.flatMap((module) => module.migrations);

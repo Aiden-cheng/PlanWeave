@@ -98,7 +98,16 @@ async function setup(
   const activity = options.projectActivity ? new ActivityRepository(server.database) : undefined;
   const activityProjection = activity ? new ActivityProjectionService({ activity }) : undefined;
 
-  const locator = { projectId: workspace.init.workspace.id, canvasId: "default" };
+  const workspaceIdentity = new WorkspaceIdentityRepository(server.database);
+  const workspaceId = workspaceIdentity.ensureLegacyProjectAdapter(
+    workspace.init.workspace.id,
+    workspace.init.workspace.id
+  );
+  const locator = {
+    workspaceId,
+    projectId: workspace.init.workspace.id,
+    canvasId: "default"
+  };
   const workAssignments = new WorkAssignmentRepository(server.database);
   const assignmentGate = options.strictGate
     ? createAssignmentDispatchGate({
@@ -155,12 +164,6 @@ async function setup(
 
   // Host reservation is workspace-scoped; map the legacy project and bind hosts so
   // preferred-host selection can resolve online capacity (same as production enrollment).
-  const workspaceIdentity = new WorkspaceIdentityRepository(server.database);
-  const workspaceId = workspaceIdentity.ensureLegacyProjectAdapter(
-    locator.projectId,
-    workspace.init.workspace.id
-  );
-
   const registeredHosts: Array<{ id: string; name: string }> = [];
   for (const hostSpec of options.withHosts ?? [
     { name: "Primary Host", capabilities: ["acp.codex"], capacity: 2 }
@@ -1392,6 +1395,7 @@ describe("HostReservationRepository preferred Host selection", () => {
     });
     const operation = operations.markClaimed(
       operations.create({
+        workspaceId,
         projectId: "project-a",
         canvasId: "default",
         blockRef: "T-001#B-001",
@@ -1409,6 +1413,7 @@ describe("HostReservationRepository preferred Host selection", () => {
     // Without preferred, automatic would pick alternate.
     const operation2 = operations.markClaimed(
       operations.create({
+        workspaceId,
         projectId: "project-a",
         canvasId: "default",
         blockRef: "T-001#B-002",

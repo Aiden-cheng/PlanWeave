@@ -33,11 +33,13 @@ async function setup(): Promise<PlanweaveServer> {
 
 function createOperation(
   repository: RemoteOperationRepository,
+  workspaceId: string,
   suffix: string,
   capabilities = ["linux"],
   projectId = "project-a"
 ) {
   const operation = repository.create({
+    workspaceId,
     projectId,
     canvasId: "default",
     blockRef: `RC-002#${suffix}`,
@@ -69,18 +71,18 @@ describe("HostReservationRepository", () => {
       leaseDurationMs: 60_000
     });
 
-    const automaticA = reservations.reserve(createOperation(operations, "scope-a").id);
+    const automaticA = reservations.reserve(createOperation(operations, workspaceA, "scope-a").id);
     expect(automaticA.hostId).toBe(hostA.id);
     expect(() =>
       reservations.reserve(
-        createOperation(operations, "scope-a-exact", ["linux"], "project-a").id,
+        createOperation(operations, workspaceA, "scope-a-exact", ["linux"], "project-a").id,
         {
           preferredHostId: hostB.id
         }
       )
     ).toThrowError("no_compatible_agent_host");
     const automaticB = reservations.reserve(
-      createOperation(operations, "scope-b", ["linux"], "project-b").id
+      createOperation(operations, workspaceB, "scope-b", ["linux"], "project-b").id
     );
     expect(automaticB.hostId).toBe(hostB.id);
   });
@@ -107,12 +109,12 @@ describe("HostReservationRepository", () => {
       leaseDurationMs: 60_000
     });
 
-    const reservedA = reservations.reserve(createOperation(operations, "B-001").id);
-    const reservedB = reservations.reserve(createOperation(operations, "B-002").id);
+    const reservedA = reservations.reserve(createOperation(operations, workspaceId, "B-001").id);
+    const reservedB = reservations.reserve(createOperation(operations, workspaceId, "B-002").id);
     expect([reservedA.hostId, reservedB.hostId]).toEqual([first.id, second.id].sort());
-    expect(() => reservations.reserve(createOperation(operations, "B-003").id)).toThrowError(
-      "no_compatible_agent_host"
-    );
+    expect(() =>
+      reservations.reserve(createOperation(operations, workspaceId, "B-003").id)
+    ).toThrowError("no_compatible_agent_host");
   });
 
   it("rejects offline, revoked, and incompatible Hosts", async () => {
@@ -141,9 +143,9 @@ describe("HostReservationRepository", () => {
       leaseDurationMs: 60_000
     });
 
-    expect(() => reservations.reserve(createOperation(operations, "B-004").id)).toThrowError(
-      "no_compatible_agent_host"
-    );
+    expect(() =>
+      reservations.reserve(createOperation(operations, workspaceId, "B-004").id)
+    ).toThrowError("no_compatible_agent_host");
   });
 
   it("releases capacity only with the current fence and preserves interrupted attempt uniqueness", async () => {
@@ -161,7 +163,7 @@ describe("HostReservationRepository", () => {
       hostOfflineAfterMs: 60_000,
       leaseDurationMs: 60_000
     });
-    const first = createOperation(operations, "B-005");
+    const first = createOperation(operations, workspaceId, "B-005");
     const lease = reservations.reserve(first.id);
     const activated = reservations.transition({
       leaseId: lease.leaseId,
@@ -211,6 +213,7 @@ describe("HostReservationRepository", () => {
     expect(() =>
       reservations.reserve(
         operations.create({
+          workspaceId: first.workspaceId,
           projectId: first.projectId,
           canvasId: first.canvasId,
           blockRef: first.blockRef,
@@ -241,7 +244,7 @@ describe("HostReservationRepository", () => {
       hostOfflineAfterMs: 60_000,
       leaseDurationMs: 60_000
     });
-    const operation = createOperation(operations, "B-006", ["linux"]);
+    const operation = createOperation(operations, workspaceId, "B-006", ["linux"]);
     const original = reservations.reserve(operation.id);
     reservations.transition({
       leaseId: original.leaseId,
@@ -313,7 +316,7 @@ describe("HostReservationRepository", () => {
       hostOfflineAfterMs: 60_000,
       leaseDurationMs: 60_000
     });
-    const operation = createOperation(operations, "B-008");
+    const operation = createOperation(operations, workspaceId, "B-008");
     const lease = reservations.reserve(operation.id);
     reservations.transition({
       leaseId: lease.leaseId,
@@ -359,7 +362,7 @@ describe("HostReservationRepository", () => {
       hostOfflineAfterMs: 60_000,
       leaseDurationMs: 60_000
     });
-    const interruptedOperation = createOperation(operations, "B-007");
+    const interruptedOperation = createOperation(operations, workspaceId, "B-007");
     const interruptedLease = reservations.reserve(interruptedOperation.id);
     reservations.transition({
       leaseId: interruptedLease.leaseId,
@@ -370,7 +373,7 @@ describe("HostReservationRepository", () => {
     now = new Date("2030-01-01T00:01:00.000Z");
     reservations.expireDue(now);
     hosts.reportOnline(host.id, ["linux", "acp.session.load"], 1);
-    reservations.reserve(createOperation(operations, "B-008").id);
+    reservations.reserve(createOperation(operations, workspaceId, "B-008").id);
     const interrupted = operations.getRequired(interruptedOperation.id);
 
     expect(() =>

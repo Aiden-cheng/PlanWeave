@@ -142,9 +142,7 @@ export async function handleAgentHostArtifactRequest(
     return false;
   }
   const dispatch = options.dispatches.get(matched.dispatchId);
-  const workspaceId = dispatch
-    ? options.hosts.workspaceForLegacyProject(dispatch.projectId)
-    : undefined;
+  const workspaceId = dispatch?.workspaceId;
   const authentication = authenticateAgentHostRequest(
     request,
     options.hosts,
@@ -167,6 +165,7 @@ export async function handleAgentHostArtifactRequest(
     return true;
   }
   const scope = {
+    workspaceId: dispatch.workspaceId,
     projectId: dispatch.projectId,
     hostId: authentication.host.id,
     dispatchId: matched.dispatchId,

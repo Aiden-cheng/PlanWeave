@@ -303,7 +303,7 @@ describe("remote operator walkthrough", () => {
         host: {
           displayName: "Walkthrough Host",
           capacity: 2,
-          capabilities: ["acp.test"]
+          capabilities: ["acp.test", "acp.codex"]
         },
         workspaces: [{ id: grant.workspaceId, path: "project" }],
         agentProfiles: [

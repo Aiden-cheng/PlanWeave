@@ -18,10 +18,36 @@ import {
   centralSchemaVersion,
   latestCentralSchemaVersion
 } from "../migrations.js";
+import { migrations } from "../migrations/registry.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 
 const directories: string[] = [];
 const databases: SqliteDatabase[] = [];
+
+function prepareHistoricalSchema(database: SqliteDatabase, throughVersion: number): void {
+  database.exec(
+    "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
+  );
+  for (const migration of migrations) {
+    if (migration.version > throughVersion) break;
+    if (migration.disableForeignKeys) database.exec("PRAGMA foreign_keys = OFF");
+    try {
+      database.exec("BEGIN IMMEDIATE");
+      migration.before?.(database);
+      database.exec(migration.sql);
+      migration.after?.(database);
+      database
+        .prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)")
+        .run(migration.version, "2020-01-01T00:00:00.000Z");
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    } finally {
+      if (migration.disableForeignKeys) database.exec("PRAGMA foreign_keys = ON");
+    }
+  }
+}
 
 afterEach(async () => {
   for (const database of databases.splice(0)) {
@@ -96,33 +122,8 @@ describe("human identity migration v16", () => {
     directories.push(directory);
     const database = await openServerDatabase(join(directory, "server.sqlite"), 5_000);
     databases.push(database);
+    prepareHistoricalSchema(database, 23);
     database.exec(`
-      CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
-      CREATE TABLE human_principals (
-        human_principal_id TEXT PRIMARY KEY,
-        display_name TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      );
-      CREATE TABLE project_memberships (
-        membership_id TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL,
-        human_principal_id TEXT NOT NULL,
-        role TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        revoked_at TEXT
-      );
-      CREATE TABLE human_device_credentials (
-        device_credential_id TEXT PRIMARY KEY,
-        human_principal_id TEXT NOT NULL,
-        minted_for_project_id TEXT NOT NULL,
-        label TEXT,
-        token_sha256 TEXT NOT NULL UNIQUE,
-        created_at TEXT NOT NULL,
-        expires_at TEXT,
-        revoked_at TEXT,
-        last_used_at TEXT
-      );
       INSERT INTO human_principals(human_principal_id,display_name,created_at)
       VALUES ('human-old','Old Human','2026-01-01T00:00:00.000Z');
       INSERT INTO project_memberships(
@@ -132,12 +133,6 @@ describe("human identity migration v16", () => {
         '2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z'
       );
     `);
-    for (let version = 1; version <= 23; version += 1) {
-      database
-        .prepare("INSERT INTO schema_migrations(version,applied_at) VALUES (?,?)")
-        .run(version, "2026-01-01T00:00:00.000Z");
-    }
-
     applyMigrations(database);
 
     expect(
@@ -158,22 +153,10 @@ describe("human identity migration v16", () => {
     const database = await openServerDatabase(join(directory, "server.sqlite"), 5_000);
     databases.push(database);
 
-    // Apply through v15 only by inserting migrations manually via full apply then
-    // checking version after truncate simulation is hard; instead open empty and migrate fully,
-    // and separately prove upgrade path from a v15-marked empty schema_migrations row set.
-    database.exec(`
-      CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
-    `);
-    for (let version = 1; version <= 15; version += 1) {
-      database
-        .prepare("INSERT INTO schema_migrations(version,applied_at) VALUES (?,?)")
-        .run(version, "2020-01-01T00:00:00.000Z");
-    }
-    database.exec("CREATE TABLE dispatches(id TEXT PRIMARY KEY, package_ref TEXT NOT NULL)");
-    // Minimal tables required only if later migrations depend on them — v16 is additive.
+    prepareHistoricalSchema(database, 15);
     applyMigrations(database);
     expect(centralSchemaVersion(database)).toBe(latestCentralSchemaVersion);
-    expect(latestCentralSchemaVersion).toBe(37);
+    expect(latestCentralSchemaVersion).toBe(40);
 
     for (const table of [
       "human_principals",

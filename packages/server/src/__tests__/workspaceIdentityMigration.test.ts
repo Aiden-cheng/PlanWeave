@@ -105,12 +105,13 @@ describe("workspace identity migration v27 Host repair markers", () => {
         database
           .prepare(
             `INSERT INTO dispatches(
-              id,project_id,block_ref,host_id,required_capabilities_json,status,lease_id,
+              id,workspace_id,project_id,block_ref,host_id,required_capabilities_json,status,lease_id,
               execution_attempt_id,lease_expires_at,created_at
-            ) VALUES(?,?,?,?,?,?,?,?,?,?)`
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)`
           )
           .run(
             `dispatch-${host.id}-${index}`,
+            "workspace-project-host-repair",
             "project-host-repair",
             `T-001#B-${String(index + 1).padStart(3, "0")}`,
             host.id,

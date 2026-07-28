@@ -10,7 +10,10 @@ import {
   remoteInteractionViewSchema,
   remoteOperationObservationSchema
 } from "@planweave-ai/collaboration-contracts";
-import type { CollaborationAuthContext } from "./identity/index.js";
+import type {
+  AuthenticatedCollaborationScope,
+  CollaborationAuthContext
+} from "./identity/index.js";
 import { authorizeHumanAction } from "./identity/policy.js";
 import { RemoteAcpEventRepository } from "./remoteAcpEvents.js";
 import { RemoteBlockCoordinator } from "./remoteBlockCoordinator.js";
@@ -33,7 +36,7 @@ export type HumanRemoteControlServiceOptions = {
   interactions: RemoteInteractionService;
   authorizeCanvas?: (
     context: CollaborationAuthContext,
-    scope: { projectId: string; canvasId: string }
+    scope: { workspaceId: string; projectId: string; canvasId: string }
   ) => void;
 };
 
@@ -46,16 +49,19 @@ function isWorkspaceDeviceContext(
 export class HumanRemoteControlService {
   constructor(private readonly options: HumanRemoteControlServiceOptions) {}
 
-  async dispatch(context: CollaborationAuthContext, projectId: string, rawRequest: unknown) {
+  async dispatch(scope: AuthenticatedCollaborationScope, rawRequest: unknown) {
+    const { actor: context, projectId } = scope;
     this.authorize(context, projectId);
     const request = remoteDispatchIntentSchema.parse(rawRequest);
     if (request.projectId !== projectId)
       throw new HumanRemoteControlError("human_remote_project_mismatch");
     this.options.authorizeCanvas?.(context, {
+      workspaceId: scope.workspaceId,
       projectId: request.projectId,
       canvasId: request.canvasId
     });
     const outcome = await this.options.coordinator.dispatch({
+      workspaceId: scope.workspaceId,
       projectId: request.projectId,
       canvasId: request.canvasId,
       blockRef: request.blockRef,
@@ -65,15 +71,11 @@ export class HumanRemoteControlService {
       expectedExecutionTargetRevision: request.expectedExecutionTargetRevision,
       strictAuthority: true
     });
-    return this.observeOperation(context, projectId, outcome.operation.id);
+    return this.observeOperation(scope, outcome.operation.id);
   }
 
-  async observeOperation(
-    context: CollaborationAuthContext,
-    projectId: string,
-    operationId: string
-  ) {
-    const operation = this.operationFor(context, projectId, operationId);
+  async observeOperation(scope: AuthenticatedCollaborationScope, operationId: string) {
+    const operation = this.operationFor(scope, operationId);
     const runtime = await this.options.coordinator.query(operation.id);
     const dispatch = this.options.dispatches.get(operation.dispatchId);
     return remoteOperationObservationSchema.parse({
@@ -132,12 +134,11 @@ export class HumanRemoteControlService {
   }
 
   async executeAction(
-    context: CollaborationAuthContext,
-    projectId: string,
+    scope: AuthenticatedCollaborationScope,
     operationId: string,
     rawAction: unknown
   ) {
-    const operation = this.operationFor(context, projectId, operationId);
+    const operation = this.operationFor(scope, operationId);
     const command = remoteHumanExecutionActionCommandSchema.parse(rawAction);
     if (command.operationId !== operation.id) {
       throw new HumanRemoteControlError("human_remote_operation_mismatch");
@@ -153,13 +154,8 @@ export class HumanRemoteControlService {
     });
   }
 
-  replayEvents(
-    context: CollaborationAuthContext,
-    projectId: string,
-    operationId: string,
-    rawQuery: unknown
-  ) {
-    const operation = this.operationFor(context, projectId, operationId);
+  replayEvents(scope: AuthenticatedCollaborationScope, operationId: string, rawQuery: unknown) {
+    const operation = this.operationFor(scope, operationId);
     const query = remoteEventQuerySchema.parse(rawQuery);
     return remoteEventReplaySchema.parse(
       this.options.events.replay(operation.executionAttemptId, query.afterCursor)
@@ -167,12 +163,11 @@ export class HumanRemoteControlService {
   }
 
   listPendingInteractions(
-    context: CollaborationAuthContext,
-    projectId: string,
+    scope: AuthenticatedCollaborationScope,
     operationId: string,
     rawQuery: unknown
   ) {
-    const operation = this.operationFor(context, projectId, operationId);
+    const operation = this.operationFor(scope, operationId);
     const query = remoteInteractionPageQuerySchema.parse(rawQuery);
     const interactions = this.options.interactions.listPending(
       operation.id,
@@ -186,12 +181,11 @@ export class HumanRemoteControlService {
   }
 
   settleInteraction(
-    context: CollaborationAuthContext,
-    projectId: string,
+    scope: AuthenticatedCollaborationScope,
     operationId: string,
     rawSettlement: unknown
   ) {
-    const operation = this.operationFor(context, projectId, operationId);
+    const operation = this.operationFor(scope, operationId);
     const settlement = remoteInteractionResponseSchema.parse(rawSettlement);
     if (
       settlement.dispatchId !== operation.dispatchId ||
@@ -203,7 +197,7 @@ export class HumanRemoteControlService {
     return toHumanInteractionView(
       this.options.interactions.settle({
         hostId: operation.attempt.hostId,
-        responderId: context.humanPrincipalId,
+        responderId: scope.actor.humanPrincipalId,
         settlement
       })
     );
@@ -223,16 +217,20 @@ export class HumanRemoteControlService {
   }
 
   private operationFor(
-    context: CollaborationAuthContext,
-    projectId: string,
+    scope: AuthenticatedCollaborationScope,
     operationId: string
   ): RemoteOperation {
+    const { actor: context, projectId } = scope;
     this.authorize(context, projectId);
-    const operation = this.options.operations.getRequired(operationId);
-    if (operation.projectId !== projectId) {
+    const operation = this.options.operations.getRequiredInWorkspace(
+      scope.workspaceId,
+      operationId
+    );
+    if (operation.projectId !== projectId || operation.workspaceId !== scope.workspaceId) {
       throw new HumanRemoteControlError("human_cross_project_forbidden");
     }
     this.options.authorizeCanvas?.(context, {
+      workspaceId: operation.workspaceId,
       projectId: operation.projectId,
       canvasId: operation.canvasId
     });
