@@ -178,10 +178,14 @@ describe("real-process adversarial authorization matrix", () => {
             path: "/api/v1/remote-operations",
             authorization: projectOperatorToken,
             body: {
+              schemaVersion: "remote-run/v2",
               projectId: c.harness.projectId,
               canvasId: "default",
               blockRef: "T-001#B-001",
-              idempotencyKey: "auth-matrix-1"
+              idempotencyKey: "auth-matrix-1",
+              expectedResponsibilityRevision: 0,
+              expectedReviewerRevision: 0,
+              expectedExecutionTargetRevision: 1
             }
           });
           expect(trusted).toMatchObject({
@@ -208,10 +212,14 @@ describe("real-process adversarial authorization matrix", () => {
             path: "/api/v1/remote-operations",
             authorization: projectOperatorToken,
             body: {
+              schemaVersion: "remote-run/v2",
               projectId: "foreign-project-id",
               canvasId: "default",
               blockRef: "T-001#B-001",
-              idempotencyKey: "auth-wrong-project"
+              idempotencyKey: "auth-wrong-project",
+              expectedResponsibilityRevision: 0,
+              expectedReviewerRevision: 0,
+              expectedExecutionTargetRevision: 1
             }
           });
           expect({ status: denied.status, body: denied.body }).toEqual({
