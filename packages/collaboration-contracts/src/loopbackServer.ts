@@ -4,7 +4,11 @@ import {
   isLoopbackHostname,
   workspaceConnectionProfileSchema
 } from "./connection.js";
-import { humanProjectIdSchema, timestampSchema, workspaceIdSchema } from "./primitives.js";
+import {
+  canvasScopeRefSchema,
+  timestampSchema,
+  workspaceIdSchema
+} from "./primitives.js";
 
 function requireLoopbackDevelopmentOrigin(
   value: { serverBaseUrl: string; allowInsecureTransport: boolean },
@@ -82,13 +86,20 @@ export const loopbackServerLifecycleRequestSchema = z.discriminatedUnion("action
 ]);
 export type LoopbackServerLifecycleRequest = z.infer<typeof loopbackServerLifecycleRequestSchema>;
 
+/** A renderer-safe exact scope for a project currently trusted by a running Server. */
+export const loopbackTrustedProjectScopeSchema = canvasScopeRefSchema;
+export type LoopbackTrustedProjectScope = z.infer<typeof loopbackTrustedProjectScopeSchema>;
+
+export const loopbackTrustedProjectListRequestSchema = z
+  .object({ profileId: z.string().trim().min(1).max(128) })
+  .strict();
+export type LoopbackTrustedProjectListRequest = z.infer<
+  typeof loopbackTrustedProjectListRequestSchema
+>;
+
 /** Current project registration contains only opaque IDs, never a local filesystem authority. */
-export const loopbackProjectRegistrationRequestSchema = z
-  .object({
-    workspaceId: workspaceIdSchema,
-    projectId: humanProjectIdSchema,
-    profileId: z.string().trim().min(1).max(128)
-  })
+export const loopbackProjectRegistrationRequestSchema = loopbackTrustedProjectScopeSchema
+  .extend({ profileId: z.string().trim().min(1).max(128) })
   .strict();
 export type LoopbackProjectRegistrationRequest = z.infer<
   typeof loopbackProjectRegistrationRequestSchema

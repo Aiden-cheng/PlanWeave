@@ -290,12 +290,18 @@ describe("scoped access capability contracts", () => {
       })
     ).toThrow(/loopback_server_requires_literal_loopback_origin/);
     expect(
-      loopbackProjectRegistrationRequestSchema.parse({ workspaceId, projectId, profileId: loopback.profileId })
-    ).toMatchObject({ workspaceId, projectId });
+      loopbackProjectRegistrationRequestSchema.parse({
+        workspaceId,
+        projectId,
+        canvasId: "canvas-main-001",
+        profileId: loopback.profileId
+      })
+    ).toMatchObject({ workspaceId, projectId, canvasId: "canvas-main-001" });
     expect(() =>
       loopbackProjectRegistrationRequestSchema.parse({
         workspaceId,
         projectId,
+        canvasId: "canvas-main-001",
         profileId: loopback.profileId,
         localPath: "/tmp/project"
       })

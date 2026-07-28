@@ -11,10 +11,13 @@ import {
   createDistributedServerComposition,
   type DistributedServerComposition
 } from "./serverComposition.js";
+import type { TrustedProjectControlPort } from "./trustedProjectControl.js";
 
 export type DistributedServerProcess = {
   readonly version: string;
   readonly publicUrl: string;
+  /** Main-process-only port; it never exposes paths, tokens, or transport control. */
+  readonly trustedProjectControl: TrustedProjectControlPort;
   readiness(): ServerReadiness;
   close(): Promise<void>;
 };
@@ -127,6 +130,7 @@ export async function serveDistributedServer(
   return {
     version: serverPackageVersion,
     publicUrl: serverConfigSummary(config).publicUrl,
+    trustedProjectControl: activeComposition.trustedProjectControl,
     readiness: () => readiness.readiness(),
     close() {
       closePromise ??= (async () => {

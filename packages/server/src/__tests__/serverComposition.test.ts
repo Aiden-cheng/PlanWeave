@@ -138,6 +138,7 @@ async function setup() {
   return {
     composition,
     projectId,
+    databasePath: config.databasePath,
     origin: `http://127.0.0.1:${address.port}`,
     executionTargetRevision
   };
@@ -175,6 +176,31 @@ function jsonHeaders(token: string) {
 }
 
 describe("distributed server composition", () => {
+  it("exposes active trusted project scopes with WorkspaceIdentity-derived workspace IDs", async () => {
+    const fixture = await setup();
+    const scopes = fixture.composition.trustedProjectControl.listTrustedProjectScopes();
+    expect(scopes).toHaveLength(1);
+    expect(scopes[0]).toMatchObject({ projectId: fixture.projectId, canvasId: "default" });
+    expect(JSON.stringify(scopes)).not.toMatch(/path|package|tmp/);
+
+    const database = await openServerDatabase(fixture.databasePath, 5_000);
+    try {
+      const workspaceId = new WorkspaceIdentityRepository(database).workspaceForLegacyProject(
+        fixture.projectId
+      );
+      expect(workspaceId).toBe(scopes[0].workspaceId);
+      expect(
+        fixture.composition.trustedProjectControl.resolveTrustedProjectScope({
+          workspaceId: "workspace-other-001",
+          projectId: fixture.projectId,
+          canvasId: "default"
+        })
+      ).toBeUndefined();
+    } finally {
+      database.close();
+    }
+  });
+
   it("materializes trusted registry owners during bootstrap for listing and management", async () => {
     const fixture = await setup();
     const bootstrap = await fetch(

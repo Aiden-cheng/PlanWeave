@@ -1,17 +1,18 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  loopbackServerProfileSchema
+  canvasScopeRefSchema,
+  loopbackServerProfileSchema,
+  type ActorRef,
+  type CanvasScopeRef
 } from "@planweave-ai/collaboration-contracts";
 import { serverReadinessSchema } from "../readiness.js";
 import { serverConfigSchema, type ServerConfig } from "../config.js";
 import type { DistributedServerProcess } from "../serverServe.js";
-import {
-  FixedProjectRegistrationController,
-  LoopbackServerController
-} from "../loopbackController.js";
+import { LoopbackServerController } from "../loopbackController.js";
 import { applyMigrations } from "../migrations.js";
 import { ProjectAccessRepository } from "../projectAccessRepository.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
+import type { TrustedProjectControlPort } from "../trustedProjectControl.js";
 
 const databases: SqliteDatabase[] = [];
 
@@ -51,10 +52,22 @@ function config(overrides: Partial<ServerConfig> = {}): ServerConfig {
   });
 }
 
-function process(close: () => Promise<void>): DistributedServerProcess {
+const unavailableTrustedProjectControl: TrustedProjectControlPort = {
+  listTrustedProjectScopes: () => [],
+  resolveTrustedProjectScope: () => undefined,
+  assertTrustedProjectAdministration: () => {
+    throw new Error("loopback_trusted_project_scope_not_found");
+  }
+};
+
+function process(
+  close: () => Promise<void>,
+  trustedProjectControl: TrustedProjectControlPort = unavailableTrustedProjectControl
+): DistributedServerProcess {
   return {
     version: "test",
     publicUrl: profile.serverBaseUrl,
+    trustedProjectControl,
     readiness: () =>
       serverReadinessSchema.parse({
         status: "ready",
@@ -66,23 +79,55 @@ function process(close: () => Promise<void>): DistributedServerProcess {
   };
 }
 
+function scopeKey(scope: CanvasScopeRef): string {
+  return `${scope.workspaceId}\0${scope.projectId}\0${scope.canvasId}`;
+}
+
+function runningTrustedProjectControl(
+  access: ProjectAccessRepository,
+  scopes: readonly CanvasScopeRef[]
+): TrustedProjectControlPort {
+  const configured = new Map(scopes.map((scope) => [scopeKey(scope), scope]));
+  const resolveTrustedProjectScope = (rawScope: unknown) => {
+    const scope = canvasScopeRefSchema.parse(rawScope);
+    return configured.get(scopeKey(scope));
+  };
+  return {
+    listTrustedProjectScopes: () => [...configured.values()],
+    resolveTrustedProjectScope,
+    assertTrustedProjectAdministration(actor: ActorRef, rawScope: unknown) {
+      const scope = resolveTrustedProjectScope(rawScope);
+      if (!scope) throw new Error("loopback_trusted_project_scope_not_found");
+      access.policy.assertCapability({ ...scope, actor, capability: "administration" });
+      return scope;
+    }
+  };
+}
+
 async function accessFixture() {
   const database = await openServerDatabase(":memory:", 5_000);
   databases.push(database);
   applyMigrations(database);
   database.exec(`
-    INSERT INTO workspaces(workspace_id,display_name,created_at) VALUES ('w','Workspace','2026-01-01T00:00:00.000Z');
+    INSERT INTO workspaces(workspace_id,display_name,created_at) VALUES
+      ('w','Workspace','2026-01-01T00:00:00.000Z'),
+      ('w-other','Other workspace','2026-01-01T00:00:00.000Z');
     INSERT INTO workspace_principals(workspace_id,human_principal_id,display_name,created_at,revoked_at) VALUES
       ('w','owner','Owner','2026-01-01T00:00:00.000Z',NULL),
       ('w','editor','Editor','2026-01-01T00:00:00.000Z',NULL),
-      ('w','viewer','Viewer','2026-01-01T00:00:00.000Z',NULL);
+      ('w','viewer','Viewer','2026-01-01T00:00:00.000Z',NULL),
+      ('w-other','other-owner','Other owner','2026-01-01T00:00:00.000Z',NULL);
     INSERT INTO workspace_memberships(workspace_id,membership_id,human_principal_id,role,revision,created_at,updated_at,revoked_at) VALUES
       ('w','m-owner','owner','owner',1,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',NULL),
       ('w','m-editor','editor','member',1,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',NULL),
-      ('w','m-viewer','viewer','member',1,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',NULL);
+      ('w','m-viewer','viewer','member',1,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',NULL),
+      ('w-other','m-other-owner','other-owner','owner',1,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',NULL);
   `);
   const access = new ProjectAccessRepository(database, () => new Date("2026-01-02T00:00:00.000Z"));
   access.registerProjectInternal({ workspaceId: "w", projectId: "p", projectRoot: "/tmp/project", ownerHumanPrincipalId: "owner" });
+  access.registerCanvasInternal({ workspaceId: "w", projectId: "p", canvasId: "c", packageDir: "/tmp/project/c", ownerHumanPrincipalId: "owner" });
+  access.registerProjectInternal({ workspaceId: "w-other", projectId: "p", projectRoot: "/tmp/other-project", ownerHumanPrincipalId: "other-owner" });
+  access.registerCanvasInternal({ workspaceId: "w-other", projectId: "p", canvasId: "c", packageDir: "/tmp/other-project/c", ownerHumanPrincipalId: "other-owner" });
   return access;
 }
 
@@ -132,23 +177,40 @@ describe("loopback controller", () => {
     await expect(controller.apply({ action: "stop", profileId: profile.profileId })).resolves.toMatchObject({ state: "stopped" });
   });
 
-  it("registers only configured owner scope without paths or secrets", async () => {
+  it("resolves and registers only exact running trusted scopes through real administration policy", async () => {
     const access = await accessFixture();
-    const controller = new FixedProjectRegistrationController(
-      [
-        { workspaceId: "w", projectId: "p", profileId: "local" },
-        { workspaceId: "other", projectId: "p", profileId: "local" }
-      ],
-      access,
-      () => new Date("2026-01-02T00:00:00.000Z")
+    const trustedProjectControl = runningTrustedProjectControl(access, [
+      canvasScopeRefSchema.parse({ workspaceId: "w", projectId: "p", canvasId: "c" }),
+      canvasScopeRefSchema.parse({ workspaceId: "w-other", projectId: "p", canvasId: "c" })
+    ]);
+    const controller = new LoopbackServerController({
+      createConfig: () => config(),
+      serve: async () => process(async () => {}, trustedProjectControl),
+      clock: () => new Date("2026-01-02T00:00:00.000Z")
+    });
+    const request = { workspaceId: "w", projectId: "p", canvasId: "c", profileId: "local" };
+    expect(() => controller.listTrustedProjectScopes({ profileId: profile.profileId })).toThrow(
+      "loopback_server_not_running"
     );
-    const request = { workspaceId: "w", projectId: "p", profileId: "local" };
-    const first = controller.register({ kind: "human", id: "owner" }, request);
-    expect(controller.register({ kind: "human", id: "owner" }, request)).toEqual(first);
-    expect(JSON.stringify(first)).not.toMatch(/path|secret|token|tmp/);
-    expect(() => controller.register({ kind: "human", id: "editor" }, request)).toThrow("access_capability_denied");
-    expect(() => controller.register({ kind: "human", id: "viewer" }, request)).toThrow("access_capability_denied");
-    expect(() => controller.register({ kind: "human", id: "owner" }, { ...request, workspaceId: "other" })).toThrow();
-    expect(() => controller.register({ kind: "human", id: "owner" }, { ...request, profileId: "unknown" })).toThrow("loopback_registration_not_configured");
+    await controller.apply({ action: "start", profile });
+    expect(controller.listTrustedProjectScopes({ profileId: profile.profileId })).toEqual([
+      { workspaceId: "w", projectId: "p", canvasId: "c" },
+      { workspaceId: "w-other", projectId: "p", canvasId: "c" }
+    ]);
+    expect(controller.resolveTrustedProjectScope(request)).toEqual({
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: "c"
+    });
+    const registered = controller.registerTrustedProject({ kind: "human", id: "owner" }, request);
+    expect(registered).toMatchObject({ ...request, registeredAt: "2026-01-02T00:00:00.000Z" });
+    expect(JSON.stringify(registered)).not.toMatch(/path|secret|token|tmp/);
+    expect(() => controller.registerTrustedProject({ kind: "human", id: "editor" }, request)).toThrow("access_capability_denied");
+    expect(() => controller.registerTrustedProject({ kind: "human", id: "viewer" }, request)).toThrow("access_capability_denied");
+    expect(() => controller.registerTrustedProject({ kind: "human", id: "owner" }, { ...request, workspaceId: "w-other" })).toThrow("access_capability_denied");
+    expect(() => controller.resolveTrustedProjectScope({ ...request, canvasId: "other" })).toThrow("loopback_registration_not_trusted");
+    expect(() => controller.registerTrustedProject({ kind: "human", id: "owner" }, { ...request, profileId: "unknown" })).toThrow("loopback_profile_mismatch");
+    await controller.apply({ action: "stop", profileId: profile.profileId });
+    expect(() => controller.registerTrustedProject({ kind: "human", id: "owner" }, request)).toThrow("loopback_server_not_running");
   });
 });

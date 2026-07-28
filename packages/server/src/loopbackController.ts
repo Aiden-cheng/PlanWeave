@@ -4,17 +4,19 @@ import {
   loopbackProjectRegistrationViewSchema,
   loopbackServerLifecycleRequestSchema,
   loopbackServerStatusSchema,
+  loopbackTrustedProjectListRequestSchema,
+  loopbackTrustedProjectScopeSchema,
   type LoopbackProjectRegistrationRequest,
   type LoopbackProjectRegistrationView,
   type LoopbackServerLifecycleRequest,
   type LoopbackServerProfile,
-  type LoopbackServerStatus
+  type LoopbackServerStatus,
+  type LoopbackTrustedProjectScope
 } from "@planweave-ai/collaboration-contracts";
 import type { ActorRef } from "@planweave-ai/collaboration-contracts";
 import { serverConfigSchema, type ServerConfig } from "./config.js";
 import type { DistributedServerProcess } from "./serverServe.js";
 import { serveDistributedServer } from "./serverServe.js";
-import type { ProjectAccessRepository } from "./projectAccessRepository.js";
 
 export type LoopbackServerControllerOptions = {
   /** Desktop main supplies a fixed, local configuration factory; renderer never supplies config or paths. */
@@ -22,49 +24,6 @@ export type LoopbackServerControllerOptions = {
   serve?(config: ServerConfig): Promise<DistributedServerProcess>;
   clock?: () => Date;
 };
-
-/** Bounded owner-authorized registration of an already trusted current project. */
-export type FixedProjectRegistration = {
-  workspaceId: string;
-  projectId: string;
-  profileId: string;
-};
-
-export class FixedProjectRegistrationController {
-  private readonly registrations = new Map<string, LoopbackProjectRegistrationView>();
-
-  constructor(
-    private readonly configured: readonly FixedProjectRegistration[],
-    private readonly access: ProjectAccessRepository,
-    private readonly clock: () => Date = () => new Date()
-  ) {}
-
-  register(actor: ActorRef, rawRequest: unknown): LoopbackProjectRegistrationView {
-    const request = loopbackProjectRegistrationRequestSchema.parse(rawRequest);
-    const configured = this.configured.find(
-      (candidate) =>
-        candidate.workspaceId === request.workspaceId &&
-        candidate.projectId === request.projectId &&
-        candidate.profileId === request.profileId
-    );
-    if (!configured) throw new Error("loopback_registration_not_configured");
-    this.access.policy.assertCapability({
-      workspaceId: request.workspaceId,
-      projectId: request.projectId,
-      actor,
-      capability: "administration"
-    });
-    const key = `${request.workspaceId}\0${request.projectId}\0${request.profileId}`;
-    const existing = this.registrations.get(key);
-    if (existing) return existing;
-    const registered = loopbackProjectRegistrationViewSchema.parse({
-      ...request,
-      registeredAt: this.clock().toISOString()
-    });
-    this.registrations.set(key, registered);
-    return registered;
-  }
-}
 
 /**
  * Main-process-only lifecycle wrapper. It has no HTTP route and accepts no command,
@@ -78,6 +37,36 @@ export class LoopbackServerController {
   private reason: LoopbackServerStatus["reason"] = null;
 
   constructor(private readonly options: LoopbackServerControllerOptions) {}
+
+  listTrustedProjectScopes(rawRequest: unknown): readonly LoopbackTrustedProjectScope[] {
+    const request = loopbackTrustedProjectListRequestSchema.parse(rawRequest);
+    return this.processForProfile(request.profileId).trustedProjectControl.listTrustedProjectScopes();
+  }
+
+  resolveTrustedProjectScope(rawRequest: unknown): LoopbackTrustedProjectScope {
+    const request = loopbackProjectRegistrationRequestSchema.parse(rawRequest);
+    const scope = this.processForProfile(request.profileId).trustedProjectControl.resolveTrustedProjectScope(
+      scopeFromRegistration(request)
+    );
+    if (!scope) throw new Error("loopback_registration_not_trusted");
+    return scope;
+  }
+
+  registerTrustedProject(
+    actor: ActorRef,
+    rawRequest: unknown
+  ): LoopbackProjectRegistrationView {
+    const request = loopbackProjectRegistrationRequestSchema.parse(rawRequest);
+    const scope = this.processForProfile(request.profileId).trustedProjectControl.assertTrustedProjectAdministration(
+      actor,
+      scopeFromRegistration(request)
+    );
+    return loopbackProjectRegistrationViewSchema.parse({
+      ...scope,
+      profileId: request.profileId,
+      registeredAt: (this.options.clock ?? (() => new Date()))().toISOString()
+    });
+  }
 
   status(): LoopbackServerStatus {
     return loopbackServerStatusSchema.parse({
@@ -106,6 +95,12 @@ export class LoopbackServerController {
       throw new Error("loopback_profile_configuration_mismatch");
     }
     return config;
+  }
+
+  private processForProfile(profileId: string): DistributedServerProcess {
+    if (!this.process) throw new Error("loopback_server_not_running");
+    if (this.profile?.profileId !== profileId) throw new Error("loopback_profile_mismatch");
+    return this.process;
   }
 
   private async start(request: Extract<LoopbackServerLifecycleRequest, { action: "start" }>): Promise<LoopbackServerStatus> {
@@ -149,6 +144,16 @@ export class LoopbackServerController {
       return this.status();
     }
   }
+}
+
+function scopeFromRegistration(
+  request: LoopbackProjectRegistrationRequest
+): LoopbackTrustedProjectScope {
+  return loopbackTrustedProjectScopeSchema.parse({
+    workspaceId: request.workspaceId,
+    projectId: request.projectId,
+    canvasId: request.canvasId
+  });
 }
 
 export type { LoopbackProjectRegistrationRequest };

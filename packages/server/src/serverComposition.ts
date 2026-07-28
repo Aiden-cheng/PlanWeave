@@ -64,6 +64,7 @@ import { createTrustedRuntimeRegistry } from "./runtimeProjectRegistry.js";
 import { createManifestWorkItemPort } from "./work/workItemFacts.js";
 import { ProjectAccessRepository } from "./projectAccessRepository.js";
 import { handleAccessHttpRequest } from "./accessHttp.js";
+import { createTrustedProjectControlPort, type TrustedProjectControlPort } from "./trustedProjectControl.js";
 import { PackageSnapshotRepository } from "./packageSnapshotRepository.js";
 import { attachAgentHostWebSocketServer, type AgentHostWebSocketServer } from "./wsServer.js";
 import {
@@ -107,6 +108,7 @@ export type DistributedServerCompositionOptions = {
 
 export type DistributedServerComposition = {
   readonly ownsHttpServer: false;
+  readonly trustedProjectControl: TrustedProjectControlPort;
   readiness(): ServerReadiness;
   beginDrain(): void;
   drainTransports(): Promise<void>;
@@ -1017,6 +1019,11 @@ export async function createDistributedServerComposition(
     };
     return {
       ownsHttpServer: false,
+      trustedProjectControl: createTrustedProjectControlPort({
+        runtimeRegistry,
+        workspaceIdentity,
+        projectAccess: initializedProjectAccess
+      }),
       readiness: () => readiness.readiness(),
       beginDrain,
       drainTransports,
