@@ -12,7 +12,8 @@ import {
 } from "./mcpTunnel/mcpTunnelHandlers.js";
 import {
   registerCollaborationHandlers,
-  shutdownCollaborationService
+  shutdownCollaborationService,
+  shutdownLocalCollaborationCoordinator
 } from "./collaboration/collaborationHandlers.js";
 import {
   registerOperatorControlHandlers,
@@ -148,6 +149,7 @@ startSingleInstanceLifecycle({
       event.preventDefault();
       void Promise.allSettled([
         stopMcpTunnelProcesses(),
+        shutdownLocalCollaborationCoordinator(),
         shutdownCollaborationService(),
         shutdownOperatorControlService(),
         shutdownDesktopAutoRuns("PlanWeave Desktop is quitting.")

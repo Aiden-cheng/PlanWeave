@@ -499,6 +499,12 @@ export class CollaborationService {
     });
   }
 
+  /** Main-only identity lookup for local coordinator authorization; never crosses IPC. */
+  async activeHumanPrincipalId(profileId: string): Promise<string | null> {
+    const metadata = await this.vault.getMetadata(profileId);
+    return metadata?.humanPrincipalId ?? null;
+  }
+
   async consumeInvitation(input: unknown): Promise<CollaborationAuthHandoffView> {
     return this.enqueue(async () => {
       this.assertOpen();

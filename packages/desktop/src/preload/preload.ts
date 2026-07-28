@@ -267,6 +267,20 @@ const collaborationApi: PlanWeaveCollaborationApi = {
     ipcRenderer.invoke(collaborationInvokeChannels.getCurrentCanvasAccess, input),
   mutateCurrentCanvasAccess: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.mutateCurrentCanvasAccess, input),
+  setCollaborationCurrentSelection: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.setCollaborationCurrentSelection, input),
+  clearCollaborationCurrentSelection: async () =>
+    ipcRenderer.invoke(collaborationInvokeChannels.clearCollaborationCurrentSelection),
+  getLocalCollaborationServerStatus: async () =>
+    ipcRenderer.invoke(collaborationInvokeChannels.getLocalCollaborationServerStatus),
+  startLocalCollaborationServer: async () =>
+    ipcRenderer.invoke(collaborationInvokeChannels.startLocalCollaborationServer),
+  stopLocalCollaborationServer: async () =>
+    ipcRenderer.invoke(collaborationInvokeChannels.stopLocalCollaborationServer),
+  listLocalCollaborationTrustedScopes: async () =>
+    ipcRenderer.invoke(collaborationInvokeChannels.listLocalCollaborationTrustedScopes),
+  registerLocalCollaborationCurrentProject: async () =>
+    ipcRenderer.invoke(collaborationInvokeChannels.registerLocalCollaborationCurrentProject),
   listCollaborationMembers: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationMembers, input),
   listCollaborationDevices: async (input) =>

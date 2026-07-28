@@ -9,6 +9,7 @@ import { CollaborationConnectForm } from "../team/CollaborationConnectForm";
 import { PeoplePanel } from "../team/PeoplePanel";
 import { ContentAuthorityPanel } from "../collaboration/ContentAuthorityPanel";
 import { CurrentCanvasAccessPanel } from "../collaboration/CurrentCanvasAccessPanel";
+import { LocalCollaborationServerPanel } from "../collaboration/LocalCollaborationServerPanel";
 import { useCurrentCanvasAccess } from "../hooks/useCurrentCanvasAccess";
 
 export type PeopleViewProps = {
@@ -147,6 +148,7 @@ export function PeopleView({
         onGrant={currentCanvasAccess.grant}
         onRevoke={currentCanvasAccess.revoke}
       />
+      <LocalCollaborationServerPanel api={api} t={t} />
       <ContentAuthorityPanel api={api ?? null} canvasId={canvasId} connected={sessionConnected} t={t} />
     </section>
   );

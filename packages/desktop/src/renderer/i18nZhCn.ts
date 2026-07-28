@@ -1212,5 +1212,18 @@ export const zhCnCatalog = {
   contentAuthorityRetry: "重试",
   contentAuthorityPublish: "发布首个版本",
   contentAuthorityMaterialize: "物化",
-  contentAuthorityRecover: "恢复"
+  contentAuthorityRecover: "恢复",
+  localServerTitle: "本机协作服务",
+  localServerRunning: "正在此设备上运行",
+  localServerStopped: "已停止",
+  localServerStart: "启动本机服务",
+  localServerStop: "停止本机服务",
+  localServerOwnerPending: "正在等待初始化所有者，随后才能注册当前画布访问权限。",
+  localServerOwnerRequired: "请先初始化所有者，再注册当前画布。",
+  localServerTrustedScope: "受信任画布范围",
+  localServerRegisterCurrent: "注册当前画布",
+  localServerRegistered: "已注册",
+  localServerStartFailed: "本机服务启动失败。准备好后可重试。",
+  localServerStopFailed: "本机服务停止失败。请重试停止操作。",
+  localServerUnavailable: "本机服务不可用。"
 } satisfies Record<TranslationKey, string>;

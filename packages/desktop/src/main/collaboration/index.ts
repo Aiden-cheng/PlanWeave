@@ -84,7 +84,8 @@ export {
   getCollaborationService,
   registerCollaborationHandlers,
   setCollaborationServiceForTests,
-  shutdownCollaborationService
+  shutdownCollaborationService,
+  shutdownLocalCollaborationCoordinator
 } from "./collaborationHandlers.js";
 export { redactCollaborationText, redactCollaborationValue } from "./redaction.js";
 export { reconnectDelay } from "./reconnectBackoff.js";

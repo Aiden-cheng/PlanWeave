@@ -13,8 +13,10 @@ import {
   type CollaborationWebSocketConstructor
 } from "./CollaborationClient.js";
 import { CollaborationService, type CollaborationServiceOptions } from "./collaborationService.js";
+import { LocalCollaborationCoordinatorControl } from "./CollaborationCoordinatorControl.js";
 
 let service: CollaborationService | null = null;
+let coordinator: LocalCollaborationCoordinatorControl | null = null;
 
 function publishStatusToRenderers(status: CollaborationStatus): void {
   for (const window of BrowserWindow.getAllWindows()) {
@@ -89,6 +91,14 @@ export function registerCollaborationHandlers(
 ): CollaborationService {
   service = createDefaultService(options);
   const active = service;
+  coordinator = new LocalCollaborationCoordinatorControl({
+    safeStorage: {
+      isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+      encryptString: (value) => safeStorage.encryptString(value),
+      decryptString: (value) => safeStorage.decryptString(value)
+    }
+  });
+  const local = coordinator;
 
   ipcMain.handle(collaborationInvokeChannels.getCollaborationStatus, () => active.getStatus());
   ipcMain.handle(collaborationInvokeChannels.upsertCollaborationProfile, (_event, input: unknown) =>
@@ -112,7 +122,14 @@ export function registerCollaborationHandlers(
   );
   ipcMain.handle(
     collaborationInvokeChannels.bootstrapCollaborationOwner,
-    (_event, input: unknown) => active.bootstrapOwner(input)
+    async (_event, input: unknown) => {
+      const handoff = await active.bootstrapOwner(input);
+      const profileId = input && typeof input === "object" && "profileId" in input ? (input as { profileId: unknown }).profileId : null;
+      if (typeof profileId === "string" && local.status().profile?.profileId === profileId) {
+        local.registerCurrentProject({ kind: "human", id: handoff.principal.humanPrincipalId });
+      }
+      return handoff;
+    }
   );
   ipcMain.handle(
     collaborationInvokeChannels.consumeCollaborationInvitation,
@@ -194,6 +211,32 @@ export function registerCollaborationHandlers(
   ipcMain.handle(collaborationInvokeChannels.mutateCurrentCanvasAccess, (_event, input: unknown) =>
     active.mutateCurrentCanvasAccess(input)
   );
+  ipcMain.handle(collaborationInvokeChannels.setCollaborationCurrentSelection, (_event, input: unknown) =>
+    local.setCurrentSelection(input)
+  );
+  ipcMain.handle(collaborationInvokeChannels.clearCollaborationCurrentSelection, () =>
+    local.clearCurrentSelection()
+  );
+  ipcMain.handle(collaborationInvokeChannels.getLocalCollaborationServerStatus, () => local.status());
+  ipcMain.handle(collaborationInvokeChannels.startLocalCollaborationServer, async () => {
+    const status = await local.start();
+    const profile = local.localProfile();
+    if (!profile) throw new Error("local_collaboration_selection_required");
+    await active.upsertProfile(profile);
+    await active.setActiveProfile({ profileId: profile.profileId });
+    return status;
+  });
+  ipcMain.handle(collaborationInvokeChannels.stopLocalCollaborationServer, () => local.stop());
+  ipcMain.handle(collaborationInvokeChannels.listLocalCollaborationTrustedScopes, () =>
+    local.listActiveTrustedScopes()
+  );
+  ipcMain.handle(collaborationInvokeChannels.registerLocalCollaborationCurrentProject, async () => {
+    const profile = local.status().profile;
+    if (!profile) throw new Error("loopback_server_not_running");
+    const humanPrincipalId = await active.activeHumanPrincipalId(profile.profileId);
+    if (!humanPrincipalId) throw new Error("local_collaboration_owner_initialization_required");
+    return local.registerCurrentProject({ kind: "human", id: humanPrincipalId });
+  });
   ipcMain.handle(collaborationInvokeChannels.listCollaborationMembers, (_event, input: unknown) =>
     active.listMembers(input)
   );
@@ -338,4 +381,13 @@ export async function shutdownCollaborationService(): Promise<void> {
   const active = service;
   service = null;
   await active.shutdown();
+}
+
+export async function shutdownLocalCollaborationCoordinator(): Promise<void> {
+  if (!coordinator) {
+    return;
+  }
+  const active = coordinator;
+  coordinator = null;
+  await active.stop();
 }

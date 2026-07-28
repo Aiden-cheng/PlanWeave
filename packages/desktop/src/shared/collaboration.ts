@@ -67,7 +67,10 @@ import {
   type WorkspacePickerPage,
   type ContentVersionDesktopReadModel,
   type CurrentCanvasAccessView,
-  type AccessMutationResult
+  type AccessMutationResult,
+  type LoopbackProjectRegistrationView,
+  type LoopbackServerStatus,
+  type LoopbackTrustedProjectScope
 } from "@planweave-ai/collaboration-contracts";
 import type {
   CollaborationActivityListQueryInput,
@@ -488,6 +491,15 @@ export type CollaborationAccessMutationInput = z.infer<
 export type CollaborationCurrentCanvasAccessView = CurrentCanvasAccessView;
 export type CollaborationAccessMutationResult = AccessMutationResult;
 
+/** Opaque selection only; main resolves the local project root and manifest. */
+export const collaborationCurrentSelectionInputSchema = z
+  .object({
+    projectId: z.string().trim().min(1).max(128),
+    canvasId: z.string().trim().min(1).max(128)
+  })
+  .strict();
+export type CollaborationCurrentSelectionInput = z.infer<typeof collaborationCurrentSelectionInputSchema>;
+
 export const collaborationInvokeChannels = {
   getCollaborationStatus: "planweave-collaboration:getStatus",
   upsertCollaborationProfile: "planweave-collaboration:upsertProfile",
@@ -521,6 +533,13 @@ export const collaborationInvokeChannels = {
   materializeCollaborationContentHead: "planweave-collaboration:materializeContentHead",
   getCurrentCanvasAccess: "planweave-collaboration:getCurrentCanvasAccess",
   mutateCurrentCanvasAccess: "planweave-collaboration:mutateCurrentCanvasAccess",
+  setCollaborationCurrentSelection: "planweave-collaboration:setCurrentSelection",
+  clearCollaborationCurrentSelection: "planweave-collaboration:clearCurrentSelection",
+  getLocalCollaborationServerStatus: "planweave-collaboration:getLocalServerStatus",
+  startLocalCollaborationServer: "planweave-collaboration:startLocalServer",
+  stopLocalCollaborationServer: "planweave-collaboration:stopLocalServer",
+  listLocalCollaborationTrustedScopes: "planweave-collaboration:listLocalTrustedScopes",
+  registerLocalCollaborationCurrentProject: "planweave-collaboration:registerLocalCurrentProject",
   listCollaborationMembers: "planweave-collaboration:listMembers",
   listCollaborationDevices: "planweave-collaboration:listDevices",
   listCollaborationInvitations: "planweave-collaboration:listInvitations",
@@ -630,6 +649,13 @@ export type PlanWeaveCollaborationApi = {
   mutateCurrentCanvasAccess: (
     input: CollaborationAccessMutationInput
   ) => Promise<CollaborationAccessMutationResult>;
+  setCollaborationCurrentSelection: (input: CollaborationCurrentSelectionInput) => Promise<void>;
+  clearCollaborationCurrentSelection: () => Promise<void>;
+  getLocalCollaborationServerStatus: () => Promise<LoopbackServerStatus>;
+  startLocalCollaborationServer: () => Promise<LoopbackServerStatus>;
+  stopLocalCollaborationServer: () => Promise<LoopbackServerStatus>;
+  listLocalCollaborationTrustedScopes: () => Promise<readonly LoopbackTrustedProjectScope[]>;
+  registerLocalCollaborationCurrentProject: () => Promise<LoopbackProjectRegistrationView>;
   listCollaborationMembers: (input?: CollaborationPageQueryInput) => Promise<HumanMemberPage>;
   listCollaborationDevices: (input?: CollaborationDeviceListQueryInput) => Promise<HumanDevicePage>;
   listCollaborationInvitations: (

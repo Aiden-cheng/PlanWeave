@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type {
   DesktopGraphViewModel,
   DesktopLayout,
@@ -11,7 +11,7 @@ import type {
   ProjectPromptPolicy,
   ValidationIssue
 } from "@planweave-ai/runtime";
-import { bridge, desktopCanvasReference } from "../bridge";
+import { bridge, collaborationBridge, desktopCanvasReference } from "../bridge";
 import type { createTranslator } from "../i18n";
 import type { DesktopSettingsUpdate } from "../types";
 import { useDesktopImportRecovery } from "./useDesktopImportRecovery";
@@ -151,6 +151,21 @@ export function useDesktopProject({ setError, t, updateSettings }: UseDesktopPro
     selectedProject,
     setError
   });
+
+  useEffect(() => {
+    if (!collaborationBridge) return;
+    if (!selectedProject || !selectedCanvasId) {
+      void collaborationBridge.clearCollaborationCurrentSelection().catch((error: unknown) => {
+        setError(error instanceof Error ? error.message : String(error));
+      });
+      return;
+    }
+    void collaborationBridge
+      .setCollaborationCurrentSelection({ projectId: selectedProject.projectId, canvasId: selectedCanvasId })
+      .catch((error: unknown) => {
+        setError(error instanceof Error ? error.message : String(error));
+      });
+  }, [selectedCanvasId, selectedProject?.projectId, setError]);
 
   return {
     expandedProjectId,

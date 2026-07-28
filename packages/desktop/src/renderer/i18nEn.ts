@@ -1263,7 +1263,20 @@ export const enCatalog = {
   contentAuthorityRetry: "Retry",
   contentAuthorityPublish: "Publish initial version",
   contentAuthorityMaterialize: "Materialize",
-  contentAuthorityRecover: "Recover"
+  contentAuthorityRecover: "Recover",
+  localServerTitle: "Local collaboration server",
+  localServerRunning: "Running on this device",
+  localServerStopped: "Stopped",
+  localServerStart: "Start local server",
+  localServerStop: "Stop local server",
+  localServerOwnerPending: "Waiting to initialize an owner before current-canvas access can be registered.",
+  localServerOwnerRequired: "Initialize an owner before registering the current canvas.",
+  localServerTrustedScope: "Trusted canvas scopes",
+  localServerRegisterCurrent: "Register current canvas",
+  localServerRegistered: "Registered",
+  localServerStartFailed: "Could not start the local server. Retry when ready.",
+  localServerStopFailed: "Could not stop the local server. Retry the stop action.",
+  localServerUnavailable: "The local server is unavailable."
 } as const;
 
 export type TranslationKey = keyof typeof enCatalog;
