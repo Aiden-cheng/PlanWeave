@@ -306,11 +306,18 @@ export function createAuthorityDispatchGate(
         if (!eligible(hostId)) throw new DispatchAssignmentError("work_host_not_authorized");
       } else {
         selection = "automatic";
+        if (input.requestedHostId === undefined) {
+          return {
+            assignmentRevision: current.executionTargetRevision,
+            authorityRevisions: current,
+            target,
+            selection,
+            requiredCapabilities
+          };
+        }
         const candidates = options.hosts
           .list()
-          .filter(
-            (host) => input.requestedHostId === undefined || host.id === input.requestedHostId
-          )
+          .filter((host) => host.id === input.requestedHostId)
           .filter((host) => eligible(host.id))
           .sort((a, b) => {
             const activeA = activeReservations(a.id);

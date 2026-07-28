@@ -375,6 +375,55 @@ describe("strict Host dispatch authority", () => {
     ).toThrow(DispatchAssignmentError);
   });
 
+  it("keeps automatic selection retryable until a compatible Host is available", async () => {
+    const { database, access, workspaceIdentity, hosts, host, repository } = await fixture();
+    const scope = {
+      kind: "block" as const,
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: "c",
+      blockRef: "T-001#B-001"
+    };
+    repository.applyExecutionTarget({
+      mutation: {
+        schemaVersion: "execution-target/v1",
+        scope,
+        target: { kind: "automatic_host" },
+        expectedRevision: 0
+      },
+      actor: { kind: "human", id: "owner" }
+    });
+    hosts.reportOnline(host.id, ["acp.other"], 1);
+    const gate = createAuthorityDispatchGate({
+      repository,
+      database,
+      workspaceIdentity,
+      hosts,
+      access,
+      hostOfflineAfterMs: 60_000,
+      clock: now
+    });
+    const request = {
+      projectId: "p",
+      canvasId: "c",
+      blockRef: "T-001#B-001",
+      requiredCapabilities: ["acp.codex"],
+      expectedResponsibilityRevision: 0,
+      expectedReviewerRevision: 0,
+      expectedExecutionTargetRevision: 1
+    };
+
+    const automatic = gate.resolve(request);
+    expect(automatic).toMatchObject({
+      target: { kind: "automatic_host" },
+      selection: "automatic"
+    });
+    expect(automatic.preferredHostId).toBeUndefined();
+    expect(() => gate.resolve({ ...request, requestedHostId: host.id })).toThrow(
+      DispatchAssignmentError
+    );
+  });
+
   it("resolves current authority when expected revisions are omitted (retry re-snapshot)", async () => {
     const { database, access, workspaceIdentity, hosts, host, repository } = await fixture();
     const scope = {
