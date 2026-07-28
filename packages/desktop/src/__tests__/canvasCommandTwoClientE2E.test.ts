@@ -4,6 +4,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import {
+  applyDefaultCanvasWorkspaceMigration,
+  resolveTaskCanvasWorkspace,
+  saveDesktopLayout
+} from "@planweave-ai/runtime";
+import {
   CANVAS_COMMAND_PROTOCOL_VERSION,
   exampleHumanDeviceToken
 } from "@planweave-ai/collaboration-contracts";
@@ -19,6 +24,7 @@ import {
   createDistributedServerComposition,
   type DistributedServerComposition
 } from "../../../server/src/serverComposition.js";
+import { createDefaultCanvasRuntimePort } from "../../../server/src/canvas/runtimePort.js";
 import {
   CollaborationClient,
   type CollaborationWebSocketConstructor
@@ -57,6 +63,22 @@ const labels: CanvasCommandLabels = {
 async function setup() {
   const workspace = await createTestWorkspace(basicManifest());
   directories.push(workspace.home, workspace.root);
+  await applyDefaultCanvasWorkspaceMigration(workspace.init.workspace);
+  const canonicalWorkspace = await resolveTaskCanvasWorkspace(workspace.root, "default");
+  await saveDesktopLayout(workspace.root, {
+    version: "desktop-layout/v1",
+    projectId: workspace.init.workspace.id,
+    nodes: [],
+    updatedAt: "2026-01-01T00:00:00.000Z"
+  });
+  const runtime = createDefaultCanvasRuntimePort();
+  if (!runtime.captureContent) throw new Error("content capture unavailable");
+  const initialContent = await runtime.captureContent({
+    projectRoot: workspace.root,
+    canvasId: "default",
+    expectedPackageDir: canonicalWorkspace.packageDir
+  });
+  if (!initialContent.ok) throw new Error(initialContent.detail);
   const projectId = workspace.init.workspace.id;
   const httpServer = createServer();
   servers.push(httpServer);
@@ -97,7 +119,8 @@ async function setup() {
     origin: `http://127.0.0.1:${address.port}`,
     projectId,
     projectRoot: workspace.root,
-    packageDir: workspace.init.workspace.packageDir
+    packageDir: canonicalWorkspace.packageDir,
+    initialContent: initialContent.content
   };
 }
 
@@ -169,6 +192,9 @@ describe("Desktop canvas command dual-client E2E (OSS-004 B-003)", () => {
 
     const clientA = createClient(fixture.origin, fixture.projectId, "profile-a", owner.deviceToken);
     const clientB = createClient(fixture.origin, fixture.projectId, "profile-b", owner.deviceToken);
+    await expect(
+      clientA.publishInitialContent({ canvasId: "default", content: fixture.initialContent })
+    ).resolves.toMatchObject({ outcome: "published" });
     const controllerA = new CanvasCommandController({ api: bridgeFor(clientA), labels });
     const controllerB = new CanvasCommandController({ api: bridgeFor(clientB), labels });
 

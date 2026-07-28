@@ -503,6 +503,80 @@ describe("CollaborationClient", () => {
     client.dispose();
   });
 
+  it("keeps an immediate observer replacement when the stopped socket closes", async () => {
+    const http = await listen((_req, res) => {
+      res.statusCode = 404;
+      res.end();
+    });
+    cleanups.push(http.close);
+    const wss = new WebSocketServer({ noServer: true });
+    cleanups.push(
+      () =>
+        new Promise((resolve, reject) => {
+          wss.close((error) => (error ? reject(error) : resolve()));
+        })
+    );
+
+    let connections = 0;
+    let replacementCursor: unknown;
+    http.server.on("upgrade", (_request, socket, head) => {
+      wss.handleUpgrade(_request, socket, head, (ws) => {
+        connections += 1;
+        const connection = connections;
+        ws.on("message", (raw) => {
+          const hello = JSON.parse(String(raw));
+          if (connection === 2) replacementCursor = hello.lastCursor;
+          ws.send(
+            JSON.stringify({
+              type: "human.observer.welcome",
+              protocolVersion: HUMAN_OBSERVER_PROTOCOL_VERSION,
+              projectId: "project-demo-001",
+              serverTime: "2030-01-01T00:00:00.000Z",
+              cursor: 5
+            })
+          );
+        });
+      });
+    });
+
+    const client = clientFor(http.origin, {
+      token: exampleHumanDeviceToken,
+      WebSocketImpl: WebSocket as unknown as ConstructorParameters<
+        typeof CollaborationClient
+      >[0]["WebSocketImpl"]
+    });
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("initial observer timeout")), 3_000);
+      client.startObserver({
+        onStatus: (status) => {
+          if (status.state === "connected") {
+            clearTimeout(timer);
+            resolve();
+          }
+        }
+      });
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("replacement observer timeout")), 3_000);
+      client.stopObserver();
+      client.startObserver({
+        onStatus: (status) => {
+          if (status.state === "connected" && connections === 2) {
+            clearTimeout(timer);
+            resolve();
+          }
+        }
+      });
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(connections).toBe(2);
+    expect(replacementCursor).toBe(5);
+    expect(client.lastObserverCursor()).toBe(5);
+    client.dispose();
+  });
+
   it("rejects observer events that do not continue from the validated cursor", async () => {
     const http = await listen((_req, res) => {
       res.statusCode = 404;

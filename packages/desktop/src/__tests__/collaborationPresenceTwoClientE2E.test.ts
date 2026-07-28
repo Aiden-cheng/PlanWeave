@@ -1,13 +1,20 @@
 import { createServer, type Server as HttpServer } from "node:http";
-import { rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
+import {
+  applyDefaultCanvasWorkspaceMigration,
+  initWorkspace
+} from "@planweave-ai/runtime";
 import { exampleHumanDeviceToken } from "@planweave-ai/collaboration-contracts";
 import {
   basicManifest,
-  createTestWorkspace
+  createTestWorkspace,
+  writePromptFiles
 } from "../../../runtime/src/__tests__/promptTestHelpers.js";
+import { writeJsonFile } from "../../../runtime/src/json.js";
 import { parseServerConfig } from "../../../server/src/config.js";
 import { hashOperatorToken } from "../../../server/src/operatorAuth.js";
 import { legacyWorkspaceIdForProject } from "../../../server/src/__tests__/support/legacyWorkspaceId.js";
@@ -51,10 +58,16 @@ const labels: CanvasPresenceLabels = {
 
 async function setup() {
   const first = await createTestWorkspace(basicManifest());
-  const second = await createTestWorkspace(basicManifest());
-  directories.push(first.home, first.root, second.home, second.root);
+  const secondRoot = await mkdtemp(join(tmpdir(), "planweave-project-"));
+  const secondInit = await initWorkspace({ projectRoot: secondRoot, projectGraph: true });
+  const secondManifest = basicManifest();
+  await writeJsonFile(secondInit.workspace.manifestFile, secondManifest);
+  await writePromptFiles(secondInit.workspace.packageDir, secondManifest);
+  directories.push(first.home, first.root, secondRoot);
+  await applyDefaultCanvasWorkspaceMigration(first.init.workspace);
+  await applyDefaultCanvasWorkspaceMigration(secondInit.workspace);
   const firstProjectId = first.init.workspace.id;
-  const secondProjectId = second.init.workspace.id;
+  const secondProjectId = secondInit.workspace.id;
   const httpServer = createServer();
   servers.push(httpServer);
   const adminToken = `pw_operator_${"E".repeat(43)}`;
@@ -75,7 +88,7 @@ async function setup() {
         workspaceId: legacyWorkspaceIdForProject(secondProjectId),
         projectId: secondProjectId,
         canvasId: "default",
-        projectRoot: second.root
+        projectRoot: secondRoot
       }
     ],
     operatorCredentials: [

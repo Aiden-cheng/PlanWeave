@@ -1062,6 +1062,7 @@ export class CollaborationClient {
         this.observerSocket = socket;
 
         const onOpen = () => {
+          if (this.observerSocket !== socket) return;
           const hello = humanObserverHelloSchema.parse({
             type: "human.observer.hello",
             protocolVersion: HUMAN_OBSERVER_PROTOCOL_VERSION,
@@ -1072,6 +1073,7 @@ export class CollaborationClient {
         };
 
         const onMessage = (event: unknown) => {
+          if (this.observerSocket !== socket) return;
           try {
             const data =
               typeof event === "object" && event !== null && "data" in event
@@ -1122,6 +1124,7 @@ export class CollaborationClient {
         };
 
         const onClose = () => {
+          if (this.observerSocket !== socket) return;
           this.observerSocket = undefined;
           if (this.observerStatus.state === "auth_expired") return;
           if (!this.observerWanted || this.disposed) {
@@ -1132,6 +1135,7 @@ export class CollaborationClient {
         };
 
         const onError = () => {
+          if (this.observerSocket !== socket) return;
           this.options.logger?.warn?.("collaboration observer socket error");
         };
 
