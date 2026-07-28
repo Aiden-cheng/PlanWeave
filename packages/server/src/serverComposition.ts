@@ -15,6 +15,7 @@ import {
   ActivityProjectionService,
   ActivityRetentionMaintenance,
   activitySubjectSchema,
+  type ActivityRecord,
   CommentRepository,
   CommentService,
   CommentServiceError,
@@ -205,6 +206,15 @@ function containsCleanupError(error: unknown, code: string): boolean {
     : false;
 }
 
+function appendHumanObserverActivity(
+  journal: HumanObserverJournal,
+  record: ActivityRecord
+): void {
+  for (const event of observerEventsForActivity(record)) {
+    journal.appendInCallerTransaction(record.projectId, event, record.occurredAt);
+  }
+}
+
 function respond(response: ServerResponse, status: number, code: string): void {
   if (response.headersSent) {
     response.destroy();
@@ -327,11 +337,7 @@ export async function createDistributedServerComposition(
         );
         humanObserverJournal = observerJournal;
         const projectionRepository = new ActivityRepository(database, {
-          onInsertedInTransaction: (record) => {
-            for (const event of observerEventsForActivity(record)) {
-              observerJournal.appendInCallerTransaction(record.projectId, event, record.occurredAt);
-            }
-          }
+          onInsertedInTransaction: (record) => appendHumanObserverActivity(observerJournal, record)
         });
         const projection = new ActivityProjectionService({
           activity: projectionRepository,
@@ -700,7 +706,11 @@ export async function createDistributedServerComposition(
       });
       if (!packagePort) throw new Error("trusted_project_work_item_port_missing");
       const scopedCommentRepository = new CommentRepository(server.database, workspaceId);
-      const scopedActivityRepository = new ActivityRepository(server.database, { workspaceId });
+      const scopedActivityRepository = new ActivityRepository(server.database, {
+        workspaceId,
+        onInsertedInTransaction: (record) =>
+          appendHumanObserverActivity(initializedHumanObserverJournal, record)
+      });
       commentServices.set(
         serviceKey,
         new CommentService({
