@@ -1,9 +1,15 @@
 import { createHash } from "node:crypto";
 import {
+  accessDisabledReasonSchema,
+  accessMutationRequestSchema,
+  requiredCapabilityForAccessMutation,
   aclRevisionSchema,
   actorRefSchema,
   membershipGrantSchema,
+  type AccessMutationRequest,
+  type AccessMutationResult,
   type ActorRef,
+  type EffectiveAccessView,
   type MembershipGrant,
   type ProjectAccessDecision,
   type ProjectAccessRecord,
@@ -124,6 +130,15 @@ export class ProjectAccessRepository {
     actor: ActorRef;
   }): ProjectAccessDecision {
     return this.policy.decideCanvas(input);
+  }
+  evaluateEffectiveAccess(input: {
+    workspaceId: string;
+    projectId: string;
+    canvasId?: string;
+    actor: ActorRef;
+    session?: "active" | "missing" | "expired" | "revoked";
+  }): EffectiveAccessView {
+    return this.policy.evaluate(input);
   }
   listAuthorizedProjects(input: {
     workspaceId: string;
@@ -357,6 +372,169 @@ export class ProjectAccessRepository {
           .get(id) as Record<string, unknown>
       );
     });
+  }
+
+  /**
+   * The HTTP/Desktop ACL mutation seam. It consumes the shared B-001 request
+   * and result contracts, preserves exact opaque scope identity, and reports
+   * stale CAS as a redacted conflict rather than applying a newer write.
+   */
+  compareAndSetAccess(input: {
+    actor: ActorRef;
+    request: AccessMutationRequest;
+  }): AccessMutationResult {
+    const request = accessMutationRequestSchema.parse(input.request);
+    const scope = request.scope;
+    const canvasId = scope.scopeKind === "canvas" ? scope.canvasId : null;
+    try {
+      this.policy.assertCapability({
+        workspaceId: scope.workspaceId,
+        projectId: scope.projectId,
+        ...(canvasId === null ? {} : { canvasId }),
+        actor: input.actor,
+        capability: requiredCapabilityForAccessMutation(request.operation)
+      });
+    } catch (error) {
+      const current = this.currentAclRevision(scope.workspaceId, scope.projectId, canvasId);
+      return {
+        status: "denied",
+        reason:
+          error instanceof Error && error.message.startsWith("access_capability_denied:")
+            ? (accessDisabledReasonSchema.safeParse(
+                error.message.slice("access_capability_denied:".length)
+              ).data ?? "capability_denied")
+            : "capability_denied",
+        aclRevision: current
+      };
+    }
+
+    return inWriteTransaction(this.database, () => {
+      const current = this.currentAclRevision(scope.workspaceId, scope.projectId, canvasId);
+      if (current !== request.expectedAclRevision) {
+        return { status: "conflict", reason: "acl_revision_conflict", aclRevision: current };
+      }
+      const at = this.clock().toISOString();
+      if (request.operation === "visibility") {
+        const table = canvasId === null ? "project_registry" : "canvas_registry";
+        const idColumn = canvasId === null ? "project_registry_id" : "canvas_registry_id";
+        const projectScope =
+          canvasId === null ? this.registry.projectInternal(scope.workspaceId, scope.projectId) : undefined;
+        const canvasScope =
+          canvasId === null
+            ? undefined
+            : this.registry.canvasInternal(scope.workspaceId, scope.projectId, canvasId);
+        if (
+          (!projectScope && !canvasScope) ||
+          (projectScope !== undefined && projectScope.revokedAt !== null) ||
+          (canvasScope !== undefined && canvasScope.revokedAt !== null)
+        ) {
+          return { status: "denied", reason: "scope_private", aclRevision: current };
+        }
+        const scopeId = projectScope?.projectRegistryId ?? canvasScope!.canvasRegistryId;
+        const updated = this.database
+          .prepare(
+            `UPDATE ${table} SET visibility=?,acl_revision=?,updated_at=? WHERE ${idColumn}=? AND acl_revision=? AND revoked_at IS NULL`
+          )
+          .run(request.visibility, current + 1, at, scopeId, current);
+        if (updated.changes !== 1)
+          return {
+            status: "conflict",
+            reason: "acl_revision_conflict",
+            aclRevision: this.currentAclRevision(scope.workspaceId, scope.projectId, canvasId)
+          };
+        return { status: "applied", aclRevision: current + 1, updatedAt: at };
+      }
+      if (request.operation === "grant") {
+        if (!activeWorkspacePrincipal(this.database, scope.workspaceId, request.humanPrincipalId)) {
+          return { status: "denied", reason: "membership_missing", aclRevision: current };
+        }
+        const project = this.registry.projectInternal(scope.workspaceId, scope.projectId);
+        const canvas =
+          canvasId === null ? undefined : this.registry.canvasInternal(scope.workspaceId, scope.projectId, canvasId);
+        if (!project || project.revokedAt !== null || (canvasId !== null && (!canvas || canvas.revokedAt !== null))) {
+          return { status: "denied", reason: "scope_private", aclRevision: current };
+        }
+        const table = canvas ? "canvas_registry" : "project_registry";
+        const idColumn = canvas ? "canvas_registry_id" : "project_registry_id";
+        const scopeId = canvas ? canvas.canvasRegistryId : project.projectRegistryId;
+        const nextRevision = current + 1;
+        const updated = this.database
+          .prepare(
+            `UPDATE ${table} SET acl_revision=?,updated_at=? WHERE ${idColumn}=? AND acl_revision=? AND revoked_at IS NULL`
+          )
+          .run(nextRevision, at, scopeId, current);
+        if (updated.changes !== 1)
+          return {
+            status: "conflict",
+            reason: "acl_revision_conflict",
+            aclRevision: this.currentAclRevision(scope.workspaceId, scope.projectId, canvasId)
+          };
+        const grantId = `grant-${createHash("sha256")
+          .update([scope.workspaceId, scope.projectId, canvasId ?? "", request.humanPrincipalId, String(nextRevision)].join("\0"))
+          .digest("hex")
+          .slice(0, 32)}`;
+        this.database
+          .prepare(
+            `INSERT INTO project_access_grants(grant_id,workspace_id,project_registry_id,project_id,canvas_registry_id,canvas_id,scope_kind,human_principal_id,role,acl_revision,granted_by_kind,granted_by_id,granted_at,revoked_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)`
+          )
+          .run(
+            grantId,
+            scope.workspaceId,
+            project.projectRegistryId,
+            scope.projectId,
+            canvas?.canvasRegistryId ?? null,
+            canvasId,
+            canvas ? "canvas" : "project",
+            request.humanPrincipalId,
+            request.role,
+            nextRevision,
+            input.actor.kind,
+            input.actor.id,
+            at
+          );
+        return { status: "applied", aclRevision: nextRevision, updatedAt: at };
+      }
+      const grant = this.database
+        .prepare(
+          `SELECT grant_id,scope_kind,canvas_id,revoked_at FROM project_access_grants
+           WHERE grant_id=? AND workspace_id=? AND project_id=?
+             AND ((scope_kind='project' AND ? IS NULL) OR (scope_kind='canvas' AND canvas_id=?))`
+        )
+        .get(request.grantId, scope.workspaceId, scope.projectId, canvasId, canvasId) as
+        | { grant_id: string; scope_kind: string; canvas_id: string | null; revoked_at: string | null }
+        | undefined;
+      if (!grant) return { status: "denied", reason: "scope_private", aclRevision: current };
+      if (grant.revoked_at !== null) {
+        return { status: "conflict", reason: "acl_revision_conflict", aclRevision: current };
+      }
+      const updatedScope = this.database
+        .prepare(
+          `UPDATE ${canvasId === null ? "project_registry" : "canvas_registry"} SET acl_revision=?,updated_at=?
+           WHERE workspace_id=? AND project_id=?${canvasId === null ? "" : " AND canvas_id=?"} AND acl_revision=? AND revoked_at IS NULL`
+        )
+        .run(
+          current + 1,
+          at,
+          scope.workspaceId,
+          scope.projectId,
+          ...(canvasId === null ? [] : [canvasId]),
+          current
+        );
+      if (updatedScope.changes !== 1) throw new Error("access_scope_revision_race");
+      const revoked = this.database
+        .prepare("UPDATE project_access_grants SET revoked_at=?,acl_revision=? WHERE grant_id=? AND revoked_at IS NULL")
+        .run(at, current + 1, request.grantId);
+      if (revoked.changes !== 1) throw new Error("access_grant_revision_race");
+      return { status: "applied", aclRevision: current + 1, updatedAt: at };
+    });
+  }
+
+  private currentAclRevision(workspaceId: string, projectId: string, canvasId: string | null): number {
+    const row =
+      canvasId === null
+        ? this.registry.projectInternal(workspaceId, projectId)
+        : this.registry.canvasInternal(workspaceId, projectId, canvasId);
+    return row?.aclRevision ?? 0;
   }
 
   private grantFromRow(row: Record<string, unknown>): MembershipGrant {

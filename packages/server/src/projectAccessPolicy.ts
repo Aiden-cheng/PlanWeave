@@ -1,6 +1,14 @@
 import {
+  accessScopeSchema,
+  evaluateEffectiveAccess,
+  humanPrincipalIdSchema,
+  membershipGrantSchema,
   projectAccessDecisionSchema,
+  type AccessCapability,
+  type AccessDisabledReason,
   type ActorRef,
+  type EffectiveAccessView,
+  type MembershipGrant,
   type ProjectAccessDecision,
   type ProjectAccessRecord,
   type CanvasAccessRecord
@@ -30,7 +38,7 @@ function latestProjectGrant(
 ): Record<string, unknown> | undefined {
   return database
     .prepare(
-      `SELECT role,revoked_at FROM project_access_grants WHERE workspace_id=? AND project_registry_id=? AND scope_kind='project' AND human_principal_id=? ORDER BY acl_revision DESC LIMIT 1`
+      `SELECT * FROM project_access_grants WHERE workspace_id=? AND project_registry_id=? AND scope_kind='project' AND human_principal_id=? ORDER BY acl_revision DESC LIMIT 1`
     )
     .get(project.workspaceId, project.projectRegistryId, principalId);
 }
@@ -42,13 +50,33 @@ function latestCanvasGrant(
 ): Record<string, unknown> | undefined {
   return database
     .prepare(
-      `SELECT role,revoked_at FROM project_access_grants WHERE workspace_id=? AND canvas_registry_id=? AND scope_kind='canvas' AND human_principal_id=? ORDER BY acl_revision DESC LIMIT 1`
+      `SELECT * FROM project_access_grants WHERE workspace_id=? AND canvas_registry_id=? AND scope_kind='canvas' AND human_principal_id=? ORDER BY acl_revision DESC LIMIT 1`
     )
     .get(canvas.workspaceId, canvas.canvasRegistryId, principalId);
 }
 
-function hasActiveEditorGrant(grant: Record<string, unknown> | undefined): boolean {
-  return grant?.revoked_at === null && grant.role === "editor";
+function grantFromRow(row: Record<string, unknown> | undefined): MembershipGrant | null {
+  if (!row) return null;
+  return membershipGrantSchema.parse({
+    schemaVersion: "project-access/v1",
+    grantId: String(row.grant_id),
+    workspaceId: String(row.workspace_id),
+    projectId: String(row.project_id),
+    humanPrincipalId: String(row.human_principal_id),
+    role: row.role === "editor" ? "editor" : row.role === "viewer" ? "viewer" : "owner",
+    aclRevision: Number(row.acl_revision),
+    grantedBy: { kind: row.granted_by_kind, id: String(row.granted_by_id) },
+    grantedAt: String(row.granted_at),
+    revokedAt: row.revoked_at === null ? null : String(row.revoked_at),
+    scopeKind: row.scope_kind === "canvas" ? "canvas" : "project",
+    canvasId: row.scope_kind === "canvas" ? String(row.canvas_id) : null
+  });
+}
+
+function legacyDeniedReason(reason: AccessDisabledReason): "missing" | "revoked" {
+  return reason === "membership_revoked" || reason === "session_revoked" || reason === "grant_revoked"
+    ? "revoked"
+    : "missing";
 }
 
 /** ACL decisions are evaluated before the registry exposes any internal path. */
@@ -58,33 +86,81 @@ export class ProjectAccessPolicy {
     private readonly registry: ProjectRegistryRepository
   ) {}
 
+  evaluate(input: {
+    workspaceId: string;
+    projectId: string;
+    canvasId?: string;
+    actor: ActorRef;
+    /** Authentication callers have already resolved a live human device session. */
+    session?: "active" | "missing" | "expired" | "revoked";
+  }): EffectiveAccessView {
+    const project = this.registry.projectInternal(input.workspaceId, input.projectId);
+    const canvas =
+      input.canvasId === undefined
+        ? undefined
+        : this.registry.canvasInternal(input.workspaceId, input.projectId, input.canvasId);
+    if (!project || project.revokedAt !== null || (input.canvasId !== undefined && (!canvas || canvas.revokedAt !== null))) {
+      throw new Error("access_scope_not_found");
+    }
+    if (!project.ownerHumanPrincipalId || (canvas && !canvas.ownerHumanPrincipalId)) {
+      throw new Error("access_scope_owner_missing");
+    }
+    const humanPrincipalId = humanPrincipalIdSchema.parse(
+      input.actor.kind === "human" ? input.actor.id : "non-human"
+    );
+    const membership =
+      input.actor.kind === "human" && activeWorkspacePrincipal(this.database, input.workspaceId, humanPrincipalId)
+        ? "active"
+        : "missing";
+    return evaluateEffectiveAccess({
+      scope: accessScopeSchema.parse(
+        input.canvasId === undefined
+          ? { scopeKind: "project", workspaceId: input.workspaceId, projectId: input.projectId, canvasId: null }
+          : { scopeKind: "canvas", workspaceId: input.workspaceId, projectId: input.projectId, canvasId: input.canvasId }
+      ),
+      humanPrincipalId,
+      membership,
+      session: input.session ?? "active",
+      project: projectAccessRecord(project),
+      canvas: canvas ? canvasAccessRecord(canvas) : null,
+      projectGrant: grantFromRow(latestProjectGrant(this.database, project, humanPrincipalId)),
+      canvasGrant: canvas ? grantFromRow(latestCanvasGrant(this.database, canvas, humanPrincipalId)) : null
+    });
+  }
+
+  assertCapability(input: {
+    workspaceId: string;
+    projectId: string;
+    canvasId?: string;
+    actor: ActorRef;
+    capability: AccessCapability;
+    session?: "active" | "missing" | "expired" | "revoked";
+    bootstrap?: boolean;
+  }): EffectiveAccessView {
+    if (input.actor.kind === "local_admin") {
+      if (input.bootstrap === true) return this.evaluate({ ...input, actor: { kind: "human", id: "bootstrap" } });
+      throw new Error("local_admin_bootstrap_only");
+    }
+    const access = this.evaluate(input);
+    if (!access.capabilities[input.capability]) {
+      throw new Error(`access_capability_denied:${access.disabledReason ?? "capability_denied"}`);
+    }
+    return access;
+  }
+
   decideProject(input: {
     workspaceId: string;
     projectId: string;
     actor: ActorRef;
   }): ProjectAccessDecision {
-    const project = this.registry.projectInternal(input.workspaceId, input.projectId);
-    if (!project || project.revokedAt !== null)
-      return decision({
-        decision: "deny",
-        reason: "missing",
-        aclRevision: project?.aclRevision ?? 0
-      });
-    if (
-      input.actor.kind !== "human" ||
-      !activeWorkspacePrincipal(this.database, project.workspaceId, input.actor.id)
-    )
-      return decision({ decision: "deny", reason: "revoked", aclRevision: project.aclRevision });
-    if (project.ownerHumanPrincipalId === input.actor.id || project.visibility === "shared")
-      return decision({ decision: "allow", aclRevision: project.aclRevision });
-    const grant = latestProjectGrant(this.database, project, input.actor.id);
-    return grant && grant.revoked_at === null
-      ? decision({ decision: "allow", aclRevision: project.aclRevision })
-      : decision({
-          decision: "deny",
-          reason: grant ? "revoked" : "missing",
-          aclRevision: project.aclRevision
-        });
+    try {
+      const access = this.evaluate(input);
+      return access.capabilities.read
+        ? decision({ decision: "allow", aclRevision: access.aclRevision })
+        : decision({ decision: "deny", reason: legacyDeniedReason(access.disabledReason ?? "capability_denied"), aclRevision: access.aclRevision });
+    } catch {
+      return decision({ decision: "deny", reason: "missing", aclRevision: 0 });
+    }
   }
 
   decideCanvas(input: {
@@ -93,33 +169,14 @@ export class ProjectAccessPolicy {
     canvasId: string;
     actor: ActorRef;
   }): ProjectAccessDecision {
-    const canvas = this.registry.canvasInternal(input.workspaceId, input.projectId, input.canvasId);
-    if (!canvas || canvas.revokedAt !== null)
-      return decision({
-        decision: "deny",
-        reason: "missing",
-        aclRevision: canvas?.aclRevision ?? 0
-      });
-    const project = this.registry.projectInternal(input.workspaceId, input.projectId);
-    if (!project || project.revokedAt !== null)
-      return decision({ decision: "deny", reason: "revoked", aclRevision: canvas.aclRevision });
-    if (
-      input.actor.kind !== "human" ||
-      !activeWorkspacePrincipal(this.database, canvas.workspaceId, input.actor.id)
-    )
-      return decision({ decision: "deny", reason: "revoked", aclRevision: canvas.aclRevision });
-    // Canvas sharing is independent. A private Project may expose one shared
-    // Canvas without granting project or sibling-canvas access.
-    if (canvas.ownerHumanPrincipalId === input.actor.id || canvas.visibility === "shared")
-      return decision({ decision: "allow", aclRevision: canvas.aclRevision });
-    const grant = latestCanvasGrant(this.database, canvas, input.actor.id);
-    return grant && grant.revoked_at === null
-      ? decision({ decision: "allow", aclRevision: canvas.aclRevision })
-      : decision({
-          decision: "deny",
-          reason: grant ? "revoked" : "missing",
-          aclRevision: canvas.aclRevision
-        });
+    try {
+      const access = this.evaluate(input);
+      return access.capabilities.read
+        ? decision({ decision: "allow", aclRevision: access.aclRevision })
+        : decision({ decision: "deny", reason: legacyDeniedReason(access.disabledReason ?? "capability_denied"), aclRevision: access.aclRevision });
+    } catch {
+      return decision({ decision: "deny", reason: "missing", aclRevision: 0 });
+    }
   }
 
   listProjects(input: {
@@ -241,30 +298,7 @@ export class ProjectAccessPolicy {
     actor: ActorRef;
     bootstrap?: boolean;
   }): void {
-    if (input.actor.kind === "local_admin") {
-      if (input.bootstrap === true) return;
-      throw new Error("local_admin_bootstrap_only");
-    }
-    if (input.actor.kind !== "human") throw new Error("grantor_not_authorized");
-    const project = this.registry.projectInternal(input.workspaceId, input.projectId);
-    if (
-      !project ||
-      project.revokedAt !== null ||
-      !activeWorkspacePrincipal(this.database, input.workspaceId, input.actor.id)
-    )
-      throw new Error("grantor_not_authorized");
-    if (project.ownerHumanPrincipalId === input.actor.id) return;
-    if (!input.canvasId) {
-      if (hasActiveEditorGrant(latestProjectGrant(this.database, project, input.actor.id))) return;
-      throw new Error("grantor_role_insufficient");
-    }
-    const canvas = this.registry.canvasInternal(input.workspaceId, input.projectId, input.canvasId);
-    if (!canvas || canvas.revokedAt !== null) throw new Error("grantor_not_authorized");
-    if (canvas.ownerHumanPrincipalId === input.actor.id) return;
-    if (hasActiveEditorGrant(latestCanvasGrant(this.database, canvas, input.actor.id))) return;
-    // Project editors manage project-scope grants only; canvas ACLs remain
-    // independently owned so a project editor cannot widen a canvas grant.
-    throw new Error("grantor_role_insufficient");
+    this.assertCapability({ ...input, capability: "administration" });
   }
 }
 

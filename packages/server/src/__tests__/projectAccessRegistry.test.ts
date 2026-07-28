@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { accessMutationRequestSchema } from "@planweave-ai/collaboration-contracts";
 import { applyMigrations } from "../migrations.js";
 import { HumanIdentityRepository } from "../identity/repository.js";
 import { ProjectAccessRepository } from "../projectAccessRepository.js";
@@ -54,7 +55,7 @@ async function registered() {
 }
 
 describe("project access registry", () => {
-  it("enforces owner/editor management by scope and makes revoke replay idempotent", async () => {
+  it("keeps grants and revokes owner-only and makes revoke replay idempotent", async () => {
     const { access } = await registered();
     const projectEditor = access.grant({
       workspaceId: "w",
@@ -79,13 +80,13 @@ describe("project access registry", () => {
         role: "viewer",
         grantedBy: editor
       })
-    ).toThrow("grantor_role_insufficient");
+    ).toThrow("access_capability_denied:capability_denied");
     const revoked = access.revoke({
       workspaceId: "w",
       projectId: "p",
       canvasId: null,
       grantId: projectViewer.grantId,
-      actor: editor,
+      actor: owner,
       expectedAclRevision: 2
     });
     expect(
@@ -94,7 +95,7 @@ describe("project access registry", () => {
         projectId: "p",
         canvasId: null,
         grantId: projectViewer.grantId,
-        actor: editor,
+        actor: owner,
         expectedAclRevision: 2
       })
     ).toEqual(revoked);
@@ -104,10 +105,10 @@ describe("project access registry", () => {
         projectId: "p",
         canvasId: null,
         grantId: projectViewer.grantId,
-        actor: viewer,
+      actor: editor,
         expectedAclRevision: 2
       })
-    ).toThrow("grantor_role_insufficient");
+    ).toThrow("access_capability_denied:capability_denied");
     const canvasEditor = access.grant({
       workspaceId: "w",
       projectId: "p",
@@ -123,7 +124,7 @@ describe("project access registry", () => {
         canvasId: "c",
         humanPrincipalId: "viewer",
         role: "viewer",
-        grantedBy: editor
+        grantedBy: owner
       }).scopeKind
     ).toBe("canvas");
     expect(projectEditor.scopeKind).toBe("project");
@@ -151,6 +152,120 @@ describe("project access registry", () => {
         offset: 0
       })
     ).toHaveLength(0);
+  });
+
+  it("uses the shared capability matrix for visibility, explicit grants, and CAS", async () => {
+    const { access } = await registered();
+    const projectScope = {
+      scopeKind: "project" as const,
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: null
+    };
+    const canvasScope = { ...projectScope, scopeKind: "canvas" as const, canvasId: "c" };
+    const visibility = access.compareAndSetAccess({
+      actor: owner,
+      request: accessMutationRequestSchema.parse({
+        operation: "visibility",
+        scope: projectScope,
+        expectedAclRevision: 0,
+        visibility: "shared"
+      })
+    });
+    expect(visibility).toEqual({ status: "applied", aclRevision: 1, updatedAt: "2026-01-02T00:00:00.000Z" });
+    const sharedViewer = access.evaluateEffectiveAccess({
+      workspaceId: "w",
+      projectId: "p",
+      actor: viewer
+    });
+    expect(sharedViewer).toMatchObject({ effectiveRole: "viewer" });
+    expect(sharedViewer.capabilities).toMatchObject({
+      read: true,
+      persistent_canvas_command: false,
+      assignment: false,
+      comment: false,
+      grant: false,
+      revoke: false,
+      administration: false,
+      visibility: false
+    });
+
+    const grant = access.compareAndSetAccess({
+      actor: owner,
+      request: accessMutationRequestSchema.parse({
+        operation: "grant",
+        scope: canvasScope,
+        expectedAclRevision: 0,
+        humanPrincipalId: "editor",
+        role: "editor"
+      })
+    });
+    expect(grant).toMatchObject({ status: "applied", aclRevision: 1 });
+    const editorAccess = access.evaluateEffectiveAccess({
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: "c",
+      actor: editor
+    });
+    expect(editorAccess.capabilities).toMatchObject({
+      persistent_canvas_command: true,
+      assignment: true,
+      comment: true,
+      grant: false,
+      revoke: false,
+      administration: false,
+      visibility: false
+    });
+    const stale = access.compareAndSetAccess({
+      actor: owner,
+      request: accessMutationRequestSchema.parse({
+        operation: "visibility",
+        scope: canvasScope,
+        expectedAclRevision: 0,
+        visibility: "shared"
+      })
+    });
+    expect(stale).toEqual({ status: "conflict", reason: "acl_revision_conflict", aclRevision: 1 });
+    const editorGrant = access.compareAndSetAccess({
+      actor: editor,
+      request: accessMutationRequestSchema.parse({
+        operation: "grant",
+        scope: canvasScope,
+        expectedAclRevision: 1,
+        humanPrincipalId: "viewer",
+        role: "viewer"
+      })
+    });
+    expect(editorGrant).toMatchObject({ status: "denied", reason: "capability_denied" });
+  });
+
+  it("does not advance the ACL revision when a revoke is replayed", async () => {
+    const { access } = await registered();
+    const grant = access.grant({
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: "c",
+      humanPrincipalId: "viewer",
+      role: "viewer",
+      grantedBy: owner
+    });
+    const request = (expectedAclRevision: number) =>
+      accessMutationRequestSchema.parse({
+        operation: "revoke",
+        scope: { scopeKind: "canvas", workspaceId: "w", projectId: "p", canvasId: "c" },
+        expectedAclRevision,
+        grantId: grant.grantId
+      });
+    expect(access.compareAndSetAccess({ actor: owner, request: request(1) })).toMatchObject({
+      status: "applied",
+      aclRevision: 2
+    });
+    expect(access.compareAndSetAccess({ actor: owner, request: request(2) })).toEqual({
+      status: "conflict",
+      reason: "acl_revision_conflict",
+      aclRevision: 2
+    });
+    expect(access.canvas("w", "p", "c")?.acl.revision).toBe(2);
   });
 
   it("requires explicit active owner initialization and verifies registration replay", async () => {

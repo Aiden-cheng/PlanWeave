@@ -50,11 +50,12 @@ export function authorizeCanvasWrite(input: {
   }
 
   try {
-    input.access.policy.assertCanManage({
+    input.access.policy.assertCapability({
       workspaceId,
       projectId: input.projectId,
       canvasId: input.canvasId,
-      actor: subject
+      actor: subject,
+      capability: "persistent_canvas_command"
     });
   } catch {
     return { ok: false, code: "forbidden" };

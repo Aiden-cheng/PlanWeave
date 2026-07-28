@@ -17,6 +17,7 @@ import {
   activitySubjectSchema,
   CommentRepository,
   CommentService,
+  CommentServiceError,
   handleCommentActivityHttpRequest
 } from "./comments/index.js";
 import {
@@ -62,6 +63,7 @@ import {
 import { createTrustedRuntimeRegistry } from "./runtimeProjectRegistry.js";
 import { createManifestWorkItemPort } from "./work/workItemFacts.js";
 import { ProjectAccessRepository } from "./projectAccessRepository.js";
+import { handleAccessHttpRequest } from "./accessHttp.js";
 import { PackageSnapshotRepository } from "./packageSnapshotRepository.js";
 import { attachAgentHostWebSocketServer, type AgentHostWebSocketServer } from "./wsServer.js";
 import {
@@ -634,6 +636,21 @@ export async function createDistributedServerComposition(
           identity: humanIdentity,
           attachments: commentAttachments,
           attachmentRepository: commentAttachmentRepository,
+          authorizeMutation(actor, workItem) {
+            const workspaceId = workspaceIdentity.workspaceForLegacyProject(actor.projectId);
+            if (!workspaceId) throw new CommentServiceError("comment_auth_forbidden");
+            try {
+              initializedProjectAccess.policy.assertCapability({
+                workspaceId,
+                projectId: actor.projectId,
+                canvasId: workItem.canvasId,
+                actor: { kind: "human", id: actor.humanPrincipalId },
+                capability: "comment"
+              });
+            } catch {
+              throw new CommentServiceError("comment_auth_forbidden");
+            }
+          },
           clock
         })
       );
@@ -813,6 +830,17 @@ export async function createDistributedServerComposition(
           return;
         }
         if (
+          await handleAccessHttpRequest(request, response, {
+            access: initializedProjectAccess,
+            repository: humanIdentity,
+            workspaceIdentity,
+            projectAuthority: runtimeRegistry,
+            allowInsecureDevelopment: config.allowInsecureDevelopment
+          })
+        ) {
+          return;
+        }
+        if (
           await handleRegistryHttpRequest(request, response, {
             repository: humanIdentity,
             workspaceIdentity,
@@ -841,6 +869,7 @@ export async function createDistributedServerComposition(
             acquireAuthorityService,
             repository: humanIdentity,
             workspaceIdentity,
+            access: initializedProjectAccess,
             projectAuthority: runtimeRegistry,
             allowInsecureDevelopment: config.allowInsecureDevelopment,
             clock

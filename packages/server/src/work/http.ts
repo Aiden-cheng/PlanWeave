@@ -16,6 +16,7 @@ import {
   type HumanProjectAuthority
 } from "../identity/index.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
+import type { ProjectAccessRepository } from "../projectAccessRepository.js";
 import { WorkAssignmentService, WorkAssignmentServiceError } from "./service.js";
 import { AuthorityService } from "./authorityService.js";
 import { workItemRefSchema } from "./schemas.js";
@@ -52,6 +53,7 @@ export type WorkAssignmentHttpOptions = {
   ): { service: AuthorityService; release(): void } | undefined;
   repository: HumanIdentityRepository;
   workspaceIdentity: WorkspaceIdentityRepository;
+  access: ProjectAccessRepository;
   projectAuthority: HumanProjectAuthority;
   allowInsecureDevelopment?: boolean;
   clock?: () => Date;
@@ -61,6 +63,31 @@ function isWorkspaceDeviceContext(
   actor: CollaborationAuthContext
 ): actor is Extract<CollaborationAuthContext, { kind: "workspace_device" }> {
   return "kind" in actor && actor.kind === "workspace_device";
+}
+
+function assertAccessCapability(input: {
+  actor: CollaborationAuthContext;
+  projectId: string;
+  canvasId: string;
+  capability: "assignment" | "read";
+  access: ProjectAccessRepository;
+  workspaceIdentity: WorkspaceIdentityRepository;
+}): void {
+  const workspaceId = isWorkspaceDeviceContext(input.actor)
+    ? input.actor.workspaceId
+    : input.workspaceIdentity.workspaceForLegacyProject(input.projectId);
+  if (!workspaceId) throw new WorkAssignmentServiceError("work_auth_forbidden");
+  try {
+    input.access.policy.assertCapability({
+      workspaceId,
+      projectId: input.projectId,
+      canvasId: input.canvasId,
+      actor: { kind: "human", id: input.actor.humanPrincipalId },
+      capability: input.capability
+    });
+  } catch {
+    throw new WorkAssignmentServiceError("work_auth_forbidden");
+  }
 }
 
 function decodeIdentifier(value: string): string | undefined {
@@ -306,6 +333,14 @@ export async function handleWorkAssignmentHttpRequest(
         query(url, []);
         const body = assignmentUpdateWireCommandSchema.parse(await readJson(request));
         if (!legacyActor) throw new WorkAssignmentServiceError("work_auth_forbidden");
+        assertAccessCapability({
+          actor,
+          projectId: matched.projectId,
+          canvasId: body.workItem.canvasId,
+          capability: "assignment",
+          access: options.access,
+          workspaceIdentity: options.workspaceIdentity
+        });
         respond(
           response,
           200,
@@ -370,6 +405,14 @@ export async function handleWorkAssignmentHttpRequest(
       case "responsibility": {
         query(url, []);
         const body = responsibilityUpdateWireCommandSchema.parse(await readJson(request));
+        assertAccessCapability({
+          actor,
+          projectId: matched.projectId,
+          canvasId: body.scope.canvasId,
+          capability: "assignment",
+          access: options.access,
+          workspaceIdentity: options.workspaceIdentity
+        });
         const handle = options.acquireAuthorityService?.(matched.projectId, body.scope.canvasId);
         if (!handle) throw new WorkAssignmentServiceError("work_cross_project_forbidden");
         try {
@@ -382,6 +425,14 @@ export async function handleWorkAssignmentHttpRequest(
       case "reviewer": {
         query(url, []);
         const body = reviewAssignmentUpdateWireCommandSchema.parse(await readJson(request));
+        assertAccessCapability({
+          actor,
+          projectId: matched.projectId,
+          canvasId: body.scope.canvasId,
+          capability: "assignment",
+          access: options.access,
+          workspaceIdentity: options.workspaceIdentity
+        });
         const handle = options.acquireAuthorityService?.(matched.projectId, body.scope.canvasId);
         if (!handle) throw new WorkAssignmentServiceError("work_cross_project_forbidden");
         try {
@@ -394,6 +445,14 @@ export async function handleWorkAssignmentHttpRequest(
       case "execution_target": {
         query(url, []);
         const body = executionTargetUpdateWireCommandSchema.parse(await readJson(request));
+        assertAccessCapability({
+          actor,
+          projectId: matched.projectId,
+          canvasId: body.scope.canvasId,
+          capability: "assignment",
+          access: options.access,
+          workspaceIdentity: options.workspaceIdentity
+        });
         const handle = options.acquireAuthorityService?.(matched.projectId, body.scope.canvasId);
         if (!handle) throw new WorkAssignmentServiceError("work_cross_project_forbidden");
         try {

@@ -132,6 +132,7 @@ async function openStack() {
     identity,
     attachments: attachmentService,
     attachmentRepository,
+    authorizeMutation() {},
     clock: () => now
   });
   const projection = new ActivityProjectionService({ activity, clock: () => now });
@@ -353,6 +354,7 @@ describe("CommentService", () => {
       activity: stack.activity,
       packagePort: missingPort,
       identity: stack.identity,
+      authorizeMutation() {},
       clock: () => now
     });
     const page = orphanService.listComments({
@@ -404,6 +406,7 @@ describe("CommentService", () => {
       activity: stack.activity,
       packagePort,
       identity: stack.identity,
+      authorizeMutation() {},
       clock: () => now
     });
     // packagePort allows T-001 for any project id (facts are package-local).

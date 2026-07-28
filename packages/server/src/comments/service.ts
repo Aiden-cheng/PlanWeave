@@ -111,6 +111,8 @@ export type CommentServiceOptions = {
   attachments?: CommentAttachmentService;
   /** Unlocked bind/tombstone markers inside comment transactions. */
   attachmentRepository?: CommentAttachmentRepository;
+  /** Server-owned ACL check at the exact canvas scope before any durable comment write. */
+  authorizeMutation(actor: HumanAuthContext, workItem: WorkItemRef): void;
   clock?: () => Date;
 };
 
@@ -133,6 +135,7 @@ export class CommentService {
   private readonly identity: HumanIdentityRepository;
   private readonly attachments?: CommentAttachmentService;
   private readonly attachmentRepository?: CommentAttachmentRepository;
+  private readonly authorizeMutation: CommentServiceOptions["authorizeMutation"];
   private readonly clock: () => Date;
 
   constructor(options: CommentServiceOptions) {
@@ -142,6 +145,7 @@ export class CommentService {
     this.identity = options.identity;
     this.attachments = options.attachments;
     this.attachmentRepository = options.attachmentRepository;
+    this.authorizeMutation = options.authorizeMutation;
     this.clock = options.clock ?? (() => new Date());
   }
 
@@ -155,6 +159,7 @@ export class CommentService {
         deny("comment_auth_project_mismatch");
       }
       this.assertActiveMembership(command.actor, command.projectId);
+      this.authorizeMutation(command.actor, command.workItem);
 
       const packageFacts = this.packagePort.resolveWorkItem(command.workItem);
       const now = this.clock();
@@ -230,6 +235,7 @@ export class CommentService {
       const command = commentEditCommandSchema.parse(commandInput);
       this.assertActiveMembership(command.actor, command.projectId);
       const current = this.comments.getRequired(command.projectId, command.commentId);
+      this.authorizeMutation(command.actor, current.workItem);
       const now = this.clock();
       const decision = decideCommentEdit({ command, current, now });
       if (!decision.ok) {
@@ -276,6 +282,7 @@ export class CommentService {
       const command = commentTombstoneCommandSchema.parse(commandInput);
       this.assertActiveMembership(command.actor, command.projectId);
       const current = this.comments.getRequired(command.projectId, command.commentId);
+      this.authorizeMutation(command.actor, current.workItem);
       const now = this.clock();
       const decision = decideCommentTombstone({ command, current, now });
       if (!decision.ok) {

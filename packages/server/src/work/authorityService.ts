@@ -93,7 +93,8 @@ export class AuthorityService {
       actor,
       scope,
       access: this.options.access,
-      workspaceIdentity: this.options.workspaceIdentity
+      workspaceIdentity: this.options.workspaceIdentity,
+      capability: "assignment"
     });
     if (intent.principal) {
       assertAssignmentPrincipalActive({
@@ -117,7 +118,8 @@ export class AuthorityService {
       actor,
       scope,
       access: this.options.access,
-      workspaceIdentity: this.options.workspaceIdentity
+      workspaceIdentity: this.options.workspaceIdentity,
+      capability: "assignment"
     });
     if (intent.principal) {
       assertAssignmentPrincipalActive({

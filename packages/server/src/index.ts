@@ -114,6 +114,7 @@ export {
   type RegistryHttpOptions,
   type RegistryHttpService
 } from "./registryHttp.js";
+export { handleAccessHttpRequest, type AccessHttpOptions } from "./accessHttp.js";
 export {
   HostEnrollmentError,
   HostEnrollmentService

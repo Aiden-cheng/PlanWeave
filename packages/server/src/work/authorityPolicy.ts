@@ -47,6 +47,7 @@ export function assertHumanScopeAuthorized(input: {
   scope: { workspaceId: string; projectId: string; canvasId: string };
   access: ProjectAccessRepository;
   workspaceIdentity: WorkspaceIdentityRepository;
+  capability?: "read" | "assignment";
 }): void {
   const { actor, scope } = input;
   if (actor.projectId !== scope.projectId) throw new Error("authority_project_mismatch");
@@ -57,13 +58,17 @@ export function assertHumanScopeAuthorized(input: {
   if (!workspace || workspace !== scope.workspaceId)
     throw new Error("authority_workspace_mismatch");
   const subject = { kind: "human" as const, id: actor.humanPrincipalId };
-  const canvas = input.access.decideCanvasAccess({
-    workspaceId: scope.workspaceId,
-    projectId: scope.projectId,
-    canvasId: scope.canvasId,
-    actor: subject
-  });
-  if (canvas.decision !== "allow") throw new Error("authority_scope_forbidden");
+  try {
+    input.access.policy.assertCapability({
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      canvasId: scope.canvasId,
+      actor: subject,
+      capability: input.capability ?? "read"
+    });
+  } catch {
+    throw new Error("authority_scope_forbidden");
+  }
 }
 
 export function assertAssignmentPrincipalActive(input: {
@@ -93,7 +98,7 @@ export function assertExecutionTargetMutation(input: {
   hosts: { get(hostId: string): AgentHost | undefined };
   packageFacts: WorkItemPackageFacts;
 }): void {
-  assertHumanScopeAuthorized({ ...input, scope: input.scope });
+  assertHumanScopeAuthorized({ ...input, scope: input.scope, capability: "assignment" });
   if (!input.packageFacts.exists || input.packageFacts.kind !== "block")
     throw new Error("authority_input_invalid");
   if (input.target.kind !== "exact_host") return;
