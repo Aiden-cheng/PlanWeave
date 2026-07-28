@@ -3,10 +3,39 @@
 import "@testing-library/jest-dom/vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { defaultDesktopSettings } from "../shared/desktopSettings";
 import { createDesktopBridgeMock } from "./desktopBridgeMock";
 import { project, projectSnapshot } from "./helpers/desktopProjectFixtures";
-import { cleanupRendererTestEnvironment } from "./helpers/rendererTestEnvironment";
+import { reviewPipeline } from "./helpers/graphFixtures";
+import {
+  cleanupRendererTestEnvironment,
+  stubSelectLayoutApis
+} from "./helpers/rendererTestEnvironment";
+
+vi.mock("@xyflow/react", async () => {
+  const React = await import("react");
+  return {
+    Background: () => <div data-testid="react-flow-background" />,
+    Controls: () => <div data-testid="react-flow-controls" />,
+    MiniMap: () => <div data-testid="react-flow-minimap" />,
+    ReactFlow: (props: { children?: ReactNode; onInit?: (instance: unknown) => void }) => {
+      React.useEffect(() => {
+        props.onInit?.({ fitView: vi.fn() });
+      }, [props.onInit]);
+      return <div data-testid="react-flow">{props.children}</div>;
+    },
+    useEdgesState: (initialEdges: unknown[]) => {
+      const [edges, setEdges] = React.useState(initialEdges);
+      return [edges, setEdges, vi.fn()];
+    },
+    useNodesState: (initialNodes: unknown[]) => {
+      const [nodes, setNodes] = React.useState(initialNodes);
+      return [nodes, setNodes, vi.fn()];
+    }
+  };
+});
 
 afterEach(() => {
   cleanupRendererTestEnvironment();
@@ -14,6 +43,20 @@ afterEach(() => {
 
 describe("Auto Run diagnostics integration", () => {
   it("shows latest Auto Run summary diagnostics in the desktop diagnostics popover", async () => {
+    stubSelectLayoutApis();
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn().mockImplementation((query: string) => ({
+        addEventListener: vi.fn(),
+        addListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+        matches: false,
+        media: query,
+        onchange: null,
+        removeEventListener: vi.fn(),
+        removeListener: vi.fn()
+      }))
+    );
     const diagnostic = {
       code: "auto_run_state_invalid_json",
       message: "Auto Run state could not be parsed.",
@@ -26,53 +69,25 @@ describe("Auto Run diagnostics integration", () => {
         .fn()
         .mockResolvedValue({ diagnostics: [], dirtyPromptRefs: [] }),
       watchPackageFiles: vi.fn().mockResolvedValue(undefined),
+      // Contract is Promise<DesktopReviewPipeline>; null defaults crash pipeline.steps on App load.
+      getReviewPipeline: vi.fn().mockResolvedValue(reviewPipeline),
       getLatestAutoRunSummaryWithDiagnostics: vi.fn().mockResolvedValue({
         state: null,
         diagnostics: [diagnostic]
       })
     });
     vi.stubGlobal("planweave", bridge);
+    vi.stubGlobal("planweaveDesktopSettings", {
+      getDesktopSettings: vi.fn().mockResolvedValue({ ...defaultDesktopSettings, language: "en" }),
+      migrateLegacyDesktopSettings: vi
+        .fn()
+        .mockResolvedValue({ ...defaultDesktopSettings, language: "en" }),
+      saveDesktopSettings: vi.fn().mockResolvedValue({ ...defaultDesktopSettings, language: "en" })
+    });
     vi.resetModules();
-    const [
-      { createTranslator },
-      { useDesktopProject },
-      { useDesktopProjectSession },
-      { DesktopDiagnosticsPopover }
-    ] = await Promise.all([
-      import("../renderer/i18n"),
-      import("../renderer/hooks/useDesktopProject"),
-      import("../renderer/hooks/useDesktopProjectSession"),
-      import("../renderer/run/DesktopDiagnosticsPopover")
-    ]);
-    const t = createTranslator("en");
+    const { App } = await import("../renderer/App");
 
-    function DiagnosticsHarness() {
-      const projectState = useDesktopProject({
-        setError: vi.fn(),
-        t,
-        updateSettings: vi.fn()
-      });
-      const session = useDesktopProjectSession({
-        clearSelectedBlockRecords: vi.fn(),
-        language: "en",
-        projectState,
-        selectBlock: vi.fn().mockResolvedValue(undefined),
-        setActiveView: vi.fn(),
-        setBlockInspectorOpen: vi.fn(),
-        setError: vi.fn(),
-        setSelectedBlock: vi.fn(),
-        setSelectedRunRecord: vi.fn()
-      });
-      return (
-        <DesktopDiagnosticsPopover
-          diagnostics={session.autoRunDiagnostics}
-          disabled={!session.selectedProject}
-          t={t}
-        />
-      );
-    }
-
-    render(<DiagnosticsHarness />);
+    render(<App />);
 
     await waitFor(() =>
       expect(bridge.getLatestAutoRunSummaryWithDiagnostics).toHaveBeenCalledWith({

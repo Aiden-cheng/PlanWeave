@@ -281,7 +281,6 @@ export class HumanIdentityRepository {
     let membership: ProjectMembership | undefined;
     if (projectId !== undefined) {
       const pid = humanProjectIdSchema.parse(projectId);
-      if (device.mintedForProjectId !== pid) return undefined;
       const targetWorkspace = this.workspaceIdentity.workspaceForLegacyProject(pid);
       if (targetWorkspace !== workspaceId) return undefined;
       try {
