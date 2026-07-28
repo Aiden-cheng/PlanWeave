@@ -12,7 +12,7 @@ describe("DeploymentConnectionCard", () => {
 
   it("enables deployment guidance without an authenticated Workspace connection", async () => {
     const user = userEvent.setup();
-    render(<DeploymentConnectionCard hosts={[]} t={createTranslator("en")} />);
+    render(<DeploymentConnectionCard t={createTranslator("en")} />);
 
     await user.type(screen.getByTestId("deployment-display-name"), "Local Server");
     await user.type(screen.getByTestId("deployment-origin"), "http://127.0.0.1:7443");

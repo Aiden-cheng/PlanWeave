@@ -1,4 +1,5 @@
 import { operatorTokenSchema } from "@planweave-ai/distributed-protocol";
+import { randomBytes } from "node:crypto";
 import {
   assertNoSmuggledOperatorSecrets,
   operatorControlProfileSchema,
@@ -182,6 +183,45 @@ export class OperatorControlService {
       const profile = operatorControlProfileSchema.parse(input);
       await this.profiles.upsert(profile);
       return this.publishStatus();
+    });
+  }
+
+  /** Main-only provisioning for Desktop-generated self-host deployments. */
+  async ensureDeploymentProfile(input: {
+    profile: OperatorControlProfile;
+    operatorId: string;
+  }): Promise<string> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      const profile = operatorControlProfileSchema.parse(input.profile);
+      const operatorId = input.operatorId.trim();
+      if (!operatorId) {
+        throw new OperatorControlError({
+          kind: "validation",
+          code: "deployment_operator_id_required"
+        });
+      }
+      const existingToken = await this.vault.getOperatorToken(profile.profileId);
+      if (existingToken) {
+        if ((await this.vault.persistenceFor(profile.profileId)) !== "persisted") {
+          throw new Error("deployment_operator_credential_persistence_required");
+        }
+        await this.profiles.upsert(profile);
+        return existingToken;
+      }
+      const operatorToken = `pw_operator_${randomBytes(32).toString("base64url")}`;
+      const persistence = await this.vault.setOperatorToken(profile.profileId, operatorToken, operatorId);
+      if (persistence !== "persisted") {
+        await this.vault.clear(profile.profileId);
+        throw new Error("deployment_operator_credential_persistence_required");
+      }
+      try {
+        await this.profiles.upsert(profile);
+      } catch (error) {
+        await this.vault.clear(profile.profileId);
+        throw error;
+      }
+      return operatorToken;
     });
   }
 

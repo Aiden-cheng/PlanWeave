@@ -238,6 +238,54 @@ describe("Desktop operator control trust boundary", () => {
     expect(JSON.stringify(status)).not.toContain(tokenB);
   });
 
+  it("reuses a persisted self-host deployment credential for repeat exports", async () => {
+    const directory = await root("planweave-operator-deployment-");
+    const service = new OperatorControlService({
+      profileStore: new OperatorProfileStore({ profilesPath: join(directory, "profiles.json") }),
+      vault: new OperatorCredentialVault({
+        paths: { credentialsPath: join(directory, "credentials.json") },
+        safeStorage: safeStorage(true)
+      })
+    });
+    const first = await service.ensureDeploymentProfile({
+      profile: profile("deployment-server", "https://collab.example.test/"),
+      operatorId: "desktop-self-host-admin"
+    });
+    const second = await service.ensureDeploymentProfile({
+      profile: { ...profile("deployment-server", "https://collab.example.test/"), displayName: "Updated" },
+      operatorId: "desktop-self-host-admin"
+    });
+    expect(second).toBe(first);
+    await expect(service.getStatus()).resolves.toMatchObject({
+      profiles: [
+        {
+          profileId: "deployment-server",
+          displayName: "Updated",
+          hasOperatorCredential: true,
+          operatorCredentialPersistence: "persisted"
+        }
+      ]
+    });
+  });
+
+  it("removes a new deployment credential when its profile cannot be persisted", async () => {
+    const directory = await root("planweave-operator-deployment-rollback-");
+    const vault = new OperatorCredentialVault({
+      paths: { credentialsPath: join(directory, "credentials.json") },
+      safeStorage: safeStorage(true)
+    });
+    const store = new OperatorProfileStore({ profilesPath: join(directory, "profiles.json") });
+    vi.spyOn(store, "upsert").mockRejectedValueOnce(new Error("profile_store_failed"));
+    const service = new OperatorControlService({ profileStore: store, vault });
+    await expect(
+      service.ensureDeploymentProfile({
+        profile: profile("deployment-rollback", "https://collab.example.test/"),
+        operatorId: "desktop-self-host-admin"
+      })
+    ).rejects.toThrow("profile_store_failed");
+    expect(await vault.persistenceFor("deployment-rollback")).toBe("missing");
+  });
+
   it("accepts loopback HTTP only when explicitly enabled", () => {
     expect(
       () =>

@@ -5,7 +5,6 @@ import type {
   DeploymentTargetDraft,
   DeploymentTopology
 } from "@planweave-ai/collaboration-contracts";
-import type { OperatorHostView } from "@planweave-ai/distributed-protocol";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { collaborationBridge } from "../bridge";
 import type { createTranslator } from "../i18n";
 
-type Props = { hosts: OperatorHostView[]; t: ReturnType<typeof createTranslator> };
+type Props = { t: ReturnType<typeof createTranslator> };
 
 function initialTopology(origin: string): DeploymentTopology {
   const url = new URL(origin);
@@ -36,7 +35,7 @@ function connectivityLabel(
   return t("deploymentConnectivityUnreachable");
 }
 
-export function DeploymentConnectionCard({ hosts, t }: Props) {
+export function DeploymentConnectionCard({ t }: Props) {
   const [origin, setOrigin] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [topology, setTopology] = useState<DeploymentTopology>("loopback_http");
@@ -264,28 +263,6 @@ export function DeploymentConnectionCard({ hosts, t }: Props) {
             {t("deploymentInvalid")}
           </p>
         ) : null}
-        <p className="text-xs text-text-muted">{t("deploymentHostBoundary")}</p>
-        <div
-          className="grid gap-2 rounded-md border p-3 text-xs"
-          data-testid="deployment-host-availability"
-        >
-          <div className="font-medium text-text-strong">{t("deploymentHostReadiness")}</div>
-          {hosts.length === 0 ? <p>{t("deploymentHostNone")}</p> : null}
-          {hosts.map((host) => (
-            <div key={host.id} className="rounded border border-border/70 p-2">
-              <div>{host.displayName}</div>
-              <div>{host.online ? t("deploymentHostOnline") : t("deploymentHostOffline")}</div>
-              <div>
-                {t("deploymentHostCapacity")}: {host.capacity}
-              </div>
-              <div>
-                {t("deploymentHostCapabilities")}:{" "}
-                {host.capabilities.join(", ") || t("deploymentHostCapabilitiesNone")}
-              </div>
-              <div className="text-destructive">{t("deploymentHostUnavailable")}</div>
-            </div>
-          ))}
-        </div>
       </CardContent>
     </Card>
   );

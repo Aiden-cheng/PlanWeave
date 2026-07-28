@@ -171,7 +171,7 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
         </div>
       ) : null}
 
-      <DeploymentConnectionCard hosts={hosts} t={t} />
+      <DeploymentConnectionCard t={t} />
 
       <HostAvailabilityCard
         hosts={hosts}

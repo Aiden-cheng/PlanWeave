@@ -11,7 +11,7 @@ import {
   type DeploymentGuidanceView,
   type ConnectivityValidationView
 } from "@planweave-ai/collaboration-contracts";
-import { parseServerConfig, type ServerConfig } from "@planweave-ai/server";
+import { serverConfigSchema, type ServerConfig } from "@planweave-ai/server";
 import { lstat, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, relative, resolve } from "node:path";
 import { zipSync, strToU8 } from "fflate";
@@ -25,6 +25,16 @@ export type DeploymentBundleSource = {
   workspaceRoot: string;
   projectId: string;
 };
+
+export class DeploymentBundleUnavailableError extends Error {
+  constructor(
+    readonly state: "needs_project" | "invalid_project",
+    message: string
+  ) {
+    super(message);
+    this.name = "DeploymentBundleUnavailableError";
+  }
+}
 
 export type DeploymentActionsOptions = {
   request?: typeof fetch;
@@ -123,6 +133,14 @@ function targetFromAction(
   return deploymentTargetDraftSchema.parse(action.target);
 }
 
+function unavailableBundleView(state: "needs_project" | "invalid_project") {
+  return deploymentBundleExportViewSchema.parse({
+    state,
+    fileName: null,
+    tls: "required_after_export"
+  });
+}
+
 /** Main-owned deployment actions. The renderer supplies only a validated, non-secret target draft. */
 export class DeploymentActions {
   private readonly request: typeof fetch;
@@ -176,24 +194,10 @@ export class DeploymentActions {
       throw new Error("deployment_compose_handoff_not_supported");
     }
     if (!this.resolveBundleSource || !this.resourceDirectory || !this.showSaveDialog) {
-      return deploymentBundleExportViewSchema.parse({
-        state: "needs_project",
-        fileName: null,
-        tls: "required_after_export"
-      });
-    }
-    let source: DeploymentBundleSource;
-    try {
-      source = await this.resolveBundleSource(target);
-    } catch {
-      return deploymentBundleExportViewSchema.parse({
-        state: "needs_project",
-        fileName: null,
-        tls: "required_after_export"
-      });
+      return unavailableBundleView("needs_project");
     }
     const save = await this.showSaveDialog({
-      defaultPath: `planweave-self-host-${source.projectId}.zip`,
+      defaultPath: "planweave-self-host-bundle.zip",
       filters: [{ name: "PlanWeave self-host bundle", extensions: ["zip"] }]
     });
     if (save.canceled || !save.filePath) {
@@ -203,6 +207,13 @@ export class DeploymentActions {
         tls: "required_after_export"
       });
     }
+    let source: DeploymentBundleSource;
+    try {
+      source = await this.resolveBundleSource(target);
+    } catch (error) {
+      if (error instanceof DeploymentBundleUnavailableError) return unavailableBundleView(error.state);
+      throw error;
+    }
     try {
       const archive = await createBundleArchive({
         resourceDirectory: this.resourceDirectory,
@@ -210,12 +221,9 @@ export class DeploymentActions {
         target
       });
       await writeFile(save.filePath, archive, { mode: 0o600 });
-    } catch {
-      return deploymentBundleExportViewSchema.parse({
-        state: "invalid_project",
-        fileName: null,
-        tls: "required_after_export"
-      });
+    } catch (error) {
+      if (error instanceof DeploymentBundleUnavailableError) return unavailableBundleView(error.state);
+      throw error;
     }
     return deploymentBundleExportViewSchema.parse({
       state: "exported",
@@ -293,21 +301,31 @@ async function archiveDirectory(
   total: { bytes: number }
 ): Promise<void> {
   const resolvedRoot = resolve(root);
-  if (!isAbsolute(resolvedRoot)) throw new Error("deployment_bundle_root_invalid");
+  if (!isAbsolute(resolvedRoot)) {
+    throw new DeploymentBundleUnavailableError("invalid_project", "deployment_bundle_root_invalid");
+  }
   const entries = await readdir(resolvedRoot, { withFileTypes: true });
   for (const entry of entries) {
     const path = resolve(resolvedRoot, entry.name);
-    if (relative(resolvedRoot, path).startsWith("..")) throw new Error("deployment_bundle_path_escape");
+    if (relative(resolvedRoot, path).startsWith("..")) {
+      throw new DeploymentBundleUnavailableError("invalid_project", "deployment_bundle_path_escape");
+    }
     const metadata = await lstat(path);
-    if (metadata.isSymbolicLink()) throw new Error("deployment_bundle_symlink_rejected");
+    if (metadata.isSymbolicLink()) {
+      throw new DeploymentBundleUnavailableError("invalid_project", "deployment_bundle_symlink_rejected");
+    }
     const name = `${prefix}/${entry.name}`;
     if (metadata.isDirectory()) {
       await archiveDirectory(path, name, output, total);
       continue;
     }
-    if (!metadata.isFile()) throw new Error("deployment_bundle_entry_invalid");
+    if (!metadata.isFile()) {
+      throw new DeploymentBundleUnavailableError("invalid_project", "deployment_bundle_entry_invalid");
+    }
     total.bytes += metadata.size;
-    if (total.bytes > maxBundleInputBytes) throw new Error("deployment_bundle_too_large");
+    if (total.bytes > maxBundleInputBytes) {
+      throw new DeploymentBundleUnavailableError("invalid_project", "deployment_bundle_too_large");
+    }
     output[name] = new Uint8Array(await readFile(path));
   }
 }
@@ -317,9 +335,9 @@ async function createBundleArchive(input: {
   source: DeploymentBundleSource;
   target: DeploymentTargetDraft;
 }): Promise<Uint8Array> {
-  const config = parseServerConfig(input.source.config);
+  const config = serverConfigSchema.parse(input.source.config);
   if (!isAbsolute(input.source.workspaceRoot) || config.trustedProjects.length !== 1) {
-    throw new Error("deployment_bundle_source_invalid");
+    throw new DeploymentBundleUnavailableError("invalid_project", "deployment_bundle_source_invalid");
   }
   const trusted = config.trustedProjects[0];
   if (
@@ -327,14 +345,35 @@ async function createBundleArchive(input: {
     trusted.projectRoot !== `/var/lib/planweave/projects/${input.source.projectId}` ||
     config.deployment?.serverOrigin !== input.target.endpoint.serverOrigin
   ) {
-    throw new Error("deployment_bundle_scope_invalid");
+    throw new DeploymentBundleUnavailableError("invalid_project", "deployment_bundle_scope_invalid");
   }
+  const { databasePath: _databasePath, ...configInput } = config;
   const files: Record<string, Uint8Array> = {
-    "server.json": strToU8(`${JSON.stringify(config)}\n`),
+    "server.json": strToU8(`${JSON.stringify(configInput)}\n`),
     "tls/.gitkeep": new Uint8Array()
   };
-  const total = { bytes: Buffer.byteLength(JSON.stringify(config)) };
-  await archiveDirectory(input.resourceDirectory, "image", files, total);
+  const total = { bytes: Buffer.byteLength(JSON.stringify(configInput)) };
+  const composePath = resolve(input.resourceDirectory, "compose.yaml");
+  const composeMetadata = await lstat(composePath);
+  if (composeMetadata.isSymbolicLink() || !composeMetadata.isFile()) {
+    throw new DeploymentBundleUnavailableError("invalid_project", "deployment_bundle_compose_invalid");
+  }
+  total.bytes += composeMetadata.size;
+  if (total.bytes > maxBundleInputBytes) {
+    throw new DeploymentBundleUnavailableError("invalid_project", "deployment_bundle_too_large");
+  }
+  files["compose.yaml"] = new Uint8Array(await readFile(composePath));
+  await archiveDirectory(resolve(input.resourceDirectory, "image"), "image", files, total);
   await archiveDirectory(input.source.workspaceRoot, `projects/${input.source.projectId}`, files, total);
+  files[`projects/${input.source.projectId}/project.json`] = strToU8(
+    `${JSON.stringify({
+      id: input.source.projectId,
+      name: input.source.projectId,
+      rootPath: `/var/lib/planweave/projects/${input.source.projectId}`,
+      kind: "managed",
+      sourceRoot: null,
+      createdAt: new Date().toISOString()
+    })}\n`
+  );
   return zipSync(files, { level: 6 });
 }

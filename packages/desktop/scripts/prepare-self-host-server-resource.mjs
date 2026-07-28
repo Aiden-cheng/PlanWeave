@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { cp, mkdir, rm } from "node:fs/promises";
+import { cp, lstat, mkdir, readdir, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
@@ -8,6 +8,7 @@ const desktopRoot = dirname(fileURLToPath(new URL("../package.json", import.meta
 const repositoryRoot = resolve(desktopRoot, "../..");
 const outputRoot = resolve(desktopRoot, "build/generated/planweave-self-host-server");
 const imageRoot = resolve(outputRoot, "image");
+const stagingAppRoot = resolve(outputRoot, "staging-app");
 
 function run(command, args) {
   return new Promise((resolveRun, reject) => {
@@ -19,9 +20,31 @@ function run(command, args) {
   });
 }
 
+async function assertPortableDirectory(directory) {
+  for (const entry of await readdir(directory)) {
+    const path = resolve(directory, entry);
+    const metadata = await lstat(path);
+    if (metadata.isSymbolicLink()) {
+      throw new Error(`self-host resource contains symbolic link: ${path}`);
+    }
+    if (metadata.isDirectory()) await assertPortableDirectory(path);
+  }
+}
+
 await rm(outputRoot, { recursive: true, force: true });
 await mkdir(imageRoot, { recursive: true });
-await run("pnpm", ["--filter", "@planweave-ai/server", "--prod", "deploy", "--legacy", resolve(imageRoot, "app")]);
+await run("pnpm", [
+  "--config.node-linker=hoisted",
+  "--filter",
+  "@planweave-ai/server",
+  "--prod",
+  "deploy",
+  "--legacy",
+  stagingAppRoot
+]);
+await cp(stagingAppRoot, resolve(imageRoot, "app"), { recursive: true, dereference: true });
+await rm(stagingAppRoot, { recursive: true, force: true });
+await assertPortableDirectory(resolve(imageRoot, "app"));
 await Promise.all([
   cp(resolve(desktopRoot, "build/self-host-server.Dockerfile"), resolve(imageRoot, "Dockerfile")),
   cp(resolve(repositoryRoot, "packages/server/docker-entrypoint.sh"), resolve(imageRoot, "docker-entrypoint.sh")),
