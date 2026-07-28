@@ -114,6 +114,21 @@ function openSqlite(path: string, readOnly = true) {
   return new DatabaseSync(path, readOnly ? { readOnly: true } : undefined);
 }
 
+class TerminalDispatchStatusError extends Error {}
+
+export function expectedDispatchStatusReached(
+  view: OperatorOperationView,
+  allowed: ReadonlySet<string>
+): boolean {
+  if (typeof view.dispatchStatus === "string" && allowed.has(view.dispatchStatus)) return true;
+  const isTerminal = ["completed", "failed", "cancelled"].includes(view.state);
+  if (!isTerminal) return false;
+  const failureCode = view.runtime.terminalReceipt?.failure?.code ?? "none";
+  throw new TerminalDispatchStatusError(
+    `real_process_lifecycle_terminal_dispatch_mismatch:operation_state=${view.state}:dispatch_status=${view.dispatchStatus ?? "none"}:failure_code=${failureCode}`
+  );
+}
+
 async function waitFor(
   predicate: () => Promise<boolean> | boolean,
   options: { timeoutMs: number; intervalMs?: number; label: string }
@@ -125,6 +140,7 @@ async function waitFor(
     try {
       if (await predicate()) return;
     } catch (error) {
+      if (error instanceof TerminalDispatchStatusError) throw error;
       lastError = error;
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
@@ -305,7 +321,7 @@ export class RealProcessLifecycleClient {
     const allowed = new Set(Array.isArray(status) ? status : [status]);
     return this.waitForOperation(
       operationId,
-      (view) => typeof view.dispatchStatus === "string" && allowed.has(view.dispatchStatus),
+      (view) => expectedDispatchStatusReached(view, allowed),
       `dispatch-status:${[...allowed].join("|")}`
     );
   }
