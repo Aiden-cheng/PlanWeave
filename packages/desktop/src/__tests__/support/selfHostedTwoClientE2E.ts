@@ -10,6 +10,7 @@ import { AgentHostRepository } from "../../../../server/src/hosts.js";
 import { hashOperatorToken } from "../../../../server/src/operatorAuth.js";
 import { ProjectAccessRepository } from "../../../../server/src/projectAccessRepository.js";
 import { openServerDatabase, type SqliteDatabase } from "../../../../server/src/sqlite.js";
+import { legacyWorkspaceIdForProject } from "../../../../server/src/__tests__/support/legacyWorkspaceId.js";
 import { seedOperatorSessions } from "../../../../server/src/__tests__/support/operatorAuthFixture.js";
 import {
   createDistributedServerComposition,
@@ -39,6 +40,7 @@ export async function setupSelfHostedTwoClientFixture() {
   await createCanvasWorkspace({ cwd: workspace.root, id: "private", title: "Private canvas" });
   directories.push(workspace.home, workspace.root);
   const projectId = workspace.init.workspace.id;
+  const workspaceId = legacyWorkspaceIdForProject(projectId);
   const httpServer = createServer();
   servers.push(httpServer);
   await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
@@ -51,7 +53,9 @@ export async function setupSelfHostedTwoClientFixture() {
     publicUrl: origin,
     allowInsecureDevelopment: true,
     dataDirectory: join(workspace.root, "server-data"),
-    trustedProjects: [{ projectId, projectRoot: workspace.root, trustAllDeclaredCanvases: true }],
+    trustedProjects: [
+      { workspaceId, projectId, projectRoot: workspace.root, trustAllDeclaredCanvases: true }
+    ],
     operatorCredentials: [{
       operatorId: "two-client-e2e-admin",
       tokenSha256: hashOperatorToken(adminToken),
@@ -63,16 +67,11 @@ export async function setupSelfHostedTwoClientFixture() {
   await seedOperatorSessions(config.databasePath, config.operatorCredentials);
   return {
     projectId,
-    workspaceId: `workspace-legacy-${await shortHash(projectId)}`,
+    workspaceId,
     origin,
     home: workspace.home,
     databasePath: config.databasePath
   };
-}
-
-async function shortHash(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-  return Buffer.from(digest).toString("hex").slice(0, 32);
 }
 
 export async function issueDeviceSetupCode(origin: string, workspaceId: string) {

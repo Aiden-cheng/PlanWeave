@@ -16,6 +16,7 @@ import {
 } from "../../../runtime/src/projectGraph/index.js";
 import { writeJsonFile } from "../../../runtime/src/json.js";
 import { parseServerConfig } from "../config.js";
+import { legacyWorkspaceIdForProject } from "./support/legacyWorkspaceId.js";
 import { hashOperatorToken } from "../operatorAuth.js";
 import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { createDistributedServerComposition } from "../serverComposition.js";
@@ -87,8 +88,18 @@ async function startComposition(
     dataDirectory,
     trustedProjects: [
       trustAllDeclaredCanvases
-        ? { projectId, projectRoot, trustAllDeclaredCanvases: true }
-        : { projectId, projectRoot, canvasId: "default" }
+        ? {
+            workspaceId: legacyWorkspaceIdForProject(projectId),
+            projectId,
+            projectRoot,
+            trustAllDeclaredCanvases: true
+          }
+        : {
+            workspaceId: legacyWorkspaceIdForProject(projectId),
+            projectId,
+            projectRoot,
+            canvasId: "default"
+          }
     ],
     operatorCredentials: [
       {

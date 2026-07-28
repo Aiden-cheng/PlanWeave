@@ -63,6 +63,7 @@ vi.mock("../runtimeProjectRegistry.js", async () => {
 
 import { hashOperatorToken } from "../operatorAuth.js";
 import { parseServerConfig } from "../config.js";
+import { legacyWorkspaceIdForProject } from "./support/legacyWorkspaceId.js";
 import { createDistributedServerComposition } from "../serverComposition.js";
 import { seedOperatorSessions } from "./support/operatorAuthFixture.js";
 
@@ -100,6 +101,7 @@ describe("distributed server composition cleanup", () => {
       dataDirectory,
       trustedProjects: [
         {
+          workspaceId: legacyWorkspaceIdForProject(workspace.init.workspace.id),
           projectId: workspace.init.workspace.id,
           canvasId: "default",
           projectRoot: workspace.root

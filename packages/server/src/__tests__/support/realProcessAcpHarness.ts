@@ -28,6 +28,7 @@ import {
 } from "../../../../runtime/src/__tests__/promptTestHelpers.js";
 import { hashOperatorToken } from "../../operatorAuth.js";
 import { parseServerConfig } from "../../config.js";
+import { legacyWorkspaceIdForProject } from "./legacyWorkspaceId.js";
 import { seedOperatorSessions } from "./operatorAuthFixture.js";
 
 function resolveHarnessPath(relativeUrl: string, workspacePath: string): string {
@@ -563,6 +564,7 @@ export class RealProcessAcpHarness {
         dataDirectory: paths.serverData,
         trustedProjects: [
           {
+            workspaceId: legacyWorkspaceIdForProject(projectId),
             projectId,
             canvasId: "default",
             projectRoot: paths.projectRoot

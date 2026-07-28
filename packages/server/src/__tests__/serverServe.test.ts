@@ -8,6 +8,7 @@ import {
   createTestWorkspace
 } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { parseServerConfig } from "../config.js";
+import { legacyWorkspaceIdForProject } from "./support/legacyWorkspaceId.js";
 import { latestCentralSchemaVersion } from "../migrations.js";
 import { hashOperatorToken } from "../operatorAuth.js";
 import { serveDistributedServer } from "../serverServe.js";
@@ -51,6 +52,7 @@ describe("distributed server listener", () => {
       dataDirectory: join(workspace.root, "server-data"),
       trustedProjects: [
         {
+          workspaceId: legacyWorkspaceIdForProject(workspace.init.workspace.id),
           projectId: workspace.init.workspace.id,
           canvasId: "default",
           projectRoot: workspace.root

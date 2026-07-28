@@ -13,6 +13,7 @@ import {
 } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { parseServerConfig } from "../../../server/src/config.js";
 import { hashOperatorToken } from "../../../server/src/operatorAuth.js";
+import { legacyWorkspaceIdForProject } from "../../../server/src/__tests__/support/legacyWorkspaceId.js";
 import { seedOperatorSessions } from "../../../server/src/__tests__/support/operatorAuthFixture.js";
 import {
   createDistributedServerComposition,
@@ -67,7 +68,12 @@ async function setup() {
     allowInsecureDevelopment: true,
     dataDirectory: join(workspace.root, "server-data"),
     trustedProjects: [
-      { projectId, canvasId: "default", projectRoot: workspace.root }
+      {
+        workspaceId: legacyWorkspaceIdForProject(projectId),
+        projectId,
+        canvasId: "default",
+        projectRoot: workspace.root
+      }
     ],
     operatorCredentials: [
       {

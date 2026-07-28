@@ -13,6 +13,7 @@ import {
 } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { latestCentralSchemaVersion } from "../migrations.js";
 import { hashOperatorToken } from "../operatorAuth.js";
+import { legacyWorkspaceIdForProject } from "./support/legacyWorkspaceId.js";
 import { seedOperatorSessions } from "./support/operatorAuthFixture.js";
 import {
   buildIsolatedPublicPackageBins,
@@ -225,6 +226,7 @@ describe("remote operator walkthrough", () => {
         dataDirectory: join(temporaryRoot, "server-data"),
         trustedProjects: [
           {
+            workspaceId: legacyWorkspaceIdForProject(workspace.init.workspace.id),
             projectId: workspace.init.workspace.id,
             canvasId: "default",
             projectRoot: workspace.root
