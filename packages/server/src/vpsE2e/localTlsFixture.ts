@@ -66,7 +66,9 @@ const HOST_DISPLAY_NAME = "local-tls-fixture-host";
 async function seedOperatorSession(databasePath: string, projectId: string, token: string) {
   const database = await openServerDatabase(databasePath, 5_000);
   try {
-    const workspaceId = new WorkspaceIdentityRepository(database).workspaceForLegacyProject(projectId);
+    const workspaceId = new WorkspaceIdentityRepository(database).workspaceForLegacyProject(
+      projectId
+    );
     if (!workspaceId) throw new Error("vps_e2e_workspace_missing");
     const existing = database
       .prepare("SELECT 1 FROM workspace_operator_sessions WHERE operator_id=?")
@@ -220,6 +222,7 @@ export async function runLocalTlsFixture(options: {
 
     const workspace = await createFixtureWorkspace();
     ownedRoots.push(...workspace.ownedRoots);
+    const workspaceId = `workspace-${workspace.projectId}`;
 
     const port = await allocateEphemeralPort();
     const origin = `https://127.0.0.1:${port}`;
@@ -234,6 +237,12 @@ export async function runLocalTlsFixture(options: {
         version: "server-config/v1",
         bind: { host: "127.0.0.1", port },
         publicUrl: origin,
+        deployment: {
+          topology: "loopback_https",
+          serverOrigin: origin,
+          allowedClientOrigins: [origin],
+          tlsTrust: "configured_ca"
+        },
         tls: {
           certificatePath: tls.certificatePath,
           privateKeyPath: tls.privateKeyPath
@@ -242,6 +251,7 @@ export async function runLocalTlsFixture(options: {
         dataDirectory: join(root, "server-data"),
         trustedProjects: [
           {
+            workspaceId,
             projectId: workspace.projectId,
             canvasId: "default",
             projectRoot: workspace.root
@@ -288,7 +298,7 @@ export async function runLocalTlsFixture(options: {
           capacity: HOST_CAPACITY,
           capabilities: [...HOST_CAPABILITIES]
         },
-        workspaces: [{ id: workspace.projectId, path: "project" }],
+        workspaces: [{ id: workspaceId, path: "project" }],
         agentProfiles: [
           {
             id: "codex-acp",
@@ -341,7 +351,11 @@ export async function runLocalTlsFixture(options: {
         diagnostics: () => redactSensitiveText(server?.logs.stderr ?? "")
       }
     );
-    await seedOperatorSession(join(root, "server-data", "planweave-server.sqlite"), workspace.projectId, operatorToken);
+    await seedOperatorSession(
+      join(root, "server-data", "planweave-server.sqlite"),
+      workspace.projectId,
+      operatorToken
+    );
 
     const versionResponse = await request(`${origin}/version`);
     const versionBody = (await versionResponse.json()) as {
@@ -462,15 +476,64 @@ export async function runLocalTlsFixture(options: {
     checks.resourceBoundsConfirmed =
       maxArtifactBytes > 0 && maxWebSocketPayloadBytes > 0 && hostOnline.capacity === HOST_CAPACITY;
 
+    const ownerResponse = await request(
+      `${origin}/api/v1/projects/${encodeURIComponent(workspace.projectId)}/human/bootstrap`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          displayName: "Local TLS fixture owner",
+          humanPrincipalId: "local-tls-fixture-owner"
+        })
+      }
+    );
+    if (ownerResponse.status !== 201) {
+      throw new Error(`vps_e2e_owner_bootstrap_failed:${ownerResponse.status}`);
+    }
+    const owner = (await ownerResponse.json()) as { deviceToken?: string };
+    if (!owner.deviceToken) throw new Error("vps_e2e_owner_credential_missing");
+    const executionTargetResponse = await request(
+      `${origin}/api/v1/projects/${encodeURIComponent(workspace.projectId)}/assignments/execution-target`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${owner.deviceToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          schemaVersion: "execution-target/v1",
+          scope: {
+            kind: "block",
+            workspaceId,
+            projectId: workspace.projectId,
+            canvasId: "default",
+            blockRef: "T-001#B-001"
+          },
+          target: { kind: "exact_host", hostId: hostOnline.id },
+          expectedRevision: 0
+        })
+      }
+    );
+    if (executionTargetResponse.status !== 200) {
+      throw new Error(`vps_e2e_execution_target_failed:${executionTargetResponse.status}`);
+    }
+    const executionTarget = (await executionTargetResponse.json()) as { revision?: number };
+    if (executionTarget.revision !== 1)
+      throw new Error("vps_e2e_execution_target_revision_invalid");
+
     // Dispatch bounded fixture block.
     const dispatchResponse = await request(`${origin}/api/v1/remote-operations`, {
       method: "POST",
       headers: authHeaders,
       body: JSON.stringify({
+        schemaVersion: "remote-run/v2",
         projectId: workspace.projectId,
         canvasId: "default",
         blockRef: "T-001#B-001",
-        idempotencyKey: `vps-e2e-local-tls-${Date.now()}`
+        idempotencyKey: `vps-e2e-local-tls-${Date.now()}`,
+        expectedResponsibilityRevision: 0,
+        expectedReviewerRevision: 0,
+        expectedExecutionTargetRevision: executionTarget.revision
       })
     });
     if (dispatchResponse.status !== 202) {
@@ -491,7 +554,7 @@ export async function runLocalTlsFixture(options: {
         identities.leaseId
     );
     commandsSanitized.push(
-      "POST /api/v1/remote-operations { projectId, canvasId, blockRef: T-001#B-001, idempotencyKey }"
+      "POST /api/v1/remote-operations { schemaVersion: remote-run/v2, projectId, canvasId, blockRef: T-001#B-001, idempotencyKey, expected authority revisions }"
     );
 
     // Wait for terminal completion (success path for local mock fixture).
@@ -644,7 +707,11 @@ export async function runLocalTlsFixture(options: {
       },
       { timeoutMs: DEFAULT_TIMEOUT_MS, label: "server-reconnect-ready" }
     );
-    await seedOperatorSession(join(root, "server-data", "planweave-server.sqlite"), workspace.projectId, operatorToken);
+    await seedOperatorSession(
+      join(root, "server-data", "planweave-server.sqlite"),
+      workspace.projectId,
+      operatorToken
+    );
 
     // Host should re-advertise heartbeat after transport recovery.
     let reconnectOk = false;
