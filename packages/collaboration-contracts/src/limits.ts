@@ -126,6 +126,12 @@ export const PACKAGE_SNAPSHOT_MAX_TOTAL_BYTES = 256 * 1_024 * 1_024;
 export const PACKAGE_SNAPSHOT_MAX_FILE_BYTES = 64 * 1_024 * 1_024;
 export const PACKAGE_SNAPSHOT_MAX_RETAINED = 256 as const;
 
+/** Immutable authoritative content-version transfer and registry budgets. */
+export const CONTENT_VERSION_MAX_MEMBERS = PACKAGE_SNAPSHOT_MAX_PROMPT_DIGESTS + 2;
+export const CONTENT_VERSION_MAX_MEMBER_BYTES = PACKAGE_SNAPSHOT_MAX_FILE_BYTES;
+export const CONTENT_VERSION_MAX_TOTAL_BYTES = PACKAGE_SNAPSHOT_MAX_TOTAL_BYTES;
+export const CONTENT_VERSION_MAX_REASON_LENGTH = 512 as const;
+
 /**
  * One-time Workspace setup code budgets.
  * Distinct from host enrollment (`pw_enroll_`), human device (`pw_hdev_`), and invitation tokens.

@@ -199,6 +199,10 @@ export type CanvasRegistryId = z.infer<typeof canvasRegistryIdSchema>;
 export const packageSnapshotIdSchema = opaqueIdentifierSchema.brand("PackageSnapshotId");
 export type PackageSnapshotId = z.infer<typeof packageSnapshotIdSchema>;
 
+/** Immutable Server content object identity. The digest relation is enforced by its version schema. */
+export const contentVersionIdSchema = opaqueIdentifierSchema.brand("ContentVersionId");
+export type ContentVersionId = z.infer<typeof contentVersionIdSchema>;
+
 export const membershipGrantIdSchema = opaqueIdentifierSchema.brand("MembershipGrantId");
 export type MembershipGrantId = z.infer<typeof membershipGrantIdSchema>;
 

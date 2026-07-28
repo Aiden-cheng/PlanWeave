@@ -1,0 +1,439 @@
+import { z } from "zod";
+import {
+  CONTENT_VERSION_MAX_MEMBER_BYTES,
+  CONTENT_VERSION_MAX_MEMBERS,
+  CONTENT_VERSION_MAX_REASON_LENGTH,
+  CONTENT_VERSION_MAX_TOTAL_BYTES
+} from "./limits.js";
+import {
+  actorRefSchema,
+  canvasScopeRefSchema,
+  contentVersionIdSchema,
+  deviceSessionIdSchema,
+  humanPrincipalIdSchema,
+  timestampSchema
+} from "./primitives.js";
+import { packageSnapshotDigestSchema } from "./packageSnapshot.js";
+import { aclRevisionSchema } from "./projectAccess.js";
+
+/**
+ * Server-authoritative immutable content versions. These records deliberately
+ * exclude Git refs, runtime state/results, project roots, and cache locations.
+ */
+export const contentVersionSchemaVersion = "content-version/v1" as const;
+export const contentVersionSchemaVersionSchema = z.literal(contentVersionSchemaVersion);
+export type ContentVersionSchemaVersion = z.infer<typeof contentVersionSchemaVersionSchema>;
+
+export const contentVersionMemberPathSchema = z
+  .string()
+  .min(1)
+  .max(512)
+  .refine((value) => !value.startsWith("/") && !value.startsWith("\\"), "absolute_path_forbidden")
+  .refine((value) => !value.includes("\\"), "backslash_path_forbidden")
+  .refine((value) => {
+    const segments = value.split("/");
+    return !segments.some((segment) => segment === "" || segment === "." || segment === "..");
+  }, "path_traversal_forbidden")
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]*$/, "invalid_content_version_member_path");
+export type ContentVersionMemberPath = z.infer<typeof contentVersionMemberPathSchema>;
+
+export const contentVersionMemberKindSchema = z.enum([
+  "manifest",
+  "task_prompt",
+  "block_prompt",
+  "desktop_layout"
+]);
+export type ContentVersionMemberKind = z.infer<typeof contentVersionMemberKindSchema>;
+
+const taskPromptPathPattern = /^nodes\/[^/]+\/prompt\.md$/;
+const blockPromptPathPattern = /^nodes\/[^/]+\/blocks\/[^/]+\.prompt\.md$/;
+const textEncoder = new TextEncoder();
+
+export const contentVersionMemberSchema = z
+  .object({
+    kind: contentVersionMemberKindSchema,
+    path: contentVersionMemberPathSchema,
+    content: z.string().max(CONTENT_VERSION_MAX_MEMBER_BYTES),
+    digestSha256: packageSnapshotDigestSchema,
+    sizeBytes: z.number().int().nonnegative().max(CONTENT_VERSION_MAX_MEMBER_BYTES)
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const actualSize = textEncoder.encode(value.content).byteLength;
+    if (actualSize !== value.sizeBytes) {
+      context.addIssue({
+        code: "custom",
+        message: "content_version_member_size_mismatch",
+        path: ["sizeBytes"]
+      });
+    }
+    const pathIsValid =
+      (value.kind === "manifest" && value.path === "manifest.json") ||
+      (value.kind === "desktop_layout" && value.path === "desktop/layout.json") ||
+      (value.kind === "task_prompt" && taskPromptPathPattern.test(value.path)) ||
+      (value.kind === "block_prompt" && blockPromptPathPattern.test(value.path));
+    if (!pathIsValid) {
+      context.addIssue({
+        code: "custom",
+        message: "content_version_member_kind_path_mismatch",
+        path: ["path"]
+      });
+    }
+  });
+export type ContentVersionMember = z.infer<typeof contentVersionMemberSchema>;
+
+function expectedMemberKind(path: string): ContentVersionMemberKind | undefined {
+  if (path === "manifest.json") return "manifest";
+  if (path === "desktop/layout.json") return "desktop_layout";
+  if (taskPromptPathPattern.test(path)) return "task_prompt";
+  if (blockPromptPathPattern.test(path)) return "block_prompt";
+  return undefined;
+}
+
+/**
+ * Complete, canonical content submitted to Server. Member order is part of the
+ * canonical input: lexicographically ordered normalized paths, one manifest,
+ * one layout, and only task/block prompts in between.
+ */
+export const completeContentVersionSchema = z
+  .object({
+    members: z.array(contentVersionMemberSchema).min(2).max(CONTENT_VERSION_MAX_MEMBERS),
+    canonicalDigest: packageSnapshotDigestSchema,
+    totalBytes: z.number().int().positive().max(CONTENT_VERSION_MAX_TOTAL_BYTES)
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const paths = value.members.map((member) => member.path);
+    if (new Set(paths).size !== paths.length) {
+      context.addIssue({ code: "custom", message: "duplicate_content_version_member_path", path: ["members"] });
+    }
+    for (let index = 0; index < value.members.length; index += 1) {
+      const member = value.members[index]!;
+      if (index > 0 && paths[index - 1]!.localeCompare(member.path) >= 0) {
+        context.addIssue({
+          code: "custom",
+          message: "content_version_members_must_be_canonically_ordered",
+          path: ["members", index, "path"]
+        });
+      }
+      if (expectedMemberKind(member.path) !== member.kind) {
+        context.addIssue({
+          code: "custom",
+          message: "content_version_member_kind_path_mismatch",
+          path: ["members", index, "kind"]
+        });
+      }
+    }
+    if (value.members.filter((member) => member.kind === "manifest").length !== 1) {
+      context.addIssue({ code: "custom", message: "content_version_requires_one_manifest", path: ["members"] });
+    }
+    if (value.members.filter((member) => member.kind === "desktop_layout").length !== 1) {
+      context.addIssue({ code: "custom", message: "content_version_requires_one_desktop_layout", path: ["members"] });
+    }
+    const totalBytes = value.members.reduce((sum, member) => sum + member.sizeBytes, 0);
+    if (totalBytes !== value.totalBytes) {
+      context.addIssue({ code: "custom", message: "content_version_total_bytes_mismatch", path: ["totalBytes"] });
+    }
+  });
+export type CompleteContentVersion = z.infer<typeof completeContentVersionSchema>;
+
+/** Canonical serialisation input for SHA-256. The Server computes and verifies the digest. */
+export function canonicalContentVersionDigestPayload(input: CompleteContentVersion): string {
+  const parsed = completeContentVersionSchema.parse(input);
+  return JSON.stringify({
+    members: parsed.members.map(({ kind, path, digestSha256, sizeBytes }) => ({
+      kind,
+      path,
+      digestSha256,
+      sizeBytes
+    })),
+    totalBytes: parsed.totalBytes
+  });
+}
+
+export const completedContentVersionRefSchema = z
+  .object({
+    versionId: contentVersionIdSchema,
+    canonicalDigest: packageSnapshotDigestSchema,
+    verification: z.literal("complete")
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.versionId !== `version-${value.canonicalDigest}`) {
+      context.addIssue({
+        code: "custom",
+        message: "content_version_id_must_bind_canonical_digest",
+        path: ["versionId"]
+      });
+    }
+  });
+export type CompletedContentVersionRef = z.infer<typeof completedContentVersionRefSchema>;
+
+export const authoritativeContentVersionSchema = z
+  .object({
+    schemaVersion: contentVersionSchemaVersionSchema,
+    scope: canvasScopeRefSchema,
+    content: completeContentVersionSchema,
+    completed: completedContentVersionRefSchema,
+    createdAt: timestampSchema,
+    createdBy: actorRefSchema
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.content.canonicalDigest !== value.completed.canonicalDigest) {
+      context.addIssue({
+        code: "custom",
+        message: "completed_content_version_digest_mismatch",
+        path: ["completed", "canonicalDigest"]
+      });
+    }
+  });
+export type AuthoritativeContentVersion = z.infer<typeof authoritativeContentVersionSchema>;
+
+export const contentVersionRevisionSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+export type ContentVersionRevision = z.infer<typeof contentVersionRevisionSchema>;
+
+export const authoritativeContentHeadSchema = z
+  .object({
+    schemaVersion: contentVersionSchemaVersionSchema,
+    scope: canvasScopeRefSchema,
+    revision: contentVersionRevisionSchema,
+    content: completedContentVersionRefSchema,
+    advancedAt: timestampSchema
+  })
+  .strict();
+export type AuthoritativeContentHead = z.infer<typeof authoritativeContentHeadSchema>;
+
+/** Journal records can only point at a completed immutable content object. */
+export const contentVersionJournalEntrySchema = z
+  .object({
+    schemaVersion: contentVersionSchemaVersionSchema,
+    scope: canvasScopeRefSchema,
+    revision: contentVersionRevisionSchema,
+    previousRevision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    content: completedContentVersionRefSchema,
+    acceptedAt: timestampSchema
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.revision !== value.previousRevision + 1) {
+      context.addIssue({ code: "custom", message: "content_version_journal_must_be_contiguous", path: ["revision"] });
+    }
+  });
+export type ContentVersionJournalEntry = z.infer<typeof contentVersionJournalEntrySchema>;
+
+export const firstContentVersionPublishRequestSchema = z
+  .object({
+    projectId: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+    canvasId: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+    expectedHeadRevision: z.literal(0),
+    expectedHeadVersionId: z.null(),
+    content: completeContentVersionSchema
+  })
+  .strict();
+export type FirstContentVersionPublishRequest = z.infer<typeof firstContentVersionPublishRequestSchema>;
+
+/** Server-only authorization envelope. The request itself cannot assert an actor or owner role. */
+export const ownerAuthorizedFirstContentVersionPublishSchema = z
+  .object({
+    request: firstContentVersionPublishRequestSchema,
+    scope: canvasScopeRefSchema,
+    owner: humanPrincipalIdSchema,
+    actor: actorRefSchema,
+    deviceSessionId: deviceSessionIdSchema,
+    aclRevision: aclRevisionSchema
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (
+      value.request.projectId !== value.scope.projectId ||
+      value.request.canvasId !== value.scope.canvasId ||
+      value.actor.kind !== "human" ||
+      value.actor.id !== value.owner
+    ) {
+      context.addIssue({ code: "custom", message: "owner_authorized_initial_publish_scope_mismatch" });
+    }
+  });
+export type OwnerAuthorizedFirstContentVersionPublish = z.infer<
+  typeof ownerAuthorizedFirstContentVersionPublishSchema
+>;
+
+export const firstContentVersionPublishFailureReasonSchema = z.enum([
+  "head_already_exists",
+  "head_cas_conflict",
+  "content_verification_failed",
+  "authorization_revoked",
+  "device_revoked",
+  "storage_unavailable"
+]);
+export type FirstContentVersionPublishFailureReason = z.infer<
+  typeof firstContentVersionPublishFailureReasonSchema
+>;
+
+export const firstContentVersionPublishResultSchema = z.discriminatedUnion("outcome", [
+  z
+    .object({
+      outcome: z.literal("published"),
+      version: authoritativeContentVersionSchema,
+      head: authoritativeContentHeadSchema
+    })
+    .strict()
+    .superRefine((value, context) => {
+      if (
+        value.version.scope.workspaceId !== value.head.scope.workspaceId ||
+        value.version.scope.projectId !== value.head.scope.projectId ||
+        value.version.scope.canvasId !== value.head.scope.canvasId ||
+        value.version.completed.versionId !== value.head.content.versionId
+      ) {
+        context.addIssue({ code: "custom", message: "published_head_must_bind_completed_version" });
+      }
+    }),
+  z
+    .object({
+      outcome: z.literal("rejected"),
+      reason: firstContentVersionPublishFailureReasonSchema,
+      retryable: z.boolean(),
+      detail: z.string().trim().min(1).max(CONTENT_VERSION_MAX_REASON_LENGTH),
+      /** Failed first publication must never advertise a half-authoritative head. */
+      head: z.null()
+    })
+    .strict()
+]);
+export type FirstContentVersionPublishResult = z.infer<typeof firstContentVersionPublishResultSchema>;
+
+export const contentVersionFetchRequestSchema = z
+  .object({
+    projectId: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+    canvasId: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+    content: completedContentVersionRefSchema
+  })
+  .strict();
+export type ContentVersionFetchRequest = z.infer<typeof contentVersionFetchRequestSchema>;
+
+export const authorizedContentVersionFetchSchema = z
+  .object({
+    request: contentVersionFetchRequestSchema,
+    scope: canvasScopeRefSchema,
+    deviceSessionId: deviceSessionIdSchema,
+    aclRevision: aclRevisionSchema
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (
+      value.request.projectId !== value.scope.projectId ||
+      value.request.canvasId !== value.scope.canvasId
+    ) {
+      context.addIssue({ code: "custom", message: "authorized_content_version_fetch_scope_mismatch" });
+    }
+  });
+export type AuthorizedContentVersionFetch = z.infer<typeof authorizedContentVersionFetchSchema>;
+
+export const contentVersionMaterializeRequestSchema = z
+  .object({
+    content: completedContentVersionRefSchema,
+    expectedCurrentVersionId: contentVersionIdSchema.nullable()
+  })
+  .strict();
+export type ContentVersionMaterializeRequest = z.infer<typeof contentVersionMaterializeRequestSchema>;
+
+export const contentVersionMaterializeOutcomeSchema = z.enum([
+  "materialized",
+  "already_materialized",
+  "retry_required",
+  "rejected"
+]);
+export type ContentVersionMaterializeOutcome = z.infer<typeof contentVersionMaterializeOutcomeSchema>;
+
+export const contentVersionMaterializeResultSchema = z
+  .object({
+    outcome: contentVersionMaterializeOutcomeSchema,
+    content: completedContentVersionRefSchema,
+    retryable: z.boolean(),
+    reason: z.string().trim().min(1).max(CONTENT_VERSION_MAX_REASON_LENGTH).nullable()
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const successful = value.outcome === "materialized" || value.outcome === "already_materialized";
+    if (successful && (value.retryable || value.reason !== null)) {
+      context.addIssue({ code: "custom", message: "successful_materialization_cannot_have_retry_reason" });
+    }
+    if (!successful && value.reason === null) {
+      context.addIssue({ code: "custom", message: "failed_materialization_requires_reason", path: ["reason"] });
+    }
+  });
+export type ContentVersionMaterializeResult = z.infer<typeof contentVersionMaterializeResultSchema>;
+
+export const contentVersionAcknowledgementSchema = z
+  .object({
+    scope: canvasScopeRefSchema,
+    deviceSessionId: deviceSessionIdSchema,
+    content: completedContentVersionRefSchema,
+    acknowledgedAt: timestampSchema
+  })
+  .strict();
+export type ContentVersionAcknowledgement = z.infer<typeof contentVersionAcknowledgementSchema>;
+
+export const contentVersionAcknowledgementRequestSchema = z
+  .object({
+    content: completedContentVersionRefSchema
+  })
+  .strict();
+export type ContentVersionAcknowledgementRequest = z.infer<
+  typeof contentVersionAcknowledgementRequestSchema
+>;
+
+export const authorizedContentVersionAcknowledgementSchema = z
+  .object({
+    request: contentVersionAcknowledgementRequestSchema,
+    acknowledgement: contentVersionAcknowledgementSchema
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (
+      value.request.content.versionId !== value.acknowledgement.content.versionId ||
+      value.request.content.canonicalDigest !== value.acknowledgement.content.canonicalDigest
+    ) {
+      context.addIssue({ code: "custom", message: "content_version_acknowledgement_mismatch" });
+    }
+  });
+export type AuthorizedContentVersionAcknowledgement = z.infer<
+  typeof authorizedContentVersionAcknowledgementSchema
+>;
+
+export const contentReplicaStatusSchema = z.enum([
+  "in_sync",
+  "behind",
+  "diverged",
+  "snapshot_required"
+]);
+export type ContentReplicaStatus = z.infer<typeof contentReplicaStatusSchema>;
+
+/** Renderer-safe read model: only immutable IDs/digests and redacted action state. */
+export const contentVersionDesktopReadModelSchema = z
+  .object({
+    authoritativeHead: authoritativeContentHeadSchema.nullable(),
+    localReplica: completedContentVersionRefSchema.nullable(),
+    replicaStatus: contentReplicaStatusSchema,
+    lastAcknowledgement: contentVersionAcknowledgementSchema.nullable(),
+    canPublishInitial: z.boolean(),
+    canMaterialize: z.boolean(),
+    canRecover: z.boolean(),
+    offlineWriteReason: z.string().trim().min(1).max(CONTENT_VERSION_MAX_REASON_LENGTH).nullable()
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.replicaStatus === "in_sync") {
+      if (value.authoritativeHead === null || value.localReplica === null) {
+        context.addIssue({ code: "custom", message: "in_sync_requires_head_and_replica" });
+      } else if (value.authoritativeHead.content.versionId !== value.localReplica.versionId) {
+        context.addIssue({ code: "custom", message: "in_sync_requires_matching_version" });
+      }
+    }
+    if (value.replicaStatus === "snapshot_required" && !value.canRecover) {
+      context.addIssue({ code: "custom", message: "snapshot_required_must_allow_recovery", path: ["canRecover"] });
+    }
+    if (value.offlineWriteReason !== null && value.canPublishInitial) {
+      context.addIssue({ code: "custom", message: "offline_write_block_cannot_allow_initial_publish" });
+    }
+  });
+export type ContentVersionDesktopReadModel = z.infer<typeof contentVersionDesktopReadModelSchema>;
