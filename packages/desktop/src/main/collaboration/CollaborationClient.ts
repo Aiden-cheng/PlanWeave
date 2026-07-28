@@ -1,4 +1,6 @@
 import {
+  accessMutationRequestSchema,
+  accessMutationResultSchema,
   activityListPageSchema,
   activityListWireQuerySchema,
   assignmentDisplayProjectionSchema,
@@ -54,6 +56,7 @@ import {
   contentVersionAcknowledgementSchema,
   contentVersionAuthorityDiscoveryResultSchema,
   firstContentVersionPublishResultSchema,
+  currentCanvasAccessViewSchema,
   type ActivityListPage,
   type AssignmentDisplayProjection,
   type AssignmentListPage,
@@ -107,7 +110,9 @@ import {
   type CompletedContentVersionRef,
   type ContentVersionAcknowledgement,
   type ContentVersionAuthorityDiscoveryResult,
-  type FirstContentVersionPublishResult
+  type FirstContentVersionPublishResult,
+  type AccessMutationResult,
+  type CurrentCanvasAccessView
 } from "@planweave-ai/collaboration-contracts";
 import type { z, ZodType } from "zod";
 import {
@@ -846,6 +851,29 @@ export class CollaborationClient {
   ): Promise<ReturnType<CanvasCommandClient["reconnect"]>> {
     this.ensureOpen();
     return this.canvasCommands.reconnect(input, signal, hooks);
+  }
+
+  /** Read the authoritative access view for one canvas through the device-authenticated transport. */
+  async getCurrentCanvasAccess(canvasId: string): Promise<CurrentCanvasAccessView> {
+    return this.transport.json(
+      "GET",
+      `/api/v1/projects/${encodeURIComponent(this.projectId)}/canvases/${encodeURIComponent(canvasId)}/access`,
+      currentCanvasAccessViewSchema
+    );
+  }
+
+  /** Apply one CAS-protected ACL mutation against the current-canvas endpoint. */
+  async mutateCurrentCanvasAccess(input: {
+    canvasId: string;
+    request: unknown;
+  }): Promise<AccessMutationResult> {
+    const body = accessMutationRequestSchema.parse(input.request);
+    return this.transport.json(
+      "POST",
+      `/api/v1/projects/${encodeURIComponent(this.projectId)}/canvases/${encodeURIComponent(input.canvasId)}/access`,
+      accessMutationResultSchema,
+      { body, acceptedStatus: [403, 409] }
+    );
   }
 
   async discoverContentAuthority(input: {

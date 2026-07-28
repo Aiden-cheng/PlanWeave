@@ -188,6 +188,12 @@ export function registerCollaborationHandlers(
   ipcMain.handle(collaborationInvokeChannels.materializeCollaborationContentHead, () =>
     active.materializeContentHead()
   );
+  ipcMain.handle(collaborationInvokeChannels.getCurrentCanvasAccess, (_event, input: unknown) =>
+    active.getCurrentCanvasAccess(input)
+  );
+  ipcMain.handle(collaborationInvokeChannels.mutateCurrentCanvasAccess, (_event, input: unknown) =>
+    active.mutateCurrentCanvasAccess(input)
+  );
   ipcMain.handle(collaborationInvokeChannels.listCollaborationMembers, (_event, input: unknown) =>
     active.listMembers(input)
   );

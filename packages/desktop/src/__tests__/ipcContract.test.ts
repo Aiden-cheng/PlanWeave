@@ -175,6 +175,12 @@ describe("desktop IPC contract", () => {
     expect(collaborationInvokeChannels.retryWorkspaceConnection).toBe(
       "planweave-collaboration:retryWorkspaceConnection"
     );
+    expect(collaborationInvokeChannels.getCurrentCanvasAccess).toBe(
+      "planweave-collaboration:getCurrentCanvasAccess"
+    );
+    expect(collaborationInvokeChannels.mutateCurrentCanvasAccess).toBe(
+      "planweave-collaboration:mutateCurrentCanvasAccess"
+    );
     expect(collaborationInvokeChannels.listCollaborationMembers).toBe(
       "planweave-collaboration:listMembers"
     );

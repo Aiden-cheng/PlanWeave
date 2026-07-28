@@ -11,6 +11,7 @@ import {
   exampleObserverEvent,
   exampleObserverWelcome,
   exampleSecretsForRedaction,
+  accessCapabilityFlags,
   HUMAN_OBSERVER_PROTOCOL_VERSION
 } from "@planweave-ai/collaboration-contracts";
 import {
@@ -114,6 +115,68 @@ describe("CollaborationClient", () => {
     const client = clientFor(fixture.origin, { token: exampleHumanDeviceToken });
     const page = await client.listMembers({ cursor: 0, limit: 50 });
     expect(page.items[0]?.role).toBe("owner");
+    client.dispose();
+  });
+
+  it("uses device-authenticated current-canvas access transport and preserves CAS conflicts", async () => {
+    const scope = {
+      scopeKind: "canvas" as const,
+      workspaceId: "workspace-demo-001",
+      projectId: "project-demo-001",
+      canvasId: "canvas-demo-001"
+    };
+    const accessView = {
+      scope,
+      projectVisibility: "shared" as const,
+      canvasVisibility: "private" as const,
+      aclRevision: 7,
+      current: {
+        scope,
+        aclRevision: 7,
+        effectiveRole: "owner" as const,
+        roleSource: "scope_owner" as const,
+        capabilities: accessCapabilityFlags("owner"),
+        disabledReason: null
+      },
+      people: [
+        {
+          humanPrincipalId: "human-owner-001",
+          displayName: "Owner",
+          membership: "active" as const,
+          effectiveRole: "owner" as const,
+          capabilities: accessCapabilityFlags("owner"),
+          disabledReason: null
+        }
+      ]
+    };
+    let postBody: unknown = null;
+    const fixture = await listen(async (req, res) => {
+      expect(req.headers.authorization).toBe(`Bearer ${exampleHumanDeviceToken}`);
+      expect(req.url).toBe("/api/v1/projects/project-demo-001/canvases/canvas-demo-001/access");
+      if (req.method === "GET") {
+        json(res, 200, accessView);
+        return;
+      }
+      postBody = JSON.parse((await readBody(req)).toString("utf8"));
+      json(res, 409, { status: "conflict", reason: "acl_revision_conflict", aclRevision: 8 });
+    });
+    cleanups.push(fixture.close);
+    const client = clientFor(fixture.origin, { token: exampleHumanDeviceToken });
+
+    await expect(client.getCurrentCanvasAccess(scope.canvasId)).resolves.toEqual(accessView);
+    await expect(
+      client.mutateCurrentCanvasAccess({
+        canvasId: scope.canvasId,
+        request: {
+          operation: "grant",
+          scope,
+          expectedAclRevision: 7,
+          humanPrincipalId: "human-editor-001",
+          role: "editor"
+        }
+      })
+    ).resolves.toEqual({ status: "conflict", reason: "acl_revision_conflict", aclRevision: 8 });
+    expect(postBody).toMatchObject({ operation: "grant", expectedAclRevision: 7, scope });
     client.dispose();
   });
 

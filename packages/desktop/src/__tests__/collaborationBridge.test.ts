@@ -266,6 +266,15 @@ describe("CollaborationService IPC trust boundary", () => {
     expect(() =>
       assertNoSmuggledCollaborationSecrets({ authorization: "Bearer x" }, "test")
     ).toThrow(/authorization/);
+    expect(() => assertNoSmuggledCollaborationSecrets({ url: "https://other.example/" }, "test")).toThrow(
+      /url/
+    );
+    expect(() => assertNoSmuggledCollaborationSecrets({ command: "server --unsafe" }, "test")).toThrow(
+      /command/
+    );
+    expect(() => assertNoSmuggledCollaborationSecrets({ path: "/tmp/project" }, "test")).toThrow(
+      /path/
+    );
   });
 
   it("rejects malformed profile payloads and invalid tokens", async () => {

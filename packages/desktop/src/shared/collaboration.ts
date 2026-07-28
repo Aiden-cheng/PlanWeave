@@ -5,6 +5,7 @@ import {
   canvasCommandOperationIdSchema,
   canvasPresencePointerSchema,
   canvasPresenceSelectionIdsSchema,
+  accessMutationRequestSchema,
   collaborationConnectionProfileSchema,
   collaborationServerOriginSchema,
   commentContentSha256Schema,
@@ -64,7 +65,9 @@ import {
   type ExecutionTargetReadModel,
   type WorkAuthorityProjection,
   type WorkspacePickerPage,
-  type ContentVersionDesktopReadModel
+  type ContentVersionDesktopReadModel,
+  type CurrentCanvasAccessView,
+  type AccessMutationResult
 } from "@planweave-ai/collaboration-contracts";
 import type {
   CollaborationActivityListQueryInput,
@@ -170,7 +173,12 @@ const forbiddenSecretKeys = [
   "hostCredentialToken",
   "hostEnrollmentCode",
   "enrollmentCode",
-  "projectRoot"
+  "projectRoot",
+  "localRoot",
+  "url",
+  "headers",
+  "path",
+  "command"
 ] as const;
 
 /**
@@ -459,6 +467,27 @@ export type CollaborationCanvasReconnectResult = {
 export type CollaborationContentAuthorityCanvasInput = { canvasId: string };
 export type CollaborationContentAuthorityView = ContentVersionDesktopReadModel;
 
+/** Renderer supplies a selected opaque canvas id; main derives and verifies the full active scope. */
+export const collaborationCurrentCanvasAccessInputSchema = z
+  .object({ canvasId: z.string().trim().min(1).max(128) })
+  .strict();
+export type CollaborationCurrentCanvasAccessInput = z.infer<
+  typeof collaborationCurrentCanvasAccessInputSchema
+>;
+
+/** ACL mutations carry an opaque route canvas plus B-001's scope + CAS request. */
+export const collaborationAccessMutationInputSchema = z
+  .object({
+    canvasId: z.string().trim().min(1).max(128),
+    request: accessMutationRequestSchema
+  })
+  .strict();
+export type CollaborationAccessMutationInput = z.infer<
+  typeof collaborationAccessMutationInputSchema
+>;
+export type CollaborationCurrentCanvasAccessView = CurrentCanvasAccessView;
+export type CollaborationAccessMutationResult = AccessMutationResult;
+
 export const collaborationInvokeChannels = {
   getCollaborationStatus: "planweave-collaboration:getStatus",
   upsertCollaborationProfile: "planweave-collaboration:upsertProfile",
@@ -490,6 +519,8 @@ export const collaborationInvokeChannels = {
   refreshCollaborationContentAuthority: "planweave-collaboration:refreshContentAuthority",
   publishCollaborationInitialContent: "planweave-collaboration:publishInitialContent",
   materializeCollaborationContentHead: "planweave-collaboration:materializeContentHead",
+  getCurrentCanvasAccess: "planweave-collaboration:getCurrentCanvasAccess",
+  mutateCurrentCanvasAccess: "planweave-collaboration:mutateCurrentCanvasAccess",
   listCollaborationMembers: "planweave-collaboration:listMembers",
   listCollaborationDevices: "planweave-collaboration:listDevices",
   listCollaborationInvitations: "planweave-collaboration:listInvitations",
@@ -593,6 +624,12 @@ export type PlanWeaveCollaborationApi = {
   refreshCollaborationContentAuthority: () => Promise<CollaborationContentAuthorityView>;
   publishCollaborationInitialContent: () => Promise<CollaborationContentAuthorityView>;
   materializeCollaborationContentHead: () => Promise<CollaborationContentAuthorityView>;
+  getCurrentCanvasAccess: (
+    input: CollaborationCurrentCanvasAccessInput
+  ) => Promise<CollaborationCurrentCanvasAccessView>;
+  mutateCurrentCanvasAccess: (
+    input: CollaborationAccessMutationInput
+  ) => Promise<CollaborationAccessMutationResult>;
   listCollaborationMembers: (input?: CollaborationPageQueryInput) => Promise<HumanMemberPage>;
   listCollaborationDevices: (input?: CollaborationDeviceListQueryInput) => Promise<HumanDevicePage>;
   listCollaborationInvitations: (

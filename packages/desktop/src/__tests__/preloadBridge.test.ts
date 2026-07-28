@@ -815,6 +815,21 @@ describe("preload bridge invocation", () => {
     await api.connectWorkspaceConnection();
     await api.disconnectWorkspaceConnection();
     await api.retryWorkspaceConnection();
+    await api.getCurrentCanvasAccess({ canvasId: "default" });
+    await api.mutateCurrentCanvasAccess({
+      canvasId: "default",
+      request: {
+        operation: "visibility",
+        scope: {
+          scopeKind: "canvas",
+          workspaceId: "workspace-1",
+          projectId: "project-1",
+          canvasId: "default"
+        },
+        expectedAclRevision: 1,
+        visibility: "shared"
+      }
+    });
     await api.startCollaborationPresence({ canvasId: "default" });
     await api.publishCollaborationPresence({ pointer: { x: 1, y: 2 }, selectionIds: [] });
     await api.stopCollaborationPresence();
@@ -865,6 +880,14 @@ describe("preload bridge invocation", () => {
     );
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       collaborationInvokeChannels.retryWorkspaceConnection
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.getCurrentCanvasAccess,
+      { canvasId: "default" }
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.mutateCurrentCanvasAccess,
+      expect.objectContaining({ canvasId: "default", request: expect.objectContaining({ operation: "visibility" }) })
     );
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       collaborationInvokeChannels.listCollaborationMembers,

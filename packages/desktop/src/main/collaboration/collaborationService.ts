@@ -34,7 +34,11 @@ import {
   type WorkAuthorityProjection,
   type WorkItemRef,
   type ActiveWorkspaceConnectionView,
-  type WorkspacePickerPage
+  type WorkspacePickerPage,
+  type AccessScope,
+  type AccessMutationRequest,
+  type AccessMutationResult,
+  type CurrentCanvasAccessView
 } from "@planweave-ai/collaboration-contracts";
 import {
   assertNoSmuggledCollaborationSecrets,
@@ -48,6 +52,8 @@ import {
   collaborationInvitationIdInputSchema,
   collaborationProfileIdInputSchema,
   collaborationUpsertProfileInputSchema,
+  collaborationCurrentCanvasAccessInputSchema,
+  collaborationAccessMutationInputSchema,
   type CollaborationAuthHandoffView,
   type CollaborationInvitationCreateView,
   type CollaborationObserverSignal,
@@ -715,6 +721,99 @@ export class CollaborationService {
       await this.ensureWorkspaceHydrated();
       return this.workspaceConnectionFacade.retryWorkspaceConnection();
     });
+  }
+
+  async getCurrentCanvasAccess(input: unknown): Promise<CurrentCanvasAccessView> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      assertNoSmuggledCollaborationSecrets(input, "getCurrentCanvasAccess");
+      const parsed = collaborationCurrentCanvasAccessInputSchema.parse(input);
+      const scope = await this.activeCanvasAccessScope(parsed.canvasId);
+      const view = await this.withActiveClient((client) => client.getCurrentCanvasAccess(scope.canvasId));
+      this.assertCurrentCanvasAccessScope(view, scope);
+      return view;
+    });
+  }
+
+  async mutateCurrentCanvasAccess(input: unknown): Promise<AccessMutationResult> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      assertNoSmuggledCollaborationSecrets(input, "mutateCurrentCanvasAccess");
+      const mutation = collaborationAccessMutationInputSchema.parse(input);
+      const scope = await this.activeCanvasAccessScope(mutation.canvasId);
+      const request = mutation.request;
+      if (
+        request.scope.workspaceId !== scope.workspaceId ||
+        request.scope.projectId !== scope.projectId ||
+        (request.scope.scopeKind === "canvas" && request.scope.canvasId !== scope.canvasId)
+      ) {
+        throw new CollaborationClientError({
+          kind: "forbidden",
+          code: "collaboration_access_scope_mismatch",
+          message: "The requested access scope does not match the active Workspace canvas."
+        });
+      }
+      const canonicalScope: AccessScope =
+        request.scope.scopeKind === "canvas"
+          ? scope
+          : {
+              scopeKind: "project",
+              workspaceId: scope.workspaceId,
+              projectId: scope.projectId,
+              canvasId: null
+            };
+      const scopedRequest: AccessMutationRequest = { ...request, scope: canonicalScope };
+      return this.withActiveClient((client) =>
+        client.mutateCurrentCanvasAccess({ canvasId: scope.canvasId, request: scopedRequest })
+      );
+    });
+  }
+
+  private async activeCanvasAccessScope(canvasId: string): Promise<Extract<AccessScope, { scopeKind: "canvas" }>> {
+    await this.ensureWorkspaceHydrated();
+    const connection = await this.workspaceConnection.buildView();
+    if (
+      connection.status !== "connected" ||
+      !connection.workspaceId ||
+      !connection.profile ||
+      !this.client
+    ) {
+      throw new CollaborationClientError({
+        kind: "offline",
+        code: "collaboration_workspace_connection_inactive",
+        message: "Connect the active Workspace before managing canvas access."
+      });
+    }
+    if (connection.profile.serverBaseUrl !== this.client.connectionProfile.serverBaseUrl) {
+      throw new CollaborationClientError({
+        kind: "forbidden",
+        code: "collaboration_workspace_connection_mismatch",
+        message: "The active Workspace connection does not authorize the active collaboration project."
+      });
+    }
+    return {
+      scopeKind: "canvas",
+      workspaceId: connection.workspaceId,
+      projectId: this.client.projectId,
+      canvasId
+    };
+  }
+
+  private assertCurrentCanvasAccessScope(
+    view: CurrentCanvasAccessView,
+    scope: Extract<AccessScope, { scopeKind: "canvas" }>
+  ): void {
+    if (
+      view.scope.workspaceId !== scope.workspaceId ||
+      view.scope.projectId !== scope.projectId ||
+      view.scope.canvasId !== scope.canvasId
+    ) {
+      throw new CollaborationClientError({
+        kind: "forbidden",
+        code: "collaboration_access_scope_mismatch",
+        message: "The Server returned access data for a different Workspace canvas."
+      });
+    }
   }
 
   /** Bind ephemeral presence to the active profile/project and selected canvas. */
