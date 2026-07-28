@@ -3,7 +3,20 @@ import {
   humanDeviceTokenSchema,
   type HumanAuthContext
 } from "./schemas.js";
+import type { DeviceSessionId, WorkspaceId } from "@planweave-ai/collaboration-contracts";
 import type { HumanIdentityRepository } from "./repository.js";
+import type { WorkspaceIdentityRepository } from "./workspaceRepository.js";
+
+export type WorkspaceDeviceAuthContext = {
+  kind: "workspace_device";
+  workspaceId: WorkspaceId;
+  deviceSessionId: DeviceSessionId;
+  humanPrincipalId: string;
+  displayName: string;
+  projectId: string;
+};
+
+export type CollaborationAuthContext = HumanAuthContext | WorkspaceDeviceAuthContext;
 
 /**
  * Human-specific authentication adapter.
@@ -58,6 +71,48 @@ export function authenticateHumanForProject(
     role: authenticated.membership.role,
     membershipId: authenticated.membership.membershipId
   });
+}
+
+/**
+ * Authenticate a collaboration request through either the legacy project-device
+ * credential or a Workspace-scoped setup-code device session. Workspace sessions
+ * are bound to exactly one mapped project workspace before downstream ACL checks.
+ */
+export function authenticateCollaborationForProject(
+  repository: HumanIdentityRepository,
+  workspaceIdentity: WorkspaceIdentityRepository,
+  authorization: string | string[] | undefined,
+  projectId: string
+): CollaborationAuthContext | undefined {
+  const token = parseHumanDeviceBearer(authorization);
+  if (!token) return undefined;
+  const workspaceSession = workspaceIdentity.authenticateWorkspaceDeviceSession(token);
+  const legacyDevice = repository.authenticateDevice(token);
+  if (workspaceSession && legacyDevice) {
+    const legacyWorkspace = workspaceIdentity.workspaceForLegacyProject(
+      legacyDevice.device.mintedForProjectId
+    );
+    if (
+      legacyDevice.principal.humanPrincipalId !== workspaceSession.humanPrincipalId ||
+      legacyWorkspace !== workspaceSession.workspaceId
+    ) {
+      return undefined;
+    }
+  }
+  const legacy = authenticateHumanForProject(repository, authorization, projectId);
+  if (legacy) return legacy;
+  if (!workspaceSession) return undefined;
+  if (workspaceIdentity.workspaceForLegacyProject(projectId) !== workspaceSession.workspaceId) {
+    return undefined;
+  }
+  return {
+    kind: "workspace_device",
+    workspaceId: workspaceSession.workspaceId,
+    deviceSessionId: workspaceSession.deviceSessionId,
+    humanPrincipalId: workspaceSession.humanPrincipalId,
+    displayName: workspaceSession.displayName,
+    projectId
+  };
 }
 
 /**

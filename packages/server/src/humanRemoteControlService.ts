@@ -10,7 +10,7 @@ import {
   remoteInteractionViewSchema,
   remoteOperationObservationSchema
 } from "@planweave-ai/collaboration-contracts";
-import type { HumanAuthContext } from "./identity/index.js";
+import type { CollaborationAuthContext } from "./identity/index.js";
 import { authorizeHumanAction } from "./identity/policy.js";
 import { RemoteAcpEventRepository } from "./remoteAcpEvents.js";
 import { RemoteBlockCoordinator } from "./remoteBlockCoordinator.js";
@@ -32,15 +32,21 @@ export type HumanRemoteControlServiceOptions = {
   events: RemoteAcpEventRepository;
   interactions: RemoteInteractionService;
   authorizeCanvas?: (
-    context: HumanAuthContext,
+    context: CollaborationAuthContext,
     scope: { projectId: string; canvasId: string }
   ) => void;
 };
 
+function isWorkspaceDeviceContext(
+  context: CollaborationAuthContext
+): context is Extract<CollaborationAuthContext, { kind: "workspace_device" }> {
+  return "kind" in context && context.kind === "workspace_device";
+}
+
 export class HumanRemoteControlService {
   constructor(private readonly options: HumanRemoteControlServiceOptions) {}
 
-  async dispatch(context: HumanAuthContext, projectId: string, rawRequest: unknown) {
+  async dispatch(context: CollaborationAuthContext, projectId: string, rawRequest: unknown) {
     this.authorize(context, projectId);
     const request = remoteDispatchIntentSchema.parse(rawRequest);
     if (request.projectId !== projectId)
@@ -62,7 +68,11 @@ export class HumanRemoteControlService {
     return this.observeOperation(context, projectId, outcome.operation.id);
   }
 
-  async observeOperation(context: HumanAuthContext, projectId: string, operationId: string) {
+  async observeOperation(
+    context: CollaborationAuthContext,
+    projectId: string,
+    operationId: string
+  ) {
     const operation = this.operationFor(context, projectId, operationId);
     const runtime = await this.options.coordinator.query(operation.id);
     const dispatch = this.options.dispatches.get(operation.dispatchId);
@@ -122,7 +132,7 @@ export class HumanRemoteControlService {
   }
 
   async executeAction(
-    context: HumanAuthContext,
+    context: CollaborationAuthContext,
     projectId: string,
     operationId: string,
     rawAction: unknown
@@ -144,7 +154,7 @@ export class HumanRemoteControlService {
   }
 
   replayEvents(
-    context: HumanAuthContext,
+    context: CollaborationAuthContext,
     projectId: string,
     operationId: string,
     rawQuery: unknown
@@ -157,7 +167,7 @@ export class HumanRemoteControlService {
   }
 
   listPendingInteractions(
-    context: HumanAuthContext,
+    context: CollaborationAuthContext,
     projectId: string,
     operationId: string,
     rawQuery: unknown
@@ -176,7 +186,7 @@ export class HumanRemoteControlService {
   }
 
   settleInteraction(
-    context: HumanAuthContext,
+    context: CollaborationAuthContext,
     projectId: string,
     operationId: string,
     rawSettlement: unknown
@@ -199,7 +209,11 @@ export class HumanRemoteControlService {
     );
   }
 
-  private authorize(context: HumanAuthContext, projectId: string): void {
+  private authorize(context: CollaborationAuthContext, projectId: string): void {
+    if (context.projectId !== projectId) {
+      throw new HumanRemoteControlError("human_remote_project_mismatch");
+    }
+    if (isWorkspaceDeviceContext(context)) return;
     const decision = authorizeHumanAction({
       action: "remote_run_control",
       subject: { kind: "human", context },
@@ -209,7 +223,7 @@ export class HumanRemoteControlService {
   }
 
   private operationFor(
-    context: HumanAuthContext,
+    context: CollaborationAuthContext,
     projectId: string,
     operationId: string
   ): RemoteOperation {

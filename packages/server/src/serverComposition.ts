@@ -661,7 +661,6 @@ export async function createDistributedServerComposition(
       const service = new AuthorityService({
         repository: authorityRepository,
         packagePort: acquired.port,
-        identity: humanIdentity,
         access: initializedProjectAccess,
         workspaceIdentity,
         hosts: coordination.hosts,
@@ -714,6 +713,7 @@ export async function createDistributedServerComposition(
     canvasPresenceWebSockets = attachCanvasPresenceWebSocketServer({
       upgradeRouter,
       repository: humanIdentity,
+      workspaceIdentity,
       projectAuthority: runtimeRegistry,
       maxPayloadBytes: config.limits.maxWebSocketPayloadBytes,
       shutdownTimeoutMs: config.limits.shutdownTimeoutMs,
@@ -733,6 +733,7 @@ export async function createDistributedServerComposition(
       upgradeRouter,
       service: canvasCommandService,
       repository: humanIdentity,
+      workspaceIdentity,
       projectAuthority: runtimeRegistry,
       maxPayloadBytes: config.limits.maxWebSocketPayloadBytes,
       shutdownTimeoutMs: config.limits.shutdownTimeoutMs,
@@ -761,7 +762,10 @@ export async function createDistributedServerComposition(
       events: coordination.acpEvents,
       interactions: coordination.interactions,
       authorizeCanvas: (context, scope) => {
-        const workspaceId = workspaceIdentity.workspaceForLegacyProject(scope.projectId);
+        const workspaceId =
+          "kind" in context && context.kind === "workspace_device"
+            ? context.workspaceId
+            : workspaceIdentity.workspaceForLegacyProject(scope.projectId);
         if (!workspaceId) throw new Error("authority_workspace_mismatch");
         assertHumanScopeAuthorized({
           actor: context,
@@ -801,6 +805,7 @@ export async function createDistributedServerComposition(
           await handleHumanRemoteHttpRequest(request, response, {
             service: humanRemoteControl,
             repository: humanIdentity,
+            workspaceIdentity,
             projectAuthority: runtimeRegistry,
             readiness: () => readiness.readiness(),
             allowInsecureDevelopment: config.allowInsecureDevelopment
@@ -813,6 +818,7 @@ export async function createDistributedServerComposition(
             resolveService: (projectId) => assignmentServices.get(projectId),
             acquireAuthorityService,
             repository: humanIdentity,
+            workspaceIdentity,
             projectAuthority: runtimeRegistry,
             allowInsecureDevelopment: config.allowInsecureDevelopment,
             clock
@@ -824,6 +830,7 @@ export async function createDistributedServerComposition(
           await handleCanvasCommandHttpRequest(request, response, {
             service: canvasCommandService,
             repository: humanIdentity,
+            workspaceIdentity,
             projectAuthority: runtimeRegistry,
             allowInsecureDevelopment: config.allowInsecureDevelopment,
             clock

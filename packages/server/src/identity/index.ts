@@ -116,6 +116,9 @@ export {
 export {
   authenticateHumanDevice,
   authenticateHumanForProject,
+  authenticateCollaborationForProject,
+  type CollaborationAuthContext,
+  type WorkspaceDeviceAuthContext,
   parseHumanDeviceBearer
 } from "./auth.js";
 

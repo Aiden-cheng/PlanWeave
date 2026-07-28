@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 import {
   agentHostIdentityViewSchema,
+  deviceSessionIdSchema,
+  humanDisplayNameSchema,
   humanDeviceTokenSchema,
+  humanPrincipalIdSchema,
   identityMigrationStateSchema,
   workspaceIdentityViewSchema,
   workspaceIdSchema,
@@ -9,6 +12,8 @@ import {
   workspaceMembershipViewSchema,
   workspacePickerItemSchema,
   type AgentHostIdentityView,
+  type DeviceSessionId,
+  type WorkspaceId,
   type WorkspaceIdentityView,
   type WorkspacePickerItem
 } from "@planweave-ai/collaboration-contracts";
@@ -246,27 +251,57 @@ export class WorkspaceIdentityRepository {
   }
 
   /** Authenticate only the Workspace-scoped device sessions minted by setup-code redemption. */
-  authenticateWorkspaceDevice(deviceToken: string):
-    | { humanPrincipalId: string; displayName: string }
+  authenticateWorkspaceDeviceSession(deviceToken: string):
+    | {
+        workspaceId: WorkspaceId;
+        deviceSessionId: DeviceSessionId;
+        humanPrincipalId: string;
+        displayName: string;
+      }
     | undefined {
     const parsedToken = humanDeviceTokenSchema.safeParse(deviceToken);
     if (!parsedToken.success) return undefined;
     const row = this.database
       .prepare(
-        `SELECT s.human_principal_id,p.display_name
+        `SELECT s.workspace_id,s.device_session_id,s.human_principal_id,p.display_name
          FROM workspace_device_sessions s
+         JOIN workspace_memberships m
+           ON m.workspace_id=s.workspace_id AND m.human_principal_id=s.human_principal_id
          JOIN workspace_principals p
            ON p.workspace_id=s.workspace_id AND p.human_principal_id=s.human_principal_id
          WHERE s.credential_sha256=?
            AND s.revoked_at IS NULL
            AND s.expires_at>?
-           AND p.revoked_at IS NULL`
+           AND p.revoked_at IS NULL
+           AND m.revoked_at IS NULL`
       )
       .get(hashHumanToken(parsedToken.data), nowIso()) as
-      | { human_principal_id: string; display_name: string }
+      | {
+          workspace_id: string;
+          device_session_id: string;
+          human_principal_id: string;
+          display_name: string;
+        }
       | undefined;
     return row
-      ? { humanPrincipalId: String(row.human_principal_id), displayName: String(row.display_name) }
+      ? {
+          workspaceId: workspaceIdSchema.parse(String(row.workspace_id)),
+          deviceSessionId: deviceSessionIdSchema.parse(String(row.device_session_id)),
+          humanPrincipalId: humanPrincipalIdSchema.parse(String(row.human_principal_id)),
+          displayName: humanDisplayNameSchema.parse(String(row.display_name))
+        }
+      : undefined;
+  }
+
+  authenticateWorkspaceDevice(deviceToken: string):
+    | { humanPrincipalId: string; displayName: string }
+    | undefined {
+    const authenticated = this.authenticateWorkspaceDeviceSession(deviceToken);
+    return authenticated
+      ? {
+          humanPrincipalId: authenticated.humanPrincipalId,
+          displayName: authenticated.displayName
+        }
       : undefined;
   }
 

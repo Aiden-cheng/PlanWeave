@@ -9,7 +9,7 @@ import {
   type ReviewAssignmentReadModel,
   type WorkAuthorityProjection
 } from "@planweave-ai/collaboration-contracts";
-import type { HumanAuthContext, HumanIdentityRepository } from "../identity/index.js";
+import type { CollaborationAuthContext } from "../identity/index.js";
 import type { ProjectAccessRepository } from "../projectAccessRepository.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import type { AgentHost, AgentHostRepository } from "../hosts.js";
@@ -31,7 +31,7 @@ import {
 import type { WorkItemPackagePort } from "./workItemFacts.js";
 import { workItemRefSchema } from "./schemas.js";
 
-function actorOf(context: HumanAuthContext): AuthorityActor {
+function actorOf(context: CollaborationAuthContext): AuthorityActor {
   return { kind: "human", id: context.humanPrincipalId };
 }
 
@@ -51,7 +51,6 @@ function workItem(scope: AuthorityScope) {
 export type AuthorityServiceOptions = {
   repository: AuthorityRepository;
   packagePort: WorkItemPackagePort;
-  identity: HumanIdentityRepository;
   access: ProjectAccessRepository;
   workspaceIdentity: WorkspaceIdentityRepository;
   hosts: AgentHostRepository;
@@ -84,7 +83,7 @@ export class AuthorityService {
     this.clock = options.clock ?? (() => new Date());
   }
 
-  updateResponsibility(actor: HumanAuthContext, rawIntent: unknown) {
+  updateResponsibility(actor: CollaborationAuthContext, rawIntent: unknown) {
     const intent = responsibilityMutationSchema.parse(rawIntent);
     const scope = authorityScopeSchema.parse(intent.scope);
     this.assertActorScope(actor, scope);
@@ -99,16 +98,16 @@ export class AuthorityService {
     if (intent.principal) {
       assertAssignmentPrincipalActive({
         actor,
-        projectId: scope.projectId,
+        workspaceId: scope.workspaceId,
         humanPrincipalId: intent.principal.humanPrincipalId,
-        identity: this.options.identity
+        workspaceIdentity: this.options.workspaceIdentity
       });
     }
     this.options.repository.applyResponsibility({ mutation: intent, actor: actorOf(actor) });
     return this.getResponsibility(actor, scope)!;
   }
 
-  updateReviewer(actor: HumanAuthContext, rawIntent: unknown) {
+  updateReviewer(actor: CollaborationAuthContext, rawIntent: unknown) {
     const intent = reviewerMutationSchema.parse(rawIntent);
     const scope = authorityScopeSchema.parse(intent.scope);
     this.assertActorScope(actor, scope);
@@ -123,16 +122,16 @@ export class AuthorityService {
     if (intent.principal) {
       assertAssignmentPrincipalActive({
         actor,
-        projectId: scope.projectId,
+        workspaceId: scope.workspaceId,
         humanPrincipalId: intent.principal.humanPrincipalId,
-        identity: this.options.identity
+        workspaceIdentity: this.options.workspaceIdentity
       });
     }
     this.options.repository.applyReviewer({ mutation: intent, actor: actorOf(actor) });
     return this.getReviewer(actor, scope)!;
   }
 
-  updateExecutionTarget(actor: HumanAuthContext, rawIntent: unknown) {
+  updateExecutionTarget(actor: CollaborationAuthContext, rawIntent: unknown) {
     const intent = executionTargetMutationSchema.parse(rawIntent);
     const scope = intent.scope;
     this.assertActorScope(actor, scope);
@@ -155,7 +154,7 @@ export class AuthorityService {
   }
 
   getResponsibility(
-    actor: HumanAuthContext,
+    actor: CollaborationAuthContext,
     rawScope: unknown
   ): ResponsibilityReadModel | undefined {
     const scope = this.authorizeRead(actor, rawScope);
@@ -164,33 +163,27 @@ export class AuthorityService {
     const availability =
       record.principal === null
         ? "unassigned"
-        : this.options.identity.getActiveMembership(
-              scope.projectId,
-              record.principal.humanPrincipalId
-            )
+        : this.isActiveWorkspaceMember(scope.workspaceId, record.principal.humanPrincipalId)
           ? "active"
           : "inactive_member";
     return responsibilityReadModelSchema.parse({ ...record, availability });
   }
 
-  getReviewer(actor: HumanAuthContext, rawScope: unknown): ReviewAssignmentReadModel | undefined {
+  getReviewer(actor: CollaborationAuthContext, rawScope: unknown): ReviewAssignmentReadModel | undefined {
     const scope = this.authorizeRead(actor, rawScope);
     const record = this.options.repository.getReviewer(scope);
     if (!record) return undefined;
     const availability =
       record.principal === null
         ? "unassigned"
-        : this.options.identity.getActiveMembership(
-              scope.projectId,
-              record.principal.humanPrincipalId
-            )
+        : this.isActiveWorkspaceMember(scope.workspaceId, record.principal.humanPrincipalId)
           ? "active"
           : "inactive_member";
     return reviewAssignmentReadModelSchema.parse({ ...record, availability });
   }
 
   getExecutionTarget(
-    actor: HumanAuthContext,
+    actor: CollaborationAuthContext,
     rawScope: unknown
   ): ExecutionTargetReadModel | undefined {
     const scope = authorityScopeSchema.parse(rawScope);
@@ -232,7 +225,7 @@ export class AuthorityService {
     });
   }
 
-  currentRevisions(actor: HumanAuthContext, rawScope: unknown) {
+  currentRevisions(actor: CollaborationAuthContext, rawScope: unknown) {
     const scope = this.authorizeRead(actor, rawScope);
     return this.options.repository.currentRevisions(scope);
   }
@@ -242,7 +235,7 @@ export class AuthorityService {
    * Missing durable rows surface as unassigned revision 0 so clients can CAS cleanly.
    * Task scopes never include Host execution targets.
    */
-  getWorkAuthorityProjection(actor: HumanAuthContext, rawScope: unknown): WorkAuthorityProjection {
+  getWorkAuthorityProjection(actor: CollaborationAuthContext, rawScope: unknown): WorkAuthorityProjection {
     const scope = this.authorizeRead(actor, rawScope);
     this.assertPackageScope(scope);
     const evaluatedAt = this.clock().toISOString();
@@ -430,7 +423,7 @@ export class AuthorityService {
     };
   }
 
-  private authorizeRead(actor: HumanAuthContext, rawScope: unknown): AuthorityScope {
+  private authorizeRead(actor: CollaborationAuthContext, rawScope: unknown): AuthorityScope {
     const scope = authorityScopeSchema.parse(rawScope);
     this.assertActorScope(actor, scope);
     assertMigration(this.options.repository, scope);
@@ -443,7 +436,7 @@ export class AuthorityService {
     return scope;
   }
 
-  private assertActorScope(actor: HumanAuthContext, scope: AuthorityScope): void {
+  private assertActorScope(actor: CollaborationAuthContext, scope: AuthorityScope): void {
     if (actor.projectId !== scope.projectId) throw new Error("authority_project_mismatch");
     if (!this.options.workspaceIdentity.workspaceExists(scope.workspaceId))
       throw new Error("authority_workspace_mismatch");
@@ -457,5 +450,14 @@ export class AuthorityService {
       throw new Error("authority_work_item_not_found");
     if (scope.kind === "block" && facts.blockRef !== scope.blockRef)
       throw new Error("authority_work_item_not_found");
+  }
+
+  private isActiveWorkspaceMember(workspaceId: string, humanPrincipalId: string): boolean {
+    return this.options.workspaceIdentity
+      .listMembershipViews(workspaceId)
+      .some(
+        (membership) =>
+          membership.humanPrincipalId === humanPrincipalId && membership.revokedAt === null
+      );
   }
 }

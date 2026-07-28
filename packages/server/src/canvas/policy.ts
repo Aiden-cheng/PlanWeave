@@ -1,7 +1,7 @@
 import type { ActorRef } from "@planweave-ai/collaboration-contracts";
 import type { ProjectAccessRepository } from "../projectAccessRepository.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
-import type { HumanAuthContext } from "../identity/schemas.js";
+import type { CollaborationAuthContext } from "../identity/auth.js";
 
 export type CanvasWriteAuthorization =
   | {
@@ -18,7 +18,7 @@ export type CanvasWriteAuthorization =
  * Presence access is independent and must not be consulted here.
  */
 export function authorizeCanvasWrite(input: {
-  actor: HumanAuthContext;
+  actor: CollaborationAuthContext;
   projectId: string;
   canvasId: string;
   access: ProjectAccessRepository;
@@ -27,7 +27,10 @@ export function authorizeCanvasWrite(input: {
   if (input.actor.projectId !== input.projectId) {
     return { ok: false, code: "cross_scope" };
   }
-  const workspaceId = input.workspaceIdentity.workspaceForLegacyProject(input.projectId);
+  const workspaceId =
+    "kind" in input.actor && input.actor.kind === "workspace_device"
+      ? input.actor.workspaceId
+      : input.workspaceIdentity.workspaceForLegacyProject(input.projectId);
   if (!workspaceId) return { ok: false, code: "unknown_canvas" };
 
   const subject: ActorRef = { kind: "human", id: input.actor.humanPrincipalId };
@@ -81,7 +84,7 @@ export function authorizeCanvasWrite(input: {
 }
 
 export function authorizeCanvasRead(input: {
-  actor: HumanAuthContext;
+  actor: CollaborationAuthContext;
   projectId: string;
   canvasId: string;
   access: ProjectAccessRepository;
@@ -90,7 +93,10 @@ export function authorizeCanvasRead(input: {
   if (input.actor.projectId !== input.projectId) {
     return { ok: false, code: "cross_scope" };
   }
-  const workspaceId = input.workspaceIdentity.workspaceForLegacyProject(input.projectId);
+  const workspaceId =
+    "kind" in input.actor && input.actor.kind === "workspace_device"
+      ? input.actor.workspaceId
+      : input.workspaceIdentity.workspaceForLegacyProject(input.projectId);
   if (!workspaceId) return { ok: false, code: "unknown_canvas" };
   const subject: ActorRef = { kind: "human", id: input.actor.humanPrincipalId };
   const canvasDecision = input.access.decideCanvasAccess({

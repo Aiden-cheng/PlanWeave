@@ -21,7 +21,7 @@ import {
 import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
 import { z } from "zod";
 import {
-  authenticateHumanDevice,
+  parseHumanDeviceBearer,
   humanTransportAllowed,
   type HumanIdentityRepository
 } from "./identity/index.js";
@@ -202,6 +202,9 @@ function safeError(error: unknown): { status: number; code: string } {
     if (error.message === "registry_workspace_scope_forbidden") {
       return { status: 403, code: error.message };
     }
+    if (error.message === "registry_unauthorized") {
+      return { status: 401, code: error.message };
+    }
     if (error.message === "snapshot_stale_acl_revision") {
       return { status: 409, code: error.message };
     }
@@ -219,18 +222,34 @@ function actorForRequest(
   workspaceId: string;
   actor: ActorRef;
 } {
-  const authenticated = authenticateHumanDevice(options.repository, request.headers.authorization);
-  if (!authenticated) throw new Error("registry_unauthorized");
-  const workspaceIds = options.workspaceIdentity.activeWorkspaceIdsForHumanPrincipal(
-    authenticated.humanPrincipalId
-  );
+  const token = parseHumanDeviceBearer(request.headers.authorization);
+  if (!token) throw new Error("registry_unauthorized");
+  const workspaceSession = options.workspaceIdentity.authenticateWorkspaceDeviceSession(token);
+  const authenticated = options.repository.authenticateDevice(token);
+  if (!workspaceSession && !authenticated) throw new Error("registry_unauthorized");
+  if (workspaceSession && authenticated) {
+    const legacyWorkspace = options.workspaceIdentity.workspaceForLegacyProject(
+      authenticated.device.mintedForProjectId
+    );
+    if (
+      legacyWorkspace !== workspaceSession.workspaceId ||
+      authenticated.principal.humanPrincipalId !== workspaceSession.humanPrincipalId
+    ) {
+      throw new Error("registry_workspace_scope_forbidden");
+    }
+  }
+  const humanPrincipalId = workspaceSession?.humanPrincipalId ?? authenticated!.principal.humanPrincipalId;
+  const displayName = workspaceSession?.displayName ?? authenticated!.principal.displayName;
+  const workspaceIds = workspaceSession
+    ? [workspaceSession.workspaceId]
+    : options.workspaceIdentity.activeWorkspaceIdsForHumanPrincipal(humanPrincipalId);
   if (workspaceIds.length !== 1) throw new Error("registry_workspace_scope_forbidden");
   return {
     workspaceId: workspaceIds[0],
     actor: actorRefSchema.parse({
       kind: "human",
-      id: authenticated.humanPrincipalId,
-      displayName: authenticated.displayName
+      id: humanPrincipalId,
+      displayName
     })
   };
 }

@@ -6,11 +6,12 @@ import {
 import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
-  authenticateHumanForProject,
+  authenticateCollaborationForProject,
   humanTransportAllowed,
   type HumanIdentityRepository,
   type HumanProjectAuthority
 } from "../identity/index.js";
+import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { CANVAS_COMMAND_HTTP_BODY_MAX_BYTES, CANVAS_COMMAND_RATE_MAX_REQUESTS, CANVAS_COMMAND_RATE_WINDOW_MS } from "./limits.js";
 import { CanvasCommandService } from "./service.js";
 
@@ -25,6 +26,7 @@ const rateBuckets = new Map<string, RateBucket>();
 export type CanvasCommandHttpOptions = {
   service: CanvasCommandService;
   repository: HumanIdentityRepository;
+  workspaceIdentity: WorkspaceIdentityRepository;
   projectAuthority: HumanProjectAuthority;
   allowInsecureDevelopment?: boolean;
   clock?: () => Date;
@@ -158,8 +160,9 @@ export async function handleCanvasCommandHttpRequest(
     return true;
   }
 
-  const context = authenticateHumanForProject(
+  const context = authenticateCollaborationForProject(
     options.repository,
+    options.workspaceIdentity,
     request.headers.authorization,
     routed.projectId
   );

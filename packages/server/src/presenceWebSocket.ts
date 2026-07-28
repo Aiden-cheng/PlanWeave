@@ -9,11 +9,12 @@ import {
 } from "@planweave-ai/collaboration-contracts";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import {
-  authenticateHumanForProject,
+  authenticateCollaborationForProject,
   humanTransportAllowed,
   type HumanIdentityRepository,
   type HumanProjectAuthority
 } from "./identity/index.js";
+import type { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
 import {
   CanvasPresenceHub,
   CanvasPresenceHubError,
@@ -31,6 +32,7 @@ const PRESENCE_PATH_PATTERN =
 export type CanvasPresenceWebSocketOptions = {
   upgradeRouter: WebSocketUpgradeRouter;
   repository: HumanIdentityRepository;
+  workspaceIdentity: WorkspaceIdentityRepository;
   projectAuthority: CanvasPresenceProjectAuthority;
   maxPayloadBytes: number;
   shutdownTimeoutMs: number;
@@ -137,7 +139,12 @@ export function attachCanvasPresenceWebSocketServer(
     let alive = true;
     const helloTimer = setTimeout(() => socket.close(4002, "presence hello required"), 10_000);
     const stillAuthorized = () =>
-      authenticateHumanForProject(options.repository, authorization, route.projectId) !== undefined;
+      authenticateCollaborationForProject(
+        options.repository,
+        options.workspaceIdentity,
+        authorization,
+        route.projectId
+      ) !== undefined;
 
     const sendError = (code: CanvasPresenceErrorCode) => {
       send(socket, {
@@ -235,8 +242,9 @@ export function attachCanvasPresenceWebSocketServer(
             socket.close(4003, "unknown canvas");
             return;
           }
-          const context = authenticateHumanForProject(
+          const context = authenticateCollaborationForProject(
             options.repository,
+            options.workspaceIdentity,
             authorization,
             route.projectId
           );
@@ -317,7 +325,12 @@ export function attachCanvasPresenceWebSocketServer(
         return;
       }
       if (
-        !authenticateHumanForProject(options.repository, request.headers.authorization, route.projectId)
+        !authenticateCollaborationForProject(
+          options.repository,
+          options.workspaceIdentity,
+          request.headers.authorization,
+          route.projectId
+        )
       ) {
         reject(socket, 401, "Unauthorized");
         return;

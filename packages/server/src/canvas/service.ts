@@ -14,7 +14,7 @@ import {
   type CanvasReconnectRequest,
   type CanvasReconnectResponse
 } from "@planweave-ai/collaboration-contracts";
-import type { HumanAuthContext } from "../identity/schemas.js";
+import type { CollaborationAuthContext } from "../identity/auth.js";
 import type { ProjectAccessRepository } from "../projectAccessRepository.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { authorizeCanvasRead, authorizeCanvasWrite } from "./policy.js";
@@ -39,7 +39,7 @@ export type CanvasCommandServiceOptions = {
   presenceHeadProbe?: (scope: { projectId: string; canvasId: string }) => number | undefined;
 };
 
-function actorFrom(context: HumanAuthContext): ActorRef {
+function actorFrom(context: CollaborationAuthContext): ActorRef {
   return {
     kind: "human",
     id: context.humanPrincipalId,
@@ -95,7 +95,7 @@ export class CanvasCommandService {
   }
 
   async submit(
-    actor: HumanAuthContext,
+    actor: CollaborationAuthContext,
     rawSubmit: unknown
   ): Promise<CanvasCommandOutcome> {
     const parsed = canvasCommandSubmitSchema.safeParse(rawSubmit);
@@ -149,7 +149,7 @@ export class CanvasCommandService {
   }
 
   private async submitAuthorized(
-    actor: HumanAuthContext,
+    actor: CollaborationAuthContext,
     submit: CanvasCommandSubmit,
     auth: Extract<ReturnType<typeof authorizeCanvasWrite>, { ok: true }>
   ): Promise<CanvasCommandOutcome> {
@@ -308,7 +308,7 @@ export class CanvasCommandService {
   }
 
   async reconnect(
-    actor: HumanAuthContext,
+    actor: CollaborationAuthContext,
     rawRequest: unknown
   ): Promise<CanvasReconnectResponse> {
     const parsed = canvasReconnectRequestSchema.safeParse(rawRequest);

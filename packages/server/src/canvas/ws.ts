@@ -10,11 +10,12 @@ import {
 } from "@planweave-ai/collaboration-contracts";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import {
-  authenticateHumanForProject,
+  authenticateCollaborationForProject,
   humanTransportAllowed,
   type HumanIdentityRepository,
   type HumanProjectAuthority
 } from "../identity/index.js";
+import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import type { WebSocketUpgradeRouter } from "../webSocketUpgradeRouter.js";
 import { CanvasCommandService } from "./service.js";
 
@@ -25,6 +26,7 @@ export type CanvasCommandWebSocketOptions = {
   upgradeRouter: WebSocketUpgradeRouter;
   service: CanvasCommandService;
   repository: HumanIdentityRepository;
+  workspaceIdentity: WorkspaceIdentityRepository;
   projectAuthority: HumanProjectAuthority & {
     hasCanvas(projectId: string, canvasId: string): boolean;
   };
@@ -122,8 +124,9 @@ export function attachCanvasCommandWebSocketServer(
       reject(socket, 404, "Not Found");
       return;
     }
-    const context = authenticateHumanForProject(
+    const context = authenticateCollaborationForProject(
       options.repository,
+      options.workspaceIdentity,
       request.headers.authorization,
       route.projectId
     );
@@ -145,8 +148,9 @@ export function attachCanvasCommandWebSocketServer(
       };
 
       const authTimer = setInterval(() => {
-        const still = authenticateHumanForProject(
+        const still = authenticateCollaborationForProject(
           options.repository,
+          options.workspaceIdentity,
           request.headers.authorization,
           route.projectId
         );

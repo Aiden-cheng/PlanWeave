@@ -9,11 +9,13 @@ import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import {
-  authenticateHumanForProject,
+  authenticateCollaborationForProject,
   humanTransportAllowed,
+  type CollaborationAuthContext,
   type HumanIdentityRepository,
   type HumanProjectAuthority
 } from "../identity/index.js";
+import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { WorkAssignmentService, WorkAssignmentServiceError } from "./service.js";
 import { AuthorityService } from "./authorityService.js";
 import { workItemRefSchema } from "./schemas.js";
@@ -49,10 +51,17 @@ export type WorkAssignmentHttpOptions = {
     canvasId: string
   ): { service: AuthorityService; release(): void } | undefined;
   repository: HumanIdentityRepository;
+  workspaceIdentity: WorkspaceIdentityRepository;
   projectAuthority: HumanProjectAuthority;
   allowInsecureDevelopment?: boolean;
   clock?: () => Date;
 };
+
+function isWorkspaceDeviceContext(
+  actor: CollaborationAuthContext
+): actor is Extract<CollaborationAuthContext, { kind: "workspace_device" }> {
+  return "kind" in actor && actor.kind === "workspace_device";
+}
 
 function decodeIdentifier(value: string): string | undefined {
   try {
@@ -263,8 +272,9 @@ export async function handleWorkAssignmentHttpRequest(
       respond(response, 429, { error: "assignment_rate_limited" });
       return true;
     }
-    const actor = authenticateHumanForProject(
+    const actor = authenticateCollaborationForProject(
       options.repository,
+      options.workspaceIdentity,
       request.headers.authorization,
       matched.projectId
     );
@@ -280,11 +290,22 @@ export async function handleWorkAssignmentHttpRequest(
     ) {
       throw new WorkAssignmentServiceError("work_cross_project_forbidden");
     }
+    const legacyActor = isWorkspaceDeviceContext(actor) ? undefined : actor;
+    if (
+      legacyActor === undefined &&
+      (matched.kind === "update" ||
+        matched.kind === "get" ||
+        matched.kind === "list" ||
+        matched.kind === "eligible")
+    ) {
+      throw new WorkAssignmentServiceError("work_auth_forbidden");
+    }
 
     switch (matched.kind) {
       case "update": {
         query(url, []);
         const body = assignmentUpdateWireCommandSchema.parse(await readJson(request));
+        if (!legacyActor) throw new WorkAssignmentServiceError("work_auth_forbidden");
         respond(
           response,
           200,
@@ -295,7 +316,8 @@ export async function handleWorkAssignmentHttpRequest(
       case "get": {
         const parameters = query(url, ["workItem"]);
         const workItem = workItemRefSchema.parse(parseJsonParameter(parameters.workItem));
-        respond(response, 200, service!.getAssignment(actor, matched.projectId, workItem));
+        if (!legacyActor) throw new WorkAssignmentServiceError("work_auth_forbidden");
+        respond(response, 200, service!.getAssignment(legacyActor, matched.projectId, workItem));
         return true;
       }
       case "list": {
@@ -308,7 +330,8 @@ export async function handleWorkAssignmentHttpRequest(
           ...(parameters.cursor === undefined ? {} : { cursor: Number(parameters.cursor) }),
           ...(parameters.limit === undefined ? {} : { limit: Number(parameters.limit) })
         });
-        respond(response, 200, service!.listAssignments(actor, matched.projectId, parsed));
+        if (!legacyActor) throw new WorkAssignmentServiceError("work_auth_forbidden");
+        respond(response, 200, service!.listAssignments(legacyActor, matched.projectId, parsed));
         return true;
       }
       case "eligible": {
@@ -320,7 +343,8 @@ export async function handleWorkAssignmentHttpRequest(
           "hostCursor"
         ]);
         const workItem = workItemRefSchema.parse(parseJsonParameter(parameters.workItem));
-        const result = service!.listEligibleAssignees(actor, matched.projectId, workItem, {
+        if (!legacyActor) throw new WorkAssignmentServiceError("work_auth_forbidden");
+        const result = service!.listEligibleAssignees(legacyActor, matched.projectId, workItem, {
           ...(parameters.humanLimit === undefined
             ? {}
             : { humanLimit: Number(parameters.humanLimit) }),

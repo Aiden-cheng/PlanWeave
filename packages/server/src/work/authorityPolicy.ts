@@ -12,7 +12,7 @@ import type { AgentHost } from "../hosts.js";
 import { isAgentHostOnline } from "../hosts.js";
 import type { ProjectAccessRepository } from "../projectAccessRepository.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
-import type { HumanAuthContext } from "../identity/schemas.js";
+import type { CollaborationAuthContext } from "../identity/auth.js";
 import type { WorkItemPackageFacts } from "./schemas.js";
 
 export type AuthorityPolicyErrorCode =
@@ -43,23 +43,20 @@ export type AuthorityPolicyErrorCode =
   | "host_stale_execution_target_revision";
 
 export function assertHumanScopeAuthorized(input: {
-  actor: HumanAuthContext;
+  actor: CollaborationAuthContext;
   scope: { workspaceId: string; projectId: string; canvasId: string };
   access: ProjectAccessRepository;
   workspaceIdentity: WorkspaceIdentityRepository;
 }): void {
   const { actor, scope } = input;
   if (actor.projectId !== scope.projectId) throw new Error("authority_project_mismatch");
-  const workspace = input.workspaceIdentity.workspaceForLegacyProject(scope.projectId);
+  const workspace =
+    "kind" in actor && actor.kind === "workspace_device"
+      ? actor.workspaceId
+      : input.workspaceIdentity.workspaceForLegacyProject(scope.projectId);
   if (!workspace || workspace !== scope.workspaceId)
     throw new Error("authority_workspace_mismatch");
   const subject = { kind: "human" as const, id: actor.humanPrincipalId };
-  const project = input.access.decideProjectAccess({
-    workspaceId: scope.workspaceId,
-    projectId: scope.projectId,
-    actor: subject
-  });
-  if (project.decision !== "allow") throw new Error("authority_scope_forbidden");
   const canvas = input.access.decideCanvasAccess({
     workspaceId: scope.workspaceId,
     projectId: scope.projectId,
@@ -70,18 +67,25 @@ export function assertHumanScopeAuthorized(input: {
 }
 
 export function assertAssignmentPrincipalActive(input: {
-  actor: HumanAuthContext;
-  projectId: string;
+  actor: CollaborationAuthContext;
+  workspaceId: string;
   humanPrincipalId: string;
-  identity: { getActiveMembership(projectId: string, humanPrincipalId: string): unknown };
+  workspaceIdentity: WorkspaceIdentityRepository;
 }): void {
-  if (!input.identity.getActiveMembership(input.projectId, input.humanPrincipalId)) {
+  if (
+    !input.workspaceIdentity
+      .listMembershipViews(input.workspaceId)
+      .some(
+        (membership) =>
+          membership.humanPrincipalId === input.humanPrincipalId && membership.revokedAt === null
+      )
+  ) {
     throw new Error("authority_membership_required");
   }
 }
 
 export function assertExecutionTargetMutation(input: {
-  actor: HumanAuthContext;
+  actor: CollaborationAuthContext;
   scope: ExactBlockExecutionScope;
   target: ExecutionTarget;
   access: ProjectAccessRepository;

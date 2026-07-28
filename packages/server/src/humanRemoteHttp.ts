@@ -2,11 +2,12 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
 import { z } from "zod";
 import {
-  authenticateHumanForProject,
+  authenticateCollaborationForProject,
   humanTransportAllowed,
   type HumanIdentityRepository,
   type HumanProjectAuthority
 } from "./identity/index.js";
+import type { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
 import { DispatchAssignmentError } from "./work/dispatchIntegration.js";
 import { RemoteExecutionActionRejectedError } from "./remoteExecutionActions.js";
 import {
@@ -20,6 +21,7 @@ const MAX_BODY_BYTES = 64 * 1024;
 export type HumanRemoteHttpOptions = {
   service: HumanRemoteControlService;
   repository: HumanIdentityRepository;
+  workspaceIdentity: WorkspaceIdentityRepository;
   projectAuthority: HumanProjectAuthority;
   readiness(): ServerReadiness;
   allowInsecureDevelopment?: boolean;
@@ -129,7 +131,18 @@ function safeError(error: unknown): { status: number; code: string } {
     if (error.code.includes("mismatch")) return { status: 409, code: error.code };
     return { status: 400, code: error.code };
   }
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "remote_block_not_found"
+  ) {
+    return { status: 404, code: "human_remote_block_not_found" };
+  }
   if (!(error instanceof Error)) return { status: 500, code: "human_remote_request_failed" };
+  if (error.message === "remote_runtime_locator_candidate_mismatch") {
+    return { status: 409, code: "human_remote_scope_conflict" };
+  }
   if (error.message.includes("not_found")) {
     return { status: 404, code: "human_remote_resource_not_found" };
   }
@@ -181,8 +194,9 @@ export async function handleHumanRemoteHttpRequest(
       respond(response, 503, { error: "server_not_accepting_mutations" });
       return true;
     }
-    const context = authenticateHumanForProject(
+    const context = authenticateCollaborationForProject(
       options.repository,
+      options.workspaceIdentity,
       request.headers.authorization,
       matched.projectId
     );
