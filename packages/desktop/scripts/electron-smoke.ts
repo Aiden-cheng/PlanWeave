@@ -14,17 +14,39 @@ const localCollaborationOnly = process.argv.includes("--local-collaboration");
 
 async function resolvePackagedExecutable(): Promise<string> {
   const releaseDir = resolve(process.cwd(), "release");
-  const entries = await readdir(releaseDir, { withFileTypes: true }).catch(() => []);
-  const appPath = entries
-    .filter((entry) => entry.isDirectory() && entry.name.startsWith("mac"))
-    .map((entry) => resolve(releaseDir, entry.name, "PlanWeave.app"))
-    .sort()[0];
+  const expectedDirectory = process.arch === "arm64" ? "mac-arm64" : "mac";
+  const entries = await readdir(releaseDir, { withFileTypes: true });
+  if (!entries.some((entry) => entry.isDirectory() && entry.name === expectedDirectory)) {
+    throw new Error(`Current packaged desktop app is missing ${expectedDirectory}.`);
+  }
   return resolve(
-    appPath ?? resolve(releaseDir, "mac-arm64", "PlanWeave.app"),
+    releaseDir,
+    expectedDirectory,
+    "PlanWeave.app",
     "Contents",
     "MacOS",
     "PlanWeave"
   );
+}
+
+async function packageCurrentDesktopApp(onOutput: (text: string, stream: "stdout" | "stderr") => void): Promise<void> {
+  const child = spawn("pnpm", ["pack:mac"], {
+    cwd: process.cwd(),
+    env: process.env,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  child.stdout.on("data", (chunk: Buffer) => onOutput(chunk.toString(), "stdout"));
+  child.stderr.on("data", (chunk: Buffer) => onOutput(chunk.toString(), "stderr"));
+  await new Promise<void>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`Current desktop packaging failed with code ${String(code)}.`));
+    });
+  });
 }
 
 const smokeHome = await mkdtemp(join(tmpdir(), "planweave-desktop-smoke-home-"));
@@ -49,6 +71,17 @@ const collaborationFixture = localCollaborationOnly
       projectRoot: smokeProjectRoot,
       projectId: init.workspace.id
     });
+
+let output = "";
+const appendOutput = (text: string, stream: "stdout" | "stderr") => {
+  output += text;
+  if (stream === "stdout") process.stdout.write(text);
+  else process.stderr.write(text);
+};
+
+if (usePackagedApp && localCollaborationOnly) {
+  await packageCurrentDesktopApp(appendOutput);
+}
 
 const smokeCommand = usePackagedApp ? await resolvePackagedExecutable() : electronBin;
 const smokeArgs = usePackagedApp ? [] : [mainEntry];
@@ -82,18 +115,12 @@ try {
     detached: process.platform !== "win32"
   });
 
-  let output = "";
-
   child.stdout.on("data", (chunk: Buffer) => {
-    const text = chunk.toString();
-    output += text;
-    process.stdout.write(text);
+    appendOutput(chunk.toString(), "stdout");
   });
 
   child.stderr.on("data", (chunk: Buffer) => {
-    const text = chunk.toString();
-    output += text;
-    process.stderr.write(text);
+    appendOutput(chunk.toString(), "stderr");
   });
 
   await assertSmokeProcess(child, () => output, {

@@ -13,7 +13,7 @@ import {
   type LoopbackProjectRegistrationView
 } from "@planweave-ai/collaboration-contracts";
 import { listProjects, resolveTaskCanvasWorkspace } from "@planweave-ai/runtime";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import type { OperatorSafeStoragePort } from "../operatorControl/operatorCredentialVault.js";
@@ -40,6 +40,10 @@ type LoopbackServerControlPort = Pick<
 
 const localProfileId = "planweave-local-loopback";
 const localStartAttempts = 3;
+
+function localWorkspaceIdForProject(projectId: string): string {
+  return `workspace-local-${createHash("sha256").update(projectId).digest("hex").slice(0, 32)}`;
+}
 
 async function allocateLoopbackPort(): Promise<number> {
   const listener = createServer();
@@ -241,6 +245,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
       dataDirectory,
       trustedProjects: [
         {
+          workspaceId: localWorkspaceIdForProject(selection.authorityProjectId),
           projectId: selection.authorityProjectId,
           canvasId: selection.canvasId,
           projectRoot: selection.projectRoot

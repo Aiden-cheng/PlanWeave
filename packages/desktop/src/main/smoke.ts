@@ -936,15 +936,23 @@ async function runLocalCollaborationSmoke(window: BrowserWindow): Promise<Record
       if (matchingScopes.length !== 1) {
         throw new Error("Local collaboration server did not expose exactly one selected trusted scope.");
       }
-      let ownerRequired = false;
-      try {
-        await collaboration.registerLocalCollaborationCurrentProject();
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        ownerRequired = message.includes("local_collaboration_owner_initialization_required");
+      if (!started.profile) {
+        throw new Error("Local collaboration server did not expose a profile after start.");
       }
-      if (!ownerRequired) {
-        throw new Error("Local collaboration registration did not require owner initialization.");
+      const owner = await collaboration.bootstrapCollaborationOwner({
+        profileId: started.profile.profileId,
+        request: { displayName: "Packaged smoke owner" }
+      });
+      if (owner.membership.role !== "owner") {
+        throw new Error("Local collaboration bootstrap did not create an owner membership.");
+      }
+      const registration = await collaboration.registerLocalCollaborationCurrentProject();
+      if (
+        registration.workspaceId !== matchingScopes[0].workspaceId ||
+        registration.projectId !== matchingScopes[0].projectId ||
+        registration.canvasId !== matchingScopes[0].canvasId
+      ) {
+        throw new Error("Local collaboration registration did not preserve the trusted scope.");
       }
       const stopped = await collaboration.stopLocalCollaborationServer();
       if (stopped.state !== "stopped") {
@@ -957,10 +965,16 @@ async function runLocalCollaborationSmoke(window: BrowserWindow): Promise<Record
         statusBeforeStart: beforeStart.state,
         statusAfterStart: started.state,
         trustedScope: {
+          workspaceId: matchingScopes[0].workspaceId,
           projectId: matchingScopes[0].projectId,
           canvasId: matchingScopes[0].canvasId
         },
-        ownerRequired,
+        ownerBootstrap: { role: owner.membership.role },
+        registration: {
+          workspaceId: registration.workspaceId,
+          projectId: registration.projectId,
+          canvasId: registration.canvasId
+        },
         statusAfterStop: stopped.state
       };
       const serialized = JSON.stringify(result);
