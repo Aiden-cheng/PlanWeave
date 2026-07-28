@@ -422,7 +422,11 @@ export type CollaborationCanvasReconnectInput = z.infer<
 >;
 
 export const collaborationCanvasSessionInputSchema = z
-  .object({ canvasId: z.string().trim().min(1).max(128) })
+  .object({
+    canvasId: z.string().trim().min(1).max(128),
+    /** Local Electron IPC binding only; never included in collaboration HTTP payloads. */
+    projectRoot: z.string().trim().min(1).max(4096)
+  })
   .strict();
 export type CollaborationCanvasSessionInput = z.infer<typeof collaborationCanvasSessionInputSchema>;
 

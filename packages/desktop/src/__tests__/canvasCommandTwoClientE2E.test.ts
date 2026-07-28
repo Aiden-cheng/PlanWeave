@@ -90,6 +90,7 @@ async function setup() {
   return {
     origin: `http://127.0.0.1:${address.port}`,
     projectId,
+    projectRoot: workspace.root,
     packageDir: workspace.init.workspace.packageDir
   };
 }
@@ -165,8 +166,8 @@ describe("Desktop canvas command dual-client E2E (OSS-004 B-003)", () => {
     const controllerA = new CanvasCommandController({ api: bridgeFor(clientA), labels });
     const controllerB = new CanvasCommandController({ api: bridgeFor(clientB), labels });
 
-    await controllerA.bind("default");
-    await controllerB.bind("default");
+    await controllerA.bind({ canvasId: "default", projectRoot: fixture.projectRoot });
+    await controllerB.bind({ canvasId: "default", projectRoot: fixture.projectRoot });
     expect(controllerA.getSnapshot().session?.revision).toBe(0);
     expect(controllerB.getSnapshot().session?.revision).toBe(0);
 
@@ -215,9 +216,10 @@ describe("Desktop canvas command dual-client E2E (OSS-004 B-003)", () => {
     expect(stale.outcome.conflict?.authoritativeRevision).toBe(1);
     expect(controllerB.getSnapshot().lastStaleConflict?.authoritativeRevision).toBe(1);
     expect(controllerB.getSnapshot().lastError).toContain("stale:0->1");
+    expect(controllerB.getSnapshot().session?.revision).toBe(0);
 
     // Client B reconnects and converges on ordered history.
-    const reconnect = await controllerB.reconnect({ canvasId: "default", afterRevision: 0 });
+    const reconnect = await controllerB.reconnect({ canvasId: "default" });
     expect(reconnect.response.type).toBe("canvas.reconnect.delta");
     if (reconnect.response.type !== "canvas.reconnect.delta") throw new Error("expected delta");
     expect(reconnect.response.headRevision).toBe(1);

@@ -4,14 +4,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   CANVAS_COMMAND_PROTOCOL_VERSION,
   exampleCanvasCommandAccepted,
+  exampleCanvasReconnectTruncatedJournal,
   exampleCanvasCommandStaleRevisionRejected,
   exampleCanvasReconnectAfterDisconnect,
   exampleHumanDeviceToken
 } from "@planweave-ai/collaboration-contracts";
-import {
-  CanvasCommandSessionState,
-  CollaborationClient
-} from "../main/collaboration/index.js";
+import { CanvasCommandSessionState, CollaborationClient } from "../main/collaboration/index.js";
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
 
@@ -68,11 +66,13 @@ describe("CanvasCommandSessionState", () => {
     session.bind("canvas-default");
     session.applyOutcome(exampleCanvasCommandStaleRevisionRejected);
     const snap = session.snapshot();
-    expect(snap?.revision).toBe(4);
+    expect(snap?.revision).toBe(0);
+    expect(snap?.contentDigest).toBeNull();
     expect(snap?.lastConflict).toEqual({
       expectedRevision: 2,
       authoritativeRevision: 4,
-      authoritativeContentDigest: exampleCanvasCommandStaleRevisionRejected.conflict!.authoritativeContentDigest
+      authoritativeContentDigest:
+        exampleCanvasCommandStaleRevisionRejected.conflict!.authoritativeContentDigest
     });
     expect(snap?.lastRejectCode).toBe("stale_revision");
   });
@@ -216,5 +216,34 @@ describe("CollaborationClient canvas commands", () => {
     expect(result.response.type).toBe("canvas.reconnect.delta");
     expect(result.session?.revision).toBe(4);
     void session;
+  });
+
+  it("does not advance the session when required snapshot materialization fails", async () => {
+    const { origin, close } = await listen(async (_req, res) => {
+      json(res, 200, exampleCanvasReconnectTruncatedJournal);
+    });
+    cleanups.push(close);
+    const client = new CollaborationClient({
+      profile: {
+        profileId: "profile-snapshot",
+        displayName: "Snapshot",
+        serverBaseUrl: origin,
+        projectId: "project-demo-001",
+        allowInsecureTransport: true
+      },
+      credential: { getDeviceToken: () => exampleHumanDeviceToken }
+    });
+    cleanups.push(async () => client.dispose());
+    client.bindCanvasCommandSession("canvas-default");
+
+    await expect(
+      client.reconnectCanvasCommands({ canvasId: "canvas-default", afterRevision: 0 }, undefined, {
+        beforeReconnect: async ({ snapshotRequired }) => {
+          expect(snapshotRequired).toBe(true);
+          throw new Error("collaboration_canvas_snapshot_materialization_required");
+        }
+      })
+    ).rejects.toThrow("collaboration_canvas_snapshot_materialization_required");
+    expect(client.canvasCommandSession()).toMatchObject({ revision: 0, contentDigest: null });
   });
 });

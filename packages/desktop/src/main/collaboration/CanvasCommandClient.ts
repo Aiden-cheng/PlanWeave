@@ -6,8 +6,10 @@ import {
   canvasCommandSubmitSchema,
   canvasReconnectRequestSchema,
   canvasReconnectResponseSchema,
+  type CanvasCommandAccepted,
   type CanvasCommandIntent,
   type CanvasCommandOutcome,
+  type CanvasJournalEntry,
   type CanvasReconnectResponse,
   type CanvasRevision
 } from "@planweave-ai/collaboration-contracts";
@@ -30,6 +32,18 @@ export type CanvasCommandReconnectInput = {
   canvasId: string;
   afterRevision?: CanvasRevision;
   afterContentDigest?: string;
+};
+
+export type CanvasCommandMaterializationHooks = {
+  beforeAccepted?: (
+    outcome: CanvasCommandAccepted,
+    intent: CanvasCommandIntent
+  ) => Promise<void>;
+  beforeReconnect?: (input: {
+    response: CanvasReconnectResponse;
+    entriesToApply: CanvasJournalEntry[];
+    snapshotRequired: boolean;
+  }) => Promise<void>;
 };
 
 /**
@@ -56,7 +70,11 @@ export class CanvasCommandClient {
     this.session.clear();
   }
 
-  async submit(input: CanvasCommandSubmitInput, signal?: AbortSignal): Promise<CanvasCommandOutcome> {
+  async submit(
+    input: CanvasCommandSubmitInput,
+    signal?: AbortSignal,
+    hooks?: CanvasCommandMaterializationHooks
+  ): Promise<CanvasCommandOutcome> {
     this.transport.ensureOpen();
     const intent = canvasCommandIntentSchema.parse(input.intent);
     const operationId = canvasCommandOperationIdSchema.parse(input.operationId);
@@ -95,13 +113,17 @@ export class CanvasCommandClient {
         acceptedStatus: [409, 401, 403, 404, 429]
       }
     );
+    if (outcome.type === "canvas.command.accepted") {
+      await hooks?.beforeAccepted?.(outcome, intent);
+    }
     this.session.applyOutcome(outcome);
     return outcome;
   }
 
   async reconnect(
     input: CanvasCommandReconnectInput,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    hooks?: CanvasCommandMaterializationHooks
   ): Promise<{
     response: CanvasReconnectResponse;
     entriesToApply: ReturnType<CanvasCommandSessionState["applyReconnect"]>["entriesToApply"];
@@ -143,6 +165,8 @@ export class CanvasCommandClient {
         acceptedStatus: [409, 401, 403, 404]
       }
     );
+    const prepared = this.session.prepareReconnect(response);
+    await hooks?.beforeReconnect?.({ response, ...prepared });
     const applied = this.session.applyReconnect(response);
     return {
       response,

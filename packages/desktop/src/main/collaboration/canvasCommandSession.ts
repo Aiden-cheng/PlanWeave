@@ -93,9 +93,8 @@ export class CanvasCommandSessionState {
         authoritativeRevision: outcome.conflict.authoritativeRevision,
         authoritativeContentDigest: outcome.conflict.authoritativeContentDigest
       };
-      // Surface authoritative head without guessing a merge or auto-rewriting expectedRevision.
-      this.revision = outcome.conflict.authoritativeRevision;
-      this.contentDigest = outcome.conflict.authoritativeContentDigest;
+      // The authoritative head is not locally materialized yet. Keep the local
+      // cursor so the next default reconnect requests the missing delta.
     }
   }
 
@@ -111,16 +110,37 @@ export class CanvasCommandSessionState {
   }
 
   /**
-   * Advance session from a server reconnect response.
-   * Returns journal entries that the client has not yet applied locally (for Runtime apply).
+   * Inspect a reconnect response without advancing the session cursor.
+   * Local Runtime materialization must succeed before `applyReconnect` commits it.
    */
-  applyReconnect(response: CanvasReconnectResponse): {
+  prepareReconnect(response: CanvasReconnectResponse): {
     entriesToApply: CanvasJournalEntry[];
     snapshotRequired: boolean;
   } {
     if (response.type === "canvas.reconnect.error") {
-      this.lastRejectCode = response.code;
       return { entriesToApply: [], snapshotRequired: false };
+    }
+    if (response.type === "canvas.reconnect.snapshot") {
+      return { entriesToApply: [], snapshotRequired: true };
+    }
+    const entriesToApply: CanvasJournalEntry[] = [];
+    for (const entry of response.entries) {
+      if (!this.appliedOperationIds.has(entry.operationId)) {
+        entriesToApply.push(entry);
+      }
+    }
+    return { entriesToApply, snapshotRequired: false };
+  }
+
+  /** Advance a reconnect response after all required local materialization succeeded. */
+  applyReconnect(response: CanvasReconnectResponse): {
+    entriesToApply: CanvasJournalEntry[];
+    snapshotRequired: boolean;
+  } {
+    const prepared = this.prepareReconnect(response);
+    if (response.type === "canvas.reconnect.error") {
+      this.lastRejectCode = response.code;
+      return prepared;
     }
     if (response.type === "canvas.reconnect.snapshot") {
       this.revision = response.snapshot.metadata.revision;
@@ -128,31 +148,21 @@ export class CanvasCommandSessionState {
       this.lastConflict = null;
       this.lastRejectCode = null;
       this.pendingOperationId = null;
-      return { entriesToApply: [], snapshotRequired: true };
+      return prepared;
     }
-    // delta
-    const entriesToApply: CanvasJournalEntry[] = [];
     for (const entry of response.entries) {
-      if (!this.appliedOperationIds.has(entry.operationId)) {
-        entriesToApply.push(entry);
-        this.appliedOperationIds.add(entry.operationId);
-      }
+      this.appliedOperationIds.add(entry.operationId);
       this.revision = entry.revision;
       this.contentDigest = entry.contentDigest;
       this.lastOperationId = entry.operationId;
       this.lastJournalEntryId = entry.entryId;
     }
-    if (response.entries.length === 0) {
-      this.revision = response.headRevision;
-      this.contentDigest = response.headContentDigest;
-    } else {
-      this.revision = response.headRevision;
-      this.contentDigest = response.headContentDigest;
-    }
+    this.revision = response.headRevision;
+    this.contentDigest = response.headContentDigest;
     this.lastConflict = null;
     this.lastRejectCode = null;
     this.pendingOperationId = null;
-    return { entriesToApply, snapshotRequired: false };
+    return prepared;
   }
 
   hasApplied(operationId: string): boolean {

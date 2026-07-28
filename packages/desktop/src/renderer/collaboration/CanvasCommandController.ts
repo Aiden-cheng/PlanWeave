@@ -38,6 +38,42 @@ const EMPTY: CanvasCommandControllerSnapshot = {
   busy: false
 };
 
+function sessionsEqual(
+  left: CollaborationCanvasCommandSessionView | null,
+  right: CollaborationCanvasCommandSessionView | null
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return (
+    left.canvasId === right.canvasId &&
+    left.revision === right.revision &&
+    left.contentDigest === right.contentDigest &&
+    left.lastOperationId === right.lastOperationId &&
+    left.lastJournalEntryId === right.lastJournalEntryId &&
+    left.pendingOperationId === right.pendingOperationId &&
+    left.lastRejectCode === right.lastRejectCode &&
+    left.lastConflict?.expectedRevision === right.lastConflict?.expectedRevision &&
+    left.lastConflict?.authoritativeRevision === right.lastConflict?.authoritativeRevision &&
+    left.lastConflict?.authoritativeContentDigest === right.lastConflict?.authoritativeContentDigest
+  );
+}
+
+function snapshotsEqual(
+  left: CanvasCommandControllerSnapshot,
+  right: CanvasCommandControllerSnapshot
+): boolean {
+  return (
+    sessionsEqual(left.session, right.session) &&
+    left.lastError === right.lastError &&
+    left.lastStaleConflict?.expectedRevision === right.lastStaleConflict?.expectedRevision &&
+    left.lastStaleConflict?.authoritativeRevision ===
+      right.lastStaleConflict?.authoritativeRevision &&
+    left.lastStaleConflict?.authoritativeContentDigest ===
+      right.lastStaleConflict?.authoritativeContentDigest &&
+    left.busy === right.busy
+  );
+}
+
 /**
  * Renderer controller for shared-mode durable canvas mutations.
  * Submits typed intents only; never writes package files directly.
@@ -66,13 +102,14 @@ export class CanvasCommandController {
     return this.snapshot;
   }
 
-  async bind(canvasId: string): Promise<void> {
+  async bind(input: { canvasId: string; projectRoot: string }): Promise<void> {
     this.generation += 1;
     const generation = this.generation;
+    const { canvasId } = input;
     this.canvasId = canvasId;
     this.patch({ busy: true, lastError: null, lastStaleConflict: null });
     try {
-      const session = await this.api.bindCollaborationCanvasCommandSession({ canvasId });
+      const session = await this.api.bindCollaborationCanvasCommandSession(input);
       if (generation !== this.generation) return;
       this.patch({ session, busy: false });
       // Align with server head via reconnect (delta or full snapshot).
@@ -134,7 +171,12 @@ export class CanvasCommandController {
           });
         }
       } else {
-        this.patch({ session: result.session, busy: false, lastError: null, lastStaleConflict: null });
+        this.patch({
+          session: result.session,
+          busy: false,
+          lastError: null,
+          lastStaleConflict: null
+        });
       }
       return result;
     } catch (error) {
@@ -144,17 +186,22 @@ export class CanvasCommandController {
     }
   }
 
-  async reconnect(input?: {
-    canvasId?: string;
-    afterRevision?: number;
-    afterContentDigest?: string;
-  }): Promise<CollaborationCanvasReconnectResult> {
+  async reconnect(
+    input?: {
+      canvasId?: string;
+      afterRevision?: number;
+      afterContentDigest?: string;
+    },
+    options?: { background?: boolean }
+  ): Promise<CollaborationCanvasReconnectResult> {
     const canvasId = input?.canvasId ?? this.canvasId;
     if (!canvasId) {
       throw new Error(this.labels.notConnected);
     }
     this.canvasId = canvasId;
-    this.patch({ busy: true, lastError: null });
+    if (!options?.background) {
+      this.patch({ busy: true, lastError: null });
+    }
     try {
       const result = await this.api.reconnectCollaborationCanvas({
         canvasId,
@@ -183,8 +230,29 @@ export class CanvasCommandController {
     }
   }
 
+  /**
+   * Poll without emitting transient busy states. Errors remain visible in the
+   * controller snapshot while the returned null keeps detached timers safe.
+   */
+  async reconnectInBackground(): Promise<CollaborationCanvasReconnectResult | null> {
+    try {
+      return await this.reconnect(undefined, { background: true });
+    } catch {
+      return null;
+    }
+  }
+
+  reportRefreshFailure(error: unknown): void {
+    this.patch({
+      busy: false,
+      lastError: error instanceof Error ? error.message : String(error)
+    });
+  }
+
   private patch(partial: Partial<CanvasCommandControllerSnapshot>): void {
-    this.snapshot = { ...this.snapshot, ...partial };
+    const next = { ...this.snapshot, ...partial };
+    if (snapshotsEqual(this.snapshot, next)) return;
+    this.snapshot = next;
     for (const listener of this.listeners) listener(this.snapshot);
   }
 }

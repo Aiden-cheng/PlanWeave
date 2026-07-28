@@ -208,6 +208,7 @@ export function BlockInspectorWindow() {
   const sharedCanvas = useSharedCanvasCommands({
     api: collaborationBridge,
     canvasId,
+    projectRoot,
     enabled: sharedCanvasEnabled,
     profileId: activeCollaborationProfile?.profileId ?? null,
     selectedProjectId: sharedProjectId,

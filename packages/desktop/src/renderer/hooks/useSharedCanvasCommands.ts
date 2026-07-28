@@ -9,6 +9,8 @@ import {
 } from "../collaboration/CanvasCommandController";
 import type { createTranslator } from "../i18n";
 
+export const SHARED_CANVAS_RECONNECT_INTERVAL_MS = 3_000;
+
 export type SharedCanvasSubmitResult = {
   ok: boolean;
   error: string | null;
@@ -35,6 +37,7 @@ export type SharedCanvasCommandsResult = {
 export function useSharedCanvasCommands(input: {
   enabled: boolean;
   canvasId: string | null;
+  projectRoot: string | null;
   profileId: string | null;
   selectedProjectId: string | null;
   activeProjectId: string | null;
@@ -49,6 +52,7 @@ export function useSharedCanvasCommands(input: {
     input.selectedProjectId !== null &&
     input.selectedProjectId === input.activeProjectId &&
     input.canvasId !== null &&
+    input.projectRoot !== null &&
     input.profileId !== null;
 
   const labels = useMemo<CanvasCommandLabels>(
@@ -93,22 +97,58 @@ export function useSharedCanvasCommands(input: {
 
   useEffect(() => {
     const controller = controllerRef.current;
-    if (!controller || !scopeEnabled || !input.canvasId) {
+    const canvasId = input.canvasId;
+    const projectRoot = input.projectRoot;
+    if (!controller || !scopeEnabled || !canvasId || !projectRoot) {
       void controller?.unbind();
       return undefined;
     }
     let active = true;
-    void controller.bind(input.canvasId).then(async () => {
-      if (!active) return;
-      const snap = controller.getSnapshot();
-      if (snap.session && !snap.lastError) {
+    let pollInFlight = false;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    const reportRefreshFailure = (error: unknown) => {
+      if (active) controller.reportRefreshFailure(error);
+    };
+    const refreshAuthoritativeState = async () => {
+      try {
         await onChangeRef.current?.();
+      } catch (error) {
+        reportRefreshFailure(error);
       }
-    });
+    };
+    const poll = async () => {
+      if (!active || pollInFlight) return;
+      pollInFlight = true;
+      try {
+        const result = await controller.reconnectInBackground();
+        if (!active || !result || result.entriesToApply.length === 0) return;
+        await refreshAuthoritativeState();
+      } finally {
+        pollInFlight = false;
+      }
+    };
+    const bindAndStartPolling = async () => {
+      try {
+        await controller.bind({ canvasId, projectRoot });
+        if (!active) return;
+        const snap = controller.getSnapshot();
+        if (!snap.session || snap.lastError) return;
+        await refreshAuthoritativeState();
+        if (!active || controller.getSnapshot().lastError) return;
+        intervalId = setInterval(() => {
+          void poll();
+        }, SHARED_CANVAS_RECONNECT_INTERVAL_MS);
+      } catch (error) {
+        reportRefreshFailure(error);
+      }
+    };
+    void bindAndStartPolling();
     return () => {
       active = false;
+      if (intervalId !== null) clearInterval(intervalId);
     };
-  }, [scopeEnabled, input.canvasId]);
+  }, [api, labels, scopeEnabled, input.canvasId, input.projectRoot]);
 
   const submit = useCallback(
     async (submitInput: {

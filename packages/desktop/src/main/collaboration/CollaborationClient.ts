@@ -122,6 +122,7 @@ import { systemCollaborationClock } from "./collaborationClientTypes.js";
 import { CollaborationHttpTransport } from "./collaborationHttpTransport.js";
 import {
   CanvasCommandClient,
+  type CanvasCommandMaterializationHooks,
   type CanvasCommandReconnectInput,
   type CanvasCommandSubmitInput
 } from "./CanvasCommandClient.js";
@@ -821,18 +822,20 @@ export class CollaborationClient {
 
   async submitCanvasCommand(
     input: CanvasCommandSubmitInput,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    hooks?: CanvasCommandMaterializationHooks
   ): Promise<CanvasCommandOutcome> {
     this.ensureOpen();
-    return this.canvasCommands.submit(input, signal);
+    return this.canvasCommands.submit(input, signal, hooks);
   }
 
   async reconnectCanvasCommands(
     input: CanvasCommandReconnectInput,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    hooks?: CanvasCommandMaterializationHooks
   ): Promise<ReturnType<CanvasCommandClient["reconnect"]>> {
     this.ensureOpen();
-    return this.canvasCommands.reconnect(input, signal);
+    return this.canvasCommands.reconnect(input, signal, hooks);
   }
 
   // ---------------------------------------------------------------------------
