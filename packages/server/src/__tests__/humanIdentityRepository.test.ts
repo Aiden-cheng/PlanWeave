@@ -401,9 +401,7 @@ describe("human identity repository", () => {
 
     repo.revokeDevice(projectB.device.deviceCredentialId, "project-b", principalId);
     expect(repo.authenticateDevice(projectA.deviceToken!, "project-a")).toBeDefined();
-    expect(repo.authenticateDevice(projectA.deviceToken!, "project-b")?.membership?.role).toBe(
-      "owner"
-    );
+    expect(repo.authenticateDevice(projectA.deviceToken!, "project-b")).toBeUndefined();
 
     const recoveredB = repo.bootstrapOwner(
       localAdminProof("project-b", principalId, "Shared Owner")
@@ -552,11 +550,9 @@ describe("human identity repository", () => {
     expect(linked.principalCreated).toBe(false);
     expect(linked.principal.humanPrincipalId).toBe(joined.principal.humanPrincipalId);
     expect(linked.membership.projectId).toBe("project-b");
-    // A workspace-scoped device can authenticate any mapped project where its principal has
-    // an active membership; device inventory remains keyed by the project that minted it.
-    expect(repo.authenticateDevice(joined.deviceToken, "project-b")?.membership?.role).toBe(
-      "member"
-    );
+    // Device credentials are scoped to the project that minted them, even when projects share
+    // a workspace and the principal is a member of both.
+    expect(repo.authenticateDevice(joined.deviceToken, "project-b")).toBeUndefined();
     expect(repo.authenticateDevice(linked.deviceToken, "project-b")?.membership?.role).toBe(
       "member"
     );
@@ -587,9 +583,7 @@ describe("human identity repository", () => {
     ).toEqual({ role: "owner" });
     // No implicit privilege on a project without membership.
     expect(repo.authenticateDevice(joined.deviceToken, "project-unrelated")).toBeUndefined();
-    expect(repo.authenticateDevice(linked.deviceToken, "project-a")?.membership?.role).toBe(
-      "owner"
-    );
+    expect(repo.authenticateDevice(linked.deviceToken, "project-a")).toBeUndefined();
     expect(
       repo
         .listDevicesForPrincipal(joined.principal.humanPrincipalId, "project-a")
