@@ -541,6 +541,109 @@ describe("canvas command service (OSS-004 B-002)", () => {
     expect(applyCalls).toBe(1);
   });
 
+  it("keeps an unreadable crash-recovery package pending and fences writes until it reconciles", async () => {
+    const scope = { workspaceId: "w", projectId: "p", canvasId: "default" };
+    let digest = digestOf("empty");
+    let digestReadable = false;
+    let applyCalls = 0;
+    const runtime: CanvasRuntimeMutationPort = {
+      async apply(input) {
+        applyCalls += 1;
+        digest = digestOf(`${digest}:applied:${JSON.stringify(input.intent)}`);
+        return {
+          ok: true,
+          contentDigest: digest,
+          digestManifest: {
+            manifest: { digestSha256: digest, sizeBytes: 10 },
+            prompts: [],
+            totalBytes: 10
+          },
+          packageDir: String(input.projectRoot),
+          sizeBytes: 10
+        };
+      },
+      async readDigest(input) {
+        if (!digestReadable) {
+          return {
+            ok: false,
+            code: "mutation_failed",
+            detail: "package_temporarily_unavailable"
+          };
+        }
+        return {
+          ok: true,
+          contentDigest: digest,
+          digestManifest: {
+            manifest: { digestSha256: digest, sizeBytes: 10 },
+            prompts: [],
+            totalBytes: 10
+          },
+          packageDir: String(input.projectRoot),
+          sizeBytes: 10
+        };
+      }
+    };
+    const { access, database, repository } = await fixture({ runtime });
+    const restarted = new CanvasCommandService({
+      repository,
+      access,
+      workspaceIdentity: new WorkspaceIdentityRepository(database),
+      runtime
+    });
+    const intent: CanvasCommandIntent = {
+      kind: "update_task_prompt",
+      taskId: "T-001",
+      promptMarkdown: "# interrupted write\n"
+    };
+
+    await runtime.apply({ projectRoot: "/tmp", canvasId: "default", intent });
+    repository.reservePending({
+      scope,
+      operationId: "op-unreadable-recovery",
+      expectedRevision: 0,
+      intent,
+      intentDigest: digestCanvasIntent(intent),
+      actor: { kind: "human", id: "owner" }
+    });
+    repository.markPendingNeedsRecovery(scope, "op-unreadable-recovery");
+
+    expect(await restarted.recoverInterrupted()).toEqual({
+      cleared: 0,
+      recovered: 0,
+      deferred: 1
+    });
+    expect(
+      database
+        .prepare(
+          `SELECT status FROM canvas_command_pending
+           WHERE workspace_id='w' AND project_id='p' AND canvas_id='default'
+             AND operation_id='op-unreadable-recovery'`
+        )
+        .get()
+    ).toEqual({ status: "needs_recovery" });
+
+    const blocked = await restarted.submit(actor("owner"), submitBody("op-blocked-recovery", 0));
+    expect(blocked).toMatchObject({
+      type: "canvas.command.rejected",
+      code: "journal_unavailable",
+      detail: "canvas_recovery_pending"
+    });
+    expect(applyCalls).toBe(1);
+
+    digestReadable = true;
+    expect(await restarted.recoverInterrupted()).toEqual({
+      cleared: 1,
+      recovered: 1,
+      deferred: 0
+    });
+    expect(repository.listNeedsRecovery()).toEqual([]);
+    expect(repository.head(scope)).toMatchObject({ revision: 1, contentDigest: digest });
+
+    const accepted = await restarted.submit(actor("owner"), submitBody("op-after-recovery", 1));
+    expect(accepted.type).toBe("canvas.command.accepted");
+    expect(applyCalls).toBe(2);
+  });
+
   it("returns snapshot_malformed when reconnect needs a snapshot that is corrupt", async () => {
     const { service, repository } = await fixture();
     const accepted = await service.submit(actor("owner"), submitBody("op-snap-1", 0));

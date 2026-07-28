@@ -193,6 +193,16 @@ export class CanvasCommandService {
       });
     }
 
+    if (this.options.repository.hasPendingRecovery(scope)) {
+      return rejectedOutcome({
+        projectId: submit.projectId,
+        canvasId: submit.canvasId,
+        operationId: submit.operationId,
+        code: "journal_unavailable",
+        detail: "canvas_recovery_pending"
+      });
+    }
+
     const head = this.options.repository.head(scope);
     if (submit.expectedRevision !== head.revision) {
       return rejectedOutcome({
@@ -538,65 +548,74 @@ export class CanvasCommandService {
    * When package digest advanced past journal head (apply succeeded, commit failed), advance
    * the journal with a recovery commit so clients do not double-apply on retry.
    * When package still matches head, drop pending so the client can retry safely.
+   * If the package cannot be read and verified, preserve the pending record to fence writes
+   * until a later recovery pass can reconcile it.
    */
-  async recoverInterrupted(): Promise<{ cleared: number; recovered: number }> {
+  async recoverInterrupted(): Promise<{ cleared: number; recovered: number; deferred: number }> {
     const pending = this.options.repository.listNeedsRecovery();
     let cleared = 0;
     let recovered = 0;
+    let deferred = 0;
     for (const item of pending) {
-      const op = this.options.repository.getOperation(item.scope, item.operationId);
-      if (op) {
-        this.options.repository.clearPending(item.scope, item.operationId);
-        cleared += 1;
-        continue;
-      }
-
-      const head = this.options.repository.head(item.scope);
-      let packageDigest: string | null = null;
-      try {
-        const location = this.options.access.registry.resolveCanvasPath({
-          workspaceId: item.scope.workspaceId,
-          projectId: item.scope.projectId,
-          canvasId: item.scope.canvasId
-        });
-        const digest = await this.options.runtime.readDigest({
-          projectRoot: location.projectRoot,
-          canvasId: item.scope.canvasId,
-          expectedPackageDir: location.packageDir
-        });
-        if (digest.ok) {
-          packageDigest = digest.contentDigest;
+      const result = await this.serialize(item.scope, async () => {
+        const op = this.options.repository.getOperation(item.scope, item.operationId);
+        if (op) {
+          this.options.repository.clearPending(item.scope, item.operationId);
+          return "cleared";
         }
-      } catch {
-        packageDigest = null;
-      }
 
-      if (
-        packageDigest !== null &&
-        packageDigest !== head.contentDigest &&
-        head.revision === item.expectedRevision
-      ) {
-        // Apply mutated package; journal never committed — align revision to package.
-        this.options.repository.commitAccepted({
-          scope: item.scope,
-          operationId: item.operationId,
-          intent: item.intent,
-          intentDigest: item.intentDigest,
-          actor: item.actor,
-          previousRevision: head.revision,
-          revision: head.revision + 1,
-          contentDigest: packageDigest
-        });
+        const head = this.options.repository.head(item.scope);
+        let packageDigest: string;
+        try {
+          const location = this.options.access.registry.resolveCanvasPath({
+            workspaceId: item.scope.workspaceId,
+            projectId: item.scope.projectId,
+            canvasId: item.scope.canvasId
+          });
+          const digest = await this.options.runtime.readDigest({
+            projectRoot: location.projectRoot,
+            canvasId: item.scope.canvasId,
+            expectedPackageDir: location.packageDir
+          });
+          if (!digest.ok) {
+            this.options.repository.markPendingNeedsRecovery(item.scope, item.operationId);
+            return "deferred";
+          }
+          packageDigest = digest.contentDigest;
+        } catch {
+          this.options.repository.markPendingNeedsRecovery(item.scope, item.operationId);
+          return "deferred";
+        }
+
+        if (packageDigest !== head.contentDigest && head.revision === item.expectedRevision) {
+          // Apply mutated package; journal never committed — align revision to package.
+          this.options.repository.commitAccepted({
+            scope: item.scope,
+            operationId: item.operationId,
+            intent: item.intent,
+            intentDigest: item.intentDigest,
+            actor: item.actor,
+            previousRevision: head.revision,
+            revision: head.revision + 1,
+            contentDigest: packageDigest
+          });
+          return "recovered";
+        }
+
+        // Package verified as unchanged, so retrying the command cannot double-apply.
+        this.options.repository.clearPending(item.scope, item.operationId);
+        return "cleared";
+      });
+      if (result === "recovered") {
         recovered += 1;
         cleared += 1;
-        continue;
+      } else if (result === "cleared") {
+        cleared += 1;
+      } else {
+        deferred += 1;
       }
-
-      // Apply did not change package (or location unavailable) — drop pending for safe retry.
-      this.options.repository.clearPending(item.scope, item.operationId);
-      cleared += 1;
     }
-    return { cleared, recovered };
+    return { cleared, recovered, deferred };
   }
 
   /** Test/diagnostic head read; not a presence cursor. */

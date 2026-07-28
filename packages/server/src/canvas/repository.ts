@@ -286,6 +286,18 @@ export class CanvasCommandRepository {
     });
   }
 
+  hasPendingRecovery(scope: CanvasScopeKey): boolean {
+    const row = this.database
+      .prepare(
+        `SELECT 1 AS present FROM canvas_command_pending
+         WHERE workspace_id=? AND project_id=? AND canvas_id=?
+           AND status IN ('applying','needs_recovery')
+         LIMIT 1`
+      )
+      .get(scope.workspaceId, scope.projectId, scope.canvasId) as { present: number } | undefined;
+    return row !== undefined;
+  }
+
   markPendingNeedsRecovery(scope: CanvasScopeKey, operationId: string): void {
     this.database
       .prepare(
