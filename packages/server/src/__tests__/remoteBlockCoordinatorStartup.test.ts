@@ -15,6 +15,7 @@ import {
 import type { PlanweaveServer } from "../lifecycle.js";
 import { centralSchemaVersion, latestCentralSchemaVersion } from "../migrations.js";
 import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
+import { ProjectAccessRepository } from "../projectAccessRepository.js";
 import type {
   RemoteCoordinatorCheckpoint,
   RemoteCoordinatorCheckpointPort
@@ -117,6 +118,25 @@ class StartupHarness {
         busyTimeoutMs: 5_000
       },
       (database): RemoteBlockCoordinationOptions => {
+        const workspaceId = new WorkspaceIdentityRepository(database).ensureWorkspaceForLegacyProject(
+          this.locator.projectId
+        );
+        const access = new ProjectAccessRepository(database);
+        const existingProject = access.registry.projectInternal(workspaceId, this.locator.projectId);
+        if (existingProject?.projectRoot === null) {
+          access.bindProjectPath(workspaceId, this.locator.projectId, this.workspace.root);
+        }
+        access.registerProjectInternal({
+          workspaceId,
+          projectId: this.locator.projectId,
+          projectRoot: this.workspace.root
+        });
+        access.registerCanvasInternal({
+          workspaceId,
+          projectId: this.locator.projectId,
+          canvasId: this.locator.canvasId,
+          packageDir: this.workspace.init.workspace.packageDir
+        });
         this.artifacts = new ArtifactStore(database, this.dataDirectory, 1024 * 1024);
         return {
           leaseDurationMs: 60_000,
@@ -194,6 +214,14 @@ class StartupHarness {
       DROP TABLE comment_attachment_bindings;
       DROP TABLE comment_pending_uploads;
       DROP TABLE comment_attachment_blobs;
+      DELETE FROM project_access_grants;
+      DELETE FROM canvas_registry;
+      DELETE FROM project_registry;
+      DELETE FROM acl_registry_migrations;
+      DELETE FROM execution_target_records;
+      DELETE FROM responsibility_records;
+      DELETE FROM review_assignment_records;
+      DELETE FROM assignment_authority_migrations;
       ALTER TABLE dispatches ADD COLUMN package_ref TEXT NOT NULL DEFAULT '';
       ALTER TABLE remote_operations DROP COLUMN host_selection_json;
       DELETE FROM schema_migrations WHERE version >= 18;
