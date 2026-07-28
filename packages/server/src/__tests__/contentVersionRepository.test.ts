@@ -25,18 +25,56 @@ afterEach(async () => {
 
 const sha256 = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
 
-function content(layout = "{}"): CompleteContentVersion {
+function content(updatedAt = "2026-01-01T00:00:00.000Z"): CompleteContentVersion {
   const members = [
-    { kind: "desktop_layout" as const, path: "desktop/layout.json", content: layout },
-    { kind: "manifest" as const, path: "manifest.json", content: "{}" },
-    { kind: "task_prompt" as const, path: "nodes/T-001/prompt.md", content: "# Task\n" }
+    {
+      kind: "desktop_layout" as const,
+      path: "desktop/layout.json",
+      content: JSON.stringify({ version: "desktop-layout/v1", projectId: "p", nodes: [], updatedAt })
+    },
+    {
+      kind: "manifest" as const,
+      path: "manifest.json",
+      content: JSON.stringify({
+        version: "plan-package/v1",
+        project: { title: "Plan", description: "" },
+        execution: { parallel: { enabled: false, maxConcurrent: 1 } },
+        review: { maxFeedbackCycles: 1, completionPolicy: "strict" },
+        executors: {},
+        nodes: [
+          {
+            id: "T-001",
+            type: "task",
+            title: "Task",
+            prompt: "nodes/T-001/prompt.md",
+            acceptance: ["done"],
+            blocks: [
+              {
+                id: "B-001",
+                type: "implementation",
+                title: "Block",
+                prompt: "nodes/T-001/blocks/B-001.prompt.md"
+              }
+            ]
+          }
+        ],
+        edges: []
+      })
+    },
+    { kind: "task_prompt" as const, path: "nodes/T-001/prompt.md", content: "# Task\n" },
+    {
+      kind: "block_prompt" as const,
+      path: "nodes/T-001/blocks/B-001.prompt.md",
+      content: "# Block\n"
+    }
   ].map((member) => ({
     ...member,
     digestSha256: sha256(member.content),
     sizeBytes: Buffer.byteLength(member.content)
   }));
-  const totalBytes = members.reduce((sum, member) => sum + member.sizeBytes, 0);
-  const withoutDigest = { members, totalBytes };
+  const canonicalMembers = members.sort((left, right) => left.path.localeCompare(right.path));
+  const totalBytes = canonicalMembers.reduce((sum, member) => sum + member.sizeBytes, 0);
+  const withoutDigest = { members: canonicalMembers, totalBytes };
   return {
     ...withoutDigest,
     canonicalDigest: sha256(
@@ -132,7 +170,7 @@ describe("authoritative content version repository", () => {
         { workspaceId: "w", projectId: "p", canvasId: "default" },
         result.version.completed
       ).content.members
-    ).toHaveLength(3);
+    ).toHaveLength(4);
     expect(
       repository.journalAfter({ workspaceId: "w", projectId: "p", canvasId: "default" }, 0)
     ).toHaveLength(1);
@@ -178,6 +216,57 @@ describe("authoritative content version repository", () => {
         content: content()
       })
     ).toMatchObject({ outcome: "rejected", reason: "head_already_exists", head: null });
+  });
+
+  it("rejects semantically incomplete content before creating a first head", async () => {
+    const invalidCases = [
+      (value: CompleteContentVersion) => value.members.map((member) =>
+        member.path === "manifest.json" ? { ...member, content: "{}" } : member
+      ),
+      (value: CompleteContentVersion) =>
+        value.members.filter((member) => member.path !== "nodes/T-001/blocks/B-001.prompt.md"),
+      (value: CompleteContentVersion) => [
+        ...value.members,
+        {
+          kind: "block_prompt" as const,
+          path: "nodes/T-001/blocks/B-999.prompt.md",
+          content: "# Extra\n",
+          digestSha256: "",
+          sizeBytes: 0
+        }
+      ],
+      (value: CompleteContentVersion) => value.members.map((member) =>
+        member.path === "desktop/layout.json" ? { ...member, content: "{}" } : member
+      )
+    ];
+    for (const change of invalidCases) {
+      const { repository, service } = await fixture();
+      const members = change(content())
+        .map((member) => ({
+          ...member,
+          digestSha256: sha256(member.content),
+          sizeBytes: Buffer.byteLength(member.content)
+        }))
+        .sort((left, right) => left.path.localeCompare(right.path));
+      const totalBytes = members.reduce((sum, member) => sum + member.sizeBytes, 0);
+      const invalid = {
+        members,
+        totalBytes,
+        canonicalDigest: sha256(
+          canonicalContentVersionDigestPayload({ members, totalBytes, canonicalDigest: "0".repeat(64) })
+        )
+      };
+      expect(
+        service.publishInitial(owner, {
+          projectId: "p",
+          canvasId: "default",
+          expectedHeadRevision: 0,
+          expectedHeadVersionId: null,
+          content: invalid
+        })
+      ).toMatchObject({ outcome: "rejected", reason: "content_verification_failed", head: null });
+      expect(repository.head({ workspaceId: "w", projectId: "p", canvasId: "default" })).toBeNull();
+    }
   });
 
   it("serves only scoped authorized content and records idempotent device acknowledgements", async () => {
@@ -362,7 +451,7 @@ describe("authoritative content version repository", () => {
     if (initial.outcome !== "published") throw new Error("expected published content");
     database
       .prepare(
-        "UPDATE canvas_content_version_members SET content='[]' WHERE version_id=? AND member_path='manifest.json'"
+        "UPDATE canvas_content_version_members SET content='x' || substr(content,2) WHERE version_id=? AND member_path='manifest.json'"
       )
       .run(initial.version.completed.versionId);
     expect(() =>

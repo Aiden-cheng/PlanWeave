@@ -33,6 +33,25 @@ function sha256(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
+function withRecomputedContent(
+  content: CompleteContentVersion,
+  change: (members: CompleteContentVersion["members"]) => CompleteContentVersion["members"]
+): CompleteContentVersion {
+  const members = change(content.members)
+    .map((member) => ({
+      ...member,
+      digestSha256: sha256(member.content),
+      sizeBytes: Buffer.byteLength(member.content, "utf8")
+    }))
+    .sort((left, right) => left.path.localeCompare(right.path));
+  const totalBytes = members.reduce((total, member) => total + member.sizeBytes, 0);
+  const provisional = { members, totalBytes, canonicalDigest: "0".repeat(64) };
+  return completeContentVersionSchema.parse({
+    ...provisional,
+    canonicalDigest: sha256(canonicalContentVersionDigestPayload(provisional))
+  });
+}
+
 async function contentFromWorkspace(projectRoot: string): Promise<CompleteContentVersion> {
   const workspace = await resolveTaskCanvasWorkspace(projectRoot, "default");
   const snapshot = await capturePackageSnapshot({ projectRoot, canvasId: "default" });
@@ -135,5 +154,67 @@ describe("authoritative content materializer", () => {
     await expect(getDesktopLayout(workspace.root)).resolves.toMatchObject({
       nodes: [{ nodeId: "T-001", x: 9, y: 8 }]
     });
+  });
+
+  it("fails closed before replacement for invalid manifest, prompt set, or layout content", async () => {
+    const cases = [
+      (content: CompleteContentVersion) =>
+        withRecomputedContent(content, (members) =>
+          members.map((member) => (member.path === "manifest.json" ? { ...member, content: "{}" } : member))
+        ),
+      (content: CompleteContentVersion) =>
+        withRecomputedContent(content, (members) =>
+          members.filter((member) => member.path !== "nodes/T-001/blocks/B-001.prompt.md")
+        ),
+      (content: CompleteContentVersion) =>
+        withRecomputedContent(content, (members) => [
+          ...members,
+          {
+            kind: "block_prompt" as const,
+            path: "nodes/T-001/blocks/B-999.prompt.md",
+            content: "# Extra\n",
+            digestSha256: "",
+            sizeBytes: 0
+          }
+        ]),
+      (content: CompleteContentVersion) =>
+        withRecomputedContent(content, (members) =>
+          members.map((member) =>
+            member.path === contentVersionDesktopLayoutMemberPath ? { ...member, content: "{}" } : member
+          )
+        ),
+      (content: CompleteContentVersion) => {
+        const malformed = structuredClone(content);
+        malformed.members[0]!.sizeBytes += 1;
+        return malformed;
+      }
+    ];
+    for (const createInvalid of cases) {
+      const workspace = await createTestWorkspace();
+      directories.push(workspace.home, workspace.root);
+      const canvas = await resolveTaskCanvasWorkspace(workspace.root, "default");
+      const promptPath = join(canvas.packageDir, "nodes", "T-001", "prompt.md");
+      await writeFile(promptPath, "# preserve this prompt\n", "utf8");
+      await saveDesktopLayout(workspace.root, {
+        version: "desktop-layout/v1",
+        projectId: workspace.init.workspace.id,
+        nodes: [{ nodeId: "T-001", x: 9, y: 8 }],
+        updatedAt: "2026-07-28T00:02:00.000Z"
+      });
+      const localLayoutPath = join(canvas.workspaceRoot, "desktop", "layout.json");
+      const beforeLayout = await readFile(localLayoutPath, "utf8");
+      const invalid = createInvalid(await contentFromWorkspace(workspace.root));
+
+      await expect(
+        materializeAuthoritativeCanvasContent({
+          projectRoot: workspace.root,
+          canvasId: "default",
+          content: invalid
+        })
+      ).rejects.toThrow();
+
+      await expect(readFile(promptPath, "utf8")).resolves.toBe("# preserve this prompt\n");
+      await expect(readFile(localLayoutPath, "utf8")).resolves.toBe(beforeLayout);
+    }
   });
 });

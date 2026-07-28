@@ -32,10 +32,59 @@ afterEach(async () => {
 const digest = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
 function content(): CompleteContentVersion {
   const members = [
-    { kind: "desktop_layout" as const, path: "desktop/layout.json", content: "{}" },
-    { kind: "manifest" as const, path: "manifest.json", content: "{}" }
-  ].map((member) => ({ ...member, digestSha256: digest(member.content), sizeBytes: 2 }));
-  const totalBytes = 4;
+    {
+      kind: "desktop_layout" as const,
+      path: "desktop/layout.json",
+      content: JSON.stringify({
+        version: "desktop-layout/v1",
+        projectId: "p",
+        nodes: [],
+        updatedAt: "2026-01-01T00:00:00.000Z"
+      })
+    },
+    {
+      kind: "manifest" as const,
+      path: "manifest.json",
+      content: JSON.stringify({
+        version: "plan-package/v1",
+        project: { title: "Plan", description: "" },
+        execution: { parallel: { enabled: false, maxConcurrent: 1 } },
+        review: { maxFeedbackCycles: 1, completionPolicy: "strict" },
+        executors: {},
+        nodes: [
+          {
+            id: "T-001",
+            type: "task",
+            title: "Task",
+            prompt: "nodes/T-001/prompt.md",
+            acceptance: ["done"],
+            blocks: [
+              {
+                id: "B-001",
+                type: "implementation",
+                title: "Block",
+                prompt: "nodes/T-001/blocks/B-001.prompt.md"
+              }
+            ]
+          }
+        ],
+        edges: []
+      })
+    },
+    { kind: "task_prompt" as const, path: "nodes/T-001/prompt.md", content: "# Task\n" },
+    {
+      kind: "block_prompt" as const,
+      path: "nodes/T-001/blocks/B-001.prompt.md",
+      content: "# Block\n"
+    }
+  ]
+    .map((member) => ({
+      ...member,
+      digestSha256: digest(member.content),
+      sizeBytes: Buffer.byteLength(member.content, "utf8")
+    }))
+    .sort((left, right) => left.path.localeCompare(right.path));
+  const totalBytes = members.reduce((sum, member) => sum + member.sizeBytes, 0);
   return {
     members,
     totalBytes,

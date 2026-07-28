@@ -1,9 +1,6 @@
-import { createHash } from "node:crypto";
 import {
   authoritativeContentHeadSchema,
   authoritativeContentVersionSchema,
-  canonicalContentVersionDigestPayload,
-  completeContentVersionSchema,
   completedContentVersionRefSchema,
   contentVersionAcknowledgementSchema,
   contentVersionAuthorityDiscoveryResultSchema,
@@ -17,14 +14,11 @@ import {
   type ContentVersionAcknowledgement,
   type ContentVersionAuthorityDiscoveryResult
 } from "@planweave-ai/collaboration-contracts";
+import { validateAuthoritativeCanvasContent } from "@planweave-ai/runtime";
 import { inWriteTransaction, type SqliteDatabase } from "../sqlite.js";
 import type { CanvasScopeKey } from "./repository.js";
 
 type VersionRow = Record<string, unknown>;
-
-function digest(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
-}
 
 function contentRef(content: CompleteContentVersion): CompletedContentVersionRef {
   return completedContentVersionRefSchema.parse({
@@ -45,16 +39,12 @@ export class ContentVersionRepository {
   ) {}
 
   verify(rawContent: unknown): CompleteContentVersion {
-    const content = completeContentVersionSchema.parse(rawContent);
-    for (const member of content.members) {
-      if (digest(member.content) !== member.digestSha256) {
-        throw new Error("content_version_member_digest_mismatch");
-      }
+    try {
+      return validateAuthoritativeCanvasContent(rawContent).content;
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("content_version_")) throw error;
+      throw new Error("content_version_semantic_validation_failed");
     }
-    if (digest(canonicalContentVersionDigestPayload(content)) !== content.canonicalDigest) {
-      throw new Error("content_version_canonical_digest_mismatch");
-    }
-    return content;
   }
 
   persistImmutable(input: {
