@@ -179,9 +179,20 @@ export async function handleSetupCodeHttpRequest(
     if (matched.kind === "issue") {
       query(url, []);
       const body = await readJson(request);
+      const bodyWorkspaceId =
+        body &&
+        typeof body === "object" &&
+        !Array.isArray(body) &&
+        "workspaceId" in body &&
+        typeof body.workspaceId === "string"
+          ? body.workspaceId
+          : undefined;
+      if (bodyWorkspaceId !== undefined && bodyWorkspaceId !== matched.workspaceId) {
+        throw new SetupCodeError("setup_code_workspace_mismatch");
+      }
       const requestBody =
-        body && typeof body === "object"
-          ? { ...(body as Record<string, unknown>), workspaceId: matched.workspaceId }
+        body && typeof body === "object" && !Array.isArray(body)
+          ? { ...body, workspaceId: matched.workspaceId }
           : { workspaceId: matched.workspaceId };
       respond(response, 201, options.service.issue(principal, requestBody));
       return true;

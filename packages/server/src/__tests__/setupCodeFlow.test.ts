@@ -402,6 +402,26 @@ describe("setup code issue/redeem/revoke", () => {
     expect(redeemed).toMatchObject({ purpose: "host_enrollment" });
     expect(JSON.stringify(redeemed)).not.toMatch(/pw_setup_|pw_host_/);
 
+    const conflictingWorkspace = await fetch(
+      `${base}/api/v1/workspaces/${workspaceId}/setup-codes`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          schemaVersion: "workspace-setup/v1",
+          workspaceId: "workspace-conflict-001",
+          purpose: "device_session"
+        })
+      }
+    );
+    expect(conflictingWorkspace.status).toBe(409);
+    await expect(conflictingWorkspace.json()).resolves.toEqual({
+      error: "setup_code_workspace_mismatch"
+    });
+
     const strict = createServer((request, response) => {
       void handleSetupCodeHttpRequest(request, response, {
         service: setup,
