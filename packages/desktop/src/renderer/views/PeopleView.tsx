@@ -8,6 +8,8 @@ import { usePeoplePanelController } from "../hooks/usePeoplePanelController";
 import { CollaborationConnectForm } from "../team/CollaborationConnectForm";
 import { PeoplePanel } from "../team/PeoplePanel";
 import { ContentAuthorityPanel } from "../collaboration/ContentAuthorityPanel";
+import { CurrentCanvasAccessPanel } from "../collaboration/CurrentCanvasAccessPanel";
+import { useCurrentCanvasAccess } from "../hooks/useCurrentCanvasAccess";
 
 export type PeopleViewProps = {
   t: ReturnType<typeof createTranslator>;
@@ -45,6 +47,7 @@ export function PeopleView({
 
   const sessionConnected =
     status?.session.phase === "connected" || status?.session.phase === "ready";
+  const currentCanvasAccess = useCurrentCanvasAccess({ api, canvasId, status });
 
   // Subscribe only: the project shell owns the shared hub's active project/canvas binding.
   const { snapshot, viewModel, controller } = useCollaborationReadModels({
@@ -132,6 +135,17 @@ export function PeopleView({
           await refreshMembers();
         }}
         connectSlot={<CollaborationConnectForm api={api} status={status} t={t} />}
+      />
+      <CurrentCanvasAccessPanel
+        view={currentCanvasAccess.view}
+        loading={currentCanvasAccess.loading}
+        error={currentCanvasAccess.error}
+        busy={currentCanvasAccess.busy}
+        t={t}
+        onRefresh={currentCanvasAccess.refresh}
+        onUpdateVisibility={currentCanvasAccess.updateVisibility}
+        onGrant={currentCanvasAccess.grant}
+        onRevoke={currentCanvasAccess.revoke}
       />
       <ContentAuthorityPanel api={api ?? null} canvasId={canvasId} connected={sessionConnected} t={t} />
     </section>
