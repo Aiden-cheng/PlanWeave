@@ -5,7 +5,6 @@ import {
 } from "@planweave-ai/collaboration-contracts";
 import type { ProjectAccessRepository } from "./projectAccessRepository.js";
 import type { TrustedRuntimeRegistry } from "./runtimeProjectRegistry.js";
-import type { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
 
 /**
  * Main-process control seam for the exact project/canvas scopes trusted by one
@@ -20,15 +19,12 @@ export interface TrustedProjectControlPort {
 
 export function createTrustedProjectControlPort(input: {
   runtimeRegistry: Pick<TrustedRuntimeRegistry, "expansions">;
-  workspaceIdentity: Pick<WorkspaceIdentityRepository, "workspaceForLegacyProject">;
   projectAccess: ProjectAccessRepository;
 }): TrustedProjectControlPort {
   const configuredScopes = new Map<string, CanvasScopeRef>();
   for (const expansion of input.runtimeRegistry.expansions) {
-    const workspaceId = input.workspaceIdentity.workspaceForLegacyProject(expansion.projectId);
-    if (!workspaceId) throw new Error("trusted_project_workspace_unresolved");
     const scope = canvasScopeRefSchema.parse({
-      workspaceId,
+      workspaceId: expansion.workspaceId,
       projectId: expansion.projectId,
       canvasId: expansion.canvasId
     });
@@ -39,9 +35,6 @@ export function createTrustedProjectControlPort(input: {
     const scope = canvasScopeRefSchema.parse(rawScope);
     const configured = configuredScopes.get(scopeKey(scope));
     if (!configured) return undefined;
-    if (input.workspaceIdentity.workspaceForLegacyProject(scope.projectId) !== scope.workspaceId) {
-      return undefined;
-    }
     const project = input.projectAccess.registry.projectInternal(scope.workspaceId, scope.projectId);
     const canvas = input.projectAccess.registry.canvasInternal(
       scope.workspaceId,

@@ -57,6 +57,8 @@ export type HumanMembershipServiceOptions = {
 };
 
 export type HumanProjectAuthority = {
+  hasScope(input: { workspaceId: string; projectId: string; canvasId?: string }): boolean;
+  /** Legacy adapter: true only when the project ID resolves to one trusted Workspace scope. */
   hasProject(projectId: string): boolean;
 };
 

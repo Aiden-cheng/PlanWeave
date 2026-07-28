@@ -5,7 +5,7 @@ import type {
 } from "./remoteBlockCoordinatorPorts.js";
 
 function locatorKey(locator: RemoteRuntimeLocator): string {
-  return `${locator.projectId}\0${locator.canvasId}`;
+  return `${locator.workspaceId ?? "legacy-unscoped"}\0${locator.projectId}\0${locator.canvasId}`;
 }
 
 export type ScopedRemoteRuntimeBinding = {
@@ -44,7 +44,7 @@ export class RemoteRuntimePortRegistry implements RemoteBlockRuntimeResolverPort
   }
 
   resolve(locator: RemoteRuntimeLocator): RemoteBlockRuntimePort {
-    const binding = this.ports.get(locatorKey(locator));
+    const binding = this.bindingFor(locator);
     if (!binding) {
       throw new Error(`remote_runtime_locator_unresolved:${locator.projectId}:${locator.canvasId}`);
     }
@@ -73,7 +73,7 @@ export class RemoteRuntimePortRegistry implements RemoteBlockRuntimeResolverPort
   }
 
   resolveArtifactSource(locator: RemoteRuntimeLocator): RemoteBlockArtifactSource {
-    const binding = this.ports.get(locatorKey(locator));
+    const binding = this.bindingFor(locator);
     if (!binding) {
       throw new Error(`remote_runtime_locator_unresolved:${locator.projectId}:${locator.canvasId}`);
     }
@@ -83,6 +83,16 @@ export class RemoteRuntimePortRegistry implements RemoteBlockRuntimeResolverPort
       );
     }
     return binding.artifacts;
+  }
+
+  private bindingFor(
+    locator: RemoteRuntimeLocator
+  ): { runtime: RemoteBlockRuntimePort; artifacts?: RemoteBlockArtifactSource } | undefined {
+    if (locator.workspaceId) return this.ports.get(locatorKey(locator));
+    const matches = [...this.ports.entries()].filter(([key]) =>
+      key.endsWith(`\0${locator.projectId}\0${locator.canvasId}`)
+    );
+    return matches.length === 1 ? matches[0][1] : undefined;
   }
 }
 

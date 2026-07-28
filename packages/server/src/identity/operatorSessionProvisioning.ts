@@ -15,6 +15,8 @@ export type OperatorSessionProvisioningInput = {
   credentials: readonly OperatorCredential[];
   trustedProjectIds: readonly string[];
   workspaceForProject: (projectId: string) => string | undefined;
+  /** Explicit anchor for server-admin sessions when legacy project IDs are ambiguous. */
+  serverAdminAnchorWorkspaceId?: string;
   operatorSessionTtlMs: number;
   clock?: () => Date;
 };
@@ -76,7 +78,8 @@ export function provisionConfiguredOperatorSessions(
     input.trustedProjectIds.map((projectId) => opaqueIdentifierSchema.parse(projectId))
   );
   if (trustedProjectIds.size === 0) throw new Error("operator_anchor_workspace_missing");
-  const anchorWorkspaceId = input.workspaceForProject([...trustedProjectIds][0]);
+  const anchorWorkspaceId =
+    input.serverAdminAnchorWorkspaceId ?? input.workspaceForProject([...trustedProjectIds][0]);
   if (!anchorWorkspaceId) throw new Error("operator_anchor_workspace_missing");
   const ttlMs = operatorSessionTtlSchema.parse(input.operatorSessionTtlMs);
   const clock = input.clock ?? (() => new Date());

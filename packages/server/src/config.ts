@@ -140,12 +140,10 @@ export const serverConfigSchema = serverConfigInputSchema
     if (config.limits.heartbeatIntervalMs >= config.limits.leaseDurationMs) {
       context.addIssue({ code: "custom", message: "server_heartbeat_must_precede_lease" });
     }
-    const projectRoots = new Set(config.trustedProjects.map((project) => project.projectRoot));
-    const projectIds = new Set(config.trustedProjects.map((project) => project.projectId));
-    if (
-      projectRoots.size !== config.trustedProjects.length ||
-      projectIds.size !== config.trustedProjects.length
-    ) {
+    const projectScopes = new Set(
+      config.trustedProjects.map((project) => `${project.workspaceId}\0${project.projectId}`)
+    );
+    if (projectScopes.size !== config.trustedProjects.length) {
       context.addIssue({ code: "custom", message: "server_trusted_project_duplicate" });
     }
     if (config.databasePath !== join(config.dataDirectory, "planweave-server.sqlite")) {

@@ -38,6 +38,7 @@ export interface RemoteCoordinatorCheckpointPort {
 }
 
 export type RemoteRuntimeLocator = {
+  workspaceId?: string;
   projectId: string;
   canvasId: string;
 };

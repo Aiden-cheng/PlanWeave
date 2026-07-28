@@ -29,21 +29,34 @@ describe("createTrustedRuntimeRegistry", () => {
     directories.push(workspace.home, workspace.root);
     await expect(
       createTrustedRuntimeRegistry([
-        { projectId: "wrong-project", canvasId: "default", projectRoot: workspace.root }
+        {
+          workspaceId: "workspace-one",
+          projectId: "wrong-project",
+          canvasId: "default",
+          projectRoot: workspace.root
+        }
       ])
     ).rejects.toThrow("trusted_project_identity_mismatch");
 
-    const locator = { projectId: workspace.init.workspace.id, canvasId: "default" };
+    const locator = {
+      workspaceId: "workspace-one",
+      projectId: workspace.init.workspace.id,
+      canvasId: "default"
+    };
     const trusted = await createTrustedRuntimeRegistry([
       { ...locator, projectRoot: workspace.root }
     ]);
     expect(trusted.locators).toEqual([locator]);
-    expect(trusted.hasProject(locator.projectId)).toBe(true);
+    expect(trusted.hasScope(locator)).toBe(true);
     expect(trusted.hasProject("unknown-project")).toBe(false);
-    expect(trusted.hasCanvas(locator.projectId, locator.canvasId)).toBe(true);
+    expect(trusted.hasScope(locator)).toBe(true);
     expect(trusted.hasCanvas(locator.projectId, "unknown-canvas")).toBe(false);
     expect(trusted.hasCanvas("unknown-project", locator.canvasId)).toBe(false);
-    trusted.locators.push({ projectId: "unknown-project", canvasId: "default" });
+    trusted.locators.push({
+      workspaceId: "workspace-unknown",
+      projectId: "unknown-project",
+      canvasId: "default"
+    });
     expect(trusted.hasProject("unknown-project")).toBe(false);
     expect(trusted.hasCanvas("unknown-project", "default")).toBe(false);
     expect(() => trusted.registry.resolve(locator)).not.toThrow();
@@ -54,11 +67,15 @@ describe("createTrustedRuntimeRegistry", () => {
   it("treats an installed scoped package resolver as authoritative", async () => {
     const workspace = await createTestWorkspace(basicManifest());
     directories.push(workspace.home, workspace.root);
-    const locator = { projectId: workspace.init.workspace.id, canvasId: "default" };
+    const locator = {
+      workspaceId: "workspace-one",
+      projectId: workspace.init.workspace.id,
+      canvasId: "default"
+    };
     const trusted = await createTrustedRuntimeRegistry([
       { ...locator, projectRoot: workspace.root }
     ]);
-    const scope = { workspaceId: "workspace-1", ...locator };
+    const scope = locator;
 
     expect(trusted.scopedWorkItemPackagePort(scope)).toBeDefined();
     trusted.setScopedPackageResolver(() => undefined);
@@ -67,10 +84,52 @@ describe("createTrustedRuntimeRegistry", () => {
     trusted.close();
   });
 
+  it("keeps identical project and canvas IDs isolated by Workspace scope", async () => {
+    const workspace = await createTestWorkspace(basicManifest());
+    directories.push(workspace.home, workspace.root);
+    const projectId = workspace.init.workspace.id;
+    const trusted = await createTrustedRuntimeRegistry([
+      {
+        workspaceId: "workspace-a",
+        projectId,
+        canvasId: "default",
+        projectRoot: workspace.root
+      },
+      {
+        workspaceId: "workspace-b",
+        projectId,
+        canvasId: "default",
+        projectRoot: workspace.root
+      }
+    ]);
+
+    expect(
+      trusted.hasScope({ workspaceId: "workspace-a", projectId, canvasId: "default" })
+    ).toBe(true);
+    expect(
+      trusted.hasScope({ workspaceId: "workspace-b", projectId, canvasId: "default" })
+    ).toBe(true);
+    expect(trusted.hasCanvas(projectId, "default")).toBe(false);
+    expect(() => trusted.registry.resolve({ projectId, canvasId: "default" })).toThrow(
+      "remote_runtime_locator_unresolved"
+    );
+    expect(() =>
+      trusted.registry.resolve({ workspaceId: "workspace-a", projectId, canvasId: "default" })
+    ).not.toThrow();
+    expect(() =>
+      trusted.registry.resolve({ workspaceId: "workspace-b", projectId, canvasId: "default" })
+    ).not.toThrow();
+    trusted.close();
+  });
+
   it("acquires and releases scoped runtime and artifact bindings", async () => {
     const workspace = await createTestWorkspace(basicManifest());
     directories.push(workspace.home, workspace.root);
-    const locator = { projectId: workspace.init.workspace.id, canvasId: "default" };
+    const locator = {
+      workspaceId: "workspace-one",
+      projectId: workspace.init.workspace.id,
+      canvasId: "default"
+    };
     const trusted = await createTrustedRuntimeRegistry([
       { ...locator, projectRoot: workspace.root }
     ]);
@@ -124,15 +183,21 @@ describe("createTrustedRuntimeRegistry", () => {
 
     const projectId = workspace.init.workspace.id;
     const trusted = await createTrustedRuntimeRegistry([
-      { projectId, projectRoot: workspace.root, trustAllDeclaredCanvases: true }
+      {
+        workspaceId: "workspace-one",
+        projectId,
+        projectRoot: workspace.root,
+        trustAllDeclaredCanvases: true
+      }
     ]);
     expect(trusted.locators).toEqual([
-      { projectId, canvasId: "default" },
-      { projectId, canvasId: "secondary" }
+      { workspaceId: "workspace-one", projectId, canvasId: "default" },
+      { workspaceId: "workspace-one", projectId, canvasId: "secondary" }
     ]);
     expect(trusted.expansions).toEqual([
       expect.objectContaining({
         projectId,
+        workspaceId: "workspace-one",
         projectRoot: workspace.root,
         canvasId: "default",
         packageDir: workspace.init.workspace.packageDir
@@ -141,9 +206,13 @@ describe("createTrustedRuntimeRegistry", () => {
     ]);
     expect(Object.isFrozen(trusted.expansions)).toBe(true);
     expect(Object.isFrozen(trusted.expansions[0])).toBe(true);
-    expect(trusted.hasCanvas(projectId, "secondary")).toBe(true);
+    expect(trusted.hasScope({ workspaceId: "workspace-one", projectId, canvasId: "secondary" })).toBe(
+      true
+    );
     expect(trusted.hasCanvas(projectId, "undeclared")).toBe(false);
-    expect(() => trusted.registry.resolve({ projectId, canvasId: "secondary" })).not.toThrow();
+    expect(() =>
+      trusted.registry.resolve({ workspaceId: "workspace-one", projectId, canvasId: "secondary" })
+    ).not.toThrow();
     trusted.close();
   });
 
@@ -172,12 +241,14 @@ describe("createTrustedRuntimeRegistry", () => {
 
     const projectId = workspace.init.workspace.id;
     const trusted = await createTrustedRuntimeRegistry([
-      { projectId, projectRoot: workspace.root, canvasId: "default" }
+      { workspaceId: "workspace-one", projectId, projectRoot: workspace.root, canvasId: "default" }
     ]);
-    expect(trusted.locators).toEqual([{ projectId, canvasId: "default" }]);
+    expect(trusted.locators).toEqual([{ workspaceId: "workspace-one", projectId, canvasId: "default" }]);
     expect(trusted.hasCanvas(projectId, "default")).toBe(true);
     expect(trusted.hasCanvas(projectId, "secondary")).toBe(false);
-    expect(() => trusted.registry.resolve({ projectId, canvasId: "secondary" })).toThrow(
+    expect(() =>
+      trusted.registry.resolve({ workspaceId: "workspace-one", projectId, canvasId: "secondary" })
+    ).toThrow(
       "remote_runtime_locator_unresolved"
     );
     trusted.close();
@@ -189,6 +260,7 @@ describe("createTrustedRuntimeRegistry", () => {
     await expect(
       createTrustedRuntimeRegistry([
         {
+          workspaceId: "workspace-one",
           projectId: workspace.init.workspace.id,
           projectRoot: workspace.root,
           canvasId: "missing"

@@ -257,6 +257,25 @@ function prepareAclRegistryMigrationForStartup(input: {
   retryAclRegistryMigration(input.database, scope);
 }
 
+function uniqueConfiguredWorkspaceId(input: {
+  runtimeRegistry: Pick<Awaited<ReturnType<typeof createTrustedRuntimeRegistry>>, "expansions">;
+  projectId: string;
+  canvasId?: string;
+}): string | undefined {
+  const workspaceIds = [
+    ...new Set(
+      input.runtimeRegistry.expansions
+        .filter(
+          (scope) =>
+            scope.projectId === input.projectId &&
+            (input.canvasId === undefined || scope.canvasId === input.canvasId)
+        )
+        .map((scope) => scope.workspaceId)
+    )
+  ];
+  return workspaceIds.length === 1 ? workspaceIds[0] : undefined;
+}
+
 export async function createDistributedServerComposition(
   options: DistributedServerCompositionOptions
 ): Promise<DistributedServerComposition> {
@@ -408,7 +427,21 @@ export async function createDistributedServerComposition(
       serverBaseUrl: config.publicUrl.endsWith("/") ? config.publicUrl : `${config.publicUrl}/`,
       allowInsecureTransport: config.allowInsecureDevelopment,
       clock,
-      operatorSessionTtlMs: config.operatorSessionTtlMs
+      operatorSessionTtlMs: config.operatorSessionTtlMs,
+      onWorkspaceDeviceMembershipCreated: ({ workspaceId, humanPrincipalId, role }) => {
+        const projectIds = new Set<string>();
+        for (const scope of runtimeRegistry.expansions) {
+          if (scope.workspaceId !== workspaceId || projectIds.has(scope.projectId)) continue;
+          projectIds.add(scope.projectId);
+          projectAccess!.synchronizeHumanMembershipOwnerInCallerTransaction({
+            workspaceId,
+            projectId: scope.projectId,
+            humanPrincipalId,
+            transition: "member_joined",
+            membershipRole: role
+          });
+        }
+      }
     });
     const workspaceIdentity = new WorkspaceIdentityRepository(server.database);
     projectAccess = new ProjectAccessRepository(server.database, clock);
@@ -426,7 +459,11 @@ export async function createDistributedServerComposition(
       return createManifestWorkItemPort(manifest, input.canvasId);
     });
     runtimeRegistry.registry.setScopedResolver(async (locator) => {
-      const workspaceId = workspaceIdentity.workspaceForLegacyProject(locator.projectId);
+      const workspaceId = locator.workspaceId ?? uniqueConfiguredWorkspaceId({
+        runtimeRegistry,
+        projectId: locator.projectId,
+        canvasId: locator.canvasId
+      });
       if (!workspaceId || !workspaceIdentity.workspaceExists(workspaceId)) {
         throw new Error("remote_runtime_workspace_unresolved");
       }
@@ -459,23 +496,32 @@ export async function createDistributedServerComposition(
         release() {}
       };
     });
-    const canvasesByProject = new Map<
+    const canvasesByProjectScope = new Map<
       string,
-      { projectRoot: string; canvases: typeof runtimeRegistry.expansions }
+      {
+        workspaceId: string;
+        projectId: string;
+        projectRoot: string;
+        canvases: typeof runtimeRegistry.expansions;
+      }
     >();
     for (const expansion of runtimeRegistry.expansions) {
-      const current = canvasesByProject.get(expansion.projectId);
+      const projectScopeKey = `${expansion.workspaceId}\0${expansion.projectId}`;
+      const current = canvasesByProjectScope.get(projectScopeKey);
       if (current) {
         current.canvases = [...current.canvases, expansion];
       } else {
-        canvasesByProject.set(expansion.projectId, {
+        canvasesByProjectScope.set(projectScopeKey, {
+          workspaceId: expansion.workspaceId,
+          projectId: expansion.projectId,
           projectRoot: expansion.projectRoot,
           canvases: [expansion]
         });
       }
     }
-    for (const [projectId, project] of canvasesByProject) {
-      const workspaceId = workspaceIdentity.ensureWorkspaceForLegacyProject(projectId);
+    for (const project of canvasesByProjectScope.values()) {
+      const { workspaceId, projectId } = project;
+      workspaceIdentity.ensureConfiguredWorkspace(workspaceId);
       prepareAclRegistryMigrationForStartup({
         database: server.database,
         workspaceId,
@@ -512,6 +558,10 @@ export async function createDistributedServerComposition(
         project.canvases.map((canvas) => canvas.canvasId)
       );
       projectAccess.finalizeProjectCutover(workspaceId, projectId);
+    }
+    for (const projectId of new Set(runtimeRegistry.expansions.map((scope) => scope.projectId))) {
+      const workspaceId = uniqueConfiguredWorkspaceId({ runtimeRegistry, projectId });
+      if (workspaceId) workspaceIdentity.ensureLegacyProjectAdapter(projectId, workspaceId);
     }
     packageSnapshots = new PackageSnapshotRepository(
       server.database,
@@ -562,7 +612,14 @@ export async function createDistributedServerComposition(
       database: server.database,
       credentials: config.operatorCredentials,
       trustedProjectIds: [...new Set(runtimeRegistry.expansions.map((canvas) => canvas.projectId))],
-      workspaceForProject: (projectId) => workspaceIdentity.workspaceForLegacyProject(projectId),
+      serverAdminAnchorWorkspaceId: runtimeRegistry.expansions[0]?.workspaceId,
+      workspaceForProject: (projectId) => {
+        const scopes = runtimeRegistry.expansions.filter(
+          (expansion) => expansion.projectId === projectId
+        );
+        const workspaceIds = [...new Set(scopes.map((scope) => scope.workspaceId))];
+        return workspaceIds.length === 1 ? workspaceIds[0] : undefined;
+      },
       operatorSessionTtlMs: config.operatorSessionTtlMs,
       clock
     });
@@ -625,9 +682,15 @@ export async function createDistributedServerComposition(
       clock
     });
     const commentServices = new Map<string, CommentService>();
-    for (const { projectId } of runtimeRegistry.locators) {
+    for (const { projectId, canvasId } of runtimeRegistry.locators) {
       if (commentServices.has(projectId)) continue;
-      const packagePort = runtimeRegistry.workItemPackagePort(projectId);
+      const workspaceId = uniqueConfiguredWorkspaceId({ runtimeRegistry, projectId, canvasId });
+      if (!workspaceId) continue;
+      const packagePort = runtimeRegistry.scopedWorkItemPackagePort({
+        workspaceId,
+        projectId,
+        canvasId
+      });
       if (!packagePort) throw new Error("trusted_project_work_item_port_missing");
       commentServices.set(
         projectId,
@@ -696,9 +759,15 @@ export async function createDistributedServerComposition(
       });
       return { service, release: acquired.release };
     };
-    for (const { projectId } of runtimeRegistry.locators) {
+    for (const { projectId, canvasId } of runtimeRegistry.locators) {
       if (assignmentServices.has(projectId)) continue;
-      const packagePort = runtimeRegistry.workItemPackagePort(projectId);
+      const workspaceId = uniqueConfiguredWorkspaceId({ runtimeRegistry, projectId, canvasId });
+      if (!workspaceId) continue;
+      const packagePort = runtimeRegistry.scopedWorkItemPackagePort({
+        workspaceId,
+        projectId,
+        canvasId
+      });
       if (!packagePort) throw new Error("trusted_project_work_item_port_missing");
       assignmentServices.set(
         projectId,
@@ -1021,7 +1090,6 @@ export async function createDistributedServerComposition(
       ownsHttpServer: false,
       trustedProjectControl: createTrustedProjectControlPort({
         runtimeRegistry,
-        workspaceIdentity,
         projectAccess: initializedProjectAccess
       }),
       readiness: () => readiness.readiness(),

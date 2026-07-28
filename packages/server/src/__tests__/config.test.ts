@@ -30,7 +30,14 @@ async function secureConfig() {
       privateKeyPath: join(root, "server.key")
     },
     dataDirectory: join(root, "data"),
-    trustedProjects: [{ projectId: "project-1", canvasId: "default", projectRoot: root }],
+    trustedProjects: [
+      {
+        workspaceId: "workspace-1",
+        projectId: "project-1",
+        canvasId: "default",
+        projectRoot: root
+      }
+    ],
     operatorCredentials: [
       {
         operatorId: "admin",
@@ -111,7 +118,7 @@ describe("server config", () => {
     );
   });
 
-  it("rejects duplicate roots, duplicate project ids, and crafted database paths", async () => {
+  it("rejects duplicate exact scopes and accepts same IDs in separate Workspaces", async () => {
     const input = await secureConfig();
     const duplicateRoot = {
       ...input,
@@ -119,33 +126,52 @@ describe("server config", () => {
         ...input.trustedProjects,
         {
           projectId: "project-2",
+          workspaceId: "workspace-2",
           canvasId: "default",
           projectRoot: input.trustedProjects[0].projectRoot
         }
       ]
     };
-    expect(() => parseServerConfig(duplicateRoot)).toThrow("server_trusted_project_duplicate");
+    expect(parseServerConfig(duplicateRoot).trustedProjects).toHaveLength(2);
 
-    const duplicateProjectId = {
+    const duplicateScope = {
       ...input,
       trustedProjects: [
         ...input.trustedProjects,
         {
+          projectId: "project-1",
+          workspaceId: "workspace-1",
+          canvasId: "default",
+          projectRoot: join(input.dataDirectory, "other-project")
+        }
+      ]
+    };
+    expect(() => parseServerConfig(duplicateScope)).toThrow("server_trusted_project_duplicate");
+
+    const sameProjectInOtherWorkspace = {
+      ...input,
+      trustedProjects: [
+        ...input.trustedProjects,
+        {
+          workspaceId: "workspace-2",
           projectId: "project-1",
           canvasId: "default",
           projectRoot: join(input.dataDirectory, "other-project")
         }
       ]
     };
-    expect(() => parseServerConfig(duplicateProjectId)).toThrow("server_trusted_project_duplicate");
+    expect(parseServerConfig(sameProjectInOtherWorkspace).trustedProjects).toHaveLength(2);
 
     expect(
       parseServerConfig({ ...input, trustedProjects: [{ ...input.trustedProjects[0] }] })
-    ).toMatchObject({ trustedProjects: [{ projectId: "project-1", canvasId: "default" }] });
+    ).toMatchObject({
+      trustedProjects: [{ workspaceId: "workspace-1", projectId: "project-1", canvasId: "default" }]
+    });
     const allDeclared = parseServerConfig({
       ...input,
       trustedProjects: [
         {
+          workspaceId: "workspace-1",
           projectId: "project-1",
           projectRoot: input.trustedProjects[0].projectRoot,
           trustAllDeclaredCanvases: true
@@ -161,7 +187,11 @@ describe("server config", () => {
       parseServerConfig({
         ...input,
         trustedProjects: [
-          { projectId: "project-1", projectRoot: input.trustedProjects[0].projectRoot }
+          {
+            workspaceId: "workspace-1",
+            projectId: "project-1",
+            projectRoot: input.trustedProjects[0].projectRoot
+          }
         ]
       })
     ).toThrow("trusted_project_canvas_required");
@@ -170,6 +200,7 @@ describe("server config", () => {
         ...input,
         trustedProjects: [
           {
+            workspaceId: "workspace-1",
             projectId: "project-1",
             canvasId: "default",
             projectRoot: input.trustedProjects[0].projectRoot,

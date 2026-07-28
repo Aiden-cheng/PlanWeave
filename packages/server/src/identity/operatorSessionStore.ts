@@ -116,6 +116,19 @@ export class OperatorSessionStore {
     return row ? this.parseRow(row) : undefined;
   }
 
+  /** Legacy issuer lookup; resolves only one durable operator session ID. */
+  findBySessionIdAcrossWorkspaces(operatorSessionId: string): OperatorSession | undefined {
+    const parsedSessionId = operatorSessionIdSchema.parse(operatorSessionId);
+    const rows = this.database
+      .prepare(
+        `SELECT workspace_id,operator_session_id,operator_id,credential_sha256,
+                issued_at,expires_at,revoked_at
+         FROM workspace_operator_sessions WHERE operator_session_id=?`
+      )
+      .all(parsedSessionId) as Record<string, unknown>[];
+    return rows.length === 1 ? this.parseRow(rows[0]) : undefined;
+  }
+
   private parseRow(row: Record<string, unknown>): OperatorSession {
     return operatorSessionSchema.parse({
       schemaVersion: "workspace-identity/v1",
@@ -167,12 +180,20 @@ export class OperatorSessionStore {
       .prepare("SELECT 1 FROM workspaces WHERE workspace_id=?")
       .get(workspaceId);
     if (!workspace) throw new Error("workspace_not_found");
-    const state = this.database
+    const migrationState = this.database
       .prepare(
         `SELECT status,interruption_marker FROM workspace_identity_migrations
          WHERE workspace_id=? ORDER BY updated_at DESC LIMIT 1`
       )
       .get(workspaceId);
+    const state =
+      migrationState ??
+      this.database
+        .prepare(
+          `SELECT status,interruption_marker FROM workspace_identity_registrations
+           WHERE workspace_id=?`
+        )
+        .get(workspaceId);
     if (
       !state ||
       state.status !== "completed" ||

@@ -918,5 +918,18 @@ function runWorkspaceIdentityBackfill(
 }
 
 export const identityMigrations: readonly Migration[] = [
-  { version: 27, sql: migration27Sql, after: backfillWorkspaceIdentity }
+  { version: 27, sql: migration27Sql, after: backfillWorkspaceIdentity },
+  {
+    version: 34,
+    sql: `
+CREATE TABLE IF NOT EXISTS workspace_identity_registrations (
+  workspace_id TEXT PRIMARY KEY REFERENCES workspaces(workspace_id),
+  registration_id TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL CHECK(status='completed'),
+  interruption_marker TEXT NOT NULL CHECK(interruption_marker='read_cutover_complete'),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`
+  }
 ];

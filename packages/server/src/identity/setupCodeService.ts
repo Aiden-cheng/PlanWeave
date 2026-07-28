@@ -77,6 +77,11 @@ export type SetupCodeServiceOptions = {
   deviceSessionTtlMs?: number;
   operatorSessionTtlMs?: number;
   hostCredentialTtlMs?: number;
+  onWorkspaceDeviceMembershipCreated?: (input: {
+    workspaceId: string;
+    humanPrincipalId: string;
+    role: "owner" | "member";
+  }) => void;
 };
 
 export class SetupCodeService {
@@ -91,6 +96,8 @@ export class SetupCodeService {
   private readonly deviceSessionTtlMs: number;
   private readonly operatorSessionTtlMs: number;
   private readonly hostCredentialTtlMs: number;
+  private readonly onWorkspaceDeviceMembershipCreated:
+    | SetupCodeServiceOptions["onWorkspaceDeviceMembershipCreated"];
 
   constructor(options: SetupCodeServiceOptions) {
     this.database = options.database;
@@ -104,6 +111,7 @@ export class SetupCodeService {
     this.deviceSessionTtlMs = options.deviceSessionTtlMs ?? DEFAULT_DEVICE_TTL_MS;
     this.operatorSessionTtlMs = options.operatorSessionTtlMs ?? DEFAULT_OPERATOR_SESSION_TTL_MS;
     this.hostCredentialTtlMs = options.hostCredentialTtlMs ?? DEFAULT_HOST_CREDENTIAL_TTL_MS;
+    this.onWorkspaceDeviceMembershipCreated = options.onWorkspaceDeviceMembershipCreated;
     this.assertTransportPolicy(this.serverBaseUrl, this.allowInsecureTransport);
   }
 
@@ -291,6 +299,11 @@ export class SetupCodeService {
         issuedAt,
         expiresAt
       );
+    this.onWorkspaceDeviceMembershipCreated?.({
+      workspaceId: grant.workspaceId,
+      humanPrincipalId,
+      role
+    });
     this.store.markRedeemed(grant.setupCodeId, deviceSessionId);
 
     const connectionProfile = this.connectionProfile(grant.workspaceId, workspace.displayName);
@@ -520,10 +533,9 @@ export class SetupCodeService {
     grant: NonNullable<ReturnType<SetupCodeStore["findByToken"]>>
   ): void {
     if (!grant.issuer) return;
-    const session = this.operators.findBySessionId(
-      grant.workspaceId,
-      grant.issuer.operatorSessionId
-    );
+    const session =
+      this.operators.findBySessionId(grant.workspaceId, grant.issuer.operatorSessionId) ??
+      this.operators.findBySessionIdAcrossWorkspaces(grant.issuer.operatorSessionId);
     if (!session || session.revokedAt !== null) {
       throw new SetupCodeError("setup_code_issuer_revoked");
     }

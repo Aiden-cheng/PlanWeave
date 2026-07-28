@@ -61,23 +61,20 @@ function remoteManifest(): PlanPackageManifest {
 
 async function configureAutomaticExecutionTarget(input: {
   databasePath: string;
+  workspaceId: string;
   projectId: string;
   canvasId: string;
   blockRef: string;
 }): Promise<number> {
   const database = await openServerDatabase(input.databasePath, 5_000);
   try {
-    const workspaceId = new WorkspaceIdentityRepository(database).workspaceForLegacyProject(
-      input.projectId
-    );
-    if (!workspaceId) throw new Error("test_workspace_mapping_missing");
     return new AuthorityRepository(database)
       .applyExecutionTarget({
         mutation: {
           schemaVersion: "execution-target/v1",
           scope: {
             kind: "block",
-            workspaceId,
+            workspaceId: input.workspaceId,
             projectId: input.projectId,
             canvasId: input.canvasId,
             blockRef: input.blockRef
@@ -100,13 +97,14 @@ async function setup() {
   httpServers.push(httpServer);
   const dataDirectory = join(workspace.root, "server-data");
   const projectId = workspace.init.workspace.id;
+  const workspaceId = "workspace-server";
   const config = parseServerConfig({
     version: "server-config/v1",
     bind: { host: "127.0.0.1", port: 7_443 },
     publicUrl: "http://127.0.0.1:7443",
     allowInsecureDevelopment: true,
     dataDirectory,
-    trustedProjects: [{ projectId, canvasId: "default", projectRoot: workspace.root }],
+    trustedProjects: [{ workspaceId, projectId, canvasId: "default", projectRoot: workspace.root }],
     operatorCredentials: [
       {
         operatorId: "admin",
@@ -128,6 +126,7 @@ async function setup() {
   compositions.push(composition);
   const executionTargetRevision = await configureAutomaticExecutionTarget({
     databasePath: config.databasePath,
+    workspaceId,
     projectId,
     canvasId: "default",
     blockRef: "T-001#B-001"
@@ -138,6 +137,7 @@ async function setup() {
   return {
     composition,
     projectId,
+    workspaceId,
     databasePath: config.databasePath,
     origin: `http://127.0.0.1:${address.port}`,
     executionTargetRevision
@@ -185,10 +185,7 @@ describe("distributed server composition", () => {
 
     const database = await openServerDatabase(fixture.databasePath, 5_000);
     try {
-      const workspaceId = new WorkspaceIdentityRepository(database).workspaceForLegacyProject(
-        fixture.projectId
-      );
-      expect(workspaceId).toBe(scopes[0].workspaceId);
+      expect(fixture.workspaceId).toBe(scopes[0].workspaceId);
       expect(
         fixture.composition.trustedProjectControl.resolveTrustedProjectScope({
           workspaceId: "workspace-other-001",
@@ -199,6 +196,90 @@ describe("distributed server composition", () => {
     } finally {
       database.close();
     }
+  });
+
+  it("keeps identical project and canvas IDs isolated across configured Workspace sessions", async () => {
+    const workspace = await createTestWorkspace(remoteManifest());
+    directories.push(workspace.home, workspace.root);
+    const httpServer = createServer();
+    httpServers.push(httpServer);
+    const projectId = workspace.init.workspace.id;
+    const workspaceA = "workspace-scope-a";
+    const workspaceB = "workspace-scope-b";
+    const config = parseServerConfig({
+      version: "server-config/v1",
+      bind: { host: "127.0.0.1", port: 7_443 },
+      publicUrl: "http://127.0.0.1:7443",
+      allowInsecureDevelopment: true,
+      dataDirectory: join(workspace.root, "same-id-server-data"),
+      trustedProjects: [
+        { workspaceId: workspaceA, projectId, canvasId: "default", projectRoot: workspace.root },
+        { workspaceId: workspaceB, projectId, canvasId: "default", projectRoot: workspace.root }
+      ],
+      operatorCredentials: [
+        {
+          operatorId: "admin",
+          tokenSha256: hashOperatorToken(adminToken),
+          projectIds: [],
+          serverAdmin: true
+        }
+      ]
+    });
+    const composition = await createDistributedServerComposition({ httpServer, config });
+    compositions.push(composition);
+    await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
+    const address = httpServer.address();
+    if (!address || typeof address === "string") throw new Error("Expected HTTP address");
+    const origin = `http://127.0.0.1:${address.port}`;
+
+    const redeemDevice = async (workspaceId: string, displayName: string): Promise<string> => {
+      const issue = await fetch(`${origin}/api/v1/workspaces/${workspaceId}/setup-codes`, {
+        method: "POST",
+        headers: jsonHeaders(adminToken),
+        body: JSON.stringify({ schemaVersion: "workspace-setup/v1", purpose: "device_session" })
+      });
+      expect(issue.status).toBe(201);
+      const issued = (await issue.json()) as { setupCode: string };
+      const redeem = await fetch(`${origin}/api/v1/setup-codes/redeem`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: "workspace-setup/v1",
+          purpose: "device_session",
+          setupCode: issued.setupCode,
+          displayName
+        })
+      });
+      expect(redeem.status).toBe(200);
+      return ((await redeem.json()) as { deviceToken: string }).deviceToken;
+    };
+
+    const [tokenA, tokenB] = await Promise.all([
+      redeemDevice(workspaceA, "Workspace A Owner"),
+      redeemDevice(workspaceB, "Workspace B Owner")
+    ]);
+    const [connectionA, connectionB] = await Promise.all([
+      fetch(`${origin}/api/v1/workspace-connection`, { headers: { Authorization: `Bearer ${tokenA}` } }),
+      fetch(`${origin}/api/v1/workspace-connection`, { headers: { Authorization: `Bearer ${tokenB}` } })
+    ]);
+    expect(connectionA.status).toBe(200);
+    expect(connectionB.status).toBe(200);
+    await expect(connectionA.json()).resolves.toMatchObject({
+      items: [expect.objectContaining({ workspaceId: workspaceA })]
+    });
+    await expect(connectionB.json()).resolves.toMatchObject({
+      items: [expect.objectContaining({ workspaceId: workspaceB })]
+    });
+    expect(composition.trustedProjectControl.resolveTrustedProjectScope({
+      workspaceId: workspaceA,
+      projectId,
+      canvasId: "default"
+    })).toMatchObject({ workspaceId: workspaceA });
+    expect(composition.trustedProjectControl.resolveTrustedProjectScope({
+      workspaceId: workspaceB,
+      projectId,
+      canvasId: "default"
+    })).toMatchObject({ workspaceId: workspaceB });
   });
 
   it("materializes trusted registry owners during bootstrap for listing and management", async () => {
@@ -271,7 +352,9 @@ describe("distributed server composition", () => {
       publicUrl: "http://127.0.0.1:7443",
       allowInsecureDevelopment: true,
       dataDirectory,
-      trustedProjects: [{ projectId, projectRoot: workspace.root, trustAllDeclaredCanvases: true }],
+      trustedProjects: [
+        { workspaceId: "workspace-server", projectId, projectRoot: workspace.root, trustAllDeclaredCanvases: true }
+      ],
       operatorCredentials: [
         {
           operatorId: "admin",
@@ -285,6 +368,7 @@ describe("distributed server composition", () => {
     compositions.push(composition);
     const executionTargetRevision = await configureAutomaticExecutionTarget({
       databasePath: config.databasePath,
+      workspaceId: "workspace-server",
       projectId,
       canvasId: "secondary",
       blockRef: "T-001#B-001"
@@ -345,7 +429,9 @@ describe("distributed server composition", () => {
       publicUrl: "http://127.0.0.1:7443",
       allowInsecureDevelopment: true,
       dataDirectory,
-      trustedProjects: [{ projectId, projectRoot: workspace.root, canvasId: "default" }],
+      trustedProjects: [
+        { workspaceId: "workspace-server", projectId, projectRoot: workspace.root, canvasId: "default" }
+      ],
       operatorCredentials: [
         {
           operatorId: "admin",
@@ -522,7 +608,12 @@ describe("distributed server composition", () => {
       allowInsecureDevelopment: true,
       dataDirectory,
       trustedProjects: [
-        { projectId: workspace.init.workspace.id, canvasId: "default", projectRoot: workspace.root }
+        {
+          workspaceId,
+          projectId: workspace.init.workspace.id,
+          canvasId: "default",
+          projectRoot: workspace.root
+        }
       ],
       operatorCredentials: [
         {
@@ -580,7 +671,12 @@ describe("distributed server composition", () => {
         allowInsecureDevelopment: true,
         dataDirectory,
         trustedProjects: [
-          { projectId, projectRoot: workspace.root, trustAllDeclaredCanvases: true }
+          {
+            workspaceId: "workspace-server",
+            projectId,
+            projectRoot: workspace.root,
+            trustAllDeclaredCanvases: true
+          }
         ],
         operatorCredentials: [
           {
@@ -616,10 +712,7 @@ describe("distributed server composition", () => {
       join(dataDirectory, "planweave-server.sqlite"),
       5_000
     );
-    const workspaceId = new WorkspaceIdentityRepository(database).workspaceForLegacyProject(
-      projectId
-    );
-    if (!workspaceId) throw new Error("Expected workspace mapping");
+    const workspaceId = "workspace-server";
     expect(
       database
         .prepare(

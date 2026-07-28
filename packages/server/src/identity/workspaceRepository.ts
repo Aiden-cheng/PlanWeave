@@ -132,7 +132,37 @@ export class WorkspaceIdentityRepository {
          WHERE workspace_id=? ORDER BY updated_at DESC LIMIT 1`
       )
       .get(parsed) as Record<string, unknown> | undefined;
-    if (!row) throw new Error("workspace_identity_migration_not_found");
+    if (!row) {
+      const registration = this.database
+        .prepare(
+          `SELECT registration_id,workspace_id,status,interruption_marker,updated_at
+           FROM workspace_identity_registrations WHERE workspace_id=?`
+        )
+        .get(parsed) as
+        | {
+            registration_id: string;
+            workspace_id: string;
+            status: "completed";
+            interruption_marker: "read_cutover_complete";
+            updated_at: string;
+          }
+        | undefined;
+      if (!registration) throw new Error("workspace_identity_migration_not_found");
+      return identityMigrationStateSchema.parse({
+        schemaVersion: "workspace-identity-migration/v1",
+        migrationId: registration.registration_id,
+        legacyProjectId: registration.workspace_id,
+        workspaceId: registration.workspace_id,
+        fromVersion: 1,
+        toVersion: 1,
+        step: "verify_cutover",
+        status: registration.status,
+        interruptionMarker: registration.interruption_marker,
+        authoritativeReadVersion: "workspace-identity/v1",
+        failureCode: null,
+        updatedAt: registration.updated_at
+      });
+    }
     return identityMigrationStateSchema.parse({
       schemaVersion: "workspace-identity-migration/v1",
       migrationId: row.migration_id,
@@ -421,6 +451,100 @@ export class WorkspaceIdentityRepository {
     return workspaceId;
   }
 
+  /**
+   * Bind one unambiguous legacy project ID to its configured Workspace.
+   * Configured registrations with duplicate project IDs deliberately do not
+   * call this adapter, so legacy routes fail closed instead of choosing a
+   * Workspace by accident.
+  */
+  ensureLegacyProjectAdapter(projectId: string, workspaceId: string): string {
+    const parsedProjectId = projectId;
+    const parsedWorkspaceId = workspaceIdSchema.parse(workspaceId);
+    const existing = this.workspaceForLegacyProject(parsedProjectId);
+    if (existing) {
+      return existing;
+    }
+    this.ensureConfiguredWorkspace(parsedWorkspaceId);
+    const at = nowIso();
+    this.database
+      .prepare(
+        `INSERT INTO legacy_project_workspace_mappings(
+          legacy_project_id,normalized_legacy_project_identity,workspace_id,mapped_at
+        ) VALUES(?,?,?,?)`
+      )
+      .run(parsedProjectId, `legacy-project:${parsedProjectId}`, parsedWorkspaceId, at);
+    this.database
+      .prepare(
+        `INSERT INTO workspace_identity_migrations(
+          migration_id,legacy_project_id,workspace_id,from_version,to_version,step,status,
+          interruption_marker,authoritative_read_version,failure_code,updated_at
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?)`
+      )
+      .run(
+        migrationIdForLegacyProject(parsedProjectId),
+        parsedProjectId,
+        parsedWorkspaceId,
+        0,
+        1,
+        "verify_cutover",
+        "completed",
+        "read_cutover_complete",
+        "workspace-identity/v1",
+        null,
+        at
+      );
+    return parsedWorkspaceId;
+  }
+
+  /**
+   * Materialize a trusted registration's explicit Workspace without creating a
+   * project-to-workspace mapping. Legacy project IDs stay outside this path.
+   */
+  ensureConfiguredWorkspace(workspaceId: string): string {
+    const parsedWorkspaceId = workspaceIdSchema.parse(workspaceId);
+    const at = nowIso();
+    const workspace = this.database
+      .prepare(
+        "SELECT workspace_id,archived_at FROM workspaces WHERE workspace_id=?"
+      )
+      .get(parsedWorkspaceId) as { workspace_id: string; archived_at: string | null } | undefined;
+    if (workspace?.archived_at !== undefined && workspace.archived_at !== null) {
+      throw new Error("workspace_projection_conflict");
+    }
+    if (!workspace) {
+      this.database
+        .prepare(
+          "INSERT INTO workspaces(workspace_id,display_name,created_at,archived_at) VALUES(?,?,?,NULL)"
+        )
+        .run(parsedWorkspaceId, "Configured workspace", at);
+    }
+    const legacyState = this.database
+      .prepare(
+        `SELECT 1 FROM workspace_identity_migrations
+         WHERE workspace_id=? AND status='completed' AND interruption_marker='read_cutover_complete'`
+      )
+      .get(parsedWorkspaceId);
+    if (!legacyState) {
+      this.database
+        .prepare(
+          `INSERT INTO workspace_identity_registrations(
+            workspace_id,registration_id,status,interruption_marker,created_at,updated_at
+          ) VALUES(?,?, 'completed','read_cutover_complete',?,?)
+          ON CONFLICT(workspace_id) DO UPDATE SET updated_at=excluded.updated_at`
+        )
+        .run(
+          parsedWorkspaceId,
+          `workspace-registration-${createHash("sha256")
+            .update(parsedWorkspaceId)
+            .digest("hex")
+            .slice(0, 32)}`,
+          at,
+          at
+        );
+    }
+    return parsedWorkspaceId;
+  }
+
   getReadState(workspaceId: string): WorkspaceIdentityReadState | undefined {
     const row = this.database
       .prepare(
@@ -428,12 +552,21 @@ export class WorkspaceIdentityRepository {
          FROM workspace_identity_migrations WHERE workspace_id=? ORDER BY updated_at DESC LIMIT 1`
       )
       .get(workspaceId);
-    return row
+    const registration = row
+      ? undefined
+      : (this.database
+          .prepare(
+            `SELECT workspace_id,status,interruption_marker,NULL AS failure_code
+             FROM workspace_identity_registrations WHERE workspace_id=?`
+          )
+          .get(workspaceId) as Record<string, unknown> | undefined);
+    const state = row ?? registration;
+    return state
       ? {
-          workspaceId: String(row.workspace_id),
-          status: row.status as WorkspaceIdentityReadState["status"],
-          interruptionMarker: String(row.interruption_marker),
-          failureCode: row.failure_code === null ? null : String(row.failure_code)
+          workspaceId: String(state.workspace_id),
+          status: state.status as WorkspaceIdentityReadState["status"],
+          interruptionMarker: String(state.interruption_marker),
+          failureCode: state.failure_code === null ? null : String(state.failure_code)
         }
       : undefined;
   }

@@ -19,6 +19,7 @@ import {
 
 export const trustedRuntimeProjectSchema = z
   .object({
+    workspaceId: opaqueIdentifierSchema,
     projectId: opaqueIdentifierSchema,
     /** Legacy configuration: trust exactly this declared canvas. */
     canvasId: opaqueIdentifierSchema.optional(),
@@ -43,6 +44,7 @@ export const trustedRuntimeProjectSchema = z
 export type TrustedRuntimeProject = z.infer<typeof trustedRuntimeProjectSchema>;
 
 export type RuntimeCanvasExpansion = Readonly<{
+  workspaceId: string;
   projectId: string;
   projectRoot: string;
   canvasId: string;
@@ -51,10 +53,14 @@ export type RuntimeCanvasExpansion = Readonly<{
 
 export type TrustedRuntimeRegistry = {
   registry: RemoteRuntimePortRegistry;
-  locators: Array<{ projectId: string; canvasId: string }>;
+  locators: Array<{ workspaceId: string; projectId: string; canvasId: string }>;
   readonly expansions: readonly RuntimeCanvasExpansion[];
+  hasScope(input: { workspaceId: string; projectId: string; canvasId?: string }): boolean;
+  /** Legacy adapter: succeeds only when a project ID has one trusted Workspace scope. */
   hasProject(projectId: string): boolean;
+  /** Legacy adapter: succeeds only when this project/canvas pair has one trusted Workspace scope. */
   hasCanvas(projectId: string, canvasId: string): boolean;
+  /** Legacy adapter: succeeds only when a project ID has one trusted Workspace scope. */
   workItemPackagePort(projectId: string): WorkItemPackagePort | undefined;
   /** Resolve a package port for one request-scoped workspace/project/canvas tuple. */
   scopedWorkItemPackagePort(input: {
@@ -83,7 +89,7 @@ export async function createTrustedRuntimeRegistry(
   const projects = z.array(trustedRuntimeProjectSchema).min(1).parse(rawProjects);
   const registry = new RemoteRuntimePortRegistry();
   const unbind: Array<() => void> = [];
-  const locators: Array<{ projectId: string; canvasId: string }> = [];
+  const locators: Array<{ workspaceId: string; projectId: string; canvasId: string }> = [];
   const expansions: RuntimeCanvasExpansion[] = [];
   const canvasWorkItemPorts = new Map<string, Map<string, WorkItemPackagePort>>();
   const loadedGraphs = new Map<string, Awaited<ReturnType<typeof loadProjectGraph>>>();
@@ -102,14 +108,19 @@ export async function createTrustedRuntimeRegistry(
       if (!project.trustAllDeclaredCanvases && selectedCanvases.length !== 1) {
         throw new Error("trusted_project_canvas_not_declared");
       }
-      let projectPorts = canvasWorkItemPorts.get(project.projectId);
+      const projectScopeKey = scopeKey(project.workspaceId, project.projectId);
+      let projectPorts = canvasWorkItemPorts.get(projectScopeKey);
       if (!projectPorts) {
         projectPorts = new Map();
-        canvasWorkItemPorts.set(project.projectId, projectPorts);
+        canvasWorkItemPorts.set(projectScopeKey, projectPorts);
       }
       for (const canvas of selectedCanvases) {
         const workspace = projectCanvasWorkspace(loaded.workspace, canvas);
-        const locator = { projectId: project.projectId, canvasId: canvas.id };
+        const locator = {
+          workspaceId: project.workspaceId,
+          projectId: project.projectId,
+          canvasId: canvas.id
+        };
         projectPorts.set(canvas.id, {
           resolveWorkItem(workItem) {
             const manifest = manifestSchema.parse(
@@ -128,6 +139,7 @@ export async function createTrustedRuntimeRegistry(
         locators.push(locator);
         expansions.push(
           Object.freeze({
+            workspaceId: project.workspaceId,
             projectId: project.projectId,
             projectRoot: project.projectRoot,
             canvasId: canvas.id,
@@ -140,28 +152,29 @@ export async function createTrustedRuntimeRegistry(
     for (const release of unbind.reverse()) release();
     throw error;
   }
-  const projectIds = new Set(locators.map((locator) => locator.projectId));
-  const canvasIdsByProject = new Map(
-    [...canvasWorkItemPorts].map(([projectId, ports]) => [projectId, new Set(ports.keys())])
+  const canvasIdsByProjectScope = new Map(
+    [...canvasWorkItemPorts].map(([projectScopeKey, ports]) => [projectScopeKey, new Set(ports.keys())])
   );
   const projectWorkItemPorts = new Map(
-    [...canvasWorkItemPorts].map(([projectId, ports]) => [
-      projectId,
+    [...canvasWorkItemPorts].map(([projectScopeKey, ports]) => [
+      projectScopeKey,
       createRoutedWorkItemPackagePort((canvasId) => ports.get(canvasId))
     ])
   );
+  const configuredLocators = Object.freeze([...locators]);
   const scopedPackagePort = (input: {
     workspaceId: string;
     projectId: string;
     canvasId: string;
   }): WorkItemPackagePort | undefined => {
     if (
-      !projectIds.has(input.projectId) ||
-      !canvasIdsByProject.get(input.projectId)?.has(input.canvasId)
+      !canvasIdsByProjectScope
+        .get(scopeKey(input.workspaceId, input.projectId))
+        ?.has(input.canvasId)
     ) {
       return undefined;
     }
-    const port = projectWorkItemPorts.get(input.projectId);
+    const port = projectWorkItemPorts.get(scopeKey(input.workspaceId, input.projectId));
     if (!port) return undefined;
     return {
       resolveWorkItem(workItem) {
@@ -191,14 +204,19 @@ export async function createTrustedRuntimeRegistry(
     registry,
     locators,
     expansions: Object.freeze(expansions),
+    hasScope(input) {
+      const canvases = canvasIdsByProjectScope.get(scopeKey(input.workspaceId, input.projectId));
+      return canvases !== undefined && (input.canvasId === undefined || canvases.has(input.canvasId));
+    },
     hasProject(projectId) {
-      return projectIds.has(projectId);
+      return uniqueProjectScope(projectId, configuredLocators) !== undefined;
     },
     hasCanvas(projectId, canvasId) {
-      return canvasIdsByProject.get(projectId)?.has(canvasId) ?? false;
+      return uniqueCanvasScope(projectId, canvasId, configuredLocators) !== undefined;
     },
     workItemPackagePort(projectId) {
-      return projectWorkItemPorts.get(projectId);
+      const scope = uniqueProjectScope(projectId, configuredLocators);
+      return scope ? projectWorkItemPorts.get(scopeKey(scope.workspaceId, projectId)) : undefined;
     },
     scopedWorkItemPackagePort(input) {
       return externalScopedResolver ? externalScopedResolver(input) : scopedPackagePort(input);
@@ -228,4 +246,32 @@ export async function createTrustedRuntimeRegistry(
       for (const release of unbind.splice(0).reverse()) release();
     }
   };
+}
+
+function scopeKey(workspaceId: string, projectId: string): string {
+  return `${workspaceId}\0${projectId}`;
+}
+
+function uniqueProjectScope(
+  projectId: string,
+  locators: readonly { workspaceId: string; projectId: string; canvasId: string }[]
+): { workspaceId: string; projectId: string } | undefined {
+  const matches = new Map<string, { workspaceId: string; projectId: string }>();
+  for (const locator of locators) {
+    if (locator.projectId === projectId) {
+      matches.set(locator.workspaceId, { workspaceId: locator.workspaceId, projectId });
+    }
+  }
+  return matches.size === 1 ? [...matches.values()][0] : undefined;
+}
+
+function uniqueCanvasScope(
+  projectId: string,
+  canvasId: string,
+  locators: readonly { workspaceId: string; projectId: string; canvasId: string }[]
+): { workspaceId: string; projectId: string; canvasId: string } | undefined {
+  const matches = locators.filter(
+    (locator) => locator.projectId === projectId && locator.canvasId === canvasId
+  );
+  return matches.length === 1 ? matches[0] : undefined;
 }
