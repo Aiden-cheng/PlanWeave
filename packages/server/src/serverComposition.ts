@@ -7,6 +7,7 @@ import {
   manifestSchema,
   resolveProjectCanvasWorkspace
 } from "@planweave-ai/runtime";
+import { canonicalRemoteRuntimePort } from "./canonicalRemoteRuntimePort.js";
 import { ArtifactStore } from "./artifacts.js";
 import { handleAgentHostArtifactRequest } from "./artifactHttp.js";
 import {
@@ -441,7 +442,10 @@ export async function createDistributedServerComposition(
         throw new Error("remote_runtime_registry_path_mismatch");
       }
       return {
-        runtime: createRemoteBlockRuntimePort({ projectRoot: workspace }),
+        runtime: canonicalRemoteRuntimePort(
+          createRemoteBlockRuntimePort({ projectRoot: workspace }),
+          workspaceId
+        ),
         artifacts: createRemoteBlockArtifactSource({ projectRoot: workspace }),
         release() {}
       };

@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { spawnManagedProcess, type ManagedProcessTree } from "@planweave-ai/runtime";
 import type { PlanPackageManifest } from "@planweave-ai/runtime";
 import { redactRunnerEventText } from "@planweave-ai/runtime";
+import { operatorEnrollmentGrantResponseSchema } from "@planweave-ai/distributed-protocol";
 import {
   basicManifest,
   createTestWorkspace
@@ -160,6 +161,50 @@ export type HostCommandResult = {
   stdout: string;
   stderr: string;
 };
+
+type HarnessHostWorkspace = Record<string, unknown> & {
+  id: string;
+  path: string;
+};
+
+type HarnessHostConfig = Record<string, unknown> & {
+  workspaces: HarnessHostWorkspace[];
+};
+
+function parseHarnessHostConfig(value: unknown): HarnessHostConfig {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("real_process_harness_host_config_invalid");
+  }
+  const config = value as Record<string, unknown>;
+  if (!Array.isArray(config.workspaces) || config.workspaces.length !== 1) {
+    throw new Error("real_process_harness_host_config_invalid");
+  }
+  const workspace = config.workspaces[0];
+  if (
+    typeof workspace !== "object" ||
+    workspace === null ||
+    Array.isArray(workspace) ||
+    typeof workspace.id !== "string" ||
+    typeof workspace.path !== "string"
+  ) {
+    throw new Error("real_process_harness_host_config_invalid");
+  }
+  return { ...config, workspaces: [workspace as HarnessHostWorkspace] };
+}
+
+async function configureHostWorkspace(
+  configPath: string,
+  workspaceId: string
+): Promise<void> {
+  const rawConfig: unknown = JSON.parse(await readFile(configPath, "utf8"));
+  const config = parseHarnessHostConfig(rawConfig);
+  const [workspace] = config.workspaces;
+  await writeFile(
+    configPath,
+    JSON.stringify({ ...config, workspaces: [{ ...workspace, id: workspaceId }] }),
+    "utf8"
+  );
+}
 
 function redactLogText(value: string): string {
   try {
@@ -896,7 +941,8 @@ export class RealProcessAcpHarness {
         `real_process_harness_enroll_grant_failed:${grantResponse.status}\n${this.diagnostics()}`
       );
     }
-    const grant = (await grantResponse.json()) as { enrollmentCode: string };
+    const grant = operatorEnrollmentGrantResponseSchema.parse(await grantResponse.json());
+    await configureHostWorkspace(this.paths.hostConfig, grant.workspaceId);
     const enrollment = await this.runHostCommand([
       "enroll",
       "--config",
@@ -1031,7 +1077,8 @@ export class RealProcessAcpHarness {
         `real_process_harness_secondary_enroll_grant_failed:${grantResponse.status}\n${this.diagnostics()}`
       );
     }
-    const grant = (await grantResponse.json()) as { enrollmentCode: string };
+    const grant = operatorEnrollmentGrantResponseSchema.parse(await grantResponse.json());
+    await configureHostWorkspace(configPath, grant.workspaceId);
     const enrollment = await this.runHostCommand([
       "enroll",
       "--config",
