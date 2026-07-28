@@ -3,7 +3,8 @@ import type { AssignmentTarget, WorkItemRef } from "@planweave-ai/collaboration-
 import { parseWorkItemKey, workItemKey } from "../../shared/collaborationReadModels.js";
 import {
   useAssigneePickerController,
-  type AssigneeAuthorityRole
+  type AssigneeAuthorityRole,
+  type TaskHostDispatchResult
 } from "../hooks/useAssigneePickerController";
 import type { createTranslator } from "../i18n";
 import type { PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
@@ -14,6 +15,10 @@ export type AssigneeInspectorFieldProps = {
   t: ReturnType<typeof createTranslator>;
   api?: PlanWeaveCollaborationApi | null;
   className?: string;
+  taskExecutionBlocks?: readonly {
+    workItem: Extract<WorkItemRef, { kind: "block" }>;
+    dispatchable: boolean;
+  }[];
   /**
    * Which independent authority axes to render.
    * Defaults to responsibility + reviewer, plus Host execution for Block work items.
@@ -27,10 +32,7 @@ export type AssigneeInspectorFieldProps = {
   }) => void;
 };
 
-function roleLabel(
-  role: AssigneeAuthorityRole,
-  t: ReturnType<typeof createTranslator>
-): string {
+function roleLabel(role: AssigneeAuthorityRole, t: ReturnType<typeof createTranslator>): string {
   switch (role) {
     case "responsibility":
       return t("authorityResponsibility");
@@ -68,6 +70,7 @@ function SingleAuthorityField({
   t,
   api,
   className,
+  taskExecutionBlocks,
   onAssignmentOutcome
 }: {
   workItem: WorkItemRef;
@@ -75,11 +78,13 @@ function SingleAuthorityField({
   t: ReturnType<typeof createTranslator>;
   api?: PlanWeaveCollaborationApi | null;
   className?: string;
+  taskExecutionBlocks?: AssigneeInspectorFieldProps["taskExecutionBlocks"];
   onAssignmentOutcome?: AssigneeInspectorFieldProps["onAssignmentOutcome"];
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const controller = useAssigneePickerController({
     workItem,
+    taskExecutionBlocks: role === "execution_target" ? taskExecutionBlocks : undefined,
     authorityRole: role,
     api,
     detailsOpen,
@@ -97,12 +102,24 @@ function SingleAuthorityField({
 
   const hint = roleHint(role, controller.authority, t);
 
+  const resultLabel = (result: TaskHostDispatchResult): string => {
+    if (result.ok) return t("taskHostDispatchSucceeded");
+    switch (result.message) {
+      case "task_block_not_dispatchable":
+        return t("taskHostDispatchNotDispatchable");
+      case "task_host_unavailable":
+        return t("taskHostDispatchHostUnavailable");
+      case "task_authority_unavailable":
+        return t("taskHostDispatchAuthorityUnavailable");
+      case "task_execution_target_update_failed":
+        return t("taskHostDispatchAssignmentFailed");
+      default:
+        return t("taskHostDispatchFailed");
+    }
+  };
+
   return (
-    <div
-      className={className}
-      data-testid={`authority-field-${role}`}
-      data-authority-role={role}
-    >
+    <div className={className} data-testid={`authority-field-${role}`} data-authority-role={role}>
       <div className="mb-1 flex items-center justify-between gap-2">
         <span className="text-[11px] font-medium text-muted-foreground">{roleLabel(role, t)}</span>
       </div>
@@ -124,6 +141,23 @@ function SingleAuthorityField({
           {hint}
         </p>
       ) : null}
+      {role === "execution_target" && controller.taskDispatchResults.length > 0 ? (
+        <div
+          className="mt-2 space-y-1 text-[10px]"
+          data-testid="task-host-dispatch-results"
+          aria-live="polite"
+        >
+          <p className="font-medium text-muted-foreground">{t("taskHostDispatchResults")}</p>
+          {controller.taskDispatchResults.map((result) => (
+            <p
+              key={result.blockRef}
+              className={result.ok ? "text-emerald-700" : "text-destructive"}
+            >
+              <span className="font-mono">{result.blockRef}</span>: {resultLabel(result)}
+            </p>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -139,6 +173,7 @@ export function AssigneeInspectorField({
   api,
   className,
   roles,
+  taskExecutionBlocks,
   onAssignmentOutcome
 }: AssigneeInspectorFieldProps) {
   const workKey = workItem ? workItemKey(workItem) : null;
@@ -150,8 +185,10 @@ export function AssigneeInspectorField({
     if (stableWorkItem.kind === "block") {
       return ["responsibility", "reviewer", "execution_target"];
     }
-    return ["responsibility", "reviewer"];
-  }, [roles, stableWorkItem]);
+    return taskExecutionBlocks && taskExecutionBlocks.length > 0
+      ? ["responsibility", "reviewer", "execution_target"]
+      : ["responsibility", "reviewer"];
+  }, [roles, stableWorkItem, taskExecutionBlocks]);
 
   if (!stableWorkItem) {
     return null;
@@ -171,6 +208,7 @@ export function AssigneeInspectorField({
           t={t}
           api={api}
           className="mb-2 last:mb-0"
+          taskExecutionBlocks={taskExecutionBlocks}
           onAssignmentOutcome={onAssignmentOutcome}
         />
       ))}

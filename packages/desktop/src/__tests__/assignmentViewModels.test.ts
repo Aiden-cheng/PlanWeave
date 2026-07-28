@@ -51,7 +51,7 @@ function statusFor(principalId: string): CollaborationStatus {
         deviceCredentialPersistence: "persisted",
         deviceCredentialId: "device-1",
         humanPrincipalId: principalId,
-        updatedAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:00:00.000Z"
       }
     ],
     activeProfileId: "profile-1",
@@ -65,16 +65,16 @@ function statusFor(principalId: string): CollaborationStatus {
       lastErrorMessage: null
     },
     updatedAt: "2030-01-01T00:00:00.000Z",
-  workspaceConnection: {
-    schemaVersion: "workspace-setup/v1",
-    status: "local_only",
-    profile: null,
-    workspaceId: null,
-    workspaceDisplayName: null,
-    connectedAt: null,
-    error: null
-  },
-  workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
+    workspaceConnection: {
+      schemaVersion: "workspace-setup/v1",
+      status: "local_only",
+      profile: null,
+      workspaceId: null,
+      workspaceDisplayName: null,
+      connectedAt: null,
+      error: null
+    },
+    workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
   };
 }
 
@@ -113,6 +113,42 @@ describe("assignmentViewModels", () => {
     expect(sections.find((s) => s.id === "people")?.options.map((o) => o.label)).toEqual([
       "Ada",
       "Bob"
+    ]);
+  });
+
+  it("offers only exact eligible Hosts for the Task execution composite", () => {
+    const eligible: EligibleAssigneesResponse = {
+      workItem: taskItem,
+      humans: [],
+      hosts: [
+        {
+          projectId: "project-1",
+          hostId: "host-1",
+          displayName: "Builder",
+          exists: true,
+          revoked: false,
+          authorizedForProject: true,
+          online: true,
+          capabilities: ["acp.codex"],
+          capacityRemaining: 1
+        }
+      ],
+      nextHumanCursor: null,
+      nextHostCursor: null
+    };
+
+    const sections = buildAssigneeSections({
+      workItem: taskItem,
+      assignment: null,
+      members: [],
+      hosts: [],
+      eligible,
+      authorityRole: "execution_target"
+    });
+
+    expect(sections.map((section) => section.id)).toEqual(["hosts"]);
+    expect(sections[0]?.options.map((option) => option.target)).toEqual([
+      { kind: "exact_host", hostId: "host-1" }
     ]);
   });
 

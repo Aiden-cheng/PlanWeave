@@ -1204,6 +1204,13 @@ export const enCatalog = {
   authorityLeaseExpired: "Lease expired",
   authorityLeaseRevoked: "Lease revoked",
   assigneeUpdateFailed: "Could not update assignee",
+  taskHostDispatchResults: "Block dispatch results",
+  taskHostDispatchSucceeded: "Dispatched",
+  taskHostDispatchNotDispatchable: "Not ready to dispatch",
+  taskHostDispatchHostUnavailable: "Host is no longer eligible",
+  taskHostDispatchAuthorityUnavailable: "Block authority is unavailable",
+  taskHostDispatchAssignmentFailed: "Could not assign the Host",
+  taskHostDispatchFailed: "Dispatch failed",
 
   // Human comments + activity (DX-003#B-001) — distinct from Agent conversation
   collaborationHumanDiscussion: "Human discussion",

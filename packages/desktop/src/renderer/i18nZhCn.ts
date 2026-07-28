@@ -1151,6 +1151,13 @@ export const zhCnCatalog = {
   authorityLeaseExpired: "租约已过期",
   authorityLeaseRevoked: "租约已吊销",
   assigneeUpdateFailed: "无法更新负责人",
+  taskHostDispatchResults: "Block 派发结果",
+  taskHostDispatchSucceeded: "已派发",
+  taskHostDispatchNotDispatchable: "当前不可派发",
+  taskHostDispatchHostUnavailable: "Host 已不再符合条件",
+  taskHostDispatchAuthorityUnavailable: "无法读取 Block 权威状态",
+  taskHostDispatchAssignmentFailed: "无法绑定 Host",
+  taskHostDispatchFailed: "派发失败",
 
   // Human comments + activity (DX-003#B-001) — distinct from Agent conversation
   collaborationHumanDiscussion: "人工讨论",

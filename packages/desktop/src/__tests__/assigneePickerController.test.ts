@@ -14,6 +14,16 @@ import { createTranslator } from "../renderer/i18n";
 
 const taskItem: WorkItemRef = { kind: "task", canvasId: "canvas-1", taskId: "T-1" };
 const blockItem: WorkItemRef = { kind: "block", canvasId: "canvas-1", blockRef: "T-1#B-001" };
+const secondBlockItem: WorkItemRef = {
+  kind: "block",
+  canvasId: "canvas-1",
+  blockRef: "T-1#B-002"
+};
+const blockedBlockItem: WorkItemRef = {
+  kind: "block",
+  canvasId: "canvas-1",
+  blockRef: "T-1#B-003"
+};
 
 function connectedStatus(): CollaborationStatus {
   return {
@@ -28,7 +38,7 @@ function connectedStatus(): CollaborationStatus {
         deviceCredentialPersistence: "persisted",
         deviceCredentialId: "device-1",
         humanPrincipalId: "human-1",
-        updatedAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:00:00.000Z"
       }
     ],
     activeProfileId: "profile-1",
@@ -42,16 +52,16 @@ function connectedStatus(): CollaborationStatus {
       lastErrorMessage: null
     },
     updatedAt: "2030-01-01T00:00:00.000Z",
-  workspaceConnection: {
-    schemaVersion: "workspace-setup/v1",
-    status: "local_only",
-    profile: null,
-    workspaceId: null,
-    workspaceDisplayName: null,
-    connectedAt: null,
-    error: null
-  },
-  workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
+    workspaceConnection: {
+      schemaVersion: "workspace-setup/v1",
+      status: "local_only",
+      profile: null,
+      workspaceId: null,
+      workspaceDisplayName: null,
+      connectedAt: null,
+      error: null
+    },
+    workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
   };
 }
 
@@ -85,62 +95,102 @@ function createApi() {
     updatedAt: "2030-01-01T00:00:00.000Z",
     availability: { status: "pending", reason: "automatic_pending_selection" }
   });
-  const getWorkAuthority = vi.fn().mockImplementation(async ({ workItem }: { workItem: WorkItemRef }) => {
-    const scope =
-      workItem.kind === "task"
-        ? {
-            kind: "task" as const,
-            workspaceId: "w",
-            projectId: "project-1",
-            canvasId: workItem.canvasId,
-            taskId: workItem.taskId
-          }
-        : {
-            kind: "block" as const,
-            workspaceId: "w",
-            projectId: "project-1",
-            canvasId: workItem.canvasId,
-            blockRef: workItem.blockRef
-          };
-    return {
-      schemaVersion: "work-authority/v1",
-      scope,
-      responsibility: {
-        schemaVersion: "responsibility/v1",
-        scope,
-        principal: null,
-        revision: 0,
-        updatedAt: "2030-01-01T00:00:00.000Z",
-        availability: "unassigned"
-      },
-      reviewer: {
-        schemaVersion: "review-assignment/v1",
-        scope,
-        principal: null,
-        revision: 0,
-        updatedAt: "2030-01-01T00:00:00.000Z",
-        availability: "unassigned"
-      },
-      executionTarget:
-        workItem.kind === "block"
+  const getWorkAuthority = vi
+    .fn()
+    .mockImplementation(async ({ workItem }: { workItem: WorkItemRef }) => {
+      const scope =
+        workItem.kind === "task"
           ? {
-              schemaVersion: "execution-target/v1",
-              scope,
-              target: { kind: "unassigned" },
-              revision: 0,
-              updatedAt: "2030-01-01T00:00:00.000Z",
-              availability: { status: "unassigned", reason: "unassigned" }
+              kind: "task" as const,
+              workspaceId: "w",
+              projectId: "project-1",
+              canvasId: workItem.canvasId,
+              taskId: workItem.taskId
             }
-          : null,
-      revisions: {
-        responsibilityRevision: 0,
-        reviewerRevision: 0,
-        executionTargetRevision: 0
-      },
-      selectedHost: null,
-      evaluatedAt: "2030-01-01T00:00:00.000Z"
-    };
-  });
+          : {
+              kind: "block" as const,
+              workspaceId: "w",
+              projectId: "project-1",
+              canvasId: workItem.canvasId,
+              blockRef: workItem.blockRef
+            };
+      return {
+        schemaVersion: "work-authority/v1",
+        scope,
+        responsibility: {
+          schemaVersion: "responsibility/v1",
+          scope,
+          principal: null,
+          revision: 0,
+          updatedAt: "2030-01-01T00:00:00.000Z",
+          availability: "unassigned"
+        },
+        reviewer: {
+          schemaVersion: "review-assignment/v1",
+          scope,
+          principal: null,
+          revision: 0,
+          updatedAt: "2030-01-01T00:00:00.000Z",
+          availability: "unassigned"
+        },
+        executionTarget:
+          workItem.kind === "block"
+            ? {
+                schemaVersion: "execution-target/v1",
+                scope,
+                target: { kind: "unassigned" },
+                revision: 0,
+                updatedAt: "2030-01-01T00:00:00.000Z",
+                availability: { status: "unassigned", reason: "unassigned" }
+              }
+            : null,
+        revisions: {
+          responsibilityRevision: 0,
+          reviewerRevision: 0,
+          executionTargetRevision: 0
+        },
+        selectedHost: null,
+        evaluatedAt: "2030-01-01T00:00:00.000Z"
+      };
+    });
+  const listEligibleAssignees = vi.fn(async ({ workItem }: { workItem: WorkItemRef }) => ({
+    workItem,
+    humans: [],
+    hosts:
+      workItem.kind === "block"
+        ? [
+            {
+              projectId: "project-1",
+              hostId: "host-1",
+              displayName: "Builder",
+              exists: true,
+              revoked: false,
+              authorizedForProject: true,
+              online: true,
+              capabilities: ["acp.codex"],
+              capacityRemaining: 1
+            },
+            ...(workItem.blockRef === secondBlockItem.blockRef
+              ? []
+              : [
+                  {
+                    projectId: "project-1",
+                    hostId: "host-only-first",
+                    displayName: "First only",
+                    exists: true,
+                    revoked: false,
+                    authorizedForProject: true,
+                    online: true,
+                    capabilities: ["acp.codex"],
+                    capacityRemaining: 1
+                  }
+                ])
+          ]
+        : [],
+    nextHumanCursor: null,
+    nextHostCursor: null
+  }));
+  const dispatchRemoteOperation = vi.fn().mockResolvedValue({ operationId: "operation-1" });
   const api = {
     getCollaborationStatus: vi.fn().mockResolvedValue(status),
     listCollaborationMembers: vi.fn().mockResolvedValue({
@@ -152,19 +202,13 @@ function createApi() {
           displayName: "Ada",
           role: "owner",
           createdAt: "2030-01-01T00:00:00.000Z",
-          updatedAt: "2030-01-01T00:00:00.000Z",
+          updatedAt: "2030-01-01T00:00:00.000Z"
         }
       ],
       nextCursor: null
     }),
     listCollaborationAssignments: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
-    listCollaborationEligibleAssignees: vi.fn().mockResolvedValue({
-      workItem: taskItem,
-      humans: [],
-      hosts: [],
-      nextHumanCursor: null,
-      nextHostCursor: null
-    }),
+    listCollaborationEligibleAssignees: listEligibleAssignees,
     getCollaborationWorkAuthority: getWorkAuthority,
     updateCollaborationResponsibility: updateResponsibility,
     updateCollaborationReviewer: vi.fn(),
@@ -175,10 +219,17 @@ function createApi() {
     createCollaborationComment: vi.fn(),
     editCollaborationComment: vi.fn(),
     tombstoneCollaborationComment: vi.fn(),
+    dispatchCollaborationRemoteOperation: dispatchRemoteOperation,
     onCollaborationStatusChanged: vi.fn(() => () => undefined),
     onCollaborationObserverSignal: vi.fn(() => () => undefined)
   } as unknown as PlanWeaveCollaborationApi & CollaborationReadBridgePort;
-  return { api, updateResponsibility, updateExecutionTarget };
+  return {
+    api,
+    updateResponsibility,
+    updateExecutionTarget,
+    listEligibleAssignees,
+    dispatchRemoteOperation
+  };
 }
 
 afterEach(() => {
@@ -266,6 +317,74 @@ describe("useAssigneePickerController", () => {
       })
     );
     expect(updateResponsibility).not.toHaveBeenCalled();
+
+    shell.release();
+    resetCollaborationReadModelHubForTests(api);
+  });
+
+  it("expands a Task Host selection into eligible exact-Block dispatches in runtime order", async () => {
+    const { api, updateExecutionTarget, listEligibleAssignees, dispatchRemoteOperation } =
+      createApi();
+    const shell = acquireCollaborationReadModelController(api);
+    await shell.controller.setActiveProject({
+      profileId: "profile-1",
+      projectId: "project-1",
+      canvasId: "canvas-1"
+    });
+
+    const { result } = renderHook(() =>
+      useAssigneePickerController({
+        workItem: taskItem,
+        taskExecutionBlocks: [
+          { workItem: blockItem, dispatchable: true },
+          { workItem: secondBlockItem, dispatchable: true },
+          { workItem: blockedBlockItem, dispatchable: false }
+        ],
+        authorityRole: "execution_target",
+        api,
+        detailsOpen: true,
+        createId: vi.fn().mockReturnValueOnce("id-1").mockReturnValueOnce("id-2"),
+        t: createTranslator("en")
+      })
+    );
+
+    await waitFor(() => {
+      expect(result.current.viewModel?.sections[0]?.options.map((option) => option.id)).toEqual([
+        "exact_host:host-1"
+      ]);
+    });
+
+    let ok = true;
+    await act(async () => {
+      ok = await result.current.selectTarget({ kind: "exact_host", hostId: "host-1" });
+    });
+
+    expect(ok).toBe(false);
+    expect(updateExecutionTarget).toHaveBeenCalledTimes(2);
+    expect(updateExecutionTarget.mock.calls.map(([input]) => input.workItem)).toEqual([
+      blockItem,
+      secondBlockItem
+    ]);
+    expect(dispatchRemoteOperation.mock.calls.map(([input]) => input.blockRef)).toEqual([
+      blockItem.blockRef,
+      secondBlockItem.blockRef
+    ]);
+    expect(dispatchRemoteOperation.mock.calls.map(([input]) => input.idempotencyKey)).toEqual([
+      "desktop-task-dispatch-id-1",
+      "desktop-task-dispatch-id-2"
+    ]);
+    expect(result.current.taskDispatchResults).toEqual([
+      { blockRef: blockItem.blockRef, ok: true, message: "task_block_dispatched" },
+      { blockRef: secondBlockItem.blockRef, ok: true, message: "task_block_dispatched" },
+      {
+        blockRef: blockedBlockItem.blockRef,
+        ok: false,
+        message: "task_block_not_dispatchable"
+      }
+    ]);
+    expect(listEligibleAssignees.mock.calls.some(([input]) => input.workItem.kind === "task")).toBe(
+      false
+    );
 
     shell.release();
     resetCollaborationReadModelHubForTests(api);

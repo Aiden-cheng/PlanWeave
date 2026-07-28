@@ -449,8 +449,8 @@ function evaluateHumanOption(input: {
 
 /**
  * Build Task/Block assignee picker sections from authoritative projections + eligible list.
- * Tasks never receive machine targets as selectable options.
- * Selecting a host option never implies dispatch — targets are assignment-only.
+ * Task execution surfaces may expose exact Hosts as a Desktop composite action.
+ * Server authority remains Block-scoped; Project and Canvas never become executable targets.
  */
 export function buildAssigneeSections(input: {
   workItem: WorkItemRef;
@@ -472,7 +472,7 @@ export function buildAssigneeSections(input: {
   const allowPeopleTargets = role !== "execution_target";
   const allowMachineTargets =
     role === "execution_target"
-      ? input.workItem.kind === "block"
+      ? true
       : role === "responsibility" || role === "reviewer"
         ? false
         : input.workItem.kind === "block";
@@ -543,7 +543,10 @@ export function buildAssigneeSections(input: {
     left.label.localeCompare(right.label)
   );
 
-  const sections: AssigneeSection[] = [{ id: "unassigned", options: [unassigned] }];
+  const taskExecutionComposite = role === "execution_target" && input.workItem.kind === "task";
+  const sections: AssigneeSection[] = taskExecutionComposite
+    ? []
+    : [{ id: "unassigned", options: [unassigned] }];
   if (allowPeopleTargets) {
     sections.push({ id: "people", options: people });
   }
@@ -578,7 +581,7 @@ export function buildAssigneeSections(input: {
   }
 
   // Merge snapshot hosts that may show current assignment degradation.
-  for (const host of input.hosts) {
+  for (const host of taskExecutionComposite ? [] : input.hosts) {
     if (hostById.has(host.hostId)) continue;
     hostById.set(
       host.hostId,
@@ -626,6 +629,10 @@ export function buildAssigneeSections(input: {
 
   const hosts = [...hostById.values()].sort((left, right) => left.label.localeCompare(right.label));
   sections.push({ id: "hosts", options: hosts });
+
+  if (taskExecutionComposite) {
+    return sections;
+  }
 
   const automatic: AssigneeOption = {
     id: "automatic_host",

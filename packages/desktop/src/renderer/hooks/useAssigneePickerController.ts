@@ -28,6 +28,13 @@ export type AssigneeAuthorityRole = "responsibility" | "reviewer" | "execution_t
 
 export type UseAssigneePickerControllerArgs = {
   workItem: WorkItemRef | null;
+  /** Runtime-stable Block list for the Task's composite Host action. */
+  taskExecutionBlocks?: readonly {
+    workItem: Extract<WorkItemRef, { kind: "block" }>;
+    dispatchable: boolean;
+  }[];
+  /** Optional random source for deterministic composite-dispatch tests. */
+  createId?: () => string;
   /**
    * Which independent authority this picker mutates.
    * Defaults to responsibility (human owner). Reviewer never changes execution target.
@@ -58,6 +65,13 @@ export type UseAssigneePickerControllerResult = {
   selectTarget: (target: AssignmentTarget) => Promise<boolean>;
   refresh: () => Promise<void>;
   retryLastTarget: () => Promise<boolean>;
+  taskDispatchResults: readonly TaskHostDispatchResult[];
+};
+
+export type TaskHostDispatchResult = {
+  blockRef: string;
+  ok: boolean;
+  message: string;
 };
 
 /**
@@ -181,7 +195,6 @@ function filterEligibleForRole(
     return {
       ...eligible,
       humans: [],
-      hosts: [],
       nextHumanCursor: null,
       nextHostCursor: null
     };
@@ -193,10 +206,28 @@ function filterEligibleForRole(
   };
 }
 
+function isReadyHost(host: EligibleAssigneesResponse["hosts"][number]): boolean {
+  return (
+    host.exists &&
+    !host.revoked &&
+    host.authorizedForProject &&
+    host.online &&
+    host.capacityRemaining !== 0
+  );
+}
+
+function createDispatchId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `task-dispatch-${Date.now()}`;
+}
+
 /**
  * Task/Block authority picker controller.
  * Routes mutations to independent responsibility / reviewer / execution-target CAS paths.
- * Task machine targets and non-Block execution targets are rejected before bridge calls.
+ * Task Host selection is a Desktop composite action over the Task's exact runtime Blocks.
+ * Server authority and dispatch remain strictly Block-scoped.
  */
 export function useAssigneePickerController(
   args: UseAssigneePickerControllerArgs
@@ -240,6 +271,19 @@ export function useAssigneePickerController(
   const [localStaleConflict, setLocalStaleConflict] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [lastAttemptedTarget, setLastAttemptedTarget] = useState<AssignmentTarget | null>(null);
+  const [taskDispatchResults, setTaskDispatchResults] = useState<readonly TaskHostDispatchResult[]>(
+    []
+  );
+
+  const taskExecutionBlocksKey =
+    args.taskExecutionBlocks
+      ?.map((block) => `${workItemKey(block.workItem)}:${block.dispatchable ? "1" : "0"}`)
+      .join("|") ?? "";
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the content key stabilizes equivalent caller arrays
+  const taskExecutionBlocks = useMemo(
+    () => args.taskExecutionBlocks ?? [],
+    [taskExecutionBlocksKey]
+  );
 
   const generationRef = useRef(0);
   const pendingRef = useRef(false);
@@ -257,6 +301,7 @@ export function useAssigneePickerController(
     setLocalStaleConflict(false);
     setActionError(null);
     setLastAttemptedTarget(null);
+    setTaskDispatchResults([]);
   }, [workItemKeyValue, authorityRole]);
 
   useEffect(() => {
@@ -270,7 +315,7 @@ export function useAssigneePickerController(
   useEffect(() => {
     if (!controller || !args.workItem || !sessionConnected) return;
     void controller.ensureWorkAuthority(args.workItem).catch(() => undefined);
-  }, [args.workItem, controller, sessionConnected, workItemKeyValue]);
+  }, [args.workItem, controller, sessionConnected]);
 
   const loadEligible = useCallback(async () => {
     if (!api || !args.workItem || !sessionConnected) {
@@ -280,7 +325,31 @@ export function useAssigneePickerController(
     const generation = generationRef.current;
     setEligibleLoading(true);
     try {
-      const page = await api.listCollaborationEligibleAssignees({ workItem: args.workItem });
+      let page: EligibleAssigneesResponse;
+      if (authorityRole === "execution_target" && args.workItem.kind === "task") {
+        const dispatchableBlocks = taskExecutionBlocks.filter((block) => block.dispatchable);
+        const blockPages = await Promise.all(
+          dispatchableBlocks.map((block) =>
+            api.listCollaborationEligibleAssignees({ workItem: block.workItem })
+          )
+        );
+        const readyHostIds = blockPages.map(
+          (blockPage) => new Set(blockPage.hosts.filter(isReadyHost).map((host) => host.hostId))
+        );
+        const hosts =
+          blockPages[0]?.hosts.filter(
+            (host) => isReadyHost(host) && readyHostIds.every((ids) => ids.has(host.hostId))
+          ) ?? [];
+        page = {
+          workItem: args.workItem,
+          humans: [],
+          hosts,
+          nextHumanCursor: null,
+          nextHostCursor: null
+        };
+      } else {
+        page = await api.listCollaborationEligibleAssignees({ workItem: args.workItem });
+      }
       if (generation !== generationRef.current) return;
       setEligible(filterEligibleForRole(page, authorityRole, args.workItem));
     } catch (error) {
@@ -292,7 +361,7 @@ export function useAssigneePickerController(
         setEligibleLoading(false);
       }
     }
-  }, [api, args.workItem, authorityRole, sessionConnected]);
+  }, [api, args.workItem, authorityRole, sessionConnected, taskExecutionBlocks]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: workItemKeyValue remounts eligible load
   useEffect(() => {
@@ -353,8 +422,8 @@ export function useAssigneePickerController(
           return false;
         }
       } else {
-        if (args.workItem.kind !== "block") {
-          const errorMessage = labels.taskDisallowsMachine;
+        if (args.workItem.kind === "task" && target.kind !== "exact_host") {
+          const errorMessage = "Task execution requires one exact Agent Host.";
           setActionError(errorMessage);
           setLastAttemptedTarget(target);
           onOutcomeRef.current?.({
@@ -376,6 +445,145 @@ export function useAssigneePickerController(
             errorMessage
           });
           return false;
+        }
+      }
+
+      if (
+        authorityRole === "execution_target" &&
+        args.workItem.kind === "task" &&
+        target.kind === "exact_host"
+      ) {
+        const blocks = taskExecutionBlocks;
+        if (blocks.length === 0 || projectId === "unknown") {
+          const errorMessage =
+            blocks.length === 0
+              ? "task_has_no_execution_blocks"
+              : "collaboration_project_unavailable";
+          setActionError(errorMessage);
+          setLastAttemptedTarget(target);
+          onOutcomeRef.current?.({
+            ok: false,
+            workItem: args.workItem,
+            target,
+            errorMessage
+          });
+          return false;
+        }
+
+        pendingRef.current = true;
+        setPending(true);
+        setLastAttemptedTarget(target);
+        setActionError(null);
+        setTaskDispatchResults([]);
+        const generation = generationRef.current;
+        const workItem = args.workItem;
+        const results: TaskHostDispatchResult[] = [];
+
+        try {
+          for (const block of blocks) {
+            if (!block.dispatchable) {
+              results.push({
+                blockRef: block.workItem.blockRef,
+                ok: false,
+                message: "task_block_not_dispatchable"
+              });
+              continue;
+            }
+
+            try {
+              const eligiblePage = await api.listCollaborationEligibleAssignees({
+                workItem: block.workItem
+              });
+              const selectedHost = eligiblePage.hosts.find(
+                (host) => host.hostId === target.hostId && isReadyHost(host)
+              );
+              if (!selectedHost) {
+                results.push({
+                  blockRef: block.workItem.blockRef,
+                  ok: false,
+                  message: "task_host_unavailable"
+                });
+                continue;
+              }
+
+              let blockAuthority = await controller.ensureWorkAuthority(block.workItem);
+              if (!blockAuthority?.executionTarget) {
+                results.push({
+                  blockRef: block.workItem.blockRef,
+                  ok: false,
+                  message: "task_authority_unavailable"
+                });
+                continue;
+              }
+
+              const currentTarget = blockAuthority.executionTarget.target;
+              if (currentTarget.kind !== "exact_host" || currentTarget.hostId !== target.hostId) {
+                const updated = await controller.updateExecutionTarget({
+                  workItem: block.workItem,
+                  target: { kind: "exact_host", hostId: target.hostId },
+                  expectedRevision: blockAuthority.revisions.executionTargetRevision
+                });
+                if (!updated) {
+                  results.push({
+                    blockRef: block.workItem.blockRef,
+                    ok: false,
+                    message: "task_execution_target_update_failed"
+                  });
+                  continue;
+                }
+              }
+
+              blockAuthority = await controller.ensureWorkAuthority(block.workItem);
+              if (!blockAuthority?.executionTarget) {
+                results.push({
+                  blockRef: block.workItem.blockRef,
+                  ok: false,
+                  message: "task_authority_unavailable"
+                });
+                continue;
+              }
+
+              await api.dispatchCollaborationRemoteOperation({
+                schemaVersion: "remote-run/v2",
+                projectId,
+                canvasId: block.workItem.canvasId,
+                blockRef: block.workItem.blockRef,
+                idempotencyKey: `desktop-task-dispatch-${(args.createId ?? createDispatchId)()}`,
+                expectedResponsibilityRevision: blockAuthority.revisions.responsibilityRevision,
+                expectedReviewerRevision: blockAuthority.revisions.reviewerRevision,
+                expectedExecutionTargetRevision: blockAuthority.revisions.executionTargetRevision
+              });
+              results.push({
+                blockRef: block.workItem.blockRef,
+                ok: true,
+                message: "task_block_dispatched"
+              });
+            } catch (error) {
+              results.push({
+                blockRef: block.workItem.blockRef,
+                ok: false,
+                message: collaborationErrorMessage(error) ?? "task_block_dispatch_failed"
+              });
+            }
+          }
+
+          if (generation !== generationRef.current) return false;
+          setTaskDispatchResults(results);
+          const ok = results.length > 0 && results.every((result) => result.ok);
+          const errorMessage = ok
+            ? null
+            : (results.find((result) => !result.ok)?.message ?? "task_block_dispatch_failed");
+          setActionError(errorMessage);
+          if (detailsOpen) {
+            await loadEligible();
+          }
+          onOutcomeRef.current?.({ ok, workItem, target, errorMessage });
+          return ok;
+        } finally {
+          if (generation === generationRef.current) {
+            pendingRef.current = false;
+            setPending(false);
+          }
         }
       }
 
@@ -473,12 +681,15 @@ export function useAssigneePickerController(
     [
       api,
       args.workItem,
+      args.createId,
       assignment,
       authorityRole,
       controller,
       detailsOpen,
       labels.taskDisallowsMachine,
-      loadEligible
+      loadEligible,
+      projectId,
+      taskExecutionBlocks
     ]
   );
 
@@ -502,7 +713,10 @@ export function useAssigneePickerController(
       workItem: args.workItem,
       assignment,
       members: projectView.members,
-      hosts: projectView.hosts,
+      hosts:
+        authorityRole === "execution_target" && args.workItem.kind === "task"
+          ? []
+          : projectView.hosts,
       eligible,
       status,
       syncPhase: snapshot.syncPhase,
@@ -542,6 +756,7 @@ export function useAssigneePickerController(
     setQuery,
     selectTarget,
     refresh,
-    retryLastTarget
+    retryLastTarget,
+    taskDispatchResults
   };
 }
