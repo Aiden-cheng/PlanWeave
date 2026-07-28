@@ -462,16 +462,18 @@ export const zhCnCatalog = {
   deploymentDescription: "审阅受支持的拓扑，并验证已配置的 Server 端点。",
   deploymentBoundary:
     "Desktop 只审阅和复制固定 Compose 交接，不会执行 shell、供应云资源，也不会暴露工作区路径或凭证。",
-  deploymentWorkspaceRequired: "请先连接 Workspace 配置，再生成部署指引。",
+  deploymentPreConnection:
+    "审阅此部署目标不需要 Workspace 连接。只有 Server 启动后才完成设置或连接。",
   deploymentTopology: "拓扑",
   deploymentLoopback: "本机 loopback HTTP",
   deploymentLan: "LAN HTTPS",
   deploymentPublic: "公网 HTTPS",
   deploymentOrigin: "Server origin",
+  deploymentDisplayName: "部署名称",
   deploymentLoopbackNote:
     "loopback 用于已显式启动的本机开发 Server 或未来本机 supervisor；它没有 Compose/TLS 交接。",
   deploymentTopologySource:
-    "现有 HTTPS Workspace 配置不持久化拓扑；使用交接前请明确审阅并选择 LAN 或公网 HTTPS。",
+    "已连接的 Workspace 配置可预填此目标，但拓扑在此处审阅，绝不会被持久化为已认证连接。",
   deploymentReview: "审阅交接",
   deploymentValidate: "验证端点",
   deploymentDurableState: "必须使用持久化 Server 状态。",
@@ -562,13 +564,15 @@ export const zhCnCatalog = {
   hostAdminConfigPath: "Host 上的绝对配置路径",
   hostAdminDataDirectory: "Host 上的绝对数据目录",
   hostAdminWorkspaceRoot: "Host 上的绝对 workspace 根目录",
+  hostAdminWorkspacePath: "相对 Host 根目录的 workspace 路径",
   hostAdminHostDisplayName: "Host 显示名称",
   hostAdminHostCapacity: "Host 容量",
   hostAdminHostCapabilities: "能力（逗号分隔）",
-  hostAdminBootstrapListsEmpty:
-    "Workspace 和 Agent profile 列表默认为空；Host 操作员可在本机补充。",
+  hostAdminBootstrapCodexPreset:
+    "交接会映射已入驻的 Server workspace，并在目标 Host 初始化固定的 codex-acp preset。目标 Host 会在连接前本机解析和验证适配器。",
   hostAdminBootstrapSecureCoordinator: "请使用安全 coordinator URL（本机开发可用回环 HTTP）。",
   hostAdminBootstrapAbsolutePaths: "配置、数据和 workspace 路径必须是 Host 本机绝对路径。",
+  hostAdminBootstrapWorkspacePath: "workspace 映射必须是相对 Host workspace 根目录的安全非空路径。",
   hostAdminBootstrapHostName: "请输入 Host 显示名称。",
   hostAdminBootstrapCapacity: "容量必须是 1 到 128 的整数。",
   hostAdminBootstrapCapabilities: "能力必须使用小写可移植标识符。",

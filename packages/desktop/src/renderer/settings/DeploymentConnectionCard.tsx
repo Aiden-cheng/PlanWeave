@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type {
   ConnectivityValidationView,
-  DeploymentConnectionProfile,
   DeploymentGuidanceView,
+  DeploymentTargetDraft,
   DeploymentTopology
 } from "@planweave-ai/collaboration-contracts";
 import type { OperatorHostView } from "@planweave-ai/distributed-protocol";
@@ -38,8 +38,8 @@ function connectivityLabel(
 
 export function DeploymentConnectionCard({ hosts, t }: Props) {
   const [origin, setOrigin] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [topology, setTopology] = useState<DeploymentTopology>("loopback_http");
-  const [profile, setProfile] = useState<DeploymentConnectionProfile | null>(null);
   const [guidance, setGuidance] = useState<DeploymentGuidanceView | null>(null);
   const [connectivity, setConnectivity] = useState<ConnectivityValidationView | null>(null);
   const [busy, setBusy] = useState<"guidance" | "validation" | "copy" | null>(null);
@@ -50,46 +50,33 @@ export function DeploymentConnectionCard({ hosts, t }: Props) {
     void collaborationBridge.getActiveWorkspaceConnection().then((connection) => {
       if (!connection.profile || !connection.workspaceId) return;
       setOrigin(connection.profile.serverBaseUrl);
+      setDisplayName(connection.profile.displayName);
       setTopology(initialTopology(connection.profile.serverBaseUrl));
-      setProfile({
-        schemaVersion: "deployment-connection/v1",
-        profileId: connection.profile.profileId,
-        displayName: connection.profile.displayName,
-        workspace: { workspaceId: connection.workspaceId },
-        endpoint: {
-          topology: initialTopology(connection.profile.serverBaseUrl),
-          serverOrigin: connection.profile.serverBaseUrl,
-          allowedClientOrigins: [connection.profile.serverBaseUrl],
-          tlsTrust:
-            initialTopology(connection.profile.serverBaseUrl) === "loopback_http"
-              ? "not_applicable"
-              : "system_ca"
-        },
-        capabilities: ["workspace_connection", "deployment_guidance", "connectivity_validation"]
-      });
     });
   }, []);
 
-  const nextProfile = useMemo(() => {
-    if (!profile) return null;
+  const target = useMemo(() => {
     try {
+      const trimmedDisplayName = displayName.trim();
+      if (!trimmedDisplayName) return null;
       const serverOrigin = normalizedOrigin(origin);
       return {
-        ...profile,
+        schemaVersion: "deployment-target-draft/v1",
+        displayName: trimmedDisplayName,
         endpoint: {
           topology,
           serverOrigin,
           allowedClientOrigins: [serverOrigin],
           tlsTrust: topology === "loopback_http" ? "not_applicable" : "system_ca"
-        }
-      } satisfies DeploymentConnectionProfile;
+        },
+        capabilities: ["deployment_guidance", "connectivity_validation"]
+      } satisfies DeploymentTargetDraft;
     } catch {
       return null;
     }
-  }, [origin, profile, topology]);
+  }, [displayName, origin, topology]);
 
-  const actionScope = () =>
-    nextProfile ? { workspace: nextProfile.workspace, profile: nextProfile } : null;
+  const actionScope = () => (target ? { target } : null);
 
   const requestGuidance = async () => {
     const scope = actionScope();
@@ -144,9 +131,7 @@ export function DeploymentConnectionCard({ hosts, t }: Props) {
       </CardHeader>
       <CardContent className="grid gap-3">
         <p className="text-xs text-text-muted">{t("deploymentBoundary")}</p>
-        {!profile ? (
-          <p className="text-xs text-text-muted">{t("deploymentWorkspaceRequired")}</p>
-        ) : null}
+        <p className="text-xs text-text-muted">{t("deploymentPreConnection")}</p>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="grid gap-1.5">
             <Label htmlFor="deployment-topology">{t("deploymentTopology")}</Label>
@@ -161,6 +146,15 @@ export function DeploymentConnectionCard({ hosts, t }: Props) {
               <option value="lan_https">{t("deploymentLan")}</option>
               <option value="public_https">{t("deploymentPublic")}</option>
             </select>
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="deployment-display-name">{t("deploymentDisplayName")}</Label>
+            <Input
+              id="deployment-display-name"
+              data-testid="deployment-display-name"
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+            />
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="deployment-origin">{t("deploymentOrigin")}</Label>
@@ -182,7 +176,7 @@ export function DeploymentConnectionCard({ hosts, t }: Props) {
           <Button
             type="button"
             size="sm"
-            disabled={!nextProfile || busy !== null}
+            disabled={!target || busy !== null}
             onClick={() => void requestGuidance()}
           >
             {t("deploymentReview")}
@@ -191,7 +185,7 @@ export function DeploymentConnectionCard({ hosts, t }: Props) {
             type="button"
             size="sm"
             variant="outline"
-            disabled={!nextProfile || busy !== null}
+            disabled={!target || busy !== null}
             onClick={() => void validate()}
           >
             {t("deploymentValidate")}

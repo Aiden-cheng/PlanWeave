@@ -470,16 +470,18 @@ export const enCatalog = {
   deploymentDescription: "Review a supported topology and verify its configured Server endpoint.",
   deploymentBoundary:
     "Desktop only reviews and copies a fixed Compose handoff. It never runs shell commands, provisions a provider, or exposes workspace paths or credentials.",
-  deploymentWorkspaceRequired: "Connect a Workspace profile before creating deployment guidance.",
+  deploymentPreConnection:
+    "A Workspace connection is not required to review this deployment target. Complete setup or connect only after the Server is running.",
   deploymentTopology: "Topology",
   deploymentLoopback: "Local loopback HTTP",
   deploymentLan: "LAN HTTPS",
   deploymentPublic: "Public HTTPS",
   deploymentOrigin: "Server origin",
+  deploymentDisplayName: "Deployment name",
   deploymentLoopbackNote:
     "Loopback is for an explicitly started local development Server or a future local supervisor; it has no Compose/TLS handoff.",
   deploymentTopologySource:
-    "Existing HTTPS Workspace profiles do not persist a topology. Review and select LAN or public HTTPS explicitly before using the handoff.",
+    "A connected Workspace profile can prefill this target, but topology is reviewed here and is never persisted as an authenticated connection.",
   deploymentReview: "Review handoff",
   deploymentValidate: "Validate endpoint",
   deploymentDurableState: "Durable Server state is required.",
@@ -573,15 +575,18 @@ export const enCatalog = {
   hostAdminConfigPath: "Absolute config path on the Host",
   hostAdminDataDirectory: "Absolute data directory on the Host",
   hostAdminWorkspaceRoot: "Absolute workspace root on the Host",
+  hostAdminWorkspacePath: "Workspace path relative to the Host root",
   hostAdminHostDisplayName: "Host display name",
   hostAdminHostCapacity: "Host capacity",
   hostAdminHostCapabilities: "Capabilities (comma separated)",
-  hostAdminBootstrapListsEmpty:
-    "Workspace and agent-profile lists start empty; the Host operator can add them locally.",
+  hostAdminBootstrapCodexPreset:
+    "This handoff maps the enrolled Server workspace and initializes the fixed codex-acp preset on the target Host. The target Host resolves and verifies the local adapter before it connects.",
   hostAdminBootstrapSecureCoordinator:
     "Use a secure coordinator URL (or loopback HTTP for local development).",
   hostAdminBootstrapAbsolutePaths:
     "Config, data, and workspace paths must be absolute Host-local paths.",
+  hostAdminBootstrapWorkspacePath:
+    "Workspace mapping must be a safe non-empty path relative to the Host workspace root.",
   hostAdminBootstrapHostName: "Enter a Host display name.",
   hostAdminBootstrapCapacity: "Capacity must be an integer from 1 to 128.",
   hostAdminBootstrapCapabilities: "Capabilities must use lowercase portable identifiers.",
