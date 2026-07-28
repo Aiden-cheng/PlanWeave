@@ -493,6 +493,35 @@ describe("self-hosted two-Desktop collaboration flow (OSS-006 B-002)", () => {
       );
       expect(revokedRegistry.status).toBe(401);
       await expect(revokedRegistry.json()).resolves.toEqual({ error: "registry_unauthorized" });
+
+      const revokedAssignment = await postJson(
+        fixture.origin,
+        `${assignmentPath}/responsibility`,
+        memberToken,
+        {
+          schemaVersion: "responsibility/v1",
+          scope: blockScope,
+          principal: { kind: "human", humanPrincipalId: ownerCredential.humanPrincipalId },
+          expectedRevision: 1
+        }
+      );
+      expect(revokedAssignment.status).toBe(401);
+
+      const revokedCommand = await postJson(
+        fixture.origin,
+        `/api/v1/projects/${encodeURIComponent(fixture.projectId)}/canvases/default/commands`,
+        memberToken,
+        {
+          operationId: "two-client-revoked-command",
+          expectedRevision: 2,
+          intent: {
+            kind: "update_task_prompt",
+            taskId: "T-001",
+            promptMarkdown: "# revoked mutation"
+          }
+        }
+      );
+      expect(revokedCommand.status).toBe(401);
     } finally {
       configured.database.close();
     }
