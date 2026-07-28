@@ -41,6 +41,13 @@ async function fixture() {
              ('pm-member','p','member','member','2026-07-27T00:00:00.000Z','2026-07-27T00:00:00.000Z',NULL);
     INSERT INTO legacy_project_workspace_mappings(legacy_project_id,normalized_legacy_project_identity,workspace_id,mapped_at)
       VALUES ('p','legacy-project:p','w','2026-07-27T00:00:00.000Z');
+    INSERT INTO workspace_identity_migrations(
+      migration_id,legacy_project_id,workspace_id,from_version,to_version,step,status,
+      interruption_marker,authoritative_read_version,failure_code,updated_at
+    ) VALUES (
+      'identity-migration-p','p','w',0,1,'verify_cutover','completed',
+      'read_cutover_complete','workspace-identity/v1',NULL,'2026-07-27T00:00:00.000Z'
+    );
   `);
   const access = new ProjectAccessRepository(database, now);
   access.registerProjectInternal({
