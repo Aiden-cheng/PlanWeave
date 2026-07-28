@@ -234,6 +234,7 @@ describe("scoped access capability contracts", () => {
         effectiveRole: "editor",
         capabilities: accessCapabilityFlags("editor"),
         disabledReason: null,
+        grants: [],
         credential: "secret"
       })
     ).toThrow();
@@ -253,7 +254,8 @@ describe("scoped access capability contracts", () => {
           membership: "active" as const,
           effectiveRole: "owner" as const,
           capabilities: accessCapabilityFlags("owner"),
-          disabledReason: null
+          disabledReason: null,
+          grants: []
         }
       ]
     };

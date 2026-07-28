@@ -158,4 +158,59 @@ describe("access HTTP", () => {
     expect(crossWorkspace.status).toBe(403);
     await expect(crossWorkspace.json()).resolves.toEqual({ error: "cross_workspace" });
   });
+
+  it("projects only active exact-scope grants for People revocation", async () => {
+    const state = await fixture();
+    const projectGrant = state.access.grant({
+      workspaceId: state.workspaceId,
+      projectId: "project-a",
+      humanPrincipalId: state.viewer.principal.humanPrincipalId,
+      role: "editor",
+      grantedBy: { kind: "human", id: "owner" }
+    });
+    const canvasGrant = state.access.grant({
+      workspaceId: state.workspaceId,
+      projectId: "project-a",
+      canvasId: "default",
+      humanPrincipalId: state.viewer.principal.humanPrincipalId,
+      role: "viewer",
+      grantedBy: { kind: "human", id: "owner" }
+    });
+    const current = await fetch(`${state.origin}/api/v1/projects/project-a/canvases/default/access`, {
+      headers: { Authorization: `Bearer ${state.owner.deviceToken}` }
+    });
+    const view = (await current.json()) as { people: Array<{ humanPrincipalId: string; grants: unknown[] }> };
+    expect(view.people.find((person) => person.humanPrincipalId === "owner")?.grants).toEqual([]);
+    expect(
+      view.people.find((person) => person.humanPrincipalId === state.viewer.principal.humanPrincipalId)?.grants
+    ).toEqual([
+      { grantId: projectGrant.grantId, scopeKind: "project", role: "editor" },
+      { grantId: canvasGrant.grantId, scopeKind: "canvas", role: "viewer" }
+    ]);
+
+    state.access.revoke({
+      workspaceId: state.workspaceId,
+      projectId: "project-a",
+      canvasId: null,
+      grantId: projectGrant.grantId,
+      actor: { kind: "human", id: "owner" },
+      expectedAclRevision: 1
+    });
+    state.access.revoke({
+      workspaceId: state.workspaceId,
+      projectId: "project-a",
+      canvasId: "default",
+      grantId: canvasGrant.grantId,
+      actor: { kind: "human", id: "owner" },
+      expectedAclRevision: 1
+    });
+    const refreshed = await fetch(`${state.origin}/api/v1/projects/project-a/canvases/default/access`, {
+      headers: { Authorization: `Bearer ${state.owner.deviceToken}` }
+    });
+    const refreshedView = (await refreshed.json()) as { people: Array<{ humanPrincipalId: string; grants: unknown[] }> };
+    expect(
+      refreshedView.people.find((person) => person.humanPrincipalId === state.viewer.principal.humanPrincipalId)
+        ?.grants
+    ).toEqual([]);
+  });
 });

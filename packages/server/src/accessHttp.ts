@@ -176,7 +176,13 @@ export async function handleAccessHttpRequest(
           membership,
           effectiveRole: view.effectiveRole,
           capabilities: view.capabilities,
-          disabledReason: view.disabledReason
+          disabledReason: view.disabledReason,
+          grants: options.access.listActiveCanvasPersonGrants({
+            workspaceId,
+            projectId: matched.projectId,
+            canvasId: matched.canvasId,
+            humanPrincipalId: member.humanPrincipalId
+          })
         };
       });
       respond(

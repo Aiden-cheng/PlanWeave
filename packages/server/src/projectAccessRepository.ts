@@ -2,12 +2,16 @@ import { createHash } from "node:crypto";
 import {
   accessDisabledReasonSchema,
   accessMutationRequestSchema,
+  activeCanvasPersonGrantSchema,
+  canvasScopeRefSchema,
+  humanPrincipalIdSchema,
   requiredCapabilityForAccessMutation,
   aclRevisionSchema,
   actorRefSchema,
   membershipGrantSchema,
   type AccessMutationRequest,
   type AccessMutationResult,
+  type ActiveCanvasPersonGrant,
   type ActorRef,
   type EffectiveAccessView,
   type MembershipGrant,
@@ -156,6 +160,47 @@ export class ProjectAccessRepository {
     offset?: number;
   }): CanvasAccessRecord[] {
     return this.policy.listCanvases(input);
+  }
+  listActiveCanvasPersonGrants(input: {
+    workspaceId: string;
+    projectId: string;
+    canvasId: string;
+    humanPrincipalId: string;
+  }): ActiveCanvasPersonGrant[] {
+    const scope = canvasScopeRefSchema.parse({
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      canvasId: input.canvasId
+    });
+    const humanPrincipalId = humanPrincipalIdSchema.parse(input.humanPrincipalId);
+    const project = this.registry.projectInternal(scope.workspaceId, scope.projectId);
+    const canvas = this.registry.canvasInternal(scope.workspaceId, scope.projectId, scope.canvasId);
+    if (!project || project.revokedAt !== null || !canvas || canvas.revokedAt !== null) {
+      throw new Error("access_scope_not_found");
+    }
+    return this.database
+      .prepare(
+        `SELECT grant_id,scope_kind,role FROM project_access_grants
+         WHERE workspace_id=? AND project_id=? AND human_principal_id=? AND revoked_at IS NULL
+           AND role IN ('editor','viewer')
+           AND ((scope_kind='project' AND project_registry_id=? AND canvas_registry_id IS NULL)
+             OR (scope_kind='canvas' AND canvas_registry_id=?))
+         ORDER BY CASE scope_kind WHEN 'project' THEN 0 ELSE 1 END`
+      )
+      .all(
+        scope.workspaceId,
+        scope.projectId,
+        humanPrincipalId,
+        project.projectRegistryId,
+        canvas.canvasRegistryId
+      )
+      .map((row) =>
+        activeCanvasPersonGrantSchema.parse({
+          grantId: row.grant_id,
+          scopeKind: row.scope_kind,
+          role: row.role
+        })
+      );
   }
   bindProjectPath(workspaceId: string, projectId: string, projectRoot: string): void {
     this.registry.bindProjectPath(workspaceId, projectId, projectRoot);

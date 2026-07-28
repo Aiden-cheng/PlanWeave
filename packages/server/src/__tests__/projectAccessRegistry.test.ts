@@ -17,14 +17,19 @@ async function openFixture() {
   applyMigrations(database);
   database.exec(`
     INSERT INTO workspaces(workspace_id,display_name,created_at) VALUES ('w','Workspace','2026-01-01');
+    INSERT INTO workspaces(workspace_id,display_name,created_at) VALUES ('w-other','Other workspace','2026-01-01');
     INSERT INTO workspace_principals(workspace_id,human_principal_id,display_name,created_at,revoked_at) VALUES
       ('w','owner','Owner','2026-01-01',NULL),
       ('w','editor','Editor','2026-01-01',NULL),
-      ('w','viewer','Viewer','2026-01-01',NULL);
+      ('w','viewer','Viewer','2026-01-01',NULL),
+      ('w-other','owner-other','Owner','2026-01-01',NULL),
+      ('w-other','editor-other','Editor','2026-01-01',NULL);
     INSERT INTO workspace_memberships(workspace_id,membership_id,human_principal_id,role,revision,created_at,updated_at,revoked_at) VALUES
       ('w','m-owner','owner','owner',1,'2026-01-01','2026-01-01',NULL),
       ('w','m-editor','editor','member',1,'2026-01-01','2026-01-01',NULL),
-      ('w','m-viewer','viewer','member',1,'2026-01-01','2026-01-01',NULL);
+      ('w','m-viewer','viewer','member',1,'2026-01-01','2026-01-01',NULL),
+      ('w-other','m-owner','owner-other','owner',1,'2026-01-01','2026-01-01',NULL),
+      ('w-other','m-editor','editor-other','member',1,'2026-01-01','2026-01-01',NULL);
   `);
   return {
     database,
@@ -55,6 +60,82 @@ async function registered() {
 }
 
 describe("project access registry", () => {
+  it("projects only active grants in the requested workspace and scope", async () => {
+    const { access } = await registered();
+    access.registerProjectInternal({
+      workspaceId: "w-other",
+      projectId: "p",
+      projectRoot: "/tmp/other-project",
+      ownerHumanPrincipalId: "owner-other"
+    });
+    access.registerCanvasInternal({
+      workspaceId: "w-other",
+      projectId: "p",
+      canvasId: "c",
+      packageDir: "/tmp/other-project-canvas",
+      ownerHumanPrincipalId: "owner-other"
+    });
+    const projectGrant = access.grant({
+      workspaceId: "w",
+      projectId: "p",
+      humanPrincipalId: "editor",
+      role: "editor",
+      grantedBy: owner
+    });
+    const canvasGrant = access.grant({
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: "c",
+      humanPrincipalId: "editor",
+      role: "viewer",
+      grantedBy: owner
+    });
+    const otherGrant = access.grant({
+      workspaceId: "w-other",
+      projectId: "p",
+      humanPrincipalId: "editor-other",
+      role: "viewer",
+      grantedBy: { kind: "human", id: "owner-other" }
+    });
+
+    expect(
+      access.listActiveCanvasPersonGrants({
+        workspaceId: "w",
+        projectId: "p",
+        canvasId: "c",
+        humanPrincipalId: "editor"
+      })
+    ).toEqual([
+      { grantId: projectGrant.grantId, scopeKind: "project", role: "editor" },
+      { grantId: canvasGrant.grantId, scopeKind: "canvas", role: "viewer" }
+    ]);
+    expect(
+      access.listActiveCanvasPersonGrants({
+        workspaceId: "w-other",
+        projectId: "p",
+        canvasId: "c",
+        humanPrincipalId: "editor-other"
+      })
+    ).toEqual([{ grantId: otherGrant.grantId, scopeKind: "project", role: "viewer" }]);
+
+    access.revoke({
+      workspaceId: "w",
+      projectId: "p",
+      canvasId: null,
+      grantId: projectGrant.grantId,
+      actor: owner,
+      expectedAclRevision: 1
+    });
+    expect(
+      access.listActiveCanvasPersonGrants({
+        workspaceId: "w",
+        projectId: "p",
+        canvasId: "c",
+        humanPrincipalId: "editor"
+      })
+    ).toEqual([{ grantId: canvasGrant.grantId, scopeKind: "canvas", role: "viewer" }]);
+  });
+
   it("keeps grants and revokes owner-only and makes revoke replay idempotent", async () => {
     const { access } = await registered();
     const projectEditor = access.grant({

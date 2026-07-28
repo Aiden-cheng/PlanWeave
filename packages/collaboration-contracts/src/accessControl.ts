@@ -349,6 +349,16 @@ export const accessMutationResultSchema = z
   ]);
 export type AccessMutationResult = z.infer<typeof accessMutationResultSchema>;
 
+/** Active grant metadata needed to issue one exact-scope revoke; authority details stay server-side. */
+export const activeCanvasPersonGrantSchema = z
+  .object({
+    grantId: membershipGrantIdSchema,
+    scopeKind: z.enum(["project", "canvas"]),
+    role: z.enum(["editor", "viewer"])
+  })
+  .strict();
+export type ActiveCanvasPersonGrant = z.infer<typeof activeCanvasPersonGrantSchema>;
+
 /** Renderer-safe current-canvas People row: no token, digest, local path, or session identifier. */
 export const canvasPersonAccessViewSchema = z
   .object({
@@ -357,7 +367,8 @@ export const canvasPersonAccessViewSchema = z
     membership: accessMembershipStateSchema,
     effectiveRole: projectAccessRoleSchema.nullable(),
     capabilities: accessCapabilityFlagsSchema,
-    disabledReason: accessDisabledReasonSchema.nullable()
+    disabledReason: accessDisabledReasonSchema.nullable(),
+    grants: z.array(activeCanvasPersonGrantSchema).max(2)
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -366,6 +377,9 @@ export const canvasPersonAccessViewSchema = z
     }
     if (value.effectiveRole !== null && value.disabledReason !== null) {
       ctx.addIssue({ code: "custom", message: "authorized_person_must_not_have_disabled_reason" });
+    }
+    if (new Set(value.grants.map((grant) => grant.scopeKind)).size !== value.grants.length) {
+      ctx.addIssue({ code: "custom", message: "duplicate_person_grant_scope" });
     }
   });
 export type CanvasPersonAccessView = z.infer<typeof canvasPersonAccessViewSchema>;
