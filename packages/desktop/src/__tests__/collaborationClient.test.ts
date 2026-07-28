@@ -385,6 +385,7 @@ describe("CollaborationClient", () => {
         socket.destroy();
         return;
       }
+      expect(request.headers.origin).toBe(new URL(http.origin).origin);
       wss.handleUpgrade(request, socket, head, (ws) => {
         ws.on("message", (raw) => {
           const message = JSON.parse(String(raw));
@@ -517,7 +518,10 @@ describe("CollaborationClient", () => {
     );
 
     const protocolClose = new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("observer cursor validation timeout")), 2_000);
+      const timer = setTimeout(
+        () => reject(new Error("observer cursor validation timeout")),
+        2_000
+      );
       http.server.on("upgrade", (request, socket, head) => {
         wss.handleUpgrade(request, socket, head, (ws) => {
           ws.on("message", () => {

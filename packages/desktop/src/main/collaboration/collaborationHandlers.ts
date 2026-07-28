@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain, safeStorage } from "electron";
+import { BrowserWindow, clipboard, ipcMain, safeStorage } from "electron";
 import WebSocket from "ws";
 import {
   collaborationInvokeChannels,
@@ -14,6 +14,7 @@ import {
 } from "./CollaborationClient.js";
 import { CollaborationService, type CollaborationServiceOptions } from "./collaborationService.js";
 import { LocalCollaborationCoordinatorControl } from "./CollaborationCoordinatorControl.js";
+import { DeploymentActions } from "./deploymentActions.js";
 
 let service: CollaborationService | null = null;
 let coordinator: LocalCollaborationCoordinatorControl | null = null;
@@ -91,6 +92,9 @@ export function registerCollaborationHandlers(
 ): CollaborationService {
   service = createDefaultService(options);
   const active = service;
+  const deploymentActions = new DeploymentActions({
+    writeClipboard: (value) => clipboard.writeText(value)
+  });
   coordinator = new LocalCollaborationCoordinatorControl({
     safeStorage: {
       isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
@@ -124,7 +128,10 @@ export function registerCollaborationHandlers(
     collaborationInvokeChannels.bootstrapCollaborationOwner,
     async (_event, input: unknown) => {
       const handoff = await active.bootstrapOwner(input);
-      const profileId = input && typeof input === "object" && "profileId" in input ? (input as { profileId: unknown }).profileId : null;
+      const profileId =
+        input && typeof input === "object" && "profileId" in input
+          ? (input as { profileId: unknown }).profileId
+          : null;
       if (typeof profileId === "string" && local.status().profile?.profileId === profileId) {
         local.registerCurrentProject({ kind: "human", id: handoff.principal.humanPrincipalId });
       }
@@ -152,9 +159,8 @@ export function registerCollaborationHandlers(
   ipcMain.handle(collaborationInvokeChannels.listWorkspacePicker, (_event, input: unknown) =>
     active.listWorkspacePicker(input)
   );
-  ipcMain.handle(
-    collaborationInvokeChannels.selectWorkspaceConnection,
-    (_event, input: unknown) => active.selectWorkspaceConnection(input)
+  ipcMain.handle(collaborationInvokeChannels.selectWorkspaceConnection, (_event, input: unknown) =>
+    active.selectWorkspaceConnection(input)
   );
   ipcMain.handle(collaborationInvokeChannels.connectWorkspaceConnection, () =>
     active.connectWorkspaceConnection()
@@ -164,6 +170,17 @@ export function registerCollaborationHandlers(
   );
   ipcMain.handle(collaborationInvokeChannels.retryWorkspaceConnection, () =>
     active.retryWorkspaceConnection()
+  );
+  ipcMain.handle(collaborationInvokeChannels.getDeploymentGuidance, (_event, input: unknown) =>
+    deploymentActions.guidance(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.copyDeploymentComposeHandoff,
+    (_event, input: unknown) => deploymentActions.copyComposeHandoff(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.validateDeploymentConnectivity,
+    (_event, input: unknown) => deploymentActions.validateConnectivity(input)
   );
   ipcMain.handle(collaborationInvokeChannels.startCollaborationPresence, (_event, input: unknown) =>
     active.startPresence(input)
@@ -190,8 +207,9 @@ export function registerCollaborationHandlers(
   ipcMain.handle(collaborationInvokeChannels.getCollaborationCanvasCommandSession, () =>
     active.getCanvasCommandSession()
   );
-  ipcMain.handle(collaborationInvokeChannels.bindCollaborationContentAuthority, (_event, input: unknown) =>
-    active.bindContentAuthority(input)
+  ipcMain.handle(
+    collaborationInvokeChannels.bindCollaborationContentAuthority,
+    (_event, input: unknown) => active.bindContentAuthority(input)
   );
   ipcMain.handle(collaborationInvokeChannels.getCollaborationContentAuthority, () =>
     active.getContentAuthority()
@@ -211,13 +229,16 @@ export function registerCollaborationHandlers(
   ipcMain.handle(collaborationInvokeChannels.mutateCurrentCanvasAccess, (_event, input: unknown) =>
     active.mutateCurrentCanvasAccess(input)
   );
-  ipcMain.handle(collaborationInvokeChannels.setCollaborationCurrentSelection, (_event, input: unknown) =>
-    local.setCurrentSelection(input)
+  ipcMain.handle(
+    collaborationInvokeChannels.setCollaborationCurrentSelection,
+    (_event, input: unknown) => local.setCurrentSelection(input)
   );
   ipcMain.handle(collaborationInvokeChannels.clearCollaborationCurrentSelection, () =>
     local.clearCurrentSelection()
   );
-  ipcMain.handle(collaborationInvokeChannels.getLocalCollaborationServerStatus, () => local.status());
+  ipcMain.handle(collaborationInvokeChannels.getLocalCollaborationServerStatus, () =>
+    local.status()
+  );
   ipcMain.handle(collaborationInvokeChannels.startLocalCollaborationServer, async () => {
     const status = await local.start();
     if (status.state !== "running") return status;

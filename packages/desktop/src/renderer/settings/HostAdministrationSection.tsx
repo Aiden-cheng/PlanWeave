@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import type { createTranslator } from "../i18n";
 import { useHostAdministrationController } from "../hooks/useHostAdministrationController";
 import { HostBootstrapCard } from "./HostBootstrapCard";
+import { DeploymentConnectionCard } from "./DeploymentConnectionCard";
 
 type HostAdministrationSectionProps = {
   t: ReturnType<typeof createTranslator>;
@@ -168,6 +169,8 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
           {t("hostAdminSessionOnlyWarning")}
         </div>
       ) : null}
+
+      <DeploymentConnectionCard hosts={hosts} t={t} />
 
       <Card data-testid="host-admin-profiles">
         <CardHeader>

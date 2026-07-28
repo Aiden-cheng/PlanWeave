@@ -14,6 +14,9 @@ import {
   humanDeviceLabelSchema,
   setupCodeTokenSchema,
   type ActiveWorkspaceConnectionView,
+  type ConnectivityValidationView,
+  type DeploymentGuidanceView,
+  type DesktopDeploymentActionRequest,
   type CanvasAccessPage,
   type CreatePackageSnapshotRequest,
   type CreatePackageSnapshotResult,
@@ -498,7 +501,9 @@ export const collaborationCurrentSelectionInputSchema = z
     canvasId: z.string().trim().min(1).max(128)
   })
   .strict();
-export type CollaborationCurrentSelectionInput = z.infer<typeof collaborationCurrentSelectionInputSchema>;
+export type CollaborationCurrentSelectionInput = z.infer<
+  typeof collaborationCurrentSelectionInputSchema
+>;
 
 export const collaborationInvokeChannels = {
   getCollaborationStatus: "planweave-collaboration:getStatus",
@@ -519,6 +524,9 @@ export const collaborationInvokeChannels = {
   connectWorkspaceConnection: "planweave-collaboration:connectWorkspaceConnection",
   disconnectWorkspaceConnection: "planweave-collaboration:disconnectWorkspaceConnection",
   retryWorkspaceConnection: "planweave-collaboration:retryWorkspaceConnection",
+  getDeploymentGuidance: "planweave-collaboration:getDeploymentGuidance",
+  copyDeploymentComposeHandoff: "planweave-collaboration:copyDeploymentComposeHandoff",
+  validateDeploymentConnectivity: "planweave-collaboration:validateDeploymentConnectivity",
   startCollaborationPresence: "planweave-collaboration:startPresence",
   stopCollaborationPresence: "planweave-collaboration:stopPresence",
   publishCollaborationPresence: "planweave-collaboration:publishPresence",
@@ -623,6 +631,13 @@ export type PlanWeaveCollaborationApi = {
   connectWorkspaceConnection: () => Promise<CollaborationStatus>;
   disconnectWorkspaceConnection: () => Promise<CollaborationStatus>;
   retryWorkspaceConnection: () => Promise<CollaborationStatus>;
+  getDeploymentGuidance: (input: DesktopDeploymentActionRequest) => Promise<DeploymentGuidanceView>;
+  copyDeploymentComposeHandoff: (
+    input: Extract<DesktopDeploymentActionRequest, { action: "copy_supported_compose_handoff" }>
+  ) => Promise<{ state: "copied"; copiedAt: string }>;
+  validateDeploymentConnectivity: (
+    input: Extract<DesktopDeploymentActionRequest, { action: "validate_connectivity" }>
+  ) => Promise<ConnectivityValidationView>;
   startCollaborationPresence: (input: CollaborationPresenceCanvasInput) => Promise<void>;
   stopCollaborationPresence: () => Promise<void>;
   publishCollaborationPresence: (input: CollaborationPresenceUpdateInput) => Promise<void>;

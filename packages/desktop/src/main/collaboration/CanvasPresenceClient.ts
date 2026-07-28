@@ -12,6 +12,7 @@ import {
 import { CollaborationClientError } from "./collaborationErrors.js";
 import { reconnectDelay } from "./reconnectBackoff.js";
 import { redactCollaborationText } from "./redaction.js";
+import { derivedWebSocketOrigin } from "./webSocketOrigin.js";
 import type {
   CollaborationClientClock,
   CollaborationCredentialPort,
@@ -122,7 +123,10 @@ export class CanvasPresenceClient {
     this.connect(this.generation, parsedCanvasId);
   }
 
-  publish(input: { pointer: CanvasPresencePointer | null; selectionIds: CanvasPresenceSelectionId[] }): void {
+  publish(input: {
+    pointer: CanvasPresencePointer | null;
+    selectionIds: CanvasPresenceSelectionId[];
+  }): void {
     if (this.disposed) {
       throw new CollaborationClientError({
         kind: "aborted",
@@ -184,7 +188,11 @@ export class CanvasPresenceClient {
         if (!this.isScopeCurrent(generation, canvasId)) return;
         if (!token) {
           this.wanted = false;
-          this.setStatus({ state: "auth_expired", canvasId, code: "collaboration_credential_missing" });
+          this.setStatus({
+            state: "auth_expired",
+            canvasId,
+            code: "collaboration_credential_missing"
+          });
           return;
         }
         const base = new URL(this.profile.serverBaseUrl);
@@ -194,7 +202,10 @@ export class CanvasPresenceClient {
           `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}` +
           `/canvases/${encodeURIComponent(canvasId)}/human/presence`;
         const socket = new this.WebSocketImpl!(wsUrl.toString(), {
-          headers: { Authorization: `Bearer ${token}` }
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Origin: derivedWebSocketOrigin(this.profile.serverBaseUrl)
+          }
         });
         if (!this.isScopeCurrent(generation, canvasId)) {
           try {
@@ -238,7 +249,9 @@ export class CanvasPresenceClient {
             this.handleMessage(message, canvasId, isCurrent);
           } catch (error) {
             this.logger?.error?.(
-              redactCollaborationText(error instanceof Error ? error.message : "presence message failed")
+              redactCollaborationText(
+                error instanceof Error ? error.message : "presence message failed"
+              )
             );
             try {
               socket.close(4000, "presence protocol error");
@@ -267,7 +280,9 @@ export class CanvasPresenceClient {
       } catch (error) {
         if (!this.isScopeCurrent(generation, canvasId)) return;
         this.logger?.error?.(
-          redactCollaborationText(error instanceof Error ? error.message : "presence connect failed")
+          redactCollaborationText(
+            error instanceof Error ? error.message : "presence connect failed"
+          )
         );
         this.setStatus({ state: "error", canvasId, code: "collaboration_presence_connect" });
         this.scheduleReconnect(canvasId, generation);
@@ -275,7 +290,11 @@ export class CanvasPresenceClient {
     })();
   }
 
-  private handleMessage(message: CanvasPresenceServerMessage, canvasId: string, isCurrent: () => boolean): void {
+  private handleMessage(
+    message: CanvasPresenceServerMessage,
+    canvasId: string,
+    isCurrent: () => boolean
+  ): void {
     if (!isCurrent()) return;
     switch (message.type) {
       case "canvas.presence.snapshot":
@@ -327,10 +346,7 @@ export class CanvasPresenceClient {
 
   private isScopeCurrent(generation: number, canvasId: string): boolean {
     return (
-      this.wanted &&
-      !this.disposed &&
-      generation === this.generation &&
-      this.canvasId === canvasId
+      this.wanted && !this.disposed && generation === this.generation && this.canvasId === canvasId
     );
   }
 

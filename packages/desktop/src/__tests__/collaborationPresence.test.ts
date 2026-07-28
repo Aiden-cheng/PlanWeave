@@ -55,6 +55,7 @@ describe("desktop canvas presence transport", () => {
     http.server.on("upgrade", (request, socket, head) => {
       expect(request.url).toBe("/api/v1/projects/project-demo-001/canvases/default/human/presence");
       expect(request.headers.authorization).toBe(`Bearer ${exampleHumanDeviceToken}`);
+      expect(request.headers.origin).toBe(new URL(http.origin).origin);
       wss.handleUpgrade(request, socket, head, (ws) => {
         connections += 1;
         ws.on("message", (raw) => {

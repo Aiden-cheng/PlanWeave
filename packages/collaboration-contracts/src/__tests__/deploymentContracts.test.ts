@@ -142,10 +142,22 @@ describe("OSS-009 deployment and Host availability contracts", () => {
         healthcheck: { required: true },
         publicIngress: { tls: "direct", port: 443 }
       },
+      handoff: {
+        state: "supported",
+        copyAction: "copy_supported_compose_handoff",
+        preview:
+          "PLANWEAVE_SERVER_CONFIG_PATH=./server.json PLANWEAVE_SERVER_TLS_DIRECTORY=./tls PLANWEAVE_SERVER_PROJECTS_ROOT=./projects docker compose -f packages/server/compose.yaml up --detach --wait",
+        configInputPath: "./server.json",
+        tlsDirectory: "./tls",
+        projectsRoot: "./projects",
+        projectsMountTarget: "/var/lib/planweave/projects",
+        trustedProjectRootPattern: "/var/lib/planweave/projects/<project-id>"
+      },
       generatedAt: "2030-01-01T00:00:00.000Z",
       unavailableReason: null
     });
     expect(guidance.requirements.publicIngress?.port).toBe(443);
+    expect(guidance.handoff.projectsMountTarget).toBe("/var/lib/planweave/projects");
     expect(() =>
       deploymentGuidanceViewSchema.parse({
         ...guidance,
@@ -220,5 +232,36 @@ describe("OSS-009 deployment and Host availability contracts", () => {
         acpProfiles: [{ profileId: "acp-profile-001", status: "invalid", capabilities: [] }]
       })
     ).toThrow("available_agent_host_requires_workspace_and_acp");
+  });
+
+  it("requires an explicit failure code for every non-reachable connectivity state", () => {
+    expect(() =>
+      connectivityValidationViewSchema.parse({
+        schemaVersion: "deployment-connection/v1",
+        workspace: { workspaceId: "workspace-001" },
+        profileId: selfHostedProfile.profileId,
+        endpoint: selfHostedProfile.endpoint,
+        status: "invalid_origin",
+        checkedAt: "2030-01-01T00:00:00.000Z",
+        failureCode: null
+      })
+    ).toThrow("connectivity_status_failure_mismatch");
+    expect(() =>
+      connectivityValidationViewSchema.parse({
+        schemaVersion: "deployment-connection/v1",
+        workspace: { workspaceId: "workspace-001" },
+        profileId: selfHostedProfile.profileId,
+        endpoint: selfHostedProfile.endpoint,
+        status: "invalid_tls",
+        checkedAt: "2030-01-01T00:00:00.000Z",
+        failureCode: "connection_failed"
+      })
+    ).toThrow("connectivity_status_failure_mismatch");
+    expect(() =>
+      deploymentGuidanceViewSchema.parse({
+        ...guidance,
+        handoff: { ...guidance.handoff, preview: "docker compose up -d" }
+      })
+    ).toThrow();
   });
 });

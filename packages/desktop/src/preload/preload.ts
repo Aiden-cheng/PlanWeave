@@ -239,6 +239,12 @@ const collaborationApi: PlanWeaveCollaborationApi = {
     ipcRenderer.invoke(collaborationInvokeChannels.disconnectWorkspaceConnection),
   retryWorkspaceConnection: async () =>
     ipcRenderer.invoke(collaborationInvokeChannels.retryWorkspaceConnection),
+  getDeploymentGuidance: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.getDeploymentGuidance, input),
+  copyDeploymentComposeHandoff: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.copyDeploymentComposeHandoff, input),
+  validateDeploymentConnectivity: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.validateDeploymentConnectivity, input),
   startCollaborationPresence: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.startCollaborationPresence, input),
   stopCollaborationPresence: async () =>

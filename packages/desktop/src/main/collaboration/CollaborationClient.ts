@@ -115,12 +115,10 @@ import {
   type CurrentCanvasAccessView
 } from "@planweave-ai/collaboration-contracts";
 import type { z, ZodType } from "zod";
-import {
-  CollaborationClientError,
-  collaborationErrorFromHttp
-} from "./collaborationErrors.js";
+import { CollaborationClientError, collaborationErrorFromHttp } from "./collaborationErrors.js";
 import { reconnectDelay } from "./reconnectBackoff.js";
 import { redactCollaborationText } from "./redaction.js";
+import { derivedWebSocketOrigin } from "./webSocketOrigin.js";
 import { CanvasPresenceClient } from "./CanvasPresenceClient.js";
 import { CollaborationRegistryClient } from "./CollaborationRegistryClient.js";
 import type {
@@ -1056,7 +1054,10 @@ export class CollaborationClient {
         wsUrl.pathname = `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/human/observe`;
 
         const socket = new WebSocketImpl(wsUrl.toString(), {
-          headers: { Authorization: `Bearer ${token}` }
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Origin: derivedWebSocketOrigin(this.profile.serverBaseUrl)
+          }
         });
         this.observerSocket = socket;
 

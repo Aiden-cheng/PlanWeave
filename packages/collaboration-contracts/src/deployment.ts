@@ -126,6 +126,14 @@ export function deploymentWebSocketOrigin(endpoint: DeploymentEndpoint): string 
   return url.toString();
 }
 
+/** Main-owned Origin header derived from the validated endpoint, never renderer headers. */
+export function deploymentOriginHeader(endpoint: DeploymentEndpoint): string | null {
+  const origin = new URL(endpoint.serverOrigin).origin;
+  return endpoint.allowedClientOrigins.some((allowed) => new URL(allowed).origin === origin)
+    ? origin
+    : null;
+}
+
 /**
  * Single Desktop connection profile for both self-hosted and future hosted
  * endpoints. Workspace authority and capabilities remain opaque and portable.
@@ -162,7 +170,46 @@ export type DeploymentOperationalRequirements = z.infer<
   typeof deploymentOperationalRequirementsSchema
 >;
 
-const deploymentActionScopeSchema = z
+/** Fixed, reviewable handoff only. Desktop never accepts a command from renderer. */
+export const deploymentComposeHandoffSchema = z
+  .object({
+    state: z.enum(["supported", "not_applicable"]),
+    copyAction: z.literal("copy_supported_compose_handoff").nullable(),
+    preview: z
+      .literal(
+        "PLANWEAVE_SERVER_CONFIG_PATH=./server.json PLANWEAVE_SERVER_TLS_DIRECTORY=./tls PLANWEAVE_SERVER_PROJECTS_ROOT=./projects docker compose -f packages/server/compose.yaml up --detach --wait"
+      )
+      .nullable(),
+    configInputPath: z.literal("./server.json").nullable(),
+    tlsDirectory: z.literal("./tls").nullable(),
+    projectsRoot: z.literal("./projects").nullable(),
+    projectsMountTarget: z.literal("/var/lib/planweave/projects").nullable(),
+    trustedProjectRootPattern: z.literal("/var/lib/planweave/projects/<project-id>").nullable()
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const supported = value.state === "supported";
+    if (
+      supported !==
+      (value.copyAction !== null &&
+        value.preview !== null &&
+        value.configInputPath !== null &&
+        value.tlsDirectory !== null &&
+        value.projectsRoot !== null &&
+        value.projectsMountTarget !== null &&
+        value.trustedProjectRootPattern !== null)
+    ) {
+      context.addIssue({ code: "custom", message: "compose_handoff_state_mismatch" });
+    }
+  });
+export type DeploymentComposeHandoff = z.infer<typeof deploymentComposeHandoffSchema>;
+
+export const deploymentCopyHandoffViewSchema = z
+  .object({ state: z.literal("copied"), copiedAt: timestampSchema })
+  .strict();
+export type DeploymentCopyHandoffView = z.infer<typeof deploymentCopyHandoffViewSchema>;
+
+export const deploymentActionScopeSchema = z
   .object({ workspace: workspaceScopeRefSchema, profile: deploymentConnectionProfileSchema })
   .strict()
   .superRefine((value, context) => {
@@ -177,6 +224,7 @@ const deploymentActionScopeSchema = z
  */
 export const desktopDeploymentActionRequestSchema = z.discriminatedUnion("action", [
   deploymentActionScopeSchema.extend({ action: z.literal("request_deployment_guidance") }),
+  deploymentActionScopeSchema.extend({ action: z.literal("copy_supported_compose_handoff") }),
   deploymentActionScopeSchema.extend({ action: z.literal("validate_connectivity") }),
   deploymentActionScopeSchema.extend({ action: z.literal("query_agent_host_availability") })
 ]);
@@ -189,6 +237,7 @@ export const deploymentGuidanceViewSchema = z
     profileId: opaqueIdentifierSchema,
     state: z.enum(["ready", "unavailable"]),
     requirements: deploymentOperationalRequirementsSchema,
+    handoff: deploymentComposeHandoffSchema,
     generatedAt: timestampSchema,
     unavailableReason: z.enum(["not_supported", "not_authorized"]).nullable()
   })
@@ -206,13 +255,36 @@ export const connectivityValidationViewSchema = z
     workspace: workspaceScopeRefSchema,
     profileId: opaqueIdentifierSchema,
     endpoint: deploymentEndpointSchema,
-    status: z.enum(["reachable", "unreachable", "invalid_tls"]),
+    status: z.enum([
+      "reachable",
+      "unreachable",
+      "invalid_tls",
+      "invalid_origin",
+      "invalid_configuration"
+    ]),
     checkedAt: timestampSchema,
-    failureCode: z.string().trim().min(1).max(128).nullable()
+    failureCode: z
+      .enum([
+        "connection_failed",
+        "http_not_ready",
+        "tls_certificate_invalid",
+        "allowed_client_origin_missing",
+        "origin_rejected",
+        "connectivity_validation_not_supported",
+        "invalid_profile"
+      ])
+      .nullable()
   })
   .strict()
   .superRefine((value, context) => {
-    if ((value.status === "reachable") !== (value.failureCode === null)) {
+    const expectedCodes = {
+      reachable: [null],
+      unreachable: ["connection_failed", "http_not_ready"],
+      invalid_tls: ["tls_certificate_invalid"],
+      invalid_origin: ["allowed_client_origin_missing", "origin_rejected"],
+      invalid_configuration: ["connectivity_validation_not_supported", "invalid_profile"]
+    } as const;
+    if (!expectedCodes[value.status].includes(value.failureCode as never)) {
       context.addIssue({ code: "custom", message: "connectivity_status_failure_mismatch" });
     }
   });
