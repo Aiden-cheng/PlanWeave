@@ -85,6 +85,22 @@ describe("server config", () => {
     );
   });
 
+  it("accepts trusted TLS on a literal loopback endpoint", async () => {
+    const input = await secureConfig();
+    const loopback = parseServerConfig({
+      ...input,
+      publicUrl: "https://127.0.0.1:7443",
+      deployment: {
+        topology: "loopback_https",
+        serverOrigin: "https://127.0.0.1:7443",
+        allowedClientOrigins: ["https://127.0.0.1:7443"],
+        tlsTrust: "configured_ca"
+      }
+    });
+    expect(loopback.deployment?.topology).toBe("loopback_https");
+    expect(serverConfigSummary(loopback).deployment?.topology).toBe("loopback_https");
+  });
+
   it("requires a bounded matching deployment endpoint for network listeners", async () => {
     const input = await secureConfig();
     expect(() => parseServerConfig({ ...input, deployment: undefined })).toThrow(

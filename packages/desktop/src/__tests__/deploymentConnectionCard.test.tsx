@@ -20,4 +20,12 @@ describe("DeploymentConnectionCard", () => {
     expect(screen.getByRole("button", { name: "Review handoff" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Validate endpoint" })).toBeEnabled();
   });
+
+  it("offers trusted HTTPS for a same-machine Server", async () => {
+    render(<DeploymentConnectionCard t={createTranslator("en")} />);
+
+    expect(screen.getByRole("option", { name: "Local loopback HTTPS" })).toHaveValue(
+      "loopback_https"
+    );
+  });
 });

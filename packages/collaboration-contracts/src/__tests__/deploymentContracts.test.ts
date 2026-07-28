@@ -39,7 +39,7 @@ const deploymentTarget = {
 };
 
 describe("OSS-009 deployment and Host availability contracts", () => {
-  it("distinguishes loopback HTTP from LAN and public trusted HTTPS/WSS", () => {
+  it("distinguishes loopback HTTP and HTTPS from LAN and public trusted HTTPS/WSS", () => {
     const loopback = deploymentConnectionProfileSchema.parse({
       ...selfHostedProfile,
       profileId: "profile-loopback-001",
@@ -51,6 +51,18 @@ describe("OSS-009 deployment and Host availability contracts", () => {
       }
     });
     expect(deploymentWebSocketOrigin(loopback.endpoint)).toBe("ws://127.0.0.1:8787/");
+
+    const secureLoopback = deploymentConnectionProfileSchema.parse({
+      ...selfHostedProfile,
+      profileId: "profile-secure-loopback-001",
+      endpoint: {
+        topology: "loopback_https",
+        serverOrigin: "https://127.0.0.1:7443/",
+        allowedClientOrigins: ["https://localhost:7443/"],
+        tlsTrust: "configured_ca"
+      }
+    });
+    expect(deploymentWebSocketOrigin(secureLoopback.endpoint)).toBe("wss://127.0.0.1:7443/");
 
     const lan = deploymentConnectionProfileSchema.parse({
       ...selfHostedProfile,
@@ -75,6 +87,28 @@ describe("OSS-009 deployment and Host availability contracts", () => {
         }
       })
     ).toThrow("loopback_http_requires_loopback_http_origins_without_tls");
+    expect(() =>
+      deploymentConnectionProfileSchema.parse({
+        ...selfHostedProfile,
+        endpoint: {
+          topology: "loopback_https",
+          serverOrigin: "https://collab.example.test/",
+          allowedClientOrigins: ["https://127.0.0.1:7443/"],
+          tlsTrust: "configured_ca"
+        }
+      })
+    ).toThrow("loopback_https_requires_trusted_loopback_https_origins");
+    expect(() =>
+      deploymentConnectionProfileSchema.parse({
+        ...selfHostedProfile,
+        endpoint: {
+          topology: "loopback_https",
+          serverOrigin: "https://127.0.0.1:7443/",
+          allowedClientOrigins: ["https://127.0.0.1:7443/"],
+          tlsTrust: "not_applicable"
+        }
+      })
+    ).toThrow("loopback_https_requires_trusted_loopback_https_origins");
     expect(() =>
       deploymentConnectionProfileSchema.parse({
         ...selfHostedProfile,

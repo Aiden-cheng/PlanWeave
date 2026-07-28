@@ -17,8 +17,13 @@ export type DeploymentTargetDraftSchemaVersion = z.infer<
   typeof deploymentTargetDraftSchemaVersionSchema
 >;
 
-/** The three supported server exposure topologies. */
-export const deploymentTopologySchema = z.enum(["loopback_http", "lan_https", "public_https"]);
+/** The four supported server exposure topologies. */
+export const deploymentTopologySchema = z.enum([
+  "loopback_http",
+  "loopback_https",
+  "lan_https",
+  "public_https"
+]);
 export type DeploymentTopology = z.infer<typeof deploymentTopologySchema>;
 
 export const deploymentTlsTrustSchema = z.enum(["not_applicable", "system_ca", "configured_ca"]);
@@ -89,6 +94,24 @@ function validateTopologyOrigin(
     }
     return;
   }
+  if (value.topology === "loopback_https") {
+    if (
+      url.protocol !== "https:" ||
+      !loopback ||
+      value.tlsTrust === "not_applicable" ||
+      value.allowedClientOrigins.some((origin) => {
+        const client = new URL(origin);
+        return client.protocol !== "https:" || !isLoopbackHostname(client.hostname);
+      })
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "loopback_https_requires_trusted_loopback_https_origins",
+        path: ["serverOrigin"]
+      });
+    }
+    return;
+  }
   if (
     url.protocol !== "https:" ||
     loopback ||
@@ -114,8 +137,8 @@ function validateTopologyOrigin(
 }
 
 /**
- * Provider-neutral server exposure endpoint. LAN and public endpoints require
- * trusted HTTPS/WSS; the websocket origin is derived from this HTTP origin.
+ * Provider-neutral server exposure endpoint. Trusted loopback, LAN, and public
+ * endpoints require HTTPS/WSS; the websocket origin is derived from this HTTP origin.
  */
 export const deploymentEndpointSchema = z
   .object({

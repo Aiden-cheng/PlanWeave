@@ -466,6 +466,7 @@ export const zhCnCatalog = {
     "审阅此部署目标不需要 Workspace 连接。只有 Server 启动后才完成设置或连接。",
   deploymentTopology: "拓扑",
   deploymentLoopback: "本机 loopback HTTP",
+  deploymentLoopbackTls: "本机 loopback HTTPS",
   deploymentLan: "LAN HTTPS",
   deploymentPublic: "公网 HTTPS",
   deploymentOrigin: "Server origin",

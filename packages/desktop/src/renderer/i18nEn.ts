@@ -474,6 +474,7 @@ export const enCatalog = {
     "A Workspace connection is not required to review this deployment target. Complete setup or connect only after the Server is running.",
   deploymentTopology: "Topology",
   deploymentLoopback: "Local loopback HTTP",
+  deploymentLoopbackTls: "Local loopback HTTPS",
   deploymentLan: "LAN HTTPS",
   deploymentPublic: "Public HTTPS",
   deploymentOrigin: "Server origin",

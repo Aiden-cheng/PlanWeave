@@ -237,7 +237,7 @@ export const serverConfigSummarySchema = z
     transport: z.enum(["https", "loopback-development"]),
     deployment: z
       .object({
-        topology: z.enum(["loopback_http", "lan_https", "public_https"]),
+        topology: z.enum(["loopback_http", "loopback_https", "lan_https", "public_https"]),
         allowedClientOrigins: z.array(z.url()).max(32)
       })
       .nullable(),

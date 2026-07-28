@@ -17,7 +17,8 @@ type Props = { t: ReturnType<typeof createTranslator> };
 function initialTopology(origin: string): DeploymentTopology {
   const url = new URL(origin);
   const loopback = ["localhost", "127.0.0.1", "[::1]", "::1"].includes(url.hostname);
-  return loopback && url.protocol === "http:" ? "loopback_http" : "public_https";
+  if (loopback) return url.protocol === "https:" ? "loopback_https" : "loopback_http";
+  return "public_https";
 }
 
 function normalizedOrigin(value: string): string {
@@ -157,6 +158,7 @@ export function DeploymentConnectionCard({ t }: Props) {
               onChange={(event) => setTopology(event.target.value as DeploymentTopology)}
             >
               <option value="loopback_http">{t("deploymentLoopback")}</option>
+              <option value="loopback_https">{t("deploymentLoopbackTls")}</option>
               <option value="lan_https">{t("deploymentLan")}</option>
               <option value="public_https">{t("deploymentPublic")}</option>
             </select>
