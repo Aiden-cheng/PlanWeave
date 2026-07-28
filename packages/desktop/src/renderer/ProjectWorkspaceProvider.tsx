@@ -251,7 +251,6 @@ export function ProjectWorkspaceProvider({
   const sharedCanvasCommands = useSharedCanvasCommands({
     api: collaborationBridge,
     canvasId: selectedCanvasId,
-    projectRoot: selectedProject?.rootPath ?? null,
     enabled: collaborationSurface.sessionConnected && Boolean(selectedProject),
     profileId: collaborationSurface.activeProfileId,
     selectedProjectId: selectedProject?.projectId ?? null,

@@ -37,7 +37,6 @@ export type SharedCanvasCommandsResult = {
 export function useSharedCanvasCommands(input: {
   enabled: boolean;
   canvasId: string | null;
-  projectRoot: string | null;
   profileId: string | null;
   selectedProjectId: string | null;
   activeProjectId: string | null;
@@ -52,7 +51,6 @@ export function useSharedCanvasCommands(input: {
     input.selectedProjectId !== null &&
     input.selectedProjectId === input.activeProjectId &&
     input.canvasId !== null &&
-    input.projectRoot !== null &&
     input.profileId !== null;
 
   const labels = useMemo<CanvasCommandLabels>(
@@ -98,8 +96,7 @@ export function useSharedCanvasCommands(input: {
   useEffect(() => {
     const controller = controllerRef.current;
     const canvasId = input.canvasId;
-    const projectRoot = input.projectRoot;
-    if (!controller || !scopeEnabled || !canvasId || !projectRoot) {
+    if (!controller || !scopeEnabled || !canvasId) {
       void controller?.unbind();
       return undefined;
     }
@@ -130,7 +127,7 @@ export function useSharedCanvasCommands(input: {
     };
     const bindAndStartPolling = async () => {
       try {
-        await controller.bind({ canvasId, projectRoot });
+        await controller.bind({ canvasId });
         if (!active) return;
         const snap = controller.getSnapshot();
         if (!snap.session || snap.lastError) return;
@@ -148,7 +145,7 @@ export function useSharedCanvasCommands(input: {
       active = false;
       if (intervalId !== null) clearInterval(intervalId);
     };
-  }, [api, labels, scopeEnabled, input.canvasId, input.projectRoot]);
+  }, [api, labels, scopeEnabled, input.canvasId]);
 
   const submit = useCallback(
     async (submitInput: {

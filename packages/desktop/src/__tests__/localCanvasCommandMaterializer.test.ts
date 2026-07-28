@@ -1,4 +1,4 @@
-import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
+import { cp, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -13,7 +13,10 @@ import {
   basicManifest,
   createTestWorkspace
 } from "../../../runtime/src/__tests__/promptTestHelpers.js";
+import { readJsonFile, writeJsonFile } from "../../../runtime/src/json.js";
+import type { ProjectMetadata } from "../../../runtime/src/projectMetadata.js";
 import { LocalCanvasCommandMaterializer } from "../main/collaboration/LocalCanvasCommandMaterializer.js";
+import { collaborationCanvasSessionInputSchema } from "../shared/collaboration.js";
 
 const directories: string[] = [];
 const originalHome = process.env.PLANWEAVE_HOME;
@@ -32,6 +35,43 @@ function scope(projectId: string) {
 }
 
 describe("LocalCanvasCommandMaterializer", () => {
+  it("binds from the registered project root without accepting a renderer path", async () => {
+    const workspace = await createTestWorkspace(basicManifest());
+    directories.push(workspace.home, workspace.root);
+    process.env.PLANWEAVE_HOME = workspace.home;
+    process.env.PLANWEAVE_DESKTOP_SETTINGS_FILE = join(workspace.home, "desktop-settings.json");
+
+    expect(collaborationCanvasSessionInputSchema.parse({ canvasId: "default" })).toEqual({
+      canvasId: "default"
+    });
+    expect(() =>
+      collaborationCanvasSessionInputSchema.parse({
+        canvasId: "default",
+        projectRoot: workspace.root
+      })
+    ).toThrow();
+
+    const binding = await new LocalCanvasCommandMaterializer().bind({
+      projectId: workspace.init.workspace.id,
+      canvasId: "default"
+    });
+    expect(binding.projectRoot).toBe(await realpath(workspace.root));
+  });
+
+  it("fails closed when the connected project is not locally registered", async () => {
+    const workspace = await createTestWorkspace(basicManifest());
+    directories.push(workspace.home, workspace.root);
+    process.env.PLANWEAVE_HOME = workspace.home;
+    process.env.PLANWEAVE_DESKTOP_SETTINGS_FILE = join(workspace.home, "desktop-settings.json");
+
+    await expect(
+      new LocalCanvasCommandMaterializer().bind({
+        projectId: "missing-project",
+        canvasId: "default"
+      })
+    ).rejects.toMatchObject({ code: "collaboration_canvas_local_project_not_registered" });
+  });
+
   it("converges a delta into an independently rooted registered project and skips co-located accepted content", async () => {
     const source = await createTestWorkspace(basicManifest());
     directories.push(source.home, source.root);
@@ -40,6 +80,13 @@ describe("LocalCanvasCommandMaterializer", () => {
     const replicaRoot = join(replicaHome, "projects", projectId);
     directories.push(replicaHome);
     await cp(source.init.workspace.workspaceRoot, replicaRoot, { recursive: true });
+    const replicaProjectFile = join(replicaRoot, "project.json");
+    const replicaMetadata = await readJsonFile<ProjectMetadata>(replicaProjectFile);
+    await writeJsonFile(replicaProjectFile, {
+      ...replicaMetadata,
+      rootPath: replicaRoot,
+      sourceRoot: replicaRoot
+    });
 
     const updateIntent = {
       kind: "update_task_prompt" as const,
@@ -57,10 +104,10 @@ describe("LocalCanvasCommandMaterializer", () => {
     process.env.PLANWEAVE_DESKTOP_SETTINGS_FILE = join(replicaHome, "desktop-settings.json");
     const replicaMaterializer = new LocalCanvasCommandMaterializer();
     const replicaBinding = await replicaMaterializer.bind({
-      projectRoot: replicaRoot,
       projectId,
       canvasId: "default"
     });
+    expect(replicaBinding.projectRoot).toBe(replicaRoot);
     const delta = canvasReconnectDeltaSchema.parse({
       type: "canvas.reconnect.delta",
       protocolVersion: CANVAS_COMMAND_PROTOCOL_VERSION,
@@ -98,7 +145,6 @@ describe("LocalCanvasCommandMaterializer", () => {
     process.env.PLANWEAVE_DESKTOP_SETTINGS_FILE = join(source.home, "desktop-settings.json");
     const sourceMaterializer = new LocalCanvasCommandMaterializer();
     const sourceBinding = await sourceMaterializer.bind({
-      projectRoot: source.root,
       projectId,
       canvasId: "default"
     });

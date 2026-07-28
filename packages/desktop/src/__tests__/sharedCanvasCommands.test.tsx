@@ -54,19 +54,21 @@ function createBridge(options?: {
   const reconnect = vi.fn<CanvasCommandBridge["reconnectCollaborationCanvas"]>(
     options?.reconnect ?? (async () => reconnectResult(initialSession))
   );
+  const bind = vi.fn<CanvasCommandBridge["bindCollaborationCanvasCommandSession"]>(async () => {
+    if (options?.bindError) throw options.bindError;
+    return initialSession;
+  });
   return {
     api: {
       submitCollaborationCanvasCommand: async () => {
         throw new Error("not used by this hook test");
       },
       reconnectCollaborationCanvas: reconnect,
-      bindCollaborationCanvasCommandSession: async () => {
-        if (options?.bindError) throw options.bindError;
-        return initialSession;
-      },
+      bindCollaborationCanvasCommandSession: bind,
       getCollaborationCanvasCommandSession: async () => initialSession
     },
-    reconnect
+    reconnect,
+    bind
   };
 }
 
@@ -75,7 +77,6 @@ function hookInput(api: CanvasCommandBridge, onAuthoritativeChange?: () => void 
     api,
     enabled: true,
     canvasId: "default",
-    projectRoot: "/tmp/project-root",
     profileId: "profile-1",
     selectedProjectId: "project-1",
     activeProjectId: "project-1",
@@ -103,7 +104,6 @@ describe("useSharedCanvasCommands", () => {
         api: null,
         enabled: false,
         canvasId: null,
-        projectRoot: null,
         profileId: null,
         selectedProjectId: null,
         activeProjectId: null,
@@ -133,6 +133,7 @@ describe("useSharedCanvasCommands", () => {
       useSharedCanvasCommands(hookInput(bridge.api, onAuthoritativeChange))
     );
     await flushEffects();
+    expect(bridge.bind).toHaveBeenCalledWith({ canvasId: "default" });
     expect(bridge.reconnect).toHaveBeenCalledTimes(1);
     onAuthoritativeChange.mockClear();
 

@@ -102,7 +102,7 @@ export class CanvasCommandController {
     return this.snapshot;
   }
 
-  async bind(input: { canvasId: string; projectRoot: string }): Promise<void> {
+  async bind(input: { canvasId: string }): Promise<void> {
     this.generation += 1;
     const generation = this.generation;
     const { canvasId } = input;

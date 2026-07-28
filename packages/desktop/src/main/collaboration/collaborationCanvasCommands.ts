@@ -135,7 +135,6 @@ export class CollaborationCanvasCommandFacade {
     const parsed = collaborationCanvasSessionInputSchema.parse(input);
     const client = requireClient(this.resolveClient());
     this.localBinding = await this.materializer.bind({
-      projectRoot: parsed.projectRoot,
       projectId: client.projectId,
       canvasId: parsed.canvasId
     });

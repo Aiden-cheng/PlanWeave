@@ -35,30 +35,32 @@ function materializationError(code: string, retryable = true): CollaborationClie
  * No server path, file payload, or client merge decision crosses this boundary.
  */
 export class LocalCanvasCommandMaterializer {
-  async bind(input: {
-    projectRoot: string;
-    projectId: string;
-    canvasId: string;
-  }): Promise<LocalCanvasCommandBinding> {
-    let project;
+  async bind(input: { projectId: string; canvasId: string }): Promise<LocalCanvasCommandBinding> {
+    let registeredProjects;
     try {
-      project = await getProjectOverview(input.projectRoot);
-    } catch {
-      throw materializationError("collaboration_canvas_local_project_unavailable", false);
-    }
-    if (project.projectId !== input.projectId) {
-      throw materializationError("collaboration_canvas_project_binding_mismatch", false);
-    }
-    let registeredProject;
-    try {
-      registeredProject = (await listProjects()).find(
-        (candidate) => candidate.projectId === input.projectId && candidate.rootPath === project.rootPath
+      registeredProjects = (await listProjects()).filter(
+        (candidate) => candidate.projectId === input.projectId
       );
     } catch {
       throw materializationError("collaboration_canvas_local_project_registry_unavailable", false);
     }
-    if (!registeredProject) {
-      throw materializationError("collaboration_canvas_local_project_not_registered", false);
+    if (registeredProjects.length !== 1) {
+      throw materializationError(
+        registeredProjects.length === 0
+          ? "collaboration_canvas_local_project_not_registered"
+          : "collaboration_canvas_local_project_ambiguous",
+        false
+      );
+    }
+    const registeredProject = registeredProjects[0]!;
+    let project;
+    try {
+      project = await getProjectOverview(registeredProject.rootPath);
+    } catch {
+      throw materializationError("collaboration_canvas_local_project_unavailable", false);
+    }
+    if (project.projectId !== input.projectId || project.rootPath !== registeredProject.rootPath) {
+      throw materializationError("collaboration_canvas_project_binding_mismatch", false);
     }
 
     let workspace;
