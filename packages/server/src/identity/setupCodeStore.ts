@@ -33,6 +33,40 @@ type SetupCodeGrantRow = {
   credential_expires_at: string | null;
 };
 
+type SetupCodeHostEnrollmentOutcomeRow = {
+  setup_code_id: string;
+  enrollment_attempt_id: string;
+  request_sha256: string;
+  enrollment_id: string;
+  host_id: string;
+  credential_expires_at: string;
+  created_at: string;
+};
+
+export type SetupCodeHostEnrollmentOutcome = {
+  setupCodeId: string;
+  enrollmentAttemptId: string;
+  requestSha256: string;
+  enrollmentId: string;
+  hostId: string;
+  credentialExpiresAt: string;
+  createdAt: string;
+};
+
+function toHostEnrollmentOutcome(
+  row: SetupCodeHostEnrollmentOutcomeRow
+): SetupCodeHostEnrollmentOutcome {
+  return {
+    setupCodeId: row.setup_code_id,
+    enrollmentAttemptId: row.enrollment_attempt_id,
+    requestSha256: row.request_sha256,
+    enrollmentId: row.enrollment_id,
+    hostId: row.host_id,
+    credentialExpiresAt: row.credential_expires_at,
+    createdAt: row.created_at
+  };
+}
+
 function toGrant(row: SetupCodeGrantRow): SetupCodeGrant {
   return setupCodeGrantSchema.parse({
     schemaVersion: "workspace-setup/v1",
@@ -184,6 +218,32 @@ export class SetupCodeStore {
     const grant = this.getById(setupCodeId);
     if (!grant) throw new Error("setup_code_not_found");
     return grant;
+  }
+
+  findHostEnrollmentOutcome(setupCodeId: string): SetupCodeHostEnrollmentOutcome | undefined {
+    const row = this.database
+      .prepare("SELECT * FROM setup_code_host_enrollment_outcomes WHERE setup_code_id=?")
+      .get(setupCodeId) as SetupCodeHostEnrollmentOutcomeRow | undefined;
+    return row ? toHostEnrollmentOutcome(row) : undefined;
+  }
+
+  insertHostEnrollmentOutcome(input: SetupCodeHostEnrollmentOutcome): void {
+    this.database
+      .prepare(
+        `INSERT INTO setup_code_host_enrollment_outcomes(
+          setup_code_id,enrollment_attempt_id,request_sha256,enrollment_id,host_id,
+          credential_expires_at,created_at
+        ) VALUES(?,?,?,?,?,?,?)`
+      )
+      .run(
+        input.setupCodeId,
+        input.enrollmentAttemptId,
+        input.requestSha256,
+        input.enrollmentId,
+        input.hostId,
+        input.credentialExpiresAt,
+        input.createdAt
+      );
   }
 
   revoke(setupCodeId: string, reason: string): SetupCodeRevocation {

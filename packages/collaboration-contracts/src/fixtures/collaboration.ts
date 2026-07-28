@@ -715,6 +715,7 @@ export const exampleSetupCodeRedeemHostResponse = setupCodeRedeemHostResponseSch
   workspaceId: "workspace-demo-001",
   workspaceDisplayName: "PlanWeave Demo",
   connectionProfile: exampleWorkspaceConnectionProfile,
+  enrollmentAttemptId: "enroll-setup-001",
   enrollmentId: "enrollment-001",
   hostId: "host-001",
   hostCredentialExpiresAt: "2030-01-03T00:00:00.000Z"

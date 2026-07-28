@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { lstat, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { HostEnrollmentCompleted } from "@planweave-ai/distributed-protocol";
+import type { SetupCodeRedeemHostResponse } from "@planweave-ai/collaboration-contracts";
 import {
   hostCredentialDocumentSchema,
   type ActiveHostCredential,
@@ -78,11 +79,15 @@ export class FileHostCredentialStore {
   }
 
   async promoteSetup(
-    response: { hostId: string; workspaceId: string; hostCredentialExpiresAt: string },
+    response: SetupCodeRedeemHostResponse,
     now = new Date()
   ): Promise<ActiveHostCredential> {
     const current = await this.read();
-    if (!current?.pending || current.pending.kind !== "setup_code") {
+    if (
+      !current?.pending ||
+      current.pending.kind !== "setup_code" ||
+      current.pending.enrollmentAttemptId !== response.enrollmentAttemptId
+    ) {
       throw new Error("agent_host_enrollment_response_mismatch");
     }
     if (Date.parse(response.hostCredentialExpiresAt) <= now.getTime()) {

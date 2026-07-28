@@ -13,6 +13,7 @@ export type HostSetupCodeRedeemRequest = {
   displayName: string;
   capabilities: string[];
   capacity: number;
+  enrollmentAttemptId: string;
   hostCredentialToken: string;
 };
 

@@ -26,13 +26,18 @@ import {
   type SetupCodeRevocation,
   type WorkspaceConnectionProfile
 } from "@planweave-ai/collaboration-contracts";
+import { canonicalizeJson } from "@planweave-ai/distributed-protocol";
 import { AgentHostRepository } from "../hosts.js";
 import type { OperatorPrincipal } from "../operatorAuth.js";
 import { inWriteTransaction, type SqliteDatabase } from "../sqlite.js";
 import { mintHumanDeviceToken, hashHumanToken } from "./crypto.js";
 import { OperatorSessionStore } from "./operatorSessionStore.js";
 import { mintOperatorCredentialToken } from "./setupCodeCrypto.js";
-import { SetupCodeStore, toSetupCodeGrantView } from "./setupCodeStore.js";
+import {
+  SetupCodeStore,
+  toSetupCodeGrantView,
+  type SetupCodeHostEnrollmentOutcome
+} from "./setupCodeStore.js";
 import { WorkspaceIdentityRepository } from "./workspaceRepository.js";
 
 const DEFAULT_DEVICE_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
@@ -204,6 +209,10 @@ export class SetupCodeService {
       assertSetupRedeemPurposeMatch(found, request);
     } catch {
       throw new SetupCodeError("setup_code_purpose_mismatch");
+    }
+    if (request.purpose === "host_enrollment") {
+      const outcome = this.store.findHostEnrollmentOutcome(found.setupCodeId);
+      if (outcome) return this.resumeHostEnrollment(found, request, outcome);
     }
     this.assertWorkspaceUsable(found.workspaceId);
     this.assertIssuerUsable(found);
@@ -398,6 +407,15 @@ export class SetupCodeService {
         registration.host.id,
         grant.issuedAt
       );
+    this.store.insertHostEnrollmentOutcome({
+      setupCodeId: grant.setupCodeId,
+      enrollmentAttemptId: request.enrollmentAttemptId,
+      requestSha256: this.hostEnrollmentRequestSha256(request),
+      enrollmentId,
+      hostId: registration.host.id,
+      credentialExpiresAt,
+      createdAt: now.toISOString()
+    });
     this.store.markRedeemed(grant.setupCodeId, registration.host.id);
     const connectionProfile = this.connectionProfile(grant.workspaceId, workspace.displayName);
     const response = setupCodeRedeemHostResponseSchema.parse({
@@ -406,12 +424,59 @@ export class SetupCodeService {
       workspaceId: grant.workspaceId,
       workspaceDisplayName: workspace.displayName,
       connectionProfile,
+      enrollmentAttemptId: request.enrollmentAttemptId,
       enrollmentId,
       hostId: registration.host.id,
       hostCredentialExpiresAt: credentialExpiresAt
     });
     assertSetupViewRedacted(response);
     return response;
+  }
+
+  private resumeHostEnrollment(
+    grant: NonNullable<ReturnType<SetupCodeStore["findByToken"]>>,
+    request: Extract<ReturnType<typeof setupCodeRedeemRequestSchema.parse>, { purpose: "host_enrollment" }>,
+    outcome: SetupCodeHostEnrollmentOutcome
+  ) {
+    if (
+      grant.redeemedAt === null ||
+      grant.redemptionSubjectId !== outcome.hostId ||
+      outcome.enrollmentAttemptId !== request.enrollmentAttemptId ||
+      outcome.requestSha256 !== this.hostEnrollmentRequestSha256(request)
+    ) {
+      throw new SetupCodeError("setup_code_redeemed");
+    }
+    this.assertWorkspaceUsable(grant.workspaceId);
+    const workspace = this.workspaceIdentity.workspaceView(grant.workspaceId);
+    const response = setupCodeRedeemHostResponseSchema.parse({
+      schemaVersion: "workspace-setup/v1",
+      purpose: "host_enrollment",
+      workspaceId: grant.workspaceId,
+      workspaceDisplayName: workspace.displayName,
+      connectionProfile: this.connectionProfile(grant.workspaceId, workspace.displayName),
+      enrollmentAttemptId: outcome.enrollmentAttemptId,
+      enrollmentId: outcome.enrollmentId,
+      hostId: outcome.hostId,
+      hostCredentialExpiresAt: outcome.credentialExpiresAt
+    });
+    assertSetupViewRedacted(response);
+    return response;
+  }
+
+  private hostEnrollmentRequestSha256(
+    request: Extract<ReturnType<typeof setupCodeRedeemRequestSchema.parse>, { purpose: "host_enrollment" }>
+  ): string {
+    return createHash("sha256")
+      .update(
+        canonicalizeJson({
+          enrollmentAttemptId: request.enrollmentAttemptId,
+          credentialTokenSha256: createHash("sha256").update(request.hostCredentialToken).digest("hex"),
+          displayName: request.displayName,
+          capabilities: request.capabilities,
+          capacity: request.capacity
+        })
+      )
+      .digest("hex");
   }
 
   private connectionProfile(workspaceId: string, displayName: string): WorkspaceConnectionProfile {

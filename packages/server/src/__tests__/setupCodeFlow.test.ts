@@ -199,6 +199,7 @@ describe("setup code issue/redeem/revoke", () => {
       displayName: "Linux Host",
       capabilities: ["linux"],
       capacity: 2,
+      enrollmentAttemptId: "enroll-host-001",
       hostCredentialToken: hostToken
     });
     expect(hostRedeem.purpose).toBe("host_enrollment");
@@ -210,6 +211,45 @@ describe("setup code issue/redeem/revoke", () => {
         workspaceId
       )?.id
     ).toBe(hostRedeem.hostId);
+  });
+
+  it("resumes a setup Host enrollment after the committed response is lost", async () => {
+    const database = await openDatabase();
+    provisionAdmin(database);
+    const workspaceId = ensureWorkspace(database);
+    const setup = service(database);
+    const issued = setup.issue(principal(database), {
+      schemaVersion: "workspace-setup/v1",
+      workspaceId,
+      purpose: "host_enrollment"
+    });
+    const request = {
+      schemaVersion: "workspace-setup/v1" as const,
+      purpose: "host_enrollment" as const,
+      setupCode: issued.setupCode,
+      displayName: "Recovered Host",
+      capabilities: ["linux"],
+      capacity: 1,
+      enrollmentAttemptId: "enroll-recovery-001",
+      hostCredentialToken: mintHostCredentialTokenForTests()
+    };
+
+    const committedBeforeResponseLoss = setup.redeem(request);
+    const resumed = setup.redeem(request);
+    expect(resumed).toEqual(committedBeforeResponseLoss);
+    expect(
+      database.prepare("SELECT COUNT(*) AS count FROM agent_hosts").get()?.count
+    ).toBe(1);
+
+    expect(() =>
+      setup.redeem({ ...request, enrollmentAttemptId: "enroll-recovery-002" })
+    ).toThrow(/setup_code_redeemed/);
+    expect(() =>
+      setup.redeem({
+        ...request,
+        hostCredentialToken: mintHostCredentialTokenForTests()
+      })
+    ).toThrow(/setup_code_redeemed/);
   });
 
   it("rejects expired, revoked, wrong workspace, revoked issuer, and forbidden capabilities", async () => {
@@ -353,6 +393,7 @@ describe("setup code issue/redeem/revoke", () => {
         displayName: "HTTP Host",
         capabilities: ["linux"],
         capacity: 1,
+        enrollmentAttemptId: "enroll-http-001",
         hostCredentialToken: mintHostCredentialTokenForTests()
       })
     });
@@ -407,11 +448,15 @@ describe("setup code issue/redeem/revoke", () => {
     expect(grant.enrollmentCode.startsWith("pw_enroll_")).toBe(true);
     const tables = database
       .prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('setup_code_grants','setup_code_revocations')"
+        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('setup_code_grants','setup_code_revocations','setup_code_host_enrollment_outcomes')"
       )
       .all()
       .map((row) => String(row.name))
       .sort();
-    expect(tables).toEqual(["setup_code_grants", "setup_code_revocations"]);
+    expect(tables).toEqual([
+      "setup_code_grants",
+      "setup_code_host_enrollment_outcomes",
+      "setup_code_revocations"
+    ]);
   });
 });

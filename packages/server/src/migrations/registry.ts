@@ -5,7 +5,7 @@ import { migration26 } from "./legacyTail.js";
 import { aclRegistryMigration } from "./aclRegistry.js";
 import { assignmentAuthorityMigration } from "./assignment.js";
 import { canvasCommandMigration } from "./canvas.js";
-import { setupCodeMigration } from "./setup.js";
+import { setupCodeHostEnrollmentOutcomeMigration, setupCodeMigration } from "./setup.js";
 import type { Migration, MigrationModule } from "./types.js";
 
 const identityModule: MigrationModule = { name: "identity", migrations: identityMigrations };
@@ -23,7 +23,7 @@ export const migrationModules: readonly MigrationModule[] = [
   { name: "acl-registry", migrations: [aclRegistryMigration] },
   { name: "assignment-authority", migrations: [assignmentAuthorityMigration] },
   { name: "canvas-command", migrations: [canvasCommandMigration] },
-  { name: "setup-code", migrations: [setupCodeMigration] }
+  { name: "setup-code", migrations: [setupCodeMigration, setupCodeHostEnrollmentOutcomeMigration] }
 ];
 
 const flattened = migrationModules.flatMap((module) => module.migrations);

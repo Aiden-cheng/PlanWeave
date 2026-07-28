@@ -59,3 +59,23 @@ export const setupCodeMigration: Migration = {
   version: 31,
   sql: setupCodeMigrationSql
 };
+
+/**
+ * Durable host setup-code outcome. A response lost after the Server commits an
+ * enrollment may be retried only by the exact Host attempt that created it.
+ */
+export const setupCodeHostEnrollmentOutcomeMigration: Migration = {
+  version: 32,
+  sql: `
+CREATE TABLE IF NOT EXISTS setup_code_host_enrollment_outcomes (
+  setup_code_id TEXT PRIMARY KEY REFERENCES setup_code_grants(setup_code_id),
+  enrollment_attempt_id TEXT NOT NULL UNIQUE,
+  request_sha256 TEXT NOT NULL
+    CHECK(length(request_sha256)=64 AND request_sha256 NOT GLOB '*[^a-f0-9]*'),
+  enrollment_id TEXT NOT NULL,
+  host_id TEXT NOT NULL,
+  credential_expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+`
+};

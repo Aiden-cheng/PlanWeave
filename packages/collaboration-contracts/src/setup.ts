@@ -15,6 +15,7 @@ import {
   credentialSha256Schema,
   deviceSessionIdSchema,
   hostEnrollmentIdSchema,
+  opaqueIdentifierSchema,
   humanDeviceLabelSchema,
   humanDeviceTokenSchema,
   humanDisplayNameSchema,
@@ -195,6 +196,7 @@ export const setupCodeRedeemHostRequestSchema = z
     displayName: workspaceNameSchema,
     capabilities: hostCapabilitiesSchema,
     capacity: z.number().int().min(1).max(128),
+    enrollmentAttemptId: opaqueIdentifierSchema,
     hostCredentialToken: z.string().regex(/^pw_host_[A-Za-z0-9_-]{43}$/)
   })
   .strict();
@@ -254,6 +256,7 @@ export const setupCodeRedeemHostResponseSchema = z
   .object({
     ...connectedWorkspaceFields,
     purpose: z.literal("host_enrollment"),
+    enrollmentAttemptId: opaqueIdentifierSchema,
     enrollmentId: hostEnrollmentIdSchema,
     hostId: agentHostIdSchema,
     hostCredentialExpiresAt: timestampSchema

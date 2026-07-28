@@ -102,6 +102,7 @@ export class AgentHostEnrollmentService {
         displayName: this.config.host.displayName,
         capabilities: this.config.host.capabilities,
         capacity: this.config.host.capacity,
+        enrollmentAttemptId: pending.enrollmentAttemptId,
         hostCredentialToken: pending.credentialToken
       },
       signal

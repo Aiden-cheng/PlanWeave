@@ -248,10 +248,12 @@ describe("Agent Host enrollment and protected credentials", () => {
         const parsed = JSON.parse(body) as {
           purpose: string;
           setupCode: string;
+          enrollmentAttemptId: string;
           hostCredentialToken: string;
         };
         expect(parsed.purpose).toBe("host_enrollment");
         expect(parsed.setupCode).toMatch(/^pw_setup_/);
+        expect(parsed.enrollmentAttemptId).toMatch(/^enroll-/);
         expect(parsed.hostCredentialToken).toMatch(/^pw_host_/);
         response.writeHead(200, { "content-type": "application/json" });
         response.end(
@@ -268,6 +270,7 @@ describe("Agent Host enrollment and protected credentials", () => {
               workspaceId: "workspace-001",
               allowInsecureTransport: true
             },
+            enrollmentAttemptId: parsed.enrollmentAttemptId,
             enrollmentId: "enrollment-setup-001",
             hostId: "host-setup-001",
             hostCredentialExpiresAt: new Date(Date.now() + 60_000).toISOString()
@@ -296,6 +299,46 @@ describe("Agent Host enrollment and protected credentials", () => {
     expect(resolveSetupCodeRedeemEndpoint("https://coordinator.example.com").href).toBe(
       "https://coordinator.example.com/api/v1/setup-codes/redeem"
     );
+  });
+
+  it("keeps a setup-code enrollment pending when the response attempt does not match", async () => {
+    const { config, store } = await setup();
+    const setupRedeem = new HttpAgentHostSetupCodeRedeem("https://coordinator.example.com", {
+      request: async () =>
+        new Response(
+          JSON.stringify({
+            schemaVersion: "workspace-setup/v1",
+            purpose: "host_enrollment",
+            workspaceId: "workspace-001",
+            workspaceDisplayName: "Demo",
+            connectionProfile: {
+              schemaVersion: "workspace-identity/v1",
+              profileId: "profile-001",
+              displayName: "Demo",
+              serverBaseUrl: "https://coordinator.example.com/",
+              workspaceId: "workspace-001",
+              allowInsecureTransport: false
+            },
+            enrollmentAttemptId: "enroll-another-attempt",
+            enrollmentId: "enrollment-setup-001",
+            hostId: "host-setup-001",
+            hostCredentialExpiresAt: new Date(Date.now() + 60_000).toISOString()
+          }),
+          { headers: { "content-type": "application/json" } }
+        )
+    });
+
+    await expect(
+      new AgentHostEnrollmentService(
+        config,
+        store,
+        { exchange: async () => { throw new Error("legacy enrollment path must not run"); } },
+        () => new Date(),
+        setupRedeem
+      ).enroll(secret("pw_setup_"))
+    ).rejects.toThrow("agent_host_enrollment_response_mismatch");
+    expect((await store.read())?.pending?.kind).toBe("setup_code");
+    expect((await store.read())?.active).toBeUndefined();
   });
 
   it("maps coordinator schemes once and bounds or normalizes HTTP exchange failures", async () => {

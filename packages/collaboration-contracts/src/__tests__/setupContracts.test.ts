@@ -188,6 +188,7 @@ describe("OSS-005 setup-code and single-connection contracts", () => {
         displayName: "Build Host",
         capabilities: ["acp.codex"],
         capacity: 2,
+        enrollmentAttemptId: "enroll-setup-001",
         hostCredentialToken: `pw_host_${"A".repeat(43)}`
       }).purpose
     ).toBe("host_enrollment");
@@ -200,6 +201,7 @@ describe("OSS-005 setup-code and single-connection contracts", () => {
         displayName: "Build Host",
         capabilities: ["acp.codex"],
         capacity: 2,
+        enrollmentAttemptId: "enroll-setup-001",
         hostCredentialToken: `pw_hdev_${"A".repeat(43)}`
       })
     ).toThrow();
