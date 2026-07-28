@@ -84,8 +84,10 @@ describe("real-process remote Block lifecycle", () => {
       blockRef: "T-001#B-001",
       state: "activated"
     });
-    // Host may accept before observe returns; either leased or running is a valid checkpoint.
-    expect(["leased", "running"]).toContain(dispatched.dispatchStatus);
+    // A fast local ACP may already be writing back before the first operator observation.
+    expect(["leased", "running", "awaiting_writeback", "completed"]).toContain(
+      dispatched.dispatchStatus
+    );
     expect(dispatched.dispatchId).toMatch(/^dispatch-/);
     expect(dispatched.executionAttemptId).toMatch(/^attempt-/);
     expect(dispatched.attempt.leaseId).toMatch(/^lease-/);

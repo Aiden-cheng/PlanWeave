@@ -1,6 +1,7 @@
 /**
  * Operator-facing lifecycle client for real-process ACP integration tests.
- * Speaks only public HTTP APIs + harness-owned SQLite inspection (no Server source imports).
+ * Speaks public HTTP APIs and reuses Server authority persistence only to establish
+ * the durable execution-target precondition for the real-process harness.
  */
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -10,6 +11,9 @@ import {
   REAL_PROCESS_ACP_HARNESS_DEFAULT_TIMEOUT_MS,
   type RealProcessAcpHarness
 } from "./realProcessAcpHarness.js";
+import { WorkspaceIdentityRepository } from "../../identity/workspaceRepository.js";
+import { AuthorityRepository } from "../../work/authorityRepository.js";
+import { openServerDatabase } from "../../sqlite.js";
 
 const require = createRequire(import.meta.url);
 
@@ -152,14 +156,19 @@ export class RealProcessLifecycleClient {
     idempotencyKey: string;
     canvasId?: string;
   }): Promise<OperatorOperationView> {
+    await this.prepareAutomaticExecutionTarget(input.blockRef, input.canvasId ?? "default");
     const response = await fetch(`${this.harness.origin}/api/v1/remote-operations`, {
       method: "POST",
       headers: this.headers(true),
       body: JSON.stringify({
+        schemaVersion: "remote-run/v2",
         projectId: this.harness.projectId,
         canvasId: input.canvasId ?? "default",
         blockRef: input.blockRef,
-        idempotencyKey: input.idempotencyKey
+        idempotencyKey: input.idempotencyKey,
+        expectedResponsibilityRevision: 0,
+        expectedReviewerRevision: 0,
+        expectedExecutionTargetRevision: 1
       })
     });
     const body = (await response.json()) as OperatorOperationView & { error?: string };
@@ -433,6 +442,44 @@ export class RealProcessLifecycleClient {
 
   serverDatabasePath(): string {
     return join(this.harness.paths.serverData, "planweave-server.sqlite");
+  }
+
+  private async prepareAutomaticExecutionTarget(blockRef: string, canvasId: string): Promise<void> {
+    const database = await openServerDatabase(this.serverDatabasePath(), 5_000);
+    try {
+      const workspaceId = new WorkspaceIdentityRepository(database).workspaceForLegacyProject(
+        this.harness.projectId
+      );
+      if (!workspaceId) {
+        throw new Error("real_process_lifecycle_workspace_mapping_missing");
+      }
+      const scope = {
+        kind: "block" as const,
+        workspaceId,
+        projectId: this.harness.projectId,
+        canvasId,
+        blockRef
+      };
+      const repository = new AuthorityRepository(database);
+      const existing = repository.getExecutionTarget(scope);
+      if (existing) {
+        if (existing.revision !== 1 || existing.target.kind !== "automatic_host") {
+          throw new Error("real_process_lifecycle_execution_target_conflict");
+        }
+        return;
+      }
+      repository.applyExecutionTarget({
+        mutation: {
+          schemaVersion: "execution-target/v1",
+          scope,
+          target: { kind: "automatic_host" },
+          expectedRevision: 0
+        },
+        actor: { kind: "system", id: "real-process-lifecycle" }
+      });
+    } finally {
+      database.close();
+    }
   }
 
   hostDatabasePath(dataDir = this.harness.paths.hostData): string {

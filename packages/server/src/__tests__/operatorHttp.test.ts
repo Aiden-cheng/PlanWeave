@@ -5,6 +5,7 @@ import { OperatorSessionStore } from "../identity/operatorSessionStore.js";
 import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { hashOperatorToken, OperatorTokenRegistry } from "../operatorAuth.js";
 import { RemoteExecutionActionRejectedError } from "../remoteExecutionActions.js";
+import { operatorDispatchRequestSchema } from "../operatorDtos.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 import {
   handleOperatorHttpRequest,
@@ -94,6 +95,28 @@ async function setup(
 const authorization = { Authorization: `Bearer ${token}` };
 
 describe("operator HTTP boundary", () => {
+  it("uses the v2 remote dispatch contract as its sole request schema", () => {
+    const request = {
+      schemaVersion: "remote-run/v2" as const,
+      projectId: "project-a",
+      canvasId: "default",
+      blockRef: "T-001#B-001",
+      idempotencyKey: "operator-v2-contract",
+      expectedResponsibilityRevision: 0,
+      expectedReviewerRevision: 0,
+      expectedExecutionTargetRevision: 1
+    };
+    expect(operatorDispatchRequestSchema.parse(request)).toEqual(request);
+    expect(
+      operatorDispatchRequestSchema.safeParse({
+        projectId: request.projectId,
+        canvasId: request.canvasId,
+        blockRef: request.blockRef,
+        idempotencyKey: request.idempotencyKey
+      }).success
+    ).toBe(false);
+  });
+
   it("enforces transport policy before reading a bearer credential", async () => {
     expect(operatorTransportAllowed({ encrypted: true, remoteAddress: "203.0.113.1" })).toBe(true);
     expect(operatorTransportAllowed({ remoteAddress: "127.0.0.1" })).toBe(false);
