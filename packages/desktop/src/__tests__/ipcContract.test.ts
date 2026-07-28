@@ -9,6 +9,7 @@ import {
   runtimeStateChangedChannel
 } from "../shared/ipcChannels";
 import {
+  collaborationCurrentSelectionInputSchema,
   collaborationInvokeChannels,
   collaborationObserverSignalChannel,
   collaborationPresenceSignalChannel,
@@ -181,6 +182,27 @@ describe("desktop IPC contract", () => {
     expect(collaborationInvokeChannels.mutateCurrentCanvasAccess).toBe(
       "planweave-collaboration:mutateCurrentCanvasAccess"
     );
+    expect(collaborationInvokeChannels.setCollaborationCurrentSelection).toBe(
+      "planweave-collaboration:setCurrentSelection"
+    );
+    expect(collaborationInvokeChannels.clearCollaborationCurrentSelection).toBe(
+      "planweave-collaboration:clearCurrentSelection"
+    );
+    expect(collaborationInvokeChannels.getLocalCollaborationServerStatus).toBe(
+      "planweave-collaboration:getLocalServerStatus"
+    );
+    expect(collaborationInvokeChannels.startLocalCollaborationServer).toBe(
+      "planweave-collaboration:startLocalServer"
+    );
+    expect(collaborationInvokeChannels.stopLocalCollaborationServer).toBe(
+      "planweave-collaboration:stopLocalServer"
+    );
+    expect(collaborationInvokeChannels.listLocalCollaborationTrustedScopes).toBe(
+      "planweave-collaboration:listLocalTrustedScopes"
+    );
+    expect(collaborationInvokeChannels.registerLocalCollaborationCurrentProject).toBe(
+      "planweave-collaboration:registerLocalCurrentProject"
+    );
     expect(collaborationInvokeChannels.listCollaborationMembers).toBe(
       "planweave-collaboration:listMembers"
     );
@@ -265,6 +287,20 @@ describe("desktop IPC contract", () => {
     expect(new Set(Object.values(collaborationInvokeChannels)).size).toBe(
       Object.values(collaborationInvokeChannels).length
     );
+  });
+
+  it("keeps local collaboration selection opaque at the renderer boundary", () => {
+    expect(collaborationCurrentSelectionInputSchema.parse({
+      projectId: "project-1",
+      canvasId: "canvas-1"
+    })).toEqual({ projectId: "project-1", canvasId: "canvas-1" });
+    expect(() =>
+      collaborationCurrentSelectionInputSchema.parse({
+        projectId: "project-1",
+        canvasId: "canvas-1",
+        projectRoot: "/private/project"
+      })
+    ).toThrow();
   });
 
   it("uses the desktop canvas reference channel for canvas-scoped bridge calls", () => {

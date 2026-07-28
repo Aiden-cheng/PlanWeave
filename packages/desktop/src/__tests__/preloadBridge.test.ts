@@ -830,6 +830,13 @@ describe("preload bridge invocation", () => {
         visibility: "shared"
       }
     });
+    await api.setCollaborationCurrentSelection({ projectId: "project-1", canvasId: "default" });
+    await api.clearCollaborationCurrentSelection();
+    await api.getLocalCollaborationServerStatus();
+    await api.startLocalCollaborationServer();
+    await api.stopLocalCollaborationServer();
+    await api.listLocalCollaborationTrustedScopes();
+    await api.registerLocalCollaborationCurrentProject();
     await api.startCollaborationPresence({ canvasId: "default" });
     await api.publishCollaborationPresence({ pointer: { x: 1, y: 2 }, selectionIds: [] });
     await api.stopCollaborationPresence();
@@ -888,6 +895,28 @@ describe("preload bridge invocation", () => {
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       collaborationInvokeChannels.mutateCurrentCanvasAccess,
       expect.objectContaining({ canvasId: "default", request: expect.objectContaining({ operation: "visibility" }) })
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.setCollaborationCurrentSelection,
+      { projectId: "project-1", canvasId: "default" }
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.clearCollaborationCurrentSelection
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.getLocalCollaborationServerStatus
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.startLocalCollaborationServer
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.stopLocalCollaborationServer
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.listLocalCollaborationTrustedScopes
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.registerLocalCollaborationCurrentProject
     );
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       collaborationInvokeChannels.listCollaborationMembers,
