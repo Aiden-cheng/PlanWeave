@@ -132,7 +132,11 @@ export const contentVersionDesktopReadModelSchema = z
         context.addIssue({ code: "custom", message: "in_sync_requires_matching_version" });
       }
     }
-    if (value.replicaStatus === "snapshot_required" && !value.canRecover) {
+    if (
+      value.replicaStatus === "snapshot_required" &&
+      value.authoritativeHead !== null &&
+      !value.canRecover
+    ) {
       context.addIssue({ code: "custom", message: "snapshot_required_must_allow_recovery", path: ["canRecover"] });
     }
     if (value.offlineWriteReason !== null && value.canPublishInitial) {
@@ -140,3 +144,19 @@ export const contentVersionDesktopReadModelSchema = z
     }
   });
 export type ContentVersionDesktopReadModel = z.infer<typeof contentVersionDesktopReadModelSchema>;
+
+export function contentVersionAuthorityDiscoveryToDesktopReadModel(
+  input: ContentVersionAuthorityDiscoveryResult
+): ContentVersionDesktopReadModel {
+  const authority = contentVersionAuthorityDiscoveryResultSchema.parse(input);
+  return contentVersionDesktopReadModelSchema.parse({
+    authoritativeHead: authority.authoritativeHead,
+    localReplica: authority.localReplica,
+    replicaStatus: authority.replicaStatus,
+    lastAcknowledgement: authority.lastAcknowledgement,
+    canPublishInitial: authority.canPublishInitial,
+    canMaterialize: authority.canMaterialize,
+    canRecover: authority.canRecover,
+    offlineWriteReason: null
+  });
+}

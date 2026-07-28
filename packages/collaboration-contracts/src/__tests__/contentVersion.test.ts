@@ -17,6 +17,7 @@ import {
   contentReplicaStatusSchema,
   contentVersionAuthorityDiscoveryRequestSchema,
   contentVersionAuthorityDiscoveryResultSchema,
+  contentVersionAuthorityDiscoveryToDesktopReadModel,
   contentVersionDesktopReadModelSchema
 } from "../contentAuthority.js";
 import {
@@ -337,6 +338,31 @@ describe("authoritative content-version contracts", () => {
         canPublishInitial: false,
         canMaterialize: false,
         canRecover: false
+      })
+    ).toThrow();
+    const headlessNonOwner = contentVersionAuthorityDiscoveryResultSchema.parse({
+      authoritativeHead: null,
+      localReplica: null,
+      lastAcknowledgement: null,
+      replicaStatus: "snapshot_required",
+      recoveryAction: "await_initial_publish",
+      canPublishInitial: false,
+      canMaterialize: false,
+      canRecover: false
+    });
+    expect(
+      contentVersionAuthorityDiscoveryToDesktopReadModel(headlessNonOwner).canRecover
+    ).toBe(false);
+    expect(() =>
+      contentVersionDesktopReadModelSchema.parse({
+        authoritativeHead: head,
+        localReplica: null,
+        replicaStatus: "snapshot_required",
+        lastAcknowledgement: null,
+        canPublishInitial: false,
+        canMaterialize: true,
+        canRecover: false,
+        offlineWriteReason: null
       })
     ).toThrow();
   });
