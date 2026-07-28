@@ -24,6 +24,9 @@ export const contentVersionSchemaVersion = "content-version/v1" as const;
 export const contentVersionSchemaVersionSchema = z.literal(contentVersionSchemaVersion);
 export type ContentVersionSchemaVersion = z.infer<typeof contentVersionSchemaVersionSchema>;
 
+/** Logical member address inside a content version, never a filesystem path. */
+export const contentVersionDesktopLayoutMemberPath = "desktop/layout.json" as const;
+
 export const contentVersionMemberPathSchema = z
   .string()
   .min(1)
@@ -69,7 +72,7 @@ export const contentVersionMemberSchema = z
     }
     const pathIsValid =
       (value.kind === "manifest" && value.path === "manifest.json") ||
-      (value.kind === "desktop_layout" && value.path === "desktop/layout.json") ||
+      (value.kind === "desktop_layout" && value.path === contentVersionDesktopLayoutMemberPath) ||
       (value.kind === "task_prompt" && taskPromptPathPattern.test(value.path)) ||
       (value.kind === "block_prompt" && blockPromptPathPattern.test(value.path));
     if (!pathIsValid) {
@@ -84,7 +87,7 @@ export type ContentVersionMember = z.infer<typeof contentVersionMemberSchema>;
 
 function expectedMemberKind(path: string): ContentVersionMemberKind | undefined {
   if (path === "manifest.json") return "manifest";
-  if (path === "desktop/layout.json") return "desktop_layout";
+  if (path === contentVersionDesktopLayoutMemberPath) return "desktop_layout";
   if (taskPromptPathPattern.test(path)) return "task_prompt";
   if (blockPromptPathPattern.test(path)) return "block_prompt";
   return undefined;
@@ -399,41 +402,3 @@ export const authorizedContentVersionAcknowledgementSchema = z
 export type AuthorizedContentVersionAcknowledgement = z.infer<
   typeof authorizedContentVersionAcknowledgementSchema
 >;
-
-export const contentReplicaStatusSchema = z.enum([
-  "in_sync",
-  "behind",
-  "diverged",
-  "snapshot_required"
-]);
-export type ContentReplicaStatus = z.infer<typeof contentReplicaStatusSchema>;
-
-/** Renderer-safe read model: only immutable IDs/digests and redacted action state. */
-export const contentVersionDesktopReadModelSchema = z
-  .object({
-    authoritativeHead: authoritativeContentHeadSchema.nullable(),
-    localReplica: completedContentVersionRefSchema.nullable(),
-    replicaStatus: contentReplicaStatusSchema,
-    lastAcknowledgement: contentVersionAcknowledgementSchema.nullable(),
-    canPublishInitial: z.boolean(),
-    canMaterialize: z.boolean(),
-    canRecover: z.boolean(),
-    offlineWriteReason: z.string().trim().min(1).max(CONTENT_VERSION_MAX_REASON_LENGTH).nullable()
-  })
-  .strict()
-  .superRefine((value, context) => {
-    if (value.replicaStatus === "in_sync") {
-      if (value.authoritativeHead === null || value.localReplica === null) {
-        context.addIssue({ code: "custom", message: "in_sync_requires_head_and_replica" });
-      } else if (value.authoritativeHead.content.versionId !== value.localReplica.versionId) {
-        context.addIssue({ code: "custom", message: "in_sync_requires_matching_version" });
-      }
-    }
-    if (value.replicaStatus === "snapshot_required" && !value.canRecover) {
-      context.addIssue({ code: "custom", message: "snapshot_required_must_allow_recovery", path: ["canRecover"] });
-    }
-    if (value.offlineWriteReason !== null && value.canPublishInitial) {
-      context.addIssue({ code: "custom", message: "offline_write_block_cannot_allow_initial_publish" });
-    }
-  });
-export type ContentVersionDesktopReadModel = z.infer<typeof contentVersionDesktopReadModelSchema>;

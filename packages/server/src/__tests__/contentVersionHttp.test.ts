@@ -73,10 +73,28 @@ async function fixture() {
   });
   database.exec(`
     INSERT OR IGNORE INTO workspace_principals(workspace_id,human_principal_id,display_name,created_at,revoked_at) VALUES
-      ('w','owner','Owner','2026-01-01',NULL),('w','member','Member','2026-01-01',NULL);
+      ('w','owner','Owner','2026-01-01',NULL);
     INSERT OR IGNORE INTO workspace_memberships(workspace_id,membership_id,human_principal_id,role,revision,created_at,updated_at,revoked_at) VALUES
-      ('w','wm-owner','owner','owner',1,'2026-01-01','2026-01-01',NULL),('w','wm-member','member','member',1,'2026-01-01','2026-01-01',NULL);
+      ('w','wm-owner','owner','owner',1,'2026-01-01','2026-01-01',NULL);
   `);
+  database
+    .prepare(
+      "INSERT OR IGNORE INTO workspace_principals(workspace_id,human_principal_id,display_name,created_at,revoked_at) VALUES(?,?,?,?,NULL)"
+    )
+    .run("w", memberJoin.principal.humanPrincipalId, memberJoin.principal.displayName, "2026-01-01");
+  database
+    .prepare(
+      "INSERT OR IGNORE INTO workspace_memberships(workspace_id,membership_id,human_principal_id,role,revision,created_at,updated_at,revoked_at) VALUES(?,?,?,?,?,?,?,NULL)"
+    )
+    .run(
+      "w",
+      "wm-member",
+      memberJoin.principal.humanPrincipalId,
+      "member",
+      1,
+      "2026-01-01",
+      "2026-01-01"
+    );
   const access = new ProjectAccessRepository(database);
   access.registerProjectInternal({
     workspaceId: "w",
@@ -97,7 +115,7 @@ async function fixture() {
     workspaceId: "w",
     projectId: "p",
     canvasId: "default",
-    humanPrincipalId: "member",
+    humanPrincipalId: memberJoin.principal.humanPrincipalId,
     role: "viewer",
     grantedBy: { kind: "human", id: "owner" }
   });
@@ -133,8 +151,8 @@ function headers(token: string) {
 }
 
 describe("content version HTTP boundary", () => {
-  it("authorizes bounded publish, fetch/ack, revocation, and redacted failures", async () => {
-    const { origin, database, ownerToken } = await fixture();
+  it("authorizes head discovery, bounded fetch/ack, revocation, and redacted failures", async () => {
+    const { origin, database, ownerToken, memberToken } = await fixture();
     const initial = await fetch(
       `${origin}/api/v1/projects/p/canvases/default/content/initial-publish`,
       {
@@ -149,9 +167,30 @@ describe("content version HTTP boundary", () => {
     );
     expect(initial.status).toBe(201);
     const published = (await initial.json()) as { version: { completed: unknown } };
+    const discovery = await fetch(`${origin}/api/v1/projects/p/canvases/default/content/head`, {
+      method: "POST",
+      headers: headers(memberToken),
+      body: JSON.stringify({ localReplica: null, knownRevision: null })
+    });
+    expect(discovery.status).toBe(200);
+    const discovered = (await discovery.json()) as {
+      authoritativeHead: { content: unknown };
+      replicaStatus: string;
+      recoveryAction: string;
+    };
+    expect(discovered).toMatchObject({
+      replicaStatus: "snapshot_required",
+      recoveryAction: "fetch_head",
+      canPublishInitial: false,
+      canMaterialize: true,
+      canRecover: true,
+      authoritativeHead: { content: published.version.completed }
+    });
+    expect(JSON.stringify(discovered)).not.toContain("members");
+    expect(JSON.stringify(discovered)).not.toContain("packageDir");
     const fetched = await fetch(`${origin}/api/v1/projects/p/canvases/default/content/fetch`, {
       method: "POST",
-      headers: headers(ownerToken),
+      headers: headers(memberToken),
       body: JSON.stringify({ content: published.version.completed })
     });
     expect(fetched.status).toBe(200);
@@ -159,11 +198,21 @@ describe("content version HTTP boundary", () => {
       `${origin}/api/v1/projects/p/canvases/default/content/acknowledgements`,
       {
         method: "POST",
-        headers: headers(ownerToken),
+        headers: headers(memberToken),
         body: JSON.stringify({ content: published.version.completed })
       }
     );
     expect(acknowledged.status).toBe(200);
+    const inSync = await fetch(`${origin}/api/v1/projects/p/canvases/default/content/head`, {
+      method: "POST",
+      headers: headers(memberToken),
+      body: JSON.stringify({ localReplica: published.version.completed, knownRevision: 1 })
+    });
+    expect(await inSync.json()).toMatchObject({
+      replicaStatus: "in_sync",
+      recoveryAction: "none",
+      lastAcknowledgement: { content: published.version.completed }
+    });
     const crossScope = await fetch(`${origin}/api/v1/projects/p/canvases/other/content/fetch`, {
       method: "POST",
       headers: headers(ownerToken),
@@ -171,6 +220,12 @@ describe("content version HTTP boundary", () => {
     });
     expect(crossScope.status).toBe(403);
     expect(JSON.stringify(await crossScope.json())).not.toContain("package");
+    const crossScopeDiscovery = await fetch(`${origin}/api/v1/projects/p/canvases/other/content/head`, {
+      method: "POST",
+      headers: headers(memberToken),
+      body: JSON.stringify({ localReplica: null, knownRevision: null })
+    });
+    expect(crossScopeDiscovery.status).toBe(403);
     database
       .prepare(
         "UPDATE human_device_credentials SET revoked_at='2026-01-03T00:00:00.000Z' WHERE device_credential_id=(SELECT device_credential_id FROM human_device_credentials WHERE human_principal_id='owner')"

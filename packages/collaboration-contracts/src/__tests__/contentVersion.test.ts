@@ -5,14 +5,20 @@ import {
   authoritativeContentHeadSchema,
   canonicalContentVersionDigestPayload,
   completeContentVersionSchema,
-  contentReplicaStatusSchema,
-  contentVersionDesktopReadModelSchema,
+  contentVersionDesktopLayoutMemberPath,
   contentVersionJournalEntrySchema,
   contentVersionMaterializeResultSchema,
   firstContentVersionPublishRequestSchema,
   firstContentVersionPublishResultSchema,
   ownerAuthorizedFirstContentVersionPublishSchema
 } from "../contentVersion.js";
+import {
+  authorizedContentVersionAuthorityDiscoverySchema,
+  contentReplicaStatusSchema,
+  contentVersionAuthorityDiscoveryRequestSchema,
+  contentVersionAuthorityDiscoveryResultSchema,
+  contentVersionDesktopReadModelSchema
+} from "../contentAuthority.js";
 import {
   exampleAuthoritativeContentVersion,
   exampleCompleteContentVersion,
@@ -80,6 +86,18 @@ describe("authoritative content-version contracts", () => {
           ...exampleCompleteContentVersion.members.slice(1)
         ],
         totalBytes: 18
+      })
+    ).toThrow();
+  });
+
+  it("keeps desktop layout as a logical member address rather than a physical path", () => {
+    expect(contentVersionDesktopLayoutMemberPath).toBe("desktop/layout.json");
+    expect(() =>
+      completeContentVersionSchema.parse({
+        ...exampleCompleteContentVersion,
+        members: exampleCompleteContentVersion.members.map((member) =>
+          member.kind === "desktop_layout" ? { ...member, path: "canvases/default/desktop/layout.json" } : member
+        )
       })
     ).toThrow();
   });
@@ -209,6 +227,28 @@ describe("authoritative content-version contracts", () => {
     ).toThrow();
   });
 
+  it("accepts authority discovery only after the server supplies scope and device identity", () => {
+    const request = { projectId: scope.projectId, canvasId: scope.canvasId, localReplica: null, knownRevision: null };
+    expect(contentVersionAuthorityDiscoveryRequestSchema.parse(request)).toEqual(request);
+    expect(() => contentVersionAuthorityDiscoveryRequestSchema.parse({ ...request, actor: { kind: "human", id: "owner" } })).toThrow();
+    expect(
+      authorizedContentVersionAuthorityDiscoverySchema.parse({
+        request,
+        scope,
+        deviceSessionId: "device-session-002",
+        aclRevision: 2
+      }).scope
+    ).toEqual(scope);
+    expect(() =>
+      authorizedContentVersionAuthorityDiscoverySchema.parse({
+        request: { ...request, canvasId: "other" },
+        scope,
+        deviceSessionId: "device-session-002",
+        aclRevision: 2
+      })
+    ).toThrow();
+  });
+
   it("requires explicit materialization failure reasons", () => {
     expect(
       contentVersionMaterializeResultSchema.parse({
@@ -260,5 +300,44 @@ describe("authoritative content-version contracts", () => {
       })
     ).toThrow();
     expect(() => contentReplicaStatusSchema.parse("offline")).toThrow();
+  });
+
+  it("returns only renderer-safe authority metadata and explicit recovery actions", () => {
+    expect(
+      contentVersionAuthorityDiscoveryResultSchema.parse({
+        authoritativeHead: head,
+        localReplica: null,
+        lastAcknowledgement: null,
+        replicaStatus: "snapshot_required",
+        recoveryAction: "fetch_head",
+        canPublishInitial: false,
+        canMaterialize: true,
+        canRecover: true
+      }).authoritativeHead?.content
+    ).toEqual(content);
+    expect(() =>
+      contentVersionAuthorityDiscoveryResultSchema.parse({
+        authoritativeHead: head,
+        localReplica: content,
+        lastAcknowledgement: null,
+        replicaStatus: "in_sync",
+        recoveryAction: "fetch_head",
+        canPublishInitial: false,
+        canMaterialize: true,
+        canRecover: true
+      })
+    ).toThrow();
+    expect(() =>
+      contentVersionAuthorityDiscoveryResultSchema.parse({
+        authoritativeHead: null,
+        localReplica: null,
+        lastAcknowledgement: null,
+        replicaStatus: "snapshot_required",
+        recoveryAction: "fetch_head",
+        canPublishInitial: false,
+        canMaterialize: false,
+        canRecover: false
+      })
+    ).toThrow();
   });
 });

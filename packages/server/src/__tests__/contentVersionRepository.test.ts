@@ -11,7 +11,7 @@ import { ContentVersionService } from "../canvas/contentVersionService.js";
 import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { applyMigrations, latestCentralSchemaVersion } from "../migrations.js";
 import { ProjectAccessRepository } from "../projectAccessRepository.js";
-import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
+import { inWriteTransaction, openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 
 const databases: SqliteDatabase[] = [];
 const directories: string[] = [];
@@ -25,9 +25,9 @@ afterEach(async () => {
 
 const sha256 = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
 
-function content(): CompleteContentVersion {
+function content(layout = "{}"): CompleteContentVersion {
   const members = [
-    { kind: "desktop_layout" as const, path: "desktop/layout.json", content: "{}" },
+    { kind: "desktop_layout" as const, path: "desktop/layout.json", content: layout },
     { kind: "manifest" as const, path: "manifest.json", content: "{}" },
     { kind: "task_prompt" as const, path: "nodes/T-001/prompt.md", content: "# Task\n" }
   ].map((member) => ({
@@ -211,6 +211,145 @@ describe("authoritative content version repository", () => {
     ).toBe(1);
   });
 
+  it("derives each device authority state from the scoped head, acknowledgement, version, and journal", async () => {
+    const { database, repository, service } = await fixture();
+    const scope = { workspaceId: "w", projectId: "p", canvasId: "default" };
+    expect(
+      service.discoverAuthority(member, {
+        projectId: "p",
+        canvasId: "default",
+        localReplica: null,
+        knownRevision: null
+      })
+    ).toMatchObject({
+      authoritativeHead: null,
+      recoveryAction: "await_initial_publish",
+      canPublishInitial: false,
+      canMaterialize: false,
+      canRecover: false
+    });
+    expect(
+      service.discoverAuthority(owner, {
+        projectId: "p",
+        canvasId: "default",
+        localReplica: null,
+        knownRevision: null
+      })
+    ).toMatchObject({ canPublishInitial: true, canMaterialize: false, canRecover: true });
+    const initial = service.publishInitial(owner, {
+      projectId: "p",
+      canvasId: "default",
+      expectedHeadRevision: 0,
+      expectedHeadVersionId: null,
+      content: content()
+    });
+    if (initial.outcome !== "published") throw new Error("expected published content");
+    service.acknowledge(member, "p", "default", { content: initial.version.completed });
+    expect(
+      service.discoverAuthority(member, {
+        projectId: "p",
+        canvasId: "default",
+        localReplica: initial.version.completed,
+        knownRevision: 1
+      })
+    ).toMatchObject({
+      replicaStatus: "in_sync",
+      recoveryAction: "none",
+      lastAcknowledgement: { content: initial.version.completed }
+    });
+    expect(
+      service.discoverAuthority(member, {
+        projectId: "p",
+        canvasId: "default",
+        localReplica: null,
+        knownRevision: null
+      })
+    ).toMatchObject({
+      authoritativeHead: { content: initial.version.completed },
+      replicaStatus: "snapshot_required",
+      recoveryAction: "fetch_head"
+    });
+
+    const advanced = repository.persistImmutable({
+      scope,
+      content: content('{"version":"next"}'),
+      createdBy: { kind: "human", id: "owner" }
+    });
+    inWriteTransaction(database, () => {
+      repository.advanceHeadInCallerTransaction({
+        scope,
+        expectedRevision: 1,
+        content: advanced.completed
+      });
+    });
+    expect(
+      service.discoverAuthority(member, {
+        projectId: "p",
+        canvasId: "default",
+        localReplica: initial.version.completed,
+        knownRevision: 1
+      })
+    ).toMatchObject({ replicaStatus: "behind", recoveryAction: "fetch_head" });
+
+    const orphan = repository.persistImmutable({
+      scope,
+      content: content('{"version":"orphan"}'),
+      createdBy: { kind: "human", id: "owner" }
+    });
+    expect(
+      service.discoverAuthority(member, {
+        projectId: "p",
+        canvasId: "default",
+        localReplica: orphan.completed,
+        knownRevision: null
+      })
+    ).toMatchObject({ replicaStatus: "diverged", recoveryAction: "fetch_head" });
+    expect(
+      service.discoverAuthority(member, {
+        projectId: "p",
+        canvasId: "default",
+        localReplica: initial.version.completed,
+        knownRevision: 7
+      })
+    ).toMatchObject({ replicaStatus: "snapshot_required", recoveryAction: "fetch_head" });
+  });
+
+  it("isolates same project and canvas identifiers across workspaces for head, acknowledgement, and fetch", async () => {
+    const { repository, service } = await fixture();
+    const first = service.publishInitial(owner, {
+      projectId: "p",
+      canvasId: "default",
+      expectedHeadRevision: 0,
+      expectedHeadVersionId: null,
+      content: content()
+    });
+    if (first.outcome !== "published") throw new Error("expected published content");
+    service.acknowledge(member, "p", "default", { content: first.version.completed });
+    const otherScope = { workspaceId: "w-other", projectId: "p", canvasId: "default" };
+    expect(
+      repository.discoverAuthority({
+        scope: otherScope,
+        deviceSessionId: "device-member",
+        localReplica: first.version.completed,
+        knownRevision: 1,
+        isCanvasOwner: false
+      })
+    ).toMatchObject({
+      authoritativeHead: null,
+      lastAcknowledgement: null,
+      replicaStatus: "diverged",
+      recoveryAction: "await_initial_publish"
+    });
+    expect(() => repository.readVersion(otherScope, first.version.completed)).toThrow("content_version_not_found");
+    expect(() =>
+      repository.acknowledge({
+        scope: otherScope,
+        deviceSessionId: "device-member",
+        content: first.version.completed
+      })
+    ).toThrow("content_version_not_found");
+  });
+
   it("rejects a tampered immutable member on read rather than returning mutable cache content", async () => {
     const { database, service } = await fixture();
     const initial = service.publishInitial(owner, {
@@ -253,5 +392,39 @@ describe("authoritative content version repository", () => {
     expect(() =>
       repository.journalAfter({ workspaceId: "w", projectId: "p", canvasId: "default" }, 0)
     ).toThrow("content_version_journal_gap");
+  });
+
+  it("fails closed during authority discovery when a known replica cannot reach head through the journal", async () => {
+    const { database, repository, service } = await fixture();
+    const scope = { workspaceId: "w", projectId: "p", canvasId: "default" };
+    const initial = service.publishInitial(owner, {
+      projectId: "p",
+      canvasId: "default",
+      expectedHeadRevision: 0,
+      expectedHeadVersionId: null,
+      content: content()
+    });
+    if (initial.outcome !== "published") throw new Error("expected published content");
+    const advanced = repository.persistImmutable({
+      scope,
+      content: content('{"version":"next"}'),
+      createdBy: { kind: "human", id: "owner" }
+    });
+    inWriteTransaction(database, () => {
+      repository.advanceHeadInCallerTransaction({ scope, expectedRevision: 1, content: advanced.completed });
+    });
+    database
+      .prepare(
+        "DELETE FROM canvas_content_journal WHERE workspace_id='w' AND project_id='p' AND canvas_id='default' AND revision=2"
+      )
+      .run();
+    expect(
+      service.discoverAuthority(member, {
+        projectId: "p",
+        canvasId: "default",
+        localReplica: initial.version.completed,
+        knownRevision: 1
+      })
+    ).toMatchObject({ replicaStatus: "snapshot_required", recoveryAction: "fetch_head" });
   });
 });

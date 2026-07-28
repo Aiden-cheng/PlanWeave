@@ -1,11 +1,14 @@
 import {
   authorizedContentVersionAcknowledgementSchema,
+  authorizedContentVersionAuthorityDiscoverySchema,
   authorizedContentVersionFetchSchema,
+  contentVersionAuthorityDiscoveryRequestSchema,
   contentVersionAcknowledgementRequestSchema,
   contentVersionFetchRequestSchema,
   firstContentVersionPublishRequestSchema,
   firstContentVersionPublishResultSchema,
   type ContentVersionAcknowledgement,
+  type ContentVersionAuthorityDiscoveryResult,
   type FirstContentVersionPublishResult
 } from "@planweave-ai/collaboration-contracts";
 import type { CollaborationAuthContext } from "../identity/auth.js";
@@ -107,6 +110,42 @@ export class ContentVersionService {
       aclRevision: authorization.aclRevision
     });
     return this.options.repository.readVersion(authorization.scope, request.content);
+  }
+
+  discoverAuthority(
+    context: CollaborationAuthContext,
+    rawRequest: unknown
+  ): ContentVersionAuthorityDiscoveryResult {
+    const parsed = contentVersionAuthorityDiscoveryRequestSchema.safeParse(rawRequest);
+    if (!parsed.success) throw new Error("content_authority_invalid");
+    const request = parsed.data;
+    const authorization = authorizeCanvasRead({
+      actor: context,
+      projectId: request.projectId,
+      canvasId: request.canvasId,
+      access: this.options.access,
+      workspaceIdentity: this.options.workspaceIdentity
+    });
+    if (!authorization.ok) throw new Error("content_authority_forbidden");
+    authorizedContentVersionAuthorityDiscoverySchema.parse({
+      request,
+      scope: authorization.scope,
+      deviceSessionId: deviceSessionId(context),
+      aclRevision: authorization.aclRevision
+    });
+    const canvas = this.options.access.registry.canvasInternal(
+      authorization.scope.workspaceId,
+      request.projectId,
+      request.canvasId
+    );
+    if (!canvas) throw new Error("content_authority_forbidden");
+    return this.options.repository.discoverAuthority({
+      scope: authorization.scope,
+      deviceSessionId: deviceSessionId(context),
+      localReplica: request.localReplica,
+      knownRevision: request.knownRevision,
+      isCanvasOwner: canvas.ownerHumanPrincipalId === context.humanPrincipalId
+    });
   }
 
   acknowledge(

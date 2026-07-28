@@ -12,7 +12,8 @@ import { ContentVersionService } from "./contentVersionService.js";
 type Route =
   | { kind: "publish"; projectId: string; canvasId: string }
   | { kind: "fetch"; projectId: string; canvasId: string }
-  | { kind: "ack"; projectId: string; canvasId: string };
+  | { kind: "ack"; projectId: string; canvasId: string }
+  | { kind: "head"; projectId: string; canvasId: string };
 
 export type ContentVersionHttpOptions = {
   service: ContentVersionService;
@@ -25,14 +26,21 @@ export type ContentVersionHttpOptions = {
 function route(request: IncomingMessage, pathname: string): Route | undefined {
   if (request.method !== "POST") return undefined;
   const match =
-    /^\/api\/v1\/projects\/([^/]+)\/canvases\/([^/]+)\/content\/(initial-publish|fetch|acknowledgements)$/.exec(
+    /^\/api\/v1\/projects\/([^/]+)\/canvases\/([^/]+)\/content\/(initial-publish|fetch|acknowledgements|head)$/.exec(
       pathname
     );
   if (!match) return undefined;
   const projectId = opaqueIdentifierSchema.safeParse(decodeURIComponent(match[1]!));
   const canvasId = opaqueIdentifierSchema.safeParse(decodeURIComponent(match[2]!));
   if (!projectId.success || !canvasId.success) return undefined;
-  const kind = match[3] === "initial-publish" ? "publish" : match[3] === "fetch" ? "fetch" : "ack";
+  const kind =
+    match[3] === "initial-publish"
+      ? "publish"
+      : match[3] === "fetch"
+        ? "fetch"
+        : match[3] === "acknowledgements"
+          ? "ack"
+          : "head";
   return { kind, projectId: projectId.data, canvasId: canvasId.data };
 }
 
@@ -113,11 +121,21 @@ export async function handleContentVersionHttpRequest(
           canvasId: matched.canvasId
         })
       );
-    } else {
+    } else if (matched.kind === "ack") {
       respond(
         response,
         200,
         options.service.acknowledge(context, matched.projectId, matched.canvasId, body)
+      );
+    } else {
+      respond(
+        response,
+        200,
+        options.service.discoverAuthority(context, {
+          ...(body as object),
+          projectId: matched.projectId,
+          canvasId: matched.canvasId
+        })
       );
     }
   } catch (error) {

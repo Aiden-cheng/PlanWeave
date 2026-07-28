@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import {
   canonicalContentVersionDigestPayload,
   completeContentVersionSchema,
+  contentVersionDesktopLayoutMemberPath,
   type CompleteContentVersion
 } from "@planweave-ai/collaboration-contracts";
 
@@ -33,6 +34,10 @@ function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
+function contentVersionDesktopLayoutFile(packageDir: string): string {
+  return join(dirname(packageDir), ...contentVersionDesktopLayoutMemberPath.split("/"));
+}
+
 export function createDefaultCanvasRuntimePort(): CanvasRuntimeMutationPort {
   // Lazy import keeps server unit tests free to inject fakes without loading Runtime.
   return {
@@ -54,7 +59,7 @@ export function createDefaultCanvasRuntimePort(): CanvasRuntimeMutationPort {
         if (captured.resolvedPackageDir !== input.expectedPackageDir) {
           return { ok: false, detail: "runtime_package_location_mismatch" };
         }
-        const layout = await readFile(join(dirname(captured.resolvedPackageDir), "desktop", "layout.json"), "utf8");
+        const layout = await readFile(contentVersionDesktopLayoutFile(captured.resolvedPackageDir), "utf8");
         const members = [
           ...captured.snapshot.files.map((file) => ({
             kind: file.path === "manifest.json" ? "manifest" as const : file.path.includes("/blocks/") ? "block_prompt" as const : "task_prompt" as const,
@@ -63,7 +68,13 @@ export function createDefaultCanvasRuntimePort(): CanvasRuntimeMutationPort {
             digestSha256: file.digestSha256,
             sizeBytes: file.sizeBytes
           })),
-          { kind: "desktop_layout" as const, path: "desktop/layout.json", content: layout, digestSha256: sha256(layout), sizeBytes: Buffer.byteLength(layout, "utf8") }
+          {
+            kind: "desktop_layout" as const,
+            path: contentVersionDesktopLayoutMemberPath,
+            content: layout,
+            digestSha256: sha256(layout),
+            sizeBytes: Buffer.byteLength(layout, "utf8")
+          }
         ].sort((left, right) => left.path.localeCompare(right.path));
         const totalBytes = members.reduce((sum, member) => sum + member.sizeBytes, 0);
         const canonicalDigest = sha256(canonicalContentVersionDigestPayload({ members, canonicalDigest: "0".repeat(64), totalBytes }));
