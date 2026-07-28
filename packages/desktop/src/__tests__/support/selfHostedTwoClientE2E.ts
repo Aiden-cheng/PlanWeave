@@ -1,7 +1,12 @@
 import { rm } from "node:fs/promises";
 import { createServer, type Server as HttpServer } from "node:http";
 import { join } from "node:path";
-import { createCanvasWorkspace } from "@planweave-ai/runtime";
+import {
+  applyDefaultCanvasWorkspaceMigration,
+  createCanvasWorkspace,
+  resolveTaskCanvasWorkspace,
+  saveDesktopLayout
+} from "@planweave-ai/runtime";
 import { expect, afterEach } from "vitest";
 import { WebSocket } from "ws";
 import { basicManifest, createTestWorkspace } from "../../../../runtime/src/__tests__/promptTestHelpers.js";
@@ -16,6 +21,7 @@ import {
   createDistributedServerComposition,
   type DistributedServerComposition
 } from "../../../../server/src/serverComposition.js";
+import { createDefaultCanvasRuntimePort } from "../../../../server/src/canvas/runtimePort.js";
 import { CollaborationCredentialVault } from "../../main/collaboration/collaborationCredentialVault.js";
 import { CollaborationWorkspaceConnection } from "../../main/collaboration/collaborationWorkspaceConnection.js";
 
@@ -37,6 +43,22 @@ export async function setupSelfHostedTwoClientFixture() {
     "codex-acp": { adapter: "agent", agent: "codex", runner: { transport: "acp" } }
   };
   const workspace = await createTestWorkspace(manifest);
+  await applyDefaultCanvasWorkspaceMigration(workspace.init.workspace);
+  const canonicalWorkspace = await resolveTaskCanvasWorkspace(workspace.root, "default");
+  await saveDesktopLayout(workspace.root, {
+    version: "desktop-layout/v1",
+    projectId: workspace.init.workspace.id,
+    nodes: [],
+    updatedAt: "2026-01-01T00:00:00.000Z"
+  });
+  const runtime = createDefaultCanvasRuntimePort();
+  if (!runtime.captureContent) throw new Error("content_capture_unavailable");
+  const initialContent = await runtime.captureContent({
+    projectRoot: workspace.root,
+    canvasId: "default",
+    expectedPackageDir: canonicalWorkspace.packageDir
+  });
+  if (!initialContent.ok) throw new Error(initialContent.detail);
   await createCanvasWorkspace({ cwd: workspace.root, id: "private", title: "Private canvas" });
   directories.push(workspace.home, workspace.root);
   const projectId = workspace.init.workspace.id;
@@ -70,7 +92,8 @@ export async function setupSelfHostedTwoClientFixture() {
     workspaceId,
     origin,
     home: workspace.home,
-    databasePath: config.databasePath
+    databasePath: config.databasePath,
+    initialContent: initialContent.content
   };
 }
 

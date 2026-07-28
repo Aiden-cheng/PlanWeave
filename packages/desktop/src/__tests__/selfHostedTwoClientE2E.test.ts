@@ -163,6 +163,19 @@ describe("self-hosted two-Desktop collaboration flow (OSS-006 B-002)", () => {
       memberId: memberCredential.humanPrincipalId
     });
     try {
+      const initialPublish = await postJson(
+        fixture.origin,
+        `/api/v1/projects/${encodeURIComponent(fixture.projectId)}/canvases/default/content/initial-publish`,
+        ownerToken,
+        {
+          expectedHeadRevision: 0,
+          expectedHeadVersionId: null,
+          content: fixture.initialContent
+        }
+      );
+      expect(initialPublish.status).toBe(201);
+      await expect(initialPublish.json()).resolves.toMatchObject({ outcome: "published" });
+
       const memberCanvases = await fetch(
         `${fixture.origin}/api/v1/registry/projects/${encodeURIComponent(fixture.projectId)}/canvases`,
         { headers: { authorization: `Bearer ${memberToken}` } }
