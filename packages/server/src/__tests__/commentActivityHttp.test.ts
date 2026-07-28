@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   initWorkspace,
+  resolveProjectCanvasWorkspace,
   writeProjectGraph,
   type InitWorkspaceResult,
   type PlanPackageManifest
@@ -27,6 +28,8 @@ const servers: HttpServer[] = [];
 const compositions: DistributedServerComposition[] = [];
 const directories: string[] = [];
 const operatorToken = `pw_operator_${"H".repeat(43)}`;
+const projectAWorkspaceId = "workspace-comment-activity-a";
+const projectBWorkspaceId = "workspace-comment-activity-b";
 
 afterEach(async () => {
   for (const composition of compositions.splice(0)) await composition.close();
@@ -60,6 +63,7 @@ async function setup(manifest: PlanPackageManifest = basicManifest()) {
     crossTaskEdges: []
   });
   const projectB = { root: projectBRoot, init: projectBInit };
+  const projectACanvas = await resolveProjectCanvasWorkspace(projectA.root, "default");
   directories.push(projectA.home, projectA.root, projectB.root);
   const httpServer = createServer();
   servers.push(httpServer);
@@ -70,8 +74,18 @@ async function setup(manifest: PlanPackageManifest = basicManifest()) {
     allowInsecureDevelopment: true,
     dataDirectory: join(projectA.root, "server-data"),
     trustedProjects: [
-      { projectId: projectA.init.workspace.id, canvasId: "default", projectRoot: projectA.root },
-      { projectId: projectB.init.workspace.id, canvasId: "default", projectRoot: projectB.root }
+      {
+        workspaceId: projectAWorkspaceId,
+        projectId: projectA.init.workspace.id,
+        canvasId: "default",
+        projectRoot: projectA.root
+      },
+      {
+        workspaceId: projectBWorkspaceId,
+        projectId: projectB.init.workspace.id,
+        canvasId: "default",
+        projectRoot: projectB.root
+      }
     ],
     operatorCredentials: [
       {
@@ -82,7 +96,7 @@ async function setup(manifest: PlanPackageManifest = basicManifest()) {
       }
     ]
   });
-  const composition = await createDistributedServerComposition({
+  let composition = await createDistributedServerComposition({
     httpServer,
     config
   });
@@ -91,10 +105,19 @@ async function setup(manifest: PlanPackageManifest = basicManifest()) {
   await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
   const address = httpServer.address();
   if (!address || typeof address === "string") throw new Error("Expected HTTP address");
+  const restart = async () => {
+    const index = compositions.indexOf(composition);
+    if (index >= 0) compositions.splice(index, 1);
+    await composition.close();
+    composition = await createDistributedServerComposition({ httpServer, config });
+    compositions.push(composition);
+  };
   return {
     origin: `http://127.0.0.1:${address.port}`,
     projectA,
     projectB,
+    projectACanvas,
+    restart,
     manifest
   };
 }
@@ -217,10 +240,11 @@ describe("comment and activity production HTTP", () => {
 
     const missingManifest: PlanPackageManifest = { ...fixture.manifest, nodes: [], edges: [] };
     await writeFile(
-      fixture.projectA.init.workspace.manifestFile,
+      fixture.projectACanvas.manifestFile,
       `${JSON.stringify(missingManifest, null, 2)}\n`,
       "utf8"
     );
+    await fixture.restart();
     const listParams = new URLSearchParams({
       workItem: JSON.stringify(workItem),
       limit: "20",
