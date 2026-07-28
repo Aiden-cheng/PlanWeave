@@ -1,4 +1,5 @@
 import { createServer, type Server as HttpServer } from "node:http";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +14,7 @@ import {
 import { applyMigrations } from "../migrations.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 import { HUMAN_RATE_MAX_BUCKETS } from "../identity/http.js";
+import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 
 const servers: HttpServer[] = [];
 const directories: string[] = [];
@@ -78,6 +80,44 @@ async function setup(
 
 function auth(token: string) {
   return { Authorization: `Bearer ${token}` };
+}
+
+function bindProjectToWorkspace(database: SqliteDatabase, projectId: string, workspaceId: string) {
+  const at = "2026-07-28T00:00:00.000Z";
+  database
+    .prepare(
+      `INSERT INTO legacy_project_workspace_mappings(
+        legacy_project_id,normalized_legacy_project_identity,workspace_id,mapped_at
+      ) VALUES(?,?,?,?)`
+    )
+    .run(projectId, `legacy-project:${projectId}`, workspaceId, at);
+  database
+    .prepare(
+      `INSERT INTO workspace_identity_migrations(
+        migration_id,legacy_project_id,workspace_id,from_version,to_version,step,status,
+        interruption_marker,authoritative_read_version,failure_code,updated_at
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?)`
+    )
+    .run(
+      `identity-migration-${createHash("sha256").update(projectId).digest("hex").slice(0, 32)}`,
+      projectId,
+      workspaceId,
+      0,
+      1,
+      "verify_cutover",
+      "completed",
+      "read_cutover_complete",
+      "workspace-identity/v1",
+      null,
+      at
+    );
+}
+
+function bindProjectsToSharedWorkspace(database: SqliteDatabase): void {
+  const workspace = new WorkspaceIdentityRepository(database).ensureWorkspaceForLegacyProject(
+    "project-a"
+  );
+  bindProjectToWorkspace(database, "project-b", workspace);
 }
 
 function jsonHeaders(token?: string) {
@@ -306,7 +346,8 @@ describe("human membership HTTP APIs", () => {
   });
 
   it("binds authentication and device inventories to the mint project", async () => {
-    const { origin } = await setup();
+    const { origin, database } = await setup();
+    bindProjectsToSharedWorkspace(database);
     const a = await bootstrap(origin, "project-a", {
       displayName: "Shared Owner",
       humanPrincipalId: "shared-owner"
@@ -359,7 +400,8 @@ describe("human membership HTTP APIs", () => {
   });
 
   it("prevents cross-project revoke for devices owned by the same principal", async () => {
-    const { origin } = await setup();
+    const { origin, database } = await setup();
+    bindProjectsToSharedWorkspace(database);
     const a = await bootstrap(origin, "project-a", {
       displayName: "Shared Owner",
       humanPrincipalId: "shared-owner"
@@ -422,7 +464,8 @@ describe("human membership HTTP APIs", () => {
   });
 
   it("recovers project-b while the same owner still has a usable project-a device", async () => {
-    const { origin } = await setup();
+    const { origin, database } = await setup();
+    bindProjectsToSharedWorkspace(database);
     const principalId = "shared-recovery-owner";
     const projectA = await bootstrap(origin, "project-a", {
       displayName: "Shared Owner",
