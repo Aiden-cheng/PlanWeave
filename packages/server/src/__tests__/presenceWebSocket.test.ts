@@ -19,6 +19,7 @@ const directories: string[] = [];
 const servers: HttpServer[] = [];
 const compositions: DistributedServerComposition[] = [];
 const sockets: WebSocket[] = [];
+const AUTHORITATIVE_CANVAS_FIELDS = ["content", "snapshot", "layout", "prompt"];
 
 afterEach(async () => {
   for (const socket of sockets.splice(0)) {
@@ -90,6 +91,36 @@ async function bootstrap(origin: string, projectId: string) {
   return (await response.json()) as { deviceToken: string; device: { deviceCredentialId: string } };
 }
 
+async function inviteMember(origin: string, projectId: string, ownerDeviceToken: string) {
+  const invitationResponse = await fetch(
+    `${origin}/api/v1/projects/${projectId}/human/invitations`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: `Bearer ${ownerDeviceToken}`
+      },
+      body: JSON.stringify({})
+    }
+  );
+  expect(invitationResponse.status).toBe(201);
+  const invitation = (await invitationResponse.json()) as { invitationToken: string };
+  const consumeResponse = await fetch(
+    `${origin}/api/v1/projects/${projectId}/human/invitations/consume`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        invitationToken: invitation.invitationToken,
+        displayName: "Presence Member"
+      })
+    }
+  );
+  const body = await consumeResponse.text();
+  expect(consumeResponse.status, body).toBe(201);
+  return JSON.parse(body) as { deviceToken: string };
+}
+
 async function connect(url: string, token: string): Promise<WebSocket> {
   const socket = new WebSocket(url, { headers: { Authorization: `Bearer ${token}` } });
   sockets.push(socket);
@@ -110,6 +141,35 @@ function nextMessage(socket: WebSocket): Promise<Record<string, unknown>> {
   });
 }
 
+function waitForClose(socket: WebSocket): Promise<number> {
+  return new Promise((resolve) => socket.once("close", (code) => resolve(code)));
+}
+
+function recordFrom(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("Expected presence record");
+  }
+  return value as Record<string, unknown>;
+}
+
+function sessionIdFrom(message: Record<string, unknown>): string {
+  const sessionId = recordFrom(recordFrom(message.session).identity).sessionId;
+  if (typeof sessionId !== "string") throw new Error("Expected presence session id");
+  return sessionId;
+}
+
+function expectNoAuthoritativeCanvasFields(value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const item of value) expectNoAuthoritativeCanvasFields(item);
+    return;
+  }
+  if (typeof value !== "object" || value === null) return;
+  for (const [key, nested] of Object.entries(value)) {
+    expect(AUTHORITATIVE_CANVAS_FIELDS).not.toContain(key);
+    expectNoAuthoritativeCanvasFields(nested);
+  }
+}
+
 function hello(socket: WebSocket, projectId: string): void {
   socket.send(
     JSON.stringify({
@@ -122,26 +182,39 @@ function hello(socket: WebSocket, projectId: string): void {
 }
 
 describe("canvas presence WebSocket", () => {
-  it("authenticates, returns same-canvas snapshots, and isolates updates to other sessions", async () => {
+  it("keeps two members mutually visible through disconnects and same-device reconnects", async () => {
     const fixture = await setup();
     const owner = await bootstrap(fixture.origin, fixture.projectId);
+    const member = await inviteMember(fixture.origin, fixture.projectId, owner.deviceToken);
     const url = `${fixture.wsOrigin}/api/v1/projects/${fixture.projectId}/canvases/default/human/presence`;
-    const first = await connect(url, owner.deviceToken);
-    const second = await connect(url, owner.deviceToken);
+    const ownerSocket = await connect(url, owner.deviceToken);
+    const memberSocket = await connect(url, member.deviceToken);
 
-    const firstSnapshot = nextMessage(first);
-    hello(first, fixture.projectId);
-    const firstSnapshotBody = await firstSnapshot;
-    expect(firstSnapshotBody.type).toBe("canvas.presence.snapshot");
-    expect(firstSnapshotBody.sessions).toEqual([]);
-    const secondSnapshot = nextMessage(second);
-    hello(second, fixture.projectId);
-    const secondSnapshotBody = await secondSnapshot;
-    expect(secondSnapshotBody.type).toBe("canvas.presence.snapshot");
-    expect((secondSnapshotBody.sessions as unknown[]).length).toBe(1);
+    const ownerSnapshot = nextMessage(ownerSocket);
+    hello(ownerSocket, fixture.projectId);
+    const ownerSnapshotBody = await ownerSnapshot;
+    expect(ownerSnapshotBody).toMatchObject({
+      type: "canvas.presence.snapshot",
+      sessions: []
+    });
+    expectNoAuthoritativeCanvasFields(ownerSnapshotBody);
 
-    const update = nextMessage(first);
-    second.send(
+    const memberSnapshot = nextMessage(memberSocket);
+    hello(memberSocket, fixture.projectId);
+    const memberSnapshotBody = await memberSnapshot;
+    expect(memberSnapshotBody).toMatchObject({
+      type: "canvas.presence.snapshot",
+      sessions: [
+        {
+          pointer: null,
+          selectionIds: []
+        }
+      ]
+    });
+    expectNoAuthoritativeCanvasFields(memberSnapshotBody);
+
+    const memberUpdateOnOwner = nextMessage(ownerSocket);
+    memberSocket.send(
       JSON.stringify({
         type: "canvas.presence.update",
         protocolVersion: 1,
@@ -151,10 +224,98 @@ describe("canvas presence WebSocket", () => {
         selectionIds: ["T-001"]
       })
     );
-    await expect(update).resolves.toMatchObject({
+    const memberUpdateBody = await memberUpdateOnOwner;
+    expect(memberUpdateBody).toMatchObject({
       type: "canvas.presence.update",
       session: { pointer: { x: 20, y: 30 }, selectionIds: ["T-001"] }
     });
+    expectNoAuthoritativeCanvasFields(memberUpdateBody);
+    const firstMemberSessionId = sessionIdFrom(memberUpdateBody);
+
+    const ownerUpdateOnMember = nextMessage(memberSocket);
+    ownerSocket.send(
+      JSON.stringify({
+        type: "canvas.presence.update",
+        protocolVersion: 1,
+        projectId: fixture.projectId,
+        canvasId: "default",
+        pointer: { x: 40, y: 50 },
+        selectionIds: ["T-002"]
+      })
+    );
+    const ownerUpdateBody = await ownerUpdateOnMember;
+    expect(ownerUpdateBody).toMatchObject({
+      type: "canvas.presence.update",
+      session: { pointer: { x: 40, y: 50 }, selectionIds: ["T-002"] }
+    });
+    expectNoAuthoritativeCanvasFields(ownerUpdateBody);
+
+    const normalLeave = nextMessage(ownerSocket);
+    const normalMemberClose = waitForClose(memberSocket);
+    memberSocket.close(1000, "presence normal disconnect");
+    await expect(normalLeave).resolves.toMatchObject({
+      type: "canvas.presence.leave",
+      sessionId: firstMemberSessionId
+    });
+    await expect(normalMemberClose).resolves.toBe(1000);
+
+    const reconnectedMemberSocket = await connect(url, member.deviceToken);
+    const reconnectSnapshot = nextMessage(reconnectedMemberSocket);
+    hello(reconnectedMemberSocket, fixture.projectId);
+    const reconnectSnapshotBody = await reconnectSnapshot;
+    expect(reconnectSnapshotBody).toMatchObject({
+      type: "canvas.presence.snapshot",
+      sessions: [
+        {
+          pointer: { x: 40, y: 50 },
+          selectionIds: ["T-002"]
+        }
+      ]
+    });
+    expectNoAuthoritativeCanvasFields(reconnectSnapshotBody);
+
+    const reconnectedMemberUpdateOnOwner = nextMessage(ownerSocket);
+    reconnectedMemberSocket.send(
+      JSON.stringify({
+        type: "canvas.presence.update",
+        protocolVersion: 1,
+        projectId: fixture.projectId,
+        canvasId: "default",
+        pointer: { x: 60, y: 70 },
+        selectionIds: ["T-003"]
+      })
+    );
+    const reconnectedMemberUpdateBody = await reconnectedMemberUpdateOnOwner;
+    expect(reconnectedMemberUpdateBody).toMatchObject({
+      type: "canvas.presence.update",
+      session: { pointer: { x: 60, y: 70 }, selectionIds: ["T-003"] }
+    });
+    expect(sessionIdFrom(reconnectedMemberUpdateBody)).not.toBe(firstMemberSessionId);
+    expectNoAuthoritativeCanvasFields(reconnectedMemberUpdateBody);
+
+    const abnormalLeave = nextMessage(ownerSocket);
+    const abnormalMemberClose = waitForClose(reconnectedMemberSocket);
+    reconnectedMemberSocket.terminate();
+    await expect(abnormalLeave).resolves.toMatchObject({
+      type: "canvas.presence.leave",
+      sessionId: sessionIdFrom(reconnectedMemberUpdateBody)
+    });
+    await abnormalMemberClose;
+
+    const ownerClose = waitForClose(ownerSocket);
+    ownerSocket.close(1000, "presence final close");
+    await expect(ownerClose).resolves.toBe(1000);
+
+    const verifierSocket = await connect(url, owner.deviceToken);
+    const verifierSnapshot = nextMessage(verifierSocket);
+    hello(verifierSocket, fixture.projectId);
+    const verifierSnapshotBody = await verifierSnapshot;
+    expect(verifierSnapshotBody).toMatchObject({
+      type: "canvas.presence.snapshot",
+      sessions: []
+    });
+    expectNoAuthoritativeCanvasFields(verifierSnapshotBody);
+    verifierSocket.close(1000, "presence cleanup verification complete");
   });
 
   it("rejects unknown canvas and non-human credentials before upgrade", async () => {
