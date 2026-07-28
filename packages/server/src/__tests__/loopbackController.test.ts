@@ -35,7 +35,7 @@ function config(overrides: Partial<ServerConfig> = {}): ServerConfig {
     allowInsecureDevelopment: true,
     dataDirectory: "/tmp/planweave-loopback-test",
     databasePath: "/tmp/planweave-loopback-test/planweave-server.sqlite",
-    trustedProjects: [{ projectId: "p", canvasId: "c", projectRoot: "/tmp/project" }],
+    trustedProjects: [{ workspaceId: "w", projectId: "p", canvasId: "c", projectRoot: "/tmp/project" }],
     operatorCredentials: [{ operatorId: "operator", tokenSha256: "a".repeat(64), projectIds: ["p"] }],
     limits: {
       busyTimeoutMs: 5_000,
