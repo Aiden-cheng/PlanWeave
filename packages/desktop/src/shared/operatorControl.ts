@@ -288,20 +288,10 @@ export function assertNoSmuggledOperatorSecrets(value: unknown, context: string)
   }
 }
 
-export const operatorControlInvokeChannels = {
-  getStatus: "planweave-operator:getStatus",
-  upsertProfile: "planweave-operator:upsertProfile",
-  removeProfile: "planweave-operator:removeProfile",
-  setActiveProfile: "planweave-operator:setActiveProfile",
-  clearActiveProfile: "planweave-operator:clearActiveProfile",
-  importCredential: "planweave-operator:importCredential",
-  clearCredential: "planweave-operator:clearCredential",
-  listHosts: "planweave-operator:listHosts",
-  copyHostBootstrapHandoff: "planweave-operator:copyHostBootstrapHandoff",
-  revokeHost: "planweave-operator:revokeHost"
-} as const;
-
-export const operatorControlStatusChangedChannel = "planweave-operator:statusChanged";
+export {
+  operatorControlInvokeChannels,
+  operatorControlStatusChangedChannel
+} from "./operatorControlIpc.js";
 
 export type PlanWeaveOperatorControlApi = {
   getOperatorControlStatus: () => Promise<OperatorControlStatus>;

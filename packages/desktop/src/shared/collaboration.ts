@@ -505,95 +505,12 @@ export type CollaborationCurrentSelectionInput = z.infer<
   typeof collaborationCurrentSelectionInputSchema
 >;
 
-export const collaborationInvokeChannels = {
-  getCollaborationStatus: "planweave-collaboration:getStatus",
-  upsertCollaborationProfile: "planweave-collaboration:upsertProfile",
-  removeCollaborationProfile: "planweave-collaboration:removeProfile",
-  setActiveCollaborationProfile: "planweave-collaboration:setActiveProfile",
-  clearActiveCollaborationProfile: "planweave-collaboration:clearActiveProfile",
-  importDeviceCredential: "planweave-collaboration:importDeviceCredential",
-  clearDeviceCredential: "planweave-collaboration:clearDeviceCredential",
-  bootstrapCollaborationOwner: "planweave-collaboration:bootstrapOwner",
-  consumeCollaborationInvitation: "planweave-collaboration:consumeInvitation",
-  connectCollaborationSession: "planweave-collaboration:connectSession",
-  disconnectCollaborationSession: "planweave-collaboration:disconnectSession",
-  redeemCollaborationSetupCode: "planweave-collaboration:redeemSetupCode",
-  getActiveWorkspaceConnection: "planweave-collaboration:getActiveWorkspaceConnection",
-  listWorkspacePicker: "planweave-collaboration:listWorkspacePicker",
-  selectWorkspaceConnection: "planweave-collaboration:selectWorkspaceConnection",
-  connectWorkspaceConnection: "planweave-collaboration:connectWorkspaceConnection",
-  disconnectWorkspaceConnection: "planweave-collaboration:disconnectWorkspaceConnection",
-  retryWorkspaceConnection: "planweave-collaboration:retryWorkspaceConnection",
-  getDeploymentGuidance: "planweave-collaboration:getDeploymentGuidance",
-  copyDeploymentComposeHandoff: "planweave-collaboration:copyDeploymentComposeHandoff",
-  exportDeploymentComposeBundle: "planweave-collaboration:exportDeploymentComposeBundle",
-  validateDeploymentConnectivity: "planweave-collaboration:validateDeploymentConnectivity",
-  startCollaborationPresence: "planweave-collaboration:startPresence",
-  stopCollaborationPresence: "planweave-collaboration:stopPresence",
-  publishCollaborationPresence: "planweave-collaboration:publishPresence",
-  submitCollaborationCanvasCommand: "planweave-collaboration:submitCanvasCommand",
-  reconnectCollaborationCanvas: "planweave-collaboration:reconnectCanvas",
-  bindCollaborationCanvasCommandSession: "planweave-collaboration:bindCanvasCommandSession",
-  getCollaborationCanvasCommandSession: "planweave-collaboration:getCanvasCommandSession",
-  bindCollaborationContentAuthority: "planweave-collaboration:bindContentAuthority",
-  getCollaborationContentAuthority: "planweave-collaboration:getContentAuthority",
-  refreshCollaborationContentAuthority: "planweave-collaboration:refreshContentAuthority",
-  publishCollaborationInitialContent: "planweave-collaboration:publishInitialContent",
-  materializeCollaborationContentHead: "planweave-collaboration:materializeContentHead",
-  getCurrentCanvasAccess: "planweave-collaboration:getCurrentCanvasAccess",
-  mutateCurrentCanvasAccess: "planweave-collaboration:mutateCurrentCanvasAccess",
-  setCollaborationCurrentSelection: "planweave-collaboration:setCurrentSelection",
-  clearCollaborationCurrentSelection: "planweave-collaboration:clearCurrentSelection",
-  getLocalCollaborationServerStatus: "planweave-collaboration:getLocalServerStatus",
-  startLocalCollaborationServer: "planweave-collaboration:startLocalServer",
-  stopLocalCollaborationServer: "planweave-collaboration:stopLocalServer",
-  listLocalCollaborationTrustedScopes: "planweave-collaboration:listLocalTrustedScopes",
-  registerLocalCollaborationCurrentProject: "planweave-collaboration:registerLocalCurrentProject",
-  listCollaborationMembers: "planweave-collaboration:listMembers",
-  listCollaborationDevices: "planweave-collaboration:listDevices",
-  listCollaborationInvitations: "planweave-collaboration:listInvitations",
-  createCollaborationInvitation: "planweave-collaboration:createInvitation",
-  revokeCollaborationInvitation: "planweave-collaboration:revokeInvitation",
-  removeCollaborationMember: "planweave-collaboration:removeMember",
-  promoteCollaborationOwner: "planweave-collaboration:promoteOwner",
-  demoteCollaborationOwner: "planweave-collaboration:demoteOwner",
-  revokeCollaborationDevice: "planweave-collaboration:revokeDevice",
-  listCollaborationAssignments: "planweave-collaboration:listAssignments",
-  getCollaborationAssignment: "planweave-collaboration:getAssignment",
-  listCollaborationEligibleAssignees: "planweave-collaboration:listEligibleAssignees",
-  getCollaborationWorkAuthority: "planweave-collaboration:getWorkAuthority",
-  updateCollaborationResponsibility: "planweave-collaboration:updateResponsibility",
-  updateCollaborationReviewer: "planweave-collaboration:updateReviewer",
-  updateCollaborationExecutionTarget: "planweave-collaboration:updateExecutionTarget",
-  listCollaborationComments: "planweave-collaboration:listComments",
-  listCollaborationActivity: "planweave-collaboration:listActivity",
-  listCollaborationAuthorizedProjects: "planweave-collaboration:listAuthorizedProjects",
-  listCollaborationAuthorizedCanvases: "planweave-collaboration:listAuthorizedCanvases",
-  readCollaborationPackageSnapshot: "planweave-collaboration:readPackageSnapshot",
-  createCollaborationPackageSnapshot: "planweave-collaboration:createPackageSnapshot",
-  restoreCollaborationPackageSnapshot: "planweave-collaboration:restorePackageSnapshot",
-  updateCollaborationAssignment: "planweave-collaboration:updateAssignment",
-  createCollaborationComment: "planweave-collaboration:createComment",
-  editCollaborationComment: "planweave-collaboration:editComment",
-  tombstoneCollaborationComment: "planweave-collaboration:tombstoneComment",
-  createCollaborationPendingAttachment: "planweave-collaboration:createPendingAttachment",
-  uploadCollaborationPendingAttachment: "planweave-collaboration:uploadPendingAttachment",
-  finalizeCollaborationPendingAttachment: "planweave-collaboration:finalizePendingAttachment",
-  dispatchCollaborationRemoteOperation: "planweave-collaboration:dispatchRemoteOperation",
-  observeCollaborationRemoteOperation: "planweave-collaboration:observeRemoteOperation",
-  executeCollaborationRemoteOperationAction: "planweave-collaboration:executeRemoteOperationAction",
-  replayCollaborationRemoteOperationEvents: "planweave-collaboration:replayRemoteOperationEvents",
-  listCollaborationRemoteOperationInteractions:
-    "planweave-collaboration:listRemoteOperationInteractions",
-  settleCollaborationRemoteOperationInteraction:
-    "planweave-collaboration:settleRemoteOperationInteraction"
-} as const;
-
-export const collaborationStatusChangedChannel = "planweave-collaboration:statusChanged";
-/** Human observer invalidation/progress/catch-up signals for a single shared renderer subscription. */
-export const collaborationObserverSignalChannel = "planweave-collaboration:observerSignal";
-/** Sanitized ephemeral canvas presence messages from the main-process socket. */
-export const collaborationPresenceSignalChannel = "planweave-collaboration:presenceSignal";
+export {
+  collaborationInvokeChannels,
+  collaborationObserverSignalChannel,
+  collaborationPresenceSignalChannel,
+  collaborationStatusChangedChannel
+} from "./collaborationIpc.js";
 
 export type PlanWeaveCollaborationApi = {
   getCollaborationStatus: () => Promise<CollaborationStatus>;

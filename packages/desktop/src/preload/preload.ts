@@ -31,7 +31,7 @@ import {
   collaborationObserverSignalChannel,
   collaborationPresenceSignalChannel,
   collaborationStatusChangedChannel
-} from "../shared/collaboration.js";
+} from "../shared/collaborationIpc.js";
 import type {
   PlanWeaveOperatorControlApi,
   OperatorControlStatus
@@ -39,7 +39,7 @@ import type {
 import {
   operatorControlInvokeChannels,
   operatorControlStatusChangedChannel
-} from "../shared/operatorControl.js";
+} from "../shared/operatorControlIpc.js";
 import type { McpTunnelStatus, PlanWeaveMcpTunnelApi } from "../shared/mcpTunnel.js";
 import { mcpTunnelChangedChannel, mcpTunnelInvokeChannels } from "../shared/mcpTunnel.js";
 import {
