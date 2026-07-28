@@ -102,6 +102,14 @@ try {
     timeoutMs: 30_000,
     terminationGraceMs: 2_000
   });
+  if (
+    localCollaborationOnly &&
+    (output.includes(smokeProjectRoot) ||
+      output.includes("projectRoot") ||
+      output.includes("pw_operator_"))
+  ) {
+    throw new Error("Local collaboration smoke output leaked a project root or operator token.");
+  }
 } finally {
   await collaborationFixture?.close();
 }
