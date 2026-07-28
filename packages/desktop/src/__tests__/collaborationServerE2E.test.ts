@@ -142,7 +142,7 @@ async function connectEnrolledHost(origin: string, adminToken: string) {
     })
   });
   expect(grantResponse.status).toBe(201);
-  const grant = (await grantResponse.json()) as { enrollmentCode: string };
+  const grant = (await grantResponse.json()) as { enrollmentCode: string; workspaceId: string };
   const credentialToken = `pw_host_${"D".repeat(43)}`;
   const enrollmentRequest = {
     type: "host.enrollment.request",
@@ -162,7 +162,7 @@ async function connectEnrolledHost(origin: string, adminToken: string) {
   expect(exchangeResponse.status).toBe(200);
   const exchange = (await exchangeResponse.json()) as { hostId: string };
   const socket = new WebSocket(
-    `${origin.replace(/^http:/, "ws:")}/agent-hosts/${exchange.hostId}/connect`,
+    `${origin.replace(/^http:/, "ws:")}/agent-hosts/${exchange.hostId}/connect?workspaceId=${encodeURIComponent(grant.workspaceId)}`,
     { headers: { Authorization: `Bearer ${credentialToken}` } }
   );
   hostSockets.push(socket);
@@ -170,6 +170,7 @@ async function connectEnrolledHost(origin: string, adminToken: string) {
     socket.once("open", resolve);
     socket.once("error", reject);
   });
+  const welcomePromise = nextHostMessage(socket);
   socket.send(
     JSON.stringify({
       type: "host.hello",
@@ -179,8 +180,13 @@ async function connectEnrolledHost(origin: string, adminToken: string) {
       capacity: 1
     })
   );
-  await expect(nextHostMessage(socket)).resolves.toMatchObject({ type: "host.welcome" });
-  return { socket, next: () => nextHostMessage(socket) };
+  await expect(welcomePromise).resolves.toMatchObject({ type: "host.welcome" });
+  return {
+    socket,
+    hostId: exchange.hostId,
+    workspaceId: grant.workspaceId,
+    next: () => nextHostMessage(socket)
+  };
 }
 
 function startObserverAndWait(
@@ -359,11 +365,27 @@ describe("Desktop CollaborationClient against the Server composition", () => {
   it("maps remote action, event, interaction, and error routes through the client", async () => {
     const { fixture, owner } = await createIdentityFixture();
     const host = await connectEnrolledHost(fixture.origin, fixture.adminToken);
+    const executionTarget = await owner.updateExecutionTarget({
+      schemaVersion: "execution-target/v1",
+      scope: {
+        kind: "block",
+        workspaceId: host.workspaceId,
+        projectId: fixture.projectId,
+        canvasId: blockWorkItem.canvasId,
+        blockRef: blockWorkItem.blockRef
+      },
+      target: { kind: "exact_host", hostId: host.hostId },
+      expectedRevision: 0
+    });
     const remoteDispatch = owner.dispatchRemoteOperation({
+      schemaVersion: "remote-run/v2",
+      projectId: fixture.projectId,
       canvasId: blockWorkItem.canvasId,
       blockRef: blockWorkItem.blockRef,
       idempotencyKey: "desktop-e2e-remote-operation",
-      allowHumanOverride: true
+      expectedResponsibilityRevision: 0,
+      expectedReviewerRevision: 0,
+      expectedExecutionTargetRevision: executionTarget.revision
     });
     const execute = await host.next();
     expect(execute.type).toBe("mailbox.message");
