@@ -322,6 +322,8 @@ export class CanvasCommandRepository {
     digestManifest?: PackageSnapshotDigestManifest;
     sizeBytes?: number;
     packageSnapshotId?: string;
+    /** B-002 content head/journal is advanced in this transaction before command visibility. */
+    beforeCommitInTransaction?: () => void;
   }): CanvasCommandAccepted {
     const acceptedAt = this.clock().toISOString();
     const entryId = `journal-${randomUUID()}`;
@@ -358,6 +360,7 @@ export class CanvasCommandRepository {
     });
 
     inWriteTransaction(this.database, () => {
+      input.beforeCommitInTransaction?.();
       this.database
         .prepare(
           `INSERT INTO canvas_command_journal(

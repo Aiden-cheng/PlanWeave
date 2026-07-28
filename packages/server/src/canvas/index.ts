@@ -9,6 +9,9 @@ export {
   CANVAS_COMMAND_WS_MAX_FRAME_BYTES
 } from "./limits.js";
 export { authorizeCanvasRead, authorizeCanvasWrite } from "./policy.js";
+export { ContentVersionRepository } from "./contentVersionRepository.js";
+export { ContentVersionService, type ContentVersionServiceOptions } from "./contentVersionService.js";
+export { handleContentVersionHttpRequest, type ContentVersionHttpOptions } from "./contentVersionHttp.js";
 export {
   CanvasCommandRepository,
   digestCanvasIntent,

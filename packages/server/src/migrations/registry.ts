@@ -5,6 +5,7 @@ import { migration26 } from "./legacyTail.js";
 import { aclRegistryMigration } from "./aclRegistry.js";
 import { assignmentAuthorityMigration } from "./assignment.js";
 import { canvasCommandMigration } from "./canvas.js";
+import { contentVersionMigration } from "./contentVersions.js";
 import { setupCodeHostEnrollmentOutcomeMigration, setupCodeMigration } from "./setup.js";
 import type { Migration, MigrationModule } from "./types.js";
 
@@ -23,6 +24,7 @@ export const migrationModules: readonly MigrationModule[] = [
   { name: "acl-registry", migrations: [aclRegistryMigration] },
   { name: "assignment-authority", migrations: [assignmentAuthorityMigration] },
   { name: "canvas-command", migrations: [canvasCommandMigration] },
+  { name: "content-versions", migrations: [contentVersionMigration] },
   { name: "setup-code", migrations: [setupCodeMigration, setupCodeHostEnrollmentOutcomeMigration] }
 ];
 

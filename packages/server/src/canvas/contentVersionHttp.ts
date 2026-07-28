@@ -1,0 +1,138 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
+import {
+  authenticateCollaborationForProject,
+  humanTransportAllowed,
+  type HumanIdentityRepository,
+  type HumanProjectAuthority
+} from "../identity/index.js";
+import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
+import { ContentVersionService } from "./contentVersionService.js";
+
+type Route =
+  | { kind: "publish"; projectId: string; canvasId: string }
+  | { kind: "fetch"; projectId: string; canvasId: string }
+  | { kind: "ack"; projectId: string; canvasId: string };
+
+export type ContentVersionHttpOptions = {
+  service: ContentVersionService;
+  repository: HumanIdentityRepository;
+  workspaceIdentity: WorkspaceIdentityRepository;
+  projectAuthority: HumanProjectAuthority;
+  allowInsecureDevelopment?: boolean;
+};
+
+function route(request: IncomingMessage, pathname: string): Route | undefined {
+  if (request.method !== "POST") return undefined;
+  const match =
+    /^\/api\/v1\/projects\/([^/]+)\/canvases\/([^/]+)\/content\/(initial-publish|fetch|acknowledgements)$/.exec(
+      pathname
+    );
+  if (!match) return undefined;
+  const projectId = opaqueIdentifierSchema.safeParse(decodeURIComponent(match[1]!));
+  const canvasId = opaqueIdentifierSchema.safeParse(decodeURIComponent(match[2]!));
+  if (!projectId.success || !canvasId.success) return undefined;
+  const kind = match[3] === "initial-publish" ? "publish" : match[3] === "fetch" ? "fetch" : "ack";
+  return { kind, projectId: projectId.data, canvasId: canvasId.data };
+}
+
+function respond(response: ServerResponse, status: number, body: unknown): void {
+  const bytes = Buffer.from(JSON.stringify(body));
+  response.writeHead(status, {
+    "content-type": "application/json; charset=utf-8",
+    "content-length": bytes.byteLength,
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff"
+  });
+  response.end(bytes);
+}
+
+async function json(request: IncomingMessage): Promise<unknown> {
+  if (!/^application\/json(?:;\s*charset=utf-8)?$/i.test(request.headers["content-type"] ?? ""))
+    throw new Error("invalid");
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    const bytes = Buffer.from(chunk);
+    size += bytes.byteLength;
+    if (size > 256 * 1024 * 1024) throw new Error("large");
+    chunks.push(bytes);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    throw new Error("invalid");
+  }
+}
+
+export async function handleContentVersionHttpRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  options: ContentVersionHttpOptions
+): Promise<boolean> {
+  const matched = route(request, new URL(request.url ?? "/", "http://127.0.0.1").pathname);
+  if (!matched) return false;
+  if (!humanTransportAllowed(request.socket, options.allowInsecureDevelopment === true)) {
+    respond(response, 400, { error: "insecure_transport" });
+    return true;
+  }
+  if (!options.projectAuthority.hasProject(matched.projectId)) {
+    respond(response, 404, { error: "project_not_found" });
+    return true;
+  }
+  const context = authenticateCollaborationForProject(
+    options.repository,
+    options.workspaceIdentity,
+    request.headers.authorization,
+    matched.projectId
+  );
+  if (!context) {
+    respond(response, 401, { error: "unauthorized" });
+    return true;
+  }
+  try {
+    const body = await json(request);
+    if (matched.kind === "publish") {
+      const result = options.service.publishInitial(context, {
+        ...(body as object),
+        projectId: matched.projectId,
+        canvasId: matched.canvasId
+      });
+      respond(
+        response,
+        result.outcome === "published" ? 201 : result.reason === "head_cas_conflict" ? 409 : 422,
+        result
+      );
+    } else if (matched.kind === "fetch") {
+      respond(
+        response,
+        200,
+        options.service.fetch(context, {
+          ...(body as object),
+          projectId: matched.projectId,
+          canvasId: matched.canvasId
+        })
+      );
+    } else {
+      respond(
+        response,
+        200,
+        options.service.acknowledge(context, matched.projectId, matched.canvasId, body)
+      );
+    }
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "content_failure";
+    respond(
+      response,
+      code.endsWith("forbidden")
+        ? 403
+        : code === "content_version_not_found"
+          ? 404
+          : code === "large"
+            ? 413
+            : 422,
+      { error: code.endsWith("forbidden") ? "forbidden" : "content_request_rejected" }
+    );
+  }
+  return true;
+}

@@ -76,8 +76,11 @@ import {
   attachCanvasCommandWebSocketServer,
   CanvasCommandRepository,
   CanvasCommandService,
+  ContentVersionRepository,
+  ContentVersionService,
   createDefaultCanvasRuntimePort,
   handleCanvasCommandHttpRequest,
+  handleContentVersionHttpRequest,
   type CanvasCommandWebSocketServer
 } from "./canvas/index.js";
 import { WebSocketUpgradeRouter } from "./webSocketUpgradeRouter.js";
@@ -223,6 +226,7 @@ function requiresAdmission(request: IncomingMessage): boolean {
     /^\/api\/v1\/projects\/[^/]+\/assignments(\/|$)/.test(pathname) ||
     /^\/api\/v1\/projects\/[^/]+\/comments(\/|$)/.test(pathname) ||
     /^\/api\/v1\/projects\/[^/]+\/attachments(\/|$)/.test(pathname) ||
+    /^\/api\/v1\/projects\/[^/]+\/canvases\/[^/]+\/content\/(initial-publish|acknowledgements)$/.test(pathname) ||
     /^\/api\/v1\/registry\/projects\/[^/]+\/canvases\/[^/]+\/snapshots(\/|$)/.test(pathname)
   );
 }
@@ -725,11 +729,18 @@ export async function createDistributedServerComposition(
       clock
     });
     const canvasCommandRepository = new CanvasCommandRepository(server.database, { clock });
+    const contentVersionRepository = new ContentVersionRepository(server.database, clock);
+    const contentVersionService = new ContentVersionService({
+      repository: contentVersionRepository,
+      access: initializedProjectAccess,
+      workspaceIdentity
+    });
     const canvasCommandService = new CanvasCommandService({
       repository: canvasCommandRepository,
       access: initializedProjectAccess,
       workspaceIdentity,
       runtime: createDefaultCanvasRuntimePort(),
+      contentVersions: contentVersionRepository,
       clock
     });
     await canvasCommandService.recoverInterrupted();
@@ -826,6 +837,17 @@ export async function createDistributedServerComposition(
             projectAuthority: runtimeRegistry,
             allowInsecureDevelopment: config.allowInsecureDevelopment,
             clock
+          })
+        ) {
+          return;
+        }
+        if (
+          await handleContentVersionHttpRequest(request, response, {
+            service: contentVersionService,
+            repository: humanIdentity,
+            workspaceIdentity,
+            projectAuthority: runtimeRegistry,
+            allowInsecureDevelopment: config.allowInsecureDevelopment
           })
         ) {
           return;

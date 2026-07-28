@@ -7,6 +7,7 @@ import {
   canvasReconnectErrorSchema,
   canvasReconnectRequestSchema,
   canvasReconnectSnapshotSchema,
+  type AuthoritativeContentVersion,
   type ActorRef,
   type CanvasCommandAccepted,
   type CanvasCommandOutcome,
@@ -25,12 +26,15 @@ import {
   type CanvasScopeKey
 } from "./repository.js";
 import type { CanvasRuntimeMutationPort } from "./runtimePort.js";
+import type { ContentVersionRepository } from "./contentVersionRepository.js";
 
 export type CanvasCommandServiceOptions = {
   repository: CanvasCommandRepository;
   access: ProjectAccessRepository;
   workspaceIdentity: WorkspaceIdentityRepository;
   runtime: CanvasRuntimeMutationPort;
+  /** When configured, commands are only visible after a complete immutable content version advances. */
+  contentVersions?: ContentVersionRepository;
   clock?: () => Date;
   /**
    * Optional presence hub probe — only used in negative tests to prove presence is never
@@ -217,6 +221,15 @@ export class CanvasCommandService {
         }
       });
     }
+    if (this.options.contentVersions && this.options.contentVersions.head(scope) === null) {
+      return rejectedOutcome({
+        projectId: submit.projectId,
+        canvasId: submit.canvasId,
+        operationId: submit.operationId,
+        code: "journal_unavailable",
+        detail: "initial_content_publish_required"
+      });
+    }
 
     const actorRef = actorFrom(actor);
     this.options.repository.reservePending({
@@ -275,6 +288,54 @@ export class CanvasCommandService {
       return rejected;
     }
 
+    let immutableContent: AuthoritativeContentVersion | undefined;
+    let contentHeadRevision: number | undefined;
+    if (this.options.contentVersions) {
+      const captureContent = this.options.runtime.captureContent;
+      if (!captureContent) {
+        this.options.repository.markPendingNeedsRecovery(scope, submit.operationId);
+        return rejectedOutcome({
+          projectId: submit.projectId,
+          canvasId: submit.canvasId,
+          operationId: submit.operationId,
+          code: "journal_unavailable",
+          detail: "content_capture_unavailable"
+        });
+      }
+      const captured = await captureContent({
+        projectRoot: reauth.projectRoot,
+        canvasId: submit.canvasId,
+        expectedPackageDir: reauth.packageDir
+      });
+      if (!captured.ok) {
+        this.options.repository.markPendingNeedsRecovery(scope, submit.operationId);
+        return rejectedOutcome({
+          projectId: submit.projectId,
+          canvasId: submit.canvasId,
+          operationId: submit.operationId,
+          code: "journal_unavailable",
+          detail: "content_capture_failed"
+        });
+      }
+      try {
+        immutableContent = this.options.contentVersions.persistImmutable({
+          scope,
+          content: captured.content,
+          createdBy: actorRef
+        });
+        contentHeadRevision = this.options.contentVersions.head(scope)?.revision ?? 0;
+      } catch {
+        this.options.repository.markPendingNeedsRecovery(scope, submit.operationId);
+        return rejectedOutcome({
+          projectId: submit.projectId,
+          canvasId: submit.canvasId,
+          operationId: submit.operationId,
+          code: "journal_unavailable",
+          detail: "content_persist_failed"
+        });
+      }
+    }
+
     // CAS re-check immediately before durable commit (concurrent writers).
     const headAfter = this.options.repository.head(scope);
     if (headAfter.revision !== submit.expectedRevision) {
@@ -301,9 +362,20 @@ export class CanvasCommandService {
         actor: actorRef,
         previousRevision: submit.expectedRevision,
         revision: submit.expectedRevision + 1,
-        contentDigest: applied.contentDigest,
+        contentDigest: immutableContent?.completed.canonicalDigest ?? applied.contentDigest,
         digestManifest: applied.digestManifest,
-        sizeBytes: applied.sizeBytes
+        sizeBytes: immutableContent?.content.totalBytes ?? applied.sizeBytes,
+        ...(immutableContent && contentHeadRevision !== undefined
+          ? {
+              beforeCommitInTransaction: () => {
+                this.options.contentVersions!.advanceHeadInCallerTransaction({
+                  scope,
+                  expectedRevision: contentHeadRevision!,
+                  content: immutableContent!.completed
+                });
+              }
+            }
+          : {})
       });
     } catch (error) {
       this.options.repository.markPendingNeedsRecovery(scope, submit.operationId);

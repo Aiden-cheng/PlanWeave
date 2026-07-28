@@ -1,0 +1,350 @@
+import { createHash } from "node:crypto";
+import {
+  authoritativeContentHeadSchema,
+  authoritativeContentVersionSchema,
+  canonicalContentVersionDigestPayload,
+  completeContentVersionSchema,
+  completedContentVersionRefSchema,
+  contentVersionAcknowledgementSchema,
+  contentVersionJournalEntrySchema,
+  type ActorRef,
+  type AuthoritativeContentHead,
+  type AuthoritativeContentVersion,
+  type CompleteContentVersion,
+  type CompletedContentVersionRef,
+  type ContentVersionAcknowledgement
+} from "@planweave-ai/collaboration-contracts";
+import { inWriteTransaction, type SqliteDatabase } from "../sqlite.js";
+import type { CanvasScopeKey } from "./repository.js";
+
+type VersionRow = Record<string, unknown>;
+
+function digest(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function contentRef(content: CompleteContentVersion): CompletedContentVersionRef {
+  return completedContentVersionRefSchema.parse({
+    versionId: `version-${content.canonicalDigest}`,
+    canonicalDigest: content.canonicalDigest,
+    verification: "complete"
+  });
+}
+
+/**
+ * Durable immutable content objects and their scoped heads. The storage is authoritative;
+ * working directories are deliberately absent from the schema and API.
+ */
+export class ContentVersionRepository {
+  constructor(
+    private readonly database: SqliteDatabase,
+    private readonly clock: () => Date = () => new Date()
+  ) {}
+
+  verify(rawContent: unknown): CompleteContentVersion {
+    const content = completeContentVersionSchema.parse(rawContent);
+    for (const member of content.members) {
+      if (digest(member.content) !== member.digestSha256) {
+        throw new Error("content_version_member_digest_mismatch");
+      }
+    }
+    if (digest(canonicalContentVersionDigestPayload(content)) !== content.canonicalDigest) {
+      throw new Error("content_version_canonical_digest_mismatch");
+    }
+    return content;
+  }
+
+  persistImmutable(input: {
+    scope: CanvasScopeKey;
+    content: unknown;
+    createdBy: ActorRef;
+    createdAt?: string;
+  }): AuthoritativeContentVersion {
+    const content = this.verify(input.content);
+    const completed = contentRef(content);
+    const createdAt = input.createdAt ?? this.clock().toISOString();
+    inWriteTransaction(this.database, () => {
+      const existing = this.database
+        .prepare(
+          `SELECT canonical_digest,total_bytes,created_at,creator_kind,creator_id,creator_display_name
+             FROM canvas_content_versions
+            WHERE workspace_id=? AND project_id=? AND canvas_id=? AND version_id=?`
+        )
+        .get(
+          input.scope.workspaceId,
+          input.scope.projectId,
+          input.scope.canvasId,
+          completed.versionId
+        ) as VersionRow | undefined;
+      if (!existing) {
+        this.database
+          .prepare(
+            `INSERT INTO canvas_content_versions(
+              workspace_id,project_id,canvas_id,version_id,canonical_digest,total_bytes,
+              created_at,creator_kind,creator_id,creator_display_name
+            ) VALUES(?,?,?,?,?,?,?,?,?,?)`
+          )
+          .run(
+            input.scope.workspaceId,
+            input.scope.projectId,
+            input.scope.canvasId,
+            completed.versionId,
+            content.canonicalDigest,
+            content.totalBytes,
+            createdAt,
+            input.createdBy.kind,
+            input.createdBy.id,
+            input.createdBy.displayName ?? null
+          );
+        const insertMember = this.database.prepare(
+          `INSERT INTO canvas_content_version_members(
+             workspace_id,project_id,canvas_id,version_id,member_path,member_kind,content,digest_sha256,size_bytes
+           ) VALUES(?,?,?,?,?,?,?,?,?)`
+        );
+        for (const member of content.members) {
+          insertMember.run(
+            input.scope.workspaceId,
+            input.scope.projectId,
+            input.scope.canvasId,
+            completed.versionId,
+            member.path,
+            member.kind,
+            member.content,
+            member.digestSha256,
+            member.sizeBytes
+          );
+        }
+      } else if (
+        String(existing.canonical_digest) !== content.canonicalDigest ||
+        Number(existing.total_bytes) !== content.totalBytes
+      ) {
+        throw new Error("content_version_immutable_conflict");
+      } else {
+        this.readVersionInCallerTransaction(input.scope, completed);
+      }
+    });
+    return this.readVersion(input.scope, completed);
+  }
+
+  readVersion(
+    scope: CanvasScopeKey,
+    content: CompletedContentVersionRef
+  ): AuthoritativeContentVersion {
+    return this.readVersionInCallerTransaction(scope, content);
+  }
+
+  private readVersionInCallerTransaction(
+    scope: CanvasScopeKey,
+    content: CompletedContentVersionRef
+  ): AuthoritativeContentVersion {
+    const row = this.database
+      .prepare(
+        `SELECT canonical_digest,total_bytes,created_at,creator_kind,creator_id,creator_display_name
+           FROM canvas_content_versions
+          WHERE workspace_id=? AND project_id=? AND canvas_id=? AND version_id=?`
+      )
+      .get(scope.workspaceId, scope.projectId, scope.canvasId, content.versionId) as
+      | VersionRow
+      | undefined;
+    if (!row || String(row.canonical_digest) !== content.canonicalDigest) {
+      throw new Error("content_version_not_found");
+    }
+    const members = this.database
+      .prepare(
+        `SELECT member_kind,member_path,content,digest_sha256,size_bytes
+           FROM canvas_content_version_members
+          WHERE workspace_id=? AND project_id=? AND canvas_id=? AND version_id=?
+          ORDER BY member_path ASC`
+      )
+      .all(scope.workspaceId, scope.projectId, scope.canvasId, content.versionId);
+    const complete = this.verify({
+      members: members.map((member) => ({
+        kind: member.member_kind,
+        path: member.member_path,
+        content: member.content,
+        digestSha256: member.digest_sha256,
+        sizeBytes: member.size_bytes
+      })),
+      canonicalDigest: row.canonical_digest,
+      totalBytes: row.total_bytes
+    });
+    return authoritativeContentVersionSchema.parse({
+      schemaVersion: "content-version/v1",
+      scope,
+      content: complete,
+      completed: content,
+      createdAt: row.created_at,
+      createdBy: {
+        kind: row.creator_kind,
+        id: row.creator_id,
+        ...(row.creator_display_name === null ? {} : { displayName: row.creator_display_name })
+      }
+    });
+  }
+
+  head(scope: CanvasScopeKey): AuthoritativeContentHead | null {
+    const row = this.database
+      .prepare(
+        `SELECT revision,version_id,canonical_digest,advanced_at FROM canvas_content_heads
+          WHERE workspace_id=? AND project_id=? AND canvas_id=?`
+      )
+      .get(scope.workspaceId, scope.projectId, scope.canvasId) as VersionRow | undefined;
+    if (!row || Number(row.revision) === 0) return null;
+    return authoritativeContentHeadSchema.parse({
+      schemaVersion: "content-version/v1",
+      scope,
+      revision: row.revision,
+      content: {
+        versionId: row.version_id,
+        canonicalDigest: row.canonical_digest,
+        verification: "complete"
+      },
+      advancedAt: row.advanced_at
+    });
+  }
+
+  /** Caller must already hold the same SQLite write transaction as any bound journal/head update. */
+  advanceHeadInCallerTransaction(input: {
+    scope: CanvasScopeKey;
+    expectedRevision: number;
+    content: CompletedContentVersionRef;
+    acceptedAt?: string;
+  }): AuthoritativeContentHead {
+    this.readVersionInCallerTransaction(input.scope, input.content);
+    const current = this.head(input.scope);
+    const revision = current?.revision ?? 0;
+    if (revision !== input.expectedRevision) throw new Error("content_version_head_cas_conflict");
+    const acceptedAt = input.acceptedAt ?? this.clock().toISOString();
+    const nextRevision = revision + 1;
+    const changed = this.database
+      .prepare(
+        `INSERT INTO canvas_content_heads(workspace_id,project_id,canvas_id,revision,version_id,canonical_digest,advanced_at)
+         VALUES(?,?,?,?,?,?,?)
+         ON CONFLICT(workspace_id,project_id,canvas_id) DO UPDATE SET
+           revision=excluded.revision,version_id=excluded.version_id,
+           canonical_digest=excluded.canonical_digest,advanced_at=excluded.advanced_at
+         WHERE canvas_content_heads.revision=?`
+      )
+      .run(
+        input.scope.workspaceId,
+        input.scope.projectId,
+        input.scope.canvasId,
+        nextRevision,
+        input.content.versionId,
+        input.content.canonicalDigest,
+        acceptedAt,
+        revision
+      );
+    if (changed.changes !== 1) throw new Error("content_version_head_cas_conflict");
+    this.database
+      .prepare(
+        `INSERT INTO canvas_content_journal(
+          workspace_id,project_id,canvas_id,revision,previous_revision,version_id,canonical_digest,accepted_at
+        ) VALUES(?,?,?,?,?,?,?,?)`
+      )
+      .run(
+        input.scope.workspaceId,
+        input.scope.projectId,
+        input.scope.canvasId,
+        nextRevision,
+        revision,
+        input.content.versionId,
+        input.content.canonicalDigest,
+        acceptedAt
+      );
+    return authoritativeContentHeadSchema.parse({
+      schemaVersion: "content-version/v1",
+      scope: input.scope,
+      revision: nextRevision,
+      content: input.content,
+      advancedAt: acceptedAt
+    });
+  }
+
+  publishInitial(input: { scope: CanvasScopeKey; content: unknown; createdBy: ActorRef }): {
+    version: AuthoritativeContentVersion;
+    head: AuthoritativeContentHead;
+  } {
+    const version = this.persistImmutable(input);
+    const head = inWriteTransaction(this.database, () =>
+      this.advanceHeadInCallerTransaction({
+        scope: input.scope,
+        expectedRevision: 0,
+        content: version.completed
+      })
+    );
+    return { version, head };
+  }
+
+  acknowledge(input: {
+    scope: CanvasScopeKey;
+    deviceSessionId: string;
+    content: CompletedContentVersionRef;
+    acknowledgedAt?: string;
+  }): ContentVersionAcknowledgement {
+    this.readVersion(input.scope, input.content);
+    const acknowledgedAt = input.acknowledgedAt ?? this.clock().toISOString();
+    inWriteTransaction(this.database, () => {
+      this.database
+        .prepare(
+          `INSERT INTO canvas_content_acknowledgements(
+            workspace_id,project_id,canvas_id,device_session_id,version_id,canonical_digest,acknowledged_at
+          ) VALUES(?,?,?,?,?,?,?)
+          ON CONFLICT(workspace_id,project_id,canvas_id,device_session_id) DO UPDATE SET
+            version_id=excluded.version_id,canonical_digest=excluded.canonical_digest,
+            acknowledged_at=excluded.acknowledged_at`
+        )
+        .run(
+          input.scope.workspaceId,
+          input.scope.projectId,
+          input.scope.canvasId,
+          input.deviceSessionId,
+          input.content.versionId,
+          input.content.canonicalDigest,
+          acknowledgedAt
+        );
+    });
+    return contentVersionAcknowledgementSchema.parse({
+      scope: input.scope,
+      deviceSessionId: input.deviceSessionId,
+      content: input.content,
+      acknowledgedAt
+    });
+  }
+
+  journalAfter(scope: CanvasScopeKey, afterRevision: number) {
+    const entries = this.database
+      .prepare(
+        `SELECT revision,previous_revision,version_id,canonical_digest,accepted_at
+           FROM canvas_content_journal WHERE workspace_id=? AND project_id=? AND canvas_id=? AND revision>?
+           ORDER BY revision ASC`
+      )
+      .all(scope.workspaceId, scope.projectId, scope.canvasId, afterRevision)
+      .map((row) =>
+        contentVersionJournalEntrySchema.parse({
+          schemaVersion: "content-version/v1",
+          scope,
+          revision: row.revision,
+          previousRevision: row.previous_revision,
+          content: {
+            versionId: row.version_id,
+            canonicalDigest: row.canonical_digest,
+            verification: "complete"
+          },
+          acceptedAt: row.accepted_at
+        })
+      );
+    const head = this.head(scope);
+    if ((head?.revision ?? 0) > afterRevision && entries.length === 0) {
+      throw new Error("content_version_journal_gap");
+    }
+    let previousRevision = afterRevision;
+    for (const entry of entries) {
+      if (entry.previousRevision !== previousRevision)
+        throw new Error("content_version_journal_gap");
+      previousRevision = entry.revision;
+    }
+    if (head && previousRevision !== head.revision) throw new Error("content_version_journal_gap");
+    return entries;
+  }
+}
