@@ -86,8 +86,8 @@ export function registerOperatorControlHandlers(
   ipcMain.handle(operatorControlInvokeChannels.listHosts, (_event, input: unknown) =>
     active.listHosts(input)
   );
-  ipcMain.handle(operatorControlInvokeChannels.createEnrollmentGrant, (_event, input: unknown) =>
-    active.createEnrollmentGrant(input)
+  ipcMain.handle(operatorControlInvokeChannels.copyHostBootstrapHandoff, (_event, input: unknown) =>
+    active.copyHostBootstrapHandoff(input, (content) => clipboard.writeText(content))
   );
   ipcMain.handle(operatorControlInvokeChannels.revokeHost, (_event, input: unknown) =>
     active.revokeHost(input)

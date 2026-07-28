@@ -56,10 +56,10 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
     busy,
     clearActiveProfile,
     clearCredential,
-    createGrant,
-    dismissGrant,
+    copyBootstrapHandoff,
+    dismissHandoff,
     error,
-    grant,
+    handoff,
     hosts,
     hostsLoading,
     importCredential,
@@ -200,7 +200,7 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
                         activeProfile?.profileId === profile.profileId ? "secondary" : "outline"
                       }
                       data-testid={`host-admin-select-${profile.profileId}`}
-                      disabled={busy || Boolean(grant)}
+                      disabled={busy || Boolean(handoff)}
                       onClick={() => void selectProfile(profile.profileId)}
                     >
                       {activeProfile?.profileId === profile.profileId
@@ -212,7 +212,7 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
                       size="sm"
                       variant="ghost"
                       data-testid={`host-admin-remove-${profile.profileId}`}
-                      disabled={busy || Boolean(grant)}
+                      disabled={busy || Boolean(handoff)}
                       onClick={() => {
                         if (window.confirm(t("hostAdminRemoveProfileConfirm"))) {
                           void removeProfile(profile.profileId);
@@ -284,7 +284,7 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
                 data-testid="host-admin-save-profile"
                 disabled={
                   busy ||
-                  Boolean(grant) ||
+                  Boolean(handoff) ||
                   !profileId.trim() ||
                   !displayName.trim() ||
                   !serverBaseUrl.trim()
@@ -297,7 +297,7 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
                   type="button"
                   variant="ghost"
                   data-testid="host-admin-clear-active"
-                  disabled={busy || Boolean(grant)}
+                  disabled={busy || Boolean(handoff)}
                   onClick={() => void clearActiveProfile()}
                 >
                   {t("hostAdminClearActive")}
@@ -337,14 +337,12 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
                   />
                 </div>
               </div>
-              <p className="text-xs text-text-muted">
-                {t("hostAdminOperatorCredential")}
-              </p>
+              <p className="text-xs text-text-muted">{t("hostAdminOperatorCredential")}</p>
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="submit"
                   data-testid="host-admin-import-credential"
-                  disabled={busy || Boolean(grant)}
+                  disabled={busy || Boolean(handoff)}
                 >
                   {t("hostAdminImportCredential")}
                 </Button>
@@ -353,7 +351,7 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
                     type="button"
                     variant="ghost"
                     data-testid="host-admin-clear-credential"
-                    disabled={busy || Boolean(grant)}
+                    disabled={busy || Boolean(handoff)}
                     onClick={() => void clearCredential(activeProfile.profileId)}
                   >
                     {t("hostAdminClearCredential")}
@@ -371,9 +369,7 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
             <div>
               <CardTitle>{t("hostAdminInventoryTitle")}</CardTitle>
               <CardDescription>{t("hostAdminInventoryDescription")}</CardDescription>
-              <p className="mt-1 text-xs text-text-muted">
-                {t("hostAdminStatusAuthorityGap")}
-              </p>
+              <p className="mt-1 text-xs text-text-muted">{t("hostAdminStatusAuthorityGap")}</p>
             </div>
             <Button
               type="button"
@@ -490,14 +486,12 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
       <HostBootstrapCard
         activeProfile={activeProfile}
         busy={busy}
-        createGrant={createGrant}
-        dismissGrant={dismissGrant}
-        grant={grant}
-        handoffState={busy ? "pending" : grant ? "ready" : error ? "failed" : "idle"}
+        copyBootstrapHandoff={copyBootstrapHandoff}
+        dismissHandoff={dismissHandoff}
+        handoff={handoff}
+        handoffState={busy ? "pending" : handoff ? "ready" : error ? "failed" : "idle"}
         handoffError={error}
-        onRetry={() => {
-          void createGrant();
-        }}
+        onRetry={copyBootstrapHandoff}
         t={t}
       />
     </div>

@@ -495,8 +495,7 @@ export const zhCnCatalog = {
   hostAdminInventoryTitle: "权威 Host 清单",
   hostAdminInventoryDescription:
     "状态来自 server 投影，包括当前在线状态、容量、能力和凭证到期时间。",
-  hostAdminStatusAuthorityGap:
-    "在线和离线状态由 server 根据其配置的心跳窗口统一计算。",
+  hostAdminStatusAuthorityGap: "在线和离线状态由 server 根据其配置的心跳窗口统一计算。",
   hostAdminNoHosts: "服务器当前没有返回 Host。",
   hostAdminStatusRevoked: "已吊销",
   hostAdminStatusAwaitingHeartbeat: "等待心跳",
@@ -516,7 +515,7 @@ export const zhCnCatalog = {
   hostAdminBootstrapDescription: "为你控制的 VPS 生成有界入驻交接。",
   hostAdminBootstrapIdle: "Host bootstrap 空闲。",
   hostAdminBootstrapPending: "正在创建 Host 入驻交接…",
-  hostAdminBootstrapReady: "Host 入驻交接已就绪（仅显示一次）。",
+  hostAdminBootstrapReady: "Host 入驻交接已由 Desktop main 复制。",
   hostAdminBootstrapFailed: "Host bootstrap 失败。",
   hostAdminBootstrapExpired: "Host 入驻交接已过期。",
   hostAdminBootstrapRevoked: "Host 入驻交接已吊销。",
@@ -535,17 +534,17 @@ export const zhCnCatalog = {
   hostAdminBootstrapCapacity: "容量必须是 1 到 128 的整数。",
   hostAdminBootstrapCapabilities: "能力必须使用小写可移植标识符。",
   hostAdminBootstrapBoundary:
-    "交接只含 server origin、一次性入驻码和到期时间；绝不包含操作员 token、Host 凭证、provider 环境值、SSH 材料或本地 secret 路径。",
-  hostAdminCreateGrant: "创建一次性入驻",
-  hostAdminGrantOnceTitle: "入驻密钥——仅显示一次",
+    "Desktop main 创建并复制交接内容。renderer 永不接收入驻码、Host 凭证、操作员 token、SSH 材料或生成的命令。",
+  hostAdminCreateGrant: "创建并复制一次性入驻",
+  hostAdminGrantOnceTitle: "Bootstrap 交接已复制",
   hostAdminGrantOnceWarning:
-    "请立即复制此密钥。关闭后 Desktop 会丢弃它且无法再次显示。到期时间：{expiry}。",
+    "完整 bootstrap 交接内容已由 Desktop main 直接复制。到期时间：{expiry}。",
   hostAdminEnrollmentSecret: "入驻密钥",
   hostAdminCopy: "复制密钥",
   hostAdminCopyConfig: "复制配置",
   hostAdminCopyCommand: "复制命令",
   hostAdminCopied: "已复制",
-  hostAdminCloseGrant: "关闭并丢弃",
+  hostAdminCloseGrant: "关闭交接状态",
   hostAdminBootstrapConfig: "Bootstrap 配置",
   hostAdminBootstrapCommand: "Bootstrap 命令",
   hostAdminBootstrapHeartbeatNote:
@@ -1161,7 +1160,8 @@ export const zhCnCatalog = {
   canvasPresenceCursorSelected: "{name} 的光标；已选择 {count} 项",
   canvasPresenceEdgesSelected: "{name} 选择了图中的连线",
   canvasPresenceError: "画布在线状态错误：{code}",
-  canvasCommandStaleRevision: "画布版本已过期（本地期望 {expected}，服务端为 {authoritative}）。请重连后重试。",
+  canvasCommandStaleRevision:
+    "画布版本已过期（本地期望 {expected}，服务端为 {authoritative}）。请重连后重试。",
   canvasCommandRejected: "画布命令被拒绝：{code}",
   canvasCommandReconnectFailed: "画布重连失败：{code}",
   canvasCommandNotConnected: "共享画布命令会话未连接。",

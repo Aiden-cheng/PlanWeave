@@ -39,6 +39,7 @@ import {
   mcpTunnelInvokeChannels,
   type McpTunnelStatus
 } from "../shared/mcpTunnel";
+import { operatorControlInvokeChannels } from "../shared/operatorControl";
 import { windowAppearanceInvokeChannels } from "../shared/windowAppearance";
 
 type IpcRendererListener = (event: unknown, payload: unknown) => void;
@@ -201,6 +202,34 @@ describe("preload bridge invocation", () => {
       desktopBridgeInvokeChannels.sendAgentPrompt,
       identity,
       "continue"
+    );
+  });
+
+  it("forwards only the redacted Host bootstrap handoff action", async () => {
+    electronMock.ipcRenderer.invoke.mockResolvedValue({ state: "ready" });
+    await import("../preload/preload");
+    const operator = electronMock.exposed.get("planweaveOperatorControl") as {
+      copyOperatorHostBootstrapHandoff: (input: unknown) => Promise<unknown>;
+    };
+    const input = {
+      profileId: "profile-a",
+      request: {
+        expiresAt: "2030-01-01T00:15:00.000Z",
+        credentialExpiresAt: "2030-01-02T00:00:00.000Z"
+      },
+      bootstrap: {
+        configPath: "/etc/planweave/agent-host.json",
+        dataDirectory: "/var/lib/planweave-agent-host",
+        workspaceRoot: "/var/lib/planweave-agent-host/workspaces",
+        host: { displayName: "Host A", capacity: 1, capabilities: ["linux.x64"] }
+      }
+    };
+
+    await operator.copyOperatorHostBootstrapHandoff(input);
+
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      operatorControlInvokeChannels.copyHostBootstrapHandoff,
+      input
     );
   });
 

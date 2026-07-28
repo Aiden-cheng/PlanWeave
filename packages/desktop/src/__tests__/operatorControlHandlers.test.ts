@@ -17,13 +17,14 @@ const electronMock = vi.hoisted(() => {
     ipcMain: {
       handle: vi.fn((channel: string, handler: IpcHandler) => handlers.set(channel, handler))
     },
-    readText: vi.fn()
+    readText: vi.fn(),
+    writeText: vi.fn()
   };
 });
 
 vi.mock("electron", () => ({
   BrowserWindow: { getAllWindows: () => [] },
-  clipboard: { readText: electronMock.readText },
+  clipboard: { readText: electronMock.readText, writeText: electronMock.writeText },
   ipcMain: electronMock.ipcMain,
   safeStorage: {
     isEncryptionAvailable: () => false,
@@ -42,6 +43,7 @@ beforeEach(() => {
   electronMock.handlers.clear();
   electronMock.ipcMain.handle.mockClear();
   electronMock.readText.mockReset();
+  electronMock.writeText.mockReset();
 });
 
 afterEach(async () => {
@@ -76,9 +78,35 @@ describe("operator control main-process credential import", () => {
       profiles: [{ profileId: "profile-a", hasOperatorCredential: true }]
     });
 
-    expect(() =>
-      handler({}, { profileId: "profile-a", operatorToken: token })
-    ).toThrow("Operator IPC rejected importOperatorCredential");
+    expect(() => handler({}, { profileId: "profile-a", operatorToken: token })).toThrow(
+      "Operator IPC rejected importOperatorCredential"
+    );
     expect(readOperatorToken).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("operator control main-owned Host handoff", () => {
+  it("rejects renderer-supplied enrollment codes before any clipboard write", async () => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-operator-handoff-handler-"));
+    roots.push(root);
+    const service = registerOperatorControlHandlers({
+      profileStorePaths: { profilesPath: join(root, "profiles.json") },
+      credentialsPath: join(root, "credentials.json")
+    });
+    await service.upsertProfile({
+      profileId: "profile-a",
+      displayName: "Operator A",
+      serverBaseUrl: "https://operator.example.test/",
+      allowInsecureTransport: false
+    });
+
+    const handler = electronMock.handlers.get(
+      operatorControlInvokeChannels.copyHostBootstrapHandoff
+    );
+    if (!handler) throw new Error("operator_handoff_handler_missing");
+    await expect(
+      handler({}, { profileId: "profile-a", enrollmentCode: `pw_enroll_${"A".repeat(43)}` })
+    ).rejects.toThrow("Operator IPC rejected copyHostBootstrapHandoff");
+    expect(electronMock.writeText).not.toHaveBeenCalled();
   });
 });

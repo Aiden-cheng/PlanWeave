@@ -371,8 +371,8 @@ const operatorControlApi: PlanWeaveOperatorControlApi = {
     ipcRenderer.invoke(operatorControlInvokeChannels.clearCredential, input),
   listOperatorHosts: async (input) =>
     ipcRenderer.invoke(operatorControlInvokeChannels.listHosts, input),
-  createOperatorEnrollmentGrant: async (input) =>
-    ipcRenderer.invoke(operatorControlInvokeChannels.createEnrollmentGrant, input),
+  copyOperatorHostBootstrapHandoff: async (input) =>
+    ipcRenderer.invoke(operatorControlInvokeChannels.copyHostBootstrapHandoff, input),
   revokeOperatorHost: async (input) =>
     ipcRenderer.invoke(operatorControlInvokeChannels.revokeHost, input),
   onOperatorControlStatusChanged: (callback) => {

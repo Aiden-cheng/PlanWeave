@@ -1,19 +1,23 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { OperatorEnrollmentGrantResponse } from "@planweave-ai/distributed-protocol";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import type {
+  OperatorHostBootstrapConfig,
+  OperatorHostBootstrapHandoffView,
+  OperatorProfileView
+} from "../../shared/operatorControl";
 import type { createTranslator } from "../i18n";
-import type { OperatorProfileView } from "../../shared/operatorControl";
-import { buildAgentHostBootstrapCommand } from "./hostBootstrapCommand";
 
 type HostBootstrapCardProps = {
   activeProfile: OperatorProfileView | null;
   busy: boolean;
-  createGrant: () => Promise<OperatorEnrollmentGrantResponse | null>;
-  dismissGrant: () => void;
-  grant: OperatorEnrollmentGrantResponse | null;
+  copyBootstrapHandoff: (
+    bootstrap: OperatorHostBootstrapConfig
+  ) => Promise<OperatorHostBootstrapHandoffView | null>;
+  dismissHandoff: () => void;
+  handoff: OperatorHostBootstrapHandoffView | null;
   t: ReturnType<typeof createTranslator>;
 };
 
@@ -29,9 +33,9 @@ function isAbsolutePath(value: string): boolean {
 export function HostBootstrapCard({
   activeProfile,
   busy,
-  createGrant,
-  dismissGrant,
-  grant,
+  copyBootstrapHandoff,
+  dismissHandoff,
+  handoff,
   t,
   handoffState = "idle",
   handoffError = null,
@@ -40,7 +44,7 @@ export function HostBootstrapCard({
   /** Honest Host bootstrap lifecycle for pending/error/retry UI. */
   handoffState?: "idle" | "pending" | "ready" | "failed" | "expired" | "revoked";
   handoffError?: string | null;
-  onRetry?: () => void;
+  onRetry?: (bootstrap: OperatorHostBootstrapConfig) => void;
 }) {
   const locale = t("hostAdminLocale");
   const [configPath, setConfigPath] = useState("/etc/planweave/agent-host.json");
@@ -51,39 +55,26 @@ export function HostBootstrapCard({
   );
   const [capacity, setCapacity] = useState("1");
   const [capabilities, setCapabilities] = useState("linux.x64");
-  const [copied, setCopied] = useState<string | null>(null);
-  const grantSecretRef = useRef<HTMLInputElement>(null);
   const resolvedHandoffState =
     handoffState !== "idle"
       ? handoffState
       : busy
         ? "pending"
-        : grant
+        : handoff
           ? "ready"
           : handoffError
             ? "failed"
             : "idle";
 
   useEffect(() => {
-    if (grant && grantSecretRef.current) {
-      grantSecretRef.current.focus();
-      grantSecretRef.current.select();
-    }
-  }, [grant]);
+    if (activeProfile && !handoff) setHostDisplayName(activeProfile.displayName);
+  }, [activeProfile, handoff]);
 
-  useEffect(() => {
-    if (activeProfile && !grant) setHostDisplayName(activeProfile.displayName);
-  }, [activeProfile, grant]);
-
-  const coordinator = useMemo(() => {
-    if (!activeProfile) return null;
+  const coordinatorIsSecure = useMemo(() => {
+    if (!activeProfile) return false;
     const url = new URL(activeProfile.serverBaseUrl);
     const loopback = url.hostname === "127.0.0.1" || url.hostname === "[::1]";
-    if (url.protocol === "http:" && !loopback) return null;
-    return {
-      url: activeProfile.serverBaseUrl,
-      allowInsecureDevelopment: url.protocol === "http:" && loopback
-    };
+    return url.protocol === "https:" || (url.protocol === "http:" && loopback);
   }, [activeProfile]);
 
   const capabilityValues = useMemo(
@@ -96,7 +87,7 @@ export function HostBootstrapCard({
   );
   const parsedCapacity = Number(capacity);
   const configValidationError =
-    !activeProfile || !coordinator
+    !activeProfile || !coordinatorIsSecure
       ? "hostAdminBootstrapSecureCoordinator"
       : !isAbsolutePath(configPath) ||
           !isAbsolutePath(dataDirectory) ||
@@ -106,57 +97,32 @@ export function HostBootstrapCard({
           ? "hostAdminBootstrapHostName"
           : !Number.isInteger(parsedCapacity) || parsedCapacity < 1 || parsedCapacity > 128
             ? "hostAdminBootstrapCapacity"
-            : capabilityValues.some((value) => !/^[a-z0-9][a-z0-9._:-]*$/.test(value))
+            : capabilityValues.length === 0 ||
+                capabilityValues.some((value) => !/^[a-z0-9][a-z0-9._:-]*$/.test(value))
               ? "hostAdminBootstrapCapabilities"
               : null;
 
-  const bootstrapConfig = useMemo(() => {
-    if (!grant || !activeProfile || !coordinator || configValidationError) return null;
-    return JSON.stringify(
-      {
-        version: "agent-host-config/v1",
-        coordinator,
-        dataDirectory: dataDirectory.trim(),
-        workspaceRoot: workspaceRoot.trim(),
-        host: {
-          displayName: hostDisplayName.trim(),
-          capacity: parsedCapacity,
-          capabilities: capabilityValues
-        },
-        workspaces: [],
-        agentProfiles: []
-      },
-      null,
-      2
-    );
+  const bootstrap = useMemo<OperatorHostBootstrapConfig | null>(() => {
+    if (configValidationError) return null;
+    return {
+      configPath: configPath.trim(),
+      dataDirectory: dataDirectory.trim(),
+      workspaceRoot: workspaceRoot.trim(),
+      host: {
+        displayName: hostDisplayName.trim(),
+        capacity: parsedCapacity,
+        capabilities: capabilityValues
+      }
+    };
   }, [
-    activeProfile,
     capabilityValues,
+    configPath,
     configValidationError,
-    coordinator,
     dataDirectory,
-    grant,
     hostDisplayName,
     parsedCapacity,
     workspaceRoot
   ]);
-
-  const bootstrapCommand = useMemo(() => {
-    if (!grant || !bootstrapConfig) return null;
-    return buildAgentHostBootstrapCommand({
-      configPath,
-      enrollmentCode: grant.enrollmentCode
-    });
-  }, [bootstrapConfig, configPath, grant]);
-
-  const copyText = async (kind: string, value: string) => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(kind);
-    } catch {
-      setCopied(null);
-    }
-  };
 
   return (
     <Card data-testid="host-admin-bootstrap" data-handoff-state={resolvedHandoffState}>
@@ -196,7 +162,9 @@ export function HostBootstrapCard({
               className="mt-2"
               data-testid="host-admin-bootstrap-retry"
               disabled={busy}
-              onClick={() => onRetry()}
+              onClick={() => {
+                if (bootstrap) onRetry(bootstrap);
+              }}
             >
               {t("hostAdminBootstrapRetry")}
             </Button>
@@ -280,12 +248,14 @@ export function HostBootstrapCard({
           type="button"
           className="w-fit"
           data-testid="host-admin-create-grant"
-          disabled={busy || !activeProfile?.hasOperatorCredential || Boolean(configValidationError)}
-          onClick={() => void createGrant()}
+          disabled={busy || !activeProfile?.hasOperatorCredential || !bootstrap}
+          onClick={() => {
+            if (bootstrap) void copyBootstrapHandoff(bootstrap);
+          }}
         >
           {t("hostAdminCreateGrant")}
         </Button>
-        {grant && bootstrapConfig && bootstrapCommand ? (
+        {handoff ? (
           <div
             className="grid gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3"
             data-testid="host-admin-grant-once"
@@ -298,79 +268,19 @@ export function HostBootstrapCard({
             <p className="text-xs text-text-muted">
               {t("hostAdminGrantOnceWarning").replace(
                 "{expiry}",
-                formatDate(grant.expiresAt, locale)
+                formatDate(handoff.expiresAt, locale)
               )}
             </p>
-            <Label htmlFor="host-admin-grant-secret">{t("hostAdminEnrollmentSecret")}</Label>
-            <Input
-              ref={grantSecretRef}
-              id="host-admin-grant-secret"
-              data-testid="host-admin-enrollment-secret"
-              readOnly
-              value={grant.enrollmentCode}
-              className="font-mono text-xs"
-            />
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                size="sm"
-                data-testid="host-admin-copy-grant"
-                onClick={() => void copyText("grant", grant.enrollmentCode)}
-              >
-                {copied === "grant" ? t("hostAdminCopied") : t("hostAdminCopy")}
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                data-testid="host-admin-close-grant"
-                onClick={dismissGrant}
-              >
-                {t("hostAdminCloseGrant")}
-              </Button>
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="host-admin-bootstrap-config">{t("hostAdminBootstrapConfig")}</Label>
-              <textarea
-                id="host-admin-bootstrap-config"
-                data-testid="host-admin-bootstrap-config"
-                readOnly
-                value={bootstrapConfig}
-                rows={6}
-                className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs"
-              />
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="w-fit"
-                data-testid="host-admin-copy-config"
-                onClick={() => void copyText("config", bootstrapConfig)}
-              >
-                {copied === "config" ? t("hostAdminCopied") : t("hostAdminCopyConfig")}
-              </Button>
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="host-admin-bootstrap-command">{t("hostAdminBootstrapCommand")}</Label>
-              <textarea
-                id="host-admin-bootstrap-command"
-                data-testid="host-admin-bootstrap-command"
-                readOnly
-                value={bootstrapCommand}
-                rows={2}
-                className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs"
-              />
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="w-fit"
-                data-testid="host-admin-copy-command"
-                onClick={() => void copyText("command", bootstrapCommand)}
-              >
-                {copied === "command" ? t("hostAdminCopied") : t("hostAdminCopyCommand")}
-              </Button>
-            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="w-fit"
+              data-testid="host-admin-close-grant"
+              onClick={dismissHandoff}
+            >
+              {t("hostAdminCloseGrant")}
+            </Button>
             <p className="text-xs text-text-muted">{t("hostAdminBootstrapHeartbeatNote")}</p>
           </div>
         ) : null}

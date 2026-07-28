@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type {
-  OperatorEnrollmentGrantResponse,
-  OperatorHostPage,
-  OperatorHostView
-} from "@planweave-ai/distributed-protocol";
+import type { OperatorHostPage, OperatorHostView } from "@planweave-ai/distributed-protocol";
 import {
   OperatorControlError,
+  type OperatorHostBootstrapConfig,
+  type OperatorHostBootstrapHandoffView,
   type OperatorControlProfile,
   type OperatorControlStatus,
   type OperatorProfileView
@@ -22,7 +20,7 @@ export type HostAdministrationController = {
   hostsLoading: boolean;
   busy: boolean;
   error: string | null;
-  grant: OperatorEnrollmentGrantResponse | null;
+  handoff: OperatorHostBootstrapHandoffView | null;
   refresh: () => Promise<void>;
   refreshHosts: () => Promise<void>;
   saveProfile: (profile: OperatorControlProfile) => Promise<boolean>;
@@ -31,9 +29,11 @@ export type HostAdministrationController = {
   clearActiveProfile: () => Promise<boolean>;
   importCredential: (profileId: string, operatorId?: string) => Promise<boolean>;
   clearCredential: (profileId: string) => Promise<boolean>;
-  createGrant: () => Promise<OperatorEnrollmentGrantResponse | null>;
+  copyBootstrapHandoff: (
+    bootstrap: OperatorHostBootstrapConfig
+  ) => Promise<OperatorHostBootstrapHandoffView | null>;
   revokeHost: (hostId: string) => Promise<OperatorHostView | null>;
-  dismissGrant: () => void;
+  dismissHandoff: () => void;
   clearError: () => void;
 };
 
@@ -70,7 +70,7 @@ export function useHostAdministrationController(): HostAdministrationController 
   const [hostsLoading, setHostsLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [grant, setGrant] = useState<OperatorEnrollmentGrantResponse | null>(null);
+  const [handoff, setHandoff] = useState<OperatorHostBootstrapHandoffView | null>(null);
 
   const refresh = useCallback(async () => {
     if (!operatorControlBridge) {
@@ -186,30 +186,34 @@ export function useHostAdministrationController(): HostAdministrationController 
     [runStatusAction]
   );
 
-  const createGrant = useCallback(async () => {
-    if (!operatorControlBridge || !activeProfile || !activeProfile.hasOperatorCredential) {
-      setError("operator_credential_missing");
-      return null;
-    }
-    setBusy(true);
-    try {
-      const result = await operatorControlBridge.createOperatorEnrollmentGrant({
-        profileId: activeProfile.profileId,
-        request: {
-          expiresAt: nextExpiry(15),
-          credentialExpiresAt: nextExpiry(24 * 60)
-        }
-      });
-      setGrant(result);
-      setError(null);
-      return result;
-    } catch (cause) {
-      setError(errorMessage(cause));
-      return null;
-    } finally {
-      setBusy(false);
-    }
-  }, [activeProfile]);
+  const copyBootstrapHandoff = useCallback(
+    async (bootstrap: OperatorHostBootstrapConfig) => {
+      if (!operatorControlBridge || !activeProfile || !activeProfile.hasOperatorCredential) {
+        setError("operator_credential_missing");
+        return null;
+      }
+      setBusy(true);
+      try {
+        const result = await operatorControlBridge.copyOperatorHostBootstrapHandoff({
+          profileId: activeProfile.profileId,
+          request: {
+            expiresAt: nextExpiry(15),
+            credentialExpiresAt: nextExpiry(24 * 60)
+          },
+          bootstrap
+        });
+        setHandoff(result);
+        setError(null);
+        return result;
+      } catch (cause) {
+        setError(errorMessage(cause));
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [activeProfile]
+  );
 
   const revokeHost = useCallback(
     async (hostId: string) => {
@@ -244,7 +248,7 @@ export function useHostAdministrationController(): HostAdministrationController 
     hostsLoading,
     busy,
     error,
-    grant,
+    handoff,
     refresh,
     refreshHosts,
     saveProfile,
@@ -253,9 +257,9 @@ export function useHostAdministrationController(): HostAdministrationController 
     clearActiveProfile,
     importCredential,
     clearCredential,
-    createGrant,
+    copyBootstrapHandoff,
     revokeHost,
-    dismissGrant: () => setGrant(null),
+    dismissHandoff: () => setHandoff(null),
     clearError: () => setError(null)
   };
 }

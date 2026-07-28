@@ -7,7 +7,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   RealProcessAcpHarness,
@@ -15,8 +15,6 @@ import {
 } from "../../../server/src/__tests__/support/realProcessAcpHarness.js";
 import { OperatorControlService } from "../main/operatorControl/operatorControlService.js";
 import type { OperatorSafeStoragePort } from "../main/operatorControl/operatorCredentialVault.js";
-import { createTranslator } from "../renderer/i18n.js";
-import { HostBootstrapCard } from "../renderer/settings/HostBootstrapCard.js";
 
 const agentHostBinPath = join(process.cwd(), "packages/agent-host/dist/bin.js");
 const roots: string[] = [];
@@ -216,45 +214,39 @@ describe("packaged Host administration control plane", () => {
     expect(roleRejected.status).toBe(403);
     await expect(roleRejected.json()).resolves.toEqual({ error: "operator_admin_required" });
 
-    const grant = await service.createEnrollmentGrant({
-      profileId,
-      request: {
-        expiresAt: new Date(Date.now() + 60_000).toISOString(),
-        credentialExpiresAt: new Date(Date.now() + 3_600_000).toISOString()
-      }
-    });
-    expect(grant.enrollmentCode).toMatch(/^pw_enroll_/);
-
-    const profileView = (await service.getStatus()).profiles[0];
-    if (!profileView) throw new Error("operator_profile_view_missing");
-    render(
-      <HostBootstrapCard
-        activeProfile={profileView}
-        busy={false}
-        createGrant={async () => grant}
-        dismissGrant={() => undefined}
-        grant={grant}
-        t={createTranslator("en")}
-      />
+    const copiedHandoffs: string[] = [];
+    const handoff = await service.copyHostBootstrapHandoff(
+      {
+        profileId,
+        request: {
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          credentialExpiresAt: new Date(Date.now() + 3_600_000).toISOString()
+        },
+        bootstrap: {
+          configPath: "/etc/planweave/agent-host.json",
+          dataDirectory: join(harness.paths.root, "ui-host-data"),
+          workspaceRoot: harness.paths.workspaceRoot,
+          host: { displayName: "UI Generated Host", capacity: 1, capabilities: ["acp.test"] }
+        }
+      },
+      (content) => copiedHandoffs.push(content)
     );
-    const uiConfigElement = await screen.findByTestId("host-admin-bootstrap-config");
-    const uiConfig = JSON.parse((uiConfigElement as HTMLTextAreaElement).value) as Record<
+    expect(handoff).toMatchObject({ state: "ready", workspaceId: expect.any(String) });
+    expect(JSON.stringify(handoff)).not.toContain("pw_enroll_");
+    expect(copiedHandoffs).toHaveLength(1);
+    const copiedHandoff = copiedHandoffs[0]!;
+    const encodedConfig = copiedHandoff.match(/printf %s '([A-Za-z0-9+/=]+)' \| base64/)?.[1];
+    const enrollmentCode = copiedHandoff.match(/--code '(pw_enroll_[A-Za-z0-9_-]{43})'/)?.[1];
+    if (!encodedConfig || !enrollmentCode) throw new Error("main_owned_handoff_missing_content");
+    const uiConfig = JSON.parse(Buffer.from(encodedConfig, "base64").toString("utf8")) as Record<
       string,
       unknown
     >;
     expect(uiConfig).not.toHaveProperty("enrollmentCode");
     expect(agentHostConfigSchema.parse(uiConfig)).toEqual(uiConfig);
 
-    const uiHost = uiConfig.host as Record<string, unknown>;
     const generatedConfig = {
       ...uiConfig,
-      dataDirectory: join(harness.paths.root, "ui-host-data"),
-      workspaceRoot: harness.paths.workspaceRoot,
-      host: {
-        ...uiHost,
-        displayName: "UI Generated Host",
-        capabilities: ["acp.test"]
-      },
       workspaces: [],
       agentProfiles: []
     };
@@ -274,7 +266,7 @@ describe("packaged Host administration control plane", () => {
       "--config",
       hostConfigPath,
       "--code",
-      grant.enrollmentCode
+      enrollmentCode
     ]);
     expect(enrollment.code).toBe(0);
     expect(JSON.parse(enrollment.stdout)).toMatchObject({ credential: "active" });
@@ -289,11 +281,11 @@ describe("packaged Host administration control plane", () => {
       "--config",
       reusedConfigPath,
       "--code",
-      grant.enrollmentCode
+      enrollmentCode
     ]);
     expect(reused.code).not.toBe(0);
     expect(reused.stderr).toContain("agent_host_enrollment_rejected");
-    expect(reused.stderr).not.toContain(grant.enrollmentCode);
+    expect(reused.stderr).not.toContain(enrollmentCode);
 
     const expiringGrant = await service.createEnrollmentGrant({
       profileId,
@@ -307,7 +299,11 @@ describe("packaged Host administration control plane", () => {
       ...generatedConfig,
       dataDirectory: join(harness.paths.root, "expired-host-data")
     };
-    const expiredConfigPath = await writeHostConfig(harness, expiredConfig, "expired-agent-host.json");
+    const expiredConfigPath = await writeHostConfig(
+      harness,
+      expiredConfig,
+      "expired-agent-host.json"
+    );
     const expired = await harness.runHostCommand([
       "enroll",
       "--config",
@@ -356,9 +352,7 @@ describe("packaged Host administration control plane", () => {
     expect(staleExit.code).not.toBe(0);
     expect(staleReconnect.logs.stderr).toContain("agent_host_auth_failed");
     expect(
-      JSON.parse(
-        (await harness.runHostCommand(["status", "--config", hostConfigPath])).stdout
-      )
+      JSON.parse((await harness.runHostCommand(["status", "--config", hostConfigPath])).stdout)
     ).toMatchObject({ credential: "active" });
   }, 60_000);
 });

@@ -3,6 +3,8 @@ import {
   assertNoSmuggledOperatorSecrets,
   operatorControlProfileSchema,
   operatorCreateEnrollmentGrantInputSchema,
+  operatorCopyHostBootstrapHandoffInputSchema,
+  operatorHostBootstrapHandoffViewSchema,
   operatorImportCredentialInputSchema,
   operatorListHostsInputSchema,
   operatorProfileIdInputSchema,
@@ -13,6 +15,7 @@ import {
   type OperatorCredentialPersistence,
   type OperatorProfileView
 } from "../../shared/operatorControl.js";
+import { buildHostBootstrapHandoff } from "./hostBootstrapHandoff.js";
 import {
   OperatorControlClient,
   type OperatorControlClientOptions
@@ -273,6 +276,26 @@ export class OperatorControlService {
     const parsed = operatorCreateEnrollmentGrantInputSchema.parse(input);
     return this.enqueue(() =>
       this.withProfile(parsed, (client, value) => client.createEnrollmentGrant(value.request))
+    );
+  }
+
+  async copyHostBootstrapHandoff(
+    input: unknown,
+    copyText: (content: string) => void
+  ): Promise<ReturnType<typeof operatorHostBootstrapHandoffViewSchema.parse>> {
+    assertNoSmuggledOperatorSecrets(input, "copyHostBootstrapHandoff");
+    const parsed = operatorCopyHostBootstrapHandoffInputSchema.parse(input);
+    return this.enqueue(() =>
+      this.withProfile(parsed, async (client, value) => {
+        const grant = await client.createEnrollmentGrant(value.request);
+        copyText(buildHostBootstrapHandoff(client.connectionProfile, value, grant));
+        return operatorHostBootstrapHandoffViewSchema.parse({
+          state: "ready",
+          workspaceId: grant.workspaceId,
+          expiresAt: grant.expiresAt,
+          copiedAt: new Date().toISOString()
+        });
+      })
     );
   }
 

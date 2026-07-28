@@ -3,7 +3,6 @@ import {
   operatorHostPageSchema,
   operatorHostViewSchema,
   operatorPageQuerySchema,
-  type OperatorEnrollmentGrantResponse,
   type OperatorHostPage,
   type OperatorHostView
 } from "@planweave-ai/distributed-protocol/operator-control";
@@ -98,6 +97,56 @@ export type OperatorCreateEnrollmentGrantInput = z.input<
   typeof operatorCreateEnrollmentGrantInputSchema
 >;
 
+const hostBootstrapAbsolutePathSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(4096)
+  .refine((value) => /^(?:\/|[A-Za-z]:[\\/])/.test(value), "path must be absolute");
+
+export const operatorHostBootstrapConfigSchema = z
+  .object({
+    configPath: hostBootstrapAbsolutePathSchema,
+    dataDirectory: hostBootstrapAbsolutePathSchema,
+    workspaceRoot: hostBootstrapAbsolutePathSchema,
+    host: z
+      .object({
+        displayName: z.string().trim().min(1).max(128),
+        capacity: z.number().int().min(1).max(128),
+        capabilities: z
+          .array(z.string().regex(/^[a-z0-9][a-z0-9._:-]*$/))
+          .min(1)
+          .max(128)
+      })
+      .strict()
+  })
+  .strict();
+export type OperatorHostBootstrapConfig = z.infer<typeof operatorHostBootstrapConfigSchema>;
+
+export const operatorCopyHostBootstrapHandoffInputSchema = z
+  .object({
+    profileId: operatorProfileIdSchema,
+    request: operatorEnrollmentGrantRequestSchema,
+    bootstrap: operatorHostBootstrapConfigSchema
+  })
+  .strict();
+export type OperatorCopyHostBootstrapHandoffInput = z.input<
+  typeof operatorCopyHostBootstrapHandoffInputSchema
+>;
+
+/** Renderer-safe result of a main-owned Host bootstrap clipboard handoff. */
+export const operatorHostBootstrapHandoffViewSchema = z
+  .object({
+    state: z.literal("ready"),
+    workspaceId: operatorProfileIdSchema,
+    expiresAt: z.iso.datetime(),
+    copiedAt: z.iso.datetime()
+  })
+  .strict();
+export type OperatorHostBootstrapHandoffView = z.infer<
+  typeof operatorHostBootstrapHandoffViewSchema
+>;
+
 export const operatorRevokeHostInputSchema = z
   .object({
     profileId: operatorProfileIdSchema,
@@ -166,6 +215,8 @@ export class OperatorControlError extends Error {
 
 const forbiddenSecretKeys = [
   "operatorToken",
+  "enrollmentCode",
+  "hostEnrollmentCode",
   "encryptedOperatorToken",
   "authorization",
   "Authorization",
@@ -231,7 +282,7 @@ export const operatorControlInvokeChannels = {
   importCredential: "planweave-operator:importCredential",
   clearCredential: "planweave-operator:clearCredential",
   listHosts: "planweave-operator:listHosts",
-  createEnrollmentGrant: "planweave-operator:createEnrollmentGrant",
+  copyHostBootstrapHandoff: "planweave-operator:copyHostBootstrapHandoff",
   revokeHost: "planweave-operator:revokeHost"
 } as const;
 
@@ -248,9 +299,9 @@ export type PlanWeaveOperatorControlApi = {
   ) => Promise<OperatorControlStatus>;
   clearOperatorCredential: (input: OperatorProfileIdInput) => Promise<OperatorControlStatus>;
   listOperatorHosts: (input: OperatorListHostsInput) => Promise<OperatorHostPage>;
-  createOperatorEnrollmentGrant: (
-    input: OperatorCreateEnrollmentGrantInput
-  ) => Promise<OperatorEnrollmentGrantResponse>;
+  copyOperatorHostBootstrapHandoff: (
+    input: OperatorCopyHostBootstrapHandoffInput
+  ) => Promise<OperatorHostBootstrapHandoffView>;
   revokeOperatorHost: (input: OperatorRevokeHostInput) => Promise<OperatorHostView>;
   onOperatorControlStatusChanged: (callback: (status: OperatorControlStatus) => void) => () => void;
 };

@@ -4,10 +4,8 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { agentHostConfigSchema } from "../../../agent-host/src/config/schema";
 import { createTranslator } from "../renderer/i18n";
 import { HostAdministrationSection } from "../renderer/settings/HostAdministrationSection";
-import { buildAgentHostBootstrapCommand } from "../renderer/settings/hostBootstrapCommand";
 
 const bridgeMock = vi.hoisted(() => ({
   getOperatorControlStatus: vi.fn(),
@@ -19,7 +17,7 @@ const bridgeMock = vi.hoisted(() => ({
   importOperatorCredential: vi.fn(),
   clearOperatorCredential: vi.fn(),
   listOperatorHosts: vi.fn(),
-  createOperatorEnrollmentGrant: vi.fn(),
+  copyOperatorHostBootstrapHandoff: vi.fn(),
   revokeOperatorHost: vi.fn()
 }));
 
@@ -76,14 +74,14 @@ const host = {
   credentialExpiresAt: "2030-01-02T00:00:00.000Z"
 };
 
-const enrollmentCode = `pw_enroll_${"A".repeat(43)}`;
-
 beforeEach(() => {
   bridgeMock.getOperatorControlStatus.mockResolvedValue(status());
   bridgeMock.listOperatorHosts.mockResolvedValue({ items: [host], nextCursor: null });
-  bridgeMock.createOperatorEnrollmentGrant.mockResolvedValue({
-    enrollmentCode,
-    expiresAt: "2030-01-01T00:15:00.000Z"
+  bridgeMock.copyOperatorHostBootstrapHandoff.mockResolvedValue({
+    state: "ready",
+    workspaceId: "workspace-a",
+    expiresAt: "2030-01-01T00:15:00.000Z",
+    copiedAt: "2030-01-01T00:00:00.000Z"
   });
   bridgeMock.revokeOperatorHost.mockResolvedValue({
     ...host,
@@ -103,10 +101,6 @@ beforeEach(() => {
     "confirm",
     vi.fn(() => true)
   );
-  Object.defineProperty(navigator, "clipboard", {
-    configurable: true,
-    value: { writeText: vi.fn().mockResolvedValue(undefined) }
-  });
 });
 
 afterEach(() => {
@@ -128,29 +122,35 @@ describe("Host administration surface", () => {
     expect(screen.queryByText(/operator_a_token|Bearer/i)).not.toBeInTheDocument();
   });
 
-  it("shows an enrollment secret once with bounded bootstrap handoff and discards it on close", async () => {
+  it("keeps enrollment secrets out of renderer state while showing redacted main-owned handoff status", async () => {
     const user = userEvent.setup();
     render(<HostAdministrationSection t={createTranslator("en")} />);
     await screen.findByTestId("host-administration");
 
     await user.click(screen.getByTestId("host-admin-create-grant"));
     expect(await screen.findByTestId("host-admin-grant-once")).toBeInTheDocument();
-    expect(screen.getByTestId("host-admin-enrollment-secret")).toHaveValue(enrollmentCode);
-    const configText = (screen.getByTestId("host-admin-bootstrap-config") as HTMLTextAreaElement)
-      .value;
-    const config = JSON.parse(configText) as Record<string, unknown>;
-    expect(agentHostConfigSchema.parse(config)).toEqual(config);
-    expect(config).not.toHaveProperty("enrollmentCode");
-    expect(screen.getByTestId("host-admin-bootstrap-command")).toHaveValue(
-      buildAgentHostBootstrapCommand({
+    expect(bridgeMock.copyOperatorHostBootstrapHandoff).toHaveBeenCalledWith({
+      profileId: "profile-a",
+      request: {
+        expiresAt: expect.any(String),
+        credentialExpiresAt: expect.any(String)
+      },
+      bootstrap: {
         configPath: "/etc/planweave/agent-host.json",
-        enrollmentCode
-      })
+        dataDirectory: "/var/lib/planweave-agent-host",
+        workspaceRoot: "/var/lib/planweave-agent-host/workspaces",
+        host: { displayName: "Production admin", capacity: 1, capabilities: ["linux.x64"] }
+      }
+    });
+    expect(screen.queryByTestId("host-admin-enrollment-secret")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("host-admin-bootstrap-config")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("host-admin-bootstrap-command")).not.toBeInTheDocument();
+    expect(JSON.stringify(bridgeMock.copyOperatorHostBootstrapHandoff.mock.calls)).not.toContain(
+      "pw_enroll_"
     );
 
     await user.click(screen.getByTestId("host-admin-close-grant"));
-    expect(screen.queryByTestId("host-admin-enrollment-secret")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("host-admin-bootstrap-command")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("host-admin-grant-once")).not.toBeInTheDocument();
   });
 
   it("requires confirmation before revoking and reflects revoked state", async () => {

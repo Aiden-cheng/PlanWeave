@@ -15,6 +15,7 @@ import {
   collaborationStatusChangedChannel
 } from "../shared/collaboration";
 import { mcpTunnelChangedChannel, mcpTunnelInvokeChannels } from "../shared/mcpTunnel";
+import { operatorControlInvokeChannels } from "../shared/operatorControl";
 import { windowAppearanceInvokeChannels } from "../shared/windowAppearance";
 
 describe("desktop IPC contract", () => {
@@ -103,6 +104,18 @@ describe("desktop IPC contract", () => {
     expect(mcpTunnelChangedChannel).toBe("planweave-mcp-tunnel:changed");
     expect(Object.values(desktopBridgeInvokeChannels)).not.toContain(mcpTunnelChangedChannel);
     for (const channel of Object.values(mcpTunnelInvokeChannels)) {
+      expect(Object.values(desktopBridgeInvokeChannels)).not.toContain(channel);
+    }
+  });
+
+  it("keeps Host bootstrap clipboard handoff outside the runtime bridge registry", () => {
+    expect(operatorControlInvokeChannels.copyHostBootstrapHandoff).toBe(
+      "planweave-operator:copyHostBootstrapHandoff"
+    );
+    expect(Object.values(operatorControlInvokeChannels)).not.toContain(
+      "planweave-operator:createEnrollmentGrant"
+    );
+    for (const channel of Object.values(operatorControlInvokeChannels)) {
       expect(Object.values(desktopBridgeInvokeChannels)).not.toContain(channel);
     }
   });
