@@ -26,7 +26,15 @@ const view: CurrentCanvasAccessView = {
   canvasVisibility: "shared",
   projectAclRevision: 3,
   canvasAclRevision: 5,
-  current: {
+  project: {
+    scope: { ...scope, scopeKind: "project", canvasId: null },
+    aclRevision: 3,
+    effectiveRole: "owner",
+    roleSource: "scope_owner",
+    capabilities: accessCapabilityFlags("owner"),
+    disabledReason: null
+  },
+  canvas: {
     scope,
     aclRevision: 5,
     effectiveRole: "owner",

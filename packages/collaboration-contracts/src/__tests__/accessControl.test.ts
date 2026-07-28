@@ -239,14 +239,25 @@ describe("scoped access capability contracts", () => {
       })
     ).toThrow();
 
-    const current = evaluateEffectiveAccess(evaluation({ canvasOwner: actorId }));
+    const projectAccess = evaluateEffectiveAccess({
+      scope: { scopeKind: "project", workspaceId, projectId, canvasId: null },
+      humanPrincipalId: actorId,
+      membership: "active",
+      session: "active",
+      project: project("private", actorId),
+      canvas: null,
+      projectGrant: null,
+      canvasGrant: null
+    });
+    const canvasAccess = evaluateEffectiveAccess(evaluation({ canvasOwner: actorId }));
     const currentCanvasView = {
       scope: { scopeKind: "canvas" as const, workspaceId, projectId, canvasId },
       projectVisibility: "private" as const,
       canvasVisibility: "private" as const,
       projectAclRevision: 3,
       canvasAclRevision: 5,
-      current,
+      project: projectAccess,
+      canvas: canvasAccess,
       people: [
         {
           humanPrincipalId: actorId,
@@ -264,6 +275,13 @@ describe("scoped access capability contracts", () => {
       canvasAclRevision: 5
     });
     expect(currentCanvasAccessViewSchema.safeParse({ ...currentCanvasView, aclRevision: 5 }).success).toBe(false);
+    expect(currentCanvasAccessViewSchema.safeParse({ ...currentCanvasView, current: canvasAccess }).success).toBe(false);
+    expect(
+      currentCanvasAccessViewSchema.safeParse({
+        ...currentCanvasView,
+        canvas: { ...canvasAccess, aclRevision: 4 }
+      }).success
+    ).toBe(false);
 
     const loopback = {
       profileId: "loopback-001",

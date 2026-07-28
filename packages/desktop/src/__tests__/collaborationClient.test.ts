@@ -131,7 +131,15 @@ describe("CollaborationClient", () => {
       canvasVisibility: "private" as const,
       projectAclRevision: 7,
       canvasAclRevision: 7,
-      current: {
+      project: {
+        scope: { ...scope, scopeKind: "project" as const, canvasId: null },
+        aclRevision: 7,
+        effectiveRole: "owner" as const,
+        roleSource: "scope_owner" as const,
+        capabilities: accessCapabilityFlags("owner"),
+        disabledReason: null
+      },
+      canvas: {
         scope,
         aclRevision: 7,
         effectiveRole: "owner" as const,

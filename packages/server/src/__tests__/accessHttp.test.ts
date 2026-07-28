@@ -49,7 +49,13 @@ async function fixture() {
       access,
       repository: identity,
       workspaceIdentity,
-      projectAuthority: { hasProject: (projectId) => projectId === "project-a" },
+      projectAuthority: {
+        hasScope: (scope) =>
+          scope.workspaceId === workspaceId &&
+          scope.projectId === "project-a" &&
+          scope.canvasId === "default",
+        hasProject: (projectId) => projectId === "project-a"
+      },
       allowInsecureDevelopment: true
     });
   });
@@ -79,7 +85,8 @@ describe("access HTTP", () => {
     });
     expect(current.status).toBe(200);
     const view = await current.json();
-    expect(view.current.effectiveRole).toBe("owner");
+    expect(view.project.effectiveRole).toBe("owner");
+    expect(view.canvas.effectiveRole).toBe("owner");
     expect(view).toMatchObject({ projectAclRevision: 0, canvasAclRevision: 0 });
     expect(JSON.stringify(view)).not.toMatch(/projectRoot|packageDir|\/srv/);
 

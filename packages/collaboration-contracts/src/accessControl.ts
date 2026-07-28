@@ -391,16 +391,27 @@ export const currentCanvasAccessViewSchema = z
     canvasVisibility: z.enum(["private", "shared"]),
     projectAclRevision: aclRevisionSchema,
     canvasAclRevision: aclRevisionSchema,
-    current: effectiveAccessViewSchema,
+    project: effectiveAccessViewSchema,
+    canvas: effectiveAccessViewSchema,
     people: z.array(canvasPersonAccessViewSchema).max(1_000)
   })
   .strict()
   .superRefine((value, ctx) => {
     if (
-      value.current.scope.scopeKind !== "canvas" ||
-      value.current.scope.workspaceId !== value.scope.workspaceId ||
-      value.current.scope.projectId !== value.scope.projectId ||
-      value.current.scope.canvasId !== value.scope.canvasId
+      value.project.scope.scopeKind !== "project" ||
+      value.project.scope.workspaceId !== value.scope.workspaceId ||
+      value.project.scope.projectId !== value.scope.projectId ||
+      value.project.scope.canvasId !== null ||
+      value.project.aclRevision !== value.projectAclRevision
+    ) {
+      ctx.addIssue({ code: "custom", message: "current_project_access_scope_mismatch" });
+    }
+    if (
+      value.canvas.scope.scopeKind !== "canvas" ||
+      value.canvas.scope.workspaceId !== value.scope.workspaceId ||
+      value.canvas.scope.projectId !== value.scope.projectId ||
+      value.canvas.scope.canvasId !== value.scope.canvasId ||
+      value.canvas.aclRevision !== value.canvasAclRevision
     ) {
       ctx.addIssue({ code: "custom", message: "current_canvas_access_scope_mismatch" });
     }

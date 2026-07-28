@@ -17,19 +17,30 @@ const scope = {
   canvasId: "canvas-access-001"
 };
 
-function accessView(role: "owner" | "editor" | "viewer"): CurrentCanvasAccessView {
+function accessView(
+  projectRole: "owner" | "editor" | "viewer",
+  canvasRole: "owner" | "editor" | "viewer" = projectRole
+): CurrentCanvasAccessView {
   return {
     scope,
     projectVisibility: "private",
     canvasVisibility: "shared",
     projectAclRevision: 3,
     canvasAclRevision: 5,
-    current: {
+    project: {
+      scope: { ...scope, scopeKind: "project", canvasId: null },
+      aclRevision: 3,
+      effectiveRole: projectRole,
+      roleSource: projectRole === "owner" ? "scope_owner" : "shared_workspace_membership",
+      capabilities: accessCapabilityFlags(projectRole),
+      disabledReason: null
+    },
+    canvas: {
       scope,
       aclRevision: 5,
-      effectiveRole: role,
-      roleSource: role === "owner" ? "scope_owner" : "shared_workspace_membership",
-      capabilities: accessCapabilityFlags(role),
+      effectiveRole: canvasRole,
+      roleSource: canvasRole === "owner" ? "scope_owner" : "shared_workspace_membership",
+      capabilities: accessCapabilityFlags(canvasRole),
       disabledReason: null
     },
     people: [
@@ -40,7 +51,13 @@ function accessView(role: "owner" | "editor" | "viewer"): CurrentCanvasAccessVie
         effectiveRole: "viewer",
         capabilities: accessCapabilityFlags("viewer"),
         disabledReason: null,
-        grants: role === "owner" ? [{ grantId: "grant-canvas-viewer-001", scopeKind: "canvas", role: "viewer" }] : []
+        grants:
+          projectRole === "owner" || canvasRole === "owner"
+            ? [
+                { grantId: "grant-project-viewer-001", scopeKind: "project", role: "viewer" },
+                { grantId: "grant-canvas-viewer-001", scopeKind: "canvas", role: "viewer" }
+              ]
+            : []
       }
     ]
   };
@@ -66,12 +83,12 @@ describe("CurrentCanvasAccessPanel", () => {
       />
     );
 
-    expect(screen.getByTestId("canvas-access-role")).toHaveTextContent("Effective role: Owner");
+    expect(screen.getByTestId("canvas-access-role")).toHaveTextContent("Effective role: project Owner · canvas Owner");
     expect(screen.getAllByTestId("canvas-access-capability")).toHaveLength(4);
     await userEvent.click(screen.getByTestId("canvas-access-project-shared"));
     expect(onUpdateVisibility).toHaveBeenCalledWith("project", "shared");
-    expect(screen.getByTestId("canvas-access-revoke")).toBeEnabled();
-    await userEvent.click(screen.getByTestId("canvas-access-revoke"));
+    expect(screen.getAllByTestId("canvas-access-revoke")).toHaveLength(2);
+    await userEvent.click(screen.getAllByTestId("canvas-access-revoke")[1]!);
     expect(onRevoke).toHaveBeenCalledWith({
       grantId: "grant-canvas-viewer-001",
       scopeKind: "canvas",
@@ -123,5 +140,51 @@ describe("CurrentCanvasAccessPanel", () => {
       "title",
       "This action requires an owner capability."
     );
+  });
+
+  it("binds project controls to project access when canvas ownership is independent", async () => {
+    const onGrant = vi.fn().mockResolvedValue(null);
+    render(
+      <CurrentCanvasAccessPanel
+        view={accessView("owner", "viewer")}
+        loading={false}
+        error={null}
+        busy={false}
+        t={t}
+        onRefresh={vi.fn()}
+        onUpdateVisibility={vi.fn()}
+        onGrant={onGrant}
+        onRevoke={vi.fn()}
+      />
+    );
+
+    expect(screen.getByTestId("canvas-access-project-shared")).toBeEnabled();
+    expect(screen.getByTestId("canvas-access-canvas-private")).toBeDisabled();
+    await userEvent.click(screen.getByTestId("canvas-access-grant-project-viewer"));
+    expect(onGrant).toHaveBeenCalledWith("human-member-001", "viewer", "project");
+    expect(screen.getByTestId("canvas-access-grant-canvas-viewer")).toBeDisabled();
+  });
+
+  it("binds canvas controls to canvas access when project ownership is independent", async () => {
+    const onGrant = vi.fn().mockResolvedValue(null);
+    render(
+      <CurrentCanvasAccessPanel
+        view={accessView("viewer", "owner")}
+        loading={false}
+        error={null}
+        busy={false}
+        t={t}
+        onRefresh={vi.fn()}
+        onUpdateVisibility={vi.fn()}
+        onGrant={onGrant}
+        onRevoke={vi.fn()}
+      />
+    );
+
+    expect(screen.getByTestId("canvas-access-project-shared")).toBeDisabled();
+    expect(screen.getByTestId("canvas-access-canvas-private")).toBeEnabled();
+    await userEvent.click(screen.getByTestId("canvas-access-grant-canvas-editor"));
+    expect(onGrant).toHaveBeenCalledWith("human-member-001", "editor", "canvas");
+    expect(screen.getByTestId("canvas-access-grant-project-editor")).toBeDisabled();
   });
 });

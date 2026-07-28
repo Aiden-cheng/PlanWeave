@@ -23,7 +23,7 @@ export type CurrentCanvasAccessPanelProps = {
 };
 
 function reasonLabel(
-  reason: CurrentCanvasAccessView["current"]["disabledReason"] | "capability_denied",
+  reason: CurrentCanvasAccessView["canvas"]["disabledReason"] | "capability_denied",
   t: ReturnType<typeof createTranslator>
 ): string {
   const labels = {
@@ -62,7 +62,7 @@ function errorLabel(error: string, t: ReturnType<typeof createTranslator>): stri
   return reason ? reasonLabel(reason, t) : error;
 }
 
-function roleLabel(role: CurrentCanvasAccessView["current"]["effectiveRole"], t: ReturnType<typeof createTranslator>) {
+function roleLabel(role: CurrentCanvasAccessView["canvas"]["effectiveRole"], t: ReturnType<typeof createTranslator>) {
   if (role === "owner") return t("accessRoleOwner");
   if (role === "editor") return t("accessRoleEditor");
   if (role === "viewer") return t("accessRoleViewer");
@@ -77,7 +77,7 @@ function CapabilityState({
 }: {
   label: string;
   enabled: boolean;
-  reason: CurrentCanvasAccessView["current"]["disabledReason"] | "capability_denied";
+  reason: CurrentCanvasAccessView["canvas"]["disabledReason"] | "capability_denied";
   t: ReturnType<typeof createTranslator>;
 }) {
   return (
@@ -102,7 +102,7 @@ function VisibilityControl({
   scopeKind: CurrentCanvasVisibilityScope;
   visibility: "private" | "shared";
   allowed: boolean;
-  reason: CurrentCanvasAccessView["current"]["disabledReason"] | "capability_denied";
+  reason: CurrentCanvasAccessView["canvas"]["disabledReason"] | "capability_denied";
   busy: boolean;
   t: ReturnType<typeof createTranslator>;
   onUpdate: CurrentCanvasAccessPanelProps["onUpdateVisibility"];
@@ -155,15 +155,16 @@ export function CurrentCanvasAccessPanel({
     );
   }
 
-  const { current } = view;
-  const disabledReason = current.disabledReason ?? "capability_denied";
+  const { project, canvas } = view;
+  const projectDisabledReason = project.disabledReason ?? "capability_denied";
+  const canvasDisabledReason = canvas.disabledReason ?? "capability_denied";
   return (
     <section className="flex flex-col gap-2" data-testid="canvas-access-panel" aria-label={t("accessTitle")}>
       <div className="flex items-center justify-between gap-2">
         <div>
           <div className="text-xs font-semibold text-text-strong">{t("accessTitle")}</div>
           <div className="text-[11px] text-muted-foreground" data-testid="canvas-access-role">
-            {t("accessEffectiveRole")}: {roleLabel(current.effectiveRole, t)}
+            {t("accessEffectiveRole")}: {t("accessProjectScope")} {roleLabel(project.effectiveRole, t)} · {t("accessCanvasScope")} {roleLabel(canvas.effectiveRole, t)}
           </div>
         </div>
         <Button
@@ -185,8 +186,8 @@ export function CurrentCanvasAccessPanel({
         <VisibilityControl
           scopeKind="project"
           visibility={view.projectVisibility}
-          allowed={current.capabilities.visibility}
-          reason={disabledReason}
+          allowed={project.capabilities.visibility}
+          reason={projectDisabledReason}
           busy={busy}
           t={t}
           onUpdate={onUpdateVisibility}
@@ -194,8 +195,8 @@ export function CurrentCanvasAccessPanel({
         <VisibilityControl
           scopeKind="canvas"
           visibility={view.canvasVisibility}
-          allowed={current.capabilities.visibility}
-          reason={disabledReason}
+          allowed={canvas.capabilities.visibility}
+          reason={canvasDisabledReason}
           busy={busy}
           t={t}
           onUpdate={onUpdateVisibility}
@@ -203,10 +204,10 @@ export function CurrentCanvasAccessPanel({
       </div>
 
       <ul className="grid grid-cols-1 gap-0.5" aria-label={t("accessCapabilities")}>
-        <CapabilityState label={t("accessCapabilityWrite")} enabled={current.capabilities.persistent_canvas_command} reason={disabledReason} t={t} />
-        <CapabilityState label={t("accessCapabilityAssignment")} enabled={current.capabilities.assignment} reason={disabledReason} t={t} />
-        <CapabilityState label={t("accessCapabilityComment")} enabled={current.capabilities.comment} reason={disabledReason} t={t} />
-        <CapabilityState label={t("accessCapabilityAdministration")} enabled={current.capabilities.administration} reason={disabledReason} t={t} />
+        <CapabilityState label={t("accessCapabilityWrite")} enabled={canvas.capabilities.persistent_canvas_command} reason={canvasDisabledReason} t={t} />
+        <CapabilityState label={t("accessCapabilityAssignment")} enabled={canvas.capabilities.assignment} reason={canvasDisabledReason} t={t} />
+        <CapabilityState label={t("accessCapabilityComment")} enabled={canvas.capabilities.comment} reason={canvasDisabledReason} t={t} />
+        <CapabilityState label={t("accessCapabilityAdministration")} enabled={canvas.capabilities.administration} reason={canvasDisabledReason} t={t} />
       </ul>
 
       <section data-testid="canvas-access-people">
@@ -214,8 +215,10 @@ export function CurrentCanvasAccessPanel({
         <ul className="flex flex-col gap-1">
           {view.people.map((person) => {
             const grants = person.grants;
-            const canGrant = current.capabilities.grant;
-            const canRevoke = current.capabilities.revoke;
+            const grantScopes = [
+              { scopeKind: "project" as const, access: project },
+              { scopeKind: "canvas" as const, access: canvas }
+            ];
             return (
               <li
                 key={person.humanPrincipalId}
@@ -227,21 +230,27 @@ export function CurrentCanvasAccessPanel({
                   {person.displayName} · {roleLabel(person.effectiveRole, t)}
                 </span>
                 <div className="flex flex-wrap gap-1">
-                  {(["viewer", "editor"] as const).map((role) => (
-                    <Button
-                      key={role}
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 px-1.5 text-[10px]"
-                      data-testid={`canvas-access-grant-${role}`}
-                      disabled={!canGrant || busy}
-                      title={!canGrant ? reasonLabel(disabledReason, t) : undefined}
-                      onClick={() => void onGrant(person.humanPrincipalId, role, "canvas")}
-                    >
-                      {role === "viewer" ? t("accessGrantViewer") : t("accessGrantEditor")}
-                    </Button>
-                  ))}
+                  {grantScopes.flatMap(({ scopeKind, access }) =>
+                    (["viewer", "editor"] as const).map((role) => (
+                      <Button
+                        key={`${scopeKind}-${role}`}
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-1.5 text-[10px]"
+                        data-testid={`canvas-access-grant-${scopeKind}-${role}`}
+                        disabled={!access.capabilities.grant || busy}
+                        title={
+                          !access.capabilities.grant
+                            ? reasonLabel(access.disabledReason ?? "capability_denied", t)
+                            : undefined
+                        }
+                        onClick={() => void onGrant(person.humanPrincipalId, role, scopeKind)}
+                      >
+                        {scopeKind === "project" ? t("accessProjectScope") : t("accessCanvasScope")} {role === "viewer" ? t("accessGrantViewer") : t("accessGrantEditor")}
+                      </Button>
+                    ))
+                  )}
                   {grants.length === 0 ? (
                     <span className="text-muted-foreground" data-testid="canvas-access-no-revocable-grant">
                       {t("accessNoRevocableGrant")}
@@ -255,8 +264,12 @@ export function CurrentCanvasAccessPanel({
                         variant="ghost"
                         className="h-7 px-1.5 text-[10px] text-destructive"
                         data-testid="canvas-access-revoke"
-                        disabled={!canRevoke || busy}
-                        title={!canRevoke ? reasonLabel(disabledReason, t) : undefined}
+                        disabled={!(grant.scopeKind === "project" ? project : canvas).capabilities.revoke || busy}
+                        title={
+                          !(grant.scopeKind === "project" ? project : canvas).capabilities.revoke
+                            ? reasonLabel((grant.scopeKind === "project" ? project : canvas).disabledReason ?? "capability_denied", t)
+                            : undefined
+                        }
                         onClick={() => void onRevoke(grant)}
                       >
                         {t("peopleRevoke")} {grant.scopeKind === "project" ? t("accessProjectScope") : t("accessCanvasScope")}

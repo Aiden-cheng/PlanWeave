@@ -129,11 +129,6 @@ export async function handleAccessHttpRequest(
       respond(response, 426, { error: "access_insecure_transport" });
       return true;
     }
-    if (!options.projectAuthority.hasProject(matched.projectId)) {
-      request.resume();
-      respond(response, 404, { error: "access_scope_not_found" });
-      return true;
-    }
     const actor = authenticateCollaborationForProject(
       options.repository,
       options.workspaceIdentity,
@@ -146,18 +141,34 @@ export async function handleAccessHttpRequest(
       respond(response, 401, { error: "access_unauthorized" });
       return true;
     }
+    if (
+      !options.projectAuthority.hasScope({
+        workspaceId,
+        projectId: matched.projectId,
+        canvasId: matched.canvasId
+      })
+    ) {
+      request.resume();
+      respond(response, 404, { error: "access_scope_not_found" });
+      return true;
+    }
     const actorRef = { kind: "human" as const, id: actor.humanPrincipalId };
     if (matched.kind === "current") {
-      const current = options.access.evaluateEffectiveAccess({
+      const canvasAccess = options.access.evaluateEffectiveAccess({
         workspaceId,
         projectId: matched.projectId,
         canvasId: matched.canvasId,
         actor: actorRef
       });
-      if (!current.capabilities.read) {
-        respond(response, 403, { error: current.disabledReason ?? "capability_denied" });
+      if (!canvasAccess.capabilities.read) {
+        respond(response, 403, { error: canvasAccess.disabledReason ?? "capability_denied" });
         return true;
       }
+      const projectAccess = options.access.evaluateEffectiveAccess({
+        workspaceId,
+        projectId: matched.projectId,
+        actor: actorRef
+      });
       const project = options.access.project(workspaceId, matched.projectId);
       const canvas = options.access.canvas(workspaceId, matched.projectId, matched.canvasId);
       if (!project || !canvas) throw new Error("access_scope_not_found");
@@ -194,7 +205,8 @@ export async function handleAccessHttpRequest(
           canvasVisibility: canvas.visibility,
           projectAclRevision: project.acl.revision,
           canvasAclRevision: canvas.acl.revision,
-          current,
+          project: projectAccess,
+          canvas: canvasAccess,
           people
         })
       );
