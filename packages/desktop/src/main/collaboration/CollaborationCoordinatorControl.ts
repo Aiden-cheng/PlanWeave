@@ -7,6 +7,7 @@ import {
 import {
   loopbackProjectRegistrationViewSchema,
   loopbackServerProfileSchema,
+  type DeploymentTargetDraft,
   type LoopbackServerProfile,
   type LoopbackServerStatus,
   type LoopbackTrustedProjectScope,
@@ -18,6 +19,7 @@ import { createServer } from "node:net";
 import { join } from "node:path";
 import type { OperatorSafeStoragePort } from "../operatorControl/operatorCredentialVault.js";
 import { OperatorCredentialVault } from "../operatorControl/operatorCredentialVault.js";
+import { getOperatorControlService } from "../operatorControl/operatorControlHandlers.js";
 import { desktopHomePaths } from "../planweaveHomePaths.js";
 import { collaborationCurrentSelectionInputSchema } from "../../shared/collaboration.js";
 
@@ -70,6 +72,11 @@ export interface CollaborationCoordinatorControl {
   listActiveTrustedScopes(): readonly LoopbackTrustedProjectScope[];
   registerCurrentProject(actor: { kind: "human"; id: string }): LoopbackProjectRegistrationView;
   localProfile(): { profileId: string; displayName: string; serverBaseUrl: string; projectId: string; allowInsecureTransport: boolean } | null;
+  createSelfHostedDeploymentSource(target: DeploymentTargetDraft): Promise<{
+    config: ServerConfig;
+    workspaceRoot: string;
+    projectId: string;
+  }>;
 }
 
 export class LocalCollaborationCoordinatorControl implements CollaborationCoordinatorControl {
@@ -199,6 +206,74 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     if (!selection || this.localPort === null) return null;
     const profile = this.profileFor(selection);
     return { ...profile, projectId: selection.authorityProjectId };
+  }
+
+  async createSelfHostedDeploymentSource(target: DeploymentTargetDraft): Promise<{
+    config: ServerConfig;
+    workspaceRoot: string;
+    projectId: string;
+  }> {
+    if (target.endpoint.topology === "loopback_http") {
+      throw new Error("deployment_bundle_loopback_not_supported");
+    }
+    const selection = this.requireSelection();
+    const workspace = await resolveTaskCanvasWorkspace(selection.projectRoot, selection.canvasId);
+    const profileId = `deployment-${createHash("sha256")
+      .update(target.endpoint.serverOrigin)
+      .digest("hex")
+      .slice(0, 32)}`;
+    const operatorToken = `pw_operator_${randomBytes(32).toString("base64url")}`;
+    const operatorService = getOperatorControlService();
+    await operatorService.upsertProfile({
+      profileId,
+      displayName: `${target.displayName} operator`,
+      serverBaseUrl: target.endpoint.serverOrigin,
+      allowInsecureTransport: false,
+      operatorId: "desktop-self-host-admin"
+    });
+    const operatorStatus = await operatorService.importCredential({
+      profileId,
+      operatorToken,
+      operatorId: "desktop-self-host-admin"
+    });
+    if (
+      operatorStatus.profiles.find((profile) => profile.profileId === profileId)
+        ?.operatorCredentialPersistence !== "persisted"
+    ) {
+      throw new Error("deployment_operator_credential_persistence_required");
+    }
+    const projectRoot = `/var/lib/planweave/projects/${workspace.id}`;
+    return {
+      config: parseServerConfig({
+        version: "server-config/v1",
+        bind: { host: "0.0.0.0", port: 443 },
+        publicUrl: target.endpoint.serverOrigin,
+        deployment: target.endpoint,
+        tls: {
+          certificatePath: "/run/planweave/input/tls/server.crt",
+          privateKeyPath: "/run/planweave/input/tls/server.key"
+        },
+        dataDirectory: "/var/lib/planweave-server",
+        trustedProjects: [
+          {
+            workspaceId: localWorkspaceIdForProject(workspace.id),
+            projectId: workspace.id,
+            canvasId: selection.canvasId,
+            projectRoot
+          }
+        ],
+        operatorCredentials: [
+          {
+            operatorId: "desktop-self-host-admin",
+            tokenSha256: hashOperatorToken(operatorToken),
+            projectIds: [workspace.id],
+            serverAdmin: true
+          }
+        ]
+      }),
+      workspaceRoot: workspace.workspaceRoot,
+      projectId: workspace.id
+    };
   }
 
   private requireSelection(): ResolvedSelection {

@@ -119,6 +119,10 @@ describe("desktop release configuration", () => {
       {
         from: "../../examples/basic-plan-package/package",
         to: "planweave-example-package"
+      },
+      {
+        from: "build/generated/planweave-self-host-server",
+        to: "planweave-self-host-server"
       }
     ]);
   });
@@ -152,6 +156,10 @@ describe("desktop release configuration", () => {
         {
           from: "../../examples/basic-plan-package/package",
           to: "planweave-example-package"
+        },
+        {
+          from: "build/generated/planweave-self-host-server",
+          to: "planweave-self-host-server"
         }
       ],
       nsis: {

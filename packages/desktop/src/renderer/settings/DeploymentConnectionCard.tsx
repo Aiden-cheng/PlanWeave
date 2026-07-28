@@ -42,8 +42,8 @@ export function DeploymentConnectionCard({ hosts, t }: Props) {
   const [topology, setTopology] = useState<DeploymentTopology>("loopback_http");
   const [guidance, setGuidance] = useState<DeploymentGuidanceView | null>(null);
   const [connectivity, setConnectivity] = useState<ConnectivityValidationView | null>(null);
-  const [busy, setBusy] = useState<"guidance" | "validation" | "copy" | null>(null);
-  const [notice, setNotice] = useState<"copied" | "invalid" | null>(null);
+  const [busy, setBusy] = useState<"guidance" | "validation" | "copy" | "export" | null>(null);
+  const [notice, setNotice] = useState<"copied" | "exported" | "invalid" | null>(null);
 
   useEffect(() => {
     if (!collaborationBridge) return;
@@ -116,6 +116,21 @@ export function DeploymentConnectionCard({ hosts, t }: Props) {
     try {
       await collaborationBridge.copyDeploymentComposeHandoff(input);
       setNotice("copied");
+    } catch {
+      setNotice("invalid");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const exportBundle = async () => {
+    const scope = actionScope();
+    const input = scope ? { action: "export_supported_compose_bundle" as const, ...scope } : null;
+    if (!collaborationBridge || !input) return setNotice("invalid");
+    setBusy("export");
+    try {
+      const result = await collaborationBridge.exportDeploymentComposeBundle(input);
+      setNotice(result.state === "exported" ? "exported" : "invalid");
     } catch {
       setNotice("invalid");
     } finally {
@@ -216,6 +231,17 @@ export function DeploymentConnectionCard({ hosts, t }: Props) {
                 >
                   {t("deploymentCopy")}
                 </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="w-fit"
+                  disabled={busy !== null}
+                  onClick={() => void exportBundle()}
+                >
+                  {t("deploymentExport")}
+                </Button>
+                <p className="text-text-muted">{t("deploymentExportInstructions")}</p>
               </>
             ) : (
               <p>{t("deploymentLoopbackNote")}</p>
@@ -232,6 +258,7 @@ export function DeploymentConnectionCard({ hosts, t }: Props) {
             {t("deploymentCopied")}
           </p>
         ) : null}
+        {notice === "exported" ? <p className="text-xs">{t("deploymentExported")}</p> : null}
         {notice === "invalid" ? (
           <p className="text-xs text-destructive" role="alert">
             {t("deploymentInvalid")}

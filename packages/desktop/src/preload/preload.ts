@@ -243,6 +243,8 @@ const collaborationApi: PlanWeaveCollaborationApi = {
     ipcRenderer.invoke(collaborationInvokeChannels.getDeploymentGuidance, input),
   copyDeploymentComposeHandoff: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.copyDeploymentComposeHandoff, input),
+  exportDeploymentComposeBundle: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.exportDeploymentComposeBundle, input),
   validateDeploymentConnectivity: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.validateDeploymentConnectivity, input),
   startCollaborationPresence: async (input) =>

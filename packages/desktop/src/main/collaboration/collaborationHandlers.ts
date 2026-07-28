@@ -1,4 +1,5 @@
-import { BrowserWindow, clipboard, ipcMain, safeStorage } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage } from "electron";
+import { join } from "node:path";
 import WebSocket from "ws";
 import {
   collaborationInvokeChannels,
@@ -92,9 +93,6 @@ export function registerCollaborationHandlers(
 ): CollaborationService {
   service = createDefaultService(options);
   const active = service;
-  const deploymentActions = new DeploymentActions({
-    writeClipboard: (value) => clipboard.writeText(value)
-  });
   coordinator = new LocalCollaborationCoordinatorControl({
     safeStorage: {
       isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
@@ -103,6 +101,14 @@ export function registerCollaborationHandlers(
     }
   });
   const local = coordinator;
+  const deploymentActions = new DeploymentActions({
+    writeClipboard: (value) => clipboard.writeText(value),
+    resourceDirectory: app.isPackaged
+      ? join(process.resourcesPath, "planweave-self-host-server")
+      : join(process.cwd(), "packages", "desktop", "build", "generated", "planweave-self-host-server"),
+    resolveBundleSource: (target) => local.createSelfHostedDeploymentSource(target),
+    showSaveDialog: (options) => dialog.showSaveDialog(options)
+  });
 
   ipcMain.handle(collaborationInvokeChannels.getCollaborationStatus, () => active.getStatus());
   ipcMain.handle(collaborationInvokeChannels.upsertCollaborationProfile, (_event, input: unknown) =>
@@ -114,6 +120,10 @@ export function registerCollaborationHandlers(
   ipcMain.handle(
     collaborationInvokeChannels.setActiveCollaborationProfile,
     (_event, input: unknown) => active.setActiveProfile(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.exportDeploymentComposeBundle,
+    (_event, input: unknown) => deploymentActions.exportComposeBundle(input)
   );
   ipcMain.handle(collaborationInvokeChannels.clearActiveCollaborationProfile, () =>
     active.clearActiveProfile()

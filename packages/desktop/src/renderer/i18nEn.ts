@@ -489,6 +489,10 @@ export const enCatalog = {
   deploymentMount: "Projects mount target",
   deploymentTrustedPath: "Trusted project root pattern",
   deploymentCopy: "Copy supported Compose handoff",
+  deploymentExport: "Export self-host bundle",
+  deploymentExportInstructions:
+    "Export, upload and unpack the bundle on the Server host, add tls/server.crt and tls/server.key, then run the reviewed command there.",
+  deploymentExported: "Bundle exported. TLS files are not included.",
   deploymentConnectivity: "Connectivity",
   deploymentConnectivityReachable: "Reachable",
   deploymentConnectivityUnreachable: "Unreachable",

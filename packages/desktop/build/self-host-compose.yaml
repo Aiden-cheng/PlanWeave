@@ -1,0 +1,51 @@
+services:
+  server:
+    build:
+      context: ./image
+      dockerfile: Dockerfile
+    image: planweave-server:self-host
+    environment:
+      PLANWEAVE_HOME: /var/lib/planweave
+    ports:
+      - "443:443"
+    volumes:
+      - type: volume
+        source: planweave_server_state
+        target: /var/lib/planweave-server
+      - type: bind
+        source: ./server.json
+        target: /run/planweave/input/config/server.json
+        read_only: true
+      - type: bind
+        source: ./tls
+        target: /run/planweave/input/tls
+        read_only: true
+      - type: bind
+        source: ./projects
+        target: /var/lib/planweave/projects
+        read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_READ_SEARCH
+      - FOWNER
+      - NET_BIND_SERVICE
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run/planweave/runtime
+    healthcheck:
+      test:
+        ["CMD", "/usr/bin/setpriv", "--reuid=node", "--regid=node", "--init-groups", "node", "/app/dist/containerHealthcheck.js"]
+      interval: 5s
+      timeout: 6s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  planweave_server_state:

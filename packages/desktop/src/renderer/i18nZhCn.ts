@@ -481,6 +481,10 @@ export const zhCnCatalog = {
   deploymentMount: "项目挂载目标",
   deploymentTrustedPath: "受信任项目根路径模式",
   deploymentCopy: "复制受支持的 Compose 交接",
+  deploymentExport: "导出自托管包",
+  deploymentExportInstructions:
+    "导出后上传并解压到 Server 主机，放入 tls/server.crt 和 tls/server.key，再在该目录运行已审阅的命令。",
+  deploymentExported: "自托管包已导出；其中不包含 TLS 文件。",
   deploymentConnectivity: "连通性",
   deploymentConnectivityReachable: "可达",
   deploymentConnectivityUnreachable: "不可达",

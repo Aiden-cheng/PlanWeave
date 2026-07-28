@@ -199,9 +199,10 @@ export const deploymentComposeHandoffSchema = z
     copyAction: z.literal("copy_supported_compose_handoff").nullable(),
     preview: z
       .literal(
-        "PLANWEAVE_SERVER_CONFIG_PATH=./server.json PLANWEAVE_SERVER_TLS_DIRECTORY=./tls PLANWEAVE_SERVER_PROJECTS_ROOT=./projects docker compose -f packages/server/compose.yaml up --detach --wait"
+        "test -f tls/server.crt && test -f tls/server.key && docker compose -f compose.yaml up --build --detach --wait"
       )
       .nullable(),
+    exportAction: z.literal("export_supported_compose_bundle").nullable(),
     configInputPath: z.literal("./server.json").nullable(),
     tlsDirectory: z.literal("./tls").nullable(),
     projectsRoot: z.literal("./projects").nullable(),
@@ -215,6 +216,7 @@ export const deploymentComposeHandoffSchema = z
       supported !==
       (value.copyAction !== null &&
         value.preview !== null &&
+        value.exportAction !== null &&
         value.configInputPath !== null &&
         value.tlsDirectory !== null &&
         value.projectsRoot !== null &&
@@ -225,6 +227,21 @@ export const deploymentComposeHandoffSchema = z
     }
   });
 export type DeploymentComposeHandoff = z.infer<typeof deploymentComposeHandoffSchema>;
+
+/** A save-dialog export result. It intentionally carries no filesystem path or deployment input. */
+export const deploymentBundleExportViewSchema = z
+  .object({
+    state: z.enum(["exported", "cancelled", "needs_project", "invalid_project"]),
+    fileName: z.string().min(1).max(255).nullable(),
+    tls: z.enum(["required_after_export", "not_applicable"])
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if ((value.state === "exported") !== (value.fileName !== null)) {
+      context.addIssue({ code: "custom", message: "deployment_bundle_export_filename_mismatch" });
+    }
+  });
+export type DeploymentBundleExportView = z.infer<typeof deploymentBundleExportViewSchema>;
 
 export const deploymentCopyHandoffViewSchema = z
   .object({ state: z.literal("copied"), copiedAt: timestampSchema })
@@ -255,6 +272,12 @@ export const desktopDeploymentActionRequestSchema = z.discriminatedUnion("action
     .object({
       target: deploymentTargetDraftSchema,
       action: z.literal("copy_supported_compose_handoff")
+    })
+    .strict(),
+  z
+    .object({
+      target: deploymentTargetDraftSchema,
+      action: z.literal("export_supported_compose_bundle")
     })
     .strict(),
   z

@@ -153,7 +153,8 @@ describe("OSS-009 deployment and Host availability contracts", () => {
         state: "supported",
         copyAction: "copy_supported_compose_handoff",
         preview:
-          "PLANWEAVE_SERVER_CONFIG_PATH=./server.json PLANWEAVE_SERVER_TLS_DIRECTORY=./tls PLANWEAVE_SERVER_PROJECTS_ROOT=./projects docker compose -f packages/server/compose.yaml up --detach --wait",
+          "test -f tls/server.crt && test -f tls/server.key && docker compose -f compose.yaml up --build --detach --wait",
+        exportAction: "export_supported_compose_bundle",
         configInputPath: "./server.json",
         tlsDirectory: "./tls",
         projectsRoot: "./projects",

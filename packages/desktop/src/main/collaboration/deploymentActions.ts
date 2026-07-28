@@ -1,5 +1,6 @@
 import {
   assertDeploymentViewRedacted,
+  deploymentBundleExportViewSchema,
   connectivityValidationViewSchema,
   deploymentCopyHandoffViewSchema,
   deploymentOriginHeader,
@@ -10,14 +11,31 @@ import {
   type DeploymentGuidanceView,
   type ConnectivityValidationView
 } from "@planweave-ai/collaboration-contracts";
+import { parseServerConfig, type ServerConfig } from "@planweave-ai/server";
+import { lstat, readdir, readFile, writeFile } from "node:fs/promises";
+import { basename, isAbsolute, relative, resolve } from "node:path";
+import { zipSync, strToU8 } from "fflate";
 
 const composePreview =
-  "PLANWEAVE_SERVER_CONFIG_PATH=./server.json PLANWEAVE_SERVER_TLS_DIRECTORY=./tls PLANWEAVE_SERVER_PROJECTS_ROOT=./projects docker compose -f packages/server/compose.yaml up --detach --wait";
+  "test -f tls/server.crt && test -f tls/server.key && docker compose -f compose.yaml up --build --detach --wait";
+const maxBundleInputBytes = 256 * 1024 * 1024;
+
+export type DeploymentBundleSource = {
+  config: ServerConfig;
+  workspaceRoot: string;
+  projectId: string;
+};
 
 export type DeploymentActionsOptions = {
   request?: typeof fetch;
   writeClipboard?: (value: string) => void;
   now?: () => Date;
+  resourceDirectory?: string;
+  resolveBundleSource?: (target: DeploymentTargetDraft) => Promise<DeploymentBundleSource>;
+  showSaveDialog?: (options: {
+    defaultPath: string;
+    filters: Array<{ name: string; extensions: string[] }>;
+  }) => Promise<{ canceled: boolean; filePath?: string }>;
 };
 
 function nowIso(now: () => Date): string {
@@ -41,6 +59,7 @@ function handoff(target: DeploymentTargetDraft) {
       state: "not_applicable" as const,
       copyAction: null,
       preview: null,
+      exportAction: null,
       configInputPath: null,
       tlsDirectory: null,
       projectsRoot: null,
@@ -52,6 +71,7 @@ function handoff(target: DeploymentTargetDraft) {
     state: "supported" as const,
     copyAction: "copy_supported_compose_handoff" as const,
     preview: composePreview,
+    exportAction: "export_supported_compose_bundle" as const,
     configInputPath: "./server.json" as const,
     tlsDirectory: "./tls" as const,
     projectsRoot: "./projects" as const,
@@ -95,6 +115,7 @@ function targetFromAction(
   expectedAction:
     | "request_deployment_guidance"
     | "copy_supported_compose_handoff"
+    | "export_supported_compose_bundle"
     | "validate_connectivity"
 ): DeploymentTargetDraft {
   const action = desktopDeploymentActionRequestSchema.parse(input);
@@ -107,11 +128,17 @@ export class DeploymentActions {
   private readonly request: typeof fetch;
   private readonly writeClipboard?: (value: string) => void;
   private readonly now: () => Date;
+  private readonly resourceDirectory?: string;
+  private readonly resolveBundleSource?: (target: DeploymentTargetDraft) => Promise<DeploymentBundleSource>;
+  private readonly showSaveDialog?: DeploymentActionsOptions["showSaveDialog"];
 
   constructor(options: DeploymentActionsOptions = {}) {
     this.request = options.request ?? fetch;
     this.writeClipboard = options.writeClipboard;
     this.now = options.now ?? (() => new Date());
+    this.resourceDirectory = options.resourceDirectory;
+    this.resolveBundleSource = options.resolveBundleSource;
+    this.showSaveDialog = options.showSaveDialog;
   }
 
   guidance(input: unknown): DeploymentGuidanceView {
@@ -140,6 +167,61 @@ export class DeploymentActions {
     if (!this.writeClipboard) throw new Error("deployment_clipboard_unavailable");
     this.writeClipboard(generated.preview);
     return deploymentCopyHandoffViewSchema.parse({ state: "copied", copiedAt: nowIso(this.now) });
+  }
+
+  async exportComposeBundle(input: unknown) {
+    const target = targetFromAction(input, "export_supported_compose_bundle");
+    assertGuidanceCapability(target);
+    if (handoff(target).state !== "supported") {
+      throw new Error("deployment_compose_handoff_not_supported");
+    }
+    if (!this.resolveBundleSource || !this.resourceDirectory || !this.showSaveDialog) {
+      return deploymentBundleExportViewSchema.parse({
+        state: "needs_project",
+        fileName: null,
+        tls: "required_after_export"
+      });
+    }
+    let source: DeploymentBundleSource;
+    try {
+      source = await this.resolveBundleSource(target);
+    } catch {
+      return deploymentBundleExportViewSchema.parse({
+        state: "needs_project",
+        fileName: null,
+        tls: "required_after_export"
+      });
+    }
+    const save = await this.showSaveDialog({
+      defaultPath: `planweave-self-host-${source.projectId}.zip`,
+      filters: [{ name: "PlanWeave self-host bundle", extensions: ["zip"] }]
+    });
+    if (save.canceled || !save.filePath) {
+      return deploymentBundleExportViewSchema.parse({
+        state: "cancelled",
+        fileName: null,
+        tls: "required_after_export"
+      });
+    }
+    try {
+      const archive = await createBundleArchive({
+        resourceDirectory: this.resourceDirectory,
+        source,
+        target
+      });
+      await writeFile(save.filePath, archive, { mode: 0o600 });
+    } catch {
+      return deploymentBundleExportViewSchema.parse({
+        state: "invalid_project",
+        fileName: null,
+        tls: "required_after_export"
+      });
+    }
+    return deploymentBundleExportViewSchema.parse({
+      state: "exported",
+      fileName: basename(save.filePath),
+      tls: "required_after_export"
+    });
   }
 
   async validateConnectivity(input: unknown): Promise<ConnectivityValidationView> {
@@ -202,4 +284,57 @@ export class DeploymentActions {
       return view;
     }
   }
+}
+
+async function archiveDirectory(
+  root: string,
+  prefix: string,
+  output: Record<string, Uint8Array>,
+  total: { bytes: number }
+): Promise<void> {
+  const resolvedRoot = resolve(root);
+  if (!isAbsolute(resolvedRoot)) throw new Error("deployment_bundle_root_invalid");
+  const entries = await readdir(resolvedRoot, { withFileTypes: true });
+  for (const entry of entries) {
+    const path = resolve(resolvedRoot, entry.name);
+    if (relative(resolvedRoot, path).startsWith("..")) throw new Error("deployment_bundle_path_escape");
+    const metadata = await lstat(path);
+    if (metadata.isSymbolicLink()) throw new Error("deployment_bundle_symlink_rejected");
+    const name = `${prefix}/${entry.name}`;
+    if (metadata.isDirectory()) {
+      await archiveDirectory(path, name, output, total);
+      continue;
+    }
+    if (!metadata.isFile()) throw new Error("deployment_bundle_entry_invalid");
+    total.bytes += metadata.size;
+    if (total.bytes > maxBundleInputBytes) throw new Error("deployment_bundle_too_large");
+    output[name] = new Uint8Array(await readFile(path));
+  }
+}
+
+async function createBundleArchive(input: {
+  resourceDirectory: string;
+  source: DeploymentBundleSource;
+  target: DeploymentTargetDraft;
+}): Promise<Uint8Array> {
+  const config = parseServerConfig(input.source.config);
+  if (!isAbsolute(input.source.workspaceRoot) || config.trustedProjects.length !== 1) {
+    throw new Error("deployment_bundle_source_invalid");
+  }
+  const trusted = config.trustedProjects[0];
+  if (
+    trusted.projectId !== input.source.projectId ||
+    trusted.projectRoot !== `/var/lib/planweave/projects/${input.source.projectId}` ||
+    config.deployment?.serverOrigin !== input.target.endpoint.serverOrigin
+  ) {
+    throw new Error("deployment_bundle_scope_invalid");
+  }
+  const files: Record<string, Uint8Array> = {
+    "server.json": strToU8(`${JSON.stringify(config)}\n`),
+    "tls/.gitkeep": new Uint8Array()
+  };
+  const total = { bytes: Buffer.byteLength(JSON.stringify(config)) };
+  await archiveDirectory(input.resourceDirectory, "image", files, total);
+  await archiveDirectory(input.source.workspaceRoot, `projects/${input.source.projectId}`, files, total);
+  return zipSync(files, { level: 6 });
 }

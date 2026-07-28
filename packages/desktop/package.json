@@ -25,8 +25,8 @@
   ],
   "scripts": {
     "build": "tsx ../../scripts/run-workspace-consumer-build.ts desktop",
-    "build:standalone": "pnpm --filter @planweave-ai/distributed-protocol build && pnpm --filter @planweave-ai/collaboration-contracts build && pnpm --filter @planweave-ai/runtime build && pnpm --filter @planweave-ai/mcp build && pnpm build:workspace",
-    "build:workspace": "tsc -p tsconfig.json && tsc -p tsconfig.main.json --noEmit && node scripts/build-electron.mjs && node scripts/copy-windows-job-helper.mjs && vite build",
+    "build:standalone": "pnpm --filter @planweave-ai/distributed-protocol build && pnpm --filter @planweave-ai/collaboration-contracts build && pnpm --filter @planweave-ai/runtime build && pnpm --filter @planweave-ai/mcp build && pnpm --filter @planweave-ai/server build && pnpm build:workspace",
+    "build:workspace": "tsc -p tsconfig.json && tsc -p tsconfig.main.json --noEmit && node scripts/build-electron.mjs && node scripts/copy-windows-job-helper.mjs && node scripts/prepare-self-host-server-resource.mjs && vite build",
     "dev": "vite --host 127.0.0.1",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.main.json --noEmit",
     "build:metadata:local": "tsx scripts/generate-build-metadata.ts --channel development --signed-distribution false",
@@ -117,6 +117,10 @@
       {
         "from": "../../examples/basic-plan-package/package",
         "to": "planweave-example-package"
+      },
+      {
+        "from": "build/generated/planweave-self-host-server",
+        "to": "planweave-self-host-server"
       }
     ],
     "asarUnpack": [

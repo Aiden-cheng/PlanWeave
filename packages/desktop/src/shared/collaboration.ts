@@ -526,6 +526,7 @@ export const collaborationInvokeChannels = {
   retryWorkspaceConnection: "planweave-collaboration:retryWorkspaceConnection",
   getDeploymentGuidance: "planweave-collaboration:getDeploymentGuidance",
   copyDeploymentComposeHandoff: "planweave-collaboration:copyDeploymentComposeHandoff",
+  exportDeploymentComposeBundle: "planweave-collaboration:exportDeploymentComposeBundle",
   validateDeploymentConnectivity: "planweave-collaboration:validateDeploymentConnectivity",
   startCollaborationPresence: "planweave-collaboration:startPresence",
   stopCollaborationPresence: "planweave-collaboration:stopPresence",
@@ -637,6 +638,9 @@ export type PlanWeaveCollaborationApi = {
   copyDeploymentComposeHandoff: (
     input: Extract<DesktopDeploymentActionRequest, { action: "copy_supported_compose_handoff" }>
   ) => Promise<{ state: "copied"; copiedAt: string }>;
+  exportDeploymentComposeBundle: (
+    input: Extract<DesktopDeploymentActionRequest, { action: "export_supported_compose_bundle" }>
+  ) => Promise<import("@planweave-ai/collaboration-contracts").DeploymentBundleExportView>;
   validateDeploymentConnectivity: (
     input: Extract<DesktopDeploymentActionRequest, { action: "validate_connectivity" }>
   ) => Promise<ConnectivityValidationView>;
