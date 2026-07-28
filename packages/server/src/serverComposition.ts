@@ -823,6 +823,7 @@ export async function createDistributedServerComposition(
       maxPayloadBytes: config.limits.maxWebSocketPayloadBytes,
       shutdownTimeoutMs: config.limits.shutdownTimeoutMs,
       allowInsecureTransport: config.allowInsecureDevelopment,
+      allowedClientOrigins: config.deployment?.allowedClientOrigins,
       clock
     });
     canvasPresenceWebSockets = attachCanvasPresenceWebSocketServer({
@@ -833,6 +834,7 @@ export async function createDistributedServerComposition(
       maxPayloadBytes: config.limits.maxWebSocketPayloadBytes,
       shutdownTimeoutMs: config.limits.shutdownTimeoutMs,
       allowInsecureTransport: config.allowInsecureDevelopment,
+      allowedClientOrigins: config.deployment?.allowedClientOrigins,
       clock
     });
     const canvasCommandRepository = new CanvasCommandRepository(server.database, { clock });
@@ -866,6 +868,7 @@ export async function createDistributedServerComposition(
       maxPayloadBytes: config.limits.maxWebSocketPayloadBytes,
       shutdownTimeoutMs: config.limits.shutdownTimeoutMs,
       allowInsecureTransport: config.allowInsecureDevelopment,
+      allowedClientOrigins: config.deployment?.allowedClientOrigins,
       clock
     });
     const attachedWebSockets = webSockets;

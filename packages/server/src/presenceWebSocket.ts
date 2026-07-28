@@ -21,6 +21,7 @@ import {
   CanvasPresenceHubError,
   type CanvasPresenceRemovalReason
 } from "./presenceHub.js";
+import { isAllowedClientOrigin } from "./clientOrigin.js";
 import type { WebSocketUpgradeRouter } from "./webSocketUpgradeRouter.js";
 
 export type CanvasPresenceProjectAuthority = HumanProjectAuthority;
@@ -36,6 +37,7 @@ export type CanvasPresenceWebSocketOptions = {
   maxPayloadBytes: number;
   shutdownTimeoutMs: number;
   allowInsecureTransport?: boolean;
+  allowedClientOrigins?: readonly string[];
   clock?: () => Date;
   authCheckIntervalMs?: number;
   heartbeatIntervalMs?: number;
@@ -315,6 +317,10 @@ export function attachCanvasPresenceWebSocketServer(
       }
       if (!humanTransportAllowed(request.socket, options.allowInsecureTransport)) {
         reject(socket, 426, "Upgrade Required");
+        return;
+      }
+      if (!isAllowedClientOrigin(request.headers, options.allowedClientOrigins)) {
+        reject(socket, 403, "Forbidden");
         return;
       }
       const authenticated = authenticateCollaborationForScope(

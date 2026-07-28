@@ -1,0 +1,13 @@
+.git
+.harness-*
+.planweave-agent-host-inputs-*
+.planweave
+AGENTS.md
+node_modules
+packages/*/node_modules
+packages/*/dist
+packages/*/release
+packages/*/build
+coverage
+output
+release

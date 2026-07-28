@@ -11,6 +11,7 @@ import {
   type HumanIdentityRepository,
   type HumanProjectAuthority
 } from "./identity/index.js";
+import { isAllowedClientOrigin } from "./clientOrigin.js";
 import type { HumanObserverJournal } from "./humanObserverJournal.js";
 import type { WebSocketUpgradeRouter } from "./webSocketUpgradeRouter.js";
 
@@ -22,6 +23,7 @@ export type HumanObserverWebSocketOptions = {
   maxPayloadBytes: number;
   shutdownTimeoutMs: number;
   allowInsecureTransport?: boolean;
+  allowedClientOrigins?: readonly string[];
   clock?: () => Date;
 };
 
@@ -53,7 +55,10 @@ function send(socket: WebSocket, message: unknown): void {
 export function attachHumanObserverWebSocketServer(
   options: HumanObserverWebSocketOptions
 ): HumanObserverWebSocketServer {
-  const webSocketServer = new WebSocketServer({ noServer: true, maxPayload: options.maxPayloadBytes });
+  const webSocketServer = new WebSocketServer({
+    noServer: true,
+    maxPayload: options.maxPayloadBytes
+  });
   const sessions = new Set<WebSocket>();
   const clock = options.clock ?? (() => new Date());
 
@@ -157,6 +162,10 @@ export function attachHumanObserverWebSocketServer(
       }
       if (!humanTransportAllowed(request.socket, options.allowInsecureTransport)) {
         reject(socket, 426, "Upgrade Required");
+        return;
+      }
+      if (!isAllowedClientOrigin(request.headers, options.allowedClientOrigins)) {
+        reject(socket, 403, "Forbidden");
         return;
       }
       if (

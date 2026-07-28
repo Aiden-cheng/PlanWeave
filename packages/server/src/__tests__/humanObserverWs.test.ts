@@ -1,7 +1,10 @@
 import { createServer, type Server as HttpServer } from "node:http";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import { basicManifest, createTestWorkspace } from "../../../runtime/src/__tests__/promptTestHelpers.js";
+import {
+  basicManifest,
+  createTestWorkspace
+} from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket, type RawData } from "ws";
 import { parseServerConfig } from "../config.js";
@@ -19,16 +22,14 @@ const compositions: DistributedServerComposition[] = [];
 afterEach(async () => {
   for (const composition of compositions.splice(0)) await composition.close();
   await Promise.all(
-    servers.splice(0).map(
-      (server) => new Promise<void>((resolve) => server.close(() => resolve()))
-    )
+    servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve())))
   );
   await Promise.all(
     directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
   );
 });
 
-async function setup() {
+async function setup(options: { allowedClientOrigins?: string[] } = {}) {
   const workspace = await createTestWorkspace(basicManifest());
   directories.push(workspace.home, workspace.root);
   const httpServer = createServer();
@@ -39,9 +40,20 @@ async function setup() {
     bind: { host: "127.0.0.1", port: 7_443 },
     publicUrl: "http://127.0.0.1:7443",
     allowInsecureDevelopment: true,
+    ...(options.allowedClientOrigins
+      ? {
+          deployment: {
+            topology: "loopback_http" as const,
+            serverOrigin: "http://127.0.0.1:7443",
+            allowedClientOrigins: options.allowedClientOrigins,
+            tlsTrust: "not_applicable" as const
+          }
+        }
+      : {}),
     dataDirectory: join(workspace.root, "server-data"),
     trustedProjects: [
       {
+        workspaceId: "observer-workspace",
         projectId: workspace.init.workspace.id,
         canvasId: "default",
         projectRoot: workspace.root
@@ -102,7 +114,10 @@ async function createInvitation(origin: string, projectId: string, token: string
     headers: jsonHeaders(token),
     body: JSON.stringify({})
   });
-  const body = (await response.json()) as { invitationToken: string; invitation: { invitationId: string } };
+  const body = (await response.json()) as {
+    invitationToken: string;
+    invitation: { invitationId: string };
+  };
   expect(response.status).toBe(201);
   return body;
 }
@@ -238,11 +253,7 @@ describe("human observer WSS", () => {
     });
     expect(unknownStatus).toBe(404);
 
-    const invitation = await createInvitation(
-      fixture.origin,
-      fixture.projectId,
-      owner.deviceToken
-    );
+    const invitation = await createInvitation(fixture.origin, fixture.projectId, owner.deviceToken);
     const joined = await fetch(
       `${fixture.origin}/api/v1/projects/${fixture.projectId}/human/invitations/consume`,
       {
@@ -284,12 +295,34 @@ describe("human observer WSS", () => {
     expect(revoke.status).toBe(200);
     await expect(expired).resolves.toMatchObject({ type: "human.observer.auth_expired" });
 
-    const replacement = await bootstrap(fixture.origin, fixture.projectId, "observer-revoked-owner");
+    const replacement = await bootstrap(
+      fixture.origin,
+      fixture.projectId,
+      "observer-revoked-owner"
+    );
     const draining = await connect(url, replacement.deviceToken);
     sendHello(draining, fixture.projectId, 0);
     await nextMessage(draining);
     const closed = new Promise<number>((resolve) => draining.once("close", resolve));
     await fixture.composition.drainTransports();
     await expect(closed).resolves.toBe(1001);
+  });
+
+  it("rejects missing and unlisted browser origins when a deployment bounds them", async () => {
+    const fixture = await setup({ allowedClientOrigins: ["http://localhost:5173/"] });
+    const owner = await bootstrap(fixture.origin, fixture.projectId, "observer-origin-owner");
+    const url = `${fixture.wsOrigin}/api/v1/projects/${fixture.projectId}/human/observe`;
+    for (const origin of [undefined, "http://localhost:5174"]) {
+      const rejected = new WebSocket(url, {
+        headers: {
+          Authorization: `Bearer ${owner.deviceToken}`,
+          ...(origin ? { Origin: origin } : {})
+        }
+      });
+      const status = await new Promise<number>((resolve) => {
+        rejected.once("unexpected-response", (_request, response) => resolve(response.statusCode));
+      });
+      expect(status).toBe(403);
+    }
   });
 });

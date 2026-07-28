@@ -5,6 +5,7 @@ import {
   OUTPUT_MAX_ARTIFACT_BYTES,
   opaqueIdentifierSchema
 } from "@planweave-ai/distributed-protocol";
+import { deploymentEndpointSchema } from "@planweave-ai/collaboration-contracts";
 import {
   RUNNER_EVENT_RETENTION_MAX_BYTES,
   RUNNER_EVENT_RETENTION_MAX_EVENTS
@@ -71,6 +72,8 @@ const serverConfigInputSchema = z
       .strict()
       .default({ host: "127.0.0.1", port: 7_443 }),
     publicUrl: z.url(),
+    /** Required for network deployments; keeps browser origins explicitly bounded. */
+    deployment: deploymentEndpointSchema.optional(),
     tls: z
       .object({ certificatePath: absolutePathSchema, privateKeyPath: absolutePathSchema })
       .strict()
@@ -125,9 +128,36 @@ export const serverConfigSchema = serverConfigInputSchema
           message: "server_insecure_development_requires_literal_loopback"
         });
       }
+      if (
+        config.deployment &&
+        (config.deployment.topology !== "loopback_http" ||
+          new URL(config.deployment.serverOrigin).origin !== publicUrl.origin)
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "server_loopback_deployment_mismatch",
+          path: ["deployment"]
+        });
+      }
     } else {
       if (publicUrl.protocol !== "https:" || !config.tls) {
         context.addIssue({ code: "custom", message: "server_tls_configuration_required" });
+      }
+      if (!config.deployment) {
+        context.addIssue({
+          code: "custom",
+          message: "server_deployment_configuration_required",
+          path: ["deployment"]
+        });
+      } else if (
+        config.deployment.topology === "loopback_http" ||
+        new URL(config.deployment.serverOrigin).origin !== publicUrl.origin
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "server_deployment_endpoint_mismatch",
+          path: ["deployment"]
+        });
       }
       const publicPort = Number(publicUrl.port || "443");
       if (publicPort !== config.bind.port) {
@@ -205,6 +235,12 @@ export const serverConfigSummarySchema = z
     bindPort: z.number().int().min(1).max(65_535),
     publicUrl: z.url(),
     transport: z.enum(["https", "loopback-development"]),
+    deployment: z
+      .object({
+        topology: z.enum(["loopback_http", "lan_https", "public_https"]),
+        allowedClientOrigins: z.array(z.url()).max(32)
+      })
+      .nullable(),
     projectIds: z.array(opaqueIdentifierSchema).max(256)
   })
   .strict();
@@ -216,6 +252,12 @@ export function serverConfigSummary(config: ServerConfig) {
     bindPort: config.bind.port,
     publicUrl: config.publicUrl,
     transport: config.allowInsecureDevelopment ? "loopback-development" : "https",
+    deployment: config.deployment
+      ? {
+          topology: config.deployment.topology,
+          allowedClientOrigins: config.deployment.allowedClientOrigins
+        }
+      : null,
     projectIds: config.trustedProjects.map((project) => project.projectId)
   });
 }

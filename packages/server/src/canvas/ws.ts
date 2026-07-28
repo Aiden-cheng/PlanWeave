@@ -18,6 +18,7 @@ import {
 } from "../identity/index.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import type { WebSocketUpgradeRouter } from "../webSocketUpgradeRouter.js";
+import { isAllowedClientOrigin } from "../clientOrigin.js";
 import { CanvasCommandService } from "./service.js";
 
 const COMMAND_PATH_PATTERN =
@@ -32,6 +33,7 @@ export type CanvasCommandWebSocketOptions = {
   maxPayloadBytes: number;
   shutdownTimeoutMs: number;
   allowInsecureTransport?: boolean;
+  allowedClientOrigins?: readonly string[];
   clock?: () => Date;
   authCheckIntervalMs?: number;
 };
@@ -114,6 +116,10 @@ export function attachCanvasCommandWebSocketServer(
     }
     if (!humanTransportAllowed(request.socket, options.allowInsecureTransport === true)) {
       reject(socket, 400, "Bad Request");
+      return;
+    }
+    if (!isAllowedClientOrigin(request.headers, options.allowedClientOrigins)) {
+      reject(socket, 403, "Forbidden");
       return;
     }
     const authenticated = authenticateCollaborationForScope(

@@ -24,7 +24,13 @@ async function secureConfig() {
   return {
     version: "server-config/v1" as const,
     bind: { host: "127.0.0.1", port: 7_443 },
-    publicUrl: "https://127.0.0.1:7443",
+    publicUrl: "https://server.example.test:7443",
+    deployment: {
+      topology: "lan_https",
+      serverOrigin: "https://server.example.test:7443",
+      allowedClientOrigins: ["https://desktop.example.test/"],
+      tlsTrust: "configured_ca"
+    },
     tls: {
       certificatePath: join(root, "server.crt"),
       privateKeyPath: join(root, "server.key")
@@ -60,8 +66,12 @@ describe("server config", () => {
       version: "server-config/v1",
       bindHost: "127.0.0.1",
       bindPort: 7_443,
-      publicUrl: "https://127.0.0.1:7443",
+      publicUrl: "https://server.example.test:7443",
       transport: "https",
+      deployment: {
+        topology: "lan_https",
+        allowedClientOrigins: ["https://desktop.example.test/"]
+      },
       projectIds: ["project-1"]
     });
     expect(JSON.stringify(serverConfigSummary(config))).not.toContain(input.dataDirectory);
@@ -73,6 +83,29 @@ describe("server config", () => {
     expect(() => parseServerConfig({ ...input, publicUrl: "https://127.0.0.1:8443" })).toThrow(
       "server_public_url_port_mismatch"
     );
+  });
+
+  it("requires a bounded matching deployment endpoint for network listeners", async () => {
+    const input = await secureConfig();
+    expect(() => parseServerConfig({ ...input, deployment: undefined })).toThrow(
+      "server_deployment_configuration_required"
+    );
+    expect(() =>
+      parseServerConfig({
+        ...input,
+        deployment: { ...input.deployment, serverOrigin: "https://other.example.test:7443" }
+      })
+    ).toThrow("server_deployment_endpoint_mismatch");
+    expect(() =>
+      parseServerConfig({
+        ...input,
+        deployment: {
+          ...input.deployment,
+          topology: "public_https",
+          serverOrigin: "https://server.example.test:7443"
+        }
+      })
+    ).toThrow("public_https_requires_direct_tls_port_443");
   });
 
   it("requires heartbeat to precede offline and lease thresholds", async () => {
@@ -107,6 +140,7 @@ describe("server config", () => {
       ...input,
       publicUrl: "http://127.0.0.1:7443",
       tls: undefined,
+      deployment: undefined,
       allowInsecureDevelopment: true
     };
     expect(parseServerConfig(insecure).allowInsecureDevelopment).toBe(true);
