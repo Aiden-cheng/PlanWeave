@@ -70,6 +70,25 @@ function commentRecord(
   } as CommentRecord;
 }
 
+function uniqueIndexColumns(database: SqliteDatabase, table: string): string[][] {
+  const indexes = database.prepare(`PRAGMA index_list(${table})`).all() as Array<{
+    name: string;
+    unique: number;
+  }>;
+  return indexes
+    .filter((index) => index.unique === 1)
+    .map((index) =>
+      (
+        database.prepare(`PRAGMA index_info(${index.name})`).all() as Array<{
+          name: string;
+          seqno: number;
+        }>
+      )
+        .sort((left, right) => left.seqno - right.seqno)
+        .map((column) => column.name)
+    );
+}
+
 describe("comment/activity migration v20", () => {
   it("creates comments, activity_records, and outbox on upgrade", async () => {
     const directory = await mkdtemp(join(tmpdir(), "planweave-comment-mig-"));
@@ -107,6 +126,18 @@ describe("comment/activity migration v20", () => {
         database.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name=?").get(index)
       ).toBeDefined();
     }
+    expect(uniqueIndexColumns(database, "activity_records")).toContainEqual([
+      "workspace_id",
+      "project_id",
+      "source_kind",
+      "source_id"
+    ]);
+    expect(uniqueIndexColumns(database, "activity_projection_outbox")).toContainEqual([
+      "workspace_id",
+      "project_id",
+      "source_kind",
+      "source_id"
+    ]);
   });
 });
 
@@ -229,6 +260,45 @@ describe("comment repository", () => {
 });
 
 describe("activity repository", () => {
+  it("keeps identical project and source keys independent across workspaces", async () => {
+    const { database } = await openMigrated();
+    const workspaceA = new ActivityRepository(database, { workspaceId: "workspace-a" });
+    const workspaceB = new ActivityRepository(database, { workspaceId: "workspace-b" });
+    const base = {
+      projectId: "shared-project",
+      type: "member_joined" as const,
+      membershipId: "membership-1",
+      transitionRevision: 1,
+      humanPrincipalId: "human-1",
+      displayName: "Ada",
+      membershipRole: "member" as const,
+      occurredAt: "2026-07-24T12:00:00.000Z"
+    };
+    const recordA = buildMembershipActivity({ activityId: "activity-a", ...base });
+    const recordB = buildMembershipActivity({ activityId: "activity-b", ...base });
+
+    expect(workspaceA.enqueueAndProject(recordA, recordA.occurredAt).inserted).toBe(true);
+    expect(workspaceB.enqueueAndProject(recordB, recordB.occurredAt).inserted).toBe(true);
+    expect(
+      workspaceA.enqueueAndProject(
+        { ...recordA, activityId: "activity-a-duplicate" },
+        recordA.occurredAt
+      )
+    ).toMatchObject({ inserted: false, record: { activityId: "activity-a" } });
+
+    expect(workspaceA.list({ projectId: base.projectId, limit: 10 })).toEqual([recordA]);
+    expect(workspaceB.list({ projectId: base.projectId, limit: 10 })).toEqual([recordB]);
+    expect(
+      database
+        .prepare(
+          `SELECT workspace_id FROM activity_projection_outbox
+           WHERE project_id=? AND source_kind='membership' AND source_id=?
+           ORDER BY workspace_id`
+        )
+        .all(base.projectId, recordA.source.sourceId)
+    ).toEqual([{ workspace_id: "workspace-a" }, { workspace_id: "workspace-b" }]);
+  });
+
   it("purges expired records and outbox rows in bounded batches without reviving them", async () => {
     const { activity } = await openMigrated();
     const cutoff = "2025-07-26T12:00:00.000Z";
@@ -305,12 +375,13 @@ describe("activity repository", () => {
     activity.database
       .prepare(
         `INSERT INTO activity_projection_outbox(
-          outbox_id,project_id,source_kind,source_id,activity_json,activity_occurred_at,
+          outbox_id,workspace_id,project_id,source_kind,source_id,activity_json,activity_occurred_at,
           created_at,projected_at
-        ) VALUES (?,?,?,?,?,?,?, NULL)`
+        ) VALUES (?,?,?,?,?,?,?,?, NULL)`
       )
       .run(
         "outbox-gap",
+        "legacy",
         gap.projectId,
         gap.source.kind,
         gap.source.sourceId,

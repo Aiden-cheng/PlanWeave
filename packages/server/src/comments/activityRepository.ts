@@ -223,7 +223,7 @@ export class ActivityRepository {
           outbox_id,workspace_id,project_id,source_kind,source_id,activity_json,activity_occurred_at,
           created_at,projected_at
         ) VALUES (?,?,?,?,?,?,?,?, NULL)
-        ON CONFLICT(project_id, source_kind, source_id) DO NOTHING`
+        ON CONFLICT(workspace_id, project_id, source_kind, source_id) DO NOTHING`
       )
       .run(
         randomUUID(),

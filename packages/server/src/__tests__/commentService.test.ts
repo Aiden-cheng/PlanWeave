@@ -481,12 +481,13 @@ describe("CommentService", () => {
     stack.activity.database
       .prepare(
         `INSERT INTO activity_projection_outbox(
-          outbox_id,project_id,source_kind,source_id,activity_json,activity_occurred_at,
+          outbox_id,workspace_id,project_id,source_kind,source_id,activity_json,activity_occurred_at,
           created_at,projected_at
-        ) VALUES (?,?,?,?,?,?,?, NULL)`
+        ) VALUES (?,?,?,?,?,?,?,?, NULL)`
       )
       .run(
         "outbox-manual",
+        "legacy",
         projectId,
         "remote_run",
         "dispatch-2:failed",
