@@ -212,6 +212,69 @@ describe("project access registry", () => {
     expect(canvasEditor.scopeKind).toBe("canvas");
   });
 
+  it("inherits project grants consistently for private and shared canvas list and exact reads", async () => {
+    const { access } = await registered();
+    access.grant({
+      workspaceId: "w",
+      projectId: "p",
+      humanPrincipalId: "editor",
+      role: "editor",
+      grantedBy: owner
+    });
+    access.grant({
+      workspaceId: "w",
+      projectId: "p",
+      humanPrincipalId: "viewer",
+      role: "viewer",
+      grantedBy: owner
+    });
+
+    for (const visibility of ["private", "shared"] as const) {
+      if (visibility === "shared") {
+        expect(
+          access.compareAndSetAccess({
+            actor: owner,
+            request: accessMutationRequestSchema.parse({
+              operation: "visibility",
+              scope: {
+                scopeKind: "canvas",
+                workspaceId: "w",
+                projectId: "p",
+                canvasId: "c"
+              },
+              expectedAclRevision: 0,
+              visibility
+            })
+          })
+        ).toMatchObject({ status: "applied", aclRevision: 1 });
+      }
+
+      for (const [actor, role] of [
+        [owner, "owner"],
+        [editor, "editor"],
+        [viewer, "viewer"]
+      ] as const) {
+        expect(
+          access.listAuthorizedCanvases({
+            workspaceId: "w",
+            projectId: "p",
+            actor,
+            limit: 1,
+            offset: 0
+          }).map((canvas) => canvas.registry.canvasId)
+        ).toEqual(["c"]);
+        expect(
+          access.evaluateEffectiveAccess({
+            workspaceId: "w",
+            projectId: "p",
+            canvasId: "c",
+            actor
+          })
+        ).toMatchObject({ effectiveRole: role, capabilities: { read: true } });
+      }
+    }
+  });
+
   it("keeps SQL pagination bounded to authorized rows", async () => {
     const { access } = await registered();
     access.grant({
@@ -232,7 +295,7 @@ describe("project access registry", () => {
         limit: 1,
         offset: 0
       })
-    ).toHaveLength(0);
+    ).toHaveLength(1);
   });
 
   it("uses the shared capability matrix for visibility, explicit grants, and CAS", async () => {

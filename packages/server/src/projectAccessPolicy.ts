@@ -275,6 +275,14 @@ export class ProjectAccessPolicy {
               AND g.human_principal_id=?
               AND g.revoked_at IS NULL
           )
+          OR EXISTS (
+            SELECT 1 FROM project_access_grants g
+            WHERE g.workspace_id=c.workspace_id
+              AND g.project_registry_id=p.project_registry_id
+              AND g.scope_kind='project'
+              AND g.human_principal_id=?
+              AND g.revoked_at IS NULL
+          )
         )
       ORDER BY c.canvas_registry_id
       LIMIT ? OFFSET ?
@@ -282,6 +290,7 @@ export class ProjectAccessPolicy {
       .all(
         input.workspaceId,
         input.projectId,
+        input.actor.id,
         input.actor.id,
         input.actor.id,
         input.actor.id,
