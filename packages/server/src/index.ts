@@ -143,9 +143,14 @@ export {
   type SetupCodeHttpOptions
 } from "./identity/index.js";
 export {
+  repairAssignmentAuthorityMigration,
   repairWorkspaceIdentityMigration,
+  retryAssignmentAuthorityMigration,
   retryWorkspaceIdentityMigration,
+  rollbackAssignmentAuthorityMigration,
   rollbackWorkspaceIdentityMigration,
+  type AssignmentMigrationRecoveryInput,
+  type AssignmentMigrationRecoveryResult,
   type WorkspaceIdentityRecoveryResult
 } from "./migrations.js";
 export {

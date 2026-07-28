@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { applyMigrations } from "../migrations.js";
+import {
+  applyMigrations,
+  repairAssignmentAuthorityMigration,
+  retryAssignmentAuthorityMigration,
+  rollbackAssignmentAuthorityMigration
+} from "../migrations.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 
 const databases: SqliteDatabase[] = [];
@@ -122,5 +127,71 @@ describe("assignment authority migration", () => {
     expect(
       database.prepare("SELECT COUNT(*) AS count FROM execution_target_records").get()
     ).toEqual({ count: 0 });
+  });
+
+  it("retries a repaired legacy source and rolls back only source-equivalent projections", async () => {
+    const database = await legacyFixture();
+    database.exec("PRAGMA ignore_check_constraints = ON");
+    insertLegacy(database, {
+      key: "T-001",
+      workItemKind: "task",
+      targetKind: "exact_host",
+      hostId: "host-1"
+    });
+    database.exec("PRAGMA ignore_check_constraints = OFF");
+    applyMigrations(database);
+
+    expect(
+      retryAssignmentAuthorityMigration(database, { workspaceId: "w", projectId: "p" })
+    ).toMatchObject({ status: "repair_required", outcome: "repair_required" });
+
+    database
+      .prepare(
+        `UPDATE work_assignments
+         SET target_kind='human',target_human_principal_id='member',target_host_id=NULL
+         WHERE project_id='p' AND work_item_key='T-001'`
+      )
+      .run();
+    expect(
+      repairAssignmentAuthorityMigration(database, { workspaceId: "w", projectId: "p" })
+    ).toMatchObject({ status: "completed", outcome: "repair_completed" });
+    expect(
+      retryAssignmentAuthorityMigration(database, { workspaceId: "w", projectId: "p" })
+    ).toMatchObject({ status: "completed", outcome: "retry_idempotent" });
+
+    expect(
+      rollbackAssignmentAuthorityMigration(database, { workspaceId: "w", projectId: "p" })
+    ).toMatchObject({ status: "repair_required", outcome: "rollback_to_legacy" });
+    expect(
+      database.prepare("SELECT COUNT(*) AS count FROM responsibility_records").get()
+    ).toEqual({ count: 0 });
+    expect(
+      database
+        .prepare(
+          "SELECT authoritative_read_version,failure_code FROM assignment_authority_migrations WHERE workspace_id='w' AND project_id='p'"
+        )
+        .get()
+    ).toEqual({ authoritative_read_version: "legacy_assignment", failure_code: "rollback_to_legacy" });
+
+    expect(
+      repairAssignmentAuthorityMigration(database, { workspaceId: "w", projectId: "p" })
+    ).toMatchObject({ status: "completed", outcome: "repair_completed" });
+    database
+      .prepare(
+        `UPDATE responsibility_records
+         SET principal_id='owner',revision=2
+         WHERE workspace_id='w' AND project_id='p' AND canvas_id='c' AND scope_key='T-001'`
+      )
+      .run();
+    expect(() =>
+      rollbackAssignmentAuthorityMigration(database, { workspaceId: "w", projectId: "p" })
+    ).toThrow("assignment_rollback_projection_conflict");
+    expect(
+      database
+        .prepare(
+          "SELECT authoritative_read_version FROM assignment_authority_migrations WHERE workspace_id='w' AND project_id='p'"
+        )
+        .get()
+    ).toEqual({ authoritative_read_version: "oss003_authorities" });
   });
 });

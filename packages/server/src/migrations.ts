@@ -11,6 +11,13 @@ export {
   rollbackWorkspaceIdentityMigration
 } from "./migrations/identityRecovery.js";
 export {
+  repairAssignmentAuthorityMigration,
+  retryAssignmentAuthorityMigration,
+  rollbackAssignmentAuthorityMigration,
+  type AssignmentMigrationRecoveryInput,
+  type AssignmentMigrationRecoveryResult
+} from "./migrations/assignmentRecovery.js";
+export {
   aclMigrationIdFor,
   canvasRegistryIdFor,
   projectRegistryIdFor,

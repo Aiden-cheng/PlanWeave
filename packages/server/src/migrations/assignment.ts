@@ -104,11 +104,17 @@ type LegacyRow = {
  * unknown legacy kind makes the project `repair_required`; no new authority is
  * made authoritative and no Host identity is ever mapped to a human.
  */
-export function migrateLegacyAssignments(database: SqliteDatabase): void {
+export function migrateLegacyAssignments(database: SqliteDatabase, projectId?: string): void {
   if (!tableExists(database, "work_assignments")) return;
-  const rows = database
-    .prepare("SELECT * FROM work_assignments ORDER BY project_id,canvas_id,work_item_key")
-    .all() as LegacyRow[];
+  const rows: readonly LegacyRow[] = (projectId
+    ? database
+        .prepare(
+          "SELECT * FROM work_assignments WHERE project_id=? ORDER BY project_id,canvas_id,work_item_key"
+        )
+        .all(projectId)
+    : database
+        .prepare("SELECT * FROM work_assignments ORDER BY project_id,canvas_id,work_item_key")
+        .all()) as LegacyRow[];
   const projects = new Map<string, { workspaceId: string; projectId: string; invalid?: string }>();
   for (const row of rows) {
     const workspace = database
