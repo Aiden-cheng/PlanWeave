@@ -99,7 +99,7 @@ export async function buildCollaborationStatus(
       lastErrorMessage: options.session.lastErrorMessage
     },
     workspaceConnection: await options.workspaceConnection.buildView(),
-    workspacePicker: await options.workspaceConnection.buildPickerPage(),
+    workspacePicker: options.workspaceConnection.buildCachedPickerPage(),
     updatedAt: (options.clock?.now() ?? new Date()).toISOString()
   };
 }

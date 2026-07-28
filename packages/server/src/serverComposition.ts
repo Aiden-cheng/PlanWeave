@@ -41,6 +41,7 @@ import {
 } from "./identity/index.js";
 import { handleSetupCodeHttpRequest } from "./identity/setupCodeHttp.js";
 import { SetupCodeService } from "./identity/setupCodeService.js";
+import { handleWorkspaceConnectionHttpRequest } from "./identity/workspaceConnectionHttp.js";
 import { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
 import { provisionConfiguredOperatorSessions } from "./identity/operatorSessionProvisioning.js";
 import { OperatorTokenRegistry } from "./operatorAuth.js";
@@ -775,6 +776,14 @@ export async function createDistributedServerComposition(
         if (requiresAdmission(request) && readiness.readiness().status !== "ready") {
           request.resume();
           respond(response, 503, "server_not_accepting_mutations");
+          return;
+        }
+        if (
+          await handleWorkspaceConnectionHttpRequest(request, response, {
+            workspaceIdentity,
+            allowInsecureDevelopment: config.allowInsecureDevelopment
+          })
+        ) {
           return;
         }
         if (

@@ -1,9 +1,8 @@
 import {
   assertHumanDisplayDtoRedacted,
   collaborationClientLimitsSchema,
-  collaborationConnectionProfileSchema,
+  collaborationServerOriginSchema,
   type CollaborationClientLimits,
-  type CollaborationConnectionProfile
 } from "@planweave-ai/collaboration-contracts";
 import type { ZodType } from "zod";
 import {
@@ -20,7 +19,7 @@ import { systemCollaborationClock } from "./collaborationClientTypes.js";
 export type JsonMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
 export type CollaborationHttpTransportOptions = {
-  profile: CollaborationConnectionProfile;
+  serverBaseUrl: string;
   credential: CollaborationCredentialPort;
   limits?: Partial<CollaborationClientLimits>;
   request?: typeof fetch;
@@ -32,7 +31,7 @@ export type CollaborationHttpTransportOptions = {
  * Callers never see raw Authorization headers or tokens.
  */
 export class CollaborationHttpTransport {
-  readonly profile: CollaborationConnectionProfile;
+  readonly serverBaseUrl: string;
   readonly limits: CollaborationClientLimits;
   private readonly fetchImpl: typeof fetch;
   private readonly clock: CollaborationClientClock;
@@ -41,7 +40,7 @@ export class CollaborationHttpTransport {
   private disposed = false;
 
   constructor(options: CollaborationHttpTransportOptions) {
-    this.profile = collaborationConnectionProfileSchema.parse(options.profile);
+    this.serverBaseUrl = collaborationServerOriginSchema.parse(options.serverBaseUrl);
     this.limits = collaborationClientLimitsSchema.parse(options.limits ?? {});
     this.fetchImpl = options.request ?? fetch;
     this.clock = options.clock ?? systemCollaborationClock;
@@ -218,7 +217,7 @@ export class CollaborationHttpTransport {
       signal?: AbortSignal;
     }
   ): Promise<Response> {
-    const url = new URL(path, this.profile.serverBaseUrl);
+    const url = new URL(path, this.serverBaseUrl);
     const timeout = new AbortController();
     const timer = this.clock.setTimeout(() => timeout.abort(), this.limits.requestTimeoutMs);
     const signals = [this.rootController.signal, timeout.signal];

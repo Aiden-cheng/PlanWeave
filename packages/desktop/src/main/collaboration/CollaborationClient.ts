@@ -175,7 +175,7 @@ export class CollaborationClient {
 
   constructor(private readonly options: CollaborationClientOptions) {
     this.transport = new CollaborationHttpTransport({
-      profile: options.profile,
+      serverBaseUrl: options.profile.serverBaseUrl,
       credential: options.credential,
       limits: options.limits,
       request: options.request,
@@ -184,7 +184,7 @@ export class CollaborationClient {
     this.clock = options.clock ?? systemCollaborationClock;
     this.random = options.random ?? Math.random;
     this.presence = new CanvasPresenceClient({
-      profile: this.transport.profile,
+      profile: options.profile,
       credential: options.credential,
       WebSocketImpl: options.WebSocketImpl,
       clock: this.clock,
@@ -199,19 +199,19 @@ export class CollaborationClient {
         auth: true
       })
     );
-    this.canvasCommands = new CanvasCommandClient(this.transport);
+    this.canvasCommands = new CanvasCommandClient(this.transport, options.profile.projectId);
   }
 
   get projectId(): string {
-    return this.transport.profile.projectId;
+    return this.options.profile.projectId;
   }
 
   get connectionProfile(): CollaborationConnectionProfile {
-    return this.transport.profile;
+    return this.options.profile;
   }
 
   private get profile(): CollaborationConnectionProfile {
-    return this.transport.profile;
+    return this.options.profile;
   }
 
   private get limits(): CollaborationClientLimits {

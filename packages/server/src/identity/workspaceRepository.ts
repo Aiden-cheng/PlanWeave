@@ -1,14 +1,18 @@
 import { createHash } from "node:crypto";
 import {
   agentHostIdentityViewSchema,
+  humanDeviceTokenSchema,
   identityMigrationStateSchema,
   workspaceIdentityViewSchema,
   workspaceIdSchema,
   workspaceHumanPrincipalViewSchema,
   workspaceMembershipViewSchema,
+  workspacePickerItemSchema,
   type AgentHostIdentityView,
-  type WorkspaceIdentityView
+  type WorkspaceIdentityView,
+  type WorkspacePickerItem
 } from "@planweave-ai/collaboration-contracts";
+import { hashHumanToken } from "./crypto.js";
 import type { SqliteDatabase } from "../sqlite.js";
 
 export type WorkspaceIdentityReadState = {
@@ -239,6 +243,53 @@ export class WorkspaceIdentityRepository {
       )
       .all(humanPrincipalId);
     return rows.map((row) => workspaceIdSchema.parse(String(row.workspace_id)));
+  }
+
+  /** Authenticate only the Workspace-scoped device sessions minted by setup-code redemption. */
+  authenticateWorkspaceDevice(deviceToken: string):
+    | { humanPrincipalId: string; displayName: string }
+    | undefined {
+    const parsedToken = humanDeviceTokenSchema.safeParse(deviceToken);
+    if (!parsedToken.success) return undefined;
+    const row = this.database
+      .prepare(
+        `SELECT s.human_principal_id,p.display_name
+         FROM workspace_device_sessions s
+         JOIN workspace_principals p
+           ON p.workspace_id=s.workspace_id AND p.human_principal_id=s.human_principal_id
+         WHERE s.credential_sha256=?
+           AND s.revoked_at IS NULL
+           AND s.expires_at>?
+           AND p.revoked_at IS NULL`
+      )
+      .get(hashHumanToken(parsedToken.data), nowIso()) as
+      | { human_principal_id: string; display_name: string }
+      | undefined;
+    return row
+      ? { humanPrincipalId: String(row.human_principal_id), displayName: String(row.display_name) }
+      : undefined;
+  }
+
+  /**
+   * Server-authoritative, redacted Workspace membership rows for an authenticated
+   * human device. Project paths and local desktop profiles are intentionally absent.
+   */
+  listActiveWorkspacePickerItems(humanPrincipalId: string): WorkspacePickerItem[] {
+    return this.activeWorkspaceIdsForHumanPrincipal(humanPrincipalId).map((workspaceId) => {
+      const workspace = this.workspaceView(workspaceId);
+      const membership = this.listMembershipViews(workspaceId).find(
+        (candidate) => candidate.humanPrincipalId === humanPrincipalId && candidate.revokedAt === null
+      );
+      if (!membership) throw new Error("workspace_membership_projection_missing");
+      return workspacePickerItemSchema.parse({
+        schemaVersion: "workspace-setup/v1",
+        workspaceId,
+        displayName: workspace.displayName,
+        role: membership.role,
+        archivedAt: workspace.archivedAt,
+        membershipActive: true
+      });
+    });
   }
 
   listHostViews(workspaceId: string, limit: number, offset: number): AgentHostIdentityView[] {

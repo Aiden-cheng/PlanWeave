@@ -28,6 +28,10 @@ export {
 } from "./collaborationCanvasCommands.js";
 export { CollaborationHttpTransport } from "./collaborationHttpTransport.js";
 export {
+  CollaborationWorkspaceClient,
+  type CollaborationWorkspaceClientOptions
+} from "./CollaborationWorkspaceClient.js";
+export {
   CollaborationRegistryClient,
   type CollaborationRegistryClientOptions,
   type CollaborationRegistryReadSnapshotInput,

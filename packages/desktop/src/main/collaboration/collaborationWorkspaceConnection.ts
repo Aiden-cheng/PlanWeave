@@ -14,6 +14,7 @@ import {
   setupCodeFailureMessage
 } from "./collaborationSetupCodeClient.js";
 import { CollaborationClientError, collaborationErrorFromUnknown } from "./collaborationErrors.js";
+import { CollaborationWorkspaceClient } from "./CollaborationWorkspaceClient.js";
 import { redactCollaborationText } from "./redaction.js";
 import {
   WorkspaceConnectionProfileStore,
@@ -47,6 +48,14 @@ function localOnlyView(): ActiveWorkspaceConnectionView {
   });
 }
 
+function emptyWorkspacePickerPage(): WorkspacePickerPage {
+  return workspacePickerPageSchema.parse({
+    schemaVersion: "workspace-setup/v1",
+    items: [],
+    nextCursor: null
+  });
+}
+
 function toPublicProfile(stored: StoredWorkspaceConnectionProfile): WorkspaceConnectionProfile {
   return {
     schemaVersion: stored.schemaVersion,
@@ -74,6 +83,7 @@ export class CollaborationWorkspaceConnection {
   private connectedAt: string | null = null;
   private error: ActiveWorkspaceConnectionError | null = null;
   private workspaceDisplayName: string | null = null;
+  private lastAuthoritativePicker: WorkspacePickerPage = emptyWorkspacePickerPage();
 
   constructor(options: CollaborationWorkspaceConnectionOptions) {
     this.store =
@@ -170,22 +180,80 @@ export class CollaborationWorkspaceConnection {
   }
 
   async buildPickerPage(cursor = 0, limit = 50): Promise<WorkspacePickerPage> {
-    const profiles = await this.store.list();
-    const slice = profiles.slice(cursor, cursor + limit);
-    const page = workspacePickerPageSchema.parse({
-      schemaVersion: "workspace-setup/v1",
-      items: slice.map((profile) => ({
-        schemaVersion: "workspace-setup/v1",
-        workspaceId: profile.workspaceId,
-        displayName: profile.workspaceDisplayName,
-        role: profile.membershipRole,
-        archivedAt: null,
-        membershipActive: profile.membershipActive
-      })),
-      nextCursor: cursor + limit < profiles.length ? cursor + limit : null
-    });
+    const activeId = this.activeProfileId ?? (await this.store.getActiveProfileId());
+    if (!activeId) {
+      const page = emptyWorkspacePickerPage();
+      assertSetupViewRedacted(page);
+      return page;
+    }
+    const stored = await this.store.get(activeId);
+    if (!stored) {
+      throw new CollaborationClientError({
+        kind: "protocol",
+        code: "workspace_connection_profile_missing",
+        message: "The active Workspace connection profile is unavailable.",
+        retryable: false
+      });
+    }
+    const page = await this.listAuthoritativeWorkspaces(stored, cursor, limit);
     assertSetupViewRedacted(page);
     return page;
+  }
+
+  buildCachedPickerPage(): WorkspacePickerPage {
+    assertSetupViewRedacted(this.lastAuthoritativePicker);
+    return this.lastAuthoritativePicker;
+  }
+
+  private async listAuthoritativeWorkspaces(
+    stored: StoredWorkspaceConnectionProfile,
+    cursor: number,
+    limit: number
+  ): Promise<WorkspacePickerPage> {
+    const client = new CollaborationWorkspaceClient({
+      profile: toPublicProfile(stored),
+      credential: { getDeviceToken: () => this.vault.getDeviceToken(stored.profileId) },
+      request: this.request
+    });
+    try {
+      const page = await client.listWorkspaces({ cursor, limit });
+      this.lastAuthoritativePicker = page;
+      return page;
+    } finally {
+      client.dispose();
+    }
+  }
+
+  private async findAuthoritativeWorkspace(
+    stored: StoredWorkspaceConnectionProfile
+  ): Promise<WorkspacePickerPage["items"][number] | null> {
+    let cursor = 0;
+    for (let pageCount = 0; pageCount < 100; pageCount += 1) {
+      const page = await this.listAuthoritativeWorkspaces(stored, cursor, 100);
+      const match = page.items.find(
+        (item) =>
+          item.workspaceId === stored.workspaceId &&
+          item.membershipActive &&
+          item.archivedAt === null
+      );
+      if (match) return match;
+      if (page.nextCursor === null) return null;
+      if (page.nextCursor <= cursor) {
+        throw new CollaborationClientError({
+          kind: "protocol",
+          code: "workspace_connection_pagination_invalid",
+          message: "Workspace picker pagination was invalid.",
+          retryable: false
+        });
+      }
+      cursor = page.nextCursor;
+    }
+    throw new CollaborationClientError({
+      kind: "protocol",
+      code: "workspace_connection_picker_limit_exceeded",
+      message: "Workspace picker exceeded the supported page limit.",
+      retryable: false
+    });
   }
 
   /**
@@ -229,11 +297,7 @@ export class CollaborationWorkspaceConnection {
       await this.store.setActiveProfileId(stored.profileId);
       this.activeProfileId = stored.profileId;
       this.workspaceDisplayName = response.workspaceDisplayName;
-      this.status = "connected";
-      this.connectedAt = nowIso(this.clock);
-      this.error = null;
-      this.onChange?.();
-      return this.buildView();
+      return await this.connectActiveProfile();
     } catch (error) {
       const mapped = collaborationErrorFromUnknown(error);
       this.status = "error";
@@ -264,29 +328,50 @@ export class CollaborationWorkspaceConnection {
     this.activeProfileId = activeId;
     this.workspaceDisplayName = stored.workspaceDisplayName;
     this.onChange?.();
-    const token = await this.vault.getDeviceToken(activeId);
-    if (!token) {
+    try {
+      const token = await this.vault.getDeviceToken(activeId);
+      if (!token) {
+        throw new CollaborationClientError({
+          kind: "auth",
+          code: "collaboration_credential_missing",
+          message: "Human device credential is not available for this Workspace.",
+          retryable: false
+        });
+      }
+      const authoritative = await this.findAuthoritativeWorkspace(stored);
+      if (!authoritative) {
+        throw new CollaborationClientError({
+          kind: "forbidden",
+          code: "workspace_connection_workspace_unavailable",
+          message: "The Server did not authorize this Workspace for the active device.",
+          retryable: false
+        });
+      }
+      await this.store.upsert({
+        profile: toPublicProfile(stored),
+        workspaceDisplayName: authoritative.displayName,
+        membershipRole: authoritative.role,
+        membershipActive: authoritative.membershipActive
+      });
+      this.workspaceDisplayName = authoritative.displayName;
+      this.status = "connected";
+      this.connectedAt = nowIso(this.clock);
+      this.error = null;
+      await this.store.setActiveProfileId(activeId);
+      this.onChange?.();
+      return this.buildView();
+    } catch (error) {
+      const mapped = collaborationErrorFromUnknown(error);
       this.status = "error";
+      this.connectedAt = null;
       this.error = {
-        code: "collaboration_credential_missing",
-        message: "Human device credential is not available for this Workspace.",
-        retryable: false
+        code: mapped.code,
+        message: mapped.message,
+        retryable: mapped.retryable
       };
       this.onChange?.();
-      throw new CollaborationClientError({
-        kind: "auth",
-        code: "collaboration_credential_missing",
-        message: "Human device credential is not available for this Workspace.",
-        retryable: false
-      });
+      throw mapped;
     }
-    // Workspace connection is established when credential + profile bind; observer remains project-scoped.
-    this.status = "connected";
-    this.connectedAt = nowIso(this.clock);
-    this.error = null;
-    await this.store.setActiveProfileId(activeId);
-    this.onChange?.();
-    return this.buildView();
   }
 
   async selectWorkspace(profileId: string): Promise<ActiveWorkspaceConnectionView> {
@@ -320,6 +405,7 @@ export class CollaborationWorkspaceConnection {
     this.status = "local_only";
     this.connectedAt = null;
     this.error = null;
+    this.lastAuthoritativePicker = emptyWorkspacePickerPage();
     this.onChange?.();
     return this.buildView();
   }

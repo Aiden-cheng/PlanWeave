@@ -137,7 +137,7 @@ export type CollaborationStatus = {
    * Never includes secrets.
    */
   workspaceConnection: ActiveWorkspaceConnectionView;
-  /** Redacted Workspace picker rows derived from stored connection profiles. */
+  /** Redacted Workspace picker rows last authenticated by the connected Server. */
   workspacePicker: WorkspacePickerPage;
   updatedAt: string;
 };

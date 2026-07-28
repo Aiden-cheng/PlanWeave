@@ -39,7 +39,10 @@ export type CanvasCommandReconnectInput = {
 export class CanvasCommandClient {
   private readonly session = new CanvasCommandSessionState();
 
-  constructor(private readonly transport: CollaborationHttpTransport) {}
+  constructor(
+    private readonly transport: CollaborationHttpTransport,
+    private readonly projectId: string
+  ) {}
 
   sessionSnapshot(): CanvasCommandSessionSnapshot | null {
     return this.session.snapshot();
@@ -74,7 +77,7 @@ export class CanvasCommandClient {
       type: "canvas.command.submit",
       protocolVersion: CANVAS_COMMAND_PROTOCOL_VERSION,
       schemaVersion: "canvas-command/v1",
-      projectId: this.transport.profile.projectId,
+      projectId: this.projectId,
       canvasId,
       operationId,
       expectedRevision,
@@ -83,7 +86,7 @@ export class CanvasCommandClient {
     this.session.beginSubmit(operationId);
     const outcome = await this.transport.json(
       "POST",
-      `/api/v1/projects/${encodeURIComponent(this.transport.profile.projectId)}/canvases/${encodeURIComponent(canvasId)}/commands`,
+      `/api/v1/projects/${encodeURIComponent(this.projectId)}/canvases/${encodeURIComponent(canvasId)}/commands`,
       canvasCommandOutcomeSchema,
       {
         body,
@@ -125,14 +128,14 @@ export class CanvasCommandClient {
       type: "canvas.reconnect.request",
       protocolVersion: CANVAS_COMMAND_PROTOCOL_VERSION,
       schemaVersion: "canvas-command/v1",
-      projectId: this.transport.profile.projectId,
+      projectId: this.projectId,
       canvasId,
       afterRevision,
       ...(afterContentDigest !== undefined ? { afterContentDigest } : {})
     });
     const response = await this.transport.json(
       "POST",
-      `/api/v1/projects/${encodeURIComponent(this.transport.profile.projectId)}/canvases/${encodeURIComponent(canvasId)}/reconnect`,
+      `/api/v1/projects/${encodeURIComponent(this.projectId)}/canvases/${encodeURIComponent(canvasId)}/reconnect`,
       canvasReconnectResponseSchema,
       {
         body,
