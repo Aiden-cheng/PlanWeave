@@ -11,6 +11,7 @@ import {
   createTestWorkspace
 } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { ArtifactStore } from "../artifacts.js";
+import { canonicalRemoteRuntimePort } from "../canonicalRemoteRuntimePort.js";
 import { createRemoteBlockCoordination } from "../distributedCoordination.js";
 import {
   handleHumanHttpRequest,
@@ -94,7 +95,10 @@ async function setup() {
   const registry = new RemoteRuntimePortRegistry();
   registry.bind(
     { projectId, canvasId },
-    createRemoteBlockRuntimePort({ projectRoot: workspace.root })
+    canonicalRemoteRuntimePort(
+      createRemoteBlockRuntimePort({ projectRoot: workspace.root }),
+      workspaceId
+    )
   );
   const artifacts = new ArtifactStore(storage.database, dataDirectory, 1024 * 1024);
   const coordination = createRemoteBlockCoordination(
@@ -150,6 +154,7 @@ async function setup() {
         await handleHumanRemoteHttpRequest(request, response, {
           service,
           repository: identity,
+          workspaceIdentity,
           projectAuthority,
           readiness: () =>
             acceptingMutations

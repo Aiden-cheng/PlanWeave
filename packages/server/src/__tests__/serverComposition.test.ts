@@ -26,6 +26,7 @@ import {
 } from "../migrations.js";
 import { openServerDatabase } from "../sqlite.js";
 import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
+import { AuthorityRepository } from "../work/authorityRepository.js";
 import {
   createDistributedServerComposition,
   type DistributedServerComposition
@@ -56,6 +57,40 @@ function remoteManifest(): PlanPackageManifest {
     "codex-acp": { adapter: "agent", agent: "codex", runner: { transport: "acp" } }
   };
   return manifest;
+}
+
+async function configureAutomaticExecutionTarget(input: {
+  databasePath: string;
+  projectId: string;
+  canvasId: string;
+  blockRef: string;
+}): Promise<number> {
+  const database = await openServerDatabase(input.databasePath, 5_000);
+  try {
+    const workspaceId = new WorkspaceIdentityRepository(database).workspaceForLegacyProject(
+      input.projectId
+    );
+    if (!workspaceId) throw new Error("test_workspace_mapping_missing");
+    return new AuthorityRepository(database)
+      .applyExecutionTarget({
+        mutation: {
+          schemaVersion: "execution-target/v1",
+          scope: {
+            kind: "block",
+            workspaceId,
+            projectId: input.projectId,
+            canvasId: input.canvasId,
+            blockRef: input.blockRef
+          },
+          target: { kind: "automatic_host" },
+          expectedRevision: 0
+        },
+        actor: { kind: "system", id: "server-composition-test" }
+      })
+      .revision;
+  } finally {
+    database.close();
+  }
 }
 
 async function setup() {
@@ -91,10 +126,21 @@ async function setup() {
     config
   });
   compositions.push(composition);
+  const executionTargetRevision = await configureAutomaticExecutionTarget({
+    databasePath: config.databasePath,
+    projectId,
+    canvasId: "default",
+    blockRef: "T-001#B-001"
+  });
   await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
   const address = httpServer.address();
   if (!address || typeof address === "string") throw new Error("Expected HTTP address");
-  return { composition, projectId, origin: `http://127.0.0.1:${address.port}` };
+  return {
+    composition,
+    projectId,
+    origin: `http://127.0.0.1:${address.port}`,
+    executionTargetRevision
+  };
 }
 
 async function addSecondaryCanvas(root: string): Promise<void> {
@@ -211,6 +257,12 @@ describe("distributed server composition", () => {
     });
     const composition = await createDistributedServerComposition({ httpServer, config });
     compositions.push(composition);
+    const executionTargetRevision = await configureAutomaticExecutionTarget({
+      databasePath: config.databasePath,
+      projectId,
+      canvasId: "secondary",
+      blockRef: "T-001#B-001"
+    });
     await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
     const address = httpServer.address();
     if (!address || typeof address === "string") throw new Error("Expected HTTP address");
@@ -240,10 +292,14 @@ describe("distributed server composition", () => {
       method: "POST",
       headers: jsonHeaders(adminToken),
       body: JSON.stringify({
+        schemaVersion: "remote-run/v2",
         projectId,
         canvasId: "secondary",
         blockRef: "T-001#B-001",
-        idempotencyKey: "secondary-dispatch"
+        idempotencyKey: "secondary-dispatch",
+        expectedResponsibilityRevision: 0,
+        expectedReviewerRevision: 0,
+        expectedExecutionTargetRevision: executionTargetRevision
       })
     });
     expect(secondaryDispatch.status).toBe(202);
@@ -355,10 +411,14 @@ describe("distributed server composition", () => {
     });
 
     const request = {
+      schemaVersion: "remote-run/v2",
       projectId: fixture.projectId,
       canvasId: "default",
       blockRef: "T-001#B-001",
-      idempotencyKey: "composition-dispatch-1"
+      idempotencyKey: "composition-dispatch-1",
+      expectedResponsibilityRevision: 0,
+      expectedReviewerRevision: 0,
+      expectedExecutionTargetRevision: fixture.executionTargetRevision
     };
     const dispatch = async (token: string, body = request) =>
       fetch(`${fixture.origin}/api/v1/remote-operations`, {

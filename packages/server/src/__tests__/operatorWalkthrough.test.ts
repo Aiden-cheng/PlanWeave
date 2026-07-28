@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { operatorEnrollmentGrantResponseSchema } from "@planweave-ai/distributed-protocol";
 import type { PlanPackageManifest } from "@planweave-ai/runtime";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
@@ -272,8 +273,22 @@ describe("remote operator walkthrough", () => {
       })
     });
     expect(grantResponse.status).toBe(201);
-    const grant = (await grantResponse.json()) as { enrollmentCode: string };
+    const grant = operatorEnrollmentGrantResponseSchema.parse(await grantResponse.json());
     expect(grant.enrollmentCode).toMatch(/^pw_enroll_/);
+
+    const bootstrap = await fetch(
+      `${origin}/api/v1/projects/${workspace.init.workspace.id}/human/bootstrap`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          displayName: "Walkthrough Owner",
+          humanPrincipalId: "walkthrough-owner"
+        })
+      }
+    );
+    expect(bootstrap.status).toBe(201);
+    const { deviceToken } = (await bootstrap.json()) as { deviceToken: string };
 
     const hostConfigPath = join(temporaryRoot, "agent-host.json");
     await writeFile(
@@ -288,7 +303,7 @@ describe("remote operator walkthrough", () => {
           capacity: 2,
           capabilities: ["acp.test"]
         },
-        workspaces: [{ id: workspace.init.workspace.id, path: "project" }],
+        workspaces: [{ id: grant.workspaceId, path: "project" }],
         agentProfiles: [
           {
             id: "codex-acp",
@@ -356,16 +371,42 @@ describe("remote operator walkthrough", () => {
     });
     expect(hostId).toBeTruthy();
 
+    const executionTarget = await fetch(
+      `${origin}/api/v1/projects/${workspace.init.workspace.id}/assignments/execution-target`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${deviceToken}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: "execution-target/v1",
+          scope: {
+            kind: "block",
+            workspaceId: grant.workspaceId,
+            projectId: workspace.init.workspace.id,
+            canvasId: "default",
+            blockRef: "T-001#B-001"
+          },
+          target: { kind: "exact_host", hostId },
+          expectedRevision: 0
+        })
+      }
+    );
+    expect(executionTarget.status).toBe(200);
+    const executionTargetBody = (await executionTarget.json()) as { revision: number };
+
     // Operator dispatch proof: HTTP 202 only means the Coordinator accepted the request.
     // Production success requires Host acceptance (leased/running) and a terminal outcome.
     const dispatchResponse = await fetch(`${origin}/api/v1/remote-operations`, {
       method: "POST",
       headers: { ...authorization, "content-type": "application/json" },
       body: JSON.stringify({
+        schemaVersion: "remote-run/v2",
         projectId: workspace.init.workspace.id,
         canvasId: "default",
         blockRef: "T-001#B-001",
-        idempotencyKey: "operator-walkthrough-dispatch"
+        idempotencyKey: "operator-walkthrough-dispatch",
+        expectedResponsibilityRevision: 0,
+        expectedReviewerRevision: 0,
+        expectedExecutionTargetRevision: executionTargetBody.revision
       })
     });
     expect(dispatchResponse.status).toBe(202);

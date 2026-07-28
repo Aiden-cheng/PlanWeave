@@ -10,6 +10,7 @@ import {
 } from "../migrations.js";
 import { AgentHostRepository } from "../hosts.js";
 import { HostReservationRepository } from "../hostReservations.js";
+import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { RemoteOperationRepository } from "../remoteOperations.js";
 import { RemoteExecutionActionRepository } from "../remoteExecutionActions.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
@@ -101,6 +102,10 @@ describe("RemoteOperationRepository", () => {
     const operations = new RemoteOperationRepository(server.database, clock);
     const hosts = new AgentHostRepository(server.database, clock);
     const host = hosts.register("Retry Host").host;
+    const workspaceId = new WorkspaceIdentityRepository(
+      server.database
+    ).ensureWorkspaceForLegacyProject(operationInput.projectId);
+    hosts.bindToWorkspace(host.id, workspaceId);
     hosts.reportOnline(host.id, ["linux", "acp.codex"], 1);
     const reservations = new HostReservationRepository(server.database, {
       leaseDurationMs: 60_000,

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { HostReservationRepository } from "../hostReservations.js";
 import { AgentHostRepository } from "../hosts.js";
+import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 import { RemoteAcpEventRepository } from "../remoteAcpEvents.js";
 import { RemoteInteractionService, type RemoteInteractionIdentity } from "../remoteInteractions.js";
@@ -32,6 +33,10 @@ async function setup() {
   servers.push(server);
   const hosts = new AgentHostRepository(server.database, clock);
   const host = hosts.register("Observation Host").host;
+  const workspaceId = new WorkspaceIdentityRepository(
+    server.database
+  ).ensureWorkspaceForLegacyProject("project-observation");
+  hosts.bindToWorkspace(host.id, workspaceId);
   hosts.reportOnline(host.id, ["linux", "acp.codex", "acp.session.load"], 2);
   const operations = new RemoteOperationRepository(server.database, clock);
   let operation = operations.markClaimed(
