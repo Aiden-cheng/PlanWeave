@@ -80,7 +80,70 @@ describe("access HTTP", () => {
     expect(current.status).toBe(200);
     const view = await current.json();
     expect(view.current.effectiveRole).toBe("owner");
+    expect(view).toMatchObject({ projectAclRevision: 0, canvasAclRevision: 0 });
     expect(JSON.stringify(view)).not.toMatch(/projectRoot|packageDir|\/srv/);
+
+    const projectVisibility = await fetch(
+      `${state.origin}/api/v1/projects/project-a/canvases/default/access`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${state.owner.deviceToken}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          operation: "visibility",
+          scope: { scopeKind: "project", workspaceId: state.workspaceId, projectId: "project-a", canvasId: null },
+          expectedAclRevision: 0,
+          visibility: "shared"
+        })
+      }
+    );
+    expect(projectVisibility.status).toBe(200);
+    await expect(projectVisibility.json()).resolves.toMatchObject({ status: "applied", aclRevision: 1 });
+
+    const canvasVisibility = await fetch(
+      `${state.origin}/api/v1/projects/project-a/canvases/default/access`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${state.owner.deviceToken}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          operation: "visibility",
+          scope: { scopeKind: "canvas", workspaceId: state.workspaceId, projectId: "project-a", canvasId: "default" },
+          expectedAclRevision: 0,
+          visibility: "shared"
+        })
+      }
+    );
+    expect(canvasVisibility.status).toBe(200);
+    await expect(canvasVisibility.json()).resolves.toMatchObject({ status: "applied", aclRevision: 1 });
+
+    const revised = await fetch(`${state.origin}/api/v1/projects/project-a/canvases/default/access`, {
+      headers: { Authorization: `Bearer ${state.owner.deviceToken}` }
+    });
+    await expect(revised.json()).resolves.toMatchObject({
+      projectVisibility: "shared",
+      canvasVisibility: "shared",
+      projectAclRevision: 1,
+      canvasAclRevision: 1
+    });
+
+    const staleProject = await fetch(
+      `${state.origin}/api/v1/projects/project-a/canvases/default/access`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${state.owner.deviceToken}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          operation: "visibility",
+          scope: { scopeKind: "project", workspaceId: state.workspaceId, projectId: "project-a", canvasId: null },
+          expectedAclRevision: 0,
+          visibility: "private"
+        })
+      }
+    );
+    expect(staleProject.status).toBe(409);
+    await expect(staleProject.json()).resolves.toMatchObject({
+      status: "conflict",
+      reason: "acl_revision_conflict",
+      aclRevision: 1
+    });
 
     const crossWorkspace = await fetch(`${state.origin}/api/v1/projects/project-a/canvases/default/access`, {
       method: "POST",

@@ -5,6 +5,7 @@ import {
   accessCapabilityMatrix,
   accessMutationRequestSchema,
   accessMutationResultSchema,
+  currentCanvasAccessViewSchema,
   canvasPersonAccessViewSchema,
   effectiveAccessEvaluationSchema,
   evaluateEffectiveAccess,
@@ -236,6 +237,31 @@ describe("scoped access capability contracts", () => {
         credential: "secret"
       })
     ).toThrow();
+
+    const current = evaluateEffectiveAccess(evaluation({ canvasOwner: actorId }));
+    const currentCanvasView = {
+      scope: { scopeKind: "canvas" as const, workspaceId, projectId, canvasId },
+      projectVisibility: "private" as const,
+      canvasVisibility: "private" as const,
+      projectAclRevision: 3,
+      canvasAclRevision: 5,
+      current,
+      people: [
+        {
+          humanPrincipalId: actorId,
+          displayName: "Owner",
+          membership: "active" as const,
+          effectiveRole: "owner" as const,
+          capabilities: accessCapabilityFlags("owner"),
+          disabledReason: null
+        }
+      ]
+    };
+    expect(currentCanvasAccessViewSchema.parse(currentCanvasView)).toMatchObject({
+      projectAclRevision: 3,
+      canvasAclRevision: 5
+    });
+    expect(currentCanvasAccessViewSchema.safeParse({ ...currentCanvasView, aclRevision: 5 }).success).toBe(false);
 
     const loopback = {
       profileId: "loopback-001",

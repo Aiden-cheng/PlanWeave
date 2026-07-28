@@ -186,7 +186,8 @@ export async function handleAccessHttpRequest(
           scope: { scopeKind: "canvas", workspaceId, projectId: matched.projectId, canvasId: matched.canvasId },
           projectVisibility: project.visibility,
           canvasVisibility: canvas.visibility,
-          aclRevision: canvas.acl.revision,
+          projectAclRevision: project.acl.revision,
+          canvasAclRevision: canvas.acl.revision,
           current,
           people
         })
@@ -196,9 +197,8 @@ export async function handleAccessHttpRequest(
     const mutation = accessMutationRequestSchema.parse(await readJson(request));
     if (
       mutation.scope.workspaceId !== workspaceId ||
-      mutation.scope.scopeKind !== "canvas" ||
       mutation.scope.projectId !== matched.projectId ||
-      mutation.scope.canvasId !== matched.canvasId
+      (mutation.scope.scopeKind === "canvas" && mutation.scope.canvasId !== matched.canvasId)
     ) {
       respond(response, 403, { error: "cross_workspace" });
       return true;

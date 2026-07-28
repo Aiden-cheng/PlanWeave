@@ -375,7 +375,8 @@ export const currentCanvasAccessViewSchema = z
     scope: canvasAccessScopeSchema,
     projectVisibility: z.enum(["private", "shared"]),
     canvasVisibility: z.enum(["private", "shared"]),
-    aclRevision: aclRevisionSchema,
+    projectAclRevision: aclRevisionSchema,
+    canvasAclRevision: aclRevisionSchema,
     current: effectiveAccessViewSchema,
     people: z.array(canvasPersonAccessViewSchema).max(1_000)
   })
