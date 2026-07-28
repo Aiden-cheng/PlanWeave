@@ -50,6 +50,7 @@ export {
   canvasMapLayoutNodeSchema,
   parseCanvasMapLayoutFile
 } from "./types/canvasMapLayoutSchema.js";
+export { materializeAuthoritativeCanvasContent } from "./contentVersionMaterializer.js";
 export type {
   CanvasMapLayoutErrorCode,
   CanvasMapLayoutIssue,

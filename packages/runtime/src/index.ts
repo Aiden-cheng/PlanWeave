@@ -70,6 +70,7 @@ export {
   runtimeSchemaTopicOrder
 } from "./schemaDocs/index.js";
 export { loadPackage } from "./package/loadPackage.js";
+export { materializeAuthoritativeCanvasContent } from "./desktop/contentVersionMaterializer.js";
 export { migrateBlockRunIndexes } from "./autoRun/blockRunIndex.js";
 export { editBlock, editTask } from "./package/manifestEdit.js";
 export { readMarkdown } from "./package/readMarkdown.js";

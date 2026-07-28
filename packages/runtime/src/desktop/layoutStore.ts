@@ -20,7 +20,7 @@ export function defaultDesktopLayout(projectId: string): DesktopLayout {
   };
 }
 
-function layoutPathForWorkspace(workspace: ProjectWorkspace): string {
+export function layoutPathForWorkspace(workspace: ProjectWorkspace): string {
   return join(workspace.workspaceRoot, "desktop", "layout.json");
 }
 
@@ -100,6 +100,27 @@ function normalizeLayout(input: unknown, projectId: string): DesktopLayout {
     };
   }
   return defaultDesktopLayout(projectId);
+}
+
+/** Validate a logical content-version layout against an already validated package. */
+export function parseDesktopLayoutForPackage(
+  input: unknown,
+  workspace: ProjectWorkspace,
+  manifest: PlanPackageManifest
+): DesktopLayout {
+  if (
+    !input ||
+    typeof input !== "object" ||
+    Array.isArray(input) ||
+    (input as Record<string, unknown>).projectId !== workspace.id
+  ) {
+    throw new Error("content_version_layout_invalid");
+  }
+  const normalized = normalizeLayout(input, workspace.id);
+  if (normalized.version !== "desktop-layout/v1" || normalized.projectId !== workspace.id) {
+    throw new Error("content_version_layout_invalid");
+  }
+  return filterLayoutNodes(normalized, manifest);
 }
 
 function filterLayoutNodes(layout: DesktopLayout, manifest: PlanPackageManifest): DesktopLayout {
