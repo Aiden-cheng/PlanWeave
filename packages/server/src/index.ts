@@ -116,6 +116,12 @@ export {
 } from "./registryHttp.js";
 export { handleAccessHttpRequest, type AccessHttpOptions } from "./accessHttp.js";
 export {
+  FixedProjectRegistrationController,
+  LoopbackServerController,
+  type FixedProjectRegistration,
+  type LoopbackServerControllerOptions
+} from "./loopbackController.js";
+export {
   HostEnrollmentError,
   HostEnrollmentService
 } from "./hostEnrollment.js";
