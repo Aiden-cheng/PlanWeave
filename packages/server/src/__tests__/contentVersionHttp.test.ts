@@ -130,7 +130,12 @@ async function fixture() {
     .prepare(
       "INSERT OR IGNORE INTO workspace_principals(workspace_id,human_principal_id,display_name,created_at,revoked_at) VALUES(?,?,?,?,NULL)"
     )
-    .run("w", memberJoin.principal.humanPrincipalId, memberJoin.principal.displayName, "2026-01-01");
+    .run(
+      "w",
+      memberJoin.principal.humanPrincipalId,
+      memberJoin.principal.displayName,
+      "2026-01-01"
+    );
   database
     .prepare(
       "INSERT OR IGNORE INTO workspace_memberships(workspace_id,membership_id,human_principal_id,role,revision,created_at,updated_at,revoked_at) VALUES(?,?,?,?,?,?,?,NULL)"
@@ -179,7 +184,13 @@ async function fixture() {
       service,
       repository: identity,
       workspaceIdentity,
-      projectAuthority: { hasProject: (id) => id === "p" },
+      projectAuthority: {
+        hasProject: (id) => id === "p",
+        hasScope: (scope) =>
+          scope.workspaceId === "w" &&
+          scope.projectId === "p" &&
+          (scope.canvasId === undefined || scope.canvasId === "default")
+      },
       allowInsecureDevelopment: true
     });
   });
@@ -269,11 +280,14 @@ describe("content version HTTP boundary", () => {
     });
     expect(crossScope.status).toBe(403);
     expect(JSON.stringify(await crossScope.json())).not.toContain("package");
-    const crossScopeDiscovery = await fetch(`${origin}/api/v1/projects/p/canvases/other/content/head`, {
-      method: "POST",
-      headers: headers(memberToken),
-      body: JSON.stringify({ localReplica: null, knownRevision: null })
-    });
+    const crossScopeDiscovery = await fetch(
+      `${origin}/api/v1/projects/p/canvases/other/content/head`,
+      {
+        method: "POST",
+        headers: headers(memberToken),
+        body: JSON.stringify({ localReplica: null, knownRevision: null })
+      }
+    );
     expect(crossScopeDiscovery.status).toBe(403);
     database
       .prepare(

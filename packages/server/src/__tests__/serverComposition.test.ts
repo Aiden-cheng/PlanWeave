@@ -68,23 +68,21 @@ async function configureAutomaticExecutionTarget(input: {
 }): Promise<number> {
   const database = await openServerDatabase(input.databasePath, 5_000);
   try {
-    return new AuthorityRepository(database)
-      .applyExecutionTarget({
-        mutation: {
-          schemaVersion: "execution-target/v1",
-          scope: {
-            kind: "block",
-            workspaceId: input.workspaceId,
-            projectId: input.projectId,
-            canvasId: input.canvasId,
-            blockRef: input.blockRef
-          },
-          target: { kind: "automatic_host" },
-          expectedRevision: 0
+    return new AuthorityRepository(database).applyExecutionTarget({
+      mutation: {
+        schemaVersion: "execution-target/v1",
+        scope: {
+          kind: "block",
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          canvasId: input.canvasId,
+          blockRef: input.blockRef
         },
-        actor: { kind: "system", id: "server-composition-test" }
-      })
-      .revision;
+        target: { kind: "automatic_host" },
+        expectedRevision: 0
+      },
+      actor: { kind: "system", id: "server-composition-test" }
+    }).revision;
   } finally {
     database.close();
   }
@@ -232,7 +230,10 @@ describe("distributed server composition", () => {
     if (!address || typeof address === "string") throw new Error("Expected HTTP address");
     const origin = `http://127.0.0.1:${address.port}`;
 
-    const redeemDevice = async (workspaceId: string, displayName: string): Promise<string> => {
+    const redeemDevice = async (
+      workspaceId: string,
+      displayName: string
+    ): Promise<{ token: string; humanPrincipalId: string }> => {
       const issue = await fetch(`${origin}/api/v1/workspaces/${workspaceId}/setup-codes`, {
         method: "POST",
         headers: jsonHeaders(adminToken),
@@ -251,16 +252,26 @@ describe("distributed server composition", () => {
         })
       });
       expect(redeem.status).toBe(200);
-      return ((await redeem.json()) as { deviceToken: string }).deviceToken;
+      const redeemed = (await redeem.json()) as {
+        deviceToken: string;
+        humanPrincipalId: string;
+      };
+      return { token: redeemed.deviceToken, humanPrincipalId: redeemed.humanPrincipalId };
     };
 
-    const [tokenA, tokenB] = await Promise.all([
+    const [deviceA, deviceB] = await Promise.all([
       redeemDevice(workspaceA, "Workspace A Owner"),
       redeemDevice(workspaceB, "Workspace B Owner")
     ]);
+    const tokenA = deviceA.token;
+    const tokenB = deviceB.token;
     const [connectionA, connectionB] = await Promise.all([
-      fetch(`${origin}/api/v1/workspace-connection`, { headers: { Authorization: `Bearer ${tokenA}` } }),
-      fetch(`${origin}/api/v1/workspace-connection`, { headers: { Authorization: `Bearer ${tokenB}` } })
+      fetch(`${origin}/api/v1/workspace-connection`, {
+        headers: { Authorization: `Bearer ${tokenA}` }
+      }),
+      fetch(`${origin}/api/v1/workspace-connection`, {
+        headers: { Authorization: `Bearer ${tokenB}` }
+      })
     ]);
     expect(connectionA.status).toBe(200);
     expect(connectionB.status).toBe(200);
@@ -307,16 +318,110 @@ describe("distributed server composition", () => {
     });
     expect(forgedWorkspace.status).toBe(403);
     await expect(forgedWorkspace.json()).resolves.toEqual({ error: "cross_workspace" });
-    expect(composition.trustedProjectControl.resolveTrustedProjectScope({
+
+    const commentsUrl = `${origin}/api/v1/projects/${projectId}/comments`;
+    const workItem = { kind: "block", canvasId: "default", blockRef: "T-001#B-001" };
+    const createdComment = await fetch(commentsUrl, {
+      method: "POST",
+      headers: jsonHeaders(tokenA),
+      body: JSON.stringify({ workItem, body: "Workspace A only" })
+    });
+    expect(createdComment.status).toBe(201);
+    const commentQuery = `?workItem=${encodeURIComponent(JSON.stringify(workItem))}`;
+    const [commentsA, commentsB] = await Promise.all([
+      fetch(`${commentsUrl}${commentQuery}`, { headers: { Authorization: `Bearer ${tokenA}` } }),
+      fetch(`${commentsUrl}${commentQuery}`, { headers: { Authorization: `Bearer ${tokenB}` } })
+    ]);
+    expect(commentsA.status).toBe(200);
+    expect(commentsB.status).toBe(200);
+    await expect(commentsA.json()).resolves.toMatchObject({
+      items: [expect.objectContaining({ body: "Workspace A only" })]
+    });
+    await expect(commentsB.json()).resolves.toMatchObject({ items: [] });
+
+    const responsibilityUrl = `${origin}/api/v1/projects/${projectId}/assignments/responsibility`;
+    const responsibilityScopeA = {
+      kind: "block",
       workspaceId: workspaceA,
       projectId,
-      canvasId: "default"
-    })).toMatchObject({ workspaceId: workspaceA });
-    expect(composition.trustedProjectControl.resolveTrustedProjectScope({
-      workspaceId: workspaceB,
-      projectId,
-      canvasId: "default"
-    })).toMatchObject({ workspaceId: workspaceB });
+      canvasId: "default",
+      blockRef: "T-001#B-001"
+    };
+    const assignedA = await fetch(responsibilityUrl, {
+      method: "POST",
+      headers: jsonHeaders(tokenA),
+      body: JSON.stringify({
+        schemaVersion: "responsibility/v1",
+        scope: responsibilityScopeA,
+        principal: { kind: "human", humanPrincipalId: deviceA.humanPrincipalId },
+        expectedRevision: 0
+      })
+    });
+    expect(assignedA.status).toBe(200);
+    const responsibilityScopeB = { ...responsibilityScopeA, workspaceId: workspaceB };
+    const authorityB = await fetch(
+      `${responsibilityUrl}?scope=${encodeURIComponent(JSON.stringify(responsibilityScopeB))}`,
+      { headers: { Authorization: `Bearer ${tokenB}` } }
+    );
+    expect(authorityB.status).toBe(200);
+    await expect(authorityB.json()).resolves.toBeNull();
+    const forgedAssignment = await fetch(responsibilityUrl, {
+      method: "POST",
+      headers: jsonHeaders(tokenA),
+      body: JSON.stringify({
+        schemaVersion: "responsibility/v1",
+        scope: responsibilityScopeB,
+        principal: { kind: "human", humanPrincipalId: deviceB.humanPrincipalId },
+        expectedRevision: 0
+      })
+    });
+    expect(forgedAssignment.status).toBe(403);
+
+    const reconnectUrl = `${origin}/api/v1/projects/${projectId}/canvases/default/reconnect`;
+    const [reconnectA, reconnectB] = await Promise.all([
+      fetch(reconnectUrl, {
+        method: "POST",
+        headers: jsonHeaders(tokenA),
+        body: JSON.stringify({ afterRevision: 0 })
+      }),
+      fetch(reconnectUrl, {
+        method: "POST",
+        headers: jsonHeaders(tokenB),
+        body: JSON.stringify({ afterRevision: 0 })
+      })
+    ]);
+    expect(reconnectA.status).toBe(200);
+    expect(reconnectB.status).toBe(200);
+
+    const contentHeadUrl = `${origin}/api/v1/projects/${projectId}/canvases/default/content/head`;
+    const [headA, headB] = await Promise.all([
+      fetch(contentHeadUrl, {
+        method: "POST",
+        headers: jsonHeaders(tokenA),
+        body: JSON.stringify({ localReplica: null, knownRevision: null })
+      }),
+      fetch(contentHeadUrl, {
+        method: "POST",
+        headers: jsonHeaders(tokenB),
+        body: JSON.stringify({ localReplica: null, knownRevision: null })
+      })
+    ]);
+    expect(headA.status).toBe(200);
+    expect(headB.status).toBe(200);
+    expect(
+      composition.trustedProjectControl.resolveTrustedProjectScope({
+        workspaceId: workspaceA,
+        projectId,
+        canvasId: "default"
+      })
+    ).toMatchObject({ workspaceId: workspaceA });
+    expect(
+      composition.trustedProjectControl.resolveTrustedProjectScope({
+        workspaceId: workspaceB,
+        projectId,
+        canvasId: "default"
+      })
+    ).toMatchObject({ workspaceId: workspaceB });
   });
 
   it("materializes trusted registry owners during bootstrap for listing and management", async () => {
@@ -390,7 +495,12 @@ describe("distributed server composition", () => {
       allowInsecureDevelopment: true,
       dataDirectory,
       trustedProjects: [
-        { workspaceId: "workspace-server", projectId, projectRoot: workspace.root, trustAllDeclaredCanvases: true }
+        {
+          workspaceId: "workspace-server",
+          projectId,
+          projectRoot: workspace.root,
+          trustAllDeclaredCanvases: true
+        }
       ],
       operatorCredentials: [
         {
@@ -467,7 +577,12 @@ describe("distributed server composition", () => {
       allowInsecureDevelopment: true,
       dataDirectory,
       trustedProjects: [
-        { workspaceId: "workspace-server", projectId, projectRoot: workspace.root, canvasId: "default" }
+        {
+          workspaceId: "workspace-server",
+          projectId,
+          projectRoot: workspace.root,
+          canvasId: "default"
+        }
       ],
       operatorCredentials: [
         {

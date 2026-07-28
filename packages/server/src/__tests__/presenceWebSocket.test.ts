@@ -1,7 +1,10 @@
 import { createServer, type Server as HttpServer } from "node:http";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import { basicManifest, createTestWorkspace } from "../../../runtime/src/__tests__/promptTestHelpers.js";
+import {
+  basicManifest,
+  createTestWorkspace
+} from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { parseServerConfig } from "../config.js";
@@ -27,7 +30,9 @@ afterEach(async () => {
   await Promise.all(
     servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve())))
   );
-  await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+  await Promise.all(
+    directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
+  );
 });
 
 async function setup() {
@@ -43,7 +48,12 @@ async function setup() {
     allowInsecureDevelopment: true,
     dataDirectory: join(workspace.root, "server-data"),
     trustedProjects: [
-      { projectId: workspace.init.workspace.id, canvasId: "default", projectRoot: workspace.root }
+      {
+        workspaceId: "presence-workspace",
+        projectId: workspace.init.workspace.id,
+        canvasId: "default",
+        projectRoot: workspace.root
+      }
     ],
     operatorCredentials: [
       {
@@ -155,7 +165,9 @@ describe("canvas presence WebSocket", () => {
       { headers: { Authorization: `Bearer ${owner.deviceToken}` } }
     );
     const unknownStatus = await new Promise<number>((resolve) => {
-      unknownCanvas.once("unexpected-response", (_request, response) => resolve(response.statusCode));
+      unknownCanvas.once("unexpected-response", (_request, response) =>
+        resolve(response.statusCode)
+      );
     });
     expect(unknownStatus).toBe(403);
     const unauthorized = new WebSocket(
@@ -163,7 +175,9 @@ describe("canvas presence WebSocket", () => {
       { headers: { Authorization: "Bearer operator-token-not-human" } }
     );
     const unauthorizedStatus = await new Promise<number>((resolve) => {
-      unauthorized.once("unexpected-response", (_request, response) => resolve(response.statusCode));
+      unauthorized.once("unexpected-response", (_request, response) =>
+        resolve(response.statusCode)
+      );
     });
     expect(unauthorizedStatus).toBe(401);
   });
@@ -175,7 +189,10 @@ describe("canvas presence WebSocket", () => {
       `${fixture.origin}/api/v1/projects/${fixture.projectId}/human/invitations`,
       {
         method: "POST",
-        headers: { "content-type": "application/json", Authorization: `Bearer ${owner.deviceToken}` },
+        headers: {
+          "content-type": "application/json",
+          Authorization: `Bearer ${owner.deviceToken}`
+        },
         body: JSON.stringify({})
       }
     );
@@ -199,7 +216,9 @@ describe("canvas presence WebSocket", () => {
     const url = `${fixture.wsOrigin}/api/v1/projects/${fixture.projectId}/canvases/default/human/presence`;
     const revokedSocket = await connect(url, owner.deviceToken);
     const peerSocket = await connect(url, secondDevice.deviceToken);
-    const revokedClose = new Promise<number>((resolve) => revokedSocket.once("close", (code) => resolve(code)));
+    const revokedClose = new Promise<number>((resolve) =>
+      revokedSocket.once("close", (code) => resolve(code))
+    );
     hello(revokedSocket, fixture.projectId);
     await nextMessage(revokedSocket);
     hello(peerSocket, fixture.projectId);

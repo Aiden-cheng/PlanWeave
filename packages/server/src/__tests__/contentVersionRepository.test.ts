@@ -30,7 +30,12 @@ function content(updatedAt = "2026-01-01T00:00:00.000Z"): CompleteContentVersion
     {
       kind: "desktop_layout" as const,
       path: "desktop/layout.json",
-      content: JSON.stringify({ version: "desktop-layout/v1", projectId: "p", nodes: [], updatedAt })
+      content: JSON.stringify({
+        version: "desktop-layout/v1",
+        projectId: "p",
+        nodes: [],
+        updatedAt
+      })
     },
     {
       kind: "manifest" as const,
@@ -154,7 +159,7 @@ const member = {
 describe("authoritative content version repository", () => {
   it("persists a verified owner-only initial version before creating the first head", async () => {
     const { repository, service } = await fixture();
-    expect(latestCentralSchemaVersion).toBe(33);
+    expect(latestCentralSchemaVersion).toBe(35);
     const result = service.publishInitial(owner, {
       projectId: "p",
       canvasId: "default",
@@ -220,9 +225,10 @@ describe("authoritative content version repository", () => {
 
   it("rejects semantically incomplete content before creating a first head", async () => {
     const invalidCases = [
-      (value: CompleteContentVersion) => value.members.map((member) =>
-        member.path === "manifest.json" ? { ...member, content: "{}" } : member
-      ),
+      (value: CompleteContentVersion) =>
+        value.members.map((member) =>
+          member.path === "manifest.json" ? { ...member, content: "{}" } : member
+        ),
       (value: CompleteContentVersion) =>
         value.members.filter((member) => member.path !== "nodes/T-001/blocks/B-001.prompt.md"),
       (value: CompleteContentVersion) => [
@@ -235,9 +241,10 @@ describe("authoritative content version repository", () => {
           sizeBytes: 0
         }
       ],
-      (value: CompleteContentVersion) => value.members.map((member) =>
-        member.path === "desktop/layout.json" ? { ...member, content: "{}" } : member
-      )
+      (value: CompleteContentVersion) =>
+        value.members.map((member) =>
+          member.path === "desktop/layout.json" ? { ...member, content: "{}" } : member
+        )
     ];
     for (const change of invalidCases) {
       const { repository, service } = await fixture();
@@ -253,7 +260,11 @@ describe("authoritative content version repository", () => {
         members,
         totalBytes,
         canonicalDigest: sha256(
-          canonicalContentVersionDigestPayload({ members, totalBytes, canonicalDigest: "0".repeat(64) })
+          canonicalContentVersionDigestPayload({
+            members,
+            totalBytes,
+            canonicalDigest: "0".repeat(64)
+          })
         )
       };
       expect(
@@ -365,7 +376,11 @@ describe("authoritative content version repository", () => {
       createdBy: { kind: "human", id: "owner" }
     });
     inWriteTransaction(database, () => {
-      repository.advanceHeadForSqliteCommit({ scope, expectedRevision: 1, content: advanced.completed });
+      repository.advanceHeadForSqliteCommit({
+        scope,
+        expectedRevision: 1,
+        content: advanced.completed
+      });
     });
     expect(
       service.discoverAuthority(member, {
@@ -425,7 +440,9 @@ describe("authoritative content version repository", () => {
       replicaStatus: "diverged",
       recoveryAction: "await_initial_publish"
     });
-    expect(() => repository.readVersion(otherScope, first.version.completed)).toThrow("content_version_not_found");
+    expect(() => repository.readVersion(otherScope, first.version.completed)).toThrow(
+      "content_version_not_found"
+    );
     expect(() =>
       repository.acknowledge({
         scope: otherScope,
@@ -496,7 +513,11 @@ describe("authoritative content version repository", () => {
       createdBy: { kind: "human", id: "owner" }
     });
     inWriteTransaction(database, () => {
-      repository.advanceHeadForSqliteCommit({ scope, expectedRevision: 1, content: advanced.completed });
+      repository.advanceHeadForSqliteCommit({
+        scope,
+        expectedRevision: 1,
+        content: advanced.completed
+      });
     });
     database
       .prepare(

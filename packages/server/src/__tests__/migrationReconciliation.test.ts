@@ -139,18 +139,22 @@ describe("collaboration migration reconciliation", () => {
       "setup-code"
     ]);
     expect(
-      migrationModules.slice(-5).map((module) => ({
-        name: module.name,
-        versions: module.migrations.map((migration) => migration.version)
-      }))
+      migrationModules
+        .filter((module) => module.migrations.some((migration) => migration.version >= 27))
+        .map((module) => ({
+          name: module.name,
+          versions: module.migrations.map((migration) => migration.version)
+        }))
     ).toEqual([
-      { name: "identity", versions: [27] },
+      { name: "identity", versions: [27, 34] },
       { name: "acl-registry", versions: [28] },
       { name: "assignment-authority", versions: [29] },
       { name: "canvas-command", versions: [30] },
-      { name: "setup-code", versions: [31, 32] }
+      { name: "content-versions", versions: [33] },
+      { name: "setup-code", versions: [31, 32] },
+      { name: "comment-workspace-scope", versions: [35] }
     ]);
-    expect(latestCentralSchemaVersion).toBe(32);
+    expect(latestCentralSchemaVersion).toBe(35);
   });
 
   it("maps a representative v26 project to one stable Workspace and package registry key", async () => {
@@ -204,7 +208,9 @@ describe("collaboration migration reconciliation", () => {
     applyMigrations(database);
     expect(
       database
-        .prepare("SELECT workspace_id FROM legacy_project_workspace_mappings WHERE legacy_project_id=?")
+        .prepare(
+          "SELECT workspace_id FROM legacy_project_workspace_mappings WHERE legacy_project_id=?"
+        )
         .get("legacy-project")
     ).toEqual({ workspace_id: workspaceId });
   });
@@ -243,11 +249,13 @@ describe("collaboration migration reconciliation", () => {
     expect(tableExists(canvas, "canvas_command_journal")).toBe(true);
     expect(tableExists(setup, "setup_code_grants")).toBe(true);
     expect(tableExists(setup, "setup_code_host_enrollment_outcomes")).toBe(true);
+    expect(canvas.prepare("SELECT version FROM schema_migrations WHERE version=30").get()).toEqual({
+      version: 30
+    });
     expect(
-      canvas.prepare("SELECT version FROM schema_migrations WHERE version=30").get()
-    ).toEqual({ version: 30 });
-    expect(
-      setup.prepare("SELECT version FROM schema_migrations WHERE version IN (31,32) ORDER BY version").all()
+      setup
+        .prepare("SELECT version FROM schema_migrations WHERE version IN (31,32) ORDER BY version")
+        .all()
     ).toEqual([{ version: 31 }, { version: 32 }]);
   });
 

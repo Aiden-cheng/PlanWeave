@@ -173,7 +173,7 @@ describe("human identity migration v16", () => {
     // Minimal tables required only if later migrations depend on them — v16 is additive.
     applyMigrations(database);
     expect(centralSchemaVersion(database)).toBe(latestCentralSchemaVersion);
-    expect(latestCentralSchemaVersion).toBe(32);
+    expect(latestCentralSchemaVersion).toBe(35);
 
     for (const table of [
       "human_principals",

@@ -292,7 +292,7 @@ describe("comment and activity production HTTP", () => {
       `${fixture.origin}/api/v1/projects/${projectId}/activity?limit=20`,
       { headers: { Authorization: `Bearer ${otherToken}` } }
     );
-    expect(crossProject.status).toBe(401);
+    expect(crossProject.status).toBe(403);
 
     const unknown = await fetch(
       `${fixture.origin}/api/v1/projects/unknown-project/comments?${listParams}`,
@@ -430,7 +430,7 @@ describe("comment and activity production HTTP", () => {
       `${fixture.origin}/api/v1/projects/${projectId}/assignments?workItem=${workItemParameter}`,
       { headers: { Authorization: `Bearer ${otherToken}` } }
     );
-    expect(crossProject.status).toBe(401);
+    expect(crossProject.status).toBe(403);
   });
 
   it("commits boundary work-item assignments with distinct bounded activity source keys", async () => {
@@ -496,18 +496,15 @@ describe("comment and activity production HTTP", () => {
     ];
 
     for (const workItem of workItems) {
-      const response = await fetch(
-        `${fixture.origin}/api/v1/projects/${projectId}/assignments`,
-        {
-          method: "POST",
-          headers: jsonHeaders(ownerToken),
-          body: JSON.stringify({
-            workItem,
-            target: { kind: "unassigned" },
-            expectedRevision: 0
-          })
-        }
-      );
+      const response = await fetch(`${fixture.origin}/api/v1/projects/${projectId}/assignments`, {
+        method: "POST",
+        headers: jsonHeaders(ownerToken),
+        body: JSON.stringify({
+          workItem,
+          target: { kind: "unassigned" },
+          expectedRevision: 0
+        })
+      });
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toMatchObject({ workItem, revision: 1 });
 

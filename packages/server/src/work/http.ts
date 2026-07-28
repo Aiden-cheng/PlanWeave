@@ -9,7 +9,9 @@ import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import {
+  authenticateCollaborationForScope,
   authenticateCollaborationForProject,
+  hasAuthenticatedCollaborationDevice,
   humanTransportAllowed,
   type CollaborationAuthContext,
   type HumanIdentityRepository,
@@ -48,6 +50,7 @@ const rateBuckets = new Map<string, RateBucket>();
 export type WorkAssignmentHttpOptions = {
   resolveService(projectId: string): WorkAssignmentService | undefined;
   acquireAuthorityService?(
+    workspaceId: string,
     projectId: string,
     canvasId: string
   ): { service: AuthorityService; release(): void } | undefined;
@@ -288,24 +291,37 @@ export async function handleWorkAssignmentHttpRequest(
       respond(response, 426, { error: "human_insecure_transport" });
       return true;
     }
-    if (!options.projectAuthority.hasProject(matched.projectId)) {
-      request.resume();
-      respond(response, 403, { error: "work_cross_project_forbidden" });
-      return true;
-    }
     const now = (options.clock ?? (() => new Date()))().getTime();
     if (!rateLimitAllowed(request, matched.projectId, now)) {
       request.resume();
       respond(response, 429, { error: "assignment_rate_limited" });
       return true;
     }
-    const actor = authenticateCollaborationForProject(
+    const credentialActor = authenticateCollaborationForProject(
       options.repository,
       options.workspaceIdentity,
       request.headers.authorization,
       matched.projectId
     );
-    if (!actor) throw new WorkAssignmentServiceError("work_auth_unauthenticated");
+    if (
+      !credentialActor &&
+      !hasAuthenticatedCollaborationDevice(
+        options.repository,
+        options.workspaceIdentity,
+        request.headers.authorization
+      )
+    ) {
+      throw new WorkAssignmentServiceError("work_auth_unauthenticated");
+    }
+    const authenticated = authenticateCollaborationForScope(
+      options.repository,
+      options.workspaceIdentity,
+      options.projectAuthority,
+      request.headers.authorization,
+      matched.projectId
+    );
+    if (!authenticated) throw new WorkAssignmentServiceError("work_cross_project_forbidden");
+    const actor = authenticated.actor;
     const service = options.resolveService(matched.projectId);
     if (
       !service &&
@@ -413,7 +429,13 @@ export async function handleWorkAssignmentHttpRequest(
           access: options.access,
           workspaceIdentity: options.workspaceIdentity
         });
-        const handle = options.acquireAuthorityService?.(matched.projectId, body.scope.canvasId);
+        if (!options.projectAuthority.hasScope({ ...authenticated, canvasId: body.scope.canvasId }))
+          throw new WorkAssignmentServiceError("work_cross_project_forbidden");
+        const handle = options.acquireAuthorityService?.(
+          authenticated.workspaceId,
+          matched.projectId,
+          body.scope.canvasId
+        );
         if (!handle) throw new WorkAssignmentServiceError("work_cross_project_forbidden");
         try {
           respond(response, 200, handle.service.updateResponsibility(actor, body));
@@ -433,7 +455,13 @@ export async function handleWorkAssignmentHttpRequest(
           access: options.access,
           workspaceIdentity: options.workspaceIdentity
         });
-        const handle = options.acquireAuthorityService?.(matched.projectId, body.scope.canvasId);
+        if (!options.projectAuthority.hasScope({ ...authenticated, canvasId: body.scope.canvasId }))
+          throw new WorkAssignmentServiceError("work_cross_project_forbidden");
+        const handle = options.acquireAuthorityService?.(
+          authenticated.workspaceId,
+          matched.projectId,
+          body.scope.canvasId
+        );
         if (!handle) throw new WorkAssignmentServiceError("work_cross_project_forbidden");
         try {
           respond(response, 200, handle.service.updateReviewer(actor, body));
@@ -453,7 +481,13 @@ export async function handleWorkAssignmentHttpRequest(
           access: options.access,
           workspaceIdentity: options.workspaceIdentity
         });
-        const handle = options.acquireAuthorityService?.(matched.projectId, body.scope.canvasId);
+        if (!options.projectAuthority.hasScope({ ...authenticated, canvasId: body.scope.canvasId }))
+          throw new WorkAssignmentServiceError("work_cross_project_forbidden");
+        const handle = options.acquireAuthorityService?.(
+          authenticated.workspaceId,
+          matched.projectId,
+          body.scope.canvasId
+        );
         if (!handle) throw new WorkAssignmentServiceError("work_cross_project_forbidden");
         try {
           respond(response, 200, handle.service.updateExecutionTarget(actor, body));
@@ -465,7 +499,13 @@ export async function handleWorkAssignmentHttpRequest(
       case "authority_get": {
         const parameters = query(url, ["scope"]);
         const scope = authorityScopeSchema.parse(parseJsonParameter(parameters.scope));
-        const handle = options.acquireAuthorityService?.(matched.projectId, scope.canvasId);
+        if (!options.projectAuthority.hasScope({ ...authenticated, canvasId: scope.canvasId }))
+          throw new WorkAssignmentServiceError("work_cross_project_forbidden");
+        const handle = options.acquireAuthorityService?.(
+          authenticated.workspaceId,
+          matched.projectId,
+          scope.canvasId
+        );
         if (!handle) throw new WorkAssignmentServiceError("work_cross_project_forbidden");
         try {
           const result =
@@ -483,7 +523,13 @@ export async function handleWorkAssignmentHttpRequest(
       case "authority_projection": {
         const parameters = query(url, ["scope"]);
         const scope = authorityScopeSchema.parse(parseJsonParameter(parameters.scope));
-        const handle = options.acquireAuthorityService?.(matched.projectId, scope.canvasId);
+        if (!options.projectAuthority.hasScope({ ...authenticated, canvasId: scope.canvasId }))
+          throw new WorkAssignmentServiceError("work_cross_project_forbidden");
+        const handle = options.acquireAuthorityService?.(
+          authenticated.workspaceId,
+          matched.projectId,
+          scope.canvasId
+        );
         if (!handle) throw new WorkAssignmentServiceError("work_cross_project_forbidden");
         try {
           respond(response, 200, handle.service.getWorkAuthorityProjection(actor, scope));

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { workspaceIdSchema } from "@planweave-ai/collaboration-contracts";
 import {
   actorRefSchema,
   humanPrincipalIdSchema,
@@ -98,14 +99,23 @@ function toRecord(row: CommentRow): CommentRecord {
  * the application service validates those first.
  */
 export class CommentRepository {
-  constructor(readonly database: SqliteDatabase) {}
+  private readonly workspaceId: string;
+
+  constructor(
+    readonly database: SqliteDatabase,
+    workspaceId = "legacy"
+  ) {
+    this.workspaceId = workspaceIdSchema.parse(workspaceId);
+  }
 
   get(projectId: string, commentId: string): CommentRecord | undefined {
     const row = this.database
-      .prepare(`SELECT * FROM comments WHERE project_id=? AND comment_id=?`)
-      .get(humanProjectIdSchema.parse(projectId), commentIdSchema.parse(commentId)) as
-      | CommentRow
-      | undefined;
+      .prepare(`SELECT * FROM comments WHERE workspace_id=? AND project_id=? AND comment_id=?`)
+      .get(
+        this.workspaceId,
+        humanProjectIdSchema.parse(projectId),
+        commentIdSchema.parse(commentId)
+      ) as CommentRow | undefined;
     return row ? toRecord(row) : undefined;
   }
 
@@ -131,14 +141,15 @@ export class CommentRepository {
       this.database
         .prepare(
           `INSERT INTO comments(
-            comment_id,project_id,canvas_id,work_item_kind,work_item_key,
+            comment_id,workspace_id,project_id,canvas_id,work_item_kind,work_item_key,
             author_human_principal_id,body,body_format,revision,created_at,updated_at,
             attachments_json,tombstoned_at,tombstoned_by_kind,tombstoned_by_id,
             tombstoned_by_display_name,tombstone_reason
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?, NULL, NULL, NULL, NULL, NULL)`
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, NULL, NULL, NULL, NULL, NULL)`
         )
         .run(
           parsed.commentId,
+          this.workspaceId,
           parsed.projectId,
           parts.canvasId,
           parts.workItemKind,
@@ -194,7 +205,7 @@ export class CommentRepository {
           tombstoned_by_id=?,
           tombstoned_by_display_name=?,
           tombstone_reason=?
-         WHERE project_id=? AND comment_id=? AND revision=?`
+         WHERE workspace_id=? AND project_id=? AND comment_id=? AND revision=?`
       )
       .run(
         record.body,
@@ -206,6 +217,7 @@ export class CommentRepository {
         tombstonedBy?.id ?? null,
         tombstonedBy?.displayName ?? null,
         record.tombstoneReason ?? null,
+        this.workspaceId,
         record.projectId,
         record.commentId,
         input.expectedRevision
@@ -244,7 +256,7 @@ export class CommentRepository {
       const rows = this.database
         .prepare(
           `SELECT * FROM comments
-           WHERE project_id=? AND canvas_id=? AND work_item_kind=? AND work_item_key=?
+           WHERE workspace_id=? AND project_id=? AND canvas_id=? AND work_item_kind=? AND work_item_key=?
              ${tombstoneClause}
              AND (
                created_at > ?
@@ -254,6 +266,7 @@ export class CommentRepository {
            LIMIT ?`
         )
         .all(
+          this.workspaceId,
           projectId,
           parts.canvasId,
           parts.workItemKind,
@@ -269,12 +282,19 @@ export class CommentRepository {
     const rows = this.database
       .prepare(
         `SELECT * FROM comments
-         WHERE project_id=? AND canvas_id=? AND work_item_kind=? AND work_item_key=?
+         WHERE workspace_id=? AND project_id=? AND canvas_id=? AND work_item_kind=? AND work_item_key=?
            ${tombstoneClause}
          ORDER BY created_at ASC, comment_id ASC
          LIMIT ?`
       )
-      .all(projectId, parts.canvasId, parts.workItemKind, parts.workItemKey, limit) as CommentRow[];
+      .all(
+        this.workspaceId,
+        projectId,
+        parts.canvasId,
+        parts.workItemKind,
+        parts.workItemKey,
+        limit
+      ) as CommentRow[];
     return rows.map(toRecord);
   }
 
@@ -296,9 +316,12 @@ export class CommentRepository {
   ): void {
     const parsed = commentAttachmentMetadataSchema.array().parse(attachments);
     this.database
-      .prepare(`UPDATE comments SET attachments_json=? WHERE project_id=? AND comment_id=?`)
+      .prepare(
+        `UPDATE comments SET attachments_json=? WHERE workspace_id=? AND project_id=? AND comment_id=?`
+      )
       .run(
         JSON.stringify(parsed),
+        this.workspaceId,
         humanProjectIdSchema.parse(projectId),
         commentIdSchema.parse(commentId)
       );

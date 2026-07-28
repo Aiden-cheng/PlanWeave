@@ -9,11 +9,15 @@ import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import {
-  authenticateHumanForProject,
+  authenticateCollaborationForScope,
+  authenticateCollaborationForProject,
+  hasAuthenticatedCollaborationDevice,
+  humanAuthContextSchema,
   humanTransportAllowed,
   type HumanIdentityRepository,
   type HumanProjectAuthority
 } from "../identity/index.js";
+import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { CommentService, CommentServiceError } from "./service.js";
 
 const MAX_COMMENT_BODY_BYTES = 262_144;
@@ -31,12 +35,38 @@ type RateBucket = { windowStartedAt: number; count: number };
 const rateBuckets = new Map<string, RateBucket>();
 
 export type CommentActivityHttpOptions = {
-  resolveService(projectId: string): CommentService | undefined;
+  resolveService(workspaceId: string, projectId: string): CommentService | undefined;
   repository: HumanIdentityRepository;
+  workspaceIdentity: WorkspaceIdentityRepository;
   projectAuthority: HumanProjectAuthority;
   allowInsecureDevelopment?: boolean;
   clock?: () => Date;
 };
+
+function commentActor(
+  authenticated: NonNullable<ReturnType<typeof authenticateCollaborationForScope>>,
+  workspaceIdentity: WorkspaceIdentityRepository
+) {
+  if (!("kind" in authenticated.actor) || authenticated.actor.kind !== "workspace_device") {
+    return authenticated.actor;
+  }
+  const membership = workspaceIdentity
+    .listMembershipViews(authenticated.workspaceId)
+    .find(
+      (candidate) =>
+        candidate.humanPrincipalId === authenticated.actor.humanPrincipalId &&
+        candidate.revokedAt === null
+    );
+  if (!membership) throw new CommentServiceError("comment_auth_forbidden");
+  return humanAuthContextSchema.parse({
+    humanPrincipalId: authenticated.actor.humanPrincipalId,
+    displayName: authenticated.actor.displayName,
+    deviceCredentialId: authenticated.actor.deviceSessionId,
+    projectId: authenticated.projectId,
+    role: membership.role,
+    membershipId: membership.membershipId
+  });
+}
 
 function decodeIdentifier(value: string): string | undefined {
   try {
@@ -219,24 +249,38 @@ export async function handleCommentActivityHttpRequest(
       respond(response, 426, { error: "human_insecure_transport" });
       return true;
     }
-    if (!options.projectAuthority.hasProject(matched.projectId)) {
-      request.resume();
-      respond(response, 403, { error: "comment_cross_project_forbidden" });
-      return true;
-    }
     const now = (options.clock ?? (() => new Date()))().getTime();
     if (!rateLimitAllowed(request, matched.projectId, now)) {
       request.resume();
       respond(response, 429, { error: "comment_rate_limited" });
       return true;
     }
-    const actor = authenticateHumanForProject(
+    const credentialActor = authenticateCollaborationForProject(
       options.repository,
+      options.workspaceIdentity,
       request.headers.authorization,
       matched.projectId
     );
-    if (!actor) throw new CommentServiceError("comment_auth_unauthenticated");
-    const service = options.resolveService(matched.projectId);
+    if (
+      !credentialActor &&
+      !hasAuthenticatedCollaborationDevice(
+        options.repository,
+        options.workspaceIdentity,
+        request.headers.authorization
+      )
+    ) {
+      throw new CommentServiceError("comment_auth_unauthenticated");
+    }
+    const authenticated = authenticateCollaborationForScope(
+      options.repository,
+      options.workspaceIdentity,
+      options.projectAuthority,
+      request.headers.authorization,
+      matched.projectId
+    );
+    if (!authenticated) throw new CommentServiceError("comment_cross_project_forbidden");
+    const actor = commentActor(authenticated, options.workspaceIdentity);
+    const service = options.resolveService(authenticated.workspaceId, matched.projectId);
     if (!service) throw new CommentServiceError("comment_cross_project_forbidden");
 
     switch (matched.kind) {
@@ -253,7 +297,10 @@ export async function handleCommentActivityHttpRequest(
       case "edit_comment": {
         query(url, []);
         const parsedBody = commentEditHttpBodySchema.parse(await readJson(request));
-        const body = commentEditWireCommandSchema.parse({ ...parsedBody, commentId: matched.commentId });
+        const body = commentEditWireCommandSchema.parse({
+          ...parsedBody,
+          commentId: matched.commentId
+        });
         respond(
           response,
           200,
@@ -287,12 +334,18 @@ export async function handleCommentActivityHttpRequest(
         const wire = commentListWireQuerySchema.parse({
           workItem: parseJsonParameter(parameters.workItem),
           ...(parameters.limit === undefined ? {} : { limit: Number(parameters.limit) }),
-          ...(parameters.cursor === undefined ? {} : { cursor: parseJsonParameter(parameters.cursor) }),
+          ...(parameters.cursor === undefined
+            ? {}
+            : { cursor: parseJsonParameter(parameters.cursor) }),
           ...(parameters.includeTombstoned === undefined
             ? {}
             : { includeTombstoned: parameters.includeTombstoned === "true" })
         });
-        respond(response, 200, service.listComments({ ...wire, actor, projectId: matched.projectId }));
+        respond(
+          response,
+          200,
+          service.listComments({ ...wire, actor, projectId: matched.projectId })
+        );
         return true;
       }
       case "list_activity": {
@@ -302,9 +355,15 @@ export async function handleCommentActivityHttpRequest(
             ? {}
             : { workItem: parseJsonParameter(parameters.workItem) }),
           ...(parameters.limit === undefined ? {} : { limit: Number(parameters.limit) }),
-          ...(parameters.cursor === undefined ? {} : { cursor: parseJsonParameter(parameters.cursor) })
+          ...(parameters.cursor === undefined
+            ? {}
+            : { cursor: parseJsonParameter(parameters.cursor) })
         });
-        respond(response, 200, service.listActivity({ ...wire, actor, projectId: matched.projectId }));
+        respond(
+          response,
+          200,
+          service.listActivity({ ...wire, actor, projectId: matched.projectId })
+        );
         return true;
       }
     }

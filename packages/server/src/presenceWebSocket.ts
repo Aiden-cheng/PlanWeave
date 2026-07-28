@@ -9,6 +9,7 @@ import {
 } from "@planweave-ai/collaboration-contracts";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import {
+  authenticateCollaborationForScope,
   authenticateCollaborationForProject,
   humanTransportAllowed,
   type HumanIdentityRepository,
@@ -22,9 +23,7 @@ import {
 } from "./presenceHub.js";
 import type { WebSocketUpgradeRouter } from "./webSocketUpgradeRouter.js";
 
-export type CanvasPresenceProjectAuthority = HumanProjectAuthority & {
-  hasCanvas(projectId: string, canvasId: string): boolean;
-};
+export type CanvasPresenceProjectAuthority = HumanProjectAuthority;
 
 const PRESENCE_PATH_PATTERN =
   /^\/api\/v1\/projects\/([^/]+)\/canvases\/([^/]+)\/human\/presence(?:\?.*)?$/;
@@ -52,6 +51,7 @@ type PresenceRoute = {
   projectId: string;
   canvasId: string;
 };
+type ScopedPresenceRoute = PresenceRoute & { workspaceId: string };
 
 function routeFromUrl(url: string | undefined): PresenceRoute | undefined {
   if (!url) return undefined;
@@ -113,10 +113,11 @@ export function attachCanvasPresenceWebSocketServer(
     throw new Error("canvas_presence_websocket_shutdown_timeout_invalid");
   }
   const webSocketServer = new WebSocketServer({ noServer: true, maxPayload: maxPayloadBytes });
-  const hub = options.hub ?? new CanvasPresenceHub({ clock: () => (options.clock ?? (() => new Date()))().getTime() });
+  const hub =
+    options.hub ??
+    new CanvasPresenceHub({ clock: () => (options.clock ?? (() => new Date()))().getTime() });
   const ownsHub = options.hub === undefined;
   const sessions = new Set<WebSocket>();
-  const clock = options.clock ?? (() => new Date());
   const authCheckIntervalMs = options.authCheckIntervalMs ?? 250;
   if (!Number.isSafeInteger(authCheckIntervalMs) || authCheckIntervalMs < 25) {
     throw new Error("canvas_presence_auth_interval_invalid");
@@ -128,7 +129,7 @@ export function attachCanvasPresenceWebSocketServer(
 
   const handleConnection = (
     socket: WebSocket,
-    route: PresenceRoute,
+    route: ScopedPresenceRoute,
     authorization: string | string[] | undefined
   ) => {
     sessions.add(socket);
@@ -139,11 +140,13 @@ export function attachCanvasPresenceWebSocketServer(
     let alive = true;
     const helloTimer = setTimeout(() => socket.close(4002, "presence hello required"), 10_000);
     const stillAuthorized = () =>
-      authenticateCollaborationForProject(
+      authenticateCollaborationForScope(
         options.repository,
         options.workspaceIdentity,
+        options.projectAuthority,
         authorization,
-        route.projectId
+        route.projectId,
+        route.canvasId
       ) !== undefined;
 
     const sendError = (code: CanvasPresenceErrorCode) => {
@@ -223,10 +226,7 @@ export function attachCanvasPresenceWebSocketServer(
           return;
         }
         const message = parsed.data;
-        if (
-          message.projectId !== route.projectId ||
-          message.canvasId !== route.canvasId
-        ) {
+        if (message.projectId !== route.projectId || message.canvasId !== route.canvasId) {
           sendError("cross_scope");
           socket.close(4003, "presence scope mismatch");
           return;
@@ -237,25 +237,22 @@ export function attachCanvasPresenceWebSocketServer(
             socket.close(4000, "presence hello required");
             return;
           }
-          if (!options.projectAuthority.hasCanvas(route.projectId, route.canvasId)) {
-            sendError("unknown_canvas");
-            socket.close(4003, "unknown canvas");
-            return;
-          }
-          const context = authenticateCollaborationForProject(
+          const authenticated = authenticateCollaborationForScope(
             options.repository,
             options.workspaceIdentity,
+            options.projectAuthority,
             authorization,
-            route.projectId
+            route.projectId,
+            route.canvasId
           );
-          if (!context) {
+          if (!authenticated) {
             expireAuthorization();
             return;
           }
           const connected = hub.connect({
             scope: route,
-            humanPrincipalId: context.humanPrincipalId,
-            displayName: context.displayName,
+            humanPrincipalId: authenticated.actor.humanPrincipalId,
+            displayName: authenticated.actor.displayName,
             send: (outbound) => {
               if (stillAuthorized()) send(socket, outbound);
             },
@@ -312,11 +309,7 @@ export function attachCanvasPresenceWebSocketServer(
     matches: (request) => routeFromUrl(request.url) !== undefined,
     handle: (request: IncomingMessage, socket: Duplex, head: Buffer) => {
       const route = routeFromUrl(request.url);
-      if (!route || !options.projectAuthority.hasProject(route.projectId)) {
-        reject(socket, 403, "Forbidden");
-        return;
-      }
-      if (!options.projectAuthority.hasCanvas(route.projectId, route.canvasId)) {
+      if (!route) {
         reject(socket, 403, "Forbidden");
         return;
       }
@@ -324,19 +317,30 @@ export function attachCanvasPresenceWebSocketServer(
         reject(socket, 426, "Upgrade Required");
         return;
       }
-      if (
-        !authenticateCollaborationForProject(
+      const authenticated = authenticateCollaborationForScope(
+        options.repository,
+        options.workspaceIdentity,
+        options.projectAuthority,
+        request.headers.authorization,
+        route.projectId,
+        route.canvasId
+      );
+      if (!authenticated) {
+        const credentialActor = authenticateCollaborationForProject(
           options.repository,
           options.workspaceIdentity,
           request.headers.authorization,
           route.projectId
-        )
-      ) {
-        reject(socket, 401, "Unauthorized");
+        );
+        reject(socket, credentialActor ? 403 : 401, credentialActor ? "Forbidden" : "Unauthorized");
         return;
       }
       webSocketServer.handleUpgrade(request, socket, head, (webSocket) =>
-        handleConnection(webSocket, route, request.headers.authorization)
+        handleConnection(
+          webSocket,
+          { ...route, workspaceId: authenticated.workspaceId },
+          request.headers.authorization
+        )
       );
     }
   });

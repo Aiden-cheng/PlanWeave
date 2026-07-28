@@ -3,9 +3,14 @@ import {
   humanDeviceTokenSchema,
   type HumanAuthContext
 } from "./schemas.js";
-import type { DeviceSessionId, WorkspaceId } from "@planweave-ai/collaboration-contracts";
+import {
+  workspaceIdSchema,
+  type DeviceSessionId,
+  type WorkspaceId
+} from "@planweave-ai/collaboration-contracts";
 import type { HumanIdentityRepository } from "./repository.js";
 import type { WorkspaceIdentityRepository } from "./workspaceRepository.js";
+import type { HumanProjectAuthority } from "./service.js";
 
 export type WorkspaceDeviceAuthContext = {
   kind: "workspace_device";
@@ -17,6 +22,13 @@ export type WorkspaceDeviceAuthContext = {
 };
 
 export type CollaborationAuthContext = HumanAuthContext | WorkspaceDeviceAuthContext;
+
+export type AuthenticatedCollaborationScope = {
+  actor: CollaborationAuthContext;
+  workspaceId: WorkspaceId;
+  projectId: string;
+  canvasId?: string;
+};
 
 /**
  * Human-specific authentication adapter.
@@ -99,6 +111,50 @@ export function authenticateCollaborationForProject(
     };
   }
   return authenticateHumanForProject(repository, authorization, projectId);
+}
+
+export function hasAuthenticatedCollaborationDevice(
+  repository: HumanIdentityRepository,
+  workspaceIdentity: WorkspaceIdentityRepository,
+  authorization: string | string[] | undefined
+): boolean {
+  const token = parseHumanDeviceBearer(authorization);
+  if (!token) return false;
+  return (
+    workspaceIdentity.authenticateWorkspaceDeviceSession(token) !== undefined ||
+    repository.authenticateDevice(token) !== undefined
+  );
+}
+
+/** Resolve a credential to one exact collaboration scope before selecting scoped services. */
+export function authenticateCollaborationForScope(
+  repository: HumanIdentityRepository,
+  workspaceIdentity: WorkspaceIdentityRepository,
+  projectAuthority: HumanProjectAuthority,
+  authorization: string | string[] | undefined,
+  projectId: string,
+  canvasId?: string
+): AuthenticatedCollaborationScope | undefined {
+  const actor = authenticateCollaborationForProject(
+    repository,
+    workspaceIdentity,
+    authorization,
+    projectId
+  );
+  if (!actor) return undefined;
+  const workspaceCandidate =
+    "kind" in actor && actor.kind === "workspace_device"
+      ? actor.workspaceId
+      : workspaceIdentity.workspaceForLegacyProject(projectId);
+  if (!workspaceCandidate) return undefined;
+  const workspaceId = workspaceIdSchema.parse(workspaceCandidate);
+  const scope = {
+    workspaceId,
+    projectId,
+    ...(canvasId === undefined ? {} : { canvasId })
+  };
+  if (!projectAuthority.hasScope(scope)) return undefined;
+  return { actor, ...scope };
 }
 
 /**

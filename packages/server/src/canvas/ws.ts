@@ -10,6 +10,7 @@ import {
 } from "@planweave-ai/collaboration-contracts";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import {
+  authenticateCollaborationForScope,
   authenticateCollaborationForProject,
   humanTransportAllowed,
   type HumanIdentityRepository,
@@ -27,9 +28,7 @@ export type CanvasCommandWebSocketOptions = {
   service: CanvasCommandService;
   repository: HumanIdentityRepository;
   workspaceIdentity: WorkspaceIdentityRepository;
-  projectAuthority: HumanProjectAuthority & {
-    hasCanvas(projectId: string, canvasId: string): boolean;
-  };
+  projectAuthority: HumanProjectAuthority;
   maxPayloadBytes: number;
   shutdownTimeoutMs: number;
   allowInsecureTransport?: boolean;
@@ -117,23 +116,25 @@ export function attachCanvasCommandWebSocketServer(
       reject(socket, 400, "Bad Request");
       return;
     }
-    if (
-      !options.projectAuthority.hasProject(route.projectId) ||
-      !options.projectAuthority.hasCanvas(route.projectId, route.canvasId)
-    ) {
-      reject(socket, 404, "Not Found");
-      return;
-    }
-    const context = authenticateCollaborationForProject(
+    const authenticated = authenticateCollaborationForScope(
       options.repository,
       options.workspaceIdentity,
+      options.projectAuthority,
       request.headers.authorization,
-      route.projectId
+      route.projectId,
+      route.canvasId
     );
-    if (!context) {
-      reject(socket, 401, "Unauthorized");
+    if (!authenticated) {
+      const credentialActor = authenticateCollaborationForProject(
+        options.repository,
+        options.workspaceIdentity,
+        request.headers.authorization,
+        route.projectId
+      );
+      reject(socket, credentialActor ? 404 : 401, credentialActor ? "Not Found" : "Unauthorized");
       return;
     }
+    const context = authenticated.actor;
 
     webSocketServer.handleUpgrade(request, socket, head, (ws) => {
       sessions.add(ws);
@@ -148,11 +149,13 @@ export function attachCanvasCommandWebSocketServer(
       };
 
       const authTimer = setInterval(() => {
-        const still = authenticateCollaborationForProject(
+        const still = authenticateCollaborationForScope(
           options.repository,
           options.workspaceIdentity,
+          options.projectAuthority,
           request.headers.authorization,
-          route.projectId
+          route.projectId,
+          route.canvasId
         );
         if (!still) {
           ws.close(4001, "revoked");

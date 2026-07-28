@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
 import {
+  authenticateCollaborationForScope,
   authenticateCollaborationForProject,
   humanTransportAllowed,
   type HumanIdentityRepository,
@@ -84,20 +85,29 @@ export async function handleContentVersionHttpRequest(
     respond(response, 400, { error: "insecure_transport" });
     return true;
   }
-  if (!options.projectAuthority.hasProject(matched.projectId)) {
-    respond(response, 404, { error: "project_not_found" });
-    return true;
-  }
-  const context = authenticateCollaborationForProject(
+  const credentialActor = authenticateCollaborationForProject(
     options.repository,
     options.workspaceIdentity,
     request.headers.authorization,
     matched.projectId
   );
-  if (!context) {
+  if (!credentialActor) {
     respond(response, 401, { error: "unauthorized" });
     return true;
   }
+  const authenticated = authenticateCollaborationForScope(
+    options.repository,
+    options.workspaceIdentity,
+    options.projectAuthority,
+    request.headers.authorization,
+    matched.projectId,
+    matched.canvasId
+  );
+  if (!authenticated) {
+    respond(response, 403, { error: "forbidden" });
+    return true;
+  }
+  const context = authenticated.actor;
   try {
     const body = await json(request);
     if (matched.kind === "publish") {

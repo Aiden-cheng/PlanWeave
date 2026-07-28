@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { workspaceIdSchema } from "@planweave-ai/collaboration-contracts";
 import { humanProjectIdSchema } from "../identity/schemas.js";
 import { inWriteTransaction, type SqliteDatabase } from "../sqlite.js";
 import { workItemKeyParts } from "../work/repository.js";
@@ -98,16 +99,35 @@ export type ActivityInsertResult =
 
 export type ActivityRepositoryOptions = {
   onInsertedInTransaction?: (record: ActivityRecord) => void;
+  workspaceId?: string;
 };
 
 /**
  * Append-only activity projection store with source-action idempotency and outbox recovery.
  */
 export class ActivityRepository {
+  private readonly configuredWorkspaceId: string | undefined;
+
   constructor(
     readonly database: SqliteDatabase,
     private readonly options: ActivityRepositoryOptions = {}
-  ) {}
+  ) {
+    this.configuredWorkspaceId = options.workspaceId
+      ? workspaceIdSchema.parse(options.workspaceId)
+      : undefined;
+  }
+
+  private workspaceIdForProject(projectId: string): string {
+    if (this.configuredWorkspaceId) return this.configuredWorkspaceId;
+    const rows = this.database
+      .prepare(
+        `SELECT workspace_id FROM project_registry
+         WHERE project_id=? AND revoked_at IS NULL ORDER BY workspace_id LIMIT 2`
+      )
+      .all(humanProjectIdSchema.parse(projectId)) as Array<{ workspace_id: string }>;
+    if (rows.length > 1) throw new ActivityRepositoryError("activity_auth_forbidden");
+    return rows[0] ? workspaceIdSchema.parse(rows[0].workspace_id) : "legacy";
+  }
 
   allocateActivityId(): ActivityId {
     return activityIdSchema.parse(randomUUID());
@@ -121,9 +141,10 @@ export class ActivityRepository {
     const row = this.database
       .prepare(
         `SELECT * FROM activity_records
-         WHERE project_id=? AND source_kind=? AND source_id=?`
+         WHERE workspace_id=? AND project_id=? AND source_kind=? AND source_id=?`
       )
       .get(
+        this.workspaceIdForProject(projectId),
         humanProjectIdSchema.parse(projectId),
         activitySourceKindSchema.parse(sourceKind),
         sourceId
@@ -147,12 +168,13 @@ export class ActivityRepository {
       this.database
         .prepare(
           `INSERT INTO activity_records(
-            activity_id,project_id,type,source_kind,source_id,
+            activity_id,workspace_id,project_id,type,source_kind,source_id,
             summary_json,subjects_json,canvas_id,work_item_kind,work_item_key,occurred_at
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
         )
         .run(
           parsed.activityId,
+          this.workspaceIdForProject(parsed.projectId),
           parsed.projectId,
           parsed.type,
           parsed.source.kind,
@@ -198,13 +220,14 @@ export class ActivityRepository {
     this.database
       .prepare(
         `INSERT INTO activity_projection_outbox(
-          outbox_id,project_id,source_kind,source_id,activity_json,activity_occurred_at,
+          outbox_id,workspace_id,project_id,source_kind,source_id,activity_json,activity_occurred_at,
           created_at,projected_at
-        ) VALUES (?,?,?,?,?,?,?, NULL)
+        ) VALUES (?,?,?,?,?,?,?,?, NULL)
         ON CONFLICT(project_id, source_kind, source_id) DO NOTHING`
       )
       .run(
         randomUUID(),
+        this.workspaceIdForProject(parsed.projectId),
         parsed.projectId,
         parsed.source.kind,
         parsed.source.sourceId,
@@ -218,9 +241,15 @@ export class ActivityRepository {
       .prepare(
         `UPDATE activity_projection_outbox
          SET projected_at=?
-         WHERE project_id=? AND source_kind=? AND source_id=? AND projected_at IS NULL`
+         WHERE workspace_id=? AND project_id=? AND source_kind=? AND source_id=? AND projected_at IS NULL`
       )
-      .run(parsed.occurredAt, parsed.projectId, parsed.source.kind, parsed.source.sourceId);
+      .run(
+        parsed.occurredAt,
+        this.workspaceIdForProject(parsed.projectId),
+        parsed.projectId,
+        parsed.source.kind,
+        parsed.source.sourceId
+      );
     return result;
   }
 
@@ -246,23 +275,39 @@ export class ActivityRepository {
       throw new ActivityRepositoryError("activity_input_invalid");
     }
     const rows = (
-      cutoff
-        ? this.database
-            .prepare(
-              `SELECT * FROM activity_projection_outbox
-             WHERE projected_at IS NULL AND activity_occurred_at >= ?
+      this.configuredWorkspaceId
+        ? cutoff
+          ? this.database
+              .prepare(
+                `SELECT * FROM activity_projection_outbox
+             WHERE workspace_id=? AND projected_at IS NULL AND activity_occurred_at >= ?
              ORDER BY created_at ASC, outbox_id ASC
              LIMIT ?`
-            )
-            .all(cutoff, limit)
-        : this.database
-            .prepare(
-              `SELECT * FROM activity_projection_outbox
-             WHERE projected_at IS NULL
+              )
+              .all(this.configuredWorkspaceId, cutoff, limit)
+          : this.database
+              .prepare(
+                `SELECT * FROM activity_projection_outbox
+             WHERE workspace_id=? AND projected_at IS NULL
              ORDER BY created_at ASC, outbox_id ASC
              LIMIT ?`
-            )
-            .all(limit)
+              )
+              .all(this.configuredWorkspaceId, limit)
+        : cutoff
+          ? this.database
+              .prepare(
+                `SELECT * FROM activity_projection_outbox
+                 WHERE projected_at IS NULL AND activity_occurred_at >= ?
+                 ORDER BY created_at ASC, outbox_id ASC LIMIT ?`
+              )
+              .all(cutoff, limit)
+          : this.database
+              .prepare(
+                `SELECT * FROM activity_projection_outbox
+                 WHERE projected_at IS NULL
+                 ORDER BY created_at ASC, outbox_id ASC LIMIT ?`
+              )
+              .all(limit)
     ) as OutboxRow[];
     return rows.map((row) => ({
       outboxId: row.outbox_id,
@@ -284,9 +329,16 @@ export class ActivityRepository {
       .prepare(
         `UPDATE activity_projection_outbox
          SET projected_at=?
-         WHERE project_id=? AND source_kind=? AND source_id=?`
+         WHERE (workspace_id=? OR workspace_id IS NULL)
+           AND project_id=? AND source_kind=? AND source_id=?`
       )
-      .run(projectedAt, humanProjectIdSchema.parse(projectId), sourceKind, sourceId);
+      .run(
+        projectedAt,
+        this.workspaceIdForProject(projectId),
+        humanProjectIdSchema.parse(projectId),
+        sourceKind,
+        sourceId
+      );
   }
 
   /**
@@ -321,28 +373,30 @@ export class ActivityRepository {
       throw new ActivityRepositoryError("activity_input_invalid");
     }
     return inWriteTransaction(this.database, () => {
+      const workspaceClause = this.configuredWorkspaceId ? "workspace_id=? AND " : "";
+      const scopeParameters = this.configuredWorkspaceId ? [this.configuredWorkspaceId] : [];
       const outbox = this.database
         .prepare(
           `DELETE FROM activity_projection_outbox
            WHERE outbox_id IN (
              SELECT outbox_id FROM activity_projection_outbox
-             WHERE activity_occurred_at < ?
+             WHERE ${workspaceClause}activity_occurred_at < ?
              ORDER BY activity_occurred_at ASC, outbox_id ASC
              LIMIT ?
            )`
         )
-        .run(cutoff, limit).changes;
+        .run(...scopeParameters, cutoff, limit).changes;
       const records = this.database
         .prepare(
           `DELETE FROM activity_records
            WHERE activity_id IN (
              SELECT activity_id FROM activity_records
-             WHERE occurred_at < ?
+             WHERE ${workspaceClause}occurred_at < ?
              ORDER BY occurred_at ASC, activity_id ASC
              LIMIT ?
            )`
         )
-        .run(cutoff, limit).changes;
+        .run(...scopeParameters, cutoff, limit).changes;
       return { records, outbox };
     });
   }
@@ -368,7 +422,7 @@ export class ActivityRepository {
         const rows = this.database
           .prepare(
             `SELECT * FROM activity_records
-             WHERE project_id=? AND canvas_id=? AND work_item_kind=? AND work_item_key=?
+             WHERE workspace_id=? AND project_id=? AND canvas_id=? AND work_item_kind=? AND work_item_key=?
                AND (
                  occurred_at < ?
                  OR (occurred_at = ? AND activity_id < ?)
@@ -377,6 +431,7 @@ export class ActivityRepository {
              LIMIT ?`
           )
           .all(
+            this.workspaceIdForProject(projectId),
             projectId,
             parts.canvasId,
             parts.workItemKind,
@@ -391,11 +446,12 @@ export class ActivityRepository {
       const rows = this.database
         .prepare(
           `SELECT * FROM activity_records
-           WHERE project_id=? AND canvas_id=? AND work_item_kind=? AND work_item_key=?
+           WHERE workspace_id=? AND project_id=? AND canvas_id=? AND work_item_kind=? AND work_item_key=?
            ORDER BY occurred_at DESC, activity_id DESC
            LIMIT ?`
         )
         .all(
+          this.workspaceIdForProject(projectId),
           projectId,
           parts.canvasId,
           parts.workItemKind,
@@ -409,7 +465,7 @@ export class ActivityRepository {
       const rows = this.database
         .prepare(
           `SELECT * FROM activity_records
-           WHERE project_id=?
+           WHERE workspace_id=? AND project_id=?
              AND (
                occurred_at < ?
                OR (occurred_at = ? AND activity_id < ?)
@@ -418,6 +474,7 @@ export class ActivityRepository {
            LIMIT ?`
         )
         .all(
+          this.workspaceIdForProject(projectId),
           projectId,
           input.cursor.occurredAt,
           input.cursor.occurredAt,
@@ -430,11 +487,11 @@ export class ActivityRepository {
     const rows = this.database
       .prepare(
         `SELECT * FROM activity_records
-         WHERE project_id=?
+         WHERE workspace_id=? AND project_id=?
          ORDER BY occurred_at DESC, activity_id DESC
          LIMIT ?`
       )
-      .all(projectId, limit) as ActivityRow[];
+      .all(this.workspaceIdForProject(projectId), projectId, limit) as ActivityRow[];
     return rows.map(toRecord);
   }
 }

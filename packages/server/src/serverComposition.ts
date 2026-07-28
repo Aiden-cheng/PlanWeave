@@ -64,7 +64,10 @@ import { createTrustedRuntimeRegistry } from "./runtimeProjectRegistry.js";
 import { createManifestWorkItemPort } from "./work/workItemFacts.js";
 import { ProjectAccessRepository } from "./projectAccessRepository.js";
 import { handleAccessHttpRequest } from "./accessHttp.js";
-import { createTrustedProjectControlPort, type TrustedProjectControlPort } from "./trustedProjectControl.js";
+import {
+  createTrustedProjectControlPort,
+  type TrustedProjectControlPort
+} from "./trustedProjectControl.js";
 import { PackageSnapshotRepository } from "./packageSnapshotRepository.js";
 import { attachAgentHostWebSocketServer, type AgentHostWebSocketServer } from "./wsServer.js";
 import {
@@ -223,7 +226,7 @@ function requiresAdmission(request: IncomingMessage): boolean {
     pathname === "/agent-hosts/enrollments/exchange" ||
     pathname === "/api/v1/host-enrollments" ||
     pathname === "/api/v1/setup-codes/redeem" ||
-    pathname.startsWith("/api/v1/workspaces/") && pathname.includes("/setup-codes") ||
+    (pathname.startsWith("/api/v1/workspaces/") && pathname.includes("/setup-codes")) ||
     pathname === "/api/v1/remote-operations" ||
     /^\/api\/v1\/remote-operations\/[^/]+\/actions$/.test(pathname) ||
     /^\/api\/v1\/remote-operations\/[^/]+\/interactions\/respond$/.test(pathname) ||
@@ -231,7 +234,9 @@ function requiresAdmission(request: IncomingMessage): boolean {
     /^\/api\/v1\/projects\/[^/]+\/assignments(\/|$)/.test(pathname) ||
     /^\/api\/v1\/projects\/[^/]+\/comments(\/|$)/.test(pathname) ||
     /^\/api\/v1\/projects\/[^/]+\/attachments(\/|$)/.test(pathname) ||
-    /^\/api\/v1\/projects\/[^/]+\/canvases\/[^/]+\/content\/(initial-publish|acknowledgements)$/.test(pathname) ||
+    /^\/api\/v1\/projects\/[^/]+\/canvases\/[^/]+\/content\/(initial-publish|acknowledgements)$/.test(
+      pathname
+    ) ||
     /^\/api\/v1\/registry\/projects\/[^/]+\/canvases\/[^/]+\/snapshots(\/|$)/.test(pathname)
   );
 }
@@ -459,11 +464,13 @@ export async function createDistributedServerComposition(
       return createManifestWorkItemPort(manifest, input.canvasId);
     });
     runtimeRegistry.registry.setScopedResolver(async (locator) => {
-      const workspaceId = locator.workspaceId ?? uniqueConfiguredWorkspaceId({
-        runtimeRegistry,
-        projectId: locator.projectId,
-        canvasId: locator.canvasId
-      });
+      const workspaceId =
+        locator.workspaceId ??
+        uniqueConfiguredWorkspaceId({
+          runtimeRegistry,
+          projectId: locator.projectId,
+          canvasId: locator.canvasId
+        });
       if (!workspaceId || !workspaceIdentity.workspaceExists(workspaceId)) {
         throw new Error("remote_runtime_workspace_unresolved");
       }
@@ -671,7 +678,6 @@ export async function createDistributedServerComposition(
         );
       }
     });
-    const commentRepository = new CommentRepository(server.database);
     const commentAttachmentBlobs = new CommentAttachmentBlobStore(
       server.database,
       config.dataDirectory
@@ -682,28 +688,29 @@ export async function createDistributedServerComposition(
       clock
     });
     const commentServices = new Map<string, CommentService>();
-    for (const { projectId, canvasId } of runtimeRegistry.locators) {
-      if (commentServices.has(projectId)) continue;
-      const workspaceId = uniqueConfiguredWorkspaceId({ runtimeRegistry, projectId, canvasId });
-      if (!workspaceId) continue;
+    const collaborationScopeKey = (workspaceId: string, projectId: string) =>
+      `${workspaceId}\u0000${projectId}`;
+    for (const { workspaceId, projectId, canvasId } of runtimeRegistry.expansions) {
+      const serviceKey = collaborationScopeKey(workspaceId, projectId);
+      if (commentServices.has(serviceKey)) continue;
       const packagePort = runtimeRegistry.scopedWorkItemPackagePort({
         workspaceId,
         projectId,
         canvasId
       });
       if (!packagePort) throw new Error("trusted_project_work_item_port_missing");
+      const scopedCommentRepository = new CommentRepository(server.database, workspaceId);
+      const scopedActivityRepository = new ActivityRepository(server.database, { workspaceId });
       commentServices.set(
-        projectId,
+        serviceKey,
         new CommentService({
-          comments: commentRepository,
-          activity: initializedActivityRepository,
+          comments: scopedCommentRepository,
+          activity: scopedActivityRepository,
           packagePort,
           identity: humanIdentity,
           attachments: commentAttachments,
           attachmentRepository: commentAttachmentRepository,
           authorizeMutation(actor, workItem) {
-            const workspaceId = workspaceIdentity.workspaceForLegacyProject(actor.projectId);
-            if (!workspaceId) throw new CommentServiceError("comment_auth_forbidden");
             try {
               initializedProjectAccess.policy.assertCapability({
                 workspaceId,
@@ -713,6 +720,18 @@ export async function createDistributedServerComposition(
                 capability: "comment"
               });
             } catch {
+              throw new CommentServiceError("comment_auth_forbidden");
+            }
+          },
+          assertMembership(actor) {
+            const membership = workspaceIdentity
+              .listMembershipViews(workspaceId)
+              .find(
+                (candidate) =>
+                  candidate.humanPrincipalId === actor.humanPrincipalId &&
+                  candidate.revokedAt === null
+              );
+            if (!membership || membership.role !== actor.role) {
               throw new CommentServiceError("comment_auth_forbidden");
             }
           },
@@ -732,9 +751,8 @@ export async function createDistributedServerComposition(
     const assignmentServices = new Map<string, WorkAssignmentService>();
     const authorityRepository = new AuthorityRepository(server.database, { clock });
     const initializedProjectAccess = projectAccess;
-    const acquireAuthorityService = (projectId: string, canvasId: string) => {
-      const workspaceId = workspaceIdentity.workspaceForLegacyProject(projectId);
-      if (!workspaceId || !workspaceIdentity.workspaceExists(workspaceId)) return undefined;
+    const acquireAuthorityService = (workspaceId: string, projectId: string, canvasId: string) => {
+      if (!workspaceIdentity.workspaceExists(workspaceId)) return undefined;
       const project = initializedProjectAccess.registry.projectInternal(workspaceId, projectId);
       const canvas = initializedProjectAccess.registry.canvasInternal(
         workspaceId,
@@ -973,8 +991,10 @@ export async function createDistributedServerComposition(
         }
         if (
           await handleCommentActivityHttpRequest(request, response, {
-            resolveService: (projectId) => commentServices.get(projectId),
+            resolveService: (workspaceId, projectId) =>
+              commentServices.get(collaborationScopeKey(workspaceId, projectId)),
             repository: humanIdentity,
+            workspaceIdentity,
             projectAuthority: runtimeRegistry,
             allowInsecureDevelopment: config.allowInsecureDevelopment,
             clock

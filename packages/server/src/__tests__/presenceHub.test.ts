@@ -6,7 +6,11 @@ import {
   type CanvasPresenceScope
 } from "../presenceHub.js";
 
-const scope: CanvasPresenceScope = { projectId: "project-1", canvasId: "default" };
+const scope: CanvasPresenceScope = {
+  workspaceId: "workspace-1",
+  projectId: "project-1",
+  canvasId: "default"
+};
 
 function hubFixture() {
   let now = 0;
@@ -66,14 +70,26 @@ describe("canvas presence hub", () => {
     expect(() => fixture.connect("human-3")).toThrowError(
       new CanvasPresenceHubError("capacity_exceeded")
     );
+    const otherWorkspace = fixture.hub.connect({
+      scope: { ...scope, workspaceId: "workspace-2" },
+      humanPrincipalId: "human-3",
+      displayName: "human-3",
+      send: () => undefined
+    });
+    expect(otherWorkspace.snapshot).toEqual([]);
     expect(() =>
-      fixture.hub.update(first.session.identity.sessionId, { projectId: "project-2", canvasId: "default" }, null, [])
+      fixture.hub.update(
+        first.session.identity.sessionId,
+        { workspaceId: "workspace-1", projectId: "project-2", canvasId: "default" },
+        null,
+        []
+      )
     ).toThrowError(new CanvasPresenceHubError("cross_scope"));
     fixture.hub.update(first.session.identity.sessionId, scope, null, []);
     fixture.hub.update(first.session.identity.sessionId, scope, null, []);
-    expect(() => fixture.hub.update(first.session.identity.sessionId, scope, null, [])).toThrowError(
-      new CanvasPresenceHubError("rate_limited")
-    );
+    expect(() =>
+      fixture.hub.update(first.session.identity.sessionId, scope, null, [])
+    ).toThrowError(new CanvasPresenceHubError("rate_limited"));
     fixture.hub.leave(second.session.identity.sessionId);
     fixture.hub.close();
   });
@@ -84,13 +100,19 @@ describe("canvas presence hub", () => {
     const second = fixture.connect("human-2");
     fixture.advance(1_000);
     expect(fixture.hub.cleanupExpired()).toBe(2);
-    expect(second.received.filter((message) => message.type === "canvas.presence.leave")).toHaveLength(1);
-    expect(first.received.filter((message) => message.type === "canvas.presence.leave")).toHaveLength(0);
+    expect(
+      second.received.filter((message) => message.type === "canvas.presence.leave")
+    ).toHaveLength(1);
+    expect(
+      first.received.filter((message) => message.type === "canvas.presence.leave")
+    ).toHaveLength(0);
     expect(fixture.hub.size()).toBe(0);
 
     const third = fixture.connect("human-3");
     const fourth = fixture.connect("human-4");
-    expect(fixture.hub.removeWhere(({ session }) => session.identity.humanPrincipalId === "human-3")).toBe(1);
+    expect(
+      fixture.hub.removeWhere(({ session }) => session.identity.humanPrincipalId === "human-3")
+    ).toBe(1);
     expect(fourth.received.at(-1)).toMatchObject({
       type: "canvas.presence.leave",
       sessionId: third.session.identity.sessionId

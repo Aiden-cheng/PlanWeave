@@ -7,6 +7,7 @@ import {
   canvasPresenceSessionSchema,
   humanProjectIdSchema,
   opaqueIdentifierSchema,
+  workspaceIdSchema,
   type CanvasPresencePointer,
   type CanvasPresenceServerMessage,
   type CanvasPresenceSession,
@@ -14,6 +15,7 @@ import {
 } from "@planweave-ai/collaboration-contracts";
 
 export type CanvasPresenceScope = {
+  workspaceId: string;
   projectId: string;
   canvasId: string;
 };
@@ -45,7 +47,12 @@ export type CanvasPresenceHubConnectInput = {
   onRemoved?: (reason: CanvasPresenceRemovalReason) => void;
 };
 
-export type CanvasPresenceRemovalReason = "leave" | "disconnect" | "revoked" | "expired" | "shutdown";
+export type CanvasPresenceRemovalReason =
+  | "leave"
+  | "disconnect"
+  | "revoked"
+  | "expired"
+  | "shutdown";
 
 type HubEntry = {
   scope: CanvasPresenceScope;
@@ -68,11 +75,12 @@ export type CanvasPresenceHubOptions = {
   sessionId?: () => string;
 };
 
-const scopeKey = ({ projectId, canvasId }: CanvasPresenceScope): string =>
-  `${projectId}\u0000${canvasId}`;
+const scopeKey = ({ workspaceId, projectId, canvasId }: CanvasPresenceScope): string =>
+  `${workspaceId}\u0000${projectId}\u0000${canvasId}`;
 
 function validateScope(scope: CanvasPresenceScope): CanvasPresenceScope {
   return {
+    workspaceId: workspaceIdSchema.parse(scope.workspaceId),
     projectId: humanProjectIdSchema.parse(scope.projectId),
     canvasId: opaqueIdentifierSchema.parse(scope.canvasId)
   };
@@ -122,6 +130,7 @@ export class CanvasPresenceHub {
   } {
     if (this.closed) throw new CanvasPresenceHubError("server_error");
     const scope = validateScope(input.scope);
+    const workspaceId = scope.workspaceId;
     const projectId = scope.projectId;
     const canvasId = scope.canvasId;
     const key = scopeKey(scope);
@@ -150,7 +159,7 @@ export class CanvasPresenceHub {
       selectionIds: []
     });
     const entry: HubEntry = {
-      scope: { projectId, canvasId },
+      scope: { workspaceId, projectId, canvasId },
       session,
       send: input.send,
       onRemoved: input.onRemoved,

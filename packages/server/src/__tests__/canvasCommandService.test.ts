@@ -194,7 +194,7 @@ function submitBody(
 describe("canvas command service (OSS-004 B-002)", () => {
   it("migrates v30 and enforces CAS + operationId idempotency", async () => {
     const { service, repository, runtime, database } = await fixture();
-    expect(latestCentralSchemaVersion).toBe(34);
+    expect(latestCentralSchemaVersion).toBe(35);
     expect(
       database
         .prepare(
@@ -240,9 +240,9 @@ describe("canvas command service (OSS-004 B-002)", () => {
 
     const second = await service.submit(actor("editor"), submitBody("op-2", 1));
     expect(second.type).toBe("canvas.command.accepted");
-    expect(repository.head({ workspaceId: "w", projectId: "p", canvasId: "default" }).revision).toBe(
-      2
-    );
+    expect(
+      repository.head({ workspaceId: "w", projectId: "p", canvasId: "default" }).revision
+    ).toBe(2);
   });
 
   it("serializes concurrent writers so only one CAS winner advances revision", async () => {
@@ -558,7 +558,8 @@ describe("canvas command service (OSS-004 B-002)", () => {
       runtime,
       contentVersions: true
     });
-    if (!contentVersions || !runtime.captureContent) throw new Error("content version fixture unavailable");
+    if (!contentVersions || !runtime.captureContent)
+      throw new Error("content version fixture unavailable");
     const scope = { workspaceId: "w", projectId: "p", canvasId: "default" };
     const runtimeApi = await import("@planweave-ai/runtime");
     await runtimeApi.saveDesktopLayout(workspace.root, {

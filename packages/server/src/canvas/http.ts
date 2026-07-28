@@ -6,13 +6,18 @@ import {
 import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
+  authenticateCollaborationForScope,
   authenticateCollaborationForProject,
   humanTransportAllowed,
   type HumanIdentityRepository,
   type HumanProjectAuthority
 } from "../identity/index.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
-import { CANVAS_COMMAND_HTTP_BODY_MAX_BYTES, CANVAS_COMMAND_RATE_MAX_REQUESTS, CANVAS_COMMAND_RATE_WINDOW_MS } from "./limits.js";
+import {
+  CANVAS_COMMAND_HTTP_BODY_MAX_BYTES,
+  CANVAS_COMMAND_RATE_MAX_REQUESTS,
+  CANVAS_COMMAND_RATE_WINDOW_MS
+} from "./limits.js";
 import { CanvasCommandService } from "./service.js";
 
 type CanvasRoute =
@@ -97,7 +102,8 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
   if (
     Array.isArray(declaredLength) ||
     (declaredLength !== undefined &&
-      (!/^\d+$/.test(declaredLength) || Number(declaredLength) > CANVAS_COMMAND_HTTP_BODY_MAX_BYTES))
+      (!/^\d+$/.test(declaredLength) ||
+        Number(declaredLength) > CANVAS_COMMAND_HTTP_BODY_MAX_BYTES))
   ) {
     throw new Error("canvas_body_too_large");
   }
@@ -123,7 +129,8 @@ function rateLimit(key: string, clock: () => Date): boolean {
     rateBuckets.set(key, { windowStartedAt: now, count: 1 });
     if (rateBuckets.size > 2_000) {
       for (const [entryKey, entry] of rateBuckets) {
-        if (now - entry.windowStartedAt >= CANVAS_COMMAND_RATE_WINDOW_MS) rateBuckets.delete(entryKey);
+        if (now - entry.windowStartedAt >= CANVAS_COMMAND_RATE_WINDOW_MS)
+          rateBuckets.delete(entryKey);
       }
     }
     return false;
@@ -155,18 +162,23 @@ export async function handleCanvasCommandHttpRequest(
     return true;
   }
 
-  if (!options.projectAuthority.hasProject(routed.projectId)) {
-    respond(response, 404, { error: "project_not_found" });
-    return true;
-  }
-
-  const context = authenticateCollaborationForProject(
+  const credentialActor = authenticateCollaborationForProject(
     options.repository,
     options.workspaceIdentity,
     request.headers.authorization,
     routed.projectId
   );
-  if (!context) {
+  const authenticated = credentialActor
+    ? authenticateCollaborationForScope(
+        options.repository,
+        options.workspaceIdentity,
+        options.projectAuthority,
+        request.headers.authorization,
+        routed.projectId,
+        routed.canvasId
+      )
+    : undefined;
+  if (!authenticated) {
     respond(response, 401, {
       type: "canvas.command.rejected",
       protocolVersion: CANVAS_COMMAND_PROTOCOL_VERSION,
@@ -174,10 +186,11 @@ export async function handleCanvasCommandHttpRequest(
       projectId: routed.projectId,
       canvasId: routed.canvasId,
       operationId: "unauthenticated",
-      code: "unauthorized"
+      code: credentialActor ? "forbidden" : "unauthorized"
     });
     return true;
   }
+  const context = authenticated.actor;
 
   const clock = options.clock ?? (() => new Date());
   if (rateLimit(`${context.humanPrincipalId}:${routed.projectId}:${routed.canvasId}`, clock)) {

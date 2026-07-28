@@ -113,6 +113,7 @@ export type CommentServiceOptions = {
   attachmentRepository?: CommentAttachmentRepository;
   /** Server-owned ACL check at the exact canvas scope before any durable comment write. */
   authorizeMutation(actor: HumanAuthContext, workItem: WorkItemRef): void;
+  assertMembership?: (actor: HumanAuthContext, projectId: string) => void;
   clock?: () => Date;
 };
 
@@ -136,6 +137,7 @@ export class CommentService {
   private readonly attachments?: CommentAttachmentService;
   private readonly attachmentRepository?: CommentAttachmentRepository;
   private readonly authorizeMutation: CommentServiceOptions["authorizeMutation"];
+  private readonly membershipAssertion?: CommentServiceOptions["assertMembership"];
   private readonly clock: () => Date;
 
   constructor(options: CommentServiceOptions) {
@@ -146,6 +148,7 @@ export class CommentService {
     this.attachments = options.attachments;
     this.attachmentRepository = options.attachmentRepository;
     this.authorizeMutation = options.authorizeMutation;
+    this.membershipAssertion = options.assertMembership;
     this.clock = options.clock ?? (() => new Date());
   }
 
@@ -415,6 +418,10 @@ export class CommentService {
    * Role on the context must still match the active membership role.
    */
   private assertActiveMembership(actor: HumanAuthContext, projectId: string): void {
+    if (this.membershipAssertion) {
+      this.membershipAssertion(actor, projectId);
+      return;
+    }
     const membership = this.identity.getActiveMembership(projectId, actor.humanPrincipalId);
     if (!membership) {
       deny("comment_auth_forbidden");

@@ -117,6 +117,9 @@ export {
   authenticateHumanDevice,
   authenticateHumanForProject,
   authenticateCollaborationForProject,
+  authenticateCollaborationForScope,
+  hasAuthenticatedCollaborationDevice,
+  type AuthenticatedCollaborationScope,
   type CollaborationAuthContext,
   type WorkspaceDeviceAuthContext,
   parseHumanDeviceBearer
