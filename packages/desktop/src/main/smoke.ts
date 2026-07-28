@@ -900,6 +900,80 @@ async function runLiveCollaborationSmoke(window: BrowserWindow): Promise<Record<
   };
 }
 
+async function runLocalCollaborationSmoke(window: BrowserWindow): Promise<Record<string, unknown>> {
+  const authorityProjectId = process.env.PLANWEAVE_DESKTOP_SMOKE_AUTHORITY_PROJECT_ID;
+  if (!authorityProjectId) {
+    throw new Error("Local collaboration smoke authority project id is required.");
+  }
+  return window.webContents.executeJavaScript(`
+    (async () => {
+      const runtime = window.planweave;
+      const collaboration = window.planweaveCollaboration;
+      if (!runtime || !collaboration) {
+        throw new Error("Packaged local collaboration bridges are unavailable.");
+      }
+      const projects = await runtime.listProjects();
+      const project = projects.find(
+        (item) => typeof item.projectId === "string" && typeof item.activeCanvasId === "string"
+      );
+      if (!project || !project.activeCanvasId) {
+        throw new Error("Packaged smoke project selection is unavailable.");
+      }
+      const selection = { projectId: project.projectId, canvasId: project.activeCanvasId };
+      await collaboration.setCollaborationCurrentSelection(selection);
+      const beforeStart = await collaboration.getLocalCollaborationServerStatus();
+      if (beforeStart.state !== "stopped") {
+        throw new Error("Local collaboration server did not start from a stopped state.");
+      }
+      const started = await collaboration.startLocalCollaborationServer();
+      if (started.state !== "running") {
+        throw new Error("Local collaboration server did not report running after start.");
+      }
+      const trustedScopes = await collaboration.listLocalCollaborationTrustedScopes();
+      const matchingScopes = trustedScopes.filter(
+        (scope) =>
+          scope.projectId === ${JSON.stringify(authorityProjectId)} &&
+          scope.canvasId === selection.canvasId
+      );
+      if (matchingScopes.length !== 1) {
+        throw new Error("Local collaboration server did not expose exactly one selected trusted scope.");
+      }
+      let ownerRequired = false;
+      try {
+        await collaboration.registerLocalCollaborationCurrentProject();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        ownerRequired = message.includes("local_collaboration_owner_initialization_required");
+      }
+      if (!ownerRequired) {
+        throw new Error("Local collaboration registration did not require owner initialization.");
+      }
+      const stopped = await collaboration.stopLocalCollaborationServer();
+      if (stopped.state !== "stopped") {
+        throw new Error("Local collaboration server did not stop.");
+      }
+      const result = {
+        selectedProjectId: selection.projectId,
+        authorityProjectId: ${JSON.stringify(authorityProjectId)},
+        selectedCanvasId: selection.canvasId,
+        statusBeforeStart: beforeStart.state,
+        statusAfterStart: started.state,
+        trustedScope: {
+          projectId: matchingScopes[0].projectId,
+          canvasId: matchingScopes[0].canvasId
+        },
+        ownerRequired,
+        statusAfterStop: stopped.state
+      };
+      const serialized = JSON.stringify(result);
+      if (serialized.includes("projectRoot") || serialized.includes("pw_operator_")) {
+        throw new Error("Local collaboration smoke result leaked a root path or operator token.");
+      }
+      return result;
+    })()
+  `) as Promise<Record<string, unknown>>;
+}
+
 async function waitForCollaborationInspectorWindow(
   mainWindow: BrowserWindow
 ): Promise<BrowserWindow> {
@@ -1210,6 +1284,7 @@ async function reloadSmokeRenderer(
 }
 
 export async function runSmokeCheck(window: BrowserWindow): Promise<void> {
+  const localCollaborationOnly = process.env.PLANWEAVE_DESKTOP_SMOKE_LOCAL_COLLABORATION === "1";
   const requiredText = ["Implement a tiny example change", "Task Node"];
   for (let attempt = 0; attempt < 50; attempt += 1) {
     const state = await readSmokeState(window);
@@ -1223,6 +1298,22 @@ export async function runSmokeCheck(window: BrowserWindow): Promise<void> {
       let workflow: Record<string, unknown>;
       let rendererManual: Record<string, unknown>;
       try {
+        if (localCollaborationOnly) {
+          workflow = { localCollaboration: await runLocalCollaborationSmoke(window) };
+          rendererManual = {};
+          console.log(
+            JSON.stringify({
+              event: "PLANWEAVE_DESKTOP_SMOKE_READY",
+              bridgeAvailable: state.bridgeAvailable,
+              nodeRequireAvailable: state.nodeRequireAvailable,
+              autoRunControlAvailable: state.autoRunControlAvailable,
+              workflow,
+              rendererManual
+            })
+          );
+          app.exit(0);
+          return;
+        }
         workflow = await runSmokeWorkflow(window);
         await reloadSmokeRenderer(window);
         await writeExternalPromptSmokeChange();
@@ -1242,7 +1333,9 @@ export async function runSmokeCheck(window: BrowserWindow): Promise<void> {
           JSON.stringify({
             event: "PLANWEAVE_DESKTOP_SMOKE_WORKFLOW_FAILED",
             message: error instanceof Error ? error.message : String(error),
-            projectRoot: process.env.PLANWEAVE_DESKTOP_SMOKE_PROJECT_ROOT
+            ...(localCollaborationOnly
+              ? {}
+              : { projectRoot: process.env.PLANWEAVE_DESKTOP_SMOKE_PROJECT_ROOT })
           })
         );
         app.exit(1);
@@ -1273,7 +1366,9 @@ export async function runSmokeCheck(window: BrowserWindow): Promise<void> {
       nodeRequireAvailable: state.nodeRequireAvailable,
       autoRunControlAvailable: state.autoRunControlAvailable,
       missingText: requiredText.filter((text) => !state.pageText.includes(text)),
-      projectRoot: process.env.PLANWEAVE_DESKTOP_SMOKE_PROJECT_ROOT
+      ...(localCollaborationOnly
+        ? {}
+        : { projectRoot: process.env.PLANWEAVE_DESKTOP_SMOKE_PROJECT_ROOT })
     })
   );
   app.exit(1);

@@ -10,6 +10,7 @@ const mainEntry = resolve(process.cwd(), "dist", "main", "main.js");
 const electronBin = resolve(process.cwd(), "node_modules", ".bin", "electron");
 const repoRoot = resolve(process.cwd(), "../..");
 const usePackagedApp = process.env.PLANWEAVE_DESKTOP_SMOKE_PACKAGED === "1";
+const localCollaborationOnly = process.argv.includes("--local-collaboration");
 
 async function resolvePackagedExecutable(): Promise<string> {
   const releaseDir = resolve(process.cwd(), "release");
@@ -42,10 +43,12 @@ await cp(
 );
 await writeFile(init.workspace.projectPromptFile, "Desktop smoke project prompt.\n", "utf8");
 
-const collaborationFixture = await startCollaborationSmokeFixture({
-  projectRoot: smokeProjectRoot,
-  projectId: init.workspace.id
-});
+const collaborationFixture = localCollaborationOnly
+  ? null
+  : await startCollaborationSmokeFixture({
+      projectRoot: smokeProjectRoot,
+      projectId: init.workspace.id
+    });
 
 const smokeCommand = usePackagedApp ? await resolvePackagedExecutable() : electronBin;
 const smokeArgs = usePackagedApp ? [] : [mainEntry];
@@ -65,10 +68,17 @@ try {
       ),
       PLANWEAVE_DESKTOP_SMOKE_USER_DATA_DIR: smokeUserData,
       PLANWEAVE_DESKTOP_SMOKE: "1",
-      PLANWEAVE_DESKTOP_SMOKE_COLLABORATION_SERVER_URL: collaborationFixture.origin,
-      PLANWEAVE_DESKTOP_SMOKE_COLLABORATION_PROJECT_ID: collaborationFixture.projectId,
-      PLANWEAVE_DESKTOP_SMOKE_COLLABORATION_INVITATION_TOKEN:
-        collaborationFixture.invitationToken
+      ...(localCollaborationOnly
+        ? {
+            PLANWEAVE_DESKTOP_SMOKE_LOCAL_COLLABORATION: "1",
+            PLANWEAVE_DESKTOP_SMOKE_AUTHORITY_PROJECT_ID: init.workspace.id
+          }
+        : {
+            PLANWEAVE_DESKTOP_SMOKE_COLLABORATION_SERVER_URL: collaborationFixture.origin,
+            PLANWEAVE_DESKTOP_SMOKE_COLLABORATION_PROJECT_ID: collaborationFixture.projectId,
+            PLANWEAVE_DESKTOP_SMOKE_COLLABORATION_INVITATION_TOKEN:
+              collaborationFixture.invitationToken
+          })
     },
     stdio: ["ignore", "pipe", "pipe"],
     detached: process.platform !== "win32"
@@ -93,5 +103,5 @@ try {
     terminationGraceMs: 2_000
   });
 } finally {
-  await collaborationFixture.close();
+  await collaborationFixture?.close();
 }
