@@ -129,7 +129,8 @@ describe("CollaborationClient", () => {
       scope,
       projectVisibility: "shared" as const,
       canvasVisibility: "private" as const,
-      aclRevision: 7,
+      projectAclRevision: 7,
+      canvasAclRevision: 7,
       current: {
         scope,
         aclRevision: 7,
@@ -145,7 +146,8 @@ describe("CollaborationClient", () => {
           membership: "active" as const,
           effectiveRole: "owner" as const,
           capabilities: accessCapabilityFlags("owner"),
-          disabledReason: null
+          disabledReason: null,
+          grants: []
         }
       ]
     };
