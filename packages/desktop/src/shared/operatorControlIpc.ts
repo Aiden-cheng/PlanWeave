@@ -12,6 +12,7 @@ export const operatorControlInvokeChannels = {
   clearCredential: "planweave-operator:clearCredential",
   listHosts: "planweave-operator:listHosts",
   copyHostBootstrapHandoff: "planweave-operator:copyHostBootstrapHandoff",
+  copyMemberSetupCode: "planweave-operator:copyMemberSetupCode",
   revokeHost: "planweave-operator:revokeHost"
 } as const;
 

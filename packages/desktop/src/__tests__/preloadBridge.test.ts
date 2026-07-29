@@ -210,6 +210,7 @@ describe("preload bridge invocation", () => {
     await import("../preload/preload");
     const operator = electronMock.exposed.get("planweaveOperatorControl") as {
       copyOperatorHostBootstrapHandoff: (input: unknown) => Promise<unknown>;
+      copyOperatorMemberSetupCode: (input: unknown) => Promise<unknown>;
     };
     const input = {
       profileId: "profile-a",
@@ -232,6 +233,12 @@ describe("preload bridge invocation", () => {
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       operatorControlInvokeChannels.copyHostBootstrapHandoff,
       input
+    );
+
+    await operator.copyOperatorMemberSetupCode({ profileId: "profile-a" });
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      operatorControlInvokeChannels.copyMemberSetupCode,
+      { profileId: "profile-a" }
     );
   });
 

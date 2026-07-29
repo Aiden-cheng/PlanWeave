@@ -540,6 +540,17 @@ export const zhCnCatalog = {
   hostAdminBridgeUnavailable: "当前 Desktop 会话无法使用 Host 管理。",
   hostAdminSessionOnlyWarning:
     "操作员凭证仅在本次会话可用，操作系统安全存储不可用，凭证不会持久化。",
+  hostAdminMemberSetupTitle: "成员设备入驻",
+  hostAdminMemberSetupDescription:
+    "为当前 server-admin 会话所在 Workspace 创建一次性设置码，并由 Desktop main 直接复制。",
+  hostAdminMemberSetupRoleNote:
+    "首个兑换设置码的设备成为 Workspace 所有者；后续设备以成员身份加入。请在“成员 → 设置码”中粘贴。",
+  hostAdminMemberSetupCopy: "创建并复制设置码",
+  hostAdminMemberSetupCopied: "设置码已复制，仅存在于系统剪贴板中。",
+  hostAdminMemberSetupWorkspace: "Workspace",
+  hostAdminMemberSetupExpires: "过期时间",
+  hostAdminMemberSetupDismiss: "完成",
+  hostAdminMemberSetupRequiresAdmin: "请先选择具有可用操作员凭证的 server-admin 配置。",
   hostAdminProfileTitle: "Server-admin 配置",
   hostAdminProfileDescription:
     "配置只包含 server origin 和显示名称；操作员凭证保留在 Electron main 中，不会在此显示。",

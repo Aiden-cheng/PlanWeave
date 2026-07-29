@@ -6,6 +6,8 @@ import {
   operatorCreateEnrollmentGrantInputSchema,
   operatorCopyHostBootstrapHandoffInputSchema,
   operatorHostBootstrapHandoffViewSchema,
+  operatorCopyMemberSetupCodeInputSchema,
+  operatorMemberSetupCodeHandoffViewSchema,
   operatorImportCredentialInputSchema,
   operatorListHostsInputSchema,
   operatorProfileIdInputSchema,
@@ -334,6 +336,26 @@ export class OperatorControlService {
           workspaceId: grant.workspaceId,
           expiresAt: grant.expiresAt,
           copiedAt: new Date().toISOString()
+        });
+      })
+    );
+  }
+
+  async copyMemberSetupCode(
+    input: unknown,
+    copyText: (content: string) => void
+  ): Promise<ReturnType<typeof operatorMemberSetupCodeHandoffViewSchema.parse>> {
+    assertNoSmuggledOperatorSecrets(input, "copyMemberSetupCode");
+    const parsed = operatorCopyMemberSetupCodeInputSchema.parse(input);
+    return this.enqueue(() =>
+      this.withProfile(parsed, async (client) => {
+        const response = await client.issueMemberDeviceSetupCode();
+        copyText(response.setupCode);
+        return operatorMemberSetupCodeHandoffViewSchema.parse({
+          state: "ready",
+          workspaceId: response.grant.workspaceId,
+          expiresAt: response.grant.expiresAt,
+          copiedAt: nowIso(this.clock)
         });
       })
     );

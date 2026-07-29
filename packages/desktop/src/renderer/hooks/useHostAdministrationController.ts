@@ -4,6 +4,7 @@ import {
   OperatorControlError,
   type OperatorHostBootstrapConfig,
   type OperatorHostBootstrapHandoffView,
+  type OperatorMemberSetupCodeHandoffView,
   type OperatorControlProfile,
   type OperatorControlStatus,
   type OperatorProfileView
@@ -21,6 +22,7 @@ export type HostAdministrationController = {
   busy: boolean;
   error: string | null;
   handoff: OperatorHostBootstrapHandoffView | null;
+  memberSetupCodeHandoff: OperatorMemberSetupCodeHandoffView | null;
   refresh: () => Promise<void>;
   refreshHosts: () => Promise<void>;
   saveProfile: (profile: OperatorControlProfile) => Promise<boolean>;
@@ -32,8 +34,10 @@ export type HostAdministrationController = {
   copyBootstrapHandoff: (
     bootstrap: OperatorHostBootstrapConfig
   ) => Promise<OperatorHostBootstrapHandoffView | null>;
+  copyMemberSetupCode: () => Promise<OperatorMemberSetupCodeHandoffView | null>;
   revokeHost: (hostId: string) => Promise<OperatorHostView | null>;
   dismissHandoff: () => void;
+  dismissMemberSetupCodeHandoff: () => void;
   clearError: () => void;
 };
 
@@ -48,6 +52,7 @@ function errorMessage(error: unknown): string {
     "operator_unauthorized",
     "operator_credential_invalid",
     "operator_admin_required",
+    "operator_server_admin_required",
     "operator_forbidden"
   ]);
   if (error instanceof OperatorControlError && knownCodes.has(error.code)) return error.code;
@@ -71,6 +76,8 @@ export function useHostAdministrationController(): HostAdministrationController 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [handoff, setHandoff] = useState<OperatorHostBootstrapHandoffView | null>(null);
+  const [memberSetupCodeHandoff, setMemberSetupCodeHandoff] =
+    useState<OperatorMemberSetupCodeHandoffView | null>(null);
 
   const refresh = useCallback(async () => {
     if (!operatorControlBridge) {
@@ -93,6 +100,10 @@ export function useHostAdministrationController(): HostAdministrationController 
     () => status?.profiles.find((profile) => profile.profileId === status.activeProfileId) ?? null,
     [status]
   );
+
+  useEffect(() => {
+    setMemberSetupCodeHandoff(null);
+  }, [activeProfile?.profileId]);
 
   const refreshHosts = useCallback(async () => {
     if (!operatorControlBridge || !activeProfile || !activeProfile.hasOperatorCredential) {
@@ -215,6 +226,27 @@ export function useHostAdministrationController(): HostAdministrationController 
     [activeProfile]
   );
 
+  const copyMemberSetupCode = useCallback(async () => {
+    if (!operatorControlBridge || !activeProfile || !activeProfile.hasOperatorCredential) {
+      setError("operator_credential_missing");
+      return null;
+    }
+    setBusy(true);
+    try {
+      const result = await operatorControlBridge.copyOperatorMemberSetupCode({
+        profileId: activeProfile.profileId
+      });
+      setMemberSetupCodeHandoff(result);
+      setError(null);
+      return result;
+    } catch (cause) {
+      setError(errorMessage(cause));
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }, [activeProfile]);
+
   const revokeHost = useCallback(
     async (hostId: string) => {
       if (!operatorControlBridge || !activeProfile) {
@@ -249,6 +281,7 @@ export function useHostAdministrationController(): HostAdministrationController 
     busy,
     error,
     handoff,
+    memberSetupCodeHandoff,
     refresh,
     refreshHosts,
     saveProfile,
@@ -258,8 +291,10 @@ export function useHostAdministrationController(): HostAdministrationController 
     importCredential,
     clearCredential,
     copyBootstrapHandoff,
+    copyMemberSetupCode,
     revokeHost,
     dismissHandoff: () => setHandoff(null),
+    dismissMemberSetupCodeHandoff: () => setMemberSetupCodeHandoff(null),
     clearError: () => setError(null)
   };
 }

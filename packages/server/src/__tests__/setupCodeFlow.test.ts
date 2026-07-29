@@ -383,6 +383,119 @@ describe("setup code issue/redeem/revoke", () => {
     const issued = (await issue.json()) as { setupCode: string; grant: { setupCodeId: string } };
     expect(issued.setupCode).toMatch(/^pw_setup_/);
 
+    const serverAdminToken = `pw_operator_${randomBytes(32).toString("base64url")}`;
+    const serverAdminAuthorization = new OperatorTokenRegistry(database, [
+      {
+        operatorId: "operator-server-admin",
+        tokenSha256: hashOperatorToken(serverAdminToken),
+        projectIds: [],
+        serverAdmin: true
+      }
+    ]);
+    provisionConfiguredOperatorSessions({
+      database,
+      credentials: [
+        {
+          operatorId: "operator-server-admin",
+          tokenSha256: hashOperatorToken(serverAdminToken),
+          projectIds: [],
+          serverAdmin: true
+        }
+      ],
+      trustedProjectIds: ["project-setup"],
+      workspaceForProject: () => workspaceId,
+      operatorSessionTtlMs: 3_600_000
+    });
+    const serverAdminServer = createServer((request, response) => {
+      void handleSetupCodeHttpRequest(request, response, {
+        service: setup,
+        authorization: serverAdminAuthorization,
+        allowInsecureDevelopment: true
+      }).then((handled) => {
+        if (!handled) {
+          response.writeHead(404);
+          response.end();
+        }
+      });
+    });
+    servers.push(serverAdminServer);
+    const serverAdminPort = await listen(serverAdminServer);
+    const currentWorkspaceIssue = await fetch(
+      `http://127.0.0.1:${serverAdminPort}/api/v1/setup-codes`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${serverAdminToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          schemaVersion: "workspace-setup/v1",
+          purpose: "device_session"
+        })
+      }
+    );
+    expect(currentWorkspaceIssue.status).toBe(201);
+    await expect(currentWorkspaceIssue.json()).resolves.toMatchObject({
+      grant: { workspaceId, purpose: "device_session" },
+      setupCode: expect.stringMatching(/^pw_setup_/),
+      displayOnce: true
+    });
+
+    const smuggledScopeIssue = await fetch(
+      `http://127.0.0.1:${serverAdminPort}/api/v1/setup-codes`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${serverAdminToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          schemaVersion: "workspace-setup/v1",
+          workspaceId: "workspace-other",
+          purpose: "host_enrollment"
+        })
+      }
+    );
+    expect(smuggledScopeIssue.status).toBe(400);
+    await expect(smuggledScopeIssue.json()).resolves.toEqual({
+      error: "setup_code_malformed"
+    });
+
+    const wrongPurposeIssue = await fetch(
+      `http://127.0.0.1:${serverAdminPort}/api/v1/setup-codes`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${serverAdminToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          schemaVersion: "workspace-setup/v1",
+          purpose: "host_enrollment"
+        })
+      }
+    );
+    expect(wrongPurposeIssue.status).toBe(400);
+    await expect(wrongPurposeIssue.json()).resolves.toEqual({
+      error: "setup_code_malformed"
+    });
+
+    const nonAdminCurrentWorkspaceIssue = await fetch(`${base}/api/v1/setup-codes`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        schemaVersion: "workspace-setup/v1",
+        purpose: "device_session"
+      })
+    });
+    expect(nonAdminCurrentWorkspaceIssue.status).toBe(403);
+    await expect(nonAdminCurrentWorkspaceIssue.json()).resolves.toEqual({
+      error: "operator_server_admin_required"
+    });
+
     const redeem = await fetch(`${base}/api/v1/setup-codes/redeem`, {
       method: "POST",
       headers: { "content-type": "application/json" },

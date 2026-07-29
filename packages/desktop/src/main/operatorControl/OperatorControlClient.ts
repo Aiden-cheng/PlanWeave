@@ -10,6 +10,10 @@ import {
   type OperatorHostPage,
   type OperatorHostView
 } from "@planweave-ai/distributed-protocol";
+import {
+  setupCodeIssueResponseSchema,
+  type SetupCodeIssueResponse
+} from "@planweave-ai/collaboration-contracts";
 import { z, type ZodType } from "zod";
 import {
   OperatorControlError,
@@ -128,6 +132,15 @@ export class OperatorControlClient {
   ): Promise<OperatorEnrollmentGrantResponse> {
     return this.json("POST", "/api/v1/host-enrollments", operatorEnrollmentGrantResponseSchema, {
       body: operatorEnrollmentGrantRequestSchema.parse(input)
+    });
+  }
+
+  async issueMemberDeviceSetupCode(): Promise<SetupCodeIssueResponse> {
+    return this.json("POST", "/api/v1/setup-codes", setupCodeIssueResponseSchema, {
+      body: {
+        schemaVersion: "workspace-setup/v1",
+        purpose: "device_session"
+      }
     });
   }
 

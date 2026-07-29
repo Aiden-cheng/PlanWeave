@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { exampleSetupCodeIssueResponse } from "@planweave-ai/collaboration-contracts";
 import {
   OPERATOR_CONTROL_JSON_BODY_MAX_BYTES,
   OperatorControlClient
@@ -161,6 +162,53 @@ describe("Desktop operator control trust boundary", () => {
     request.mockResolvedValueOnce(new Response("not-json", { status: 200 }));
     await expect(client.listHosts()).rejects.toMatchObject({ code: "operator_malformed_json" });
     expect(JSON.stringify(requests)).toContain(tokenA);
+  });
+
+  it("copies a member setup code in main and returns only redacted handoff metadata", async () => {
+    const directory = await root("planweave-operator-member-setup-");
+    const request = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe("https://operator.example.test/api/v1/setup-codes");
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        schemaVersion: "workspace-setup/v1",
+        purpose: "device_session"
+      });
+      return new Response(JSON.stringify(exampleSetupCodeIssueResponse), { status: 201 });
+    });
+    const service = new OperatorControlService({
+      profileStore: new OperatorProfileStore({ profilesPath: join(directory, "profiles.json") }),
+      vault: new OperatorCredentialVault({
+        paths: { credentialsPath: join(directory, "credentials.json") },
+        safeStorage: safeStorage(false)
+      }),
+      request,
+      clock: { now: () => new Date("2030-01-01T00:02:00.000Z") }
+    });
+    await service.upsertProfile(profile("profile-a"));
+    await service.importCredential({ profileId: "profile-a", operatorToken: tokenA });
+    const copyText = vi.fn();
+
+    const handoff = await service.copyMemberSetupCode({ profileId: "profile-a" }, copyText);
+
+    expect(copyText).toHaveBeenCalledWith(exampleSetupCodeIssueResponse.setupCode);
+    expect(handoff).toEqual({
+      state: "ready",
+      workspaceId: exampleSetupCodeIssueResponse.grant.workspaceId,
+      expiresAt: exampleSetupCodeIssueResponse.grant.expiresAt,
+      copiedAt: "2030-01-01T00:02:00.000Z"
+    });
+    expect(JSON.stringify(handoff)).not.toContain(exampleSetupCodeIssueResponse.setupCode);
+    await expect(
+      service.copyMemberSetupCode({ profileId: "profile-a" }, () => {
+        throw new Error("clipboard_unavailable");
+      })
+    ).rejects.toThrow("clipboard_unavailable");
+    await expect(
+      service.copyMemberSetupCode(
+        { profileId: "profile-a", setupCode: exampleSetupCodeIssueResponse.setupCode },
+        copyText
+      )
+    ).rejects.toThrow("Operator IPC rejected copyMemberSetupCode");
   });
 
   it("stops reading declared and chunked responses at the byte limit", async () => {

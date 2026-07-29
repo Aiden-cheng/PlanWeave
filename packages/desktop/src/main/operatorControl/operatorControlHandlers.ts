@@ -89,6 +89,9 @@ export function registerOperatorControlHandlers(
   ipcMain.handle(operatorControlInvokeChannels.copyHostBootstrapHandoff, (_event, input: unknown) =>
     active.copyHostBootstrapHandoff(input, (content) => clipboard.writeText(content))
   );
+  ipcMain.handle(operatorControlInvokeChannels.copyMemberSetupCode, (_event, input: unknown) =>
+    active.copyMemberSetupCode(input, (content) => clipboard.writeText(content))
+  );
   ipcMain.handle(operatorControlInvokeChannels.revokeHost, (_event, input: unknown) =>
     active.revokeHost(input)
   );

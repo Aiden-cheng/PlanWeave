@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { exampleSetupCodeIssueResponse } from "@planweave-ai/collaboration-contracts";
 import {
   registerOperatorControlHandlers,
   shutdownOperatorControlService
@@ -108,5 +109,39 @@ describe("operator control main-owned Host handoff", () => {
       handler({}, { profileId: "profile-a", enrollmentCode: `pw_enroll_${"A".repeat(43)}` })
     ).rejects.toThrow("Operator IPC rejected copyHostBootstrapHandoff");
     expect(electronMock.writeText).not.toHaveBeenCalled();
+  });
+});
+
+describe("operator control main-owned member setup code", () => {
+  it("copies the one-time code in main and returns only redacted metadata", async () => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-operator-member-setup-handler-"));
+    roots.push(root);
+    const service = registerOperatorControlHandlers({
+      profileStorePaths: { profilesPath: join(root, "profiles.json") },
+      credentialsPath: join(root, "credentials.json"),
+      request: vi.fn(async () =>
+        new Response(JSON.stringify(exampleSetupCodeIssueResponse), { status: 201 })
+      )
+    });
+    await service.upsertProfile({
+      profileId: "profile-a",
+      displayName: "Operator A",
+      serverBaseUrl: "https://operator.example.test/",
+      allowInsecureTransport: false
+    });
+    await service.importCredential({
+      profileId: "profile-a",
+      operatorToken: "operator_handler_token_abcdefghijklmnopqrstuvwxyz"
+    });
+    const handler = electronMock.handlers.get(operatorControlInvokeChannels.copyMemberSetupCode);
+    if (!handler) throw new Error("operator_member_setup_handler_missing");
+
+    const handoff = await handler({}, { profileId: "profile-a" });
+
+    expect(electronMock.writeText).toHaveBeenCalledWith(exampleSetupCodeIssueResponse.setupCode);
+    expect(JSON.stringify(handoff)).not.toContain(exampleSetupCodeIssueResponse.setupCode);
+    await expect(
+      handler({}, { profileId: "profile-a", setupCode: exampleSetupCodeIssueResponse.setupCode })
+    ).rejects.toThrow("Operator IPC rejected copyMemberSetupCode");
   });
 });

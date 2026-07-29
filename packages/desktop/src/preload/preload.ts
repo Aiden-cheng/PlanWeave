@@ -409,6 +409,8 @@ const operatorControlApi: PlanWeaveOperatorControlApi = {
     ipcRenderer.invoke(operatorControlInvokeChannels.listHosts, input),
   copyOperatorHostBootstrapHandoff: async (input) =>
     ipcRenderer.invoke(operatorControlInvokeChannels.copyHostBootstrapHandoff, input),
+  copyOperatorMemberSetupCode: async (input) =>
+    ipcRenderer.invoke(operatorControlInvokeChannels.copyMemberSetupCode, input),
   revokeOperatorHost: async (input) =>
     ipcRenderer.invoke(operatorControlInvokeChannels.revokeHost, input),
   onOperatorControlStatusChanged: (callback) => {

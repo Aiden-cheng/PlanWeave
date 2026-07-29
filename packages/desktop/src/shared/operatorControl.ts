@@ -149,8 +149,15 @@ export type OperatorCopyHostBootstrapHandoffInput = z.input<
   typeof operatorCopyHostBootstrapHandoffInputSchema
 >;
 
-/** Renderer-safe result of a main-owned Host bootstrap clipboard handoff. */
-export const operatorHostBootstrapHandoffViewSchema = z
+export const operatorCopyMemberSetupCodeInputSchema = z
+  .object({ profileId: operatorProfileIdSchema })
+  .strict();
+export type OperatorCopyMemberSetupCodeInput = z.infer<
+  typeof operatorCopyMemberSetupCodeInputSchema
+>;
+
+/** Renderer-safe result of a main-owned one-time clipboard handoff. */
+const operatorClipboardHandoffViewSchema = z
   .object({
     state: z.literal("ready"),
     workspaceId: operatorProfileIdSchema,
@@ -158,8 +165,14 @@ export const operatorHostBootstrapHandoffViewSchema = z
     copiedAt: z.iso.datetime()
   })
   .strict();
+export const operatorHostBootstrapHandoffViewSchema = operatorClipboardHandoffViewSchema;
 export type OperatorHostBootstrapHandoffView = z.infer<
   typeof operatorHostBootstrapHandoffViewSchema
+>;
+
+export const operatorMemberSetupCodeHandoffViewSchema = operatorClipboardHandoffViewSchema;
+export type OperatorMemberSetupCodeHandoffView = z.infer<
+  typeof operatorMemberSetupCodeHandoffViewSchema
 >;
 
 export const operatorRevokeHostInputSchema = z
@@ -230,6 +243,7 @@ export class OperatorControlError extends Error {
 
 const forbiddenSecretKeys = [
   "operatorToken",
+  "setupCode",
   "enrollmentCode",
   "hostEnrollmentCode",
   "encryptedOperatorToken",
@@ -307,6 +321,9 @@ export type PlanWeaveOperatorControlApi = {
   copyOperatorHostBootstrapHandoff: (
     input: OperatorCopyHostBootstrapHandoffInput
   ) => Promise<OperatorHostBootstrapHandoffView>;
+  copyOperatorMemberSetupCode: (
+    input: OperatorCopyMemberSetupCodeInput
+  ) => Promise<OperatorMemberSetupCodeHandoffView>;
   revokeOperatorHost: (input: OperatorRevokeHostInput) => Promise<OperatorHostView>;
   onOperatorControlStatusChanged: (callback: (status: OperatorControlStatus) => void) => () => void;
 };

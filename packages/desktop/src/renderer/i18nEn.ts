@@ -552,6 +552,18 @@ export const enCatalog = {
   hostAdminBridgeUnavailable: "Host administration is unavailable in this Desktop session.",
   hostAdminSessionOnlyWarning:
     "The operator credential is available for this session only; it is not persisted by the operating system vault.",
+  hostAdminMemberSetupTitle: "Member device onboarding",
+  hostAdminMemberSetupDescription:
+    "Create a one-time setup code for this server-admin session's Workspace and copy it directly from Desktop main.",
+  hostAdminMemberSetupRoleNote:
+    "The first device to redeem a code becomes the Workspace owner. Later devices join as members. Paste the code in Members → Setup code.",
+  hostAdminMemberSetupCopy: "Create and copy setup code",
+  hostAdminMemberSetupCopied: "Setup code copied. It is shown only in the system clipboard.",
+  hostAdminMemberSetupWorkspace: "Workspace",
+  hostAdminMemberSetupExpires: "Expires",
+  hostAdminMemberSetupDismiss: "Done",
+  hostAdminMemberSetupRequiresAdmin:
+    "Select a server-admin profile with an available operator credential first.",
   hostAdminProfileTitle: "Server-admin profiles",
   hostAdminProfileDescription:
     "Profiles contain a server origin and display name. Operator credentials stay in Electron main and are never shown here.",

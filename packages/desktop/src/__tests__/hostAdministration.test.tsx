@@ -18,6 +18,7 @@ const bridgeMock = vi.hoisted(() => ({
   clearOperatorCredential: vi.fn(),
   listOperatorHosts: vi.fn(),
   copyOperatorHostBootstrapHandoff: vi.fn(),
+  copyOperatorMemberSetupCode: vi.fn(),
   revokeOperatorHost: vi.fn()
 }));
 
@@ -86,6 +87,12 @@ beforeEach(() => {
     state: "ready",
     workspaceId: "workspace-a",
     expiresAt: "2030-01-01T00:15:00.000Z",
+    copiedAt: "2030-01-01T00:00:00.000Z"
+  });
+  bridgeMock.copyOperatorMemberSetupCode.mockResolvedValue({
+    state: "ready",
+    workspaceId: "workspace-a",
+    expiresAt: "2030-01-01T01:00:00.000Z",
     copiedAt: "2030-01-01T00:00:00.000Z"
   });
   bridgeMock.revokeOperatorHost.mockResolvedValue({
@@ -226,6 +233,28 @@ describe("Host administration surface", () => {
 
     await user.click(screen.getByTestId("host-admin-close-grant"));
     expect(screen.queryByTestId("host-admin-grant-once")).not.toBeInTheDocument();
+  });
+
+  it("creates a member setup code through main without exposing the secret in the renderer", async () => {
+    const user = userEvent.setup();
+    render(<HostAdministrationSection t={createTranslator("en")} />);
+    await screen.findByTestId("host-administration");
+
+    await user.click(screen.getByTestId("host-admin-member-setup-copy"));
+
+    expect(bridgeMock.copyOperatorMemberSetupCode).toHaveBeenCalledWith({
+      profileId: "profile-a"
+    });
+    expect(await screen.findByTestId("host-admin-member-setup-copied")).toHaveTextContent(
+      "workspace-a"
+    );
+    expect(screen.queryByDisplayValue(/pw_setup_/)).not.toBeInTheDocument();
+    expect(JSON.stringify(bridgeMock.copyOperatorMemberSetupCode.mock.calls)).not.toContain(
+      "pw_setup_"
+    );
+
+    await user.click(screen.getByTestId("host-admin-member-setup-dismiss"));
+    expect(screen.queryByTestId("host-admin-member-setup-copied")).not.toBeInTheDocument();
   });
 
   it("requires confirmation before revoking and reflects revoked state", async () => {

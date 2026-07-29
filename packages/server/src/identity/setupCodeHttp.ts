@@ -1,10 +1,17 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { opaqueIdentifierSchema } from "@planweave-ai/collaboration-contracts";
+import {
+  opaqueIdentifierSchema,
+  setupCodeIssueRequestSchema
+} from "@planweave-ai/collaboration-contracts";
 import { z } from "zod";
 import { OperatorTokenRegistry, type OperatorPrincipal } from "../operatorAuth.js";
 import { SetupCodeError, SetupCodeService } from "./setupCodeService.js";
 
 const MAX_SETUP_BODY_BYTES = 16_384;
+const currentWorkspaceDeviceIssueRequestSchema = setupCodeIssueRequestSchema
+  .omit({ workspaceId: true, purpose: true })
+  .extend({ purpose: z.literal("device_session") })
+  .strict();
 
 export type SetupCodeHttpOptions = {
   service: SetupCodeService;
@@ -14,6 +21,7 @@ export type SetupCodeHttpOptions = {
 
 type SetupRoute =
   | { kind: "issue"; workspaceId: string }
+  | { kind: "issueCurrentWorkspace" }
   | { kind: "list"; workspaceId: string }
   | { kind: "revoke"; workspaceId: string; setupCodeId: string }
   | { kind: "redeem" };
@@ -53,6 +61,9 @@ function decodeIdentifier(value: string): string | undefined {
 }
 
 function route(request: IncomingMessage, pathname: string): SetupRoute | undefined {
+  if (request.method === "POST" && pathname === "/api/v1/setup-codes") {
+    return { kind: "issueCurrentWorkspace" };
+  }
   if (request.method === "POST" && pathname === "/api/v1/setup-codes/redeem") {
     return { kind: "redeem" };
   }
@@ -135,6 +146,9 @@ function mapError(error: unknown): { status: number; code: string } {
   if (error.message === "operator_workspace_forbidden") {
     return { status: 403, code: "operator_workspace_forbidden" };
   }
+  if (error.message === "operator_server_admin_required") {
+    return { status: 403, code: "operator_server_admin_required" };
+  }
   if (error.message === "setup_code_body_too_large") {
     return { status: 413, code: "setup_code_body_too_large" };
   }
@@ -176,6 +190,17 @@ export async function handleSetupCodeHttpRequest(
     }
 
     const principal = requireOperator(options.authorization, request.headers.authorization);
+    if (matched.kind === "issueCurrentWorkspace") {
+      query(url, []);
+      options.authorization.requireServerAdmin(principal);
+      const body = currentWorkspaceDeviceIssueRequestSchema.parse(await readJson(request));
+      respond(
+        response,
+        201,
+        options.service.issue(principal, { ...body, workspaceId: principal.workspaceId })
+      );
+      return true;
+    }
     if (matched.kind === "issue") {
       query(url, []);
       const body = await readJson(request);

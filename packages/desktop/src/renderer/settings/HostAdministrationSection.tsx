@@ -9,6 +9,7 @@ import { useHostAdministrationController } from "../hooks/useHostAdministrationC
 import { HostBootstrapCard } from "./HostBootstrapCard";
 import { HostAvailabilityCard } from "./HostAvailabilityCard";
 import { DeploymentConnectionCard } from "./DeploymentConnectionCard";
+import { MemberSetupCodeCard } from "./MemberSetupCodeCard";
 
 type HostAdministrationSectionProps = {
   t: ReturnType<typeof createTranslator>;
@@ -40,7 +41,9 @@ function errorLabel(code: string | null, t: ReturnType<typeof createTranslator>)
             ? "hostAdminOffline"
             : code === "operator_unauthorized" || code === "operator_credential_invalid"
               ? "hostAdminUnauthorized"
-              : code === "operator_admin_required" || code === "operator_forbidden"
+              : code === "operator_admin_required" ||
+                  code === "operator_server_admin_required" ||
+                  code === "operator_forbidden"
                 ? "hostAdminForbidden"
                 : "hostAdminErrorGeneric";
   return t(key);
@@ -59,9 +62,12 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
     clearActiveProfile,
     clearCredential,
     copyBootstrapHandoff,
+    copyMemberSetupCode,
     dismissHandoff,
+    dismissMemberSetupCodeHandoff,
     error,
     handoff,
+    memberSetupCodeHandoff,
     hosts,
     hostsLoading,
     importCredential,
@@ -172,6 +178,15 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
       ) : null}
 
       <DeploymentConnectionCard t={t} />
+
+      <MemberSetupCodeCard
+        t={t}
+        enabled={Boolean(activeProfile?.hasOperatorCredential)}
+        busy={busy}
+        handoff={memberSetupCodeHandoff}
+        onCopy={() => void copyMemberSetupCode()}
+        onDismiss={dismissMemberSetupCodeHandoff}
+      />
 
       <HostAvailabilityCard
         hosts={hosts}
