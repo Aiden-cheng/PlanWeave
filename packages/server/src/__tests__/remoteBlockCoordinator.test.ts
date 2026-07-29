@@ -244,6 +244,96 @@ describe("RemoteBlockCoordinator", () => {
     ).toEqual({ status: "expired" });
   });
 
+  it("keeps an exact workspace Host authorized through reservation and final reentry", async () => {
+    const fixture = await setup(true);
+    const secondWorkspaceId = "workspace-2";
+    const secondLocator = { ...fixture.locator, workspaceId: secondWorkspaceId };
+    new WorkspaceIdentityRepository(fixture.server.database).ensureConfiguredWorkspace(
+      secondWorkspaceId
+    );
+    fixture.registry.bind(secondLocator, fixture.runtime);
+
+    const access = new ProjectAccessRepository(fixture.server.database);
+    access.registerProjectInternal({
+      workspaceId: secondWorkspaceId,
+      projectId: secondLocator.projectId,
+      projectRoot: fixture.workspace.root
+    });
+    access.registerCanvasInternal({
+      workspaceId: secondWorkspaceId,
+      projectId: secondLocator.projectId,
+      canvasId: secondLocator.canvasId,
+      packageDir: fixture.workspace.init.workspace.packageDir
+    });
+    const host = fixture.hosts.register("Second Workspace Host").host;
+    fixture.hosts.bindToWorkspace(host.id, secondWorkspaceId);
+    fixture.hosts.reportOnline(host.id, ["acp.codex"], 1, {
+      workspaceMappings: [{ workspaceId: secondWorkspaceId, status: "ready" }],
+      acpProfiles: [
+        {
+          profileId: "codex-acp",
+          agentId: "codex",
+          status: "ready",
+          capabilities: ["acp.codex"]
+        }
+      ]
+    });
+    const scope = {
+      kind: "block" as const,
+      ...secondLocator,
+      blockRef: "T-001#B-001"
+    };
+    new AuthorityRepository(fixture.server.database).applyExecutionTarget({
+      mutation: {
+        schemaVersion: "execution-target/v1",
+        scope,
+        target: { kind: "exact_host", hostId: host.id },
+        expectedRevision: 0
+      },
+      actor: { kind: "system", id: "test-system" }
+    });
+
+    fixture.server.database
+      .prepare("DELETE FROM legacy_project_workspace_mappings WHERE legacy_project_id=?")
+      .run(secondLocator.projectId);
+    expect(
+      new WorkspaceIdentityRepository(fixture.server.database).workspaceForLegacyProject(
+        secondLocator.projectId
+      )
+    ).toBeUndefined();
+
+    const outcome = await fixture.coordinator.dispatch({
+      ...secondLocator,
+      blockRef: scope.blockRef,
+      idempotencyKey: "strict-authority-exact-workspace",
+      expectedResponsibilityRevision: 0,
+      expectedReviewerRevision: 0,
+      expectedExecutionTargetRevision: 1,
+      strictAuthority: true
+    });
+    expect(outcome).toMatchObject({
+      status: "activated",
+      operation: {
+        workspaceId: secondWorkspaceId,
+        attempt: { hostId: host.id }
+      }
+    });
+    const leaseId = outcome.operation.attempt.leaseId;
+    if (!leaseId) throw new Error("expected_reservation_lease");
+    expect(fixture.reservations.getRequired(leaseId)).toMatchObject({
+      hostId: host.id,
+      status: "active"
+    });
+    expect(fixture.dispatches.getRequired(outcome.operation.dispatchId)).toMatchObject({
+      workspaceId: secondWorkspaceId,
+      hostId: host.id,
+      status: "leased"
+    });
+    await expect(fixture.coordinator.reenter(outcome.operation.id)).resolves.toMatchObject({
+      status: "activated"
+    });
+  });
+
   it("retry_new_attempt follows authority tables after execution target change (not legacy)", async () => {
     const fixture = await setup(true);
     if (!fixture.host) throw new Error("expected_test_host");

@@ -157,7 +157,7 @@ export function createRemoteBlockCoordination(
       if (!expected) return;
       const scope = {
         kind: "block" as const,
-        workspaceId: workspaceIdentity.workspaceForLegacyProject(operation.projectId) ?? "",
+        workspaceId: operation.workspaceId,
         projectId: operation.projectId,
         canvasId: operation.canvasId,
         blockRef: operation.blockRef
