@@ -79,6 +79,7 @@ export type WorkAssignmentServiceOptions = {
    * Never used to rewrite assignment or migrate leases.
    */
   resolveActiveDispatch?: (input: {
+    workspaceId: string;
     projectId: string;
     workItem: WorkItemRef;
   }) => { present: boolean; hostId?: string; dispatchId?: string } | undefined;
@@ -413,7 +414,11 @@ export class WorkAssignmentService {
     if (target.kind === "exact_host") {
       host = this.hostPort.getHostFacts(this.workspaceId, projectId, target.hostId);
     }
-    const activeDispatch = this.resolveActiveDispatch?.({ projectId, workItem });
+    const activeDispatch = this.resolveActiveDispatch?.({
+      workspaceId: this.workspaceId,
+      projectId,
+      workItem
+    });
     return projectAssignmentDisplay({
       projectId,
       workItem,

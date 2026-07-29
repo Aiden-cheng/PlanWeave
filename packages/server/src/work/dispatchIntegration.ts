@@ -394,7 +394,7 @@ const ACTIVE_OPERATION_STATES = new Set([
  */
 export function resolveActiveDispatchSnapshot(
   database: SqliteDatabase,
-  input: { projectId: string; workItem: WorkItemRef }
+  input: { workspaceId: string; projectId: string; workItem: WorkItemRef }
 ): ActiveDispatchSnapshot {
   const workItem = workItemRefSchema.parse(input.workItem);
   if (workItem.kind !== "block") {
@@ -404,13 +404,14 @@ export function resolveActiveDispatchSnapshot(
     .prepare(
       `SELECT o.id AS operation_id,o.dispatch_id,o.state AS operation_state,a.host_id
        FROM remote_operations o
-       JOIN remote_execution_attempts a ON a.execution_attempt_id=o.execution_attempt_id
-       WHERE o.project_id=? AND o.canvas_id=? AND o.block_ref=?
+       JOIN remote_execution_attempts a
+         ON a.execution_attempt_id=o.execution_attempt_id AND a.workspace_id=o.workspace_id
+       WHERE o.workspace_id=? AND o.project_id=? AND o.canvas_id=? AND o.block_ref=?
          AND o.state NOT IN ('completed','failed','cancelled')
        ORDER BY o.created_at DESC,o.id DESC
        LIMIT 1`
     )
-    .get(input.projectId, workItem.canvasId, workItem.blockRef) as
+    .get(input.workspaceId, input.projectId, workItem.canvasId, workItem.blockRef) as
     | {
         operation_id: string;
         dispatch_id: string;
@@ -434,7 +435,7 @@ export function resolveActiveDispatchSnapshot(
  * Batch active-dispatch resolver for WorkAssignmentService projections.
  */
 export function createActiveDispatchResolver(database: SqliteDatabase) {
-  return (input: { projectId: string; workItem: WorkItemRef }) => {
+  return (input: { workspaceId: string; projectId: string; workItem: WorkItemRef }) => {
     const snapshot = resolveActiveDispatchSnapshot(database, input);
     if (!snapshot.present) {
       return { present: false as const };
