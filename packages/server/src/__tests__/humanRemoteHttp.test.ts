@@ -372,41 +372,46 @@ describe("human remote operation HTTP", () => {
     });
   });
 
-  it("rejects non-human, cross-project, untrusted, and draining mutations", async () => {
+  it("distinguishes unauthenticated from unauthorized scope without revealing target trust", async () => {
     const fixture = await setup();
     const token = await bootstrap(fixture.origin, fixture.projectId, "boundary-owner");
-    const otherToken = await bootstrap(fixture.origin, fixture.otherProjectId, "other-owner");
-    const path = `${fixture.origin}/api/v1/projects/${fixture.projectId}/remote-operations`;
     const body = JSON.stringify(remoteDispatchBody(fixture, "boundary-dispatch"));
+    const targetPaths = [
+      `${fixture.origin}/api/v1/projects/${fixture.otherProjectId}/remote-operations`,
+      `${fixture.origin}/api/v1/projects/untrusted-project/remote-operations`
+    ];
 
-    for (const invalidToken of ["pw_host_not_human", "operator-token-not-human"]) {
+    for (const path of targetPaths) {
       const denied = await fetch(path, {
         method: "POST",
-        headers: headers(invalidToken),
+        headers: headers(token),
         body
       });
-      expect(denied.status).toBe(401);
+      expect(denied.status).toBe(403);
+      await expect(denied.json()).resolves.toEqual({ error: "human_cross_project_forbidden" });
     }
 
-    const crossProject = await fetch(path, {
-      method: "POST",
-      headers: headers(otherToken),
-      body
-    });
-    expect(crossProject.status).toBe(401);
-
-    const untrusted = await fetch(
-      `${fixture.origin}/api/v1/projects/untrusted-project/remote-operations`,
-      { method: "POST", headers: headers(token), body }
-    );
-    expect(untrusted.status).toBe(403);
+    for (const credential of [undefined, "pw_host_not_human", "operator-token-not-human"]) {
+      for (const path of targetPaths) {
+        const denied = await fetch(path, {
+          method: "POST",
+          headers: headers(credential),
+          body
+        });
+        expect(denied.status).toBe(401);
+        await expect(denied.json()).resolves.toEqual({ error: "human_auth_unauthenticated" });
+      }
+    }
 
     fixture.setAcceptingMutations(false);
-    const draining = await fetch(path, {
-      method: "POST",
-      headers: headers(token),
-      body
-    });
+    const draining = await fetch(
+      `${fixture.origin}/api/v1/projects/${fixture.projectId}/remote-operations`,
+      {
+        method: "POST",
+        headers: headers(token),
+        body
+      }
+    );
     expect(draining.status).toBe(503);
     await expect(draining.json()).resolves.toEqual({ error: "server_not_accepting_mutations" });
   });

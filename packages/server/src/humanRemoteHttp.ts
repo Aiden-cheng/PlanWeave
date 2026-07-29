@@ -204,10 +204,9 @@ export async function handleHumanRemoteHttpRequest(
         options.workspaceIdentity,
         request.headers.authorization
       );
-      const forbidden = authenticated && !options.projectAuthority.hasProject(matched.projectId);
       request.resume();
-      respond(response, forbidden ? 403 : 401, {
-        error: forbidden ? "human_cross_project_forbidden" : "human_auth_unauthenticated"
+      respond(response, authenticated ? 403 : 401, {
+        error: authenticated ? "human_cross_project_forbidden" : "human_auth_unauthenticated"
       });
       return true;
     }
