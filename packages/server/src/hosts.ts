@@ -90,12 +90,7 @@ export function hostExecutionProfileAvailability(
   if (profile.status === "invalid") {
     return { status: "unavailable", reason: "acp_profile_invalid" };
   }
-  if (
-    !input.requiredCapabilities.every(
-      (capability) =>
-        host.capabilities.includes(capability) && profile.capabilities.includes(capability)
-    )
-  ) {
+  if (!input.requiredCapabilities.every((capability) => host.capabilities.includes(capability))) {
     return { status: "unavailable", reason: "capability_mismatch" };
   }
   return { status: "available", reason: null };

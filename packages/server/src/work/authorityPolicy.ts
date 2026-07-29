@@ -164,8 +164,7 @@ export function hostCanSatisfyBlock(
       agentProfileId: input.agentProfileId,
       requiredCapabilities: input.requiredCapabilities
     }).status === "available" &&
-    host.capacity > input.activeReservations &&
-    input.requiredCapabilities.every((capability) => host.capabilities.includes(capability))
+    host.capacity > input.activeReservations
   );
 }
 

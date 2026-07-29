@@ -154,7 +154,17 @@ describe("HostReservationRepository", () => {
         }
       ]
     });
-    reportReady(hosts, ready.id, workspaceId, ["linux"], 1);
+    hosts.reportOnline(ready.id, ["linux", "acp.codex"], 1, {
+      workspaceMappings: [{ workspaceId, status: "ready" }],
+      acpProfiles: [
+        {
+          profileId: "codex-acp",
+          agentId: "codex",
+          status: "ready",
+          capabilities: ["acp.codex"]
+        }
+      ]
+    });
     server.database
       .prepare("UPDATE agent_hosts SET last_seen_at=? WHERE id=?")
       .run("2099-01-01T00:00:00.000Z", wrongReadyProfile.id);
