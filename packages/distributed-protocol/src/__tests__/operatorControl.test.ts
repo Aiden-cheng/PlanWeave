@@ -27,7 +27,8 @@ describe("operator control wire contracts", () => {
             displayName: "Host",
             capabilities: [],
             capacity: 1,
-            online: false
+            online: false,
+            availability: { status: "unavailable", reason: "offline" }
           }
         ],
         nextCursor: null
@@ -42,6 +43,8 @@ describe("operator control wire contracts", () => {
             displayName: "Host",
             capabilities: [],
             capacity: 1,
+            online: false,
+            availability: { status: "unavailable", reason: "offline" },
             unexpected: true
           }
         ],
