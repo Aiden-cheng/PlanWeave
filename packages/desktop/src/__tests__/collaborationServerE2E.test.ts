@@ -15,6 +15,8 @@ import {
 } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { parseServerConfig } from "../../../server/src/config.js";
 import { hashOperatorToken } from "../../../server/src/operatorAuth.js";
+import { ProjectAccessRepository } from "../../../server/src/projectAccessRepository.js";
+import { openServerDatabase } from "../../../server/src/sqlite.js";
 import { legacyWorkspaceIdForProject } from "../../../server/src/__tests__/support/legacyWorkspaceId.js";
 import { seedOperatorSessions } from "../../../server/src/__tests__/support/operatorAuthFixture.js";
 import {
@@ -98,7 +100,13 @@ async function setup() {
   await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
   const address = httpServer.address();
   if (!address || typeof address === "string") throw new Error("Expected HTTP address");
-  return { projectId, origin: `http://127.0.0.1:${address.port}`, adminToken: compositionAdminToken };
+  return {
+    projectId,
+    workspaceId: legacyWorkspaceIdForProject(projectId),
+    databasePath: config.databasePath,
+    origin: `http://127.0.0.1:${address.port}`,
+    adminToken: compositionAdminToken
+  };
 }
 
 function clientFor(origin: string, projectId: string, token?: string): CollaborationClient {
@@ -115,6 +123,37 @@ function clientFor(origin: string, projectId: string, token?: string): Collabora
   });
   clients.push(client);
   return client;
+}
+
+async function redeemWorkspaceDevice(input: {
+  origin: string;
+  adminToken: string;
+  workspaceId: string;
+  displayName: string;
+}): Promise<{ token: string; humanPrincipalId: string }> {
+  const issue = await fetch(
+    `${input.origin}/api/v1/workspaces/${encodeURIComponent(input.workspaceId)}/setup-codes`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${input.adminToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ schemaVersion: "workspace-setup/v1", purpose: "device_session" })
+    }
+  );
+  expect(issue.status).toBe(201);
+  const issued = (await issue.json()) as { setupCode: string };
+  const redeem = await fetch(`${input.origin}/api/v1/setup-codes/redeem`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      schemaVersion: "workspace-setup/v1",
+      purpose: "device_session",
+      setupCode: issued.setupCode,
+      displayName: input.displayName
+    })
+  });
+  expect(redeem.status).toBe(200);
+  const redeemed = (await redeem.json()) as { deviceToken: string; humanPrincipalId: string };
+  return { token: redeemed.deviceToken, humanPrincipalId: redeemed.humanPrincipalId };
 }
 
 function nextHostMessage(socket: WebSocket): Promise<Record<string, unknown>> {
@@ -185,7 +224,18 @@ async function connectEnrolledHost(origin: string, adminToken: string) {
       protocolVersion: 1,
       lastAcknowledgedSequence: 0,
       capabilities: enrollmentRequest.capabilities,
-      capacity: 1
+      capacity: 1,
+      readiness: {
+        workspaceMappings: [{ workspaceId: grant.workspaceId, status: "ready" }],
+        acpProfiles: [
+          {
+            profileId: "codex-acp",
+            agentId: "codex",
+            status: "ready",
+            capabilities: enrollmentRequest.capabilities
+          }
+        ]
+      }
     })
   );
   await expect(welcomePromise).resolves.toMatchObject({ type: "host.welcome" });
@@ -238,6 +288,51 @@ async function createIdentityFixture() {
   return { fixture, anonymous, owner, member, ownerBootstrap, memberBootstrap };
 }
 
+async function configureWorkspaceWorkAccess(input: {
+  fixture: Awaited<ReturnType<typeof setup>>;
+  ownerBootstrap: Awaited<ReturnType<CollaborationClient["bootstrapOwner"]>>;
+}) {
+  const workspaceOwner = await redeemWorkspaceDevice({
+    origin: input.fixture.origin,
+    adminToken: input.fixture.adminToken,
+    workspaceId: input.fixture.workspaceId,
+    displayName: "Desktop Workspace Owner"
+  });
+  const workspaceMember = await redeemWorkspaceDevice({
+    origin: input.fixture.origin,
+    adminToken: input.fixture.adminToken,
+    workspaceId: input.fixture.workspaceId,
+    displayName: "Desktop Workspace Member"
+  });
+  const database = await openServerDatabase(input.fixture.databasePath, 5_000);
+  try {
+    const access = new ProjectAccessRepository(database);
+    for (const humanPrincipalId of [
+      workspaceOwner.humanPrincipalId,
+      workspaceMember.humanPrincipalId
+    ]) {
+      access.grant({
+        workspaceId: input.fixture.workspaceId,
+        projectId: input.fixture.projectId,
+        canvasId: "default",
+        humanPrincipalId,
+        role: "editor",
+        grantedBy: { kind: "human", id: input.ownerBootstrap.principal.humanPrincipalId }
+      });
+    }
+  } finally {
+    database.close();
+  }
+  const workspaceConnection = await fetch(`${input.fixture.origin}/api/v1/workspace-connection`, {
+    headers: { Authorization: `Bearer ${workspaceOwner.token}` }
+  });
+  expect(workspaceConnection.status).toBe(200);
+  return {
+    workspaceOwner: clientFor(input.fixture.origin, input.fixture.projectId, workspaceOwner.token),
+    workspaceMember
+  };
+}
+
 const blockWorkItem = {
   kind: "block" as const,
   canvasId: "default",
@@ -246,7 +341,13 @@ const blockWorkItem = {
 
 describe("Desktop CollaborationClient against the Server composition", () => {
   it("covers identity, membership, assignment, and comment mutations", async () => {
-    const { owner, member, ownerBootstrap, memberBootstrap } = await createIdentityFixture();
+    const {
+      fixture,
+      owner,
+      member,
+      ownerBootstrap,
+      memberBootstrap
+    } = await createIdentityFixture();
 
     const revocableInvitation = await owner.createInvitation();
     const openInvitations = await owner.listInvitations({ openOnly: true });
@@ -288,60 +389,66 @@ describe("Desktop CollaborationClient against the Server composition", () => {
       code: "work_auth_unauthenticated",
       httpStatus: 401
     });
+    const { workspaceOwner, workspaceMember } = await configureWorkspaceWorkAccess({
+      fixture,
+      ownerBootstrap
+    });
 
-    const assignment = await owner.updateAssignment({
+    const assignment = await workspaceOwner.updateAssignment({
       workItem: blockWorkItem,
-      target: { kind: "human", humanPrincipalId: memberBootstrap.principal.humanPrincipalId },
+      target: { kind: "human", humanPrincipalId: workspaceMember.humanPrincipalId },
       expectedRevision: 0,
       reason: "Desktop network assignment"
     });
     expect(assignment.revision).toBe(1);
-    expect((await owner.getAssignment(blockWorkItem)).target).toEqual(assignment.target);
-    expect((await owner.listAssignments({ canvasId: "default" })).items).toEqual(
+    expect((await workspaceOwner.getAssignment(blockWorkItem)).target).toEqual(assignment.target);
+    expect((await workspaceOwner.listAssignments({ canvasId: "default" })).items).toEqual(
       expect.arrayContaining([expect.objectContaining({ workItem: blockWorkItem, revision: 1 })])
     );
-    expect((await owner.listEligibleAssignees(blockWorkItem)).humans).toEqual(
+    expect((await workspaceOwner.listEligibleAssignees(blockWorkItem)).humans).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          humanPrincipalId: memberBootstrap.principal.humanPrincipalId,
+          humanPrincipalId: workspaceMember.humanPrincipalId,
           membershipActive: true
         })
       ])
     );
     await expect(
-      owner.updateAssignment({
+      workspaceOwner.updateAssignment({
         workItem: blockWorkItem,
         target: { kind: "unassigned" },
         expectedRevision: 0
       })
     ).rejects.toMatchObject({ kind: "conflict", httpStatus: 409 });
 
-    const comment = await owner.createComment({
+    const comment = await workspaceOwner.createComment({
       workItem: blockWorkItem,
       body: "Desktop network comment"
     });
-    const edited = await owner.editComment({
+    const edited = await workspaceOwner.editComment({
       commentId: comment.commentId,
       body: "Desktop edited comment",
       expectedRevision: 1
     });
     expect(edited.revision).toBe(2);
     expect(edited.body).toBe("Desktop edited comment");
-    const tombstoned = await owner.tombstoneComment({
+    const tombstoned = await workspaceOwner.tombstoneComment({
       commentId: comment.commentId,
       expectedRevision: 2,
       reason: "Desktop test tombstone"
     });
     expect(tombstoned.tombstoned).toBe(true);
-    expect((await owner.listComments({ workItem: blockWorkItem, limit: 50 })).items).toEqual([]);
     expect(
-      (await owner.listComments({
+      (await workspaceOwner.listComments({ workItem: blockWorkItem, limit: 50 })).items
+    ).toEqual([]);
+    expect(
+      (await workspaceOwner.listComments({
         workItem: blockWorkItem,
         limit: 50,
         includeTombstoned: true
       })).items
     ).toEqual(expect.arrayContaining([expect.objectContaining({ tombstoned: true })]));
-    expect((await owner.listActivity({ workItem: blockWorkItem, limit: 50 })).items).toEqual(
+    expect((await workspaceOwner.listActivity({ workItem: blockWorkItem, limit: 50 })).items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           type: "comment_tombstoned",
@@ -371,9 +478,10 @@ describe("Desktop CollaborationClient against the Server composition", () => {
   });
 
   it("maps remote action, event, interaction, and error routes through the client", async () => {
-    const { fixture, owner } = await createIdentityFixture();
+    const { fixture, ownerBootstrap } = await createIdentityFixture();
+    const { workspaceOwner } = await configureWorkspaceWorkAccess({ fixture, ownerBootstrap });
     const host = await connectEnrolledHost(fixture.origin, fixture.adminToken);
-    const executionTarget = await owner.updateExecutionTarget({
+    const executionTarget = await workspaceOwner.updateExecutionTarget({
       schemaVersion: "execution-target/v1",
       scope: {
         kind: "block",
@@ -385,7 +493,7 @@ describe("Desktop CollaborationClient against the Server composition", () => {
       target: { kind: "exact_host", hostId: host.hostId },
       expectedRevision: 0
     });
-    const remoteDispatch = owner.dispatchRemoteOperation({
+    const remoteDispatch = workspaceOwner.dispatchRemoteOperation({
       schemaVersion: "remote-run/v2",
       projectId: fixture.projectId,
       canvasId: blockWorkItem.canvasId,
@@ -439,11 +547,11 @@ describe("Desktop CollaborationClient against the Server composition", () => {
     );
     await expect(host.next()).resolves.toMatchObject({ type: "host.event_ack" });
     const remote = await remoteDispatch;
-    expect((await owner.observeRemoteOperation(remote.operationId)).operationId).toBe(
+    expect((await workspaceOwner.observeRemoteOperation(remote.operationId)).operationId).toBe(
       remote.operationId
     );
 
-    const replayedEvents = await owner.replayRemoteOperationEvents(remote.operationId, {
+    const replayedEvents = await workspaceOwner.replayRemoteOperationEvents(remote.operationId, {
       afterCursor: 0
     });
     expect(replayedEvents.afterCursor).toBe(0);
@@ -456,16 +564,18 @@ describe("Desktop CollaborationClient against the Server composition", () => {
         text: "desktop e2e event"
       })
     ]);
-    const events = await owner.replayRemoteOperationEvents(remote.operationId, { afterCursor: 1 });
+    const events = await workspaceOwner.replayRemoteOperationEvents(remote.operationId, {
+      afterCursor: 1
+    });
     expect(events).toMatchObject({ afterCursor: 1, cursor: 1, events: [], hasMore: false });
-    const interactions = await owner.listRemoteOperationInteractions(remote.operationId, {
+    const interactions = await workspaceOwner.listRemoteOperationInteractions(remote.operationId, {
       cursor: 0,
       limit: 50
     });
     expect(interactions).toEqual({ items: [], nextCursor: null });
 
     await expect(
-      owner.executeRemoteOperationAction(remote.operationId, {
+      workspaceOwner.executeRemoteOperationAction(remote.operationId, {
         kind: "cancel",
         actionId: "desktop-e2e-cancel",
         operationId: remote.operationId,
@@ -477,7 +587,7 @@ describe("Desktop CollaborationClient against the Server composition", () => {
       })
     ).rejects.toMatchObject({ kind: "conflict", httpStatus: 409 });
     await expect(
-      owner.settleRemoteOperationInteraction(remote.operationId, {
+      workspaceOwner.settleRemoteOperationInteraction(remote.operationId, {
         type: "interaction.authentication_action",
         action: "cancel",
         actionId: "desktop-e2e-interaction",
@@ -487,7 +597,7 @@ describe("Desktop CollaborationClient against the Server composition", () => {
         acpSessionId: "desktop-e2e-acp-session"
       })
     ).rejects.toMatchObject({ kind: "not_found", httpStatus: 404 });
-    await expect(owner.observeRemoteOperation("missing-operation")).rejects.toMatchObject({
+    await expect(workspaceOwner.observeRemoteOperation("missing-operation")).rejects.toMatchObject({
       kind: "not_found",
       httpStatus: 404
     });
