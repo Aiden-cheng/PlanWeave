@@ -257,8 +257,9 @@ describe("self-hosted two-Desktop collaboration flow (OSS-006 B-002)", () => {
         target: { kind: "exact_host", hostId: configured.hostId },
         expectedRevision: 0
       });
-      expect(target.status).toBe(200);
-      await expect(target.json()).resolves.toMatchObject({
+      const targetBody = await target.json();
+      expect(target.status, JSON.stringify(targetBody)).toBe(200);
+      expect(targetBody).toMatchObject({
         target: { kind: "exact_host", hostId: configured.hostId },
         revision: 1
       });

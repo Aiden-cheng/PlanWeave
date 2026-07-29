@@ -168,7 +168,17 @@ export async function configureWorkspaceAccess(input: {
   const hosts = new AgentHostRepository(database);
   const host = hosts.register("E2E exact-block host").host;
   hosts.bindToWorkspace(host.id, input.workspaceId);
-  hosts.reportOnline(host.id, ["acp.codex"], 1);
+  hosts.reportOnline(host.id, ["acp.codex"], 1, {
+    workspaceMappings: [{ workspaceId: input.workspaceId, status: "ready" }],
+    acpProfiles: [
+      {
+        profileId: "codex-acp",
+        agentId: "codex",
+        status: "ready",
+        capabilities: ["acp.codex"]
+      }
+    ]
+  });
   return { database, hostId: host.id };
 }
 
