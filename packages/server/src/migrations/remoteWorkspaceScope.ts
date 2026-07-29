@@ -5,7 +5,6 @@ import type { Migration } from "./types.js";
 const scopeSql = `
   SELECT project_id, MIN(workspace_id) AS workspace_id
   FROM project_registry
-  WHERE revoked_at IS NULL
   GROUP BY project_id
   HAVING COUNT(DISTINCT workspace_id)=1
 `;
