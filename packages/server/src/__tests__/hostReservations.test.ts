@@ -10,6 +10,7 @@ import { RemoteOperationRepository } from "../remoteOperations.js";
 
 const directories: string[] = [];
 const servers: PlanweaveServer[] = [];
+const executionProfile = { agentId: "codex", agentProfileId: "codex-acp" } as const;
 
 afterEach(async () => {
   for (const server of servers.splice(0)) server.close();
@@ -91,18 +92,23 @@ describe("HostReservationRepository", () => {
       leaseDurationMs: 60_000
     });
 
-    const automaticA = reservations.reserve(createOperation(operations, workspaceA, "scope-a").id);
+    const automaticA = reservations.reserve(
+      createOperation(operations, workspaceA, "scope-a").id,
+      executionProfile
+    );
     expect(automaticA.hostId).toBe(hostA.id);
     expect(() =>
       reservations.reserve(
         createOperation(operations, workspaceA, "scope-a-exact", ["linux"], "project-a").id,
         {
+          ...executionProfile,
           preferredHostId: hostB.id
         }
       )
     ).toThrowError("no_compatible_agent_host");
     const automaticB = reservations.reserve(
-      createOperation(operations, workspaceB, "scope-b", ["linux"], "project-b").id
+      createOperation(operations, workspaceB, "scope-b", ["linux"], "project-b").id,
+      executionProfile
     );
     expect(automaticB.hostId).toBe(hostB.id);
   });
@@ -116,8 +122,9 @@ describe("HostReservationRepository", () => {
     const hosts = new AgentHostRepository(server.database);
     const missingWorkspace = hosts.register("Missing workspace readiness").host;
     const missingAcp = hosts.register("Missing ACP readiness").host;
+    const wrongReadyProfile = hosts.register("Wrong ready ACP profile").host;
     const ready = hosts.register("Ready Host").host;
-    for (const host of [missingWorkspace, missingAcp, ready]) {
+    for (const host of [missingWorkspace, missingAcp, wrongReadyProfile, ready]) {
       hosts.bindToWorkspace(host.id, workspaceId);
     }
     hosts.reportOnline(missingWorkspace.id, ["linux"], 1, {
@@ -130,7 +137,27 @@ describe("HostReservationRepository", () => {
       workspaceMappings: [{ workspaceId, status: "ready" }],
       acpProfiles: []
     });
+    hosts.reportOnline(wrongReadyProfile.id, ["linux"], 1, {
+      workspaceMappings: [{ workspaceId, status: "ready" }],
+      acpProfiles: [
+        {
+          profileId: "codex-acp",
+          agentId: "codex",
+          status: "missing",
+          capabilities: ["linux"]
+        },
+        {
+          profileId: "opencode-acp",
+          agentId: "opencode",
+          status: "ready",
+          capabilities: ["linux"]
+        }
+      ]
+    });
     reportReady(hosts, ready.id, workspaceId, ["linux"], 1);
+    server.database
+      .prepare("UPDATE agent_hosts SET last_seen_at=? WHERE id=?")
+      .run("2099-01-01T00:00:00.000Z", wrongReadyProfile.id);
     const operations = new RemoteOperationRepository(server.database);
     const reservations = new HostReservationRepository(server.database, {
       hostOfflineAfterMs: 60_000,
@@ -138,11 +165,19 @@ describe("HostReservationRepository", () => {
     });
 
     const automatic = reservations.reserve(
-      createOperation(operations, workspaceId, "readiness-automatic").id
+      createOperation(operations, workspaceId, "readiness-automatic").id,
+      executionProfile
     );
     expect(automatic.hostId).toBe(ready.id);
     expect(() =>
+      reservations.reserve(createOperation(operations, workspaceId, "readiness-profile").id, {
+        ...executionProfile,
+        preferredHostId: wrongReadyProfile.id
+      })
+    ).toThrowError("no_compatible_agent_host");
+    expect(() =>
       reservations.reserve(createOperation(operations, workspaceId, "readiness-preferred").id, {
+        ...executionProfile,
         preferredHostId: missingWorkspace.id
       })
     ).toThrowError("no_compatible_agent_host");
@@ -158,7 +193,10 @@ describe("HostReservationRepository", () => {
       acpProfiles: []
     });
     expect(() =>
-      reservations.reserve(createOperation(operations, workspaceId, "readiness-none").id)
+      reservations.reserve(
+        createOperation(operations, workspaceId, "readiness-none").id,
+        executionProfile
+      )
     ).toThrowError("no_compatible_agent_host");
   });
 
@@ -184,11 +222,17 @@ describe("HostReservationRepository", () => {
       leaseDurationMs: 60_000
     });
 
-    const reservedA = reservations.reserve(createOperation(operations, workspaceId, "B-001").id);
-    const reservedB = reservations.reserve(createOperation(operations, workspaceId, "B-002").id);
+    const reservedA = reservations.reserve(
+      createOperation(operations, workspaceId, "B-001").id,
+      executionProfile
+    );
+    const reservedB = reservations.reserve(
+      createOperation(operations, workspaceId, "B-002").id,
+      executionProfile
+    );
     expect([reservedA.hostId, reservedB.hostId]).toEqual([first.id, second.id].sort());
     expect(() =>
-      reservations.reserve(createOperation(operations, workspaceId, "B-003").id)
+      reservations.reserve(createOperation(operations, workspaceId, "B-003").id, executionProfile)
     ).toThrowError("no_compatible_agent_host");
   });
 
@@ -219,7 +263,7 @@ describe("HostReservationRepository", () => {
     });
 
     expect(() =>
-      reservations.reserve(createOperation(operations, workspaceId, "B-004").id)
+      reservations.reserve(createOperation(operations, workspaceId, "B-004").id, executionProfile)
     ).toThrowError("no_compatible_agent_host");
   });
 
@@ -239,7 +283,7 @@ describe("HostReservationRepository", () => {
       leaseDurationMs: 60_000
     });
     const first = createOperation(operations, workspaceId, "B-005");
-    const lease = reservations.reserve(first.id);
+    const lease = reservations.reserve(first.id, executionProfile);
     const activated = reservations.transition({
       leaseId: lease.leaseId,
       fencingToken: lease.fencingToken,
@@ -296,7 +340,8 @@ describe("HostReservationRepository", () => {
           idempotencyKey: "another-request",
           sourceFingerprint: first.sourceFingerprint,
           requiredCapabilities: first.requiredCapabilities
-        }).id
+        }).id,
+        executionProfile
       )
     ).toThrowError("remote_active_attempt_conflict");
   });
@@ -320,7 +365,7 @@ describe("HostReservationRepository", () => {
       leaseDurationMs: 60_000
     });
     const operation = createOperation(operations, workspaceId, "B-006", ["linux"]);
-    const original = reservations.reserve(operation.id);
+    const original = reservations.reserve(operation.id, executionProfile);
     reservations.transition({
       leaseId: original.leaseId,
       fencingToken: original.fencingToken,
@@ -392,7 +437,7 @@ describe("HostReservationRepository", () => {
       leaseDurationMs: 60_000
     });
     const operation = createOperation(operations, workspaceId, "B-008");
-    const lease = reservations.reserve(operation.id);
+    const lease = reservations.reserve(operation.id, executionProfile);
     reservations.transition({
       leaseId: lease.leaseId,
       fencingToken: lease.fencingToken,
@@ -438,7 +483,7 @@ describe("HostReservationRepository", () => {
       leaseDurationMs: 60_000
     });
     const interruptedOperation = createOperation(operations, workspaceId, "B-007");
-    const interruptedLease = reservations.reserve(interruptedOperation.id);
+    const interruptedLease = reservations.reserve(interruptedOperation.id, executionProfile);
     reservations.transition({
       leaseId: interruptedLease.leaseId,
       fencingToken: interruptedLease.fencingToken,
@@ -448,7 +493,7 @@ describe("HostReservationRepository", () => {
     now = new Date("2030-01-01T00:01:00.000Z");
     reservations.expireDue(now);
     reportReady(hosts, host.id, workspaceId, ["linux", "acp.session.load"], 1);
-    reservations.reserve(createOperation(operations, workspaceId, "B-008").id);
+    reservations.reserve(createOperation(operations, workspaceId, "B-008").id, executionProfile);
     const interrupted = operations.getRequired(interruptedOperation.id);
 
     expect(() =>

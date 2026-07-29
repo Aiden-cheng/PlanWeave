@@ -145,6 +145,8 @@ export type AssignmentDispatchGate = {
     canvasId: string;
     blockRef: string;
     requiredCapabilities: readonly string[];
+    agentId: string;
+    agentProfileId: string;
     requestedHostId?: string;
     allowHumanOverride?: boolean;
     expectedAssignmentRevision?: number;
@@ -312,6 +314,8 @@ export function createAuthorityDispatchGate(
           hostCanSatisfyBlock(host, {
             scope,
             requiredCapabilities,
+            agentId: input.agentId,
+            agentProfileId: input.agentProfileId,
             workspaceIdentity: options.workspaceIdentity,
             now,
             hostOfflineAfterMs: options.hostOfflineAfterMs,

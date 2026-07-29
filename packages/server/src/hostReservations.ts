@@ -5,7 +5,11 @@ import { capabilitiesSchema } from "./protocol.js";
 import { RemoteOperationRepository } from "./remoteOperations.js";
 import { inWriteTransaction, type SqliteDatabase } from "./sqlite.js";
 import { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
-import { AgentHostRepository, isAgentHostOnline, operatorHostAvailability } from "./hosts.js";
+import {
+  AgentHostRepository,
+  hostExecutionProfileAvailability,
+  isAgentHostOnline
+} from "./hosts.js";
 
 const timestampSchema = z.iso.datetime();
 const hostCandidateRowSchema = z
@@ -144,7 +148,7 @@ export class HostReservationRepository {
    */
   reserve(
     operationId: string,
-    options: { preferredHostId?: string } = {}
+    options: { agentId: string; agentProfileId: string; preferredHostId?: string }
   ): HostCapacityReservation {
     try {
       return inWriteTransaction(this.database, () => {
@@ -217,7 +221,13 @@ export class HostReservationRepository {
             return (
               this.workspaceIdentity.hostUsable(candidate.id, now) &&
               this.workspaceIdentity.hostUsable(candidate.id, now, workspaceId) &&
-              operatorHostAvailability(host, workspaceId, online).status === "available"
+              hostExecutionProfileAvailability(host, {
+                workspaceId,
+                online,
+                agentId: options.agentId,
+                agentProfileId: options.agentProfileId,
+                requiredCapabilities: operation.requiredCapabilities
+              }).status === "available"
             );
           });
         const required = new Set(operation.requiredCapabilities);

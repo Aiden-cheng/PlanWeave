@@ -67,6 +67,40 @@ export function operatorHostAvailability(
   return { status: "available", reason: null };
 }
 
+/** Operation-specific readiness for the exact ACP profile carried by an execution envelope. */
+export function hostExecutionProfileAvailability(
+  host: AgentHost,
+  input: {
+    workspaceId: string;
+    online: boolean;
+    agentId: string;
+    agentProfileId: string;
+    requiredCapabilities: readonly string[];
+  }
+): OperatorHostAvailability {
+  const generic = operatorHostAvailability(host, input.workspaceId, input.online);
+  if (generic.status !== "available") return generic;
+  const profile = host.readinessObservation?.acpProfiles.find(
+    (candidate) =>
+      candidate.profileId === input.agentProfileId && candidate.agentId === input.agentId
+  );
+  if (!profile || profile.status === "missing") {
+    return { status: "unavailable", reason: "acp_profile_missing" };
+  }
+  if (profile.status === "invalid") {
+    return { status: "unavailable", reason: "acp_profile_invalid" };
+  }
+  if (
+    !input.requiredCapabilities.every(
+      (capability) =>
+        host.capabilities.includes(capability) && profile.capabilities.includes(capability)
+    )
+  ) {
+    return { status: "unavailable", reason: "capability_mismatch" };
+  }
+  return { status: "available", reason: null };
+}
+
 /** Server-authoritative Host liveness shared by assignment and operator projections. */
 export function isAgentHostOnline(
   host: AgentHost,

@@ -66,7 +66,10 @@ async function setup() {
     hostOfflineAfterMs: 60_000,
     clock
   });
-  const reservation = reservations.reserve(operation.id);
+  const reservation = reservations.reserve(operation.id, {
+    agentId: "codex",
+    agentProfileId: "codex-acp"
+  });
   operation = operations.getRequired(operation.id);
   server.database
     .prepare(

@@ -1,6 +1,10 @@
 import { DispatchService, type DispatchRecord } from "./dispatches.js";
 import { ArtifactAuthorizationRepository } from "./artifactAuthorization.js";
-import { AgentHostRepository, isAgentHostOnline } from "./hosts.js";
+import {
+  AgentHostRepository,
+  hostExecutionProfileAvailability,
+  isAgentHostOnline
+} from "./hosts.js";
 import { DurableMailbox } from "./mailbox.js";
 import type { SqliteDatabase } from "./sqlite.js";
 import { RemoteBlockCoordinator } from "./remoteBlockCoordinator.js";
@@ -77,6 +81,7 @@ export function createRemoteBlockCoordination(
   const mailbox = new DurableMailbox(database);
   const artifactAuthorization = new ArtifactAuthorizationRepository(database);
   const operations = new RemoteOperationRepository(database, options.clock);
+  const candidates = new SqliteRemoteOperationCandidateRepository(database);
   const actions = new RemoteExecutionActionRepository(database, options.clock);
   const reservations = new HostReservationRepository(database, {
     leaseDurationMs: options.leaseDurationMs,
@@ -155,6 +160,8 @@ export function createRemoteBlockCoordination(
     try {
       const expected = operation.hostSelection?.authorityRevisions;
       if (!expected) return;
+      const candidate = candidates.get(operation.id);
+      if (!candidate) throw new Error("remote_operation_candidate_missing");
       const scope = {
         kind: "block" as const,
         workspaceId: operation.workspaceId,
@@ -171,6 +178,20 @@ export function createRemoteBlockCoordination(
       );
       const currentRevisions = authorityRepository.currentRevisions(scope);
       const now = (options.clock ?? (() => new Date()))();
+      const online =
+        !!host && isAgentHostOnline(host, { now, hostOfflineAfterMs: options.hostOfflineAfterMs });
+      if (
+        !host ||
+        hostExecutionProfileAvailability(host, {
+          workspaceId: scope.workspaceId,
+          online,
+          agentId: candidate.agentId,
+          agentProfileId: candidate.agentProfileId,
+          requiredCapabilities: operation.requiredCapabilities
+        }).status !== "available"
+      ) {
+        throw new Error("host_authorization_denied:capability_mismatch");
+      }
       const activeReservations = Number(
         (
           database
@@ -203,9 +224,7 @@ export function createRemoteBlockCoordination(
         requiredCapabilities: operation.requiredCapabilities,
         advertisedCapabilities: host?.capabilities ?? [],
         revoked: !host || host.revokedAt !== undefined,
-        online:
-          !!host &&
-          isAgentHostOnline(host, { now, hostOfflineAfterMs: options.hostOfflineAfterMs }),
+        online,
         capacityRemaining,
         lease:
           reservation.status === "active" && Date.parse(reservation.leaseExpiresAt) > now.getTime()
@@ -256,7 +275,7 @@ export function createRemoteBlockCoordination(
     runtimeResolver: options.runtimeResolver,
     operations,
     actions,
-    candidates: new SqliteRemoteOperationCandidateRepository(database),
+    candidates,
     reservations,
     dispatches: new SqliteRemoteDispatchPersistence(database),
     mailbox,

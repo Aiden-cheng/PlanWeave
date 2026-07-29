@@ -273,6 +273,8 @@ export class RemoteBlockActionCoordinator {
     const preferAuthority = operation.hostSelection?.authorityRevisions !== undefined;
     const workspaceId = operation.hostSelection?.workspaceId;
     if (!workspaceId) throw new DispatchAssignmentError("work_host_not_authorized");
+    const candidate = this.options.candidates.get(operation.id);
+    if (!candidate) throw new Error("remote_operation_candidate_missing");
     try {
       return this.options.assignmentGate?.resolve({
         workspaceId,
@@ -280,6 +282,8 @@ export class RemoteBlockActionCoordinator {
         canvasId: operation.canvasId,
         blockRef: operation.blockRef,
         requiredCapabilities: operation.requiredCapabilities,
+        agentId: candidate.agentId,
+        agentProfileId: candidate.agentProfileId,
         allowHumanOverride: false,
         preferAuthority
       });

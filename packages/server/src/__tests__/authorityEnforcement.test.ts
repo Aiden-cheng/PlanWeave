@@ -322,6 +322,8 @@ describe("strict Host dispatch authority", () => {
         canvasId: "c",
         blockRef: "T-001#B-001",
         requiredCapabilities: ["acp.codex"],
+        agentId: "codex",
+        agentProfileId: "codex-acp",
         expectedResponsibilityRevision: 0,
         expectedReviewerRevision: 0,
         expectedExecutionTargetRevision: 1
@@ -334,6 +336,8 @@ describe("strict Host dispatch authority", () => {
         canvasId: "c",
         blockRef: "T-001#B-001",
         requiredCapabilities: ["acp.codex"],
+        agentId: "codex",
+        agentProfileId: "codex-acp",
         expectedResponsibilityRevision: 0,
         expectedReviewerRevision: 0,
         expectedExecutionTargetRevision: 1
@@ -375,6 +379,8 @@ describe("strict Host dispatch authority", () => {
         canvasId: "c",
         blockRef: "T-001#B-001",
         requiredCapabilities: ["acp.codex"],
+        agentId: "codex",
+        agentProfileId: "codex-acp",
         expectedResponsibilityRevision: 0,
         expectedReviewerRevision: 0,
         expectedExecutionTargetRevision: 1
@@ -397,6 +403,8 @@ describe("strict Host dispatch authority", () => {
         canvasId: "c",
         blockRef: "T-001#B-001",
         requiredCapabilities: ["acp.codex"],
+        agentId: "codex",
+        agentProfileId: "codex-acp",
         expectedResponsibilityRevision: 0,
         expectedReviewerRevision: 0,
         expectedExecutionTargetRevision: 1
@@ -463,6 +471,28 @@ describe("strict Host dispatch authority", () => {
       }
     },
     {
+      name: "exact_acp_profile_not_ready",
+      setup: (ctx: Awaited<ReturnType<typeof fixture>>) => {
+        ctx.hosts.reportOnline(ctx.host.id, ["acp.codex", "acp.opencode"], 1, {
+          workspaceMappings: [{ workspaceId: "w", status: "ready" }],
+          acpProfiles: [
+            {
+              profileId: "codex-acp",
+              agentId: "codex",
+              status: "missing",
+              capabilities: ["acp.codex"]
+            },
+            {
+              profileId: "opencode-acp",
+              agentId: "opencode",
+              status: "ready",
+              capabilities: ["acp.opencode"]
+            }
+          ]
+        });
+      }
+    },
+    {
       name: "cross_workspace",
       setup: (ctx: Awaited<ReturnType<typeof fixture>>) => {
         ctx.database.exec(`
@@ -507,6 +537,8 @@ describe("strict Host dispatch authority", () => {
         canvasId: "c",
         blockRef: "T-001#B-001",
         requiredCapabilities: ["acp.codex"],
+        agentId: "codex",
+        agentProfileId: "codex-acp",
         expectedResponsibilityRevision: 0,
         expectedReviewerRevision: 0,
         expectedExecutionTargetRevision: 1
@@ -553,6 +585,8 @@ describe("strict Host dispatch authority", () => {
       canvasId: "c",
       blockRef: "T-001#B-001",
       requiredCapabilities: ["acp.codex"],
+      agentId: "codex",
+      agentProfileId: "codex-acp",
       expectedResponsibilityRevision: 0,
       expectedReviewerRevision: 0,
       expectedExecutionTargetRevision: 1
@@ -603,6 +637,8 @@ describe("strict Host dispatch authority", () => {
         canvasId: "c",
         blockRef: "T-001#B-001",
         requiredCapabilities: ["acp.codex"],
+        agentId: "codex",
+        agentProfileId: "codex-acp",
         preferAuthority: true
       })
     ).toMatchObject({

@@ -44,8 +44,8 @@ export function createRemoteDispatchFixture(
         workspaceMappings: [{ workspaceId, status: "ready" }],
         acpProfiles: [
           {
-            profileId: "fixture-acp",
-            agentId: "fixture-agent",
+            profileId: sourceEnvelope.agentProfileId,
+            agentId: sourceEnvelope.agentId,
             status: "ready",
             capabilities: candidateHost.capabilities
           }
@@ -80,7 +80,10 @@ export function createRemoteDispatchFixture(
   });
   const reservation = operation.attempt.leaseId
     ? reservations.getRequired(operation.attempt.leaseId)
-    : reservations.reserve(operation.id);
+    : reservations.reserve(operation.id, {
+        agentId: sourceEnvelope.agentId,
+        agentProfileId: sourceEnvelope.agentProfileId
+      });
   operation = operations.getRequired(operation.id);
   const persistence = new SqliteRemoteDispatchPersistence(database);
   persistence.prepare({ operation, reservation, envelope, envelopeDigest });

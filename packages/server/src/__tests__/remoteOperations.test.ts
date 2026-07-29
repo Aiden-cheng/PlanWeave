@@ -126,7 +126,10 @@ describe("RemoteOperationRepository", () => {
     const created = operations.markClaimed(
       operations.create({ ...operationInput, workspaceId }).id
     );
-    const reservation = reservations.reserve(created.id);
+    const reservation = reservations.reserve(created.id, {
+      agentId: "codex",
+      agentProfileId: "codex-acp"
+    });
     reservations.transition({
       leaseId: reservation.leaseId,
       fencingToken: reservation.fencingToken,

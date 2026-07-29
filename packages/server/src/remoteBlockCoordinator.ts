@@ -204,6 +204,8 @@ export class RemoteBlockCoordinator {
         canvasId: candidate.canvasId,
         blockRef: candidate.blockRef,
         requiredCapabilities: candidate.requiredCapabilities,
+        agentId: candidate.agentId,
+        agentProfileId: candidate.agentProfileId,
         requestedHostId: request.requestedHostId,
         allowHumanOverride: request.allowHumanOverride,
         expectedAssignmentRevision: request.expectedAssignmentRevision,
@@ -406,8 +408,12 @@ export class RemoteBlockCoordinator {
       : undefined;
     if (!reservation) {
       try {
-        const preferredHostId = this.resolvePreferredHostId(operation, candidate.workspaceId);
-        reservation = this.options.reservations.reserve(operation.id, { preferredHostId });
+        const preferredHostId = this.resolvePreferredHostId(operation, candidate);
+        reservation = this.options.reservations.reserve(operation.id, {
+          preferredHostId,
+          agentId: candidate.agentId,
+          agentProfileId: candidate.agentProfileId
+        });
         this.options.finalAuthorize?.({
           operation: this.options.operations.getRequired(operation.id),
           reservation
@@ -671,7 +677,7 @@ export class RemoteBlockCoordinator {
    */
   private resolvePreferredHostId(
     operation: RemoteOperation,
-    workspaceId: string
+    candidate: RemoteBlockDispatchCandidate
   ): string | undefined {
     const durable = operation.hostSelection ?? this.hostSelectionByOperation.get(operation.id);
     if (durable) {
@@ -682,11 +688,13 @@ export class RemoteBlockCoordinator {
       return undefined;
     }
     const snapshot = this.options.assignmentGate.resolve({
-      workspaceId,
+      workspaceId: candidate.workspaceId,
       projectId: operation.projectId,
       canvasId: operation.canvasId,
       blockRef: operation.blockRef,
       requiredCapabilities: operation.requiredCapabilities,
+      agentId: candidate.agentId,
+      agentProfileId: candidate.agentProfileId,
       allowHumanOverride: false,
       ...(operation.hostSelection?.authorityRevisions
         ? {

@@ -9,7 +9,11 @@ import {
   type ExecutionTarget
 } from "@planweave-ai/collaboration-contracts";
 import type { AgentHost } from "../hosts.js";
-import { isAgentHostOnline, operatorHostAvailability } from "../hosts.js";
+import {
+  hostExecutionProfileAvailability,
+  isAgentHostOnline,
+  operatorHostAvailability
+} from "../hosts.js";
 import type { ProjectAccessRepository } from "../projectAccessRepository.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import type { CollaborationAuthContext } from "../identity/auth.js";
@@ -136,6 +140,8 @@ export function hostCanSatisfyBlock(
   input: {
     scope: ExactBlockExecutionScope;
     requiredCapabilities: readonly string[];
+    agentId: string;
+    agentProfileId: string;
     workspaceIdentity: WorkspaceIdentityRepository;
     now: Date;
     hostOfflineAfterMs: number;
@@ -151,7 +157,13 @@ export function hostCanSatisfyBlock(
     workspace === input.scope.workspaceId &&
     host.revokedAt === undefined &&
     online &&
-    operatorHostAvailability(host, input.scope.workspaceId, online).status === "available" &&
+    hostExecutionProfileAvailability(host, {
+      workspaceId: input.scope.workspaceId,
+      online,
+      agentId: input.agentId,
+      agentProfileId: input.agentProfileId,
+      requiredCapabilities: input.requiredCapabilities
+    }).status === "available" &&
     host.capacity > input.activeReservations &&
     input.requiredCapabilities.every((capability) => host.capabilities.includes(capability))
   );

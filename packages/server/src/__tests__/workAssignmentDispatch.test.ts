@@ -384,7 +384,9 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
         projectId: fixture.locator.projectId,
         canvasId: "default",
         blockRef: "T-001#B-001",
-        requiredCapabilities: ["acp.codex"]
+        requiredCapabilities: ["acp.codex"],
+        agentId: "codex",
+        agentProfileId: "codex-acp"
       });
     const expectDenied = (code: string) => {
       try {
@@ -1407,7 +1409,11 @@ describe("HostReservationRepository preferred Host selection", () => {
     );
 
     expect(() =>
-      reservations.reserve(operation.id, { preferredHostId: preferred.id })
+      reservations.reserve(operation.id, {
+        agentId: "codex",
+        agentProfileId: "codex-acp",
+        preferredHostId: preferred.id
+      })
     ).toThrowError("no_compatible_agent_host");
 
     // Without preferred, automatic would pick alternate.
@@ -1423,7 +1429,10 @@ describe("HostReservationRepository preferred Host selection", () => {
         requiredCapabilities: ["linux"]
       }).id
     );
-    const reserved = reservations.reserve(operation2.id);
+    const reserved = reservations.reserve(operation2.id, {
+      agentId: "codex",
+      agentProfileId: "codex-acp"
+    });
     expect(reserved.hostId).toBe(alternate.id);
   });
 });
