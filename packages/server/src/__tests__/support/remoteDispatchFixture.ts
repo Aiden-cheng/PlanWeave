@@ -25,14 +25,34 @@ export function createRemoteDispatchFixture(
   const workspaceIdentity = new WorkspaceIdentityRepository(database);
   const workspaceId = workspaceIdentity.ensureWorkspaceForLegacyProject(sourceEnvelope.projectId);
   const requiredCapabilities = new Set(sourceEnvelope.requiredCapabilities);
-  const candidateHost = coordination.hosts
-    .list()
-    .find(
-      (host) =>
-        workspaceIdentity.workspaceForHost(host.id) === undefined &&
-        [...requiredCapabilities].every((capability) => host.capabilities.includes(capability))
+  const candidateHost = coordination.hosts.list().find((host) => {
+    const hostWorkspaceId = workspaceIdentity.workspaceForHost(host.id);
+    return (
+      (hostWorkspaceId === undefined || hostWorkspaceId === workspaceId) &&
+      [...requiredCapabilities].every((capability) => host.capabilities.includes(capability))
     );
-  if (candidateHost) coordination.hosts.bindToWorkspace(candidateHost.id, workspaceId);
+  });
+  if (candidateHost) {
+    if (workspaceIdentity.workspaceForHost(candidateHost.id) === undefined) {
+      coordination.hosts.bindToWorkspace(candidateHost.id, workspaceId);
+    }
+    coordination.hosts.reportOnline(
+      candidateHost.id,
+      candidateHost.capabilities,
+      candidateHost.capacity,
+      {
+        workspaceMappings: [{ workspaceId, status: "ready" }],
+        acpProfiles: [
+          {
+            profileId: "fixture-acp",
+            agentId: "fixture-agent",
+            status: "ready",
+            capabilities: candidateHost.capabilities
+          }
+        ]
+      }
+    );
+  }
   const operations = new RemoteOperationRepository(database);
   let operation = operations.create({
     workspaceId,

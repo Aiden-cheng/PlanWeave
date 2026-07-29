@@ -100,6 +100,20 @@ function remoteManifest(): PlanPackageManifest {
   return manifest;
 }
 
+function readyObservation(workspaceId: string) {
+  return {
+    workspaceMappings: [{ workspaceId, status: "ready" as const }],
+    acpProfiles: [
+      {
+        profileId: "codex-acp",
+        agentId: "codex",
+        status: "ready" as const,
+        capabilities: ["acp.codex"]
+      }
+    ]
+  };
+}
+
 async function createWsCoordination() {
   const workspace = await createTestWorkspace(remoteManifest());
   directories.push(workspace.home, workspace.root);
@@ -229,7 +243,8 @@ describe("agent host WebSocket transport", () => {
         protocolVersion: 1,
         lastAcknowledgedSequence: 0,
         capabilities: ["acp.codex"],
-        capacity: 1
+        capacity: 1,
+        readiness: readyObservation(workspaceId)
       })
     );
     await expect(events.next()).resolves.toMatchObject({ type: "host.welcome" });
@@ -335,7 +350,8 @@ describe("agent host WebSocket transport", () => {
         protocolVersion: 1,
         lastAcknowledgedSequence: 0,
         capabilities: ["acp.codex"],
-        capacity: 1
+        capacity: 1,
+        readiness: readyObservation(workspaceId)
       })
     );
     await events.next();
@@ -494,7 +510,8 @@ describe("agent host WebSocket transport", () => {
         protocolVersion: 1,
         lastAcknowledgedSequence: 0,
         capabilities: ["acp.codex"],
-        capacity: 1
+        capacity: 1,
+        readiness: readyObservation(workspaceId)
       })
     );
     await expect(firstEvents.next()).resolves.toMatchObject({ type: "host.welcome" });
@@ -604,7 +621,8 @@ describe("agent host WebSocket transport", () => {
         protocolVersion: 1,
         lastAcknowledgedSequence: 0,
         capabilities: ["acp.codex"],
-        capacity: 1
+        capacity: 1,
+        readiness: readyObservation(workspaceId)
       })
     );
     await expect(secondEvents.next()).resolves.toMatchObject({ type: "host.welcome" });
@@ -672,7 +690,8 @@ describe("agent host WebSocket transport", () => {
         protocolVersion: 1,
         lastAcknowledgedSequence: 0,
         capabilities: ["acp.codex"],
-        capacity: 1
+        capacity: 1,
+        readiness: readyObservation(workspaceId)
       })
     );
     await firstEvents.next();
@@ -724,7 +743,8 @@ describe("agent host WebSocket transport", () => {
         protocolVersion: 1,
         lastAcknowledgedSequence: 0,
         capabilities: ["acp.codex"],
-        capacity: 1
+        capacity: 1,
+        readiness: readyObservation(workspaceId)
       })
     );
     await secondEvents.next();
@@ -761,7 +781,8 @@ describe("agent host WebSocket transport", () => {
         protocolVersion: 1,
         lastAcknowledgedSequence: 0,
         capabilities: ["acp.codex"],
-        capacity: 1
+        capacity: 1,
+        readiness: readyObservation(workspaceId)
       })
     );
     await thirdEvents.next();
@@ -809,7 +830,8 @@ describe("agent host WebSocket transport", () => {
         protocolVersion: 1,
         lastAcknowledgedSequence: 0,
         capabilities: ["acp.codex"],
-        capacity: 1
+        capacity: 1,
+        readiness: readyObservation(workspaceId)
       })
     );
     await expect(events.next()).resolves.toMatchObject({ type: "host.welcome" });
