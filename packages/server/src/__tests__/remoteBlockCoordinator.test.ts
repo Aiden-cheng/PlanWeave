@@ -174,9 +174,65 @@ describe("RemoteBlockCoordinator", () => {
     ).workspaceForLegacyProject(fixture.locator.projectId);
     if (!workspaceId) throw new Error("workspace_mapping_missing");
     fixture.hosts.bindToWorkspace(host.id, workspaceId);
-    fixture.hosts.reportOnline(host.id, ["acp.codex"], 1);
+    fixture.hosts.reportOnline(host.id, ["acp.codex"], 1, {
+      workspaceMappings: [{ workspaceId, status: "ready" }],
+      acpProfiles: [
+        {
+          profileId: "codex-acp",
+          agentId: "codex",
+          status: "ready",
+          capabilities: ["acp.codex"]
+        }
+      ]
+    });
     await expect(fixture.coordinator.reenter(pending.operation.id)).resolves.toMatchObject({
       status: "activated"
+    });
+  });
+
+  it("dispatches automatic Host selection only to a ready workspace ACP Host", async () => {
+    const fixture = await setup(false);
+    const missingWorkspace = fixture.hosts.register("Missing workspace readiness").host;
+    const missingAcp = fixture.hosts.register("Missing ACP readiness").host;
+    const ready = fixture.hosts.register("Ready automatic Host").host;
+    for (const host of [missingWorkspace, missingAcp, ready]) {
+      fixture.hosts.bindToWorkspace(host.id, fixture.locator.workspaceId);
+    }
+    fixture.hosts.reportOnline(missingWorkspace.id, ["acp.codex"], 1, {
+      workspaceMappings: [],
+      acpProfiles: [
+        {
+          profileId: "codex-acp",
+          agentId: "codex",
+          status: "ready",
+          capabilities: ["acp.codex"]
+        }
+      ]
+    });
+    fixture.hosts.reportOnline(missingAcp.id, ["acp.codex"], 1, {
+      workspaceMappings: [{ workspaceId: fixture.locator.workspaceId, status: "ready" }],
+      acpProfiles: []
+    });
+    fixture.hosts.reportOnline(ready.id, ["acp.codex"], 1, {
+      workspaceMappings: [{ workspaceId: fixture.locator.workspaceId, status: "ready" }],
+      acpProfiles: [
+        {
+          profileId: "codex-acp",
+          agentId: "codex",
+          status: "ready",
+          capabilities: ["acp.codex"]
+        }
+      ]
+    });
+
+    const outcome = await fixture.coordinator.dispatch({
+      ...fixture.locator,
+      blockRef: "T-001#B-001",
+      idempotencyKey: "automatic-ready-host"
+    });
+    expect(outcome).toMatchObject({
+      status: "activated",
+      operation: { attempt: { hostId: ready.id } }
     });
   });
 

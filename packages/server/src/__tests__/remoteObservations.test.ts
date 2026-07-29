@@ -37,7 +37,17 @@ async function setup() {
     server.database
   ).ensureWorkspaceForLegacyProject("project-observation");
   hosts.bindToWorkspace(host.id, workspaceId);
-  hosts.reportOnline(host.id, ["linux", "acp.codex", "acp.session.load"], 2);
+  hosts.reportOnline(host.id, ["linux", "acp.codex", "acp.session.load"], 2, {
+    workspaceMappings: [{ workspaceId, status: "ready" }],
+    acpProfiles: [
+      {
+        profileId: "codex-acp",
+        agentId: "codex",
+        status: "ready",
+        capabilities: ["linux", "acp.codex", "acp.session.load"]
+      }
+    ]
+  });
   const operations = new RemoteOperationRepository(server.database, clock);
   let operation = operations.markClaimed(
     operations.create({

@@ -5,6 +5,7 @@ import { capabilitiesSchema } from "./protocol.js";
 import { RemoteOperationRepository } from "./remoteOperations.js";
 import { inWriteTransaction, type SqliteDatabase } from "./sqlite.js";
 import { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
+import { AgentHostRepository, isAgentHostOnline, operatorHostAvailability } from "./hosts.js";
 
 const timestampSchema = z.iso.datetime();
 const hostCandidateRowSchema = z
@@ -103,6 +104,7 @@ function toReservation(row: Record<string, unknown>): HostCapacityReservation {
 
 export class HostReservationRepository {
   private readonly clock: () => Date;
+  private readonly hosts: AgentHostRepository;
   private readonly workspaceIdentity: WorkspaceIdentityRepository;
 
   constructor(
@@ -116,6 +118,7 @@ export class HostReservationRepository {
       throw new Error("leaseDurationMs must be an integer of at least 1000.");
     }
     this.clock = options.clock ?? (() => new Date());
+    this.hosts = new AgentHostRepository(database, this.clock);
     this.workspaceIdentity = new WorkspaceIdentityRepository(database);
   }
 
@@ -204,11 +207,19 @@ export class HostReservationRepository {
               throw new Error("agent_host_row_invalid", { cause: error });
             }
           })
-          .filter(
-            (candidate) =>
+          .filter((candidate) => {
+            const host = this.hosts.get(candidate.id);
+            if (!host) return false;
+            const online = isAgentHostOnline(host, {
+              now,
+              hostOfflineAfterMs: this.options.hostOfflineAfterMs
+            });
+            return (
               this.workspaceIdentity.hostUsable(candidate.id, now) &&
-              this.workspaceIdentity.hostUsable(candidate.id, now, workspaceId)
-          );
+              this.workspaceIdentity.hostUsable(candidate.id, now, workspaceId) &&
+              operatorHostAvailability(host, workspaceId, online).status === "available"
+            );
+          });
         const required = new Set(operation.requiredCapabilities);
         const host = candidates.find(
           (candidate) =>

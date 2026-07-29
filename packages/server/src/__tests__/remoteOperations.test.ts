@@ -107,7 +107,17 @@ describe("RemoteOperationRepository", () => {
       server.database
     ).ensureWorkspaceForLegacyProject(operationInput.projectId);
     hosts.bindToWorkspace(host.id, workspaceId);
-    hosts.reportOnline(host.id, ["linux", "acp.codex"], 1);
+    hosts.reportOnline(host.id, ["linux", "acp.codex"], 1, {
+      workspaceMappings: [{ workspaceId, status: "ready" }],
+      acpProfiles: [
+        {
+          profileId: "codex-acp",
+          agentId: "codex",
+          status: "ready",
+          capabilities: ["linux", "acp.codex"]
+        }
+      ]
+    });
     const reservations = new HostReservationRepository(server.database, {
       leaseDurationMs: 60_000,
       hostOfflineAfterMs: 60_000,

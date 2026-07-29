@@ -51,6 +51,26 @@ function createOperation(
   return repository.markClaimed(operation.id);
 }
 
+function reportReady(
+  hosts: AgentHostRepository,
+  hostId: string,
+  workspaceId: string,
+  capabilities: string[],
+  capacity: number
+) {
+  hosts.reportOnline(hostId, capabilities, capacity, {
+    workspaceMappings: [{ workspaceId, status: "ready" }],
+    acpProfiles: [
+      {
+        profileId: "codex-acp",
+        agentId: "codex",
+        status: "ready",
+        capabilities
+      }
+    ]
+  });
+}
+
 describe("HostReservationRepository", () => {
   it("scopes automatic and exact reservations to the operation Workspace", async () => {
     const server = await setup();
@@ -63,8 +83,8 @@ describe("HostReservationRepository", () => {
     const hostB = hosts.register("Workspace B").host;
     hosts.bindToWorkspace(hostA.id, workspaceA);
     hosts.bindToWorkspace(hostB.id, workspaceB);
-    hosts.reportOnline(hostA.id, ["linux"], 1);
-    hosts.reportOnline(hostB.id, ["linux"], 1);
+    reportReady(hosts, hostA.id, workspaceA, ["linux"], 1);
+    reportReady(hosts, hostB.id, workspaceB, ["linux"], 1);
     const operations = new RemoteOperationRepository(server.database);
     const reservations = new HostReservationRepository(server.database, {
       hostOfflineAfterMs: 60_000,
@@ -87,6 +107,61 @@ describe("HostReservationRepository", () => {
     expect(automaticB.hostId).toBe(hostB.id);
   });
 
+  it("skips unready Hosts for automatic reservations and rejects an unready preferred Host", async () => {
+    const server = await setup();
+    const workspaceId = new WorkspaceIdentityRepository(server.database).workspaceForLegacyProject(
+      "project-a"
+    );
+    if (!workspaceId) throw new Error("workspace_mapping_missing");
+    const hosts = new AgentHostRepository(server.database);
+    const missingWorkspace = hosts.register("Missing workspace readiness").host;
+    const missingAcp = hosts.register("Missing ACP readiness").host;
+    const ready = hosts.register("Ready Host").host;
+    for (const host of [missingWorkspace, missingAcp, ready]) {
+      hosts.bindToWorkspace(host.id, workspaceId);
+    }
+    hosts.reportOnline(missingWorkspace.id, ["linux"], 1, {
+      workspaceMappings: [],
+      acpProfiles: [
+        { profileId: "codex-acp", agentId: "codex", status: "ready", capabilities: ["linux"] }
+      ]
+    });
+    hosts.reportOnline(missingAcp.id, ["linux"], 1, {
+      workspaceMappings: [{ workspaceId, status: "ready" }],
+      acpProfiles: []
+    });
+    reportReady(hosts, ready.id, workspaceId, ["linux"], 1);
+    const operations = new RemoteOperationRepository(server.database);
+    const reservations = new HostReservationRepository(server.database, {
+      hostOfflineAfterMs: 60_000,
+      leaseDurationMs: 60_000
+    });
+
+    const automatic = reservations.reserve(
+      createOperation(operations, workspaceId, "readiness-automatic").id
+    );
+    expect(automatic.hostId).toBe(ready.id);
+    expect(() =>
+      reservations.reserve(createOperation(operations, workspaceId, "readiness-preferred").id, {
+        preferredHostId: missingWorkspace.id
+      })
+    ).toThrowError("no_compatible_agent_host");
+
+    reservations.release({
+      leaseId: automatic.leaseId,
+      fencingToken: automatic.fencingToken,
+      expectedVersion: automatic.version,
+      reason: "expired"
+    });
+    hosts.reportOnline(ready.id, ["linux"], 1, {
+      workspaceMappings: [{ workspaceId, status: "ready" }],
+      acpProfiles: []
+    });
+    expect(() =>
+      reservations.reserve(createOperation(operations, workspaceId, "readiness-none").id)
+    ).toThrowError("no_compatible_agent_host");
+  });
+
   it("selects deterministically under capacity and prevents a capacity race", async () => {
     const server = await setup();
     const hosts = new AgentHostRepository(server.database);
@@ -98,8 +173,8 @@ describe("HostReservationRepository", () => {
     if (!workspaceId) throw new Error("workspace_mapping_missing");
     hosts.bindToWorkspace(first.id, workspaceId);
     hosts.bindToWorkspace(second.id, workspaceId);
-    hosts.reportOnline(first.id, ["linux"], 1);
-    hosts.reportOnline(second.id, ["linux"], 1);
+    reportReady(hosts, first.id, workspaceId, ["linux"], 1);
+    reportReady(hosts, second.id, workspaceId, ["linux"], 1);
     server.database
       .prepare("UPDATE agent_hosts SET last_seen_at=? WHERE id IN (?,?)")
       .run("2030-01-01T00:00:00.000Z", first.id, second.id);
@@ -127,15 +202,15 @@ describe("HostReservationRepository", () => {
     if (!workspaceId) throw new Error("workspace_mapping_missing");
     const offline = hosts.register("Offline").host;
     hosts.bindToWorkspace(offline.id, workspaceId);
-    hosts.reportOnline(offline.id, ["linux"], 1);
+    reportReady(hosts, offline.id, workspaceId, ["linux"], 1);
     now = new Date("2030-01-01T00:02:00.000Z");
     const revoked = hosts.register("Revoked").host;
     hosts.bindToWorkspace(revoked.id, workspaceId);
-    hosts.reportOnline(revoked.id, ["linux"], 1);
+    reportReady(hosts, revoked.id, workspaceId, ["linux"], 1);
     hosts.revoke(revoked.id);
     const incompatible = hosts.register("Incompatible").host;
     hosts.bindToWorkspace(incompatible.id, workspaceId);
-    hosts.reportOnline(incompatible.id, ["macos"], 1);
+    reportReady(hosts, incompatible.id, workspaceId, ["macos"], 1);
     const operations = new RemoteOperationRepository(server.database, () => now);
     const reservations = new HostReservationRepository(server.database, {
       clock: () => now,
@@ -157,7 +232,7 @@ describe("HostReservationRepository", () => {
     );
     if (!workspaceId) throw new Error("workspace_mapping_missing");
     hosts.bindToWorkspace(host.id, workspaceId);
-    hosts.reportOnline(host.id, ["linux"], 1);
+    reportReady(hosts, host.id, workspaceId, ["linux"], 1);
     const operations = new RemoteOperationRepository(server.database);
     const reservations = new HostReservationRepository(server.database, {
       hostOfflineAfterMs: 60_000,
@@ -237,7 +312,7 @@ describe("HostReservationRepository", () => {
     );
     if (!workspaceId) throw new Error("workspace_mapping_missing");
     hosts.bindToWorkspace(host.id, workspaceId);
-    hosts.reportOnline(host.id, ["linux", "acp.session.load"], 1);
+    reportReady(hosts, host.id, workspaceId, ["linux", "acp.session.load"], 1);
     const operations = new RemoteOperationRepository(server.database, clock);
     const reservations = new HostReservationRepository(server.database, {
       clock,
@@ -267,7 +342,7 @@ describe("HostReservationRepository", () => {
       state: "interrupted",
       attempt: { status: "interrupted", executionAttemptId: running.executionAttemptId }
     });
-    hosts.reportOnline(host.id, ["linux", "acp.session.load"], 1);
+    reportReady(hosts, host.id, workspaceId, ["linux", "acp.session.load"], 1);
 
     const resumed = reservations.resumeSameAttempt({
       priorLeaseId: original.leaseId,
@@ -310,7 +385,7 @@ describe("HostReservationRepository", () => {
     );
     if (!workspaceId) throw new Error("workspace_mapping_missing");
     hosts.bindToWorkspace(host.id, workspaceId);
-    hosts.reportOnline(host.id, ["linux"], 1);
+    reportReady(hosts, host.id, workspaceId, ["linux"], 1);
     const operations = new RemoteOperationRepository(server.database);
     const reservations = new HostReservationRepository(server.database, {
       hostOfflineAfterMs: 60_000,
@@ -355,7 +430,7 @@ describe("HostReservationRepository", () => {
     );
     if (!workspaceId) throw new Error("workspace_mapping_missing");
     hosts.bindToWorkspace(host.id, workspaceId);
-    hosts.reportOnline(host.id, ["linux", "acp.session.load"], 1);
+    reportReady(hosts, host.id, workspaceId, ["linux", "acp.session.load"], 1);
     const operations = new RemoteOperationRepository(server.database, clock);
     const reservations = new HostReservationRepository(server.database, {
       clock,
@@ -372,7 +447,7 @@ describe("HostReservationRepository", () => {
     });
     now = new Date("2030-01-01T00:01:00.000Z");
     reservations.expireDue(now);
-    hosts.reportOnline(host.id, ["linux", "acp.session.load"], 1);
+    reportReady(hosts, host.id, workspaceId, ["linux", "acp.session.load"], 1);
     reservations.reserve(createOperation(operations, workspaceId, "B-008").id);
     const interrupted = operations.getRequired(interruptedOperation.id);
 
