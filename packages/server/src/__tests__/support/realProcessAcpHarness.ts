@@ -518,7 +518,9 @@ export class RealProcessAcpHarness {
       options.readinessTimeoutMs ?? REAL_PROCESS_ACP_HARNESS_DEFAULT_TIMEOUT_MS;
     const hostDisplayName = options.hostDisplayName ?? "Harness Host";
     const hostCapacity = options.hostCapacity ?? 2;
-    const hostCapabilities = options.hostCapabilities ?? ["acp.test"];
+    const hostCapabilities = [
+      ...new Set([...(options.hostCapabilities ?? ["acp.test"]), "acp.codex"])
+    ];
     const graceMs = options.graceMs ?? 500;
 
     const workspace = await createTestWorkspace(options.manifest ?? remoteAcpManifest());
@@ -1021,7 +1023,7 @@ export class RealProcessAcpHarness {
     if (this.secondaryHosts.has(key))
       throw new Error(`real_process_harness_secondary_exists:${key}`);
     const capacity = options.capacity ?? 1;
-    const capabilities = options.capabilities ?? ["acp.test"];
+    const capabilities = [...new Set([...(options.capabilities ?? ["acp.test"]), "acp.codex"])];
     const acpScenario = options.acpScenario ?? this.acpScenario;
     const dataDir = join(this.paths.root, `host-data-${key}`);
     const controlDir = join(this.paths.root, `acp-control-${key}`);
