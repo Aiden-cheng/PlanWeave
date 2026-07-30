@@ -9,11 +9,12 @@ import { createTranslator } from "../renderer/i18n";
 import type { PlanWeaveCollaborationApi } from "../shared/collaboration";
 
 const profile = {
-  profileId: "planweave-local-loopback",
+  profileId: "planweave-local-server",
   displayName: "Local collaboration server",
   serverBaseUrl: "http://127.0.0.1:8787/",
   allowInsecureTransport: true
 };
+const connectionProfileId = "planweave-local-project-1";
 
 afterEach(cleanup);
 
@@ -64,7 +65,15 @@ describe("LocalCollaborationServerPanel", () => {
           reason: null
         })
     });
-    render(<LocalCollaborationServerPanel api={collaborationApi} t={createTranslator("en")} />);
+    render(
+      <LocalCollaborationServerPanel
+        api={collaborationApi}
+        t={createTranslator("en")}
+        profileId={connectionProfileId}
+        projectId="project-1"
+        canvasId="canvas-1"
+      />
+    );
     await userEvent.click(await screen.findByRole("button", { name: "Start local server" }));
     await waitFor(() =>
       expect(collaborationApi.listLocalCollaborationTrustedScopes).toHaveBeenCalled()
@@ -88,7 +97,15 @@ describe("LocalCollaborationServerPanel", () => {
         .fn()
         .mockRejectedValue(new Error("local_collaboration_owner_initialization_required"))
     });
-    render(<LocalCollaborationServerPanel api={collaborationApi} t={createTranslator("en")} />);
+    render(
+      <LocalCollaborationServerPanel
+        api={collaborationApi}
+        t={createTranslator("en")}
+        profileId={connectionProfileId}
+        projectId="project-1"
+        canvasId="canvas-1"
+      />
+    );
     await userEvent.click(await screen.findByRole("button", { name: "Enable current canvas" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Initialize an owner before registering the current canvas."
@@ -118,11 +135,19 @@ describe("LocalCollaborationServerPanel", () => {
           registeredAt: "2030-01-01T00:00:01.000Z"
         })
     });
-    render(<LocalCollaborationServerPanel api={collaborationApi} t={createTranslator("en")} />);
+    render(
+      <LocalCollaborationServerPanel
+        api={collaborationApi}
+        t={createTranslator("en")}
+        profileId={connectionProfileId}
+        projectId="project-1"
+        canvasId="canvas-1"
+      />
+    );
     await userEvent.click(await screen.findByRole("button", { name: "Enable current canvas" }));
     await waitFor(() => {
       expect(collaborationApi.bootstrapCollaborationOwner).toHaveBeenCalledWith({
-        profileId: profile.profileId,
+        profileId: connectionProfileId,
         request: { displayName: "Local owner" }
       });
       expect(collaborationApi.registerLocalCollaborationCurrentProject).toHaveBeenCalledTimes(2);
@@ -155,12 +180,20 @@ describe("LocalCollaborationServerPanel", () => {
         })
     });
 
-    render(<LocalCollaborationServerPanel api={collaborationApi} t={createTranslator("en")} />);
+    render(
+      <LocalCollaborationServerPanel
+        api={collaborationApi}
+        t={createTranslator("en")}
+        profileId={connectionProfileId}
+        projectId="project-2"
+        canvasId="canvas-2"
+      />
+    );
     await userEvent.click(await screen.findByRole("button", { name: "Enable current canvas" }));
 
     await waitFor(() => {
       expect(collaborationApi.bootstrapCollaborationOwner).toHaveBeenCalledWith({
-        profileId: profile.profileId,
+        profileId: connectionProfileId,
         request: { displayName: "Local owner" }
       });
       expect(collaborationApi.registerLocalCollaborationCurrentProject).toHaveBeenCalledTimes(2);

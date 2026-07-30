@@ -101,6 +101,16 @@ export function registerCollaborationHandlers(
     }
   });
   const local = coordinator;
+  const activateLocalSelection = async (): Promise<void> => {
+    const profile = local.localProfile();
+    if (!profile) throw new Error("local_collaboration_selection_required");
+    await active.upsertProfile(profile);
+    await active.migrateLocalProfileCredential(
+      "planweave-local-loopback",
+      profile.profileId
+    );
+    await active.setActiveProfile({ profileId: profile.profileId });
+  };
   const deploymentActions = new DeploymentActions({
     writeClipboard: (value) => clipboard.writeText(value),
     resourceDirectory: app.isPackaged
@@ -142,7 +152,7 @@ export function registerCollaborationHandlers(
         input && typeof input === "object" && "profileId" in input
           ? (input as { profileId: unknown }).profileId
           : null;
-      if (typeof profileId === "string" && local.status().profile?.profileId === profileId) {
+      if (typeof profileId === "string" && local.localProfile()?.profileId === profileId) {
         local.registerCurrentProject({ kind: "human", id: handoff.principal.humanPrincipalId });
         await active.connectSession({ profileId });
       }
@@ -243,15 +253,16 @@ export function registerCollaborationHandlers(
   ipcMain.handle(
     collaborationInvokeChannels.setCollaborationCurrentSelection,
     async (_event, input: unknown) => {
-      const localProfileId = local.status().profile?.profileId;
+      const localProfileId = local.localProfile()?.profileId;
       if (localProfileId && (await active.getStatus()).activeProfileId === localProfileId) {
         await active.disconnectSession();
       }
-      return local.setCurrentSelection(input);
+      await local.setCurrentSelection(input);
+      if (local.status().state === "running") await activateLocalSelection();
     }
   );
   ipcMain.handle(collaborationInvokeChannels.clearCollaborationCurrentSelection, async () => {
-    const localProfileId = local.status().profile?.profileId;
+    const localProfileId = local.localProfile()?.profileId;
     if (localProfileId && (await active.getStatus()).activeProfileId === localProfileId) {
       await active.disconnectSession();
     }
@@ -263,18 +274,11 @@ export function registerCollaborationHandlers(
   ipcMain.handle(collaborationInvokeChannels.startLocalCollaborationServer, async () => {
     const status = await local.start();
     if (status.state !== "running") return status;
-    const profile = local.localProfile();
-    if (!profile) throw new Error("local_collaboration_selection_required");
-    await active.upsertProfile(profile);
-    await active.migrateLocalProfileCredential(
-      "planweave-local-loopback",
-      profile.profileId
-    );
-    await active.setActiveProfile({ profileId: profile.profileId });
+    await activateLocalSelection();
     return status;
   });
   ipcMain.handle(collaborationInvokeChannels.stopLocalCollaborationServer, async () => {
-    const localProfileId = local.status().profile?.profileId;
+    const localProfileId = local.localProfile()?.profileId;
     if (localProfileId && (await active.getStatus()).activeProfileId === localProfileId) {
       await active.disconnectSession();
     }
@@ -284,7 +288,7 @@ export function registerCollaborationHandlers(
     local.listActiveTrustedScopes()
   );
   ipcMain.handle(collaborationInvokeChannels.registerLocalCollaborationCurrentProject, async () => {
-    const profile = local.status().profile;
+    const profile = local.localProfile();
     if (!profile) throw new Error("loopback_server_not_running");
     const humanPrincipalId = await active.activeHumanPrincipalId(profile.profileId);
     if (!humanPrincipalId) throw new Error("local_collaboration_owner_initialization_required");

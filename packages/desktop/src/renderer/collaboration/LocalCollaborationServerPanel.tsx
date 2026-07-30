@@ -22,10 +22,16 @@ function requiresOwnerInitialization(error: unknown): boolean {
 
 export function LocalCollaborationServerPanel({
   api,
-  t
+  t,
+  profileId,
+  projectId,
+  canvasId
 }: {
   api: PlanWeaveCollaborationApi | null;
   t: ReturnType<typeof createTranslator>;
+  profileId: string | null;
+  projectId: string | null;
+  canvasId: string | null;
 }) {
   const [status, setStatus] = useState<LoopbackServerStatus | null>(null);
   const [scopes, setScopes] = useState<readonly LoopbackTrustedProjectScope[]>([]);
@@ -53,6 +59,9 @@ export function LocalCollaborationServerPanel({
 
   if (!api) return null;
   const running = status?.state === "running";
+  const currentScope = scopes.find(
+    (scope) => scope.projectId === projectId && scope.canvasId === canvasId
+  );
   const statusLabel =
     status?.state === "error"
       ? status.reason === "stop_failed"
@@ -88,9 +97,9 @@ export function LocalCollaborationServerPanel({
         nextRegistration = await api.registerLocalCollaborationCurrentProject();
       } catch (caught) {
         if (!requiresOwnerInitialization(caught)) throw caught;
-        if (!status?.profile) throw new Error(ownerInitializationRequiredCode);
+        if (!profileId) throw new Error(ownerInitializationRequiredCode);
         await api.bootstrapCollaborationOwner({
-          profileId: status.profile.profileId,
+          profileId,
           request: { displayName: t("localServerDefaultOwnerName") }
         });
         nextRegistration = await api.registerLocalCollaborationCurrentProject();
@@ -175,8 +184,8 @@ export function LocalCollaborationServerPanel({
             {t("localServerTrustedScope")}
           </div>
           <div className="mt-1 break-all font-mono text-[11px] text-text-strong">
-            {scopes.length > 0
-              ? `${scopes[0].projectId} / ${scopes[0].canvasId}`
+            {currentScope
+              ? `${currentScope.projectId} / ${currentScope.canvasId}`
               : t("localServerOwnerPending")}
           </div>
           {registration ? (

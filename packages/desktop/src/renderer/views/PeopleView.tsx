@@ -87,7 +87,14 @@ export function PeopleView({
       aria-label={t("peopleTitle")}
     >
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 pb-8">
-        <LocalCollaborationServerPanel api={api} t={t} />
+        <LocalCollaborationServerPanel
+          key={`${activeProfile?.profileId ?? "local"}:${canvasId ?? "none"}`}
+          api={api}
+          t={t}
+          profileId={activeProfile?.profileId ?? null}
+          projectId={activeProfile?.projectId ?? null}
+          canvasId={canvasId}
+        />
         <CurrentCanvasAccessPanel
           view={currentCanvasAccess.view}
           loading={currentCanvasAccess.loading}

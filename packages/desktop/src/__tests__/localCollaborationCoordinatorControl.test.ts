@@ -5,6 +5,7 @@ import {
   type LoopbackServerStatus,
   type LoopbackTrustedProjectScope
 } from "@planweave-ai/collaboration-contracts";
+import type { ServerConfig } from "@planweave-ai/server";
 import { describe, expect, it, vi } from "vitest";
 import { LocalCollaborationCoordinatorControl } from "../main/collaboration/CollaborationCoordinatorControl";
 
@@ -112,7 +113,7 @@ function fakeControl(options: {
 }
 
 describe("LocalCollaborationCoordinatorControl", () => {
-  it("resolves opaque selection, registers its exact trusted scope, and waits for clear stop", async () => {
+  it("resolves opaque selection, registers its exact trusted scope, and only stops explicitly", async () => {
     const fake = fakeControl({ pauseStop: true });
     const resolveAuthorityProjectId = vi.fn().mockResolvedValue(authorityProjectId);
     const control = new LocalCollaborationCoordinatorControl({
@@ -137,7 +138,10 @@ describe("LocalCollaborationCoordinatorControl", () => {
       expect.objectContaining({ workspaceId: "workspace-2", projectId: authorityProjectId, canvasId: "canvas-1" })
     );
 
-    const clear = control.clearCurrentSelection();
+    await control.clearCurrentSelection();
+    expect(control.status().state).toBe("running");
+
+    const stop = control.stop();
     await vi.waitFor(() => {
       expect(fake.apply).toHaveBeenLastCalledWith(
         expect.objectContaining({ action: "stop", profileId: expect.stringMatching(/^planweave-local-/) })
@@ -145,7 +149,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     });
     expect(control.status().state).toBe("running");
     fake.releaseStop();
-    await clear;
+    await stop;
     expect(control.status().state).toBe("stopped");
     expect(resolveAuthorityProjectId).toHaveBeenCalledWith("/test/project", "canvas-1");
   });
@@ -185,46 +189,78 @@ describe("LocalCollaborationCoordinatorControl", () => {
     );
   });
 
-  it("waits for the active local server to stop before switching selections", async () => {
-    const fake = fakeControl({ pauseStop: true });
-    const resolveAuthorityProjectId = vi
-      .fn()
-      .mockResolvedValueOnce(authorityProjectId)
-      .mockResolvedValueOnce("authority-project-2");
+  it("keeps the device-local server running while switching project selections", async () => {
+    const fake = fakeControl({
+      scopes: [
+        { workspaceId: "workspace-1", projectId: authorityProjectId, canvasId: "canvas-1" },
+        { workspaceId: "workspace-2", projectId: "authority-project-2", canvasId: "canvas-1" }
+      ]
+    });
+    const resolveAuthorityProjectId = vi.fn(async (projectRoot: string) =>
+      projectRoot === nextProject.rootPath ? "authority-project-2" : authorityProjectId
+    );
+    let configFactory:
+      | ((profile: NonNullable<LoopbackServerStatus["profile"]>) => ServerConfig)
+      | undefined;
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
       projects: {
         listProjects: async () => [project, nextProject],
         resolveAuthorityProjectId
       },
-      createController: () => fake.control,
+      createController: (createConfig) => {
+        configFactory = createConfig;
+        return fake.control;
+      },
       allocatePort: async () => 18_787
     });
     await control.setCurrentSelection({ projectId: project.projectId, canvasId: "canvas-1" });
     await control.start();
     const firstProfileId = control.status().profile?.profileId;
+    const runningProfile = control.status().profile;
+    expect(runningProfile).not.toBeNull();
+    const config = configFactory!(runningProfile!);
+    expect(config.trustedProjects).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          projectId: authorityProjectId,
+          projectRoot: project.rootPath,
+          trustAllDeclaredCanvases: true
+        }),
+        expect.objectContaining({
+          projectId: "authority-project-2",
+          projectRoot: nextProject.rootPath,
+          trustAllDeclaredCanvases: true
+        })
+      ])
+    );
 
-    const switchSelection = control.setCurrentSelection({
+    await control.setCurrentSelection({
       projectId: nextProject.projectId,
       canvasId: "canvas-1"
     });
-    await vi.waitFor(() => {
-      expect(fake.apply).toHaveBeenLastCalledWith(
-        expect.objectContaining({ action: "stop", profileId: expect.stringMatching(/^planweave-local-/) })
-      );
-    });
-    expect(control.localProfile()?.projectId).toBe(authorityProjectId);
-    fake.releaseStop();
-    await switchSelection;
 
+    expect(fake.apply).toHaveBeenCalledTimes(1);
+    expect(fake.apply).toHaveBeenLastCalledWith(expect.objectContaining({ action: "start" }));
+    expect(control.status()).toMatchObject({ state: "running" });
+    expect(control.status().profile?.profileId).toBe(firstProfileId);
     expect(control.localProfile()?.projectId).toBe("authority-project-2");
-    await control.start();
-    expect(control.status().profile?.profileId).not.toBe(firstProfileId);
+    expect(control.localProfile()?.profileId).not.toBe(firstProfileId);
+    expect(control.registerCurrentProject({ kind: "human", id: "owner-2" })).toMatchObject({
+      workspaceId: "workspace-2",
+      projectId: "authority-project-2",
+      canvasId: "canvas-1"
+    });
     expect(resolveAuthorityProjectId).toHaveBeenLastCalledWith("/test/next-project", "canvas-1");
   });
 
-  it("serializes a start requested while the active selection is switching", async () => {
-    const fake = fakeControl({ pauseStop: true });
+  it("serializes a redundant start while switching without restarting the server", async () => {
+    const fake = fakeControl({
+      scopes: [
+        { workspaceId: "workspace-1", projectId: authorityProjectId, canvasId: "canvas-1" },
+        { workspaceId: "workspace-2", projectId: "authority-project-2", canvasId: "canvas-1" }
+      ]
+    });
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
       projects: {
@@ -242,29 +278,61 @@ describe("LocalCollaborationCoordinatorControl", () => {
       projectId: nextProject.projectId,
       canvasId: "canvas-1"
     });
-    await vi.waitFor(() => {
-      expect(fake.apply).toHaveBeenLastCalledWith(
-        expect.objectContaining({ action: "stop", profileId: expect.stringMatching(/^planweave-local-/) })
-      );
-    });
-
     const startAfterSwitch = control.start();
-    let startSettledBeforeSwitch = false;
-    void startAfterSwitch.then(() => {
-      startSettledBeforeSwitch = true;
-    });
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    const observedEarlySettlement = startSettledBeforeSwitch;
-    fake.releaseStop();
     await switchSelection;
 
     await expect(startAfterSwitch).resolves.toMatchObject({ state: "running" });
-    expect(observedEarlySettlement).toBe(false);
     expect(control.status().state).toBe("running");
     expect(control.localProfile()?.projectId).toBe("authority-project-2");
-    expect(fake.apply).toHaveBeenLastCalledWith(
-      expect.objectContaining({ action: "start" })
-    );
+    expect(fake.apply).toHaveBeenCalledTimes(1);
+    expect(fake.apply).toHaveBeenLastCalledWith(expect.objectContaining({ action: "start" }));
+  });
+
+  it("refreshes the running server automatically when a newly imported project is selected", async () => {
+    const first = fakeControl({
+      scopes: [
+        { workspaceId: "workspace-1", projectId: authorityProjectId, canvasId: "canvas-1" }
+      ]
+    });
+    const second = fakeControl({
+      scopes: [
+        { workspaceId: "workspace-1", projectId: authorityProjectId, canvasId: "canvas-1" },
+        { workspaceId: "workspace-2", projectId: "authority-project-2", canvasId: "canvas-1" }
+      ]
+    });
+    const listProjects = vi
+      .fn()
+      .mockResolvedValueOnce([project])
+      .mockResolvedValueOnce([project])
+      .mockResolvedValue([project, nextProject]);
+    const createController = vi
+      .fn()
+      .mockReturnValueOnce(first.control)
+      .mockReturnValueOnce(second.control);
+    const control = new LocalCollaborationCoordinatorControl({
+      safeStorage,
+      projects: {
+        listProjects,
+        resolveAuthorityProjectId: async (projectRoot) =>
+          projectRoot === nextProject.rootPath ? "authority-project-2" : authorityProjectId
+      },
+      createController,
+      allocatePort: async () => 18_787
+    });
+
+    await control.setCurrentSelection({ projectId: project.projectId, canvasId: "canvas-1" });
+    await control.start();
+    await control.setCurrentSelection({ projectId: nextProject.projectId, canvasId: "canvas-1" });
+
+    expect(first.apply).toHaveBeenNthCalledWith(1, expect.objectContaining({ action: "start" }));
+    expect(first.apply).toHaveBeenNthCalledWith(2, expect.objectContaining({ action: "stop" }));
+    expect(second.apply).toHaveBeenCalledWith(expect.objectContaining({ action: "start" }));
+    expect(control.status().state).toBe("running");
+    expect(control.localProfile()?.projectId).toBe("authority-project-2");
+    expect(control.registerCurrentProject({ kind: "human", id: "owner-2" })).toMatchObject({
+      projectId: "authority-project-2",
+      canvasId: "canvas-1"
+    });
   });
 
   it("retries a failed loopback start with a fresh literal-loopback port and controller", async () => {

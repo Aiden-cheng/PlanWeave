@@ -42,6 +42,7 @@ type LoopbackServerControlPort = Pick<
 >;
 
 const localOperatorCredentialKey = "planweave-local-loopback";
+const localServerProfileId = "planweave-local-server";
 const localStartAttempts = 3;
 
 function localWorkspaceIdForProject(projectId: string): string {
@@ -146,20 +147,19 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
       canvasId: selected.canvasId,
       projectRoot: project.rootPath
     };
-    if (
-      this.controller?.status().profile &&
-      this.selection &&
-      (this.selection.desktopProjectId !== next.desktopProjectId ||
-        this.selection.canvasId !== next.canvasId)
-    ) {
-      await this.stopUnlocked();
-    }
+    const wasRunning = this.status().state === "running";
     this.selection = next;
+    if (wasRunning && !this.isTrustedSelection(next)) {
+      await this.stopUnlocked();
+      const restarted = await this.startUnlocked();
+      if (restarted.state !== "running") {
+        throw new Error("local_collaboration_project_catalog_refresh_failed");
+      }
+    }
   }
 
   clearCurrentSelection(): Promise<void> {
     return this.enqueue(async () => {
-      if (this.status().profile) await this.stopUnlocked();
       this.selection = null;
     });
   }
@@ -173,18 +173,19 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   }
 
   private async startUnlocked(): Promise<LoopbackServerStatus> {
-    const selection = this.requireSelection();
+    this.requireSelection();
     await this.ensureOperatorToken();
     const current = this.status();
     if (current.state === "running") return current;
+    const trustedProjects = await this.resolveTrustedProjects();
     let lastStatus = current;
     for (let attempt = 0; attempt < localStartAttempts; attempt += 1) {
       this.localPort = await this.allocatePort();
       const controller = this.createController((profile) =>
-        this.createConfig(profile, this.requireSelection())
+        this.createConfig(profile, trustedProjects)
       );
       this.controller = controller;
-      const status = await controller.apply({ action: "start", profile: this.profileFor(selection) });
+      const status = await controller.apply({ action: "start", profile: this.serverProfile() });
       if (status.state === "running") return status;
       lastStatus = status;
       this.controller = null;
@@ -233,7 +234,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   localProfile() {
     const selection = this.selection;
     if (!selection || this.localPort === null) return null;
-    const profile = this.profileFor(selection);
+    const profile = this.connectionProfileFor(selection);
     return { ...profile, projectId: selection.authorityProjectId };
   }
 
@@ -316,15 +317,62 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     return status.profile;
   }
 
-  private profileFor(selection: ResolvedSelection): LoopbackServerProfile {
+  private isTrustedSelection(selection: ResolvedSelection): boolean {
+    const status = this.status();
+    if (status.state !== "running" || !status.profile || !this.controller) return false;
+    return this.controller
+      .listTrustedProjectScopes({ profileId: status.profile.profileId })
+      .some(
+        (scope) =>
+          scope.projectId === selection.authorityProjectId &&
+          scope.canvasId === selection.canvasId
+      );
+  }
+
+  private serverProfile(): LoopbackServerProfile {
     const localPort = this.localPort;
     if (localPort === null) throw new Error("local_collaboration_port_allocation_required");
     return loopbackServerProfileSchema.parse({
-      profileId: localProfileIdForProject(selection.authorityProjectId),
+      profileId: localServerProfileId,
       displayName: "Local collaboration server",
       serverBaseUrl: `http://127.0.0.1:${localPort}/`,
       allowInsecureTransport: true
     });
+  }
+
+  private connectionProfileFor(selection: ResolvedSelection): LoopbackServerProfile {
+    return loopbackServerProfileSchema.parse({
+      ...this.serverProfile(),
+      profileId: localProfileIdForProject(selection.authorityProjectId)
+    });
+  }
+
+  private async resolveTrustedProjects(): Promise<ServerConfig["trustedProjects"]> {
+    const trustedProjects = new Map<string, ServerConfig["trustedProjects"][number]>();
+    for (const project of await this.projects.listProjects()) {
+      const canvas = project.taskCanvases[0];
+      if (!canvas) continue;
+      const authorityProjectId =
+        project.projectId === this.selection?.desktopProjectId
+          ? this.selection.authorityProjectId
+          : await this.projects.resolveAuthorityProjectId(project.rootPath, canvas.canvasId);
+      const workspaceId = localWorkspaceIdForProject(authorityProjectId);
+      const key = `${workspaceId}\0${authorityProjectId}`;
+      const existing = trustedProjects.get(key);
+      if (existing && existing.projectRoot !== project.rootPath) {
+        throw new Error("local_collaboration_project_catalog_ambiguous");
+      }
+      trustedProjects.set(key, {
+        workspaceId,
+        projectId: authorityProjectId,
+        trustAllDeclaredCanvases: true,
+        projectRoot: project.rootPath
+      });
+    }
+    if (trustedProjects.size === 0) {
+      throw new Error("local_collaboration_trusted_project_required");
+    }
+    return [...trustedProjects.values()];
   }
 
   private async ensureOperatorToken(): Promise<void> {
@@ -340,7 +388,10 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     );
   }
 
-  private createConfig(profile: LoopbackServerProfile, selection: ResolvedSelection): ServerConfig {
+  private createConfig(
+    profile: LoopbackServerProfile,
+    trustedProjects: ServerConfig["trustedProjects"]
+  ): ServerConfig {
     if (!this.operatorToken) throw new Error("local_collaboration_operator_credential_unavailable");
     const localPort = this.localPort;
     if (localPort === null) throw new Error("local_collaboration_port_allocation_required");
@@ -351,19 +402,12 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
       publicUrl: profile.serverBaseUrl,
       allowInsecureDevelopment: true,
       dataDirectory,
-      trustedProjects: [
-        {
-          workspaceId: localWorkspaceIdForProject(selection.authorityProjectId),
-          projectId: selection.authorityProjectId,
-          canvasId: selection.canvasId,
-          projectRoot: selection.projectRoot
-        }
-      ],
+      trustedProjects,
       operatorCredentials: [
         {
           operatorId: "desktop-local-admin",
           tokenSha256: hashOperatorToken(this.operatorToken),
-          projectIds: [selection.authorityProjectId],
+          projectIds: trustedProjects.map((project) => project.projectId),
           serverAdmin: false
         }
       ]
