@@ -40,21 +40,54 @@ export function ContentAuthorityPanel({
     void run(() => api.bindCollaborationContentAuthority({ canvasId }));
   }, [api, canvasId, connected, run]);
 
-  if (!canvasId) return null;
+  if (!canvasId || !connected) return null;
   const revision = model?.authoritativeHead?.revision ?? t("contentAuthorityWaiting");
   return (
-    <section className="mt-4 rounded-md border border-border p-3" data-testid="content-authority-panel">
+    <section
+      className="mt-4 rounded-md border border-border p-3"
+      data-testid="content-authority-panel"
+    >
       <h2 className="text-sm font-semibold">{t("contentAuthorityTitle")}</h2>
-      <p className="mt-1 text-xs text-muted-foreground">{t("contentAuthorityRevision").replace("{revision}", String(revision))}</p>
-      <p className="text-xs text-muted-foreground">
-        {t("contentAuthorityStatus").replace("{status}", model?.replicaStatus ?? t("contentAuthorityOffline"))}
+      <p className="mt-1 text-xs text-muted-foreground">
+        {t("contentAuthorityRevision").replace("{revision}", String(revision))}
       </p>
-      {model?.lastAcknowledgement ? <p className="text-xs text-muted-foreground">{t("contentAuthorityAcknowledged")}</p> : null}
+      <p className="text-xs text-muted-foreground">
+        {t("contentAuthorityStatus").replace(
+          "{status}",
+          model?.replicaStatus ?? t("contentAuthorityOffline")
+        )}
+      </p>
+      {model?.lastAcknowledgement ? (
+        <p className="text-xs text-muted-foreground">{t("contentAuthorityAcknowledged")}</p>
+      ) : null}
       {error ? <p className="mt-1 text-xs text-destructive">{error}</p> : null}
       <div className="mt-2 flex flex-wrap gap-2">
-        <Button size="sm" variant="outline" disabled={!api || !connected || busy} onClick={() => api && run(() => api.refreshCollaborationContentAuthority())}>{t("contentAuthorityRetry")}</Button>
-        {model?.canPublishInitial ? <Button size="sm" disabled={busy} onClick={() => api && run(() => api.publishCollaborationInitialContent())}>{t("contentAuthorityPublish")}</Button> : null}
-        {model?.canMaterialize ? <Button size="sm" disabled={busy} onClick={() => api && run(() => api.materializeCollaborationContentHead())}>{model.canRecover ? t("contentAuthorityRecover") : t("contentAuthorityMaterialize")}</Button> : null}
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!api || !connected || busy}
+          onClick={() => api && run(() => api.refreshCollaborationContentAuthority())}
+        >
+          {t("contentAuthorityRetry")}
+        </Button>
+        {model?.canPublishInitial ? (
+          <Button
+            size="sm"
+            disabled={busy}
+            onClick={() => api && run(() => api.publishCollaborationInitialContent())}
+          >
+            {t("contentAuthorityPublish")}
+          </Button>
+        ) : null}
+        {model?.canMaterialize ? (
+          <Button
+            size="sm"
+            disabled={busy}
+            onClick={() => api && run(() => api.materializeCollaborationContentHead())}
+          >
+            {model.canRecover ? t("contentAuthorityRecover") : t("contentAuthorityMaterialize")}
+          </Button>
+        ) : null}
       </div>
     </section>
   );

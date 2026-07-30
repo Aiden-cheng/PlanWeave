@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { CheckCircle2Icon, LaptopIcon } from "lucide-react";
 import type {
   LoopbackProjectRegistrationView,
   LoopbackServerStatus,
@@ -7,6 +8,14 @@ import type {
 import { Button } from "@/components/ui/button";
 import type { PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
 import type { createTranslator } from "../i18n";
+import { collaborationErrorMessage } from "./formatCollaborationError";
+
+const ownerInitializationRequiredCode = "local_collaboration_owner_initialization_required";
+
+function requiresOwnerInitialization(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes(ownerInitializationRequiredCode);
+}
 
 export function LocalCollaborationServerPanel({
   api,
@@ -26,7 +35,9 @@ export function LocalCollaborationServerPanel({
     try {
       const nextStatus = await api.getLocalCollaborationServerStatus();
       setStatus(nextStatus);
-      setScopes(nextStatus.state === "running" ? await api.listLocalCollaborationTrustedScopes() : []);
+      setScopes(
+        nextStatus.state === "running" ? await api.listLocalCollaborationTrustedScopes() : []
+      );
       setError(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -52,7 +63,11 @@ export function LocalCollaborationServerPanel({
   const action = async () => {
     setBusy(true);
     try {
-      setStatus(running ? await api.stopLocalCollaborationServer() : await api.startLocalCollaborationServer());
+      setStatus(
+        running
+          ? await api.stopLocalCollaborationServer()
+          : await api.startLocalCollaborationServer()
+      );
       setRegistration(null);
       await refresh();
       setError(null);
@@ -65,43 +80,121 @@ export function LocalCollaborationServerPanel({
   const register = async () => {
     setBusy(true);
     try {
-      setRegistration(await api.registerLocalCollaborationCurrentProject());
+      let nextRegistration: LoopbackProjectRegistrationView;
+      try {
+        nextRegistration = await api.registerLocalCollaborationCurrentProject();
+      } catch (caught) {
+        if (!requiresOwnerInitialization(caught)) throw caught;
+        if (!status?.profile) throw new Error(ownerInitializationRequiredCode);
+        await api.bootstrapCollaborationOwner({
+          profileId: status.profile.profileId,
+          request: { displayName: t("localServerDefaultOwnerName") }
+        });
+        nextRegistration = await api.registerLocalCollaborationCurrentProject();
+      }
+      setRegistration(nextRegistration);
       await refresh();
       setError(null);
     } catch (caught) {
-      const message = caught instanceof Error ? caught.message : String(caught);
-      setError(message === "local_collaboration_owner_initialization_required" ? t("localServerOwnerRequired") : message);
+      setError(
+        requiresOwnerInitialization(caught)
+          ? t("localServerOwnerRequired")
+          : collaborationErrorMessage(caught)
+      );
     } finally {
       setBusy(false);
     }
   };
   return (
-    <section className="flex flex-col gap-2" data-testid="local-collaboration-server-panel">
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <div className="text-xs font-semibold text-text-strong">{t("localServerTitle")}</div>
-          <div className="text-[11px] text-muted-foreground">
-            {statusLabel}
+    <section
+      className="overflow-hidden rounded-xl border border-border/70 bg-background shadow-sm"
+      data-testid="local-collaboration-server-panel"
+      aria-labelledby="local-collaboration-server-title"
+    >
+      <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 gap-3">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+            <LaptopIcon className="size-4" aria-hidden="true" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2
+                id="local-collaboration-server-title"
+                className="text-sm font-semibold text-text-strong"
+              >
+                {t("localServerTitle")}
+              </h2>
+              <span
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                  running
+                    ? "bg-emerald-500/10 text-emerald-800 dark:text-emerald-200"
+                    : "bg-muted text-muted-foreground"
+                }`}
+                data-testid="local-collaboration-server-status"
+              >
+                <span
+                  className={`size-1.5 rounded-full ${running ? "bg-emerald-500" : "bg-muted-foreground/50"}`}
+                />
+                {statusLabel}
+              </span>
+            </div>
+            <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
+              {t("localServerDescription")}
+            </p>
           </div>
         </div>
-        <Button type="button" size="sm" className="h-7 text-[10px]" disabled={busy} onClick={() => void action()}>
-          {running ? t("localServerStop") : t("localServerStart")}
-        </Button>
+        <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
+          {running ? (
+            <>
+              <Button type="button" size="sm" disabled={busy} onClick={() => void register()}>
+                {busy ? t("peopleWorking") : t("localServerRegisterCurrent")}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => void action()}
+              >
+                {t("localServerStop")}
+              </Button>
+            </>
+          ) : (
+            <Button type="button" size="sm" disabled={busy} onClick={() => void action()}>
+              {busy ? t("peopleWorking") : t("localServerStart")}
+            </Button>
+          )}
+        </div>
       </div>
       {running ? (
-        <>
-          <div className="text-[11px] text-muted-foreground">
+        <div className="border-t border-border/60 bg-muted/20 px-4 py-3">
+          <div className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+            {t("localServerTrustedScope")}
+          </div>
+          <div className="mt-1 break-all font-mono text-[11px] text-text-strong">
             {scopes.length > 0
-              ? `${t("localServerTrustedScope")}: ${scopes[0].projectId} / ${scopes[0].canvasId}`
+              ? `${scopes[0].projectId} / ${scopes[0].canvasId}`
               : t("localServerOwnerPending")}
           </div>
-          <Button type="button" size="sm" variant="outline" className="h-7 w-fit text-[10px]" disabled={busy} onClick={() => void register()}>
-            {t("localServerRegisterCurrent")}
-          </Button>
-          {registration ? <div className="text-[11px] text-muted-foreground">{t("localServerRegistered")}: {registration.registeredAt}</div> : null}
-        </>
+          {registration ? (
+            <div
+              className="mt-2 flex items-center gap-1.5 text-[11px] text-emerald-700 dark:text-emerald-300"
+              role="status"
+            >
+              <CheckCircle2Icon className="size-3.5" aria-hidden="true" />
+              {t("localServerRegistered")}: {registration.registeredAt}
+            </div>
+          ) : null}
+        </div>
       ) : null}
-      {error ? <div className="text-xs text-destructive" role="alert">{error}</div> : null}
+      {error ? (
+        <div
+          className="border-t border-destructive/20 bg-destructive/5 px-4 py-2.5 text-xs text-destructive"
+          role="alert"
+        >
+          {error}
+        </div>
+      ) : null}
     </section>
   );
 }

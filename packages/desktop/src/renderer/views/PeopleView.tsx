@@ -82,74 +82,81 @@ export function PeopleView({
 
   return (
     <section
-      className="flex h-full min-h-0 w-full flex-col"
+      className="h-full min-h-0 w-full overflow-y-auto"
       data-testid="people-view"
       aria-label={t("peopleTitle")}
     >
-      <PeoplePanel
-        mode={panel.mode}
-        presence={panel.presence}
-        members={panel.members}
-        hosts={panel.hosts}
-        invitations={panel.invitations}
-        devices={panel.devices}
-        detailsLoading={panel.detailsLoading}
-        detailsError={panel.detailsError}
-        actionError={panel.actionError}
-        actionBusy={panel.actionBusy}
-        pendingInvitation={panel.pendingInvitation}
-        showTitle={false}
-        t={t}
-        onCreateInvitation={panel.createInvitation}
-        onCopyInvitationToken={copyText}
-        onDismissPendingInvitation={panel.clearPendingInvitation}
-        onRevokeInvitation={async (invitationId) => {
-          const ok = await panel.revokeInvitation(invitationId);
-          reportMembership(ok, membershipResult(ok));
-          return ok;
-        }}
-        onPromoteMember={async (humanPrincipalId) => {
-          const ok = await panel.promoteMember(humanPrincipalId);
-          if (ok) await refreshMembers();
-          reportMembership(ok, membershipResult(ok));
-          return ok;
-        }}
-        onDemoteMember={async (humanPrincipalId) => {
-          const ok = await panel.demoteMember(humanPrincipalId);
-          if (ok) await refreshMembers();
-          reportMembership(ok, membershipResult(ok));
-          return ok;
-        }}
-        onRemoveMember={async (humanPrincipalId) => {
-          const ok = await panel.removeMember(humanPrincipalId);
-          if (ok) await refreshMembers();
-          reportMembership(ok, membershipResult(ok));
-          return ok;
-        }}
-        onRevokeDevice={async (deviceCredentialId) => {
-          const ok = await panel.revokeDevice(deviceCredentialId);
-          reportMembership(ok, membershipResult(ok));
-          return ok;
-        }}
-        onRefreshDetails={async () => {
-          await panel.refreshDetails();
-          await refreshMembers();
-        }}
-        connectSlot={<CollaborationConnectForm api={api} status={status} t={t} />}
-      />
-      <CurrentCanvasAccessPanel
-        view={currentCanvasAccess.view}
-        loading={currentCanvasAccess.loading}
-        error={currentCanvasAccess.error}
-        busy={currentCanvasAccess.busy}
-        t={t}
-        onRefresh={currentCanvasAccess.refresh}
-        onUpdateVisibility={currentCanvasAccess.updateVisibility}
-        onGrant={currentCanvasAccess.grant}
-        onRevoke={currentCanvasAccess.revoke}
-      />
-      <LocalCollaborationServerPanel api={api} t={t} />
-      <ContentAuthorityPanel api={api ?? null} canvasId={canvasId} connected={sessionConnected} t={t} />
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 pb-8">
+        <LocalCollaborationServerPanel api={api} t={t} />
+        <PeoplePanel
+          mode={panel.mode}
+          presence={panel.presence}
+          members={panel.members}
+          hosts={panel.hosts}
+          invitations={panel.invitations}
+          devices={panel.devices}
+          detailsLoading={panel.detailsLoading}
+          detailsError={panel.detailsError}
+          actionError={panel.actionError}
+          actionBusy={panel.actionBusy}
+          pendingInvitation={panel.pendingInvitation}
+          showTitle={false}
+          t={t}
+          onCreateInvitation={panel.createInvitation}
+          onCopyInvitationToken={copyText}
+          onDismissPendingInvitation={panel.clearPendingInvitation}
+          onRevokeInvitation={async (invitationId) => {
+            const ok = await panel.revokeInvitation(invitationId);
+            reportMembership(ok, membershipResult(ok));
+            return ok;
+          }}
+          onPromoteMember={async (humanPrincipalId) => {
+            const ok = await panel.promoteMember(humanPrincipalId);
+            if (ok) await refreshMembers();
+            reportMembership(ok, membershipResult(ok));
+            return ok;
+          }}
+          onDemoteMember={async (humanPrincipalId) => {
+            const ok = await panel.demoteMember(humanPrincipalId);
+            if (ok) await refreshMembers();
+            reportMembership(ok, membershipResult(ok));
+            return ok;
+          }}
+          onRemoveMember={async (humanPrincipalId) => {
+            const ok = await panel.removeMember(humanPrincipalId);
+            if (ok) await refreshMembers();
+            reportMembership(ok, membershipResult(ok));
+            return ok;
+          }}
+          onRevokeDevice={async (deviceCredentialId) => {
+            const ok = await panel.revokeDevice(deviceCredentialId);
+            reportMembership(ok, membershipResult(ok));
+            return ok;
+          }}
+          onRefreshDetails={async () => {
+            await panel.refreshDetails();
+            await refreshMembers();
+          }}
+          connectSlot={<CollaborationConnectForm api={api} status={status} t={t} />}
+        />
+        <CurrentCanvasAccessPanel
+          view={currentCanvasAccess.view}
+          loading={currentCanvasAccess.loading}
+          error={currentCanvasAccess.error}
+          busy={currentCanvasAccess.busy}
+          t={t}
+          onRefresh={currentCanvasAccess.refresh}
+          onUpdateVisibility={currentCanvasAccess.updateVisibility}
+          onGrant={currentCanvasAccess.grant}
+          onRevoke={currentCanvasAccess.revoke}
+        />
+        <ContentAuthorityPanel
+          api={api ?? null}
+          canvasId={canvasId}
+          connected={sessionConnected}
+          t={t}
+        />
+      </div>
     </section>
   );
 }

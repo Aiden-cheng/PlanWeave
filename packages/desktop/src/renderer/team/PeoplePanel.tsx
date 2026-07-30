@@ -126,9 +126,9 @@ export function PeoplePanel({
         {showTitle ? (
           <h1 className="text-lg font-semibold text-text-strong">{t("peopleTitle")}</h1>
         ) : null}
-        <p className="text-xs text-muted-foreground">
-          {mode === "connecting" ? t("peopleConnecting") : t("peopleDisconnected")}
-        </p>
+        {mode === "connecting" ? (
+          <p className="text-xs text-muted-foreground">{t("peopleConnecting")}</p>
+        ) : null}
         {connectSlot}
       </div>
     );

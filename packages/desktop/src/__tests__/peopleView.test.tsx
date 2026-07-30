@@ -20,4 +20,10 @@ describe("PeopleView", () => {
     expect(screen.getByTestId("people-connect-form")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
   });
+
+  it("hides remote content authority while the project is local only", () => {
+    render(<PeopleView api={null} canvasId="canvas-1" t={createTranslator("en")} />);
+
+    expect(screen.queryByTestId("content-authority-panel")).not.toBeInTheDocument();
+  });
 });

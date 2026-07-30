@@ -55,7 +55,7 @@ function connectedStatus(
         deviceCredentialPersistence: "persisted",
         deviceCredentialId: "device-1",
         humanPrincipalId: "human-1",
-        updatedAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:00:00.000Z"
       }
     ],
     activeProfileId: phase === "idle" ? null : "profile-1",
@@ -69,16 +69,16 @@ function connectedStatus(
       lastErrorMessage: null
     },
     updatedAt: "2030-01-01T00:00:00.000Z",
-  workspaceConnection: {
-    schemaVersion: "workspace-setup/v1",
-    status: "local_only",
-    profile: null,
-    workspaceId: null,
-    workspaceDisplayName: null,
-    connectedAt: null,
-    error: null
-  },
-  workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
+    workspaceConnection: {
+      schemaVersion: "workspace-setup/v1",
+      status: "local_only",
+      profile: null,
+      workspaceId: null,
+      workspaceDisplayName: null,
+      connectedAt: null,
+      error: null
+    },
+    workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
   };
 }
 
@@ -343,7 +343,7 @@ function createScenarioApi(state: ScenarioState) {
           displayName: "Ada",
           role: "owner",
           createdAt: "2030-01-01T00:00:00.000Z",
-          updatedAt: "2030-01-01T00:00:00.000Z",
+          updatedAt: "2030-01-01T00:00:00.000Z"
         },
         {
           membershipId: "m-2",
@@ -352,7 +352,7 @@ function createScenarioApi(state: ScenarioState) {
           displayName: "Grace",
           role: "member",
           createdAt: "2030-01-01T00:00:00.000Z",
-          updatedAt: "2030-01-01T00:00:00.000Z",
+          updatedAt: "2030-01-01T00:00:00.000Z"
         }
       ],
       nextCursor: null
@@ -394,7 +394,7 @@ function createScenarioApi(state: ScenarioState) {
           displayName: "Grace",
           role: "member",
           createdAt: "2030-01-01T00:00:00.000Z",
-          updatedAt: "2030-01-01T00:00:00.000Z",
+          updatedAt: "2030-01-01T00:00:00.000Z"
         }
       ],
       hosts: [
@@ -591,7 +591,7 @@ describe("collaboration integration scenarios", () => {
             error: null
           },
           workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null },
-          updatedAt: "2030-01-01T00:00:00.000Z",
+          updatedAt: "2030-01-01T00:00:00.000Z"
         }}
         t={t}
         onConnected={onConnected}
@@ -599,7 +599,9 @@ describe("collaboration integration scenarios", () => {
     );
 
     expect(screen.getByTestId("people-connect-form")).toBeInTheDocument();
+    expect(screen.getByTestId("people-connect-submit")).toHaveTextContent("Redeem setup code");
     await user.click(screen.getByTestId("people-connect-mode-join"));
+    expect(screen.getByTestId("people-connect-submit")).toHaveTextContent("Join Workspace");
     await user.type(screen.getByTestId("people-connect-display-name"), "Ada");
     await user.clear(screen.getByTestId("people-connect-server-url"));
     await user.type(screen.getByTestId("people-connect-server-url"), "https://example.test");
