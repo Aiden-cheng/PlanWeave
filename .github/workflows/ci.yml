@@ -280,6 +280,115 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  windows-wsl-integration:
+    name: Windows WSL execution-host integration
+    runs-on: windows-2022
+    timeout-minutes: 30
+    env:
+      PLANWEAVE_REQUIRE_WSL_TESTS: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Ubuntu WSL 1
+        shell: pwsh
+        run: |
+          function Invoke-WslCommand {
+            param(
+              [Parameter(Mandatory)][string[]]$Arguments,
+              [Parameter(Mandatory)][Text.Encoding]$OutputEncoding
+            )
+
+            $startInfo = [Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = "wsl.exe"
+            $startInfo.UseShellExecute = $false
+            $startInfo.RedirectStandardOutput = $true
+            $startInfo.RedirectStandardError = $true
+            $startInfo.StandardOutputEncoding = $OutputEncoding
+            $startInfo.StandardErrorEncoding = $OutputEncoding
+            foreach ($argument in $Arguments) {
+              [void]$startInfo.ArgumentList.Add($argument)
+            }
+
+            $process = [Diagnostics.Process]::new()
+            $process.StartInfo = $startInfo
+            if (-not $process.Start()) { throw "Failed to start wsl.exe." }
+            $outputTask = $process.StandardOutput.ReadToEndAsync()
+            $errorTask = $process.StandardError.ReadToEndAsync()
+            $process.WaitForExit()
+            [pscustomobject]@{
+              ExitCode = $process.ExitCode
+              Output = $outputTask.GetAwaiter().GetResult()
+              ErrorOutput = $errorTask.GetAwaiter().GetResult()
+            }
+          }
+
+          function Get-WslFailureSummary {
+            param([Parameter(Mandatory)]$Result)
+
+            $summary = $Result.ErrorOutput.Trim()
+            if (-not $summary) { return "wsl.exe exited with code $($Result.ExitCode)." }
+            $summary = $summary -replace '(?i)\b(password|secret|token|key)=[^\s]+', '$1=[REDACTED]'
+            if ($summary.Length -gt 500) { $summary = "$($summary.Substring(0, 500))…" }
+            return $summary
+          }
+
+          $managementEncoding = [Text.Encoding]::Unicode
+          $setDefaultVersion = Invoke-WslCommand -Arguments @("--set-default-version", "1") -OutputEncoding $managementEncoding
+          if ($setDefaultVersion.ExitCode -ne 0) { throw "Failed to set the default WSL version to 1: $(Get-WslFailureSummary $setDefaultVersion)" }
+
+          $installed = Invoke-WslCommand -Arguments @("--list", "--quiet") -OutputEncoding $managementEncoding
+          if ($installed.ExitCode -ne 0) { throw "Failed to list installed WSL distributions: $(Get-WslFailureSummary $installed)" }
+
+          if (-not (($installed.Output -split "\r?\n" | ForEach-Object { $_.Trim() }) -contains "Ubuntu")) {
+            $installUbuntu = Invoke-WslCommand -Arguments @("--install", "--distribution", "Ubuntu", "--no-launch") -OutputEncoding $managementEncoding
+            if ($installUbuntu.ExitCode -ne 0) {
+              $initialInstallFailure = Get-WslFailureSummary $installUbuntu
+              $installUbuntu = Invoke-WslCommand -Arguments @("--install", "--distribution", "Ubuntu", "--no-launch", "--web-download") -OutputEncoding $managementEncoding
+            }
+            if ($installUbuntu.ExitCode -ne 0) {
+              throw "Failed to install the Ubuntu WSL distribution. Initial attempt: $initialInstallFailure Web download retry: $(Get-WslFailureSummary $installUbuntu)"
+            }
+          }
+
+          $setUbuntuVersion = Invoke-WslCommand -Arguments @("--set-version", "Ubuntu", "1") -OutputEncoding $managementEncoding
+          if ($setUbuntuVersion.ExitCode -ne 0) { throw "Failed to set Ubuntu to WSL version 1: $(Get-WslFailureSummary $setUbuntuVersion)" }
+
+          $verbose = Invoke-WslCommand -Arguments @("--list", "--verbose") -OutputEncoding $managementEncoding
+          if ($verbose.ExitCode -ne 0) { throw "Failed to inspect the Ubuntu WSL version: $(Get-WslFailureSummary $verbose)" }
+          if (-not ($verbose.Output -match "(?m)^\s*\*?\s*Ubuntu\s+\S+\s+1\s*$")) {
+            throw "Ubuntu is not installed as a WSL 1 distribution."
+          }
+
+          $env:WSLENV = "PLANWEAVE_WSL_CI_SENTINEL"
+          $env:PLANWEAVE_WSL_CI_SENTINEL = "planweave-wsl-ci"
+          $probeScript = 'test "$WSL_DISTRO_NAME" = "Ubuntu" && test "$PLANWEAVE_WSL_CI_SENTINEL" = "planweave-wsl-ci" && printf "%s\n" "$WSL_DISTRO_NAME"'
+          $probe = Invoke-WslCommand -Arguments @("--distribution", "Ubuntu", "--exec", "sh", "-lc", $probeScript) -OutputEncoding ([Text.Encoding]::UTF8)
+          if ($probe.ExitCode -ne 0) { throw "Ubuntu WSL execution probe failed: $(Get-WslFailureSummary $probe)" }
+          if ($probe.Output.Trim() -ne "Ubuntu") { throw "Ubuntu WSL execution probe returned an unexpected distribution." }
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check test suite classification
+        run: pnpm check:test-suites
+
+      - name: Run WSL execution-host integration test
+        timeout-minutes: 10
+        run: pnpm exec vitest run packages/runtime/src/__tests__/executorEnvironment.test.ts --config vitest.integration-core.config.ts --testNamePattern="does not import a sentinel Windows credential named by WSLENV"
+
   windows-packaged-smoke:
     name: Windows unsigned packaged smoke
     runs-on: windows-latest

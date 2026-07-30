@@ -573,6 +573,48 @@ process.exit(2);
     expect(workflow).toContain("- windows-latest");
     expect(workflow).toContain("pnpm test:platform --maxWorkers=2");
     expect(workflow).not.toContain("pnpm test:platform -- --maxWorkers=2");
+    expect(workflow).toContain("name: Windows WSL execution-host integration");
+    expect(workflow).toContain("runs-on: windows-2022");
+    expect(workflow).toContain('PLANWEAVE_REQUIRE_WSL_TESTS: "1"');
+    expect(workflow).toContain("function Invoke-WslCommand");
+    expect(workflow).toContain("$startInfo.UseShellExecute = $false");
+    expect(workflow).toContain("$startInfo.ArgumentList.Add($argument)");
+    expect(workflow).toContain("$startInfo.StandardOutputEncoding = $OutputEncoding");
+    expect(workflow).toContain("$startInfo.StandardErrorEncoding = $OutputEncoding");
+    expect(workflow).toContain("$managementEncoding = [Text.Encoding]::Unicode");
+    expect(workflow).toContain(
+      'Invoke-WslCommand -Arguments @("--set-default-version", "1") -OutputEncoding $managementEncoding'
+    );
+    expect(workflow).toContain(
+      'Invoke-WslCommand -Arguments @("--install", "--distribution", "Ubuntu", "--no-launch") -OutputEncoding $managementEncoding'
+    );
+    expect(workflow).toContain(
+      'Invoke-WslCommand -Arguments @("--install", "--distribution", "Ubuntu", "--no-launch", "--web-download") -OutputEncoding $managementEncoding'
+    );
+    expect(workflow).toContain(
+      'Invoke-WslCommand -Arguments @("--set-version", "Ubuntu", "1") -OutputEncoding $managementEncoding'
+    );
+    expect(workflow).toContain(
+      'Invoke-WslCommand -Arguments @("--list", "--verbose") -OutputEncoding $managementEncoding'
+    );
+    expect(workflow).toContain(
+      'Invoke-WslCommand -Arguments @("--distribution", "Ubuntu", "--exec", "sh", "-lc", $probeScript) -OutputEncoding ([Text.Encoding]::UTF8)'
+    );
+    expect(workflow).toContain("function Get-WslFailureSummary");
+    expect(workflow).toContain("Initial attempt: $initialInstallFailure Web download retry:");
+    expect(workflow).not.toContain("cmd.exe /d /u /c");
+    expect(workflow).toContain("PLANWEAVE_WSL_CI_SENTINEL");
+    expect(workflow).toContain('test "$WSL_DISTRO_NAME" = "Ubuntu"');
+    expect(workflow).toContain(
+      "pnpm exec vitest run packages/runtime/src/__tests__/executorEnvironment.test.ts --config vitest.integration-core.config.ts"
+    );
+    expect(workflow).toContain(
+      '--testNamePattern="does not import a sentinel Windows credential named by WSLENV"'
+    );
+    expect(workflow).toContain(
+      'throw "Failed to install the Ubuntu WSL distribution. Initial attempt:'
+    );
+    expect(workflow).toContain('throw "Ubuntu WSL execution probe failed:');
     expect(workflow).toContain("name: Windows unsigned packaged smoke");
     expect(workflow).toContain("pnpm --dir packages/desktop build");
     expect(workflow).toContain("pnpm --dir packages/desktop pack:win");
@@ -581,8 +623,8 @@ process.exit(2);
     expect(workflow).toContain("PLANWEAVE_CI_REPORT_PATH: reports/windows-packaged-smoke.json");
     expect(workflow).not.toContain("secrets.");
     expect(occurrenceCount(workflow, "timeout-minutes:")).toBeGreaterThanOrEqual(7);
-    expect(occurrenceCount(workflow, "cache: pnpm")).toBe(5);
-    expect(occurrenceCount(workflow, "pnpm install --frozen-lockfile")).toBe(5);
+    expect(occurrenceCount(workflow, "cache: pnpm")).toBe(6);
+    expect(occurrenceCount(workflow, "pnpm install --frozen-lockfile")).toBe(6);
     expect(occurrenceCount(workflow, "node scripts/report-slowest-tests.mjs")).toBe(4);
     expect(occurrenceCount(workflow, "node scripts/redact-ci-test-artifacts.mjs reports")).toBe(5);
     expect(occurrenceCount(workflow, "actions/upload-artifact@v4")).toBe(5);

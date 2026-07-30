@@ -13,13 +13,21 @@ import { createTestWorkspace } from "./promptTestHelpers.js";
 import { manifestTestBuilder } from "./manifestTestBuilder.js";
 
 describe("executor environment", () => {
+  const requireWslTests = process.env.PLANWEAVE_REQUIRE_WSL_TESTS === "1";
+
   it.runIf(process.platform === "win32")(
     "does not import a sentinel Windows credential named by WSLENV",
     async ({ skip }) => {
       const distributions = await listWslDistributions({ platform: "win32" });
-      const distribution = distributions.distributions[0];
-      if (!distributions.available || !distribution) {
-        skip(distributions.unavailableReason ?? "No WSL distribution is installed.");
+      const distribution = "Ubuntu";
+      if (!distributions.available || !distributions.distributions.includes(distribution)) {
+        const reason = distributions.unavailableReason
+          ? `Ubuntu WSL distribution is required: ${distributions.unavailableReason}`
+          : "Ubuntu WSL distribution is required.";
+        if (requireWslTests) {
+          throw new Error(reason);
+        }
+        skip(reason);
       }
 
       const prepared = await prepareExecutionHostInvocation({
@@ -27,7 +35,7 @@ describe("executor environment", () => {
         command: "sh",
         args: [
           "-c",
-          'if [ "${PLANWEAVE_WSL_SECRET_SENTINEL+x}" = x ]; then exit 91; fi; printf clean'
+          'if [ "${PLANWEAVE_WSL_SECRET_SENTINEL+x}" = x ]; then exit 91; fi; if [ "$WSL_DISTRO_NAME" != "Ubuntu" ]; then exit 92; fi; printf "%s:clean" "$WSL_DISTRO_NAME"'
         ],
         cwd: process.cwd(),
         env: {
@@ -58,7 +66,7 @@ describe("executor environment", () => {
             }
           );
         })
-      ).resolves.toBe("clean");
+      ).resolves.toBe("Ubuntu:clean");
     },
     60_000
   );
