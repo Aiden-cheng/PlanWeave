@@ -22,9 +22,18 @@ import {
 } from "../index.js";
 
 describe("collaboration-contracts", () => {
-  it("parses connection profiles and rejects non-loopback insecure HTTP", () => {
+  it("parses explicitly enabled private-LAN HTTP and rejects public insecure HTTP", () => {
     expect(exampleConnectionProfile.projectId).toBe("project-demo-001");
     expect(exampleLoopbackConnectionProfile.allowInsecureTransport).toBe(true);
+    expect(
+      parseCollaborationConnectionProfile({
+        profileId: "p-lan",
+        displayName: "LAN",
+        serverBaseUrl: "http://192.168.1.20:8787/",
+        projectId: "project-1",
+        allowInsecureTransport: true
+      }).serverBaseUrl
+    ).toBe("http://192.168.1.20:8787/");
     expect(() =>
       parseCollaborationConnectionProfile({
         profileId: "p1",

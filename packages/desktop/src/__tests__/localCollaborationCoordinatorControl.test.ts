@@ -62,6 +62,16 @@ function scopeStore(
   };
 }
 
+function networkStore(initial = false) {
+  let lanSharingEnabled = initial;
+  return {
+    read: vi.fn(async () => ({ lanSharingEnabled })),
+    write: vi.fn(async (next: { lanSharingEnabled: boolean }) => {
+      lanSharingEnabled = next.lanSharingEnabled;
+    })
+  };
+}
+
 function fakeControl(
   options: {
     scopes?: readonly LoopbackTrustedProjectScope[];
@@ -138,6 +148,118 @@ function fakeControl(
 }
 
 describe("LocalCollaborationCoordinatorControl", () => {
+  it("starts selected scopes when LAN sharing is enabled from a stopped state", async () => {
+    const fake = fakeControl();
+    const control = new LocalCollaborationCoordinatorControl({
+      safeStorage,
+      scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
+      networkStore: networkStore(),
+      resolveLanAddress: () => "192.168.1.20",
+      projects: {
+        listProjects: async () => [project],
+        resolveAuthorityProjectId: async () => authorityProjectId
+      },
+      createController: () => fake.control,
+      allocatePort: async () => 18_787
+    });
+
+    await expect(control.setLanSharing({ enabled: true })).resolves.toMatchObject({
+      state: "running",
+      lanSharingEnabled: true,
+      lanServerBaseUrl: "http://192.168.1.20:18787/"
+    });
+  });
+
+  it("recovers a stopped service when LAN sharing is already enabled", async () => {
+    const fake = fakeControl();
+    const storedNetwork = networkStore(true);
+    const control = new LocalCollaborationCoordinatorControl({
+      safeStorage,
+      scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
+      networkStore: storedNetwork,
+      resolveLanAddress: () => "192.168.1.20",
+      projects: {
+        listProjects: async () => [project],
+        resolveAuthorityProjectId: async () => authorityProjectId
+      },
+      createController: () => fake.control,
+      allocatePort: async () => 18_787
+    });
+
+    await control.restore();
+    await control.stop();
+
+    await expect(control.setLanSharing({ enabled: true })).resolves.toMatchObject({
+      state: "running",
+      lanSharingEnabled: true,
+      lanServerBaseUrl: "http://192.168.1.20:18787/"
+    });
+    expect(storedNetwork.write).not.toHaveBeenCalled();
+  });
+
+  it("publishes selected canvases on a private LAN address and persists the switch", async () => {
+    const fake = fakeControl();
+    const storedNetwork = networkStore();
+    const allocatePort = vi.fn(async () => 18_787);
+    let configFactory:
+      | ((profile: NonNullable<LoopbackServerStatus["profile"]>) => ServerConfig)
+      | undefined;
+    const control = new LocalCollaborationCoordinatorControl({
+      safeStorage,
+      scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
+      networkStore: storedNetwork,
+      resolveLanAddress: () => "192.168.1.20",
+      projects: {
+        listProjects: async () => [project],
+        resolveAuthorityProjectId: async () => authorityProjectId
+      },
+      createController: (createConfig) => {
+        configFactory = createConfig;
+        return fake.control;
+      },
+      allocatePort
+    });
+
+    await control.setLanSharing({ enabled: true });
+    const status = await control.start();
+    expect(status).toMatchObject({
+      state: "running",
+      lanSharingEnabled: true,
+      lanServerBaseUrl: "http://192.168.1.20:18787/"
+    });
+    expect(allocatePort).toHaveBeenCalledWith("0.0.0.0");
+    expect(storedNetwork.write).toHaveBeenCalledWith({ lanSharingEnabled: true });
+    expect(configFactory!(status.profile!)).toMatchObject({
+      bind: { host: "0.0.0.0", port: 18_787 },
+      publicUrl: "http://192.168.1.20:18787",
+      allowInsecureDevelopment: true,
+      allowInsecureLan: true
+    });
+    expect(status.profile?.serverBaseUrl).toBe("http://127.0.0.1:18787/");
+  });
+
+  it("restores the persisted network switch and starts selected scopes automatically", async () => {
+    const fake = fakeControl();
+    const control = new LocalCollaborationCoordinatorControl({
+      safeStorage,
+      scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
+      networkStore: networkStore(true),
+      resolveLanAddress: () => "10.0.0.15",
+      projects: {
+        listProjects: async () => [project],
+        resolveAuthorityProjectId: async () => authorityProjectId
+      },
+      createController: () => fake.control,
+      allocatePort: async () => 18_788
+    });
+
+    await expect(control.restore()).resolves.toMatchObject({
+      state: "running",
+      lanSharingEnabled: true,
+      lanServerBaseUrl: "http://10.0.0.15:18788/"
+    });
+  });
+
   it("starts with only the explicitly selected project and canvas scopes", async () => {
     const secondCanvasProject: DesktopProjectSummary = {
       ...project,

@@ -289,6 +289,8 @@ const collaborationApi: PlanWeaveCollaborationApi = {
     ipcRenderer.invoke(collaborationInvokeChannels.startLocalCollaborationServer),
   stopLocalCollaborationServer: async () =>
     ipcRenderer.invoke(collaborationInvokeChannels.stopLocalCollaborationServer),
+  setLocalCollaborationLanSharing: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.setLocalCollaborationLanSharing, input),
   listLocalCollaborationTrustedScopes: async () =>
     ipcRenderer.invoke(collaborationInvokeChannels.listLocalCollaborationTrustedScopes),
   registerLocalCollaborationCurrentProject: async (input) =>

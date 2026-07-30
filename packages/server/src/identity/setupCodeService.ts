@@ -5,7 +5,7 @@ import {
   collaborationServerOriginSchema,
   evaluateSetupCodeUsability,
   humanDeviceTokenSchema,
-  isLoopbackHostname,
+  isPrivateNetworkHostname,
   operatorCredentialTokenSchema,
   setupCodeGrantPageSchema,
   setupCodeIssueRequestSchema,
@@ -590,7 +590,11 @@ export class SetupCodeService {
     if (url.protocol !== "https:" && !allowInsecureTransport) {
       throw new Error("setup_server_base_url_requires_https");
     }
-    if (allowInsecureTransport && url.protocol === "http:" && !isLoopbackHostname(url.hostname)) {
+    if (
+      allowInsecureTransport &&
+      url.protocol === "http:" &&
+      !isPrivateNetworkHostname(url.hostname)
+    ) {
       throw new Error("setup_server_base_url_insecure_non_loopback");
     }
   }

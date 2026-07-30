@@ -1,7 +1,7 @@
 import { z } from "zod";
 import {
   collaborationServerOriginSchema,
-  isLoopbackHostname,
+  isPrivateNetworkHostname,
   workspaceConnectionProfileSchema
 } from "./connection.js";
 import {
@@ -353,10 +353,14 @@ export const hostBootstrapHandoffViewSchema = z
         path: ["serverBaseUrl"]
       });
     }
-    if (value.allowInsecureTransport && url.protocol === "http:" && !isLoopbackHostname(url.hostname)) {
+    if (
+      value.allowInsecureTransport &&
+      url.protocol === "http:" &&
+      !isPrivateNetworkHostname(url.hostname)
+    ) {
       ctx.addIssue({
         code: "custom",
-        message: "Insecure HTTP is only allowed for loopback hosts",
+        message: "Insecure HTTP is only allowed for loopback or private-network hosts",
         path: ["serverBaseUrl"]
       });
     }
@@ -397,10 +401,14 @@ export const hostBootstrapEnrollmentSecretSchema = z
         path: ["serverBaseUrl"]
       });
     }
-    if (value.allowInsecureTransport && url.protocol === "http:" && !isLoopbackHostname(url.hostname)) {
+    if (
+      value.allowInsecureTransport &&
+      url.protocol === "http:" &&
+      !isPrivateNetworkHostname(url.hostname)
+    ) {
       ctx.addIssue({
         code: "custom",
-        message: "Insecure HTTP is only allowed for loopback hosts",
+        message: "Insecure HTTP is only allowed for loopback or private-network hosts",
         path: ["serverBaseUrl"]
       });
     }

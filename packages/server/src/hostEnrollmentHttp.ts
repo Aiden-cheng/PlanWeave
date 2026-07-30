@@ -4,6 +4,7 @@ import {
   type HostEnrollmentErrorCode
 } from "@planweave-ai/distributed-protocol";
 import { HostEnrollmentError, HostEnrollmentService } from "./hostEnrollment.js";
+import { humanNetworkTransportAllowed } from "./insecureTransport.js";
 
 const MAX_BODY_BYTES = 16_384;
 
@@ -45,8 +46,7 @@ export async function handleHostEnrollmentRequest(
   options: HostEnrollmentHttpOptions
 ): Promise<boolean> {
   if (request.url !== "/agent-hosts/enrollments/exchange") return false;
-  const encrypted = "encrypted" in request.socket && request.socket.encrypted === true;
-  if (!encrypted && !options.allowInsecureDevelopment) {
+  if (!humanNetworkTransportAllowed(request.socket, options.allowInsecureDevelopment)) {
     send(response, 426, errorBody("insecure_transport"));
     return true;
   }

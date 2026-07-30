@@ -6,6 +6,7 @@ import {
 import { z } from "zod";
 import { OperatorTokenRegistry, type OperatorPrincipal } from "../operatorAuth.js";
 import { SetupCodeError, SetupCodeService } from "./setupCodeService.js";
+import { humanNetworkTransportAllowed } from "../insecureTransport.js";
 
 const MAX_SETUP_BODY_BYTES = 16_384;
 const currentWorkspaceDeviceIssueRequestSchema = setupCodeIssueRequestSchema
@@ -26,20 +27,11 @@ type SetupRoute =
   | { kind: "revoke"; workspaceId: string; setupCodeId: string }
   | { kind: "redeem" };
 
-function isLoopback(address: string | undefined): boolean {
-  return Boolean(
-    address === "::1" ||
-      address === "127.0.0.1" ||
-      address?.startsWith("127.") ||
-      address?.startsWith("::ffff:127.")
-  );
-}
-
 function transportAllowed(
   socket: { encrypted?: boolean; remoteAddress?: string },
   allowInsecureDevelopment = false
 ): boolean {
-  return socket.encrypted === true || (allowInsecureDevelopment && isLoopback(socket.remoteAddress));
+  return humanNetworkTransportAllowed(socket, allowInsecureDevelopment);
 }
 
 function respond(response: ServerResponse, status: number, body: unknown): void {

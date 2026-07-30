@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { loopbackServerStatusSchema } from "@planweave-ai/collaboration-contracts";
 
 const scopeIdentifierSchema = z.string().trim().min(1).max(128);
 
@@ -63,3 +64,20 @@ export type LocalCollaborationScopeCatalog = {
   projects: LocalCollaborationProjectCatalogItem[];
   selectedCount: number;
 };
+
+export const localCollaborationLanSharingInputSchema = z
+  .object({ enabled: z.boolean() })
+  .strict();
+export type LocalCollaborationLanSharingInput = z.infer<
+  typeof localCollaborationLanSharingInputSchema
+>;
+
+export const localCollaborationServerStatusSchema = loopbackServerStatusSchema
+  .extend({
+    lanSharingEnabled: z.boolean(),
+    lanServerBaseUrl: z.string().url().nullable()
+  })
+  .strict();
+export type LocalCollaborationServerStatus = z.infer<
+  typeof localCollaborationServerStatusSchema
+>;

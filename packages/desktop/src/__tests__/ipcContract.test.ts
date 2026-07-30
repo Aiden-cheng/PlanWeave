@@ -188,6 +188,9 @@ describe("desktop IPC contract", () => {
     expect(collaborationInvokeChannels.setCollaborationCurrentSelection).toBe(
       "planweave-collaboration:setCurrentSelection"
     );
+    expect(collaborationInvokeChannels.setLocalCollaborationLanSharing).toBe(
+      "planweave-collaboration:setLocalLanSharing"
+    );
     expect(collaborationInvokeChannels.clearCollaborationCurrentSelection).toBe(
       "planweave-collaboration:clearCurrentSelection"
     );

@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2Icon, ChevronDownIcon, ChevronRightIcon, LaptopIcon } from "lucide-react";
-import type {
-  LoopbackProjectRegistrationView,
-  LoopbackServerStatus,
-  LoopbackTrustedProjectScope
-} from "@planweave-ai/collaboration-contracts";
+import { ChevronDownIcon, ChevronRightIcon, CopyIcon, WifiIcon } from "lucide-react";
+import type { LoopbackTrustedProjectScope } from "@planweave-ai/collaboration-contracts";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import type {
+  LocalCollaborationServerStatus,
   LocalCollaborationScope,
   LocalCollaborationScopeCatalog,
   PlanWeaveCollaborationApi
@@ -33,7 +31,9 @@ export function LocalCollaborationServerPanel({
   projectId,
   canvasId,
   scopeLayout,
-  onScopeLayoutChange
+  onScopeLayoutChange,
+  copyText,
+  onStatusChange
 }: {
   api: PlanWeaveCollaborationApi | null;
   t: ReturnType<typeof createTranslator>;
@@ -41,12 +41,13 @@ export function LocalCollaborationServerPanel({
   canvasId: string | null;
   scopeLayout: DesktopUiSettings["layout"]["collaborationScope"];
   onScopeLayoutChange: (patch: Partial<DesktopUiSettings["layout"]["collaborationScope"]>) => void;
+  copyText: (text: string) => Promise<void>;
+  onStatusChange?: (status: LocalCollaborationServerStatus) => void;
 }) {
-  const [status, setStatus] = useState<LoopbackServerStatus | null>(null);
+  const [status, setStatus] = useState<LocalCollaborationServerStatus | null>(null);
   const [catalog, setCatalog] = useState<LocalCollaborationScopeCatalog | null>(null);
   const [draftScopes, setDraftScopes] = useState<LocalCollaborationScope[]>([]);
   const [scopes, setScopes] = useState<readonly LoopbackTrustedProjectScope[]>([]);
-  const [registration, setRegistration] = useState<LoopbackProjectRegistrationView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -58,6 +59,7 @@ export function LocalCollaborationServerPanel({
         api.getLocalCollaborationScopeCatalog()
       ]);
       setStatus(nextStatus);
+      onStatusChange?.(nextStatus);
       setCatalog(nextCatalog);
       setDraftScopes(selectedScopes(nextCatalog));
       setScopes(
@@ -67,7 +69,7 @@ export function LocalCollaborationServerPanel({
     } catch (caught) {
       setError(collaborationErrorMessage(caught));
     }
-  }, [api]);
+  }, [api, onStatusChange]);
 
   useEffect(() => {
     void refresh();
@@ -105,6 +107,8 @@ export function LocalCollaborationServerPanel({
 
   if (!api) return null;
   const running = status?.state === "running";
+  const lanSharingEnabled = status?.lanSharingEnabled ?? false;
+  const lanAvailable = running && lanSharingEnabled && status?.lanServerBaseUrl !== null;
   const statusLabel =
     status?.state === "error"
       ? status.reason === "stop_failed"
@@ -112,9 +116,9 @@ export function LocalCollaborationServerPanel({
         : status.reason === "unavailable"
           ? t("localServerUnavailable")
           : t("localServerStartFailed")
-      : running
-        ? t("localServerRunning")
-        : t("localServerStopped");
+      : lanAvailable
+        ? t("localServerLanEnabled")
+        : t("localServerLanDisabled");
 
   const toggleScope = (scope: LocalCollaborationScope) => {
     const key = scopeKey(scope);
@@ -123,7 +127,6 @@ export function LocalCollaborationServerPanel({
         ? current.filter((item) => scopeKey(item) !== key)
         : [...current, scope]
     );
-    setRegistration(null);
   };
 
   const toggleProject = (projectId: string) => {
@@ -142,13 +145,24 @@ export function LocalCollaborationServerPanel({
     setDraftScopes(selectedScopes(next));
   };
 
-  const start = async () => {
+  const applyScopeChanges = async () => {
     setBusy(true);
     try {
       await applyScopes();
-      const nextStatus = await api.startLocalCollaborationServer();
+      await refresh();
+    } catch (caught) {
+      setError(collaborationErrorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const setLanSharing = async (enabled: boolean) => {
+    setBusy(true);
+    try {
+      const nextStatus = await api.setLocalCollaborationLanSharing({ enabled });
       setStatus(nextStatus);
-      setRegistration(null);
+      onStatusChange?.(nextStatus);
       await refresh();
     } catch (caught) {
       setError(collaborationErrorMessage(caught));
@@ -157,40 +171,12 @@ export function LocalCollaborationServerPanel({
     }
   };
 
-  const applyRunningScopes = async () => {
+  const copyLanAddress = async () => {
+    if (!status?.lanServerBaseUrl) return;
     setBusy(true);
     try {
-      await applyScopes();
-      setRegistration(null);
-      await refresh();
-    } catch (caught) {
-      setError(collaborationErrorMessage(caught));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const stop = async () => {
-    setBusy(true);
-    try {
-      setStatus(await api.stopLocalCollaborationServer());
-      setRegistration(null);
-      await refresh();
-    } catch (caught) {
-      setError(collaborationErrorMessage(caught));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const register = async () => {
-    setBusy(true);
-    try {
-      const nextRegistration = await api.registerLocalCollaborationCurrentProject({
-        ownerDisplayName: t("localServerDefaultOwnerName")
-      });
-      setRegistration(nextRegistration);
-      await refresh();
+      await copyText(status.lanServerBaseUrl);
+      setError(null);
     } catch (caught) {
       setError(collaborationErrorMessage(caught));
     } finally {
@@ -200,14 +186,13 @@ export function LocalCollaborationServerPanel({
 
   return (
     <section
-      className="bg-background"
       data-testid="local-collaboration-server-panel"
       aria-labelledby="local-collaboration-server-title"
     >
       <div className="flex flex-col gap-5 px-1 pb-6 pt-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 gap-4">
           <div className="mt-0.5 shrink-0 text-emerald-700 dark:text-emerald-300">
-            <LaptopIcon className="size-5" aria-hidden="true" />
+            <WifiIcon className="size-5" aria-hidden="true" />
           </div>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
@@ -219,14 +204,14 @@ export function LocalCollaborationServerPanel({
               </h2>
               <span
                 className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                  running
+                  lanAvailable
                     ? "bg-emerald-500/10 text-emerald-800 dark:text-emerald-200"
                     : "bg-muted text-muted-foreground"
                 }`}
                 data-testid="local-collaboration-server-status"
               >
                 <span
-                  className={`size-1.5 rounded-full ${running ? "bg-emerald-500" : "bg-muted-foreground/50"}`}
+                  className={`size-1.5 rounded-full ${lanAvailable ? "bg-emerald-500" : "bg-muted-foreground/50"}`}
                 />
                 {statusLabel}
               </span>
@@ -236,31 +221,52 @@ export function LocalCollaborationServerPanel({
             </p>
           </div>
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
-          {running ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={busy}
-              onClick={() => void stop()}
-            >
-              {t("localServerStop")}
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              size="sm"
-              disabled={busy || draftScopes.length === 0}
-              onClick={() => void start()}
-            >
-              {busy
-                ? t("peopleWorking")
-                : t("localServerStartSelected").replace("{count}", String(draftScopes.length))}
-            </Button>
-          )}
+        <div className="flex shrink-0 items-center gap-3 sm:justify-end">
+          <span className="text-xs font-medium text-muted-foreground">
+            {t("localServerLanToggle")}
+          </span>
+          <Switch
+            checked={lanSharingEnabled}
+            disabled={busy || status === null}
+            aria-label={t("localServerLanToggle")}
+            onCheckedChange={(checked) => void setLanSharing(checked)}
+          />
         </div>
       </div>
+
+      {lanSharingEnabled ? (
+        <div className="border-t border-border/70 px-1 py-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className="text-xs font-semibold text-text-strong">
+                {t("localServerLanAddress")}
+              </div>
+              {status?.lanServerBaseUrl ? (
+                <code className="mt-1 block truncate font-mono text-xs text-emerald-700 dark:text-emerald-300">
+                  {status.lanServerBaseUrl}
+                </code>
+              ) : (
+                <p className="mt-1 text-xs text-muted-foreground">{t("localServerLanNoScope")}</p>
+              )}
+            </div>
+            {status?.lanServerBaseUrl ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => void copyLanAddress()}
+              >
+                <CopyIcon className="size-3.5" aria-hidden="true" />
+                {t("localServerCopyAddress")}
+              </Button>
+            ) : null}
+          </div>
+          <p className="mt-2 max-w-3xl text-[11px] leading-4 text-muted-foreground">
+            {t("localServerLanHint")}
+          </p>
+        </div>
+      ) : null}
 
       <div className="border-y border-border/70 px-1 py-5">
         <button
@@ -346,7 +352,7 @@ export function LocalCollaborationServerPanel({
                   {!projectCollapsed ? (
                     <div
                       id={projectContentId}
-                      className="divide-y divide-border/40 border-t border-border/50 bg-muted/10"
+                      className="divide-y divide-border/40 border-t border-border/50"
                     >
                       {project.canvases.map((canvas) => {
                         const scope = { projectId: project.projectId, canvasId: canvas.canvasId };
@@ -393,7 +399,7 @@ export function LocalCollaborationServerPanel({
           </div>
         ) : null}
 
-        {running && scopeChanged ? (
+        {scopeChanged ? (
           <div className="mt-4 flex items-center justify-between gap-3 border-l-2 border-amber-500 bg-amber-500/5 px-3 py-2.5">
             <span className="text-[11px] text-amber-900 dark:text-amber-200">
               {t("localServerScopeChanged")}
@@ -402,7 +408,7 @@ export function LocalCollaborationServerPanel({
               type="button"
               size="sm"
               disabled={busy}
-              onClick={() => void applyRunningScopes()}
+              onClick={() => void applyScopeChanges()}
             >
               {t("localServerApplyScopes")}
             </Button>
@@ -410,7 +416,10 @@ export function LocalCollaborationServerPanel({
         ) : null}
 
         {running && currentCatalogCanvas?.selected ? (
-          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-border/50 pt-4">
+          <div
+            className="mt-5 border-t border-border/50 pt-4"
+            data-testid="local-collaboration-current-canvas-status"
+          >
             <div>
               <div className="text-[11px] font-medium text-text-strong">
                 {t("localServerCurrentCanvasReady")}
@@ -421,19 +430,6 @@ export function LocalCollaborationServerPanel({
                   : t("localServerOwnerPending")}
               </div>
             </div>
-            <Button type="button" size="sm" disabled={busy} onClick={() => void register()}>
-              {busy ? t("peopleWorking") : t("localServerRegisterCurrent")}
-            </Button>
-          </div>
-        ) : null}
-
-        {registration ? (
-          <div
-            className="mt-2 flex items-center gap-1.5 text-[11px] text-emerald-700 dark:text-emerald-300"
-            role="status"
-          >
-            <CheckCircle2Icon className="size-3.5" aria-hidden="true" />
-            {t("localServerRegistered")}: {registration.registeredAt}
           </div>
         ) : null}
       </div>

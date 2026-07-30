@@ -13,6 +13,7 @@ import {
 import { z } from "zod";
 import { operatorCredentialSchema } from "./operatorAuth.js";
 import { trustedRuntimeProjectSchema } from "./runtimeProjectRegistry.js";
+import { isPrivateNetworkAddress } from "./insecureTransport.js";
 
 const MAX_CONFIG_BYTES = 256 * 1024;
 const DEFAULT_OPERATOR_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
@@ -79,6 +80,7 @@ const serverConfigInputSchema = z
       .strict()
       .optional(),
     allowInsecureDevelopment: z.boolean().default(false),
+    allowInsecureLan: z.boolean().default(false),
     dataDirectory: absolutePathSchema,
     trustedProjects: z.array(trustedRuntimeProjectSchema).min(1).max(256),
     operatorCredentials: z.array(operatorCredentialSchema).min(1).max(1_024),
@@ -116,7 +118,21 @@ export const serverConfigSchema = serverConfigInputSchema
     ) {
       context.addIssue({ code: "custom", message: "server_public_url_must_be_origin" });
     }
-    if (config.allowInsecureDevelopment) {
+    if (config.allowInsecureLan) {
+      if (
+        !config.allowInsecureDevelopment ||
+        config.bind.host !== "0.0.0.0" ||
+        publicUrl.protocol !== "http:" ||
+        !isPrivateNetworkAddress(publicUrl.hostname) ||
+        config.tls ||
+        config.deployment
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "server_insecure_lan_requires_private_http"
+        });
+      }
+    } else if (config.allowInsecureDevelopment) {
       if (
         !["127.0.0.1", "::1"].includes(config.bind.host) ||
         publicUrl.protocol !== "http:" ||
@@ -247,7 +263,7 @@ export const serverConfigSummarySchema = z
     bindHost: bindHostSchema,
     bindPort: z.number().int().min(1).max(65_535),
     publicUrl: z.url(),
-    transport: z.enum(["https", "loopback-development"]),
+    transport: z.enum(["https", "loopback-development", "lan-http"]),
     deployment: z
       .object({
         topology: z.enum(["loopback_http", "loopback_https", "lan_https", "public_https"]),
@@ -264,7 +280,11 @@ export function serverConfigSummary(config: ServerConfig) {
     bindHost: config.bind.host,
     bindPort: config.bind.port,
     publicUrl: config.publicUrl,
-    transport: config.allowInsecureDevelopment ? "loopback-development" : "https",
+    transport: config.allowInsecureLan
+      ? "lan-http"
+      : config.allowInsecureDevelopment
+        ? "loopback-development"
+        : "https",
     deployment: config.deployment
       ? {
           topology: config.deployment.topology,

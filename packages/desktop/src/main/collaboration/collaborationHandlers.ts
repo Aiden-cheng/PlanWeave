@@ -17,6 +17,7 @@ import {
 import { CollaborationService, type CollaborationServiceOptions } from "./collaborationService.js";
 import { LocalCollaborationCoordinatorControl } from "./CollaborationCoordinatorControl.js";
 import { DeploymentActions } from "./deploymentActions.js";
+import { activateLocalCollaborationSelection } from "./localCollaborationSelectionActivation.js";
 
 let service: CollaborationService | null = null;
 let coordinator: LocalCollaborationCoordinatorControl | null = null;
@@ -102,16 +103,16 @@ export function registerCollaborationHandlers(
     }
   });
   const local = coordinator;
-  const activateLocalSelection = async (): Promise<void> => {
-    const profile = local.localProfile();
-    if (!profile) throw new Error("local_collaboration_selection_required");
-    await active.upsertProfile(profile);
-    await active.migrateLocalProfileCredential("planweave-local-loopback", profile.profileId);
-    await active.setActiveProfile({ profileId: profile.profileId });
-    if (await active.activeHumanPrincipalId(profile.profileId)) {
-      await active.connectSession({ profileId: profile.profileId });
-    }
-  };
+  const localReady = local.restore();
+  void localReady.catch((error: unknown) => {
+    console.error("Failed to restore the local collaboration service.", error);
+  });
+  const activateLocalSelection = (ownerDisplayName = "Local owner") =>
+    activateLocalCollaborationSelection({
+      coordinator: local,
+      service: active,
+      ownerDisplayName
+    });
   const deactivateLocalSelection = async (): Promise<void> => {
     const profileId = local.localProfile()?.profileId;
     if (profileId && (await active.getStatus()).activeProfileId === profileId) {
@@ -278,9 +279,10 @@ export function registerCollaborationHandlers(
     await deactivateLocalSelection();
     return local.clearCurrentSelection();
   });
-  ipcMain.handle(collaborationInvokeChannels.getLocalCollaborationServerStatus, () =>
-    local.status()
-  );
+  ipcMain.handle(collaborationInvokeChannels.getLocalCollaborationServerStatus, async () => {
+    await localReady;
+    return local.status();
+  });
   ipcMain.handle(collaborationInvokeChannels.getLocalCollaborationScopeCatalog, () =>
     local.getScopeCatalog()
   );
@@ -305,6 +307,17 @@ export function registerCollaborationHandlers(
     await deactivateLocalSelection();
     return local.stop();
   });
+  ipcMain.handle(
+    collaborationInvokeChannels.setLocalCollaborationLanSharing,
+    async (_event, input: unknown) => {
+      await deactivateLocalSelection();
+      const status = await local.setLanSharing(input);
+      if (status.state === "running" && local.currentSelectionIsTrusted()) {
+        await activateLocalSelection();
+      }
+      return status;
+    }
+  );
   ipcMain.handle(collaborationInvokeChannels.listLocalCollaborationTrustedScopes, () =>
     local.listActiveTrustedScopes()
   );
@@ -312,19 +325,7 @@ export function registerCollaborationHandlers(
     collaborationInvokeChannels.registerLocalCollaborationCurrentProject,
     async (_event, input: unknown) => {
       const registrationInput = localCollaborationRegistrationInputSchema.parse(input ?? {});
-      const profile = local.localProfile();
-      if (!profile) throw new Error("loopback_server_not_running");
-      let humanPrincipalId = await active.activeHumanPrincipalId(profile.profileId);
-      if (!humanPrincipalId) {
-        const handoff = await active.bootstrapOwner({
-          profileId: profile.profileId,
-          request: { displayName: registrationInput.ownerDisplayName ?? "Local owner" }
-        });
-        humanPrincipalId = handoff.principal.humanPrincipalId;
-      }
-      const registration = local.registerCurrentProject({ kind: "human", id: humanPrincipalId });
-      await active.connectSession({ profileId: profile.profileId });
-      return registration;
+      return activateLocalSelection(registrationInput.ownerDisplayName ?? "Local owner");
     }
   );
   ipcMain.handle(collaborationInvokeChannels.listCollaborationMembers, (_event, input: unknown) =>

@@ -1,7 +1,7 @@
 import {
   collaborationClientLimitsSchema,
   collaborationServerOriginSchema,
-  isLoopbackHostname,
+  isPrivateNetworkHostname,
   setupCodeRedeemDeviceRequestSchema,
   setupCodeRedeemDeviceResponseSchema,
   type CollaborationClientLimits,
@@ -41,11 +41,15 @@ function assertTransportPolicy(origin: SetupCodeTransportOrigin): {
       retryable: false
     });
   }
-  if (allowInsecureTransport && url.protocol === "http:" && !isLoopbackHostname(url.hostname)) {
+  if (
+    allowInsecureTransport &&
+    url.protocol === "http:" &&
+    !isPrivateNetworkHostname(url.hostname)
+  ) {
     throw new CollaborationClientError({
       kind: "protocol",
       code: "collaboration_insecure_transport",
-      message: "Insecure HTTP is only allowed for loopback hosts",
+      message: "Insecure HTTP is only allowed for loopback or private-network hosts",
       retryable: false
     });
   }

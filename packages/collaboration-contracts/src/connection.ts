@@ -46,13 +46,32 @@ export function isLoopbackHostname(hostname: string): boolean {
   );
 }
 
+/** Literal private-network hosts accepted for explicitly enabled LAN HTTP. */
+export function isPrivateNetworkHostname(hostname: string): boolean {
+  if (isLoopbackHostname(hostname)) return true;
+  const octets = hostname.split(".").map((part) => Number(part));
+  if (
+    octets.length === 4 &&
+    octets.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)
+  ) {
+    const [first, second] = octets as [number, number, number, number];
+    return (
+      first === 10 ||
+      (first === 172 && second >= 16 && second <= 31) ||
+      (first === 192 && second === 168) ||
+      (first === 169 && second === 254)
+    );
+  }
+  return false;
+}
+
 /** Shared origin validator for Desktop profiles and setup handoff envelopes. */
 export const collaborationServerOriginSchema = z
   .string()
   .url()
   .refine(isCollaborationServerOrigin, "serverBaseUrl must be an http(s) origin without a path");
 
-function refineTransportPolicy(
+export function refineCollaborationTransportPolicy(
   value: { serverBaseUrl: string; allowInsecureTransport: boolean },
   ctx: z.RefinementCtx
 ): void {
@@ -65,10 +84,10 @@ function refineTransportPolicy(
     });
   }
   if (value.allowInsecureTransport && url.protocol === "http:") {
-    if (!isLoopbackHostname(url.hostname)) {
+    if (!isPrivateNetworkHostname(url.hostname)) {
       ctx.addIssue({
         code: "custom",
-        message: "Insecure HTTP is only allowed for loopback hosts",
+        message: "Insecure HTTP is only allowed for loopback or private-network hosts",
         path: ["serverBaseUrl"]
       });
     }
@@ -89,7 +108,7 @@ export const collaborationConnectionProfileSchema = z
     allowInsecureTransport: z.boolean().default(false)
   })
   .strict()
-  .superRefine(refineTransportPolicy);
+  .superRefine(refineCollaborationTransportPolicy);
 export type CollaborationConnectionProfile = z.infer<typeof collaborationConnectionProfileSchema>;
 
 /**
@@ -108,7 +127,7 @@ export const workspaceConnectionProfileSchema = z
     allowInsecureTransport: z.boolean()
   })
   .strict()
-  .superRefine(refineTransportPolicy);
+  .superRefine(refineCollaborationTransportPolicy);
 export type WorkspaceConnectionProfile = z.infer<typeof workspaceConnectionProfileSchema>;
 
 export function parseWorkspaceConnectionProfile(input: unknown): WorkspaceConnectionProfile {

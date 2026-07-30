@@ -57,6 +57,7 @@ describe("DesktopSettingsStore", () => {
       collaborationProfilesFile: join(home, "desktop", "collaboration", "profiles.json"),
       collaborationCredentialsFile: join(home, "desktop", "collaboration", "credentials.json"),
       localCollaborationScopesFile: join(home, "desktop", "collaboration", "local-scopes.json"),
+      localCollaborationNetworkFile: join(home, "desktop", "collaboration", "local-network.json"),
       operatorControlDir: join(home, "desktop", "operator-control"),
       operatorProfilesFile: join(home, "desktop", "operator-control", "profiles.json"),
       operatorCredentialsFile: join(home, "desktop", "operator-control", "credentials.json")

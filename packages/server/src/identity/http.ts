@@ -1,6 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
 import { z } from "zod";
+import {
+  humanNetworkTransportAllowed,
+  isLoopbackAddress
+} from "../insecureTransport.js";
 import { authenticateHumanForProject } from "./auth.js";
 import {
   HUMAN_AUTH_ERROR_MESSAGES,
@@ -167,22 +171,11 @@ function query(url: URL, allowed: readonly string[]): Record<string, string | un
   return result;
 }
 
-function isLoopback(address: string | undefined): boolean {
-  return Boolean(
-    address === "::1" ||
-      address === "127.0.0.1" ||
-      address?.startsWith("127.") ||
-      address?.startsWith("::ffff:127.")
-  );
-}
-
 export function humanTransportAllowed(
   socket: { encrypted?: boolean; remoteAddress?: string },
   allowInsecureDevelopment = false
 ): boolean {
-  return (
-    socket.encrypted === true || (allowInsecureDevelopment && isLoopback(socket.remoteAddress))
-  );
+  return humanNetworkTransportAllowed(socket, allowInsecureDevelopment);
 }
 
 /**
@@ -190,7 +183,7 @@ export function humanTransportAllowed(
  * first project owner. This is not a network bearer and not Host/operator auth.
  */
 export function humanLocalAdminBoundaryAllowed(socket: { remoteAddress?: string }): boolean {
-  return isLoopback(socket.remoteAddress);
+  return isLoopbackAddress(socket.remoteAddress);
 }
 
 function rateLimitKey(request: IncomingMessage, projectId: string): string {

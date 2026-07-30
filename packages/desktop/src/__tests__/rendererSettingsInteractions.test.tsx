@@ -179,6 +179,10 @@ describe("desktop renderer settings interactions", () => {
       },
       autoRunControl: {
         position: null
+      },
+      collaborationScope: {
+        collapsed: true,
+        expandedProjectIds: []
       }
     });
   });

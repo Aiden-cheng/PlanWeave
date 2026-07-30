@@ -258,4 +258,53 @@ describe("distributed server ACL migration recovery", () => {
       "canvas_registry_conflict"
     );
   });
+
+  it("preserves authoritative project and canvas visibility across restarts", async () => {
+    const workspace = await createTestWorkspace(remoteManifest());
+    directories.push(workspace.home, workspace.root);
+    const projectId = workspace.init.workspace.id;
+    const dataDirectory = join(workspace.root, "visibility-restart-data");
+    const first = await startComposition(workspace.root, dataDirectory, projectId, false);
+    await first.composition.close();
+    compositions.splice(compositions.indexOf(first.composition), 1);
+
+    const databasePath = join(dataDirectory, "planweave-server.sqlite");
+    const database = await openServerDatabase(databasePath, 5_000);
+    const workspaceId = new WorkspaceIdentityRepository(database).workspaceForLegacyProject(
+      projectId
+    );
+    if (!workspaceId) throw new Error("Expected workspace mapping");
+    database
+      .prepare(
+        "UPDATE project_registry SET visibility='shared' WHERE workspace_id=? AND project_id=?"
+      )
+      .run(workspaceId, projectId);
+    database
+      .prepare(
+        "UPDATE canvas_registry SET visibility='shared' WHERE workspace_id=? AND project_id=? AND canvas_id='default'"
+      )
+      .run(workspaceId, projectId);
+    database.close();
+
+    const second = await startComposition(workspace.root, dataDirectory, projectId, false);
+    await second.composition.close();
+    compositions.splice(compositions.indexOf(second.composition), 1);
+
+    const reopened = await openServerDatabase(databasePath, 5_000);
+    expect(
+      reopened
+        .prepare(
+          "SELECT visibility FROM project_registry WHERE workspace_id=? AND project_id=?"
+        )
+        .get(workspaceId, projectId)
+    ).toEqual({ visibility: "shared" });
+    expect(
+      reopened
+        .prepare(
+          "SELECT visibility FROM canvas_registry WHERE workspace_id=? AND project_id=? AND canvas_id='default'"
+        )
+        .get(workspaceId, projectId)
+    ).toEqual({ visibility: "shared" });
+    reopened.close();
+  });
 });

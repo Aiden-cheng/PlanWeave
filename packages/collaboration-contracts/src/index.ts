@@ -19,6 +19,7 @@ export * from "./observer.js";
 export * from "./presence.js";
 export * from "./canvasCommands.js";
 export * from "./connection.js";
+export * from "./invitationHandoff.js";
 export * from "./deployment.js";
 export * from "./accessControl.js";
 export * from "./loopbackServer.js";

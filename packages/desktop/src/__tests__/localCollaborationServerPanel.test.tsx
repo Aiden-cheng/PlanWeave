@@ -19,6 +19,7 @@ const expandedScopeLayout = {
   expandedProjectIds: ["desktop-project-1"]
 };
 const onScopeLayoutChange = vi.fn();
+const copyText = vi.fn(async () => undefined);
 afterEach(cleanup);
 
 function api(overrides: Partial<PlanWeaveCollaborationApi> = {}): PlanWeaveCollaborationApi {
@@ -34,18 +35,38 @@ function api(overrides: Partial<PlanWeaveCollaborationApi> = {}): PlanWeaveColla
     selectedCount: 1
   };
   return {
-    getLocalCollaborationServerStatus: vi
-      .fn()
-      .mockResolvedValue({ profile: null, state: "stopped", startedAt: null, reason: null }),
+    getLocalCollaborationServerStatus: vi.fn().mockResolvedValue({
+      profile: null,
+      state: "stopped",
+      startedAt: null,
+      reason: null,
+      lanSharingEnabled: false,
+      lanServerBaseUrl: null
+    }),
     startLocalCollaborationServer: vi.fn().mockResolvedValue({
       profile,
       state: "running",
       startedAt: "2030-01-01T00:00:00.000Z",
-      reason: null
+      reason: null,
+      lanSharingEnabled: false,
+      lanServerBaseUrl: null
     }),
-    stopLocalCollaborationServer: vi
-      .fn()
-      .mockResolvedValue({ profile: null, state: "stopped", startedAt: null, reason: null }),
+    stopLocalCollaborationServer: vi.fn().mockResolvedValue({
+      profile: null,
+      state: "stopped",
+      startedAt: null,
+      reason: null,
+      lanSharingEnabled: false,
+      lanServerBaseUrl: null
+    }),
+    setLocalCollaborationLanSharing: vi.fn().mockResolvedValue({
+      profile,
+      state: "running",
+      startedAt: "2030-01-01T00:00:00.000Z",
+      reason: null,
+      lanSharingEnabled: true,
+      lanServerBaseUrl: "http://192.168.1.20:8787/"
+    }),
     listLocalCollaborationTrustedScopes: vi
       .fn()
       .mockResolvedValue([
@@ -69,7 +90,7 @@ function api(overrides: Partial<PlanWeaveCollaborationApi> = {}): PlanWeaveColla
 }
 
 describe("LocalCollaborationServerPanel", () => {
-  it("requires an explicit canvas selection before starting", async () => {
+  it("applies an explicit canvas selection and lets main start the internal service", async () => {
     const emptyCatalog = {
       projects: [
         {
@@ -104,68 +125,33 @@ describe("LocalCollaborationServerPanel", () => {
         canvasId="canvas-1"
         scopeLayout={expandedScopeLayout}
         onScopeLayoutChange={onScopeLayoutChange}
+        copyText={copyText}
       />
     );
 
-    const start = await screen.findByRole("button", { name: "Start with 0 canvases" });
-    expect(start).toBeDisabled();
-    await userEvent.click(screen.getByRole("checkbox", { name: "Project One / Canvas One" }));
-    await userEvent.click(screen.getByRole("button", { name: "Start with 1 canvases" }));
+    await userEvent.click(
+      await screen.findByRole("checkbox", { name: "Project One / Canvas One" })
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Apply changes" }));
 
     await waitFor(() =>
       expect(collaborationApi.setLocalCollaborationTrustedScopes).toHaveBeenCalledWith({
         scopes: [{ projectId: "desktop-project-1", canvasId: "canvas-1" }]
       })
     );
-    expect(collaborationApi.startLocalCollaborationServer).toHaveBeenCalled();
+    expect(collaborationApi.startLocalCollaborationServer).not.toHaveBeenCalled();
   });
 
-  it("starts, loads trusted scopes, and registers the current canvas", async () => {
-    const collaborationApi = api({
-      getLocalCollaborationServerStatus: vi
-        .fn()
-        .mockResolvedValueOnce({ profile: null, state: "stopped", startedAt: null, reason: null })
-        .mockResolvedValue({
-          profile,
-          state: "running",
-          startedAt: "2030-01-01T00:00:00.000Z",
-          reason: null
-        })
-    });
-    render(
-      <LocalCollaborationServerPanel
-        api={collaborationApi}
-        t={createTranslator("en")}
-        projectId="project-1"
-        canvasId="canvas-1"
-        scopeLayout={expandedScopeLayout}
-        onScopeLayoutChange={onScopeLayoutChange}
-      />
-    );
-    await userEvent.click(await screen.findByRole("button", { name: "Start with 1 canvases" }));
-    await waitFor(() =>
-      expect(collaborationApi.listLocalCollaborationTrustedScopes).toHaveBeenCalled()
-    );
-    await userEvent.click(screen.getByRole("button", { name: "Enable current canvas" }));
-    await waitFor(() =>
-      expect(collaborationApi.registerLocalCollaborationCurrentProject).toHaveBeenCalledWith({
-        ownerDisplayName: "Local owner"
-      })
-    );
-    expect(screen.getByText(/Registered:/)).toHaveTextContent("2030-01-01T00:00:01.000Z");
-  });
-
-  it("surfaces registration failures without retrying from the renderer", async () => {
+  it("shows an automatically activated canvas without a second initialization action", async () => {
     const collaborationApi = api({
       getLocalCollaborationServerStatus: vi.fn().mockResolvedValue({
         profile,
         state: "running",
         startedAt: "2030-01-01T00:00:00.000Z",
-        reason: null
-      }),
-      registerLocalCollaborationCurrentProject: vi
-        .fn()
-        .mockRejectedValue(new Error("local_collaboration_owner_initialization_required"))
+        reason: null,
+        lanSharingEnabled: false,
+        lanServerBaseUrl: null
+      })
     });
     render(
       <LocalCollaborationServerPanel
@@ -175,13 +161,15 @@ describe("LocalCollaborationServerPanel", () => {
         canvasId="canvas-1"
         scopeLayout={expandedScopeLayout}
         onScopeLayoutChange={onScopeLayoutChange}
+        copyText={copyText}
       />
     );
-    await userEvent.click(await screen.findByRole("button", { name: "Enable current canvas" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "local_collaboration_owner_initialization_required"
+    await waitFor(() =>
+      expect(collaborationApi.listLocalCollaborationTrustedScopes).toHaveBeenCalled()
     );
-    expect(collaborationApi.registerLocalCollaborationCurrentProject).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Current canvas collaboration is active")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Enable current canvas" })).not.toBeInTheDocument();
+    expect(collaborationApi.registerLocalCollaborationCurrentProject).not.toHaveBeenCalled();
   });
 
   it("persists the catalog and per-project disclosure state", async () => {
@@ -195,6 +183,7 @@ describe("LocalCollaborationServerPanel", () => {
         canvasId="canvas-1"
         scopeLayout={expandedScopeLayout}
         onScopeLayoutChange={onLayoutChange}
+        copyText={copyText}
       />
     );
 
@@ -203,7 +192,8 @@ describe("LocalCollaborationServerPanel", () => {
     ).toBeInTheDocument();
     expect(screen.getByTestId("local-collaboration-server-panel")).not.toHaveClass(
       "rounded-xl",
-      "shadow-sm"
+      "shadow-sm",
+      "bg-background"
     );
     await userEvent.click(screen.getByRole("button", { name: "Hide hosted canvas selection" }));
     expect(onLayoutChange).toHaveBeenLastCalledWith({ collapsed: true });
@@ -216,6 +206,7 @@ describe("LocalCollaborationServerPanel", () => {
         canvasId="canvas-1"
         scopeLayout={{ collapsed: true, expandedProjectIds: [] }}
         onScopeLayoutChange={onLayoutChange}
+        copyText={copyText}
       />
     );
     expect(screen.queryByTestId("local-collaboration-scope-catalog")).not.toBeInTheDocument();
@@ -228,6 +219,7 @@ describe("LocalCollaborationServerPanel", () => {
         canvasId="canvas-1"
         scopeLayout={{ collapsed: false, expandedProjectIds: [] }}
         onScopeLayoutChange={onLayoutChange}
+        copyText={copyText}
       />
     );
     expect(screen.getByRole("button", { name: "Show canvases in Project One" })).toHaveAttribute(
@@ -241,6 +233,39 @@ describe("LocalCollaborationServerPanel", () => {
     await userEvent.click(screen.getByRole("button", { name: "Show canvases in Project One" }));
     expect(onLayoutChange).toHaveBeenLastCalledWith({
       expandedProjectIds: ["desktop-project-1"]
+    });
+  });
+
+  it("enables LAN sharing and copies the private-network address", async () => {
+    const collaborationApi = api({
+      getLocalCollaborationServerStatus: vi.fn().mockResolvedValue({
+        profile,
+        state: "running",
+        startedAt: "2030-01-01T00:00:00.000Z",
+        reason: null,
+        lanSharingEnabled: true,
+        lanServerBaseUrl: "http://192.168.1.20:8787/"
+      })
+    });
+    const copy = vi.fn(async () => undefined);
+    render(
+      <LocalCollaborationServerPanel
+        api={collaborationApi}
+        t={createTranslator("en")}
+        projectId="project-1"
+        canvasId="canvas-1"
+        scopeLayout={expandedScopeLayout}
+        onScopeLayoutChange={onScopeLayoutChange}
+        copyText={copy}
+      />
+    );
+
+    expect(await screen.findByText("http://192.168.1.20:8787/")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Copy address" }));
+    expect(copy).toHaveBeenCalledWith("http://192.168.1.20:8787/");
+    await userEvent.click(screen.getByRole("switch", { name: "Share on local network" }));
+    expect(collaborationApi.setLocalCollaborationLanSharing).toHaveBeenCalledWith({
+      enabled: false
     });
   });
 });

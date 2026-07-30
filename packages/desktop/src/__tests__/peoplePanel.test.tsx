@@ -1,11 +1,12 @@
 /* @vitest-environment jsdom */
 
 import "@testing-library/jest-dom/vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTranslator } from "../renderer/i18n";
 import { PeoplePanel } from "../renderer/team/PeoplePanel";
+import { parseCollaborationInvitationHandoff } from "../renderer/team/collaborationInvitationHandoff";
 import type {
   PeopleDeviceRow,
   PeopleHostRow,
@@ -246,6 +247,194 @@ describe("PeoplePanel", () => {
     expect(screen.getByTestId("people-panel")).toHaveAttribute("data-mode", "disconnected");
     expect(screen.getByTestId("people-connect-form")).toBeVisible();
     expect(screen.queryByText(/Not connected/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps an empty workspace neutral and keeps advanced recovery collapsed", async () => {
+    const connectSlot = <div data-testid="people-connect-form">connect</div>;
+    const commonProps = {
+      presence: { ...presence, memberCount: 0, hostCount: 0, onlineHostCount: 0 },
+      members: [],
+      hosts: [],
+      invitations: [],
+      devices: [],
+      detailsLoading: false,
+      detailsError: null,
+      actionError: null,
+      actionBusy: false,
+      pendingInvitation: null,
+      t,
+      onCreateInvitation: vi.fn(),
+      onCopyInvitationToken: vi.fn(),
+      onDismissPendingInvitation: vi.fn(),
+      onRevokeInvitation: vi.fn(),
+      onPromoteMember: vi.fn(),
+      onDemoteMember: vi.fn(),
+      onRemoveMember: vi.fn(),
+      onRevokeDevice: vi.fn(),
+      onRefreshDetails: vi.fn(),
+      connectSlot
+    };
+
+    const { rerender } = render(<PeoplePanel {...commonProps} mode="empty" />);
+
+    expect(screen.getByTestId("people-empty")).toHaveClass("text-muted-foreground");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    rerender(<PeoplePanel {...commonProps} mode="error" />);
+
+    expect(screen.getByTestId("people-error")).toBeVisible();
+    expect(screen.getByTestId("people-error")).toHaveClass("text-muted-foreground");
+    expect(screen.getByTestId("people-error")).not.toHaveAttribute("role", "alert");
+    expect(screen.queryByTestId("people-connect-form")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("people-toggle-connection-settings"));
+    expect(screen.getByTestId("people-connect-form")).toBeVisible();
+  });
+
+  it("opens invitation management after a lone owner finishes initialization", () => {
+    render(
+      <PeoplePanel
+        mode="ready"
+        presence={{ ...presence, memberCount: 1, hostCount: 0, onlineHostCount: 0 }}
+        members={[members[0]!]}
+        hosts={[]}
+        invitations={[]}
+        devices={[]}
+        detailsLoading={false}
+        detailsError={null}
+        actionError={null}
+        actionBusy={false}
+        pendingInvitation={null}
+        t={t}
+        onCreateInvitation={vi.fn()}
+        onCopyInvitationToken={vi.fn()}
+        onDismissPendingInvitation={vi.fn()}
+        onRevokeInvitation={vi.fn()}
+        onPromoteMember={vi.fn()}
+        onDemoteMember={vi.fn()}
+        onRemoveMember={vi.fn()}
+        onRevokeDevice={vi.fn()}
+        onRefreshDetails={vi.fn()}
+      />
+    );
+
+    expect(screen.getByTestId("people-owner-toggle")).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("people-create-invitation")).toBeVisible();
+  });
+
+  it("copies a complete cross-device invitation handoff when connection details exist", async () => {
+    const onCopy = vi.fn().mockResolvedValue(undefined);
+    render(
+      <PeoplePanel
+        mode="ready"
+        presence={presence}
+        members={members}
+        hosts={hosts}
+        invitations={[]}
+        devices={[]}
+        detailsLoading={false}
+        detailsError={null}
+        actionError={null}
+        actionBusy={false}
+        pendingInvitation={{
+          invitation: {
+            invitationId: "inv-new",
+            projectId: "project-1",
+            role: "member",
+            createdByHumanPrincipalId: "human-1",
+            createdAt: "2030-01-01T00:00:00.000Z",
+            expiresAt: "2030-01-08T00:00:00.000Z"
+          },
+          invitationToken: `pw_inv_${"A".repeat(43)}`
+        }}
+        invitationConnection={{
+          serverBaseUrl: "http://192.168.1.20:56584/",
+          projectId: "project-1"
+        }}
+        t={t}
+        onCreateInvitation={vi.fn()}
+        onCopyInvitationToken={onCopy}
+        onDismissPendingInvitation={vi.fn()}
+        onRevokeInvitation={vi.fn()}
+        onPromoteMember={vi.fn()}
+        onDemoteMember={vi.fn()}
+        onRemoveMember={vi.fn()}
+        onRevokeDevice={vi.fn()}
+        onRefreshDetails={vi.fn()}
+      />
+    );
+
+    await userEvent.click(screen.getByTestId("people-invitation-copy"));
+
+    const copiedInvitation = onCopy.mock.calls[0]?.[0];
+    expect(copiedInvitation).toEqual(
+      expect.stringContaining("planweave-collaboration-invitation/v1:")
+    );
+    expect(parseCollaborationInvitationHandoff(copiedInvitation ?? "")).toEqual({
+      serverBaseUrl: "http://192.168.1.20:56584/",
+      projectId: "project-1",
+      invitationToken: `pw_inv_${"A".repeat(43)}`,
+      allowInsecureTransport: true
+    });
+  });
+
+  it("uses readable invitation and device summaries instead of raw identifiers", () => {
+    const invitationId = "24e269e7-2c6a-43cc-995f-6e73db44fb1c";
+    const deviceId = "369c6c7c-dace-4f0b-a8b9-16da98374eac";
+    render(
+      <PeoplePanel
+        mode="ready"
+        presence={presence}
+        members={members}
+        hosts={[]}
+        invitations={[
+          {
+            invitationId,
+            role: "member",
+            createdAt: "2030-01-01T00:00:00.000Z",
+            expiresAt: "2030-01-08T00:00:00.000Z",
+            open: true
+          }
+        ]}
+        devices={[
+          {
+            deviceCredentialId: deviceId,
+            humanPrincipalId: "human-1",
+            label: deviceId,
+            createdAt: "2030-01-01T00:00:00.000Z",
+            lastSeenAt: "2030-01-02T00:00:00.000Z",
+            isRevoked: false
+          }
+        ]}
+        detailsLoading={false}
+        detailsError={null}
+        actionError={null}
+        actionBusy={false}
+        pendingInvitation={null}
+        t={t}
+        onCreateInvitation={vi.fn()}
+        onCopyInvitationToken={vi.fn()}
+        onDismissPendingInvitation={vi.fn()}
+        onRevokeInvitation={vi.fn()}
+        onPromoteMember={vi.fn()}
+        onDemoteMember={vi.fn()}
+        onRemoveMember={vi.fn()}
+        onRevokeDevice={vi.fn()}
+        onRefreshDetails={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId("people-owner-toggle"));
+
+    expect(screen.getByTestId("people-invitation-row")).toHaveTextContent("Waiting for a member");
+    expect(screen.getByTestId("people-invitation-row")).toHaveTextContent(
+      "Invite ID 24e269e7…fb1c"
+    );
+    expect(screen.getByTestId("people-device-row")).toHaveTextContent("Unnamed device 1");
+    expect(screen.getByTestId("people-device-row")).toHaveTextContent("Member: Owner");
+    expect(screen.getByTestId("people-device-row")).toHaveTextContent("Device ID 369c6c7c…4eac");
+    expect(screen.queryByText(invitationId)).not.toBeInTheDocument();
+    expect(screen.queryByText(deviceId)).not.toBeInTheDocument();
   });
 
   it("shows forbidden state without owner mutation controls", () => {

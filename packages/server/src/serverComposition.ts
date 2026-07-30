@@ -577,7 +577,8 @@ export async function createDistributedServerComposition(
       projectAccess.registerProjectInternal({
         workspaceId,
         projectId,
-        projectRoot: project.projectRoot
+        projectRoot: project.projectRoot,
+        visibility: existingProject?.visibility ?? "private"
       });
       for (const canvas of project.canvases) {
         prepareAclRegistryMigrationForStartup({
@@ -587,11 +588,17 @@ export async function createDistributedServerComposition(
           canvasId: canvas.canvasId,
           sourceKind: "trusted_canvas"
         });
+        const existingCanvas = projectAccess.registry.canvasInternal(
+          workspaceId,
+          projectId,
+          canvas.canvasId
+        );
         projectAccess.registerCanvasInternal({
           workspaceId,
           projectId,
           canvasId: canvas.canvasId,
-          packageDir: canvas.packageDir
+          packageDir: canvas.packageDir,
+          visibility: existingCanvas?.visibility ?? "private"
         });
         projectAccess.markCanvasCutover(workspaceId, projectId, canvas.canvasId);
       }

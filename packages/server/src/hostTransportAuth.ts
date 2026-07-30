@@ -1,6 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
 import { AgentHostRepository, type AgentHost } from "./hosts.js";
+import { humanNetworkTransportAllowed } from "./insecureTransport.js";
 
 export type HostTransportAuthentication =
   | { ok: true; host: AgentHost }
@@ -48,8 +49,7 @@ export function authenticateAgentHostRequest(
   expectedWorkspaceId?: string
 ): HostTransportAuthentication {
   if (request.headers.origin) return { ok: false, status: 403, message: "Forbidden" };
-  const encrypted = "encrypted" in request.socket && request.socket.encrypted === true;
-  if (!encrypted && !allowInsecureTransport) {
+  if (!humanNetworkTransportAllowed(request.socket, allowInsecureTransport)) {
     return { ok: false, status: 426, message: "Upgrade Required" };
   }
   const requestedWorkspaceId = workspaceScope(request);

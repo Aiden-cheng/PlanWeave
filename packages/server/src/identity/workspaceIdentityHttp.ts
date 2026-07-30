@@ -10,6 +10,7 @@ import {
   type WorkspaceIdentityReadModel
 } from "./dtos.js";
 import { WorkspaceIdentityRepository } from "./workspaceRepository.js";
+import { humanNetworkTransportAllowed } from "../insecureTransport.js";
 
 export type WorkspaceIdentityHttpOptions = {
   authorization: OperatorTokenRegistry;
@@ -17,20 +18,11 @@ export type WorkspaceIdentityHttpOptions = {
   allowInsecureDevelopment?: boolean;
 };
 
-function isLoopback(address: string | undefined): boolean {
-  return Boolean(
-    address === "::1" ||
-      address === "127.0.0.1" ||
-      address?.startsWith("127.") ||
-      address?.startsWith("::ffff:127.")
-  );
-}
-
 function transportAllowed(
   socket: { encrypted?: boolean; remoteAddress?: string },
   allowInsecureDevelopment = false
 ): boolean {
-  return socket.encrypted === true || (allowInsecureDevelopment && isLoopback(socket.remoteAddress));
+  return humanNetworkTransportAllowed(socket, allowInsecureDevelopment);
 }
 
 function respond(response: ServerResponse, status: number, body: unknown): void {

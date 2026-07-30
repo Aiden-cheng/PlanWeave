@@ -14,6 +14,8 @@ import {
   type PlanWeaveCollaborationApi
 } from "../../shared/collaboration.js";
 import { collaborationErrorMessage } from "../collaboration/formatCollaborationError";
+import { parseCollaborationInvitationHandoff } from "./collaborationInvitationHandoff";
+import { CollaborationInvitationJoinFields } from "./CollaborationInvitationJoinFields";
 
 export type CollaborationConnectFormProps = {
   api: PlanWeaveCollaborationApi | null;
@@ -22,9 +24,17 @@ export type CollaborationConnectFormProps = {
   onConnected?: () => void;
   /** Restore focus to the people trigger after successful close actions. */
   onRequestClose?: () => void;
+  /** Preferred entry point for the surrounding surface. */
+  initialMode?: ConnectMode;
+  /** Lock the form to one product flow and hide the protocol-oriented mode switcher. */
+  fixedMode?: ConnectMode;
+  /** Embedded onboarding already supplies the section heading. */
+  showHeader?: boolean;
+  /** Embedded onboarding does not need the stored Workspace summary. */
+  showConnectionSummary?: boolean;
 };
 
-type ConnectMode = "setup" | "join" | "bootstrap" | "connect";
+export type ConnectMode = "setup" | "join" | "bootstrap" | "connect";
 
 function newProfileId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -65,14 +75,22 @@ export function CollaborationConnectForm({
   status,
   t,
   onConnected,
-  onRequestClose
+  onRequestClose,
+  initialMode = "setup",
+  fixedMode,
+  showHeader = true,
+  showConnectionSummary = true
 }: CollaborationConnectFormProps) {
   const formId = useId();
-  const [mode, setMode] = useState<ConnectMode>("setup");
+  const [mode, setMode] = useState<ConnectMode>(fixedMode ?? initialMode);
   const [displayName, setDisplayName] = useState("");
   const [serverBaseUrl, setServerBaseUrl] = useState("https://");
   const [projectId, setProjectId] = useState("");
   const [invitationToken, setInvitationToken] = useState("");
+  const [invitationDetails, setInvitationDetails] = useState("");
+  const [manualJoinOpen, setManualJoinOpen] = useState(
+    !fixedMode && (fixedMode ?? initialMode) === "join"
+  );
   const setupCodeInputRef = useRef<HTMLInputElement>(null);
   const [allowInsecureTransport, setAllowInsecureTransport] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -155,15 +173,34 @@ export function CollaborationConnectForm({
         return;
       }
 
+      let effectiveServerBaseUrl = serverBaseUrl.trim() || activeProfile?.serverBaseUrl || "";
+      let effectiveProjectId = projectId.trim() || activeProfile?.projectId || "";
+      let effectiveInvitationToken = invitationToken.trim();
+      let effectiveAllowInsecureTransport = allowInsecureTransport;
+      if (mode === "join" && invitationDetails.trim()) {
+        const handoff = parseCollaborationInvitationHandoff(invitationDetails);
+        if (!handoff) {
+          setError(t("peopleInvitationDetailsInvalid"));
+          return;
+        }
+        effectiveServerBaseUrl = handoff.serverBaseUrl;
+        effectiveProjectId = handoff.projectId;
+        effectiveInvitationToken = handoff.invitationToken;
+        effectiveAllowInsecureTransport = handoff.allowInsecureTransport;
+      } else if (mode === "join" && !manualJoinOpen) {
+        setError(t("peopleInvitationDetailsInvalid"));
+        return;
+      }
+
       const profileId = activeProfile?.profileId ?? newProfileId();
       const profileDisplayName =
         displayName.trim() || activeProfile?.displayName || t("peopleDefaultProfileName");
       await api.upsertCollaborationProfile({
         profileId,
         displayName: profileDisplayName,
-        serverBaseUrl: serverBaseUrl.trim() || activeProfile?.serverBaseUrl || "",
-        projectId: projectId.trim() || activeProfile?.projectId || "",
-        allowInsecureTransport
+        serverBaseUrl: effectiveServerBaseUrl,
+        projectId: effectiveProjectId,
+        allowInsecureTransport: effectiveAllowInsecureTransport
       });
 
       if (mode === "bootstrap") {
@@ -181,7 +218,7 @@ export function CollaborationConnectForm({
         const handoff = await api.consumeCollaborationInvitation({
           profileId,
           request: {
-            invitationToken: invitationToken.trim(),
+            invitationToken: effectiveInvitationToken,
             displayName: profileDisplayName
           }
         });
@@ -195,6 +232,7 @@ export function CollaborationConnectForm({
 
       await api.connectCollaborationSession({ profileId });
       setInvitationToken("");
+      setInvitationDetails("");
       onConnected?.();
     } catch (submitError) {
       setError(collaborationErrorMessage(submitError));
@@ -246,75 +284,90 @@ export function CollaborationConnectForm({
 
   return (
     <section
-      className="overflow-hidden rounded-xl border border-border/70 bg-background shadow-sm"
+      className="max-w-4xl"
       data-testid="people-connect-form"
-      aria-labelledby="people-remote-workspace-title"
+      aria-label={showHeader ? undefined : t("peopleRemoteWorkspaceTitle")}
+      aria-labelledby={showHeader ? "people-remote-workspace-title" : undefined}
     >
-      <div className="flex items-start gap-3 border-b border-border/60 p-4">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-700 dark:text-sky-300">
-          <ServerIcon className="size-4" aria-hidden="true" />
-        </div>
-        <div>
-          <h2 id="people-remote-workspace-title" className="text-sm font-semibold text-text-strong">
-            {t("peopleRemoteWorkspaceTitle")}
-          </h2>
-          <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
-            {t("peopleRemoteWorkspaceDescription")}
-          </p>
-        </div>
-      </div>
-      <div className="flex flex-col gap-3 p-4">
-        <div
-          className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5 text-xs"
-          data-testid="people-workspace-connection-status"
-          data-status={workspaceConnection?.status ?? "local_only"}
-          role="status"
-        >
-          <div className="font-medium text-text-strong">
-            {workspaceStatusLabel(workspaceConnection, t)}
+      {showHeader ? (
+        <div className="flex items-start gap-3 border-b border-border/70 pb-5">
+          <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center text-sky-700 dark:text-sky-300">
+            <ServerIcon className="size-4" aria-hidden="true" />
           </div>
-          {workspaceConnection?.workspaceDisplayName ? (
-            <div className="text-muted-foreground">{workspaceConnection.workspaceDisplayName}</div>
-          ) : (
-            <div className="text-muted-foreground">{t("peopleWorkspaceLocalOnlyHint")}</div>
-          )}
-          {workspaceConnection?.profile?.serverBaseUrl ? (
-            <div className="text-muted-foreground">{workspaceConnection.profile.serverBaseUrl}</div>
-          ) : null}
-          {workspaceConnection?.status === "error" && workspaceConnection.error ? (
-            <div className="mt-1 text-destructive" data-testid="people-workspace-connection-error">
-              {workspaceConnection.error.message ?? workspaceConnection.error.code}
+          <div>
+            <h2
+              id="people-remote-workspace-title"
+              className="text-sm font-semibold text-text-strong"
+            >
+              {t("peopleRemoteWorkspaceTitle")}
+            </h2>
+            <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
+              {t("peopleRemoteWorkspaceDescription")}
+            </p>
+          </div>
+        </div>
+      ) : null}
+      <div className="flex flex-col gap-5 pt-5">
+        {showConnectionSummary ? (
+          <div
+            className="border-l-2 border-border px-3 py-1 text-xs"
+            data-testid="people-workspace-connection-status"
+            data-status={workspaceConnection?.status ?? "local_only"}
+            role="status"
+          >
+            <div className="font-medium text-text-strong">
+              {workspaceStatusLabel(workspaceConnection, t)}
             </div>
-          ) : null}
-          <div className="mt-2 flex flex-wrap gap-1">
-            {workspaceConnection?.status === "error" && workspaceConnection.error?.retryable ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                data-testid="people-workspace-retry"
-                disabled={busy || !api}
-                onClick={() => void retryWorkspace()}
-              >
-                {t("peopleWorkspaceRetry")}
-              </Button>
+            {workspaceConnection?.workspaceDisplayName ? (
+              <div className="text-muted-foreground">
+                {workspaceConnection.workspaceDisplayName}
+              </div>
+            ) : (
+              <div className="text-muted-foreground">{t("peopleWorkspaceLocalOnlyHint")}</div>
+            )}
+            {workspaceConnection?.profile?.serverBaseUrl ? (
+              <div className="text-muted-foreground">
+                {workspaceConnection.profile.serverBaseUrl}
+              </div>
             ) : null}
-            {workspaceConnection && workspaceConnection.status !== "local_only" ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                data-testid="people-workspace-disconnect"
-                disabled={busy || !api}
-                onClick={() => void disconnectWorkspace()}
+            {workspaceConnection?.status === "error" && workspaceConnection.error ? (
+              <div
+                className="mt-1 text-destructive"
+                data-testid="people-workspace-connection-error"
               >
-                {t("peopleWorkspaceStayLocal")}
-              </Button>
+                {workspaceConnection.error.message ?? workspaceConnection.error.code}
+              </div>
             ) : null}
+            <div className="mt-2 flex flex-wrap gap-1">
+              {workspaceConnection?.status === "error" && workspaceConnection.error?.retryable ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  data-testid="people-workspace-retry"
+                  disabled={busy || !api}
+                  onClick={() => void retryWorkspace()}
+                >
+                  {t("peopleWorkspaceRetry")}
+                </Button>
+              ) : null}
+              {workspaceConnection && workspaceConnection.status !== "local_only" ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  data-testid="people-workspace-disconnect"
+                  disabled={busy || !api}
+                  onClick={() => void disconnectWorkspace()}
+                >
+                  {t("peopleWorkspaceStayLocal")}
+                </Button>
+              ) : null}
+            </div>
           </div>
-        </div>
+        ) : null}
 
-        {workspacePickerItems.length > 0 ? (
+        {showConnectionSummary && workspacePickerItems.length > 0 ? (
           <div
             className="flex flex-col gap-1"
             data-testid="people-workspace-picker"
@@ -355,38 +408,47 @@ export function CollaborationConnectForm({
           </p>
         ) : null}
 
-        <div
-          className="flex w-fit max-w-full flex-wrap gap-1 rounded-lg bg-muted/60 p-1"
-          role="tablist"
-          aria-label={t("peopleConnectModes")}
-        >
-          {(
-            [
-              ["setup", "peopleConnectSetupCode"],
-              ["join", "peopleConnectJoin"],
-              ["bootstrap", "peopleConnectBootstrap"],
-              ["connect", "peopleConnectExisting"]
-            ] as const
-          ).map(([value, labelKey]) => (
-            <Button
-              key={value}
-              type="button"
-              role="tab"
-              size="sm"
-              variant={mode === value ? "secondary" : "ghost"}
-              className={mode === value ? "bg-background shadow-sm hover:bg-background" : undefined}
-              data-testid={`people-connect-mode-${value}`}
-              aria-selected={mode === value}
-              onClick={() => setMode(value)}
-            >
-              {t(labelKey)}
-            </Button>
-          ))}
-        </div>
+        {!fixedMode ? (
+          <div
+            className="flex max-w-full flex-wrap gap-x-6 border-b border-border/70"
+            role="tablist"
+            aria-label={t("peopleConnectModes")}
+          >
+            {(
+              [
+                ["setup", "peopleConnectSetupCode"],
+                ["join", "peopleConnectJoin"],
+                ["bootstrap", "peopleConnectBootstrap"],
+                ["connect", "peopleConnectExisting"]
+              ] as const
+            ).map(([value, labelKey]) => (
+              <Button
+                key={value}
+                type="button"
+                role="tab"
+                size="sm"
+                variant="ghost"
+                className={`relative rounded-none px-0 pb-2.5 text-xs hover:bg-transparent ${
+                  mode === value
+                    ? "text-text-strong after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:bg-text-strong"
+                    : "text-muted-foreground"
+                }`}
+                data-testid={`people-connect-mode-${value}`}
+                aria-selected={mode === value}
+                onClick={() => {
+                  setMode(value);
+                  if (value === "join") setManualJoinOpen(true);
+                }}
+              >
+                {t(labelKey)}
+              </Button>
+            ))}
+          </div>
+        ) : null}
 
         {mode === "setup" ? (
-          <div className="flex flex-col gap-2">
-            <div className="flex flex-col gap-1">
+          <div className="grid grid-cols-1 gap-x-5 gap-y-3 md:grid-cols-2">
+            <div className="flex flex-col gap-1 md:col-span-2">
               <Label htmlFor={`${formId}-name`}>{t("peopleDisplayName")}</Label>
               <Input
                 id={`${formId}-name`}
@@ -417,7 +479,7 @@ export function CollaborationConnectForm({
                 spellCheck={false}
               />
             </div>
-            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <label className="flex items-center gap-2 text-xs text-muted-foreground md:col-span-2">
               <input
                 type="checkbox"
                 data-testid="people-connect-allow-insecure"
@@ -429,8 +491,29 @@ export function CollaborationConnectForm({
           </div>
         ) : null}
 
-        {mode === "join" || mode === "bootstrap" ? (
-          <div className="flex flex-col gap-2">
+        {mode === "join" ? (
+          <CollaborationInvitationJoinFields
+            formId={formId}
+            t={t}
+            invitationDetails={invitationDetails}
+            displayName={displayName}
+            manualJoinOpen={manualJoinOpen}
+            serverBaseUrl={serverBaseUrl}
+            projectId={projectId}
+            invitationToken={invitationToken}
+            allowInsecureTransport={allowInsecureTransport}
+            onInvitationDetailsChange={setInvitationDetails}
+            onDisplayNameChange={setDisplayName}
+            onManualJoinOpenChange={setManualJoinOpen}
+            onServerBaseUrlChange={setServerBaseUrl}
+            onProjectIdChange={setProjectId}
+            onInvitationTokenChange={setInvitationToken}
+            onAllowInsecureTransportChange={setAllowInsecureTransport}
+          />
+        ) : null}
+
+        {mode === "bootstrap" ? (
+          <div className="grid grid-cols-1 gap-x-5 gap-y-3 md:grid-cols-2">
             <div className="flex flex-col gap-1">
               <Label htmlFor={`${formId}-name-legacy`}>{t("peopleDisplayName")}</Label>
               <Input
@@ -463,20 +546,7 @@ export function CollaborationConnectForm({
                 spellCheck={false}
               />
             </div>
-            {mode === "join" ? (
-              <div className="flex flex-col gap-1">
-                <Label htmlFor={`${formId}-token`}>{t("peopleInvitationToken")}</Label>
-                <Input
-                  id={`${formId}-token`}
-                  data-testid="people-connect-invitation-token"
-                  value={invitationToken}
-                  onChange={(event) => setInvitationToken(event.target.value)}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              </div>
-            ) : null}
-            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <label className="flex items-center gap-2 text-xs text-muted-foreground md:col-span-2">
               <input
                 type="checkbox"
                 data-testid="people-connect-allow-insecure"
@@ -489,7 +559,7 @@ export function CollaborationConnectForm({
         ) : null}
 
         {mode === "connect" ? (
-          <div className="rounded-md border border-border/70 bg-muted/20 px-2 py-1.5 text-xs">
+          <div className="border-y border-border/70 py-3 text-xs">
             {activeProfile || workspaceConnection?.profile ? (
               <div data-testid="people-connect-active-profile">
                 <div className="font-medium text-text-strong">

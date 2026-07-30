@@ -211,7 +211,7 @@ describe("OSS-005 setup-code and single-connection contracts", () => {
     ).toThrow();
   });
 
-  it("bounds Server origins to HTTPS with loopback-only insecure exception", () => {
+  it("bounds Server origins to HTTPS with explicit loopback and private-LAN exceptions", () => {
     expect(collaborationServerOriginSchema.parse("https://collab.example.com/")).toBe(
       "https://collab.example.com/"
     );
@@ -231,6 +231,17 @@ describe("OSS-005 setup-code and single-connection contracts", () => {
         allowInsecureTransport: true
       }).allowInsecureTransport
     ).toBe(true);
+
+    expect(
+      workspaceConnectionProfileSchema.parse({
+        schemaVersion: "workspace-identity/v1",
+        profileId: "profile-lan",
+        displayName: "LAN",
+        serverBaseUrl: "http://10.0.0.15:8787/",
+        workspaceId: "workspace-demo-001",
+        allowInsecureTransport: true
+      }).serverBaseUrl
+    ).toBe("http://10.0.0.15:8787/");
 
     expect(() =>
       workspaceConnectionProfileSchema.parse({

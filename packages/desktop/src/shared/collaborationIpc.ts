@@ -46,6 +46,7 @@ export const collaborationInvokeChannels = {
   setLocalCollaborationTrustedScopes: "planweave-collaboration:setLocalTrustedScopes",
   startLocalCollaborationServer: "planweave-collaboration:startLocalServer",
   stopLocalCollaborationServer: "planweave-collaboration:stopLocalServer",
+  setLocalCollaborationLanSharing: "planweave-collaboration:setLocalLanSharing",
   listLocalCollaborationTrustedScopes: "planweave-collaboration:listLocalTrustedScopes",
   registerLocalCollaborationCurrentProject: "planweave-collaboration:registerLocalCurrentProject",
   listCollaborationMembers: "planweave-collaboration:listMembers",

@@ -848,6 +848,7 @@ describe("preload bridge invocation", () => {
     });
     await api.startLocalCollaborationServer();
     await api.stopLocalCollaborationServer();
+    await api.setLocalCollaborationLanSharing({ enabled: true });
     await api.listLocalCollaborationTrustedScopes();
     await api.registerLocalCollaborationCurrentProject({ ownerDisplayName: "Local owner" });
     await api.startCollaborationPresence({ canvasId: "default" });
@@ -934,6 +935,10 @@ describe("preload bridge invocation", () => {
     );
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       collaborationInvokeChannels.stopLocalCollaborationServer
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.setLocalCollaborationLanSharing,
+      { enabled: true }
     );
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       collaborationInvokeChannels.listLocalCollaborationTrustedScopes

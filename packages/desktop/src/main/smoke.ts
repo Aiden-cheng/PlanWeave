@@ -925,13 +925,9 @@ async function runLocalCollaborationSmoke(window: BrowserWindow): Promise<Record
       if (scopeCatalog.selectedCount !== 1) {
         throw new Error("Local collaboration scope selection was not persisted.");
       }
-      const beforeStart = await collaboration.getLocalCollaborationServerStatus();
-      if (beforeStart.state !== "stopped") {
-        throw new Error("Local collaboration server did not start from a stopped state.");
-      }
-      const started = await collaboration.startLocalCollaborationServer();
-      if (started.state !== "running") {
-        throw new Error("Local collaboration server did not report running after start.");
+      const activated = await collaboration.getLocalCollaborationServerStatus();
+      if (activated.state !== "running") {
+        throw new Error("Local collaboration server did not start automatically for the selected canvas.");
       }
       const trustedScopes = await collaboration.listLocalCollaborationTrustedScopes();
       const matchingScopes = trustedScopes.filter(
@@ -942,46 +938,68 @@ async function runLocalCollaborationSmoke(window: BrowserWindow): Promise<Record
       if (matchingScopes.length !== 1) {
         throw new Error("Local collaboration server did not expose exactly one selected trusted scope.");
       }
-      if (!started.profile) {
-        throw new Error("Local collaboration server did not expose a profile after start.");
+      if (!activated.profile) {
+        throw new Error("Local collaboration server did not expose a profile after activation.");
       }
-      const owner = await collaboration.bootstrapCollaborationOwner({
-        profileId: started.profile.profileId,
-        request: { displayName: "Packaged smoke owner" }
-      });
-      if (owner.membership.role !== "owner") {
-        throw new Error("Local collaboration bootstrap did not create an owner membership.");
+      let collaborationStatus = await collaboration.getCollaborationStatus();
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const activeProfile = collaborationStatus.profiles.find(
+          (profile) => profile.profileId === collaborationStatus.activeProfileId
+        );
+        if (
+          activeProfile?.serverBaseUrl === activated.profile.serverBaseUrl &&
+          activeProfile?.projectId === ${JSON.stringify(authorityProjectId)} &&
+          ["connected", "ready"].includes(collaborationStatus.session.phase)
+        ) {
+          break;
+        }
+        if (collaborationStatus.session.phase === "error") {
+          throw new Error(
+            "Local collaboration owner session failed: " +
+              (collaborationStatus.session.lastErrorCode ?? "unknown_error")
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        collaborationStatus = await collaboration.getCollaborationStatus();
       }
-      const registration = await collaboration.registerLocalCollaborationCurrentProject();
+      const activeProfile = collaborationStatus.profiles.find(
+        (profile) => profile.profileId === collaborationStatus.activeProfileId
+      );
       if (
-        registration.workspaceId !== matchingScopes[0].workspaceId ||
-        registration.projectId !== matchingScopes[0].projectId ||
-        registration.canvasId !== matchingScopes[0].canvasId
+        activeProfile?.serverBaseUrl !== activated.profile.serverBaseUrl ||
+        activeProfile?.projectId !== ${JSON.stringify(authorityProjectId)} ||
+        !["connected", "ready"].includes(collaborationStatus.session.phase)
       ) {
-        throw new Error("Local collaboration registration did not preserve the trusted scope.");
+        throw new Error(
+          "Local collaboration owner session was not restored automatically: " +
+            JSON.stringify({
+              activeProfileMatchesServer:
+                activeProfile?.serverBaseUrl === activated.profile.serverBaseUrl,
+              activeProfileMatchesProject:
+                activeProfile?.projectId === ${JSON.stringify(authorityProjectId)},
+              phase: collaborationStatus.session.phase,
+              detail: collaborationStatus.session.detail,
+              lastErrorCode: collaborationStatus.session.lastErrorCode
+            })
+        );
       }
-      const stopped = await collaboration.stopLocalCollaborationServer();
-      if (stopped.state !== "stopped") {
-        throw new Error("Local collaboration server did not stop.");
+      const members = await collaboration.listCollaborationMembers({ cursor: 0, limit: 20 });
+      const owner = members.items.find((member) => member.role === "owner");
+      if (!owner) {
+        throw new Error("Local collaboration activation did not expose its owner membership.");
       }
       const result = {
         selectedProjectId: selection.projectId,
         authorityProjectId: ${JSON.stringify(authorityProjectId)},
         selectedCanvasId: selection.canvasId,
-        statusBeforeStart: beforeStart.state,
-        statusAfterStart: started.state,
+        statusAfterActivation: activated.state,
+        sessionPhase: collaborationStatus.session.phase,
         trustedScope: {
           workspaceId: matchingScopes[0].workspaceId,
           projectId: matchingScopes[0].projectId,
           canvasId: matchingScopes[0].canvasId
         },
-        ownerBootstrap: { role: owner.membership.role },
-        registration: {
-          workspaceId: registration.workspaceId,
-          projectId: registration.projectId,
-          canvasId: registration.canvasId
-        },
-        statusAfterStop: stopped.state
+        ownerMembership: { role: owner.role }
       };
       const serialized = JSON.stringify(result);
       if (serialized.includes("projectRoot") || serialized.includes("pw_operator_")) {

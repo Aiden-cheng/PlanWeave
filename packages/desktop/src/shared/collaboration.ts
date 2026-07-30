@@ -72,7 +72,6 @@ import {
   type CurrentCanvasAccessView,
   type AccessMutationResult,
   type LoopbackProjectRegistrationView,
-  type LoopbackServerStatus,
   type LoopbackTrustedProjectScope
 } from "@planweave-ai/collaboration-contracts";
 import type {
@@ -97,17 +96,23 @@ import type {
   CollaborationWorkItemInput
 } from "./collaborationReadModels.js";
 import type {
+  LocalCollaborationLanSharingInput,
   LocalCollaborationRegistrationInput,
+  LocalCollaborationServerStatus,
   LocalCollaborationScopeCatalog,
   LocalCollaborationScopeSelectionInput
 } from "./localCollaborationScopes.js";
 export {
+  localCollaborationLanSharingInputSchema,
   localCollaborationRegistrationInputSchema,
+  localCollaborationServerStatusSchema,
   localCollaborationScopeSchema,
   localCollaborationScopeSelectionInputSchema,
   type LocalCollaborationCanvasCatalogItem,
   type LocalCollaborationProjectCatalogItem,
   type LocalCollaborationRegistrationInput,
+  type LocalCollaborationLanSharingInput,
+  type LocalCollaborationServerStatus,
   type LocalCollaborationScope,
   type LocalCollaborationScopeCatalog,
   type LocalCollaborationScopeSelectionInput
@@ -605,13 +610,16 @@ export type PlanWeaveCollaborationApi = {
   ) => Promise<CollaborationAccessMutationResult>;
   setCollaborationCurrentSelection: (input: CollaborationCurrentSelectionInput) => Promise<void>;
   clearCollaborationCurrentSelection: () => Promise<void>;
-  getLocalCollaborationServerStatus: () => Promise<LoopbackServerStatus>;
+  getLocalCollaborationServerStatus: () => Promise<LocalCollaborationServerStatus>;
   getLocalCollaborationScopeCatalog: () => Promise<LocalCollaborationScopeCatalog>;
   setLocalCollaborationTrustedScopes: (
     input: LocalCollaborationScopeSelectionInput
   ) => Promise<LocalCollaborationScopeCatalog>;
-  startLocalCollaborationServer: () => Promise<LoopbackServerStatus>;
-  stopLocalCollaborationServer: () => Promise<LoopbackServerStatus>;
+  startLocalCollaborationServer: () => Promise<LocalCollaborationServerStatus>;
+  stopLocalCollaborationServer: () => Promise<LocalCollaborationServerStatus>;
+  setLocalCollaborationLanSharing: (
+    input: LocalCollaborationLanSharingInput
+  ) => Promise<LocalCollaborationServerStatus>;
   listLocalCollaborationTrustedScopes: () => Promise<readonly LoopbackTrustedProjectScope[]>;
   registerLocalCollaborationCurrentProject: (
     input?: LocalCollaborationRegistrationInput

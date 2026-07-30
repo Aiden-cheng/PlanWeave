@@ -1,5 +1,6 @@
 import {
   isLoopbackHostname,
+  isPrivateNetworkHostname,
   loopbackProjectRegistrationRequestSchema,
   loopbackProjectRegistrationViewSchema,
   loopbackServerLifecycleRequestSchema,
@@ -86,12 +87,18 @@ export class LoopbackServerController {
     const config = serverConfigSchema.parse(this.options.createConfig(profile));
     const profileUrl = new URL(profile.serverBaseUrl);
     const configUrl = new URL(config.publicUrl);
-    if (
-      !isLoopbackHostname(config.bind.host) ||
-      !isLoopbackHostname(configUrl.hostname) ||
-      config.bind.port !== Number(profileUrl.port || (profileUrl.protocol === "https:" ? 443 : 80)) ||
-      configUrl.origin !== profileUrl.origin
-    ) {
+    const expectedPort = Number(profileUrl.port || (profileUrl.protocol === "https:" ? 443 : 80));
+    const fixedLanConfig =
+      config.allowInsecureLan &&
+      config.bind.host === "0.0.0.0" &&
+      isPrivateNetworkHostname(configUrl.hostname) &&
+      !isLoopbackHostname(configUrl.hostname);
+    const fixedLoopbackConfig =
+      !config.allowInsecureLan &&
+      isLoopbackHostname(config.bind.host) &&
+      isLoopbackHostname(configUrl.hostname) &&
+      configUrl.origin === profileUrl.origin;
+    if (config.bind.port !== expectedPort || (!fixedLanConfig && !fixedLoopbackConfig)) {
       throw new Error("loopback_profile_configuration_mismatch");
     }
     return config;
