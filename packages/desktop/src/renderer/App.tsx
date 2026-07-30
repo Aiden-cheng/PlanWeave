@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { bridge } from "./bridge";
 import { createTranslator } from "./i18n";
 import { ProjectSidebar } from "./sidebar/ProjectSidebar";
@@ -11,7 +11,6 @@ import { useRuntimeTools } from "./hooks/useRuntimeTools";
 import { useGlobalPrompt } from "./hooks/useGlobalPrompt";
 import { useResizableSidebarLayout } from "./hooks/useResizableSidebarLayout";
 import { CollapsedSidebarControls, RightPaletteSidebar } from "./AppSidebars";
-import { AppSettingsRoute } from "./AppSettingsRoute";
 import { AppOverlays } from "./components/AppOverlays";
 import { detectRendererPlatform } from "./rendererPlatform";
 import {
@@ -19,6 +18,11 @@ import {
   useProjectWorkspace,
   type ProjectWorkspaceShellInput
 } from "./ProjectWorkspaceProvider";
+
+const AppSettingsRoute = lazy(async () => {
+  const module = await import("./AppSettingsRoute");
+  return { default: module.AppSettingsRoute };
+});
 
 export function AppWorkspaceChrome({
   leftSidebarCollapsed,
@@ -106,7 +110,15 @@ function AppSettingsChrome({
   const { settingsRouteProps } = useProjectWorkspace();
   return (
     <>
-      <AppSettingsRoute {...settingsRouteProps} />
+      <Suspense
+        fallback={
+          <div className="flex h-full min-h-0 items-center justify-center text-sm text-text-muted">
+            {t("loadingProject")}
+          </div>
+        }
+      >
+        <AppSettingsRoute {...settingsRouteProps} />
+      </Suspense>
       <AppOverlays
         error={error}
         successMessage={successMessage}

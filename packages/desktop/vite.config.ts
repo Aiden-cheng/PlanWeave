@@ -5,27 +5,91 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const maxRendererChunkBytes = 500_000;
+export const maxRendererChunkBytes = 500_000;
+export const maxSettingsRouteChunkBytes = 75_000;
+export const appSettingsRouteModuleId = resolve(
+  __dirname,
+  "src",
+  "renderer",
+  "AppSettingsRoute.tsx"
+).replaceAll("\\", "/");
 
-function enforceRendererChunkBudget(): Plugin {
-  let oversized: string[] = [];
+export type RendererChunk = {
+  type: "chunk";
+  code: string;
+  facadeModuleId: string | null;
+  fileName: string;
+  isEntry: boolean;
+  modules: Record<string, unknown>;
+};
+
+function normalizeModuleId(moduleId: string): string {
+  return moduleId.replaceAll("\\", "/");
+}
+
+export function isAppSettingsRouteChunk(chunk: RendererChunk): boolean {
+  return [chunk.facadeModuleId, ...Object.keys(chunk.modules)].some(
+    (moduleId) => moduleId !== null && normalizeModuleId(moduleId) === appSettingsRouteModuleId
+  );
+}
+
+export function rendererChunkBudgetViolations(chunks: Iterable<RendererChunk>): string[] {
+  const violations: string[] = [];
+  const settingsRouteChunks: RendererChunk[] = [];
+
+  for (const chunk of chunks) {
+    const bytes = Buffer.byteLength(chunk.code);
+    if (bytes > maxRendererChunkBytes) {
+      violations.push(`${chunk.fileName} (${bytes} bytes) exceeds the renderer chunk budget`);
+    }
+    if (isAppSettingsRouteChunk(chunk)) {
+      settingsRouteChunks.push(chunk);
+    }
+  }
+
+  if (settingsRouteChunks.length !== 1) {
+    violations.push(
+      `Expected exactly one AppSettingsRoute chunk, found ${settingsRouteChunks.length}.`
+    );
+    return violations;
+  }
+
+  const [settingsRouteChunk] = settingsRouteChunks;
+  if (settingsRouteChunk.isEntry) {
+    violations.push("AppSettingsRoute must be emitted as a non-entry chunk.");
+  }
+  const settingsRouteBytes = Buffer.byteLength(settingsRouteChunk.code);
+  if (settingsRouteBytes > maxSettingsRouteChunkBytes) {
+    violations.push(
+      `${settingsRouteChunk.fileName} (${settingsRouteBytes} bytes) exceeds the AppSettingsRoute budget.`
+    );
+  }
+
+  return violations;
+}
+
+export function enforceRendererChunkBudget(): Plugin {
+  let violations: string[] = [];
   return {
     name: "planweave-renderer-chunk-budget",
     generateBundle(_options, bundle) {
-      oversized = [];
+      const chunks: RendererChunk[] = [];
       for (const output of Object.values(bundle)) {
         if (output.type !== "chunk") continue;
-        const bytes = Buffer.byteLength(output.code);
-        if (bytes > maxRendererChunkBytes) {
-          oversized.push(`${output.fileName} (${bytes} bytes)`);
-        }
+        chunks.push({
+          type: output.type,
+          code: output.code,
+          facadeModuleId: output.facadeModuleId,
+          fileName: output.fileName,
+          isEntry: output.isEntry,
+          modules: output.modules
+        });
       }
+      violations = rendererChunkBudgetViolations(chunks);
     },
     closeBundle() {
-      if (oversized.length > 0) {
-        this.error(
-          `Renderer chunks exceed the ${maxRendererChunkBytes}-byte budget:\n${oversized.join("\n")}`
-        );
+      if (violations.length > 0) {
+        this.error(`Renderer bundle contract failed:\n${violations.join("\n")}`);
       }
     }
   };
