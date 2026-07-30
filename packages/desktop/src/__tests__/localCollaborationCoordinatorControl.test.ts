@@ -138,9 +138,11 @@ describe("LocalCollaborationCoordinatorControl", () => {
     );
 
     const clear = control.clearCurrentSelection();
-    expect(fake.apply).toHaveBeenLastCalledWith(
-      expect.objectContaining({ action: "stop", profileId: "planweave-local-loopback" })
-    );
+    await vi.waitFor(() => {
+      expect(fake.apply).toHaveBeenLastCalledWith(
+        expect.objectContaining({ action: "stop", profileId: "planweave-local-loopback" })
+      );
+    });
     expect(control.status().state).toBe("running");
     fake.releaseStop();
     await clear;
@@ -216,6 +218,50 @@ describe("LocalCollaborationCoordinatorControl", () => {
 
     expect(control.localProfile()?.projectId).toBe("authority-project-2");
     expect(resolveAuthorityProjectId).toHaveBeenLastCalledWith("/test/next-project", "canvas-1");
+  });
+
+  it("serializes a start requested while the active selection is switching", async () => {
+    const fake = fakeControl({ pauseStop: true });
+    const control = new LocalCollaborationCoordinatorControl({
+      safeStorage,
+      projects: {
+        listProjects: async () => [project, nextProject],
+        resolveAuthorityProjectId: async (projectRoot) =>
+          projectRoot === nextProject.rootPath ? "authority-project-2" : authorityProjectId
+      },
+      createController: () => fake.control,
+      allocatePort: async () => 18_787
+    });
+    await control.setCurrentSelection({ projectId: project.projectId, canvasId: "canvas-1" });
+    await control.start();
+
+    const switchSelection = control.setCurrentSelection({
+      projectId: nextProject.projectId,
+      canvasId: "canvas-1"
+    });
+    await vi.waitFor(() => {
+      expect(fake.apply).toHaveBeenLastCalledWith(
+        expect.objectContaining({ action: "stop", profileId: "planweave-local-loopback" })
+      );
+    });
+
+    const startAfterSwitch = control.start();
+    let startSettledBeforeSwitch = false;
+    void startAfterSwitch.then(() => {
+      startSettledBeforeSwitch = true;
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const observedEarlySettlement = startSettledBeforeSwitch;
+    fake.releaseStop();
+    await switchSelection;
+
+    await expect(startAfterSwitch).resolves.toMatchObject({ state: "running" });
+    expect(observedEarlySettlement).toBe(false);
+    expect(control.status().state).toBe("running");
+    expect(control.localProfile()?.projectId).toBe("authority-project-2");
+    expect(fake.apply).toHaveBeenLastCalledWith(
+      expect.objectContaining({ action: "start" })
+    );
   });
 
   it("retries a failed loopback start with a fresh literal-loopback port and controller", async () => {

@@ -654,15 +654,61 @@ describe("collaboration integration scenarios", () => {
     );
 
     const setupCodeInput = screen.getByTestId("people-connect-setup-code");
-    await user.type(setupCodeInput, "pw_setup_test_code");
+    await user.clear(screen.getByTestId("people-connect-server-url"));
+    await user.type(screen.getByTestId("people-connect-server-url"), "https://example.test");
+    const setupCode = `pw_setup_${"A".repeat(43)}`;
+    await user.type(setupCodeInput, setupCode);
     await user.click(screen.getByTestId("people-connect-submit"));
 
     await waitFor(() => {
       expect(redeemCollaborationSetupCode).toHaveBeenCalledWith(
-        expect.objectContaining({ setupCode: "pw_setup_test_code" })
+        expect.objectContaining({ setupCode })
       );
     });
     expect(setupCodeInput).toHaveValue("");
+  });
+
+  it("does not send incomplete setup-code fields to the main process", async () => {
+    const user = userEvent.setup();
+    const redeemCollaborationSetupCode = vi.fn().mockRejectedValue(new Error("raw_ipc_error"));
+    const api = { redeemCollaborationSetupCode } as unknown as PlanWeaveCollaborationApi;
+
+    render(
+      <CollaborationConnectForm
+        api={api}
+        status={{
+          profiles: [],
+          activeProfileId: null,
+          credentialStorage: "available",
+          nonPersistenceWarning: null,
+          session: {
+            phase: "idle",
+            activeProfileId: null,
+            detail: null,
+            lastErrorCode: null,
+            lastErrorMessage: null
+          },
+          workspaceConnection: {
+            schemaVersion: "workspace-setup/v1",
+            status: "local_only",
+            profile: null,
+            workspaceId: null,
+            workspaceDisplayName: null,
+            connectedAt: null,
+            error: null
+          },
+          workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null },
+          updatedAt: "2030-01-01T00:00:00.000Z"
+        }}
+        t={t}
+      />
+    );
+
+    await user.click(screen.getByTestId("people-connect-submit"));
+
+    expect(redeemCollaborationSetupCode).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Enter a valid server URL and setup code.");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("raw_ipc_error");
   });
 
   it("covers members/Hosts and assignment-ready work surfaces", async () => {

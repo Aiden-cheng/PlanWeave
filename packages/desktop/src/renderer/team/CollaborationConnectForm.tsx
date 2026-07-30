@@ -7,7 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { createTranslator } from "../i18n";
-import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
+import {
+  collaborationRedeemSetupCodeInputSchema,
+  type CollaborationStatus,
+  type PlanWeaveCollaborationApi
+} from "../../shared/collaboration.js";
 import { collaborationErrorMessage } from "../collaboration/formatCollaborationError";
 
 export type CollaborationConnectFormProps = {
@@ -96,12 +100,27 @@ export function CollaborationConnectForm({
         const code = setupCodeInput.value.trim();
         // Keep the one-time code out of React state and clear the element before IPC.
         setupCodeInput.value = "";
-        await api.redeemCollaborationSetupCode({
+        const candidate = {
           serverBaseUrl: serverBaseUrl.trim(),
           allowInsecureTransport,
           setupCode: code,
           displayName: displayName.trim() || t("peopleDefaultProfileName")
-        });
+        };
+        const parsed = collaborationRedeemSetupCodeInputSchema.safeParse(candidate);
+        if (!parsed.success) {
+          const invalidFields = new Set(parsed.error.issues.map((issue) => issue.path[0]));
+          const invalidServer = invalidFields.has("serverBaseUrl");
+          const invalidCode = invalidFields.has("setupCode");
+          setError(
+            invalidServer && invalidCode
+              ? t("peopleSetupCodeFieldsInvalid")
+              : invalidServer
+                ? t("peopleServerUrlInvalid")
+                : t("peopleSetupCodeInvalid")
+          );
+          return;
+        }
+        await api.redeemCollaborationSetupCode(parsed.data);
         onConnected?.();
         return;
       }

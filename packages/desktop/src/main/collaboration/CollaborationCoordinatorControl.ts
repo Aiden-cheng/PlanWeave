@@ -85,6 +85,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   private controller: LoopbackServerControlPort | null = null;
   private localPort: number | null = null;
   private operatorToken: string | null = null;
+  private operationQueue: Promise<unknown> = Promise.resolve();
   private readonly vault: OperatorCredentialVault;
 
   private readonly projects: ProjectCatalogPort;
@@ -110,7 +111,20 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     this.allocatePort = options.allocatePort ?? allocateLoopbackPort;
   }
 
-  async setCurrentSelection(input: unknown): Promise<void> {
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const next = this.operationQueue.catch(() => undefined).then(operation);
+    this.operationQueue = next.then(
+      () => undefined,
+      () => undefined
+    );
+    return next;
+  }
+
+  setCurrentSelection(input: unknown): Promise<void> {
+    return this.enqueue(() => this.setCurrentSelectionUnlocked(input));
+  }
+
+  private async setCurrentSelectionUnlocked(input: unknown): Promise<void> {
     const selected = collaborationCurrentSelectionInputSchema.parse(input);
     const projects = (await this.projects.listProjects()).filter((project) => project.projectId === selected.projectId);
     if (projects.length !== 1) throw new Error("local_collaboration_project_selection_ambiguous");
@@ -134,21 +148,27 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
       (this.selection.desktopProjectId !== next.desktopProjectId ||
         this.selection.canvasId !== next.canvasId)
     ) {
-      await this.stop();
+      await this.stopUnlocked();
     }
     this.selection = next;
   }
 
-  async clearCurrentSelection(): Promise<void> {
-    if (this.status().profile) await this.stop();
-    this.selection = null;
+  clearCurrentSelection(): Promise<void> {
+    return this.enqueue(async () => {
+      if (this.status().profile) await this.stopUnlocked();
+      this.selection = null;
+    });
   }
 
   status(): LoopbackServerStatus {
     return this.controller?.status() ?? { profile: null, state: "stopped", startedAt: null, reason: null };
   }
 
-  async start(): Promise<LoopbackServerStatus> {
+  start(): Promise<LoopbackServerStatus> {
+    return this.enqueue(() => this.startUnlocked());
+  }
+
+  private async startUnlocked(): Promise<LoopbackServerStatus> {
     const selection = this.requireSelection();
     await this.ensureOperatorToken();
     const current = this.status();
@@ -170,7 +190,11 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     return lastStatus;
   }
 
-  async stop(): Promise<LoopbackServerStatus> {
+  stop(): Promise<LoopbackServerStatus> {
+    return this.enqueue(() => this.stopUnlocked());
+  }
+
+  private async stopUnlocked(): Promise<LoopbackServerStatus> {
     const status = this.status();
     if (!this.controller || status.profile === null) return status;
     return this.controller.apply({ action: "stop", profileId: status.profile.profileId });
