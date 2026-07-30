@@ -14,7 +14,10 @@ const profile = {
   serverBaseUrl: "http://127.0.0.1:8787/",
   allowInsecureTransport: true
 };
-const expandedScopeLayout = { collapsed: false, collapsedProjectIds: [] };
+const expandedScopeLayout = {
+  collapsed: false,
+  expandedProjectIds: ["desktop-project-1"]
+};
 const onScopeLayoutChange = vi.fn();
 afterEach(cleanup);
 
@@ -198,6 +201,10 @@ describe("LocalCollaborationServerPanel", () => {
     expect(
       await screen.findByRole("checkbox", { name: "Project One / Canvas One" })
     ).toBeInTheDocument();
+    expect(screen.getByTestId("local-collaboration-server-panel")).not.toHaveClass(
+      "rounded-xl",
+      "shadow-sm"
+    );
     await userEvent.click(screen.getByRole("button", { name: "Hide hosted canvas selection" }));
     expect(onLayoutChange).toHaveBeenLastCalledWith({ collapsed: true });
 
@@ -207,7 +214,7 @@ describe("LocalCollaborationServerPanel", () => {
         t={createTranslator("en")}
         projectId="project-1"
         canvasId="canvas-1"
-        scopeLayout={{ collapsed: true, collapsedProjectIds: [] }}
+        scopeLayout={{ collapsed: true, expandedProjectIds: [] }}
         onScopeLayoutChange={onLayoutChange}
       />
     );
@@ -219,7 +226,7 @@ describe("LocalCollaborationServerPanel", () => {
         t={createTranslator("en")}
         projectId="project-1"
         canvasId="canvas-1"
-        scopeLayout={{ collapsed: false, collapsedProjectIds: ["desktop-project-1"] }}
+        scopeLayout={{ collapsed: false, expandedProjectIds: [] }}
         onScopeLayoutChange={onLayoutChange}
       />
     );
@@ -232,6 +239,8 @@ describe("LocalCollaborationServerPanel", () => {
     ).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Show canvases in Project One" }));
-    expect(onLayoutChange).toHaveBeenLastCalledWith({ collapsedProjectIds: [] });
+    expect(onLayoutChange).toHaveBeenLastCalledWith({
+      expandedProjectIds: ["desktop-project-1"]
+    });
   });
 });

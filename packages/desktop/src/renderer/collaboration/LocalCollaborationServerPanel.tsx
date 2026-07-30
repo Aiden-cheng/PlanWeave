@@ -76,22 +76,22 @@ export function LocalCollaborationServerPanel({
   useEffect(() => {
     if (!catalog) return;
     const projectIds = new Set(catalog.projects.map((project) => project.projectId));
-    const validCollapsedProjectIds = scopeLayout.collapsedProjectIds.filter((projectId) =>
+    const validExpandedProjectIds = scopeLayout.expandedProjectIds.filter((projectId) =>
       projectIds.has(projectId)
     );
-    if (validCollapsedProjectIds.length !== scopeLayout.collapsedProjectIds.length) {
-      onScopeLayoutChange({ collapsedProjectIds: validCollapsedProjectIds });
+    if (validExpandedProjectIds.length !== scopeLayout.expandedProjectIds.length) {
+      onScopeLayoutChange({ expandedProjectIds: validExpandedProjectIds });
     }
-  }, [catalog, onScopeLayoutChange, scopeLayout.collapsedProjectIds]);
+  }, [catalog, onScopeLayoutChange, scopeLayout.expandedProjectIds]);
 
   const savedScopeKeys = useMemo(
     () => new Set(catalog ? selectedScopes(catalog).map(scopeKey) : []),
     [catalog]
   );
   const draftScopeKeys = useMemo(() => new Set(draftScopes.map(scopeKey)), [draftScopes]);
-  const collapsedProjectIds = useMemo(
-    () => new Set(scopeLayout.collapsedProjectIds),
-    [scopeLayout.collapsedProjectIds]
+  const expandedProjectIds = useMemo(
+    () => new Set(scopeLayout.expandedProjectIds),
+    [scopeLayout.expandedProjectIds]
   );
   const scopeChanged =
     savedScopeKeys.size !== draftScopeKeys.size ||
@@ -127,13 +127,13 @@ export function LocalCollaborationServerPanel({
   };
 
   const toggleProject = (projectId: string) => {
-    const next = new Set(scopeLayout.collapsedProjectIds);
+    const next = new Set(scopeLayout.expandedProjectIds);
     if (next.has(projectId)) {
       next.delete(projectId);
     } else {
       next.add(projectId);
     }
-    onScopeLayoutChange({ collapsedProjectIds: [...next] });
+    onScopeLayoutChange({ expandedProjectIds: [...next] });
   };
 
   const applyScopes = async () => {
@@ -200,20 +200,20 @@ export function LocalCollaborationServerPanel({
 
   return (
     <section
-      className="overflow-hidden rounded-xl border border-border/70 bg-background shadow-sm"
+      className="bg-background"
       data-testid="local-collaboration-server-panel"
       aria-labelledby="local-collaboration-server-title"
     >
-      <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex min-w-0 gap-3">
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
-            <LaptopIcon className="size-4" aria-hidden="true" />
+      <div className="flex flex-col gap-5 px-1 pb-6 pt-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 gap-4">
+          <div className="mt-0.5 shrink-0 text-emerald-700 dark:text-emerald-300">
+            <LaptopIcon className="size-5" aria-hidden="true" />
           </div>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h2
                 id="local-collaboration-server-title"
-                className="text-sm font-semibold text-text-strong"
+                className="text-base font-semibold tracking-tight text-text-strong"
               >
                 {t("localServerTitle")}
               </h2>
@@ -231,7 +231,7 @@ export function LocalCollaborationServerPanel({
                 {statusLabel}
               </span>
             </div>
-            <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
+            <p className="mt-1.5 max-w-2xl text-xs leading-5 text-muted-foreground">
               {t("localServerDescription")}
             </p>
           </div>
@@ -262,10 +262,10 @@ export function LocalCollaborationServerPanel({
         </div>
       </div>
 
-      <div className="border-t border-border/60 bg-muted/15 px-4 py-3">
+      <div className="border-y border-border/70 px-1 py-5">
         <button
           type="button"
-          className="flex w-full items-start gap-2 rounded-md text-left outline-none transition-colors hover:text-text-strong focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex w-full items-start gap-3 text-left outline-none transition-colors hover:text-text-strong focus-visible:ring-2 focus-visible:ring-ring"
           aria-expanded={!scopeLayout.collapsed}
           aria-controls="local-collaboration-scope-catalog"
           aria-label={t(
@@ -274,19 +274,25 @@ export function LocalCollaborationServerPanel({
           onClick={() => onScopeLayoutChange({ collapsed: !scopeLayout.collapsed })}
         >
           {scopeLayout.collapsed ? (
-            <ChevronRightIcon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            <ChevronRightIcon
+              className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+              aria-hidden="true"
+            />
           ) : (
-            <ChevronDownIcon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            <ChevronDownIcon
+              className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+              aria-hidden="true"
+            />
           )}
           <span className="min-w-0 flex-1">
-            <span className="block text-xs font-semibold text-text-strong">
+            <span className="block text-sm font-semibold text-text-strong">
               {t("localServerScopeTitle")}
             </span>
             <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground">
               {t("localServerScopeHint")}
             </span>
           </span>
-          <span className="shrink-0 rounded-full border border-border/70 bg-background px-2.5 py-1 text-[10px] font-medium text-muted-foreground">
+          <span className="shrink-0 text-xs font-medium tabular-nums text-muted-foreground">
             {t("localServerSelectedCount").replace("{count}", String(draftScopes.length))}
           </span>
         </button>
@@ -294,20 +300,17 @@ export function LocalCollaborationServerPanel({
         {!scopeLayout.collapsed ? (
           <div
             id="local-collaboration-scope-catalog"
-            className="mt-3 grid gap-2"
+            className="mt-5 border-t border-border/70"
             data-testid="local-collaboration-scope-catalog"
           >
             {catalog?.projects.map((project, projectIndex) => {
-              const projectCollapsed = collapsedProjectIds.has(project.projectId);
+              const projectCollapsed = !expandedProjectIds.has(project.projectId);
               const projectContentId = `local-collaboration-project-${projectIndex}`;
               return (
-                <div
-                  key={project.projectId}
-                  className="overflow-hidden rounded-lg border border-border/60 bg-background"
-                >
+                <div key={project.projectId} className="border-b border-border/70">
                   <button
                     type="button"
-                    className={`flex w-full items-center gap-2 px-3 py-2 text-left outline-none transition-colors hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${projectCollapsed ? "" : "border-b border-border/50"}`}
+                    className="flex w-full items-center gap-3 px-1 py-4 text-left outline-none transition-colors hover:bg-muted/20 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                     aria-expanded={!projectCollapsed}
                     aria-controls={projectContentId}
                     aria-label={t(
@@ -326,10 +329,10 @@ export function LocalCollaborationServerPanel({
                         aria-hidden="true"
                       />
                     )}
-                    <span className="min-w-0 flex-1 truncate text-xs font-medium text-text-strong">
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-text-strong">
                       {project.name}
                     </span>
-                    <span className="text-[10px] tabular-nums text-muted-foreground">
+                    <span className="text-xs tabular-nums text-muted-foreground">
                       {
                         project.canvases.filter((canvas) =>
                           draftScopeKeys.has(
@@ -341,14 +344,17 @@ export function LocalCollaborationServerPanel({
                     </span>
                   </button>
                   {!projectCollapsed ? (
-                    <div id={projectContentId} className="divide-y divide-border/40">
+                    <div
+                      id={projectContentId}
+                      className="divide-y divide-border/40 border-t border-border/50 bg-muted/10"
+                    >
                       {project.canvases.map((canvas) => {
                         const scope = { projectId: project.projectId, canvasId: canvas.canvasId };
                         const checked = draftScopeKeys.has(scopeKey(scope));
                         return (
                           <label
                             key={canvas.canvasId}
-                            className="flex cursor-pointer items-center gap-3 px-3 py-2.5 hover:bg-muted/30"
+                            className="flex cursor-pointer items-center gap-3 py-3 pl-8 pr-1 hover:bg-muted/30"
                           >
                             <input
                               type="checkbox"
@@ -358,7 +364,7 @@ export function LocalCollaborationServerPanel({
                               onChange={() => toggleScope(scope)}
                               aria-label={`${project.name} / ${canvas.name}`}
                             />
-                            <span className="min-w-0 flex-1 truncate text-xs text-text-strong">
+                            <span className="min-w-0 flex-1 truncate text-sm text-text-strong">
                               {canvas.name}
                             </span>
                             {canvas.current ? (
@@ -380,7 +386,7 @@ export function LocalCollaborationServerPanel({
               );
             })}
             {catalog && catalog.projects.length === 0 ? (
-              <p className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
+              <p className="border-b border-border/70 py-8 text-center text-sm text-muted-foreground">
                 {t("localServerNoProjects")}
               </p>
             ) : null}
@@ -388,7 +394,7 @@ export function LocalCollaborationServerPanel({
         ) : null}
 
         {running && scopeChanged ? (
-          <div className="mt-3 flex items-center justify-between gap-3 rounded-lg bg-amber-500/10 px-3 py-2">
+          <div className="mt-4 flex items-center justify-between gap-3 border-l-2 border-amber-500 bg-amber-500/5 px-3 py-2.5">
             <span className="text-[11px] text-amber-900 dark:text-amber-200">
               {t("localServerScopeChanged")}
             </span>
@@ -404,7 +410,7 @@ export function LocalCollaborationServerPanel({
         ) : null}
 
         {running && currentCatalogCanvas?.selected ? (
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-border/50 pt-3">
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-border/50 pt-4">
             <div>
               <div className="text-[11px] font-medium text-text-strong">
                 {t("localServerCurrentCanvasReady")}
@@ -434,7 +440,7 @@ export function LocalCollaborationServerPanel({
 
       {error ? (
         <div
-          className="border-t border-destructive/20 bg-destructive/5 px-4 py-2.5 text-xs text-destructive"
+          className="border-b border-destructive/30 bg-destructive/5 px-1 py-3 text-xs text-destructive"
           role="alert"
         >
           {error}

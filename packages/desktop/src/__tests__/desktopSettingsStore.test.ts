@@ -119,6 +119,11 @@ describe("DesktopSettingsStore", () => {
   });
 
   it("persists collaboration scope disclosure settings", async () => {
+    expect(defaultDesktopSettings.layout.collaborationScope).toEqual({
+      collapsed: true,
+      expandedProjectIds: []
+    });
+
     const home = await tempHome();
     const store = testStore(join(home, "config", "desktop-settings.json"));
 
@@ -126,7 +131,7 @@ describe("DesktopSettingsStore", () => {
       layout: {
         collaborationScope: {
           collapsed: true,
-          collapsedProjectIds: ["project-a", "project-a", "project-b"]
+          expandedProjectIds: ["project-a", "project-a", "project-b"]
         }
       }
     });
@@ -135,7 +140,34 @@ describe("DesktopSettingsStore", () => {
       layout: {
         collaborationScope: {
           collapsed: true,
-          collapsedProjectIds: ["project-a", "project-b"]
+          expandedProjectIds: ["project-a", "project-b"]
+        }
+      }
+    });
+  });
+
+  it("resets the superseded disclosure shape to the all-collapsed default", async () => {
+    const home = await tempHome();
+    const settingsFile = join(home, "desktop-settings.json");
+    await writeFile(
+      settingsFile,
+      JSON.stringify({
+        ...defaultDesktopSettings,
+        layout: {
+          ...defaultDesktopSettings.layout,
+          collaborationScope: {
+            collapsed: false,
+            collapsedProjectIds: []
+          }
+        }
+      })
+    );
+
+    await expect(testStore(settingsFile).read()).resolves.toMatchObject({
+      layout: {
+        collaborationScope: {
+          collapsed: true,
+          expandedProjectIds: []
         }
       }
     });

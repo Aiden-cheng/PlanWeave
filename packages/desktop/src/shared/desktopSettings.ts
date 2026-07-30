@@ -47,7 +47,7 @@ export type DesktopUiSettings = {
     };
     collaborationScope: {
       collapsed: boolean;
-      collapsedProjectIds: string[];
+      expandedProjectIds: string[];
     };
   };
   review: {
@@ -154,8 +154,8 @@ export const defaultDesktopSettings: DesktopUiSettings = {
       position: null
     },
     collaborationScope: {
-      collapsed: false,
-      collapsedProjectIds: []
+      collapsed: true,
+      expandedProjectIds: []
     }
   },
   review: {
@@ -484,17 +484,25 @@ export function normalizeDesktopSettingsPatch(value: unknown): DesktopSettingsPa
     const autoRunPosition = isRecord(value.layout.autoRunControl)
       ? normalizeFloatingControlPosition(value.layout.autoRunControl.position)
       : undefined;
-    const collapsedProjectIds = isRecord(value.layout.collaborationScope)
-      ? stringArray(value.layout.collaborationScope.collapsedProjectIds)
+    const collaborationScopeSource = isRecord(value.layout.collaborationScope)
+      ? value.layout.collaborationScope
       : undefined;
-    const collaborationScope = isRecord(value.layout.collaborationScope)
-      ? {
-          ...(typeof value.layout.collaborationScope.collapsed === "boolean"
-            ? { collapsed: value.layout.collaborationScope.collapsed }
-            : {}),
-          ...(collapsedProjectIds ? { collapsedProjectIds: [...new Set(collapsedProjectIds)] } : {})
-        }
+    const legacyCollaborationScope =
+      collaborationScopeSource !== undefined &&
+      Object.hasOwn(collaborationScopeSource, "collapsedProjectIds") &&
+      !Object.hasOwn(collaborationScopeSource, "expandedProjectIds");
+    const expandedProjectIds = collaborationScopeSource
+      ? stringArray(collaborationScopeSource.expandedProjectIds)
       : undefined;
+    const collaborationScope =
+      collaborationScopeSource && !legacyCollaborationScope
+        ? {
+            ...(typeof collaborationScopeSource.collapsed === "boolean"
+              ? { collapsed: collaborationScopeSource.collapsed }
+              : {}),
+            ...(expandedProjectIds ? { expandedProjectIds: [...new Set(expandedProjectIds)] } : {})
+          }
+        : undefined;
     const hasCollaborationScope =
       collaborationScope !== undefined && Object.keys(collaborationScope).length > 0;
     if (leftSidebar || rightSidebar || autoRunPosition !== undefined || hasCollaborationScope) {

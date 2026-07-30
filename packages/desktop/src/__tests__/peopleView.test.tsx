@@ -7,7 +7,7 @@ import { createTranslator } from "../renderer/i18n";
 import { PeopleView } from "../renderer/views/PeopleView";
 import { cleanupRendererTestEnvironment } from "./helpers/rendererTestEnvironment";
 
-const scopeLayout = { collapsed: false, collapsedProjectIds: [] };
+const scopeLayout = { collapsed: true, expandedProjectIds: [] };
 const onScopeLayoutChange = () => undefined;
 
 afterEach(cleanupRendererTestEnvironment);
