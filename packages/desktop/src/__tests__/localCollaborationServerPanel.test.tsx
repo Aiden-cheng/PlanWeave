@@ -14,11 +14,20 @@ const profile = {
   serverBaseUrl: "http://127.0.0.1:8787/",
   allowInsecureTransport: true
 };
-const connectionProfileId = "planweave-local-project-1";
-
 afterEach(cleanup);
 
 function api(overrides: Partial<PlanWeaveCollaborationApi> = {}): PlanWeaveCollaborationApi {
+  const catalog = {
+    projects: [
+      {
+        projectId: "desktop-project-1",
+        name: "Project One",
+        selectedCanvasCount: 1,
+        canvases: [{ canvasId: "canvas-1", name: "Canvas One", selected: true, current: true }]
+      }
+    ],
+    selectedCount: 1
+  };
   return {
     getLocalCollaborationServerStatus: vi
       .fn()
@@ -37,6 +46,8 @@ function api(overrides: Partial<PlanWeaveCollaborationApi> = {}): PlanWeaveColla
       .mockResolvedValue([
         { workspaceId: "workspace-1", projectId: "project-1", canvasId: "canvas-1" }
       ]),
+    getLocalCollaborationScopeCatalog: vi.fn().mockResolvedValue(catalog),
+    setLocalCollaborationTrustedScopes: vi.fn().mockResolvedValue(catalog),
     bootstrapCollaborationOwner: vi.fn().mockResolvedValue({
       deviceCredentialPersistence: "persisted",
       nonPersistenceWarning: null
@@ -53,6 +64,55 @@ function api(overrides: Partial<PlanWeaveCollaborationApi> = {}): PlanWeaveColla
 }
 
 describe("LocalCollaborationServerPanel", () => {
+  it("requires an explicit canvas selection before starting", async () => {
+    const emptyCatalog = {
+      projects: [
+        {
+          projectId: "desktop-project-1",
+          name: "Project One",
+          selectedCanvasCount: 0,
+          canvases: [{ canvasId: "canvas-1", name: "Canvas One", selected: false, current: true }]
+        }
+      ],
+      selectedCount: 0
+    };
+    const selectedCatalog = {
+      ...emptyCatalog,
+      selectedCount: 1,
+      projects: [
+        {
+          ...emptyCatalog.projects[0],
+          selectedCanvasCount: 1,
+          canvases: [{ ...emptyCatalog.projects[0]!.canvases[0]!, selected: true }]
+        }
+      ]
+    };
+    const collaborationApi = api({
+      getLocalCollaborationScopeCatalog: vi.fn().mockResolvedValue(emptyCatalog),
+      setLocalCollaborationTrustedScopes: vi.fn().mockResolvedValue(selectedCatalog)
+    });
+    render(
+      <LocalCollaborationServerPanel
+        api={collaborationApi}
+        t={createTranslator("en")}
+        projectId="project-1"
+        canvasId="canvas-1"
+      />
+    );
+
+    const start = await screen.findByRole("button", { name: "Start with 0 canvases" });
+    expect(start).toBeDisabled();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Project One / Canvas One" }));
+    await userEvent.click(screen.getByRole("button", { name: "Start with 1 canvases" }));
+
+    await waitFor(() =>
+      expect(collaborationApi.setLocalCollaborationTrustedScopes).toHaveBeenCalledWith({
+        scopes: [{ projectId: "desktop-project-1", canvasId: "canvas-1" }]
+      })
+    );
+    expect(collaborationApi.startLocalCollaborationServer).toHaveBeenCalled();
+  });
+
   it("starts, loads trusted scopes, and registers the current canvas", async () => {
     const collaborationApi = api({
       getLocalCollaborationServerStatus: vi
@@ -69,23 +129,24 @@ describe("LocalCollaborationServerPanel", () => {
       <LocalCollaborationServerPanel
         api={collaborationApi}
         t={createTranslator("en")}
-        profileId={connectionProfileId}
         projectId="project-1"
         canvasId="canvas-1"
       />
     );
-    await userEvent.click(await screen.findByRole("button", { name: "Start local server" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Start with 1 canvases" }));
     await waitFor(() =>
       expect(collaborationApi.listLocalCollaborationTrustedScopes).toHaveBeenCalled()
     );
     await userEvent.click(screen.getByRole("button", { name: "Enable current canvas" }));
     await waitFor(() =>
-      expect(collaborationApi.registerLocalCollaborationCurrentProject).toHaveBeenCalled()
+      expect(collaborationApi.registerLocalCollaborationCurrentProject).toHaveBeenCalledWith({
+        ownerDisplayName: "Local owner"
+      })
     );
     expect(screen.getByText(/Registered:/)).toHaveTextContent("2030-01-01T00:00:01.000Z");
   });
 
-  it("explains when registration requires owner initialization", async () => {
+  it("surfaces registration failures without retrying from the renderer", async () => {
     const collaborationApi = api({
       getLocalCollaborationServerStatus: vi.fn().mockResolvedValue({
         profile,
@@ -101,104 +162,14 @@ describe("LocalCollaborationServerPanel", () => {
       <LocalCollaborationServerPanel
         api={collaborationApi}
         t={createTranslator("en")}
-        profileId={connectionProfileId}
         projectId="project-1"
         canvasId="canvas-1"
       />
     );
     await userEvent.click(await screen.findByRole("button", { name: "Enable current canvas" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Initialize an owner before registering the current canvas."
+      "local_collaboration_owner_initialization_required"
     );
-  });
-
-  it("initializes the local owner and retries registration after an Electron-wrapped owner error", async () => {
-    const collaborationApi = api({
-      getLocalCollaborationServerStatus: vi.fn().mockResolvedValue({
-        profile,
-        state: "running",
-        startedAt: "2030-01-01T00:00:00.000Z",
-        reason: null
-      }),
-      registerLocalCollaborationCurrentProject: vi
-        .fn()
-        .mockRejectedValueOnce(
-          new Error(
-            "Error invoking remote method 'planweave-collaboration:registerLocalCurrentProject': Error: local_collaboration_owner_initialization_required"
-          )
-        )
-        .mockResolvedValue({
-          workspaceId: "workspace-1",
-          projectId: "project-1",
-          canvasId: "canvas-1",
-          profileId: profile.profileId,
-          registeredAt: "2030-01-01T00:00:01.000Z"
-        })
-    });
-    render(
-      <LocalCollaborationServerPanel
-        api={collaborationApi}
-        t={createTranslator("en")}
-        profileId={connectionProfileId}
-        projectId="project-1"
-        canvasId="canvas-1"
-      />
-    );
-    await userEvent.click(await screen.findByRole("button", { name: "Enable current canvas" }));
-    await waitFor(() => {
-      expect(collaborationApi.bootstrapCollaborationOwner).toHaveBeenCalledWith({
-        profileId: connectionProfileId,
-        request: { displayName: "Local owner" }
-      });
-      expect(collaborationApi.registerLocalCollaborationCurrentProject).toHaveBeenCalledTimes(2);
-    });
-    expect(screen.getByText(/Registered:/)).toBeInTheDocument();
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-
-  it("reinitializes the local owner when the saved profile belongs to another project", async () => {
-    const collaborationApi = api({
-      getLocalCollaborationServerStatus: vi.fn().mockResolvedValue({
-        profile,
-        state: "running",
-        startedAt: "2030-01-01T00:00:00.000Z",
-        reason: null
-      }),
-      registerLocalCollaborationCurrentProject: vi
-        .fn()
-        .mockRejectedValueOnce(
-          new Error(
-            "Error invoking remote method 'planweave-collaboration:registerLocalCurrentProject': Error: access_capability_denied"
-          )
-        )
-        .mockResolvedValue({
-          workspaceId: "workspace-2",
-          projectId: "project-2",
-          canvasId: "canvas-2",
-          profileId: profile.profileId,
-          registeredAt: "2030-01-01T00:00:01.000Z"
-        })
-    });
-
-    render(
-      <LocalCollaborationServerPanel
-        api={collaborationApi}
-        t={createTranslator("en")}
-        profileId={connectionProfileId}
-        projectId="project-2"
-        canvasId="canvas-2"
-      />
-    );
-    await userEvent.click(await screen.findByRole("button", { name: "Enable current canvas" }));
-
-    await waitFor(() => {
-      expect(collaborationApi.bootstrapCollaborationOwner).toHaveBeenCalledWith({
-        profileId: connectionProfileId,
-        request: { displayName: "Local owner" }
-      });
-      expect(collaborationApi.registerLocalCollaborationCurrentProject).toHaveBeenCalledTimes(2);
-    });
-    expect(screen.getByText(/Registered:/)).toBeInTheDocument();
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(collaborationApi.registerLocalCollaborationCurrentProject).toHaveBeenCalledTimes(1);
   });
 });

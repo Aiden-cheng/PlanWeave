@@ -10,6 +10,7 @@ import { useCollaborationStatus } from "./hooks/useCollaborationStatus";
 import { useDetectedAgents } from "./hooks/useDetectedAgents";
 import { useDesktopSettingsBridge } from "./hooks/useDesktopSettingsBridge";
 import { useSharedCanvasCommands } from "./hooks/useSharedCanvasCommands";
+import { isCollaborationSessionConnected } from "./collaboration/sessionState";
 
 function supportedLanguage(value: string | null): Language {
   return value === "en" || value === "zh-CN" ? value : "zh-CN";
@@ -103,9 +104,7 @@ export function TaskInspectorWindow() {
       ) ?? null
     );
   }, [collaborationStatus]);
-  const sessionConnected =
-    collaborationStatus?.session.phase === "connected" ||
-    collaborationStatus?.session.phase === "ready";
+  const sessionConnected = isCollaborationSessionConnected(collaborationStatus);
   const sharedProjectId = activeCollaborationProfile?.projectId ?? null;
   const graphProjectId = graph?.projectId ?? null;
   const sharedCanvasEnabled =
@@ -117,6 +116,7 @@ export function TaskInspectorWindow() {
     api: collaborationBridge,
     canvasId,
     enabled: sharedCanvasEnabled,
+    sessionConnected,
     profileId: activeCollaborationProfile?.profileId ?? null,
     selectedProjectId: sharedProjectId,
     activeProjectId: sharedProjectId,

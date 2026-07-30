@@ -20,6 +20,7 @@ import {
 import type { PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
 import { useCollaborationReadModels } from "./useCollaborationReadModels";
 import { useCollaborationStatus } from "./useCollaborationStatus";
+import { isCollaborationSessionConnected } from "../collaboration/sessionState";
 
 export type UseActivityPanelControllerArgs = {
   /** When set, list activity for this work item; otherwise project-wide. */
@@ -77,8 +78,7 @@ export function useActivityPanelController(
     manageActiveProject: false
   });
 
-  const sessionConnected =
-    status?.session.phase === "connected" || status?.session.phase === "ready";
+  const sessionConnected = isCollaborationSessionConnected(status);
   const workKey = args.workItem ? workItemKey(args.workItem) : "project";
 
   const [items, setItems] = useState<ActivityRecord[]>([]);

@@ -42,6 +42,7 @@ function normalizeSelectionIds(selection: OnSelectionChangeParams): string[] {
  */
 export function useCollaborationCanvasPresence(input: {
   enabled: boolean;
+  sessionConnected: boolean;
   canvasId: string | null;
   profileId: string | null;
   selectedProjectId: string | null;
@@ -52,6 +53,7 @@ export function useCollaborationCanvasPresence(input: {
   const api = input.api === undefined ? collaborationBridge : input.api;
   const scopeEnabled =
     input.enabled &&
+    input.sessionConnected &&
     input.selectedProjectId !== null &&
     input.selectedProjectId === input.activeProjectId;
   const labels = useMemo<CanvasPresenceLabels>(

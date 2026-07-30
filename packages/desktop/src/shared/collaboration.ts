@@ -96,6 +96,22 @@ import type {
   CollaborationWorkAuthorityScopeInput,
   CollaborationWorkItemInput
 } from "./collaborationReadModels.js";
+import type {
+  LocalCollaborationRegistrationInput,
+  LocalCollaborationScopeCatalog,
+  LocalCollaborationScopeSelectionInput
+} from "./localCollaborationScopes.js";
+export {
+  localCollaborationRegistrationInputSchema,
+  localCollaborationScopeSchema,
+  localCollaborationScopeSelectionInputSchema,
+  type LocalCollaborationCanvasCatalogItem,
+  type LocalCollaborationProjectCatalogItem,
+  type LocalCollaborationRegistrationInput,
+  type LocalCollaborationScope,
+  type LocalCollaborationScopeCatalog,
+  type LocalCollaborationScopeSelectionInput
+} from "./localCollaborationScopes.js";
 
 /** Whether the OS-backed encryptor can persist device credentials across restarts. */
 export type CollaborationCredentialStorage = "available" | "unavailable";
@@ -590,10 +606,16 @@ export type PlanWeaveCollaborationApi = {
   setCollaborationCurrentSelection: (input: CollaborationCurrentSelectionInput) => Promise<void>;
   clearCollaborationCurrentSelection: () => Promise<void>;
   getLocalCollaborationServerStatus: () => Promise<LoopbackServerStatus>;
+  getLocalCollaborationScopeCatalog: () => Promise<LocalCollaborationScopeCatalog>;
+  setLocalCollaborationTrustedScopes: (
+    input: LocalCollaborationScopeSelectionInput
+  ) => Promise<LocalCollaborationScopeCatalog>;
   startLocalCollaborationServer: () => Promise<LoopbackServerStatus>;
   stopLocalCollaborationServer: () => Promise<LoopbackServerStatus>;
   listLocalCollaborationTrustedScopes: () => Promise<readonly LoopbackTrustedProjectScope[]>;
-  registerLocalCollaborationCurrentProject: () => Promise<LoopbackProjectRegistrationView>;
+  registerLocalCollaborationCurrentProject: (
+    input?: LocalCollaborationRegistrationInput
+  ) => Promise<LoopbackProjectRegistrationView>;
   listCollaborationMembers: (input?: CollaborationPageQueryInput) => Promise<HumanMemberPage>;
   listCollaborationDevices: (input?: CollaborationDeviceListQueryInput) => Promise<HumanDevicePage>;
   listCollaborationInvitations: (

@@ -46,7 +46,7 @@ const view: CurrentCanvasAccessView = {
 };
 
 describe("useCurrentCanvasAccess", () => {
-  it("loads access controls for an explicitly initialized local collaboration session", async () => {
+  it("does not load access controls until a prepared local session is connected", async () => {
     const getCurrentCanvasAccess = vi.fn().mockResolvedValue(view);
     const api: CurrentCanvasAccessApi = {
       getCurrentCanvasAccess,
@@ -64,8 +64,9 @@ describe("useCurrentCanvasAccess", () => {
       })
     );
 
-    await waitFor(() => expect(result.current.view).toEqual(view));
-    expect(getCurrentCanvasAccess).toHaveBeenCalledWith({ canvasId: scope.canvasId });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.view).toBeNull();
+    expect(getCurrentCanvasAccess).not.toHaveBeenCalled();
   });
 
   it("uses the matching project revision and refreshes after a CAS conflict", async () => {

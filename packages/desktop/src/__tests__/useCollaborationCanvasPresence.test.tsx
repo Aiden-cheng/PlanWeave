@@ -41,6 +41,26 @@ const selection: OnSelectionChangeParams = {
 };
 
 describe("useCollaborationCanvasPresence", () => {
+  it("does not start presence before collaboration is connected", async () => {
+    const fixture = bridgeFixture();
+
+    renderHook(() =>
+      useCollaborationCanvasPresence({
+        api: fixture.api,
+        canvasId: "canvas-main",
+        enabled: true,
+        sessionConnected: false,
+        profileId: "profile-1",
+        selectedProjectId: "project-1",
+        activeProjectId: "project-1",
+        t
+      })
+    );
+    await act(async () => Promise.resolve());
+
+    expect(fixture.api.startCollaborationPresence).not.toHaveBeenCalled();
+  });
+
   it("publishes selection only on change and coalesces pointer updates to 20Hz", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);
@@ -56,6 +76,7 @@ describe("useCollaborationCanvasPresence", () => {
         api: fixture.api,
         canvasId: "canvas-main",
         enabled: true,
+        sessionConnected: true,
         profileId: "profile-1",
         selectedProjectId: "project-1",
         activeProjectId: "project-1",
@@ -103,6 +124,7 @@ describe("useCollaborationCanvasPresence", () => {
           api: fixture.api,
           canvasId: "canvas-main",
           enabled,
+          sessionConnected: true,
           profileId: "profile-1",
           selectedProjectId: "project-1",
           activeProjectId: "project-1",
@@ -147,6 +169,7 @@ describe("useCollaborationCanvasPresence", () => {
           api: fixture.api,
           canvasId: "default",
           enabled: true,
+          sessionConnected: true,
           profileId: "profile-1",
           selectedProjectId: "project-a",
           activeProjectId,

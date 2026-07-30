@@ -194,6 +194,12 @@ describe("desktop IPC contract", () => {
     expect(collaborationInvokeChannels.getLocalCollaborationServerStatus).toBe(
       "planweave-collaboration:getLocalServerStatus"
     );
+    expect(collaborationInvokeChannels.getLocalCollaborationScopeCatalog).toBe(
+      "planweave-collaboration:getLocalScopeCatalog"
+    );
+    expect(collaborationInvokeChannels.setLocalCollaborationTrustedScopes).toBe(
+      "planweave-collaboration:setLocalTrustedScopes"
+    );
     expect(collaborationInvokeChannels.startLocalCollaborationServer).toBe(
       "planweave-collaboration:startLocalServer"
     );
@@ -293,10 +299,12 @@ describe("desktop IPC contract", () => {
   });
 
   it("keeps local collaboration selection opaque at the renderer boundary", () => {
-    expect(collaborationCurrentSelectionInputSchema.parse({
-      projectId: "project-1",
-      canvasId: "canvas-1"
-    })).toEqual({ projectId: "project-1", canvasId: "canvas-1" });
+    expect(
+      collaborationCurrentSelectionInputSchema.parse({
+        projectId: "project-1",
+        canvasId: "canvas-1"
+      })
+    ).toEqual({ projectId: "project-1", canvasId: "canvas-1" });
     expect(() =>
       collaborationCurrentSelectionInputSchema.parse({
         projectId: "project-1",

@@ -352,16 +352,11 @@ describe("CollaborationReadModelController", () => {
     const hostIds = controller.getSnapshot().hosts.map((host) => host.hostId);
     expect(hostIds).toHaveLength(4);
     expect(new Set(hostIds)).toEqual(
-      new Set([
-        "host-assigned-1",
-        "host-assigned-2",
-        "host-eligible-1",
-        "host-eligible-2"
-      ])
+      new Set(["host-assigned-1", "host-assigned-2", "host-eligible-1", "host-eligible-2"])
     );
-    expect(controller.getSnapshot().hosts.find((host) => host.hostId === "host-assigned-1")).toEqual(
-      expect.objectContaining({ capabilities: ["acp", "shell"] })
-    );
+    expect(
+      controller.getSnapshot().hosts.find((host) => host.hostId === "host-assigned-1")
+    ).toEqual(expect.objectContaining({ capabilities: ["acp", "shell"] }));
     controller.dispose();
   });
 
@@ -397,7 +392,9 @@ describe("CollaborationReadModelController", () => {
       profileId: "profile-demo-001",
       projectId: "project-demo-001"
     });
-    expect(controller.getSnapshot().assignmentsByWorkItem[workItemKey(block.workItem)]).toBeTruthy();
+    expect(
+      controller.getSnapshot().assignmentsByWorkItem[workItemKey(block.workItem)]
+    ).toBeTruthy();
     expect(new Set(controller.getSnapshot().hosts.map((host) => host.hostId))).toEqual(
       new Set(["host-assigned-1", "host-eligible-1"])
     );
@@ -848,6 +845,30 @@ describe("CollaborationReadModelController", () => {
 
     expect(controller.getSnapshot().syncPhase).toBe("auth_expired");
     expect(controller.getSnapshot().lastError?.code).toBe("human_device_revoked");
+    controller.dispose();
+  });
+
+  it("treats a prepared session as disconnected until the client connects", async () => {
+    const mock = createMockApi();
+    const controller = new CollaborationReadModelController({ api: mock.api });
+    await controller.setActiveProject({
+      profileId: "profile-demo-001",
+      projectId: "project-demo-001"
+    });
+
+    controller.handleStatusForTests(
+      idleStatus({
+        session: {
+          phase: "ready",
+          activeProfileId: "profile-demo-001",
+          detail: "workspace_selected",
+          lastErrorCode: null,
+          lastErrorMessage: null
+        }
+      })
+    );
+
+    expect(controller.getSnapshot().syncPhase).toBe("disconnected");
     controller.dispose();
   });
 

@@ -530,7 +530,7 @@ export type DesktopBridgeApi = {
   getAutoRunRetrospective(
     ref: DesktopCanvasReference,
     runId: string
-  ): Promise<DesktopAutoRunRetrospectiveSummary>;
+  ): Promise<DesktopAutoRunRetrospectiveSummary | null>;
   getLatestAutoRunRetrospective(
     ref: DesktopCanvasReference
   ): Promise<DesktopAutoRunRetrospectiveSummary | null>;

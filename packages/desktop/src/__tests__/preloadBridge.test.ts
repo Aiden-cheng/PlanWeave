@@ -387,7 +387,7 @@ describe("preload bridge invocation", () => {
         options: { tmuxEnabled: false },
         error: null,
         startedAt: "2026-06-16T00:00:00.000Z",
-        updatedAt: "2026-06-16T00:00:01.000Z",
+        updatedAt: "2026-06-16T00:00:01.000Z"
       },
       currentRef: "T-001#B-001",
       latestRecordId: null,
@@ -538,16 +538,16 @@ describe("preload bridge invocation", () => {
       progress: null,
       update: { version: "0.1.2", releaseDate: null, releaseName: null },
       updatedAt: "2026-06-19T00:00:01.000Z",
-    workspaceConnection: {
-      schemaVersion: "workspace-setup/v1",
-      status: "local_only",
-      profile: null,
-      workspaceId: null,
-      workspaceDisplayName: null,
-      connectedAt: null,
-      error: null
-    },
-    workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
+      workspaceConnection: {
+        schemaVersion: "workspace-setup/v1",
+        status: "local_only",
+        profile: null,
+        workspaceId: null,
+        workspaceDisplayName: null,
+        connectedAt: null,
+        error: null
+      },
+      workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
     };
     electronMock.ipcRenderer.invoke.mockResolvedValue(state);
 
@@ -669,16 +669,16 @@ describe("preload bridge invocation", () => {
       },
       downloadUrl: "https://github.com/openai/tunnel-client/releases/latest",
       updatedAt: "2026-06-19T00:00:00.000Z",
-    workspaceConnection: {
-      schemaVersion: "workspace-setup/v1",
-      status: "local_only",
-      profile: null,
-      workspaceId: null,
-      workspaceDisplayName: null,
-      connectedAt: null,
-      error: null
-    },
-    workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
+      workspaceConnection: {
+        schemaVersion: "workspace-setup/v1",
+        status: "local_only",
+        profile: null,
+        workspaceId: null,
+        workspaceDisplayName: null,
+        connectedAt: null,
+        error: null
+      },
+      workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
     };
     electronMock.ipcRenderer.invoke.mockResolvedValue(status);
 
@@ -766,16 +766,16 @@ describe("preload bridge invocation", () => {
         lastErrorMessage: null
       },
       updatedAt: "2026-07-25T00:00:00.000Z",
-    workspaceConnection: {
-      schemaVersion: "workspace-setup/v1",
-      status: "local_only",
-      profile: null,
-      workspaceId: null,
-      workspaceDisplayName: null,
-      connectedAt: null,
-      error: null
-    },
-    workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
+      workspaceConnection: {
+        schemaVersion: "workspace-setup/v1",
+        status: "local_only",
+        profile: null,
+        workspaceId: null,
+        workspaceDisplayName: null,
+        connectedAt: null,
+        error: null
+      },
+      workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
     };
     electronMock.ipcRenderer.invoke.mockResolvedValue(status);
 
@@ -842,10 +842,14 @@ describe("preload bridge invocation", () => {
     await api.setCollaborationCurrentSelection({ projectId: "project-1", canvasId: "default" });
     await api.clearCollaborationCurrentSelection();
     await api.getLocalCollaborationServerStatus();
+    await api.getLocalCollaborationScopeCatalog();
+    await api.setLocalCollaborationTrustedScopes({
+      scopes: [{ projectId: "project-1", canvasId: "default" }]
+    });
     await api.startLocalCollaborationServer();
     await api.stopLocalCollaborationServer();
     await api.listLocalCollaborationTrustedScopes();
-    await api.registerLocalCollaborationCurrentProject();
+    await api.registerLocalCollaborationCurrentProject({ ownerDisplayName: "Local owner" });
     await api.startCollaborationPresence({ canvasId: "default" });
     await api.publishCollaborationPresence({ pointer: { x: 1, y: 2 }, selectionIds: [] });
     await api.stopCollaborationPresence();
@@ -903,7 +907,10 @@ describe("preload bridge invocation", () => {
     );
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       collaborationInvokeChannels.mutateCurrentCanvasAccess,
-      expect.objectContaining({ canvasId: "default", request: expect.objectContaining({ operation: "visibility" }) })
+      expect.objectContaining({
+        canvasId: "default",
+        request: expect.objectContaining({ operation: "visibility" })
+      })
     );
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       collaborationInvokeChannels.setCollaborationCurrentSelection,
@@ -916,6 +923,13 @@ describe("preload bridge invocation", () => {
       collaborationInvokeChannels.getLocalCollaborationServerStatus
     );
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.getLocalCollaborationScopeCatalog
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.setLocalCollaborationTrustedScopes,
+      { scopes: [{ projectId: "project-1", canvasId: "default" }] }
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       collaborationInvokeChannels.startLocalCollaborationServer
     );
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
@@ -925,7 +939,8 @@ describe("preload bridge invocation", () => {
       collaborationInvokeChannels.listLocalCollaborationTrustedScopes
     );
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
-      collaborationInvokeChannels.registerLocalCollaborationCurrentProject
+      collaborationInvokeChannels.registerLocalCollaborationCurrentProject,
+      { ownerDisplayName: "Local owner" }
     );
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       collaborationInvokeChannels.listCollaborationMembers,

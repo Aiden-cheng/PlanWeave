@@ -35,6 +35,7 @@ import {
 import type { PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
 import { useCollaborationReadModels } from "./useCollaborationReadModels";
 import { useCollaborationStatus } from "./useCollaborationStatus";
+import { isCollaborationSessionConnected } from "../collaboration/sessionState";
 
 export type UseCommentsPanelControllerArgs = {
   workItem: WorkItemRef | null;
@@ -117,8 +118,7 @@ export function useCommentsPanelController(
     return status.profiles.find((p) => p.profileId === status.activeProfileId) ?? null;
   }, [status]);
 
-  const sessionConnected =
-    status?.session.phase === "connected" || status?.session.phase === "ready";
+  const sessionConnected = isCollaborationSessionConnected(status);
   const currentMembership = resolveCurrentMembership({
     members: snapshot.members,
     status

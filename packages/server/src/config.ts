@@ -170,11 +170,24 @@ export const serverConfigSchema = serverConfigInputSchema
     if (config.limits.heartbeatIntervalMs >= config.limits.leaseDurationMs) {
       context.addIssue({ code: "custom", message: "server_heartbeat_must_precede_lease" });
     }
-    const projectScopes = new Set(
-      config.trustedProjects.map((project) => `${project.workspaceId}\0${project.projectId}`)
+    const exactScopes = new Set(
+      config.trustedProjects.map(
+        (project) =>
+          `${project.workspaceId}\0${project.projectId}\0${project.trustAllDeclaredCanvases ? "*" : project.canvasId}`
+      )
     );
-    if (projectScopes.size !== config.trustedProjects.length) {
+    if (exactScopes.size !== config.trustedProjects.length) {
       context.addIssue({ code: "custom", message: "server_trusted_project_duplicate" });
+    }
+    const projectModes = new Map<string, Set<"all" | "exact">>();
+    for (const project of config.trustedProjects) {
+      const projectKey = `${project.workspaceId}\0${project.projectId}`;
+      const modes = projectModes.get(projectKey) ?? new Set<"all" | "exact">();
+      modes.add(project.trustAllDeclaredCanvases ? "all" : "exact");
+      projectModes.set(projectKey, modes);
+    }
+    if ([...projectModes.values()].some((modes) => modes.size > 1)) {
+      context.addIssue({ code: "custom", message: "server_trusted_project_scope_overlap" });
     }
     if (config.databasePath !== join(config.dataDirectory, "planweave-server.sqlite")) {
       context.addIssue({ code: "custom", message: "server_database_path_mismatch" });
@@ -258,6 +271,6 @@ export function serverConfigSummary(config: ServerConfig) {
           allowedClientOrigins: config.deployment.allowedClientOrigins
         }
       : null,
-    projectIds: config.trustedProjects.map((project) => project.projectId)
+    projectIds: [...new Set(config.trustedProjects.map((project) => project.projectId))]
   });
 }

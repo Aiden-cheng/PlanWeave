@@ -212,6 +212,20 @@ describe("server config", () => {
     };
     expect(parseServerConfig(sameProjectInOtherWorkspace).trustedProjects).toHaveLength(2);
 
+    const separateCanvases = {
+      ...input,
+      trustedProjects: [
+        ...input.trustedProjects,
+        {
+          workspaceId: "workspace-1",
+          projectId: "project-1",
+          canvasId: "planning",
+          projectRoot: input.trustedProjects[0].projectRoot
+        }
+      ]
+    };
+    expect(parseServerConfig(separateCanvases).trustedProjects).toHaveLength(2);
+
     expect(
       parseServerConfig({ ...input, trustedProjects: [{ ...input.trustedProjects[0] }] })
     ).toMatchObject({

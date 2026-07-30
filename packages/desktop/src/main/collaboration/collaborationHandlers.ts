@@ -9,6 +9,7 @@ import {
   type CollaborationObserverSignal,
   type CollaborationStatus
 } from "../../shared/collaboration.js";
+import { localCollaborationRegistrationInputSchema } from "../../shared/localCollaborationScopes.js";
 import {
   CollaborationClient,
   type CollaborationWebSocketConstructor
@@ -105,17 +106,30 @@ export function registerCollaborationHandlers(
     const profile = local.localProfile();
     if (!profile) throw new Error("local_collaboration_selection_required");
     await active.upsertProfile(profile);
-    await active.migrateLocalProfileCredential(
-      "planweave-local-loopback",
-      profile.profileId
-    );
+    await active.migrateLocalProfileCredential("planweave-local-loopback", profile.profileId);
     await active.setActiveProfile({ profileId: profile.profileId });
+    if (await active.activeHumanPrincipalId(profile.profileId)) {
+      await active.connectSession({ profileId: profile.profileId });
+    }
+  };
+  const deactivateLocalSelection = async (): Promise<void> => {
+    const profileId = local.localProfile()?.profileId;
+    if (profileId && (await active.getStatus()).activeProfileId === profileId) {
+      await active.clearActiveProfile();
+    }
   };
   const deploymentActions = new DeploymentActions({
     writeClipboard: (value) => clipboard.writeText(value),
     resourceDirectory: app.isPackaged
       ? join(process.resourcesPath, "planweave-self-host-server")
-      : join(process.cwd(), "packages", "desktop", "build", "generated", "planweave-self-host-server"),
+      : join(
+          process.cwd(),
+          "packages",
+          "desktop",
+          "build",
+          "generated",
+          "planweave-self-host-server"
+        ),
     resolveBundleSource: (target) => local.createSelfHostedDeploymentSource(target),
     showSaveDialog: (options) => dialog.showSaveDialog(options)
   });
@@ -253,49 +267,66 @@ export function registerCollaborationHandlers(
   ipcMain.handle(
     collaborationInvokeChannels.setCollaborationCurrentSelection,
     async (_event, input: unknown) => {
-      const localProfileId = local.localProfile()?.profileId;
-      if (localProfileId && (await active.getStatus()).activeProfileId === localProfileId) {
-        await active.disconnectSession();
-      }
+      await deactivateLocalSelection();
       await local.setCurrentSelection(input);
-      if (local.status().state === "running") await activateLocalSelection();
+      if (local.status().state === "running" && local.currentSelectionIsTrusted()) {
+        await activateLocalSelection();
+      }
     }
   );
   ipcMain.handle(collaborationInvokeChannels.clearCollaborationCurrentSelection, async () => {
-    const localProfileId = local.localProfile()?.profileId;
-    if (localProfileId && (await active.getStatus()).activeProfileId === localProfileId) {
-      await active.disconnectSession();
-    }
+    await deactivateLocalSelection();
     return local.clearCurrentSelection();
   });
   ipcMain.handle(collaborationInvokeChannels.getLocalCollaborationServerStatus, () =>
     local.status()
   );
+  ipcMain.handle(collaborationInvokeChannels.getLocalCollaborationScopeCatalog, () =>
+    local.getScopeCatalog()
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.setLocalCollaborationTrustedScopes,
+    async (_event, input: unknown) => {
+      await deactivateLocalSelection();
+      const catalog = await local.setTrustedScopes(input);
+      if (local.status().state === "running" && local.currentSelectionIsTrusted()) {
+        await activateLocalSelection();
+      }
+      return catalog;
+    }
+  );
   ipcMain.handle(collaborationInvokeChannels.startLocalCollaborationServer, async () => {
     const status = await local.start();
     if (status.state !== "running") return status;
-    await activateLocalSelection();
+    if (local.currentSelectionIsTrusted()) await activateLocalSelection();
     return status;
   });
   ipcMain.handle(collaborationInvokeChannels.stopLocalCollaborationServer, async () => {
-    const localProfileId = local.localProfile()?.profileId;
-    if (localProfileId && (await active.getStatus()).activeProfileId === localProfileId) {
-      await active.disconnectSession();
-    }
+    await deactivateLocalSelection();
     return local.stop();
   });
   ipcMain.handle(collaborationInvokeChannels.listLocalCollaborationTrustedScopes, () =>
     local.listActiveTrustedScopes()
   );
-  ipcMain.handle(collaborationInvokeChannels.registerLocalCollaborationCurrentProject, async () => {
-    const profile = local.localProfile();
-    if (!profile) throw new Error("loopback_server_not_running");
-    const humanPrincipalId = await active.activeHumanPrincipalId(profile.profileId);
-    if (!humanPrincipalId) throw new Error("local_collaboration_owner_initialization_required");
-    const registration = local.registerCurrentProject({ kind: "human", id: humanPrincipalId });
-    await active.connectSession({ profileId: profile.profileId });
-    return registration;
-  });
+  ipcMain.handle(
+    collaborationInvokeChannels.registerLocalCollaborationCurrentProject,
+    async (_event, input: unknown) => {
+      const registrationInput = localCollaborationRegistrationInputSchema.parse(input ?? {});
+      const profile = local.localProfile();
+      if (!profile) throw new Error("loopback_server_not_running");
+      let humanPrincipalId = await active.activeHumanPrincipalId(profile.profileId);
+      if (!humanPrincipalId) {
+        const handoff = await active.bootstrapOwner({
+          profileId: profile.profileId,
+          request: { displayName: registrationInput.ownerDisplayName ?? "Local owner" }
+        });
+        humanPrincipalId = handoff.principal.humanPrincipalId;
+      }
+      const registration = local.registerCurrentProject({ kind: "human", id: humanPrincipalId });
+      await active.connectSession({ profileId: profile.profileId });
+      return registration;
+    }
+  );
   ipcMain.handle(collaborationInvokeChannels.listCollaborationMembers, (_event, input: unknown) =>
     active.listMembers(input)
   );

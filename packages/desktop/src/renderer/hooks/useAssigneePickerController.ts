@@ -21,6 +21,7 @@ import { workItemKey } from "../../shared/collaborationReadModels.js";
 import type { createTranslator } from "../i18n";
 import { useCollaborationReadModels } from "./useCollaborationReadModels";
 import { useCollaborationStatus } from "./useCollaborationStatus";
+import { isCollaborationSessionConnected } from "../collaboration/sessionState";
 import type { PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
 
 /** Independent OSS-003 authority axes. Responsibility/reviewer are human-only; execution is Host-only. */
@@ -242,8 +243,7 @@ export function useAssigneePickerController(
     return status.profiles.find((profile) => profile.profileId === status.activeProfileId) ?? null;
   }, [status]);
 
-  const sessionConnected =
-    status?.session.phase === "connected" || status?.session.phase === "ready";
+  const sessionConnected = isCollaborationSessionConnected(status);
 
   // Subscribe only — project/canvas binding is owned by useCollaborationSurface.
   const {

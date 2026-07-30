@@ -76,6 +76,7 @@ function hookInput(api: CanvasCommandBridge, onAuthoritativeChange?: () => void 
   return {
     api,
     enabled: true,
+    sessionConnected: true,
     canvasId: "default",
     profileId: "profile-1",
     selectedProjectId: "project-1",
@@ -97,12 +98,30 @@ afterEach(() => {
 });
 
 describe("useSharedCanvasCommands", () => {
+  it("does not bind a command session before collaboration is connected", async () => {
+    vi.useFakeTimers();
+    const bridge = createBridge();
+
+    const { result } = renderHook(() =>
+      useSharedCanvasCommands({
+        ...hookInput(bridge.api),
+        sessionConnected: false
+      })
+    );
+    await flushEffects();
+
+    expect(bridge.bind).not.toHaveBeenCalled();
+    expect(bridge.reconnect).not.toHaveBeenCalled();
+    expect(result.current.enabled).toBe(true);
+  });
+
   it("keeps the command facade stable when its inputs and snapshot are unchanged", () => {
     const t = createTranslator("en");
     const { result, rerender } = renderHook(() =>
       useSharedCanvasCommands({
         api: null,
         enabled: false,
+        sessionConnected: false,
         canvasId: null,
         profileId: null,
         selectedProjectId: null,

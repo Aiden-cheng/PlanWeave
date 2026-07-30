@@ -36,6 +36,7 @@ export type SharedCanvasCommandsResult = {
  */
 export function useSharedCanvasCommands(input: {
   enabled: boolean;
+  sessionConnected: boolean;
   canvasId: string | null;
   profileId: string | null;
   selectedProjectId: string | null;
@@ -46,12 +47,13 @@ export function useSharedCanvasCommands(input: {
   onAuthoritativeChange?: () => void | Promise<void>;
 }): SharedCanvasCommandsResult {
   const api = input.api === undefined ? collaborationBridge : input.api;
-  const scopeEnabled =
+  const authorityEnabled =
     input.enabled &&
     input.selectedProjectId !== null &&
     input.selectedProjectId === input.activeProjectId &&
     input.canvasId !== null &&
     input.profileId !== null;
+  const sessionEnabled = authorityEnabled && input.sessionConnected;
 
   const labels = useMemo<CanvasCommandLabels>(
     () => ({
@@ -96,7 +98,7 @@ export function useSharedCanvasCommands(input: {
   useEffect(() => {
     const controller = controllerRef.current;
     const canvasId = input.canvasId;
-    if (!controller || !scopeEnabled || !canvasId) {
+    if (!controller || !sessionEnabled || !canvasId) {
       void controller?.unbind();
       return undefined;
     }
@@ -145,7 +147,7 @@ export function useSharedCanvasCommands(input: {
       active = false;
       if (intervalId !== null) clearInterval(intervalId);
     };
-  }, [api, labels, scopeEnabled, input.canvasId]);
+  }, [sessionEnabled, input.canvasId]);
 
   const submit = useCallback(
     async (submitInput: {
@@ -154,7 +156,7 @@ export function useSharedCanvasCommands(input: {
       expectedRevision?: number;
     }): Promise<SharedCanvasSubmitResult> => {
       const controller = controllerRef.current;
-      if (!controller || !scopeEnabled) {
+      if (!controller || !sessionEnabled) {
         return { ok: false, error: labels.notConnected, staleConflict: null };
       }
       const result = await controller.submit(submitInput);
@@ -169,27 +171,27 @@ export function useSharedCanvasCommands(input: {
         staleConflict: snap.lastStaleConflict
       };
     },
-    [labels.notConnected, scopeEnabled]
+    [labels.notConnected, sessionEnabled]
   );
 
   const reconnect = useCallback(async () => {
     const controller = controllerRef.current;
-    if (!controller || !scopeEnabled) return false;
+    if (!controller || !sessionEnabled) return false;
     const result = await controller.reconnect();
     if (result.response.type !== "canvas.reconnect.error") {
       await onChangeRef.current?.();
       return true;
     }
     return false;
-  }, [scopeEnabled]);
+  }, [sessionEnabled]);
 
   return useMemo(
     () => ({
-      enabled: Boolean(scopeEnabled),
+      enabled: Boolean(authorityEnabled),
       snapshot,
       submit,
       reconnect
     }),
-    [reconnect, scopeEnabled, snapshot, submit]
+    [authorityEnabled, reconnect, snapshot, submit]
   );
 }

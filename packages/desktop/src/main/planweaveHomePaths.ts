@@ -12,6 +12,7 @@ export type DesktopHomePaths = {
   collaborationDir: string;
   collaborationProfilesFile: string;
   collaborationCredentialsFile: string;
+  localCollaborationScopesFile: string;
   operatorControlDir: string;
   operatorProfilesFile: string;
   operatorCredentialsFile: string;
@@ -33,6 +34,7 @@ export function desktopHomePaths(): DesktopHomePaths {
     collaborationDir,
     collaborationProfilesFile: join(collaborationDir, "profiles.json"),
     collaborationCredentialsFile: join(collaborationDir, "credentials.json"),
+    localCollaborationScopesFile: join(collaborationDir, "local-scopes.json"),
     operatorControlDir,
     operatorProfilesFile: join(operatorControlDir, "profiles.json"),
     operatorCredentialsFile: join(operatorControlDir, "credentials.json")

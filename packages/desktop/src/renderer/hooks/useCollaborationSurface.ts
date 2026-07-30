@@ -13,6 +13,7 @@ import type { CollaborationReadModelSnapshot } from "../../shared/collaborationR
 import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
 import { useCollaborationReadModels } from "./useCollaborationReadModels";
 import { useCollaborationStatus } from "./useCollaborationStatus";
+import { isCollaborationSessionConnected } from "../collaboration/sessionState";
 
 export type UseCollaborationSurfaceArgs = {
   /** Active local canvas id (filters assignment pages when set). */
@@ -49,8 +50,7 @@ export function useCollaborationSurface(
     return status.profiles.find((profile) => profile.profileId === status.activeProfileId) ?? null;
   }, [status]);
 
-  const sessionConnected =
-    status?.session.phase === "connected" || status?.session.phase === "ready";
+  const sessionConnected = isCollaborationSessionConnected(status);
 
   const profileId = sessionConnected ? (activeProfile?.profileId ?? null) : null;
   const projectId = sessionConnected ? (activeProfile?.projectId ?? null) : null;

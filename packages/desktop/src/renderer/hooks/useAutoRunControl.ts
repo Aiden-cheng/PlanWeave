@@ -237,6 +237,7 @@ export function useAutoRunControl({
       .then((summary) => {
         if (!cancelled) {
           setAutoRunRetrospective(summary);
+          if (summary === null && autoRunRunId) setAutoRunState(null);
         }
       })
       .catch((caught) => {

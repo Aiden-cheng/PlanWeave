@@ -254,6 +254,7 @@ export function ProjectWorkspaceProvider({
     // A configured shared project remains read-only while offline; package writers must not
     // fall through to local direct writes merely because its session disconnected.
     enabled: Boolean(selectedProject),
+    sessionConnected: collaborationSurface.sessionConnected,
     profileId: collaborationSurface.activeProfileId,
     selectedProjectId: selectedProject?.projectId ?? null,
     activeProjectId: collaborationSurface.activeProjectId,
@@ -444,6 +445,7 @@ export function ProjectWorkspaceProvider({
     api: collaborationBridge,
     canvasId: selectedCanvasId,
     enabled: activeView === "graph" && Boolean(selectedProject),
+    sessionConnected: collaborationSurface.sessionConnected,
     profileId: collaborationSurface.activeProfileId,
     selectedProjectId: selectedProject?.projectId ?? null,
     activeProjectId: collaborationSurface.activeProjectId,

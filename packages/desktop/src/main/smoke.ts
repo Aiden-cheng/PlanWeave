@@ -919,6 +919,12 @@ async function runLocalCollaborationSmoke(window: BrowserWindow): Promise<Record
       }
       const selection = { projectId: project.projectId, canvasId: project.activeCanvasId };
       await collaboration.setCollaborationCurrentSelection(selection);
+      const scopeCatalog = await collaboration.setLocalCollaborationTrustedScopes({
+        scopes: [selection]
+      });
+      if (scopeCatalog.selectedCount !== 1) {
+        throw new Error("Local collaboration scope selection was not persisted.");
+      }
       const beforeStart = await collaboration.getLocalCollaborationServerStatus();
       if (beforeStart.state !== "stopped") {
         throw new Error("Local collaboration server did not start from a stopped state.");

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { CheckCircle2Icon, LaptopIcon } from "lucide-react";
 import type {
   LoopbackProjectRegistrationView,
@@ -6,34 +6,40 @@ import type {
   LoopbackTrustedProjectScope
 } from "@planweave-ai/collaboration-contracts";
 import { Button } from "@/components/ui/button";
-import type { PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
+import type {
+  LocalCollaborationScope,
+  LocalCollaborationScopeCatalog,
+  PlanWeaveCollaborationApi
+} from "../../shared/collaboration.js";
 import type { createTranslator } from "../i18n";
 import { collaborationErrorMessage } from "./formatCollaborationError";
 
-const ownerInitializationRequiredCode = "local_collaboration_owner_initialization_required";
-const capabilityDeniedCode = "access_capability_denied";
+function scopeKey(scope: LocalCollaborationScope): string {
+  return `${scope.projectId}\0${scope.canvasId}`;
+}
 
-function requiresOwnerInitialization(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return (
-    message.includes(ownerInitializationRequiredCode) || message.includes(capabilityDeniedCode)
+function selectedScopes(catalog: LocalCollaborationScopeCatalog): LocalCollaborationScope[] {
+  return catalog.projects.flatMap((project) =>
+    project.canvases
+      .filter((canvas) => canvas.selected)
+      .map((canvas) => ({ projectId: project.projectId, canvasId: canvas.canvasId }))
   );
 }
 
 export function LocalCollaborationServerPanel({
   api,
   t,
-  profileId,
   projectId,
   canvasId
 }: {
   api: PlanWeaveCollaborationApi | null;
   t: ReturnType<typeof createTranslator>;
-  profileId: string | null;
   projectId: string | null;
   canvasId: string | null;
 }) {
   const [status, setStatus] = useState<LoopbackServerStatus | null>(null);
+  const [catalog, setCatalog] = useState<LocalCollaborationScopeCatalog | null>(null);
+  const [draftScopes, setDraftScopes] = useState<LocalCollaborationScope[]>([]);
   const [scopes, setScopes] = useState<readonly LoopbackTrustedProjectScope[]>([]);
   const [registration, setRegistration] = useState<LoopbackProjectRegistrationView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,14 +48,19 @@ export function LocalCollaborationServerPanel({
   const refresh = useCallback(async () => {
     if (!api) return;
     try {
-      const nextStatus = await api.getLocalCollaborationServerStatus();
+      const [nextStatus, nextCatalog] = await Promise.all([
+        api.getLocalCollaborationServerStatus(),
+        api.getLocalCollaborationScopeCatalog()
+      ]);
       setStatus(nextStatus);
+      setCatalog(nextCatalog);
+      setDraftScopes(selectedScopes(nextCatalog));
       setScopes(
         nextStatus.state === "running" ? await api.listLocalCollaborationTrustedScopes() : []
       );
       setError(null);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      setError(collaborationErrorMessage(caught));
     }
   }, [api]);
 
@@ -57,11 +68,23 @@ export function LocalCollaborationServerPanel({
     void refresh();
   }, [refresh]);
 
-  if (!api) return null;
-  const running = status?.state === "running";
+  const savedScopeKeys = useMemo(
+    () => new Set(catalog ? selectedScopes(catalog).map(scopeKey) : []),
+    [catalog]
+  );
+  const draftScopeKeys = useMemo(() => new Set(draftScopes.map(scopeKey)), [draftScopes]);
+  const scopeChanged =
+    savedScopeKeys.size !== draftScopeKeys.size ||
+    [...savedScopeKeys].some((key) => !draftScopeKeys.has(key));
+  const currentCatalogCanvas = catalog?.projects
+    .flatMap((project) => project.canvases)
+    .find((canvas) => canvas.current);
   const currentScope = scopes.find(
     (scope) => scope.projectId === projectId && scope.canvasId === canvasId
   );
+
+  if (!api) return null;
+  const running = status?.state === "running";
   const statusLabel =
     status?.state === "error"
       ? status.reason === "stop_failed"
@@ -72,51 +95,79 @@ export function LocalCollaborationServerPanel({
       : running
         ? t("localServerRunning")
         : t("localServerStopped");
-  const action = async () => {
+
+  const toggleScope = (scope: LocalCollaborationScope) => {
+    const key = scopeKey(scope);
+    setDraftScopes((current) =>
+      current.some((item) => scopeKey(item) === key)
+        ? current.filter((item) => scopeKey(item) !== key)
+        : [...current, scope]
+    );
+    setRegistration(null);
+  };
+
+  const applyScopes = async () => {
+    const next = await api.setLocalCollaborationTrustedScopes({ scopes: draftScopes });
+    setCatalog(next);
+    setDraftScopes(selectedScopes(next));
+  };
+
+  const start = async () => {
     setBusy(true);
     try {
-      setStatus(
-        running
-          ? await api.stopLocalCollaborationServer()
-          : await api.startLocalCollaborationServer()
-      );
+      await applyScopes();
+      const nextStatus = await api.startLocalCollaborationServer();
+      setStatus(nextStatus);
       setRegistration(null);
       await refresh();
-      setError(null);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      setError(collaborationErrorMessage(caught));
     } finally {
       setBusy(false);
     }
   };
+
+  const applyRunningScopes = async () => {
+    setBusy(true);
+    try {
+      await applyScopes();
+      setRegistration(null);
+      await refresh();
+    } catch (caught) {
+      setError(collaborationErrorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const stop = async () => {
+    setBusy(true);
+    try {
+      setStatus(await api.stopLocalCollaborationServer());
+      setRegistration(null);
+      await refresh();
+    } catch (caught) {
+      setError(collaborationErrorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const register = async () => {
     setBusy(true);
     try {
-      let nextRegistration: LoopbackProjectRegistrationView;
-      try {
-        nextRegistration = await api.registerLocalCollaborationCurrentProject();
-      } catch (caught) {
-        if (!requiresOwnerInitialization(caught)) throw caught;
-        if (!profileId) throw new Error(ownerInitializationRequiredCode);
-        await api.bootstrapCollaborationOwner({
-          profileId,
-          request: { displayName: t("localServerDefaultOwnerName") }
-        });
-        nextRegistration = await api.registerLocalCollaborationCurrentProject();
-      }
+      const nextRegistration = await api.registerLocalCollaborationCurrentProject({
+        ownerDisplayName: t("localServerDefaultOwnerName")
+      });
       setRegistration(nextRegistration);
       await refresh();
-      setError(null);
     } catch (caught) {
-      setError(
-        requiresOwnerInitialization(caught)
-          ? t("localServerOwnerRequired")
-          : collaborationErrorMessage(caught)
-      );
+      setError(collaborationErrorMessage(caught));
     } finally {
       setBusy(false);
     }
   };
+
   return (
     <section
       className="overflow-hidden rounded-xl border border-border/70 bg-background shadow-sm"
@@ -157,48 +208,154 @@ export function LocalCollaborationServerPanel({
         </div>
         <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
           {running ? (
-            <>
-              <Button type="button" size="sm" disabled={busy} onClick={() => void register()}>
-                {busy ? t("peopleWorking") : t("localServerRegisterCurrent")}
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={busy}
-                onClick={() => void action()}
-              >
-                {t("localServerStop")}
-              </Button>
-            </>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => void stop()}
+            >
+              {t("localServerStop")}
+            </Button>
           ) : (
-            <Button type="button" size="sm" disabled={busy} onClick={() => void action()}>
-              {busy ? t("peopleWorking") : t("localServerStart")}
+            <Button
+              type="button"
+              size="sm"
+              disabled={busy || draftScopes.length === 0}
+              onClick={() => void start()}
+            >
+              {busy
+                ? t("peopleWorking")
+                : t("localServerStartSelected").replace("{count}", String(draftScopes.length))}
             </Button>
           )}
         </div>
       </div>
-      {running ? (
-        <div className="border-t border-border/60 bg-muted/20 px-4 py-3">
-          <div className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-            {t("localServerTrustedScope")}
-          </div>
-          <div className="mt-1 break-all font-mono text-[11px] text-text-strong">
-            {currentScope
-              ? `${currentScope.projectId} / ${currentScope.canvasId}`
-              : t("localServerOwnerPending")}
-          </div>
-          {registration ? (
-            <div
-              className="mt-2 flex items-center gap-1.5 text-[11px] text-emerald-700 dark:text-emerald-300"
-              role="status"
-            >
-              <CheckCircle2Icon className="size-3.5" aria-hidden="true" />
-              {t("localServerRegistered")}: {registration.registeredAt}
+
+      <div className="border-t border-border/60 bg-muted/15 px-4 py-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="text-xs font-semibold text-text-strong">
+              {t("localServerScopeTitle")}
             </div>
+            <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
+              {t("localServerScopeHint")}
+            </p>
+          </div>
+          <span className="rounded-full border border-border/70 bg-background px-2.5 py-1 text-[10px] font-medium text-muted-foreground">
+            {t("localServerSelectedCount").replace("{count}", String(draftScopes.length))}
+          </span>
+        </div>
+
+        <div className="mt-3 grid gap-2" data-testid="local-collaboration-scope-catalog">
+          {catalog?.projects.map((project) => (
+            <div
+              key={project.projectId}
+              className="overflow-hidden rounded-lg border border-border/60 bg-background"
+            >
+              <div className="flex items-center justify-between border-b border-border/50 px-3 py-2">
+                <span className="truncate text-xs font-medium text-text-strong">
+                  {project.name}
+                </span>
+                <span className="text-[10px] tabular-nums text-muted-foreground">
+                  {
+                    project.canvases.filter((canvas) =>
+                      draftScopeKeys.has(
+                        scopeKey({ projectId: project.projectId, canvasId: canvas.canvasId })
+                      )
+                    ).length
+                  }
+                  /{project.canvases.length}
+                </span>
+              </div>
+              <div className="divide-y divide-border/40">
+                {project.canvases.map((canvas) => {
+                  const scope = { projectId: project.projectId, canvasId: canvas.canvasId };
+                  const checked = draftScopeKeys.has(scopeKey(scope));
+                  return (
+                    <label
+                      key={canvas.canvasId}
+                      className="flex cursor-pointer items-center gap-3 px-3 py-2.5 hover:bg-muted/30"
+                    >
+                      <input
+                        type="checkbox"
+                        className="size-4 rounded border-border accent-emerald-600"
+                        checked={checked}
+                        disabled={busy}
+                        onChange={() => toggleScope(scope)}
+                        aria-label={`${project.name} / ${canvas.name}`}
+                      />
+                      <span className="min-w-0 flex-1 truncate text-xs text-text-strong">
+                        {canvas.name}
+                      </span>
+                      {canvas.current ? (
+                        <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium text-primary">
+                          {t("localServerCurrentCanvas")}
+                        </span>
+                      ) : null}
+                      <span
+                        className={`text-[10px] ${checked ? "text-emerald-700 dark:text-emerald-300" : "text-muted-foreground"}`}
+                      >
+                        {checked ? t("localServerHosted") : t("localServerPrivate")}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+          {catalog && catalog.projects.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
+              {t("localServerNoProjects")}
+            </p>
           ) : null}
         </div>
-      ) : null}
+
+        {running && scopeChanged ? (
+          <div className="mt-3 flex items-center justify-between gap-3 rounded-lg bg-amber-500/10 px-3 py-2">
+            <span className="text-[11px] text-amber-900 dark:text-amber-200">
+              {t("localServerScopeChanged")}
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              disabled={busy}
+              onClick={() => void applyRunningScopes()}
+            >
+              {t("localServerApplyScopes")}
+            </Button>
+          </div>
+        ) : null}
+
+        {running && currentCatalogCanvas?.selected ? (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-border/50 pt-3">
+            <div>
+              <div className="text-[11px] font-medium text-text-strong">
+                {t("localServerCurrentCanvasReady")}
+              </div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">
+                {currentScope
+                  ? `${currentScope.projectId} / ${currentScope.canvasId}`
+                  : t("localServerOwnerPending")}
+              </div>
+            </div>
+            <Button type="button" size="sm" disabled={busy} onClick={() => void register()}>
+              {busy ? t("peopleWorking") : t("localServerRegisterCurrent")}
+            </Button>
+          </div>
+        ) : null}
+
+        {registration ? (
+          <div
+            className="mt-2 flex items-center gap-1.5 text-[11px] text-emerald-700 dark:text-emerald-300"
+            role="status"
+          >
+            <CheckCircle2Icon className="size-3.5" aria-hidden="true" />
+            {t("localServerRegistered")}: {registration.registeredAt}
+          </div>
+        ) : null}
+      </div>
+
       {error ? (
         <div
           className="border-t border-destructive/20 bg-destructive/5 px-4 py-2.5 text-xs text-destructive"

@@ -11,6 +11,7 @@ import type {
   CollaborationAccessMutationInput,
   PlanWeaveCollaborationApi
 } from "../../shared/collaboration.js";
+import { isCollaborationSessionConnected } from "../collaboration/sessionState";
 
 export type CurrentCanvasAccessApi = Pick<
   PlanWeaveCollaborationApi,
@@ -46,7 +47,9 @@ export type UseCurrentCanvasAccessResult = {
   revoke: (grant: ActiveCanvasPersonGrant) => Promise<AccessMutationResult | null>;
 };
 
-function canLoadCurrentCanvasAccess(args: UseCurrentCanvasAccessArgs): args is UseCurrentCanvasAccessArgs & {
+function canLoadCurrentCanvasAccess(
+  args: UseCurrentCanvasAccessArgs
+): args is UseCurrentCanvasAccessArgs & {
   api: CurrentCanvasAccessApi;
   canvasId: string;
 } {
@@ -55,8 +58,7 @@ function canLoadCurrentCanvasAccess(args: UseCurrentCanvasAccessArgs): args is U
     typeof args.canvasId === "string" &&
     args.canvasId.length > 0 &&
     (args.status?.workspaceConnection.status === "connected" ||
-      args.status?.session.phase === "ready" ||
-      args.status?.session.phase === "connected")
+      isCollaborationSessionConnected(args.status))
   );
 }
 
@@ -104,7 +106,9 @@ export function useCurrentCanvasAccess(
   }, [refresh]);
 
   const mutate = useCallback(
-    async (request: CollaborationAccessMutationInput["request"]): Promise<AccessMutationResult | null> => {
+    async (
+      request: CollaborationAccessMutationInput["request"]
+    ): Promise<AccessMutationResult | null> => {
       const currentArgs = {
         api,
         canvasId,
@@ -160,9 +164,7 @@ export function useCurrentCanvasAccess(
   const updateVisibility = useCallback(
     async (scopeKind: CurrentCanvasVisibilityScope, visibility: "private" | "shared") => {
       const target = scopeFor(scopeKind);
-      return target
-        ? mutate({ operation: "visibility", ...target, visibility })
-        : null;
+      return target ? mutate({ operation: "visibility", ...target, visibility }) : null;
     },
     [mutate, scopeFor]
   );
@@ -182,7 +184,9 @@ export function useCurrentCanvasAccess(
   const revoke = useCallback(
     async (grantToRevoke: ActiveCanvasPersonGrant) => {
       const target = scopeFor(grantToRevoke.scopeKind);
-      return target ? mutate({ operation: "revoke", ...target, grantId: grantToRevoke.grantId }) : null;
+      return target
+        ? mutate({ operation: "revoke", ...target, grantId: grantToRevoke.grantId })
+        : null;
     },
     [mutate, scopeFor]
   );

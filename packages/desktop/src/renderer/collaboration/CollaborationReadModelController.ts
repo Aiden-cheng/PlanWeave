@@ -31,6 +31,7 @@ import {
   type CollaborationSyncPhase,
   type HumanMembershipView
 } from "../../shared/collaborationReadModels.js";
+import { isCollaborationSessionConnected } from "./sessionState";
 
 export type CollaborationReadBridgePort = Pick<
   PlanWeaveCollaborationApi,
@@ -167,7 +168,7 @@ function mapSessionPhaseToSync(
   ) {
     return "forbidden";
   }
-  if (phase === "idle") return "disconnected";
+  if (phase === "idle" || phase === "ready") return "disconnected";
   if (phase === "connecting") {
     if (detail.includes("reconnecting")) return "reconnecting";
     return current === "ready" || current === "degraded" ? "reconnecting" : "loading";
@@ -176,7 +177,7 @@ function mapSessionPhaseToSync(
     if (detail.includes("auth_expired")) return "auth_expired";
     return "error";
   }
-  if (phase === "connected" || phase === "ready") {
+  if (isCollaborationSessionConnected(status)) {
     if (current === "loading") return "loading";
     if (current === "stale_conflict") return "stale_conflict";
     if (current === "degraded") return "degraded";

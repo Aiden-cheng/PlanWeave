@@ -89,13 +89,7 @@ describe("auto run control hook retrospective", () => {
       runId: "DESKTOP-RUN-0008",
       currentRef: selectedBlock.ref
     });
-    const getAutoRunRetrospective = vi
-      .fn()
-      .mockRejectedValue(
-        new Error(
-          "Error invoking remote method 'planweave:getAutoRunRetrospective': Error: Auto Run 'DESKTOP-RUN-0008' could not be read: auto_run_state_missing: /tmp/demo/results/auto-runs/DESKTOP-RUN-0008/state.json: Auto Run state '/tmp/demo/results/auto-runs/DESKTOP-RUN-0008/state.json' does not exist."
-        )
-      );
+    const getAutoRunRetrospective = vi.fn().mockResolvedValue(null);
     const bridge = createDesktopBridgeMock({
       getAutoRunRetrospective,
       getLatestAutoRunRetrospective: vi.fn()

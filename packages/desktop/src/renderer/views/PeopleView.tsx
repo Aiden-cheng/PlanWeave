@@ -11,6 +11,7 @@ import { ContentAuthorityPanel } from "../collaboration/ContentAuthorityPanel";
 import { CurrentCanvasAccessPanel } from "../collaboration/CurrentCanvasAccessPanel";
 import { LocalCollaborationServerPanel } from "../collaboration/LocalCollaborationServerPanel";
 import { useCurrentCanvasAccess } from "../hooks/useCurrentCanvasAccess";
+import { isCollaborationSessionConnected } from "../collaboration/sessionState";
 
 export type PeopleViewProps = {
   t: ReturnType<typeof createTranslator>;
@@ -46,8 +47,7 @@ export function PeopleView({
     return status.profiles.find((profile) => profile.profileId === status.activeProfileId) ?? null;
   }, [status]);
 
-  const sessionConnected =
-    status?.session.phase === "connected" || status?.session.phase === "ready";
+  const sessionConnected = isCollaborationSessionConnected(status);
   const currentCanvasAccess = useCurrentCanvasAccess({ api, canvasId, status });
 
   // Subscribe only: the project shell owns the shared hub's active project/canvas binding.
@@ -91,7 +91,6 @@ export function PeopleView({
           key={`${activeProfile?.profileId ?? "local"}:${canvasId ?? "none"}`}
           api={api}
           t={t}
-          profileId={activeProfile?.profileId ?? null}
           projectId={activeProfile?.projectId ?? null}
           canvasId={canvasId}
         />

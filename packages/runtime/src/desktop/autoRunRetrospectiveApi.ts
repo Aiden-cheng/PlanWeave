@@ -238,13 +238,14 @@ export async function getAutoRunRetrospective(
   projectRoot: string,
   canvasId: string | null | undefined,
   runId: string
-): Promise<DesktopAutoRunRetrospectiveSummary> {
+): Promise<DesktopAutoRunRetrospectiveSummary | null> {
   const workspace = await resolveTaskCanvasWorkspace(projectRoot, canvasId);
   const { state, diagnostics } = await readPersistedAutoRunStateWithDiagnostics(workspace, runId);
-  if (!state && diagnostics.length === 0) {
-    throw new Error(`Auto Run '${runId}' does not exist.`);
-  }
+  if (!state && diagnostics.length === 0) return null;
   if (!state) {
+    if (diagnostics.every((diagnostic) => diagnostic.code === "auto_run_state_missing")) {
+      return null;
+    }
     throw new Error(
       `Auto Run '${runId}' could not be read: ${diagnostics.map(diagnosticMessage).join("; ")}`
     );

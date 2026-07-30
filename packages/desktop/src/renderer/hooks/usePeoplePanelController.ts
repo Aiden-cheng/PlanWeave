@@ -30,6 +30,7 @@ import type {
   CollaborationHostProjection,
   CollaborationSyncPhase
 } from "../../shared/collaborationReadModels.js";
+import { isCollaborationSessionConnected } from "../collaboration/sessionState";
 
 export type UsePeoplePanelControllerArgs = {
   api?: PlanWeaveCollaborationApi | null;
@@ -77,6 +78,7 @@ export function usePeoplePanelController(
   const [pendingInvitation, setPendingInvitation] =
     useState<CollaborationInvitationCreateView | null>(null);
   const detailsGenerationRef = useRef(0);
+  const sessionConnected = isCollaborationSessionConnected(args.status);
 
   const currentMembership = useMemo(
     () =>
@@ -125,7 +127,7 @@ export function usePeoplePanelController(
   const deviceRows = useMemo(() => buildPeopleDeviceRows(devices), [devices]);
 
   const refreshDetails = useCallback(async () => {
-    if (!api) {
+    if (!api || !sessionConnected) {
       setInvitations([]);
       setDevices([]);
       return;
@@ -156,10 +158,10 @@ export function usePeoplePanelController(
         setDetailsLoading(false);
       }
     }
-  }, [api]);
+  }, [api, sessionConnected]);
 
   useEffect(() => {
-    if (!args.detailsOpen) {
+    if (!args.detailsOpen || !sessionConnected) {
       return;
     }
     if (
@@ -171,11 +173,11 @@ export function usePeoplePanelController(
       return;
     }
     void refreshDetails();
-  }, [args.detailsOpen, mode, refreshDetails]);
+  }, [args.detailsOpen, mode, refreshDetails, sessionConnected]);
 
   const runAction = useCallback(
     async (operation: () => Promise<void>, options?: { refreshDetails?: boolean }) => {
-      if (!api || actionBusy) return false;
+      if (!api || !sessionConnected || actionBusy) return false;
       setActionBusy(true);
       setActionError(null);
       try {
@@ -191,7 +193,7 @@ export function usePeoplePanelController(
         setActionBusy(false);
       }
     },
-    [actionBusy, api, refreshDetails]
+    [actionBusy, api, refreshDetails, sessionConnected]
   );
 
   return {
@@ -210,7 +212,7 @@ export function usePeoplePanelController(
     clearActionError: () => setActionError(null),
     refreshDetails,
     createInvitation: async () => {
-      if (!api || actionBusy) return null;
+      if (!api || !sessionConnected || actionBusy) return null;
       setActionBusy(true);
       setActionError(null);
       try {

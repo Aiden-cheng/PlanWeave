@@ -26,6 +26,7 @@ import {
 } from "../../shared/collaborationReadModels.js";
 import { useCollaborationReadModels } from "./useCollaborationReadModels";
 import { useCollaborationStatus } from "./useCollaborationStatus";
+import { isCollaborationSessionConnected } from "../collaboration/sessionState";
 
 export type UseRemoteRunPanelControllerArgs = {
   workItem: WorkItemRef | null;
@@ -118,8 +119,7 @@ export function useRemoteRunPanelController(
     manageActiveProject: false
   });
 
-  const sessionConnected =
-    status?.session.phase === "connected" || status?.session.phase === "ready";
+  const sessionConnected = isCollaborationSessionConnected(status);
   const offline =
     !api ||
     !sessionConnected ||
