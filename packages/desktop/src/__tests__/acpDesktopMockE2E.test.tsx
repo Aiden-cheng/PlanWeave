@@ -69,20 +69,21 @@ describe("provider-free ACP Desktop E2E", () => {
         desktopRunId: started.runId,
         claimRef: "T-001#B-001"
       });
+      const runDir = handle?.identity.scope ?? "";
       const recordId = `T-001#B-001::${handle?.identity.executorRunId}`;
       await waitFor(
         async () =>
-          JSON.parse(
-            await readFile(join(handle?.identity.scope ?? "", "metadata.json"), "utf8")
-          ) as { sessionId?: string | null },
+          JSON.parse(await readFile(join(runDir, "metadata.json"), "utf8")) as {
+            sessionId?: string | null;
+          },
         (value) => value.sessionId === handle?.identity.sessionId
       );
-      const eventModel = acpEventReadModels.get(handle?.identity.scope ?? "");
+      const eventModel = acpEventReadModels.get(runDir);
       const canonical = eventModel?.replay().cursor.canonicalIdentity?.identity;
       if (!eventModel || !canonical) throw new Error("Expected an active ACP event model.");
       const metadata = {
         runnerKind: "acp",
-        scope: handle?.identity.scope,
+        scope: runDir,
         runId: canonical.runId,
         ref: canonical.claimRef,
         claimRef: canonical.claimRef,
@@ -96,7 +97,7 @@ describe("provider-free ACP Desktop E2E", () => {
       };
       let bridgeListener: Parameters<DesktopBridgeApi["subscribeRunnerRecord"]>[1] | null = null;
       const initialConsumer = await consumeRunnerRecordReadModel({
-        runDir: handle?.identity.scope ?? "",
+        runDir,
         metadata,
         subscriber: (snapshot) =>
           bridgeListener?.({
@@ -138,9 +139,9 @@ describe("provider-free ACP Desktop E2E", () => {
         () => getAutoRunState(started.runId),
         (value) => value.phase === "paused" && value.stepCount === 1
       );
-      expect(acpEventReadModels.release(handle?.identity.scope ?? "")).toBe(true);
+      expect(acpEventReadModels.get(runDir)).toBeNull();
       const reopened = await readRunnerRecordReadModel({
-        runDir: handle?.identity.scope ?? "",
+        runDir,
         metadata
       });
       expect(reopened).toMatchObject({
