@@ -57,9 +57,6 @@ describe("desktop graph flow model", () => {
       {},
       labels,
       null,
-      [],
-      [],
-      [],
       vi.fn(),
       vi.fn(),
       vi.fn(),
@@ -85,6 +82,13 @@ describe("desktop graph flow model", () => {
 
     expect(nodes.find((node) => node.id === "T-002")?.position).toEqual({ x: 999, y: 888 });
     expect(nodes.find((node) => node.id === "T-001")?.position.x).toBeLessThan(999);
+    expect(nodes.find((node) => node.id === "T-001")?.data).not.toHaveProperty("blockRunRecords");
+    expect(nodes.find((node) => node.id === "T-001")?.data).not.toHaveProperty(
+      "blockReviewAttempts"
+    );
+    expect(nodes.find((node) => node.id === "T-001")?.data).not.toHaveProperty(
+      "blockFeedbackRecords"
+    );
   });
 
   it("threads shared-resource hints without creating scheduling state", () => {
@@ -102,9 +106,6 @@ describe("desktop graph flow model", () => {
       {},
       labels,
       null,
-      [],
-      [],
-      [],
       // 21 task/block callbacks (onTitleChange … onOpenRunRecord)
       noop,
       noop,

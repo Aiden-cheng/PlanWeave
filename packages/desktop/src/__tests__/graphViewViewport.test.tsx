@@ -109,9 +109,6 @@ function flowNode(promptDraft = "# Prompt"): AppFlowNode {
       executorOptions: ["manual"],
       labels: taskNodeLabels(createTranslator("en")),
       selectedBlock: null,
-      blockRunRecords: [],
-      blockReviewAttempts: [],
-      blockFeedbackRecords: [],
       onTitleChange: vi.fn(),
       onTitleSave: vi.fn(),
       onExecutorChange: vi.fn(),
@@ -205,6 +202,13 @@ describe("GraphView viewport fitting", () => {
     expect(screen.getByTestId("shared-canvas-offline-replica")).toHaveTextContent(
       "Offline · read-only · last confirmed revision 4"
     );
+  });
+
+  it("enables ReactFlow viewport-only rendering for the task graph", async () => {
+    render(<GraphView {...defaultProps()} />);
+
+    await waitFor(() => expect(reactFlowMock.props.length).toBeGreaterThan(0));
+    expect(reactFlowMock.props.at(-1)?.onlyRenderVisibleElements).toBe(true);
   });
 
   it("shows a loading placeholder instead of the empty project prompt while project data is loading", () => {

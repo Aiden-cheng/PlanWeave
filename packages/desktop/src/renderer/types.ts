@@ -2,11 +2,8 @@ import type { Node } from "@xyflow/react";
 import type {
   DesktopAutoRunScope,
   DesktopBlockDetail,
-  DesktopBlockRunRecordSummary,
   DesktopCanvasHealthCanvasSummary,
   DesktopCanvasNodeViewModel,
-  DesktopFeedbackRecord,
-  DesktopReviewAttemptSummary,
   DesktopTaskNodeViewModel
 } from "@planweave-ai/runtime";
 import type { DesktopSettingsPatch, DesktopUiSettings } from "../shared/desktopSettings";
@@ -75,9 +72,6 @@ export type TaskNodeData = {
   selectedAgentEndpointId: string;
   labels: TaskNodeLabels;
   selectedBlock: DesktopBlockDetail | null;
-  blockRunRecords: DesktopBlockRunRecordSummary[];
-  blockReviewAttempts: DesktopReviewAttemptSummary[];
-  blockFeedbackRecords: DesktopFeedbackRecord[];
   sharedResources: string[];
   activeSharedResources: Set<string>;
   highlightedResource: string | null;

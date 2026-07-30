@@ -331,6 +331,7 @@ export function GraphView({
           edges={styledVisibleEdges}
           edgeTypes={edgeTypes}
           nodeTypes={nodeTypes}
+          onlyRenderVisibleElements
           onConnect={(connection) => void handleConnect(connection)}
           onEdgesDelete={(deletedEdges) => void handleEdgesDelete(deletedEdges)}
           onReconnect={handleReconnect}

@@ -337,9 +337,6 @@ export function ProjectWorkspaceProvider({
   );
 
   const {
-    blockFeedbackRecords,
-    blockReviewAttempts,
-    blockRunRecords,
     clearSelectedBlockRecords,
     handleBlockSelect,
     handleOpenRunRecord,
@@ -906,11 +903,6 @@ export function ProjectWorkspaceProvider({
       setEdges,
       setNodes,
       setSelectedBlock
-    },
-    records: {
-      blockFeedbackRecords,
-      blockReviewAttempts,
-      blockRunRecords
     },
     source: {
       agentEndpointCatalogErrorCode: agentEndpointCatalog.errorCode,

@@ -1,11 +1,8 @@
 import { MarkerType, type Edge, type EdgeTypes } from "@xyflow/react";
 import type {
   DesktopBlockDetail,
-  DesktopBlockRunRecordSummary,
-  DesktopFeedbackRecord,
   DesktopGraphViewModel,
-  DesktopLayout,
-  DesktopReviewAttemptSummary
+  DesktopLayout
 } from "@planweave-ai/runtime";
 import type { AssigneeSurfaceIndex } from "../collaboration/assigneeSurfaceViewModels";
 import {
@@ -185,9 +182,6 @@ export function graphNodes(
   saveStates: Record<string, TaskNodeData["saveState"]>,
   labels: TaskNodeData["labels"],
   selectedBlock: DesktopBlockDetail | null,
-  blockRunRecords: DesktopBlockRunRecordSummary[],
-  blockReviewAttempts: DesktopReviewAttemptSummary[],
-  blockFeedbackRecords: DesktopFeedbackRecord[],
   onTitleChange: TaskNodeData["onTitleChange"],
   onTitleSave: TaskNodeData["onTitleSave"],
   onAgentEndpointChange: TaskNodeData["onAgentEndpointChange"],
@@ -271,9 +265,6 @@ export function graphNodes(
             : selectedAgentEndpointIdForTask(task.taskId, task.executorLabel),
         labels,
         selectedBlock,
-        blockRunRecords,
-        blockReviewAttempts,
-        blockFeedbackRecords,
         sharedResources,
         activeSharedResources: new Set(
           sharedResources.filter((name) => activeResourceNames.has(name))

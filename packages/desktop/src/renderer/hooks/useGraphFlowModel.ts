@@ -3,11 +3,8 @@ import type { Dispatch, SetStateAction } from "react";
 import type { Edge } from "@xyflow/react";
 import type {
   DesktopBlockDetail,
-  DesktopBlockRunRecordSummary,
-  DesktopFeedbackRecord,
   DesktopGraphViewModel,
-  DesktopLayout,
-  DesktopReviewAttemptSummary
+  DesktopLayout
 } from "@planweave-ai/runtime";
 import {
   graphEdges,
@@ -39,12 +36,6 @@ type GraphFlowDrafts = {
   promptDrafts: Record<string, string>;
   saveStates: Record<string, TaskNodeData["saveState"]>;
   titleDrafts: Record<string, string>;
-};
-
-type GraphFlowRecords = {
-  blockFeedbackRecords: DesktopFeedbackRecord[];
-  blockReviewAttempts: DesktopReviewAttemptSummary[];
-  blockRunRecords: DesktopBlockRunRecordSummary[];
 };
 
 type GraphFlowTaskActions = {
@@ -82,7 +73,6 @@ type UseGraphFlowModelArgs = {
   blockActions: GraphFlowBlockActions;
   drafts: GraphFlowDrafts;
   flowState: GraphFlowState;
-  records: GraphFlowRecords;
   source: GraphFlowSource;
   taskActions: GraphFlowTaskActions;
 };
@@ -91,7 +81,6 @@ export function useGraphFlowModel({
   blockActions,
   drafts,
   flowState,
-  records,
   source,
   taskActions
 }: UseGraphFlowModelArgs) {
@@ -113,7 +102,6 @@ export function useGraphFlowModel({
   const onResourceHover = resourceUi?.onResourceHover;
   const onResourcePin = resourceUi?.onResourcePin;
   const onResourceOverflow = resourceUi?.onResourceOverflow;
-  const { blockFeedbackRecords, blockReviewAttempts, blockRunRecords } = records;
   const {
     handleDeleteBlock,
     handleDeleteTaskNode,
@@ -166,9 +154,6 @@ export function useGraphFlowModel({
         saveStates,
         taskNodeLabels(t),
         selectedBlock,
-        blockRunRecords,
-        blockReviewAttempts,
-        blockFeedbackRecords,
         handleTitleChange,
         handleTitleSave,
         handleTaskAgentEndpointChange,
@@ -204,9 +189,6 @@ export function useGraphFlowModel({
     onResourceHover,
     onResourcePin,
     onResourceOverflow,
-    blockFeedbackRecords,
-    blockReviewAttempts,
-    blockRunRecords,
     agentEndpointCatalogErrorCode,
     agentEndpointFleetCatalogError,
     agentEndpoints,
