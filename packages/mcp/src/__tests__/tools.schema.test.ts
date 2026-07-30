@@ -61,7 +61,7 @@ describe("MCP tools: schema", () => {
   });
 
   it("uses runtime schema topics in MCP get_schema input and output schemas", () => {
-    const inputSchema = z.object(planweaveToolDefinitions.get_schema.inputSchema ?? {});
+    const inputSchema = planweaveToolDefinitions.get_schema.inputSchema;
     const outputSchema = z.object(planweaveToolOutputSchemas.get_schema);
 
     for (const topic of runtimeSchemaTopicOrder) {

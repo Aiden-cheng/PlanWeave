@@ -1,5 +1,4 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import * as z from "zod/v4";
 import { planweaveToolDefinitions } from "./toolDefinitions.js";
 import { planweaveToolOutputSchemas } from "./toolSchemas.js";
 import {
@@ -21,17 +20,16 @@ export function registerPlanweaveTools(
 ): void {
   for (const name of toolNamesForDiscoveryMode(options.discoveryMode ?? "default")) {
     const definition = planweaveToolDefinitions[name];
-    const inputSchema = z.strictObject(definition.inputSchema ?? {});
     server.registerTool(
       name,
       {
         title: definition.title,
         description: definition.description,
-        inputSchema,
+        inputSchema: definition.inputSchema,
         outputSchema: planweaveToolOutputSchemas[name],
         annotations: definition.annotations
       },
-      async (args) => handlePlanweaveTool(name, args)
+      async (args: unknown) => handlePlanweaveTool(name, args)
     );
   }
 }

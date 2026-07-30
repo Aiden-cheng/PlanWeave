@@ -19,7 +19,20 @@ export const planweaveToolDefinitionRegistries = [
   debugToolDefinitions
 ] as const;
 
-export const planweaveToolDefinitions = buildToolContractRegistry<ToolDefinition>(
+type UnionToIntersection<Value> = (
+  Value extends unknown ? (value: Value) => void : never
+) extends (value: infer Intersection) => void
+  ? Intersection
+  : never;
+
+type PlanweaveToolDefinitionRegistry = UnionToIntersection<
+  (typeof planweaveToolDefinitionRegistries)[number]
+>;
+
+export const planweaveToolDefinitions = buildToolContractRegistry<
+  ToolDefinition,
+  PlanweaveToolDefinitionRegistry
+>(
   planweaveToolDefinitionRegistries,
   planweaveToolNames,
   "PlanWeave tool definition"

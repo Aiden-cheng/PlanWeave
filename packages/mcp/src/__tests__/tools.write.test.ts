@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import * as z from "zod/v4";
 import { createGateway, readJson } from "./toolTestHelpers.js";
 import { planweaveToolDefinitions } from "../toolDefinitions.js";
 import { handlePlanweaveTool } from "../tools.js";
@@ -210,71 +209,73 @@ describe("MCP tools: write tools", () => {
     });
   });
 
-  it("uses update_review_pipeline input defaults in both definition and parser paths", async () => {
-    const gateway = createGateway();
-    const input = {
-      projectId: " project-1 ",
-      canvasId: " default ",
-      taskId: " T-001 ",
-      steps: [
-        {
-          blockRef: " T-001#R-001 ",
-          title: " Architecture review ",
-          preset: " architecture ",
-          inputContext: " implementation report ",
-          passCriteria: " Boundaries remain clear. ",
-          feedbackFormat: " Findings by severity. ",
-          promptMarkdown: "# Architecture review"
-        }
-      ]
-    };
-    const definitionShape = planweaveToolDefinitions.update_review_pipeline.inputSchema;
+  it.each(["update_review_pipeline", "set_review_pipeline"] as const)(
+    "uses %s input defaults in both definition and parser paths",
+    async (name) => {
+      const gateway = createGateway();
+      const input = {
+        projectId: " project-1 ",
+        canvasId: " default ",
+        taskId: " T-001 ",
+        steps: [
+          {
+            blockRef: " T-001#R-001 ",
+            title: " Architecture review ",
+            preset: " architecture ",
+            inputContext: " implementation report ",
+            passCriteria: " Boundaries remain clear. ",
+            feedbackFormat: " Findings by severity. ",
+            promptMarkdown: "# Architecture review"
+          }
+        ]
+      };
+      const definitionSchema = planweaveToolDefinitions[name].inputSchema;
 
-    expect(definitionShape).toBeDefined();
-    expect(z.object(definitionShape!).parse(input)).toMatchObject({
-      projectId: "project-1",
-      canvasId: "default",
-      taskId: "T-001",
-      steps: [
-        {
-          blockId: "R-001",
-          blockRef: "T-001#R-001",
-          title: "Architecture review",
-          enabled: true,
-          preset: "architecture",
-          triggerCondition: "after_required_work_completed",
-          inputContext: "implementation report",
-          passCriteria: "Boundaries remain clear.",
-          feedbackFormat: "Findings by severity.",
-          maxFeedbackCycles: 1,
-          hook: null,
-          promptMarkdown: "# Architecture review"
-        }
-      ]
-    });
+      expect(definitionSchema.parse(input)).toMatchObject({
+        projectId: "project-1",
+        canvasId: "default",
+        taskId: "T-001",
+        steps: [
+          {
+            blockId: "R-001",
+            blockRef: "T-001#R-001",
+            title: "Architecture review",
+            enabled: true,
+            preset: "architecture",
+            triggerCondition: "after_required_work_completed",
+            inputContext: "implementation report",
+            passCriteria: "Boundaries remain clear.",
+            feedbackFormat: "Findings by severity.",
+            maxFeedbackCycles: 1,
+            hook: null,
+            promptMarkdown: "# Architecture review"
+          }
+        ]
+      });
 
-    await handlePlanweaveTool("update_review_pipeline", input, gateway);
+      await handlePlanweaveTool(name, input, gateway);
 
-    expect(gateway.updateReviewPipeline).toHaveBeenCalledWith("project-1", "default", "T-001", {
-      packageDefaults: undefined,
-      steps: [
-        {
-          blockId: "R-001",
-          blockRef: "T-001#R-001",
-          title: "Architecture review",
-          enabled: true,
-          preset: "architecture",
-          triggerCondition: "after_required_work_completed",
-          inputContext: "implementation report",
-          passCriteria: "Boundaries remain clear.",
-          feedbackFormat: "Findings by severity.",
-          maxFeedbackCycles: 1,
-          hook: null,
-          promptMarkdown: "# Architecture review"
-        }
-      ]
-    });
-  });
+      expect(gateway.updateReviewPipeline).toHaveBeenCalledWith("project-1", "default", "T-001", {
+        packageDefaults: undefined,
+        steps: [
+          {
+            blockId: "R-001",
+            blockRef: "T-001#R-001",
+            title: "Architecture review",
+            enabled: true,
+            preset: "architecture",
+            triggerCondition: "after_required_work_completed",
+            inputContext: "implementation report",
+            passCriteria: "Boundaries remain clear.",
+            feedbackFormat: "Findings by severity.",
+            maxFeedbackCycles: 1,
+            hook: null,
+            promptMarkdown: "# Architecture review"
+          }
+        ]
+      });
+    }
+  );
 
   it("normalizes target write tool inputs through shared schemas", async () => {
     const gateway = createGateway();

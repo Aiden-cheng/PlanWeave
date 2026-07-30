@@ -82,7 +82,7 @@ export const createBlockFieldsShape = {
   dependsOn: optionalStringArraySchema
 } satisfies z.core.$ZodLooseShape;
 
-export const createBlockFieldsSchema = z.object(createBlockFieldsShape);
+export const createBlockFieldsSchema = z.strictObject(createBlockFieldsShape);
 
 export const taskAcceptanceFieldsShape = {
   acceptance: requiredStringArraySchema.min(1, {
@@ -106,7 +106,7 @@ export const blockPlanningFieldsShape = {
 } satisfies z.core.$ZodLooseShape;
 
 export const blockPlanningFieldsSchema = z
-  .object(blockPlanningFieldsShape)
+  .strictObject(blockPlanningFieldsShape)
   .refine(hasPlanningField, {
     message: "At least one block planning field must be provided."
   });
@@ -118,7 +118,7 @@ export const canvasExecutionPolicyFieldsShape = {
 } satisfies z.core.$ZodLooseShape;
 
 export const canvasExecutionPolicyFieldsSchema = z
-  .object(canvasExecutionPolicyFieldsShape)
+  .strictObject(canvasExecutionPolicyFieldsShape)
   .refine(hasExecutionPolicyField, {
     message: "At least one execution policy field must be provided."
   });
@@ -276,12 +276,14 @@ const bulkParallelPolicyFieldsSchema = z
     }
   });
 
-// --- Advertised input shapes for full tools (where useful) ---
+// --- Canonical full schemas for public tools ---
 
 export const createBlockInputShape = {
   ...projectCanvasInputShape,
   ...createBlockFieldsShape
 } satisfies z.core.$ZodLooseShape;
+
+export const createBlockToolInputSchema = z.strictObject(createBlockInputShape);
 
 export const updateTaskAcceptanceInputShape = {
   ...projectCanvasInputShape,
@@ -300,11 +302,26 @@ export const updateCanvasExecutionPolicyInputShape = {
   ...canvasExecutionPolicyFieldsShape
 } satisfies z.core.$ZodLooseShape;
 
+export const updateCanvasExecutionPolicyToolInputSchema = z
+  .strictObject(updateCanvasExecutionPolicyInputShape)
+  .refine(hasExecutionPolicyField, {
+    message: "At least one execution policy field must be provided."
+  });
+
 export const updateBlockPlanningInputShape = {
   ...projectCanvasInputShape,
   ...blockTargetShape,
   ...blockPlanningFieldsShape
 } satisfies z.core.$ZodLooseShape;
+
+export const updateBlockPlanningToolInputSchema = z
+  .strictObject(updateBlockPlanningInputShape)
+  .refine(hasBlockTarget, {
+    message: "blockRef is required unless taskId and blockId are provided."
+  })
+  .refine(hasPlanningField, {
+    message: "At least one block planning field must be provided."
+  });
 
 export const projectTaskRefsInputShape = {
   projectId: requiredTrimmedStringSchema,
@@ -379,7 +396,15 @@ export type ParsedReviewPipelineBulkUpdate = {
 // --- Parsers ---
 
 export function parseCreateBlockInput(record: Record<string, unknown>): ParsedCreateBlockInput {
-  return createBlockFieldsSchema.parse(record);
+  const parsed = createBlockToolInputSchema.parse(record);
+  return {
+    taskId: parsed.taskId,
+    type: parsed.type,
+    title: parsed.title,
+    promptMarkdown: parsed.promptMarkdown,
+    executor: parsed.executor,
+    dependsOn: parsed.dependsOn
+  };
 }
 
 export function parseTaskAcceptanceInput(record: Record<string, unknown>): string[] {
@@ -391,7 +416,7 @@ export function parseBlockDependenciesInput(record: Record<string, unknown>): st
 }
 
 export function parseBlockPlanningInput(record: Record<string, unknown>): ParsedBlockPlanningInput {
-  const parsed = blockPlanningFieldsSchema.parse(record);
+  const parsed = updateBlockPlanningToolInputSchema.parse(record);
   return {
     sharedResources: parsed.sharedResources,
     reviewRequired: parsed.reviewRequired,
@@ -403,7 +428,7 @@ export function parseBlockPlanningInput(record: Record<string, unknown>): Parsed
 export function parseCanvasExecutionPolicyInput(
   record: Record<string, unknown>
 ): ParsedCanvasExecutionPolicyInput {
-  const parsed = canvasExecutionPolicyFieldsSchema.parse(record);
+  const parsed = updateCanvasExecutionPolicyToolInputSchema.parse(record);
   return {
     defaultExecutor: parsed.defaultExecutor,
     parallelEnabled: parsed.parallelEnabled,

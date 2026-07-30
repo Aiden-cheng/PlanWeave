@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   compatPlanweaveToolNames,
   debugPlanweaveToolNames,
@@ -10,15 +10,15 @@ import { planweaveToolDefinitionRegistries, planweaveToolDefinitions } from "../
 import { buildToolContractRegistry } from "../toolContracts/registry.js";
 import type { ToolDefinition } from "../toolContracts/types.js";
 import {
-  createTaskInputShape,
-  updateBlockInputShape,
-  updateReviewPipelineInputShape,
-  updateTaskInputShape
+  createTaskToolInputSchema,
+  updateBlockToolInputSchema,
+  updateReviewPipelineToolInputSchema,
+  updateTaskToolInputSchema
 } from "../toolInputSchemas.js";
 import {
-  createBlockInputShape,
-  updateBlockPlanningInputShape,
-  updateCanvasExecutionPolicyInputShape
+  createBlockToolInputSchema,
+  updateBlockPlanningToolInputSchema,
+  updateCanvasExecutionPolicyToolInputSchema
 } from "../toolStructuredEditSchemas.js";
 import { planweaveToolHandlerRegistries, planweaveToolHandlers } from "../toolDispatcher.js";
 import { planweaveToolOutputSchemaRegistries, planweaveToolOutputSchemas } from "../toolSchemas.js";
@@ -62,29 +62,29 @@ function duplicateNames(counts: ReadonlyMap<string, number>): string[] {
     .sort();
 }
 
-const parserBackedInputShapes = {
-  create_task: { parser: "parseCreateTaskToolArgs", shape: createTaskInputShape },
-  update_task: { parser: "parseUpdateTaskToolArgs", shape: updateTaskInputShape },
-  update_block: { parser: "parseUpdateBlockToolArgs", shape: updateBlockInputShape },
+const parserBackedInputSchemas = {
+  create_task: { parser: "parseCreateTaskToolArgs", schema: createTaskToolInputSchema },
+  update_task: { parser: "parseUpdateTaskToolArgs", schema: updateTaskToolInputSchema },
+  update_block: { parser: "parseUpdateBlockToolArgs", schema: updateBlockToolInputSchema },
   update_review_pipeline: {
     parser: "parseUpdateReviewPipelineToolArgs",
-    shape: updateReviewPipelineInputShape
+    schema: updateReviewPipelineToolInputSchema
   },
   set_review_pipeline: {
     parser: "parseUpdateReviewPipelineToolArgs",
-    shape: updateReviewPipelineInputShape
+    schema: updateReviewPipelineToolInputSchema
   },
-  create_block: { parser: "parseCreateBlockInput", shape: createBlockInputShape },
+  create_block: { parser: "parseCreateBlockInput", schema: createBlockToolInputSchema },
   update_canvas_execution_policy: {
     parser: "parseCanvasExecutionPolicyInput",
-    shape: updateCanvasExecutionPolicyInputShape
+    schema: updateCanvasExecutionPolicyToolInputSchema
   },
   update_block_planning: {
     parser: "parseBlockPlanningInput",
-    shape: updateBlockPlanningInputShape
+    schema: updateBlockPlanningToolInputSchema
   }
 } satisfies Partial<
-  Record<PlanweaveToolName, { parser: string; shape: NonNullable<ToolDefinition["inputSchema"]> }>
+  Record<PlanweaveToolName, { parser: string; schema: ToolDefinition["inputSchema"] }>
 >;
 
 describe("MCP tool contracts", () => {
@@ -104,7 +104,7 @@ describe("MCP tool contracts", () => {
       const definition = planweaveToolDefinitions[name];
       const outputSchema = planweaveToolOutputSchemas[name];
       const handler = planweaveToolHandlers[name];
-      const parserBackedInputShape = parserBackedInputShapes[name];
+      const parserBackedInputSchema = parserBackedInputSchemas[name];
       const discovery = compatTools.has(name) ? "compat" : "default";
       return {
         name,
@@ -116,7 +116,7 @@ describe("MCP tool contracts", () => {
         definitionOwners: definitionOwners.get(name) ?? [],
         outputSchemaOwners: outputSchemaOwners.get(name) ?? [],
         handlerOwners: handlerOwners.get(name) ?? [],
-        parserBackedInputShape
+        parserBackedInputSchema
       };
     });
 
@@ -225,11 +225,11 @@ describe("MCP tool contracts", () => {
         failures.push(`${row.name}: definition annotations must be present`);
       }
       if (
-        row.parserBackedInputShape &&
-        row.definition.inputSchema !== row.parserBackedInputShape.shape
+        row.parserBackedInputSchema &&
+        row.definition.inputSchema !== row.parserBackedInputSchema.schema
       ) {
         failures.push(
-          `${row.name}: definition inputSchema must use ${row.parserBackedInputShape.parser} shared input shape`
+          `${row.name}: definition inputSchema must use ${row.parserBackedInputSchema.parser} canonical input schema`
         );
       }
       if (row.debugHeavy && row.discovery !== "compat") {
@@ -249,6 +249,18 @@ describe("MCP tool contracts", () => {
     expect([...counts.keys()].sort()).toEqual([...planweaveToolNames].sort());
     expect([...counts.entries()].filter(([, count]) => count !== 1)).toEqual([]);
     expect(Object.keys(planweaveToolDefinitions).sort()).toEqual([...planweaveToolNames].sort());
+  });
+
+  it("preserves canonical parser schema types through the aggregate registry", () => {
+    expectTypeOf(planweaveToolDefinitions.update_review_pipeline.inputSchema).toEqualTypeOf<
+      typeof updateReviewPipelineToolInputSchema
+    >();
+    expectTypeOf(planweaveToolDefinitions.set_review_pipeline.inputSchema).toEqualTypeOf<
+      typeof updateReviewPipelineToolInputSchema
+    >();
+    expectTypeOf(planweaveToolDefinitions.update_task.inputSchema).toEqualTypeOf<
+      typeof updateTaskToolInputSchema
+    >();
   });
 
   it("registers every output schema exactly once", () => {

@@ -1,12 +1,12 @@
 import * as z from "zod/v4";
 import { projectInput } from "./inputShapes.js";
 import {
+  defineToolDefinitions,
   readOnlyAnnotations,
-  writeAnnotations,
-  type PlanweavePartialToolDefinitionRegistry
+  writeAnnotations
 } from "./types.js";
 
-export const projectToolDefinitions = {
+export const projectToolDefinitions = defineToolDefinitions({
   get_project_tree: {
     title: "Get PlanWeave Project Tree",
     description:
@@ -120,4 +120,4 @@ export const projectToolDefinitions = {
     },
     annotations: writeAnnotations
   }
-} satisfies PlanweavePartialToolDefinitionRegistry;
+});

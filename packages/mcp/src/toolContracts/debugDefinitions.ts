@@ -1,11 +1,11 @@
 import { blockRefInput, projectCanvasInput, projectInput } from "./inputShapes.js";
 import {
+  defineToolDefinitions,
   readOnlyAnnotations,
-  writeAnnotations,
-  type PlanweavePartialToolDefinitionRegistry
+  writeAnnotations
 } from "./types.js";
 
-export const debugToolDefinitions = {
+export const debugToolDefinitions = defineToolDefinitions({
   get_project_graph_full_debug: {
     title: "Get PlanWeave Project Graph Full Debug",
     description:
@@ -40,4 +40,4 @@ export const debugToolDefinitions = {
     inputSchema: projectCanvasInput,
     annotations: readOnlyAnnotations
   }
-} satisfies PlanweavePartialToolDefinitionRegistry;
+});

@@ -3,6 +3,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { registerPlanweaveTools } from "../toolRegistry.js";
+import { defaultPlanweaveToolNames } from "../tools.js";
 
 let client: Client | undefined;
 let server: McpServer | undefined;
@@ -55,18 +56,84 @@ describe("PlanWeave MCP tool registry", () => {
     expect(errorText).toContain("Unrecognized key");
   });
 
-  it("publishes strict input schemas for registered tools", async () => {
+  it("publishes strict input schemas for every registered tool", async () => {
     const registryClient = await connectRegistry();
     const tools = await registryClient.listTools();
 
-    for (const name of [
-      "update_block_planning",
-      "bulk_update_blocks",
-      "bulk_update_parallel_policy"
-    ]) {
-      expect(tools.tools.find((tool) => tool.name === name)?.inputSchema).toMatchObject({
+    expect(tools.tools.map((tool) => tool.name).sort()).toEqual([...defaultPlanweaveToolNames].sort());
+    for (const tool of tools.tools) {
+      expect(tool.inputSchema).toMatchObject({
         additionalProperties: false
       });
     }
+  });
+
+  it.each([
+    ["update_task", { projectId: "project-1", taskId: "T-001" }, "At least one of title"],
+    [
+      "update_block",
+      { projectId: "project-1", title: "Updated" },
+      "blockRef is required unless taskId and blockId are provided."
+    ],
+    [
+      "update_canvas_execution_policy",
+      { projectId: "project-1" },
+      "At least one execution policy field must be provided."
+    ],
+    [
+      "update_block_planning",
+      { projectId: "project-1", blockRef: "T-001#B-001" },
+      "At least one block planning field must be provided."
+    ],
+    [
+      "set_review_pipeline",
+      {
+        projectId: "project-1",
+        taskId: "T-001",
+        steps: [
+          {
+            blockRef: "not-a-block-ref",
+            title: "Review",
+            preset: "architecture",
+            inputContext: "Implementation report",
+            passCriteria: "Clear boundaries",
+            feedbackFormat: "Findings",
+            promptMarkdown: "# Review"
+          }
+        ]
+      },
+      "blockRef must use '<taskId>#<blockId>'."
+    ]
+  ] as const)("enforces %s parser refinements at the registered boundary", async (name, args, message) => {
+    const registryClient = await connectRegistry();
+
+    const result = await registryClient.callTool({ name, arguments: args });
+    const errorText = result.content
+      .map((content) => (content.type === "text" ? content.text : ""))
+      .join("\n");
+
+    expect(result).toMatchObject({ isError: true });
+    expect(errorText).toContain("MCP error -32602");
+    expect(errorText).toContain(message);
+  });
+
+  it("rejects unknown fields through the set_review_pipeline alias", async () => {
+    const registryClient = await connectRegistry();
+    const result = await registryClient.callTool({
+      name: "set_review_pipeline",
+      arguments: {
+        projectId: "project-1",
+        taskId: "T-001",
+        steps: [],
+        legacy: true
+      }
+    });
+    const errorText = result.content
+      .map((content) => (content.type === "text" ? content.text : ""))
+      .join("\n");
+
+    expect(result).toMatchObject({ isError: true });
+    expect(errorText).toContain("MCP error -32602");
+    expect(errorText).toContain("Unrecognized key");
   });
 });

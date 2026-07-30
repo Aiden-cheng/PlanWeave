@@ -131,19 +131,19 @@ export const updateReviewPipelineInputShape = {
   steps: z.array(reviewPipelineStepInputSchema)
 } satisfies z.core.$ZodLooseShape;
 
-const createTaskInputSchema = z.object(createTaskInputShape);
-const updateTaskInputSchema = z.object(updateTaskInputShape).refine(hasUpdateField, {
+export const createTaskToolInputSchema = z.strictObject(createTaskInputShape);
+export const updateTaskToolInputSchema = z.strictObject(updateTaskInputShape).refine(hasUpdateField, {
   message: "At least one of title, promptMarkdown, or executor must be provided."
 });
-const updateBlockInputSchema = z
-  .object(updateBlockInputShape)
+export const updateBlockToolInputSchema = z
+  .strictObject(updateBlockInputShape)
   .refine(hasBlockTarget, {
     message: "blockRef is required unless taskId and blockId are provided."
   })
   .refine(hasUpdateField, {
     message: "At least one of title, promptMarkdown, or executor must be provided."
   });
-const updateReviewPipelineInputSchema = z.object(updateReviewPipelineInputShape);
+export const updateReviewPipelineToolInputSchema = z.strictObject(updateReviewPipelineInputShape);
 
 export type ParsedCreateTaskToolArgs = {
   projectId: string;
@@ -179,7 +179,7 @@ export type ParsedUpdateReviewPipelineToolArgs = {
 };
 
 export function parseCreateTaskToolArgs(record: Record<string, unknown>): ParsedCreateTaskToolArgs {
-  const parsed = createTaskInputSchema.parse(record);
+  const parsed = createTaskToolInputSchema.parse(record);
   return {
     projectId: parsed.projectId,
     canvasId: parsed.canvasId,
@@ -194,7 +194,7 @@ export function parseCreateTaskToolArgs(record: Record<string, unknown>): Parsed
 }
 
 export function parseUpdateTaskToolArgs(record: Record<string, unknown>): ParsedUpdateTaskToolArgs {
-  const parsed = updateTaskInputSchema.parse(record);
+  const parsed = updateTaskToolInputSchema.parse(record);
   return {
     projectId: parsed.projectId,
     canvasId: parsed.canvasId,
@@ -206,7 +206,7 @@ export function parseUpdateTaskToolArgs(record: Record<string, unknown>): Parsed
 export function parseUpdateBlockToolArgs(
   record: Record<string, unknown>
 ): ParsedUpdateBlockToolArgs {
-  const parsed = updateBlockInputSchema.parse(record);
+  const parsed = updateBlockToolInputSchema.parse(record);
   return {
     projectId: parsed.projectId,
     canvasId: parsed.canvasId,
@@ -218,7 +218,7 @@ export function parseUpdateBlockToolArgs(
 export function parseUpdateReviewPipelineToolArgs(
   record: Record<string, unknown>
 ): ParsedUpdateReviewPipelineToolArgs {
-  const parsed = updateReviewPipelineInputSchema.parse(record);
+  const parsed = updateReviewPipelineToolInputSchema.parse(record);
   return {
     projectId: parsed.projectId,
     canvasId: parsed.canvasId,

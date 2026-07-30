@@ -1,11 +1,5 @@
 import * as z from "zod/v4";
 import {
-  createTaskInputShape,
-  updateBlockInputShape,
-  updateReviewPipelineInputShape,
-  updateTaskInputShape
-} from "../toolInputSchemas.js";
-import {
   blockDependencyRefSchema,
   blockDependencyUpdateSchema,
   bulkCreateBlockSchema,
@@ -116,11 +110,4 @@ export const promptSourceWriteInput = {
   taskId: z.string().min(1).optional(),
   blockRef: z.string().min(1).optional(),
   markdown: z.string()
-};
-
-export {
-  createTaskInputShape,
-  updateBlockInputShape,
-  updateReviewPipelineInputShape,
-  updateTaskInputShape
 };

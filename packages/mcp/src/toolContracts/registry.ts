@@ -1,10 +1,13 @@
 import type { PlanweaveToolName } from "../toolTypes.js";
 
-export function buildToolContractRegistry<T>(
+export function buildToolContractRegistry<
+  T,
+  Result extends Record<PlanweaveToolName, T> = Record<PlanweaveToolName, T>
+>(
   registries: readonly Readonly<Record<string, T | undefined>>[],
   allToolNames: readonly PlanweaveToolName[],
   label: string
-): Record<PlanweaveToolName, T> {
+): Result {
   const allowedNames = new Set<string>(allToolNames);
   const contracts: Partial<Record<PlanweaveToolName, T>> = {};
   const duplicates: string[] = [];
@@ -40,5 +43,5 @@ export function buildToolContractRegistry<T>(
     throw new Error(`Missing ${label}(s): ${missing.join(", ")}`);
   }
 
-  return contracts as Record<PlanweaveToolName, T>;
+  return contracts as Result;
 }

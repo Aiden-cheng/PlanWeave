@@ -1,10 +1,16 @@
 import * as z from "zod/v4";
 import {
   canvasExecutionPolicyFieldsShape,
-  createBlockInputShape,
-  updateBlockPlanningInputShape,
-  updateCanvasExecutionPolicyInputShape
+  createBlockToolInputSchema,
+  updateBlockPlanningToolInputSchema,
+  updateCanvasExecutionPolicyToolInputSchema
 } from "../toolStructuredEditSchemas.js";
+import {
+  createTaskToolInputSchema,
+  updateBlockToolInputSchema,
+  updateReviewPipelineToolInputSchema,
+  updateTaskToolInputSchema
+} from "../toolInputSchemas.js";
 import {
   blockDependencyRefSchema,
   blockDependencyUpdateSchema,
@@ -13,7 +19,6 @@ import {
   bulkCreateTaskSchema,
   bulkUpdateBlockSchema,
   bulkUpdateTaskSchema,
-  createTaskInputShape,
   graphGatePolicySchema,
   graphHeuristicsSchema,
   graphReadInput,
@@ -25,17 +30,14 @@ import {
   semanticTaskDependencyInput,
   taskDependencyEdgeSchema,
   taskDependencyUpdateSchema,
-  updateBlockInputShape,
-  updateReviewPipelineInputShape,
-  updateTaskInputShape
 } from "./inputShapes.js";
 import {
+  defineToolDefinitions,
   readOnlyAnnotations,
-  writeAnnotations,
-  type PlanweavePartialToolDefinitionRegistry
+  writeAnnotations
 } from "./types.js";
 
-export const graphToolDefinitions = {
+export const graphToolDefinitions = defineToolDefinitions({
   preview_execution_graph: {
     title: "Preview PlanWeave Execution Graph",
     description:
@@ -117,26 +119,26 @@ export const graphToolDefinitions = {
   update_review_pipeline: {
     title: "Update PlanWeave Review Pipeline",
     description: "Replace review gate steps and package review defaults for a task.",
-    inputSchema: updateReviewPipelineInputShape,
+    inputSchema: updateReviewPipelineToolInputSchema,
     annotations: writeAnnotations
   },
   set_review_pipeline: {
     title: "Set PlanWeave Review Pipeline",
     description: "Preferred replacement-name alias for update_review_pipeline.",
-    inputSchema: updateReviewPipelineInputShape,
+    inputSchema: updateReviewPipelineToolInputSchema,
     annotations: writeAnnotations
   },
   create_task: {
     title: "Create PlanWeave Task",
     description: "Create a task node and initial blocks in the selected canvas.",
-    inputSchema: createTaskInputShape,
+    inputSchema: createTaskToolInputSchema,
     annotations: writeAnnotations
   },
   update_task: {
     title: "Update PlanWeave Task",
     description:
       "Update a task title, prompt markdown, or executor. Use promptMarkdown here instead of a separate prompt-writing tool.",
-    inputSchema: updateTaskInputShape,
+    inputSchema: updateTaskToolInputSchema,
     annotations: writeAnnotations
   },
   update_task_acceptance: {
@@ -158,28 +160,28 @@ export const graphToolDefinitions = {
   create_block: {
     title: "Create PlanWeave Block",
     description: "Create an implementation or review block under a task.",
-    inputSchema: createBlockInputShape,
+    inputSchema: createBlockToolInputSchema,
     annotations: writeAnnotations
   },
   update_block: {
     title: "Update PlanWeave Block",
     description:
       "Update a block title, prompt markdown, or executor. Use promptMarkdown here instead of a separate prompt-writing tool.",
-    inputSchema: updateBlockInputShape,
+    inputSchema: updateBlockToolInputSchema,
     annotations: writeAnnotations
   },
   update_canvas_execution_policy: {
     title: "Update PlanWeave Canvas Execution Policy",
     description:
       "Update selected top-level manifest execution policy fields for one canvas. Use update_block_planning for per-block shared resource coordination hints.",
-    inputSchema: updateCanvasExecutionPolicyInputShape,
+    inputSchema: updateCanvasExecutionPolicyToolInputSchema,
     annotations: writeAnnotations
   },
   update_block_planning: {
     title: "Update PlanWeave Block Planning",
     description:
       "Update per-block shared resource coordination hints or review block planning fields. Shared resources do not affect readiness or dispatchability.",
-    inputSchema: updateBlockPlanningInputShape,
+    inputSchema: updateBlockPlanningToolInputSchema,
     annotations: writeAnnotations
   },
   update_block_dependencies: {
@@ -335,4 +337,4 @@ export const graphToolDefinitions = {
     },
     annotations: writeAnnotations
   }
-} satisfies PlanweavePartialToolDefinitionRegistry;
+});

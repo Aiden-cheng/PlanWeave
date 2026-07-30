@@ -5,9 +5,9 @@ import {
   projectInput,
   searchResultKindSchema
 } from "./inputShapes.js";
-import { readOnlyAnnotations, type PlanweavePartialToolDefinitionRegistry } from "./types.js";
+import { defineToolDefinitions, readOnlyAnnotations } from "./types.js";
 
-export const readToolDefinitions = {
+export const readToolDefinitions = defineToolDefinitions({
   validate_project: {
     title: "Validate PlanWeave Project",
     description: "Validate a registered PlanWeave project by projectId.",
@@ -50,4 +50,4 @@ export const readToolDefinitions = {
     inputSchema: projectCanvasInput,
     annotations: readOnlyAnnotations
   }
-} satisfies PlanweavePartialToolDefinitionRegistry;
+});

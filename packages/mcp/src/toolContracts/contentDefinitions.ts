@@ -11,12 +11,12 @@ import {
   taskPromptInput
 } from "./inputShapes.js";
 import {
+  defineToolDefinitions,
   readOnlyAnnotations,
-  writeAnnotations,
-  type PlanweavePartialToolDefinitionRegistry
+  writeAnnotations
 } from "./types.js";
 
-export const contentToolDefinitions = {
+export const contentToolDefinitions = defineToolDefinitions({
   get_prompt: {
     title: "Get PlanWeave Rendered Prompt",
     description:
@@ -194,4 +194,4 @@ export const contentToolDefinitions = {
     inputSchema: { ...projectCanvasInput, draftRoot: z.string().min(1), apply: z.literal(true) },
     annotations: writeAnnotations
   }
-} satisfies PlanweavePartialToolDefinitionRegistry;
+});

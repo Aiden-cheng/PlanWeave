@@ -1,8 +1,8 @@
 import * as z from "zod/v4";
 import { runtimeSchemaTopicOrder } from "@planweave-ai/runtime";
-import { readOnlyAnnotations, type PlanweavePartialToolDefinitionRegistry } from "./types.js";
+import { defineToolDefinitions, readOnlyAnnotations } from "./types.js";
 
-export const authoringToolDefinitions = {
+export const authoringToolDefinitions = defineToolDefinitions({
   list_tool_groups: {
     title: "List PlanWeave Tool Groups",
     description:
@@ -39,4 +39,4 @@ export const authoringToolDefinitions = {
       "Compatibility alias that returns the basic importable PlanWeave package file set. Prefer get_plan_package_examples for template discovery.",
     annotations: readOnlyAnnotations
   }
-} satisfies PlanweavePartialToolDefinitionRegistry;
+});
