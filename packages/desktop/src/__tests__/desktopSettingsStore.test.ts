@@ -118,6 +118,29 @@ describe("DesktopSettingsStore", () => {
     });
   });
 
+  it("persists collaboration scope disclosure settings", async () => {
+    const home = await tempHome();
+    const store = testStore(join(home, "config", "desktop-settings.json"));
+
+    await store.mergePatch({
+      layout: {
+        collaborationScope: {
+          collapsed: true,
+          collapsedProjectIds: ["project-a", "project-a", "project-b"]
+        }
+      }
+    });
+
+    await expect(store.read()).resolves.toMatchObject({
+      layout: {
+        collaborationScope: {
+          collapsed: true,
+          collapsedProjectIds: ["project-a", "project-b"]
+        }
+      }
+    });
+  });
+
   it("normalizes and applies PlanWeave Home settings", async () => {
     const home = await tempHome();
     const configuredHome = join(home, "custom-home");

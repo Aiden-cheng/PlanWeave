@@ -1393,6 +1393,10 @@ export const enCatalog = {
   localServerScopeHint:
     "Choose exactly which canvases this device hosts. Hosting makes a canvas available to the server; its private/shared permission remains explicit below.",
   localServerSelectedCount: "{count} selected",
+  localServerScopeExpand: "Show hosted canvas selection",
+  localServerScopeCollapse: "Hide hosted canvas selection",
+  localServerProjectExpand: "Show canvases in {project}",
+  localServerProjectCollapse: "Hide canvases in {project}",
   localServerCurrentCanvas: "Current",
   localServerHosted: "Hosted",
   localServerPrivate: "Not hosted",

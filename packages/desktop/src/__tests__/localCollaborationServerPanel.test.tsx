@@ -14,6 +14,8 @@ const profile = {
   serverBaseUrl: "http://127.0.0.1:8787/",
   allowInsecureTransport: true
 };
+const expandedScopeLayout = { collapsed: false, collapsedProjectIds: [] };
+const onScopeLayoutChange = vi.fn();
 afterEach(cleanup);
 
 function api(overrides: Partial<PlanWeaveCollaborationApi> = {}): PlanWeaveCollaborationApi {
@@ -97,6 +99,8 @@ describe("LocalCollaborationServerPanel", () => {
         t={createTranslator("en")}
         projectId="project-1"
         canvasId="canvas-1"
+        scopeLayout={expandedScopeLayout}
+        onScopeLayoutChange={onScopeLayoutChange}
       />
     );
 
@@ -131,6 +135,8 @@ describe("LocalCollaborationServerPanel", () => {
         t={createTranslator("en")}
         projectId="project-1"
         canvasId="canvas-1"
+        scopeLayout={expandedScopeLayout}
+        onScopeLayoutChange={onScopeLayoutChange}
       />
     );
     await userEvent.click(await screen.findByRole("button", { name: "Start with 1 canvases" }));
@@ -164,6 +170,8 @@ describe("LocalCollaborationServerPanel", () => {
         t={createTranslator("en")}
         projectId="project-1"
         canvasId="canvas-1"
+        scopeLayout={expandedScopeLayout}
+        onScopeLayoutChange={onScopeLayoutChange}
       />
     );
     await userEvent.click(await screen.findByRole("button", { name: "Enable current canvas" }));
@@ -171,5 +179,59 @@ describe("LocalCollaborationServerPanel", () => {
       "local_collaboration_owner_initialization_required"
     );
     expect(collaborationApi.registerLocalCollaborationCurrentProject).toHaveBeenCalledTimes(1);
+  });
+
+  it("persists the catalog and per-project disclosure state", async () => {
+    const collaborationApi = api();
+    const onLayoutChange = vi.fn();
+    const { rerender } = render(
+      <LocalCollaborationServerPanel
+        api={collaborationApi}
+        t={createTranslator("en")}
+        projectId="project-1"
+        canvasId="canvas-1"
+        scopeLayout={expandedScopeLayout}
+        onScopeLayoutChange={onLayoutChange}
+      />
+    );
+
+    expect(
+      await screen.findByRole("checkbox", { name: "Project One / Canvas One" })
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Hide hosted canvas selection" }));
+    expect(onLayoutChange).toHaveBeenLastCalledWith({ collapsed: true });
+
+    rerender(
+      <LocalCollaborationServerPanel
+        api={collaborationApi}
+        t={createTranslator("en")}
+        projectId="project-1"
+        canvasId="canvas-1"
+        scopeLayout={{ collapsed: true, collapsedProjectIds: [] }}
+        onScopeLayoutChange={onLayoutChange}
+      />
+    );
+    expect(screen.queryByTestId("local-collaboration-scope-catalog")).not.toBeInTheDocument();
+
+    rerender(
+      <LocalCollaborationServerPanel
+        api={collaborationApi}
+        t={createTranslator("en")}
+        projectId="project-1"
+        canvasId="canvas-1"
+        scopeLayout={{ collapsed: false, collapsedProjectIds: ["desktop-project-1"] }}
+        onScopeLayoutChange={onLayoutChange}
+      />
+    );
+    expect(screen.getByRole("button", { name: "Show canvases in Project One" })).toHaveAttribute(
+      "aria-expanded",
+      "false"
+    );
+    expect(
+      screen.queryByRole("checkbox", { name: "Project One / Canvas One" })
+    ).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Show canvases in Project One" }));
+    expect(onLayoutChange).toHaveBeenLastCalledWith({ collapsedProjectIds: [] });
   });
 });

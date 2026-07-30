@@ -1333,6 +1333,10 @@ export const zhCnCatalog = {
   localServerScopeHint:
     "明确选择由这台设备托管的画布。托管只表示 Server 可以访问；画布是私人还是共享，仍由下方权限栏单独决定。",
   localServerSelectedCount: "已选择 {count} 张",
+  localServerScopeExpand: "展开本机托管范围",
+  localServerScopeCollapse: "收起本机托管范围",
+  localServerProjectExpand: "展开 {project} 的画布",
+  localServerProjectCollapse: "收起 {project} 的画布",
   localServerCurrentCanvas: "当前",
   localServerHosted: "已托管",
   localServerPrivate: "未托管",

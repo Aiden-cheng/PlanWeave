@@ -13,6 +13,7 @@ type LayoutSettingsPatch = {
   leftSidebar?: Partial<DesktopUiSettings["layout"]["leftSidebar"]>;
   rightSidebar?: Partial<DesktopUiSettings["layout"]["rightSidebar"]>;
   autoRunControl?: Partial<DesktopUiSettings["layout"]["autoRunControl"]>;
+  collaborationScope?: Partial<DesktopUiSettings["layout"]["collaborationScope"]>;
 };
 
 type UseDesktopSettingsBridgeArgs = {

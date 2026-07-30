@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2Icon, LaptopIcon } from "lucide-react";
+import { CheckCircle2Icon, ChevronDownIcon, ChevronRightIcon, LaptopIcon } from "lucide-react";
 import type {
   LoopbackProjectRegistrationView,
   LoopbackServerStatus,
@@ -12,6 +12,7 @@ import type {
   PlanWeaveCollaborationApi
 } from "../../shared/collaboration.js";
 import type { createTranslator } from "../i18n";
+import type { DesktopUiSettings } from "../types";
 import { collaborationErrorMessage } from "./formatCollaborationError";
 
 function scopeKey(scope: LocalCollaborationScope): string {
@@ -30,12 +31,16 @@ export function LocalCollaborationServerPanel({
   api,
   t,
   projectId,
-  canvasId
+  canvasId,
+  scopeLayout,
+  onScopeLayoutChange
 }: {
   api: PlanWeaveCollaborationApi | null;
   t: ReturnType<typeof createTranslator>;
   projectId: string | null;
   canvasId: string | null;
+  scopeLayout: DesktopUiSettings["layout"]["collaborationScope"];
+  onScopeLayoutChange: (patch: Partial<DesktopUiSettings["layout"]["collaborationScope"]>) => void;
 }) {
   const [status, setStatus] = useState<LoopbackServerStatus | null>(null);
   const [catalog, setCatalog] = useState<LocalCollaborationScopeCatalog | null>(null);
@@ -68,11 +73,26 @@ export function LocalCollaborationServerPanel({
     void refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    if (!catalog) return;
+    const projectIds = new Set(catalog.projects.map((project) => project.projectId));
+    const validCollapsedProjectIds = scopeLayout.collapsedProjectIds.filter((projectId) =>
+      projectIds.has(projectId)
+    );
+    if (validCollapsedProjectIds.length !== scopeLayout.collapsedProjectIds.length) {
+      onScopeLayoutChange({ collapsedProjectIds: validCollapsedProjectIds });
+    }
+  }, [catalog, onScopeLayoutChange, scopeLayout.collapsedProjectIds]);
+
   const savedScopeKeys = useMemo(
     () => new Set(catalog ? selectedScopes(catalog).map(scopeKey) : []),
     [catalog]
   );
   const draftScopeKeys = useMemo(() => new Set(draftScopes.map(scopeKey)), [draftScopes]);
+  const collapsedProjectIds = useMemo(
+    () => new Set(scopeLayout.collapsedProjectIds),
+    [scopeLayout.collapsedProjectIds]
+  );
   const scopeChanged =
     savedScopeKeys.size !== draftScopeKeys.size ||
     [...savedScopeKeys].some((key) => !draftScopeKeys.has(key));
@@ -104,6 +124,16 @@ export function LocalCollaborationServerPanel({
         : [...current, scope]
     );
     setRegistration(null);
+  };
+
+  const toggleProject = (projectId: string) => {
+    const next = new Set(scopeLayout.collapsedProjectIds);
+    if (next.has(projectId)) {
+      next.delete(projectId);
+    } else {
+      next.add(projectId);
+    }
+    onScopeLayoutChange({ collapsedProjectIds: [...next] });
   };
 
   const applyScopes = async () => {
@@ -233,83 +263,129 @@ export function LocalCollaborationServerPanel({
       </div>
 
       <div className="border-t border-border/60 bg-muted/15 px-4 py-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="text-xs font-semibold text-text-strong">
+        <button
+          type="button"
+          className="flex w-full items-start gap-2 rounded-md text-left outline-none transition-colors hover:text-text-strong focus-visible:ring-2 focus-visible:ring-ring"
+          aria-expanded={!scopeLayout.collapsed}
+          aria-controls="local-collaboration-scope-catalog"
+          aria-label={t(
+            scopeLayout.collapsed ? "localServerScopeExpand" : "localServerScopeCollapse"
+          )}
+          onClick={() => onScopeLayoutChange({ collapsed: !scopeLayout.collapsed })}
+        >
+          {scopeLayout.collapsed ? (
+            <ChevronRightIcon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+          ) : (
+            <ChevronDownIcon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+          )}
+          <span className="min-w-0 flex-1">
+            <span className="block text-xs font-semibold text-text-strong">
               {t("localServerScopeTitle")}
-            </div>
-            <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
+            </span>
+            <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground">
               {t("localServerScopeHint")}
-            </p>
-          </div>
-          <span className="rounded-full border border-border/70 bg-background px-2.5 py-1 text-[10px] font-medium text-muted-foreground">
+            </span>
+          </span>
+          <span className="shrink-0 rounded-full border border-border/70 bg-background px-2.5 py-1 text-[10px] font-medium text-muted-foreground">
             {t("localServerSelectedCount").replace("{count}", String(draftScopes.length))}
           </span>
-        </div>
+        </button>
 
-        <div className="mt-3 grid gap-2" data-testid="local-collaboration-scope-catalog">
-          {catalog?.projects.map((project) => (
-            <div
-              key={project.projectId}
-              className="overflow-hidden rounded-lg border border-border/60 bg-background"
-            >
-              <div className="flex items-center justify-between border-b border-border/50 px-3 py-2">
-                <span className="truncate text-xs font-medium text-text-strong">
-                  {project.name}
-                </span>
-                <span className="text-[10px] tabular-nums text-muted-foreground">
-                  {
-                    project.canvases.filter((canvas) =>
-                      draftScopeKeys.has(
-                        scopeKey({ projectId: project.projectId, canvasId: canvas.canvasId })
-                      )
-                    ).length
-                  }
-                  /{project.canvases.length}
-                </span>
-              </div>
-              <div className="divide-y divide-border/40">
-                {project.canvases.map((canvas) => {
-                  const scope = { projectId: project.projectId, canvasId: canvas.canvasId };
-                  const checked = draftScopeKeys.has(scopeKey(scope));
-                  return (
-                    <label
-                      key={canvas.canvasId}
-                      className="flex cursor-pointer items-center gap-3 px-3 py-2.5 hover:bg-muted/30"
-                    >
-                      <input
-                        type="checkbox"
-                        className="size-4 rounded border-border accent-emerald-600"
-                        checked={checked}
-                        disabled={busy}
-                        onChange={() => toggleScope(scope)}
-                        aria-label={`${project.name} / ${canvas.name}`}
+        {!scopeLayout.collapsed ? (
+          <div
+            id="local-collaboration-scope-catalog"
+            className="mt-3 grid gap-2"
+            data-testid="local-collaboration-scope-catalog"
+          >
+            {catalog?.projects.map((project, projectIndex) => {
+              const projectCollapsed = collapsedProjectIds.has(project.projectId);
+              const projectContentId = `local-collaboration-project-${projectIndex}`;
+              return (
+                <div
+                  key={project.projectId}
+                  className="overflow-hidden rounded-lg border border-border/60 bg-background"
+                >
+                  <button
+                    type="button"
+                    className={`flex w-full items-center gap-2 px-3 py-2 text-left outline-none transition-colors hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${projectCollapsed ? "" : "border-b border-border/50"}`}
+                    aria-expanded={!projectCollapsed}
+                    aria-controls={projectContentId}
+                    aria-label={t(
+                      projectCollapsed ? "localServerProjectExpand" : "localServerProjectCollapse"
+                    ).replace("{project}", project.name)}
+                    onClick={() => toggleProject(project.projectId)}
+                  >
+                    {projectCollapsed ? (
+                      <ChevronRightIcon
+                        className="size-3.5 shrink-0 text-muted-foreground"
+                        aria-hidden="true"
                       />
-                      <span className="min-w-0 flex-1 truncate text-xs text-text-strong">
-                        {canvas.name}
-                      </span>
-                      {canvas.current ? (
-                        <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium text-primary">
-                          {t("localServerCurrentCanvas")}
-                        </span>
-                      ) : null}
-                      <span
-                        className={`text-[10px] ${checked ? "text-emerald-700 dark:text-emerald-300" : "text-muted-foreground"}`}
-                      >
-                        {checked ? t("localServerHosted") : t("localServerPrivate")}
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-          {catalog && catalog.projects.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
-              {t("localServerNoProjects")}
-            </p>
-          ) : null}
-        </div>
+                    ) : (
+                      <ChevronDownIcon
+                        className="size-3.5 shrink-0 text-muted-foreground"
+                        aria-hidden="true"
+                      />
+                    )}
+                    <span className="min-w-0 flex-1 truncate text-xs font-medium text-text-strong">
+                      {project.name}
+                    </span>
+                    <span className="text-[10px] tabular-nums text-muted-foreground">
+                      {
+                        project.canvases.filter((canvas) =>
+                          draftScopeKeys.has(
+                            scopeKey({ projectId: project.projectId, canvasId: canvas.canvasId })
+                          )
+                        ).length
+                      }
+                      /{project.canvases.length}
+                    </span>
+                  </button>
+                  {!projectCollapsed ? (
+                    <div id={projectContentId} className="divide-y divide-border/40">
+                      {project.canvases.map((canvas) => {
+                        const scope = { projectId: project.projectId, canvasId: canvas.canvasId };
+                        const checked = draftScopeKeys.has(scopeKey(scope));
+                        return (
+                          <label
+                            key={canvas.canvasId}
+                            className="flex cursor-pointer items-center gap-3 px-3 py-2.5 hover:bg-muted/30"
+                          >
+                            <input
+                              type="checkbox"
+                              className="size-4 rounded border-border accent-emerald-600"
+                              checked={checked}
+                              disabled={busy}
+                              onChange={() => toggleScope(scope)}
+                              aria-label={`${project.name} / ${canvas.name}`}
+                            />
+                            <span className="min-w-0 flex-1 truncate text-xs text-text-strong">
+                              {canvas.name}
+                            </span>
+                            {canvas.current ? (
+                              <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium text-primary">
+                                {t("localServerCurrentCanvas")}
+                              </span>
+                            ) : null}
+                            <span
+                              className={`text-[10px] ${checked ? "text-emerald-700 dark:text-emerald-300" : "text-muted-foreground"}`}
+                            >
+                              {checked ? t("localServerHosted") : t("localServerPrivate")}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+            {catalog && catalog.projects.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
+                {t("localServerNoProjects")}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
 
         {running && scopeChanged ? (
           <div className="mt-3 flex items-center justify-between gap-3 rounded-lg bg-amber-500/10 px-3 py-2">

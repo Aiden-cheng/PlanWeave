@@ -7,11 +7,21 @@ import { createTranslator } from "../renderer/i18n";
 import { PeopleView } from "../renderer/views/PeopleView";
 import { cleanupRendererTestEnvironment } from "./helpers/rendererTestEnvironment";
 
+const scopeLayout = { collapsed: false, collapsedProjectIds: [] };
+const onScopeLayoutChange = () => undefined;
+
 afterEach(cleanupRendererTestEnvironment);
 
 describe("PeopleView", () => {
   it("renders member onboarding as a standalone named page", () => {
-    render(<PeopleView api={null} t={createTranslator("en")} />);
+    render(
+      <PeopleView
+        api={null}
+        t={createTranslator("en")}
+        collaborationScopeLayout={scopeLayout}
+        onCollaborationScopeLayoutChange={onScopeLayoutChange}
+      />
+    );
 
     expect(screen.getByTestId("people-view")).toHaveAccessibleName("Project people");
     expect(screen.getByTestId("people-view")).not.toHaveClass("border");
@@ -22,7 +32,15 @@ describe("PeopleView", () => {
   });
 
   it("hides remote content authority while the project is local only", () => {
-    render(<PeopleView api={null} canvasId="canvas-1" t={createTranslator("en")} />);
+    render(
+      <PeopleView
+        api={null}
+        canvasId="canvas-1"
+        t={createTranslator("en")}
+        collaborationScopeLayout={scopeLayout}
+        onCollaborationScopeLayoutChange={onScopeLayoutChange}
+      />
+    );
 
     expect(screen.queryByTestId("content-authority-panel")).not.toBeInTheDocument();
   });

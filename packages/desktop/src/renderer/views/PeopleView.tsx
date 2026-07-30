@@ -12,6 +12,7 @@ import { CurrentCanvasAccessPanel } from "../collaboration/CurrentCanvasAccessPa
 import { LocalCollaborationServerPanel } from "../collaboration/LocalCollaborationServerPanel";
 import { useCurrentCanvasAccess } from "../hooks/useCurrentCanvasAccess";
 import { isCollaborationSessionConnected } from "../collaboration/sessionState";
+import type { DesktopUiSettings } from "../types";
 
 export type PeopleViewProps = {
   t: ReturnType<typeof createTranslator>;
@@ -21,6 +22,10 @@ export type PeopleViewProps = {
   copyText?: (text: string) => Promise<void>;
   canvasId?: string | null;
   onMembershipOutcome?: (outcome: { ok: boolean; message: string }) => void;
+  collaborationScopeLayout: DesktopUiSettings["layout"]["collaborationScope"];
+  onCollaborationScopeLayoutChange: (
+    patch: Partial<DesktopUiSettings["layout"]["collaborationScope"]>
+  ) => void;
 };
 
 async function defaultCopyText(text: string): Promise<void> {
@@ -37,7 +42,9 @@ export function PeopleView({
   api: apiProp,
   copyText = defaultCopyText,
   canvasId = null,
-  onMembershipOutcome
+  onMembershipOutcome,
+  collaborationScopeLayout,
+  onCollaborationScopeLayoutChange
 }: PeopleViewProps) {
   const api = apiProp === undefined ? collaborationBridge : apiProp;
   const { status } = useCollaborationStatus({ api });
@@ -93,6 +100,8 @@ export function PeopleView({
           t={t}
           projectId={activeProfile?.projectId ?? null}
           canvasId={canvasId}
+          scopeLayout={collaborationScopeLayout}
+          onScopeLayoutChange={onCollaborationScopeLayoutChange}
         />
         <CurrentCanvasAccessPanel
           view={currentCanvasAccess.view}

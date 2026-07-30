@@ -45,6 +45,10 @@ export type DesktopUiSettings = {
     autoRunControl: {
       position: FloatingControlPosition | null;
     };
+    collaborationScope: {
+      collapsed: boolean;
+      collapsedProjectIds: string[];
+    };
   };
   review: {
     pipelineEnabled: boolean;
@@ -83,6 +87,7 @@ export type DesktopSettingsPatch = Partial<{
     leftSidebar: Partial<DesktopUiSettings["layout"]["leftSidebar"]>;
     rightSidebar: Partial<DesktopUiSettings["layout"]["rightSidebar"]>;
     autoRunControl: Partial<DesktopUiSettings["layout"]["autoRunControl"]>;
+    collaborationScope: Partial<DesktopUiSettings["layout"]["collaborationScope"]>;
   }>;
   review: Partial<DesktopUiSettings["review"]>;
   palette: Partial<{
@@ -147,6 +152,10 @@ export const defaultDesktopSettings: DesktopUiSettings = {
     },
     autoRunControl: {
       position: null
+    },
+    collaborationScope: {
+      collapsed: false,
+      collapsedProjectIds: []
     }
   },
   review: {
@@ -228,6 +237,10 @@ export function mergeDesktopSettings(
       autoRunControl: {
         ...current.layout.autoRunControl,
         ...patch.layout?.autoRunControl
+      },
+      collaborationScope: {
+        ...current.layout.collaborationScope,
+        ...patch.layout?.collaborationScope
       }
     },
     review: {
@@ -471,7 +484,20 @@ export function normalizeDesktopSettingsPatch(value: unknown): DesktopSettingsPa
     const autoRunPosition = isRecord(value.layout.autoRunControl)
       ? normalizeFloatingControlPosition(value.layout.autoRunControl.position)
       : undefined;
-    if (leftSidebar || rightSidebar || autoRunPosition !== undefined) {
+    const collapsedProjectIds = isRecord(value.layout.collaborationScope)
+      ? stringArray(value.layout.collaborationScope.collapsedProjectIds)
+      : undefined;
+    const collaborationScope = isRecord(value.layout.collaborationScope)
+      ? {
+          ...(typeof value.layout.collaborationScope.collapsed === "boolean"
+            ? { collapsed: value.layout.collaborationScope.collapsed }
+            : {}),
+          ...(collapsedProjectIds ? { collapsedProjectIds: [...new Set(collapsedProjectIds)] } : {})
+        }
+      : undefined;
+    const hasCollaborationScope =
+      collaborationScope !== undefined && Object.keys(collaborationScope).length > 0;
+    if (leftSidebar || rightSidebar || autoRunPosition !== undefined || hasCollaborationScope) {
       patch.layout = {};
       if (leftSidebar) {
         patch.layout.leftSidebar = leftSidebar;
@@ -481,6 +507,9 @@ export function normalizeDesktopSettingsPatch(value: unknown): DesktopSettingsPa
       }
       if (autoRunPosition !== undefined) {
         patch.layout.autoRunControl = { position: autoRunPosition };
+      }
+      if (hasCollaborationScope) {
+        patch.layout.collaborationScope = collaborationScope;
       }
     }
   }

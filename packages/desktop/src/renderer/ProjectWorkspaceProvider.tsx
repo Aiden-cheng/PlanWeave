@@ -117,6 +117,7 @@ type LayoutSettingsPatch = {
   autoRunControl?: Partial<DesktopUiSettings["layout"]["autoRunControl"]> & {
     position?: FloatingControlPosition | null;
   };
+  collaborationScope?: Partial<DesktopUiSettings["layout"]["collaborationScope"]>;
 };
 
 export type ProjectWorkspaceShellInput = {
@@ -935,6 +936,9 @@ export function ProjectWorkspaceProvider({
       setActiveView,
       setError,
       setSuccessMessage,
+      collaborationScopeLayout: settings.layout.collaborationScope,
+      updateCollaborationScopeLayout: (patch) =>
+        updateLayoutSettings({ collaborationScope: patch }),
       t
     }),
     [
@@ -952,7 +956,9 @@ export function ProjectWorkspaceProvider({
       setActiveView,
       setError,
       setSuccessMessage,
-      t
+      settings.layout.collaborationScope,
+      t,
+      updateLayoutSettings
     ]
   );
   const graphWorkspaceController = useGraphWorkspaceController({

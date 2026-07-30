@@ -37,7 +37,13 @@ import type { createTranslator } from "../i18n";
 import type { DesktopSearchCanvasScope, DesktopSearchStatus } from "../hooks/useDesktopSearch";
 import type { AppEdgeTypes, AppNodeTypes } from "../graph/flowModel";
 import type { AutoRunNextActionDescriptor } from "../run/autoRunNextActions";
-import type { AppFlowNode, AppView, AutoRunScopeMode, NotificationItem } from "../types";
+import type {
+  AppFlowNode,
+  AppView,
+  AutoRunScopeMode,
+  DesktopUiSettings,
+  NotificationItem
+} from "../types";
 import type { CollaborationCanvasPresenceResult } from "../hooks/useCollaborationCanvasPresence";
 import { useProjectWorkspace } from "../ProjectWorkspaceProvider";
 
@@ -86,6 +92,10 @@ export type WorkspaceTabsShellProps = {
   setActiveView: Dispatch<SetStateAction<AppView>>;
   setError: (message: string | null) => void;
   setSuccessMessage?: Dispatch<SetStateAction<string | null>>;
+  collaborationScopeLayout: DesktopUiSettings["layout"]["collaborationScope"];
+  updateCollaborationScopeLayout: (
+    patch: Partial<DesktopUiSettings["layout"]["collaborationScope"]>
+  ) => void;
   t: ReturnType<typeof createTranslator>;
 };
 
@@ -280,6 +290,8 @@ function PeopleRoute() {
     <PeopleView
       t={shell.t}
       canvasId={shell.selectedCanvasId}
+      collaborationScopeLayout={shell.collaborationScopeLayout}
+      onCollaborationScopeLayoutChange={shell.updateCollaborationScopeLayout}
       onMembershipOutcome={(outcome) => {
         if (outcome.ok) {
           shell.setSuccessMessage?.(outcome.message);
