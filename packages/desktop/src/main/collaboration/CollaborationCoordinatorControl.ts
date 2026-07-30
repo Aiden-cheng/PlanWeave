@@ -41,11 +41,15 @@ type LoopbackServerControlPort = Pick<
   "status" | "apply" | "listTrustedProjectScopes" | "registerTrustedProject"
 >;
 
-const localProfileId = "planweave-local-loopback";
+const localOperatorCredentialKey = "planweave-local-loopback";
 const localStartAttempts = 3;
 
 function localWorkspaceIdForProject(projectId: string): string {
   return `workspace-local-${createHash("sha256").update(projectId).digest("hex").slice(0, 32)}`;
+}
+
+function localProfileIdForProject(projectId: string): string {
+  return `planweave-local-${createHash("sha256").update(projectId).digest("hex").slice(0, 24)}`;
 }
 
 async function allocateLoopbackPort(): Promise<number> {
@@ -312,11 +316,11 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     return status.profile;
   }
 
-  private profileFor(_selection: ResolvedSelection): LoopbackServerProfile {
+  private profileFor(selection: ResolvedSelection): LoopbackServerProfile {
     const localPort = this.localPort;
     if (localPort === null) throw new Error("local_collaboration_port_allocation_required");
     return loopbackServerProfileSchema.parse({
-      profileId: localProfileId,
+      profileId: localProfileIdForProject(selection.authorityProjectId),
       displayName: "Local collaboration server",
       serverBaseUrl: `http://127.0.0.1:${localPort}/`,
       allowInsecureTransport: true
@@ -324,12 +328,16 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   }
 
   private async ensureOperatorToken(): Promise<void> {
-    const storedToken = await this.vault.getOperatorToken(localProfileId);
+    const storedToken = await this.vault.getOperatorToken(localOperatorCredentialKey);
     this.operatorToken = storedToken ?? null;
     if (this.operatorToken) return;
     const token = `pw_operator_${randomBytes(32).toString("base64url")}`;
     this.operatorToken = token;
-    await this.vault.setOperatorToken(localProfileId, token, "desktop-local-admin");
+    await this.vault.setOperatorToken(
+      localOperatorCredentialKey,
+      token,
+      "desktop-local-admin"
+    );
   }
 
   private createConfig(profile: LoopbackServerProfile, selection: ResolvedSelection): ServerConfig {

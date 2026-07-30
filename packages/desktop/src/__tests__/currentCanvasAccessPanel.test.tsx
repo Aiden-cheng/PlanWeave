@@ -84,6 +84,9 @@ describe("CurrentCanvasAccessPanel", () => {
     );
 
     expect(screen.getByTestId("canvas-access-role")).toHaveTextContent("Effective role: project Owner · canvas Owner");
+    expect(screen.getByRole("radiogroup", { name: "Current canvas visibility" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /Private/ })).not.toBeChecked();
+    expect(screen.getByRole("radio", { name: /Shared/ })).toBeChecked();
     expect(screen.getAllByTestId("canvas-access-capability")).toHaveLength(4);
     await userEvent.click(screen.getByTestId("canvas-access-project-shared"));
     expect(onUpdateVisibility).toHaveBeenCalledWith("project", "shared");

@@ -46,6 +46,28 @@ const view: CurrentCanvasAccessView = {
 };
 
 describe("useCurrentCanvasAccess", () => {
+  it("loads access controls for an explicitly initialized local collaboration session", async () => {
+    const getCurrentCanvasAccess = vi.fn().mockResolvedValue(view);
+    const api: CurrentCanvasAccessApi = {
+      getCurrentCanvasAccess,
+      mutateCurrentCanvasAccess: vi.fn()
+    };
+
+    const { result } = renderHook(() =>
+      useCurrentCanvasAccess({
+        api,
+        canvasId: scope.canvasId,
+        status: {
+          session: { phase: "ready" },
+          workspaceConnection: { status: "local_only" }
+        }
+      })
+    );
+
+    await waitFor(() => expect(result.current.view).toEqual(view));
+    expect(getCurrentCanvasAccess).toHaveBeenCalledWith({ canvasId: scope.canvasId });
+  });
+
   it("uses the matching project revision and refreshes after a CAS conflict", async () => {
     const getCurrentCanvasAccess = vi.fn().mockResolvedValue(view);
     const mutateCurrentCanvasAccess = vi.fn().mockResolvedValue({
@@ -61,7 +83,10 @@ describe("useCurrentCanvasAccess", () => {
       useCurrentCanvasAccess({
         api,
         canvasId: scope.canvasId,
-        status: { workspaceConnection: { status: "connected" } }
+        status: {
+          session: { phase: "connected" },
+          workspaceConnection: { status: "connected" }
+        }
       })
     );
 
@@ -112,7 +137,10 @@ describe("useCurrentCanvasAccess", () => {
       useCurrentCanvasAccess({
         api,
         canvasId: scope.canvasId,
-        status: { workspaceConnection: { status: "connected" } }
+        status: {
+          session: { phase: "connected" },
+          workspaceConnection: { status: "connected" }
+        }
       })
     );
 

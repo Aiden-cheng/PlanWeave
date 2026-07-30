@@ -1,4 +1,5 @@
 import type { ActiveCanvasPersonGrant, CurrentCanvasAccessView } from "@planweave-ai/collaboration-contracts";
+import { LockKeyholeIcon, UsersRoundIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { createTranslator } from "../i18n";
 import type { CurrentCanvasVisibilityScope } from "../hooks/useCurrentCanvasAccess";
@@ -132,6 +133,85 @@ function VisibilityControl({
   );
 }
 
+function CanvasVisibilitySelector({
+  visibility,
+  allowed,
+  reason,
+  busy,
+  t,
+  onUpdate
+}: Omit<Parameters<typeof VisibilityControl>[0], "scopeKind">) {
+  const choices = [
+    {
+      value: "private" as const,
+      label: t("accessVisibilityPrivate"),
+      hint: t("accessVisibilityPrivateHint"),
+      icon: LockKeyholeIcon
+    },
+    {
+      value: "shared" as const,
+      label: t("accessVisibilityShared"),
+      hint: t("accessVisibilitySharedHint"),
+      icon: UsersRoundIcon
+    }
+  ];
+  return (
+    <div
+      className="rounded-lg border border-border/70 bg-muted/20 p-3"
+      data-testid="canvas-access-canvas-visibility"
+    >
+      <div className="mb-2">
+        <div className="text-xs font-semibold text-text-strong">
+          {t("accessCurrentCanvasVisibility")}
+        </div>
+        <div className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
+          {t("accessCanvasVisibilityHint")}
+        </div>
+      </div>
+      <div
+        className="grid grid-cols-2 gap-2"
+        role="radiogroup"
+        aria-label={t("accessCurrentCanvasVisibility")}
+      >
+        {choices.map((choice) => {
+          const selected = visibility === choice.value;
+          const Icon = choice.icon;
+          return (
+            <label
+              key={choice.value}
+              className={`flex min-w-0 items-start gap-2 rounded-md border px-3 py-2 text-left transition-colors ${
+                selected
+                  ? "border-primary/45 bg-background text-text-strong shadow-sm"
+                  : "border-transparent bg-background/55 text-muted-foreground hover:border-border hover:bg-background"
+              }`}
+              title={!allowed ? reasonLabel(reason, t) : undefined}
+            >
+              <input
+                type="radio"
+                name="current-canvas-visibility"
+                value={choice.value}
+                checked={selected}
+                className="sr-only"
+                data-testid={`canvas-access-canvas-${choice.value}`}
+                disabled={!allowed || busy || selected}
+                title={!allowed ? reasonLabel(reason, t) : undefined}
+                onChange={() => void onUpdate("canvas", choice.value)}
+              />
+              <Icon className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+              <span className="min-w-0">
+                <span className="block text-[11px] font-semibold">{choice.label}</span>
+                <span className="mt-0.5 block text-[10px] leading-4 text-muted-foreground">
+                  {choice.hint}
+                </span>
+              </span>
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /** Compact current-canvas access read model and owner-only visibility actions. */
 export function CurrentCanvasAccessPanel({
   view,
@@ -182,21 +262,20 @@ export function CurrentCanvasAccessPanel({
 
       {error ? <div className="text-xs text-destructive" role="alert">{errorLabel(error, t)}</div> : null}
 
-      <div className="flex flex-col gap-1.5" data-testid="canvas-access-visibility-controls">
-        <VisibilityControl
-          scopeKind="project"
-          visibility={view.projectVisibility}
-          allowed={project.capabilities.visibility}
-          reason={projectDisabledReason}
+      <div className="flex flex-col gap-2" data-testid="canvas-access-visibility-controls">
+        <CanvasVisibilitySelector
+          visibility={view.canvasVisibility}
+          allowed={canvas.capabilities.visibility}
+          reason={canvasDisabledReason}
           busy={busy}
           t={t}
           onUpdate={onUpdateVisibility}
         />
         <VisibilityControl
-          scopeKind="canvas"
-          visibility={view.canvasVisibility}
-          allowed={canvas.capabilities.visibility}
-          reason={canvasDisabledReason}
+          scopeKind="project"
+          visibility={view.projectVisibility}
+          allowed={project.capabilities.visibility}
+          reason={projectDisabledReason}
           busy={busy}
           t={t}
           onUpdate={onUpdateVisibility}

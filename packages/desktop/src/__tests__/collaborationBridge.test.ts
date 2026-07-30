@@ -334,6 +334,60 @@ describe("CollaborationService IPC trust boundary", () => {
     expect(JSON.stringify(status)).not.toContain(join(root, "credentials.json"));
   });
 
+  it("migrates the legacy local credential only to a profile for the same project", async () => {
+    const root = await tempDir("planweave-collab-local-profile-migration-");
+    const service = await serviceWithRoot(root);
+    const baseProfile = {
+      displayName: "Local",
+      serverBaseUrl: "http://127.0.0.1:8787/",
+      allowInsecureTransport: true
+    };
+    await service.upsertProfile({
+      ...baseProfile,
+      profileId: "planweave-local-loopback",
+      projectId: "project-a"
+    });
+    await service.upsertProfile({
+      ...baseProfile,
+      profileId: "planweave-local-project-a",
+      projectId: "project-a"
+    });
+    await service.upsertProfile({
+      ...baseProfile,
+      profileId: "planweave-local-project-b",
+      projectId: "project-b"
+    });
+    await service.importDeviceCredential({
+      profileId: "planweave-local-loopback",
+      deviceToken: exampleHumanDeviceToken,
+      deviceCredentialId: "device-a",
+      humanPrincipalId: "owner-a"
+    });
+
+    await service.migrateLocalProfileCredential(
+      "planweave-local-loopback",
+      "planweave-local-project-a"
+    );
+    await service.migrateLocalProfileCredential(
+      "planweave-local-loopback",
+      "planweave-local-project-b"
+    );
+
+    const status = await service.getStatus();
+    const profileA = status.profiles.find(
+      (profile) => profile.profileId === "planweave-local-project-a"
+    );
+    const profileB = status.profiles.find(
+      (profile) => profile.profileId === "planweave-local-project-b"
+    );
+    expect(profileA).toMatchObject({
+      hasDeviceCredential: true,
+      deviceCredentialId: "device-a",
+      humanPrincipalId: "owner-a"
+    });
+    expect(profileB?.hasDeviceCredential).toBe(false);
+  });
+
   it("redeems a setup code in main and exposes only a redacted Workspace connection", async () => {
     const root = await tempDir("planweave-collab-workspace-setup-");
     const request = vi.fn(async (_input: RequestInfo | URL) => {

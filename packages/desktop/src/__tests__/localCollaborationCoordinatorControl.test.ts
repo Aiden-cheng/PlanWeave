@@ -140,7 +140,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     const clear = control.clearCurrentSelection();
     await vi.waitFor(() => {
       expect(fake.apply).toHaveBeenLastCalledWith(
-        expect.objectContaining({ action: "stop", profileId: "planweave-local-loopback" })
+        expect.objectContaining({ action: "stop", profileId: expect.stringMatching(/^planweave-local-/) })
       );
     });
     expect(control.status().state).toBe("running");
@@ -202,6 +202,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     });
     await control.setCurrentSelection({ projectId: project.projectId, canvasId: "canvas-1" });
     await control.start();
+    const firstProfileId = control.status().profile?.profileId;
 
     const switchSelection = control.setCurrentSelection({
       projectId: nextProject.projectId,
@@ -209,7 +210,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     });
     await vi.waitFor(() => {
       expect(fake.apply).toHaveBeenLastCalledWith(
-        expect.objectContaining({ action: "stop", profileId: "planweave-local-loopback" })
+        expect.objectContaining({ action: "stop", profileId: expect.stringMatching(/^planweave-local-/) })
       );
     });
     expect(control.localProfile()?.projectId).toBe(authorityProjectId);
@@ -217,6 +218,8 @@ describe("LocalCollaborationCoordinatorControl", () => {
     await switchSelection;
 
     expect(control.localProfile()?.projectId).toBe("authority-project-2");
+    await control.start();
+    expect(control.status().profile?.profileId).not.toBe(firstProfileId);
     expect(resolveAuthorityProjectId).toHaveBeenLastCalledWith("/test/next-project", "canvas-1");
   });
 
@@ -241,7 +244,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     });
     await vi.waitFor(() => {
       expect(fake.apply).toHaveBeenLastCalledWith(
-        expect.objectContaining({ action: "stop", profileId: "planweave-local-loopback" })
+        expect.objectContaining({ action: "stop", profileId: expect.stringMatching(/^planweave-local-/) })
       );
     });
 

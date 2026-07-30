@@ -1133,8 +1133,13 @@ export const enCatalog = {
   accessRoleNone: "No access",
   accessProjectVisibility: "Project visibility",
   accessCanvasVisibility: "Canvas visibility",
+  accessCurrentCanvasVisibility: "Current canvas visibility",
+  accessCanvasVisibilityHint:
+    "Choose explicitly whether this canvas stays private or opens to existing members.",
   accessVisibilityPrivate: "Private",
+  accessVisibilityPrivateHint: "Only owners and explicitly granted members can access it",
   accessVisibilityShared: "Shared",
+  accessVisibilitySharedHint: "Members of this Workspace can access it",
   accessCapabilities: "Capabilities",
   accessCapabilityAvailable: "Available",
   accessCapabilityWrite: "Persistent canvas commands",

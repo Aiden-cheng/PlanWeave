@@ -11,10 +11,13 @@ import type { createTranslator } from "../i18n";
 import { collaborationErrorMessage } from "./formatCollaborationError";
 
 const ownerInitializationRequiredCode = "local_collaboration_owner_initialization_required";
+const capabilityDeniedCode = "access_capability_denied";
 
 function requiresOwnerInitialization(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return message.includes(ownerInitializationRequiredCode);
+  return (
+    message.includes(ownerInitializationRequiredCode) || message.includes(capabilityDeniedCode)
+  );
 }
 
 export function LocalCollaborationServerPanel({

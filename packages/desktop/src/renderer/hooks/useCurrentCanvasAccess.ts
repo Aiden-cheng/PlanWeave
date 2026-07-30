@@ -7,6 +7,7 @@ import type {
 } from "@planweave-ai/collaboration-contracts";
 import { collaborationErrorMessage } from "../collaboration/formatCollaborationError";
 import type {
+  CollaborationSessionPhase,
   CollaborationAccessMutationInput,
   PlanWeaveCollaborationApi
 } from "../../shared/collaboration.js";
@@ -19,7 +20,10 @@ export type CurrentCanvasAccessApi = Pick<
 export type UseCurrentCanvasAccessArgs = {
   api: CurrentCanvasAccessApi | null;
   canvasId: string | null | undefined;
-  status: { workspaceConnection: { status: ActiveWorkspaceConnectionStatus } } | null;
+  status: {
+    session: { phase: CollaborationSessionPhase };
+    workspaceConnection: { status: ActiveWorkspaceConnectionStatus };
+  } | null;
 };
 
 export type CurrentCanvasVisibilityScope = "project" | "canvas";
@@ -50,16 +54,19 @@ function canLoadCurrentCanvasAccess(args: UseCurrentCanvasAccessArgs): args is U
     args.api !== null &&
     typeof args.canvasId === "string" &&
     args.canvasId.length > 0 &&
-    args.status?.workspaceConnection.status === "connected"
+    (args.status?.workspaceConnection.status === "connected" ||
+      args.status?.session.phase === "ready" ||
+      args.status?.session.phase === "connected")
   );
 }
 
-/** Current-canvas ACL state is authoritative only when main has an explicit Workspace connection. */
+/** Current-canvas ACL state is loaded only for an explicit Workspace or collaboration session. */
 export function useCurrentCanvasAccess(
   args: UseCurrentCanvasAccessArgs
 ): UseCurrentCanvasAccessResult {
   const { api, canvasId, status } = args;
   const workspaceConnectionStatus = status?.workspaceConnection.status ?? "local_only";
+  const sessionPhase = status?.session.phase ?? "idle";
   const [view, setView] = useState<CurrentCanvasAccessView | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -69,7 +76,10 @@ export function useCurrentCanvasAccess(
     const currentArgs = {
       api,
       canvasId,
-      status: { workspaceConnection: { status: workspaceConnectionStatus } }
+      status: {
+        session: { phase: sessionPhase },
+        workspaceConnection: { status: workspaceConnectionStatus }
+      }
     };
     if (!canLoadCurrentCanvasAccess(currentArgs)) {
       setView(null);
@@ -87,7 +97,7 @@ export function useCurrentCanvasAccess(
     } finally {
       setLoading(false);
     }
-  }, [api, canvasId, workspaceConnectionStatus]);
+  }, [api, canvasId, sessionPhase, workspaceConnectionStatus]);
 
   useEffect(() => {
     void refresh();
@@ -98,7 +108,10 @@ export function useCurrentCanvasAccess(
       const currentArgs = {
         api,
         canvasId,
-        status: { workspaceConnection: { status: workspaceConnectionStatus } }
+        status: {
+          session: { phase: sessionPhase },
+          workspaceConnection: { status: workspaceConnectionStatus }
+        }
       };
       if (!canLoadCurrentCanvasAccess(currentArgs) || !view || busy) return null;
       const input: CollaborationAccessMutationInput = {
@@ -123,7 +136,7 @@ export function useCurrentCanvasAccess(
         setBusy(false);
       }
     },
-    [api, busy, canvasId, refresh, view, workspaceConnectionStatus]
+    [api, busy, canvasId, refresh, sessionPhase, view, workspaceConnectionStatus]
   );
 
   const scopeFor = useCallback(

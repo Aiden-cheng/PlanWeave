@@ -88,6 +88,17 @@ export function PeopleView({
     >
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 pb-8">
         <LocalCollaborationServerPanel api={api} t={t} />
+        <CurrentCanvasAccessPanel
+          view={currentCanvasAccess.view}
+          loading={currentCanvasAccess.loading}
+          error={currentCanvasAccess.error}
+          busy={currentCanvasAccess.busy}
+          t={t}
+          onRefresh={currentCanvasAccess.refresh}
+          onUpdateVisibility={currentCanvasAccess.updateVisibility}
+          onGrant={currentCanvasAccess.grant}
+          onRevoke={currentCanvasAccess.revoke}
+        />
         <PeoplePanel
           mode={panel.mode}
           presence={panel.presence}
@@ -138,17 +149,6 @@ export function PeopleView({
             await refreshMembers();
           }}
           connectSlot={<CollaborationConnectForm api={api} status={status} t={t} />}
-        />
-        <CurrentCanvasAccessPanel
-          view={currentCanvasAccess.view}
-          loading={currentCanvasAccess.loading}
-          error={currentCanvasAccess.error}
-          busy={currentCanvasAccess.busy}
-          t={t}
-          onRefresh={currentCanvasAccess.refresh}
-          onUpdateVisibility={currentCanvasAccess.updateVisibility}
-          onGrant={currentCanvasAccess.grant}
-          onRevoke={currentCanvasAccess.revoke}
         />
         <ContentAuthorityPanel
           api={api ?? null}
