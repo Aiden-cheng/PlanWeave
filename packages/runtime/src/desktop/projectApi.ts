@@ -8,6 +8,7 @@ import {
   normalizeProjectMetadata,
   projectWorkspacePaths,
   readProject,
+  directRegisteredWorkspaceId,
   resolveProjectWorkspace
 } from "../project.js";
 import { readProjectMetadataFile } from "../projectMetadata.js";
@@ -22,7 +23,8 @@ import {
 } from "../projectGraph/index.js";
 import { manifestSchema } from "../schema/manifest.js";
 import type { PlanPackageManifest, ProjectMetadata, ProjectWorkspace } from "../types.js";
-import type { DesktopProjectSummary } from "./types.js";
+import { desktopRegisteredProjectIdSchema } from "./types/desktopBridgeInputSchemas.js";
+import type { DesktopProjectReference, DesktopProjectSummary } from "./types.js";
 import { getActiveTaskCanvasId, listTaskCanvases } from "./canvasApi.js";
 import {
   readActiveTaskCanvasSelection,
@@ -133,8 +135,14 @@ function projectWorkspacePathsForRename(
 async function readRegisteredProject(
   projectId: string
 ): Promise<{ project: ProjectMetadata; workspaceRoot: string; projectFile: string } | null> {
+  const registeredProjectId = desktopRegisteredProjectIdSchema.parse(projectId);
   const planweaveHome = resolvePlanweaveHome();
-  const workspaceRoot = join(planweaveHome, "projects", projectId);
+  const projectsRoot = resolve(planweaveHome, "projects");
+  const workspaceRoot = resolve(projectsRoot, registeredProjectId);
+  const workspaceProjectId = await directRegisteredWorkspaceId(planweaveHome, workspaceRoot);
+  if (workspaceProjectId !== registeredProjectId) {
+    throw new Error(`Registered project '${projectId}' must be a direct project registry entry.`);
+  }
   const projectFile = join(workspaceRoot, "project.json");
   if (!(await optionalStat(projectFile))) {
     return null;
@@ -143,6 +151,11 @@ async function readRegisteredProject(
     planweaveHome,
     workspaceRoot
   });
+  if (project.id !== workspaceProjectId) {
+    throw new Error(
+      `Registered project metadata id '${project.id}' does not match registry directory '${workspaceProjectId}'.`
+    );
+  }
   return { project, workspaceRoot, projectFile };
 }
 
@@ -155,6 +168,19 @@ async function readProjectById(projectId: string): Promise<DesktopProjectSummary
     return null;
   }
   return projectSummary(entry.project, entry.workspaceRoot);
+}
+
+export async function resolveDesktopProjectReference(
+  reference: DesktopProjectReference
+): Promise<{ projectId: string; projectRoot: string }> {
+  const entry = await readRegisteredProject(reference.projectId);
+  if (!entry || !(await optionalStat(entry.project.rootPath))) {
+    throw new Error(`Registered project '${reference.projectId}' is unavailable.`);
+  }
+  return {
+    projectId: entry.project.id,
+    projectRoot: entry.project.rootPath
+  };
 }
 
 export async function listProjects(): Promise<DesktopProjectSummary[]> {

@@ -7,6 +7,7 @@ export {
   openProject,
   renameProject,
   removeProject,
+  resolveDesktopProjectReference,
   unlinkProjectSourceRoot
 } from "./projectApi.js";
 export {
@@ -65,12 +66,18 @@ export type {
 } from "./types/canvasMapLayoutSchema.js";
 export {
   desktopCanvasReferenceSchema,
+  desktopProjectDoctorRepairConfirmationSchema,
+  desktopRegisteredProjectIdSchema,
+  desktopProjectReferenceSchema,
   desktopPromptSaveOptionsSchema
 } from "./types/desktopBridgeInputSchemas.js";
 export type {
   DesktopCanvasReferenceInput,
+  DesktopProjectDoctorRepairConfirmationInput,
+  DesktopProjectReferenceInput,
   DesktopPromptSaveOptionsInput
 } from "./types/desktopBridgeInputSchemas.js";
+export { checkDesktopProjectDoctor, repairDesktopProjectDoctor } from "./projectDoctorApi.js";
 export {
   desktopLayoutFileSchema,
   desktopLayoutNodeSchema

@@ -454,6 +454,7 @@ export const enCatalog = {
   settingsGeneral: "General",
   settingsComponents: "Components",
   settingsReview: "Review",
+  settingsProjectDoctor: "Project Doctor",
   settingsAgents: "Agents",
   settingsMcpTunnel: "MCP Tunnel",
   settingsConnections: "Connections & Devices",
@@ -476,6 +477,25 @@ export const enCatalog = {
   settingsComponentsHint: "Configure draggable graph components and the default Block Set.",
   settingsReviewHint:
     "Configure the current project's Review Pipeline and default feedback cycles.",
+  settingsProjectDoctorHint:
+    "Check project runtime state and result indexes. Repair is explicit and never rewrites manifest or task definitions.",
+  projectDoctorNoProject: "Select a registered project before running Project Doctor.",
+  projectDoctorBridgeUnavailable:
+    "Project Doctor is unavailable because the Desktop bridge is not connected.",
+  projectDoctorCheck: "Check project",
+  projectDoctorChecking: "Checking project…",
+  projectDoctorRepair: "Repair runtime drift",
+  projectDoctorRepairing: "Repairing runtime drift…",
+  projectDoctorRepairConfirm:
+    "Repair project runtime drift? This repairs runtime state and result indexes, may quarantine orphan canvases, and may remove stale staging. It does not rewrite the manifest or task definitions.",
+  projectDoctorHealthy: "No repairable errors",
+  projectDoctorIssuesFound: "Issues found",
+  projectDoctorRepaired: "Repair applied",
+  projectDoctorErrorCount: "Errors",
+  projectDoctorWarningCount: "Warnings",
+  projectDoctorCanvasCount: "Canvases",
+  projectDoctorCanvasHealthy: "Healthy",
+  projectDoctorCanvasIssues: "Issues found",
   settingsAgentsHint: "Choose an agent transport and configure the agents available through it.",
   agentTransport: "Agent transport",
   agentTransportHint: "Use command-line agents directly or connect through ACP.",

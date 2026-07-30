@@ -14,6 +14,7 @@ import { SettingsGeneralSection } from "../settings/SettingsGeneralSection";
 import { SettingsNav } from "../settings/SettingsNav";
 import type { SettingsSection } from "../settings/SettingsNav";
 import { SettingsMcpSection } from "../settings/SettingsMcpSection";
+import { SettingsProjectDoctorSection } from "../settings/SettingsProjectDoctorSection";
 import { SettingsReviewSection } from "../settings/SettingsReviewSection";
 import { SettingsConnectionsSection } from "../settings/SettingsConnectionsSection";
 import type { createTranslator, Language } from "../i18n";
@@ -176,6 +177,13 @@ export function SettingsView({
                 settings={settings}
                 t={t}
                 updateSettings={updateSettings}
+              />
+            ) : null}
+            {section === "project-doctor" ? (
+              <SettingsProjectDoctorSection
+                selectedProject={selectedProject ?? null}
+                setError={setError}
+                t={t}
               />
             ) : null}
             {section === "agents" ? (

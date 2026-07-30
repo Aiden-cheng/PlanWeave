@@ -27,6 +27,7 @@ import {
   openProject,
   renameProject,
   removeProject,
+  resolveDesktopProjectReference,
   resolveSourceDefaultProjectRoot,
   saveCanvasMapLayout,
   setSourceDefaultProject,
@@ -83,6 +84,43 @@ function resultReadPaths(resultsDir: string): string[] {
 }
 
 describe("desktop project API", () => {
+  it("resolves only registered project identities for Desktop project-scoped operations", async () => {
+    const { root, init } = await createTestWorkspace();
+    const resolvedRoot = await realpath(root);
+
+    await expect(resolveDesktopProjectReference({ projectId: init.workspace.id })).resolves.toEqual(
+      {
+        projectId: init.workspace.id,
+        projectRoot: resolvedRoot
+      }
+    );
+    await expect(resolveDesktopProjectReference({ projectId: "missing-project" })).rejects.toThrow(
+      "Registered project 'missing-project' is unavailable."
+    );
+    await expect(resolveDesktopProjectReference({ projectId: "../outside" })).rejects.toThrow();
+    await expect(resolveDesktopProjectReference({ projectId: "nested/project" })).rejects.toThrow();
+    await expect(
+      resolveDesktopProjectReference({ projectId: "project\\outside" })
+    ).rejects.toThrow();
+    await expect(resolveDesktopProjectReference({ projectId: "." })).rejects.toThrow();
+    await expect(resolveDesktopProjectReference({ projectId: ".." })).rejects.toThrow();
+
+    const metadata = await readJsonFile<ProjectMetadata>(init.workspace.projectFile);
+    await writeJsonFile(init.workspace.projectFile, {
+      ...metadata,
+      id: "mismatched-project-id"
+    });
+    await expect(resolveDesktopProjectReference({ projectId: init.workspace.id })).rejects.toThrow(
+      "does not match registry directory"
+    );
+    await writeJsonFile(init.workspace.projectFile, metadata);
+
+    await rm(root, { recursive: true, force: true });
+    await expect(resolveDesktopProjectReference({ projectId: init.workspace.id })).rejects.toThrow(
+      `Registered project '${init.workspace.id}' is unavailable.`
+    );
+  });
+
   it("lists projects from the PlanWeave home registry", async () => {
     const { init } = await createTestWorkspace();
 

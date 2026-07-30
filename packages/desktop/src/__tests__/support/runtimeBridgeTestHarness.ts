@@ -123,6 +123,13 @@ const runtimeMock = vi.hoisted(() => {
   return {
     autoRunEventListeners,
     applyCanvasLaneLayout: vi.fn(async (workspace: unknown) => ({ workspace, nodes: [] })),
+    checkDesktopProjectDoctor: vi.fn(async () => ({
+      ok: true,
+      repaired: false,
+      errors: [],
+      warnings: [],
+      canvasReports: []
+    })),
     getDesktopGraphDiagnostics: vi.fn(async (workspace: unknown) => ({
       workspace,
       diagnostics: []
@@ -455,6 +462,13 @@ const runtimeMock = vi.hoisted(() => {
         graph: { workspace, baseGraphVersion, layoutSnapshot }
       })
     ),
+    repairDesktopProjectDoctor: vi.fn(async () => ({
+      ok: true,
+      repaired: true,
+      errors: [],
+      warnings: [],
+      canvasReports: []
+    })),
     saveDesktopLayout: vi.fn(async (_workspace: unknown, layout: unknown) => layout),
     startAutoRun: vi.fn(
       async (
@@ -513,6 +527,7 @@ vi.mock("@planweave-ai/runtime", async () => {
   return {
     ...actual,
     applyCanvasLaneLayout: runtimeMock.applyCanvasLaneLayout,
+    checkDesktopProjectDoctor: runtimeMock.checkDesktopProjectDoctor,
     getDesktopProjectSnapshot: runtimeMock.getDesktopProjectSnapshot,
     getDesktopGraphDiagnostics: runtimeMock.getDesktopGraphDiagnostics,
     getDesktopRuntimeRefresh: runtimeMock.getDesktopRuntimeRefresh,
@@ -548,6 +563,7 @@ vi.mock("@planweave-ai/runtime", async () => {
     addDependencyEdge: runtimeMock.addDependencyEdge,
     removeDependencyEdge: runtimeMock.removeDependencyEdge,
     reconnectDependencyEdge: runtimeMock.reconnectDependencyEdge,
+    repairDesktopProjectDoctor: runtimeMock.repairDesktopProjectDoctor,
     saveDesktopLayout: runtimeMock.saveDesktopLayout,
     startAutoRun: runtimeMock.startAutoRun,
     subscribeAutoRunEvents: runtimeMock.subscribeAutoRunEvents,
@@ -593,6 +609,7 @@ export async function resetRuntimeBridgeMocks(): Promise<void> {
   delete process.env.PLANWEAVE_DESKTOP_SMOKE;
   runtimeMock.autoRunEventListeners.clear();
   runtimeMock.applyCanvasLaneLayout.mockClear();
+  runtimeMock.checkDesktopProjectDoctor.mockClear();
   runtimeMock.getDesktopGraphDiagnostics.mockClear();
   runtimeMock.getDesktopProjectSnapshot.mockClear();
   runtimeMock.getDesktopRuntimeRefresh.mockClear();
@@ -626,6 +643,7 @@ export async function resetRuntimeBridgeMocks(): Promise<void> {
   runtimeMock.addDependencyEdge.mockClear();
   runtimeMock.removeDependencyEdge.mockClear();
   runtimeMock.reconnectDependencyEdge.mockClear();
+  runtimeMock.repairDesktopProjectDoctor.mockClear();
   runtimeMock.saveDesktopLayout.mockClear();
   runtimeMock.startAutoRun.mockClear();
   runtimeMock.subscribeAutoRunEvents.mockClear();

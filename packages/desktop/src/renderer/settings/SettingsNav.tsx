@@ -5,7 +5,8 @@ import {
   CableIcon,
   GitPullRequestIcon,
   NetworkIcon,
-  SettingsIcon
+  SettingsIcon,
+  WrenchIcon
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { createTranslator } from "../i18n";
@@ -15,6 +16,7 @@ export type SettingsSection =
   | "general"
   | "components"
   | "review"
+  | "project-doctor"
   | "agents"
   | "mcp"
   | "connections";
@@ -31,6 +33,7 @@ export function SettingsNav({ section, setSection, onBackToApp, t }: SettingsNav
     { key: "general", label: t("settingsGeneral"), icon: SettingsIcon },
     { key: "components", label: t("settingsComponents"), icon: BlocksIcon },
     { key: "review", label: t("settingsReview"), icon: GitPullRequestIcon },
+    { key: "project-doctor", label: t("settingsProjectDoctor"), icon: WrenchIcon },
     { key: "agents", label: t("settingsAgents"), icon: BotIcon },
     { key: "mcp", label: t("settingsMcpTunnel"), icon: CableIcon },
     { key: "connections", label: t("settingsConnections"), icon: NetworkIcon }

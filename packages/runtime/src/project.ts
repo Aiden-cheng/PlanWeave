@@ -1,5 +1,5 @@
 import { realpath } from "node:fs/promises";
-import { basename, isAbsolute, join, relative } from "node:path";
+import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { PlanWeaveWorkspaceNotInitializedError } from "./errors.js";
 import { optionalStat } from "./fs/optionalFile.js";
 import { createProjectId } from "./projectId.js";
@@ -77,7 +77,7 @@ function sourceRootForMetadata(project: ProjectMetadata): string | null {
   return project.sourceRoot ?? project.rootPath;
 }
 
-async function directRegisteredWorkspaceId(
+export async function directRegisteredWorkspaceId(
   planweaveHome: string,
   rootPath: string
 ): Promise<string | null> {
@@ -87,16 +87,26 @@ async function directRegisteredWorkspaceId(
   } catch {
     projectsRoot = join(planweaveHome, "projects");
   }
-  const relativePath = relative(projectsRoot, rootPath);
+  let resolvedRootPath: string;
+  try {
+    resolvedRootPath = await realpath(rootPath);
+  } catch {
+    try {
+      resolvedRootPath = join(await realpath(dirname(rootPath)), basename(rootPath));
+    } catch {
+      resolvedRootPath = rootPath;
+    }
+  }
+  const relativePath = relative(projectsRoot, resolvedRootPath);
   if (
     !relativePath ||
     relativePath.startsWith("..") ||
     isAbsolute(relativePath) ||
-    relativePath !== basename(rootPath)
+    relativePath !== basename(resolvedRootPath)
   ) {
     return null;
   }
-  return basename(rootPath);
+  return basename(resolvedRootPath);
 }
 
 async function workspaceFromRegisteredRoot(

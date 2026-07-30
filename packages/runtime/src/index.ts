@@ -814,6 +814,14 @@ export type {
   SourceDefaultProjectCandidate,
   SourceDefaultProjectEntry
 } from "./desktop/sourceDefaultProject.js";
+export {
+  checkDesktopProjectDoctor,
+  desktopProjectDoctorRepairConfirmationSchema,
+  desktopRegisteredProjectIdSchema,
+  desktopProjectReferenceSchema,
+  repairDesktopProjectDoctor,
+  resolveDesktopProjectReference
+} from "./desktop/index.js";
 export type { AutoRunEventTailItem, TailAutoRunEventsOptions } from "./desktop/runEventTail.js";
 export {
   projectGraphCanvasNodeTypes,

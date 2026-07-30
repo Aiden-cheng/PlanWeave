@@ -34,6 +34,28 @@ describe("runtime bridge handlers: graph and project", () => {
     await restoreRuntimeBridgeEnv();
   });
 
+  it("keeps project Doctor checks and repairs as distinct bridge operations", async () => {
+    const { registerRuntimeBridgeHandlers } = await import("../main/runtimeBridgeHandlers");
+    registerRuntimeBridgeHandlers();
+
+    await electronMock.handlers.get(desktopBridgeInvokeChannels.checkProjectDoctor)?.(null, {
+      projectId: "project-a"
+    });
+    expect(runtimeMock.checkDesktopProjectDoctor).toHaveBeenCalledWith({ projectId: "project-a" });
+    expect(runtimeMock.repairDesktopProjectDoctor).not.toHaveBeenCalled();
+
+    const confirmation = { confirmation: "repair_project_runtime_drift" };
+    await electronMock.handlers.get(desktopBridgeInvokeChannels.repairProjectDoctor)?.(
+      null,
+      { projectId: "project-a" },
+      confirmation
+    );
+    expect(runtimeMock.repairDesktopProjectDoctor).toHaveBeenCalledWith(
+      { projectId: "project-a" },
+      confirmation
+    );
+  });
+
   it("resolves desktop canvas references through runtime task canvas workspace API", async () => {
     const { registerRuntimeBridgeHandlers } = await import("../main/runtimeBridgeHandlers");
     registerRuntimeBridgeHandlers();

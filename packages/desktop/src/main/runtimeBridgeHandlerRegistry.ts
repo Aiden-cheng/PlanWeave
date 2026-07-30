@@ -12,6 +12,7 @@ import {
   addTaskNode,
   applyCanvasLaneLayout,
   cancelDesktopAgentRun,
+  checkDesktopProjectDoctor,
   createDesktopPackageFileSnapshot,
   createProjectFromTaskCanvas,
   createTaskCanvas,
@@ -72,6 +73,7 @@ import {
   removeTaskCanvas,
   removeTaskNode,
   reconnectDependencyEdge,
+  repairDesktopProjectDoctor,
   redoDesktopPlanGraphCommand,
   resetCanvasMapLayout,
   resetDesktopLayout,
@@ -502,6 +504,9 @@ function parseRunTerminalAvailabilityInput(value: unknown): DesktopRunTerminalAv
 
 export const runtimeBridgeHandlers = {
   listProjects: () => listProjects(),
+  checkProjectDoctor: (_event, reference) => checkDesktopProjectDoctor(reference),
+  repairProjectDoctor: (_event, reference, confirmation) =>
+    repairDesktopProjectDoctor(reference, confirmation),
   chooseProjectFolder: async (event) => {
     const owner = BrowserWindow.fromWebContents(event.sender);
     const options: OpenDialogOptions = { properties: ["openDirectory", "createDirectory"] };

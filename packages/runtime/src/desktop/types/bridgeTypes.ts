@@ -20,6 +20,11 @@ import type {
   DesktopTodoGroups
 } from "./graphTypes.js";
 import type { DesktopProjectSummary, DesktopTaskCanvasSummary } from "./projectTypes.js";
+import type { ProjectDoctorReport } from "../../types.js";
+import type {
+  DesktopProjectDoctorRepairConfirmation,
+  DesktopProjectReference
+} from "./desktopBridgeInputSchemas.js";
 import type { ProjectPromptPolicy } from "../../projectPromptPolicy.js";
 import type {
   DesktopBlockRunRecordSummary,
@@ -242,6 +247,11 @@ export type DesktopCanvasReference = {
   canvasId?: string | null;
 };
 
+export type {
+  DesktopProjectDoctorRepairConfirmation,
+  DesktopProjectReference
+} from "./desktopBridgeInputSchemas.js";
+
 export type DesktopPromptSaveOptions = {
   baseGraphVersion?: string;
   basePromptHash?: string;
@@ -249,6 +259,11 @@ export type DesktopPromptSaveOptions = {
 
 export type DesktopBridgeApi = {
   listProjects(): Promise<DesktopProjectSummary[]>;
+  checkProjectDoctor(reference: DesktopProjectReference): Promise<ProjectDoctorReport>;
+  repairProjectDoctor(
+    reference: DesktopProjectReference,
+    confirmation: DesktopProjectDoctorRepairConfirmation
+  ): Promise<ProjectDoctorReport>;
   chooseProjectFolder(): Promise<string | null>;
   chooseSourceRootFolder(): Promise<string | null>;
   openProjectInDevelopmentTool(rootPath: string, toolId: DesktopDevelopmentToolId): Promise<void>;
