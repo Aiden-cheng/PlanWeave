@@ -359,7 +359,7 @@ describe("desktop settings bridge", () => {
     });
   });
 
-  it("shows desktop settings save errors instead of faking a successful update", async () => {
+  it("rejects failed awaited saves while rolling back and reporting the error", async () => {
     const settingsApi: PlanWeaveDesktopSettingsApi = {
       getDesktopSettings: vi.fn().mockResolvedValue(defaultDesktopSettings),
       saveDesktopSettings: vi.fn().mockRejectedValue(new Error("settings file is read-only")),
@@ -368,10 +368,60 @@ describe("desktop settings bridge", () => {
     const setError = vi.fn();
     const { result } = renderHook(() => useDesktopSettingsBridge({ setError, settingsApi }));
 
-    act(() => result.current.updateSettings({ appearance: "dark" }));
+    let save!: Promise<void>;
+    act(() => {
+      save = result.current.updateSettingsAndWait({ appearance: "dark" });
+    });
 
+    await expect(save).rejects.toThrow("settings file is read-only");
     await waitFor(() => expect(setError).toHaveBeenCalledWith("settings file is read-only"));
-    expect(result.current.settings.appearance).toBe(defaultDesktopSettings.appearance);
+    await waitFor(() =>
+      expect(result.current.settings.appearance).toBe(defaultDesktopSettings.appearance)
+    );
+  });
+
+  it("continues serialized saves after an awaited save rejects", async () => {
+    const persistedSettings = {
+      ...defaultDesktopSettings,
+      appearance: "dark" as const,
+      notifications: {
+        ...defaultDesktopSettings.notifications,
+        autoRunFailure: false
+      }
+    };
+    let saveCount = 0;
+    const events: string[] = [];
+    const settingsApi: PlanWeaveDesktopSettingsApi = {
+      getDesktopSettings: vi.fn().mockResolvedValue(defaultDesktopSettings),
+      saveDesktopSettings: vi.fn(async () => {
+        saveCount += 1;
+        if (saveCount === 1) {
+          throw new Error("first save failed");
+        }
+        events.push("second save");
+        return persistedSettings;
+      }),
+      migrateLegacyDesktopSettings: vi.fn().mockResolvedValue(defaultDesktopSettings)
+    };
+    const setError = vi.fn(() => events.push("failure handled"));
+    const { result } = renderHook(() =>
+      useDesktopSettingsBridge({ setError, settingsApi })
+    );
+
+    let firstSave!: Promise<void>;
+    let secondSave!: Promise<void>;
+    act(() => {
+      firstSave = result.current.updateSettingsAndWait({ appearance: "dark" });
+      secondSave = result.current.updateSettingsAndWait({
+        notifications: { autoRunFailure: false }
+      });
+    });
+
+    await expect(firstSave).rejects.toThrow("first save failed");
+    await expect(secondSave).resolves.toBeUndefined();
+    expect(settingsApi.saveDesktopSettings).toHaveBeenCalledTimes(2);
+    expect(events).toEqual(["failure handled", "second save"]);
+    expect(result.current.settings).toEqual(persistedSettings);
   });
 
   it("rolls back to the last confirmed settings when queued saves all fail", async () => {
@@ -459,13 +509,17 @@ describe("desktop settings bridge", () => {
     expect(setError).toHaveBeenCalledWith("first save failed");
   });
 
-  it("reports an error instead of faking persistence when no desktop settings bridge exists", async () => {
+  it("rejects instead of faking persistence when no desktop settings bridge exists", async () => {
     const setError = vi.fn();
     const { result } = renderHook(() => useDesktopSettingsBridge({ setError, settingsApi: null }));
     window.localStorage.setItem.mockClear();
 
-    act(() => result.current.updateSettings({ appearance: "dark" }));
+    let save!: Promise<void>;
+    act(() => {
+      save = result.current.updateSettingsAndWait({ appearance: "dark" });
+    });
 
+    await expect(save).rejects.toThrow("Desktop settings bridge is unavailable.");
     await waitFor(() =>
       expect(setError).toHaveBeenCalledWith("Desktop settings bridge is unavailable.")
     );

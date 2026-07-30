@@ -186,6 +186,7 @@ export function SettingsView({
                 graph={graph}
                 persistSettings={updateSettingsAndWait}
                 refreshAgentDetections={refreshAgentDetections}
+                setError={setError}
                 settings={settings}
                 t={t}
                 updateSettings={updateSettings}

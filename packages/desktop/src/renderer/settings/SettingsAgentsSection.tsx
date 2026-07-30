@@ -33,6 +33,7 @@ type SettingsAgentsSectionProps = {
   graph: DesktopGraphViewModel | null;
   refreshAgentDetections: () => Promise<void>;
   persistSettings?: (update: DesktopSettingsUpdate) => Promise<void>;
+  setError?: (message: string | null) => void;
   settings: DesktopUiSettings;
   t: ReturnType<typeof createTranslator>;
   updateSettings: (update: DesktopSettingsUpdate) => void;
@@ -40,6 +41,28 @@ type SettingsAgentsSectionProps = {
 
 function checkStatusVariant(status: ExecutorPreflightCheck["status"]) {
   return status === "failed" ? "destructive" : status === "passed" ? "secondary" : "outline";
+}
+
+function errorMessage(caught: unknown): string {
+  return caught instanceof Error ? caught.message : String(caught);
+}
+
+function settleSettingsSave(
+  save: Promise<void>,
+  onSettled: () => void,
+  refreshAgentDetections?: () => Promise<void>,
+  setError?: (message: string | null) => void
+): void {
+  void save
+    .then(
+      () =>
+        refreshAgentDetections?.().then(
+          () => undefined,
+          (caught: unknown) => setError?.(errorMessage(caught))
+        ),
+      () => undefined
+    )
+    .finally(onSettled);
 }
 
 function ExecutorPreflightCheckList({
@@ -116,6 +139,7 @@ export function SettingsAgentsSection({
   graph,
   persistSettings,
   refreshAgentDetections,
+  setError,
   settings,
   t,
   updateSettings
@@ -215,9 +239,7 @@ export function SettingsAgentsSection({
                 : Promise.resolve(
                     updateSettings({ execution: { agentHost: { kind: "native" } } })
                   );
-              void save
-                .then(() => refreshAgentDetections())
-                .finally(() => setHostSaving(false));
+              settleSettingsSave(save, () => setHostSaving(false), refreshAgentDetections, setError);
             }}
           >
             <SelectTrigger className="mt-3 w-56" id="agent-host-select" aria-label={t("agentHost")}>
@@ -254,9 +276,12 @@ export function SettingsAgentsSection({
                           execution: { agentHost: { kind: "wsl", distribution } }
                         })
                       );
-                  void save
-                    .then(() => refreshAgentDetections())
-                    .finally(() => setHostSaving(false));
+                  settleSettingsSave(
+                    save,
+                    () => setHostSaving(false),
+                    refreshAgentDetections,
+                    setError
+                  );
                 }}
               >
                 <SelectTrigger
@@ -298,9 +323,7 @@ export function SettingsAgentsSection({
             const save = persistSettings
               ? persistSettings({ execution: { agentTransport } })
               : Promise.resolve(updateSettings({ execution: { agentTransport } }));
-            void save.finally(() => {
-              setTransportSaving(false);
-            });
+            settleSettingsSave(save, () => setTransportSaving(false));
           }}
         >
           <SelectTrigger

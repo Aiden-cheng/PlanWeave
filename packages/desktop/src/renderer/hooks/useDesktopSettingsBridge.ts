@@ -126,7 +126,7 @@ export function useDesktopSettingsBridge({
     (update: DesktopSettingsUpdate) => {
       if (!settingsApi && !allowInMemoryFallback) {
         setError(missingSettingsBridgeMessage);
-        return Promise.resolve();
+        return Promise.reject(new Error(missingSettingsBridgeMessage));
       }
       const patch = typeof update === "function" ? update(latestSettingsRef.current) : update;
       const nextRevision = localRevisionRef.current + 1;
@@ -138,10 +138,10 @@ export function useDesktopSettingsBridge({
       if (!settingsApi) {
         return Promise.resolve();
       }
-      saveQueueRef.current = saveQueueRef.current
-        .catch(() => undefined)
+      const save = saveQueueRef.current
         .then(() => initializationRef.current)
-        .then(() => settingsApi.saveDesktopSettings(patch))
+        .then(() => settingsApi.saveDesktopSettings(patch));
+      const callerSave = save
         .then((nextSettings) => {
           lastConfirmedSettingsRef.current = nextSettings;
           if (localRevisionRef.current === nextRevision) {
@@ -155,16 +155,20 @@ export function useDesktopSettingsBridge({
             setSettings(lastConfirmedSettingsRef.current);
           }
           setError(errorMessage(caught));
+          throw caught;
         });
-      void saveQueueRef.current;
-      return saveQueueRef.current;
+      saveQueueRef.current = callerSave.then(
+        () => undefined,
+        () => undefined
+      );
+      return callerSave;
     },
     [allowInMemoryFallback, setError, settingsApi]
   );
 
   const updateSettings = useCallback(
     (update: DesktopSettingsUpdate) => {
-      void updateSettingsAndWait(update);
+      void updateSettingsAndWait(update).catch(() => undefined);
     },
     [updateSettingsAndWait]
   );

@@ -192,6 +192,7 @@
         "selectedBlockHook.test.tsx",
         "sharedCanvasCommands.test.tsx",
         "sharedPackageWriteAdapter.test.tsx",
+        "settingsAgentsSaveFailureUi.test.tsx",
         "sharedResourceBadges.test.tsx",
         "sharedResourceHighlight.test.tsx",
         "singleInstanceLifecycle.test.ts",
