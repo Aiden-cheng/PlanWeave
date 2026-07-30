@@ -83,7 +83,7 @@ describe("auto run control hook retrospective", () => {
     });
   });
 
-  it("clears stale auto-run state when retrospective state was deleted", async () => {
+  it("treats a deleted retrospective state as unavailable without clearing the current run", async () => {
     const blockedState = autoRunState({
       phase: "blocked",
       runId: "DESKTOP-RUN-0008",
@@ -120,8 +120,8 @@ describe("auto run control hook retrospective", () => {
         blockedState.runId
       )
     );
-    await waitFor(() => expect(setAutoRunState).toHaveBeenCalledWith(null));
     expect(result.current.autoRunRetrospective).toBeNull();
+    expect(setAutoRunState).not.toHaveBeenCalled();
     expect(setError).not.toHaveBeenCalled();
   });
 

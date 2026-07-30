@@ -215,7 +215,7 @@ describe("PeoplePanel", () => {
     expect(onRevokeDevice).toHaveBeenCalledWith("device-1");
   });
 
-  it("shows connect slot when disconnected and surfaces typed errors", () => {
+  it("shows the connect slot without surfacing disconnected API noise", () => {
     render(
       <PeoplePanel
         mode="disconnected"
@@ -245,7 +245,7 @@ describe("PeoplePanel", () => {
 
     expect(screen.getByTestId("people-panel")).toHaveAttribute("data-mode", "disconnected");
     expect(screen.getByTestId("people-connect-form")).toBeVisible();
-    expect(screen.getByText(/Not connected/i)).toBeVisible();
+    expect(screen.queryByText(/Not connected/i)).not.toBeInTheDocument();
   });
 
   it("shows forbidden state without owner mutation controls", () => {
