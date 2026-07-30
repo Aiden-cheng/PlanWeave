@@ -82,9 +82,7 @@ describe("PeoplePanel invitation copy", () => {
     const first = pendingInvitation("inv-first", invitationToken);
     const second = pendingInvitation("inv-second", `pw_inv_${"B".repeat(43)}`);
     const third = pendingInvitation("inv-third", `pw_inv_${"C".repeat(43)}`);
-    const { rerender } = render(
-      <PeoplePanel {...createProps(first, onCopyInvitationToken)} />
-    );
+    const { rerender } = render(<PeoplePanel {...createProps(first, onCopyInvitationToken)} />);
 
     await userEvent.click(screen.getByTestId("people-invitation-copy"));
     expect(screen.getByTestId("people-invitation-copy")).toHaveTextContent("Copied");

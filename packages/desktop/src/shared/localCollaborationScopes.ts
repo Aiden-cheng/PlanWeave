@@ -65,9 +65,7 @@ export type LocalCollaborationScopeCatalog = {
   selectedCount: number;
 };
 
-export const localCollaborationLanSharingInputSchema = z
-  .object({ enabled: z.boolean() })
-  .strict();
+export const localCollaborationLanSharingInputSchema = z.object({ enabled: z.boolean() }).strict();
 export type LocalCollaborationLanSharingInput = z.infer<
   typeof localCollaborationLanSharingInputSchema
 >;
@@ -78,6 +76,4 @@ export const localCollaborationServerStatusSchema = loopbackServerStatusSchema
     lanServerBaseUrl: z.string().url().nullable()
   })
   .strict();
-export type LocalCollaborationServerStatus = z.infer<
-  typeof localCollaborationServerStatusSchema
->;
+export type LocalCollaborationServerStatus = z.infer<typeof localCollaborationServerStatusSchema>;

@@ -143,9 +143,9 @@ describe("OSS-005 setup-code and single-connection contracts", () => {
     expect(setupCodeRedeemResponseSchema.parse(exampleSetupCodeRedeemDeviceResponse).purpose).toBe(
       "device_session"
     );
-    expect(setupCodeRedeemResponseSchema.parse(exampleSetupCodeRedeemOperatorResponse).purpose).toBe(
-      "operator_session"
-    );
+    expect(
+      setupCodeRedeemResponseSchema.parse(exampleSetupCodeRedeemOperatorResponse).purpose
+    ).toBe("operator_session");
     expect(setupCodeRedeemResponseSchema.parse(exampleSetupCodeRedeemHostResponse).purpose).toBe(
       "host_enrollment"
     );
@@ -206,9 +206,7 @@ describe("OSS-005 setup-code and single-connection contracts", () => {
       })
     ).toThrow();
 
-    expect(() =>
-      setupCodeRedeemDeviceResponseSchemaWithMixedSecrets()
-    ).toThrow();
+    expect(() => setupCodeRedeemDeviceResponseSchemaWithMixedSecrets()).toThrow();
   });
 
   it("bounds Server origins to HTTPS with explicit loopback and private-LAN exceptions", () => {

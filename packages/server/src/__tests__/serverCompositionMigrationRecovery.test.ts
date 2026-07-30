@@ -293,9 +293,7 @@ describe("distributed server ACL migration recovery", () => {
     const reopened = await openServerDatabase(databasePath, 5_000);
     expect(
       reopened
-        .prepare(
-          "SELECT visibility FROM project_registry WHERE workspace_id=? AND project_id=?"
-        )
+        .prepare("SELECT visibility FROM project_registry WHERE workspace_id=? AND project_id=?")
         .get(workspaceId, projectId)
     ).toEqual({ visibility: "shared" });
     expect(

@@ -41,11 +41,14 @@ import {
 const nullableTimestampSchema = timestampSchema.nullable();
 
 const hostCapabilitySchema = z.string().trim().min(1).max(128);
-const hostCapabilitiesSchema = z.array(hostCapabilitySchema).max(128).superRefine((values, ctx) => {
-  if (new Set(values).size !== values.length) {
-    ctx.addIssue({ code: "custom", message: "duplicate_host_capability" });
-  }
-});
+const hostCapabilitiesSchema = z
+  .array(hostCapabilitySchema)
+  .max(128)
+  .superRefine((values, ctx) => {
+    if (new Set(values).size !== values.length) {
+      ctx.addIssue({ code: "custom", message: "duplicate_host_capability" });
+    }
+  });
 
 /** Exported trust-boundary ownership for Server / Desktop / Agent Host consumers. */
 export const setupContractOwnership = {
@@ -367,7 +370,10 @@ export const hostBootstrapHandoffViewSchema = z
     if (value.state === "ready" && (value.hostId === null || value.enrollmentId === null)) {
       ctx.addIssue({ code: "custom", message: "ready_handoff_requires_host_and_enrollment" });
     }
-    if ((value.state === "failed" || value.state === "expired" || value.state === "revoked") && value.reason === null) {
+    if (
+      (value.state === "failed" || value.state === "expired" || value.state === "revoked") &&
+      value.reason === null
+    ) {
       ctx.addIssue({ code: "custom", message: "terminal_handoff_requires_reason" });
     }
   });
@@ -414,7 +420,11 @@ export const hostBootstrapEnrollmentSecretSchema = z
     }
     if (value.kind === "setup_code") {
       if (!value.setupCode) {
-        ctx.addIssue({ code: "custom", message: "setup_code_secret_required", path: ["setupCode"] });
+        ctx.addIssue({
+          code: "custom",
+          message: "setup_code_secret_required",
+          path: ["setupCode"]
+        });
       }
       if (value.hostEnrollmentCode !== undefined) {
         ctx.addIssue({

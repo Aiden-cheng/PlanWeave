@@ -96,8 +96,7 @@ export class SetupCodeService {
   private readonly deviceSessionTtlMs: number;
   private readonly operatorSessionTtlMs: number;
   private readonly hostCredentialTtlMs: number;
-  private readonly onWorkspaceDeviceMembershipCreated:
-    | SetupCodeServiceOptions["onWorkspaceDeviceMembershipCreated"];
+  private readonly onWorkspaceDeviceMembershipCreated: SetupCodeServiceOptions["onWorkspaceDeviceMembershipCreated"];
 
   constructor(options: SetupCodeServiceOptions) {
     this.database = options.database;
@@ -198,7 +197,7 @@ export class SetupCodeService {
   }
 
   redeem(rawRequest: unknown): SetupCodeRedeemResponse {
-    let request;
+    let request: ReturnType<typeof setupCodeRedeemRequestSchema.parse>;
     try {
       request = setupCodeRedeemRequestSchema.parse(rawRequest);
     } catch {
@@ -258,6 +257,7 @@ export class SetupCodeService {
     displayName: string,
     deviceLabel: string | undefined
   ) {
+    void deviceLabel;
     const now = this.clock();
     const workspace = this.workspaceIdentity.workspaceView(grant.workspaceId);
     const humanPrincipalId = `human-${randomUUID()}`;
@@ -384,13 +384,15 @@ export class SetupCodeService {
 
   private redeemHost(
     grant: NonNullable<ReturnType<SetupCodeStore["findByToken"]>>,
-    request: Extract<ReturnType<typeof setupCodeRedeemRequestSchema.parse>, { purpose: "host_enrollment" }>
+    request: Extract<
+      ReturnType<typeof setupCodeRedeemRequestSchema.parse>,
+      { purpose: "host_enrollment" }
+    >
   ) {
     const now = this.clock();
     const workspace = this.workspaceIdentity.workspaceView(grant.workspaceId);
     const credentialExpiresAt =
-      grant.credentialExpiresAt ??
-      new Date(now.getTime() + this.hostCredentialTtlMs).toISOString();
+      grant.credentialExpiresAt ?? new Date(now.getTime() + this.hostCredentialTtlMs).toISOString();
     if (Date.parse(credentialExpiresAt) <= now.getTime()) {
       throw new SetupCodeError("setup_code_expired");
     }
@@ -448,7 +450,10 @@ export class SetupCodeService {
 
   private resumeHostEnrollment(
     grant: NonNullable<ReturnType<SetupCodeStore["findByToken"]>>,
-    request: Extract<ReturnType<typeof setupCodeRedeemRequestSchema.parse>, { purpose: "host_enrollment" }>,
+    request: Extract<
+      ReturnType<typeof setupCodeRedeemRequestSchema.parse>,
+      { purpose: "host_enrollment" }
+    >,
     outcome: SetupCodeHostEnrollmentOutcome
   ) {
     if (
@@ -477,13 +482,18 @@ export class SetupCodeService {
   }
 
   private hostEnrollmentRequestSha256(
-    request: Extract<ReturnType<typeof setupCodeRedeemRequestSchema.parse>, { purpose: "host_enrollment" }>
+    request: Extract<
+      ReturnType<typeof setupCodeRedeemRequestSchema.parse>,
+      { purpose: "host_enrollment" }
+    >
   ): string {
     return createHash("sha256")
       .update(
         canonicalizeJson({
           enrollmentAttemptId: request.enrollmentAttemptId,
-          credentialTokenSha256: createHash("sha256").update(request.hostCredentialToken).digest("hex"),
+          credentialTokenSha256: createHash("sha256")
+            .update(request.hostCredentialToken)
+            .digest("hex"),
           displayName: request.displayName,
           capabilities: request.capabilities,
           capacity: request.capacity
@@ -518,7 +528,10 @@ export class SetupCodeService {
     try {
       this.workspaceIdentity.assertReadCutover(workspaceId);
     } catch (error) {
-      if (error instanceof Error && error.message === "workspace_identity_read_cutover_incomplete") {
+      if (
+        error instanceof Error &&
+        error.message === "workspace_identity_read_cutover_incomplete"
+      ) {
         throw new SetupCodeError("workspace_identity_read_cutover_incomplete");
       }
       throw error;
@@ -529,9 +542,7 @@ export class SetupCodeService {
     }
   }
 
-  private assertIssuerUsable(
-    grant: NonNullable<ReturnType<SetupCodeStore["findByToken"]>>
-  ): void {
+  private assertIssuerUsable(grant: NonNullable<ReturnType<SetupCodeStore["findByToken"]>>): void {
     if (!grant.issuer) return;
     const session =
       this.operators.findBySessionId(grant.workspaceId, grant.issuer.operatorSessionId) ??

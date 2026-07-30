@@ -1,10 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
 import { z } from "zod";
-import {
-  humanNetworkTransportAllowed,
-  isLoopbackAddress
-} from "../insecureTransport.js";
+import { humanNetworkTransportAllowed, isLoopbackAddress } from "../insecureTransport.js";
 import { authenticateHumanForProject } from "./auth.js";
 import {
   HUMAN_AUTH_ERROR_MESSAGES,

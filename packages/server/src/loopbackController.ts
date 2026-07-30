@@ -41,24 +41,25 @@ export class LoopbackServerController {
 
   listTrustedProjectScopes(rawRequest: unknown): readonly LoopbackTrustedProjectScope[] {
     const request = loopbackTrustedProjectListRequestSchema.parse(rawRequest);
-    return this.processForProfile(request.profileId).trustedProjectControl.listTrustedProjectScopes();
+    return this.processForProfile(
+      request.profileId
+    ).trustedProjectControl.listTrustedProjectScopes();
   }
 
   resolveTrustedProjectScope(rawRequest: unknown): LoopbackTrustedProjectScope {
     const request = loopbackProjectRegistrationRequestSchema.parse(rawRequest);
-    const scope = this.processForProfile(request.profileId).trustedProjectControl.resolveTrustedProjectScope(
-      scopeFromRegistration(request)
-    );
+    const scope = this.processForProfile(
+      request.profileId
+    ).trustedProjectControl.resolveTrustedProjectScope(scopeFromRegistration(request));
     if (!scope) throw new Error("loopback_registration_not_trusted");
     return scope;
   }
 
-  registerTrustedProject(
-    actor: ActorRef,
-    rawRequest: unknown
-  ): LoopbackProjectRegistrationView {
+  registerTrustedProject(actor: ActorRef, rawRequest: unknown): LoopbackProjectRegistrationView {
     const request = loopbackProjectRegistrationRequestSchema.parse(rawRequest);
-    const scope = this.processForProfile(request.profileId).trustedProjectControl.assertTrustedProjectAdministration(
+    const scope = this.processForProfile(
+      request.profileId
+    ).trustedProjectControl.assertTrustedProjectAdministration(
       actor,
       scopeFromRegistration(request)
     );
@@ -110,9 +111,12 @@ export class LoopbackServerController {
     return this.process;
   }
 
-  private async start(request: Extract<LoopbackServerLifecycleRequest, { action: "start" }>): Promise<LoopbackServerStatus> {
+  private async start(
+    request: Extract<LoopbackServerLifecycleRequest, { action: "start" }>
+  ): Promise<LoopbackServerStatus> {
     if (this.process) {
-      if (this.profile?.profileId !== request.profile.profileId) throw new Error("loopback_profile_already_running");
+      if (this.profile?.profileId !== request.profile.profileId)
+        throw new Error("loopback_profile_already_running");
       return this.status();
     }
     this.profile = request.profile;
@@ -133,7 +137,9 @@ export class LoopbackServerController {
     }
   }
 
-  private async stop(request: Extract<LoopbackServerLifecycleRequest, { action: "stop" }>): Promise<LoopbackServerStatus> {
+  private async stop(
+    request: Extract<LoopbackServerLifecycleRequest, { action: "stop" }>
+  ): Promise<LoopbackServerStatus> {
     if (!this.process) return this.status();
     if (this.profile?.profileId !== request.profileId) throw new Error("loopback_profile_mismatch");
     this.state = "stopping";

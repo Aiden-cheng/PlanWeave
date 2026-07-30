@@ -3,9 +3,7 @@ import { dirname } from "node:path";
 import { z } from "zod";
 import { desktopHomePaths } from "../planweaveHomePaths.js";
 
-const documentSchema = z
-  .object({ version: z.literal(1), lanSharingEnabled: z.boolean() })
-  .strict();
+const documentSchema = z.object({ version: z.literal(1), lanSharingEnabled: z.boolean() }).strict();
 
 function isMissingFile(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && "code" in error && error.code === "ENOENT");

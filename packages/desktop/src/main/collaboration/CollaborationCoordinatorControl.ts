@@ -9,7 +9,6 @@ import {
   loopbackServerProfileSchema,
   type DeploymentTargetDraft,
   type LoopbackServerProfile,
-  type LoopbackServerStatus,
   type LoopbackTrustedProjectScope,
   type LoopbackProjectRegistrationView
 } from "@planweave-ai/collaboration-contracts";
@@ -201,13 +200,12 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   }
 
   status(): LocalCollaborationServerStatus {
-    const lifecycle =
-      this.controller?.status() ?? {
-        profile: null,
-        state: "stopped",
-        startedAt: null,
-        reason: null
-      };
+    const lifecycle = this.controller?.status() ?? {
+      profile: null,
+      state: "stopped",
+      startedAt: null,
+      reason: null
+    };
     return localCollaborationServerStatusSchema.parse({
       ...lifecycle,
       lanSharingEnabled: this.lanSharingEnabled,

@@ -172,9 +172,7 @@ export const activeWorkspaceConnectionStatusSchema = z.enum([
   "error",
   "disconnected"
 ]);
-export type ActiveWorkspaceConnectionStatus = z.infer<
-  typeof activeWorkspaceConnectionStatusSchema
->;
+export type ActiveWorkspaceConnectionStatus = z.infer<typeof activeWorkspaceConnectionStatusSchema>;
 
 export const activeWorkspaceConnectionErrorSchema = z
   .object({

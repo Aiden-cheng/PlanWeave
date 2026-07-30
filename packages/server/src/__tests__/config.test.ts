@@ -181,9 +181,9 @@ describe("server config", () => {
     });
     expect(serverConfigSummary(lan).transport).toBe("lan-http");
     const { databasePath: _databasePath, ...lanInput } = lan;
-    expect(() =>
-      parseServerConfig({ ...lanInput, publicUrl: "http://203.0.113.10:7443" })
-    ).toThrow("server_insecure_lan_requires_private_http");
+    expect(() => parseServerConfig({ ...lanInput, publicUrl: "http://203.0.113.10:7443" })).toThrow(
+      "server_insecure_lan_requires_private_http"
+    );
     expect(() =>
       parseServerConfig({ ...lanInput, bind: { host: "127.0.0.1", port: 7_443 } })
     ).toThrow("server_insecure_lan_requires_private_http");

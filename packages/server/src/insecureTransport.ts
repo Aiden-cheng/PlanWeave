@@ -26,11 +26,7 @@ export function isPrivateNetworkAddress(address: string | undefined): boolean {
   }
   if (isIP(normalized) !== 6) return false;
   const lower = normalized.toLowerCase();
-  return (
-    lower.startsWith("fc") ||
-    lower.startsWith("fd") ||
-    /^fe[89ab]/.test(lower.slice(0, 3))
-  );
+  return lower.startsWith("fc") || lower.startsWith("fd") || /^fe[89ab]/.test(lower.slice(0, 3));
 }
 
 export function humanNetworkTransportAllowed(

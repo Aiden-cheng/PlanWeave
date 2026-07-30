@@ -5,10 +5,7 @@ import {
 } from "@planweave-ai/collaboration-contracts";
 import { z } from "zod";
 import { OperatorTokenRegistry, type OperatorPrincipal } from "../operatorAuth.js";
-import {
-  workspaceIdentityReadModelSchema,
-  type WorkspaceIdentityReadModel
-} from "./dtos.js";
+import { workspaceIdentityReadModelSchema, type WorkspaceIdentityReadModel } from "./dtos.js";
 import { WorkspaceIdentityRepository } from "./workspaceRepository.js";
 import { humanNetworkTransportAllowed } from "../insecureTransport.js";
 

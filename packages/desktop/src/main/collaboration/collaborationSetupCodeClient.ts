@@ -93,15 +93,18 @@ export class CollaborationSetupCodeClient {
     if (signal) signals.push(signal);
     const combined = AbortSignal.any(signals);
     try {
-      const response = await this.fetchImpl(new URL("/api/v1/setup-codes/redeem", this.serverBaseUrl), {
-        method: "POST",
-        headers: {
-          accept: "application/json",
-          "content-type": "application/json; charset=utf-8"
-        },
-        body: JSON.stringify(body),
-        signal: combined
-      });
+      const response = await this.fetchImpl(
+        new URL("/api/v1/setup-codes/redeem", this.serverBaseUrl),
+        {
+          method: "POST",
+          headers: {
+            accept: "application/json",
+            "content-type": "application/json; charset=utf-8"
+          },
+          body: JSON.stringify(body),
+          signal: combined
+        }
+      );
       const text = await response.text();
       if (!response.ok) {
         throw collaborationErrorFromHttp(response.status, text);
