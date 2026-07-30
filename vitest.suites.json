@@ -259,6 +259,7 @@
         "collaborationServerE2E.test.ts",
         "contentVersionFacade.test.ts",
         "desktopDevContract.test.ts",
+        "ciArtifactRedaction.test.ts",
         "desktopImportRecoveryHook.test.tsx",
         "desktopMutationIpcContract.test.ts",
         "desktopReleaseConfig.test.ts",
