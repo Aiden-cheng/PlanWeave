@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTranslator } from "../renderer/i18n";
@@ -136,6 +136,89 @@ describe("PeopleView", () => {
     expect(screen.getByTestId("people-connect-invitation-details")).toBeVisible();
     expect(screen.queryByTestId("people-connect-server-url")).not.toBeInTheDocument();
     expect(screen.queryByTestId("people-connect-project-id")).not.toBeInTheDocument();
+  });
+
+  it("refreshes workspace status after the local collaboration service is ready", async () => {
+    const user = userEvent.setup();
+    const getCollaborationStatus = vi.fn().mockResolvedValue({
+      profiles: [],
+      activeProfileId: null,
+      credentialStorage: "available",
+      nonPersistenceWarning: null,
+      session: {
+        phase: "idle",
+        activeProfileId: null,
+        detail: null,
+        lastErrorCode: null,
+        lastErrorMessage: null
+      },
+      workspaceConnection: {
+        schemaVersion: "workspace-setup/v1",
+        status: "local_only",
+        profile: null,
+        workspaceId: null,
+        workspaceDisplayName: null,
+        connectedAt: null,
+        error: null
+      },
+      workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null },
+      updatedAt: "2030-01-01T00:00:00.000Z"
+    });
+    const api = {
+      getCollaborationStatus,
+      onCollaborationStatusChanged: vi.fn(() => () => undefined),
+      getLocalCollaborationServerStatus: vi.fn().mockResolvedValue({
+        profile: {
+          profileId: "planweave-local-server",
+          displayName: "Local collaboration server",
+          serverBaseUrl: "http://127.0.0.1:56584/",
+          allowInsecureTransport: true
+        },
+        state: "running",
+        startedAt: "2030-01-01T00:00:00.000Z",
+        reason: null,
+        lanSharingEnabled: true,
+        lanServerBaseUrl: "http://192.168.1.20:56584/"
+      }),
+      getLocalCollaborationScopeCatalog: vi.fn().mockResolvedValue({
+        projects: [
+          {
+            projectId: "project-1",
+            name: "Project One",
+            selectedCanvasCount: 1,
+            canvases: [
+              {
+                canvasId: "canvas-1",
+                name: "Canvas One",
+                selected: true,
+                current: true
+              }
+            ]
+          }
+        ],
+        selectedCount: 1
+      }),
+      listLocalCollaborationTrustedScopes: vi
+        .fn()
+        .mockResolvedValue([
+          { workspaceId: "workspace-1", projectId: "project-1", canvasId: "canvas-1" }
+        ])
+    } as unknown as PlanWeaveCollaborationApi;
+
+    render(
+      <PeopleView
+        api={api}
+        canvasId="canvas-1"
+        t={createTranslator("en")}
+        collaborationScopeLayout={scopeLayout}
+        onCollaborationScopeLayoutChange={onScopeLayoutChange}
+      />
+    );
+
+    await user.click(await screen.findByTestId("collaboration-onboarding-create"));
+    await user.click(screen.getByTestId("collaboration-onboarding-host-locally"));
+
+    await waitFor(() => expect(getCollaborationStatus).toHaveBeenCalledTimes(2));
   });
 
   it("hides remote content authority while the project is local only", () => {

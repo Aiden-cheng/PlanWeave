@@ -1087,9 +1087,9 @@ export const enCatalog = {
   peopleRemoveConfirm: "Remove this member from the project?",
   peopleRevokeInvitationConfirm: "Revoke this invitation?",
   peopleRevokeDeviceConfirm: "Revoke this human device credential?",
-  peopleInvitationCopyOnceTitle: "Invitation secret (shown once)",
+  peopleInvitationCopyOnceTitle: "Complete invitation (shown once)",
   peopleInvitationCopyOnceWarning:
-    "Copy this invitation token now. It is a bearer secret and will not be shown again after you dismiss this panel.",
+    "Copy the complete invitation now. It contains the Server, project, and bearer secret required to join, and will not be shown again after you dismiss this panel.",
   peopleInvitationCopy: "Copy token",
   peopleInvitationCopyHandoff: "Copy complete join details",
   peopleInvitationCopied: "Copied",

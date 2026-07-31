@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import type { createTranslator } from "../i18n";
 import type {
@@ -143,14 +143,23 @@ export function PeoplePanel({
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
   const liveRegionRef = useRef<HTMLDivElement>(null);
-  const pendingTokenRef = useRef<HTMLInputElement>(null);
+  const pendingInvitationRef = useRef<HTMLTextAreaElement>(null);
+  const pendingInvitationDetails = useMemo(() => {
+    if (!pendingInvitation) return null;
+    if (!invitationConnection) return pendingInvitation.invitationToken;
+    return serializeCollaborationInvitationHandoff({
+      ...invitationConnection,
+      invitationToken: pendingInvitation.invitationToken,
+      allowInsecureTransport: new URL(invitationConnection.serverBaseUrl).protocol === "http:"
+    });
+  }, [invitationConnection, pendingInvitation]);
 
   useEffect(() => {
     setCopied(false);
     setCopyError(false);
-    if (pendingInvitation && pendingTokenRef.current) {
-      pendingTokenRef.current.focus();
-      pendingTokenRef.current.select();
+    if (pendingInvitation && pendingInvitationRef.current) {
+      pendingInvitationRef.current.focus();
+      pendingInvitationRef.current.select();
     }
   }, [pendingInvitation]);
 
@@ -210,6 +219,17 @@ export function PeoplePanel({
           </p>
         </div>
         <div className="flex items-center gap-1">
+          {presence.currentUserIsOwner ? (
+            <Button
+              type="button"
+              size="sm"
+              data-testid="people-create-invitation"
+              disabled={actionBusy || pendingInvitation !== null}
+              onClick={() => void onCreateInvitation()}
+            >
+              {t("peopleCreateInvitation")}
+            </Button>
+          ) : null}
           {connectSlot ? (
             <Button
               type="button"
@@ -313,13 +333,34 @@ export function PeoplePanel({
               {t("peopleInvitationLoopbackWarning")}
             </p>
           ) : null}
-          <input
-            ref={pendingTokenRef}
-            className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-xs"
+          {invitationConnection ? (
+            <dl
+              className="grid gap-x-4 gap-y-1 border-y border-amber-500/25 py-2 text-xs sm:grid-cols-[auto_1fr]"
+              data-testid="people-invitation-connection-summary"
+            >
+              <dt className="text-muted-foreground">{t("peopleServerUrl")}</dt>
+              <dd className="min-w-0 truncate font-mono text-text-strong">
+                {invitationConnection.serverBaseUrl}
+              </dd>
+              <dt className="text-muted-foreground">{t("peopleProjectId")}</dt>
+              <dd className="min-w-0 truncate font-mono text-text-strong">
+                {invitationConnection.projectId}
+              </dd>
+            </dl>
+          ) : null}
+          <label htmlFor="people-invitation-details" className="text-xs font-semibold">
+            {t(invitationConnection ? "peopleInvitationDetails" : "peopleInvitationToken")}
+          </label>
+          <textarea
+            id="people-invitation-details"
+            ref={pendingInvitationRef}
+            className="min-h-24 w-full resize-y rounded border border-border bg-background px-2 py-1.5 font-mono text-xs leading-5"
             data-testid="people-invitation-token-value"
             readOnly
-            value={pendingInvitation.invitationToken}
-            aria-label={t("peopleInvitationToken")}
+            value={pendingInvitationDetails ?? ""}
+            aria-label={t(
+              invitationConnection ? "peopleInvitationDetails" : "peopleInvitationToken"
+            )}
           />
           <div className="flex flex-wrap gap-1">
             <Button
@@ -330,14 +371,7 @@ export function PeoplePanel({
               onClick={() => {
                 void (async () => {
                   try {
-                    const copyValue = invitationConnection
-                      ? serializeCollaborationInvitationHandoff({
-                          ...invitationConnection,
-                          invitationToken: pendingInvitation.invitationToken,
-                          allowInsecureTransport:
-                            new URL(invitationConnection.serverBaseUrl).protocol === "http:"
-                        })
-                      : pendingInvitation.invitationToken;
+                    const copyValue = pendingInvitationDetails ?? pendingInvitation.invitationToken;
                     await onCopyInvitationToken(copyValue);
                     setCopied(true);
                     setCopyError(false);
@@ -546,18 +580,6 @@ export function PeoplePanel({
               </Button>
               {showOwnerDetails ? (
                 <div className="flex flex-col gap-3 border-t border-border/70 p-2">
-                  <div className="flex flex-wrap gap-1">
-                    <Button
-                      type="button"
-                      size="sm"
-                      data-testid="people-create-invitation"
-                      disabled={actionBusy}
-                      onClick={() => void onCreateInvitation()}
-                    >
-                      {t("peopleCreateInvitation")}
-                    </Button>
-                  </div>
-
                   <div data-testid="people-invitations-list">
                     <div className="mb-1 text-[11px] font-semibold">{t("peopleInvitations")}</div>
                     {detailsLoading ? (

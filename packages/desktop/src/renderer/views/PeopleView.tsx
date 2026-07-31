@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   CollaborationProfileView,
   LocalCollaborationServerStatus,
@@ -127,6 +127,15 @@ export function PeopleView({
     activeProfile,
     localServerStatus
   );
+  const handleLocalServerStatusChange = useCallback(
+    (nextStatus: LocalCollaborationServerStatus) => {
+      setLocalServerStatus(nextStatus);
+      if (nextStatus.state === "running") {
+        void refreshCollaborationStatus();
+      }
+    },
+    [refreshCollaborationStatus]
+  );
   const currentCanvasAccess = useCurrentCanvasAccess({ api, canvasId, status });
 
   // Subscribe only: the project shell owns the shared hub's active project/canvas binding.
@@ -192,7 +201,7 @@ export function PeopleView({
                   scopeLayout={collaborationScopeLayout}
                   onScopeLayoutChange={onCollaborationScopeLayoutChange}
                   copyText={copyText}
-                  onStatusChange={setLocalServerStatus}
+                  onStatusChange={handleLocalServerStatusChange}
                 />
               }
               existingServerSlot={
@@ -340,7 +349,7 @@ export function PeopleView({
                   scopeLayout={collaborationScopeLayout}
                   onScopeLayoutChange={onCollaborationScopeLayoutChange}
                   copyText={copyText}
-                  onStatusChange={setLocalServerStatus}
+                  onStatusChange={handleLocalServerStatusChange}
                 />
               </div>
             )}

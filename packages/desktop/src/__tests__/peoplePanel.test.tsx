@@ -364,6 +364,12 @@ describe("PeoplePanel", () => {
       />
     );
 
+    const visibleInvitation = screen.getByTestId("people-invitation-token-value");
+    expect(screen.getByTestId("people-invitation-connection-summary")).toHaveTextContent(
+      "http://192.168.1.20:56584/"
+    );
+    expect(visibleInvitation.value).toContain("planweave-collaboration-invitation/v1:");
+
     await userEvent.click(screen.getByTestId("people-invitation-copy"));
 
     const copiedInvitation = onCopy.mock.calls[0]?.[0];

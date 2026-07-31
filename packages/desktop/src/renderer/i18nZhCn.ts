@@ -1031,8 +1031,9 @@ export const zhCnCatalog = {
   peopleRemoveConfirm: "从项目中移除此成员？",
   peopleRevokeInvitationConfirm: "吊销此邀请？",
   peopleRevokeDeviceConfirm: "吊销此人类设备凭证？",
-  peopleInvitationCopyOnceTitle: "邀请密钥（仅显示一次）",
-  peopleInvitationCopyOnceWarning: "请立即复制此邀请令牌。它是持有者密钥，关闭后不会再次显示。",
+  peopleInvitationCopyOnceTitle: "完整邀请（仅显示一次）",
+  peopleInvitationCopyOnceWarning:
+    "请立即复制完整邀请。它包含加入所需的服务器、项目和持有者密钥，关闭后不会再次显示。",
   peopleInvitationCopy: "复制令牌",
   peopleInvitationCopyHandoff: "复制完整加入信息",
   peopleInvitationCopied: "已复制",

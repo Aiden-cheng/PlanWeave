@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { collaborationBridge } from "../bridge";
 import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
 
@@ -25,6 +25,20 @@ export function useCollaborationStatus(
   const [status, setStatus] = useState<CollaborationStatus | null>(null);
   const [loading, setLoading] = useState(Boolean(api));
   const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    if (!api) return;
+    setLoading(true);
+    try {
+      const next = await api.getCollaborationStatus();
+      setStatus(next);
+      setError(null);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "collaboration_status_failed");
+    } finally {
+      setLoading(false);
+    }
+  }, [api]);
 
   useEffect(() => {
     if (!api) {
@@ -72,18 +86,6 @@ export function useCollaborationStatus(
     status,
     loading,
     error,
-    refresh: async () => {
-      if (!api) return;
-      setLoading(true);
-      try {
-        const next = await api.getCollaborationStatus();
-        setStatus(next);
-        setError(null);
-      } catch (loadError) {
-        setError(loadError instanceof Error ? loadError.message : "collaboration_status_failed");
-      } finally {
-        setLoading(false);
-      }
-    }
+    refresh
   };
 }
