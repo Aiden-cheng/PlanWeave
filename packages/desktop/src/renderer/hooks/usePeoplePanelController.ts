@@ -59,6 +59,7 @@ export type UsePeoplePanelControllerResult = {
   refreshDetails: () => Promise<void>;
   createInvitation: () => Promise<CollaborationInvitationCreateView | null>;
   revokeInvitation: (invitationId: string) => Promise<boolean>;
+  revokeInvitations: (invitationIds: readonly string[]) => Promise<boolean>;
   promoteMember: (humanPrincipalId: string) => Promise<boolean>;
   demoteMember: (humanPrincipalId: string) => Promise<boolean>;
   removeMember: (humanPrincipalId: string) => Promise<boolean>;
@@ -137,14 +138,25 @@ export function usePeoplePanelController(
     setDetailsLoading(true);
     setDetailsError(null);
     try {
-      const [invitationPage, devicePage] = await Promise.all([
+      const [openInvitationPage, invitationHistoryPage, devicePage] = await Promise.all([
+        api.listCollaborationInvitations({ cursor: 0, limit: 100, openOnly: true }),
         api.listCollaborationInvitations({ cursor: 0, limit: 50, openOnly: false }),
         api.listCollaborationDevices({ cursor: 0, limit: 50, scope: "project" })
       ]);
       if (detailsGenerationRef.current !== generation) {
         return;
       }
-      setInvitations(invitationPage.items);
+      const invitationsById = new Map(
+        invitationHistoryPage.items.map((invitation) => [invitation.invitationId, invitation])
+      );
+      for (const invitation of openInvitationPage.items) {
+        invitationsById.set(invitation.invitationId, invitation);
+      }
+      setInvitations(
+        [...invitationsById.values()].sort((left, right) =>
+          left.createdAt.localeCompare(right.createdAt)
+        )
+      );
       setDevices(devicePage.items);
     } catch (error) {
       if (detailsGenerationRef.current !== generation) {
@@ -231,6 +243,24 @@ export function usePeoplePanelController(
       runAction(async () => {
         await api!.revokeCollaborationInvitation({ invitationId });
       }),
+    revokeInvitations: async (invitationIds) =>
+      runAction(
+        async () => {
+          let firstError: unknown;
+          for (const invitationId of invitationIds) {
+            try {
+              await api!.revokeCollaborationInvitation({ invitationId });
+            } catch (error) {
+              firstError ??= error;
+            }
+          }
+          await refreshDetails();
+          if (firstError !== undefined) {
+            throw firstError;
+          }
+        },
+        { refreshDetails: false }
+      ),
     promoteMember: async (humanPrincipalId) =>
       runAction(
         async () => {

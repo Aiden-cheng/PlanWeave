@@ -1011,6 +1011,9 @@ export const zhCnCatalog = {
   peopleDemote: "降级",
   peopleRemove: "移除",
   peopleRevoke: "吊销",
+  peopleRevokeSelected: "吊销所选（{count}）",
+  peopleSelectAllOpenInvitations: "全选有效邀请",
+  peopleSelectInvitation: "选择邀请 {id}",
   peopleCreateInvitation: "创建邀请",
   peopleConnectionSettings: "连接设置",
   peopleHideConnectionSettings: "收起连接设置",
@@ -1030,6 +1033,7 @@ export const zhCnCatalog = {
   peopleDemoteConfirm: "将此所有者降级为成员？",
   peopleRemoveConfirm: "从项目中移除此成员？",
   peopleRevokeInvitationConfirm: "吊销此邀请？",
+  peopleRevokeSelectedInvitationsConfirm: "吊销所选的 {count} 个邀请？此操作无法撤销。",
   peopleRevokeDeviceConfirm: "吊销此人类设备凭证？",
   peopleInvitationCopyOnceTitle: "完整邀请（仅显示一次）",
   peopleInvitationCopyOnceWarning:

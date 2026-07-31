@@ -30,6 +30,7 @@ export type PeoplePanelProps = {
   onCopyInvitationToken: (token: string) => Promise<void>;
   onDismissPendingInvitation: () => void;
   onRevokeInvitation: (invitationId: string) => Promise<boolean>;
+  onRevokeInvitations: (invitationIds: readonly string[]) => Promise<boolean>;
   onPromoteMember: (humanPrincipalId: string) => Promise<boolean>;
   onDemoteMember: (humanPrincipalId: string) => Promise<boolean>;
   onRemoveMember: (humanPrincipalId: string) => Promise<boolean>;
@@ -130,6 +131,7 @@ export function PeoplePanel({
   onCopyInvitationToken,
   onDismissPendingInvitation,
   onRevokeInvitation,
+  onRevokeInvitations,
   onPromoteMember,
   onDemoteMember,
   onRemoveMember,
@@ -142,6 +144,7 @@ export function PeoplePanel({
   const [showConnectionSettings, setShowConnectionSettings] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
+  const [selectedInvitationIds, setSelectedInvitationIds] = useState<Set<string>>(new Set());
   const liveRegionRef = useRef<HTMLDivElement>(null);
   const pendingInvitationRef = useRef<HTMLTextAreaElement>(null);
   const pendingInvitationDetails = useMemo(() => {
@@ -168,6 +171,28 @@ export function PeoplePanel({
       setShowOwnerDetails(true);
     }
   }, [presence.currentUserIsOwner, presence.memberCount]);
+
+  const openInvitationIds = useMemo(
+    () =>
+      invitations
+        .filter((invitation) => invitation.open)
+        .map((invitation) => invitation.invitationId),
+    [invitations]
+  );
+  const allOpenInvitationsSelected =
+    openInvitationIds.length > 0 &&
+    openInvitationIds.every((invitationId) => selectedInvitationIds.has(invitationId));
+  const someOpenInvitationsSelected =
+    selectedInvitationIds.size > 0 && !allOpenInvitationsSelected;
+
+  useEffect(() => {
+    const openIds = new Set(openInvitationIds);
+    setSelectedInvitationIds((current) => {
+      const next = new Set([...current].filter((invitationId) => openIds.has(invitationId)));
+      if (next.size === current.size) return current;
+      return next;
+    });
+  }, [openInvitationIds]);
 
   const confirmDestructive = (message: string): boolean => window.confirm(message);
 
@@ -581,7 +606,74 @@ export function PeoplePanel({
               {showOwnerDetails ? (
                 <div className="flex flex-col gap-3 border-t border-border/70 p-2">
                   <div data-testid="people-invitations-list">
-                    <div className="mb-1 text-[11px] font-semibold">{t("peopleInvitations")}</div>
+                    <div className="mb-1 flex min-h-7 items-center justify-between gap-3">
+                      <div className="text-[11px] font-semibold">{t("peopleInvitations")}</div>
+                      {openInvitationIds.length > 0 ? (
+                        <div className="flex items-center gap-3 text-[10px]">
+                          <label className="flex cursor-pointer items-center gap-1.5 text-muted-foreground">
+                            <input
+                              type="checkbox"
+                              className="size-3.5 accent-foreground"
+                              data-testid="people-invitation-select-all"
+                              checked={allOpenInvitationsSelected}
+                              disabled={actionBusy}
+                              aria-checked={
+                                someOpenInvitationsSelected ? "mixed" : allOpenInvitationsSelected
+                              }
+                              ref={(element) => {
+                                if (element) {
+                                  element.indeterminate = someOpenInvitationsSelected;
+                                }
+                              }}
+                              onChange={(event) => {
+                                setSelectedInvitationIds(
+                                  event.currentTarget.checked
+                                    ? new Set(openInvitationIds)
+                                    : new Set()
+                                );
+                              }}
+                            />
+                            {t("peopleSelectAllOpenInvitations")}
+                          </label>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-2 text-[10px] text-destructive"
+                            data-testid="people-invitation-revoke-selected"
+                            disabled={actionBusy || selectedInvitationIds.size === 0}
+                            onClick={() => {
+                              const invitationIds = [...selectedInvitationIds];
+                              if (
+                                !confirmDestructive(
+                                  t("peopleRevokeSelectedInvitationsConfirm").replace(
+                                    "{count}",
+                                    String(invitationIds.length)
+                                  )
+                                )
+                              ) {
+                                return;
+                              }
+                              void onRevokeInvitations(invitationIds).then((ok) => {
+                                if (!ok) return;
+                                setSelectedInvitationIds((current) => {
+                                  const next = new Set(current);
+                                  for (const invitationId of invitationIds) {
+                                    next.delete(invitationId);
+                                  }
+                                  return next;
+                                });
+                              });
+                            }}
+                          >
+                            {t("peopleRevokeSelected").replace(
+                              "{count}",
+                              String(selectedInvitationIds.size)
+                            )}
+                          </Button>
+                        </div>
+                      ) : null}
+                    </div>
                     {detailsLoading ? (
                       <div className="text-xs text-muted-foreground">{t("peopleLoading")}</div>
                     ) : invitations.length === 0 ? (
@@ -605,6 +697,30 @@ export function PeoplePanel({
                               data-testid="people-invitation-row"
                               data-open={invitation.open ? "true" : "false"}
                             >
+                              {invitation.open ? (
+                                <input
+                                  type="checkbox"
+                                  className="size-3.5 shrink-0 accent-foreground"
+                                  data-testid="people-invitation-select"
+                                  aria-label={t("peopleSelectInvitation").replace(
+                                    "{id}",
+                                    shortIdentifier(invitation.invitationId)
+                                  )}
+                                  checked={selectedInvitationIds.has(invitation.invitationId)}
+                                  disabled={actionBusy}
+                                  onChange={(event) => {
+                                    setSelectedInvitationIds((current) => {
+                                      const next = new Set(current);
+                                      if (event.currentTarget.checked) {
+                                        next.add(invitation.invitationId);
+                                      } else {
+                                        next.delete(invitation.invitationId);
+                                      }
+                                      return next;
+                                    });
+                                  }}
+                                />
+                              ) : null}
                               <div className="min-w-0 flex-1">
                                 <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                                   <span className="font-medium text-text-strong">{status}</span>

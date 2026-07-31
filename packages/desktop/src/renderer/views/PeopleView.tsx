@@ -286,6 +286,11 @@ export function PeopleView({
                     reportMembership(ok, membershipResult(ok));
                     return ok;
                   }}
+                  onRevokeInvitations={async (invitationIds) => {
+                    const ok = await panel.revokeInvitations(invitationIds);
+                    reportMembership(ok, membershipResult(ok));
+                    return ok;
+                  }}
                   onPromoteMember={async (humanPrincipalId) => {
                     const ok = await panel.promoteMember(humanPrincipalId);
                     if (ok) await refreshMembers();

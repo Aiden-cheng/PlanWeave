@@ -289,6 +289,7 @@ describe("collaboration accessibility", () => {
           onCopyInvitationToken={vi.fn()}
           onDismissPendingInvitation={vi.fn()}
           onRevokeInvitation={vi.fn()}
+          onRevokeInvitations={vi.fn()}
           onPromoteMember={vi.fn()}
           onDemoteMember={vi.fn()}
           onRemoveMember={vi.fn()}

@@ -141,6 +141,7 @@ describe("PeoplePanel", () => {
         onCopyInvitationToken={onCopy}
         onDismissPendingInvitation={vi.fn()}
         onRevokeInvitation={onRevokeInvitation}
+        onRevokeInvitations={vi.fn()}
         onPromoteMember={onPromote}
         onDemoteMember={vi.fn()}
         onRemoveMember={onRemove}
@@ -194,6 +195,7 @@ describe("PeoplePanel", () => {
         onCopyInvitationToken={onCopy}
         onDismissPendingInvitation={vi.fn()}
         onRevokeInvitation={onRevokeInvitation}
+        onRevokeInvitations={vi.fn()}
         onPromoteMember={onPromote}
         onDemoteMember={vi.fn()}
         onRemoveMember={onRemove}
@@ -235,6 +237,7 @@ describe("PeoplePanel", () => {
         onCopyInvitationToken={vi.fn()}
         onDismissPendingInvitation={vi.fn()}
         onRevokeInvitation={vi.fn()}
+        onRevokeInvitations={vi.fn()}
         onPromoteMember={vi.fn()}
         onDemoteMember={vi.fn()}
         onRemoveMember={vi.fn()}
@@ -310,6 +313,7 @@ describe("PeoplePanel", () => {
         onCopyInvitationToken={vi.fn()}
         onDismissPendingInvitation={vi.fn()}
         onRevokeInvitation={vi.fn()}
+        onRevokeInvitations={vi.fn()}
         onPromoteMember={vi.fn()}
         onDemoteMember={vi.fn()}
         onRemoveMember={vi.fn()}
@@ -356,6 +360,7 @@ describe("PeoplePanel", () => {
         onCopyInvitationToken={onCopy}
         onDismissPendingInvitation={vi.fn()}
         onRevokeInvitation={vi.fn()}
+        onRevokeInvitations={vi.fn()}
         onPromoteMember={vi.fn()}
         onDemoteMember={vi.fn()}
         onRemoveMember={vi.fn()}
@@ -422,6 +427,7 @@ describe("PeoplePanel", () => {
         onCopyInvitationToken={vi.fn()}
         onDismissPendingInvitation={vi.fn()}
         onRevokeInvitation={vi.fn()}
+        onRevokeInvitations={vi.fn()}
         onPromoteMember={vi.fn()}
         onDemoteMember={vi.fn()}
         onRemoveMember={vi.fn()}
@@ -443,6 +449,59 @@ describe("PeoplePanel", () => {
     expect(screen.queryByText(deviceId)).not.toBeInTheDocument();
   });
 
+  it("selects and revokes multiple open invitations in one action", async () => {
+    const onRevokeInvitations = vi.fn().mockResolvedValue(true);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(
+      <PeoplePanel
+        mode="ready"
+        presence={presence}
+        members={members}
+        hosts={[]}
+        invitations={[
+          { ...invitations[0]!, invitationId: "inv-1" },
+          { ...invitations[0]!, invitationId: "inv-2" },
+          {
+            ...invitations[0]!,
+            invitationId: "inv-closed",
+            open: false,
+            revokedAt: "2030-01-02T00:00:00.000Z"
+          }
+        ]}
+        devices={[]}
+        detailsLoading={false}
+        detailsError={null}
+        actionError={null}
+        actionBusy={false}
+        pendingInvitation={null}
+        t={t}
+        onCreateInvitation={vi.fn()}
+        onCopyInvitationToken={vi.fn()}
+        onDismissPendingInvitation={vi.fn()}
+        onRevokeInvitation={vi.fn()}
+        onRevokeInvitations={onRevokeInvitations}
+        onPromoteMember={vi.fn()}
+        onDemoteMember={vi.fn()}
+        onRemoveMember={vi.fn()}
+        onRevokeDevice={vi.fn()}
+        onRefreshDetails={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId("people-owner-toggle"));
+    await userEvent.click(screen.getByTestId("people-invitation-select-all"));
+
+    expect(screen.getByTestId("people-invitation-revoke-selected")).toHaveTextContent(
+      "Revoke selected (2)"
+    );
+    await userEvent.click(screen.getByTestId("people-invitation-revoke-selected"));
+
+    expect(window.confirm).toHaveBeenCalledWith(
+      "Revoke the 2 selected invitations? This action cannot be undone."
+    );
+    expect(onRevokeInvitations).toHaveBeenCalledWith(["inv-1", "inv-2"]);
+  });
+
   it("shows forbidden state without owner mutation controls", () => {
     render(
       <PeoplePanel
@@ -462,6 +521,7 @@ describe("PeoplePanel", () => {
         onCopyInvitationToken={vi.fn()}
         onDismissPendingInvitation={vi.fn()}
         onRevokeInvitation={vi.fn()}
+        onRevokeInvitations={vi.fn()}
         onPromoteMember={vi.fn()}
         onDemoteMember={vi.fn()}
         onRemoveMember={vi.fn()}

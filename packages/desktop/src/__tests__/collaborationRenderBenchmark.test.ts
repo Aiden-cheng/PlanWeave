@@ -104,6 +104,7 @@ function createAuditApi() {
   });
   const listInvitations = vi.fn().mockResolvedValue({ items: [], nextCursor: null });
   const listDevices = vi.fn().mockResolvedValue({ items: [], nextCursor: null });
+  const revokeInvitation = vi.fn().mockResolvedValue(undefined);
   const observe = vi.fn().mockResolvedValue({
     operationId: "op-1",
     projectId: "project-1",
@@ -197,6 +198,7 @@ function createAuditApi() {
     updateCollaborationExecutionTarget: vi.fn(),
     listCollaborationInvitations: listInvitations,
     listCollaborationDevices: listDevices,
+    revokeCollaborationInvitation: revokeInvitation,
     observeCollaborationRemoteOperation: observe,
     replayCollaborationRemoteOperationEvents: replay,
     listCollaborationRemoteOperationInteractions: listInteractions,
@@ -217,6 +219,7 @@ function createAuditApi() {
     listAssignments,
     listInvitations,
     listDevices,
+    revokeInvitation,
     observe,
     replay,
     listInteractions
@@ -400,9 +403,40 @@ describe("collaboration render / subscription audit", () => {
 
     rerender({ detailsOpen: true });
     await waitFor(() => {
-      expect(listInvitations).toHaveBeenCalled();
+      expect(listInvitations).toHaveBeenCalledWith({ cursor: 0, limit: 100, openOnly: true });
+      expect(listInvitations).toHaveBeenCalledWith({ cursor: 0, limit: 50, openOnly: false });
       expect(listDevices).toHaveBeenCalled();
     });
+  });
+
+  it("attempts every selected invitation and refreshes details after a partial failure", async () => {
+    const { api, listInvitations, revokeInvitation } = createAuditApi();
+    trackedApis.push(api);
+    revokeInvitation.mockRejectedValueOnce(new Error("first revoke failed"));
+
+    const { result } = renderHook(() =>
+      usePeoplePanelController({
+        api,
+        status: connectedStatus(),
+        members: [],
+        hosts: [],
+        syncPhase: "ready",
+        detailsOpen: true
+      })
+    );
+
+    await waitFor(() => expect(listInvitations).toHaveBeenCalledTimes(2));
+    let succeeded = true;
+    await act(async () => {
+      succeeded = await result.current.revokeInvitations(["inv-1", "inv-2"]);
+    });
+
+    expect(succeeded).toBe(false);
+    expect(revokeInvitation).toHaveBeenCalledTimes(2);
+    expect(revokeInvitation).toHaveBeenNthCalledWith(1, { invitationId: "inv-1" });
+    expect(revokeInvitation).toHaveBeenNthCalledWith(2, { invitationId: "inv-2" });
+    expect(listInvitations).toHaveBeenCalledTimes(4);
+    expect(result.current.actionError).not.toBeNull();
   });
 
   it("bounds event-burst projection by unique cursor after duplicate/out-of-order delivery", () => {

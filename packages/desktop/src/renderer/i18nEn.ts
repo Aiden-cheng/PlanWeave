@@ -1068,6 +1068,9 @@ export const enCatalog = {
   peopleDemote: "Demote",
   peopleRemove: "Remove",
   peopleRevoke: "Revoke",
+  peopleRevokeSelected: "Revoke selected ({count})",
+  peopleSelectAllOpenInvitations: "Select all open invitations",
+  peopleSelectInvitation: "Select invitation {id}",
   peopleCreateInvitation: "Create invitation",
   peopleConnectionSettings: "Connection settings",
   peopleHideConnectionSettings: "Hide connection settings",
@@ -1087,6 +1090,8 @@ export const enCatalog = {
   peopleDemoteConfirm: "Demote this owner to member?",
   peopleRemoveConfirm: "Remove this member from the project?",
   peopleRevokeInvitationConfirm: "Revoke this invitation?",
+  peopleRevokeSelectedInvitationsConfirm:
+    "Revoke the {count} selected invitations? This action cannot be undone.",
   peopleRevokeDeviceConfirm: "Revoke this human device credential?",
   peopleInvitationCopyOnceTitle: "Complete invitation (shown once)",
   peopleInvitationCopyOnceWarning:
