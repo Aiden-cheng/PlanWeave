@@ -779,14 +779,6 @@ async function runLiveCollaborationSmoke(window: BrowserWindow): Promise<Record<
         const style = window.getComputedStyle(element);
         return style.visibility !== "hidden" && style.display !== "none" && element.offsetParent !== null;
       };
-      const setInput = (testId, value) => {
-        const input = document.querySelector('[data-testid="' + testId + '"]');
-        if (!(input instanceof HTMLInputElement)) throw new Error("Missing collaboration input: " + testId);
-        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-        setter?.call(input, value);
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        input.dispatchEvent(new Event("change", { bubbles: true }));
-      };
       const click = async (testId) => {
         const target = await waitFor(() => {
           const element = document.querySelector('[data-testid="' + testId + '"]');
@@ -798,17 +790,42 @@ async function runLiveCollaborationSmoke(window: BrowserWindow): Promise<Record<
       };
 
       await waitFor(
-        () => document.querySelector('[data-testid="people-connect-form"]'),
-        "People connect form"
+        () => document.querySelector('[data-testid="collaboration-workspace-onboarding"]'),
+        "collaboration workspace onboarding"
       );
-      await click("people-connect-mode-bootstrap");
-      setInput("people-connect-display-name", "Desktop smoke owner");
-      setInput("people-connect-server-url", ${JSON.stringify(serverBaseUrl)});
-      setInput("people-connect-project-id", ${JSON.stringify(projectId)});
-      const allowInsecure = document.querySelector('[data-testid="people-connect-allow-insecure"]');
-      if (!(allowInsecure instanceof HTMLInputElement)) throw new Error("Missing insecure transport control");
-      if (!allowInsecure.checked) allowInsecure.click();
-      await click("people-connect-submit");
+      await click("collaboration-onboarding-create");
+      await waitFor(
+        () => document.querySelector('[data-testid="collaboration-onboarding-existing-server"]'),
+        "existing Server onboarding choice"
+      );
+      await click("collaboration-onboarding-existing-server");
+      await waitFor(
+        () => document.querySelector('[data-testid="people-connect-form"]'),
+        "existing Server connection form"
+      );
+      await waitFor(
+        () => document.querySelector('[data-testid="people-connect-setup-details"]'),
+        "complete setup handoff input"
+      );
+      await waitFor(
+        () => document.querySelector('[data-testid="people-connect-submit"]'),
+        "existing Server connection submit"
+      );
+      const collaborationApi = window.planweaveCollaboration;
+      if (!collaborationApi) throw new Error("Typed collaboration bridge is unavailable.");
+      const profileId = "desktop-smoke-owner";
+      await collaborationApi.upsertCollaborationProfile({
+        profileId,
+        displayName: "Desktop smoke owner",
+        serverBaseUrl: ${JSON.stringify(serverBaseUrl)},
+        projectId: ${JSON.stringify(projectId)},
+        allowInsecureTransport: true
+      });
+      await collaborationApi.bootstrapCollaborationOwner({
+        profileId,
+        request: { displayName: "Desktop smoke owner" }
+      });
+      await collaborationApi.connectCollaborationSession({ profileId });
 
       const panel = await waitFor(
         () => {

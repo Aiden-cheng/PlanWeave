@@ -18,6 +18,83 @@ const onScopeLayoutChange = () => undefined;
 afterEach(cleanupRendererTestEnvironment);
 
 describe("PeopleView", () => {
+  it("keeps the connected workspace visible during a transient disconnected status event", async () => {
+    let emitStatus: ((status: unknown) => void) | null = null;
+    const connectedStatus = {
+      profiles: [
+        {
+          profileId: "profile-1",
+          displayName: "Team workspace",
+          serverBaseUrl: "https://collaboration.example.test",
+          projectId: "project-1",
+          allowInsecureTransport: false,
+          hasDeviceCredential: true,
+          deviceCredentialPersistence: "persisted",
+          deviceCredentialId: "device-1",
+          humanPrincipalId: "human-1",
+          updatedAt: "2030-01-01T00:00:00.000Z"
+        }
+      ],
+      activeProfileId: "profile-1",
+      credentialStorage: "available",
+      nonPersistenceWarning: null,
+      session: {
+        phase: "connected",
+        activeProfileId: "profile-1",
+        detail: null,
+        lastErrorCode: null,
+        lastErrorMessage: null
+      },
+      workspaceConnection: {
+        schemaVersion: "workspace-setup/v1",
+        status: "connected",
+        profile: null,
+        workspaceId: "workspace-1",
+        workspaceDisplayName: "Team",
+        connectedAt: "2030-01-01T00:00:00.000Z",
+        error: null
+      },
+      workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null },
+      updatedAt: "2030-01-01T00:00:00.000Z"
+    } as const;
+    const api = {
+      getCollaborationStatus: vi.fn().mockResolvedValue(connectedStatus),
+      onCollaborationStatusChanged: vi.fn((listener: (status: unknown) => void) => {
+        emitStatus = listener;
+        return () => undefined;
+      }),
+      getLocalCollaborationServerStatus: vi.fn().mockResolvedValue({
+        profile: null,
+        state: "stopped",
+        startedAt: null,
+        reason: null,
+        lanSharingEnabled: false,
+        lanServerBaseUrl: null
+      }),
+      onCollaborationObserverSignal: vi.fn(() => () => undefined)
+    } as unknown as PlanWeaveCollaborationApi;
+
+    render(
+      <PeopleView
+        api={api}
+        t={createTranslator("en")}
+        collaborationScopeLayout={scopeLayout}
+        onCollaborationScopeLayoutChange={onScopeLayoutChange}
+      />
+    );
+    expect(await screen.findByTestId("people-workspace-section")).toBeVisible();
+
+    emitStatus?.({
+      ...connectedStatus,
+      session: { ...connectedStatus.session, phase: "idle" },
+      workspaceConnection: { ...connectedStatus.workspaceConnection, status: "disconnected" },
+      updatedAt: "2030-01-01T00:00:01.000Z"
+    });
+
+    await waitFor(() => expect(screen.getByTestId("people-workspace-section")).toBeVisible());
+    expect(screen.queryByTestId("collaboration-workspace-onboarding")).not.toBeInTheDocument();
+  });
+
   it("uses the LAN endpoint for the same running local server even when service and project profile IDs differ", () => {
     const activeProfile = {
       profileId: "planweave-local-project-hash",
@@ -279,7 +356,7 @@ describe("PeopleView", () => {
     expect(screen.queryByTestId("content-authority-panel")).not.toBeInTheDocument();
   });
 
-  it("shows create-or-join onboarding when a stored profile is not connected", async () => {
+  it("keeps a stored credential workspace visible while it is disconnected", async () => {
     const api = {
       getCollaborationStatus: vi.fn().mockResolvedValue({
         profiles: [
@@ -338,10 +415,9 @@ describe("PeopleView", () => {
       />
     );
 
-    expect(await screen.findByTestId("collaboration-workspace-onboarding")).toBeVisible();
-    expect(screen.getByTestId("collaboration-onboarding-create")).toBeVisible();
-    expect(screen.getByTestId("collaboration-onboarding-join")).toBeVisible();
-    expect(screen.queryByTestId("people-panel")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("people-workspace-section")).toBeVisible();
+    expect(screen.getByTestId("people-panel")).toBeVisible();
+    expect(screen.queryByTestId("collaboration-workspace-onboarding")).not.toBeInTheDocument();
   });
 
   it("keeps onboarding visible when a failed join left only an uncredentialed profile", async () => {

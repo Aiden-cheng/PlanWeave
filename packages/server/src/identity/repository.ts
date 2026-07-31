@@ -218,6 +218,34 @@ export class HumanIdentityRepository {
     });
   }
 
+  revokeInvitations(
+    invitationIds: readonly string[],
+    projectId: string
+  ): ProjectInvitationMetadata[] {
+    return inWriteTransaction(this.database, () => {
+      const invitations = invitationIds.map((invitationId) => {
+        const invitation = this.invitations.getInvitation(invitationId);
+        if (!invitation || invitation.projectId !== projectId) {
+          throw new HumanIdentityError("human_invitation_invalid");
+        }
+        if (invitation.consumedAt !== undefined) {
+          throw new HumanIdentityError("human_invitation_consumed");
+        }
+        return invitation;
+      });
+
+      return invitations.map((invitation) => {
+        if (invitation.revokedAt !== undefined) return invitation;
+        const revoked = this.invitations.revokeInvitation(invitation.invitationId, projectId);
+        this.options.onInvitationTransitionInTransaction?.({
+          type: "invitation_revoked",
+          invitation: revoked
+        });
+        return revoked;
+      });
+    });
+  }
+
   /**
    * Consume a one-time invitation.
    *

@@ -17,6 +17,8 @@ import { isDesktopPerformanceDiagnostic } from "../diagnostics";
 export type ApplyDesktopProjectSnapshotOptions = {
   includeLayout?: boolean;
   includePrompt?: boolean;
+  requireCurrentCanvas?: boolean;
+  throwOnErrors?: boolean;
 };
 
 export type CurrentDesktopCanvasRef = {

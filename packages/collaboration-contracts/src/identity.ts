@@ -35,22 +35,40 @@ import {
 } from "./primitives.js";
 
 const hostCapabilitySchema = z.string().trim().min(1).max(128);
-const hostCapabilitiesSchema = z.array(hostCapabilitySchema).max(128).superRefine((values, ctx) => {
-  if (new Set(values).size !== values.length) {
-    ctx.addIssue({ code: "custom", message: "duplicate_host_capability" });
-  }
-});
+const hostCapabilitiesSchema = z
+  .array(hostCapabilitySchema)
+  .max(128)
+  .superRefine((values, ctx) => {
+    if (new Set(values).size !== values.length) {
+      ctx.addIssue({ code: "custom", message: "duplicate_host_capability" });
+    }
+  });
 
 const nullableTimestampSchema = timestampSchema.nullable();
 
 /** Exported trust-boundary ownership for each consumer. */
 export const identityContractOwnership = {
   server: {
-    creates: ["workspace", "human_principal", "membership", "device_session", "operator_session", "agent_host", "host_enrollment", "revocation"],
+    creates: [
+      "workspace",
+      "human_principal",
+      "membership",
+      "device_session",
+      "operator_session",
+      "agent_host",
+      "host_enrollment",
+      "revocation"
+    ],
     authenticates: ["device_session", "operator_session", "agent_host"]
   },
   desktop: {
-    consumes: ["workspace_identity_view", "human_principal_view", "membership_view", "device_session_view", "agent_host_view"]
+    consumes: [
+      "workspace_identity_view",
+      "human_principal_view",
+      "membership_view",
+      "device_session_view",
+      "agent_host_view"
+    ]
   },
   agentHost: {
     consumes: ["agent_host_credential_binding", "workspace_scope_ref"]
@@ -390,6 +408,28 @@ export const humanInvitationPageSchema = z
   .strict();
 export type HumanInvitationPage = z.infer<typeof humanInvitationPageSchema>;
 
+export const humanRevokeInvitationsRequestSchema = z
+  .object({
+    invitationIds: z
+      .array(projectInvitationIdSchema)
+      .min(1)
+      .max(HUMAN_MAX_INVITATIONS_LISTED_PER_PAGE)
+      .superRefine((values, ctx) => {
+        if (new Set(values).size !== values.length) {
+          ctx.addIssue({ code: "custom", message: "duplicate_invitation_id" });
+        }
+      })
+  })
+  .strict();
+export type HumanRevokeInvitationsRequest = z.infer<typeof humanRevokeInvitationsRequestSchema>;
+
+export const humanRevokeInvitationsResponseSchema = z
+  .object({
+    items: z.array(humanInvitationViewSchema).max(HUMAN_MAX_INVITATIONS_LISTED_PER_PAGE)
+  })
+  .strict();
+export type HumanRevokeInvitationsResponse = z.infer<typeof humanRevokeInvitationsResponseSchema>;
+
 export const humanBootstrapRequestSchema = z
   .object({
     displayName: humanDisplayNameSchema,
@@ -484,7 +524,8 @@ export function assertHumanDisplayDtoRedacted(value: unknown): void {
 }
 
 export function assertWorkspaceIdentityViewRedacted(value: unknown): void {
-  const forbiddenKey = /^(?:credential(?:Sha256|Hash|Token)|credential[_-](?:sha256|hash|token)|token(?:Sha256|Hash|Token)?|token[_-](?:sha256|hash|token)|secret|password|enrollment(?:Code|Hash)|enrollment[_-](?:code|hash)|projectRoot|executable|command|args|environment|env)$/i;
+  const forbiddenKey =
+    /^(?:credential(?:Sha256|Hash|Token)|credential[_-](?:sha256|hash|token)|token(?:Sha256|Hash|Token)?|token[_-](?:sha256|hash|token)|secret|password|enrollment(?:Code|Hash)|enrollment[_-](?:code|hash)|projectRoot|executable|command|args|environment|env)$/i;
   const visit = (current: unknown): boolean => {
     if (Array.isArray(current)) return current.some(visit);
     if (!current || typeof current !== "object") return false;
@@ -500,7 +541,9 @@ export type IdentityCredentialUsability =
   | { usable: true; state: "active" }
   | {
       usable: false;
-      state: Exclude<z.infer<typeof identityCredentialStateSchema>, "active"> | "workspace_mismatch";
+      state:
+        | Exclude<z.infer<typeof identityCredentialStateSchema>, "active">
+        | "workspace_mismatch";
     };
 
 function evaluateCredentialUsability(input: {

@@ -40,6 +40,7 @@ type HumanRoute =
   | { kind: "consume_invitation"; projectId: string }
   | { kind: "create_invitation"; projectId: string }
   | { kind: "list_invitations"; projectId: string }
+  | { kind: "revoke_invitations"; projectId: string }
   | { kind: "revoke_invitation"; projectId: string; invitationId: string }
   | { kind: "list_members"; projectId: string }
   | { kind: "remove_member"; projectId: string; humanPrincipalId: string }
@@ -77,6 +78,9 @@ function route(request: IncomingMessage, pathname: string): HumanRoute | undefin
   }
   if (request.method === "GET" && rest === "/invitations") {
     return { kind: "list_invitations", projectId };
+  }
+  if (request.method === "POST" && rest === "/invitations/revoke-batch") {
+    return { kind: "revoke_invitations", projectId };
   }
   const revokeInvitation = /^\/invitations\/([^/]+)\/revoke$/.exec(rest);
   if (request.method === "POST" && revokeInvitation) {
@@ -385,6 +389,13 @@ export async function handleHumanHttpRequest(
           200,
           options.service.revokeInvitation(context, matched.projectId, matched.invitationId)
         );
+        break;
+      }
+      case "revoke_invitations": {
+        query(url, []);
+        const context = requireHumanContext(options, request, matched.projectId);
+        const body = await readJson(request);
+        respond(response, 200, options.service.revokeInvitations(context, matched.projectId, body));
         break;
       }
       case "list_members": {

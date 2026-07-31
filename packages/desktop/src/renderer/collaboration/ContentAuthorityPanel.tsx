@@ -9,20 +9,24 @@ export function ContentAuthorityPanel({
   api,
   canvasId,
   connected,
+  onMaterialized,
   t
 }: {
   api: PlanWeaveCollaborationApi | null;
   canvasId: string | null;
   connected: boolean;
+  onMaterialized?: () => Promise<void>;
   t: ReturnType<typeof createTranslator>;
 }) {
   const [model, setModel] = useState<ContentVersionDesktopReadModel | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const run = useCallback(async (action: () => Promise<ContentVersionDesktopReadModel>) => {
     setBusy(true);
     setError(null);
+    setInfo(null);
     try {
       setModel(await action());
     } catch (cause) {
@@ -61,6 +65,7 @@ export function ContentAuthorityPanel({
         <p className="text-xs text-muted-foreground">{t("contentAuthorityAcknowledged")}</p>
       ) : null}
       {error ? <p className="mt-1 text-xs text-destructive">{error}</p> : null}
+      {info ? <p className="mt-1 text-xs text-emerald-700 dark:text-emerald-300">{info}</p> : null}
       <div className="mt-2 flex flex-wrap gap-2">
         <Button
           size="sm"
@@ -83,7 +88,19 @@ export function ContentAuthorityPanel({
           <Button
             size="sm"
             disabled={busy}
-            onClick={() => api && run(() => api.materializeCollaborationContentHead())}
+            onClick={() =>
+              api &&
+              run(async () => {
+                const nextModel = await api.materializeCollaborationContentHead();
+                try {
+                  await onMaterialized?.();
+                  setInfo(t("contentAuthorityMaterializedSuccess"));
+                } catch (cause) {
+                  setError(collaborationErrorMessage(cause));
+                }
+                return nextModel;
+              })
+            }
           >
             {model.canRecover ? t("contentAuthorityRecover") : t("contentAuthorityMaterialize")}
           </Button>

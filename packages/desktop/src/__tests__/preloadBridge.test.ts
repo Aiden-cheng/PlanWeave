@@ -857,6 +857,7 @@ describe("preload bridge invocation", () => {
     await api.listCollaborationMembers({ cursor: 0, limit: 20 });
     await api.createCollaborationInvitation({});
     await api.revokeCollaborationInvitation({ invitationId: "inv-1" });
+    await api.revokeCollaborationInvitations({ invitationIds: ["inv-1", "inv-2"] });
     await api.removeCollaborationMember({ humanPrincipalId: "human-1" });
     await api.promoteCollaborationOwner({ humanPrincipalId: "human-2" });
     await api.demoteCollaborationOwner({ humanPrincipalId: "human-2" });

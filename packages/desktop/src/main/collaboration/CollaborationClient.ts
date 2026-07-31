@@ -29,6 +29,8 @@ import {
   humanInvitationListQuerySchema,
   humanInvitationPageSchema,
   humanInvitationViewSchema,
+  humanRevokeInvitationsRequestSchema,
+  humanRevokeInvitationsResponseSchema,
   humanMemberPageSchema,
   humanObserverHelloSchema,
   humanPageQuerySchema,
@@ -86,6 +88,7 @@ import {
   type HumanDevicePage,
   type HumanInvitationPage,
   type HumanInvitationView,
+  type HumanRevokeInvitationsResponse,
   type HumanMemberPage,
   type HumanObserverCursor,
   type HumanObserverServerMessage,
@@ -319,6 +322,19 @@ export class CollaborationClient {
       `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/human/invitations/${encodeURIComponent(invitationId)}/revoke`,
       humanInvitationViewSchema,
       { body: {}, signal }
+    );
+  }
+
+  async revokeInvitations(
+    input: z.input<typeof humanRevokeInvitationsRequestSchema>,
+    signal?: AbortSignal
+  ): Promise<HumanRevokeInvitationsResponse> {
+    const body = humanRevokeInvitationsRequestSchema.parse(input);
+    return this.json(
+      "POST",
+      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/human/invitations/revoke-batch`,
+      humanRevokeInvitationsResponseSchema,
+      { body, signal }
     );
   }
 

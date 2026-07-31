@@ -46,6 +46,14 @@ describe("CollaborationWorkspaceOnboarding", () => {
 
     await user.click(screen.getByRole("button", { name: "collaborationOnboardingBack" }));
     expect(onLocalHostingOpenChange).toHaveBeenLastCalledWith(false);
+
+    await user.click(screen.getByTestId("collaboration-onboarding-existing-server"));
+    expect(screen.getByTestId("collaboration-workspace-onboarding")).toHaveAttribute(
+      "data-step",
+      "existing-server"
+    );
+    expect(screen.getByTestId("existing-server-slot")).toBeVisible();
+    expect(screen.queryByTestId("local-hosting-slot")).not.toBeInTheDocument();
   });
 
   it("renders the supplied join slot without adding a second invitation input", async () => {

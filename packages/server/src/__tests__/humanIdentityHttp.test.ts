@@ -210,9 +210,11 @@ describe("human membership HTTP APIs", () => {
 
     expect((await fetch(trustedUrl)).status).toBe(429);
     expect(
-      (database.prepare("SELECT COUNT(*) AS count FROM project_memberships").get() as {
-        count: number;
-      }).count
+      (
+        database.prepare("SELECT COUNT(*) AS count FROM project_memberships").get() as {
+          count: number;
+        }
+      ).count
     ).toBe(0);
   });
 
@@ -345,6 +347,37 @@ describe("human membership HTTP APIs", () => {
     await expect(consumeRevoked.json()).resolves.toEqual({ error: "human_invitation_revoked" });
   });
 
+  it("revokes many invitations with one rate-limited HTTP action", async () => {
+    const { origin } = await setup();
+    const owner = await bootstrap(origin);
+    const ownerToken = owner.payload.deviceToken!;
+    const invitationIds: string[] = [];
+    for (let index = 0; index < 3; index += 1) {
+      const response = await fetch(`${origin}/api/v1/projects/project-a/human/invitations`, {
+        method: "POST",
+        headers: jsonHeaders(ownerToken),
+        body: JSON.stringify({})
+      });
+      const payload = (await response.json()) as { invitation: { invitationId: string } };
+      invitationIds.push(payload.invitation.invitationId);
+    }
+
+    const response = await fetch(
+      `${origin}/api/v1/projects/project-a/human/invitations/revoke-batch`,
+      {
+        method: "POST",
+        headers: jsonHeaders(ownerToken),
+        body: JSON.stringify({ invitationIds })
+      }
+    );
+
+    const responseText = await response.text();
+    expect(response.status, responseText).toBe(200);
+    expect(JSON.parse(responseText)).toMatchObject({
+      items: invitationIds.map((invitationId) => ({ invitationId, revokedAt: expect.any(String) }))
+    });
+  });
+
   it("binds authentication and device inventories to the mint project", async () => {
     const { origin, database } = await setup();
     bindProjectsToSharedWorkspace(database);
@@ -368,10 +401,9 @@ describe("human membership HTTP APIs", () => {
     });
     expect(own.status).toBe(200);
 
-    const ownDevices = await fetch(
-      `${origin}/api/v1/projects/project-b/human/devices?scope=own`,
-      { headers: auth(b.payload.deviceToken!) }
-    );
+    const ownDevices = await fetch(`${origin}/api/v1/projects/project-b/human/devices?scope=own`, {
+      headers: auth(b.payload.deviceToken!)
+    });
     expect(ownDevices.status).toBe(200);
     const ownBody = (await ownDevices.json()) as {
       items: Array<{ deviceCredentialId: string; mintedForProjectId: string }>;

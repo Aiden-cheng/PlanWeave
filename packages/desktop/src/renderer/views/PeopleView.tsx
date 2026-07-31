@@ -28,6 +28,7 @@ export type PeopleViewProps = {
   /** Optional clipboard writer; defaults to navigator.clipboard. */
   copyText?: (text: string) => Promise<void>;
   canvasId?: string | null;
+  onContentMaterialized?: () => Promise<void>;
   onMembershipOutcome?: (outcome: { ok: boolean; message: string }) => void;
   collaborationScopeLayout: DesktopUiSettings["layout"]["collaborationScope"];
   onCollaborationScopeLayoutChange: (
@@ -85,6 +86,7 @@ export function PeopleView({
   api: apiProp,
   copyText = defaultCopyText,
   canvasId = null,
+  onContentMaterialized,
   onMembershipOutcome,
   collaborationScopeLayout,
   onCollaborationScopeLayoutChange
@@ -122,8 +124,9 @@ export function PeopleView({
     status?.workspaceConnection.status === "connecting" ||
     status?.workspaceConnection.status === "connected" ||
     status?.workspaceConnection.status === "reconnecting";
-  const showOnboarding =
-    localHostingOpen || (!sessionConnected && !workspaceConnectionActive);
+  const hasConfiguredWorkspace =
+    activeProfile?.hasDeviceCredential === true || workspaceConnectionActive;
+  const showOnboarding = localHostingOpen || !hasConfiguredWorkspace;
   const invitationServerBaseUrl = resolveCollaborationInvitationServerBaseUrl(
     activeProfile,
     localServerStatus
@@ -214,7 +217,7 @@ export function PeopleView({
                   fixedMode="setup"
                   showHeader={false}
                   showConnectionSummary
-                  onConnected={() => void refreshCollaborationStatus()}
+                  onConnected={refreshCollaborationStatus}
                 />
               }
               joinSlot={
@@ -225,7 +228,7 @@ export function PeopleView({
                   fixedMode="join"
                   showHeader={false}
                   showConnectionSummary={false}
-                  onConnected={() => void refreshCollaborationStatus()}
+                  onConnected={refreshCollaborationStatus}
                 />
               }
             />
@@ -324,6 +327,7 @@ export function PeopleView({
                       status={status}
                       t={t}
                       initialMode={activeProfile ? "connect" : "join"}
+                      onConnected={refreshCollaborationStatus}
                     />
                   }
                 />
@@ -342,6 +346,7 @@ export function PeopleView({
                   api={api ?? null}
                   canvasId={canvasId}
                   connected={sessionConnected}
+                  onMaterialized={onContentMaterialized}
                   t={t}
                 />
               </div>

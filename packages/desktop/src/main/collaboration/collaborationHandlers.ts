@@ -350,6 +350,10 @@ export function registerCollaborationHandlers(
     collaborationInvokeChannels.revokeCollaborationInvitation,
     (_event, input: unknown) => active.revokeInvitation(input)
   );
+  ipcMain.handle(
+    collaborationInvokeChannels.revokeCollaborationInvitations,
+    (_event, input: unknown) => active.revokeInvitations(input)
+  );
   ipcMain.handle(collaborationInvokeChannels.removeCollaborationMember, (_event, input: unknown) =>
     active.removeMember(input)
   );

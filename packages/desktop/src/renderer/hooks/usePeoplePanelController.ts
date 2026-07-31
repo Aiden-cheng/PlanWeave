@@ -26,6 +26,7 @@ import type {
   CollaborationStatus,
   PlanWeaveCollaborationApi
 } from "../../shared/collaboration.js";
+import { collaborationInvitationIdsInputSchema } from "../../shared/collaboration.js";
 import type {
   CollaborationHostProjection,
   CollaborationSyncPhase
@@ -138,22 +139,15 @@ export function usePeoplePanelController(
     setDetailsLoading(true);
     setDetailsError(null);
     try {
-      const [openInvitationPage, invitationHistoryPage, devicePage] = await Promise.all([
+      const [invitationPage, devicePage] = await Promise.all([
         api.listCollaborationInvitations({ cursor: 0, limit: 100, openOnly: true }),
-        api.listCollaborationInvitations({ cursor: 0, limit: 50, openOnly: false }),
         api.listCollaborationDevices({ cursor: 0, limit: 50, scope: "project" })
       ]);
       if (detailsGenerationRef.current !== generation) {
         return;
       }
-      const invitationsById = new Map(
-        invitationHistoryPage.items.map((invitation) => [invitation.invitationId, invitation])
-      );
-      for (const invitation of openInvitationPage.items) {
-        invitationsById.set(invitation.invitationId, invitation);
-      }
       setInvitations(
-        [...invitationsById.values()].sort((left, right) =>
+        [...invitationPage.items].sort((left, right) =>
           left.createdAt.localeCompare(right.createdAt)
         )
       );
@@ -240,24 +234,30 @@ export function usePeoplePanelController(
       }
     },
     revokeInvitation: async (invitationId) =>
-      runAction(async () => {
-        await api!.revokeCollaborationInvitation({ invitationId });
-      }),
+      runAction(
+        async () => {
+          const revoked = await api!.revokeCollaborationInvitation({ invitationId });
+          setInvitations((current) =>
+            current.map((invitation) =>
+              invitation.invitationId === revoked.invitationId ? revoked : invitation
+            )
+          );
+        },
+        { refreshDetails: false }
+      ),
     revokeInvitations: async (invitationIds) =>
       runAction(
         async () => {
-          let firstError: unknown;
-          for (const invitationId of invitationIds) {
-            try {
-              await api!.revokeCollaborationInvitation({ invitationId });
-            } catch (error) {
-              firstError ??= error;
-            }
-          }
-          await refreshDetails();
-          if (firstError !== undefined) {
-            throw firstError;
-          }
+          const input = collaborationInvitationIdsInputSchema.parse({
+            invitationIds: [...invitationIds]
+          });
+          const revoked = await api!.revokeCollaborationInvitations(input);
+          const revokedById = new Map(
+            revoked.items.map((invitation) => [invitation.invitationId, invitation])
+          );
+          setInvitations((current) =>
+            current.map((invitation) => revokedById.get(invitation.invitationId) ?? invitation)
+          );
         },
         { refreshDetails: false }
       ),

@@ -240,12 +240,18 @@ export function useDesktopProjectLoader({
         currentCanvas.projectRoot !== canvasRef.projectRoot ||
         currentCanvas.canvasId !== canvasRef.canvasId
       ) {
+        if (options.requireCurrentCanvas) {
+          throw new Error("project_canvas_changed_during_refresh");
+        }
         return;
       }
       const errors = applyDesktopProjectSnapshot(snapshot, options);
       if (snapshot.graph) {
         const diagnosticsApplied = await refreshDesktopGraphDiagnostics(canvasRef);
         if (!diagnosticsApplied) {
+          if (options.requireCurrentCanvas) {
+            throw new Error("project_canvas_changed_during_diagnostics_refresh");
+          }
           return;
         }
       } else {
@@ -253,6 +259,9 @@ export function useDesktopProjectLoader({
       }
       if (errors.length > 0) {
         setError(errors.join("\n"));
+        if (options.throwOnErrors) {
+          throw new Error(errors.join("\n"));
+        }
       }
     },
     [

@@ -706,4 +706,40 @@ describe("desktop project loader hook", () => {
     expect(result.current.layout).toBeNull();
     expect(setError).toHaveBeenCalledWith("layout: layout.nodes.filter is not a function");
   });
+
+  it("rejects strict derived refreshes when the snapshot contains errors", async () => {
+    const getDesktopProjectSnapshot = vi.fn().mockResolvedValue(projectSnapshot());
+    const bridge = createDesktopBridgeMock({
+      listProjects: vi.fn().mockResolvedValue([project]),
+      getDesktopProjectSnapshot,
+      refreshPackageFileChanges: vi
+        .fn()
+        .mockResolvedValue({ diagnostics: [], dirtyPromptRefs: [] }),
+      watchPackageFiles: vi.fn().mockResolvedValue(undefined)
+    });
+    vi.stubGlobal("planweave", bridge);
+    vi.resetModules();
+    const { useDesktopProject } = await import("../renderer/hooks/useDesktopProject");
+
+    const setError = vi.fn();
+    const { result } = renderHook(() =>
+      useDesktopProject({
+        setError,
+        t: createTranslator("en"),
+        updateSettings: vi.fn()
+      })
+    );
+
+    await waitFor(() => expect(result.current.projectLoading).toBe(false));
+    getDesktopProjectSnapshot.mockResolvedValue(
+      projectSnapshot({ errors: ["graph: authoritative package could not be loaded"] })
+    );
+
+    await expect(
+      act(async () => {
+        await result.current.refreshProjectDerivedState({ throwOnErrors: true });
+      })
+    ).rejects.toThrow("graph: authoritative package could not be loaded");
+    expect(setError).toHaveBeenCalledWith("graph: authoritative package could not be loaded");
+  });
 });

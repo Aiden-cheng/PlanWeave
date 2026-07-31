@@ -50,6 +50,7 @@ import {
   collaborationHumanPrincipalIdInputSchema,
   collaborationImportDeviceCredentialInputSchema,
   collaborationInvitationIdInputSchema,
+  collaborationInvitationIdsInputSchema,
   collaborationProfileIdInputSchema,
   collaborationUpsertProfileInputSchema,
   collaborationCurrentCanvasAccessInputSchema,
@@ -893,9 +894,7 @@ export class CollaborationService {
     });
   }
 
-  async bindCanvasCommandSession(
-    input: unknown
-  ): Promise<CollaborationCanvasCommandSessionView> {
+  async bindCanvasCommandSession(input: unknown): Promise<CollaborationCanvasCommandSessionView> {
     return this.enqueue(async () => {
       this.assertOpen();
       return this.canvasCommands.bind(input);
@@ -979,6 +978,11 @@ export class CollaborationService {
   async revokeInvitation(input: unknown): Promise<HumanInvitationView> {
     const { invitationId } = collaborationInvitationIdInputSchema.parse(input);
     return this.withActiveClient((client) => client.revokeInvitation(invitationId));
+  }
+
+  async revokeInvitations(input: unknown) {
+    const parsed = collaborationInvitationIdsInputSchema.parse(input);
+    return this.withActiveClient((client) => client.revokeInvitations(parsed));
   }
 
   async removeMember(input: unknown): Promise<void> {
@@ -1224,7 +1228,6 @@ export class CollaborationService {
     });
   }
 }
-
 
 // Re-export input type for handlers
 export type { CollaborationUpsertProfileInput };

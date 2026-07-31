@@ -224,6 +224,9 @@ describe("desktop IPC contract", () => {
     expect(collaborationInvokeChannels.revokeCollaborationInvitation).toBe(
       "planweave-collaboration:revokeInvitation"
     );
+    expect(collaborationInvokeChannels.revokeCollaborationInvitations).toBe(
+      "planweave-collaboration:revokeInvitations"
+    );
     expect(collaborationInvokeChannels.removeCollaborationMember).toBe(
       "planweave-collaboration:removeMember"
     );

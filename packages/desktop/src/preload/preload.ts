@@ -305,6 +305,8 @@ const collaborationApi: PlanWeaveCollaborationApi = {
     ipcRenderer.invoke(collaborationInvokeChannels.createCollaborationInvitation, input),
   revokeCollaborationInvitation: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.revokeCollaborationInvitation, input),
+  revokeCollaborationInvitations: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.revokeCollaborationInvitations, input),
   removeCollaborationMember: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.removeCollaborationMember, input),
   promoteCollaborationOwner: async (input) =>

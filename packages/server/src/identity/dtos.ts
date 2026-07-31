@@ -6,6 +6,14 @@ import {
   workspaceIdentityViewSchema,
   workspaceMembershipViewSchema
 } from "@planweave-ai/collaboration-contracts";
+export {
+  humanRevokeInvitationsRequestSchema,
+  humanRevokeInvitationsResponseSchema
+} from "@planweave-ai/collaboration-contracts";
+export type {
+  HumanRevokeInvitationsRequest,
+  HumanRevokeInvitationsResponse
+} from "@planweave-ai/collaboration-contracts";
 import {
   HUMAN_DEVICE_LABEL_MAX_LENGTH,
   HUMAN_DISPLAY_NAME_MAX_LENGTH,

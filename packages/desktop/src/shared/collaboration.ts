@@ -23,6 +23,7 @@ import {
   humanBootstrapRequestSchema,
   humanConsumeInvitationRequestSchema,
   humanCreateInvitationRequestSchema,
+  humanRevokeInvitationsRequestSchema,
   humanDeviceTokenSchema,
   pendingAttachmentUploadIdSchema,
   type ActivityListPage,
@@ -41,6 +42,7 @@ import {
   type HumanDeviceView,
   type HumanInvitationPage,
   type HumanInvitationView,
+  type HumanRevokeInvitationsResponse,
   type HumanMemberPage,
   type HumanMembershipView,
   type HumanPrincipalView,
@@ -328,6 +330,9 @@ export const collaborationInvitationIdInputSchema = z
   })
   .strict();
 export type CollaborationInvitationIdInput = z.infer<typeof collaborationInvitationIdInputSchema>;
+
+export const collaborationInvitationIdsInputSchema = humanRevokeInvitationsRequestSchema;
+export type CollaborationInvitationIdsInput = z.infer<typeof collaborationInvitationIdsInputSchema>;
 
 export const collaborationHumanPrincipalIdInputSchema = z
   .object({
@@ -635,6 +640,9 @@ export type PlanWeaveCollaborationApi = {
   revokeCollaborationInvitation: (
     input: CollaborationInvitationIdInput
   ) => Promise<HumanInvitationView>;
+  revokeCollaborationInvitations: (
+    input: CollaborationInvitationIdsInput
+  ) => Promise<HumanRevokeInvitationsResponse>;
   removeCollaborationMember: (input: CollaborationHumanPrincipalIdInput) => Promise<void>;
   promoteCollaborationOwner: (input: CollaborationHumanPrincipalIdInput) => Promise<void>;
   demoteCollaborationOwner: (input: CollaborationHumanPrincipalIdInput) => Promise<void>;

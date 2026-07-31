@@ -11,9 +11,11 @@ import {
   humanCreateInvitationRequestSchema,
   humanDeviceListQuerySchema,
   humanInvitationListQuerySchema,
+  humanRevokeInvitationsRequestSchema,
   humanPageQuerySchema,
   type HumanDeviceView,
   type HumanInvitationView,
+  type HumanRevokeInvitationsResponse,
   type HumanMembershipView,
   type HumanPrincipalView
 } from "./dtos.js";
@@ -224,6 +226,29 @@ export class HumanMembershipService {
       }
 
       return toInvitationView(this.repository.revokeInvitation(id, pid));
+    } catch (error) {
+      mapIdentityError(error);
+    }
+  }
+
+  revokeInvitations(
+    context: HumanAuthContext,
+    projectId: string,
+    request: unknown
+  ): HumanRevokeInvitationsResponse {
+    try {
+      const pid = this.requireProject(projectId);
+      const { invitationIds } = humanRevokeInvitationsRequestSchema.parse(request);
+      const decision = authorizeHumanAction({
+        action: "revoke_invitation",
+        subject: { kind: "human", context },
+        facts: { targetProjectId: pid }
+      });
+      if (!decision.allowed) deny(decision.code);
+
+      return {
+        items: this.repository.revokeInvitations(invitationIds, pid).map(toInvitationView)
+      };
     } catch (error) {
       mapIdentityError(error);
     }
@@ -482,9 +507,7 @@ export class HumanMembershipService {
       }
 
       if (isOwn) {
-        return toDeviceView(
-          this.repository.revokeDevice(deviceId, pid, context.humanPrincipalId)
-        );
+        return toDeviceView(this.repository.revokeDevice(deviceId, pid, context.humanPrincipalId));
       }
       return toDeviceView(this.repository.revokeDevice(deviceId, pid));
     } catch (error) {

@@ -655,6 +655,7 @@ describe("collaboration integration scenarios", () => {
       />
     );
 
+    await user.click(screen.getByTestId("people-connect-setup-manual-toggle"));
     const setupCodeInput = screen.getByTestId("people-connect-setup-code");
     await user.clear(screen.getByTestId("people-connect-server-url"));
     await user.type(screen.getByTestId("people-connect-server-url"), "https://example.test");
@@ -706,6 +707,7 @@ describe("collaboration integration scenarios", () => {
       />
     );
 
+    await user.click(screen.getByTestId("people-connect-setup-manual-toggle"));
     await user.click(screen.getByTestId("people-connect-submit"));
 
     expect(redeemCollaborationSetupCode).not.toHaveBeenCalled();

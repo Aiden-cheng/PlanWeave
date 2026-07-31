@@ -138,6 +138,8 @@ describe("CollaborationConnectForm invitation onboarding", () => {
       />
     );
 
+    expect(screen.getByLabelText("Your name or nickname")).toBeInTheDocument();
+
     expect(screen.queryByTestId("people-connect-server-url")).not.toBeInTheDocument();
     fireEvent.change(screen.getByTestId("people-connect-invitation-details"), {
       target: { value: handoff }
@@ -161,6 +163,68 @@ describe("CollaborationConnectForm invitation onboarding", () => {
       })
     );
     expect(api.connectCollaborationSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("creates a separate member profile and waits for the connected workspace refresh", async () => {
+    const user = userEvent.setup();
+    const api = joinApi();
+    const onConnected = vi.fn().mockResolvedValue(undefined);
+    const invitationToken = `pw_inv_${"B".repeat(43)}`;
+    const handoff = serializeCollaborationInvitationHandoff({
+      serverBaseUrl: "http://192.168.1.20:56584",
+      projectId: "shared-project",
+      invitationToken,
+      allowInsecureTransport: true
+    });
+
+    render(
+      <CollaborationConnectForm
+        api={api}
+        status={{
+          activeProfileId: "existing-project-profile",
+          profiles: [
+            {
+              profileId: "existing-project-profile",
+              displayName: "Existing project",
+              serverBaseUrl: "https://server.example",
+              projectId: "existing-project",
+              allowInsecureTransport: false,
+              hasDeviceCredential: true
+            }
+          ],
+          session: null,
+          workspaceConnection: { status: "local_only" },
+          workspacePicker: { items: [] },
+          credentialStorage: "available",
+          nonPersistenceWarning: null
+        }}
+        t={createTranslator("en")}
+        fixedMode="join"
+        showHeader={false}
+        showConnectionSummary={false}
+        onConnected={onConnected}
+      />
+    );
+
+    fireEvent.change(screen.getByTestId("people-connect-invitation-details"), {
+      target: { value: handoff }
+    });
+    await user.type(screen.getByTestId("people-connect-display-name"), "Windows member");
+    await user.click(screen.getByTestId("people-connect-submit"));
+
+    await waitFor(() => expect(onConnected).toHaveBeenCalledTimes(1));
+    const profileInput = vi.mocked(api.upsertCollaborationProfile).mock.calls[0]?.[0];
+    expect(profileInput?.profileId).toBeTruthy();
+    expect(profileInput?.profileId).not.toBe("existing-project-profile");
+    expect(api.consumeCollaborationInvitation).toHaveBeenCalledWith(
+      expect.objectContaining({ profileId: profileInput?.profileId })
+    );
+    expect(api.connectCollaborationSession).toHaveBeenCalledWith({
+      profileId: profileInput?.profileId
+    });
+    expect(api.connectCollaborationSession.mock.invocationCallOrder[0]).toBeLessThan(
+      onConnected.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
+    );
   });
 
   it("keeps malformed invitation details out of the profile bridge", async () => {

@@ -54,6 +54,7 @@ export const collaborationInvokeChannels = {
   listCollaborationInvitations: "planweave-collaboration:listInvitations",
   createCollaborationInvitation: "planweave-collaboration:createInvitation",
   revokeCollaborationInvitation: "planweave-collaboration:revokeInvitation",
+  revokeCollaborationInvitations: "planweave-collaboration:revokeInvitations",
   removeCollaborationMember: "planweave-collaboration:removeMember",
   promoteCollaborationOwner: "planweave-collaboration:promoteOwner",
   demoteCollaborationOwner: "planweave-collaboration:demoteOwner",

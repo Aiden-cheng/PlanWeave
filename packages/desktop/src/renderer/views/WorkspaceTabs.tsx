@@ -35,6 +35,7 @@ import type {
 } from "@planweave-ai/runtime";
 import type { createTranslator } from "../i18n";
 import type { DesktopSearchCanvasScope, DesktopSearchStatus } from "../hooks/useDesktopSearch";
+import type { ApplyDesktopProjectSnapshotOptions } from "../hooks/useDesktopProjectSnapshot";
 import type { AppEdgeTypes, AppNodeTypes } from "../graph/flowModel";
 import type { AutoRunNextActionDescriptor } from "../run/autoRunNextActions";
 import type {
@@ -160,7 +161,7 @@ export type WorkspaceTabsFileSyncProps = {
   fileSyncResult: DesktopPackageFileSyncResult | null;
   projectDiagnostics: ValidationIssue[];
   refreshPackageFiles: () => Promise<void>;
-  refreshProjectDerivedState: () => Promise<void>;
+  refreshProjectDerivedState: (options?: ApplyDesktopProjectSnapshotOptions) => Promise<void>;
   setError: (message: string | null) => void;
 };
 
@@ -285,11 +286,17 @@ function NotificationsRoute() {
 }
 
 function PeopleRoute() {
-  const { shell } = useProjectWorkspace();
+  const { fileSync, shell } = useProjectWorkspace();
   return (
     <PeopleView
       t={shell.t}
       canvasId={shell.selectedCanvasId}
+      onContentMaterialized={() =>
+        fileSync.refreshProjectDerivedState({
+          requireCurrentCanvas: true,
+          throwOnErrors: true
+        })
+      }
       collaborationScopeLayout={shell.collaborationScopeLayout}
       onCollaborationScopeLayoutChange={shell.updateCollaborationScopeLayout}
       onMembershipOutcome={(outcome) => {

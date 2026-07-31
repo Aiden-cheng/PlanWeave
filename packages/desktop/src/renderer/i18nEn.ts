@@ -1158,7 +1158,7 @@ export const enCatalog = {
     "Connect to a shared PlanWeave Server for people, permissions, and multi-device collaboration.",
   peopleClose: "Close",
   peopleWorking: "Working…",
-  peopleDisplayName: "Display name",
+  peopleDisplayName: "Your name or nickname",
   peopleServerUrl: "Server URL",
   peopleProjectId: "Project ID",
   peopleSetupCode: "Setup code",
@@ -1453,8 +1453,10 @@ export const enCatalog = {
   contentAuthorityOffline: "offline",
   contentAuthorityRetry: "Retry",
   contentAuthorityPublish: "Publish initial version",
-  contentAuthorityMaterialize: "Materialize",
-  contentAuthorityRecover: "Recover",
+  contentAuthorityMaterialize: "Sync to this device",
+  contentAuthorityRecover: "Restore from authoritative version",
+  contentAuthorityMaterializedSuccess:
+    "The authoritative version is synced to this device and the project view has been refreshed.",
   localServerTitle: "Local network sharing",
   localServerDescription:
     "PlanWeave keeps its internal service running automatically for selected canvases. Turn on local network sharing only when another computer needs access.",

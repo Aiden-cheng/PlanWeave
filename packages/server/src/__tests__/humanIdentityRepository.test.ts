@@ -226,6 +226,39 @@ describe("human identity migration v16", () => {
 });
 
 describe("human identity repository", () => {
+  it("rolls back every invitation when a batch revoke transition fails", async () => {
+    const { database, repo: setupRepo } = await openMigrated();
+    setupRepo.bootstrapOwner(localAdminProof());
+    const invitations = [
+      setupRepo.createInvitation({
+        projectId: "project-a",
+        createdByHumanPrincipalId: "human-owner-1"
+      }).invitation,
+      setupRepo.createInvitation({
+        projectId: "project-a",
+        createdByHumanPrincipalId: "human-owner-1"
+      }).invitation
+    ];
+    let transitions = 0;
+    const repo = new HumanIdentityRepository(database, () => new Date(), {
+      onInvitationTransitionInTransaction: ({ type }) => {
+        if (type === "invitation_revoked" && ++transitions === 2) {
+          throw new Error("invitation_projection_failed");
+        }
+      }
+    });
+
+    expect(() =>
+      repo.revokeInvitations(
+        invitations.map((invitation) => invitation.invitationId),
+        "project-a"
+      )
+    ).toThrow("invitation_projection_failed");
+    expect(
+      invitations.map((invitation) => repo.getInvitation(invitation.invitationId)?.revokedAt)
+    ).toEqual([undefined, undefined]);
+  });
+
   it("rolls back membership creation when transactional activity projection fails", async () => {
     const directory = await mkdtemp(join(tmpdir(), "planweave-human-projector-failure-"));
     directories.push(directory);

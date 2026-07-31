@@ -23,7 +23,7 @@ export type CollaborationConnectFormProps = {
   api: PlanWeaveCollaborationApi | null;
   status: CollaborationStatus | null;
   t: ReturnType<typeof createTranslator>;
-  onConnected?: () => void;
+  onConnected?: () => void | Promise<void>;
   /** Restore focus to the people trigger after successful close actions. */
   onRequestClose?: () => void;
   /** Preferred entry point for the surrounding surface. */
@@ -172,7 +172,7 @@ export function CollaborationConnectForm({
           return;
         }
         await api.redeemCollaborationSetupCode(parsed.data);
-        onConnected?.();
+        await onConnected?.();
         return;
       }
 
@@ -182,7 +182,7 @@ export function CollaborationConnectForm({
           workspaceConnection?.status === "error"
         ) {
           await api.connectWorkspaceConnection();
-          onConnected?.();
+          await onConnected?.();
           return;
         }
         if (!activeProfile) {
@@ -193,7 +193,7 @@ export function CollaborationConnectForm({
         }
         await api.setActiveCollaborationProfile({ profileId: activeProfile.profileId });
         await api.connectCollaborationSession({ profileId: activeProfile.profileId });
-        onConnected?.();
+        await onConnected?.();
         return;
       }
 
@@ -216,9 +216,12 @@ export function CollaborationConnectForm({
         return;
       }
 
-      const profileId = activeProfile?.profileId ?? newProfileId();
+      const profileId =
+        mode === "join" ? newProfileId() : (activeProfile?.profileId ?? newProfileId());
       const profileDisplayName =
-        displayName.trim() || activeProfile?.displayName || t("peopleDefaultProfileName");
+        displayName.trim() ||
+        (mode === "join" ? t("peopleDefaultProfileName") : activeProfile?.displayName) ||
+        t("peopleDefaultProfileName");
       await api.upsertCollaborationProfile({
         profileId,
         displayName: profileDisplayName,
@@ -257,7 +260,7 @@ export function CollaborationConnectForm({
       await api.connectCollaborationSession({ profileId });
       setInvitationToken("");
       setInvitationDetails("");
-      onConnected?.();
+      await onConnected?.();
     } catch (submitError) {
       setError(collaborationErrorMessage(submitError));
     } finally {
@@ -271,7 +274,7 @@ export function CollaborationConnectForm({
     setError(null);
     try {
       await api.selectWorkspaceConnection({ workspaceId });
-      onConnected?.();
+      await onConnected?.();
     } catch (selectError) {
       setError(collaborationErrorMessage(selectError));
     } finally {
@@ -298,7 +301,7 @@ export function CollaborationConnectForm({
     setError(null);
     try {
       await api.retryWorkspaceConnection();
-      onConnected?.();
+      await onConnected?.();
     } catch (retryError) {
       setError(collaborationErrorMessage(retryError));
     } finally {
