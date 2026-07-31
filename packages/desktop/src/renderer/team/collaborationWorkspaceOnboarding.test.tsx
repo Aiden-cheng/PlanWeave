@@ -3,7 +3,7 @@
 import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   CollaborationWorkspaceOnboarding,
   type CollaborationWorkspaceOnboardingProps
@@ -14,9 +14,11 @@ const t: CollaborationWorkspaceOnboardingProps["t"] = (key) => key;
 describe("CollaborationWorkspaceOnboarding", () => {
   it("progressively reveals local and existing-server creation slots", async () => {
     const user = userEvent.setup();
+    const onLocalHostingOpenChange = vi.fn();
     render(
       <CollaborationWorkspaceOnboarding
         t={t}
+        onLocalHostingOpenChange={onLocalHostingOpenChange}
         localHostingSlot={<div data-testid="local-hosting-slot">local hosting</div>}
         existingServerSlot={<div data-testid="existing-server-slot">existing server</div>}
         joinSlot={<div>join action</div>}
@@ -40,6 +42,10 @@ describe("CollaborationWorkspaceOnboarding", () => {
 
     expect(screen.getByTestId("local-hosting-slot")).toBeVisible();
     expect(screen.queryByTestId("existing-server-slot")).not.toBeInTheDocument();
+    expect(onLocalHostingOpenChange).toHaveBeenLastCalledWith(true);
+
+    await user.click(screen.getByRole("button", { name: "collaborationOnboardingBack" }));
+    expect(onLocalHostingOpenChange).toHaveBeenLastCalledWith(false);
   });
 
   it("renders the supplied join slot without adding a second invitation input", async () => {

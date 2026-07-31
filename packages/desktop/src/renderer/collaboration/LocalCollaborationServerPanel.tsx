@@ -91,10 +91,8 @@ export function LocalCollaborationServerPanel({
     }
   }, [catalog, onScopeLayoutChange, scopeLayout.expandedProjectIds]);
 
-  const savedScopeKeys = useMemo(
-    () => new Set(catalog ? selectedScopes(catalog).map(scopeKey) : []),
-    [catalog]
-  );
+  const savedScopes = useMemo(() => (catalog ? selectedScopes(catalog) : []), [catalog]);
+  const savedScopeKeys = useMemo(() => new Set(savedScopes.map(scopeKey)), [savedScopes]);
   const draftScopeKeys = useMemo(() => new Set(draftScopes.map(scopeKey)), [draftScopes]);
   const expandedProjectIds = useMemo(
     () => new Set(scopeLayout.expandedProjectIds),
@@ -103,19 +101,29 @@ export function LocalCollaborationServerPanel({
   const scopeChanged =
     savedScopeKeys.size !== draftScopeKeys.size ||
     [...savedScopeKeys].some((key) => !draftScopeKeys.has(key));
-  const currentCatalogCanvas = catalog?.projects
-    .flatMap((project) => project.canvases)
-    .find((canvas) => canvas.current);
+  const invitationScope = useMemo(() => {
+    const currentSelectedScope = savedScopes.find(
+      (scope) => scope.projectId === projectId && scope.canvasId === canvasId
+    );
+    if (currentSelectedScope) return currentSelectedScope;
+    return savedScopes.length === 1 ? savedScopes[0]! : null;
+  }, [canvasId, projectId, savedScopes]);
+  const currentCanvasIsSelected =
+    projectId !== null &&
+    canvasId !== null &&
+    savedScopeKeys.has(scopeKey({ projectId, canvasId }));
   const currentScope = scopes.find(
     (scope) => scope.projectId === projectId && scope.canvasId === canvasId
   );
 
   const prepareInvitation = useCallback(async () => {
-    if (!api || !status?.lanServerBaseUrl) return;
+    if (!api || !status?.lanServerBaseUrl || !invitationScope) return;
     setInvitationBusy(true);
     setInvitationCopied(false);
     try {
-      const registration = await api.registerLocalCollaborationCurrentProject({});
+      const registration = await api.registerLocalCollaborationCurrentProject({
+        selection: invitationScope
+      });
       const created = await api.createCollaborationInvitation({});
       const handoff = serializeCollaborationInvitationHandoff({
         serverBaseUrl: status.lanServerBaseUrl,
@@ -130,20 +138,24 @@ export function LocalCollaborationServerPanel({
     } finally {
       setInvitationBusy(false);
     }
-  }, [api, status?.lanServerBaseUrl]);
+  }, [api, invitationScope, status?.lanServerBaseUrl]);
 
   useEffect(() => {
-    if (!status?.lanServerBaseUrl || !currentCatalogCanvas?.selected || invitationHandoff) return;
-    const attemptKey = `${status.lanServerBaseUrl}\0${projectId ?? ""}\0${canvasId ?? ""}`;
+    if (
+      !status?.lanServerBaseUrl ||
+      !invitationScope ||
+      invitationHandoff
+    ) {
+      return;
+    }
+    const attemptKey = `${status.lanServerBaseUrl}\0${scopeKey(invitationScope)}`;
     if (invitationAttemptRef.current === attemptKey) return;
     invitationAttemptRef.current = attemptKey;
     void prepareInvitation();
   }, [
-    canvasId,
-    currentCatalogCanvas?.selected,
+    invitationScope,
     invitationHandoff,
     prepareInvitation,
-    projectId,
     status?.lanServerBaseUrl
   ]);
 
@@ -512,7 +524,7 @@ export function LocalCollaborationServerPanel({
           </div>
         ) : null}
 
-        {running && currentCatalogCanvas?.selected ? (
+        {running && currentCanvasIsSelected ? (
           <div
             className="mt-5 border-t border-border/50 pt-4"
             data-testid="local-collaboration-current-canvas-status"

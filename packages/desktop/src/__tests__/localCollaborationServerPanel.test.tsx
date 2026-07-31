@@ -162,7 +162,7 @@ describe("LocalCollaborationServerPanel", () => {
       <LocalCollaborationServerPanel
         api={collaborationApi}
         t={createTranslator("en")}
-        projectId="project-1"
+        projectId="desktop-project-1"
         canvasId="canvas-1"
         scopeLayout={expandedScopeLayout}
         onScopeLayoutChange={onScopeLayoutChange}
@@ -285,12 +285,23 @@ describe("LocalCollaborationServerPanel", () => {
         lanSharingEnabled: true,
         lanServerBaseUrl: "http://192.168.1.20:8787/"
       }),
-      registerLocalCollaborationCurrentProject: vi.fn().mockResolvedValue({
-        workspaceId: "workspace-1",
-        projectId: "authority-project-1",
-        canvasId: "canvas-1",
-        profileId: profile.profileId,
-        registeredAt: "2030-01-01T00:00:01.000Z"
+      registerLocalCollaborationCurrentProject: vi.fn().mockImplementation(async (input) => {
+        const requestedSelection = (
+          input as { selection?: { projectId?: string; canvasId?: string } } | undefined
+        )?.selection;
+        if (
+          requestedSelection?.projectId !== "desktop-project-1" ||
+          requestedSelection.canvasId !== "canvas-1"
+        ) {
+          throw new Error("local_collaboration_selection_required");
+        }
+        return {
+          workspaceId: "workspace-1",
+          projectId: "authority-project-1",
+          canvasId: "canvas-1",
+          profileId: profile.profileId,
+          registeredAt: "2030-01-01T00:00:01.000Z"
+        };
       }),
       createCollaborationInvitation: vi.fn().mockResolvedValue({
         invitationToken,
@@ -302,7 +313,7 @@ describe("LocalCollaborationServerPanel", () => {
       <LocalCollaborationServerPanel
         api={collaborationApi}
         t={createTranslator("en")}
-        projectId="project-1"
+        projectId="desktop-project-1"
         canvasId="canvas-1"
         scopeLayout={expandedScopeLayout}
         onScopeLayoutChange={onScopeLayoutChange}
@@ -314,7 +325,9 @@ describe("LocalCollaborationServerPanel", () => {
       name: "Complete invitation (shown on this page only)"
     });
     expect(copy).not.toHaveBeenCalled();
-    expect(collaborationApi.registerLocalCollaborationCurrentProject).toHaveBeenCalledWith({});
+    expect(collaborationApi.registerLocalCollaborationCurrentProject).toHaveBeenCalledWith({
+      selection: { projectId: "desktop-project-1", canvasId: "canvas-1" }
+    });
     expect(collaborationApi.createCollaborationInvitation).toHaveBeenCalledWith({});
 
     const invitation = (invitationField as HTMLTextAreaElement).value;
@@ -329,5 +342,76 @@ describe("LocalCollaborationServerPanel", () => {
     await userEvent.click(screen.getByRole("button", { name: "Copy complete invitation" }));
     expect(copy).toHaveBeenCalledWith(invitation);
     expect(screen.getByText("Complete invitation copied.")).toBeVisible();
+  });
+
+  it("creates the invitation for the only hosted canvas when another project is open", async () => {
+    const hostedCatalog = {
+      projects: [
+        {
+          projectId: "open-project",
+          name: "Open Project",
+          selectedCanvasCount: 0,
+          canvases: [
+            { canvasId: "open-canvas", name: "Open Canvas", selected: false, current: true }
+          ]
+        },
+        {
+          projectId: "hosted-project",
+          name: "Hosted Project",
+          selectedCanvasCount: 1,
+          canvases: [
+            {
+              canvasId: "hosted-canvas",
+              name: "Hosted Canvas",
+              selected: true,
+              current: false
+            }
+          ]
+        }
+      ],
+      selectedCount: 1
+    };
+    const collaborationApi = api({
+      getLocalCollaborationServerStatus: vi.fn().mockResolvedValue({
+        profile,
+        state: "running",
+        startedAt: "2030-01-01T00:00:00.000Z",
+        reason: null,
+        lanSharingEnabled: true,
+        lanServerBaseUrl: "http://192.168.1.20:8787/"
+      }),
+      getLocalCollaborationScopeCatalog: vi.fn().mockResolvedValue(hostedCatalog),
+      registerLocalCollaborationCurrentProject: vi.fn().mockImplementation(async (input) => {
+        expect(input).toEqual({
+          selection: { projectId: "hosted-project", canvasId: "hosted-canvas" }
+        });
+        return {
+          workspaceId: "workspace-1",
+          projectId: "authority-hosted-project",
+          canvasId: "hosted-canvas",
+          profileId: profile.profileId,
+          registeredAt: "2030-01-01T00:00:01.000Z"
+        };
+      })
+    });
+
+    render(
+      <LocalCollaborationServerPanel
+        api={collaborationApi}
+        t={createTranslator("en")}
+        projectId="open-project"
+        canvasId="open-canvas"
+        scopeLayout={expandedScopeLayout}
+        onScopeLayoutChange={onScopeLayoutChange}
+        copyText={copyText}
+      />
+    );
+
+    expect(
+      await screen.findByRole("textbox", {
+        name: "Complete invitation (shown on this page only)"
+      })
+    ).toBeVisible();
+    expect(collaborationApi.registerLocalCollaborationCurrentProject).toHaveBeenCalledTimes(1);
   });
 });

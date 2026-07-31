@@ -38,7 +38,8 @@ export type LocalCollaborationScopeSelectionInput = z.infer<
 
 export const localCollaborationRegistrationInputSchema = z
   .object({
-    ownerDisplayName: z.string().trim().min(1).max(120).optional()
+    ownerDisplayName: z.string().trim().min(1).max(120).optional(),
+    selection: localCollaborationScopeSchema.optional()
   })
   .strict();
 

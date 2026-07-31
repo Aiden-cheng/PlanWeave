@@ -127,7 +127,7 @@ describe("PeopleView", () => {
 
     await user.click(screen.getByTestId("collaboration-onboarding-existing-server"));
     expect(screen.getByTestId("people-connect-form")).toBeVisible();
-    expect(screen.getByTestId("people-connect-setup-code")).toBeInTheDocument();
+    expect(screen.getByTestId("people-connect-setup-details")).toBeInTheDocument();
     expect(screen.queryByTestId("people-connect-mode-join")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Back" }));
@@ -138,7 +138,7 @@ describe("PeopleView", () => {
     expect(screen.queryByTestId("people-connect-project-id")).not.toBeInTheDocument();
   });
 
-  it("keeps the local hosting step visible while workspace status refreshes", async () => {
+  it("keeps the local hosting step visible after workspace connection succeeds", async () => {
     const user = userEvent.setup();
     const localOnlyStatus = {
       profiles: [],
@@ -164,10 +164,44 @@ describe("PeopleView", () => {
       workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null },
       updatedAt: "2030-01-01T00:00:00.000Z"
     } as const;
+    const connectedStatus = {
+      ...localOnlyStatus,
+      profiles: [
+        {
+          profileId: "planweave-local-project-1",
+          displayName: "Project One",
+          serverBaseUrl: "http://127.0.0.1:56584/",
+          projectId: "project-1",
+          allowInsecureTransport: true,
+          hasDeviceCredential: true,
+          deviceCredentialPersistence: "persisted" as const,
+          deviceCredentialId: "device-1",
+          humanPrincipalId: "human-1",
+          updatedAt: "2030-01-01T00:00:01.000Z"
+        }
+      ],
+      activeProfileId: "planweave-local-project-1",
+      session: {
+        phase: "connected" as const,
+        activeProfileId: "planweave-local-project-1",
+        detail: null,
+        lastErrorCode: null,
+        lastErrorMessage: null
+      },
+      workspaceConnection: {
+        ...localOnlyStatus.workspaceConnection,
+        status: "connected" as const,
+        profile: null,
+        workspaceId: "workspace-1",
+        workspaceDisplayName: "Local workspace",
+        connectedAt: "2030-01-01T00:00:01.000Z"
+      },
+      updatedAt: "2030-01-01T00:00:01.000Z"
+    };
     const getCollaborationStatus = vi
       .fn()
       .mockResolvedValueOnce(localOnlyStatus)
-      .mockImplementationOnce(() => new Promise(() => undefined));
+      .mockResolvedValue(connectedStatus);
     const api = {
       getCollaborationStatus,
       onCollaborationStatusChanged: vi.fn(() => () => undefined),
@@ -228,6 +262,7 @@ describe("PeopleView", () => {
       "local"
     );
     expect(screen.getByTestId("local-collaboration-server-panel")).toBeVisible();
+    expect(screen.queryByTestId("people-workspace-section")).not.toBeInTheDocument();
   });
 
   it("hides remote content authority while the project is local only", () => {

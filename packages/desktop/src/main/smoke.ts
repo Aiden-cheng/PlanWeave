@@ -918,7 +918,6 @@ async function runLocalCollaborationSmoke(window: BrowserWindow): Promise<Record
         throw new Error("Packaged smoke project selection is unavailable.");
       }
       const selection = { projectId: project.projectId, canvasId: project.activeCanvasId };
-      await collaboration.setCollaborationCurrentSelection(selection);
       const scopeCatalog = await collaboration.setLocalCollaborationTrustedScopes({
         scopes: [selection]
       });
@@ -928,6 +927,19 @@ async function runLocalCollaborationSmoke(window: BrowserWindow): Promise<Record
       const activated = await collaboration.getLocalCollaborationServerStatus();
       if (activated.state !== "running") {
         throw new Error("Local collaboration server did not start automatically for the selected canvas.");
+      }
+      const registration = await collaboration.registerLocalCollaborationCurrentProject({
+        selection
+      });
+      if (
+        registration.projectId !== ${JSON.stringify(authorityProjectId)} ||
+        registration.canvasId !== selection.canvasId
+      ) {
+        throw new Error("Local collaboration registration did not use the explicit canvas selection.");
+      }
+      const invitation = await collaboration.createCollaborationInvitation({});
+      if (!/^pw_inv_[A-Za-z0-9_-]{43}$/.test(invitation.invitationToken)) {
+        throw new Error("Local collaboration did not create a complete invitation token.");
       }
       const trustedScopes = await collaboration.listLocalCollaborationTrustedScopes();
       const matchingScopes = trustedScopes.filter(
@@ -994,6 +1006,7 @@ async function runLocalCollaborationSmoke(window: BrowserWindow): Promise<Record
         selectedCanvasId: selection.canvasId,
         statusAfterActivation: activated.state,
         sessionPhase: collaborationStatus.session.phase,
+        completeInvitationCreated: true,
         trustedScope: {
           workspaceId: matchingScopes[0].workspaceId,
           projectId: matchingScopes[0].projectId,

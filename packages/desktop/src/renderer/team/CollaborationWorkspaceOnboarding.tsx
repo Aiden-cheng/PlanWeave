@@ -17,6 +17,7 @@ export type CollaborationWorkspaceOnboardingProps = {
   localHostingSlot: ReactNode;
   existingServerSlot: ReactNode;
   joinSlot: ReactNode;
+  onLocalHostingOpenChange?: (open: boolean) => void;
 };
 
 type OnboardingActionProps = {
@@ -63,12 +64,19 @@ export function CollaborationWorkspaceOnboarding({
   t,
   localHostingSlot,
   existingServerSlot,
-  joinSlot
+  joinSlot,
+  onLocalHostingOpenChange
 }: CollaborationWorkspaceOnboardingProps) {
   const [step, setStep] = useState<OnboardingStep>("start");
 
-  const returnToStart = () => setStep("start");
-  const returnToCreate = () => setStep("create");
+  const returnToStart = () => {
+    onLocalHostingOpenChange?.(false);
+    setStep("start");
+  };
+  const returnToCreate = () => {
+    onLocalHostingOpenChange?.(false);
+    setStep("create");
+  };
 
   const header = (() => {
     switch (step) {
@@ -160,7 +168,10 @@ export function CollaborationWorkspaceOnboarding({
             description={t("collaborationOnboardingHostLocallyDescription")}
             icon={<LaptopIcon className="size-4" aria-hidden="true" />}
             testId="collaboration-onboarding-host-locally"
-            onClick={() => setStep("local")}
+            onClick={() => {
+              onLocalHostingOpenChange?.(true);
+              setStep("local");
+            }}
           />
           <OnboardingAction
             title={t("collaborationOnboardingUseExistingServerTitle")}

@@ -325,6 +325,10 @@ export function registerCollaborationHandlers(
     collaborationInvokeChannels.registerLocalCollaborationCurrentProject,
     async (_event, input: unknown) => {
       const registrationInput = localCollaborationRegistrationInputSchema.parse(input ?? {});
+      if (registrationInput.selection) {
+        await deactivateLocalSelection();
+        await local.setCurrentSelection(registrationInput.selection);
+      }
       return activateLocalSelection(registrationInput.ownerDisplayName ?? "Local owner");
     }
   );

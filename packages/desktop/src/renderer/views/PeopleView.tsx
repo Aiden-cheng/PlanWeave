@@ -91,6 +91,7 @@ export function PeopleView({
 }: PeopleViewProps) {
   const api = apiProp === undefined ? collaborationBridge : apiProp;
   const [section, setSection] = useState<PeopleSection>("workspace");
+  const [localHostingOpen, setLocalHostingOpen] = useState(false);
   const [localServerStatus, setLocalServerStatus] = useState<LocalCollaborationServerStatus | null>(
     null
   );
@@ -121,7 +122,8 @@ export function PeopleView({
     status?.workspaceConnection.status === "connecting" ||
     status?.workspaceConnection.status === "connected" ||
     status?.workspaceConnection.status === "reconnecting";
-  const showOnboarding = !sessionConnected && !workspaceConnectionActive;
+  const showOnboarding =
+    localHostingOpen || (!sessionConnected && !workspaceConnectionActive);
   const invitationServerBaseUrl = resolveCollaborationInvitationServerBaseUrl(
     activeProfile,
     localServerStatus
@@ -190,6 +192,7 @@ export function PeopleView({
             ) : null}
             <CollaborationWorkspaceOnboarding
               t={t}
+              onLocalHostingOpenChange={setLocalHostingOpen}
               localHostingSlot={
                 <LocalCollaborationServerPanel
                   key={`onboarding:${canvasId ?? "none"}`}
