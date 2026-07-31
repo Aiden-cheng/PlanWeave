@@ -1,3 +1,4 @@
+import { serializeCollaborationSetupHandoffV1 } from "@planweave-ai/collaboration-contracts";
 import { operatorTokenSchema } from "@planweave-ai/distributed-protocol";
 import { randomBytes } from "node:crypto";
 import {
@@ -350,7 +351,13 @@ export class OperatorControlService {
     return this.enqueue(() =>
       this.withProfile(parsed, async (client) => {
         const response = await client.issueMemberDeviceSetupCode();
-        copyText(response.setupCode);
+        copyText(
+          serializeCollaborationSetupHandoffV1({
+            serverBaseUrl: client.connectionProfile.serverBaseUrl,
+            setupCode: response.setupCode,
+            allowInsecureTransport: client.connectionProfile.allowInsecureTransport
+          })
+        );
         return operatorMemberSetupCodeHandoffViewSchema.parse({
           state: "ready",
           workspaceId: response.grant.workspaceId,

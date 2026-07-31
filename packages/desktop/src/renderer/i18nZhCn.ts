@@ -542,11 +542,11 @@ export const zhCnCatalog = {
     "操作员凭证仅在本次会话可用，操作系统安全存储不可用，凭证不会持久化。",
   hostAdminMemberSetupTitle: "成员设备入驻",
   hostAdminMemberSetupDescription:
-    "为当前 server-admin 会话所在 Workspace 创建一次性设置码，并由 Desktop main 直接复制。",
+    "为当前 server-admin 会话所在 Workspace 创建可一次粘贴的完整连接信息。",
   hostAdminMemberSetupRoleNote:
-    "首个兑换设置码的设备成为 Workspace 所有者；后续设备以成员身份加入。请在“成员 → 设置码”中粘贴。",
-  hostAdminMemberSetupCopy: "创建并复制设置码",
-  hostAdminMemberSetupCopied: "设置码已复制，仅存在于系统剪贴板中。",
+    "首个兑换连接信息的设备成为 Workspace 所有者；后续设备以成员身份加入。请在“成员 → 使用已有 Server”中粘贴。",
+  hostAdminMemberSetupCopy: "创建并复制完整连接信息",
+  hostAdminMemberSetupCopied: "完整连接信息已复制，仅存在于系统剪贴板中。",
   hostAdminMemberSetupWorkspace: "Workspace",
   hostAdminMemberSetupExpires: "过期时间",
   hostAdminMemberSetupDismiss: "完成",
@@ -1096,6 +1096,12 @@ export const zhCnCatalog = {
   peopleServerUrl: "服务器 URL",
   peopleProjectId: "项目 ID",
   peopleSetupCode: "设置码",
+  peopleSetupDetails: "完整 Server 连接信息",
+  peopleSetupDetailsPlaceholder: "粘贴完整的 PlanWeave Server 连接信息",
+  peopleSetupDetailsHint: "只需粘贴一次，PlanWeave 会自动读取 Server 地址和一次性设置码。",
+  peopleSetupDetailsInvalid: "Server 连接信息不完整或无效，请让管理员重新复制完整信息。",
+  peopleAdvancedSetupDetails: "手动填写 Server 信息",
+  peopleHideAdvancedSetupDetails: "收起手动填写",
   peopleServerUrlInvalid: "请输入不含路径的有效 HTTP(S) 服务器地址。",
   peopleSetupCodeInvalid: "请输入有效的设置码。",
   peopleSetupCodeFieldsInvalid: "请输入有效的服务器 URL 和设置码。",
@@ -1411,5 +1417,12 @@ export const zhCnCatalog = {
   localServerLanNoScope: "选择至少一张画布后会生成连接地址。",
   localServerLanHint:
     "其他设备需要处于同一可信局域网。HTTP 只允许私有局域网地址，公网 HTTP 仍会被拒绝。",
-  localServerCopyAddress: "复制地址"
+  localServerCopyAddress: "仅复制地址",
+  localServerCreateInvitation: "创建并复制完整邀请",
+  localServerCopyInvitationAgain: "再次复制完整邀请",
+  localServerInvitationReady: "完整邀请（仅在本次页面中显示）",
+  localServerInvitationReadyHint:
+    "已包含服务器地址、项目和一次性邀请令牌。将整段内容粘贴到另一台电脑的“加入协作空间”即可。",
+  localServerInvitationCopied: "完整邀请已复制。",
+  localServerInvitationUnavailable: "本机协作会话尚未就绪，请稍后重试。"
 } satisfies Record<TranslationKey, string>;

@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocalCollaborationServerPanel } from "../renderer/collaboration/LocalCollaborationServerPanel";
 import { createTranslator } from "../renderer/i18n";
+import { parseCollaborationInvitationHandoff } from "../renderer/team/collaborationInvitationHandoff";
 import type { PlanWeaveCollaborationApi } from "../shared/collaboration";
 
 const profile = {
@@ -236,7 +237,7 @@ describe("LocalCollaborationServerPanel", () => {
     });
   });
 
-  it("enables LAN sharing and copies the private-network address", async () => {
+  it("enables LAN sharing and keeps raw address copying as a secondary action", async () => {
     const collaborationApi = api({
       getLocalCollaborationServerStatus: vi.fn().mockResolvedValue({
         profile,
@@ -261,11 +262,85 @@ describe("LocalCollaborationServerPanel", () => {
     );
 
     expect(await screen.findByText("http://192.168.1.20:8787/")).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "Copy address" }));
+    await userEvent.click(screen.getByRole("button", { name: "Copy address only" }));
     expect(copy).toHaveBeenCalledWith("http://192.168.1.20:8787/");
     await userEvent.click(screen.getByRole("switch", { name: "Share on local network" }));
     expect(collaborationApi.setLocalCollaborationLanSharing).toHaveBeenCalledWith({
       enabled: false
     });
+  });
+
+  it("creates and copies a complete project invitation from the local hosting page", async () => {
+    const invitationToken = `pw_inv_${"A".repeat(43)}`;
+    const collaborationApi = api({
+      getLocalCollaborationServerStatus: vi.fn().mockResolvedValue({
+        profile,
+        state: "running",
+        startedAt: "2030-01-01T00:00:00.000Z",
+        reason: null,
+        lanSharingEnabled: true,
+        lanServerBaseUrl: "http://192.168.1.20:8787/"
+      }),
+      getCollaborationStatus: vi.fn().mockResolvedValue({
+        profiles: [
+          {
+            profileId: "planweave-local-project-1",
+            displayName: "Local collaboration server",
+            serverBaseUrl: profile.serverBaseUrl,
+            projectId: "authority-project-1",
+            allowInsecureTransport: true,
+            hasDeviceCredential: true,
+            deviceCredentialPersistence: "persisted",
+            deviceCredentialId: "credential-1",
+            humanPrincipalId: "principal-1",
+            updatedAt: "2030-01-01T00:00:00.000Z"
+          }
+        ],
+        activeProfileId: "planweave-local-project-1",
+        session: {
+          phase: "connected",
+          activeProfileId: "planweave-local-project-1",
+          detail: null,
+          lastErrorCode: null,
+          lastErrorMessage: null
+        }
+      }),
+      createCollaborationInvitation: vi.fn().mockResolvedValue({
+        invitationToken,
+        invitation: { invitationId: "invitation-1" }
+      })
+    });
+    const copy = vi.fn(async () => undefined);
+    render(
+      <LocalCollaborationServerPanel
+        api={collaborationApi}
+        t={createTranslator("en")}
+        projectId="project-1"
+        canvasId="canvas-1"
+        scopeLayout={expandedScopeLayout}
+        onScopeLayoutChange={onScopeLayoutChange}
+        copyText={copy}
+      />
+    );
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Create and copy complete invitation" })
+    );
+
+    await waitFor(() => expect(copy).toHaveBeenCalledTimes(1));
+    const parsed = parseCollaborationInvitationHandoff(copy.mock.calls[0]![0]);
+    expect(parsed).toMatchObject({
+      serverBaseUrl: "http://192.168.1.20:8787/",
+      projectId: "authority-project-1",
+      invitationToken,
+      allowInsecureTransport: true
+    });
+    expect(
+      screen.getByRole("textbox", {
+        name: "Complete invitation (shown on this page only)"
+      })
+    ).toHaveValue(copy.mock.calls[0]![0]);
+    expect(screen.getByText("Complete invitation copied.")).toBeVisible();
+    expect(collaborationApi.createCollaborationInvitation).toHaveBeenCalledWith({});
   });
 });

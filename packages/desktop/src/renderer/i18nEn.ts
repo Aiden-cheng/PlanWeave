@@ -554,11 +554,12 @@ export const enCatalog = {
     "The operator credential is available for this session only; it is not persisted by the operating system vault.",
   hostAdminMemberSetupTitle: "Member device onboarding",
   hostAdminMemberSetupDescription:
-    "Create a one-time setup code for this server-admin session's Workspace and copy it directly from Desktop main.",
+    "Create complete one-paste connection details for this server-admin session's Workspace.",
   hostAdminMemberSetupRoleNote:
-    "The first device to redeem a code becomes the Workspace owner. Later devices join as members. Paste the code in Members → Setup code.",
-  hostAdminMemberSetupCopy: "Create and copy setup code",
-  hostAdminMemberSetupCopied: "Setup code copied. It is shown only in the system clipboard.",
+    "The first device to redeem the setup becomes the Workspace owner. Later devices join as members. Paste the copied details in Members → Use existing Server.",
+  hostAdminMemberSetupCopy: "Create and copy connection details",
+  hostAdminMemberSetupCopied:
+    "Complete connection details copied. They are shown only in the system clipboard.",
   hostAdminMemberSetupWorkspace: "Workspace",
   hostAdminMemberSetupExpires: "Expires",
   hostAdminMemberSetupDismiss: "Done",
@@ -1156,6 +1157,14 @@ export const enCatalog = {
   peopleServerUrl: "Server URL",
   peopleProjectId: "Project ID",
   peopleSetupCode: "Setup code",
+  peopleSetupDetails: "Complete Server connection details",
+  peopleSetupDetailsPlaceholder: "Paste the complete PlanWeave Server connection details",
+  peopleSetupDetailsHint:
+    "Paste once; PlanWeave will read the Server address and one-time setup code automatically.",
+  peopleSetupDetailsInvalid:
+    "These Server connection details are incomplete or invalid. Copy them again from the Server administrator.",
+  peopleAdvancedSetupDetails: "Enter Server details manually",
+  peopleHideAdvancedSetupDetails: "Hide manual Server details",
   peopleServerUrlInvalid: "Enter a valid HTTP(S) server origin without a path.",
   peopleSetupCodeInvalid: "Enter a valid setup code.",
   peopleSetupCodeFieldsInvalid: "Enter a valid server URL and setup code.",
@@ -1476,7 +1485,15 @@ export const enCatalog = {
   localServerLanNoScope: "Select at least one canvas to create a connection address.",
   localServerLanHint:
     "Other devices must be on the same trusted network. HTTP is accepted only for private local-network addresses; public internet HTTP remains blocked.",
-  localServerCopyAddress: "Copy address"
+  localServerCopyAddress: "Copy address only",
+  localServerCreateInvitation: "Create and copy complete invitation",
+  localServerCopyInvitationAgain: "Copy complete invitation again",
+  localServerInvitationReady: "Complete invitation (shown on this page only)",
+  localServerInvitationReadyHint:
+    "Includes the server address, project, and one-time invitation token. Paste the full value into Join workspace on the other computer.",
+  localServerInvitationCopied: "Complete invitation copied.",
+  localServerInvitationUnavailable:
+    "The local collaboration session is not ready yet. Try again shortly."
 } as const;
 
 export type TranslationKey = keyof typeof enCatalog;

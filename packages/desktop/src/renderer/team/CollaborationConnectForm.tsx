@@ -1,8 +1,9 @@
 import { useId, useRef, useState } from "react";
 import { ServerIcon } from "lucide-react";
-import type {
-  ActiveWorkspaceConnectionView,
-  WorkspacePickerItem
+import {
+  parseCollaborationSetupHandoffV1,
+  type ActiveWorkspaceConnectionView,
+  type WorkspacePickerItem
 } from "@planweave-ai/collaboration-contracts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +17,7 @@ import {
 import { collaborationErrorMessage } from "../collaboration/formatCollaborationError";
 import { parseCollaborationInvitationHandoff } from "./collaborationInvitationHandoff";
 import { CollaborationInvitationJoinFields } from "./CollaborationInvitationJoinFields";
+import { CollaborationSetupHandoffFields } from "./CollaborationSetupHandoffFields";
 
 export type CollaborationConnectFormProps = {
   api: PlanWeaveCollaborationApi | null;
@@ -91,6 +93,8 @@ export function CollaborationConnectForm({
   const [manualJoinOpen, setManualJoinOpen] = useState(
     !fixedMode && (fixedMode ?? initialMode) === "join"
   );
+  const [manualSetupOpen, setManualSetupOpen] = useState(false);
+  const setupHandoffInputRef = useRef<HTMLTextAreaElement>(null);
   const setupCodeInputRef = useRef<HTMLInputElement>(null);
   const [allowInsecureTransport, setAllowInsecureTransport] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -120,17 +124,37 @@ export function CollaborationConnectForm({
     setInfo(null);
     try {
       if (mode === "setup") {
-        const setupCodeInput = setupCodeInputRef.current;
-        if (!setupCodeInput) {
-          throw new Error("Setup code input is unavailable.");
+        const setupHandoffInput = setupHandoffInputRef.current;
+        const completeSetupDetails = setupHandoffInput?.value.trim() ?? "";
+        if (setupHandoffInput) setupHandoffInput.value = "";
+
+        let effectiveServerBaseUrl = serverBaseUrl.trim();
+        let effectiveSetupCode = "";
+        let effectiveAllowInsecureTransport = allowInsecureTransport;
+        if (completeSetupDetails) {
+          const handoff = parseCollaborationSetupHandoffV1(completeSetupDetails);
+          if (!handoff) {
+            setError(t("peopleSetupDetailsInvalid"));
+            return;
+          }
+          effectiveServerBaseUrl = handoff.serverBaseUrl;
+          effectiveSetupCode = handoff.setupCode;
+          effectiveAllowInsecureTransport = handoff.allowInsecureTransport;
+        } else if (!manualSetupOpen) {
+          setError(t("peopleSetupDetailsInvalid"));
+          return;
+        } else {
+          const setupCodeInput = setupCodeInputRef.current;
+          if (!setupCodeInput) {
+            throw new Error("Setup code input is unavailable.");
+          }
+          effectiveSetupCode = setupCodeInput.value.trim();
+          setupCodeInput.value = "";
         }
-        const code = setupCodeInput.value.trim();
-        // Keep the one-time code out of React state and clear the element before IPC.
-        setupCodeInput.value = "";
         const candidate = {
-          serverBaseUrl: serverBaseUrl.trim(),
-          allowInsecureTransport,
-          setupCode: code,
+          serverBaseUrl: effectiveServerBaseUrl,
+          allowInsecureTransport: effectiveAllowInsecureTransport,
+          setupCode: effectiveSetupCode,
           displayName: displayName.trim() || t("peopleDefaultProfileName")
         };
         const parsed = collaborationRedeemSetupCodeInputSchema.safeParse(candidate);
@@ -447,48 +471,20 @@ export function CollaborationConnectForm({
         ) : null}
 
         {mode === "setup" ? (
-          <div className="grid grid-cols-1 gap-x-5 gap-y-3 md:grid-cols-2">
-            <div className="flex flex-col gap-1 md:col-span-2">
-              <Label htmlFor={`${formId}-name`}>{t("peopleDisplayName")}</Label>
-              <Input
-                id={`${formId}-name`}
-                data-testid="people-connect-display-name"
-                value={displayName}
-                onChange={(event) => setDisplayName(event.target.value)}
-                autoComplete="nickname"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor={`${formId}-url`}>{t("peopleServerUrl")}</Label>
-              <Input
-                id={`${formId}-url`}
-                data-testid="people-connect-server-url"
-                value={serverBaseUrl}
-                onChange={(event) => setServerBaseUrl(event.target.value)}
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor={`${formId}-setup`}>{t("peopleSetupCode")}</Label>
-              <Input
-                id={`${formId}-setup`}
-                data-testid="people-connect-setup-code"
-                ref={setupCodeInputRef}
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </div>
-            <label className="flex items-center gap-2 text-xs text-muted-foreground md:col-span-2">
-              <input
-                type="checkbox"
-                data-testid="people-connect-allow-insecure"
-                checked={allowInsecureTransport}
-                onChange={(event) => setAllowInsecureTransport(event.target.checked)}
-              />
-              {t("peopleAllowInsecureTransport")}
-            </label>
-          </div>
+          <CollaborationSetupHandoffFields
+            formId={formId}
+            t={t}
+            handoffInputRef={setupHandoffInputRef}
+            setupCodeInputRef={setupCodeInputRef}
+            displayName={displayName}
+            manualOpen={manualSetupOpen}
+            serverBaseUrl={serverBaseUrl}
+            allowInsecureTransport={allowInsecureTransport}
+            onDisplayNameChange={setDisplayName}
+            onManualOpenChange={setManualSetupOpen}
+            onServerBaseUrlChange={setServerBaseUrl}
+            onAllowInsecureTransportChange={setAllowInsecureTransport}
+          />
         ) : null}
 
         {mode === "join" ? (

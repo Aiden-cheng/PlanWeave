@@ -11,7 +11,9 @@ import type {
 } from "../../shared/collaboration.js";
 import type { createTranslator } from "../i18n";
 import type { DesktopUiSettings } from "../types";
+import { serializeCollaborationInvitationHandoff } from "../team/collaborationInvitationHandoff";
 import { collaborationErrorMessage } from "./formatCollaborationError";
+import { isCollaborationSessionConnected } from "./sessionState";
 
 function scopeKey(scope: LocalCollaborationScope): string {
   return `${scope.projectId}\0${scope.canvasId}`;
@@ -50,6 +52,8 @@ export function LocalCollaborationServerPanel({
   const [scopes, setScopes] = useState<readonly LoopbackTrustedProjectScope[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [invitationHandoff, setInvitationHandoff] = useState<string | null>(null);
+  const [invitationCopied, setInvitationCopied] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!api) return;
@@ -159,6 +163,8 @@ export function LocalCollaborationServerPanel({
 
   const setLanSharing = async (enabled: boolean) => {
     setBusy(true);
+    setInvitationHandoff(null);
+    setInvitationCopied(false);
     try {
       const nextStatus = await api.setLocalCollaborationLanSharing({ enabled });
       setStatus(nextStatus);
@@ -176,6 +182,45 @@ export function LocalCollaborationServerPanel({
     setBusy(true);
     try {
       await copyText(status.lanServerBaseUrl);
+      setError(null);
+    } catch (caught) {
+      setError(collaborationErrorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const createAndCopyInvitation = async () => {
+    if (!status?.lanServerBaseUrl || !status.profile) return;
+    setBusy(true);
+    setInvitationCopied(false);
+    try {
+      let handoff = invitationHandoff;
+      if (!handoff) {
+        const collaborationStatus = await api.getCollaborationStatus();
+        const activeProfile = collaborationStatus.profiles.find(
+          (profile) => profile.profileId === collaborationStatus.activeProfileId
+        );
+        const localOrigin = new URL(status.profile.serverBaseUrl).origin;
+        if (
+          !activeProfile ||
+          new URL(activeProfile.serverBaseUrl).origin !== localOrigin ||
+          !isCollaborationSessionConnected(collaborationStatus)
+        ) {
+          setError(t("localServerInvitationUnavailable"));
+          return;
+        }
+        const created = await api.createCollaborationInvitation({});
+        handoff = serializeCollaborationInvitationHandoff({
+          serverBaseUrl: status.lanServerBaseUrl,
+          projectId: activeProfile.projectId,
+          invitationToken: created.invitationToken,
+          allowInsecureTransport: new URL(status.lanServerBaseUrl).protocol === "http:"
+        });
+        setInvitationHandoff(handoff);
+      }
+      await copyText(handoff);
+      setInvitationCopied(true);
       setError(null);
     } catch (caught) {
       setError(collaborationErrorMessage(caught));
@@ -250,21 +295,56 @@ export function LocalCollaborationServerPanel({
               )}
             </div>
             {status?.lanServerBaseUrl ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={busy}
-                onClick={() => void copyLanAddress()}
-              >
-                <CopyIcon className="size-3.5" aria-hidden="true" />
-                {t("localServerCopyAddress")}
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => void createAndCopyInvitation()}
+                >
+                  <CopyIcon className="size-3.5" aria-hidden="true" />
+                  {invitationHandoff
+                    ? t("localServerCopyInvitationAgain")
+                    : t("localServerCreateInvitation")}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => void copyLanAddress()}
+                >
+                  {t("localServerCopyAddress")}
+                </Button>
+              </div>
             ) : null}
           </div>
           <p className="mt-2 max-w-3xl text-[11px] leading-4 text-muted-foreground">
             {t("localServerLanHint")}
           </p>
+          {invitationHandoff ? (
+            <div className="mt-4 border-l-2 border-emerald-500 bg-emerald-500/5 px-3 py-3">
+              <div className="text-xs font-semibold text-text-strong">
+                {t("localServerInvitationReady")}
+              </div>
+              <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+                {t("localServerInvitationReadyHint")}
+              </p>
+              <textarea
+                className="mt-3 min-h-20 w-full resize-y rounded-md border border-border bg-background px-3 py-2 font-mono text-[11px] leading-4 text-text-strong outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={t("localServerInvitationReady")}
+                readOnly
+                value={invitationHandoff}
+                onFocus={(event) => event.currentTarget.select()}
+              />
+              <div
+                className="mt-2 text-[11px] font-medium text-emerald-700 dark:text-emerald-300"
+                aria-live="polite"
+              >
+                {invitationCopied ? t("localServerInvitationCopied") : null}
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 

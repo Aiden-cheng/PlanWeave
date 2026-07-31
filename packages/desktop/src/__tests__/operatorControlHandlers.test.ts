@@ -2,7 +2,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { exampleSetupCodeIssueResponse } from "@planweave-ai/collaboration-contracts";
+import {
+  exampleSetupCodeIssueResponse,
+  parseCollaborationSetupHandoffV1
+} from "@planweave-ai/collaboration-contracts";
 import {
   registerOperatorControlHandlers,
   shutdownOperatorControlService
@@ -138,7 +141,13 @@ describe("operator control main-owned member setup code", () => {
 
     const handoff = await handler({}, { profileId: "profile-a" });
 
-    expect(electronMock.writeText).toHaveBeenCalledWith(exampleSetupCodeIssueResponse.setupCode);
+    expect(
+      parseCollaborationSetupHandoffV1(electronMock.writeText.mock.calls[0]?.[0] ?? "")
+    ).toEqual({
+      serverBaseUrl: "https://operator.example.test/",
+      setupCode: exampleSetupCodeIssueResponse.setupCode,
+      allowInsecureTransport: false
+    });
     expect(JSON.stringify(handoff)).not.toContain(exampleSetupCodeIssueResponse.setupCode);
     await expect(
       handler({}, { profileId: "profile-a", setupCode: exampleSetupCodeIssueResponse.setupCode })

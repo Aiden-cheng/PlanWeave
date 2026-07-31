@@ -2,7 +2,10 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { exampleSetupCodeIssueResponse } from "@planweave-ai/collaboration-contracts";
+import {
+  exampleSetupCodeIssueResponse,
+  parseCollaborationSetupHandoffV1
+} from "@planweave-ai/collaboration-contracts";
 import {
   OPERATOR_CONTROL_JSON_BODY_MAX_BYTES,
   OperatorControlClient
@@ -190,7 +193,11 @@ describe("Desktop operator control trust boundary", () => {
 
     const handoff = await service.copyMemberSetupCode({ profileId: "profile-a" }, copyText);
 
-    expect(copyText).toHaveBeenCalledWith(exampleSetupCodeIssueResponse.setupCode);
+    expect(parseCollaborationSetupHandoffV1(copyText.mock.calls[0]?.[0] ?? "")).toEqual({
+      serverBaseUrl: "https://operator.example.test/",
+      setupCode: exampleSetupCodeIssueResponse.setupCode,
+      allowInsecureTransport: false
+    });
     expect(handoff).toEqual({
       state: "ready",
       workspaceId: exampleSetupCodeIssueResponse.grant.workspaceId,
