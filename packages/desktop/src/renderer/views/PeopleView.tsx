@@ -117,13 +117,12 @@ export function PeopleView({
   }, [status]);
 
   const sessionConnected = isCollaborationSessionConnected(status);
-  const hasRestorableProjectProfile =
-    status?.profiles.some((profile) => profile.hasDeviceCredential) ?? false;
+  const workspaceConnectionActive =
+    status?.workspaceConnection.status === "connecting" ||
+    status?.workspaceConnection.status === "connected" ||
+    status?.workspaceConnection.status === "reconnecting";
   const showOnboarding =
-    !collaborationStatusLoading &&
-    !activeProfile &&
-    !sessionConnected &&
-    !hasRestorableProjectProfile;
+    !collaborationStatusLoading && !sessionConnected && !workspaceConnectionActive;
   const invitationServerBaseUrl = resolveCollaborationInvitationServerBaseUrl(
     activeProfile,
     localServerStatus

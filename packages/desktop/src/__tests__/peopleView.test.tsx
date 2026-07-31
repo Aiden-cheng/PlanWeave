@@ -152,7 +152,7 @@ describe("PeopleView", () => {
     expect(screen.queryByTestId("content-authority-panel")).not.toBeInTheDocument();
   });
 
-  it("keeps stored workspace reconnect controls out of first-time onboarding", async () => {
+  it("shows create-or-join onboarding when a stored profile is not connected", async () => {
     const api = {
       getCollaborationStatus: vi.fn().mockResolvedValue({
         profiles: [
@@ -211,9 +211,10 @@ describe("PeopleView", () => {
       />
     );
 
-    expect(await screen.findByTestId("people-section-workspace")).toBeVisible();
-    expect(screen.getByTestId("people-panel")).toHaveAttribute("data-mode", "disconnected");
-    expect(screen.queryByTestId("collaboration-workspace-onboarding")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("collaboration-workspace-onboarding")).toBeVisible();
+    expect(screen.getByTestId("collaboration-onboarding-create")).toBeVisible();
+    expect(screen.getByTestId("collaboration-onboarding-join")).toBeVisible();
+    expect(screen.queryByTestId("people-panel")).not.toBeInTheDocument();
   });
 
   it("keeps onboarding visible when a failed join left only an uncredentialed profile", async () => {
