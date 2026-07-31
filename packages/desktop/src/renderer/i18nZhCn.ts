@@ -1418,11 +1418,11 @@ export const zhCnCatalog = {
   localServerLanHint:
     "其他设备需要处于同一可信局域网。HTTP 只允许私有局域网地址，公网 HTTP 仍会被拒绝。",
   localServerCopyAddress: "仅复制地址",
-  localServerCreateInvitation: "创建并复制完整邀请",
-  localServerCopyInvitationAgain: "再次复制完整邀请",
+  localServerCopyInvitation: "复制完整邀请",
+  localServerPreparingInvitation: "正在准备完整邀请…",
+  localServerRetryInvitation: "重试生成完整邀请",
   localServerInvitationReady: "完整邀请（仅在本次页面中显示）",
   localServerInvitationReadyHint:
     "已包含服务器地址、项目和一次性邀请令牌。将整段内容粘贴到另一台电脑的“加入协作空间”即可。",
-  localServerInvitationCopied: "完整邀请已复制。",
-  localServerInvitationUnavailable: "本机协作会话尚未就绪，请稍后重试。"
+  localServerInvitationCopied: "完整邀请已复制。"
 } satisfies Record<TranslationKey, string>;

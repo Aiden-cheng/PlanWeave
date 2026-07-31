@@ -1486,14 +1486,13 @@ export const enCatalog = {
   localServerLanHint:
     "Other devices must be on the same trusted network. HTTP is accepted only for private local-network addresses; public internet HTTP remains blocked.",
   localServerCopyAddress: "Copy address only",
-  localServerCreateInvitation: "Create and copy complete invitation",
-  localServerCopyInvitationAgain: "Copy complete invitation again",
+  localServerCopyInvitation: "Copy complete invitation",
+  localServerPreparingInvitation: "Preparing complete invitation…",
+  localServerRetryInvitation: "Retry complete invitation",
   localServerInvitationReady: "Complete invitation (shown on this page only)",
   localServerInvitationReadyHint:
     "Includes the server address, project, and one-time invitation token. Paste the full value into Join workspace on the other computer.",
-  localServerInvitationCopied: "Complete invitation copied.",
-  localServerInvitationUnavailable:
-    "The local collaboration session is not ready yet. Try again shortly."
+  localServerInvitationCopied: "Complete invitation copied."
 } as const;
 
 export type TranslationKey = keyof typeof enCatalog;

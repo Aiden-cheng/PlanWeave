@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDownIcon, ChevronRightIcon, CopyIcon, WifiIcon } from "lucide-react";
 import type { LoopbackTrustedProjectScope } from "@planweave-ai/collaboration-contracts";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,6 @@ import type { createTranslator } from "../i18n";
 import type { DesktopUiSettings } from "../types";
 import { serializeCollaborationInvitationHandoff } from "../team/collaborationInvitationHandoff";
 import { collaborationErrorMessage } from "./formatCollaborationError";
-import { isCollaborationSessionConnected } from "./sessionState";
 
 function scopeKey(scope: LocalCollaborationScope): string {
   return `${scope.projectId}\0${scope.canvasId}`;
@@ -54,6 +53,8 @@ export function LocalCollaborationServerPanel({
   const [busy, setBusy] = useState(false);
   const [invitationHandoff, setInvitationHandoff] = useState<string | null>(null);
   const [invitationCopied, setInvitationCopied] = useState(false);
+  const [invitationBusy, setInvitationBusy] = useState(false);
+  const invitationAttemptRef = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!api) return;
@@ -108,6 +109,43 @@ export function LocalCollaborationServerPanel({
   const currentScope = scopes.find(
     (scope) => scope.projectId === projectId && scope.canvasId === canvasId
   );
+
+  const prepareInvitation = useCallback(async () => {
+    if (!api || !status?.lanServerBaseUrl) return;
+    setInvitationBusy(true);
+    setInvitationCopied(false);
+    try {
+      const registration = await api.registerLocalCollaborationCurrentProject({});
+      const created = await api.createCollaborationInvitation({});
+      const handoff = serializeCollaborationInvitationHandoff({
+        serverBaseUrl: status.lanServerBaseUrl,
+        projectId: registration.projectId,
+        invitationToken: created.invitationToken,
+        allowInsecureTransport: new URL(status.lanServerBaseUrl).protocol === "http:"
+      });
+      setInvitationHandoff(handoff);
+      setError(null);
+    } catch (caught) {
+      setError(collaborationErrorMessage(caught));
+    } finally {
+      setInvitationBusy(false);
+    }
+  }, [api, status?.lanServerBaseUrl]);
+
+  useEffect(() => {
+    if (!status?.lanServerBaseUrl || !currentCatalogCanvas?.selected || invitationHandoff) return;
+    const attemptKey = `${status.lanServerBaseUrl}\0${projectId ?? ""}\0${canvasId ?? ""}`;
+    if (invitationAttemptRef.current === attemptKey) return;
+    invitationAttemptRef.current = attemptKey;
+    void prepareInvitation();
+  }, [
+    canvasId,
+    currentCatalogCanvas?.selected,
+    invitationHandoff,
+    prepareInvitation,
+    projectId,
+    status?.lanServerBaseUrl
+  ]);
 
   if (!api) return null;
   const running = status?.state === "running";
@@ -165,6 +203,7 @@ export function LocalCollaborationServerPanel({
     setBusy(true);
     setInvitationHandoff(null);
     setInvitationCopied(false);
+    invitationAttemptRef.current = null;
     try {
       const nextStatus = await api.setLocalCollaborationLanSharing({ enabled });
       setStatus(nextStatus);
@@ -190,42 +229,18 @@ export function LocalCollaborationServerPanel({
     }
   };
 
-  const createAndCopyInvitation = async () => {
-    if (!status?.lanServerBaseUrl || !status.profile) return;
-    setBusy(true);
+  const copyInvitation = async () => {
+    if (!invitationHandoff) return;
+    setInvitationBusy(true);
     setInvitationCopied(false);
     try {
-      let handoff = invitationHandoff;
-      if (!handoff) {
-        const collaborationStatus = await api.getCollaborationStatus();
-        const activeProfile = collaborationStatus.profiles.find(
-          (profile) => profile.profileId === collaborationStatus.activeProfileId
-        );
-        const localOrigin = new URL(status.profile.serverBaseUrl).origin;
-        if (
-          !activeProfile ||
-          new URL(activeProfile.serverBaseUrl).origin !== localOrigin ||
-          !isCollaborationSessionConnected(collaborationStatus)
-        ) {
-          setError(t("localServerInvitationUnavailable"));
-          return;
-        }
-        const created = await api.createCollaborationInvitation({});
-        handoff = serializeCollaborationInvitationHandoff({
-          serverBaseUrl: status.lanServerBaseUrl,
-          projectId: activeProfile.projectId,
-          invitationToken: created.invitationToken,
-          allowInsecureTransport: new URL(status.lanServerBaseUrl).protocol === "http:"
-        });
-        setInvitationHandoff(handoff);
-      }
-      await copyText(handoff);
+      await copyText(invitationHandoff);
       setInvitationCopied(true);
       setError(null);
     } catch (caught) {
       setError(collaborationErrorMessage(caught));
     } finally {
-      setBusy(false);
+      setInvitationBusy(false);
     }
   };
 
@@ -299,19 +314,21 @@ export function LocalCollaborationServerPanel({
                 <Button
                   type="button"
                   size="sm"
-                  disabled={busy}
-                  onClick={() => void createAndCopyInvitation()}
+                  disabled={busy || invitationBusy}
+                  onClick={() => void (invitationHandoff ? copyInvitation() : prepareInvitation())}
                 >
                   <CopyIcon className="size-3.5" aria-hidden="true" />
                   {invitationHandoff
-                    ? t("localServerCopyInvitationAgain")
-                    : t("localServerCreateInvitation")}
+                    ? t("localServerCopyInvitation")
+                    : invitationBusy
+                      ? t("localServerPreparingInvitation")
+                      : t("localServerRetryInvitation")}
                 </Button>
                 <Button
                   type="button"
                   size="sm"
                   variant="ghost"
-                  disabled={busy}
+                  disabled={busy || invitationBusy}
                   onClick={() => void copyLanAddress()}
                 >
                   {t("localServerCopyAddress")}

@@ -86,6 +86,10 @@ function api(overrides: Partial<PlanWeaveCollaborationApi> = {}): PlanWeaveColla
       profileId: profile.profileId,
       registeredAt: "2030-01-01T00:00:01.000Z"
     }),
+    createCollaborationInvitation: vi.fn().mockResolvedValue({
+      invitationToken: `pw_inv_${"B".repeat(43)}`,
+      invitation: { invitationId: "invitation-default" }
+    }),
     ...overrides
   } as PlanWeaveCollaborationApi;
 }
@@ -270,7 +274,7 @@ describe("LocalCollaborationServerPanel", () => {
     });
   });
 
-  it("creates and copies a complete project invitation from the local hosting page", async () => {
+  it("activates the local canvas and displays a complete invitation without an extra create step", async () => {
     const invitationToken = `pw_inv_${"A".repeat(43)}`;
     const collaborationApi = api({
       getLocalCollaborationServerStatus: vi.fn().mockResolvedValue({
@@ -281,29 +285,12 @@ describe("LocalCollaborationServerPanel", () => {
         lanSharingEnabled: true,
         lanServerBaseUrl: "http://192.168.1.20:8787/"
       }),
-      getCollaborationStatus: vi.fn().mockResolvedValue({
-        profiles: [
-          {
-            profileId: "planweave-local-project-1",
-            displayName: "Local collaboration server",
-            serverBaseUrl: profile.serverBaseUrl,
-            projectId: "authority-project-1",
-            allowInsecureTransport: true,
-            hasDeviceCredential: true,
-            deviceCredentialPersistence: "persisted",
-            deviceCredentialId: "credential-1",
-            humanPrincipalId: "principal-1",
-            updatedAt: "2030-01-01T00:00:00.000Z"
-          }
-        ],
-        activeProfileId: "planweave-local-project-1",
-        session: {
-          phase: "connected",
-          activeProfileId: "planweave-local-project-1",
-          detail: null,
-          lastErrorCode: null,
-          lastErrorMessage: null
-        }
+      registerLocalCollaborationCurrentProject: vi.fn().mockResolvedValue({
+        workspaceId: "workspace-1",
+        projectId: "authority-project-1",
+        canvasId: "canvas-1",
+        profileId: profile.profileId,
+        registeredAt: "2030-01-01T00:00:01.000Z"
       }),
       createCollaborationInvitation: vi.fn().mockResolvedValue({
         invitationToken,
@@ -323,24 +310,24 @@ describe("LocalCollaborationServerPanel", () => {
       />
     );
 
-    await userEvent.click(
-      await screen.findByRole("button", { name: "Create and copy complete invitation" })
-    );
+    const invitationField = await screen.findByRole("textbox", {
+      name: "Complete invitation (shown on this page only)"
+    });
+    expect(copy).not.toHaveBeenCalled();
+    expect(collaborationApi.registerLocalCollaborationCurrentProject).toHaveBeenCalledWith({});
+    expect(collaborationApi.createCollaborationInvitation).toHaveBeenCalledWith({});
 
-    await waitFor(() => expect(copy).toHaveBeenCalledTimes(1));
-    const parsed = parseCollaborationInvitationHandoff(copy.mock.calls[0]![0]);
+    const invitation = (invitationField as HTMLTextAreaElement).value;
+    const parsed = parseCollaborationInvitationHandoff(invitation);
     expect(parsed).toMatchObject({
       serverBaseUrl: "http://192.168.1.20:8787/",
       projectId: "authority-project-1",
       invitationToken,
       allowInsecureTransport: true
     });
-    expect(
-      screen.getByRole("textbox", {
-        name: "Complete invitation (shown on this page only)"
-      })
-    ).toHaveValue(copy.mock.calls[0]![0]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Copy complete invitation" }));
+    expect(copy).toHaveBeenCalledWith(invitation);
     expect(screen.getByText("Complete invitation copied.")).toBeVisible();
-    expect(collaborationApi.createCollaborationInvitation).toHaveBeenCalledWith({});
   });
 });
