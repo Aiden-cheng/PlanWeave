@@ -121,8 +121,7 @@ export function PeopleView({
     status?.workspaceConnection.status === "connecting" ||
     status?.workspaceConnection.status === "connected" ||
     status?.workspaceConnection.status === "reconnecting";
-  const showOnboarding =
-    !collaborationStatusLoading && !sessionConnected && !workspaceConnectionActive;
+  const showOnboarding = !sessionConnected && !workspaceConnectionActive;
   const invitationServerBaseUrl = resolveCollaborationInvitationServerBaseUrl(
     activeProfile,
     localServerStatus

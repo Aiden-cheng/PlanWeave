@@ -138,9 +138,9 @@ describe("PeopleView", () => {
     expect(screen.queryByTestId("people-connect-project-id")).not.toBeInTheDocument();
   });
 
-  it("refreshes workspace status after the local collaboration service is ready", async () => {
+  it("keeps the local hosting step visible while workspace status refreshes", async () => {
     const user = userEvent.setup();
-    const getCollaborationStatus = vi.fn().mockResolvedValue({
+    const localOnlyStatus = {
       profiles: [],
       activeProfileId: null,
       credentialStorage: "available",
@@ -163,7 +163,11 @@ describe("PeopleView", () => {
       },
       workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null },
       updatedAt: "2030-01-01T00:00:00.000Z"
-    });
+    } as const;
+    const getCollaborationStatus = vi
+      .fn()
+      .mockResolvedValueOnce(localOnlyStatus)
+      .mockImplementationOnce(() => new Promise(() => undefined));
     const api = {
       getCollaborationStatus,
       onCollaborationStatusChanged: vi.fn(() => () => undefined),
@@ -219,6 +223,11 @@ describe("PeopleView", () => {
     await user.click(screen.getByTestId("collaboration-onboarding-host-locally"));
 
     await waitFor(() => expect(getCollaborationStatus).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId("collaboration-workspace-onboarding")).toHaveAttribute(
+      "data-step",
+      "local"
+    );
+    expect(screen.getByTestId("local-collaboration-server-panel")).toBeVisible();
   });
 
   it("hides remote content authority while the project is local only", () => {
