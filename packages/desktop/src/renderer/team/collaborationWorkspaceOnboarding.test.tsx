@@ -25,9 +25,17 @@ describe("CollaborationWorkspaceOnboarding", () => {
 
     expect(screen.getByTestId("collaboration-onboarding-create")).toBeVisible();
     expect(screen.getByTestId("collaboration-onboarding-join")).toBeVisible();
+    expect(screen.getByTestId("collaboration-workspace-onboarding")).toHaveAttribute(
+      "data-step",
+      "start"
+    );
     expect(screen.queryByTestId("local-hosting-slot")).not.toBeInTheDocument();
 
     await user.click(screen.getByTestId("collaboration-onboarding-create"));
+    expect(screen.getByTestId("collaboration-workspace-onboarding")).toHaveAttribute(
+      "data-step",
+      "create"
+    );
     await user.click(screen.getByTestId("collaboration-onboarding-host-locally"));
 
     expect(screen.getByTestId("local-hosting-slot")).toBeVisible();
