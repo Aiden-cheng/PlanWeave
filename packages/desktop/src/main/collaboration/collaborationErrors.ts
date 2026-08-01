@@ -10,6 +10,7 @@ export class CollaborationClientError extends Error {
   readonly kind: CollaborationBoundaryErrorKind;
   readonly code: string;
   readonly httpStatus?: number;
+  readonly retryAfterMs?: number;
   readonly retryable: boolean;
 
   constructor(input: {
@@ -17,6 +18,7 @@ export class CollaborationClientError extends Error {
     code: string;
     message?: string;
     httpStatus?: number;
+    retryAfterMs?: number;
     retryable?: boolean;
     cause?: unknown;
   }) {
@@ -25,6 +27,7 @@ export class CollaborationClientError extends Error {
     this.kind = input.kind;
     this.code = input.code;
     this.httpStatus = input.httpStatus;
+    this.retryAfterMs = input.retryAfterMs;
     this.retryable = input.retryable ?? isRetryableBoundaryKind(input.kind);
     if (input.cause !== undefined) {
       (this as Error & { cause?: unknown }).cause = input.cause;
@@ -34,7 +37,8 @@ export class CollaborationClientError extends Error {
 
 export function collaborationErrorFromHttp(
   status: number,
-  bodyText: string
+  bodyText: string,
+  retryAfterHeader?: string | null
 ): CollaborationClientError {
   let code = `http_${status}`;
   let message: string | undefined;
@@ -48,13 +52,27 @@ export function collaborationErrorFromHttp(
     // Non-JSON error bodies are common for proxies; keep generic code.
   }
   const kind = mapHttpStatusToBoundaryKind(status, code);
+  const retryAfterMs = parseRetryAfterMs(retryAfterHeader);
   return new CollaborationClientError({
     kind,
     code,
     message,
     httpStatus: status,
+    retryAfterMs,
     retryable: isRetryableBoundaryKind(kind)
   });
+}
+
+function parseRetryAfterMs(value: string | null | undefined): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return Math.ceil(seconds * 1_000);
+  }
+  const retryAt = Date.parse(value);
+  if (!Number.isFinite(retryAt)) return undefined;
+  const remaining = retryAt - Date.now();
+  return remaining > 0 ? remaining : undefined;
 }
 
 export function collaborationErrorFromUnknown(error: unknown): CollaborationClientError {
@@ -66,6 +84,7 @@ export function collaborationErrorFromUnknown(error: unknown): CollaborationClie
       code: error.code,
       message: redacted,
       httpStatus: error.httpStatus,
+      retryAfterMs: error.retryAfterMs,
       retryable: error.retryable,
       cause: error
     });

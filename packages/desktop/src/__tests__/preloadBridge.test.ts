@@ -777,7 +777,49 @@ describe("preload bridge invocation", () => {
       },
       workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
     };
-    electronMock.ipcRenderer.invoke.mockResolvedValue(status);
+    const invitation = {
+      invitationId: "invitation-1",
+      projectId: "project-1",
+      role: "member" as const,
+      createdByHumanPrincipalId: "human-1",
+      createdAt: "2026-07-25T00:00:00.000Z",
+      expiresAt: "2026-07-26T00:00:00.000Z"
+    };
+    electronMock.ipcRenderer.invoke.mockImplementation(async (channel: string) => {
+      if (channel === collaborationInvokeChannels.listCollaborationMembers) {
+        return { ok: true, value: { items: [], nextCursor: null } };
+      }
+      if (channel === collaborationInvokeChannels.listCollaborationDevices) {
+        return { ok: true, value: { items: [], nextCursor: null } };
+      }
+      if (channel === collaborationInvokeChannels.listCollaborationInvitations) {
+        return { ok: true, value: { items: [], nextCursor: null } };
+      }
+      if (channel === collaborationInvokeChannels.createCollaborationInvitation) {
+        return {
+          ok: true,
+          value: {
+            invitation,
+            invitationToken: `pw_inv_${"A".repeat(43)}`
+          }
+        };
+      }
+      if (channel === collaborationInvokeChannels.revokeCollaborationInvitation) {
+        return { ok: true, value: { ...invitation, revokedAt: "2026-07-25T00:01:00.000Z" } };
+      }
+      if (channel === collaborationInvokeChannels.revokeCollaborationInvitations) {
+        return { ok: true, value: { items: [] } };
+      }
+      if (
+        channel === collaborationInvokeChannels.removeCollaborationMember ||
+        channel === collaborationInvokeChannels.promoteCollaborationOwner ||
+        channel === collaborationInvokeChannels.demoteCollaborationOwner ||
+        channel === collaborationInvokeChannels.revokeCollaborationDevice
+      ) {
+        return { ok: true, value: undefined };
+      }
+      return status;
+    });
 
     await import("../preload/preload");
     const api = electronMock.exposed.get("planweaveCollaboration") as PlanWeaveCollaborationApi;
@@ -825,6 +867,12 @@ describe("preload bridge invocation", () => {
     await api.disconnectWorkspaceConnection();
     await api.retryWorkspaceConnection();
     await api.getCurrentCanvasAccess({ canvasId: "default" });
+    await api.listCollaborationContentBootstrapCandidates();
+    await api.bootstrapCollaborationContent({
+      workspaceId: "workspace-1",
+      projectId: "project-1",
+      canvasId: "default"
+    });
     await api.mutateCurrentCanvasAccess({
       canvasId: "default",
       request: {
@@ -906,6 +954,13 @@ describe("preload bridge invocation", () => {
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       collaborationInvokeChannels.getCurrentCanvasAccess,
       { canvasId: "default" }
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.listCollaborationContentBootstrapCandidates
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.bootstrapCollaborationContent,
+      { workspaceId: "workspace-1", projectId: "project-1", canvasId: "default" }
     );
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       collaborationInvokeChannels.mutateCurrentCanvasAccess,

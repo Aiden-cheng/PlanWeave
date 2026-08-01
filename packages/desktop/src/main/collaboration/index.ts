@@ -53,6 +53,7 @@ export {
   type CollaborationSafeStoragePort,
   type StoredCredentialMetadata
 } from "./collaborationCredentialVault.js";
+export { CollaborationInvitationVault } from "./collaborationInvitationVault.js";
 export {
   CollaborationProfileStore,
   collaborationProfileStorePaths,

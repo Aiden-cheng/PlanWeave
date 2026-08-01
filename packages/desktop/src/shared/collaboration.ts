@@ -53,6 +53,7 @@ import {
   type CanvasCommandOutcome,
   type CanvasJournalEntry,
   type CanvasReconnectResponse,
+  type CanvasRuntimeStatusProjection,
   type CanvasPresenceServerMessage,
   type RemoteActionView,
   type RemoteDispatchIntent,
@@ -70,6 +71,7 @@ import {
   type ExecutionTargetReadModel,
   type WorkAuthorityProjection,
   type WorkspacePickerPage,
+  contentVersionDesktopReadModelSchema,
   type ContentVersionDesktopReadModel,
   type CurrentCanvasAccessView,
   type AccessMutationResult,
@@ -463,7 +465,8 @@ export type CollaborationCanvasReconnectInput = z.infer<
 
 export const collaborationCanvasSessionInputSchema = z
   .object({
-    canvasId: z.string().trim().min(1).max(128)
+    localProjectId: collaborationOpaqueIdSchema,
+    canvasId: collaborationOpaqueIdSchema
   })
   .strict();
 export type CollaborationCanvasSessionInput = z.infer<typeof collaborationCanvasSessionInputSchema>;
@@ -495,9 +498,72 @@ export type CollaborationCanvasReconnectResult = {
   session: CollaborationCanvasCommandSessionView | null;
 };
 
-/** Renderer input is limited to an opaque canvas id; main resolves all local paths. */
-export type CollaborationContentAuthorityCanvasInput = { canvasId: string };
+/** Renderer supplies opaque local identities only; main resolves and verifies disk paths. */
+export const collaborationContentAuthorityCanvasInputSchema = z
+  .object({
+    localProjectId: collaborationOpaqueIdSchema,
+    canvasId: collaborationOpaqueIdSchema
+  })
+  .strict();
+export type CollaborationContentAuthorityCanvasInput = z.infer<
+  typeof collaborationContentAuthorityCanvasInputSchema
+>;
+export const collaborationCanvasScopeResolutionSchema = z
+  .object({
+    projectId: collaborationOpaqueIdSchema,
+    canvasId: collaborationOpaqueIdSchema
+  })
+  .strict();
+export type CollaborationCanvasScopeResolution = z.infer<
+  typeof collaborationCanvasScopeResolutionSchema
+>;
 export type CollaborationContentAuthorityView = ContentVersionDesktopReadModel;
+
+export const collaborationContentBootstrapInputSchema = z
+  .object({
+    workspaceId: collaborationOpaqueIdSchema,
+    projectId: collaborationOpaqueIdSchema,
+    canvasId: collaborationOpaqueIdSchema
+  })
+  .strict();
+export type CollaborationContentBootstrapInput = z.infer<
+  typeof collaborationContentBootstrapInputSchema
+>;
+
+const collaborationLocalContentReplicaViewSchema = z
+  .object({
+    projectId: collaborationOpaqueIdSchema,
+    canvasId: collaborationOpaqueIdSchema
+  })
+  .strict();
+
+export const collaborationContentBootstrapCandidateSchema = z
+  .object({
+    workspaceId: collaborationOpaqueIdSchema,
+    projectId: collaborationOpaqueIdSchema,
+    canvasId: collaborationOpaqueIdSchema,
+    visibility: z.enum(["private", "shared"]),
+    authority: contentVersionDesktopReadModelSchema,
+    localReplica: collaborationLocalContentReplicaViewSchema.nullable()
+  })
+  .strict();
+export type CollaborationContentBootstrapCandidate = z.infer<
+  typeof collaborationContentBootstrapCandidateSchema
+>;
+
+export const collaborationContentBootstrapResultSchema = z
+  .object({
+    outcome: z.enum(["created", "reused"]),
+    localProjectId: collaborationOpaqueIdSchema,
+    localCanvasId: collaborationOpaqueIdSchema,
+    remoteCanvasId: collaborationOpaqueIdSchema,
+    acknowledgement: z.enum(["acknowledged", "pending"]),
+    authority: contentVersionDesktopReadModelSchema
+  })
+  .strict();
+export type CollaborationContentBootstrapResult = z.infer<
+  typeof collaborationContentBootstrapResultSchema
+>;
 
 /** Renderer supplies a selected opaque canvas id; main derives and verifies the full active scope. */
 export const collaborationCurrentCanvasAccessInputSchema = z
@@ -600,6 +666,12 @@ export type PlanWeaveCollaborationApi = {
     input: CollaborationCanvasSessionInput
   ) => Promise<CollaborationCanvasCommandSessionView | null>;
   getCollaborationCanvasCommandSession: () => Promise<CollaborationCanvasCommandSessionView | null>;
+  resolveCollaborationCanvasScope: (
+    input: CollaborationContentAuthorityCanvasInput
+  ) => Promise<CollaborationCanvasScopeResolution | null>;
+  readCollaborationCanvasRuntimeStatus: (
+    input: CollaborationContentAuthorityCanvasInput
+  ) => Promise<CanvasRuntimeStatusProjection | null>;
   bindCollaborationContentAuthority: (
     input: CollaborationContentAuthorityCanvasInput
   ) => Promise<CollaborationContentAuthorityView>;
@@ -607,6 +679,12 @@ export type PlanWeaveCollaborationApi = {
   refreshCollaborationContentAuthority: () => Promise<CollaborationContentAuthorityView>;
   publishCollaborationInitialContent: () => Promise<CollaborationContentAuthorityView>;
   materializeCollaborationContentHead: () => Promise<CollaborationContentAuthorityView>;
+  listCollaborationContentBootstrapCandidates: () => Promise<
+    CollaborationContentBootstrapCandidate[]
+  >;
+  bootstrapCollaborationContent: (
+    input: CollaborationContentBootstrapInput
+  ) => Promise<CollaborationContentBootstrapResult>;
   getCurrentCanvasAccess: (
     input: CollaborationCurrentCanvasAccessInput
   ) => Promise<CollaborationCurrentCanvasAccessView>;
@@ -636,6 +714,9 @@ export type PlanWeaveCollaborationApi = {
   ) => Promise<HumanInvitationPage>;
   createCollaborationInvitation: (
     input?: CollaborationCreateInvitationInput
+  ) => Promise<CollaborationInvitationCreateView>;
+  getCollaborationInvitationSecret: (
+    input: CollaborationInvitationIdInput
   ) => Promise<CollaborationInvitationCreateView>;
   revokeCollaborationInvitation: (
     input: CollaborationInvitationIdInput

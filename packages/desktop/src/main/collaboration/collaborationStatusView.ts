@@ -29,6 +29,19 @@ export type BuildCollaborationStatusOptions = {
   clock?: { now(): Date };
 };
 
+function observerDetail(status: CollaborationObserverStatus): string {
+  if (status.state === "connecting") {
+    return `observer:connecting:attempt=${status.attempt}`;
+  }
+  if (status.state === "reconnecting") {
+    return `observer:reconnecting:attempt=${status.attempt}:delay_ms=${status.delayMs}`;
+  }
+  if (status.state === "catching_up") {
+    return `observer:catching_up:resume_cursor=${status.resumeCursor}`;
+  }
+  return `observer:${status.state}`;
+}
+
 function toPublicProfile(
   profile: CollaborationConnectionProfile & { updatedAt: string },
   credential: {
@@ -83,7 +96,7 @@ export async function buildCollaborationStatus(
         : null;
   const detail =
     options.session.observerStatus.state !== "stopped" && options.session.client
-      ? `observer:${options.session.observerStatus.state}`
+      ? observerDetail(options.session.observerStatus)
       : options.session.detail;
 
   return {

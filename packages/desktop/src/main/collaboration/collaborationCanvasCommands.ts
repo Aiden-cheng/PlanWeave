@@ -9,8 +9,12 @@ import {
   type CanvasReconnectResponse
 } from "@planweave-ai/collaboration-contracts";
 import { z } from "zod";
-import { collaborationCanvasSessionInputSchema } from "../../shared/collaboration.js";
+import {
+  collaborationCanvasSessionInputSchema,
+  type CollaborationCanvasSessionInput
+} from "../../shared/collaboration.js";
 import type { CollaborationClient } from "./CollaborationClient.js";
+import type { ResolvedCollaborationCanvasBinding } from "./ContentVersionFacade.js";
 import { CollaborationClientError } from "./collaborationErrors.js";
 import type { CanvasCommandSessionSnapshot } from "./canvasCommandSession.js";
 import {
@@ -60,7 +64,21 @@ export type CollaborationCanvasReconnectResult = {
 
 export type CollaborationCanvasCommandSessionView = CanvasCommandSessionSnapshot | null;
 
-function requireClient(client: CollaborationClient | null): CollaborationClient {
+type CanvasCommandClientPort = Pick<
+  CollaborationClient,
+  | "projectId"
+  | "submitCanvasCommand"
+  | "reconnectCanvasCommands"
+  | "bindCanvasCommandSession"
+  | "canvasCommandSession"
+>;
+
+type CanvasCommandMaterializerPort = Pick<
+  LocalCanvasCommandMaterializer,
+  "bind" | "materializeAccepted" | "materializeReconnect"
+>;
+
+function requireClient(client: CanvasCommandClientPort | null): CanvasCommandClientPort {
   if (!client) {
     throw new CollaborationClientError({
       kind: "aborted",
@@ -76,10 +94,20 @@ function requireClient(client: CollaborationClient | null): CollaborationClient 
  * Keeps command/read-model boundaries out of the monolithic service body.
  */
 export class CollaborationCanvasCommandFacade {
-  private readonly materializer = new LocalCanvasCommandMaterializer();
-  private localBinding: LocalCanvasCommandBinding | null = null;
+  private binding: {
+    local: LocalCanvasCommandBinding;
+    remoteProjectId: string;
+    remoteCanvasId: string;
+  } | null = null;
 
-  constructor(private readonly resolveClient: () => CollaborationClient | null) {}
+  constructor(
+    private readonly resolveClient: () => CanvasCommandClientPort | null,
+    private readonly resolveCanvasBinding: (
+      input: CollaborationCanvasSessionInput
+    ) => Promise<ResolvedCollaborationCanvasBinding | null>,
+    private readonly materializer: CanvasCommandMaterializerPort =
+      new LocalCanvasCommandMaterializer()
+  ) {}
 
   async submit(input: unknown): Promise<CollaborationCanvasCommandSubmitResult> {
     const parsed = collaborationCanvasCommandSubmitInputSchema.parse(input);
@@ -134,11 +162,31 @@ export class CollaborationCanvasCommandFacade {
   async bind(input: unknown): Promise<CollaborationCanvasCommandSessionView> {
     const parsed = collaborationCanvasSessionInputSchema.parse(input);
     const client = requireClient(this.resolveClient());
-    this.localBinding = await this.materializer.bind({
-      projectId: client.projectId,
-      canvasId: parsed.canvasId
+    const resolved = await this.resolveCanvasBinding(parsed);
+    if (
+      !resolved ||
+      resolved.localProjectId !== parsed.localProjectId ||
+      resolved.localCanvasId !== parsed.canvasId ||
+      resolved.remoteProjectId !== client.projectId
+    ) {
+      this.binding = null;
+      throw new CollaborationClientError({
+        kind: "aborted",
+        code: "collaboration_canvas_scope_unmapped",
+        message: "collaboration_canvas_scope_unmapped",
+        retryable: false
+      });
+    }
+    const local = await this.materializer.bind({
+      projectId: resolved.localProjectId,
+      canvasId: resolved.localCanvasId
     });
-    client.bindCanvasCommandSession(parsed.canvasId);
+    this.binding = {
+      local,
+      remoteProjectId: resolved.remoteProjectId,
+      remoteCanvasId: resolved.remoteCanvasId
+    };
+    client.bindCanvasCommandSession(resolved.remoteCanvasId);
     return client.canvasCommandSession();
   }
 
@@ -148,11 +196,15 @@ export class CollaborationCanvasCommandFacade {
   }
 
   private requireLocalBinding(
-    client: CollaborationClient,
+    client: CanvasCommandClientPort,
     canvasId: string
   ): LocalCanvasCommandBinding {
-    const binding = this.localBinding;
-    if (!binding || binding.canvasId !== canvasId || binding.projectId !== client.projectId) {
+    const binding = this.binding;
+    if (
+      !binding ||
+      binding.remoteCanvasId !== canvasId ||
+      binding.remoteProjectId !== client.projectId
+    ) {
       throw new CollaborationClientError({
         kind: "aborted",
         code: "collaboration_canvas_local_binding_required",
@@ -160,6 +212,6 @@ export class CollaborationCanvasCommandFacade {
         retryable: false
       });
     }
-    return binding;
+    return binding.local;
   }
 }

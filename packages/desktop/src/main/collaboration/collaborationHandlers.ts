@@ -1,6 +1,15 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage } from "electron";
 import { join } from "node:path";
 import WebSocket from "ws";
+import { z } from "zod";
+import {
+  humanCreateInvitationResponseSchema,
+  humanDevicePageSchema,
+  humanInvitationPageSchema,
+  humanInvitationViewSchema,
+  humanMemberPageSchema,
+  humanRevokeInvitationsResponseSchema
+} from "@planweave-ai/collaboration-contracts";
 import {
   collaborationInvokeChannels,
   collaborationObserverSignalChannel,
@@ -17,7 +26,8 @@ import {
 import { CollaborationService, type CollaborationServiceOptions } from "./collaborationService.js";
 import { LocalCollaborationCoordinatorControl } from "./CollaborationCoordinatorControl.js";
 import { DeploymentActions } from "./deploymentActions.js";
-import { activateLocalCollaborationSelection } from "./localCollaborationSelectionActivation.js";
+import { runCollaborationCommand } from "./collaborationCommandHandler.js";
+import { createLocalCollaborationActivationCommand } from "./localCollaborationSelectionActivation.js";
 
 let service: CollaborationService | null = null;
 let coordinator: LocalCollaborationCoordinatorControl | null = null;
@@ -107,14 +117,22 @@ export function registerCollaborationHandlers(
   void localReady.catch((error: unknown) => {
     console.error("Failed to restore the local collaboration service.", error);
   });
-  const activateLocalSelection = (ownerDisplayName = "Local owner") =>
-    activateLocalCollaborationSelection({
-      coordinator: local,
-      service: active,
-      ownerDisplayName
-    });
-  const deactivateLocalSelection = async (): Promise<void> => {
-    const profileId = local.localProfile()?.profileId;
+  const localActivation = createLocalCollaborationActivationCommand({
+    coordinator: local,
+    service: active
+  });
+  let localOperationQueue: Promise<unknown> = Promise.resolve();
+  const runLocalOperation = <T>(operation: () => Promise<T>): Promise<T> => {
+    const next = localOperationQueue.catch(() => undefined).then(operation);
+    localOperationQueue = next.then(
+      () => undefined,
+      () => undefined
+    );
+    return next;
+  };
+  const deactivateLocalSelection = async (
+    profileId = local.localProfile()?.profileId
+  ): Promise<void> => {
     if (profileId && (await active.getStatus()).activeProfileId === profileId) {
       await active.clearActiveProfile();
     }
@@ -244,6 +262,14 @@ export function registerCollaborationHandlers(
     active.getCanvasCommandSession()
   );
   ipcMain.handle(
+    collaborationInvokeChannels.resolveCollaborationCanvasScope,
+    (_event, input: unknown) => active.resolveCanvasScope(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.readCollaborationCanvasRuntimeStatus,
+    (_event, input: unknown) => active.readCanvasRuntimeStatus(input)
+  );
+  ipcMain.handle(
     collaborationInvokeChannels.bindCollaborationContentAuthority,
     (_event, input: unknown) => active.bindContentAuthority(input)
   );
@@ -259,6 +285,13 @@ export function registerCollaborationHandlers(
   ipcMain.handle(collaborationInvokeChannels.materializeCollaborationContentHead, () =>
     active.materializeContentHead()
   );
+  ipcMain.handle(collaborationInvokeChannels.listCollaborationContentBootstrapCandidates, () =>
+    active.listContentBootstrapCandidates()
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.bootstrapCollaborationContent,
+    (_event, input: unknown) => active.bootstrapContent(input)
+  );
   ipcMain.handle(collaborationInvokeChannels.getCurrentCanvasAccess, (_event, input: unknown) =>
     active.getCurrentCanvasAccess(input)
   );
@@ -267,18 +300,24 @@ export function registerCollaborationHandlers(
   );
   ipcMain.handle(
     collaborationInvokeChannels.setCollaborationCurrentSelection,
-    async (_event, input: unknown) => {
-      await deactivateLocalSelection();
-      await local.setCurrentSelection(input);
-      if (local.status().state === "running" && local.currentSelectionIsTrusted()) {
-        await activateLocalSelection();
-      }
-    }
+    (_event, input: unknown) =>
+      runLocalOperation(async () => {
+        const registrationInput = localCollaborationRegistrationInputSchema.parse({
+          selection: input
+        });
+        if (!registrationInput.selection) {
+          throw new Error("local_collaboration_selection_required");
+        }
+        await localActivation.selectAndReconcile(registrationInput.selection);
+      })
   );
-  ipcMain.handle(collaborationInvokeChannels.clearCollaborationCurrentSelection, async () => {
-    await deactivateLocalSelection();
-    return local.clearCurrentSelection();
-  });
+  ipcMain.handle(collaborationInvokeChannels.clearCollaborationCurrentSelection, () =>
+    runLocalOperation(async () => {
+      const previousProfileId = local.localProfile()?.profileId;
+      await local.clearCurrentSelection();
+      await deactivateLocalSelection(previousProfileId);
+    })
+  );
   ipcMain.handle(collaborationInvokeChannels.getLocalCollaborationServerStatus, async () => {
     await localReady;
     return local.status();
@@ -288,83 +327,102 @@ export function registerCollaborationHandlers(
   );
   ipcMain.handle(
     collaborationInvokeChannels.setLocalCollaborationTrustedScopes,
-    async (_event, input: unknown) => {
-      await deactivateLocalSelection();
-      const catalog = await local.setTrustedScopes(input);
-      if (local.status().state === "running" && local.currentSelectionIsTrusted()) {
-        await activateLocalSelection();
-      }
-      return catalog;
-    }
+    (_event, input: unknown) =>
+      runLocalOperation(async () => {
+        const previousProfileId = local.localProfile()?.profileId;
+        const catalog = await local.setTrustedScopes(input);
+        await localActivation.reconcile(previousProfileId);
+        return catalog;
+      })
   );
-  ipcMain.handle(collaborationInvokeChannels.startLocalCollaborationServer, async () => {
-    const status = await local.start();
-    if (status.state !== "running") return status;
-    if (local.currentSelectionIsTrusted()) await activateLocalSelection();
-    return status;
-  });
-  ipcMain.handle(collaborationInvokeChannels.stopLocalCollaborationServer, async () => {
-    await deactivateLocalSelection();
-    return local.stop();
-  });
+  ipcMain.handle(collaborationInvokeChannels.startLocalCollaborationServer, () =>
+    runLocalOperation(async () => {
+      const status = await local.start();
+      if (status.state !== "running") return status;
+      await localActivation.reconcile();
+      return status;
+    })
+  );
+  ipcMain.handle(collaborationInvokeChannels.stopLocalCollaborationServer, () =>
+    runLocalOperation(async () => {
+      const previousProfileId = local.localProfile()?.profileId;
+      const status = await local.stop();
+      await deactivateLocalSelection(previousProfileId);
+      return status;
+    })
+  );
   ipcMain.handle(
     collaborationInvokeChannels.setLocalCollaborationLanSharing,
-    async (_event, input: unknown) => {
-      await deactivateLocalSelection();
-      const status = await local.setLanSharing(input);
-      if (status.state === "running" && local.currentSelectionIsTrusted()) {
-        await activateLocalSelection();
-      }
-      return status;
-    }
+    (_event, input: unknown) =>
+      runLocalOperation(async () => {
+        const previousProfileId = local.localProfile()?.profileId;
+        const status = await local.setLanSharing(input);
+        await localActivation.reconcile(previousProfileId);
+        return status;
+      })
   );
   ipcMain.handle(collaborationInvokeChannels.listLocalCollaborationTrustedScopes, () =>
     local.listActiveTrustedScopes()
   );
   ipcMain.handle(
     collaborationInvokeChannels.registerLocalCollaborationCurrentProject,
-    async (_event, input: unknown) => {
-      const registrationInput = localCollaborationRegistrationInputSchema.parse(input ?? {});
-      if (registrationInput.selection) {
-        await deactivateLocalSelection();
-        await local.setCurrentSelection(registrationInput.selection);
-      }
-      return activateLocalSelection(registrationInput.ownerDisplayName ?? "Local owner");
-    }
+    (_event, input: unknown) =>
+      runLocalOperation(async () => {
+        const registrationInput = localCollaborationRegistrationInputSchema.parse(input ?? {});
+        return localActivation.activate(registrationInput);
+      })
   );
   ipcMain.handle(collaborationInvokeChannels.listCollaborationMembers, (_event, input: unknown) =>
-    active.listMembers(input)
+    runCollaborationCommand(() => active.listMembers(input), humanMemberPageSchema)
   );
   ipcMain.handle(collaborationInvokeChannels.listCollaborationDevices, (_event, input: unknown) =>
-    active.listDevices(input)
+    runCollaborationCommand(() => active.listDevices(input), humanDevicePageSchema)
   );
   ipcMain.handle(
     collaborationInvokeChannels.listCollaborationInvitations,
-    (_event, input: unknown) => active.listInvitations(input)
+    (_event, input: unknown) =>
+      runCollaborationCommand(() => active.listInvitations(input), humanInvitationPageSchema)
   );
   ipcMain.handle(
     collaborationInvokeChannels.createCollaborationInvitation,
-    (_event, input: unknown) => active.createInvitation(input)
+    (_event, input: unknown) =>
+      runCollaborationCommand(
+        () => active.createInvitation(input),
+        humanCreateInvitationResponseSchema
+      )
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.getCollaborationInvitationSecret,
+    (_event, input: unknown) =>
+      runCollaborationCommand(
+        () => active.getInvitationSecret(input),
+        humanCreateInvitationResponseSchema
+      )
   );
   ipcMain.handle(
     collaborationInvokeChannels.revokeCollaborationInvitation,
-    (_event, input: unknown) => active.revokeInvitation(input)
+    (_event, input: unknown) =>
+      runCollaborationCommand(() => active.revokeInvitation(input), humanInvitationViewSchema)
   );
   ipcMain.handle(
     collaborationInvokeChannels.revokeCollaborationInvitations,
-    (_event, input: unknown) => active.revokeInvitations(input)
+    (_event, input: unknown) =>
+      runCollaborationCommand(
+        () => active.revokeInvitations(input),
+        humanRevokeInvitationsResponseSchema
+      )
   );
   ipcMain.handle(collaborationInvokeChannels.removeCollaborationMember, (_event, input: unknown) =>
-    active.removeMember(input)
+    runCollaborationCommand(() => active.removeMember(input), z.undefined())
   );
   ipcMain.handle(collaborationInvokeChannels.promoteCollaborationOwner, (_event, input: unknown) =>
-    active.promoteOwner(input)
+    runCollaborationCommand(() => active.promoteOwner(input), z.undefined())
   );
   ipcMain.handle(collaborationInvokeChannels.demoteCollaborationOwner, (_event, input: unknown) =>
-    active.demoteOwner(input)
+    runCollaborationCommand(() => active.demoteOwner(input), z.undefined())
   );
   ipcMain.handle(collaborationInvokeChannels.revokeCollaborationDevice, (_event, input: unknown) =>
-    active.revokeDevice(input)
+    runCollaborationCommand(() => active.revokeDevice(input), z.undefined())
   );
   ipcMain.handle(
     collaborationInvokeChannels.listCollaborationAssignments,

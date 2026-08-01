@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  COLLABORATION_REQUEST_TIMEOUT_MS,
   exampleBootstrapResponse,
   exampleHumanDeviceToken,
   exampleInvitationToken,
@@ -14,7 +15,9 @@ import {
   exampleSetupCodeRedeemDeviceResponse
 } from "@planweave-ai/collaboration-contracts";
 import {
+  CollaborationClientError,
   CollaborationCredentialVault,
+  CollaborationInvitationVault,
   CollaborationProfileStore,
   CollaborationService,
   redactCollaborationText
@@ -94,6 +97,58 @@ afterEach(async () => {
 });
 
 describe("collaboration credential vault + profile store", () => {
+  it("encrypts invitation secrets and restores them only for the owning profile", async () => {
+    const root = await tempDir("planweave-collab-invitations-");
+    const invitationsPath = join(root, "invitations.json");
+    const safeStorage = mockSafeStorage({ available: true });
+    const invitation = {
+      invitation: {
+        invitationId: "invitation-001",
+        projectId: "project-1",
+        role: "member" as const,
+        createdByHumanPrincipalId: "human-1",
+        createdAt: "2030-01-01T00:00:00.000Z",
+        expiresAt: "2030-01-02T00:00:00.000Z"
+      },
+      invitationToken: exampleInvitationToken
+    };
+
+    const first = new CollaborationInvitationVault({ path: invitationsPath, safeStorage });
+    await expect(first.set("profile-1", invitation)).resolves.toBe("persisted");
+    expect(await readFile(invitationsPath, "utf8")).not.toContain(exampleInvitationToken);
+
+    const reopened = new CollaborationInvitationVault({ path: invitationsPath, safeStorage });
+    await expect(reopened.get("profile-1", "invitation-001")).resolves.toEqual(invitation);
+    await expect(reopened.get("profile-2", "invitation-001")).resolves.toBeNull();
+
+    await reopened.delete("profile-1", "invitation-001");
+    await expect(reopened.get("profile-1", "invitation-001")).resolves.toBeNull();
+  });
+
+  it("keeps invitation secrets in memory when safeStorage is unavailable", async () => {
+    const root = await tempDir("planweave-collab-session-invitations-");
+    const invitationsPath = join(root, "invitations.json");
+    const invitation = {
+      invitation: {
+        invitationId: "invitation-002",
+        projectId: "project-1",
+        role: "member" as const,
+        createdByHumanPrincipalId: "human-1",
+        createdAt: "2030-01-01T00:00:00.000Z",
+        expiresAt: "2030-01-02T00:00:00.000Z"
+      },
+      invitationToken: exampleInvitationToken
+    };
+    const vault = new CollaborationInvitationVault({
+      path: invitationsPath,
+      safeStorage: mockSafeStorage({ available: false })
+    });
+
+    await expect(vault.set("profile-1", invitation)).resolves.toBe("session-only");
+    await expect(vault.get("profile-1", "invitation-002")).resolves.toEqual(invitation);
+    await expect(readFile(invitationsPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("persists profiles without secrets and encrypts device tokens when safeStorage is available", async () => {
     const root = await tempDir("planweave-collab-");
     const profilesPath = join(root, "profiles.json");
@@ -266,12 +321,12 @@ describe("CollaborationService IPC trust boundary", () => {
     expect(() =>
       assertNoSmuggledCollaborationSecrets({ authorization: "Bearer x" }, "test")
     ).toThrow(/authorization/);
-    expect(() => assertNoSmuggledCollaborationSecrets({ url: "https://other.example/" }, "test")).toThrow(
-      /url/
-    );
-    expect(() => assertNoSmuggledCollaborationSecrets({ command: "server --unsafe" }, "test")).toThrow(
-      /command/
-    );
+    expect(() =>
+      assertNoSmuggledCollaborationSecrets({ url: "https://other.example/" }, "test")
+    ).toThrow(/url/);
+    expect(() =>
+      assertNoSmuggledCollaborationSecrets({ command: "server --unsafe" }, "test")
+    ).toThrow(/command/);
     expect(() => assertNoSmuggledCollaborationSecrets({ path: "/tmp/project" }, "test")).toThrow(
       /path/
     );
@@ -388,6 +443,98 @@ describe("CollaborationService IPC trust boundary", () => {
     expect(profileB?.hasDeviceCredential).toBe(false);
   });
 
+  it("publishes only the final non-empty profile during a nested activation transaction", async () => {
+    const root = await tempDir("planweave-collab-activation-publication-");
+    const publishedActiveProfileIds: Array<string | null> = [];
+    const safeStorage = mockSafeStorage({ available: true });
+    const service = new CollaborationService({
+      profileStore: new CollaborationProfileStore({ profilesPath: join(root, "profiles.json") }),
+      vault: new CollaborationCredentialVault({
+        paths: { credentialsPath: join(root, "credentials.json") },
+        safeStorage
+      }),
+      workspaceProfileStorePaths: { profilesPath: join(root, "workspace-profiles.json") },
+      safeStorage,
+      createClient: () =>
+        ({
+          verifyAccess: vi.fn().mockResolvedValue(undefined),
+          startObserver: vi.fn(),
+          stopObserver: vi.fn(),
+          dispose: vi.fn(),
+          bootstrapOwner: vi.fn(),
+          consumeInvitation: vi.fn()
+        }) as never,
+      onStatusChange: (status) => publishedActiveProfileIds.push(status.activeProfileId)
+    });
+    const baseProfile = {
+      displayName: "Local",
+      serverBaseUrl: "http://127.0.0.1:8787/",
+      allowInsecureTransport: true
+    };
+    await service.upsertProfile({
+      ...baseProfile,
+      profileId: "profile-stable",
+      projectId: "project-stable"
+    });
+    await service.upsertProfile({
+      ...baseProfile,
+      profileId: "profile-next",
+      projectId: "project-next"
+    });
+    await service.importDeviceCredential({
+      profileId: "profile-next",
+      deviceToken: exampleHumanDeviceToken,
+      humanPrincipalId: "human-owner"
+    });
+    await service.setActiveProfile({ profileId: "profile-stable" });
+    publishedActiveProfileIds.length = 0;
+
+    await service.runStatusPublicationTransaction(async () => {
+      await service.upsertProfile({
+        ...baseProfile,
+        profileId: "profile-next",
+        projectId: "project-next"
+      });
+      await service.runStatusPublicationTransaction(async () => {
+        await service.setActiveProfile({ profileId: "profile-next" });
+        await service.connectSession({ profileId: "profile-next" });
+      });
+    });
+
+    expect(publishedActiveProfileIds).toEqual(["profile-next"]);
+  });
+
+  it("publishes the restored stable profile after an activation transaction fails", async () => {
+    const root = await tempDir("planweave-collab-activation-rollback-");
+    const publishedActiveProfileIds: Array<string | null> = [];
+    const safeStorage = mockSafeStorage({ available: true });
+    const service = new CollaborationService({
+      profileStore: new CollaborationProfileStore({ profilesPath: join(root, "profiles.json") }),
+      workspaceProfileStorePaths: { profilesPath: join(root, "workspace-profiles.json") },
+      safeStorage,
+      onStatusChange: (status) => publishedActiveProfileIds.push(status.activeProfileId)
+    });
+    await service.upsertProfile({
+      profileId: "profile-stable",
+      displayName: "Stable",
+      serverBaseUrl: "http://127.0.0.1:8787/",
+      projectId: "project-stable",
+      allowInsecureTransport: true
+    });
+    await service.setActiveProfile({ profileId: "profile-stable" });
+    publishedActiveProfileIds.length = 0;
+
+    await expect(
+      service.runStatusPublicationTransaction(async () => {
+        await service.clearActiveProfile();
+        await service.setActiveProfile({ profileId: "profile-stable" });
+        throw new Error("activation_failed");
+      })
+    ).rejects.toThrow("activation_failed");
+
+    expect(publishedActiveProfileIds).toEqual(["profile-stable"]);
+  });
+
   it("redeems a setup code in main and exposes only a redacted Workspace connection", async () => {
     const root = await tempDir("planweave-collab-workspace-setup-");
     const request = vi.fn(async (_input: RequestInfo | URL) => {
@@ -447,7 +594,11 @@ describe("CollaborationService IPC trust boundary", () => {
   });
 
   it.each([
-    ["offline", () => Promise.reject(new TypeError("network unavailable")), "collaboration_offline"],
+    [
+      "offline",
+      () => Promise.reject(new TypeError("network unavailable")),
+      "collaboration_offline"
+    ],
     [
       "revoked",
       () =>
@@ -590,6 +741,7 @@ describe("CollaborationService IPC trust boundary", () => {
       }),
       createClient: () =>
         ({
+          verifyAccess: vi.fn().mockResolvedValue(undefined),
           startObserver: vi.fn(),
           stopObserver,
           dispose,
@@ -645,6 +797,243 @@ describe("CollaborationService IPC trust boundary", () => {
     await expect(service.getStatus()).rejects.toThrow(/shut down/);
   });
 
+  it("keeps authenticated HTTP reads available when the observer times out", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const root = await tempDir("planweave-collab-observer-timeout-");
+    const stopObserver = vi.fn();
+    const dispose = vi.fn();
+    const service = new CollaborationService({
+      profileStore: new CollaborationProfileStore({ profilesPath: join(root, "profiles.json") }),
+      vault: new CollaborationCredentialVault({
+        paths: { credentialsPath: join(root, "credentials.json") },
+        safeStorage: mockSafeStorage({ available: true })
+      }),
+      createClient: () =>
+        ({
+          verifyAccess: vi.fn().mockResolvedValue(undefined),
+          startObserver: (handlers: {
+            onStatus?: (status: { state: "connecting"; attempt: number }) => void;
+          }) => handlers.onStatus?.({ state: "connecting", attempt: 1 }),
+          stopObserver,
+          stopPresence: vi.fn(),
+          dispose,
+          bootstrapOwner: vi.fn(),
+          consumeInvitation: vi.fn()
+        }) as never
+    });
+
+    try {
+      await service.upsertProfile({
+        profileId: "profile-timeout",
+        displayName: "Windows test",
+        serverBaseUrl: "http://192.168.123.23:62060/",
+        projectId: "project-timeout",
+        allowInsecureTransport: true
+      });
+      await service.importDeviceCredential({
+        profileId: "profile-timeout",
+        deviceToken: exampleHumanDeviceToken
+      });
+
+      const connecting = await service.connectSession({ profileId: "profile-timeout" });
+      expect(connecting.session.phase).toBe("connected");
+
+      await vi.advanceTimersByTimeAsync(COLLABORATION_REQUEST_TIMEOUT_MS + 1);
+      const timedOut = await service.getStatus();
+
+      expect(timedOut.session).toMatchObject({
+        phase: "connected",
+        detail: "observer:connect_timeout",
+        lastErrorCode: "collaboration_observer_connect_timeout"
+      });
+      expect(stopObserver).toHaveBeenCalledTimes(1);
+      expect(dispose).not.toHaveBeenCalled();
+    } finally {
+      await service.shutdown();
+      vi.useRealTimers();
+    }
+  });
+
+  it("creates a fresh client when retrying a failed observer session", async () => {
+    const root = await tempDir("planweave-collab-observer-failed-retry-");
+    const createClient = vi.fn(() =>
+      ({
+        verifyAccess: vi.fn().mockResolvedValue(undefined),
+        startObserver: (handlers: {
+          onStatus?: (status: { state: "failed"; code: string }) => void;
+        }) =>
+          handlers.onStatus?.({
+            state: "failed",
+            code: "collaboration_observer_http_403"
+          }),
+        stopObserver: vi.fn(),
+        stopPresence: vi.fn(),
+        dispose: vi.fn(),
+        bootstrapOwner: vi.fn(),
+        consumeInvitation: vi.fn()
+      }) as never
+    );
+    const service = new CollaborationService({
+      profileStore: new CollaborationProfileStore({ profilesPath: join(root, "profiles.json") }),
+      vault: new CollaborationCredentialVault({
+        paths: { credentialsPath: join(root, "credentials.json") },
+        safeStorage: mockSafeStorage({ available: true })
+      }),
+      createClient
+    });
+
+    await service.upsertProfile({
+      profileId: "profile-retry",
+      displayName: "Windows test",
+      serverBaseUrl: "http://192.168.123.23:50653/",
+      projectId: "project-retry",
+      allowInsecureTransport: true
+    });
+    await service.importDeviceCredential({
+      profileId: "profile-retry",
+      deviceToken: exampleHumanDeviceToken
+    });
+
+    expect((await service.connectSession({ profileId: "profile-retry" })).session).toMatchObject({
+      phase: "connected",
+      lastErrorCode: "collaboration_observer_http_403",
+      lastErrorMessage:
+        "Realtime updates are unavailable because this member does not have project read access. Ask an owner to share the project or grant this member project access."
+    });
+    await service.connectSession({ profileId: "profile-retry" });
+
+    expect(createClient).toHaveBeenCalledTimes(2);
+    await service.shutdown();
+  });
+
+  it("rejects an invalid credential during HTTP preflight before starting the observer", async () => {
+    const root = await tempDir("planweave-collab-session-preflight-");
+    const startObserver = vi.fn();
+    const service = new CollaborationService({
+      profileStore: new CollaborationProfileStore({ profilesPath: join(root, "profiles.json") }),
+      vault: new CollaborationCredentialVault({
+        paths: { credentialsPath: join(root, "credentials.json") },
+        safeStorage: mockSafeStorage({ available: true })
+      }),
+      createClient: () =>
+        ({
+          verifyAccess: vi.fn().mockRejectedValue(
+            new CollaborationClientError({
+              kind: "auth",
+              code: "human_auth_unauthenticated",
+              message: "Unauthorized",
+              httpStatus: 401
+            })
+          ),
+          startObserver,
+          stopObserver: vi.fn(),
+          stopPresence: vi.fn(),
+          dispose: vi.fn(),
+          bootstrapOwner: vi.fn(),
+          consumeInvitation: vi.fn()
+        }) as never
+    });
+
+    await service.upsertProfile({
+      profileId: "profile-preflight",
+      displayName: "Windows test",
+      serverBaseUrl: "http://192.168.123.23:50653/",
+      projectId: "project-preflight",
+      allowInsecureTransport: true
+    });
+    await service.importDeviceCredential({
+      profileId: "profile-preflight",
+      deviceToken: exampleHumanDeviceToken
+    });
+
+    await expect(service.connectSession({ profileId: "profile-preflight" })).rejects.toMatchObject({
+      code: "human_auth_unauthenticated",
+      httpStatus: 401
+    });
+    expect(startObserver).not.toHaveBeenCalled();
+    expect((await service.getStatus()).session).toMatchObject({
+      phase: "error",
+      detail: "connect_preflight_failed",
+      lastErrorCode: "human_auth_unauthenticated"
+    });
+    expect(
+      (await service.getStatus()).profiles.find(
+        (profile) => profile.profileId === "profile-preflight"
+      )?.hasDeviceCredential
+    ).toBe(false);
+    await service.shutdown();
+  });
+
+  it("also bounds reconnecting after an established observer loses its socket", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const root = await tempDir("planweave-collab-observer-reconnect-timeout-");
+    const stopObserver = vi.fn();
+    const dispose = vi.fn();
+    let onStatus:
+      | ((
+          status:
+            | { state: "connected"; cursor: number; connectedAt: string }
+            | { state: "reconnecting"; attempt: number; delayMs: number }
+        ) => void)
+      | undefined;
+    const service = new CollaborationService({
+      profileStore: new CollaborationProfileStore({ profilesPath: join(root, "profiles.json") }),
+      vault: new CollaborationCredentialVault({
+        paths: { credentialsPath: join(root, "credentials.json") },
+        safeStorage: mockSafeStorage({ available: true })
+      }),
+      createClient: () =>
+        ({
+          verifyAccess: vi.fn().mockResolvedValue(undefined),
+          startObserver: (handlers: { onStatus?: typeof onStatus }) => {
+            onStatus = handlers.onStatus;
+            onStatus?.({
+              state: "connected",
+              cursor: 4,
+              connectedAt: "2030-01-01T00:00:00.000Z"
+            });
+          },
+          stopObserver,
+          stopPresence: vi.fn(),
+          dispose,
+          lastObserverCursor: () => 4,
+          bootstrapOwner: vi.fn(),
+          consumeInvitation: vi.fn()
+        }) as never
+    });
+
+    try {
+      await service.upsertProfile({
+        profileId: "profile-reconnect-timeout",
+        displayName: "Windows test",
+        serverBaseUrl: "http://192.168.123.23:62060/",
+        projectId: "project-timeout",
+        allowInsecureTransport: true
+      });
+      await service.importDeviceCredential({
+        profileId: "profile-reconnect-timeout",
+        deviceToken: exampleHumanDeviceToken
+      });
+
+      const connected = await service.connectSession({ profileId: "profile-reconnect-timeout" });
+      expect(connected.session.phase).toBe("connected");
+
+      onStatus?.({ state: "reconnecting", attempt: 1, delayMs: 500 });
+      expect((await service.getStatus()).session.phase).toBe("connected");
+      await vi.advanceTimersByTimeAsync(COLLABORATION_REQUEST_TIMEOUT_MS + 1);
+
+      expect((await service.getStatus()).session.lastErrorCode).toBe(
+        "collaboration_observer_connect_timeout"
+      );
+      expect((await service.getStatus()).session.phase).toBe("connected");
+      expect(stopObserver).toHaveBeenCalledTimes(1);
+      expect(dispose).not.toHaveBeenCalled();
+    } finally {
+      await service.shutdown();
+      vi.useRealTimers();
+    }
+  });
+
   it("preserves validated observer cursor across dispose and resumes startObserver", async () => {
     const root = await tempDir("planweave-collab-cursor-");
     const startObserver = vi.fn();
@@ -662,6 +1051,7 @@ describe("CollaborationService IPC trust boundary", () => {
       }),
       createClient: () =>
         ({
+          verifyAccess: vi.fn().mockResolvedValue(undefined),
           startObserver: (
             handlers: {
               onStatus?: (status: unknown) => void;

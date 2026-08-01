@@ -59,6 +59,7 @@ import {
   contentVersionAuthorityDiscoveryResultSchema,
   firstContentVersionPublishResultSchema,
   currentCanvasAccessViewSchema,
+  canvasRuntimeStatusProjectionSchema,
   type ActivityListPage,
   type AssignmentDisplayProjection,
   type AssignmentListPage,
@@ -115,7 +116,8 @@ import {
   type ContentVersionAuthorityDiscoveryResult,
   type FirstContentVersionPublishResult,
   type AccessMutationResult,
-  type CurrentCanvasAccessView
+  type CurrentCanvasAccessView,
+  type CanvasRuntimeStatusProjection
 } from "@planweave-ai/collaboration-contracts";
 import type { z, ZodType } from "zod";
 import { CollaborationClientError, collaborationErrorFromHttp } from "./collaborationErrors.js";
@@ -353,6 +355,10 @@ export class CollaborationClient {
       humanMemberPageSchema,
       { signal }
     );
+  }
+
+  async verifyAccess(signal?: AbortSignal): Promise<void> {
+    await this.listMembers({ cursor: 0, limit: 1 }, signal);
   }
 
   async removeMember(humanPrincipalId: string, signal?: AbortSignal): Promise<void> {
@@ -786,7 +792,9 @@ export class CollaborationClient {
       });
     }
     const text = Buffer.from(buffer).toString("utf8");
-    if (!response.ok) throw collaborationErrorFromHttp(response.status, text);
+    if (!response.ok) {
+      throw collaborationErrorFromHttp(response.status, text, response.headers.get("retry-after"));
+    }
     const parsed = uploadPendingAttachmentResponseSchema.parse(JSON.parse(text));
     return pendingAttachmentViewSchema.parse({
       pendingUploadId: parsed.pendingUploadId,
@@ -946,6 +954,18 @@ export class CollaborationClient {
     );
   }
 
+  async readRuntimeStatus(
+    canvasId: string,
+    signal?: AbortSignal
+  ): Promise<CanvasRuntimeStatusProjection> {
+    return this.transport.json(
+      "GET",
+      `/api/v1/projects/${encodeURIComponent(this.projectId)}/canvases/${encodeURIComponent(canvasId)}/runtime-status`,
+      canvasRuntimeStatusProjectionSchema,
+      { signal }
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // Human observer subscription
   // ---------------------------------------------------------------------------
@@ -1077,6 +1097,22 @@ export class CollaborationClient {
         });
         this.observerSocket = socket;
 
+        socket.on?.("unexpected-response", (_request, response) => {
+          if (this.observerSocket !== socket) return;
+          response.resume?.();
+          const statusCode = response.statusCode;
+          const code =
+            statusCode === undefined
+              ? "collaboration_observer_handshake_rejected"
+              : `collaboration_observer_http_${statusCode}`;
+          this.observerWanted = false;
+          this.setObserverStatus(
+            statusCode === 401
+              ? { state: "auth_expired", code }
+              : { state: "failed", code }
+          );
+        });
+
         const onOpen = () => {
           if (this.observerSocket !== socket) return;
           const hello = humanObserverHelloSchema.parse({
@@ -1142,7 +1178,12 @@ export class CollaborationClient {
         const onClose = () => {
           if (this.observerSocket !== socket) return;
           this.observerSocket = undefined;
-          if (this.observerStatus.state === "auth_expired") return;
+          if (
+            this.observerStatus.state === "auth_expired" ||
+            this.observerStatus.state === "failed"
+          ) {
+            return;
+          }
           if (!this.observerWanted || this.disposed) {
             this.setObserverStatus({ state: "stopped" });
             return;

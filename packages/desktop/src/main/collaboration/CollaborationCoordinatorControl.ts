@@ -68,11 +68,11 @@ function localProfileIdForProject(projectId: string): string {
   return `planweave-local-${createHash("sha256").update(projectId).digest("hex").slice(0, 24)}`;
 }
 
-async function allocateLocalPort(host: string): Promise<number> {
+async function allocateLocalPort(host: string, preferredPort: number | null): Promise<number> {
   const listener = createServer();
   return new Promise<number>((resolve, reject) => {
     listener.once("error", reject);
-    listener.listen(0, host, () => {
+    listener.listen(preferredPort ?? 0, host, () => {
       const address = listener.address();
       if (!address || typeof address === "string") {
         listener.close(() => reject(new Error("local_collaboration_port_allocation_failed")));
@@ -87,6 +87,7 @@ async function allocateLocalPort(host: string): Promise<number> {
 export interface CollaborationCoordinatorControl {
   setCurrentSelection(input: unknown): Promise<void>;
   clearCurrentSelection(): Promise<void>;
+  currentSelection(): { projectId: string; canvasId: string } | null;
   restore(): Promise<LocalCollaborationServerStatus>;
   status(): LocalCollaborationServerStatus;
   start(): Promise<LocalCollaborationServerStatus>;
@@ -95,6 +96,7 @@ export interface CollaborationCoordinatorControl {
   getScopeCatalog(): Promise<LocalCollaborationScopeCatalog>;
   setTrustedScopes(input: unknown): Promise<LocalCollaborationScopeCatalog>;
   currentSelectionIsTrusted(): boolean;
+  ownsLocalProfile(profileId: string): boolean;
   listActiveTrustedScopes(): readonly LoopbackTrustedProjectScope[];
   registerCurrentProject(actor: { kind: "human"; id: string }): LoopbackProjectRegistrationView;
   localProfile(): {
@@ -115,6 +117,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   private selection: ResolvedSelection | null = null;
   private controller: LoopbackServerControlPort | null = null;
   private localPort: number | null = null;
+  private preferredPort: number | null = null;
   private lanSharingEnabled = false;
   private lanAddress: string | null = null;
   private operatorToken: string | null = null;
@@ -127,7 +130,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   private readonly createController: (
     createConfig: (profile: LoopbackServerProfile) => ServerConfig
   ) => LoopbackServerControlPort;
-  private readonly allocatePort: (host: string) => Promise<number>;
+  private readonly allocatePort: (host: string, preferredPort: number | null) => Promise<number>;
   private readonly resolveLanAddress: () => string | null;
 
   constructor(options: {
@@ -136,7 +139,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     createController?: (
       createConfig: (profile: LoopbackServerProfile) => ServerConfig
     ) => LoopbackServerControlPort;
-    allocatePort?: (host: string) => Promise<number>;
+    allocatePort?: (host: string, preferredPort: number | null) => Promise<number>;
     scopeStore?: LocalCollaborationScopeStorePort;
     networkStore?: LocalCollaborationNetworkStorePort;
     resolveLanAddress?: () => string | null;
@@ -199,6 +202,12 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     });
   }
 
+  currentSelection(): { projectId: string; canvasId: string } | null {
+    return this.selection
+      ? { projectId: this.selection.desktopProjectId, canvasId: this.selection.canvasId }
+      : null;
+  }
+
   status(): LocalCollaborationServerStatus {
     const lifecycle = this.controller?.status() ?? {
       profile: null,
@@ -218,7 +227,9 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
 
   restore(): Promise<LocalCollaborationServerStatus> {
     return this.enqueue(async () => {
-      this.lanSharingEnabled = (await this.networkStore.read()).lanSharingEnabled;
+      const network = await this.networkStore.read();
+      this.lanSharingEnabled = network.lanSharingEnabled;
+      this.preferredPort = network.preferredPort;
       return (await this.scopeStore.read()).length > 0 ? this.startUnlocked() : this.status();
     });
   }
@@ -238,13 +249,28 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
       if (this.lanSharingEnabled && !this.lanAddress) {
         throw new Error("local_collaboration_lan_address_unavailable");
       }
-      this.localPort = await this.allocatePort(this.lanSharingEnabled ? "0.0.0.0" : "127.0.0.1");
+      try {
+        this.localPort = await this.allocatePort(
+          this.lanSharingEnabled ? "0.0.0.0" : "127.0.0.1",
+          attempt === 0 ? this.preferredPort : null
+        );
+      } catch (error) {
+        this.localPort = null;
+        if (attempt === 0 && this.preferredPort !== null) continue;
+        throw error;
+      }
       const controller = this.createController((profile) =>
         this.createConfig(profile, trustedProjects)
       );
       this.controller = controller;
       const status = await controller.apply({ action: "start", profile: this.serverProfile() });
-      if (status.state === "running") return this.status();
+      if (status.state === "running") {
+        if (this.preferredPort !== this.localPort) {
+          this.preferredPort = this.localPort;
+          await this.persistNetworkState();
+        }
+        return this.status();
+      }
       lastStatus = this.status();
       this.controller = null;
       this.localPort = null;
@@ -295,7 +321,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
         if (stopped.state !== "stopped") throw new Error("local_collaboration_network_stop_failed");
       }
       this.lanSharingEnabled = parsed.enabled;
-      await this.networkStore.write({ lanSharingEnabled: parsed.enabled });
+      await this.persistNetworkState();
       if (wasRunning) return this.startUnlocked();
       if (parsed.enabled && (await this.scopeStore.read()).length > 0) {
         return this.startUnlocked();
@@ -338,6 +364,14 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
 
   currentSelectionIsTrusted(): boolean {
     return this.selection !== null && this.isTrustedSelection(this.selection);
+  }
+
+  ownsLocalProfile(profileId: string): boolean {
+    const status = this.status();
+    if (status.state !== "running" || !status.profile || !this.controller) return false;
+    return this.controller
+      .listTrustedProjectScopes({ profileId: status.profile.profileId })
+      .some((scope) => localProfileIdForProject(scope.projectId) === profileId);
   }
 
   listActiveTrustedScopes(): readonly LoopbackTrustedProjectScope[] {
@@ -445,6 +479,13 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   private requireSelection(): ResolvedSelection {
     if (!this.selection) throw new Error("local_collaboration_selection_required");
     return this.selection;
+  }
+
+  private persistNetworkState(): Promise<void> {
+    return this.networkStore.write({
+      lanSharingEnabled: this.lanSharingEnabled,
+      preferredPort: this.preferredPort
+    });
   }
 
   private requireRunningProfile(): LoopbackServerProfile {

@@ -186,6 +186,7 @@ describe("desktop canvas presence transport", () => {
       onPresenceSignal: (signal) => presenceSignals.push(signal),
       createClient: () =>
         ({
+          verifyAccess: vi.fn().mockResolvedValue(undefined),
           projectId: "project-demo-001",
           presenceCanvas: () => startPresence.at(-1) ?? null,
           startObserver: vi.fn(),

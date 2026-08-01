@@ -41,11 +41,18 @@ describe("LocalCanvasCommandMaterializer", () => {
     process.env.PLANWEAVE_HOME = workspace.home;
     process.env.PLANWEAVE_DESKTOP_SETTINGS_FILE = join(workspace.home, "desktop-settings.json");
 
-    expect(collaborationCanvasSessionInputSchema.parse({ canvasId: "default" })).toEqual({
+    expect(
+      collaborationCanvasSessionInputSchema.parse({
+        localProjectId: workspace.init.workspace.id,
+        canvasId: "default"
+      })
+    ).toEqual({
+      localProjectId: workspace.init.workspace.id,
       canvasId: "default"
     });
     expect(() =>
       collaborationCanvasSessionInputSchema.parse({
+        localProjectId: workspace.init.workspace.id,
         canvasId: "default",
         projectRoot: workspace.root
       })

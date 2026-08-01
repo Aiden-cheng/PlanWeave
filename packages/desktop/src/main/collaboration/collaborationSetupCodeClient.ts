@@ -107,7 +107,11 @@ export class CollaborationSetupCodeClient {
       );
       const text = await response.text();
       if (!response.ok) {
-        throw collaborationErrorFromHttp(response.status, text);
+        throw collaborationErrorFromHttp(
+          response.status,
+          text,
+          response.headers.get("retry-after")
+        );
       }
       let value: unknown;
       try {

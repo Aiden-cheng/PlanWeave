@@ -954,7 +954,9 @@ async function runLocalCollaborationSmoke(window: BrowserWindow): Promise<Record
       ) {
         throw new Error("Local collaboration registration did not use the explicit canvas selection.");
       }
-      const invitation = await collaboration.createCollaborationInvitation({});
+      const invitation = await collaboration.createCollaborationInvitation({
+        idempotencyKey: crypto.randomUUID()
+      });
       if (!/^pw_inv_[A-Za-z0-9_-]{43}$/.test(invitation.invitationToken)) {
         throw new Error("Local collaboration did not create a complete invitation token.");
       }

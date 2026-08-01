@@ -1,4 +1,5 @@
-import { rm } from "node:fs/promises";
+import { join } from "node:path";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   AuthoritativeContentVersion,
@@ -12,9 +13,18 @@ import {
   type CompletedContentVersionRef
 } from "@planweave-ai/collaboration-contracts";
 import { ContentVersionFacade } from "../main/collaboration/ContentVersionFacade.js";
+import {
+  CollaborationContentReplicaStore,
+  type CollaborationContentReplicaStorePort
+} from "../main/collaboration/CollaborationContentReplicaStore.js";
 import { CollaborationClientError } from "../main/collaboration/collaborationErrors.js";
 import type { CollaborationClient } from "../main/collaboration/CollaborationClient.js";
 import { createTestWorkspace } from "../../../runtime/src/__tests__/promptTestHelpers.js";
+import {
+  initManagedWorkspace,
+  listProjects,
+  planManagedProjectFromAuthoritativeContent
+} from "../../../runtime/src/index.js";
 
 const directories: string[] = [];
 const originalHome = process.env.PLANWEAVE_HOME;
@@ -25,7 +35,9 @@ afterEach(async () => {
   else process.env.PLANWEAVE_HOME = originalHome;
   if (originalSettingsFile === undefined) delete process.env.PLANWEAVE_DESKTOP_SETTINGS_FILE;
   else process.env.PLANWEAVE_DESKTOP_SETTINGS_FILE = originalSettingsFile;
-  await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+  await Promise.all(
+    directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
+  );
 });
 
 function versionRef(content: CompleteContentVersion): CompletedContentVersionRef {
@@ -36,7 +48,10 @@ function versionRef(content: CompleteContentVersion): CompletedContentVersionRef
   });
 }
 
-function acknowledgement(projectId: string, content: CompletedContentVersionRef): ContentVersionAcknowledgement {
+function acknowledgement(
+  projectId: string,
+  content: CompletedContentVersionRef
+): ContentVersionAcknowledgement {
   return {
     scope: { workspaceId: "workspace-test", projectId, canvasId: "default" },
     deviceSessionId: "device-session-test",
@@ -55,46 +70,68 @@ function head(projectId: string, content: CompletedContentVersionRef) {
   };
 }
 
+function bootstrapScope(projectId: string, workspaceId = "workspace-test") {
+  return { workspaceId, projectId, canvasId: "default" };
+}
+
 function fakeClient(projectId: string) {
   let published: AuthoritativeContentVersion | null = null;
-  const discoverContentAuthority = vi.fn(async (input: {
-    localReplica: CompletedContentVersionRef | null;
-  }): Promise<ContentVersionAuthorityDiscoveryResult> => {
-    if (!published) {
+  const discoverContentAuthority = vi.fn(
+    async (input: {
+      localReplica: CompletedContentVersionRef | null;
+    }): Promise<ContentVersionAuthorityDiscoveryResult> => {
+      if (!published) {
+        return {
+          authoritativeHead: null,
+          localReplica: input.localReplica,
+          lastAcknowledgement: null,
+          replicaStatus: "snapshot_required",
+          recoveryAction: "await_initial_publish",
+          canPublishInitial: true,
+          canMaterialize: false,
+          canRecover: true
+        };
+      }
+      if (!input.localReplica) {
+        return {
+          authoritativeHead: head(projectId, published.completed),
+          localReplica: null,
+          lastAcknowledgement: null,
+          replicaStatus: "snapshot_required",
+          recoveryAction: "fetch_head",
+          canPublishInitial: false,
+          canMaterialize: true,
+          canRecover: true
+        };
+      }
       return {
-        authoritativeHead: null,
+        authoritativeHead: head(projectId, published.completed),
         localReplica: input.localReplica,
-        lastAcknowledgement: null,
-        replicaStatus: "snapshot_required",
-        recoveryAction: "await_initial_publish",
-        canPublishInitial: true,
-        canMaterialize: false,
+        lastAcknowledgement: acknowledgement(projectId, published.completed),
+        replicaStatus: "in_sync",
+        recoveryAction: "none",
+        canPublishInitial: false,
+        canMaterialize: true,
         canRecover: true
       };
     }
-    return {
-      authoritativeHead: head(projectId, published.completed),
-      localReplica: input.localReplica,
-      lastAcknowledgement: acknowledgement(projectId, published.completed),
-      replicaStatus: "in_sync",
-      recoveryAction: "none",
-      canPublishInitial: false,
-      canMaterialize: true,
-      canRecover: true
-    };
-  });
-  const publishInitialContent = vi.fn(async (input: { content: CompleteContentVersion }): Promise<FirstContentVersionPublishResult> => {
-    const completed = versionRef(input.content);
-    published = {
-      schemaVersion: "content-version/v1",
-      scope: { workspaceId: "workspace-test", projectId, canvasId: "default" },
-      content: input.content,
-      completed,
-      createdAt: "2026-07-28T00:00:00.000Z",
-      createdBy: { kind: "human", id: "human-owner", displayName: "Owner" }
-    };
-    return { outcome: "published", version: published, head: head(projectId, completed) };
-  });
+  );
+  const publishInitialContent = vi.fn(
+    async (input: {
+      content: CompleteContentVersion;
+    }): Promise<FirstContentVersionPublishResult> => {
+      const completed = versionRef(input.content);
+      published = {
+        schemaVersion: "content-version/v1",
+        scope: { workspaceId: "workspace-test", projectId, canvasId: "default" },
+        content: input.content,
+        completed,
+        createdAt: "2026-07-28T00:00:00.000Z",
+        createdBy: { kind: "human", id: "human-owner", displayName: "Owner" }
+      };
+      return { outcome: "published", version: published, head: head(projectId, completed) };
+    }
+  );
   const fetchContentVersion = vi.fn(async (): Promise<AuthoritativeContentVersion> => {
     if (!published) throw new Error("content_not_published");
     return published;
@@ -105,12 +142,44 @@ function fakeClient(projectId: string) {
   return {
     client: {
       projectId,
+      connectionProfile: {
+        profileId: "profile-test",
+        serverBaseUrl: "http://127.0.0.1:50653/",
+        projectId,
+        allowInsecureTransport: true
+      },
+      registry: () => ({
+        listCanvases: vi.fn(async () => ({
+          items: [
+            {
+              schemaVersion: "project-access/v1",
+              registry: {
+                projectRegistryId: "project-registry-test",
+                canvasRegistryId: "canvas-registry-test",
+                workspaceId: "workspace-test",
+                projectId,
+                canvasId: "default"
+              },
+              visibility: "shared",
+              acl: { revision: 1, updatedAt: "2026-07-28T00:00:00.000Z" },
+              owner: "human-owner",
+              updatedAt: "2026-07-28T00:00:00.000Z"
+            }
+          ],
+          nextCursor: null
+        }))
+      }),
       discoverContentAuthority,
       publishInitialContent,
       fetchContentVersion,
       acknowledgeContentVersion
     } as unknown as CollaborationClient,
-    calls: { discoverContentAuthority, publishInitialContent, fetchContentVersion, acknowledgeContentVersion }
+    calls: {
+      discoverContentAuthority,
+      publishInitialContent,
+      fetchContentVersion,
+      acknowledgeContentVersion
+    }
   };
 }
 
@@ -121,7 +190,9 @@ describe("ContentVersionFacade", () => {
     const fake = fakeClient(workspace.init.workspace.id);
     const facade = new ContentVersionFacade(() => fake.client);
 
-    await expect(facade.bind({ canvasId: "default" })).resolves.toMatchObject({
+    await expect(
+      facade.bind({ localProjectId: workspace.init.project.id, canvasId: "default" })
+    ).resolves.toMatchObject({
       authoritativeHead: null,
       replicaStatus: "snapshot_required",
       canPublishInitial: true
@@ -132,15 +203,23 @@ describe("ContentVersionFacade", () => {
     });
     await expect(facade.materializeHead()).resolves.toMatchObject({ replicaStatus: "in_sync" });
 
-    expect(fake.calls.publishInitialContent).toHaveBeenCalledWith(expect.objectContaining({
-      canvasId: "default",
-      content: expect.objectContaining({ canonicalDigest: expect.stringMatching(/^[a-f0-9]{64}$/) })
-    }));
-    expect(fake.calls.discoverContentAuthority).toHaveBeenCalledWith(expect.objectContaining({
-      canvasId: "default",
-      localReplica: expect.objectContaining({ verification: "complete" })
-    }));
-    expect(fake.calls.fetchContentVersion).toHaveBeenCalledWith(expect.objectContaining({ canvasId: "default" }));
+    expect(fake.calls.publishInitialContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        canvasId: "default",
+        content: expect.objectContaining({
+          canonicalDigest: expect.stringMatching(/^[a-f0-9]{64}$/)
+        })
+      })
+    );
+    expect(fake.calls.discoverContentAuthority).toHaveBeenCalledWith(
+      expect.objectContaining({
+        canvasId: "default",
+        localReplica: expect.objectContaining({ verification: "complete" })
+      })
+    );
+    expect(fake.calls.fetchContentVersion).toHaveBeenCalledWith(
+      expect.objectContaining({ canvasId: "default" })
+    );
     expect(fake.calls.acknowledgeContentVersion).toHaveBeenCalledTimes(2);
   });
 
@@ -156,7 +235,7 @@ describe("ContentVersionFacade", () => {
       head: null
     }));
     const facade = new ContentVersionFacade(() => fake.client);
-    await facade.bind({ canvasId: "default" });
+    await facade.bind({ localProjectId: workspace.init.project.id, canvasId: "default" });
 
     await expect(facade.publishInitial()).rejects.toMatchObject({
       name: "CollaborationClientError",
@@ -168,10 +247,363 @@ describe("ContentVersionFacade", () => {
   it("fails closed while disconnected before accepting a renderer canvas input", async () => {
     const facade = new ContentVersionFacade(() => null);
 
-    await expect(facade.bind({ canvasId: "default" })).rejects.toBeInstanceOf(CollaborationClientError);
-    await expect(facade.bind({ canvasId: "default" })).rejects.toMatchObject({
+    await expect(
+      facade.bind({ localProjectId: "missing", canvasId: "default" })
+    ).rejects.toBeInstanceOf(CollaborationClientError);
+    await expect(
+      facade.bind({ localProjectId: "missing", canvasId: "default" })
+    ).rejects.toMatchObject({
       code: "collaboration_content_offline",
       retryable: true
     });
+  });
+
+  it("bootstraps a missing local package from Server authority and restores the mapping after restart", async () => {
+    const workspace = await createTestWorkspace();
+    directories.push(workspace.home, workspace.root);
+    const fake = fakeClient(workspace.init.workspace.id);
+    const storePath = join(workspace.home, "desktop", "collaboration", "content-replicas.json");
+    const owner = new ContentVersionFacade(
+      () => fake.client,
+      new CollaborationContentReplicaStore(storePath)
+    );
+    await owner.bind({ localProjectId: workspace.init.project.id, canvasId: "default" });
+    await owner.publishInitial();
+    await rm(workspace.init.workspace.workspaceRoot, { recursive: true, force: true });
+
+    const member = new ContentVersionFacade(
+      () => fake.client,
+      new CollaborationContentReplicaStore(storePath)
+    );
+    await expect(member.listBootstrapCandidates()).resolves.toEqual([
+      expect.objectContaining({
+        workspaceId: "workspace-test",
+        projectId: workspace.init.workspace.id,
+        canvasId: "default",
+        localReplica: null,
+        authority: expect.objectContaining({ canMaterialize: true })
+      })
+    ]);
+    const imported = await member.bootstrap({
+      workspaceId: "workspace-test",
+      projectId: workspace.init.workspace.id,
+      canvasId: "default"
+    });
+    expect(imported).toMatchObject({
+      outcome: "created",
+      localCanvasId: "default",
+      acknowledgement: "acknowledged",
+      authority: {
+        replicaStatus: "in_sync",
+        localReplica: expect.objectContaining({ verification: "complete" })
+      }
+    });
+    expect(imported.localProjectId).not.toBe(workspace.init.project.id);
+
+    const restarted = new ContentVersionFacade(
+      () => fake.client,
+      new CollaborationContentReplicaStore(storePath)
+    );
+    await expect(restarted.listBootstrapCandidates()).resolves.toEqual([
+      expect.objectContaining({
+        localReplica: {
+          projectId: imported.localProjectId,
+          canvasId: "default"
+        }
+      })
+    ]);
+    await expect(
+      restarted.bootstrap({
+        workspaceId: "workspace-test",
+        projectId: workspace.init.workspace.id,
+        canvasId: "default"
+      })
+    ).resolves.toMatchObject({
+      outcome: "reused",
+      localProjectId: imported.localProjectId
+    });
+    await expect(
+      restarted.resolveCanvasScope({
+        localProjectId: imported.localProjectId,
+        canvasId: "default"
+      })
+    ).resolves.toEqual({
+      projectId: workspace.init.workspace.id,
+      canvasId: "default"
+    });
+  });
+
+  it("matches the complete remote identity when workspaces expose the same canvas id", async () => {
+    const workspace = await createTestWorkspace();
+    directories.push(workspace.home, workspace.root);
+    const fake = fakeClient(workspace.init.workspace.id);
+    const originalRegistry = fake.client.registry();
+    fake.client.registry = (() => ({
+      listCanvases: vi.fn(async () => ({
+        items: [
+          {
+            schemaVersion: "project-access/v1" as const,
+            registry: {
+              projectRegistryId: "project-registry-other",
+              canvasRegistryId: "canvas-registry-other",
+              workspaceId: "workspace-other",
+              projectId: workspace.init.workspace.id,
+              canvasId: "default"
+            },
+            visibility: "shared" as const,
+            acl: { revision: 1, updatedAt: "2026-07-28T00:00:00.000Z" },
+            owner: "human-owner",
+            updatedAt: "2026-07-28T00:00:00.000Z"
+          },
+          ...(
+            await originalRegistry.listCanvases({
+              projectId: workspace.init.workspace.id,
+              cursor: 0,
+              limit: 100
+            })
+          ).items
+        ],
+        nextCursor: null
+      }))
+    })) as CollaborationClient["registry"];
+    const owner = new ContentVersionFacade(() => fake.client);
+    await owner.bind({ localProjectId: workspace.init.project.id, canvasId: "default" });
+    await owner.publishInitial();
+    await rm(workspace.init.workspace.workspaceRoot, { recursive: true, force: true });
+
+    const member = new ContentVersionFacade(() => fake.client);
+    await expect(
+      member.bootstrap(bootstrapScope(workspace.init.workspace.id, "workspace-test"))
+    ).resolves.toMatchObject({ outcome: "created" });
+  });
+
+  it("clears the cached authority model when the active profile changes", async () => {
+    const workspace = await createTestWorkspace();
+    directories.push(workspace.home, workspace.root);
+    const first = fakeClient(workspace.init.workspace.id);
+    const second = fakeClient(workspace.init.workspace.id);
+    second.client.connectionProfile.profileId = "profile-other";
+    let active = first.client;
+    const facade = new ContentVersionFacade(() => active);
+    await facade.bind({ localProjectId: workspace.init.project.id, canvasId: "default" });
+    await expect(facade.read()).resolves.not.toBeNull();
+
+    active = second.client;
+    await expect(facade.read()).resolves.toBeNull();
+  });
+
+  it("removes a stale mapping when its local project no longer exists", async () => {
+    const workspace = await createTestWorkspace();
+    directories.push(workspace.home, workspace.root);
+    const fake = fakeClient(workspace.init.workspace.id);
+    const storePath = join(workspace.home, "replicas-stale.json");
+    const store = new CollaborationContentReplicaStore(storePath);
+    const owner = new ContentVersionFacade(() => fake.client, store);
+    await owner.bind({ localProjectId: workspace.init.project.id, canvasId: "default" });
+    await owner.publishInitial();
+    await rm(workspace.init.workspace.workspaceRoot, { recursive: true, force: true });
+    const member = new ContentVersionFacade(() => fake.client, store);
+    const imported = await member.bootstrap(bootstrapScope(workspace.init.workspace.id));
+    const importedProject = (await listProjects()).find(
+      (project) => project.projectId === imported.localProjectId
+    );
+    expect(importedProject).toBeDefined();
+    await rm(importedProject!.rootPath, { recursive: true, force: true });
+
+    await expect(member.listBootstrapCandidates()).resolves.toEqual([
+      expect.objectContaining({ localReplica: null })
+    ]);
+    await expect(store.list()).resolves.toEqual([]);
+  });
+
+  it("resumes an importing reservation after completion was interrupted", async () => {
+    const workspace = await createTestWorkspace();
+    directories.push(workspace.home, workspace.root);
+    const fake = fakeClient(workspace.init.workspace.id);
+    const store = new CollaborationContentReplicaStore(
+      join(workspace.home, "replicas-resume.json")
+    );
+    const owner = new ContentVersionFacade(() => fake.client);
+    await owner.bind({ localProjectId: workspace.init.project.id, canvasId: "default" });
+    await owner.publishInitial();
+    await rm(workspace.init.workspace.workspaceRoot, { recursive: true, force: true });
+    let interruptCompletion = true;
+    const interruptedStore: CollaborationContentReplicaStorePort = {
+      list: () => store.list(),
+      add: (replica) => store.add(replica),
+      reserve: (replica) => store.reserve(replica),
+      complete: (remote) => {
+        if (interruptCompletion) {
+          interruptCompletion = false;
+          return Promise.reject(new Error("simulated_process_interruption"));
+        }
+        return store.complete(remote);
+      },
+      remove: (remote) => store.remove(remote)
+    };
+    const member = new ContentVersionFacade(() => fake.client, interruptedStore);
+    const before = await listProjects();
+    await expect(member.bootstrap(bootstrapScope(workspace.init.workspace.id))).rejects.toThrow(
+      "simulated_process_interruption"
+    );
+    const afterInterruption = await listProjects();
+    expect(afterInterruption).toHaveLength(before.length + 1);
+    await expect(store.list()).resolves.toEqual([expect.objectContaining({ phase: "importing" })]);
+
+    const restarted = new ContentVersionFacade(() => fake.client, store);
+    await expect(
+      restarted.bootstrap(bootstrapScope(workspace.init.workspace.id))
+    ).resolves.toMatchObject({ outcome: "created" });
+    await expect(listProjects()).resolves.toHaveLength(afterInterruption.length);
+    await expect(store.list()).resolves.toEqual([expect.objectContaining({ phase: "ready" })]);
+  });
+
+  it("preserves and resumes an importing reservation when only its ownership marker exists", async () => {
+    const workspace = await createTestWorkspace();
+    directories.push(workspace.home, workspace.root);
+    const fake = fakeClient(workspace.init.workspace.id);
+    const owner = new ContentVersionFacade(() => fake.client);
+    await owner.bind({ localProjectId: workspace.init.project.id, canvasId: "default" });
+    const published = await owner.publishInitial();
+    const fetched = await fake.client.fetchContentVersion({
+      canvasId: "default",
+      content: published.authoritativeHead!.content
+    });
+    await rm(workspace.init.workspace.workspaceRoot, { recursive: true, force: true });
+    const planned = await planManagedProjectFromAuthoritativeContent({ content: fetched.content });
+    const token = "marker-only-interrupted-import";
+    const store = new CollaborationContentReplicaStore(
+      join(workspace.home, "replicas-marker-only.json")
+    );
+    const timestamp = "2026-08-01T00:00:00.000Z";
+    await store.reserve({
+      remote: {
+        serverOrigin: "http://127.0.0.1:50653",
+        ...bootstrapScope(workspace.init.workspace.id)
+      },
+      local: { projectId: planned.projectId, canvasId: planned.canvasId },
+      phase: "importing",
+      projectName: planned.projectName,
+      reservationToken: token,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+    const reservedRoot = join(workspace.home, "projects", planned.projectId);
+    await mkdir(reservedRoot, { recursive: true });
+    await writeFile(join(reservedRoot, ".planweave-content-replica-reservation"), `${token}\n`);
+
+    const restarted = new ContentVersionFacade(() => fake.client, store);
+    await expect(restarted.listBootstrapCandidates()).resolves.toEqual([
+      expect.objectContaining({ localReplica: null })
+    ]);
+    await expect(store.list()).resolves.toEqual([
+      expect.objectContaining({ phase: "importing", reservationToken: token })
+    ]);
+    await expect(
+      restarted.bootstrap(bootstrapScope(workspace.init.workspace.id))
+    ).resolves.toMatchObject({ outcome: "created" });
+    await expect(store.list()).resolves.toEqual([expect.objectContaining({ phase: "ready" })]);
+  });
+
+  it("never resumes into an unrelated project that appeared after reservation", async () => {
+    const workspace = await createTestWorkspace();
+    directories.push(workspace.home, workspace.root);
+    const fake = fakeClient(workspace.init.workspace.id);
+    const owner = new ContentVersionFacade(() => fake.client);
+    await owner.bind({ localProjectId: workspace.init.project.id, canvasId: "default" });
+    const published = await owner.publishInitial();
+    const headRef = published.authoritativeHead!.content;
+    const fetched = await fake.client.fetchContentVersion({
+      canvasId: "default",
+      content: headRef
+    });
+    await rm(workspace.init.workspace.workspaceRoot, { recursive: true, force: true });
+    const planned = await planManagedProjectFromAuthoritativeContent({ content: fetched.content });
+    const store = new CollaborationContentReplicaStore(join(workspace.home, "replicas-owner.json"));
+    const timestamp = "2026-08-01T00:00:00.000Z";
+    await store.reserve({
+      remote: {
+        serverOrigin: "http://127.0.0.1:50653",
+        ...bootstrapScope(workspace.init.workspace.id)
+      },
+      local: { projectId: planned.projectId, canvasId: planned.canvasId },
+      phase: "importing",
+      projectName: planned.projectName,
+      reservationToken: "reservation-owned-by-interrupted-import",
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+    const unrelated = await initManagedWorkspace({ name: planned.projectName, projectGraph: true });
+    expect(unrelated.created).toBe(true);
+
+    const member = new ContentVersionFacade(() => fake.client, store);
+    await expect(member.bootstrap(bootstrapScope(workspace.init.workspace.id))).rejects.toThrow(
+      "content_local_project_reservation_conflict"
+    );
+    await expect(listProjects()).resolves.toEqual([
+      expect.objectContaining({ projectId: unrelated.project.id })
+    ]);
+  });
+
+  it("rejects fetched content whose Server scope differs from the selected registry entry", async () => {
+    const workspace = await createTestWorkspace();
+    directories.push(workspace.home, workspace.root);
+    const fake = fakeClient(workspace.init.workspace.id);
+    const owner = new ContentVersionFacade(() => fake.client);
+    await owner.bind({ localProjectId: workspace.init.project.id, canvasId: "default" });
+    await owner.publishInitial();
+    await rm(workspace.init.workspace.workspaceRoot, { recursive: true, force: true });
+    const originalFetch = fake.client.fetchContentVersion.bind(fake.client);
+    fake.client.fetchContentVersion = vi.fn(async (input) => ({
+      ...(await originalFetch(input)),
+      scope: {
+        workspaceId: "workspace-other",
+        projectId: workspace.init.workspace.id,
+        canvasId: "default"
+      }
+    }));
+
+    const member = new ContentVersionFacade(() => fake.client);
+    await expect(
+      member.bootstrap(bootstrapScope(workspace.init.workspace.id))
+    ).rejects.toMatchObject({ code: "content_authoritative_scope_mismatch" });
+  });
+
+  it("does not create a local project when the replica reservation cannot be persisted", async () => {
+    const workspace = await createTestWorkspace();
+    directories.push(workspace.home, workspace.root);
+    const fake = fakeClient(workspace.init.workspace.id);
+    const owner = new ContentVersionFacade(
+      () => fake.client,
+      new CollaborationContentReplicaStore(join(workspace.home, "owner-replicas.json"))
+    );
+    await owner.bind({ localProjectId: workspace.init.project.id, canvasId: "default" });
+    await owner.publishInitial();
+    await rm(workspace.init.workspace.workspaceRoot, { recursive: true, force: true });
+    const before = await listProjects();
+    const failingStore: CollaborationContentReplicaStorePort = {
+      list: async () => [],
+      add: async () => {
+        throw new Error("mapping_commit_failed");
+      },
+      reserve: async () => {
+        throw new Error("mapping_commit_failed");
+      },
+      complete: async () => {
+        throw new Error("mapping_commit_failed");
+      },
+      remove: async () => undefined
+    };
+
+    const member = new ContentVersionFacade(() => fake.client, failingStore);
+    await expect(
+      member.bootstrap({
+        workspaceId: "workspace-test",
+        projectId: workspace.init.workspace.id,
+        canvasId: "default"
+      })
+    ).rejects.toThrow("mapping_commit_failed");
+    await expect(listProjects()).resolves.toEqual(before);
+    expect(fake.calls.acknowledgeContentVersion).toHaveBeenCalledTimes(1);
   });
 });

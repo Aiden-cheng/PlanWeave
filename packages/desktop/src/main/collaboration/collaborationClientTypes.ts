@@ -67,6 +67,13 @@ export type CollaborationWebSocketLike = {
   readonly readyState: number;
   send(data: string): void;
   close(code?: number, reason?: string): void;
+  on?(
+    type: "unexpected-response",
+    listener: (
+      request: unknown,
+      response: { readonly statusCode?: number; resume?(): void }
+    ) => void
+  ): void;
   addEventListener(
     type: "open" | "message" | "error" | "close",
     listener: (event: unknown) => void

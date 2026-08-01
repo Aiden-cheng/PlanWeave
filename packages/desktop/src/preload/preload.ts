@@ -1,5 +1,14 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { IpcRendererEvent } from "electron";
+import { z } from "zod";
+import {
+  humanCreateInvitationResponseSchema,
+  humanDevicePageSchema,
+  humanInvitationPageSchema,
+  humanInvitationViewSchema,
+  humanMemberPageSchema,
+  humanRevokeInvitationsResponseSchema
+} from "@planweave-ai/collaboration-contracts";
 import type {
   DesktopAutoRunEvent,
   DesktopBridgeApi,
@@ -32,6 +41,7 @@ import {
   collaborationPresenceSignalChannel,
   collaborationStatusChangedChannel
 } from "../shared/collaborationIpc.js";
+import { unwrapCollaborationCommandResult } from "../shared/collaborationCommandIpc.js";
 import type {
   PlanWeaveOperatorControlApi,
   OperatorControlStatus
@@ -261,6 +271,10 @@ const collaborationApi: PlanWeaveCollaborationApi = {
     ipcRenderer.invoke(collaborationInvokeChannels.bindCollaborationCanvasCommandSession, input),
   getCollaborationCanvasCommandSession: async () =>
     ipcRenderer.invoke(collaborationInvokeChannels.getCollaborationCanvasCommandSession),
+  resolveCollaborationCanvasScope: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.resolveCollaborationCanvasScope, input),
+  readCollaborationCanvasRuntimeStatus: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.readCollaborationCanvasRuntimeStatus, input),
   bindCollaborationContentAuthority: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.bindCollaborationContentAuthority, input),
   getCollaborationContentAuthority: async () =>
@@ -271,6 +285,10 @@ const collaborationApi: PlanWeaveCollaborationApi = {
     ipcRenderer.invoke(collaborationInvokeChannels.publishCollaborationInitialContent),
   materializeCollaborationContentHead: async () =>
     ipcRenderer.invoke(collaborationInvokeChannels.materializeCollaborationContentHead),
+  listCollaborationContentBootstrapCandidates: async () =>
+    ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationContentBootstrapCandidates),
+  bootstrapCollaborationContent: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.bootstrapCollaborationContent, input),
   getCurrentCanvasAccess: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.getCurrentCanvasAccess, input),
   mutateCurrentCanvasAccess: async (input) =>
@@ -296,25 +314,60 @@ const collaborationApi: PlanWeaveCollaborationApi = {
   registerLocalCollaborationCurrentProject: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.registerLocalCollaborationCurrentProject, input),
   listCollaborationMembers: async (input) =>
-    ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationMembers, input),
+    unwrapCollaborationCommandResult(
+      await ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationMembers, input),
+      humanMemberPageSchema
+    ),
   listCollaborationDevices: async (input) =>
-    ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationDevices, input),
+    unwrapCollaborationCommandResult(
+      await ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationDevices, input),
+      humanDevicePageSchema
+    ),
   listCollaborationInvitations: async (input) =>
-    ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationInvitations, input),
+    unwrapCollaborationCommandResult(
+      await ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationInvitations, input),
+      humanInvitationPageSchema
+    ),
   createCollaborationInvitation: async (input) =>
-    ipcRenderer.invoke(collaborationInvokeChannels.createCollaborationInvitation, input),
+    unwrapCollaborationCommandResult(
+      await ipcRenderer.invoke(collaborationInvokeChannels.createCollaborationInvitation, input),
+      humanCreateInvitationResponseSchema
+    ),
+  getCollaborationInvitationSecret: async (input) =>
+    unwrapCollaborationCommandResult(
+      await ipcRenderer.invoke(collaborationInvokeChannels.getCollaborationInvitationSecret, input),
+      humanCreateInvitationResponseSchema
+    ),
   revokeCollaborationInvitation: async (input) =>
-    ipcRenderer.invoke(collaborationInvokeChannels.revokeCollaborationInvitation, input),
+    unwrapCollaborationCommandResult(
+      await ipcRenderer.invoke(collaborationInvokeChannels.revokeCollaborationInvitation, input),
+      humanInvitationViewSchema
+    ),
   revokeCollaborationInvitations: async (input) =>
-    ipcRenderer.invoke(collaborationInvokeChannels.revokeCollaborationInvitations, input),
+    unwrapCollaborationCommandResult(
+      await ipcRenderer.invoke(collaborationInvokeChannels.revokeCollaborationInvitations, input),
+      humanRevokeInvitationsResponseSchema
+    ),
   removeCollaborationMember: async (input) =>
-    ipcRenderer.invoke(collaborationInvokeChannels.removeCollaborationMember, input),
+    unwrapCollaborationCommandResult(
+      await ipcRenderer.invoke(collaborationInvokeChannels.removeCollaborationMember, input),
+      z.undefined()
+    ),
   promoteCollaborationOwner: async (input) =>
-    ipcRenderer.invoke(collaborationInvokeChannels.promoteCollaborationOwner, input),
+    unwrapCollaborationCommandResult(
+      await ipcRenderer.invoke(collaborationInvokeChannels.promoteCollaborationOwner, input),
+      z.undefined()
+    ),
   demoteCollaborationOwner: async (input) =>
-    ipcRenderer.invoke(collaborationInvokeChannels.demoteCollaborationOwner, input),
+    unwrapCollaborationCommandResult(
+      await ipcRenderer.invoke(collaborationInvokeChannels.demoteCollaborationOwner, input),
+      z.undefined()
+    ),
   revokeCollaborationDevice: async (input) =>
-    ipcRenderer.invoke(collaborationInvokeChannels.revokeCollaborationDevice, input),
+    unwrapCollaborationCommandResult(
+      await ipcRenderer.invoke(collaborationInvokeChannels.revokeCollaborationDevice, input),
+      z.undefined()
+    ),
   listCollaborationAssignments: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationAssignments, input),
   getCollaborationAssignment: async (input) =>

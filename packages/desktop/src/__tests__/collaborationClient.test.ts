@@ -118,6 +118,34 @@ describe("CollaborationClient", () => {
     client.dispose();
   });
 
+  it("reads the redacted canvas runtime status with device authentication", async () => {
+    const projection = {
+      schemaVersion: "canvas-runtime-status/v1",
+      scope: {
+        workspaceId: "workspace-demo-001",
+        projectId: "project-demo-001",
+        canvasId: "canvas-demo-001"
+      },
+      packageFingerprint: `pkg-${"a".repeat(64)}`,
+      capturedAt: "2026-08-01T00:00:00.000Z",
+      tasks: [{ taskId: "T-001", status: "implemented", openFeedbackCount: 0 }],
+      blocks: []
+    };
+    const fixture = await listen((req, res) => {
+      expect(req.method).toBe("GET");
+      expect(req.headers.authorization).toBe(`Bearer ${exampleHumanDeviceToken}`);
+      expect(req.url).toBe(
+        "/api/v1/projects/project-demo-001/canvases/canvas-demo-001/runtime-status"
+      );
+      json(res, 200, projection);
+    });
+    cleanups.push(fixture.close);
+    const client = clientFor(fixture.origin, { token: exampleHumanDeviceToken });
+
+    await expect(client.readRuntimeStatus("canvas-demo-001")).resolves.toEqual(projection);
+    client.dispose();
+  });
+
   it("uses device-authenticated current-canvas access transport and preserves CAS conflicts", async () => {
     const scope = {
       scopeKind: "canvas" as const,
@@ -312,7 +340,10 @@ describe("CollaborationClient", () => {
     const fixture = await listen((_req, res) => {
       n += 1;
       if (n === 1) json(res, 409, { error: "work_revision_conflict" });
-      else json(res, 429, { error: "human_rate_limited" });
+      else {
+        res.setHeader("retry-after", "2");
+        json(res, 429, { error: "human_rate_limited" });
+      }
     });
     cleanups.push(fixture.close);
     const client = clientFor(fixture.origin, { token: exampleHumanDeviceToken });
@@ -325,7 +356,8 @@ describe("CollaborationClient", () => {
     ).rejects.toMatchObject({ kind: "conflict", code: "work_revision_conflict" });
     await expect(client.listMembers()).rejects.toMatchObject({
       kind: "rate_limited",
-      retryable: true
+      retryable: true,
+      retryAfterMs: 2_000
     });
     client.dispose();
   });
@@ -687,6 +719,46 @@ describe("CollaborationClient", () => {
 
     await new Promise((r) => setTimeout(r, 40));
     expect(client.observerState().state).toBe("auth_expired");
+    client.dispose();
+  });
+
+  it("surfaces an authenticated observer handshake rejection instead of timing out", async () => {
+    const http = await listen((_req, res) => {
+      res.statusCode = 404;
+      res.end();
+    });
+    cleanups.push(http.close);
+    http.server.on("upgrade", (_request, socket) => {
+      socket.end(
+        "HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
+      );
+    });
+
+    const client = clientFor(http.origin, {
+      token: exampleHumanDeviceToken,
+      WebSocketImpl: WebSocket as unknown as ConstructorParameters<
+        typeof CollaborationClient
+      >[0]["WebSocketImpl"]
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("handshake rejection timeout")), 500);
+      client.startObserver({
+        onStatus: (status) => {
+          if (status.state === "auth_expired") {
+            clearTimeout(timer);
+            expect(status.code).toBe("collaboration_observer_http_401");
+            resolve();
+          }
+        }
+      });
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(client.observerState()).toEqual({
+      state: "auth_expired",
+      code: "collaboration_observer_http_401"
+    });
     client.dispose();
   });
 

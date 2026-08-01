@@ -2,7 +2,7 @@ import {
   assertHumanDisplayDtoRedacted,
   collaborationClientLimitsSchema,
   collaborationServerOriginSchema,
-  type CollaborationClientLimits,
+  type CollaborationClientLimits
 } from "@planweave-ai/collaboration-contracts";
 import type { ZodType } from "zod";
 import {
@@ -118,7 +118,7 @@ export class CollaborationHttpTransport {
     const text = await this.readTextLimited(response);
     const accepted = normalizeAccepted(options.acceptedStatus);
     if (!response.ok && !accepted.has(response.status)) {
-      throw collaborationErrorFromHttp(response.status, text);
+      throw collaborationErrorFromHttp(response.status, text, response.headers.get("retry-after"));
     }
     if (schema === undefined) {
       if (text.length === 0) return undefined as T;
@@ -181,7 +181,7 @@ export class CollaborationHttpTransport {
     });
     const text = await this.readTextLimited(response);
     if (!response.ok) {
-      throw collaborationErrorFromHttp(response.status, text);
+      throw collaborationErrorFromHttp(response.status, text, response.headers.get("retry-after"));
     }
     let value: unknown;
     try {

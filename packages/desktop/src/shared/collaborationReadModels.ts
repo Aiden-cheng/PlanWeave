@@ -124,6 +124,7 @@ export type CollaborationBoundaryErrorView = {
   code: string;
   message: string;
   httpStatus?: number;
+  retryAfterMs?: number;
   retryable: boolean;
 };
 

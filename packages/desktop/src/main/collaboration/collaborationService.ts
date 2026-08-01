@@ -1,4 +1,5 @@
 import {
+  COLLABORATION_REQUEST_TIMEOUT_MS,
   collaborationConnectionProfileSchema,
   humanBootstrapRequestSchema,
   humanConsumeInvitationRequestSchema,
@@ -99,10 +100,18 @@ import {
   workspaceConnectionProfileStorePaths
 } from "./workspaceConnectionProfileStore.js";
 import { redactCollaborationText } from "./redaction.js";
+import { CollaborationInvitationVault } from "./collaborationInvitationVault.js";
 
 export type CollaborationClientFactory = (
   options: CollaborationClientOptions
 ) => CollaborationClient;
+
+function observerFailureMessage(code: string): string {
+  if (code === "collaboration_observer_http_403") {
+    return "Realtime updates are unavailable because this member does not have project read access. Ask an owner to share the project or grant this member project access.";
+  }
+  return code;
+}
 
 export type CollaborationServiceOptions = {
   profileStore?: CollaborationProfileStore;
@@ -112,6 +121,8 @@ export type CollaborationServiceOptions = {
   workspaceProfileStore?: WorkspaceConnectionProfileStore;
   workspaceProfileStorePaths?: WorkspaceConnectionProfileStorePaths;
   credentialsPath?: string;
+  invitationVault?: CollaborationInvitationVault;
+  invitationsPath?: string;
   createClient?: CollaborationClientFactory;
   request?: typeof fetch;
   clock?: { now(): Date };
@@ -151,6 +162,7 @@ function stripAuthHandoff(
 export class CollaborationService {
   private readonly profiles: CollaborationProfileStore;
   private readonly vault: CollaborationCredentialVault;
+  private readonly invitationVault: CollaborationInvitationVault;
   private readonly createClient: CollaborationClientFactory;
   private readonly request?: typeof fetch;
   private readonly clock?: { now(): Date };
@@ -177,12 +189,23 @@ export class CollaborationService {
   private lastValidatedObserverCursor = 0;
   private lastValidatedObserverProfileId: string | null = null;
   private observerGeneration = 0;
+  private observerConnectDeadline: ReturnType<typeof setTimeout> | null = null;
   private readonly presenceSession: CollaborationPresenceSession;
   private disposed = false;
   private queue: Promise<unknown> = Promise.resolve();
+  private statusPublicationTransactionDepth = 0;
+  private statusPublicationPending = false;
 
   constructor(options: CollaborationServiceOptions = {}) {
-    const safeStorage = options.safeStorage;
+    const safeStorage = options.safeStorage ?? {
+      isEncryptionAvailable: () => false,
+      encryptString: () => {
+        throw new Error("safeStorage is not configured");
+      },
+      decryptString: () => {
+        throw new Error("safeStorage is not configured");
+      }
+    };
     this.profiles =
       options.profileStore ??
       new CollaborationProfileStore(options.profileStorePaths ?? collaborationProfileStorePaths());
@@ -194,6 +217,9 @@ export class CollaborationService {
           : undefined,
         safeStorage
       });
+    this.invitationVault =
+      options.invitationVault ??
+      new CollaborationInvitationVault({ path: options.invitationsPath, safeStorage });
     this.createClient =
       options.createClient ?? ((clientOptions) => new CollaborationClient(clientOptions));
     this.request = options.request;
@@ -202,8 +228,11 @@ export class CollaborationService {
     this.onObserverSignal = options.onObserverSignal;
     this.onPresenceSignal = options.onPresenceSignal;
     this.registryService = new CollaborationRegistryService(() => this.client);
-    this.canvasCommands = new CollaborationCanvasCommandFacade(() => this.client);
     this.contentVersions = new ContentVersionFacade(() => this.client);
+    this.canvasCommands = new CollaborationCanvasCommandFacade(
+      () => this.client,
+      (input) => this.contentVersions.resolveCanvasBinding(input)
+    );
     this.remoteOperations = new CollaborationRemoteOperationsFacade((operation) =>
       this.withActiveClient(operation)
     );
@@ -294,8 +323,27 @@ export class CollaborationService {
 
   private async publishStatus(): Promise<CollaborationStatus> {
     const status = await this.buildStatus();
+    if (this.statusPublicationTransactionDepth > 0) {
+      this.statusPublicationPending = true;
+      return status;
+    }
     this.onStatusChange?.(status);
     return status;
+  }
+
+  /** Main-only status transaction: nested operations publish one final renderer snapshot. */
+  async runStatusPublicationTransaction<T>(operation: () => Promise<T>): Promise<T> {
+    this.statusPublicationTransactionDepth += 1;
+    try {
+      return await operation();
+    } finally {
+      this.statusPublicationTransactionDepth -= 1;
+      if (this.statusPublicationTransactionDepth === 0 && this.statusPublicationPending) {
+        this.statusPublicationPending = false;
+        const status = await this.buildStatus();
+        this.onStatusChange?.(status);
+      }
+    }
   }
 
   async getStatus(): Promise<CollaborationStatus> {
@@ -338,6 +386,7 @@ export class CollaborationService {
         this.clearRememberedObserverCursor(profileId);
       }
       await this.vault.clear(profileId);
+      await this.invitationVault.clearProfile(profileId);
       await this.profiles.remove(profileId);
       return this.publishStatus();
     });
@@ -596,7 +645,14 @@ export class CollaborationService {
       this.assertOpen();
       assertNoSmuggledCollaborationSecrets(input, "connectCollaborationSession");
       const { profileId } = collaborationProfileIdInputSchema.parse(input);
-      if (this.clientProfileId === profileId && this.client) {
+      if (
+        this.clientProfileId === profileId &&
+        this.client &&
+        (this.sessionPhase === "connecting" ||
+          (this.sessionPhase === "connected" &&
+            this.observerStatus.state !== "failed" &&
+            this.observerStatus.state !== "stopped"))
+      ) {
         return this.publishStatus();
       }
       await this.disposeClient("reconnect");
@@ -616,14 +672,20 @@ export class CollaborationService {
       this.observerStatus = { state: "stopped" };
       const resumeCursor =
         this.lastValidatedObserverProfileId === profileId ? this.lastValidatedObserverCursor : 0;
+      let preflightComplete = false;
       try {
-        this.setSession("connecting", "observer");
+        this.setSession("connecting", "http_preflight", null);
+        await client.verifyAccess();
+        preflightComplete = true;
+        this.setSession("connected", "http_ready", null);
+        this.armObserverConnectDeadline({ client, profileId, observerGeneration });
         client.startObserver(
           {
             onStatus: (status) => {
               if (!isCurrentObserver()) return;
               this.observerStatus = status;
               if (status.state === "connected") {
+                this.clearObserverConnectDeadline();
                 this.rememberObserverCursor(profileId, status.cursor);
                 this.setSession("connected", `observer:${status.state}`, null);
                 this.publishObserverSignal({
@@ -633,19 +695,25 @@ export class CollaborationService {
                   cursor: status.cursor
                 });
               } else if (status.state === "auth_expired") {
+                this.clearObserverConnectDeadline();
                 this.setSession("error", `observer:${status.state}`, {
                   code: status.code,
                   message: "Collaboration device credential was rejected by the server."
                 });
                 void this.vault.clear(profileId).then(() => this.publishStatus());
               } else if (status.state === "failed") {
-                this.setSession("error", `observer:${status.state}`, {
+                this.clearObserverConnectDeadline();
+                this.setSession("connected", `observer:${status.state}`, {
                   code: status.code,
-                  message: status.code
+                  message: observerFailureMessage(status.code)
                 });
               } else if (status.state === "reconnecting" || status.state === "connecting") {
-                this.setSession("connecting", `observer:${status.state}`);
+                if (status.state === "reconnecting" && this.observerConnectDeadline === null) {
+                  this.armObserverConnectDeadline({ client, profileId, observerGeneration });
+                }
+                this.setSession("connected", `observer:${status.state}`);
               } else if (status.state === "catching_up") {
+                this.clearObserverConnectDeadline();
                 this.rememberObserverCursor(profileId, status.resumeCursor);
                 this.setSession("connected", `observer:${status.state}`);
               }
@@ -676,11 +744,13 @@ export class CollaborationService {
           },
           { cursor: resumeCursor }
         );
-        this.setSession("connecting", "observer_started", null);
       } catch (error) {
         const mapped = collaborationErrorFromUnknown(error);
         await this.disposeClient("connect_failed");
-        this.setSession("error", "connect_failed", {
+        if (!preflightComplete && mapped.kind === "auth") {
+          await this.vault.clear(profileId);
+        }
+        this.setSession("error", preflightComplete ? "connect_failed" : "connect_preflight_failed", {
           code: mapped.code,
           message: mapped.message
         });
@@ -908,6 +978,20 @@ export class CollaborationService {
     });
   }
 
+  async resolveCanvasScope(input: unknown) {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      return this.contentVersions.resolveCanvasScope(input);
+    });
+  }
+
+  async readCanvasRuntimeStatus(input: unknown) {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      return this.contentVersions.readRuntimeStatus(input);
+    });
+  }
+
   async bindContentAuthority(input: unknown) {
     return this.enqueue(async () => {
       this.assertOpen();
@@ -944,6 +1028,21 @@ export class CollaborationService {
     });
   }
 
+  async listContentBootstrapCandidates() {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      return this.contentVersions.listBootstrapCandidates();
+    });
+  }
+
+  async bootstrapContent(input: unknown) {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      assertNoSmuggledCollaborationSecrets(input, "bootstrapCollaborationContent");
+      return this.contentVersions.bootstrap(input);
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // Session-scoped read models / mutations (require active connected client)
   // ---------------------------------------------------------------------------
@@ -972,17 +1071,44 @@ export class CollaborationService {
 
   async createInvitation(input: unknown = {}): Promise<CollaborationInvitationCreateView> {
     const parsed = collaborationCreateInvitationInputSchema.parse(input ?? {});
-    return this.withActiveClient((client) => client.createInvitation(parsed));
+    const profileId = this.clientProfileId;
+    if (!profileId) {
+      return this.withActiveClient((client) => client.createInvitation(parsed));
+    }
+    const invitation = await this.withActiveClient((client) => client.createInvitation(parsed));
+    await this.invitationVault.set(profileId, invitation);
+    return invitation;
+  }
+
+  async getInvitationSecret(input: unknown): Promise<CollaborationInvitationCreateView> {
+    const { invitationId } = collaborationInvitationIdInputSchema.parse(input);
+    const profileId = this.clientProfileId;
+    if (!profileId) {
+      throw new Error("No active collaboration profile.");
+    }
+    const invitation = await this.invitationVault.get(profileId, invitationId);
+    if (!invitation) {
+      throw new Error("Complete invitation is unavailable. Create a new invitation to store it securely.");
+    }
+    return invitation;
   }
 
   async revokeInvitation(input: unknown): Promise<HumanInvitationView> {
     const { invitationId } = collaborationInvitationIdInputSchema.parse(input);
-    return this.withActiveClient((client) => client.revokeInvitation(invitationId));
+    const profileId = this.clientProfileId;
+    const revoked = await this.withActiveClient((client) => client.revokeInvitation(invitationId));
+    if (profileId) await this.invitationVault.delete(profileId, invitationId);
+    return revoked;
   }
 
   async revokeInvitations(input: unknown) {
     const parsed = collaborationInvitationIdsInputSchema.parse(input);
-    return this.withActiveClient((client) => client.revokeInvitations(parsed));
+    const profileId = this.clientProfileId;
+    const revoked = await this.withActiveClient((client) => client.revokeInvitations(parsed));
+    if (profileId) {
+      await Promise.all(parsed.invitationIds.map((id) => this.invitationVault.delete(profileId, id)));
+    }
+    return revoked;
   }
 
   async removeMember(input: unknown): Promise<void> {
@@ -1178,7 +1304,49 @@ export class CollaborationService {
     }
   }
 
+  private clearObserverConnectDeadline(): void {
+    if (this.observerConnectDeadline === null) return;
+    clearTimeout(this.observerConnectDeadline);
+    this.observerConnectDeadline = null;
+  }
+
+  private armObserverConnectDeadline(input: {
+    client: CollaborationClient;
+    profileId: string;
+    observerGeneration: number;
+  }): void {
+    this.clearObserverConnectDeadline();
+    const deadline = setTimeout(() => {
+      this.observerConnectDeadline = null;
+      void this.enqueue(async () => {
+        const isCurrentObserver =
+          this.client === input.client &&
+          this.clientProfileId === input.profileId &&
+          this.observerGeneration === input.observerGeneration;
+        if (
+          !isCurrentObserver ||
+          (this.observerStatus.state !== "connecting" &&
+            this.observerStatus.state !== "reconnecting")
+        ) {
+          return;
+        }
+
+        input.client.stopObserver();
+        this.observerStatus = { state: "stopped" };
+        this.setSession("connected", "observer:connect_timeout", {
+          code: "collaboration_observer_connect_timeout",
+          message:
+            "Authenticated HTTP access is available, but realtime WebSocket updates did not connect before the deadline."
+        });
+        await this.publishStatus();
+      });
+    }, COLLABORATION_REQUEST_TIMEOUT_MS);
+    deadline.unref?.();
+    this.observerConnectDeadline = deadline;
+  }
+
   private async disposeClient(reason: string): Promise<void> {
+    this.clearObserverConnectDeadline();
     const client = this.client;
     const profileId = this.clientProfileId;
     this.observerGeneration += 1;

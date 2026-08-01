@@ -62,12 +62,14 @@ function scopeStore(
   };
 }
 
-function networkStore(initial = false) {
+function networkStore(initial = false, initialPreferredPort: number | null = null) {
   let lanSharingEnabled = initial;
+  let preferredPort: number | null = initialPreferredPort;
   return {
-    read: vi.fn(async () => ({ lanSharingEnabled })),
-    write: vi.fn(async (next: { lanSharingEnabled: boolean }) => {
+    read: vi.fn(async () => ({ lanSharingEnabled, preferredPort })),
+    write: vi.fn(async (next: { lanSharingEnabled: boolean; preferredPort: number | null }) => {
       lanSharingEnabled = next.lanSharingEnabled;
+      preferredPort = next.preferredPort;
     })
   };
 }
@@ -188,6 +190,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
 
     await control.restore();
     await control.stop();
+    storedNetwork.write.mockClear();
 
     await expect(control.setLanSharing({ enabled: true })).resolves.toMatchObject({
       state: "running",
@@ -227,8 +230,11 @@ describe("LocalCollaborationCoordinatorControl", () => {
       lanSharingEnabled: true,
       lanServerBaseUrl: "http://192.168.1.20:18787/"
     });
-    expect(allocatePort).toHaveBeenCalledWith("0.0.0.0");
-    expect(storedNetwork.write).toHaveBeenCalledWith({ lanSharingEnabled: true });
+    expect(allocatePort).toHaveBeenCalledWith("0.0.0.0", null);
+    expect(storedNetwork.write).toHaveBeenCalledWith({
+      lanSharingEnabled: true,
+      preferredPort: 18_787
+    });
     expect(configFactory!(status.profile!)).toMatchObject({
       bind: { host: "0.0.0.0", port: 18_787 },
       publicUrl: "http://192.168.1.20:18787",
@@ -260,6 +266,86 @@ describe("LocalCollaborationCoordinatorControl", () => {
     });
   });
 
+  it("reuses the advertised LAN port after a full coordinator restart", async () => {
+    const storedNetwork = networkStore(true);
+    const first = fakeControl();
+    const firstAllocatePort = vi.fn(async (_host: string, preferredPort?: number | null) =>
+      preferredPort ?? 18_787
+    );
+    const firstControl = new LocalCollaborationCoordinatorControl({
+      safeStorage,
+      scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
+      networkStore: storedNetwork,
+      resolveLanAddress: () => "192.168.1.20",
+      projects: {
+        listProjects: async () => [project],
+        resolveAuthorityProjectId: async () => authorityProjectId
+      },
+      createController: () => first.control,
+      allocatePort: firstAllocatePort
+    });
+
+    await expect(firstControl.restore()).resolves.toMatchObject({
+      lanServerBaseUrl: "http://192.168.1.20:18787/"
+    });
+    await firstControl.stop();
+
+    const second = fakeControl();
+    const secondAllocatePort = vi.fn(async (_host: string, preferredPort?: number | null) =>
+      preferredPort ?? 19_999
+    );
+    const secondControl = new LocalCollaborationCoordinatorControl({
+      safeStorage,
+      scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
+      networkStore: storedNetwork,
+      resolveLanAddress: () => "192.168.1.20",
+      projects: {
+        listProjects: async () => [project],
+        resolveAuthorityProjectId: async () => authorityProjectId
+      },
+      createController: () => second.control,
+      allocatePort: secondAllocatePort
+    });
+
+    await expect(secondControl.restore()).resolves.toMatchObject({
+      lanServerBaseUrl: "http://192.168.1.20:18787/"
+    });
+    expect(secondAllocatePort).toHaveBeenCalledWith("0.0.0.0", 18_787);
+  });
+
+  it("allocates and persists a replacement when the preferred port is unavailable", async () => {
+    const storedNetwork = networkStore(true, 18_787);
+    const fake = fakeControl();
+    const allocatePort = vi.fn(async (_host: string, preferredPort: number | null) => {
+      if (preferredPort === 18_787) {
+        throw new Error("EADDRINUSE");
+      }
+      return 19_999;
+    });
+    const control = new LocalCollaborationCoordinatorControl({
+      safeStorage,
+      scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
+      networkStore: storedNetwork,
+      resolveLanAddress: () => "192.168.1.20",
+      projects: {
+        listProjects: async () => [project],
+        resolveAuthorityProjectId: async () => authorityProjectId
+      },
+      createController: () => fake.control,
+      allocatePort
+    });
+
+    await expect(control.restore()).resolves.toMatchObject({
+      lanServerBaseUrl: "http://192.168.1.20:19999/"
+    });
+    expect(allocatePort).toHaveBeenNthCalledWith(1, "0.0.0.0", 18_787);
+    expect(allocatePort).toHaveBeenNthCalledWith(2, "0.0.0.0", null);
+    expect(storedNetwork.write).toHaveBeenLastCalledWith({
+      lanSharingEnabled: true,
+      preferredPort: 19_999
+    });
+  });
+
   it("starts with only the explicitly selected project and canvas scopes", async () => {
     const secondCanvasProject: DesktopProjectSummary = {
       ...project,
@@ -275,6 +361,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
       scopeStore: scopeStore([]),
+      networkStore: networkStore(),
       projects: {
         listProjects: async () => [secondCanvasProject, nextProject],
         resolveAuthorityProjectId: async (root, canvasId) =>
@@ -317,6 +404,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
+      networkStore: networkStore(),
       projects: { listProjects: async () => [project], resolveAuthorityProjectId },
       createController: () => fake.control,
       allocatePort: async () => 18_787
@@ -340,9 +428,13 @@ describe("LocalCollaborationCoordinatorControl", () => {
         canvasId: "canvas-1"
       })
     );
+    const localProfileId = control.localProfile()!.profileId;
+    expect(control.ownsLocalProfile(localProfileId)).toBe(true);
+    expect(control.ownsLocalProfile("remote-team")).toBe(false);
 
     await control.clearCurrentSelection();
     expect(control.status().state).toBe("running");
+    expect(control.ownsLocalProfile(localProfileId)).toBe(true);
 
     const stop = control.stop();
     await vi.waitFor(() => {
@@ -375,6 +467,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
+      networkStore: networkStore(),
       projects: {
         listProjects: async () => [project, project],
         resolveAuthorityProjectId: async () => authorityProjectId
@@ -393,6 +486,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     const unambiguousControl = new LocalCollaborationCoordinatorControl({
       safeStorage,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
+      networkStore: networkStore(),
       projects: {
         listProjects: async () => [project],
         resolveAuthorityProjectId: async () => authorityProjectId
@@ -426,6 +520,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
       scopeStore: scopeStore(),
+      networkStore: networkStore(),
       projects: {
         listProjects: async () => [project, nextProject],
         resolveAuthorityProjectId
@@ -493,6 +588,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
       scopeStore: scopeStore(),
+      networkStore: networkStore(),
       projects: {
         listProjects: async () => [project, nextProject],
         resolveAuthorityProjectId: async (projectRoot) =>
@@ -540,6 +636,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
+      networkStore: networkStore(),
       projects: {
         listProjects,
         resolveAuthorityProjectId: async (projectRoot) =>
@@ -574,6 +671,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
+      networkStore: networkStore(),
       projects: {
         listProjects: async () => [project],
         resolveAuthorityProjectId: async () => authorityProjectId
@@ -619,6 +717,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
+      networkStore: networkStore(),
       projects: {
         listProjects: async () => [project],
         resolveAuthorityProjectId: async () => authorityProjectId

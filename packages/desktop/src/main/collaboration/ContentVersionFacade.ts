@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   canonicalContentVersionDigestPayload,
   completeContentVersionSchema,
@@ -7,24 +7,53 @@ import {
   contentVersionDesktopLayoutMemberPath,
   contentVersionDesktopReadModelSchema,
   type CompleteContentVersion,
+  type CanvasAccessRecord,
   type CompletedContentVersionRef,
   type ContentVersionDesktopReadModel
 } from "@planweave-ai/collaboration-contracts";
 import {
   capturePackageSnapshot,
+  createManagedProjectFromAuthoritativeContent,
   getDesktopLayout,
   getProjectOverview,
   listProjects,
   materializeAuthoritativeCanvasContent,
+  planManagedProjectFromAuthoritativeContent,
   resolveTaskCanvasWorkspace
 } from "@planweave-ai/runtime";
-import { z } from "zod";
+import {
+  collaborationContentAuthorityCanvasInputSchema,
+  collaborationCanvasScopeResolutionSchema,
+  collaborationContentBootstrapCandidateSchema,
+  collaborationContentBootstrapInputSchema,
+  collaborationContentBootstrapResultSchema,
+  type CollaborationContentBootstrapCandidate,
+  type CollaborationContentBootstrapResult
+} from "../../shared/collaboration.js";
 import type { CollaborationClient } from "./CollaborationClient.js";
+import {
+  CollaborationContentReplicaStore,
+  type CollaborationContentReplica,
+  type CollaborationContentReplicaStorePort
+} from "./CollaborationContentReplicaStore.js";
 import { CollaborationClientError } from "./collaborationErrors.js";
 
-const canvasInputSchema = z.object({ canvasId: z.string().trim().min(1).max(128) }).strict();
+type LocalCanvasBinding = {
+  clientFingerprint: string;
+  authorityProjectId: string;
+  remoteCanvasId: string;
+  projectRoot: string;
+  localProjectId: string;
+  localCanvasId: string;
+  expectedPackageDir: string;
+};
 
-type LocalCanvasBinding = { projectRoot: string; canvasId: string; expectedPackageDir: string };
+export type ResolvedCollaborationCanvasBinding = {
+  localProjectId: string;
+  localCanvasId: string;
+  remoteProjectId: string;
+  remoteCanvasId: string;
+};
 
 function digest(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -39,17 +68,272 @@ export class ContentVersionFacade {
   private binding: LocalCanvasBinding | null = null;
   private lastModel: ContentVersionDesktopReadModel | null = null;
 
-  constructor(private readonly resolveClient: () => CollaborationClient | null) {}
+  constructor(
+    private readonly resolveClient: () => CollaborationClient | null,
+    private readonly replicas: CollaborationContentReplicaStorePort = new CollaborationContentReplicaStore()
+  ) {}
 
   async bind(input: unknown): Promise<ContentVersionDesktopReadModel> {
-    const { canvasId } = canvasInputSchema.parse(input);
+    const { localProjectId, canvasId } =
+      collaborationContentAuthorityCanvasInputSchema.parse(input);
     const client = this.requireClient();
-    this.binding = await this.bindLocal(client.projectId, canvasId);
+    const mapped = (await this.replicas.list()).find(
+      (replica) =>
+        replica.remote.serverOrigin === this.serverOrigin(client) &&
+        replica.remote.projectId === client.projectId &&
+        replica.local.projectId === localProjectId &&
+        replica.local.canvasId === canvasId
+    );
+    this.binding = await this.bindLocal(
+      client,
+      localProjectId,
+      canvasId,
+      mapped?.remote.canvasId ?? canvasId,
+      mapped
+    );
     return this.refresh();
   }
 
+  async listBootstrapCandidates(): Promise<CollaborationContentBootstrapCandidate[]> {
+    const client = this.requireClient();
+    const serverOrigin = this.serverOrigin(client);
+    const [canvases, storedReplicas, localProjects] = await Promise.all([
+      this.listAuthorizedCanvases(client),
+      this.replicas.list(),
+      listProjects()
+    ]);
+    const localProjectIds = new Set(localProjects.map((project) => project.projectId));
+    return Promise.all(
+      canvases.map(async (canvas) => {
+        const remote = {
+          serverOrigin,
+          workspaceId: canvas.registry.workspaceId,
+          projectId: canvas.registry.projectId,
+          canvasId: canvas.registry.canvasId
+        };
+        let mapped =
+          storedReplicas.find((replica) => this.sameRemote(replica.remote, remote)) ?? null;
+        if (mapped?.phase === "ready" && !localProjectIds.has(mapped.local.projectId)) {
+          await this.replicas.remove(remote);
+          mapped = null;
+        }
+        const discovered = await client.discoverContentAuthority({
+          canvasId: canvas.registry.canvasId,
+          localReplica: null,
+          knownRevision: null
+        });
+        return collaborationContentBootstrapCandidateSchema.parse({
+          workspaceId: canvas.registry.workspaceId,
+          projectId: canvas.registry.projectId,
+          canvasId: canvas.registry.canvasId,
+          visibility: canvas.visibility,
+          authority: contentVersionAuthorityDiscoveryToDesktopReadModel(discovered),
+          localReplica:
+            mapped?.phase === "ready"
+              ? { projectId: mapped.local.projectId, canvasId: mapped.local.canvasId }
+              : null
+        });
+      })
+    );
+  }
+
+  async bootstrap(input: unknown): Promise<CollaborationContentBootstrapResult> {
+    const requested = collaborationContentBootstrapInputSchema.parse(input);
+    const client = this.requireClient();
+    const serverOrigin = this.serverOrigin(client);
+    const canvases = await this.listAuthorizedCanvases(client);
+    const canvas = canvases.find(
+      (candidate) =>
+        candidate.registry.workspaceId === requested.workspaceId &&
+        candidate.registry.projectId === requested.projectId &&
+        candidate.registry.canvasId === requested.canvasId
+    );
+    if (!canvas) throw unavailable("content_remote_canvas_not_authorized", false);
+    const remote = {
+      serverOrigin,
+      workspaceId: canvas.registry.workspaceId,
+      projectId: canvas.registry.projectId,
+      canvasId: canvas.registry.canvasId
+    };
+    let existing = (await this.replicas.list()).find((replica) =>
+      this.sameRemote(replica.remote, remote)
+    );
+    const localProjects = new Set((await listProjects()).map((project) => project.projectId));
+    if (existing?.phase === "ready" && !localProjects.has(existing.local.projectId)) {
+      await this.replicas.remove(remote);
+      existing = undefined;
+    }
+    if (existing?.phase === "ready") {
+      this.binding = await this.bindLocal(
+        client,
+        existing.local.projectId,
+        existing.local.canvasId,
+        remote.canvasId,
+        existing
+      );
+      const authority = await this.refresh();
+      const acknowledgement = await this.acknowledgeCurrentHead(client, authority);
+      return collaborationContentBootstrapResultSchema.parse({
+        outcome: "reused",
+        localProjectId: existing.local.projectId,
+        localCanvasId: existing.local.canvasId,
+        remoteCanvasId: remote.canvasId,
+        acknowledgement,
+        authority
+      });
+    }
+
+    const discovered = await client.discoverContentAuthority({
+      canvasId: remote.canvasId,
+      localReplica: null,
+      knownRevision: null
+    });
+    const authority = contentVersionDesktopReadModelSchema.parse(
+      contentVersionAuthorityDiscoveryToDesktopReadModel(discovered)
+    );
+    const head = authority.authoritativeHead;
+    if (!head || !authority.canMaterialize) {
+      throw unavailable("content_authoritative_head_unavailable", false);
+    }
+    this.assertRemoteScope(head.scope, remote);
+    const fetched = await client.fetchContentVersion({
+      canvasId: remote.canvasId,
+      content: head.content
+    });
+    if (
+      fetched.completed.versionId !== head.content.versionId ||
+      fetched.content.canonicalDigest !== head.content.canonicalDigest
+    ) {
+      throw unavailable("content_authoritative_head_mismatch", false);
+    }
+    this.assertRemoteScope(fetched.scope, remote);
+    let replica = existing;
+    if (!replica) {
+      const planned = await planManagedProjectFromAuthoritativeContent({
+        content: fetched.content
+      });
+      const now = new Date().toISOString();
+      replica = await this.replicas.reserve({
+        remote,
+        local: { projectId: planned.projectId, canvasId: planned.canvasId },
+        phase: "importing",
+        projectName: planned.projectName,
+        reservationToken: randomUUID(),
+        createdAt: now,
+        updatedAt: now
+      });
+    }
+    if (!replica.projectName || !replica.reservationToken) {
+      throw unavailable("content_replica_reservation_invalid", false);
+    }
+    const created = await createManagedProjectFromAuthoritativeContent({
+      authorityProjectId: client.projectId,
+      content: fetched.content,
+      projectName: replica.projectName,
+      expectedProjectId: replica.local.projectId,
+      resumeReservedProject: true,
+      reservationToken: replica.reservationToken
+    });
+    const completedReplica = await this.replicas.complete(remote);
+    this.binding = await this.bindLocal(
+      client,
+      created.project.projectId,
+      created.canvasId,
+      remote.canvasId,
+      completedReplica
+    );
+    const synchronizedAuthority = contentVersionDesktopReadModelSchema.parse({
+      ...authority,
+      localReplica: fetched.completed,
+      replicaStatus: "in_sync"
+    });
+    this.lastModel = synchronizedAuthority;
+    let acknowledgement: "acknowledged" | "pending" = "acknowledged";
+    try {
+      await client.acknowledgeContentVersion({
+        canvasId: remote.canvasId,
+        content: fetched.completed
+      });
+    } catch {
+      acknowledgement = "pending";
+    }
+    return collaborationContentBootstrapResultSchema.parse({
+      outcome: "created",
+      localProjectId: created.project.projectId,
+      localCanvasId: created.canvasId,
+      remoteCanvasId: remote.canvasId,
+      acknowledgement,
+      authority: synchronizedAuthority
+    });
+  }
+
   async read(): Promise<ContentVersionDesktopReadModel | null> {
+    const client = this.resolveClient();
+    if (
+      !client ||
+      !this.binding ||
+      this.binding.clientFingerprint !== this.clientFingerprint(client)
+    ) {
+      this.binding = null;
+      this.lastModel = null;
+    }
     return this.lastModel;
+  }
+
+  async resolveCanvasBinding(input: unknown): Promise<ResolvedCollaborationCanvasBinding | null> {
+    const { localProjectId, canvasId } =
+      collaborationContentAuthorityCanvasInputSchema.parse(input);
+    const client = this.requireClient();
+    if (localProjectId === client.projectId) {
+      return {
+        localProjectId,
+        localCanvasId: canvasId,
+        remoteProjectId: client.projectId,
+        remoteCanvasId: canvasId
+      };
+    }
+    const serverOrigin = this.serverOrigin(client);
+    const replica = (await this.replicas.list()).find(
+      (candidate) =>
+        candidate.phase === "ready" &&
+        candidate.remote.serverOrigin === serverOrigin &&
+        candidate.remote.projectId === client.projectId &&
+        candidate.local.projectId === localProjectId &&
+        candidate.local.canvasId === canvasId
+    );
+    return replica
+      ? {
+          localProjectId: replica.local.projectId,
+          localCanvasId: replica.local.canvasId,
+          remoteProjectId: replica.remote.projectId,
+          remoteCanvasId: replica.remote.canvasId
+        }
+      : null;
+  }
+
+  async resolveCanvasScope(input: unknown) {
+    const binding = await this.resolveCanvasBinding(input);
+    return binding
+      ? collaborationCanvasScopeResolutionSchema.parse({
+          projectId: binding.remoteProjectId,
+          canvasId: binding.remoteCanvasId
+        })
+      : null;
+  }
+
+  async readRuntimeStatus(input: unknown) {
+    const requested = collaborationContentAuthorityCanvasInputSchema.parse(input);
+    const client = this.requireClient();
+    const scope = await this.resolveCanvasScope(requested);
+    if (!scope) return null;
+    const status = await client.readRuntimeStatus(scope.canvasId);
+    if (
+      status.scope.projectId !== scope.projectId ||
+      status.scope.canvasId !== scope.canvasId
+    ) {
+      throw unavailable("runtime_status_scope_mismatch", false);
+    }
+    return status;
   }
 
   async refresh(): Promise<ContentVersionDesktopReadModel> {
@@ -57,7 +341,7 @@ export class ContentVersionFacade {
     const binding = this.requireBinding(client);
     const local = await this.collect(binding);
     const discovered = await client.discoverContentAuthority({
-      canvasId: binding.canvasId,
+      canvasId: binding.remoteCanvasId,
       localReplica: local.ref,
       knownRevision: this.lastModel?.authoritativeHead?.revision ?? null
     });
@@ -71,11 +355,17 @@ export class ContentVersionFacade {
     const client = this.requireClient();
     const binding = this.requireBinding(client);
     const local = await this.collect(binding);
-    const published = await client.publishInitialContent({ canvasId: binding.canvasId, content: local.content });
+    const published = await client.publishInitialContent({
+      canvasId: binding.remoteCanvasId,
+      content: local.content
+    });
     if (published.outcome !== "published") {
       throw unavailable(`content_initial_publish_${published.reason}`, published.retryable);
     }
-    await client.acknowledgeContentVersion({ canvasId: binding.canvasId, content: published.version.completed });
+    await client.acknowledgeContentVersion({
+      canvasId: binding.remoteCanvasId,
+      content: published.version.completed
+    });
     return this.refresh();
   }
 
@@ -84,52 +374,112 @@ export class ContentVersionFacade {
     const binding = this.requireBinding(client);
     const model = await this.refresh();
     const head = model.authoritativeHead;
-    if (!head || !model.canMaterialize) throw unavailable("content_materialization_not_available", false);
-    const fetched = await client.fetchContentVersion({ canvasId: binding.canvasId, content: head.content });
-    if (fetched.completed.versionId !== head.content.versionId || fetched.content.canonicalDigest !== head.content.canonicalDigest) {
+    if (!head || !model.canMaterialize)
+      throw unavailable("content_materialization_not_available", false);
+    const fetched = await client.fetchContentVersion({
+      canvasId: binding.remoteCanvasId,
+      content: head.content
+    });
+    if (
+      fetched.completed.versionId !== head.content.versionId ||
+      fetched.content.canonicalDigest !== head.content.canonicalDigest
+    ) {
       throw unavailable("content_authoritative_head_mismatch", false);
     }
     await materializeAuthoritativeCanvasContent({
       projectRoot: binding.projectRoot,
-      canvasId: binding.canvasId,
+      canvasId: binding.localCanvasId,
       expectedPackageDir: binding.expectedPackageDir,
+      authorityProjectId: binding.authorityProjectId,
       content: fetched.content
     });
-    await client.acknowledgeContentVersion({ canvasId: binding.canvasId, content: fetched.completed });
+    await client.acknowledgeContentVersion({
+      canvasId: binding.remoteCanvasId,
+      content: fetched.completed
+    });
     return this.refresh();
   }
 
   private requireClient(): CollaborationClient {
     const client = this.resolveClient();
     if (!client) throw unavailable("collaboration_content_offline", true);
+    if (this.binding && this.binding.clientFingerprint !== this.clientFingerprint(client)) {
+      this.binding = null;
+      this.lastModel = null;
+    }
     return client;
   }
 
   private requireBinding(client: CollaborationClient): LocalCanvasBinding {
-    if (!this.binding || this.binding.canvasId.length === 0) throw unavailable("content_canvas_binding_required", false);
+    if (!this.binding) throw unavailable("content_canvas_binding_required", false);
+    if (this.binding.clientFingerprint !== this.clientFingerprint(client)) {
+      this.binding = null;
+      this.lastModel = null;
+      throw unavailable("content_canvas_binding_scope_mismatch", false);
+    }
     return this.binding;
   }
 
-  private async bindLocal(projectId: string, canvasId: string): Promise<LocalCanvasBinding> {
-    const matches = (await listProjects()).filter((project) => project.projectId === projectId);
+  private async bindLocal(
+    client: CollaborationClient,
+    localProjectId: string,
+    localCanvasId: string,
+    remoteCanvasId: string,
+    expectedReplica?: CollaborationContentReplica
+  ): Promise<LocalCanvasBinding> {
+    const matches = (await listProjects()).filter(
+      (project) => project.projectId === localProjectId
+    );
     if (matches.length !== 1) throw unavailable("content_local_project_binding_invalid", false);
     const overview = await getProjectOverview(matches[0]!.rootPath);
-    if (overview.projectId !== projectId) throw unavailable("content_local_project_binding_invalid", false);
-    const workspace = await resolveTaskCanvasWorkspace(overview.rootPath, canvasId);
-    return { projectRoot: overview.rootPath, canvasId, expectedPackageDir: workspace.packageDir };
+    if (overview.projectId !== localProjectId)
+      throw unavailable("content_local_project_binding_invalid", false);
+    const workspace = await resolveTaskCanvasWorkspace(overview.rootPath, localCanvasId);
+    if (expectedReplica) {
+      if (
+        expectedReplica.local.projectId !== localProjectId ||
+        expectedReplica.local.canvasId !== localCanvasId ||
+        expectedReplica.remote.serverOrigin !== this.serverOrigin(client) ||
+        expectedReplica.remote.projectId !== client.projectId ||
+        expectedReplica.remote.canvasId !== remoteCanvasId
+      ) {
+        throw unavailable("content_replica_mapping_conflict", false);
+      }
+    } else if (workspace.id !== client.projectId) {
+      throw unavailable("content_local_project_scope_mismatch", false);
+    }
+    return {
+      clientFingerprint: this.clientFingerprint(client),
+      authorityProjectId: client.projectId,
+      remoteCanvasId,
+      projectRoot: overview.rootPath,
+      localProjectId,
+      localCanvasId,
+      expectedPackageDir: workspace.packageDir
+    };
   }
 
   private async collect(binding: LocalCanvasBinding): Promise<{
     content: CompleteContentVersion;
     ref: CompletedContentVersionRef;
   }> {
-    const snapshot = await capturePackageSnapshot({ projectRoot: binding.projectRoot, canvasId: binding.canvasId });
-    if (snapshot.resolvedPackageDir !== binding.expectedPackageDir) throw unavailable("content_local_package_binding_invalid", false);
-    const workspace = await resolveTaskCanvasWorkspace(binding.projectRoot, binding.canvasId);
+    const snapshot = await capturePackageSnapshot({
+      projectRoot: binding.projectRoot,
+      canvasId: binding.localCanvasId
+    });
+    if (snapshot.resolvedPackageDir !== binding.expectedPackageDir)
+      throw unavailable("content_local_package_binding_invalid", false);
+    const workspace = await resolveTaskCanvasWorkspace(binding.projectRoot, binding.localCanvasId);
     const layout = await getDesktopLayout(workspace);
+    const authorityLayout = { ...layout, projectId: binding.authorityProjectId };
     const members = [
       ...snapshot.snapshot.files.map((file) => ({
-        kind: file.path === "manifest.json" ? "manifest" as const : file.path.includes("/blocks/") ? "block_prompt" as const : "task_prompt" as const,
+        kind:
+          file.path === "manifest.json"
+            ? ("manifest" as const)
+            : file.path.includes("/blocks/")
+              ? ("block_prompt" as const)
+              : ("task_prompt" as const),
         path: file.path,
         content: file.content,
         digestSha256: file.digestSha256,
@@ -138,14 +488,21 @@ export class ContentVersionFacade {
       {
         kind: "desktop_layout" as const,
         path: contentVersionDesktopLayoutMemberPath,
-        content: `${JSON.stringify(layout, null, 2)}\n`,
+        content: `${JSON.stringify(authorityLayout, null, 2)}\n`,
         digestSha256: "",
         sizeBytes: 0
       }
-    ].map((member) => member.kind === "desktop_layout"
-      ? { ...member, digestSha256: digest(member.content), sizeBytes: Buffer.byteLength(member.content, "utf8") }
-      : member
-    ).sort((left, right) => left.path.localeCompare(right.path));
+    ]
+      .map((member) =>
+        member.kind === "desktop_layout"
+          ? {
+              ...member,
+              digestSha256: digest(member.content),
+              sizeBytes: Buffer.byteLength(member.content, "utf8")
+            }
+          : member
+      )
+      .sort((left, right) => left.path.localeCompare(right.path));
     const totalBytes = members.reduce((total, member) => total + member.sizeBytes, 0);
     const provisional = { members, totalBytes, canonicalDigest: "0".repeat(64) };
     const content = completeContentVersionSchema.parse({
@@ -160,5 +517,77 @@ export class ContentVersionFacade {
         verification: "complete"
       })
     };
+  }
+
+  private serverOrigin(client: CollaborationClient): string {
+    return new URL(client.connectionProfile.serverBaseUrl).origin;
+  }
+
+  private clientFingerprint(client: CollaborationClient): string {
+    const profile = client.connectionProfile;
+    return `${profile.profileId}\u0000${this.serverOrigin(client)}\u0000${client.projectId}`;
+  }
+
+  private sameRemote(
+    left: CollaborationContentReplica["remote"],
+    right: CollaborationContentReplica["remote"]
+  ): boolean {
+    return (
+      left.serverOrigin === right.serverOrigin &&
+      left.workspaceId === right.workspaceId &&
+      left.projectId === right.projectId &&
+      left.canvasId === right.canvasId
+    );
+  }
+
+  private assertRemoteScope(
+    actual: { workspaceId: string; projectId: string; canvasId: string },
+    expected: CollaborationContentReplica["remote"]
+  ): void {
+    if (
+      actual.workspaceId !== expected.workspaceId ||
+      actual.projectId !== expected.projectId ||
+      actual.canvasId !== expected.canvasId
+    ) {
+      throw unavailable("content_authoritative_scope_mismatch", false);
+    }
+  }
+
+  private async listAuthorizedCanvases(client: CollaborationClient): Promise<CanvasAccessRecord[]> {
+    const items: CanvasAccessRecord[] = [];
+    const cursors = new Set<number>();
+    let cursor = 0;
+    while (true) {
+      if (cursors.has(cursor)) throw unavailable("content_registry_pagination_invalid", false);
+      cursors.add(cursor);
+      const page = await client.registry().listCanvases({
+        projectId: client.projectId,
+        cursor,
+        limit: 100
+      });
+      items.push(...page.items);
+      if (page.nextCursor === null) return items;
+      cursor = page.nextCursor;
+    }
+  }
+
+  private async acknowledgeCurrentHead(
+    client: CollaborationClient,
+    authority: ContentVersionDesktopReadModel
+  ): Promise<"acknowledged" | "pending"> {
+    const binding = this.requireBinding(client);
+    const head = authority.authoritativeHead;
+    if (!head || authority.localReplica?.canonicalDigest !== head.content.canonicalDigest) {
+      return "pending";
+    }
+    try {
+      await client.acknowledgeContentVersion({
+        canvasId: binding.remoteCanvasId,
+        content: head.content
+      });
+      return "acknowledged";
+    } catch {
+      return "pending";
+    }
   }
 }
