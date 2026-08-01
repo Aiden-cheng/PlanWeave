@@ -6,9 +6,9 @@ import { pathToFileURL } from "node:url";
 
 const allowedExtensions = new Set([".json", ".log", ".txt", ".xml"]);
 const headerDefinitions = [
-  { name: "proxy-authorization", requiresAuthorizationScheme: true },
-  { name: "authorization", requiresAuthorizationScheme: true },
-  { name: "cookie", requiresAuthorizationScheme: false }
+  { name: "proxy-authorization" },
+  { name: "authorization" },
+  { name: "cookie" }
 ];
 
 function escapeRegExp(value) {
@@ -65,16 +65,10 @@ function isContainerTerminator(content, index) {
   return content[next] === undefined || /[\r\n,}\]]/.test(content[next]);
 }
 
-function unquotedValueEnd(content, start, preserveSemicolons) {
+function unquotedValueEnd(content, start) {
   for (let index = start; index < content.length; index += 1) {
     const character = content[index];
     if (character === "\r" || character === "\n") {
-      return index;
-    }
-    if (!preserveSemicolons && character === ",") {
-      return index;
-    }
-    if (!preserveSemicolons && character === ";") {
       return index;
     }
 
@@ -94,12 +88,12 @@ function unquotedValueEnd(content, start, preserveSemicolons) {
   return content.length;
 }
 
-function headerValue(content, start, preserveSemicolons) {
+function headerValue(content, start) {
   const delimiter = quoteAt(content, start);
   if (!delimiter) {
     return {
       contentStart: start,
-      contentEnd: unquotedValueEnd(content, start, preserveSemicolons)
+      contentEnd: unquotedValueEnd(content, start)
     };
   }
 
@@ -107,7 +101,7 @@ function headerValue(content, start, preserveSemicolons) {
   if (!closing) {
     return {
       contentStart: start + delimiter.width,
-      contentEnd: unquotedValueEnd(content, start + delimiter.width, preserveSemicolons)
+      contentEnd: unquotedValueEnd(content, start + delimiter.width)
     };
   }
   return { contentStart: start + delimiter.width, contentEnd: closing.closingStart };
@@ -149,17 +143,8 @@ function redactHeaderValues(content) {
     const header = headerAt(content, index);
     if (!header) continue;
 
-    const value = headerValue(
-      content,
-      header.valueStart,
-      !header.definition.requiresAuthorizationScheme
-    );
-    const rawValue = content.slice(value.contentStart, value.contentEnd).trim();
-    if (
-      value.contentEnd <= value.contentStart ||
-      (header.definition.requiresAuthorizationScheme &&
-        !/^(?:basic|bearer)(?:\s|$)/i.test(rawValue))
-    ) {
+    const value = headerValue(content, header.valueStart);
+    if (value.contentEnd <= value.contentStart) {
       continue;
     }
 

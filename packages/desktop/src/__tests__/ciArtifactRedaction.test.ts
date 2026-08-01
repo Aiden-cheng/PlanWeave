@@ -11,6 +11,66 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..")
 const redactionScript = resolve(repoRoot, "scripts/redact-ci-test-artifacts.mjs");
 
 describe("CI artifact redaction", () => {
+  it("redacts every authorization scheme through the end of CRLF log headers", async () => {
+    const reportDirectory = await mkdtemp(resolve(tmpdir(), "planweave-ci-header-redaction-"));
+    const reportPath = resolve(reportDirectory, "credentials.log");
+    const secrets = [
+      "basic-token-value",
+      "basic-metadata-value",
+      "bearer-token-value",
+      "bearer-scope-value",
+      "AKIAIOSFODNN7EXAMPLE",
+      "aws-signature-value",
+      "digest-user-value",
+      "digest-realm-value",
+      "digest-nonce-value",
+      "digest-response-value",
+      "digest-response-after-diagnostic",
+      "negotiate-token-value",
+      "ntlm-token-value",
+      "proxy-cookie-value",
+      "csrf-cookie-value"
+    ];
+
+    try {
+      await writeFile(
+        reportPath,
+        [
+          "Authorization: Basic basic-token-value metadata=basic-metadata-value",
+          "Proxy-Authorization: Bearer bearer-token-value scope=bearer-scope-value",
+          "authorization: AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20260801/us-east-1/service/aws4_request, SignedHeaders=host;x-amz-date, diagnostic=header-metadata, Signature=aws-signature-value",
+          'pRoXy-AuThOrIzAtIoN: Digest username="digest-user-value", realm="digest-realm-value", nonce="digest-nonce-value", diagnostic=header-metadata, response="digest-response-value", response-after-diagnostic="digest-response-after-diagnostic"',
+          "Authorization: Negotiate negotiate-token-value",
+          "Proxy-Authorization: NTLM ntlm-token-value",
+          "Cookie: session=proxy-cookie-value; csrf=csrf-cookie-value",
+          "Authorization: Bearer boundary-token",
+          "diagnostic=ordinary diagnostic remains"
+        ].join("\r\n"),
+        "utf8"
+      );
+
+      await execFileAsync(process.execPath, [redactionScript, reportDirectory], { cwd: repoRoot });
+
+      const redacted = await readFile(reportPath, "utf8");
+      for (const secret of secrets) {
+        expect(redacted).not.toContain(secret);
+      }
+      expect(redacted).not.toContain("boundary-token");
+      expect(redacted).not.toContain("diagnostic=header-metadata");
+      expect(redacted).not.toContain("response-after-diagnostic");
+      expect(redacted).toContain("Authorization: [REDACTED]");
+      expect(redacted).toContain("Proxy-Authorization: [REDACTED]");
+      expect(redacted).toContain("authorization: [REDACTED]");
+      expect(redacted).toContain("pRoXy-AuThOrIzAtIoN: [REDACTED]");
+      expect(redacted).toContain("Cookie: [REDACTED]");
+      expect(redacted).toContain("Authorization: [REDACTED]\r\nProxy-Authorization: [REDACTED]");
+      expect(redacted).toContain("authorization: [REDACTED]\r\npRoXy-AuThOrIzAtIoN: [REDACTED]");
+      expect(redacted).toContain("diagnostic=ordinary diagnostic remains");
+    } finally {
+      await rm(reportDirectory, { recursive: true, force: true });
+    }
+  });
+
   it("redacts complete credential headers and preserves ordinary diagnostics", async () => {
     const reportDirectory = await mkdtemp(resolve(tmpdir(), "planweave-ci-artifact-redaction-"));
     const reportPath = resolve(reportDirectory, "failure.json");
@@ -89,12 +149,12 @@ describe("CI artifact redaction", () => {
         ),
         writeFile(
           logReportPath,
-          "authorization=Bearer lower-log-token, diagnostic=log diagnostic remains\ncookie=log-cookie-one; csrf=log-cookie-two\ncontext;Authorization: Bearer immediate-token\n",
+          "authorization=Bearer lower-log-token\ndiagnostic=log diagnostic remains\ncookie=log-cookie-one; csrf=log-cookie-two\ncontext;Authorization: Bearer immediate-token\n",
           "utf8"
         ),
         writeFile(
           plainTextReportPath,
-          'PROXY-AUTHORIZATION: Basic upper-plain-basic-token; diagnostic=plain diagnostic remains\nAuthorization=Bearer equals-plain-token\nCookie: session=plain-cookie-one; csrf=plain-cookie-two\nAuthorization: "Bearer raw-unclosed-secret\nnext diagnostic after malformed authorization\nCookie: "session=raw-unclosed-cookie\nnext diagnostic after malformed cookie\nCookie: a=cookie-comma-one, b=cookie-comma-two; diagnostic=ok\nnext diagnostic after comma cookie\n',
+          'PROXY-AUTHORIZATION: Basic upper-plain-basic-token\nplain diagnostic=plain diagnostic remains\nAuthorization=Bearer equals-plain-token\nCookie: session=plain-cookie-one; csrf=plain-cookie-two\nAuthorization: "Bearer raw-unclosed-secret\nnext diagnostic after malformed authorization\nCookie: "session=raw-unclosed-cookie\nnext diagnostic after malformed cookie\nCookie: a=cookie-comma-one, b=cookie-comma-two; diagnostic=ok\nnext diagnostic after comma cookie\n',
           "utf8"
         )
       ]);
@@ -132,12 +192,12 @@ describe("CI artifact redaction", () => {
       expect(redactedXml).toContain('Proxy-Authorization="[REDACTED]"');
       expect(redactedXml).toContain('Cookie="[REDACTED]"');
       expect(redactedXml).toContain('diagnostic="xml diagnostic remains"');
-      expect(redactedLog).toContain("authorization=[REDACTED], diagnostic=log diagnostic remains");
+      expect(redactedLog).toContain("authorization=[REDACTED]");
+      expect(redactedLog).toContain("diagnostic=log diagnostic remains");
       expect(redactedLog).toContain("cookie=[REDACTED]");
       expect(redactedLog).toContain("context;Authorization: [REDACTED]");
-      expect(redactedPlainText).toContain(
-        "PROXY-AUTHORIZATION: [REDACTED]; diagnostic=plain diagnostic remains"
-      );
+      expect(redactedPlainText).toContain("PROXY-AUTHORIZATION: [REDACTED]");
+      expect(redactedPlainText).toContain("plain diagnostic=plain diagnostic remains");
       expect(redactedPlainText).toContain("Authorization=[REDACTED]");
       expect(redactedPlainText).toContain("Cookie: [REDACTED]");
       expect(redactedPlainText).toContain("next diagnostic after malformed authorization");
