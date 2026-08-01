@@ -41,11 +41,88 @@ function materializableModel(): ContentVersionDesktopReadModel {
 }
 
 describe("ContentAuthorityPanel", () => {
+  it("does not bind an unrelated selected local project when opening remote authority settings", async () => {
+    const model = materializableModel();
+    const bindCollaborationContentAuthority = vi.fn().mockResolvedValue(model);
+    const api = {
+      bindCollaborationContentAuthority,
+      listCollaborationContentBootstrapCandidates: vi.fn().mockResolvedValue([
+        {
+          workspaceId: "workspace-1",
+          projectId: "remote-project",
+          canvasId: "default",
+          visibility: "shared",
+          authority: model,
+          localReplica: null
+        }
+      ])
+    } as unknown as PlanWeaveCollaborationApi;
+
+    render(
+      <ContentAuthorityPanel
+        api={api}
+        connectionKey="profile-1"
+        authorityProjectId="remote-project"
+        localProjectId="unrelated-local-project"
+        canvasId="default"
+        connected
+        t={createTranslator("en")}
+      />
+    );
+
+    expect(await screen.findByRole("button", { name: "Sync to this device" })).toBeVisible();
+    expect(bindCollaborationContentAuthority).not.toHaveBeenCalled();
+    expect(screen.queryByText("content_local_project_scope_mismatch")).not.toBeInTheDocument();
+  });
+
+  it("rebinds the current canvas when retrying after the authority binding was lost", async () => {
+    const user = userEvent.setup();
+    const model = materializableModel();
+    const bindCollaborationContentAuthority = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("collaboration_content_offline"))
+      .mockResolvedValueOnce(model);
+    const refreshCollaborationContentAuthority = vi
+      .fn()
+      .mockRejectedValue(new Error("content_canvas_binding_required"));
+    const api = {
+      bindCollaborationContentAuthority,
+      refreshCollaborationContentAuthority,
+      listCollaborationContentBootstrapCandidates: vi.fn().mockResolvedValue([])
+    } as unknown as PlanWeaveCollaborationApi;
+
+    render(
+      <ContentAuthorityPanel
+        api={api}
+        connectionKey="profile-1"
+        authorityProjectId="local-project"
+        localProjectId="local-project"
+        canvasId="default"
+        connected
+        t={createTranslator("en")}
+      />
+    );
+
+    expect(await screen.findByText("collaboration_content_offline")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(bindCollaborationContentAuthority).toHaveBeenCalledTimes(2));
+    expect(bindCollaborationContentAuthority).toHaveBeenLastCalledWith({
+      localProjectId: "local-project",
+      canvasId: "default"
+    });
+    expect(refreshCollaborationContentAuthority).not.toHaveBeenCalled();
+    expect(await screen.findByTestId("content-authority-version")).toHaveTextContent(
+      /version-aaaa/
+    );
+  });
+
   it("refreshes the local project and reports success after materializing the authority head", async () => {
     const user = userEvent.setup();
     const model = materializableModel();
     const api = {
       bindCollaborationContentAuthority: vi.fn().mockResolvedValue(model),
+      listCollaborationContentBootstrapCandidates: vi.fn().mockResolvedValue([]),
       materializeCollaborationContentHead: vi.fn().mockResolvedValue({
         ...model,
         localReplica: model.authoritativeHead?.content ?? null,
@@ -57,11 +134,29 @@ describe("ContentAuthorityPanel", () => {
     render(
       <ContentAuthorityPanel
         api={api}
+        connectionKey="profile-1"
+        authorityProjectId="local-project"
+        localProjectId="local-project"
         canvasId="default"
         connected
         onMaterialized={onMaterialized}
         t={createTranslator("en")}
       />
+    );
+
+    expect(await screen.findByTestId("content-authority-version")).toHaveTextContent(
+      /version-aaaa/
+    );
+    expect(screen.getByTestId("content-authority-panel")).not.toHaveClass(
+      "rounded-xl",
+      "border",
+      "bg-background"
+    );
+    expect(screen.getByTestId("content-authority-section-icon")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Authoritative content" })).toHaveClass("text-base");
+    expect(screen.getByTestId("content-authority-digest")).toHaveAttribute("title", "a".repeat(64));
+    expect(screen.getByTestId("content-authority-local-version")).toHaveTextContent(
+      "Not materialized on this device"
     );
 
     await user.click(
@@ -82,6 +177,7 @@ describe("ContentAuthorityPanel", () => {
     const model = materializableModel();
     const api = {
       bindCollaborationContentAuthority: vi.fn().mockResolvedValue(model),
+      listCollaborationContentBootstrapCandidates: vi.fn().mockResolvedValue([]),
       materializeCollaborationContentHead: vi.fn().mockResolvedValue({
         ...model,
         localReplica: model.authoritativeHead?.content ?? null,
@@ -93,6 +189,9 @@ describe("ContentAuthorityPanel", () => {
     render(
       <ContentAuthorityPanel
         api={api}
+        connectionKey="profile-1"
+        authorityProjectId="local-project"
+        localProjectId="local-project"
         canvasId="default"
         connected
         onMaterialized={onMaterialized}
@@ -106,7 +205,61 @@ describe("ContentAuthorityPanel", () => {
 
     await waitFor(() => expect(screen.getByText("project_refresh_failed")).toBeInTheDocument());
     expect(api.materializeCollaborationContentHead).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("Replica: in_sync")).toBeInTheDocument();
+    expect(screen.getByTestId("content-authority-status")).toHaveTextContent("In sync");
+    expect(screen.getByTestId("content-authority-local-version")).toHaveTextContent(/version-aaaa/);
     expect(screen.queryByText(/project view has been refreshed/i)).not.toBeInTheDocument();
+  });
+
+  it("creates and opens a local project from a remote authoritative package without a selected canvas", async () => {
+    const user = userEvent.setup();
+    const model = materializableModel();
+    const candidate = {
+      workspaceId: "workspace-1",
+      projectId: "project-1",
+      canvasId: "default",
+      visibility: "shared" as const,
+      authority: model,
+      localReplica: null
+    };
+    const result = {
+      outcome: "created" as const,
+      localProjectId: "local-project",
+      localCanvasId: "default",
+      remoteCanvasId: "default",
+      acknowledgement: "acknowledged" as const,
+      authority: model
+    };
+    const api = {
+      listCollaborationContentBootstrapCandidates: vi.fn().mockResolvedValue([candidate]),
+      bootstrapCollaborationContent: vi.fn().mockResolvedValue(result)
+    } as unknown as PlanWeaveCollaborationApi;
+    const onReplicaReady = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <ContentAuthorityPanel
+        api={api}
+        connectionKey="profile-1"
+        authorityProjectId="project-1"
+        localProjectId={null}
+        canvasId={null}
+        connected
+        onReplicaReady={onReplicaReady}
+        t={createTranslator("en")}
+      />
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Sync to this device" }));
+
+    await waitFor(() =>
+      expect(api.bootstrapCollaborationContent).toHaveBeenCalledWith({
+        workspaceId: "workspace-1",
+        projectId: "project-1",
+        canvasId: "default"
+      })
+    );
+    expect(onReplicaReady).toHaveBeenCalledWith(result);
+    expect(
+      await screen.findByText("The authoritative Plan Package was synced and opened.")
+    ).toBeInTheDocument();
   });
 });

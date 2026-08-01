@@ -761,20 +761,6 @@ describe("collaboration integration scenarios", () => {
             ]
           }
         ]}
-        hosts={[
-          {
-            hostId: "host-1",
-            displayName: "Host One",
-            status: "online",
-            capacityRemaining: 2,
-            capabilities: ["acp"],
-            revoked: false,
-            authorizedForProject: true,
-            exists: true,
-            versionSummary: "1.0.0",
-            lastSeenSummary: "now"
-          }
-        ]}
         invitations={[]}
         devices={[]}
         detailsLoading={false}
@@ -798,10 +784,8 @@ describe("collaboration integration scenarios", () => {
 
     expect(screen.getByTestId("people-panel")).toHaveAttribute("data-mode", "ready");
     expect(screen.getByTestId("people-members-section")).toBeInTheDocument();
-    expect(screen.getByTestId("people-hosts-section")).toBeInTheDocument();
     expect(screen.getAllByTestId("people-member-row")).toHaveLength(2);
-    expect(screen.getByTestId("people-host-row")).toBeInTheDocument();
-    expect(screen.getByTestId("people-host-status")).toHaveAttribute("data-status", "online");
+    expect(screen.queryByTestId("people-hosts-section")).not.toBeInTheDocument();
   });
 
   it("covers comments, attachments, activity, and tab isolation from agent conversation", async () => {

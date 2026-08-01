@@ -1024,8 +1024,8 @@ export const enCatalog = {
   people: "People",
   peopleTitle: "Project people",
   peopleSections: "People page sections",
-  peopleSectionWorkspace: "Collaboration workspace",
-  peopleSectionHosting: "Sharing",
+  peopleSectionWorkspace: "Members",
+  peopleSectionHosting: "Sharing settings",
   collaborationOnboardingTitle: "Work together in PlanWeave",
   collaborationOnboardingDescription:
     "Create a shared workspace for this project, or join one with an invitation.",
@@ -1055,9 +1055,7 @@ export const enCatalog = {
   peoplePresence: "People",
   peoplePresenceWithCount: "People ({count})",
   peopleMemberCount: "{count} members",
-  peopleHostOnlineCount: "{online}/{total} hosts online",
   peopleMembers: "Members",
-  peopleAgentHosts: "Agent Hosts",
   peopleOwnerActions: "Invitations & devices",
   peopleInvitations: "Invitations",
   peopleDevices: "Devices",
@@ -1067,14 +1065,24 @@ export const enCatalog = {
   peoplePromote: "Promote",
   peopleDemote: "Demote",
   peopleRemove: "Remove",
+  peopleManagePermissions: "Manage access",
+  peopleHidePermissions: "Hide access",
   peopleRevoke: "Revoke",
   peopleRevokeSelected: "Revoke selected ({count})",
   peopleSelectAllOpenInvitations: "Select all open invitations",
   peopleSelectInvitation: "Select invitation {id}",
   peopleCreateInvitation: "Create invitation",
+  peopleViewInvitation: "View invitation",
   peopleConnectionSettings: "Connection settings",
   peopleHideConnectionSettings: "Hide connection settings",
+  peopleConnectionDiagnostics: "Connection diagnostics",
+  peopleConnectionDiagnosticsHint:
+    "Safe to share for troubleshooting. Invitation and device secrets are excluded.",
+  peopleConnectionDiagnosticsCopy: "Copy diagnostics",
+  peopleConnectionDiagnosticsCopied: "Diagnostics copied",
+  peopleConnectionDiagnosticsCopyFailed: "Could not copy the diagnostics. Try again.",
   peopleRefresh: "Refresh",
+  peopleRequestRateLimited: "Too many collaboration requests. Wait a moment, then try again.",
   peopleLoading: "Loading…",
   peopleConnecting: "Connecting to collaboration…",
   peopleDisconnected: "Not connected to a collaboration project.",
@@ -1083,7 +1091,6 @@ export const enCatalog = {
   peopleAuthExpired: "Collaboration credentials expired. Rejoin or reconnect with a valid device.",
   peopleForbidden: "You do not have permission for this collaboration project.",
   peopleEmptyMembers: "No members yet.",
-  peopleEmptyHosts: "No Agent Hosts reported for this project.",
   peopleEmptyInvitations: "No invitations.",
   peopleEmptyDevices: "No devices listed.",
   peopleLastOwnerProtected: "Last owner protected",
@@ -1093,9 +1100,11 @@ export const enCatalog = {
   peopleRevokeSelectedInvitationsConfirm:
     "Revoke the {count} selected invitations? This action cannot be undone.",
   peopleRevokeDeviceConfirm: "Revoke this human device credential?",
-  peopleInvitationCopyOnceTitle: "Complete invitation (shown once)",
+  peopleInvitationCopyOnceTitle: "Complete invitation",
   peopleInvitationCopyOnceWarning:
-    "Copy the complete invitation now. It contains the Server, project, and bearer secret required to join, and will not be shown again after you dismiss this panel.",
+    "The complete invitation contains the Server, project, and bearer secret required to join, and is encrypted with the operating system keychain.",
+  peopleInvitationSessionOnlyWarning:
+    "The operating system keychain is unavailable. This complete invitation is session-only and cannot be restored after restart. Copy it now.",
   peopleInvitationCopy: "Copy token",
   peopleInvitationCopyHandoff: "Copy complete join details",
   peopleInvitationCopied: "Copied",
@@ -1128,15 +1137,6 @@ export const enCatalog = {
   peopleInvitationCreated: "Created {time}",
   peopleInvitationExpires: "Expires {time}",
   peopleInvitationIdLabel: "Invite ID {id}",
-  peopleHostOnline: "Online",
-  peopleHostOffline: "Offline",
-  peopleHostDegraded: "Degraded",
-  peopleHostCapacity: "Capacity",
-  peopleHostCapacityUnknown: "unknown",
-  peopleHostCapabilities: "Capabilities",
-  peopleHostCapabilitiesNone: "none",
-  peopleHostVersion: "Version",
-  peopleHostLastSeen: "Last seen",
   peopleHostFieldUnavailable: "not in projection",
   peopleDeviceLastSeen: "Last seen",
   peopleDeviceCreated: "Added {time}",
@@ -1153,6 +1153,9 @@ export const enCatalog = {
   peopleConnectJoinSubmit: "Join Workspace",
   peopleConnectBootstrapSubmit: "Initialize server owner",
   peopleConnectExistingSubmit: "Connect Workspace",
+  peopleExistingServerUrl: "Current Server address",
+  peopleExistingServerUrlHint:
+    "If the connection times out, copy the current connection address from the owner's Sharing settings. Connecting saves the new address without creating another member.",
   peopleRemoteWorkspaceTitle: "Remote Workspace",
   peopleRemoteWorkspaceDescription:
     "Connect to a shared PlanWeave Server for people, permissions, and multi-device collaboration.",
@@ -1209,7 +1212,9 @@ export const enCatalog = {
   accessCanvasVisibility: "Canvas visibility",
   accessCurrentCanvasVisibility: "Current canvas visibility",
   accessCanvasVisibilityHint:
-    "Choose explicitly whether this canvas stays private or opens to existing members.",
+    "This canvas can override the project default. Keep it private, or open it to existing Workspace members.",
+  accessDescription:
+    "Controls who can view or edit the selected canvas. Project visibility is the default; canvas visibility can override it.",
   accessVisibilityPrivate: "Private",
   accessVisibilityPrivateHint: "Only owners and explicitly granted members can access it",
   accessVisibilityShared: "Shared",
@@ -1232,7 +1237,10 @@ export const enCatalog = {
   accessReasonCrossWorkspace: "This Workspace does not match the active connection.",
   accessReasonCrossProject: "This project does not match the active connection.",
   accessReasonCrossCanvas: "This canvas does not match the active selection.",
-  accessPeople: "Canvas people",
+  accessMemberEffectiveRole: "Effective access",
+  accessMemberPermissionHint:
+    "Workspace role controls membership administration. These controls grant this person project or selected-canvas access.",
+  accessMemberUnavailable: "Access details are unavailable for this member.",
   accessGrantViewer: "Grant viewer",
   accessGrantEditor: "Grant editor",
   accessNoRevocableGrant: "No explicit grant to revoke",
@@ -1446,9 +1454,25 @@ export const enCatalog = {
   canvasCommandUnsupportedLocalOnly:
     "This edit is not available while the shared canvas is connected. Disconnect collaboration or use a supported shared command.",
   contentAuthorityTitle: "Authoritative content",
+  contentAuthorityDescription:
+    "The Server's immutable reference version for this canvas and the state of this device's local replica.",
+  contentAuthorityRevisionLabel: "Revision",
+  contentAuthorityStatusLabel: "Replica status",
   contentAuthorityRevision: "Revision: {revision}",
   contentAuthorityStatus: "Replica: {status}",
   contentAuthorityAcknowledged: "This device acknowledged the current version.",
+  contentAuthorityVersionId: "Authoritative version",
+  contentAuthorityDigest: "Content digest",
+  contentAuthorityAdvancedAt: "Advanced at",
+  contentAuthorityLocalVersion: "Local replica",
+  contentAuthorityAcknowledgedAt: "Acknowledged at",
+  contentAuthorityCanvas: "Canvas",
+  contentAuthorityWriteBlocked: "Offline write blocked: {reason}",
+  contentAuthorityNoLocalReplica: "Not materialized on this device",
+  contentAuthorityStatusInSync: "In sync",
+  contentAuthorityStatusBehind: "Behind authoritative version",
+  contentAuthorityStatusDiverged: "Local changes diverged",
+  contentAuthorityStatusSnapshotRequired: "Authoritative snapshot required",
   contentAuthorityWaiting: "waiting for first publish",
   contentAuthorityOffline: "offline",
   contentAuthorityRetry: "Retry",
@@ -1457,6 +1481,17 @@ export const enCatalog = {
   contentAuthorityRecover: "Restore from authoritative version",
   contentAuthorityMaterializedSuccess:
     "The authoritative version is synced to this device and the project view has been refreshed.",
+  contentBootstrapTitle: "Authoritative content available",
+  contentBootstrapDescription:
+    "Choose an authoritative Plan Package from the Server. First sync creates a local project without requiring a preselected canvas.",
+  contentBootstrapRevision: "Server revision {revision}",
+  contentBootstrapWaitingForOwner: "Waiting for the owner to publish the first version",
+  contentBootstrapStoredReplica: "Local replica saved",
+  contentBootstrapOpenLocal: "Open local replica",
+  contentBootstrapSync: "Sync to this device",
+  contentBootstrapSuccess: "The authoritative Plan Package was synced and opened.",
+  contentBootstrapAcknowledgementPending:
+    "Content was synced, but Server acknowledgement is still pending. Retry later.",
   localServerTitle: "Local network sharing",
   localServerDescription:
     "PlanWeave keeps its internal service running automatically for selected canvases. Turn on local network sharing only when another computer needs access.",
@@ -1495,11 +1530,16 @@ export const enCatalog = {
   localServerCopyAddress: "Copy address only",
   localServerCopyInvitation: "Copy complete invitation",
   localServerPreparingInvitation: "Preparing complete invitation…",
-  localServerRetryInvitation: "Retry complete invitation",
+  localServerRetryInvitation: "Create complete invitation",
   localServerInvitationReady: "Complete invitation (shown on this page only)",
   localServerInvitationReadyHint:
     "Includes the server address, project, and one-time invitation token. Paste the full value into Join workspace on the other computer.",
-  localServerInvitationCopied: "Complete invitation copied."
+  localServerInvitationCopied: "Complete invitation copied.",
+  localServerInvitationRateLimited:
+    "Too many invitations were created recently. Wait a moment, then try again.",
+  localServerInvitationCapacityExceeded:
+    "The open-invitation limit has been reached. Revoke invitations you no longer use in Collaboration workspace, then try again.",
+  localServerManageInvitations: "Manage open invitations"
 } as const;
 
 export type TranslationKey = keyof typeof enCatalog;

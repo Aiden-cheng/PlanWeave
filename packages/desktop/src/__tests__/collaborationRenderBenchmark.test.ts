@@ -11,6 +11,7 @@ import {
   ACTIVITY_LIST_PAGE_MAX,
   COMMENT_LIST_PAGE_DEFAULT,
   COMMENT_LIST_PAGE_MAX,
+  type HumanMembershipView,
   type WorkItemRef
 } from "@planweave-ai/collaboration-contracts";
 import {
@@ -75,6 +76,18 @@ function connectedStatus(): CollaborationStatus {
       error: null
     },
     workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
+  };
+}
+
+function membership(role: HumanMembershipView["role"]): HumanMembershipView {
+  return {
+    membershipId: `membership-${role}`,
+    projectId: "project-1",
+    humanPrincipalId: "human-1",
+    displayName: "Demo",
+    role,
+    createdAt: "2030-01-01T00:00:00.000Z",
+    updatedAt: "2030-01-01T00:00:00.000Z"
   };
 }
 
@@ -395,7 +408,7 @@ describe("collaboration render / subscription audit", () => {
         usePeoplePanelController({
           api,
           status: connectedStatus(),
-          members: [],
+          members: [membership("owner")],
           hosts: [],
           syncPhase: "ready",
           detailsOpen
@@ -416,6 +429,103 @@ describe("collaboration render / subscription audit", () => {
     });
   });
 
+  it("does not request owner-only invitation/device details for an ordinary member", async () => {
+    const { api, listInvitations, listDevices } = createAuditApi();
+    trackedApis.push(api);
+
+    renderHook(() =>
+      usePeoplePanelController({
+        api,
+        status: connectedStatus(),
+        members: [membership("member")],
+        hosts: [],
+        syncPhase: "ready",
+        detailsOpen: true
+      })
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(listInvitations).not.toHaveBeenCalled();
+    expect(listDevices).not.toHaveBeenCalled();
+  });
+
+  it("does not reload invitation/device details for read-model phase transitions", async () => {
+    const { api, listInvitations, listDevices } = createAuditApi();
+    trackedApis.push(api);
+
+    const { rerender } = renderHook(
+      ({ syncPhase }: { syncPhase: CollaborationSyncPhase }) =>
+        usePeoplePanelController({
+          api,
+          status: connectedStatus(),
+          members: [membership("owner")],
+          hosts: [],
+          syncPhase,
+          detailsOpen: true
+        }),
+      { initialProps: { syncPhase: "idle" as CollaborationSyncPhase } }
+    );
+
+    await waitFor(() => expect(listInvitations).toHaveBeenCalledTimes(1));
+    rerender({ syncPhase: "loading" });
+    rerender({ syncPhase: "ready" });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(listInvitations).toHaveBeenCalledTimes(1);
+    expect(listDevices).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the last invitation details visible when a refresh is rate-limited", async () => {
+    const { api, listInvitations } = createAuditApi();
+    trackedApis.push(api);
+    listInvitations.mockResolvedValueOnce({
+      items: [
+        {
+          invitationId: "inv-keep",
+          projectId: "project-1",
+          role: "member",
+          createdByHumanPrincipalId: "human-1",
+          createdAt: "2030-01-01T00:00:00.000Z",
+          expiresAt: "2030-01-02T00:00:00.000Z"
+        }
+      ],
+      nextCursor: null
+    });
+
+    const { result } = renderHook(() =>
+      usePeoplePanelController({
+        api,
+        status: connectedStatus(),
+        members: [membership("owner")],
+        hosts: [],
+        syncPhase: "ready",
+        detailsOpen: true
+      })
+    );
+    await waitFor(() => expect(result.current.invitations).toHaveLength(1));
+
+    listInvitations.mockRejectedValueOnce({
+      kind: "rate_limited",
+      code: "human_rate_limited",
+      message: "Too many collaboration requests. Try again shortly.",
+      httpStatus: 429,
+      retryAfterMs: 2_000,
+      retryable: true
+    });
+    await act(async () => {
+      await result.current.refreshDetails();
+    });
+
+    expect(result.current.detailsError).toContain("human_rate_limited");
+    expect(result.current.invitations).toHaveLength(1);
+    expect(result.current.invitations[0]?.invitationId).toBe("inv-keep");
+  });
+
   it("revokes every selected invitation in one request without a rate-limited follow-up read", async () => {
     const { api, listInvitations, revokeInvitation, revokeInvitations } = createAuditApi();
     trackedApis.push(api);
@@ -424,7 +534,7 @@ describe("collaboration render / subscription audit", () => {
       usePeoplePanelController({
         api,
         status: connectedStatus(),
-        members: [],
+        members: [membership("owner")],
         hosts: [],
         syncPhase: "ready",
         detailsOpen: true

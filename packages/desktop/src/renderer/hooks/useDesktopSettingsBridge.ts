@@ -46,6 +46,9 @@ export function useDesktopSettingsBridge({
   allowInMemoryFallback = false
 }: UseDesktopSettingsBridgeArgs) {
   const [settings, setSettings] = useState<DesktopUiSettings>(defaultDesktopSettings);
+  const [settingsHydrated, setSettingsHydrated] = useState(!settingsApi);
+  const setErrorRef = useRef(setError);
+  setErrorRef.current = setError;
   const latestSettingsRef = useRef<DesktopUiSettings>(defaultDesktopSettings);
   const lastConfirmedSettingsRef = useRef<DesktopUiSettings>(defaultDesktopSettings);
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -55,12 +58,14 @@ export function useDesktopSettingsBridge({
 
   useEffect(() => {
     if (!settingsApi) {
+      setSettingsHydrated(true);
       if (!allowInMemoryFallback) {
-        setError(missingSettingsBridgeMessage);
+        setErrorRef.current(missingSettingsBridgeMessage);
       }
       return;
     }
     let cancelled = false;
+    setSettingsHydrated(false);
 
     const loadSettings = async (options: { migrateLegacy: boolean }) => {
       try {
@@ -91,12 +96,16 @@ export function useDesktopSettingsBridge({
         writeLegacyMigrationMarker();
       } catch (caught) {
         if (!cancelled) {
-          setError(errorMessage(caught));
+          setErrorRef.current(errorMessage(caught));
         }
       }
     };
 
-    const initialization = loadSettings({ migrateLegacy: true });
+    const initialization = loadSettings({ migrateLegacy: true }).finally(() => {
+      if (!cancelled) {
+        setSettingsHydrated(true);
+      }
+    });
     initializationRef.current = initialization;
     refreshQueueRef.current = initialization;
     void initialization;
@@ -111,7 +120,7 @@ export function useDesktopSettingsBridge({
       cancelled = true;
       window.removeEventListener("focus", refreshOnFocus);
     };
-  }, [allowInMemoryFallback, setError, settingsApi]);
+  }, [allowInMemoryFallback, settingsApi]);
 
   const updateSettingsAndWait = useCallback(
     (update: DesktopSettingsUpdate) => {
@@ -169,6 +178,7 @@ export function useDesktopSettingsBridge({
 
   return {
     settings,
+    settingsHydrated,
     updateLayoutSettings,
     updateSettings,
     updateSettingsAndWait

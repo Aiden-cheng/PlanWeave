@@ -135,6 +135,7 @@ function errorFromUnknown(error: unknown): CollaborationBoundaryErrorView {
       code: string;
       message?: string;
       httpStatus?: number;
+      retryAfterMs?: number;
       retryable?: boolean;
     };
     return {
@@ -142,6 +143,7 @@ function errorFromUnknown(error: unknown): CollaborationBoundaryErrorView {
       code: typed.code,
       message: typed.message ?? typed.code,
       httpStatus: typed.httpStatus,
+      retryAfterMs: typed.retryAfterMs,
       retryable: typed.retryable ?? false
     };
   }
@@ -159,25 +161,30 @@ function mapSessionPhaseToSync(
 ): CollaborationSyncPhase {
   const phase = status.session.phase;
   const detail = status.session.detail ?? "";
-  if (status.session.lastErrorCode === "human_device_expired" || detail.includes("auth_expired")) {
-    return "auth_expired";
-  }
-  if (
-    status.session.lastErrorCode?.includes("forbidden") ||
-    status.session.lastErrorCode === "http_403"
-  ) {
-    return "forbidden";
-  }
   if (phase === "idle" || phase === "ready") return "disconnected";
   if (phase === "connecting") {
     if (detail.includes("reconnecting")) return "reconnecting";
     return current === "ready" || current === "degraded" ? "reconnecting" : "loading";
   }
   if (phase === "error") {
-    if (detail.includes("auth_expired")) return "auth_expired";
+    if (
+      status.session.lastErrorCode === "human_device_expired" ||
+      detail.includes("auth_expired")
+    ) {
+      return "auth_expired";
+    }
+    if (
+      status.session.lastErrorCode?.includes("forbidden") ||
+      status.session.lastErrorCode === "http_403"
+    ) {
+      return "forbidden";
+    }
     return "error";
   }
   if (isCollaborationSessionConnected(status)) {
+    if (status.session.lastErrorCode?.startsWith("collaboration_observer_")) {
+      return "degraded";
+    }
     if (current === "loading") return "loading";
     if (current === "stale_conflict") return "stale_conflict";
     if (current === "degraded") return "degraded";
@@ -525,9 +532,10 @@ export class CollaborationReadModelController {
       case "human.observer.event":
         switch (signal.event.kind) {
           case "membership":
-          case "invitation":
           case "project":
             this.setLoading("members", false);
+            break;
+          case "invitation":
             break;
           case "assignment":
             this.setLoading("assignments", false);
@@ -673,9 +681,12 @@ export class CollaborationReadModelController {
 
     switch (kind) {
       case "membership":
-      case "invitation":
       case "project":
         await this.reloadMembers(generation);
+        break;
+      case "invitation":
+        // Invitations are owned by the on-demand People details projection.
+        // They do not invalidate membership and must not fan out member reads.
         break;
       case "assignment":
         if (event.workItem) {

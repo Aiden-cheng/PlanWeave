@@ -8,6 +8,10 @@ import {
   type CanvasCommandLabels
 } from "../collaboration/CanvasCommandController";
 import type { createTranslator } from "../i18n";
+import type { PlanWeaveCollaborationApi } from "../../shared/collaboration";
+
+export type SharedCanvasCommandBridge = CanvasCommandBridge &
+  Pick<PlanWeaveCollaborationApi, "resolveCollaborationCanvasScope">;
 
 export const SHARED_CANVAS_RECONNECT_INTERVAL_MS = 3_000;
 
@@ -42,18 +46,48 @@ export function useSharedCanvasCommands(input: {
   selectedProjectId: string | null;
   activeProjectId: string | null;
   t: ReturnType<typeof createTranslator>;
-  api?: CanvasCommandBridge | null;
+  api?: SharedCanvasCommandBridge | null;
   /** Called after accepted mutation or successful reconnect so ReactFlow can refresh. */
   onAuthoritativeChange?: () => void | Promise<void>;
 }): SharedCanvasCommandsResult {
   const api = input.api === undefined ? collaborationBridge : input.api;
-  const authorityEnabled =
+  const [scopeResolution, setScopeResolution] = useState<
+    | { phase: "idle" }
+    | { phase: "resolving"; localProjectId: string; localCanvasId: string }
+    | {
+        phase: "resolved";
+        localProjectId: string;
+        localCanvasId: string;
+        remoteProjectId: string;
+        remoteCanvasId: string;
+      }
+    | { phase: "unmapped"; localProjectId: string; localCanvasId: string }
+  >({ phase: "idle" });
+  const currentScope =
+    scopeResolution.phase === "resolved" &&
+    scopeResolution.localProjectId === input.selectedProjectId &&
+    scopeResolution.localCanvasId === input.canvasId &&
+    scopeResolution.remoteProjectId === input.activeProjectId
+      ? scopeResolution
+      : null;
+  const scopeMayBeShared =
+    scopeResolution.phase === "resolving" &&
+    scopeResolution.localProjectId === input.selectedProjectId &&
+    scopeResolution.localCanvasId === input.canvasId;
+  const scopeKnownUnmapped =
+    scopeResolution.phase === "unmapped" &&
+    scopeResolution.localProjectId === input.selectedProjectId &&
+    scopeResolution.localCanvasId === input.canvasId;
+  const collaborationConfigured =
     input.enabled &&
     input.selectedProjectId !== null &&
-    input.selectedProjectId === input.activeProjectId &&
+    input.activeProjectId !== null &&
     input.canvasId !== null &&
     input.profileId !== null;
-  const sessionEnabled = authorityEnabled && input.sessionConnected;
+  const authorityEnabled =
+    collaborationConfigured &&
+    (scopeMayBeShared || currentScope !== null || (!input.sessionConnected && !scopeKnownUnmapped));
+  const sessionEnabled = authorityEnabled && input.sessionConnected && currentScope !== null;
 
   const labels = useMemo<CanvasCommandLabels>(
     () => ({
@@ -80,6 +114,56 @@ export function useSharedCanvasCommands(input: {
   });
 
   useEffect(() => {
+    if (
+      !api ||
+      !collaborationConfigured ||
+      !input.selectedProjectId ||
+      !input.canvasId ||
+      !input.activeProjectId
+    ) {
+      setScopeResolution({ phase: "idle" });
+      return undefined;
+    }
+    if (!input.sessionConnected) return undefined;
+    const localProjectId = input.selectedProjectId;
+    const localCanvasId = input.canvasId;
+    const activeProjectId = input.activeProjectId;
+    let active = true;
+    setScopeResolution({ phase: "resolving", localProjectId, localCanvasId });
+    void api
+      .resolveCollaborationCanvasScope({ localProjectId, canvasId: localCanvasId })
+      .then((scope) => {
+        if (!active) return;
+        if (!scope || scope.projectId !== activeProjectId) {
+          setScopeResolution({ phase: "unmapped", localProjectId, localCanvasId });
+          return;
+        }
+        setScopeResolution({
+          phase: "resolved",
+          localProjectId,
+          localCanvasId,
+          remoteProjectId: scope.projectId,
+          remoteCanvasId: scope.canvasId
+        });
+      })
+      .catch(() => {
+        if (active) {
+          setScopeResolution({ phase: "unmapped", localProjectId, localCanvasId });
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [
+    api,
+    collaborationConfigured,
+    input.activeProjectId,
+    input.canvasId,
+    input.selectedProjectId,
+    input.sessionConnected
+  ]);
+
+  useEffect(() => {
     if (!api) {
       controllerRef.current = null;
       setSnapshot({ session: null, lastError: null, lastStaleConflict: null, busy: false });
@@ -97,8 +181,9 @@ export function useSharedCanvasCommands(input: {
 
   useEffect(() => {
     const controller = controllerRef.current;
-    const canvasId = input.canvasId;
-    if (!controller || !sessionEnabled || !canvasId) {
+    const localProjectId = currentScope?.localProjectId ?? null;
+    const localCanvasId = currentScope?.localCanvasId ?? null;
+    if (!controller || !sessionEnabled || !localProjectId || !localCanvasId) {
       void controller?.unbind();
       return undefined;
     }
@@ -129,7 +214,7 @@ export function useSharedCanvasCommands(input: {
     };
     const bindAndStartPolling = async () => {
       try {
-        await controller.bind({ canvasId });
+        await controller.bind({ localProjectId, canvasId: localCanvasId });
         if (!active) return;
         const snap = controller.getSnapshot();
         if (!snap.session || snap.lastError) return;
@@ -147,7 +232,13 @@ export function useSharedCanvasCommands(input: {
       active = false;
       if (intervalId !== null) clearInterval(intervalId);
     };
-  }, [sessionEnabled, input.canvasId]);
+  }, [
+    currentScope?.localCanvasId,
+    currentScope?.localProjectId,
+    currentScope?.remoteCanvasId,
+    currentScope?.remoteProjectId,
+    sessionEnabled
+  ]);
 
   const submit = useCallback(
     async (submitInput: {
@@ -159,7 +250,17 @@ export function useSharedCanvasCommands(input: {
       if (!controller || !sessionEnabled) {
         return { ok: false, error: labels.notConnected, staleConflict: null };
       }
-      const result = await controller.submit(submitInput);
+      let result;
+      try {
+        result = await controller.submit(submitInput);
+      } catch (error) {
+        const snap = controller.getSnapshot();
+        return {
+          ok: false,
+          error: snap.lastError ?? (error instanceof Error ? error.message : String(error)),
+          staleConflict: snap.lastStaleConflict
+        };
+      }
       const snap = controller.getSnapshot();
       if (result.outcome.type === "canvas.command.accepted") {
         await onChangeRef.current?.();

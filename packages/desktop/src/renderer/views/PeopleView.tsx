@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
+  CollaborationContentBootstrapResult,
   CollaborationProfileView,
   LocalCollaborationServerStatus,
   PlanWeaveCollaborationApi
@@ -10,13 +11,21 @@ import { useCollaborationReadModels } from "../hooks/useCollaborationReadModels"
 import { useCollaborationStatus } from "../hooks/useCollaborationStatus";
 import { usePeoplePanelController } from "../hooks/usePeoplePanelController";
 import { CollaborationConnectForm } from "../team/CollaborationConnectForm";
+import { buildCollaborationDiagnosticReport } from "../team/collaborationDiagnostics";
 import { CollaborationWorkspaceOnboarding } from "../team/CollaborationWorkspaceOnboarding";
 import { PeoplePanel } from "../team/PeoplePanel";
 import { ContentAuthorityPanel } from "../collaboration/ContentAuthorityPanel";
-import { CurrentCanvasAccessPanel } from "../collaboration/CurrentCanvasAccessPanel";
+import {
+  CurrentCanvasAccessPanel,
+  CurrentCanvasMemberAccess
+} from "../collaboration/CurrentCanvasAccessPanel";
 import { LocalCollaborationServerPanel } from "../collaboration/LocalCollaborationServerPanel";
 import { useCurrentCanvasAccess } from "../hooks/useCurrentCanvasAccess";
 import { isCollaborationSessionConnected } from "../collaboration/sessionState";
+import {
+  collaborationErrorCode,
+  collaborationErrorMessage
+} from "../collaboration/formatCollaborationError";
 import type { DesktopUiSettings } from "../types";
 
 type PeopleSection = "workspace" | "hosting";
@@ -27,13 +36,17 @@ export type PeopleViewProps = {
   api?: PlanWeaveCollaborationApi | null;
   /** Optional clipboard writer; defaults to navigator.clipboard. */
   copyText?: (text: string) => Promise<void>;
+  localProjectId?: string | null;
   canvasId?: string | null;
   onContentMaterialized?: () => Promise<void>;
+  onContentReplicaReady?: (result: CollaborationContentBootstrapResult) => Promise<void>;
   onMembershipOutcome?: (outcome: { ok: boolean; message: string }) => void;
   collaborationScopeLayout: DesktopUiSettings["layout"]["collaborationScope"];
   onCollaborationScopeLayoutChange: (
     patch: Partial<DesktopUiSettings["layout"]["collaborationScope"]>
   ) => void;
+  localInvitationHandoff?: string | null;
+  onLocalInvitationHandoffChange?: (handoff: string | null) => void;
 };
 
 async function defaultCopyText(text: string): Promise<void> {
@@ -80,20 +93,44 @@ export function resolveCollaborationInvitationServerBaseUrl(
   return activeProfile.serverBaseUrl;
 }
 
+export function formatPeoplePanelError(
+  t: ReturnType<typeof createTranslator>,
+  error: unknown
+): string {
+  const code = collaborationErrorCode(error);
+  if (code === "human_rate_limited") return t("peopleRequestRateLimited");
+  if (code === "human_limit_exceeded") return t("localServerInvitationCapacityExceeded");
+  return collaborationErrorMessage(error);
+}
+
 /** Active-project member administration surface. */
 export function PeopleView({
   t,
   api: apiProp,
   copyText = defaultCopyText,
+  localProjectId = null,
   canvasId = null,
   onContentMaterialized,
+  onContentReplicaReady,
   onMembershipOutcome,
   collaborationScopeLayout,
-  onCollaborationScopeLayoutChange
+  onCollaborationScopeLayoutChange,
+  localInvitationHandoff: controlledLocalInvitationHandoff,
+  onLocalInvitationHandoffChange
 }: PeopleViewProps) {
   const api = apiProp === undefined ? collaborationBridge : apiProp;
   const [section, setSection] = useState<PeopleSection>("workspace");
   const [localHostingOpen, setLocalHostingOpen] = useState(false);
+  const [revealInvitationManagement, setRevealInvitationManagement] = useState(false);
+  const [internalLocalInvitationHandoff, setInternalLocalInvitationHandoff] = useState<
+    string | null
+  >(null);
+  const localInvitationHandoff =
+    controlledLocalInvitationHandoff === undefined
+      ? internalLocalInvitationHandoff
+      : controlledLocalInvitationHandoff;
+  const setLocalInvitationHandoff =
+    onLocalInvitationHandoffChange ?? setInternalLocalInvitationHandoff;
   const [localServerStatus, setLocalServerStatus] = useState<LocalCollaborationServerStatus | null>(
     null
   );
@@ -126,7 +163,14 @@ export function PeopleView({
     status?.workspaceConnection.status === "reconnecting";
   const hasConfiguredWorkspace =
     activeProfile?.hasDeviceCredential === true || workspaceConnectionActive;
-  const showOnboarding = localHostingOpen || !hasConfiguredWorkspace;
+  const showOnboarding = !hasConfiguredWorkspace;
+
+  useEffect(() => {
+    if (hasConfiguredWorkspace && localHostingOpen) {
+      setLocalHostingOpen(false);
+    }
+  }, [hasConfiguredWorkspace, localHostingOpen]);
+
   const invitationServerBaseUrl = resolveCollaborationInvitationServerBaseUrl(
     activeProfile,
     localServerStatus
@@ -134,13 +178,14 @@ export function PeopleView({
   const handleLocalServerStatusChange = useCallback(
     (nextStatus: LocalCollaborationServerStatus) => {
       setLocalServerStatus(nextStatus);
-      if (nextStatus.state === "running") {
+      if (localHostingOpen && nextStatus.state === "running") {
         void refreshCollaborationStatus();
       }
     },
-    [refreshCollaborationStatus]
+    [localHostingOpen, refreshCollaborationStatus]
   );
   const currentCanvasAccess = useCurrentCanvasAccess({ api, canvasId, status });
+  const formatPanelError = useCallback((error: unknown) => formatPeoplePanelError(t, error), [t]);
 
   // Subscribe only: the project shell owns the shared hub's active project/canvas binding.
   const { snapshot, viewModel, controller } = useCollaborationReadModels({
@@ -156,8 +201,23 @@ export function PeopleView({
     members: viewModel.members,
     hosts: viewModel.hosts,
     syncPhase: snapshot.syncPhase,
-    detailsOpen: true
+    detailsOpen: true,
+    formatError: formatPanelError
   });
+  const diagnosticReport = useMemo(
+    () =>
+      status
+        ? buildCollaborationDiagnosticReport(status, undefined, snapshot, currentCanvasAccess.view)
+        : null,
+    [currentCanvasAccess.view, snapshot, status]
+  );
+
+  const handleManageInvitations = useCallback(() => {
+    setLocalHostingOpen(false);
+    setRevealInvitationManagement(true);
+    setSection("workspace");
+    void panel.refreshDetails();
+  }, [panel.refreshDetails]);
 
   const refreshMembers = async () => {
     if (controller && activeProfile) {
@@ -178,7 +238,7 @@ export function PeopleView({
       data-testid="people-view"
       aria-label={t("peopleTitle")}
     >
-      <div className="mx-auto flex w-full max-w-6xl flex-col pb-10">
+      <div className="mx-auto flex w-full max-w-6xl flex-col px-5 pb-12 pt-1 sm:px-7 lg:px-9">
         {collaborationStatusLoading && !status ? (
           <div className="py-8 text-xs text-muted-foreground" role="status">
             {t("peopleWorking")}
@@ -198,7 +258,6 @@ export function PeopleView({
               onLocalHostingOpenChange={setLocalHostingOpen}
               localHostingSlot={
                 <LocalCollaborationServerPanel
-                  key={`onboarding:${canvasId ?? "none"}`}
                   api={api}
                   t={t}
                   projectId={null}
@@ -206,6 +265,9 @@ export function PeopleView({
                   scopeLayout={collaborationScopeLayout}
                   onScopeLayoutChange={onCollaborationScopeLayoutChange}
                   copyText={copyText}
+                  invitationHandoff={localInvitationHandoff}
+                  onInvitationHandoffChange={setLocalInvitationHandoff}
+                  onManageInvitations={handleManageInvitations}
                   onStatusChange={handleLocalServerStatusChange}
                 />
               }
@@ -217,6 +279,7 @@ export function PeopleView({
                   fixedMode="setup"
                   showHeader={false}
                   showConnectionSummary
+                  copyText={copyText}
                   onConnected={refreshCollaborationStatus}
                 />
               }
@@ -228,6 +291,7 @@ export function PeopleView({
                   fixedMode="join"
                   showHeader={false}
                   showConnectionSummary={false}
+                  copyText={copyText}
                   onConnected={refreshCollaborationStatus}
                 />
               }
@@ -236,14 +300,15 @@ export function PeopleView({
         ) : (
           <>
             <nav
-              className="mb-7 flex items-end gap-7 border-b border-border/70 px-1"
+              className="mb-7 flex items-end gap-7 border-b border-border/70 px-1 pt-1"
+              data-testid="people-section-nav"
               aria-label={t("peopleSections")}
             >
               {(["workspace", "hosting"] as const).map((value) => (
                 <button
                   key={value}
                   type="button"
-                  className={`relative pb-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  className={`relative pb-3 text-sm font-semibold tracking-[-0.01em] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                     section === value
                       ? "text-text-strong after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:bg-text-strong"
                       : "text-muted-foreground hover:text-text-strong"
@@ -258,12 +323,11 @@ export function PeopleView({
             </nav>
 
             {section === "workspace" ? (
-              <div className="flex flex-col gap-8" data-testid="people-workspace-section">
+              <div className="flex flex-col gap-6" data-testid="people-workspace-section">
                 <PeoplePanel
                   mode={panel.mode}
                   presence={panel.presence}
                   members={panel.members}
-                  hosts={panel.hosts}
                   invitations={panel.invitations}
                   devices={panel.devices}
                   detailsLoading={panel.detailsLoading}
@@ -271,6 +335,7 @@ export function PeopleView({
                   actionError={panel.actionError}
                   actionBusy={panel.actionBusy}
                   pendingInvitation={panel.pendingInvitation}
+                  revealInvitationManagement={revealInvitationManagement}
                   invitationConnection={
                     activeProfile
                       ? {
@@ -280,8 +345,11 @@ export function PeopleView({
                       : null
                   }
                   showTitle={false}
+                  diagnosticReport={diagnosticReport}
+                  onCopyDiagnostics={copyText}
                   t={t}
                   onCreateInvitation={panel.createInvitation}
+                  onViewInvitation={panel.viewInvitation}
                   onCopyInvitationToken={copyText}
                   onDismissPendingInvitation={panel.clearPendingInvitation}
                   onRevokeInvitation={async (invitationId) => {
@@ -321,15 +389,57 @@ export function PeopleView({
                     await panel.refreshDetails();
                     await refreshMembers();
                   }}
+                  renderMemberAccess={(member) => {
+                    if (currentCanvasAccess.loading && !currentCanvasAccess.view) {
+                      return <p className="text-xs text-muted-foreground">{t("accessLoading")}</p>;
+                    }
+                    const person = currentCanvasAccess.view?.people.find(
+                      (candidate) => candidate.humanPrincipalId === member.humanPrincipalId
+                    );
+                    if (!currentCanvasAccess.view || !person) {
+                      return (
+                        <p className="text-xs text-muted-foreground">
+                          {currentCanvasAccess.error ?? t("accessMemberUnavailable")}
+                        </p>
+                      );
+                    }
+                    return (
+                      <CurrentCanvasMemberAccess
+                        view={currentCanvasAccess.view}
+                        person={person}
+                        busy={currentCanvasAccess.busy}
+                        t={t}
+                        onGrant={currentCanvasAccess.grant}
+                        onRevoke={currentCanvasAccess.revoke}
+                      />
+                    );
+                  }}
                   connectSlot={
                     <CollaborationConnectForm
                       api={api}
                       status={status}
                       t={t}
                       initialMode={activeProfile ? "connect" : "join"}
+                      copyText={copyText}
                       onConnected={refreshCollaborationStatus}
                     />
                   }
+                />
+              </div>
+            ) : (
+              <div className="flex flex-col" data-testid="people-hosting-section">
+                <LocalCollaborationServerPanel
+                  api={api}
+                  t={t}
+                  projectId={activeProfile?.projectId ?? null}
+                  canvasId={canvasId}
+                  scopeLayout={collaborationScopeLayout}
+                  onScopeLayoutChange={onCollaborationScopeLayoutChange}
+                  copyText={copyText}
+                  invitationHandoff={localInvitationHandoff}
+                  onInvitationHandoffChange={setLocalInvitationHandoff}
+                  onManageInvitations={handleManageInvitations}
+                  onStatusChange={handleLocalServerStatusChange}
                 />
                 <CurrentCanvasAccessPanel
                   view={currentCanvasAccess.view}
@@ -339,29 +449,17 @@ export function PeopleView({
                   t={t}
                   onRefresh={currentCanvasAccess.refresh}
                   onUpdateVisibility={currentCanvasAccess.updateVisibility}
-                  onGrant={currentCanvasAccess.grant}
-                  onRevoke={currentCanvasAccess.revoke}
                 />
                 <ContentAuthorityPanel
                   api={api ?? null}
+                  connectionKey={activeProfile?.profileId ?? null}
+                  authorityProjectId={activeProfile?.projectId ?? null}
+                  localProjectId={localProjectId}
                   canvasId={canvasId}
                   connected={sessionConnected}
                   onMaterialized={onContentMaterialized}
+                  onReplicaReady={onContentReplicaReady}
                   t={t}
-                />
-              </div>
-            ) : (
-              <div className="flex flex-col gap-6" data-testid="people-hosting-section">
-                <LocalCollaborationServerPanel
-                  key={`${activeProfile?.profileId ?? "local"}:${canvasId ?? "none"}`}
-                  api={api}
-                  t={t}
-                  projectId={activeProfile?.projectId ?? null}
-                  canvasId={canvasId}
-                  scopeLayout={collaborationScopeLayout}
-                  onScopeLayoutChange={onCollaborationScopeLayoutChange}
-                  copyText={copyText}
-                  onStatusChange={handleLocalServerStatusChange}
                 />
               </div>
             )}

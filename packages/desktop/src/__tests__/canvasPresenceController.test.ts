@@ -51,6 +51,36 @@ function createBridge() {
 describe("CanvasPresenceController", () => {
   beforeEach(() => vi.useRealTimers());
 
+  it("flushes the latest local cursor after the presence handshake completes", async () => {
+    const transport = createBridge();
+    const controller = new CanvasPresenceController({
+      api: transport.bridge,
+      labels: labels("en")
+    });
+    await controller.start({ profileId: "profile-1", canvasId: "canvas-main" });
+
+    await controller.publish({ pointer: { x: 10, y: 20 }, selectionIds: [] });
+    await controller.publish({ pointer: { x: 30, y: 40 }, selectionIds: ["T-001"] });
+    expect(transport.bridge.publishCollaborationPresence).not.toHaveBeenCalled();
+
+    transport.emit(
+      signal({
+        type: "canvas.presence.snapshot",
+        protocolVersion: 1,
+        projectId: "project-1",
+        canvasId: "canvas-main",
+        sessions: []
+      })
+    );
+    await Promise.resolve();
+
+    expect(transport.bridge.publishCollaborationPresence).toHaveBeenCalledTimes(1);
+    expect(transport.bridge.publishCollaborationPresence).toHaveBeenCalledWith({
+      pointer: { x: 30, y: 40 },
+      selectionIds: ["T-001"]
+    });
+  });
+
   it("keeps two client read models scoped, validated, and remote-only", async () => {
     const transport = createBridge();
     const first = new CanvasPresenceController({ api: transport.bridge, labels: labels("en") });

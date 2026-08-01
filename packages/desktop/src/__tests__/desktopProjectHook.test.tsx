@@ -3,7 +3,7 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDesktopBridgeMock } from "./desktopBridgeMock";
-import { project, projectSnapshot } from "./helpers/desktopProjectFixtures";
+import { deferred, project, projectSnapshot } from "./helpers/desktopProjectFixtures";
 import { graph } from "./helpers/graphFixtures";
 import { cleanupRendererTestEnvironment } from "./helpers/rendererTestEnvironment";
 import { useVisibleGraphTasks } from "../renderer/hooks/useVisibleGraphTasks";
@@ -118,5 +118,45 @@ describe("desktop renderer hook interfaces", () => {
       })
     );
     expect(updateSettings).toHaveBeenCalledWith({ runtimePath: project.workspaceRoot });
+  });
+
+  it("does not clear the committed collaboration selection while projects are restoring", async () => {
+    const projectsResult = deferred<typeof project[]>();
+    const bridge = createDesktopBridgeMock({
+      listProjects: vi.fn(() => projectsResult.promise),
+      getDesktopProjectSnapshot: vi.fn().mockResolvedValue(projectSnapshot()),
+      refreshPackageFileChanges: vi
+        .fn()
+        .mockResolvedValue({ diagnostics: [], dirtyPromptRefs: [] }),
+      watchPackageFiles: vi.fn().mockResolvedValue(undefined)
+    });
+    const collaboration = {
+      setCollaborationCurrentSelection: vi.fn().mockResolvedValue(undefined),
+      clearCollaborationCurrentSelection: vi.fn().mockResolvedValue(undefined)
+    };
+    vi.stubGlobal("planweave", bridge);
+    vi.stubGlobal("planweaveCollaboration", collaboration);
+    vi.resetModules();
+    const { useDesktopProject } = await import("../renderer/hooks/useDesktopProject");
+
+    renderHook(() =>
+      useDesktopProject({
+        setError: vi.fn(),
+        t: createTranslator("en"),
+        updateSettings: vi.fn()
+      })
+    );
+
+    await waitFor(() => expect(bridge.listProjects).toHaveBeenCalledOnce());
+    expect(collaboration.clearCollaborationCurrentSelection).not.toHaveBeenCalled();
+
+    projectsResult.resolve([project]);
+    await waitFor(() =>
+      expect(collaboration.setCollaborationCurrentSelection).toHaveBeenCalledWith({
+        projectId: project.projectId,
+        canvasId: "canvas-main"
+      })
+    );
+    expect(collaboration.clearCollaborationCurrentSelection).not.toHaveBeenCalled();
   });
 });

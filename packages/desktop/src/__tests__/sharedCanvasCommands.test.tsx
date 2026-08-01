@@ -9,9 +9,9 @@ import type {
   CollaborationCanvasCommandSessionView,
   CollaborationCanvasReconnectResult
 } from "../shared/collaboration";
-import type { CanvasCommandBridge } from "../renderer/collaboration/CanvasCommandController";
 import {
   SHARED_CANVAS_RECONNECT_INTERVAL_MS,
+  type SharedCanvasCommandBridge,
   useSharedCanvasCommands
 } from "../renderer/hooks/useSharedCanvasCommands";
 
@@ -49,12 +49,13 @@ function reconnectResult(
 
 function createBridge(options?: {
   bindError?: Error;
-  reconnect?: CanvasCommandBridge["reconnectCollaborationCanvas"];
+  reconnect?: SharedCanvasCommandBridge["reconnectCollaborationCanvas"];
+  resolveScope?: SharedCanvasCommandBridge["resolveCollaborationCanvasScope"];
 }) {
-  const reconnect = vi.fn<CanvasCommandBridge["reconnectCollaborationCanvas"]>(
+  const reconnect = vi.fn<SharedCanvasCommandBridge["reconnectCollaborationCanvas"]>(
     options?.reconnect ?? (async () => reconnectResult(initialSession))
   );
-  const bind = vi.fn<CanvasCommandBridge["bindCollaborationCanvasCommandSession"]>(async () => {
+  const bind = vi.fn<SharedCanvasCommandBridge["bindCollaborationCanvasCommandSession"]>(async () => {
     if (options?.bindError) throw options.bindError;
     return initialSession;
   });
@@ -65,14 +66,17 @@ function createBridge(options?: {
       },
       reconnectCollaborationCanvas: reconnect,
       bindCollaborationCanvasCommandSession: bind,
-      getCollaborationCanvasCommandSession: async () => initialSession
+      getCollaborationCanvasCommandSession: async () => initialSession,
+      resolveCollaborationCanvasScope:
+        options?.resolveScope ??
+        (async ({ canvasId }) => ({ projectId: "project-1", canvasId }))
     },
     reconnect,
     bind
   };
 }
 
-function hookInput(api: CanvasCommandBridge, onAuthoritativeChange?: () => void | Promise<void>) {
+function hookInput(api: SharedCanvasCommandBridge, onAuthoritativeChange?: () => void | Promise<void>) {
   return {
     api,
     enabled: true,
@@ -141,7 +145,7 @@ describe("useSharedCanvasCommands", () => {
     const onAuthoritativeChange = vi.fn();
     const bridge = createBridge({
       reconnect: vi
-        .fn<CanvasCommandBridge["reconnectCollaborationCanvas"]>()
+        .fn<SharedCanvasCommandBridge["reconnectCollaborationCanvas"]>()
         .mockResolvedValueOnce(reconnectResult(initialSession))
         .mockResolvedValueOnce(
           reconnectResult(remoteSession, exampleCanvasReconnectAfterDisconnect.entries)
@@ -152,7 +156,10 @@ describe("useSharedCanvasCommands", () => {
       useSharedCanvasCommands(hookInput(bridge.api, onAuthoritativeChange))
     );
     await flushEffects();
-    expect(bridge.bind).toHaveBeenCalledWith({ canvasId: "default" });
+    expect(bridge.bind).toHaveBeenCalledWith({
+      localProjectId: "project-1",
+      canvasId: "default"
+    });
     expect(bridge.reconnect).toHaveBeenCalledTimes(1);
     onAuthoritativeChange.mockClear();
 
@@ -163,6 +170,43 @@ describe("useSharedCanvasCommands", () => {
     expect(bridge.reconnect).toHaveBeenCalledTimes(2);
     expect(onAuthoritativeChange).toHaveBeenCalledTimes(1);
     expect(result.current.snapshot.session?.revision).toBe(remoteSession.revision);
+  });
+
+  it("binds an imported local replica to its remote canvas scope", async () => {
+    vi.useFakeTimers();
+    const bridge = createBridge({
+      resolveScope: async () => ({ projectId: "remote-project", canvasId: "remote-canvas" })
+    });
+
+    renderHook(() =>
+      useSharedCanvasCommands({
+        ...hookInput(bridge.api),
+        selectedProjectId: "local-replica",
+        activeProjectId: "remote-project"
+      })
+    );
+    await flushEffects();
+
+    expect(bridge.bind).toHaveBeenCalledWith({
+      localProjectId: "local-replica",
+      canvasId: "default"
+    });
+  });
+
+  it("keeps an unrelated local project on direct runtime writes after scope resolution", async () => {
+    vi.useFakeTimers();
+    const bridge = createBridge({ resolveScope: async () => null });
+
+    const { result } = renderHook(() =>
+      useSharedCanvasCommands({
+        ...hookInput(bridge.api),
+        selectedProjectId: "unrelated-local-project"
+      })
+    );
+    await flushEffects();
+
+    expect(result.current.enabled).toBe(false);
+    expect(bridge.bind).not.toHaveBeenCalled();
   });
 
   it("stops polling after unmount", async () => {
@@ -188,7 +232,7 @@ describe("useSharedCanvasCommands", () => {
     });
     const bridge = createBridge({
       reconnect: vi
-        .fn<CanvasCommandBridge["reconnectCollaborationCanvas"]>()
+        .fn<SharedCanvasCommandBridge["reconnectCollaborationCanvas"]>()
         .mockResolvedValueOnce(reconnectResult(initialSession))
         .mockImplementationOnce(async () => {
           await remoteReconnect;

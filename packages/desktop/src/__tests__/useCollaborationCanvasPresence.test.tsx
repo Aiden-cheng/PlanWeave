@@ -19,7 +19,24 @@ afterEach(() => {
 function bridgeFixture() {
   let onSignal: ((signal: CollaborationPresenceSignal) => void) | null = null;
   const api: CanvasPresenceBridge = {
-    startCollaborationPresence: vi.fn().mockResolvedValue(undefined),
+    resolveCollaborationCanvasScope: vi.fn(async (input) => ({
+      projectId: input.localProjectId,
+      canvasId: input.canvasId
+    })),
+    startCollaborationPresence: vi.fn(async ({ canvasId }) => {
+      queueMicrotask(() =>
+        onSignal?.({
+          profileId: "profile-1",
+          message: {
+            type: "canvas.presence.snapshot",
+            protocolVersion: 1,
+            projectId: "project-1",
+            canvasId,
+            sessions: []
+          }
+        })
+      );
+    }),
     stopCollaborationPresence: vi.fn().mockResolvedValue(undefined),
     publishCollaborationPresence: vi.fn().mockResolvedValue(undefined),
     onCollaborationPresenceSignal: vi.fn((callback) => {
@@ -161,31 +178,37 @@ describe("useCollaborationCanvasPresence", () => {
     expect(fixture.api.stopCollaborationPresence).toHaveBeenCalled();
   });
 
-  it("does not connect or publish when the selected project differs from the active profile", async () => {
+  it("resolves an imported local replica before starting presence", async () => {
     const fixture = bridgeFixture();
-    const { result, rerender } = renderHook(
-      ({ activeProjectId }) =>
-        useCollaborationCanvasPresence({
-          api: fixture.api,
-          canvasId: "default",
-          enabled: true,
-          sessionConnected: true,
-          profileId: "profile-1",
-          selectedProjectId: "project-a",
-          activeProjectId,
-          t
-        }),
-      { initialProps: { activeProjectId: "project-b" } }
+    vi.mocked(fixture.api.resolveCollaborationCanvasScope).mockResolvedValue({
+      projectId: "remote-project",
+      canvasId: "remote-canvas"
+    });
+    const { result } = renderHook(() =>
+      useCollaborationCanvasPresence({
+        api: fixture.api,
+        canvasId: "default",
+        enabled: true,
+        sessionConnected: true,
+        profileId: "profile-1",
+        selectedProjectId: "imported-local-project",
+        activeProjectId: "remote-project",
+        t
+      })
     );
 
-    await act(async () => Promise.resolve());
-    expect(fixture.api.startCollaborationPresence).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(fixture.api.resolveCollaborationCanvasScope).toHaveBeenCalledWith({
+        localProjectId: "imported-local-project",
+        canvasId: "default"
+      })
+    );
+    await waitFor(() =>
+      expect(fixture.api.startCollaborationPresence).toHaveBeenCalledWith({
+        canvasId: "remote-canvas"
+      })
+    );
     act(() => result.current.onSelectionChange(selection));
-    expect(fixture.api.publishCollaborationPresence).not.toHaveBeenCalled();
-
-    rerender({ activeProjectId: "project-a" });
-    await waitFor(() => expect(fixture.api.startCollaborationPresence).toHaveBeenCalledTimes(1));
-    rerender({ activeProjectId: "project-b" });
-    await waitFor(() => expect(fixture.api.stopCollaborationPresence).toHaveBeenCalled());
+    expect(fixture.api.publishCollaborationPresence).toHaveBeenCalledTimes(1);
   });
 });

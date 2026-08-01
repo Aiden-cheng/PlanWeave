@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { collaborationBridge } from "../bridge";
 import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
 
@@ -25,22 +25,31 @@ export function useCollaborationStatus(
   const [status, setStatus] = useState<CollaborationStatus | null>(null);
   const [loading, setLoading] = useState(Boolean(api));
   const [error, setError] = useState<string | null>(null);
+  const generationRef = useRef(0);
 
   const refresh = useCallback(async () => {
     if (!api) return;
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
     setLoading(true);
     try {
       const next = await api.getCollaborationStatus();
+      if (generationRef.current !== generation) return;
       setStatus(next);
       setError(null);
     } catch (loadError) {
+      if (generationRef.current !== generation) return;
       setError(loadError instanceof Error ? loadError.message : "collaboration_status_failed");
     } finally {
-      setLoading(false);
+      if (generationRef.current === generation) {
+        setLoading(false);
+      }
     }
   }, [api]);
 
   useEffect(() => {
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
     if (!api) {
       setStatus(null);
       setLoading(false);
@@ -54,16 +63,16 @@ export function useCollaborationStatus(
     const load = async () => {
       try {
         const next = await api.getCollaborationStatus();
-        if (!cancelled) {
+        if (!cancelled && generationRef.current === generation) {
           setStatus(next);
           setError(null);
         }
       } catch (loadError) {
-        if (!cancelled) {
+        if (!cancelled && generationRef.current === generation) {
           setError(loadError instanceof Error ? loadError.message : "collaboration_status_failed");
         }
       } finally {
-        if (!cancelled) {
+        if (!cancelled && generationRef.current === generation) {
           setLoading(false);
         }
       }
@@ -71,6 +80,7 @@ export function useCollaborationStatus(
 
     void load();
     const unsubscribe = api.onCollaborationStatusChanged((next) => {
+      generationRef.current += 1;
       setStatus(next);
       setError(null);
       setLoading(false);
@@ -78,6 +88,7 @@ export function useCollaborationStatus(
 
     return () => {
       cancelled = true;
+      generationRef.current += 1;
       unsubscribe();
     };
   }, [api]);

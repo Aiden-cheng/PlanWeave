@@ -43,8 +43,17 @@ function createProps(
       nonPersistenceWarning: null
     },
     members: [],
-    hosts: [],
-    invitations: [],
+    invitations: pendingInvitationValue
+      ? [
+          {
+            invitationId: pendingInvitationValue.invitation.invitationId,
+            role: "member",
+            createdAt: pendingInvitationValue.invitation.createdAt,
+            expiresAt: pendingInvitationValue.invitation.expiresAt,
+            open: true
+          }
+        ]
+      : [],
     devices: [],
     detailsLoading: false,
     detailsError: null,
@@ -57,6 +66,7 @@ function createProps(
     },
     t,
     onCreateInvitation: vi.fn(),
+    onViewInvitation: vi.fn(),
     onCopyInvitationToken,
     onDismissPendingInvitation: vi.fn(),
     onRevokeInvitation: vi.fn(),

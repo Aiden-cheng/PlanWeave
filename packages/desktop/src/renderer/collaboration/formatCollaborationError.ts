@@ -4,6 +4,12 @@ import {
   formatUnknownCollaborationError
 } from "./peopleViewModels.js";
 
+export function collaborationErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== "object" || !("code" in error)) return null;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" && code.trim() ? code.trim() : null;
+}
+
 export function collaborationErrorMessage(
   error: CollaborationBoundaryErrorView | unknown | null | undefined
 ): string {

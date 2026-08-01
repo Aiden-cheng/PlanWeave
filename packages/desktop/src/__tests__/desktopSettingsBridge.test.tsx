@@ -47,6 +47,30 @@ afterEach(() => {
 });
 
 describe("desktop settings bridge", () => {
+  it("reports hydration only after persisted settings have loaded", async () => {
+    let resolveSettings!: (settings: DesktopUiSettings) => void;
+    const settingsApi: PlanWeaveDesktopSettingsApi = {
+      getDesktopSettings: vi.fn(
+        () =>
+          new Promise<DesktopUiSettings>((resolve) => {
+            resolveSettings = resolve;
+          })
+      ),
+      saveDesktopSettings: vi.fn().mockResolvedValue(defaultDesktopSettings),
+      migrateLegacyDesktopSettings: vi.fn().mockResolvedValue(defaultDesktopSettings)
+    };
+    const setError = vi.fn();
+    const { result } = renderHook(() =>
+      useDesktopSettingsBridge({ setError, settingsApi })
+    );
+
+    expect(result.current.settingsHydrated).toBe(false);
+    act(() => resolveSettings({ ...defaultDesktopSettings, runtimePath: "/tmp/restored" }));
+
+    await waitFor(() => expect(result.current.settingsHydrated).toBe(true));
+    expect(result.current.settings.runtimePath).toBe("/tmp/restored");
+  });
+
   it("loads settings through the desktop settings bridge and migrates legacy localStorage once", async () => {
     const legacyPayload = JSON.stringify({
       appearance: "dark",

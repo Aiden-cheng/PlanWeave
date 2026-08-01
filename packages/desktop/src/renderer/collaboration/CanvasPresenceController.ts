@@ -22,6 +22,7 @@ export type CanvasPresenceBridge = Pick<
   | "stopCollaborationPresence"
   | "publishCollaborationPresence"
   | "onCollaborationPresenceSignal"
+  | "resolveCollaborationCanvasScope"
 >;
 
 export type CanvasPresenceRemoteSession = {
@@ -47,6 +48,7 @@ export type CanvasPresenceLabels = {
 };
 
 type TrackedSession = CanvasPresenceRemoteSession;
+type PresenceUpdate = CollaborationPresenceUpdateInput;
 
 const EMPTY_SNAPSHOT: CanvasPresenceSnapshot = { sessions: [], error: null };
 
@@ -103,6 +105,9 @@ export class CanvasPresenceController {
   private sessions = new Map<string, TrackedSession>();
   private listeners = new Set<(snapshot: CanvasPresenceSnapshot) => void>();
   private unsubscribeSignal: (() => void) | null = null;
+  private connected = false;
+  private latestUpdate: PresenceUpdate | null = null;
+  private pendingUpdate: PresenceUpdate | null = null;
   private generation = 0;
   private snapshot: CanvasPresenceSnapshot = EMPTY_SNAPSHOT;
 
@@ -127,6 +132,9 @@ export class CanvasPresenceController {
     await this.stop();
     const generation = ++this.generation;
     this.scope = { ...scope };
+    this.connected = false;
+    this.latestUpdate = null;
+    this.pendingUpdate = null;
     this.unsubscribeSignal = this.api.onCollaborationPresenceSignal((signal) => {
       if (generation !== this.generation) return;
       this.handleSignal(signal);
@@ -135,6 +143,7 @@ export class CanvasPresenceController {
       await this.api.startCollaborationPresence({ canvasId: scope.canvasId });
     } catch (error) {
       if (generation !== this.generation) return;
+      this.connected = false;
       this.publishSnapshot({
         sessions: [],
         error: error instanceof Error ? error.message : String(error)
@@ -146,6 +155,9 @@ export class CanvasPresenceController {
   async stop(): Promise<void> {
     this.generation += 1;
     this.scope = null;
+    this.connected = false;
+    this.latestUpdate = null;
+    this.pendingUpdate = null;
     this.unsubscribeSignal?.();
     this.unsubscribeSignal = null;
     this.sessions.clear();
@@ -158,10 +170,16 @@ export class CanvasPresenceController {
   }
 
   async publish(input: CollaborationPresenceUpdateInput): Promise<void> {
-    await this.api.publishCollaborationPresence({
+    const update = {
       pointer: cleanPointer(input.pointer),
       selectionIds: cleanSelectionIds(input.selectionIds)
-    });
+    };
+    this.latestUpdate = update;
+    if (!this.connected) {
+      this.pendingUpdate = update;
+      return;
+    }
+    await this.api.publishCollaborationPresence(update);
   }
 
   private handleSignal(signal: CollaborationPresenceSignal): void {
@@ -169,6 +187,8 @@ export class CanvasPresenceController {
     if (!scope || signal.profileId !== scope.profileId) return;
     if ("reset" in signal) {
       if (signal.reset.canvasId !== scope.canvasId) return;
+      this.connected = false;
+      this.pendingUpdate = this.latestUpdate;
       this.sessions.clear();
       this.publishSnapshot(EMPTY_SNAPSHOT);
       return;
@@ -177,12 +197,15 @@ export class CanvasPresenceController {
     if (!sameScope(message, scope)) return;
     switch (message.type) {
       case "canvas.presence.snapshot": {
+        this.connected = true;
         this.sessions.clear();
         for (const session of message.sessions) this.upsertSession(session);
         this.publishSnapshot({ sessions: this.readSessions(), error: null });
+        void this.flushPendingUpdate();
         return;
       }
       case "canvas.presence.update":
+        this.connected = true;
         this.upsertSession(message.session);
         this.publishSnapshot({ sessions: this.readSessions(), error: null });
         return;
@@ -191,6 +214,8 @@ export class CanvasPresenceController {
         this.publishSnapshot({ sessions: this.readSessions(), error: null });
         return;
       case "canvas.presence.error":
+        this.connected = false;
+        this.pendingUpdate = this.latestUpdate;
         this.sessions.clear();
         this.publishSnapshot({ sessions: [], error: toErrorMessage(message, this.labels) });
         return;
@@ -198,6 +223,21 @@ export class CanvasPresenceController {
         const _exhaustive: never = message;
         void _exhaustive;
       }
+    }
+  }
+
+  private async flushPendingUpdate(): Promise<void> {
+    const pending = this.pendingUpdate;
+    if (!this.connected || !pending) return;
+    this.pendingUpdate = null;
+    try {
+      await this.api.publishCollaborationPresence(pending);
+    } catch (error) {
+      this.pendingUpdate = pending;
+      this.publishSnapshot({
+        sessions: this.readSessions(),
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
   }
 

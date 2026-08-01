@@ -3,6 +3,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState, type ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocalCollaborationServerPanel } from "../renderer/collaboration/LocalCollaborationServerPanel";
 import { createTranslator } from "../renderer/i18n";
@@ -22,6 +23,22 @@ const expandedScopeLayout = {
 const onScopeLayoutChange = vi.fn();
 const copyText = vi.fn(async () => undefined);
 afterEach(cleanup);
+
+function LocalCollaborationServerPanelHarness(
+  props: Omit<
+    ComponentProps<typeof LocalCollaborationServerPanel>,
+    "invitationHandoff" | "onInvitationHandoffChange"
+  >
+) {
+  const [invitationHandoff, setInvitationHandoff] = useState<string | null>(null);
+  return (
+    <LocalCollaborationServerPanel
+      {...props}
+      invitationHandoff={invitationHandoff}
+      onInvitationHandoffChange={setInvitationHandoff}
+    />
+  );
+}
 
 function api(overrides: Partial<PlanWeaveCollaborationApi> = {}): PlanWeaveCollaborationApi {
   const catalog = {
@@ -123,7 +140,7 @@ describe("LocalCollaborationServerPanel", () => {
       setLocalCollaborationTrustedScopes: vi.fn().mockResolvedValue(selectedCatalog)
     });
     render(
-      <LocalCollaborationServerPanel
+      <LocalCollaborationServerPanelHarness
         api={collaborationApi}
         t={createTranslator("en")}
         projectId="project-1"
@@ -159,7 +176,7 @@ describe("LocalCollaborationServerPanel", () => {
       })
     });
     render(
-      <LocalCollaborationServerPanel
+      <LocalCollaborationServerPanelHarness
         api={collaborationApi}
         t={createTranslator("en")}
         projectId="desktop-project-1"
@@ -181,7 +198,7 @@ describe("LocalCollaborationServerPanel", () => {
     const collaborationApi = api();
     const onLayoutChange = vi.fn();
     const { rerender } = render(
-      <LocalCollaborationServerPanel
+      <LocalCollaborationServerPanelHarness
         api={collaborationApi}
         t={createTranslator("en")}
         projectId="project-1"
@@ -200,11 +217,13 @@ describe("LocalCollaborationServerPanel", () => {
       "shadow-sm",
       "bg-background"
     );
+    expect(screen.getByTestId("local-collaboration-section-icon")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Local network sharing" })).toHaveClass("text-base");
     await userEvent.click(screen.getByRole("button", { name: "Hide hosted canvas selection" }));
     expect(onLayoutChange).toHaveBeenLastCalledWith({ collapsed: true });
 
     rerender(
-      <LocalCollaborationServerPanel
+      <LocalCollaborationServerPanelHarness
         api={collaborationApi}
         t={createTranslator("en")}
         projectId="project-1"
@@ -217,7 +236,7 @@ describe("LocalCollaborationServerPanel", () => {
     expect(screen.queryByTestId("local-collaboration-scope-catalog")).not.toBeInTheDocument();
 
     rerender(
-      <LocalCollaborationServerPanel
+      <LocalCollaborationServerPanelHarness
         api={collaborationApi}
         t={createTranslator("en")}
         projectId="project-1"
@@ -254,7 +273,7 @@ describe("LocalCollaborationServerPanel", () => {
     });
     const copy = vi.fn(async () => undefined);
     render(
-      <LocalCollaborationServerPanel
+      <LocalCollaborationServerPanelHarness
         api={collaborationApi}
         t={createTranslator("en")}
         projectId="project-1"
@@ -274,7 +293,7 @@ describe("LocalCollaborationServerPanel", () => {
     });
   });
 
-  it("activates the local canvas and displays a complete invitation without an extra create step", async () => {
+  it("creates and displays a complete invitation only after an explicit user action", async () => {
     const invitationToken = `pw_inv_${"A".repeat(43)}`;
     const collaborationApi = api({
       getLocalCollaborationServerStatus: vi.fn().mockResolvedValue({
@@ -310,7 +329,7 @@ describe("LocalCollaborationServerPanel", () => {
     });
     const copy = vi.fn(async () => undefined);
     render(
-      <LocalCollaborationServerPanel
+      <LocalCollaborationServerPanelHarness
         api={collaborationApi}
         t={createTranslator("en")}
         projectId="desktop-project-1"
@@ -321,6 +340,12 @@ describe("LocalCollaborationServerPanel", () => {
       />
     );
 
+    expect(await screen.findByText("http://192.168.1.20:8787/")).toBeVisible();
+    expect(collaborationApi.registerLocalCollaborationCurrentProject).not.toHaveBeenCalled();
+    expect(collaborationApi.createCollaborationInvitation).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Create complete invitation" }));
+
     const invitationField = await screen.findByRole("textbox", {
       name: "Complete invitation (shown on this page only)"
     });
@@ -328,7 +353,9 @@ describe("LocalCollaborationServerPanel", () => {
     expect(collaborationApi.registerLocalCollaborationCurrentProject).toHaveBeenCalledWith({
       selection: { projectId: "desktop-project-1", canvasId: "canvas-1" }
     });
-    expect(collaborationApi.createCollaborationInvitation).toHaveBeenCalledWith({});
+    expect(collaborationApi.createCollaborationInvitation).toHaveBeenCalledWith({
+      idempotencyKey: expect.any(String)
+    });
 
     const invitation = (invitationField as HTMLTextAreaElement).value;
     const parsed = parseCollaborationInvitationHandoff(invitation);
@@ -396,7 +423,7 @@ describe("LocalCollaborationServerPanel", () => {
     });
 
     render(
-      <LocalCollaborationServerPanel
+      <LocalCollaborationServerPanelHarness
         api={collaborationApi}
         t={createTranslator("en")}
         projectId="open-project"
@@ -407,11 +434,92 @@ describe("LocalCollaborationServerPanel", () => {
       />
     );
 
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Create complete invitation" })
+    );
     expect(
       await screen.findByRole("textbox", {
         name: "Complete invitation (shown on this page only)"
       })
     ).toBeVisible();
     expect(collaborationApi.registerLocalCollaborationCurrentProject).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows localized guidance instead of a raw rate-limit error", async () => {
+    const collaborationApi = api({
+      getLocalCollaborationServerStatus: vi.fn().mockResolvedValue({
+        profile,
+        state: "running",
+        startedAt: "2030-01-01T00:00:00.000Z",
+        reason: null,
+        lanSharingEnabled: true,
+        lanServerBaseUrl: "http://192.168.1.20:8787/"
+      }),
+      createCollaborationInvitation: vi.fn().mockRejectedValue({
+        kind: "rate_limited",
+        code: "human_rate_limited",
+        message: "Raw Electron rate-limit envelope text",
+        retryable: true
+      })
+    });
+
+    render(
+      <LocalCollaborationServerPanelHarness
+        api={collaborationApi}
+        t={createTranslator("en")}
+        projectId="desktop-project-1"
+        canvasId="canvas-1"
+        scopeLayout={expandedScopeLayout}
+        onScopeLayoutChange={onScopeLayoutChange}
+        copyText={copyText}
+      />
+    );
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Create complete invitation" })
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Too many invitations were created recently. Wait a moment, then try again."
+    );
+    expect(screen.getByRole("alert")).not.toHaveTextContent("Raw Electron");
+  });
+
+  it("shows actionable localized guidance instead of a raw open-invitation limit code", async () => {
+    const collaborationApi = api({
+      getLocalCollaborationServerStatus: vi.fn().mockResolvedValue({
+        profile,
+        state: "running",
+        startedAt: "2030-01-01T00:00:00.000Z",
+        reason: null,
+        lanSharingEnabled: true,
+        lanServerBaseUrl: "http://192.168.1.20:8787/"
+      }),
+      createCollaborationInvitation: vi.fn().mockRejectedValue({
+        kind: "conflict",
+        code: "human_limit_exceeded",
+        message: "human_limit_exceeded",
+        httpStatus: 409,
+        retryable: false
+      })
+    });
+
+    render(
+      <LocalCollaborationServerPanelHarness
+        api={collaborationApi}
+        t={createTranslator("zh-CN")}
+        projectId="desktop-project-1"
+        canvasId="canvas-1"
+        scopeLayout={expandedScopeLayout}
+        onScopeLayoutChange={onScopeLayoutChange}
+        copyText={copyText}
+      />
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: "新建完整邀请" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "开放邀请已达到上限。请在协作空间的邀请列表中撤销不再使用的邀请，然后重试。"
+    );
+    expect(screen.getByRole("alert")).not.toHaveTextContent("human_limit_exceeded");
   });
 });

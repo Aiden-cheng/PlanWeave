@@ -417,6 +417,7 @@ describe("CollaborationReadModelController", () => {
       kind: "network",
       code: "eligible_hosts_unavailable",
       message: "Eligible Host query failed.",
+      retryAfterMs: 2_000,
       retryable: true
     });
     const controller = new CollaborationReadModelController({ api: mock.api });
@@ -430,7 +431,8 @@ describe("CollaborationReadModelController", () => {
     expect(controller.getSnapshot().lastError).toEqual(
       expect.objectContaining({
         code: "eligible_hosts_unavailable",
-        message: "Eligible Host query failed."
+        message: "Eligible Host query failed.",
+        retryAfterMs: 2_000
       })
     );
     expect(controller.getSnapshot().loadingKinds).not.toContain("assignments");
@@ -652,6 +654,49 @@ describe("CollaborationReadModelController", () => {
     controller.dispose();
   });
 
+  it("does not reload members for invitation-only observer bursts", async () => {
+    const mock = createMockApi();
+    const controller = new CollaborationReadModelController({ api: mock.api });
+    await controller.setActiveProject({
+      profileId: "profile-demo-001",
+      projectId: "project-demo-001"
+    });
+    mock.listMembers.mockClear();
+
+    for (let index = 0; index < 64; index += 1) {
+      const cursor = 100 + index;
+      controller.handleObserverSignalForTests({
+        type: "human.observer.event",
+        profileId: "profile-demo-001",
+        projectId: "project-demo-001",
+        event: {
+          ...exampleObserverEvent,
+          kind: "invitation",
+          cursor,
+          previousCursor: cursor - 1
+        }
+      });
+    }
+
+    await waitFor(() => expect(controller.getSnapshot().observerCursor).toBe(163));
+    expect(mock.listMembers).not.toHaveBeenCalled();
+
+    controller.handleObserverSignalForTests({
+      type: "human.observer.event",
+      profileId: "profile-demo-001",
+      projectId: "project-demo-001",
+      event: {
+        ...exampleObserverEvent,
+        kind: "membership",
+        cursor: 164,
+        previousCursor: 163
+      }
+    });
+    await waitFor(() => expect(mock.listMembers).toHaveBeenCalledOnce());
+    expect(controller.getSnapshot().observerCursor).toBe(164);
+    controller.dispose();
+  });
+
   it("surfaces observer assignment reload failures and retries the failed cursor", async () => {
     const mock = createMockApi();
     const controller = new CollaborationReadModelController({ api: mock.api });
@@ -845,6 +890,33 @@ describe("CollaborationReadModelController", () => {
 
     expect(controller.getSnapshot().syncPhase).toBe("auth_expired");
     expect(controller.getSnapshot().lastError?.code).toBe("human_device_revoked");
+    controller.dispose();
+  });
+
+  it("keeps authoritative reads while marking observer-only failures as degraded", async () => {
+    const mock = createMockApi();
+    const controller = new CollaborationReadModelController({ api: mock.api });
+    await controller.setActiveProject({
+      profileId: "profile-demo-001",
+      projectId: "project-demo-001"
+    });
+    const membersBeforeFailure = controller.getSnapshot().members;
+
+    controller.handleStatusForTests(
+      idleStatus({
+        session: {
+          phase: "connected",
+          activeProfileId: "profile-demo-001",
+          detail: "observer:failed",
+          lastErrorCode: "collaboration_observer_http_403",
+          lastErrorMessage: "Realtime observer handshake was rejected."
+        }
+      })
+    );
+
+    expect(controller.getSnapshot().syncPhase).toBe("degraded");
+    expect(controller.getSnapshot().members).toEqual(membersBeforeFailure);
+    expect(controller.getSnapshot().lastError?.code).toBe("collaboration_observer_http_403");
     controller.dispose();
   });
 

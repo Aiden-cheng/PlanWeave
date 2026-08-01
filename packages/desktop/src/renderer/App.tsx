@@ -120,7 +120,7 @@ function AppSettingsChrome({
 export function App() {
   const rendererPlatform = detectRendererPlatform();
   const [error, setError] = useState<string | null>(null);
-  const { settings, updateLayoutSettings, updateSettings, updateSettingsAndWait } =
+  const { settings, settingsHydrated, updateLayoutSettings, updateSettings, updateSettingsAndWait } =
     useDesktopSettingsBridge({ setError });
   const language = settings.language;
   const t = useMemo(() => createTranslator(language), [language]);
@@ -170,6 +170,7 @@ export function App() {
       setError,
       setSuccessMessage,
       settings,
+      settingsHydrated,
       t,
       updateLayoutSettings,
       updateSettings,
@@ -186,6 +187,7 @@ export function App() {
       runtimeTools,
       setActiveView,
       settings,
+      settingsHydrated,
       t,
       updateLayoutSettings,
       updateSettings,

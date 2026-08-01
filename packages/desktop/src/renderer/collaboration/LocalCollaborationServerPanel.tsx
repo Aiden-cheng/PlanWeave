@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronDownIcon, ChevronRightIcon, CopyIcon, WifiIcon } from "lucide-react";
 import type { LoopbackTrustedProjectScope } from "@planweave-ai/collaboration-contracts";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,22 @@ function selectedScopes(catalog: LocalCollaborationScopeCatalog): LocalCollabora
   );
 }
 
+function isInvitationRateLimited(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const boundaryError = error as { code?: unknown; kind?: unknown };
+  return boundaryError.code === "human_rate_limited" || boundaryError.kind === "rate_limited";
+}
+
+function isInvitationCapacityExceeded(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  return (error as { code?: unknown }).code === "human_limit_exceeded";
+}
+
+type LocalCollaborationPanelError = {
+  message: string;
+  action?: "manage_invitations";
+};
+
 export function LocalCollaborationServerPanel({
   api,
   t,
@@ -34,6 +50,9 @@ export function LocalCollaborationServerPanel({
   scopeLayout,
   onScopeLayoutChange,
   copyText,
+  invitationHandoff,
+  onInvitationHandoffChange,
+  onManageInvitations,
   onStatusChange
 }: {
   api: PlanWeaveCollaborationApi | null;
@@ -43,18 +62,19 @@ export function LocalCollaborationServerPanel({
   scopeLayout: DesktopUiSettings["layout"]["collaborationScope"];
   onScopeLayoutChange: (patch: Partial<DesktopUiSettings["layout"]["collaborationScope"]>) => void;
   copyText: (text: string) => Promise<void>;
+  invitationHandoff: string | null;
+  onInvitationHandoffChange: (handoff: string | null) => void;
+  onManageInvitations?: () => void;
   onStatusChange?: (status: LocalCollaborationServerStatus) => void;
 }) {
   const [status, setStatus] = useState<LocalCollaborationServerStatus | null>(null);
   const [catalog, setCatalog] = useState<LocalCollaborationScopeCatalog | null>(null);
   const [draftScopes, setDraftScopes] = useState<LocalCollaborationScope[]>([]);
   const [scopes, setScopes] = useState<readonly LoopbackTrustedProjectScope[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<LocalCollaborationPanelError | null>(null);
   const [busy, setBusy] = useState(false);
-  const [invitationHandoff, setInvitationHandoff] = useState<string | null>(null);
   const [invitationCopied, setInvitationCopied] = useState(false);
   const [invitationBusy, setInvitationBusy] = useState(false);
-  const invitationAttemptRef = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!api) return;
@@ -72,7 +92,7 @@ export function LocalCollaborationServerPanel({
       );
       setError(null);
     } catch (caught) {
-      setError(collaborationErrorMessage(caught));
+      setError({ message: collaborationErrorMessage(caught) });
     }
   }, [api, onStatusChange]);
 
@@ -118,46 +138,39 @@ export function LocalCollaborationServerPanel({
 
   const prepareInvitation = useCallback(async () => {
     if (!api || !status?.lanServerBaseUrl || !invitationScope) return;
+    const idempotencyKey = globalThis.crypto.randomUUID();
     setInvitationBusy(true);
     setInvitationCopied(false);
     try {
       const registration = await api.registerLocalCollaborationCurrentProject({
         selection: invitationScope
       });
-      const created = await api.createCollaborationInvitation({});
+      const created = await api.createCollaborationInvitation({ idempotencyKey });
       const handoff = serializeCollaborationInvitationHandoff({
         serverBaseUrl: status.lanServerBaseUrl,
         projectId: registration.projectId,
         invitationToken: created.invitationToken,
         allowInsecureTransport: new URL(status.lanServerBaseUrl).protocol === "http:"
       });
-      setInvitationHandoff(handoff);
+      onInvitationHandoffChange(handoff);
       setError(null);
     } catch (caught) {
-      setError(collaborationErrorMessage(caught));
+      setError(
+        isInvitationCapacityExceeded(caught)
+          ? {
+              message: t("localServerInvitationCapacityExceeded"),
+              action: "manage_invitations"
+            }
+          : {
+              message: isInvitationRateLimited(caught)
+                ? t("localServerInvitationRateLimited")
+                : collaborationErrorMessage(caught)
+            }
+      );
     } finally {
       setInvitationBusy(false);
     }
-  }, [api, invitationScope, status?.lanServerBaseUrl]);
-
-  useEffect(() => {
-    if (
-      !status?.lanServerBaseUrl ||
-      !invitationScope ||
-      invitationHandoff
-    ) {
-      return;
-    }
-    const attemptKey = `${status.lanServerBaseUrl}\0${scopeKey(invitationScope)}`;
-    if (invitationAttemptRef.current === attemptKey) return;
-    invitationAttemptRef.current = attemptKey;
-    void prepareInvitation();
-  }, [
-    invitationScope,
-    invitationHandoff,
-    prepareInvitation,
-    status?.lanServerBaseUrl
-  ]);
+  }, [api, invitationScope, onInvitationHandoffChange, status?.lanServerBaseUrl, t]);
 
   if (!api) return null;
   const running = status?.state === "running";
@@ -205,7 +218,7 @@ export function LocalCollaborationServerPanel({
       await applyScopes();
       await refresh();
     } catch (caught) {
-      setError(collaborationErrorMessage(caught));
+      setError({ message: collaborationErrorMessage(caught) });
     } finally {
       setBusy(false);
     }
@@ -213,16 +226,15 @@ export function LocalCollaborationServerPanel({
 
   const setLanSharing = async (enabled: boolean) => {
     setBusy(true);
-    setInvitationHandoff(null);
+    onInvitationHandoffChange(null);
     setInvitationCopied(false);
-    invitationAttemptRef.current = null;
     try {
       const nextStatus = await api.setLocalCollaborationLanSharing({ enabled });
       setStatus(nextStatus);
       onStatusChange?.(nextStatus);
       await refresh();
     } catch (caught) {
-      setError(collaborationErrorMessage(caught));
+      setError({ message: collaborationErrorMessage(caught) });
     } finally {
       setBusy(false);
     }
@@ -235,7 +247,7 @@ export function LocalCollaborationServerPanel({
       await copyText(status.lanServerBaseUrl);
       setError(null);
     } catch (caught) {
-      setError(collaborationErrorMessage(caught));
+      setError({ message: collaborationErrorMessage(caught) });
     } finally {
       setBusy(false);
     }
@@ -250,7 +262,7 @@ export function LocalCollaborationServerPanel({
       setInvitationCopied(true);
       setError(null);
     } catch (caught) {
-      setError(collaborationErrorMessage(caught));
+      setError({ message: collaborationErrorMessage(caught) });
     } finally {
       setInvitationBusy(false);
     }
@@ -258,42 +270,44 @@ export function LocalCollaborationServerPanel({
 
   return (
     <section
+      className="pb-7"
       data-testid="local-collaboration-server-panel"
       aria-labelledby="local-collaboration-server-title"
     >
-      <div className="flex flex-col gap-5 px-1 pb-6 pt-2 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex min-w-0 gap-4">
-          <div className="mt-0.5 shrink-0 text-emerald-700 dark:text-emerald-300">
-            <WifiIcon className="size-5" aria-hidden="true" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2
-                id="local-collaboration-server-title"
-                className="text-base font-semibold tracking-tight text-text-strong"
-              >
-                {t("localServerTitle")}
-              </h2>
-              <span
-                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                  lanAvailable
-                    ? "bg-emerald-500/10 text-emerald-800 dark:text-emerald-200"
-                    : "bg-muted text-muted-foreground"
-                }`}
-                data-testid="local-collaboration-server-status"
-              >
-                <span
-                  className={`size-1.5 rounded-full ${lanAvailable ? "bg-emerald-500" : "bg-muted-foreground/50"}`}
-                />
-                {statusLabel}
-              </span>
-            </div>
-            <p className="mt-1.5 max-w-2xl text-xs leading-5 text-muted-foreground">
-              {t("localServerDescription")}
-            </p>
-          </div>
+      <div className="grid grid-cols-[2rem_minmax(0,1fr)] gap-x-3 px-1 pb-5 sm:grid-cols-[2rem_minmax(0,1fr)_auto]">
+        <div
+          className="flex size-8 items-center justify-center text-emerald-700 dark:text-emerald-300"
+          data-testid="local-collaboration-section-icon"
+        >
+          <WifiIcon className="size-5" aria-hidden="true" />
         </div>
-        <div className="flex shrink-0 items-center gap-3 sm:justify-end">
+        <div className="min-w-0 pt-0.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2
+              id="local-collaboration-server-title"
+              className="text-base font-semibold tracking-tight text-text-strong"
+            >
+              {t("localServerTitle")}
+            </h2>
+            <span
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                lanAvailable
+                  ? "bg-emerald-500/10 text-emerald-800 dark:text-emerald-200"
+                  : "bg-muted text-muted-foreground"
+              }`}
+              data-testid="local-collaboration-server-status"
+            >
+              <span
+                className={`size-1.5 rounded-full ${lanAvailable ? "bg-emerald-500" : "bg-muted-foreground/50"}`}
+              />
+              {statusLabel}
+            </span>
+          </div>
+          <p className="mt-1.5 max-w-2xl text-xs leading-5 text-muted-foreground">
+            {t("localServerDescription")}
+          </p>
+        </div>
+        <div className="col-start-2 mt-4 flex shrink-0 items-center gap-3 sm:col-start-3 sm:row-start-1 sm:mt-0 sm:justify-end">
           <span className="text-xs font-medium text-muted-foreground">
             {t("localServerLanToggle")}
           </span>
@@ -307,7 +321,7 @@ export function LocalCollaborationServerPanel({
       </div>
 
       {lanSharingEnabled ? (
-        <div className="border-t border-border/70 px-1 py-4">
+        <div className="border-t border-border/70 px-1 py-5 sm:ml-11">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <div className="text-xs font-semibold text-text-strong">
@@ -327,15 +341,24 @@ export function LocalCollaborationServerPanel({
                   type="button"
                   size="sm"
                   disabled={busy || invitationBusy}
-                  onClick={() => void (invitationHandoff ? copyInvitation() : prepareInvitation())}
+                  onClick={() => void prepareInvitation()}
                 >
                   <CopyIcon className="size-3.5" aria-hidden="true" />
-                  {invitationHandoff
-                    ? t("localServerCopyInvitation")
-                    : invitationBusy
-                      ? t("localServerPreparingInvitation")
-                      : t("localServerRetryInvitation")}
+                  {invitationBusy
+                    ? t("localServerPreparingInvitation")
+                    : t("localServerRetryInvitation")}
                 </Button>
+                {invitationHandoff ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    disabled={busy || invitationBusy}
+                    onClick={() => void copyInvitation()}
+                  >
+                    {t("localServerCopyInvitation")}
+                  </Button>
+                ) : null}
                 <Button
                   type="button"
                   size="sm"
@@ -377,7 +400,7 @@ export function LocalCollaborationServerPanel({
         </div>
       ) : null}
 
-      <div className="border-y border-border/70 px-1 py-5">
+      <div className="border-y border-border/70 px-1 py-5 sm:ml-11">
         <button
           type="button"
           className="flex w-full items-start gap-3 text-left outline-none transition-colors hover:text-text-strong focus-visible:ring-2 focus-visible:ring-ring"
@@ -545,10 +568,15 @@ export function LocalCollaborationServerPanel({
 
       {error ? (
         <div
-          className="border-b border-destructive/30 bg-destructive/5 px-1 py-3 text-xs text-destructive"
+          className="flex items-center justify-between gap-3 border-b border-destructive/30 bg-destructive/5 px-1 py-3 text-xs text-destructive sm:ml-11"
           role="alert"
         >
-          {error}
+          <span>{error.message}</span>
+          {error.action === "manage_invitations" && onManageInvitations ? (
+            <Button type="button" size="sm" variant="outline" onClick={onManageInvitations}>
+              {t("localServerManageInvitations")}
+            </Button>
+          ) : null}
         </div>
       ) : null}
     </section>

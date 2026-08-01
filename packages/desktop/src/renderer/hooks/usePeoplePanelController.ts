@@ -41,6 +41,8 @@ export type UsePeoplePanelControllerArgs = {
   syncPhase: CollaborationSyncPhase;
   /** When true, load invitations/devices (on-demand detailed panel). */
   detailsOpen: boolean;
+  /** Renderer-owned localization for typed boundary errors. */
+  formatError?: (error: unknown) => string;
 };
 
 export type UsePeoplePanelControllerResult = {
@@ -59,6 +61,7 @@ export type UsePeoplePanelControllerResult = {
   clearActionError: () => void;
   refreshDetails: () => Promise<void>;
   createInvitation: () => Promise<CollaborationInvitationCreateView | null>;
+  viewInvitation: (invitationId: string) => Promise<CollaborationInvitationCreateView | null>;
   revokeInvitation: (invitationId: string) => Promise<boolean>;
   revokeInvitations: (invitationIds: readonly string[]) => Promise<boolean>;
   promoteMember: (humanPrincipalId: string) => Promise<boolean>;
@@ -80,7 +83,11 @@ export function usePeoplePanelController(
   const [pendingInvitation, setPendingInvitation] =
     useState<CollaborationInvitationCreateView | null>(null);
   const detailsGenerationRef = useRef(0);
+  const detailsRequestRef = useRef<Promise<void> | null>(null);
+  const detailsRequestProfileRef = useRef<string | null>(null);
   const sessionConnected = isCollaborationSessionConnected(args.status);
+  const activeProfileId = args.status?.activeProfileId ?? null;
+  const formatError = args.formatError ?? collaborationErrorMessage;
 
   const currentMembership = useMemo(
     () =>
@@ -128,58 +135,65 @@ export function usePeoplePanelController(
   const invitationRows = useMemo(() => buildPeopleInvitationRows(invitations), [invitations]);
   const deviceRows = useMemo(() => buildPeopleDeviceRows(devices), [devices]);
 
-  const refreshDetails = useCallback(async () => {
-    if (!api || !sessionConnected) {
+  const refreshDetails = useCallback((): Promise<void> => {
+    if (!api || !sessionConnected || !activeProfileId || !currentUserIsOwner) {
+      detailsGenerationRef.current += 1;
+      detailsRequestRef.current = null;
+      detailsRequestProfileRef.current = null;
       setInvitations([]);
       setDevices([]);
-      return;
+      setDetailsLoading(false);
+      setDetailsError(null);
+      return Promise.resolve();
+    }
+    if (detailsRequestRef.current && detailsRequestProfileRef.current === activeProfileId) {
+      return detailsRequestRef.current;
     }
     const generation = detailsGenerationRef.current + 1;
     detailsGenerationRef.current = generation;
+    detailsRequestProfileRef.current = activeProfileId;
     setDetailsLoading(true);
     setDetailsError(null);
-    try {
-      const [invitationPage, devicePage] = await Promise.all([
-        api.listCollaborationInvitations({ cursor: 0, limit: 100, openOnly: true }),
-        api.listCollaborationDevices({ cursor: 0, limit: 50, scope: "project" })
-      ]);
-      if (detailsGenerationRef.current !== generation) {
-        return;
+    const request = (async () => {
+      try {
+        const [invitationPage, devicePage] = await Promise.all([
+          api.listCollaborationInvitations({ cursor: 0, limit: 100, openOnly: true }),
+          api.listCollaborationDevices({ cursor: 0, limit: 50, scope: "project" })
+        ]);
+        if (detailsGenerationRef.current !== generation) {
+          return;
+        }
+        setInvitations(
+          [...invitationPage.items].sort((left, right) =>
+            left.createdAt.localeCompare(right.createdAt)
+          )
+        );
+        setDevices(devicePage.items);
+      } catch (error) {
+        if (detailsGenerationRef.current !== generation) {
+          return;
+        }
+        setDetailsError(formatError(error));
+      } finally {
+        if (detailsGenerationRef.current === generation) {
+          setDetailsLoading(false);
+        }
       }
-      setInvitations(
-        [...invitationPage.items].sort((left, right) =>
-          left.createdAt.localeCompare(right.createdAt)
-        )
-      );
-      setDevices(devicePage.items);
-    } catch (error) {
-      if (detailsGenerationRef.current !== generation) {
-        return;
+    })();
+    detailsRequestRef.current = request;
+    void request.finally(() => {
+      if (detailsRequestRef.current === request) {
+        detailsRequestRef.current = null;
+        detailsRequestProfileRef.current = null;
       }
-      setDetailsError(collaborationErrorMessage(error));
-      setInvitations([]);
-      setDevices([]);
-    } finally {
-      if (detailsGenerationRef.current === generation) {
-        setDetailsLoading(false);
-      }
-    }
-  }, [api, sessionConnected]);
+    });
+    return request;
+  }, [activeProfileId, api, currentUserIsOwner, formatError, sessionConnected]);
 
   useEffect(() => {
-    if (!args.detailsOpen || !sessionConnected) {
-      return;
-    }
-    if (
-      mode === "disconnected" ||
-      mode === "connecting" ||
-      mode === "auth_expired" ||
-      mode === "forbidden"
-    ) {
-      return;
-    }
+    if (!args.detailsOpen) return;
     void refreshDetails();
-  }, [args.detailsOpen, mode, refreshDetails, sessionConnected]);
+  }, [args.detailsOpen, refreshDetails]);
 
   const runAction = useCallback(
     async (operation: () => Promise<void>, options?: { refreshDetails?: boolean }) => {
@@ -193,13 +207,13 @@ export function usePeoplePanelController(
         }
         return true;
       } catch (error) {
-        setActionError(collaborationErrorMessage(error));
+        setActionError(formatError(error));
         return false;
       } finally {
         setActionBusy(false);
       }
     },
-    [actionBusy, api, refreshDetails, sessionConnected]
+    [actionBusy, api, formatError, refreshDetails, sessionConnected]
   );
 
   return {
@@ -222,12 +236,35 @@ export function usePeoplePanelController(
       setActionBusy(true);
       setActionError(null);
       try {
-        const created = await api.createCollaborationInvitation({});
+        const created = await api.createCollaborationInvitation({
+          idempotencyKey: globalThis.crypto.randomUUID()
+        });
         setPendingInvitation(created);
+        setInvitations((current) => [
+          ...current.filter(
+            (invitation) => invitation.invitationId !== created.invitation.invitationId
+          ),
+          created.invitation
+        ]);
         await refreshDetails();
         return created;
       } catch (error) {
-        setActionError(collaborationErrorMessage(error));
+        setActionError(formatError(error));
+        return null;
+      } finally {
+        setActionBusy(false);
+      }
+    },
+    viewInvitation: async (invitationId) => {
+      if (!api || !sessionConnected || actionBusy) return null;
+      setActionBusy(true);
+      setActionError(null);
+      try {
+        const invitation = await api.getCollaborationInvitationSecret({ invitationId });
+        setPendingInvitation(invitation);
+        return invitation;
+      } catch (error) {
+        setActionError(formatError(error));
         return null;
       } finally {
         setActionBusy(false);
@@ -238,9 +275,10 @@ export function usePeoplePanelController(
         async () => {
           const revoked = await api!.revokeCollaborationInvitation({ invitationId });
           setInvitations((current) =>
-            current.map((invitation) =>
-              invitation.invitationId === revoked.invitationId ? revoked : invitation
-            )
+            current.filter((invitation) => invitation.invitationId !== revoked.invitationId)
+          );
+          setPendingInvitation((current) =>
+            current?.invitation.invitationId === revoked.invitationId ? null : current
           );
         },
         { refreshDetails: false }
@@ -252,11 +290,12 @@ export function usePeoplePanelController(
             invitationIds: [...invitationIds]
           });
           const revoked = await api!.revokeCollaborationInvitations(input);
-          const revokedById = new Map(
-            revoked.items.map((invitation) => [invitation.invitationId, invitation])
-          );
+          const revokedIds = new Set(revoked.items.map((invitation) => invitation.invitationId));
           setInvitations((current) =>
-            current.map((invitation) => revokedById.get(invitation.invitationId) ?? invitation)
+            current.filter((invitation) => !revokedIds.has(invitation.invitationId))
+          );
+          setPendingInvitation((current) =>
+            current && revokedIds.has(current.invitation.invitationId) ? null : current
           );
         },
         { refreshDetails: false }

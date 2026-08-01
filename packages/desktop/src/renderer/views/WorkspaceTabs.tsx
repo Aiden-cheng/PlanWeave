@@ -1,6 +1,9 @@
 import {
   lazy,
   Suspense,
+  useEffect,
+  useRef,
+  useState,
   type CSSProperties,
   type Dispatch,
   type DragEvent,
@@ -86,6 +89,7 @@ export type WorkspaceTabsShellProps = {
     currentName: string
   ) => Promise<void>;
   loadProject: (project: DesktopProjectSummary, canvasId?: string | null) => Promise<void>;
+  refreshProjects: (options?: { selectProjectId?: string }) => Promise<void>;
   projectLoading: boolean;
   selectedCanvasId: string | null;
   selectedProject: DesktopProjectSummary | null;
@@ -285,11 +289,18 @@ function NotificationsRoute() {
   );
 }
 
-function PeopleRoute() {
+function PeopleRoute({
+  localInvitationHandoff,
+  onLocalInvitationHandoffChange
+}: {
+  localInvitationHandoff: string | null;
+  onLocalInvitationHandoffChange: (handoff: string | null) => void;
+}) {
   const { fileSync, shell } = useProjectWorkspace();
   return (
     <PeopleView
       t={shell.t}
+      localProjectId={shell.selectedProject?.projectId ?? null}
       canvasId={shell.selectedCanvasId}
       onContentMaterialized={() =>
         fileSync.refreshProjectDerivedState({
@@ -297,8 +308,13 @@ function PeopleRoute() {
           throwOnErrors: true
         })
       }
+      onContentReplicaReady={(result) =>
+        shell.refreshProjects({ selectProjectId: result.localProjectId })
+      }
       collaborationScopeLayout={shell.collaborationScopeLayout}
       onCollaborationScopeLayoutChange={shell.updateCollaborationScopeLayout}
+      localInvitationHandoff={localInvitationHandoff}
+      onLocalInvitationHandoffChange={onLocalInvitationHandoffChange}
       onMembershipOutcome={(outcome) => {
         if (outcome.ok) {
           shell.setSuccessMessage?.(outcome.message);
@@ -334,6 +350,19 @@ function CanvasMapRoute() {
 export function WorkspaceTabs() {
   const { shell } = useProjectWorkspace();
   const activeView = shell.activeView;
+  const selectedProjectId = shell.selectedProject?.projectId ?? null;
+  const [localInvitationHandoff, setLocalInvitationHandoff] = useState<string | null>(null);
+  const invitationProjectIdRef = useRef(selectedProjectId);
+  const visibleLocalInvitationHandoff =
+    invitationProjectIdRef.current === selectedProjectId ? localInvitationHandoff : null;
+
+  useEffect(() => {
+    if (invitationProjectIdRef.current !== selectedProjectId) {
+      invitationProjectIdRef.current = selectedProjectId;
+      setLocalInvitationHandoff(null);
+    }
+  }, [selectedProjectId]);
+
   const content = (() => {
     switch (activeView) {
       case "review-pipeline":
@@ -347,7 +376,12 @@ export function WorkspaceTabs() {
       case "notifications":
         return <NotificationsRoute />;
       case "people":
-        return <PeopleRoute />;
+        return (
+          <PeopleRoute
+            localInvitationHandoff={visibleLocalInvitationHandoff}
+            onLocalInvitationHandoffChange={setLocalInvitationHandoff}
+          />
+        );
       case "canvas-map":
         return <CanvasMapRoute />;
       case "graph":

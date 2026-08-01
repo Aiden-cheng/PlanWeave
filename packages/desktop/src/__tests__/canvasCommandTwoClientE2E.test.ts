@@ -198,8 +198,8 @@ describe("Desktop canvas command dual-client E2E (OSS-004 B-003)", () => {
     const controllerA = new CanvasCommandController({ api: bridgeFor(clientA), labels });
     const controllerB = new CanvasCommandController({ api: bridgeFor(clientB), labels });
 
-    await controllerA.bind({ canvasId: "default" });
-    await controllerB.bind({ canvasId: "default" });
+    await controllerA.bind({ localProjectId: fixture.projectId, canvasId: "default" });
+    await controllerB.bind({ localProjectId: fixture.projectId, canvasId: "default" });
     expect(controllerA.getSnapshot().session?.revision).toBe(0);
     expect(controllerB.getSnapshot().session?.revision).toBe(0);
 

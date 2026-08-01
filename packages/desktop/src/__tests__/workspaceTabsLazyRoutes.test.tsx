@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceTabs } from "../renderer/views/WorkspaceTabs";
 import { cleanupRendererTestEnvironment } from "./helpers/rendererTestEnvironment";
@@ -19,7 +19,20 @@ vi.mock("../renderer/views/NotificationsView", () => ({
   NotificationsView: () => <div data-testid="notifications-route">Notifications route</div>
 }));
 vi.mock("../renderer/views/PeopleView", () => ({
-  PeopleView: () => <div data-testid="people-route">People route</div>
+  PeopleView: ({
+    localInvitationHandoff,
+    onLocalInvitationHandoffChange
+  }: {
+    localInvitationHandoff: string | null;
+    onLocalInvitationHandoffChange: (handoff: string | null) => void;
+  }) => (
+    <div data-testid="people-route">
+      <span data-testid="people-invitation-handoff">{localInvitationHandoff}</span>
+      <button type="button" onClick={() => onLocalInvitationHandoffChange("full-invitation")}>
+        Create invitation
+      </button>
+    </div>
+  )
 }));
 vi.mock("../renderer/views/ReviewPipelineView", () => ({
   ReviewPipelineView: () => <div data-testid="review-pipeline-route">Review pipeline route</div>
@@ -69,5 +82,42 @@ describe("WorkspaceTabs lazy routes", () => {
 
     expect(screen.getByText("loadingProject")).toBeInTheDocument();
     expect(await screen.findByTestId(testId)).toBeInTheDocument();
+  });
+
+  it("keeps an invitation handoff across routes and clears it across projects", async () => {
+    let activeView = "people";
+    let selectedProjectId = "project-1";
+    useProjectWorkspace.mockImplementation(() => ({
+      autoRun: {},
+      fileSync: {},
+      graphWorkspace: {},
+      notifications: {},
+      planning: {},
+      review: {},
+      search: {},
+      shell: {
+        activeView,
+        selectedProject: { projectId: selectedProjectId },
+        t: (key: string) => key
+      }
+    }));
+
+    const view = render(<WorkspaceTabs />);
+    fireEvent.click(await screen.findByRole("button", { name: "Create invitation" }));
+    expect(screen.getByTestId("people-invitation-handoff")).toHaveTextContent("full-invitation");
+
+    activeView = "graph";
+    view.rerender(<WorkspaceTabs />);
+    expect(await screen.findByTestId("graph-route")).toBeVisible();
+
+    activeView = "people";
+    view.rerender(<WorkspaceTabs />);
+    expect(await screen.findByTestId("people-invitation-handoff")).toHaveTextContent(
+      "full-invitation"
+    );
+
+    selectedProjectId = "project-2";
+    view.rerender(<WorkspaceTabs />);
+    expect(await screen.findByTestId("people-invitation-handoff")).toBeEmptyDOMElement();
   });
 });

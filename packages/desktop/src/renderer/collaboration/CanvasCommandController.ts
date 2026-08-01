@@ -3,6 +3,7 @@ import type {
   CanvasCommandOperationId
 } from "@planweave-ai/collaboration-contracts";
 import type {
+  CollaborationCanvasSessionInput,
   CollaborationCanvasCommandSessionView,
   CollaborationCanvasCommandSubmitResult,
   CollaborationCanvasReconnectResult,
@@ -85,6 +86,7 @@ export class CanvasCommandController {
   private snapshot: CanvasCommandControllerSnapshot = EMPTY;
   private readonly listeners = new Set<(snapshot: CanvasCommandControllerSnapshot) => void>();
   private canvasId: string | null = null;
+  private bindingPromise: Promise<void> | null = null;
   private generation = 0;
 
   constructor(options: { api: CanvasCommandBridge; labels: CanvasCommandLabels }) {
@@ -102,30 +104,23 @@ export class CanvasCommandController {
     return this.snapshot;
   }
 
-  async bind(input: { canvasId: string }): Promise<void> {
+  bind(input: CollaborationCanvasSessionInput): Promise<void> {
     this.generation += 1;
     const generation = this.generation;
-    const { canvasId } = input;
-    this.canvasId = canvasId;
+    this.canvasId = null;
     this.patch({ busy: true, lastError: null, lastStaleConflict: null });
-    try {
-      const session = await this.api.bindCollaborationCanvasCommandSession(input);
-      if (generation !== this.generation) return;
-      this.patch({ session, busy: false });
-      // Align with server head via reconnect (delta or full snapshot).
-      await this.reconnect({ canvasId });
-    } catch (error) {
-      if (generation !== this.generation) return;
-      this.patch({
-        busy: false,
-        lastError: error instanceof Error ? error.message : String(error)
-      });
-    }
+    let tracked: Promise<void>;
+    tracked = this.bindAndReconnect(input, generation).finally(() => {
+      if (this.bindingPromise === tracked) this.bindingPromise = null;
+    });
+    this.bindingPromise = tracked;
+    return tracked;
   }
 
   async unbind(): Promise<void> {
     this.generation += 1;
     this.canvasId = null;
+    this.bindingPromise = null;
     this.patch({ ...EMPTY });
   }
 
@@ -138,9 +133,11 @@ export class CanvasCommandController {
     operationId?: CanvasCommandOperationId | string;
     expectedRevision?: number;
   }): Promise<CollaborationCanvasCommandSubmitResult> {
+    const binding = this.bindingPromise;
+    if (binding) await binding;
     const canvasId = this.canvasId;
-    if (!canvasId) {
-      throw new Error(this.labels.notConnected);
+    if (!canvasId || this.snapshot.lastError) {
+      throw new Error(this.snapshot.lastError ?? this.labels.notConnected);
     }
     this.patch({ busy: true, lastError: null, lastStaleConflict: null });
     try {
@@ -247,6 +244,29 @@ export class CanvasCommandController {
       busy: false,
       lastError: error instanceof Error ? error.message : String(error)
     });
+  }
+
+  private async bindAndReconnect(
+    input: CollaborationCanvasSessionInput,
+    generation: number
+  ): Promise<void> {
+    try {
+      const session = await this.api.bindCollaborationCanvasCommandSession(input);
+      if (generation !== this.generation) return;
+      if (!session) throw new Error(this.labels.notConnected);
+      this.canvasId = session.canvasId;
+      this.patch({ session });
+      // Align the local materialization and CAS revision with the authoritative head
+      // before allowing the first mutation through this controller.
+      await this.reconnect({ canvasId: session.canvasId });
+    } catch (error) {
+      if (generation !== this.generation) return;
+      this.canvasId = null;
+      this.patch({
+        busy: false,
+        lastError: error instanceof Error ? error.message : String(error)
+      });
+    }
   }
 
   private patch(partial: Partial<CanvasCommandControllerSnapshot>): void {

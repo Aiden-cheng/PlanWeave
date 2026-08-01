@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import type { createTranslator } from "../i18n";
 import {
   collaborationRedeemSetupCodeInputSchema,
+  collaborationUpsertProfileInputSchema,
   type CollaborationStatus,
   type PlanWeaveCollaborationApi
 } from "../../shared/collaboration.js";
@@ -18,6 +19,7 @@ import { collaborationErrorMessage } from "../collaboration/formatCollaborationE
 import { parseCollaborationInvitationHandoff } from "./collaborationInvitationHandoff";
 import { CollaborationInvitationJoinFields } from "./CollaborationInvitationJoinFields";
 import { CollaborationSetupHandoffFields } from "./CollaborationSetupHandoffFields";
+import { buildCollaborationDiagnosticReport } from "./collaborationDiagnostics";
 
 export type CollaborationConnectFormProps = {
   api: PlanWeaveCollaborationApi | null;
@@ -34,6 +36,8 @@ export type CollaborationConnectFormProps = {
   showHeader?: boolean;
   /** Embedded onboarding does not need the stored Workspace summary. */
   showConnectionSummary?: boolean;
+  /** Clipboard boundary supplied by the containing desktop view. */
+  copyText?: (text: string) => Promise<void>;
 };
 
 export type ConnectMode = "setup" | "join" | "bootstrap" | "connect";
@@ -81,7 +85,8 @@ export function CollaborationConnectForm({
   initialMode = "setup",
   fixedMode,
   showHeader = true,
-  showConnectionSummary = true
+  showConnectionSummary = true,
+  copyText
 }: CollaborationConnectFormProps) {
   const formId = useId();
   const [mode, setMode] = useState<ConnectMode>(fixedMode ?? initialMode);
@@ -100,6 +105,11 @@ export function CollaborationConnectForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [diagnosticsCopied, setDiagnosticsCopied] = useState(false);
+  const [existingServerAddressEdit, setExistingServerAddressEdit] = useState<{
+    profileId: string;
+    value: string;
+  } | null>(null);
 
   const profiles = status?.profiles ?? [];
   const activeProfile =
@@ -108,6 +118,11 @@ export function CollaborationConnectForm({
     null;
   const workspaceConnection = status?.workspaceConnection ?? null;
   const workspacePickerItems: WorkspacePickerItem[] = status?.workspacePicker?.items ?? [];
+  const diagnosticReport = status ? buildCollaborationDiagnosticReport(status) : null;
+  const existingServerBaseUrl =
+    activeProfile && existingServerAddressEdit?.profileId === activeProfile.profileId
+      ? existingServerAddressEdit.value
+      : (activeProfile?.serverBaseUrl ?? "");
   const submitLabel =
     mode === "setup"
       ? t("peopleConnectSetupSubmit")
@@ -177,22 +192,46 @@ export function CollaborationConnectForm({
       }
 
       if (mode === "connect") {
-        if (
-          workspaceConnection?.status === "disconnected" ||
-          workspaceConnection?.status === "error"
-        ) {
-          await api.connectWorkspaceConnection();
-          await onConnected?.();
-          return;
-        }
         if (!activeProfile) {
           throw new Error(t("peopleNoProfileToConnect"));
         }
         if (!activeProfile.hasDeviceCredential) {
           throw new Error(t("peopleMissingCredential"));
         }
+        const updatedProfile = collaborationUpsertProfileInputSchema.safeParse({
+          profileId: activeProfile.profileId,
+          displayName: activeProfile.displayName,
+          serverBaseUrl: existingServerBaseUrl.trim(),
+          projectId: activeProfile.projectId,
+          allowInsecureTransport: activeProfile.allowInsecureTransport
+        });
+        if (!updatedProfile.success) {
+          setError(t("peopleServerUrlInvalid"));
+          return;
+        }
+        if (updatedProfile.data.serverBaseUrl !== activeProfile.serverBaseUrl) {
+          await api.upsertCollaborationProfile(updatedProfile.data);
+        }
+        let workspaceConnectError: unknown = null;
+        if (
+          workspaceConnection?.status === "disconnected" ||
+          workspaceConnection?.status === "error"
+        ) {
+          try {
+            await api.connectWorkspaceConnection();
+          } catch (caught) {
+            // A Workspace connection is optional for a stored project profile. Preserve its
+            // independent error state, but do not prevent the project session from connecting.
+            workspaceConnectError = caught;
+          }
+        }
         await api.setActiveCollaborationProfile({ profileId: activeProfile.profileId });
         await api.connectCollaborationSession({ profileId: activeProfile.profileId });
+        if (workspaceConnectError) {
+          setInfo(
+            `${t("peopleWorkspaceError")}: ${collaborationErrorMessage(workspaceConnectError)}`
+          );
+        }
         await onConnected?.();
         return;
       }
@@ -306,6 +345,16 @@ export function CollaborationConnectForm({
       setError(collaborationErrorMessage(retryError));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const copyDiagnostics = async () => {
+    if (!copyText || !diagnosticReport) return;
+    try {
+      await copyText(diagnosticReport);
+      setDiagnosticsCopied(true);
+    } catch {
+      setError(t("peopleConnectionDiagnosticsCopyFailed"));
     }
   };
 
@@ -580,10 +629,66 @@ export function CollaborationConnectForm({
                     ? t("peopleCredentialPresent")
                     : t("peopleMissingCredential")}
                 </div>
+                {activeProfile ? (
+                  <div className="mt-3 flex flex-col gap-1">
+                    <Label htmlFor={`${formId}-existing-server-url`}>
+                      {t("peopleExistingServerUrl")}
+                    </Label>
+                    <Input
+                      id={`${formId}-existing-server-url`}
+                      data-testid="people-connect-existing-server-url"
+                      value={existingServerBaseUrl}
+                      onChange={(event) =>
+                        setExistingServerAddressEdit({
+                          profileId: activeProfile.profileId,
+                          value: event.target.value
+                        })
+                      }
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                    <p className="text-muted-foreground">
+                      {t("peopleExistingServerUrlHint")}
+                    </p>
+                  </div>
+                ) : null}
               </div>
             ) : (
               <div data-testid="people-connect-no-profile">{t("peopleNoProfileToConnect")}</div>
             )}
+            {diagnosticReport ? (
+              <details
+                className="mt-3 border-t border-border/70 pt-3"
+                data-testid="people-connection-diagnostics"
+              >
+                <summary className="cursor-pointer select-none font-medium text-text-strong">
+                  {t("peopleConnectionDiagnostics")}
+                </summary>
+                <p className="mt-2 text-muted-foreground">
+                  {t("peopleConnectionDiagnosticsHint")}
+                </p>
+                <pre
+                  className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted/40 p-2 font-mono text-[11px] leading-5 text-text-strong"
+                  data-testid="people-connection-diagnostics-report"
+                >
+                  {diagnosticReport}
+                </pre>
+                {copyText ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="mt-2"
+                    data-testid="people-connection-diagnostics-copy"
+                    onClick={() => void copyDiagnostics()}
+                  >
+                    {diagnosticsCopied
+                      ? t("peopleConnectionDiagnosticsCopied")
+                      : t("peopleConnectionDiagnosticsCopy")}
+                  </Button>
+                ) : null}
+              </details>
+            ) : null}
           </div>
         ) : null}
 

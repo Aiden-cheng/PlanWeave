@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   type Dispatch,
   type MutableRefObject,
   type SetStateAction
@@ -27,6 +28,7 @@ type UseDesktopProjectLoaderArgs = {
   ) => string[];
   clearProjectState: () => void;
   currentCanvasRef: MutableRefObject<CurrentDesktopCanvasRef>;
+  initialProjectPath: string;
   refreshDesktopGraphDiagnostics: (canvasRef: {
     projectRoot: string;
     canvasId?: string | null;
@@ -44,6 +46,7 @@ type UseDesktopProjectLoaderArgs = {
   setProjects: Dispatch<SetStateAction<DesktopProjectSummary[]>>;
   setSelectedCanvasId: Dispatch<SetStateAction<string | null>>;
   setSelectedProject: (value: DesktopProjectSummary | null) => void;
+  settingsHydrated: boolean;
   t: ReturnType<typeof createTranslator>;
   updateSettings: (update: DesktopSettingsUpdate) => void;
 };
@@ -72,6 +75,7 @@ export function useDesktopProjectLoader({
   applyDesktopProjectSnapshot,
   clearProjectState,
   currentCanvasRef,
+  initialProjectPath,
   refreshDesktopGraphDiagnostics,
   selectedCanvasId,
   selectedProject,
@@ -86,9 +90,15 @@ export function useDesktopProjectLoader({
   setProjects,
   setSelectedCanvasId,
   setSelectedProject,
+  settingsHydrated,
   t,
   updateSettings
 }: UseDesktopProjectLoaderArgs) {
+  const initialProjectPathRef = useRef<string | null>(null);
+  if (settingsHydrated && initialProjectPathRef.current === null) {
+    initialProjectPathRef.current = initialProjectPath;
+  }
+
   const loadProject = useCallback(
     async (project: DesktopProjectSummary, requestedCanvasId?: string | null) => {
       if (!bridge) {
@@ -188,6 +198,9 @@ export function useDesktopProjectLoader({
   );
 
   useEffect(() => {
+    if (!settingsHydrated) {
+      return;
+    }
     if (!bridge) {
       setProjectLoading(false);
       return;
@@ -200,8 +213,12 @@ export function useDesktopProjectLoader({
           return;
         }
         setProjects(items);
-        if (items[0]) {
-          void loadProject(items[0]);
+        const persistedProject = items.find(
+          (item) => item.workspaceRoot === initialProjectPathRef.current
+        );
+        const initialProject = persistedProject ?? items[0];
+        if (initialProject) {
+          void loadProject(initialProject);
           return;
         }
         setProjectLoading(false);
@@ -216,7 +233,7 @@ export function useDesktopProjectLoader({
     return () => {
       cancelled = true;
     };
-  }, [loadProject, setError, setProjectLoading, setProjects]);
+  }, [loadProject, setError, setProjectLoading, setProjects, settingsHydrated]);
 
   const refreshGraph = useCallback(async () => {
     if (!bridge || !selectedProject) {

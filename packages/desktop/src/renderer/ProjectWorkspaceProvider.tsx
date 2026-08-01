@@ -63,6 +63,7 @@ import { useSharedResourceHighlight } from "./hooks/useSharedResourceHighlight";
 import { useLerpedNodeDrag } from "./hooks/useLerpedNodeDrag";
 import { useCollaborationSurface } from "./hooks/useCollaborationSurface";
 import { useCollaborationCanvasPresence } from "./hooks/useCollaborationCanvasPresence";
+import { useCollaborationRuntimeStatus } from "./hooks/useCollaborationRuntimeStatus";
 import { useSharedCanvasCommands } from "./hooks/useSharedCanvasCommands";
 import { buildAppSettingsRouteProps } from "./AppSettingsRouteProps";
 import { useAutoRunController, useFileSyncController } from "./controllers/AutoRunController";
@@ -133,6 +134,7 @@ export type ProjectWorkspaceShellInput = {
   setError: (message: string | null) => void;
   setSuccessMessage: Dispatch<SetStateAction<string | null>>;
   settings: DesktopUiSettings;
+  settingsHydrated: boolean;
   t: ReturnType<typeof createTranslator>;
   updateLayoutSettings: (patch: LayoutSettingsPatch) => void;
   updateSettings: (update: DesktopSettingsUpdate) => void;
@@ -190,6 +192,7 @@ export function ProjectWorkspaceProvider({
     setError,
     setSuccessMessage,
     settings,
+    settingsHydrated,
     t,
     updateLayoutSettings,
     updateSettings,
@@ -210,14 +213,16 @@ export function ProjectWorkspaceProvider({
   });
 
   const desktopProject = useDesktopProject({
+    initialProjectPath: settings.runtimePath,
     setError,
+    settingsHydrated,
     t,
     updateSettings
   });
   const {
     expandedProjectId,
     executionPlan,
-    graph,
+    graph: localGraph,
     graphDiagnostics,
     handleOpenProject,
     layout,
@@ -249,6 +254,14 @@ export function ProjectWorkspaceProvider({
     canvasId: selectedCanvasId,
     t
   });
+  const collaborationRuntimeStatus = useCollaborationRuntimeStatus({
+    enabled: Boolean(selectedProject),
+    sessionConnected: collaborationSurface.sessionConnected,
+    localProjectId: selectedProject?.projectId ?? null,
+    localCanvasId: selectedCanvasId,
+    graph: localGraph
+  });
+  const graph = collaborationRuntimeStatus.graph;
   const sharedCanvasCommands = useSharedCanvasCommands({
     api: collaborationBridge,
     canvasId: selectedCanvasId,
@@ -929,6 +942,7 @@ export function ProjectWorkspaceProvider({
       handleRevealTaskCanvas,
       handleRenameTaskCanvas,
       loadProject: openProjectInSession,
+      refreshProjects,
       projectLoading,
       selectedCanvasId,
       selectedProject,
@@ -950,6 +964,7 @@ export function ProjectWorkspaceProvider({
       handleRenameTaskCanvas,
       openProjectInSession,
       projectLoading,
+      refreshProjects,
       selectedCanvasId,
       selectedProject,
       selectedTaskPanelId,

@@ -22,12 +22,20 @@ import { useDesktopRuntimeSubscriptions } from "./useDesktopRuntimeSubscriptions
 export { resolveProjectCanvasId } from "./useDesktopProjectLoader";
 
 export type UseDesktopProjectArgs = {
+  initialProjectPath?: string;
   setError: (message: string | null) => void;
+  settingsHydrated?: boolean;
   t: ReturnType<typeof createTranslator>;
   updateSettings: (update: DesktopSettingsUpdate) => void;
 };
 
-export function useDesktopProject({ setError, t, updateSettings }: UseDesktopProjectArgs) {
+export function useDesktopProject({
+  initialProjectPath = "",
+  setError,
+  settingsHydrated = true,
+  t,
+  updateSettings
+}: UseDesktopProjectArgs) {
   const [projects, setProjects] = useState<DesktopProjectSummary[]>([]);
   const [projectLoading, setProjectLoading] = useState(Boolean(bridge));
   const [projectRefreshing, setProjectRefreshing] = useState(false);
@@ -89,6 +97,7 @@ export function useDesktopProject({ setError, t, updateSettings }: UseDesktopPro
     applyDesktopProjectSnapshot,
     clearProjectState,
     currentCanvasRef,
+    initialProjectPath,
     refreshDesktopGraphDiagnostics,
     selectedCanvasId,
     selectedProject,
@@ -103,6 +112,7 @@ export function useDesktopProject({ setError, t, updateSettings }: UseDesktopPro
     setProjects,
     setSelectedCanvasId,
     setSelectedProject,
+    settingsHydrated,
     t,
     updateSettings
   });
@@ -155,6 +165,7 @@ export function useDesktopProject({ setError, t, updateSettings }: UseDesktopPro
   useEffect(() => {
     if (!collaborationBridge) return;
     if (!selectedProject || !selectedCanvasId) {
+      if (projectLoading || projectRefreshing) return;
       void collaborationBridge.clearCollaborationCurrentSelection().catch((error: unknown) => {
         setError(error instanceof Error ? error.message : String(error));
       });
@@ -165,7 +176,7 @@ export function useDesktopProject({ setError, t, updateSettings }: UseDesktopPro
       .catch((error: unknown) => {
         setError(error instanceof Error ? error.message : String(error));
       });
-  }, [selectedCanvasId, selectedProject?.projectId, setError]);
+  }, [projectLoading, projectRefreshing, selectedCanvasId, selectedProject?.projectId, setError]);
 
   return {
     expandedProjectId,

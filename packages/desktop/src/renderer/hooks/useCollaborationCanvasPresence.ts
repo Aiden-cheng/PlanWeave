@@ -51,11 +51,21 @@ export function useCollaborationCanvasPresence(input: {
   api?: CanvasPresenceBridge | null;
 }): CollaborationCanvasPresenceResult {
   const api = input.api === undefined ? collaborationBridge : input.api;
+  const [resolvedScope, setResolvedScope] = useState<{
+    localProjectId: string;
+    localCanvasId: string;
+    remoteProjectId: string;
+    remoteCanvasId: string;
+  } | null>(null);
+  const currentScope =
+    resolvedScope &&
+    resolvedScope.localProjectId === input.selectedProjectId &&
+    resolvedScope.localCanvasId === input.canvasId &&
+    resolvedScope.remoteProjectId === input.activeProjectId
+      ? resolvedScope
+      : null;
   const scopeEnabled =
-    input.enabled &&
-    input.sessionConnected &&
-    input.selectedProjectId !== null &&
-    input.selectedProjectId === input.activeProjectId;
+    input.enabled && input.sessionConnected && input.profileId !== null && currentScope !== null;
   const labels = useMemo<CanvasPresenceLabels>(
     () => ({
       error: (code) => input.t("canvasPresenceError").replace("{code}", code)
@@ -72,6 +82,54 @@ export function useCollaborationCanvasPresence(input: {
   const frameRef = useRef<number | null>(null);
   const [remoteSessions, setRemoteSessions] = useState<CanvasPresenceRemoteSession[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (
+      !api ||
+      !input.enabled ||
+      !input.sessionConnected ||
+      !input.profileId ||
+      !input.selectedProjectId ||
+      !input.canvasId ||
+      !input.activeProjectId
+    ) {
+      setResolvedScope(null);
+      return undefined;
+    }
+    const localProjectId = input.selectedProjectId;
+    const localCanvasId = input.canvasId;
+    const activeProjectId = input.activeProjectId;
+    let active = true;
+    setResolvedScope(null);
+    void api
+      .resolveCollaborationCanvasScope({
+        localProjectId,
+        canvasId: localCanvasId
+      })
+      .then((scope) => {
+        if (!active || !scope || scope.projectId !== activeProjectId) return;
+        setResolvedScope({
+          localProjectId,
+          localCanvasId,
+          remoteProjectId: scope.projectId,
+          remoteCanvasId: scope.canvasId
+        });
+      })
+      .catch((caught: unknown) => {
+        if (active) setError(caught instanceof Error ? caught.message : String(caught));
+      });
+    return () => {
+      active = false;
+    };
+  }, [
+    api,
+    input.activeProjectId,
+    input.canvasId,
+    input.enabled,
+    input.profileId,
+    input.selectedProjectId,
+    input.sessionConnected
+  ]);
 
   useEffect(() => {
     if (!api) {
@@ -101,7 +159,7 @@ export function useCollaborationCanvasPresence(input: {
 
   useEffect(() => {
     const controller = controllerRef.current;
-    const shouldRun = Boolean(controller && scopeEnabled && input.canvasId && input.profileId);
+    const shouldRun = Boolean(controller && scopeEnabled && currentScope && input.profileId);
     if (!controller || !shouldRun) {
       desiredPointerRef.current = null;
       desiredSelectionRef.current = [];
@@ -110,7 +168,7 @@ export function useCollaborationCanvasPresence(input: {
       return undefined;
     }
     setError(null);
-    const canvasId = input.canvasId;
+    const canvasId = currentScope?.remoteCanvasId ?? null;
     const profileId = input.profileId;
     if (!canvasId || !profileId) return undefined;
     const scope = {
@@ -129,11 +187,11 @@ export function useCollaborationCanvasPresence(input: {
       lastPublishedRef.current = null;
       setRemoteSessions([]);
     };
-  }, [input.canvasId, input.profileId, scopeEnabled]);
+  }, [currentScope?.remoteCanvasId, input.profileId, scopeEnabled]);
 
   const publish = useCallback(
     (pointer: XYPosition | null, selectionIds: string[]) => {
-      if (!scopeEnabled || !input.canvasId || !input.profileId) return;
+      if (!scopeEnabled || !currentScope || !input.profileId) return;
       const controller = controllerRef.current;
       if (!controller) return;
       const previous = lastPublishedRef.current;
@@ -152,7 +210,7 @@ export function useCollaborationCanvasPresence(input: {
           setError(caught instanceof Error ? caught.message : String(caught))
         );
     },
-    [input.canvasId, input.profileId, scopeEnabled]
+    [currentScope, input.profileId, scopeEnabled]
   );
 
   const flushPointer = useCallback(() => {

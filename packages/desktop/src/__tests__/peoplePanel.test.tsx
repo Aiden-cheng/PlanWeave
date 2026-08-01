@@ -1,6 +1,7 @@
 /* @vitest-environment jsdom */
 
 import "@testing-library/jest-dom/vitest";
+import { StrictMode } from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,7 +10,6 @@ import { PeoplePanel } from "../renderer/team/PeoplePanel";
 import { parseCollaborationInvitationHandoff } from "../renderer/team/collaborationInvitationHandoff";
 import type {
   PeopleDeviceRow,
-  PeopleHostRow,
   PeopleInvitationRow,
   PeopleMemberRow,
   PeoplePresenceSummary
@@ -62,21 +62,6 @@ const members: PeopleMemberRow[] = [
   }
 ];
 
-const hosts: PeopleHostRow[] = [
-  {
-    hostId: "host-1",
-    displayName: "Builder",
-    status: "online",
-    capacityRemaining: 3,
-    capabilities: ["shell", "git"],
-    revoked: false,
-    authorizedForProject: true,
-    exists: true,
-    versionSummary: null,
-    lastSeenSummary: null
-  }
-];
-
 const invitations: PeopleInvitationRow[] = [
   {
     invitationId: "inv-1",
@@ -104,7 +89,7 @@ afterEach(() => {
 });
 
 describe("PeoplePanel", () => {
-  it("renders members and hosts separately and supports owner invite/copy-once", async () => {
+  it("renders full-width member rows with inline access and supports owner invite/copy-once", async () => {
     const onCreateInvitation = vi.fn().mockResolvedValue({
       invitation: {
         invitationId: "inv-new",
@@ -116,6 +101,7 @@ describe("PeoplePanel", () => {
       },
       invitationToken: `pw_inv_${"A".repeat(43)}`
     });
+    const onViewInvitation = vi.fn().mockResolvedValue(null);
     const onCopy = vi.fn().mockResolvedValue(undefined);
     const onPromote = vi.fn().mockResolvedValue(true);
     const onRemove = vi.fn().mockResolvedValue(true);
@@ -128,7 +114,6 @@ describe("PeoplePanel", () => {
         mode="ready"
         presence={presence}
         members={members}
-        hosts={hosts}
         invitations={invitations}
         devices={devices}
         detailsLoading={false}
@@ -136,8 +121,10 @@ describe("PeoplePanel", () => {
         actionError={null}
         actionBusy={false}
         pendingInvitation={null}
+        revealInvitationManagement
         t={t}
         onCreateInvitation={onCreateInvitation}
+        onViewInvitation={onViewInvitation}
         onCopyInvitationToken={onCopy}
         onDismissPendingInvitation={vi.fn()}
         onRevokeInvitation={onRevokeInvitation}
@@ -147,32 +134,45 @@ describe("PeoplePanel", () => {
         onRemoveMember={onRemove}
         onRevokeDevice={onRevokeDevice}
         onRefreshDetails={vi.fn()}
+        renderMemberAccess={(member) => (
+          <div data-testid="member-access-slot">{member.displayName} access</div>
+        )}
       />
     );
 
     expect(screen.getByTestId("people-panel")).toHaveAttribute("data-mode", "ready");
+    expect(screen.getByTestId("people-toolbar")).not.toHaveClass("rounded-xl", "bg-background");
     expect(screen.getByTestId("people-members-section")).toBeVisible();
-    expect(screen.getByTestId("people-hosts-section")).toBeVisible();
-    expect(screen.getByTestId("people-host-status")).toHaveAttribute("data-status", "online");
-    expect(screen.getByTestId("people-host-version")).toHaveTextContent("not in projection");
+    expect(screen.getByTestId("people-members-section")).not.toHaveClass("rounded-xl", "border");
+    expect(screen.queryByTestId("people-hosts-section")).not.toBeInTheDocument();
+    expect(screen.getByTestId("people-presence-summary")).toHaveTextContent("2 members");
+    expect(screen.getByTestId("people-presence-summary")).not.toHaveTextContent("host");
+    expect(screen.getAllByTestId("people-member-access-toggle")).toHaveLength(1);
+    await userEvent.click(screen.getByTestId("people-member-access-toggle"));
+    expect(screen.getByTestId("member-access-slot")).toHaveTextContent("Member access");
     expect(screen.getByTestId("people-last-owner-guard")).toHaveTextContent("Last owner protected");
+    expect(screen.getByTestId("people-owner-toggle")).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("people-owner-section")).not.toHaveClass("rounded-xl", "border");
+    expect(screen.getByTestId("people-invitations-list")).toBeVisible();
+    expect(screen.getByTestId("people-invitations-list")).not.toHaveClass("rounded-lg", "border");
 
     await userEvent.click(screen.getByTestId("people-member-promote"));
     expect(onPromote).toHaveBeenCalledWith("human-2");
 
-    await userEvent.click(screen.getByTestId("people-owner-toggle"));
-    expect(screen.getByTestId("people-invitations-list")).toBeVisible();
     expect(screen.getByTestId("people-devices-list")).toBeVisible();
+    expect(screen.getByTestId("people-devices-list")).not.toHaveClass("rounded-lg", "border");
 
     await userEvent.click(screen.getByTestId("people-create-invitation"));
     expect(onCreateInvitation).toHaveBeenCalled();
+
+    await userEvent.click(screen.getByTestId("people-invitation-view"));
+    expect(onViewInvitation).toHaveBeenCalledWith("inv-1");
 
     rerender(
       <PeoplePanel
         mode="ready"
         presence={presence}
         members={members}
-        hosts={hosts}
         invitations={invitations}
         devices={devices}
         detailsLoading={false}
@@ -181,7 +181,7 @@ describe("PeoplePanel", () => {
         actionBusy={false}
         pendingInvitation={{
           invitation: {
-            invitationId: "inv-new",
+            invitationId: "inv-1",
             projectId: "project-1",
             role: "member",
             createdByHumanPrincipalId: "human-1",
@@ -192,6 +192,7 @@ describe("PeoplePanel", () => {
         }}
         t={t}
         onCreateInvitation={onCreateInvitation}
+        onViewInvitation={onViewInvitation}
         onCopyInvitationToken={onCopy}
         onDismissPendingInvitation={vi.fn()}
         onRevokeInvitation={onRevokeInvitation}
@@ -224,8 +225,15 @@ describe("PeoplePanel", () => {
         mode="disconnected"
         presence={{ ...presence, memberCount: 0, currentUserIsOwner: false }}
         members={[]}
-        hosts={[]}
-        invitations={[]}
+        invitations={[
+          {
+            invitationId: "inv-new",
+            role: "member",
+            createdAt: "2030-01-01T00:00:00.000Z",
+            expiresAt: "2030-01-08T00:00:00.000Z",
+            open: true
+          }
+        ]}
         devices={[]}
         detailsLoading={false}
         detailsError={null}
@@ -234,6 +242,7 @@ describe("PeoplePanel", () => {
         pendingInvitation={null}
         t={t}
         onCreateInvitation={vi.fn()}
+        onViewInvitation={vi.fn()}
         onCopyInvitationToken={vi.fn()}
         onDismissPendingInvitation={vi.fn()}
         onRevokeInvitation={vi.fn()}
@@ -257,7 +266,6 @@ describe("PeoplePanel", () => {
     const commonProps = {
       presence: { ...presence, memberCount: 0, hostCount: 0, onlineHostCount: 0 },
       members: [],
-      hosts: [],
       invitations: [],
       devices: [],
       detailsLoading: false,
@@ -267,6 +275,7 @@ describe("PeoplePanel", () => {
       pendingInvitation: null,
       t,
       onCreateInvitation: vi.fn(),
+      onViewInvitation: vi.fn(),
       onCopyInvitationToken: vi.fn(),
       onDismissPendingInvitation: vi.fn(),
       onRevokeInvitation: vi.fn(),
@@ -288,10 +297,68 @@ describe("PeoplePanel", () => {
     expect(screen.getByTestId("people-error")).toBeVisible();
     expect(screen.getByTestId("people-error")).toHaveClass("text-muted-foreground");
     expect(screen.getByTestId("people-error")).not.toHaveAttribute("role", "alert");
+    expect(screen.getByTestId("people-presence-summary")).toHaveTextContent(
+      "Could not load collaboration people"
+    );
+    expect(screen.getByTestId("people-presence-summary")).not.toHaveTextContent("0 members");
+    expect(screen.getByTestId("people-members-empty")).toHaveTextContent(
+      "Could not load collaboration people"
+    );
+    expect(screen.getByTestId("people-members-empty")).not.toHaveTextContent("No members");
     expect(screen.queryByTestId("people-connect-form")).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByTestId("people-toggle-connection-settings"));
     expect(screen.getByTestId("people-connect-form")).toBeVisible();
+  });
+
+  it("exposes copyable read diagnostics when member loading fails", async () => {
+    const onCopyDiagnostics = vi.fn().mockResolvedValue(undefined);
+    render(
+      <PeoplePanel
+        mode="error"
+        presence={{ ...presence, memberCount: 0, hostCount: 0, onlineHostCount: 0 }}
+        members={[]}
+        invitations={[]}
+        devices={[]}
+        detailsLoading={false}
+        detailsError={null}
+        actionError={null}
+        actionBusy={false}
+        pendingInvitation={null}
+        diagnosticReport={[
+          "planweave.collaboration.diagnostics/v1",
+          "profile.project_id=project-1",
+          "read_model.error_code=human_rate_limited"
+        ].join("\n")}
+        onCopyDiagnostics={onCopyDiagnostics}
+        t={t}
+        onCreateInvitation={vi.fn()}
+        onViewInvitation={vi.fn()}
+        onCopyInvitationToken={vi.fn()}
+        onDismissPendingInvitation={vi.fn()}
+        onRevokeInvitation={vi.fn()}
+        onRevokeInvitations={vi.fn()}
+        onPromoteMember={vi.fn()}
+        onDemoteMember={vi.fn()}
+        onRemoveMember={vi.fn()}
+        onRevokeDevice={vi.fn()}
+        onRefreshDetails={vi.fn()}
+      />
+    );
+
+    expect(screen.getByTestId("people-read-diagnostics")).not.toHaveAttribute("open");
+    await userEvent.click(screen.getByText("Connection diagnostics"));
+    expect(screen.getByTestId("people-read-diagnostics-report")).toHaveTextContent(
+      "read_model.error_code=human_rate_limited"
+    );
+    await userEvent.click(screen.getByTestId("people-read-diagnostics-copy"));
+
+    expect(onCopyDiagnostics).toHaveBeenCalledWith(
+      expect.stringContaining("profile.project_id=project-1")
+    );
+    expect(screen.getByTestId("people-read-diagnostics-copy")).toHaveTextContent(
+      "Diagnostics copied"
+    );
   });
 
   it("opens invitation management after a lone owner finishes initialization", () => {
@@ -300,7 +367,6 @@ describe("PeoplePanel", () => {
         mode="ready"
         presence={{ ...presence, memberCount: 1, hostCount: 0, onlineHostCount: 0 }}
         members={[members[0]!]}
-        hosts={[]}
         invitations={[]}
         devices={[]}
         detailsLoading={false}
@@ -333,8 +399,15 @@ describe("PeoplePanel", () => {
         mode="ready"
         presence={presence}
         members={members}
-        hosts={hosts}
-        invitations={[]}
+        invitations={[
+          {
+            invitationId: "inv-new",
+            role: "member",
+            createdAt: "2030-01-01T00:00:00.000Z",
+            expiresAt: "2030-01-08T00:00:00.000Z",
+            open: true
+          }
+        ]}
         devices={[]}
         detailsLoading={false}
         detailsError={null}
@@ -351,12 +424,14 @@ describe("PeoplePanel", () => {
           },
           invitationToken: `pw_inv_${"A".repeat(43)}`
         }}
+        revealInvitationManagement
         invitationConnection={{
           serverBaseUrl: "http://192.168.1.20:56584/",
           projectId: "project-1"
         }}
         t={t}
         onCreateInvitation={vi.fn()}
+        onViewInvitation={vi.fn()}
         onCopyInvitationToken={onCopy}
         onDismissPendingInvitation={vi.fn()}
         onRevokeInvitation={vi.fn()}
@@ -370,9 +445,6 @@ describe("PeoplePanel", () => {
     );
 
     const visibleInvitation = screen.getByTestId("people-invitation-token-value");
-    expect(screen.getByTestId("people-invitation-connection-summary")).toHaveTextContent(
-      "http://192.168.1.20:56584/"
-    );
     expect(visibleInvitation.value).toContain("planweave-collaboration-invitation/v1:");
 
     await userEvent.click(screen.getByTestId("people-invitation-copy"));
@@ -397,7 +469,6 @@ describe("PeoplePanel", () => {
         mode="ready"
         presence={presence}
         members={members}
-        hosts={[]}
         invitations={[
           {
             invitationId,
@@ -457,7 +528,6 @@ describe("PeoplePanel", () => {
         mode="ready"
         presence={presence}
         members={members}
-        hosts={[]}
         invitations={[
           { ...invitations[0]!, invitationId: "inv-1" },
           { ...invitations[0]!, invitationId: "inv-2" },
@@ -502,13 +572,53 @@ describe("PeoplePanel", () => {
     expect(onRevokeInvitations).toHaveBeenCalledWith(["inv-1", "inv-2"]);
   });
 
+  it("selects one invitation without crashing the People renderer", async () => {
+    render(
+      <StrictMode>
+        <PeoplePanel
+          mode="ready"
+          presence={presence}
+          members={members}
+          invitations={[
+            { ...invitations[0]!, invitationId: "inv-1" },
+            { ...invitations[0]!, invitationId: "inv-2" }
+          ]}
+          devices={[]}
+          detailsLoading={false}
+          detailsError={null}
+          actionError={null}
+          actionBusy={false}
+          pendingInvitation={null}
+          t={t}
+          onCreateInvitation={vi.fn()}
+          onCopyInvitationToken={vi.fn()}
+          onDismissPendingInvitation={vi.fn()}
+          onRevokeInvitation={vi.fn()}
+          onRevokeInvitations={vi.fn()}
+          onPromoteMember={vi.fn()}
+          onDemoteMember={vi.fn()}
+          onRemoveMember={vi.fn()}
+          onRevokeDevice={vi.fn()}
+          onRefreshDetails={vi.fn()}
+        />
+      </StrictMode>
+    );
+
+    fireEvent.click(screen.getByTestId("people-owner-toggle"));
+    await userEvent.click(screen.getAllByTestId("people-invitation-select")[0]!);
+
+    expect(screen.getByTestId("people-panel")).toBeVisible();
+    expect(screen.getByTestId("people-invitation-revoke-selected")).toHaveTextContent(
+      "Revoke selected (1)"
+    );
+  });
+
   it("shows forbidden state without owner mutation controls", () => {
     render(
       <PeoplePanel
         mode="forbidden"
         presence={{ ...presence, currentUserIsOwner: false }}
         members={members}
-        hosts={hosts}
         invitations={[]}
         devices={[]}
         detailsLoading={false}

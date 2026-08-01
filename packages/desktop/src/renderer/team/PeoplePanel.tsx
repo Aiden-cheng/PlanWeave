@@ -3,20 +3,19 @@ import { Button } from "@/components/ui/button";
 import type { createTranslator } from "../i18n";
 import type {
   PeopleDeviceRow,
-  PeopleHostRow,
   PeopleInvitationRow,
   PeopleMemberRow,
   PeoplePanelMode,
   PeoplePresenceSummary
 } from "../collaboration/peopleViewModels";
 import type { CollaborationInvitationCreateView } from "../../shared/collaboration.js";
+import { CollaborationDiagnosticsDetails } from "./CollaborationDiagnosticsDetails";
 import { serializeCollaborationInvitationHandoff } from "./collaborationInvitationHandoff";
 
 export type PeoplePanelProps = {
   mode: PeoplePanelMode;
   presence: PeoplePresenceSummary;
   members: PeopleMemberRow[];
-  hosts: PeopleHostRow[];
   invitations: PeopleInvitationRow[];
   devices: PeopleDeviceRow[];
   detailsLoading: boolean;
@@ -25,8 +24,11 @@ export type PeoplePanelProps = {
   actionBusy: boolean;
   pendingInvitation: CollaborationInvitationCreateView | null;
   invitationConnection?: { serverBaseUrl: string; projectId: string } | null;
+  /** Opens the existing owner invitation controls after a capacity-recovery navigation. */
+  revealInvitationManagement?: boolean;
   t: ReturnType<typeof createTranslator>;
   onCreateInvitation: () => Promise<CollaborationInvitationCreateView | null>;
+  onViewInvitation: (invitationId: string) => Promise<CollaborationInvitationCreateView | null>;
   onCopyInvitationToken: (token: string) => Promise<void>;
   onDismissPendingInvitation: () => void;
   onRevokeInvitation: (invitationId: string) => Promise<boolean>;
@@ -36,8 +38,13 @@ export type PeoplePanelProps = {
   onRemoveMember: (humanPrincipalId: string) => Promise<boolean>;
   onRevokeDevice: (deviceCredentialId: string) => Promise<boolean>;
   onRefreshDetails: () => Promise<void>;
+  /** Current-project access controls rendered below one expanded member row. */
+  renderMemberAccess?: (member: PeopleMemberRow) => ReactNode;
   /** Optional connect form when disconnected. */
   connectSlot?: ReactNode;
+  /** Allowlisted read/session context for cross-device troubleshooting. */
+  diagnosticReport?: string | null;
+  onCopyDiagnostics?: (report: string) => Promise<void>;
   /** Page shells may already expose the selected destination. */
   showTitle?: boolean;
 };
@@ -75,40 +82,10 @@ function MemberAvatar({ initials, label }: { initials: string; label: string }) 
   return (
     <span
       aria-hidden="true"
-      className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-state-selected-surface text-[10px] font-semibold text-text-strong ring-1 ring-border/70"
+      className="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-state-selected-surface text-xs font-semibold text-text-strong ring-1 ring-border/70"
       title={label}
     >
       {initials}
-    </span>
-  );
-}
-
-function HostStatusBadge({
-  status,
-  t
-}: {
-  status: PeopleHostRow["status"];
-  t: ReturnType<typeof createTranslator>;
-}) {
-  const label =
-    status === "online"
-      ? t("peopleHostOnline")
-      : status === "offline"
-        ? t("peopleHostOffline")
-        : t("peopleHostDegraded");
-  const tone =
-    status === "online"
-      ? "bg-emerald-500/15 text-emerald-800 dark:text-emerald-100"
-      : status === "offline"
-        ? "bg-muted text-muted-foreground"
-        : "bg-amber-500/15 text-amber-900 dark:text-amber-100";
-  return (
-    <span
-      className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${tone}`}
-      data-testid="people-host-status"
-      data-status={status}
-    >
-      {label}
     </span>
   );
 }
@@ -117,7 +94,6 @@ export function PeoplePanel({
   mode,
   presence,
   members,
-  hosts,
   invitations,
   devices,
   detailsLoading,
@@ -126,8 +102,10 @@ export function PeoplePanel({
   actionBusy,
   pendingInvitation,
   invitationConnection = null,
+  revealInvitationManagement = false,
   t,
   onCreateInvitation,
+  onViewInvitation,
   onCopyInvitationToken,
   onDismissPendingInvitation,
   onRevokeInvitation,
@@ -137,16 +115,20 @@ export function PeoplePanel({
   onRemoveMember,
   onRevokeDevice,
   onRefreshDetails,
+  renderMemberAccess,
   connectSlot,
+  diagnosticReport = null,
+  onCopyDiagnostics,
   showTitle = true
 }: PeoplePanelProps) {
-  const [showOwnerDetails, setShowOwnerDetails] = useState(false);
+  const [showOwnerDetails, setShowOwnerDetails] = useState(revealInvitationManagement);
   const [showConnectionSettings, setShowConnectionSettings] = useState(false);
+  const [expandedAccessPrincipalId, setExpandedAccessPrincipalId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
   const [selectedInvitationIds, setSelectedInvitationIds] = useState<Set<string>>(new Set());
   const liveRegionRef = useRef<HTMLDivElement>(null);
-  const pendingInvitationRef = useRef<HTMLTextAreaElement>(null);
+  const pendingInvitationRef = useRef<HTMLInputElement>(null);
   const pendingInvitationDetails = useMemo(() => {
     if (!pendingInvitation) return null;
     if (!invitationConnection) return pendingInvitation.invitationToken;
@@ -167,23 +149,23 @@ export function PeoplePanel({
   }, [pendingInvitation]);
 
   useEffect(() => {
-    if (presence.currentUserIsOwner && presence.memberCount <= 1) {
+    if (presence.currentUserIsOwner && (presence.memberCount <= 1 || revealInvitationManagement)) {
       setShowOwnerDetails(true);
     }
-  }, [presence.currentUserIsOwner, presence.memberCount]);
+  }, [presence.currentUserIsOwner, presence.memberCount, revealInvitationManagement]);
 
-  const openInvitationIds = useMemo(
-    () =>
-      invitations
-        .filter((invitation) => invitation.open)
-        .map((invitation) => invitation.invitationId),
+  const openInvitations = useMemo(
+    () => invitations.filter((invitation) => invitation.open),
     [invitations]
+  );
+  const openInvitationIds = useMemo(
+    () => openInvitations.map((invitation) => invitation.invitationId),
+    [openInvitations]
   );
   const allOpenInvitationsSelected =
     openInvitationIds.length > 0 &&
     openInvitationIds.every((invitationId) => selectedInvitationIds.has(invitationId));
-  const someOpenInvitationsSelected =
-    selectedInvitationIds.size > 0 && !allOpenInvitationsSelected;
+  const someOpenInvitationsSelected = selectedInvitationIds.size > 0 && !allOpenInvitationsSelected;
 
   useEffect(() => {
     const openIds = new Set(openInvitationIds);
@@ -196,6 +178,97 @@ export function PeoplePanel({
 
   const confirmDestructive = (message: string): boolean => window.confirm(message);
 
+  const diagnostics = diagnosticReport ? (
+    <CollaborationDiagnosticsDetails
+      report={diagnosticReport}
+      t={t}
+      onCopy={onCopyDiagnostics}
+      testIdPrefix="people-read-diagnostics"
+    />
+  ) : null;
+
+  const renderInlineInvitationSecret = (invitationId: string) => {
+    if (pendingInvitation?.invitation.invitationId !== invitationId) return null;
+    return (
+      <section
+        className="mt-2 flex flex-col gap-2 rounded-lg border border-amber-500/35 bg-amber-500/10 p-3"
+        data-testid="people-invitation-secret-once"
+        aria-label={t("peopleInvitationCopyOnceTitle")}
+      >
+        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+          <span className="shrink-0 text-xs font-semibold">
+            {t("peopleInvitationCopyOnceTitle")}
+          </span>
+          <input
+            ref={pendingInvitationRef}
+            className="h-9 min-w-0 flex-1 truncate rounded-md border border-border bg-background px-3 font-mono text-xs"
+            data-testid="people-invitation-token-value"
+            readOnly
+            value={pendingInvitationDetails ?? ""}
+            aria-label={t(
+              invitationConnection ? "peopleInvitationDetails" : "peopleInvitationToken"
+            )}
+          />
+          <Button
+            type="button"
+            size="sm"
+            className="h-9 shrink-0 px-3 text-xs"
+            data-testid="people-invitation-copy"
+            disabled={actionBusy}
+            onClick={() => {
+              void (async () => {
+                try {
+                  await onCopyInvitationToken(
+                    pendingInvitationDetails ?? pendingInvitation.invitationToken
+                  );
+                  setCopied(true);
+                  setCopyError(false);
+                } catch {
+                  setCopied(false);
+                  setCopyError(true);
+                }
+              })();
+            }}
+          >
+            {copied ? t("peopleInvitationCopied") : t("peopleInvitationCopyHandoff")}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-9 shrink-0 px-3 text-xs"
+            data-testid="people-invitation-dismiss"
+            onClick={() => {
+              setCopied(false);
+              onDismissPendingInvitation();
+            }}
+          >
+            {t("peopleInvitationDismiss")}
+          </Button>
+        </div>
+        {presence.credentialPersistence === "session-only" || presence.nonPersistenceWarning ? (
+          <p className="text-xs leading-5 text-amber-900 dark:text-amber-100">
+            {t("peopleInvitationSessionOnlyWarning")}
+          </p>
+        ) : null}
+        {invitationConnection && isLoopbackServer(invitationConnection.serverBaseUrl) ? (
+          <p className="text-xs leading-5 text-amber-900 dark:text-amber-100">
+            {t("peopleInvitationLoopbackWarning")}
+          </p>
+        ) : null}
+        {copyError ? (
+          <p
+            className="text-xs text-destructive"
+            data-testid="people-invitation-copy-error"
+            role="alert"
+          >
+            {t("peopleInvitationCopyFailed")}
+          </p>
+        ) : null}
+      </section>
+    );
+  };
+
   if (mode === "disconnected" || mode === "connecting") {
     return (
       <div className="flex flex-col gap-2" data-testid="people-panel" data-mode={mode}>
@@ -206,6 +279,7 @@ export function PeoplePanel({
           <p className="text-xs text-muted-foreground">{t("peopleConnecting")}</p>
         ) : null}
         {connectSlot}
+        {diagnostics}
       </div>
     );
   }
@@ -224,26 +298,43 @@ export function PeoplePanel({
           {mode === "auth_expired" ? t("peopleAuthExpired") : t("peopleForbidden")}
         </div>
         {connectSlot}
+        {diagnostics}
       </div>
     );
   }
 
+  const memberStateText =
+    mode === "ready" || mode === "empty"
+      ? t("peopleMemberCount").replace("{count}", String(presence.memberCount))
+      : mode === "loading"
+        ? t("peopleLoading")
+        : mode === "offline"
+          ? t("peopleOffline")
+          : t("peopleError");
+  const emptyMemberStateText =
+    mode === "empty"
+      ? t("peopleEmptyMembers")
+      : mode === "loading"
+        ? t("peopleLoading")
+        : mode === "offline"
+          ? t("peopleOffline")
+          : t("peopleError");
+
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3" data-testid="people-panel" data-mode={mode}>
-      <div className="flex items-start justify-between gap-2">
+    <div className="flex min-w-0 flex-col gap-4" data-testid="people-panel" data-mode={mode}>
+      <div
+        className="flex flex-col gap-4 border-b border-border/70 px-1 pb-5 sm:flex-row sm:items-center sm:justify-between"
+        data-testid="people-toolbar"
+      >
         <div>
           {showTitle ? (
             <h1 className="text-lg font-semibold text-text-strong">{t("peopleTitle")}</h1>
           ) : null}
-          <p className="text-xs text-muted-foreground" data-testid="people-presence-summary">
-            {t("peopleMemberCount").replace("{count}", String(presence.memberCount))}
-            {" · "}
-            {t("peopleHostOnlineCount")
-              .replace("{online}", String(presence.onlineHostCount))
-              .replace("{total}", String(presence.hostCount))}
+          <p className="text-sm text-muted-foreground" data-testid="people-presence-summary">
+            {memberStateText}
           </p>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-2">
           {presence.currentUserIsOwner ? (
             <Button
               type="button"
@@ -336,118 +427,36 @@ export function PeoplePanel({
         </div>
       ) : null}
 
+      {diagnostics}
+
       {connectSlot && showConnectionSettings ? (
         <div className="border-y border-border/70 py-4" data-testid="people-connection-settings">
           {connectSlot}
         </div>
       ) : null}
 
-      {pendingInvitation ? (
-        <div
-          className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2"
-          data-testid="people-invitation-secret-once"
-          role="alertdialog"
-          aria-labelledby="people-invitation-secret-title"
-        >
-          <div id="people-invitation-secret-title" className="text-xs font-semibold">
-            {t("peopleInvitationCopyOnceTitle")}
-          </div>
-          <p className="text-xs text-muted-foreground">{t("peopleInvitationCopyOnceWarning")}</p>
-          {invitationConnection && isLoopbackServer(invitationConnection.serverBaseUrl) ? (
-            <p className="text-xs font-medium text-amber-950 dark:text-amber-100" role="status">
-              {t("peopleInvitationLoopbackWarning")}
-            </p>
-          ) : null}
-          {invitationConnection ? (
-            <dl
-              className="grid gap-x-4 gap-y-1 border-y border-amber-500/25 py-2 text-xs sm:grid-cols-[auto_1fr]"
-              data-testid="people-invitation-connection-summary"
+      <div className="flex min-w-0 flex-col gap-5">
+        <div className="min-w-0">
+          <section
+            aria-labelledby="people-members-heading"
+            data-testid="people-members-section"
+            className="min-w-0 border-b border-border/70"
+          >
+            <h3
+              id="people-members-heading"
+              className="border-b border-border/60 px-1 pb-3 text-sm font-semibold text-text-strong"
             >
-              <dt className="text-muted-foreground">{t("peopleServerUrl")}</dt>
-              <dd className="min-w-0 truncate font-mono text-text-strong">
-                {invitationConnection.serverBaseUrl}
-              </dd>
-              <dt className="text-muted-foreground">{t("peopleProjectId")}</dt>
-              <dd className="min-w-0 truncate font-mono text-text-strong">
-                {invitationConnection.projectId}
-              </dd>
-            </dl>
-          ) : null}
-          <label htmlFor="people-invitation-details" className="text-xs font-semibold">
-            {t(invitationConnection ? "peopleInvitationDetails" : "peopleInvitationToken")}
-          </label>
-          <textarea
-            id="people-invitation-details"
-            ref={pendingInvitationRef}
-            className="min-h-24 w-full resize-y rounded border border-border bg-background px-2 py-1.5 font-mono text-xs leading-5"
-            data-testid="people-invitation-token-value"
-            readOnly
-            value={pendingInvitationDetails ?? ""}
-            aria-label={t(
-              invitationConnection ? "peopleInvitationDetails" : "peopleInvitationToken"
-            )}
-          />
-          <div className="flex flex-wrap gap-1">
-            <Button
-              type="button"
-              size="sm"
-              data-testid="people-invitation-copy"
-              disabled={actionBusy}
-              onClick={() => {
-                void (async () => {
-                  try {
-                    const copyValue = pendingInvitationDetails ?? pendingInvitation.invitationToken;
-                    await onCopyInvitationToken(copyValue);
-                    setCopied(true);
-                    setCopyError(false);
-                  } catch {
-                    setCopied(false);
-                    setCopyError(true);
-                  }
-                })();
-              }}
-            >
-              {copied
-                ? t("peopleInvitationCopied")
-                : t(invitationConnection ? "peopleInvitationCopyHandoff" : "peopleInvitationCopy")}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              data-testid="people-invitation-dismiss"
-              onClick={() => {
-                setCopied(false);
-                onDismissPendingInvitation();
-              }}
-            >
-              {t("peopleInvitationDismiss")}
-            </Button>
-          </div>
-          {copyError ? (
-            <p
-              className="text-xs text-destructive"
-              data-testid="people-invitation-copy-error"
-              role="alert"
-            >
-              {t("peopleInvitationCopyFailed")}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="flex flex-col gap-3 pr-1">
-          <section aria-labelledby="people-members-heading" data-testid="people-members-section">
-            <h3 id="people-members-heading" className="mb-1 text-xs font-semibold text-text-strong">
               {t("peopleMembers")}
             </h3>
             {members.length === 0 ? (
-              <div className="text-xs text-muted-foreground" data-testid="people-members-empty">
-                {t("peopleEmptyMembers")}
+              <div
+                className="px-1 py-5 text-xs text-muted-foreground"
+                data-testid="people-members-empty"
+              >
+                {emptyMemberStateText}
               </div>
             ) : (
-              <ul className="flex flex-col gap-1">
+              <ul className="divide-y divide-border/60">
                 {members.map((member) => {
                   const promote = member.actions.find((action) => action.action === "promote");
                   const demote = member.actions.find((action) => action.action === "demote");
@@ -455,77 +464,113 @@ export function PeoplePanel({
                   return (
                     <li
                       key={member.membershipId}
-                      className="flex items-center gap-2 rounded-md border border-border/60 px-2 py-1.5"
+                      className="min-w-0"
                       data-testid="people-member-row"
                       data-principal-id={member.humanPrincipalId}
                       data-role={member.role}
                     >
-                      <MemberAvatar initials={member.initials} label={member.displayName} />
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-xs font-medium text-text-strong">
-                          {member.displayName}
-                          {member.isCurrentUser ? (
-                            <span className="ml-1 text-muted-foreground">({t("peopleYou")})</span>
-                          ) : null}
+                      <div className="flex min-w-0 items-center gap-3 px-1 py-3.5">
+                        <MemberAvatar initials={member.initials} label={member.displayName} />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-semibold text-text-strong">
+                            {member.displayName}
+                            {member.isCurrentUser ? (
+                              <span className="ml-1 text-muted-foreground">({t("peopleYou")})</span>
+                            ) : null}
+                          </div>
+                          <div className="mt-0.5 text-xs text-muted-foreground">
+                            {member.role === "owner" ? t("peopleRoleOwner") : t("peopleRoleMember")}
+                          </div>
                         </div>
-                        <div className="text-[10px] text-muted-foreground">
-                          {member.role === "owner" ? t("peopleRoleOwner") : t("peopleRoleMember")}
-                        </div>
+                        {presence.currentUserIsOwner ? (
+                          <div className="flex shrink-0 flex-wrap justify-end gap-1">
+                            {renderMemberAccess && member.role !== "owner" ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 px-2 text-xs"
+                                data-testid="people-member-access-toggle"
+                                aria-expanded={
+                                  expandedAccessPrincipalId === member.humanPrincipalId
+                                }
+                                aria-controls={`people-member-access-${member.humanPrincipalId}`}
+                                onClick={() =>
+                                  setExpandedAccessPrincipalId((current) =>
+                                    current === member.humanPrincipalId
+                                      ? null
+                                      : member.humanPrincipalId
+                                  )
+                                }
+                              >
+                                {expandedAccessPrincipalId === member.humanPrincipalId
+                                  ? t("peopleHidePermissions")
+                                  : t("peopleManagePermissions")}
+                              </Button>
+                            ) : null}
+                            {promote?.allowed ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 px-2 text-xs"
+                                data-testid="people-member-promote"
+                                disabled={actionBusy}
+                                onClick={() => void onPromoteMember(member.humanPrincipalId)}
+                              >
+                                {t("peoplePromote")}
+                              </Button>
+                            ) : null}
+                            {demote?.allowed ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 px-2 text-xs"
+                                data-testid="people-member-demote"
+                                disabled={actionBusy}
+                                onClick={() => {
+                                  if (!confirmDestructive(t("peopleDemoteConfirm"))) return;
+                                  void onDemoteMember(member.humanPrincipalId);
+                                }}
+                              >
+                                {t("peopleDemote")}
+                              </Button>
+                            ) : demote && !demote.allowed && demote.reason === "last_owner" ? (
+                              <span
+                                className="max-w-32 text-right text-[11px] leading-4 text-muted-foreground"
+                                data-testid="people-last-owner-guard"
+                              >
+                                {t("peopleLastOwnerProtected")}
+                              </span>
+                            ) : null}
+                            {remove?.allowed ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 px-2 text-xs text-destructive"
+                                data-testid="people-member-remove"
+                                disabled={actionBusy}
+                                onClick={() => {
+                                  if (!confirmDestructive(t("peopleRemoveConfirm"))) return;
+                                  void onRemoveMember(member.humanPrincipalId);
+                                }}
+                              >
+                                {t("peopleRemove")}
+                              </Button>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </div>
-                      {presence.currentUserIsOwner ? (
-                        <div className="flex shrink-0 flex-wrap justify-end gap-0.5">
-                          {promote?.allowed ? (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 px-1.5 text-[10px]"
-                              data-testid="people-member-promote"
-                              disabled={actionBusy}
-                              onClick={() => void onPromoteMember(member.humanPrincipalId)}
-                            >
-                              {t("peoplePromote")}
-                            </Button>
-                          ) : null}
-                          {demote?.allowed ? (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 px-1.5 text-[10px]"
-                              data-testid="people-member-demote"
-                              disabled={actionBusy}
-                              onClick={() => {
-                                if (!confirmDestructive(t("peopleDemoteConfirm"))) return;
-                                void onDemoteMember(member.humanPrincipalId);
-                              }}
-                            >
-                              {t("peopleDemote")}
-                            </Button>
-                          ) : demote && !demote.allowed && demote.reason === "last_owner" ? (
-                            <span
-                              className="text-[10px] text-muted-foreground"
-                              data-testid="people-last-owner-guard"
-                            >
-                              {t("peopleLastOwnerProtected")}
-                            </span>
-                          ) : null}
-                          {remove?.allowed ? (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 px-1.5 text-[10px] text-destructive"
-                              data-testid="people-member-remove"
-                              disabled={actionBusy}
-                              onClick={() => {
-                                if (!confirmDestructive(t("peopleRemoveConfirm"))) return;
-                                void onRemoveMember(member.humanPrincipalId);
-                              }}
-                            >
-                              {t("peopleRemove")}
-                            </Button>
-                          ) : null}
+                      {expandedAccessPrincipalId === member.humanPrincipalId &&
+                      renderMemberAccess ? (
+                        <div
+                          id={`people-member-access-${member.humanPrincipalId}`}
+                          className="border-t border-border/60 px-1 py-4"
+                          data-testid="people-member-access"
+                        >
+                          {renderMemberAccess(member)}
                         </div>
                       ) : null}
                     </li>
@@ -534,169 +579,121 @@ export function PeoplePanel({
               </ul>
             )}
           </section>
+        </div>
 
-          <section aria-labelledby="people-hosts-heading" data-testid="people-hosts-section">
-            <h3 id="people-hosts-heading" className="mb-1 text-xs font-semibold text-text-strong">
-              {t("peopleAgentHosts")}
-            </h3>
-            {hosts.length === 0 ? (
-              <div className="text-xs text-muted-foreground" data-testid="people-hosts-empty">
-                {t("peopleEmptyHosts")}
-              </div>
-            ) : (
-              <ul className="flex flex-col gap-1">
-                {hosts.map((host) => (
-                  <li
-                    key={host.hostId}
-                    className="rounded-md border border-border/60 px-2 py-1.5"
-                    data-testid="people-host-row"
-                    data-host-id={host.hostId}
-                    data-status={host.status}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0 truncate text-xs font-medium text-text-strong">
-                        {host.displayName}
-                      </div>
-                      <HostStatusBadge status={host.status} t={t} />
-                    </div>
-                    <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground">
-                      <span data-testid="people-host-capacity">
-                        {t("peopleHostCapacity")}:{" "}
-                        {host.capacityRemaining === undefined
-                          ? t("peopleHostCapacityUnknown")
-                          : String(host.capacityRemaining)}
-                      </span>
-                      <span data-testid="people-host-capabilities">
-                        {t("peopleHostCapabilities")}:{" "}
-                        {host.capabilities.length > 0
-                          ? host.capabilities.join(", ")
-                          : t("peopleHostCapabilitiesNone")}
-                      </span>
-                      <span data-testid="people-host-version">
-                        {t("peopleHostVersion")}: {t("peopleHostFieldUnavailable")}
-                      </span>
-                      <span data-testid="people-host-last-seen">
-                        {t("peopleHostLastSeen")}: {t("peopleHostFieldUnavailable")}
-                      </span>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
-          {presence.currentUserIsOwner ? (
-            <section
-              aria-labelledby="people-owner-heading"
-              data-testid="people-owner-section"
-              className="rounded-md border border-border/70"
+        {presence.currentUserIsOwner ? (
+          <section
+            aria-labelledby="people-owner-heading"
+            data-testid="people-owner-section"
+            className="min-w-0 border-b border-border/70"
+          >
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-auto w-full justify-between rounded-none px-1 py-4 text-sm font-semibold hover:bg-transparent"
+              data-testid="people-owner-toggle"
+              aria-expanded={showOwnerDetails}
+              onClick={() => setShowOwnerDetails((current) => !current)}
             >
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-auto w-full justify-between rounded-none px-2 py-1.5 text-xs"
-                data-testid="people-owner-toggle"
-                aria-expanded={showOwnerDetails}
-                onClick={() => setShowOwnerDetails((current) => !current)}
-              >
-                <span id="people-owner-heading">{t("peopleOwnerActions")}</span>
-                <span aria-hidden="true">{showOwnerDetails ? "−" : "+"}</span>
-              </Button>
-              {showOwnerDetails ? (
-                <div className="flex flex-col gap-3 border-t border-border/70 p-2">
-                  <div data-testid="people-invitations-list">
-                    <div className="mb-1 flex min-h-7 items-center justify-between gap-3">
-                      <div className="text-[11px] font-semibold">{t("peopleInvitations")}</div>
-                      {openInvitationIds.length > 0 ? (
-                        <div className="flex items-center gap-3 text-[10px]">
-                          <label className="flex cursor-pointer items-center gap-1.5 text-muted-foreground">
-                            <input
-                              type="checkbox"
-                              className="size-3.5 accent-foreground"
-                              data-testid="people-invitation-select-all"
-                              checked={allOpenInvitationsSelected}
-                              disabled={actionBusy}
-                              aria-checked={
-                                someOpenInvitationsSelected ? "mixed" : allOpenInvitationsSelected
+              <span id="people-owner-heading">{t("peopleOwnerActions")}</span>
+              <span aria-hidden="true">{showOwnerDetails ? "−" : "+"}</span>
+            </Button>
+            {showOwnerDetails ? (
+              <div className="grid min-w-0 gap-8 border-t border-border/70 py-4 xl:grid-cols-2 xl:gap-0">
+                <div className="min-w-0 xl:pr-8" data-testid="people-invitations-list">
+                  <div className="flex min-h-11 flex-col gap-2 border-b border-border/60 px-1 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="text-xs font-semibold">{t("peopleInvitations")}</div>
+                    {openInvitationIds.length > 0 ? (
+                      <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                        <label className="flex cursor-pointer items-center gap-1.5 text-muted-foreground">
+                          <input
+                            type="checkbox"
+                            className="size-3.5 accent-foreground"
+                            data-testid="people-invitation-select-all"
+                            checked={allOpenInvitationsSelected}
+                            disabled={actionBusy}
+                            aria-checked={
+                              someOpenInvitationsSelected ? "mixed" : allOpenInvitationsSelected
+                            }
+                            ref={(element) => {
+                              if (element) {
+                                element.indeterminate = someOpenInvitationsSelected;
                               }
-                              ref={(element) => {
-                                if (element) {
-                                  element.indeterminate = someOpenInvitationsSelected;
-                                }
-                              }}
-                              onChange={(event) => {
-                                setSelectedInvitationIds(
-                                  event.currentTarget.checked
-                                    ? new Set(openInvitationIds)
-                                    : new Set()
-                                );
-                              }}
-                            />
-                            {t("peopleSelectAllOpenInvitations")}
-                          </label>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 px-2 text-[10px] text-destructive"
-                            data-testid="people-invitation-revoke-selected"
-                            disabled={actionBusy || selectedInvitationIds.size === 0}
-                            onClick={() => {
-                              const invitationIds = [...selectedInvitationIds];
-                              if (
-                                !confirmDestructive(
-                                  t("peopleRevokeSelectedInvitationsConfirm").replace(
-                                    "{count}",
-                                    String(invitationIds.length)
-                                  )
-                                )
-                              ) {
-                                return;
-                              }
-                              void onRevokeInvitations(invitationIds).then((ok) => {
-                                if (!ok) return;
-                                setSelectedInvitationIds((current) => {
-                                  const next = new Set(current);
-                                  for (const invitationId of invitationIds) {
-                                    next.delete(invitationId);
-                                  }
-                                  return next;
-                                });
-                              });
                             }}
-                          >
-                            {t("peopleRevokeSelected").replace(
-                              "{count}",
-                              String(selectedInvitationIds.size)
-                            )}
-                          </Button>
-                        </div>
-                      ) : null}
-                    </div>
-                    {detailsLoading ? (
-                      <div className="text-xs text-muted-foreground">{t("peopleLoading")}</div>
-                    ) : invitations.length === 0 ? (
-                      <div className="text-xs text-muted-foreground">
-                        {t("peopleEmptyInvitations")}
+                            onChange={(event) => {
+                              setSelectedInvitationIds(
+                                event.currentTarget.checked ? new Set(openInvitationIds) : new Set()
+                              );
+                            }}
+                          />
+                          {t("peopleSelectAllOpenInvitations")}
+                        </label>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 px-2 text-[11px] text-destructive"
+                          data-testid="people-invitation-revoke-selected"
+                          disabled={actionBusy || selectedInvitationIds.size === 0}
+                          onClick={() => {
+                            const invitationIds = [...selectedInvitationIds];
+                            if (
+                              !confirmDestructive(
+                                t("peopleRevokeSelectedInvitationsConfirm").replace(
+                                  "{count}",
+                                  String(invitationIds.length)
+                                )
+                              )
+                            ) {
+                              return;
+                            }
+                            void onRevokeInvitations(invitationIds).then((ok) => {
+                              if (!ok) return;
+                              setSelectedInvitationIds((current) => {
+                                const next = new Set(current);
+                                for (const invitationId of invitationIds) {
+                                  next.delete(invitationId);
+                                }
+                                return next;
+                              });
+                            });
+                          }}
+                        >
+                          {t("peopleRevokeSelected").replace(
+                            "{count}",
+                            String(selectedInvitationIds.size)
+                          )}
+                        </Button>
                       </div>
-                    ) : (
-                      <ul className="divide-y divide-border/60 border-y border-border/60">
-                        {invitations.map((invitation) => {
-                          const status = invitation.open
-                            ? t("peopleInvitationOpen")
-                            : invitation.consumedAt
-                              ? t("peopleInvitationConsumed")
-                              : invitation.revokedAt
-                                ? t("peopleInvitationRevoked")
-                                : t("peopleInvitationExpired");
-                          return (
-                            <li
-                              key={invitation.invitationId}
-                              className="flex items-center justify-between gap-4 py-2 text-xs"
-                              data-testid="people-invitation-row"
-                              data-open={invitation.open ? "true" : "false"}
-                            >
+                    ) : null}
+                  </div>
+                  {detailsLoading ? (
+                    <div className="px-1 py-4 text-xs text-muted-foreground">
+                      {t("peopleLoading")}
+                    </div>
+                  ) : openInvitations.length === 0 ? (
+                    <div className="px-1 py-4 text-xs text-muted-foreground">
+                      {t("peopleEmptyInvitations")}
+                    </div>
+                  ) : (
+                    <ul className="divide-y divide-border/60">
+                      {openInvitations.map((invitation) => {
+                        const status = invitation.open
+                          ? t("peopleInvitationOpen")
+                          : invitation.consumedAt
+                            ? t("peopleInvitationConsumed")
+                            : invitation.revokedAt
+                              ? t("peopleInvitationRevoked")
+                              : t("peopleInvitationExpired");
+                        return (
+                          <li
+                            key={invitation.invitationId}
+                            className="flex min-w-0 flex-col px-1 py-3 text-xs"
+                            data-testid="people-invitation-row"
+                            data-open={invitation.open ? "true" : "false"}
+                          >
+                            <div className="flex min-w-0 items-start gap-3">
                               {invitation.open ? (
                                 <input
                                   type="checkbox"
@@ -709,12 +706,14 @@ export function PeoplePanel({
                                   checked={selectedInvitationIds.has(invitation.invitationId)}
                                   disabled={actionBusy}
                                   onChange={(event) => {
+                                    const checked = event.currentTarget.checked;
+                                    const invitationId = invitation.invitationId;
                                     setSelectedInvitationIds((current) => {
                                       const next = new Set(current);
-                                      if (event.currentTarget.checked) {
-                                        next.add(invitation.invitationId);
+                                      if (checked) {
+                                        next.add(invitationId);
                                       } else {
-                                        next.delete(invitation.invitationId);
+                                        next.delete(invitationId);
                                       }
                                       return next;
                                     });
@@ -731,12 +730,11 @@ export function PeoplePanel({
                                     )}
                                   </span>
                                 </div>
-                                <div className="text-[10px] text-muted-foreground">
+                                <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] leading-4 text-muted-foreground">
                                   {t("peopleInvitationExpires").replace(
                                     "{time}",
                                     formatTimestamp(invitation.expiresAt)
                                   )}
-                                  <span aria-hidden="true"> · </span>
                                   <span title={invitation.invitationId}>
                                     {t("peopleInvitationIdLabel").replace(
                                       "{id}",
@@ -746,113 +744,136 @@ export function PeoplePanel({
                                 </div>
                               </div>
                               {invitation.open ? (
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-7 px-1.5 text-[10px] text-destructive"
-                                  data-testid="people-invitation-revoke"
-                                  disabled={actionBusy}
-                                  onClick={() => {
-                                    if (!confirmDestructive(t("peopleRevokeInvitationConfirm")))
-                                      return;
-                                    void onRevokeInvitation(invitation.invitationId);
-                                  }}
-                                >
-                                  {t("peopleRevoke")}
-                                </Button>
+                                <div className="flex shrink-0 items-center gap-1">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-8 px-2 text-[11px]"
+                                    data-testid="people-invitation-view"
+                                    disabled={actionBusy}
+                                    onClick={() => void onViewInvitation(invitation.invitationId)}
+                                  >
+                                    {t("peopleViewInvitation")}
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-8 px-2 text-[11px] text-destructive"
+                                    data-testid="people-invitation-revoke"
+                                    disabled={actionBusy}
+                                    onClick={() => {
+                                      if (!confirmDestructive(t("peopleRevokeInvitationConfirm")))
+                                        return;
+                                      void onRevokeInvitation(invitation.invitationId);
+                                    }}
+                                  >
+                                    {t("peopleRevoke")}
+                                  </Button>
+                                </div>
                               ) : null}
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                  </div>
-
-                  <div data-testid="people-devices-list">
-                    <div className="mb-1 text-[11px] font-semibold">{t("peopleDevices")}</div>
-                    {detailsLoading ? (
-                      <div className="text-xs text-muted-foreground">{t("peopleLoading")}</div>
-                    ) : devices.length === 0 ? (
-                      <div className="text-xs text-muted-foreground">{t("peopleEmptyDevices")}</div>
-                    ) : (
-                      <ul className="divide-y divide-border/60 border-y border-border/60">
-                        {devices.map((device, index) => {
-                          const memberName = members.find(
-                            (member) => member.humanPrincipalId === device.humanPrincipalId
-                          )?.displayName;
-                          const displayName =
-                            device.label !== device.deviceCredentialId
-                              ? device.label
-                              : t("peopleUnnamedDevice").replace("{number}", String(index + 1));
-                          return (
-                            <li
-                              key={device.deviceCredentialId}
-                              className="flex items-center justify-between gap-4 py-2 text-xs"
-                              data-testid="people-device-row"
-                              data-revoked={device.isRevoked ? "true" : "false"}
-                            >
-                              <div className="min-w-0 flex-1">
-                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                                  <span className="truncate font-medium text-text-strong">
-                                    {displayName}
-                                  </span>
-                                  {memberName ? (
-                                    <span className="text-[10px] text-muted-foreground">
-                                      {t("peopleDeviceOwner").replace("{name}", memberName)}
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <div className="text-[10px] text-muted-foreground">
-                                  {t("peopleDeviceCreated").replace(
-                                    "{time}",
-                                    formatTimestamp(device.createdAt)
-                                  )}
-                                  <span aria-hidden="true"> · </span>
-                                  {t("peopleDeviceLastSeen")}:{" "}
-                                  {device.lastSeenAt
-                                    ? formatTimestamp(device.lastSeenAt)
-                                    : t("peopleHostFieldUnavailable")}
-                                  <span aria-hidden="true"> · </span>
-                                  <span title={device.deviceCredentialId}>
-                                    {t("peopleDeviceCredentialId").replace(
-                                      "{id}",
-                                      shortIdentifier(device.deviceCredentialId)
-                                    )}
-                                  </span>
-                                </div>
-                              </div>
-                              {!device.isRevoked ? (
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-7 px-1.5 text-[10px] text-destructive"
-                                  data-testid="people-device-revoke"
-                                  disabled={actionBusy}
-                                  onClick={() => {
-                                    if (!confirmDestructive(t("peopleRevokeDeviceConfirm"))) return;
-                                    void onRevokeDevice(device.deviceCredentialId);
-                                  }}
-                                >
-                                  {t("peopleRevoke")}
-                                </Button>
-                              ) : (
-                                <span className="text-[10px] text-muted-foreground">
-                                  {t("peopleDeviceRevoked")}
-                                </span>
-                              )}
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                  </div>
+                            </div>
+                            {renderInlineInvitationSecret(invitation.invitationId)}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
                 </div>
-              ) : null}
-            </section>
-          ) : null}
-        </div>
+
+                <div
+                  className="min-w-0 border-t border-border/60 pt-5 xl:border-l xl:border-t-0 xl:pl-8 xl:pt-0"
+                  data-testid="people-devices-list"
+                >
+                  <div className="min-h-11 border-b border-border/60 px-1 py-2.5 text-xs font-semibold">
+                    {t("peopleDevices")}
+                  </div>
+                  {detailsLoading ? (
+                    <div className="px-1 py-4 text-xs text-muted-foreground">
+                      {t("peopleLoading")}
+                    </div>
+                  ) : devices.length === 0 ? (
+                    <div className="px-1 py-4 text-xs text-muted-foreground">
+                      {t("peopleEmptyDevices")}
+                    </div>
+                  ) : (
+                    <ul className="divide-y divide-border/60">
+                      {devices.map((device, index) => {
+                        const memberName = members.find(
+                          (member) => member.humanPrincipalId === device.humanPrincipalId
+                        )?.displayName;
+                        const displayName =
+                          device.label !== device.deviceCredentialId
+                            ? device.label
+                            : t("peopleUnnamedDevice").replace("{number}", String(index + 1));
+                        return (
+                          <li
+                            key={device.deviceCredentialId}
+                            className="flex min-w-0 items-start gap-3 px-1 py-3 text-xs"
+                            data-testid="people-device-row"
+                            data-revoked={device.isRevoked ? "true" : "false"}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                                <span className="truncate text-sm font-semibold text-text-strong">
+                                  {displayName}
+                                </span>
+                                {memberName ? (
+                                  <span className="text-[11px] text-muted-foreground">
+                                    {t("peopleDeviceOwner").replace("{name}", memberName)}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] leading-4 text-muted-foreground">
+                                {t("peopleDeviceCreated").replace(
+                                  "{time}",
+                                  formatTimestamp(device.createdAt)
+                                )}
+                                <span aria-hidden="true"> · </span>
+                                {t("peopleDeviceLastSeen")}:{" "}
+                                {device.lastSeenAt
+                                  ? formatTimestamp(device.lastSeenAt)
+                                  : t("peopleHostFieldUnavailable")}
+                                <span aria-hidden="true"> · </span>
+                                <span className="font-mono" title={device.deviceCredentialId}>
+                                  {t("peopleDeviceCredentialId").replace(
+                                    "{id}",
+                                    shortIdentifier(device.deviceCredentialId)
+                                  )}
+                                </span>
+                              </div>
+                            </div>
+                            {!device.isRevoked ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 shrink-0 px-2 text-[11px] text-destructive"
+                                data-testid="people-device-revoke"
+                                disabled={actionBusy}
+                                onClick={() => {
+                                  if (!confirmDestructive(t("peopleRevokeDeviceConfirm"))) return;
+                                  void onRevokeDevice(device.deviceCredentialId);
+                                }}
+                              >
+                                {t("peopleRevoke")}
+                              </Button>
+                            ) : (
+                              <span className="shrink-0 text-[11px] text-muted-foreground">
+                                {t("peopleDeviceRevoked")}
+                              </span>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
       </div>
 
       <div

@@ -20,6 +20,59 @@ import { createTranslator } from "../renderer/i18n";
 afterEach(cleanupRendererTestEnvironment);
 
 describe("desktop project loader hook", () => {
+  it("waits for settings hydration and restores the persisted project path", async () => {
+    const restoredProject: DesktopProjectSummary = {
+      ...project,
+      projectId: "P-RESTORED",
+      name: "Restored project",
+      rootPath: "/tmp/restored",
+      workspaceRoot: "/tmp/restored"
+    };
+    const bridge = createDesktopBridgeMock({
+      listProjects: vi.fn().mockResolvedValue([project, restoredProject]),
+      getDesktopProjectSnapshot: vi.fn().mockResolvedValue(projectSnapshot()),
+      refreshPackageFileChanges: vi
+        .fn()
+        .mockResolvedValue({ diagnostics: [], dirtyPromptRefs: [] }),
+      watchPackageFiles: vi.fn().mockResolvedValue(undefined)
+    });
+    vi.stubGlobal("planweave", bridge);
+    vi.resetModules();
+    const { useDesktopProject } = await import("../renderer/hooks/useDesktopProject");
+
+    const updateSettings = vi.fn();
+    const setError = vi.fn();
+    const t = createTranslator("en");
+    const { rerender, result } = renderHook(
+      ({ settingsHydrated, initialProjectPath }) =>
+        useDesktopProject({
+          setError,
+          t,
+          updateSettings,
+          settingsHydrated,
+          initialProjectPath
+        }),
+      { initialProps: { settingsHydrated: false, initialProjectPath: "" } }
+    );
+
+    expect(bridge.listProjects).not.toHaveBeenCalled();
+    rerender({
+      settingsHydrated: true,
+      initialProjectPath: restoredProject.workspaceRoot
+    });
+
+    await waitFor(() =>
+      expect(bridge.getDesktopProjectSnapshot).toHaveBeenCalledWith({
+        projectRoot: restoredProject.rootPath,
+        canvasId: "canvas-main"
+      })
+    );
+    expect(result.current.selectedProject?.projectId).toBe(restoredProject.projectId);
+    expect(bridge.getDesktopProjectSnapshot).toHaveBeenCalledOnce();
+    expect(updateSettings).toHaveBeenCalledWith({ runtimePath: restoredProject.workspaceRoot });
+    expect(updateSettings).not.toHaveBeenCalledWith({ runtimePath: project.workspaceRoot });
+  });
+
   it("loads a project through bridge calls scoped by DesktopCanvasReference", async () => {
     const graphQualityDiagnostic = {
       code: "task_orphaned",
