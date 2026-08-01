@@ -301,7 +301,7 @@ export class WorkspaceIdentityRepository {
            ON p.workspace_id=s.workspace_id AND p.human_principal_id=s.human_principal_id
          WHERE s.credential_sha256=?
            AND s.revoked_at IS NULL
-           AND s.expires_at>?
+           AND (s.expires_at IS NULL OR s.expires_at>?)
            AND p.revoked_at IS NULL
            AND m.revoked_at IS NULL`
       )

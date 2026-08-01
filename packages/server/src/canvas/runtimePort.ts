@@ -7,6 +7,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   canonicalContentVersionDigestPayload,
+  type CanvasRuntimeStatusProjection,
   completeContentVersionSchema,
   contentVersionDesktopLayoutMemberPath,
   type CompleteContentVersion
@@ -28,6 +29,13 @@ export type CanvasRuntimeMutationPort = {
     canvasId: string;
     expectedPackageDir: string;
   }): Promise<{ ok: true; content: CompleteContentVersion } | { ok: false; detail: string }>;
+  readStatus?(input: {
+    projectRoot: string;
+    canvasId: string;
+    expectedPackageDir: string;
+    scope: CanvasRuntimeStatusProjection["scope"];
+    capturedAt?: string;
+  }): Promise<CanvasRuntimeStatusProjection>;
 };
 
 function sha256(value: string): string {
@@ -82,6 +90,10 @@ export function createDefaultCanvasRuntimePort(): CanvasRuntimeMutationPort {
       } catch (error) {
         return { ok: false, detail: error instanceof Error ? error.message.slice(0, 200) : "content_capture_failed" };
       }
+    },
+    async readStatus(input) {
+      const runtime = await import("@planweave-ai/runtime");
+      return runtime.readAuthorizedCanvasRuntimeStatus(input);
     }
   };
 }

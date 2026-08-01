@@ -28,6 +28,10 @@ export const TOKEN_SHA256_HEX_LENGTH = 64 as const;
 export const PROJECT_INVITATION_MIN_TTL_MS = 60_000 as const;
 export const PROJECT_INVITATION_MAX_TTL_MS = 604_800_000 as const; // 7 days
 export const PROJECT_INVITATION_DEFAULT_TTL_MS = 86_400_000 as const; // 24 hours
+/** Successful invitation-create replays retain plaintext only in process for five minutes. */
+export const PROJECT_INVITATION_IDEMPOTENCY_CACHE_TTL_MS = 300_000 as const;
+/** Bounds plaintext-bearing invitation-create replay entries retained by one Server process. */
+export const PROJECT_INVITATION_IDEMPOTENCY_CACHE_MAX_ENTRIES = 1_000 as const;
 
 /** Optional device credential lifetime (omit expiry for non-expiring until revoke). */
 export const HUMAN_DEVICE_MIN_TTL_MS = 60_000 as const;

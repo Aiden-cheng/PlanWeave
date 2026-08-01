@@ -88,6 +88,19 @@ describe("workspace connection HTTP", () => {
     expect(JSON.stringify(page)).not.toMatch(/projectRoot|credential|token|secret/i);
   });
 
+  it("accepts active non-expiring Workspace device sessions", async () => {
+    const { database, origin, token } = await setup();
+    database
+      .prepare("UPDATE workspace_device_sessions SET expires_at=NULL WHERE device_session_id=?")
+      .run("device-session-connection");
+
+    const response = await fetch(`${origin}/api/v1/workspace-connection`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    expect(response.status).toBe(200);
+  });
+
   it("fails closed for revoked credentials and malformed picker queries", async () => {
     const { database, origin, token } = await setup();
     const malformed = await fetch(`${origin}/api/v1/workspace-connection?cursor=-1`, {

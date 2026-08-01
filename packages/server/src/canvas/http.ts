@@ -1,7 +1,8 @@
 import {
   CANVAS_COMMAND_PROTOCOL_VERSION,
   canvasCommandOutcomeSchema,
-  canvasReconnectResponseSchema
+  canvasReconnectResponseSchema,
+  canvasRuntimeStatusProjectionSchema
 } from "@planweave-ai/collaboration-contracts";
 import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -23,6 +24,7 @@ import { CanvasCommandService } from "./service.js";
 type CanvasRoute =
   | { kind: "command"; projectId: string; canvasId: string }
   | { kind: "reconnect"; projectId: string; canvasId: string }
+  | { kind: "runtime_status"; projectId: string; canvasId: string }
   | { kind: "forbidden_feature"; feature: string; projectId?: string };
 
 type RateBucket = { windowStartedAt: number; count: number };
@@ -67,7 +69,7 @@ export function routeCanvasCommandHttp(
   }
 
   const match =
-    /^\/api\/v1\/projects\/([^/]+)\/canvases\/([^/]+)\/(?:commands|reconnect)(\/.*)?$/.exec(
+    /^\/api\/v1\/projects\/([^/]+)\/canvases\/([^/]+)\/(?:commands|reconnect|runtime-status)(\/.*)?$/.exec(
       pathname
     );
   if (!match) return undefined;
@@ -78,6 +80,10 @@ export function routeCanvasCommandHttp(
   if (isReconnect) {
     if (request.method !== "POST") return undefined;
     return { kind: "reconnect", projectId, canvasId };
+  }
+  if (pathname.includes("/runtime-status")) {
+    if (request.method !== "GET") return undefined;
+    return { kind: "runtime_status", projectId, canvasId };
   }
   if (request.method !== "POST") return undefined;
   return { kind: "command", projectId, canvasId };
@@ -193,7 +199,12 @@ export async function handleCanvasCommandHttpRequest(
   const context = authenticated.actor;
 
   const clock = options.clock ?? (() => new Date());
-  if (rateLimit(`${context.humanPrincipalId}:${routed.projectId}:${routed.canvasId}`, clock)) {
+  if (
+    rateLimit(
+      `${routed.kind}:${context.humanPrincipalId}:${routed.projectId}:${routed.canvasId}`,
+      clock
+    )
+  ) {
     respond(response, 429, {
       type: "canvas.command.rejected",
       protocolVersion: CANVAS_COMMAND_PROTOCOL_VERSION,
@@ -207,6 +218,14 @@ export async function handleCanvasCommandHttpRequest(
   }
 
   try {
+    if (routed.kind === "runtime_status") {
+      const status = await options.service.readRuntimeStatus(context, {
+        projectId: routed.projectId,
+        canvasId: routed.canvasId
+      });
+      respond(response, 200, canvasRuntimeStatusProjectionSchema.parse(status));
+      return true;
+    }
     const body = await readJson(request);
     if (routed.kind === "command") {
       const submit =
@@ -255,6 +274,13 @@ export async function handleCanvasCommandHttpRequest(
     }
     if (message === "canvas_body_content_type" || message === "canvas_body_malformed") {
       respond(response, 400, { error: "invalid_command" });
+      return true;
+    }
+    if (message.startsWith("canvas_runtime_status_")) {
+      const forbidden = message.endsWith("forbidden") || message.endsWith("cross_scope");
+      respond(response, forbidden ? 403 : message.endsWith("unknown_canvas") ? 404 : 503, {
+        error: message
+      });
       return true;
     }
     respond(response, 500, { error: "server_error" });

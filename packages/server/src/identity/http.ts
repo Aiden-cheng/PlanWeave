@@ -1,4 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import {
+  humanCreateInvitationRequestSchema,
+  type HumanCreateInvitationRequest
+} from "@planweave-ai/collaboration-contracts";
 import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
 import { z } from "zod";
 import { humanNetworkTransportAllowed, isLoopbackAddress } from "../insecureTransport.js";
@@ -17,6 +21,8 @@ import {
 import {
   HUMAN_DEVICE_TOKEN_PREFIX,
   HUMAN_TOKEN_SECRET_CHAR_LENGTH,
+  PROJECT_INVITATION_IDEMPOTENCY_CACHE_MAX_ENTRIES,
+  PROJECT_INVITATION_IDEMPOTENCY_CACHE_TTL_MS,
   PROJECT_INVITATION_TOKEN_PREFIX
 } from "./limits.js";
 
@@ -24,7 +30,7 @@ const MAX_HUMAN_BODY_BYTES = 16_384;
 /** Soft admission limit for human auth-sensitive routes (per remote address). */
 const HUMAN_RATE_WINDOW_MS = 60_000;
 const HUMAN_RATE_MAX_REQUESTS = 60;
-/** Bounds untrusted remote-address/project pairs retained by the in-process limiter. */
+/** Bounds untrusted remote-address/project tuples retained by each in-process limit class. */
 export const HUMAN_RATE_MAX_BUCKETS = 1_000;
 
 export type HumanHttpOptions = {
@@ -50,7 +56,29 @@ type HumanRoute =
   | { kind: "revoke_device"; projectId: string; deviceCredentialId: string };
 
 type RateBucket = { windowStartedAt: number; count: number };
-const rateBuckets = new Map<string, RateBucket>();
+type HumanRateClass = "read" | "sensitive_write";
+type RateLimitResult = { allowed: true } | { allowed: false; retryAfterSeconds: number };
+const rateBuckets: Record<HumanRateClass, Map<string, RateBucket>> = {
+  read: new Map(),
+  sensitive_write: new Map()
+};
+
+type InvitationCreateResult = ReturnType<HumanMembershipService["createInvitation"]>;
+type InvitationIdempotencyEntry = {
+  promise: Promise<InvitationCreateResult>;
+  /** Pending entries have no expiry and are always shared until they settle. */
+  expiresAt?: number;
+  expiryTimer?: ReturnType<typeof setTimeout>;
+};
+const invitationIdempotencyEntries = new Map<string, InvitationIdempotencyEntry>();
+const invitationRepositoryScopeIds = new WeakMap<HumanIdentityRepository, number>();
+let nextInvitationRepositoryScopeId = 1;
+
+class HumanRateLimitError extends Error {
+  constructor(readonly retryAfterSeconds: number) {
+    super("human_rate_limited");
+  }
+}
 
 function decodeIdentifier(value: string): string | undefined {
   try {
@@ -119,12 +147,18 @@ function isHumanApiCandidate(pathname: string): boolean {
   return pathname.startsWith("/api/v1/projects/") && pathname.includes("/human");
 }
 
-function respond(response: ServerResponse, status: number, body: unknown): void {
+function respond(
+  response: ServerResponse,
+  status: number,
+  body: unknown,
+  headers: Readonly<Record<string, string>> = {}
+): void {
   const bytes = Buffer.from(JSON.stringify(body));
   response.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "content-length": bytes.byteLength,
-    "cache-control": "no-store"
+    "cache-control": "no-store",
+    ...headers
   });
   response.end(bytes);
 }
@@ -187,36 +221,77 @@ export function humanLocalAdminBoundaryAllowed(socket: { remoteAddress?: string 
   return isLoopbackAddress(socket.remoteAddress);
 }
 
-function rateLimitKey(request: IncomingMessage, projectId: string): string {
-  return `${request.socket.remoteAddress ?? "unknown"}:${projectId}`;
+function rateClass(route: HumanRoute): HumanRateClass {
+  switch (route.kind) {
+    case "list_invitations":
+    case "list_members":
+    case "list_devices":
+      return "read";
+    default:
+      return "sensitive_write";
+  }
 }
 
-function checkRateLimit(request: IncomingMessage, projectId: string, now: number): boolean {
-  const key = rateLimitKey(request, projectId);
-  const bucket = rateBuckets.get(key);
+function rateLimitKey(
+  request: IncomingMessage,
+  projectId: string,
+  rateClass: HumanRateClass,
+  routeKind: HumanRoute["kind"]
+): string {
+  return JSON.stringify([
+    request.socket.remoteAddress ?? "unknown",
+    projectId,
+    rateClass,
+    rateClass === "read" ? routeKind : "all"
+  ]);
+}
+
+function checkRateLimit(
+  request: IncomingMessage,
+  projectId: string,
+  route: HumanRoute,
+  now: number
+): RateLimitResult {
+  const requestClass = rateClass(route);
+  const buckets = rateBuckets[requestClass];
+  const key = rateLimitKey(request, projectId, requestClass, route.kind);
+  const bucket = buckets.get(key);
   if (bucket && now - bucket.windowStartedAt < HUMAN_RATE_WINDOW_MS) {
-    if (bucket.count >= HUMAN_RATE_MAX_REQUESTS) return false;
+    if (bucket.count >= HUMAN_RATE_MAX_REQUESTS) {
+      return {
+        allowed: false,
+        retryAfterSeconds: Math.max(
+          1,
+          Math.ceil((bucket.windowStartedAt + HUMAN_RATE_WINDOW_MS - now) / 1_000)
+        )
+      };
+    }
     bucket.count += 1;
-    return true;
+    return { allowed: true };
   }
 
-  for (const [candidateKey, candidate] of rateBuckets) {
+  for (const [candidateKey, candidate] of buckets) {
     if (now - candidate.windowStartedAt >= HUMAN_RATE_WINDOW_MS) {
-      rateBuckets.delete(candidateKey);
+      buckets.delete(candidateKey);
     }
   }
-  if (rateBuckets.size >= HUMAN_RATE_MAX_BUCKETS) {
-    const oldestKey = rateBuckets.keys().next().value;
-    if (oldestKey !== undefined) rateBuckets.delete(oldestKey);
+  if (buckets.size >= HUMAN_RATE_MAX_BUCKETS) {
+    const oldestKey = buckets.keys().next().value;
+    if (oldestKey !== undefined) buckets.delete(oldestKey);
   }
 
-  rateBuckets.set(key, { windowStartedAt: now, count: 1 });
-  return true;
+  buckets.set(key, { windowStartedAt: now, count: 1 });
+  return { allowed: true };
 }
 
-/** Test helper to clear in-memory rate limit state. */
+/** Test helper to clear in-memory admission and invitation replay state. */
 export function resetHumanHttpRateLimits(): void {
-  rateBuckets.clear();
+  rateBuckets.read.clear();
+  rateBuckets.sensitive_write.clear();
+  for (const entry of invitationIdempotencyEntries.values()) {
+    if (entry.expiryTimer) clearTimeout(entry.expiryTimer);
+  }
+  invitationIdempotencyEntries.clear();
 }
 
 function httpStatusForCode(code: HumanAuthErrorCode): number {
@@ -254,7 +329,7 @@ function httpStatusForCode(code: HumanAuthErrorCode): number {
   }
 }
 
-function safeError(error: unknown): { status: number; code: string } {
+function safeError(error: unknown): { status: number; code: string; retryAfterSeconds?: number } {
   if (error instanceof z.ZodError) {
     return { status: 400, code: "human_input_invalid" };
   }
@@ -262,15 +337,115 @@ function safeError(error: unknown): { status: number; code: string } {
     const code = humanAuthErrorCodeSchema.parse(error.code);
     return { status: httpStatusForCode(code), code };
   }
+  if (error instanceof HumanRateLimitError) {
+    return {
+      status: 429,
+      code: "human_rate_limited",
+      retryAfterSeconds: error.retryAfterSeconds
+    };
+  }
   if (error instanceof Error) {
     if (error.message === "human_body_too_large") {
       return { status: 413, code: "human_body_too_large" };
     }
     if (error.message === "human_rate_limited") {
-      return { status: 429, code: "human_rate_limited" };
+      return {
+        status: 429,
+        code: "human_rate_limited",
+        retryAfterSeconds: Math.ceil(HUMAN_RATE_WINDOW_MS / 1_000)
+      };
     }
   }
   return { status: 500, code: "human_request_failed" };
+}
+
+function invitationIdempotencyCacheKey(input: {
+  repository: HumanIdentityRepository;
+  projectId: string;
+  humanPrincipalId: string;
+  idempotencyKey: string;
+}): string {
+  let repositoryScopeId = invitationRepositoryScopeIds.get(input.repository);
+  if (repositoryScopeId === undefined) {
+    repositoryScopeId = nextInvitationRepositoryScopeId;
+    nextInvitationRepositoryScopeId += 1;
+    invitationRepositoryScopeIds.set(input.repository, repositoryScopeId);
+  }
+  return JSON.stringify([
+    repositoryScopeId,
+    input.projectId,
+    input.humanPrincipalId,
+    input.idempotencyKey
+  ]);
+}
+
+function pruneInvitationIdempotencyEntries(now: number): void {
+  for (const [key, entry] of invitationIdempotencyEntries) {
+    if (entry.expiresAt !== undefined && entry.expiresAt <= now) {
+      if (entry.expiryTimer) clearTimeout(entry.expiryTimer);
+      invitationIdempotencyEntries.delete(key);
+    }
+  }
+}
+
+async function createInvitationIdempotently(input: {
+  options: HumanHttpOptions;
+  context: ReturnType<typeof requireHumanContext>;
+  projectId: string;
+  body: HumanCreateInvitationRequest;
+  now: number;
+}): Promise<InvitationCreateResult> {
+  const idempotencyKey = input.body.idempotencyKey;
+  if (idempotencyKey === undefined) {
+    return input.options.service.createInvitation(input.context, input.projectId, {
+      ttlMs: input.body.ttlMs
+    });
+  }
+
+  pruneInvitationIdempotencyEntries(input.now);
+  const cacheKey = invitationIdempotencyCacheKey({
+    repository: input.options.repository,
+    projectId: input.projectId,
+    humanPrincipalId: input.context.humanPrincipalId,
+    idempotencyKey
+  });
+  const existing = invitationIdempotencyEntries.get(cacheKey);
+  if (existing) return existing.promise;
+
+  if (invitationIdempotencyEntries.size >= PROJECT_INVITATION_IDEMPOTENCY_CACHE_MAX_ENTRIES) {
+    const earliestExpiry = Math.min(
+      ...Array.from(
+        invitationIdempotencyEntries.values(),
+        (entry) => entry.expiresAt ?? input.now + PROJECT_INVITATION_IDEMPOTENCY_CACHE_TTL_MS
+      )
+    );
+    throw new HumanRateLimitError(Math.max(1, Math.ceil((earliestExpiry - input.now) / 1_000)));
+  }
+
+  const entry: InvitationIdempotencyEntry = {
+    promise: Promise.resolve().then(() =>
+      input.options.service.createInvitation(input.context, input.projectId, {
+        ttlMs: input.body.ttlMs
+      })
+    )
+  };
+  invitationIdempotencyEntries.set(cacheKey, entry);
+  try {
+    const result = await entry.promise;
+    entry.expiresAt = input.now + PROJECT_INVITATION_IDEMPOTENCY_CACHE_TTL_MS;
+    entry.expiryTimer = setTimeout(() => {
+      if (invitationIdempotencyEntries.get(cacheKey) === entry) {
+        invitationIdempotencyEntries.delete(cacheKey);
+      }
+    }, PROJECT_INVITATION_IDEMPOTENCY_CACHE_TTL_MS);
+    entry.expiryTimer.unref();
+    return result;
+  } catch (error) {
+    if (invitationIdempotencyEntries.get(cacheKey) === entry) {
+      invitationIdempotencyEntries.delete(cacheKey);
+    }
+    throw error;
+  }
 }
 
 /**
@@ -333,9 +508,15 @@ export async function handleHumanHttpRequest(
     }
 
     const now = (options.clock ?? (() => new Date()))().getTime();
-    if (!checkRateLimit(request, matched.projectId, now)) {
+    const rateLimit = checkRateLimit(request, matched.projectId, matched, now);
+    if (!rateLimit.allowed) {
       request.resume();
-      respond(response, 429, { error: "human_rate_limited" });
+      respond(
+        response,
+        429,
+        { error: "human_rate_limited" },
+        { "retry-after": String(rateLimit.retryAfterSeconds) }
+      );
       return true;
     }
 
@@ -365,8 +546,14 @@ export async function handleHumanHttpRequest(
       case "create_invitation": {
         query(url, []);
         const context = requireHumanContext(options, request, matched.projectId);
-        const body = await readJson(request);
-        const result = options.service.createInvitation(context, matched.projectId, body);
+        const body = humanCreateInvitationRequestSchema.parse(await readJson(request));
+        const result = await createInvitationIdempotently({
+          options,
+          context,
+          projectId: matched.projectId,
+          body,
+          now
+        });
         respond(response, 201, result);
         break;
       }
@@ -462,8 +649,16 @@ export async function handleHumanHttpRequest(
   } catch (error) {
     const safe = safeError(error);
     request.resume();
-    if (!response.headersSent) respond(response, safe.status, publicErrorBody(safe.code));
-    else response.destroy();
+    if (!response.headersSent) {
+      respond(
+        response,
+        safe.status,
+        publicErrorBody(safe.code),
+        safe.retryAfterSeconds === undefined
+          ? {}
+          : { "retry-after": String(safe.retryAfterSeconds) }
+      );
+    } else response.destroy();
   }
   return true;
 }

@@ -188,6 +188,25 @@ async function createInvitation(origin: string, projectId: string, token: string
   return body;
 }
 
+async function consumeInvitation(
+  origin: string,
+  projectId: string,
+  invitationToken: string,
+  displayName: string
+) {
+  const response = await fetch(
+    `${origin}/api/v1/projects/${projectId}/human/invitations/consume`,
+    {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ invitationToken, displayName })
+    }
+  );
+  const body = (await response.json()) as { deviceToken: string };
+  expect(response.status).toBe(201);
+  return body;
+}
+
 async function connect(url: string, token: string): Promise<WebSocket> {
   const socket = new WebSocket(url, { headers: { Authorization: `Bearer ${token}` } });
   await new Promise<void>((resolve, reject) => {
@@ -408,6 +427,52 @@ describe("human observer WSS", () => {
       reason: "retention_gap"
     });
     gap.close();
+  });
+
+  it("accepts an invited member when the project is shared", async () => {
+    const fixture = await setup();
+    const owner = await bootstrap(fixture.origin, fixture.projectId, "observer-shared-owner");
+    const visibility = await fetch(
+      `${fixture.origin}/api/v1/projects/${fixture.projectId}/canvases/default/access`,
+      {
+        method: "POST",
+        headers: jsonHeaders(owner.deviceToken),
+        body: JSON.stringify({
+          operation: "visibility",
+          scope: {
+            scopeKind: "project",
+            workspaceId: "observer-workspace",
+            projectId: fixture.projectId,
+            canvasId: null
+          },
+          expectedAclRevision: 0,
+          visibility: "shared"
+        })
+      }
+    );
+    expect(visibility.status).toBe(200);
+
+    const invitation = await createInvitation(
+      fixture.origin,
+      fixture.projectId,
+      owner.deviceToken
+    );
+    const member = await consumeInvitation(
+      fixture.origin,
+      fixture.projectId,
+      invitation.invitationToken,
+      "Observer shared member"
+    );
+    const socket = await connect(
+      `${fixture.wsOrigin}/api/v1/projects/${fixture.projectId}/human/observe`,
+      member.deviceToken
+    );
+    sendHello(socket, fixture.projectId, 0);
+    await expect(nextMessage(socket)).resolves.toMatchObject({
+      type: "human.observer.welcome",
+      projectId: fixture.projectId
+    });
+    socket.close();
   });
 
   it("rejects invalid upgrades, expires revoked devices, and drains active sessions", async () => {

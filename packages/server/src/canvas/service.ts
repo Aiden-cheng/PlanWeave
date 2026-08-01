@@ -1,6 +1,7 @@
 import {
   CANVAS_COMMAND_MAX_JOURNAL_DELTA_ENTRIES,
   CANVAS_COMMAND_PROTOCOL_VERSION,
+  canvasScopeRefSchema,
   canvasCommandAcceptedSchema,
   canvasCommandSubmitSchema,
   canvasReconnectDeltaSchema,
@@ -13,7 +14,8 @@ import {
   type CanvasCommandOutcome,
   type CanvasCommandSubmit,
   type CanvasReconnectRequest,
-  type CanvasReconnectResponse
+  type CanvasReconnectResponse,
+  type CanvasRuntimeStatusProjection
 } from "@planweave-ai/collaboration-contracts";
 import type { CollaborationAuthContext } from "../identity/auth.js";
 import type { ProjectAccessRepository } from "../projectAccessRepository.js";
@@ -471,6 +473,29 @@ export class CanvasCommandService {
     }
     const scope = scopeKey(auth.scope);
     return this.serialize(scope, () => this.reconnectAuthorized(request, scope, auth));
+  }
+
+  async readRuntimeStatus(
+    actor: CollaborationAuthContext,
+    input: { projectId: string; canvasId: string }
+  ): Promise<CanvasRuntimeStatusProjection> {
+    const auth = authorizeCanvasRead({
+      actor,
+      projectId: input.projectId,
+      canvasId: input.canvasId,
+      access: this.options.access,
+      workspaceIdentity: this.options.workspaceIdentity
+    });
+    if (!auth.ok) throw new Error(`canvas_runtime_status_${auth.code}`);
+    const readStatus = this.options.runtime.readStatus;
+    if (!readStatus) throw new Error("canvas_runtime_status_unavailable");
+    return readStatus({
+      projectRoot: auth.projectRoot,
+      canvasId: input.canvasId,
+      expectedPackageDir: auth.packageDir,
+      scope: canvasScopeRefSchema.parse(auth.scope),
+      capturedAt: this.clock().toISOString()
+    });
   }
 
   private async reconnectAuthorized(

@@ -14,6 +14,7 @@ import {
 import { applyMigrations } from "../migrations.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 import { HUMAN_RATE_MAX_BUCKETS } from "../identity/http.js";
+import { PROJECT_INVITATION_IDEMPOTENCY_CACHE_TTL_MS } from "../identity/limits.js";
 import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 
 const servers: HttpServer[] = [];
@@ -345,6 +346,112 @@ describe("human membership HTTP APIs", () => {
     );
     expect(consumeRevoked.status).toBe(403);
     await expect(consumeRevoked.json()).resolves.toEqual({ error: "human_invitation_revoked" });
+  });
+
+  it("replays one invitation and its plaintext token for the same owner idempotency key", async () => {
+    const { origin } = await setup();
+    const owner = await bootstrap(origin);
+    const ownerToken = owner.payload.deviceToken!;
+    const request = {
+      method: "POST",
+      headers: jsonHeaders(ownerToken),
+      body: JSON.stringify({ idempotencyKey: "create-invitation-1" })
+    } as const;
+
+    const [first, retry] = await Promise.all([
+      fetch(`${origin}/api/v1/projects/project-a/human/invitations`, request),
+      fetch(`${origin}/api/v1/projects/project-a/human/invitations`, request)
+    ]);
+    expect(first.status, await first.clone().text()).toBe(201);
+    expect(retry.status, await retry.clone().text()).toBe(201);
+    const firstBody = await first.json();
+    const retryBody = await retry.json();
+    expect(retryBody).toEqual(firstBody);
+
+    const listed = await fetch(`${origin}/api/v1/projects/project-a/human/invitations`, {
+      headers: auth(ownerToken)
+    });
+    const listedBody = (await listed.json()) as { items: unknown[] };
+    expect(listedBody.items).toHaveLength(1);
+  });
+
+  it("expires plaintext invitation replay results after the bounded in-process TTL", async () => {
+    let now = new Date("2026-07-26T10:00:00.000Z");
+    const { origin } = await setup(true, () => now);
+    const owner = await bootstrap(origin);
+    const ownerToken = owner.payload.deviceToken!;
+    const create = () =>
+      fetch(`${origin}/api/v1/projects/project-a/human/invitations`, {
+        method: "POST",
+        headers: jsonHeaders(ownerToken),
+        body: JSON.stringify({ idempotencyKey: "expiring-invitation-create" })
+      });
+
+    const first = await create();
+    const firstBody = (await first.json()) as {
+      invitationToken: string;
+      invitation: { invitationId: string };
+    };
+    now = new Date(now.getTime() + PROJECT_INVITATION_IDEMPOTENCY_CACHE_TTL_MS);
+    const afterExpiry = await create();
+    const afterExpiryBody = (await afterExpiry.json()) as typeof firstBody;
+
+    expect(first.status).toBe(201);
+    expect(afterExpiry.status).toBe(201);
+    expect(afterExpiryBody.invitation.invitationId).not.toBe(firstBody.invitation.invitationId);
+    expect(afterExpiryBody.invitationToken).not.toBe(firstBody.invitationToken);
+  });
+
+  it("does not cache failed creates or share plaintext replays between owners", async () => {
+    const { origin } = await setup();
+    const owner = await bootstrap(origin);
+    const ownerToken = owner.payload.deviceToken!;
+    const joinInvitation = await fetch(`${origin}/api/v1/projects/project-a/human/invitations`, {
+      method: "POST",
+      headers: jsonHeaders(ownerToken),
+      body: JSON.stringify({})
+    });
+    const joinInvitationBody = (await joinInvitation.json()) as { invitationToken: string };
+    const joined = await fetch(`${origin}/api/v1/projects/project-a/human/invitations/consume`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({
+        invitationToken: joinInvitationBody.invitationToken,
+        displayName: "Bob"
+      })
+    });
+    const member = (await joined.json()) as {
+      deviceToken: string;
+      principal: { humanPrincipalId: string };
+    };
+    const createWithSharedKey = (token: string) =>
+      fetch(`${origin}/api/v1/projects/project-a/human/invitations`, {
+        method: "POST",
+        headers: jsonHeaders(token),
+        body: JSON.stringify({ idempotencyKey: "same-key-two-owners" })
+      });
+
+    const denied = await createWithSharedKey(member.deviceToken);
+    expect(denied.status).toBe(403);
+
+    const promoted = await fetch(
+      `${origin}/api/v1/projects/project-a/human/members/${member.principal.humanPrincipalId}/promote`,
+      { method: "POST", headers: auth(ownerToken) }
+    );
+    expect(promoted.status).toBe(200);
+
+    const retriedAfterPromotion = await createWithSharedKey(member.deviceToken);
+    expect(retriedAfterPromotion.status).toBe(201);
+    const memberCreate = (await retriedAfterPromotion.json()) as {
+      invitationToken: string;
+      invitation: { invitationId: string };
+    };
+
+    const originalOwnerCreate = await createWithSharedKey(ownerToken);
+    expect(originalOwnerCreate.status).toBe(201);
+    const ownerCreate = (await originalOwnerCreate.json()) as typeof memberCreate;
+    expect(ownerCreate.invitation.invitationId).not.toBe(memberCreate.invitation.invitationId);
+    expect(ownerCreate.invitationToken).not.toBe(memberCreate.invitationToken);
   });
 
   it("revokes many invitations with one rate-limited HTTP action", async () => {
@@ -766,5 +873,49 @@ describe("human membership HTTP APIs", () => {
 
     const afterCapacityEviction = await fetch(limitedUrl);
     expect(afterCapacityEviction.status).toBe(401);
+  });
+
+  it("isolates read routes from each other and the sensitive-write bucket", async () => {
+    const now = new Date("2026-07-26T10:00:00.000Z");
+    const { origin } = await setup(true, () => now);
+    const owner = await bootstrap(origin);
+    const ownerToken = owner.payload.deviceToken!;
+    const membersUrl = `${origin}/api/v1/projects/project-a/human/members`;
+
+    for (let request = 0; request < 60; request += 1) {
+      expect((await fetch(membersUrl, { headers: auth(ownerToken) })).status).toBe(200);
+    }
+
+    const invitationsAfterMemberReads = await fetch(
+      `${origin}/api/v1/projects/project-a/human/invitations`,
+      { headers: auth(ownerToken) }
+    );
+    expect(invitationsAfterMemberReads.status).toBe(200);
+
+    const create = await fetch(`${origin}/api/v1/projects/project-a/human/invitations`, {
+      method: "POST",
+      headers: jsonHeaders(ownerToken),
+      body: JSON.stringify({ idempotencyKey: "write-after-read-quota" })
+    });
+    expect(create.status).toBe(201);
+
+    for (let request = 0; request < 58; request += 1) {
+      const unauthenticatedWrite = await fetch(
+        `${origin}/api/v1/projects/project-a/human/invitations`,
+        {
+          method: "POST",
+          headers: jsonHeaders(),
+          body: JSON.stringify({})
+        }
+      );
+      expect(unauthenticatedWrite.status).toBe(401);
+    }
+    const limited = await fetch(`${origin}/api/v1/projects/project-a/human/invitations`, {
+      method: "POST",
+      headers: jsonHeaders(ownerToken),
+      body: JSON.stringify({ idempotencyKey: "write-over-quota" })
+    });
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("retry-after")).toBe("60");
   });
 });
