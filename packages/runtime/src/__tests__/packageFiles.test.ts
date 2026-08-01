@@ -335,7 +335,7 @@ describe("packageFiles primitives", () => {
     expect(await temporaryReplacementEntries(parent)).toEqual([]);
   });
 
-  it("preserves the original package at a recovery path when the staged swap fails", async () => {
+  it("restores the original package and cleans temporary siblings when the staged swap fails", async () => {
     const { parent, root } = await createReplacementTarget();
     const before = await readPackageFiles(root);
     let renameCalls = 0;
@@ -352,16 +352,14 @@ describe("packageFiles primitives", () => {
 
     await expect(
       replacePackageFilesWithFileSystem(root, replacementFiles, failingFileSystem)
-    ).rejects.toThrow(/original package remains recoverable.*injected staged swap rename failure/i);
+    ).rejects.toThrow(/original package was restored.*injected staged swap rename failure/i);
 
-    await expect(lstat(root)).rejects.toThrow("ENOENT");
-    const backups = await replacementEntries(parent, "backup");
-    expect(backups).toHaveLength(1);
-    expect(await readPackageFiles(join(parent, backups[0]!))).toEqual(before);
+    expect(await readPackageFiles(root)).toEqual(before);
+    expect(await replacementEntries(parent, "backup")).toEqual([]);
     expect(await replacementEntries(parent, "staging")).toEqual([]);
   });
 
-  it("retains the primary failure, recovery path, and staging cleanup failure", async () => {
+  it("retains the primary failure and cleanup failures after restoring the original package", async () => {
     const { parent, root } = await createReplacementTarget();
     const before = await readPackageFiles(root);
     let renameCalls = 0;
@@ -401,17 +399,56 @@ describe("packageFiles primitives", () => {
       throw new Error("Expected staged swap failure.");
     }
 
+    expect(error.message).toContain("injected staged swap rename failure");
+    expect(error.message).toContain("original package was restored");
+    expect(error.message).toContain("temporary cleanup failed");
+    expect(error.message).toContain("injected rollback staging cleanup failure");
+    expect(error.message).toContain("injected rollback lock cleanup failure");
+    expect(await readPackageFiles(root)).toEqual(before);
+    expect(await replacementEntries(parent, "backup")).toEqual([]);
+    expect(await replacementEntries(parent, "staging")).toHaveLength(1);
+    expect((await lstat(join(parent, ".package.replace.lock"))).isFile()).toBe(true);
+  });
+
+  it("retains the install and recovery failures when restoring the original package fails", async () => {
+    const { parent, root } = await createReplacementTarget();
+    const before = await readPackageFiles(root);
+    let renameCalls = 0;
+    const failingFileSystem: PackageFileSystem = {
+      ...nodePackageFileSystem,
+      rename: async (source, destination) => {
+        renameCalls += 1;
+        if (renameCalls === 2) {
+          throw new Error("injected staged swap rename failure");
+        }
+        if (renameCalls === 3) {
+          throw new Error("injected original package restore failure");
+        }
+        await nodePackageFileSystem.rename(source, destination);
+      }
+    };
+
+    const error = await replacePackageFilesWithFileSystem(
+      root,
+      replacementFiles,
+      failingFileSystem
+    ).then(
+      () => null,
+      (reason: unknown) => reason
+    );
+    if (!(error instanceof Error)) {
+      throw new Error("Expected staged swap and recovery failures.");
+    }
+
     const backups = await replacementEntries(parent, "backup");
     expect(backups).toHaveLength(1);
     expect(error.message).toContain("injected staged swap rename failure");
-    expect(error.message).toContain("Original package recovery path");
-    expect(error.message).toContain("injected rollback staging cleanup failure");
-    expect(error.message).toContain("injected rollback lock cleanup failure");
-    expect(error.message).toContain(join(parent, backups[0]!));
-    expect(await readdir(root)).toEqual([]);
+    expect(error.message).toContain("original package recovery failed");
+    expect(error.message).toContain("Failed to restore original package from backup");
+    expect(error.message).toContain("injected original package restore failure");
+    await expect(lstat(root)).rejects.toThrow("ENOENT");
     expect(await readPackageFiles(join(parent, backups[0]!))).toEqual(before);
-    expect(await replacementEntries(parent, "staging")).toHaveLength(1);
-    expect((await lstat(join(parent, ".package.replace.lock"))).isFile()).toBe(true);
+    expect(await replacementEntries(parent, "staging")).toEqual([]);
   });
 
   it("reports backup cleanup failure while retaining the replacement and recoverable backup", async () => {

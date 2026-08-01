@@ -179,16 +179,15 @@ async function replacePreparedPackageFiles(
   try {
     await fs.rename(stagingRoot, targetRoot);
   } catch (error) {
-    const recoveryFailures = await preserveFailedPackageReplacement(
-      fs,
-      targetRoot,
-      backupRoot,
-      stagingRoot
-    );
+    const recovery = await restoreFailedPackageReplacement(fs, targetRoot, backupRoot, stagingRoot);
     throw replacementFailure(
-      `Failed to install staged package replacement at '${targetRoot}'; the original package remains recoverable at '${backupRoot}'.`,
+      recovery.restored && recovery.failures.length === 0
+        ? `Failed to install staged package replacement at '${targetRoot}'; the original package was restored from '${backupRoot}'.`
+        : recovery.restored
+          ? `Failed to install staged package replacement at '${targetRoot}'; the original package was restored from '${backupRoot}', but temporary cleanup failed.`
+          : `Failed to install staged package replacement at '${targetRoot}'; original package recovery failed from '${backupRoot}'.`,
       error,
-      recoveryFailures
+      recovery.failures
     );
   }
 
@@ -330,19 +329,43 @@ async function pathExists(fs: PackageFileSystem, path: string): Promise<boolean>
   }
 }
 
-async function preserveFailedPackageReplacement(
+type FailedPackageReplacementRecovery = {
+  restored: boolean;
+  failures: Error[];
+};
+
+async function restoreFailedPackageReplacement(
   fs: PackageFileSystem,
   targetRoot: string,
   backupRoot: string,
   stagingRoot: string
-): Promise<Error[]> {
-  const failures = [
-    new Error(
-      `Original package recovery path is '${backupRoot}'; no recovery write was attempted at '${targetRoot}'.`
-    ),
-    await cleanupPathFailure(fs, stagingRoot, "staging directory")
-  ];
-  return failures.filter((failure): failure is Error => failure !== null);
+): Promise<FailedPackageReplacementRecovery> {
+  const failures: Error[] = [];
+  const targetCleanupFailure = await cleanupPathFailure(
+    fs,
+    targetRoot,
+    "failed package replacement target"
+  );
+  let restored = false;
+  if (targetCleanupFailure) {
+    failures.push(targetCleanupFailure);
+  } else {
+    try {
+      await fs.rename(backupRoot, targetRoot);
+      restored = true;
+    } catch (error) {
+      failures.push(
+        new Error(
+          `Failed to restore original package from backup '${backupRoot}' to '${targetRoot}': ${errorSummary(error)}`,
+          { cause: error }
+        )
+      );
+    }
+  }
+
+  const stagingCleanupFailure = await cleanupPathFailure(fs, stagingRoot, "staging directory");
+  if (stagingCleanupFailure) failures.push(stagingCleanupFailure);
+  return { restored, failures };
 }
 
 async function cleanupPathFailure(
