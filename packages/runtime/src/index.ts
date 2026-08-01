@@ -70,9 +70,17 @@ export {
   runtimeSchemaTopicOrder
 } from "./schemaDocs/index.js";
 export { loadPackage } from "./package/loadPackage.js";
-export { materializeAuthoritativeCanvasContent } from "./desktop/contentVersionMaterializer.js";
+export {
+  createManagedProjectFromAuthoritativeContent,
+  materializeAuthoritativeCanvasContent,
+  planManagedProjectFromAuthoritativeContent
+} from "./desktop/contentVersionMaterializer.js";
 export { validateAuthoritativeCanvasContent } from "./desktop/contentVersionValidation.js";
 export type { ValidatedAuthoritativeCanvasContent } from "./desktop/contentVersionValidation.js";
+export {
+  readAuthorizedCanvasRuntimeStatus,
+  type ReadAuthorizedCanvasRuntimeStatusInput
+} from "./desktop/canvasRuntimeStatus.js";
 export { migrateBlockRunIndexes } from "./autoRun/blockRunIndex.js";
 export { editBlock, editTask } from "./package/manifestEdit.js";
 export { readMarkdown } from "./package/readMarkdown.js";

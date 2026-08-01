@@ -18,6 +18,8 @@ export const HUMAN_TOKEN_SECRET_CHAR_LENGTH = 43 as const;
 export const PROJECT_INVITATION_MIN_TTL_MS = 60_000 as const;
 export const PROJECT_INVITATION_MAX_TTL_MS = 604_800_000 as const;
 export const PROJECT_INVITATION_DEFAULT_TTL_MS = 86_400_000 as const;
+/** Client-generated invitation-create retry identity. */
+export const HUMAN_INVITATION_IDEMPOTENCY_KEY_MAX_LENGTH = 128 as const;
 
 export const HUMAN_DEVICE_MIN_TTL_MS = 60_000 as const;
 export const HUMAN_DEVICE_MAX_TTL_MS = 31_536_000_000 as const;

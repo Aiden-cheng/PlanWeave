@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  HUMAN_INVITATION_IDEMPOTENCY_KEY_MAX_LENGTH,
   HUMAN_MAX_DEVICES_LISTED_PER_PAGE,
   HUMAN_MAX_INVITATIONS_LISTED_PER_PAGE,
   HUMAN_MAX_MEMBERS_LISTED_PER_PAGE
@@ -453,7 +454,13 @@ export type HumanBootstrapResponse = z.infer<typeof humanBootstrapResponseSchema
 
 export const humanCreateInvitationRequestSchema = z
   .object({
-    ttlMs: projectInvitationTtlMsSchema.optional()
+    ttlMs: projectInvitationTtlMsSchema.optional(),
+    idempotencyKey: z
+      .string()
+      .trim()
+      .min(1)
+      .max(HUMAN_INVITATION_IDEMPOTENCY_KEY_MAX_LENGTH)
+      .optional()
   })
   .strict();
 export type HumanCreateInvitationRequest = z.infer<typeof humanCreateInvitationRequestSchema>;

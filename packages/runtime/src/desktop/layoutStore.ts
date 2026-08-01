@@ -106,13 +106,15 @@ function normalizeLayout(input: unknown, projectId: string): DesktopLayout {
 export function parseDesktopLayoutForPackage(
   input: unknown,
   workspace: ProjectWorkspace,
-  manifest: PlanPackageManifest
+  manifest: PlanPackageManifest,
+  options: { authorityProjectId?: string } = {}
 ): DesktopLayout {
+  const expectedProjectId = options.authorityProjectId ?? workspace.id;
   if (
     !input ||
     typeof input !== "object" ||
     Array.isArray(input) ||
-    (input as Record<string, unknown>).projectId !== workspace.id
+    (input as Record<string, unknown>).projectId !== expectedProjectId
   ) {
     throw new Error("content_version_layout_invalid");
   }

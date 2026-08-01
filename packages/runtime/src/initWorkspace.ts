@@ -1,4 +1,4 @@
-import { cp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { optionalStat } from "./fs/optionalFile.js";
 import { resolvePlanweaveHome } from "./paths.js";
@@ -36,6 +36,8 @@ export function initialManifest(projectName: string): PlanPackageManifest {
     edges: []
   };
 }
+
+export const authoritativeImportReservationFile = ".planweave-content-replica-reservation";
 
 async function exists(path: string): Promise<boolean> {
   return (await optionalStat(path)) !== null;
@@ -182,6 +184,7 @@ export async function initManagedWorkspace(options: {
   resetPackage?: boolean;
   resetResults?: boolean;
   projectGraph?: boolean;
+  contentReplicaReservationToken?: string;
 }): Promise<InitWorkspaceResult> {
   const projectName = options.name.trim();
   if (!projectName) {
@@ -190,6 +193,29 @@ export async function initManagedWorkspace(options: {
   const planweaveHome = resolvePlanweaveHome();
   const id = createManagedProjectId(projectName);
   const workspaceRoot = join(planweaveHome, "projects", id);
+  const reservationFile = join(workspaceRoot, authoritativeImportReservationFile);
+  try {
+    const reservationToken = (await readFile(reservationFile, "utf8")).trim();
+    if (
+      !options.contentReplicaReservationToken ||
+      options.contentReplicaReservationToken !== reservationToken
+    ) {
+      throw new Error("Managed project is reserved by an authoritative content import.");
+    }
+  } catch (error) {
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "ENOENT" &&
+      options.contentReplicaReservationToken
+    ) {
+      throw new Error("Authoritative content import reservation is missing.");
+    }
+    if (!error || typeof error !== "object" || !("code" in error) || error.code !== "ENOENT") {
+      throw error;
+    }
+  }
   const workspace = projectWorkspacePaths({
     id,
     kind: "managed",

@@ -38,6 +38,7 @@ export const collaborationBoundaryErrorSchema = z
     kind: collaborationBoundaryErrorKindSchema,
     code: z.string().min(1).max(128),
     httpStatus: z.number().int().positive().max(599).optional(),
+    retryAfterMs: z.number().int().positive().optional(),
     retryable: z.boolean()
   })
   .strict();

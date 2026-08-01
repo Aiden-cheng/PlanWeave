@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { join, win32 } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   canonicalContentVersionDigestPayload,
@@ -10,12 +10,15 @@ import {
 } from "@planweave-ai/collaboration-contracts";
 import {
   capturePackageSnapshot,
+  createManagedProjectFromAuthoritativeContent,
   getDesktopLayout,
+  listProjects,
   materializeAuthoritativeCanvasContent,
   resolveTaskCanvasWorkspace,
   saveDesktopLayout
 } from "../index.js";
 import { createTestWorkspace } from "./promptTestHelpers.js";
+import { resolveStagedContentVersionLayoutPath } from "../desktop/contentVersionMaterializer.js";
 
 const directories: string[] = [];
 const originalHome = process.env.PLANWEAVE_HOME;
@@ -84,6 +87,60 @@ async function contentFromWorkspace(projectRoot: string): Promise<CompleteConten
 }
 
 describe("authoritative content materializer", () => {
+  it("keeps a Windows staging layout beside the package instead of nesting the absolute path", () => {
+    const staging =
+      "C:\\Users\\24385\\.planweave\\projects\\tiny-notes-agent-board-9cd37a11\\canvases\\default\\.planweave-content-version-z9qklC";
+
+    expect(resolveStagedContentVersionLayoutPath(staging, win32)).toBe(
+      "C:\\Users\\24385\\.planweave\\projects\\tiny-notes-agent-board-9cd37a11\\canvases\\default\\.planweave-content-version-z9qklC.layout.json"
+    );
+  });
+
+  it("creates a managed local project from a remote authority without requiring a local canvas", async () => {
+    const authority = await createTestWorkspace();
+    directories.push(authority.home, authority.root);
+    const content = await contentFromWorkspace(authority.root);
+
+    const created = await createManagedProjectFromAuthoritativeContent({
+      authorityProjectId: authority.init.workspace.id,
+      content
+    });
+
+    expect(created.project.projectId).not.toBe(authority.init.workspace.id);
+    expect(created.canvasId).toBe("default");
+    expect(await listProjects()).toContainEqual(expect.objectContaining({
+      projectId: created.project.projectId,
+      activeCanvasId: "default"
+    }));
+    await expect(getDesktopLayout(created.project.rootPath)).resolves.toMatchObject({
+      projectId: created.project.projectId
+    });
+    const localCanvas = await resolveTaskCanvasWorkspace(created.project.rootPath, "default");
+    await expect(readdir(localCanvas.resultsDir)).resolves.toEqual([]);
+    await expect(readFile(localCanvas.stateFile, "utf8")).resolves.toContain('"tasks"');
+  });
+
+  it("removes only the newly created project when authoritative materialization fails", async () => {
+    const authority = await createTestWorkspace();
+    directories.push(authority.home, authority.root);
+    const content = await contentFromWorkspace(authority.root);
+    const malformed = withRecomputedContent(content, (members) =>
+      members.map((member) =>
+        member.path === contentVersionDesktopLayoutMemberPath
+          ? { ...member, content: JSON.stringify({ version: "desktop-layout/v1", projectId: "wrong", nodes: [], updatedAt: "2026-08-01T00:00:00.000Z" }) }
+          : member
+      )
+    );
+    const before = await listProjects();
+
+    await expect(createManagedProjectFromAuthoritativeContent({
+      authorityProjectId: authority.init.workspace.id,
+      content: malformed
+    })).rejects.toThrow("content_version_layout_invalid");
+
+    expect(await listProjects()).toEqual(before);
+  });
+
   it("replaces package and logical layout together after validating the authoritative digest", async () => {
     const workspace = await createTestWorkspace();
     directories.push(workspace.home, workspace.root);

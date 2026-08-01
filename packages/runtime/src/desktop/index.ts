@@ -34,6 +34,10 @@ export {
 export type { ArchiveTaskCanvasOptions, ArchiveTaskCanvasResult } from "./canvasApi.js";
 export { selectTaskCanvas } from "./canvasSelectionApi.js";
 export {
+  readAuthorizedCanvasRuntimeStatus,
+  type ReadAuthorizedCanvasRuntimeStatusInput
+} from "./canvasRuntimeStatus.js";
+export {
   getCanvasGraphViewModel,
   getCanvasMapLayout,
   resetCanvasMapLayout,
