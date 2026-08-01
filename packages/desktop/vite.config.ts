@@ -6,6 +6,7 @@ import { dirname, resolve } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const maxRendererChunkBytes = 500_000;
+export const maxRendererEntryChunkBytes = 450_000;
 export const maxSettingsRouteChunkBytes = 75_000;
 export const appSettingsRouteModuleId = resolve(
   __dirname,
@@ -39,6 +40,11 @@ export function rendererChunkBudgetViolations(chunks: Iterable<RendererChunk>): 
 
   for (const chunk of chunks) {
     const bytes = Buffer.byteLength(chunk.code);
+    if (chunk.isEntry && bytes > maxRendererEntryChunkBytes) {
+      violations.push(
+        `${chunk.fileName} (${bytes} bytes) exceeds the renderer entry chunk budget.`
+      );
+    }
     if (bytes > maxRendererChunkBytes) {
       violations.push(`${chunk.fileName} (${bytes} bytes) exceeds the renderer chunk budget`);
     }

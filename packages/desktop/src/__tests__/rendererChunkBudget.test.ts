@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   appSettingsRouteModuleId,
+  maxRendererEntryChunkBytes,
   maxRendererChunkBytes,
   maxSettingsRouteChunkBytes,
   rendererChunkBudgetViolations,
@@ -71,5 +72,23 @@ describe("renderer chunk budget", () => {
         expect.stringContaining("exceeds the AppSettingsRoute budget")
       ])
     );
+  });
+
+  it("enforces a stricter budget for the renderer entry chunk", () => {
+    expect(
+      rendererChunkBudgetViolations([
+        chunk({
+          code: "x".repeat(maxRendererEntryChunkBytes + 1),
+          fileName: "assets/index-test.js",
+          isEntry: true
+        }),
+        chunk({
+          facadeModuleId: appSettingsRouteModuleId,
+          fileName: "assets/settings-test.js"
+        })
+      ])
+    ).toEqual([
+      `assets/index-test.js (${maxRendererEntryChunkBytes + 1} bytes) exceeds the renderer entry chunk budget.`
+    ]);
   });
 });
