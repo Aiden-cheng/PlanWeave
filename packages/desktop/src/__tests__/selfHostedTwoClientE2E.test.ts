@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   adminToken,
+  assertFixturesDoNotShareAcceptanceState,
+  clearIsolatedCanvasContentHead,
   configureWorkspaceAccess,
   deviceToken,
+  discoverContentHead,
   expectRouteUnavailable,
   issueDeviceSetupCode,
   nextPresenceMessage,
@@ -163,7 +166,23 @@ describe("self-hosted two-Desktop collaboration flow (OSS-006 B-002)", () => {
       memberId: memberCredential.humanPrincipalId
     });
     try {
-      const initialPublish = await postJson(
+      // Server composition bootstraps trusted canvas content at startup (publishInitial).
+      // HTTP initial-publish is not a second bootstrap; it must see an existing head.
+      const bootstrapped = await discoverContentHead(
+        fixture.origin,
+        fixture.projectId,
+        "default",
+        ownerToken
+      );
+      expect(bootstrapped.status).toBe(200);
+      expect(bootstrapped.body.canPublishInitial).toBe(false);
+      expect(bootstrapped.body.authoritativeHead).toMatchObject({
+        revision: 1,
+        content: { canonicalDigest: fixture.initialContent.canonicalDigest }
+      });
+
+      // Wrong second "first publish" must fail closed with a structured rejection body.
+      const duplicateInitial = await postJson(
         fixture.origin,
         `/api/v1/projects/${encodeURIComponent(fixture.projectId)}/canvases/default/content/initial-publish`,
         ownerToken,
@@ -173,8 +192,15 @@ describe("self-hosted two-Desktop collaboration flow (OSS-006 B-002)", () => {
           content: fixture.initialContent
         }
       );
-      expect(initialPublish.status).toBe(201);
-      await expect(initialPublish.json()).resolves.toMatchObject({ outcome: "published" });
+      expect(duplicateInitial.status).toBe(409);
+      await expect(duplicateInitial.json()).resolves.toEqual({
+        outcome: "rejected",
+        reason: "head_already_exists",
+        retryable: false,
+        detail: "initial_publish_already_completed",
+        // Contract: rejected first-publish never advertises a partial head.
+        head: null
+      });
 
       const memberCanvases = await fetch(
         `${fixture.origin}/api/v1/registry/projects/${encodeURIComponent(fixture.projectId)}/canvases`,
