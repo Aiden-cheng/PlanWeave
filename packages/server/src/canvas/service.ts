@@ -13,6 +13,7 @@ import {
   type ActorRef,
   type CanvasCommandAccepted,
   type CanvasCommandOutcome,
+  type CanvasJournalEntry,
   type CanvasCommandSubmit,
   type CanvasReconnectRequest,
   type CanvasReconnectResponse,
@@ -42,6 +43,14 @@ export type CanvasCommandServiceOptions = {
   /** When configured, commands are only visible after a complete immutable content version advances. */
   contentVersions?: ContentAuthorityStore;
   authoritativeCommits?: AuthoritativeCanvasCommitPort;
+  /** Invoked only after a non-idempotent accepted journal commit is durable. */
+  onAcceptedEntry?: (entry: CanvasJournalEntry) => void;
+  /** Invalidates active live subscribers when a committed entry cannot be published. */
+  onAcceptedEntryUnavailable?: (input: {
+    scope: CanvasScopeKey;
+    headRevision: number;
+    headContentDigest: string;
+  }) => void;
   clock?: () => Date;
   /**
    * Optional presence hub probe — only used in negative tests to prove presence is never
@@ -106,6 +115,11 @@ export class CanvasCommandService {
   private readonly chains = new Map<string, Promise<unknown>>();
 
   constructor(private readonly options: CanvasCommandServiceOptions) {
+    if (
+      (options.onAcceptedEntry === undefined) !== (options.onAcceptedEntryUnavailable === undefined)
+    ) {
+      throw new Error("canvas_live_sync_publication_callbacks_must_be_paired");
+    }
     this.clock = options.clock ?? (() => new Date());
   }
 
@@ -497,9 +511,10 @@ export class CanvasCommandService {
       });
     }
 
+    let accepted: CanvasCommandAccepted;
     try {
       if (authoritativeContent) {
-        return this.commitAcceptedWithAuthoritativeContent({
+        accepted = this.commitAcceptedWithAuthoritativeContent({
           scope,
           operationId: submit.operationId,
           intent: submit.intent,
@@ -509,19 +524,20 @@ export class CanvasCommandService {
           digestManifest: applied.digestManifest,
           ...authoritativeContent
         });
+      } else {
+        accepted = this.options.repository.commitAccepted({
+          scope,
+          operationId: submit.operationId,
+          intent: submit.intent,
+          intentDigest,
+          actor: actorRef,
+          previousRevision: submit.expectedRevision,
+          revision: submit.expectedRevision + 1,
+          contentDigest: applied.contentDigest,
+          digestManifest: applied.digestManifest,
+          sizeBytes: applied.sizeBytes
+        });
       }
-      return this.options.repository.commitAccepted({
-        scope,
-        operationId: submit.operationId,
-        intent: submit.intent,
-        intentDigest,
-        actor: actorRef,
-        previousRevision: submit.expectedRevision,
-        revision: submit.expectedRevision + 1,
-        contentDigest: applied.contentDigest,
-        digestManifest: applied.digestManifest,
-        sizeBytes: applied.sizeBytes
-      });
     } catch (error) {
       this.options.repository.markPendingNeedsRecovery(scope, submit.operationId);
       return rejectedOutcome({
@@ -530,6 +546,37 @@ export class CanvasCommandService {
         operationId: submit.operationId,
         code: "journal_unavailable",
         detail: error instanceof Error ? error.message.slice(0, 200) : "journal_commit_failed"
+      });
+    }
+    this.publishAcceptedEntry(scope, accepted);
+    return accepted;
+  }
+
+  private publishAcceptedEntry(scope: CanvasScopeKey, accepted: CanvasCommandAccepted): void {
+    if (accepted.idempotentReplay || !this.options.onAcceptedEntry) return;
+    try {
+      const entry = this.options.repository.journalEntryAt(scope, accepted.revision);
+      if (!entry) throw new Error("canvas_live_sync_committed_entry_missing");
+      this.options.onAcceptedEntry(entry);
+    } catch {
+      this.notifyLiveSubscribersOfPublicationFailure(scope, accepted);
+    }
+  }
+
+  private notifyLiveSubscribersOfPublicationFailure(
+    scope: CanvasScopeKey,
+    accepted: CanvasCommandAccepted
+  ): void {
+    try {
+      this.options.onAcceptedEntryUnavailable?.({
+        scope,
+        headRevision: accepted.revision,
+        headContentDigest: accepted.contentDigest
+      });
+    } catch {
+      // A durable command must remain accepted even if its best-effort transport invalidation fails.
+      process.emitWarning("canvas_live_sync_invalidation_failed", {
+        code: "PLANWEAVE_CANVAS_LIVE_SYNC_INVALIDATION_FAILED"
       });
     }
   }

@@ -18,6 +18,7 @@ export * from "./attachments.js";
 export * from "./observer.js";
 export * from "./presence.js";
 export * from "./canvasCommands.js";
+export * from "./canvasLiveSync.js";
 export * from "./runtimeStatus.js";
 export * from "./connection.js";
 export * from "./invitationHandoff.js";

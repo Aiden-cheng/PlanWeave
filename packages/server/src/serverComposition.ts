@@ -81,6 +81,7 @@ import {
 } from "./presenceWebSocket.js";
 import {
   attachCanvasCommandWebSocketServer,
+  attachCanvasLiveSyncWebSocketServer,
   CanvasCommandRepository,
   CanvasCommandService,
   ContentVersionRepository,
@@ -89,7 +90,8 @@ import {
   createDefaultCanvasRuntimePort,
   handleCanvasCommandHttpRequest,
   handleContentVersionHttpRequest,
-  type CanvasCommandWebSocketServer
+  type CanvasCommandWebSocketServer,
+  type CanvasLiveSyncWebSocketServer
 } from "./canvas/index.js";
 import { WebSocketUpgradeRouter } from "./webSocketUpgradeRouter.js";
 import {
@@ -145,6 +147,7 @@ async function drainCompositionTransports(input: {
   humanObserverWebSockets?: HumanObserverWebSocketServer;
   canvasPresenceWebSockets?: CanvasPresenceWebSocketServer;
   canvasCommandWebSockets?: CanvasCommandWebSocketServer;
+  canvasLiveSyncWebSockets?: CanvasLiveSyncWebSocketServer;
   upgradeRouter?: WebSocketUpgradeRouter;
   inflightRequests: ReadonlySet<Promise<void>>;
   shutdownTimeoutMs: number;
@@ -168,6 +171,11 @@ async function drainCompositionTransports(input: {
   }
   try {
     await input.canvasCommandWebSockets?.close();
+  } catch (error) {
+    errors.push(error);
+  }
+  try {
+    await input.canvasLiveSyncWebSockets?.close();
   } catch (error) {
     errors.push(error);
   }
@@ -317,6 +325,7 @@ export async function createDistributedServerComposition(
   let humanObserverWebSockets: HumanObserverWebSocketServer | undefined;
   let canvasPresenceWebSockets: CanvasPresenceWebSocketServer | undefined;
   let canvasCommandWebSockets: CanvasCommandWebSocketServer | undefined;
+  let canvasLiveSyncWebSockets: CanvasLiveSyncWebSocketServer | undefined;
   let upgradeRouter: WebSocketUpgradeRouter | undefined;
   let requestListener: ((request: IncomingMessage, response: ServerResponse) => void) | undefined;
   let humanIdentityForInteractions: HumanIdentityRepository | undefined;
@@ -905,6 +914,20 @@ export async function createDistributedServerComposition(
       clock
     });
     const canvasCommandRepository = new CanvasCommandRepository(server.database, { clock });
+    const attachedCanvasLiveSyncWebSockets = attachCanvasLiveSyncWebSocketServer({
+      upgradeRouter,
+      repository: canvasCommandRepository,
+      identityRepository: humanIdentity,
+      workspaceIdentity,
+      projectAccess: initializedProjectAccess,
+      projectAuthority: runtimeRegistry,
+      maxPayloadBytes: config.limits.maxWebSocketPayloadBytes,
+      shutdownTimeoutMs: config.limits.shutdownTimeoutMs,
+      allowInsecureTransport: config.allowInsecureDevelopment,
+      allowedClientOrigins: config.deployment?.allowedClientOrigins,
+      clock
+    });
+    canvasLiveSyncWebSockets = attachedCanvasLiveSyncWebSockets;
     const contentVersionRepository = new ContentVersionRepository(server.database, clock);
     const authoritativeCanvasCommits = new SqliteAuthoritativeCanvasCommitStore(
       server.database,
@@ -937,6 +960,8 @@ export async function createDistributedServerComposition(
       runtime: createDefaultCanvasRuntimePort(),
       contentVersions: contentVersionRepository,
       authoritativeCommits: authoritativeCanvasCommits,
+      onAcceptedEntry: (entry) => attachedCanvasLiveSyncWebSockets.publishAcceptedEntry(entry),
+      onAcceptedEntryUnavailable: (input) => attachedCanvasLiveSyncWebSockets.invalidateScope(input),
       clock
     });
     await canvasCommandService.recoverInterrupted();
@@ -1181,6 +1206,7 @@ export async function createDistributedServerComposition(
         humanObserverWebSockets,
         canvasPresenceWebSockets,
         canvasCommandWebSockets,
+        canvasLiveSyncWebSockets,
         upgradeRouter,
         inflightRequests,
         shutdownTimeoutMs: config.limits.shutdownTimeoutMs
@@ -1246,6 +1272,7 @@ export async function createDistributedServerComposition(
         humanObserverWebSockets,
         canvasPresenceWebSockets,
         canvasCommandWebSockets,
+        canvasLiveSyncWebSockets,
         upgradeRouter,
         inflightRequests,
         shutdownTimeoutMs: config.limits.shutdownTimeoutMs

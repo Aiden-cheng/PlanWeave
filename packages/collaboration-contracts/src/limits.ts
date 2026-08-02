@@ -114,6 +114,10 @@ export const CANVAS_COMMAND_MAX_JOURNAL_RETAINED = 10_000 as const;
 /** Coordinate bounds for layout nodes on the shared canvas (same scale as presence). */
 export const CANVAS_COMMAND_LAYOUT_COORDINATE_ABS_MAX = CANVAS_PRESENCE_COORDINATE_ABS_MAX;
 
+/** Server-to-Desktop accepted Canvas journal stream (read-only WebSocket). */
+export const CANVAS_LIVE_SYNC_PROTOCOL_VERSION = 1 as const;
+export const CANVAS_LIVE_SYNC_MAX_FRAME_BYTES = CANVAS_COMMAND_MAX_FRAME_BYTES;
+
 /** Default HTTPS request timeout. */
 export const COLLABORATION_REQUEST_TIMEOUT_MS = 30_000 as const;
 

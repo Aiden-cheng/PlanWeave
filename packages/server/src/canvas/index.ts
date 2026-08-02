@@ -41,3 +41,8 @@ export {
   type CanvasCommandWebSocketOptions,
   type CanvasCommandWebSocketServer
 } from "./ws.js";
+export {
+  attachCanvasLiveSyncWebSocketServer,
+  type CanvasLiveSyncWebSocketOptions,
+  type CanvasLiveSyncWebSocketServer
+} from "./canvasLiveSyncWebSocket.js";
