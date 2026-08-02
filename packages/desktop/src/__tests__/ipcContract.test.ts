@@ -10,6 +10,7 @@ import {
 } from "../shared/ipcChannels";
 import {
   collaborationCurrentSelectionInputSchema,
+  collaborationCanvasLiveSyncSignalChannel,
   collaborationInvokeChannels,
   collaborationObserverSignalChannel,
   collaborationPresenceSignalChannel,
@@ -281,6 +282,9 @@ describe("desktop IPC contract", () => {
     expect(collaborationStatusChangedChannel).toBe("planweave-collaboration:statusChanged");
     expect(collaborationObserverSignalChannel).toBe("planweave-collaboration:observerSignal");
     expect(collaborationPresenceSignalChannel).toBe("planweave-collaboration:presenceSignal");
+    expect(collaborationCanvasLiveSyncSignalChannel).toBe(
+      "planweave-collaboration:canvasLiveSyncSignal"
+    );
     expect(Object.values(desktopBridgeInvokeChannels)).not.toContain(
       collaborationStatusChangedChannel
     );
@@ -290,11 +294,17 @@ describe("desktop IPC contract", () => {
     expect(Object.values(desktopBridgeInvokeChannels)).not.toContain(
       collaborationPresenceSignalChannel
     );
+    expect(Object.values(desktopBridgeInvokeChannels)).not.toContain(
+      collaborationCanvasLiveSyncSignalChannel
+    );
     expect(Object.values(collaborationInvokeChannels)).not.toContain(
       collaborationObserverSignalChannel
     );
     expect(Object.values(collaborationInvokeChannels)).not.toContain(
       collaborationPresenceSignalChannel
+    );
+    expect(Object.values(collaborationInvokeChannels)).not.toContain(
+      collaborationCanvasLiveSyncSignalChannel
     );
     for (const channel of Object.values(collaborationInvokeChannels)) {
       expect(Object.values(desktopBridgeInvokeChannels)).not.toContain(channel);

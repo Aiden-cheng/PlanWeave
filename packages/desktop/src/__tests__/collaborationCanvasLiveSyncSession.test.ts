@@ -1,0 +1,227 @@
+import { describe, expect, it } from "vitest";
+import { CANVAS_LIVE_SYNC_PROTOCOL_VERSION } from "@planweave-ai/collaboration-contracts";
+import { CollaborationClient } from "../main/collaboration/CollaborationClient.js";
+import {
+  CollaborationCanvasLiveSyncSession,
+  type CollaborationCanvasLiveSyncClientPort
+} from "../main/collaboration/collaborationCanvasLiveSyncSession.js";
+import type { CollaborationClientClock } from "../main/collaboration/collaborationClientTypes.js";
+import type { CanvasLiveSyncHandlers, CanvasLiveSyncStatus } from "../main/collaboration/CanvasLiveSyncClient.js";
+import type { CanvasCommandSessionSnapshot } from "../main/collaboration/canvasCommandSession.js";
+
+type Listener = (event: unknown) => void;
+
+class TestSocket {
+  static instances: TestSocket[] = [];
+  readonly listeners = new Map<string, Listener[]>();
+  readyState = 0;
+
+  constructor(_url: string, _options?: string | string[] | { headers?: Record<string, string> }) {
+    TestSocket.instances.push(this);
+  }
+
+  send(): void {}
+
+  close(code = 1000): void {
+    if (this.readyState === 3) return;
+    this.readyState = 3;
+    this.emit("close", { code });
+  }
+
+  addEventListener(type: "open" | "message" | "error" | "close", listener: Listener): void {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+  }
+
+  removeEventListener(type: "open" | "message" | "error" | "close", listener: Listener): void {
+    this.listeners.set(type, (this.listeners.get(type) ?? []).filter((entry) => entry !== listener));
+  }
+
+  emit(type: "open" | "message" | "error" | "close", event: unknown): void {
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
+}
+
+const clock: CollaborationClientClock = {
+  now: () => new Date("2026-08-02T00:00:00.000Z"),
+  setTimeout: (callback) => callback,
+  clearTimeout: () => undefined
+};
+
+async function flush(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+}
+
+function acceptedEntryMessage(canvasId: string): string {
+  return JSON.stringify({
+    type: "canvas.live.accepted_entry",
+    protocolVersion: CANVAS_LIVE_SYNC_PROTOCOL_VERSION,
+    entry: {
+      schemaVersion: "canvas-journal/v1",
+      entryId: `journal-${canvasId}`,
+      scope: { workspaceId: "workspace-1", projectId: "project-1", canvasId },
+      revision: 1,
+      previousRevision: 0,
+      operationId: `operation-${canvasId}`,
+      intent: { kind: "update_layout", nodes: [{ nodeId: "T-1", x: 1, y: 2 }] },
+      intentDigest: "a".repeat(64),
+      contentDigest: "b".repeat(64),
+      actor: { kind: "human", id: "human-1" },
+      acceptedAt: "2026-08-02T00:00:00.000Z"
+    }
+  });
+}
+
+describe("CollaborationCanvasLiveSyncSession", () => {
+  it("keeps a scope idempotent, atomically replaces it, and discards old callbacks after reset", async () => {
+    TestSocket.instances = [];
+    const client = new CollaborationClient({
+      profile: {
+        profileId: "profile-1",
+        displayName: "Demo",
+        serverBaseUrl: "https://collab.example.com/",
+        projectId: "project-1",
+        allowInsecureTransport: false
+      },
+      credential: { getDeviceToken: () => "pw_hdev_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq" },
+      WebSocketImpl: TestSocket,
+      clock,
+      random: () => 0,
+      limits: { reconnectInitialDelayMs: 4, reconnectMaxDelayMs: 8 }
+    });
+    const signals: unknown[] = [];
+    const session = new CollaborationCanvasLiveSyncSession({
+      getClient: () => client,
+      getClientProfileId: () => "profile-1",
+      resolveCanvasBinding: async ({ localProjectId, canvasId }) => ({
+        localProjectId,
+        localCanvasId: canvasId,
+        remoteProjectId: "project-1",
+        remoteCanvasId: `remote-${canvasId}`
+      }),
+      publishCanvasLiveSyncSignal: (signal) => signals.push(signal),
+      clearDeviceCredential: async () => undefined,
+      publishStatus: async () => undefined
+    });
+
+    client.bindCanvasCommandSession("remote-first");
+    await session.start({ localProjectId: "local-project", canvasId: "first" });
+    await flush();
+    const firstSocket = TestSocket.instances[0];
+    await session.start({ localProjectId: "local-project", canvasId: "first" });
+    await flush();
+    expect(TestSocket.instances).toHaveLength(1);
+
+    client.bindCanvasCommandSession("remote-second");
+    await session.start({ localProjectId: "local-project", canvasId: "second" });
+    await flush();
+    const secondSocket = TestSocket.instances[1];
+    expect(firstSocket.readyState).toBe(3);
+    expect(secondSocket).toBeDefined();
+
+    firstSocket.emit("message", { data: acceptedEntryMessage("remote-first") });
+    expect(signals).toEqual([]);
+    secondSocket.emit("message", { data: acceptedEntryMessage("remote-second") });
+    expect(signals).toHaveLength(1);
+
+    session.reset();
+    secondSocket.emit("message", { data: acceptedEntryMessage("remote-second") });
+    expect(signals).toHaveLength(1);
+
+    client.dispose();
+    expect(client.liveSyncState()).toEqual({ state: "stopped" });
+    expect(secondSocket.readyState).toBe(3);
+  });
+
+  it("replaces the socket when the authoritative command revision advances and clears credentials only for auth", async () => {
+    class SessionClient implements CollaborationCanvasLiveSyncClientPort {
+      readonly projectId = "project-1";
+      revision = 0;
+      status: CanvasLiveSyncStatus = { state: "stopped" };
+      canvas: string | null = null;
+      helloRevision: number | null = null;
+      stopCalls = 0;
+      starts: number[] = [];
+      handlers: CanvasLiveSyncHandlers[] = [];
+
+      canvasCommandSession(): CanvasCommandSessionSnapshot {
+        return {
+          canvasId: "remote-first",
+          revision: this.revision,
+          contentDigest: null,
+          lastOperationId: null,
+          lastJournalEntryId: null,
+          pendingOperationId: null,
+          lastConflict: null,
+          lastRejectCode: null
+        };
+      }
+
+      liveSyncCanvas(): string | null {
+        return this.canvas;
+      }
+
+      liveSyncHelloRevision(): number | null {
+        return this.helloRevision;
+      }
+
+      liveSyncState(): CanvasLiveSyncStatus {
+        return this.status;
+      }
+
+      startLiveSync(_canvasId: string, lastRevision: number, handlers: CanvasLiveSyncHandlers): void {
+        if (this.canvas !== null) this.stopLiveSync();
+        this.canvas = "remote-first";
+        this.helloRevision = lastRevision;
+        this.status = { state: "connecting", canvasId: "remote-first", attempt: 1 };
+        this.starts.push(lastRevision);
+        this.handlers.push(handlers);
+      }
+
+      stopLiveSync(): void {
+        this.stopCalls += 1;
+        this.canvas = null;
+        this.helloRevision = null;
+        this.status = { state: "stopped" };
+      }
+    }
+
+    const client = new SessionClient();
+    const cleared: string[] = [];
+    const session = new CollaborationCanvasLiveSyncSession({
+      getClient: () => client,
+      getClientProfileId: () => "profile-1",
+      resolveCanvasBinding: async ({ localProjectId, canvasId }) => ({
+        localProjectId,
+        localCanvasId: canvasId,
+        remoteProjectId: "project-1",
+        remoteCanvasId: "remote-first"
+      }),
+      publishCanvasLiveSyncSignal: () => undefined,
+      clearDeviceCredential: async (profileId) => {
+        cleared.push(profileId);
+      },
+      publishStatus: async () => undefined
+    });
+
+    await session.start({ localProjectId: "local-project", canvasId: "first" });
+    await session.start({ localProjectId: "local-project", canvasId: "first" });
+    expect(client.starts).toEqual([0]);
+
+    client.revision = 1;
+    await session.start({ localProjectId: "local-project", canvasId: "first" });
+    expect(client.starts).toEqual([0, 1]);
+    expect(client.stopCalls).toBe(1);
+
+    const currentHandlers = client.handlers.at(-1);
+    client.status = { state: "access_denied", canvasId: "remote-first", code: "forbidden" };
+    currentHandlers?.onStatus?.(client.status);
+    expect(cleared).toEqual([]);
+
+    client.status = { state: "auth_expired", canvasId: "remote-first", code: "unauthorized" };
+    currentHandlers?.onStatus?.(client.status);
+    await flush();
+    expect(cleared).toEqual(["profile-1"]);
+  });
+});

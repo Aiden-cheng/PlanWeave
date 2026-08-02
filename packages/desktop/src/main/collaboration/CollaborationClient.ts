@@ -70,6 +70,7 @@ import {
   type ExecutionTargetUpdateWireCommand,
   type CanvasPresencePointer,
   type CanvasPresenceSelectionId,
+  type CanvasRevision,
   type CollaborationClientLimits,
   type CollaborationConnectionProfile,
   type CommentCreateWireCommand,
@@ -125,6 +126,11 @@ import { reconnectDelay } from "./reconnectBackoff.js";
 import { redactCollaborationText } from "./redaction.js";
 import { derivedWebSocketOrigin } from "./webSocketOrigin.js";
 import { CanvasPresenceClient } from "./CanvasPresenceClient.js";
+import {
+  CanvasLiveSyncClient,
+  type CanvasLiveSyncHandlers,
+  type CanvasLiveSyncStatus
+} from "./CanvasLiveSyncClient.js";
 import { CollaborationRegistryClient } from "./CollaborationRegistryClient.js";
 import type {
   CollaborationClientClock,
@@ -189,6 +195,7 @@ export class CollaborationClient {
   private observerWanted = false;
 
   private readonly presence: CanvasPresenceClient;
+  private readonly liveSync: CanvasLiveSyncClient;
   private readonly registryClient: CollaborationRegistryClient;
   private readonly canvasCommands: CanvasCommandClient;
 
@@ -203,6 +210,16 @@ export class CollaborationClient {
     this.clock = options.clock ?? systemCollaborationClock;
     this.random = options.random ?? Math.random;
     this.presence = new CanvasPresenceClient({
+      profile: options.profile,
+      credential: options.credential,
+      WebSocketImpl: options.WebSocketImpl,
+      clock: this.clock,
+      random: this.random,
+      reconnectInitialDelayMs: this.transport.limits.reconnectInitialDelayMs,
+      reconnectMaxDelayMs: this.transport.limits.reconnectMaxDelayMs,
+      logger: options.logger
+    });
+    this.liveSync = new CanvasLiveSyncClient({
       profile: options.profile,
       credential: options.credential,
       WebSocketImpl: options.WebSocketImpl,
@@ -255,6 +272,18 @@ export class CollaborationClient {
 
   presenceCanvas(): string | null {
     return this.presence.canvas();
+  }
+
+  liveSyncState(): CanvasLiveSyncStatus {
+    return this.liveSync.state();
+  }
+
+  liveSyncCanvas(): string | null {
+    return this.liveSync.canvas();
+  }
+
+  liveSyncHelloRevision(): CanvasRevision | null {
+    return this.liveSync.helloRevision();
   }
 
   // ---------------------------------------------------------------------------
@@ -844,6 +873,19 @@ export class CollaborationClient {
     this.presence.stop();
   }
 
+  startLiveSync(
+    canvasId: string,
+    lastRevision: CanvasRevision,
+    handlers: CanvasLiveSyncHandlers = {}
+  ): void {
+    this.ensureOpen();
+    this.liveSync.start(canvasId, lastRevision, handlers);
+  }
+
+  stopLiveSync(): void {
+    this.liveSync.stop();
+  }
+
   // ---------------------------------------------------------------------------
   // Server-authoritative canvas commands (durable; not presence)
   // ---------------------------------------------------------------------------
@@ -1013,6 +1055,7 @@ export class CollaborationClient {
     this.disposed = true;
     this.stopObserver();
     this.stopPresence();
+    this.stopLiveSync();
     this.canvasCommands.clearSession();
     this.transport.dispose();
   }

@@ -27,6 +27,8 @@ export const collaborationInvokeChannels = {
   validateDeploymentConnectivity: "planweave-collaboration:validateDeploymentConnectivity",
   startCollaborationPresence: "planweave-collaboration:startPresence",
   stopCollaborationPresence: "planweave-collaboration:stopPresence",
+  startCollaborationCanvasLiveSync: "planweave-collaboration:startCanvasLiveSync",
+  stopCollaborationCanvasLiveSync: "planweave-collaboration:stopCanvasLiveSync",
   publishCollaborationPresence: "planweave-collaboration:publishPresence",
   submitCollaborationCanvasCommand: "planweave-collaboration:submitCanvasCommand",
   reconnectCollaborationCanvas: "planweave-collaboration:reconnectCanvas",
@@ -99,3 +101,4 @@ export const collaborationInvokeChannels = {
 export const collaborationStatusChangedChannel = "planweave-collaboration:statusChanged";
 export const collaborationObserverSignalChannel = "planweave-collaboration:observerSignal";
 export const collaborationPresenceSignalChannel = "planweave-collaboration:presenceSignal";
+export const collaborationCanvasLiveSyncSignalChannel = "planweave-collaboration:canvasLiveSyncSignal";

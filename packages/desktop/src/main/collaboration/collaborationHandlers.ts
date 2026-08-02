@@ -14,6 +14,7 @@ import {
   collaborationInvokeChannels,
   collaborationObserverSignalChannel,
   collaborationPresenceSignalChannel,
+  collaborationCanvasLiveSyncSignalChannel,
   collaborationStatusChangedChannel,
   type CollaborationObserverSignal,
   type CollaborationStatus
@@ -58,6 +59,16 @@ function publishPresenceSignalToRenderers(
   }
 }
 
+function publishCanvasLiveSyncSignalToRenderers(
+  signal: Parameters<NonNullable<CollaborationServiceOptions["onCanvasLiveSyncSignal"]>>[0]
+): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.webContents.isDestroyed()) {
+      window.webContents.send(collaborationCanvasLiveSyncSignalChannel, signal);
+    }
+  }
+}
+
 function createDefaultService(options: CollaborationServiceOptions = {}): CollaborationService {
   const userCreateClient = options.createClient;
   return new CollaborationService({
@@ -78,7 +89,9 @@ function createDefaultService(options: CollaborationServiceOptions = {}): Collab
         })),
     onStatusChange: options.onStatusChange ?? publishStatusToRenderers,
     onObserverSignal: options.onObserverSignal ?? publishObserverSignalToRenderers,
-    onPresenceSignal: options.onPresenceSignal ?? publishPresenceSignalToRenderers
+    onPresenceSignal: options.onPresenceSignal ?? publishPresenceSignalToRenderers,
+    onCanvasLiveSyncSignal:
+      options.onCanvasLiveSyncSignal ?? publishCanvasLiveSyncSignalToRenderers
   });
 }
 
@@ -241,6 +254,13 @@ export function registerCollaborationHandlers(
   );
   ipcMain.handle(collaborationInvokeChannels.stopCollaborationPresence, () =>
     active.stopPresence()
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.startCollaborationCanvasLiveSync,
+    (_event, input: unknown) => active.startCanvasLiveSync(input)
+  );
+  ipcMain.handle(collaborationInvokeChannels.stopCollaborationCanvasLiveSync, () =>
+    active.stopCanvasLiveSync()
   );
   ipcMain.handle(
     collaborationInvokeChannels.publishCollaborationPresence,

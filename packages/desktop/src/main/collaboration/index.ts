@@ -12,6 +12,12 @@ export {
 } from "./CollaborationClient.js";
 export { CanvasPresenceClient, type CanvasPresenceClientOptions } from "./CanvasPresenceClient.js";
 export {
+  CanvasLiveSyncClient,
+  type CanvasLiveSyncClientOptions,
+  type CanvasLiveSyncHandlers,
+  type CanvasLiveSyncStatus
+} from "./CanvasLiveSyncClient.js";
+export {
   CanvasCommandClient,
   type CanvasCommandReconnectInput,
   type CanvasCommandSubmitInput

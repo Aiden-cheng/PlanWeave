@@ -60,6 +60,7 @@ import {
   type CollaborationInvitationCreateView,
   type CollaborationObserverSignal,
   type CollaborationPresenceSignal,
+  type CollaborationCanvasLiveSyncSignal,
   type CollaborationSessionPhase,
   type CollaborationStatus,
   type CollaborationUpsertProfileInput
@@ -79,6 +80,7 @@ import {
 import { ContentVersionFacade } from "./ContentVersionFacade.js";
 import { CollaborationRemoteOperationsFacade } from "./collaborationRemoteOperations.js";
 import { CollaborationPresenceSession } from "./collaborationPresenceSession.js";
+import { CollaborationCanvasLiveSyncSession } from "./collaborationCanvasLiveSyncSession.js";
 import { CollaborationReadMutationsFacade } from "./collaborationReadMutations.js";
 import { CollaborationClientError, collaborationErrorFromUnknown } from "./collaborationErrors.js";
 import {
@@ -129,6 +131,7 @@ export type CollaborationServiceOptions = {
   onStatusChange?: (status: CollaborationStatus) => void;
   onObserverSignal?: (signal: CollaborationObserverSignal) => void;
   onPresenceSignal?: (signal: CollaborationPresenceSignal) => void;
+  onCanvasLiveSyncSignal?: (signal: CollaborationCanvasLiveSyncSignal) => void;
 };
 
 function stripAuthHandoff(
@@ -169,6 +172,7 @@ export class CollaborationService {
   private readonly onStatusChange?: (status: CollaborationStatus) => void;
   private readonly onObserverSignal?: (signal: CollaborationObserverSignal) => void;
   private readonly onPresenceSignal?: (signal: CollaborationPresenceSignal) => void;
+  private readonly onCanvasLiveSyncSignal?: (signal: CollaborationCanvasLiveSyncSignal) => void;
   private readonly registryService: CollaborationRegistryService;
   private readonly canvasCommands: CollaborationCanvasCommandFacade;
   private readonly contentVersions: ContentVersionFacade;
@@ -191,6 +195,7 @@ export class CollaborationService {
   private observerGeneration = 0;
   private observerConnectDeadline: ReturnType<typeof setTimeout> | null = null;
   private readonly presenceSession: CollaborationPresenceSession;
+  private readonly canvasLiveSyncSession: CollaborationCanvasLiveSyncSession;
   private disposed = false;
   private queue: Promise<unknown> = Promise.resolve();
   private statusPublicationTransactionDepth = 0;
@@ -227,6 +232,7 @@ export class CollaborationService {
     this.onStatusChange = options.onStatusChange;
     this.onObserverSignal = options.onObserverSignal;
     this.onPresenceSignal = options.onPresenceSignal;
+    this.onCanvasLiveSyncSignal = options.onCanvasLiveSyncSignal;
     this.registryService = new CollaborationRegistryService(() => this.client);
     this.contentVersions = new ContentVersionFacade(() => this.client);
     this.canvasCommands = new CollaborationCanvasCommandFacade(
@@ -246,6 +252,14 @@ export class CollaborationService {
       getClientProfileId: () => this.clientProfileId,
       publishPresenceSignal: (signal) => this.publishPresenceSignal(signal),
       setSessionError: (detail, error) => this.setSession("error", detail, error),
+      clearDeviceCredential: (profileId) => this.vault.clear(profileId),
+      publishStatus: () => this.publishStatus()
+    });
+    this.canvasLiveSyncSession = new CollaborationCanvasLiveSyncSession({
+      getClient: () => this.client,
+      getClientProfileId: () => this.clientProfileId,
+      resolveCanvasBinding: (input) => this.contentVersions.resolveCanvasBinding(input),
+      publishCanvasLiveSyncSignal: (signal) => this.publishCanvasLiveSyncSignal(signal),
       clearDeviceCredential: (profileId) => this.vault.clear(profileId),
       publishStatus: () => this.publishStatus()
     });
@@ -947,6 +961,21 @@ export class CollaborationService {
     });
   }
 
+  /** Start a read-only remote Canvas journal notification stream for the bound command session. */
+  async startCanvasLiveSync(input: unknown): Promise<void> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      await this.canvasLiveSyncSession.start(input);
+    });
+  }
+
+  async stopCanvasLiveSync(): Promise<void> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      this.canvasLiveSyncSession.stop();
+    });
+  }
+
   async publishPresence(input: unknown): Promise<void> {
     return this.enqueue(async () => {
       this.assertOpen();
@@ -1295,6 +1324,10 @@ export class CollaborationService {
     this.onPresenceSignal?.(signal);
   }
 
+  private publishCanvasLiveSyncSignal(signal: CollaborationCanvasLiveSyncSignal): void {
+    this.onCanvasLiveSyncSignal?.(signal);
+  }
+
   private rememberObserverCursor(profileId: string, cursor: number): void {
     if (!Number.isFinite(cursor) || cursor < 0) return;
     if (this.lastValidatedObserverProfileId !== profileId) {
@@ -1361,6 +1394,7 @@ export class CollaborationService {
     const profileId = this.clientProfileId;
     this.observerGeneration += 1;
     this.presenceSession.reset();
+    this.canvasLiveSyncSession.reset();
     // Preserve validated cursor across dispose so the next connectSession can resume.
     if (client && profileId) {
       try {
@@ -1376,6 +1410,11 @@ export class CollaborationService {
     if (client) {
       try {
         client.stopPresence();
+      } catch {
+        // ignore stop errors during dispose
+      }
+      try {
+        client.stopLiveSync();
       } catch {
         // ignore stop errors during dispose
       }

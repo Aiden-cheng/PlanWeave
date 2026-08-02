@@ -55,6 +55,7 @@ import {
   type CanvasReconnectResponse,
   type CanvasRuntimeStatusProjection,
   type CanvasPresenceServerMessage,
+  type CanvasLiveSyncServerMessage,
   type RemoteActionView,
   type RemoteDispatchIntent,
   type RemoteDispatchWireCommand,
@@ -436,6 +437,25 @@ export type CollaborationPresenceSignal =
       };
     };
 
+/** Renderer supplies only opaque local scope; main resolves remote IDs and session revision. */
+export const collaborationCanvasLiveSyncInputSchema = z
+  .object({
+    localProjectId: collaborationOpaqueIdSchema,
+    canvasId: collaborationOpaqueIdSchema
+  })
+  .strict();
+export type CollaborationCanvasLiveSyncInput = z.infer<
+  typeof collaborationCanvasLiveSyncInputSchema
+>;
+
+/** Validated read-only live-sync signal. No token, header, local path, or disk content crosses IPC. */
+export type CollaborationCanvasLiveSyncSignal = {
+  profileId: string;
+  projectId: string;
+  canvasId: string;
+  message: CanvasLiveSyncServerMessage;
+};
+
 /** Renderer → main: submit one durable canvas command intent (no actor/path/revision override authority). */
 export const collaborationCanvasCommandSubmitInputSchema = z
   .object({
@@ -599,6 +619,7 @@ export type CollaborationCurrentSelectionInput = z.infer<
 
 export {
   collaborationInvokeChannels,
+  collaborationCanvasLiveSyncSignalChannel,
   collaborationObserverSignalChannel,
   collaborationPresenceSignalChannel,
   collaborationStatusChangedChannel
@@ -655,6 +676,10 @@ export type PlanWeaveCollaborationApi = {
   ) => Promise<ConnectivityValidationView>;
   startCollaborationPresence: (input: CollaborationPresenceCanvasInput) => Promise<void>;
   stopCollaborationPresence: () => Promise<void>;
+  startCollaborationCanvasLiveSync: (
+    input: CollaborationCanvasLiveSyncInput
+  ) => Promise<void>;
+  stopCollaborationCanvasLiveSync: () => Promise<void>;
   publishCollaborationPresence: (input: CollaborationPresenceUpdateInput) => Promise<void>;
   submitCollaborationCanvasCommand: (
     input: CollaborationCanvasCommandSubmitInput
@@ -819,6 +844,9 @@ export type PlanWeaveCollaborationApi = {
   ) => () => void;
   onCollaborationPresenceSignal: (
     callback: (signal: CollaborationPresenceSignal) => void
+  ) => () => void;
+  onCollaborationCanvasLiveSyncSignal: (
+    callback: (signal: CollaborationCanvasLiveSyncSignal) => void
   ) => () => void;
 };
 
