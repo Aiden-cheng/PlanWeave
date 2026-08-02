@@ -6,6 +6,7 @@ import type {
   CanvasReconnectResponse,
   CompleteContentVersion
 } from "@planweave-ai/collaboration-contracts";
+import { CANVAS_LIVE_SYNC_PROTOCOL_VERSION } from "@planweave-ai/collaboration-contracts";
 import {
   applyCanvasReplicaIntent,
   encodeCanvasReplicaDocument,
@@ -17,6 +18,9 @@ import {
   CanvasReplicaCommandWorker,
   type CanvasReplicaCommandTransport
 } from "../main/collaboration/CanvasReplicaCommandWorker.js";
+import { CollaborationCanvasCommandFacade } from "../main/collaboration/collaborationCanvasCommands.js";
+import { CanvasLiveSyncClient } from "../main/collaboration/CanvasLiveSyncClient.js";
+import type { CollaborationClient } from "../main/collaboration/CollaborationClient.js";
 import {
   CanvasReplicaStore,
   type CanvasReplicaScope
@@ -522,11 +526,97 @@ describe("Canvas replica live broadcast (Phase 5B)", () => {
     expect(harness.store.revision(baseScope)).toBe(5);
   });
 
-  it("facade recovery path advances live cursor via materialized-head ack (not strict +1)", async () => {
-    // Simulate the facade decision table against a real CanvasLiveSyncClient cursor.
-    const { CanvasLiveSyncClient } = await import(
-      "../main/collaboration/CanvasLiveSyncClient.js"
+  it("real facade recovery advances live cursor from revision 1 to materialized head 5", async () => {
+    // Production path: CollaborationCanvasCommandFacade.startLiveSubscription →
+    // worker.applyLiveEntry (gap) → recovered head → acknowledgeLiveSyncMaterializedHead.
+    // Must instantiate the real facade — hand-copied branch tables would pass even if wiring is wrong.
+    type SocketListener = (event: unknown) => void;
+    class MiniSocket {
+      static instances: MiniSocket[] = [];
+      readyState = 0;
+      sent: string[] = [];
+      listeners = new Map<string, SocketListener[]>();
+      constructor(
+        public url: string,
+        public options?: { headers?: Record<string, string> }
+      ) {
+        MiniSocket.instances.push(this);
+      }
+      send(data: string) {
+        this.sent.push(data);
+      }
+      close() {
+        this.readyState = 3;
+        for (const listener of this.listeners.get("close") ?? []) listener({ code: 1000 });
+      }
+      addEventListener(type: string, listener: SocketListener) {
+        this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+      }
+      removeEventListener(type: string, listener: SocketListener) {
+        this.listeners.set(
+          type,
+          (this.listeners.get(type) ?? []).filter((entry) => entry !== listener)
+        );
+      }
+      emit(type: string, event: unknown = {}) {
+        for (const listener of this.listeners.get(type) ?? []) listener(event);
+      }
+    }
+    MiniSocket.instances = [];
+
+    const baselineDoc = documentFixture();
+    const baselineContent = encodeCanvasReplicaDocument(baselineDoc);
+    const snapDoc = applyCanvasReplicaIntent(
+      baselineDoc,
+      layoutIntent(9, "2026-08-02T12:07:00.000Z")
     );
+    const snapContent = encodeCanvasReplicaDocument(snapDoc);
+    const store = new CanvasReplicaStore(() => undefined);
+    const transport: CanvasReplicaCommandTransport = {
+      async fetchReconnectBaseline() {
+        return { response: snapshotResponse(baselineContent, 1), content: baselineContent };
+      },
+      async reconnect(_scope, input) {
+        if (input.afterRevision === 0) {
+          return {
+            response: snapshotResponse(snapContent, 5),
+            snapshotContent: snapContent
+          };
+        }
+        // Gap delta cannot materialize — installReconnect upgrades to snapshot head 5.
+        return {
+          response: {
+            type: "canvas.reconnect.delta",
+            protocolVersion: 1,
+            schemaVersion: "canvas-command/v1",
+            scope: {
+              workspaceId: baseScope.workspaceId,
+              projectId: baseScope.projectId,
+              canvasId: baseScope.canvasId
+            },
+            afterRevision: input.afterRevision,
+            headRevision: 5,
+            headContentDigest: "e".repeat(64),
+            entries: [
+              journalEntry({
+                revision: 5,
+                previousRevision: 4,
+                operationId: "op-gap-facade",
+                intent: layoutIntent(1, "2026-08-02T12:07:00.000Z"),
+                contentDigest: "e".repeat(64)
+              })
+            ]
+          }
+        };
+      },
+      async canPersistCanvasCommand() {
+        return true;
+      },
+      async submit() {
+        throw new Error("unexpected submit");
+      }
+    };
+
     const clock = {
       now: () => new Date("2026-08-02T00:00:00.000Z"),
       setTimeout: (cb: () => void) => {
@@ -535,57 +625,128 @@ describe("Canvas replica live broadcast (Phase 5B)", () => {
       },
       clearTimeout: () => undefined
     };
-    class MiniSocket {
-      readyState = 0;
-      sent: string[] = [];
-      listeners = new Map<string, Array<(e: unknown) => void>>();
-      constructor(
-        public url: string,
-        public options?: { headers?: Record<string, string> }
-      ) {}
-      send(data: string) {
-        this.sent.push(data);
-      }
-      close() {
-        this.readyState = 3;
-      }
-      addEventListener(type: string, listener: (e: unknown) => void) {
-        this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
-      }
-      removeEventListener() {}
-    }
-    const client = new CanvasLiveSyncClient({
+    const liveSync = new CanvasLiveSyncClient({
       profile: {
         profileId: "p",
         displayName: "d",
         serverBaseUrl: "https://example.com/",
-        projectId: "project-authority",
+        projectId: baseScope.projectId,
         allowInsecureTransport: false
       },
-      credential: { getDeviceToken: () => "pw_hdev_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq" },
+      credential: {
+        getDeviceToken: () => "pw_hdev_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq"
+      },
       WebSocketImpl: MiniSocket as never,
       clock,
       random: () => 0,
       reconnectInitialDelayMs: 1,
       reconnectMaxDelayMs: 1
     });
-    client.start("default", 1);
-    await Promise.resolve();
-    expect(client.helloRevision()).toBe(1);
 
-    // Worker-shaped recovered result after snapshot catch-up 1 → 5.
-    const recovered = {
-      entryApplied: false as const,
-      reason: "recovered" as const,
-      materializedHead: { revision: 5, contentDigest: "a".repeat(64) }
+    const remoteSession = {
+      canvasId: baseScope.canvasId,
+      revision: 1,
+      contentDigest: baselineContent.canonicalDigest,
+      lastOperationId: null,
+      lastJournalEntryId: null,
+      pendingOperationId: null,
+      lastConflict: null,
+      lastRejectCode: null
     };
-    // Facade policy: entryApplied uses +1; recovered uses head jump.
-    if (recovered.entryApplied) {
-      client.acknowledgeAppliedRevision(recovered.materializedHead.revision);
-    } else if (recovered.reason === "recovered") {
-      client.acknowledgeMaterializedHead(recovered.materializedHead.revision);
-    }
-    expect(client.helloRevision()).toBe(5);
+    const client = {
+      projectId: baseScope.projectId,
+      connectionProfile: {
+        profileId: "p",
+        serverBaseUrl: "https://example.com/",
+        projectId: baseScope.projectId,
+        allowInsecureTransport: false
+      },
+      submitCanvasCommand: vi.fn(),
+      reconnectCanvasCommands: vi.fn(),
+      fetchContentVersion: vi.fn(),
+      bindCanvasCommandSession: vi.fn(),
+      clearCanvasCommandSession: vi.fn(),
+      canvasCommandSession: vi.fn(() => remoteSession),
+      getCurrentCanvasAccess: vi.fn(async () => null),
+      startLiveSync: (canvasId: string, lastRevision: number, handlers?: unknown) => {
+        liveSync.start(canvasId, lastRevision, handlers as never);
+      },
+      stopLiveSync: () => liveSync.stop(),
+      subscribeLiveSync: (handlers: {
+        onMessage?: (message: unknown) => void;
+        onStatus?: (status: unknown) => void;
+      }) => liveSync.subscribe(handlers as never),
+      acknowledgeLiveSyncRevision: (revision: number) => {
+        liveSync.acknowledgeAppliedRevision(revision);
+      },
+      acknowledgeLiveSyncMaterializedHead: (revision: number) => {
+        liveSync.acknowledgeMaterializedHead(revision);
+      },
+      reportLiveSyncCatchupRecovering: vi.fn()
+    } as unknown as CollaborationClient;
+
+    const facade = new CollaborationCanvasCommandFacade({
+      resolveClient: () => client,
+      resolveCanvasBinding: async () => ({
+        localProjectId: baseScope.localProjectId,
+        localCanvasId: baseScope.localCanvasId,
+        remoteProjectId: baseScope.projectId,
+        remoteCanvasId: baseScope.canvasId
+      }),
+      resolveCanvasScope: async () => ({
+        workspaceId: baseScope.workspaceId,
+        projectId: baseScope.projectId,
+        canvasId: baseScope.canvasId
+      }),
+      resolveAuthorityId: () => baseScope.authorityId,
+      store,
+      transport
+    });
+
+    await facade.bind({
+      localProjectId: baseScope.localProjectId,
+      canvasId: baseScope.localCanvasId
+    });
+    // Yield so CanvasLiveSyncClient async connect creates the socket.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(liveSync.helloRevision()).toBe(1);
+    expect(store.revision({
+      authorityId: baseScope.authorityId,
+      workspaceId: baseScope.workspaceId,
+      projectId: baseScope.projectId,
+      canvasId: baseScope.canvasId
+    })).toBe(1);
+
+    const socket = MiniSocket.instances[0];
+    expect(socket).toBeDefined();
+    socket.emit("open");
+    // Live frame with a revision gap (1 → 5): facade must recover via HTTP then jump the cursor.
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "canvas.live.accepted_entry",
+        protocolVersion: CANVAS_LIVE_SYNC_PROTOCOL_VERSION,
+        entry: journalEntry({
+          revision: 5,
+          previousRevision: 4,
+          operationId: "op-gap-facade",
+          intent: layoutIntent(1, "2026-08-02T12:07:00.000Z"),
+          contentDigest: "e".repeat(64)
+        })
+      })
+    });
+
+    await vi.waitFor(() => {
+      expect(liveSync.helloRevision()).toBe(5);
+    });
+    expect(store.revision({
+      authorityId: baseScope.authorityId,
+      workspaceId: baseScope.workspaceId,
+      projectId: baseScope.projectId,
+      canvasId: baseScope.canvasId
+    })).toBe(5);
+    // Strict +1 would have ignored 1 → 5; only materialized-head ack advances here.
+    facade.clearAllSessions();
   });
 
   it("rejects a stale reconnect snapshot that would roll the head backwards", async () => {
