@@ -25,9 +25,7 @@ import {
 export const collaborationCanvasCommandSubmitInputSchema = z
   .object({
     canvasId: opaqueIdentifierSchema,
-    intent: canvasCommandSubmissionIntentSchema,
-    operationId: canvasCommandOperationIdSchema.optional(),
-    expectedRevision: z.number().int().nonnegative().optional()
+    intent: canvasCommandSubmissionIntentSchema
   })
   .strict();
 export type CollaborationCanvasCommandSubmitInput = z.infer<
@@ -118,15 +116,15 @@ export class CollaborationCanvasCommandFacade {
     const parsed = collaborationCanvasCommandSubmitInputSchema.parse(input);
     const client = requireClient(this.resolveClient());
     const localBinding = this.requireLocalBinding(client, parsed.canvasId);
-    const operationId =
-      parsed.operationId ??
-      canvasCommandOperationIdSchema.parse(`op-${randomUUID().replace(/-/g, "").slice(0, 24)}`);
+    const operationId = canvasCommandOperationIdSchema.parse(
+      `op-${randomUUID().replace(/-/g, "").slice(0, 24)}`
+    );
     const outcome = await client.submitCanvasCommand(
       {
         canvasId: parsed.canvasId,
         operationId,
         intent: parsed.intent as CanvasCommandIntent,
-        expectedRevision: parsed.expectedRevision
+        expectedRevision: undefined
       },
       undefined,
       {

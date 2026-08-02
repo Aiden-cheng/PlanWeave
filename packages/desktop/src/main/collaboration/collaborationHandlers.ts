@@ -15,6 +15,7 @@ import {
   collaborationObserverSignalChannel,
   collaborationPresenceSignalChannel,
   collaborationCanvasLiveSyncSignalChannel,
+  collaborationCanvasReplicaSignalChannel,
   collaborationStatusChangedChannel,
   type CollaborationObserverSignal,
   type CollaborationStatus
@@ -25,6 +26,7 @@ import {
   type CollaborationWebSocketConstructor
 } from "./CollaborationClient.js";
 import { CollaborationService, type CollaborationServiceOptions } from "./collaborationService.js";
+import type { CollaborationCanvasReplicaSignal } from "../../shared/canvasReplicaIpc.js";
 import { LocalCollaborationCoordinatorControl } from "./CollaborationCoordinatorControl.js";
 import { DeploymentActions } from "./deploymentActions.js";
 import { runCollaborationCommand } from "./collaborationCommandHandler.js";
@@ -69,6 +71,14 @@ function publishCanvasLiveSyncSignalToRenderers(
   }
 }
 
+function publishCanvasReplicaSignalToRenderers(signal: CollaborationCanvasReplicaSignal): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.webContents.isDestroyed()) {
+      window.webContents.send(collaborationCanvasReplicaSignalChannel, signal);
+    }
+  }
+}
+
 function createDefaultService(options: CollaborationServiceOptions = {}): CollaborationService {
   const userCreateClient = options.createClient;
   return new CollaborationService({
@@ -91,7 +101,8 @@ function createDefaultService(options: CollaborationServiceOptions = {}): Collab
     onObserverSignal: options.onObserverSignal ?? publishObserverSignalToRenderers,
     onPresenceSignal: options.onPresenceSignal ?? publishPresenceSignalToRenderers,
     onCanvasLiveSyncSignal:
-      options.onCanvasLiveSyncSignal ?? publishCanvasLiveSyncSignalToRenderers
+      options.onCanvasLiveSyncSignal ?? publishCanvasLiveSyncSignalToRenderers,
+    onCanvasReplicaSignal: options.onCanvasReplicaSignal ?? publishCanvasReplicaSignalToRenderers
   });
 }
 
@@ -288,6 +299,10 @@ export function registerCollaborationHandlers(
   ipcMain.handle(
     collaborationInvokeChannels.readCollaborationCanvasRuntimeStatus,
     (_event, input: unknown) => active.readCanvasRuntimeStatus(input)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.getCollaborationCanvasReplicaProjection,
+    (_event, input: unknown) => active.getCanvasReplicaProjection(input)
   );
   ipcMain.handle(
     collaborationInvokeChannels.bindCollaborationContentAuthority,

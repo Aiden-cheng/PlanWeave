@@ -1,7 +1,4 @@
-import type {
-  CanvasCommandIntent,
-  CanvasCommandOperationId
-} from "@planweave-ai/collaboration-contracts";
+import type { CanvasCommandIntent } from "@planweave-ai/collaboration-contracts";
 import type {
   CollaborationCanvasSessionInput,
   CollaborationCanvasCommandSessionView,
@@ -130,8 +127,6 @@ export class CanvasCommandController {
    */
   async submit(input: {
     intent: CanvasCommandIntent;
-    operationId?: CanvasCommandOperationId | string;
-    expectedRevision?: number;
   }): Promise<CollaborationCanvasCommandSubmitResult> {
     const binding = this.bindingPromise;
     if (binding) await binding;
@@ -143,11 +138,7 @@ export class CanvasCommandController {
     try {
       const result = await this.api.submitCollaborationCanvasCommand({
         canvasId,
-        intent: input.intent,
-        ...(input.operationId !== undefined
-          ? { operationId: input.operationId as CanvasCommandOperationId }
-          : {}),
-        expectedRevision: input.expectedRevision
+        intent: input.intent
       });
       if (result.outcome.type === "canvas.command.rejected") {
         if (result.outcome.code === "stale_revision" && result.outcome.conflict) {

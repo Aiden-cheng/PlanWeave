@@ -1,8 +1,8 @@
 import { z } from "zod";
+import type { CollaborationCanvasReplicaProjection, CollaborationCanvasReplicaSignal } from "./canvasReplicaIpc.js";
 import {
   COMMENT_ATTACHMENT_MAX_BYTES,
   canvasCommandIntentSchema,
-  canvasCommandOperationIdSchema,
   canvasPresencePointerSchema,
   canvasPresenceSelectionIdsSchema,
   accessMutationRequestSchema,
@@ -461,9 +461,7 @@ export type CollaborationCanvasLiveSyncSignal = {
 export const collaborationCanvasCommandSubmitInputSchema = z
   .object({
     canvasId: z.string().trim().min(1).max(128),
-    intent: canvasCommandIntentSchema,
-    operationId: canvasCommandOperationIdSchema.optional(),
-    expectedRevision: z.number().int().nonnegative().optional()
+    intent: canvasCommandIntentSchema
   })
   .strict();
 export type CollaborationCanvasCommandSubmitInput = z.infer<
@@ -622,6 +620,7 @@ export type CollaborationCurrentSelectionInput = z.infer<
 export {
   collaborationInvokeChannels,
   collaborationCanvasLiveSyncSignalChannel,
+  collaborationCanvasReplicaSignalChannel,
   collaborationObserverSignalChannel,
   collaborationPresenceSignalChannel,
   collaborationStatusChangedChannel
@@ -699,6 +698,9 @@ export type PlanWeaveCollaborationApi = {
   readCollaborationCanvasRuntimeStatus: (
     input: CollaborationContentAuthorityCanvasInput
   ) => Promise<CanvasRuntimeStatusProjection | null>;
+  getCollaborationCanvasReplicaProjection: (input: CollaborationCanvasSessionInput) => Promise<
+    CollaborationCanvasReplicaProjection | null
+  >;
   bindCollaborationContentAuthority: (
     input: CollaborationContentAuthorityCanvasInput
   ) => Promise<CollaborationContentAuthorityView>;
@@ -849,6 +851,9 @@ export type PlanWeaveCollaborationApi = {
   ) => () => void;
   onCollaborationCanvasLiveSyncSignal: (
     callback: (signal: CollaborationCanvasLiveSyncSignal) => void
+  ) => () => void;
+  onCollaborationCanvasReplicaSignal: (
+    callback: (signal: CollaborationCanvasReplicaSignal) => void
   ) => () => void;
 };
 

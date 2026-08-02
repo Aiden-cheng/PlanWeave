@@ -37,9 +37,14 @@ import type {
   PlanWeaveCollaborationApi
 } from "../shared/collaboration.js";
 import {
+  collaborationCanvasReplicaProjectionSchema,
+  collaborationCanvasReplicaSignalSchema
+} from "../shared/canvasReplicaIpc.js";
+import {
   collaborationInvokeChannels,
   collaborationObserverSignalChannel,
   collaborationCanvasLiveSyncSignalChannel,
+  collaborationCanvasReplicaSignalChannel,
   collaborationPresenceSignalChannel,
   collaborationStatusChangedChannel
 } from "../shared/collaborationIpc.js";
@@ -281,6 +286,15 @@ const collaborationApi: PlanWeaveCollaborationApi = {
     ipcRenderer.invoke(collaborationInvokeChannels.resolveCollaborationCanvasScope, input),
   readCollaborationCanvasRuntimeStatus: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.readCollaborationCanvasRuntimeStatus, input),
+  getCollaborationCanvasReplicaProjection: async (input) =>
+    z
+      .union([collaborationCanvasReplicaProjectionSchema, z.null()])
+      .parse(
+        await ipcRenderer.invoke(
+          collaborationInvokeChannels.getCollaborationCanvasReplicaProjection,
+          input
+        )
+      ),
   bindCollaborationContentAuthority: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.bindCollaborationContentAuthority, input),
   getCollaborationContentAuthority: async () =>
@@ -459,6 +473,12 @@ const collaborationApi: PlanWeaveCollaborationApi = {
       callback(payload);
     ipcRenderer.on(collaborationCanvasLiveSyncSignalChannel, listener);
     return () => ipcRenderer.off(collaborationCanvasLiveSyncSignalChannel, listener);
+  },
+  onCollaborationCanvasReplicaSignal: (callback) => {
+    const listener = (_event: IpcRendererEvent, payload: unknown) =>
+      callback(collaborationCanvasReplicaSignalSchema.parse(payload));
+    ipcRenderer.on(collaborationCanvasReplicaSignalChannel, listener);
+    return () => ipcRenderer.off(collaborationCanvasReplicaSignalChannel, listener);
   }
 };
 

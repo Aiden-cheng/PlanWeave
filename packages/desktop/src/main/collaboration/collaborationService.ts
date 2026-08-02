@@ -56,6 +56,7 @@ import {
   collaborationUpsertProfileInputSchema,
   collaborationCurrentCanvasAccessInputSchema,
   collaborationAccessMutationInputSchema,
+  collaborationCanvasSessionInputSchema,
   type CollaborationAuthHandoffView,
   type CollaborationInvitationCreateView,
   type CollaborationObserverSignal,
@@ -103,6 +104,8 @@ import {
 } from "./workspaceConnectionProfileStore.js";
 import { redactCollaborationText } from "./redaction.js";
 import { CollaborationInvitationVault } from "./collaborationInvitationVault.js";
+import { CanvasReplicaStore } from "./CanvasReplicaStore.js";
+import type { CollaborationCanvasReplicaSignal } from "../../shared/canvasReplicaIpc.js";
 
 export type CollaborationClientFactory = (
   options: CollaborationClientOptions
@@ -132,6 +135,7 @@ export type CollaborationServiceOptions = {
   onObserverSignal?: (signal: CollaborationObserverSignal) => void;
   onPresenceSignal?: (signal: CollaborationPresenceSignal) => void;
   onCanvasLiveSyncSignal?: (signal: CollaborationCanvasLiveSyncSignal) => void;
+  onCanvasReplicaSignal?: (signal: CollaborationCanvasReplicaSignal) => void;
 };
 
 function stripAuthHandoff(
@@ -173,6 +177,8 @@ export class CollaborationService {
   private readonly onObserverSignal?: (signal: CollaborationObserverSignal) => void;
   private readonly onPresenceSignal?: (signal: CollaborationPresenceSignal) => void;
   private readonly onCanvasLiveSyncSignal?: (signal: CollaborationCanvasLiveSyncSignal) => void;
+  private readonly onCanvasReplicaSignal?: (signal: CollaborationCanvasReplicaSignal) => void;
+  private readonly canvasReplicas: CanvasReplicaStore;
   private readonly registryService: CollaborationRegistryService;
   private readonly canvasCommands: CollaborationCanvasCommandFacade;
   private readonly contentVersions: ContentVersionFacade;
@@ -233,6 +239,10 @@ export class CollaborationService {
     this.onObserverSignal = options.onObserverSignal;
     this.onPresenceSignal = options.onPresenceSignal;
     this.onCanvasLiveSyncSignal = options.onCanvasLiveSyncSignal;
+    this.onCanvasReplicaSignal = options.onCanvasReplicaSignal;
+    this.canvasReplicas = new CanvasReplicaStore((projection) =>
+      this.onCanvasReplicaSignal?.({ type: "canvas.replica.changed", projection })
+    );
     this.registryService = new CollaborationRegistryService(() => this.client);
     this.contentVersions = new ContentVersionFacade(() => this.client);
     this.canvasCommands = new CollaborationCanvasCommandFacade(
@@ -1028,6 +1038,15 @@ export class CollaborationService {
     return this.enqueue(async () => {
       this.assertOpen();
       return this.contentVersions.readRuntimeStatus(input);
+    });
+  }
+
+  async getCanvasReplicaProjection(input: unknown) {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      const requested = collaborationCanvasSessionInputSchema.parse(input);
+      const scope = await this.contentVersions.resolveCanvasScope(requested);
+      return scope ? this.canvasReplicas.projection(scope) : null;
     });
   }
 

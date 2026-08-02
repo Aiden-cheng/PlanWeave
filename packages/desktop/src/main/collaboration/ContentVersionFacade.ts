@@ -33,6 +33,7 @@ import {
   type CollaborationContentReplicaStorePort
 } from "./CollaborationContentReplicaStore.js";
 import { CollaborationClientError } from "./collaborationErrors.js";
+import type { CanvasReplicaScope } from "./CanvasReplicaStore.js";
 
 type LocalCanvasBinding = {
   clientFingerprint: string;
@@ -49,6 +50,12 @@ export type ResolvedCollaborationCanvasBinding = {
   localCanvasId: string;
   remoteProjectId: string;
   remoteCanvasId: string;
+};
+
+export type CanvasReplicaBaseline = {
+  scope: CanvasReplicaScope & { authorityId: string };
+  content: CompleteContentVersion;
+  contentDigest: string;
 };
 
 function unavailable(code: string, retryable = false): CollaborationClientError {
@@ -301,6 +308,57 @@ export class ContentVersionFacade {
           remoteCanvasId: replica.remote.canvasId
         }
       : null;
+  }
+
+  /** Read an immutable remote authority head for an in-memory Canvas replica; never materializes disk. */
+  async readCanvasReplicaBaseline(input: unknown): Promise<CanvasReplicaBaseline> {
+    const requested = collaborationContentAuthorityCanvasInputSchema.parse(input);
+    const client = this.requireClient();
+    const binding = await this.resolveCanvasBinding(requested);
+    if (!binding) throw unavailable("canvas_replica_scope_unmapped", false);
+    const scope = await this.resolveCanvasScope(requested);
+    if (!scope || scope.projectId !== binding.remoteProjectId || scope.canvasId !== binding.remoteCanvasId) {
+      throw unavailable("canvas_replica_scope_mismatch", false);
+    }
+    const discovered = await client.discoverContentAuthority({
+      canvasId: scope.canvasId,
+      localReplica: null,
+      knownRevision: null
+    });
+    const authority = contentVersionDesktopReadModelSchema.parse(
+      contentVersionAuthorityDiscoveryToDesktopReadModel(discovered)
+    );
+    const head = authority.authoritativeHead;
+    if (!head) throw unavailable("canvas_replica_authoritative_head_unavailable", false);
+    if (
+      head.scope.workspaceId !== scope.workspaceId ||
+      head.scope.projectId !== scope.projectId ||
+      head.scope.canvasId !== scope.canvasId
+    ) {
+      throw unavailable("canvas_replica_authoritative_scope_mismatch", false);
+    }
+    const fetched = await client.fetchContentVersion({ scope: head.scope, content: head.content });
+    if (
+      fetched.scope.workspaceId !== head.scope.workspaceId ||
+      fetched.scope.projectId !== head.scope.projectId ||
+      fetched.scope.canvasId !== head.scope.canvasId ||
+      fetched.completed.versionId !== head.content.versionId ||
+      fetched.content.canonicalDigest !== head.content.canonicalDigest
+    ) {
+      throw unavailable("canvas_replica_authoritative_content_mismatch", false);
+    }
+    return {
+      scope: {
+        localProjectId: binding.localProjectId,
+        localCanvasId: binding.localCanvasId,
+        workspaceId: scope.workspaceId,
+        projectId: scope.projectId,
+        canvasId: scope.canvasId,
+        authorityId: this.clientFingerprint(client)
+      },
+      content: fetched.content,
+      contentDigest: head.content.canonicalDigest
+    };
   }
 
   async resolveCanvasScope(input: unknown) {

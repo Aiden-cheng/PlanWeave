@@ -223,6 +223,24 @@ describe("ContentVersionFacade", () => {
     expect(fake.calls.acknowledgeContentVersion).toHaveBeenCalledTimes(2);
   });
 
+  it("reads replica baseline content without exposing the independent authority revision", async () => {
+    const workspace = await createTestWorkspace();
+    directories.push(workspace.home, workspace.root);
+    const fake = fakeClient(workspace.init.workspace.id);
+    const facade = new ContentVersionFacade(() => fake.client);
+    await facade.bind({ localProjectId: workspace.init.project.id, canvasId: "default" });
+    await facade.publishInitial();
+
+    const baseline = await facade.readCanvasReplicaBaseline({
+      localProjectId: workspace.init.project.id,
+      canvasId: "default"
+    });
+
+    expect(baseline.contentDigest).toBe(baseline.content.canonicalDigest);
+    expect("revision" in baseline).toBe(false);
+    expect(baseline.scope.authorityId).toContain("profile-test");
+  });
+
   it("keeps a rejected initial publish redacted and typed as a boundary failure", async () => {
     const workspace = await createTestWorkspace();
     directories.push(workspace.home, workspace.root);

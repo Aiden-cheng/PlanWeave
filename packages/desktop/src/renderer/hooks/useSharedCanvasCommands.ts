@@ -30,8 +30,6 @@ export type SharedCanvasCommandsResult = {
   snapshot: CanvasCommandControllerSnapshot;
   submit: (input: {
     intent: CanvasCommandIntent;
-    operationId?: string;
-    expectedRevision?: number;
   }) => Promise<SharedCanvasSubmitResult>;
   reconnect: () => Promise<boolean>;
 };
@@ -288,8 +286,6 @@ export function useSharedCanvasCommands(input: {
   const submit = useCallback(
     async (submitInput: {
       intent: CanvasCommandIntent;
-      operationId?: string;
-      expectedRevision?: number;
     }): Promise<SharedCanvasSubmitResult> => {
       const controller = controllerRef.current;
       if (!controller || !sessionEnabled) {
