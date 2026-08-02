@@ -129,9 +129,17 @@ describe("CollaborationCanvasLiveSyncSession", () => {
     secondSocket.emit("message", { data: acceptedEntryMessage("remote-second") });
     expect(signals).toHaveLength(1);
 
+    // After rebind to second, frames for the first canvas must never be published with the old scope.
+    client.bindCanvasCommandSession("remote-first");
+    await session.start({ localProjectId: "local-project", canvasId: "first" });
+    await flush();
+    const reboundSocket = TestSocket.instances.at(-1)!;
+    const signalsBefore = signals.length;
+    reboundSocket.emit("message", { data: acceptedEntryMessage("remote-second") });
+    expect(signals).toHaveLength(signalsBefore);
+
     client.dispose();
     expect(client.liveSyncState()).toEqual({ state: "stopped" });
-    expect(secondSocket.readyState).toBe(3);
   });
 
   it("subscribes without restarting an owned socket and clears credentials only for auth", async () => {

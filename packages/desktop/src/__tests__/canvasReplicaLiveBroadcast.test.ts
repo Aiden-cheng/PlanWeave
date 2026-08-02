@@ -469,7 +469,10 @@ describe("Canvas replica live broadcast (Phase 5B)", () => {
       "op-viewer-sees"
     );
     const result = await harness.worker.applyLiveEntry(baseScope, entry);
-    expect(result).toMatchObject({ applied: true, revision: 2 });
+    expect(result).toMatchObject({
+      entryApplied: true,
+      materializedHead: { revision: 2 }
+    });
     expect(harness.store.revision(baseScope)).toBe(2);
     expect(harness.store.projection(baseScope)?.content.layout.nodes).toEqual(
       expect.arrayContaining([expect.objectContaining({ nodeId: "T-001", x: 8 })])
@@ -512,9 +515,10 @@ describe("Canvas replica live broadcast (Phase 5B)", () => {
       };
     };
     const result = await harness.worker.applyLiveEntry(baseScope, gapEntry);
-    // Recovery installed a snapshot but did not prove this operationId — not applied:true for cursor.
-    expect(result.applied).toBe(false);
+    // Recovery installed a snapshot: entry not confirmed, but head is materialised for cursor.
+    expect(result.entryApplied).toBe(false);
     expect(result.reason).toBe("recovered");
+    expect(result.materializedHead?.revision).toBe(5);
     expect(harness.store.revision(baseScope)).toBe(5);
   });
 

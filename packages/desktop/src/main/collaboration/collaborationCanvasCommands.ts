@@ -26,6 +26,28 @@ import { CollaborationClientError } from "./collaborationErrors.js";
 import type { CanvasCommandSessionSnapshot } from "./canvasCommandSession.js";
 import type { CanvasLiveSyncStatus } from "./CanvasLiveSyncClient.js";
 
+function isRetryableCatchupError(error: unknown): boolean {
+  if (error instanceof CollaborationClientError) {
+    if (error.kind === "forbidden" || error.kind === "aborted" || error.kind === "auth") {
+      return false;
+    }
+    const terminalCodes = new Set([
+      "forbidden",
+      "unauthorized",
+      "unknown_canvas",
+      "cross_scope",
+      "collaboration_canvas_scope_unmapped",
+      "canvas_replica_scope_unbound",
+      "canvas_replica_command_forbidden",
+      "collaboration_session_not_connected"
+    ]);
+    if (terminalCodes.has(error.code)) return false;
+    return error.retryable === true;
+  }
+  // Unknown/network failures remain retryable.
+  return true;
+}
+
 export const collaborationCanvasCommandSubmitInputSchema = z
   .object({
     canvasId: opaqueIdentifierSchema,
@@ -259,6 +281,7 @@ export class CollaborationCanvasCommandFacade {
   private liveGeneration = 0;
   private liveUnsubscribe: (() => void) | null = null;
   private catchupRunning = false;
+  private catchupDelayCancel: (() => void) | null = null;
 
   private readonly store: CanvasReplicaStore;
   private readonly worker: CanvasReplicaCommandWorker;
@@ -406,6 +429,7 @@ export class CollaborationCanvasCommandFacade {
   }
 
   clearAllSessions(): void {
+    this.cancelCatchupDelay();
     this.liveGeneration += 1;
     this.catchupRunning = false;
     this.liveUnsubscribe?.();
@@ -425,6 +449,7 @@ export class CollaborationCanvasCommandFacade {
    * and client command session.
    */
   private unbindCurrent(client: CanvasCommandClientPort | null): void {
+    this.cancelCatchupDelay();
     this.liveGeneration += 1;
     this.catchupRunning = false;
     this.liveUnsubscribe?.();
@@ -448,14 +473,20 @@ export class CollaborationCanvasCommandFacade {
     }
   }
 
+  private cancelCatchupDelay(): void {
+    this.catchupDelayCancel?.();
+    this.catchupDelayCancel = null;
+  }
+
   /**
    * Own the live socket for this canvas and fold accepted journal entries into the replica.
-   * Cursor advances only after store apply succeeds. Catch-up retries with cancellable backoff.
+   * Materialized cursor advances when the store head is updated; entryApplied is independent.
    */
   private startLiveSubscription(client: CanvasCommandClientPort, scope: CanvasReplicaScope): void {
     if (typeof client.startLiveSync !== "function") {
       return;
     }
+    this.cancelCatchupDelay();
     this.liveGeneration += 1;
     const generation = this.liveGeneration;
     this.catchupRunning = false;
@@ -473,11 +504,24 @@ export class CollaborationCanvasCommandFacade {
       onMessage: (message: CanvasLiveSyncServerMessage) => {
         if (!isCurrent()) return;
         if (message.type !== "canvas.live.accepted_entry") return;
+        // Drop cross-canvas frames even if the shared socket briefly delivers them.
+        if (
+          message.entry.scope.projectId !== boundScope.projectId ||
+          message.entry.scope.canvasId !== boundScope.canvasId ||
+          message.entry.scope.workspaceId !== boundScope.workspaceId
+        ) {
+          return;
+        }
         void (async () => {
           const result = await this.worker.applyLiveEntry(boundScope, message.entry);
           if (!isCurrent()) return;
-          if (result.applied && typeof client.acknowledgeLiveSyncRevision === "function") {
-            client.acknowledgeLiveSyncRevision(result.revision);
+          // Advance hello cursor for any materialised head (entry apply OR HTTP recovery),
+          // without treating recovery as operationId confirmation.
+          if (
+            result.materializedHead &&
+            typeof client.acknowledgeLiveSyncRevision === "function"
+          ) {
+            client.acknowledgeLiveSyncRevision(result.materializedHead.revision);
           }
         })();
       },
@@ -488,8 +532,6 @@ export class CollaborationCanvasCommandFacade {
       }
     };
 
-    // Connection owner: opens the socket at the store's applied revision.
-    // Handlers are subscribed (not exclusive) so renderer IPC can attach without overwrite.
     if (typeof client.subscribeLiveSync === "function") {
       this.liveUnsubscribe = client.subscribeLiveSync(handlers);
       client.startLiveSync(boundScope.canvasId, this.store.revision(boundScope));
@@ -499,8 +541,8 @@ export class CollaborationCanvasCommandFacade {
   }
 
   /**
-   * Persistent catch-up: HTTP reconnect with cancellable exponential backoff until success
-   * or scope invalidation. Publishes catchup_recovering status for observability.
+   * Persistent catch-up: retry only transport/retryable failures with cancellable backoff.
+   * Terminal auth/permission errors stop immediately with a failed status.
    */
   private async recoverLiveCatchup(
     client: CanvasCommandClientPort,
@@ -527,21 +569,55 @@ export class CollaborationCanvasCommandFacade {
           ) {
             return;
           }
-          // Successful catch-up: restart live from the recovered applied head.
+          // Materialised head must advance the hello cursor before reopening live.
+          if (typeof client.acknowledgeLiveSyncRevision === "function") {
+            client.acknowledgeLiveSyncRevision(this.store.revision(scope));
+          }
           this.catchupRunning = false;
           this.startLiveSubscription(client, scope);
           return;
-        } catch {
+        } catch (error) {
           if (this.liveGeneration !== generation) return;
-          await new Promise<void>((resolve) => {
-            const timer = setTimeout(resolve, delayMs);
-            timer.unref?.();
-          });
+          if (!isRetryableCatchupError(error)) {
+            // Terminal: permission / unknown canvas / non-retryable protocol failure.
+            try {
+              client.stopLiveSync();
+            } catch {
+              // ignore
+            }
+            return;
+          }
+          const wait = await this.waitCatchupDelay(delayMs, generation);
+          if (wait === "cancelled") return;
         }
       }
     } finally {
+      this.cancelCatchupDelay();
       if (this.liveGeneration === generation) this.catchupRunning = false;
     }
+  }
+
+  private waitCatchupDelay(
+    ms: number,
+    generation: number
+  ): Promise<"ok" | "cancelled"> {
+    if (this.liveGeneration !== generation) return Promise.resolve("cancelled");
+    if (ms <= 0) {
+      return Promise.resolve(this.liveGeneration === generation ? "ok" : "cancelled");
+    }
+    return new Promise((resolve) => {
+      this.cancelCatchupDelay();
+      const timer = setTimeout(() => {
+        this.catchupDelayCancel = null;
+        resolve(this.liveGeneration === generation ? "ok" : "cancelled");
+      }, ms);
+      timer.unref?.();
+      this.catchupDelayCancel = () => {
+        clearTimeout(timer);
+        this.catchupDelayCancel = null;
+        resolve("cancelled");
+      };
+    });
   }
 
   private requireBinding(
