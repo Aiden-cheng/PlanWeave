@@ -178,12 +178,14 @@ export class CanvasLiveSyncClient {
   }
 
   private connect(generation: number, canvasId: string, lastRevision: CanvasRevision): void {
-    if (!this.isScopeCurrent(generation, canvasId, lastRevision)) return;
+    if (!this.isScopeCurrent(generation, canvasId)) return;
+    // Hello uses the latest applied cursor (may have advanced since the previous connect).
+    this.lastRevision = lastRevision;
     this.setStatus({ state: "connecting", canvasId, attempt: this.reconnectAttempt + 1 });
     void (async () => {
       try {
         const token = await this.credential.getDeviceToken();
-        if (!this.isScopeCurrent(generation, canvasId, lastRevision)) return;
+        if (!this.isScopeCurrent(generation, canvasId)) return;
         if (!token) {
           this.wanted = false;
           this.setStatus({ state: "auth_expired", canvasId, code: "collaboration_credential_missing" });
@@ -201,7 +203,7 @@ export class CanvasLiveSyncClient {
             Origin: derivedWebSocketOrigin(this.profile.serverBaseUrl)
           }
         });
-        if (!this.isScopeCurrent(generation, canvasId, lastRevision)) {
+        if (!this.isScopeCurrent(generation, canvasId)) {
           try {
             socket.close(1000, "stale live sync connection");
           } catch (error) {
@@ -210,10 +212,10 @@ export class CanvasLiveSyncClient {
           return;
         }
         this.socket = socket;
-        const isCurrent = () =>
-          this.isScopeCurrent(generation, canvasId, lastRevision) && this.socket === socket;
+        const isCurrent = () => this.isScopeCurrent(generation, canvasId) && this.socket === socket;
         socket.addEventListener("open", () => {
           if (!isCurrent()) return;
+          const helloRevision = this.lastRevision ?? lastRevision;
           socket.send(
             JSON.stringify(
               canvasLiveSyncHelloSchema.parse({
@@ -221,7 +223,7 @@ export class CanvasLiveSyncClient {
                 protocolVersion: CANVAS_LIVE_SYNC_PROTOCOL_VERSION,
                 projectId: this.profile.projectId,
                 canvasId,
-                lastRevision
+                lastRevision: helloRevision
               })
             )
           );
@@ -301,17 +303,17 @@ export class CanvasLiveSyncClient {
             this.setStatus({ state: "stopped" });
             return;
           }
-          this.scheduleReconnect(canvasId, lastRevision, generation);
+          this.scheduleReconnect(canvasId, generation);
         });
         socket.addEventListener("error", () => {
           if (isCurrent()) this.logger?.warn?.("collaboration live sync socket error");
         });
       } catch (error) {
-        if (!this.isScopeCurrent(generation, canvasId, lastRevision)) return;
+        if (!this.isScopeCurrent(generation, canvasId)) return;
         this.logger?.error?.(
           redactCollaborationText(error instanceof Error ? error.message : "live sync connect failed")
         );
-        this.scheduleReconnect(canvasId, lastRevision, generation);
+        this.scheduleReconnect(canvasId, generation);
       }
     })();
   }
@@ -329,6 +331,16 @@ export class CanvasLiveSyncClient {
         this.setStatus({ state: "connected", canvasId });
         break;
       case "canvas.live.accepted_entry":
+        // Advance the hello cursor only for contiguous accepted heads so reconnect
+        // resumes from the last applied revision rather than the bind-time snapshot.
+        if (
+          this.lastRevision !== null &&
+          message.entry.previousRevision === this.lastRevision &&
+          message.entry.revision === this.lastRevision + 1
+        ) {
+          this.lastRevision = message.entry.revision;
+        }
+        break;
       case "canvas.live.pong":
         break;
       case "canvas.live.catchup_required":
@@ -359,8 +371,8 @@ export class CanvasLiveSyncClient {
     }
   }
 
-  private scheduleReconnect(canvasId: string, lastRevision: CanvasRevision, generation: number): void {
-    if (!this.isScopeCurrent(generation, canvasId, lastRevision)) return;
+  private scheduleReconnect(canvasId: string, generation: number): void {
+    if (!this.isScopeCurrent(generation, canvasId)) return;
     this.reconnectAttempt += 1;
     const delayMs = reconnectDelay(this.reconnectAttempt, this.random, {
       initialDelayMs: this.reconnectInitialDelayMs,
@@ -370,7 +382,8 @@ export class CanvasLiveSyncClient {
     if (this.reconnectTimer) this.clock.clearTimeout(this.reconnectTimer);
     this.reconnectTimer = this.clock.setTimeout(() => {
       this.reconnectTimer = undefined;
-      this.connect(generation, canvasId, lastRevision);
+      // Resume hello from the latest applied revision cursor.
+      this.connect(generation, canvasId, this.lastRevision ?? 0);
     }, delayMs);
   }
 
@@ -389,13 +402,12 @@ export class CanvasLiveSyncClient {
     this.setStatus({ state: "failed", canvasId, code });
   }
 
-  private isScopeCurrent(generation: number, canvasId: string, lastRevision: CanvasRevision): boolean {
+  private isScopeCurrent(generation: number, canvasId: string): boolean {
     return (
       this.wanted &&
       !this.disposed &&
       generation === this.generation &&
-      this.canvasId === canvasId &&
-      this.lastRevision === lastRevision
+      this.canvasId === canvasId
     );
   }
 

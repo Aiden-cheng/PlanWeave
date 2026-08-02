@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
-import type {
-  CanvasCommandAccepted,
-  CanvasCommandIntent,
-  CanvasCommandOutcome,
-  CanvasJournalEntry,
-  CanvasReconnectResponse,
-  CompleteContentVersion
+import {
+  canvasCommandAcceptedSchema,
+  type CanvasCommandAccepted,
+  type CanvasCommandIntent,
+  type CanvasCommandOutcome,
+  type CanvasJournalEntry,
+  type CanvasReconnectResponse,
+  type CompleteContentVersion
 } from "@planweave-ai/collaboration-contracts";
 import type {
   CanvasReplicaPendingOperation,
@@ -273,7 +274,67 @@ export class CanvasReplicaCommandWorker {
       { forceSnapshotOnMaterializeFailure: true }
     );
     if (!result) throw disconnectedError();
+    this.rejectDropped(scopeKey, result.droppedPending);
+    this.settleQueueMatchesStore(scope, scopeKey);
     return result.response;
+  }
+
+  /**
+   * Fold one Server-broadcast accepted journal entry into the replica.
+   * Own operationIds confirm pending at most once; gaps/digest failures recover via HTTP reconnect.
+   */
+  async applyLiveEntry(scope: CanvasReplicaScope, entry: CanvasJournalEntry): Promise<void> {
+    const scopeKey = this.key(scope);
+    if (!this.scopes.has(scopeKey) || !this.store.has(scope)) return;
+    const generation = this.generations.get(scopeKey) ?? 0;
+    if (
+      entry.scope.workspaceId !== scope.workspaceId ||
+      entry.scope.projectId !== scope.projectId ||
+      entry.scope.canvasId !== scope.canvasId
+    ) {
+      return;
+    }
+    try {
+      const { droppedPending } = this.store.applyEntry(entry);
+      if (!this.isCurrent(scopeKey, generation)) return;
+      this.rejectDropped(scopeKey, droppedPending);
+      this.confirmLiveOperation(scopeKey, entry);
+      this.resetBackoff(scopeKey);
+    } catch (error) {
+      if (!this.isCurrent(scopeKey, generation)) return;
+      const code =
+        error instanceof CollaborationClientError ? error.code : "canvas_replica_live_apply_failed";
+      if (
+        code !== "canvas_replica_revision_gap" &&
+        code !== "canvas_replica_canonical_digest_mismatch" &&
+        code !== "canvas_replica_reconnect_delta_invalid" &&
+        code !== "canvas_replica_reconnect_head_mismatch"
+      ) {
+        // Unexpected protocol failures: do not hot-loop; leave committed state intact.
+        return;
+      }
+      // Gap / unmaterializable entry: recover through HTTP delta→snapshot without publishing bad state.
+      const ok = await this.waitBackoff(scopeKey, generation);
+      if (!ok) return;
+      try {
+        const installed = await this.installReconnect(
+          scope,
+          scopeKey,
+          generation,
+          {
+            afterRevision: this.store.revision(scope),
+            afterContentDigest: this.store.digest(scope)
+          },
+          { forceSnapshotOnMaterializeFailure: true }
+        );
+        if (!installed || !this.isCurrent(scopeKey, generation)) return;
+        this.rejectDropped(scopeKey, installed.droppedPending);
+        this.settleQueueMatchesStore(scope, scopeKey);
+        this.resetBackoff(scopeKey);
+      } catch {
+        // Keep pending; another live event or submit path may recover.
+      }
+    }
   }
 
   clear(scope: CanvasReplicaScope): void {
@@ -325,11 +386,16 @@ export class CanvasReplicaCommandWorker {
             settleReject(current, disconnectedError());
             return;
           }
+          // Live broadcast may have already confirmed this operationId while HTTP was in flight.
+          if (current.settled) {
+            if (queue[0] === current) queue.shift();
+            continue;
+          }
           if (outcome.type === "canvas.command.accepted") {
             const folded = this.tryAccept(scope, scopeKey, outcome);
             if (folded === "accepted") {
               this.resetBackoff(scopeKey);
-              queue.shift();
+              if (queue[0] === current) queue.shift();
               settleResolve(current, outcome);
               continue;
             }
@@ -680,6 +746,57 @@ export class CanvasReplicaCommandWorker {
       return "accepted";
     } catch {
       return "failed";
+    }
+  }
+
+  /** Confirm a queued submit at most once when a live entry matches its operationId. */
+  private confirmLiveOperation(scopeKey: string, entry: CanvasJournalEntry): void {
+    const queue = this.queues.get(scopeKey);
+    if (!queue?.length) return;
+    const index = queue.findIndex((item) => item.operationId === entry.operationId);
+    if (index < 0) return;
+    const item = queue[index]!;
+    settleResolve(item, acceptedFromEntry(entry));
+    queue.splice(index, 1);
+  }
+
+  /**
+   * After reconnect catch-up, settle any queue items whose operationId is no longer pending
+   * (already absorbed into committed state).
+   */
+  private settleQueueMatchesStore(scope: CanvasReplicaScope, scopeKey: string): void {
+    const queue = this.queues.get(scopeKey);
+    if (!queue?.length) return;
+    const stillPending = new Set(this.store.pendingOperationIds(scope));
+    const revision = this.store.revision(scope);
+    const digest = this.store.digest(scope);
+    if (digest === null) return;
+    for (let index = queue.length - 1; index >= 0; index -= 1) {
+      const item = queue[index]!;
+      if (stillPending.has(item.operationId) || item.settled) continue;
+      // Absorbed by journal/snapshot during catch-up — resolve as accepted at current head.
+      const outcome = canvasCommandAcceptedSchema.parse({
+        type: "canvas.command.accepted",
+        protocolVersion: 1,
+        schemaVersion: "canvas-command/v1",
+        scope: {
+          workspaceId: scope.workspaceId,
+          projectId: scope.projectId,
+          canvasId: scope.canvasId
+        },
+        operationId: item.operationId,
+        revision,
+        previousRevision: Math.max(0, revision - 1),
+        contentDigest: digest,
+        journalEntryId: item.operationId.startsWith("op-")
+          ? `je-${item.operationId.slice(3)}`
+          : `je-${item.operationId}`,
+        actor: { kind: "human", id: "authority", displayName: "Authority" },
+        acceptedAt: new Date().toISOString(),
+        idempotentReplay: true
+      });
+      settleResolve(item, outcome);
+      queue.splice(index, 1);
     }
   }
 

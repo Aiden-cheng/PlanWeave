@@ -203,15 +203,20 @@ export class CanvasReplicaStore {
     return removed;
   }
 
-  /** Apply a live or HTTP journal entry strictly at the next revision. */
+  /**
+   * Apply one durable journal entry (live broadcast or catch-up).
+   * Contiguous next-revision entries advance committed state and drop matching pending.
+   * Same-head duplicates are idempotent and only clear a matching pending operationId.
+   */
   applyEntry(entry: CanvasJournalEntry): CanvasReplicaMutationResult {
     const replica = this.requireByRemoteScope(entry.scope);
     if (!replica.document || replica.contentDigest === null) {
       throw replicaError("canvas_replica_baseline_required", true);
     }
     if (entry.revision === replica.revision && entry.contentDigest === replica.contentDigest) {
+      // Already at this head (duplicate event or self-accept race). Never re-apply.
       if (replica.pending.some((pending) => pending.operationId === entry.operationId)) {
-        throw replicaError("canvas_replica_duplicate_pending_acceptance");
+        return this.acknowledgeIncluded(replica.scope, entry.operationId);
       }
       return { droppedPending: [] };
     }

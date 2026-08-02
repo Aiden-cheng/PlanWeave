@@ -4,6 +4,7 @@ import {
   type CanvasCommandIntent,
   type CanvasCommandOutcome,
   type CanvasJournalEntry,
+  type CanvasLiveSyncServerMessage,
   type CanvasReconnectResponse,
   type CompleteContentVersion
 } from "@planweave-ai/collaboration-contracts";
@@ -23,6 +24,7 @@ import type { CanvasReplicaScope } from "./CanvasReplicaStore.js";
 import type { CanvasReplicaStore } from "./CanvasReplicaStore.js";
 import { CollaborationClientError } from "./collaborationErrors.js";
 import type { CanvasCommandSessionSnapshot } from "./canvasCommandSession.js";
+import type { CanvasLiveSyncStatus } from "./CanvasLiveSyncClient.js";
 
 export const collaborationCanvasCommandSubmitInputSchema = z
   .object({
@@ -75,6 +77,8 @@ type CanvasCommandClientPort = Pick<
   | "canvasCommandSession"
   | "getCurrentCanvasAccess"
   | "connectionProfile"
+  | "startLiveSync"
+  | "stopLiveSync"
 >;
 
 export type CollaborationCanvasCommandFacadeDeps = {
@@ -248,6 +252,9 @@ export class CollaborationCanvasCommandFacade {
     remoteCanvasId: string;
   } | null = null;
 
+  /** Bumps on every unbind so late live messages cannot touch a new or cleared scope. */
+  private liveGeneration = 0;
+
   private readonly store: CanvasReplicaStore;
   private readonly worker: CanvasReplicaCommandWorker;
   private readonly resolveClient: () => CanvasCommandClientPort | null;
@@ -366,6 +373,7 @@ export class CollaborationCanvasCommandFacade {
         remoteCanvasId: resolved.remoteCanvasId
       };
       client.bindCanvasCommandSession(resolved.remoteCanvasId);
+      this.startLiveSubscription(client, scope);
       return client.canvasCommandSession();
     } catch (error) {
       // Transactional rollback: new scope, queues, and client command session.
@@ -393,16 +401,30 @@ export class CollaborationCanvasCommandFacade {
   }
 
   clearAllSessions(): void {
+    this.liveGeneration += 1;
+    const client = this.resolveClient();
+    try {
+      client?.stopLiveSync();
+    } catch {
+      // ignore stop races during shutdown
+    }
     this.worker.clearAll();
     this.binding = null;
   }
 
   /**
-   * Full unbind: worker scope + pending queues, facade binding, and client command session.
-   * Used on rebind resolution failures so in-flight commands cannot complete against a
-   * facade that already cleared its binding pointer.
+   * Full unbind: live subscription, worker scope + pending queues, facade binding,
+   * and client command session.
    */
   private unbindCurrent(client: CanvasCommandClientPort | null): void {
+    this.liveGeneration += 1;
+    if (client) {
+      try {
+        client.stopLiveSync();
+      } catch {
+        // ignore
+      }
+    }
     if (this.binding) {
       this.worker.clear(this.binding.scope);
       this.binding = null;
@@ -413,6 +435,65 @@ export class CollaborationCanvasCommandFacade {
     } catch {
       // Client may already be disposed; facade is unbound regardless.
     }
+  }
+
+  /**
+   * Subscribe to Server-accepted journal entries for this canvas and fold them into the replica.
+   * Catch-up remains HTTP reconnect; this channel never mutates without a complete entry.
+   */
+  private startLiveSubscription(client: CanvasCommandClientPort, scope: CanvasReplicaScope): void {
+    if (typeof client.startLiveSync !== "function" || typeof client.stopLiveSync !== "function") {
+      // Tests may inject a minimal transport client without live sync.
+      return;
+    }
+    this.liveGeneration += 1;
+    const generation = this.liveGeneration;
+    const boundScope = scope;
+    const isCurrent = () =>
+      this.liveGeneration === generation &&
+      this.binding?.scope.authorityId === boundScope.authorityId &&
+      this.binding.scope.workspaceId === boundScope.workspaceId &&
+      this.binding.scope.projectId === boundScope.projectId &&
+      this.binding.scope.canvasId === boundScope.canvasId;
+
+    const handlers = {
+      onMessage: (message: CanvasLiveSyncServerMessage) => {
+        if (!isCurrent()) return;
+        if (message.type === "canvas.live.accepted_entry") {
+          void this.worker.applyLiveEntry(boundScope, message.entry);
+        }
+      },
+      onStatus: (status: CanvasLiveSyncStatus) => {
+        if (!isCurrent()) return;
+        if (status.state !== "catchup_required") return;
+        void this.recoverLiveCatchup(client, boundScope, generation);
+      }
+    };
+
+    client.startLiveSync(boundScope.canvasId, this.store.revision(boundScope), handlers);
+  }
+
+  private async recoverLiveCatchup(
+    client: CanvasCommandClientPort,
+    scope: CanvasReplicaScope,
+    generation: number
+  ): Promise<void> {
+    if (this.liveGeneration !== generation) return;
+    try {
+      await this.worker.reconnect(scope);
+    } catch {
+      return;
+    }
+    if (this.liveGeneration !== generation) return;
+    if (
+      !this.binding ||
+      this.binding.scope.authorityId !== scope.authorityId ||
+      this.binding.scope.canvasId !== scope.canvasId
+    ) {
+      return;
+    }
+    // Restart live from the recovered head so gaps filled over HTTP are not re-requested.
+    this.startLiveSubscription(client, scope);
   }
 
   private requireBinding(
