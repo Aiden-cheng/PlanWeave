@@ -15,6 +15,7 @@ import { CollaborationClientError } from "./collaborationErrors.js";
 
 export type LocalCanvasCommandBinding = {
   projectId: string;
+  authorityProjectId: string;
   projectRoot: string;
   canvasId: string;
   expectedPackageDir: string;
@@ -35,7 +36,11 @@ function materializationError(code: string, retryable = true): CollaborationClie
  * No server path, file payload, or client merge decision crosses this boundary.
  */
 export class LocalCanvasCommandMaterializer {
-  async bind(input: { projectId: string; canvasId: string }): Promise<LocalCanvasCommandBinding> {
+  async bind(input: {
+    projectId: string;
+    canvasId: string;
+    authorityProjectId: string;
+  }): Promise<LocalCanvasCommandBinding> {
     let registeredProjects;
     try {
       registeredProjects = (await listProjects()).filter(
@@ -72,6 +77,7 @@ export class LocalCanvasCommandMaterializer {
 
     const binding: LocalCanvasCommandBinding = {
       projectId: input.projectId,
+      authorityProjectId: input.authorityProjectId,
       projectRoot: project.rootPath,
       canvasId: input.canvasId,
       expectedPackageDir: workspace.packageDir,
@@ -99,11 +105,18 @@ export class LocalCanvasCommandMaterializer {
     }
   ): Promise<void> {
     if (input.response.type === "canvas.reconnect.error") return;
-    if (input.snapshotRequired || input.response.type === "canvas.reconnect.snapshot") {
+    const currentDigest = await this.readDigest(binding);
+    if (input.response.type === "canvas.reconnect.snapshot") {
+      if (currentDigest === input.response.snapshot.metadata.contentDigest) {
+        binding.expectedContentDigest = currentDigest;
+        return;
+      }
+      throw materializationError("collaboration_canvas_snapshot_materialization_required");
+    }
+    if (input.snapshotRequired) {
       throw materializationError("collaboration_canvas_snapshot_materialization_required");
     }
 
-    const currentDigest = await this.readDigest(binding);
     if (currentDigest === input.response.headContentDigest) {
       binding.expectedContentDigest = currentDigest;
       return;
@@ -147,6 +160,7 @@ export class LocalCanvasCommandMaterializer {
       projectRoot: binding.projectRoot,
       canvasId: binding.canvasId,
       expectedPackageDir: binding.expectedPackageDir,
+      authorityProjectId: binding.authorityProjectId,
       intent
     });
     if (!result.ok) {
@@ -162,7 +176,8 @@ export class LocalCanvasCommandMaterializer {
     const result = await readAuthorizedCanvasContentDigest({
       projectRoot: binding.projectRoot,
       canvasId: binding.canvasId,
-      expectedPackageDir: binding.expectedPackageDir
+      expectedPackageDir: binding.expectedPackageDir,
+      authorityProjectId: binding.authorityProjectId
     });
     if (!result.ok) {
       throw materializationError("collaboration_canvas_local_digest_unavailable");

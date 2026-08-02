@@ -74,6 +74,38 @@ describe("collaboration-contracts", () => {
     ).toThrow();
   });
 
+  it("requires a complete authoritative canvas invalidation payload", () => {
+    expect(
+      humanObserverEventSchema.parse({
+        type: "human.observer.event",
+        protocolVersion: 1,
+        cursor: 12,
+        previousCursor: 11,
+        occurredAt: "2030-01-01T00:00:00.000Z",
+        kind: "canvas",
+        canvasId: "default",
+        canvasRevision: 4,
+        canvasContentDigest: "a".repeat(64)
+      })
+    ).toMatchObject({
+      kind: "canvas",
+      canvasId: "default",
+      canvasRevision: 4,
+      canvasContentDigest: "a".repeat(64)
+    });
+    expect(() =>
+      humanObserverEventSchema.parse({
+        type: "human.observer.event",
+        protocolVersion: 1,
+        cursor: 12,
+        previousCursor: 11,
+        occurredAt: "2030-01-01T00:00:00.000Z",
+        kind: "canvas",
+        canvasId: "default"
+      })
+    ).toThrow();
+  });
+
   it("maps HTTP statuses to boundary error kinds", () => {
     expect(mapHttpStatusToBoundaryKind(401)).toBe("auth");
     expect(mapHttpStatusToBoundaryKind(409, "work_revision_conflict")).toBe("conflict");

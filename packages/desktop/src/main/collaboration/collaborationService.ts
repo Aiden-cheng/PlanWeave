@@ -231,7 +231,12 @@ export class CollaborationService {
     this.contentVersions = new ContentVersionFacade(() => this.client);
     this.canvasCommands = new CollaborationCanvasCommandFacade(
       () => this.client,
-      (input) => this.contentVersions.resolveCanvasBinding(input)
+      (input) => this.contentVersions.resolveCanvasBinding(input),
+      undefined,
+      async ({ localProjectId, localCanvasId }) => {
+        await this.contentVersions.bind({ localProjectId, canvasId: localCanvasId });
+        await this.contentVersions.materializeHead();
+      }
     );
     this.remoteOperations = new CollaborationRemoteOperationsFacade((operation) =>
       this.withActiveClient(operation)
@@ -359,8 +364,13 @@ export class CollaborationService {
       assertNoSmuggledCollaborationSecrets(input, "upsertCollaborationProfile");
       const profile = collaborationUpsertProfileInputSchema.parse(input);
       const existing = await this.profiles.get(profile.profileId);
+      const connectionIdentityChanged =
+        !existing ||
+        existing.serverBaseUrl !== profile.serverBaseUrl ||
+        existing.projectId !== profile.projectId ||
+        existing.allowInsecureTransport !== profile.allowInsecureTransport;
       await this.profiles.upsert(profile);
-      if (this.clientProfileId === profile.profileId) {
+      if (this.clientProfileId === profile.profileId && connectionIdentityChanged) {
         // Profile identity changed; drop live client so callers reconnect explicitly.
         await this.disposeClient("profile_updated");
       }
@@ -1362,6 +1372,7 @@ export class CollaborationService {
     this.client = null;
     this.clientProfileId = null;
     this.observerStatus = { state: "stopped" };
+    this.setSession("idle", reason, null);
     if (client) {
       try {
         client.stopPresence();
@@ -1378,7 +1389,6 @@ export class CollaborationService {
       } catch {
         // ignore dispose errors
       }
-      this.sessionDetail = reason;
     }
     // Drop resume continuity only when the device/profile identity is torn down.
     if (reason === "logout" || reason === "profile_removed" || reason === "shutdown") {

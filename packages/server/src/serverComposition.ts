@@ -909,7 +909,21 @@ export async function createDistributedServerComposition(
     const authoritativeCanvasCommits = new SqliteAuthoritativeCanvasCommitStore(
       server.database,
       contentVersionRepository,
-      canvasCommandRepository
+      canvasCommandRepository,
+      (accepted) => {
+        initializedHumanObserverJournal.appendInCallerTransaction(
+          {
+            workspaceId: accepted.scope.workspaceId,
+            projectId: accepted.scope.projectId
+          },
+          {
+            kind: "canvas",
+            canvasId: accepted.scope.canvasId,
+            canvasRevision: accepted.revision,
+            canvasContentDigest: accepted.contentDigest
+          }
+        );
+      }
     );
     const contentVersionService = new ContentVersionService({
       repository: contentVersionRepository,

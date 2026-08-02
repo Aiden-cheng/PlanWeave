@@ -156,7 +156,8 @@ export async function getDesktopLayoutForPackage(
 
 export async function saveDesktopLayoutDirect(
   projectRoot: PackageWorkspaceRef,
-  layout: DesktopLayout
+  layout: DesktopLayout,
+  options: { updatedAt?: string } = {}
 ): Promise<DesktopLayout> {
   const { workspace, manifest } = await loadPackage(projectRoot);
   const next = filterLayoutNodes(
@@ -164,7 +165,7 @@ export async function saveDesktopLayoutDirect(
       ...layout,
       version: "desktop-layout/v1",
       projectId: workspace.id,
-      updatedAt: new Date().toISOString()
+      updatedAt: options.updatedAt ?? new Date().toISOString()
     },
     manifest
   );

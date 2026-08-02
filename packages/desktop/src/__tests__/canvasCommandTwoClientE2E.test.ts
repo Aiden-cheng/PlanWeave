@@ -10,7 +10,8 @@ import {
 } from "@planweave-ai/runtime";
 import {
   CANVAS_COMMAND_PROTOCOL_VERSION,
-  exampleHumanDeviceToken
+  exampleHumanDeviceToken,
+  type HumanObserverEvent
 } from "@planweave-ai/collaboration-contracts";
 import {
   basicManifest,
@@ -198,6 +199,24 @@ describe("Desktop canvas command dual-client E2E (OSS-004 B-003)", () => {
     const controllerA = new CanvasCommandController({ api: bridgeFor(clientA), labels });
     const controllerB = new CanvasCommandController({ api: bridgeFor(clientB), labels });
 
+    let resolveCanvasEvent: ((event: HumanObserverEvent) => void) | undefined;
+    const canvasEvent = new Promise<HumanObserverEvent>((resolve) => {
+      resolveCanvasEvent = resolve;
+    });
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("observer connect timeout")), 3_000);
+      clientB.startObserver({
+        onEvent: (event) => {
+          if (event.kind === "canvas") resolveCanvasEvent?.(event);
+        },
+        onStatus: (status) => {
+          if (status.state !== "connected") return;
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+    });
+
     await controllerA.bind({ localProjectId: fixture.projectId, canvasId: "default" });
     await controllerB.bind({ localProjectId: fixture.projectId, canvasId: "default" });
     expect(controllerA.getSnapshot().session?.revision).toBe(0);
@@ -212,10 +231,23 @@ describe("Desktop canvas command dual-client E2E (OSS-004 B-003)", () => {
       },
       expectedRevision: 0
     });
-    expect(first.outcome.type).toBe("canvas.command.accepted");
+    expect(first.outcome.type, JSON.stringify(first.outcome)).toBe("canvas.command.accepted");
     if (first.outcome.type !== "canvas.command.accepted") throw new Error("expected accept");
     expect(first.outcome.revision).toBe(1);
     expect(first.outcome.idempotentReplay).toBe(false);
+    await expect(
+      Promise.race([
+        canvasEvent,
+        new Promise<never>((_resolve, reject) =>
+          setTimeout(() => reject(new Error("canvas observer event timeout")), 3_000)
+        )
+      ])
+    ).resolves.toMatchObject({
+      kind: "canvas",
+      canvasId: "default",
+      canvasRevision: 1,
+      canvasContentDigest: first.outcome.contentDigest
+    });
 
     // Duplicate operationId is idempotent (no second apply).
     const replay = await controllerA.submit({

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
-  canvasCommandIntentSchema,
   canvasCommandOperationIdSchema,
+  canvasCommandSubmissionIntentSchema,
   opaqueIdentifierSchema,
   type CanvasCommandIntent,
   type CanvasCommandOutcome,
@@ -25,7 +25,7 @@ import {
 export const collaborationCanvasCommandSubmitInputSchema = z
   .object({
     canvasId: opaqueIdentifierSchema,
-    intent: canvasCommandIntentSchema,
+    intent: canvasCommandSubmissionIntentSchema,
     operationId: canvasCommandOperationIdSchema.optional(),
     expectedRevision: z.number().int().nonnegative().optional()
   })
@@ -106,7 +106,11 @@ export class CollaborationCanvasCommandFacade {
       input: CollaborationCanvasSessionInput
     ) => Promise<ResolvedCollaborationCanvasBinding | null>,
     private readonly materializer: CanvasCommandMaterializerPort =
-      new LocalCanvasCommandMaterializer()
+      new LocalCanvasCommandMaterializer(),
+    private readonly recoverAuthoritativeContent?: (input: {
+      localProjectId: string;
+      localCanvasId: string;
+    }) => Promise<void>
   ) {}
 
   async submit(input: unknown): Promise<CollaborationCanvasCommandSubmitResult> {
@@ -138,19 +142,56 @@ export class CollaborationCanvasCommandFacade {
   async reconnect(input: unknown): Promise<CollaborationCanvasReconnectResult> {
     const parsed = collaborationCanvasReconnectInputSchema.parse(input);
     const client = requireClient(this.resolveClient());
-    const localBinding = this.requireLocalBinding(client, parsed.canvasId);
-    const result = await client.reconnectCanvasCommands(
-      {
-        canvasId: parsed.canvasId,
-        afterRevision: parsed.afterRevision,
-        afterContentDigest: parsed.afterContentDigest
-      },
-      undefined,
-      {
-        beforeReconnect: (materialization) =>
-          this.materializer.materializeReconnect(localBinding, materialization)
+    let localBinding = this.requireLocalBinding(client, parsed.canvasId);
+    const reconnect = (binding: LocalCanvasCommandBinding) =>
+      client.reconnectCanvasCommands(
+        {
+          canvasId: parsed.canvasId,
+          afterRevision: parsed.afterRevision,
+          afterContentDigest: parsed.afterContentDigest ?? binding.expectedContentDigest
+        },
+        undefined,
+        {
+          beforeReconnect: (materialization) =>
+            this.materializer.materializeReconnect(binding, materialization)
+        }
+      );
+    let result;
+    try {
+      result = await reconnect(localBinding);
+    } catch (error) {
+      if (
+        !(error instanceof CollaborationClientError) ||
+        error.code !== "collaboration_canvas_snapshot_materialization_required" ||
+        !this.recoverAuthoritativeContent
+      ) {
+        throw error;
       }
-    );
+      await this.recoverAuthoritativeContent({
+        localProjectId: localBinding.projectId,
+        localCanvasId: localBinding.canvasId
+      });
+      const current = this.binding;
+      if (
+        !current ||
+        current.remoteCanvasId !== parsed.canvasId ||
+        current.remoteProjectId !== client.projectId
+      ) {
+        throw new CollaborationClientError({
+          kind: "aborted",
+          code: "collaboration_canvas_local_binding_required",
+          message: "collaboration_canvas_local_binding_required",
+          retryable: false
+        });
+      }
+      localBinding = await this.materializer.bind({
+        projectId: localBinding.projectId,
+        canvasId: localBinding.canvasId,
+        authorityProjectId: current.remoteProjectId
+      });
+      this.binding = { ...current, local: localBinding };
+      result = await reconnect(localBinding);
+    }
     return {
       response: result.response,
       entriesToApply: result.entriesToApply,
@@ -179,7 +220,8 @@ export class CollaborationCanvasCommandFacade {
     }
     const local = await this.materializer.bind({
       projectId: resolved.localProjectId,
-      canvasId: resolved.localCanvasId
+      canvasId: resolved.localCanvasId,
+      authorityProjectId: resolved.remoteProjectId
     });
     this.binding = {
       local,

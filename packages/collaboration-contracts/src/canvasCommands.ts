@@ -216,7 +216,8 @@ const canvasCommandIntentUnionSchema = z.discriminatedUnion("kind", [
       acceptance: canvasAcceptanceItemsSchema.optional(),
       executor: opaqueIdentifierSchema.optional(),
       blockPrompts: z.array(blockPromptEntrySchema).max(CANVAS_COMMAND_MAX_BLOCK_PROMPT_ENTRIES).optional(),
-      layout: canvasLayoutNodeSchema.optional()
+      layout: canvasLayoutNodeSchema.optional(),
+      layoutUpdatedAt: timestampSchema.optional()
     })
     .strict(),
   z
@@ -299,7 +300,8 @@ const canvasCommandIntentUnionSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("update_layout"),
-      nodes: canvasLayoutNodesSchema
+      nodes: canvasLayoutNodesSchema,
+      updatedAt: timestampSchema.optional()
     })
     .strict(),
   z
@@ -333,6 +335,30 @@ export const canvasCommandIntentSchema = canvasCommandIntentUnionSchema.superRef
 );
 export type CanvasCommandIntent = z.infer<typeof canvasCommandIntentSchema>;
 
+/** New submissions must make layout metadata deterministic across materializers. */
+export const canvasCommandSubmissionIntentSchema = canvasCommandIntentSchema.superRefine(
+  (value, context) => {
+    if (value.kind === "update_layout" && value.updatedAt === undefined) {
+      context.addIssue({
+        code: "custom",
+        message: "update_layout requires updatedAt",
+        path: ["updatedAt"]
+      });
+    }
+    if (
+      value.kind === "add_task" &&
+      value.layout !== undefined &&
+      value.layoutUpdatedAt === undefined
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "add_task with layout requires layoutUpdatedAt",
+        path: ["layoutUpdatedAt"]
+      });
+    }
+  }
+);
+
 /**
  * Client submit envelope. Excludes actor, authorization, projectRoot, absolute path,
  * and authoritative revision override (only expectedRevision for CAS is allowed).
@@ -346,7 +372,7 @@ export const canvasCommandSubmitSchema = z
     canvasId: canvasIdSchema,
     operationId: canvasCommandOperationIdSchema,
     expectedRevision: canvasRevisionSchema,
-    intent: canvasCommandIntentSchema
+    intent: canvasCommandSubmissionIntentSchema
   })
   .strict();
 export type CanvasCommandSubmit = z.infer<typeof canvasCommandSubmitSchema>;

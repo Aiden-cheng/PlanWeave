@@ -197,6 +197,10 @@ export {
   type ApplyAuthorizedCanvasCommandSuccess
 } from "./graph/canvasCommandPort.js";
 export {
+  captureAuthorizedCanvasContent,
+  type CapturedAuthorizedCanvasContent
+} from "./desktop/authorizedCanvasContent.js";
+export {
   createPackageFileSnapshot,
   detectPackageFileChanges,
   refreshChangedPackagePrompts

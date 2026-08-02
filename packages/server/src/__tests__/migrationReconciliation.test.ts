@@ -153,7 +153,7 @@ describe("collaboration migration reconciliation", () => {
       { name: "identity", versions: [27, 34] },
       { name: "acl-registry", versions: [28] },
       { name: "assignment-authority", versions: [29] },
-      { name: "canvas-command", versions: [30] },
+      { name: "canvas-command", versions: [30, 41] },
       { name: "content-versions", versions: [33] },
       { name: "setup-code", versions: [31, 32] },
       { name: "comment-workspace-scope", versions: [35] },
@@ -163,7 +163,7 @@ describe("collaboration migration reconciliation", () => {
       { name: "attachment-workspace-scope", versions: [39] },
       { name: "remote-workspace-scope", versions: [40] }
     ]);
-    expect(latestCentralSchemaVersion).toBe(40);
+    expect(latestCentralSchemaVersion).toBe(41);
   });
 
   it("maps a representative v26 project to one stable Workspace and package registry key", async () => {

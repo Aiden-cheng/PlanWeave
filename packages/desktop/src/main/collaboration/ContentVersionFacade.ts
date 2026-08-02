@@ -1,10 +1,7 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
-  canonicalContentVersionDigestPayload,
-  completeContentVersionSchema,
   completedContentVersionRefSchema,
   contentVersionAuthorityDiscoveryToDesktopReadModel,
-  contentVersionDesktopLayoutMemberPath,
   contentVersionDesktopReadModelSchema,
   type CompleteContentVersion,
   type CanvasAccessRecord,
@@ -12,9 +9,8 @@ import {
   type ContentVersionDesktopReadModel
 } from "@planweave-ai/collaboration-contracts";
 import {
-  capturePackageSnapshot,
+  captureAuthorizedCanvasContent,
   createManagedProjectFromAuthoritativeContent,
-  getDesktopLayout,
   getProjectOverview,
   listProjects,
   materializeAuthoritativeCanvasContent,
@@ -54,10 +50,6 @@ export type ResolvedCollaborationCanvasBinding = {
   remoteProjectId: string;
   remoteCanvasId: string;
 };
-
-function digest(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
-}
 
 function unavailable(code: string, retryable = false): CollaborationClientError {
   return new CollaborationClientError({ kind: "unknown", code, message: code, retryable });
@@ -463,52 +455,15 @@ export class ContentVersionFacade {
     content: CompleteContentVersion;
     ref: CompletedContentVersionRef;
   }> {
-    const snapshot = await capturePackageSnapshot({
+    const captured = await captureAuthorizedCanvasContent({
       projectRoot: binding.projectRoot,
-      canvasId: binding.localCanvasId
+      canvasId: binding.localCanvasId,
+      expectedPackageDir: binding.expectedPackageDir,
+      authorityProjectId: binding.authorityProjectId
     });
-    if (snapshot.resolvedPackageDir !== binding.expectedPackageDir)
+    if (captured.packageDir !== binding.expectedPackageDir)
       throw unavailable("content_local_package_binding_invalid", false);
-    const workspace = await resolveTaskCanvasWorkspace(binding.projectRoot, binding.localCanvasId);
-    const layout = await getDesktopLayout(workspace);
-    const authorityLayout = { ...layout, projectId: binding.authorityProjectId };
-    const members = [
-      ...snapshot.snapshot.files.map((file) => ({
-        kind:
-          file.path === "manifest.json"
-            ? ("manifest" as const)
-            : file.path.includes("/blocks/")
-              ? ("block_prompt" as const)
-              : ("task_prompt" as const),
-        path: file.path,
-        content: file.content,
-        digestSha256: file.digestSha256,
-        sizeBytes: file.sizeBytes
-      })),
-      {
-        kind: "desktop_layout" as const,
-        path: contentVersionDesktopLayoutMemberPath,
-        content: `${JSON.stringify(authorityLayout, null, 2)}\n`,
-        digestSha256: "",
-        sizeBytes: 0
-      }
-    ]
-      .map((member) =>
-        member.kind === "desktop_layout"
-          ? {
-              ...member,
-              digestSha256: digest(member.content),
-              sizeBytes: Buffer.byteLength(member.content, "utf8")
-            }
-          : member
-      )
-      .sort((left, right) => left.path.localeCompare(right.path));
-    const totalBytes = members.reduce((total, member) => total + member.sizeBytes, 0);
-    const provisional = { members, totalBytes, canonicalDigest: "0".repeat(64) };
-    const content = completeContentVersionSchema.parse({
-      ...provisional,
-      canonicalDigest: digest(canonicalContentVersionDigestPayload(provisional))
-    });
+    const content = captured.content;
     return {
       content,
       ref: completedContentVersionRefSchema.parse({

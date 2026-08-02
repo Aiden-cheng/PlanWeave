@@ -8,6 +8,7 @@ import {
   timestampSchema,
   workItemRefSchema
 } from "./primitives.js";
+import { canvasContentDigestSchema, canvasRevisionSchema } from "./canvasCommands.js";
 
 /**
  * Distinct human observer channel — not Host mailbox, not ACP streams.
@@ -51,7 +52,8 @@ export const humanObserverInvalidateKindSchema = z.enum([
   "activity",
   "attachment",
   "remote_run",
-  "project"
+  "project",
+  "canvas"
 ]);
 
 /**
@@ -71,6 +73,9 @@ export const humanObserverEventSchema = z
     activityId: activityIdSchema.optional(),
     humanPrincipalId: opaqueIdentifierSchema.optional(),
     dispatchId: opaqueIdentifierSchema.optional(),
+    canvasId: opaqueIdentifierSchema.optional(),
+    canvasRevision: canvasRevisionSchema.optional(),
+    canvasContentDigest: canvasContentDigestSchema.optional(),
     /** Opaque status token for remote-run progress (not ACP stream content). */
     remoteRunStatus: z
       .enum(["started", "progress", "succeeded", "failed", "interrupted"])
@@ -83,6 +88,21 @@ export const humanObserverEventSchema = z
         code: "custom",
         message: "observer event cursor must advance",
         path: ["cursor"]
+      });
+    }
+    const canvasFields = [value.canvasId, value.canvasRevision, value.canvasContentDigest];
+    if (value.kind === "canvas" && canvasFields.some((field) => field === undefined)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "canvas observer event requires canvas id, revision, and content digest",
+        path: ["canvasId"]
+      });
+    }
+    if (value.kind !== "canvas" && canvasFields.some((field) => field !== undefined)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "canvas observer fields are only valid for canvas events",
+        path: ["canvasId"]
       });
     }
   });

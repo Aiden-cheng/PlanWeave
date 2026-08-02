@@ -550,6 +550,8 @@ export class CollaborationReadModelController {
           case "remote_run":
             this.setLoading("activity", false);
             break;
+          case "canvas":
+            break;
           default:
             break;
         }
@@ -726,6 +728,9 @@ export class CollaborationReadModelController {
           this.state.trackedCommentWorkItems.set(workItemKey(event.workItem), event.workItem);
           await this.reloadComments(event.workItem, generation);
         }
+        break;
+      case "canvas":
+        // Durable canvas reconciliation is owned by useSharedCanvasCommands.
         break;
       default:
         break;

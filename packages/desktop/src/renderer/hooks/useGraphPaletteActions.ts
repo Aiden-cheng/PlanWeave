@@ -132,9 +132,10 @@ export function useGraphPaletteActions({
         y: item.id === node.id && !getLayoutNodes ? node.position.y : item.position.y
       }));
       if (sharedCanvas?.enabled) {
+        const updatedAt = new Date().toISOString();
         const ok = await submitSharedIntent(
           sharedCanvas,
-          { kind: "update_layout", nodes: layoutNodes },
+          { kind: "update_layout", nodes: layoutNodes, updatedAt },
           setError
         );
         if (ok) {
@@ -142,7 +143,7 @@ export function useGraphPaletteActions({
             version: "desktop-layout/v1",
             projectId: layout?.projectId ?? graph?.projectId ?? selectedProject.projectId,
             nodes: layoutNodes,
-            updatedAt: new Date().toISOString()
+            updatedAt
           });
         }
         return;
@@ -199,9 +200,10 @@ export function useGraphPaletteActions({
         });
         return;
       }
+      const updatedAt = new Date().toISOString();
       const ok = await submitSharedIntent(
         sharedCanvas,
-        { kind: "update_layout", nodes: layoutNodes },
+        { kind: "update_layout", nodes: layoutNodes, updatedAt },
         setError
       );
       if (ok) {
@@ -209,7 +211,7 @@ export function useGraphPaletteActions({
           version: "desktop-layout/v1",
           projectId: layout?.projectId ?? graph?.projectId ?? selectedProject.projectId,
           nodes: layoutNodes,
-          updatedAt: new Date().toISOString()
+          updatedAt
         });
       }
       return;
@@ -401,9 +403,12 @@ export function useGraphPaletteActions({
                 promptMarkdown: t("defaultTaskPrompt"),
                 acceptance: [t("defaultTaskAcceptance")],
                 executor: settings.defaultExecutor.trim() || undefined,
-                layout: dropPosition
-                  ? { nodeId: taskId, x: dropPosition.x, y: dropPosition.y }
-                  : undefined
+                ...(dropPosition
+                  ? {
+                      layout: { nodeId: taskId, x: dropPosition.x, y: dropPosition.y },
+                      layoutUpdatedAt: new Date().toISOString()
+                    }
+                  : {})
               },
               setError
             );

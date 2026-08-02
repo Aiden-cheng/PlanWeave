@@ -1105,12 +1105,14 @@ export class CollaborationClient {
             statusCode === undefined
               ? "collaboration_observer_handshake_rejected"
               : `collaboration_observer_http_${statusCode}`;
-          this.observerWanted = false;
-          this.setObserverStatus(
-            statusCode === 401
-              ? { state: "auth_expired", code }
-              : { state: "failed", code }
-          );
+          if (statusCode === 401) {
+            this.observerWanted = false;
+            this.setObserverStatus({ state: "auth_expired", code });
+            return;
+          }
+          this.setObserverStatus({ state: "failed", code });
+          this.observerSocket = undefined;
+          this.scheduleObserverReconnect();
         });
 
         const onOpen = () => {
@@ -1178,12 +1180,7 @@ export class CollaborationClient {
         const onClose = () => {
           if (this.observerSocket !== socket) return;
           this.observerSocket = undefined;
-          if (
-            this.observerStatus.state === "auth_expired" ||
-            this.observerStatus.state === "failed"
-          ) {
-            return;
-          }
+          if (this.observerStatus.state === "auth_expired") return;
           if (!this.observerWanted || this.disposed) {
             this.setObserverStatus({ state: "stopped" });
             return;

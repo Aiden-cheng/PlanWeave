@@ -535,6 +535,66 @@ describe("CollaborationClient", () => {
     client.dispose();
   });
 
+  it("retries an observer forbidden handshake after project access is granted", async () => {
+    const http = await listen((_req, res) => {
+      res.statusCode = 404;
+      res.end();
+    });
+    cleanups.push(http.close);
+    const wss = new WebSocketServer({ noServer: true });
+    cleanups.push(
+      () =>
+        new Promise((resolve, reject) => {
+          wss.close((error) => (error ? reject(error) : resolve()));
+        })
+    );
+
+    let attempts = 0;
+    http.server.on("upgrade", (request, socket, head) => {
+      attempts += 1;
+      if (attempts === 1) {
+        socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+        return;
+      }
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        ws.on("message", () => {
+          ws.send(
+            JSON.stringify({
+              type: "human.observer.welcome",
+              protocolVersion: HUMAN_OBSERVER_PROTOCOL_VERSION,
+              projectId: "project-demo-001",
+              serverTime: "2030-01-01T00:00:00.000Z",
+              cursor: 0
+            })
+          );
+        });
+      });
+    });
+
+    const client = clientFor(http.origin, {
+      token: exampleHumanDeviceToken,
+      WebSocketImpl: WebSocket as unknown as ConstructorParameters<
+        typeof CollaborationClient
+      >[0]["WebSocketImpl"]
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("observer authorization retry timeout")), 3_000);
+      client.startObserver({
+        onStatus: (status) => {
+          if (status.state === "connected") {
+            clearTimeout(timer);
+            resolve();
+          }
+        }
+      });
+    });
+
+    expect(attempts).toBe(2);
+    expect(client.observerState()).toMatchObject({ state: "connected", cursor: 0 });
+    client.dispose();
+  });
+
   it("keeps an immediate observer replacement when the stopped socket closes", async () => {
     const http = await listen((_req, res) => {
       res.statusCode = 404;

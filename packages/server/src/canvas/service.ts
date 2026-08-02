@@ -8,6 +8,7 @@ import {
   canvasReconnectErrorSchema,
   canvasReconnectRequestSchema,
   canvasReconnectSnapshotSchema,
+  packageSnapshotDigestManifestSchema,
   type AuthoritativeContentVersion,
   type ActorRef,
   type CanvasCommandAccepted,
@@ -15,7 +16,9 @@ import {
   type CanvasCommandSubmit,
   type CanvasReconnectRequest,
   type CanvasReconnectResponse,
-  type CanvasRuntimeStatusProjection
+  type CanvasRuntimeStatusProjection,
+  type CompleteContentVersion,
+  type PackageSnapshotDigestManifest
 } from "@planweave-ai/collaboration-contracts";
 import type { CollaborationAuthContext } from "../identity/auth.js";
 import type { ProjectAccessRepository } from "../projectAccessRepository.js";
@@ -67,6 +70,32 @@ function scopeKey(scope: {
   };
 }
 
+function packageDigestManifestFromContent(
+  content: CompleteContentVersion
+): PackageSnapshotDigestManifest {
+  const manifest = content.members.find((member) => member.kind === "manifest");
+  if (!manifest) throw new Error("canvas_baseline_rebase_authority_malformed");
+  const prompts = content.members
+    .filter((member) => member.kind === "task_prompt" || member.kind === "block_prompt")
+    .map((member) => ({
+      path: member.path,
+      digest: {
+        digestSha256: member.digestSha256,
+        sizeBytes: member.sizeBytes
+      }
+    }))
+    .sort((left, right) => left.path.localeCompare(right.path));
+  return packageSnapshotDigestManifestSchema.parse({
+    manifest: {
+      digestSha256: manifest.digestSha256,
+      sizeBytes: manifest.sizeBytes
+    },
+    prompts,
+    totalBytes:
+      manifest.sizeBytes + prompts.reduce((total, member) => total + member.digest.sizeBytes, 0)
+  });
+}
+
 /**
  * Server-authoritative Canvas command service: ACL, CAS, serialization, idempotency,
  * journal/snapshot persistence, and reconnect. Presence is never consulted for mutations.
@@ -102,6 +131,36 @@ export class CanvasCommandService {
     }
   }
 
+  private async rebuildLegacyBaseline(scope: CanvasScopeKey): Promise<void> {
+    const rebase = this.options.repository.legacyBaselineRebase(scope);
+    if (!rebase || rebase.status === "completed") return;
+
+    const contentVersions = this.options.contentVersions;
+    if (!contentVersions) throw new Error("canvas_baseline_rebase_authority_unavailable");
+    const authorityHead = contentVersions.head(scope);
+    if (!authorityHead) throw new Error("canvas_baseline_rebase_authority_unavailable");
+
+    let authorityVersion: AuthoritativeContentVersion;
+    try {
+      authorityVersion = contentVersions.readVersion(scope, authorityHead.content);
+    } catch {
+      throw new Error("canvas_baseline_rebase_authority_unavailable");
+    }
+    if (
+      authorityVersion.completed.versionId !== authorityHead.content.versionId ||
+      authorityVersion.completed.canonicalDigest !== authorityHead.content.canonicalDigest ||
+      authorityVersion.content.canonicalDigest !== authorityHead.content.canonicalDigest
+    ) {
+      throw new Error("canvas_baseline_rebase_authority_mismatch");
+    }
+
+    this.options.repository.completeLegacyBaselineRebase(scope, {
+      contentDigest: authorityVersion.content.canonicalDigest,
+      digestManifest: packageDigestManifestFromContent(authorityVersion.content),
+      sizeBytes: authorityVersion.content.totalBytes
+    });
+  }
+
   private async captureAuthoritativeContent(input: {
     scope: CanvasScopeKey;
     actor: ActorRef;
@@ -115,7 +174,8 @@ export class CanvasCommandService {
     const captured = await captureContent({
       projectRoot: input.projectRoot,
       canvasId: input.canvasId,
-      expectedPackageDir: input.expectedPackageDir
+      expectedPackageDir: input.expectedPackageDir,
+      authorityProjectId: input.scope.projectId
     });
     if (!captured.ok) throw new Error("content_capture_failed");
     const content = contentVersions.persistImmutable({
@@ -224,25 +284,6 @@ export class CanvasCommandService {
   ): Promise<CanvasCommandOutcome> {
     const scope = scopeKey(auth.scope);
     const intentDigest = digestCanvasIntent(submit.intent);
-    const existing = this.options.repository.getOperation(scope, submit.operationId);
-    if (existing) {
-      if (existing.intentDigest !== intentDigest) {
-        return rejectedOutcome({
-          projectId: submit.projectId,
-          canvasId: submit.canvasId,
-          operationId: submit.operationId,
-          code: "operation_conflict",
-          detail: "operation_id_intent_mismatch"
-        });
-      }
-      if (existing.outcome.type === "canvas.command.accepted") {
-        return canvasCommandAcceptedSchema.parse({
-          ...existing.outcome,
-          idempotentReplay: true
-        });
-      }
-      return existing.outcome;
-    }
 
     // Re-check ACL inside the serializer (covers revocation races).
     const reauth = authorizeCanvasWrite({
@@ -262,6 +303,48 @@ export class CanvasCommandService {
       });
     }
 
+    try {
+      await this.rebuildLegacyBaseline(scope);
+    } catch (error) {
+      return rejectedOutcome({
+        projectId: submit.projectId,
+        canvasId: submit.canvasId,
+        operationId: submit.operationId,
+        code: "journal_unavailable",
+        detail:
+          error instanceof Error ? error.message.slice(0, 200) : "canvas_baseline_rebase_failed"
+      });
+    }
+
+    const existing = this.options.repository.getOperation(scope, submit.operationId);
+    if (existing) {
+      if (existing.intentDigest !== intentDigest) {
+        return rejectedOutcome({
+          projectId: submit.projectId,
+          canvasId: submit.canvasId,
+          operationId: submit.operationId,
+          code: "operation_conflict",
+          detail: "operation_id_intent_mismatch"
+        });
+      }
+      if (existing.outcome.type === "canvas.command.accepted") {
+        return canvasCommandAcceptedSchema.parse({
+          ...existing.outcome,
+          idempotentReplay: true
+        });
+      }
+      return existing.outcome;
+    }
+    if (this.options.repository.isLegacyOperationArchived(scope, submit.operationId)) {
+      return rejectedOutcome({
+        projectId: submit.projectId,
+        canvasId: submit.canvasId,
+        operationId: submit.operationId,
+        code: "operation_conflict",
+        detail: "operation_archived_by_baseline_rebase"
+      });
+    }
+
     if (this.options.repository.hasPendingRecovery(scope)) {
       return rejectedOutcome({
         projectId: submit.projectId,
@@ -272,7 +355,28 @@ export class CanvasCommandService {
       });
     }
 
-    const head = this.options.repository.head(scope);
+    let head = this.options.repository.head(scope);
+    if (head.revision === 0 && head.contentDigest === "0".repeat(64)) {
+      const initial = await this.options.runtime.readDigest({
+        projectRoot: reauth.projectRoot,
+        canvasId: submit.canvasId,
+        expectedPackageDir: reauth.packageDir,
+        authorityProjectId: submit.projectId
+      });
+      if (!initial.ok) {
+        return rejectedOutcome({
+          projectId: submit.projectId,
+          canvasId: submit.canvasId,
+          operationId: submit.operationId,
+          code: "journal_unavailable",
+          detail: "initial_content_digest_unavailable"
+        });
+      }
+      head = this.options.repository.ensureInitialHead(scope, initial.contentDigest, {
+        digestManifest: initial.digestManifest,
+        sizeBytes: initial.sizeBytes
+      });
+    }
     if (submit.expectedRevision !== head.revision) {
       return rejectedOutcome({
         projectId: submit.projectId,
@@ -313,6 +417,7 @@ export class CanvasCommandService {
         projectRoot: reauth.projectRoot,
         canvasId: submit.canvasId,
         expectedPackageDir: reauth.packageDir,
+        authorityProjectId: submit.projectId,
         intent: submit.intent
       });
     } catch (error) {
@@ -508,15 +613,33 @@ export class CanvasCommandService {
       projectId: scope.projectId,
       canvasId: scope.canvasId
     };
+    try {
+      await this.rebuildLegacyBaseline(scope);
+    } catch (error) {
+      return canvasReconnectErrorSchema.parse({
+        type: "canvas.reconnect.error",
+        protocolVersion: CANVAS_COMMAND_PROTOCOL_VERSION,
+        schemaVersion: "canvas-command/v1",
+        projectId: request.projectId,
+        canvasId: request.canvasId,
+        code: "server_error",
+        detail:
+          error instanceof Error ? error.message.slice(0, 200) : "canvas_baseline_rebase_failed"
+      });
+    }
     let head = this.options.repository.head(scope);
     if (head.revision === 0 && head.contentDigest === "0".repeat(64)) {
       const digest = await this.options.runtime.readDigest({
         projectRoot: auth.projectRoot,
         canvasId: request.canvasId,
-        expectedPackageDir: auth.packageDir
+        expectedPackageDir: auth.packageDir,
+        authorityProjectId: request.projectId
       });
       if (digest.ok) {
-        head = this.options.repository.ensureInitialHead(scope, digest.contentDigest);
+        head = this.options.repository.ensureInitialHead(scope, digest.contentDigest, {
+          digestManifest: digest.digestManifest,
+          sizeBytes: digest.sizeBytes
+        });
       }
     }
 
@@ -544,10 +667,12 @@ export class CanvasCommandService {
       });
     }
 
-    if (request.afterContentDigest !== undefined && request.afterRevision > 0) {
+    if (request.afterContentDigest !== undefined) {
       const entry = this.options.repository.journalEntryAt(scope, request.afterRevision);
       const digestAt =
-        entry?.contentDigest ??
+        (request.afterRevision === 0
+          ? this.options.repository.getSnapshot(scope, 0)?.metadata.contentDigest
+          : entry?.contentDigest) ??
         (request.afterRevision === head.revision ? head.contentDigest : undefined);
       if (digestAt !== undefined && digestAt !== request.afterContentDigest) {
         const snapshot = this.verifiedSnapshotOrError(scope, request, "digest_mismatch");

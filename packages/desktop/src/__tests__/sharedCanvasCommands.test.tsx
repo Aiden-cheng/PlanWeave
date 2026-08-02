@@ -7,7 +7,8 @@ import { cleanupRendererTestEnvironment } from "./helpers/rendererTestEnvironmen
 import { createTranslator } from "../renderer/i18n";
 import type {
   CollaborationCanvasCommandSessionView,
-  CollaborationCanvasReconnectResult
+  CollaborationCanvasReconnectResult,
+  CollaborationObserverSignal
 } from "../shared/collaboration";
 import {
   SHARED_CANVAS_RECONNECT_INTERVAL_MS,
@@ -52,6 +53,7 @@ function createBridge(options?: {
   reconnect?: SharedCanvasCommandBridge["reconnectCollaborationCanvas"];
   resolveScope?: SharedCanvasCommandBridge["resolveCollaborationCanvasScope"];
 }) {
+  const observerListeners = new Set<(signal: CollaborationObserverSignal) => void>();
   const reconnect = vi.fn<SharedCanvasCommandBridge["reconnectCollaborationCanvas"]>(
     options?.reconnect ?? (async () => reconnectResult(initialSession))
   );
@@ -69,10 +71,17 @@ function createBridge(options?: {
       getCollaborationCanvasCommandSession: async () => initialSession,
       resolveCollaborationCanvasScope:
         options?.resolveScope ??
-        (async ({ canvasId }) => ({ projectId: "project-1", canvasId }))
+        (async ({ canvasId }) => ({ projectId: "project-1", canvasId })),
+      onCollaborationObserverSignal: (listener: (signal: CollaborationObserverSignal) => void) => {
+        observerListeners.add(listener);
+        return () => observerListeners.delete(listener);
+      }
     },
     reconnect,
-    bind
+    bind,
+    emitObserver(signal: CollaborationObserverSignal) {
+      for (const listener of observerListeners) listener(signal);
+    }
   };
 }
 
@@ -166,6 +175,48 @@ describe("useSharedCanvasCommands", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(SHARED_CANVAS_RECONNECT_INTERVAL_MS);
     });
+
+    expect(bridge.reconnect).toHaveBeenCalledTimes(2);
+    expect(onAuthoritativeChange).toHaveBeenCalledTimes(1);
+    expect(result.current.snapshot.session?.revision).toBe(remoteSession.revision);
+  });
+
+  it("reconnects immediately when the observer reports a newer revision for this canvas", async () => {
+    vi.useFakeTimers();
+    const onAuthoritativeChange = vi.fn();
+    const bridge = createBridge({
+      reconnect: vi
+        .fn<SharedCanvasCommandBridge["reconnectCollaborationCanvas"]>()
+        .mockResolvedValueOnce(reconnectResult(initialSession))
+        .mockResolvedValueOnce(
+          reconnectResult(remoteSession, exampleCanvasReconnectAfterDisconnect.entries)
+        )
+    });
+
+    const { result } = renderHook(() =>
+      useSharedCanvasCommands(hookInput(bridge.api, onAuthoritativeChange))
+    );
+    await flushEffects();
+    expect(bridge.reconnect).toHaveBeenCalledTimes(1);
+    onAuthoritativeChange.mockClear();
+
+    bridge.emitObserver({
+      type: "human.observer.event",
+      profileId: "profile-1",
+      projectId: "project-1",
+      event: {
+        type: "human.observer.event",
+        protocolVersion: 1,
+        cursor: 2,
+        previousCursor: 1,
+        occurredAt: "2030-01-01T00:00:00.000Z",
+        kind: "canvas",
+        canvasId: "default",
+        canvasRevision: remoteSession.revision,
+        canvasContentDigest: remoteSession.contentDigest
+      }
+    } as unknown as CollaborationObserverSignal);
+    await flushEffects();
 
     expect(bridge.reconnect).toHaveBeenCalledTimes(2);
     expect(onAuthoritativeChange).toHaveBeenCalledTimes(1);

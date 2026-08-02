@@ -4,6 +4,7 @@ import type { IncomingMessage } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   CANVAS_COMMAND_PROTOCOL_VERSION,
+  type CanvasCommandAccepted,
   type CanvasCommandIntent
 } from "@planweave-ai/collaboration-contracts";
 import { createTestWorkspace } from "../../../runtime/src/__tests__/promptTestHelpers.js";
@@ -93,6 +94,7 @@ async function fixture(options?: {
   journalRetention?: number;
   runtime?: CanvasRuntimeMutationPort;
   contentVersions?: boolean;
+  onAcceptedInCallerTransaction?: (accepted: CanvasCommandAccepted) => void;
 }) {
   const workspace = await createTestWorkspace();
   directories.push(workspace.home, workspace.root);
@@ -161,7 +163,12 @@ async function fixture(options?: {
     runtime,
     contentVersions,
     authoritativeCommits: contentVersions
-      ? new SqliteAuthoritativeCanvasCommitStore(database, contentVersions, repository)
+      ? new SqliteAuthoritativeCanvasCommitStore(
+          database,
+          contentVersions,
+          repository,
+          options?.onAcceptedInCallerTransaction
+        )
       : undefined,
     clock: () => new Date("2026-01-02T00:00:00.000Z"),
     presenceHeadProbe: () => 999
@@ -204,7 +211,7 @@ function submitBody(
 describe("canvas command service (OSS-004 B-002)", () => {
   it("migrates v30 and enforces CAS + operationId idempotency", async () => {
     const { service, repository, runtime, database } = await fixture();
-    expect(latestCentralSchemaVersion).toBe(40);
+    expect(latestCentralSchemaVersion).toBe(41);
     expect(
       database
         .prepare(
@@ -416,6 +423,32 @@ describe("canvas command service (OSS-004 B-002)", () => {
     expect((await service.recoverInterrupted()).cleared).toBe(1);
   });
 
+  it("rejects a revision-zero delta when the client baseline digest differs", async () => {
+    const { service, repository } = await fixture();
+    const accepted = await service.submit(actor("owner"), submitBody("op-baseline", 0));
+    expect(accepted.type).toBe("canvas.command.accepted");
+    expect(
+      repository.getSnapshot({ workspaceId: "w", projectId: "p", canvasId: "default" }, 0)
+        ?.metadata.contentDigest
+    ).toMatch(/^[a-f0-9]{64}$/);
+
+    const response = await service.reconnect(actor("editor"), {
+      type: "canvas.reconnect.request",
+      protocolVersion: CANVAS_COMMAND_PROTOCOL_VERSION,
+      schemaVersion: "canvas-command/v1",
+      projectId: "p",
+      canvasId: "default",
+      afterRevision: 0,
+      afterContentDigest: "f".repeat(64)
+    });
+
+    expect(response).toMatchObject({
+      type: "canvas.reconnect.snapshot",
+      reason: "digest_mismatch",
+      afterRevision: 0
+    });
+  });
+
   it("rejects forbidden shared-mode features and ignores presence as mutation authority", async () => {
     const request = { method: "POST" } as IncomingMessage;
     for (const path of [
@@ -582,9 +615,11 @@ describe("canvas command service (OSS-004 B-002)", () => {
 
   it("recovers immutable content and both authority heads in one accepted commit", async () => {
     const runtime = createDefaultCanvasRuntimePort();
+    const acceptedCommits: CanvasCommandAccepted[] = [];
     const { workspace, database, access, repository, service, contentVersions } = await fixture({
       runtime,
-      contentVersions: true
+      contentVersions: true,
+      onAcceptedInCallerTransaction: (accepted) => acceptedCommits.push(accepted)
     });
     if (!contentVersions || !runtime.captureContent)
       throw new Error("content version fixture unavailable");
@@ -644,6 +679,14 @@ describe("canvas command service (OSS-004 B-002)", () => {
       type: "canvas.command.accepted",
       contentDigest: contentHead.content.canonicalDigest
     });
+    expect(acceptedCommits).toEqual([
+      expect.objectContaining({
+        scope,
+        operationId: "op-content-recovery",
+        revision: 1,
+        contentDigest: contentHead.content.canonicalDigest
+      })
+    ]);
 
     const fetched = new ContentVersionService({
       repository: contentVersions,

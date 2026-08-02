@@ -797,6 +797,47 @@ describe("CollaborationService IPC trust boundary", () => {
     await expect(service.getStatus()).rejects.toThrow(/shut down/);
   });
 
+  it("keeps the connected client when activation upserts an unchanged active profile", async () => {
+    const root = await tempDir("planweave-collab-idempotent-profile-activation-");
+    const dispose = vi.fn();
+    const service = new CollaborationService({
+      profileStore: new CollaborationProfileStore({ profilesPath: join(root, "profiles.json") }),
+      vault: new CollaborationCredentialVault({
+        paths: { credentialsPath: join(root, "credentials.json") },
+        safeStorage: mockSafeStorage({ available: true })
+      }),
+      createClient: () =>
+        ({
+          verifyAccess: vi.fn().mockResolvedValue(undefined),
+          startObserver: vi.fn(),
+          stopObserver: vi.fn(),
+          stopPresence: vi.fn(),
+          dispose,
+          bootstrapOwner: vi.fn(),
+          consumeInvitation: vi.fn()
+        }) as never
+    });
+    const profile = {
+      profileId: "profile-stable",
+      displayName: "Stable local profile",
+      serverBaseUrl: "http://127.0.0.1:8787/",
+      projectId: "project-stable",
+      allowInsecureTransport: true
+    };
+    await service.upsertProfile(profile);
+    await service.importDeviceCredential({
+      profileId: profile.profileId,
+      deviceToken: exampleHumanDeviceToken
+    });
+    await service.connectSession({ profileId: profile.profileId });
+
+    const status = await service.upsertProfile(profile);
+
+    expect(dispose).not.toHaveBeenCalled();
+    expect(status.session.phase).toBe("connected");
+    await service.shutdown();
+  });
+
   it("keeps authenticated HTTP reads available when the observer times out", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const root = await tempDir("planweave-collab-observer-timeout-");

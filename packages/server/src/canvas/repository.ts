@@ -46,6 +46,14 @@ export type CanvasOperationRecord = {
   createdAt: string;
 };
 
+export type LegacyCanvasBaselineRebase = {
+  sourceRevision: number;
+  sourceContentDigest: string;
+  status: "pending" | "completed";
+  reason: "legacy_nondeterministic_layout";
+  replacementContentDigest: string | null;
+};
+
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
@@ -132,6 +140,19 @@ export class CanvasCommandRepository {
     };
   }
 
+  isLegacyOperationArchived(scope: CanvasScopeKey, operationId: string): boolean {
+    const row = this.database
+      .prepare(
+        `SELECT 1 AS present FROM canvas_command_legacy_archive
+         WHERE workspace_id=? AND project_id=? AND canvas_id=?
+           AND record_kind='operation' AND record_key=?`
+      )
+      .get(scope.workspaceId, scope.projectId, scope.canvasId, operationId) as
+      | { present: number }
+      | undefined;
+    return row !== undefined;
+  }
+
   listJournalAfter(scope: CanvasScopeKey, afterRevision: number): CanvasJournalEntry[] {
     const rows = this.database
       .prepare(
@@ -176,7 +197,7 @@ export class CanvasCommandRepository {
         ? (this.database
             .prepare(
               `SELECT * FROM canvas_command_snapshots
-               WHERE workspace_id=? AND project_id=? AND canvas_id=? AND integrity='verified'
+               WHERE workspace_id=? AND project_id=? AND canvas_id=?
                ORDER BY revision DESC LIMIT 1`
             )
             .get(scope.workspaceId, scope.projectId, scope.canvasId) as
@@ -185,12 +206,12 @@ export class CanvasCommandRepository {
         : (this.database
             .prepare(
               `SELECT * FROM canvas_command_snapshots
-               WHERE workspace_id=? AND project_id=? AND canvas_id=? AND revision=? AND integrity='verified'`
+               WHERE workspace_id=? AND project_id=? AND canvas_id=? AND revision=?`
             )
             .get(scope.workspaceId, scope.projectId, scope.canvasId, revision) as
             | Record<string, unknown>
             | undefined);
-    if (!row) return undefined;
+    if (!row || row.integrity !== "verified") return undefined;
     return this.snapshotFromRow(scope, row);
   }
 
@@ -296,6 +317,144 @@ export class CanvasCommandRepository {
       )
       .get(scope.workspaceId, scope.projectId, scope.canvasId) as { present: number } | undefined;
     return row !== undefined;
+  }
+
+  legacyBaselineRebase(scope: CanvasScopeKey): LegacyCanvasBaselineRebase | null {
+    const row = this.database
+      .prepare(
+        `SELECT source_revision,source_content_digest,status,reason,replacement_content_digest
+           FROM canvas_command_baseline_rebases
+          WHERE workspace_id=? AND project_id=? AND canvas_id=?`
+      )
+      .get(scope.workspaceId, scope.projectId, scope.canvasId) as
+      | Record<string, unknown>
+      | undefined;
+    if (!row) return null;
+    return {
+      sourceRevision: Number(row.source_revision),
+      sourceContentDigest: String(row.source_content_digest),
+      status: String(row.status) as LegacyCanvasBaselineRebase["status"],
+      reason: String(row.reason) as LegacyCanvasBaselineRebase["reason"],
+      replacementContentDigest:
+        row.replacement_content_digest == null ? null : String(row.replacement_content_digest)
+    };
+  }
+
+  completeLegacyBaselineRebase(
+    scope: CanvasScopeKey,
+    replacement: {
+      contentDigest: string;
+      digestManifest: PackageSnapshotDigestManifest;
+      sizeBytes: number;
+    }
+  ): CanvasHead {
+    return inWriteTransaction(this.database, () => {
+      const rebase = this.legacyBaselineRebase(scope);
+      if (!rebase) throw new Error("canvas_baseline_rebase_not_pending");
+      if (rebase.status === "completed") {
+        if (rebase.replacementContentDigest !== replacement.contentDigest) {
+          throw new Error("canvas_baseline_rebase_replacement_conflict");
+        }
+        return this.head(scope);
+      }
+      const head = this.head(scope);
+      if (
+        head.revision !== rebase.sourceRevision ||
+        head.contentDigest !== rebase.sourceContentDigest
+      ) {
+        throw new Error("canvas_baseline_rebase_source_changed");
+      }
+
+      const archivedAt = this.clock().toISOString();
+      const archive = this.database.prepare(
+        `INSERT INTO canvas_command_legacy_archive(
+           workspace_id,project_id,canvas_id,record_kind,record_key,record_json,archived_at,reason
+         ) VALUES(?,?,?,?,?,?,?,'legacy_nondeterministic_layout')
+         ON CONFLICT(workspace_id,project_id,canvas_id,record_kind,record_key) DO NOTHING`
+      );
+      const archiveTable = (
+        table: string,
+        kind: "journal" | "operation" | "snapshot" | "pending",
+        keyColumn: string
+      ) => {
+        const rows = this.database
+          .prepare(
+            `SELECT * FROM ${table} WHERE workspace_id=? AND project_id=? AND canvas_id=?`
+          )
+          .all(scope.workspaceId, scope.projectId, scope.canvasId) as Array<Record<string, unknown>>;
+        for (const row of rows) {
+          archive.run(
+            scope.workspaceId,
+            scope.projectId,
+            scope.canvasId,
+            kind,
+            String(row[keyColumn]),
+            JSON.stringify(row),
+            archivedAt
+          );
+        }
+      };
+      archiveTable("canvas_command_journal", "journal", "revision");
+      archiveTable("canvas_command_operations", "operation", "operation_id");
+      archiveTable("canvas_command_snapshots", "snapshot", "revision");
+      archiveTable("canvas_command_pending", "pending", "operation_id");
+
+      for (const table of [
+        "canvas_command_journal",
+        "canvas_command_operations",
+        "canvas_command_snapshots",
+        "canvas_command_pending"
+      ]) {
+        this.database
+          .prepare(`DELETE FROM ${table} WHERE workspace_id=? AND project_id=? AND canvas_id=?`)
+          .run(scope.workspaceId, scope.projectId, scope.canvasId);
+      }
+      this.database
+        .prepare(
+          `UPDATE canvas_command_heads
+              SET content_digest=?,updated_at=?
+            WHERE workspace_id=? AND project_id=? AND canvas_id=? AND revision=?`
+        )
+        .run(
+          replacement.contentDigest,
+          archivedAt,
+          scope.workspaceId,
+          scope.projectId,
+          scope.canvasId,
+          head.revision
+        );
+      this.database
+        .prepare(
+          `INSERT INTO canvas_command_snapshots(
+             workspace_id,project_id,canvas_id,revision,content_digest,created_at,
+             package_snapshot_id,digest_manifest_json,size_bytes,encoding,integrity
+           ) VALUES(?,?,?,?,?,?,NULL,?,?,'digest_manifest_only','verified')`
+        )
+        .run(
+          scope.workspaceId,
+          scope.projectId,
+          scope.canvasId,
+          head.revision,
+          replacement.contentDigest,
+          archivedAt,
+          JSON.stringify(replacement.digestManifest),
+          replacement.sizeBytes
+        );
+      this.database
+        .prepare(
+          `UPDATE canvas_command_baseline_rebases
+              SET status='completed',completed_at=?,replacement_content_digest=?
+            WHERE workspace_id=? AND project_id=? AND canvas_id=? AND status='pending'`
+        )
+        .run(
+          archivedAt,
+          replacement.contentDigest,
+          scope.workspaceId,
+          scope.projectId,
+          scope.canvasId
+        );
+      return this.head(scope);
+    });
   }
 
   markPendingNeedsRecovery(scope: CanvasScopeKey, operationId: string): void {
@@ -510,7 +669,11 @@ export class CanvasCommandRepository {
     });
   }
 
-  ensureInitialHead(scope: CanvasScopeKey, contentDigest: string): CanvasHead {
+  ensureInitialHead(
+    scope: CanvasScopeKey,
+    contentDigest: string,
+    snapshot?: { digestManifest: PackageSnapshotDigestManifest; sizeBytes: number }
+  ): CanvasHead {
     const existing = this.head(scope);
     if (existing.revision > 0) return existing;
     const at = this.clock().toISOString();
@@ -534,10 +697,18 @@ export class CanvasCommandRepository {
             `INSERT INTO canvas_command_snapshots(
               workspace_id,project_id,canvas_id,revision,content_digest,created_at,
               package_snapshot_id,digest_manifest_json,size_bytes,encoding,integrity
-            ) VALUES(?,?,?,0,?,?,NULL,NULL,NULL,'digest_manifest_only','verified')
+            ) VALUES(?,?,?,0,?,?,NULL,?,?,'digest_manifest_only','verified')
             ON CONFLICT(workspace_id,project_id,canvas_id,revision) DO NOTHING`
           )
-          .run(scope.workspaceId, scope.projectId, scope.canvasId, contentDigest, at);
+          .run(
+            scope.workspaceId,
+            scope.projectId,
+            scope.canvasId,
+            contentDigest,
+            at,
+            snapshot ? JSON.stringify(snapshot.digestManifest) : null,
+            snapshot?.sizeBytes ?? null
+          );
       }
     });
     return this.head(scope);

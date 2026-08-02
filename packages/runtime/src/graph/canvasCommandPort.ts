@@ -15,9 +15,9 @@ import {
   type PlanPackageGraphMutation
 } from "./mutation.js";
 import { commitPlanPackageGraphMutation } from "./editGraph.js";
-import { capturePackageSnapshot } from "../package/packageSnapshot.js";
 import { loadPackage, resolvePackageWorkspace } from "../package/loadPackage.js";
 import { resolveTaskCanvasWorkspace } from "../desktop/canvasApi.js";
+import { captureAuthorizedCanvasContent } from "../desktop/authorizedCanvasContent.js";
 import { getDesktopLayoutDirect, saveDesktopLayoutDirect } from "../desktop/layoutStore.js";
 import type { ManifestBlock, ManifestTaskNode, PackageWorkspaceRef } from "../types.js";
 
@@ -33,6 +33,8 @@ export type ApplyAuthorizedCanvasCommandInput = {
   canvasId: string;
   /** When set, refuse if resolved packageDir does not match the ACL-bound location. */
   expectedPackageDir?: string;
+  /** Project identity used by the remote authority for canonical layout content. */
+  authorityProjectId?: string;
   intent: CanvasCommandIntent;
 };
 
@@ -370,8 +372,9 @@ async function applyLayoutUpdate(
     }
     await saveDesktopLayoutDirect(projectRoot, {
       ...layout,
-      nodes: [...byId.values()],
-      updatedAt: new Date().toISOString()
+      nodes: [...byId.values()]
+    }, {
+      updatedAt: intent.updatedAt
     });
     return undefined;
   } catch (error) {
@@ -444,7 +447,8 @@ export async function applyAuthorizedCanvasCommand(
     if (intent.kind === "add_task" && intent.layout) {
       const layoutError = await applyLayoutUpdate(workspace, {
         kind: "update_layout",
-        nodes: [intent.layout]
+        nodes: [intent.layout],
+        updatedAt: intent.layoutUpdatedAt
       });
       if (layoutError) return layoutError;
     }
@@ -452,21 +456,20 @@ export async function applyAuthorizedCanvasCommand(
 
   try {
     // Pass resolved workspace object only (no canvasId re-resolution that stringifies objects).
-    const captured = await capturePackageSnapshot({
-      projectRoot: workspace
+    const captured = await captureAuthorizedCanvasContent({
+      projectRoot: workspace,
+      authorityProjectId: input.authorityProjectId
     });
-    if (captured.resolvedPackageDir !== workspace.packageDir) {
+    if (captured.packageDir !== workspace.packageDir) {
       return fail("package_mismatch", "runtime_package_location_mismatch");
     }
-    const digestManifest = packageSnapshotDigestManifestSchema.parse(
-      captured.snapshot.digestManifest
-    );
+    const digestManifest = packageSnapshotDigestManifestSchema.parse(captured.digestManifest);
     return {
       ok: true,
-      contentDigest: contentDigestFromManifest(digestManifest),
+      contentDigest: captured.content.canonicalDigest,
       digestManifest,
       packageDir: workspace.packageDir,
-      sizeBytes: digestManifest.totalBytes
+      sizeBytes: captured.content.totalBytes
     };
   } catch (error) {
     return fail(
@@ -483,6 +486,7 @@ export async function readAuthorizedCanvasContentDigest(input: {
   projectRoot: PackageWorkspaceRef;
   canvasId: string;
   expectedPackageDir?: string;
+  authorityProjectId?: string;
 }): Promise<ApplyAuthorizedCanvasCommandResult> {
   try {
     const workspace =
@@ -495,21 +499,20 @@ export async function readAuthorizedCanvasContentDigest(input: {
     ) {
       return fail("package_mismatch", "runtime_package_location_mismatch");
     }
-    const captured = await capturePackageSnapshot({
-      projectRoot: workspace
+    const captured = await captureAuthorizedCanvasContent({
+      projectRoot: workspace,
+      authorityProjectId: input.authorityProjectId
     });
-    if (captured.resolvedPackageDir !== workspace.packageDir) {
+    if (captured.packageDir !== workspace.packageDir) {
       return fail("package_mismatch", "runtime_package_location_mismatch");
     }
-    const digestManifest = packageSnapshotDigestManifestSchema.parse(
-      captured.snapshot.digestManifest
-    );
+    const digestManifest = packageSnapshotDigestManifestSchema.parse(captured.digestManifest);
     return {
       ok: true,
-      contentDigest: contentDigestFromManifest(digestManifest),
+      contentDigest: captured.content.canonicalDigest,
       digestManifest,
       packageDir: workspace.packageDir,
-      sizeBytes: digestManifest.totalBytes
+      sizeBytes: captured.content.totalBytes
     };
   } catch (error) {
     return fail(

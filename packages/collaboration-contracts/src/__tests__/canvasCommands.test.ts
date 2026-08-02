@@ -57,6 +57,34 @@ describe("OSS-004 canvas command contracts", () => {
     );
   });
 
+  it("requires one durable timestamp for every submitted layout mutation", () => {
+    expect(() =>
+      canvasCommandSubmitSchema.parse({
+        ...baseSubmit,
+        intent: { kind: "update_layout", nodes: [{ nodeId: "task-1", x: 1, y: 2 }] }
+      })
+    ).toThrow();
+    expect(
+      canvasCommandSubmitSchema.parse({
+        ...baseSubmit,
+        intent: {
+          kind: "update_layout",
+          nodes: [{ nodeId: "task-1", x: 1, y: 2 }],
+          updatedAt: "2026-08-02T00:00:00.000Z"
+        }
+      }).intent
+    ).toMatchObject({ updatedAt: "2026-08-02T00:00:00.000Z" });
+    expect(() =>
+      canvasCommandSubmitSchema.parse({
+        ...baseSubmit,
+        intent: {
+          ...baseSubmit.intent,
+          layout: { nodeId: "task-1", x: 1, y: 2 }
+        }
+      })
+    ).toThrow();
+  });
+
   it("rejects unknown command kinds, unknown fields, and forged client trust fields", () => {
     expect(() =>
       canvasCommandSubmitSchema.parse({

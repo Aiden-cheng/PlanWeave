@@ -11,7 +11,10 @@ import type { createTranslator } from "../i18n";
 import type { PlanWeaveCollaborationApi } from "../../shared/collaboration";
 
 export type SharedCanvasCommandBridge = CanvasCommandBridge &
-  Pick<PlanWeaveCollaborationApi, "resolveCollaborationCanvasScope">;
+  Pick<
+    PlanWeaveCollaborationApi,
+    "resolveCollaborationCanvasScope" | "onCollaborationObserverSignal"
+  >;
 
 export const SHARED_CANVAS_RECONNECT_INTERVAL_MS = 3_000;
 
@@ -183,13 +186,16 @@ export function useSharedCanvasCommands(input: {
     const controller = controllerRef.current;
     const localProjectId = currentScope?.localProjectId ?? null;
     const localCanvasId = currentScope?.localCanvasId ?? null;
-    if (!controller || !sessionEnabled || !localProjectId || !localCanvasId) {
+    if (!api || !controller || !sessionEnabled || !localProjectId || !localCanvasId) {
       void controller?.unbind();
       return undefined;
     }
+    const activeApi = api;
     let active = true;
     let pollInFlight = false;
+    let observerPollQueued = false;
     let intervalId: ReturnType<typeof setInterval> | null = null;
+    let unsubscribeObserver: (() => void) | null = null;
 
     const reportRefreshFailure = (error: unknown) => {
       if (active) controller.reportRefreshFailure(error);
@@ -201,8 +207,12 @@ export function useSharedCanvasCommands(input: {
         reportRefreshFailure(error);
       }
     };
-    const poll = async () => {
-      if (!active || pollInFlight) return;
+    const poll = async (queueWhenBusy = false) => {
+      if (!active) return;
+      if (pollInFlight) {
+        if (queueWhenBusy) observerPollQueued = true;
+        return;
+      }
       pollInFlight = true;
       try {
         const result = await controller.reconnectInBackground();
@@ -210,6 +220,10 @@ export function useSharedCanvasCommands(input: {
         await refreshAuthoritativeState();
       } finally {
         pollInFlight = false;
+        if (active && observerPollQueued) {
+          observerPollQueued = false;
+          void poll(true);
+        }
       }
     };
     const bindAndStartPolling = async () => {
@@ -220,6 +234,29 @@ export function useSharedCanvasCommands(input: {
         if (!snap.session || snap.lastError) return;
         await refreshAuthoritativeState();
         if (!active || controller.getSnapshot().lastError) return;
+        unsubscribeObserver = activeApi.onCollaborationObserverSignal((signal) => {
+          if (
+            signal.type !== "human.observer.event" ||
+            signal.profileId !== input.profileId ||
+            signal.projectId !== currentScope.remoteProjectId ||
+            signal.event.kind !== "canvas" ||
+            signal.event.canvasId !== currentScope.remoteCanvasId
+          ) {
+            return;
+          }
+          const canvasRevision = signal.event.canvasRevision;
+          const canvasContentDigest = signal.event.canvasContentDigest;
+          if (canvasRevision === undefined || canvasContentDigest === undefined) return;
+          const session = controller.getSnapshot().session;
+          if (
+            session &&
+            canvasRevision <= session.revision &&
+            canvasContentDigest === session.contentDigest
+          ) {
+            return;
+          }
+          void poll(true);
+        });
         intervalId = setInterval(() => {
           void poll();
         }, SHARED_CANVAS_RECONNECT_INTERVAL_MS);
@@ -231,12 +268,14 @@ export function useSharedCanvasCommands(input: {
     return () => {
       active = false;
       if (intervalId !== null) clearInterval(intervalId);
+      unsubscribeObserver?.();
     };
   }, [
     currentScope?.localCanvasId,
     currentScope?.localProjectId,
     currentScope?.remoteCanvasId,
     currentScope?.remoteProjectId,
+    input.profileId,
     sessionEnabled
   ]);
 
