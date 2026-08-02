@@ -97,7 +97,12 @@ function toErrorMessage(
   return labels.error(message.code);
 }
 
-/** Renderer read model for one ephemeral canvas presence scope. */
+/**
+ * Renderer read model for one ephemeral canvas presence scope.
+ * Sole owner of local presence replay after reconnect: latestUpdate/pendingUpdate
+ * are flushed when the next snapshot (or peer update) proves the socket is live.
+ * Main-process CollaborationPresenceSession must not also re-publish last state.
+ */
 export class CanvasPresenceController {
   private readonly api: CanvasPresenceBridge;
   private readonly labels: CanvasPresenceLabels;

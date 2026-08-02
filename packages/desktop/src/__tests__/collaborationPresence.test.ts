@@ -241,8 +241,8 @@ describe("desktop canvas presence transport", () => {
     await service.shutdown();
   });
 
-  it("re-publishes the last local presence update after a reconnect snapshot", async () => {
-    const root = await mkdtemp(join(tmpdir(), "planweave-presence-republish-"));
+  it("forwards reconnect snapshots without main-process re-publish (renderer owns replay)", async () => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-presence-no-main-replay-"));
     cleanups.push(() => rm(root, { recursive: true, force: true }));
     const safeStorage = {
       isEncryptionAvailable: () => false,
@@ -252,12 +252,14 @@ describe("desktop canvas presence transport", () => {
     const published: Array<{ pointer: { x: number; y: number } | null; selectionIds: string[] }> =
       [];
     let activeHandlers: CollaborationPresenceHandlers | undefined;
+    const presenceSignals: CollaborationPresenceSignal[] = [];
     const service = new CollaborationService({
       profileStore: new CollaborationProfileStore({ profilesPath: join(root, "profiles.json") }),
       vault: new CollaborationCredentialVault({
         paths: { credentialsPath: join(root, "credentials.json") },
         safeStorage
       }),
+      onPresenceSignal: (signal) => presenceSignals.push(signal),
       createClient: () =>
         ({
           verifyAccess: vi.fn().mockResolvedValue(undefined),
@@ -317,10 +319,12 @@ describe("desktop canvas presence transport", () => {
       canvasId: "default",
       sessions: []
     });
-    expect(published).toEqual([
-      { pointer: { x: 3, y: 4 }, selectionIds: ["T-1"] },
-      { pointer: { x: 3, y: 4 }, selectionIds: ["T-1"] }
-    ]);
+    // Main only forwards the snapshot signal; it must not auto re-send lastUpdate.
+    expect(published).toEqual([{ pointer: { x: 3, y: 4 }, selectionIds: ["T-1"] }]);
+    expect(presenceSignals.at(-1)).toEqual({
+      profileId: "profile-test",
+      message: expect.objectContaining({ type: "canvas.presence.snapshot" })
+    });
     await service.shutdown();
   });
 });

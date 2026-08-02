@@ -1,8 +1,7 @@
 import {
   collaborationPresenceCanvasInputSchema,
   collaborationPresenceUpdateInputSchema,
-  type CollaborationPresenceSignal,
-  type CollaborationPresenceUpdateInput
+  type CollaborationPresenceSignal
 } from "../../shared/collaboration.js";
 import type { CollaborationClient, CollaborationPresenceStatus } from "./CollaborationClient.js";
 import { CollaborationClientError } from "./collaborationErrors.js";
@@ -19,19 +18,21 @@ export type CollaborationPresenceSessionHost = {
 /**
  * Ephemeral canvas presence session state for CollaborationService.
  * Independent from durable canvas command revision tracking.
+ *
+ * Does not cache or re-play local pointer/selection after reconnect — that
+ * responsibility lives solely in the renderer CanvasPresenceController so
+ * offline edits while disconnected are not overwritten by a stale main-process
+ * copy.
  */
 export class CollaborationPresenceSession {
   private presenceCanvasId: string | null = null;
   private presenceGeneration = 0;
-  /** Last local pointer/selection; re-published after each successful snapshot (reconnect). */
-  private lastUpdate: CollaborationPresenceUpdateInput | null = null;
 
   constructor(private readonly host: CollaborationPresenceSessionHost) {}
 
   reset(): void {
     this.presenceGeneration += 1;
     this.presenceCanvasId = null;
-    this.lastUpdate = null;
   }
 
   canvasId(): string | null {
@@ -50,10 +51,6 @@ export class CollaborationPresenceSession {
       });
     }
     if (this.presenceCanvasId === canvasId && client.presenceCanvas() === canvasId) return;
-    // Canvas change drops the previous surface's pointer; same-canvas reconnect keeps lastUpdate.
-    if (this.presenceCanvasId !== canvasId) {
-      this.lastUpdate = null;
-    }
     this.presenceGeneration += 1;
     const generation = this.presenceGeneration;
     this.presenceCanvasId = canvasId;
@@ -66,8 +63,6 @@ export class CollaborationPresenceSession {
       onSnapshot: (message) => {
         if (!isCurrent()) return;
         this.host.publishPresenceSignal({ profileId, message });
-        // Server-accepted reconnect: re-announce last local cursor without requiring a UI gesture.
-        this.republishLastUpdate(client, isCurrent);
       },
       onUpdate: (message) => {
         if (!isCurrent()) return;
@@ -98,7 +93,6 @@ export class CollaborationPresenceSession {
         }
         if (status.state === "auth_expired") {
           this.presenceCanvasId = null;
-          this.lastUpdate = null;
           this.presenceGeneration += 1;
           try {
             client.stopPresence();
@@ -124,7 +118,6 @@ export class CollaborationPresenceSession {
   async stop(): Promise<void> {
     this.presenceGeneration += 1;
     this.presenceCanvasId = null;
-    this.lastUpdate = null;
     try {
       this.host.getClient()?.stopPresence();
     } catch {
@@ -142,20 +135,6 @@ export class CollaborationPresenceSession {
         message: "Canvas presence is not connected."
       });
     }
-    this.lastUpdate = {
-      pointer: parsed.pointer,
-      selectionIds: [...parsed.selectionIds]
-    };
     client.publishPresence(parsed);
-  }
-
-  private republishLastUpdate(client: CollaborationClient, isCurrent: () => boolean): void {
-    const pending = this.lastUpdate;
-    if (!pending || !isCurrent()) return;
-    try {
-      client.publishPresence(pending);
-    } catch {
-      // Socket may still be settling; renderer controller also flushes pending updates.
-    }
   }
 }
