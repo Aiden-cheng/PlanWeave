@@ -16,6 +16,7 @@ import type { ProjectAccessRepository } from "../projectAccessRepository.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { authorizeCanvasRead, authorizeCanvasWrite } from "./policy.js";
 import type { ContentAuthorityStore } from "./contentAuthorityStore.js";
+import type { CanvasScopeKey } from "./repository.js";
 
 function actor(context: CollaborationAuthContext) {
   return { kind: "human" as const, id: context.humanPrincipalId, displayName: context.displayName };
@@ -92,6 +93,15 @@ export class ContentVersionService {
   }
 
   fetch(context: CollaborationAuthContext, rawRequest: unknown) {
+    const authorized = this.authorizeFetch(context, rawRequest);
+    return this.options.repository.readVersion(authorized.scope, authorized.content);
+  }
+
+  /** Validates the request and ACL before a transport adapter starts a content stream. */
+  authorizeFetch(
+    context: CollaborationAuthContext,
+    rawRequest: unknown
+  ): { scope: CanvasScopeKey; content: ReturnType<typeof contentVersionFetchRequestSchema.parse>["content"] } {
     const parsed = contentVersionFetchRequestSchema.safeParse(rawRequest);
     if (!parsed.success) throw new Error("content_fetch_invalid");
     const request = parsed.data;
@@ -109,7 +119,7 @@ export class ContentVersionService {
       deviceSessionId: deviceSessionId(context),
       aclRevision: authorization.aclRevision
     });
-    return this.options.repository.readVersion(authorization.scope, request.content);
+    return { scope: authorization.scope, content: request.content };
   }
 
   discoverAuthority(

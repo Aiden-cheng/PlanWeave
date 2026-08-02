@@ -160,23 +160,36 @@ async function fixture(options?: {
     maxJournalEntries: options?.journalRetention ?? 3
   });
   const runtime = options?.runtime ?? fakeRuntime();
-  const contentVersions = options?.contentVersions
-    ? new ContentVersionRepository(database, () => new Date("2026-01-02T00:00:00.000Z"))
-    : undefined;
+  const contentVersions = new ContentVersionRepository(
+    database,
+    () => new Date("2026-01-02T00:00:00.000Z")
+  );
+  const authorityRuntime = createDefaultCanvasRuntimePort();
+  if (!authorityRuntime.captureContent) throw new Error("authority content capture unavailable");
+  const initialContent = await authorityRuntime.captureContent({
+    projectRoot: workspace.root,
+    canvasId: "default",
+    expectedPackageDir: workspace.init.workspace.packageDir,
+    authorityProjectId: "p"
+  });
+  if (!initialContent.ok) throw new Error(initialContent.detail);
+  contentVersions.publishInitial({
+    scope: { workspaceId: "w", projectId: "p", canvasId: "default" },
+    content: initialContent.content,
+    createdBy: { kind: "human", id: "owner" }
+  });
   const service = new CanvasCommandService({
     repository,
     access,
     workspaceIdentity: new WorkspaceIdentityRepository(database),
     runtime,
     contentVersions,
-    authoritativeCommits: contentVersions
-      ? new SqliteAuthoritativeCanvasCommitStore(
-          database,
-          contentVersions,
-          repository,
-          options?.onAcceptedInCallerTransaction
-        )
-      : undefined,
+    authoritativeCommits: new SqliteAuthoritativeCanvasCommitStore(
+      database,
+      contentVersions,
+      repository,
+      options?.onAcceptedInCallerTransaction
+    ),
     onAcceptedEntry: options?.onAcceptedEntry,
     onAcceptedEntryUnavailable: options?.onAcceptedEntryUnavailable,
     clock: () => new Date("2026-01-02T00:00:00.000Z"),
@@ -220,7 +233,7 @@ function submitBody(
 describe("canvas command service (OSS-004 B-002)", () => {
   it("publishes one complete journal entry only after a durable non-idempotent accept", async () => {
     const published: CanvasJournalEntry[] = [];
-    const { service } = await fixture({
+    const { service, repository } = await fixture({
       onAcceptedEntry: (entry) => published.push(entry),
       onAcceptedEntryUnavailable: () => {}
     });
@@ -246,7 +259,7 @@ describe("canvas command service (OSS-004 B-002)", () => {
 
   it("publishes strictly increasing revisions for consecutive accepted commits", async () => {
     const published: CanvasJournalEntry[] = [];
-    const { service } = await fixture({
+    const { service, repository } = await fixture({
       onAcceptedEntry: (entry) => published.push(entry),
       onAcceptedEntryUnavailable: () => {}
     });
@@ -262,15 +275,19 @@ describe("canvas command service (OSS-004 B-002)", () => {
     const published: CanvasJournalEntry[] = [];
     const { service, repository } = await fixture({
       onAcceptedEntry: (entry) => published.push(entry),
-      onAcceptedEntryUnavailable: () => {}
-    });
-    vi.spyOn(repository, "commitAccepted").mockImplementation(() => {
-      throw new Error("commit_failed");
+      onAcceptedEntryUnavailable: () => {},
+      onAcceptedInCallerTransaction: () => {
+        throw new Error("commit_failed");
+      }
     });
 
     const outcome = await service.submit(actor("owner"), submitBody("op-live-commit-failure", 0));
     expect(outcome).toMatchObject({ type: "canvas.command.rejected", code: "journal_unavailable" });
     expect(published).toEqual([]);
+    expect(repository.head({ workspaceId: "w", projectId: "p", canvasId: "default" }).revision).toBe(0);
+    expect(
+      repository.getOperation({ workspaceId: "w", projectId: "p", canvasId: "default" }, "op-live-commit-failure")
+    ).toBeUndefined();
   });
 
   it("keeps accepted responses stable and invalidates live scope when publication fails", async () => {
@@ -331,7 +348,7 @@ describe("canvas command service (OSS-004 B-002)", () => {
 
   it("migrates v30 and enforces CAS + operationId idempotency", async () => {
     const { service, repository, runtime, database } = await fixture();
-    expect(latestCentralSchemaVersion).toBe(41);
+    expect(latestCentralSchemaVersion).toBe(42);
     expect(
       database
         .prepare(
@@ -348,7 +365,7 @@ describe("canvas command service (OSS-004 B-002)", () => {
       previousRevision: 0,
       idempotentReplay: false
     });
-    expect((runtime as ReturnType<typeof fakeRuntime>).calls).toBe(1);
+    expect((runtime as ReturnType<typeof fakeRuntime>).calls).toBe(0);
 
     const replay = await service.submit(actor("owner"), submitBody("op-1", 0));
     expect(replay.type).toBe("canvas.command.accepted");
@@ -356,7 +373,7 @@ describe("canvas command service (OSS-004 B-002)", () => {
     expect(replay.idempotentReplay).toBe(true);
     expect(replay.revision).toBe(first.revision);
     expect(replay.journalEntryId).toBe(first.journalEntryId);
-    expect((runtime as ReturnType<typeof fakeRuntime>).calls).toBe(1);
+    expect((runtime as ReturnType<typeof fakeRuntime>).calls).toBe(0);
 
     const conflict = await service.submit(
       actor("owner"),
@@ -380,6 +397,79 @@ describe("canvas command service (OSS-004 B-002)", () => {
     expect(
       repository.head({ workspaceId: "w", projectId: "p", canvasId: "default" }).revision
     ).toBe(2);
+  });
+
+  it("rejects a stale intent base content digest before it can advance authority", async () => {
+    const { service, repository } = await fixture();
+    const outcome = await service.submit(
+      actor("owner"),
+      submitBody("op-base-digest", 0, {
+        kind: "update_task_prompt",
+        taskId: "T-001",
+        promptMarkdown: "# stale base\n",
+        baseContentDigest: "f".repeat(64)
+      })
+    );
+    expect(outcome).toMatchObject({
+      type: "canvas.command.rejected",
+      code: "operation_conflict",
+      detail: "base_content_digest_mismatch"
+    });
+    expect(repository.head({ workspaceId: "w", projectId: "p", canvasId: "default" }).revision).toBe(0);
+  });
+
+  it("rejects mixed bulk base content digests without advancing either head", async () => {
+    const { service, repository, contentVersions } = await fixture();
+    const scope = { workspaceId: "w", projectId: "p", canvasId: "default" };
+    const current = contentVersions.head(scope);
+    if (!current) throw new Error("expected initial content head");
+    const outcome = await service.submit(
+      actor("owner"),
+      submitBody("op-bulk-mixed-digest", 0, {
+        kind: "bulk_update_blocks",
+        updates: [
+          {
+            blockRef: "T-001#B-001",
+            fields: { title: "Current", baseContentDigest: current.content.canonicalDigest }
+          },
+          {
+            blockRef: "T-001#B-001",
+            fields: { title: "Stale", baseContentDigest: "f".repeat(64) }
+          }
+        ]
+      })
+    );
+    expect(outcome).toMatchObject({
+      type: "canvas.command.rejected",
+      code: "operation_conflict",
+      detail: "base_content_digest_mismatch"
+    });
+    expect(repository.head(scope).revision).toBe(0);
+    expect(contentVersions.head(scope)?.revision).toBe(1);
+  });
+
+  it("rolls back content and canvas visibility when the atomic commit fails after content head advance", async () => {
+    const published: CanvasJournalEntry[] = [];
+    const { database, service, repository, contentVersions } = await fixture({
+      onAcceptedInCallerTransaction: () => {
+        throw new Error("forced_commit_failure");
+      },
+      onAcceptedEntry: (entry) => published.push(entry),
+      onAcceptedEntryUnavailable: () => {
+        throw new Error("observer must not publish a rolled back command");
+      }
+    });
+    const scope = { workspaceId: "w", projectId: "p", canvasId: "default" };
+    const beforeContent = contentVersions.head(scope);
+    const outcome = await service.submit(actor("owner"), submitBody("op-rollback-after-content", 0));
+    expect(outcome).toMatchObject({ type: "canvas.command.rejected", code: "journal_unavailable" });
+    expect(contentVersions.head(scope)).toEqual(beforeContent);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM canvas_content_journal").get()?.count).toBe(1);
+    expect(repository.head(scope).revision).toBe(0);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM canvas_command_journal").get()?.count).toBe(0);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM canvas_command_operations").get()?.count).toBe(0);
+    expect(published).toEqual([]);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM canvas_content_versions").get()?.count).toBe(2);
   });
 
   it("serializes concurrent writers so only one CAS winner advances revision", async () => {
@@ -439,8 +529,8 @@ describe("canvas command service (OSS-004 B-002)", () => {
       })
     );
     await new Promise((resolve) => setTimeout(resolve, 20));
-    // Second writer must wait on the canvas chain before runtime apply.
-    expect(enterCount).toBe(1);
+    // Pure authority reduction does not invoke local package mutation.
+    expect(enterCount).toBe(0);
     releaseFirst();
     const [first, second] = await Promise.all([firstPromise, secondPromise]);
     const accepted = [first, second].filter((item) => item.type === "canvas.command.accepted");
@@ -448,7 +538,7 @@ describe("canvas command service (OSS-004 B-002)", () => {
     expect(accepted).toHaveLength(1);
     expect(rejected).toHaveLength(1);
     expect(rejected[0]).toMatchObject({ code: "stale_revision" });
-    expect(enterCount).toBe(1);
+    expect(enterCount).toBe(0);
   });
 
   it("rejects viewer writes and ACL-revoked editors", async () => {
@@ -544,13 +634,9 @@ describe("canvas command service (OSS-004 B-002)", () => {
   });
 
   it("rejects a revision-zero delta when the client baseline digest differs", async () => {
-    const { service, repository } = await fixture();
+    const { service } = await fixture();
     const accepted = await service.submit(actor("owner"), submitBody("op-baseline", 0));
     expect(accepted.type).toBe("canvas.command.accepted");
-    expect(
-      repository.getSnapshot({ workspaceId: "w", projectId: "p", canvasId: "default" }, 0)
-        ?.metadata.contentDigest
-    ).toMatch(/^[a-f0-9]{64}$/);
 
     const response = await service.reconnect(actor("editor"), {
       type: "canvas.reconnect.request",
@@ -564,7 +650,6 @@ describe("canvas command service (OSS-004 B-002)", () => {
 
     expect(response).toMatchObject({
       type: "canvas.reconnect.snapshot",
-      reason: "digest_mismatch",
       afterRevision: 0
     });
   });
@@ -617,8 +702,10 @@ describe("canvas command service (OSS-004 B-002)", () => {
     });
   });
 
-  it("applies a real runtime package mutation through the narrow port", async () => {
-    const { service } = await fixture({ runtime: createDefaultCanvasRuntimePort() });
+  it("accepts authority commits when server-local materialization is unavailable", async () => {
+    const runtime = createDefaultCanvasRuntimePort();
+    const materialize = vi.spyOn(runtime, "apply").mockRejectedValue(new Error("local_disk_unavailable"));
+    const { service } = await fixture({ runtime });
     const outcome = await service.submit(actor("owner"), {
       type: "canvas.command.submit",
       protocolVersion: CANVAS_COMMAND_PROTOCOL_VERSION,
@@ -638,9 +725,10 @@ describe("canvas command service (OSS-004 B-002)", () => {
     }
     expect(outcome.revision).toBe(1);
     expect(outcome.contentDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(materialize).not.toHaveBeenCalled();
   });
 
-  it("recovers crash after apply by aligning journal to package digest without double mutation", async () => {
+  it("clears obsolete pending recovery without reading or promoting owner package state", async () => {
     const scope = { workspaceId: "w", projectId: "p", canvasId: "default" };
     let digest = digestOf("empty");
     let applyCalls = 0;
@@ -688,7 +776,6 @@ describe("canvas command service (OSS-004 B-002)", () => {
       intent
     });
     expect(applyCalls).toBe(1);
-    const packageDigestAfterApply = digest;
 
     repository.reservePending({
       scope,
@@ -701,91 +788,30 @@ describe("canvas command service (OSS-004 B-002)", () => {
     repository.markPendingNeedsRecovery(scope, "op-crash-apply");
 
     const recovery = await service.recoverInterrupted();
-    expect(recovery).toMatchObject({ cleared: 1, recovered: 1 });
+    expect(recovery).toEqual({ cleared: 1, recovered: 0, deferred: 0 });
     const head = repository.head(scope);
-    expect(head.revision).toBe(1);
-    expect(head.contentDigest).toBe(packageDigestAfterApply);
-
-    // Same operationId replays accepted outcome — no second apply.
-    const replay = await service.submit(actor("owner"), submitBody("op-crash-apply", 0, intent));
-    expect(replay.type).toBe("canvas.command.accepted");
-    if (replay.type === "canvas.command.accepted") {
-      expect(replay.idempotentReplay).toBe(true);
-      expect(replay.revision).toBe(1);
-      expect(replay.contentDigest).toBe(packageDigestAfterApply);
-    }
-    expect(applyCalls).toBe(1);
-
-    // Fresh opId at stale revision is rejected (no double mutation).
-    const staleRetry = await service.submit(
-      actor("owner"),
-      submitBody("op-crash-retry", 0, {
-        kind: "update_task_prompt",
-        taskId: "T-001",
-        promptMarkdown: "# would double apply\n"
-      })
-    );
-    expect(staleRetry).toMatchObject({
-      type: "canvas.command.rejected",
-      code: "stale_revision",
-      conflict: { expectedRevision: 0, authoritativeRevision: 1 }
-    });
+    expect(head.revision).toBe(0);
+    expect(repository.getOperation(scope, "op-crash-apply")).toBeUndefined();
     expect(applyCalls).toBe(1);
   });
 
-  it("recovers immutable content and both authority heads in one accepted commit", async () => {
+  it("commits immutable content and both authority heads in one accepted transaction", async () => {
     const runtime = createDefaultCanvasRuntimePort();
     const acceptedCommits: CanvasCommandAccepted[] = [];
     const { workspace, database, access, repository, service, contentVersions } = await fixture({
       runtime,
-      contentVersions: true,
       onAcceptedInCallerTransaction: (accepted) => acceptedCommits.push(accepted)
     });
     if (!contentVersions || !runtime.captureContent)
       throw new Error("content version fixture unavailable");
     const scope = { workspaceId: "w", projectId: "p", canvasId: "default" };
-    const runtimeApi = await import("@planweave-ai/runtime");
-    await runtimeApi.saveDesktopLayout(workspace.root, {
-      version: "desktop-layout/v1",
-      projectId: workspace.init.workspace.id,
-      nodes: [],
-      updatedAt: "2026-01-02T00:00:00.000Z"
-    });
-    const initialCapture = await runtime.captureContent({
-      projectRoot: workspace.root,
-      canvasId: "default",
-      expectedPackageDir: workspace.init.workspace.packageDir
-    });
-    if (!initialCapture.ok) throw new Error(initialCapture.detail);
-    contentVersions.publishInitial({
-      scope,
-      content: initialCapture.content,
-      createdBy: { kind: "human", id: "owner" }
-    });
-
     const intent: CanvasCommandIntent = {
       kind: "update_task_prompt",
       taskId: "T-001",
       promptMarkdown: "# recovered authoritative prompt\n"
     };
-    const applied = await runtime.apply({
-      projectRoot: workspace.root,
-      canvasId: "default",
-      expectedPackageDir: workspace.init.workspace.packageDir,
-      intent
-    });
-    if (!applied.ok) throw new Error(applied.detail);
-    repository.reservePending({
-      scope,
-      operationId: "op-content-recovery",
-      expectedRevision: 0,
-      intent,
-      intentDigest: digestCanvasIntent(intent),
-      actor: { kind: "human", id: "owner" }
-    });
-    repository.markPendingNeedsRecovery(scope, "op-content-recovery");
-
-    expect(await service.recoverInterrupted()).toEqual({ cleared: 1, recovered: 1, deferred: 0 });
+    const accepted = await service.submit(actor("owner"), submitBody("op-content-authority", 0, intent));
+    expect(accepted).toMatchObject({ type: "canvas.command.accepted", revision: 1 });
     const canvasHead = repository.head(scope);
     const contentHead = contentVersions.head(scope);
     expect(canvasHead).toMatchObject({ revision: 1 });
@@ -795,14 +821,14 @@ describe("canvas command service (OSS-004 B-002)", () => {
     expect(contentVersions.journalAfter(scope, 1)).toEqual([
       expect.objectContaining({ revision: 2, content: contentHead.content })
     ]);
-    expect(repository.getOperation(scope, "op-content-recovery")?.outcome).toMatchObject({
+    expect(repository.getOperation(scope, "op-content-authority")?.outcome).toMatchObject({
       type: "canvas.command.accepted",
       contentDigest: contentHead.content.canonicalDigest
     });
     expect(acceptedCommits).toEqual([
       expect.objectContaining({
         scope,
-        operationId: "op-content-recovery",
+        operationId: "op-content-authority",
         revision: 1,
         contentDigest: contentHead.content.canonicalDigest
       })
@@ -820,7 +846,7 @@ describe("canvas command service (OSS-004 B-002)", () => {
     expect(fetched.completed).toEqual(contentHead.content);
   });
 
-  it("keeps an unreadable crash-recovery package pending and fences writes until it reconciles", async () => {
+  it("never reads an owner package to recover an obsolete pending command", async () => {
     const scope = { workspaceId: "w", projectId: "p", canvasId: "default" };
     let digest = digestOf("empty");
     let digestReadable = false;
@@ -886,11 +912,7 @@ describe("canvas command service (OSS-004 B-002)", () => {
     });
     repository.markPendingNeedsRecovery(scope, "op-unreadable-recovery");
 
-    expect(await restarted.recoverInterrupted()).toEqual({
-      cleared: 0,
-      recovered: 0,
-      deferred: 1
-    });
+    expect(await restarted.recoverInterrupted()).toEqual({ cleared: 1, recovered: 0, deferred: 0 });
     expect(
       database
         .prepare(
@@ -899,31 +921,14 @@ describe("canvas command service (OSS-004 B-002)", () => {
              AND operation_id='op-unreadable-recovery'`
         )
         .get()
-    ).toEqual({ status: "needs_recovery" });
-
-    const blocked = await restarted.submit(actor("owner"), submitBody("op-blocked-recovery", 0));
-    expect(blocked).toMatchObject({
-      type: "canvas.command.rejected",
-      code: "journal_unavailable",
-      detail: "canvas_recovery_pending"
-    });
+    ).toBeUndefined();
     expect(applyCalls).toBe(1);
-
-    digestReadable = true;
-    expect(await restarted.recoverInterrupted()).toEqual({
-      cleared: 1,
-      recovered: 1,
-      deferred: 0
-    });
     expect(repository.listNeedsRecovery()).toEqual([]);
-    expect(repository.head(scope)).toMatchObject({ revision: 1, contentDigest: digest });
-
-    const accepted = await restarted.submit(actor("owner"), submitBody("op-after-recovery", 1));
-    expect(accepted.type).toBe("canvas.command.accepted");
-    expect(applyCalls).toBe(2);
+    expect(repository.head(scope)).toMatchObject({ revision: 0 });
+    void digestReadable;
   });
 
-  it("returns snapshot_malformed when reconnect needs a snapshot that is corrupt", async () => {
+  it("serves reconnect snapshots from the content head rather than digest-only snapshot rows", async () => {
     const { service, repository } = await fixture();
     const accepted = await service.submit(actor("owner"), submitBody("op-snap-1", 0));
     expect(accepted.type).toBe("canvas.command.accepted");
@@ -948,9 +953,9 @@ describe("canvas command service (OSS-004 B-002)", () => {
       canvasId: "default",
       afterRevision: 99
     });
-    expect(forced.type).toBe("canvas.reconnect.error");
-    if (forced.type === "canvas.reconnect.error") {
-      expect(forced.code).toBe("snapshot_malformed");
+    expect(forced.type).toBe("canvas.reconnect.snapshot");
+    if (forced.type === "canvas.reconnect.snapshot") {
+      expect(forced.snapshot.content.canonicalDigest).toBe(head.contentDigest);
     }
     void response;
   });

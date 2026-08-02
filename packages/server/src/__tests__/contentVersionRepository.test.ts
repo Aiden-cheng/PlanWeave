@@ -88,6 +88,56 @@ function content(updatedAt = "2026-01-01T00:00:00.000Z"): CompleteContentVersion
   };
 }
 
+function caseDistinctContent(): CompleteContentVersion {
+  const base = content();
+  const manifestMember = base.members.find((member) => member.kind === "manifest");
+  if (!manifestMember) throw new Error("expected manifest member");
+  const manifest = JSON.parse(manifestMember.content) as {
+    nodes: Array<{
+      id: string;
+      prompt: string;
+      blocks: Array<{ id: string; prompt: string }>;
+    }>;
+  };
+  const template = manifest.nodes[0];
+  if (!template) throw new Error("expected manifest task");
+  manifest.nodes = ["a", "A"].map((id) => ({
+    ...template,
+    id,
+    prompt: `nodes/${id}/prompt.md`,
+    blocks: template.blocks.map((block) => ({
+      ...block,
+      prompt: `nodes/${id}/blocks/${block.id}.prompt.md`
+    }))
+  }));
+  const members = [
+    ...base.members.filter((member) => member.kind === "desktop_layout"),
+    { ...manifestMember, content: JSON.stringify(manifest) },
+    ...manifest.nodes.flatMap((node) => [
+      { kind: "task_prompt" as const, path: node.prompt, content: `# ${node.id}\n` },
+      ...node.blocks.map((block) => ({
+        kind: "block_prompt" as const,
+        path: block.prompt,
+        content: `# ${node.id}-${block.id}\n`
+      }))
+    ])
+  ]
+    .map((member) => ({
+      ...member,
+      digestSha256: sha256(member.content),
+      sizeBytes: Buffer.byteLength(member.content)
+    }))
+    .sort((left, right) => left.path.localeCompare(right.path));
+  const totalBytes = members.reduce((sum, member) => sum + member.sizeBytes, 0);
+  return {
+    members,
+    totalBytes,
+    canonicalDigest: sha256(
+      canonicalContentVersionDigestPayload({ members, totalBytes, canonicalDigest: "0".repeat(64) })
+    )
+  };
+}
+
 async function fixture() {
   const workspace = await createTestWorkspace();
   directories.push(workspace.home, workspace.root);
@@ -159,7 +209,7 @@ const member = {
 describe("authoritative content version repository", () => {
   it("persists a verified owner-only initial version before creating the first head", async () => {
     const { repository, service } = await fixture();
-    expect(latestCentralSchemaVersion).toBe(41);
+    expect(latestCentralSchemaVersion).toBe(42);
     const result = service.publishInitial(owner, {
       projectId: "p",
       canvasId: "default",
@@ -179,6 +229,27 @@ describe("authoritative content version repository", () => {
     expect(
       repository.journalAfter({ workspaceId: "w", projectId: "p", canvasId: "default" }, 0)
     ).toHaveLength(1);
+  });
+
+  it("retains canonical locale ordering when SQLite ordering differs", async () => {
+    const { repository } = await fixture();
+    const value = caseDistinctContent();
+    const scope = { workspaceId: "w", projectId: "p", canvasId: "default" };
+    const stored = repository.persistImmutable({
+      scope,
+      content: value,
+      createdBy: { kind: "human", id: "owner" }
+    });
+    const expectedPaths = value.members.map((member) => member.path);
+    expect(expectedPaths.indexOf("nodes/a/prompt.md")).toBeLessThan(
+      expectedPaths.indexOf("nodes/A/prompt.md")
+    );
+    expect(repository.readVersion(scope, stored.completed).content.members.map((member) => member.path)).toEqual(
+      expectedPaths
+    );
+    expect([...repository.openTransfer(scope, stored.completed).members].map((member) => member.path)).toEqual(
+      expectedPaths
+    );
   });
 
   it("fails closed for malformed digest, non-owner publication, and first-head races", async () => {

@@ -137,6 +137,11 @@ export const CONTENT_VERSION_MAX_MEMBERS = PACKAGE_SNAPSHOT_MAX_PROMPT_DIGESTS +
 export const CONTENT_VERSION_MAX_MEMBER_BYTES = PACKAGE_SNAPSHOT_MAX_FILE_BYTES;
 export const CONTENT_VERSION_MAX_TOTAL_BYTES = PACKAGE_SNAPSHOT_MAX_TOTAL_BYTES;
 export const CONTENT_VERSION_MAX_REASON_LENGTH = 512 as const;
+/** NDJSON transfer frames include JSON escaping, so their wire ceiling is larger than member bytes. */
+export const CONTENT_VERSION_TRANSFER_MAX_FRAME_BYTES = CONTENT_VERSION_MAX_MEMBER_BYTES * 6 + 65_536;
+/** The aggregate escaped wire budget, including header and completion frames. */
+export const CONTENT_VERSION_TRANSFER_MAX_WIRE_BYTES = CONTENT_VERSION_MAX_TOTAL_BYTES * 6 +
+  (CONTENT_VERSION_MAX_MEMBERS + 2) * 65_536;
 
 /**
  * One-time Workspace setup code budgets.

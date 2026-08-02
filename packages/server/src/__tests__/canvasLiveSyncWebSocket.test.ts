@@ -1,20 +1,53 @@
 import { createServer, type Server as HttpServer } from "node:http";
+import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { CanvasCommandRepository } from "../canvas/repository.js";
+import { ContentVersionRepository } from "../canvas/contentVersionRepository.js";
 import { attachCanvasLiveSyncWebSocketServer } from "../canvas/canvasLiveSyncWebSocket.js";
 import { CanvasCommandService } from "../canvas/service.js";
+import { SqliteAuthoritativeCanvasCommitStore } from "../canvas/sqliteAuthoritativeCanvasCommitStore.js";
 import { HumanIdentityRepository } from "../identity/repository.js";
 import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { applyMigrations } from "../migrations.js";
 import { ProjectAccessRepository } from "../projectAccessRepository.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 import { WebSocketUpgradeRouter } from "../webSocketUpgradeRouter.js";
+import {
+  canonicalContentVersionDigestPayload,
+  type CompleteContentVersion
+} from "@planweave-ai/collaboration-contracts";
 
 const servers: HttpServer[] = [];
 const databases: SqliteDatabase[] = [];
 const liveServers: Array<{ close(): Promise<void> }> = [];
 const sockets: WebSocket[] = [];
+
+function initialContent(): CompleteContentVersion {
+  const digest = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
+  const members = [
+    {
+      kind: "desktop_layout" as const,
+      path: "desktop/layout.json",
+      content: JSON.stringify({ version: "desktop-layout/v1", projectId: "project-live", nodes: [], updatedAt: "2026-08-02T00:00:00.000Z" })
+    },
+    {
+      kind: "manifest" as const,
+      path: "manifest.json",
+      content: JSON.stringify({ version: "plan-package/v1", project: { title: "Plan", description: "" }, execution: { parallel: { enabled: false, maxConcurrent: 1 } }, review: { maxFeedbackCycles: 1, completionPolicy: "strict" }, executors: {}, nodes: [{ id: "T-001", type: "task", title: "Task", prompt: "nodes/T-001/prompt.md", acceptance: ["done"], blocks: [{ id: "B-001", type: "implementation", title: "Block", prompt: "nodes/T-001/blocks/B-001.prompt.md" }] }], edges: [] })
+    },
+    { kind: "task_prompt" as const, path: "nodes/T-001/prompt.md", content: "# Task\n" },
+    { kind: "block_prompt" as const, path: "nodes/T-001/blocks/B-001.prompt.md", content: "# Block\n" }
+  ]
+    .map((member) => ({ ...member, digestSha256: digest(member.content), sizeBytes: Buffer.byteLength(member.content, "utf8") }))
+    .sort((left, right) => left.path.localeCompare(right.path));
+  const totalBytes = members.reduce((sum, member) => sum + member.sizeBytes, 0);
+  return {
+    members,
+    totalBytes,
+    canonicalDigest: digest(canonicalContentVersionDigestPayload({ members, totalBytes, canonicalDigest: "0".repeat(64) }))
+  };
+}
 
 afterEach(async () => {
   for (const socket of sockets.splice(0)) socket.terminate();
@@ -75,12 +108,19 @@ async function setup() {
   const repository = new CanvasCommandRepository(database, {
     clock: () => new Date("2026-08-02T00:00:00.000Z")
   });
+  const contentVersions = new ContentVersionRepository(database, () => new Date("2026-08-02T00:00:00.000Z"));
+  contentVersions.publishInitial({
+    scope: { workspaceId, projectId: "project-live", canvasId: "default" },
+    content: initialContent(),
+    createdBy: { kind: "human", id: "owner", displayName: "Owner" }
+  });
   const httpServer = createServer();
   servers.push(httpServer);
   const router = new WebSocketUpgradeRouter(httpServer);
   const live = attachCanvasLiveSyncWebSocketServer({
     upgradeRouter: router,
     repository,
+    contentVersions,
     identityRepository: identity,
     workspaceIdentity,
     projectAccess: access,
@@ -100,10 +140,12 @@ async function setup() {
   const address = httpServer.address();
   if (!address || typeof address === "string") throw new Error("expected TCP listener");
   return {
+    database,
     live,
     access,
     workspaceIdentity,
     repository,
+    contentVersions,
     scope: { workspaceId, projectId: "project-live", canvasId: "default" },
     ownerToken: owner.deviceToken,
     viewerToken: viewer.deviceToken,
@@ -321,6 +363,12 @@ describe("canvas live sync WebSocket", () => {
           };
         }
       },
+      contentVersions: fixture.contentVersions,
+      authoritativeCommits: new SqliteAuthoritativeCanvasCommitStore(
+        fixture.database,
+        fixture.contentVersions,
+        fixture.repository
+      ),
       onAcceptedEntry: () => {
         throw new Error("live_publish_failed");
       },

@@ -218,7 +218,7 @@ describe("ContentVersionFacade", () => {
       })
     );
     expect(fake.calls.fetchContentVersion).toHaveBeenCalledWith(
-      expect.objectContaining({ canvasId: "default" })
+      expect.objectContaining({ scope: expect.objectContaining({ canvasId: "default" }) })
     );
     expect(fake.calls.acknowledgeContentVersion).toHaveBeenCalledTimes(2);
   });
@@ -467,7 +467,7 @@ describe("ContentVersionFacade", () => {
     await owner.bind({ localProjectId: workspace.init.project.id, canvasId: "default" });
     const published = await owner.publishInitial();
     const fetched = await fake.client.fetchContentVersion({
-      canvasId: "default",
+      scope: published.authoritativeHead!.scope,
       content: published.authoritativeHead!.content
     });
     await rm(workspace.init.workspace.workspaceRoot, { recursive: true, force: true });
@@ -515,7 +515,7 @@ describe("ContentVersionFacade", () => {
     const published = await owner.publishInitial();
     const headRef = published.authoritativeHead!.content;
     const fetched = await fake.client.fetchContentVersion({
-      canvasId: "default",
+      scope: published.authoritativeHead!.scope,
       content: headRef
     });
     await rm(workspace.init.workspace.workspaceRoot, { recursive: true, force: true });

@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer, WebSocket } from "ws";
 import {
@@ -12,6 +13,8 @@ import {
   exampleObserverWelcome,
   exampleSecretsForRedaction,
   accessCapabilityFlags,
+  CONTENT_VERSION_MAX_TOTAL_BYTES,
+  contentVersionTransferMediaType,
   HUMAN_OBSERVER_PROTOCOL_VERSION
 } from "@planweave-ai/collaboration-contracts";
 import {
@@ -64,6 +67,47 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   res.end(bytes);
 }
 
+const transferScope = {
+  workspaceId: "workspace-demo-001",
+  projectId: "project-demo-001",
+  canvasId: "canvas-demo-001"
+};
+const transferDigest = "a".repeat(64);
+const transferRef = {
+  versionId: `version-${transferDigest}`,
+  canonicalDigest: transferDigest,
+  verification: "complete" as const
+};
+const transferMembers = [
+  { kind: "desktop_layout" as const, path: "desktop/layout.json", content: "{}" },
+  { kind: "manifest" as const, path: "manifest.json", content: "{}" }
+].map((member) => ({
+  ...member,
+  digestSha256: createHash("sha256").update(member.content, "utf8").digest("hex"),
+  sizeBytes: Buffer.byteLength(member.content, "utf8")
+}));
+
+function transferHeader(overrides: Record<string, unknown> = {}) {
+  return {
+    type: "header",
+    schemaVersion: "content-version/v1",
+    scope: transferScope,
+    completed: transferRef,
+    canonicalDigest: transferDigest,
+    totalBytes: transferMembers.reduce((total, member) => total + member.sizeBytes, 0),
+    memberCount: transferMembers.length,
+    createdAt: "2026-08-01T00:00:00.000Z",
+    createdBy: { kind: "human", id: "owner" },
+    ...overrides
+  };
+}
+
+function ndjson(res: ServerResponse, frames: unknown[], end = true): void {
+  res.writeHead(200, { "content-type": `${contentVersionTransferMediaType}; charset=utf-8` });
+  for (const frame of frames) res.write(`${JSON.stringify(frame)}\n`);
+  if (end) res.end();
+}
+
 describe("CollaborationClient", () => {
   const cleanups: Array<() => Promise<void>> = [];
   afterEach(async () => {
@@ -104,6 +148,128 @@ describe("CollaborationClient", () => {
       random: () => 0
     });
   }
+
+  it("rejects oversized content transfer headers before accumulating members", async () => {
+    const fixture = await listen((_req, res) => {
+      ndjson(res, [transferHeader({ totalBytes: CONTENT_VERSION_MAX_TOTAL_BYTES + 1 })]);
+    });
+    cleanups.push(fixture.close);
+    const client = clientFor(fixture.origin, { token: exampleHumanDeviceToken });
+    await expect(
+      client.fetchContentVersion({ scope: transferScope, content: transferRef })
+    ).rejects.toMatchObject({ code: "content_transfer_frame_schema_invalid" });
+    client.dispose();
+  });
+
+  it("rejects oversized transfer error bodies without a declared length", async () => {
+    const fixture = await listen((_req, res) => {
+      res.writeHead(500, { "content-type": "application/json; charset=utf-8" });
+      res.end("x".repeat(4_097));
+    });
+    cleanups.push(fixture.close);
+    const client = clientFor(fixture.origin, { token: exampleHumanDeviceToken });
+    await expect(
+      client.fetchContentVersion({ scope: transferScope, content: transferRef })
+    ).rejects.toMatchObject({ code: "collaboration_response_too_large" });
+    client.dispose();
+  });
+
+  it("rejects transfer media types that only share the expected prefix", async () => {
+    const fixture = await listen((_req, res) => {
+      res.writeHead(200, { "content-type": `${contentVersionTransferMediaType}-evil` });
+      res.end();
+    });
+    cleanups.push(fixture.close);
+    const client = clientFor(fixture.origin, { token: exampleHumanDeviceToken });
+    await expect(
+      client.fetchContentVersion({ scope: transferScope, content: transferRef })
+    ).rejects.toMatchObject({ code: "content_transfer_media_type_invalid" });
+    client.dispose();
+  });
+
+  it("fails closed for malformed content transfer order, digest, scope, and unterminated frames", async () => {
+    const cases = [
+      {
+        name: "member before header",
+        frames: [{ type: "member", index: 0, member: transferMembers[0] }],
+        end: true,
+        code: "content_transfer_header_missing"
+      },
+      {
+        name: "wrong digest",
+        frames: [
+          transferHeader(),
+          { type: "member", index: 0, member: { ...transferMembers[0], digestSha256: "b".repeat(64) } }
+        ],
+        end: true,
+        code: "content_transfer_member_digest_invalid"
+      },
+      {
+        name: "wrong workspace",
+        frames: [transferHeader({ scope: { ...transferScope, workspaceId: "workspace-other" } })],
+        end: true,
+        code: "content_transfer_authority_mismatch"
+      },
+      {
+        name: "cumulative bytes exceed declared total",
+        frames: [
+          transferHeader({ totalBytes: 4, memberCount: 3 }),
+          { type: "member", index: 0, member: transferMembers[0] },
+          { type: "member", index: 1, member: transferMembers[1] },
+          {
+            type: "member",
+            index: 2,
+            member: {
+              kind: "task_prompt",
+              path: "nodes/T-001/prompt.md",
+              content: "abc",
+              digestSha256: createHash("sha256").update("abc", "utf8").digest("hex"),
+              sizeBytes: 3
+            }
+          }
+        ],
+        end: true,
+        code: "content_transfer_total_bytes_invalid"
+      },
+      {
+        name: "unterminated",
+        frames: [],
+        end: false,
+        code: "content_transfer_frame_unterminated"
+      }
+    ] as const;
+    for (const testCase of cases) {
+      const fixture = await listen((_req, res) => {
+        if (testCase.name === "unterminated") {
+          res.writeHead(200, { "content-type": `${contentVersionTransferMediaType}; charset=utf-8` });
+          res.end(JSON.stringify(transferHeader()));
+          return;
+        }
+        ndjson(res, [...testCase.frames], testCase.end);
+      });
+      cleanups.push(fixture.close);
+      const client = clientFor(fixture.origin, { token: exampleHumanDeviceToken });
+      await expect(
+        client.fetchContentVersion({ scope: transferScope, content: transferRef })
+      ).rejects.toMatchObject({ code: testCase.code });
+      client.dispose();
+    }
+  });
+
+  it("keeps the stream deadline active until content transfer body consumption completes", async () => {
+    const fixture = await listen((_req, res) => {
+      ndjson(res, [transferHeader()], false);
+    });
+    cleanups.push(fixture.close);
+    const client = clientFor(fixture.origin, {
+      token: exampleHumanDeviceToken,
+      limits: { requestTimeoutMs: 25 }
+    });
+    await expect(
+      client.fetchContentVersion({ scope: transferScope, content: transferRef })
+    ).rejects.toMatchObject({ code: "collaboration_timeout" });
+    client.dispose();
+  });
 
   it("lists members through application-shaped methods and validates responses", async () => {
     const fixture = await listen(async (req, res) => {

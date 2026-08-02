@@ -428,7 +428,7 @@ export class CanvasCommandRepository {
           `INSERT INTO canvas_command_snapshots(
              workspace_id,project_id,canvas_id,revision,content_digest,created_at,
              package_snapshot_id,digest_manifest_json,size_bytes,encoding,integrity
-           ) VALUES(?,?,?,?,?,?,NULL,?,?,'digest_manifest_only','verified')`
+          ) VALUES(?,?,?,?,?,?,NULL,?,?,'content_version_ref','verified')`
         )
         .run(
           scope.workspaceId,
@@ -476,6 +476,7 @@ export class CanvasCommandRepository {
     intentDigest: string;
     actor: ActorRef;
     previousRevision: number;
+    expectedContentDigest?: string;
     revision: number;
     contentDigest: string;
     digestManifest?: PackageSnapshotDigestManifest;
@@ -493,6 +494,7 @@ export class CanvasCommandRepository {
     intentDigest: string;
     actor: ActorRef;
     previousRevision: number;
+    expectedContentDigest?: string;
     revision: number;
     contentDigest: string;
     digestManifest?: PackageSnapshotDigestManifest;
@@ -559,23 +561,27 @@ export class CanvasCommandRepository {
           JSON.stringify(journalEntry)
         );
 
-    this.database
-        .prepare(
-          `INSERT INTO canvas_command_heads(workspace_id,project_id,canvas_id,revision,content_digest,updated_at)
-           VALUES(?,?,?,?,?,?)
-           ON CONFLICT(workspace_id,project_id,canvas_id) DO UPDATE SET
-             revision=excluded.revision,
-             content_digest=excluded.content_digest,
-             updated_at=excluded.updated_at`
-        )
-        .run(
-          input.scope.workspaceId,
-          input.scope.projectId,
-          input.scope.canvasId,
-          input.revision,
-          input.contentDigest,
-          acceptedAt
-        );
+    const headWrite = this.database
+      .prepare(
+        `INSERT INTO canvas_command_heads(workspace_id,project_id,canvas_id,revision,content_digest,updated_at)
+         VALUES(?,?,?,?,?,?)
+         ON CONFLICT(workspace_id,project_id,canvas_id) DO UPDATE SET
+           revision=excluded.revision,
+           content_digest=excluded.content_digest,
+           updated_at=excluded.updated_at
+         WHERE canvas_command_heads.revision=? AND canvas_command_heads.content_digest=?`
+      )
+      .run(
+        input.scope.workspaceId,
+        input.scope.projectId,
+        input.scope.canvasId,
+        input.revision,
+        input.contentDigest,
+        acceptedAt,
+        input.previousRevision,
+        input.expectedContentDigest ?? this.head(input.scope).contentDigest
+      );
+    if (headWrite.changes !== 1) throw new Error("canvas_command_head_cas_conflict");
 
     this.database
         .prepare(
@@ -598,7 +604,9 @@ export class CanvasCommandRepository {
           acceptedAt
         );
 
-    const encoding = input.packageSnapshotId ? "package_snapshot_ref" : "digest_manifest_only";
+    // Snapshots retain only metadata. The canonical baseline is always addressed by
+    // the immutable content-version id derived from content_digest.
+    const encoding = "content_version_ref";
     this.database
         .prepare(
           `INSERT INTO canvas_command_snapshots(
@@ -697,7 +705,7 @@ export class CanvasCommandRepository {
             `INSERT INTO canvas_command_snapshots(
               workspace_id,project_id,canvas_id,revision,content_digest,created_at,
               package_snapshot_id,digest_manifest_json,size_bytes,encoding,integrity
-            ) VALUES(?,?,?,0,?,?,NULL,?,?,'digest_manifest_only','verified')
+            ) VALUES(?,?,?,0,?,?,NULL,?,?,'content_version_ref','verified')
             ON CONFLICT(workspace_id,project_id,canvas_id,revision) DO NOTHING`
           )
           .run(
@@ -763,8 +771,11 @@ export class CanvasCommandRepository {
     row: Record<string, unknown>
   ): CanvasSnapshotContent | undefined {
     try {
+      if (row.encoding !== "content_version_ref") {
+        throw new Error("canvas_snapshot_encoding_unsupported");
+      }
       const metadata = canvasSnapshotMetadataSchema.parse({
-        schemaVersion: "canvas-snapshot/v1",
+        schemaVersion: "canvas-snapshot/v2",
         scope: {
           workspaceId: scope.workspaceId,
           projectId: scope.projectId,
@@ -773,25 +784,19 @@ export class CanvasCommandRepository {
         revision: Number(row.revision),
         contentDigest: String(row.content_digest),
         createdAt: String(row.created_at),
-        packageSnapshotId:
-          row.package_snapshot_id === null || row.package_snapshot_id === undefined
-            ? undefined
-            : String(row.package_snapshot_id),
-        digestManifest:
-          row.digest_manifest_json === null || row.digest_manifest_json === undefined
-            ? undefined
-            : JSON.parse(String(row.digest_manifest_json)),
         sizeBytes:
           row.size_bytes === null || row.size_bytes === undefined
             ? undefined
             : Number(row.size_bytes)
       });
-      const encoding = String(row.encoding) as "package_snapshot_ref" | "digest_manifest_only";
       return canvasSnapshotContentSchema.parse({
         metadata,
-        encoding,
-        packageSnapshotId: metadata.packageSnapshotId,
-        digestManifest: metadata.digestManifest
+        encoding: "content_version_ref",
+        content: {
+          versionId: `version-${metadata.contentDigest}`,
+          canonicalDigest: metadata.contentDigest,
+          verification: "complete"
+        }
       });
     } catch {
       this.markSnapshotCorrupt(scope, Number(row.revision));

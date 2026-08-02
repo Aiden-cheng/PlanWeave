@@ -216,7 +216,13 @@ export function useSharedCanvasCommands(input: {
       pollInFlight = true;
       try {
         const result = await controller.reconnectInBackground();
-        if (!active || !result || result.entriesToApply.length === 0) return;
+        if (
+          !active ||
+          !result ||
+          (result.entriesToApply.length === 0 &&
+            result.response.type !== "canvas.reconnect.snapshot")
+        )
+          return;
         await refreshAuthoritativeState();
       } finally {
         pollInFlight = false;

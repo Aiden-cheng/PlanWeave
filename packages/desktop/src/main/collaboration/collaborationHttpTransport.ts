@@ -26,6 +26,12 @@ export type CollaborationHttpTransportOptions = {
   clock?: CollaborationClientClock;
 };
 
+export type CollaborationHttpStream = {
+  response: Response;
+  timedOut(): boolean;
+  release(): void;
+};
+
 /**
  * Credential injection + bounded JSON HTTP transport for collaboration clients.
  * Callers never see raw Authorization headers or tokens.
@@ -208,6 +214,58 @@ export class CollaborationHttpTransport {
     }
   }
 
+  /** Opens a non-JSON response stream while retaining credential ownership at this boundary. */
+  async openStream(
+    method: JsonMethod,
+    path: string,
+    options: { body?: unknown; signal?: AbortSignal; accept: string }
+  ): Promise<CollaborationHttpStream> {
+    this.ensureOpen();
+    const headers: Record<string, string> = { accept: options.accept };
+    if (options.body !== undefined) headers["content-type"] = "application/json; charset=utf-8";
+    await this.applyAuth(headers);
+    const url = new URL(path, this.serverBaseUrl);
+    const timeout = new AbortController();
+    const timer = this.clock.setTimeout(() => timeout.abort(), this.limits.requestTimeoutMs);
+    const signals = [this.rootController.signal, timeout.signal];
+    if (options.signal) signals.push(options.signal);
+    const signal = AbortSignal.any(signals);
+    try {
+      const response = await this.fetchImpl(url, {
+        method,
+        headers,
+        body: options.body === undefined ? undefined : JSON.stringify(options.body),
+        signal
+      });
+      let released = false;
+      return {
+        response,
+        timedOut: () => timeout.signal.aborted && !this.rootController.signal.aborted,
+        release: () => {
+          if (released) return;
+          released = true;
+          this.clock.clearTimeout(timer);
+        }
+      };
+    } catch (error) {
+      this.clock.clearTimeout(timer);
+      if (signal.aborted && timeout.signal.aborted && !this.rootController.signal.aborted) {
+        throw new CollaborationClientError({
+          kind: "timeout",
+          code: "collaboration_timeout",
+          message: "Collaboration request timed out.",
+          retryable: true,
+          cause: error
+        });
+      }
+      throw collaborationErrorFromUnknown(error);
+    }
+  }
+
+  async readBoundedError(response: Response): Promise<string> {
+    return this.readTextLimited(response);
+  }
+
   async send(
     path: string,
     init: {
@@ -253,8 +311,10 @@ export class CollaborationHttpTransport {
   }
 
   private async readTextLimited(response: Response): Promise<string> {
+    const maxBytes = this.limits.jsonBodyMaxBytes;
     const declared = response.headers.get("content-length");
-    if (declared && /^\d+$/.test(declared) && Number(declared) > this.limits.jsonBodyMaxBytes) {
+    if (declared && /^\d+$/.test(declared) && Number(declared) > maxBytes) {
+      await response.body?.cancel();
       throw new CollaborationClientError({
         kind: "payload_too_large",
         code: "collaboration_response_too_large",
@@ -262,16 +322,32 @@ export class CollaborationHttpTransport {
         httpStatus: response.status
       });
     }
-    const buffer = await response.arrayBuffer();
-    if (buffer.byteLength > this.limits.jsonBodyMaxBytes) {
-      throw new CollaborationClientError({
-        kind: "payload_too_large",
-        code: "collaboration_response_too_large",
-        message: "Response exceeded body size limit.",
-        httpStatus: response.status
-      });
+    if (!response.body) return "";
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let bytesRead = 0;
+    try {
+      while (true) {
+        const next = await reader.read();
+        if (next.done) break;
+        bytesRead += next.value.byteLength;
+        if (bytesRead > maxBytes) {
+          throw new CollaborationClientError({
+            kind: "payload_too_large",
+            code: "collaboration_response_too_large",
+            message: "Response exceeded body size limit.",
+            httpStatus: response.status
+          });
+        }
+        chunks.push(next.value);
+      }
+      return Buffer.concat(chunks).toString("utf8");
+    } catch (error) {
+      await reader.cancel(error);
+      throw error;
+    } finally {
+      reader.releaseLock();
     }
-    return Buffer.from(buffer).toString("utf8");
   }
 }
 

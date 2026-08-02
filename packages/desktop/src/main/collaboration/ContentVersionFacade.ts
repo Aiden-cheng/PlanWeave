@@ -189,7 +189,7 @@ export class ContentVersionFacade {
     }
     this.assertRemoteScope(head.scope, remote);
     const fetched = await client.fetchContentVersion({
-      canvasId: remote.canvasId,
+      scope: head.scope,
       content: head.content
     });
     if (
@@ -400,7 +400,7 @@ export class ContentVersionFacade {
     if (!head || !model.canMaterialize)
       throw unavailable("content_materialization_not_available", false);
     const fetched = await client.fetchContentVersion({
-      canvasId: binding.remoteCanvasId,
+      scope: head.scope,
       content: head.content
     });
     if (

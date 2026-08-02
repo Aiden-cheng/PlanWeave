@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS canvas_command_snapshots (
   package_snapshot_id TEXT,
   digest_manifest_json TEXT,
   size_bytes INTEGER,
-  encoding TEXT NOT NULL CHECK(encoding IN ('package_snapshot_ref','digest_manifest_only')),
+  encoding TEXT NOT NULL CHECK(encoding IN ('package_snapshot_ref','digest_manifest_only','content_version_ref')),
   integrity TEXT NOT NULL CHECK(integrity IN ('verified','corrupt','pending')),
   PRIMARY KEY(workspace_id, project_id, canvas_id, revision)
 );

@@ -9,6 +9,8 @@ import {
 } from "../identity/index.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { ContentVersionService } from "./contentVersionService.js";
+import { ContentVersionRepository } from "./contentVersionRepository.js";
+import { streamContentVersion } from "./contentVersionTransferHttp.js";
 
 type Route =
   | { kind: "publish"; projectId: string; canvasId: string }
@@ -18,6 +20,7 @@ type Route =
 
 export type ContentVersionHttpOptions = {
   service: ContentVersionService;
+  contentVersions: ContentVersionRepository;
   repository: HumanIdentityRepository;
   workspaceIdentity: WorkspaceIdentityRepository;
   projectAuthority: HumanProjectAuthority;
@@ -118,18 +121,24 @@ export async function handleContentVersionHttpRequest(
       });
       respond(
         response,
-        result.outcome === "published" ? 201 : result.reason === "head_cas_conflict" ? 409 : 422,
+        result.outcome === "published"
+          ? 201
+          : result.reason === "head_cas_conflict" || result.reason === "head_already_exists"
+            ? 409
+            : 422,
         result
       );
     } else if (matched.kind === "fetch") {
-      respond(
+      const authorized = options.service.authorizeFetch(context, {
+        ...(body as object),
+        projectId: matched.projectId,
+        canvasId: matched.canvasId
+      });
+      await streamContentVersion(
         response,
-        200,
-        options.service.fetch(context, {
-          ...(body as object),
-          projectId: matched.projectId,
-          canvasId: matched.canvasId
-        })
+        options.contentVersions,
+        authorized.scope,
+        authorized.content
       );
     } else if (matched.kind === "ack") {
       respond(
@@ -149,6 +158,10 @@ export async function handleContentVersionHttpRequest(
       );
     }
   } catch (error) {
+    if (response.headersSent) {
+      response.destroy(error instanceof Error ? error : undefined);
+      return true;
+    }
     const code = error instanceof Error ? error.message : "content_failure";
     respond(
       response,

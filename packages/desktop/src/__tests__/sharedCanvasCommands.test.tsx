@@ -1,7 +1,10 @@
 /* @vitest-environment jsdom */
 
 import { act, renderHook } from "@testing-library/react";
-import { exampleCanvasReconnectAfterDisconnect } from "@planweave-ai/collaboration-contracts";
+import {
+  exampleCanvasReconnectAfterDisconnect,
+  exampleCanvasReconnectTruncatedJournal
+} from "@planweave-ai/collaboration-contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanupRendererTestEnvironment } from "./helpers/rendererTestEnvironment";
 import { createTranslator } from "../renderer/i18n";
@@ -183,6 +186,31 @@ describe("useSharedCanvasCommands", () => {
     expect(bridge.reconnect).toHaveBeenCalledTimes(2);
     expect(onAuthoritativeChange).toHaveBeenCalledTimes(1);
     expect(result.current.snapshot.session?.revision).toBe(remoteSession.revision);
+  });
+
+  it("refreshes the renderer after a snapshot-only reconnect", async () => {
+    vi.useFakeTimers();
+    const onAuthoritativeChange = vi.fn();
+    const bridge = createBridge({
+      reconnect: vi
+        .fn<SharedCanvasCommandBridge["reconnectCollaborationCanvas"]>()
+        .mockResolvedValueOnce(reconnectResult(initialSession))
+        .mockResolvedValueOnce({
+          response: exampleCanvasReconnectTruncatedJournal,
+          entriesToApply: [],
+          snapshotRequired: true,
+          session: remoteSession
+        })
+    });
+    renderHook(() => useSharedCanvasCommands(hookInput(bridge.api, onAuthoritativeChange)));
+    await flushEffects();
+    onAuthoritativeChange.mockClear();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SHARED_CANVAS_RECONNECT_INTERVAL_MS);
+    });
+
+    expect(onAuthoritativeChange).toHaveBeenCalledTimes(1);
   });
 
   it("reconnects immediately when the observer reports a newer revision for this canvas", async () => {

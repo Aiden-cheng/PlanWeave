@@ -4,6 +4,7 @@ import {
   authorizedContentVersionFetchSchema,
   authoritativeContentHeadSchema,
   canonicalContentVersionDigestPayload,
+  compareContentVersionMemberPaths,
   completeContentVersionSchema,
   contentVersionDesktopLayoutMemberPath,
   contentVersionJournalEntrySchema,
@@ -56,6 +57,47 @@ describe("authoritative content-version contracts", () => {
         )
       })
     ).toThrow();
+  });
+
+  it("uses the canonical comparator for paths whose locale and code-unit orders differ", () => {
+    const members = exampleCompleteContentVersion.members.map((member) => {
+      if (member.kind === "task_prompt") return { ...member, path: "nodes/a/prompt.md" };
+      if (member.kind === "block_prompt") {
+        return { ...member, path: "nodes/A/blocks/B-001.prompt.md" };
+      }
+      return member;
+    });
+    expect(compareContentVersionMemberPaths("nodes/a/prompt.md", "nodes/A/prompt.md")).toBeLessThan(0);
+    expect(
+      completeContentVersionSchema.parse({
+        ...exampleCompleteContentVersion,
+        canonicalDigest: "a".repeat(64),
+        members
+      }).members.map((member) => member.path)
+    ).toEqual(members.map((member) => member.path));
+    expect(() =>
+      completeContentVersionSchema.parse({
+        ...exampleCompleteContentVersion,
+        canonicalDigest: "a".repeat(64),
+        members: [...members.slice(0, 2), ...members.slice(2).reverse()]
+      })
+    ).toThrow();
+  });
+
+  it("pins case-distinct ASCII path order independently of the runtime locale", () => {
+    const upperCaseI = "nodes/I/prompt.md";
+    const lowerCaseI = "nodes/i/prompt.md";
+    expect(new Intl.Collator("tr", { sensitivity: "variant" }).compare(upperCaseI, lowerCaseI)).toBeLessThan(0);
+    expect(compareContentVersionMemberPaths(upperCaseI, lowerCaseI)).toBeGreaterThan(0);
+    expect(compareContentVersionMemberPaths(upperCaseI, lowerCaseI)).toBe(
+      new Intl.Collator("en-US", {
+        usage: "sort",
+        sensitivity: "variant",
+        numeric: false,
+        caseFirst: "false",
+        ignorePunctuation: false
+      }).compare(upperCaseI, lowerCaseI)
+    );
   });
 
   it("rejects arbitrary paths, invalid member kinds, and unverified byte metadata", () => {

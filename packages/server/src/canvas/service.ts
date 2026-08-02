@@ -8,7 +8,6 @@ import {
   canvasReconnectErrorSchema,
   canvasReconnectRequestSchema,
   canvasReconnectSnapshotSchema,
-  packageSnapshotDigestManifestSchema,
   type AuthoritativeContentVersion,
   type ActorRef,
   type CanvasCommandAccepted,
@@ -19,8 +18,15 @@ import {
   type CanvasReconnectResponse,
   type CanvasRuntimeStatusProjection,
   type CompleteContentVersion,
+  type CanvasCommandIntent,
+  type CanvasSnapshotContent,
   type PackageSnapshotDigestManifest
 } from "@planweave-ai/collaboration-contracts";
+import {
+  applyCanvasReplicaIntent,
+  decodeCanvasReplicaDocument,
+  encodeCanvasReplicaDocument
+} from "@planweave-ai/runtime";
 import type { CollaborationAuthContext } from "../identity/auth.js";
 import type { ProjectAccessRepository } from "../projectAccessRepository.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
@@ -79,6 +85,23 @@ function scopeKey(scope: {
   };
 }
 
+function baseContentDigests(intent: CanvasCommandIntent): readonly string[] {
+  switch (intent.kind) {
+    case "update_task_fields":
+    case "update_block_fields":
+      return intent.fields.baseContentDigest === undefined ? [] : [intent.fields.baseContentDigest];
+    case "update_task_prompt":
+    case "update_block_prompt":
+      return intent.baseContentDigest === undefined ? [] : [intent.baseContentDigest];
+    case "bulk_update_blocks":
+      return intent.updates.flatMap((update) =>
+        update.fields.baseContentDigest === undefined ? [] : [update.fields.baseContentDigest]
+      );
+    default:
+      return [];
+  }
+}
+
 function packageDigestManifestFromContent(
   content: CompleteContentVersion
 ): PackageSnapshotDigestManifest {
@@ -88,21 +111,13 @@ function packageDigestManifestFromContent(
     .filter((member) => member.kind === "task_prompt" || member.kind === "block_prompt")
     .map((member) => ({
       path: member.path,
-      digest: {
-        digestSha256: member.digestSha256,
-        sizeBytes: member.sizeBytes
-      }
-    }))
-    .sort((left, right) => left.path.localeCompare(right.path));
-  return packageSnapshotDigestManifestSchema.parse({
-    manifest: {
-      digestSha256: manifest.digestSha256,
-      sizeBytes: manifest.sizeBytes
-    },
+      digest: { digestSha256: member.digestSha256, sizeBytes: member.sizeBytes }
+    }));
+  return {
+    manifest: { digestSha256: manifest.digestSha256, sizeBytes: manifest.sizeBytes },
     prompts,
-    totalBytes:
-      manifest.sizeBytes + prompts.reduce((total, member) => total + member.digest.sizeBytes, 0)
-  });
+    totalBytes: manifest.sizeBytes + prompts.reduce((total, member) => total + member.digest.sizeBytes, 0)
+  };
 }
 
 /**
@@ -175,32 +190,48 @@ export class CanvasCommandService {
     });
   }
 
-  private async captureAuthoritativeContent(input: {
-    scope: CanvasScopeKey;
-    actor: ActorRef;
-    projectRoot: string;
-    canvasId: string;
-    expectedPackageDir: string;
-  }): Promise<{ content: AuthoritativeContentVersion; expectedContentHeadRevision: number }> {
+  private readAuthoritativeContent(scope: CanvasScopeKey): {
+    content: AuthoritativeContentVersion;
+    expectedContentHeadRevision: number;
+  } {
     const contentVersions = this.options.contentVersions;
-    const captureContent = this.options.runtime.captureContent;
-    if (!contentVersions || !captureContent) throw new Error("content_capture_unavailable");
-    const captured = await captureContent({
-      projectRoot: input.projectRoot,
-      canvasId: input.canvasId,
-      expectedPackageDir: input.expectedPackageDir,
-      authorityProjectId: input.scope.projectId
-    });
-    if (!captured.ok) throw new Error("content_capture_failed");
-    const content = contentVersions.persistImmutable({
-      scope: input.scope,
-      content: captured.content,
-      createdBy: input.actor
-    });
+    if (!contentVersions) throw new Error("content_authority_unavailable");
+    const head = contentVersions.head(scope);
+    if (!head) throw new Error("initial_content_publish_required");
+    const content = contentVersions.readVersion(scope, head.content);
+    if (content.content.canonicalDigest !== head.content.canonicalDigest) {
+      throw new Error("content_authority_head_mismatch");
+    }
     return {
       content,
-      expectedContentHeadRevision: contentVersions.head(input.scope)?.revision ?? 0
+      expectedContentHeadRevision: head.revision
     };
+  }
+
+  private snapshotFromAuthoritativeHead(
+    scope: CanvasScopeKey,
+    revision: number
+  ): CanvasSnapshotContent | null {
+    try {
+      const authority = this.readAuthoritativeContent(scope);
+      if (authority.content.content.canonicalDigest !== this.options.repository.head(scope).contentDigest) {
+        return null;
+      }
+      return {
+        metadata: {
+          schemaVersion: "canvas-snapshot/v2",
+          scope: canvasScopeRefSchema.parse(scope),
+          revision,
+          contentDigest: authority.content.content.canonicalDigest,
+          createdAt: authority.content.createdAt,
+          sizeBytes: authority.content.content.totalBytes
+        },
+        encoding: "content_version_ref",
+        content: authority.content.completed
+      };
+    } catch {
+      return null;
+    }
   }
 
   private commitAcceptedWithAuthoritativeContent(input: {
@@ -210,6 +241,7 @@ export class CanvasCommandService {
     intentDigest: string;
     actor: ActorRef;
     previousRevision: number;
+    expectedContentDigest?: string;
     digestManifest?: Parameters<CanvasCommandRepository["commitAccepted"]>[0]["digestManifest"];
     content: AuthoritativeContentVersion;
     expectedContentHeadRevision: number;
@@ -229,6 +261,7 @@ export class CanvasCommandService {
           intentDigest: input.intentDigest,
           actor: input.actor,
           previousRevision: input.previousRevision,
+          expectedContentDigest: input.expectedContentDigest,
           revision: input.previousRevision + 1,
           contentDigest: input.content.completed.canonicalDigest,
           digestManifest: input.digestManifest,
@@ -369,26 +402,29 @@ export class CanvasCommandService {
       });
     }
 
+    let authority: { content: AuthoritativeContentVersion; expectedContentHeadRevision: number };
+    try {
+      authority = this.readAuthoritativeContent(scope);
+    } catch (error) {
+      return rejectedOutcome({
+        projectId: submit.projectId,
+        canvasId: submit.canvasId,
+        operationId: submit.operationId,
+        code: "journal_unavailable",
+        detail: error instanceof Error ? error.message.slice(0, 200) : "content_authority_unavailable"
+      });
+    }
     let head = this.options.repository.head(scope);
     if (head.revision === 0 && head.contentDigest === "0".repeat(64)) {
-      const initial = await this.options.runtime.readDigest({
-        projectRoot: reauth.projectRoot,
+      head = this.options.repository.ensureInitialHead(scope, authority.content.content.canonicalDigest);
+    }
+    if (head.contentDigest !== authority.content.content.canonicalDigest) {
+      return rejectedOutcome({
+        projectId: submit.projectId,
         canvasId: submit.canvasId,
-        expectedPackageDir: reauth.packageDir,
-        authorityProjectId: submit.projectId
-      });
-      if (!initial.ok) {
-        return rejectedOutcome({
-          projectId: submit.projectId,
-          canvasId: submit.canvasId,
-          operationId: submit.operationId,
-          code: "journal_unavailable",
-          detail: "initial_content_digest_unavailable"
-        });
-      }
-      head = this.options.repository.ensureInitialHead(scope, initial.contentDigest, {
-        digestManifest: initial.digestManifest,
-        sizeBytes: initial.sizeBytes
+        operationId: submit.operationId,
+        code: "journal_unavailable",
+        detail: "canvas_content_head_mismatch"
       });
     }
     if (submit.expectedRevision !== head.revision) {
@@ -404,13 +440,17 @@ export class CanvasCommandService {
         }
       });
     }
-    if (this.options.contentVersions && this.options.contentVersions.head(scope) === null) {
+    if (
+      baseContentDigests(submit.intent).some(
+        (digest) => digest !== authority.content.content.canonicalDigest
+      )
+    ) {
       return rejectedOutcome({
         projectId: submit.projectId,
         canvasId: submit.canvasId,
         operationId: submit.operationId,
-        code: "journal_unavailable",
-        detail: "initial_content_publish_required"
+        code: "operation_conflict",
+        detail: "base_content_digest_mismatch"
       });
     }
 
@@ -424,80 +464,57 @@ export class CanvasCommandService {
       actor: actorRef
     });
 
-    let applied;
+    let nextContent: CompleteContentVersion;
     try {
-      applied = await this.options.runtime.apply({
-        // Server-resolved project root + ACL-bound packageDir; Runtime parses package only.
-        projectRoot: reauth.projectRoot,
-        canvasId: submit.canvasId,
-        expectedPackageDir: reauth.packageDir,
-        authorityProjectId: submit.projectId,
-        intent: submit.intent
-      });
+      nextContent = encodeCanvasReplicaDocument(
+        applyCanvasReplicaIntent(
+          decodeCanvasReplicaDocument(authority.content.content),
+          submit.intent
+        )
+      );
     } catch (error) {
-      this.options.repository.markPendingNeedsRecovery(scope, submit.operationId);
-      return rejectedOutcome({
-        projectId: submit.projectId,
-        canvasId: submit.canvasId,
-        operationId: submit.operationId,
-        code: "server_error",
-        detail: error instanceof Error ? error.message.slice(0, 200) : "runtime_apply_failed"
-      });
-    }
-
-    if (!applied.ok) {
-      this.options.repository.clearPending(scope, submit.operationId);
-      const code =
-        applied.code === "invalid_command"
-          ? "invalid_command"
-          : applied.code === "package_mismatch"
-            ? "unknown_canvas"
-            : "server_error";
       const rejected = rejectedOutcome({
         projectId: submit.projectId,
         canvasId: submit.canvasId,
         operationId: submit.operationId,
-        code,
-        detail: applied.detail.slice(0, 200)
+        code: "invalid_command",
+        detail: error instanceof Error ? error.message.slice(0, 200) : "intent_apply_failed"
       });
-      if (code === "invalid_command") {
-        this.options.repository.storeRejected({
-          scope,
-          operationId: submit.operationId,
-          intent: submit.intent,
-          intentDigest,
-          rejected
-        });
-      }
+      this.options.repository.clearPending(scope, submit.operationId);
+      this.options.repository.storeRejected({
+        scope,
+        operationId: submit.operationId,
+        intent: submit.intent,
+        intentDigest,
+        rejected
+      });
       return rejected;
     }
 
-    let authoritativeContent: { content: AuthoritativeContentVersion; expectedContentHeadRevision: number } | undefined;
-    if (this.options.contentVersions) {
-      try {
-        authoritativeContent = await this.captureAuthoritativeContent({
-          scope,
-          actor: actorRef,
-          projectRoot: reauth.projectRoot,
-          canvasId: submit.canvasId,
-          expectedPackageDir: reauth.packageDir
-        });
-      } catch {
-        this.options.repository.markPendingNeedsRecovery(scope, submit.operationId);
-        return rejectedOutcome({
-          projectId: submit.projectId,
-          canvasId: submit.canvasId,
-          operationId: submit.operationId,
-          code: "journal_unavailable",
-          detail: "content_persist_failed"
-        });
-      }
+    let nextAuthority: AuthoritativeContentVersion;
+    try {
+      const contentVersions = this.options.contentVersions;
+      if (!contentVersions) throw new Error("content_authority_unavailable");
+      nextAuthority = contentVersions.persistImmutable({
+        scope,
+        content: nextContent,
+        createdBy: actorRef
+      });
+    } catch (error) {
+      this.options.repository.clearPending(scope, submit.operationId);
+      return rejectedOutcome({
+        projectId: submit.projectId,
+        canvasId: submit.canvasId,
+        operationId: submit.operationId,
+        code: "journal_unavailable",
+        detail: error instanceof Error ? error.message.slice(0, 200) : "content_persist_failed"
+      });
     }
 
     // CAS re-check immediately before durable commit (concurrent writers).
     const headAfter = this.options.repository.head(scope);
     if (headAfter.revision !== submit.expectedRevision) {
-      this.options.repository.markPendingNeedsRecovery(scope, submit.operationId);
+      this.options.repository.clearPending(scope, submit.operationId);
       return rejectedOutcome({
         projectId: submit.projectId,
         canvasId: submit.canvasId,
@@ -513,33 +530,33 @@ export class CanvasCommandService {
 
     let accepted: CanvasCommandAccepted;
     try {
-      if (authoritativeContent) {
-        accepted = this.commitAcceptedWithAuthoritativeContent({
-          scope,
+      accepted = this.commitAcceptedWithAuthoritativeContent({
+        scope,
+        operationId: submit.operationId,
+        intent: submit.intent,
+        intentDigest,
+        actor: actorRef,
+        previousRevision: submit.expectedRevision,
+        expectedContentDigest: head.contentDigest,
+        content: nextAuthority,
+        expectedContentHeadRevision: authority.expectedContentHeadRevision
+      });
+    } catch (error) {
+      this.options.repository.clearPending(scope, submit.operationId);
+      const currentHead = this.options.repository.head(scope);
+      if (currentHead.revision !== submit.expectedRevision) {
+        return rejectedOutcome({
+          projectId: submit.projectId,
+          canvasId: submit.canvasId,
           operationId: submit.operationId,
-          intent: submit.intent,
-          intentDigest,
-          actor: actorRef,
-          previousRevision: submit.expectedRevision,
-          digestManifest: applied.digestManifest,
-          ...authoritativeContent
-        });
-      } else {
-        accepted = this.options.repository.commitAccepted({
-          scope,
-          operationId: submit.operationId,
-          intent: submit.intent,
-          intentDigest,
-          actor: actorRef,
-          previousRevision: submit.expectedRevision,
-          revision: submit.expectedRevision + 1,
-          contentDigest: applied.contentDigest,
-          digestManifest: applied.digestManifest,
-          sizeBytes: applied.sizeBytes
+          code: "stale_revision",
+          conflict: {
+            expectedRevision: submit.expectedRevision,
+            authoritativeRevision: currentHead.revision,
+            authoritativeContentDigest: currentHead.contentDigest
+          }
         });
       }
-    } catch (error) {
-      this.options.repository.markPendingNeedsRecovery(scope, submit.operationId);
       return rejectedOutcome({
         projectId: submit.projectId,
         canvasId: submit.canvasId,
@@ -624,7 +641,7 @@ export class CanvasCommandService {
       });
     }
     const scope = scopeKey(auth.scope);
-    return this.serialize(scope, () => this.reconnectAuthorized(request, scope, auth));
+    return this.serialize(scope, () => this.reconnectAuthorized(request, scope));
   }
 
   async readRuntimeStatus(
@@ -652,8 +669,7 @@ export class CanvasCommandService {
 
   private async reconnectAuthorized(
     request: CanvasReconnectRequest,
-    scope: CanvasScopeKey,
-    auth: Extract<ReturnType<typeof authorizeCanvasRead>, { ok: true }>
+    scope: CanvasScopeKey
   ): Promise<CanvasReconnectResponse> {
     const authorizedScope = {
       workspaceId: scope.workspaceId,
@@ -674,52 +690,48 @@ export class CanvasCommandService {
           error instanceof Error ? error.message.slice(0, 200) : "canvas_baseline_rebase_failed"
       });
     }
+    let authority: { content: AuthoritativeContentVersion; expectedContentHeadRevision: number };
+    try {
+      authority = this.readAuthoritativeContent(scope);
+    } catch (error) {
+      return canvasReconnectErrorSchema.parse({
+        type: "canvas.reconnect.error",
+        protocolVersion: CANVAS_COMMAND_PROTOCOL_VERSION,
+        schemaVersion: "canvas-command/v1",
+        projectId: request.projectId,
+        canvasId: request.canvasId,
+        code: "snapshot_malformed",
+        detail: error instanceof Error ? error.message.slice(0, 200) : "content_authority_unavailable"
+      });
+    }
     let head = this.options.repository.head(scope);
     if (head.revision === 0 && head.contentDigest === "0".repeat(64)) {
-      const digest = await this.options.runtime.readDigest({
-        projectRoot: auth.projectRoot,
+      head = this.options.repository.ensureInitialHead(scope, authority.content.content.canonicalDigest);
+    }
+    if (head.contentDigest !== authority.content.content.canonicalDigest) {
+      return canvasReconnectErrorSchema.parse({
+        type: "canvas.reconnect.error",
+        protocolVersion: CANVAS_COMMAND_PROTOCOL_VERSION,
+        schemaVersion: "canvas-command/v1",
+        projectId: request.projectId,
         canvasId: request.canvasId,
-        expectedPackageDir: auth.packageDir,
-        authorityProjectId: request.projectId
+        code: "snapshot_malformed",
+        detail: "canvas_content_head_mismatch"
       });
-      if (digest.ok) {
-        head = this.options.repository.ensureInitialHead(scope, digest.contentDigest, {
-          digestManifest: digest.digestManifest,
-          sizeBytes: digest.sizeBytes
-        });
-      }
     }
 
     if (request.afterRevision > head.revision) {
-      const snapshot = this.options.repository.getSnapshot(scope);
-      if (!snapshot || !this.verifySnapshot(snapshot.metadata.contentDigest, snapshot)) {
-        return canvasReconnectErrorSchema.parse({
-          type: "canvas.reconnect.error",
-          protocolVersion: CANVAS_COMMAND_PROTOCOL_VERSION,
-          schemaVersion: "canvas-command/v1",
-          projectId: request.projectId,
-          canvasId: request.canvasId,
-          code: "snapshot_malformed",
-          detail: "revision_ahead_without_verified_snapshot"
-        });
-      }
-      return canvasReconnectSnapshotSchema.parse({
-        type: "canvas.reconnect.snapshot",
-        protocolVersion: CANVAS_COMMAND_PROTOCOL_VERSION,
-        schemaVersion: "canvas-command/v1",
-        scope: authorizedScope,
-        reason: "revision_ahead",
-        afterRevision: request.afterRevision,
-        snapshot
-      });
+      return this.verifiedSnapshotOrError(scope, request, "revision_ahead");
+    }
+
+    if (request.afterRevision === 0) {
+      return this.verifiedSnapshotOrError(scope, request, "fresh_session");
     }
 
     if (request.afterContentDigest !== undefined) {
       const entry = this.options.repository.journalEntryAt(scope, request.afterRevision);
       const digestAt =
-        (request.afterRevision === 0
-          ? this.options.repository.getSnapshot(scope, 0)?.metadata.contentDigest
-          : entry?.contentDigest) ??
+        entry?.contentDigest ??
         (request.afterRevision === head.revision ? head.contentDigest : undefined);
       if (digestAt !== undefined && digestAt !== request.afterContentDigest) {
         const snapshot = this.verifiedSnapshotOrError(scope, request, "digest_mismatch");
@@ -728,31 +740,6 @@ export class CanvasCommandService {
     }
 
     const oldest = this.options.repository.oldestRetainedRevision(scope);
-    if (request.afterRevision === 0 && head.revision === 0) {
-      const snapshot = this.options.repository.getSnapshot(scope, 0);
-      if (snapshot && this.verifySnapshot(snapshot.metadata.contentDigest, snapshot)) {
-        return canvasReconnectSnapshotSchema.parse({
-          type: "canvas.reconnect.snapshot",
-          protocolVersion: CANVAS_COMMAND_PROTOCOL_VERSION,
-          schemaVersion: "canvas-command/v1",
-          scope: authorizedScope,
-          reason: "fresh_session",
-          afterRevision: 0,
-          snapshot
-        });
-      }
-      return canvasReconnectDeltaSchema.parse({
-        type: "canvas.reconnect.delta",
-        protocolVersion: CANVAS_COMMAND_PROTOCOL_VERSION,
-        schemaVersion: "canvas-command/v1",
-        scope: authorizedScope,
-        afterRevision: 0,
-        headRevision: 0,
-        headContentDigest: head.contentDigest,
-        entries: []
-      });
-    }
-
     if (request.afterRevision > 0 && oldest > 0 && request.afterRevision < oldest - 0) {
       // If the next entry is not contiguous from afterRevision, journal was truncated.
       const entriesProbe = this.options.repository.listJournalAfter(scope, request.afterRevision);
@@ -811,10 +798,16 @@ export class CanvasCommandService {
   private verifiedSnapshotOrError(
     scope: CanvasScopeKey,
     request: CanvasReconnectRequest,
-    reason: "retention_gap" | "digest_mismatch" | "truncated_journal" | "fresh_session"
+    reason:
+      | "retention_gap"
+      | "digest_mismatch"
+      | "truncated_journal"
+      | "fresh_session"
+      | "revision_ahead"
   ): CanvasReconnectResponse {
-    const snapshot = this.options.repository.getSnapshot(scope);
-    if (!snapshot || !this.verifySnapshot(snapshot.metadata.contentDigest, snapshot)) {
+    const head = this.options.repository.head(scope);
+    const snapshot = this.snapshotFromAuthoritativeHead(scope, head.revision);
+    if (!snapshot || !this.verifySnapshot(head.contentDigest, snapshot)) {
       return canvasReconnectErrorSchema.parse({
         type: "canvas.reconnect.error",
         protocolVersion: CANVAS_COMMAND_PROTOCOL_VERSION,
@@ -842,116 +835,21 @@ export class CanvasCommandService {
 
   private verifySnapshot(
     expectedDigest: string,
-    snapshot: { metadata: { contentDigest: string }; encoding: string }
+    snapshot: CanvasSnapshotContent
   ): boolean {
     if (snapshot.metadata.contentDigest !== expectedDigest) return false;
-    if (!/^[a-f0-9]{64}$/.test(snapshot.metadata.contentDigest)) return false;
-    return true;
+    return snapshot.content.canonicalDigest === expectedDigest;
   }
 
-  /**
-   * Crash-safe recovery after apply/commit interruption.
-   * Package FS is source of truth for content digest; journal is authoritative for revision.
-   * When package digest advanced past journal head (apply succeeded, commit failed), advance
-   * the journal with a recovery commit so clients do not double-apply on retry.
-   * When package still matches head, drop pending so the client can retry safely.
-   * If the package cannot be read and verified, preserve the pending record to fence writes
-   * until a later recovery pass can reconcile it.
-   */
+  /** Failed authority transactions cannot have changed a local package, so retries are safe. */
   async recoverInterrupted(): Promise<{ cleared: number; recovered: number; deferred: number }> {
     const pending = this.options.repository.listNeedsRecovery();
-    let cleared = 0;
-    let recovered = 0;
-    let deferred = 0;
     for (const item of pending) {
-      const result = await this.serialize(item.scope, async () => {
-        const op = this.options.repository.getOperation(item.scope, item.operationId);
-        if (op) {
-          this.options.repository.clearPending(item.scope, item.operationId);
-          return "cleared";
-        }
-
-        const head = this.options.repository.head(item.scope);
-        let packageDigest: string;
-        let digestManifest: Parameters<CanvasCommandRepository["commitAccepted"]>[0]["digestManifest"];
-        let location: { projectRoot: string; packageDir: string };
-        try {
-          location = this.options.access.registry.resolveCanvasPath({
-            workspaceId: item.scope.workspaceId,
-            projectId: item.scope.projectId,
-            canvasId: item.scope.canvasId
-          });
-          const digest = await this.options.runtime.readDigest({
-            projectRoot: location.projectRoot,
-            canvasId: item.scope.canvasId,
-            expectedPackageDir: location.packageDir
-          });
-          if (!digest.ok) {
-            this.options.repository.markPendingNeedsRecovery(item.scope, item.operationId);
-            return "deferred";
-          }
-          packageDigest = digest.contentDigest;
-          digestManifest = digest.digestManifest;
-        } catch {
-          this.options.repository.markPendingNeedsRecovery(item.scope, item.operationId);
-          return "deferred";
-        }
-
-        if (packageDigest !== head.contentDigest && head.revision === item.expectedRevision) {
-          // Apply mutated package; journal never committed — align revision to package.
-          try {
-            if (this.options.contentVersions) {
-              const authoritativeContent = await this.captureAuthoritativeContent({
-                scope: item.scope,
-                actor: item.actor,
-                projectRoot: location.projectRoot,
-                canvasId: item.scope.canvasId,
-                expectedPackageDir: location.packageDir
-              });
-              this.commitAcceptedWithAuthoritativeContent({
-                scope: item.scope,
-                operationId: item.operationId,
-                intent: item.intent,
-                intentDigest: item.intentDigest,
-                actor: item.actor,
-                previousRevision: head.revision,
-                digestManifest,
-                ...authoritativeContent
-              });
-            } else {
-              this.options.repository.commitAccepted({
-                scope: item.scope,
-                operationId: item.operationId,
-                intent: item.intent,
-                intentDigest: item.intentDigest,
-                actor: item.actor,
-                previousRevision: head.revision,
-                revision: head.revision + 1,
-                contentDigest: packageDigest,
-                digestManifest
-              });
-            }
-          } catch {
-            this.options.repository.markPendingNeedsRecovery(item.scope, item.operationId);
-            return "deferred";
-          }
-          return "recovered";
-        }
-
-        // Package verified as unchanged, so retrying the command cannot double-apply.
+      await this.serialize(item.scope, async () => {
         this.options.repository.clearPending(item.scope, item.operationId);
-        return "cleared";
       });
-      if (result === "recovered") {
-        recovered += 1;
-        cleared += 1;
-      } else if (result === "cleared") {
-        cleared += 1;
-      } else {
-        deferred += 1;
-      }
     }
-    return { cleared, recovered, deferred };
+    return { cleared: pending.length, recovered: 0, deferred: 0 };
   }
 
   /** Test/diagnostic head read; not a presence cursor. */

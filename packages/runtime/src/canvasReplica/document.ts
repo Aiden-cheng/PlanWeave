@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
   canonicalContentVersionDigestPayload,
+  compareContentVersionMemberPaths,
   completeContentVersionSchema,
   contentVersionDesktopLayoutMemberPath,
   contentVersionMemberPathSchema,
@@ -163,7 +164,7 @@ export function encodeCanvasReplicaDocument(input: CanvasReplicaDocument): Compl
       contentVersionDesktopLayoutMemberPath,
       `${JSON.stringify(document.layout, null, 2)}\n`
     )
-  ].sort((left, right) => left.path.localeCompare(right.path));
+  ].sort((left, right) => compareContentVersionMemberPaths(left.path, right.path));
   const totalBytes = members.reduce((sum, item) => sum + item.sizeBytes, 0);
   const provisional = { members, totalBytes, canonicalDigest: "0".repeat(64) };
   return deepFreeze(

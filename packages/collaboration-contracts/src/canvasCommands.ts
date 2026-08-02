@@ -26,6 +26,7 @@ import {
   packageSnapshotIdSchema,
   timestampSchema
 } from "./primitives.js";
+import { completedContentVersionRefSchema } from "./contentVersion.js";
 import { packageSnapshotDigestSchema, packageSnapshotDigestManifestSchema } from "./packageSnapshot.js";
 
 /**
@@ -49,7 +50,11 @@ export type CanvasCommandSchemaVersion = z.infer<typeof canvasCommandSchemaVersi
 export const canvasJournalSchemaVersion = "canvas-journal/v1" as const;
 export const canvasJournalSchemaVersionSchema = z.literal(canvasJournalSchemaVersion);
 
-export const canvasSnapshotSchemaVersion = "canvas-snapshot/v1" as const;
+/**
+ * v2 replaces the inline baseline with an immutable content-version reference.
+ * A v1 snapshot must be rejected rather than being interpreted as a v2 baseline.
+ */
+export const canvasSnapshotSchemaVersion = "canvas-snapshot/v2" as const;
 export const canvasSnapshotSchemaVersionSchema = z.literal(canvasSnapshotSchemaVersion);
 
 /** Client-generated idempotency key; Server returns the same outcome for identical retries. */
@@ -535,7 +540,6 @@ export type CanvasJournalEntry = z.infer<typeof canvasJournalEntrySchema>;
 
 /**
  * Snapshot metadata for the current authoritative canvas head.
- * Content itself is addressed by digest (and optional package snapshot registry ref).
  */
 export const canvasSnapshotMetadataSchema = z
   .object({
@@ -554,36 +558,24 @@ export const canvasSnapshotMetadataSchema = z
 export type CanvasSnapshotMetadata = z.infer<typeof canvasSnapshotMetadataSchema>;
 
 /**
- * Full snapshot payload for reconnect when the journal cannot satisfy a delta.
- * Digest must match metadata.contentDigest; Server verifies before serving.
+ * Full canonical baseline for reconnect when the journal cannot satisfy a delta.
+ * Clients fetch the immutable `content` reference through the content authority before
+ * establishing their replica. Snapshot responses deliberately never carry content bodies.
  */
 export const canvasSnapshotContentSchema = z
   .object({
     metadata: canvasSnapshotMetadataSchema,
-    /** Encoding of materialised content; Runtime validates package semantics after transfer. */
-    encoding: z.enum(["package_snapshot_ref", "digest_manifest_only"]),
-    packageSnapshotId: packageSnapshotIdSchema.optional(),
-    digestManifest: packageSnapshotDigestManifestSchema.optional()
+    encoding: z.literal("content_version_ref"),
+    content: completedContentVersionRefSchema
   })
   .strict()
   .superRefine((value, context) => {
-    if (value.encoding === "package_snapshot_ref") {
-      if (value.packageSnapshotId === undefined) {
-        context.addIssue({
-          code: "custom",
-          message: "package_snapshot_ref requires packageSnapshotId",
-          path: ["packageSnapshotId"]
-        });
-      }
-    }
-    if (value.encoding === "digest_manifest_only") {
-      if (value.digestManifest === undefined && value.metadata.digestManifest === undefined) {
-        context.addIssue({
-          code: "custom",
-          message: "digest_manifest_only requires a digestManifest",
-          path: ["digestManifest"]
-        });
-      }
+    if (value.content.canonicalDigest !== value.metadata.contentDigest) {
+      context.addIssue({
+        code: "custom",
+        message: "snapshot_content_digest_mismatch",
+        path: ["content", "canonicalDigest"]
+      });
     }
   });
 export type CanvasSnapshotContent = z.infer<typeof canvasSnapshotContentSchema>;

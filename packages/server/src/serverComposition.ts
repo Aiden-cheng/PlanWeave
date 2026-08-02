@@ -929,6 +929,29 @@ export async function createDistributedServerComposition(
     });
     canvasLiveSyncWebSockets = attachedCanvasLiveSyncWebSockets;
     const contentVersionRepository = new ContentVersionRepository(server.database, clock);
+    const canvasRuntime = createDefaultCanvasRuntimePort();
+    for (const expansion of runtimeRegistry.expansions) {
+      const scope = {
+        workspaceId: expansion.workspaceId,
+        projectId: expansion.projectId,
+        canvasId: expansion.canvasId
+      };
+      if (contentVersionRepository.head(scope)) continue;
+      const captured = await canvasRuntime.captureContent?.({
+        projectRoot: expansion.projectRoot,
+        canvasId: expansion.canvasId,
+        expectedPackageDir: expansion.packageDir,
+        authorityProjectId: expansion.projectId
+      });
+      if (!captured || !captured.ok) {
+        throw new Error(`initial_content_publish_failed:${expansion.canvasId}`);
+      }
+      contentVersionRepository.publishInitial({
+        scope,
+        content: captured.content,
+        createdBy: { kind: "system", id: "server-bootstrap" }
+      });
+    }
     const authoritativeCanvasCommits = new SqliteAuthoritativeCanvasCommitStore(
       server.database,
       contentVersionRepository,
@@ -957,7 +980,7 @@ export async function createDistributedServerComposition(
       repository: canvasCommandRepository,
       access: initializedProjectAccess,
       workspaceIdentity,
-      runtime: createDefaultCanvasRuntimePort(),
+      runtime: canvasRuntime,
       contentVersions: contentVersionRepository,
       authoritativeCommits: authoritativeCanvasCommits,
       onAcceptedEntry: (entry) => attachedCanvasLiveSyncWebSockets.publishAcceptedEntry(entry),
@@ -1074,6 +1097,7 @@ export async function createDistributedServerComposition(
         if (
           await handleContentVersionHttpRequest(request, response, {
             service: contentVersionService,
+            contentVersions: contentVersionRepository,
             repository: humanIdentity,
             workspaceIdentity,
             projectAuthority: runtimeRegistry,

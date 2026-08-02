@@ -241,7 +241,10 @@ describe("OSS-004 canvas command contracts", () => {
     expect(snapshot.type).toBe("canvas.reconnect.snapshot");
     if (snapshot.type === "canvas.reconnect.snapshot") {
       expect(snapshot.reason).toBe("truncated_journal");
-      expect(snapshot.snapshot.encoding).toBe("package_snapshot_ref");
+      expect(snapshot.snapshot.encoding).toBe("content_version_ref");
+      expect(snapshot.snapshot.content.canonicalDigest).toBe(
+        snapshot.snapshot.metadata.contentDigest
+      );
     }
 
     expect(() => canvasSnapshotContentSchema.parse(exampleCanvasMalformedSnapshotInput.snapshot)).toThrow();
@@ -263,6 +266,19 @@ describe("OSS-004 canvas command contracts", () => {
         headRevision: 3,
         headContentDigest: digestB,
         entries: []
+      })
+    ).toThrow();
+  });
+
+  it("rejects v1 inline snapshots instead of treating them as v2 content references", () => {
+    const snapshot = exampleCanvasReconnectTruncatedJournal;
+    expect(() =>
+      canvasReconnectResponseSchema.parse({
+        ...snapshot,
+        snapshot: {
+          ...snapshot.snapshot,
+          metadata: { ...snapshot.snapshot.metadata, schemaVersion: "canvas-snapshot/v1" }
+        }
       })
     ).toThrow();
   });

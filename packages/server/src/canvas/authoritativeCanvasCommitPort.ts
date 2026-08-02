@@ -14,6 +14,7 @@ export type AuthoritativeCanvasAcceptedCommit = {
   intentDigest: string;
   actor: ActorRef;
   previousRevision: number;
+  expectedContentDigest?: string;
   revision: number;
   contentDigest: string;
   digestManifest?: PackageSnapshotDigestManifest;

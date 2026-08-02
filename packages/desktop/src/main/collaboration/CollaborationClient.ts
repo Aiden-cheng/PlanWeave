@@ -54,7 +54,6 @@ import {
   reviewAssignmentUpdateWireCommandSchema,
   uploadPendingAttachmentResponseSchema,
   workAuthorityProjectionSchema,
-  authoritativeContentVersionSchema,
   contentVersionAcknowledgementSchema,
   contentVersionAuthorityDiscoveryResultSchema,
   firstContentVersionPublishResultSchema,
@@ -65,6 +64,7 @@ import {
   type AssignmentListPage,
   type AssignmentUpdateWireCommand,
   type CanvasCommandOutcome,
+  type CanvasScopeRef,
   type CollaborationWorkScope,
   type ExecutionTargetReadModel,
   type ExecutionTargetUpdateWireCommand,
@@ -144,6 +144,7 @@ import type {
 } from "./collaborationClientTypes.js";
 import { systemCollaborationClock } from "./collaborationClientTypes.js";
 import { CollaborationHttpTransport } from "./collaborationHttpTransport.js";
+import { fetchContentVersionTransfer } from "./contentVersionTransfer.js";
 import {
   CanvasCommandClient,
   type CanvasCommandMaterializationHooks,
@@ -973,15 +974,14 @@ export class CollaborationClient {
   }
 
   async fetchContentVersion(input: {
-    canvasId: string;
+    scope: CanvasScopeRef;
     content: CompletedContentVersionRef;
   }): Promise<AuthoritativeContentVersion> {
-    return this.transport.json(
-      "POST",
-      `/api/v1/projects/${encodeURIComponent(this.projectId)}/canvases/${encodeURIComponent(input.canvasId)}/content/fetch`,
-      authoritativeContentVersionSchema,
-      { body: { content: input.content } }
-    );
+    return fetchContentVersionTransfer({
+      transport: this.transport,
+      scope: input.scope,
+      content: input.content
+    });
   }
 
   async acknowledgeContentVersion(input: {

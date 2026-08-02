@@ -6,6 +6,7 @@ import { aclRegistryMigration } from "./aclRegistry.js";
 import { assignmentAuthorityMigration } from "./assignment.js";
 import { canvasCommandMigration } from "./canvas.js";
 import { canvasBaselineMigration } from "./canvasBaseline.js";
+import { canvasSnapshotContentRefMigration } from "./canvasSnapshotContentRef.js";
 import { contentVersionMigration } from "./contentVersions.js";
 import { setupCodeHostEnrollmentOutcomeMigration, setupCodeMigration } from "./setup.js";
 import { commentWorkspaceScopeMigration } from "./commentWorkspaceScope.js";
@@ -30,7 +31,10 @@ export const migrationModules: readonly MigrationModule[] = [
   identityModule,
   { name: "acl-registry", migrations: [aclRegistryMigration] },
   { name: "assignment-authority", migrations: [assignmentAuthorityMigration] },
-  { name: "canvas-command", migrations: [canvasCommandMigration, canvasBaselineMigration] },
+  {
+    name: "canvas-command",
+    migrations: [canvasCommandMigration, canvasBaselineMigration, canvasSnapshotContentRefMigration]
+  },
   { name: "content-versions", migrations: [contentVersionMigration] },
   { name: "setup-code", migrations: [setupCodeMigration, setupCodeHostEnrollmentOutcomeMigration] },
   { name: "comment-workspace-scope", migrations: [commentWorkspaceScopeMigration] },

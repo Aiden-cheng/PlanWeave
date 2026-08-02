@@ -69,13 +69,14 @@ type CanvasCommandClientPort = Pick<
   | "projectId"
   | "submitCanvasCommand"
   | "reconnectCanvasCommands"
+  | "fetchContentVersion"
   | "bindCanvasCommandSession"
   | "canvasCommandSession"
 >;
 
 type CanvasCommandMaterializerPort = Pick<
   LocalCanvasCommandMaterializer,
-  "bind" | "materializeAccepted" | "materializeReconnect"
+  "bind" | "currentDigest" | "materializeAccepted" | "materializeReconnect"
 >;
 
 function requireClient(client: CanvasCommandClientPort | null): CanvasCommandClientPort {
@@ -152,8 +153,23 @@ export class CollaborationCanvasCommandFacade {
         },
         undefined,
         {
-          beforeReconnect: (materialization) =>
-            this.materializer.materializeReconnect(binding, materialization)
+          beforeReconnect: async (materialization) => {
+            const snapshotContent =
+              materialization.response.type === "canvas.reconnect.snapshot" &&
+              (await this.materializer.currentDigest(binding)) !==
+                materialization.response.snapshot.metadata.contentDigest
+                ? (
+                    await client.fetchContentVersion({
+                      scope: materialization.response.snapshot.metadata.scope,
+                      content: materialization.response.snapshot.content
+                    })
+                  ).content
+                : undefined;
+            await this.materializer.materializeReconnect(binding, {
+              ...materialization,
+              ...(snapshotContent === undefined ? {} : { snapshotContent })
+            });
+          }
         }
       );
     let result;

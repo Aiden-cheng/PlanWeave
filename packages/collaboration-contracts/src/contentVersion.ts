@@ -93,6 +93,19 @@ function expectedMemberKind(path: string): ContentVersionMemberKind | undefined 
   return undefined;
 }
 
+const canonicalContentVersionMemberPathCollator = new Intl.Collator("en-US", {
+  usage: "sort",
+  sensitivity: "variant",
+  numeric: false,
+  caseFirst: "false",
+  ignorePunctuation: false
+});
+
+/** Canonical member-path comparison used when serialising immutable content versions. */
+export function compareContentVersionMemberPaths(left: string, right: string): number {
+  return canonicalContentVersionMemberPathCollator.compare(left, right);
+}
+
 /**
  * Complete, canonical content submitted to Server. Member order is part of the
  * canonical input: lexicographically ordered normalized paths, one manifest,
@@ -112,7 +125,7 @@ export const completeContentVersionSchema = z
     }
     for (let index = 0; index < value.members.length; index += 1) {
       const member = value.members[index]!;
-      if (index > 0 && paths[index - 1]!.localeCompare(member.path) >= 0) {
+      if (index > 0 && compareContentVersionMemberPaths(paths[index - 1]!, member.path) >= 0) {
         context.addIssue({
           code: "custom",
           message: "content_version_members_must_be_canonically_ordered",

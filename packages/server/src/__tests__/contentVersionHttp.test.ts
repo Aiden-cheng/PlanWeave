@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
+import { EventEmitter } from "node:events";
 import { rm } from "node:fs/promises";
 import {
   canonicalContentVersionDigestPayload,
@@ -10,6 +11,7 @@ import { createTestWorkspace } from "../../../runtime/src/__tests__/promptTestHe
 import { handleContentVersionHttpRequest } from "../canvas/contentVersionHttp.js";
 import { ContentVersionRepository } from "../canvas/contentVersionRepository.js";
 import { ContentVersionService } from "../canvas/contentVersionService.js";
+import { streamContentVersion } from "../canvas/contentVersionTransferHttp.js";
 import { HumanIdentityRepository, HumanMembershipService } from "../identity/index.js";
 import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { applyMigrations } from "../migrations.js";
@@ -174,14 +176,16 @@ async function fixture() {
     grantedBy: { kind: "human", id: "owner" }
   });
   const workspaceIdentity = new WorkspaceIdentityRepository(database);
+  const contentVersions = new ContentVersionRepository(database);
   const service = new ContentVersionService({
-    repository: new ContentVersionRepository(database),
+    repository: contentVersions,
     access,
     workspaceIdentity
   });
   const server = createServer((request, response) => {
     void handleContentVersionHttpRequest(request, response, {
       service,
+      contentVersions,
       repository: identity,
       workspaceIdentity,
       projectAuthority: {
@@ -201,6 +205,8 @@ async function fixture() {
   return {
     origin: `http://127.0.0.1:${address.port}`,
     database,
+    membership,
+    ownerDeviceCredentialId: owner.device.deviceCredentialId,
     ownerToken: owner.deviceToken,
     memberToken: memberJoin.deviceToken
   };
@@ -211,8 +217,153 @@ function headers(token: string) {
 }
 
 describe("content version HTTP boundary", () => {
+  it("waits for drain before reading the next transfer member", async () => {
+    const scope = { workspaceId: "w", projectId: "p", canvasId: "default" };
+    const canonicalDigest = "a".repeat(64);
+    const content = {
+      versionId: `version-${canonicalDigest}`,
+      canonicalDigest,
+      verification: "complete" as const
+    };
+    const members = [
+      { kind: "desktop_layout" as const, path: "desktop/layout.json", content: "{}" },
+      { kind: "manifest" as const, path: "manifest.json", content: "{}" }
+    ].map((member) => ({
+      ...member,
+      digestSha256: digest(member.content),
+      sizeBytes: Buffer.byteLength(member.content, "utf8")
+    }));
+    let streamingPass = false;
+    let secondMemberRead = false;
+    let notifyBackpressure: (() => void) | undefined;
+    const backpressured = new Promise<void>((resolve) => {
+      notifyBackpressure = resolve;
+    });
+    const repository = {
+      openTransfer() {
+        return {
+          header: {
+            type: "header" as const,
+            schemaVersion: "content-version/v1" as const,
+            scope,
+            completed: content,
+            canonicalDigest,
+            totalBytes: members.reduce((total, member) => total + member.sizeBytes, 0),
+            memberCount: members.length,
+            createdAt: "2026-08-01T00:00:00.000Z",
+            createdBy: { kind: "human" as const, id: "owner" }
+          },
+          members: {
+            *[Symbol.iterator]() {
+              yield members[0]!;
+              if (streamingPass) secondMemberRead = true;
+              yield members[1]!;
+            }
+          }
+        };
+      }
+    };
+    class FakeResponse extends EventEmitter {
+      writes: Buffer[] = [];
+      writeHead(): void {}
+      write(chunk: Uint8Array): boolean {
+        this.writes.push(Buffer.from(chunk));
+        if (this.writes.length === 2) notifyBackpressure?.();
+        return this.writes.length !== 2;
+      }
+      end(): void {}
+    }
+    const response = new FakeResponse();
+    const pending = streamContentVersion(response, repository, scope, content);
+    await backpressured;
+    streamingPass = true;
+    expect(secondMemberRead).toBe(false);
+    response.emit("drain");
+    await pending;
+    expect(secondMemberRead).toBe(true);
+  });
+
+  it("fails closed when a client disconnects or errors during a backpressured write", async () => {
+    const scope = { workspaceId: "w", projectId: "p", canvasId: "default" };
+    const canonicalDigest = "a".repeat(64);
+    const content = {
+      versionId: `version-${canonicalDigest}`,
+      canonicalDigest,
+      verification: "complete" as const
+    };
+    const members = [
+      { kind: "desktop_layout" as const, path: "desktop/layout.json", content: "{}" },
+      { kind: "manifest" as const, path: "manifest.json", content: "{}" }
+    ].map((member) => ({
+      ...member,
+      digestSha256: digest(member.content),
+      sizeBytes: Buffer.byteLength(member.content, "utf8")
+    }));
+
+    for (const failure of ["close", "error"] as const) {
+      let openCount = 0;
+      let secondMemberRead = false;
+      const repository = {
+        openTransfer() {
+          openCount += 1;
+          const isStreamingPass = openCount === 2;
+          return {
+            header: {
+              type: "header" as const,
+              schemaVersion: "content-version/v1" as const,
+              scope,
+              completed: content,
+              canonicalDigest,
+              totalBytes: members.reduce((total, member) => total + member.sizeBytes, 0),
+              memberCount: members.length,
+              createdAt: "2026-08-01T00:00:00.000Z",
+              createdBy: { kind: "human" as const, id: "owner" }
+            },
+            members: {
+              *[Symbol.iterator]() {
+                yield members[0]!;
+                if (isStreamingPass) secondMemberRead = true;
+                yield members[1]!;
+              }
+            }
+          };
+        }
+      };
+      class FakeResponse extends EventEmitter {
+        destroyed = false;
+        writes: Buffer[] = [];
+        writeHead(): void {}
+        write(chunk: Uint8Array): boolean {
+          this.writes.push(Buffer.from(chunk));
+          if (this.writes.length !== 2) return true;
+          if (failure === "close") {
+            this.destroyed = true;
+            this.emit("close");
+          } else {
+            this.emit("error", new Error("simulated_write_error"));
+          }
+          return false;
+        }
+        end(): void {}
+      }
+      const pending = streamContentVersion(new FakeResponse(), repository, scope, content);
+      if (failure === "close") {
+        await expect(pending).rejects.toThrow("content_transfer_client_disconnected");
+      } else {
+        await expect(pending).rejects.toThrow("simulated_write_error");
+      }
+      expect(secondMemberRead).toBe(false);
+    }
+  });
+
   it("authorizes head discovery, bounded fetch/ack, revocation, and redacted failures", async () => {
-    const { origin, database, ownerToken, memberToken } = await fixture();
+    const {
+      origin,
+      membership,
+      ownerDeviceCredentialId,
+      ownerToken,
+      memberToken
+    } = await fixture();
     const initial = await fetch(
       `${origin}/api/v1/projects/p/canvases/default/content/initial-publish`,
       {
@@ -254,6 +405,7 @@ describe("content version HTTP boundary", () => {
       body: JSON.stringify({ content: published.version.completed })
     });
     expect(fetched.status).toBe(200);
+    await fetched.text();
     const acknowledged = await fetch(
       `${origin}/api/v1/projects/p/canvases/default/content/acknowledgements`,
       {
@@ -289,11 +441,18 @@ describe("content version HTTP boundary", () => {
       }
     );
     expect(crossScopeDiscovery.status).toBe(403);
-    database
-      .prepare(
-        "UPDATE human_device_credentials SET revoked_at='2026-01-03T00:00:00.000Z' WHERE device_credential_id=(SELECT device_credential_id FROM human_device_credentials WHERE human_principal_id='owner')"
-      )
-      .run();
+    membership.revokeDevice(
+      {
+        humanPrincipalId: "owner",
+        displayName: "Owner",
+        deviceCredentialId: ownerDeviceCredentialId,
+        projectId: "p",
+        role: "owner",
+        membershipId: "membership-owner"
+      },
+      "p",
+      ownerDeviceCredentialId
+    );
     const revoked = await fetch(`${origin}/api/v1/projects/p/canvases/default/content/fetch`, {
       method: "POST",
       headers: headers(ownerToken),

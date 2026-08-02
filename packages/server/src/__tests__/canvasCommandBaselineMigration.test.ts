@@ -11,6 +11,8 @@ import { applyMigrations, latestCentralSchemaVersion } from "../migrations.js";
 import { migrations } from "../migrations/registry.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 import { CanvasCommandRepository } from "../canvas/repository.js";
+import { createDefaultCanvasRuntimePort } from "../canvas/runtimePort.js";
+import { ContentVersionRepository } from "../canvas/contentVersionRepository.js";
 import { CanvasCommandService } from "../canvas/service.js";
 import type { ContentAuthorityStore } from "../canvas/contentAuthorityStore.js";
 import type { CanvasRuntimeMutationPort } from "../canvas/runtimePort.js";
@@ -43,6 +45,60 @@ function applyThrough(database: SqliteDatabase, throughVersion: number): void {
 }
 
 describe("canvas command baseline migration", () => {
+  it("upgrades v41 snapshots only when their immutable content reference is recoverable", async () => {
+    const database = await openServerDatabase(":memory:", 5_000);
+    const workspace = await createTestWorkspace();
+    try {
+      applyThrough(database, 41);
+      const scope = { workspaceId: "workspace", projectId: "project", canvasId: "default" };
+      const contentVersions = new ContentVersionRepository(
+        database,
+        () => new Date("2026-08-02T00:00:00.000Z")
+      );
+      const runtime = createDefaultCanvasRuntimePort();
+      if (!runtime.captureContent) throw new Error("capture unavailable");
+      const captured = await runtime.captureContent({
+        projectRoot: workspace.root,
+        canvasId: "default",
+        expectedPackageDir: workspace.init.workspace.packageDir,
+        authorityProjectId: scope.projectId
+      });
+      if (!captured.ok) throw new Error(captured.detail);
+      const version = contentVersions.persistImmutable({
+        scope,
+        content: captured.content,
+        createdBy: { kind: "human", id: "owner" }
+      });
+      const insert = database.prepare(
+        `INSERT INTO canvas_command_snapshots(
+           workspace_id,project_id,canvas_id,revision,content_digest,created_at,
+           package_snapshot_id,digest_manifest_json,size_bytes,encoding,integrity
+         ) VALUES(?,?,?,?,?,?,NULL,NULL,?,'digest_manifest_only','verified')`
+      );
+      insert.run(...Object.values(scope), 1, version.completed.canonicalDigest, "2026-08-02T00:00:00.000Z", version.content.totalBytes);
+      insert.run(...Object.values(scope), 2, "d".repeat(64), "2026-08-02T00:00:00.000Z", 1);
+      applyMigrations(database);
+      expect(
+        database
+          .prepare(
+            `SELECT revision,content_digest,encoding FROM canvas_command_snapshots
+             WHERE workspace_id=? AND project_id=? AND canvas_id=? ORDER BY revision`
+          )
+          .all(...Object.values(scope))
+      ).toEqual([
+        {
+          revision: 1,
+          content_digest: version.completed.canonicalDigest,
+          encoding: "content_version_ref"
+        }
+      ]);
+    } finally {
+      database.close();
+      await rm(workspace.home, { recursive: true, force: true });
+      await rm(workspace.root, { recursive: true, force: true });
+    }
+  });
+
   it("marks legacy nondeterministic layout journals for an authoritative baseline rebuild", async () => {
     const database = await openServerDatabase(":memory:", 5_000);
     try {
@@ -96,7 +152,7 @@ describe("canvas command baseline migration", () => {
 
       applyMigrations(database);
 
-      expect(latestCentralSchemaVersion).toBe(41);
+      expect(latestCentralSchemaVersion).toBe(42);
       expect(
         database
           .prepare(
@@ -216,7 +272,7 @@ describe("canvas command baseline migration", () => {
           at,
           JSON.stringify({ manifest: { digestSha256: oldDigest, sizeBytes: 10 }, prompts: [], totalBytes: 10 }),
           10,
-          "digest_manifest_only",
+          "content_version_ref",
           "verified"
         );
       database

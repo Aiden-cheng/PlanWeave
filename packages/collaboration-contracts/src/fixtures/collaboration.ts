@@ -68,6 +68,7 @@ import {
   canvasReconnectSnapshotSchema,
   canvasSnapshotContentSchema
 } from "../canvasCommands.js";
+import { exampleCompleteContentVersion } from "./contentVersion.js";
 
 /** Deterministic 43-char base64url secret segment (test-only; not a real secret). */
 const SECRET_SEGMENT = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -586,16 +587,19 @@ export const exampleCanvasReconnectTruncatedJournal = canvasReconnectSnapshotSch
   afterRevision: 1,
   snapshot: canvasSnapshotContentSchema.parse({
     metadata: {
-      schemaVersion: "canvas-snapshot/v1",
+      schemaVersion: "canvas-snapshot/v2",
       scope: exampleCanvasAuthorizedScope,
       revision: 4,
-      contentDigest: canvasDigestB,
+      contentDigest: exampleCompleteContentVersion.canonicalDigest,
       createdAt: "2030-01-01T00:04:00.000Z",
-      packageSnapshotId: "snapshot-demo-001",
-      sizeBytes: 4096
+      sizeBytes: exampleCompleteContentVersion.totalBytes
     },
-    encoding: "package_snapshot_ref",
-    packageSnapshotId: "snapshot-demo-001"
+    encoding: "content_version_ref",
+    content: {
+      versionId: `version-${exampleCompleteContentVersion.canonicalDigest}`,
+      canonicalDigest: exampleCompleteContentVersion.canonicalDigest,
+      verification: "complete"
+    }
   })
 });
 
@@ -609,14 +613,18 @@ export const exampleCanvasMalformedSnapshotInput = {
   afterRevision: 0,
   snapshot: {
     metadata: {
-      schemaVersion: "canvas-snapshot/v1",
+      schemaVersion: "canvas-snapshot/v2",
       scope: exampleCanvasAuthorizedScope,
       revision: 4,
       contentDigest: "not-a-sha256",
       createdAt: "2030-01-01T00:04:00.000Z"
     },
-    encoding: "package_snapshot_ref",
-    packageSnapshotId: "snapshot-demo-001"
+    encoding: "content_version_ref",
+    content: {
+      versionId: `version-${exampleCompleteContentVersion.canonicalDigest}`,
+      canonicalDigest: exampleCompleteContentVersion.canonicalDigest,
+      verification: "complete"
+    }
   }
 } as const;
 

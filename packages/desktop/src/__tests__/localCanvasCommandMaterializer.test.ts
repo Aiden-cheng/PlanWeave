@@ -10,6 +10,7 @@ import {
 } from "@planweave-ai/collaboration-contracts";
 import {
   applyAuthorizedCanvasCommand,
+  captureAuthorizedCanvasContent,
   readAuthorizedCanvasContentDigest
 } from "@planweave-ai/runtime";
 import {
@@ -207,6 +208,11 @@ describe("LocalCanvasCommandMaterializer", () => {
     await expect(
       sourceMaterializer.materializeAccepted(sourceBinding, accepted, removeIntent)
     ).resolves.toBeUndefined();
+    const captured = await captureAuthorizedCanvasContent({
+      projectRoot: source.root,
+      canvasId: "default",
+      authorityProjectId: projectId
+    });
 
     const snapshot = canvasReconnectSnapshotSchema.parse({
       type: "canvas.reconnect.snapshot",
@@ -217,22 +223,27 @@ describe("LocalCanvasCommandMaterializer", () => {
       afterRevision: 1,
       snapshot: {
         metadata: {
-          schemaVersion: "canvas-snapshot/v1",
+          schemaVersion: "canvas-snapshot/v2",
           scope: scope(projectId),
           revision: 2,
           contentDigest: removed.contentDigest,
           createdAt: "2026-07-28T00:01:00.000Z",
-          digestManifest: removed.digestManifest
+          sizeBytes: captured.content.totalBytes
         },
-        encoding: "digest_manifest_only",
-        digestManifest: removed.digestManifest
+        encoding: "content_version_ref",
+        content: {
+          versionId: `version-${captured.content.canonicalDigest}`,
+          canonicalDigest: captured.content.canonicalDigest,
+          verification: "complete"
+        }
       }
     });
     await expect(
       sourceMaterializer.materializeReconnect(sourceBinding, {
         response: snapshot,
         entriesToApply: [],
-        snapshotRequired: true
+        snapshotRequired: true,
+        snapshotContent: captured.content
       })
     ).resolves.toBeUndefined();
     expect(sourceBinding.expectedContentDigest).toBe(snapshot.snapshot.metadata.contentDigest);
@@ -255,10 +266,11 @@ describe("LocalCanvasCommandMaterializer", () => {
           }
         },
         entriesToApply: [],
-        snapshotRequired: true
+        snapshotRequired: true,
+        snapshotContent: captured.content
       })
     ).rejects.toMatchObject({
-      code: "collaboration_canvas_snapshot_materialization_required",
+      code: "collaboration_canvas_snapshot_materialized_digest_mismatch",
       retryable: true
     });
   });

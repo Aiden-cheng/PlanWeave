@@ -195,7 +195,7 @@ describe("Desktop canvas command dual-client E2E (OSS-004 B-003)", () => {
     const clientB = createClient(fixture.origin, fixture.projectId, "profile-b", owner.deviceToken);
     await expect(
       clientA.publishInitialContent({ canvasId: "default", content: fixture.initialContent })
-    ).resolves.toMatchObject({ outcome: "published" });
+    ).resolves.toMatchObject({ outcome: "rejected", reason: "head_already_exists" });
     const controllerA = new CanvasCommandController({ api: bridgeFor(clientA), labels });
     const controllerB = new CanvasCommandController({ api: bridgeFor(clientB), labels });
 
@@ -284,10 +284,12 @@ describe("Desktop canvas command dual-client E2E (OSS-004 B-003)", () => {
 
     // Client B reconnects and converges on ordered history.
     const reconnect = await controllerB.reconnect({ canvasId: "default" });
-    expect(reconnect.response.type).toBe("canvas.reconnect.delta");
-    if (reconnect.response.type !== "canvas.reconnect.delta") throw new Error("expected delta");
-    expect(reconnect.response.headRevision).toBe(1);
-    expect(reconnect.response.entries.map((entry) => entry.operationId)).toEqual(["op-shared-001"]);
+    expect(reconnect.response.type).toBe("canvas.reconnect.snapshot");
+    if (reconnect.response.type !== "canvas.reconnect.snapshot") throw new Error("expected snapshot");
+    expect(reconnect.response.snapshot.metadata.revision).toBe(1);
+    expect(reconnect.response.snapshot.content.canonicalDigest).toBe(
+      reconnect.response.snapshot.metadata.contentDigest
+    );
     expect(controllerB.getSnapshot().session?.revision).toBe(1);
 
     // Client B continues ordered history from authoritative revision.

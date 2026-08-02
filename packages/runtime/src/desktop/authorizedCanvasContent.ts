@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   canonicalContentVersionDigestPayload,
+  compareContentVersionMemberPaths,
   completeContentVersionSchema,
   contentVersionDesktopLayoutMemberPath,
   type CompleteContentVersion,
@@ -76,7 +77,7 @@ export async function captureAuthorizedCanvasContent(input: {
       digestSha256: sha256(canonicalLayout),
       sizeBytes: Buffer.byteLength(canonicalLayout, "utf8")
     }
-  ].sort((left, right) => left.path.localeCompare(right.path));
+  ].sort((left, right) => compareContentVersionMemberPaths(left.path, right.path));
   const totalBytes = members.reduce((sum, member) => sum + member.sizeBytes, 0);
   const provisional = { members, totalBytes, canonicalDigest: "0".repeat(64) };
   const content = completeContentVersionSchema.parse({

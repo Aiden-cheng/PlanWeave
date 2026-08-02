@@ -5,6 +5,7 @@ export * from "./migration.js";
 export * from "./projectAccess.js";
 export * from "./packageSnapshot.js";
 export * from "./contentVersion.js";
+export * from "./contentVersionTransfer.js";
 export * from "./contentAuthority.js";
 export * from "./assignment.js";
 export * from "./responsibility.js";

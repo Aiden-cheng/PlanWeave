@@ -1,7 +1,10 @@
 import {
   authoritativeContentHeadSchema,
   authoritativeContentVersionSchema,
+  canvasScopeRefSchema,
+  compareContentVersionMemberPaths,
   completedContentVersionRefSchema,
+  contentVersionMemberSchema,
   contentVersionAcknowledgementSchema,
   contentVersionAuthorityDiscoveryResultSchema,
   contentVersionJournalEntrySchema,
@@ -12,7 +15,9 @@ import {
   type CompletedContentVersionRef,
   type ContentReplicaStatus,
   type ContentVersionAcknowledgement,
-  type ContentVersionAuthorityDiscoveryResult
+  type ContentVersionAuthorityDiscoveryResult,
+  type ContentVersionMember,
+  type ContentVersionTransferHeaderFrame
 } from "@planweave-ai/collaboration-contracts";
 import { validateAuthoritativeCanvasContent } from "@planweave-ai/runtime";
 import { inWriteTransaction, type SqliteDatabase } from "../sqlite.js";
@@ -127,6 +132,94 @@ export class ContentVersionRepository implements ContentAuthorityStore {
     return this.readVersionInCallerTransaction(scope, content);
   }
 
+  /**
+   * Opens a bounded, item-at-a-time immutable-content transfer source. The HTTP
+   * adapter owns framing and backpressure; this repository never exposes paths.
+   */
+  openTransfer(
+    scope: CanvasScopeKey,
+    content: CompletedContentVersionRef
+  ): { header: ContentVersionTransferHeaderFrame; members: Iterable<ContentVersionMember> } {
+    const row = this.database
+      .prepare(
+        `SELECT canonical_digest,total_bytes,created_at,creator_kind,creator_id,creator_display_name
+           FROM canvas_content_versions
+          WHERE workspace_id=? AND project_id=? AND canvas_id=? AND version_id=?`
+      )
+      .get(scope.workspaceId, scope.projectId, scope.canvasId, content.versionId) as VersionRow | undefined;
+    if (!row || String(row.canonical_digest) !== content.canonicalDigest) {
+      throw new Error("content_version_not_found");
+    }
+    const count = this.database
+      .prepare(
+        `SELECT COUNT(*) AS count FROM canvas_content_version_members
+          WHERE workspace_id=? AND project_id=? AND canvas_id=? AND version_id=?`
+      )
+      .get(scope.workspaceId, scope.projectId, scope.canvasId, content.versionId);
+    const memberCount = Number(count?.count ?? 0);
+    const header: ContentVersionTransferHeaderFrame = {
+      type: "header",
+      schemaVersion: "content-version/v1",
+      scope: canvasScopeRefSchema.parse(scope),
+      completed: content,
+      canonicalDigest: String(row.canonical_digest),
+      totalBytes: Number(row.total_bytes),
+      memberCount,
+      createdAt: String(row.created_at),
+      createdBy: {
+        kind: row.creator_kind as ActorRef["kind"],
+        id: String(row.creator_id),
+        ...(row.creator_display_name === null ? {} : { displayName: String(row.creator_display_name) })
+      }
+    };
+    return {
+      header,
+      members: this.transferMembers(scope, content)
+    };
+  }
+
+  private *transferMembers(
+    scope: CanvasScopeKey,
+    content: CompletedContentVersionRef
+  ): Iterable<ContentVersionMember> {
+    const paths = this.database
+      .prepare(
+        `SELECT member_path
+         FROM canvas_content_version_members
+        WHERE workspace_id=? AND project_id=? AND canvas_id=? AND version_id=?`
+      )
+      .all(
+        scope.workspaceId,
+        scope.projectId,
+        scope.canvasId,
+        content.versionId
+      )
+      .map((row) => String(row.member_path))
+      .sort(compareContentVersionMemberPaths);
+    const readMember = this.database.prepare(
+      `SELECT member_kind,member_path,content,digest_sha256,size_bytes
+         FROM canvas_content_version_members
+        WHERE workspace_id=? AND project_id=? AND canvas_id=? AND version_id=? AND member_path=?`
+    );
+    for (const path of paths) {
+      const row = readMember.get(
+        scope.workspaceId,
+        scope.projectId,
+        scope.canvasId,
+        content.versionId,
+        path
+      );
+      if (!row) throw new Error("content_version_member_missing");
+      yield contentVersionMemberSchema.parse({
+        kind: row.member_kind,
+        path: row.member_path,
+        content: row.content,
+        digestSha256: row.digest_sha256,
+        sizeBytes: row.size_bytes
+      });
+    }
+  }
+
   private readVersionInCallerTransaction(
     scope: CanvasScopeKey,
     content: CompletedContentVersionRef
@@ -143,22 +236,9 @@ export class ContentVersionRepository implements ContentAuthorityStore {
     if (!row || String(row.canonical_digest) !== content.canonicalDigest) {
       throw new Error("content_version_not_found");
     }
-    const members = this.database
-      .prepare(
-        `SELECT member_kind,member_path,content,digest_sha256,size_bytes
-           FROM canvas_content_version_members
-          WHERE workspace_id=? AND project_id=? AND canvas_id=? AND version_id=?
-          ORDER BY member_path ASC`
-      )
-      .all(scope.workspaceId, scope.projectId, scope.canvasId, content.versionId);
+    const members = [...this.transferMembers(scope, content)];
     const complete = this.verify({
-      members: members.map((member) => ({
-        kind: member.member_kind,
-        path: member.member_path,
-        content: member.content,
-        digestSha256: member.digest_sha256,
-        sizeBytes: member.size_bytes
-      })),
+      members,
       canonicalDigest: row.canonical_digest,
       totalBytes: row.total_bytes
     });
