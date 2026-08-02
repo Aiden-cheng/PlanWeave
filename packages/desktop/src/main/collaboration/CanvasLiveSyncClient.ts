@@ -189,8 +189,8 @@ export class CanvasLiveSyncClient {
   }
 
   /**
-   * Advance the reconnect hello cursor only after the replica store successfully applied
-   * a contiguous revision. Never jumps forward over gaps.
+   * Advance the hello cursor by exactly one after a single live entry was applied.
+   * Rejects non-contiguous jumps (catch-up must use acknowledgeMaterializedHead).
    */
   acknowledgeAppliedRevision(revision: CanvasRevision): void {
     if (this.lastRevision === null) {
@@ -202,7 +202,20 @@ export class CanvasLiveSyncClient {
       return;
     }
     if (revision === this.lastRevision) return;
-    // Ignore non-contiguous or stale acks — catch-up owns gap repair.
+    // Ignore non-contiguous or stale acks — HTTP recovery owns gap repair.
+  }
+
+  /**
+   * Advance the hello cursor to a store head installed by authoritative HTTP recovery
+   * (delta/snapshot catch-up). Allows monotone forward jumps (e.g. 1 → 5) without
+   * requiring intermediate live frames.
+   */
+  acknowledgeMaterializedHead(revision: CanvasRevision): void {
+    if (this.lastRevision === null || revision > this.lastRevision) {
+      this.lastRevision = revision;
+      return;
+    }
+    // Same or older head: ignore (never roll the cursor backwards).
   }
 
   /** Report catch-up recovery progress without taking over the socket. */

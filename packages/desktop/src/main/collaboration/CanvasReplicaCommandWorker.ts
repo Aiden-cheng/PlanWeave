@@ -543,10 +543,8 @@ export class CanvasReplicaCommandWorker {
   }
 
   /**
-   * After an uncertain network outcome, reconnect to install authoritative state, then either:
-   * - resolve when the same operationId appears as accepted in the journal / known outcome
-   * - resubmit the same operationId (idempotent) when still pending
-   * - only reject after a definitive Server rejection or confirmed rebase failure after confirm
+   * Outer wrapper: enter the per-scope serial lane, then run in-lane recovery.
+   * Must not be called from inside another enqueueSerial task for the same scope.
    */
   private async reconcileUncertain(
     scope: CanvasReplicaScope,
@@ -556,109 +554,120 @@ export class CanvasReplicaCommandWorker {
     queue: Queued[],
     options: { knownAccepted?: CanvasCommandAccepted; preferSnapshot?: boolean }
   ): Promise<void> {
-    // Share the per-scope FIFO lane with live apply / catch-up so installReconnect cannot race.
-    await this.enqueueSerial(scopeKey, async () => {
+    await this.enqueueSerial(scopeKey, () =>
+      this.reconcileUncertainInLane(scope, scopeKey, generation, current, queue, options)
+    );
+  }
+
+  /**
+   * In-lane recovery body. Caller must already hold the serial lane (or be the sole caller).
+   * Never re-enters enqueueSerial.
+   */
+  private async reconcileUncertainInLane(
+    scope: CanvasReplicaScope,
+    scopeKey: string,
+    generation: number,
+    current: Queued,
+    queue: Queued[],
+    options: { knownAccepted?: CanvasCommandAccepted; preferSnapshot?: boolean }
+  ): Promise<void> {
+    if (!this.isCurrent(scopeKey, generation) || current.settled) return;
+    try {
+      const preferred = options.preferSnapshot
+        ? { afterRevision: 0, afterContentDigest: null as string | null }
+        : {
+            afterRevision: this.store.revision(scope),
+            afterContentDigest: this.store.digest(scope)
+          };
+      const installed = await this.installReconnect(scope, scopeKey, generation, preferred, {
+        forceSnapshotOnMaterializeFailure: true
+      });
+      if (!installed) {
+        settleReject(current, disconnectedError());
+        return;
+      }
       if (!this.isCurrent(scopeKey, generation) || current.settled) return;
-      try {
-        const preferred = options.preferSnapshot
-          ? { afterRevision: 0, afterContentDigest: null as string | null }
-          : {
-              afterRevision: this.store.revision(scope),
-              afterContentDigest: this.store.digest(scope)
-            };
-        const installed = await this.installReconnect(scope, scopeKey, generation, preferred, {
-          forceSnapshotOnMaterializeFailure: true
-        });
-        if (!installed) {
-          settleReject(current, disconnectedError());
-          return;
-        }
-        if (!this.isCurrent(scopeKey, generation) || current.settled) return;
-        const { response, droppedPending, viaSnapshot } = installed;
+      const { response, droppedPending, viaSnapshot } = installed;
 
-        const journalAccepted =
-          response.type === "canvas.reconnect.delta"
-            ? response.entries.find((entry) => entry.operationId === current.operationId)
-            : undefined;
+      const journalAccepted =
+        response.type === "canvas.reconnect.delta"
+          ? response.entries.find((entry) => entry.operationId === current.operationId)
+          : undefined;
 
-        if (journalAccepted) {
+      if (journalAccepted) {
+        this.rejectDropped(
+          scopeKey,
+          droppedPending.filter((item) => item.operationId !== current.operationId)
+        );
+        if (queue[0] === current) queue.shift();
+        settleResolve(current, acceptedFromEntry(journalAccepted));
+        this.resetBackoff(scopeKey);
+        return;
+      }
+
+      const wasDropped = droppedPending.some((item) => item.operationId === current.operationId);
+      const stillPending = this.store.pendingOperationIds(scope).includes(current.operationId);
+
+      if (options.knownAccepted) {
+        const folded = this.tryAccept(scope, scopeKey, options.knownAccepted);
+        if (folded === "accepted") {
           this.rejectDropped(
             scopeKey,
             droppedPending.filter((item) => item.operationId !== current.operationId)
           );
           if (queue[0] === current) queue.shift();
-          settleResolve(current, acceptedFromEntry(journalAccepted));
-          this.resetBackoff(scopeKey);
-          return;
-        }
-
-        const wasDropped = droppedPending.some((item) => item.operationId === current.operationId);
-        const stillPending = this.store.pendingOperationIds(scope).includes(current.operationId);
-
-        if (options.knownAccepted) {
-          const folded = this.tryAccept(scope, scopeKey, options.knownAccepted);
-          if (folded === "accepted") {
-            this.rejectDropped(
-              scopeKey,
-              droppedPending.filter((item) => item.operationId !== current.operationId)
-            );
-            if (queue[0] === current) queue.shift();
-            settleResolve(current, options.knownAccepted);
-            this.resetBackoff(scopeKey);
-            return;
-          }
-          if (
-            viaSnapshot ||
-            this.store.revision(scope) >= options.knownAccepted.revision
-          ) {
-            const included = this.store.acknowledgeIncluded(scope, current.operationId);
-            this.rejectDropped(scopeKey, [
-              ...droppedPending.filter((item) => item.operationId !== current.operationId),
-              ...included.droppedPending
-            ]);
-            if (queue[0] === current) queue.shift();
-            settleResolve(current, options.knownAccepted);
-            this.resetBackoff(scopeKey);
-            return;
-          }
-        }
-
-        if (stillPending) {
-          this.rejectDropped(scopeKey, droppedPending);
-          return;
-        }
-
-        if (options.knownAccepted && !wasDropped) {
-          this.rejectDropped(scopeKey, droppedPending);
-          if (queue[0] === current) queue.shift();
           settleResolve(current, options.knownAccepted);
           this.resetBackoff(scopeKey);
           return;
         }
-
-        if (wasDropped) {
-          this.rejectDropped(
-            scopeKey,
-            droppedPending.filter((item) => item.operationId !== current.operationId)
-          );
-          await this.confirmDroppedOrRetry(scope, scopeKey, generation, current, queue);
-          return;
-        }
-
-        this.rejectDropped(scopeKey, droppedPending);
-        if (options.knownAccepted) {
+        if (viaSnapshot || this.store.revision(scope) >= options.knownAccepted.revision) {
+          const included = this.store.acknowledgeIncluded(scope, current.operationId);
+          this.rejectDropped(scopeKey, [
+            ...droppedPending.filter((item) => item.operationId !== current.operationId),
+            ...included.droppedPending
+          ]);
           if (queue[0] === current) queue.shift();
           settleResolve(current, options.knownAccepted);
           this.resetBackoff(scopeKey);
           return;
-        }
-        await this.confirmDroppedOrRetry(scope, scopeKey, generation, current, queue);
-      } catch {
-        if (!this.isCurrent(scopeKey, generation)) {
-          settleReject(current, disconnectedError());
         }
       }
-    });
+
+      if (stillPending) {
+        this.rejectDropped(scopeKey, droppedPending);
+        return;
+      }
+
+      if (options.knownAccepted && !wasDropped) {
+        this.rejectDropped(scopeKey, droppedPending);
+        if (queue[0] === current) queue.shift();
+        settleResolve(current, options.knownAccepted);
+        this.resetBackoff(scopeKey);
+        return;
+      }
+
+      if (wasDropped) {
+        this.rejectDropped(
+          scopeKey,
+          droppedPending.filter((item) => item.operationId !== current.operationId)
+        );
+        await this.confirmDroppedOrRetryInLane(scope, scopeKey, generation, current, queue);
+        return;
+      }
+
+      this.rejectDropped(scopeKey, droppedPending);
+      if (options.knownAccepted) {
+        if (queue[0] === current) queue.shift();
+        settleResolve(current, options.knownAccepted);
+        this.resetBackoff(scopeKey);
+        return;
+      }
+      await this.confirmDroppedOrRetryInLane(scope, scopeKey, generation, current, queue);
+    } catch {
+      if (!this.isCurrent(scopeKey, generation)) {
+        settleReject(current, disconnectedError());
+      }
+    }
   }
 
   /**
@@ -717,9 +726,10 @@ export class CanvasReplicaCommandWorker {
   }
 
   /**
-   * After rebase drop, ask Server with the same operationId before rejecting the Promise.
+   * In-lane only: ask Server with the same operationId before rejecting.
+   * Nested recovery uses *InLane helpers — never re-enters enqueueSerial.
    */
-  private async confirmDroppedOrRetry(
+  private async confirmDroppedOrRetryInLane(
     scope: CanvasReplicaScope,
     scopeKey: string,
     generation: number,
@@ -741,8 +751,7 @@ export class CanvasReplicaCommandWorker {
         if (this.store.pendingOperationIds(scope).includes(current.operationId)) {
           const folded = this.tryAccept(scope, scopeKey, outcome);
           if (folded === "failed") {
-            // Head already has content but fold still failed — reconnect (delta→snapshot).
-            await this.reconcileUncertain(scope, scopeKey, generation, current, queue, {
+            await this.reconcileUncertainInLane(scope, scopeKey, generation, current, queue, {
               knownAccepted: outcome
             });
             return;
@@ -773,7 +782,7 @@ export class CanvasReplicaCommandWorker {
             return;
           }
         }
-        await this.recoverStaleRevision(scope, scopeKey, generation);
+        await this.recoverStaleRevisionInLane(scope, scopeKey, generation);
         return;
       }
       if (queue[0] === current) queue.shift();
@@ -845,27 +854,37 @@ export class CanvasReplicaCommandWorker {
     }
   }
 
+  /** Outer wrapper for submit-path stale recovery (not already on the serial lane). */
   private async recoverStaleRevision(
     scope: CanvasReplicaScope,
     scopeKey: string,
     generation: number
   ): Promise<void> {
-    await this.enqueueSerial(scopeKey, async () => {
-      if (!this.isCurrent(scopeKey, generation)) return;
-      const installed = await this.installReconnect(
-        scope,
-        scopeKey,
-        generation,
-        {
-          afterRevision: this.store.revision(scope),
-          afterContentDigest: this.store.digest(scope)
-        },
-        { forceSnapshotOnMaterializeFailure: true }
-      );
-      if (!installed || !this.isCurrent(scopeKey, generation)) return;
-      this.rejectDropped(scopeKey, installed.droppedPending);
-      this.confirmQueueFromReconnectEntries(scopeKey, installed.response);
-    });
+    await this.enqueueSerial(scopeKey, () =>
+      this.recoverStaleRevisionInLane(scope, scopeKey, generation)
+    );
+  }
+
+  /** In-lane only — never re-enters enqueueSerial. */
+  private async recoverStaleRevisionInLane(
+    scope: CanvasReplicaScope,
+    scopeKey: string,
+    generation: number
+  ): Promise<void> {
+    if (!this.isCurrent(scopeKey, generation)) return;
+    const installed = await this.installReconnect(
+      scope,
+      scopeKey,
+      generation,
+      {
+        afterRevision: this.store.revision(scope),
+        afterContentDigest: this.store.digest(scope)
+      },
+      { forceSnapshotOnMaterializeFailure: true }
+    );
+    if (!installed || !this.isCurrent(scopeKey, generation)) return;
+    this.rejectDropped(scopeKey, installed.droppedPending);
+    this.confirmQueueFromReconnectEntries(scopeKey, installed.response);
   }
 
   private finishForbidden(scope: CanvasReplicaScope, scopeKey: string): void {

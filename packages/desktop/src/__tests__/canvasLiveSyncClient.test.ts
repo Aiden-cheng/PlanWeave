@@ -136,6 +136,25 @@ describe("CanvasLiveSyncClient", () => {
     expect(client.helloRevision()).toBe(1);
   });
 
+  it("allows monotone head jumps via acknowledgeMaterializedHead after HTTP recovery", async () => {
+    TestSocket.instances = [];
+    const { clock } = deferredClock();
+    const client = createClient(clock);
+    client.start("canvas-1", 1);
+    await flush();
+    expect(client.helloRevision()).toBe(1);
+    // Strict +1 cannot jump 1 → 5.
+    client.acknowledgeAppliedRevision(5);
+    expect(client.helloRevision()).toBe(1);
+    // Recovery head jump is allowed and monotone.
+    client.acknowledgeMaterializedHead(5);
+    expect(client.helloRevision()).toBe(5);
+    client.acknowledgeMaterializedHead(3);
+    expect(client.helloRevision()).toBe(5);
+    client.acknowledgeMaterializedHead(6);
+    expect(client.helloRevision()).toBe(6);
+  });
+
   it("fans out to multiple subscribers without overwriting handlers", async () => {
     TestSocket.instances = [];
     const { clock } = deferredClock();

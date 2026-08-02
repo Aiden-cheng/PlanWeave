@@ -479,7 +479,7 @@ describe("Canvas replica live broadcast (Phase 5B)", () => {
     );
   });
 
-  it("does not advance applied cursor semantics when apply fails (caller only acks applied)", async () => {
+  it("returns recovered materialized head for cursor jump without entry confirmation", async () => {
     const harness = await bindWorker();
     const gapEntry = journalEntry({
       revision: 5,
@@ -520,6 +520,72 @@ describe("Canvas replica live broadcast (Phase 5B)", () => {
     expect(result.reason).toBe("recovered");
     expect(result.materializedHead?.revision).toBe(5);
     expect(harness.store.revision(baseScope)).toBe(5);
+  });
+
+  it("facade recovery path advances live cursor via materialized-head ack (not strict +1)", async () => {
+    // Simulate the facade decision table against a real CanvasLiveSyncClient cursor.
+    const { CanvasLiveSyncClient } = await import(
+      "../main/collaboration/CanvasLiveSyncClient.js"
+    );
+    const clock = {
+      now: () => new Date("2026-08-02T00:00:00.000Z"),
+      setTimeout: (cb: () => void) => {
+        cb();
+        return cb;
+      },
+      clearTimeout: () => undefined
+    };
+    class MiniSocket {
+      readyState = 0;
+      sent: string[] = [];
+      listeners = new Map<string, Array<(e: unknown) => void>>();
+      constructor(
+        public url: string,
+        public options?: { headers?: Record<string, string> }
+      ) {}
+      send(data: string) {
+        this.sent.push(data);
+      }
+      close() {
+        this.readyState = 3;
+      }
+      addEventListener(type: string, listener: (e: unknown) => void) {
+        this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+      }
+      removeEventListener() {}
+    }
+    const client = new CanvasLiveSyncClient({
+      profile: {
+        profileId: "p",
+        displayName: "d",
+        serverBaseUrl: "https://example.com/",
+        projectId: "project-authority",
+        allowInsecureTransport: false
+      },
+      credential: { getDeviceToken: () => "pw_hdev_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq" },
+      WebSocketImpl: MiniSocket as never,
+      clock,
+      random: () => 0,
+      reconnectInitialDelayMs: 1,
+      reconnectMaxDelayMs: 1
+    });
+    client.start("default", 1);
+    await Promise.resolve();
+    expect(client.helloRevision()).toBe(1);
+
+    // Worker-shaped recovered result after snapshot catch-up 1 → 5.
+    const recovered = {
+      entryApplied: false as const,
+      reason: "recovered" as const,
+      materializedHead: { revision: 5, contentDigest: "a".repeat(64) }
+    };
+    // Facade policy: entryApplied uses +1; recovered uses head jump.
+    if (recovered.entryApplied) {
+      client.acknowledgeAppliedRevision(recovered.materializedHead.revision);
+    } else if (recovered.reason === "recovered") {
+      client.acknowledgeMaterializedHead(recovered.materializedHead.revision);
+    }
+    expect(client.helloRevision()).toBe(5);
   });
 
   it("rejects a stale reconnect snapshot that would roll the head backwards", async () => {

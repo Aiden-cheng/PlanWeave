@@ -103,6 +103,7 @@ type CanvasCommandClientPort = Pick<
   | "stopLiveSync"
   | "subscribeLiveSync"
   | "acknowledgeLiveSyncRevision"
+  | "acknowledgeLiveSyncMaterializedHead"
   | "reportLiveSyncCatchupRecovering"
 >;
 
@@ -515,13 +516,22 @@ export class CollaborationCanvasCommandFacade {
         void (async () => {
           const result = await this.worker.applyLiveEntry(boundScope, message.entry);
           if (!isCurrent()) return;
-          // Advance hello cursor for any materialised head (entry apply OR HTTP recovery),
-          // without treating recovery as operationId confirmation.
-          if (
-            result.materializedHead &&
-            typeof client.acknowledgeLiveSyncRevision === "function"
-          ) {
+          if (!result.materializedHead) return;
+          // Live entry: strict +1 cursor. HTTP recovery: monotone head jump.
+          if (result.entryApplied && typeof client.acknowledgeLiveSyncRevision === "function") {
             client.acknowledgeLiveSyncRevision(result.materializedHead.revision);
+            return;
+          }
+          if (
+            result.reason === "recovered" &&
+            typeof client.acknowledgeLiveSyncMaterializedHead === "function"
+          ) {
+            client.acknowledgeLiveSyncMaterializedHead(result.materializedHead.revision);
+            return;
+          }
+          // Other materialised heads (e.g. head advanced without entryApplied) use jump ack.
+          if (typeof client.acknowledgeLiveSyncMaterializedHead === "function") {
+            client.acknowledgeLiveSyncMaterializedHead(result.materializedHead.revision);
           }
         })();
       },
@@ -569,8 +579,10 @@ export class CollaborationCanvasCommandFacade {
           ) {
             return;
           }
-          // Materialised head must advance the hello cursor before reopening live.
-          if (typeof client.acknowledgeLiveSyncRevision === "function") {
+          // Materialised head may jump multiple revisions — use recovery cursor ack.
+          if (typeof client.acknowledgeLiveSyncMaterializedHead === "function") {
+            client.acknowledgeLiveSyncMaterializedHead(this.store.revision(scope));
+          } else if (typeof client.acknowledgeLiveSyncRevision === "function") {
             client.acknowledgeLiveSyncRevision(this.store.revision(scope));
           }
           this.catchupRunning = false;

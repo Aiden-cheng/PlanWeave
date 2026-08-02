@@ -293,10 +293,18 @@ export class CollaborationClient {
   }
 
   /**
-   * Advance the live hello cursor only after the replica store applied a contiguous revision.
+   * Advance the live hello cursor by exactly one after a single live entry was applied.
    */
   acknowledgeLiveSyncRevision(revision: CanvasRevision): void {
     this.liveSync.acknowledgeAppliedRevision(revision);
+  }
+
+  /**
+   * Advance the live hello cursor to a recovered store head after HTTP catch-up.
+   * Allows monotone jumps across multiple missing revisions.
+   */
+  acknowledgeLiveSyncMaterializedHead(revision: CanvasRevision): void {
+    this.liveSync.acknowledgeMaterializedHead(revision);
   }
 
   reportLiveSyncCatchupRecovering(canvasId: string, attempt: number, delayMs: number): void {
