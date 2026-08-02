@@ -326,6 +326,10 @@ export class CanvasReplicaStore {
       ) {
         throw replicaError("canvas_replica_scope_mismatch");
       }
+      // Late recovery must never roll an applied head backwards.
+      if (replica.document !== null && response.snapshot.metadata.revision < replica.revision) {
+        throw replicaError("canvas_replica_reconnect_stale_snapshot", true);
+      }
       if (response.snapshot.metadata.contentDigest !== input.snapshotContent.canonicalDigest) {
         throw replicaError("canvas_replica_snapshot_metadata_digest_mismatch", true);
       }

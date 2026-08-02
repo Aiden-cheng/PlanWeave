@@ -468,10 +468,70 @@ describe("Canvas replica live broadcast (Phase 5B)", () => {
       layoutIntent(8, "2026-08-02T12:06:01.000Z"),
       "op-viewer-sees"
     );
-    await harness.worker.applyLiveEntry(baseScope, entry);
+    const result = await harness.worker.applyLiveEntry(baseScope, entry);
+    expect(result).toMatchObject({ applied: true, revision: 2 });
     expect(harness.store.revision(baseScope)).toBe(2);
     expect(harness.store.projection(baseScope)?.content.layout.nodes).toEqual(
       expect.arrayContaining([expect.objectContaining({ nodeId: "T-001", x: 8 })])
     );
+  });
+
+  it("does not advance applied cursor semantics when apply fails (caller only acks applied)", async () => {
+    const harness = await bindWorker();
+    const gapEntry = journalEntry({
+      revision: 5,
+      previousRevision: 4,
+      operationId: "op-gap-no-ack",
+      intent: layoutIntent(1, "2026-08-02T12:07:00.000Z"),
+      contentDigest: "e".repeat(64)
+    });
+    const snapDoc = applyCanvasReplicaIntent(
+      documentFixture(),
+      layoutIntent(9, "2026-08-02T12:07:00.000Z")
+    );
+    const snapContent = encodeCanvasReplicaDocument(snapDoc);
+    harness.transport.reconnect = async (_scope, input) => {
+      if (input.afterRevision === 0) {
+        return { response: snapshotResponse(snapContent, 5), snapshotContent: snapContent };
+      }
+      return {
+        response: {
+          type: "canvas.reconnect.delta",
+          protocolVersion: 1,
+          schemaVersion: "canvas-command/v1",
+          scope: {
+            workspaceId: baseScope.workspaceId,
+            projectId: baseScope.projectId,
+            canvasId: baseScope.canvasId
+          },
+          afterRevision: 1,
+          headRevision: 5,
+          headContentDigest: "e".repeat(64),
+          entries: [gapEntry]
+        }
+      };
+    };
+    const result = await harness.worker.applyLiveEntry(baseScope, gapEntry);
+    // Recovery installed a snapshot but did not prove this operationId — not applied:true for cursor.
+    expect(result.applied).toBe(false);
+    expect(result.reason).toBe("recovered");
+    expect(harness.store.revision(baseScope)).toBe(5);
+  });
+
+  it("rejects a stale reconnect snapshot that would roll the head backwards", async () => {
+    const harness = await bindWorker();
+    const first = harness.advanceRemote(layoutIntent(2, "2026-08-02T12:08:00.000Z"), "op-1");
+    await harness.worker.applyLiveEntry(baseScope, first);
+    expect(harness.store.revision(baseScope)).toBe(2);
+
+    const staleContent = encodeCanvasReplicaDocument(documentFixture());
+    expect(() =>
+      harness.store.replaceFromReconnect({
+        scope: baseScope,
+        response: snapshotResponse(staleContent, 1),
+        snapshotContent: staleContent
+      })
+    ).toThrow(/canvas_replica_reconnect_stale_snapshot/);
+    expect(harness.store.revision(baseScope)).toBe(2);
   });
 });

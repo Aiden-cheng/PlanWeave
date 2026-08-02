@@ -29,6 +29,12 @@ export type CanvasLiveSyncStatus =
       readonly delayMs: number;
     }
   | { readonly state: "catchup_required"; readonly canvasId: string }
+  | {
+      readonly state: "catchup_recovering";
+      readonly canvasId: string;
+      readonly attempt: number;
+      readonly delayMs: number;
+    }
   | { readonly state: "auth_expired"; readonly canvasId: string; readonly code: string }
   | { readonly state: "access_denied"; readonly canvasId: string; readonly code: string }
   | { readonly state: "failed"; readonly canvasId: string; readonly code: string };
@@ -66,7 +72,12 @@ function textFromEvent(event: unknown): string {
   });
 }
 
-/** Main-process-only read-only Canvas journal notification transport. */
+/**
+ * Main-process-only read-only Canvas journal notification transport.
+ * Connection ownership is singular; application handlers attach via subscribe() so
+ * multiple consumers (replica worker + renderer signals) never overwrite each other.
+ * Hello cursor advances only through acknowledgeAppliedRevision after local materialize.
+ */
 export class CanvasLiveSyncClient {
   private readonly profile: CollaborationConnectionProfile;
   private readonly credential: CollaborationCredentialPort;
@@ -77,9 +88,11 @@ export class CanvasLiveSyncClient {
   private readonly reconnectMaxDelayMs: number;
   private readonly logger?: CanvasLiveSyncClientOptions["logger"];
   private socket?: CollaborationWebSocketLike;
-  private handlers?: CanvasLiveSyncHandlers;
+  private readonly messageListeners = new Set<(message: CanvasLiveSyncServerMessage) => void>();
+  private readonly statusListeners = new Set<(status: CanvasLiveSyncStatus) => void>();
   private status: CanvasLiveSyncStatus = { state: "stopped" };
   private canvasId: string | null = null;
+  /** Last revision successfully applied by the replica store (hello cursor). */
   private lastRevision: CanvasRevision | null = null;
   private wanted = false;
   private disposed = false;
@@ -106,11 +119,31 @@ export class CanvasLiveSyncClient {
     return this.canvasId;
   }
 
-  /** Last revision encoded in the active hello; the main command session owns its value. */
+  /** Last revision encoded in hello — only advances after acknowledgeAppliedRevision. */
   helloRevision(): CanvasRevision | null {
     return this.lastRevision;
   }
 
+  /**
+   * Attach non-owning listeners. Safe to call while a connection is already open;
+   * does not restart the socket or replace other listeners.
+   */
+  subscribe(handlers: CanvasLiveSyncHandlers): () => void {
+    if (handlers.onMessage) this.messageListeners.add(handlers.onMessage);
+    if (handlers.onStatus) {
+      this.statusListeners.add(handlers.onStatus);
+      handlers.onStatus(this.status);
+    }
+    return () => {
+      if (handlers.onMessage) this.messageListeners.delete(handlers.onMessage);
+      if (handlers.onStatus) this.statusListeners.delete(handlers.onStatus);
+    };
+  }
+
+  /**
+   * Open or re-open the live socket for one canvas. Does not replace subscribers.
+   * Optional handlers are added as subscribers for backward compatibility.
+   */
   start(canvasId: string, lastRevision: CanvasRevision, handlers: CanvasLiveSyncHandlers = {}): void {
     if (this.disposed) {
       throw new CollaborationClientError({
@@ -133,53 +166,86 @@ export class CanvasLiveSyncClient {
       canvasId,
       lastRevision
     });
+    if (handlers.onMessage || handlers.onStatus) {
+      this.subscribe(handlers);
+    }
     if (
       this.wanted &&
       this.canvasId === hello.canvasId &&
-      this.lastRevision === hello.lastRevision
+      this.lastRevision === hello.lastRevision &&
+      this.status.state !== "catchup_required" &&
+      this.status.state !== "failed" &&
+      this.status.state !== "stopped"
     ) {
-      this.handlers = handlers;
       return;
     }
-    this.stop();
+    this.stopConnection();
     this.generation += 1;
     this.canvasId = hello.canvasId;
     this.lastRevision = hello.lastRevision;
-    this.handlers = handlers;
     this.wanted = true;
     this.reconnectAttempt = 0;
     this.connect(this.generation, hello.canvasId, hello.lastRevision);
   }
 
+  /**
+   * Advance the reconnect hello cursor only after the replica store successfully applied
+   * a contiguous revision. Never jumps forward over gaps.
+   */
+  acknowledgeAppliedRevision(revision: CanvasRevision): void {
+    if (this.lastRevision === null) {
+      this.lastRevision = revision;
+      return;
+    }
+    if (revision === this.lastRevision + 1) {
+      this.lastRevision = revision;
+      return;
+    }
+    if (revision === this.lastRevision) return;
+    // Ignore non-contiguous or stale acks — catch-up owns gap repair.
+  }
+
+  /** Report catch-up recovery progress without taking over the socket. */
+  reportCatchupRecovering(canvasId: string, attempt: number, delayMs: number): void {
+    if (this.canvasId !== canvasId && this.wanted) return;
+    this.setStatus({ state: "catchup_recovering", canvasId, attempt, delayMs });
+  }
+
   stop(): void {
     this.wanted = false;
     this.generation += 1;
-    if (this.reconnectTimer) this.clock.clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = undefined;
-    const socket = this.socket;
-    this.socket = undefined;
+    this.stopConnection();
     this.canvasId = null;
     this.lastRevision = null;
-    this.handlers = undefined;
-    if (socket && socket.readyState !== 3) {
-      try {
-        socket.close(1000, "live sync stopped");
-      } catch (error) {
-        this.logger?.warn?.(redactCollaborationText(error instanceof Error ? error.message : "live sync close failed"));
-      }
-    }
     this.setStatus({ state: "stopped" });
   }
 
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.messageListeners.clear();
+    this.statusListeners.clear();
     this.stop();
+  }
+
+  private stopConnection(): void {
+    if (this.reconnectTimer) this.clock.clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = undefined;
+    const socket = this.socket;
+    this.socket = undefined;
+    if (socket && socket.readyState !== 3) {
+      try {
+        socket.close(1000, "live sync stopped");
+      } catch (error) {
+        this.logger?.warn?.(
+          redactCollaborationText(error instanceof Error ? error.message : "live sync close failed")
+        );
+      }
+    }
   }
 
   private connect(generation: number, canvasId: string, lastRevision: CanvasRevision): void {
     if (!this.isScopeCurrent(generation, canvasId)) return;
-    // Hello uses the latest applied cursor (may have advanced since the previous connect).
     this.lastRevision = lastRevision;
     this.setStatus({ state: "connecting", canvasId, attempt: this.reconnectAttempt + 1 });
     void (async () => {
@@ -188,7 +254,11 @@ export class CanvasLiveSyncClient {
         if (!this.isScopeCurrent(generation, canvasId)) return;
         if (!token) {
           this.wanted = false;
-          this.setStatus({ state: "auth_expired", canvasId, code: "collaboration_credential_missing" });
+          this.setStatus({
+            state: "auth_expired",
+            canvasId,
+            code: "collaboration_credential_missing"
+          });
           return;
         }
         const base = new URL(this.profile.serverBaseUrl);
@@ -207,7 +277,11 @@ export class CanvasLiveSyncClient {
           try {
             socket.close(1000, "stale live sync connection");
           } catch (error) {
-            this.logger?.warn?.(redactCollaborationText(error instanceof Error ? error.message : "stale live sync close failed"));
+            this.logger?.warn?.(
+              redactCollaborationText(
+                error instanceof Error ? error.message : "stale live sync close failed"
+              )
+            );
           }
           return;
         }
@@ -242,7 +316,10 @@ export class CanvasLiveSyncClient {
             const message = canvasLiveSyncServerMessageSchema.parse(JSON.parse(text));
             const scope =
               message.type === "canvas.live.accepted_entry"
-                ? { projectId: message.entry.scope.projectId, canvasId: message.entry.scope.canvasId }
+                ? {
+                    projectId: message.entry.scope.projectId,
+                    canvasId: message.entry.scope.canvasId
+                  }
                 : message.type === "canvas.live.pong"
                   ? null
                   : { projectId: message.projectId, canvasId: message.canvasId };
@@ -259,13 +336,19 @@ export class CanvasLiveSyncClient {
             this.handleMessage(message, canvasId, isCurrent);
           } catch (error) {
             this.logger?.error?.(
-              redactCollaborationText(error instanceof Error ? error.message : "live sync message failed")
+              redactCollaborationText(
+                error instanceof Error ? error.message : "live sync message failed"
+              )
             );
             this.fail(canvasId, "collaboration_live_sync_protocol_error");
             try {
               socket.close(4000, "live sync protocol error");
             } catch (closeError) {
-              this.logger?.warn?.(redactCollaborationText(closeError instanceof Error ? closeError.message : "live sync close failed"));
+              this.logger?.warn?.(
+                redactCollaborationText(
+                  closeError instanceof Error ? closeError.message : "live sync close failed"
+                )
+              );
             }
           }
         });
@@ -273,7 +356,9 @@ export class CanvasLiveSyncClient {
           if (!isCurrent()) return;
           this.socket = undefined;
           const code =
-            typeof event === "object" && event !== null && "code" in event &&
+            typeof event === "object" &&
+            event !== null &&
+            "code" in event &&
             typeof (event as { code: unknown }).code === "number"
               ? (event as { code: number }).code
               : 1006;
@@ -281,11 +366,14 @@ export class CanvasLiveSyncClient {
             return;
           }
           if (code === 4004) {
+            // Stop the socket; catch-up recovery is owned by the replica facade with backoff.
             this.wanted = false;
             this.setStatus({ state: "catchup_required", canvasId });
             return;
           }
-          if (this.status.state === "catchup_required") return;
+          if (this.status.state === "catchup_required" || this.status.state === "catchup_recovering") {
+            return;
+          }
           if (code === 4001) {
             this.expireCredential(canvasId, "websocket_4001");
             return;
@@ -324,22 +412,25 @@ export class CanvasLiveSyncClient {
     isCurrent: () => boolean
   ): void {
     if (!isCurrent()) return;
-    this.handlers?.onMessage?.(message);
+    // Fan-out first so replica materialization can run before status side effects.
+    for (const listener of [...this.messageListeners]) {
+      try {
+        listener(message);
+      } catch (error) {
+        this.logger?.error?.(
+          redactCollaborationText(
+            error instanceof Error ? error.message : "live sync listener failed"
+          )
+        );
+      }
+    }
     switch (message.type) {
       case "canvas.live.welcome":
         this.reconnectAttempt = 0;
         this.setStatus({ state: "connected", canvasId });
         break;
       case "canvas.live.accepted_entry":
-        // Advance the hello cursor only for contiguous accepted heads so reconnect
-        // resumes from the last applied revision rather than the bind-time snapshot.
-        if (
-          this.lastRevision !== null &&
-          message.entry.previousRevision === this.lastRevision &&
-          message.entry.revision === this.lastRevision + 1
-        ) {
-          this.lastRevision = message.entry.revision;
-        }
+        // Do NOT advance lastRevision here — only acknowledgeAppliedRevision after store apply.
         break;
       case "canvas.live.pong":
         break;
@@ -382,7 +473,6 @@ export class CanvasLiveSyncClient {
     if (this.reconnectTimer) this.clock.clearTimeout(this.reconnectTimer);
     this.reconnectTimer = this.clock.setTimeout(() => {
       this.reconnectTimer = undefined;
-      // Resume hello from the latest applied revision cursor.
       this.connect(generation, canvasId, this.lastRevision ?? 0);
     }, delayMs);
   }
@@ -404,15 +494,22 @@ export class CanvasLiveSyncClient {
 
   private isScopeCurrent(generation: number, canvasId: string): boolean {
     return (
-      this.wanted &&
-      !this.disposed &&
-      generation === this.generation &&
-      this.canvasId === canvasId
+      this.wanted && !this.disposed && generation === this.generation && this.canvasId === canvasId
     );
   }
 
   private setStatus(status: CanvasLiveSyncStatus): void {
     this.status = status;
-    this.handlers?.onStatus?.(status);
+    for (const listener of [...this.statusListeners]) {
+      try {
+        listener(status);
+      } catch (error) {
+        this.logger?.error?.(
+          redactCollaborationText(
+            error instanceof Error ? error.message : "live sync status listener failed"
+          )
+        );
+      }
+    }
   }
 }

@@ -287,6 +287,22 @@ export class CollaborationClient {
     return this.liveSync.helloRevision();
   }
 
+  /** Non-owning live listeners (renderer signals, etc.). Does not restart the socket. */
+  subscribeLiveSync(handlers: CanvasLiveSyncHandlers): () => void {
+    return this.liveSync.subscribe(handlers);
+  }
+
+  /**
+   * Advance the live hello cursor only after the replica store applied a contiguous revision.
+   */
+  acknowledgeLiveSyncRevision(revision: CanvasRevision): void {
+    this.liveSync.acknowledgeAppliedRevision(revision);
+  }
+
+  reportLiveSyncCatchupRecovering(canvasId: string, attempt: number, delayMs: number): void {
+    this.liveSync.reportCatchupRecovering(canvasId, attempt, delayMs);
+  }
+
   // ---------------------------------------------------------------------------
   // Identity
   // ---------------------------------------------------------------------------
@@ -874,6 +890,10 @@ export class CollaborationClient {
     this.presence.stop();
   }
 
+  /**
+   * Own the live socket for one canvas. Handlers are subscribed (not exclusive);
+   * additional consumers must use subscribeLiveSync so they never replace replica handlers.
+   */
   startLiveSync(
     canvasId: string,
     lastRevision: CanvasRevision,

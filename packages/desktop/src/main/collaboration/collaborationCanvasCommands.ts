@@ -79,6 +79,9 @@ type CanvasCommandClientPort = Pick<
   | "connectionProfile"
   | "startLiveSync"
   | "stopLiveSync"
+  | "subscribeLiveSync"
+  | "acknowledgeLiveSyncRevision"
+  | "reportLiveSyncCatchupRecovering"
 >;
 
 export type CollaborationCanvasCommandFacadeDeps = {
@@ -254,6 +257,8 @@ export class CollaborationCanvasCommandFacade {
 
   /** Bumps on every unbind so late live messages cannot touch a new or cleared scope. */
   private liveGeneration = 0;
+  private liveUnsubscribe: (() => void) | null = null;
+  private catchupRunning = false;
 
   private readonly store: CanvasReplicaStore;
   private readonly worker: CanvasReplicaCommandWorker;
@@ -402,6 +407,9 @@ export class CollaborationCanvasCommandFacade {
 
   clearAllSessions(): void {
     this.liveGeneration += 1;
+    this.catchupRunning = false;
+    this.liveUnsubscribe?.();
+    this.liveUnsubscribe = null;
     const client = this.resolveClient();
     try {
       client?.stopLiveSync();
@@ -418,6 +426,9 @@ export class CollaborationCanvasCommandFacade {
    */
   private unbindCurrent(client: CanvasCommandClientPort | null): void {
     this.liveGeneration += 1;
+    this.catchupRunning = false;
+    this.liveUnsubscribe?.();
+    this.liveUnsubscribe = null;
     if (client) {
       try {
         client.stopLiveSync();
@@ -438,16 +449,18 @@ export class CollaborationCanvasCommandFacade {
   }
 
   /**
-   * Subscribe to Server-accepted journal entries for this canvas and fold them into the replica.
-   * Catch-up remains HTTP reconnect; this channel never mutates without a complete entry.
+   * Own the live socket for this canvas and fold accepted journal entries into the replica.
+   * Cursor advances only after store apply succeeds. Catch-up retries with cancellable backoff.
    */
   private startLiveSubscription(client: CanvasCommandClientPort, scope: CanvasReplicaScope): void {
-    if (typeof client.startLiveSync !== "function" || typeof client.stopLiveSync !== "function") {
-      // Tests may inject a minimal transport client without live sync.
+    if (typeof client.startLiveSync !== "function") {
       return;
     }
     this.liveGeneration += 1;
     const generation = this.liveGeneration;
+    this.catchupRunning = false;
+    this.liveUnsubscribe?.();
+    this.liveUnsubscribe = null;
     const boundScope = scope;
     const isCurrent = () =>
       this.liveGeneration === generation &&
@@ -459,9 +472,14 @@ export class CollaborationCanvasCommandFacade {
     const handlers = {
       onMessage: (message: CanvasLiveSyncServerMessage) => {
         if (!isCurrent()) return;
-        if (message.type === "canvas.live.accepted_entry") {
-          void this.worker.applyLiveEntry(boundScope, message.entry);
-        }
+        if (message.type !== "canvas.live.accepted_entry") return;
+        void (async () => {
+          const result = await this.worker.applyLiveEntry(boundScope, message.entry);
+          if (!isCurrent()) return;
+          if (result.applied && typeof client.acknowledgeLiveSyncRevision === "function") {
+            client.acknowledgeLiveSyncRevision(result.revision);
+          }
+        })();
       },
       onStatus: (status: CanvasLiveSyncStatus) => {
         if (!isCurrent()) return;
@@ -470,30 +488,60 @@ export class CollaborationCanvasCommandFacade {
       }
     };
 
-    client.startLiveSync(boundScope.canvasId, this.store.revision(boundScope), handlers);
+    // Connection owner: opens the socket at the store's applied revision.
+    // Handlers are subscribed (not exclusive) so renderer IPC can attach without overwrite.
+    if (typeof client.subscribeLiveSync === "function") {
+      this.liveUnsubscribe = client.subscribeLiveSync(handlers);
+      client.startLiveSync(boundScope.canvasId, this.store.revision(boundScope));
+    } else {
+      client.startLiveSync(boundScope.canvasId, this.store.revision(boundScope), handlers);
+    }
   }
 
+  /**
+   * Persistent catch-up: HTTP reconnect with cancellable exponential backoff until success
+   * or scope invalidation. Publishes catchup_recovering status for observability.
+   */
   private async recoverLiveCatchup(
     client: CanvasCommandClientPort,
     scope: CanvasReplicaScope,
     generation: number
   ): Promise<void> {
-    if (this.liveGeneration !== generation) return;
+    if (this.liveGeneration !== generation || this.catchupRunning) return;
+    this.catchupRunning = true;
+    let attempt = 0;
     try {
-      await this.worker.reconnect(scope);
-    } catch {
-      return;
+      while (this.liveGeneration === generation) {
+        attempt += 1;
+        const delayMs = Math.min(30_000, 200 * 2 ** Math.min(attempt - 1, 10));
+        if (typeof client.reportLiveSyncCatchupRecovering === "function") {
+          client.reportLiveSyncCatchupRecovering(scope.canvasId, attempt, delayMs);
+        }
+        try {
+          await this.worker.reconnect(scope);
+          if (this.liveGeneration !== generation) return;
+          if (
+            !this.binding ||
+            this.binding.scope.authorityId !== scope.authorityId ||
+            this.binding.scope.canvasId !== scope.canvasId
+          ) {
+            return;
+          }
+          // Successful catch-up: restart live from the recovered applied head.
+          this.catchupRunning = false;
+          this.startLiveSubscription(client, scope);
+          return;
+        } catch {
+          if (this.liveGeneration !== generation) return;
+          await new Promise<void>((resolve) => {
+            const timer = setTimeout(resolve, delayMs);
+            timer.unref?.();
+          });
+        }
+      }
+    } finally {
+      if (this.liveGeneration === generation) this.catchupRunning = false;
     }
-    if (this.liveGeneration !== generation) return;
-    if (
-      !this.binding ||
-      this.binding.scope.authorityId !== scope.authorityId ||
-      this.binding.scope.canvasId !== scope.canvasId
-    ) {
-      return;
-    }
-    // Restart live from the recovered head so gaps filled over HTTP are not re-requested.
-    this.startLiveSubscription(client, scope);
   }
 
   private requireBinding(

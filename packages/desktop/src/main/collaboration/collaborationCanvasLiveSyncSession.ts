@@ -5,6 +5,7 @@ import {
 import type { CollaborationClient } from "./CollaborationClient.js";
 import { CollaborationClientError } from "./collaborationErrors.js";
 import type { ResolvedCollaborationCanvasBinding } from "./ContentVersionFacade.js";
+import type { CanvasLiveSyncHandlers } from "./CanvasLiveSyncClient.js";
 
 export type CollaborationCanvasLiveSyncClientPort = Pick<
   CollaborationClient,
@@ -15,6 +16,7 @@ export type CollaborationCanvasLiveSyncClientPort = Pick<
   | "liveSyncState"
   | "startLiveSync"
   | "stopLiveSync"
+  | "subscribeLiveSync"
 >;
 
 export type CollaborationCanvasLiveSyncSessionHost = {
@@ -30,8 +32,10 @@ export type CollaborationCanvasLiveSyncSessionHost = {
 };
 
 /**
- * Service-scoped bridge between opaque local canvas identity and a single remote live socket.
- * It never materializes journal entries; HTTP reconnect remains the only recovery mechanism.
+ * Renderer-facing live-sync session: attaches signal subscribers only.
+ * It never owns exclusive handlers. Command-facade bind owns socket start and replica apply.
+ * When live is not yet open for the canvas, this session may open the connection at the
+ * command-session revision, then subscribe — replica apply still attaches separately via facade.
  */
 export class CollaborationCanvasLiveSyncSession {
   private scope: {
@@ -41,11 +45,14 @@ export class CollaborationCanvasLiveSyncSession {
     remoteCanvasId: string;
   } | null = null;
   private generation = 0;
+  private unsubscribe: (() => void) | null = null;
 
   constructor(private readonly host: CollaborationCanvasLiveSyncSessionHost) {}
 
   reset(): void {
     this.generation += 1;
+    this.unsubscribe?.();
+    this.unsubscribe = null;
     this.scope = null;
   }
 
@@ -83,30 +90,19 @@ export class CollaborationCanvasLiveSyncSession {
       remoteProjectId: resolved.remoteProjectId,
       remoteCanvasId: resolved.remoteCanvasId
     };
-    if (
-      this.scope?.localProjectId === nextScope.localProjectId &&
-      this.scope.localCanvasId === nextScope.localCanvasId &&
-      this.scope.remoteProjectId === nextScope.remoteProjectId &&
-      this.scope.remoteCanvasId === nextScope.remoteCanvasId &&
-      client.liveSyncCanvas() === nextScope.remoteCanvasId &&
-      client.liveSyncHelloRevision() === commandSession.revision &&
-      client.liveSyncState().state !== "catchup_required" &&
-      client.liveSyncState().state !== "failed" &&
-      client.liveSyncState().state !== "auth_expired" &&
-      client.liveSyncState().state !== "access_denied" &&
-      client.liveSyncState().state !== "stopped"
-    ) {
-      return;
-    }
     this.generation += 1;
     const generation = this.generation;
     this.scope = nextScope;
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+
     const isCurrent = () =>
       this.generation === generation &&
       this.scope === nextScope &&
       this.host.getClient() === client &&
       this.host.getClientProfileId() === profileId;
-    client.startLiveSync(nextScope.remoteCanvasId, commandSession.revision, {
+
+    const handlers: CanvasLiveSyncHandlers = {
       onMessage: (message) => {
         if (!isCurrent()) return;
         this.host.publishCanvasLiveSyncSignal({
@@ -120,16 +116,40 @@ export class CollaborationCanvasLiveSyncSession {
         if (!isCurrent()) return;
         if (status.state !== "auth_expired") return;
         this.generation += 1;
+        this.unsubscribe?.();
+        this.unsubscribe = null;
         this.scope = null;
-        client.stopLiveSync();
+        // Do not stopLiveSync here — command facade owns the socket. Only clear credentials.
         void this.host.clearDeviceCredential(profileId).then(() => this.host.publishStatus());
       }
-    });
+    };
+
+    // Prefer subscribe-only when the command facade already owns the live socket for this canvas.
+    if (
+      client.liveSyncCanvas() === nextScope.remoteCanvasId &&
+      typeof client.subscribeLiveSync === "function"
+    ) {
+      this.unsubscribe = client.subscribeLiveSync(handlers);
+      return;
+    }
+
+    // Passive open: establish connection without exclusive handler ownership.
+    // Handlers are attached via subscribe so a later command-facade start keeps apply handlers.
+    if (typeof client.subscribeLiveSync === "function") {
+      this.unsubscribe = client.subscribeLiveSync(handlers);
+    }
+    client.startLiveSync(
+      nextScope.remoteCanvasId,
+      commandSession.revision,
+      typeof client.subscribeLiveSync === "function" ? {} : handlers
+    );
   }
 
   stop(): void {
     this.generation += 1;
+    this.unsubscribe?.();
+    this.unsubscribe = null;
     this.scope = null;
-    this.host.getClient()?.stopLiveSync();
+    // Never stopLiveSync — command facade is the socket owner. Detaching signal listeners is enough.
   }
 }

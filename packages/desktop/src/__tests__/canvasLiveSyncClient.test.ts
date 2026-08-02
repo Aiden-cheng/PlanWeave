@@ -130,6 +130,44 @@ describe("CanvasLiveSyncClient", () => {
       })
     });
     expect(messages).toEqual([expect.objectContaining({ type: "canvas.live.accepted_entry" })]);
+    // Cursor does not advance on receive — only after acknowledgeAppliedRevision.
+    expect(client.helloRevision()).toBe(0);
+    client.acknowledgeAppliedRevision(1);
+    expect(client.helloRevision()).toBe(1);
+  });
+
+  it("fans out to multiple subscribers without overwriting handlers", async () => {
+    TestSocket.instances = [];
+    const { clock } = deferredClock();
+    const client = createClient(clock);
+    const a: unknown[] = [];
+    const b: unknown[] = [];
+    client.start("canvas-1", 0);
+    client.subscribe({ onMessage: (m) => a.push(m.type) });
+    client.subscribe({ onMessage: (m) => b.push(m.type) });
+    await flush();
+    const socket = TestSocket.instances[0];
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "canvas.live.accepted_entry",
+        protocolVersion: CANVAS_LIVE_SYNC_PROTOCOL_VERSION,
+        entry: {
+          schemaVersion: "canvas-journal/v1",
+          entryId: "journal-1",
+          scope: { workspaceId: "workspace-1", projectId: "project-1", canvasId: "canvas-1" },
+          revision: 1,
+          previousRevision: 0,
+          operationId: "operation-1",
+          intent: { kind: "update_layout", nodes: [{ nodeId: "T-1", x: 1, y: 2 }] },
+          intentDigest: "a".repeat(64),
+          contentDigest: "b".repeat(64),
+          actor: { kind: "human", id: "human-1" },
+          acceptedAt: "2026-08-02T00:00:00.000Z"
+        }
+      })
+    });
+    expect(a).toEqual(["canvas.live.accepted_entry"]);
+    expect(b).toEqual(["canvas.live.accepted_entry"]);
   });
 
   it("uses the active hello revision after a retryable network close and pauses after catchup", async () => {

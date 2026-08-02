@@ -1,12 +1,11 @@
 import { randomUUID } from "node:crypto";
-import {
-  canvasCommandAcceptedSchema,
-  type CanvasCommandAccepted,
-  type CanvasCommandIntent,
-  type CanvasCommandOutcome,
-  type CanvasJournalEntry,
-  type CanvasReconnectResponse,
-  type CompleteContentVersion
+import type {
+  CanvasCommandAccepted,
+  CanvasCommandIntent,
+  CanvasCommandOutcome,
+  CanvasJournalEntry,
+  CanvasReconnectResponse,
+  CompleteContentVersion
 } from "@planweave-ai/collaboration-contracts";
 import type {
   CanvasReplicaPendingOperation,
@@ -47,6 +46,10 @@ export type CanvasReplicaCommandWorkerOptions = {
   random?: () => number;
   backoff?: ReconnectBackoffOptions;
 };
+
+export type CanvasReplicaLiveApplyResult =
+  | { readonly applied: true; readonly revision: number; readonly contentDigest: string }
+  | { readonly applied: false; readonly reason: "ignored" | "recovered" | "failed" };
 
 type Queued = {
   operationId: string;
@@ -137,6 +140,8 @@ export class CanvasReplicaCommandWorker {
   private readonly scopes = new Map<string, CanvasReplicaScope>();
   private readonly recoveryAttempts = new Map<string, number>();
   private readonly delays = new Map<string, DelayHandle>();
+  /** Serializes live-entry apply + reconnect recovery per scope (no concurrent install races). */
+  private readonly serialChains = new Map<string, Promise<unknown>>();
   private readonly sleep: (ms: number, isCancelled: () => boolean) => Promise<void>;
   private readonly random: () => number;
   private readonly backoffOptions: ReconnectBackoffOptions;
@@ -152,6 +157,19 @@ export class CanvasReplicaCommandWorker {
       initialDelayMs: 200,
       maxDelayMs: 30_000
     };
+  }
+
+  private enqueueSerial<T>(scopeKey: string, task: () => Promise<T>): Promise<T> {
+    const previous = this.serialChains.get(scopeKey) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(task);
+    this.serialChains.set(
+      scopeKey,
+      current.then(
+        () => undefined,
+        () => undefined
+      )
+    );
+    return current;
   }
 
   /**
@@ -257,84 +275,121 @@ export class CanvasReplicaCommandWorker {
     input?: { afterRevision?: number; afterContentDigest?: string | null }
   ): Promise<CanvasReconnectResponse> {
     const scopeKey = this.key(scope);
-    const generation = this.generations.get(scopeKey) ?? 0;
-    const afterRevision = input?.afterRevision ?? this.store.revision(scope);
-    const afterContentDigest =
-      input?.afterContentDigest !== undefined
-        ? input.afterContentDigest
-        : this.store.digest(scope);
-    const result = await this.installReconnect(
-      scope,
-      scopeKey,
-      generation,
-      {
-        afterRevision,
-        afterContentDigest
-      },
-      { forceSnapshotOnMaterializeFailure: true }
-    );
-    if (!result) throw disconnectedError();
-    this.rejectDropped(scopeKey, result.droppedPending);
-    this.settleQueueMatchesStore(scope, scopeKey);
-    return result.response;
+    return this.enqueueSerial(scopeKey, async () => {
+      const generation = this.generations.get(scopeKey) ?? 0;
+      const afterRevision = input?.afterRevision ?? this.store.revision(scope);
+      const afterContentDigest =
+        input?.afterContentDigest !== undefined
+          ? input.afterContentDigest
+          : this.store.digest(scope);
+      const result = await this.installReconnect(
+        scope,
+        scopeKey,
+        generation,
+        {
+          afterRevision,
+          afterContentDigest
+        },
+        { forceSnapshotOnMaterializeFailure: true }
+      );
+      if (!result) throw disconnectedError();
+      this.rejectDropped(scopeKey, result.droppedPending);
+      this.confirmQueueFromReconnectEntries(scopeKey, result.response);
+      return result.response;
+    });
   }
 
   /**
    * Fold one Server-broadcast accepted journal entry into the replica.
-   * Own operationIds confirm pending at most once; gaps/digest failures recover via HTTP reconnect.
+   * Serialized per scope with reconnect recovery. Own operationIds confirm pending at most once.
+   * Returns applied=true only when the store committed the entry (caller may advance live cursor).
    */
-  async applyLiveEntry(scope: CanvasReplicaScope, entry: CanvasJournalEntry): Promise<void> {
+  async applyLiveEntry(
+    scope: CanvasReplicaScope,
+    entry: CanvasJournalEntry
+  ): Promise<CanvasReplicaLiveApplyResult> {
     const scopeKey = this.key(scope);
-    if (!this.scopes.has(scopeKey) || !this.store.has(scope)) return;
-    const generation = this.generations.get(scopeKey) ?? 0;
-    if (
-      entry.scope.workspaceId !== scope.workspaceId ||
-      entry.scope.projectId !== scope.projectId ||
-      entry.scope.canvasId !== scope.canvasId
-    ) {
-      return;
-    }
-    try {
-      const { droppedPending } = this.store.applyEntry(entry);
-      if (!this.isCurrent(scopeKey, generation)) return;
-      this.rejectDropped(scopeKey, droppedPending);
-      this.confirmLiveOperation(scopeKey, entry);
-      this.resetBackoff(scopeKey);
-    } catch (error) {
-      if (!this.isCurrent(scopeKey, generation)) return;
-      const code =
-        error instanceof CollaborationClientError ? error.code : "canvas_replica_live_apply_failed";
+    return this.enqueueSerial(scopeKey, async () => {
+      if (!this.scopes.has(scopeKey) || !this.store.has(scope)) {
+        return { applied: false, reason: "ignored" as const };
+      }
+      const generation = this.generations.get(scopeKey) ?? 0;
       if (
-        code !== "canvas_replica_revision_gap" &&
-        code !== "canvas_replica_canonical_digest_mismatch" &&
-        code !== "canvas_replica_reconnect_delta_invalid" &&
-        code !== "canvas_replica_reconnect_head_mismatch"
+        entry.scope.workspaceId !== scope.workspaceId ||
+        entry.scope.projectId !== scope.projectId ||
+        entry.scope.canvasId !== scope.canvasId
       ) {
-        // Unexpected protocol failures: do not hot-loop; leave committed state intact.
-        return;
+        return { applied: false, reason: "ignored" as const };
       }
-      // Gap / unmaterializable entry: recover through HTTP delta→snapshot without publishing bad state.
-      const ok = await this.waitBackoff(scopeKey, generation);
-      if (!ok) return;
       try {
-        const installed = await this.installReconnect(
-          scope,
-          scopeKey,
-          generation,
-          {
-            afterRevision: this.store.revision(scope),
-            afterContentDigest: this.store.digest(scope)
-          },
-          { forceSnapshotOnMaterializeFailure: true }
-        );
-        if (!installed || !this.isCurrent(scopeKey, generation)) return;
-        this.rejectDropped(scopeKey, installed.droppedPending);
-        this.settleQueueMatchesStore(scope, scopeKey);
+        const beforeRevision = this.store.revision(scope);
+        const { droppedPending } = this.store.applyEntry(entry);
+        if (!this.isCurrent(scopeKey, generation)) {
+          return { applied: false, reason: "ignored" as const };
+        }
+        this.rejectDropped(scopeKey, droppedPending);
+        this.confirmLiveOperation(scopeKey, entry);
         this.resetBackoff(scopeKey);
-      } catch {
-        // Keep pending; another live event or submit path may recover.
+        // Idempotent same-head apply still counts as successfully handled for cursor ack.
+        if (
+          this.store.revision(scope) === entry.revision &&
+          this.store.digest(scope) === entry.contentDigest
+        ) {
+          return {
+            applied: true,
+            revision: entry.revision,
+            contentDigest: entry.contentDigest
+          };
+        }
+        if (this.store.revision(scope) > beforeRevision) {
+          return {
+            applied: true,
+            revision: this.store.revision(scope),
+            contentDigest: this.store.digest(scope)!
+          };
+        }
+        return { applied: false, reason: "ignored" as const };
+      } catch (error) {
+        if (!this.isCurrent(scopeKey, generation)) {
+          return { applied: false, reason: "ignored" as const };
+        }
+        const code =
+          error instanceof CollaborationClientError
+            ? error.code
+            : "canvas_replica_live_apply_failed";
+        if (
+          code !== "canvas_replica_revision_gap" &&
+          code !== "canvas_replica_canonical_digest_mismatch" &&
+          code !== "canvas_replica_reconnect_delta_invalid" &&
+          code !== "canvas_replica_reconnect_head_mismatch"
+        ) {
+          return { applied: false, reason: "failed" as const };
+        }
+        const ok = await this.waitBackoff(scopeKey, generation);
+        if (!ok) return { applied: false, reason: "ignored" as const };
+        try {
+          const installed = await this.installReconnect(
+            scope,
+            scopeKey,
+            generation,
+            {
+              afterRevision: this.store.revision(scope),
+              afterContentDigest: this.store.digest(scope)
+            },
+            { forceSnapshotOnMaterializeFailure: true }
+          );
+          if (!installed || !this.isCurrent(scopeKey, generation)) {
+            return { applied: false, reason: "ignored" as const };
+          }
+          this.rejectDropped(scopeKey, installed.droppedPending);
+          this.confirmQueueFromReconnectEntries(scopeKey, installed.response);
+          this.resetBackoff(scopeKey);
+          return { applied: false, reason: "recovered" as const };
+        } catch {
+          return { applied: false, reason: "failed" as const };
+        }
       }
-    }
+    });
   }
 
   clear(scope: CanvasReplicaScope): void {
@@ -761,42 +816,17 @@ export class CanvasReplicaCommandWorker {
   }
 
   /**
-   * After reconnect catch-up, settle any queue items whose operationId is no longer pending
-   * (already absorbed into committed state).
+   * Confirm queued submits only from real journal entries in a reconnect delta.
+   * Snapshot catch-up cannot prove operationId acceptance — remaining queue items
+   * stay for FIFO idempotent resubmit against the Server.
    */
-  private settleQueueMatchesStore(scope: CanvasReplicaScope, scopeKey: string): void {
-    const queue = this.queues.get(scopeKey);
-    if (!queue?.length) return;
-    const stillPending = new Set(this.store.pendingOperationIds(scope));
-    const revision = this.store.revision(scope);
-    const digest = this.store.digest(scope);
-    if (digest === null) return;
-    for (let index = queue.length - 1; index >= 0; index -= 1) {
-      const item = queue[index]!;
-      if (stillPending.has(item.operationId) || item.settled) continue;
-      // Absorbed by journal/snapshot during catch-up — resolve as accepted at current head.
-      const outcome = canvasCommandAcceptedSchema.parse({
-        type: "canvas.command.accepted",
-        protocolVersion: 1,
-        schemaVersion: "canvas-command/v1",
-        scope: {
-          workspaceId: scope.workspaceId,
-          projectId: scope.projectId,
-          canvasId: scope.canvasId
-        },
-        operationId: item.operationId,
-        revision,
-        previousRevision: Math.max(0, revision - 1),
-        contentDigest: digest,
-        journalEntryId: item.operationId.startsWith("op-")
-          ? `je-${item.operationId.slice(3)}`
-          : `je-${item.operationId}`,
-        actor: { kind: "human", id: "authority", displayName: "Authority" },
-        acceptedAt: new Date().toISOString(),
-        idempotentReplay: true
-      });
-      settleResolve(item, outcome);
-      queue.splice(index, 1);
+  private confirmQueueFromReconnectEntries(
+    scopeKey: string,
+    response: CanvasReconnectResponse
+  ): void {
+    if (response.type !== "canvas.reconnect.delta") return;
+    for (const entry of response.entries) {
+      this.confirmLiveOperation(scopeKey, entry);
     }
   }
 
@@ -805,18 +835,21 @@ export class CanvasReplicaCommandWorker {
     scopeKey: string,
     generation: number
   ): Promise<void> {
-    const installed = await this.installReconnect(
-      scope,
-      scopeKey,
-      generation,
-      {
-        afterRevision: this.store.revision(scope),
-        afterContentDigest: this.store.digest(scope)
-      },
-      { forceSnapshotOnMaterializeFailure: true }
-    );
-    if (!installed) return;
-    this.rejectDropped(scopeKey, installed.droppedPending);
+    await this.enqueueSerial(scopeKey, async () => {
+      const installed = await this.installReconnect(
+        scope,
+        scopeKey,
+        generation,
+        {
+          afterRevision: this.store.revision(scope),
+          afterContentDigest: this.store.digest(scope)
+        },
+        { forceSnapshotOnMaterializeFailure: true }
+      );
+      if (!installed) return;
+      this.rejectDropped(scopeKey, installed.droppedPending);
+      this.confirmQueueFromReconnectEntries(scopeKey, installed.response);
+    });
   }
 
   private finishForbidden(scope: CanvasReplicaScope, scopeKey: string): void {

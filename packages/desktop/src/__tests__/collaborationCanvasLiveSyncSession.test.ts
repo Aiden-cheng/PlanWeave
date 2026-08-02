@@ -134,7 +134,7 @@ describe("CollaborationCanvasLiveSyncSession", () => {
     expect(secondSocket.readyState).toBe(3);
   });
 
-  it("replaces the socket when the authoritative command revision advances and clears credentials only for auth", async () => {
+  it("subscribes without restarting an owned socket and clears credentials only for auth", async () => {
     class SessionClient implements CollaborationCanvasLiveSyncClientPort {
       readonly projectId = "project-1";
       revision = 0;
@@ -143,7 +143,7 @@ describe("CollaborationCanvasLiveSyncSession", () => {
       helloRevision: number | null = null;
       stopCalls = 0;
       starts: number[] = [];
-      handlers: CanvasLiveSyncHandlers[] = [];
+      readonly listeners: CanvasLiveSyncHandlers[] = [];
 
       canvasCommandSession(): CanvasCommandSessionSnapshot {
         return {
@@ -170,13 +170,19 @@ describe("CollaborationCanvasLiveSyncSession", () => {
         return this.status;
       }
 
-      startLiveSync(_canvasId: string, lastRevision: number, handlers: CanvasLiveSyncHandlers): void {
-        if (this.canvas !== null) this.stopLiveSync();
+      subscribeLiveSync(handlers: CanvasLiveSyncHandlers): () => void {
+        this.listeners.push(handlers);
+        return () => {
+          const index = this.listeners.indexOf(handlers);
+          if (index >= 0) this.listeners.splice(index, 1);
+        };
+      }
+
+      startLiveSync(_canvasId: string, lastRevision: number, _handlers?: CanvasLiveSyncHandlers): void {
         this.canvas = "remote-first";
         this.helloRevision = lastRevision;
         this.status = { state: "connecting", canvasId: "remote-first", attempt: 1 };
         this.starts.push(lastRevision);
-        this.handlers.push(handlers);
       }
 
       stopLiveSync(): void {
@@ -205,23 +211,35 @@ describe("CollaborationCanvasLiveSyncSession", () => {
       publishStatus: async () => undefined
     });
 
-    await session.start({ localProjectId: "local-project", canvasId: "first" });
+    // First open establishes the socket once.
     await session.start({ localProjectId: "local-project", canvasId: "first" });
     expect(client.starts).toEqual([0]);
+    expect(client.listeners).toHaveLength(1);
+
+    // Re-start while already connected only re-subscribes — never restarts or stops the owner socket.
+    await session.start({ localProjectId: "local-project", canvasId: "first" });
+    expect(client.starts).toEqual([0]);
+    expect(client.stopCalls).toBe(0);
+    expect(client.listeners).toHaveLength(1);
 
     client.revision = 1;
     await session.start({ localProjectId: "local-project", canvasId: "first" });
-    expect(client.starts).toEqual([0, 1]);
-    expect(client.stopCalls).toBe(1);
+    // Revision advances are owned by the command facade; session stays subscribe-only.
+    expect(client.starts).toEqual([0]);
+    expect(client.stopCalls).toBe(0);
 
-    const currentHandlers = client.handlers.at(-1);
-    client.status = { state: "access_denied", canvasId: "remote-first", code: "forbidden" };
-    currentHandlers?.onStatus?.(client.status);
+    const currentHandlers = client.listeners.at(-1);
+    currentHandlers?.onStatus?.({ state: "access_denied", canvasId: "remote-first", code: "forbidden" });
     expect(cleared).toEqual([]);
 
-    client.status = { state: "auth_expired", canvasId: "remote-first", code: "unauthorized" };
-    currentHandlers?.onStatus?.(client.status);
+    currentHandlers?.onStatus?.({
+      state: "auth_expired",
+      canvasId: "remote-first",
+      code: "unauthorized"
+    });
     await flush();
     expect(cleared).toEqual(["profile-1"]);
+    // Session must not tear down the shared socket on auth signal.
+    expect(client.stopCalls).toBe(0);
   });
 });
