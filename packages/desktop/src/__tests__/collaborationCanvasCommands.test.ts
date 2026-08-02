@@ -104,6 +104,7 @@ function makeClient(overrides: Partial<CollaborationClient> = {}) {
     reconnectCanvasCommands: vi.fn<CollaborationClient["reconnectCanvasCommands"]>(),
     fetchContentVersion: vi.fn<CollaborationClient["fetchContentVersion"]>(),
     bindCanvasCommandSession: vi.fn<CollaborationClient["bindCanvasCommandSession"]>(),
+    clearCanvasCommandSession: vi.fn<CollaborationClient["clearCanvasCommandSession"]>(),
     canvasCommandSession: vi.fn<CollaborationClient["canvasCommandSession"]>(() => remoteSession),
     getCurrentCanvasAccess: vi.fn(async () => ({
       scope: {
@@ -370,6 +371,277 @@ describe("CollaborationCanvasCommandFacade", () => {
     facade.clearAllSessions();
     expect(
       facade.projectionForBinding({ localProjectId: "local-project", canvasId: "local-canvas" })
+    ).toBeNull();
+  });
+
+  it("leaves the facade unbound and clears client session when rebind fails", async () => {
+    const content = fixtureContent();
+    const store = new CanvasReplicaStore(() => undefined);
+    let bindAttempts = 0;
+    const transport: CanvasReplicaCommandTransport = {
+      async fetchReconnectBaseline() {
+        bindAttempts += 1;
+        if (bindAttempts === 1) {
+          return { response: snapshotResponse(content, 1), content };
+        }
+        throw new Error("second canvas baseline failed");
+      },
+      async reconnect() {
+        throw new Error("unexpected");
+      },
+      async canPersistCanvasCommand() {
+        return true;
+      },
+      async submit() {
+        throw new Error("unexpected");
+      }
+    };
+    const clearCanvasCommandSession = vi.fn();
+    const client = makeClient({
+      clearCanvasCommandSession
+    } as Partial<CollaborationClient>);
+    const facade = new CollaborationCanvasCommandFacade({
+      resolveClient: () => client,
+      resolveCanvasBinding: async (input) => ({
+        localProjectId: input.localProjectId,
+        localCanvasId: input.canvasId,
+        remoteProjectId: "remote-project",
+        remoteCanvasId:
+          input.canvasId === "local-canvas" ? "remote-canvas" : "remote-canvas-b"
+      }),
+      resolveCanvasScope: async (input) => ({
+        workspaceId: "workspace-001",
+        projectId: "remote-project",
+        canvasId: input.canvasId === "local-canvas" ? "remote-canvas" : "remote-canvas-b"
+      }),
+      resolveAuthorityId: () => "authority-1",
+      store,
+      transport
+    });
+
+    await facade.bind({ localProjectId: "local-project", canvasId: "local-canvas" });
+    await expect(
+      facade.bind({ localProjectId: "local-project", canvasId: "local-canvas-b" })
+    ).rejects.toThrow(/second canvas baseline failed/);
+
+    expect(
+      facade.projectionForBinding({ localProjectId: "local-project", canvasId: "local-canvas" })
+    ).toBeNull();
+    expect(
+      facade.projectionForBinding({ localProjectId: "local-project", canvasId: "local-canvas-b" })
+    ).toBeNull();
+    expect(store.projection({
+      authorityId: "authority-1",
+      workspaceId: "workspace-001",
+      projectId: "remote-project",
+      canvasId: "remote-canvas-b"
+    })).toBeNull();
+    expect(clearCanvasCommandSession).toHaveBeenCalled();
+    await expect(
+      facade.submit({
+        canvasId: "remote-canvas",
+        intent: {
+          kind: "update_layout",
+          nodes: [
+            { nodeId: "T-001", x: 1, y: 2 },
+            { nodeId: "T-002", x: 30, y: 40 }
+          ],
+          updatedAt: "2026-08-02T00:00:00.000Z"
+        }
+      })
+    ).rejects.toMatchObject({ code: "collaboration_canvas_local_binding_required" });
+  });
+
+  it("fully unbinds worker scope and client session when rebind mapping is unmapped", async () => {
+    const content = fixtureContent();
+    const store = new CanvasReplicaStore(() => undefined);
+    let submitCalls = 0;
+    let submitGate: { promise: Promise<void>; resolve: () => void } | null = null;
+    const transport: CanvasReplicaCommandTransport = {
+      async fetchReconnectBaseline() {
+        return { response: snapshotResponse(content, 1), content };
+      },
+      async reconnect() {
+        throw new Error("unexpected reconnect");
+      },
+      async canPersistCanvasCommand() {
+        return true;
+      },
+      async submit(input) {
+        submitCalls += 1;
+        if (!submitGate) {
+          let resolve!: () => void;
+          const promise = new Promise<void>((r) => {
+            resolve = r;
+          });
+          submitGate = { promise, resolve };
+        }
+        await submitGate.promise;
+        const next = encodeCanvasReplicaDocument(
+          applyCanvasReplicaIntent(decodeCanvasReplicaDocument(content), input.intent)
+        );
+        return {
+          type: "canvas.command.accepted" as const,
+          protocolVersion: 1 as const,
+          schemaVersion: "canvas-command/v1" as const,
+          scope: {
+            workspaceId: "workspace-001",
+            projectId: "remote-project",
+            canvasId: "remote-canvas"
+          },
+          operationId: input.operationId,
+          revision: 2,
+          previousRevision: 1,
+          contentDigest: next.canonicalDigest,
+          journalEntryId: "journal-late",
+          actor: { kind: "human" as const, id: "human-1", displayName: "Owner" },
+          acceptedAt: "2026-08-02T00:00:00.000Z",
+          idempotentReplay: false
+        };
+      }
+    };
+    const clearCanvasCommandSession = vi.fn();
+    const client = makeClient({
+      clearCanvasCommandSession
+    } as Partial<CollaborationClient>);
+    const facade = new CollaborationCanvasCommandFacade({
+      resolveClient: () => client,
+      resolveCanvasBinding: async (input) => {
+        if (input.canvasId === "missing-canvas") return null;
+        return {
+          localProjectId: "local-project",
+          localCanvasId: "local-canvas",
+          remoteProjectId: "remote-project",
+          remoteCanvasId: "remote-canvas"
+        };
+      },
+      resolveCanvasScope: async () => ({
+        workspaceId: "workspace-001",
+        projectId: "remote-project",
+        canvasId: "remote-canvas"
+      }),
+      resolveAuthorityId: () => "authority-1",
+      store,
+      transport
+    });
+
+    await facade.bind({ localProjectId: "local-project", canvasId: "local-canvas" });
+    const inFlight = facade.submit({
+      canvasId: "remote-canvas",
+      intent: {
+        kind: "update_layout",
+        nodes: [
+          { nodeId: "T-001", x: 5, y: 6 },
+          { nodeId: "T-002", x: 30, y: 40 }
+        ],
+        updatedAt: "2026-08-02T01:00:00.000Z"
+      }
+    });
+    await vi.waitFor(() => expect(submitCalls).toBe(1));
+
+    // Mapping failure must tear down the old worker before the late network reply.
+    await expect(
+      facade.bind({ localProjectId: "local-project", canvasId: "missing-canvas" })
+    ).rejects.toMatchObject({ code: "collaboration_canvas_scope_unmapped" });
+
+    expect(clearCanvasCommandSession).toHaveBeenCalled();
+    expect(
+      facade.projectionForBinding({ localProjectId: "local-project", canvasId: "local-canvas" })
+    ).toBeNull();
+    expect(
+      store.projection({
+        authorityId: "authority-1",
+        workspaceId: "workspace-001",
+        projectId: "remote-project",
+        canvasId: "remote-canvas"
+      })
+    ).toBeNull();
+
+    submitGate!.resolve();
+    await expect(inFlight).rejects.toMatchObject({
+      code: "canvas_replica_session_disconnected"
+    });
+  });
+
+  it("fully unbinds when rebind scope resolution mismatches remote canvas", async () => {
+    const content = fixtureContent();
+    const store = new CanvasReplicaStore(() => undefined);
+    const transport: CanvasReplicaCommandTransport = {
+      async fetchReconnectBaseline() {
+        return { response: snapshotResponse(content, 1), content };
+      },
+      async reconnect() {
+        throw new Error("unexpected");
+      },
+      async canPersistCanvasCommand() {
+        return true;
+      },
+      async submit() {
+        throw new Error("unexpected");
+      }
+    };
+    const clearCanvasCommandSession = vi.fn();
+    const client = makeClient({
+      clearCanvasCommandSession
+    } as Partial<CollaborationClient>);
+    const facade = new CollaborationCanvasCommandFacade({
+      resolveClient: () => client,
+      resolveCanvasBinding: async (input) => {
+        if (input.canvasId === "local-canvas-b") {
+          return {
+            localProjectId: "local-project",
+            localCanvasId: "local-canvas-b",
+            remoteProjectId: "remote-project",
+            remoteCanvasId: "remote-canvas-b"
+          };
+        }
+        return {
+          localProjectId: "local-project",
+          localCanvasId: "local-canvas",
+          remoteProjectId: "remote-project",
+          remoteCanvasId: "remote-canvas"
+        };
+      },
+      resolveCanvasScope: async (input) => {
+        if (input.canvasId === "local-canvas-b") {
+          // Binding maps to remote-canvas-b, but scope resolution returns a different canvas.
+          return {
+            workspaceId: "workspace-001",
+            projectId: "remote-project",
+            canvasId: "other-canvas"
+          };
+        }
+        return {
+          workspaceId: "workspace-001",
+          projectId: "remote-project",
+          canvasId: "remote-canvas"
+        };
+      },
+      resolveAuthorityId: () => "authority-1",
+      store,
+      transport
+    });
+
+    await facade.bind({ localProjectId: "local-project", canvasId: "local-canvas" });
+    clearCanvasCommandSession.mockClear();
+    await expect(
+      facade.bind({ localProjectId: "local-project", canvasId: "local-canvas-b" })
+    ).rejects.toMatchObject({ code: "collaboration_canvas_scope_unmapped" });
+
+    expect(clearCanvasCommandSession).toHaveBeenCalled();
+    expect(
+      facade.projectionForBinding({
+        localProjectId: "local-project",
+        canvasId: "local-canvas"
+      })
+    ).toBeNull();
+    expect(
+      store.projection({
+        authorityId: "authority-1",
+        workspaceId: "workspace-001",
+        projectId: "remote-project",
+        canvasId: "remote-canvas"
+      })
     ).toBeNull();
   });
 });

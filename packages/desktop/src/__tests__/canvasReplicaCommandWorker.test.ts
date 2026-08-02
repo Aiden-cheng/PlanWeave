@@ -742,4 +742,442 @@ describe("CanvasReplicaCommandWorker", () => {
     expect(storeB.revision(baseScope)).toBe(3);
     expect(storeB.revision(scopeB)).toBe(0);
   });
+
+  it("keeps the same operationId after transport failure until reconnect confirms acceptance", async () => {
+    const document = documentFixture();
+    let committedDoc = document;
+    let commandRevision = 1;
+    let content = encodeCanvasReplicaDocument(committedDoc);
+    const store = new CanvasReplicaStore(() => undefined);
+    const submitOperationIds: string[] = [];
+    let attempt = 0;
+    const transport: CanvasReplicaCommandTransport = {
+      async fetchReconnectBaseline() {
+        return { response: snapshotResponse(content, commandRevision), content };
+      },
+      async reconnect() {
+        // Server actually accepted the first submit before the client saw the timeout.
+        const peerIntent = layoutIntent(9, "2026-08-02T12:00:00.000Z");
+        // Use the pending intent that was submitted — recovered from last submit call.
+        const acceptedId = submitOperationIds[0]!;
+        const nextDoc = applyCanvasReplicaIntent(committedDoc, peerIntent);
+        const nextContent = encodeCanvasReplicaDocument(nextDoc);
+        const entry = {
+          schemaVersion: "canvas-journal/v1" as const,
+          entryId: "journal-server",
+          scope: {
+            workspaceId: baseScope.workspaceId,
+            projectId: baseScope.projectId,
+            canvasId: baseScope.canvasId
+          },
+          revision: commandRevision + 1,
+          previousRevision: commandRevision,
+          operationId: acceptedId,
+          intent: peerIntent,
+          intentDigest: "c".repeat(64),
+          contentDigest: nextContent.canonicalDigest,
+          actor: { kind: "human" as const, id: "human-1", displayName: "Editor" },
+          acceptedAt: "2026-08-02T12:00:00.000Z"
+        };
+        committedDoc = nextDoc;
+        content = nextContent;
+        commandRevision += 1;
+        return {
+          response: {
+            type: "canvas.reconnect.delta",
+            protocolVersion: 1,
+            schemaVersion: "canvas-command/v1",
+            scope: entry.scope,
+            afterRevision: entry.previousRevision,
+            headRevision: commandRevision,
+            headContentDigest: content.canonicalDigest,
+            entries: [entry]
+          }
+        };
+      },
+      async canPersistCanvasCommand() {
+        return true;
+      },
+      async submit(input) {
+        submitOperationIds.push(input.operationId);
+        attempt += 1;
+        if (attempt === 1) {
+          // Client times out; Server may already have applied the command.
+          throw new Error("socket hang up");
+        }
+        throw new Error("should not resubmit after journal confirmed acceptance");
+      }
+    };
+    const worker = new CanvasReplicaCommandWorker(store, transport);
+    await worker.bind(baseScope);
+    const pending = worker.submit(baseScope, layoutIntent(9, "2026-08-02T12:00:00.000Z"));
+    const outcome = await pending;
+    expect(outcome.type).toBe("canvas.command.accepted");
+    expect(outcome.operationId).toBe(submitOperationIds[0]);
+    expect(store.revision(baseScope)).toBe(2);
+    expect(store.pendingOperationIds(baseScope)).toEqual([]);
+    expect(attempt).toBe(1);
+  });
+
+  it("resubmits the same operationId after transport failure when reconnect finds no acceptance", async () => {
+    const document = documentFixture();
+    let committedDoc = document;
+    let commandRevision = 1;
+    let content = encodeCanvasReplicaDocument(committedDoc);
+    const store = new CanvasReplicaStore(() => undefined);
+    const submitOperationIds: string[] = [];
+    let attempt = 0;
+    const transport: CanvasReplicaCommandTransport = {
+      async fetchReconnectBaseline() {
+        return { response: snapshotResponse(content, commandRevision), content };
+      },
+      async reconnect() {
+        return {
+          response: {
+            type: "canvas.reconnect.delta",
+            protocolVersion: 1,
+            schemaVersion: "canvas-command/v1",
+            scope: {
+              workspaceId: baseScope.workspaceId,
+              projectId: baseScope.projectId,
+              canvasId: baseScope.canvasId
+            },
+            afterRevision: commandRevision,
+            headRevision: commandRevision,
+            headContentDigest: content.canonicalDigest,
+            entries: []
+          }
+        };
+      },
+      async canPersistCanvasCommand() {
+        return true;
+      },
+      async submit(input) {
+        submitOperationIds.push(input.operationId);
+        attempt += 1;
+        if (attempt === 1) {
+          throw new Error("network timeout");
+        }
+        const nextDoc = applyCanvasReplicaIntent(committedDoc, input.intent);
+        const nextContent = encodeCanvasReplicaDocument(nextDoc);
+        committedDoc = nextDoc;
+        content = nextContent;
+        commandRevision += 1;
+        return {
+          type: "canvas.command.accepted",
+          protocolVersion: 1,
+          schemaVersion: "canvas-command/v1",
+          scope: {
+            workspaceId: baseScope.workspaceId,
+            projectId: baseScope.projectId,
+            canvasId: baseScope.canvasId
+          },
+          operationId: input.operationId,
+          revision: commandRevision,
+          previousRevision: commandRevision - 1,
+          contentDigest: nextContent.canonicalDigest,
+          journalEntryId: `journal-${commandRevision}`,
+          actor: { kind: "human", id: "human-1", displayName: "Editor" },
+          acceptedAt: "2026-08-02T12:30:00.000Z",
+          idempotentReplay: false
+        };
+      }
+    };
+    const worker = new CanvasReplicaCommandWorker(store, transport);
+    await worker.bind(baseScope);
+    const outcome = await worker.submit(baseScope, layoutIntent(3, "2026-08-02T12:30:00.000Z"));
+    expect(outcome.type).toBe("canvas.command.accepted");
+    expect(submitOperationIds).toHaveLength(2);
+    expect(submitOperationIds[0]).toBe(submitOperationIds[1]);
+    expect(store.revision(baseScope)).toBe(2);
+  });
+
+  it("rolls back a failed bind so the scope is not left half-initialized", async () => {
+    const document = documentFixture();
+    const content = encodeCanvasReplicaDocument(document);
+    const store = new CanvasReplicaStore(() => undefined);
+    const transport: CanvasReplicaCommandTransport = {
+      async fetchReconnectBaseline() {
+        throw new Error("baseline download failed");
+      },
+      async reconnect() {
+        throw new Error("unexpected");
+      },
+      async canPersistCanvasCommand() {
+        return true;
+      },
+      async submit() {
+        throw new Error("unexpected");
+      }
+    };
+    const worker = new CanvasReplicaCommandWorker(store, transport);
+    await expect(worker.bind(baseScope)).rejects.toThrow(/baseline download failed/);
+    expect(store.projection(baseScope)).toBeNull();
+    expect(store.has(baseScope)).toBe(false);
+
+    // A subsequent successful bind must start clean.
+    const transport2: CanvasReplicaCommandTransport = {
+      async fetchReconnectBaseline() {
+        return { response: snapshotResponse(content, 4), content };
+      },
+      async reconnect() {
+        throw new Error("unexpected");
+      },
+      async canPersistCanvasCommand() {
+        return true;
+      },
+      async submit() {
+        throw new Error("unexpected");
+      }
+    };
+    const worker2 = new CanvasReplicaCommandWorker(store, transport2);
+    await worker2.bind(baseScope);
+    expect(store.revision(baseScope)).toBe(4);
+  });
+
+  it("applies cancellable exponential backoff under permanent network failure", async () => {
+    const document = documentFixture();
+    const content = encodeCanvasReplicaDocument(document);
+    const store = new CanvasReplicaStore(() => undefined);
+    let submitCalls = 0;
+    let reconnectCalls = 0;
+    const sleepCalls: number[] = [];
+    let worker!: CanvasReplicaCommandWorker;
+    const transport: CanvasReplicaCommandTransport = {
+      async fetchReconnectBaseline() {
+        return { response: snapshotResponse(content, 1), content };
+      },
+      async reconnect() {
+        reconnectCalls += 1;
+        throw new Error("network offline");
+      },
+      async canPersistCanvasCommand() {
+        return true;
+      },
+      async submit() {
+        submitCalls += 1;
+        throw new Error("network offline");
+      }
+    };
+    worker = new CanvasReplicaCommandWorker(store, transport, {
+      // Deterministic: zero jitter; sleep records delays and yields so the loop stays bounded.
+      random: () => 0,
+      backoff: { initialDelayMs: 10, maxDelayMs: 40 },
+      sleep: async (ms) => {
+        sleepCalls.push(ms);
+        // After a few backoff waits, cancel the session (simulates disconnect).
+        if (sleepCalls.length >= 3) {
+          worker.clear(baseScope);
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+    });
+    await worker.bind(baseScope);
+    const pending = worker.submit(baseScope, layoutIntent(1, "2026-08-02T14:00:00.000Z"));
+
+    await expect(pending).rejects.toMatchObject({ code: "canvas_replica_session_disconnected" });
+    // Equal-jitter with random=0: floor(cap/2) but at least 1; delays non-decreasing.
+    expect(sleepCalls.length).toBe(3);
+    expect(sleepCalls[0]).toBeGreaterThanOrEqual(1);
+    expect(sleepCalls[1]!).toBeGreaterThanOrEqual(sleepCalls[0]!);
+    expect(sleepCalls[2]!).toBeGreaterThanOrEqual(sleepCalls[1]!);
+    // Network attempts are gated by backoff — not an unbounded hot loop.
+    expect(submitCalls).toBeGreaterThanOrEqual(3);
+    expect(submitCalls).toBeLessThanOrEqual(4);
+    expect(reconnectCalls).toBeGreaterThanOrEqual(3);
+    expect(reconnectCalls).toBeLessThanOrEqual(4);
+    const submitsAfterClear = submitCalls;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(submitCalls).toBe(submitsAfterClear);
+  });
+
+  it("upgrades to a full snapshot when delta materialization fails after server accept", async () => {
+    const document = documentFixture();
+    let committedDoc = document;
+    let commandRevision = 1;
+    let content = encodeCanvasReplicaDocument(committedDoc);
+    const publishedDigests: string[] = [];
+    const store = new CanvasReplicaStore((projection) => {
+      publishedDigests.push(projection.contentDigest);
+    });
+    const intent = layoutIntent(42, "2026-08-02T15:00:00.000Z");
+    const nextDoc = applyCanvasReplicaIntent(committedDoc, intent);
+    const nextContent = encodeCanvasReplicaDocument(nextDoc);
+    const badDigest = "f".repeat(64);
+    const reconnectAfterRevisions: number[] = [];
+
+    const transport: CanvasReplicaCommandTransport = {
+      async fetchReconnectBaseline() {
+        return { response: snapshotResponse(content, commandRevision), content };
+      },
+      async reconnect(_scope, input) {
+        reconnectAfterRevisions.push(input.afterRevision);
+        if (input.afterRevision === 0) {
+          // Full snapshot at the post-accept head (only after bad delta fails).
+          committedDoc = nextDoc;
+          content = nextContent;
+          commandRevision = 2;
+          return {
+            response: snapshotResponse(content, commandRevision),
+            snapshotContent: content
+          };
+        }
+        // Delta claims a digest that cannot be produced by replaying the intent.
+        return {
+          response: {
+            type: "canvas.reconnect.delta",
+            protocolVersion: 1,
+            schemaVersion: "canvas-command/v1",
+            scope: {
+              workspaceId: baseScope.workspaceId,
+              projectId: baseScope.projectId,
+              canvasId: baseScope.canvasId
+            },
+            afterRevision: 1,
+            headRevision: 2,
+            headContentDigest: badDigest,
+            entries: [
+              {
+                schemaVersion: "canvas-journal/v1",
+                entryId: "journal-bad-digest",
+                scope: {
+                  workspaceId: baseScope.workspaceId,
+                  projectId: baseScope.projectId,
+                  canvasId: baseScope.canvasId
+                },
+                revision: 2,
+                previousRevision: 1,
+                operationId: "will-be-replaced",
+                intent,
+                intentDigest: "c".repeat(64),
+                contentDigest: badDigest,
+                actor: { kind: "human", id: "human-1", displayName: "Editor" },
+                acceptedAt: "2026-08-02T15:00:00.000Z"
+              }
+            ]
+          }
+        };
+      },
+      async canPersistCanvasCommand() {
+        return true;
+      },
+      async submit(input) {
+        // Server accepted, but local fold fails (outcome digest cannot be reproduced).
+        committedDoc = nextDoc;
+        content = nextContent;
+        commandRevision = 2;
+        return {
+          type: "canvas.command.accepted",
+          protocolVersion: 1,
+          schemaVersion: "canvas-command/v1",
+          scope: {
+            workspaceId: baseScope.workspaceId,
+            projectId: baseScope.projectId,
+            canvasId: baseScope.canvasId
+          },
+          operationId: input.operationId,
+          revision: 2,
+          previousRevision: 1,
+          contentDigest: badDigest,
+          journalEntryId: "journal-2",
+          actor: { kind: "human", id: "human-1", displayName: "Editor" },
+          acceptedAt: "2026-08-02T15:00:00.000Z",
+          idempotentReplay: false
+        };
+      }
+    };
+
+    const worker = new CanvasReplicaCommandWorker(store, transport, {
+      random: () => 0,
+      backoff: { initialDelayMs: 1, maxDelayMs: 1 },
+      sleep: async () => undefined
+    });
+    await worker.bind(baseScope);
+    const baselineDigest = store.digest(baseScope)!;
+    const digestsAfterBind = [...publishedDigests];
+
+    const outcome = await worker.submit(baseScope, intent);
+    expect(outcome.type).toBe("canvas.command.accepted");
+    // Must try delta at current revision, then upgrade to snapshot at 0.
+    expect(reconnectAfterRevisions).toEqual([1, 0]);
+    // Bad delta digest must never become the published committed head.
+    expect(publishedDigests).not.toContain(badDigest);
+    expect(store.revision(baseScope)).toBe(2);
+    expect(store.digest(baseScope)).toBe(nextContent.canonicalDigest);
+    expect(store.pendingOperationIds(baseScope)).toEqual([]);
+    // Snapshot is the first publish that advances committed digest past baseline.
+    const afterBind = publishedDigests.slice(digestsAfterBind.length);
+    expect(afterBind.some((digest) => digest === nextContent.canonicalDigest)).toBe(true);
+    expect(store.digest(baseScope)).not.toBe(baselineDigest);
+  });
+
+  it("clears pending when idempotent accept reports the current head revision", async () => {
+    const document = documentFixture();
+    let committedDoc = document;
+    let commandRevision = 1;
+    let content = encodeCanvasReplicaDocument(committedDoc);
+    const store = new CanvasReplicaStore(() => undefined);
+    const intent = layoutIntent(7, "2026-08-02T16:00:00.000Z");
+    // Snapshot head already includes the operation.
+    const headDoc = applyCanvasReplicaIntent(committedDoc, intent);
+    const headContent = encodeCanvasReplicaDocument(headDoc);
+    committedDoc = headDoc;
+    content = headContent;
+    commandRevision = 2;
+
+    const transport: CanvasReplicaCommandTransport = {
+      async fetchReconnectBaseline() {
+        return { response: snapshotResponse(content, commandRevision), content };
+      },
+      async reconnect() {
+        return {
+          response: {
+            type: "canvas.reconnect.delta",
+            protocolVersion: 1,
+            schemaVersion: "canvas-command/v1",
+            scope: {
+              workspaceId: baseScope.workspaceId,
+              projectId: baseScope.projectId,
+              canvasId: baseScope.canvasId
+            },
+            afterRevision: commandRevision,
+            headRevision: commandRevision,
+            headContentDigest: content.canonicalDigest,
+            entries: []
+          }
+        };
+      },
+      async canPersistCanvasCommand() {
+        return true;
+      },
+      async submit(input) {
+        return {
+          type: "canvas.command.accepted",
+          protocolVersion: 1,
+          schemaVersion: "canvas-command/v1",
+          scope: {
+            workspaceId: baseScope.workspaceId,
+            projectId: baseScope.projectId,
+            canvasId: baseScope.canvasId
+          },
+          operationId: input.operationId,
+          revision: commandRevision,
+          previousRevision: commandRevision - 1,
+          contentDigest: content.canonicalDigest,
+          journalEntryId: "journal-idempotent",
+          actor: { kind: "human", id: "human-1", displayName: "Editor" },
+          acceptedAt: "2026-08-02T16:00:00.000Z",
+          idempotentReplay: true
+        };
+      }
+    };
+
+    const worker = new CanvasReplicaCommandWorker(store, transport);
+    await worker.bind(baseScope);
+    // Pending is a second optimistic apply of the same layout (already on head).
+    const outcome = await worker.submit(baseScope, intent);
+    expect(outcome.type).toBe("canvas.command.accepted");
+    expect(store.revision(baseScope)).toBe(2);
+    expect(store.pendingOperationIds(baseScope)).toEqual([]);
+  });
 });

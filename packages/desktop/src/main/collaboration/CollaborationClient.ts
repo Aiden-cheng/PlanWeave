@@ -900,6 +900,11 @@ export class CollaborationClient {
     this.canvasCommands.bindCanvas(canvasId);
   }
 
+  /** Drop durable canvas command session cursor after a failed rebind or disconnect. */
+  clearCanvasCommandSession(): void {
+    this.canvasCommands.clearSession();
+  }
+
   async submitCanvasCommand(
     input: CanvasCommandSubmitInput,
     signal?: AbortSignal,

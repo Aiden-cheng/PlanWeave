@@ -315,4 +315,58 @@ describe("CanvasReplicaStore", () => {
     expect(projection.canEdit).toBe(true);
     expect(projection.revision).toBe(3);
   });
+
+  it("does not leave a ghost pending when optimistic intent is semantically invalid", () => {
+    const published: CollaborationCanvasReplicaProjection[] = [];
+    const store = new CanvasReplicaStore((projection) => published.push(projection));
+    const installed = install(store);
+    const countBefore = published.length;
+    expect(() =>
+      store.enqueue(installed.scope, {
+        operationId: "op-ghost",
+        intent: {
+          kind: "update_task_prompt",
+          taskId: "T-MISSING",
+          promptMarkdown: "# gone\n"
+        }
+      })
+    ).toThrow(/canvas_replica_pending_invalid|task_missing/);
+    expect(store.pendingOperationIds(installed.scope)).toEqual([]);
+    expect(published.length).toBe(countBefore);
+  });
+
+  it("clears pending without re-applying when authority head already includes the operation", () => {
+    const store = new CanvasReplicaStore(() => undefined);
+    const installed = install(store, "authority-a", 4);
+    store.enqueue(installed.scope, {
+      operationId: "op-already",
+      intent: layoutIntent(99, 88, "2026-08-02T13:00:00.000Z")
+    });
+    expect(store.pendingOperationIds(installed.scope)).toEqual(["op-already"]);
+
+    // Idempotent accept at the current head (snapshot already absorbed the op).
+    const { droppedPending } = store.accept(installed.scope, {
+      type: "canvas.command.accepted",
+      protocolVersion: 1,
+      schemaVersion: "canvas-command/v1",
+      scope: {
+        workspaceId: installed.scope.workspaceId,
+        projectId: installed.scope.projectId,
+        canvasId: installed.scope.canvasId
+      },
+      operationId: "op-already",
+      revision: installed.revision,
+      previousRevision: installed.revision - 1,
+      contentDigest: installed.digest,
+      journalEntryId: "journal-idempotent",
+      actor: { kind: "human", id: "human-1", displayName: "Editor" },
+      acceptedAt: "2026-08-02T13:00:00.000Z",
+      idempotentReplay: true
+    });
+
+    expect(droppedPending).toEqual([]);
+    expect(store.pendingOperationIds(installed.scope)).toEqual([]);
+    expect(store.revision(installed.scope)).toBe(installed.revision);
+    expect(store.digest(installed.scope)).toBe(installed.digest);
+  });
 });

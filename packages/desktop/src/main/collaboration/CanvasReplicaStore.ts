@@ -143,6 +143,11 @@ export class CanvasReplicaStore {
     return replica?.document ? this.toProjection(replica) : null;
   }
 
+  /**
+   * Atomically enqueue one optimistic operation.
+   * Validates intent on the current visible document and builds the projection before
+   * mutating pending — never leaves a ghost pending without a published projection.
+   */
   enqueue(
     scope: Pick<CanvasReplicaScope, "authorityId" | "workspaceId" | "projectId" | "canvasId">,
     pending: CanvasReplicaPendingOperation
@@ -155,8 +160,18 @@ export class CanvasReplicaStore {
     if (!replica.document || replica.contentDigest === null) {
       throw replicaError("canvas_replica_baseline_required", true);
     }
-    replica.pending.push(pending);
-    this.publish(replica);
+    // Validate on a temporary pending list before committing store state.
+    const previousPending = replica.pending;
+    replica.pending = [...previousPending, pending];
+    try {
+      // toProjection applies all pending intents; throw before notifying subscribers.
+      const projection = this.toProjection(replica);
+      this.onChange(projection);
+    } catch (error) {
+      replica.pending = previousPending;
+      if (error instanceof CollaborationClientError) throw error;
+      throw replicaError("canvas_replica_pending_invalid");
+    }
   }
 
   reject(
@@ -214,7 +229,31 @@ export class CanvasReplicaStore {
     return { droppedPending };
   }
 
-  /** Own HTTP acceptance carries no entry; fold with the exact queued intent. */
+  /**
+   * Drop one pending operation that authority has already absorbed (snapshot head
+   * or idempotent confirmation) without re-applying its intent.
+   */
+  acknowledgeIncluded(
+    scope: Pick<CanvasReplicaScope, "authorityId" | "workspaceId" | "projectId" | "canvasId">,
+    operationId: string
+  ): CanvasReplicaMutationResult {
+    const replica = this.require(scope);
+    const before = replica.pending.length;
+    replica.pending = replica.pending.filter((pending) => pending.operationId !== operationId);
+    if (replica.pending.length === before) {
+      return { droppedPending: [] };
+    }
+    const droppedPending = this.rebasePending(replica);
+    if (replica.document) this.publish(replica);
+    return { droppedPending };
+  }
+
+  /**
+   * Own HTTP acceptance carries no entry; fold with the exact queued intent.
+   * When authority head already includes this operationId (idempotent replay or
+   * snapshot that already absorbed the change), only clear the pending op —
+   * do not re-apply the intent.
+   */
   accept(
     scope: Pick<CanvasReplicaScope, "authorityId" | "workspaceId" | "projectId" | "canvasId">,
     outcome: Extract<CanvasCommandOutcome, { type: "canvas.command.accepted" }>
@@ -229,7 +268,22 @@ export class CanvasReplicaStore {
       }
       throw replicaError("canvas_replica_acceptance_without_pending", true);
     }
-    if (!replica.document || replica.contentDigest === null || outcome.revision !== replica.revision + 1) {
+    if (!replica.document || replica.contentDigest === null) {
+      throw replicaError("canvas_replica_baseline_required", true);
+    }
+
+    // Authority already reflects this operation (same head revision/digest).
+    if (
+      outcome.contentDigest === replica.contentDigest &&
+      outcome.revision <= replica.revision
+    ) {
+      replica.pending = replica.pending.filter((item) => item.operationId !== outcome.operationId);
+      const droppedPending = this.rebasePending(replica);
+      this.publish(replica);
+      return { droppedPending };
+    }
+
+    if (outcome.revision !== replica.revision + 1) {
       throw replicaError("canvas_replica_acceptance_revision_mismatch", true);
     }
     const pending = replica.pending[pendingIndex]!;

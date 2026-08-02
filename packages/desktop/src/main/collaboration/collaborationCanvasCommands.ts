@@ -71,6 +71,7 @@ type CanvasCommandClientPort = Pick<
   | "reconnectCanvasCommands"
   | "fetchContentVersion"
   | "bindCanvasCommandSession"
+  | "clearCanvasCommandSession"
   | "canvasCommandSession"
   | "getCurrentCanvasAccess"
   | "connectionProfile"
@@ -166,14 +167,33 @@ function createDefaultTransport(
       });
       let snapshotContent: CompleteContentVersion | undefined;
       if (reconnect.response.type === "canvas.reconnect.snapshot") {
+        const response = reconnect.response;
+        // Same strict scope checks as the initial reconnect(0) baseline path.
+        if (
+          response.scope.workspaceId !== scope.workspaceId ||
+          response.scope.projectId !== scope.projectId ||
+          response.scope.canvasId !== scope.canvasId ||
+          response.snapshot.metadata.scope.workspaceId !== scope.workspaceId ||
+          response.snapshot.metadata.scope.projectId !== scope.projectId ||
+          response.snapshot.metadata.scope.canvasId !== scope.canvasId
+        ) {
+          throw new CollaborationClientError({
+            kind: "protocol",
+            code: "canvas_replica_scope_mismatch",
+            message: "canvas_replica_scope_mismatch"
+          });
+        }
         const fetched = await client.fetchContentVersion({
-          scope: reconnect.response.snapshot.metadata.scope,
-          content: reconnect.response.snapshot.content
+          scope: response.snapshot.metadata.scope,
+          content: response.snapshot.content
         });
         if (
-          fetched.completed.versionId !== reconnect.response.snapshot.content.versionId ||
-          fetched.content.canonicalDigest !==
-            reconnect.response.snapshot.metadata.contentDigest
+          fetched.scope.workspaceId !== scope.workspaceId ||
+          fetched.scope.projectId !== scope.projectId ||
+          fetched.scope.canvasId !== scope.canvasId ||
+          fetched.completed.versionId !== response.snapshot.content.versionId ||
+          fetched.content.canonicalDigest !== response.snapshot.metadata.contentDigest ||
+          fetched.content.canonicalDigest !== response.snapshot.content.canonicalDigest
         ) {
           throw new CollaborationClientError({
             kind: "protocol",
@@ -250,14 +270,18 @@ export class CollaborationCanvasCommandFacade {
    * the network Promise without holding callers on disk materialization.
    */
   submit(input: unknown): Promise<CollaborationCanvasCommandSubmitResult> {
-    const parsed = collaborationCanvasCommandSubmitInputSchema.parse(input);
-    const client = requireClient(this.resolveClient());
-    const binding = this.requireBinding(client, parsed.canvasId);
-    const network = this.worker.submit(binding.scope, parsed.intent as CanvasCommandIntent);
-    return network.then((outcome) => ({
-      outcome,
-      session: client.canvasCommandSession()
-    }));
+    try {
+      const parsed = collaborationCanvasCommandSubmitInputSchema.parse(input);
+      const client = requireClient(this.resolveClient());
+      const binding = this.requireBinding(client, parsed.canvasId);
+      const network = this.worker.submit(binding.scope, parsed.intent as CanvasCommandIntent);
+      return network.then((outcome) => ({
+        outcome,
+        session: client.canvasCommandSession()
+      }));
+    } catch (error) {
+      return Promise.reject(error);
+    }
   }
 
   async reconnect(input: unknown): Promise<CollaborationCanvasReconnectResult> {
@@ -283,6 +307,8 @@ export class CollaborationCanvasCommandFacade {
     const client = requireClient(this.resolveClient());
     const authorityId = this.resolveAuthorityId();
     if (!authorityId) {
+      // Full unbind: resolution never starts, but an existing session must not keep running.
+      this.unbindCurrent(client);
       throw new CollaborationClientError({
         kind: "aborted",
         code: "collaboration_session_not_connected",
@@ -296,7 +322,7 @@ export class CollaborationCanvasCommandFacade {
       resolved.localCanvasId !== parsed.canvasId ||
       resolved.remoteProjectId !== client.projectId
     ) {
-      this.binding = null;
+      this.unbindCurrent(client);
       throw new CollaborationClientError({
         kind: "aborted",
         code: "collaboration_canvas_scope_unmapped",
@@ -310,7 +336,7 @@ export class CollaborationCanvasCommandFacade {
       remoteScope.projectId !== resolved.remoteProjectId ||
       remoteScope.canvasId !== resolved.remoteCanvasId
     ) {
-      this.binding = null;
+      this.unbindCurrent(client);
       throw new CollaborationClientError({
         kind: "aborted",
         code: "collaboration_canvas_scope_unmapped",
@@ -319,9 +345,9 @@ export class CollaborationCanvasCommandFacade {
       });
     }
 
-    if (this.binding) {
-      this.worker.clear(this.binding.scope);
-    }
+    // Drop the previous binding immediately so a failed rebind cannot leave the
+    // facade pointing at a cleared scope.
+    this.unbindCurrent(client);
 
     const scope: CanvasReplicaScope = {
       authorityId,
@@ -332,14 +358,21 @@ export class CollaborationCanvasCommandFacade {
       canvasId: remoteScope.canvasId
     };
 
-    await this.worker.bind(scope);
-    this.binding = {
-      scope,
-      remoteProjectId: resolved.remoteProjectId,
-      remoteCanvasId: resolved.remoteCanvasId
-    };
-    client.bindCanvasCommandSession(resolved.remoteCanvasId);
-    return client.canvasCommandSession();
+    try {
+      await this.worker.bind(scope);
+      this.binding = {
+        scope,
+        remoteProjectId: resolved.remoteProjectId,
+        remoteCanvasId: resolved.remoteCanvasId
+      };
+      client.bindCanvasCommandSession(resolved.remoteCanvasId);
+      return client.canvasCommandSession();
+    } catch (error) {
+      // Transactional rollback: new scope, queues, and client command session.
+      this.worker.clear(scope);
+      this.unbindCurrent(client);
+      throw error;
+    }
   }
 
   session(): CollaborationCanvasCommandSessionView {
@@ -362,6 +395,24 @@ export class CollaborationCanvasCommandFacade {
   clearAllSessions(): void {
     this.worker.clearAll();
     this.binding = null;
+  }
+
+  /**
+   * Full unbind: worker scope + pending queues, facade binding, and client command session.
+   * Used on rebind resolution failures so in-flight commands cannot complete against a
+   * facade that already cleared its binding pointer.
+   */
+  private unbindCurrent(client: CanvasCommandClientPort | null): void {
+    if (this.binding) {
+      this.worker.clear(this.binding.scope);
+      this.binding = null;
+    }
+    if (!client) return;
+    try {
+      client.clearCanvasCommandSession();
+    } catch {
+      // Client may already be disposed; facade is unbound regardless.
+    }
   }
 
   private requireBinding(
