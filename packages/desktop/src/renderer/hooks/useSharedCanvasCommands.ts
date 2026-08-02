@@ -9,11 +9,18 @@ import {
 } from "../collaboration/CanvasCommandController";
 import type { createTranslator } from "../i18n";
 import type { PlanWeaveCollaborationApi } from "../../shared/collaboration";
+import type { CollaborationCanvasReplicaProjection } from "../../shared/canvasReplicaIpc";
 
 export type SharedCanvasCommandBridge = CanvasCommandBridge &
   Pick<
     PlanWeaveCollaborationApi,
     "resolveCollaborationCanvasScope" | "onCollaborationObserverSignal"
+  > &
+  Partial<
+    Pick<
+      PlanWeaveCollaborationApi,
+      "getCollaborationCanvasReplicaProjection" | "onCollaborationCanvasReplicaSignal"
+    >
   >;
 
 export const SHARED_CANVAS_RECONNECT_INTERVAL_MS = 3_000;
@@ -28,6 +35,8 @@ export type SharedCanvasCommandsResult = {
   /** True when shared-mode durable mutations must go through canvas commands. */
   enabled: boolean;
   snapshot: CanvasCommandControllerSnapshot;
+  /** Authoritative in-memory projection used by the shared canvas renderer. */
+  projection: CollaborationCanvasReplicaProjection | null;
   submit: (input: {
     intent: CanvasCommandIntent;
   }) => Promise<SharedCanvasSubmitResult>;
@@ -113,6 +122,7 @@ export function useSharedCanvasCommands(input: {
     lastStaleConflict: null,
     busy: false
   });
+  const [projection, setProjection] = useState<CollaborationCanvasReplicaProjection | null>(null);
 
   useEffect(() => {
     if (
@@ -186,6 +196,7 @@ export function useSharedCanvasCommands(input: {
     const localCanvasId = currentScope?.localCanvasId ?? null;
     if (!api || !controller || !sessionEnabled || !localProjectId || !localCanvasId) {
       void controller?.unbind();
+      setProjection(null);
       return undefined;
     }
     const activeApi = api;
@@ -194,6 +205,7 @@ export function useSharedCanvasCommands(input: {
     let observerPollQueued = false;
     let intervalId: ReturnType<typeof setInterval> | null = null;
     let unsubscribeObserver: (() => void) | null = null;
+    let unsubscribeReplica: (() => void) | null = null;
 
     const reportRefreshFailure = (error: unknown) => {
       if (active) controller.reportRefreshFailure(error);
@@ -204,6 +216,19 @@ export function useSharedCanvasCommands(input: {
       } catch (error) {
         reportRefreshFailure(error);
       }
+    };
+    const acceptsProjection = (candidate: CollaborationCanvasReplicaProjection) =>
+      candidate.localProjectId === localProjectId &&
+      candidate.localCanvasId === localCanvasId &&
+      candidate.projectId === currentScope.remoteProjectId &&
+      candidate.canvasId === currentScope.remoteCanvasId;
+    const refreshReplicaProjection = async () => {
+      if (!activeApi.getCollaborationCanvasReplicaProjection) return;
+      const next = await activeApi.getCollaborationCanvasReplicaProjection({
+        localProjectId,
+        canvasId: localCanvasId
+      });
+      if (active && next && acceptsProjection(next)) setProjection(next);
     };
     const poll = async (queueWhenBusy = false) => {
       if (!active) return;
@@ -221,6 +246,7 @@ export function useSharedCanvasCommands(input: {
             result.response.type !== "canvas.reconnect.snapshot")
         )
           return;
+        await refreshReplicaProjection();
         await refreshAuthoritativeState();
       } finally {
         pollInFlight = false;
@@ -232,10 +258,14 @@ export function useSharedCanvasCommands(input: {
     };
     const bindAndStartPolling = async () => {
       try {
+        unsubscribeReplica = activeApi.onCollaborationCanvasReplicaSignal?.((signal) => {
+          if (active && acceptsProjection(signal.projection)) setProjection(signal.projection);
+        }) ?? null;
         await controller.bind({ localProjectId, canvasId: localCanvasId });
         if (!active) return;
         const snap = controller.getSnapshot();
         if (!snap.session || snap.lastError) return;
+        await refreshReplicaProjection();
         await refreshAuthoritativeState();
         if (!active || controller.getSnapshot().lastError) return;
         unsubscribeObserver = activeApi.onCollaborationObserverSignal((signal) => {
@@ -273,6 +303,7 @@ export function useSharedCanvasCommands(input: {
       active = false;
       if (intervalId !== null) clearInterval(intervalId);
       unsubscribeObserver?.();
+      unsubscribeReplica?.();
     };
   }, [
     currentScope?.localCanvasId,
@@ -331,9 +362,10 @@ export function useSharedCanvasCommands(input: {
     () => ({
       enabled: Boolean(authorityEnabled),
       snapshot,
+      projection,
       submit,
       reconnect
     }),
-    [authorityEnabled, reconnect, snapshot, submit]
+    [authorityEnabled, projection, reconnect, snapshot, submit]
   );
 }

@@ -65,6 +65,7 @@ import { useCollaborationSurface } from "./hooks/useCollaborationSurface";
 import { useCollaborationCanvasPresence } from "./hooks/useCollaborationCanvasPresence";
 import { useCollaborationRuntimeStatus } from "./hooks/useCollaborationRuntimeStatus";
 import { useSharedCanvasCommands } from "./hooks/useSharedCanvasCommands";
+import { canvasReplicaProjectionToDesktopGraph } from "./collaboration/canvasReplicaGraphAdapter";
 import { buildAppSettingsRouteProps } from "./AppSettingsRouteProps";
 import { useAutoRunController, useFileSyncController } from "./controllers/AutoRunController";
 import { useGraphWorkspaceController } from "./controllers/GraphWorkspaceController";
@@ -225,7 +226,7 @@ export function ProjectWorkspaceProvider({
     graph: localGraph,
     graphDiagnostics,
     handleOpenProject,
-    layout,
+    layout: localLayout,
     projects,
     pendingImportRecoveries,
     projectLoading,
@@ -254,16 +255,6 @@ export function ProjectWorkspaceProvider({
     canvasId: selectedCanvasId,
     t
   });
-  const collaborationRuntimeStatus = useCollaborationRuntimeStatus({
-    enabled: Boolean(selectedProject),
-    sessionConnected: collaborationSurface.sessionConnected,
-    profileId: collaborationSurface.activeProfileId,
-    activeProjectId: collaborationSurface.activeProjectId,
-    localProjectId: selectedProject?.projectId ?? null,
-    localCanvasId: selectedCanvasId,
-    graph: localGraph
-  });
-  const graph = collaborationRuntimeStatus.graph;
   const sharedCanvasCommands = useSharedCanvasCommands({
     api: collaborationBridge,
     canvasId: selectedCanvasId,
@@ -279,6 +270,24 @@ export function ProjectWorkspaceProvider({
       await refreshProjectDerivedState();
     }
   });
+  const replicaGraph = useMemo(
+    () =>
+      sharedCanvasCommands.projection
+        ? canvasReplicaProjectionToDesktopGraph(sharedCanvasCommands.projection)
+        : localGraph,
+    [localGraph, sharedCanvasCommands.projection]
+  );
+  const layout = sharedCanvasCommands.projection?.content.layout ?? localLayout;
+  const collaborationRuntimeStatus = useCollaborationRuntimeStatus({
+    enabled: Boolean(selectedProject),
+    sessionConnected: collaborationSurface.sessionConnected,
+    profileId: collaborationSurface.activeProfileId,
+    activeProjectId: collaborationSurface.activeProjectId,
+    localProjectId: selectedProject?.projectId ?? null,
+    localCanvasId: selectedCanvasId,
+    graph: replicaGraph
+  });
+  const graph = collaborationRuntimeStatus.graph;
 
   const pinnedProjectIds = useMemo(
     () => new Set(settings.pinnedProjectIds),

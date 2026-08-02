@@ -114,8 +114,14 @@ export class CanvasReplicaStore {
     }
   ): CanvasReplicaMutationResult {
     const replica = this.require(scope);
+    if (baseline.content.canonicalDigest !== baseline.contentDigest) {
+      throw replicaError("canvas_replica_baseline_content_digest_mismatch", true);
+    }
     const document = decodeCanvasReplicaDocument(baseline.content);
-    this.assertDigest(document, baseline.contentDigest);
+    // The authority digest covers the exact immutable member bytes. Decoding the
+    // manifest intentionally loses JSON whitespace, so decode -> encode is not a
+    // valid integrity check for a freshly captured (non-normalized) baseline.
+    // The transfer boundary has already validated baseline.content itself.
     replica.document = document;
     replica.revision = baseline.revision;
     replica.contentDigest = baseline.contentDigest;
@@ -340,7 +346,9 @@ export class CanvasReplicaStore {
         throw replicaError("canvas_replica_snapshot_content_ref_mismatch", true);
       }
       const document = decodeCanvasReplicaDocument(input.snapshotContent);
-      this.assertDigest(document, response.snapshot.metadata.contentDigest);
+      // snapshotContent is already validated against both the content ref and
+      // metadata above. Do not compare it with a re-encoded parsed document:
+      // canonical JSON formatting is first established by the next command.
       replica.document = document;
       replica.revision = response.snapshot.metadata.revision;
       replica.contentDigest = response.snapshot.metadata.contentDigest;

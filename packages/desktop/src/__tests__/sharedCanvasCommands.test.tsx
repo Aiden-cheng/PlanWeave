@@ -14,6 +14,11 @@ import type {
   CollaborationObserverSignal
 } from "../shared/collaboration";
 import {
+  collaborationCanvasReplicaProjectionSchema,
+  type CollaborationCanvasReplicaProjection,
+  type CollaborationCanvasReplicaSignal
+} from "../shared/canvasReplicaIpc";
+import {
   SHARED_CANVAS_RECONNECT_INTERVAL_MS,
   type SharedCanvasCommandBridge,
   useSharedCanvasCommands
@@ -57,6 +62,7 @@ function createBridge(options?: {
   resolveScope?: SharedCanvasCommandBridge["resolveCollaborationCanvasScope"];
 }) {
   const observerListeners = new Set<(signal: CollaborationObserverSignal) => void>();
+  const replicaListeners = new Set<(signal: CollaborationCanvasReplicaSignal) => void>();
   const reconnect = vi.fn<SharedCanvasCommandBridge["reconnectCollaborationCanvas"]>(
     options?.reconnect ?? (async () => reconnectResult(initialSession))
   );
@@ -82,14 +88,58 @@ function createBridge(options?: {
       onCollaborationObserverSignal: (listener: (signal: CollaborationObserverSignal) => void) => {
         observerListeners.add(listener);
         return () => observerListeners.delete(listener);
+      },
+      getCollaborationCanvasReplicaProjection: async () => null,
+      onCollaborationCanvasReplicaSignal: (listener: (signal: CollaborationCanvasReplicaSignal) => void) => {
+        replicaListeners.add(listener);
+        return () => replicaListeners.delete(listener);
       }
     },
     reconnect,
     bind,
     emitObserver(signal: CollaborationObserverSignal) {
       for (const listener of observerListeners) listener(signal);
+    },
+    emitReplica(projection: CollaborationCanvasReplicaProjection) {
+      for (const listener of replicaListeners) {
+        listener({ type: "canvas.replica.changed", projection });
+      }
     }
   };
+}
+
+function replicaProjection(revision: number): CollaborationCanvasReplicaProjection {
+  return collaborationCanvasReplicaProjectionSchema.parse({
+    authorityId: "authority-1",
+    localProjectId: "project-1",
+    localCanvasId: "default",
+    workspaceId: "workspace-1",
+    projectId: "project-1",
+    canvasId: "default",
+    revision,
+    contentDigest: "a".repeat(64),
+    canEdit: true,
+    optimisticOperationIds: [],
+    rejections: [],
+    content: {
+      projectTitle: "Shared",
+      graphVersion: "1",
+      packageFingerprint: `pkg-${"b".repeat(64)}`,
+      tasks: [],
+      edges: [],
+      sharedResourceGroups: [],
+      diagnostics: [],
+      layout: {
+        version: "desktop-layout/v1",
+        projectId: "project-1",
+        nodes: [],
+        updatedAt: "2026-08-02T00:00:00.000Z"
+      },
+      blockDependenciesByRef: {},
+      taskOpenFeedbackCountByTaskId: {},
+      blockPromptMarkdownByRef: {}
+    }
+  });
 }
 
 function hookInput(api: SharedCanvasCommandBridge, onAuthoritativeChange?: () => void | Promise<void>) {
@@ -118,6 +168,18 @@ afterEach(() => {
 });
 
 describe("useSharedCanvasCommands", () => {
+  it("adopts a live replica projection without refreshing local disk state", async () => {
+    vi.useFakeTimers();
+    const bridge = createBridge();
+    const { result } = renderHook(() => useSharedCanvasCommands(hookInput(bridge.api)));
+    await flushEffects();
+
+    act(() => bridge.emitReplica(replicaProjection(4)));
+
+    expect(result.current.projection?.revision).toBe(4);
+    expect(result.current.projection?.content.projectTitle).toBe("Shared");
+  });
+
   it("does not bind a command session before collaboration is connected", async () => {
     vi.useFakeTimers();
     const bridge = createBridge();
