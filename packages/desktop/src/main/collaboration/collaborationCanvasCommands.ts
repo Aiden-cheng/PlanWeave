@@ -1,26 +1,28 @@
-import { randomUUID } from "node:crypto";
 import {
-  canvasCommandOperationIdSchema,
   canvasCommandSubmissionIntentSchema,
   opaqueIdentifierSchema,
   type CanvasCommandIntent,
   type CanvasCommandOutcome,
   type CanvasJournalEntry,
-  type CanvasReconnectResponse
+  type CanvasReconnectResponse,
+  type CompleteContentVersion
 } from "@planweave-ai/collaboration-contracts";
 import { z } from "zod";
 import {
   collaborationCanvasSessionInputSchema,
+  type CollaborationCanvasScopeResolution,
   type CollaborationCanvasSessionInput
 } from "../../shared/collaboration.js";
 import type { CollaborationClient } from "./CollaborationClient.js";
 import type { ResolvedCollaborationCanvasBinding } from "./ContentVersionFacade.js";
+import {
+  CanvasReplicaCommandWorker,
+  type CanvasReplicaCommandTransport
+} from "./CanvasReplicaCommandWorker.js";
+import type { CanvasReplicaScope } from "./CanvasReplicaStore.js";
+import type { CanvasReplicaStore } from "./CanvasReplicaStore.js";
 import { CollaborationClientError } from "./collaborationErrors.js";
 import type { CanvasCommandSessionSnapshot } from "./canvasCommandSession.js";
-import {
-  LocalCanvasCommandMaterializer,
-  type LocalCanvasCommandBinding
-} from "./LocalCanvasCommandMaterializer.js";
 
 export const collaborationCanvasCommandSubmitInputSchema = z
   .object({
@@ -70,12 +72,23 @@ type CanvasCommandClientPort = Pick<
   | "fetchContentVersion"
   | "bindCanvasCommandSession"
   | "canvasCommandSession"
+  | "getCurrentCanvasAccess"
+  | "connectionProfile"
 >;
 
-type CanvasCommandMaterializerPort = Pick<
-  LocalCanvasCommandMaterializer,
-  "bind" | "currentDigest" | "materializeAccepted" | "materializeReconnect"
->;
+export type CollaborationCanvasCommandFacadeDeps = {
+  resolveClient: () => CanvasCommandClientPort | null;
+  resolveCanvasBinding: (
+    input: CollaborationCanvasSessionInput
+  ) => Promise<ResolvedCollaborationCanvasBinding | null>;
+  resolveCanvasScope: (
+    input: CollaborationCanvasSessionInput
+  ) => Promise<CollaborationCanvasScopeResolution | null>;
+  resolveAuthorityId: () => string | null;
+  store: CanvasReplicaStore;
+  worker?: CanvasReplicaCommandWorker;
+  transport?: CanvasReplicaCommandTransport;
+};
 
 function requireClient(client: CanvasCommandClientPort | null): CanvasCommandClientPort {
   if (!client) {
@@ -88,135 +101,194 @@ function requireClient(client: CanvasCommandClientPort | null): CanvasCommandCli
   return client;
 }
 
+function createDefaultTransport(
+  resolveClient: () => CanvasCommandClientPort | null
+): CanvasReplicaCommandTransport {
+  return {
+    async fetchReconnectBaseline(scope) {
+      const client = requireClient(resolveClient());
+      // Single reconnect(0) establishes command revision + immutable content ref together.
+      const reconnect = await client.reconnectCanvasCommands({
+        canvasId: scope.canvasId,
+        afterRevision: 0
+      });
+      const response = reconnect.response;
+      if (response.type !== "canvas.reconnect.snapshot") {
+        throw new CollaborationClientError({
+          kind: "protocol",
+          code: "canvas_replica_snapshot_required",
+          message: "canvas_replica_snapshot_required",
+          retryable: true
+        });
+      }
+      if (
+        response.scope.workspaceId !== scope.workspaceId ||
+        response.scope.projectId !== scope.projectId ||
+        response.scope.canvasId !== scope.canvasId ||
+        response.snapshot.metadata.scope.workspaceId !== scope.workspaceId ||
+        response.snapshot.metadata.scope.projectId !== scope.projectId ||
+        response.snapshot.metadata.scope.canvasId !== scope.canvasId
+      ) {
+        throw new CollaborationClientError({
+          kind: "protocol",
+          code: "canvas_replica_scope_mismatch",
+          message: "canvas_replica_scope_mismatch"
+        });
+      }
+      const fetched = await client.fetchContentVersion({
+        scope: response.snapshot.metadata.scope,
+        content: response.snapshot.content
+      });
+      if (
+        fetched.scope.workspaceId !== scope.workspaceId ||
+        fetched.scope.projectId !== scope.projectId ||
+        fetched.scope.canvasId !== scope.canvasId ||
+        fetched.completed.versionId !== response.snapshot.content.versionId ||
+        fetched.content.canonicalDigest !== response.snapshot.metadata.contentDigest ||
+        fetched.content.canonicalDigest !== response.snapshot.content.canonicalDigest
+      ) {
+        throw new CollaborationClientError({
+          kind: "protocol",
+          code: "canvas_replica_snapshot_content_mismatch",
+          message: "canvas_replica_snapshot_content_mismatch",
+          retryable: true
+        });
+      }
+      return { response, content: fetched.content };
+    },
+
+    async reconnect(scope, input) {
+      const client = requireClient(resolveClient());
+      const reconnect = await client.reconnectCanvasCommands({
+        canvasId: scope.canvasId,
+        afterRevision: input.afterRevision,
+        ...(input.afterContentDigest ? { afterContentDigest: input.afterContentDigest } : {})
+      });
+      let snapshotContent: CompleteContentVersion | undefined;
+      if (reconnect.response.type === "canvas.reconnect.snapshot") {
+        const fetched = await client.fetchContentVersion({
+          scope: reconnect.response.snapshot.metadata.scope,
+          content: reconnect.response.snapshot.content
+        });
+        if (
+          fetched.completed.versionId !== reconnect.response.snapshot.content.versionId ||
+          fetched.content.canonicalDigest !==
+            reconnect.response.snapshot.metadata.contentDigest
+        ) {
+          throw new CollaborationClientError({
+            kind: "protocol",
+            code: "canvas_replica_snapshot_content_mismatch",
+            message: "canvas_replica_snapshot_content_mismatch",
+            retryable: true
+          });
+        }
+        snapshotContent = fetched.content;
+      }
+      return { response: reconnect.response, snapshotContent };
+    },
+
+    async canPersistCanvasCommand(scope) {
+      const client = requireClient(resolveClient());
+      const access = await client.getCurrentCanvasAccess(scope.canvasId);
+      if (
+        access.scope.workspaceId !== scope.workspaceId ||
+        access.scope.projectId !== scope.projectId ||
+        access.scope.canvasId !== scope.canvasId
+      ) {
+        throw new CollaborationClientError({
+          kind: "protocol",
+          code: "canvas_replica_access_scope_mismatch",
+          message: "canvas_replica_access_scope_mismatch"
+        });
+      }
+      return access.canvas.capabilities.persistent_canvas_command === true;
+    },
+
+    async submit(input) {
+      const client = requireClient(resolveClient());
+      // Real-time edit success must not depend on local disk materialization.
+      return client.submitCanvasCommand({
+        canvasId: input.scope.canvasId,
+        operationId: input.operationId,
+        intent: input.intent,
+        expectedRevision: input.expectedRevision
+      });
+    }
+  };
+}
+
 /**
- * Service-facing seam for durable canvas commands.
- * Keeps command/read-model boundaries out of the monolithic service body.
+ * Service-facing seam for durable canvas commands via in-memory replica + FIFO worker.
+ * Renderer never supplies operationId or expectedRevision.
  */
 export class CollaborationCanvasCommandFacade {
   private binding: {
-    local: LocalCanvasCommandBinding;
+    scope: CanvasReplicaScope;
     remoteProjectId: string;
     remoteCanvasId: string;
   } | null = null;
 
-  constructor(
-    private readonly resolveClient: () => CanvasCommandClientPort | null,
-    private readonly resolveCanvasBinding: (
-      input: CollaborationCanvasSessionInput
-    ) => Promise<ResolvedCollaborationCanvasBinding | null>,
-    private readonly materializer: CanvasCommandMaterializerPort =
-      new LocalCanvasCommandMaterializer(),
-    private readonly recoverAuthoritativeContent?: (input: {
-      localProjectId: string;
-      localCanvasId: string;
-    }) => Promise<void>
-  ) {}
+  private readonly store: CanvasReplicaStore;
+  private readonly worker: CanvasReplicaCommandWorker;
+  private readonly resolveClient: () => CanvasCommandClientPort | null;
+  private readonly resolveCanvasBinding: CollaborationCanvasCommandFacadeDeps["resolveCanvasBinding"];
+  private readonly resolveCanvasScope: CollaborationCanvasCommandFacadeDeps["resolveCanvasScope"];
+  private readonly resolveAuthorityId: () => string | null;
 
-  async submit(input: unknown): Promise<CollaborationCanvasCommandSubmitResult> {
+  constructor(deps: CollaborationCanvasCommandFacadeDeps) {
+    this.resolveClient = deps.resolveClient;
+    this.resolveCanvasBinding = deps.resolveCanvasBinding;
+    this.resolveCanvasScope = deps.resolveCanvasScope;
+    this.resolveAuthorityId = deps.resolveAuthorityId;
+    this.store = deps.store;
+    const transport = deps.transport ?? createDefaultTransport(deps.resolveClient);
+    this.worker = deps.worker ?? new CanvasReplicaCommandWorker(deps.store, transport);
+  }
+
+  /**
+   * Start a submit: validates binding, enqueues optimistic pending synchronously, returns
+   * the network Promise without holding callers on disk materialization.
+   */
+  submit(input: unknown): Promise<CollaborationCanvasCommandSubmitResult> {
     const parsed = collaborationCanvasCommandSubmitInputSchema.parse(input);
     const client = requireClient(this.resolveClient());
-    const localBinding = this.requireLocalBinding(client, parsed.canvasId);
-    const operationId = canvasCommandOperationIdSchema.parse(
-      `op-${randomUUID().replace(/-/g, "").slice(0, 24)}`
-    );
-    const outcome = await client.submitCanvasCommand(
-      {
-        canvasId: parsed.canvasId,
-        operationId,
-        intent: parsed.intent as CanvasCommandIntent,
-        expectedRevision: undefined
-      },
-      undefined,
-      {
-        beforeAccepted: (accepted, intent) =>
-          this.materializer.materializeAccepted(localBinding, accepted, intent)
-      }
-    );
-    return {
+    const binding = this.requireBinding(client, parsed.canvasId);
+    const network = this.worker.submit(binding.scope, parsed.intent as CanvasCommandIntent);
+    return network.then((outcome) => ({
       outcome,
       session: client.canvasCommandSession()
-    };
+    }));
   }
 
   async reconnect(input: unknown): Promise<CollaborationCanvasReconnectResult> {
     const parsed = collaborationCanvasReconnectInputSchema.parse(input);
     const client = requireClient(this.resolveClient());
-    let localBinding = this.requireLocalBinding(client, parsed.canvasId);
-    const reconnect = (binding: LocalCanvasCommandBinding) =>
-      client.reconnectCanvasCommands(
-        {
-          canvasId: parsed.canvasId,
-          afterRevision: parsed.afterRevision,
-          afterContentDigest: parsed.afterContentDigest ?? binding.expectedContentDigest
-        },
-        undefined,
-        {
-          beforeReconnect: async (materialization) => {
-            const snapshotContent =
-              materialization.response.type === "canvas.reconnect.snapshot" &&
-              (await this.materializer.currentDigest(binding)) !==
-                materialization.response.snapshot.metadata.contentDigest
-                ? (
-                    await client.fetchContentVersion({
-                      scope: materialization.response.snapshot.metadata.scope,
-                      content: materialization.response.snapshot.content
-                    })
-                  ).content
-                : undefined;
-            await this.materializer.materializeReconnect(binding, {
-              ...materialization,
-              ...(snapshotContent === undefined ? {} : { snapshotContent })
-            });
-          }
-        }
-      );
-    let result;
-    try {
-      result = await reconnect(localBinding);
-    } catch (error) {
-      if (
-        !(error instanceof CollaborationClientError) ||
-        error.code !== "collaboration_canvas_snapshot_materialization_required" ||
-        !this.recoverAuthoritativeContent
-      ) {
-        throw error;
-      }
-      await this.recoverAuthoritativeContent({
-        localProjectId: localBinding.projectId,
-        localCanvasId: localBinding.canvasId
-      });
-      const current = this.binding;
-      if (
-        !current ||
-        current.remoteCanvasId !== parsed.canvasId ||
-        current.remoteProjectId !== client.projectId
-      ) {
-        throw new CollaborationClientError({
-          kind: "aborted",
-          code: "collaboration_canvas_local_binding_required",
-          message: "collaboration_canvas_local_binding_required",
-          retryable: false
-        });
-      }
-      localBinding = await this.materializer.bind({
-        projectId: localBinding.projectId,
-        canvasId: localBinding.canvasId,
-        authorityProjectId: current.remoteProjectId
-      });
-      this.binding = { ...current, local: localBinding };
-      result = await reconnect(localBinding);
-    }
+    const binding = this.requireBinding(client, parsed.canvasId);
+    const response = await this.worker.reconnect(binding.scope, {
+      afterRevision: parsed.afterRevision,
+      afterContentDigest: parsed.afterContentDigest
+    });
+    const entriesToApply =
+      response.type === "canvas.reconnect.delta" ? [...response.entries] : [];
     return {
-      response: result.response,
-      entriesToApply: result.entriesToApply,
-      snapshotRequired: result.snapshotRequired,
-      session: result.session
+      response,
+      entriesToApply,
+      snapshotRequired: response.type === "canvas.reconnect.snapshot",
+      session: client.canvasCommandSession()
     };
   }
 
   async bind(input: unknown): Promise<CollaborationCanvasCommandSessionView> {
     const parsed = collaborationCanvasSessionInputSchema.parse(input);
     const client = requireClient(this.resolveClient());
+    const authorityId = this.resolveAuthorityId();
+    if (!authorityId) {
+      throw new CollaborationClientError({
+        kind: "aborted",
+        code: "collaboration_session_not_connected",
+        message: "Collaboration session is not connected."
+      });
+    }
     const resolved = await this.resolveCanvasBinding(parsed);
     if (
       !resolved ||
@@ -232,13 +304,37 @@ export class CollaborationCanvasCommandFacade {
         retryable: false
       });
     }
-    const local = await this.materializer.bind({
-      projectId: resolved.localProjectId,
-      canvasId: resolved.localCanvasId,
-      authorityProjectId: resolved.remoteProjectId
-    });
+    const remoteScope = await this.resolveCanvasScope(parsed);
+    if (
+      !remoteScope ||
+      remoteScope.projectId !== resolved.remoteProjectId ||
+      remoteScope.canvasId !== resolved.remoteCanvasId
+    ) {
+      this.binding = null;
+      throw new CollaborationClientError({
+        kind: "aborted",
+        code: "collaboration_canvas_scope_unmapped",
+        message: "collaboration_canvas_scope_unmapped",
+        retryable: false
+      });
+    }
+
+    if (this.binding) {
+      this.worker.clear(this.binding.scope);
+    }
+
+    const scope: CanvasReplicaScope = {
+      authorityId,
+      localProjectId: resolved.localProjectId,
+      localCanvasId: resolved.localCanvasId,
+      workspaceId: remoteScope.workspaceId,
+      projectId: remoteScope.projectId,
+      canvasId: remoteScope.canvasId
+    };
+
+    await this.worker.bind(scope);
     this.binding = {
-      local,
+      scope,
       remoteProjectId: resolved.remoteProjectId,
       remoteCanvasId: resolved.remoteCanvasId
     };
@@ -251,10 +347,27 @@ export class CollaborationCanvasCommandFacade {
     return client?.canvasCommandSession() ?? null;
   }
 
-  private requireLocalBinding(
+  projectionForBinding(input: CollaborationCanvasSessionInput) {
+    const binding = this.binding;
+    if (
+      !binding ||
+      binding.scope.localProjectId !== input.localProjectId ||
+      binding.scope.localCanvasId !== input.canvasId
+    ) {
+      return null;
+    }
+    return this.store.projection(binding.scope);
+  }
+
+  clearAllSessions(): void {
+    this.worker.clearAll();
+    this.binding = null;
+  }
+
+  private requireBinding(
     client: CanvasCommandClientPort,
     canvasId: string
-  ): LocalCanvasCommandBinding {
+  ): { scope: CanvasReplicaScope; remoteProjectId: string; remoteCanvasId: string } {
     const binding = this.binding;
     if (
       !binding ||
@@ -268,6 +381,6 @@ export class CollaborationCanvasCommandFacade {
         retryable: false
       });
     }
-    return binding.local;
+    return binding;
   }
 }

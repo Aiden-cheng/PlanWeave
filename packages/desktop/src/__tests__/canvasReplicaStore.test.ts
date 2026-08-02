@@ -1,57 +1,318 @@
-import { describe, expect, it } from "vitest";
-import {
-  canvasScopeRefSchema,
-  exampleAuthoritativeContentVersion
+import { describe, expect, it, vi } from "vitest";
+import type {
+  CanvasCommandAccepted,
+  CanvasCommandIntent,
+  CanvasJournalEntry,
+  CanvasReconnectResponse
 } from "@planweave-ai/collaboration-contracts";
+import {
+  applyCanvasReplicaIntent,
+  encodeCanvasReplicaDocument,
+  parseCanvasReplicaDocument,
+  type CanvasReplicaDocument
+} from "@planweave-ai/runtime";
+import { basicManifest } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { CanvasReplicaStore } from "../main/collaboration/CanvasReplicaStore.js";
 import type { CollaborationCanvasReplicaProjection } from "../shared/canvasReplicaIpc.js";
 
-const scope = {
-  localProjectId: "local-project",
-  localCanvasId: "local-canvas",
-  projectId: "project-authority",
-  canvasId: "default",
-  workspaceId: canvasScopeRefSchema.parse({
-    workspaceId: "workspace-authority",
+function documentFixture(): CanvasReplicaDocument {
+  const manifest = basicManifest({ includeSecondTask: true });
+  return parseCanvasReplicaDocument({
+    schemaVersion: "canvas-replica-document/v1",
+    manifest,
+    promptMarkdownByPath: Object.fromEntries(
+      manifest.nodes.flatMap((task) => [
+        [task.prompt, `# ${task.id} task\n`],
+        ...task.blocks.map((block) => [block.prompt, `# ${task.id} ${block.id}\n`])
+      ])
+    ),
+    layout: {
+      version: "desktop-layout/v1",
+      projectId: "project-authority",
+      nodes: [
+        { nodeId: "T-001", x: 10, y: 20 },
+        { nodeId: "T-002", x: 30, y: 40 }
+      ],
+      updatedAt: "2026-08-02T00:00:00.000Z"
+    }
+  });
+}
+
+function scope(authorityId = "authority-a") {
+  return {
+    authorityId,
+    localProjectId: "local-project",
+    localCanvasId: "local-canvas",
     projectId: "project-authority",
-    canvasId: "default"
-  }).workspaceId
-};
+    canvasId: "default",
+    workspaceId: "workspace-authority"
+  };
+}
+
+function install(store: CanvasReplicaStore, authorityId = "authority-a", revision = 3) {
+  const document = documentFixture();
+  const content = encodeCanvasReplicaDocument(document);
+  const s = scope(authorityId);
+  store.bind(s);
+  store.installBaseline(s, {
+    content,
+    revision,
+    contentDigest: content.canonicalDigest
+  });
+  store.setCanEdit(s, true);
+  return { scope: s, document, content, revision, digest: content.canonicalDigest };
+}
+
+function layoutIntent(x: number, y: number, updatedAt: string): CanvasCommandIntent {
+  return {
+    kind: "update_layout",
+    nodes: [
+      { nodeId: "T-001", x, y },
+      { nodeId: "T-002", x: 30, y: 40 }
+    ],
+    updatedAt
+  };
+}
+
+function accepted(
+  operationId: string,
+  previousRevision: number,
+  digest: string
+): CanvasCommandAccepted {
+  return {
+    type: "canvas.command.accepted",
+    protocolVersion: 1,
+    schemaVersion: "canvas-command/v1",
+    scope: {
+      workspaceId: "workspace-authority",
+      projectId: "project-authority",
+      canvasId: "default"
+    },
+    operationId,
+    revision: previousRevision + 1,
+    previousRevision,
+    contentDigest: digest,
+    journalEntryId: `journal-${previousRevision + 1}`,
+    actor: { kind: "human", id: "human-1", displayName: "Editor" },
+    acceptedAt: "2026-08-02T00:00:00.000Z",
+    idempotentReplay: false
+  };
+}
 
 describe("CanvasReplicaStore", () => {
   it("rejects malformed immutable snapshots before they become a replica baseline", () => {
     const published: CollaborationCanvasReplicaProjection[] = [];
     const store = new CanvasReplicaStore((projection) => published.push(projection));
-    store.bind(scope);
-    expect(() => store.replaceFromReconnect({
-      scope,
+    const s = scope();
+    store.bind(s);
+    expect(() =>
+      store.replaceFromReconnect({
+        scope: s,
+        response: {
+          type: "canvas.reconnect.snapshot",
+          protocolVersion: 1,
+          schemaVersion: "canvas-command/v1",
+          scope: {
+            workspaceId: "workspace-authority",
+            projectId: s.projectId,
+            canvasId: s.canvasId
+          },
+          reason: "truncated_journal",
+          afterRevision: 0,
+          snapshot: {
+            metadata: {
+              schemaVersion: "canvas-snapshot/v2",
+              scope: {
+                workspaceId: "workspace-authority",
+                projectId: s.projectId,
+                canvasId: s.canvasId
+              },
+              revision: 0,
+              contentDigest: "a".repeat(64),
+              createdAt: "2026-08-02T00:00:00.000Z"
+            },
+            encoding: "content_version_ref",
+            content: {
+              versionId: "version-bad",
+              canonicalDigest: "a".repeat(64),
+              verification: "complete"
+            }
+          }
+        },
+        snapshotContent: {
+          members: [],
+          canonicalDigest: "a".repeat(64),
+          totalBytes: 0
+        }
+      })
+    ).toThrow();
+    expect(store.projection(s)).toBeNull();
+    expect(published).toHaveLength(0);
+  });
+
+  it("rejects cross-scope snapshot/delta without mutating the committed replica", () => {
+    const published: CollaborationCanvasReplicaProjection[] = [];
+    const store = new CanvasReplicaStore((projection) => published.push(projection));
+    const installed = install(store);
+    const before = store.projection(installed.scope)!;
+    const countBefore = published.length;
+
+    expect(() =>
+      store.replaceFromReconnect({
+        scope: installed.scope,
+        response: {
+          type: "canvas.reconnect.snapshot",
+          protocolVersion: 1,
+          schemaVersion: "canvas-command/v1",
+          scope: {
+            workspaceId: "other-workspace",
+            projectId: installed.scope.projectId,
+            canvasId: installed.scope.canvasId
+          },
+          reason: "truncated_journal",
+          afterRevision: 0,
+          snapshot: {
+            metadata: {
+              schemaVersion: "canvas-snapshot/v2",
+              scope: {
+                workspaceId: "other-workspace",
+                projectId: installed.scope.projectId,
+                canvasId: installed.scope.canvasId
+              },
+              revision: 9,
+              contentDigest: installed.digest,
+              createdAt: "2026-08-02T00:00:00.000Z"
+            },
+            encoding: "content_version_ref",
+            content: {
+              versionId: "version-x",
+              canonicalDigest: installed.digest,
+              verification: "complete"
+            }
+          }
+        },
+        snapshotContent: installed.content
+      })
+    ).toThrow(/canvas_replica_scope_mismatch/);
+
+    expect(store.revision(installed.scope)).toBe(installed.revision);
+    expect(store.digest(installed.scope)).toBe(installed.digest);
+    expect(store.projection(installed.scope)).toEqual(before);
+    expect(published.length).toBe(countBefore);
+  });
+
+  it("publishes a single projection for one reconnect delta install", () => {
+    const published: CollaborationCanvasReplicaProjection[] = [];
+    const store = new CanvasReplicaStore((projection) => published.push(projection));
+    const installed = install(store, "authority-a", 3);
+    const intent = layoutIntent(99, 88, "2026-08-02T01:00:00.000Z");
+    const nextDoc = applyCanvasReplicaIntent(installed.document, intent);
+    const nextContent = encodeCanvasReplicaDocument(nextDoc);
+    const entry: CanvasJournalEntry = {
+      schemaVersion: "canvas-journal/v1",
+      entryId: "journal-4",
+      scope: {
+        workspaceId: installed.scope.workspaceId,
+        projectId: installed.scope.projectId,
+        canvasId: installed.scope.canvasId
+      },
+      revision: 4,
+      previousRevision: 3,
+      operationId: "op-remote-1",
+      intent,
+      intentDigest: "c".repeat(64),
+      contentDigest: nextContent.canonicalDigest,
+      actor: { kind: "human", id: "human-2", displayName: "Peer" },
+      acceptedAt: "2026-08-02T01:00:00.000Z"
+    };
+    const delta: CanvasReconnectResponse = {
+      type: "canvas.reconnect.delta",
+      protocolVersion: 1,
+      schemaVersion: "canvas-command/v1",
+      scope: entry.scope,
+      afterRevision: 3,
+      headRevision: 4,
+      headContentDigest: nextContent.canonicalDigest,
+      entries: [entry]
+    };
+    const countBefore = published.length;
+    store.replaceFromReconnect({ scope: installed.scope, response: delta });
+    expect(published.length - countBefore).toBe(1);
+    expect(store.revision(installed.scope)).toBe(4);
+    expect(store.digest(installed.scope)).toBe(nextContent.canonicalDigest);
+  });
+
+  it("does not reuse a replica when authority identity differs for the same remote canvas", () => {
+    const store = new CanvasReplicaStore(() => undefined);
+    const a = install(store, "authority-a", 5);
+    const b = install(store, "authority-b", 0);
+    expect(store.revision(a.scope)).toBe(5);
+    expect(store.revision(b.scope)).toBe(0);
+    expect(store.projection(a.scope)?.authorityId).toBe("authority-a");
+    expect(store.projection(b.scope)?.authorityId).toBe("authority-b");
+  });
+
+  it("drops pending via reconnect rebase and reports them", () => {
+    const store = new CanvasReplicaStore(() => undefined);
+    const installed = install(store);
+    // Valid against the current document, but fails after peer removes T-002.
+    store.enqueue(installed.scope, {
+      operationId: "op-bad",
+      intent: {
+        kind: "update_task_prompt",
+        taskId: "T-002",
+        promptMarkdown: "# local edit of second task\n"
+      }
+    });
+    const intent: CanvasCommandIntent = { kind: "remove_task", taskId: "T-002" };
+    const nextDoc = applyCanvasReplicaIntent(installed.document, intent);
+    const nextContent = encodeCanvasReplicaDocument(nextDoc);
+    const entry: CanvasJournalEntry = {
+      schemaVersion: "canvas-journal/v1",
+      entryId: "journal-4",
+      scope: {
+        workspaceId: installed.scope.workspaceId,
+        projectId: installed.scope.projectId,
+        canvasId: installed.scope.canvasId
+      },
+      revision: 4,
+      previousRevision: 3,
+      operationId: "op-remote",
+      intent,
+      intentDigest: "c".repeat(64),
+      contentDigest: nextContent.canonicalDigest,
+      actor: { kind: "human", id: "human-2", displayName: "Peer" },
+      acceptedAt: "2026-08-02T03:00:00.000Z"
+    };
+    const { droppedPending } = store.replaceFromReconnect({
+      scope: installed.scope,
       response: {
-        type: "canvas.reconnect.snapshot",
+        type: "canvas.reconnect.delta",
         protocolVersion: 1,
         schemaVersion: "canvas-command/v1",
-        projectId: scope.projectId,
-        canvasId: scope.canvasId,
-        snapshot: {
-          metadata: {
-            schemaVersion: "canvas-snapshot/v2",
-            scope: canvasScopeRefSchema.parse({
-              workspaceId: "workspace-authority",
-              projectId: scope.projectId,
-              canvasId: scope.canvasId
-            }),
-            revision: 0,
-            contentDigest: exampleAuthoritativeContentVersion.canonicalDigest,
-            createdAt: "2026-08-02T00:00:00.000Z"
-          },
-          content: {
-            versionId: "version-authority",
-            canonicalDigest: exampleAuthoritativeContentVersion.canonicalDigest
-          }
-        }
-      },
-      snapshotContent: exampleAuthoritativeContentVersion.content
-    })).toThrow();
-    expect(store.projection(scope)).toBeNull();
-    expect(published).toHaveLength(0);
+        scope: entry.scope,
+        afterRevision: 3,
+        headRevision: 4,
+        headContentDigest: nextContent.canonicalDigest,
+        entries: [entry]
+      }
+    });
+    expect(droppedPending.map((item) => item.operationId)).toEqual(["op-bad"]);
+    expect(store.pendingOperationIds(installed.scope)).toEqual([]);
+  });
+
+  it("projects layout, prompts, dependencies, and feedback fields for the renderer", () => {
+    const store = new CanvasReplicaStore(() => undefined);
+    const installed = install(store);
+    const projection = store.projection(installed.scope)!;
+    expect(projection.content.layout.nodes).toEqual(
+      expect.arrayContaining([expect.objectContaining({ nodeId: "T-001", x: 10, y: 20 })])
+    );
+    expect(projection.content.tasks[0]?.promptMarkdown).toContain("T-001");
+    expect(projection.content.blockPromptMarkdownByRef["T-001#B-001"]).toContain("B-001");
+    expect(projection.content.blockDependenciesByRef["T-001#R-001"]).toEqual(["T-001#B-001"]);
+    expect(projection.content.taskOpenFeedbackCountByTaskId["T-001"]).toBe(0);
+    expect(projection.canEdit).toBe(true);
+    expect(projection.revision).toBe(3);
   });
 });

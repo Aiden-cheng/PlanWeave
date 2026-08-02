@@ -931,7 +931,8 @@ describe("preload bridge invocation", () => {
         "onCollaborationStatusChanged",
         "onCollaborationObserverSignal",
         "onCollaborationPresenceSignal",
-        "onCollaborationCanvasLiveSyncSignal"
+        "onCollaborationCanvasLiveSyncSignal",
+        "onCollaborationCanvasReplicaSignal"
       ].sort()
     );
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(

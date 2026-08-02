@@ -245,15 +245,14 @@ export class CollaborationService {
     );
     this.registryService = new CollaborationRegistryService(() => this.client);
     this.contentVersions = new ContentVersionFacade(() => this.client);
-    this.canvasCommands = new CollaborationCanvasCommandFacade(
-      () => this.client,
-      (input) => this.contentVersions.resolveCanvasBinding(input),
-      undefined,
-      async ({ localProjectId, localCanvasId }) => {
-        await this.contentVersions.bind({ localProjectId, canvasId: localCanvasId });
-        await this.contentVersions.materializeHead();
-      }
-    );
+    this.canvasCommands = new CollaborationCanvasCommandFacade({
+      resolveClient: () => this.client,
+      resolveCanvasBinding: (input) => this.contentVersions.resolveCanvasBinding(input),
+      resolveCanvasScope: (input) => this.contentVersions.resolveCanvasScope(input),
+      resolveAuthorityId: () =>
+        this.client ? this.contentVersions.authorityIdForClient(this.client) : null,
+      store: this.canvasReplicas
+    });
     this.remoteOperations = new CollaborationRemoteOperationsFacade((operation) =>
       this.withActiveClient(operation)
     );
@@ -998,11 +997,15 @@ export class CollaborationService {
   // ---------------------------------------------------------------------------
 
   async submitCanvasCommand(input: unknown): Promise<CollaborationCanvasCommandSubmitResult> {
-    return this.enqueue(async () => {
+    // Hold the global service queue only for sync validation + optimistic enqueue.
+    // Network submit must not block a second op from entering optimistic pending.
+    let pending: Promise<CollaborationCanvasCommandSubmitResult>;
+    await this.enqueue(async () => {
       this.assertOpen();
       assertNoSmuggledCollaborationSecrets(input, "submitCollaborationCanvasCommand");
-      return this.canvasCommands.submit(input);
+      pending = this.canvasCommands.submit(input);
     });
+    return pending!;
   }
 
   async reconnectCanvas(input: unknown): Promise<CollaborationCanvasReconnectResult> {
@@ -1045,8 +1048,19 @@ export class CollaborationService {
     return this.enqueue(async () => {
       this.assertOpen();
       const requested = collaborationCanvasSessionInputSchema.parse(input);
+      const fromBinding = this.canvasCommands.projectionForBinding(requested);
+      if (fromBinding) return fromBinding;
+      const authorityId = this.client
+        ? this.contentVersions.authorityIdForClient(this.client)
+        : null;
       const scope = await this.contentVersions.resolveCanvasScope(requested);
-      return scope ? this.canvasReplicas.projection(scope) : null;
+      if (!authorityId || !scope) return null;
+      return this.canvasReplicas.projection({
+        authorityId,
+        workspaceId: scope.workspaceId,
+        projectId: scope.projectId,
+        canvasId: scope.canvasId
+      });
     });
   }
 
@@ -1414,6 +1428,8 @@ export class CollaborationService {
     this.observerGeneration += 1;
     this.presenceSession.reset();
     this.canvasLiveSyncSession.reset();
+    // Bump replica generations so late baseline/submit responses cannot overwrite the next session.
+    this.canvasCommands.clearAllSessions();
     // Preserve validated cursor across dispose so the next connectSession can resume.
     if (client && profileId) {
       try {

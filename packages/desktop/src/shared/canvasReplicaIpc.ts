@@ -12,12 +12,7 @@ const blockStatusSchema = z.enum([
   "diverged",
   "needs_changes"
 ]);
-const taskStatusSchema = z.enum([
-  "planned",
-  "ready",
-  "in_progress",
-  "implemented"
-]);
+const taskStatusSchema = z.enum(["planned", "ready", "in_progress", "implemented"]);
 
 const blockSchema = z
   .object({
@@ -63,11 +58,33 @@ const taskSchema = z
   })
   .strict();
 
-/** Renderer-ready replica content, intentionally not a duplicate DesktopGraphViewModel. */
+const layoutSchema = z
+  .object({
+    version: z.literal("desktop-layout/v1"),
+    projectId: z.string().min(1),
+    nodes: z.array(
+      z
+        .object({
+          nodeId: z.string(),
+          x: z.number(),
+          y: z.number()
+        })
+        .strict()
+    ),
+    updatedAt: z.string().min(1)
+  })
+  .strict();
+
+/**
+ * Renderer-ready replica content — the sole authoritative canvas projection for shared mode.
+ * Must carry graph, layout, prompts, dependencies, and runtime overlay fields together.
+ */
 export const collaborationCanvasReplicaProjectionSchema = z
   .object({
+    authorityId: z.string().min(1),
     localProjectId: identifierSchema,
     localCanvasId: identifierSchema,
+    workspaceId: identifierSchema,
     projectId: identifierSchema,
     canvasId: identifierSchema,
     revision: z.number().int().nonnegative(),
@@ -83,9 +100,17 @@ export const collaborationCanvasReplicaProjectionSchema = z
         graphVersion: z.string(),
         packageFingerprint: packageFingerprintSchema,
         tasks: z.array(taskSchema).max(10_000),
-        edges: z.array(
-          z.object({ from: identifierSchema, to: identifierSchema, type: z.literal("depends_on") }).strict()
-        ).max(50_000),
+        edges: z
+          .array(
+            z
+              .object({
+                from: identifierSchema,
+                to: identifierSchema,
+                type: z.literal("depends_on")
+              })
+              .strict()
+          )
+          .max(50_000),
         sharedResourceGroups: z.array(
           z
             .object({
@@ -101,6 +126,10 @@ export const collaborationCanvasReplicaProjectionSchema = z
             .object({ code: z.string(), message: z.string(), path: z.string().optional() })
             .strict()
         ),
+        layout: layoutSchema,
+        blockDependenciesByRef: z.record(z.string(), z.array(z.string())),
+        taskOpenFeedbackCountByTaskId: z.record(z.string(), z.number().int().nonnegative()),
+        blockPromptMarkdownByRef: z.record(z.string(), z.string())
       })
       .strict()
   })
@@ -110,7 +139,10 @@ export type CollaborationCanvasReplicaProjection = z.infer<
 >;
 
 export const collaborationCanvasReplicaSignalSchema = z
-  .object({ type: z.literal("canvas.replica.changed"), projection: collaborationCanvasReplicaProjectionSchema })
+  .object({
+    type: z.literal("canvas.replica.changed"),
+    projection: collaborationCanvasReplicaProjectionSchema
+  })
   .strict();
 export type CollaborationCanvasReplicaSignal = z.infer<
   typeof collaborationCanvasReplicaSignalSchema

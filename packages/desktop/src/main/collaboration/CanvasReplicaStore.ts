@@ -21,6 +21,8 @@ import {
 import { CollaborationClientError } from "./collaborationErrors.js";
 
 export type CanvasReplicaScope = {
+  /** Profile/server/project identity — prevents cross-authority replica reuse. */
+  authorityId: string;
   localProjectId: string;
   localCanvasId: string;
   projectId: string;
@@ -28,34 +30,58 @@ export type CanvasReplicaScope = {
   workspaceId: CanvasRuntimeStatusProjection["scope"]["workspaceId"];
 };
 
-type PendingOperation = { operationId: string; intent: CanvasCommandIntent };
+export type CanvasReplicaPendingOperation = {
+  operationId: string;
+  intent: CanvasCommandIntent;
+};
+
 type ReplicaState = {
   scope: CanvasReplicaScope;
   document: CanvasReplicaDocument | null;
   revision: number;
   contentDigest: string | null;
-  pending: PendingOperation[];
+  pending: CanvasReplicaPendingOperation[];
   runtimeStatus: CanvasRuntimeStatusProjection | null;
   canEdit: boolean;
   rejections: Array<{ operationId: string; code: string }>;
+};
+
+export type CanvasReplicaMutationResult = {
+  droppedPending: CanvasReplicaPendingOperation[];
 };
 
 function replicaError(code: string, retryable = false): CollaborationClientError {
   return new CollaborationClientError({ kind: "protocol", code, message: code, retryable });
 }
 
-function key(scope: Pick<CanvasReplicaScope, "workspaceId" | "projectId" | "canvasId">): string {
-  return JSON.stringify([scope.workspaceId, scope.projectId, scope.canvasId]);
+function key(
+  scope: Pick<CanvasReplicaScope, "authorityId" | "workspaceId" | "projectId" | "canvasId">
+): string {
+  return JSON.stringify([scope.authorityId, scope.workspaceId, scope.projectId, scope.canvasId]);
+}
+
+function sameRemoteScope(
+  left: Pick<CanvasReplicaScope, "workspaceId" | "projectId" | "canvasId">,
+  right: Pick<CanvasReplicaScope, "workspaceId" | "projectId" | "canvasId">
+): boolean {
+  return (
+    left.workspaceId === right.workspaceId &&
+    left.projectId === right.projectId &&
+    left.canvasId === right.canvasId
+  );
 }
 
 /**
- * Main-process authority cache for one remote Canvas. Disk materialization is intentionally
- * outside this store: only immutable content snapshots and ordered durable intents enter it.
+ * Main-process authority cache for one remote Canvas.
+ * Visible state is committed document + ordered optimistic pending ops.
+ * Disk materialization is intentionally outside this store.
  */
 export class CanvasReplicaStore {
   private readonly replicas = new Map<string, ReplicaState>();
 
-  constructor(private readonly onChange: (projection: CollaborationCanvasReplicaProjection) => void) {}
+  constructor(
+    private readonly onChange: (projection: CollaborationCanvasReplicaProjection) => void
+  ) {}
 
   bind(scope: CanvasReplicaScope): void {
     const current = this.replicas.get(key(scope));
@@ -75,30 +101,52 @@ export class CanvasReplicaStore {
     });
   }
 
+  /**
+   * Install one atomic baseline from a reconnect snapshot's immutable content +
+   * snapshot.metadata.revision (command revision, not content-authority revision).
+   */
   installBaseline(
     scope: CanvasReplicaScope,
-    baseline: { content: CompleteContentVersion; revision: number; contentDigest: string }
-  ): void {
+    baseline: {
+      content: CompleteContentVersion;
+      revision: number;
+      contentDigest: string;
+    }
+  ): CanvasReplicaMutationResult {
     const replica = this.require(scope);
     const document = decodeCanvasReplicaDocument(baseline.content);
     this.assertDigest(document, baseline.contentDigest);
     replica.document = document;
     replica.revision = baseline.revision;
     replica.contentDigest = baseline.contentDigest;
-    this.rebasePending(replica);
+    const droppedPending = this.rebasePending(replica);
     this.publish(replica);
+    return { droppedPending };
   }
 
   clear(scope: CanvasReplicaScope): void {
     this.replicas.delete(key(scope));
   }
 
-  projection(scope: Pick<CanvasReplicaScope, "workspaceId" | "projectId" | "canvasId">): CollaborationCanvasReplicaProjection | null {
+  clearAll(): void {
+    this.replicas.clear();
+  }
+
+  has(scope: Pick<CanvasReplicaScope, "authorityId" | "workspaceId" | "projectId" | "canvasId">): boolean {
+    return this.replicas.has(key(scope));
+  }
+
+  projection(
+    scope: Pick<CanvasReplicaScope, "authorityId" | "workspaceId" | "projectId" | "canvasId">
+  ): CollaborationCanvasReplicaProjection | null {
     const replica = this.replicas.get(key(scope));
     return replica?.document ? this.toProjection(replica) : null;
   }
 
-  enqueue(scope: Pick<CanvasReplicaScope, "workspaceId" | "projectId" | "canvasId">, pending: PendingOperation): void {
+  enqueue(
+    scope: Pick<CanvasReplicaScope, "authorityId" | "workspaceId" | "projectId" | "canvasId">,
+    pending: CanvasReplicaPendingOperation
+  ): void {
     const replica = this.require(scope);
     if (!replica.canEdit) throw replicaError("canvas_replica_command_forbidden");
     if (replica.pending.some((item) => item.operationId === pending.operationId)) {
@@ -111,18 +159,38 @@ export class CanvasReplicaStore {
     this.publish(replica);
   }
 
-  reject(scope: Pick<CanvasReplicaScope, "workspaceId" | "projectId" | "canvasId">, operationId: string, code: string): void {
+  reject(
+    scope: Pick<CanvasReplicaScope, "authorityId" | "workspaceId" | "projectId" | "canvasId">,
+    operationId: string,
+    code: string
+  ): void {
     const replica = this.require(scope);
     const before = replica.pending.length;
     replica.pending = replica.pending.filter((pending) => pending.operationId !== operationId);
-    replica.rejections.push({ operationId, code });
     if (replica.pending.length === before) return;
+    this.recordRejection(replica, operationId, code);
     this.publish(replica);
   }
 
+  /** Drop every pending op (e.g. forbidden / disconnect) and publish once. */
+  clearPending(
+    scope: Pick<CanvasReplicaScope, "authorityId" | "workspaceId" | "projectId" | "canvasId">,
+    code: string
+  ): CanvasReplicaPendingOperation[] {
+    const replica = this.require(scope);
+    const removed = replica.pending;
+    if (removed.length === 0) return [];
+    for (const pending of removed) {
+      this.recordRejection(replica, pending.operationId, code);
+    }
+    replica.pending = [];
+    if (replica.document) this.publish(replica);
+    return removed;
+  }
+
   /** Apply a live or HTTP journal entry strictly at the next revision. */
-  applyEntry(entry: CanvasJournalEntry): void {
-    const replica = this.require(entry.scope);
+  applyEntry(entry: CanvasJournalEntry): CanvasReplicaMutationResult {
+    const replica = this.requireByRemoteScope(entry.scope);
     if (!replica.document || replica.contentDigest === null) {
       throw replicaError("canvas_replica_baseline_required", true);
     }
@@ -130,7 +198,7 @@ export class CanvasReplicaStore {
       if (replica.pending.some((pending) => pending.operationId === entry.operationId)) {
         throw replicaError("canvas_replica_duplicate_pending_acceptance");
       }
-      return;
+      return { droppedPending: [] };
     }
     if (entry.previousRevision !== replica.revision || entry.revision !== replica.revision + 1) {
       throw replicaError("canvas_replica_revision_gap", true);
@@ -141,94 +209,128 @@ export class CanvasReplicaStore {
     replica.revision = entry.revision;
     replica.contentDigest = entry.contentDigest;
     replica.pending = replica.pending.filter((pending) => pending.operationId !== entry.operationId);
-    this.rebasePending(replica);
+    const droppedPending = this.rebasePending(replica);
     this.publish(replica);
+    return { droppedPending };
   }
 
-  /** Own HTTP acceptance carries no entry, so it is folded with its exact queued intent. */
+  /** Own HTTP acceptance carries no entry; fold with the exact queued intent. */
   accept(
-    scope: Pick<CanvasReplicaScope, "workspaceId" | "projectId" | "canvasId">,
+    scope: Pick<CanvasReplicaScope, "authorityId" | "workspaceId" | "projectId" | "canvasId">,
     outcome: Extract<CanvasCommandOutcome, { type: "canvas.command.accepted" }>
-  ): void {
+  ): CanvasReplicaMutationResult {
     const replica = this.require(scope);
-    const pending = replica.pending[0];
-    if (!pending || pending.operationId !== outcome.operationId) {
-      if (outcome.revision === replica.revision && outcome.contentDigest === replica.contentDigest) return;
+    const pendingIndex = replica.pending.findIndex(
+      (pending) => pending.operationId === outcome.operationId
+    );
+    if (pendingIndex < 0) {
+      if (outcome.revision === replica.revision && outcome.contentDigest === replica.contentDigest) {
+        return { droppedPending: [] };
+      }
       throw replicaError("canvas_replica_acceptance_without_pending", true);
     }
     if (!replica.document || replica.contentDigest === null || outcome.revision !== replica.revision + 1) {
       throw replicaError("canvas_replica_acceptance_revision_mismatch", true);
     }
+    const pending = replica.pending[pendingIndex]!;
     const next = applyCanvasReplicaIntent(replica.document, pending.intent);
     this.assertDigest(next, outcome.contentDigest);
     replica.document = next;
     replica.revision = outcome.revision;
     replica.contentDigest = outcome.contentDigest;
-    replica.pending.shift();
-    this.rebasePending(replica);
+    replica.pending = replica.pending.filter((item) => item.operationId !== outcome.operationId);
+    const droppedPending = this.rebasePending(replica);
     this.publish(replica);
+    return { droppedPending };
   }
 
-  /** Replace the immutable baseline then replay its validated ordered delta. */
+  /**
+   * Validate reconnect snapshot/delta fully against a temporary state, then replace once
+   * and publish a single projection.
+   */
   replaceFromReconnect(input: {
-    scope: Pick<CanvasReplicaScope, "workspaceId" | "projectId" | "canvasId">;
+    scope: Pick<CanvasReplicaScope, "authorityId" | "workspaceId" | "projectId" | "canvasId">;
     response: CanvasReconnectResponse;
     snapshotContent?: CompleteContentVersion;
-  }): void {
+  }): CanvasReplicaMutationResult {
     const replica = this.require(input.scope);
     const { response } = input;
     if (response.type === "canvas.reconnect.error") {
       throw replicaError(`canvas_replica_reconnect_${response.code}`);
     }
+
     if (response.type === "canvas.reconnect.snapshot") {
       if (!input.snapshotContent) throw replicaError("canvas_replica_snapshot_content_required", true);
       if (
-        response.snapshot.metadata.scope.workspaceId !== replica.scope.workspaceId ||
-        response.snapshot.metadata.scope.projectId !== replica.scope.projectId ||
-        response.snapshot.metadata.scope.canvasId !== replica.scope.canvasId
+        !sameRemoteScope(response.scope, replica.scope) ||
+        !sameRemoteScope(response.snapshot.metadata.scope, replica.scope)
       ) {
         throw replicaError("canvas_replica_scope_mismatch");
+      }
+      if (response.snapshot.metadata.contentDigest !== input.snapshotContent.canonicalDigest) {
+        throw replicaError("canvas_replica_snapshot_metadata_digest_mismatch", true);
+      }
+      if (
+        response.snapshot.content.canonicalDigest !== response.snapshot.metadata.contentDigest ||
+        response.snapshot.content.canonicalDigest !== input.snapshotContent.canonicalDigest
+      ) {
+        throw replicaError("canvas_replica_snapshot_content_ref_mismatch", true);
       }
       const document = decodeCanvasReplicaDocument(input.snapshotContent);
       this.assertDigest(document, response.snapshot.metadata.contentDigest);
       replica.document = document;
       replica.revision = response.snapshot.metadata.revision;
       replica.contentDigest = response.snapshot.metadata.contentDigest;
-      this.rebasePending(replica);
+      const droppedPending = this.rebasePending(replica);
       this.publish(replica);
-      return;
+      return { droppedPending };
     }
-    if (!replica.document) throw replicaError("canvas_replica_baseline_required", true);
+
+    // delta — fold into temporary state first; never mutate committed fields until complete
+    if (!sameRemoteScope(response.scope, replica.scope)) {
+      throw replicaError("canvas_replica_scope_mismatch");
+    }
+    if (!replica.document || replica.contentDigest === null) {
+      throw replicaError("canvas_replica_baseline_required", true);
+    }
+    if (response.afterRevision !== replica.revision) {
+      throw replicaError("canvas_replica_reconnect_after_revision_mismatch", true);
+    }
+
     let document = replica.document;
     let revision = replica.revision;
     let digest = replica.contentDigest;
+    const acceptedIds = new Set<string>();
+
     for (const entry of response.entries) {
-      if (
-        entry.scope.workspaceId !== replica.scope.workspaceId ||
-        entry.scope.projectId !== replica.scope.projectId ||
-        entry.scope.canvasId !== replica.scope.canvasId ||
-        entry.previousRevision !== revision ||
-        entry.revision !== revision + 1
-      ) {
+      if (!sameRemoteScope(entry.scope, replica.scope)) {
+        throw replicaError("canvas_replica_reconnect_delta_invalid", true);
+      }
+      if (entry.previousRevision !== revision || entry.revision !== revision + 1) {
         throw replicaError("canvas_replica_reconnect_delta_invalid", true);
       }
       document = applyCanvasReplicaIntent(document, entry.intent);
       this.assertDigest(document, entry.contentDigest);
       revision = entry.revision;
       digest = entry.contentDigest;
+      acceptedIds.add(entry.operationId);
     }
+
     if (revision !== response.headRevision || digest !== response.headContentDigest) {
       throw replicaError("canvas_replica_reconnect_head_mismatch", true);
     }
+
     replica.document = document;
     replica.revision = revision;
     replica.contentDigest = digest;
-    this.rebasePending(replica);
+    replica.pending = replica.pending.filter((pending) => !acceptedIds.has(pending.operationId));
+    const droppedPending = this.rebasePending(replica);
     this.publish(replica);
+    return { droppedPending };
   }
 
   setRuntimeStatus(
-    scope: Pick<CanvasReplicaScope, "workspaceId" | "projectId" | "canvasId">,
+    scope: Pick<CanvasReplicaScope, "authorityId" | "workspaceId" | "projectId" | "canvasId">,
     status: CanvasRuntimeStatusProjection | null
   ): void {
     const replica = this.require(scope);
@@ -237,30 +339,59 @@ export class CanvasReplicaStore {
   }
 
   setCanEdit(
-    scope: Pick<CanvasReplicaScope, "workspaceId" | "projectId" | "canvasId">,
+    scope: Pick<CanvasReplicaScope, "authorityId" | "workspaceId" | "projectId" | "canvasId">,
     canEdit: boolean
   ): void {
     const replica = this.require(scope);
+    if (replica.canEdit === canEdit) return;
     replica.canEdit = canEdit;
     if (replica.document) this.publish(replica);
   }
 
-  revision(scope: Pick<CanvasReplicaScope, "workspaceId" | "projectId" | "canvasId">): number {
+  revision(
+    scope: Pick<CanvasReplicaScope, "authorityId" | "workspaceId" | "projectId" | "canvasId">
+  ): number {
     return this.require(scope).revision;
   }
 
-  digest(scope: Pick<CanvasReplicaScope, "workspaceId" | "projectId" | "canvasId">): string | null {
+  digest(
+    scope: Pick<CanvasReplicaScope, "authorityId" | "workspaceId" | "projectId" | "canvasId">
+  ): string | null {
     return this.require(scope).contentDigest;
   }
 
-  canEdit(scope: Pick<CanvasReplicaScope, "workspaceId" | "projectId" | "canvasId">): boolean {
+  canEdit(
+    scope: Pick<CanvasReplicaScope, "authorityId" | "workspaceId" | "projectId" | "canvasId">
+  ): boolean {
     return this.require(scope).canEdit;
   }
 
-  private require(scope: Pick<CanvasReplicaScope, "workspaceId" | "projectId" | "canvasId">): ReplicaState {
+  pendingOperationIds(
+    scope: Pick<CanvasReplicaScope, "authorityId" | "workspaceId" | "projectId" | "canvasId">
+  ): string[] {
+    return this.require(scope).pending.map((pending) => pending.operationId);
+  }
+
+  private require(
+    scope: Pick<CanvasReplicaScope, "authorityId" | "workspaceId" | "projectId" | "canvasId">
+  ): ReplicaState {
     const replica = this.replicas.get(key(scope));
     if (!replica) throw replicaError("canvas_replica_scope_unbound");
     return replica;
+  }
+
+  private requireByRemoteScope(
+    scope: Pick<CanvasReplicaScope, "workspaceId" | "projectId" | "canvasId">
+  ): ReplicaState {
+    const matches = [...this.replicas.values()].filter(
+      (replica) =>
+        replica.scope.workspaceId === scope.workspaceId &&
+        replica.scope.projectId === scope.projectId &&
+        replica.scope.canvasId === scope.canvasId
+    );
+    if (matches.length === 0) throw replicaError("canvas_replica_scope_unbound");
+    if (matches.length > 1) throw replicaError("canvas_replica_scope_ambiguous");
+    return matches[0]!;
   }
 
   private assertDigest(document: CanvasReplicaDocument, expected: string): void {
@@ -269,13 +400,20 @@ export class CanvasReplicaStore {
     }
   }
 
+  private recordRejection(replica: ReplicaState, operationId: string, code: string): void {
+    replica.rejections.push({ operationId, code });
+    replica.rejections = replica.rejections.slice(-100);
+  }
+
   private publish(replica: ReplicaState): void {
     if (!replica.document) return;
     this.onChange(this.toProjection(replica));
   }
 
   private toProjection(replica: ReplicaState): CollaborationCanvasReplicaProjection {
-    if (!replica.document || !replica.contentDigest) throw replicaError("canvas_replica_baseline_required");
+    if (!replica.document || !replica.contentDigest) {
+      throw replicaError("canvas_replica_baseline_required");
+    }
     const visibleDocument = this.visibleDocument(replica);
     const content = overlayCanvasReplicaRuntimeStatus({
       content: projectCanvasReplicaDocument(visibleDocument),
@@ -287,8 +425,10 @@ export class CanvasReplicaStore {
       }
     });
     return collaborationCanvasReplicaProjectionSchema.parse({
+      authorityId: replica.scope.authorityId,
       localProjectId: replica.scope.localProjectId,
       localCanvasId: replica.scope.localCanvasId,
+      workspaceId: replica.scope.workspaceId,
       projectId: replica.scope.projectId,
       canvasId: replica.scope.canvasId,
       revision: replica.revision,
@@ -303,7 +443,11 @@ export class CanvasReplicaStore {
         tasks: content.tasks,
         edges: content.edges,
         sharedResourceGroups: content.sharedResourceGroups,
-        diagnostics: content.diagnostics
+        diagnostics: content.diagnostics,
+        layout: content.layout,
+        blockDependenciesByRef: content.blockDependenciesByRef,
+        taskOpenFeedbackCountByTaskId: content.taskOpenFeedbackCountByTaskId,
+        blockPromptMarkdownByRef: content.blockPromptMarkdownByRef
       }
     });
   }
@@ -317,19 +461,22 @@ export class CanvasReplicaStore {
     return visible;
   }
 
-  private rebasePending(replica: ReplicaState): void {
-    if (!replica.document) return;
+  /** Replay pending ops on the committed document; return ops that can no longer apply. */
+  private rebasePending(replica: ReplicaState): CanvasReplicaPendingOperation[] {
+    if (!replica.document) return [];
     let visible = replica.document;
-    const retained: PendingOperation[] = [];
+    const retained: CanvasReplicaPendingOperation[] = [];
+    const dropped: CanvasReplicaPendingOperation[] = [];
     for (const pending of replica.pending) {
       try {
         visible = applyCanvasReplicaIntent(visible, pending.intent);
         retained.push(pending);
       } catch {
-        replica.rejections.push({ operationId: pending.operationId, code: "canvas_replica_pending_rebase_failed" });
+        dropped.push(pending);
+        this.recordRejection(replica, pending.operationId, "canvas_replica_pending_rebase_failed");
       }
     }
     replica.pending = retained;
-    replica.rejections = replica.rejections.slice(-100);
+    return dropped;
   }
 }

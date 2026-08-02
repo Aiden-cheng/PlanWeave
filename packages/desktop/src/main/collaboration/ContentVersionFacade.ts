@@ -53,7 +53,7 @@ export type ResolvedCollaborationCanvasBinding = {
 };
 
 export type CanvasReplicaBaseline = {
-  scope: CanvasReplicaScope & { authorityId: string };
+  scope: CanvasReplicaScope;
   content: CompleteContentVersion;
   contentDigest: string;
 };
@@ -310,55 +310,75 @@ export class ContentVersionFacade {
       : null;
   }
 
-  /** Read an immutable remote authority head for an in-memory Canvas replica; never materializes disk. */
+  /**
+   * Read the immutable content for an in-memory Canvas replica baseline.
+   * Uses reconnect(afterRevision: 0) so command revision and content ref come from one
+   * consistent snapshot — never discover(content head) then reconnect separately.
+   * Does not materialize disk. Content-authority revision is intentionally not returned.
+   */
   async readCanvasReplicaBaseline(input: unknown): Promise<CanvasReplicaBaseline> {
     const requested = collaborationContentAuthorityCanvasInputSchema.parse(input);
     const client = this.requireClient();
     const binding = await this.resolveCanvasBinding(requested);
     if (!binding) throw unavailable("canvas_replica_scope_unmapped", false);
     const scope = await this.resolveCanvasScope(requested);
-    if (!scope || scope.projectId !== binding.remoteProjectId || scope.canvasId !== binding.remoteCanvasId) {
+    if (
+      !scope ||
+      scope.projectId !== binding.remoteProjectId ||
+      scope.canvasId !== binding.remoteCanvasId
+    ) {
       throw unavailable("canvas_replica_scope_mismatch", false);
     }
-    const discovered = await client.discoverContentAuthority({
+    const reconnect = await client.reconnectCanvasCommands({
       canvasId: scope.canvasId,
-      localReplica: null,
-      knownRevision: null
+      afterRevision: 0
     });
-    const authority = contentVersionDesktopReadModelSchema.parse(
-      contentVersionAuthorityDiscoveryToDesktopReadModel(discovered)
-    );
-    const head = authority.authoritativeHead;
-    if (!head) throw unavailable("canvas_replica_authoritative_head_unavailable", false);
-    if (
-      head.scope.workspaceId !== scope.workspaceId ||
-      head.scope.projectId !== scope.projectId ||
-      head.scope.canvasId !== scope.canvasId
-    ) {
-      throw unavailable("canvas_replica_authoritative_scope_mismatch", false);
+    const response = reconnect.response;
+    if (response.type !== "canvas.reconnect.snapshot") {
+      throw unavailable("canvas_replica_snapshot_required", true);
     }
-    const fetched = await client.fetchContentVersion({ scope: head.scope, content: head.content });
     if (
-      fetched.scope.workspaceId !== head.scope.workspaceId ||
-      fetched.scope.projectId !== head.scope.projectId ||
-      fetched.scope.canvasId !== head.scope.canvasId ||
-      fetched.completed.versionId !== head.content.versionId ||
-      fetched.content.canonicalDigest !== head.content.canonicalDigest
+      response.scope.workspaceId !== scope.workspaceId ||
+      response.scope.projectId !== scope.projectId ||
+      response.scope.canvasId !== scope.canvasId ||
+      response.snapshot.metadata.scope.workspaceId !== scope.workspaceId ||
+      response.snapshot.metadata.scope.projectId !== scope.projectId ||
+      response.snapshot.metadata.scope.canvasId !== scope.canvasId
     ) {
-      throw unavailable("canvas_replica_authoritative_content_mismatch", false);
+      throw unavailable("canvas_replica_scope_mismatch", false);
+    }
+    const snapshot = response.snapshot;
+    const fetched = await client.fetchContentVersion({
+      scope: snapshot.metadata.scope,
+      content: snapshot.content
+    });
+    if (
+      fetched.scope.workspaceId !== scope.workspaceId ||
+      fetched.scope.projectId !== scope.projectId ||
+      fetched.scope.canvasId !== scope.canvasId ||
+      fetched.completed.versionId !== snapshot.content.versionId ||
+      fetched.content.canonicalDigest !== snapshot.metadata.contentDigest ||
+      fetched.content.canonicalDigest !== snapshot.content.canonicalDigest
+    ) {
+      throw unavailable("canvas_replica_snapshot_content_mismatch", true);
     }
     return {
       scope: {
+        authorityId: this.clientFingerprint(client),
         localProjectId: binding.localProjectId,
         localCanvasId: binding.localCanvasId,
         workspaceId: scope.workspaceId,
         projectId: scope.projectId,
-        canvasId: scope.canvasId,
-        authorityId: this.clientFingerprint(client)
+        canvasId: scope.canvasId
       },
       content: fetched.content,
-      contentDigest: head.content.canonicalDigest
+      contentDigest: snapshot.metadata.contentDigest
     };
+  }
+
+  /** Public authority fingerprint for replica scope keys (profile + server + project). */
+  authorityIdForClient(client: CollaborationClient = this.requireClient()): string {
+    return this.clientFingerprint(client);
   }
 
   async resolveCanvasScope(input: unknown) {

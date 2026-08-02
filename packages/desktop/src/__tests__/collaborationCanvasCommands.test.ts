@@ -1,15 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  CANVAS_COMMAND_PROTOCOL_VERSION,
-  canvasReconnectDeltaSchema,
-  exampleCanvasCommandAccepted,
-  exampleCanvasReconnectTruncatedJournal,
-  exampleAuthoritativeContentVersion
+import type {
+  CanvasCommandOutcome,
+  CanvasReconnectResponse,
+  CompleteContentVersion
 } from "@planweave-ai/collaboration-contracts";
+import {
+  applyCanvasReplicaIntent,
+  decodeCanvasReplicaDocument,
+  encodeCanvasReplicaDocument,
+  parseCanvasReplicaDocument
+} from "@planweave-ai/runtime";
+import { basicManifest } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import type { CollaborationClient } from "../main/collaboration/CollaborationClient.js";
 import { CollaborationCanvasCommandFacade } from "../main/collaboration/collaborationCanvasCommands.js";
-import { CollaborationClientError } from "../main/collaboration/collaborationErrors.js";
-import type { LocalCanvasCommandBinding } from "../main/collaboration/LocalCanvasCommandMaterializer.js";
+import { CanvasReplicaStore } from "../main/collaboration/CanvasReplicaStore.js";
+import type { CanvasReplicaCommandTransport } from "../main/collaboration/CanvasReplicaCommandWorker.js";
 import type { CollaborationCanvasCommandSessionView } from "../shared/collaboration.js";
 
 const remoteSession: CollaborationCanvasCommandSessionView = {
@@ -23,345 +28,348 @@ const remoteSession: CollaborationCanvasCommandSessionView = {
   lastRejectCode: null
 };
 
-describe("CollaborationCanvasCommandFacade", () => {
-  it("sends the caller-stamped layout mutation unchanged", async () => {
-    const submitCanvasCommand = vi.fn<CollaborationClient["submitCanvasCommand"]>(
-      async () => exampleCanvasCommandAccepted
-    );
-    const client = {
-      projectId: "remote-project",
-      submitCanvasCommand,
-      reconnectCanvasCommands: vi.fn<CollaborationClient["reconnectCanvasCommands"]>(),
-      bindCanvasCommandSession: vi.fn<CollaborationClient["bindCanvasCommandSession"]>(),
-      canvasCommandSession: vi.fn<CollaborationClient["canvasCommandSession"]>(() => remoteSession)
-    };
-    const localBinding: LocalCanvasCommandBinding = {
-      projectId: "local-project",
-      authorityProjectId: "remote-project",
-      projectRoot: "/local/project",
-      canvasId: "local-canvas",
-      expectedPackageDir: "/local/project/package",
-      expectedContentDigest: "b".repeat(64)
-    };
-    const facade = new CollaborationCanvasCommandFacade(
-      () => client,
-      async () => ({
-        localProjectId: "local-project",
-        localCanvasId: "local-canvas",
-        remoteProjectId: "remote-project",
-        remoteCanvasId: "remote-canvas"
-      }),
-      {
-        bind: vi.fn(async () => localBinding),
-        materializeAccepted: vi.fn(),
-        materializeReconnect: vi.fn()
-      }
-    );
-    await facade.bind({ localProjectId: "local-project", canvasId: "local-canvas" });
-
-    await facade.submit({
-      canvasId: "remote-canvas",
-      intent: {
-        kind: "update_layout",
-        nodes: [{ nodeId: "T-001", x: 1, y: 2 }],
+function fixtureContent(): CompleteContentVersion {
+  const manifest = basicManifest({ includeSecondTask: true });
+  return encodeCanvasReplicaDocument(
+    parseCanvasReplicaDocument({
+      schemaVersion: "canvas-replica-document/v1",
+      manifest,
+      promptMarkdownByPath: Object.fromEntries(
+        manifest.nodes.flatMap((task) => [
+          [task.prompt, `# ${task.id} task\n`],
+          ...task.blocks.map((block) => [block.prompt, `# ${task.id} ${block.id}\n`])
+        ])
+      ),
+      layout: {
+        version: "desktop-layout/v1",
+        projectId: "remote-project",
+        nodes: [
+          { nodeId: "T-001", x: 10, y: 20 },
+          { nodeId: "T-002", x: 30, y: 40 }
+        ],
         updatedAt: "2026-08-02T00:00:00.000Z"
       }
-    });
+    })
+  );
+}
 
-    expect(submitCanvasCommand).toHaveBeenCalledWith(
-      expect.objectContaining({
-        intent: expect.objectContaining({
-          kind: "update_layout",
-          updatedAt: "2026-08-02T00:00:00.000Z"
-        })
-      }),
-      undefined,
-      expect.any(Object)
-    );
-  });
-
-  it("binds imported replicas locally while opening the remote command session", async () => {
-    const bindCanvasCommandSession = vi.fn<CollaborationClient["bindCanvasCommandSession"]>();
-    const client = {
+function snapshotResponse(
+  content: CompleteContentVersion,
+  revision: number
+): Extract<CanvasReconnectResponse, { type: "canvas.reconnect.snapshot" }> {
+  return {
+    type: "canvas.reconnect.snapshot",
+    protocolVersion: 1,
+    schemaVersion: "canvas-command/v1",
+    scope: {
+      workspaceId: "workspace-001",
       projectId: "remote-project",
-      submitCanvasCommand: vi.fn<CollaborationClient["submitCanvasCommand"]>(),
-      reconnectCanvasCommands: vi.fn<CollaborationClient["reconnectCanvasCommands"]>(),
-      bindCanvasCommandSession,
-      canvasCommandSession: vi.fn<CollaborationClient["canvasCommandSession"]>(
-        () => remoteSession
-      )
+      canvasId: "remote-canvas"
+    },
+    reason: "truncated_journal",
+    afterRevision: 0,
+    snapshot: {
+      metadata: {
+        schemaVersion: "canvas-snapshot/v2",
+        scope: {
+          workspaceId: "workspace-001",
+          projectId: "remote-project",
+          canvasId: "remote-canvas"
+        },
+        revision,
+        contentDigest: content.canonicalDigest,
+        createdAt: "2026-08-02T00:00:00.000Z",
+        sizeBytes: content.totalBytes
+      },
+      encoding: "content_version_ref",
+      content: {
+        versionId: `version-${content.canonicalDigest}`,
+        canonicalDigest: content.canonicalDigest,
+        verification: "complete"
+      }
+    }
+  };
+}
+
+function makeClient(overrides: Partial<CollaborationClient> = {}) {
+  return {
+    projectId: "remote-project",
+    connectionProfile: {
+      profileId: "profile-1",
+      serverBaseUrl: "http://127.0.0.1:1/",
+      projectId: "remote-project",
+      allowInsecureTransport: true
+    },
+    submitCanvasCommand: vi.fn<CollaborationClient["submitCanvasCommand"]>(),
+    reconnectCanvasCommands: vi.fn<CollaborationClient["reconnectCanvasCommands"]>(),
+    fetchContentVersion: vi.fn<CollaborationClient["fetchContentVersion"]>(),
+    bindCanvasCommandSession: vi.fn<CollaborationClient["bindCanvasCommandSession"]>(),
+    canvasCommandSession: vi.fn<CollaborationClient["canvasCommandSession"]>(() => remoteSession),
+    getCurrentCanvasAccess: vi.fn(async () => ({
+      scope: {
+        scopeKind: "canvas" as const,
+        workspaceId: "workspace-001",
+        projectId: "remote-project",
+        canvasId: "remote-canvas"
+      },
+      projectVisibility: "shared" as const,
+      canvasVisibility: "shared" as const,
+      projectAclRevision: 1,
+      canvasAclRevision: 1,
+      project: {
+        scope: {
+          scopeKind: "project" as const,
+          workspaceId: "workspace-001",
+          projectId: "remote-project",
+          canvasId: null
+        },
+        aclRevision: 1,
+        effectiveRole: "owner" as const,
+        roleSource: "scope_owner" as const,
+        capabilities: {
+          list: true,
+          read: true,
+          persistent_canvas_command: true,
+          assignment: true,
+          comment: true,
+          grant: true,
+          revoke: true,
+          administration: true,
+          visibility: true
+        },
+        disabledReason: null
+      },
+      canvas: {
+        scope: {
+          scopeKind: "canvas" as const,
+          workspaceId: "workspace-001",
+          projectId: "remote-project",
+          canvasId: "remote-canvas"
+        },
+        aclRevision: 1,
+        effectiveRole: "owner" as const,
+        roleSource: "scope_owner" as const,
+        capabilities: {
+          list: true,
+          read: true,
+          persistent_canvas_command: true,
+          assignment: true,
+          comment: true,
+          grant: true,
+          revoke: true,
+          administration: true,
+          visibility: true
+        },
+        disabledReason: null
+      },
+      people: []
+    })),
+    ...overrides
+  } as unknown as CollaborationClient;
+}
+
+describe("CollaborationCanvasCommandFacade", () => {
+  it("binds via reconnect snapshot and submits without local disk materialization hooks", async () => {
+    let content = fixtureContent();
+    const store = new CanvasReplicaStore(() => undefined);
+    const submitCalls: Array<{ expectedRevision: number; operationId: string }> = [];
+    const transport: CanvasReplicaCommandTransport = {
+      async fetchReconnectBaseline() {
+        return { response: snapshotResponse(content, 7), content };
+      },
+      async reconnect() {
+        return {
+          response: {
+            type: "canvas.reconnect.delta",
+            protocolVersion: 1,
+            schemaVersion: "canvas-command/v1",
+            scope: {
+              workspaceId: "workspace-001",
+              projectId: "remote-project",
+              canvasId: "remote-canvas"
+            },
+            afterRevision: 7,
+            headRevision: 7,
+            headContentDigest: content.canonicalDigest,
+            entries: []
+          }
+        };
+      },
+      async canPersistCanvasCommand() {
+        return true;
+      },
+      async submit(input) {
+        submitCalls.push({
+          expectedRevision: input.expectedRevision,
+          operationId: input.operationId
+        });
+        const next = encodeCanvasReplicaDocument(
+          applyCanvasReplicaIntent(decodeCanvasReplicaDocument(content), input.intent)
+        );
+        content = next;
+        const outcome: CanvasCommandOutcome = {
+          type: "canvas.command.accepted",
+          protocolVersion: 1,
+          schemaVersion: "canvas-command/v1",
+          scope: {
+            workspaceId: "workspace-001",
+            projectId: "remote-project",
+            canvasId: "remote-canvas"
+          },
+          operationId: input.operationId,
+          revision: input.expectedRevision + 1,
+          previousRevision: input.expectedRevision,
+          contentDigest: next.canonicalDigest,
+          journalEntryId: "journal-8",
+          actor: { kind: "human", id: "human-1", displayName: "Owner" },
+          acceptedAt: "2026-08-02T00:00:00.000Z",
+          idempotentReplay: false
+        };
+        return outcome;
+      }
     };
-    const localBinding: LocalCanvasCommandBinding = {
-      projectId: "local-project",
-      authorityProjectId: "remote-project",
-      projectRoot: "/local/project",
-      canvasId: "local-canvas",
-      expectedPackageDir: "/local/project/package",
-      expectedContentDigest: "b".repeat(64)
-    };
-    const bindLocal = vi.fn(async () => localBinding);
-    const facade = new CollaborationCanvasCommandFacade(
-      () => client,
-      async () => ({
+    const client = makeClient();
+    const facade = new CollaborationCanvasCommandFacade({
+      resolveClient: () => client,
+      resolveCanvasBinding: async () => ({
         localProjectId: "local-project",
         localCanvasId: "local-canvas",
         remoteProjectId: "remote-project",
         remoteCanvasId: "remote-canvas"
       }),
-      {
-        bind: bindLocal,
-        materializeAccepted: vi.fn(),
-        materializeReconnect: vi.fn()
-      }
-    );
+      resolveCanvasScope: async () => ({
+        workspaceId: "workspace-001",
+        projectId: "remote-project",
+        canvasId: "remote-canvas"
+      }),
+      resolveAuthorityId: () => "authority-1",
+      store,
+      transport
+    });
 
     await expect(
       facade.bind({ localProjectId: "local-project", canvasId: "local-canvas" })
     ).resolves.toEqual(remoteSession);
-    expect(bindLocal).toHaveBeenCalledWith({
-      projectId: "local-project",
-      canvasId: "local-canvas",
-      authorityProjectId: "remote-project"
+    expect(client.bindCanvasCommandSession).toHaveBeenCalledWith("remote-canvas");
+    expect(store.revision({
+      authorityId: "authority-1",
+      workspaceId: "workspace-001",
+      projectId: "remote-project",
+      canvasId: "remote-canvas"
+    })).toBe(7);
+
+    const result = await facade.submit({
+      canvasId: "remote-canvas",
+      intent: {
+        kind: "update_layout",
+        nodes: [
+          { nodeId: "T-001", x: 1, y: 2 },
+          { nodeId: "T-002", x: 30, y: 40 }
+        ],
+        updatedAt: "2026-08-02T00:00:00.000Z"
+      }
     });
-    expect(bindCanvasCommandSession).toHaveBeenCalledWith("remote-canvas");
+    expect(result.outcome.type).toBe("canvas.command.accepted");
+    expect(submitCalls[0]?.expectedRevision).toBe(7);
+    // Renderer/main never lets the caller stamp operationId.
+    expect(submitCalls[0]?.operationId).toMatch(/^op-/);
   });
 
-  it("sends the bound local digest when reconnect starts at revision zero", async () => {
-    const response = canvasReconnectDeltaSchema.parse({
-      type: "canvas.reconnect.delta",
-      protocolVersion: CANVAS_COMMAND_PROTOCOL_VERSION,
-      schemaVersion: "canvas-command/v1",
-      scope: {
-        workspaceId: "workspace-001",
-        projectId: "remote-project",
-        canvasId: "remote-canvas"
+  it("reconnects through the replica worker without materializing disk as a success gate", async () => {
+    const content = fixtureContent();
+    const store = new CanvasReplicaStore(() => undefined);
+    const transport: CanvasReplicaCommandTransport = {
+      async fetchReconnectBaseline() {
+        return { response: snapshotResponse(content, 1), content };
       },
-      afterRevision: 0,
-      headRevision: 0,
-      headContentDigest: "b".repeat(64),
-      entries: []
-    });
-    const reconnectCanvasCommands = vi.fn<CollaborationClient["reconnectCanvasCommands"]>(
-      async () => ({
-        response,
-        entriesToApply: [],
-        snapshotRequired: false,
-        session: { ...remoteSession, revision: 0, contentDigest: "b".repeat(64) }
-      })
-    );
-    const client = {
-      projectId: "remote-project",
-      submitCanvasCommand: vi.fn<CollaborationClient["submitCanvasCommand"]>(),
-      reconnectCanvasCommands,
-      bindCanvasCommandSession: vi.fn<CollaborationClient["bindCanvasCommandSession"]>(),
-      canvasCommandSession: vi.fn<CollaborationClient["canvasCommandSession"]>(() => remoteSession)
+      async reconnect(_scope, input) {
+        return {
+          response: {
+            type: "canvas.reconnect.delta",
+            protocolVersion: 1,
+            schemaVersion: "canvas-command/v1",
+            scope: {
+              workspaceId: "workspace-001",
+              projectId: "remote-project",
+              canvasId: "remote-canvas"
+            },
+            afterRevision: input.afterRevision,
+            headRevision: input.afterRevision,
+            headContentDigest: content.canonicalDigest,
+            entries: []
+          }
+        };
+      },
+      async canPersistCanvasCommand() {
+        return true;
+      },
+      async submit() {
+        throw new Error("unexpected submit");
+      }
     };
-    const localBinding: LocalCanvasCommandBinding = {
-      projectId: "local-project",
-      authorityProjectId: "remote-project",
-      projectRoot: "/local/project",
-      canvasId: "local-canvas",
-      expectedPackageDir: "/local/project/package",
-      expectedContentDigest: "b".repeat(64)
-    };
-    const facade = new CollaborationCanvasCommandFacade(
-      () => client,
-      async () => ({
+    const client = makeClient();
+    const facade = new CollaborationCanvasCommandFacade({
+      resolveClient: () => client,
+      resolveCanvasBinding: async () => ({
         localProjectId: "local-project",
         localCanvasId: "local-canvas",
         remoteProjectId: "remote-project",
         remoteCanvasId: "remote-canvas"
       }),
-      {
-        bind: vi.fn(async () => localBinding),
-        materializeAccepted: vi.fn(),
-        materializeReconnect: vi.fn()
-      }
-    );
-    await facade.bind({ localProjectId: "local-project", canvasId: "local-canvas" });
-
-    await facade.reconnect({ canvasId: "remote-canvas", afterRevision: 0 });
-
-    expect(reconnectCanvasCommands).toHaveBeenCalledWith(
-      {
-        canvasId: "remote-canvas",
-        afterRevision: 0,
-        afterContentDigest: localBinding.expectedContentDigest
-      },
-      undefined,
-      expect.any(Object)
-    );
-  });
-
-  it("materializes the authoritative head and retries once when the baseline needs a snapshot", async () => {
-    const response = canvasReconnectDeltaSchema.parse({
-      type: "canvas.reconnect.delta",
-      protocolVersion: CANVAS_COMMAND_PROTOCOL_VERSION,
-      schemaVersion: "canvas-command/v1",
-      scope: {
+      resolveCanvasScope: async () => ({
         workspaceId: "workspace-001",
         projectId: "remote-project",
         canvasId: "remote-canvas"
-      },
-      afterRevision: 0,
-      headRevision: 0,
-      headContentDigest: "c".repeat(64),
-      entries: []
+      }),
+      resolveAuthorityId: () => "authority-1",
+      store,
+      transport
     });
-    const reconnectCanvasCommands = vi
-      .fn<CollaborationClient["reconnectCanvasCommands"]>()
-      .mockRejectedValueOnce(
-        new CollaborationClientError({
-          kind: "unknown",
-          code: "collaboration_canvas_snapshot_materialization_required",
-          message: "collaboration_canvas_snapshot_materialization_required",
-          retryable: true
-        })
-      )
-      .mockResolvedValueOnce({
-        response,
-        entriesToApply: [],
-        snapshotRequired: false,
-        session: { ...remoteSession, revision: 0, contentDigest: "c".repeat(64) }
-      });
-    const client = {
-      projectId: "remote-project",
-      submitCanvasCommand: vi.fn<CollaborationClient["submitCanvasCommand"]>(),
-      reconnectCanvasCommands,
-      bindCanvasCommandSession: vi.fn<CollaborationClient["bindCanvasCommandSession"]>(),
-      canvasCommandSession: vi.fn<CollaborationClient["canvasCommandSession"]>(() => remoteSession)
+    await facade.bind({ localProjectId: "local-project", canvasId: "local-canvas" });
+    const result = await facade.reconnect({ canvasId: "remote-canvas", afterRevision: 1 });
+    expect(result.response.type).toBe("canvas.reconnect.delta");
+    expect(result.snapshotRequired).toBe(false);
+  });
+
+  it("clears replica sessions so late work cannot rebind an old authority", async () => {
+    const content = fixtureContent();
+    const store = new CanvasReplicaStore(() => undefined);
+    const transport: CanvasReplicaCommandTransport = {
+      async fetchReconnectBaseline() {
+        return { response: snapshotResponse(content, 1), content };
+      },
+      async reconnect() {
+        throw new Error("unexpected");
+      },
+      async canPersistCanvasCommand() {
+        return true;
+      },
+      async submit() {
+        throw new Error("unexpected");
+      }
     };
-    const before: LocalCanvasCommandBinding = {
-      projectId: "local-project",
-      authorityProjectId: "remote-project",
-      projectRoot: "/local/project",
-      canvasId: "local-canvas",
-      expectedPackageDir: "/local/project/package",
-      expectedContentDigest: "b".repeat(64)
-    };
-    const after = { ...before, expectedContentDigest: "c".repeat(64) };
-    const bindLocal = vi.fn().mockResolvedValueOnce(before).mockResolvedValueOnce(after);
-    const recoverAuthoritativeContent = vi.fn(async () => undefined);
-    const facade = new CollaborationCanvasCommandFacade(
-      () => client,
-      async () => ({
+    const client = makeClient();
+    const facade = new CollaborationCanvasCommandFacade({
+      resolveClient: () => client,
+      resolveCanvasBinding: async () => ({
         localProjectId: "local-project",
         localCanvasId: "local-canvas",
         remoteProjectId: "remote-project",
         remoteCanvasId: "remote-canvas"
       }),
-      {
-        bind: bindLocal,
-        materializeAccepted: vi.fn(),
-        materializeReconnect: vi.fn()
-      },
-      recoverAuthoritativeContent
-    );
-    await facade.bind({ localProjectId: "local-project", canvasId: "local-canvas" });
-
-    await expect(
-      facade.reconnect({ canvasId: "remote-canvas", afterRevision: 0 })
-    ).resolves.toMatchObject({ response });
-
-    expect(recoverAuthoritativeContent).toHaveBeenCalledWith({
-      localProjectId: "local-project",
-      localCanvasId: "local-canvas"
-    });
-    expect(reconnectCanvasCommands).toHaveBeenNthCalledWith(
-      2,
-      {
-        canvasId: "remote-canvas",
-        afterRevision: 0,
-        afterContentDigest: after.expectedContentDigest
-      },
-      undefined,
-      expect.any(Object)
-    );
-  });
-
-  it("does not fetch a snapshot content version when the local digest already matches", async () => {
-    const response = {
-      ...exampleCanvasReconnectTruncatedJournal,
-      scope: { workspaceId: "workspace-001", projectId: "remote-project", canvasId: "remote-canvas" },
-      snapshot: {
-        ...exampleCanvasReconnectTruncatedJournal.snapshot,
-        metadata: {
-          ...exampleCanvasReconnectTruncatedJournal.snapshot.metadata,
-          scope: { workspaceId: "workspace-001", projectId: "remote-project", canvasId: "remote-canvas" }
-        }
-      }
-    };
-    const materializeReconnect = vi.fn();
-    const fetchContentVersion = vi.fn<CollaborationClient["fetchContentVersion"]>();
-    const client = {
-      projectId: "remote-project",
-      submitCanvasCommand: vi.fn<CollaborationClient["submitCanvasCommand"]>(),
-      fetchContentVersion,
-      reconnectCanvasCommands: vi.fn<CollaborationClient["reconnectCanvasCommands"]>(
-        async (_input, _signal, hooks) => {
-          await hooks?.beforeReconnect({ response, entriesToApply: [], snapshotRequired: true });
-          return { response, entriesToApply: [], snapshotRequired: true, session: remoteSession };
-        }
-      ),
-      bindCanvasCommandSession: vi.fn<CollaborationClient["bindCanvasCommandSession"]>(),
-      canvasCommandSession: vi.fn<CollaborationClient["canvasCommandSession"]>(() => remoteSession)
-    };
-    const binding: LocalCanvasCommandBinding = {
-      projectId: "local-project", authorityProjectId: "remote-project", projectRoot: "/local/project",
-      canvasId: "local-canvas", expectedPackageDir: "/local/project/package",
-      expectedContentDigest: response.snapshot.metadata.contentDigest
-    };
-    const facade = new CollaborationCanvasCommandFacade(
-      () => client,
-      async () => ({ localProjectId: "local-project", localCanvasId: "local-canvas", remoteProjectId: "remote-project", remoteCanvasId: "remote-canvas" }),
-      { bind: vi.fn(async () => binding), currentDigest: vi.fn(async () => response.snapshot.metadata.contentDigest), materializeAccepted: vi.fn(), materializeReconnect }
-    );
-    await facade.bind({ localProjectId: "local-project", canvasId: "local-canvas" });
-    await facade.reconnect({ canvasId: "remote-canvas" });
-    expect(fetchContentVersion).not.toHaveBeenCalled();
-    expect(materializeReconnect).toHaveBeenCalledWith(binding, expect.not.objectContaining({ snapshotContent: expect.anything() }));
-  });
-
-  it("fetches snapshot content only when the local digest differs", async () => {
-    const response = {
-      ...exampleCanvasReconnectTruncatedJournal,
-      scope: { workspaceId: "workspace-001", projectId: "remote-project", canvasId: "remote-canvas" },
-      snapshot: {
-        ...exampleCanvasReconnectTruncatedJournal.snapshot,
-        metadata: {
-          ...exampleCanvasReconnectTruncatedJournal.snapshot.metadata,
-          scope: { workspaceId: "workspace-001", projectId: "remote-project", canvasId: "remote-canvas" }
-        }
-      }
-    };
-    const fetched = { ...exampleAuthoritativeContentVersion, scope: response.scope, completed: response.snapshot.content };
-    const fetchContentVersion = vi.fn<CollaborationClient["fetchContentVersion"]>(async () => fetched);
-    const materializeReconnect = vi.fn();
-    const client = {
-      projectId: "remote-project",
-      submitCanvasCommand: vi.fn<CollaborationClient["submitCanvasCommand"]>(), fetchContentVersion,
-      reconnectCanvasCommands: vi.fn<CollaborationClient["reconnectCanvasCommands"]>(async (_input, _signal, hooks) => {
-        await hooks?.beforeReconnect({ response, entriesToApply: [], snapshotRequired: true });
-        return { response, entriesToApply: [], snapshotRequired: true, session: remoteSession };
+      resolveCanvasScope: async () => ({
+        workspaceId: "workspace-001",
+        projectId: "remote-project",
+        canvasId: "remote-canvas"
       }),
-      bindCanvasCommandSession: vi.fn<CollaborationClient["bindCanvasCommandSession"]>(),
-      canvasCommandSession: vi.fn<CollaborationClient["canvasCommandSession"]>(() => remoteSession)
-    };
-    const binding: LocalCanvasCommandBinding = {
-      projectId: "local-project", authorityProjectId: "remote-project", projectRoot: "/local/project",
-      canvasId: "local-canvas", expectedPackageDir: "/local/project/package", expectedContentDigest: "b".repeat(64)
-    };
-    const facade = new CollaborationCanvasCommandFacade(
-      () => client,
-      async () => ({ localProjectId: "local-project", localCanvasId: "local-canvas", remoteProjectId: "remote-project", remoteCanvasId: "remote-canvas" }),
-      { bind: vi.fn(async () => binding), currentDigest: vi.fn(async () => "b".repeat(64)), materializeAccepted: vi.fn(), materializeReconnect }
-    );
-    await facade.bind({ localProjectId: "local-project", canvasId: "local-canvas" });
-    await facade.reconnect({ canvasId: "remote-canvas" });
-    expect(fetchContentVersion).toHaveBeenCalledWith({
-      scope: response.snapshot.metadata.scope,
-      content: response.snapshot.content
+      resolveAuthorityId: () => "authority-1",
+      store,
+      transport
     });
-    expect(materializeReconnect).toHaveBeenCalledWith(binding, expect.objectContaining({ snapshotContent: fetched.content }));
+    await facade.bind({ localProjectId: "local-project", canvasId: "local-canvas" });
+    facade.clearAllSessions();
+    expect(
+      facade.projectionForBinding({ localProjectId: "local-project", canvasId: "local-canvas" })
+    ).toBeNull();
   });
 });

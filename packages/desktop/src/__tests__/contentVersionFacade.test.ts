@@ -139,6 +139,43 @@ function fakeClient(projectId: string) {
   const acknowledgeContentVersion = vi.fn(async (input: { content: CompletedContentVersionRef }) =>
     acknowledgement(projectId, input.content)
   );
+  /** Independent command revision (7) vs content-authority head revision (1). */
+  const reconnectCanvasCommands = vi.fn(async () => {
+    if (!published) throw new Error("content_not_published");
+    return {
+      response: {
+        type: "canvas.reconnect.snapshot" as const,
+        protocolVersion: 1 as const,
+        schemaVersion: "canvas-command/v1" as const,
+        scope: {
+          workspaceId: "workspace-test",
+          projectId,
+          canvasId: "default"
+        },
+        reason: "truncated_journal" as const,
+        afterRevision: 0,
+        snapshot: {
+          metadata: {
+            schemaVersion: "canvas-snapshot/v2" as const,
+            scope: {
+              workspaceId: "workspace-test",
+              projectId,
+              canvasId: "default"
+            },
+            revision: 7,
+            contentDigest: published.content.canonicalDigest,
+            createdAt: "2026-07-28T00:00:00.000Z",
+            sizeBytes: published.content.totalBytes
+          },
+          encoding: "content_version_ref" as const,
+          content: published.completed
+        }
+      },
+      entriesToApply: [],
+      snapshotRequired: true,
+      session: null
+    };
+  });
   return {
     client: {
       projectId,
@@ -172,13 +209,15 @@ function fakeClient(projectId: string) {
       discoverContentAuthority,
       publishInitialContent,
       fetchContentVersion,
-      acknowledgeContentVersion
+      acknowledgeContentVersion,
+      reconnectCanvasCommands
     } as unknown as CollaborationClient,
     calls: {
       discoverContentAuthority,
       publishInitialContent,
       fetchContentVersion,
-      acknowledgeContentVersion
+      acknowledgeContentVersion,
+      reconnectCanvasCommands
     }
   };
 }
@@ -239,6 +278,12 @@ describe("ContentVersionFacade", () => {
     expect(baseline.contentDigest).toBe(baseline.content.canonicalDigest);
     expect("revision" in baseline).toBe(false);
     expect(baseline.scope.authorityId).toContain("profile-test");
+    // Must use reconnect snapshot path, never discover(content head) for command baseline.
+    expect(fake.calls.reconnectCanvasCommands).toHaveBeenCalledWith({
+      canvasId: "default",
+      afterRevision: 0
+    });
+    expect(fake.calls.fetchContentVersion).toHaveBeenCalled();
   });
 
   it("keeps a rejected initial publish redacted and typed as a boundary failure", async () => {
