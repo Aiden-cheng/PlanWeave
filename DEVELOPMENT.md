@@ -1,6 +1,6 @@
 # Development
 
-This document is for contributors working from source. The main README is user-facing and assumes the `planweave` CLI is installed. Stable operator install/config/security guidance lives in the primary [README.md](README.md) (English) and [readme/README.zh-CN.md](readme/README.zh-CN.md).
+Contributor setup, repository layout, verification, distributed packages, and local packaging.
 
 ## Repository Layout
 
@@ -16,13 +16,13 @@ packages/collaboration-contracts   Schema-only human collaboration wire DTOs for
 examples                           Example PlanWeave packages
 scripts                            Repository checks, pack smoke, release-gate helpers
 skills                             Agent skills distributed from this repository
-readme                             README assets and localized README content
+readme                             Localized docs and static assets
 archive                            Archived planning material (not implementation authority)
 ```
 
 ## Distributed architecture contracts
 
-Final module and security boundaries (not process history):
+Module and security boundaries:
 
 | Boundary | Authority | Non-authority |
 | --- | --- | --- |
@@ -158,6 +158,8 @@ pnpm --filter @planweave-ai/desktop smoke
 
 ## Distributed packages from source
 
+Packages: `@planweave-ai/server` → `planweave-server`, `@planweave-ai/agent-host` → `planweave-agent-host` (Node.js 22.5+). Desktop stays `private: true` and is not part of `publish:npm` / `publish:distributed`.
+
 Build order for the distributed graph (also used by `pnpm pack:distributed`):
 
 ```bash
@@ -168,15 +170,36 @@ pnpm --filter @planweave-ai/server build
 pnpm --filter @planweave-ai/agent-host build
 ```
 
-Run Coordinator / Host from the workspace after build:
+Run Coordinator / Host from the workspace after build (absolute config paths only; Server also accepts `PLANWEAVE_SERVER_CONFIG`):
 
 ```bash
+node packages/server/dist/bin.js --help
+node packages/agent-host/dist/bin.js --help
+
 node packages/server/dist/bin.js serve --config /absolute/path/server.json
 node packages/agent-host/dist/bin.js preflight --config /absolute/path/agent-host.json
+node packages/agent-host/dist/bin.js enroll --config /absolute/path/agent-host.json --code pw_enroll_...
 node packages/agent-host/dist/bin.js run --config /absolute/path/agent-host.json
+node packages/agent-host/dist/bin.js revoke --config /absolute/path/agent-host.json
 ```
 
-Commands accept only absolute config paths (or `PLANWEAVE_SERVER_CONFIG` for Server). User-facing config keys, HTTP routes, recovery actions, and security rules are documented in the README Distributed Operator Guide — keep that guide aligned when contracts change.
+After a published install the same entry points are `planweave-server` and `planweave-agent-host` on `PATH`.
+
+Config shape (details and schema live in each package; use `--help` and package tests as contract sources):
+
+| Side | You configure | Notes |
+| --- | --- | --- |
+| Coordinator | TLS (or loopback dev), `dataDirectory`, trusted project roots, operator token **digests** | Config stores `tokenSha256`, never the raw operator token |
+| Agent Host | Coordinator URL, `dataDirectory`, workspace folders, ACP profile command paths | Provider API keys and agent login stay on the Host environment |
+
+Operational defaults:
+
+- Production transport is **HTTPS** and **WSS**. Plain HTTP/WS is loopback development only (`allowInsecureDevelopment`).
+- Create a one-time Host enrollment grant as server admin, enroll the Host, then `run`. Revoke on the server and/or `planweave-agent-host revoke` when a Host should no longer be trusted.
+- Unauthenticated health endpoints: `/healthz`, `/readyz`, `/version`.
+- **Assignment** is coordination metadata only; **dispatch** / remote run is an explicit action.
+- Interrupted remote work needs an explicit lifecycle action (`cancel`, `resume_same_session`, `retry_new_attempt`, `fail`, `block`) — never silent re-run.
+- Human comments/activity are not Host mailbox traffic or Runtime claim/submit.
 
 Pack and clean-install smoke (no publish):
 
@@ -184,8 +207,6 @@ Pack and clean-install smoke (no publish):
 pnpm pack:distributed
 pnpm check:distributed-package-install
 ```
-
-Desktop remains `private: true` and is not part of `publish:npm` / `publish:distributed`.
 
 ## Distributed release gate
 
@@ -197,7 +218,25 @@ pnpm exec vitest run packages/server/src/__tests__/releaseGate.test.ts \
   packages/distributed-protocol/src/__tests__/compatibility.test.ts
 ```
 
-Do not treat skipped `PLANWEAVE_REAL_ACP` or `PLANWEAVE_VPS_E2E` evidence as a release pass. Run both live tiers in hard mode and evaluate their current sanitized evidence with the release gate command documented in the main README section **Live release gate and rollback checks**.
+Do not treat skipped `PLANWEAVE_REAL_ACP` or `PLANWEAVE_VPS_E2E` evidence as a release pass. Run both live tiers in hard mode, then evaluate their current sanitized evidence with:
+
+```bash
+# After collecting evidence files (paths are examples):
+node scripts/planweave-release-gate.mjs \
+  --deterministic-evidence /tmp/det.json \
+  --real-acp-evidence /tmp/real-acp.json \
+  --vps-evidence /tmp/vps-e2e.json \
+  --report /tmp/release-gate.json
+```
+
+Opt-in live helpers from the monorepo:
+
+```bash
+PLANWEAVE_REAL_ACP=1 node scripts/real-acp-host-smoke.mjs --list-profiles
+PLANWEAVE_VPS_E2E=1 node scripts/vps-authenticated-e2e.mjs --profile local-tls-fixture
+```
+
+See `planweave-server release-gate --help`, `planweave-agent-host real-acp-smoke --help`, and `planweave-server vps-e2e --help` for flags and environment variables.
 
 ## ACP Verification
 
