@@ -4,7 +4,7 @@ import { canvasRuntimeStatusProjectionSchema } from "../runtimeStatus.js";
 describe("canvas runtime status projection", () => {
   it("accepts only the redacted task and block execution state needed by replicas", () => {
     const parsed = canvasRuntimeStatusProjectionSchema.parse({
-      schemaVersion: "canvas-runtime-status/v1",
+      schemaVersion: "canvas-runtime-status/v2",
       scope: {
         workspaceId: "workspace-1",
         projectId: "project-1",
@@ -19,7 +19,8 @@ describe("canvas runtime status projection", () => {
           status: "completed",
           completionReason: null,
           blockedReason: null,
-          divergenceReason: null
+          divergenceReason: null,
+          dispatchable: false
         }
       ]
     });
@@ -31,7 +32,7 @@ describe("canvas runtime status projection", () => {
 
   it("rejects duplicate task and block identities", () => {
     const base = {
-      schemaVersion: "canvas-runtime-status/v1" as const,
+      schemaVersion: "canvas-runtime-status/v2" as const,
       scope: { workspaceId: "workspace-1", projectId: "project-1", canvasId: "default" },
       packageFingerprint: `pkg-${"a".repeat(64)}`,
       capturedAt: "2026-08-01T00:00:00.000Z"
@@ -56,14 +57,16 @@ describe("canvas runtime status projection", () => {
             status: "ready",
             completionReason: null,
             blockedReason: null,
-            divergenceReason: null
+            divergenceReason: null,
+            dispatchable: true
           },
           {
             ref: "T-001#B-001",
             status: "completed",
             completionReason: null,
             blockedReason: null,
-            divergenceReason: null
+            divergenceReason: null,
+            dispatchable: false
           }
         ]
       })

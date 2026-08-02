@@ -21,36 +21,61 @@ export const desktopSharedResourceGroupSchema = z
 
 export type DesktopSharedResourceGroupDto = z.infer<typeof desktopSharedResourceGroupSchema>;
 
-export function buildSharedResourceGroups(
-  graph: CompiledExecutionGraph,
-  state: RuntimeState
+export type SharedResourceBlockMembership = {
+  ref: string;
+  taskId: string;
+  resources: readonly string[];
+  status: "in_progress" | "inactive";
+};
+
+/** Builds informational resource groups from content membership and transient block status. */
+export function buildSharedResourceGroupsFromMembership(
+  memberships: readonly SharedResourceBlockMembership[]
 ): DesktopSharedResourceGroup[] {
-  const memberBlockRefsByResource = new Map<string, Set<string>>();
-  for (const [ref, resources] of graph.sharedResourcesByBlockRef.entries()) {
-    for (const resource of resources) {
-      const members = memberBlockRefsByResource.get(resource) ?? new Set<string>();
-      members.add(ref);
-      memberBlockRefsByResource.set(resource, members);
+  const membersByResource = new Map<string, SharedResourceBlockMembership[]>();
+  for (const membership of memberships) {
+    for (const resource of membership.resources) {
+      const members = membersByResource.get(resource);
+      if (members) {
+        members.push(membership);
+      } else {
+        membersByResource.set(resource, [membership]);
+      }
     }
   }
-  return [...memberBlockRefsByResource.entries()]
+  return [...membersByResource.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([name, members]) => {
-      const memberBlockRefs = [...members].sort((left, right) => left.localeCompare(right));
-      const memberTaskIds = [
-        ...new Set(
-          memberBlockRefs.map((ref) => requireMapValue(graph.blockTaskByRef, ref, "blockTaskByRef"))
-        )
-      ].sort((left, right) => left.localeCompare(right));
+      const memberBlockRefs = members
+        .map((membership) => membership.ref)
+        .sort((left, right) => left.localeCompare(right));
+      const memberTaskIds = [...new Set(members.map((membership) => membership.taskId))].sort(
+        (left, right) => left.localeCompare(right)
+      );
       return {
         name,
         memberTaskIds,
         memberBlockRefs,
-        activeBlockRefs: memberBlockRefs.filter(
-          (ref) => requireBlockState(state, ref).status === "in_progress"
-        )
+        activeBlockRefs: members
+          .filter((membership) => membership.status === "in_progress")
+          .map((membership) => membership.ref)
+          .sort((left, right) => left.localeCompare(right))
       };
     });
+}
+
+export function buildSharedResourceGroups(
+  graph: CompiledExecutionGraph,
+  state: RuntimeState
+): DesktopSharedResourceGroup[] {
+  return buildSharedResourceGroupsFromMembership(
+    graph.blockRefsInManifestOrder.map((ref) => ({
+      ref,
+      taskId: requireMapValue(graph.blockTaskByRef, ref, "blockTaskByRef"),
+      resources: requireMapValue(graph.sharedResourcesByBlockRef, ref, "sharedResourcesByBlockRef"),
+      status: requireBlockState(state, ref).status === "in_progress" ? "in_progress" : "inactive"
+    }))
+  );
 }
 
 function enrichBlockPreview(

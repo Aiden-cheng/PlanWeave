@@ -8,42 +8,132 @@ export const COLLABORATION_RUNTIME_STATUS_POLL_MS = 3_000;
 
 export type CollaborationRuntimeStatusBridge = Pick<
   PlanWeaveCollaborationApi,
-  "readCollaborationCanvasRuntimeStatus"
+  "readCollaborationCanvasRuntimeStatus" | "resolveCollaborationCanvasScope"
 >;
+
+type ResolvedCanvasIdentity = {
+  profileId: string;
+  localProjectId: string;
+  localCanvasId: string;
+  remoteWorkspaceId: CanvasRuntimeStatusProjection["scope"]["workspaceId"];
+  remoteProjectId: string;
+  remoteCanvasId: string;
+};
+
+type RuntimeStatusSnapshot = {
+  identity: ResolvedCanvasIdentity;
+  status: CanvasRuntimeStatusProjection;
+};
+
+function sameCanvasIdentity(
+  left: ResolvedCanvasIdentity,
+  right: ResolvedCanvasIdentity
+): boolean {
+  return (
+    left.profileId === right.profileId &&
+    left.localProjectId === right.localProjectId &&
+    left.localCanvasId === right.localCanvasId &&
+    left.remoteWorkspaceId === right.remoteWorkspaceId &&
+    left.remoteProjectId === right.remoteProjectId &&
+    left.remoteCanvasId === right.remoteCanvasId
+  );
+}
+
+function sameRuntimeScope(
+  left: CanvasRuntimeStatusProjection["scope"],
+  right: CanvasRuntimeStatusProjection["scope"]
+): boolean {
+  return (
+    left.workspaceId === right.workspaceId &&
+    left.projectId === right.projectId &&
+    left.canvasId === right.canvasId
+  );
+}
+
+function matchesResolvedCanvas(
+  status: CanvasRuntimeStatusProjection,
+  identity: ResolvedCanvasIdentity
+): boolean {
+  return (
+    status.scope.workspaceId === identity.remoteWorkspaceId &&
+    status.scope.projectId === identity.remoteProjectId &&
+    status.scope.canvasId === identity.remoteCanvasId
+  );
+}
+
+function hasExactRuntimeIdentity(
+  graph: DesktopGraphViewModel,
+  status: CanvasRuntimeStatusProjection
+): boolean {
+  const taskIds = graph.tasks.map((task) => task.taskId);
+  const blockRefs = graph.tasks.flatMap((task) => task.blocks.map((block) => block.ref));
+  const statusTaskIds = new Set(status.tasks.map((task) => task.taskId));
+  const statusBlockRefs = new Set(status.blocks.map((block) => block.ref));
+  return (
+    taskIds.length === status.tasks.length &&
+    blockRefs.length === status.blocks.length &&
+    taskIds.every((taskId) => statusTaskIds.has(taskId)) &&
+    blockRefs.every((ref) => statusBlockRefs.has(ref))
+  );
+}
+
+function failClosedDispatchability(graph: DesktopGraphViewModel): DesktopGraphViewModel {
+  return {
+    ...graph,
+    tasks: graph.tasks.map((task) => ({
+      ...task,
+      blocks: task.blocks.map((block) => ({ ...block, dispatchable: false })),
+      blockPreview: task.blockPreview.map((block) => ({ ...block, dispatchable: false }))
+    }))
+  };
+}
 
 export function mergeCollaborationRuntimeStatus(
   graph: DesktopGraphViewModel,
-  status: CanvasRuntimeStatusProjection | null
+  status: CanvasRuntimeStatusProjection | null,
+  expectedScope: CanvasRuntimeStatusProjection["scope"] | null
 ): DesktopGraphViewModel {
-  if (!status || status.packageFingerprint !== graph.packageFingerprint) return graph;
+  if (
+    !status ||
+    !expectedScope ||
+    status.packageFingerprint !== graph.packageFingerprint ||
+    !sameRuntimeScope(status.scope, expectedScope) ||
+    !hasExactRuntimeIdentity(graph, status)
+  ) {
+    return failClosedDispatchability(graph);
+  }
   const taskStatuses = new Map(status.tasks.map((task) => [task.taskId, task]));
   const blockStatuses = new Map(status.blocks.map((block) => [block.ref, block]));
   return {
     ...graph,
     tasks: graph.tasks.map((task) => {
       const remoteTask = taskStatuses.get(task.taskId);
+      if (!remoteTask) throw new Error(`collaboration_runtime_task_status_missing:${task.taskId}`);
       const mergeBlocks = (blocks: typeof task.blocks) =>
         blocks.map((block) => {
           const remoteBlock = blockStatuses.get(block.ref);
-          if (!remoteBlock) return block;
+          if (!remoteBlock) {
+            throw new Error(`collaboration_runtime_block_status_missing:${block.ref}`);
+          }
           return {
             ...block,
             status: remoteBlock.status,
-            exceptionReason: remoteBlock.blockedReason ?? remoteBlock.divergenceReason ?? null
+            exceptionReason: remoteBlock.blockedReason ?? remoteBlock.divergenceReason ?? null,
+            dispatchable: remoteBlock.dispatchable
           };
         });
-      const exceptions = status.blocks.flatMap((block) => {
-        if (!block.ref.startsWith(`${task.taskId}#`)) return [];
-        const reason = block.blockedReason ?? block.divergenceReason;
-        if (!reason || (block.status !== "blocked" && block.status !== "diverged")) return [];
-        return [{ ref: block.ref, reason, source: block.status }];
-      });
+      const blocks = mergeBlocks(task.blocks);
       return {
         ...task,
-        status: remoteTask?.status ?? task.status,
-        blocks: mergeBlocks(task.blocks),
+        status: remoteTask.status,
+        blocks,
         blockPreview: mergeBlocks(task.blockPreview),
-        exceptions
+        exceptions: blocks.flatMap((block) => {
+          if (!block.exceptionReason || (block.status !== "blocked" && block.status !== "diverged")) {
+            return [];
+          }
+          return [{ ref: block.ref, reason: block.exceptionReason, source: block.status }];
+        })
       };
     })
   };
@@ -52,13 +142,15 @@ export function mergeCollaborationRuntimeStatus(
 export function useCollaborationRuntimeStatus(input: {
   enabled: boolean;
   sessionConnected: boolean;
+  profileId: string | null;
+  activeProjectId: string | null;
   localProjectId: string | null;
   localCanvasId: string | null;
   graph: DesktopGraphViewModel | null;
   api?: CollaborationRuntimeStatusBridge | null;
 }): { graph: DesktopGraphViewModel | null; error: string | null } {
   const api = input.api === undefined ? collaborationBridge : input.api;
-  const [status, setStatus] = useState<CanvasRuntimeStatusProjection | null>(null);
+  const [snapshot, setSnapshot] = useState<RuntimeStatusSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -66,21 +158,30 @@ export function useCollaborationRuntimeStatus(input: {
       !api ||
       !input.enabled ||
       !input.sessionConnected ||
+      !input.profileId ||
+      !input.activeProjectId ||
       !input.localProjectId ||
       !input.localCanvasId ||
       !input.graph
     ) {
-      setStatus(null);
+      setSnapshot(null);
       setError(null);
       return undefined;
     }
+    const profileId = input.profileId;
+    const activeProjectId = input.activeProjectId;
     const localProjectId = input.localProjectId;
     const localCanvasId = input.localCanvasId;
     const packageFingerprint = input.graph.packageFingerprint;
     let active = true;
     let inFlight = false;
+    let identity: ResolvedCanvasIdentity | null = null;
+    setSnapshot(null);
+    setError(null);
+
     const refresh = async () => {
-      if (!active || inFlight) return;
+      if (!active || inFlight || !identity) return;
+      const currentIdentity = identity;
       inFlight = true;
       try {
         const next = await api.readCollaborationCanvasRuntimeStatus({
@@ -88,15 +189,48 @@ export function useCollaborationRuntimeStatus(input: {
           canvasId: localCanvasId
         });
         if (!active) return;
-        setStatus(next?.packageFingerprint === packageFingerprint ? next : null);
+        if (
+          !next ||
+          next.packageFingerprint !== packageFingerprint ||
+          !matchesResolvedCanvas(next, currentIdentity)
+        ) {
+          setSnapshot(null);
+          return;
+        }
+        setSnapshot((current) => {
+          if (current && !sameCanvasIdentity(current.identity, currentIdentity)) return null;
+          if (current && !sameRuntimeScope(current.status.scope, next.scope)) return null;
+          return { identity: currentIdentity, status: next };
+        });
         setError(null);
       } catch (caught) {
-        if (active) setError(caught instanceof Error ? caught.message : String(caught));
+        if (active) {
+          setSnapshot(null);
+          setError(caught instanceof Error ? caught.message : String(caught));
+        }
       } finally {
         inFlight = false;
       }
     };
-    void refresh();
+
+    void api
+      .resolveCollaborationCanvasScope({ localProjectId, canvasId: localCanvasId })
+      .then((resolved) => {
+        if (!active || !resolved || resolved.projectId !== activeProjectId) return;
+        const resolvedIdentity: ResolvedCanvasIdentity = {
+          profileId,
+          localProjectId,
+          localCanvasId,
+          remoteWorkspaceId: resolved.workspaceId,
+          remoteProjectId: resolved.projectId,
+          remoteCanvasId: resolved.canvasId
+        };
+        identity = resolvedIdentity;
+        void refresh();
+      })
+      .catch((caught: unknown) => {
+        if (active) setError(caught instanceof Error ? caught.message : String(caught));
+      });
     const intervalId = setInterval(() => void refresh(), COLLABORATION_RUNTIME_STATUS_POLL_MS);
     return () => {
       active = false;
@@ -104,18 +238,45 @@ export function useCollaborationRuntimeStatus(input: {
     };
   }, [
     api,
+    input.activeProjectId,
     input.enabled,
     input.graph?.packageFingerprint,
     input.localCanvasId,
     input.localProjectId,
+    input.profileId,
     input.sessionConnected
   ]);
 
+  const currentSnapshot =
+    snapshot &&
+    input.profileId &&
+    input.localProjectId &&
+    input.localCanvasId &&
+    input.activeProjectId &&
+    snapshot.identity.profileId === input.profileId &&
+    snapshot.identity.localProjectId === input.localProjectId &&
+    snapshot.identity.localCanvasId === input.localCanvasId &&
+    snapshot.identity.remoteProjectId === input.activeProjectId
+      ? snapshot
+      : null;
+
   return useMemo(
     () => ({
-      graph: input.graph ? mergeCollaborationRuntimeStatus(input.graph, status) : null,
+      graph: input.graph
+        ? mergeCollaborationRuntimeStatus(
+            input.graph,
+            currentSnapshot?.status ?? null,
+            currentSnapshot
+              ? {
+                  workspaceId: currentSnapshot.identity.remoteWorkspaceId,
+                  projectId: currentSnapshot.identity.remoteProjectId,
+                  canvasId: currentSnapshot.identity.remoteCanvasId
+                }
+              : null
+          )
+        : null,
       error
     }),
-    [error, input.graph, status]
+    [currentSnapshot, error, input.graph]
   );
 }

@@ -304,9 +304,39 @@ export class ContentVersionFacade {
   }
 
   async resolveCanvasScope(input: unknown) {
+    const requested = collaborationContentAuthorityCanvasInputSchema.parse(input);
+    const client = this.requireClient();
     const binding = await this.resolveCanvasBinding(input);
-    return binding
+    if (!binding) return null;
+    const serverOrigin = this.serverOrigin(client);
+    const replica = (await this.replicas.list()).find(
+      (candidate) =>
+        candidate.phase === "ready" &&
+        candidate.remote.serverOrigin === serverOrigin &&
+        candidate.local.projectId === requested.localProjectId &&
+        candidate.local.canvasId === requested.canvasId &&
+        candidate.remote.projectId === binding.remoteProjectId &&
+        candidate.remote.canvasId === binding.remoteCanvasId
+    );
+    if (replica) {
+      return collaborationCanvasScopeResolutionSchema.parse({
+        workspaceId: replica.remote.workspaceId,
+        projectId: binding.remoteProjectId,
+        canvasId: binding.remoteCanvasId
+      });
+    }
+    const matchingCanvases = (await this.listAuthorizedCanvases(client)).filter(
+      (candidate) =>
+        candidate.registry.projectId === binding.remoteProjectId &&
+        candidate.registry.canvasId === binding.remoteCanvasId
+    );
+    if (matchingCanvases.length > 1) {
+      throw unavailable("content_remote_canvas_scope_ambiguous", false);
+    }
+    const canvas = matchingCanvases[0];
+    return canvas
       ? collaborationCanvasScopeResolutionSchema.parse({
+          workspaceId: canvas.registry.workspaceId,
           projectId: binding.remoteProjectId,
           canvasId: binding.remoteCanvasId
         })
@@ -320,6 +350,7 @@ export class ContentVersionFacade {
     if (!scope) return null;
     const status = await client.readRuntimeStatus(scope.canvasId);
     if (
+      status.scope.workspaceId !== scope.workspaceId ||
       status.scope.projectId !== scope.projectId ||
       status.scope.canvasId !== scope.canvasId
     ) {

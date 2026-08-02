@@ -257,6 +257,8 @@ export function ProjectWorkspaceProvider({
   const collaborationRuntimeStatus = useCollaborationRuntimeStatus({
     enabled: Boolean(selectedProject),
     sessionConnected: collaborationSurface.sessionConnected,
+    profileId: collaborationSurface.activeProfileId,
+    activeProjectId: collaborationSurface.activeProjectId,
     localProjectId: selectedProject?.projectId ?? null,
     localCanvasId: selectedCanvasId,
     graph: localGraph

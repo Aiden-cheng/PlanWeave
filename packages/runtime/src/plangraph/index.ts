@@ -68,7 +68,10 @@ export {
 } from "./executeCommand.js";
 export type { ExecutePlanGraphCommandOptions, PlanGraphHistoryOptions } from "./executeCommand.js";
 export { loadPlanGraphPackage } from "./packageRepository.js";
-export { buildPlanGraphViewProjection } from "./projections/graphViewProjection.js";
+export {
+  buildPlanGraphContentProjection,
+  buildPlanGraphViewProjection
+} from "./projections/graphViewProjection.js";
 export type { PlanGraphViewProjection } from "./projections/graphViewProjection.js";
 export {
   buildAgentClaimMarkdown,

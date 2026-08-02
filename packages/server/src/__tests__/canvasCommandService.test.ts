@@ -80,7 +80,7 @@ function fakeRuntime(initialDigest = digestOf("empty")): CanvasRuntimeMutationPo
     },
     async readStatus(input) {
       return {
-        schemaVersion: "canvas-runtime-status/v1",
+        schemaVersion: "canvas-runtime-status/v2",
         scope: input.scope,
         packageFingerprint: `pkg-${"a".repeat(64)}`,
         capturedAt: input.capturedAt ?? "2026-01-02T00:00:00.000Z",
@@ -611,7 +611,7 @@ describe("canvas command service (OSS-004 B-002)", () => {
     await expect(
       service.readRuntimeStatus(actor("viewer"), { projectId: "p", canvasId: "default" })
     ).resolves.toMatchObject({
-      schemaVersion: "canvas-runtime-status/v1",
+      schemaVersion: "canvas-runtime-status/v2",
       scope: { workspaceId: "w", projectId: "p", canvasId: "default" },
       tasks: [{ taskId: "T-001", status: "implemented", openFeedbackCount: 0 }]
     });

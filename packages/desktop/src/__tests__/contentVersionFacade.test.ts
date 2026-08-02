@@ -328,6 +328,7 @@ describe("ContentVersionFacade", () => {
         canvasId: "default"
       })
     ).resolves.toEqual({
+      workspaceId: "workspace-test",
       projectId: workspace.init.workspace.id,
       canvasId: "default"
     });

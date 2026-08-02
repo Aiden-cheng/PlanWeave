@@ -71,7 +71,11 @@ function createBridge(options?: {
       getCollaborationCanvasCommandSession: async () => initialSession,
       resolveCollaborationCanvasScope:
         options?.resolveScope ??
-        (async ({ canvasId }) => ({ projectId: "project-1", canvasId })),
+        (async ({ canvasId }) => ({
+          workspaceId: "workspace-1",
+          projectId: "project-1",
+          canvasId
+        })),
       onCollaborationObserverSignal: (listener: (signal: CollaborationObserverSignal) => void) => {
         observerListeners.add(listener);
         return () => observerListeners.delete(listener);

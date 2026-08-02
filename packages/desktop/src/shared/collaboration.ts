@@ -72,6 +72,7 @@ import {
   type ExecutionTargetReadModel,
   type WorkAuthorityProjection,
   type WorkspacePickerPage,
+  workspaceIdSchema,
   contentVersionDesktopReadModelSchema,
   type ContentVersionDesktopReadModel,
   type CurrentCanvasAccessView,
@@ -530,6 +531,7 @@ export type CollaborationContentAuthorityCanvasInput = z.infer<
 >;
 export const collaborationCanvasScopeResolutionSchema = z
   .object({
+    workspaceId: workspaceIdSchema,
     projectId: collaborationOpaqueIdSchema,
     canvasId: collaborationOpaqueIdSchema
   })

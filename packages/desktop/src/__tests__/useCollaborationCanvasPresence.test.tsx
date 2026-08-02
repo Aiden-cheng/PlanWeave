@@ -20,6 +20,7 @@ function bridgeFixture() {
   let onSignal: ((signal: CollaborationPresenceSignal) => void) | null = null;
   const api: CanvasPresenceBridge = {
     resolveCollaborationCanvasScope: vi.fn(async (input) => ({
+      workspaceId: "workspace-1",
       projectId: input.localProjectId,
       canvasId: input.canvasId
     })),
@@ -181,6 +182,7 @@ describe("useCollaborationCanvasPresence", () => {
   it("resolves an imported local replica before starting presence", async () => {
     const fixture = bridgeFixture();
     vi.mocked(fixture.api.resolveCollaborationCanvasScope).mockResolvedValue({
+      workspaceId: "workspace-1",
       projectId: "remote-project",
       canvasId: "remote-canvas"
     });

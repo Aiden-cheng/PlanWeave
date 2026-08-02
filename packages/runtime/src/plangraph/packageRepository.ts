@@ -5,7 +5,13 @@ import { commitPlanPackageGraphMutation } from "../graph/editGraph.js";
 import { resolvePackagePath } from "../package/resolvePackagePath.js";
 import { loadPackage } from "../package/loadPackage.js";
 import { buildPlanGraph } from "./domain/buildPlanGraph.js";
-import { promptPreview, sha256Hex, stableJson } from "./hash.js";
+import {
+  packageFingerprintFromContent,
+  graphVersionFromPackageFingerprint,
+  promptPreview,
+  sha256Hex,
+  stableJson
+} from "./hash.js";
 import type { PlanPackageGraphMutation } from "../graph/mutation.js";
 import type {
   CompiledExecutionGraph,
@@ -217,16 +223,6 @@ async function readPromptMetadataIndex(
   return { promptIndex, promptReadFailuresByPath, diagnostics };
 }
 
-function packageFingerprint(
-  manifest: PlanPackageManifest,
-  promptMarkdownByPath: Map<string, string>
-): string {
-  const prompts = [...promptMarkdownByPath.entries()].sort(([left], [right]) =>
-    left.localeCompare(right)
-  );
-  return sha256Hex(stableJson({ manifest, prompts }));
-}
-
 function packageMetadataFingerprint(
   manifest: PlanPackageManifest,
   promptIndex: Map<string, PromptIndexEntry>
@@ -235,10 +231,6 @@ function packageMetadataFingerprint(
     .map(([path, entry]) => ({ path, contentHash: entry.contentHash }))
     .sort((left, right) => left.path.localeCompare(right.path));
   return sha256Hex(stableJson({ manifest, prompts }));
-}
-
-export function graphVersionFromPackageFingerprint(fingerprint: string): string {
-  return `pgv-${fingerprint}`;
 }
 
 export async function loadPlanGraphPackage(
@@ -259,7 +251,7 @@ export async function loadPlanGraphPackageFromSnapshot(
   const { workspace, manifest, compiledGraph } = input;
   const { promptIndex, promptMarkdownByPath, promptReadFailuresByPath, diagnostics } =
     await readPromptIndex(manifest, workspace.packageDir);
-  const fingerprint = `pkg-${packageFingerprint(manifest, promptMarkdownByPath)}`;
+  const fingerprint = packageFingerprintFromContent(manifest, promptMarkdownByPath);
   const graph = buildPlanGraph({
     manifest,
     compiledGraph,

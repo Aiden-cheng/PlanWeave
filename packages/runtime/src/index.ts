@@ -201,7 +201,10 @@ export {
   canvasReplicaDocumentSchemaVersion,
   decodeCanvasReplicaDocument,
   encodeCanvasReplicaDocument,
+  overlayCanvasReplicaRuntimeStatus,
   parseCanvasReplicaDocument,
+  projectCanvasReplicaDocument,
+  type CanvasReplicaGraphContent,
   type CanvasReplicaDocument
 } from "./canvasReplica/index.js";
 export {

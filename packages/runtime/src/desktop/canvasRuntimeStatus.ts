@@ -4,7 +4,10 @@ import {
 } from "@planweave-ai/collaboration-contracts";
 import { loadPlanGraphPackage } from "../plangraph/index.js";
 import { resolveTaskCanvasWorkspace } from "./canvasApi.js";
-import { loadDesktopGraphViewModelContext } from "./graph/readModel.js";
+import {
+  loadDesktopGraphViewModelContext,
+  type DesktopGraphViewModelContext
+} from "./graph/readModel.js";
 
 export type ReadAuthorizedCanvasRuntimeStatusInput = {
   projectRoot: string;
@@ -27,9 +30,35 @@ export async function readAuthorizedCanvasRuntimeStatus(
     throw new Error("runtime_package_location_mismatch");
   }
   const context = await loadDesktopGraphViewModelContext(workspace);
-  const planGraphPackage = await loadPlanGraphPackage(workspace);
+  return buildAuthorizedCanvasRuntimeStatusProjection({
+    context,
+    scope: input.scope,
+    capturedAt: input.capturedAt
+  });
+}
+
+/**
+ * Builds the redacted status from one Runtime context and its matching PlanGraph snapshot.
+ * The package fingerprint can therefore never describe a later manifest than claim readiness.
+ */
+export async function buildAuthorizedCanvasRuntimeStatusProjection(input: {
+  context: DesktopGraphViewModelContext;
+  scope: CanvasRuntimeStatusProjection["scope"];
+  capturedAt?: string;
+}): Promise<CanvasRuntimeStatusProjection> {
+  const { context } = input;
+  const planGraphPackage = await loadPlanGraphPackage(context.workspace, {
+    snapshot: {
+      workspace: context.workspace,
+      manifest: context.manifest,
+      compiledGraph: context.graph
+    }
+  });
+  const claimHintByRef = new Map(
+    context.claimReadiness.claimHints.map((hint) => [hint.ref, hint])
+  );
   return canvasRuntimeStatusProjectionSchema.parse({
-    schemaVersion: "canvas-runtime-status/v1",
+    schemaVersion: "canvas-runtime-status/v2",
     scope: input.scope,
     packageFingerprint: planGraphPackage.graph.packageFingerprint,
     capturedAt: input.capturedAt ?? new Date().toISOString(),
@@ -41,12 +70,15 @@ export async function readAuthorizedCanvasRuntimeStatus(
     blocks: context.status.blocks.map((block) => {
       const state = context.state.blocks[block.ref];
       if (!state) throw new Error(`runtime_block_state_missing:${block.ref}`);
+      const claimHint = claimHintByRef.get(block.ref);
+      if (!claimHint) throw new Error(`runtime_claim_hint_missing:${block.ref}`);
       return {
         ref: block.ref,
         status: block.status,
         completionReason: state.completionReason ?? null,
         blockedReason: state.blockedReason ?? null,
-        divergenceReason: state.divergenceReason ?? null
+        divergenceReason: state.divergenceReason ?? null,
+        dispatchable: claimHint.dispatchable
       };
     })
   });

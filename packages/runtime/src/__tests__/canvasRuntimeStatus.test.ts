@@ -1,6 +1,10 @@
-import { rm } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
-import { readAuthorizedCanvasRuntimeStatus } from "../desktop/canvasRuntimeStatus.js";
+import {
+  buildAuthorizedCanvasRuntimeStatusProjection,
+  readAuthorizedCanvasRuntimeStatus
+} from "../desktop/canvasRuntimeStatus.js";
+import { loadDesktopGraphViewModelContext } from "../desktop/graph/readModel.js";
 import { readState, writeState } from "../state.js";
 import { createTestWorkspace } from "./promptTestHelpers.js";
 
@@ -46,7 +50,8 @@ describe("authorized canvas runtime status", () => {
       status: "completed",
       completionReason: "passed",
       blockedReason: null,
-      divergenceReason: null
+      divergenceReason: null,
+      dispatchable: false
     });
     expect(JSON.stringify(projection)).not.toContain("private-run-id");
   });
@@ -63,5 +68,33 @@ describe("authorized canvas runtime status", () => {
         scope: { workspaceId: "w", projectId: "p", canvasId: "default" }
       })
     ).rejects.toThrow("runtime_package_location_mismatch");
+  });
+
+  it("keeps runtime status and package fingerprint on one captured graph snapshot", async () => {
+    const fixture = await createTestWorkspace();
+    directories.push(fixture.home, fixture.root);
+    const context = await loadDesktopGraphViewModelContext(fixture.init.workspace);
+    const before = await buildAuthorizedCanvasRuntimeStatusProjection({
+      context,
+      scope: { workspaceId: "w", projectId: "p", canvasId: "default" },
+      capturedAt: "2026-08-01T00:00:00.000Z"
+    });
+    const laterManifest = structuredClone(context.manifest);
+    laterManifest.project.title = "Later manifest version";
+    await writeFile(
+      fixture.init.workspace.manifestFile,
+      `${JSON.stringify(laterManifest, null, 2)}\n`,
+      "utf8"
+    );
+
+    const after = await buildAuthorizedCanvasRuntimeStatusProjection({
+      context,
+      scope: { workspaceId: "w", projectId: "p", canvasId: "default" },
+      capturedAt: "2026-08-01T00:00:00.000Z"
+    });
+
+    expect(after.packageFingerprint).toBe(before.packageFingerprint);
+    expect(after.tasks).toEqual(before.tasks);
+    expect(after.blocks).toEqual(before.blocks);
   });
 });

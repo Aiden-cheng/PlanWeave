@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { canvasScopeRefSchema, timestampSchema } from "./primitives.js";
 
-export const canvasRuntimeStatusSchemaVersion = "canvas-runtime-status/v1" as const;
+export const canvasRuntimeStatusSchemaVersion = "canvas-runtime-status/v2" as const;
 export const canvasRuntimeTaskStatuses = [
   "planned",
   "ready",
@@ -33,7 +33,8 @@ const blockStatusSchema = z
     status: z.enum(canvasRuntimeBlockStatuses),
     completionReason: z.enum(["passed", "max_cycles_reached"]).nullable(),
     blockedReason: z.string().max(2_000).nullable(),
-    divergenceReason: z.string().max(2_000).nullable()
+    divergenceReason: z.string().max(2_000).nullable(),
+    dispatchable: z.boolean()
   })
   .strict();
 

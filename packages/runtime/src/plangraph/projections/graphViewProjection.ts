@@ -15,10 +15,15 @@ export type PlanGraphViewProjection = {
   edges: DesktopGraphEdgeViewModel[];
 };
 
+type GraphProjectionRuntime = Pick<RuntimeContext, "manifest">;
+
 function blockStatus(
-  status: ExecutionStatus,
+  status: ExecutionStatus | undefined,
   ref: string
 ): Pick<ExecutionStatus["blocks"][number], "status" | "reason" | "remoteExecution"> {
+  if (!status) {
+    return { status: "planned", reason: null, remoteExecution: null };
+  }
   const block = status.blocks.find((item) => item.ref === ref);
   if (block === undefined) {
     throw new Error(
@@ -32,7 +37,10 @@ function blockStatus(
   };
 }
 
-function taskStatus(status: ExecutionStatus, taskId: string): TaskStatus {
+function taskStatus(status: ExecutionStatus | undefined, taskId: string): TaskStatus {
+  if (!status) {
+    return "planned";
+  }
   const task = status.tasks.find((item) => item.taskId === taskId);
   if (task === undefined) {
     throw new Error(
@@ -42,7 +50,7 @@ function taskStatus(status: ExecutionStatus, taskId: string): TaskStatus {
   return task.status;
 }
 
-function exceptionForBlock(
+export function exceptionForBlock(
   ref: string,
   status: BlockStatus,
   reason: string | null
@@ -62,12 +70,16 @@ function exceptionForBlock(
 function effectiveExecutor(
   task: PlanGraphTaskNode,
   block: PlanGraphBlockNode,
-  runtime: RuntimeContext
+  runtime: GraphProjectionRuntime
 ): string | null {
   return block.executor ?? task.executor ?? runtime.manifest.execution.defaultExecutor ?? null;
 }
 
-function executorLabel(task: PlanGraphTaskNode, graph: PlanGraph, runtime: RuntimeContext): string {
+function executorLabel(
+  task: PlanGraphTaskNode,
+  graph: PlanGraph,
+  runtime: GraphProjectionRuntime
+): string {
   const blockExecutors = new Set(
     task.blockRefs.map((ref) => {
       const block = graph.blocks.get(ref);
@@ -125,10 +137,10 @@ function sortedBlockRefsForTask(graph: PlanGraph, task: PlanGraphTaskNode): stri
 }
 
 function blockPreview(
-  runtime: RuntimeContext,
+  runtime: GraphProjectionRuntime,
   task: PlanGraphTaskNode,
   block: PlanGraphBlockNode,
-  status: ExecutionStatus
+  status: ExecutionStatus | undefined
 ): DesktopBlockPreview {
   const currentStatus = blockStatus(status, block.ref);
   return {
@@ -147,10 +159,10 @@ function blockPreview(
   };
 }
 
-export function buildPlanGraphViewProjection(options: {
+function buildPlanGraphProjection(options: {
   graph: PlanGraph;
-  runtime: RuntimeContext;
-  status: ExecutionStatus;
+  runtime: GraphProjectionRuntime;
+  status?: ExecutionStatus;
   taskPromptMarkdownById?: Map<string, string>;
 }): PlanGraphViewProjection {
   const tasks: DesktopTaskNodeViewModel[] = [];
@@ -191,4 +203,22 @@ export function buildPlanGraphViewProjection(options: {
       .filter((edge) => edge.type === "taskDependsOn")
       .map((edge) => ({ from: edge.fromTaskId, to: edge.toTaskId, type: "depends_on" }))
   };
+}
+
+export function buildPlanGraphViewProjection(options: {
+  graph: PlanGraph;
+  runtime: GraphProjectionRuntime;
+  status: ExecutionStatus;
+  taskPromptMarkdownById?: Map<string, string>;
+}): PlanGraphViewProjection {
+  return buildPlanGraphProjection(options);
+}
+
+/** Builds a content-only projection with no RuntimeState-derived fields. */
+export function buildPlanGraphContentProjection(options: {
+  graph: PlanGraph;
+  runtime: GraphProjectionRuntime;
+  taskPromptMarkdownById?: Map<string, string>;
+}): PlanGraphViewProjection {
+  return buildPlanGraphProjection(options);
 }

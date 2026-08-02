@@ -120,7 +120,7 @@ describe("CollaborationClient", () => {
 
   it("reads the redacted canvas runtime status with device authentication", async () => {
     const projection = {
-      schemaVersion: "canvas-runtime-status/v1",
+      schemaVersion: "canvas-runtime-status/v2",
       scope: {
         workspaceId: "workspace-demo-001",
         projectId: "project-demo-001",

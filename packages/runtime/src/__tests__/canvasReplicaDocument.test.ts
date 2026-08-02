@@ -8,6 +8,7 @@ import {
   captureAuthorizedCanvasContent,
   decodeCanvasReplicaDocument,
   encodeCanvasReplicaDocument,
+  projectCanvasReplicaDocument,
   parseCanvasReplicaDocument,
   type CanvasReplicaDocument
 } from "../index.js";
@@ -16,6 +17,7 @@ import { getDesktopLayoutDirect } from "../desktop/layoutStore.js";
 import { buildCanvasCommandApplication } from "../graph/canvasCommandMutation.js";
 import { commitCanvasCommandApplication } from "../graph/canvasCommandPort.js";
 import { loadPackage } from "../package/loadPackage.js";
+import { loadPlanGraphPackage } from "../plangraph/index.js";
 import {
   listPendingImportTransactions,
   rollbackPendingImportTransaction
@@ -95,6 +97,21 @@ async function expectDiskMatchesReplica(intent: CanvasCommandIntent): Promise<vo
 }
 
 describe("CanvasReplicaDocument", () => {
+  it("uses the same package fingerprint as the disk PlanGraph loader for identical content", async () => {
+    const fixture = await createTestWorkspace();
+    directories.push(fixture.home, fixture.root);
+    const captured = await captureAuthorizedCanvasContent({
+      projectRoot: fixture.init.workspace,
+      authorityProjectId: "project-authority"
+    });
+    const replica = decodeCanvasReplicaDocument(captured.content);
+    const disk = await loadPlanGraphPackage(fixture.init.workspace);
+
+    expect(projectCanvasReplicaDocument(replica).packageFingerprint).toBe(
+      disk.graph.packageFingerprint
+    );
+  });
+
   it("round-trips complete semantic content and rejects tampering or incomplete surfaces", () => {
     const document = baseDocument();
     const content = encodeCanvasReplicaDocument(document);
