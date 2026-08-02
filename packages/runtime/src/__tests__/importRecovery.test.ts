@@ -26,6 +26,7 @@ async function writeRecovery(options: {
   workspaceRoot: string;
   transactionId: string;
   createdAt: string;
+  state?: "active" | "committed";
   operations?: unknown[];
   recoveryWorkspaceRoot?: string;
 }): Promise<void> {
@@ -36,6 +37,7 @@ async function writeRecovery(options: {
     transactionId: options.transactionId,
     workspaceRoot: options.recoveryWorkspaceRoot ?? options.workspaceRoot,
     createdAt: options.createdAt,
+    ...(options.state === undefined ? {} : { state: options.state }),
     operations: options.operations ?? []
   });
 }
@@ -200,6 +202,27 @@ describe("import recovery", () => {
     await rollbackPendingImportTransaction({ workspaceRoot, transactionId });
 
     expect(await readFile(target, "utf8")).toBe("old state\n");
+    await expect(access(recoveryRoot(workspaceRoot, transactionId))).rejects.toThrow();
+  });
+
+  it("finalizes committed recovery without exposing it as rollbackable", async () => {
+    const workspaceRoot = await tempWorkspace();
+    const transactionId = "committed-cleanup-pending";
+    const target = join(workspaceRoot, "canvases", "default", "state.json");
+    const staged = join(workspaceRoot, "staged-state.json");
+    await writeText(target, "old state\n");
+    await writeFile(staged, "new state\n", "utf8");
+    const transaction = await ImportTransaction.create({ workspaceRoot, transactionId });
+    await transaction.replacePath(target, staged);
+    await transaction.markCommitted();
+
+    await expect(
+      rollbackPendingImportTransaction({ workspaceRoot, transactionId })
+    ).rejects.toThrow("Committed import transaction cannot be rolled back");
+    expect(await readFile(target, "utf8")).toBe("new state\n");
+
+    await expect(listPendingImportTransactions(workspaceRoot)).resolves.toEqual([]);
+    expect(await readFile(target, "utf8")).toBe("new state\n");
     await expect(access(recoveryRoot(workspaceRoot, transactionId))).rejects.toThrow();
   });
 

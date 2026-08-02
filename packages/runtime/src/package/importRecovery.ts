@@ -43,6 +43,14 @@ export async function listPendingImportTransactions(
       workspaceRoot: resolvedWorkspaceRoot,
       transactionId
     });
+    if (summary.state === "committed") {
+      const transaction = await ImportTransaction.recover({
+        workspaceRoot: resolvedWorkspaceRoot,
+        transactionId
+      });
+      await transaction.cleanupCommitted();
+      continue;
+    }
     pending.push({
       transactionId: summary.transactionId,
       recoveryRoot: summary.recoveryRoot,

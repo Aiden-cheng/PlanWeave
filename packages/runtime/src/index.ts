@@ -197,6 +197,14 @@ export {
   type ApplyAuthorizedCanvasCommandSuccess
 } from "./graph/canvasCommandPort.js";
 export {
+  applyCanvasReplicaIntent,
+  canvasReplicaDocumentSchemaVersion,
+  decodeCanvasReplicaDocument,
+  encodeCanvasReplicaDocument,
+  parseCanvasReplicaDocument,
+  type CanvasReplicaDocument
+} from "./canvasReplica/index.js";
+export {
   captureAuthorizedCanvasContent,
   type CapturedAuthorizedCanvasContent
 } from "./desktop/authorizedCanvasContent.js";

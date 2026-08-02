@@ -23,6 +23,7 @@ type ImportTransactionOperation = {
 
 type ImportTransactionRecoveryFile = {
   version: 1;
+  state: "active" | "committed";
   transactionId: string;
   workspaceRoot: string;
   createdAt: string;
@@ -36,6 +37,7 @@ export type ImportTransactionRecoverySummary = {
   createdAt: string;
   operationCount: number;
   phases: string[];
+  state: "active" | "committed";
 };
 
 type ImportTransactionFileSystem = {
@@ -161,7 +163,7 @@ function parseRecoveryFile(raw: unknown, recoveryFile: string): ImportTransactio
   if (!isRecord(raw)) {
     throw new Error(`Invalid import transaction recovery file at ${recoveryFile}.`);
   }
-  const { version, transactionId, workspaceRoot, createdAt, operations } = raw;
+  const { version, state, transactionId, workspaceRoot, createdAt, operations } = raw;
   if (version !== 1) {
     throw new Error(`Unsupported import transaction recovery file version at ${recoveryFile}.`);
   }
@@ -178,8 +180,14 @@ function parseRecoveryFile(raw: unknown, recoveryFile: string): ImportTransactio
   if (!Array.isArray(operations)) {
     throw new Error(`Invalid import transaction operations in ${recoveryFile}.`);
   }
+  const parsedState =
+    state === undefined ? "active" : state === "active" || state === "committed" ? state : null;
+  if (parsedState === null) {
+    throw new Error(`Invalid import transaction state in ${recoveryFile}.`);
+  }
   return {
     version,
+    state: parsedState,
     transactionId,
     workspaceRoot: resolve(workspaceRoot),
     createdAt,
@@ -242,7 +250,8 @@ export async function readImportTransactionRecoverySummary(options: {
     workspaceRoot,
     createdAt: recovery.createdAt,
     operationCount: recovery.operations.length,
-    phases: [...new Set(recovery.operations.map((operation) => operation.phase))]
+    phases: [...new Set(recovery.operations.map((operation) => operation.phase))],
+    state: recovery.state
   };
 }
 
@@ -253,6 +262,7 @@ export class ImportTransaction {
   private readonly createdAt: string;
   private readonly fs: ImportTransactionFileSystem;
   private operations: ImportTransactionOperation[] = [];
+  private state: ImportTransactionRecoveryFile["state"] = "active";
 
   private constructor(options: {
     workspaceRoot: string;
@@ -308,6 +318,7 @@ export class ImportTransaction {
       fs
     });
     transaction.operations = recovery.operations;
+    transaction.state = recovery.state;
     return transaction;
   }
 
@@ -347,6 +358,9 @@ export class ImportTransaction {
   }
 
   async rollback(): Promise<void> {
+    if (this.state === "committed") {
+      throw new Error("Committed import transaction cannot be rolled back.");
+    }
     const failures: string[] = [];
     for (const operation of [...this.operations].reverse()) {
       if (operation.phase === "rolledBack") {
@@ -395,9 +409,28 @@ export class ImportTransaction {
     await this.fs.rm(this.recoveryRoot, { recursive: true, force: true });
   }
 
-  async commit(): Promise<void> {
+  async markCommitted(): Promise<void> {
+    if (this.state === "committed") return;
+    this.state = "committed";
+    try {
+      await this.writeRecoveryFile();
+    } catch (error) {
+      this.state = "active";
+      throw error;
+    }
+  }
+
+  async cleanupCommitted(): Promise<void> {
+    if (this.state !== "committed") {
+      throw new Error("Active import transaction cannot be finalized as committed.");
+    }
     await this.fs.rm(this.recoveryRoot, { recursive: true, force: true });
     this.operations = [];
+  }
+
+  async commit(): Promise<void> {
+    await this.markCommitted();
+    await this.cleanupCommitted();
   }
 
   private nextOperation(
@@ -516,6 +549,7 @@ export class ImportTransaction {
   private async writeRecoveryFile(): Promise<void> {
     const recovery: ImportTransactionRecoveryFile = {
       version: 1,
+      state: this.state,
       transactionId: this.transactionId,
       workspaceRoot: this.workspaceRoot,
       createdAt: this.createdAt,
