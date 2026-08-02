@@ -192,4 +192,96 @@ describe("CanvasPresenceController", () => {
     expect(controller.getSnapshot().sessions).toEqual([]);
     await controller.stop();
   });
+
+  it("re-publishes the last local pointer after disconnect reset + reconnect snapshot", async () => {
+    const transport = createBridge();
+    const controller = new CanvasPresenceController({
+      api: transport.bridge,
+      labels: labels("en")
+    });
+    await controller.start({ profileId: "profile-1", canvasId: "canvas-main" });
+    transport.emit(
+      signal({
+        type: "canvas.presence.snapshot",
+        protocolVersion: 1,
+        projectId: "project-1",
+        canvasId: "canvas-main",
+        sessions: []
+      })
+    );
+    await Promise.resolve();
+    await controller.publish({ pointer: { x: 11, y: 22 }, selectionIds: ["T-001"] });
+    expect(transport.bridge.publishCollaborationPresence).toHaveBeenLastCalledWith({
+      pointer: { x: 11, y: 22 },
+      selectionIds: ["T-001"]
+    });
+    const publishesBeforeReconnect = vi.mocked(transport.bridge.publishCollaborationPresence).mock
+      .calls.length;
+
+    transport.emit({
+      profileId: "profile-1",
+      reset: { canvasId: "canvas-main", reason: "disconnected" }
+    });
+    expect(controller.getSnapshot().sessions).toEqual([]);
+
+    transport.emit(
+      signal({
+        type: "canvas.presence.snapshot",
+        protocolVersion: 1,
+        projectId: "project-1",
+        canvasId: "canvas-main",
+        sessions: []
+      })
+    );
+    await Promise.resolve();
+    expect(vi.mocked(transport.bridge.publishCollaborationPresence).mock.calls.length).toBe(
+      publishesBeforeReconnect + 1
+    );
+    expect(transport.bridge.publishCollaborationPresence).toHaveBeenLastCalledWith({
+      pointer: { x: 11, y: 22 },
+      selectionIds: ["T-001"]
+    });
+    await controller.stop();
+  });
+
+  it("drops stale signals after canvas/profile generation changes", async () => {
+    const transport = createBridge();
+    const controller = new CanvasPresenceController({
+      api: transport.bridge,
+      labels: labels("en")
+    });
+    await controller.start({ profileId: "profile-1", canvasId: "canvas-a" });
+    const gen0ListenerCount = vi.mocked(transport.bridge.onCollaborationPresenceSignal).mock.calls
+      .length;
+    await controller.start({ profileId: "profile-1", canvasId: "canvas-b" });
+    expect(vi.mocked(transport.bridge.onCollaborationPresenceSignal).mock.calls.length).toBeGreaterThan(
+      gen0ListenerCount
+    );
+
+    // Late signal for the previous canvas must not pollute the new scope.
+    transport.emit(
+      signal({
+        type: "canvas.presence.update",
+        protocolVersion: 1,
+        projectId: "project-1",
+        canvasId: "canvas-a",
+        session: session("session-old", "human-old", "Old")
+      })
+    );
+    expect(controller.getSnapshot().sessions).toEqual([]);
+
+    transport.emit(
+      signal({
+        type: "canvas.presence.snapshot",
+        protocolVersion: 1,
+        projectId: "project-1",
+        canvasId: "canvas-b",
+        sessions: [session("session-new", "human-new", "New")]
+      })
+    );
+    expect(controller.getSnapshot().sessions).toEqual([
+      expect.objectContaining({ sessionId: "session-new", displayName: "New" })
+    ]);
+    await controller.stop();
+  });
 });

@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import type { DesktopGraphViewModel, DesktopProjectSummary } from "@planweave-ai/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -401,7 +401,7 @@ describe("GraphView viewport fitting", () => {
 });
 
 describe("GraphView canvas presence wiring", () => {
-  it("converts pane pointer events to flow coordinates and forwards stable selections", async () => {
+  it("tracks pointers over the full graph surface (including nodes) and forwards selections", async () => {
     const presence = {
       remoteSessions: [],
       error: null,
@@ -413,22 +413,31 @@ describe("GraphView canvas presence wiring", () => {
     render(<GraphView {...defaultProps({ nodes: [node], presence })} />);
 
     await waitFor(() => expect(reactFlowMock.props.length).toBeGreaterThan(0));
-    const latestProps = reactFlowMock.props.at(-1) as {
-      onPaneMouseLeave: () => void;
-      onPaneMouseMove: (event: MouseEvent) => void;
-      onSelectionChange: (selection: { nodes: AppFlowNode[]; edges: [] }) => void;
-    };
-    const pointer = new MouseEvent("mousemove", { clientX: 100, clientY: 200 });
-    act(() => latestProps.onPaneMouseMove(pointer));
+    const surface = document.querySelector("[data-graph-surface]");
+    expect(surface).toBeTruthy();
+    // Move over the surface (covers empty pane and task nodes — not pane-only).
+    fireEvent.mouseMove(surface!, { clientX: 100, clientY: 200 });
     expect(reactFlowMock.flowInstance.screenToFlowPosition).toHaveBeenCalledWith({
       x: 100,
       y: 200
     });
     expect(presence.onPointerMove).toHaveBeenCalledWith({ x: 90, y: 180 });
 
+    const latestProps = reactFlowMock.props.at(-1) as {
+      onSelectionChange: (selection: { nodes: AppFlowNode[]; edges: [] }) => void;
+    };
     act(() => latestProps.onSelectionChange({ nodes: [node], edges: [] }));
     expect(presence.onSelectionChange).toHaveBeenCalledWith({ nodes: [node], edges: [] });
-    act(() => latestProps.onPaneMouseLeave());
+
+    // Leave only when exiting the whole graph surface — not when entering a node.
+    fireEvent.mouseLeave(surface!);
     expect(presence.onPointerLeave).toHaveBeenCalledTimes(1);
+    // Pane handlers must not be the presence leave path (they fire when hovering nodes).
+    const paneProps = reactFlowMock.props.at(-1) as {
+      onPaneMouseLeave?: () => void;
+      onPaneMouseMove?: (event: MouseEvent) => void;
+    };
+    expect(paneProps.onPaneMouseLeave).toBeUndefined();
+    expect(paneProps.onPaneMouseMove).toBeUndefined();
   });
 });

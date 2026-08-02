@@ -242,14 +242,25 @@ export function useCollaborationCanvasPresence(input: {
     [publish]
   );
 
+  const onPointerLeave = useCallback(() => {
+    // Leave must publish null immediately — do not wait for the 20Hz pointer coalescer.
+    desiredPointerRef.current = null;
+    if (frameRef.current !== null) {
+      cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    }
+    lastPointerPublishedAtRef.current = 0;
+    publish(null, desiredSelectionRef.current);
+  }, [publish]);
+
   return useMemo(
     () => ({
       remoteSessions,
       error,
       onPointerMove: queuePointer,
-      onPointerLeave: () => queuePointer(null),
+      onPointerLeave,
       onSelectionChange
     }),
-    [error, onSelectionChange, queuePointer, remoteSessions]
+    [error, onPointerLeave, onSelectionChange, queuePointer, remoteSessions]
   );
 }

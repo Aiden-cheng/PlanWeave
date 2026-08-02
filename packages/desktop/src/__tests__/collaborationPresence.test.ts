@@ -240,4 +240,87 @@ describe("desktop canvas presence transport", () => {
     expect(stopPresence).toHaveLength(2);
     await service.shutdown();
   });
+
+  it("re-publishes the last local presence update after a reconnect snapshot", async () => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-presence-republish-"));
+    cleanups.push(() => rm(root, { recursive: true, force: true }));
+    const safeStorage = {
+      isEncryptionAvailable: () => false,
+      encryptString: (value: string) => Buffer.from(value),
+      decryptString: (value: Buffer) => value.toString()
+    };
+    const published: Array<{ pointer: { x: number; y: number } | null; selectionIds: string[] }> =
+      [];
+    let activeHandlers: CollaborationPresenceHandlers | undefined;
+    const service = new CollaborationService({
+      profileStore: new CollaborationProfileStore({ profilesPath: join(root, "profiles.json") }),
+      vault: new CollaborationCredentialVault({
+        paths: { credentialsPath: join(root, "credentials.json") },
+        safeStorage
+      }),
+      createClient: () =>
+        ({
+          verifyAccess: vi.fn().mockResolvedValue(undefined),
+          projectId: "project-demo-001",
+          presenceCanvas: () => "default",
+          startObserver: vi.fn(),
+          stopObserver: vi.fn(),
+          startPresence: (_canvasId: string, handlers: typeof activeHandlers) => {
+            activeHandlers = handlers;
+          },
+          stopPresence: vi.fn(),
+          publishPresence: (input: {
+            pointer: { x: number; y: number } | null;
+            selectionIds: string[];
+          }) => {
+            published.push(input);
+          },
+          dispose: vi.fn(),
+          lastObserverCursor: () => 0,
+          bootstrapOwner: vi.fn(),
+          consumeInvitation: vi.fn()
+        }) as never
+    });
+    await service.upsertProfile({
+      profileId: "profile-test",
+      displayName: "Test",
+      serverBaseUrl: "https://collab.example.com/",
+      projectId: "project-demo-001",
+      allowInsecureTransport: false
+    });
+    await service.importDeviceCredential({
+      profileId: "profile-test",
+      deviceToken: exampleHumanDeviceToken
+    });
+    await service.connectSession({ profileId: "profile-test" });
+    await service.startPresence({ canvasId: "default" });
+    activeHandlers?.onSnapshot?.({
+      type: "canvas.presence.snapshot",
+      protocolVersion: CANVAS_PRESENCE_PROTOCOL_VERSION,
+      projectId: "project-demo-001",
+      canvasId: "default",
+      sessions: []
+    });
+    await service.publishPresence({ pointer: { x: 3, y: 4 }, selectionIds: ["T-1"] });
+    expect(published).toEqual([{ pointer: { x: 3, y: 4 }, selectionIds: ["T-1"] }]);
+
+    activeHandlers?.onStatus?.({
+      state: "reconnecting",
+      canvasId: "default",
+      attempt: 1,
+      delayMs: 5
+    });
+    activeHandlers?.onSnapshot?.({
+      type: "canvas.presence.snapshot",
+      protocolVersion: CANVAS_PRESENCE_PROTOCOL_VERSION,
+      projectId: "project-demo-001",
+      canvasId: "default",
+      sessions: []
+    });
+    expect(published).toEqual([
+      { pointer: { x: 3, y: 4 }, selectionIds: ["T-1"] },
+      { pointer: { x: 3, y: 4 }, selectionIds: ["T-1"] }
+    ]);
+    await service.shutdown();
+  });
 });

@@ -210,8 +210,13 @@ export function GraphView({
     },
     [setFlowInstance]
   );
-  const handlePaneMouseMove = useCallback(
-    (event: MouseEvent) => {
+  /**
+   * Presence cursors must track the full graph surface, including task nodes and edges.
+   * React Flow's onPaneMouseMove/Leave only cover empty pane background — moving onto a
+   * node used to fire leave (null pointer) and stop updates, so peers saw cursors vanish.
+   */
+  const handleGraphPointerMove = useCallback(
+    (event: MouseEvent<HTMLDivElement>) => {
       if (!presence || !localFlowInstance) return;
       presence.onPointerMove(
         localFlowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY })
@@ -219,6 +224,9 @@ export function GraphView({
     },
     [localFlowInstance, presence]
   );
+  const handleGraphPointerLeave = useCallback(() => {
+    presence?.onPointerLeave();
+  }, [presence]);
   const { handleReconnect, handleReconnectEnd, handleReconnectStart } = useEdgeReconnect({
     handleEdgesDelete,
     handleReconnectEdge
@@ -290,6 +298,8 @@ export function GraphView({
       data-project-loading={projectLoading ? "true" : "false"}
       onDragOver={handleGraphDragOver}
       onDrop={handleGraphDrop}
+      onMouseMove={graph ? handleGraphPointerMove : undefined}
+      onMouseLeave={graph ? handleGraphPointerLeave : undefined}
     >
       {!graph ? (
         <div className="flex h-full items-center justify-center p-6">
@@ -341,8 +351,6 @@ export function GraphView({
             setHoveredEdgeId(null);
             setHoveredNodeId(null);
           }}
-          onPaneMouseMove={handlePaneMouseMove}
-          onPaneMouseLeave={() => presence?.onPointerLeave()}
           onPaneClick={() => {
             clearPinnedResource();
           }}

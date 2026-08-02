@@ -179,7 +179,17 @@ export class CanvasPresenceController {
       this.pendingUpdate = update;
       return;
     }
-    await this.api.publishCollaborationPresence(update);
+    try {
+      await this.api.publishCollaborationPresence(update);
+    } catch (error) {
+      // Transport may already be down; keep the update for the next snapshot/reconnect flush.
+      this.connected = false;
+      this.pendingUpdate = update;
+      this.publishSnapshot({
+        sessions: this.readSessions(),
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
   }
 
   private handleSignal(signal: CollaborationPresenceSignal): void {
@@ -197,18 +207,24 @@ export class CanvasPresenceController {
     if (!sameScope(message, scope)) return;
     switch (message.type) {
       case "canvas.presence.snapshot": {
+        const wasConnected = this.connected;
         this.connected = true;
         this.sessions.clear();
         for (const session of message.sessions) this.upsertSession(session);
         this.publishSnapshot({ sessions: this.readSessions(), error: null });
-        void this.flushPendingUpdate();
+        // First snapshot after bind/reconnect: re-announce last local pointer/selection.
+        if (!wasConnected || this.pendingUpdate) void this.flushPendingUpdate();
         return;
       }
-      case "canvas.presence.update":
+      case "canvas.presence.update": {
+        const wasConnected = this.connected;
         this.connected = true;
         this.upsertSession(message.session);
         this.publishSnapshot({ sessions: this.readSessions(), error: null });
+        // Peer traffic can prove connectivity after a soft error reset without a new snapshot.
+        if (!wasConnected && this.pendingUpdate) void this.flushPendingUpdate();
         return;
+      }
       case "canvas.presence.leave":
         this.sessions.delete(message.sessionId);
         this.publishSnapshot({ sessions: this.readSessions(), error: null });

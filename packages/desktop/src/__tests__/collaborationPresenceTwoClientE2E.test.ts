@@ -158,7 +158,13 @@ async function inviteMember(origin: string, projectId: string, ownerToken: strin
   return JSON.parse(memberBody) as { deviceToken: string };
 }
 
-function createClient(origin: string, projectId: string, profileId: string, token: string) {
+function createClient(
+  origin: string,
+  projectId: string,
+  profileId: string,
+  token: string,
+  limits?: { reconnectInitialDelayMs?: number; reconnectMaxDelayMs?: number }
+) {
   const client = new CollaborationClient({
     profile: {
       profileId,
@@ -168,7 +174,12 @@ function createClient(origin: string, projectId: string, profileId: string, toke
       allowInsecureTransport: true
     },
     credential: { getDeviceToken: () => token },
-    WebSocketImpl: WebSocket as unknown as CollaborationWebSocketConstructor
+    WebSocketImpl: WebSocket as unknown as CollaborationWebSocketConstructor,
+    random: () => 0,
+    limits: {
+      reconnectInitialDelayMs: limits?.reconnectInitialDelayMs ?? 50,
+      reconnectMaxDelayMs: limits?.reconnectMaxDelayMs ?? 100
+    }
   });
   clients.push(client);
   return client;
@@ -285,6 +296,14 @@ describe("real Desktop canvas presence clients", () => {
     );
     expect(otherController.getSnapshot().sessions).toEqual([]);
 
+    // Pointer leave must propagate as null while the session stays connected.
+    await memberController.publish({ pointer: null, selectionIds: ["T-001"] });
+    await waitFor(() =>
+      expect(ownerController.getSnapshot().sessions).toEqual([
+        expect.objectContaining({ pointer: null, selectionIds: ["T-001"] })
+      ])
+    );
+
     await memberController.stop();
     await waitFor(() => expect(ownerController.getSnapshot().sessions).toEqual([]));
     const rejectedCanvas = new Promise<void>((resolve, reject) => {
@@ -308,5 +327,65 @@ describe("real Desktop canvas presence clients", () => {
       memberController.stop(),
       otherController.stop()
     ]);
+  });
+
+  it("re-publishes last pointer after presence disconnect and automatic reconnect", async () => {
+    const fixture = await setup();
+    const owner = await bootstrap(fixture.origin, fixture.firstProjectId, "Owner Reconnect");
+    const member = await inviteMember(
+      fixture.origin,
+      fixture.firstProjectId,
+      owner.deviceToken
+    );
+    const ownerProfileId = "owner-reconnect";
+    const memberProfileId = "member-reconnect";
+    const ownerClient = createClient(
+      fixture.origin,
+      fixture.firstProjectId,
+      ownerProfileId,
+      owner.deviceToken
+    );
+    const memberClient = createClient(
+      fixture.origin,
+      fixture.firstProjectId,
+      memberProfileId,
+      member.deviceToken
+    );
+    const ownerController = new CanvasPresenceController({
+      api: bridgeFor(ownerClient, ownerProfileId),
+      labels
+    });
+    const memberController = new CanvasPresenceController({
+      api: bridgeFor(memberClient, memberProfileId),
+      labels
+    });
+
+    await ownerController.start({ profileId: ownerProfileId, canvasId: "default" });
+    await memberController.start({ profileId: memberProfileId, canvasId: "default" });
+    await memberController.publish({ pointer: { x: 7, y: 9 }, selectionIds: ["T-002"] });
+    await waitFor(() =>
+      expect(ownerController.getSnapshot().sessions).toEqual([
+        expect.objectContaining({ pointer: { x: 7, y: 9 }, selectionIds: ["T-002"] })
+      ])
+    );
+
+    // Force the member transport to drop; client must auto-reconnect and re-announce.
+    const memberPresence = (
+      memberClient as unknown as {
+        presence: { socket?: { close(code?: number, reason?: string): void } };
+      }
+    ).presence;
+    expect(memberPresence.socket).toBeDefined();
+    memberPresence.socket!.close(4000, "test forced disconnect");
+    await waitFor(() => expect(ownerController.getSnapshot().sessions).toEqual([]));
+
+    // After reconnect + snapshot, last local pointer must reappear without a new UI gesture.
+    await waitFor(() =>
+      expect(ownerController.getSnapshot().sessions).toEqual([
+        expect.objectContaining({ pointer: { x: 7, y: 9 }, selectionIds: ["T-002"] })
+      ])
+    );
+
+    await Promise.all([ownerController.stop(), memberController.stop()]);
   });
 });

@@ -213,4 +213,42 @@ describe("useCollaborationCanvasPresence", () => {
     act(() => result.current.onSelectionChange(selection));
     expect(fixture.api.publishCollaborationPresence).toHaveBeenCalledTimes(1);
   });
+
+  it("publishes pointer leave as null immediately without waiting for the 20Hz coalescer", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    let frame: FrameRequestCallback | null = null;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frame = callback;
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const fixture = bridgeFixture();
+    const { result } = renderHook(() =>
+      useCollaborationCanvasPresence({
+        api: fixture.api,
+        canvasId: "canvas-main",
+        enabled: true,
+        sessionConnected: true,
+        profileId: "profile-1",
+        selectedProjectId: "project-1",
+        activeProjectId: "project-1",
+        t
+      })
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() => result.current.onPointerMove({ x: 5, y: 6 }));
+    act(() => frame?.(0));
+    expect(fixture.api.publishCollaborationPresence).toHaveBeenLastCalledWith({
+      pointer: { x: 5, y: 6 },
+      selectionIds: []
+    });
+    act(() => result.current.onPointerLeave());
+    expect(fixture.api.publishCollaborationPresence).toHaveBeenLastCalledWith({
+      pointer: null,
+      selectionIds: []
+    });
+  });
 });
