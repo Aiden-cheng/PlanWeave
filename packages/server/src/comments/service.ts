@@ -185,7 +185,8 @@ export class CommentService {
           actor: command.actor,
           workspaceId: this.workspaceId,
           projectId: command.projectId,
-          attachment
+          pendingUploadId: attachment.pendingUploadId,
+          expectedDigestSha256: attachment.digestSha256
         });
         return metadata;
       });

@@ -4,6 +4,7 @@ import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { finalizePendingAttachmentResponseSchema } from "@planweave-ai/collaboration-protocol/activity/attachments";
 import {
   CommentAttachmentBlobStore,
   CommentAttachmentRepository,
@@ -264,14 +265,14 @@ async function finalizePending(
   token: string,
   projectId: string,
   pendingUploadId: string,
-  attachment: Record<string, unknown>
+  expectedDigestSha256?: string
 ) {
   const response = await fetch(
     `${origin}/api/v1/projects/${projectId}/attachments/pending/${pendingUploadId}/finalize`,
     {
       method: "POST",
       headers: { "content-type": "application/json", ...auth(token) },
-      body: JSON.stringify(attachment)
+      body: JSON.stringify(expectedDigestSha256 ? { expectedDigestSha256 } : {})
     }
   );
   const payload = (await response.json()) as Record<string, unknown>;
@@ -332,15 +333,16 @@ describe("comment attachment HTTP and blob authorization", () => {
     expect(uploaded.response.status).toBe(201);
     expect(uploaded.payload.digestSha256).toBe(digest);
 
-    const finalized = await finalizePending(origin, token, "project-a", pendingUploadId, {
+    const finalized = await finalizePending(origin, token, "project-a", pendingUploadId, digest);
+    expect(finalized.response.status).toBe(200);
+    expect(finalizePendingAttachmentResponseSchema.parse(finalized.payload)).toMatchObject({
       pendingUploadId,
+      status: "finalized",
       digestSha256: digest,
       sizeBytes: bytes.byteLength,
       mediaType: "text/plain",
       fileName: "note.txt"
     });
-    expect(finalized.response.status).toBe(200);
-    expect((finalized.payload.attachment as { digestSha256: string }).digestSha256).toBe(digest);
 
     const download = await fetch(
       `${origin}/api/v1/projects/project-a/attachments/pending/${pendingUploadId}`,
@@ -385,12 +387,7 @@ describe("comment attachment HTTP and blob authorization", () => {
     });
     const pendingUploadId = created.payload.pendingUploadId as string;
     await uploadPending(origin, tokenA, "project-a", pendingUploadId, bytes, "text/plain", digest);
-    await finalizePending(origin, tokenA, "project-a", pendingUploadId, {
-      pendingUploadId,
-      digestSha256: digest,
-      sizeBytes: bytes.byteLength,
-      mediaType: "text/plain"
-    });
+    await finalizePending(origin, tokenA, "project-a", pendingUploadId, digest);
 
     const crossPending = await fetch(
       `${origin}/api/v1/projects/project-a/attachments/pending/${pendingUploadId}`,
@@ -466,12 +463,13 @@ describe("comment attachment HTTP and blob authorization", () => {
         )
       ).response.status
     ).toBe(201);
-    const firstFinalized = await finalizePending(origin, first.token, projectId, firstPendingId, {
-      pendingUploadId: firstPendingId,
-      digestSha256: digest,
-      sizeBytes: bytes.byteLength,
-      mediaType: "text/plain"
-    });
+    const firstFinalized = await finalizePending(
+      origin,
+      first.token,
+      projectId,
+      firstPendingId,
+      digest
+    );
     expect(firstFinalized.response.status).toBe(200);
     const firstActor = {
       humanPrincipalId: first.principalId,
@@ -481,11 +479,11 @@ describe("comment attachment HTTP and blob authorization", () => {
       role: "owner" as const,
       membershipId: "membership-workspace-one"
     };
-    const metadata = firstFinalized.payload.attachment as {
-      digestSha256: string;
-      sizeBytes: number;
-      mediaType: "text/plain";
-      createdAt: string;
+    const metadata = {
+      digestSha256: firstFinalized.payload.digestSha256 as string,
+      sizeBytes: firstFinalized.payload.sizeBytes as number,
+      mediaType: "text/plain" as const,
+      createdAt: new Date().toISOString()
     };
     attachmentService.bindCommentAttachments({
       actor: firstActor,
@@ -526,12 +524,7 @@ describe("comment attachment HTTP and blob authorization", () => {
       second.token,
       projectId,
       secondPendingId,
-      {
-        pendingUploadId: secondPendingId,
-        digestSha256: digest,
-        sizeBytes: bytes.byteLength,
-        mediaType: "text/plain"
-      }
+      digest
     );
     expect(secondFinalized.response.status).toBe(200);
     attachmentService.bindCommentAttachments({
@@ -546,7 +539,14 @@ describe("comment attachment HTTP and blob authorization", () => {
       workspaceId: workspaceTwo,
       projectId,
       commentId: "comment-shared",
-      attachments: [secondFinalized.payload.attachment as typeof metadata]
+      attachments: [
+        {
+          digestSha256: secondFinalized.payload.digestSha256 as string,
+          sizeBytes: secondFinalized.payload.sizeBytes as number,
+          mediaType: "text/plain",
+          createdAt: new Date().toISOString()
+        }
+      ]
     });
     const secondRead = await fetch(
       `${origin}/api/v1/projects/${projectId}/attachments/comments/comment-shared/${digest}`,
@@ -628,12 +628,13 @@ describe("comment attachment HTTP and blob authorization", () => {
 
     await uploadPending(origin, token, "project-a", pendingUploadId, bytes, "text/plain", digest);
     now = new Date("2026-07-24T12:30:00.000Z");
-    const expiredFinalize = await finalizePending(origin, token, "project-a", pendingUploadId, {
+    const expiredFinalize = await finalizePending(
+      origin,
+      token,
+      "project-a",
       pendingUploadId,
-      digestSha256: digest,
-      sizeBytes: bytes.byteLength,
-      mediaType: "text/plain"
-    });
+      digest
+    );
     expect(expiredFinalize.response.status).toBe(409);
     expect(expiredFinalize.payload.error).toBe("attachment_pending_expired");
   });
@@ -667,28 +668,13 @@ describe("comment attachment HTTP and blob authorization", () => {
     const second = await stageOne();
     expect(first).not.toBe(second);
 
-    const fin1 = await finalizePending(origin, token, "project-a", first, {
-      pendingUploadId: first,
-      digestSha256: digest,
-      sizeBytes: bytes.byteLength,
-      mediaType: "text/markdown"
-    });
-    const fin2 = await finalizePending(origin, token, "project-a", second, {
-      pendingUploadId: second,
-      digestSha256: digest,
-      sizeBytes: bytes.byteLength,
-      mediaType: "text/markdown"
-    });
+    const fin1 = await finalizePending(origin, token, "project-a", first, digest);
+    const fin2 = await finalizePending(origin, token, "project-a", second, digest);
     expect(fin1.response.status).toBe(200);
     expect(fin2.response.status).toBe(200);
 
     // Idempotent re-finalize
-    const again = await finalizePending(origin, token, "project-a", first, {
-      pendingUploadId: first,
-      digestSha256: digest,
-      sizeBytes: bytes.byteLength,
-      mediaType: "text/markdown"
-    });
+    const again = await finalizePending(origin, token, "project-a", first, digest);
     expect(again.response.status).toBe(200);
 
     // Concurrent finalize race against a third staged upload: only first CAS wins from uploaded.
@@ -703,19 +689,14 @@ describe("comment attachment HTTP and blob authorization", () => {
     };
     // Use service-level concurrent finalize after re-reading uploaded status via HTTP once.
     // Both calls should not throw uncaught; one may be idempotent success after first.
-    const attachment = {
-      pendingUploadId: third,
-      digestSha256: digest,
-      sizeBytes: bytes.byteLength,
-      mediaType: "text/markdown" as const
-    };
     const results = await Promise.allSettled([
       Promise.resolve(
         attachmentService.finalize({
           actor: { ...actor, deviceCredentialId: "d1", membershipId: "m1" },
           workspaceId: workspaceA,
           projectId: "project-a",
-          attachment
+          pendingUploadId: third,
+          expectedDigestSha256: digest
         })
       ),
       Promise.resolve(
@@ -723,7 +704,8 @@ describe("comment attachment HTTP and blob authorization", () => {
           actor: { ...actor, deviceCredentialId: "d1", membershipId: "m1" },
           workspaceId: workspaceA,
           projectId: "project-a",
-          attachment
+          pendingUploadId: third,
+          expectedDigestSha256: digest
         })
       )
     ]);
@@ -758,19 +740,13 @@ describe("comment attachment HTTP and blob authorization", () => {
     });
     const pendingUploadId = created.payload.pendingUploadId as string;
     await uploadPending(origin, token, "project-a", pendingUploadId, bytes, "text/plain", digest);
-    const finalized = await finalizePending(origin, token, "project-a", pendingUploadId, {
-      pendingUploadId,
-      digestSha256: digest,
-      sizeBytes: bytes.byteLength,
-      mediaType: "text/plain",
-      fileName: "keep.txt"
-    });
-    const metadata = finalized.payload.attachment as {
-      digestSha256: string;
-      sizeBytes: number;
-      mediaType: "text/plain";
-      fileName?: string;
-      createdAt: string;
+    const finalized = await finalizePending(origin, token, "project-a", pendingUploadId, digest);
+    const metadata = {
+      digestSha256: finalized.payload.digestSha256 as string,
+      sizeBytes: finalized.payload.sizeBytes as number,
+      mediaType: "text/plain" as const,
+      fileName: finalized.payload.fileName as string | undefined,
+      createdAt: now.toISOString()
     };
 
     const actor = {

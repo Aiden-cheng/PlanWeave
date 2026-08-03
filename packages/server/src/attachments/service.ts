@@ -4,6 +4,7 @@ import {
   commentAttachmentInputSchema,
   commentAttachmentMediaTypeSchema,
   commentContentSha256Schema,
+  pendingAttachmentUploadIdSchema,
   type CommentAttachmentInput,
   type CommentAttachmentMetadata
 } from "../comments/schemas.js";
@@ -236,10 +237,15 @@ export class CommentAttachmentService {
     actor: HumanAuthContext;
     workspaceId: string;
     projectId: string;
-    attachment: CommentAttachmentInput;
+    pendingUploadId: string;
+    expectedDigestSha256?: string;
   }): { record: PendingUploadRecord; metadata: CommentAttachmentMetadata } {
     try {
-      const attachment = commentAttachmentInputSchema.parse(input.attachment);
+      const pendingUploadId = pendingAttachmentUploadIdSchema.parse(input.pendingUploadId);
+      const expectedDigestSha256 =
+        input.expectedDigestSha256 === undefined
+          ? undefined
+          : commentContentSha256Schema.parse(input.expectedDigestSha256);
       const subject = humanSubject(input.actor);
       if (input.actor.projectId !== input.projectId) {
         deny("attachment_auth_project_mismatch");
@@ -248,7 +254,7 @@ export class CommentAttachmentService {
       const record = this.options.repository.getPendingRequired(
         input.workspaceId,
         input.projectId,
-        attachment.pendingUploadId
+        pendingUploadId
       );
       const auth = authorizePendingUploadMutation({
         subject,
@@ -258,11 +264,23 @@ export class CommentAttachmentService {
         requiredStatus: ["uploaded", "finalized"]
       });
       if (!auth.allowed) deny(auth.code, auth.message);
+      if (!record.digestSha256) deny("attachment_status_conflict");
+      if (expectedDigestSha256 !== undefined && expectedDigestSha256 !== record.digestSha256) {
+        deny("attachment_digest_mismatch");
+      }
+
+      const attachment = commentAttachmentInputSchema.parse({
+        pendingUploadId: record.pendingUploadId,
+        digestSha256: record.digestSha256,
+        sizeBytes: record.expectedSizeBytes,
+        mediaType: record.mediaType,
+        fileName: record.fileName
+      });
 
       return this.options.repository.finalize({
         workspaceId: input.workspaceId,
         projectId: input.projectId,
-        pendingUploadId: attachment.pendingUploadId,
+        pendingUploadId,
         expected: attachment,
         finalizedAt: this.clock().toISOString()
       });

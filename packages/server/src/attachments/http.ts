@@ -1,13 +1,13 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
+import { finalizePendingAttachmentRequestSchema } from "@planweave-ai/collaboration-protocol/activity/attachments";
 import {
   commentAttachmentFileNameSchema,
-  commentAttachmentInputSchema,
   commentAttachmentMediaTypeSchema,
   commentAttachmentSizeBytesSchema,
   commentContentSha256Schema,
   commentIdSchema,
-  pendingAttachmentUploadIdSchema,
   pendingUploadTtlMsSchema
 } from "../comments/schemas.js";
 import {
@@ -18,7 +18,6 @@ import {
   type HumanProjectAuthority,
   type WorkspaceIdentityRepository
 } from "../identity/index.js";
-import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { attachmentErrorCodeSchema, type AttachmentErrorCode } from "./errors.js";
 import { CommentAttachmentService, CommentAttachmentServiceError } from "./service.js";
 
@@ -359,35 +358,22 @@ export async function handleCommentAttachmentHttpRequest(
         return true;
       }
       case "finalize_pending": {
-        const body = await readJson(request, 16_384);
-        const parsedBody =
-          body && typeof body === "object" && Object.keys(body as object).length > 0
-            ? commentAttachmentInputSchema.parse({
-                ...(body as object),
-                pendingUploadId: matched.pendingUploadId
-              })
-            : undefined;
-
-        // Allow finalize with only path id when body empty: client must still prove digest.
-        // Require body with digest/size/media for explicit verify.
-        if (!parsedBody) {
-          throw new CommentAttachmentServiceError("attachment_input_invalid");
-        }
-        if (parsedBody.pendingUploadId !== matched.pendingUploadId) {
-          throw new CommentAttachmentServiceError("attachment_input_invalid");
-        }
-        pendingAttachmentUploadIdSchema.parse(matched.pendingUploadId);
+        const body = finalizePendingAttachmentRequestSchema.parse(await readJson(request, 16_384));
 
         const result = options.service.finalize({
           actor,
           workspaceId,
           projectId: matched.projectId,
-          attachment: parsedBody
+          pendingUploadId: matched.pendingUploadId,
+          expectedDigestSha256: body.expectedDigestSha256
         });
         respondJson(response, 200, {
           pendingUploadId: result.record.pendingUploadId,
-          status: result.record.status,
-          attachment: result.metadata
+          status: "finalized",
+          digestSha256: result.metadata.digestSha256,
+          sizeBytes: result.metadata.sizeBytes,
+          mediaType: result.metadata.mediaType,
+          fileName: result.metadata.fileName
         });
         return true;
       }
