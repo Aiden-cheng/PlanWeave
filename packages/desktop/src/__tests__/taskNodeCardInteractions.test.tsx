@@ -319,6 +319,34 @@ describe("TaskNodeCard context menu", () => {
     expect(await screen.findByTestId("mock-comments-panel")).toHaveTextContent("T-001");
   });
 
+  it("does not bubble a double click from the Task comment UI", async () => {
+    const onParentDoubleClick = vi.fn();
+    const t = createTranslator("en");
+
+    render(
+      <div role="application" onDoubleClick={onParentDoubleClick}>
+        <TaskNodeCard
+          data={nodeData({
+            commentUi: {
+              canvasId: "default",
+              taskCommentCount: 1,
+              blockCommentCounts: {},
+              t
+            }
+          })}
+        />
+      </div>
+    );
+
+    const trigger = screen.getByRole("button", { name: "View 1 comments" });
+    fireEvent.doubleClick(trigger);
+    expect(onParentDoubleClick).not.toHaveBeenCalled();
+
+    await userEvent.click(trigger);
+    fireEvent.doubleClick(await screen.findByTestId("work-item-comments-popover"));
+    expect(onParentDoubleClick).not.toHaveBeenCalled();
+  });
+
   it("opens Block comments from the Block context menu", async () => {
     const blockRef = "T-001#B-001";
     const t = createTranslator("en");

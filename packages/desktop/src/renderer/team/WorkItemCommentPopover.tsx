@@ -45,6 +45,7 @@ export function WorkItemCommentPopover({
           data-graph-interaction="work-item-comments"
           data-testid="work-item-comments-trigger"
           onClick={(event) => event.stopPropagation()}
+          onDoubleClick={(event) => event.stopPropagation()}
         >
           <MessageSquareIcon data-icon="inline-start" />
           {commentCount > 0 ? (
@@ -62,6 +63,7 @@ export function WorkItemCommentPopover({
         className="nodrag nowheel w-[min(420px,calc(100vw-32px))] p-3"
         data-testid="work-item-comments-popover"
         onClick={(event) => event.stopPropagation()}
+        onDoubleClick={(event) => event.stopPropagation()}
       >
         <WorkItemCollaborationPanel
           workItem={workItem}
