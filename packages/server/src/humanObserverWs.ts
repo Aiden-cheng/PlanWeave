@@ -13,6 +13,7 @@ import {
   type HumanIdentityRepository,
   type HumanProjectAuthority
 } from "./identity/index.js";
+import type { TransportAdmissionPolicy } from "./insecureTransport.js";
 import { isAllowedClientOrigin } from "./clientOrigin.js";
 import type { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
 import type { HumanObserverJournal, HumanObserverScope } from "./humanObserverJournal.js";
@@ -28,7 +29,7 @@ export type HumanObserverWebSocketOptions = {
   projectAuthority: HumanProjectAuthority;
   maxPayloadBytes: number;
   shutdownTimeoutMs: number;
-  allowInsecureTransport?: boolean;
+  transportAdmission: TransportAdmissionPolicy;
   allowedClientOrigins?: readonly string[];
   clock?: () => Date;
 };
@@ -188,7 +189,7 @@ export function attachHumanObserverWebSocketServer(
         reject(socket, 403, "Forbidden");
         return;
       }
-      if (!humanTransportAllowed(request.socket, options.allowInsecureTransport)) {
+      if (!humanTransportAllowed(request.socket, options.transportAdmission)) {
         reject(socket, 426, "Upgrade Required");
         return;
       }

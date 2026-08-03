@@ -4,7 +4,10 @@ import {
   type HostEnrollmentErrorCode
 } from "@planweave-ai/agent-host-protocol";
 import { HostEnrollmentError, HostEnrollmentService } from "./hostEnrollment.js";
-import { humanNetworkTransportAllowed } from "./insecureTransport.js";
+import {
+  humanNetworkTransportAllowed,
+  type TransportAdmissionPolicy
+} from "./insecureTransport.js";
 
 const MAX_BODY_BYTES = 16_384;
 
@@ -37,7 +40,7 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
 
 export type HostEnrollmentHttpOptions = {
   service: HostEnrollmentService;
-  allowInsecureDevelopment?: boolean;
+  transportAdmission: TransportAdmissionPolicy;
 };
 
 export async function handleHostEnrollmentRequest(
@@ -46,7 +49,7 @@ export async function handleHostEnrollmentRequest(
   options: HostEnrollmentHttpOptions
 ): Promise<boolean> {
   if (request.url !== "/agent-hosts/enrollments/exchange") return false;
-  if (!humanNetworkTransportAllowed(request.socket, options.allowInsecureDevelopment)) {
+  if (!humanNetworkTransportAllowed(request.socket, options.transportAdmission)) {
     send(response, 426, errorBody("insecure_transport"));
     return true;
   }

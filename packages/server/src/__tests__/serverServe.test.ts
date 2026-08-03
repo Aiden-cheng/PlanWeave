@@ -95,7 +95,7 @@ describe("distributed server listener", () => {
     expect(server.readiness()).toMatchObject({ status: "draining" });
   });
 
-  it("listens on loopback HTTP while advertising Tailscale HTTPS without enabling human transport", async () => {
+  it("admits only the loopback Tailscale backend without granting local owner bootstrap", async () => {
     const workspace = await createTestWorkspace(remoteManifest());
     directories.push(workspace.home, workspace.root);
     const port = await availablePort();
@@ -187,10 +187,23 @@ describe("distributed server listener", () => {
     expect(events).toEqual(["inspect", "activate:503:listening"]);
     const readiness = await fetch(`http://127.0.0.1:${port}/readyz`);
     expect(readiness.status).toBe(200);
-    const blocked = await fetch(`http://127.0.0.1:${port}/api/v1/hosts?limit=1`, {
+    const admitted = await fetch(`http://127.0.0.1:${port}/api/v1/hosts?limit=1`, {
       headers: { Authorization: `Bearer pw_operator_${"T".repeat(43)}` }
     });
-    expect(blocked.status).toBe(426);
+    expect(admitted.status).toBe(200);
+    const bootstrap = await fetch(
+      `http://127.0.0.1:${port}/api/v1/projects/${workspace.init.workspace.id}/human/bootstrap`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-forwarded-for": "127.0.0.1",
+          "x-forwarded-proto": "https"
+        },
+        body: JSON.stringify({ displayName: "Proxy user", deviceLabel: "Proxy device" })
+      }
+    );
+    expect(bootstrap.status).toBe(403);
     await server.close();
     expect(events).toEqual([
       "inspect",

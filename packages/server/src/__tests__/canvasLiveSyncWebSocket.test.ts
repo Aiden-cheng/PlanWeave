@@ -1,4 +1,5 @@
 import { createServer, type Server as HttpServer } from "node:http";
+import { loopbackHttpTransportAdmission } from "./support/transportAdmission.js";
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
@@ -133,7 +134,7 @@ async function setup() {
     },
     maxPayloadBytes: 64 * 1024,
     shutdownTimeoutMs: 1_000,
-    allowInsecureTransport: true
+    transportAdmission: loopbackHttpTransportAdmission
   });
   liveServers.push(live);
   await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));

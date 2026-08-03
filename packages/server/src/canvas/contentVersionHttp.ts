@@ -7,6 +7,7 @@ import {
   type HumanIdentityRepository,
   type HumanProjectAuthority
 } from "../identity/index.js";
+import type { TransportAdmissionPolicy } from "../insecureTransport.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { ContentVersionService } from "./contentVersionService.js";
 import { ContentVersionRepository } from "./contentVersionRepository.js";
@@ -24,7 +25,7 @@ export type ContentVersionHttpOptions = {
   repository: HumanIdentityRepository;
   workspaceIdentity: WorkspaceIdentityRepository;
   projectAuthority: HumanProjectAuthority;
-  allowInsecureDevelopment?: boolean;
+  transportAdmission: TransportAdmissionPolicy;
 };
 
 function route(request: IncomingMessage, pathname: string): Route | undefined {
@@ -84,7 +85,7 @@ export async function handleContentVersionHttpRequest(
 ): Promise<boolean> {
   const matched = route(request, new URL(request.url ?? "/", "http://127.0.0.1").pathname);
   if (!matched) return false;
-  if (!humanTransportAllowed(request.socket, options.allowInsecureDevelopment === true)) {
+  if (!humanTransportAllowed(request.socket, options.transportAdmission)) {
     respond(response, 400, { error: "insecure_transport" });
     return true;
   }

@@ -18,6 +18,7 @@ import {
   type HumanIdentityRepository,
   type HumanProjectAuthority
 } from "../identity/index.js";
+import type { TransportAdmissionPolicy } from "../insecureTransport.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import type { WebSocketUpgradeRouter } from "../webSocketUpgradeRouter.js";
 import { isAllowedClientOrigin } from "../clientOrigin.js";
@@ -34,7 +35,7 @@ export type CanvasCommandWebSocketOptions = {
   projectAuthority: HumanProjectAuthority;
   maxPayloadBytes: number;
   shutdownTimeoutMs: number;
-  allowInsecureTransport?: boolean;
+  transportAdmission: TransportAdmissionPolicy;
   allowedClientOrigins?: readonly string[];
   clock?: () => Date;
   authCheckIntervalMs?: number;
@@ -116,7 +117,7 @@ export function attachCanvasCommandWebSocketServer(
       reject(socket, 404, "Not Found");
       return;
     }
-    if (!humanTransportAllowed(request.socket, options.allowInsecureTransport === true)) {
+    if (!humanTransportAllowed(request.socket, options.transportAdmission)) {
       reject(socket, 400, "Bad Request");
       return;
     }

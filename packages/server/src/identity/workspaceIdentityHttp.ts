@@ -5,19 +5,22 @@ import { z } from "zod";
 import { OperatorTokenRegistry, type OperatorPrincipal } from "../operatorAuth.js";
 import { workspaceIdentityReadModelSchema, type WorkspaceIdentityReadModel } from "./dtos.js";
 import { WorkspaceIdentityRepository } from "./workspaceRepository.js";
-import { humanNetworkTransportAllowed } from "../insecureTransport.js";
+import {
+  humanNetworkTransportAllowed,
+  type TransportAdmissionPolicy
+} from "../insecureTransport.js";
 
 export type WorkspaceIdentityHttpOptions = {
   authorization: OperatorTokenRegistry;
   repository: WorkspaceIdentityRepository;
-  allowInsecureDevelopment?: boolean;
+  transportAdmission: TransportAdmissionPolicy;
 };
 
 function transportAllowed(
   socket: { encrypted?: boolean; remoteAddress?: string },
-  allowInsecureDevelopment = false
+  transportAdmission: TransportAdmissionPolicy
 ): boolean {
-  return humanNetworkTransportAllowed(socket, allowInsecureDevelopment);
+  return humanNetworkTransportAllowed(socket, transportAdmission);
 }
 
 function respond(response: ServerResponse, status: number, body: unknown): void {
@@ -97,7 +100,7 @@ export async function handleWorkspaceIdentityHttpRequest(
     respond(response, 400, { error: "workspace_identity_query_invalid" });
     return true;
   }
-  if (!transportAllowed(request.socket, options.allowInsecureDevelopment)) {
+  if (!transportAllowed(request.socket, options.transportAdmission)) {
     request.resume();
     respond(response, 426, { error: "workspace_identity_insecure_transport" });
     return true;

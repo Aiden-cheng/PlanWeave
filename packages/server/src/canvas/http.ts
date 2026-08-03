@@ -13,6 +13,7 @@ import {
   type HumanIdentityRepository,
   type HumanProjectAuthority
 } from "../identity/index.js";
+import type { TransportAdmissionPolicy } from "../insecureTransport.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import {
   CANVAS_COMMAND_HTTP_BODY_MAX_BYTES,
@@ -35,7 +36,7 @@ export type CanvasCommandHttpOptions = {
   repository: HumanIdentityRepository;
   workspaceIdentity: WorkspaceIdentityRepository;
   projectAuthority: HumanProjectAuthority;
-  allowInsecureDevelopment?: boolean;
+  transportAdmission: TransportAdmissionPolicy;
   clock?: () => Date;
 };
 
@@ -163,7 +164,7 @@ export async function handleCanvasCommandHttpRequest(
     return true;
   }
 
-  if (!humanTransportAllowed(request.socket, options.allowInsecureDevelopment === true)) {
+  if (!humanTransportAllowed(request.socket, options.transportAdmission)) {
     respond(response, 400, { error: "insecure_transport" });
     return true;
   }

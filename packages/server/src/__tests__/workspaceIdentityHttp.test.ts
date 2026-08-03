@@ -1,4 +1,5 @@
 import { createServer, type Server as HttpServer } from "node:http";
+import { loopbackHttpTransportAdmission } from "./support/transportAdmission.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -86,7 +87,7 @@ async function setup() {
     void handleWorkspaceIdentityHttpRequest(request, response, {
       authorization,
       repository,
-      allowInsecureDevelopment: true
+      transportAdmission: loopbackHttpTransportAdmission
     });
   });
   servers.push(server);

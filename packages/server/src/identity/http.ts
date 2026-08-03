@@ -1,11 +1,16 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { createHash } from "node:crypto";
 import {
   humanCreateInvitationRequestSchema,
   type HumanCreateInvitationRequest
 } from "@planweave-ai/collaboration-protocol/identity/workspace";
 import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
-import { humanNetworkTransportAllowed, isLoopbackAddress } from "../insecureTransport.js";
+import {
+  humanNetworkTransportAllowed,
+  localAdminBootstrapAllowed,
+  type TransportAdmissionPolicy
+} from "../insecureTransport.js";
 import { authenticateHumanForProject } from "./auth.js";
 import {
   HUMAN_AUTH_ERROR_MESSAGES,
@@ -25,9 +30,10 @@ import {
   PROJECT_INVITATION_IDEMPOTENCY_CACHE_TTL_MS,
   PROJECT_INVITATION_TOKEN_PREFIX
 } from "./limits.js";
+import { humanConsumeInvitationRequestSchema } from "./dtos.js";
 
 const MAX_HUMAN_BODY_BYTES = 16_384;
-/** Soft admission limit for human auth-sensitive routes (per remote address). */
+/** Soft admission limit for human auth-sensitive routes (per authenticated credential subject). */
 const HUMAN_RATE_WINDOW_MS = 60_000;
 const HUMAN_RATE_MAX_REQUESTS = 60;
 /** Bounds untrusted remote-address/project tuples retained by each in-process limit class. */
@@ -37,7 +43,7 @@ export type HumanHttpOptions = {
   service: HumanMembershipService;
   repository: HumanIdentityRepository;
   projectAuthority: HumanProjectAuthority;
-  allowInsecureDevelopment?: boolean;
+  transportAdmission: TransportAdmissionPolicy;
   clock?: () => Date;
 };
 
@@ -208,17 +214,20 @@ function query(url: URL, allowed: readonly string[]): Record<string, string | un
 
 export function humanTransportAllowed(
   socket: { encrypted?: boolean; remoteAddress?: string },
-  allowInsecureDevelopment = false
+  transportAdmission: TransportAdmissionPolicy
 ): boolean {
-  return humanNetworkTransportAllowed(socket, allowInsecureDevelopment);
+  return humanNetworkTransportAllowed(socket, transportAdmission);
 }
 
 /**
  * Local administrative boundary for owner bootstrap: only loopback clients may mint the
  * first project owner. This is not a network bearer and not Host/operator auth.
  */
-export function humanLocalAdminBoundaryAllowed(socket: { remoteAddress?: string }): boolean {
-  return isLoopbackAddress(socket.remoteAddress);
+export function humanLocalAdminBoundaryAllowed(
+  socket: { remoteAddress?: string },
+  admission: TransportAdmissionPolicy
+): boolean {
+  return localAdminBootstrapAllowed(socket, admission);
 }
 
 function rateClass(route: HumanRoute): HumanRateClass {
@@ -233,28 +242,23 @@ function rateClass(route: HumanRoute): HumanRateClass {
 }
 
 function rateLimitKey(
-  request: IncomingMessage,
+  subject: string,
   projectId: string,
   rateClass: HumanRateClass,
   routeKind: HumanRoute["kind"]
 ): string {
-  return JSON.stringify([
-    request.socket.remoteAddress ?? "unknown",
-    projectId,
-    rateClass,
-    rateClass === "read" ? routeKind : "all"
-  ]);
+  return JSON.stringify([subject, projectId, rateClass, rateClass === "read" ? routeKind : "all"]);
 }
 
 function checkRateLimit(
-  request: IncomingMessage,
+  subject: string,
   projectId: string,
   route: HumanRoute,
   now: number
 ): RateLimitResult {
   const requestClass = rateClass(route);
   const buckets = rateBuckets[requestClass];
-  const key = rateLimitKey(request, projectId, requestClass, route.kind);
+  const key = rateLimitKey(subject, projectId, requestClass, route.kind);
   const bucket = buckets.get(key);
   if (bucket && now - bucket.windowStartedAt < HUMAN_RATE_WINDOW_MS) {
     if (bucket.count >= HUMAN_RATE_MAX_REQUESTS) {
@@ -282,6 +286,20 @@ function checkRateLimit(
 
   buckets.set(key, { windowStartedAt: now, count: 1 });
   return { allowed: true };
+}
+
+function credentialRateLimitSubject(kind: "invitation", credential: string): string {
+  return `${kind}:${createHash("sha256").update(credential).digest("hex")}`;
+}
+
+function enforceRateLimit(
+  subject: string,
+  projectId: string,
+  route: HumanRoute,
+  now: number
+): void {
+  const result = checkRateLimit(subject, projectId, route, now);
+  if (!result.allowed) throw new HumanRateLimitError(result.retryAfterSeconds);
 }
 
 /** Test helper to clear in-memory admission and invitation replay state. */
@@ -495,7 +513,7 @@ export async function handleHumanHttpRequest(
   }
 
   try {
-    if (!humanTransportAllowed(request.socket, options.allowInsecureDevelopment)) {
+    if (!humanTransportAllowed(request.socket, options.transportAdmission)) {
       request.resume();
       respond(response, 426, { error: "human_insecure_transport" });
       return true;
@@ -508,21 +526,21 @@ export async function handleHumanHttpRequest(
     }
 
     const now = (options.clock ?? (() => new Date()))().getTime();
-    const rateLimit = checkRateLimit(request, matched.projectId, matched, now);
-    if (!rateLimit.allowed) {
-      request.resume();
-      respond(
-        response,
-        429,
-        { error: "human_rate_limited" },
-        { "retry-after": String(rateLimit.retryAfterSeconds) }
+    if (matched.kind === "bootstrap") {
+      enforceRateLimit(
+        `local-admin:${request.socket.remoteAddress ?? "unknown"}`,
+        matched.projectId,
+        matched,
+        now
       );
-      return true;
+    } else if (matched.kind !== "consume_invitation") {
+      const context = requireHumanContext(options, request, matched.projectId);
+      enforceRateLimit(`human:${context.humanPrincipalId}`, matched.projectId, matched, now);
     }
 
     switch (matched.kind) {
       case "bootstrap": {
-        if (!humanLocalAdminBoundaryAllowed(request.socket)) {
+        if (!humanLocalAdminBoundaryAllowed(request.socket, options.transportAdmission)) {
           request.resume();
           respond(response, 403, {
             error: "human_bootstrap_requires_local_admin",
@@ -538,7 +556,13 @@ export async function handleHumanHttpRequest(
       }
       case "consume_invitation": {
         query(url, []);
-        const body = await readJson(request);
+        const body = humanConsumeInvitationRequestSchema.parse(await readJson(request));
+        enforceRateLimit(
+          credentialRateLimitSubject("invitation", body.invitationToken),
+          matched.projectId,
+          matched,
+          now
+        );
         const result = options.service.consumeInvitation(matched.projectId, body);
         respond(response, 201, result);
         break;

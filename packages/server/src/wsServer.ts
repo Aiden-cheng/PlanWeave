@@ -16,6 +16,7 @@ import {
   type HostEvent
 } from "./protocol.js";
 import type { WebSocketUpgradeRouter } from "./webSocketUpgradeRouter.js";
+import type { TransportAdmissionPolicy } from "./insecureTransport.js";
 
 export type AgentHostWebSocketOptions = {
   server: HttpServer;
@@ -29,7 +30,7 @@ export type AgentHostWebSocketOptions = {
   leaseDurationMs: number;
   maxPayloadBytes?: number;
   shutdownTimeoutMs?: number;
-  allowInsecureTransport?: boolean;
+  transportAdmission: TransportAdmissionPolicy;
   upgradeRouter?: WebSocketUpgradeRouter;
 };
 
@@ -268,7 +269,7 @@ export function attachAgentHostWebSocketServer(
       request,
       options.hosts,
       hostId,
-      options.allowInsecureTransport ?? false
+      options.transportAdmission
     );
     if (!authentication.ok) {
       rejectUpgrade(socket, authentication.status, authentication.message);

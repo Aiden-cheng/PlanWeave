@@ -1,4 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
+import {
+  directHttpsTransportAdmission,
+  loopbackHttpTransportAdmission
+} from "./support/transportAdmission.js";
 import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import { assertSetupViewRedacted } from "@planweave-ai/collaboration-protocol/setup";
@@ -356,7 +360,7 @@ describe("setup code issue/redeem/revoke", () => {
       void handleSetupCodeHttpRequest(request, response, {
         service: setup,
         authorization,
-        allowInsecureDevelopment: true
+        transportAdmission: loopbackHttpTransportAdmission
       }).then((handled) => {
         if (!handled) {
           response.writeHead(404);
@@ -410,7 +414,7 @@ describe("setup code issue/redeem/revoke", () => {
       void handleSetupCodeHttpRequest(request, response, {
         service: setup,
         authorization: serverAdminAuthorization,
-        allowInsecureDevelopment: true
+        transportAdmission: loopbackHttpTransportAdmission
       }).then((handled) => {
         if (!handled) {
           response.writeHead(404);
@@ -538,7 +542,8 @@ describe("setup code issue/redeem/revoke", () => {
     const strict = createServer((request, response) => {
       void handleSetupCodeHttpRequest(request, response, {
         service: setup,
-        authorization
+        authorization,
+        transportAdmission: directHttpsTransportAdmission
       }).then((handled) => {
         if (!handled) {
           response.writeHead(404);

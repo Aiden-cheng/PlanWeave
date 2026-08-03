@@ -1,4 +1,5 @@
 import { createServer, type Server as HttpServer } from "node:http";
+import { loopbackHttpTransportAdmission } from "./support/transportAdmission.js";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { createRemoteBlockRuntimePort, type PlanPackageManifest } from "@planweave-ai/runtime";
@@ -174,7 +175,7 @@ describe("agent host WebSocket transport", () => {
         actions: coordination.actions,
         heartbeatIntervalMs: 30_000,
         leaseDurationMs: 60_000,
-        allowInsecureTransport: true
+        transportAdmission: loopbackHttpTransportAdmission
       })
     );
     const base = `ws://127.0.0.1:${address.port}/agent-hosts/${registration.host.id}/connect`;
@@ -229,7 +230,7 @@ describe("agent host WebSocket transport", () => {
       actions: coordination.actions,
       heartbeatIntervalMs: 30_000,
       leaseDurationMs: 60_000,
-      allowInsecureTransport: true
+      transportAdmission: loopbackHttpTransportAdmission
     });
     webSocketServers.push(transport);
     const url =
@@ -335,7 +336,7 @@ describe("agent host WebSocket transport", () => {
         actions: coordination.actions,
         heartbeatIntervalMs: 30_000,
         leaseDurationMs: 60_000,
-        allowInsecureTransport: true
+        transportAdmission: loopbackHttpTransportAdmission
       })
     );
     const socket = await openSocket(
@@ -495,7 +496,7 @@ describe("agent host WebSocket transport", () => {
       actions: coordination.actions,
       heartbeatIntervalMs: 30_000,
       leaseDurationMs: 60_000,
-      allowInsecureTransport: true
+      transportAdmission: loopbackHttpTransportAdmission
     });
     webSocketServers.push(transport);
     const url =
@@ -676,7 +677,7 @@ describe("agent host WebSocket transport", () => {
         actions: coordination.actions,
         heartbeatIntervalMs: 30_000,
         leaseDurationMs: 60_000,
-        allowInsecureTransport: true
+        transportAdmission: loopbackHttpTransportAdmission
       })
     );
     const url =
@@ -815,7 +816,7 @@ describe("agent host WebSocket transport", () => {
         actions: coordination.actions,
         heartbeatIntervalMs: 30_000,
         leaseDurationMs: 60_000,
-        allowInsecureTransport: true
+        transportAdmission: loopbackHttpTransportAdmission
       })
     );
     const socket = await openSocket(

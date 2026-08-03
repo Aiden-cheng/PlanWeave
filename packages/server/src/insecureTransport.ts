@@ -1,4 +1,13 @@
 import { isIP } from "node:net";
+import type { ServerConfig, ServerTransport } from "./config.js";
+
+type TransportSocket = { encrypted?: boolean; remoteAddress?: string };
+
+export type TransportAdmissionPolicy = Readonly<{
+  allowsNetworkTransport(socket: TransportSocket): boolean;
+  allowsOperatorTransport(socket: TransportSocket): boolean;
+  allowsLocalAdminBootstrap(socket: TransportSocket): boolean;
+}>;
 
 function normalizedAddress(address: string | undefined): string | null {
   if (!address) return null;
@@ -29,12 +38,52 @@ export function isPrivateNetworkAddress(address: string | undefined): boolean {
   return lower.startsWith("fc") || lower.startsWith("fd") || /^fe[89ab]/.test(lower.slice(0, 3));
 }
 
+export function createTransportAdmissionPolicyForMode(
+  mode: ServerTransport["mode"]
+): TransportAdmissionPolicy {
+  return Object.freeze({
+    allowsNetworkTransport(socket: TransportSocket): boolean {
+      if (socket.encrypted === true) return true;
+      if (mode === "tailscale_https") return isLoopbackAddress(socket.remoteAddress);
+      if (mode === "loopback_http" || mode === "lan_http") {
+        return isPrivateNetworkAddress(socket.remoteAddress);
+      }
+      return false;
+    },
+    allowsOperatorTransport(socket: TransportSocket): boolean {
+      if (socket.encrypted === true) return true;
+      if (mode === "tailscale_https" || mode === "loopback_http" || mode === "lan_http") {
+        return isLoopbackAddress(socket.remoteAddress);
+      }
+      return false;
+    },
+    allowsLocalAdminBootstrap(socket: TransportSocket): boolean {
+      return mode !== "tailscale_https" && isLoopbackAddress(socket.remoteAddress);
+    }
+  });
+}
+
+export function createTransportAdmissionPolicy(config: ServerConfig): TransportAdmissionPolicy {
+  return createTransportAdmissionPolicyForMode(config.transport.mode);
+}
+
 export function humanNetworkTransportAllowed(
-  socket: { encrypted?: boolean; remoteAddress?: string },
-  allowInsecureDevelopment = false
+  socket: TransportSocket,
+  admission: TransportAdmissionPolicy
 ): boolean {
-  return (
-    socket.encrypted === true ||
-    (allowInsecureDevelopment && isPrivateNetworkAddress(socket.remoteAddress))
-  );
+  return admission.allowsNetworkTransport(socket);
+}
+
+export function operatorNetworkTransportAllowed(
+  socket: TransportSocket,
+  admission: TransportAdmissionPolicy
+): boolean {
+  return admission.allowsOperatorTransport(socket);
+}
+
+export function localAdminBootstrapAllowed(
+  socket: TransportSocket,
+  admission: TransportAdmissionPolicy
+): boolean {
+  return admission.allowsLocalAdminBootstrap(socket);
 }

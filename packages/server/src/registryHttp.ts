@@ -29,6 +29,7 @@ import {
   humanTransportAllowed,
   type HumanIdentityRepository
 } from "./identity/index.js";
+import type { TransportAdmissionPolicy } from "./insecureTransport.js";
 import { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
 import type { ServerReadiness } from "./readiness.js";
 
@@ -71,7 +72,7 @@ export type RegistryHttpOptions = {
   workspaceIdentity: WorkspaceIdentityRepository;
   service: RegistryHttpService;
   readiness?: () => ServerReadiness;
-  allowInsecureDevelopment?: boolean;
+  transportAdmission: TransportAdmissionPolicy;
 };
 
 type RegistryRoute =
@@ -242,7 +243,8 @@ function actorForRequest(
       throw new Error("registry_workspace_scope_forbidden");
     }
   }
-  const humanPrincipalId = workspaceSession?.humanPrincipalId ?? authenticated!.principal.humanPrincipalId;
+  const humanPrincipalId =
+    workspaceSession?.humanPrincipalId ?? authenticated!.principal.humanPrincipalId;
   const displayName = workspaceSession?.displayName ?? authenticated!.principal.displayName;
   const workspaceIds = workspaceSession
     ? [workspaceSession.workspaceId]
@@ -283,7 +285,7 @@ export async function handleRegistryHttpRequest(
     return false;
   }
   try {
-    if (!humanTransportAllowed(request.socket, options.allowInsecureDevelopment)) {
+    if (!humanTransportAllowed(request.socket, options.transportAdmission)) {
       request.resume();
       respond(response, 426, { error: "registry_insecure_transport" });
       return true;

@@ -3,11 +3,12 @@ import { WORKSPACE_PICKER_MAX_ITEMS_PER_PAGE } from "@planweave-ai/collaboration
 import { humanDeviceTokenSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
 import { workspacePickerPageSchema } from "@planweave-ai/collaboration-protocol/connection";
 import { humanTransportAllowed } from "./http.js";
+import type { TransportAdmissionPolicy } from "../insecureTransport.js";
 import { WorkspaceIdentityRepository } from "./workspaceRepository.js";
 
 export type WorkspaceConnectionHttpOptions = {
   workspaceIdentity: WorkspaceIdentityRepository;
-  allowInsecureDevelopment?: boolean;
+  transportAdmission: TransportAdmissionPolicy;
 };
 
 function respond(response: ServerResponse, status: number, body: unknown): void {
@@ -44,9 +45,7 @@ function pageQuery(url: URL): { cursor: number; limit: number } {
   return { cursor, limit };
 }
 
-function workspaceDeviceBearer(
-  authorization: string | string[] | undefined
-): string | undefined {
+function workspaceDeviceBearer(authorization: string | string[] | undefined): string | undefined {
   if (Array.isArray(authorization) || authorization === undefined) return undefined;
   const match = /^Bearer (.+)$/.exec(authorization);
   if (!match) return undefined;
@@ -67,7 +66,7 @@ export async function handleWorkspaceConnectionHttpRequest(
     respond(response, 404, { error: "workspace_connection_not_found" });
     return true;
   }
-  if (!humanTransportAllowed(request.socket, options.allowInsecureDevelopment)) {
+  if (!humanTransportAllowed(request.socket, options.transportAdmission)) {
     request.resume();
     respond(response, 426, { error: "workspace_connection_insecure_transport" });
     return true;

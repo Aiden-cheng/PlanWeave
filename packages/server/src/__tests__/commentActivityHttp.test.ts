@@ -142,6 +142,28 @@ async function bootstrap(origin: string, projectId: string, principalId: string)
 }
 
 describe("comment and activity production HTTP", () => {
+  it("does not let unauthenticated proxy peers exhaust comment or assignment buckets", async () => {
+    const fixture = await setup();
+    const projectId = fixture.projectA.init.workspace.id;
+    const ownerToken = await bootstrap(fixture.origin, projectId, "rate-limit-owner");
+    const workItem = encodeURIComponent(
+      JSON.stringify({ kind: "task", canvasId: "default", taskId: "T-001" })
+    );
+    const urls = [
+      `${fixture.origin}/api/v1/projects/${projectId}/comments?workItem=${workItem}`,
+      `${fixture.origin}/api/v1/projects/${projectId}/assignments/list?cursor=0&limit=50`
+    ];
+
+    for (const url of urls) {
+      for (let request = 0; request <= 120; request += 1) {
+        expect((await fetch(url)).status).toBe(401);
+      }
+      expect(
+        (await fetch(url, { headers: { Authorization: `Bearer ${ownerToken}` } })).status
+      ).toBe(200);
+    }
+  });
+
   it("wires create/list/edit/tombstone/activity with project, CAS, package, and attachment bounds", async () => {
     const fixture = await setup();
     const projectId = fixture.projectA.init.workspace.id;

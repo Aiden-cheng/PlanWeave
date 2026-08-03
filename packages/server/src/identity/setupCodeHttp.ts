@@ -4,7 +4,10 @@ import { setupCodeIssueRequestSchema } from "@planweave-ai/collaboration-protoco
 import { z } from "zod";
 import { OperatorTokenRegistry, type OperatorPrincipal } from "../operatorAuth.js";
 import { SetupCodeError, SetupCodeService } from "./setupCodeService.js";
-import { humanNetworkTransportAllowed } from "../insecureTransport.js";
+import {
+  humanNetworkTransportAllowed,
+  type TransportAdmissionPolicy
+} from "../insecureTransport.js";
 
 const MAX_SETUP_BODY_BYTES = 16_384;
 const currentWorkspaceDeviceIssueRequestSchema = setupCodeIssueRequestSchema
@@ -15,7 +18,7 @@ const currentWorkspaceDeviceIssueRequestSchema = setupCodeIssueRequestSchema
 export type SetupCodeHttpOptions = {
   service: SetupCodeService;
   authorization: OperatorTokenRegistry;
-  allowInsecureDevelopment?: boolean;
+  transportAdmission: TransportAdmissionPolicy;
 };
 
 type SetupRoute =
@@ -27,9 +30,9 @@ type SetupRoute =
 
 function transportAllowed(
   socket: { encrypted?: boolean; remoteAddress?: string },
-  allowInsecureDevelopment = false
+  transportAdmission: TransportAdmissionPolicy
 ): boolean {
-  return humanNetworkTransportAllowed(socket, allowInsecureDevelopment);
+  return humanNetworkTransportAllowed(socket, transportAdmission);
 }
 
 function respond(response: ServerResponse, status: number, body: unknown): void {
@@ -167,7 +170,7 @@ export async function handleSetupCodeHttpRequest(
   if (!matched) return false;
 
   try {
-    if (!transportAllowed(request.socket, options.allowInsecureDevelopment)) {
+    if (!transportAllowed(request.socket, options.transportAdmission)) {
       request.resume();
       respond(response, 426, { error: "setup_code_insecure_transport" });
       return true;

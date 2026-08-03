@@ -1,4 +1,8 @@
 import { randomBytes } from "node:crypto";
+import {
+  directHttpsTransportAdmission,
+  loopbackHttpTransportAdmission
+} from "./support/transportAdmission.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -203,7 +207,10 @@ describe("Agent Host enrollment", () => {
     });
     const server = createServer();
     servers.push(server);
-    const strictAttachment = attachHostEnrollmentHttp(server, { service });
+    const strictAttachment = attachHostEnrollmentHttp(server, {
+      service,
+      transportAdmission: directHttpsTransportAdmission
+    });
     const port = await listen(server);
     const endpoint = `http://127.0.0.1:${port}/agent-hosts/enrollments/exchange`;
     const rejected = await fetch(endpoint, {
@@ -214,7 +221,10 @@ describe("Agent Host enrollment", () => {
     expect(rejected.status).toBe(426);
 
     strictAttachment.close();
-    attachHostEnrollmentHttp(server, { service, allowInsecureDevelopment: true });
+    attachHostEnrollmentHttp(server, {
+      service,
+      transportAdmission: loopbackHttpTransportAdmission
+    });
     const acceptedRequest = request(grant.enrollmentCode);
     const accepted = await fetch(endpoint, {
       method: "POST",
@@ -289,7 +299,7 @@ describe("Agent Host enrollment", () => {
     servers.push(server);
     attachHostEnrollmentHttp(server, {
       service: new HostEnrollmentService(store.database),
-      allowInsecureDevelopment: true
+      transportAdmission: loopbackHttpTransportAdmission
     });
     server.on("request", (incoming, response) => {
       if (incoming.url === "/health" && !response.headersSent) response.writeHead(204).end();

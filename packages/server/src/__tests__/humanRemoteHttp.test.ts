@@ -1,4 +1,5 @@
 import { createServer, type Server as HttpServer } from "node:http";
+import { loopbackHttpTransportAdmission } from "./support/transportAdmission.js";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { createRemoteBlockRuntimePort, type PlanPackageManifest } from "@planweave-ai/runtime";
@@ -155,7 +156,7 @@ async function setup() {
           service: membership,
           repository: identity,
           projectAuthority,
-          allowInsecureDevelopment: true
+          transportAdmission: loopbackHttpTransportAdmission
         })
       ) {
         return;
@@ -170,7 +171,7 @@ async function setup() {
             acceptingMutations
               ? { status: "ready", schemaVersion: 1 }
               : { status: "draining", schemaVersion: 1 },
-          allowInsecureDevelopment: true
+          transportAdmission: loopbackHttpTransportAdmission
         })
       ) {
         return;

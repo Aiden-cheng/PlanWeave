@@ -1,4 +1,5 @@
 import { createServer, type Server as HttpServer } from "node:http";
+import { loopbackHttpTransportAdmission } from "./support/transportAdmission.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { handleAccessHttpRequest } from "../accessHttp.js";
 import { applyMigrations } from "../migrations.js";
@@ -56,7 +57,7 @@ async function fixture() {
           scope.canvasId === "default",
         hasProject: (projectId) => projectId === "project-a"
       },
-      allowInsecureDevelopment: true
+      transportAdmission: loopbackHttpTransportAdmission
     });
   });
   servers.push(server);

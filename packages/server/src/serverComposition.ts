@@ -94,6 +94,7 @@ import {
   type CanvasLiveSyncWebSocketServer
 } from "./canvas/index.js";
 import { WebSocketUpgradeRouter } from "./webSocketUpgradeRouter.js";
+import { createTransportAdmissionPolicy } from "./insecureTransport.js";
 import {
   createActiveDispatchResolver,
   createHostAssignmentPort,
@@ -316,6 +317,7 @@ export async function createDistributedServerComposition(
   options: DistributedServerCompositionOptions
 ): Promise<DistributedServerComposition> {
   const config = serverConfigSchema.parse(options.config);
+  const transportAdmission = createTransportAdmissionPolicy(config);
   const clock = options.clock ?? (() => new Date());
   const readiness = options.readiness ?? new ServerReadinessController();
   const runtimeRegistry = await createTrustedRuntimeRegistry(config.trustedProjects);
@@ -892,7 +894,7 @@ export async function createDistributedServerComposition(
       leaseDurationMs: config.limits.leaseDurationMs,
       maxPayloadBytes: config.limits.maxWebSocketPayloadBytes,
       shutdownTimeoutMs: config.limits.shutdownTimeoutMs,
-      allowInsecureTransport: config.insecurePolicy.allowInsecureTransport
+      transportAdmission
     });
     humanObserverWebSockets = attachHumanObserverWebSocketServer({
       upgradeRouter,
@@ -903,7 +905,7 @@ export async function createDistributedServerComposition(
       projectAuthority: runtimeRegistry,
       maxPayloadBytes: config.limits.maxWebSocketPayloadBytes,
       shutdownTimeoutMs: config.limits.shutdownTimeoutMs,
-      allowInsecureTransport: config.insecurePolicy.allowInsecureTransport,
+      transportAdmission,
       allowedClientOrigins: config.allowedClientOrigins ?? undefined,
       clock
     });
@@ -914,7 +916,7 @@ export async function createDistributedServerComposition(
       projectAuthority: runtimeRegistry,
       maxPayloadBytes: config.limits.maxWebSocketPayloadBytes,
       shutdownTimeoutMs: config.limits.shutdownTimeoutMs,
-      allowInsecureTransport: config.insecurePolicy.allowInsecureTransport,
+      transportAdmission,
       allowedClientOrigins: config.allowedClientOrigins ?? undefined,
       clock
     });
@@ -928,7 +930,7 @@ export async function createDistributedServerComposition(
       projectAuthority: runtimeRegistry,
       maxPayloadBytes: config.limits.maxWebSocketPayloadBytes,
       shutdownTimeoutMs: config.limits.shutdownTimeoutMs,
-      allowInsecureTransport: config.insecurePolicy.allowInsecureTransport,
+      transportAdmission,
       allowedClientOrigins: config.allowedClientOrigins ?? undefined,
       clock
     });
@@ -1002,7 +1004,7 @@ export async function createDistributedServerComposition(
       projectAuthority: runtimeRegistry,
       maxPayloadBytes: config.limits.maxWebSocketPayloadBytes,
       shutdownTimeoutMs: config.limits.shutdownTimeoutMs,
-      allowInsecureTransport: config.insecurePolicy.allowInsecureTransport,
+      transportAdmission,
       allowedClientOrigins: config.allowedClientOrigins ?? undefined,
       clock
     });
@@ -1046,7 +1048,7 @@ export async function createDistributedServerComposition(
         if (
           await handleWorkspaceConnectionHttpRequest(request, response, {
             workspaceIdentity,
-            allowInsecureDevelopment: config.insecurePolicy.allowInsecureTransport
+            transportAdmission
           })
         ) {
           return;
@@ -1057,7 +1059,7 @@ export async function createDistributedServerComposition(
             repository: humanIdentity,
             workspaceIdentity,
             projectAuthority: runtimeRegistry,
-            allowInsecureDevelopment: config.insecurePolicy.allowInsecureTransport
+            transportAdmission
           })
         ) {
           return;
@@ -1068,7 +1070,7 @@ export async function createDistributedServerComposition(
             workspaceIdentity,
             service: registryService,
             readiness: () => readiness.readiness(),
-            allowInsecureDevelopment: config.insecurePolicy.allowInsecureTransport
+            transportAdmission
           })
         ) {
           return;
@@ -1080,7 +1082,7 @@ export async function createDistributedServerComposition(
             workspaceIdentity,
             projectAuthority: runtimeRegistry,
             readiness: () => readiness.readiness(),
-            allowInsecureDevelopment: config.insecurePolicy.allowInsecureTransport
+            transportAdmission
           })
         ) {
           return;
@@ -1094,7 +1096,7 @@ export async function createDistributedServerComposition(
             workspaceIdentity,
             access: initializedProjectAccess,
             projectAuthority: runtimeRegistry,
-            allowInsecureDevelopment: config.insecurePolicy.allowInsecureTransport,
+            transportAdmission,
             clock
           })
         ) {
@@ -1107,7 +1109,7 @@ export async function createDistributedServerComposition(
             repository: humanIdentity,
             workspaceIdentity,
             projectAuthority: runtimeRegistry,
-            allowInsecureDevelopment: config.insecurePolicy.allowInsecureTransport
+            transportAdmission
           })
         ) {
           return;
@@ -1118,7 +1120,7 @@ export async function createDistributedServerComposition(
             repository: humanIdentity,
             workspaceIdentity,
             projectAuthority: runtimeRegistry,
-            allowInsecureDevelopment: config.insecurePolicy.allowInsecureTransport,
+            transportAdmission,
             clock
           })
         ) {
@@ -1131,7 +1133,7 @@ export async function createDistributedServerComposition(
             repository: humanIdentity,
             workspaceIdentity,
             projectAuthority: runtimeRegistry,
-            allowInsecureDevelopment: config.insecurePolicy.allowInsecureTransport,
+            transportAdmission,
             clock
           })
         ) {
@@ -1140,7 +1142,7 @@ export async function createDistributedServerComposition(
         if (
           await handleHostEnrollmentRequest(request, response, {
             service: enrollments,
-            allowInsecureDevelopment: config.insecurePolicy.allowInsecureTransport
+            transportAdmission
           })
         ) {
           return;
@@ -1149,7 +1151,7 @@ export async function createDistributedServerComposition(
           await handleSetupCodeHttpRequest(request, response, {
             service: setupCodes,
             authorization,
-            allowInsecureDevelopment: config.insecurePolicy.allowInsecureTransport
+            transportAdmission
           })
         ) {
           return;
@@ -1160,7 +1162,7 @@ export async function createDistributedServerComposition(
             dispatches: coordination.dispatches,
             authorization: coordination.artifactAuthorization,
             artifacts: initializedArtifactStore,
-            allowInsecureTransport: config.insecurePolicy.allowInsecureTransport
+            transportAdmission
           })
         ) {
           return;
@@ -1170,7 +1172,7 @@ export async function createDistributedServerComposition(
             service: humanMembership,
             repository: humanIdentity,
             projectAuthority: runtimeRegistry,
-            allowInsecureDevelopment: config.insecurePolicy.allowInsecureTransport,
+            transportAdmission,
             clock
           })
         ) {
@@ -1182,7 +1184,7 @@ export async function createDistributedServerComposition(
             repository: humanIdentity,
             workspaceIdentity,
             projectAuthority: runtimeRegistry,
-            allowInsecureDevelopment: config.insecurePolicy.allowInsecureTransport,
+            transportAdmission,
             clock
           })
         ) {
@@ -1192,7 +1194,7 @@ export async function createDistributedServerComposition(
           await handleWorkspaceIdentityHttpRequest(request, response, {
             authorization,
             repository: workspaceIdentity,
-            allowInsecureDevelopment: config.insecurePolicy.allowInsecureTransport
+            transportAdmission
           })
         ) {
           return;
@@ -1207,7 +1209,7 @@ export async function createDistributedServerComposition(
               maxArtifactBytes: config.limits.maxArtifactBytes,
               maxWebSocketPayloadBytes: config.limits.maxWebSocketPayloadBytes
             },
-            allowInsecureDevelopment: config.insecurePolicy.allowInsecureTransport
+            transportAdmission
           })
         ) {
           return;

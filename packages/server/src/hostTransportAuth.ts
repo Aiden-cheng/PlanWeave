@@ -1,7 +1,10 @@
 import type { IncomingMessage } from "node:http";
 import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { AgentHostRepository, type AgentHost } from "./hosts.js";
-import { humanNetworkTransportAllowed } from "./insecureTransport.js";
+import {
+  humanNetworkTransportAllowed,
+  type TransportAdmissionPolicy
+} from "./insecureTransport.js";
 
 export type HostTransportAuthentication =
   | { ok: true; host: AgentHost }
@@ -45,11 +48,11 @@ export function authenticateAgentHostRequest(
   request: IncomingMessage,
   hosts: AgentHostRepository,
   hostId: string,
-  allowInsecureTransport: boolean,
+  transportAdmission: TransportAdmissionPolicy,
   expectedWorkspaceId?: string
 ): HostTransportAuthentication {
   if (request.headers.origin) return { ok: false, status: 403, message: "Forbidden" };
-  if (!humanNetworkTransportAllowed(request.socket, allowInsecureTransport)) {
+  if (!humanNetworkTransportAllowed(request.socket, transportAdmission)) {
     return { ok: false, status: 426, message: "Upgrade Required" };
   }
   const requestedWorkspaceId = workspaceScope(request);

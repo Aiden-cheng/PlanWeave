@@ -19,6 +19,7 @@ import {
   type HumanIdentityRepository,
   type HumanProjectAuthority
 } from "../identity/index.js";
+import type { TransportAdmissionPolicy } from "../insecureTransport.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import type { ProjectAccessRepository } from "../projectAccessRepository.js";
 import { isAllowedClientOrigin } from "../clientOrigin.js";
@@ -38,7 +39,7 @@ export type CanvasLiveSyncWebSocketOptions = {
   projectAuthority: HumanProjectAuthority;
   maxPayloadBytes: number;
   shutdownTimeoutMs: number;
-  allowInsecureTransport?: boolean;
+  transportAdmission: TransportAdmissionPolicy;
   allowedClientOrigins?: readonly string[];
   clock?: () => Date;
   authCheckIntervalMs?: number;
@@ -257,10 +258,7 @@ export function attachCanvasLiveSyncWebSocketServer(
     };
     const currentAuthorization = (): ReadAuthorization => {
       const authorizationResult = authorizeRead(authorization, route);
-      if (
-        authorizationResult.ok &&
-        authorizationResult.route.workspaceId !== route.workspaceId
-      ) {
+      if (authorizationResult.ok && authorizationResult.route.workspaceId !== route.workspaceId) {
         return { ok: false, code: "cross_scope" };
       }
       return authorizationResult;
@@ -287,8 +285,10 @@ export function attachCanvasLiveSyncWebSocketServer(
     const expireAuthorization = (authorizationResult = currentAuthorization()) => {
       if (authorizationExpired) return;
       authorizationExpired = true;
-      const code: Extract<CanvasLiveSyncErrorCode, "unauthorized" | "forbidden" | "unknown_canvas" | "cross_scope"> =
-        authorizationResult.ok ? "unauthorized" : authorizationResult.code;
+      const code: Extract<
+        CanvasLiveSyncErrorCode,
+        "unauthorized" | "forbidden" | "unknown_canvas" | "cross_scope"
+      > = authorizationResult.ok ? "unauthorized" : authorizationResult.code;
       send(socket, {
         type: "canvas.live.auth_expired",
         protocolVersion: CANVAS_LIVE_SYNC_PROTOCOL_VERSION,
@@ -333,9 +333,15 @@ export function attachCanvasLiveSyncWebSocketServer(
           protocolVersion: CANVAS_LIVE_SYNC_PROTOCOL_VERSION,
           projectId: route.projectId,
           canvasId: route.canvasId,
-          code: error instanceof Error && error.message === "frame_too_large" ? "frame_too_large" : "invalid_message"
+          code:
+            error instanceof Error && error.message === "frame_too_large"
+              ? "frame_too_large"
+              : "invalid_message"
         });
-        socket.close(error instanceof Error && error.message === "frame_too_large" ? 1009 : 4000, "live sync protocol error");
+        socket.close(
+          error instanceof Error && error.message === "frame_too_large" ? 1009 : 4000,
+          "live sync protocol error"
+        );
         return;
       }
       const parsed = canvasLiveSyncClientMessageSchema.safeParse(raw);
@@ -370,7 +376,11 @@ export function attachCanvasLiveSyncWebSocketServer(
         });
         return;
       }
-      if (initialized || message.projectId !== route.projectId || message.canvasId !== route.canvasId) {
+      if (
+        initialized ||
+        message.projectId !== route.projectId ||
+        message.canvasId !== route.canvasId
+      ) {
         send(socket, {
           type: "canvas.live.error",
           protocolVersion: CANVAS_LIVE_SYNC_PROTOCOL_VERSION,
@@ -458,7 +468,7 @@ export function attachCanvasLiveSyncWebSocketServer(
         reject(socket, 403, "Forbidden");
         return;
       }
-      if (!humanTransportAllowed(request.socket, options.allowInsecureTransport)) {
+      if (!humanTransportAllowed(request.socket, options.transportAdmission)) {
         reject(socket, 426, "Upgrade Required");
         return;
       }
@@ -468,7 +478,11 @@ export function attachCanvasLiveSyncWebSocketServer(
       }
       const authorization = authorizeRead(request.headers.authorization, route);
       if (!authorization.ok) {
-        reject(socket, authorization.code === "unauthorized" ? 401 : 403, authorization.code === "unauthorized" ? "Unauthorized" : "Forbidden");
+        reject(
+          socket,
+          authorization.code === "unauthorized" ? 401 : 403,
+          authorization.code === "unauthorized" ? "Unauthorized" : "Forbidden"
+        );
         return;
       }
       webSocketServer.handleUpgrade(request, socket, head, (webSocket) =>

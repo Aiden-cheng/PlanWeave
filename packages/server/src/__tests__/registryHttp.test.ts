@@ -1,4 +1,5 @@
 import { createServer, type Server as HttpServer } from "node:http";
+import { loopbackHttpTransportAdmission } from "./support/transportAdmission.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { actorRefSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
 import { type RegistryHttpService } from "../registryHttp.js";
@@ -112,7 +113,7 @@ async function setup() {
     repository: identity,
     workspaceIdentity,
     service,
-    allowInsecureDevelopment: true
+    transportAdmission: loopbackHttpTransportAdmission
   };
   const server = createServer((request, response) => {
     void handleRegistryHttpRequest(request, response, options);

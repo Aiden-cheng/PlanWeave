@@ -15,6 +15,7 @@ import {
   type HumanIdentityRepository,
   type HumanProjectAuthority
 } from "./identity/index.js";
+import type { TransportAdmissionPolicy } from "./insecureTransport.js";
 import type { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
 import {
   CanvasPresenceHub,
@@ -36,7 +37,7 @@ export type CanvasPresenceWebSocketOptions = {
   projectAuthority: CanvasPresenceProjectAuthority;
   maxPayloadBytes: number;
   shutdownTimeoutMs: number;
-  allowInsecureTransport?: boolean;
+  transportAdmission: TransportAdmissionPolicy;
   allowedClientOrigins?: readonly string[];
   clock?: () => Date;
   authCheckIntervalMs?: number;
@@ -315,7 +316,7 @@ export function attachCanvasPresenceWebSocketServer(
         reject(socket, 403, "Forbidden");
         return;
       }
-      if (!humanTransportAllowed(request.socket, options.allowInsecureTransport)) {
+      if (!humanTransportAllowed(request.socket, options.transportAdmission)) {
         reject(socket, 426, "Upgrade Required");
         return;
       }

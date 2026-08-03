@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { loopbackHttpTransportAdmission } from "./support/transportAdmission.js";
 import { createServer, type Server as HttpServer } from "node:http";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -84,7 +85,7 @@ async function setup(options?: { clock?: () => Date }) {
           service: humanService,
           repository: humanRepository,
           projectAuthority,
-          allowInsecureDevelopment: true,
+          transportAdmission: loopbackHttpTransportAdmission,
           clock: options?.clock
         })
       ) {
@@ -96,7 +97,7 @@ async function setup(options?: { clock?: () => Date }) {
           repository: humanRepository,
           workspaceIdentity,
           projectAuthority,
-          allowInsecureDevelopment: true,
+          transportAdmission: loopbackHttpTransportAdmission,
           clock: options?.clock
         })
       ) {

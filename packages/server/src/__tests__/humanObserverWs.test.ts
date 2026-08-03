@@ -1,4 +1,5 @@
 import { createServer, type Server as HttpServer } from "node:http";
+import { loopbackHttpTransportAdmission } from "./support/transportAdmission.js";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -317,7 +318,7 @@ describe("human observer WSS", () => {
       },
       maxPayloadBytes: 16_384,
       shutdownTimeoutMs: 1_000,
-      allowInsecureTransport: true
+      transportAdmission: loopbackHttpTransportAdmission
     });
     observerServers.push(observer);
     await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));

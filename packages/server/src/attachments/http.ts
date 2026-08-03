@@ -18,6 +18,7 @@ import {
   type HumanProjectAuthority,
   type WorkspaceIdentityRepository
 } from "../identity/index.js";
+import type { TransportAdmissionPolicy } from "../insecureTransport.js";
 import { attachmentErrorCodeSchema, type AttachmentErrorCode } from "./errors.js";
 import { CommentAttachmentService, CommentAttachmentServiceError } from "./service.js";
 
@@ -26,7 +27,7 @@ export type AttachmentHttpOptions = {
   repository: HumanIdentityRepository;
   workspaceIdentity: WorkspaceIdentityRepository;
   projectAuthority: HumanProjectAuthority;
-  allowInsecureDevelopment?: boolean;
+  transportAdmission: TransportAdmissionPolicy;
   clock?: () => Date;
 };
 
@@ -263,7 +264,7 @@ export async function handleCommentAttachmentHttpRequest(
     return false;
   }
 
-  if (!humanTransportAllowed(request.socket, options.allowInsecureDevelopment ?? false)) {
+  if (!humanTransportAllowed(request.socket, options.transportAdmission)) {
     respondJson(response, 403, { error: "attachment_auth_forbidden" });
     request.resume();
     return true;

@@ -6,13 +6,14 @@ import { ArtifactStore } from "./artifacts.js";
 import { DispatchService } from "./dispatches.js";
 import { AgentHostRepository } from "./hosts.js";
 import { authenticateAgentHostRequest } from "./hostTransportAuth.js";
+import type { TransportAdmissionPolicy } from "./insecureTransport.js";
 
 export type ArtifactHttpOptions = {
   hosts: AgentHostRepository;
   dispatches: DispatchService;
   authorization: ArtifactAuthorizationRepository;
   artifacts: ArtifactStore;
-  allowInsecureTransport?: boolean;
+  transportAdmission: TransportAdmissionPolicy;
 };
 
 export type ArtifactHttpServer = {
@@ -147,7 +148,7 @@ export async function handleAgentHostArtifactRequest(
     request,
     options.hosts,
     matched.hostId,
-    options.allowInsecureTransport ?? false,
+    options.transportAdmission,
     workspaceId
   );
   if (!authentication.ok) {

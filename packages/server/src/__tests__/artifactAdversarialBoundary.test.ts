@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { loopbackHttpTransportAdmission } from "./support/transportAdmission.js";
 import { createServer, request as httpRequest, type Server as HttpServer } from "node:http";
 import { connect } from "node:net";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -98,7 +99,7 @@ async function setup() {
       dispatches: coordination.dispatches,
       authorization: coordination.artifactAuthorization,
       artifacts,
-      allowInsecureTransport: true
+      transportAdmission: loopbackHttpTransportAdmission
     })
   );
   await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));

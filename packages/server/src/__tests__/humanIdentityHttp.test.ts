@@ -14,6 +14,11 @@ import {
 import { applyMigrations } from "../migrations.js";
 import { openServerDatabase, type SqliteDatabase } from "../sqlite.js";
 import { HUMAN_RATE_MAX_BUCKETS } from "../identity/http.js";
+import {
+  directHttpsTransportAdmission,
+  loopbackHttpTransportAdmission
+} from "./support/transportAdmission.js";
+import type { TransportAdmissionPolicy } from "../insecureTransport.js";
 import { PROJECT_INVITATION_IDEMPOTENCY_CACHE_TTL_MS } from "../identity/limits.js";
 import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 
@@ -40,7 +45,7 @@ afterEach(async () => {
 });
 
 async function setup(
-  allowInsecureDevelopment = true,
+  transportAdmission: TransportAdmissionPolicy = loopbackHttpTransportAdmission,
   clock?: () => Date,
   additionalProjectIds: readonly string[] = []
 ) {
@@ -63,7 +68,7 @@ async function setup(
       service,
       repository,
       projectAuthority,
-      allowInsecureDevelopment,
+      transportAdmission,
       clock
     });
   });
@@ -209,7 +214,7 @@ describe("human membership HTTP APIs", () => {
       expect(unknown.status).toBe(403);
     }
 
-    expect((await fetch(trustedUrl)).status).toBe(429);
+    expect((await fetch(trustedUrl)).status).toBe(401);
     expect(
       (
         database.prepare("SELECT COUNT(*) AS count FROM project_memberships").get() as {
@@ -377,7 +382,7 @@ describe("human membership HTTP APIs", () => {
 
   it("expires plaintext invitation replay results after the bounded in-process TTL", async () => {
     let now = new Date("2026-07-26T10:00:00.000Z");
-    const { origin } = await setup(true, () => now);
+    const { origin } = await setup(loopbackHttpTransportAdmission, () => now);
     const owner = await bootstrap(origin);
     const ownerToken = owner.payload.deviceToken!;
     const create = () =>
@@ -792,7 +797,7 @@ describe("human membership HTTP APIs", () => {
   });
 
   it("rejects malformed and oversized bodies, invalid query, and insecure transport", async () => {
-    const secure = await setup(false);
+    const secure = await setup(directHttpsTransportAdmission);
     const insecure = await fetch(`${secure.origin}/api/v1/projects/project-a/human/bootstrap`, {
       method: "POST",
       headers: jsonHeaders(),
@@ -801,7 +806,7 @@ describe("human membership HTTP APIs", () => {
     expect(insecure.status).toBe(426);
     await expect(insecure.json()).resolves.toEqual({ error: "human_insecure_transport" });
 
-    const { origin } = await setup(true);
+    const { origin } = await setup(loopbackHttpTransportAdmission);
     const malformed = await fetch(`${origin}/api/v1/projects/project-a/human/bootstrap`, {
       method: "POST",
       headers: jsonHeaders(),
@@ -846,38 +851,75 @@ describe("human membership HTTP APIs", () => {
     expect(formPost.status).toBe(400);
   });
 
-  it("keeps fixed-window rate limits while expiring and bounding admitted keys", async () => {
+  it("does not let unauthenticated requests consume authenticated rate-limit buckets", async () => {
     let now = new Date("2026-07-26T10:00:00.000Z");
     const capacityProjectIds = Array.from(
       { length: HUMAN_RATE_MAX_BUCKETS },
       (_, bucket) => `capacity-project-${bucket}`
     );
-    const { origin } = await setup(true, () => now, capacityProjectIds);
+    const { origin } = await setup(loopbackHttpTransportAdmission, () => now, capacityProjectIds);
     const limitedUrl = `${origin}/api/v1/projects/project-a/human/members`;
 
     for (let request = 0; request < 60; request += 1) {
       const response = await fetch(limitedUrl);
       expect(response.status).toBe(401);
     }
-    const limited = await fetch(limitedUrl);
-    expect(limited.status).toBe(429);
+    const stillUnauthenticated = await fetch(limitedUrl);
+    expect(stillUnauthenticated.status).toBe(401);
 
     now = new Date(now.getTime() + 60_000);
-    const afterWindow = await fetch(limitedUrl);
-    expect(afterWindow.status).toBe(401);
+    expect((await fetch(limitedUrl)).status).toBe(401);
 
     for (const projectId of capacityProjectIds) {
       const response = await fetch(`${origin}/api/v1/projects/${projectId}/human/members`);
       expect(response.status).toBe(401);
     }
 
-    const afterCapacityEviction = await fetch(limitedUrl);
-    expect(afterCapacityEviction.status).toBe(401);
+    expect((await fetch(limitedUrl)).status).toBe(401);
+  });
+
+  it("bounds invalid invitation-token buckets without locking a valid invitation", async () => {
+    const { origin } = await setup();
+    const owner = await bootstrap(origin);
+    const invitationResponse = await fetch(
+      `${origin}/api/v1/projects/project-a/human/invitations`,
+      {
+        method: "POST",
+        headers: jsonHeaders(owner.payload.deviceToken!),
+        body: "{}"
+      }
+    );
+    const invitation = (await invitationResponse.json()) as { invitationToken: string };
+
+    for (let bucket = 0; bucket <= HUMAN_RATE_MAX_BUCKETS; bucket += 1) {
+      const invalidToken = `pw_inv_${createHash("sha256")
+        .update(`invalid-invitation-${bucket}`)
+        .digest("base64url")}`;
+      const response = await fetch(
+        `${origin}/api/v1/projects/project-a/human/invitations/consume`,
+        {
+          method: "POST",
+          headers: jsonHeaders(),
+          body: JSON.stringify({ invitationToken: invalidToken, displayName: "Attacker" })
+        }
+      );
+      expect(response.status).toBe(403);
+    }
+
+    const valid = await fetch(`${origin}/api/v1/projects/project-a/human/invitations/consume`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({
+        invitationToken: invitation.invitationToken,
+        displayName: "Invited Member"
+      })
+    });
+    expect(valid.status).toBe(201);
   });
 
   it("isolates read routes from each other and the sensitive-write bucket", async () => {
     const now = new Date("2026-07-26T10:00:00.000Z");
-    const { origin } = await setup(true, () => now);
+    const { origin } = await setup(loopbackHttpTransportAdmission, () => now);
     const owner = await bootstrap(origin);
     const ownerToken = owner.payload.deviceToken!;
     const membersUrl = `${origin}/api/v1/projects/project-a/human/members`;
@@ -909,6 +951,26 @@ describe("human membership HTTP APIs", () => {
         }
       );
       expect(unauthenticatedWrite.status).toBe(401);
+    }
+    const authenticatedAfterAttack = await fetch(
+      `${origin}/api/v1/projects/project-a/human/invitations`,
+      {
+        method: "POST",
+        headers: jsonHeaders(ownerToken),
+        body: JSON.stringify({ idempotencyKey: "write-after-unauthenticated-attack" })
+      }
+    );
+    expect(authenticatedAfterAttack.status).toBe(201);
+    for (let request = 0; request < 58; request += 1) {
+      const authenticatedWrite = await fetch(
+        `${origin}/api/v1/projects/project-a/human/invitations`,
+        {
+          method: "POST",
+          headers: jsonHeaders(ownerToken),
+          body: JSON.stringify({ idempotencyKey: `authenticated-write-${request}` })
+        }
+      );
+      expect(authenticatedWrite.status).toBe(201);
     }
     const limited = await fetch(`${origin}/api/v1/projects/project-a/human/invitations`, {
       method: "POST",

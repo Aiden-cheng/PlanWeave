@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { loopbackHttpTransportAdmission } from "./support/transportAdmission.js";
 import { createServer, request as httpRequest, type Server as HttpServer } from "node:http";
 import { mkdtemp, readdir, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -153,7 +154,7 @@ describe("content-addressed artifacts", () => {
         dispatches: coordination.dispatches,
         authorization: coordination.artifactAuthorization,
         artifacts,
-        allowInsecureTransport: true
+        transportAdmission: loopbackHttpTransportAdmission
       })
     );
     await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
@@ -292,7 +293,7 @@ describe("content-addressed artifacts", () => {
         dispatches: coordination.dispatches,
         authorization: coordination.artifactAuthorization,
         artifacts,
-        allowInsecureTransport: true
+        transportAdmission: loopbackHttpTransportAdmission
       })
     );
     await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));

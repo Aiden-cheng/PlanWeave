@@ -17,6 +17,7 @@ import {
   type HumanIdentityRepository,
   type HumanProjectAuthority
 } from "../identity/index.js";
+import type { TransportAdmissionPolicy } from "../insecureTransport.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { CommentService, CommentServiceError } from "./service.js";
 
@@ -39,7 +40,7 @@ export type CommentActivityHttpOptions = {
   repository: HumanIdentityRepository;
   workspaceIdentity: WorkspaceIdentityRepository;
   projectAuthority: HumanProjectAuthority;
-  allowInsecureDevelopment?: boolean;
+  transportAdmission: TransportAdmissionPolicy;
   clock?: () => Date;
 };
 
@@ -167,8 +168,13 @@ function parseJsonParameter(value: string | undefined): unknown {
   }
 }
 
-function rateLimitAllowed(request: IncomingMessage, projectId: string, now: number): boolean {
-  const key = `${request.socket.remoteAddress ?? "unknown"}:${projectId}`;
+function rateLimitAllowed(
+  humanPrincipalId: string,
+  workspaceId: string,
+  projectId: string,
+  now: number
+): boolean {
+  const key = JSON.stringify([humanPrincipalId, workspaceId, projectId]);
   const current = rateBuckets.get(key);
   if (current && now - current.windowStartedAt < COMMENT_RATE_WINDOW_MS) {
     if (current.count >= COMMENT_RATE_MAX_REQUESTS) return false;
@@ -244,15 +250,9 @@ export async function handleCommentActivityHttpRequest(
   }
 
   try {
-    if (!humanTransportAllowed(request.socket, options.allowInsecureDevelopment)) {
+    if (!humanTransportAllowed(request.socket, options.transportAdmission)) {
       request.resume();
       respond(response, 426, { error: "human_insecure_transport" });
-      return true;
-    }
-    const now = (options.clock ?? (() => new Date()))().getTime();
-    if (!rateLimitAllowed(request, matched.projectId, now)) {
-      request.resume();
-      respond(response, 429, { error: "comment_rate_limited" });
       return true;
     }
     const credentialActor = authenticateCollaborationForProject(
@@ -279,6 +279,19 @@ export async function handleCommentActivityHttpRequest(
       matched.projectId
     );
     if (!authenticated) throw new CommentServiceError("comment_cross_project_forbidden");
+    const now = (options.clock ?? (() => new Date()))().getTime();
+    if (
+      !rateLimitAllowed(
+        authenticated.actor.humanPrincipalId,
+        authenticated.workspaceId,
+        matched.projectId,
+        now
+      )
+    ) {
+      request.resume();
+      respond(response, 429, { error: "comment_rate_limited" });
+      return true;
+    }
     const actor = commentActor(authenticated, options.workspaceIdentity);
     const service = options.resolveService(authenticated.workspaceId, matched.projectId);
     if (!service) throw new CommentServiceError("comment_cross_project_forbidden");

@@ -8,6 +8,7 @@ import {
   type HumanIdentityRepository,
   type HumanProjectAuthority
 } from "./identity/index.js";
+import type { TransportAdmissionPolicy } from "./insecureTransport.js";
 import type { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
 import { DispatchAssignmentError } from "./work/dispatchIntegration.js";
 import { RemoteExecutionActionRejectedError } from "./remoteExecutionActions.js";
@@ -25,7 +26,7 @@ export type HumanRemoteHttpOptions = {
   workspaceIdentity: WorkspaceIdentityRepository;
   projectAuthority: HumanProjectAuthority;
   readiness(): ServerReadiness;
-  allowInsecureDevelopment?: boolean;
+  transportAdmission: TransportAdmissionPolicy;
 };
 
 type HumanRemoteRoute =
@@ -176,7 +177,7 @@ export async function handleHumanRemoteHttpRequest(
     return false;
   }
   try {
-    if (!humanTransportAllowed(request.socket, options.allowInsecureDevelopment)) {
+    if (!humanTransportAllowed(request.socket, options.transportAdmission)) {
       request.resume();
       respond(response, 426, { error: "human_insecure_transport" });
       return true;

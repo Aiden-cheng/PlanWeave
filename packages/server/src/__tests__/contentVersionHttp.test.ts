@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { loopbackHttpTransportAdmission } from "./support/transportAdmission.js";
 import { createServer, type Server } from "node:http";
 import { EventEmitter } from "node:events";
 import { rm } from "node:fs/promises";
@@ -195,7 +196,7 @@ async function fixture() {
           scope.projectId === "p" &&
           (scope.canvasId === undefined || scope.canvasId === "default")
       },
-      allowInsecureDevelopment: true
+      transportAdmission: loopbackHttpTransportAdmission
     });
   });
   servers.push(server);

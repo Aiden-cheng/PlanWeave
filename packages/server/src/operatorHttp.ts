@@ -5,6 +5,10 @@ import { OperatorTokenRegistry, type OperatorPrincipal } from "./operatorAuth.js
 import { serverReadinessSchema, type ServerReadiness } from "./readiness.js";
 import { DispatchAssignmentError } from "./work/dispatchIntegration.js";
 import { RemoteExecutionActionRejectedError } from "./remoteExecutionActions.js";
+import {
+  operatorNetworkTransportAllowed,
+  type TransportAdmissionPolicy
+} from "./insecureTransport.js";
 
 const MAX_OPERATOR_BODY_BYTES = 64 * 1024;
 
@@ -31,7 +35,7 @@ export type OperatorHttpOptions = {
     maxArtifactBytes: number;
     maxWebSocketPayloadBytes: number;
   };
-  allowInsecureDevelopment?: boolean;
+  transportAdmission: TransportAdmissionPolicy;
 };
 
 export type OperatorControlPort = {
@@ -232,22 +236,11 @@ function safeError(error: unknown): { status: number; code: string } {
   return { status: 500, code: "operator_request_failed" };
 }
 
-function isLoopback(address: string | undefined): boolean {
-  return Boolean(
-    address === "::1" ||
-      address === "127.0.0.1" ||
-      address?.startsWith("127.") ||
-      address?.startsWith("::ffff:127.")
-  );
-}
-
 export function operatorTransportAllowed(
   socket: { encrypted?: boolean; remoteAddress?: string },
-  allowInsecureDevelopment = false
+  transportAdmission: TransportAdmissionPolicy
 ): boolean {
-  return (
-    socket.encrypted === true || (allowInsecureDevelopment && isLoopback(socket.remoteAddress))
-  );
+  return operatorNetworkTransportAllowed(socket, transportAdmission);
 }
 
 export async function handleOperatorHttpRequest(
@@ -292,7 +285,7 @@ export async function handleOperatorHttpRequest(
       );
       return true;
     }
-    if (!operatorTransportAllowed(request.socket, options.allowInsecureDevelopment)) {
+    if (!operatorTransportAllowed(request.socket, options.transportAdmission)) {
       request.resume();
       respond(response, 426, { error: "operator_insecure_transport" });
       return true;

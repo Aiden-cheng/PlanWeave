@@ -12,6 +12,7 @@ import {
   type HumanIdentityRepository,
   type HumanProjectAuthority
 } from "./identity/index.js";
+import type { TransportAdmissionPolicy } from "./insecureTransport.js";
 import type { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
 import type { ProjectAccessRepository } from "./projectAccessRepository.js";
 
@@ -26,7 +27,7 @@ export type AccessHttpOptions = {
   repository: HumanIdentityRepository;
   workspaceIdentity: WorkspaceIdentityRepository;
   projectAuthority: HumanProjectAuthority;
-  allowInsecureDevelopment?: boolean;
+  transportAdmission: TransportAdmissionPolicy;
 };
 
 function decodeIdentifier(value: string): string | undefined {
@@ -124,7 +125,7 @@ export async function handleAccessHttpRequest(
   const matched = route(request, url.pathname);
   if (!matched) return false;
   try {
-    if (!humanTransportAllowed(request.socket, options.allowInsecureDevelopment)) {
+    if (!humanTransportAllowed(request.socket, options.transportAdmission)) {
       request.resume();
       respond(response, 426, { error: "access_insecure_transport" });
       return true;
@@ -200,7 +201,12 @@ export async function handleAccessHttpRequest(
         response,
         200,
         currentCanvasAccessViewSchema.parse({
-          scope: { scopeKind: "canvas", workspaceId, projectId: matched.projectId, canvasId: matched.canvasId },
+          scope: {
+            scopeKind: "canvas",
+            workspaceId,
+            projectId: matched.projectId,
+            canvasId: matched.canvasId
+          },
           projectVisibility: project.visibility,
           canvasVisibility: canvas.visibility,
           projectAclRevision: project.acl.revision,
@@ -222,7 +228,11 @@ export async function handleAccessHttpRequest(
       return true;
     }
     const result = options.access.compareAndSetAccess({ actor: actorRef, request: mutation });
-    respond(response, result.status === "conflict" ? 409 : result.status === "denied" ? 403 : 200, result);
+    respond(
+      response,
+      result.status === "conflict" ? 409 : result.status === "denied" ? 403 : 200,
+      result
+    );
     return true;
   } catch (error) {
     request.resume();

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { loopbackHttpTransportAdmission } from "./support/transportAdmission.js";
 import { createServer, type Server as HttpServer } from "node:http";
 import { connect } from "node:net";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -72,7 +73,7 @@ describe("artifact output quotas", () => {
         dispatches: coordination.dispatches,
         authorization: coordination.artifactAuthorization,
         artifacts,
-        allowInsecureTransport: true
+        transportAdmission: loopbackHttpTransportAdmission
       })
     );
     await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
