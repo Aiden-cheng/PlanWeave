@@ -72,7 +72,13 @@ describe("authoritative canvas replica two-client live E2E", () => {
             displayName: profileId,
             serverBaseUrl: `${fixture.origin}/`,
             projectId: fixture.projectId,
-            allowInsecureTransport: true
+            allowInsecureTransport: true,
+            endpoint: {
+              topology: "loopback_http",
+              serverOrigin: `${fixture.origin}/`,
+              allowedClientOrigins: [`${fixture.origin}/`],
+              tlsTrust: "not_applicable"
+            }
           },
           credential: { getDeviceToken: () => token },
           WebSocketImpl: WebSocket as unknown as CollaborationWebSocketConstructor,

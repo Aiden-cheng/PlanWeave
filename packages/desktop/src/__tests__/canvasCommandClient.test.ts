@@ -139,7 +139,13 @@ describe("CollaborationClient canvas commands", () => {
         displayName: "Cmd",
         serverBaseUrl: origin,
         projectId: "project-demo-001",
-        allowInsecureTransport: true
+        allowInsecureTransport: true,
+        endpoint: {
+          topology: "loopback_http",
+          serverOrigin: origin,
+          allowedClientOrigins: [origin],
+          tlsTrust: "not_applicable"
+        }
       },
       credential: { getDeviceToken: () => exampleHumanDeviceToken },
       limits: { requestTimeoutMs: 2_000, jsonBodyMaxBytes: 64_000 }
@@ -199,7 +205,13 @@ describe("CollaborationClient canvas commands", () => {
         displayName: "Reconnect",
         serverBaseUrl: origin,
         projectId: "project-demo-001",
-        allowInsecureTransport: true
+        allowInsecureTransport: true,
+        endpoint: {
+          topology: "loopback_http",
+          serverOrigin: origin,
+          allowedClientOrigins: [origin],
+          tlsTrust: "not_applicable"
+        }
       },
       credential: { getDeviceToken: () => exampleHumanDeviceToken }
     });
@@ -229,7 +241,13 @@ describe("CollaborationClient canvas commands", () => {
         displayName: "Snapshot",
         serverBaseUrl: origin,
         projectId: "project-demo-001",
-        allowInsecureTransport: true
+        allowInsecureTransport: true,
+        endpoint: {
+          topology: "loopback_http",
+          serverOrigin: origin,
+          allowedClientOrigins: [origin],
+          tlsTrust: "not_applicable"
+        }
       },
       credential: { getDeviceToken: () => exampleHumanDeviceToken }
     });

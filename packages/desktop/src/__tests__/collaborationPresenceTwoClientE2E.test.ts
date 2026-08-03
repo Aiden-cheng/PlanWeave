@@ -171,7 +171,13 @@ function createClient(
       displayName: profileId,
       serverBaseUrl: `${origin}/`,
       projectId,
-      allowInsecureTransport: true
+      allowInsecureTransport: true,
+      endpoint: {
+        topology: "loopback_http",
+        serverOrigin: `${origin}/`,
+        allowedClientOrigins: [`${origin}/`],
+        tlsTrust: "not_applicable"
+      }
     },
     credential: { getDeviceToken: () => token },
     WebSocketImpl: WebSocket as unknown as CollaborationWebSocketConstructor,

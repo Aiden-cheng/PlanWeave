@@ -141,7 +141,13 @@ function createClient(origin: string, projectId: string, profileId: string, toke
       displayName: profileId,
       serverBaseUrl: `${origin}/`,
       projectId,
-      allowInsecureTransport: true
+      allowInsecureTransport: true,
+      endpoint: {
+        topology: "loopback_http",
+        serverOrigin: `${origin}/`,
+        allowedClientOrigins: [`${origin}/`],
+        tlsTrust: "not_applicable"
+      }
     },
     credential: { getDeviceToken: () => token },
     WebSocketImpl: WebSocket as unknown as CollaborationWebSocketConstructor,
@@ -156,9 +162,8 @@ function bridgeFor(client: CollaborationClient): CanvasCommandBridge {
     submitCollaborationCanvasCommand: async (input) => {
       const outcome = await client.submitCanvasCommand({
         canvasId: input.canvasId,
-        operationId: input.operationId ?? `op-${Math.random().toString(36).slice(2, 12)}`,
-        intent: input.intent,
-        expectedRevision: input.expectedRevision
+        operationId: `op-${Math.random().toString(36).slice(2, 12)}`,
+        intent: input.intent
       });
       return { outcome, session: client.canvasCommandSession() };
     },
@@ -220,15 +225,12 @@ describe("Desktop canvas command dual-client E2E (OSS-004 B-003)", () => {
     expect(controllerA.getSnapshot().session?.revision).toBe(0);
     expect(controllerB.getSnapshot().session?.revision).toBe(0);
 
-    const first = await controllerA.submit({
-      operationId: "op-shared-001",
-      intent: {
-        kind: "update_task_prompt",
-        taskId: "T-001",
-        promptMarkdown: "# dual client first\n"
-      },
-      expectedRevision: 0
-    });
+    const firstIntent = {
+      kind: "update_task_prompt" as const,
+      taskId: "T-001",
+      promptMarkdown: "# dual client first\n"
+    };
+    const first = await controllerA.submit({ intent: firstIntent });
     expect(first.outcome.type, JSON.stringify(first.outcome)).toBe("canvas.command.accepted");
     if (first.outcome.type !== "canvas.command.accepted") throw new Error("expected accept");
     expect(first.outcome.revision).toBe(1);
@@ -248,29 +250,24 @@ describe("Desktop canvas command dual-client E2E (OSS-004 B-003)", () => {
     });
 
     // Duplicate operationId is idempotent (no second apply).
-    const replay = await controllerA.submit({
-      operationId: "op-shared-001",
-      intent: {
-        kind: "update_task_prompt",
-        taskId: "T-001",
-        promptMarkdown: "# dual client first\n"
-      },
+    const replay = await clientA.submitCanvasCommand({
+      canvasId: "default",
+      operationId: first.outcome.operationId,
+      intent: firstIntent,
       expectedRevision: 0
     });
-    expect(replay.outcome.type).toBe("canvas.command.accepted");
-    if (replay.outcome.type !== "canvas.command.accepted") throw new Error("expected replay");
-    expect(replay.outcome.idempotentReplay).toBe(true);
-    expect(replay.outcome.revision).toBe(1);
+    expect(replay.type).toBe("canvas.command.accepted");
+    if (replay.type !== "canvas.command.accepted") throw new Error("expected replay");
+    expect(replay.idempotentReplay).toBe(true);
+    expect(replay.revision).toBe(1);
 
     // Stale revision is surfaced without guessing.
     const stale = await controllerB.submit({
-      operationId: "op-shared-stale",
       intent: {
         kind: "update_task_prompt",
         taskId: "T-001",
         promptMarkdown: "# stale attempt\n"
-      },
-      expectedRevision: 0
+      }
     });
     expect(stale.outcome.type).toBe("canvas.command.rejected");
     if (stale.outcome.type !== "canvas.command.rejected") throw new Error("expected reject");
@@ -281,7 +278,7 @@ describe("Desktop canvas command dual-client E2E (OSS-004 B-003)", () => {
     expect(controllerB.getSnapshot().session?.revision).toBe(0);
 
     // Client B reconnects and converges on ordered history.
-    const reconnect = await controllerB.reconnect({ canvasId: "default" });
+    const reconnect = await controllerB.reconnect();
     expect(reconnect.response.type).toBe("canvas.reconnect.snapshot");
     if (reconnect.response.type !== "canvas.reconnect.snapshot") throw new Error("expected snapshot");
     expect(reconnect.response.snapshot.metadata.revision).toBe(1);
@@ -292,22 +289,22 @@ describe("Desktop canvas command dual-client E2E (OSS-004 B-003)", () => {
 
     // Client B continues ordered history from authoritative revision.
     const second = await controllerB.submit({
-      operationId: "op-shared-002",
       intent: {
         kind: "update_task_prompt",
         taskId: "T-001",
         promptMarkdown: "# dual client second\n"
-      },
-      expectedRevision: 1
+      }
     });
     expect(second.outcome.type).toBe("canvas.command.accepted");
     if (second.outcome.type !== "canvas.command.accepted") throw new Error("expected accept");
     expect(second.outcome.revision).toBe(2);
 
-    const reconnectA = await controllerA.reconnect({ canvasId: "default", afterRevision: 1 });
+    const reconnectA = await controllerA.reconnect({ afterRevision: 1 });
     expect(reconnectA.response.type).toBe("canvas.reconnect.delta");
     if (reconnectA.response.type !== "canvas.reconnect.delta") throw new Error("expected delta");
-    expect(reconnectA.response.entries.map((entry) => entry.operationId)).toEqual(["op-shared-002"]);
+    expect(reconnectA.response.entries.map((entry) => entry.operationId)).toEqual([
+      second.outcome.operationId
+    ]);
     expect(controllerA.getSnapshot().session?.revision).toBe(2);
 
     // Unauthorized cannot mutate or read reconnect snapshots.
