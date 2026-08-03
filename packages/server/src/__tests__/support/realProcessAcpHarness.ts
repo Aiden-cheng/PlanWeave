@@ -22,12 +22,13 @@ import { spawnManagedProcess, type ManagedProcessTree } from "@planweave-ai/runt
 import type { PlanPackageManifest } from "@planweave-ai/runtime";
 import { redactRunnerEventText } from "@planweave-ai/runtime";
 import { operatorEnrollmentGrantResponseSchema } from "@planweave-ai/agent-host-protocol";
+import { z } from "zod";
 import {
   basicManifest,
   createTestWorkspace
 } from "../../../../runtime/src/__tests__/promptTestHelpers.js";
 import { hashOperatorToken } from "../../operatorAuth.js";
-import { parseServerConfig } from "../../config.js";
+import { parseServerConfig, serverConfigSummarySchema } from "../../config.js";
 import { legacyWorkspaceIdForProject } from "./legacyWorkspaceId.js";
 import { seedOperatorSessions } from "./operatorAuthFixture.js";
 
@@ -50,6 +51,11 @@ export const acpMockAgentPath = resolveHarnessPath(
 );
 
 export const REAL_PROCESS_ACP_HARNESS_DEFAULT_TIMEOUT_MS = 15_000;
+
+const serverReadyOutputSchema = serverConfigSummarySchema
+  .pick({ advertisedOrigin: true })
+  .extend({ status: z.literal("ready") })
+  .passthrough();
 
 export type ProcessLogBuffer = {
   stdout: string;
@@ -813,8 +819,8 @@ export class RealProcessAcpHarness {
                 .map((value) => value.trim())
                 .find((value) => value.startsWith("{") && value.includes("status"));
               if (!line) return false;
-              const parsed = JSON.parse(line) as { status?: string; publicUrl?: string };
-              return parsed.status === "ready" && parsed.publicUrl === this.origin;
+              const parsed = serverReadyOutputSchema.safeParse(JSON.parse(line));
+              return parsed.success && parsed.data.advertisedOrigin === this.origin;
             } catch {
               return false;
             }
@@ -831,17 +837,13 @@ export class RealProcessAcpHarness {
       } catch (error) {
         lastError = error;
         const busy = this.serverLogsIndicatePortBusy();
-        const snapshot = this.server?.exitSnapshot;
         if (this.server?.tree.isAlive()) {
           await this.stopServer("harness rebind after bind failure").catch(() => undefined);
         } else {
           this.server = undefined;
         }
-        if (!busy && snapshot) {
-          // Config/corruption failures should not consume all rebind attempts silently.
-          throw error;
-        }
-        if (!busy && attempt === maxBindAttempts - 1) throw error;
+        if (!busy) throw error;
+        if (attempt === maxBindAttempts - 1) throw error;
       }
     }
     throw lastError instanceof Error

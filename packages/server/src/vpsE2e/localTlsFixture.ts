@@ -4,6 +4,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { z } from "zod";
+import { serverConfigSummarySchema } from "../config.js";
 import { hashOperatorToken } from "../operatorAuth.js";
 import { OperatorSessionStore } from "../identity/operatorSessionStore.js";
 import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
@@ -62,6 +64,11 @@ const DEFAULT_TIMEOUT_MS = 45_000;
 const HOST_CAPACITY = 2;
 const HOST_CAPABILITIES = ["acp.test"] as const;
 const HOST_DISPLAY_NAME = "local-tls-fixture-host";
+
+const serverReadyOutputSchema = serverConfigSummarySchema
+  .pick({ advertisedOrigin: true })
+  .extend({ status: z.literal("ready") })
+  .passthrough();
 
 async function seedOperatorSession(databasePath: string, projectId: string, token: string) {
   const database = await openServerDatabase(databasePath, 5_000);
@@ -339,8 +346,8 @@ export async function runLocalTlsFixture(options: {
           .find((value) => value.startsWith("{") && value.includes("status"));
         if (!line) return false;
         try {
-          const parsed = JSON.parse(line) as { status?: string; publicUrl?: string };
-          return parsed.status === "ready" && parsed.publicUrl === origin;
+          const parsed = serverReadyOutputSchema.safeParse(JSON.parse(line));
+          return parsed.success && parsed.data.advertisedOrigin === origin;
         } catch {
           return false;
         }
