@@ -210,7 +210,7 @@ pnpm check:distributed-package-install
 
 ## Distributed release gate
 
-Print the live release checklist (deterministic CI suite, local real ACP, remote VPS) and evaluate sanitized evidence:
+Print the live release checklist (deterministic CI suite, local real ACP, remote VPS, and live Tailnet collaboration/Agent Host) and evaluate sanitized evidence:
 
 ```bash
 node scripts/planweave-release-gate.mjs --checklist
@@ -218,7 +218,7 @@ pnpm exec vitest run packages/server/src/__tests__/releaseGate.test.ts \
   packages/agent-host-protocol/src/__tests__/compatibility.test.ts
 ```
 
-Do not treat skipped `PLANWEAVE_REAL_ACP` or `PLANWEAVE_VPS_E2E` evidence as a release pass. Run both live tiers in hard mode, then evaluate their current sanitized evidence with:
+Do not treat skipped live evidence as a release pass. Pre-release readiness requires all four tiers; remote VPS evidence does not replace the independent live Tailnet collaboration/Agent Host tier. Run the live checks in hard mode, then evaluate their current sanitized evidence with:
 
 ```bash
 # After collecting evidence files (paths are examples):
@@ -226,8 +226,17 @@ node scripts/planweave-release-gate.mjs \
   --deterministic-evidence /tmp/det.json \
   --real-acp-evidence /tmp/real-acp.json \
   --vps-evidence /tmp/vps-e2e.json \
+  --tailnet-evidence /tmp/tailnet-e2e.json \
   --report /tmp/release-gate.json
 ```
+
+The Tailnet evidence producer is operator-owned and must verify the exact Tailscale Serve route and lease, independent ACL and Serve probes, Windows and Linux/VPS Agent Hosts, packaged macOS and Windows Desktops, two independent Desktop identities/profiles/vaults, collaboration boundaries, an explicitly selected Agent endpoint, restart recovery, and temporary Desktop credential revocation:
+
+```bash
+PLANWEAVE_TAILNET_E2E_REQUIRE=1 node scripts/tailnet-collaboration-e2e.mjs --require --evidence /tmp/tailnet-e2e.json
+```
+
+Its `planweave.tailnet-collaboration-e2e/v1` output must contain only sanitized SHA-256 digests, enums, booleans, counts, and timestamps—never origins, hostnames, tokens, setup codes, Host/device identifiers, or absolute paths. The strict schema protects against incomplete or accidentally unsafe operator evidence; it does not authenticate evidence against a malicious operator, and no signing or PKI trust is implied.
 
 Opt-in live helpers from the monorepo:
 

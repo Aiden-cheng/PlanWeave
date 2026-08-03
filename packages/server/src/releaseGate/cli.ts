@@ -2,7 +2,11 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { RELEASE_GATE_ROLLBACK_CHECKS, RELEASE_GATE_TIERS } from "./checklist.js";
+import {
+  RELEASE_GATE_CHECKLIST_VERSION,
+  RELEASE_GATE_ROLLBACK_CHECKS,
+  RELEASE_GATE_TIERS
+} from "./checklist.js";
 import {
   buildReleaseGateReport,
   writeReleaseGateReport,
@@ -11,6 +15,20 @@ import {
 import { runDeterministicProcessSuite } from "./runDeterministic.js";
 
 export type ReleaseGateCliIo = { stdout(value: string): void; stderr(value: string): void };
+
+export const RELEASE_GATE_CLI_USAGE = `Usage: planweave-server release-gate [options]
+
+Options:
+  --checklist
+  --run-deterministic
+  --deterministic-evidence <path>
+  --real-acp-evidence <path>
+  --vps-evidence <path>
+  --tailnet-evidence <path>
+  --agent-host-version <semver>
+  --protocol-version <semver>
+  --report <path>
+  -h, --help`;
 
 function option(argv: readonly string[], name: string): string | undefined {
   const index = argv.indexOf(name);
@@ -45,6 +63,7 @@ async function readMonorepoPackageVersion(
  *   [--deterministic-evidence <path>]
  *   [--real-acp-evidence <path>]
  *   [--vps-evidence <path>]
+ *   [--tailnet-evidence <path>]
  *   [--agent-host-version <semver>]
  *   [--protocol-version <semver>]
  *   [--report <path>]
@@ -66,12 +85,18 @@ export async function runReleaseGateCli(
 ): Promise<number> {
   const io = options.io ?? { stdout: console.log, stderr: console.error };
 
+  if (argv.length === 1 && (argv[0] === "--help" || argv[0] === "-h")) {
+    io.stdout(RELEASE_GATE_CLI_USAGE);
+    return 0;
+  }
+
   const known = new Set([
     "--checklist",
     "--run-deterministic",
     "--deterministic-evidence",
     "--real-acp-evidence",
     "--vps-evidence",
+    "--tailnet-evidence",
     "--agent-host-version",
     "--protocol-version",
     "--report"
@@ -90,7 +115,7 @@ export async function runReleaseGateCli(
     io.stdout(
       JSON.stringify(
         {
-          version: "planweave.release-gate.checklist/v1",
+          version: RELEASE_GATE_CHECKLIST_VERSION,
           tiers: RELEASE_GATE_TIERS,
           rollback: RELEASE_GATE_ROLLBACK_CHECKS,
           rules: {
@@ -124,13 +149,13 @@ export async function runReleaseGateCli(
   const agentHostVersion =
     option(argv, "--agent-host-version") ?? (await readMonorepoPackageVersion("agent-host"));
   const protocolPackageVersion =
-    option(argv, "--protocol-version") ??
-    (await readMonorepoPackageVersion("agent-host-protocol"));
+    option(argv, "--protocol-version") ?? (await readMonorepoPackageVersion("agent-host-protocol"));
 
   const report: ReleaseGateReport = await buildReleaseGateReport({
     deterministicEvidencePath,
     realAcpEvidencePath: option(argv, "--real-acp-evidence"),
     vpsEvidencePath: option(argv, "--vps-evidence"),
+    tailnetEvidencePath: option(argv, "--tailnet-evidence"),
     agentHostVersion,
     protocolPackageVersion,
     now: options.now
@@ -147,6 +172,7 @@ export async function runReleaseGateCli(
     argv.includes("--run-deterministic") &&
     !option(argv, "--real-acp-evidence") &&
     !option(argv, "--vps-evidence") &&
+    !option(argv, "--tailnet-evidence") &&
     report.releaseReady.ci
   ) {
     return 0;
@@ -157,6 +183,7 @@ export async function runReleaseGateCli(
     !option(argv, "--deterministic-evidence") &&
     !option(argv, "--real-acp-evidence") &&
     !option(argv, "--vps-evidence") &&
+    !option(argv, "--tailnet-evidence") &&
     !argv.includes("--run-deterministic")
   ) {
     // Pure checklist dump already handled; bare `release-gate` prints readiness report.
