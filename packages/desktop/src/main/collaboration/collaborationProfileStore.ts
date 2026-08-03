@@ -67,9 +67,9 @@ const currentCollaborationProfilesDocumentSchema = z
     }
   });
 
-const versionTwoCollaborationProfilesDocumentSchema = z
+const preDiscriminatorCollaborationProfilesDocumentSchema = z
   .object({
-    version: z.literal(2),
+    version: z.union([z.literal(2), z.literal(3)]),
     profiles: z.array(
       collaborationConnectionProfileSchema.extend({ updatedAt: timestampSchema }).strict()
     ),
@@ -123,13 +123,13 @@ function parseProfilesDocument(input: unknown): {
     return { document: current.data, requiresWrite: false };
   }
 
-  const versionTwo = versionTwoCollaborationProfilesDocumentSchema.safeParse(input);
-  if (versionTwo.success) {
+  const preDiscriminator = preDiscriminatorCollaborationProfilesDocumentSchema.safeParse(input);
+  if (preDiscriminator.success) {
     return {
       document: currentCollaborationProfilesDocumentSchema.parse({
         version: 3,
-        activeProfileId: versionTwo.data.activeProfileId,
-        profiles: versionTwo.data.profiles.map((profile) => ({
+        activeProfileId: preDiscriminator.data.activeProfileId,
+        profiles: preDiscriminator.data.profiles.map((profile) => ({
           ...profile,
           connectionState: "ready"
         }))

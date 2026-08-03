@@ -230,6 +230,32 @@ describe("collaboration profile endpoint authority", () => {
     });
   });
 
+  it("migrates pre-discriminator version 3 records written by earlier desktop builds", async () => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-profile-v3-migration-"));
+    const profilesPath = join(root, "profiles.json");
+    await writeFile(
+      profilesPath,
+      JSON.stringify({
+        version: 3,
+        activeProfileId: "remote-v3",
+        profiles: [{ ...readyProfile("remote-v3"), updatedAt: "2030-01-01T00:00:00.000Z" }]
+      })
+    );
+
+    const document = await new CollaborationProfileStore({ profilesPath }).read();
+
+    expect(document).toMatchObject({
+      version: 3,
+      activeProfileId: "remote-v3",
+      profiles: [{ profileId: "remote-v3", connectionState: "ready" }]
+    });
+    expect(JSON.parse(await readFile(profilesPath, "utf8"))).toMatchObject({
+      version: 3,
+      activeProfileId: "remote-v3",
+      profiles: [{ profileId: "remote-v3", connectionState: "ready" }]
+    });
+  });
+
   it("keeps cached and durable state unchanged after failed profile mutations", async () => {
     const root = await mkdtemp(join(tmpdir(), "planweave-profile-write-failure-"));
     const profilesPath = join(root, "profiles.json");
