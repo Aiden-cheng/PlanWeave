@@ -689,7 +689,7 @@ async function runRendererManualSmoke(window: BrowserWindow): Promise<Record<str
       covered.push("return-graph-from-task-workspace");
 
       await clickByTestId("sidebar-todo");
-      await waitForText("ready");
+      await waitForSelector('[data-testid="todo-view"]', "Todo view");
       covered.push("open-todo");
       return {
         covered,

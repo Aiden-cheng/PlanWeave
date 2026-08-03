@@ -120,6 +120,65 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("selected block hook selection", () => {
+  it("restores a delayed block selection without navigating while direct selection opens graph", async () => {
+    let resolveBlockDetail!: (block: DesktopBlockDetail) => void;
+    const delayedBlockDetail = new Promise<DesktopBlockDetail>((resolve) => {
+      resolveBlockDetail = resolve;
+    });
+    const bridge = createDesktopBridgeMock({
+      getBlockDetail: vi
+        .fn()
+        .mockImplementationOnce(() => delayedBlockDetail)
+        .mockResolvedValue(blockDetail),
+      getFeedbackRecords: vi.fn().mockResolvedValue([]),
+      getReviewAttempts: vi.fn().mockResolvedValue([]),
+      getRunRecord: vi.fn().mockResolvedValue(runRecord()),
+      listBlockRunRecords: vi.fn().mockResolvedValue([runRecordSummary])
+    });
+    vi.stubGlobal("planweave", bridge);
+    vi.resetModules();
+    const { useSelectedBlock } = await import("../renderer/hooks/useSelectedBlock");
+    const setActiveView = vi.fn();
+
+    const { result } = renderHook(() =>
+      useSelectedBlock({
+        refreshGraph: vi.fn().mockResolvedValue(undefined),
+        selectedCanvasId: "canvas-main",
+        selectedProject: project,
+        setActiveView,
+        setError: vi.fn()
+      })
+    );
+
+    await act(async () => {
+      await result.current.handleOpenRunRecord(runRecordSummary.recordId);
+    });
+    expect(result.current.selectedRunRecord).toEqual(runRecord());
+
+    let restorePromise: Promise<DesktopBlockDetail | undefined> | undefined;
+    act(() => {
+      restorePromise = result.current.restoreBlockSelection(blockDetail.ref);
+    });
+    expect(setActiveView).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveBlockDetail(blockDetail);
+      await restorePromise;
+    });
+    expect(result.current.selectedBlock).toEqual(blockDetail);
+    expect(result.current.blockRunRecords).toEqual([runRecordSummary]);
+    expect(result.current.selectedRunRecord).toBeNull();
+    expect(setActiveView).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.handleBlockSelect(blockDetail.ref);
+    });
+    expect(setActiveView).toHaveBeenCalledOnce();
+    expect(setActiveView).toHaveBeenCalledWith("graph");
+  });
+});
+
 describe("selected block hook auto-run events", () => {
   it("refreshes selected block records from matching auto-run events", async () => {
     const refreshedRecord = runRecord({

@@ -63,7 +63,7 @@ export function useSelectedBlock({
     setBlockFeedbackRecords([]);
   }, []);
 
-  const handleBlockSelect = useCallback(
+  const restoreBlockSelection = useCallback(
     async (ref: string, canvasIdOverride?: string | null) => {
       if (!bridge || !selectedProject) {
         return;
@@ -81,10 +81,20 @@ export function useSelectedBlock({
       setBlockReviewAttempts(reviewAttempts);
       setBlockFeedbackRecords(feedbackRecords);
       setSelectedRunRecord(null);
-      setActiveView("graph");
       return block;
     },
-    [selectedCanvasId, selectedProject, setActiveView]
+    [selectedCanvasId, selectedProject]
+  );
+
+  const handleBlockSelect = useCallback(
+    async (ref: string, canvasIdOverride?: string | null) => {
+      const block = await restoreBlockSelection(ref, canvasIdOverride);
+      if (block) {
+        setActiveView("graph");
+      }
+      return block;
+    },
+    [restoreBlockSelection, setActiveView]
   );
 
   const handleOpenRunRecord = useCallback(
@@ -294,6 +304,7 @@ export function useSelectedBlock({
     clearSelectedBlockRecords,
     handleBlockSelect,
     handleOpenRunRecord,
+    restoreBlockSelection,
     saveSelectedBlockExecutor,
     saveSelectedBlockPrompt,
     saveSelectedBlockTitle,

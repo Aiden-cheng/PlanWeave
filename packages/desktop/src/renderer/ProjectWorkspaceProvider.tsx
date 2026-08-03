@@ -322,6 +322,7 @@ export function ProjectWorkspaceProvider({
     clearSelectedBlockRecords,
     handleBlockSelect,
     handleOpenRunRecord,
+    restoreBlockSelection,
     saveSelectedBlockExecutor,
     saveSelectedBlockPrompt,
     saveSelectedBlockTitle,
@@ -392,7 +393,7 @@ export function ProjectWorkspaceProvider({
     async (taskId: string | null, blockRef: string | null) => {
       setSelectedRunRecord(null);
       if (blockRef) {
-        await handleBlockSelect(blockRef);
+        await restoreBlockSelection(blockRef);
       } else {
         setSelectedBlock(null);
         clearSelectedBlockRecords();
@@ -401,7 +402,7 @@ export function ProjectWorkspaceProvider({
     },
     [
       clearSelectedBlockRecords,
-      handleBlockSelect,
+      restoreBlockSelection,
       restoreTaskPanelSelection,
       setSelectedBlock,
       setSelectedRunRecord

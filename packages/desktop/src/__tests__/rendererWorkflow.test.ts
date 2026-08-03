@@ -7,10 +7,11 @@ const sourceDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("desktop renderer workflow guardrails", () => {
   it("keeps the Electron smoke on real renderer interactions without test-only IPC or text selectors", async () => {
-    const [mainSource, smokeSource, smokeDriverSource] = await Promise.all([
+    const [mainSource, smokeSource, smokeDriverSource, todoSource] = await Promise.all([
       readFile(resolve(sourceDir, "main", "main.ts"), "utf8"),
       readFile(resolve(sourceDir, "main", "smoke.ts"), "utf8"),
-      readFile(resolve(sourceDir, "..", "scripts", "electron-smoke.ts"), "utf8")
+      readFile(resolve(sourceDir, "..", "scripts", "electron-smoke.ts"), "utf8"),
+      readFile(resolve(sourceDir, "renderer", "views", "TodoView.tsx"), "utf8")
     ]);
 
     expect(smokeSource).toContain("async function runRendererManualSmoke");
@@ -43,6 +44,9 @@ describe("desktop renderer workflow guardrails", () => {
     expect(smokeSource).toContain('[data-testid="task-workspace-run-summary"]');
     expect(smokeSource).toContain('data-record-ready="true"');
     expect(smokeSource).toContain('await clickByTestId("task-workspace-back")');
+    expect(smokeSource).toContain(
+      'await waitForSelector(\'[data-testid="todo-view"]\', "Todo view")'
+    );
     expect(smokeSource).toContain("taskWorkspaceDiagnostics");
     expect(smokeSource).not.toContain("getTaskWorkspace(");
     expect(smokeSource).not.toContain("getTaskWorkspaceRunDetail(");
@@ -54,7 +58,9 @@ describe("desktop renderer workflow guardrails", () => {
     expect(smokeSource).not.toContain('await clickByText("设置")');
     expect(smokeSource).not.toContain('await waitForText("运行面板")');
     expect(smokeSource).not.toContain('await waitForText("当前 Block")');
+    expect(smokeSource).not.toContain('await waitForText("ready")');
     expect(smokeSource).not.toContain("planweave:rendererSmoke");
+    expect(todoSource).toContain('data-testid="todo-view"');
     expect(smokeDriverSource).toContain("assertSmokeProcess");
     expect(smokeDriverSource).toContain("30_000");
     expect(mainSource).toContain("app.isPackaged && !isDev && !isSmokeRun");
