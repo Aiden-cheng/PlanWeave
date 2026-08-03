@@ -8,11 +8,18 @@ import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import {
+  remoteAgentEndpointListSchema,
+  type RemoteAgentEndpoint,
+  type RemoteAgentEndpointList
+} from "@planweave-ai/collaboration-protocol/agent-endpoint";
+import {
   REAL_PROCESS_ACP_HARNESS_DEFAULT_TIMEOUT_MS,
   type RealProcessAcpHarness
 } from "./realProcessAcpHarness.js";
 
 const require = createRequire(import.meta.url);
+
+type AvailableAgentEndpoint = Extract<RemoteAgentEndpoint, { status: "available" }>;
 
 export type OperatorOperationView = {
   operationId: string;
@@ -25,6 +32,7 @@ export type OperatorOperationView = {
   createdAt: string;
   updatedAt: string;
   terminalAt?: string;
+  agentEndpoint?: AvailableAgentEndpoint & { resolvedAt: string };
   attempt: {
     executionAttemptId: string;
     dispatchId: string;
@@ -150,8 +158,6 @@ async function waitFor(
 }
 
 export class RealProcessLifecycleClient {
-  private humanDeviceToken: string | undefined;
-
   constructor(
     readonly harness: RealProcessAcpHarness,
     readonly timeoutMs = REAL_PROCESS_ACP_HARNESS_DEFAULT_TIMEOUT_MS * 3
@@ -170,12 +176,29 @@ export class RealProcessLifecycleClient {
     blockRef: string;
     idempotencyKey: string;
     canvasId?: string;
+    agentEndpointId?: string;
   }): Promise<OperatorOperationView> {
-    const agentEndpointId = await this.availableAgentEndpointId();
-    const response = await fetch(`${this.harness.origin}/api/v1/remote-operations`, {
+    const result = await this.rawDispatch(input);
+    const body = result.body as OperatorOperationView & { error?: string };
+    if (result.status !== 202) {
+      throw new Error(
+        `real_process_lifecycle_dispatch_failed:${result.status}:${body.error ?? JSON.stringify(body)}`
+      );
+    }
+    return body;
+  }
+
+  async rawDispatch(input: {
+    blockRef: string;
+    idempotencyKey: string;
+    canvasId?: string;
+    agentEndpointId?: string;
+  }): Promise<{ status: number; body: unknown; text: string }> {
+    const agentEndpointId = input.agentEndpointId ?? (await this.availableAgentEndpointId());
+    return this.rawRequest({
       method: "POST",
-      headers: this.headers(true),
-      body: JSON.stringify({
+      path: "/api/v1/remote-operations",
+      body: {
         schemaVersion: "remote-run/v3",
         projectId: this.harness.projectId,
         canvasId: input.canvasId ?? "default",
@@ -184,15 +207,8 @@ export class RealProcessLifecycleClient {
         idempotencyKey: input.idempotencyKey,
         expectedResponsibilityRevision: 0,
         expectedReviewerRevision: 0
-      })
+      }
     });
-    const body = (await response.json()) as OperatorOperationView & { error?: string };
-    if (response.status !== 202) {
-      throw new Error(
-        `real_process_lifecycle_dispatch_failed:${response.status}:${body.error ?? JSON.stringify(body)}`
-      );
-    }
-    return body;
   }
 
   /**
@@ -459,42 +475,55 @@ export class RealProcessLifecycleClient {
     return join(this.harness.paths.serverData, "planweave-server.sqlite");
   }
 
-  async availableAgentEndpointId(): Promise<string> {
-    if (!this.humanDeviceToken) {
-      const bootstrap = await fetch(
-        `${this.harness.origin}/api/v1/projects/${encodeURIComponent(this.harness.projectId)}/human/bootstrap`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            displayName: "Real process lifecycle owner",
-            humanPrincipalId: "real-process-lifecycle-owner"
-          })
-        }
-      );
-      const body = (await bootstrap.json()) as { deviceToken?: string; error?: string };
-      if (bootstrap.status !== 201 || !body.deviceToken) {
-        throw new Error(
-          `real_process_lifecycle_bootstrap_failed:${bootstrap.status}:${body.error ?? "missing_token"}`
-        );
-      }
-      this.humanDeviceToken = body.deviceToken;
-    }
+  async listAgentEndpoints(): Promise<RemoteAgentEndpointList> {
     const response = await fetch(
-      `${this.harness.origin}/api/v1/projects/${encodeURIComponent(this.harness.projectId)}/agent-endpoints`,
-      { headers: { Authorization: `Bearer ${this.humanDeviceToken}` } }
+      `${this.harness.origin}/api/v1/agent-endpoints?projectId=${encodeURIComponent(this.harness.projectId)}`,
+      { headers: this.headers() }
     );
-    const page = (await response.json()) as {
-      items?: Array<{ endpointId?: string; status?: string }>;
-      error?: string;
-    };
-    const endpointId = page.items?.find((endpoint) => endpoint.status === "available")?.endpointId;
-    if (response.status !== 200 || !endpointId) {
+    const body: unknown = await response.json();
+    if (response.status !== 200) {
+      const error =
+        typeof body === "object" && body !== null && "error" in body
+          ? String(body.error)
+          : JSON.stringify(body);
+      throw new Error(`real_process_lifecycle_endpoints_failed:${response.status}:${error}`);
+    }
+    return remoteAgentEndpointListSchema.parse(body);
+  }
+
+  async availableAgentEndpoints(): Promise<RemoteAgentEndpoint[]> {
+    const page = await this.listAgentEndpoints();
+    return page.items.filter((endpoint) => endpoint.status === "available");
+  }
+
+  async agentEndpointForHostDisplayName(hostDisplayName: string): Promise<RemoteAgentEndpoint> {
+    const matches = (await this.listAgentEndpoints()).items.filter(
+      (endpoint) => endpoint.hostDisplayName === hostDisplayName
+    );
+    if (matches.length !== 1) {
       throw new Error(
-        `real_process_lifecycle_endpoint_failed:${response.status}:${page.error ?? "missing_endpoint"}`
+        `real_process_lifecycle_endpoint_host_mismatch:${hostDisplayName}:${matches.length}`
       );
     }
-    return endpointId;
+    return matches[0];
+  }
+
+  async availableAgentEndpointForHostDisplayName(
+    hostDisplayName: string
+  ): Promise<AvailableAgentEndpoint> {
+    const endpoint = await this.agentEndpointForHostDisplayName(hostDisplayName);
+    if (endpoint.status !== "available") {
+      throw new Error(
+        `real_process_lifecycle_endpoint_host_unavailable:${hostDisplayName}:${endpoint.unavailableReason}`
+      );
+    }
+    return endpoint;
+  }
+
+  async availableAgentEndpointId(): Promise<string> {
+    const endpoint = (await this.availableAgentEndpoints())[0];
+    if (!endpoint) throw new Error("real_process_lifecycle_endpoint_failed:missing_endpoint");
+    return endpoint.endpointId;
   }
 
   hostDatabasePath(dataDir = this.harness.paths.hostData): string {

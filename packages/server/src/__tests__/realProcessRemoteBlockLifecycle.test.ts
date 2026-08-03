@@ -17,9 +17,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { writeReport } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import {
   RealProcessAcpHarness,
-  remoteAcpManifestWithDependency,
   type RealProcessAcpHarnessOptions
 } from "./support/realProcessAcpHarness.js";
+import { remoteAcpManifestWithDependency } from "./support/realProcessAcpManifests.js";
 import { RealProcessLifecycleClient } from "./support/realProcessLifecycleClient.js";
 
 const harnesses: RealProcessAcpHarness[] = [];
@@ -73,10 +73,12 @@ describe("real-process remote Block lifecycle", () => {
     const { harness, client } = await createHarness({ acpScenario: "success" });
     await harness.startAll();
     const host = await harness.waitForHostOnline();
+    const endpoint = await client.availableAgentEndpointForHostDisplayName(host.displayName);
 
     const dispatched = await client.dispatch({
       blockRef: "T-001#B-001",
-      idempotencyKey: "lifecycle-success-1"
+      idempotencyKey: "lifecycle-success-1",
+      agentEndpointId: endpoint.endpointId
     });
     expect(dispatched).toMatchObject({
       projectId: harness.projectId,
@@ -91,7 +93,11 @@ describe("real-process remote Block lifecycle", () => {
     expect(dispatched.dispatchId).toMatch(/^dispatch-/);
     expect(dispatched.executionAttemptId).toMatch(/^attempt-/);
     expect(dispatched.attempt.leaseId).toMatch(/^lease-/);
-    expect(dispatched.attempt.hostId).toBe(host.id);
+    expect(dispatched.agentEndpoint).toMatchObject({
+      endpointId: endpoint.endpointId,
+      hostDisplayName: host.displayName
+    });
+    expect(dispatched.attempt.hostId).toBeUndefined();
 
     const identities = {
       operationId: dispatched.operationId,
@@ -113,8 +119,11 @@ describe("real-process remote Block lifecycle", () => {
       dispatchStatus: "completed",
       attempt: {
         status: "completed",
-        hostId: host.id,
         leaseId: identities.leaseId
+      },
+      agentEndpoint: {
+        endpointId: endpoint.endpointId,
+        hostDisplayName: host.displayName
       },
       runtime: {
         status: "completed",
@@ -157,7 +166,7 @@ describe("real-process remote Block lifecycle", () => {
     const envelope = client.readServerEnvelope(identities.dispatchId);
     expect(envelope).toMatchObject({
       blockRef: "T-001#B-001",
-      requiredCapabilities: ["acp.test"],
+      requiredCapabilities: ["acp.codex"],
       execution: {
         dispatchId: identities.dispatchId,
         attemptId: identities.executionAttemptId
@@ -428,11 +437,12 @@ describe("real-process remote Block lifecycle", () => {
     expect(after.hasMore).toBe(false);
   }, 120_000);
 
-  it("two Hosts: capability selection prefers compatible Host; no-compatible-Host awaits capacity", async () => {
+  it("two Hosts: available incompatible endpoint creates no operation; compatible endpoint completes", async () => {
     const { harness, client } = await createHarness({
       acpScenario: "success",
       hostDisplayName: "Incompatible Host",
-      hostCapabilities: ["other.capability"],
+      hostCapabilities: ["acp.opencode"],
+      hostAgentProfile: { id: "opencode-acp", agentId: "opencode" },
       hostCapacity: 2
     });
     await harness.startServer();
@@ -440,46 +450,62 @@ describe("real-process remote Block lifecycle", () => {
     await harness.startHost();
     const incompatible = await harness.waitForHostOnline({ displayName: "Incompatible Host" });
 
-    const awaiting = await client.dispatch({
+    const incompatibleEndpoints = (await client.listAgentEndpoints()).items.filter(
+      (endpoint) =>
+        endpoint.hostDisplayName === "Incompatible Host" && endpoint.agentId === "opencode"
+    );
+    if (incompatibleEndpoints.length !== 1) {
+      throw new Error(`expected_one_incompatible_endpoint:${incompatibleEndpoints.length}`);
+    }
+    const incompatibleEndpoint = incompatibleEndpoints[0];
+    expect(incompatibleEndpoint).toMatchObject({
+      status: "available",
+      capabilities: ["acp.opencode"]
+    });
+    const rejected = await client.rawDispatch({
       blockRef: "T-001#B-001",
-      idempotencyKey: "lifecycle-select-1"
+      idempotencyKey: "lifecycle-select-incompatible",
+      agentEndpointId: incompatibleEndpoint.endpointId
     });
-    expect(awaiting.state).toBe("claimed");
-    expect(awaiting.attempt.status).toBe("prepared");
-    expect(awaiting.attempt.hostId).toBeUndefined();
-    expect(awaiting.dispatchStatus).toBeUndefined();
-    const diagnostic = client.readOperationDiagnostic(awaiting.operationId);
-    expect(diagnostic).toMatchObject({
-      state: "claimed",
-      diagnostic_code: "no_compatible_agent_host"
+    expect(rejected).toMatchObject({
+      status: 409,
+      body: { error: "agent_endpoint_incompatible" }
     });
+    expect(client.countServerRows("remote_operations")).toBe(0);
+    expect(client.countServerRows("remote_execution_attempts")).toBe(0);
 
     const secondary = await harness.startSecondaryHost({
       key: "compatible",
       displayName: "Compatible Host",
-      capabilities: ["acp.test"],
+      capabilities: ["acp.codex"],
       capacity: 1,
       acpScenario: "success"
     });
     expect(secondary.id).not.toBe(incompatible.id);
 
-    // Re-enter via idempotent dispatch once a compatible Host is online.
+    const compatibleEndpoint =
+      await client.availableAgentEndpointForHostDisplayName("Compatible Host");
     const activated = await client.dispatch({
       blockRef: "T-001#B-001",
-      idempotencyKey: "lifecycle-select-1"
+      idempotencyKey: "lifecycle-select-compatible",
+      agentEndpointId: compatibleEndpoint.endpointId
     });
-    expect(activated.operationId).toBe(awaiting.operationId);
-    expect(activated.dispatchId).toBe(awaiting.dispatchId);
-    expect(activated.executionAttemptId).toBe(awaiting.executionAttemptId);
+    expect(activated.agentEndpoint).toMatchObject({
+      endpointId: compatibleEndpoint.endpointId,
+      hostDisplayName: "Compatible Host"
+    });
     expect(
       ["activated", "completed"].includes(activated.state) ||
         ["leased", "running", "completed"].includes(String(activated.dispatchStatus))
     ).toBe(true);
 
-    const terminal = await client.waitForTerminal(awaiting.operationId);
+    const terminal = await client.waitForTerminal(activated.operationId);
     expect(terminal.state).toBe("completed");
-    expect(terminal.attempt.hostId).toBe(secondary.id);
-    expect(terminal.attempt.hostId).not.toBe(incompatible.id);
+    expect(terminal.agentEndpoint).toMatchObject({
+      endpointId: compatibleEndpoint.endpointId,
+      hostDisplayName: "Compatible Host"
+    });
+    expect(terminal.attempt.hostId).toBeUndefined();
 
     const hosts = await client.listHosts();
     expect(hosts.items.map((item) => item.displayName).sort()).toEqual([

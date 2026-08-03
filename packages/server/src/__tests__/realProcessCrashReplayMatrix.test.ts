@@ -11,9 +11,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   RealProcessAcpHarness,
-  remoteAcpManifestParallelCapacity,
   type RealProcessAcpHarnessOptions
 } from "./support/realProcessAcpHarness.js";
+import { remoteAcpManifestParallelCapacity } from "./support/realProcessAcpManifests.js";
 import { RealProcessLifecycleClient } from "./support/realProcessLifecycleClient.js";
 
 const harnesses: RealProcessAcpHarness[] = [];
@@ -184,9 +184,7 @@ describe("real-process crash/replay fault matrix", () => {
 
     if (view.state === "completed") {
       // Real success path: identities stable, single attempt, single report link.
-      expect(client.countLifecycleExactEvent("session/prompt")).toBe(
-        baseline.sessionPrompt + 1
-      );
+      expect(client.countLifecycleExactEvent("session/prompt")).toBe(baseline.sessionPrompt + 1);
       // Barrier lines must not be mistaken for completion evidence.
       expect(client.countLifecycleExactEvent("paused session/prompt")).toBeGreaterThanOrEqual(1);
     } else {
@@ -242,7 +240,7 @@ describe("real-process crash/replay fault matrix", () => {
     expect(client.countServerRows("dispatches", "status=?", ["completed"])).toBe(1);
   }, 120_000);
 
-  it("capacity contention: one Host capacity=1 activates only one of two Blocks", async () => {
+  it("capacity contention: busy endpoint rejects without creating a queued operation", async () => {
     const { harness, client } = await createHarness({
       hostCapacity: 1,
       manifest: remoteAcpManifestParallelCapacity(),
@@ -251,24 +249,26 @@ describe("real-process crash/replay fault matrix", () => {
     });
     await harness.startAll();
     await harness.acpControl.pause(["session/prompt"]);
+    const endpointId = await client.availableAgentEndpointId();
 
     const first = await client.dispatch({
       blockRef: "T-001#B-001",
-      idempotencyKey: "fault-capacity-a"
+      idempotencyKey: "fault-capacity-a",
+      agentEndpointId: endpointId
     });
     await client.waitForDispatchStatus(first.operationId, ["leased", "running"]);
 
-    const second = await client.dispatch({
+    const second = await client.rawDispatch({
       blockRef: "T-002#B-001",
-      idempotencyKey: "fault-capacity-b"
+      idempotencyKey: "fault-capacity-b",
+      agentEndpointId: endpointId
     });
-    // Second remains claimed/awaiting host capacity (no second reservation).
-    expect(["claimed", "activated"]).toContain(second.state);
-    if (second.state === "claimed") {
-      expect(second.dispatchStatus).toBeUndefined();
-      const diagnostic = client.readOperationDiagnostic(second.operationId);
-      expect(diagnostic.diagnostic_code).toMatch(/no_compatible|capacity|host/i);
-    }
+    expect(second).toMatchObject({
+      status: 409,
+      body: { error: "agent_endpoint_unavailable" }
+    });
+    expect(client.countServerRows("remote_operations")).toBe(1);
+    expect(client.countServerRows("remote_execution_attempts")).toBe(1);
     expect(client.countServerRows("host_capacity_reservations")).toBe(1);
     expect(client.countServerRows("mailbox_messages")).toBe(1);
 
@@ -276,13 +276,13 @@ describe("real-process crash/replay fault matrix", () => {
     const firstTerminal = await client.waitForTerminal(first.operationId);
     expect(firstTerminal.state).toBe("completed");
 
-    // After capacity frees, re-dispatch second should progress.
+    // After capacity frees, the caller retries the rejected request and creates the second operation.
     const secondActivated = await client.dispatch({
       blockRef: "T-002#B-001",
-      idempotencyKey: "fault-capacity-b"
+      idempotencyKey: "fault-capacity-b",
+      agentEndpointId: endpointId
     });
-    expect(secondActivated.operationId).toBe(second.operationId);
-    const secondTerminal = await client.waitForTerminal(second.operationId);
+    const secondTerminal = await client.waitForTerminal(secondActivated.operationId);
     expect(secondTerminal.state).toBe("completed");
     expect(secondTerminal.operationId).not.toBe(first.operationId);
   }, 180_000);

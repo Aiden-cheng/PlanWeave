@@ -1,17 +1,4 @@
-/**
- * Real multi-process ACP integration harness.
- *
- * Topology (all OS processes unless noted):
- *   test runner
- *     ├─ planweave-server (dist/bin.js serve)  — HTTP/WSS + SQLite dataDirectory
- *     ├─ planweave-agent-host (dist/bin.js run) — enroll/run against public APIs
- *     │    └─ fake ACP (acpMockAgent.mjs) — real stdio JSON-RPC; optional control-dir
- *     └─ harness-owned temp root (project, workspaces, state, artifacts, logs, control)
- *
- * Determinism: explicit readiness (/readyz + host lastSeenAt), ACP control-dir barriers,
- * and scripted mock scenarios — not sleeps-as-authority. No production debug endpoints.
- */
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -23,14 +10,17 @@ import type { PlanPackageManifest } from "@planweave-ai/runtime";
 import { redactRunnerEventText } from "@planweave-ai/runtime";
 import { operatorEnrollmentGrantResponseSchema } from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
-import {
-  basicManifest,
-  createTestWorkspace
-} from "../../../../runtime/src/__tests__/promptTestHelpers.js";
+import { createTestWorkspace } from "../../../../runtime/src/__tests__/promptTestHelpers.js";
 import { hashOperatorToken } from "../../operatorAuth.js";
 import { parseServerConfig, serverConfigSummarySchema } from "../../config.js";
 import { legacyWorkspaceIdForProject } from "./legacyWorkspaceId.js";
 import { seedOperatorSessions } from "./operatorAuthFixture.js";
+import { remoteAcpManifest } from "./realProcessAcpManifests.js";
+import {
+  createAgentExecutableProbe,
+  runAgentHostCommand,
+  type HostCommandResult
+} from "./realProcessAgentExposure.js";
 
 function resolveHarnessPath(relativeUrl: string, workspacePath: string): string {
   try {
@@ -116,16 +106,13 @@ export type RealProcessAcpHarnessOptions = {
   hostDisplayName?: string;
   hostCapacity?: number;
   hostCapabilities?: string[];
+  hostAgentProfile?: { id: string; agentId: "codex" | "opencode" };
   operatorToken?: string;
-  /** Optional non-admin operator credential scoped to the harness project. */
   projectOperatorToken?: string;
   readinessTimeoutMs?: number;
-  /** When true, write intentionally invalid server config for failed-startup tests. */
   corruptServerConfigOnCreate?: boolean;
   graceMs?: number;
-  /** Override the temporary Plan Package manifest (defaults to remoteAcpManifest()). */
   manifest?: PlanPackageManifest;
-  /** Optional Server limits (must satisfy config invariants vs each other). */
   serverLimits?: RealProcessServerLimits;
 };
 
@@ -158,15 +145,10 @@ export type HarnessPaths = {
   artifacts: string;
   logs: string;
   control: string;
+  agentBin: string;
   serverConfig: string;
   hostConfig: string;
   acpLifecycle: string;
-};
-
-export type HostCommandResult = {
-  code: number;
-  stdout: string;
-  stderr: string;
 };
 
 type HarnessHostWorkspace = Record<string, unknown> & {
@@ -199,10 +181,7 @@ function parseHarnessHostConfig(value: unknown): HarnessHostConfig {
   return { ...config, workspaces: [workspace as HarnessHostWorkspace] };
 }
 
-async function configureHostWorkspace(
-  configPath: string,
-  workspaceId: string
-): Promise<void> {
+async function configureHostWorkspace(configPath: string, workspaceId: string): Promise<void> {
   const rawConfig: unknown = JSON.parse(await readFile(configPath, "utf8"));
   const config = parseHarnessHostConfig(rawConfig);
   const [workspace] = config.workspaces;
@@ -291,52 +270,6 @@ async function removeDirectoryWithRetries(directory: string, attempts = 8): Prom
   throw lastError instanceof Error
     ? lastError
     : new Error(`real_process_harness_cleanup_failed:${String(lastError)}`);
-}
-
-export function remoteAcpManifest(): PlanPackageManifest {
-  const manifest = basicManifest();
-  manifest.execution.defaultExecutor = "codex-acp";
-  manifest.executors = {
-    "codex-acp": { adapter: "agent", agent: "codex", runner: { transport: "acp" } }
-  };
-  manifest.nodes[0].blocks[0].requirements = { capabilities: ["acp.test"] };
-  return manifest;
-}
-
-/** Manifest with T-001#B-002 depending on T-001#B-001 for dependency/artifact scenarios. */
-export function remoteAcpManifestWithDependency(): PlanPackageManifest {
-  const manifest = remoteAcpManifest();
-  const task = manifest.nodes[0];
-  if (task.type !== "task") throw new Error("remote_acp_manifest_expected_task");
-  task.blocks.splice(1, 0, {
-    id: "B-002",
-    type: "implementation",
-    title: "Consume first implementation",
-    prompt: "nodes/T-001/blocks/B-002.prompt.md",
-    depends_on: ["B-001"],
-    requirements: { capabilities: ["acp.test"] }
-  });
-  const review = task.blocks.find((block) => block.id === "R-001");
-  if (review) review.depends_on = ["B-002"];
-  return manifest;
-}
-
-/** Parallel two-task manifest for capacity contention matrices. */
-export function remoteAcpManifestParallelCapacity(): PlanPackageManifest {
-  const manifest = basicManifest({ parallel: true, maxConcurrent: 2, includeSecondTask: true });
-  manifest.execution.defaultExecutor = "codex-acp";
-  manifest.executors = {
-    "codex-acp": { adapter: "agent", agent: "codex", runner: { transport: "acp" } }
-  };
-  for (const node of manifest.nodes) {
-    if (node.type !== "task") continue;
-    for (const block of node.blocks) {
-      if (block.type === "implementation") {
-        block.requirements = { capabilities: ["acp.test"] };
-      }
-    }
-  }
-  return manifest;
 }
 
 async function waitFor(
@@ -517,16 +450,17 @@ export class RealProcessAcpHarness {
   }
 
   static async create(options: RealProcessAcpHarnessOptions = {}): Promise<RealProcessAcpHarness> {
-    const operatorToken =
-      options.operatorToken ?? `pw_operator_${"H".repeat(43)}`;
+    const operatorToken = options.operatorToken ?? `pw_operator_${"H".repeat(43)}`;
     const acpScenario = options.acpScenario ?? "artifact-implementation";
     const readinessTimeoutMs =
       options.readinessTimeoutMs ?? REAL_PROCESS_ACP_HARNESS_DEFAULT_TIMEOUT_MS;
     const hostDisplayName = options.hostDisplayName ?? "Harness Host";
     const hostCapacity = options.hostCapacity ?? 2;
-    const hostCapabilities = [
-      ...new Set([...(options.hostCapabilities ?? ["acp.test"]), "acp.codex"])
-    ];
+    const hostCapabilities = [...new Set(options.hostCapabilities ?? ["acp.codex"])];
+    const hostAgentProfile = options.hostAgentProfile ?? {
+      id: "codex-acp",
+      agentId: "codex"
+    };
     const graceMs = options.graceMs ?? 500;
 
     const workspace = await createTestWorkspace(options.manifest ?? remoteAcpManifest());
@@ -544,18 +478,19 @@ export class RealProcessAcpHarness {
       artifacts: join(root, "artifacts"),
       logs: join(root, "logs"),
       control: join(root, "acp-control"),
+      agentBin: join(root, "agent-bin"),
       serverConfig: join(root, "server.json"),
       hostConfig: join(root, "agent-host.json"),
       acpLifecycle: join(root, "acp-control", "lifecycle.log")
     };
 
-    // Host credential store requires dataDirectory mode 0700; create it securely.
     await mkdir(paths.serverData, { recursive: true, mode: 0o700 });
     await mkdir(paths.hostData, { recursive: true, mode: 0o700 });
     await mkdir(paths.workspaceProject, { recursive: true });
     await mkdir(paths.artifacts, { recursive: true });
     await mkdir(paths.logs, { recursive: true });
     await mkdir(paths.control, { recursive: true });
+    await createAgentExecutableProbe(paths.agentBin);
 
     const port = await allocateEphemeralPort();
     const origin = `http://127.0.0.1:${port}`;
@@ -623,8 +558,8 @@ export class RealProcessAcpHarness {
         workspaces: [{ id: projectId, path: "project" }],
         agentProfiles: [
           {
-            id: "codex-acp",
-            agentId: "codex",
+            id: hostAgentProfile.id,
+            agentId: hostAgentProfile.agentId,
             command: process.execPath,
             args: [acpMockAgentPath, acpScenario, `--control-dir=${paths.control}`],
             environment: []
@@ -684,10 +619,6 @@ export class RealProcessAcpHarness {
     return this.host?.child.pid;
   }
 
-  /**
-   * Injected clocks are not available for production Server/Host binaries.
-   * Determinism for real-process tests uses readiness + ACP barriers.
-   */
   advanceInjectedClock(_milliseconds: number): never {
     throw new Error("real_process_acp_harness_clock_not_supported");
   }
@@ -831,7 +762,9 @@ export class RealProcessAcpHarness {
             diagnostics: () => this.diagnostics()
           }
         );
-        const config = parseServerConfig(JSON.parse(await readFile(this.paths.serverConfig, "utf8")));
+        const config = parseServerConfig(
+          JSON.parse(await readFile(this.paths.serverConfig, "utf8"))
+        );
         await seedOperatorSessions(config.databasePath, config.operatorCredentials);
         return;
       } catch (error) {
@@ -900,31 +833,26 @@ export class RealProcessAcpHarness {
     return snapshot;
   }
 
-  async runHostCommand(argv: readonly string[]): Promise<HostCommandResult> {
-    return new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, [agentHostBinPath, ...argv], {
-        stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env }
-      });
-      let stdout = "";
-      let stderr = "";
-      child.stdout.setEncoding("utf8");
-      child.stderr.setEncoding("utf8");
-      child.stdout.on("data", (chunk: string) => {
-        stdout += chunk;
-      });
-      child.stderr.on("data", (chunk: string) => {
-        stderr += chunk;
-      });
-      child.once("error", reject);
-      child.once("close", (code) => {
-        resolve({
-          code: code ?? 1,
-          stdout: redactLogText(stdout),
-          stderr: redactLogText(stderr)
-        });
-      });
-    });
+  async runHostCommand(
+    argv: readonly string[],
+    environment: NodeJS.ProcessEnv = {}
+  ): Promise<HostCommandResult> {
+    const result = await runAgentHostCommand(agentHostBinPath, argv, environment);
+    return {
+      ...result,
+      stdout: redactLogText(result.stdout),
+      stderr: redactLogText(result.stderr)
+    };
+  }
+
+  private async exposeCodexProfile(configPath: string, errorCode: string): Promise<void> {
+    const result = await this.runHostCommand(
+      ["agents", "expose", "codex-acp", "--config", configPath],
+      { PATH: this.paths.agentBin, PATHEXT: ".CMD" }
+    );
+    if (result.code !== 0) {
+      throw new Error(`${errorCode}:${result.code}\n${result.stderr}\n${this.diagnostics()}`);
+    }
   }
 
   async enrollHost(): Promise<void> {
@@ -961,6 +889,10 @@ export class RealProcessAcpHarness {
         `real_process_harness_enroll_failed:${enrollment.code}\n${enrollment.stderr}\n${this.diagnostics()}`
       );
     }
+    await this.exposeCodexProfile(
+      this.paths.hostConfig,
+      "real_process_harness_agent_expose_failed"
+    );
     this.enrolled = true;
   }
 
@@ -1025,7 +957,7 @@ export class RealProcessAcpHarness {
     if (this.secondaryHosts.has(key))
       throw new Error(`real_process_harness_secondary_exists:${key}`);
     const capacity = options.capacity ?? 1;
-    const capabilities = [...new Set([...(options.capabilities ?? ["acp.test"]), "acp.codex"])];
+    const capabilities = [...new Set(options.capabilities ?? ["acp.codex"])];
     const acpScenario = options.acpScenario ?? this.acpScenario;
     const dataDir = join(this.paths.root, `host-data-${key}`);
     const controlDir = join(this.paths.root, `acp-control-${key}`);
@@ -1097,6 +1029,7 @@ export class RealProcessAcpHarness {
         `real_process_harness_secondary_enroll_failed:${enrollment.code}\n${enrollment.stderr}\n${this.diagnostics()}`
       );
     }
+    await this.exposeCodexProfile(configPath, "real_process_harness_secondary_agent_expose_failed");
     const entry = this.secondaryHosts.get(key)!;
     entry.enrolled = true;
     entry.child = this.spawnLongLived(
@@ -1162,9 +1095,6 @@ export class RealProcessAcpHarness {
     return snapshot;
   }
 
-  /**
-   * Full readiness: Server process ready + /readyz + enrolled Host online.
-   */
   async startAll(): Promise<void> {
     await this.startServer();
     await this.waitForServerReadyz();
@@ -1200,10 +1130,7 @@ export class RealProcessAcpHarness {
     if (this.disposed) return;
     this.disposed = true;
     const errors: unknown[] = [];
-    const forceStop = async (
-      child: ManagedChild | undefined,
-      reason: string
-    ): Promise<void> => {
+    const forceStop = async (child: ManagedChild | undefined, reason: string): Promise<void> => {
       if (!child) return;
       try {
         await stopManagedChildForCleanup(child, reason);

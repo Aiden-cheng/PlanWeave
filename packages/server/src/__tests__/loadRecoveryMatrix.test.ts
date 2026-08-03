@@ -11,9 +11,9 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   RealProcessAcpHarness,
-  remoteAcpManifestParallelCapacity,
   type RealProcessAcpHarnessOptions
 } from "./support/realProcessAcpHarness.js";
+import { remoteAcpManifestParallelCapacity } from "./support/realProcessAcpManifests.js";
 import { RealProcessLifecycleClient } from "./support/realProcessLifecycleClient.js";
 
 /**
@@ -91,23 +91,34 @@ describe("load / recovery matrix (moderate intended scale)", () => {
       key: "load-b",
       displayName: "Load Host B",
       capacity: LOAD_RECOVERY_THRESHOLDS.hostCapacityEach,
-      capabilities: ["acp.test"],
+      capabilities: ["acp.codex"],
       acpScenario: "success"
     });
     expect(secondary.id).toEqual(expect.any(String));
 
     const hosts = await client.listHosts();
     expect(hosts.items.length).toBeGreaterThanOrEqual(LOAD_RECOVERY_THRESHOLDS.hosts);
+    const primaryEndpoint = await client.availableAgentEndpointForHostDisplayName("Load Host A");
+    const secondaryEndpoint = await client.availableAgentEndpointForHostDisplayName("Load Host B");
+    expect(primaryEndpoint.endpointId).not.toBe(secondaryEndpoint.endpointId);
+    expect(await client.availableAgentEndpoints()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ endpointId: primaryEndpoint.endpointId }),
+        expect.objectContaining({ endpointId: secondaryEndpoint.endpointId })
+      ])
+    );
 
     const t0 = Date.now();
     const [first, second] = await Promise.all([
       client.dispatch({
         blockRef: "T-001#B-001",
-        idempotencyKey: "load-concurrent-1"
+        idempotencyKey: "load-concurrent-1",
+        agentEndpointId: primaryEndpoint.endpointId
       }),
       client.dispatch({
         blockRef: "T-002#B-001",
-        idempotencyKey: "load-concurrent-2"
+        idempotencyKey: "load-concurrent-2",
+        agentEndpointId: secondaryEndpoint.endpointId
       })
     ]);
     expect(first.operationId).not.toBe(second.operationId);
@@ -156,18 +167,20 @@ describe("load / recovery matrix (moderate intended scale)", () => {
     );
   }, 180_000);
 
-  it("capacity contention (1 Host, cap 1, 2 blocks): serializes without data loss or duplicate attempt", async () => {
+  it("capacity contention (1 Host, cap 1, 2 blocks): rejects busy endpoint until caller retries", async () => {
     const { harness, client } = await createHarness({
       hostCapacity: 1,
       manifest: remoteAcpManifestParallelCapacity()
     });
     await harness.startAll();
     await harness.acpControl.pause(["session/prompt"]);
+    const endpointId = await client.availableAgentEndpointId();
 
     const t0 = Date.now();
     const first = await client.dispatch({
       blockRef: "T-001#B-001",
-      idempotencyKey: "load-cap-1"
+      idempotencyKey: "load-cap-1",
+      agentEndpointId: endpointId
     });
     await client.waitForDispatchStatus(first.operationId, ["leased", "running"]);
     const leasedMs = Date.now() - t0;
@@ -175,15 +188,17 @@ describe("load / recovery matrix (moderate intended scale)", () => {
       LOAD_RECOVERY_THRESHOLDS.maxDispatchLeasedMs
     );
 
-    const second = await client.dispatch({
+    const second = await client.rawDispatch({
       blockRef: "T-002#B-001",
-      idempotencyKey: "load-cap-2"
+      idempotencyKey: "load-cap-2",
+      agentEndpointId: endpointId
     });
-    // Second remains claimed/awaiting capacity while first holds the only reservation.
-    expect(["claimed", "activated"]).toContain(second.state);
-    if (second.state === "claimed") {
-      expect(second.dispatchStatus).toBeUndefined();
-    }
+    expect(second).toMatchObject({
+      status: 409,
+      body: { error: "agent_endpoint_unavailable" }
+    });
+    expect(client.countServerRows("remote_operations")).toBe(1);
+    expect(client.countServerRows("remote_execution_attempts")).toBe(1);
     expect(client.countServerRows("host_capacity_reservations")).toBe(1);
     expect(client.countServerRows("mailbox_messages")).toBe(1);
 
@@ -191,14 +206,14 @@ describe("load / recovery matrix (moderate intended scale)", () => {
     const term1 = await client.waitForTerminal(first.operationId);
     expect(term1.state).toBe("completed");
 
-    // After capacity frees, idempotent re-dispatch must progress the same operation (no drop, no fork).
+    // After capacity frees, the caller retries the rejected request and creates the second operation.
     const waitStart = Date.now();
     const secondActivated = await client.dispatch({
       blockRef: "T-002#B-001",
-      idempotencyKey: "load-cap-2"
+      idempotencyKey: "load-cap-2",
+      agentEndpointId: endpointId
     });
-    expect(secondActivated.operationId).toBe(second.operationId);
-    const term2 = await client.waitForTerminal(second.operationId);
+    const term2 = await client.waitForTerminal(secondActivated.operationId);
     expect(Date.now() - waitStart).toBeLessThanOrEqual(
       LOAD_RECOVERY_THRESHOLDS.maxCapacityWaitMs + LOAD_RECOVERY_THRESHOLDS.maxTerminalMs
     );
@@ -208,7 +223,7 @@ describe("load / recovery matrix (moderate intended scale)", () => {
     expect(
       client.countServerRows("remote_execution_attempts", "operation_id IN (?,?)", [
         first.operationId,
-        second.operationId
+        secondActivated.operationId
       ])
     ).toBe(2);
     expect(

@@ -15,9 +15,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { writeReport } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import {
   RealProcessAcpHarness,
-  remoteAcpManifestWithDependency,
   type RealProcessAcpHarnessOptions
 } from "./support/realProcessAcpHarness.js";
+import { remoteAcpManifestWithDependency } from "./support/realProcessAcpManifests.js";
 import { RealProcessLifecycleClient } from "./support/realProcessLifecycleClient.js";
 
 const harnesses: RealProcessAcpHarness[] = [];
@@ -593,16 +593,25 @@ describe("real-process adversarial authorization matrix", () => {
     expect(foreignCredential.hostId).toBe(secondary.id);
     expect(foreignCredential.hostId).not.toBe(ownerCredential.hostId);
 
+    const ownerEndpoint = await client.availableAgentEndpointForHostDisplayName(
+      ownerHost.displayName
+    );
     const dispatched = await client.dispatch({
       blockRef: "T-001#B-002",
-      idempotencyKey: "auth-matrix-process-scope-1"
+      idempotencyKey: "auth-matrix-process-scope-1",
+      agentEndpointId: ownerEndpoint.endpointId
     });
     await client.waitForDispatchStatus(dispatched.operationId, ["leased", "running"]);
     await harness.acpControl.waitUntilLifecycleContains("paused session/prompt", 30_000);
     const view = await client.observe(dispatched.operationId);
     const leaseId = view.attempt.leaseId;
     expect(leaseId).toEqual(expect.any(String));
-    expect(view.attempt.hostId).toBe(ownerHost.id);
+    expect(view.agentEndpoint).toMatchObject({
+      endpointId: ownerEndpoint.endpointId,
+      hostDisplayName: ownerHost.displayName
+    });
+    expect(view.attempt.hostId).toBeUndefined();
+    expect(client.readServerDispatch(view.dispatchId).host_id).toBe(ownerHost.id);
 
     const envelopeBefore = client.readServerEnvelopeCanonical(view.dispatchId);
     const envelope = client.readServerEnvelope(view.dispatchId);
