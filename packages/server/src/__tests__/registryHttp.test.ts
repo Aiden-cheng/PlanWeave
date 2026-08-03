@@ -126,6 +126,7 @@ async function setup() {
     origin: `http://127.0.0.1:${address.port}`,
     token: owner.deviceToken!,
     database,
+    access,
     identity,
     workspaceIdentity,
     workspaceId
@@ -235,16 +236,52 @@ describe("registry HTTP boundary", () => {
         "2026-01-01T00:00:00.000Z",
         "2026-01-01T00:00:00.000Z"
       );
-    const crossWorkspace = await fetch(`${fixture.origin}/api/v1/registry/projects`, {
+    fixture.access.registerProjectInternal({
+      workspaceId: otherWorkspaceId,
+      projectId: "project-c",
+      projectRoot: "/srv/project-c",
+      ownerHumanPrincipalId: "human-owner"
+    });
+    const scopedWorkspace = await fetch(`${fixture.origin}/api/v1/registry/projects`, {
       headers: { Authorization: `Bearer ${fixture.token}` }
     });
-    expect(crossWorkspace.status).toBe(403);
+    expect(scopedWorkspace.status).toBe(200);
+    const scopedItems = (await scopedWorkspace.json()).items as Array<{
+      registry: { workspaceId: string; projectId: string };
+    }>;
+    expect(scopedItems).toHaveLength(2);
+    const scopedProjectIds = scopedItems.map((item) => item.registry.projectId).sort();
+    expect(scopedProjectIds).toEqual(["project-a", "project-b"]);
+    expect(scopedProjectIds).not.toContain("project-c");
+    expect(scopedItems.map((item) => item.registry.workspaceId)).toEqual([
+      fixture.workspaceId,
+      fixture.workspaceId
+    ]);
+    expect(scopedItems.map((item) => item.registry.workspaceId)).not.toContain(otherWorkspaceId);
+
     fixture.database
-      .prepare("DELETE FROM workspace_memberships WHERE workspace_id=? AND human_principal_id=?")
-      .run(otherWorkspaceId, "human-owner");
+      .prepare(
+        "DELETE FROM workspace_device_sessions WHERE workspace_id=? AND human_principal_id=?"
+      )
+      .run(fixture.workspaceId, "human-owner");
+    const ambiguousWorkspace = await fetch(`${fixture.origin}/api/v1/registry/projects`, {
+      headers: { Authorization: `Bearer ${fixture.token}` }
+    });
+    expect(ambiguousWorkspace.status).toBe(403);
+    expect(await ambiguousWorkspace.json()).toEqual({
+      error: "registry_workspace_scope_forbidden"
+    });
+
     fixture.database
-      .prepare("DELETE FROM workspace_principals WHERE workspace_id=? AND human_principal_id=?")
-      .run(otherWorkspaceId, "human-owner");
+      .prepare(
+        "UPDATE workspace_memberships SET revoked_at=?,updated_at=? WHERE workspace_id=? AND human_principal_id=?"
+      )
+      .run(
+        "2026-01-02T00:00:00.000Z",
+        "2026-01-02T00:00:00.000Z",
+        otherWorkspaceId,
+        "human-owner"
+      );
 
     const conflict = await fetch(
       `${fixture.origin}/api/v1/registry/projects/project-a/canvases/default/snapshots/snapshot-001/restore`,
