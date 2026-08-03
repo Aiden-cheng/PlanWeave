@@ -152,6 +152,36 @@ describe("Task Workspace route wiring", () => {
     expect(returnToCanvas).toHaveBeenCalledTimes(1);
   });
 
+  it("shows Task Overview when its explicit selection supersedes a retained run route", async () => {
+    const fixture = taskWorkspaceInspectorFixture();
+    useProjectWorkspace.mockReturnValue({
+      shell: {
+        activeView: "task-workspace",
+        t: createTranslator("en")
+      },
+      taskWorkspace: readyTaskWorkspace(fixture, {
+        liveStatus: "idle",
+        navigation: {
+          projectRoot: "/projects/demo",
+          canvasId: "canvas-main",
+          taskId: "T-001",
+          blockRef: fixture.selectedRun.block.ref,
+          recordId: fixture.selectedRun.item.run.record.recordId,
+          source: { view: "graph" }
+        },
+        runnerModel: null,
+        selectedRecord: null,
+        selectedRecordId: null,
+        selectedRun: null
+      })
+    });
+
+    render(<WorkspaceTabs />);
+
+    expect(await screen.findByTestId("task-workspace-overview-panel")).toBeInTheDocument();
+    expect(screen.queryByText("Loading selected run…")).not.toBeInTheDocument();
+  });
+
   it("shows Cancel run in the composer only for an exact available ACP cancel identity", async () => {
     const model = readModel();
     const selectedRun = selection({ model });

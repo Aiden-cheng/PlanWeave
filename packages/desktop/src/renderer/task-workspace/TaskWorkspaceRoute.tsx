@@ -243,7 +243,7 @@ export function TaskWorkspaceRoute({
     selectedRun: controller.selectedRun,
     workspace: controller.workspace
   };
-  const routedRunPending = !controller.selectedRun && Boolean(controller.navigation?.recordId);
+  const routedRunPending = !controller.selectedRun && Boolean(controller.selectedRecordId);
   const timeline: ReactNode = slots.timeline?.(timelineProps) ?? (
     <EmptySlot title={labels.timeline} description={labels.noRuns} />
   );

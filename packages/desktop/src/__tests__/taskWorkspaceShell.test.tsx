@@ -344,6 +344,7 @@ describe("Task Workspace shell", () => {
       <TaskWorkspaceRoute
         controller={controller({
           liveStatus: "loading",
+          selectedRecordId: "FE-001::RUN-001",
           navigation: {
             projectRoot: "/projects/demo",
             canvasId: "canvas-main",
@@ -371,6 +372,7 @@ describe("Task Workspace shell", () => {
       <TaskWorkspaceRoute
         controller={controller({
           liveStatus: "idle",
+          selectedRecordId: "FE-001::RUN-001",
           navigation: {
             projectRoot: "/projects/demo",
             canvasId: "canvas-main",
