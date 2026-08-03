@@ -195,8 +195,11 @@ describe("packaged Host administration control plane", () => {
       safeStorage: unavailableSafeStorage,
       request: fetch
     });
-    await service.upsertProfile(profile);
-    await service.importCredential({ profileId, operatorToken: harness.operatorToken });
+    await service.ensureMainOwnedServerProfile({
+      profile,
+      operatorId: "harness-operator",
+      operatorToken: harness.operatorToken
+    });
 
     const status = await service.getStatus();
     expect(status.credentialStorage).toBe("unavailable");

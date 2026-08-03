@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { serverConfigSummarySchema } from "../config.js";
@@ -62,7 +62,7 @@ const acpMockAgentPath =
 
 const DEFAULT_TIMEOUT_MS = 45_000;
 const HOST_CAPACITY = 2;
-const HOST_CAPABILITIES = ["acp.test"] as const;
+const HOST_CAPABILITIES = ["acp.codex"] as const;
 const HOST_DISPLAY_NAME = "local-tls-fixture-host";
 
 const serverReadyOutputSchema = serverConfigSummarySchema
@@ -223,6 +223,12 @@ export async function runLocalTlsFixture(options: {
     await mkdir(join(root, "workspaces", "project"), { recursive: true });
     await mkdir(join(root, "logs"), { recursive: true });
     await mkdir(join(root, "acp-control"), { recursive: true });
+    const supportedAgentBinDirectory = join(root, "supported-agent-bin");
+    await mkdir(supportedAgentBinDirectory, { recursive: true, mode: 0o700 });
+    await writeFile(join(supportedAgentBinDirectory, "codex-acp"), "", {
+      encoding: "utf8",
+      mode: 0o700
+    });
 
     const tls = await generateLocalTlsMaterial(root, { opensslBinary: openssl });
     commandsSanitized.push(...tls.commandsSanitized);
@@ -418,6 +424,25 @@ export async function runLocalTlsFixture(options: {
     if (enrollment.code !== 0) {
       throw new Error(`vps_e2e_host_enroll_failed:${enrollment.stderr || enrollment.stdout}`);
     }
+
+    const exposure = await runNodeBin(
+      agentHostBinPath,
+      ["agents", "expose", "codex-acp", "--config", hostConfigPath],
+      {
+        ...process.env,
+        ...env,
+        PATH: [supportedAgentBinDirectory, env.PATH ?? process.env.PATH]
+          .filter((value): value is string => Boolean(value))
+          .join(delimiter),
+        PLANWEAVE_HOME: workspace.home
+      }
+    );
+    if (exposure.code !== 0) {
+      throw new Error(`vps_e2e_agent_exposure_failed:${exposure.stderr || exposure.stdout}`);
+    }
+    commandsSanitized.push(
+      "planweave-agent-host agents expose codex-acp --config <redacted-absolute-config>"
+    );
 
     host = spawnLongLived({
       command: process.execPath,

@@ -43,7 +43,7 @@ export function remoteAcpFixtureManifest(): PlanPackageManifest {
             title: "Bounded fixture implementation",
             prompt: "nodes/T-001/blocks/B-001.prompt.md",
             depends_on: [],
-            requirements: { capabilities: ["acp.test"] }
+            requirements: { capabilities: ["acp.codex"] }
           },
           {
             id: "R-001",
