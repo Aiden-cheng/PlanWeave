@@ -616,6 +616,7 @@
         "realAcpGate.test.ts",
         "realAcpLiveSmoke.test.ts",
         "remoteAcpExecutor.test.ts",
+        "resolveHostExecutable.test.ts",
         "tlsTrust.test.ts"
       ],
       "platform": [],
