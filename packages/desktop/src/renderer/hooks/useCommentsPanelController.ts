@@ -185,15 +185,16 @@ export function useCommentsPanelController(
         const page = await api.listCollaborationComments({
           workItem: args.workItem,
           limit: COMMENT_LIST_PAGE_DEFAULT,
-          includeTombstoned: true,
+          includeTombstoned: false,
           cursor: mode === "append" && nextCursor ? nextCursor : undefined
         });
         if (generation !== generationRef.current) return;
         setComments((prev) => {
-          if (mode === "replace") return page.items;
+          const activeItems = page.items.filter((item) => !item.tombstoned);
+          if (mode === "replace") return activeItems;
           const seen = new Set(prev.map((c) => c.commentId));
           const merged = [...prev];
-          for (const item of page.items) {
+          for (const item of activeItems) {
             if (!seen.has(item.commentId)) merged.push(item);
           }
           merged.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -235,11 +236,16 @@ export function useCommentsPanelController(
   useEffect(() => {
     if (!args.open || !workKey) return;
     const hubItems = snapshot.commentsByWorkItem[workKey];
-    if (!hubItems || hubItems.length === 0) return;
+    if (!hubItems) return;
+    if (hubItems.length === 0) {
+      setComments([]);
+      return;
+    }
     setComments((prev) => {
       const byId = new Map(prev.map((c) => [c.commentId, c]));
       for (const item of hubItems) {
-        byId.set(item.commentId, item);
+        if (item.tombstoned) byId.delete(item.commentId);
+        else byId.set(item.commentId, item);
       }
       return [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     });
@@ -247,16 +253,18 @@ export function useCommentsPanelController(
 
   const rows = useMemo(
     () =>
-      comments.map((comment) =>
-        buildCommentRowViewModel({
-          comment,
-          currentHumanPrincipalId,
-          currentUserIsOwner,
-          canMutate,
-          removedMemberLabel: args.t("commentsRemovedMember"),
-          tombstonedLabel: args.t("commentsTombstoned")
-        })
-      ),
+      comments
+        .filter((comment) => !comment.tombstoned)
+        .map((comment) =>
+          buildCommentRowViewModel({
+            comment,
+            currentHumanPrincipalId,
+            currentUserIsOwner,
+            canMutate,
+            removedMemberLabel: args.t("commentsRemovedMember"),
+            tombstonedLabel: args.t("commentsTombstoned")
+          })
+        ),
     [args.t, canMutate, comments, currentHumanPrincipalId, currentUserIsOwner]
   );
 
@@ -381,7 +389,9 @@ export function useCommentsPanelController(
           );
           return false;
         }
-        setComments((prev) => prev.map((c) => (c.commentId === result.commentId ? result : c)));
+        setComments((prev) =>
+          prev.map((comment) => (comment.commentId === result.commentId ? result : comment))
+        );
         return true;
       } catch (error) {
         setActionError(collaborationErrorMessage(mapBoundaryError(error)));
@@ -409,7 +419,7 @@ export function useCommentsPanelController(
           );
           return false;
         }
-        setComments((prev) => prev.map((c) => (c.commentId === result.commentId ? result : c)));
+        setComments((prev) => prev.filter((comment) => comment.commentId !== result.commentId));
         return true;
       } catch (error) {
         setActionError(collaborationErrorMessage(mapBoundaryError(error)));

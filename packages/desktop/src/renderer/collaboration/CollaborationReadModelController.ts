@@ -876,7 +876,7 @@ export class CollaborationReadModelController {
       const query: CollaborationCommentListQueryInput = {
         workItem,
         limit: this.pageLimit,
-        includeTombstoned: false
+        includeTombstoned: true
       };
       const page = await this.api.listCollaborationComments(query);
       if (generation !== this.state.generation) return;

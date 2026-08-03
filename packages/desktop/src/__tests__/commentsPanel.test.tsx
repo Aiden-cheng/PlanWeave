@@ -37,23 +37,13 @@ const liveRow: CommentRowViewModel = {
   actions: { canEdit: true, canTombstone: true, reason: "author" }
 };
 
-const tombstoneRow: CommentRowViewModel = {
-  ...liveRow,
-  commentId: "comment-2",
-  body: null,
-  tombstoned: true,
-  tombstoneLabel: "This comment was removed.",
-  attachments: [],
-  actions: { canEdit: false, canTombstone: false, reason: "tombstoned" }
-};
-
 afterEach(() => {
   cleanupRendererTestEnvironment();
   vi.restoreAllMocks();
 });
 
 describe("CommentsPanel", () => {
-  it("renders human comments, safe markdown, attachments, and author actions", async () => {
+  it("renders active comments without exposing removed tombstones", async () => {
     const user = userEvent.setup();
     const onEdit = vi.fn().mockResolvedValue(true);
     const onTombstone = vi.fn().mockResolvedValue(true);
@@ -63,7 +53,7 @@ describe("CommentsPanel", () => {
     render(
       <CommentsPanel
         mode="ready"
-        rows={[liveRow, tombstoneRow]}
+        rows={[liveRow]}
         draft={{ body: "draft body", showPreview: false }}
         stagedAttachments={[]}
         loading={false}
@@ -88,7 +78,8 @@ describe("CommentsPanel", () => {
 
     expect(screen.getByTestId("comments-panel")).toHaveAttribute("data-mode", "ready");
     expect(screen.getByText("Comments")).toBeInTheDocument();
-    expect(screen.getByTestId("comments-item-tombstone")).toHaveTextContent("removed");
+    expect(screen.queryByTestId("comments-item-tombstone")).toBeNull();
+    expect(screen.queryByText("This comment was removed.")).toBeNull();
     // SafeMarkdown renders text nodes; script tags are not executable DOM.
     expect(screen.getByTestId("comments-item-body").textContent).toContain("<script>");
     expect(screen.queryByTestId("comments-item-body")?.querySelector("script")).toBeNull();

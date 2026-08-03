@@ -29,7 +29,7 @@ function connectedStatus(): CollaborationStatus {
         deviceCredentialPersistence: "persisted",
         deviceCredentialId: "device-1",
         humanPrincipalId: "human-1",
-        updatedAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:00:00.000Z"
       }
     ],
     activeProfileId: "profile-1",
@@ -43,16 +43,16 @@ function connectedStatus(): CollaborationStatus {
       lastErrorMessage: null
     },
     updatedAt: "2030-01-01T00:00:00.000Z",
-  workspaceConnection: {
-    schemaVersion: "workspace-setup/v1",
-    status: "local_only",
-    profile: null,
-    workspaceId: null,
-    workspaceDisplayName: null,
-    connectedAt: null,
-    error: null
-  },
-  workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
+    workspaceConnection: {
+      schemaVersion: "workspace-setup/v1",
+      status: "local_only",
+      profile: null,
+      workspaceId: null,
+      workspaceDisplayName: null,
+      connectedAt: null,
+      error: null
+    },
+    workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
   };
 }
 
@@ -132,7 +132,7 @@ function createApi() {
           displayName: "Ada",
           role: "owner",
           createdAt: "2030-01-01T00:00:00.000Z",
-          updatedAt: "2030-01-01T00:00:00.000Z",
+          updatedAt: "2030-01-01T00:00:00.000Z"
         }
       ],
       nextCursor: null
@@ -208,7 +208,10 @@ describe("useCommentsPanelController", () => {
     await waitFor(() => {
       expect(result.current.rows.length).toBeGreaterThan(0);
     });
-    expect(listComments).toHaveBeenCalled();
+    expect(listComments).toHaveBeenCalledWith(
+      expect.objectContaining({ includeTombstoned: false })
+    );
+    expect(listComments).toHaveBeenCalledWith(expect.objectContaining({ includeTombstoned: true }));
     expect(result.current.hasMore).toBe(true);
 
     await act(async () => {
@@ -250,6 +253,67 @@ describe("useCommentsPanelController", () => {
     expect(tombstoneComment).toHaveBeenCalledWith({
       commentId: "comment-1",
       expectedRevision: 2
+    });
+    expect(result.current.rows.some((row) => row.commentId === "comment-1")).toBe(false);
+    expect(
+      Object.values(shell.controller.getSnapshot().commentsByWorkItem)
+        .flat()
+        .find((comment) => comment.commentId === "comment-1")
+    ).toMatchObject({ tombstoned: true });
+  });
+
+  it("removes an active row when an observer refresh no longer returns the comment", async () => {
+    const { api, listComments } = createApi();
+    const shell = acquireCollaborationReadModelController(api);
+    await shell.controller.setActiveProject({
+      profileId: "profile-1",
+      projectId: "project-1",
+      canvasId: "canvas-1"
+    });
+
+    const { result } = renderHook(() =>
+      useCommentsPanelController({
+        workItem: taskItem,
+        open: true,
+        api,
+        t: createTranslator("en")
+      })
+    );
+
+    await waitFor(() => {
+      expect(result.current.rows.map((row) => row.commentId)).toContain("comment-1");
+    });
+
+    const removedComment = {
+      ...commentProjection("comment-1", "first", 2),
+      body: null,
+      tombstoned: true,
+      tombstonedAt: "2030-01-01T00:10:00.000Z"
+    };
+    listComments.mockImplementation(async (query: { includeTombstoned?: boolean }) => ({
+      items: query.includeTombstoned ? [removedComment] : [],
+      nextCursor: null
+    }));
+    shell.controller.handleObserverSignalForTests({
+      type: "human.observer.event",
+      profileId: "profile-1",
+      projectId: "project-1",
+      event: {
+        type: "human.observer.event",
+        protocolVersion: 1,
+        cursor: 1,
+        previousCursor: 0,
+        occurredAt: "2030-01-01T00:10:00.000Z",
+        kind: "comment",
+        workItem: taskItem
+      }
+    });
+
+    await waitFor(() => {
+      expect(shell.controller.getSnapshot().commentsByWorkItem["task:canvas-1:T-1"]).toEqual([
+        removedComment
+      ]);
+      expect(result.current.rows).toEqual([]);
     });
   });
 
