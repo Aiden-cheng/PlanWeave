@@ -61,7 +61,8 @@ const productionExportPaths = [
   "./handoff/invitation",
   "./deployment",
   "./loopback",
-  "./remote-run"
+  "./remote-run",
+  "./agent-endpoint"
 ] as const;
 
 const fixtureExportPaths = ["./fixtures/collaboration", "./fixtures/content-version"] as const;

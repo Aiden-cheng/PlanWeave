@@ -6,7 +6,10 @@ import {
   type CollaborationCanvasLiveSyncClientPort
 } from "../main/collaboration/collaborationCanvasLiveSyncSession.js";
 import type { CollaborationClientClock } from "../main/collaboration/collaborationClientTypes.js";
-import type { CanvasLiveSyncHandlers, CanvasLiveSyncStatus } from "../main/collaboration/CanvasLiveSyncClient.js";
+import type {
+  CanvasLiveSyncHandlers,
+  CanvasLiveSyncStatus
+} from "../main/collaboration/CanvasLiveSyncClient.js";
 import type { CanvasCommandSessionSnapshot } from "../main/collaboration/canvasCommandSession.js";
 
 type Listener = (event: unknown) => void;
@@ -33,7 +36,10 @@ class TestSocket {
   }
 
   removeEventListener(type: "open" | "message" | "error" | "close", listener: Listener): void {
-    this.listeners.set(type, (this.listeners.get(type) ?? []).filter((entry) => entry !== listener));
+    this.listeners.set(
+      type,
+      (this.listeners.get(type) ?? []).filter((entry) => entry !== listener)
+    );
   }
 
   emit(type: "open" | "message" | "error" | "close", event: unknown): void {
@@ -82,7 +88,13 @@ describe("CollaborationCanvasLiveSyncSession", () => {
         displayName: "Demo",
         serverBaseUrl: "https://collab.example.com/",
         projectId: "project-1",
-        allowInsecureTransport: false
+        allowInsecureTransport: false,
+        endpoint: {
+          topology: "public_https",
+          serverOrigin: "https://collab.example.com/",
+          allowedClientOrigins: ["https://collab.example.com/"],
+          tlsTrust: "system_ca"
+        }
       },
       credential: { getDeviceToken: () => "pw_hdev_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq" },
       WebSocketImpl: TestSocket,
@@ -186,7 +198,11 @@ describe("CollaborationCanvasLiveSyncSession", () => {
         };
       }
 
-      startLiveSync(_canvasId: string, lastRevision: number, _handlers?: CanvasLiveSyncHandlers): void {
+      startLiveSync(
+        _canvasId: string,
+        lastRevision: number,
+        _handlers?: CanvasLiveSyncHandlers
+      ): void {
         this.canvas = "remote-first";
         this.helloRevision = lastRevision;
         this.status = { state: "connecting", canvasId: "remote-first", attempt: 1 };
@@ -237,7 +253,11 @@ describe("CollaborationCanvasLiveSyncSession", () => {
     expect(client.stopCalls).toBe(0);
 
     const currentHandlers = client.listeners.at(-1);
-    currentHandlers?.onStatus?.({ state: "access_denied", canvasId: "remote-first", code: "forbidden" });
+    currentHandlers?.onStatus?.({
+      state: "access_denied",
+      canvasId: "remote-first",
+      code: "forbidden"
+    });
     expect(cleared).toEqual([]);
 
     currentHandlers?.onStatus?.({

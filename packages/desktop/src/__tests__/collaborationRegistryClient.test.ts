@@ -7,6 +7,12 @@ import {
 import { CollaborationRegistryService } from "../main/collaboration/CollaborationRegistryService.js";
 
 const page = { items: [], nextCursor: null };
+const profileEndpoint = {
+  topology: "public_https",
+  serverOrigin: "https://collaboration.example/",
+  allowedClientOrigins: ["https://collaboration.example/"],
+  tlsTrust: "system_ca"
+} as const;
 
 describe("CollaborationRegistryClient", () => {
   it("builds bounded registry paths without exposing filesystem fields", async () => {
@@ -77,9 +83,10 @@ describe("CollaborationRegistryService", () => {
       profile: {
         profileId: "profile-a",
         displayName: "Profile A",
-        serverBaseUrl: "https://collaboration.example",
+        serverBaseUrl: "https://collaboration.example/",
         projectId: "project-a",
-        allowInsecureTransport: false
+        allowInsecureTransport: false,
+        endpoint: profileEndpoint
       },
       credential: { getDeviceToken: () => "pw_hdev_test" },
       request
@@ -118,9 +125,10 @@ describe("CollaborationRegistryService", () => {
       profile: {
         profileId: "profile-a",
         displayName: "Profile A",
-        serverBaseUrl: "https://collaboration.example",
+        serverBaseUrl: "https://collaboration.example/",
         projectId: "project-a",
-        allowInsecureTransport: false
+        allowInsecureTransport: false,
+        endpoint: profileEndpoint
       },
       credential: { getDeviceToken: () => "pw_hdev_test" },
       request
