@@ -398,7 +398,7 @@ export class CollaborationCanvasCommandFacade {
     };
 
     try {
-      void this.mirror?.bind(scope);
+      await this.mirror?.bind(scope);
       await this.worker.bind(scope);
       this.binding = {
         scope,

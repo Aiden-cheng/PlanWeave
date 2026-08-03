@@ -14,6 +14,7 @@ export type DesktopHomePaths = {
   collaborationCredentialsFile: string;
   collaborationInvitationsFile: string;
   collaborationContentReplicasFile: string;
+  collaborationRuntimeStatusFile: string;
   localCollaborationScopesFile: string;
   localCollaborationNetworkFile: string;
   operatorControlDir: string;
@@ -39,6 +40,7 @@ export function desktopHomePaths(): DesktopHomePaths {
     collaborationCredentialsFile: join(collaborationDir, "credentials.json"),
     collaborationInvitationsFile: join(collaborationDir, "invitations.json"),
     collaborationContentReplicasFile: join(collaborationDir, "content-replicas.json"),
+    collaborationRuntimeStatusFile: join(collaborationDir, "runtime-status.json"),
     localCollaborationScopesFile: join(collaborationDir, "local-scopes.json"),
     localCollaborationNetworkFile: join(collaborationDir, "local-network.json"),
     operatorControlDir,

@@ -115,7 +115,10 @@ export function mergeCollaborationRuntimeStatus(
         blocks,
         blockPreview: mergeBlocks(task.blockPreview),
         exceptions: blocks.flatMap((block) => {
-          if (!block.exceptionReason || (block.status !== "blocked" && block.status !== "diverged")) {
+          if (
+            !block.exceptionReason ||
+            (block.status !== "blocked" && block.status !== "diverged")
+          ) {
             return [];
           }
           return [{ ref: block.ref, reason: block.exceptionReason, source: block.status }];
@@ -136,6 +139,7 @@ export function useCollaborationRuntimeStatus(input: {
   api?: CollaborationRuntimeStatusBridge | null;
 }): { graph: DesktopGraphViewModel | null; error: string | null } {
   const api = input.api === undefined ? collaborationBridge : input.api;
+  const graphPackageFingerprint = input.graph?.packageFingerprint ?? null;
   const [snapshot, setSnapshot] = useState<RuntimeStatusSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -143,12 +147,11 @@ export function useCollaborationRuntimeStatus(input: {
     if (
       !api ||
       !input.enabled ||
-      !input.sessionConnected ||
       !input.profileId ||
       !input.activeProjectId ||
       !input.localProjectId ||
       !input.localCanvasId ||
-      !input.graph
+      !graphPackageFingerprint
     ) {
       setSnapshot(null);
       setError(null);
@@ -173,10 +176,7 @@ export function useCollaborationRuntimeStatus(input: {
           canvasId: localCanvasId
         });
         if (!active) return;
-        if (
-          !next ||
-          !matchesResolvedCanvas(next, currentIdentity)
-        ) {
+        if (!next || !matchesResolvedCanvas(next, currentIdentity)) {
           setSnapshot(null);
           return;
         }
@@ -184,7 +184,6 @@ export function useCollaborationRuntimeStatus(input: {
         setError(null);
       } catch (caught) {
         if (active) {
-          setSnapshot(null);
           setError(caught instanceof Error ? caught.message : String(caught));
         }
       } finally {
@@ -210,16 +209,18 @@ export function useCollaborationRuntimeStatus(input: {
       .catch((caught: unknown) => {
         if (active) setError(caught instanceof Error ? caught.message : String(caught));
       });
-    const intervalId = setInterval(() => void refresh(), COLLABORATION_RUNTIME_STATUS_POLL_MS);
+    const intervalId = input.sessionConnected
+      ? setInterval(() => void refresh(), COLLABORATION_RUNTIME_STATUS_POLL_MS)
+      : null;
     return () => {
       active = false;
-      clearInterval(intervalId);
+      if (intervalId !== null) clearInterval(intervalId);
     };
   }, [
     api,
     input.activeProjectId,
     input.enabled,
-    input.graph?.packageFingerprint,
+    graphPackageFingerprint,
     input.localCanvasId,
     input.localProjectId,
     input.profileId,
@@ -242,20 +243,34 @@ export function useCollaborationRuntimeStatus(input: {
   return useMemo(
     () => ({
       graph: input.graph
-        ? mergeCollaborationRuntimeStatus(
-            input.graph,
-            currentSnapshot?.status ?? null,
-            currentSnapshot
-              ? {
-                  workspaceId: currentSnapshot.identity.remoteWorkspaceId,
-                  projectId: currentSnapshot.identity.remoteProjectId,
-                  canvasId: currentSnapshot.identity.remoteCanvasId
-                }
-              : null
-          )
+        ? input.sessionConnected && !error
+          ? mergeCollaborationRuntimeStatus(
+              input.graph,
+              currentSnapshot?.status ?? null,
+              currentSnapshot
+                ? {
+                    workspaceId: currentSnapshot.identity.remoteWorkspaceId,
+                    projectId: currentSnapshot.identity.remoteProjectId,
+                    canvasId: currentSnapshot.identity.remoteCanvasId
+                  }
+                : null
+            )
+          : failClosedDispatchability(
+              mergeCollaborationRuntimeStatus(
+                input.graph,
+                currentSnapshot?.status ?? null,
+                currentSnapshot
+                  ? {
+                      workspaceId: currentSnapshot.identity.remoteWorkspaceId,
+                      projectId: currentSnapshot.identity.remoteProjectId,
+                      canvasId: currentSnapshot.identity.remoteCanvasId
+                    }
+                  : null
+              )
+            )
         : null,
       error
     }),
-    [currentSnapshot, error, input.graph]
+    [currentSnapshot, error, input.graph, input.sessionConnected]
   );
 }

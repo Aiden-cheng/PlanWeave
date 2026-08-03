@@ -17,6 +17,7 @@ import {
   CollaborationContentReplicaStore,
   type CollaborationContentReplicaStorePort
 } from "../main/collaboration/CollaborationContentReplicaStore.js";
+import { CollaborationRuntimeStatusStore } from "../main/collaboration/CollaborationRuntimeStatusStore.js";
 import { CollaborationClientError } from "../main/collaboration/collaborationErrors.js";
 import type { CollaborationClient } from "../main/collaboration/CollaborationClient.js";
 import { createTestWorkspace } from "../../../runtime/src/__tests__/promptTestHelpers.js";
@@ -319,6 +320,52 @@ describe("ContentVersionFacade", () => {
       code: "collaboration_content_offline",
       retryable: true
     });
+  });
+
+  it("reads an exact persisted runtime status while disconnected", async () => {
+    const workspace = await createTestWorkspace();
+    directories.push(workspace.home, workspace.root);
+    const runtimeStatuses = new CollaborationRuntimeStatusStore(
+      join(workspace.home, "runtime-status.json")
+    );
+    const authority = {
+      profileId: "profile-test",
+      serverOrigin: "http://127.0.0.1:50653",
+      projectId: "remote-project"
+    };
+    const status = {
+      schemaVersion: "canvas-runtime-status/v2" as const,
+      scope: {
+        workspaceId: "workspace-test",
+        projectId: "remote-project",
+        canvasId: "remote-canvas"
+      },
+      packageFingerprint: `pkg-${"a".repeat(64)}`,
+      capturedAt: "2026-08-03T00:00:00.000Z",
+      tasks: [],
+      blocks: []
+    };
+    await runtimeStatuses.put(
+      {
+        ...authority,
+        localProjectId: "local-project",
+        localCanvasId: "default"
+      },
+      status
+    );
+    const facade = new ContentVersionFacade(
+      () => null,
+      new CollaborationContentReplicaStore(join(workspace.home, "content-replicas.json")),
+      () => authority,
+      runtimeStatuses
+    );
+
+    await expect(
+      facade.resolveCanvasScope({ localProjectId: "local-project", canvasId: "default" })
+    ).resolves.toEqual(status.scope);
+    await expect(
+      facade.readRuntimeStatus({ localProjectId: "local-project", canvasId: "default" })
+    ).resolves.toEqual(status);
   });
 
   it("bootstraps a missing local package from Server authority and restores the mapping after restart", async () => {

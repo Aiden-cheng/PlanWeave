@@ -98,7 +98,10 @@ describe("collaboration runtime status", () => {
       { ...remoteStatus, tasks: remoteStatus.tasks.slice(0, 1) },
       {
         ...remoteStatus,
-        tasks: [...remoteStatus.tasks, { taskId: "T-EXTRA", status: "ready" as const, openFeedbackCount: 0 }]
+        tasks: [
+          ...remoteStatus.tasks,
+          { taskId: "T-EXTRA", status: "ready" as const, openFeedbackCount: 0 }
+        ]
       },
       { ...remoteStatus, blocks: [] },
       {
@@ -145,10 +148,9 @@ describe("collaboration runtime status", () => {
 
   it("clears a prior overlay immediately when the profile or canvas identity changes", async () => {
     const bridge = api();
-    const { result, rerender } = renderHook(
-      ({ input }) => useCollaborationRuntimeStatus(input),
-      { initialProps: { input: hookInput({ api: bridge }) } }
-    );
+    const { result, rerender } = renderHook(({ input }) => useCollaborationRuntimeStatus(input), {
+      initialProps: { input: hookInput({ api: bridge }) }
+    });
 
     await act(async () => {
       await Promise.resolve();
@@ -174,15 +176,11 @@ describe("collaboration runtime status", () => {
     const pendingRefresh = new Promise<typeof remoteStatus>((resolve) => {
       resolveRefresh = resolve;
     });
-    const read = vi
-      .fn()
-      .mockResolvedValueOnce(remoteStatus)
-      .mockReturnValueOnce(pendingRefresh);
+    const read = vi.fn().mockResolvedValueOnce(remoteStatus).mockReturnValueOnce(pendingRefresh);
     const bridge = api(read);
-    const { result, rerender } = renderHook(
-      ({ input }) => useCollaborationRuntimeStatus(input),
-      { initialProps: { input: hookInput({ api: bridge }) } }
-    );
+    const { result, rerender } = renderHook(({ input }) => useCollaborationRuntimeStatus(input), {
+      initialProps: { input: hookInput({ api: bridge }) }
+    });
 
     await act(async () => {
       await Promise.resolve();
@@ -233,7 +231,7 @@ describe("collaboration runtime status", () => {
     expect(result.current.graph?.tasks[0]?.blocks[0]?.dispatchable).toBe(false);
   });
 
-  it("clears the cached overlay when a refresh fails", async () => {
+  it("keeps the last confirmed overlay read-only when a refresh fails", async () => {
     vi.useFakeTimers();
     const read = vi
       .fn()
@@ -252,8 +250,25 @@ describe("collaboration runtime status", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(COLLABORATION_RUNTIME_STATUS_POLL_MS);
     });
-    expect(result.current.graph?.tasks[0]?.status).toBe("ready");
+    expect(result.current.graph?.tasks[0]?.status).toBe("implemented");
     expect(result.current.graph?.tasks[0]?.blocks[0]?.dispatchable).toBe(false);
     expect(result.current.error).toBe("network_down");
+  });
+
+  it("loads the persisted status once while the collaboration session is offline", async () => {
+    const bridge = api();
+    const { result } = renderHook(() =>
+      useCollaborationRuntimeStatus(hookInput({ api: bridge, sessionConnected: false }))
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(bridge.readCollaborationCanvasRuntimeStatus).toHaveBeenCalledTimes(1);
+    expect(result.current.graph?.tasks[0]?.status).toBe("implemented");
+    expect(result.current.graph?.tasks[0]?.blocks[0]?.dispatchable).toBe(false);
   });
 });

@@ -2,6 +2,7 @@
 
 import { act, renderHook } from "@testing-library/react";
 import {
+  exampleCanvasCommandAccepted,
   exampleCanvasReconnectAfterDisconnect,
   exampleCanvasReconnectTruncatedJournal
 } from "@planweave-ai/collaboration-protocol/fixtures/collaboration";
@@ -60,6 +61,8 @@ function createBridge(options?: {
   bindError?: Error;
   reconnect?: SharedCanvasCommandBridge["reconnectCollaborationCanvas"];
   resolveScope?: SharedCanvasCommandBridge["resolveCollaborationCanvasScope"];
+  flush?: SharedCanvasCommandBridge["flushCollaborationCanvasReplicaMaterialization"];
+  submit?: SharedCanvasCommandBridge["submitCollaborationCanvasCommand"];
 }) {
   const observerListeners = new Set<(signal: CollaborationObserverSignal) => void>();
   const replicaListeners = new Set<(signal: CollaborationCanvasReplicaSignal) => void>();
@@ -74,9 +77,11 @@ function createBridge(options?: {
   );
   return {
     api: {
-      submitCollaborationCanvasCommand: async () => {
-        throw new Error("not used by this hook test");
-      },
+      submitCollaborationCanvasCommand:
+        options?.submit ??
+        (async () => {
+          throw new Error("not used by this hook test");
+        }),
       reconnectCollaborationCanvas: reconnect,
       bindCollaborationCanvasCommandSession: bind,
       getCollaborationCanvasCommandSession: async () => initialSession,
@@ -92,6 +97,7 @@ function createBridge(options?: {
         return () => observerListeners.delete(listener);
       },
       getCollaborationCanvasReplicaProjection: async () => null,
+      flushCollaborationCanvasReplicaMaterialization: options?.flush ?? (async () => undefined),
       onCollaborationCanvasReplicaSignal: (
         listener: (signal: CollaborationCanvasReplicaSignal) => void
       ) => {
@@ -284,6 +290,45 @@ describe("useSharedCanvasCommands", () => {
     rerender();
 
     expect(result.current).toBe(initialFacade);
+  });
+
+  it("returns an accepted drag before the background disk mirror finishes", async () => {
+    vi.useFakeTimers();
+    let releaseFlush!: () => void;
+    const flush = new Promise<void>((resolve) => {
+      releaseFlush = resolve;
+    });
+    const onAuthoritativeChange = vi.fn();
+    const bridge = createBridge({
+      flush: async () => flush,
+      submit: async () => ({
+        outcome: exampleCanvasCommandAccepted,
+        session: {
+          ...initialSession,
+          revision: exampleCanvasCommandAccepted.revision,
+          contentDigest: exampleCanvasCommandAccepted.contentDigest
+        }
+      })
+    });
+    const { result } = renderHook(() =>
+      useSharedCanvasCommands(hookInput(bridge.api, onAuthoritativeChange))
+    );
+    await flushEffects();
+    onAuthoritativeChange.mockClear();
+
+    const submitted = await result.current.submit({
+      intent: {
+        kind: "update_layout",
+        nodes: [{ nodeId: "T-001", x: 40, y: 80 }],
+        updatedAt: "2026-08-03T00:00:00.000Z"
+      }
+    });
+
+    expect(submitted.ok).toBe(true);
+    expect(onAuthoritativeChange).not.toHaveBeenCalled();
+    releaseFlush();
+    await flushEffects();
+    expect(onAuthoritativeChange).toHaveBeenCalledTimes(1);
   });
 
   it("polls a remote delta and refreshes the authoritative canvas", async () => {

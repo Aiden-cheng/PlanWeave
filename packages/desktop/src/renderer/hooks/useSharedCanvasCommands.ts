@@ -14,7 +14,9 @@ import type { CollaborationCanvasReplicaProjection } from "../../shared/canvasRe
 export type SharedCanvasCommandBridge = CanvasCommandBridge &
   Pick<
     PlanWeaveCollaborationApi,
-    "resolveCollaborationCanvasScope" | "onCollaborationObserverSignal"
+    | "resolveCollaborationCanvasScope"
+    | "onCollaborationObserverSignal"
+    | "flushCollaborationCanvasReplicaMaterialization"
   > &
   Partial<
     Pick<
@@ -116,6 +118,13 @@ export function useSharedCanvasCommands(input: {
   const controllerRef = useRef<CanvasCommandController | null>(null);
   const onChangeRef = useRef(input.onAuthoritativeChange);
   onChangeRef.current = input.onAuthoritativeChange;
+  const refreshGenerationRef = useRef(0);
+  const refreshScopeIdentity = JSON.stringify([
+    input.activeProjectId,
+    input.canvasId,
+    input.profileId,
+    input.selectedProjectId
+  ]);
   const [snapshot, setSnapshot] = useState<CanvasCommandControllerSnapshot>({
     session: null,
     lastError: null,
@@ -127,6 +136,29 @@ export function useSharedCanvasCommands(input: {
     profileId: string | null;
     projection: CollaborationCanvasReplicaProjection;
   } | null>(null);
+
+  const refreshAfterMaterialization = useCallback(() => {
+    if (!api || !onChangeRef.current) return;
+    const generation = ++refreshGenerationRef.current;
+    void api
+      .flushCollaborationCanvasReplicaMaterialization()
+      .then(async () => {
+        if (generation !== refreshGenerationRef.current) return;
+        await onChangeRef.current?.();
+      })
+      .catch((error: unknown) => {
+        if (generation === refreshGenerationRef.current) {
+          controllerRef.current?.reportRefreshFailure(error);
+        }
+      });
+  }, [api]);
+
+  useEffect(() => {
+    void refreshScopeIdentity;
+    return () => {
+      refreshGenerationRef.current += 1;
+    };
+  }, [refreshScopeIdentity]);
 
   useEffect(() => {
     if (
@@ -227,13 +259,6 @@ export function useSharedCanvasCommands(input: {
     const reportRefreshFailure = (error: unknown) => {
       if (active) controller.reportRefreshFailure(error);
     };
-    const refreshAuthoritativeState = async () => {
-      try {
-        await onChangeRef.current?.();
-      } catch (error) {
-        reportRefreshFailure(error);
-      }
-    };
     const acceptsProjection = (candidate: CollaborationCanvasReplicaProjection) =>
       candidate.localProjectId === localProjectId &&
       candidate.localCanvasId === localCanvasId &&
@@ -273,7 +298,7 @@ export function useSharedCanvasCommands(input: {
         )
           return;
         await refreshReplicaProjection();
-        await refreshAuthoritativeState();
+        refreshAfterMaterialization();
       } finally {
         pollInFlight = false;
         if (active && observerPollQueued) {
@@ -294,7 +319,7 @@ export function useSharedCanvasCommands(input: {
         const snap = controller.getSnapshot();
         if (!snap.session || snap.lastError) return;
         await refreshReplicaProjection();
-        await refreshAuthoritativeState();
+        refreshAfterMaterialization();
         if (!active || controller.getSnapshot().lastError) return;
         unsubscribeObserver = activeApi.onCollaborationObserverSignal((signal) => {
           if (
@@ -338,7 +363,12 @@ export function useSharedCanvasCommands(input: {
     currentScope?.localProjectId,
     currentScope?.remoteCanvasId,
     currentScope?.remoteProjectId,
+    api,
+    input.activeProjectId,
+    input.canvasId,
     input.profileId,
+    input.selectedProjectId,
+    refreshAfterMaterialization,
     sessionEnabled
   ]);
 
@@ -348,9 +378,18 @@ export function useSharedCanvasCommands(input: {
       if (!controller || !sessionEnabled) {
         return { ok: false, error: labels.notConnected, staleConflict: null };
       }
-      let result;
       try {
-        result = await controller.submit(submitInput);
+        const result = await controller.submit(submitInput);
+        const snap = controller.getSnapshot();
+        if (result.outcome.type === "canvas.command.accepted") {
+          refreshAfterMaterialization();
+          return { ok: true, error: null, staleConflict: null };
+        }
+        return {
+          ok: false,
+          error: snap.lastError,
+          staleConflict: snap.lastStaleConflict
+        };
       } catch (error) {
         const snap = controller.getSnapshot();
         return {
@@ -359,18 +398,8 @@ export function useSharedCanvasCommands(input: {
           staleConflict: snap.lastStaleConflict
         };
       }
-      const snap = controller.getSnapshot();
-      if (result.outcome.type === "canvas.command.accepted") {
-        await onChangeRef.current?.();
-        return { ok: true, error: null, staleConflict: null };
-      }
-      return {
-        ok: false,
-        error: snap.lastError,
-        staleConflict: snap.lastStaleConflict
-      };
     },
-    [labels.notConnected, sessionEnabled]
+    [labels.notConnected, refreshAfterMaterialization, sessionEnabled]
   );
 
   const reconnect = useCallback(async () => {
@@ -378,11 +407,11 @@ export function useSharedCanvasCommands(input: {
     if (!controller || !sessionEnabled) return false;
     const result = await controller.reconnect();
     if (result.response.type !== "canvas.reconnect.error") {
-      await onChangeRef.current?.();
+      refreshAfterMaterialization();
       return true;
     }
     return false;
-  }, [sessionEnabled]);
+  }, [refreshAfterMaterialization, sessionEnabled]);
 
   return useMemo(
     () => ({

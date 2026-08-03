@@ -79,4 +79,100 @@ describe("CanvasReplicaDiskMirror", () => {
 
     await expect(mirror.flush()).rejects.toThrow("disk full");
   });
+
+  it("coalesces queued revisions while one materialization is in progress", async () => {
+    let releaseFirst!: () => void;
+    const firstWrite = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const materializeConfirmed = vi
+      .fn()
+      .mockReturnValueOnce(firstWrite)
+      .mockResolvedValue(undefined);
+    const mirror = new CanvasReplicaDiskMirror({
+      bind: vi.fn().mockResolvedValue({ expectedContentDigest: "a".repeat(64) }),
+      materializeConfirmed
+    });
+    const first = content();
+    const second = { ...content(), canonicalDigest: "b".repeat(64) };
+    const latest = { ...content(), canonicalDigest: "c".repeat(64) };
+
+    await mirror.bind(scope());
+    mirror.capture({
+      scope: scope(),
+      revision: 1,
+      contentDigest: first.canonicalDigest,
+      content: first
+    });
+    await vi.waitFor(() => expect(materializeConfirmed).toHaveBeenCalledTimes(1));
+    mirror.capture({
+      scope: scope(),
+      revision: 2,
+      contentDigest: second.canonicalDigest,
+      content: second
+    });
+    mirror.capture({
+      scope: scope(),
+      revision: 3,
+      contentDigest: latest.canonicalDigest,
+      content: latest
+    });
+
+    releaseFirst();
+    await mirror.flush();
+
+    expect(materializeConfirmed).toHaveBeenCalledTimes(2);
+    expect(materializeConfirmed).toHaveBeenLastCalledWith(expect.anything(), {
+      content: latest,
+      contentDigest: latest.canonicalDigest
+    });
+  });
+
+  it("does not expose a replacement binding until the previous write is stable", async () => {
+    let releaseFirst!: () => void;
+    const firstWrite = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const materializeConfirmed = vi
+      .fn()
+      .mockReturnValueOnce(firstWrite)
+      .mockResolvedValue(undefined);
+    const mirror = new CanvasReplicaDiskMirror({
+      bind: vi
+        .fn()
+        .mockResolvedValueOnce({ expectedContentDigest: "a".repeat(64) })
+        .mockResolvedValueOnce({ expectedContentDigest: "b".repeat(64) }),
+      materializeConfirmed
+    });
+    const committed = content();
+
+    await mirror.bind(scope("authority-1"));
+    mirror.capture({
+      scope: scope("authority-1"),
+      revision: 1,
+      contentDigest: committed.canonicalDigest,
+      content: committed
+    });
+    await vi.waitFor(() => expect(materializeConfirmed).toHaveBeenCalledTimes(1));
+
+    const rebinding = mirror.bind(scope("authority-2"));
+    mirror.capture({
+      scope: scope("authority-2"),
+      revision: 1,
+      contentDigest: committed.canonicalDigest,
+      content: committed
+    });
+    releaseFirst();
+    await rebinding;
+    expect(materializeConfirmed).toHaveBeenCalledTimes(1);
+
+    mirror.capture({
+      scope: scope("authority-2"),
+      revision: 1,
+      contentDigest: committed.canonicalDigest,
+      content: committed
+    });
+    await mirror.flush();
+    expect(materializeConfirmed).toHaveBeenCalledTimes(2);
+  });
 });

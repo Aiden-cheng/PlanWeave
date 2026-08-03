@@ -10,6 +10,11 @@ type CanvasReplicaMaterializerPort = Pick<
   "bind" | "materializeConfirmed"
 >;
 
+type CanvasReplicaDiskBinding = {
+  scope: CanvasReplicaScope;
+  local: Promise<LocalCanvasCommandBinding>;
+};
+
 function sameScope(left: CanvasReplicaScope, right: CanvasReplicaScope): boolean {
   return (
     left.authorityId === right.authorityId &&
@@ -26,12 +31,15 @@ function sameScope(left: CanvasReplicaScope, right: CanvasReplicaScope): boolean
  * Optimistic state never crosses this boundary and online command success never waits on disk I/O.
  */
 export class CanvasReplicaDiskMirror {
-  private binding: {
-    scope: CanvasReplicaScope;
-    local: Promise<LocalCanvasCommandBinding>;
-  } | null = null;
+  private binding: CanvasReplicaDiskBinding | null = null;
   private generation = 0;
   private tail: Promise<void> = Promise.resolve();
+  private pending: {
+    generation: number;
+    binding: CanvasReplicaDiskBinding;
+    input: { content: CompleteContentVersion; contentDigest: string };
+  } | null = null;
+  private drainQueued = false;
   private lastError: unknown = null;
 
   constructor(
@@ -40,6 +48,8 @@ export class CanvasReplicaDiskMirror {
 
   async bind(scope: CanvasReplicaScope): Promise<void> {
     const generation = ++this.generation;
+    this.pending = null;
+    this.binding = null;
     this.lastError = null;
     const previous = this.tail;
     const local = previous.then(() =>
@@ -50,42 +60,66 @@ export class CanvasReplicaDiskMirror {
       })
     );
     const binding = { scope, local };
-    this.binding = binding;
     this.tail = local.then(
-      () => undefined,
+      () => {
+        if (generation === this.generation) this.binding = binding;
+      },
       (error) => {
-        if (generation === this.generation && this.binding === binding) this.lastError = error;
+        if (generation === this.generation) this.lastError = error;
       }
     );
     await this.tail;
+    if (generation === this.generation && this.lastError) throw this.lastError;
   }
 
   capture(snapshot: CanvasReplicaCommittedSnapshot): void {
     const binding = this.binding;
     if (!binding || !sameScope(binding.scope, snapshot.scope)) return;
-    const generation = this.generation;
-    const input: { content: CompleteContentVersion; contentDigest: string } = {
-      content: snapshot.content,
-      contentDigest: snapshot.contentDigest
+    this.pending = {
+      generation: this.generation,
+      binding,
+      input: { content: snapshot.content, contentDigest: snapshot.contentDigest }
     };
-    this.tail = this.tail.then(async () => {
-      if (generation !== this.generation || this.binding !== binding) return;
-      try {
-        await this.materializer.materializeConfirmed(await binding.local, input);
-        if (generation === this.generation) this.lastError = null;
-      } catch (error) {
-        if (generation === this.generation) this.lastError = error;
-      }
-    });
+    this.queueDrain();
   }
 
   async flush(): Promise<void> {
-    await this.tail;
+    while (true) {
+      const tail = this.tail;
+      await tail;
+      if (tail === this.tail && !this.pending) break;
+    }
     if (this.lastError) throw this.lastError;
   }
 
   clear(): void {
     this.generation += 1;
+    this.pending = null;
     this.binding = null;
+  }
+
+  private queueDrain(): void {
+    if (this.drainQueued) return;
+    this.drainQueued = true;
+    this.tail = this.tail.then(async () => {
+      try {
+        while (this.pending) {
+          const next = this.pending;
+          this.pending = null;
+          if (next.generation !== this.generation || this.binding !== next.binding) {
+            continue;
+          }
+          try {
+            await this.materializer.materializeConfirmed(await next.binding.local, next.input);
+            if (next.generation === this.generation) this.lastError = null;
+          } catch (error) {
+            if (next.generation === this.generation) this.lastError = error;
+          }
+        }
+      } finally {
+        this.drainQueued = false;
+        if (this.pending) this.queueDrain();
+      }
+    });
   }
 }

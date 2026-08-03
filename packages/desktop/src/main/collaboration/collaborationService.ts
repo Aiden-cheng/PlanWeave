@@ -263,7 +263,22 @@ export class CollaborationService {
       (snapshot) => this.canvasReplicaMirror.capture(snapshot)
     );
     this.registryService = new CollaborationRegistryService(() => this.client);
-    this.contentVersions = new ContentVersionFacade(() => this.client);
+    this.contentVersions = new ContentVersionFacade(
+      () => this.client,
+      undefined,
+      async () => {
+        const profileId = await this.profiles.getActiveProfileId();
+        if (!profileId) return null;
+        const profile = await this.profiles.get(profileId);
+        return profile
+          ? {
+              profileId,
+              serverOrigin: new URL(profile.serverBaseUrl).origin,
+              projectId: profile.projectId
+            }
+          : null;
+      }
+    );
     this.canvasCommands = new CollaborationCanvasCommandFacade({
       resolveClient: () => this.client,
       resolveCanvasBinding: (input) => this.contentVersions.resolveCanvasBinding(input),
@@ -1071,7 +1086,17 @@ export class CollaborationService {
   async readCanvasRuntimeStatus(input: unknown) {
     return this.enqueue(async () => {
       this.assertOpen();
-      return this.contentVersions.readRuntimeStatus(input);
+      const status = await this.contentVersions.readRuntimeStatus(input);
+      if (status && this.client) {
+        const scope = {
+          authorityId: this.contentVersions.authorityIdForClient(this.client),
+          workspaceId: status.scope.workspaceId,
+          projectId: status.scope.projectId,
+          canvasId: status.scope.canvasId
+        };
+        if (this.canvasReplicas.has(scope)) this.canvasReplicas.setRuntimeStatus(scope, status);
+      }
+      return status;
     });
   }
 

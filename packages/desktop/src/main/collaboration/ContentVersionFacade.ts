@@ -34,6 +34,10 @@ import {
   type CollaborationContentReplica,
   type CollaborationContentReplicaStorePort
 } from "./CollaborationContentReplicaStore.js";
+import {
+  CollaborationRuntimeStatusStore,
+  type CollaborationRuntimeStatusStorePort
+} from "./CollaborationRuntimeStatusStore.js";
 import { CollaborationClientError } from "./collaborationErrors.js";
 import type { CanvasReplicaScope } from "./CanvasReplicaStore.js";
 
@@ -60,6 +64,12 @@ export type CanvasReplicaBaseline = {
   contentDigest: string;
 };
 
+export type CollaborationAuthorityContext = {
+  profileId: string;
+  serverOrigin: string;
+  projectId: string;
+};
+
 function unavailable(code: string, retryable = false): CollaborationClientError {
   return new CollaborationClientError({ kind: "unknown", code, message: code, retryable });
 }
@@ -71,7 +81,12 @@ export class ContentVersionFacade {
 
   constructor(
     private readonly resolveClient: () => CollaborationClient | null,
-    private readonly replicas: CollaborationContentReplicaStorePort = new CollaborationContentReplicaStore()
+    private readonly replicas: CollaborationContentReplicaStorePort = new CollaborationContentReplicaStore(),
+    private readonly resolveAuthorityContext: () =>
+      | CollaborationAuthorityContext
+      | null
+      | Promise<CollaborationAuthorityContext | null> = () => null,
+    private readonly runtimeStatuses: CollaborationRuntimeStatusStorePort = new CollaborationRuntimeStatusStore()
   ) {}
 
   async bind(input: unknown): Promise<ContentVersionDesktopReadModel> {
@@ -284,8 +299,10 @@ export class ContentVersionFacade {
   async resolveCanvasBinding(input: unknown): Promise<ResolvedCollaborationCanvasBinding | null> {
     const { localProjectId, canvasId } =
       collaborationContentAuthorityCanvasInputSchema.parse(input);
-    const client = this.requireClient();
-    if (localProjectId === client.projectId) {
+    const client = this.resolveClient();
+    const authority = await this.authorityContext(client);
+    if (!authority) return null;
+    if (client && localProjectId === client.projectId) {
       return {
         localProjectId,
         localCanvasId: canvasId,
@@ -293,12 +310,11 @@ export class ContentVersionFacade {
         remoteCanvasId: canvasId
       };
     }
-    const serverOrigin = this.serverOrigin(client);
     const replica = (await this.replicas.list()).find(
       (candidate) =>
         candidate.phase === "ready" &&
-        candidate.remote.serverOrigin === serverOrigin &&
-        candidate.remote.projectId === client.projectId &&
+        candidate.remote.serverOrigin === authority.serverOrigin &&
+        candidate.remote.projectId === authority.projectId &&
         candidate.local.projectId === localProjectId &&
         candidate.local.canvasId === canvasId
     );
@@ -385,14 +401,23 @@ export class ContentVersionFacade {
 
   async resolveCanvasScope(input: unknown) {
     const requested = collaborationContentAuthorityCanvasInputSchema.parse(input);
-    const client = this.requireClient();
+    const client = this.resolveClient();
+    const authority = await this.authorityContext(client);
+    if (!authority) return null;
+    if (!client) {
+      const cached = await this.runtimeStatuses.get({
+        ...authority,
+        localProjectId: requested.localProjectId,
+        localCanvasId: requested.canvasId
+      });
+      return cached ? collaborationCanvasScopeResolutionSchema.parse(cached.scope) : null;
+    }
     const binding = await this.resolveCanvasBinding(input);
     if (!binding) return null;
-    const serverOrigin = this.serverOrigin(client);
     const replica = (await this.replicas.list()).find(
       (candidate) =>
         candidate.phase === "ready" &&
-        candidate.remote.serverOrigin === serverOrigin &&
+        candidate.remote.serverOrigin === authority.serverOrigin &&
         candidate.local.projectId === requested.localProjectId &&
         candidate.local.canvasId === requested.canvasId &&
         candidate.remote.projectId === binding.remoteProjectId &&
@@ -425,7 +450,15 @@ export class ContentVersionFacade {
 
   async readRuntimeStatus(input: unknown) {
     const requested = collaborationContentAuthorityCanvasInputSchema.parse(input);
-    const client = this.requireClient();
+    const client = this.resolveClient();
+    const authority = await this.authorityContext(client);
+    if (!authority) return null;
+    const cacheKey = {
+      ...authority,
+      localProjectId: requested.localProjectId,
+      localCanvasId: requested.canvasId
+    };
+    if (!client) return this.runtimeStatuses.get(cacheKey);
     const scope = await this.resolveCanvasScope(requested);
     if (!scope) return null;
     const status = await client.readRuntimeStatus(scope.canvasId);
@@ -436,7 +469,7 @@ export class ContentVersionFacade {
     ) {
       throw unavailable("runtime_status_scope_mismatch", false);
     }
-    return status;
+    return this.runtimeStatuses.put(cacheKey, status);
   }
 
   async refresh(): Promise<ContentVersionDesktopReadModel> {
@@ -587,6 +620,19 @@ export class ContentVersionFacade {
 
   private serverOrigin(client: CollaborationClient): string {
     return new URL(client.connectionProfile.serverBaseUrl).origin;
+  }
+
+  private async authorityContext(
+    client: CollaborationClient | null
+  ): Promise<CollaborationAuthorityContext | null> {
+    if (client) {
+      return {
+        profileId: client.connectionProfile.profileId,
+        serverOrigin: this.serverOrigin(client),
+        projectId: client.projectId
+      };
+    }
+    return this.resolveAuthorityContext();
   }
 
   private clientFingerprint(client: CollaborationClient): string {
