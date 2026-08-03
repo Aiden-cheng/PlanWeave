@@ -539,6 +539,10 @@ export function registerCollaborationHandlers(
     (_event, input: unknown) => active.finalizePendingAttachment(input)
   );
   ipcMain.handle(
+    collaborationInvokeChannels.readCollaborationCommentAttachment,
+    (_event, input: unknown) => active.readCommentAttachment(input)
+  );
+  ipcMain.handle(
     collaborationInvokeChannels.dispatchCollaborationRemoteOperation,
     (_event, input: unknown) => active.dispatchRemoteOperation(input)
   );

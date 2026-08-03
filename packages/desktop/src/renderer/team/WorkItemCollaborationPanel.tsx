@@ -131,6 +131,7 @@ export function WorkItemCollaborationPanel({
           onSubmit={comments.submitComment}
           onEdit={comments.editComment}
           onTombstone={comments.tombstoneComment}
+          onReadAttachment={comments.readAttachment}
           onStageFiles={comments.stageFiles}
           onCancelAttachment={comments.cancelAttachment}
           onRemoveAttachment={comments.removeAttachment}

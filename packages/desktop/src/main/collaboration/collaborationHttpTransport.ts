@@ -266,6 +266,45 @@ export class CollaborationHttpTransport {
     return this.readTextLimited(response);
   }
 
+  async readBytesLimited(response: Response, maxBytes: number): Promise<Uint8Array> {
+    const declared = response.headers.get("content-length");
+    if (declared && /^\d+$/.test(declared) && Number(declared) > maxBytes) {
+      await response.body?.cancel();
+      throw new CollaborationClientError({
+        kind: "payload_too_large",
+        code: "collaboration_response_too_large",
+        message: "Response exceeded body size limit.",
+        httpStatus: response.status
+      });
+    }
+    if (!response.body) return new Uint8Array();
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let bytesRead = 0;
+    try {
+      while (true) {
+        const next = await reader.read();
+        if (next.done) break;
+        bytesRead += next.value.byteLength;
+        if (bytesRead > maxBytes) {
+          throw new CollaborationClientError({
+            kind: "payload_too_large",
+            code: "collaboration_response_too_large",
+            message: "Response exceeded body size limit.",
+            httpStatus: response.status
+          });
+        }
+        chunks.push(next.value);
+      }
+      return Buffer.concat(chunks);
+    } catch (error) {
+      await reader.cancel(error);
+      throw error;
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
   async send(
     path: string,
     init: {
@@ -311,43 +350,8 @@ export class CollaborationHttpTransport {
   }
 
   private async readTextLimited(response: Response): Promise<string> {
-    const maxBytes = this.limits.jsonBodyMaxBytes;
-    const declared = response.headers.get("content-length");
-    if (declared && /^\d+$/.test(declared) && Number(declared) > maxBytes) {
-      await response.body?.cancel();
-      throw new CollaborationClientError({
-        kind: "payload_too_large",
-        code: "collaboration_response_too_large",
-        message: "Response exceeded body size limit.",
-        httpStatus: response.status
-      });
-    }
-    if (!response.body) return "";
-    const reader = response.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let bytesRead = 0;
-    try {
-      while (true) {
-        const next = await reader.read();
-        if (next.done) break;
-        bytesRead += next.value.byteLength;
-        if (bytesRead > maxBytes) {
-          throw new CollaborationClientError({
-            kind: "payload_too_large",
-            code: "collaboration_response_too_large",
-            message: "Response exceeded body size limit.",
-            httpStatus: response.status
-          });
-        }
-        chunks.push(next.value);
-      }
-      return Buffer.concat(chunks).toString("utf8");
-    } catch (error) {
-      await reader.cancel(error);
-      throw error;
-    } finally {
-      reader.releaseLock();
-    }
+    const bytes = await this.readBytesLimited(response, this.limits.jsonBodyMaxBytes);
+    return Buffer.from(bytes).toString("utf8");
   }
 }
 

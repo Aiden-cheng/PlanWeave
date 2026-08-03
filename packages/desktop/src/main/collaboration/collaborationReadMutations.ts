@@ -38,9 +38,12 @@ import {
   collaborationWorkAuthorityScopeInputSchema
 } from "../../shared/collaborationReadModels.js";
 import {
+  collaborationCommentAttachmentBodySchema,
   collaborationFinalizePendingAttachmentInputSchema,
+  collaborationReadCommentAttachmentInputSchema,
   collaborationUploadPendingAttachmentInputSchema
 } from "../../shared/collaboration.js";
+import type { CollaborationCommentAttachmentBody } from "../../shared/collaboration.js";
 import type { CollaborationClient } from "./CollaborationClient.js";
 import { CollaborationClientError } from "./collaborationErrors.js";
 
@@ -223,6 +226,15 @@ export class CollaborationReadMutationsFacade {
       client.finalizePendingAttachment(body.pendingUploadId, {
         expectedDigestSha256: body.expectedDigestSha256
       })
+    );
+  }
+
+  readCommentAttachment(input: unknown): Promise<CollaborationCommentAttachmentBody> {
+    const body = collaborationReadCommentAttachmentInputSchema.parse(input);
+    return this.withActiveClient(async (client) =>
+      collaborationCommentAttachmentBodySchema.parse(
+        await client.readCommentAttachment(body.commentId, body.digestSha256)
+      )
     );
   }
 }

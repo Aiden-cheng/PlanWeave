@@ -72,6 +72,7 @@ import {
   collaborationAccessMutationInputSchema,
   collaborationCanvasSessionInputSchema,
   type CollaborationAuthHandoffView,
+  type CollaborationCommentAttachmentBody,
   type CollaborationInvitationCreateView,
   type CollaborationObserverSignal,
   type CollaborationPresenceSignal,
@@ -1303,6 +1304,10 @@ export class CollaborationService {
 
   async finalizePendingAttachment(input: unknown): Promise<FinalizePendingAttachmentResponse> {
     return this.readMutations.finalizePendingAttachment(input);
+  }
+
+  async readCommentAttachment(input: unknown): Promise<CollaborationCommentAttachmentBody> {
+    return this.readMutations.readCommentAttachment(input);
   }
 
   private async withActiveClient<T>(

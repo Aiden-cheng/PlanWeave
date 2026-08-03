@@ -261,6 +261,9 @@ describe("desktop IPC contract", () => {
     expect(collaborationInvokeChannels.finalizeCollaborationPendingAttachment).toBe(
       "planweave-collaboration:finalizePendingAttachment"
     );
+    expect(collaborationInvokeChannels.readCollaborationCommentAttachment).toBe(
+      "planweave-collaboration:readCommentAttachment"
+    );
     expect(collaborationInvokeChannels.dispatchCollaborationRemoteOperation).toBe(
       "planweave-collaboration:dispatchRemoteOperation"
     );

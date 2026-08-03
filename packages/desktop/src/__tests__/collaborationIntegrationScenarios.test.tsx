@@ -478,6 +478,12 @@ function createScenarioApi(state: ScenarioState) {
     createCollaborationPendingAttachment: vi.fn(),
     uploadCollaborationPendingAttachment: vi.fn(),
     finalizeCollaborationPendingAttachment: vi.fn(),
+    readCollaborationCommentAttachment: vi.fn().mockResolvedValue({
+      digestSha256: "a".repeat(64),
+      mediaType: "image/png",
+      sizeBytes: 4,
+      bodyBase64: "iVBORw=="
+    }),
     listCollaborationInvitations: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
     listCollaborationDevices: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
     createCollaborationInvitation: vi.fn(),

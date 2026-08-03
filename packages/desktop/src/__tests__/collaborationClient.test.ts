@@ -286,6 +286,52 @@ describe("CollaborationClient", () => {
     client.dispose();
   });
 
+  it("reads a comment attachment with device authentication", async () => {
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    const digestSha256 = createHash("sha256").update(bytes).digest("hex");
+    const fixture = await listen((req, res) => {
+      expect(req.method).toBe("GET");
+      expect(req.url).toBe(
+        `/api/v1/projects/project-demo-001/attachments/comments/comment-1/${digestSha256}`
+      );
+      expect(req.headers.authorization).toBe(`Bearer ${exampleHumanDeviceToken}`);
+      res.writeHead(200, {
+        "content-type": "image/png",
+        "content-length": bytes.byteLength
+      });
+      res.end(bytes);
+    });
+    cleanups.push(fixture.close);
+    const client = clientFor(fixture.origin, { token: exampleHumanDeviceToken });
+
+    await expect(client.readCommentAttachment("comment-1", digestSha256)).resolves.toEqual({
+      digestSha256,
+      mediaType: "image/png",
+      sizeBytes: bytes.byteLength,
+      bodyBase64: bytes.toString("base64")
+    });
+    client.dispose();
+  });
+
+  it("rejects a comment attachment whose body does not match the requested digest", async () => {
+    const requestedDigest = "a".repeat(64);
+    const fixture = await listen((_req, res) => {
+      const bytes = Buffer.from("different attachment body");
+      res.writeHead(200, {
+        "content-type": "image/png",
+        "content-length": bytes.byteLength
+      });
+      res.end(bytes);
+    });
+    cleanups.push(fixture.close);
+    const client = clientFor(fixture.origin, { token: exampleHumanDeviceToken });
+
+    await expect(client.readCommentAttachment("comment-1", requestedDigest)).rejects.toMatchObject({
+      code: "collaboration_attachment_digest_mismatch"
+    });
+    client.dispose();
+  });
+
   it("reads the redacted canvas runtime status with device authentication", async () => {
     const projection = {
       schemaVersion: "canvas-runtime-status/v2",

@@ -32,7 +32,10 @@ import {
   workItemKey,
   type CollaborationBoundaryErrorView
 } from "../../shared/collaborationReadModels.js";
-import type { PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
+import type {
+  CollaborationCommentAttachmentBody,
+  PlanWeaveCollaborationApi
+} from "../../shared/collaboration.js";
 import { useCollaborationReadModels } from "./useCollaborationReadModels";
 import { useCollaborationStatus } from "./useCollaborationStatus";
 import { isCollaborationSessionConnected } from "../collaboration/sessionState";
@@ -63,6 +66,10 @@ export type UseCommentsPanelControllerResult = {
   submitComment: () => Promise<boolean>;
   editComment: (commentId: string, body: string, expectedRevision: number) => Promise<boolean>;
   tombstoneComment: (commentId: string, expectedRevision: number) => Promise<boolean>;
+  readAttachment: (
+    commentId: string,
+    digestSha256: string
+  ) => Promise<CollaborationCommentAttachmentBody>;
   stageFiles: (
     files: Array<{
       name: string;
@@ -510,6 +517,16 @@ export function useCommentsPanelController(
     setStagedAttachments((prev) => prev.filter((item) => item.localId !== localId));
   }, []);
 
+  const readAttachment = useCallback(
+    async (commentId: string, digestSha256: string) => {
+      if (!api || !sessionConnected) {
+        throw new Error("collaboration_session_inactive");
+      }
+      return api.readCollaborationCommentAttachment({ commentId, digestSha256 });
+    },
+    [api, sessionConnected]
+  );
+
   return {
     mode,
     rows,
@@ -528,6 +545,7 @@ export function useCommentsPanelController(
     submitComment,
     editComment,
     tombstoneComment,
+    readAttachment,
     stageFiles,
     cancelAttachment,
     removeAttachment

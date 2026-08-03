@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   accessMutationRequestSchema,
   accessMutationResultSchema,
@@ -8,6 +9,8 @@ import {
 import {
   activityListPageSchema,
   activityListWireQuerySchema,
+  commentAttachmentMediaTypeSchema,
+  commentAttachmentSizeBytesSchema,
   commentCreateWireCommandSchema,
   commentDisplayProjectionSchema,
   commentEditWireCommandSchema,
@@ -15,6 +18,7 @@ import {
   commentListWireQuerySchema,
   commentTombstoneWireCommandSchema,
   type ActivityListPage,
+  type CommentAttachmentMediaType,
   type CommentCreateWireCommand,
   type CommentDisplayProjection,
   type CommentEditWireCommand,
@@ -22,6 +26,7 @@ import {
   type CommentListWireQuery,
   type CommentTombstoneWireCommand
 } from "@planweave-ai/collaboration-protocol/activity/comments";
+import { COMMENT_ATTACHMENT_MAX_BYTES } from "@planweave-ai/collaboration-protocol/core/limits";
 import {
   assignmentDisplayProjectionSchema,
   assignmentListPageSchema,
@@ -908,6 +913,53 @@ export class CollaborationClient {
       finalizePendingAttachmentResponseSchema,
       { body: input, signal }
     );
+  }
+
+  async readCommentAttachment(
+    commentId: string,
+    digestSha256: string,
+    signal?: AbortSignal
+  ): Promise<{
+    digestSha256: string;
+    mediaType: CommentAttachmentMediaType;
+    sizeBytes: number;
+    bodyBase64: string;
+  }> {
+    this.ensureOpen();
+    const path =
+      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}` +
+      `/attachments/comments/${encodeURIComponent(commentId)}/${encodeURIComponent(digestSha256)}`;
+    const headers: Record<string, string> = { accept: "*/*" };
+    await this.transport.applyAuth(headers);
+    const response = await this.transport.send(path, {
+      method: "GET",
+      headers,
+      signal
+    });
+    if (!response.ok) {
+      const text = await this.transport.readBoundedError(response);
+      throw collaborationErrorFromHttp(response.status, text, response.headers.get("retry-after"));
+    }
+    const mediaType = commentAttachmentMediaTypeSchema.parse(
+      response.headers.get("content-type")?.split(";", 1)[0]?.trim()
+    );
+    const bytes = await this.transport.readBytesLimited(response, COMMENT_ATTACHMENT_MAX_BYTES);
+    const sizeBytes = commentAttachmentSizeBytesSchema.parse(bytes.byteLength);
+    const actualDigest = createHash("sha256").update(bytes).digest("hex");
+    if (actualDigest !== digestSha256) {
+      throw new CollaborationClientError({
+        kind: "protocol",
+        code: "collaboration_attachment_digest_mismatch",
+        message: "Attachment content did not match its declared digest.",
+        retryable: true
+      });
+    }
+    return {
+      digestSha256: actualDigest,
+      mediaType,
+      sizeBytes,
+      bodyBase64: Buffer.from(bytes).toString("base64")
+    };
   }
 
   // ---------------------------------------------------------------------------

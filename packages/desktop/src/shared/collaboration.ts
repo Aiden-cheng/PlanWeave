@@ -26,6 +26,7 @@ import {
 } from "@planweave-ai/collaboration-protocol/connection";
 import {
   commentContentSha256Schema,
+  commentIdSchema,
   humanDisplayNameSchema,
   humanDeviceLabelSchema,
   setupCodeTokenSchema,
@@ -74,6 +75,8 @@ import {
   type HumanPrincipalView
 } from "@planweave-ai/collaboration-protocol/identity/workspace";
 import {
+  commentAttachmentMediaTypeSchema,
+  commentAttachmentSizeBytesSchema,
   type ActivityListPage,
   type CommentDisplayProjection,
   type CommentListPage
@@ -420,6 +423,31 @@ export const collaborationFinalizePendingAttachmentInputSchema = z
   .strict();
 export type CollaborationFinalizePendingAttachmentInput = z.infer<
   typeof collaborationFinalizePendingAttachmentInputSchema
+>;
+
+export const collaborationReadCommentAttachmentInputSchema = z
+  .object({
+    commentId: commentIdSchema,
+    digestSha256: commentContentSha256Schema
+  })
+  .strict();
+export type CollaborationReadCommentAttachmentInput = z.input<
+  typeof collaborationReadCommentAttachmentInputSchema
+>;
+
+export const collaborationCommentAttachmentBodySchema = z
+  .object({
+    digestSha256: commentContentSha256Schema,
+    mediaType: commentAttachmentMediaTypeSchema,
+    sizeBytes: commentAttachmentSizeBytesSchema,
+    bodyBase64: z
+      .string()
+      .min(1)
+      .max(Math.ceil((COMMENT_ATTACHMENT_MAX_BYTES * 4) / 3) + 8)
+  })
+  .strict();
+export type CollaborationCommentAttachmentBody = z.infer<
+  typeof collaborationCommentAttachmentBodySchema
 >;
 
 /** One-shot invitation create view — token is display/copy-once only; never persisted by Desktop. */
@@ -848,6 +876,9 @@ export type PlanWeaveCollaborationApi = {
   finalizeCollaborationPendingAttachment: (
     input: CollaborationFinalizePendingAttachmentInput
   ) => Promise<FinalizePendingAttachmentResponse>;
+  readCollaborationCommentAttachment: (
+    input: CollaborationReadCommentAttachmentInput
+  ) => Promise<CollaborationCommentAttachmentBody>;
   dispatchCollaborationRemoteOperation: (
     input: RemoteDispatchIntent | RemoteDispatchWireCommand
   ) => Promise<RemoteOperationObservation>;

@@ -917,6 +917,10 @@ describe("preload bridge invocation", () => {
     await api.revokeCollaborationDevice({ deviceCredentialId: "device-1" });
     await api.listCollaborationAssignments({ cursor: 0, limit: 20 });
     await api.listCollaborationActivity({ limit: 20 });
+    await api.readCollaborationCommentAttachment({
+      commentId: "comment-1",
+      digestSha256: "a".repeat(64)
+    });
     const unsubscribe = api.onCollaborationStatusChanged(callback);
     const signalCallback = vi.fn();
     const unsubscribeSignal = api.onCollaborationObserverSignal(signalCallback);
@@ -1015,6 +1019,10 @@ describe("preload bridge invocation", () => {
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       collaborationInvokeChannels.listCollaborationMembers,
       { cursor: 0, limit: 20 }
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.readCollaborationCommentAttachment,
+      { commentId: "comment-1", digestSha256: "a".repeat(64) }
     );
 
     const statusCall = electronMock.ipcRenderer.on.mock.calls.find(

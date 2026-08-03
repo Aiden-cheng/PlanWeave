@@ -120,6 +120,12 @@ function createApi() {
     tombstoned: true,
     tombstonedAt: "2030-01-01T00:05:00.000Z"
   });
+  const readCommentAttachment = vi.fn().mockResolvedValue({
+    digestSha256: "a".repeat(64),
+    mediaType: "image/png",
+    sizeBytes: 4,
+    bodyBase64: "iVBORw=="
+  });
 
   const api = {
     getCollaborationStatus: vi.fn().mockResolvedValue(status),
@@ -154,11 +160,20 @@ function createApi() {
     createCollaborationPendingAttachment: vi.fn(),
     uploadCollaborationPendingAttachment: vi.fn(),
     finalizeCollaborationPendingAttachment: vi.fn(),
+    readCollaborationCommentAttachment: readCommentAttachment,
     onCollaborationStatusChanged: vi.fn(() => () => undefined),
     onCollaborationObserverSignal: vi.fn(() => () => undefined)
   } as unknown as PlanWeaveCollaborationApi & CollaborationReadBridgePort;
 
-  return { api, listComments, listActivity, createComment, editComment, tombstoneComment };
+  return {
+    api,
+    listComments,
+    listActivity,
+    createComment,
+    editComment,
+    tombstoneComment,
+    readCommentAttachment
+  };
 }
 
 afterEach(() => {
@@ -188,7 +203,14 @@ describe("useCommentsPanelController", () => {
   });
 
   it("loads pages, preserves drafts by work item, and mutates with expected revision", async () => {
-    const { api, listComments, createComment, editComment, tombstoneComment } = createApi();
+    const {
+      api,
+      listComments,
+      createComment,
+      editComment,
+      tombstoneComment,
+      readCommentAttachment
+    } = createApi();
     const shell = acquireCollaborationReadModelController(api);
     await shell.controller.setActiveProject({
       profileId: "profile-1",
@@ -213,6 +235,17 @@ describe("useCommentsPanelController", () => {
     );
     expect(listComments).toHaveBeenCalledWith(expect.objectContaining({ includeTombstoned: true }));
     expect(result.current.hasMore).toBe(true);
+
+    await expect(result.current.readAttachment("comment-1", "a".repeat(64))).resolves.toMatchObject(
+      {
+        mediaType: "image/png",
+        bodyBase64: "iVBORw=="
+      }
+    );
+    expect(readCommentAttachment).toHaveBeenCalledWith({
+      commentId: "comment-1",
+      digestSha256: "a".repeat(64)
+    });
 
     await act(async () => {
       result.current.setDraftBody("saved draft");

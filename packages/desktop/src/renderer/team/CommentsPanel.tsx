@@ -6,6 +6,8 @@ import { SafeMarkdown } from "../inspector/SafeMarkdown";
 import type { StagedAttachment } from "../collaboration/attachmentUpload";
 import type { CommentRowViewModel, CommentsPanelMode } from "../collaboration/commentViewModels";
 import type { CommentComposerDraft } from "../collaboration/commentDraftStore";
+import type { CollaborationCommentAttachmentBody } from "../../shared/collaboration.js";
+import { CommentAttachmentView } from "./CommentAttachmentView";
 
 export type CommentsPanelProps = {
   mode: CommentsPanelMode;
@@ -29,6 +31,10 @@ export type CommentsPanelProps = {
   onSubmit: () => Promise<boolean>;
   onEdit: (commentId: string, body: string, expectedRevision: number) => Promise<boolean>;
   onTombstone: (commentId: string, expectedRevision: number) => Promise<boolean>;
+  onReadAttachment: (
+    commentId: string,
+    digestSha256: string
+  ) => Promise<CollaborationCommentAttachmentBody>;
   onStageFiles: (
     files: Array<{
       name: string;
@@ -75,17 +81,21 @@ function CommentItem({
   submitting,
   t,
   onEdit,
-  onTombstone
+  onTombstone,
+  onReadAttachment
 }: {
   row: CommentRowViewModel;
   submitting: boolean;
   t: ReturnType<typeof createTranslator>;
   onEdit: (commentId: string, body: string, expectedRevision: number) => Promise<boolean>;
   onTombstone: (commentId: string, expectedRevision: number) => Promise<boolean>;
+  onReadAttachment: (
+    commentId: string,
+    digestSha256: string
+  ) => Promise<CollaborationCommentAttachmentBody>;
 }) {
   const [editing, setEditing] = useState(false);
   const [editBody, setEditBody] = useState(row.body ?? "");
-
   return (
     <article
       className="rounded-md border border-border/70 bg-card/40 p-2.5"
@@ -154,22 +164,12 @@ function CommentItem({
       )}
 
       {row.attachments.length > 0 ? (
-        <ul className="mt-2 flex flex-col gap-1" data-testid="comments-item-attachments">
-          {row.attachments.map((attachment) => (
-            <li
-              key={attachment.id}
-              className="flex items-center gap-2 rounded border border-border/50 px-2 py-1 text-[11px] text-muted-foreground"
-              data-testid="comments-attachment"
-            >
-              <span className="min-w-0 truncate font-medium text-text">
-                {attachment.displayName}
-              </span>
-              <span>{attachment.mediaType}</span>
-              <span>{attachment.sizeBytes} B</span>
-              <span title={t("commentsAttachmentDigest")}>{attachment.digestShort}</span>
-            </li>
-          ))}
-        </ul>
+        <CommentAttachmentView
+          commentId={row.commentId}
+          attachments={row.attachments}
+          t={t}
+          onReadAttachment={onReadAttachment}
+        />
       ) : null}
 
       {!row.tombstoned && (row.actions.canEdit || row.actions.canTombstone) ? (
@@ -231,6 +231,7 @@ export function CommentsPanel({
   onSubmit,
   onEdit,
   onTombstone,
+  onReadAttachment,
   onStageFiles,
   onCancelAttachment,
   onRemoveAttachment
@@ -328,6 +329,7 @@ export function CommentsPanel({
               t={t}
               onEdit={onEdit}
               onTombstone={onTombstone}
+              onReadAttachment={onReadAttachment}
             />
           ))
         )}

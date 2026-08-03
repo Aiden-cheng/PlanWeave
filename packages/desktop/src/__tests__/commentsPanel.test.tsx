@@ -11,6 +11,7 @@ import type { CommentRowViewModel } from "../renderer/collaboration/commentViewM
 import { cleanupRendererTestEnvironment } from "./helpers/rendererTestEnvironment";
 
 const t = createTranslator("en");
+const imageDisplayName = "clipboard_2026-08-02_10-02_with-a-very-long-name.png";
 
 const liveRow: CommentRowViewModel = {
   commentId: "comment-1",
@@ -28,10 +29,17 @@ const liveRow: CommentRowViewModel = {
   attachments: [
     {
       id: "a".repeat(64),
-      displayName: "notes.txt",
-      mediaType: "text/plain",
+      displayName: imageDisplayName,
+      mediaType: "image/png",
       sizeBytes: 4,
       digestShort: "aaaaaaaa…"
+    },
+    {
+      id: "b".repeat(64),
+      displayName: "notes.txt",
+      mediaType: "text/plain",
+      sizeBytes: 5,
+      digestShort: "bbbbbbbb…"
     }
   ],
   actions: { canEdit: true, canTombstone: true, reason: "author" }
@@ -49,6 +57,21 @@ describe("CommentsPanel", () => {
     const onTombstone = vi.fn().mockResolvedValue(true);
     const onSubmit = vi.fn().mockResolvedValue(true);
     const onDraftBodyChange = vi.fn();
+    const onReadAttachment = vi.fn(async (_commentId: string, digestSha256: string) =>
+      digestSha256 === "a".repeat(64)
+        ? {
+            digestSha256,
+            mediaType: "image/png" as const,
+            sizeBytes: 4,
+            bodyBase64: "iVBORw=="
+          }
+        : {
+            digestSha256,
+            mediaType: "text/plain" as const,
+            sizeBytes: 5,
+            bodyBase64: "bm90ZXM="
+          }
+    );
 
     render(
       <CommentsPanel
@@ -73,6 +96,7 @@ describe("CommentsPanel", () => {
         onStageFiles={vi.fn().mockResolvedValue(undefined)}
         onCancelAttachment={vi.fn()}
         onRemoveAttachment={vi.fn()}
+        onReadAttachment={onReadAttachment}
       />
     );
 
@@ -83,7 +107,43 @@ describe("CommentsPanel", () => {
     // SafeMarkdown renders text nodes; script tags are not executable DOM.
     expect(screen.getByTestId("comments-item-body").textContent).toContain("<script>");
     expect(screen.queryByTestId("comments-item-body")?.querySelector("script")).toBeNull();
-    expect(screen.getByTestId("comments-attachment")).toHaveTextContent("notes.txt");
+    const imageAttachmentButton = screen.getByRole("button", {
+      name: `View attachment ${imageDisplayName}`
+    });
+    expect(imageAttachmentButton).toHaveAttribute("title", imageDisplayName);
+    expect(imageAttachmentButton).toHaveClass("w-full", "min-w-0", "truncate");
+    await user.click(imageAttachmentButton);
+    expect(onReadAttachment).toHaveBeenCalledWith("comment-1", "a".repeat(64));
+    expect(screen.getByRole("img", { name: imageDisplayName })).toHaveAttribute(
+      "src",
+      "data:image/png;base64,iVBORw=="
+    );
+    expect(screen.getByRole("link", { name: "Download" })).toHaveAttribute(
+      "download",
+      imageDisplayName
+    );
+    await user.click(screen.getByRole("button", { name: `Expand image ${imageDisplayName}` }));
+    const imageDialog = screen.getByRole("dialog", { name: imageDisplayName });
+    expect(screen.getByTestId("comments-attachment-lightbox-overlay")).toHaveClass("bg-black/25");
+    expect(screen.getByTestId("comments-attachment-lightbox-overlay")).not.toHaveClass(
+      "bg-black/80"
+    );
+    expect(imageDialog).toHaveClass("bg-background", "text-text");
+    expect(imageDialog).not.toHaveClass("bg-neutral-950", "text-white");
+    expect(within(imageDialog).getByRole("img", { name: imageDisplayName })).toHaveAttribute(
+      "src",
+      "data:image/png;base64,iVBORw=="
+    );
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: imageDisplayName })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "View attachment notes.txt" }));
+    expect(onReadAttachment).toHaveBeenCalledWith("comment-1", "b".repeat(64));
+    expect(screen.getByText(t("commentsAttachmentPreviewUnavailable"))).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Download" })).toHaveAttribute("download", "notes.txt");
+    expect(screen.getByRole("link", { name: "Download" })).toHaveAttribute(
+      "href",
+      "data:text/plain;base64,bm90ZXM="
+    );
     expect(screen.getByTestId("comments-load-more")).toBeInTheDocument();
 
     await user.click(screen.getByTestId("comments-edit"));
@@ -142,6 +202,12 @@ describe("CommentsPanel", () => {
         onStageFiles={vi.fn().mockResolvedValue(undefined)}
         onCancelAttachment={onCancel}
         onRemoveAttachment={vi.fn()}
+        onReadAttachment={vi.fn().mockResolvedValue({
+          digestSha256: "a".repeat(64),
+          mediaType: "image/png",
+          sizeBytes: 4,
+          bodyBase64: "iVBORw=="
+        })}
       />
     );
 
