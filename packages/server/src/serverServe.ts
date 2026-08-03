@@ -23,11 +23,11 @@ export type DistributedServerProcess = {
 };
 
 async function createListener(config: ServerConfig): Promise<HttpServer> {
-  if (config.allowInsecureDevelopment) return createHttpServer();
-  if (!config.tls) throw new Error("server_tls_configuration_required");
+  if (config.transport.listener.protocol === "http") return createHttpServer();
+  const tls = config.transport.listener.tls;
   const [certificate, privateKey] = await Promise.all([
-    readFile(config.tls.certificatePath),
-    readFile(config.tls.privateKeyPath)
+    readFile(tls.certificatePath),
+    readFile(tls.privateKeyPath)
   ]);
   return createHttpsServer({ cert: certificate, key: privateKey, minVersion: "TLSv1.2" });
 }
@@ -44,7 +44,7 @@ async function listen(server: HttpServer, config: ServerConfig): Promise<void> {
     };
     server.once("error", onError);
     server.once("listening", onListening);
-    server.listen(config.bind.port, config.bind.host);
+    server.listen(config.transport.listener.port, config.transport.listener.host);
   });
 }
 
@@ -129,7 +129,7 @@ export async function serveDistributedServer(
   let closePromise: Promise<void> | undefined;
   return {
     version: serverPackageVersion,
-    publicUrl: serverConfigSummary(config).publicUrl,
+    publicUrl: serverConfigSummary(config).advertisedOrigin,
     trustedProjectControl: activeComposition.trustedProjectControl,
     readiness: () => readiness.readiness(),
     close() {

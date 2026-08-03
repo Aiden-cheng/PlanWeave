@@ -6,7 +6,7 @@ import {
 } from "@planweave-ai/collaboration-protocol/core/primitives";
 import { loopbackServerProfileSchema } from "@planweave-ai/collaboration-protocol/loopback";
 import { serverReadinessSchema } from "../readiness.js";
-import { serverConfigSchema, type ServerConfig } from "../config.js";
+import { parseServerConfig, type ServerConfig } from "../config.js";
 import type { DistributedServerProcess } from "../serverServe.js";
 import { LoopbackServerController } from "../loopbackController.js";
 import { applyMigrations } from "../migrations.js";
@@ -27,14 +27,13 @@ const profile = loopbackServerProfileSchema.parse({
   allowInsecureTransport: true
 });
 
-function config(overrides: Partial<ServerConfig> = {}): ServerConfig {
-  return serverConfigSchema.parse({
+function config(overrides: { publicUrl?: string } = {}): ServerConfig {
+  return parseServerConfig({
     version: "server-config/v1",
     bind: { host: "127.0.0.1", port: 7443 },
     publicUrl: "http://127.0.0.1:7443",
     allowInsecureDevelopment: true,
     dataDirectory: "/tmp/planweave-loopback-test",
-    databasePath: "/tmp/planweave-loopback-test/planweave-server.sqlite",
     trustedProjects: [{ workspaceId: "w", projectId: "p", canvasId: "c", projectRoot: "/tmp/project" }],
     operatorCredentials: [{ operatorId: "operator", tokenSha256: "a".repeat(64), projectIds: ["p"] }],
     limits: {

@@ -60,7 +60,7 @@ describe("DeploymentActions", () => {
     expect(copied).toEqual([guidance.handoff.preview]);
   });
 
-  it("keeps loopback out of the Compose handoff", () => {
+  it("keeps loopback and Tailscale proxy TLS out of the direct-TLS Compose handoff", () => {
     const actions = new DeploymentActions();
     const loopback = {
       ...target,
@@ -81,6 +81,27 @@ describe("DeploymentActions", () => {
       actions.copyComposeHandoff({
         action: "copy_supported_compose_handoff",
         target: loopback
+      })
+    ).toThrow("deployment_compose_handoff_not_supported");
+    const tailscale = {
+      ...target,
+      endpoint: {
+        topology: "tailscale_https" as const,
+        serverOrigin: "https://planweave.tailnet.ts.net/",
+        allowedClientOrigins: ["https://planweave.tailnet.ts.net/"],
+        tlsTrust: "system_ca" as const
+      }
+    };
+    expect(
+      actions.guidance({
+        action: "request_deployment_guidance",
+        target: tailscale
+      }).handoff.state
+    ).toBe("not_applicable");
+    expect(() =>
+      actions.copyComposeHandoff({
+        action: "copy_supported_compose_handoff",
+        target: tailscale
       })
     ).toThrow("deployment_compose_handoff_not_supported");
   });

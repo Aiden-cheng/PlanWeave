@@ -89,19 +89,22 @@ export class LoopbackServerController {
   private assertFixedLoopbackConfig(profile: LoopbackServerProfile): ServerConfig {
     const config = serverConfigSchema.parse(this.options.createConfig(profile));
     const profileUrl = new URL(profile.serverBaseUrl);
-    const configUrl = new URL(config.publicUrl);
+    const configUrl = new URL(config.transport.advertisedOrigin);
     const expectedPort = Number(profileUrl.port || (profileUrl.protocol === "https:" ? 443 : 80));
     const fixedLanConfig =
-      config.allowInsecureLan &&
-      config.bind.host === "0.0.0.0" &&
+      config.transport.mode === "lan_http" &&
+      config.transport.listener.host === "0.0.0.0" &&
       isPrivateNetworkHostname(configUrl.hostname) &&
       !isLoopbackHostname(configUrl.hostname);
     const fixedLoopbackConfig =
-      !config.allowInsecureLan &&
-      isLoopbackHostname(config.bind.host) &&
+      config.transport.mode === "loopback_http" &&
+      isLoopbackHostname(config.transport.listener.host) &&
       isLoopbackHostname(configUrl.hostname) &&
       configUrl.origin === profileUrl.origin;
-    if (config.bind.port !== expectedPort || (!fixedLanConfig && !fixedLoopbackConfig)) {
+    if (
+      config.transport.listener.port !== expectedPort ||
+      (!fixedLanConfig && !fixedLoopbackConfig)
+    ) {
       throw new Error("loopback_profile_configuration_mismatch");
     }
     return config;

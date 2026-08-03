@@ -76,6 +76,18 @@ describe("OSS-009 deployment and Host availability contracts", () => {
     });
     expect(deploymentWebSocketOrigin(lan.endpoint)).toBe("wss://collab.lan:8443/");
 
+    const tailscale = deploymentConnectionProfileSchema.parse({
+      ...selfHostedProfile,
+      profileId: "profile-tailscale-001",
+      endpoint: {
+        topology: "tailscale_https",
+        serverOrigin: "https://planweave.tailnet.ts.net/",
+        allowedClientOrigins: ["https://planweave.tailnet.ts.net/"],
+        tlsTrust: "system_ca"
+      }
+    });
+    expect(deploymentWebSocketOrigin(tailscale.endpoint)).toBe("wss://planweave.tailnet.ts.net/");
+
     expect(() =>
       deploymentConnectionProfileSchema.parse({
         ...selfHostedProfile,
@@ -120,6 +132,30 @@ describe("OSS-009 deployment and Host availability contracts", () => {
         }
       })
     ).toThrow("network_topology_requires_trusted_non_loopback_https_origins");
+    for (const endpoint of [
+      {
+        topology: "tailscale_https",
+        serverOrigin: "https://planweave.example.test/",
+        allowedClientOrigins: ["https://planweave.example.test/"],
+        tlsTrust: "system_ca"
+      },
+      {
+        topology: "tailscale_https",
+        serverOrigin: "https://planweave.tailnet.ts.net:8443/",
+        allowedClientOrigins: ["https://planweave.tailnet.ts.net:8443/"],
+        tlsTrust: "system_ca"
+      },
+      {
+        topology: "tailscale_https",
+        serverOrigin: "https://planweave.tailnet.ts.net/",
+        allowedClientOrigins: ["https://planweave.tailnet.ts.net/"],
+        tlsTrust: "configured_ca"
+      }
+    ]) {
+      expect(() =>
+        deploymentConnectionProfileSchema.parse({ ...selfHostedProfile, endpoint })
+      ).toThrow("tailscale_https_requires_system_ca_ts_net_port_443_origins");
+    }
     expect(() =>
       deploymentConnectionProfileSchema.parse({
         ...selfHostedProfile,

@@ -17,11 +17,12 @@ export type DeploymentTargetDraftSchemaVersion = z.infer<
   typeof deploymentTargetDraftSchemaVersionSchema
 >;
 
-/** The four supported server exposure topologies. */
+/** The supported server exposure topologies. */
 export const deploymentTopologySchema = z.enum([
   "loopback_http",
   "loopback_https",
   "lan_https",
+  "tailscale_https",
   "public_https"
 ]);
 export type DeploymentTopology = z.infer<typeof deploymentTopologySchema>;
@@ -107,6 +108,31 @@ function validateTopologyOrigin(
       context.addIssue({
         code: "custom",
         message: "loopback_https_requires_trusted_loopback_https_origins",
+        path: ["serverOrigin"]
+      });
+    }
+    return;
+  }
+  if (value.topology === "tailscale_https") {
+    if (
+      url.protocol !== "https:" ||
+      loopback ||
+      !url.hostname.toLowerCase().endsWith(".ts.net") ||
+      originPort(url) !== 443 ||
+      value.tlsTrust !== "system_ca" ||
+      value.allowedClientOrigins.some((origin) => {
+        const client = new URL(origin);
+        return (
+          client.protocol !== "https:" ||
+          isLoopbackHostname(client.hostname) ||
+          !client.hostname.toLowerCase().endsWith(".ts.net") ||
+          originPort(client) !== 443
+        );
+      })
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "tailscale_https_requires_system_ca_ts_net_port_443_origins",
         path: ["serverOrigin"]
       });
     }

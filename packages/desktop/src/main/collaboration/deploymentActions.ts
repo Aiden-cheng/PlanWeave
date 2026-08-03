@@ -11,7 +11,7 @@ import {
   type DeploymentGuidanceView,
   type ConnectivityValidationView
 } from "@planweave-ai/collaboration-protocol/deployment";
-import { serverConfigSchema, type ServerConfig } from "@planweave-ai/server";
+import { serverConfigFileInput, serverConfigSchema, type ServerConfig } from "@planweave-ai/server";
 import { lstat, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, relative, resolve } from "node:path";
 import { zipSync, strToU8 } from "fflate";
@@ -64,7 +64,10 @@ function requirements(target: DeploymentTargetDraft) {
 }
 
 function handoff(target: DeploymentTargetDraft) {
-  if (target.endpoint.topology === "loopback_http") {
+  if (
+    target.endpoint.topology === "loopback_http" ||
+    target.endpoint.topology === "tailscale_https"
+  ) {
     return {
       state: "not_applicable" as const,
       copyAction: null,
@@ -341,13 +344,14 @@ async function createBundleArchive(input: {
   }
   const trusted = config.trustedProjects[0];
   if (
+    config.transport.mode !== "direct_https" ||
     trusted.projectId !== input.source.projectId ||
     trusted.projectRoot !== `/var/lib/planweave/projects/${input.source.projectId}` ||
     config.deployment?.serverOrigin !== input.target.endpoint.serverOrigin
   ) {
     throw new DeploymentBundleUnavailableError("invalid_project", "deployment_bundle_scope_invalid");
   }
-  const { databasePath: _databasePath, ...configInput } = config;
+  const configInput = serverConfigFileInput(config);
   const files: Record<string, Uint8Array> = {
     "server.json": strToU8(`${JSON.stringify(configInput)}\n`),
     "tls/.gitkeep": new Uint8Array()

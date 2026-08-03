@@ -413,7 +413,10 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     workspaceRoot: string;
     projectId: string;
   }> {
-    if (target.endpoint.topology === "loopback_http") {
+    if (
+      target.endpoint.topology === "loopback_http" ||
+      target.endpoint.topology === "tailscale_https"
+    ) {
       throw new DeploymentBundleUnavailableError(
         "needs_project",
         "deployment_bundle_loopback_not_supported"

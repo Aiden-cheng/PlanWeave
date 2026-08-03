@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadServerConfig, parseServerConfig } from "../config.js";
+import { loadServerConfig, parseServerConfig, serverConfigFileInput } from "../config.js";
 import { prepareContainerRuntime } from "../containerPrepare.js";
 import { hashOperatorToken } from "../operatorAuth.js";
 
@@ -59,7 +59,7 @@ async function fixture() {
       }
     ]
   });
-  const { databasePath: _databasePath, ...configInput } = config;
+  const configInput = serverConfigFileInput(config);
   await writeFile(configPath, `${JSON.stringify(configInput)}\n`);
   return { configPath, inputTlsDirectory, runtimeDirectory, stateDirectory };
 }
@@ -77,7 +77,7 @@ describe("container runtime preparation", () => {
     const runtimeConfig = JSON.parse(
       await readFile(join(input.runtimeDirectory, "server.json"), "utf8")
     );
-    expect(runtimeConfig.tls).toEqual({
+    expect(runtimeConfig.transport.listener.tls).toEqual({
       certificatePath: join(input.runtimeDirectory, "tls/server.crt"),
       privateKeyPath: join(input.runtimeDirectory, "tls/server.key")
     });

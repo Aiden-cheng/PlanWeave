@@ -1,6 +1,6 @@
 import { chown, chmod, copyFile, lstat, mkdir, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { loadServerConfig, serverConfigSchema } from "./config.js";
+import { loadServerConfig, serverConfigFileInput, serverConfigSchema } from "./config.js";
 
 const inputConfigPath = "/run/planweave/input/config/server.json";
 const inputTlsDirectory = "/run/planweave/input/tls";
@@ -56,10 +56,12 @@ export async function prepareContainerRuntime(
   const certificatePath = join(tlsDirectory, "server.crt");
   const privateKeyPath = join(tlsDirectory, "server.key");
   const config = await loadServerConfig(configPath);
+  if (config.transport.mode !== "direct_https") {
+    throw new Error("server_container_direct_https_required");
+  }
   if (
-    !config.tls ||
-    config.tls.certificatePath !== certificatePath ||
-    config.tls.privateKeyPath !== privateKeyPath
+    config.transport.listener.tls.certificatePath !== certificatePath ||
+    config.transport.listener.tls.privateKeyPath !== privateKeyPath
   ) {
     throw new Error("server_container_tls_path_mismatch");
   }
@@ -78,9 +80,18 @@ export async function prepareContainerRuntime(
   await Promise.all([chmod(runtimeCertificatePath, 0o600), chmod(runtimePrivateKeyPath, 0o600)]);
   const runtimeConfig = serverConfigSchema.parse({
     ...config,
-    tls: { certificatePath: runtimeCertificatePath, privateKeyPath: runtimePrivateKeyPath }
+    transport: {
+      ...config.transport,
+      listener: {
+        ...config.transport.listener,
+        tls: {
+          certificatePath: runtimeCertificatePath,
+          privateKeyPath: runtimePrivateKeyPath
+        }
+      }
+    }
   });
-  const { databasePath: _databasePath, ...runtimeConfigInput } = runtimeConfig;
+  const runtimeConfigInput = serverConfigFileInput(runtimeConfig);
   const runtimeConfigPath = join(runtime, "server.json");
   await writeFile(runtimeConfigPath, `${JSON.stringify(runtimeConfigInput)}\n`, { mode: 0o600 });
   await chmod(runtimeConfigPath, 0o600);

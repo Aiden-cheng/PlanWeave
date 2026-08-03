@@ -27,6 +27,7 @@ export {
   loadServerConfig,
   parseServerConfig,
   resolveServerConfigPath,
+  serverConfigFileInput,
   serverConfigSchema,
   serverConfigSummary,
   serverConfigSummarySchema,

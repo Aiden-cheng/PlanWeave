@@ -8,17 +8,19 @@ async function checkReadiness(): Promise<void> {
   const configPath = process.env.PLANWEAVE_SERVER_CONFIG;
   if (!configPath) throw new Error("container_healthcheck_config_missing");
   const config = await loadServerConfig(configPath);
-  if (!config.tls) throw new Error("container_healthcheck_tls_required");
-  const endpoint = new URL(config.publicUrl);
+  if (config.transport.mode !== "direct_https") {
+    throw new Error("container_healthcheck_direct_https_required");
+  }
+  const endpoint = new URL(config.transport.advertisedOrigin);
   const certificateAuthority =
     config.deployment?.tlsTrust === "configured_ca"
-      ? await readFile(config.tls.certificatePath)
+      ? await readFile(config.transport.listener.tls.certificatePath)
       : undefined;
   await new Promise<void>((resolve, reject) => {
     const healthcheck = request(
       {
         host: "127.0.0.1",
-        port: config.bind.port,
+        port: config.transport.listener.port,
         servername: endpoint.hostname,
         path: "/readyz",
         method: "GET",

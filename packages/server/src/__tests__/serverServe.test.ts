@@ -73,18 +73,66 @@ describe("distributed server listener", () => {
       status: "ready",
       schemaVersion: latestCentralSchemaVersion
     });
-    const response = await fetch(`${config.publicUrl}/readyz`);
+    const response = await fetch(`${config.transport.advertisedOrigin}/readyz`);
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       status: "ready",
       schemaVersion: latestCentralSchemaVersion
     });
-    const authenticated = await fetch(`${config.publicUrl}/api/v1/hosts?limit=1`, {
+    const authenticated = await fetch(`${config.transport.advertisedOrigin}/api/v1/hosts?limit=1`, {
       headers: { Authorization: `Bearer pw_operator_${"S".repeat(43)}` }
     });
     expect(authenticated.status).toBe(200);
     await server.close();
     await server.close();
     expect(server.readiness()).toMatchObject({ status: "draining" });
+  });
+
+  it("listens on loopback HTTP while advertising Tailscale HTTPS without enabling human transport", async () => {
+    const workspace = await createTestWorkspace(remoteManifest());
+    directories.push(workspace.home, workspace.root);
+    const port = await availablePort();
+    const advertisedOrigin = "https://planweave.tailnet.ts.net";
+    const config = parseServerConfig({
+      version: "server-config/v2",
+      transport: {
+        mode: "tailscale_https",
+        listener: { protocol: "http", host: "127.0.0.1", port },
+        advertisedOrigin
+      },
+      deployment: {
+        topology: "tailscale_https",
+        serverOrigin: advertisedOrigin,
+        allowedClientOrigins: [advertisedOrigin],
+        tlsTrust: "system_ca"
+      },
+      allowedClientOrigins: [advertisedOrigin],
+      dataDirectory: join(workspace.root, "tailscale-server-data"),
+      trustedProjects: [
+        {
+          workspaceId: legacyWorkspaceIdForProject(workspace.init.workspace.id),
+          projectId: workspace.init.workspace.id,
+          canvasId: "default",
+          projectRoot: workspace.root
+        }
+      ],
+      operatorCredentials: [
+        {
+          operatorId: "admin",
+          tokenSha256: hashOperatorToken(`pw_operator_${"T".repeat(43)}`),
+          projectIds: [],
+          serverAdmin: true
+        }
+      ]
+    });
+    const server = await serveDistributedServer(config);
+    expect(server.publicUrl).toBe(advertisedOrigin);
+    const readiness = await fetch(`http://127.0.0.1:${port}/readyz`);
+    expect(readiness.status).toBe(200);
+    const blocked = await fetch(`http://127.0.0.1:${port}/api/v1/hosts?limit=1`, {
+      headers: { Authorization: `Bearer pw_operator_${"T".repeat(43)}` }
+    });
+    expect(blocked.status).toBe(426);
+    await server.close();
   });
 });
