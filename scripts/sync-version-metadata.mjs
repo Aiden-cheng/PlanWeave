@@ -45,7 +45,13 @@ const versionFlagTargets = {
   "--collaboration-protocol": ["collaboration-protocol"],
   "--agent-host": ["agent-host"],
   "--server": ["server"],
-  "--npm": ["runtime", "cli"],
+  "--npm": [
+    "agent-host-protocol",
+    "collaboration-protocol",
+    "runtime",
+    "mcp",
+    "cli"
+  ],
   "--all": [
     "root",
     "runtime",
@@ -87,7 +93,7 @@ function usage() {
     "  --collaboration-protocol packages/collaboration-protocol/package.json",
     "  --agent-host packages/agent-host/package.json",
     "  --server    packages/server/package.json",
-    "  --npm       packages/runtime/package.json and packages/cli/package.json",
+    "  --npm       agent-host-protocol, collaboration-protocol, runtime, mcp, and cli package.json files",
     "  --all       all package.json files above"
   ].join("\n");
 }

@@ -147,6 +147,20 @@ describe("distributed package artifact contracts", () => {
     expect(root.scripts?.["publish:distributed"]).toContain("@planweave-ai/agent-host");
   });
 
+  it("keeps npm version targets aligned with the standard publish lane", () => {
+    const syncVersionScript = readFileSync(
+      join(repoRoot, "scripts/sync-version-metadata.mjs"),
+      "utf8"
+    );
+
+    expect(syncVersionScript).toMatch(
+      /"--npm": \[\s*"agent-host-protocol",\s*"collaboration-protocol",\s*"runtime",\s*"mcp",\s*"cli"\s*\]/
+    );
+    expect(syncVersionScript).toContain(
+      "--npm       agent-host-protocol, collaboration-protocol, runtime, mcp, and cli package.json files"
+    );
+  });
+
   it("keeps schema-only packages free of implementation dependencies", () => {
     const protocol = readPackageJson("packages/agent-host-protocol/package.json");
     const contracts = readPackageJson("packages/collaboration-protocol/package.json");
