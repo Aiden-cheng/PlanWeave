@@ -230,6 +230,11 @@ describe("CollaborationCanvasCommandFacade", () => {
       }
     };
     const client = makeClient();
+    const mirror = {
+      bind: vi.fn().mockResolvedValue(undefined),
+      flush: vi.fn().mockResolvedValue(undefined),
+      clear: vi.fn()
+    };
     const facade = new CollaborationCanvasCommandFacade({
       resolveClient: () => client,
       resolveCanvasBinding: async () => ({
@@ -245,6 +250,7 @@ describe("CollaborationCanvasCommandFacade", () => {
       }),
       resolveAuthorityId: () => "authority-1",
       store,
+      mirror,
       transport
     });
 
@@ -252,12 +258,24 @@ describe("CollaborationCanvasCommandFacade", () => {
       facade.bind({ localProjectId: "local-project", canvasId: "local-canvas" })
     ).resolves.toEqual(remoteSession);
     expect(client.bindCanvasCommandSession).toHaveBeenCalledWith("remote-canvas");
-    expect(store.revision({
+    expect(mirror.bind).toHaveBeenCalledWith({
       authorityId: "authority-1",
+      localProjectId: "local-project",
+      localCanvasId: "local-canvas",
       workspaceId: "workspace-001",
       projectId: "remote-project",
       canvasId: "remote-canvas"
-    })).toBe(7);
+    });
+    await facade.flushMaterialization();
+    expect(mirror.flush).toHaveBeenCalledTimes(1);
+    expect(
+      store.revision({
+        authorityId: "authority-1",
+        workspaceId: "workspace-001",
+        projectId: "remote-project",
+        canvasId: "remote-canvas"
+      })
+    ).toBe(7);
 
     const result = await facade.submit({
       canvasId: "remote-canvas",
@@ -406,8 +424,7 @@ describe("CollaborationCanvasCommandFacade", () => {
         localProjectId: input.localProjectId,
         localCanvasId: input.canvasId,
         remoteProjectId: "remote-project",
-        remoteCanvasId:
-          input.canvasId === "local-canvas" ? "remote-canvas" : "remote-canvas-b"
+        remoteCanvasId: input.canvasId === "local-canvas" ? "remote-canvas" : "remote-canvas-b"
       }),
       resolveCanvasScope: async (input) => ({
         workspaceId: "workspace-001",
@@ -430,12 +447,14 @@ describe("CollaborationCanvasCommandFacade", () => {
     expect(
       facade.projectionForBinding({ localProjectId: "local-project", canvasId: "local-canvas-b" })
     ).toBeNull();
-    expect(store.projection({
-      authorityId: "authority-1",
-      workspaceId: "workspace-001",
-      projectId: "remote-project",
-      canvasId: "remote-canvas-b"
-    })).toBeNull();
+    expect(
+      store.projection({
+        authorityId: "authority-1",
+        workspaceId: "workspace-001",
+        projectId: "remote-project",
+        canvasId: "remote-canvas-b"
+      })
+    ).toBeNull();
     expect(clearCanvasCommandSession).toHaveBeenCalled();
     await expect(
       facade.submit({

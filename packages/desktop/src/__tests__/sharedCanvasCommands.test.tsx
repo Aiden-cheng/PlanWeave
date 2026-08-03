@@ -66,10 +66,12 @@ function createBridge(options?: {
   const reconnect = vi.fn<SharedCanvasCommandBridge["reconnectCollaborationCanvas"]>(
     options?.reconnect ?? (async () => reconnectResult(initialSession))
   );
-  const bind = vi.fn<SharedCanvasCommandBridge["bindCollaborationCanvasCommandSession"]>(async () => {
-    if (options?.bindError) throw options.bindError;
-    return initialSession;
-  });
+  const bind = vi.fn<SharedCanvasCommandBridge["bindCollaborationCanvasCommandSession"]>(
+    async () => {
+      if (options?.bindError) throw options.bindError;
+      return initialSession;
+    }
+  );
   return {
     api: {
       submitCollaborationCanvasCommand: async () => {
@@ -90,7 +92,9 @@ function createBridge(options?: {
         return () => observerListeners.delete(listener);
       },
       getCollaborationCanvasReplicaProjection: async () => null,
-      onCollaborationCanvasReplicaSignal: (listener: (signal: CollaborationCanvasReplicaSignal) => void) => {
+      onCollaborationCanvasReplicaSignal: (
+        listener: (signal: CollaborationCanvasReplicaSignal) => void
+      ) => {
         replicaListeners.add(listener);
         return () => replicaListeners.delete(listener);
       }
@@ -142,7 +146,10 @@ function replicaProjection(revision: number): CollaborationCanvasReplicaProjecti
   });
 }
 
-function hookInput(api: SharedCanvasCommandBridge, onAuthoritativeChange?: () => void | Promise<void>) {
+function hookInput(
+  api: SharedCanvasCommandBridge,
+  onAuthoritativeChange?: () => void | Promise<void>
+) {
   return {
     api,
     enabled: true,
@@ -178,6 +185,67 @@ describe("useSharedCanvasCommands", () => {
 
     expect(result.current.projection?.revision).toBe(4);
     expect(result.current.projection?.content.projectTitle).toBe("Shared");
+  });
+
+  it("retains the last confirmed projection as a read-only view after disconnect", async () => {
+    vi.useFakeTimers();
+    const bridge = createBridge();
+    const { result, rerender } = renderHook(
+      ({ connected }) =>
+        useSharedCanvasCommands({
+          ...hookInput(bridge.api),
+          sessionConnected: connected
+        }),
+      { initialProps: { connected: true } }
+    );
+    await flushEffects();
+
+    act(() => bridge.emitReplica(replicaProjection(4)));
+    expect(result.current.projection?.revision).toBe(4);
+
+    rerender({ connected: false });
+    await flushEffects();
+
+    expect(result.current.enabled).toBe(true);
+    expect(result.current.offline).toBe(true);
+    expect(result.current.projection?.revision).toBe(4);
+    expect(result.current.projection?.canEdit).toBe(false);
+    expect(result.current.projection?.optimisticOperationIds).toEqual([]);
+  });
+
+  it("drops unconfirmed optimistic content when the shared session disconnects", async () => {
+    vi.useFakeTimers();
+    const bridge = createBridge();
+    const { result, rerender } = renderHook(
+      ({ connected }) =>
+        useSharedCanvasCommands({
+          ...hookInput(bridge.api),
+          sessionConnected: connected
+        }),
+      { initialProps: { connected: true } }
+    );
+    await flushEffects();
+
+    act(() => bridge.emitReplica(replicaProjection(4)));
+    act(() =>
+      bridge.emitReplica(
+        collaborationCanvasReplicaProjectionSchema.parse({
+          ...replicaProjection(4),
+          optimisticOperationIds: ["operation-pending"],
+          content: {
+            ...replicaProjection(4).content,
+            projectTitle: "Unconfirmed"
+          }
+        })
+      )
+    );
+    expect(result.current.projection?.content.projectTitle).toBe("Unconfirmed");
+
+    rerender({ connected: false });
+    await flushEffects();
+
+    expect(result.current.projection?.content.projectTitle).toBe("Shared");
+    expect(result.current.projection?.optimisticOperationIds).toEqual([]);
   });
 
   it("does not bind a command session before collaboration is connected", async () => {

@@ -113,6 +113,8 @@ type GraphViewProps = {
   onResourcePin: (name: string | null) => void;
   clearPinnedResource: () => void;
   presence?: CollaborationCanvasPresenceResult;
+  sharedCanvasOffline: boolean;
+  sharedCanvasRevision: number | null;
 };
 
 export function GraphView({
@@ -172,7 +174,9 @@ export function GraphView({
   onResourceHover,
   onResourcePin,
   clearPinnedResource,
-  presence
+  presence,
+  sharedCanvasOffline,
+  sharedCanvasRevision
 }: GraphViewProps) {
   const fittedGraphScopeId = useRef<string | null>(null);
   const [localFlowInstance, setLocalFlowInstance] = useState<ReactFlowInstance<
@@ -301,6 +305,16 @@ export function GraphView({
       onMouseMove={graph ? handleGraphPointerMove : undefined}
       onMouseLeave={graph ? handleGraphPointerLeave : undefined}
     >
+      {sharedCanvasOffline ? (
+        <div
+          className="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-full border border-border bg-surface/95 px-3 py-1 text-xs text-text-muted shadow-sm"
+          data-testid="shared-canvas-offline-replica"
+        >
+          {sharedCanvasRevision === null
+            ? t("sharedCanvasOfflineReplica")
+            : t("sharedCanvasOfflineRevision").replace("{revision}", String(sharedCanvasRevision))}
+        </div>
+      ) : null}
       {!graph ? (
         <div className="flex h-full items-center justify-center p-6">
           <GraphEmptyState

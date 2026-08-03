@@ -907,6 +907,7 @@ describe("preload bridge invocation", () => {
       canvasId: "default"
     });
     await api.stopCollaborationCanvasLiveSync();
+    await api.flushCollaborationCanvasReplicaMaterialization();
     await api.listCollaborationMembers({ cursor: 0, limit: 20 });
     await api.createCollaborationInvitation({});
     await api.revokeCollaborationInvitation({ invitationId: "inv-1" });
@@ -927,7 +928,8 @@ describe("preload bridge invocation", () => {
     const presenceSignalCallback = vi.fn();
     const unsubscribePresenceSignal = api.onCollaborationPresenceSignal(presenceSignalCallback);
     const liveSyncSignalCallback = vi.fn();
-    const unsubscribeLiveSyncSignal = api.onCollaborationCanvasLiveSyncSignal(liveSyncSignalCallback);
+    const unsubscribeLiveSyncSignal =
+      api.onCollaborationCanvasLiveSyncSignal(liveSyncSignalCallback);
 
     expect(Object.keys(api).sort()).toEqual(
       [
@@ -1023,6 +1025,9 @@ describe("preload bridge invocation", () => {
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       collaborationInvokeChannels.readCollaborationCommentAttachment,
       { commentId: "comment-1", digestSha256: "a".repeat(64) }
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.flushCollaborationCanvasReplicaMaterialization
     );
 
     const statusCall = electronMock.ipcRenderer.on.mock.calls.find(

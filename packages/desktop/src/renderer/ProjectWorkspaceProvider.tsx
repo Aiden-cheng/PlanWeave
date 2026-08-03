@@ -363,6 +363,27 @@ export function ProjectWorkspaceProvider({
     setSelectedRunRecord
   });
 
+  const createLocalProjectFromTaskCanvas = useCallback(
+    async (project: DesktopProjectSummary, canvasId: string) => {
+      const isCurrentSharedCanvas =
+        sharedCanvasCommands.enabled &&
+        selectedProject?.projectId === project.projectId &&
+        selectedCanvasId === canvasId;
+      if (isCurrentSharedCanvas) {
+        if (!collaborationBridge) throw new Error(t("bridgeUnavailable"));
+        await collaborationBridge.flushCollaborationCanvasReplicaMaterialization();
+      }
+      return createProjectFromTaskCanvasInSession(project, canvasId);
+    },
+    [
+      createProjectFromTaskCanvasInSession,
+      selectedCanvasId,
+      selectedProject?.projectId,
+      sharedCanvasCommands.enabled,
+      t
+    ]
+  );
+
   const restoreTaskWorkspaceSourceSelection = useCallback(
     async (taskId: string | null, blockRef: string | null) => {
       setSelectedRunRecord(null);
@@ -670,7 +691,7 @@ export function ProjectWorkspaceProvider({
   } = useDesktopProjectActions({
     clearReviewTaskSelection,
     createTaskCanvas: createTaskCanvasInSession,
-    createProjectFromTaskCanvas: createProjectFromTaskCanvasInSession,
+    createProjectFromTaskCanvas: createLocalProjectFromTaskCanvas,
     deleteTaskCanvas: deleteTaskCanvasInSession,
     duplicateTaskCanvas: duplicateTaskCanvasInSession,
     renameProject: async (project, name) => {
@@ -1032,7 +1053,9 @@ export function ProjectWorkspaceProvider({
     onResourceHover,
     onResourcePin,
     clearPinnedResource,
-    presence: collaborationPresence
+    presence: collaborationPresence,
+    sharedCanvasOffline: sharedCanvasCommands.offline,
+    sharedCanvasRevision: sharedCanvasCommands.projection?.revision ?? null
   });
   const review = useMemo<WorkspaceTabsReviewProps>(
     () => ({

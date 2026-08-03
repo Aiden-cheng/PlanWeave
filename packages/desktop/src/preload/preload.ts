@@ -282,6 +282,8 @@ const collaborationApi: PlanWeaveCollaborationApi = {
     ipcRenderer.invoke(collaborationInvokeChannels.bindCollaborationCanvasCommandSession, input),
   getCollaborationCanvasCommandSession: async () =>
     ipcRenderer.invoke(collaborationInvokeChannels.getCollaborationCanvasCommandSession),
+  flushCollaborationCanvasReplicaMaterialization: async () =>
+    ipcRenderer.invoke(collaborationInvokeChannels.flushCollaborationCanvasReplicaMaterialization),
   resolveCollaborationCanvasScope: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.resolveCollaborationCanvasScope, input),
   readCollaborationCanvasRuntimeStatus: async (input) =>

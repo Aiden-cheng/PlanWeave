@@ -181,6 +181,8 @@ function defaultProps(
     startAutoRunControlDrag: vi.fn(),
     stopAutoRunClick: vi.fn().mockResolvedValue(undefined),
     stopAutoRunControlDrag: vi.fn(),
+    sharedCanvasOffline: false,
+    sharedCanvasRevision: null,
     t: createTranslator("en"),
     visibleTaskIds: new Set(["T-001"]),
     visibleTasks: undefined,
@@ -198,6 +200,14 @@ afterEach(() => {
 });
 
 describe("GraphView viewport fitting", () => {
+  it("labels the retained shared replica as offline and read-only", () => {
+    render(<GraphView {...defaultProps({ sharedCanvasOffline: true, sharedCanvasRevision: 4 })} />);
+
+    expect(screen.getByTestId("shared-canvas-offline-replica")).toHaveTextContent(
+      "Offline · read-only · last confirmed revision 4"
+    );
+  });
+
   it("shows a loading placeholder instead of the empty project prompt while project data is loading", () => {
     render(<GraphView {...defaultProps({ graph: null, nodes: [], projectLoading: true })} />);
 

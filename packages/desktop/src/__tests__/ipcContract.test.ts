@@ -159,6 +159,9 @@ describe("desktop IPC contract", () => {
     expect(collaborationInvokeChannels.disconnectCollaborationSession).toBe(
       "planweave-collaboration:disconnectSession"
     );
+    expect(collaborationInvokeChannels.flushCollaborationCanvasReplicaMaterialization).toBe(
+      "planweave-collaboration:flushCanvasReplicaMaterialization"
+    );
     expect(collaborationInvokeChannels.redeemCollaborationSetupCode).toBe(
       "planweave-collaboration:redeemSetupCode"
     );

@@ -119,7 +119,7 @@ export const enCatalog = {
   openTaskInFileExplorer: "Open task in File Explorer",
   openTaskInFileManager: "Open task in file manager",
   duplicateTaskCanvas: "Duplicate task canvas",
-  copyCanvasToNewProject: "Copy canvas to new project",
+  copyCanvasToNewProject: "Save as local plan",
   renameTaskCanvas: "Rename task canvas",
   renameTaskCanvasPrompt: "Task canvas name",
   removeProject: "Remove",
@@ -1464,6 +1464,8 @@ export const enCatalog = {
   canvasCommandReconnectFailed: "Canvas reconnect failed: {code}",
   canvasCommandNotConnected:
     "This shared canvas is offline and cannot be edited. Start or check the Server, then go to People and select Refresh to reconnect.",
+  sharedCanvasOfflineReplica: "Offline · read-only local replica",
+  sharedCanvasOfflineRevision: "Offline · read-only · last confirmed revision {revision}",
   canvasCommandUnsupportedLocalOnly:
     "This edit is not available while the shared canvas is connected. Disconnect collaboration or use a supported shared command.",
   contentAuthorityTitle: "Authoritative content",

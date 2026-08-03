@@ -50,6 +50,13 @@ export type CanvasReplicaMutationResult = {
   droppedPending: CanvasReplicaPendingOperation[];
 };
 
+export type CanvasReplicaCommittedSnapshot = {
+  scope: CanvasReplicaScope;
+  revision: number;
+  contentDigest: string;
+  content: CompleteContentVersion;
+};
+
 function replicaError(code: string, retryable = false): CollaborationClientError {
   return new CollaborationClientError({ kind: "protocol", code, message: code, retryable });
 }
@@ -80,7 +87,9 @@ export class CanvasReplicaStore {
   private readonly replicas = new Map<string, ReplicaState>();
 
   constructor(
-    private readonly onChange: (projection: CollaborationCanvasReplicaProjection) => void
+    private readonly onChange: (projection: CollaborationCanvasReplicaProjection) => void,
+    private readonly onCommitted: (snapshot: CanvasReplicaCommittedSnapshot) => void = () =>
+      undefined
   ) {}
 
   bind(scope: CanvasReplicaScope): void {
@@ -126,6 +135,7 @@ export class CanvasReplicaStore {
     replica.revision = baseline.revision;
     replica.contentDigest = baseline.contentDigest;
     const droppedPending = this.rebasePending(replica);
+    this.publishCommitted(replica, baseline.content);
     this.publish(replica);
     return { droppedPending };
   }
@@ -138,7 +148,9 @@ export class CanvasReplicaStore {
     this.replicas.clear();
   }
 
-  has(scope: Pick<CanvasReplicaScope, "authorityId" | "workspaceId" | "projectId" | "canvasId">): boolean {
+  has(
+    scope: Pick<CanvasReplicaScope, "authorityId" | "workspaceId" | "projectId" | "canvasId">
+  ): boolean {
     return this.replicas.has(key(scope));
   }
 
@@ -234,8 +246,11 @@ export class CanvasReplicaStore {
     replica.document = next;
     replica.revision = entry.revision;
     replica.contentDigest = entry.contentDigest;
-    replica.pending = replica.pending.filter((pending) => pending.operationId !== entry.operationId);
+    replica.pending = replica.pending.filter(
+      (pending) => pending.operationId !== entry.operationId
+    );
     const droppedPending = this.rebasePending(replica);
+    this.publishCommitted(replica);
     this.publish(replica);
     return { droppedPending };
   }
@@ -274,7 +289,10 @@ export class CanvasReplicaStore {
       (pending) => pending.operationId === outcome.operationId
     );
     if (pendingIndex < 0) {
-      if (outcome.revision === replica.revision && outcome.contentDigest === replica.contentDigest) {
+      if (
+        outcome.revision === replica.revision &&
+        outcome.contentDigest === replica.contentDigest
+      ) {
         return { droppedPending: [] };
       }
       throw replicaError("canvas_replica_acceptance_without_pending", true);
@@ -284,10 +302,7 @@ export class CanvasReplicaStore {
     }
 
     // Authority already reflects this operation (same head revision/digest).
-    if (
-      outcome.contentDigest === replica.contentDigest &&
-      outcome.revision <= replica.revision
-    ) {
+    if (outcome.contentDigest === replica.contentDigest && outcome.revision <= replica.revision) {
       replica.pending = replica.pending.filter((item) => item.operationId !== outcome.operationId);
       const droppedPending = this.rebasePending(replica);
       this.publish(replica);
@@ -305,6 +320,7 @@ export class CanvasReplicaStore {
     replica.contentDigest = outcome.contentDigest;
     replica.pending = replica.pending.filter((item) => item.operationId !== outcome.operationId);
     const droppedPending = this.rebasePending(replica);
+    this.publishCommitted(replica);
     this.publish(replica);
     return { droppedPending };
   }
@@ -325,7 +341,8 @@ export class CanvasReplicaStore {
     }
 
     if (response.type === "canvas.reconnect.snapshot") {
-      if (!input.snapshotContent) throw replicaError("canvas_replica_snapshot_content_required", true);
+      if (!input.snapshotContent)
+        throw replicaError("canvas_replica_snapshot_content_required", true);
       if (
         !sameRemoteScope(response.scope, replica.scope) ||
         !sameRemoteScope(response.snapshot.metadata.scope, replica.scope)
@@ -353,6 +370,7 @@ export class CanvasReplicaStore {
       replica.revision = response.snapshot.metadata.revision;
       replica.contentDigest = response.snapshot.metadata.contentDigest;
       const droppedPending = this.rebasePending(replica);
+      this.publishCommitted(replica, input.snapshotContent);
       this.publish(replica);
       return { droppedPending };
     }
@@ -396,6 +414,7 @@ export class CanvasReplicaStore {
     replica.contentDigest = digest;
     replica.pending = replica.pending.filter((pending) => !acceptedIds.has(pending.operationId));
     const droppedPending = this.rebasePending(replica);
+    if (response.entries.length > 0) this.publishCommitted(replica);
     this.publish(replica);
     return { droppedPending };
   }
@@ -479,6 +498,20 @@ export class CanvasReplicaStore {
   private publish(replica: ReplicaState): void {
     if (!replica.document) return;
     this.onChange(this.toProjection(replica));
+  }
+
+  private publishCommitted(replica: ReplicaState, exactContent?: CompleteContentVersion): void {
+    if (!replica.document || !replica.contentDigest) return;
+    const content = exactContent ?? encodeCanvasReplicaDocument(replica.document);
+    if (content.canonicalDigest !== replica.contentDigest) {
+      throw replicaError("canvas_replica_committed_content_digest_mismatch", true);
+    }
+    this.onCommitted({
+      scope: replica.scope,
+      revision: replica.revision,
+      contentDigest: replica.contentDigest,
+      content
+    });
   }
 
   private toProjection(replica: ReplicaState): CollaborationCanvasReplicaProjection {

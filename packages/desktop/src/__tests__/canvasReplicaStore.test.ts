@@ -100,6 +100,39 @@ function accepted(
 }
 
 describe("CanvasReplicaStore", () => {
+  it("publishes only committed content to the durable replica listener", () => {
+    const committed: Array<{ revision: number; contentDigest: string }> = [];
+    const store = new CanvasReplicaStore(
+      () => undefined,
+      (snapshot) =>
+        committed.push({
+          revision: snapshot.revision,
+          contentDigest: snapshot.contentDigest
+        })
+    );
+    const content = encodeCanvasReplicaDocument(documentFixture());
+    store.bind(scope());
+    store.installBaseline(scope(), {
+      content,
+      revision: 3,
+      contentDigest: content.canonicalDigest
+    });
+    store.setCanEdit(scope(), true);
+
+    store.enqueue(scope(), {
+      operationId: "operation-pending",
+      intent: {
+        kind: "update_layout",
+        nodes: [
+          { nodeId: "T-001", x: 101, y: 202 },
+          { nodeId: "T-002", x: 30, y: 40 }
+        ],
+        updatedAt: "2026-08-03T00:00:00.000Z"
+      }
+    });
+
+    expect(committed).toEqual([{ revision: 3, contentDigest: content.canonicalDigest }]);
+  });
   it("rejects malformed immutable snapshots before they become a replica baseline", () => {
     const published: CollaborationCanvasReplicaProjection[] = [];
     const store = new CanvasReplicaStore((projection) => published.push(projection));

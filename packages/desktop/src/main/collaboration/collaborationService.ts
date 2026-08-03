@@ -120,6 +120,7 @@ import {
 import { redactCollaborationText } from "./redaction.js";
 import { CollaborationInvitationVault } from "./collaborationInvitationVault.js";
 import { CanvasReplicaStore } from "./CanvasReplicaStore.js";
+import { CanvasReplicaDiskMirror } from "./CanvasReplicaDiskMirror.js";
 import type { CollaborationCanvasReplicaSignal } from "../../shared/canvasReplicaIpc.js";
 
 export type CollaborationClientFactory = (
@@ -194,6 +195,7 @@ export class CollaborationService {
   private readonly onCanvasLiveSyncSignal?: (signal: CollaborationCanvasLiveSyncSignal) => void;
   private readonly onCanvasReplicaSignal?: (signal: CollaborationCanvasReplicaSignal) => void;
   private readonly canvasReplicas: CanvasReplicaStore;
+  private readonly canvasReplicaMirror: CanvasReplicaDiskMirror;
   private readonly registryService: CollaborationRegistryService;
   private readonly canvasCommands: CollaborationCanvasCommandFacade;
   private readonly contentVersions: ContentVersionFacade;
@@ -255,8 +257,10 @@ export class CollaborationService {
     this.onPresenceSignal = options.onPresenceSignal;
     this.onCanvasLiveSyncSignal = options.onCanvasLiveSyncSignal;
     this.onCanvasReplicaSignal = options.onCanvasReplicaSignal;
-    this.canvasReplicas = new CanvasReplicaStore((projection) =>
-      this.onCanvasReplicaSignal?.({ type: "canvas.replica.changed", projection })
+    this.canvasReplicaMirror = new CanvasReplicaDiskMirror();
+    this.canvasReplicas = new CanvasReplicaStore(
+      (projection) => this.onCanvasReplicaSignal?.({ type: "canvas.replica.changed", projection }),
+      (snapshot) => this.canvasReplicaMirror.capture(snapshot)
     );
     this.registryService = new CollaborationRegistryService(() => this.client);
     this.contentVersions = new ContentVersionFacade(() => this.client);
@@ -266,7 +270,8 @@ export class CollaborationService {
       resolveCanvasScope: (input) => this.contentVersions.resolveCanvasScope(input),
       resolveAuthorityId: () =>
         this.client ? this.contentVersions.authorityIdForClient(this.client) : null,
-      store: this.canvasReplicas
+      store: this.canvasReplicas,
+      mirror: this.canvasReplicaMirror
     });
     this.remoteOperations = new CollaborationRemoteOperationsFacade((operation) =>
       this.withActiveClient(operation)
@@ -798,10 +803,14 @@ export class CollaborationService {
         if (!preflightComplete && mapped.kind === "auth") {
           await this.vault.clear(profileId);
         }
-        this.setSession("error", preflightComplete ? "connect_failed" : "connect_preflight_failed", {
-          code: mapped.code,
-          message: mapped.message
-        });
+        this.setSession(
+          "error",
+          preflightComplete ? "connect_failed" : "connect_preflight_failed",
+          {
+            code: mapped.code,
+            message: mapped.message
+          }
+        );
         await this.publishStatus();
         throw mapped;
       }
@@ -1045,6 +1054,13 @@ export class CollaborationService {
     });
   }
 
+  async flushCanvasReplicaMaterialization(): Promise<void> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      await this.canvasCommands.flushMaterialization();
+    });
+  }
+
   async resolveCanvasScope(input: unknown) {
     return this.enqueue(async () => {
       this.assertOpen();
@@ -1175,7 +1191,9 @@ export class CollaborationService {
     }
     const invitation = await this.invitationVault.get(profileId, invitationId);
     if (!invitation) {
-      throw new Error("Complete invitation is unavailable. Create a new invitation to store it securely.");
+      throw new Error(
+        "Complete invitation is unavailable. Create a new invitation to store it securely."
+      );
     }
     return invitation;
   }
@@ -1193,7 +1211,9 @@ export class CollaborationService {
     const profileId = this.clientProfileId;
     const revoked = await this.withActiveClient((client) => client.revokeInvitations(parsed));
     if (profileId) {
-      await Promise.all(parsed.invitationIds.map((id) => this.invitationVault.delete(profileId, id)));
+      await Promise.all(
+        parsed.invitationIds.map((id) => this.invitationVault.delete(profileId, id))
+      );
     }
     return revoked;
   }
@@ -1447,6 +1467,15 @@ export class CollaborationService {
     this.observerGeneration += 1;
     this.presenceSession.reset();
     this.canvasLiveSyncSession.reset();
+    try {
+      await this.canvasCommands.flushMaterialization();
+    } catch (error) {
+      const mapped = collaborationErrorFromUnknown(error);
+      this.setSession("error", "canvas_replica_persistence_failed", {
+        code: mapped.code,
+        message: mapped.message
+      });
+    }
     // Bump replica generations so late baseline/submit responses cannot overwrite the next session.
     this.canvasCommands.clearAllSessions();
     // Preserve validated cursor across dispose so the next connectSession can resume.

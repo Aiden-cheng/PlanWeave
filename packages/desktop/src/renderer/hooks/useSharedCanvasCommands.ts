@@ -37,9 +37,9 @@ export type SharedCanvasCommandsResult = {
   snapshot: CanvasCommandControllerSnapshot;
   /** Authoritative in-memory projection used by the shared canvas renderer. */
   projection: CollaborationCanvasReplicaProjection | null;
-  submit: (input: {
-    intent: CanvasCommandIntent;
-  }) => Promise<SharedCanvasSubmitResult>;
+  /** Shared authority is configured but the command session is currently unavailable. */
+  offline: boolean;
+  submit: (input: { intent: CanvasCommandIntent }) => Promise<SharedCanvasSubmitResult>;
   reconnect: () => Promise<boolean>;
 };
 
@@ -123,6 +123,10 @@ export function useSharedCanvasCommands(input: {
     busy: false
   });
   const [projection, setProjection] = useState<CollaborationCanvasReplicaProjection | null>(null);
+  const lastConfirmedProjectionRef = useRef<{
+    profileId: string | null;
+    projection: CollaborationCanvasReplicaProjection;
+  } | null>(null);
 
   useEffect(() => {
     if (
@@ -196,7 +200,20 @@ export function useSharedCanvasCommands(input: {
     const localCanvasId = currentScope?.localCanvasId ?? null;
     if (!api || !controller || !sessionEnabled || !localProjectId || !localCanvasId) {
       void controller?.unbind();
-      setProjection(null);
+      const confirmed = lastConfirmedProjectionRef.current;
+      setProjection(() =>
+        confirmed &&
+        confirmed.profileId === input.profileId &&
+        confirmed.projection.localProjectId === input.selectedProjectId &&
+        confirmed.projection.localCanvasId === input.canvasId &&
+        confirmed.projection.projectId === input.activeProjectId
+          ? {
+              ...confirmed.projection,
+              canEdit: false,
+              optimisticOperationIds: []
+            }
+          : null
+      );
       return undefined;
     }
     const activeApi = api;
@@ -222,13 +239,22 @@ export function useSharedCanvasCommands(input: {
       candidate.localCanvasId === localCanvasId &&
       candidate.projectId === currentScope.remoteProjectId &&
       candidate.canvasId === currentScope.remoteCanvasId;
+    const publishProjection = (candidate: CollaborationCanvasReplicaProjection) => {
+      if (candidate.optimisticOperationIds.length === 0) {
+        lastConfirmedProjectionRef.current = {
+          profileId: input.profileId,
+          projection: candidate
+        };
+      }
+      setProjection(candidate);
+    };
     const refreshReplicaProjection = async () => {
       if (!activeApi.getCollaborationCanvasReplicaProjection) return;
       const next = await activeApi.getCollaborationCanvasReplicaProjection({
         localProjectId,
         canvasId: localCanvasId
       });
-      if (active && next && acceptsProjection(next)) setProjection(next);
+      if (active && next && acceptsProjection(next)) publishProjection(next);
     };
     const poll = async (queueWhenBusy = false) => {
       if (!active) return;
@@ -258,9 +284,11 @@ export function useSharedCanvasCommands(input: {
     };
     const bindAndStartPolling = async () => {
       try {
-        unsubscribeReplica = activeApi.onCollaborationCanvasReplicaSignal?.((signal) => {
-          if (active && acceptsProjection(signal.projection)) setProjection(signal.projection);
-        }) ?? null;
+        unsubscribeReplica =
+          activeApi.onCollaborationCanvasReplicaSignal?.((signal) => {
+            if (active && acceptsProjection(signal.projection))
+              publishProjection(signal.projection);
+          }) ?? null;
         await controller.bind({ localProjectId, canvasId: localCanvasId });
         if (!active) return;
         const snap = controller.getSnapshot();
@@ -315,9 +343,7 @@ export function useSharedCanvasCommands(input: {
   ]);
 
   const submit = useCallback(
-    async (submitInput: {
-      intent: CanvasCommandIntent;
-    }): Promise<SharedCanvasSubmitResult> => {
+    async (submitInput: { intent: CanvasCommandIntent }): Promise<SharedCanvasSubmitResult> => {
       const controller = controllerRef.current;
       if (!controller || !sessionEnabled) {
         return { ok: false, error: labels.notConnected, staleConflict: null };
@@ -363,9 +389,10 @@ export function useSharedCanvasCommands(input: {
       enabled: Boolean(authorityEnabled),
       snapshot,
       projection,
+      offline: Boolean(authorityEnabled && !sessionEnabled),
       submit,
       reconnect
     }),
-    [authorityEnabled, projection, reconnect, snapshot, submit]
+    [authorityEnabled, projection, reconnect, sessionEnabled, snapshot, submit]
   );
 }

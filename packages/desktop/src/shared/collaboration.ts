@@ -1,5 +1,8 @@
 import { z } from "zod";
-import type { CollaborationCanvasReplicaProjection, CollaborationCanvasReplicaSignal } from "./canvasReplicaIpc.js";
+import type {
+  CollaborationCanvasReplicaProjection,
+  CollaborationCanvasReplicaSignal
+} from "./canvasReplicaIpc.js";
 import { COMMENT_ATTACHMENT_MAX_BYTES } from "@planweave-ai/collaboration-protocol/core/limits";
 import {
   canvasCommandIntentSchema,
@@ -727,15 +730,15 @@ export type PlanWeaveCollaborationApi = {
   ) => Promise<{ state: "copied"; copiedAt: string }>;
   exportDeploymentComposeBundle: (
     input: Extract<DesktopDeploymentActionRequest, { action: "export_supported_compose_bundle" }>
-  ) => Promise<import("@planweave-ai/collaboration-protocol/deployment").DeploymentBundleExportView>;
+  ) => Promise<
+    import("@planweave-ai/collaboration-protocol/deployment").DeploymentBundleExportView
+  >;
   validateDeploymentConnectivity: (
     input: Extract<DesktopDeploymentActionRequest, { action: "validate_connectivity" }>
   ) => Promise<ConnectivityValidationView>;
   startCollaborationPresence: (input: CollaborationPresenceCanvasInput) => Promise<void>;
   stopCollaborationPresence: () => Promise<void>;
-  startCollaborationCanvasLiveSync: (
-    input: CollaborationCanvasLiveSyncInput
-  ) => Promise<void>;
+  startCollaborationCanvasLiveSync: (input: CollaborationCanvasLiveSyncInput) => Promise<void>;
   stopCollaborationCanvasLiveSync: () => Promise<void>;
   publishCollaborationPresence: (input: CollaborationPresenceUpdateInput) => Promise<void>;
   submitCollaborationCanvasCommand: (
@@ -748,15 +751,16 @@ export type PlanWeaveCollaborationApi = {
     input: CollaborationCanvasSessionInput
   ) => Promise<CollaborationCanvasCommandSessionView | null>;
   getCollaborationCanvasCommandSession: () => Promise<CollaborationCanvasCommandSessionView | null>;
+  flushCollaborationCanvasReplicaMaterialization: () => Promise<void>;
   resolveCollaborationCanvasScope: (
     input: CollaborationContentAuthorityCanvasInput
   ) => Promise<CollaborationCanvasScopeResolution | null>;
   readCollaborationCanvasRuntimeStatus: (
     input: CollaborationContentAuthorityCanvasInput
   ) => Promise<CanvasRuntimeStatusProjection | null>;
-  getCollaborationCanvasReplicaProjection: (input: CollaborationCanvasSessionInput) => Promise<
-    CollaborationCanvasReplicaProjection | null
-  >;
+  getCollaborationCanvasReplicaProjection: (
+    input: CollaborationCanvasSessionInput
+  ) => Promise<CollaborationCanvasReplicaProjection | null>;
   bindCollaborationContentAuthority: (
     input: CollaborationContentAuthorityCanvasInput
   ) => Promise<CollaborationContentAuthorityView>;

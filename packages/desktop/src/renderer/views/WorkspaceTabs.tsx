@@ -138,6 +138,8 @@ export type WorkspaceTabsGraphWorkspaceProps = {
   onResourcePin: (name: string | null) => void;
   clearPinnedResource: () => void;
   presence?: CollaborationCanvasPresenceResult;
+  sharedCanvasOffline: boolean;
+  sharedCanvasRevision: number | null;
 };
 
 export type WorkspaceTabsAutoRunProps = {

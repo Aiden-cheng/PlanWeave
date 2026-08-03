@@ -32,7 +32,9 @@ afterEach(async () => {
   else process.env.PLANWEAVE_HOME = originalHome;
   if (originalSettingsFile === undefined) delete process.env.PLANWEAVE_DESKTOP_SETTINGS_FILE;
   else process.env.PLANWEAVE_DESKTOP_SETTINGS_FILE = originalSettingsFile;
-  await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+  await Promise.all(
+    directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
+  );
 });
 
 function scope(projectId: string) {
@@ -108,6 +110,61 @@ describe("LocalCanvasCommandMaterializer", () => {
     ).rejects.toMatchObject({ code: "collaboration_canvas_local_project_not_registered" });
   });
 
+  it("materializes a server-confirmed content snapshot into the registered local replica", async () => {
+    const source = await createTestWorkspace(basicManifest());
+    directories.push(source.home, source.root);
+    const projectId = source.init.workspace.id;
+    const replicaHome = await mkdtemp(join(tmpdir(), "planweave-confirmed-replica-home-"));
+    const replicaRoot = join(replicaHome, "projects", projectId);
+    directories.push(replicaHome);
+    await cp(source.init.workspace.workspaceRoot, replicaRoot, { recursive: true });
+    const replicaProjectFile = join(replicaRoot, "project.json");
+    const replicaMetadata = await readJsonFile<ProjectMetadata>(replicaProjectFile);
+    await writeJsonFile(replicaProjectFile, {
+      ...replicaMetadata,
+      rootPath: replicaRoot,
+      sourceRoot: replicaRoot
+    });
+
+    const updated = await applyAuthorizedCanvasCommand({
+      projectRoot: source.init.workspace,
+      canvasId: "default",
+      authorityProjectId: projectId,
+      intent: {
+        kind: "update_task_prompt",
+        taskId: "T-001",
+        promptMarkdown: "# confirmed replica prompt\n"
+      }
+    });
+    if (!updated.ok) throw new Error(updated.code);
+    const captured = await captureAuthorizedCanvasContent({
+      projectRoot: source.init.workspace,
+      canvasId: "default",
+      authorityProjectId: projectId
+    });
+
+    process.env.PLANWEAVE_HOME = replicaHome;
+    process.env.PLANWEAVE_DESKTOP_SETTINGS_FILE = join(replicaHome, "desktop-settings.json");
+    const materializer = new LocalCanvasCommandMaterializer();
+    const binding = await materializer.bind({
+      projectId,
+      canvasId: "default",
+      authorityProjectId: projectId
+    });
+    await materializer.materializeConfirmed(binding, {
+      content: captured.content,
+      contentDigest: updated.contentDigest
+    });
+
+    await expect(
+      readFile(
+        join(replicaRoot, "canvases", "default", "package", "nodes", "T-001", "prompt.md"),
+        "utf8"
+      )
+    ).resolves.toBe("# confirmed replica prompt\n");
+    expect(binding.expectedContentDigest).toBe(updated.contentDigest);
+  });
+
   it("converges a delta into an independently rooted registered project and skips co-located accepted content", async () => {
     const source = await createTestWorkspace(basicManifest());
     directories.push(source.home, source.root);
@@ -174,7 +231,10 @@ describe("LocalCanvasCommandMaterializer", () => {
       snapshotRequired: false
     });
     await expect(
-      readFile(join(replicaRoot, "canvases", "default", "package", "nodes", "T-001", "prompt.md"), "utf8")
+      readFile(
+        join(replicaRoot, "canvases", "default", "package", "nodes", "T-001", "prompt.md"),
+        "utf8"
+      )
     ).resolves.toBe("# replicated prompt\n");
 
     process.env.PLANWEAVE_HOME = source.home;

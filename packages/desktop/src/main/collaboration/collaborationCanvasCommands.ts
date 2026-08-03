@@ -25,6 +25,7 @@ import type { CanvasReplicaStore } from "./CanvasReplicaStore.js";
 import { CollaborationClientError } from "./collaborationErrors.js";
 import type { CanvasCommandSessionSnapshot } from "./canvasCommandSession.js";
 import type { CanvasLiveSyncStatus } from "./CanvasLiveSyncClient.js";
+import type { CanvasReplicaDiskMirror } from "./CanvasReplicaDiskMirror.js";
 
 function isRetryableCatchupError(error: unknown): boolean {
   if (error instanceof CollaborationClientError) {
@@ -117,6 +118,7 @@ export type CollaborationCanvasCommandFacadeDeps = {
   ) => Promise<CollaborationCanvasScopeResolution | null>;
   resolveAuthorityId: () => string | null;
   store: CanvasReplicaStore;
+  mirror?: Pick<CanvasReplicaDiskMirror, "bind" | "flush" | "clear">;
   worker?: CanvasReplicaCommandWorker;
   transport?: CanvasReplicaCommandTransport;
 };
@@ -290,12 +292,14 @@ export class CollaborationCanvasCommandFacade {
   private readonly resolveCanvasBinding: CollaborationCanvasCommandFacadeDeps["resolveCanvasBinding"];
   private readonly resolveCanvasScope: CollaborationCanvasCommandFacadeDeps["resolveCanvasScope"];
   private readonly resolveAuthorityId: () => string | null;
+  private readonly mirror: CollaborationCanvasCommandFacadeDeps["mirror"];
 
   constructor(deps: CollaborationCanvasCommandFacadeDeps) {
     this.resolveClient = deps.resolveClient;
     this.resolveCanvasBinding = deps.resolveCanvasBinding;
     this.resolveCanvasScope = deps.resolveCanvasScope;
     this.resolveAuthorityId = deps.resolveAuthorityId;
+    this.mirror = deps.mirror;
     this.store = deps.store;
     const transport = deps.transport ?? createDefaultTransport(deps.resolveClient);
     this.worker = deps.worker ?? new CanvasReplicaCommandWorker(deps.store, transport);
@@ -328,8 +332,7 @@ export class CollaborationCanvasCommandFacade {
       afterRevision: parsed.afterRevision,
       afterContentDigest: parsed.afterContentDigest
     });
-    const entriesToApply =
-      response.type === "canvas.reconnect.delta" ? [...response.entries] : [];
+    const entriesToApply = response.type === "canvas.reconnect.delta" ? [...response.entries] : [];
     return {
       response,
       entriesToApply,
@@ -395,6 +398,7 @@ export class CollaborationCanvasCommandFacade {
     };
 
     try {
+      void this.mirror?.bind(scope);
       await this.worker.bind(scope);
       this.binding = {
         scope,
@@ -443,6 +447,11 @@ export class CollaborationCanvasCommandFacade {
     }
     this.worker.clearAll();
     this.binding = null;
+    this.mirror?.clear();
+  }
+
+  async flushMaterialization(): Promise<void> {
+    await this.mirror?.flush();
   }
 
   /**
@@ -466,6 +475,7 @@ export class CollaborationCanvasCommandFacade {
       this.worker.clear(this.binding.scope);
       this.binding = null;
     }
+    this.mirror?.clear();
     if (!client) return;
     try {
       client.clearCanvasCommandSession();
@@ -609,10 +619,7 @@ export class CollaborationCanvasCommandFacade {
     }
   }
 
-  private waitCatchupDelay(
-    ms: number,
-    generation: number
-  ): Promise<"ok" | "cancelled"> {
+  private waitCatchupDelay(ms: number, generation: number): Promise<"ok" | "cancelled"> {
     if (this.liveGeneration !== generation) return Promise.resolve("cancelled");
     if (ms <= 0) {
       return Promise.resolve(this.liveGeneration === generation ? "ok" : "cancelled");

@@ -292,6 +292,9 @@ export function registerCollaborationHandlers(
   ipcMain.handle(collaborationInvokeChannels.getCollaborationCanvasCommandSession, () =>
     active.getCanvasCommandSession()
   );
+  ipcMain.handle(collaborationInvokeChannels.flushCollaborationCanvasReplicaMaterialization, () =>
+    active.flushCanvasReplicaMaterialization()
+  );
   ipcMain.handle(
     collaborationInvokeChannels.resolveCollaborationCanvasScope,
     (_event, input: unknown) => active.resolveCanvasScope(input)

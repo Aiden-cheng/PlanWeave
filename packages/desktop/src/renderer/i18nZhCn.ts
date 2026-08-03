@@ -118,7 +118,7 @@ export const zhCnCatalog = {
   openTaskInFileExplorer: "在文件资源管理器中打开任务",
   openTaskInFileManager: "在文件管理器中打开任务",
   duplicateTaskCanvas: "复制任务画布",
-  copyCanvasToNewProject: "复制画布为新项目",
+  copyCanvasToNewProject: "另存为本地计划",
   renameTaskCanvas: "重命名任务画布",
   renameTaskCanvasPrompt: "任务画布名称",
   removeProject: "移除",
@@ -1395,6 +1395,8 @@ export const zhCnCatalog = {
   canvasCommandReconnectFailed: "画布重连失败：{code}",
   canvasCommandNotConnected:
     "共享画布当前离线，无法编辑。请先启动或检查 Server，然后前往“成员”页面点击“刷新”重新连接。",
+  sharedCanvasOfflineReplica: "离线只读 · 显示本机最后同步副本",
+  sharedCanvasOfflineRevision: "离线只读 · 最后确认修订 {revision}",
   canvasCommandUnsupportedLocalOnly:
     "共享画布已连接时无法执行此编辑。请断开协作连接，或改用受支持的共享命令。",
   contentAuthorityTitle: "权威内容版本",

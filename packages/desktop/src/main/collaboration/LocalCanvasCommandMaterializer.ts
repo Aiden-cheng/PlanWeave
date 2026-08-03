@@ -98,6 +98,38 @@ export class LocalCanvasCommandMaterializer {
     await this.apply(binding, intent, outcome.contentDigest);
   }
 
+  async materializeConfirmed(
+    binding: LocalCanvasCommandBinding,
+    input: {
+      content: CompleteContentVersion;
+      contentDigest: string;
+    }
+  ): Promise<void> {
+    if (input.content.canonicalDigest !== input.contentDigest) {
+      throw materializationError("collaboration_canvas_confirmed_content_digest_mismatch");
+    }
+    const currentDigest = await this.readDigest(binding);
+    if (currentDigest === input.contentDigest) {
+      binding.expectedContentDigest = currentDigest;
+      return;
+    }
+    if (currentDigest !== binding.expectedContentDigest) {
+      throw materializationError("collaboration_canvas_local_digest_diverged");
+    }
+    await materializeAuthoritativeCanvasContent({
+      projectRoot: binding.projectRoot,
+      canvasId: binding.canvasId,
+      expectedPackageDir: binding.expectedPackageDir,
+      authorityProjectId: binding.authorityProjectId,
+      content: input.content
+    });
+    const materializedDigest = await this.readDigest(binding);
+    if (materializedDigest !== input.contentDigest) {
+      throw materializationError("collaboration_canvas_confirmed_materialized_digest_mismatch");
+    }
+    binding.expectedContentDigest = materializedDigest;
+  }
+
   /** Read only the local canonical digest before deciding whether a snapshot body is needed. */
   async currentDigest(binding: LocalCanvasCommandBinding): Promise<string> {
     return this.readDigest(binding);
@@ -122,7 +154,9 @@ export class LocalCanvasCommandMaterializer {
       if (!input.snapshotContent) {
         throw materializationError("collaboration_canvas_snapshot_content_required");
       }
-      if (input.snapshotContent.canonicalDigest !== input.response.snapshot.content.canonicalDigest) {
+      if (
+        input.snapshotContent.canonicalDigest !== input.response.snapshot.content.canonicalDigest
+      ) {
         throw materializationError("collaboration_canvas_snapshot_content_digest_mismatch");
       }
       await materializeAuthoritativeCanvasContent({
