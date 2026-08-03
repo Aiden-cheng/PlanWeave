@@ -257,7 +257,10 @@ describe("TaskNodeCard context menu", () => {
       </form>
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /Implement workspace/ }));
+    const blockButton = screen.getByTestId("task-node-block");
+    expect(blockButton.tagName).toBe("BUTTON");
+
+    fireEvent.click(blockButton);
 
     expect(onBlockWorkspaceOpen).toHaveBeenCalledWith("T-001#B-001");
     expect(onTaskWorkspaceOpen).not.toHaveBeenCalled();
