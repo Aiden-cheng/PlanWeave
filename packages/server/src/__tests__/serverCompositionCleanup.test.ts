@@ -1,6 +1,8 @@
-import { createServer } from "node:http";
+import { createServer, IncomingMessage } from "node:http";
 import { rm } from "node:fs/promises";
+import { Socket } from "node:net";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import type { PlanPackageManifest } from "@planweave-ai/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -14,8 +16,62 @@ const cleanupSpies = vi.hoisted(() => ({
   }),
   retentionStart: vi.fn(async () => {}),
   retentionClose: vi.fn(async () => {}),
-  runtimeRegistryClose: vi.fn()
+  runtimeRegistryClose: vi.fn(),
+  canvasPresenceClose: vi.fn(),
+  canvasLiveSyncClose: vi.fn(),
+  canvasCaptureFailure: { enabled: false }
 }));
+
+vi.mock("../presenceWebSocket.js", async () => {
+  const actual =
+    await vi.importActual<typeof import("../presenceWebSocket.js")>("../presenceWebSocket.js");
+  return {
+    ...actual,
+    attachCanvasPresenceWebSocketServer: (
+      options: Parameters<typeof actual.attachCanvasPresenceWebSocketServer>[0]
+    ) => {
+      const server = actual.attachCanvasPresenceWebSocketServer(options);
+      return {
+        ...server,
+        async close() {
+          cleanupSpies.canvasPresenceClose();
+          await server.close();
+        }
+      };
+    }
+  };
+});
+
+vi.mock("../canvas/index.js", async () => {
+  const actual = await vi.importActual<typeof import("../canvas/index.js")>("../canvas/index.js");
+  return {
+    ...actual,
+    attachCanvasLiveSyncWebSocketServer: (
+      options: Parameters<typeof actual.attachCanvasLiveSyncWebSocketServer>[0]
+    ) => {
+      const server = actual.attachCanvasLiveSyncWebSocketServer(options);
+      return {
+        ...server,
+        async close() {
+          cleanupSpies.canvasLiveSyncClose();
+          await server.close();
+        }
+      };
+    },
+    createDefaultCanvasRuntimePort: () => {
+      const runtime = actual.createDefaultCanvasRuntimePort();
+      return {
+        ...runtime,
+        async captureContent(input: Parameters<NonNullable<typeof runtime.captureContent>>[0]) {
+          if (cleanupSpies.canvasCaptureFailure.enabled) {
+            throw new Error("canvas_capture_startup_failed");
+          }
+          return runtime.captureContent?.(input);
+        }
+      };
+    }
+  };
+});
 
 vi.mock("../comments/index.js", async () => {
   const actual =
@@ -65,6 +121,17 @@ import { hashOperatorToken } from "../operatorAuth.js";
 import { parseServerConfig } from "../config.js";
 import { legacyWorkspaceIdForProject } from "./support/legacyWorkspaceId.js";
 import { createDistributedServerComposition } from "../serverComposition.js";
+import { createCanvasCollaborationComposition } from "../canvas/collaborationComposition.js";
+import { canvasLiveSyncRouteFromUrl } from "../canvas/canvasLiveSyncWebSocket.js";
+import { HumanIdentityRepository } from "../identity/repository.js";
+import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
+import { HumanObserverJournal } from "../humanObserverJournal.js";
+import { createTransportAdmissionPolicyForMode } from "../insecureTransport.js";
+import { applyMigrations } from "../migrations.js";
+import { ProjectAccessRepository } from "../projectAccessRepository.js";
+import { canvasPresenceRouteFromUrl } from "../presenceWebSocket.js";
+import { openServerDatabase } from "../sqlite.js";
+import { WebSocketUpgradeRouter } from "../webSocketUpgradeRouter.js";
 import { seedOperatorSessions } from "./support/operatorAuthFixture.js";
 
 const directories: string[] = [];
@@ -74,6 +141,10 @@ afterEach(async () => {
   cleanupSpies.retentionStart.mockClear();
   cleanupSpies.retentionClose.mockClear();
   cleanupSpies.runtimeRegistryClose.mockClear();
+  cleanupSpies.canvasPresenceClose.mockClear();
+  cleanupSpies.canvasLiveSyncClose.mockClear();
+  cleanupSpies.canvasCaptureFailure.enabled = false;
+  vi.useRealTimers();
   await Promise.all(
     directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
   );
@@ -89,6 +160,86 @@ function remoteManifest(): PlanPackageManifest {
 }
 
 describe("distributed server composition cleanup", () => {
+  it("releases partial Canvas transports when initial content capture fails", async () => {
+    const database = await openServerDatabase(":memory:", 5_000);
+    applyMigrations(database);
+    const httpServer = createServer();
+    const upgradeRouter = new WebSocketUpgradeRouter(httpServer);
+    const workspaceIdentity = new WorkspaceIdentityRepository(database);
+    const identity = new HumanIdentityRepository(database);
+    const projectAccess = new ProjectAccessRepository(database);
+    const observerJournal = new HumanObserverJournal(database, 100);
+    vi.useFakeTimers();
+    const initialTimerCount = vi.getTimerCount();
+    cleanupSpies.canvasCaptureFailure.enabled = true;
+
+    try {
+      await expect(
+        createCanvasCollaborationComposition({
+          database,
+          upgradeRouter,
+          identity,
+          workspaceIdentity,
+          projectAccess,
+          projectAuthority: {
+            hasProject: (projectId) => projectId === "project-capture-failure",
+            hasScope: (scope) =>
+              scope.workspaceId === "workspace-capture-failure" &&
+              scope.projectId === "project-capture-failure"
+          },
+          expansions: [
+            {
+              workspaceId: "workspace-capture-failure",
+              projectId: "project-capture-failure",
+              canvasId: "default",
+              projectRoot: "/srv/project-capture-failure",
+              packageDir: "/srv/project-capture-failure/default"
+            }
+          ],
+          observerJournal,
+          transportAdmission: createTransportAdmissionPolicyForMode("loopback_http"),
+          maxPayloadBytes: 64 * 1024,
+          shutdownTimeoutMs: 1_000,
+          clock: () => new Date("2026-08-04T00:00:00.000Z")
+        })
+      ).rejects.toThrow("canvas_capture_startup_failed");
+
+      expect(cleanupSpies.canvasLiveSyncClose).toHaveBeenCalledOnce();
+      expect(cleanupSpies.canvasPresenceClose).toHaveBeenCalledOnce();
+      expect(cleanupSpies.canvasLiveSyncClose.mock.invocationCallOrder[0]).toBeLessThan(
+        cleanupSpies.canvasPresenceClose.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
+      );
+      expect(vi.getTimerCount()).toBe(initialTimerCount);
+
+      const fallbackUpgrade = vi.fn();
+      upgradeRouter.register({
+        matches: () => true,
+        handle: fallbackUpgrade
+      });
+      const presenceUrl =
+        "/api/v1/projects/project-capture-failure/canvases/default/human/presence";
+      const liveSyncUrl = "/api/v1/projects/project-capture-failure/canvases/default/human/live";
+      expect(canvasPresenceRouteFromUrl(presenceUrl)).toEqual({
+        projectId: "project-capture-failure",
+        canvasId: "default"
+      });
+      expect(canvasLiveSyncRouteFromUrl(liveSyncUrl)).toEqual({
+        projectId: "project-capture-failure",
+        canvasId: "default"
+      });
+      for (const url of [presenceUrl, liveSyncUrl]) {
+        const request = new IncomingMessage(new Socket());
+        request.url = url;
+        httpServer.emit("upgrade", request, new PassThrough(), Buffer.alloc(0));
+      }
+      expect(fallbackUpgrade).toHaveBeenCalledTimes(2);
+    } finally {
+      upgradeRouter.close();
+      httpServer.close();
+      database.close();
+    }
+  });
+
   it("closes SQLite and unbinds runtimes when WebSocket cleanup fails", async () => {
     const workspace = await createTestWorkspace(remoteManifest());
     directories.push(workspace.home, workspace.root);

@@ -327,9 +327,27 @@ export class WorkspaceIdentityRepository {
       : undefined;
   }
 
-  authenticateWorkspaceDevice(deviceToken: string):
-    | { humanPrincipalId: string; displayName: string }
-    | undefined {
+  /**
+   * Distinguish a current device credential from an unauthenticated request even
+   * when its Workspace membership no longer grants collaboration authority.
+   */
+  hasCurrentWorkspaceDeviceCredential(deviceToken: string): boolean {
+    const parsedToken = humanDeviceTokenSchema.safeParse(deviceToken);
+    if (!parsedToken.success) return false;
+    return (
+      this.database
+        .prepare(
+          `SELECT 1 FROM workspace_device_sessions
+           WHERE credential_sha256=? AND revoked_at IS NULL
+             AND (expires_at IS NULL OR expires_at>?)`
+        )
+        .get(hashHumanToken(parsedToken.data), nowIso()) !== undefined
+    );
+  }
+
+  authenticateWorkspaceDevice(
+    deviceToken: string
+  ): { humanPrincipalId: string; displayName: string } | undefined {
     const authenticated = this.authenticateWorkspaceDeviceSession(deviceToken);
     return authenticated
       ? {
@@ -347,7 +365,8 @@ export class WorkspaceIdentityRepository {
     return this.activeWorkspaceIdsForHumanPrincipal(humanPrincipalId).map((workspaceId) => {
       const workspace = this.workspaceView(workspaceId);
       const membership = this.listMembershipViews(workspaceId).find(
-        (candidate) => candidate.humanPrincipalId === humanPrincipalId && candidate.revokedAt === null
+        (candidate) =>
+          candidate.humanPrincipalId === humanPrincipalId && candidate.revokedAt === null
       );
       if (!membership) throw new Error("workspace_membership_projection_missing");
       return workspacePickerItemSchema.parse({
@@ -460,7 +479,7 @@ export class WorkspaceIdentityRepository {
    * Configured registrations with duplicate project IDs deliberately do not
    * call this adapter, so legacy routes fail closed instead of choosing a
    * Workspace by accident.
-  */
+   */
   ensureLegacyProjectAdapter(projectId: string, workspaceId: string): string {
     const parsedProjectId = projectId;
     const parsedWorkspaceId = workspaceIdSchema.parse(workspaceId);
@@ -508,9 +527,7 @@ export class WorkspaceIdentityRepository {
     const parsedWorkspaceId = workspaceIdSchema.parse(workspaceId);
     const at = nowIso();
     const workspace = this.database
-      .prepare(
-        "SELECT workspace_id,archived_at FROM workspaces WHERE workspace_id=?"
-      )
+      .prepare("SELECT workspace_id,archived_at FROM workspaces WHERE workspace_id=?")
       .get(parsedWorkspaceId) as { workspace_id: string; archived_at: string | null } | undefined;
     if (workspace?.archived_at !== undefined && workspace.archived_at !== null) {
       throw new Error("workspace_projection_conflict");
@@ -575,13 +592,13 @@ export class WorkspaceIdentityRepository {
       : undefined;
   }
 
-  assertReadCutover(workspaceId: string): void {
+  hasCompletedReadCutover(workspaceId: string): boolean {
     const state = this.getReadState(workspaceId);
-    if (
-      !state ||
-      state.status !== "completed" ||
-      state.interruptionMarker !== "read_cutover_complete"
-    ) {
+    return state?.status === "completed" && state.interruptionMarker === "read_cutover_complete";
+  }
+
+  assertReadCutover(workspaceId: string): void {
+    if (!this.hasCompletedReadCutover(workspaceId)) {
       throw new Error("workspace_identity_read_cutover_incomplete");
     }
   }

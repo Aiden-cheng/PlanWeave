@@ -22,6 +22,13 @@ const hostCandidateRowSchema = z
   })
   .strict();
 
+const activeReservationCountRowSchema = z
+  .object({
+    host_id: opaqueIdentifierSchema,
+    active_reservations: z.number().int().nonnegative()
+  })
+  .strict();
+
 export const reservationStatusSchema = z.enum(["active", "released", "expired", "cancelled"]);
 export const reservationReleaseReasonSchema = z.enum([
   "completed",
@@ -137,6 +144,26 @@ export class HostReservationRepository {
       leaseId: leaseIdSchema.parse(`lease-${randomUUID()}`),
       leaseExpiresAt: new Date(now.getTime() + this.options.leaseDurationMs).toISOString()
     };
+  }
+
+  /** Snapshot active reservation counts for a specific Host set in one query. */
+  activeCountsForHosts(hostIds: readonly string[]): ReadonlyMap<string, number> {
+    const ids = [...new Set(hostIds.map((hostId) => opaqueIdentifierSchema.parse(hostId)))];
+    const counts = new Map(ids.map((hostId) => [hostId, 0]));
+    if (ids.length === 0) return counts;
+    const rows = this.database
+      .prepare(
+        `SELECT host_id,COUNT(*) AS active_reservations
+         FROM host_capacity_reservations
+         WHERE status='active' AND host_id IN (SELECT value FROM json_each(?))
+         GROUP BY host_id`
+      )
+      .all(JSON.stringify(ids));
+    for (const row of rows) {
+      const parsed = activeReservationCountRowSchema.parse(row);
+      counts.set(parsed.host_id, parsed.active_reservations);
+    }
+    return counts;
   }
 
   /**

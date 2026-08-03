@@ -9,6 +9,18 @@ export {
   handleHumanRemoteHttpRequest,
   type HumanRemoteHttpOptions
 } from "./humanRemoteHttp.js";
+export {
+  AgentEndpointCatalog,
+  AgentEndpointCatalogError,
+  type AgentEndpointCapacityPort,
+  type AgentEndpointCatalogOptions,
+  type AgentEndpointHostPort,
+  type ResolvedAgentEndpoint
+} from "./agentEndpointCatalog.js";
+export {
+  handleAgentEndpointHttpRequest,
+  type AgentEndpointHttpOptions
+} from "./agentEndpointHttp.js";
 
 export {
   ArtifactAuthorizationRepository,

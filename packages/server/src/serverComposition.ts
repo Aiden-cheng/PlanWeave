@@ -9,7 +9,6 @@ import {
 } from "@planweave-ai/runtime";
 import { canonicalRemoteRuntimePort } from "./canonicalRemoteRuntimePort.js";
 import { ArtifactStore } from "./artifacts.js";
-import { handleAgentHostArtifactRequest } from "./artifactHttp.js";
 import {
   ActivityRepository,
   ActivityProjectionService,
@@ -18,43 +17,32 @@ import {
   type ActivityRecord,
   CommentRepository,
   CommentService,
-  CommentServiceError,
-  handleCommentActivityHttpRequest
+  CommentServiceError
 } from "./comments/index.js";
 import {
   CommentAttachmentBlobStore,
   CommentAttachmentRepository,
-  CommentAttachmentService,
-  handleCommentAttachmentHttpRequest
+  CommentAttachmentService
 } from "./attachments/index.js";
 import { serverConfigSchema, type ServerConfig } from "./config.js";
 import { startRemoteBlockCoordinationServer } from "./distributedCoordination.js";
 import { HostEnrollmentService } from "./hostEnrollment.js";
-import { handleHostEnrollmentRequest } from "./hostEnrollmentHttp.js";
 import {
   readAclRegistryMigration,
   repairAclRegistryMigration,
   retryAclRegistryMigration
 } from "./migrations.js";
-import {
-  handleHumanHttpRequest,
-  HumanIdentityRepository,
-  HumanMembershipService,
-  handleWorkspaceIdentityHttpRequest
-} from "./identity/index.js";
-import { handleSetupCodeHttpRequest } from "./identity/setupCodeHttp.js";
+import { HumanIdentityRepository, HumanMembershipService } from "./identity/index.js";
 import { SetupCodeService } from "./identity/setupCodeService.js";
-import { handleWorkspaceConnectionHttpRequest } from "./identity/workspaceConnectionHttp.js";
 import { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
 import { provisionConfiguredOperatorSessions } from "./identity/operatorSessionProvisioning.js";
 import { OperatorTokenRegistry } from "./operatorAuth.js";
-import { handleOperatorHttpRequest } from "./operatorHttp.js";
-import { handleRegistryHttpRequest, type RegistryHttpService } from "./registryHttp.js";
+import type { RegistryHttpService } from "./registryHttp.js";
 import { serverPackageVersion } from "./packageInfo.js";
 import { ServerReadinessController, type ServerReadiness } from "./readiness.js";
 import { RemoteControlService } from "./remoteControlService.js";
 import { HumanRemoteControlService } from "./humanRemoteControlService.js";
-import { handleHumanRemoteHttpRequest } from "./humanRemoteHttp.js";
+import { AgentEndpointCatalog } from "./agentEndpointCatalog.js";
 import { observerEventsForActivity } from "./humanObserverActivity.js";
 import { HumanObserverJournal } from "./humanObserverJournal.js";
 import {
@@ -64,7 +52,6 @@ import {
 import { createTrustedRuntimeRegistry } from "./runtimeProjectRegistry.js";
 import { createManifestWorkItemPort } from "./work/workItemFacts.js";
 import { ProjectAccessRepository } from "./projectAccessRepository.js";
-import { handleAccessHttpRequest } from "./accessHttp.js";
 import {
   createTrustedProjectControlPort,
   type TrustedProjectControlPort
@@ -75,24 +62,12 @@ import {
   attachHumanObserverWebSocketServer,
   type HumanObserverWebSocketServer
 } from "./humanObserverWs.js";
+import type { CanvasPresenceWebSocketServer } from "./presenceWebSocket.js";
 import {
-  attachCanvasPresenceWebSocketServer,
-  type CanvasPresenceWebSocketServer
-} from "./presenceWebSocket.js";
-import {
-  attachCanvasCommandWebSocketServer,
-  attachCanvasLiveSyncWebSocketServer,
-  CanvasCommandRepository,
-  CanvasCommandService,
-  ContentVersionRepository,
-  SqliteAuthoritativeCanvasCommitStore,
-  ContentVersionService,
-  createDefaultCanvasRuntimePort,
-  handleCanvasCommandHttpRequest,
-  handleContentVersionHttpRequest,
   type CanvasCommandWebSocketServer,
   type CanvasLiveSyncWebSocketServer
 } from "./canvas/index.js";
+import { createCanvasCollaborationComposition } from "./canvas/collaborationComposition.js";
 import { WebSocketUpgradeRouter } from "./webSocketUpgradeRouter.js";
 import { createTransportAdmissionPolicy } from "./insecureTransport.js";
 import {
@@ -102,11 +77,16 @@ import {
   AuthorityRepository,
   AuthorityService,
   assertHumanScopeAuthorized,
-  handleWorkAssignmentHttpRequest,
   WorkAssignmentService
 } from "./work/index.js";
 import { SqliteExposureLeaseStore } from "./exposure/exposureLeaseRepository.js";
 import type { ExposureLeaseStorePort } from "./exposure/types.js";
+import { createDistributedHttpRequestListener } from "./distributedHttpRequestListener.js";
+import {
+  closeCompositionStorage,
+  containsCleanupError,
+  drainCompositionTransports
+} from "./distributedCompositionLifecycle.js";
 
 export type DistributedServerCompositionOptions = {
   httpServer: HttpServer;
@@ -125,99 +105,6 @@ export type DistributedServerComposition = {
   close(): Promise<void>;
 };
 
-async function waitForInflightRequests(
-  requests: ReadonlySet<Promise<void>>,
-  timeoutMs: number
-): Promise<void> {
-  if (requests.size === 0) return;
-  const settled = Promise.allSettled([...requests]).then(() => undefined);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timedOut = await Promise.race([
-    settled.then(() => false),
-    new Promise<true>((resolve) => {
-      timer = setTimeout(() => {
-        resolve(true);
-      }, timeoutMs);
-    })
-  ]);
-  if (timer) clearTimeout(timer);
-  if (timedOut) throw new Error("server_http_inflight_drain_timeout");
-}
-
-async function drainCompositionTransports(input: {
-  httpServer: HttpServer;
-  requestListener?: (request: IncomingMessage, response: ServerResponse) => void;
-  webSockets?: AgentHostWebSocketServer;
-  humanObserverWebSockets?: HumanObserverWebSocketServer;
-  canvasPresenceWebSockets?: CanvasPresenceWebSocketServer;
-  canvasCommandWebSockets?: CanvasCommandWebSocketServer;
-  canvasLiveSyncWebSockets?: CanvasLiveSyncWebSocketServer;
-  upgradeRouter?: WebSocketUpgradeRouter;
-  inflightRequests: ReadonlySet<Promise<void>>;
-  shutdownTimeoutMs: number;
-}): Promise<void> {
-  const errors: unknown[] = [];
-  if (input.requestListener) input.httpServer.off("request", input.requestListener);
-  try {
-    await input.webSockets?.close();
-  } catch (error) {
-    errors.push(error);
-  }
-  try {
-    await input.humanObserverWebSockets?.close();
-  } catch (error) {
-    errors.push(error);
-  }
-  try {
-    await input.canvasPresenceWebSockets?.close();
-  } catch (error) {
-    errors.push(error);
-  }
-  try {
-    await input.canvasCommandWebSockets?.close();
-  } catch (error) {
-    errors.push(error);
-  }
-  try {
-    await input.canvasLiveSyncWebSockets?.close();
-  } catch (error) {
-    errors.push(error);
-  }
-  input.upgradeRouter?.close();
-  try {
-    await waitForInflightRequests(input.inflightRequests, input.shutdownTimeoutMs);
-  } catch (error) {
-    errors.push(error);
-  }
-  if (errors.length > 0)
-    throw new AggregateError(errors, "distributed_server_transport_drain_failed");
-}
-
-function closeCompositionStorage(input: {
-  closeLifecycle?: () => void;
-  closeRuntimeRegistry(): void;
-}): void {
-  const errors: unknown[] = [];
-  try {
-    input.closeLifecycle?.();
-  } catch (error) {
-    errors.push(error);
-  }
-  try {
-    input.closeRuntimeRegistry();
-  } catch (error) {
-    errors.push(error);
-  }
-  if (errors.length > 0) throw new AggregateError(errors, "distributed_server_cleanup_failed");
-}
-
-function containsCleanupError(error: unknown, code: string): boolean {
-  if (error instanceof Error && error.message === code) return true;
-  return error instanceof AggregateError
-    ? error.errors.some((nested) => containsCleanupError(nested, code))
-    : false;
-}
-
 function appendHumanObserverActivity(
   journal: HumanObserverJournal,
   workspaceId: string | undefined,
@@ -231,42 +118,6 @@ function appendHumanObserverActivity(
       record.occurredAt
     );
   }
-}
-
-function respond(response: ServerResponse, status: number, code: string): void {
-  if (response.headersSent) {
-    response.destroy();
-    return;
-  }
-  const bytes = Buffer.from(JSON.stringify({ error: code }));
-  response.writeHead(status, {
-    "content-type": "application/json; charset=utf-8",
-    "content-length": bytes.byteLength,
-    "cache-control": "no-store"
-  });
-  response.end(bytes);
-}
-
-function requiresAdmission(request: IncomingMessage): boolean {
-  if (request.method !== "POST" && request.method !== "PATCH") return false;
-  const pathname = new URL(request.url ?? "/", "http://planweave.invalid").pathname;
-  return (
-    pathname === "/agent-hosts/enrollments/exchange" ||
-    pathname === "/api/v1/host-enrollments" ||
-    pathname === "/api/v1/setup-codes/redeem" ||
-    (pathname.startsWith("/api/v1/workspaces/") && pathname.includes("/setup-codes")) ||
-    pathname === "/api/v1/remote-operations" ||
-    /^\/api\/v1\/remote-operations\/[^/]+\/actions$/.test(pathname) ||
-    /^\/api\/v1\/remote-operations\/[^/]+\/interactions\/respond$/.test(pathname) ||
-    /^\/api\/v1\/projects\/[^/]+\/human\//.test(pathname) ||
-    /^\/api\/v1\/projects\/[^/]+\/assignments(\/|$)/.test(pathname) ||
-    /^\/api\/v1\/projects\/[^/]+\/comments(\/|$)/.test(pathname) ||
-    /^\/api\/v1\/projects\/[^/]+\/attachments(\/|$)/.test(pathname) ||
-    /^\/api\/v1\/projects\/[^/]+\/canvases\/[^/]+\/content\/(initial-publish|acknowledgements)$/.test(
-      pathname
-    ) ||
-    /^\/api\/v1\/registry\/projects\/[^/]+\/canvases\/[^/]+\/snapshots(\/|$)/.test(pathname)
-  );
 }
 
 function prepareAclRegistryMigrationForStartup(input: {
@@ -909,105 +760,27 @@ export async function createDistributedServerComposition(
       allowedClientOrigins: config.allowedClientOrigins ?? undefined,
       clock
     });
-    canvasPresenceWebSockets = attachCanvasPresenceWebSocketServer({
+    const canvasCollaboration = await createCanvasCollaborationComposition({
+      database: server.database,
       upgradeRouter,
-      repository: humanIdentity,
-      workspaceIdentity,
-      projectAuthority: runtimeRegistry,
-      maxPayloadBytes: config.limits.maxWebSocketPayloadBytes,
-      shutdownTimeoutMs: config.limits.shutdownTimeoutMs,
-      transportAdmission,
-      allowedClientOrigins: config.allowedClientOrigins ?? undefined,
-      clock
-    });
-    const canvasCommandRepository = new CanvasCommandRepository(server.database, { clock });
-    const attachedCanvasLiveSyncWebSockets = attachCanvasLiveSyncWebSocketServer({
-      upgradeRouter,
-      repository: canvasCommandRepository,
-      identityRepository: humanIdentity,
+      identity: humanIdentity,
       workspaceIdentity,
       projectAccess: initializedProjectAccess,
       projectAuthority: runtimeRegistry,
+      expansions: runtimeRegistry.expansions,
+      observerJournal: initializedHumanObserverJournal,
+      transportAdmission,
       maxPayloadBytes: config.limits.maxWebSocketPayloadBytes,
       shutdownTimeoutMs: config.limits.shutdownTimeoutMs,
-      transportAdmission,
       allowedClientOrigins: config.allowedClientOrigins ?? undefined,
       clock
     });
-    canvasLiveSyncWebSockets = attachedCanvasLiveSyncWebSockets;
-    const contentVersionRepository = new ContentVersionRepository(server.database, clock);
-    const canvasRuntime = createDefaultCanvasRuntimePort();
-    for (const expansion of runtimeRegistry.expansions) {
-      const scope = {
-        workspaceId: expansion.workspaceId,
-        projectId: expansion.projectId,
-        canvasId: expansion.canvasId
-      };
-      if (contentVersionRepository.head(scope)) continue;
-      const captured = await canvasRuntime.captureContent?.({
-        projectRoot: expansion.projectRoot,
-        canvasId: expansion.canvasId,
-        expectedPackageDir: expansion.packageDir,
-        authorityProjectId: expansion.projectId
-      });
-      if (!captured || !captured.ok) {
-        throw new Error(`initial_content_publish_failed:${expansion.canvasId}`);
-      }
-      contentVersionRepository.publishInitial({
-        scope,
-        content: captured.content,
-        createdBy: { kind: "system", id: "server-bootstrap" }
-      });
-    }
-    const authoritativeCanvasCommits = new SqliteAuthoritativeCanvasCommitStore(
-      server.database,
-      contentVersionRepository,
-      canvasCommandRepository,
-      (accepted) => {
-        initializedHumanObserverJournal.appendInCallerTransaction(
-          {
-            workspaceId: accepted.scope.workspaceId,
-            projectId: accepted.scope.projectId
-          },
-          {
-            kind: "canvas",
-            canvasId: accepted.scope.canvasId,
-            canvasRevision: accepted.revision,
-            canvasContentDigest: accepted.contentDigest
-          }
-        );
-      }
-    );
-    const contentVersionService = new ContentVersionService({
-      repository: contentVersionRepository,
-      access: initializedProjectAccess,
-      workspaceIdentity
-    });
-    const canvasCommandService = new CanvasCommandService({
-      repository: canvasCommandRepository,
-      access: initializedProjectAccess,
-      workspaceIdentity,
-      runtime: canvasRuntime,
-      contentVersions: contentVersionRepository,
-      authoritativeCommits: authoritativeCanvasCommits,
-      onAcceptedEntry: (entry) => attachedCanvasLiveSyncWebSockets.publishAcceptedEntry(entry),
-      onAcceptedEntryUnavailable: (input) =>
-        attachedCanvasLiveSyncWebSockets.invalidateScope(input),
-      clock
-    });
-    await canvasCommandService.recoverInterrupted();
-    canvasCommandWebSockets = attachCanvasCommandWebSocketServer({
-      upgradeRouter,
-      service: canvasCommandService,
-      repository: humanIdentity,
-      workspaceIdentity,
-      projectAuthority: runtimeRegistry,
-      maxPayloadBytes: config.limits.maxWebSocketPayloadBytes,
-      shutdownTimeoutMs: config.limits.shutdownTimeoutMs,
-      transportAdmission,
-      allowedClientOrigins: config.allowedClientOrigins ?? undefined,
-      clock
-    });
+    canvasPresenceWebSockets = canvasCollaboration.presenceWebSockets;
+    canvasLiveSyncWebSockets = canvasCollaboration.liveSyncWebSockets;
+    canvasCommandWebSockets = canvasCollaboration.commandWebSockets;
+    const contentVersionRepository = canvasCollaboration.contentVersions;
+    const contentVersionService = canvasCollaboration.contentVersionService;
+    const canvasCommandService = canvasCollaboration.commandService;
     const attachedWebSockets = webSockets;
     const control = new RemoteControlService({
       authorization,
@@ -1038,187 +811,46 @@ export async function createDistributedServerComposition(
         });
       }
     });
-    requestListener = (request: IncomingMessage, response: ServerResponse) => {
-      const operation = (async () => {
-        if (requiresAdmission(request) && readiness.readiness().status !== "ready") {
-          request.resume();
-          respond(response, 503, "server_not_accepting_mutations");
-          return;
-        }
-        if (
-          await handleWorkspaceConnectionHttpRequest(request, response, {
-            workspaceIdentity,
-            transportAdmission
-          })
-        ) {
-          return;
-        }
-        if (
-          await handleAccessHttpRequest(request, response, {
-            access: initializedProjectAccess,
-            repository: humanIdentity,
-            workspaceIdentity,
-            projectAuthority: runtimeRegistry,
-            transportAdmission
-          })
-        ) {
-          return;
-        }
-        if (
-          await handleRegistryHttpRequest(request, response, {
-            repository: humanIdentity,
-            workspaceIdentity,
-            service: registryService,
-            readiness: () => readiness.readiness(),
-            transportAdmission
-          })
-        ) {
-          return;
-        }
-        if (
-          await handleHumanRemoteHttpRequest(request, response, {
-            service: humanRemoteControl,
-            repository: humanIdentity,
-            workspaceIdentity,
-            projectAuthority: runtimeRegistry,
-            readiness: () => readiness.readiness(),
-            transportAdmission
-          })
-        ) {
-          return;
-        }
-        if (
-          await handleWorkAssignmentHttpRequest(request, response, {
-            resolveService: (workspaceId, projectId) =>
-              assignmentServices.get(assignmentServiceKey(workspaceId, projectId)),
-            acquireAuthorityService,
-            repository: humanIdentity,
-            workspaceIdentity,
-            access: initializedProjectAccess,
-            projectAuthority: runtimeRegistry,
-            transportAdmission,
-            clock
-          })
-        ) {
-          return;
-        }
-        if (
-          await handleContentVersionHttpRequest(request, response, {
-            service: contentVersionService,
-            contentVersions: contentVersionRepository,
-            repository: humanIdentity,
-            workspaceIdentity,
-            projectAuthority: runtimeRegistry,
-            transportAdmission
-          })
-        ) {
-          return;
-        }
-        if (
-          await handleCanvasCommandHttpRequest(request, response, {
-            service: canvasCommandService,
-            repository: humanIdentity,
-            workspaceIdentity,
-            projectAuthority: runtimeRegistry,
-            transportAdmission,
-            clock
-          })
-        ) {
-          return;
-        }
-        if (
-          await handleCommentActivityHttpRequest(request, response, {
-            resolveService: (workspaceId, projectId) =>
-              commentServices.get(collaborationScopeKey(workspaceId, projectId)),
-            repository: humanIdentity,
-            workspaceIdentity,
-            projectAuthority: runtimeRegistry,
-            transportAdmission,
-            clock
-          })
-        ) {
-          return;
-        }
-        if (
-          await handleHostEnrollmentRequest(request, response, {
-            service: enrollments,
-            transportAdmission
-          })
-        ) {
-          return;
-        }
-        if (
-          await handleSetupCodeHttpRequest(request, response, {
-            service: setupCodes,
-            authorization,
-            transportAdmission
-          })
-        ) {
-          return;
-        }
-        if (
-          await handleAgentHostArtifactRequest(request, response, {
-            hosts: coordination.hosts,
-            dispatches: coordination.dispatches,
-            authorization: coordination.artifactAuthorization,
-            artifacts: initializedArtifactStore,
-            transportAdmission
-          })
-        ) {
-          return;
-        }
-        if (
-          await handleHumanHttpRequest(request, response, {
-            service: humanMembership,
-            repository: humanIdentity,
-            projectAuthority: runtimeRegistry,
-            transportAdmission,
-            clock
-          })
-        ) {
-          return;
-        }
-        if (
-          await handleCommentAttachmentHttpRequest(request, response, {
-            service: commentAttachments,
-            repository: humanIdentity,
-            workspaceIdentity,
-            projectAuthority: runtimeRegistry,
-            transportAdmission,
-            clock
-          })
-        ) {
-          return;
-        }
-        if (
-          await handleWorkspaceIdentityHttpRequest(request, response, {
-            authorization,
-            repository: workspaceIdentity,
-            transportAdmission
-          })
-        ) {
-          return;
-        }
-        if (
-          await handleOperatorHttpRequest(request, response, {
-            authorization,
-            service: control,
-            readiness: () => readiness.readiness(),
-            serverVersion: serverPackageVersion,
-            limits: {
-              maxArtifactBytes: config.limits.maxArtifactBytes,
-              maxWebSocketPayloadBytes: config.limits.maxWebSocketPayloadBytes
-            },
-            transportAdmission
-          })
-        ) {
-          return;
-        }
-        respond(response, 404, "route_not_found");
-      })().catch(() => respond(response, 500, "request_failed"));
-      inflightRequests.add(operation);
-      void operation.finally(() => inflightRequests.delete(operation));
-    };
+    const agentEndpointCatalog = new AgentEndpointCatalog({
+      hosts: coordination.hosts,
+      capacities: coordination.reservations,
+      hostOfflineAfterMs: config.limits.hostOfflineAfterMs,
+      clock
+    });
+    requestListener = createDistributedHttpRequestListener({
+      readiness,
+      inflightRequests,
+      workspaceIdentity,
+      projectAccess: initializedProjectAccess,
+      humanIdentity,
+      projectAuthority: runtimeRegistry,
+      transportAdmission,
+      registryService,
+      agentEndpointCatalog,
+      humanRemoteControl,
+      resolveAssignmentService: (workspaceId, projectId) =>
+        assignmentServices.get(assignmentServiceKey(workspaceId, projectId)),
+      acquireAuthorityService,
+      contentVersionService,
+      contentVersions: contentVersionRepository,
+      canvasCommandService,
+      resolveCommentService: (workspaceId, projectId) =>
+        commentServices.get(collaborationScopeKey(workspaceId, projectId)),
+      enrollments,
+      setupCodes,
+      authorization,
+      hosts: coordination.hosts,
+      dispatches: coordination.dispatches,
+      artifactAuthorization: coordination.artifactAuthorization,
+      artifacts: initializedArtifactStore,
+      humanMembership,
+      commentAttachments,
+      operatorControl: control,
+      serverVersion: serverPackageVersion,
+      maxArtifactBytes: config.limits.maxArtifactBytes,
+      maxWebSocketPayloadBytes: config.limits.maxWebSocketPayloadBytes,
+      clock
+    });
     options.httpServer.on("request", requestListener);
     const attachedRequestListener = requestListener;
     if (!options.readiness) readiness.transition("ready", schemaVersion);

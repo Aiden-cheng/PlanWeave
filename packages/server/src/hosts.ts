@@ -249,6 +249,29 @@ export class AgentHostRepository {
     ).map(toHost);
   }
 
+  /**
+   * Read authoritative Host rows for Hosts bound to exactly one workspace.
+   * The workspace projection is used only as an identity binding; liveness and
+   * readiness always come from the canonical agent_hosts row.
+   */
+  listExclusivelyBoundToWorkspace(workspaceId: string): AgentHost[] {
+    if (!this.workspaceIdentity.hasCompletedReadCutover(workspaceId)) return [];
+    return (
+      this.database
+        .prepare(
+          `SELECT h.* FROM agent_hosts h
+           JOIN (
+             SELECT host_id,MIN(workspace_id) AS workspace_id FROM workspace_agent_hosts
+             GROUP BY host_id
+             HAVING COUNT(*)=1
+           ) binding ON binding.host_id=h.id
+           WHERE binding.workspace_id=?
+           ORDER BY h.display_name,h.id`
+        )
+        .all(workspaceId) as HostRow[]
+    ).map(toHost);
+  }
+
   authenticate(hostId: string, token: string, workspaceId?: string): AgentHost | undefined {
     const row = this.database.prepare("SELECT * FROM agent_hosts WHERE id=?").get(hostId) as
       | HostRow

@@ -1,0 +1,177 @@
+import type { HumanProjectAuthority } from "../identity/index.js";
+import type { HumanIdentityRepository } from "../identity/repository.js";
+import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
+import type { TransportAdmissionPolicy } from "../insecureTransport.js";
+import type { HumanObserverJournal } from "../humanObserverJournal.js";
+import type { ProjectAccessRepository } from "../projectAccessRepository.js";
+import type { SqliteDatabase } from "../sqlite.js";
+import type { WebSocketUpgradeRouter } from "../webSocketUpgradeRouter.js";
+import {
+  attachCanvasCommandWebSocketServer,
+  attachCanvasLiveSyncWebSocketServer,
+  CanvasCommandRepository,
+  CanvasCommandService,
+  ContentVersionRepository,
+  ContentVersionService,
+  createDefaultCanvasRuntimePort,
+  SqliteAuthoritativeCanvasCommitStore
+} from "./index.js";
+import { attachCanvasPresenceWebSocketServer } from "../presenceWebSocket.js";
+
+export type CanvasCollaborationExpansion = {
+  workspaceId: string;
+  projectId: string;
+  canvasId: string;
+  projectRoot: string;
+  packageDir: string;
+};
+
+export type CanvasCollaborationCompositionOptions = {
+  database: SqliteDatabase;
+  upgradeRouter: WebSocketUpgradeRouter;
+  identity: HumanIdentityRepository;
+  workspaceIdentity: WorkspaceIdentityRepository;
+  projectAccess: ProjectAccessRepository;
+  projectAuthority: HumanProjectAuthority;
+  expansions: readonly CanvasCollaborationExpansion[];
+  observerJournal: HumanObserverJournal;
+  transportAdmission: TransportAdmissionPolicy;
+  maxPayloadBytes: number;
+  shutdownTimeoutMs: number;
+  allowedClientOrigins?: readonly string[];
+  clock: () => Date;
+};
+
+/** Compose the complete Canvas collaboration runtime and its transport endpoints. */
+export async function createCanvasCollaborationComposition(
+  options: CanvasCollaborationCompositionOptions
+) {
+  const presenceWebSockets = attachCanvasPresenceWebSocketServer({
+    upgradeRouter: options.upgradeRouter,
+    repository: options.identity,
+    workspaceIdentity: options.workspaceIdentity,
+    projectAuthority: options.projectAuthority,
+    maxPayloadBytes: options.maxPayloadBytes,
+    shutdownTimeoutMs: options.shutdownTimeoutMs,
+    transportAdmission: options.transportAdmission,
+    allowedClientOrigins: options.allowedClientOrigins,
+    clock: options.clock
+  });
+  let liveSyncWebSockets: ReturnType<typeof attachCanvasLiveSyncWebSocketServer> | undefined;
+  try {
+    const commandRepository = new CanvasCommandRepository(options.database, {
+      clock: options.clock
+    });
+    const attachedLiveSyncWebSockets = attachCanvasLiveSyncWebSocketServer({
+      upgradeRouter: options.upgradeRouter,
+      repository: commandRepository,
+      identityRepository: options.identity,
+      workspaceIdentity: options.workspaceIdentity,
+      projectAccess: options.projectAccess,
+      projectAuthority: options.projectAuthority,
+      maxPayloadBytes: options.maxPayloadBytes,
+      shutdownTimeoutMs: options.shutdownTimeoutMs,
+      transportAdmission: options.transportAdmission,
+      allowedClientOrigins: options.allowedClientOrigins,
+      clock: options.clock
+    });
+    liveSyncWebSockets = attachedLiveSyncWebSockets;
+    const contentVersions = new ContentVersionRepository(options.database, options.clock);
+    const runtime = createDefaultCanvasRuntimePort();
+    for (const expansion of options.expansions) {
+      const scope = {
+        workspaceId: expansion.workspaceId,
+        projectId: expansion.projectId,
+        canvasId: expansion.canvasId
+      };
+      if (contentVersions.head(scope)) continue;
+      const captured = await runtime.captureContent?.({
+        projectRoot: expansion.projectRoot,
+        canvasId: expansion.canvasId,
+        expectedPackageDir: expansion.packageDir,
+        authorityProjectId: expansion.projectId
+      });
+      if (!captured || !captured.ok) {
+        throw new Error(`initial_content_publish_failed:${expansion.canvasId}`);
+      }
+      contentVersions.publishInitial({
+        scope,
+        content: captured.content,
+        createdBy: { kind: "system", id: "server-bootstrap" }
+      });
+    }
+    const authoritativeCommits = new SqliteAuthoritativeCanvasCommitStore(
+      options.database,
+      contentVersions,
+      commandRepository,
+      (accepted) => {
+        options.observerJournal.appendInCallerTransaction(
+          {
+            workspaceId: accepted.scope.workspaceId,
+            projectId: accepted.scope.projectId
+          },
+          {
+            kind: "canvas",
+            canvasId: accepted.scope.canvasId,
+            canvasRevision: accepted.revision,
+            canvasContentDigest: accepted.contentDigest
+          }
+        );
+      }
+    );
+    const contentVersionService = new ContentVersionService({
+      repository: contentVersions,
+      access: options.projectAccess,
+      workspaceIdentity: options.workspaceIdentity
+    });
+    const commandService = new CanvasCommandService({
+      repository: commandRepository,
+      access: options.projectAccess,
+      workspaceIdentity: options.workspaceIdentity,
+      runtime,
+      contentVersions,
+      authoritativeCommits,
+      onAcceptedEntry: (entry) => attachedLiveSyncWebSockets.publishAcceptedEntry(entry),
+      onAcceptedEntryUnavailable: (input) => attachedLiveSyncWebSockets.invalidateScope(input),
+      clock: options.clock
+    });
+    await commandService.recoverInterrupted();
+    const commandWebSockets = attachCanvasCommandWebSocketServer({
+      upgradeRouter: options.upgradeRouter,
+      service: commandService,
+      repository: options.identity,
+      workspaceIdentity: options.workspaceIdentity,
+      projectAuthority: options.projectAuthority,
+      maxPayloadBytes: options.maxPayloadBytes,
+      shutdownTimeoutMs: options.shutdownTimeoutMs,
+      transportAdmission: options.transportAdmission,
+      allowedClientOrigins: options.allowedClientOrigins,
+      clock: options.clock
+    });
+    return {
+      presenceWebSockets,
+      liveSyncWebSockets: attachedLiveSyncWebSockets,
+      commandWebSockets,
+      contentVersions,
+      contentVersionService,
+      commandService
+    };
+  } catch (error) {
+    const cleanupErrors: unknown[] = [];
+    for (const transport of [liveSyncWebSockets, presenceWebSockets]) {
+      try {
+        await transport?.close();
+      } catch (cleanupError) {
+        cleanupErrors.push(cleanupError);
+      }
+    }
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(
+        [error, ...cleanupErrors],
+        "canvas_collaboration_startup_and_cleanup_failed",
+        { cause: error }
+      );
+    }
+    throw error;
+  }
+}

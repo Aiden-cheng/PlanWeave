@@ -137,6 +137,10 @@
       "types": "./dist/remoteRun.d.ts",
       "import": "./dist/remoteRun.js"
     },
+    "./agent-endpoint": {
+      "types": "./dist/agentEndpoint.d.ts",
+      "import": "./dist/agentEndpoint.js"
+    },
     "./fixtures/collaboration": {
       "types": "./dist/fixtures/collaboration.d.ts",
       "import": "./dist/fixtures/collaboration.js"

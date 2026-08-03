@@ -1,0 +1,217 @@
+import {
+  agentEndpointCapabilitiesSchema,
+  assertRemoteAgentEndpointRedacted,
+  remoteAgentEndpointListSchema,
+  remoteAgentEndpointSchema,
+  type AgentEndpointErrorCode,
+  type AgentEndpointUnavailableReason,
+  type RemoteAgentEndpoint,
+  type RemoteAgentEndpointList
+} from "@planweave-ai/collaboration-protocol/agent-endpoint";
+import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
+import { createHash } from "node:crypto";
+import { workspaceIdSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
+import type { AgentHost } from "./hosts.js";
+
+export interface AgentEndpointHostPort {
+  listExclusivelyBoundToWorkspace(workspaceId: string): AgentHost[];
+}
+
+export interface AgentEndpointCapacityPort {
+  activeCountsForHosts(hostIds: readonly string[]): ReadonlyMap<string, number>;
+}
+
+export type ResolvedAgentEndpoint = {
+  hostId: string;
+  profileId: string;
+  agentId: string;
+  capabilities: string[];
+};
+
+type CatalogErrorCode = Extract<
+  AgentEndpointErrorCode,
+  "agent_endpoint_unknown" | "agent_endpoint_unavailable" | "agent_endpoint_incompatible"
+>;
+
+export class AgentEndpointCatalogError extends Error {
+  constructor(readonly code: CatalogErrorCode) {
+    super(code);
+    this.name = "AgentEndpointCatalogError";
+  }
+}
+
+export type AgentEndpointCatalogOptions = {
+  hosts: AgentEndpointHostPort;
+  capacities: AgentEndpointCapacityPort;
+  hostOfflineAfterMs: number;
+  clock?: () => Date;
+};
+
+type InternalCandidate = {
+  endpoint: RemoteAgentEndpoint;
+  host: AgentHost;
+  profile: NonNullable<AgentHost["readinessObservation"]>["acpProfiles"][number];
+};
+
+function endpointIdFor(input: {
+  workspaceId: string;
+  hostId: string;
+  profileId: string;
+  agentId: string;
+}): string {
+  const digest = createHash("sha256")
+    .update(
+      JSON.stringify([input.workspaceId, input.hostId, input.profileId, input.agentId]),
+      "utf8"
+    )
+    .digest("base64url");
+  return opaqueIdentifierSchema.parse(`aep_${digest}`);
+}
+
+function unavailableReason(
+  host: AgentHost,
+  workspaceId: string,
+  profile: InternalCandidate["profile"],
+  activeReservations: number,
+  now: Date,
+  hostOfflineAfterMs: number,
+  duplicateProfile: boolean
+): AgentEndpointUnavailableReason | undefined {
+  if (host.revokedAt !== undefined) return "host_revoked";
+  const credentialExpiry =
+    host.credentialExpiresAt === undefined ? undefined : Date.parse(host.credentialExpiresAt);
+  if (
+    credentialExpiry !== undefined &&
+    (!Number.isFinite(credentialExpiry) || credentialExpiry <= now.getTime())
+  ) {
+    return "host_credential_expired";
+  }
+  const lastSeenAt = host.lastSeenAt === undefined ? undefined : Date.parse(host.lastSeenAt);
+  if (
+    lastSeenAt === undefined ||
+    !Number.isFinite(lastSeenAt) ||
+    lastSeenAt < now.getTime() - hostOfflineAfterMs
+  ) {
+    return "host_offline";
+  }
+  const mappings =
+    host.readinessObservation?.workspaceMappings.filter(
+      (mapping) => mapping.workspaceId === workspaceId
+    ) ?? [];
+  if (mappings.length === 0 || mappings[0]?.status === "missing") {
+    return "workspace_mapping_missing";
+  }
+  if (mappings.length !== 1 || mappings[0]?.status === "invalid") {
+    return "workspace_mapping_invalid";
+  }
+  if (duplicateProfile || profile.status === "invalid") return "profile_invalid";
+  if (profile.status === "missing") return "profile_missing";
+  if (!profile.capabilities.every((capability) => host.capabilities.includes(capability))) {
+    return "profile_invalid";
+  }
+  if (activeReservations >= host.capacity) return "at_capacity";
+  return undefined;
+}
+
+export class AgentEndpointCatalog {
+  private readonly clock: () => Date;
+
+  constructor(private readonly options: AgentEndpointCatalogOptions) {
+    if (!Number.isInteger(options.hostOfflineAfterMs) || options.hostOfflineAfterMs < 1_000) {
+      throw new Error("host_offline_after_invalid");
+    }
+    this.clock = options.clock ?? (() => new Date());
+  }
+
+  listVisible(workspaceIdInput: string): RemoteAgentEndpointList {
+    const workspaceId = workspaceIdSchema.parse(workspaceIdInput);
+    const items = this.currentCandidates(workspaceId).map((candidate) => candidate.endpoint);
+    return remoteAgentEndpointListSchema.parse({
+      schemaVersion: "agent-endpoint-list/v1",
+      items
+    });
+  }
+
+  resolveForRun(
+    endpointIdInput: string,
+    workspaceIdInput: string,
+    requiredCapabilitiesInput: readonly string[]
+  ): ResolvedAgentEndpoint {
+    const endpointId = opaqueIdentifierSchema.parse(endpointIdInput);
+    const workspaceId = workspaceIdSchema.parse(workspaceIdInput);
+    const requiredCapabilities = agentEndpointCapabilitiesSchema.parse(requiredCapabilitiesInput);
+    const candidate = this.currentCandidates(workspaceId).find(
+      (current) => current.endpoint.endpointId === endpointId
+    );
+    if (!candidate) throw new AgentEndpointCatalogError("agent_endpoint_unknown");
+    if (candidate.endpoint.status !== "available") {
+      throw new AgentEndpointCatalogError("agent_endpoint_unavailable");
+    }
+    if (
+      !requiredCapabilities.every(
+        (capability) =>
+          candidate.host.capabilities.includes(capability) &&
+          candidate.profile.capabilities.includes(capability)
+      )
+    ) {
+      throw new AgentEndpointCatalogError("agent_endpoint_incompatible");
+    }
+    return {
+      hostId: candidate.host.id,
+      profileId: candidate.profile.profileId,
+      agentId: candidate.profile.agentId,
+      capabilities: [...candidate.profile.capabilities]
+    };
+  }
+
+  private currentCandidates(workspaceId: string): InternalCandidate[] {
+    const now = this.clock();
+    const hosts = this.options.hosts.listExclusivelyBoundToWorkspace(workspaceId);
+    const activeCounts = this.options.capacities.activeCountsForHosts(hosts.map((host) => host.id));
+    const candidates: InternalCandidate[] = [];
+    for (const host of hosts) {
+      const profiles = host.readinessObservation?.acpProfiles ?? [];
+      const identityCounts = new Map<string, number>();
+      for (const profile of profiles) {
+        const identity = `${profile.profileId}\u0000${profile.agentId}`;
+        identityCounts.set(identity, (identityCounts.get(identity) ?? 0) + 1);
+      }
+      const emitted = new Set<string>();
+      for (const profile of profiles) {
+        const identity = `${profile.profileId}\u0000${profile.agentId}`;
+        if (emitted.has(identity)) continue;
+        emitted.add(identity);
+        const reason = unavailableReason(
+          host,
+          workspaceId,
+          profile,
+          activeCounts.get(host.id) ?? 0,
+          now,
+          this.options.hostOfflineAfterMs,
+          identityCounts.get(identity) !== 1
+        );
+        const endpoint = remoteAgentEndpointSchema.parse({
+          schemaVersion: "agent-endpoint/v1",
+          endpointId: endpointIdFor({
+            workspaceId,
+            hostId: host.id,
+            profileId: profile.profileId,
+            agentId: profile.agentId
+          }),
+          agentId: profile.agentId,
+          profileId: profile.profileId,
+          displayName: profile.displayName,
+          hostDisplayName: host.displayName,
+          status: reason === undefined ? "available" : "unavailable",
+          ...(reason === undefined ? {} : { unavailableReason: reason }),
+          capabilities: profile.capabilities
+        });
+        assertRemoteAgentEndpointRedacted(endpoint);
+        candidates.push({ endpoint, host, profile });
+      }
+    }
+    return candidates.sort((left, right) =>
+      left.endpoint.endpointId.localeCompare(right.endpoint.endpointId)
+    );
+  }
+}
