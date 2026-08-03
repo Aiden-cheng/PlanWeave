@@ -124,17 +124,6 @@ function initialRunForNavigation(
     const item = block?.runs.find((candidate) => candidate.active) ?? block?.runs.at(-1);
     return block && item ? { block, item } : null;
   }
-  if (!workspace.selectedRecordId) {
-    return null;
-  }
-  for (const block of workspace.blocks) {
-    const item = block.runs.find(
-      (candidate) => candidate.run.record.recordId === workspace.selectedRecordId
-    );
-    if (item) {
-      return { block, item };
-    }
-  }
   return null;
 }
 

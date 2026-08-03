@@ -27,7 +27,27 @@ import {
 afterEach(cleanupRendererTestEnvironment);
 
 describe("Task Workspace selected run controller", () => {
-  it("finishes loading after a direct task target selects its initial run", async () => {
+  it("opens a direct task target on Task Overview even when the workspace suggests a run", async () => {
+    const { api } = controllerApi({ readModel: () => null });
+    const taskNavigation = taskWorkspaceNavigationIdentity(
+      {
+        projectRoot: "/projects/demo",
+        canvasId: "canvas-main",
+        taskId: "T-001"
+      },
+      taskWorkspaceSource
+    );
+    const { result } = renderHook(() => useControllerHarness(api, taskNavigation));
+
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    expect(result.current.selectedRun).toBeNull();
+    expect(result.current.selectedRecordId).toBeNull();
+    expect(result.current.navigation?.recordId).toBeUndefined();
+    expect(api.getTaskWorkspaceRunDetail).not.toHaveBeenCalled();
+  });
+
+  it("finishes loading after a direct block target selects its initial run", async () => {
     const { api } = controllerApi({ readModel: () => null });
     const directNavigation = taskWorkspaceNavigationIdentity(
       {
