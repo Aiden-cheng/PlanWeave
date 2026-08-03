@@ -137,8 +137,12 @@ describe("distributed package artifact contracts", () => {
 
     // Root remains private monorepo shell.
     expect(root.private).toBe(true);
-    expect(root.scripts?.["pack:npm"]).toContain("@planweave-ai/agent-host-protocol");
-    expect(root.scripts?.["publish:npm"]).toContain("@planweave-ai/agent-host-protocol");
+    expect(root.scripts?.["pack:npm"]).toMatch(
+      /@planweave-ai\/agent-host-protocol.*@planweave-ai\/collaboration-protocol.*@planweave-ai\/runtime/
+    );
+    expect(root.scripts?.["publish:npm"]).toMatch(
+      /@planweave-ai\/agent-host-protocol.*@planweave-ai\/collaboration-protocol.*@planweave-ai\/runtime/
+    );
     expect(root.scripts?.["publish:distributed"]).toContain("@planweave-ai/server");
     expect(root.scripts?.["publish:distributed"]).toContain("@planweave-ai/agent-host");
   });
