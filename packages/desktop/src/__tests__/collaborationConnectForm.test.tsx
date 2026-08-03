@@ -769,6 +769,7 @@ describe("CollaborationConnectForm connection diagnostics", () => {
         t={createTranslator("en")}
         fixedMode="connect"
         copyText={copyText}
+        diagnosticsEnabled
       />
     );
 
