@@ -35,6 +35,15 @@ interface FixtureFile {
   content: string;
 }
 
+interface IntegrationShardsFixture {
+  cli?: string[] | string;
+  core?: string[] | string;
+  distributed?: string[] | string;
+  unexpected?: string[];
+}
+
+const exampleSuiteRoot = "packages/example/src/__tests__";
+
 async function createRepositoryFixture(files: FixtureFile[]): Promise<string> {
   const fixtureRoot = await mkdtemp(join(tmpdir(), "planweave-test-suite-classifier-"));
   fixtureRoots.push(fixtureRoot);
@@ -83,11 +92,17 @@ function manifest(
   unit: string[],
   integration: string[] = [],
   platform: string[] = [],
-  performance: string[] = []
+  performance: string[] = [],
+  integrationShards: IntegrationShardsFixture = {
+    cli: integration.length > 0 ? [exampleSuiteRoot] : [],
+    core: [],
+    distributed: []
+  }
 ): string {
   return JSON.stringify({
+    integrationShards,
     groups: [
-      { root: "packages/example/src/__tests__", unit, integration, platform, performance },
+      { root: exampleSuiteRoot, unit, integration, platform, performance },
       ...suiteRoots.map((root) => ({
         root,
         unit: [],
@@ -192,7 +207,7 @@ it("rejects direct real filesystem imports and temporary path operations", async
   );
 });
 
-it("accepts filesystem and child-process tests in the integration suite", async () => {
+it("accepts external API tests when their root belongs to exactly one integration shard", async () => {
   const fixtureRoot = await createRepositoryFixture([
     {
       path: "vitest.suites.json",
@@ -213,6 +228,100 @@ it("accepts filesystem and child-process tests in the integration suite", async 
   expect(result.stdout).toContain(
     `Test suite classification valid: 0 unit, 1 integration, ${requiredPlatformTests.length} platform, ${requiredPerformanceTests.length} performance.`
   );
+});
+
+it.each([
+  {
+    label: "a non-empty integration root omitted from every shard",
+    unit: [],
+    integration: ["example.test.ts"],
+    integrationShards: { cli: [], core: [], distributed: [] },
+    expected:
+      'Integration group root "packages/example/src/__tests__" must be assigned to exactly one integration shard; found 0.'
+  },
+  {
+    label: "an integration root repeated across shards",
+    unit: [],
+    integration: ["example.test.ts"],
+    integrationShards: {
+      cli: [exampleSuiteRoot],
+      core: [exampleSuiteRoot],
+      distributed: []
+    },
+    expected:
+      'Integration group root "packages/example/src/__tests__" must be assigned to exactly one integration shard; found 2 (cli, core).'
+  },
+  {
+    label: "an unknown root assigned to a shard",
+    unit: ["example.test.ts"],
+    integration: [],
+    integrationShards: {
+      cli: ["packages/unknown/src/__tests__"],
+      core: [],
+      distributed: []
+    },
+    expected:
+      'Integration shard "cli" references unknown group root "packages/unknown/src/__tests__".'
+  },
+  {
+    label: "a group without integration tests assigned to a shard",
+    unit: ["example.test.ts"],
+    integration: [],
+    integrationShards: { cli: [exampleSuiteRoot], core: [], distributed: [] },
+    expected:
+      'Group root "packages/example/src/__tests__" has no integration tests and must not be assigned to an integration shard.'
+  }
+])("rejects $label", async ({ unit, integration, integrationShards, expected }) => {
+  const fixtureRoot = await createRepositoryFixture([
+    {
+      path: "vitest.suites.json",
+      content: manifest(unit, integration, [], [], integrationShards)
+    },
+    {
+      path: "packages/example/src/__tests__/example.test.ts",
+      content: "export const example = true;\n"
+    }
+  ]);
+
+  const result = runClassifier(fixtureRoot);
+
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain(expected);
+});
+
+it.each([
+  {
+    label: "a required shard name is missing",
+    integrationShards: { cli: [], core: [] },
+    expected: "integrationShards.distributed must be an array of group roots."
+  },
+  {
+    label: "an unexpected shard name is present",
+    integrationShards: { cli: [], core: [], distributed: [], unexpected: [] },
+    expected:
+      'integrationShards contains unknown shard "unexpected"; expected only cli, core, and distributed.'
+  },
+  {
+    label: "a known shard name does not contain an array",
+    integrationShards: { cli: [], core: "not-an-array", distributed: [] },
+    expected: "integrationShards.core must be an array of group roots."
+  }
+])("rejects an integrationShards object when $label", async ({ integrationShards, expected }) => {
+  const fixtureRoot = await createRepositoryFixture([
+    {
+      path: "vitest.suites.json",
+      content: manifest(["example.test.ts"], [], [], [], integrationShards)
+    },
+    {
+      path: "packages/example/src/__tests__/example.test.ts",
+      content: "export const example = true;\n"
+    }
+  ]);
+
+  const result = runClassifier(fixtureRoot);
+
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain(expected);
 });
 
 it("rejects uncurated tests from the platform matrix", async () => {

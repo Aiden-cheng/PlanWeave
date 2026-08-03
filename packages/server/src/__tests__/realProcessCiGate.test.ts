@@ -25,15 +25,25 @@ describe("real-process CI registration gate", () => {
         readFile(join(repositoryRoot, "vitest.suites.json"), "utf8"),
         readFile(join(repositoryRoot, "package.json"), "utf8"),
         readFile(join(repositoryRoot, "vitest.integration-distributed.config.ts"), "utf8"),
-        readFile(join(repositoryRoot, "packages/server/src/releaseGate/runDeterministic.ts"), "utf8")
+        readFile(
+          join(repositoryRoot, "packages/server/src/releaseGate/runDeterministic.ts"),
+          "utf8"
+        )
       ]);
 
     const packageScripts = JSON.parse(packageJson) as { scripts: Record<string, string> };
+    const suites = JSON.parse(suitesJson) as {
+      integrationShards: { distributed: string[] };
+      groups: Array<{ root: string; integration: string[] }>;
+    };
     expect(packageScripts.scripts["test:integration:distributed"]).toMatch(
       /vitest\.integration-distributed\.config\.ts/
     );
-    expect(integrationDistributedConfig).toContain("packages/server/src/__tests__");
-    expect(integrationDistributedConfig).toContain("packages/agent-host/src/__tests__");
+    expect(new Set(suites.integrationShards.distributed)).toEqual(
+      new Set(["packages/server/src/__tests__", "packages/agent-host/src/__tests__"])
+    );
+    expect(integrationDistributedConfig).toContain('testFilesForIntegrationShard("distributed")');
+    expect(integrationDistributedConfig).not.toContain("testFilesForRoots");
 
     // Required CI job: dedicated distributed shard with serial workers.
     expect(workflow).toContain("shard: distributed");
@@ -44,9 +54,6 @@ describe("real-process CI registration gate", () => {
     expect(workflow).toMatch(/shard:\s*distributed[\s\S]*?max_workers:\s*1/);
     expect(workflow).not.toMatch(/shard:\s*distributed[\s\S]*?max_workers:\s*2/);
 
-    const suites = JSON.parse(suitesJson) as {
-      groups: Array<{ root: string; integration: string[] }>;
-    };
     const serverSuite = suites.groups.find(
       (entry) => entry.root === "packages/server/src/__tests__"
     );

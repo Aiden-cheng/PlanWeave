@@ -39,6 +39,8 @@ const curatedPlatformTestSet = new Set(curatedPlatformTests);
 const curatedPerformanceTests = ["packages/runtime/src/__tests__/blockRunIndexPerformance.test.ts"];
 const curatedPerformanceTestSet = new Set(curatedPerformanceTests);
 const suiteNames = ["unit", "integration", "platform", "performance"];
+const integrationShardNames = ["cli", "core", "distributed"];
+const integrationShardNameSet = new Set(integrationShardNames);
 
 function trackedTestFiles() {
   return execFileSync("git", ["ls-files", "--cached", "--", "packages"], {
@@ -144,6 +146,7 @@ if (!(manifest && Array.isArray(manifest.groups))) {
 }
 
 const assignments = new Map();
+const groupsByRoot = new Map();
 for (const group of manifest.groups) {
   if (
     typeof group.root !== "string" ||
@@ -156,6 +159,11 @@ for (const group of manifest.groups) {
       "Each group must define root, unit, integration, platform, and performance."
     );
   } else {
+    if (groupsByRoot.has(group.root)) {
+      validationErrors.push(`Group root ${JSON.stringify(group.root)} is defined more than once.`);
+    } else {
+      groupsByRoot.set(group.root, group);
+    }
     for (const suite of suiteNames) {
       for (const fileName of group[suite]) {
         if (typeof fileName !== "string" || fileName !== posix.basename(fileName)) {
@@ -171,6 +179,63 @@ for (const group of manifest.groups) {
         }
       }
     }
+  }
+}
+
+const integrationShardAssignments = new Map();
+if (
+  typeof manifest.integrationShards !== "object" ||
+  manifest.integrationShards === null ||
+  Array.isArray(manifest.integrationShards)
+) {
+  validationErrors.push(
+    "vitest.suites.json must contain an integrationShards object with cli, core, and distributed arrays."
+  );
+} else {
+  for (const shardName of Object.keys(manifest.integrationShards)) {
+    if (!integrationShardNameSet.has(shardName)) {
+      validationErrors.push(
+        `integrationShards contains unknown shard ${JSON.stringify(shardName)}; expected only cli, core, and distributed.`
+      );
+    }
+  }
+  for (const shardName of integrationShardNames) {
+    const roots = manifest.integrationShards[shardName];
+    if (!Array.isArray(roots)) {
+      validationErrors.push(`integrationShards.${shardName} must be an array of group roots.`);
+      continue;
+    }
+    for (const [index, root] of roots.entries()) {
+      if (typeof root !== "string" || root.length === 0 || root.trim() !== root) {
+        validationErrors.push(
+          `integrationShards.${shardName}[${index}] must be a non-empty group root string.`
+        );
+        continue;
+      }
+      if (!groupsByRoot.has(root)) {
+        validationErrors.push(
+          `Integration shard ${JSON.stringify(shardName)} references unknown group root ${JSON.stringify(root)}.`
+        );
+        continue;
+      }
+      const shards = integrationShardAssignments.get(root) ?? [];
+      shards.push(shardName);
+      integrationShardAssignments.set(root, shards);
+    }
+  }
+}
+
+for (const [root, group] of groupsByRoot) {
+  const shards = integrationShardAssignments.get(root) ?? [];
+  if (group.integration.length > 0 && shards.length !== 1) {
+    validationErrors.push(
+      `Integration group root ${JSON.stringify(root)} must be assigned to exactly one integration shard; found ${shards.length}${shards.length > 0 ? ` (${shards.join(", ")})` : ""}.`
+    );
+  }
+  if (group.integration.length === 0 && shards.length > 0) {
+    validationErrors.push(
+      `Group root ${JSON.stringify(root)} has no integration tests and must not be assigned to an integration shard.`
+    );
   }
 }
 
