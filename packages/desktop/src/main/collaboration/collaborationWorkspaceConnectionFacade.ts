@@ -1,4 +1,4 @@
-import type { ActiveWorkspaceConnectionView, WorkspacePickerPage } from "@planweave-ai/collaboration-contracts";
+import type { ActiveWorkspaceConnectionView, WorkspacePickerPage } from "@planweave-ai/collaboration-protocol";
 import {
   assertNoSmuggledCollaborationSecrets,
   collaborationProfileIdInputSchema,

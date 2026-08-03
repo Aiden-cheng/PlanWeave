@@ -11,6 +11,11 @@ import {
 describe("distributed compatibility bounds", () => {
   it("pins a single wire protocol version and fail-closed rollback rules", () => {
     expect(PLANWEAVE_COMPATIBILITY_BOUNDS.agentHostProtocolVersion).toBe(agentHostProtocolVersion);
+    expect(PLANWEAVE_COMPATIBILITY_BOUNDS.packageMajorMustMatch).toEqual([
+      "server",
+      "agent-host",
+      "agent-host-protocol"
+    ]);
     expect(PLANWEAVE_COMPATIBILITY_BOUNDS.rollbackConstraints.resetDatabases).toBe(false);
     expect(PLANWEAVE_COMPATIBILITY_BOUNDS.rollbackConstraints.silentRerunInterruptedBlocks).toBe(
       false
@@ -43,6 +48,17 @@ describe("distributed compatibility bounds", () => {
         agentHost: "1.0.0"
       })
     ).toMatchObject({ ok: false, code: "package_major_mismatch" });
+    expect(
+      assertMatchingPackageMajors({
+        server: "1.0.0",
+        agentHost: "1.0.0",
+        protocol: "2.0.0"
+      })
+    ).toEqual({
+      ok: false,
+      code: "package_major_mismatch",
+      message: "agent-host-protocol major 2 is incompatible with Server major 1."
+    });
     expect(parsePackageMajor("1.2.3-beta.1")).toBe(1);
   });
 

@@ -8,7 +8,7 @@ import {
   executeBlockCommandSchema,
   executionEnvelopeSchema,
   hashExecutionEnvelope
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import type { AcpEngineTerminal } from "@planweave-ai/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {

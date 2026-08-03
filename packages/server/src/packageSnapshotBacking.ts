@@ -9,7 +9,7 @@ import {
   PACKAGE_SNAPSHOT_MAX_FILE_BYTES,
   PACKAGE_SNAPSHOT_MAX_PROMPT_DIGESTS,
   PACKAGE_SNAPSHOT_MAX_TOTAL_BYTES
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { z } from "zod";
 
 export const snapshotFileSchema = z

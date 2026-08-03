@@ -7,7 +7,7 @@ import {
   type HostEnrollmentCompleted,
   type HostEnrollmentErrorCode,
   type HostEnrollmentRequest
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import { AgentHostRepository } from "./hosts.js";
 import { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
 import { inWriteTransaction, type SqliteDatabase } from "./sqlite.js";

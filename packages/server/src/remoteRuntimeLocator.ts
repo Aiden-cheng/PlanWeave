@@ -1,5 +1,5 @@
 import type { RemoteBlockArtifactSource, RemoteBlockRuntimePort } from "@planweave-ai/runtime";
-import { workspaceIdSchema } from "@planweave-ai/collaboration-contracts";
+import { workspaceIdSchema } from "@planweave-ai/collaboration-protocol";
 import { canonicalRemoteRuntimePort } from "./canonicalRemoteRuntimePort.js";
 import type {
   RemoteBlockRuntimeResolverPort,

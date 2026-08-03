@@ -3,7 +3,7 @@ import type {
   InterruptionReason,
   MailboxCommand,
   NormalizedFailure
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import type { RemoteBlockDispatchCandidate, RemoteBlockRuntimePort } from "@planweave-ai/runtime";
 import type { HostCapacityReservation } from "./hostReservations.js";
 import type { MailboxMessage } from "./mailbox.js";

@@ -2,8 +2,8 @@ import {
   hostCredentialTokenSchema,
   hostEnrollmentCodeSchema,
   opaqueIdentifierSchema
-} from "@planweave-ai/distributed-protocol";
-import { setupCodeTokenSchema } from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/agent-host-protocol";
+import { setupCodeTokenSchema } from "@planweave-ai/collaboration-protocol";
 import { z } from "zod";
 
 const pendingBase = {

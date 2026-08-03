@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   exampleSetupCodeIssueResponse,
   parseCollaborationSetupHandoffV1
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   registerOperatorControlHandlers,
   shutdownOperatorControlService

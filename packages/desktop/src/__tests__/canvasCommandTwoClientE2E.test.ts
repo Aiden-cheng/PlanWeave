@@ -12,7 +12,7 @@ import {
   CANVAS_COMMAND_PROTOCOL_VERSION,
   exampleHumanDeviceToken,
   type HumanObserverEvent
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   basicManifest,
   createTestWorkspace

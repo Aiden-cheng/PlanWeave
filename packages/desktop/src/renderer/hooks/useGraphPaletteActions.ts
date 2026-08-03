@@ -7,7 +7,7 @@ import type {
   DesktopLayout,
   DesktopProjectSummary
 } from "@planweave-ai/runtime";
-import type { CanvasCommandIntent } from "@planweave-ai/collaboration-contracts";
+import type { CanvasCommandIntent } from "@planweave-ai/collaboration-protocol";
 import { bridge, desktopCanvasReference } from "../bridge";
 import {
   dependencyConnectionToManifestEndpoints,

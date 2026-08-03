@@ -1,4 +1,4 @@
-import { leaseIdSchema, opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
+import { leaseIdSchema, opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { capabilitiesSchema } from "./protocol.js";

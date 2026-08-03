@@ -5,7 +5,7 @@ import {
   leaseIdSchema,
   normalizedFailureSchema,
   opaqueIdentifierSchema
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
 import { remoteAttemptStatusSchema } from "./remoteOperations.js";
 

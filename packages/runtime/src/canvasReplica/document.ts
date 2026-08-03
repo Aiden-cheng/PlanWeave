@@ -10,7 +10,7 @@ import {
   type CompleteContentVersion,
   type ContentVersionMember,
   type ContentVersionMemberKind
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { validateAuthoritativeCanvasContent } from "../desktop/contentVersionValidation.js";
 import {
   desktopLayoutFileSchema,

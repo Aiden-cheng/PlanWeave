@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ContentVersionDesktopReadModel } from "@planweave-ai/collaboration-contracts";
+import type { ContentVersionDesktopReadModel } from "@planweave-ai/collaboration-protocol";
 import { DatabaseIcon, DownloadIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type {

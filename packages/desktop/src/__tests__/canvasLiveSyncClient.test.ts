@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CANVAS_LIVE_SYNC_PROTOCOL_VERSION } from "@planweave-ai/collaboration-contracts";
+import { CANVAS_LIVE_SYNC_PROTOCOL_VERSION } from "@planweave-ai/collaboration-protocol";
 import { CanvasLiveSyncClient } from "../main/collaboration/CanvasLiveSyncClient.js";
 import type { CollaborationClientClock } from "../main/collaboration/collaborationClientTypes.js";
 

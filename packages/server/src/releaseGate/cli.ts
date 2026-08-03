@@ -18,7 +18,7 @@ function option(argv: readonly string[], name: string): string | undefined {
 }
 
 async function readMonorepoPackageVersion(
-  packageDirName: "agent-host" | "distributed-protocol"
+  packageDirName: "agent-host" | "agent-host-protocol"
 ): Promise<string | null> {
   // packages/server/src/releaseGate -> packages/<name>/package.json
   const candidate = join(
@@ -125,7 +125,7 @@ export async function runReleaseGateCli(
     option(argv, "--agent-host-version") ?? (await readMonorepoPackageVersion("agent-host"));
   const protocolPackageVersion =
     option(argv, "--protocol-version") ??
-    (await readMonorepoPackageVersion("distributed-protocol"));
+    (await readMonorepoPackageVersion("agent-host-protocol"));
 
   const report: ReleaseGateReport = await buildReleaseGateReport({
     deterministicEvidencePath,

@@ -1,7 +1,7 @@
 import type {
   CanvasRuntimeStatusProjection,
   CanvasScopeRef
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { compileTaskGraph } from "../graph/compileTaskGraph.js";
 import { requireMapValue } from "../graph/requireMapValue.js";
 import { buildPlanGraph, buildPlanGraphContentProjection } from "../plangraph/index.js";

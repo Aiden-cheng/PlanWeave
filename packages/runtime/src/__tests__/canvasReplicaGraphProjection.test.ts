@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canvasRuntimeStatusProjectionSchema } from "@planweave-ai/collaboration-contracts";
+import { canvasRuntimeStatusProjectionSchema } from "@planweave-ai/collaboration-protocol";
 import {
   overlayCanvasReplicaRuntimeStatus,
   parseCanvasReplicaDocument,

@@ -8,7 +8,7 @@ import {
   type CanvasPresenceSelectionId,
   type CanvasPresenceServerMessage,
   type CollaborationConnectionProfile
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { CollaborationClientError } from "./collaborationErrors.js";
 import { reconnectDelay } from "./reconnectBackoff.js";
 import { redactCollaborationText } from "./redaction.js";

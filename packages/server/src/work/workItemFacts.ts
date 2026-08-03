@@ -1,4 +1,4 @@
-import { blockRefSchema, type BlockRef } from "@planweave-ai/distributed-protocol";
+import { blockRefSchema, type BlockRef } from "@planweave-ai/agent-host-protocol";
 import type { CompiledExecutionGraph, PlanPackageManifest } from "@planweave-ai/runtime";
 import { compileTaskGraph, parseBlockRef } from "@planweave-ai/runtime";
 import {

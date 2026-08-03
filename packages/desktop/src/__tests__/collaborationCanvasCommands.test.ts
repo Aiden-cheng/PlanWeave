@@ -3,7 +3,7 @@ import type {
   CanvasCommandOutcome,
   CanvasReconnectResponse,
   CompleteContentVersion
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   applyCanvasReplicaIntent,
   decodeCanvasReplicaDocument,

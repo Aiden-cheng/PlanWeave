@@ -12,7 +12,7 @@ import {
   exampleObserverCatchupRequired,
   exampleObserverEvent,
   type AssignmentDisplayProjection
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { CollaborationReadModelController } from "../renderer/collaboration/CollaborationReadModelController";
 import {
   buildCollaborationProjectViewModel,

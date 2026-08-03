@@ -1,6 +1,6 @@
 import { chmod, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { operatorTokenSchema } from "@planweave-ai/distributed-protocol";
+import { operatorTokenSchema } from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
 import type {
   OperatorCredentialPersistence,

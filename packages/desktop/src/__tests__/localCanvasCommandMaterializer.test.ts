@@ -7,7 +7,7 @@ import {
   canvasCommandAcceptedSchema,
   canvasReconnectDeltaSchema,
   canvasReconnectSnapshotSchema
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   applyAuthorizedCanvasCommand,
   captureAuthorizedCanvasContent,

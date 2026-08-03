@@ -15,7 +15,7 @@ import {
   serverEventSchema,
   type HostEvent as SharedHostEvent,
   type ServerEvent as SharedServerEvent
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   agentHostProtocolVersion as serverProtocolVersion,
@@ -31,7 +31,7 @@ import {
 } from "../protocol.js";
 
 describe("Server protocol primitives", () => {
-  it("re-exports shared schemas from @planweave-ai/distributed-protocol without redefining them", () => {
+  it("re-exports shared schemas from @planweave-ai/agent-host-protocol without redefining them", () => {
     expect(serverProtocolVersion).toBe(agentHostProtocolVersion);
     expect(serverOpaqueIdentifierSchema).toBe(opaqueIdentifierSchema);
     expect(serverCapabilitySchema).toBe(capabilitySchema);

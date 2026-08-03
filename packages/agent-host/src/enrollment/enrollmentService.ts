@@ -3,8 +3,8 @@ import {
   hostEnrollmentCompletedSchema,
   type HostEnrollmentCompleted,
   type HostEnrollmentRequest
-} from "@planweave-ai/distributed-protocol";
-import { setupCodeTokenSchema } from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/agent-host-protocol";
+import { setupCodeTokenSchema } from "@planweave-ai/collaboration-protocol";
 import type { AgentHostConfig } from "../config/schema.js";
 import type {
   ActiveHostCredential,

@@ -5,7 +5,7 @@ import {
   type ExecutionTargetRecord,
   type ResponsibilityRecord,
   type ReviewAssignmentRecord
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { inWriteTransaction, type SqliteDatabase } from "../sqlite.js";
 import {
   authorityScopeSchema,

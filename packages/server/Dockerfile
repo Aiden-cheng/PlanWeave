@@ -6,8 +6,8 @@ COPY . .
 RUN --mount=type=cache,id=planweave-server-pnpm-store,target=/pnpm/store \
   pnpm config set store-dir /pnpm/store \
   && pnpm install --frozen-lockfile --filter @planweave-ai/server... \
-  && pnpm --filter @planweave-ai/distributed-protocol build \
-  && pnpm --filter @planweave-ai/collaboration-contracts build \
+  && pnpm --filter @planweave-ai/agent-host-protocol build \
+  && pnpm --filter @planweave-ai/collaboration-protocol build \
   && pnpm --filter @planweave-ai/runtime build \
   && pnpm --filter @planweave-ai/server build \
   && pnpm --filter @planweave-ai/server --prod deploy --legacy /out

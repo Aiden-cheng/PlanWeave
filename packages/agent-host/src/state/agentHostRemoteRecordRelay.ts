@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { NormalizedAcpEvent } from "@planweave-ai/distributed-protocol";
+import type { NormalizedAcpEvent } from "@planweave-ai/agent-host-protocol";
 import type { AgentHostRemoteExecutionRecord } from "../execution/remoteAcpPorts.js";
 import { parseAgentHostEvent } from "../protocol.js";
 import { AgentHostEventOutbox } from "./agentHostEventOutbox.js";

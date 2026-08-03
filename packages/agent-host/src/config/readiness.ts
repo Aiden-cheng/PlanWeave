@@ -1,4 +1,4 @@
-import type { HostReadinessObservation } from "@planweave-ai/distributed-protocol";
+import type { HostReadinessObservation } from "@planweave-ai/agent-host-protocol";
 import { ConfiguredAcpProfileResolver, ConfiguredWorkspaceResolver } from "./resolvers.js";
 import type { AgentHostConfig } from "./schema.js";
 

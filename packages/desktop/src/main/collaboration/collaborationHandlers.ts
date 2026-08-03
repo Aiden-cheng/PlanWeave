@@ -9,7 +9,7 @@ import {
   humanInvitationViewSchema,
   humanMemberPageSchema,
   humanRevokeInvitationsResponseSchema
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   collaborationInvokeChannels,
   collaborationObserverSignalChannel,

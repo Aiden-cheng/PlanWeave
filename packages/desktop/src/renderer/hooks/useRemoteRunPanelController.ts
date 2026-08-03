@@ -6,7 +6,7 @@ import type {
   RemoteInteractionView,
   RemoteOperationObservation,
   WorkItemRef
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import type { RemoteBlockExecutionReadModel } from "@planweave-ai/runtime";
 import { collaborationBridge } from "../bridge";
 import { collaborationErrorMessage } from "../collaboration/formatCollaborationError";

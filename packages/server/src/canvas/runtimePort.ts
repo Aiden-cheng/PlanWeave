@@ -5,7 +5,7 @@ import type {
 import {
   type CanvasRuntimeStatusProjection,
   type CompleteContentVersion
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 
 /**
  * Server-side port to Runtime graph mutation. Implementations must not re-parse

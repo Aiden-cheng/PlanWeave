@@ -9,7 +9,7 @@ import {
   remoteInteractionResponseSchema,
   remoteInteractionViewSchema,
   remoteOperationObservationSchema
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import type {
   AuthenticatedCollaborationScope,
   CollaborationAuthContext

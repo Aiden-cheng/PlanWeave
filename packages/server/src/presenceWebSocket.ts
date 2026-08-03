@@ -6,7 +6,7 @@ import {
   canvasPresenceServerMessageSchema,
   type CanvasPresenceErrorCode,
   type CanvasPresenceServerMessage
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import {
   authenticateCollaborationForScope,

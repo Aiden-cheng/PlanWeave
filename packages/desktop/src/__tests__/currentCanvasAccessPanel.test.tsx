@@ -6,7 +6,7 @@ import userEvent from "@testing-library/user-event";
 import {
   accessCapabilityFlags,
   type CurrentCanvasAccessView
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CurrentCanvasAccessPanel,

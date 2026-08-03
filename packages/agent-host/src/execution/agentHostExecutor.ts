@@ -7,7 +7,7 @@ import type {
 import {
   normalizedFailureSchema,
   type ArtifactMediaType
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 
 export type AgentHostExecuteCommand = Extract<ServerToHostCommand, { type: "execute_block" }>;
 

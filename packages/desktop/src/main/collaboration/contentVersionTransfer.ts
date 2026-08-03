@@ -12,7 +12,7 @@ import {
   type CanvasScopeRef,
   type CompletedContentVersionRef,
   type ContentVersionMember
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { CollaborationClientError, collaborationErrorFromHttp } from "./collaborationErrors.js";
 import { CollaborationHttpTransport } from "./collaborationHttpTransport.js";
 

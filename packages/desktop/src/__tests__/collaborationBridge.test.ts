@@ -13,7 +13,7 @@ import {
   exampleObserverEvent,
   exampleSetupCode,
   exampleSetupCodeRedeemDeviceResponse
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   CollaborationClientError,
   CollaborationCredentialVault,

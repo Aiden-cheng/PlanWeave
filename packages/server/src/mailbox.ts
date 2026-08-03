@@ -6,7 +6,7 @@ import {
   mailboxMessageIdSchema,
   type MailboxCommand,
   type MailboxMessageId
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import type { SqliteDatabase } from "./sqlite.js";
 
 export type MailboxMessage = {

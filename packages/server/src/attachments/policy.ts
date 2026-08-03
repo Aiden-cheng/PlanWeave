@@ -18,7 +18,7 @@ import {
   type AttachmentAuthDecision,
   type AttachmentErrorCode
 } from "./errors.js";
-import type { WorkspaceId } from "@planweave-ai/collaboration-contracts";
+import type { WorkspaceId } from "@planweave-ai/collaboration-protocol";
 
 export type PendingUploadStatus = "pending" | "uploaded" | "finalized" | "expired" | "aborted";
 

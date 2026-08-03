@@ -1,4 +1,4 @@
-import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
+import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
 import {
   HUMAN_ASSIGN_REASON_MAX_LENGTH,

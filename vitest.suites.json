@@ -483,7 +483,7 @@
       "performance": ["blockRunIndexPerformance.test.ts"]
     },
     {
-      "root": "packages/distributed-protocol/src/__tests__",
+      "root": "packages/agent-host-protocol/src/__tests__",
       "unit": [
         "agentHostEnrollment.test.ts",
         "agentHostProtocol.test.ts",
@@ -500,7 +500,7 @@
       "performance": []
     },
     {
-      "root": "packages/collaboration-contracts/src/__tests__",
+      "root": "packages/collaboration-protocol/src/__tests__",
       "unit": [
         "accessControl.test.ts",
         "canvasCommands.test.ts",

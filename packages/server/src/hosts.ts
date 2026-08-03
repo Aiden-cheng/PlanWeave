@@ -3,7 +3,7 @@ import {
   hostReadinessObservationSchema,
   type HostReadinessObservation,
   type OperatorHostAvailability
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
 import { capabilitiesSchema } from "./protocol.js";

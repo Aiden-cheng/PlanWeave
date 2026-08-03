@@ -1,7 +1,7 @@
 import {
   canvasCommandIntentSchema,
   type CanvasCommandIntent
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { buildCanvasCommandApplication } from "../graph/canvasCommandMutation.js";
 import type { PlanPackageGraphMutationSideEffect } from "../graph/mutation.js";
 import {

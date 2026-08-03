@@ -4,7 +4,7 @@ import type {
   ActiveWorkspaceConnectionStatus,
   AccessMutationResult,
   CurrentCanvasAccessView
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { collaborationErrorMessage } from "../collaboration/formatCollaborationError";
 import type {
   CollaborationSessionPhase,

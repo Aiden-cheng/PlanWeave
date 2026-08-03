@@ -8,7 +8,7 @@ import {
   type ResponsibilityReadModel,
   type ReviewAssignmentReadModel,
   type WorkAuthorityProjection
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import type { CollaborationAuthContext } from "../identity/index.js";
 import type { ProjectAccessRepository } from "../projectAccessRepository.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";

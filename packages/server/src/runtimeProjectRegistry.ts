@@ -5,7 +5,7 @@ import {
   manifestSchema,
   projectCanvasWorkspace
 } from "@planweave-ai/runtime";
-import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
+import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { readFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { z } from "zod";

@@ -9,7 +9,7 @@ import {
   PACKAGE_SNAPSHOT_MAX_TOTAL_BYTES,
   packageSnapshotDigestManifestSchema,
   type PackageSnapshotDigestManifest
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import type { PackageWorkspaceRef } from "../types.js";
 import { loadPackage, resolvePackageWorkspace } from "./loadPackage.js";
 import { resolvePackagePath } from "./resolvePackagePath.js";

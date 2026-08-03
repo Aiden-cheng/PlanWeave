@@ -4,7 +4,7 @@ import {
   interruptionReasonSchema,
   normalizedFailureSchema,
   opaqueIdentifierSchema
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
 
 const remoteOwnershipSourceShape = {

@@ -1,7 +1,7 @@
 import {
   COMMENT_ATTACHMENT_ALLOWED_MEDIA_TYPES,
   COMMENT_ATTACHMENT_MAX_BYTES
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import type { PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
 import { sanitizeAttachmentFileName } from "./commentViewModels.js";
 

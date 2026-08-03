@@ -119,7 +119,7 @@ import {
   type AccessMutationResult,
   type CurrentCanvasAccessView,
   type CanvasRuntimeStatusProjection
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import type { z, ZodType } from "zod";
 import { CollaborationClientError, collaborationErrorFromHttp } from "./collaborationErrors.js";
 import { reconnectDelay } from "./reconnectBackoff.js";
@@ -179,7 +179,7 @@ export type CollaborationClientOptions = {
  * Electron-main human collaboration client.
  *
  * Application-shaped methods only — no raw `request(path)` or socket access for callers.
- * Validates every JSON response/event with collaboration-contracts Zod schemas.
+ * Validates every JSON response/event with collaboration-protocol Zod schemas.
  */
 export class CollaborationClient {
   private readonly transport: CollaborationHttpTransport;

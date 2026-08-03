@@ -1,7 +1,7 @@
 import type {
   OperatorHostAvailabilityReason,
   OperatorHostView
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { createTranslator } from "../i18n";

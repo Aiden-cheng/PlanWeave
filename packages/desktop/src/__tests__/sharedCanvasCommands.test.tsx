@@ -4,7 +4,7 @@ import { act, renderHook } from "@testing-library/react";
 import {
   exampleCanvasReconnectAfterDisconnect,
   exampleCanvasReconnectTruncatedJournal
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanupRendererTestEnvironment } from "./helpers/rendererTestEnvironment";
 import { createTranslator } from "../renderer/i18n";

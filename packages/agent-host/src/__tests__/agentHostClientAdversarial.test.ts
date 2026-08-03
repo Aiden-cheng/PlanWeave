@@ -11,7 +11,7 @@ import {
   mailboxDeliverySchema,
   serverEventSchema,
   type HostEvent
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 import type { AgentHostExecutor } from "../execution/agentHostExecutor.js";

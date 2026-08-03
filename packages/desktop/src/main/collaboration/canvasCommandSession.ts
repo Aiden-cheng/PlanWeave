@@ -5,7 +5,7 @@ import type {
   CanvasJournalEntry,
   CanvasReconnectResponse,
   CanvasRevision
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 
 /**
  * Client-side durable canvas command session state.

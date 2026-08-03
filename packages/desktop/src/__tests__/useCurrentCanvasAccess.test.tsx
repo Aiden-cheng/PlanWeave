@@ -6,7 +6,7 @@ import {
   activeCanvasPersonGrantSchema,
   canvasPersonAccessViewSchema,
   type CurrentCanvasAccessView
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { describe, expect, it, vi } from "vitest";
 import {
   type CurrentCanvasAccessApi,

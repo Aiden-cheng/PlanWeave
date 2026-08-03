@@ -2,8 +2,8 @@ import {
   dispatchIdSchema,
   executionAttemptIdSchema,
   opaqueIdentifierSchema
-} from "@planweave-ai/distributed-protocol";
-import { workspaceIdSchema } from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/agent-host-protocol";
+import { workspaceIdSchema } from "@planweave-ai/collaboration-protocol";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { capabilitiesSchema } from "./protocol.js";

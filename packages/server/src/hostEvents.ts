@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { canonicalizeJson } from "@planweave-ai/distributed-protocol";
+import { canonicalizeJson } from "@planweave-ai/agent-host-protocol";
 import { inWriteTransaction, type SqliteDatabase } from "./sqlite.js";
 
 export class HostEventInbox {

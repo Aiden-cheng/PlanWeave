@@ -7,7 +7,7 @@ import {
   type RemoteInteractionView,
   type RemoteOperationObservation,
   type RemoteOperationState
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import type { RemoteBlockExecutionReadModel } from "@planweave-ai/runtime";
 
 type NormalizedAcpEvent = RemoteEventReplay["events"][number];

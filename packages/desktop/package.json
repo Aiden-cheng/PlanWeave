@@ -25,7 +25,7 @@
   ],
   "scripts": {
     "build": "tsx ../../scripts/run-workspace-consumer-build.ts desktop",
-    "build:standalone": "pnpm --filter @planweave-ai/distributed-protocol build && pnpm --filter @planweave-ai/collaboration-contracts build && pnpm --filter @planweave-ai/runtime build && pnpm --filter @planweave-ai/mcp build && pnpm --filter @planweave-ai/server build && pnpm build:workspace",
+    "build:standalone": "pnpm --filter @planweave-ai/agent-host-protocol build && pnpm --filter @planweave-ai/collaboration-protocol build && pnpm --filter @planweave-ai/runtime build && pnpm --filter @planweave-ai/mcp build && pnpm --filter @planweave-ai/server build && pnpm build:workspace",
     "build:workspace": "tsc -p tsconfig.json && tsc -p tsconfig.main.json --noEmit && node scripts/build-electron.mjs && node scripts/copy-windows-job-helper.mjs && node scripts/prepare-self-host-server-resource.mjs && vite build",
     "dev": "vite --host 127.0.0.1",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.main.json --noEmit",
@@ -70,8 +70,8 @@
     "tailwind-merge": "^3.6.0",
     "tw-animate-css": "^1.4.0",
     "zod": "^4.1.12",
-    "@planweave-ai/collaboration-contracts": "workspace:*",
-    "@planweave-ai/distributed-protocol": "workspace:*",
+    "@planweave-ai/collaboration-protocol": "workspace:*",
+    "@planweave-ai/agent-host-protocol": "workspace:*",
     "ws": "^8.21.0"
   },
   "devDependencies": {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { CanvasRuntimeStatusProjection } from "@planweave-ai/collaboration-contracts";
+import type { CanvasRuntimeStatusProjection } from "@planweave-ai/collaboration-protocol";
 import type { DesktopGraphViewModel } from "@planweave-ai/runtime";
 import type { PlanWeaveCollaborationApi } from "../../shared/collaboration";
 import { collaborationBridge } from "../bridge";

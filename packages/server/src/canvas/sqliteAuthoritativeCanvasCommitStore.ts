@@ -2,7 +2,7 @@ import { inWriteTransaction, type SqliteDatabase } from "../sqlite.js";
 import type { AuthoritativeCanvasCommitPort } from "./authoritativeCanvasCommitPort.js";
 import { ContentVersionRepository } from "./contentVersionRepository.js";
 import { CanvasCommandRepository } from "./repository.js";
-import type { CanvasCommandAccepted } from "@planweave-ai/collaboration-contracts";
+import type { CanvasCommandAccepted } from "@planweave-ai/collaboration-protocol";
 
 /** Self-hosted adapter that keeps immutable content and canvas visibility atomic in SQLite. */
 export class SqliteAuthoritativeCanvasCommitStore implements AuthoritativeCanvasCommitPort {

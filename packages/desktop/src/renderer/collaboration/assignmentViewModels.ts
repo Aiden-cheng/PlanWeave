@@ -5,7 +5,7 @@ import type {
   EligibleAssigneesResponse,
   HumanPrincipalId,
   WorkItemRef
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import type {
   CollaborationBoundaryErrorView,
   CollaborationHostProjection,

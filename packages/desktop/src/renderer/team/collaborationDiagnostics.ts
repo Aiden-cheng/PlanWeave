@@ -1,4 +1,4 @@
-import type { CurrentCanvasAccessView } from "@planweave-ai/collaboration-contracts";
+import type { CurrentCanvasAccessView } from "@planweave-ai/collaboration-protocol";
 import type { CollaborationStatus } from "../../shared/collaboration.js";
 import type { CollaborationReadModelSnapshot } from "../../shared/collaborationReadModels.js";
 

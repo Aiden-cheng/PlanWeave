@@ -7,7 +7,7 @@ import {
   type ActiveWorkspaceConnectionView,
   type WorkspaceConnectionProfile,
   type WorkspacePickerPage
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import type { CollaborationCredentialVault } from "./collaborationCredentialVault.js";
 import {
   CollaborationSetupCodeClient,

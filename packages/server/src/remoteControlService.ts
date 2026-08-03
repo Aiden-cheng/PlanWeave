@@ -14,7 +14,7 @@ import {
   operatorPageQuerySchema,
   type OperatorOperationView
 } from "./operatorDtos.js";
-import { remoteDispatchIntentSchema } from "@planweave-ai/collaboration-contracts";
+import { remoteDispatchIntentSchema } from "@planweave-ai/collaboration-protocol";
 import { HostEnrollmentService } from "./hostEnrollment.js";
 import {
   DEFAULT_HOST_OFFLINE_AFTER_MS,

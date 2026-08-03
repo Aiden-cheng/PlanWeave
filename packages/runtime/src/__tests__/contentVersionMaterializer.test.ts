@@ -7,7 +7,7 @@ import {
   completeContentVersionSchema,
   contentVersionDesktopLayoutMemberPath,
   type CompleteContentVersion
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   capturePackageSnapshot,
   createManagedProjectFromAuthoritativeContent,

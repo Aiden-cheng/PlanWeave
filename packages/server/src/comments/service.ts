@@ -1,5 +1,5 @@
 import { ZodError } from "zod";
-import { workspaceIdSchema } from "@planweave-ai/collaboration-contracts";
+import { workspaceIdSchema } from "@planweave-ai/collaboration-protocol";
 import type { CommentAttachmentRepository } from "../attachments/repository.js";
 import type { CommentAttachmentService } from "../attachments/service.js";
 import type { HumanIdentityRepository } from "../identity/repository.js";

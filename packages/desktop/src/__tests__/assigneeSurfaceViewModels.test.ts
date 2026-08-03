@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   exampleActivityListPage,
   exampleAssignmentProjection
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   buildAssigneeSurfaceIndex,
   buildCollaborationNotificationDrafts,

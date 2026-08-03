@@ -2,7 +2,7 @@ import {
   exampleExecutionEnvelopeInput,
   executionEnvelopeSchema,
   type ExecutionEnvelope
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 
 export function executionEnvelopeFor(
   blockRef: string,

@@ -10,7 +10,7 @@ import {
   leaseIdSchema,
   type DispatchResult,
   type ExecutionEnvelope
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
 import { artifactMediaTypeSchema } from "./artifactMediaType.js";
 import type { ArtifactMetadata } from "./artifacts.js";

@@ -1,7 +1,7 @@
 import {
   hostCredentialTokenSchema,
   hostEnrollmentCodeSchema
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import { describe, expect, it } from "vitest";
 import {
   actorRefFromHuman,

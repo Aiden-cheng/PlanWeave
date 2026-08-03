@@ -44,12 +44,12 @@ importers:
 
   packages/agent-host:
     dependencies:
-      '@planweave-ai/collaboration-contracts':
+      '@planweave-ai/agent-host-protocol':
         specifier: workspace:*
-        version: link:../collaboration-contracts
-      '@planweave-ai/distributed-protocol':
+        version: link:../agent-host-protocol
+      '@planweave-ai/collaboration-protocol':
         specifier: workspace:*
-        version: link:../distributed-protocol
+        version: link:../collaboration-protocol
       '@planweave-ai/runtime':
         specifier: workspace:*
         version: link:../runtime
@@ -67,6 +67,12 @@ importers:
         specifier: ^8.5.14
         version: 8.18.1
 
+  packages/agent-host-protocol:
+    dependencies:
+      zod:
+        specifier: ^4.1.12
+        version: 4.4.3
+
   packages/cli:
     dependencies:
       '@planweave-ai/mcp':
@@ -79,11 +85,11 @@ importers:
         specifier: ^14.0.2
         version: 14.0.3
 
-  packages/collaboration-contracts:
+  packages/collaboration-protocol:
     dependencies:
-      '@planweave-ai/distributed-protocol':
+      '@planweave-ai/agent-host-protocol':
         specifier: workspace:*
-        version: link:../distributed-protocol
+        version: link:../agent-host-protocol
       zod:
         specifier: ^4.1.12
         version: 4.4.3
@@ -93,12 +99,12 @@ importers:
       '@fontsource-variable/geist':
         specifier: ^5.2.9
         version: 5.2.9
-      '@planweave-ai/collaboration-contracts':
+      '@planweave-ai/agent-host-protocol':
         specifier: workspace:*
-        version: link:../collaboration-contracts
-      '@planweave-ai/distributed-protocol':
+        version: link:../agent-host-protocol
+      '@planweave-ai/collaboration-protocol':
         specifier: workspace:*
-        version: link:../distributed-protocol
+        version: link:../collaboration-protocol
       '@planweave-ai/mcp':
         specifier: workspace:*
         version: link:../mcp
@@ -206,12 +212,6 @@ importers:
         specifier: ^8.1.0
         version: 8.1.0(@types/node@24.12.4)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)
 
-  packages/distributed-protocol:
-    dependencies:
-      zod:
-        specifier: ^4.1.12
-        version: 4.4.3
-
   packages/mcp:
     dependencies:
       '@modelcontextprotocol/sdk':
@@ -232,12 +232,12 @@ importers:
       '@agentclientprotocol/sdk':
         specifier: 1.2.1
         version: 1.2.1(zod@4.4.3)
-      '@planweave-ai/collaboration-contracts':
+      '@planweave-ai/agent-host-protocol':
         specifier: workspace:*
-        version: link:../collaboration-contracts
-      '@planweave-ai/distributed-protocol':
+        version: link:../agent-host-protocol
+      '@planweave-ai/collaboration-protocol':
         specifier: workspace:*
-        version: link:../distributed-protocol
+        version: link:../collaboration-protocol
       ajv:
         specifier: 8.20.0
         version: 8.20.0
@@ -250,12 +250,12 @@ importers:
 
   packages/server:
     dependencies:
-      '@planweave-ai/collaboration-contracts':
+      '@planweave-ai/agent-host-protocol':
         specifier: workspace:*
-        version: link:../collaboration-contracts
-      '@planweave-ai/distributed-protocol':
+        version: link:../agent-host-protocol
+      '@planweave-ai/collaboration-protocol':
         specifier: workspace:*
-        version: link:../distributed-protocol
+        version: link:../collaboration-protocol
       '@planweave-ai/runtime':
         specifier: workspace:*
         version: link:../runtime

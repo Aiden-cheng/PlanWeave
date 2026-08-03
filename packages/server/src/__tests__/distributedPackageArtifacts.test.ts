@@ -8,7 +8,7 @@ import {
   assertAgentHostProtocolCompatible,
   assertGracefulPackageDowngrade,
   assertMatchingPackageMajors
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import { serverPackageVersion } from "../packageInfo.js";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -76,8 +76,8 @@ describe("distributed package artifact contracts", () => {
   });
 
   it("pins engines, bins, licenses, and publish metadata for shippable packages", () => {
-    const protocol = readPackageJson("packages/distributed-protocol/package.json");
-    const contracts = readPackageJson("packages/collaboration-contracts/package.json");
+    const protocol = readPackageJson("packages/agent-host-protocol/package.json");
+    const contracts = readPackageJson("packages/collaboration-protocol/package.json");
     const runtime = readPackageJson("packages/runtime/package.json");
     const server = readPackageJson("packages/server/package.json");
     const host = readPackageJson("packages/agent-host/package.json");
@@ -86,8 +86,8 @@ describe("distributed package artifact contracts", () => {
     const desktop = readPackageJson("packages/desktop/package.json");
     const root = readPackageJson("package.json");
 
-    expectPublishableMetadata(protocol, "packages/distributed-protocol");
-    expectPublishableMetadata(contracts, "packages/collaboration-contracts");
+    expectPublishableMetadata(protocol, "packages/agent-host-protocol");
+    expectPublishableMetadata(contracts, "packages/collaboration-protocol");
     expectPublishableMetadata(runtime, "packages/runtime");
     expectPublishableMetadata(server, "packages/server");
     expectPublishableMetadata(host, "packages/agent-host");
@@ -107,11 +107,11 @@ describe("distributed package artifact contracts", () => {
     expect(runtime.version).toBe(serverPackageVersion);
     expect(cli.version).toBe(serverPackageVersion);
     expect(mcp.version).toBe(serverPackageVersion);
-    expect(server.dependencies?.["@planweave-ai/distributed-protocol"]).toBe("workspace:*");
-    expect(host.dependencies?.["@planweave-ai/distributed-protocol"]).toBe("workspace:*");
-    expect(runtime.dependencies?.["@planweave-ai/distributed-protocol"]).toBe("workspace:*");
-    expect(contracts.dependencies?.["@planweave-ai/distributed-protocol"]).toBe("workspace:*");
-    expect(server.dependencies?.["@planweave-ai/collaboration-contracts"]).toBe("workspace:*");
+    expect(server.dependencies?.["@planweave-ai/agent-host-protocol"]).toBe("workspace:*");
+    expect(host.dependencies?.["@planweave-ai/agent-host-protocol"]).toBe("workspace:*");
+    expect(runtime.dependencies?.["@planweave-ai/agent-host-protocol"]).toBe("workspace:*");
+    expect(contracts.dependencies?.["@planweave-ai/agent-host-protocol"]).toBe("workspace:*");
+    expect(server.dependencies?.["@planweave-ai/collaboration-protocol"]).toBe("workspace:*");
     expect(agentHostProtocolVersion).toBe(1);
 
     // Desktop is Electron-distributed, never an npm library publish target.
@@ -124,18 +124,18 @@ describe("distributed package artifact contracts", () => {
 
     // Root remains private monorepo shell.
     expect(root.private).toBe(true);
-    expect(root.scripts?.["pack:npm"]).toContain("@planweave-ai/distributed-protocol");
-    expect(root.scripts?.["publish:npm"]).toContain("@planweave-ai/distributed-protocol");
+    expect(root.scripts?.["pack:npm"]).toContain("@planweave-ai/agent-host-protocol");
+    expect(root.scripts?.["publish:npm"]).toContain("@planweave-ai/agent-host-protocol");
     expect(root.scripts?.["publish:distributed"]).toContain("@planweave-ai/server");
     expect(root.scripts?.["publish:distributed"]).toContain("@planweave-ai/agent-host");
   });
 
   it("keeps schema-only packages free of implementation dependencies", () => {
-    const protocol = readPackageJson("packages/distributed-protocol/package.json");
-    const contracts = readPackageJson("packages/collaboration-contracts/package.json");
+    const protocol = readPackageJson("packages/agent-host-protocol/package.json");
+    const contracts = readPackageJson("packages/collaboration-protocol/package.json");
     expect(Object.keys(protocol.dependencies ?? {}).sort()).toEqual(["zod"]);
     expect(Object.keys(contracts.dependencies ?? {}).sort()).toEqual([
-      "@planweave-ai/distributed-protocol",
+      "@planweave-ai/agent-host-protocol",
       "zod"
     ]);
     for (const name of [

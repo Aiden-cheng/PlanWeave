@@ -5,7 +5,7 @@ import { rm } from "node:fs/promises";
 import {
   canonicalContentVersionDigestPayload,
   type CompleteContentVersion
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestWorkspace } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { handleContentVersionHttpRequest } from "../canvas/contentVersionHttp.js";

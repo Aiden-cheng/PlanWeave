@@ -1,4 +1,4 @@
-import { isPrivateNetworkHostname } from "@planweave-ai/collaboration-contracts";
+import { isPrivateNetworkHostname } from "@planweave-ai/collaboration-protocol";
 import { networkInterfaces } from "node:os";
 
 export function resolveLocalCollaborationLanAddress(): string | null {

@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { spawnManagedProcess, type ManagedProcessTree } from "@planweave-ai/runtime";
 import type { PlanPackageManifest } from "@planweave-ai/runtime";
 import { redactRunnerEventText } from "@planweave-ai/runtime";
-import { operatorEnrollmentGrantResponseSchema } from "@planweave-ai/distributed-protocol";
+import { operatorEnrollmentGrantResponseSchema } from "@planweave-ai/agent-host-protocol";
 import {
   basicManifest,
   createTestWorkspace

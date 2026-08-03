@@ -4,7 +4,7 @@ import type {
   CanvasCommandIntent,
   CompletedContentVersionRef,
   PackageSnapshotDigestManifest
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import type { CanvasScopeKey } from "./repository.js";
 
 export type AuthoritativeCanvasAcceptedCommit = {

@@ -48,8 +48,8 @@
     "test": "cd ../.. && vitest run packages/agent-host/src"
   },
   "dependencies": {
-    "@planweave-ai/collaboration-contracts": "workspace:*",
-    "@planweave-ai/distributed-protocol": "workspace:*",
+    "@planweave-ai/collaboration-protocol": "workspace:*",
+    "@planweave-ai/agent-host-protocol": "workspace:*",
     "@planweave-ai/runtime": "workspace:*",
     "undici": "^7.25.0",
     "ws": "^8.21.0",

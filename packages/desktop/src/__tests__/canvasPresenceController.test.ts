@@ -1,4 +1,4 @@
-import type { CanvasPresenceServerMessage } from "@planweave-ai/collaboration-contracts";
+import type { CanvasPresenceServerMessage } from "@planweave-ai/collaboration-protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CanvasPresenceController,

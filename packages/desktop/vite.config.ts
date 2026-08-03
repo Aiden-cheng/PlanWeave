@@ -82,7 +82,7 @@ export default defineConfig({
                 id.includes("/renderer/hooks/useAssignee") ||
                 id.includes("/renderer/hooks/usePeople") ||
                 id.includes("/shared/collaboration") ||
-                id.includes("@planweave-ai/collaboration-contracts"),
+                id.includes("@planweave-ai/collaboration-protocol"),
               priority: 12
             },
             {

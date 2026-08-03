@@ -2,7 +2,7 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import {
   hostEnrollmentErrorSchema,
   type HostEnrollmentErrorCode
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import { HostEnrollmentError, HostEnrollmentService } from "./hostEnrollment.js";
 import { humanNetworkTransportAllowed } from "./insecureTransport.js";
 

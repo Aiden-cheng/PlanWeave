@@ -5,7 +5,7 @@ import type {
   CompletedContentVersionRef,
   ContentVersionAcknowledgement,
   ContentVersionAuthorityDiscoveryResult
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import type { CanvasScopeKey } from "./repository.js";
 
 /**

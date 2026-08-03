@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { operatorEnrollmentGrantResponseSchema } from "@planweave-ai/distributed-protocol";
+import { operatorEnrollmentGrantResponseSchema } from "@planweave-ai/agent-host-protocol";
 import type { PlanPackageManifest } from "@planweave-ai/runtime";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {

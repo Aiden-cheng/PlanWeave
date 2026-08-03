@@ -38,22 +38,22 @@ const skipBuild = args.includes("--skip-build");
 const keepTemp = args.includes("--keep-temp");
 
 const packOrder = [
-  "distributed-protocol",
-  "collaboration-contracts",
+  "agent-host-protocol",
+  "collaboration-protocol",
   "runtime",
   "server",
   "agent-host"
 ];
 
 const packageMeta = {
-  "distributed-protocol": {
-    name: "@planweave-ai/distributed-protocol",
-    dir: "packages/distributed-protocol",
+  "agent-host-protocol": {
+    name: "@planweave-ai/agent-host-protocol",
+    dir: "packages/agent-host-protocol",
     requiredPaths: ["dist/index.js", "dist/compatibility.js", "dist/version.js"]
   },
-  "collaboration-contracts": {
-    name: "@planweave-ai/collaboration-contracts",
-    dir: "packages/collaboration-contracts",
+  "collaboration-protocol": {
+    name: "@planweave-ai/collaboration-protocol",
+    dir: "packages/collaboration-protocol",
     requiredPaths: ["dist/index.js"]
   },
   runtime: {
@@ -317,9 +317,9 @@ async function main() {
     if (!skipBuild) {
       run("pnpm", [
         "--filter",
-        "@planweave-ai/distributed-protocol",
+        "@planweave-ai/agent-host-protocol",
         "--filter",
-        "@planweave-ai/collaboration-contracts",
+        "@planweave-ai/collaboration-protocol",
         "--filter",
         "@planweave-ai/runtime",
         "--filter",

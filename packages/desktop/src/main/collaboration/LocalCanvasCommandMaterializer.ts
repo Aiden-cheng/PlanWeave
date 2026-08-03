@@ -12,7 +12,7 @@ import type {
   CanvasJournalEntry,
   CanvasReconnectResponse,
   CompleteContentVersion
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { CollaborationClientError } from "./collaborationErrors.js";
 
 export type LocalCanvasCommandBinding = {

@@ -3,7 +3,7 @@ import {
   ACTIVITY_LIST_PAGE_DEFAULT,
   type ActivityRecord,
   type WorkItemRef
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { collaborationBridge } from "../bridge";
 import {
   buildActivityRowViewModel,

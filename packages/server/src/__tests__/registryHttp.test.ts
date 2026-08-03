@@ -1,6 +1,6 @@
 import { createServer, type Server as HttpServer } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
-import { actorRefSchema, type RegistryHttpService } from "@planweave-ai/collaboration-contracts";
+import { actorRefSchema, type RegistryHttpService } from "@planweave-ai/collaboration-protocol";
 import { handleRegistryHttpRequest, type RegistryHttpOptions } from "../registryHttp.js";
 import { applyMigrations } from "../migrations.js";
 import { HumanIdentityRepository } from "../identity/repository.js";

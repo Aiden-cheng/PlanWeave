@@ -7,7 +7,7 @@ import {
   type CanvasCommandAccepted,
   type CanvasCommandIntent,
   type CanvasJournalEntry
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { createTestWorkspace } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import {
   CanvasCommandRepository,

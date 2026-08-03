@@ -4,7 +4,7 @@ import {
   blockRefSchema,
   dispatchInputArtifactSchema,
   executionEnvelopeSchema
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
 import { withCanvasLock } from "../fs/withCanvasLock.js";
 import { loadPackage } from "../package/loadPackage.js";

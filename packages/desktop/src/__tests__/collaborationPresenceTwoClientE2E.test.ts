@@ -8,7 +8,7 @@ import {
   applyDefaultCanvasWorkspaceMigration,
   initWorkspace
 } from "@planweave-ai/runtime";
-import { exampleHumanDeviceToken } from "@planweave-ai/collaboration-contracts";
+import { exampleHumanDeviceToken } from "@planweave-ai/collaboration-protocol";
 import {
   basicManifest,
   createTestWorkspace,

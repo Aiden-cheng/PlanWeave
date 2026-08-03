@@ -1,7 +1,7 @@
 import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { CanvasCommandIntent } from "@planweave-ai/collaboration-contracts";
+import type { CanvasCommandIntent } from "@planweave-ai/collaboration-protocol";
 import {
   applyAuthorizedCanvasCommand,
   applyCanvasReplicaIntent,

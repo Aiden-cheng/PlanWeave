@@ -43,7 +43,7 @@ import {
   type RemoteOperationObservation,
   type WorkAuthorityProjection,
   type WorkItemRef
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 
 /**
  * Renderer-facing collaboration sync lifecycle.

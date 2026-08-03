@@ -16,7 +16,7 @@ import {
   type WorkspaceId,
   type WorkspaceIdentityView,
   type WorkspacePickerItem
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { hashHumanToken } from "./crypto.js";
 import type { SqliteDatabase } from "../sqlite.js";
 

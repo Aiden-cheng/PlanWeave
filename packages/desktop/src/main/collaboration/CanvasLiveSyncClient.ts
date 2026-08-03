@@ -6,7 +6,7 @@ import {
   type CanvasLiveSyncServerMessage,
   type CanvasRevision,
   type CollaborationConnectionProfile
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { CollaborationClientError } from "./collaborationErrors.js";
 import { reconnectDelay } from "./reconnectBackoff.js";
 import { redactCollaborationText } from "./redaction.js";

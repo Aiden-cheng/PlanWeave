@@ -8,7 +8,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import {
   CANVAS_PRESENCE_PROTOCOL_VERSION,
   exampleHumanDeviceToken
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   CollaborationClient,
   CollaborationCredentialVault,

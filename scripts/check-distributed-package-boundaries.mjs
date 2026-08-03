@@ -8,8 +8,8 @@ const sourceRoots = {
   runtime: resolve(repoRoot, "packages", "runtime", "src"),
   server: resolve(repoRoot, "packages", "server", "src"),
   agentHost: resolve(repoRoot, "packages", "agent-host", "src"),
-  protocol: resolve(repoRoot, "packages", "distributed-protocol", "src"),
-  collaborationContracts: resolve(repoRoot, "packages", "collaboration-contracts", "src")
+  protocol: resolve(repoRoot, "packages", "agent-host-protocol", "src"),
+  collaborationContracts: resolve(repoRoot, "packages", "collaboration-protocol", "src")
 };
 const sourceExtensions = new Set([".ts", ".tsx", ".mts", ".cts"]);
 const schemaOnlyNodeIoModules = new Set([

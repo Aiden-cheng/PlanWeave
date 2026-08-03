@@ -9,11 +9,11 @@ import {
   type OperatorEnrollmentGrantResponse,
   type OperatorHostPage,
   type OperatorHostView
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import {
   setupCodeIssueResponseSchema,
   type SetupCodeIssueResponse
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { z, type ZodType } from "zod";
 import {
   OperatorControlError,

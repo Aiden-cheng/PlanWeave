@@ -3,7 +3,7 @@ import type { Duplex } from "node:stream";
 import {
   humanObserverClientMessageSchema,
   humanObserverServerMessageSchema
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { WebSocket, WebSocketServer } from "ws";
 import {
   authenticateCollaborationForProject,

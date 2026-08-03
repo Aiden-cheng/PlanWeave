@@ -7,7 +7,7 @@ import {
   type CollaborationClientLimits,
   type SetupCodeRedeemDeviceRequest,
   type SetupCodeRedeemDeviceResponse
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   CollaborationClientError,
   collaborationErrorFromHttp,

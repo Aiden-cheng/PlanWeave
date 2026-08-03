@@ -3,7 +3,7 @@ import type { XYPosition, OnSelectionChangeParams } from "@xyflow/react";
 import {
   CANVAS_PRESENCE_MAX_SELECTION_IDS,
   canvasPresenceSelectionIdSchema
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { collaborationBridge } from "../bridge";
 import {
   CanvasPresenceController,

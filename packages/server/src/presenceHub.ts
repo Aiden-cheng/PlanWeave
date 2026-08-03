@@ -12,7 +12,7 @@ import {
   type CanvasPresenceServerMessage,
   type CanvasPresenceSession,
   type CanvasPresenceSessionId
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 
 export type CanvasPresenceScope = {
   workspaceId: string;

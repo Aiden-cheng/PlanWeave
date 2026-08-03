@@ -7,7 +7,7 @@ import type {
   ReviewAssignmentReadModel,
   WorkAuthorityProjection,
   WorkItemRef
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
 import {
   workItemKey,

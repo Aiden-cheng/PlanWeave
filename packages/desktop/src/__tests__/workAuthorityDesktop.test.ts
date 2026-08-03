@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   WorkAuthorityProjection,
   WorkItemRef
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   acquireCollaborationReadModelController,
   resetCollaborationReadModelHubForTests

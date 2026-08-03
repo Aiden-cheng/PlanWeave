@@ -5,7 +5,7 @@ import {
   exampleAuthoritativeContentVersion,
   exampleCompleteContentVersion,
   type AuthoritativeContentHead
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { createTestWorkspace } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { applyMigrations, latestCentralSchemaVersion } from "../migrations.js";
 import { migrations } from "../migrations/registry.js";

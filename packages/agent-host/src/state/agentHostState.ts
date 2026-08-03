@@ -3,7 +3,7 @@ import { z } from "zod";
 import type {
   HostReadinessObservation,
   InteractionSettlement
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import type {
   AgentHostRemoteExecutionIdentity,
   AgentHostRemoteExecutionRecord

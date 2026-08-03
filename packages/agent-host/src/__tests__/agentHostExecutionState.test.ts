@@ -2,7 +2,7 @@ import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { exampleExecuteDelivery } from "@planweave-ai/distributed-protocol";
+import { exampleExecuteDelivery } from "@planweave-ai/agent-host-protocol";
 import { openAgentHostState, type AgentHostState } from "../state/agentHostState.js";
 import { openAgentHostRemoteExecutionOutbox } from "../state/remoteExecutionOutbox.js";
 import { openAgentHostDatabase } from "../state/sqliteDatabase.js";

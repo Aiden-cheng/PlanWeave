@@ -7,7 +7,7 @@ import {
   canvasCommandOperationIdSchema,
   canvasCommandServerMessageSchema,
   type CanvasCommandServerMessage
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import {
   authenticateCollaborationForScope,

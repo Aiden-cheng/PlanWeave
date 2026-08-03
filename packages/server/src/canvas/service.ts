@@ -21,7 +21,7 @@ import {
   type CanvasCommandIntent,
   type CanvasSnapshotContent,
   type PackageSnapshotDigestManifest
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   applyCanvasReplicaIntent,
   decodeCanvasReplicaDocument,

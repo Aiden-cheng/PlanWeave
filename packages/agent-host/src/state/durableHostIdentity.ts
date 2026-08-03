@@ -1,6 +1,6 @@
 import { lstat, mkdir, open, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
+import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
 
 const durableHostIdentitySchema = z

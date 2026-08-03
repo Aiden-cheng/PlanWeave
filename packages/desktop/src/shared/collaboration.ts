@@ -79,7 +79,7 @@ import {
   type AccessMutationResult,
   type LoopbackProjectRegistrationView,
   type LoopbackTrustedProjectScope
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import type {
   CollaborationActivityListQueryInput,
   CollaborationAssignmentListQueryInput,
@@ -671,7 +671,7 @@ export type PlanWeaveCollaborationApi = {
   ) => Promise<{ state: "copied"; copiedAt: string }>;
   exportDeploymentComposeBundle: (
     input: Extract<DesktopDeploymentActionRequest, { action: "export_supported_compose_bundle" }>
-  ) => Promise<import("@planweave-ai/collaboration-contracts").DeploymentBundleExportView>;
+  ) => Promise<import("@planweave-ai/collaboration-protocol").DeploymentBundleExportView>;
   validateDeploymentConnectivity: (
     input: Extract<DesktopDeploymentActionRequest, { action: "validate_connectivity" }>
   ) => Promise<ConnectivityValidationView>;

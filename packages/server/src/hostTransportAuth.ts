@@ -1,5 +1,5 @@
 import type { IncomingMessage } from "node:http";
-import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
+import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { AgentHostRepository, type AgentHost } from "./hosts.js";
 import { humanNetworkTransportAllowed } from "./insecureTransport.js";
 

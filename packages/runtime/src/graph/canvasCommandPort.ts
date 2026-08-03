@@ -6,7 +6,7 @@ import {
   packageSnapshotDigestManifestSchema,
   type CanvasCommandIntent,
   type PackageSnapshotDigestManifest
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   buildCanvasCommandApplication,
   CanvasCommandMutationError,

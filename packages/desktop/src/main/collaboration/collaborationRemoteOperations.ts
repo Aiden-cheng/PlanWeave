@@ -9,7 +9,7 @@ import {
   type RemoteInteractionPage,
   type RemoteInteractionView,
   type RemoteOperationObservation
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { z } from "zod";
 import {
   collaborationRemoteActionInputSchema,

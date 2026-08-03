@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
   ActivityRecord,
   CommentDisplayProjection
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   buildActivityRowViewModel,
   buildCommentRowViewModel,

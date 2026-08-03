@@ -1,4 +1,4 @@
-import type { CanvasCommandIntent } from "@planweave-ai/collaboration-contracts";
+import type { CanvasCommandIntent } from "@planweave-ai/collaboration-protocol";
 import {
   buildPlanPackageBlockFieldEditMutation,
   buildPlanPackageTaskFieldEditMutation

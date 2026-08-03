@@ -4,7 +4,7 @@ import {
   parseCollaborationSetupHandoffV1,
   type ActiveWorkspaceConnectionView,
   type WorkspacePickerItem
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";

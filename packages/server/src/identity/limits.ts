@@ -4,7 +4,7 @@
  * only digests appear in durable metadata schemas.
  */
 
-/** Opaque id max length (aligned with distributed-protocol wire identifiers). */
+/** Opaque id max length (aligned with agent-host-protocol wire identifiers). */
 export const HUMAN_OPAQUE_ID_MAX_LENGTH = 128 as const;
 
 /** Human principal / device label display name budget. */

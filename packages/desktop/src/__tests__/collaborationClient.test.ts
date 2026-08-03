@@ -16,7 +16,7 @@ import {
   CONTENT_VERSION_MAX_TOTAL_BYTES,
   contentVersionTransferMediaType,
   HUMAN_OBSERVER_PROTOCOL_VERSION
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   CollaborationClient,
   CollaborationClientError,

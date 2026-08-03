@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import type { AssignmentTarget } from "@planweave-ai/collaboration-contracts";
+import type { AssignmentTarget } from "@planweave-ai/collaboration-protocol";
 import { ChevronDownIcon, RefreshCwIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

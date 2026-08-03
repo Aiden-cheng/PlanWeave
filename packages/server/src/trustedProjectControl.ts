@@ -2,7 +2,7 @@ import {
   canvasScopeRefSchema,
   type ActorRef,
   type CanvasScopeRef
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import type { ProjectAccessRepository } from "./projectAccessRepository.js";
 import type { TrustedRuntimeRegistry } from "./runtimeProjectRegistry.js";
 

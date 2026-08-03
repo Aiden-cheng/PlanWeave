@@ -21,7 +21,7 @@ import {
   parseHumanObserverServerMessage
 } from "../index.js";
 
-describe("collaboration-contracts", () => {
+describe("collaboration-protocol", () => {
   it("parses explicitly enabled private-LAN HTTP and rejects public insecure HTTP", () => {
     expect(exampleConnectionProfile.projectId).toBe("project-demo-001");
     expect(exampleLoopbackConnectionProfile.allowInsecureTransport).toBe(true);

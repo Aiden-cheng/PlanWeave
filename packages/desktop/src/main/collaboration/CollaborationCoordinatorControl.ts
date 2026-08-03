@@ -11,7 +11,7 @@ import {
   type LoopbackServerProfile,
   type LoopbackTrustedProjectScope,
   type LoopbackProjectRegistrationView
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { listProjects, resolveTaskCanvasWorkspace } from "@planweave-ai/runtime";
 import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:net";

@@ -1,4 +1,4 @@
-import type { ActorRef } from "@planweave-ai/collaboration-contracts";
+import type { ActorRef } from "@planweave-ai/collaboration-protocol";
 import type { ProjectAccessRepository } from "../projectAccessRepository.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import type { CollaborationAuthContext } from "../identity/auth.js";

@@ -3,7 +3,7 @@ import {
   WORKSPACE_PICKER_MAX_ITEMS_PER_PAGE,
   humanDeviceTokenSchema,
   workspacePickerPageSchema
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { humanTransportAllowed } from "./http.js";
 import { WorkspaceIdentityRepository } from "./workspaceRepository.js";
 

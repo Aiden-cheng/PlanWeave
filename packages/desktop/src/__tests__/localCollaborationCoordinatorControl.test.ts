@@ -4,7 +4,7 @@ import {
   type LoopbackProjectRegistrationView,
   type LoopbackServerStatus,
   type LoopbackTrustedProjectScope
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import type { ServerConfig } from "@planweave-ai/server";
 import { describe, expect, it, vi } from "vitest";
 import { LocalCollaborationCoordinatorControl } from "../main/collaboration/CollaborationCoordinatorControl";

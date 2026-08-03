@@ -10,7 +10,7 @@ import {
   type PackageSnapshot,
   type ProjectAccessPage,
   type RestorePackageSnapshotResult
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { CollaborationClient } from "./CollaborationClient.js";
 import { CollaborationClientError, collaborationErrorFromUnknown } from "./collaborationErrors.js";
 

@@ -12,7 +12,7 @@ import {
   type CanvasJournalEntry,
   type CanvasReconnectResponse,
   type CanvasRevision
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { CollaborationClientError } from "./collaborationErrors.js";
 import type { CollaborationHttpTransport } from "./collaborationHttpTransport.js";
 import {

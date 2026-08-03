@@ -16,11 +16,11 @@ import {
   operatorHostPageSchema,
   operatorHostViewSchema,
   operatorPageQuerySchema
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import {
   remoteDispatchIntentSchema,
   type RemoteDispatchIntent
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { remoteBlockBindingViewSchema } from "@planweave-ai/runtime";
 import { z } from "zod";
 import { dispatchStatusSchema } from "./dispatches.js";

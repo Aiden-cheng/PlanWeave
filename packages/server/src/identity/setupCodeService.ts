@@ -25,8 +25,8 @@ import {
   type SetupCodeRedeemResponse,
   type SetupCodeRevocation,
   type WorkspaceConnectionProfile
-} from "@planweave-ai/collaboration-contracts";
-import { canonicalizeJson } from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/collaboration-protocol";
+import { canonicalizeJson } from "@planweave-ai/agent-host-protocol";
 import { AgentHostRepository } from "../hosts.js";
 import type { OperatorPrincipal } from "../operatorAuth.js";
 import { inWriteTransaction, type SqliteDatabase } from "../sqlite.js";

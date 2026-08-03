@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import * as nodePath from "node:path";
-import { type CompleteContentVersion } from "@planweave-ai/collaboration-contracts";
+import { type CompleteContentVersion } from "@planweave-ai/collaboration-protocol";
 import { resolveTaskCanvasWorkspace } from "./canvasApi.js";
 import { getProjectOverview, listProjects, removeProject } from "./projectApi.js";
 import { layoutPathForWorkspace, parseDesktopLayoutForPackage } from "./layoutStore.js";

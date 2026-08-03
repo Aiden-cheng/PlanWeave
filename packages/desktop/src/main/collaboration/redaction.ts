@@ -1,7 +1,7 @@
 import {
   HUMAN_DEVICE_TOKEN_PREFIX,
   PROJECT_INVITATION_TOKEN_PREFIX
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 
 const TOKEN_LIKE = /(pw_hdev_[A-Za-z0-9_-]+|pw_inv_[A-Za-z0-9_-]+|Bearer\s+[A-Za-z0-9._~+/-]+=*)/gi;
 

@@ -22,7 +22,7 @@ export const packageVersionSchema = z
 
 export type PackageVersion = z.infer<typeof packageVersionSchema>;
 
-export type PackageRole = "server" | "agent-host" | "distributed-protocol";
+export type PackageRole = "server" | "agent-host" | "agent-host-protocol";
 
 export type CompatibilityBounds = {
   /** Sole supported Agent Host ↔ Server wire protocol version. */
@@ -53,7 +53,7 @@ export type CompatibilityBounds = {
 
 export const PLANWEAVE_COMPATIBILITY_BOUNDS: CompatibilityBounds = {
   agentHostProtocolVersion,
-  packageMajorMustMatch: ["server", "agent-host", "distributed-protocol"],
+  packageMajorMustMatch: ["server", "agent-host", "agent-host-protocol"],
   gracefulPackageDowngrade: "same-major-only",
   rollbackConstraints: {
     resetDatabases: false,
@@ -135,7 +135,7 @@ export function assertMatchingPackageMajors(versions: {
       return {
         ok: false,
         code: "package_major_mismatch",
-        message: `distributed-protocol major ${protocolMajor} is incompatible with Server major ${serverMajor}.`
+        message: `agent-host-protocol major ${protocolMajor} is incompatible with Server major ${serverMajor}.`
       };
     }
   }

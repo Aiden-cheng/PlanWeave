@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   assertWorkspaceIdentityViewRedacted,
   opaqueIdentifierSchema
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { z } from "zod";
 import { OperatorTokenRegistry, type OperatorPrincipal } from "../operatorAuth.js";
 import { workspaceIdentityReadModelSchema, type WorkspaceIdentityReadModel } from "./dtos.js";

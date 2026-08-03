@@ -10,7 +10,7 @@ import {
   type DeploymentTargetDraft,
   type DeploymentGuidanceView,
   type ConnectivityValidationView
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { serverConfigSchema, type ServerConfig } from "@planweave-ai/server";
 import { lstat, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, relative, resolve } from "node:path";

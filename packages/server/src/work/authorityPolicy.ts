@@ -7,7 +7,7 @@ import {
   type HostAuthorizationDecisionReason,
   type ExactBlockExecutionScope,
   type ExecutionTarget
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import type { AgentHost } from "../hosts.js";
 import {
   hostExecutionProfileAvailability,

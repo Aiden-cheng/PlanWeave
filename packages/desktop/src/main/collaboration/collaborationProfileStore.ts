@@ -5,7 +5,7 @@ import {
   opaqueIdentifierSchema,
   timestampSchema,
   type CollaborationConnectionProfile
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { z } from "zod";
 import { desktopHomePaths } from "../planweaveHomePaths.js";
 

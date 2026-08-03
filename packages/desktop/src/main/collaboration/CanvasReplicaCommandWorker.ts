@@ -6,7 +6,7 @@ import type {
   CanvasJournalEntry,
   CanvasReconnectResponse,
   CompleteContentVersion
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import type {
   CanvasReplicaPendingOperation,
   CanvasReplicaScope

@@ -1,5 +1,5 @@
 import { rm } from "node:fs/promises";
-import { PACKAGE_SNAPSHOT_MAX_RETAINED } from "@planweave-ai/collaboration-contracts";
+import { PACKAGE_SNAPSHOT_MAX_RETAINED } from "@planweave-ai/collaboration-protocol";
 import { backingPath } from "./packageSnapshotBacking.js";
 import type { SqliteDatabase } from "./sqlite.js";
 

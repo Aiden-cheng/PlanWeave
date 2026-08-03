@@ -13,7 +13,7 @@ import {
   type SetupCodeGrantView,
   type SetupCodeRevocation,
   type SetupCredentialPurpose
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import type { SqliteDatabase } from "../sqlite.js";
 import { hashSetupCode, mintSetupCodeToken } from "./setupCodeCrypto.js";
 

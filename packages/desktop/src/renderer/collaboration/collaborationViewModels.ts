@@ -2,7 +2,7 @@ import type {
   AssignmentDisplayProjection,
   CommentDisplayProjection,
   WorkItemRef
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   workItemKey,
   type CollaborationHostProjection,

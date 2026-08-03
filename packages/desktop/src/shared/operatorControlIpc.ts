@@ -1,6 +1,6 @@
 /**
  * Operator-control IPC names are loadable by the sandboxed preload process.
- * Keep this module free of runtime distributed-protocol imports.
+ * Keep this module free of runtime agent-host-protocol imports.
  */
 export const operatorControlInvokeChannels = {
   getStatus: "planweave-operator:getStatus",

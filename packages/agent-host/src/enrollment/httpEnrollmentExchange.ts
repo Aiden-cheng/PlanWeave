@@ -3,7 +3,7 @@ import {
   hostEnrollmentErrorSchema,
   type HostEnrollmentCompleted,
   type HostEnrollmentRequest
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import type { AgentHostEnrollmentExchange } from "./enrollmentService.js";
 
 const MAX_RESPONSE_BYTES = 16_384;

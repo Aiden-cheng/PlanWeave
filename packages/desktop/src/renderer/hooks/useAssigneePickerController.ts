@@ -6,7 +6,7 @@ import type {
   ExecutionTarget,
   WorkAuthorityProjection,
   WorkItemRef
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { collaborationBridge } from "../bridge";
 import {
   assigneeDisplayLabelsFromTranslator,

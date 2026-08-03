@@ -5,7 +5,7 @@ import {
   serverEventSchema,
   type HostEvent as SharedHostEvent,
   type ServerEvent as SharedServerEvent
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   parseAgentHostEvent,

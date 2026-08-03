@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { WorkItemRef } from "@planweave-ai/collaboration-contracts";
+import type { WorkItemRef } from "@planweave-ai/collaboration-protocol";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { createTranslator } from "../i18n";

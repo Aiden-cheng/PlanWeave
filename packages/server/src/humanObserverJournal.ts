@@ -2,7 +2,7 @@ import {
   humanObserverEventSchema,
   workspaceIdSchema,
   type HumanObserverEvent
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { z } from "zod";
 import type { SqliteDatabase } from "./sqlite.js";
 

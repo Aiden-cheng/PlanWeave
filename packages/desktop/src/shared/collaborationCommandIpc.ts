@@ -2,7 +2,7 @@ import { z } from "zod";
 import {
   collaborationBoundaryErrorSchema,
   type CollaborationBoundaryErrorKind
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 
 export const collaborationCommandErrorSchema = collaborationBoundaryErrorSchema
   .extend({

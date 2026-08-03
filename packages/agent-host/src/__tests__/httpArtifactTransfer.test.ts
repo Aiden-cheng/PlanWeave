@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
-import { exampleExecuteDelivery } from "@planweave-ai/distributed-protocol";
+import { exampleExecuteDelivery } from "@planweave-ai/agent-host-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { HttpArtifactClient } from "../artifacts/httpArtifactTransfer.js";
 

@@ -7,7 +7,7 @@ import {
   executeBlockCommandSchema,
   executionEnvelopeSchema,
   hashExecutionEnvelope
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import {
   ACP_SDK_AUTHORITY,
   executeAcp,

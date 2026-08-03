@@ -3,7 +3,7 @@ import {
   hashExecutionEnvelope,
   mailboxCommandSchema,
   type ExecutionEnvelope
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import { HostReservationRepository } from "../../hostReservations.js";
 import { RemoteOperationRepository } from "../../remoteOperations.js";
 import { SqliteRemoteDispatchPersistence } from "../../remoteCoordinatorPersistence.js";

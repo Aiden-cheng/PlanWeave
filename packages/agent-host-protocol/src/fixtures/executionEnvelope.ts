@@ -27,7 +27,7 @@ export const exampleExecutionEnvelopeInput = {
     {
       blockRef: "FND-001#B-001",
       outcome: "completed" as const,
-      summary: "Created schema-only distributed-protocol package.",
+      summary: "Created schema-only agent-host-protocol package.",
       reportArtifactRef: `artifact:sha256:${"b".repeat(64)}`
     }
   ],
@@ -62,4 +62,4 @@ export const exampleExecutionEnvelopeInput = {
  * Update only when the fixture or canonicalization rules intentionally change.
  */
 export const exampleExecutionEnvelopeDigest =
-  "envelope:sha256:ac4adf33a3d831bbcac39d65de3d1410f7fed5d58fbde62cd4ed9b42d55bad5e";
+  "envelope:sha256:4e2d0ec6f0e9db7f3663c3ca5642a19c2647f1d40f39a401b48d5bf8b78da43d";

@@ -1,5 +1,5 @@
 import { WebSocket } from "ws";
-import type { HostReadinessObservation } from "@planweave-ai/distributed-protocol";
+import type { HostReadinessObservation } from "@planweave-ai/agent-host-protocol";
 import {
   parseAgentHostCapabilities,
   parseAgentHostDispatchResult,

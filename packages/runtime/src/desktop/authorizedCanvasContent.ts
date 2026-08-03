@@ -6,7 +6,7 @@ import {
   contentVersionDesktopLayoutMemberPath,
   type CompleteContentVersion,
   type PackageSnapshotDigestManifest
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { capturePackageSnapshot } from "../package/packageSnapshot.js";
 import { resolvePackageWorkspace } from "../package/loadPackage.js";
 import type { PackageWorkspaceRef } from "../types.js";

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { HostReadinessObservation } from "@planweave-ai/distributed-protocol";
+import type { HostReadinessObservation } from "@planweave-ai/agent-host-protocol";
 import { parseAgentHostEvent, type HostEvent } from "../protocol.js";
 import { outboxRowSchema } from "./agentHostStateRecords.js";
 import type { SqliteDatabase } from "./sqliteDatabase.js";

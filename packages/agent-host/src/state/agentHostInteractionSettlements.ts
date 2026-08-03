@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   interactionSettlementSchema,
   type InteractionSettlement
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import { parseAgentHostEvent } from "../protocol.js";
 import { AgentHostEventOutbox } from "./agentHostEventOutbox.js";
 import { AgentHostExecutionRepository } from "./agentHostExecutionRepository.js";

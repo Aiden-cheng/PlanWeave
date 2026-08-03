@@ -13,7 +13,7 @@ import {
   serverEventSchema,
   type HostEvent,
   type ServerEvent
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { AgentHostExecutionError, type AgentHostExecutor } from "../execution/agentHostExecutor.js";

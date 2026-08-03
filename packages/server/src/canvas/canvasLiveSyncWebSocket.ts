@@ -8,7 +8,7 @@ import {
   type CanvasJournalEntry,
   type CanvasLiveSyncErrorCode,
   type CanvasLiveSyncServerMessage
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import {
   authenticateCollaborationForProject,

@@ -8,7 +8,7 @@ import {
   exampleCanvasCommandStaleRevisionRejected,
   exampleCanvasReconnectAfterDisconnect,
   exampleHumanDeviceToken
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { CanvasCommandSessionState, CollaborationClient } from "../main/collaboration/index.js";
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;

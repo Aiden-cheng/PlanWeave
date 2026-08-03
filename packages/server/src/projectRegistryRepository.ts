@@ -3,7 +3,7 @@ import {
   canvasScopeRefSchema,
   type CanvasAccessRecord,
   type ProjectAccessRecord
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { z } from "zod";
 import {
   aclMigrationIdFor,

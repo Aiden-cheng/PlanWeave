@@ -27,4 +27,4 @@ export {
   type NormalizedFailure as ProtocolDispatchFailure,
   type ObservationEvent,
   type ServerEvent
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";

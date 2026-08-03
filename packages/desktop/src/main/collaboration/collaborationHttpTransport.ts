@@ -3,7 +3,7 @@ import {
   collaborationClientLimitsSchema,
   collaborationServerOriginSchema,
   type CollaborationClientLimits
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import type { ZodType } from "zod";
 import {
   CollaborationClientError,

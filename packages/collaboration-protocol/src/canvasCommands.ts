@@ -1,4 +1,4 @@
-import { blockRefSchema, opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
+import { blockRefSchema, opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
 import {
   CANVAS_COMMAND_LAYOUT_COORDINATE_ABS_MAX,

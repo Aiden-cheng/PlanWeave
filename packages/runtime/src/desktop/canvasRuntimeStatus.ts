@@ -1,7 +1,7 @@
 import {
   canvasRuntimeStatusProjectionSchema,
   type CanvasRuntimeStatusProjection
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { loadPlanGraphPackage } from "../plangraph/index.js";
 import { resolveTaskCanvasWorkspace } from "./canvasApi.js";
 import {

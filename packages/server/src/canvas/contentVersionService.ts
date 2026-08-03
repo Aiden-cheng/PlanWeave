@@ -10,7 +10,7 @@ import {
   type ContentVersionAcknowledgement,
   type ContentVersionAuthorityDiscoveryResult,
   type FirstContentVersionPublishResult
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import type { CollaborationAuthContext } from "../identity/auth.js";
 import type { ProjectAccessRepository } from "../projectAccessRepository.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";

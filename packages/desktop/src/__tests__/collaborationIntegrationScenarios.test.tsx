@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   exampleObserverCatchupRequired,
   type WorkItemRef
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   acquireCollaborationReadModelController,
   resetCollaborationReadModelHubForTests

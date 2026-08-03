@@ -16,7 +16,7 @@ import { WebSocketUpgradeRouter } from "../webSocketUpgradeRouter.js";
 import {
   canonicalContentVersionDigestPayload,
   type CompleteContentVersion
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 
 const servers: HttpServer[] = [];
 const databases: SqliteDatabase[] = [];

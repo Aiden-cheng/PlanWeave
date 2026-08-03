@@ -15,7 +15,7 @@ import {
   type NormalizedFailure,
   type ServerEvent,
   type ServerToHostCommand
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 
 export type {
   ArtifactRef,

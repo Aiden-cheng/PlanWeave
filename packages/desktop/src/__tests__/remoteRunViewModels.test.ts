@@ -3,7 +3,7 @@ import type {
   AssignmentDisplayProjection,
   RemoteInteractionView,
   RemoteOperationObservation
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   adaptRemoteAcpEvents,
   buildRemoteActionIdentity,

@@ -1,4 +1,4 @@
-import { artifactMediaTypeSchema as sharedArtifactMediaTypeSchema } from "@planweave-ai/distributed-protocol";
+import { artifactMediaTypeSchema as sharedArtifactMediaTypeSchema } from "@planweave-ai/agent-host-protocol";
 import { describe, expect, it } from "vitest";
 import { artifactMediaTypeSchema } from "../artifactMediaType.js";
 

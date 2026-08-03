@@ -4,7 +4,7 @@ import "@testing-library/jest-dom/vitest";
 import {
   contentVersionDesktopReadModelSchema,
   type ContentVersionDesktopReadModel
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";

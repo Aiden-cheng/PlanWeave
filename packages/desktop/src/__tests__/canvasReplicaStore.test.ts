@@ -4,7 +4,7 @@ import type {
   CanvasCommandIntent,
   CanvasJournalEntry,
   CanvasReconnectResponse
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   applyCanvasReplicaIntent,
   encodeCanvasReplicaDocument,

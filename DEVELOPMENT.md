@@ -11,8 +11,8 @@ packages/mcp                       Local HTTP MCP server for plan authoring clie
 packages/desktop                   Electron desktop canvas (private package; not npm-published)
 packages/server                    Coordinator: operator HTTP, Host WSS, human collab, remote ops
 packages/agent-host                Agent Host daemon: enroll, preflight, ACP-only remote runs
-packages/distributed-protocol      Schema-only Agent Host wire / compatibility contracts
-packages/collaboration-contracts   Schema-only human collaboration wire DTOs for Desktop/Server
+packages/agent-host-protocol      Schema-only Agent Host wire / compatibility contracts
+packages/collaboration-protocol   Schema-only human collaboration wire DTOs for Desktop/Server
 examples                           Example PlanWeave packages
 scripts                            Repository checks, pack smoke, release-gate helpers
 skills                             Agent skills distributed from this repository
@@ -163,8 +163,8 @@ Packages: `@planweave-ai/server` → `planweave-server`, `@planweave-ai/agent-ho
 Build order for the distributed graph (also used by `pnpm pack:distributed`):
 
 ```bash
-pnpm --filter @planweave-ai/distributed-protocol build
-pnpm --filter @planweave-ai/collaboration-contracts build
+pnpm --filter @planweave-ai/agent-host-protocol build
+pnpm --filter @planweave-ai/collaboration-protocol build
 pnpm --filter @planweave-ai/runtime build
 pnpm --filter @planweave-ai/server build
 pnpm --filter @planweave-ai/agent-host build
@@ -215,7 +215,7 @@ Print the live release checklist (deterministic CI suite, local real ACP, remote
 ```bash
 node scripts/planweave-release-gate.mjs --checklist
 pnpm exec vitest run packages/server/src/__tests__/releaseGate.test.ts \
-  packages/distributed-protocol/src/__tests__/compatibility.test.ts
+  packages/agent-host-protocol/src/__tests__/compatibility.test.ts
 ```
 
 Do not treat skipped `PLANWEAVE_REAL_ACP` or `PLANWEAVE_VPS_E2E` evidence as a release pass. Run both live tiers in hard mode, then evaluate their current sanitized evidence with:

@@ -12,7 +12,7 @@ import {
   type ProjectAccessDecision,
   type ProjectAccessRecord,
   type CanvasAccessRecord
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import type { SqliteDatabase } from "./sqlite.js";
 import {
   activeWorkspacePrincipal,

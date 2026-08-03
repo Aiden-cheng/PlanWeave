@@ -4,7 +4,7 @@ import {
   COMMENT_LIST_PAGE_DEFAULT,
   type CommentDisplayProjection,
   type WorkItemRef
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { collaborationBridge } from "../bridge";
 import {
   createStagedAttachmentFromFile,

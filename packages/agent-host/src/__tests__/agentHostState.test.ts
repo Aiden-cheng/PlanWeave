@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   agentHostProtocolGoldenFixtures,
   exampleExecuteDelivery
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import { openAgentHostState, type AgentHostState } from "../state/agentHostState.js";
 
 const directories: string[] = [];

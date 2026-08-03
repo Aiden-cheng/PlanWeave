@@ -40,7 +40,7 @@ import { AuthorityRepository } from "./work/authorityRepository.js";
 import { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
 import { ProjectAccessRepository } from "./projectAccessRepository.js";
 import { evaluateHostAuthorization } from "./work/authorityPolicy.js";
-import { hostAuthorizationFactsSchema } from "@planweave-ai/collaboration-contracts";
+import { hostAuthorizationFactsSchema } from "@planweave-ai/collaboration-protocol";
 
 export type RemoteBlockCoordinationOptions = {
   leaseDurationMs: number;

@@ -6,7 +6,7 @@ import {
   assertAgentHostProtocolCompatible,
   assertMatchingPackageMajors,
   packageVersionSchema
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import { serverPackageVersion } from "../packageInfo.js";
 import {
   RELEASE_GATE_EVIDENCE_MAX_AGE_HOURS,

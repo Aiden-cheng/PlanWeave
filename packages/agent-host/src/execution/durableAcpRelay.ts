@@ -1,4 +1,4 @@
-import type { InteractionSettlement, MailboxCommand } from "@planweave-ai/distributed-protocol";
+import type { InteractionSettlement, MailboxCommand } from "@planweave-ai/agent-host-protocol";
 import type {
   AcpEngineElicitationRequest,
   AcpEngineInteractionContext,

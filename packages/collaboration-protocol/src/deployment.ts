@@ -1,4 +1,4 @@
-import { capabilitiesSchema, opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
+import { capabilitiesSchema, opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
 import { collaborationServerOriginSchema, isLoopbackHostname } from "./connection.js";
 import { timestampSchema, workspaceScopeRefSchema } from "./primitives.js";

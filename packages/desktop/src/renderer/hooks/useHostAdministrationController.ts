@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { OperatorHostPage, OperatorHostView } from "@planweave-ai/distributed-protocol";
+import type { OperatorHostPage, OperatorHostView } from "@planweave-ai/agent-host-protocol";
 import {
   OperatorControlError,
   type OperatorHostBootstrapConfig,

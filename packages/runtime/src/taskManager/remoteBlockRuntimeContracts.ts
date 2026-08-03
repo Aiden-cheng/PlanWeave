@@ -7,7 +7,7 @@ import {
   normalizedFailureSchema,
   opaqueIdentifierSchema,
   OUTPUT_MAX_ARTIFACT_BYTES
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
 import {
   activeRemoteBlockOwnershipSchema,

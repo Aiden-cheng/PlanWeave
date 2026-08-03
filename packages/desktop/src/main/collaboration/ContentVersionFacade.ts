@@ -7,7 +7,7 @@ import {
   type CanvasAccessRecord,
   type CompletedContentVersionRef,
   type ContentVersionDesktopReadModel
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   captureAuthorizedCanvasContent,
   createManagedProjectFromAuthoritativeContent,

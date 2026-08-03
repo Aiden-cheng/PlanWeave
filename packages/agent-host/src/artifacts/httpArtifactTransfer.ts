@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { artifactMediaTypeSchema } from "@planweave-ai/distributed-protocol";
+import { artifactMediaTypeSchema } from "@planweave-ai/agent-host-protocol";
 import type {
   AgentHostArtifactDownload,
   AgentHostArtifactInput,

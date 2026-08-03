@@ -6,7 +6,7 @@ import {
   parseInteractionSettlementForRequest,
   type InteractionRequest,
   type InteractionSettlement
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import { redactRunnerEventText } from "@planweave-ai/runtime";
 import { z } from "zod";
 import { HostEventInbox } from "./hostEvents.js";

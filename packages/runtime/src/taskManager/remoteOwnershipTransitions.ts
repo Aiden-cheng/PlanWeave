@@ -9,7 +9,7 @@ import {
   type RemoteInterruption,
   type RemoteOperationReceipt
 } from "../schema/remoteOwnership.js";
-import type { NormalizedFailure } from "@planweave-ai/distributed-protocol";
+import type { NormalizedFailure } from "@planweave-ai/agent-host-protocol";
 import type { BlockState, BlockStatus, BlockType } from "../types.js";
 
 export type RemoteOwnershipConflictCode =

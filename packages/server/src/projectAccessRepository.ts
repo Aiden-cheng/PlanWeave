@@ -18,7 +18,7 @@ import {
   type ProjectAccessDecision,
   type ProjectAccessRecord,
   type CanvasAccessRecord
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { z } from "zod";
 import { inWriteTransaction, type SqliteDatabase } from "./sqlite.js";
 import { assertNoPendingSnapshotRestore } from "./authorizationFence.js";

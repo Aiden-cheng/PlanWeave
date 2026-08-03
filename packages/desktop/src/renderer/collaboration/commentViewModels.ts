@@ -7,7 +7,7 @@ import {
   type ActivityType,
   type CommentDisplayProjection,
   type WorkItemRef
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import type { CollaborationSyncPhase } from "../../shared/collaborationReadModels.js";
 
 export type CommentsPanelMode =

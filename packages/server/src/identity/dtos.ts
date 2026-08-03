@@ -5,15 +5,15 @@ import {
   workspaceHumanPrincipalViewSchema,
   workspaceIdentityViewSchema,
   workspaceMembershipViewSchema
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 export {
   humanRevokeInvitationsRequestSchema,
   humanRevokeInvitationsResponseSchema
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 export type {
   HumanRevokeInvitationsRequest,
   HumanRevokeInvitationsResponse
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   HUMAN_DEVICE_LABEL_MAX_LENGTH,
   HUMAN_DISPLAY_NAME_MAX_LENGTH,

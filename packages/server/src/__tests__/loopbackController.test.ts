@@ -4,7 +4,7 @@ import {
   loopbackServerProfileSchema,
   type ActorRef,
   type CanvasScopeRef
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { serverReadinessSchema } from "../readiness.js";
 import { serverConfigSchema, type ServerConfig } from "../config.js";
 import type { DistributedServerProcess } from "../serverServe.js";

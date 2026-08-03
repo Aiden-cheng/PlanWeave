@@ -1,6 +1,6 @@
-import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
+import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
-import { workspaceIdSchema } from "@planweave-ai/collaboration-contracts";
+import { workspaceIdSchema } from "@planweave-ai/collaboration-protocol";
 import { capabilitiesSchema } from "../protocol.js";
 import type { SqliteDatabase } from "../sqlite.js";
 import { WORK_ASSIGNMENT_ERROR_MESSAGES, type WorkAssignmentErrorCode } from "./errors.js";

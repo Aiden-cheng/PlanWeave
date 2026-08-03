@@ -6,7 +6,7 @@ import {
   contentVersionTransferMediaType,
   compareContentVersionMemberPaths,
   type CompletedContentVersionRef
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import type { CanvasScopeKey } from "./repository.js";
 import { ContentVersionRepository } from "./contentVersionRepository.js";
 

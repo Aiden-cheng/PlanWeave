@@ -13,8 +13,8 @@ import {
   type ExecutionTargetRecord,
   type ReviewAssignmentRecord,
   type ResponsibilityRecord
-} from "@planweave-ai/collaboration-contracts";
-import { blockRefSchema, opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/collaboration-protocol";
+import { blockRefSchema, opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
 
 export const authorityScopeSchema = collaborationWorkScopeSchema;

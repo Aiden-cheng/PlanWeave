@@ -18,12 +18,12 @@ import {
   HUMAN_COMMENT_BODY_MAX_LENGTH,
   HUMAN_OBSERVER_MAX_PAYLOAD_BYTES,
   WORK_ASSIGNMENT_BATCH_MAX
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   EXECUTION_ENVELOPE_MAX_BYTES,
   OUTPUT_MAX_ARTIFACT_BYTES,
   OUTPUT_MAX_ARTIFACT_COUNT
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import { CommentAttachmentBlobStore } from "../attachments/blobStore.js";
 import {
   COMMENT_ATTACHMENT_MAX_BYTES as SERVER_COMMENT_ATTACHMENT_MAX_BYTES,

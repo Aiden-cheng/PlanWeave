@@ -3,8 +3,8 @@ import {
   credentialSha256Schema,
   operatorSessionIdSchema,
   type OperatorSession
-} from "@planweave-ai/collaboration-contracts";
-import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/collaboration-protocol";
+import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
 import { operatorCredentialSchema, type OperatorCredential } from "../operatorAuth.js";
 import { inWriteTransaction, type SqliteDatabase } from "../sqlite.js";

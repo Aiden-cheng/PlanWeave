@@ -6,7 +6,7 @@ import {
   type CompleteContentVersion,
   type ContentVersionMember,
   type ContentVersionMemberKind
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { manifestSchema } from "../schema/manifest.js";
 import type { PlanPackageManifest } from "../types.js";
 import { desktopLayoutFileSchema, type DesktopLayout } from "./types/desktopLayoutSchema.js";

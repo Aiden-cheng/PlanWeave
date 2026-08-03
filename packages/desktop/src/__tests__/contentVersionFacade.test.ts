@@ -7,11 +7,11 @@ import type {
   ContentVersionAcknowledgement,
   ContentVersionAuthorityDiscoveryResult,
   FirstContentVersionPublishResult
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   completedContentVersionRefSchema,
   type CompletedContentVersionRef
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { ContentVersionFacade } from "../main/collaboration/ContentVersionFacade.js";
 import {
   CollaborationContentReplicaStore,

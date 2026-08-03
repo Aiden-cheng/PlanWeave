@@ -4,7 +4,7 @@ import {
   executionAttemptIdSchema,
   leaseIdSchema,
   opaqueIdentifierSchema
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
 import { COLLABORATION_REVISION_MAX, HOST_AUTHORIZATION_CAPABILITIES_MAX } from "./limits.js";
 import { exactBlockExecutionScopeSchema } from "./executionTarget.js";

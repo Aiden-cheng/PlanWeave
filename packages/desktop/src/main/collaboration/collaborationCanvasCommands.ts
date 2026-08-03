@@ -7,7 +7,7 @@ import {
   type CanvasLiveSyncServerMessage,
   type CanvasReconnectResponse,
   type CompleteContentVersion
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { z } from "zod";
 import {
   collaborationCanvasSessionInputSchema,

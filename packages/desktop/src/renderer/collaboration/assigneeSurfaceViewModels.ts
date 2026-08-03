@@ -2,7 +2,7 @@ import type {
   ActivityRecord,
   AssignmentDisplayProjection,
   WorkItemRef
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   workItemKey,
   type CollaborationMutationRecord,

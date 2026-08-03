@@ -1,4 +1,4 @@
-import type { OperatorEnrollmentGrantResponse } from "@planweave-ai/distributed-protocol/operator-control";
+import type { OperatorEnrollmentGrantResponse } from "@planweave-ai/agent-host-protocol/operator-control";
 import type {
   OperatorControlProfile,
   OperatorCopyHostBootstrapHandoffInput

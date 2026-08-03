@@ -8,7 +8,7 @@ import {
   type CreatePackageSnapshotResult,
   type PackageSnapshot,
   type RestorePackageSnapshotResult
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   capturePackageSnapshot,
   restorePackageSnapshot,

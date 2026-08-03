@@ -14,7 +14,7 @@ import {
   type ProjectAccessPage,
   type RegistryPageQuery,
   type RestorePackageSnapshotResult
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import type { z, ZodType } from "zod";
 
 export type RegistryJsonRequest = <T>(

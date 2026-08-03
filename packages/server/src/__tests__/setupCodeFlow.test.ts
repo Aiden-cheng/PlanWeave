@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
-import { assertSetupViewRedacted } from "@planweave-ai/collaboration-contracts";
+import { assertSetupViewRedacted } from "@planweave-ai/collaboration-protocol";
 import { AgentHostRepository } from "../hosts.js";
 import { handleSetupCodeHttpRequest } from "../identity/setupCodeHttp.js";
 import {

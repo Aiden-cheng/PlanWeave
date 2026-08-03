@@ -8,7 +8,7 @@ import {
   mailboxCommandSchema,
   normalizedFailureSchema,
   type ExecutionEnvelope
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import { remoteBlockDispatchCandidateSchema } from "@planweave-ai/runtime";
 import { z } from "zod";
 import { ArtifactAuthorizationRepository } from "./artifactAuthorization.js";

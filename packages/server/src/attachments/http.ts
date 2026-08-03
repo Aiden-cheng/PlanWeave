@@ -18,7 +18,7 @@ import {
   type HumanProjectAuthority,
   type WorkspaceIdentityRepository
 } from "../identity/index.js";
-import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
+import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { attachmentErrorCodeSchema, type AttachmentErrorCode } from "./errors.js";
 import { CommentAttachmentService, CommentAttachmentServiceError } from "./service.js";
 

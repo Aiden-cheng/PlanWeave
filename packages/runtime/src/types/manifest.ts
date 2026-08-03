@@ -1,5 +1,5 @@
 import type { ExecutorProfile } from "./executor.js";
-import type { Capabilities } from "@planweave-ai/distributed-protocol";
+import type { Capabilities } from "@planweave-ai/agent-host-protocol";
 
 export const supportedManifestVersion = "plan-package/v1" as const;
 

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { loopbackServerStatusSchema } from "@planweave-ai/collaboration-contracts";
+import { loopbackServerStatusSchema } from "@planweave-ai/collaboration-protocol";
 
 const scopeIdentifierSchema = z.string().trim().min(1).max(128);
 

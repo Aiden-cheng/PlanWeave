@@ -14,16 +14,16 @@ import {
   activityRecordSchema as contractActivity,
   humanObserverEventSchema as contractObserverEvent,
   humanObserverWelcomeSchema as contractObserverWelcome
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { humanBootstrapResponseSchema, humanMemberPageSchema } from "../identity/dtos.js";
 import { assignmentDisplayProjectionSchema } from "../work/schemas.js";
 import { activityRecordSchema, commentDisplayProjectionSchema } from "../comments/schemas.js";
 
 /**
- * Dual-parse shared fixtures against Server domain schemas and collaboration-contracts.
+ * Dual-parse shared fixtures against Server domain schemas and collaboration-protocol.
  * Keeps Desktop wire DTOs aligned with HC public projections without reversing deps.
  */
-describe("collaboration-contracts alignment with Server", () => {
+describe("collaboration-protocol alignment with Server", () => {
   it("parses identity fixtures with both authorities", () => {
     expect(contractBootstrap.parse(exampleBootstrapResponse).created).toBe(true);
     expect(humanBootstrapResponseSchema.parse(exampleBootstrapResponse).created).toBe(true);

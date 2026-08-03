@@ -22,7 +22,7 @@ import {
   type CollaborationWorkScope,
   type WorkAuthorityProjection,
   type WorkItemRef
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   collaborationExecutionTargetUpdateInputSchema,
   collaborationResponsibilityUpdateInputSchema,

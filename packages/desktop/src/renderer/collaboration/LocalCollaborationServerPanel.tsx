@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronDownIcon, ChevronRightIcon, CopyIcon, WifiIcon } from "lucide-react";
-import type { LoopbackTrustedProjectScope } from "@planweave-ai/collaboration-contracts";
+import type { LoopbackTrustedProjectScope } from "@planweave-ai/collaboration-protocol";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import type {

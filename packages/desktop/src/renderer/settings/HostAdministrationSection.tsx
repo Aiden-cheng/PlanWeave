@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import type { OperatorHostView } from "@planweave-ai/distributed-protocol";
+import type { OperatorHostView } from "@planweave-ai/agent-host-protocol";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";

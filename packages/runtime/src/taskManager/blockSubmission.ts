@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { OUTPUT_MAX_ARTIFACT_BYTES } from "@planweave-ai/distributed-protocol";
+import { OUTPUT_MAX_ARTIFACT_BYTES } from "@planweave-ai/agent-host-protocol";
 import {
   materializeArtifactBytes,
   readVerifiedArtifactReference,

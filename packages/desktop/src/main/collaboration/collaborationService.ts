@@ -40,7 +40,7 @@ import {
   type AccessMutationRequest,
   type AccessMutationResult,
   type CurrentCanvasAccessView
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   assertNoSmuggledCollaborationSecrets,
   COLLABORATION_SESSION_ONLY_WARNING,

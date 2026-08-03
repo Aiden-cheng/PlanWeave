@@ -1,6 +1,6 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import type { DispatchInputArtifact } from "@planweave-ai/distributed-protocol";
+import type { DispatchInputArtifact } from "@planweave-ai/agent-host-protocol";
 import type { AgentHostArtifactTransfer } from "./agentHostExecutor.js";
 
 const MAX_INPUT_ARTIFACT_TOTAL_BYTES = 64 * 1_024 * 1_024;

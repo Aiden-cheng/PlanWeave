@@ -6,15 +6,15 @@ import { fileURLToPath } from "node:url";
 const repoRoot = resolve(fileURLToPath(import.meta.url), "..", "..");
 const rootPackage = JSON.parse(await readFile(resolve(repoRoot, "package.json"), "utf8"));
 const packages = [
-  "@planweave-ai/distributed-protocol",
-  "@planweave-ai/collaboration-contracts",
+  "@planweave-ai/agent-host-protocol",
+  "@planweave-ai/collaboration-protocol",
   "@planweave-ai/runtime",
   "@planweave-ai/server",
   "@planweave-ai/agent-host"
 ];
 const packageDirectories = new Map([
-  ["@planweave-ai/distributed-protocol", "packages/distributed-protocol"],
-  ["@planweave-ai/collaboration-contracts", "packages/collaboration-contracts"],
+  ["@planweave-ai/agent-host-protocol", "packages/agent-host-protocol"],
+  ["@planweave-ai/collaboration-protocol", "packages/collaboration-protocol"],
   ["@planweave-ai/runtime", "packages/runtime"],
   ["@planweave-ai/server", "packages/server"],
   ["@planweave-ai/agent-host", "packages/agent-host"]

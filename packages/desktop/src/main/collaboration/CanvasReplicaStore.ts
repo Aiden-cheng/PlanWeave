@@ -13,7 +13,7 @@ import type {
   CanvasReconnectResponse,
   CanvasRuntimeStatusProjection,
   CompleteContentVersion
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   collaborationCanvasReplicaProjectionSchema,
   type CollaborationCanvasReplicaProjection

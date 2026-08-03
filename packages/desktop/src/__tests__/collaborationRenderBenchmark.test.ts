@@ -13,7 +13,7 @@ import {
   COMMENT_LIST_PAGE_MAX,
   type HumanMembershipView,
   type WorkItemRef
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import {
   acquireCollaborationReadModelController,
   resetCollaborationReadModelHubForTests

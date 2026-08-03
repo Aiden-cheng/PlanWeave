@@ -168,7 +168,7 @@ describe("public package exports", () => {
       devDependencies?: Record<string, string>;
     };
 
-    expect(packageJson.name).toBe("@planweave-ai/distributed-protocol");
+    expect(packageJson.name).toBe("@planweave-ai/agent-host-protocol");
     expect(packageJson.type).toBe("module");
     expect(Object.keys(packageJson.dependencies)).toEqual(["zod"]);
     expect(packageJson.devDependencies ?? {}).toEqual({});

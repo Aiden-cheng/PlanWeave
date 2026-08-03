@@ -18,7 +18,7 @@ import {
   type ContentVersionAuthorityDiscoveryResult,
   type ContentVersionMember,
   type ContentVersionTransferHeaderFrame
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { validateAuthoritativeCanvasContent } from "@planweave-ai/runtime";
 import { inWriteTransaction, type SqliteDatabase } from "../sqlite.js";
 import type { ContentAuthorityStore } from "./contentAuthorityStore.js";

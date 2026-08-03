@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
+import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
 import { OperatorTokenRegistry, type OperatorPrincipal } from "./operatorAuth.js";
 import { serverReadinessSchema, type ServerReadiness } from "./readiness.js";

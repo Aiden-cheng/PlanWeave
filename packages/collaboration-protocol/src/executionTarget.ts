@@ -1,4 +1,4 @@
-import { blockRefSchema, opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
+import { blockRefSchema, opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
 import { COLLABORATION_REASON_MAX_LENGTH, COLLABORATION_REVISION_MAX } from "./limits.js";
 import { timestampSchema, workspaceIdSchema } from "./primitives.js";

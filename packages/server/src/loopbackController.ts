@@ -13,8 +13,8 @@ import {
   type LoopbackServerProfile,
   type LoopbackServerStatus,
   type LoopbackTrustedProjectScope
-} from "@planweave-ai/collaboration-contracts";
-import type { ActorRef } from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
+import type { ActorRef } from "@planweave-ai/collaboration-protocol";
 import { serverConfigSchema, type ServerConfig } from "./config.js";
 import type { DistributedServerProcess } from "./serverServe.js";
 import { serveDistributedServer } from "./serverServe.js";

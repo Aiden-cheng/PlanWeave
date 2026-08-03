@@ -3,7 +3,7 @@ import { createServer, type Server as HttpServer } from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { executionEnvelopeSchema } from "@planweave-ai/distributed-protocol";
+import { executionEnvelopeSchema } from "@planweave-ai/agent-host-protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { attachAgentHostArtifactHttp, type ArtifactHttpServer } from "../artifactHttp.js";
 import { ArtifactStore } from "../artifacts.js";

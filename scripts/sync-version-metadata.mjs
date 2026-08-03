@@ -12,8 +12,8 @@ const packages = {
   cli: "packages/cli/package.json",
   desktop: "packages/desktop/package.json",
   mcp: "packages/mcp/package.json",
-  "distributed-protocol": "packages/distributed-protocol/package.json",
-  "collaboration-contracts": "packages/collaboration-contracts/package.json",
+  "agent-host-protocol": "packages/agent-host-protocol/package.json",
+  "collaboration-protocol": "packages/collaboration-protocol/package.json",
   "agent-host": "packages/agent-host/package.json",
   server: "packages/server/package.json"
 };
@@ -41,8 +41,8 @@ const versionFlagTargets = {
   "--cli": ["cli"],
   "--desktop": ["desktop"],
   "--mcp": ["mcp"],
-  "--distributed-protocol": ["distributed-protocol"],
-  "--collaboration-contracts": ["collaboration-contracts"],
+  "--agent-host-protocol": ["agent-host-protocol"],
+  "--collaboration-protocol": ["collaboration-protocol"],
   "--agent-host": ["agent-host"],
   "--server": ["server"],
   "--npm": ["runtime", "cli"],
@@ -52,8 +52,8 @@ const versionFlagTargets = {
     "cli",
     "desktop",
     "mcp",
-    "distributed-protocol",
-    "collaboration-contracts",
+    "agent-host-protocol",
+    "collaboration-protocol",
     "agent-host",
     "server"
   ]
@@ -83,8 +83,8 @@ function usage() {
     "  --cli       packages/cli/package.json",
     "  --desktop   packages/desktop/package.json",
     "  --mcp       packages/mcp/package.json",
-    "  --distributed-protocol packages/distributed-protocol/package.json",
-    "  --collaboration-contracts packages/collaboration-contracts/package.json",
+    "  --agent-host-protocol packages/agent-host-protocol/package.json",
+    "  --collaboration-protocol packages/collaboration-protocol/package.json",
     "  --agent-host packages/agent-host/package.json",
     "  --server    packages/server/package.json",
     "  --npm       packages/runtime/package.json and packages/cli/package.json",

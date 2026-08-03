@@ -17,8 +17,8 @@ import {
   type PackageSnapshot,
   type ProjectAccessPage,
   type RestorePackageSnapshotResult
-} from "@planweave-ai/collaboration-contracts";
-import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/collaboration-protocol";
+import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
 import {
   parseHumanDeviceBearer,

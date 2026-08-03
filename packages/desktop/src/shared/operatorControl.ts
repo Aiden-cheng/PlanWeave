@@ -5,7 +5,7 @@ import {
   operatorPageQuerySchema,
   type OperatorHostPage,
   type OperatorHostView
-} from "@planweave-ai/distributed-protocol/operator-control";
+} from "@planweave-ai/agent-host-protocol/operator-control";
 import { z } from "zod";
 
 const operatorProfileIdSchema = z.string().trim().min(1).max(128);

@@ -8,7 +8,7 @@ import {
   type CommentAttachmentMetadata
 } from "../comments/schemas.js";
 import { humanProjectIdSchema, type HumanAuthContext } from "../identity/schemas.js";
-import { workspaceIdSchema } from "@planweave-ai/collaboration-contracts";
+import { workspaceIdSchema } from "@planweave-ai/collaboration-protocol";
 import {
   ATTACHMENT_ERROR_MESSAGES,
   attachmentErrorCodeSchema,

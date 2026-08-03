@@ -5,8 +5,8 @@ import type {
   CanvasJournalEntry,
   CanvasReconnectResponse,
   CompleteContentVersion
-} from "@planweave-ai/collaboration-contracts";
-import { CANVAS_LIVE_SYNC_PROTOCOL_VERSION } from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
+import { CANVAS_LIVE_SYNC_PROTOCOL_VERSION } from "@planweave-ai/collaboration-protocol";
 import {
   applyCanvasReplicaIntent,
   encodeCanvasReplicaDocument,

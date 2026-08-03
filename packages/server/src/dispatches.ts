@@ -1,6 +1,6 @@
 import { ArtifactAuthorizationRepository } from "./artifactAuthorization.js";
 import { z } from "zod";
-import type { HostReadinessObservation } from "@planweave-ai/distributed-protocol";
+import type { HostReadinessObservation } from "@planweave-ai/agent-host-protocol";
 import { AgentHostRepository } from "./hosts.js";
 import { HostEventInbox } from "./hostEvents.js";
 import {

@@ -4,8 +4,8 @@ import { isAbsolute, join } from "node:path";
 import {
   OUTPUT_MAX_ARTIFACT_BYTES,
   opaqueIdentifierSchema
-} from "@planweave-ai/distributed-protocol";
-import { deploymentEndpointSchema } from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/agent-host-protocol";
+import { deploymentEndpointSchema } from "@planweave-ai/collaboration-protocol";
 import {
   RUNNER_EVENT_RETENTION_MAX_BYTES,
   RUNNER_EVENT_RETENTION_MAX_EVENTS

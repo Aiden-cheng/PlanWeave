@@ -10,7 +10,7 @@ import {
   mailboxDeliverySchema,
   serverEventSchema,
   type ServerEvent
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import type { AgentHostExecutor } from "../execution/agentHostExecutor.js";

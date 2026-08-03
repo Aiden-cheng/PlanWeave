@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// The durable source state is already validated by distributed-protocol. This browser-safe
+// The durable source state is already validated by agent-host-protocol. This browser-safe
 // public projection independently rejects paths, URLs, whitespace, and unbounded labels.
 const publicLogicalIdentifierSchema = z
   .string()

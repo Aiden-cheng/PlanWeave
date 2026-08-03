@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CanvasCommandIntent } from "@planweave-ai/collaboration-contracts";
+import type { CanvasCommandIntent } from "@planweave-ai/collaboration-protocol";
 import { collaborationBridge } from "../bridge";
 import {
   CanvasCommandController,

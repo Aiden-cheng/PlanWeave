@@ -16,7 +16,7 @@ import {
   type CanvasSnapshotContent,
   type CanvasSnapshotMetadata,
   type PackageSnapshotDigestManifest
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import { inWriteTransaction, type SqliteDatabase } from "../sqlite.js";
 import {
   CANVAS_COMMAND_JOURNAL_RETAINED_DEFAULT,

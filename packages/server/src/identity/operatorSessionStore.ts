@@ -9,7 +9,7 @@ import {
   timestampSchema,
   workspaceIdSchema,
   type OperatorSession
-} from "@planweave-ai/collaboration-contracts";
+} from "@planweave-ai/collaboration-protocol";
 import type { SqliteDatabase } from "../sqlite.js";
 
 export type OperatorSessionInput = {

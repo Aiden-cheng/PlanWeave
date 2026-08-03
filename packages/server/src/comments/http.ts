@@ -4,8 +4,8 @@ import {
   commentEditWireCommandSchema,
   commentListWireQuerySchema,
   commentTombstoneWireCommandSchema
-} from "@planweave-ai/collaboration-contracts";
-import { opaqueIdentifierSchema } from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/collaboration-protocol";
+import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import {

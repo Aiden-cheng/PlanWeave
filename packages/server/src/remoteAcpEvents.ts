@@ -5,7 +5,7 @@ import {
   normalizedAcpEventBatchSchema,
   normalizedAcpEventSchema,
   type NormalizedAcpEvent
-} from "@planweave-ai/distributed-protocol";
+} from "@planweave-ai/agent-host-protocol";
 import {
   RUNNER_EVENT_RETENTION_MAX_BYTES,
   RUNNER_EVENT_RETENTION_MAX_EVENTS,
