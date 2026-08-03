@@ -225,6 +225,18 @@ describe("desktop IPC contract", () => {
     expect(collaborationInvokeChannels.createCollaborationInvitation).toBe(
       "planweave-collaboration:createInvitation"
     );
+    expect(collaborationInvokeChannels.createCollaborationInvitationHandoff).toBe(
+      "planweave-collaboration:createInvitationHandoff"
+    );
+    expect(collaborationInvokeChannels.getCollaborationInvitationHandoff).toBe(
+      "planweave-collaboration:getInvitationHandoff"
+    );
+    expect(collaborationInvokeChannels.getDesktopServerExposure).toBe(
+      "planweave-collaboration:getDesktopServerExposure"
+    );
+    expect(collaborationInvokeChannels.setDesktopServerExposureMode).toBe(
+      "planweave-collaboration:setDesktopServerExposureMode"
+    );
     expect(collaborationInvokeChannels.revokeCollaborationInvitation).toBe(
       "planweave-collaboration:revokeInvitation"
     );

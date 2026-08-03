@@ -8,9 +8,8 @@ import type {
   PeoplePanelMode,
   PeoplePresenceSummary
 } from "../collaboration/peopleViewModels";
-import type { CollaborationInvitationCreateView } from "../../shared/collaboration.js";
+import type { CollaborationInvitationHandoffView } from "../../shared/collaboration.js";
 import { CollaborationDiagnosticsDetails } from "./CollaborationDiagnosticsDetails";
-import { serializeCollaborationInvitationHandoff } from "./collaborationInvitationHandoff";
 
 export type PeoplePanelProps = {
   mode: PeoplePanelMode;
@@ -22,13 +21,12 @@ export type PeoplePanelProps = {
   detailsError: string | null;
   actionError: string | null;
   actionBusy: boolean;
-  pendingInvitation: CollaborationInvitationCreateView | null;
-  invitationConnection?: { serverBaseUrl: string; projectId: string } | null;
+  pendingInvitation: CollaborationInvitationHandoffView | null;
   /** Opens the existing owner invitation controls after a capacity-recovery navigation. */
   revealInvitationManagement?: boolean;
   t: ReturnType<typeof createTranslator>;
-  onCreateInvitation: () => Promise<CollaborationInvitationCreateView | null>;
-  onViewInvitation: (invitationId: string) => Promise<CollaborationInvitationCreateView | null>;
+  onCreateInvitation: () => Promise<CollaborationInvitationHandoffView | null>;
+  onViewInvitation: (invitationId: string) => Promise<CollaborationInvitationHandoffView | null>;
   onCopyInvitationToken: (token: string) => Promise<void>;
   onDismissPendingInvitation: () => void;
   onRevokeInvitation: (invitationId: string) => Promise<boolean>;
@@ -48,21 +46,6 @@ export type PeoplePanelProps = {
   /** Page shells may already expose the selected destination. */
   showTitle?: boolean;
 };
-
-function isLoopbackServer(serverBaseUrl: string): boolean {
-  try {
-    const hostname = new URL(serverBaseUrl).hostname;
-    return (
-      hostname === "localhost" ||
-      hostname === "127.0.0.1" ||
-      hostname === "::1" ||
-      hostname === "[::1]" ||
-      hostname.endsWith(".localhost")
-    );
-  } catch {
-    return false;
-  }
-}
 
 function formatTimestamp(value: string): string {
   const date = new Date(value);
@@ -101,7 +84,6 @@ export function PeoplePanel({
   actionError,
   actionBusy,
   pendingInvitation,
-  invitationConnection = null,
   revealInvitationManagement = false,
   t,
   onCreateInvitation,
@@ -129,15 +111,7 @@ export function PeoplePanel({
   const [selectedInvitationIds, setSelectedInvitationIds] = useState<Set<string>>(new Set());
   const liveRegionRef = useRef<HTMLDivElement>(null);
   const pendingInvitationRef = useRef<HTMLInputElement>(null);
-  const pendingInvitationDetails = useMemo(() => {
-    if (!pendingInvitation) return null;
-    if (!invitationConnection) return pendingInvitation.invitationToken;
-    return serializeCollaborationInvitationHandoff({
-      ...invitationConnection,
-      invitationToken: pendingInvitation.invitationToken,
-      allowInsecureTransport: new URL(invitationConnection.serverBaseUrl).protocol === "http:"
-    });
-  }, [invitationConnection, pendingInvitation]);
+  const pendingInvitationDetails = pendingInvitation?.handoff ?? null;
 
   useEffect(() => {
     setCopied(false);
@@ -205,9 +179,7 @@ export function PeoplePanel({
             data-testid="people-invitation-token-value"
             readOnly
             value={pendingInvitationDetails ?? ""}
-            aria-label={t(
-              invitationConnection ? "peopleInvitationDetails" : "peopleInvitationToken"
-            )}
+            aria-label={t("peopleInvitationDetails")}
           />
           <Button
             type="button"
@@ -249,11 +221,6 @@ export function PeoplePanel({
         {presence.credentialPersistence === "session-only" || presence.nonPersistenceWarning ? (
           <p className="text-xs leading-5 text-amber-900 dark:text-amber-100">
             {t("peopleInvitationSessionOnlyWarning")}
-          </p>
-        ) : null}
-        {invitationConnection && isLoopbackServer(invitationConnection.serverBaseUrl) ? (
-          <p className="text-xs leading-5 text-amber-900 dark:text-amber-100">
-            {t("peopleInvitationLoopbackWarning")}
           </p>
         ) : null}
         {copyError ? (

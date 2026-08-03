@@ -7,7 +7,10 @@ import { useState, type ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocalCollaborationServerPanel } from "../renderer/collaboration/LocalCollaborationServerPanel";
 import { createTranslator } from "../renderer/i18n";
-import { parseCollaborationInvitationHandoff } from "../renderer/team/collaborationInvitationHandoff";
+import {
+  parseCollaborationInvitationHandoff,
+  serializeCollaborationInvitationHandoff
+} from "../renderer/team/collaborationInvitationHandoff";
 import type { PlanWeaveCollaborationApi } from "../shared/collaboration";
 
 const profile = {
@@ -23,6 +26,23 @@ const expandedScopeLayout = {
 const onScopeLayoutChange = vi.fn();
 const copyText = vi.fn(async () => undefined);
 afterEach(cleanup);
+
+function invitationHandoff(invitationToken: string, invitationId = "invitation-default") {
+  return {
+    invitationToken,
+    invitation: { invitationId },
+    handoff: serializeCollaborationInvitationHandoff({
+      endpoint: {
+        topology: "lan_http",
+        serverOrigin: "http://192.168.1.20:8787/",
+        allowedClientOrigins: ["http://192.168.1.20:8787/"],
+        tlsTrust: "not_applicable"
+      },
+      projectId: "authority-project-1",
+      invitationToken
+    })
+  };
+}
 
 function LocalCollaborationServerPanelHarness(
   props: Omit<
@@ -53,6 +73,15 @@ function api(overrides: Partial<PlanWeaveCollaborationApi> = {}): PlanWeaveColla
     selectedCount: 1
   };
   return {
+    getDesktopServerExposure: vi.fn().mockResolvedValue({
+      mode: "lan_http",
+      topology: "lan_http",
+      lifecycle: "ready",
+      advertisedOrigin: "http://192.168.1.20:8787/",
+      errorCode: null,
+      canActivate: true,
+      canInvite: true
+    }),
     getLocalCollaborationServerStatus: vi.fn().mockResolvedValue({
       profile: null,
       state: "stopped",
@@ -103,10 +132,9 @@ function api(overrides: Partial<PlanWeaveCollaborationApi> = {}): PlanWeaveColla
       profileId: profile.profileId,
       registeredAt: "2030-01-01T00:00:01.000Z"
     }),
-    createCollaborationInvitation: vi.fn().mockResolvedValue({
-      invitationToken: `pw_inv_${"B".repeat(43)}`,
-      invitation: { invitationId: "invitation-default" }
-    }),
+    createCollaborationInvitationHandoff: vi
+      .fn()
+      .mockResolvedValue(invitationHandoff(`pw_inv_${"B".repeat(43)}`)),
     ...overrides
   } as PlanWeaveCollaborationApi;
 }
@@ -322,10 +350,9 @@ describe("LocalCollaborationServerPanel", () => {
           registeredAt: "2030-01-01T00:00:01.000Z"
         };
       }),
-      createCollaborationInvitation: vi.fn().mockResolvedValue({
-        invitationToken,
-        invitation: { invitationId: "invitation-1" }
-      })
+      createCollaborationInvitationHandoff: vi
+        .fn()
+        .mockResolvedValue(invitationHandoff(invitationToken, "invitation-1"))
     });
     const copy = vi.fn(async () => undefined);
     render(
@@ -342,7 +369,7 @@ describe("LocalCollaborationServerPanel", () => {
 
     expect(await screen.findByText("http://192.168.1.20:8787/")).toBeVisible();
     expect(collaborationApi.registerLocalCollaborationCurrentProject).not.toHaveBeenCalled();
-    expect(collaborationApi.createCollaborationInvitation).not.toHaveBeenCalled();
+    expect(collaborationApi.createCollaborationInvitationHandoff).not.toHaveBeenCalled();
 
     await userEvent.click(screen.getByRole("button", { name: "Create complete invitation" }));
 
@@ -353,7 +380,7 @@ describe("LocalCollaborationServerPanel", () => {
     expect(collaborationApi.registerLocalCollaborationCurrentProject).toHaveBeenCalledWith({
       selection: { projectId: "desktop-project-1", canvasId: "canvas-1" }
     });
-    expect(collaborationApi.createCollaborationInvitation).toHaveBeenCalledWith({
+    expect(collaborationApi.createCollaborationInvitationHandoff).toHaveBeenCalledWith({
       idempotencyKey: expect.any(String)
     });
 
@@ -455,7 +482,7 @@ describe("LocalCollaborationServerPanel", () => {
         lanSharingEnabled: true,
         lanServerBaseUrl: "http://192.168.1.20:8787/"
       }),
-      createCollaborationInvitation: vi.fn().mockRejectedValue({
+      createCollaborationInvitationHandoff: vi.fn().mockRejectedValue({
         kind: "rate_limited",
         code: "human_rate_limited",
         message: "Raw Electron rate-limit envelope text",
@@ -494,7 +521,7 @@ describe("LocalCollaborationServerPanel", () => {
         lanSharingEnabled: true,
         lanServerBaseUrl: "http://192.168.1.20:8787/"
       }),
-      createCollaborationInvitation: vi.fn().mockRejectedValue({
+      createCollaborationInvitationHandoff: vi.fn().mockRejectedValue({
         kind: "conflict",
         code: "human_limit_exceeded",
         message: "human_limit_exceeded",

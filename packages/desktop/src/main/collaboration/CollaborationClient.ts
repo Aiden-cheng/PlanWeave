@@ -240,6 +240,9 @@ export class CollaborationClient {
   private readonly canvasCommands: CanvasCommandClient;
 
   constructor(private readonly options: CollaborationClientOptions) {
+    if (options.profile.endpoint.tlsTrust === "configured_ca") {
+      throw new Error("collaboration_configured_ca_unsupported");
+    }
     this.transport = new CollaborationHttpTransport({
       serverBaseUrl: options.profile.serverBaseUrl,
       credential: options.credential,

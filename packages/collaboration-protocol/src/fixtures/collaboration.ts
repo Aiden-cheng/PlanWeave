@@ -83,7 +83,13 @@ export const exampleConnectionProfile = parseCollaborationConnectionProfile({
   displayName: "Local collab server",
   serverBaseUrl: "https://collab.example.com/",
   projectId: "project-demo-001",
-  allowInsecureTransport: false
+  allowInsecureTransport: false,
+  endpoint: {
+    topology: "public_https",
+    serverOrigin: "https://collab.example.com/",
+    allowedClientOrigins: ["https://collab.example.com/"],
+    tlsTrust: "system_ca"
+  }
 });
 
 export const exampleLoopbackConnectionProfile = parseCollaborationConnectionProfile({
@@ -91,7 +97,13 @@ export const exampleLoopbackConnectionProfile = parseCollaborationConnectionProf
   displayName: "Loopback",
   serverBaseUrl: "http://127.0.0.1:8787/",
   projectId: "project-demo-001",
-  allowInsecureTransport: true
+  allowInsecureTransport: true,
+  endpoint: {
+    topology: "loopback_http",
+    serverOrigin: "http://127.0.0.1:8787/",
+    allowedClientOrigins: ["http://127.0.0.1:8787/"],
+    tlsTrust: "not_applicable"
+  }
 });
 
 export const exampleWorkspaceConnectionProfile = parseWorkspaceConnectionProfile({

@@ -11,7 +11,6 @@ import type {
 } from "../../shared/collaboration.js";
 import type { createTranslator } from "../i18n";
 import type { DesktopUiSettings } from "../types";
-import { serializeCollaborationInvitationHandoff } from "../team/collaborationInvitationHandoff";
 import { collaborationErrorMessage } from "./formatCollaborationError";
 
 function scopeKey(scope: LocalCollaborationScope): string {
@@ -137,22 +136,16 @@ export function LocalCollaborationServerPanel({
   );
 
   const prepareInvitation = useCallback(async () => {
-    if (!api || !status?.lanServerBaseUrl || !invitationScope) return;
+    if (!api || !invitationScope) return;
     const idempotencyKey = globalThis.crypto.randomUUID();
     setInvitationBusy(true);
     setInvitationCopied(false);
     try {
-      const registration = await api.registerLocalCollaborationCurrentProject({
+      await api.registerLocalCollaborationCurrentProject({
         selection: invitationScope
       });
-      const created = await api.createCollaborationInvitation({ idempotencyKey });
-      const handoff = serializeCollaborationInvitationHandoff({
-        serverBaseUrl: status.lanServerBaseUrl,
-        projectId: registration.projectId,
-        invitationToken: created.invitationToken,
-        allowInsecureTransport: new URL(status.lanServerBaseUrl).protocol === "http:"
-      });
-      onInvitationHandoffChange(handoff);
+      const created = await api.createCollaborationInvitationHandoff({ idempotencyKey });
+      onInvitationHandoffChange(created.handoff);
       setError(null);
     } catch (caught) {
       setError(
@@ -170,7 +163,7 @@ export function LocalCollaborationServerPanel({
     } finally {
       setInvitationBusy(false);
     }
-  }, [api, invitationScope, onInvitationHandoffChange, status?.lanServerBaseUrl, t]);
+  }, [api, invitationScope, onInvitationHandoffChange, t]);
 
   if (!api) return null;
   const running = status?.state === "running";

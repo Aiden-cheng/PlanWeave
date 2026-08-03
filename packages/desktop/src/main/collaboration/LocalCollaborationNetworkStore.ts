@@ -3,6 +3,8 @@ import { dirname } from "node:path";
 import { z } from "zod";
 import { desktopHomePaths } from "../planweaveHomePaths.js";
 
+const localExposureModeSchema = z.enum(["local_only", "tailscale_private", "lan_http"]);
+
 const preferredPortSchema = z.number().int().min(1).max(65_535).nullable();
 const legacyDocumentSchema = z
   .object({ version: z.literal(1), lanSharingEnabled: z.boolean() })
@@ -14,13 +16,22 @@ const documentSchema = z
     preferredPort: preferredPortSchema
   })
   .strict();
+const currentDocumentSchema = z
+  .object({
+    version: z.literal(3),
+    exposureMode: localExposureModeSchema,
+    preferredPort: preferredPortSchema
+  })
+  .strict();
 const storedDocumentSchema = z.discriminatedUnion("version", [
   legacyDocumentSchema,
-  documentSchema
+  documentSchema,
+  currentDocumentSchema
 ]);
 
 export type LocalCollaborationNetworkState = {
   lanSharingEnabled: boolean;
+  exposureMode?: "local_only" | "tailscale_private" | "lan_http";
   preferredPort: number | null;
 };
 
@@ -40,17 +51,32 @@ export class LocalCollaborationNetworkStore implements LocalCollaborationNetwork
     try {
       const document = storedDocumentSchema.parse(JSON.parse(await readFile(this.path, "utf8")));
       return {
-        lanSharingEnabled: document.lanSharingEnabled,
+        lanSharingEnabled:
+          document.version === 3
+            ? document.exposureMode === "lan_http"
+            : document.lanSharingEnabled,
+        exposureMode:
+          document.version === 3
+            ? document.exposureMode
+            : document.lanSharingEnabled
+              ? "lan_http"
+              : "local_only",
         preferredPort: document.version === 1 ? null : document.preferredPort
       };
     } catch (error) {
-      if (isMissingFile(error)) return { lanSharingEnabled: false, preferredPort: null };
+      if (isMissingFile(error)) {
+        return { lanSharingEnabled: false, exposureMode: "local_only", preferredPort: null };
+      }
       throw new Error("local_collaboration_network_store_invalid", { cause: error });
     }
   }
 
   async write(input: LocalCollaborationNetworkState): Promise<void> {
-    const document = documentSchema.parse({ version: 2, ...input });
+    const document = currentDocumentSchema.parse({
+      version: 3,
+      exposureMode: input.exposureMode ?? (input.lanSharingEnabled ? "lan_http" : "local_only"),
+      preferredPort: input.preferredPort
+    });
     const parent = dirname(this.path);
     await mkdir(parent, { recursive: true, mode: 0o700 });
     const temporaryPath = `${this.path}.${process.pid}.${Date.now()}.tmp`;

@@ -804,6 +804,42 @@ describe("preload bridge invocation", () => {
           }
         };
       }
+      if (
+        channel === collaborationInvokeChannels.createCollaborationInvitationHandoff ||
+        channel === collaborationInvokeChannels.getCollaborationInvitationHandoff
+      ) {
+        return {
+          ok: true,
+          value: {
+            invitation,
+            invitationToken: `pw_inv_${"A".repeat(43)}`,
+            handoff: `planweave-collaboration-invitation/v2:${JSON.stringify({
+              endpoint: {
+                topology: "tailscale_https",
+                serverOrigin: "https://planweave.example.ts.net/",
+                allowedClientOrigins: ["https://planweave.example.ts.net/"],
+                tlsTrust: "system_ca"
+              },
+              projectId: "project-1",
+              invitationToken: `pw_inv_${"A".repeat(43)}`
+            })}`
+          }
+        };
+      }
+      if (
+        channel === collaborationInvokeChannels.getDesktopServerExposure ||
+        channel === collaborationInvokeChannels.setDesktopServerExposureMode
+      ) {
+        return {
+          mode: "tailscale_private",
+          topology: "tailscale_https",
+          lifecycle: "ready",
+          advertisedOrigin: "https://planweave.example.ts.net/",
+          errorCode: null,
+          canActivate: true,
+          canInvite: true
+        };
+      }
       if (channel === collaborationInvokeChannels.revokeCollaborationInvitation) {
         return { ok: true, value: { ...invitation, revokedAt: "2026-07-25T00:01:00.000Z" } };
       }
@@ -897,6 +933,8 @@ describe("preload bridge invocation", () => {
     await api.startLocalCollaborationServer();
     await api.stopLocalCollaborationServer();
     await api.setLocalCollaborationLanSharing({ enabled: true });
+    await api.getDesktopServerExposure();
+    await api.setDesktopServerExposureMode({ mode: "tailscale_private" });
     await api.listLocalCollaborationTrustedScopes();
     await api.registerLocalCollaborationCurrentProject({ ownerDisplayName: "Local owner" });
     await api.startCollaborationPresence({ canvasId: "default" });
@@ -910,6 +948,8 @@ describe("preload bridge invocation", () => {
     await api.flushCollaborationCanvasReplicaMaterialization();
     await api.listCollaborationMembers({ cursor: 0, limit: 20 });
     await api.createCollaborationInvitation({});
+    await api.createCollaborationInvitationHandoff({});
+    await api.getCollaborationInvitationHandoff({ invitationId: "invitation-1" });
     await api.revokeCollaborationInvitation({ invitationId: "inv-1" });
     await api.revokeCollaborationInvitations({ invitationIds: ["inv-1", "inv-2"] });
     await api.removeCollaborationMember({ humanPrincipalId: "human-1" });
@@ -1010,6 +1050,14 @@ describe("preload bridge invocation", () => {
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       collaborationInvokeChannels.setLocalCollaborationLanSharing,
       { enabled: true }
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.setDesktopServerExposureMode,
+      { mode: "tailscale_private" }
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.createCollaborationInvitationHandoff,
+      {}
     );
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       collaborationInvokeChannels.listLocalCollaborationTrustedScopes

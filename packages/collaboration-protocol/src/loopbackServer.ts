@@ -4,21 +4,22 @@ import {
   isLoopbackHostname,
   workspaceConnectionProfileSchema
 } from "./connection.js";
-import {
-  canvasScopeRefSchema,
-  timestampSchema,
-  workspaceIdSchema
-} from "./primitives.js";
+import { canvasScopeRefSchema, timestampSchema, workspaceIdSchema } from "./primitives.js";
 
 function requireLoopbackDevelopmentOrigin(
   value: { serverBaseUrl: string; allowInsecureTransport: boolean },
   ctx: z.RefinementCtx
 ): void {
   const url = new URL(value.serverBaseUrl);
-  if (!isLoopbackHostname(url.hostname)) {
+  const tailscaleAdvertisedOrigin =
+    url.protocol === "https:" &&
+    url.hostname.toLowerCase().endsWith(".ts.net") &&
+    !url.port &&
+    value.allowInsecureTransport === false;
+  if (!isLoopbackHostname(url.hostname) && !tailscaleAdvertisedOrigin) {
     ctx.addIssue({
       code: "custom",
-      message: "loopback_server_requires_literal_loopback_origin",
+      message: "loopback_server_requires_loopback_or_tailscale_advertised_origin",
       path: ["serverBaseUrl"]
     });
   }
@@ -31,7 +32,7 @@ function requireLoopbackDevelopmentOrigin(
   }
 }
 
-/** A fixed loopback profile. Renderer input cannot carry paths, commands, or credentials. */
+/** A local Server profile with a loopback or Tailscale-advertised Origin. */
 export const loopbackServerProfileSchema = z
   .object({
     profileId: z.string().trim().min(1).max(128),
@@ -61,7 +62,10 @@ export const loopbackServerStatusSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
-    if ((value.state === "running" || value.state === "starting" || value.state === "stopping") && value.profile === null) {
+    if (
+      (value.state === "running" || value.state === "starting" || value.state === "stopping") &&
+      value.profile === null
+    ) {
       ctx.addIssue({ code: "custom", message: "active_loopback_server_requires_profile" });
     }
     if (value.state === "error" && value.reason === null) {

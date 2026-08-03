@@ -426,7 +426,8 @@ export class CollaborationService {
         !existing ||
         existing.serverBaseUrl !== profile.serverBaseUrl ||
         existing.projectId !== profile.projectId ||
-        existing.allowInsecureTransport !== profile.allowInsecureTransport;
+        existing.allowInsecureTransport !== profile.allowInsecureTransport ||
+        JSON.stringify(existing.endpoint) !== JSON.stringify(profile.endpoint);
       await this.profiles.upsert(profile);
       if (this.clientProfileId === profile.profileId && connectionIdentityChanged) {
         // Profile identity changed; drop live client so callers reconnect explicitly.
@@ -554,7 +555,8 @@ export class CollaborationService {
       displayName: stored.displayName,
       serverBaseUrl: stored.serverBaseUrl,
       projectId: stored.projectId,
-      allowInsecureTransport: stored.allowInsecureTransport
+      allowInsecureTransport: stored.allowInsecureTransport,
+      endpoint: stored.endpoint
     });
     if (requireCredential) {
       const token = await this.vault.getDeviceToken(profileId);

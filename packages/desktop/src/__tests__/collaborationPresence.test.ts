@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket, WebSocketServer } from "ws";
+import { deploymentEndpointSchema } from "@planweave-ai/collaboration-protocol/connection";
 import { CANVAS_PRESENCE_PROTOCOL_VERSION } from "@planweave-ai/collaboration-protocol/core/limits";
 import { exampleHumanDeviceToken } from "@planweave-ai/collaboration-protocol/fixtures/collaboration";
 import {
@@ -17,6 +18,22 @@ import {
 import type { CollaborationPresenceSignal } from "../shared/collaboration.js";
 
 type Fixture = { server: Server; close(): Promise<void>; origin: string };
+
+function loopbackEndpoint(serverOrigin: string) {
+  return deploymentEndpointSchema.parse({
+    topology: "loopback_http",
+    serverOrigin,
+    allowedClientOrigins: [serverOrigin],
+    tlsTrust: "not_applicable"
+  });
+}
+
+const publicEndpoint = deploymentEndpointSchema.parse({
+  topology: "public_https",
+  serverOrigin: "https://collab.example.com/",
+  allowedClientOrigins: ["https://collab.example.com/"],
+  tlsTrust: "system_ca"
+});
 
 async function fixture(): Promise<Fixture> {
   const server = createServer((_req, res) => {
@@ -85,7 +102,8 @@ describe("desktop canvas presence transport", () => {
         displayName: "Test",
         serverBaseUrl: http.origin,
         projectId: "project-demo-001",
-        allowInsecureTransport: true
+        allowInsecureTransport: true,
+        endpoint: loopbackEndpoint(http.origin)
       },
       credential: { getDeviceToken: () => exampleHumanDeviceToken },
       WebSocketImpl: WebSocket as never,
@@ -149,7 +167,8 @@ describe("desktop canvas presence transport", () => {
         displayName: "Test",
         serverBaseUrl: "https://collab.example.com/",
         projectId: "project-demo-001",
-        allowInsecureTransport: false
+        allowInsecureTransport: false,
+        endpoint: publicEndpoint
       },
       credential: { getDeviceToken: () => credential },
       WebSocketImpl: FakeSocket as never
@@ -206,7 +225,8 @@ describe("desktop canvas presence transport", () => {
       displayName: "Test",
       serverBaseUrl: "https://collab.example.com/",
       projectId: "project-demo-001",
-      allowInsecureTransport: false
+      allowInsecureTransport: false,
+      endpoint: publicEndpoint
     });
     await service.importDeviceCredential({
       profileId: "profile-test",
@@ -286,7 +306,8 @@ describe("desktop canvas presence transport", () => {
       displayName: "Test",
       serverBaseUrl: "https://collab.example.com/",
       projectId: "project-demo-001",
-      allowInsecureTransport: false
+      allowInsecureTransport: false,
+      endpoint: publicEndpoint
     });
     await service.importDeviceCredential({
       profileId: "profile-test",

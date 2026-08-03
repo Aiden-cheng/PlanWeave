@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   CollaborationContentBootstrapResult,
-  CollaborationProfileView,
   LocalCollaborationServerStatus,
   PlanWeaveCollaborationApi
 } from "../../shared/collaboration.js";
@@ -58,42 +57,6 @@ async function defaultCopyText(text: string): Promise<void> {
   throw new Error("clipboard_unavailable");
 }
 
-function isLoopbackServerUrl(value: string): boolean {
-  try {
-    const hostname = new URL(value).hostname.toLowerCase();
-    return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
-  } catch {
-    return false;
-  }
-}
-
-function sameServerOrigin(left: string, right: string): boolean {
-  try {
-    return new URL(left).origin === new URL(right).origin;
-  } catch {
-    return false;
-  }
-}
-
-export function resolveCollaborationInvitationServerBaseUrl(
-  activeProfile: CollaborationProfileView | null,
-  localServerStatus: LocalCollaborationServerStatus | null
-): string | undefined {
-  if (!activeProfile) return undefined;
-  const localProfile = localServerStatus?.profile;
-  if (
-    localServerStatus?.state === "running" &&
-    localProfile &&
-    localServerStatus.lanSharingEnabled &&
-    localServerStatus.lanServerBaseUrl &&
-    isLoopbackServerUrl(activeProfile.serverBaseUrl) &&
-    sameServerOrigin(localProfile.serverBaseUrl, activeProfile.serverBaseUrl)
-  ) {
-    return localServerStatus.lanServerBaseUrl;
-  }
-  return activeProfile.serverBaseUrl;
-}
-
 export function formatPeoplePanelError(
   t: ReturnType<typeof createTranslator>,
   error: unknown
@@ -134,25 +97,12 @@ export function PeopleView({
       : controlledLocalInvitationHandoff;
   const setLocalInvitationHandoff =
     onLocalInvitationHandoffChange ?? setInternalLocalInvitationHandoff;
-  const [localServerStatus, setLocalServerStatus] = useState<LocalCollaborationServerStatus | null>(
-    null
-  );
   const {
     status,
     loading: collaborationStatusLoading,
     error: collaborationStatusError,
     refresh: refreshCollaborationStatus
   } = useCollaborationStatus({ api });
-
-  useEffect(() => {
-    if (!api) return;
-    void api
-      .getLocalCollaborationServerStatus()
-      .then(setLocalServerStatus)
-      .catch((error: unknown) => {
-        console.error("Failed to read local collaboration sharing status.", error);
-      });
-  }, [api]);
 
   const activeProfile = useMemo(() => {
     if (!status?.activeProfileId) return null;
@@ -178,13 +128,8 @@ export function PeopleView({
     }
   }, [hasConfiguredWorkspace, localHostingOpen]);
 
-  const invitationServerBaseUrl = resolveCollaborationInvitationServerBaseUrl(
-    activeProfile,
-    localServerStatus
-  );
   const handleLocalServerStatusChange = useCallback(
     (nextStatus: LocalCollaborationServerStatus) => {
-      setLocalServerStatus(nextStatus);
       if (localHostingOpen && nextStatus.state === "running") {
         void refreshCollaborationStatus();
       }
@@ -371,14 +316,6 @@ export function PeopleView({
                   actionBusy={panel.actionBusy}
                   pendingInvitation={panel.pendingInvitation}
                   revealInvitationManagement={revealInvitationManagement}
-                  invitationConnection={
-                    activeProfile
-                      ? {
-                          serverBaseUrl: invitationServerBaseUrl ?? activeProfile.serverBaseUrl,
-                          projectId: activeProfile.projectId
-                        }
-                      : null
-                  }
                   showTitle={false}
                   diagnosticReport={diagnosticReport}
                   onCopyDiagnostics={copyText}

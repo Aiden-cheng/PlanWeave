@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTranslator } from "../renderer/i18n";
 import { PeoplePanel, type PeoplePanelProps } from "../renderer/team/PeoplePanel";
 import { cleanupRendererTestEnvironment } from "./helpers/rendererTestEnvironment";
+import { serializeCollaborationInvitationHandoffV2 } from "@planweave-ai/collaboration-protocol/handoff/invitation";
 
 const invitationToken = `pw_inv_${"A".repeat(43)}`;
 const t = createTranslator("en");
@@ -21,7 +22,17 @@ function pendingInvitation(invitationId: string, token: string) {
       createdAt: "2030-01-01T00:00:00.000Z",
       expiresAt: "2030-01-08T00:00:00.000Z"
     },
-    invitationToken: token
+    invitationToken: token,
+    handoff: serializeCollaborationInvitationHandoffV2({
+      endpoint: {
+        topology: "public_https",
+        serverOrigin: "https://server.example.test/",
+        allowedClientOrigins: ["https://server.example.test/"],
+        tlsTrust: "system_ca"
+      },
+      projectId: "project-1",
+      invitationToken: token
+    })
   };
 }
 
@@ -60,10 +71,6 @@ function createProps(
     actionError: null,
     actionBusy: false,
     pendingInvitation: pendingInvitationValue,
-    invitationConnection: {
-      serverBaseUrl: "http://192.168.1.20:56584/",
-      projectId: "project-1"
-    },
     t,
     onCreateInvitation: vi.fn(),
     onViewInvitation: vi.fn(),

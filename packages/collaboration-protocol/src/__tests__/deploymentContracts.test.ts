@@ -52,6 +52,18 @@ describe("OSS-009 deployment and Host availability contracts", () => {
     });
     expect(deploymentWebSocketOrigin(loopback.endpoint)).toBe("ws://127.0.0.1:8787/");
 
+    const insecureLan = deploymentConnectionProfileSchema.parse({
+      ...selfHostedProfile,
+      profileId: "profile-insecure-lan-001",
+      endpoint: {
+        topology: "lan_http",
+        serverOrigin: "http://192.168.1.20:8787/",
+        allowedClientOrigins: ["http://192.168.1.20:8787/"],
+        tlsTrust: "not_applicable"
+      }
+    });
+    expect(deploymentWebSocketOrigin(insecureLan.endpoint)).toBe("ws://192.168.1.20:8787/");
+
     const secureLoopback = deploymentConnectionProfileSchema.parse({
       ...selfHostedProfile,
       profileId: "profile-secure-loopback-001",
@@ -99,6 +111,17 @@ describe("OSS-009 deployment and Host availability contracts", () => {
         }
       })
     ).toThrow("loopback_http_requires_loopback_http_origins_without_tls");
+    expect(() =>
+      deploymentConnectionProfileSchema.parse({
+        ...selfHostedProfile,
+        endpoint: {
+          topology: "lan_http",
+          serverOrigin: "http://example.com/",
+          allowedClientOrigins: ["http://example.com/"],
+          tlsTrust: "not_applicable"
+        }
+      })
+    ).toThrow("lan_http_requires_private_http_origins_without_tls");
     expect(() =>
       deploymentConnectionProfileSchema.parse({
         ...selfHostedProfile,

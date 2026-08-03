@@ -5,9 +5,9 @@ import { StrictMode } from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { serializeCollaborationInvitationHandoffV2 } from "@planweave-ai/collaboration-protocol/handoff/invitation";
 import { createTranslator } from "../renderer/i18n";
 import { PeoplePanel } from "../renderer/team/PeoplePanel";
-import { parseCollaborationInvitationHandoff } from "../renderer/team/collaborationInvitationHandoff";
 import type {
   PeopleDeviceRow,
   PeopleInvitationRow,
@@ -188,7 +188,17 @@ describe("PeoplePanel", () => {
             createdAt: "2030-01-01T00:00:00.000Z",
             expiresAt: "2030-01-08T00:00:00.000Z"
           },
-          invitationToken: `pw_inv_${"A".repeat(43)}`
+          invitationToken: `pw_inv_${"A".repeat(43)}`,
+          handoff: serializeCollaborationInvitationHandoffV2({
+            endpoint: {
+              topology: "public_https",
+              serverOrigin: "https://server.example.test/",
+              allowedClientOrigins: ["https://server.example.test/"],
+              tlsTrust: "system_ca"
+            },
+            projectId: "project-1",
+            invitationToken: `pw_inv_${"A".repeat(43)}`
+          })
         }}
         t={t}
         onCreateInvitation={onCreateInvitation}
@@ -207,11 +217,13 @@ describe("PeoplePanel", () => {
 
     const secret = screen.getByTestId("people-invitation-secret-once");
     expect(secret).toBeVisible();
-    expect(within(secret).getByTestId("people-invitation-token-value")).toHaveValue(
-      `pw_inv_${"A".repeat(43)}`
-    );
+    expect(
+      (within(secret).getByTestId("people-invitation-token-value") as HTMLInputElement).value
+    ).toContain("planweave-collaboration-invitation/v2:");
     await userEvent.click(screen.getByTestId("people-invitation-copy"));
-    expect(onCopy).toHaveBeenCalledWith(`pw_inv_${"A".repeat(43)}`);
+    expect(onCopy).toHaveBeenCalledWith(
+      expect.stringContaining("planweave-collaboration-invitation/v2:")
+    );
 
     await userEvent.click(screen.getByTestId("people-invitation-revoke"));
     expect(onRevokeInvitation).toHaveBeenCalledWith("inv-1");
@@ -422,13 +434,19 @@ describe("PeoplePanel", () => {
             createdAt: "2030-01-01T00:00:00.000Z",
             expiresAt: "2030-01-08T00:00:00.000Z"
           },
-          invitationToken: `pw_inv_${"A".repeat(43)}`
+          invitationToken: `pw_inv_${"A".repeat(43)}`,
+          handoff: serializeCollaborationInvitationHandoffV2({
+            endpoint: {
+              topology: "public_https",
+              serverOrigin: "https://server.example.test/",
+              allowedClientOrigins: ["https://server.example.test/"],
+              tlsTrust: "system_ca"
+            },
+            projectId: "project-1",
+            invitationToken: `pw_inv_${"A".repeat(43)}`
+          })
         }}
         revealInvitationManagement
-        invitationConnection={{
-          serverBaseUrl: "http://192.168.1.20:56584/",
-          projectId: "project-1"
-        }}
         t={t}
         onCreateInvitation={vi.fn()}
         onViewInvitation={vi.fn()}
@@ -445,20 +463,16 @@ describe("PeoplePanel", () => {
     );
 
     const visibleInvitation = screen.getByTestId("people-invitation-token-value");
-    expect(visibleInvitation.value).toContain("planweave-collaboration-invitation/v1:");
+    expect((visibleInvitation as HTMLInputElement).value).toContain(
+      "planweave-collaboration-invitation/v2:"
+    );
 
     await userEvent.click(screen.getByTestId("people-invitation-copy"));
 
     const copiedInvitation = onCopy.mock.calls[0]?.[0];
     expect(copiedInvitation).toEqual(
-      expect.stringContaining("planweave-collaboration-invitation/v1:")
+      expect.stringContaining("planweave-collaboration-invitation/v2:")
     );
-    expect(parseCollaborationInvitationHandoff(copiedInvitation ?? "")).toEqual({
-      serverBaseUrl: "http://192.168.1.20:56584/",
-      projectId: "project-1",
-      invitationToken: `pw_inv_${"A".repeat(43)}`,
-      allowInsecureTransport: true
-    });
   });
 
   it("uses readable invitation and device summaries instead of raw identifiers", () => {

@@ -1,11 +1,15 @@
 /* @vitest-environment jsdom */
 
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import "@testing-library/jest-dom/vitest";
 import {
   accessCapabilityFlags,
   type CurrentCanvasAccessView
 } from "@planweave-ai/collaboration-protocol/access/control";
 import { serializeCollaborationSetupHandoffV1 } from "@planweave-ai/collaboration-protocol/handoff/setup";
+import { exampleHumanDeviceToken } from "@planweave-ai/collaboration-protocol/fixtures/collaboration";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -14,6 +18,9 @@ import { CollaborationConnectForm } from "../renderer/team/CollaborationConnectF
 import { buildCollaborationDiagnosticReport } from "../renderer/team/collaborationDiagnostics";
 import { serializeCollaborationInvitationHandoff } from "../renderer/team/collaborationInvitationHandoff";
 import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../shared/collaboration";
+import { CollaborationCredentialVault } from "../main/collaboration/collaborationCredentialVault";
+import { CollaborationProfileStore } from "../main/collaboration/collaborationProfileStore";
+import { CollaborationService } from "../main/collaboration/collaborationService";
 import { cleanupRendererTestEnvironment } from "./helpers/rendererTestEnvironment";
 
 afterEach(cleanupRendererTestEnvironment);
@@ -126,10 +133,14 @@ describe("CollaborationConnectForm invitation onboarding", () => {
     const api = joinApi();
     const invitationToken = `pw_inv_${"A".repeat(43)}`;
     const handoff = serializeCollaborationInvitationHandoff({
-      serverBaseUrl: "http://192.168.1.20:56584",
+      endpoint: {
+        topology: "lan_http",
+        serverOrigin: "http://192.168.1.20:56584",
+        allowedClientOrigins: ["http://192.168.1.20:56584"],
+        tlsTrust: "not_applicable"
+      },
       projectId: "project-1",
-      invitationToken,
-      allowInsecureTransport: true
+      invitationToken
     });
 
     render(
@@ -176,10 +187,14 @@ describe("CollaborationConnectForm invitation onboarding", () => {
     const onConnected = vi.fn().mockResolvedValue(undefined);
     const invitationToken = `pw_inv_${"B".repeat(43)}`;
     const handoff = serializeCollaborationInvitationHandoff({
-      serverBaseUrl: "http://192.168.1.20:56584",
+      endpoint: {
+        topology: "lan_http",
+        serverOrigin: "http://192.168.1.20:56584",
+        allowedClientOrigins: ["http://192.168.1.20:56584"],
+        tlsTrust: "not_applicable"
+      },
       projectId: "shared-project",
-      invitationToken,
-      allowInsecureTransport: true
+      invitationToken
     });
 
     render(
@@ -290,6 +305,13 @@ describe("CollaborationConnectForm connection diagnostics", () => {
         serverBaseUrl: "http://192.168.123.23:62060/",
         projectId: "project-1",
         allowInsecureTransport: true,
+        endpoint: {
+          topology: "lan_http",
+          serverOrigin: "http://192.168.123.23:62060/",
+          allowedClientOrigins: ["http://192.168.123.23:62060/"],
+          tlsTrust: "not_applicable"
+        },
+        connectionState: "ready",
         hasDeviceCredential: true,
         deviceCredentialPersistence: "persisted",
         deviceCredentialId: "device-1",
@@ -323,6 +345,99 @@ describe("CollaborationConnectForm connection diagnostics", () => {
     updatedAt: "2030-01-01T00:00:03.000Z"
   };
 
+  it.each([
+    {
+      topology: "tailscale_https" as const,
+      serverOrigin: "https://planweave.example.ts.net/",
+      tlsTrust: "system_ca" as const
+    },
+    {
+      topology: "public_https" as const,
+      serverOrigin: "https://collab.example.com/",
+      tlsTrust: "system_ca" as const
+    },
+    {
+      topology: "lan_https" as const,
+      serverOrigin: "https://192.168.1.20:7443/",
+      tlsTrust: "system_ca" as const
+    },
+    {
+      topology: "loopback_https" as const,
+      serverOrigin: "https://127.0.0.1:7443/",
+      tlsTrust: "system_ca" as const
+    }
+  ])("connects an existing $topology profile through the strict Main service", async (endpoint) => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-connect-endpoint-"));
+    const profileStore = new CollaborationProfileStore({
+      profilesPath: join(root, "profiles.json")
+    });
+    const safeStorage = {
+      isEncryptionAvailable: () => true,
+      encryptString: (value: string) => Buffer.from(value),
+      decryptString: (value: Buffer) => value.toString()
+    };
+    const service = new CollaborationService({
+      profileStore,
+      vault: new CollaborationCredentialVault({
+        paths: { credentialsPath: join(root, "credentials.json") },
+        safeStorage
+      }),
+      workspaceProfileStorePaths: { profilesPath: join(root, "workspace-profiles.json") },
+      safeStorage,
+      createClient: () =>
+        ({
+          verifyAccess: vi.fn().mockResolvedValue(undefined),
+          startObserver: vi.fn((handlers) =>
+            handlers.onStatus?.({ state: "connected", cursor: 0 })
+          ),
+          stopObserver: vi.fn(),
+          stopPresence: vi.fn(),
+          dispose: vi.fn()
+        }) as never
+    });
+    const profile = {
+      profileId: `profile-${endpoint.topology}`,
+      displayName: endpoint.topology,
+      serverBaseUrl: endpoint.serverOrigin,
+      projectId: "project-1",
+      allowInsecureTransport: false,
+      endpoint: {
+        ...endpoint,
+        allowedClientOrigins: [endpoint.serverOrigin]
+      }
+    };
+    await service.upsertProfile(profile);
+    await service.importDeviceCredential({
+      profileId: profile.profileId,
+      deviceToken: exampleHumanDeviceToken
+    });
+    const api = {
+      upsertCollaborationProfile: (input: unknown) => service.upsertProfile(input),
+      setActiveCollaborationProfile: (input: unknown) => service.setActiveProfile(input),
+      connectCollaborationSession: (input: unknown) => service.connectSession(input)
+    } as PlanWeaveCollaborationApi;
+
+    render(
+      <CollaborationConnectForm
+        api={api}
+        status={await service.getStatus()}
+        t={createTranslator("en")}
+        fixedMode="connect"
+      />
+    );
+    await userEvent.click(screen.getByTestId("people-connect-submit"));
+
+    await waitFor(async () => expect((await service.getStatus()).session.phase).toBe("connected"));
+    expect(
+      (
+        await new CollaborationProfileStore({ profilesPath: join(root, "profiles.json") }).get(
+          profile.profileId
+        )
+      )?.endpoint
+    ).toEqual(profile.endpoint);
+    await service.shutdown();
+  });
+
   it("connects the Workspace and the active project session as one user action", async () => {
     const user = userEvent.setup();
     const connectWorkspaceConnection = vi.fn().mockResolvedValue(undefined);
@@ -330,6 +445,7 @@ describe("CollaborationConnectForm connection diagnostics", () => {
     const connectCollaborationSession = vi.fn().mockResolvedValue(undefined);
     const onConnected = vi.fn().mockResolvedValue(undefined);
     const api = {
+      upsertCollaborationProfile: vi.fn().mockResolvedValue(undefined),
       connectWorkspaceConnection,
       setActiveCollaborationProfile,
       connectCollaborationSession
@@ -379,6 +495,7 @@ describe("CollaborationConnectForm connection diagnostics", () => {
   it("explains how to recover when the configured Server is unreachable", async () => {
     const user = userEvent.setup();
     const api = {
+      upsertCollaborationProfile: vi.fn().mockResolvedValue(undefined),
       connectWorkspaceConnection: vi.fn().mockResolvedValue(undefined),
       setActiveCollaborationProfile: vi.fn().mockResolvedValue(undefined),
       connectCollaborationSession: vi.fn().mockRejectedValue({
@@ -418,7 +535,7 @@ describe("CollaborationConnectForm connection diagnostics", () => {
     );
   });
 
-  it("updates a stale server address without replacing the existing member identity", async () => {
+  it("resubmits the unchanged validated endpoint before connecting", async () => {
     const user = userEvent.setup();
     const upsertCollaborationProfile = vi.fn().mockResolvedValue(undefined);
     const setActiveCollaborationProfile = vi.fn().mockResolvedValue(undefined);
@@ -449,17 +566,22 @@ describe("CollaborationConnectForm connection diagnostics", () => {
 
     const serverUrlInput = screen.getByTestId("people-connect-existing-server-url");
     expect(serverUrlInput).toHaveValue("http://192.168.123.23:62060/");
-    await user.clear(serverUrlInput);
-    await user.type(serverUrlInput, "http://192.168.123.23:50653/");
+    expect(serverUrlInput).toHaveAttribute("readonly");
     await user.click(screen.getByTestId("people-connect-submit"));
 
     await waitFor(() => expect(connectCollaborationSession).toHaveBeenCalledTimes(1));
     expect(upsertCollaborationProfile).toHaveBeenCalledWith({
       profileId: "profile-windows",
       displayName: "Windows member",
-      serverBaseUrl: "http://192.168.123.23:50653/",
+      serverBaseUrl: "http://192.168.123.23:62060/",
       projectId: "project-1",
-      allowInsecureTransport: true
+      allowInsecureTransport: true,
+      endpoint: {
+        topology: "lan_http",
+        serverOrigin: "http://192.168.123.23:62060/",
+        allowedClientOrigins: ["http://192.168.123.23:62060/"],
+        tlsTrust: "not_applicable"
+      }
     });
     expect(setActiveCollaborationProfile).toHaveBeenCalledWith({
       profileId: "profile-windows"
@@ -469,8 +591,7 @@ describe("CollaborationConnectForm connection diagnostics", () => {
     );
   });
 
-  it("rejects an invalid replacement server address before changing the profile", async () => {
-    const user = userEvent.setup();
+  it("keeps the validated server authority read-only", async () => {
     const upsertCollaborationProfile = vi.fn().mockResolvedValue(undefined);
     const connectCollaborationSession = vi.fn().mockResolvedValue(undefined);
     const api = {
@@ -489,13 +610,8 @@ describe("CollaborationConnectForm connection diagnostics", () => {
     );
 
     const serverUrlInput = screen.getByTestId("people-connect-existing-server-url");
-    await user.clear(serverUrlInput);
-    await user.type(serverUrlInput, "http://example.com/path");
-    await user.click(screen.getByTestId("people-connect-submit"));
-
-    expect(await screen.findByTestId("people-connect-error")).toHaveTextContent(
-      "Enter a valid HTTP(S) server origin without a path"
-    );
+    expect(serverUrlInput).toHaveAttribute("readonly");
+    expect(screen.getByText(/new invitation or the deployment connection flow/i)).toBeVisible();
     expect(upsertCollaborationProfile).not.toHaveBeenCalled();
     expect(connectCollaborationSession).not.toHaveBeenCalled();
   });
@@ -509,6 +625,7 @@ describe("CollaborationConnectForm connection diagnostics", () => {
     const connectCollaborationSession = vi.fn().mockResolvedValue(undefined);
     const onConnected = vi.fn().mockResolvedValue(undefined);
     const api = {
+      upsertCollaborationProfile: vi.fn().mockResolvedValue(undefined),
       connectWorkspaceConnection,
       setActiveCollaborationProfile,
       connectCollaborationSession
@@ -594,24 +711,29 @@ describe("CollaborationConnectForm connection diagnostics", () => {
       },
       people: []
     };
-    const report = buildCollaborationDiagnosticReport(diagnosticStatus, "Win32", {
-      profileId: "profile-windows",
-      projectId: "project-1",
-      canvasId: "default",
-      syncPhase: "error",
-      observerCursor: 42,
-      members: [],
-      loadingKinds: ["members"],
-      lastError: {
-        kind: "rate_limit",
-        code: "human_rate_limited",
-        message: `Bearer pw_hdev_${"T".repeat(43)}`,
-        httpStatus: 429,
-        retryAfterMs: 1500,
-        retryable: true
+    const report = buildCollaborationDiagnosticReport(
+      diagnosticStatus,
+      "Win32",
+      {
+        profileId: "profile-windows",
+        projectId: "project-1",
+        canvasId: "default",
+        syncPhase: "error",
+        observerCursor: 42,
+        members: [],
+        loadingKinds: ["members"],
+        lastError: {
+          kind: "rate_limit",
+          code: "human_rate_limited",
+          message: `Bearer pw_hdev_${"T".repeat(43)}`,
+          httpStatus: 429,
+          retryAfterMs: 1500,
+          retryable: true
+        },
+        updatedAt: "2030-01-01T00:00:04.000Z"
       },
-      updatedAt: "2030-01-01T00:00:04.000Z"
-    }, accessView);
+      accessView
+    );
 
     expect(report).toContain("platform=Win32");
     expect(report).toContain(

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   canvasScopeRefSchema,
   type ActorRef,
@@ -34,8 +34,12 @@ function config(overrides: { publicUrl?: string } = {}): ServerConfig {
     publicUrl: "http://127.0.0.1:7443",
     allowInsecureDevelopment: true,
     dataDirectory: "/tmp/planweave-loopback-test",
-    trustedProjects: [{ workspaceId: "w", projectId: "p", canvasId: "c", projectRoot: "/tmp/project" }],
-    operatorCredentials: [{ operatorId: "operator", tokenSha256: "a".repeat(64), projectIds: ["p"] }],
+    trustedProjects: [
+      { workspaceId: "w", projectId: "p", canvasId: "c", projectRoot: "/tmp/project" }
+    ],
+    operatorCredentials: [
+      { operatorId: "operator", tokenSha256: "a".repeat(64), projectIds: ["p"] }
+    ],
     limits: {
       busyTimeoutMs: 5_000,
       leaseDurationMs: 30_000,
@@ -48,6 +52,27 @@ function config(overrides: { publicUrl?: string } = {}): ServerConfig {
       shutdownTimeoutMs: 100
     },
     ...overrides
+  });
+}
+
+function tailscaleConfig(): ServerConfig {
+  const origin = "https://planweave.example.ts.net/";
+  const { databasePath: _databasePath, insecurePolicy: _insecurePolicy, ...base } = config();
+  return parseServerConfig({
+    ...base,
+    version: "server-config/v2",
+    transport: {
+      mode: "tailscale_https",
+      listener: { protocol: "http", host: "127.0.0.1", port: 7443 },
+      advertisedOrigin: origin
+    },
+    deployment: {
+      topology: "tailscale_https",
+      serverOrigin: origin,
+      allowedClientOrigins: [origin],
+      tlsTrust: "system_ca"
+    },
+    allowedClientOrigins: [origin]
   });
 }
 
@@ -123,14 +148,96 @@ async function accessFixture() {
       ('w-other','m-other-owner','other-owner','owner',1,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',NULL);
   `);
   const access = new ProjectAccessRepository(database, () => new Date("2026-01-02T00:00:00.000Z"));
-  access.registerProjectInternal({ workspaceId: "w", projectId: "p", projectRoot: "/tmp/project", ownerHumanPrincipalId: "owner" });
-  access.registerCanvasInternal({ workspaceId: "w", projectId: "p", canvasId: "c", packageDir: "/tmp/project/c", ownerHumanPrincipalId: "owner" });
-  access.registerProjectInternal({ workspaceId: "w-other", projectId: "p", projectRoot: "/tmp/other-project", ownerHumanPrincipalId: "other-owner" });
-  access.registerCanvasInternal({ workspaceId: "w-other", projectId: "p", canvasId: "c", packageDir: "/tmp/other-project/c", ownerHumanPrincipalId: "other-owner" });
+  access.registerProjectInternal({
+    workspaceId: "w",
+    projectId: "p",
+    projectRoot: "/tmp/project",
+    ownerHumanPrincipalId: "owner"
+  });
+  access.registerCanvasInternal({
+    workspaceId: "w",
+    projectId: "p",
+    canvasId: "c",
+    packageDir: "/tmp/project/c",
+    ownerHumanPrincipalId: "owner"
+  });
+  access.registerProjectInternal({
+    workspaceId: "w-other",
+    projectId: "p",
+    projectRoot: "/tmp/other-project",
+    ownerHumanPrincipalId: "other-owner"
+  });
+  access.registerCanvasInternal({
+    workspaceId: "w-other",
+    projectId: "p",
+    canvasId: "c",
+    packageDir: "/tmp/other-project/c",
+    ownerHumanPrincipalId: "other-owner"
+  });
   return access;
 }
 
 describe("loopback controller", () => {
+  it("accepts a validated Tailscale exposure while keeping the backend on loopback HTTP", async () => {
+    const tailscaleProfile = loopbackServerProfileSchema.parse({
+      ...profile,
+      serverBaseUrl: "https://planweave.example.ts.net/",
+      allowInsecureTransport: false
+    });
+    let received: ServerConfig | null = null;
+    const onLifecycleError = vi.fn();
+    const controller = new LoopbackServerController({
+      createConfig: () => tailscaleConfig(),
+      serve: async (serverConfig) => {
+        received = serverConfig;
+        return process(async () => {});
+      },
+      onLifecycleError
+    });
+
+    const status = await controller.apply({ action: "start", profile: tailscaleProfile });
+    expect(onLifecycleError).not.toHaveBeenCalled();
+    expect(status).toMatchObject({ state: "running", profile: tailscaleProfile });
+    expect(received?.transport).toMatchObject({
+      mode: "tailscale_https",
+      listener: { protocol: "http", host: "127.0.0.1", port: 7443 },
+      advertisedOrigin: new URL(tailscaleProfile.serverBaseUrl).origin
+    });
+  });
+
+  it("rejects a Tailscale profile that does not match the advertised Origin", async () => {
+    const controller = new LoopbackServerController({
+      createConfig: () => tailscaleConfig(),
+      serve: async () => process(async () => {})
+    });
+    await expect(
+      controller.apply({
+        action: "start",
+        profile: {
+          ...profile,
+          serverBaseUrl: "https://other.example.ts.net/",
+          allowInsecureTransport: false
+        }
+      })
+    ).resolves.toMatchObject({ state: "error", reason: "start_failed" });
+  });
+
+  it("rejects a runtime-invalid config returned by the typed config factory", async () => {
+    const invalidConfig = config();
+    invalidConfig.allowedClientOrigins = ["http://example.com/"];
+    const serve = vi.fn(async () => process(async () => {}));
+    const controller = new LoopbackServerController({
+      createConfig: (): ServerConfig => invalidConfig,
+      serve
+    });
+
+    await expect(controller.apply({ action: "start", profile })).resolves.toMatchObject({
+      state: "error",
+      reason: "start_failed"
+    });
+    expect(serve).not.toHaveBeenCalled();
+  });
+
   it("starts once, exposes readiness, and stops the owned process", async () => {
     let starts = 0;
     let closes = 0;
@@ -144,17 +251,34 @@ describe("loopback controller", () => {
       },
       clock: () => new Date("2026-01-02T00:00:00.000Z")
     });
-    await expect(controller.apply({ action: "start", profile })).resolves.toMatchObject({ state: "running", profile });
-    await expect(controller.apply({ action: "start", profile })).resolves.toMatchObject({ state: "running" });
+    await expect(controller.apply({ action: "start", profile })).resolves.toMatchObject({
+      state: "running",
+      profile
+    });
+    await expect(controller.apply({ action: "start", profile })).resolves.toMatchObject({
+      state: "running"
+    });
     expect(starts).toBe(1);
-    await expect(controller.apply({ action: "stop", profileId: profile.profileId })).resolves.toMatchObject({ state: "stopped", profile: null });
+    await expect(
+      controller.apply({ action: "stop", profileId: profile.profileId })
+    ).resolves.toMatchObject({ state: "stopped", profile: null });
     expect(closes).toBe(1);
   });
 
   it("fails closed for profile/config mismatch and surfaces retryable start and stop failures", async () => {
-    const wrongConfig = new LoopbackServerController({ createConfig: () => config({ publicUrl: "http://127.0.0.1:7444" }) });
-    await expect(wrongConfig.apply({ action: "start", profile })).resolves.toMatchObject({ state: "error", reason: "start_failed" });
-    expect(loopbackServerProfileSchema.safeParse({ ...profile, serverBaseUrl: "https://example.test:7443" }).success).toBe(false);
+    const wrongConfig = new LoopbackServerController({
+      createConfig: () => config({ publicUrl: "http://127.0.0.1:7444" })
+    });
+    await expect(wrongConfig.apply({ action: "start", profile })).resolves.toMatchObject({
+      state: "error",
+      reason: "start_failed"
+    });
+    expect(
+      loopbackServerProfileSchema.safeParse({
+        ...profile,
+        serverBaseUrl: "https://example.test:7443"
+      }).success
+    ).toBe(false);
 
     let starts = 0;
     let closes = 0;
@@ -169,11 +293,22 @@ describe("loopback controller", () => {
         });
       }
     });
-    await expect(controller.apply({ action: "start", profile })).resolves.toMatchObject({ state: "error", reason: "start_failed" });
-    await expect(controller.apply({ action: "start", profile })).resolves.toMatchObject({ state: "running" });
-    await expect(controller.apply({ action: "start", profile: { ...profile, profileId: "other" } })).rejects.toThrow("loopback_profile_already_running");
-    await expect(controller.apply({ action: "stop", profileId: profile.profileId })).resolves.toMatchObject({ state: "error", reason: "stop_failed" });
-    await expect(controller.apply({ action: "stop", profileId: profile.profileId })).resolves.toMatchObject({ state: "stopped" });
+    await expect(controller.apply({ action: "start", profile })).resolves.toMatchObject({
+      state: "error",
+      reason: "start_failed"
+    });
+    await expect(controller.apply({ action: "start", profile })).resolves.toMatchObject({
+      state: "running"
+    });
+    await expect(
+      controller.apply({ action: "start", profile: { ...profile, profileId: "other" } })
+    ).rejects.toThrow("loopback_profile_already_running");
+    await expect(
+      controller.apply({ action: "stop", profileId: profile.profileId })
+    ).resolves.toMatchObject({ state: "error", reason: "stop_failed" });
+    await expect(
+      controller.apply({ action: "stop", profileId: profile.profileId })
+    ).resolves.toMatchObject({ state: "stopped" });
   });
 
   it("resolves and registers only exact running trusted scopes through real administration policy", async () => {
@@ -204,12 +339,30 @@ describe("loopback controller", () => {
     const registered = controller.registerTrustedProject({ kind: "human", id: "owner" }, request);
     expect(registered).toMatchObject({ ...request, registeredAt: "2026-01-02T00:00:00.000Z" });
     expect(JSON.stringify(registered)).not.toMatch(/path|secret|token|tmp/);
-    expect(() => controller.registerTrustedProject({ kind: "human", id: "editor" }, request)).toThrow("access_capability_denied");
-    expect(() => controller.registerTrustedProject({ kind: "human", id: "viewer" }, request)).toThrow("access_capability_denied");
-    expect(() => controller.registerTrustedProject({ kind: "human", id: "owner" }, { ...request, workspaceId: "w-other" })).toThrow("access_capability_denied");
-    expect(() => controller.resolveTrustedProjectScope({ ...request, canvasId: "other" })).toThrow("loopback_registration_not_trusted");
-    expect(() => controller.registerTrustedProject({ kind: "human", id: "owner" }, { ...request, profileId: "unknown" })).toThrow("loopback_profile_mismatch");
+    expect(() =>
+      controller.registerTrustedProject({ kind: "human", id: "editor" }, request)
+    ).toThrow("access_capability_denied");
+    expect(() =>
+      controller.registerTrustedProject({ kind: "human", id: "viewer" }, request)
+    ).toThrow("access_capability_denied");
+    expect(() =>
+      controller.registerTrustedProject(
+        { kind: "human", id: "owner" },
+        { ...request, workspaceId: "w-other" }
+      )
+    ).toThrow("access_capability_denied");
+    expect(() => controller.resolveTrustedProjectScope({ ...request, canvasId: "other" })).toThrow(
+      "loopback_registration_not_trusted"
+    );
+    expect(() =>
+      controller.registerTrustedProject(
+        { kind: "human", id: "owner" },
+        { ...request, profileId: "unknown" }
+      )
+    ).toThrow("loopback_profile_mismatch");
     await controller.apply({ action: "stop", profileId: profile.profileId });
-    expect(() => controller.registerTrustedProject({ kind: "human", id: "owner" }, request)).toThrow("loopback_server_not_running");
+    expect(() =>
+      controller.registerTrustedProject({ kind: "human", id: "owner" }, request)
+    ).toThrow("loopback_server_not_running");
   });
 });

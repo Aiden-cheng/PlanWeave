@@ -10,6 +10,7 @@ import {
   humanMemberPageSchema,
   humanRevokeInvitationsResponseSchema
 } from "@planweave-ai/collaboration-protocol/identity/workspace";
+import { collaborationInvitationHandoffResponseSchema } from "@planweave-ai/collaboration-protocol/handoff/invitation";
 import {
   collaborationInvokeChannels,
   collaborationObserverSignalChannel,
@@ -31,6 +32,10 @@ import { LocalCollaborationCoordinatorControl } from "./CollaborationCoordinator
 import { DeploymentActions } from "./deploymentActions.js";
 import { runCollaborationCommand } from "./collaborationCommandHandler.js";
 import { createLocalCollaborationActivationCommand } from "./localCollaborationSelectionActivation.js";
+import { CollaborationInvitationHandoffCoordinator } from "./CollaborationInvitationHandoffCoordinator.js";
+import { createCollaborationCoordinationQueue } from "./collaborationCoordinationQueue.js";
+import { switchLocalCollaborationExposure } from "./localCollaborationExposureSwitch.js";
+import { assertRendererProfileNamespace } from "./collaborationProfileEndpoint.js";
 
 let service: CollaborationService | null = null;
 let coordinator: LocalCollaborationCoordinatorControl | null = null;
@@ -145,15 +150,7 @@ export function registerCollaborationHandlers(
     coordinator: local,
     service: active
   });
-  let localOperationQueue: Promise<unknown> = Promise.resolve();
-  const runLocalOperation = <T>(operation: () => Promise<T>): Promise<T> => {
-    const next = localOperationQueue.catch(() => undefined).then(operation);
-    localOperationQueue = next.then(
-      () => undefined,
-      () => undefined
-    );
-    return next;
-  };
+  const runCoordinationOperation = createCollaborationCoordinationQueue();
   const deactivateLocalSelection = async (
     profileId = local.localProfile()?.profileId
   ): Promise<void> => {
@@ -176,24 +173,28 @@ export function registerCollaborationHandlers(
     resolveBundleSource: (target) => local.createSelfHostedDeploymentSource(target),
     showSaveDialog: (options) => dialog.showSaveDialog(options)
   });
+  const invitationHandoff = new CollaborationInvitationHandoffCoordinator(active, local);
 
   ipcMain.handle(collaborationInvokeChannels.getCollaborationStatus, () => active.getStatus());
   ipcMain.handle(collaborationInvokeChannels.upsertCollaborationProfile, (_event, input: unknown) =>
-    active.upsertProfile(input)
+    runCoordinationOperation(() => {
+      assertRendererProfileNamespace(input);
+      return active.upsertProfile(input);
+    })
   );
   ipcMain.handle(collaborationInvokeChannels.removeCollaborationProfile, (_event, input: unknown) =>
-    active.removeProfile(input)
+    runCoordinationOperation(() => active.removeProfile(input))
   );
   ipcMain.handle(
     collaborationInvokeChannels.setActiveCollaborationProfile,
-    (_event, input: unknown) => active.setActiveProfile(input)
+    (_event, input: unknown) => runCoordinationOperation(() => active.setActiveProfile(input))
   );
   ipcMain.handle(
     collaborationInvokeChannels.exportDeploymentComposeBundle,
     (_event, input: unknown) => deploymentActions.exportComposeBundle(input)
   );
   ipcMain.handle(collaborationInvokeChannels.clearActiveCollaborationProfile, () =>
-    active.clearActiveProfile()
+    runCoordinationOperation(() => active.clearActiveProfile())
   );
   ipcMain.handle(collaborationInvokeChannels.importDeviceCredential, (_event, input: unknown) =>
     active.importDeviceCredential(input)
@@ -203,33 +204,34 @@ export function registerCollaborationHandlers(
   );
   ipcMain.handle(
     collaborationInvokeChannels.bootstrapCollaborationOwner,
-    async (_event, input: unknown) => {
-      const handoff = await active.bootstrapOwner(input);
-      const profileId =
-        input && typeof input === "object" && "profileId" in input
-          ? (input as { profileId: unknown }).profileId
-          : null;
-      if (typeof profileId === "string" && local.localProfile()?.profileId === profileId) {
-        local.registerCurrentProject({ kind: "human", id: handoff.principal.humanPrincipalId });
-        await active.connectSession({ profileId });
-      }
-      return handoff;
-    }
+    (_event, input: unknown) =>
+      runCoordinationOperation(async () => {
+        const handoff = await active.bootstrapOwner(input);
+        const profileId =
+          input && typeof input === "object" && "profileId" in input
+            ? (input as { profileId: unknown }).profileId
+            : null;
+        if (typeof profileId === "string" && local.localProfile()?.profileId === profileId) {
+          local.registerCurrentProject({ kind: "human", id: handoff.principal.humanPrincipalId });
+          await active.connectSession({ profileId });
+        }
+        return handoff;
+      })
   );
   ipcMain.handle(
     collaborationInvokeChannels.consumeCollaborationInvitation,
-    (_event, input: unknown) => active.consumeInvitation(input)
+    (_event, input: unknown) => runCoordinationOperation(() => active.consumeInvitation(input))
   );
   ipcMain.handle(
     collaborationInvokeChannels.connectCollaborationSession,
-    (_event, input: unknown) => active.connectSession(input)
+    (_event, input: unknown) => runCoordinationOperation(() => active.connectSession(input))
   );
   ipcMain.handle(collaborationInvokeChannels.disconnectCollaborationSession, () =>
-    active.disconnectSession()
+    runCoordinationOperation(() => active.disconnectSession())
   );
   ipcMain.handle(
     collaborationInvokeChannels.redeemCollaborationSetupCode,
-    (_event, input: unknown) => active.redeemSetupCode(input)
+    (_event, input: unknown) => runCoordinationOperation(() => active.redeemSetupCode(input))
   );
   ipcMain.handle(collaborationInvokeChannels.getActiveWorkspaceConnection, () =>
     active.getActiveWorkspaceConnection()
@@ -238,16 +240,16 @@ export function registerCollaborationHandlers(
     active.listWorkspacePicker(input)
   );
   ipcMain.handle(collaborationInvokeChannels.selectWorkspaceConnection, (_event, input: unknown) =>
-    active.selectWorkspaceConnection(input)
+    runCoordinationOperation(() => active.selectWorkspaceConnection(input))
   );
   ipcMain.handle(collaborationInvokeChannels.connectWorkspaceConnection, () =>
-    active.connectWorkspaceConnection()
+    runCoordinationOperation(() => active.connectWorkspaceConnection())
   );
   ipcMain.handle(collaborationInvokeChannels.disconnectWorkspaceConnection, () =>
-    active.disconnectWorkspaceConnection()
+    runCoordinationOperation(() => active.disconnectWorkspaceConnection())
   );
   ipcMain.handle(collaborationInvokeChannels.retryWorkspaceConnection, () =>
-    active.retryWorkspaceConnection()
+    runCoordinationOperation(() => active.retryWorkspaceConnection())
   );
   ipcMain.handle(collaborationInvokeChannels.getDeploymentGuidance, (_event, input: unknown) =>
     deploymentActions.guidance(input)
@@ -259,6 +261,17 @@ export function registerCollaborationHandlers(
   ipcMain.handle(
     collaborationInvokeChannels.validateDeploymentConnectivity,
     (_event, input: unknown) => deploymentActions.validateConnectivity(input)
+  );
+  ipcMain.handle(collaborationInvokeChannels.getDesktopServerExposure, async () => {
+    await localReady;
+    return local.getExposureView();
+  });
+  ipcMain.handle(
+    collaborationInvokeChannels.setDesktopServerExposureMode,
+    (_event, input: unknown) =>
+      runCoordinationOperation(() =>
+        switchLocalCollaborationExposure(local, localActivation, input)
+      )
   );
   ipcMain.handle(collaborationInvokeChannels.startCollaborationPresence, (_event, input: unknown) =>
     active.startPresence(input)
@@ -339,7 +352,7 @@ export function registerCollaborationHandlers(
   ipcMain.handle(
     collaborationInvokeChannels.setCollaborationCurrentSelection,
     (_event, input: unknown) =>
-      runLocalOperation(async () => {
+      runCoordinationOperation(async () => {
         const registrationInput = localCollaborationRegistrationInputSchema.parse({
           selection: input
         });
@@ -350,7 +363,7 @@ export function registerCollaborationHandlers(
       })
   );
   ipcMain.handle(collaborationInvokeChannels.clearCollaborationCurrentSelection, () =>
-    runLocalOperation(async () => {
+    runCoordinationOperation(async () => {
       const previousProfileId = local.localProfile()?.profileId;
       await local.clearCurrentSelection();
       await deactivateLocalSelection(previousProfileId);
@@ -366,7 +379,7 @@ export function registerCollaborationHandlers(
   ipcMain.handle(
     collaborationInvokeChannels.setLocalCollaborationTrustedScopes,
     (_event, input: unknown) =>
-      runLocalOperation(async () => {
+      runCoordinationOperation(async () => {
         const previousProfileId = local.localProfile()?.profileId;
         const catalog = await local.setTrustedScopes(input);
         await localActivation.reconcile(previousProfileId);
@@ -374,7 +387,7 @@ export function registerCollaborationHandlers(
       })
   );
   ipcMain.handle(collaborationInvokeChannels.startLocalCollaborationServer, () =>
-    runLocalOperation(async () => {
+    runCoordinationOperation(async () => {
       const status = await local.start();
       if (status.state !== "running") return status;
       await localActivation.reconcile();
@@ -382,7 +395,7 @@ export function registerCollaborationHandlers(
     })
   );
   ipcMain.handle(collaborationInvokeChannels.stopLocalCollaborationServer, () =>
-    runLocalOperation(async () => {
+    runCoordinationOperation(async () => {
       const previousProfileId = local.localProfile()?.profileId;
       const status = await local.stop();
       await deactivateLocalSelection(previousProfileId);
@@ -392,7 +405,7 @@ export function registerCollaborationHandlers(
   ipcMain.handle(
     collaborationInvokeChannels.setLocalCollaborationLanSharing,
     (_event, input: unknown) =>
-      runLocalOperation(async () => {
+      runCoordinationOperation(async () => {
         const previousProfileId = local.localProfile()?.profileId;
         const status = await local.setLanSharing(input);
         await localActivation.reconcile(previousProfileId);
@@ -405,7 +418,7 @@ export function registerCollaborationHandlers(
   ipcMain.handle(
     collaborationInvokeChannels.registerLocalCollaborationCurrentProject,
     (_event, input: unknown) =>
-      runLocalOperation(async () => {
+      runCoordinationOperation(async () => {
         const registrationInput = localCollaborationRegistrationInputSchema.parse(input ?? {});
         return localActivation.activate(registrationInput);
       })
@@ -430,11 +443,27 @@ export function registerCollaborationHandlers(
       )
   );
   ipcMain.handle(
+    collaborationInvokeChannels.createCollaborationInvitationHandoff,
+    (_event, input: unknown) =>
+      runCollaborationCommand(
+        () => runCoordinationOperation(() => invitationHandoff.create(input)),
+        collaborationInvitationHandoffResponseSchema
+      )
+  );
+  ipcMain.handle(
     collaborationInvokeChannels.getCollaborationInvitationSecret,
     (_event, input: unknown) =>
       runCollaborationCommand(
         () => active.getInvitationSecret(input),
         humanCreateInvitationResponseSchema
+      )
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.getCollaborationInvitationHandoff,
+    (_event, input: unknown) =>
+      runCollaborationCommand(
+        () => runCoordinationOperation(() => invitationHandoff.get(input)),
+        collaborationInvitationHandoffResponseSchema
       )
   );
   ipcMain.handle(

@@ -3,6 +3,7 @@ import { ServerIcon } from "lucide-react";
 import { parseCollaborationSetupHandoffV1 } from "@planweave-ai/collaboration-protocol/handoff/setup";
 import {
   type ActiveWorkspaceConnectionView,
+  type DeploymentEndpoint,
   type WorkspacePickerItem
 } from "@planweave-ai/collaboration-protocol/connection";
 import { Button } from "@/components/ui/button";
@@ -19,7 +20,10 @@ import {
   collaborationConnectionErrorMessage,
   collaborationErrorMessage
 } from "../collaboration/formatCollaborationError";
-import { parseCollaborationInvitationHandoff } from "./collaborationInvitationHandoff";
+import {
+  endpointForLegacyCollaborationInvitationHandoff,
+  parseCollaborationInvitationHandoff
+} from "./collaborationInvitationHandoff";
 import { CollaborationInvitationJoinFields } from "./CollaborationInvitationJoinFields";
 import { CollaborationSetupHandoffFields } from "./CollaborationSetupHandoffFields";
 import {
@@ -112,10 +116,6 @@ export function CollaborationConnectForm({
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [diagnosticsCopied, setDiagnosticsCopied] = useState(false);
-  const [existingServerAddressEdit, setExistingServerAddressEdit] = useState<{
-    profileId: string;
-    value: string;
-  } | null>(null);
 
   const profiles = status?.profiles ?? [];
   const activeProfile =
@@ -128,10 +128,7 @@ export function CollaborationConnectForm({
     status && shouldShowCollaborationDiagnostics()
       ? buildCollaborationDiagnosticReport(status)
       : null;
-  const existingServerBaseUrl =
-    activeProfile && existingServerAddressEdit?.profileId === activeProfile.profileId
-      ? existingServerAddressEdit.value
-      : (activeProfile?.serverBaseUrl ?? "");
+  const existingServerBaseUrl = activeProfile?.serverBaseUrl ?? "";
   const submitLabel =
     mode === "setup"
       ? t("peopleConnectSetupSubmit")
@@ -207,20 +204,23 @@ export function CollaborationConnectForm({
         if (!activeProfile.hasDeviceCredential) {
           throw new Error(t("peopleMissingCredential"));
         }
+        if (activeProfile.connectionState === "reconnect_required") {
+          setError(t("peopleProfileReconnectRequired"));
+          return;
+        }
         const updatedProfile = collaborationUpsertProfileInputSchema.safeParse({
           profileId: activeProfile.profileId,
           displayName: activeProfile.displayName,
           serverBaseUrl: existingServerBaseUrl.trim(),
           projectId: activeProfile.projectId,
-          allowInsecureTransport: activeProfile.allowInsecureTransport
+          allowInsecureTransport: activeProfile.allowInsecureTransport,
+          endpoint: activeProfile.endpoint
         });
         if (!updatedProfile.success) {
           setError(t("peopleServerUrlInvalid"));
           return;
         }
-        if (updatedProfile.data.serverBaseUrl !== activeProfile.serverBaseUrl) {
-          await api.upsertCollaborationProfile(updatedProfile.data);
-        }
+        await api.upsertCollaborationProfile(updatedProfile.data);
         let workspaceConnectError: unknown = null;
         if (
           workspaceConnection?.status === "disconnected" ||
@@ -249,6 +249,7 @@ export function CollaborationConnectForm({
       let effectiveProjectId = projectId.trim() || activeProfile?.projectId || "";
       let effectiveInvitationToken = invitationToken.trim();
       let effectiveAllowInsecureTransport = allowInsecureTransport;
+      let effectiveEndpoint: DeploymentEndpoint | undefined = activeProfile?.endpoint ?? undefined;
       if (mode === "join" && invitationDetails.trim()) {
         const handoff = parseCollaborationInvitationHandoff(invitationDetails);
         if (!handoff) {
@@ -259,6 +260,8 @@ export function CollaborationConnectForm({
         effectiveProjectId = handoff.projectId;
         effectiveInvitationToken = handoff.invitationToken;
         effectiveAllowInsecureTransport = handoff.allowInsecureTransport;
+        effectiveEndpoint =
+          handoff.endpoint ?? endpointForLegacyCollaborationInvitationHandoff(handoff) ?? undefined;
       } else if (mode === "join" && !manualJoinOpen) {
         setError(t("peopleInvitationDetailsInvalid"));
         return;
@@ -270,13 +273,19 @@ export function CollaborationConnectForm({
         displayName.trim() ||
         (mode === "join" ? t("peopleDefaultProfileName") : activeProfile?.displayName) ||
         t("peopleDefaultProfileName");
-      await api.upsertCollaborationProfile({
+      const profile = collaborationUpsertProfileInputSchema.safeParse({
         profileId,
         displayName: profileDisplayName,
         serverBaseUrl: effectiveServerBaseUrl,
         projectId: effectiveProjectId,
-        allowInsecureTransport: effectiveAllowInsecureTransport
+        allowInsecureTransport: effectiveAllowInsecureTransport,
+        endpoint: effectiveEndpoint
       });
+      if (!profile.success) {
+        setError(t("peopleProfileReconnectRequired"));
+        return;
+      }
+      await api.upsertCollaborationProfile(profile.data);
 
       if (mode === "bootstrap") {
         const handoff = await api.bootstrapCollaborationOwner({
@@ -647,17 +656,14 @@ export function CollaborationConnectForm({
                       id={`${formId}-existing-server-url`}
                       data-testid="people-connect-existing-server-url"
                       value={existingServerBaseUrl}
-                      onChange={(event) =>
-                        setExistingServerAddressEdit({
-                          profileId: activeProfile.profileId,
-                          value: event.target.value
-                        })
-                      }
+                      readOnly
                       autoComplete="off"
                       spellCheck={false}
                     />
                     <p className="text-muted-foreground">
-                      {t("peopleExistingServerUrlHint")}
+                      {activeProfile.connectionState === "reconnect_required"
+                        ? t("peopleProfileReconnectRequired")
+                        : t("peopleExistingServerUrlHint")}
                     </p>
                   </div>
                 ) : null}
@@ -673,9 +679,7 @@ export function CollaborationConnectForm({
                 <summary className="cursor-pointer select-none font-medium text-text-strong">
                   {t("peopleConnectionDiagnostics")}
                 </summary>
-                <p className="mt-2 text-muted-foreground">
-                  {t("peopleConnectionDiagnosticsHint")}
-                </p>
+                <p className="mt-2 text-muted-foreground">{t("peopleConnectionDiagnosticsHint")}</p>
                 <pre
                   className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted/40 p-2 font-mono text-[11px] leading-5 text-text-strong"
                   data-testid="people-connection-diagnostics-report"

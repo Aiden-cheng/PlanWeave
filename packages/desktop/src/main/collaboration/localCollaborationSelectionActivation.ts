@@ -1,13 +1,8 @@
+import type { CollaborationConnectionProfile } from "@planweave-ai/collaboration-protocol/connection";
 import type { LoopbackProjectRegistrationView } from "@planweave-ai/collaboration-protocol/loopback";
 import type { LocalCollaborationRegistrationInput } from "../../shared/localCollaborationScopes.js";
 
-type LocalCollaborationProfile = {
-  profileId: string;
-  displayName: string;
-  serverBaseUrl: string;
-  projectId: string;
-  allowInsecureTransport: boolean;
-};
+type LocalCollaborationProfile = CollaborationConnectionProfile;
 
 type LocalCollaborationCoordinatorPort = {
   currentSelection(): NonNullable<LocalCollaborationRegistrationInput["selection"]> | null;
@@ -23,7 +18,7 @@ type LocalCollaborationCoordinatorPort = {
 };
 
 type LocalCollaborationSelectionServicePort = {
-  upsertProfile(input: unknown): Promise<unknown>;
+  upsertProfile(input: CollaborationConnectionProfile): Promise<unknown>;
   migrateLocalProfileCredential(sourceProfileId: string, targetProfileId: string): Promise<void>;
   setActiveProfile(input: unknown): Promise<unknown>;
   activeHumanPrincipalId(profileId: string): Promise<string | null>;

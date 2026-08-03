@@ -2,6 +2,9 @@ import {
   hashOperatorToken,
   LoopbackServerController,
   parseServerConfig,
+  TailscaleCliAdapter,
+  TailscaleExposureError,
+  type TailscaleControlPort,
   type ServerConfig
 } from "@planweave-ai/server";
 import {
@@ -11,7 +14,12 @@ import {
   type LoopbackTrustedProjectScope,
   type LoopbackProjectRegistrationView
 } from "@planweave-ai/collaboration-protocol/loopback";
-import { type DeploymentTargetDraft } from "@planweave-ai/collaboration-protocol/deployment";
+import {
+  deploymentEndpointSchema,
+  type DeploymentEndpoint,
+  type DeploymentTargetDraft
+} from "@planweave-ai/collaboration-protocol/deployment";
+import { collaborationConnectionProfileSchema } from "@planweave-ai/collaboration-protocol/connection";
 import { listProjects, resolveTaskCanvasWorkspace } from "@planweave-ai/runtime";
 import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:net";
@@ -28,6 +36,12 @@ import {
   type LocalCollaborationScopeCatalog,
   type LocalCollaborationServerStatus
 } from "../../shared/collaboration.js";
+import {
+  desktopServerExposureModeInputSchema,
+  desktopServerExposureViewSchema,
+  type DesktopServerExposureErrorCode,
+  type DesktopServerExposureView
+} from "../../shared/deploymentExposure.js";
 import { DeploymentBundleUnavailableError } from "./deploymentActions.js";
 import {
   LocalCollaborationScopeStore,
@@ -55,6 +69,8 @@ type LoopbackServerControlPort = Pick<
   LoopbackServerController,
   "status" | "apply" | "listTrustedProjectScopes" | "registerTrustedProject"
 >;
+
+type LocalExposureMode = "local_only" | "tailscale_private" | "lan_http";
 
 const localOperatorCredentialKey = "planweave-local-loopback";
 const localServerProfileId = "planweave-local-server";
@@ -93,10 +109,14 @@ export interface CollaborationCoordinatorControl {
   start(): Promise<LocalCollaborationServerStatus>;
   stop(): Promise<LocalCollaborationServerStatus>;
   setLanSharing(input: unknown): Promise<LocalCollaborationServerStatus>;
+  getExposureView(): DesktopServerExposureView;
+  setExposureMode(input: unknown): Promise<DesktopServerExposureView>;
+  invitationEndpoint(): DeploymentEndpoint | null;
   getScopeCatalog(): Promise<LocalCollaborationScopeCatalog>;
   setTrustedScopes(input: unknown): Promise<LocalCollaborationScopeCatalog>;
   currentSelectionIsTrusted(): boolean;
   ownsLocalProfile(profileId: string): boolean;
+  recognizesLocalProfile(profileId: string): boolean;
   listActiveTrustedScopes(): readonly LoopbackTrustedProjectScope[];
   registerCurrentProject(actor: { kind: "human"; id: string }): LoopbackProjectRegistrationView;
   localProfile(): {
@@ -105,6 +125,7 @@ export interface CollaborationCoordinatorControl {
     serverBaseUrl: string;
     projectId: string;
     allowInsecureTransport: boolean;
+    endpoint: DeploymentEndpoint;
   } | null;
   createSelfHostedDeploymentSource(target: DeploymentTargetDraft): Promise<{
     config: ServerConfig;
@@ -120,6 +141,9 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   private preferredPort: number | null = null;
   private lanSharingEnabled = false;
   private lanAddress: string | null = null;
+  private exposureMode: LocalExposureMode = "local_only";
+  private tailscaleOrigin: string | null = null;
+  private exposureErrorCode: DesktopServerExposureErrorCode | null = null;
   private operatorToken: string | null = null;
   private operationQueue: Promise<unknown> = Promise.resolve();
   private readonly vault: OperatorCredentialVault;
@@ -128,21 +152,25 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
 
   private readonly projects: ProjectCatalogPort;
   private readonly createController: (
-    createConfig: (profile: LoopbackServerProfile) => ServerConfig
+    createConfig: (profile: LoopbackServerProfile) => ServerConfig,
+    onLifecycleError: (error: unknown) => void
   ) => LoopbackServerControlPort;
   private readonly allocatePort: (host: string, preferredPort: number | null) => Promise<number>;
   private readonly resolveLanAddress: () => string | null;
+  private readonly tailscale: TailscaleControlPort;
 
   constructor(options: {
     safeStorage: OperatorSafeStoragePort;
     projects?: ProjectCatalogPort;
     createController?: (
-      createConfig: (profile: LoopbackServerProfile) => ServerConfig
+      createConfig: (profile: LoopbackServerProfile) => ServerConfig,
+      onLifecycleError: (error: unknown) => void
     ) => LoopbackServerControlPort;
     allocatePort?: (host: string, preferredPort: number | null) => Promise<number>;
     scopeStore?: LocalCollaborationScopeStorePort;
     networkStore?: LocalCollaborationNetworkStorePort;
     resolveLanAddress?: () => string | null;
+    tailscale?: TailscaleControlPort;
   }) {
     this.vault = new OperatorCredentialVault({ safeStorage: options.safeStorage });
     this.projects = options.projects ?? {
@@ -153,11 +181,13 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     };
     this.createController =
       options.createController ??
-      ((createConfig) => new LoopbackServerController({ createConfig }));
+      ((createConfig, onLifecycleError) =>
+        new LoopbackServerController({ createConfig, onLifecycleError }));
     this.allocatePort = options.allocatePort ?? allocateLocalPort;
     this.scopeStore = options.scopeStore ?? new LocalCollaborationScopeStore();
     this.networkStore = options.networkStore ?? new LocalCollaborationNetworkStore();
     this.resolveLanAddress = options.resolveLanAddress ?? resolveLocalCollaborationLanAddress;
+    this.tailscale = options.tailscale ?? new TailscaleCliAdapter();
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -228,7 +258,9 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   restore(): Promise<LocalCollaborationServerStatus> {
     return this.enqueue(async () => {
       const network = await this.networkStore.read();
-      this.lanSharingEnabled = network.lanSharingEnabled;
+      this.exposureMode =
+        network.exposureMode ?? (network.lanSharingEnabled ? "lan_http" : "local_only");
+      this.lanSharingEnabled = this.exposureMode === "lan_http";
       this.preferredPort = network.preferredPort;
       return (await this.scopeStore.read()).length > 0 ? this.startUnlocked() : this.status();
     });
@@ -245,6 +277,18 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     const trustedProjects = await this.resolveTrustedProjects();
     let lastStatus: LocalCollaborationServerStatus = current;
     for (let attempt = 0; attempt < localStartAttempts; attempt += 1) {
+      if (this.exposureMode === "tailscale_private") {
+        try {
+          const node = await this.tailscale.inspectNode();
+          this.tailscaleOrigin = `https://${node.dnsName}/`;
+          this.exposureErrorCode = null;
+        } catch (error) {
+          this.exposureErrorCode = this.exposureCode(error);
+          throw error;
+        }
+      } else {
+        this.tailscaleOrigin = null;
+      }
       this.lanAddress = this.lanSharingEnabled ? this.resolveLanAddress() : null;
       if (this.lanSharingEnabled && !this.lanAddress) {
         throw new Error("local_collaboration_lan_address_unavailable");
@@ -259,12 +303,16 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
         if (attempt === 0 && this.preferredPort !== null) continue;
         throw error;
       }
-      const controller = this.createController((profile) =>
-        this.createConfig(profile, trustedProjects)
+      const controller = this.createController(
+        (profile) => this.createConfig(profile, trustedProjects),
+        (error) => {
+          this.exposureErrorCode = this.exposureCode(error);
+        }
       );
       this.controller = controller;
       const status = await controller.apply({ action: "start", profile: this.serverProfile() });
       if (status.state === "running") {
+        this.exposureErrorCode = null;
         if (this.preferredPort !== this.localPort) {
           this.preferredPort = this.localPort;
           await this.persistNetworkState();
@@ -302,7 +350,8 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   setLanSharing(input: unknown): Promise<LocalCollaborationServerStatus> {
     return this.enqueue(async () => {
       const parsed = localCollaborationLanSharingInputSchema.parse(input);
-      if (parsed.enabled === this.lanSharingEnabled) {
+      const requestedMode: LocalExposureMode = parsed.enabled ? "lan_http" : "local_only";
+      if (parsed.enabled === this.lanSharingEnabled && this.exposureMode === requestedMode) {
         if (
           parsed.enabled &&
           this.status().state !== "running" &&
@@ -312,6 +361,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
         }
         return this.status();
       }
+      this.exposureMode = requestedMode;
       if (parsed.enabled && !this.resolveLanAddress()) {
         throw new Error("local_collaboration_lan_address_unavailable");
       }
@@ -327,6 +377,110 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
         return this.startUnlocked();
       }
       return this.status();
+    });
+  }
+
+  getExposureView(): DesktopServerExposureView {
+    const status = this.status();
+    const running = status.state === "running";
+    const topology =
+      this.exposureMode === "tailscale_private"
+        ? "tailscale_https"
+        : this.exposureMode === "lan_http"
+          ? "lan_http"
+          : "loopback_http";
+    return desktopServerExposureViewSchema.parse({
+      mode: this.exposureMode,
+      topology,
+      lifecycle:
+        this.exposureErrorCode !== null
+          ? "error"
+          : status.state === "starting" || status.state === "stopping"
+            ? "preparing"
+            : status.state === "error"
+              ? "error"
+              : running
+                ? "ready"
+                : "stopped",
+      advertisedOrigin:
+        running && this.exposureMode === "tailscale_private"
+          ? this.tailscaleOrigin
+          : running && this.exposureMode === "lan_http"
+            ? status.lanServerBaseUrl
+            : null,
+      errorCode: this.exposureErrorCode,
+      canActivate: status.state !== "starting" && status.state !== "stopping",
+      canInvite: running && this.invitationEndpoint() !== null
+    });
+  }
+
+  setExposureMode(input: unknown): Promise<DesktopServerExposureView> {
+    return this.enqueue(async () => {
+      const { mode } = desktopServerExposureModeInputSchema.parse(input);
+      if (mode === "custom_https") {
+        return desktopServerExposureViewSchema.parse({
+          mode,
+          topology: null,
+          lifecycle: "stopped",
+          advertisedOrigin: null,
+          errorCode: "CUSTOM_HTTPS_CONFIGURATION_REQUIRED",
+          canActivate: false,
+          canInvite: false
+        });
+      }
+      const nextMode: LocalExposureMode = mode;
+      const wasRunning = this.status().state === "running";
+      if (wasRunning) {
+        const stopped = await this.stopUnlocked();
+        if (stopped.state !== "stopped") {
+          this.exposureErrorCode = "SERVER_STOP_FAILED";
+          return this.getExposureView();
+        }
+      }
+      this.exposureMode = nextMode;
+      this.lanSharingEnabled = nextMode === "lan_http";
+      this.exposureErrorCode = null;
+      await this.persistNetworkState();
+      if (wasRunning || (await this.scopeStore.read()).length > 0) {
+        try {
+          await this.startUnlocked();
+        } catch (error) {
+          this.exposureErrorCode = this.exposureCode(error);
+        }
+      }
+      return this.getExposureView();
+    });
+  }
+
+  invitationEndpoint(): DeploymentEndpoint | null {
+    const status = this.status();
+    if (status.state !== "running") return null;
+    const selection = this.selection;
+    if (!selection || !this.isTrustedSelection(selection)) return null;
+    const profile = this.connectionProfileFor(selection);
+    if (this.exposureMode === "tailscale_private") {
+      if (!this.tailscaleOrigin) return null;
+      return deploymentEndpointSchema.parse({
+        topology: "tailscale_https",
+        serverOrigin: this.tailscaleOrigin,
+        allowedClientOrigins: [this.tailscaleOrigin],
+        tlsTrust: "system_ca"
+      });
+    }
+    if (this.exposureMode === "lan_http") {
+      if (!status.lanServerBaseUrl) return null;
+      return deploymentEndpointSchema.parse({
+        topology: "lan_http",
+        serverOrigin: status.lanServerBaseUrl,
+        allowedClientOrigins: [status.lanServerBaseUrl],
+        tlsTrust: "not_applicable"
+      });
+    }
+    return deploymentEndpointSchema.parse({
+      topology: "loopback_http",
+      serverOrigin: profile.serverBaseUrl,
+      allowedClientOrigins: [profile.serverBaseUrl],
+      tlsTrust: "not_applicable"
     });
   }
 
@@ -374,6 +528,10 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
       .some((scope) => localProfileIdForProject(scope.projectId) === profileId);
   }
 
+  recognizesLocalProfile(profileId: string): boolean {
+    return profileId.startsWith("planweave-local-");
+  }
+
   listActiveTrustedScopes(): readonly LoopbackTrustedProjectScope[] {
     const profile = this.requireRunningProfile();
     return this.controller!.listTrustedProjectScopes({ profileId: profile.profileId });
@@ -404,8 +562,17 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     const selection = this.selection;
     if (!selection || this.localPort === null) return null;
     if (this.status().state === "running" && !this.isTrustedSelection(selection)) return null;
+    const endpoint = this.invitationEndpoint();
+    if (!endpoint) return null;
     const profile = this.connectionProfileFor(selection);
-    return { ...profile, projectId: selection.authorityProjectId };
+    return collaborationConnectionProfileSchema.parse({
+      ...profile,
+      serverBaseUrl: endpoint.serverOrigin,
+      projectId: selection.authorityProjectId,
+      allowInsecureTransport:
+        endpoint.topology === "loopback_http" || endpoint.topology === "lan_http",
+      endpoint
+    });
   }
 
   async createSelfHostedDeploymentSource(target: DeploymentTargetDraft): Promise<{
@@ -415,6 +582,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   }> {
     if (
       target.endpoint.topology === "loopback_http" ||
+      target.endpoint.topology === "lan_http" ||
       target.endpoint.topology === "tailscale_https"
     ) {
       throw new DeploymentBundleUnavailableError(
@@ -486,7 +654,8 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
 
   private persistNetworkState(): Promise<void> {
     return this.networkStore.write({
-      lanSharingEnabled: this.lanSharingEnabled,
+      lanSharingEnabled: this.exposureMode === "lan_http",
+      exposureMode: this.exposureMode,
       preferredPort: this.preferredPort
     });
   }
@@ -512,11 +681,16 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   private serverProfile(): LoopbackServerProfile {
     const localPort = this.localPort;
     if (localPort === null) throw new Error("local_collaboration_port_allocation_required");
+    const serverBaseUrl =
+      this.exposureMode === "tailscale_private"
+        ? this.tailscaleOrigin
+        : `http://127.0.0.1:${localPort}/`;
+    if (!serverBaseUrl) throw new Error("tailscale_advertised_origin_unavailable");
     return loopbackServerProfileSchema.parse({
       profileId: localServerProfileId,
       displayName: "Local collaboration server",
-      serverBaseUrl: `http://127.0.0.1:${localPort}/`,
-      allowInsecureTransport: true
+      serverBaseUrl,
+      allowInsecureTransport: this.exposureMode !== "tailscale_private"
     });
   }
 
@@ -621,6 +795,36 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
       "desktop",
       "local-collaboration-server"
     );
+    if (this.exposureMode === "tailscale_private") {
+      const advertisedOrigin = this.tailscaleOrigin;
+      if (!advertisedOrigin) throw new Error("tailscale_advertised_origin_unavailable");
+      const endpoint = deploymentEndpointSchema.parse({
+        topology: "tailscale_https",
+        serverOrigin: advertisedOrigin,
+        allowedClientOrigins: [advertisedOrigin],
+        tlsTrust: "system_ca"
+      });
+      return parseServerConfig({
+        version: "server-config/v2",
+        transport: {
+          mode: "tailscale_https",
+          listener: { protocol: "http", host: "127.0.0.1", port: localPort },
+          advertisedOrigin
+        },
+        deployment: endpoint,
+        allowedClientOrigins: endpoint.allowedClientOrigins,
+        dataDirectory,
+        trustedProjects,
+        operatorCredentials: [
+          {
+            operatorId: "desktop-local-admin",
+            tokenSha256: hashOperatorToken(this.operatorToken),
+            projectIds: [],
+            serverAdmin: true
+          }
+        ]
+      });
+    }
     return parseServerConfig({
       version: "server-config/v1" as const,
       bind: { host: this.lanSharingEnabled ? "0.0.0.0" : "127.0.0.1", port: localPort },
@@ -641,5 +845,20 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
         }
       ]
     });
+  }
+
+  private exposureCode(error: unknown): DesktopServerExposureErrorCode {
+    if (error instanceof TailscaleExposureError) return error.code;
+    if (error instanceof AggregateError) {
+      for (const nestedError of error.errors) {
+        const code = this.exposureCode(nestedError);
+        if (code !== "SERVER_START_FAILED") return code;
+      }
+    }
+    if (error && typeof error === "object" && "cause" in error) {
+      const cause = (error as { cause?: unknown }).cause;
+      if (cause !== undefined && cause !== error) return this.exposureCode(cause);
+    }
+    return "SERVER_START_FAILED";
   }
 }

@@ -1,13 +1,31 @@
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { DesktopProjectSummary } from "@planweave-ai/runtime";
+import {
+  exampleBootstrapResponse,
+  exampleInvitationToken
+} from "@planweave-ai/collaboration-protocol/fixtures/collaboration";
+import { parseCollaborationInvitationHandoffV2 } from "@planweave-ai/collaboration-protocol/handoff/invitation";
 import {
   loopbackServerLifecycleRequestSchema,
   type LoopbackProjectRegistrationView,
   type LoopbackServerStatus,
   type LoopbackTrustedProjectScope
 } from "@planweave-ai/collaboration-protocol/loopback";
-import type { ServerConfig } from "@planweave-ai/server";
+import {
+  TailscaleExposureError,
+  type ServerConfig,
+  type TailscaleControlPort
+} from "@planweave-ai/server";
 import { describe, expect, it, vi } from "vitest";
 import { LocalCollaborationCoordinatorControl } from "../main/collaboration/CollaborationCoordinatorControl";
+import { CollaborationCredentialVault } from "../main/collaboration/collaborationCredentialVault";
+import { CollaborationInvitationHandoffCoordinator } from "../main/collaboration/CollaborationInvitationHandoffCoordinator";
+import { CollaborationProfileStore } from "../main/collaboration/collaborationProfileStore";
+import { CollaborationService } from "../main/collaboration/collaborationService";
+import { createLocalCollaborationActivationCommand } from "../main/collaboration/localCollaborationSelectionActivation";
+import { switchLocalCollaborationExposure } from "../main/collaboration/localCollaborationExposureSwitch";
 
 const project: DesktopProjectSummary = {
   projectId: "project-1",
@@ -149,6 +167,19 @@ function fakeControl(
   };
 }
 
+function tailscaleControl(): TailscaleControlPort {
+  return {
+    inspectNode: vi.fn().mockResolvedValue({
+      version: "1.90.1",
+      nodeIdentitySha256: "a".repeat(64),
+      dnsName: "planweave.example.ts.net"
+    }),
+    inspectServe: vi.fn().mockResolvedValue({ config: null }),
+    ensurePrivateHttps: vi.fn().mockResolvedValue({ config: null }),
+    releasePrivateHttps: vi.fn().mockResolvedValue(undefined)
+  };
+}
+
 describe("LocalCollaborationCoordinatorControl", () => {
   it("starts selected scopes when LAN sharing is enabled from a stopped state", async () => {
     const fake = fakeControl();
@@ -233,13 +264,16 @@ describe("LocalCollaborationCoordinatorControl", () => {
     expect(allocatePort).toHaveBeenCalledWith("0.0.0.0", null);
     expect(storedNetwork.write).toHaveBeenCalledWith({
       lanSharingEnabled: true,
+      exposureMode: "lan_http",
       preferredPort: 18_787
     });
     expect(configFactory!(status.profile!)).toMatchObject({
-      bind: { host: "0.0.0.0", port: 18_787 },
-      publicUrl: "http://192.168.1.20:18787",
-      allowInsecureDevelopment: true,
-      allowInsecureLan: true
+      transport: {
+        mode: "lan_http",
+        listener: { protocol: "http", host: "0.0.0.0", port: 18_787 },
+        advertisedOrigin: "http://192.168.1.20:18787"
+      },
+      insecurePolicy: { allowInsecureTransport: true, allowInsecureLan: true }
     });
     expect(status.profile?.serverBaseUrl).toBe("http://127.0.0.1:18787/");
   });
@@ -269,8 +303,8 @@ describe("LocalCollaborationCoordinatorControl", () => {
   it("reuses the advertised LAN port after a full coordinator restart", async () => {
     const storedNetwork = networkStore(true);
     const first = fakeControl();
-    const firstAllocatePort = vi.fn(async (_host: string, preferredPort?: number | null) =>
-      preferredPort ?? 18_787
+    const firstAllocatePort = vi.fn(
+      async (_host: string, preferredPort?: number | null) => preferredPort ?? 18_787
     );
     const firstControl = new LocalCollaborationCoordinatorControl({
       safeStorage,
@@ -291,8 +325,8 @@ describe("LocalCollaborationCoordinatorControl", () => {
     await firstControl.stop();
 
     const second = fakeControl();
-    const secondAllocatePort = vi.fn(async (_host: string, preferredPort?: number | null) =>
-      preferredPort ?? 19_999
+    const secondAllocatePort = vi.fn(
+      async (_host: string, preferredPort?: number | null) => preferredPort ?? 19_999
     );
     const secondControl = new LocalCollaborationCoordinatorControl({
       safeStorage,
@@ -342,6 +376,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     expect(allocatePort).toHaveBeenNthCalledWith(2, "0.0.0.0", null);
     expect(storedNetwork.write).toHaveBeenLastCalledWith({
       lanSharingEnabled: true,
+      exposureMode: "lan_http",
       preferredPort: 19_999
     });
   });
@@ -734,5 +769,210 @@ describe("LocalCollaborationCoordinatorControl", () => {
     expect(allocatePort).toHaveBeenCalledTimes(3);
     expect(createController).toHaveBeenCalledTimes(3);
     expect(control.localProfile()).toBeNull();
+  });
+
+  it("activates Tailscale with a loopback backend and exposes only the advertised endpoint", async () => {
+    const fake = fakeControl();
+    let configFactory:
+      | ((profile: NonNullable<LoopbackServerStatus["profile"]>) => ServerConfig)
+      | undefined;
+    const control = new LocalCollaborationCoordinatorControl({
+      safeStorage,
+      scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
+      networkStore: networkStore(),
+      tailscale: tailscaleControl(),
+      projects: {
+        listProjects: async () => [project],
+        resolveAuthorityProjectId: async () => authorityProjectId
+      },
+      createController: (createConfig) => {
+        configFactory = createConfig;
+        return fake.control;
+      },
+      allocatePort: async () => 18_787
+    });
+    await control.setCurrentSelection({ projectId: project.projectId, canvasId: "canvas-1" });
+
+    await expect(control.setExposureMode({ mode: "tailscale_private" })).resolves.toMatchObject({
+      mode: "tailscale_private",
+      topology: "tailscale_https",
+      lifecycle: "ready",
+      advertisedOrigin: "https://planweave.example.ts.net/",
+      errorCode: null,
+      canInvite: true
+    });
+    expect(control.status().profile).toMatchObject({
+      serverBaseUrl: "https://planweave.example.ts.net/",
+      allowInsecureTransport: false
+    });
+    expect(configFactory!(control.status().profile!)).toMatchObject({
+      transport: {
+        mode: "tailscale_https",
+        listener: { protocol: "http", host: "127.0.0.1", port: 18_787 },
+        advertisedOrigin: "https://planweave.example.ts.net"
+      }
+    });
+    expect(JSON.stringify(control.getExposureView())).not.toMatch(
+      /127\.0\.0\.1|backend|lease|stdout|stderr|token/i
+    );
+  });
+
+  it.each([
+    "TAILSCALE_NOT_INSTALLED",
+    "TAILSCALE_LOGIN_REQUIRED",
+    "TAILSCALE_HTTPS_UNAVAILABLE"
+  ] as const)("returns the stable %s activation error without raw details", async (code) => {
+    const tailscale = tailscaleControl();
+    vi.mocked(tailscale.inspectNode).mockRejectedValue(
+      new TailscaleExposureError(code, { cause: new Error("secret stderr output") })
+    );
+    const control = new LocalCollaborationCoordinatorControl({
+      safeStorage,
+      scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
+      networkStore: networkStore(),
+      tailscale,
+      projects: {
+        listProjects: async () => [project],
+        resolveAuthorityProjectId: async () => authorityProjectId
+      },
+      createController: () => fakeControl().control,
+      allocatePort: async () => 18_787
+    });
+
+    const view = await control.setExposureMode({ mode: "tailscale_private" });
+    expect(view).toMatchObject({
+      lifecycle: "error",
+      advertisedOrigin: null,
+      errorCode: code,
+      canInvite: false
+    });
+    expect(JSON.stringify(view)).not.toContain("secret stderr output");
+  });
+
+  it("preserves a stable Serve conflict code reported by the server lifecycle", async () => {
+    const fake = fakeControl({ startFailures: 3 });
+    const createController = vi.fn(
+      (
+        _createConfig: (profile: NonNullable<LoopbackServerStatus["profile"]>) => ServerConfig,
+        onLifecycleError: (error: unknown) => void
+      ) => {
+        onLifecycleError(new TailscaleExposureError("TAILSCALE_SERVE_CONFLICT"));
+        return fake.control;
+      }
+    );
+    const control = new LocalCollaborationCoordinatorControl({
+      safeStorage,
+      scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
+      networkStore: networkStore(),
+      tailscale: tailscaleControl(),
+      projects: {
+        listProjects: async () => [project],
+        resolveAuthorityProjectId: async () => authorityProjectId
+      },
+      createController,
+      allocatePort: async () => 18_787
+    });
+
+    await expect(control.setExposureMode({ mode: "tailscale_private" })).resolves.toMatchObject({
+      lifecycle: "error",
+      errorCode: "TAILSCALE_SERVE_CONFLICT",
+      advertisedOrigin: null,
+      canInvite: false
+    });
+  });
+
+  it("keeps LAN and loopback profile authority identical through persistence and handoff", async () => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-lan-authority-"));
+    const fake = fakeControl();
+    const control = new LocalCollaborationCoordinatorControl({
+      safeStorage,
+      scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
+      networkStore: networkStore(),
+      resolveLanAddress: () => "192.168.1.20",
+      projects: {
+        listProjects: async () => [project],
+        resolveAuthorityProjectId: async () => authorityProjectId
+      },
+      createController: () => fake.control,
+      allocatePort: async () => 18_787
+    });
+    const profileStore = new CollaborationProfileStore({
+      profilesPath: join(root, "profiles.json")
+    });
+    const service = new CollaborationService({
+      profileStore,
+      vault: new CollaborationCredentialVault({
+        paths: { credentialsPath: join(root, "credentials.json") },
+        safeStorage
+      }),
+      workspaceProfileStorePaths: { profilesPath: join(root, "workspace-profiles.json") },
+      invitationsPath: join(root, "invitations.json"),
+      safeStorage,
+      createClient: () =>
+        ({
+          bootstrapOwner: vi.fn().mockResolvedValue(exampleBootstrapResponse),
+          verifyAccess: vi.fn().mockResolvedValue(undefined),
+          startObserver: vi.fn(),
+          stopObserver: vi.fn(),
+          stopPresence: vi.fn(),
+          dispose: vi.fn(),
+          createInvitation: vi.fn().mockResolvedValue({
+            invitation: {
+              invitationId: "invitation-lan",
+              projectId: authorityProjectId,
+              role: "member",
+              createdByHumanPrincipalId: "human-owner-001",
+              createdAt: "2030-01-01T00:00:00.000Z",
+              expiresAt: "2030-01-02T00:00:00.000Z"
+            },
+            invitationToken: exampleInvitationToken
+          })
+        }) as never
+    });
+    const activation = createLocalCollaborationActivationCommand({ coordinator: control, service });
+
+    await control.setCurrentSelection({ projectId: project.projectId, canvasId: "canvas-1" });
+    await control.setExposureMode({ mode: "lan_http" });
+    await activation.reconcile();
+
+    const lanProfile = control.localProfile();
+    expect(lanProfile).toMatchObject({
+      serverBaseUrl: "http://192.168.1.20:18787/",
+      allowInsecureTransport: true,
+      endpoint: {
+        topology: "lan_http",
+        serverOrigin: "http://192.168.1.20:18787/"
+      }
+    });
+    const status = await service.getStatus();
+    expect(status.activeProfileId).toBe(lanProfile?.profileId);
+    expect(status.profiles[0]).toMatchObject({
+      serverBaseUrl: lanProfile?.endpoint.serverOrigin,
+      endpoint: { serverOrigin: lanProfile?.serverBaseUrl },
+      connectionState: "ready"
+    });
+    expect(
+      (
+        await new CollaborationProfileStore({ profilesPath: join(root, "profiles.json") }).get(
+          lanProfile!.profileId
+        )
+      )?.serverBaseUrl
+    ).toBe(lanProfile?.endpoint.serverOrigin);
+
+    const handoff = await new CollaborationInvitationHandoffCoordinator(service, control).create(
+      {}
+    );
+    expect(parseCollaborationInvitationHandoffV2(handoff.handoff)?.endpoint.serverOrigin).toBe(
+      lanProfile?.serverBaseUrl
+    );
+
+    await switchLocalCollaborationExposure(control, activation, { mode: "local_only" });
+    const loopbackProfile = control.localProfile();
+    expect(loopbackProfile?.serverBaseUrl).toBe(loopbackProfile?.endpoint.serverOrigin);
+    expect(loopbackProfile?.endpoint.topology).toBe("loopback_http");
+    expect((await service.getStatus()).profiles[0]).toMatchObject({
+      serverBaseUrl: loopbackProfile?.serverBaseUrl,
+      endpoint: { serverOrigin: loopbackProfile?.serverBaseUrl }
+    });
   });
 });

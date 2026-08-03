@@ -25,6 +25,8 @@ export type LoopbackServerControllerOptions = {
   /** Desktop main supplies a fixed, local configuration factory; renderer never supplies config or paths. */
   createConfig(profile: LoopbackServerProfile): ServerConfig;
   serve?(config: ServerConfig): Promise<DistributedServerProcess>;
+  /** Main-only lifecycle observation; callers must redact before crossing a process boundary. */
+  onLifecycleError?(error: unknown): void;
   clock?: () => Date;
 };
 
@@ -101,9 +103,16 @@ export class LoopbackServerController {
       isLoopbackHostname(config.transport.listener.host) &&
       isLoopbackHostname(configUrl.hostname) &&
       configUrl.origin === profileUrl.origin;
+    const fixedTailscaleConfig =
+      config.transport.mode === "tailscale_https" &&
+      config.transport.listener.protocol === "http" &&
+      config.transport.listener.host === "127.0.0.1" &&
+      profileUrl.protocol === "https:" &&
+      profile.allowInsecureTransport === false &&
+      configUrl.origin === profileUrl.origin;
     if (
-      config.transport.listener.port !== expectedPort ||
-      (!fixedLanConfig && !fixedLoopbackConfig)
+      (!fixedTailscaleConfig && config.transport.listener.port !== expectedPort) ||
+      (!fixedLanConfig && !fixedLoopbackConfig && !fixedTailscaleConfig)
     ) {
       throw new Error("loopback_profile_configuration_mismatch");
     }
@@ -133,7 +142,8 @@ export class LoopbackServerController {
       this.startedAt = (this.options.clock ?? (() => new Date()))().toISOString();
       this.state = "running";
       return this.status();
-    } catch {
+    } catch (error) {
+      this.options.onLifecycleError?.(error);
       this.process = undefined;
       this.startedAt = null;
       this.state = "error";
@@ -156,7 +166,8 @@ export class LoopbackServerController {
       this.state = "stopped";
       this.reason = null;
       return this.status();
-    } catch {
+    } catch (error) {
+      this.options.onLifecycleError?.(error);
       this.state = "error";
       this.reason = "stop_failed";
       return this.status();

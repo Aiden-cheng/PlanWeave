@@ -5,12 +5,11 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTranslator } from "../renderer/i18n";
+import { formatPeoplePanelError, PeopleView } from "../renderer/views/PeopleView";
 import {
-  formatPeoplePanelError,
-  PeopleView,
-  resolveCollaborationInvitationServerBaseUrl
-} from "../renderer/views/PeopleView";
-import { parseCollaborationInvitationHandoff } from "../renderer/team/collaborationInvitationHandoff";
+  parseCollaborationInvitationHandoff,
+  serializeCollaborationInvitationHandoff
+} from "../renderer/team/collaborationInvitationHandoff";
 import { acquireCollaborationReadModelController } from "../renderer/collaboration/collaborationReadModelHub";
 import type { CollaborationReadBridgePort } from "../renderer/collaboration/CollaborationReadModelController";
 import { cleanupRendererTestEnvironment } from "./helpers/rendererTestEnvironment";
@@ -18,6 +17,23 @@ import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../shared/c
 
 const scopeLayout = { collapsed: true, expandedProjectIds: [] };
 const onScopeLayoutChange = () => undefined;
+
+function invitationHandoff(invitationToken: string, invitationId = "invitation-1") {
+  return {
+    invitationToken,
+    invitation: { invitationId },
+    handoff: serializeCollaborationInvitationHandoff({
+      endpoint: {
+        topology: "lan_http",
+        serverOrigin: "http://192.168.1.20:56584/",
+        allowedClientOrigins: ["http://192.168.1.20:56584/"],
+        tlsTrust: "not_applicable"
+      },
+      projectId: "authority-project-1",
+      invitationToken
+    })
+  };
+}
 
 afterEach(cleanupRendererTestEnvironment);
 
@@ -333,10 +349,7 @@ describe("PeopleView", () => {
       workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null },
       updatedAt: "2030-01-01T00:00:00.000Z"
     } as const;
-    const createInvitation = vi.fn().mockResolvedValue({
-      invitationToken,
-      invitation: { invitationId: "invitation-1" }
-    });
+    const createInvitation = vi.fn().mockResolvedValue(invitationHandoff(invitationToken));
     const api = {
       getCollaborationStatus: vi.fn().mockResolvedValue(connectedStatus),
       onCollaborationStatusChanged: vi.fn(() => () => undefined),
@@ -374,7 +387,7 @@ describe("PeopleView", () => {
         profileId: "profile-1",
         registeredAt: "2030-01-01T00:00:01.000Z"
       }),
-      createCollaborationInvitation: createInvitation
+      createCollaborationInvitationHandoff: createInvitation
     } as unknown as PlanWeaveCollaborationApi;
 
     render(
@@ -511,7 +524,7 @@ describe("PeopleView", () => {
         profileId: "profile-1",
         registeredAt: "2030-01-01T00:00:01.000Z"
       }),
-      createCollaborationInvitation: vi.fn().mockRejectedValue({
+      createCollaborationInvitationHandoff: vi.fn().mockRejectedValue({
         kind: "conflict",
         code: "human_limit_exceeded",
         message: "human_limit_exceeded",
@@ -568,53 +581,6 @@ describe("PeopleView", () => {
     await waitFor(() => expect(listCollaborationInvitations).toHaveBeenCalledOnce());
     expect(listCollaborationDevices).toHaveBeenCalledOnce();
     shell.release();
-  });
-
-  it("uses the LAN endpoint for the same running local server even when service and project profile IDs differ", () => {
-    const activeProfile = {
-      profileId: "planweave-local-project-hash",
-      displayName: "Local project",
-      serverBaseUrl: "http://127.0.0.1:56584/",
-      projectId: "project-1",
-      allowInsecureTransport: true,
-      hasDeviceCredential: true,
-      deviceCredentialPersistence: "persisted" as const,
-      deviceCredentialId: "device-1",
-      humanPrincipalId: "human-1",
-      updatedAt: "2030-01-01T00:00:00.000Z"
-    };
-
-    expect(
-      resolveCollaborationInvitationServerBaseUrl(activeProfile, {
-        profile: {
-          profileId: "planweave-local-server",
-          displayName: "Local server",
-          serverBaseUrl: "http://127.0.0.1:56584/",
-          allowInsecureTransport: true
-        },
-        state: "running",
-        startedAt: "2030-01-01T00:00:00.000Z",
-        reason: null,
-        lanSharingEnabled: true,
-        lanServerBaseUrl: "http://192.168.1.20:56584/"
-      })
-    ).toBe("http://192.168.1.20:56584/");
-
-    expect(
-      resolveCollaborationInvitationServerBaseUrl(activeProfile, {
-        profile: {
-          profileId: "another-server",
-          displayName: "Other server",
-          serverBaseUrl: "http://127.0.0.1:60000/",
-          allowInsecureTransport: true
-        },
-        state: "running",
-        startedAt: "2030-01-01T00:00:00.000Z",
-        reason: null,
-        lanSharingEnabled: true,
-        lanServerBaseUrl: "http://192.168.1.20:60000/"
-      })
-    ).toBe("http://127.0.0.1:56584/");
   });
 
   it("does not flash first-time onboarding while persisted collaboration status is loading", () => {

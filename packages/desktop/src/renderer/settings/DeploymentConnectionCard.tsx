@@ -3,8 +3,14 @@ import type {
   ConnectivityValidationView,
   DeploymentGuidanceView,
   DeploymentTargetDraft,
+  DeploymentTlsTrust,
   DeploymentTopology
 } from "@planweave-ai/collaboration-protocol/deployment";
+import type {
+  DesktopServerExposureErrorCode,
+  DesktopServerExposureMode,
+  DesktopServerExposureView
+} from "../../shared/deploymentExposure";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,13 +19,6 @@ import { collaborationBridge } from "../bridge";
 import type { createTranslator } from "../i18n";
 
 type Props = { t: ReturnType<typeof createTranslator> };
-
-function initialTopology(origin: string): DeploymentTopology {
-  const url = new URL(origin);
-  const loopback = ["localhost", "127.0.0.1", "[::1]", "::1"].includes(url.hostname);
-  if (loopback) return url.protocol === "https:" ? "loopback_https" : "loopback_http";
-  return "public_https";
-}
 
 function normalizedOrigin(value: string): string {
   return `${new URL(value.trim()).origin}/`;
@@ -36,45 +35,90 @@ function connectivityLabel(
   return t("deploymentConnectivityUnreachable");
 }
 
+function exposureErrorLabel(
+  code: DesktopServerExposureErrorCode,
+  t: ReturnType<typeof createTranslator>
+): string {
+  if (code === "TAILSCALE_NOT_INSTALLED") return t("deploymentTailscaleNotInstalled");
+  if (code === "TAILSCALE_LOGIN_REQUIRED" || code === "TAILSCALE_MACHINE_AUTH_REQUIRED") {
+    return t("deploymentTailscaleLoginRequired");
+  }
+  if (code === "TAILSCALE_MAGIC_DNS_UNAVAILABLE" || code === "TAILSCALE_HTTPS_UNAVAILABLE") {
+    return t("deploymentTailscaleHttpsUnavailable");
+  }
+  if (code === "TAILSCALE_SERVE_CONFLICT" || code === "TAILSCALE_SERVE_UNOWNED") {
+    return t("deploymentTailscaleServeConflict");
+  }
+  if (code.startsWith("TAILSCALE_")) return t("deploymentTailscaleUnavailable");
+  return t("deploymentServerStartFailed");
+}
+
 export function DeploymentConnectionCard({ t }: Props) {
   const [origin, setOrigin] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [topology, setTopology] = useState<DeploymentTopology>("loopback_http");
+  const [mode, setMode] = useState<DesktopServerExposureMode>("local_only");
+  const [customTopology, setCustomTopology] =
+    useState<Extract<DeploymentTopology, "loopback_https" | "lan_https" | "public_https">>(
+      "public_https"
+    );
+  const [tlsTrust, setTlsTrust] =
+    useState<Extract<DeploymentTlsTrust, "system_ca" | "configured_ca">>("system_ca");
+  const [exposure, setExposure] = useState<DesktopServerExposureView | null>(null);
   const [guidance, setGuidance] = useState<DeploymentGuidanceView | null>(null);
   const [connectivity, setConnectivity] = useState<ConnectivityValidationView | null>(null);
-  const [busy, setBusy] = useState<"guidance" | "validation" | "copy" | "export" | null>(null);
+  const [busy, setBusy] = useState<
+    "activation" | "guidance" | "validation" | "copy" | "export" | null
+  >(null);
   const [notice, setNotice] = useState<"copied" | "exported" | "invalid" | null>(null);
 
   useEffect(() => {
     if (!collaborationBridge) return;
-    void collaborationBridge.getActiveWorkspaceConnection().then((connection) => {
+    void Promise.all([
+      collaborationBridge.getActiveWorkspaceConnection(),
+      collaborationBridge.getDesktopServerExposure()
+    ]).then(([connection, nextExposure]) => {
+      setExposure(nextExposure);
+      setMode(nextExposure.mode);
       if (!connection.profile || !connection.workspaceId) return;
       setOrigin(connection.profile.serverBaseUrl);
       setDisplayName(connection.profile.displayName);
-      setTopology(initialTopology(connection.profile.serverBaseUrl));
     });
   }, []);
 
   const target = useMemo(() => {
     try {
       const trimmedDisplayName = displayName.trim();
-      if (!trimmedDisplayName) return null;
+      if (mode !== "custom_https" || !trimmedDisplayName) return null;
       const serverOrigin = normalizedOrigin(origin);
       return {
         schemaVersion: "deployment-target-draft/v1",
         displayName: trimmedDisplayName,
         endpoint: {
-          topology,
+          topology: customTopology,
           serverOrigin,
           allowedClientOrigins: [serverOrigin],
-          tlsTrust: topology === "loopback_http" ? "not_applicable" : "system_ca"
+          tlsTrust
         },
         capabilities: ["deployment_guidance", "connectivity_validation"]
       } satisfies DeploymentTargetDraft;
     } catch {
       return null;
     }
-  }, [displayName, origin, topology]);
+  }, [customTopology, displayName, mode, origin, tlsTrust]);
+
+  const activate = async () => {
+    if (!collaborationBridge || mode === "custom_https") return;
+    setBusy("activation");
+    try {
+      const next = await collaborationBridge.setDesktopServerExposureMode({ mode });
+      setExposure(next);
+      setNotice(next.lifecycle === "error" ? "invalid" : null);
+    } catch {
+      setNotice("invalid");
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const actionScope = () => (target ? { target } : null);
 
@@ -154,59 +198,127 @@ export function DeploymentConnectionCard({ t }: Props) {
               className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               data-testid="deployment-topology"
               id="deployment-topology"
-              value={topology}
-              onChange={(event) => setTopology(event.target.value as DeploymentTopology)}
+              value={mode}
+              onChange={(event) => setMode(event.target.value as DesktopServerExposureMode)}
             >
-              <option value="loopback_http">{t("deploymentLoopback")}</option>
-              <option value="loopback_https">{t("deploymentLoopbackTls")}</option>
-              <option value="lan_https">{t("deploymentLan")}</option>
-              <option value="public_https">{t("deploymentPublic")}</option>
+              <option value="local_only">{t("deploymentLoopback")}</option>
+              <option value="tailscale_private">{t("deploymentTailscale")}</option>
+              <option value="custom_https">{t("deploymentCustomHttps")}</option>
+              <option value="lan_http">{t("deploymentLanAdvanced")}</option>
             </select>
           </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="deployment-display-name">{t("deploymentDisplayName")}</Label>
-            <Input
-              id="deployment-display-name"
-              data-testid="deployment-display-name"
-              value={displayName}
-              onChange={(event) => setDisplayName(event.target.value)}
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="deployment-origin">{t("deploymentOrigin")}</Label>
-            <Input
-              id="deployment-origin"
-              data-testid="deployment-origin"
-              value={origin}
-              onChange={(event) => setOrigin(event.target.value)}
-            />
-          </div>
+          {mode === "custom_https" ? (
+            <>
+              <div className="grid gap-1.5">
+                <Label htmlFor="deployment-display-name">{t("deploymentDisplayName")}</Label>
+                <Input
+                  id="deployment-display-name"
+                  data-testid="deployment-display-name"
+                  value={displayName}
+                  onChange={(event) => setDisplayName(event.target.value)}
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="deployment-origin">{t("deploymentOrigin")}</Label>
+                <Input
+                  id="deployment-origin"
+                  data-testid="deployment-origin"
+                  value={origin}
+                  onChange={(event) => setOrigin(event.target.value)}
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="deployment-custom-topology">{t("deploymentCustomTopology")}</Label>
+                <select
+                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                  data-testid="deployment-custom-topology"
+                  id="deployment-custom-topology"
+                  value={customTopology}
+                  onChange={(event) =>
+                    setCustomTopology(event.target.value as typeof customTopology)
+                  }
+                >
+                  <option value="loopback_https">{t("deploymentLoopbackHttps")}</option>
+                  <option value="lan_https">{t("deploymentLanHttps")}</option>
+                  <option value="public_https">{t("deploymentPublicHttps")}</option>
+                </select>
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="deployment-tls-trust">{t("deploymentTlsTrust")}</Label>
+                <select
+                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                  data-testid="deployment-tls-trust"
+                  id="deployment-tls-trust"
+                  value={tlsTrust}
+                  onChange={(event) => setTlsTrust(event.target.value as typeof tlsTrust)}
+                >
+                  <option value="system_ca">{t("deploymentSystemCa")}</option>
+                  <option value="configured_ca">{t("deploymentConfiguredCa")}</option>
+                </select>
+              </div>
+            </>
+          ) : null}
         </div>
-        {topology === "loopback_http" ? (
+        {mode === "local_only" ? (
           <p className="text-xs text-text-muted">{t("deploymentLoopbackNote")}</p>
         ) : null}
-        {topology !== "loopback_http" ? (
+        {mode === "tailscale_private" ? (
+          <p className="text-xs text-text-muted" data-testid="deployment-tailscale-note">
+            {t("deploymentTailscaleNote")}
+          </p>
+        ) : null}
+        {mode === "lan_http" ? (
+          <p className="text-xs text-destructive">{t("deploymentLanAdvancedNote")}</p>
+        ) : null}
+        {mode === "custom_https" ? (
           <p className="text-xs text-text-muted">{t("deploymentTopologySource")}</p>
         ) : null}
-        <div className="flex flex-wrap gap-2">
+        {mode !== "custom_https" ? (
           <Button
             type="button"
             size="sm"
-            disabled={!target || busy !== null}
-            onClick={() => void requestGuidance()}
+            className="w-fit"
+            disabled={busy !== null || exposure?.canActivate === false}
+            onClick={() => void activate()}
           >
-            {t("deploymentReview")}
+            {t("deploymentActivate")}
           </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={!target || busy !== null}
-            onClick={() => void validate()}
+        ) : null}
+        {exposure?.advertisedOrigin ? (
+          <p className="text-xs" data-testid="deployment-advertised-origin">
+            {t("deploymentAdvertisedOrigin")}: {exposure.advertisedOrigin}
+          </p>
+        ) : null}
+        {exposure?.errorCode ? (
+          <p
+            className="text-xs text-destructive"
+            data-testid="deployment-exposure-error"
+            data-error-code={exposure.errorCode}
           >
-            {t("deploymentValidate")}
-          </Button>
-        </div>
+            {exposureErrorLabel(exposure.errorCode, t)}
+          </p>
+        ) : null}
+        {mode === "custom_https" ? (
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              disabled={!target || busy !== null}
+              onClick={() => void requestGuidance()}
+            >
+              {t("deploymentReview")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={!target || busy !== null}
+              onClick={() => void validate()}
+            >
+              {t("deploymentValidate")}
+            </Button>
+          </div>
+        ) : null}
         {guidance ? (
           <div
             className="grid gap-1 rounded-md border p-3 text-xs"

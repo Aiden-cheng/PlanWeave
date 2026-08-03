@@ -9,6 +9,7 @@ import {
   humanMemberPageSchema,
   humanRevokeInvitationsResponseSchema
 } from "@planweave-ai/collaboration-protocol/identity/workspace";
+import { collaborationInvitationHandoffResponseSchema } from "@planweave-ai/collaboration-protocol/handoff/invitation";
 import type {
   DesktopAutoRunEvent,
   DesktopBridgeApi,
@@ -264,6 +265,10 @@ const collaborationApi: PlanWeaveCollaborationApi = {
     ipcRenderer.invoke(collaborationInvokeChannels.exportDeploymentComposeBundle, input),
   validateDeploymentConnectivity: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.validateDeploymentConnectivity, input),
+  getDesktopServerExposure: async () =>
+    ipcRenderer.invoke(collaborationInvokeChannels.getDesktopServerExposure),
+  setDesktopServerExposureMode: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.setDesktopServerExposureMode, input),
   startCollaborationPresence: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.startCollaborationPresence, input),
   stopCollaborationPresence: async () =>
@@ -355,10 +360,26 @@ const collaborationApi: PlanWeaveCollaborationApi = {
       await ipcRenderer.invoke(collaborationInvokeChannels.createCollaborationInvitation, input),
       humanCreateInvitationResponseSchema
     ),
+  createCollaborationInvitationHandoff: async (input) =>
+    unwrapCollaborationCommandResult(
+      await ipcRenderer.invoke(
+        collaborationInvokeChannels.createCollaborationInvitationHandoff,
+        input
+      ),
+      collaborationInvitationHandoffResponseSchema
+    ),
   getCollaborationInvitationSecret: async (input) =>
     unwrapCollaborationCommandResult(
       await ipcRenderer.invoke(collaborationInvokeChannels.getCollaborationInvitationSecret, input),
       humanCreateInvitationResponseSchema
+    ),
+  getCollaborationInvitationHandoff: async (input) =>
+    unwrapCollaborationCommandResult(
+      await ipcRenderer.invoke(
+        collaborationInvokeChannels.getCollaborationInvitationHandoff,
+        input
+      ),
+      collaborationInvitationHandoffResponseSchema
     ),
   revokeCollaborationInvitation: async (input) =>
     unwrapCollaborationCommandResult(

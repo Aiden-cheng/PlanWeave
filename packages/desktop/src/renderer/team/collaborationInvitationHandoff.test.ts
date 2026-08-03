@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   collaborationInvitationHandoffV1Prefix,
+  collaborationInvitationHandoffV2Prefix,
+  endpointForLegacyCollaborationInvitationHandoff,
   parseCollaborationInvitationHandoff,
   serializeCollaborationInvitationHandoff
 } from "./collaborationInvitationHandoff";
@@ -8,33 +10,85 @@ import {
 const invitationToken = `pw_inv_${"A".repeat(43)}`;
 
 describe("collaboration invitation handoff", () => {
-  it("serializes a locale-independent V1 payload with stable field order", () => {
+  it("serializes a locale-independent V2 payload with a validated endpoint", () => {
     expect(
       serializeCollaborationInvitationHandoff({
-        serverBaseUrl: "https://collaboration.example.test",
+        endpoint: {
+          topology: "public_https",
+          serverOrigin: "https://collaboration.example.test/",
+          allowedClientOrigins: ["https://collaboration.example.test/"],
+          tlsTrust: "system_ca"
+        },
         projectId: "project-1",
-        invitationToken,
-        allowInsecureTransport: false
+        invitationToken
       })
     ).toBe(
-      `${collaborationInvitationHandoffV1Prefix}{"serverBaseUrl":"https://collaboration.example.test","projectId":"project-1","invitationToken":"${invitationToken}","allowInsecureTransport":false}`
+      `${collaborationInvitationHandoffV2Prefix}{"endpoint":{"topology":"public_https","serverOrigin":"https://collaboration.example.test/","allowedClientOrigins":["https://collaboration.example.test/"],"tlsTrust":"system_ca"},"projectId":"project-1","invitationToken":"${invitationToken}"}`
     );
   });
 
-  it("round-trips a V1 payload", () => {
+  it("normalizes a V2 endpoint for the existing connection profile", () => {
     const serialized = serializeCollaborationInvitationHandoff({
-      serverBaseUrl: "http://192.168.1.20:56584",
+      endpoint: {
+        topology: "lan_http",
+        serverOrigin: "http://192.168.1.20:56584/",
+        allowedClientOrigins: ["http://192.168.1.20:56584/"],
+        tlsTrust: "not_applicable"
+      },
       projectId: "project-1",
-      invitationToken,
-      allowInsecureTransport: true
+      invitationToken
     });
 
     expect(parseCollaborationInvitationHandoff(serialized)).toEqual({
-      serverBaseUrl: "http://192.168.1.20:56584",
+      serverBaseUrl: "http://192.168.1.20:56584/",
       projectId: "project-1",
       invitationToken,
-      allowInsecureTransport: true
+      allowInsecureTransport: true,
+      endpoint: {
+        topology: "lan_http",
+        serverOrigin: "http://192.168.1.20:56584/",
+        allowedClientOrigins: ["http://192.168.1.20:56584/"],
+        tlsTrust: "not_applicable"
+      }
     });
+  });
+
+  it.each([
+    ["loopback_https", "https://127.0.0.1:7443/", "configured_ca"],
+    ["lan_https", "https://192.168.1.20:7443/", "configured_ca"],
+    ["public_https", "https://server.example.test/", "system_ca"],
+    ["tailscale_https", "https://planweave.example.ts.net/", "system_ca"]
+  ] as const)("preserves %s endpoint authority through V2 join parsing", (topology, origin, tlsTrust) => {
+    const endpoint = {
+      topology,
+      serverOrigin: origin,
+      allowedClientOrigins: [origin],
+      tlsTrust
+    };
+    const serialized = serializeCollaborationInvitationHandoff({
+      endpoint,
+      projectId: "project-1",
+      invitationToken
+    });
+    expect(parseCollaborationInvitationHandoff(serialized)?.endpoint).toEqual(endpoint);
+  });
+
+  it("does not reinterpret a custom public .ts.net endpoint as Tailscale", () => {
+    const endpoint = {
+      topology: "public_https" as const,
+      serverOrigin: "https://custom.example.ts.net/",
+      allowedClientOrigins: ["https://custom.example.ts.net/"],
+      tlsTrust: "configured_ca" as const
+    };
+    expect(
+      parseCollaborationInvitationHandoff(
+        serializeCollaborationInvitationHandoff({
+          endpoint,
+          projectId: "project-1",
+          invitationToken
+        })
+      )?.endpoint
+    ).toEqual(endpoint);
   });
 
   it("rejects a legacy URL and invitation token when the project ID is absent", () => {
@@ -64,6 +118,22 @@ describe("collaboration invitation handoff", () => {
         `服务器 URL: https://collaboration.example.test\n项目 ID: project-1\n邀请令牌: ${invitationToken}`
       )
     ).toMatchObject({ projectId: "project-1", invitationToken });
+  });
+
+  it("adapts only explicit private HTTP legacy invitations to an endpoint", () => {
+    const legacyHttp = parseCollaborationInvitationHandoff(
+      `Server: http://192.168.1.20:8787/\nProject ID: project-1\nToken: ${invitationToken}`
+    );
+    expect(legacyHttp && endpointForLegacyCollaborationInvitationHandoff(legacyHttp)).toMatchObject(
+      {
+        topology: "lan_http",
+        serverOrigin: "http://192.168.1.20:8787/"
+      }
+    );
+    const legacyHttps = parseCollaborationInvitationHandoff(
+      `Server: https://custom.example.ts.net/\nProject ID: project-1\nToken: ${invitationToken}`
+    );
+    expect(legacyHttps && endpointForLegacyCollaborationInvitationHandoff(legacyHttps)).toBeNull();
   });
 
   it("rejects malformed or unsafe handoff payloads", () => {

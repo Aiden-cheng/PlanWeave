@@ -819,7 +819,13 @@ async function runLiveCollaborationSmoke(window: BrowserWindow): Promise<Record<
         displayName: "Desktop smoke owner",
         serverBaseUrl: ${JSON.stringify(serverBaseUrl)},
         projectId: ${JSON.stringify(projectId)},
-        allowInsecureTransport: true
+        allowInsecureTransport: true,
+        endpoint: {
+          topology: "loopback_http",
+          serverOrigin: ${JSON.stringify(serverBaseUrl)},
+          allowedClientOrigins: [${JSON.stringify(serverBaseUrl)}],
+          tlsTrust: "not_applicable"
+        }
       });
       await collaborationApi.bootstrapCollaborationOwner({
         profileId,

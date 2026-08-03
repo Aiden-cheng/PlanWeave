@@ -22,7 +22,7 @@ import {
   type PeoplePresenceSummary
 } from "../collaboration/peopleViewModels";
 import type {
-  CollaborationInvitationCreateView,
+  CollaborationInvitationHandoffView,
   CollaborationStatus,
   PlanWeaveCollaborationApi
 } from "../../shared/collaboration.js";
@@ -56,12 +56,12 @@ export type UsePeoplePanelControllerResult = {
   detailsError: string | null;
   actionError: string | null;
   actionBusy: boolean;
-  pendingInvitation: CollaborationInvitationCreateView | null;
+  pendingInvitation: CollaborationInvitationHandoffView | null;
   clearPendingInvitation: () => void;
   clearActionError: () => void;
   refreshDetails: () => Promise<void>;
-  createInvitation: () => Promise<CollaborationInvitationCreateView | null>;
-  viewInvitation: (invitationId: string) => Promise<CollaborationInvitationCreateView | null>;
+  createInvitation: () => Promise<CollaborationInvitationHandoffView | null>;
+  viewInvitation: (invitationId: string) => Promise<CollaborationInvitationHandoffView | null>;
   revokeInvitation: (invitationId: string) => Promise<boolean>;
   revokeInvitations: (invitationIds: readonly string[]) => Promise<boolean>;
   promoteMember: (humanPrincipalId: string) => Promise<boolean>;
@@ -81,7 +81,7 @@ export function usePeoplePanelController(
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [pendingInvitation, setPendingInvitation] =
-    useState<CollaborationInvitationCreateView | null>(null);
+    useState<CollaborationInvitationHandoffView | null>(null);
   const detailsGenerationRef = useRef(0);
   const detailsRequestRef = useRef<Promise<void> | null>(null);
   const detailsRequestProfileRef = useRef<string | null>(null);
@@ -236,7 +236,7 @@ export function usePeoplePanelController(
       setActionBusy(true);
       setActionError(null);
       try {
-        const created = await api.createCollaborationInvitation({
+        const created = await api.createCollaborationInvitationHandoff({
           idempotencyKey: globalThis.crypto.randomUUID()
         });
         setPendingInvitation(created);
@@ -260,7 +260,7 @@ export function usePeoplePanelController(
       setActionBusy(true);
       setActionError(null);
       try {
-        const invitation = await api.getCollaborationInvitationSecret({ invitationId });
+        const invitation = await api.getCollaborationInvitationHandoff({ invitationId });
         setPendingInvitation(invitation);
         return invitation;
       } catch (error) {

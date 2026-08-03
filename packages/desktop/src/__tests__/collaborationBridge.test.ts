@@ -30,6 +30,33 @@ import {
 
 const tempRoots: string[] = [];
 
+function publicEndpoint(serverOrigin: string) {
+  return {
+    topology: "public_https" as const,
+    serverOrigin,
+    allowedClientOrigins: [serverOrigin],
+    tlsTrust: "system_ca" as const
+  };
+}
+
+function loopbackEndpoint(serverOrigin: string) {
+  return {
+    topology: "loopback_http" as const,
+    serverOrigin,
+    allowedClientOrigins: [serverOrigin],
+    tlsTrust: "not_applicable" as const
+  };
+}
+
+function lanEndpoint(serverOrigin: string) {
+  return {
+    topology: "lan_http" as const,
+    serverOrigin,
+    allowedClientOrigins: [serverOrigin],
+    tlsTrust: "not_applicable" as const
+  };
+}
+
 async function tempDir(prefix: string): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), prefix));
   tempRoots.push(dir);
@@ -165,7 +192,13 @@ describe("collaboration credential vault + profile store", () => {
       displayName: "Demo",
       serverBaseUrl: "https://collab.example.com/",
       projectId: "project-1",
-      allowInsecureTransport: false
+      allowInsecureTransport: false,
+      endpoint: {
+        topology: "public_https",
+        serverOrigin: "https://collab.example.com/",
+        allowedClientOrigins: ["https://collab.example.com/"],
+        tlsTrust: "system_ca"
+      }
     });
     await vault.setDeviceToken("profile-1", exampleHumanDeviceToken, {
       deviceCredentialId: "device-1",
@@ -252,7 +285,7 @@ describe("collaboration credential vault + profile store", () => {
 
     await writeFile(
       profilesPath,
-      JSON.stringify({ version: 2, profiles: [], activeProfileId: null }),
+      JSON.stringify({ version: 4, profiles: [], activeProfileId: null }),
       "utf8"
     );
     await expect(new CollaborationProfileStore({ profilesPath }).read()).rejects.toThrow(
@@ -351,7 +384,8 @@ describe("CollaborationService IPC trust boundary", () => {
       displayName: "Demo",
       serverBaseUrl: "https://collab.example.com/",
       projectId: "project-1",
-      allowInsecureTransport: false
+      allowInsecureTransport: false,
+      endpoint: publicEndpoint("https://collab.example.com/")
     });
 
     await expect(
@@ -370,7 +404,8 @@ describe("CollaborationService IPC trust boundary", () => {
       displayName: "Demo",
       serverBaseUrl: "https://collab.example.com/",
       projectId: "project-1",
-      allowInsecureTransport: false
+      allowInsecureTransport: false,
+      endpoint: publicEndpoint("https://collab.example.com/")
     });
     await service.importDeviceCredential({
       profileId: "profile-1",
@@ -395,7 +430,8 @@ describe("CollaborationService IPC trust boundary", () => {
     const baseProfile = {
       displayName: "Local",
       serverBaseUrl: "http://127.0.0.1:8787/",
-      allowInsecureTransport: true
+      allowInsecureTransport: true,
+      endpoint: loopbackEndpoint("http://127.0.0.1:8787/")
     };
     await service.upsertProfile({
       ...baseProfile,
@@ -469,7 +505,8 @@ describe("CollaborationService IPC trust boundary", () => {
     const baseProfile = {
       displayName: "Local",
       serverBaseUrl: "http://127.0.0.1:8787/",
-      allowInsecureTransport: true
+      allowInsecureTransport: true,
+      endpoint: loopbackEndpoint("http://127.0.0.1:8787/")
     };
     await service.upsertProfile({
       ...baseProfile,
@@ -519,7 +556,8 @@ describe("CollaborationService IPC trust boundary", () => {
       displayName: "Stable",
       serverBaseUrl: "http://127.0.0.1:8787/",
       projectId: "project-stable",
-      allowInsecureTransport: true
+      allowInsecureTransport: true,
+      endpoint: loopbackEndpoint("http://127.0.0.1:8787/")
     });
     await service.setActiveProfile({ profileId: "profile-stable" });
     publishedActiveProfileIds.length = 0;
@@ -648,6 +686,7 @@ describe("CollaborationService IPC trust boundary", () => {
       return workspaceResponse();
     });
     const service = new CollaborationService({
+      profileStore: new CollaborationProfileStore({ profilesPath: join(root, "profiles.json") }),
       workspaceProfileStorePaths: { profilesPath: join(root, "workspace-profiles.json") },
       vault: new CollaborationCredentialVault({
         paths: { credentialsPath: join(root, "credentials.json") },
@@ -685,7 +724,8 @@ describe("CollaborationService IPC trust boundary", () => {
         displayName: "Demo",
         serverBaseUrl: fixture.origin,
         projectId: "project-demo-001",
-        allowInsecureTransport: true
+        allowInsecureTransport: true,
+        endpoint: loopbackEndpoint(fixture.origin)
       });
 
       const handoff = await service.bootstrapOwner({
@@ -714,7 +754,8 @@ describe("CollaborationService IPC trust boundary", () => {
       displayName: "Demo",
       serverBaseUrl: "https://collab.example.com/",
       projectId: "project-1",
-      allowInsecureTransport: false
+      allowInsecureTransport: false,
+      endpoint: publicEndpoint("https://collab.example.com/")
     });
 
     await expect(
@@ -755,14 +796,16 @@ describe("CollaborationService IPC trust boundary", () => {
       displayName: "A",
       serverBaseUrl: "https://a.example.com/",
       projectId: "project-a",
-      allowInsecureTransport: false
+      allowInsecureTransport: false,
+      endpoint: publicEndpoint("https://a.example.com/")
     });
     await service.upsertProfile({
       profileId: "profile-b",
       displayName: "B",
       serverBaseUrl: "https://b.example.com/",
       projectId: "project-b",
-      allowInsecureTransport: false
+      allowInsecureTransport: false,
+      endpoint: publicEndpoint("https://b.example.com/")
     });
     await service.importDeviceCredential({
       profileId: "profile-a",
@@ -822,7 +865,8 @@ describe("CollaborationService IPC trust boundary", () => {
       displayName: "Stable local profile",
       serverBaseUrl: "http://127.0.0.1:8787/",
       projectId: "project-stable",
-      allowInsecureTransport: true
+      allowInsecureTransport: true,
+      endpoint: loopbackEndpoint("http://127.0.0.1:8787/")
     };
     await service.upsertProfile(profile);
     await service.importDeviceCredential({
@@ -869,7 +913,8 @@ describe("CollaborationService IPC trust boundary", () => {
         displayName: "Windows test",
         serverBaseUrl: "http://192.168.123.23:62060/",
         projectId: "project-timeout",
-        allowInsecureTransport: true
+        allowInsecureTransport: true,
+        endpoint: lanEndpoint("http://192.168.123.23:62060/")
       });
       await service.importDeviceCredential({
         profileId: "profile-timeout",
@@ -897,22 +942,23 @@ describe("CollaborationService IPC trust boundary", () => {
 
   it("creates a fresh client when retrying a failed observer session", async () => {
     const root = await tempDir("planweave-collab-observer-failed-retry-");
-    const createClient = vi.fn(() =>
-      ({
-        verifyAccess: vi.fn().mockResolvedValue(undefined),
-        startObserver: (handlers: {
-          onStatus?: (status: { state: "failed"; code: string }) => void;
-        }) =>
-          handlers.onStatus?.({
-            state: "failed",
-            code: "collaboration_observer_http_403"
-          }),
-        stopObserver: vi.fn(),
-        stopPresence: vi.fn(),
-        dispose: vi.fn(),
-        bootstrapOwner: vi.fn(),
-        consumeInvitation: vi.fn()
-      }) as never
+    const createClient = vi.fn(
+      () =>
+        ({
+          verifyAccess: vi.fn().mockResolvedValue(undefined),
+          startObserver: (handlers: {
+            onStatus?: (status: { state: "failed"; code: string }) => void;
+          }) =>
+            handlers.onStatus?.({
+              state: "failed",
+              code: "collaboration_observer_http_403"
+            }),
+          stopObserver: vi.fn(),
+          stopPresence: vi.fn(),
+          dispose: vi.fn(),
+          bootstrapOwner: vi.fn(),
+          consumeInvitation: vi.fn()
+        }) as never
     );
     const service = new CollaborationService({
       profileStore: new CollaborationProfileStore({ profilesPath: join(root, "profiles.json") }),
@@ -928,7 +974,8 @@ describe("CollaborationService IPC trust boundary", () => {
       displayName: "Windows test",
       serverBaseUrl: "http://192.168.123.23:50653/",
       projectId: "project-retry",
-      allowInsecureTransport: true
+      allowInsecureTransport: true,
+      endpoint: lanEndpoint("http://192.168.123.23:50653/")
     });
     await service.importDeviceCredential({
       profileId: "profile-retry",
@@ -980,7 +1027,8 @@ describe("CollaborationService IPC trust boundary", () => {
       displayName: "Windows test",
       serverBaseUrl: "http://192.168.123.23:50653/",
       projectId: "project-preflight",
-      allowInsecureTransport: true
+      allowInsecureTransport: true,
+      endpoint: lanEndpoint("http://192.168.123.23:50653/")
     });
     await service.importDeviceCredential({
       profileId: "profile-preflight",
@@ -1049,7 +1097,8 @@ describe("CollaborationService IPC trust boundary", () => {
         displayName: "Windows test",
         serverBaseUrl: "http://192.168.123.23:62060/",
         projectId: "project-timeout",
-        allowInsecureTransport: true
+        allowInsecureTransport: true,
+        endpoint: lanEndpoint("http://192.168.123.23:62060/")
       });
       await service.importDeviceCredential({
         profileId: "profile-reconnect-timeout",
@@ -1126,7 +1175,8 @@ describe("CollaborationService IPC trust boundary", () => {
       displayName: "A",
       serverBaseUrl: "https://a.example.com/",
       projectId: "project-a",
-      allowInsecureTransport: false
+      allowInsecureTransport: false,
+      endpoint: publicEndpoint("https://a.example.com/")
     });
     await service.importDeviceCredential({
       profileId: "profile-a",
@@ -1148,7 +1198,8 @@ describe("CollaborationService IPC trust boundary", () => {
       displayName: "A moved",
       serverBaseUrl: "https://moved.example.com/",
       projectId: "project-moved",
-      allowInsecureTransport: false
+      allowInsecureTransport: false,
+      endpoint: publicEndpoint("https://moved.example.com/")
     });
     observerHandlers.at(-1)?.onStatus?.({
       state: "connected",

@@ -64,6 +64,9 @@ describe("preload collaboration command bridge", () => {
     await expect(api.createCollaborationInvitation({})).rejects.toMatchObject(
       expectedBoundaryError
     );
+    await expect(api.createCollaborationInvitationHandoff({})).rejects.toMatchObject(
+      expectedBoundaryError
+    );
   });
 
   it("unwraps People read errors without exposing Electron invoke text", async () => {

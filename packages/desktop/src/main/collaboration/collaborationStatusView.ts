@@ -1,4 +1,3 @@
-import type { CollaborationConnectionProfile } from "@planweave-ai/collaboration-protocol/connection";
 import {
   COLLABORATION_SESSION_ONLY_WARNING,
   type CollaborationProfileView,
@@ -8,7 +7,10 @@ import {
 import type { CollaborationClient } from "./CollaborationClient.js";
 import type { CollaborationObserverStatus } from "./CollaborationClient.js";
 import type { CollaborationCredentialVault } from "./collaborationCredentialVault.js";
-import type { CollaborationProfileStore } from "./collaborationProfileStore.js";
+import type {
+  CollaborationProfileStore,
+  StoredCollaborationProfileRecord
+} from "./collaborationProfileStore.js";
 import type { CollaborationWorkspaceConnection } from "./collaborationWorkspaceConnection.js";
 
 export type CollaborationStatusSession = {
@@ -43,7 +45,7 @@ function observerDetail(status: CollaborationObserverStatus): string {
 }
 
 function toPublicProfile(
-  profile: CollaborationConnectionProfile & { updatedAt: string },
+  profile: StoredCollaborationProfileRecord,
   credential: {
     hasDeviceCredential: boolean;
     deviceCredentialPersistence: CollaborationProfileView["deviceCredentialPersistence"];
@@ -51,7 +53,7 @@ function toPublicProfile(
     humanPrincipalId: string | null;
   }
 ): CollaborationProfileView {
-  return {
+  const base = {
     profileId: profile.profileId,
     displayName: profile.displayName,
     serverBaseUrl: profile.serverBaseUrl,
@@ -63,6 +65,12 @@ function toPublicProfile(
     humanPrincipalId: credential.humanPrincipalId,
     updatedAt: profile.updatedAt
   };
+  switch (profile.connectionState) {
+    case "ready":
+      return { ...base, endpoint: profile.endpoint, connectionState: "ready" };
+    case "reconnect_required":
+      return { ...base, endpoint: null, connectionState: "reconnect_required" };
+  }
 }
 
 /** Builds the redacted renderer status from credential/profile read models. */

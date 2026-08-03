@@ -4,6 +4,7 @@ import type {
   CollaborationCanvasReplicaSignal
 } from "./canvasReplicaIpc.js";
 import { COMMENT_ATTACHMENT_MAX_BYTES } from "@planweave-ai/collaboration-protocol/core/limits";
+import type { CollaborationInvitationHandoffResponse } from "@planweave-ai/collaboration-protocol/handoff/invitation";
 import {
   canvasCommandIntentSchema,
   type CanvasCommandOutcome,
@@ -25,6 +26,7 @@ import {
   collaborationServerOriginSchema,
   type ActiveWorkspaceConnectionView,
   type CollaborationConnectionProfile,
+  type DeploymentEndpoint,
   type WorkspacePickerPage
 } from "@planweave-ai/collaboration-protocol/connection";
 import {
@@ -142,6 +144,20 @@ import type {
   LocalCollaborationScopeCatalog,
   LocalCollaborationScopeSelectionInput
 } from "./localCollaborationScopes.js";
+import type {
+  DesktopServerExposureModeInput,
+  DesktopServerExposureView
+} from "./deploymentExposure.js";
+export {
+  desktopServerExposureErrorCodeSchema,
+  desktopServerExposureModeInputSchema,
+  desktopServerExposureModeSchema,
+  desktopServerExposureViewSchema,
+  type DesktopServerExposureErrorCode,
+  type DesktopServerExposureMode,
+  type DesktopServerExposureModeInput,
+  type DesktopServerExposureView
+} from "./deploymentExposure.js";
 export {
   localCollaborationLanSharingInputSchema,
   localCollaborationRegistrationInputSchema,
@@ -168,7 +184,7 @@ export type CollaborationCredentialPersistence = "persisted" | "session-only" | 
  * Public profile view for renderer/preload.
  * Never includes deviceToken, encrypted ciphertext, credential path, or Authorization.
  */
-export type CollaborationProfileView = {
+type CollaborationProfileViewBase = {
   profileId: string;
   displayName: string;
   serverBaseUrl: string;
@@ -180,6 +196,12 @@ export type CollaborationProfileView = {
   humanPrincipalId: string | null;
   updatedAt: string;
 };
+
+export type CollaborationProfileView = CollaborationProfileViewBase &
+  (
+    | { endpoint: DeploymentEndpoint; connectionState: "ready" }
+    | { endpoint: null; connectionState: "reconnect_required" }
+  );
 
 export type CollaborationSessionPhase = "idle" | "ready" | "connecting" | "connected" | "error";
 
@@ -455,6 +477,7 @@ export type CollaborationCommentAttachmentBody = z.infer<
 
 /** One-shot invitation create view — token is display/copy-once only; never persisted by Desktop. */
 export type CollaborationInvitationCreateView = HumanCreateInvitationResponse;
+export type CollaborationInvitationHandoffView = CollaborationInvitationHandoffResponse;
 
 /** Selected canvas binding for the ephemeral presence socket. */
 export const collaborationPresenceCanvasInputSchema = z
@@ -736,6 +759,10 @@ export type PlanWeaveCollaborationApi = {
   validateDeploymentConnectivity: (
     input: Extract<DesktopDeploymentActionRequest, { action: "validate_connectivity" }>
   ) => Promise<ConnectivityValidationView>;
+  getDesktopServerExposure: () => Promise<DesktopServerExposureView>;
+  setDesktopServerExposureMode: (
+    input: DesktopServerExposureModeInput
+  ) => Promise<DesktopServerExposureView>;
   startCollaborationPresence: (input: CollaborationPresenceCanvasInput) => Promise<void>;
   stopCollaborationPresence: () => Promise<void>;
   startCollaborationCanvasLiveSync: (input: CollaborationCanvasLiveSyncInput) => Promise<void>;
@@ -804,9 +831,15 @@ export type PlanWeaveCollaborationApi = {
   createCollaborationInvitation: (
     input?: CollaborationCreateInvitationInput
   ) => Promise<CollaborationInvitationCreateView>;
+  createCollaborationInvitationHandoff: (
+    input?: CollaborationCreateInvitationInput
+  ) => Promise<CollaborationInvitationHandoffView>;
   getCollaborationInvitationSecret: (
     input: CollaborationInvitationIdInput
   ) => Promise<CollaborationInvitationCreateView>;
+  getCollaborationInvitationHandoff: (
+    input: CollaborationInvitationIdInput
+  ) => Promise<CollaborationInvitationHandoffView>;
   revokeCollaborationInvitation: (
     input: CollaborationInvitationIdInput
   ) => Promise<HumanInvitationView>;

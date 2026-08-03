@@ -1,6 +1,14 @@
 import { capabilitiesSchema, opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
-import { collaborationServerOriginSchema, isLoopbackHostname } from "./connection.js";
+import { deploymentEndpointSchema, type DeploymentEndpoint } from "./connection.js";
+export {
+  deploymentEndpointSchema,
+  deploymentTlsTrustSchema,
+  deploymentTopologySchema,
+  type DeploymentEndpoint,
+  type DeploymentTlsTrust,
+  type DeploymentTopology
+} from "./connection.js";
 import { timestampSchema, workspaceScopeRefSchema } from "./primitives.js";
 
 export const deploymentConnectionSchemaVersion = "deployment-connection/v1" as const;
@@ -16,29 +24,6 @@ export const deploymentTargetDraftSchemaVersionSchema = z.literal(
 export type DeploymentTargetDraftSchemaVersion = z.infer<
   typeof deploymentTargetDraftSchemaVersionSchema
 >;
-
-/** The supported server exposure topologies. */
-export const deploymentTopologySchema = z.enum([
-  "loopback_http",
-  "loopback_https",
-  "lan_https",
-  "tailscale_https",
-  "public_https"
-]);
-export type DeploymentTopology = z.infer<typeof deploymentTopologySchema>;
-
-export const deploymentTlsTrustSchema = z.enum(["not_applicable", "system_ca", "configured_ca"]);
-export type DeploymentTlsTrust = z.infer<typeof deploymentTlsTrustSchema>;
-
-const allowedClientOriginsSchema = z
-  .array(collaborationServerOriginSchema)
-  .min(1)
-  .max(32)
-  .superRefine((origins, context) => {
-    if (new Set(origins).size !== origins.length) {
-      context.addIssue({ code: "custom", message: "duplicate_allowed_client_origin" });
-    }
-  });
 
 export const deploymentConnectionCapabilitySchema = z.enum([
   "workspace_connection",
@@ -60,122 +45,6 @@ export const deploymentConnectionCapabilitiesSchema = z
 export type DeploymentConnectionCapabilities = z.infer<
   typeof deploymentConnectionCapabilitiesSchema
 >;
-
-function originPort(url: URL): number {
-  if (url.port) return Number(url.port);
-  return url.protocol === "https:" ? 443 : 80;
-}
-
-function validateTopologyOrigin(
-  value: {
-    topology: DeploymentTopology;
-    serverOrigin: string;
-    allowedClientOrigins: string[];
-    tlsTrust: DeploymentTlsTrust;
-  },
-  context: z.RefinementCtx
-): void {
-  const url = new URL(value.serverOrigin);
-  const loopback = isLoopbackHostname(url.hostname);
-  if (value.topology === "loopback_http") {
-    if (
-      url.protocol !== "http:" ||
-      !loopback ||
-      value.tlsTrust !== "not_applicable" ||
-      value.allowedClientOrigins.some((origin) => {
-        const client = new URL(origin);
-        return client.protocol !== "http:" || !isLoopbackHostname(client.hostname);
-      })
-    ) {
-      context.addIssue({
-        code: "custom",
-        message: "loopback_http_requires_loopback_http_origins_without_tls",
-        path: ["serverOrigin"]
-      });
-    }
-    return;
-  }
-  if (value.topology === "loopback_https") {
-    if (
-      url.protocol !== "https:" ||
-      !loopback ||
-      value.tlsTrust === "not_applicable" ||
-      value.allowedClientOrigins.some((origin) => {
-        const client = new URL(origin);
-        return client.protocol !== "https:" || !isLoopbackHostname(client.hostname);
-      })
-    ) {
-      context.addIssue({
-        code: "custom",
-        message: "loopback_https_requires_trusted_loopback_https_origins",
-        path: ["serverOrigin"]
-      });
-    }
-    return;
-  }
-  if (value.topology === "tailscale_https") {
-    if (
-      url.protocol !== "https:" ||
-      loopback ||
-      !url.hostname.toLowerCase().endsWith(".ts.net") ||
-      originPort(url) !== 443 ||
-      value.tlsTrust !== "system_ca" ||
-      value.allowedClientOrigins.some((origin) => {
-        const client = new URL(origin);
-        return (
-          client.protocol !== "https:" ||
-          isLoopbackHostname(client.hostname) ||
-          !client.hostname.toLowerCase().endsWith(".ts.net") ||
-          originPort(client) !== 443
-        );
-      })
-    ) {
-      context.addIssue({
-        code: "custom",
-        message: "tailscale_https_requires_system_ca_ts_net_port_443_origins",
-        path: ["serverOrigin"]
-      });
-    }
-    return;
-  }
-  if (
-    url.protocol !== "https:" ||
-    loopback ||
-    value.tlsTrust === "not_applicable" ||
-    value.allowedClientOrigins.some((origin) => {
-      const client = new URL(origin);
-      return client.protocol !== "https:" || isLoopbackHostname(client.hostname);
-    })
-  ) {
-    context.addIssue({
-      code: "custom",
-      message: "network_topology_requires_trusted_non_loopback_https_origins",
-      path: ["serverOrigin"]
-    });
-  }
-  if (value.topology === "public_https" && originPort(url) !== 443) {
-    context.addIssue({
-      code: "custom",
-      message: "public_https_requires_direct_tls_port_443",
-      path: ["serverOrigin"]
-    });
-  }
-}
-
-/**
- * Provider-neutral server exposure endpoint. Trusted loopback, LAN, and public
- * endpoints require HTTPS/WSS; the websocket origin is derived from this HTTP origin.
- */
-export const deploymentEndpointSchema = z
-  .object({
-    topology: deploymentTopologySchema,
-    serverOrigin: collaborationServerOriginSchema,
-    allowedClientOrigins: allowedClientOriginsSchema,
-    tlsTrust: deploymentTlsTrustSchema
-  })
-  .strict()
-  .superRefine(validateTopologyOrigin);
-export type DeploymentEndpoint = z.infer<typeof deploymentEndpointSchema>;
 
 export function deploymentWebSocketOrigin(endpoint: DeploymentEndpoint): string {
   const url = new URL(endpoint.serverOrigin);

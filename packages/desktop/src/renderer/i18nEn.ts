@@ -477,6 +477,31 @@ export const enCatalog = {
   deploymentLoopbackTls: "Local loopback HTTPS",
   deploymentLan: "LAN HTTPS",
   deploymentPublic: "Public HTTPS",
+  deploymentTailscale: "Tailscale private network",
+  deploymentCustomHttps: "Custom HTTPS",
+  deploymentCustomTopology: "HTTPS topology",
+  deploymentLoopbackHttps: "Loopback HTTPS",
+  deploymentLanHttps: "LAN HTTPS",
+  deploymentPublicHttps: "Public HTTPS",
+  deploymentTlsTrust: "TLS trust",
+  deploymentSystemCa: "System CA",
+  deploymentConfiguredCa: "Configured CA",
+  deploymentLanAdvanced: "LAN HTTP (advanced/development)",
+  deploymentTailscaleNote:
+    "PlanWeave discovers the private .ts.net address and manages only its owned Serve route. No Origin entry is required.",
+  deploymentLanAdvancedNote:
+    "LAN HTTP is unencrypted and should only be used for explicit development on a trusted private network.",
+  deploymentActivate: "Apply connection mode",
+  deploymentAdvertisedOrigin: "Advertised address",
+  deploymentTailscaleNotInstalled: "Install Tailscale, then try again.",
+  deploymentTailscaleLoginRequired: "Sign in to Tailscale on this device, then try again.",
+  deploymentTailscaleHttpsUnavailable:
+    "Enable MagicDNS and HTTPS certificates for this tailnet, then try again.",
+  deploymentTailscaleServeConflict:
+    "The Tailscale Serve root route is already in use. PlanWeave did not overwrite it.",
+  deploymentTailscaleUnavailable:
+    "Tailscale private sharing is unavailable. Check Tailscale and retry.",
+  deploymentServerStartFailed: "The PlanWeave Server could not start in this connection mode.",
   deploymentOrigin: "Server origin",
   deploymentDisplayName: "Deployment name",
   deploymentLoopbackNote:
@@ -1157,7 +1182,9 @@ export const enCatalog = {
   peopleConnectExistingSubmit: "Connect Workspace",
   peopleExistingServerUrl: "Current Server address",
   peopleExistingServerUrlHint:
-    "If the connection times out, copy the current connection address from the owner's Sharing settings. Connecting saves the new address without creating another member.",
+    "This validated address is read-only. Use a new invitation or the deployment connection flow to change it.",
+  peopleProfileReconnectRequired:
+    "This legacy profile needs a new invitation or deployment connection before it can connect.",
   peopleRemoteWorkspaceTitle: "Remote Workspace",
   peopleRemoteWorkspaceDescription:
     "Connect to a shared PlanWeave Server for people, permissions, and multi-device collaboration.",
