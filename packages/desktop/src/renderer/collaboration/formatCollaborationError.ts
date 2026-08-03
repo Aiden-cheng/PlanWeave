@@ -33,10 +33,7 @@ export function collaborationErrorMessage(
   return formatUnknownCollaborationError(error);
 }
 
-export function collaborationConnectionErrorMessage(
-  t: ReturnType<typeof createTranslator>,
-  error: unknown
-): string {
+export function isCollaborationConnectionUnavailable(error: unknown): boolean {
   const code = collaborationErrorCode(error);
   const record = error && typeof error === "object" ? (error as Record<string, unknown>) : null;
   const kind = typeof record?.kind === "string" ? record.kind : null;
@@ -46,16 +43,26 @@ export function collaborationConnectionErrorMessage(
       : typeof record?.message === "string"
         ? record.message
         : null;
-  if (
+  return (
     kind === "offline" ||
     kind === "network" ||
     kind === "timeout" ||
     code === "collaboration_offline" ||
     code === "collaboration_timeout" ||
     code === "network_unreachable" ||
+    code === "canvas_replica_session_disconnected" ||
     (message !== null &&
-      /fetch failed|network request failed|network unreachable|timed?\s*out/i.test(message))
-  ) {
+      /fetch failed|network request failed|network unreachable|timed?\s*out|canvas_replica_session_disconnected/i.test(
+        message
+      ))
+  );
+}
+
+export function collaborationConnectionErrorMessage(
+  t: ReturnType<typeof createTranslator>,
+  error: unknown
+): string {
+  if (isCollaborationConnectionUnavailable(error)) {
     return t("peopleServerUnreachable");
   }
   return collaborationErrorMessage(error);

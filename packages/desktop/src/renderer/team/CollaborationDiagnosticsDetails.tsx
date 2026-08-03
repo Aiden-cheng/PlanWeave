@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { createTranslator } from "../i18n";
+import { shouldShowCollaborationDiagnostics } from "./collaborationDiagnostics";
 
 export type CollaborationDiagnosticsDetailsProps = {
   report: string;
@@ -18,6 +19,8 @@ export function CollaborationDiagnosticsDetails({
 }: CollaborationDiagnosticsDetailsProps) {
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
+
+  if (!shouldShowCollaborationDiagnostics()) return null;
 
   return (
     <details
@@ -62,9 +65,7 @@ export function CollaborationDiagnosticsDetails({
             })();
           }}
         >
-          {copied
-            ? t("peopleConnectionDiagnosticsCopied")
-            : t("peopleConnectionDiagnosticsCopy")}
+          {copied ? t("peopleConnectionDiagnosticsCopied") : t("peopleConnectionDiagnosticsCopy")}
         </Button>
         {copyError ? (
           <span className="text-xs text-destructive" role="alert">

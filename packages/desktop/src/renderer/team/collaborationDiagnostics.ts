@@ -46,6 +46,11 @@ export type CollaborationReadModelDiagnosticContext = Pick<
   | "updatedAt"
 >;
 
+/** Diagnostic payloads are an internal troubleshooting surface, not product UI. */
+export function shouldShowCollaborationDiagnostics(): boolean {
+  return !import.meta.env.PROD;
+}
+
 /** Builds an allowlisted, copy-safe report. Credentials and invitation secrets are never included. */
 export function buildCollaborationDiagnosticReport(
   status: CollaborationStatus,
@@ -76,13 +81,9 @@ export function buildCollaborationDiagnosticReport(
       activeProfile ? membersUrl(activeProfile.serverBaseUrl, activeProfile.projectId) : null
     )}`,
     `profile.project_id=${diagnosticValue(activeProfile?.projectId)}`,
-    `profile.allow_insecure_transport=${diagnosticValue(
-      activeProfile?.allowInsecureTransport
-    )}`,
+    `profile.allow_insecure_transport=${diagnosticValue(activeProfile?.allowInsecureTransport)}`,
     `profile.has_device_credential=${diagnosticValue(activeProfile?.hasDeviceCredential)}`,
-    `profile.credential_persistence=${diagnosticValue(
-      activeProfile?.deviceCredentialPersistence
-    )}`,
+    `profile.credential_persistence=${diagnosticValue(activeProfile?.deviceCredentialPersistence)}`,
     `workspace.status=${diagnosticValue(workspace.status)}`,
     `workspace.id=${diagnosticValue(workspace.workspaceId)}`,
     `workspace.server_url=${diagnosticValue(workspaceProfile?.serverBaseUrl)}`,

@@ -6,6 +6,7 @@ import type {
   CollaborationCanvasReconnectResult,
   PlanWeaveCollaborationApi
 } from "../../shared/collaboration.js";
+import { isCollaborationConnectionUnavailable } from "./formatCollaborationError.js";
 
 export type CanvasCommandBridge = Pick<
   PlanWeaveCollaborationApi,
@@ -17,6 +18,7 @@ export type CanvasCommandBridge = Pick<
 
 export type CanvasCommandControllerSnapshot = {
   session: CollaborationCanvasCommandSessionView | null;
+  connectionPhase: "idle" | "connecting" | "connected" | "disconnected";
   lastError: string | null;
   lastStaleConflict: CollaborationCanvasCommandSessionView["lastConflict"] | null;
   busy: boolean;
@@ -31,6 +33,7 @@ export type CanvasCommandLabels = {
 
 const EMPTY: CanvasCommandControllerSnapshot = {
   session: null,
+  connectionPhase: "idle",
   lastError: null,
   lastStaleConflict: null,
   busy: false
@@ -62,6 +65,7 @@ function snapshotsEqual(
 ): boolean {
   return (
     sessionsEqual(left.session, right.session) &&
+    left.connectionPhase === right.connectionPhase &&
     left.lastError === right.lastError &&
     left.lastStaleConflict?.expectedRevision === right.lastStaleConflict?.expectedRevision &&
     left.lastStaleConflict?.authoritativeRevision ===
@@ -105,7 +109,12 @@ export class CanvasCommandController {
     this.generation += 1;
     const generation = this.generation;
     this.canvasId = null;
-    this.patch({ busy: true, lastError: null, lastStaleConflict: null });
+    this.patch({
+      connectionPhase: "connecting",
+      busy: true,
+      lastError: null,
+      lastStaleConflict: null
+    });
     let tracked: Promise<void>;
     tracked = this.bindAndReconnect(input, generation).finally(() => {
       if (this.bindingPromise === tracked) this.bindingPromise = null;
@@ -131,7 +140,7 @@ export class CanvasCommandController {
     const binding = this.bindingPromise;
     if (binding) await binding;
     const canvasId = this.canvasId;
-    if (!canvasId || this.snapshot.lastError) {
+    if (!canvasId || this.snapshot.connectionPhase !== "connected" || this.snapshot.lastError) {
       throw new Error(this.snapshot.lastError ?? this.labels.notConnected);
     }
     this.patch({ busy: true, lastError: null, lastStaleConflict: null });
@@ -144,6 +153,7 @@ export class CanvasCommandController {
         if (result.outcome.code === "stale_revision" && result.outcome.conflict) {
           this.patch({
             session: result.session,
+            connectionPhase: "connected",
             busy: false,
             lastStaleConflict: result.outcome.conflict,
             lastError: this.labels.staleRevision(
@@ -154,6 +164,7 @@ export class CanvasCommandController {
         } else {
           this.patch({
             session: result.session,
+            connectionPhase: "connected",
             busy: false,
             lastError: this.labels.rejected(result.outcome.code)
           });
@@ -161,6 +172,7 @@ export class CanvasCommandController {
       } else {
         this.patch({
           session: result.session,
+          connectionPhase: "connected",
           busy: false,
           lastError: null,
           lastStaleConflict: null
@@ -168,6 +180,10 @@ export class CanvasCommandController {
       }
       return result;
     } catch (error) {
+      if (isCollaborationConnectionUnavailable(error)) {
+        this.patch({ connectionPhase: "disconnected", busy: false, lastError: null });
+        throw error;
+      }
       const message = error instanceof Error ? error.message : String(error);
       this.patch({ busy: false, lastError: message });
       throw error;
@@ -188,7 +204,7 @@ export class CanvasCommandController {
     }
     this.canvasId = canvasId;
     if (!options?.background) {
-      this.patch({ busy: true, lastError: null });
+      this.patch({ connectionPhase: "connecting", busy: true, lastError: null });
     }
     try {
       const result = await this.api.reconnectCollaborationCanvas({
@@ -199,12 +215,14 @@ export class CanvasCommandController {
       if (result.response.type === "canvas.reconnect.error") {
         this.patch({
           session: result.session,
+          connectionPhase: "connected",
           busy: false,
           lastError: this.labels.reconnectFailed(result.response.code)
         });
       } else {
         this.patch({
           session: result.session,
+          connectionPhase: "connected",
           busy: false,
           lastError: null,
           lastStaleConflict: null
@@ -212,6 +230,10 @@ export class CanvasCommandController {
       }
       return result;
     } catch (error) {
+      if (isCollaborationConnectionUnavailable(error)) {
+        this.patch({ connectionPhase: "disconnected", busy: false, lastError: null });
+        throw error;
+      }
       const message = error instanceof Error ? error.message : String(error);
       this.patch({ busy: false, lastError: message });
       throw error;
@@ -219,8 +241,8 @@ export class CanvasCommandController {
   }
 
   /**
-   * Poll without emitting transient busy states. Errors remain visible in the
-   * controller snapshot while the returned null keeps detached timers safe.
+   * Poll without emitting transient busy states. Expected transport failures
+   * move the command channel offline; other failures remain visible.
    */
   async reconnectInBackground(): Promise<CollaborationCanvasReconnectResult | null> {
     try {
@@ -246,16 +268,22 @@ export class CanvasCommandController {
       if (generation !== this.generation) return;
       if (!session) throw new Error(this.labels.notConnected);
       this.canvasId = session.canvasId;
-      this.patch({ session });
+      this.patch({ session, connectionPhase: "connecting" });
       // Align the local materialization and CAS revision with the authoritative head
       // before allowing the first mutation through this controller.
       await this.reconnect({ canvasId: session.canvasId });
     } catch (error) {
       if (generation !== this.generation) return;
-      this.canvasId = null;
+      const connectionUnavailable = isCollaborationConnectionUnavailable(error);
+      if (!connectionUnavailable) this.canvasId = null;
       this.patch({
+        connectionPhase: connectionUnavailable ? "disconnected" : "idle",
         busy: false,
-        lastError: error instanceof Error ? error.message : String(error)
+        lastError: connectionUnavailable
+          ? null
+          : error instanceof Error
+            ? error.message
+            : String(error)
       });
     }
   }

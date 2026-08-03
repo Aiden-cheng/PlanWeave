@@ -525,4 +525,106 @@ describe("useSharedCanvasCommands", () => {
     });
     expect(bridge.reconnect).not.toHaveBeenCalled();
   });
+
+  it("treats a background reconnect transport failure as offline without exposing IPC details", async () => {
+    vi.useFakeTimers();
+    const submit = vi.fn<SharedCanvasCommandBridge["submitCollaborationCanvasCommand"]>();
+    const bridge = createBridge({
+      reconnect: vi
+        .fn<SharedCanvasCommandBridge["reconnectCollaborationCanvas"]>()
+        .mockResolvedValueOnce(reconnectResult(initialSession))
+        .mockRejectedValueOnce(
+          new Error(
+            "Error invoking remote method 'planweave-collaboration:reconnectCanvas': CollaborationClientError: Network request failed."
+          )
+        )
+        .mockResolvedValue(reconnectResult(initialSession)),
+      submit
+    });
+    const { result } = renderHook(() => useSharedCanvasCommands(hookInput(bridge.api)));
+    await flushEffects();
+
+    act(() => bridge.emitReplica(replicaProjection(4)));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SHARED_CANVAS_RECONNECT_INTERVAL_MS);
+    });
+
+    expect(result.current.offline).toBe(true);
+    expect(result.current.snapshot.lastError).toBeNull();
+    expect(result.current.projection?.revision).toBe(4);
+    expect(result.current.projection?.canEdit).toBe(false);
+
+    let submitted: Awaited<ReturnType<typeof result.current.submit>> | undefined;
+    await act(async () => {
+      submitted = await result.current.submit({
+        intent: {
+          kind: "update_layout",
+          nodes: [{ nodeId: "T-001", x: 40, y: 80 }],
+          updatedAt: "2026-08-03T00:00:00.000Z"
+        }
+      });
+    });
+
+    expect(submitted).toEqual({ ok: false, error: null, staleConflict: null });
+    expect(submit).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SHARED_CANVAS_RECONNECT_INTERVAL_MS);
+    });
+
+    expect(result.current.offline).toBe(false);
+    expect(result.current.projection?.canEdit).toBe(true);
+  });
+
+  it("treats a disconnected canvas command session as offline without a raw error banner", async () => {
+    vi.useFakeTimers();
+    const bridge = createBridge({
+      submit: vi
+        .fn()
+        .mockRejectedValue(
+          new Error(
+            "Error invoking remote method 'planweave-collaboration:submitCanvasCommand': CollaborationClientError: canvas_replica_session_disconnected"
+          )
+        )
+    });
+    const { result } = renderHook(() => useSharedCanvasCommands(hookInput(bridge.api)));
+    await flushEffects();
+    act(() => bridge.emitReplica(replicaProjection(4)));
+
+    let submitted: Awaited<ReturnType<typeof result.current.submit>> | undefined;
+    await act(async () => {
+      submitted = await result.current.submit({
+        intent: {
+          kind: "update_layout",
+          nodes: [{ nodeId: "T-001", x: 40, y: 80 }],
+          updatedAt: "2026-08-03T00:00:00.000Z"
+        }
+      });
+    });
+
+    expect(submitted).toEqual({ ok: false, error: null, staleConflict: null });
+    expect(result.current.offline).toBe(true);
+    expect(result.current.snapshot.lastError).toBeNull();
+    expect(result.current.projection?.canEdit).toBe(false);
+  });
+
+  it("keeps unexpected canvas command failures visible", async () => {
+    vi.useFakeTimers();
+    const bridge = createBridge({
+      submit: vi.fn().mockRejectedValue(new Error("unexpected protocol failure"))
+    });
+    const { result } = renderHook(() => useSharedCanvasCommands(hookInput(bridge.api)));
+    await flushEffects();
+
+    const submitted = await result.current.submit({
+      intent: {
+        kind: "update_layout",
+        nodes: [{ nodeId: "T-001", x: 40, y: 80 }],
+        updatedAt: "2026-08-03T00:00:00.000Z"
+      }
+    });
+
+    expect(submitted.error).toBe("unexpected protocol failure");
+    expect(result.current.offline).toBe(false);
+  });
 });

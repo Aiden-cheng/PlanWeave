@@ -127,6 +127,7 @@ export function useSharedCanvasCommands(input: {
   ]);
   const [snapshot, setSnapshot] = useState<CanvasCommandControllerSnapshot>({
     session: null,
+    connectionPhase: "idle",
     lastError: null,
     lastStaleConflict: null,
     busy: false
@@ -213,7 +214,13 @@ export function useSharedCanvasCommands(input: {
   useEffect(() => {
     if (!api) {
       controllerRef.current = null;
-      setSnapshot({ session: null, lastError: null, lastStaleConflict: null, busy: false });
+      setSnapshot({
+        session: null,
+        connectionPhase: "idle",
+        lastError: null,
+        lastStaleConflict: null,
+        busy: false
+      });
       return undefined;
     }
     const controller = new CanvasCommandController({ api, labels });
@@ -378,6 +385,9 @@ export function useSharedCanvasCommands(input: {
       if (!controller || !sessionEnabled) {
         return { ok: false, error: labels.notConnected, staleConflict: null };
       }
+      if (controller.getSnapshot().connectionPhase === "disconnected") {
+        return { ok: false, error: null, staleConflict: null };
+      }
       try {
         const result = await controller.submit(submitInput);
         const snap = controller.getSnapshot();
@@ -394,7 +404,10 @@ export function useSharedCanvasCommands(input: {
         const snap = controller.getSnapshot();
         return {
           ok: false,
-          error: snap.lastError ?? (error instanceof Error ? error.message : String(error)),
+          error:
+            snap.connectionPhase === "disconnected"
+              ? null
+              : (snap.lastError ?? (error instanceof Error ? error.message : String(error))),
           staleConflict: snap.lastStaleConflict
         };
       }
@@ -405,23 +418,59 @@ export function useSharedCanvasCommands(input: {
   const reconnect = useCallback(async () => {
     const controller = controllerRef.current;
     if (!controller || !sessionEnabled) return false;
-    const result = await controller.reconnect();
-    if (result.response.type !== "canvas.reconnect.error") {
-      refreshAfterMaterialization();
-      return true;
+    try {
+      const result = await controller.reconnect();
+      if (result.response.type !== "canvas.reconnect.error") {
+        refreshAfterMaterialization();
+        return true;
+      }
+      return false;
+    } catch (error) {
+      if (controller.getSnapshot().connectionPhase === "disconnected") return false;
+      throw error;
     }
-    return false;
   }, [refreshAfterMaterialization, sessionEnabled]);
+
+  const visibleProjection = useMemo(() => {
+    if (!(authorityEnabled && snapshot.connectionPhase === "disconnected")) return projection;
+    const confirmed = lastConfirmedProjectionRef.current;
+    const confirmedProjection =
+      confirmed &&
+      confirmed.profileId === input.profileId &&
+      confirmed.projection.localProjectId === input.selectedProjectId &&
+      confirmed.projection.localCanvasId === input.canvasId &&
+      confirmed.projection.projectId === input.activeProjectId
+        ? confirmed.projection
+        : null;
+    const retained = confirmedProjection ?? projection;
+    return retained
+      ? {
+          ...retained,
+          canEdit: false,
+          optimisticOperationIds: []
+        }
+      : null;
+  }, [
+    authorityEnabled,
+    input.activeProjectId,
+    input.canvasId,
+    input.profileId,
+    input.selectedProjectId,
+    projection,
+    snapshot.connectionPhase
+  ]);
 
   return useMemo(
     () => ({
       enabled: Boolean(authorityEnabled),
       snapshot,
-      projection,
-      offline: Boolean(authorityEnabled && !sessionEnabled),
+      projection: visibleProjection,
+      offline: Boolean(
+        authorityEnabled && (!sessionEnabled || snapshot.connectionPhase === "disconnected")
+      ),
       submit,
       reconnect
     }),
-    [authorityEnabled, projection, reconnect, sessionEnabled, snapshot, submit]
+    [authorityEnabled, reconnect, sessionEnabled, snapshot, submit, visibleProjection]
   );
 }

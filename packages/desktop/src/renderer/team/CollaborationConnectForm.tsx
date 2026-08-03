@@ -22,7 +22,10 @@ import {
 import { parseCollaborationInvitationHandoff } from "./collaborationInvitationHandoff";
 import { CollaborationInvitationJoinFields } from "./CollaborationInvitationJoinFields";
 import { CollaborationSetupHandoffFields } from "./CollaborationSetupHandoffFields";
-import { buildCollaborationDiagnosticReport } from "./collaborationDiagnostics";
+import {
+  buildCollaborationDiagnosticReport,
+  shouldShowCollaborationDiagnostics
+} from "./collaborationDiagnostics";
 
 export type CollaborationConnectFormProps = {
   api: PlanWeaveCollaborationApi | null;
@@ -121,7 +124,10 @@ export function CollaborationConnectForm({
     null;
   const workspaceConnection = status?.workspaceConnection ?? null;
   const workspacePickerItems: WorkspacePickerItem[] = status?.workspacePicker?.items ?? [];
-  const diagnosticReport = status ? buildCollaborationDiagnosticReport(status) : null;
+  const diagnosticReport =
+    status && shouldShowCollaborationDiagnostics()
+      ? buildCollaborationDiagnosticReport(status)
+      : null;
   const existingServerBaseUrl =
     activeProfile && existingServerAddressEdit?.profileId === activeProfile.profileId
       ? existingServerAddressEdit.value
