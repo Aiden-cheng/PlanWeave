@@ -342,6 +342,7 @@ describe("PeoplePanel", () => {
           "profile.project_id=project-1",
           "read_model.error_code=human_rate_limited"
         ].join("\n")}
+        diagnosticsEnabled
         onCopyDiagnostics={onCopyDiagnostics}
         t={t}
         onCreateInvitation={vi.fn()}

@@ -448,7 +448,15 @@ describe("collaboration accessibility", () => {
     );
 
     expect(screen.getByTestId("people-connect-form")).toBeInTheDocument();
-    expect(screen.getByTestId("people-connect-setup-code")).toBeInTheDocument();
+    expect(screen.getByTestId("people-connect-setup-details")).toHaveAccessibleName(
+      "Complete Server connection details"
+    );
+    expect(screen.queryByTestId("people-connect-setup-code")).not.toBeInTheDocument();
+    const advancedSetupToggle = screen.getByTestId("people-connect-setup-manual-toggle");
+    expect(advancedSetupToggle).toHaveAttribute("aria-expanded", "false");
+    await user.click(advancedSetupToggle);
+    expect(advancedSetupToggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("people-connect-setup-code")).toHaveAccessibleName("Setup code");
     await user.click(screen.getByTestId("people-connect-mode-join"));
     expect(screen.getByTestId("people-connect-display-name")).toBeInTheDocument();
     expect(screen.getByTestId("people-connect-server-url")).toBeInTheDocument();

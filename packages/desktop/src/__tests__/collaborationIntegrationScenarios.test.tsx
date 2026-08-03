@@ -6,7 +6,7 @@
  * Does not rely on Chinese copy or ReactFlow internals.
  */
 import "@testing-library/jest-dom/vitest";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { exampleObserverCatchupRequired } from "@planweave-ai/collaboration-protocol/fixtures/collaboration";
@@ -18,6 +18,7 @@ import {
 import type { CollaborationReadBridgePort } from "../renderer/collaboration/CollaborationReadModelController";
 import { createTranslator } from "../renderer/i18n";
 import { CollaborationConnectForm } from "../renderer/team/CollaborationConnectForm";
+import { serializeCollaborationInvitationHandoff } from "../renderer/team/collaborationInvitationHandoff";
 import { PeoplePanel } from "../renderer/team/PeoplePanel";
 import { RemoteRunPanel } from "../renderer/team/RemoteRunPanel";
 import { WorkItemCollaborationPanel } from "../renderer/team/WorkItemCollaborationPanel";
@@ -567,6 +568,17 @@ describe("collaboration integration scenarios", () => {
       comments: [],
       activity: []
     });
+    const invitationToken = `pw_inv_${"A".repeat(43)}`;
+    const invitationHandoff = serializeCollaborationInvitationHandoff({
+      endpoint: {
+        topology: "tailscale_https",
+        serverOrigin: "https://planweave.example.ts.net/",
+        allowedClientOrigins: ["https://planweave.example.ts.net/"],
+        tlsTrust: "system_ca"
+      },
+      projectId: "project-1",
+      invitationToken
+    });
 
     const onConnected = vi.fn();
     render(
@@ -606,20 +618,39 @@ describe("collaboration integration scenarios", () => {
     await user.click(screen.getByTestId("people-connect-mode-join"));
     expect(screen.getByTestId("people-connect-submit")).toHaveTextContent("Join Workspace");
     await user.type(screen.getByTestId("people-connect-display-name"), "Ada");
-    await user.clear(screen.getByTestId("people-connect-server-url"));
-    await user.type(screen.getByTestId("people-connect-server-url"), "https://example.test");
-    await user.type(screen.getByTestId("people-connect-project-id"), "project-1");
-    await user.type(
-      screen.getByTestId("people-connect-invitation-token"),
-      `pw_inv_${"A".repeat(43)}`
-    );
+    fireEvent.change(screen.getByTestId("people-connect-invitation-details"), {
+      target: { value: invitationHandoff }
+    });
     await user.click(screen.getByTestId("people-connect-submit"));
 
-    await waitFor(() => {
-      expect(api.consumeCollaborationInvitation).toHaveBeenCalled();
-      expect(api.connectCollaborationSession).toHaveBeenCalled();
-      expect(onConnected).toHaveBeenCalled();
+    await waitFor(() => expect(onConnected).toHaveBeenCalledTimes(1));
+    const profileInput = vi.mocked(api.upsertCollaborationProfile).mock.calls[0]?.[0];
+    expect(profileInput?.profileId).toBeTruthy();
+    expect(profileInput).toEqual(
+      expect.objectContaining({
+        displayName: "Ada",
+        serverBaseUrl: "https://planweave.example.ts.net/",
+        projectId: "project-1",
+        allowInsecureTransport: false,
+        endpoint: expect.objectContaining({ topology: "tailscale_https" })
+      })
+    );
+    expect(api.consumeCollaborationInvitation).toHaveBeenCalledWith({
+      profileId: profileInput?.profileId,
+      request: { invitationToken, displayName: "Ada" }
     });
+    expect(api.connectCollaborationSession).toHaveBeenCalledWith({
+      profileId: profileInput?.profileId
+    });
+    expect(api.upsertCollaborationProfile.mock.invocationCallOrder[0]).toBeLessThan(
+      api.consumeCollaborationInvitation.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
+    );
+    expect(api.consumeCollaborationInvitation.mock.invocationCallOrder[0]).toBeLessThan(
+      api.connectCollaborationSession.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
+    );
+    expect(api.connectCollaborationSession.mock.invocationCallOrder[0]).toBeLessThan(
+      onConnected.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
+    );
   });
 
   it("redeems a setup code without retaining it in renderer state", async () => {
