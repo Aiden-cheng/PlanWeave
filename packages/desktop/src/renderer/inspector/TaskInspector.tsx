@@ -11,7 +11,14 @@ import type {
 import { RefreshCwIcon, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -222,30 +229,38 @@ export function TaskInspector({
       size="sm"
       style={style}
     >
-      <CardHeader className="border-b">
-        <CardTitle>{t("selectedTask")}</CardTitle>
+      <CardHeader className="border-b px-5 py-4">
+        <CardTitle className="min-w-0">
+          {selectedTask ? (
+            <Input
+              aria-label={t("title")}
+              className="h-8 min-w-0 border-transparent bg-transparent px-0 text-lg font-semibold shadow-none focus-visible:border-transparent focus-visible:ring-0"
+              value={selectedTask.title}
+              onBlur={() => void saveSelectedTaskTitle().then(() => onDraftDirtyChange?.(false))}
+              onChange={(event) => {
+                onDraftDirtyChange?.(true);
+                setSelectedTask({ ...selectedTask, title: event.target.value });
+              }}
+            />
+          ) : (
+            t("selectedTask")
+          )}
+        </CardTitle>
+        {selectedTask ? (
+          <CardDescription className="font-mono text-xs">{selectedTask.taskId}</CardDescription>
+        ) : null}
         <CardAction className="flex items-center gap-1">
+          {selectedTask ? (
+            <Badge variant={statusVariant[selectedTask.status]}>{selectedTask.status}</Badge>
+          ) : null}
           <Button size="icon-sm" variant="ghost" aria-label={t("close")} onClick={onClose}>
             <XIcon data-icon="inline-start" />
           </Button>
         </CardAction>
       </CardHeader>
-      <CardContent className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto">
+      <CardContent className="flex min-h-0 flex-1 flex-col gap-5 overflow-auto px-5 py-4">
         {selectedTask ? (
-          <div className="flex min-h-0 flex-1 flex-col gap-3">
-            <div className="flex items-center justify-between gap-2">
-              <Input
-                aria-label={t("title")}
-                className="min-w-0 font-medium"
-                value={selectedTask.title}
-                onBlur={() => void saveSelectedTaskTitle().then(() => onDraftDirtyChange?.(false))}
-                onChange={(event) => {
-                  onDraftDirtyChange?.(true);
-                  setSelectedTask({ ...selectedTask, title: event.target.value });
-                }}
-              />
-              <Badge variant={statusVariant[selectedTask.status]}>{selectedTask.status}</Badge>
-            </div>
+          <div className="flex min-h-0 flex-1 flex-col gap-5">
             <div className="flex flex-col gap-1">
               <div className="text-xs font-medium text-muted-foreground">{t("agent")}</div>
               <Select
@@ -330,26 +345,16 @@ export function TaskInspector({
               taskExecutionBlocks={taskExecutionBlocks}
               t={t}
             />
-            <WorkItemCollaborationPanel
-              workItem={
-                selectedTask
-                  ? {
-                      kind: "task",
-                      canvasId: canvasRef?.canvasId ?? "default",
-                      taskId: selectedTask.taskId
-                    }
-                  : null
-              }
-              t={t}
-            />
-            <div className="rounded-lg border bg-card p-3 text-xs">
+            <section className="border-t border-border/80 pt-4 text-xs">
               <div className="text-sm font-semibold">{t("taskExecutionSummary")}</div>
-              <div className="mt-1 text-muted-foreground">{selectedTask.taskId}</div>
               {selectedTask.acceptance.length > 0 ? (
-                <div className="mt-3 flex flex-col gap-1">
+                <div className="mt-3 flex flex-col gap-2">
                   <div className="font-medium">{t("acceptanceCriteria")}</div>
                   {selectedTask.acceptance.map((item) => (
-                    <div className="rounded-md border p-2 text-muted-foreground" key={item}>
+                    <div
+                      className="border-b border-border/60 pb-2 text-muted-foreground"
+                      key={item}
+                    >
                       {item}
                     </div>
                   ))}
@@ -360,7 +365,7 @@ export function TaskInspector({
                   <div className="font-medium">{t("blockStack")}</div>
                   {taskBlocks.map((block) => (
                     <div
-                      className="flex items-center justify-between gap-2 rounded-md border p-2"
+                      className="flex items-center justify-between gap-2 border-b border-border/60 py-2"
                       key={block.ref}
                     >
                       <span className="min-w-0 truncate">{block.title}</span>
@@ -369,15 +374,27 @@ export function TaskInspector({
                   ))}
                 </div>
               ) : null}
-            </div>
-            <Textarea
-              className="min-h-80 flex-1 resize-none"
-              value={selectedTask.promptMarkdown}
-              onBlur={saveTaskPromptIfDirty}
-              onChange={(event) => {
-                onDraftDirtyChange?.(true);
-                setSelectedTask({ ...selectedTask, promptMarkdown: event.target.value });
+            </section>
+            <section className="flex flex-col gap-2 border-t border-border/80 pt-4">
+              <div className="text-sm font-semibold">{t("taskPrompt")}</div>
+              <Textarea
+                aria-label={t("taskPrompt")}
+                className="min-h-56 resize-y"
+                value={selectedTask.promptMarkdown}
+                onBlur={saveTaskPromptIfDirty}
+                onChange={(event) => {
+                  onDraftDirtyChange?.(true);
+                  setSelectedTask({ ...selectedTask, promptMarkdown: event.target.value });
+                }}
+              />
+            </section>
+            <WorkItemCollaborationPanel
+              workItem={{
+                kind: "task",
+                canvasId: canvasRef?.canvasId ?? "default",
+                taskId: selectedTask.taskId
               }}
+              t={t}
             />
           </div>
         ) : (

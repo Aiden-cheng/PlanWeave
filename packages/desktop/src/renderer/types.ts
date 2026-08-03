@@ -13,6 +13,7 @@ import type {
 } from "@planweave-ai/runtime";
 import type { DesktopSettingsPatch, DesktopUiSettings } from "../shared/desktopSettings";
 import type { CompactAssigneeChip } from "./collaboration/assigneeSurfaceViewModels";
+import type { createTranslator } from "./i18n";
 import type { TaskWorkspaceNavigationTarget } from "./taskWorkspaceNavigation";
 export type {
   AppearanceMode,
@@ -89,6 +90,13 @@ export type TaskNodeData = {
   assigneeChip: CompactAssigneeChip | null;
   /** Block ref → compact assignee for block rows on the card. */
   blockAssigneeChips: Record<string, CompactAssigneeChip | null>;
+  /** On-demand human comment affordances. Counts only reflect work items already observed. */
+  commentUi: {
+    canvasId: string;
+    taskCommentCount: number;
+    blockCommentCounts: Record<string, number>;
+    t: ReturnType<typeof createTranslator>;
+  } | null;
   onTitleChange: (taskId: string, value: string) => void;
   onTitleSave: (taskId: string) => void;
   onExecutorChange: (taskId: string, executorName: string | null) => void;

@@ -14,6 +14,8 @@ import {
   lookupTaskCardAssigneeChip
 } from "../collaboration/assigneeSurfaceViewModels";
 import type { AppFlowNode, TaskFlowNode, TaskNodeData } from "../types";
+import type { createTranslator } from "../i18n";
+import { workItemKey } from "../../shared/collaborationReadModels.js";
 import { TaskNodeCard } from "./TaskNodeCard";
 import { TaskDependencyEdge } from "./TaskDependencyEdge";
 import {
@@ -38,6 +40,12 @@ export type GraphSharedResourceUiState = {
 export type GraphAssigneeUiState = {
   canvasId: string;
   index: AssigneeSurfaceIndex;
+};
+
+export type GraphCommentUiState = {
+  canvasId: string;
+  countsByWorkItem: Record<string, number>;
+  t: ReturnType<typeof createTranslator>;
 };
 
 export type AppNodeTypes = typeof nodeTypes;
@@ -205,7 +213,8 @@ export function graphNodes(
     onResourcePin: () => undefined,
     onResourceOverflow: () => undefined
   },
-  assigneeUi: GraphAssigneeUiState | null = null
+  assigneeUi: GraphAssigneeUiState | null = null,
+  commentUi: GraphCommentUiState | null = null
 ): AppFlowNode[] {
   const layoutByNode = new Map(layout?.nodes.map((node) => [node.nodeId, node]) ?? []);
   const defaultPositions = defaultTaskNodePositions(graph);
@@ -265,6 +274,32 @@ export function graphNodes(
           ? lookupTaskCardAssigneeChip(assigneeIndex, canvasId, task.taskId, blockRefs)
           : null,
         blockAssigneeChips,
+        commentUi: commentUi
+          ? {
+              canvasId: commentUi.canvasId,
+              taskCommentCount:
+                commentUi.countsByWorkItem[
+                  workItemKey({
+                    kind: "task",
+                    canvasId: commentUi.canvasId,
+                    taskId: task.taskId
+                  })
+                ] ?? 0,
+              blockCommentCounts: Object.fromEntries(
+                task.blocks.map((block) => [
+                  block.ref,
+                  commentUi.countsByWorkItem[
+                    workItemKey({
+                      kind: "block",
+                      canvasId: commentUi.canvasId,
+                      blockRef: block.ref
+                    })
+                  ] ?? 0
+                ])
+              ),
+              t: commentUi.t
+            }
+          : null,
         onTitleChange,
         onTitleSave,
         onExecutorChange,

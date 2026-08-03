@@ -16,6 +16,9 @@ export type WorkItemCollaborationPanelProps = {
   className?: string;
   /** When false, histories stay unloaded. Default true once mounted. */
   open?: boolean;
+  /** Inline comment surface used by the canvas annotation popover. */
+  commentsOnly?: boolean;
+  autoFocusComposer?: boolean;
 };
 
 type TabId = "comments" | "activity";
@@ -29,11 +32,13 @@ export function WorkItemCollaborationPanel({
   t,
   api,
   className,
-  open = true
+  open = true,
+  commentsOnly = false,
+  autoFocusComposer = false
 }: WorkItemCollaborationPanelProps) {
   const [tab, setTab] = useState<TabId>("comments");
   const commentsOpen = open && tab === "comments";
-  const activityOpen = open && tab === "activity";
+  const activityOpen = open && !commentsOnly && tab === "activity";
 
   const comments = useCommentsPanelController({
     workItem,
@@ -55,45 +60,53 @@ export function WorkItemCollaborationPanel({
   return (
     <section
       className={cn(
-        "flex min-h-0 flex-col gap-2 rounded-lg border border-border/80 bg-app-panel/60 p-2.5",
+        commentsOnly
+          ? "flex min-h-0 flex-col gap-2"
+          : "flex min-h-0 flex-col gap-3 border-t border-border/80 pt-3",
         className
       )}
       data-testid="work-item-collaboration-panel"
       data-work-item-kind={workItem.kind}
       aria-label={t("collaborationHumanDiscussion")}
     >
-      <div
-        className="flex items-center gap-1 rounded-md bg-muted/40 p-0.5"
-        role="tablist"
-        aria-label={t("collaborationHumanDiscussion")}
-      >
-        <Button
-          role="tab"
-          size="sm"
-          variant={tab === "comments" ? "secondary" : "ghost"}
-          className="flex-1"
-          aria-selected={tab === "comments"}
-          data-testid="collaboration-tab-comments"
-          onClick={() => setTab("comments")}
-        >
-          {t("commentsTitle")}
-        </Button>
-        <Button
-          role="tab"
-          size="sm"
-          variant={tab === "activity" ? "secondary" : "ghost"}
-          className="flex-1"
-          aria-selected={tab === "activity"}
-          data-testid="collaboration-tab-activity"
-          onClick={() => setTab("activity")}
-        >
-          {t("activityTitle")}
-        </Button>
-      </div>
+      {!commentsOnly ? (
+        <>
+          <div
+            className="flex items-center gap-5 border-b border-border/70"
+            role="tablist"
+            aria-label={t("collaborationHumanDiscussion")}
+          >
+            <Button
+              role="tab"
+              size="sm"
+              variant="ghost"
+              className="rounded-none border-b-2 border-transparent px-0 data-[active=true]:border-foreground"
+              data-active={tab === "comments"}
+              aria-selected={tab === "comments"}
+              data-testid="collaboration-tab-comments"
+              onClick={() => setTab("comments")}
+            >
+              {t("commentsTitle")}
+            </Button>
+            <Button
+              role="tab"
+              size="sm"
+              variant="ghost"
+              className="rounded-none border-b-2 border-transparent px-0 data-[active=true]:border-foreground"
+              data-active={tab === "activity"}
+              aria-selected={tab === "activity"}
+              data-testid="collaboration-tab-activity"
+              onClick={() => setTab("activity")}
+            >
+              {t("activityTitle")}
+            </Button>
+          </div>
 
-      <p className="text-[11px] text-muted-foreground" data-testid="collaboration-human-notice">
-        {t("collaborationHumanNotice")}
-      </p>
+          <p className="text-[11px] text-muted-foreground" data-testid="collaboration-human-notice">
+            {t("collaborationHumanNotice")}
+          </p>
+        </>
+      ) : null}
 
       {tab === "comments" ? (
         <CommentsPanel
@@ -107,6 +120,9 @@ export function WorkItemCollaborationPanel({
           submitting={comments.submitting}
           actionError={comments.actionError}
           canCompose={comments.canCompose}
+          autoFocusComposer={autoFocusComposer}
+          compact={commentsOnly}
+          showHeader={commentsOnly}
           t={t}
           onDraftBodyChange={comments.setDraftBody}
           onShowPreviewChange={comments.setShowPreview}

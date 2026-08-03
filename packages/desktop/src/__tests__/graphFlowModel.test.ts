@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { DesktopGraphViewModel, DesktopLayout } from "@planweave-ai/runtime";
+import { workItemKey } from "../shared/collaborationReadModels.js";
 import { defaultTaskNodePositions, graphNodes } from "../renderer/graph/flowModel";
+import { createTranslator } from "../renderer/i18n";
 import type { TaskNodeLabels } from "../renderer/types";
 
 describe("desktop graph flow model", () => {
@@ -131,6 +133,15 @@ describe("desktop graph flow model", () => {
         onResourceHover,
         onResourcePin: vi.fn(),
         onResourceOverflow: vi.fn()
+      },
+      null,
+      {
+        canvasId: "default",
+        countsByWorkItem: {
+          [workItemKey({ kind: "task", canvasId: "default", taskId: "T-A" })]: 2,
+          [workItemKey({ kind: "block", canvasId: "default", blockRef: "T-A#B-001" })]: 1
+        },
+        t: createTranslator("en")
       }
     );
 
@@ -142,6 +153,9 @@ describe("desktop graph flow model", () => {
     expect(nodeB?.data.activeSharedResources).toEqual(new Set(["db"]));
     expect(nodeA?.data.resourceHighlighted).toBe(true);
     expect(nodeB?.data.resourceHighlighted).toBe(true);
+    expect(nodeA?.data.commentUi?.taskCommentCount).toBe(2);
+    expect(nodeA?.data.commentUi?.blockCommentCounts["T-A#B-001"]).toBe(1);
+    expect(nodeB?.data.commentUi?.taskCommentCount).toBe(0);
   });
 });
 

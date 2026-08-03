@@ -1,8 +1,9 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { type CSSProperties, type KeyboardEvent } from "react";
+import { type CSSProperties, type KeyboardEvent, useState } from "react";
 import {
   ClipboardIcon,
   FolderOpenIcon,
+  MessageSquareIcon,
   MessageSquareWarningIcon,
   PlayIcon,
   ScanSearchIcon,
@@ -46,6 +47,7 @@ import { buildExecutorOptionViews, executorOptionName } from "../executors/execu
 import type { TaskFlowNode } from "../types";
 import { BlockPreviewButton } from "./BlockPreviewButton";
 import { CompactAssigneeChipView } from "../team/CompactAssigneeChip";
+import { WorkItemCommentPopover } from "../team/WorkItemCommentPopover";
 import { SharedResourceBadges } from "./sharedResourceBadges";
 import { sharedResourceColor } from "./sharedResourceColors";
 import { taskNodeStatusVisual, TaskNodeStatusMarker } from "./taskNodeStatus";
@@ -80,6 +82,7 @@ export function TaskNodeCard({ data, selected }: NodeProps<TaskFlowNode>) {
     transitionEpochByResource = {},
     assigneeChip = null,
     blockAssigneeChips = {},
+    commentUi = null,
     onTitleChange,
     onTitleSave,
     onExecutorChange,
@@ -99,6 +102,7 @@ export function TaskNodeCard({ data, selected }: NodeProps<TaskFlowNode>) {
     onResourcePin = () => undefined,
     onResourceOverflow = () => undefined
   } = data;
+  const [taskCommentsOpen, setTaskCommentsOpen] = useState(false);
   const hasException = task.exceptions.length > 0;
   const selectedExecutor =
     task.executorLabel === "Mixed"
@@ -225,7 +229,20 @@ export function TaskNodeCard({ data, selected }: NodeProps<TaskFlowNode>) {
                 <CompactAssigneeChipView chip={assigneeChip} label={labels.assignee} size="sm" />
               ) : null}
             </CardDescription>
-            <CardAction>
+            <CardAction className="flex items-center gap-1">
+              {commentUi ? (
+                <WorkItemCommentPopover
+                  workItem={{
+                    kind: "task",
+                    canvasId: commentUi.canvasId,
+                    taskId: task.taskId
+                  }}
+                  commentCount={commentUi.taskCommentCount}
+                  open={taskCommentsOpen}
+                  onOpenChange={setTaskCommentsOpen}
+                  t={commentUi.t}
+                />
+              ) : null}
               {hasException ? (
                 <Popover>
                   <PopoverTrigger asChild>
@@ -301,6 +318,15 @@ export function TaskNodeCard({ data, selected }: NodeProps<TaskFlowNode>) {
                     onRun={(ref) => void onAutoRunScopeStart({ kind: "block", blockRef: ref })}
                     onSelect={onBlockWorkspaceOpen}
                     selectedBlockRef={selectedBlock?.ref ?? null}
+                    commentUi={
+                      commentUi
+                        ? {
+                            canvasId: commentUi.canvasId,
+                            commentCount: commentUi.blockCommentCounts[block.ref] ?? 0,
+                            t: commentUi.t
+                          }
+                        : null
+                    }
                   />
                 ))}
               </div>
@@ -321,6 +347,16 @@ export function TaskNodeCard({ data, selected }: NodeProps<TaskFlowNode>) {
           <ScanSearchIcon data-icon="inline-start" />
           {labels.inspectTask}
         </ContextMenuItem>
+        {commentUi ? (
+          <ContextMenuItem onSelect={() => setTaskCommentsOpen(true)}>
+            <MessageSquareIcon data-icon="inline-start" />
+            {commentUi.taskCommentCount > 0
+              ? commentUi
+                  .t("commentsViewCount")
+                  .replace("{count}", String(commentUi.taskCommentCount))
+              : commentUi.t("commentsAdd")}
+          </ContextMenuItem>
+        ) : null}
         <ContextMenuItem onSelect={() => onAgentPromptCopy(task.taskId)}>
           <ClipboardIcon data-icon="inline-start" />
           {labels.copyAgentPrompt}

@@ -43,6 +43,18 @@ vi.mock("@xyflow/react", () => ({
   }
 }));
 
+vi.mock("../renderer/team/WorkItemCollaborationPanel", () => ({
+  WorkItemCollaborationPanel: ({
+    workItem
+  }: {
+    workItem: { kind: "task"; taskId: string } | { kind: "block"; blockRef: string };
+  }) => (
+    <div data-testid="mock-comments-panel">
+      {workItem.kind === "task" ? workItem.taskId : workItem.blockRef}
+    </div>
+  )
+}));
+
 afterEach(() => {
   cleanup();
 });
@@ -97,6 +109,7 @@ function nodeData(patch: Partial<TaskNodeData> = {}): TaskNodeData {
     blockRunRecords: [],
     blockReviewAttempts: [],
     blockFeedbackRecords: [],
+    commentUi: null,
     onTitleChange: vi.fn(),
     onTitleSave: vi.fn(),
     onExecutorChange: vi.fn(),
@@ -279,6 +292,67 @@ describe("TaskNodeCard context menu", () => {
 
     expect(onTaskOpen).toHaveBeenCalledWith("T-001");
     expect(onTaskWorkspaceOpen).not.toHaveBeenCalled();
+  });
+
+  it("opens Task comments from the annotation badge and context menu", async () => {
+    const t = createTranslator("en");
+    renderTaskNode(
+      nodeData({
+        commentUi: {
+          canvasId: "default",
+          taskCommentCount: 2,
+          blockCommentCounts: {},
+          t
+        }
+      })
+    );
+
+    const trigger = screen.getByRole("button", { name: "View 2 comments" });
+    expect(screen.getByTestId("work-item-comments-count")).toHaveTextContent("2");
+
+    await userEvent.click(trigger);
+    expect(await screen.findByTestId("mock-comments-panel")).toHaveTextContent("T-001");
+
+    await userEvent.click(trigger);
+    fireEvent.contextMenu(screen.getByTestId("task-node-card"));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "View 2 comments" }));
+    expect(await screen.findByTestId("mock-comments-panel")).toHaveTextContent("T-001");
+  });
+
+  it("opens Block comments from the Block context menu", async () => {
+    const blockRef = "T-001#B-001";
+    const t = createTranslator("en");
+    renderTaskNode(
+      nodeData({
+        task: {
+          ...task("# Prompt"),
+          blocks: [
+            {
+              ref: blockRef,
+              blockId: "B-001",
+              type: "implementation",
+              title: "Implement workspace",
+              status: "ready",
+              executor: null,
+              promptMissing: false,
+              exceptionReason: null,
+              dispatchable: true
+            }
+          ]
+        },
+        commentUi: {
+          canvasId: "default",
+          taskCommentCount: 0,
+          blockCommentCounts: { [blockRef]: 1 },
+          t
+        }
+      })
+    );
+
+    fireEvent.contextMenu(screen.getByTestId("task-node-block"));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "View 1 comments" }));
+
+    expect(await screen.findByTestId("mock-comments-panel")).toHaveTextContent(blockRef);
   });
 });
 

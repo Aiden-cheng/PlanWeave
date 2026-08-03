@@ -1,4 +1,4 @@
-import { useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type { createTranslator } from "../i18n";
@@ -18,6 +18,9 @@ export type CommentsPanelProps = {
   submitting: boolean;
   actionError: string | null;
   canCompose: boolean;
+  autoFocusComposer?: boolean;
+  compact?: boolean;
+  showHeader?: boolean;
   t: ReturnType<typeof createTranslator>;
   onDraftBodyChange: (body: string) => void;
   onShowPreviewChange: (show: boolean) => void;
@@ -217,6 +220,9 @@ export function CommentsPanel({
   submitting,
   actionError,
   canCompose,
+  autoFocusComposer = false,
+  compact = false,
+  showHeader = true,
   t,
   onDraftBodyChange,
   onShowPreviewChange,
@@ -230,6 +236,13 @@ export function CommentsPanel({
   onRemoveAttachment
 }: CommentsPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (!autoFocusComposer || !canCompose || draft.showPreview) return;
+    const frame = window.requestAnimationFrame(() => composerRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [autoFocusComposer, canCompose, draft.showPreview]);
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const list = event.target.files;
@@ -252,10 +265,14 @@ export function CommentsPanel({
       data-mode={mode}
     >
       <div className="flex items-center justify-between gap-2">
-        <div>
-          <h3 className="text-sm font-semibold text-text-strong">{t("commentsTitle")}</h3>
-          <p className="text-[11px] text-muted-foreground">{t("commentsSubtitle")}</p>
-        </div>
+        {showHeader ? (
+          <div>
+            <h3 className="text-sm font-semibold text-text-strong">{t("commentsTitle")}</h3>
+            <p className="text-[11px] text-muted-foreground">{t("commentsSubtitle")}</p>
+          </div>
+        ) : (
+          <span />
+        )}
         <Button
           size="sm"
           variant="ghost"
@@ -291,7 +308,11 @@ export function CommentsPanel({
       ) : null}
 
       <div
-        className="flex max-h-72 min-h-24 flex-col gap-2 overflow-y-auto pr-0.5 [scrollbar-gutter:stable]"
+        className={
+          compact
+            ? "flex max-h-64 min-h-16 flex-col gap-2 overflow-y-auto pr-1 [scrollbar-gutter:stable]"
+            : "flex max-h-72 min-h-24 flex-col gap-2 overflow-y-auto pr-1 [scrollbar-gutter:stable]"
+        }
         data-testid="comments-list"
       >
         {rows.length === 0 ? (
@@ -324,11 +345,8 @@ export function CommentsPanel({
         ) : null}
       </div>
 
-      <div
-        className="rounded-md border border-dashed border-border/80 bg-muted/20 p-2"
-        data-testid="comments-composer"
-      >
-        <div className="mb-1.5 flex items-center gap-2 text-[11px]">
+      <div className="border-t border-border/70 pt-2" data-testid="comments-composer">
+        <div className="mb-1.5 flex items-center justify-between gap-2 text-[11px]">
           <span className="font-medium text-text-strong">{t("commentsCompose")}</span>
           <Button
             size="sm"
@@ -353,8 +371,9 @@ export function CommentsPanel({
           </div>
         ) : (
           <Textarea
+            ref={composerRef}
             aria-label={t("commentsComposeAria")}
-            className="min-h-20 text-sm"
+            className={compact ? "min-h-16 resize-none text-sm" : "min-h-20 resize-y text-sm"}
             data-testid="comments-body-input"
             disabled={!canCompose || submitting}
             placeholder={t("commentsPlaceholder")}

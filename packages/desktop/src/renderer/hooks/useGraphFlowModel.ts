@@ -15,6 +15,7 @@ import {
   graphEdges,
   graphNodes,
   type GraphAssigneeUiState,
+  type GraphCommentUiState,
   type GraphSharedResourceUiState
 } from "../graph/flowModel";
 import { taskNodeLabels } from "../graph/taskNodeLabels";
@@ -31,6 +32,7 @@ type GraphFlowSource = {
   t: ReturnType<typeof createTranslator>;
   resourceUi?: GraphSharedResourceUiState;
   assigneeUi?: GraphAssigneeUiState | null;
+  commentUi?: GraphCommentUiState | null;
 };
 
 type GraphFlowDrafts = {
@@ -103,7 +105,8 @@ export function useGraphFlowModel({
     selectedBlock,
     t,
     resourceUi,
-    assigneeUi
+    assigneeUi,
+    commentUi
   } = source;
   const { promptDrafts, saveStates, titleDrafts } = drafts;
   const activeResource = resourceUi?.activeResource ?? null;
@@ -185,13 +188,15 @@ export function useGraphFlowModel({
         saveSelectedBlockPrompt,
         handleOpenRunRecord,
         resolvedResourceUi,
-        assigneeUi ?? null
+        assigneeUi ?? null,
+        commentUi ?? null
       )
     );
     setEdges(graphEdges(graph, { activeResource }));
   }, [
     activeResource,
     assigneeUi,
+    commentUi,
     transitionEpochByResource,
     onResourceHover,
     onResourcePin,

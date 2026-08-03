@@ -464,6 +464,8 @@ describe("desktop renderer component interactions", () => {
       />
     );
 
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("Task");
+    expect(screen.queryByText("Task Detail")).not.toBeInTheDocument();
     expect(screen.getByRole("combobox")).toHaveTextContent("legacy-executor");
   });
 

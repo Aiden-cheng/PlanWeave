@@ -17,7 +17,14 @@ import type {
 import { RefreshCwIcon, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -219,15 +226,38 @@ export function BlockInspector({
       size="sm"
       style={style}
     >
-      <CardHeader className="border-b">
-        <CardTitle>{selectedRunRecord ? t("runRecordDetail") : t("selectedBlock")}</CardTitle>
+      <CardHeader className="border-b px-5 py-4">
+        <CardTitle className="min-w-0">
+          {selectedRunRecord ? (
+            t("runRecordDetail")
+          ) : selectedBlock ? (
+            <Input
+              aria-label={t("title")}
+              className="h-8 min-w-0 border-transparent bg-transparent px-0 text-lg font-semibold shadow-none focus-visible:border-transparent focus-visible:ring-0"
+              value={selectedBlock.title}
+              onChange={(event) => {
+                onDraftDirtyChange?.(true);
+                setSelectedBlock({ ...selectedBlock, title: event.target.value });
+              }}
+              onBlur={() => void saveSelectedBlockTitle().then(() => onDraftDirtyChange?.(false))}
+            />
+          ) : (
+            t("selectedBlock")
+          )}
+        </CardTitle>
+        {selectedBlock && !selectedRunRecord ? (
+          <CardDescription className="font-mono text-xs">{selectedBlock.ref}</CardDescription>
+        ) : null}
         <CardAction className="flex items-center gap-1">
+          {selectedBlock && !selectedRunRecord ? (
+            <Badge variant={statusVariant[selectedBlock.status]}>{selectedBlock.status}</Badge>
+          ) : null}
           <Button size="icon-sm" variant="ghost" aria-label={t("close")} onClick={onClose}>
             <XIcon data-icon="inline-start" />
           </Button>
         </CardAction>
       </CardHeader>
-      <CardContent className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto">
+      <CardContent className="flex min-h-0 flex-1 flex-col gap-5 overflow-auto px-5 py-4">
         {selectedRunRecord ? (
           <BlockRunRecordCard
             canvasRef={canvasRef}
@@ -245,20 +275,7 @@ export function BlockInspector({
             t={t}
           />
         ) : selectedBlock ? (
-          <div data-testid="block-inspector-content" className="flex flex-col gap-3">
-            <div className="flex items-center justify-between gap-2">
-              <Input
-                aria-label={t("title")}
-                className="min-w-0 font-medium"
-                value={selectedBlock.title}
-                onChange={(event) => {
-                  onDraftDirtyChange?.(true);
-                  setSelectedBlock({ ...selectedBlock, title: event.target.value });
-                }}
-                onBlur={() => void saveSelectedBlockTitle().then(() => onDraftDirtyChange?.(false))}
-              />
-              <Badge variant={statusVariant[selectedBlock.status]}>{selectedBlock.status}</Badge>
-            </div>
+          <div data-testid="block-inspector-content" className="flex flex-col gap-5">
             <div className="flex flex-col gap-1">
               <div className="text-xs font-medium text-muted-foreground">{t("agent")}</div>
               <Select

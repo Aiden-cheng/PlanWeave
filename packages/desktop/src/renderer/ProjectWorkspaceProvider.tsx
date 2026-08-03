@@ -804,6 +804,21 @@ export function ProjectWorkspaceProvider({
         : null,
     [collaborationSurface.assigneeIndex, selectedCanvasId]
   );
+  const commentUi = useMemo(
+    () =>
+      selectedCanvasId
+        ? {
+            canvasId: selectedCanvasId,
+            countsByWorkItem: Object.fromEntries(
+              Object.entries(collaborationSurface.snapshot.commentsByWorkItem).map(
+                ([key, comments]) => [key, comments.filter((comment) => !comment.tombstoned).length]
+              )
+            ),
+            t
+          }
+        : null,
+    [collaborationSurface.snapshot.commentsByWorkItem, selectedCanvasId, t]
+  );
 
   useGraphFlowModel({
     blockActions: {
@@ -835,7 +850,8 @@ export function ProjectWorkspaceProvider({
       selectedBlock,
       t,
       resourceUi,
-      assigneeUi
+      assigneeUi,
+      commentUi
     },
     taskActions: {
       handleDeleteBlock,
