@@ -201,6 +201,28 @@ describe("AgentEndpointCatalog", () => {
     ).toThrowError(new AgentEndpointCatalogError("agent_endpoint_incompatible"));
   });
 
+  it("revalidates an exact reserved Endpoint while discounting its own capacity lease", () => {
+    const state = fixture();
+    const endpoint = state.catalog.listVisible("workspace-a").items[0]!;
+    state.setActive("host-primary", 2);
+    expect(
+      state.catalog.resolveForReservedRun(
+        endpoint.endpointId,
+        "workspace-a",
+        ["acp.codex"],
+        "host-primary"
+      )
+    ).toMatchObject({ endpointId: endpoint.endpointId, hostId: "host-primary" });
+    expect(() =>
+      state.catalog.resolveForReservedRun(
+        endpoint.endpointId,
+        "workspace-a",
+        ["acp.codex"],
+        "host-secondary"
+      )
+    ).toThrowError(new AgentEndpointCatalogError("agent_endpoint_unknown"));
+  });
+
   it("fails a stale endpoint instead of rerouting to another compatible Host", () => {
     const first = readyHost();
     const second = readyHost({ id: "host-secondary", displayName: "Second Host" });

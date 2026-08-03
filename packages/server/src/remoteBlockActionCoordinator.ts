@@ -22,6 +22,8 @@ import type {
 } from "./remoteBlockCoordinator.js";
 import type { RemoteBlockRuntimePort } from "@planweave-ai/runtime";
 import type { MailboxMessage } from "./mailbox.js";
+import type { HostCapacityReservation } from "./hostReservations.js";
+import type { RemoteOperation } from "./remoteOperations.js";
 import {
   DispatchAssignmentError,
   dispatchHostSelectionSnapshotSchema,
@@ -36,6 +38,10 @@ export class RemoteBlockActionCoordinator {
     private readonly lifecycle: {
       reenter(operationId: string): Promise<RemoteDispatchOutcome>;
       fail(operationId: string): Promise<void>;
+      authorizeEndpointOperation(
+        operation: RemoteOperation,
+        reservation?: HostCapacityReservation
+      ): void;
       checkpoint(): Promise<void>;
     }
   ) {
@@ -106,6 +112,8 @@ export class RemoteBlockActionCoordinator {
       ) {
         return undefined;
       }
+      const operation = this.options.operations.getRequired(action.operationId);
+      if (operation.endpointSelection) this.lifecycle.authorizeEndpointOperation(operation);
       await this.lifecycle.reenter(action.operationId);
       return "settled";
     }
@@ -226,6 +234,7 @@ export class RemoteBlockActionCoordinator {
         if (action.kind !== "retry_new_attempt") throw new Error("remote_action_decision_mismatch");
         const hostSelection =
           context === undefined ? undefined : dispatchHostSelectionSnapshotSchema.parse(context);
+        if (operation.endpointSelection) this.lifecycle.authorizeEndpointOperation(operation);
         await this.withRuntime(operation, (runtime) =>
           runtime.retryAttempt({
             ...remoteBlockIdentity(operation),
@@ -267,6 +276,10 @@ export class RemoteBlockActionCoordinator {
     if (decision.transition !== "retry") return undefined;
     if (action.kind !== "retry_new_attempt") throw new Error("remote_action_decision_mismatch");
     const operation = this.options.operations.getRequired(action.operationId);
+    if (operation.endpointSelection) {
+      this.lifecycle.authorizeEndpointOperation(operation);
+      return undefined;
+    }
     // Prior authority-backed attempts must re-resolve against current OSS-003 tables, not
     // legacy work_assignments. Omit expected*Revision so the authority gate takes current
     // revisions (follow reassignment) and persists authorityRevisions on the new snapshot.

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { AssignmentDisplayProjection } from "@planweave-ai/collaboration-protocol/work/assignment";
 import type {
   RemoteEventReplay,
@@ -8,7 +8,9 @@ import type {
 } from "@planweave-ai/collaboration-protocol/remote-run";
 import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import type { RemoteBlockExecutionReadModel } from "@planweave-ai/runtime";
-import { collaborationBridge } from "../bridge";
+import type { DesktopCanvasReference } from "@planweave-ai/runtime";
+import type { RemoteAgentEndpoint } from "@planweave-ai/collaboration-protocol/agent-endpoint";
+import { bridge, collaborationBridge } from "../bridge";
 import { collaborationErrorMessage } from "../collaboration/formatCollaborationError";
 import {
   adaptRemoteAcpEvents,
@@ -27,6 +29,11 @@ import {
 import { useCollaborationReadModels } from "./useCollaborationReadModels";
 import { useCollaborationStatus } from "./useCollaborationStatus";
 import { isCollaborationSessionConnected } from "../collaboration/sessionState";
+import {
+  buildAvailableAgentEndpoints,
+  type AvailableAgentEndpoint,
+  type LocalAgentEndpointInput
+} from "../collaboration/agentEndpointViewModel";
 
 export type UseRemoteRunPanelControllerArgs = {
   workItem: WorkItemRef | null;
@@ -34,6 +41,9 @@ export type UseRemoteRunPanelControllerArgs = {
   runtimeRemoteExecution?: RemoteBlockExecutionReadModel | null;
   /** True when a local Auto Run record is active for the same Block. */
   localAutoRunActive?: boolean;
+  canvasRef?: DesktopCanvasReference | null;
+  localAgentEndpoint?: LocalAgentEndpointInput | null;
+  requiredCapabilities?: readonly string[];
   open: boolean;
   api?: PlanWeaveCollaborationApi | null;
   t: ReturnType<typeof createTranslator>;
@@ -48,6 +58,11 @@ export type UseRemoteRunPanelControllerResult = {
   loadingInteractions: boolean;
   actionInFlight: RemoteRunAuthorizedActionKind | null;
   actionError: string | null;
+  agentEndpoints: AvailableAgentEndpoint[];
+  selectedAgentEndpointId: string | null;
+  setSelectedAgentEndpointId: (endpointId: string) => void;
+  refreshingAgentEndpoints: boolean;
+  refreshAgentEndpoints: () => Promise<void>;
   confirmKind: "cancel" | "retry_new_attempt" | "fail_interruption" | null;
   setConfirmKind: (kind: "cancel" | "retry_new_attempt" | "fail_interruption" | null) => void;
   refresh: () => Promise<void>;
@@ -156,6 +171,9 @@ export function useRemoteRunPanelController(
   }, [args.workItem, snapshot.remoteRunsByDispatchId]);
 
   const [observation, setObservation] = useState<RemoteOperationObservation | null>(null);
+  const [remoteAgentEndpoints, setRemoteAgentEndpoints] = useState<RemoteAgentEndpoint[]>([]);
+  const [selectedAgentEndpointId, setSelectedAgentEndpointIdState] = useState<string | null>(null);
+  const [refreshingAgentEndpoints, setRefreshingAgentEndpoints] = useState(false);
   const [pendingInteractions, setPendingInteractions] = useState<RemoteInteractionView[]>([]);
   const [events, setEvents] = useState<RemoteEventReplay["events"]>([]);
   const [eventCursor, setEventCursor] = useState(0);
@@ -168,13 +186,79 @@ export function useRemoteRunPanelController(
   const [confirmKind, setConfirmKind] = useState<
     "cancel" | "retry_new_attempt" | "fail_interruption" | null
   >(null);
+  const observationRef = useRef<RemoteOperationObservation | null>(null);
+  observationRef.current = observation;
   const generationRef = useRef(0);
-  const projectIdRef = useRef(snapshot.projectId);
+  const endpointRequestGenerationRef = useRef(0);
+  const scopeGenerationRef = useRef(0);
+  const scopeKey = JSON.stringify([snapshot.projectId ?? null, workKey]);
+  const scopeKeyRef = useRef(scopeKey);
+
+  const agentEndpoints = useMemo(
+    () =>
+      buildAvailableAgentEndpoints({
+        local: args.localAgentEndpoint ?? null,
+        remote: remoteAgentEndpoints,
+        requiredProfileId: args.localAgentEndpoint?.executorName ?? null,
+        requiredCapabilities: args.requiredCapabilities ?? []
+      }),
+    [args.localAgentEndpoint, args.requiredCapabilities, remoteAgentEndpoints]
+  );
+
+  const refreshAgentEndpoints = useCallback(async () => {
+    const requestGeneration = ++endpointRequestGenerationRef.current;
+    const requestScopeKey = scopeKey;
+    const requestScopeGeneration = scopeGenerationRef.current;
+    if (!api?.listCollaborationAgentEndpoints || !sessionConnected) {
+      if (
+        requestGeneration === endpointRequestGenerationRef.current &&
+        requestScopeKey === scopeKeyRef.current &&
+        requestScopeGeneration === scopeGenerationRef.current
+      ) {
+        setRemoteAgentEndpoints([]);
+        setRefreshingAgentEndpoints(false);
+      }
+      return;
+    }
+    setRefreshingAgentEndpoints(true);
+    try {
+      const list = await api.listCollaborationAgentEndpoints();
+      if (
+        requestGeneration === endpointRequestGenerationRef.current &&
+        requestScopeKey === scopeKeyRef.current &&
+        requestScopeGeneration === scopeGenerationRef.current
+      ) {
+        setRemoteAgentEndpoints(list.items);
+      }
+    } finally {
+      if (
+        requestGeneration === endpointRequestGenerationRef.current &&
+        requestScopeKey === scopeKeyRef.current &&
+        requestScopeGeneration === scopeGenerationRef.current
+      ) {
+        setRefreshingAgentEndpoints(false);
+      }
+    }
+  }, [api, sessionConnected, scopeKey]);
 
   useEffect(() => {
-    if (projectIdRef.current !== snapshot.projectId) {
-      projectIdRef.current = snapshot.projectId;
+    if (
+      selectedAgentEndpointId !== null &&
+      !agentEndpoints.some(
+        (endpoint) => endpoint.id === selectedAgentEndpointId && endpoint.available
+      )
+    ) {
+      setSelectedAgentEndpointIdState(null);
+    }
+  }, [agentEndpoints, selectedAgentEndpointId]);
+
+  useLayoutEffect(() => {
+    if (scopeKeyRef.current !== scopeKey) {
+      scopeKeyRef.current = scopeKey;
+      scopeGenerationRef.current += 1;
       generationRef.current += 1;
+      endpointRequestGenerationRef.current += 1;
+      observationRef.current = null;
       setObservation(null);
       setPendingInteractions([]);
       setEvents([]);
@@ -182,16 +266,42 @@ export function useRemoteRunPanelController(
       setEventsHasMore(false);
       setActionError(null);
       setConfirmKind(null);
+      setLoading(false);
+      setLoadingEvents(false);
+      setLoadingInteractions(false);
+      setActionInFlight(null);
+      setRefreshingAgentEndpoints(false);
+      setRemoteAgentEndpoints([]);
+      setSelectedAgentEndpointIdState(null);
     }
-  }, [snapshot.projectId]);
+  }, [scopeKey]);
 
-  const observationRef = useRef<RemoteOperationObservation | null>(null);
-  observationRef.current = observation;
+  useEffect(() => {
+    if (!args.open) return;
+    const requestScopeKey = scopeKey;
+    const requestScopeGeneration = scopeGenerationRef.current;
+    void refreshAgentEndpoints().catch((error) => {
+      if (
+        requestScopeKey !== scopeKeyRef.current ||
+        requestScopeGeneration !== scopeGenerationRef.current
+      ) {
+        return;
+      }
+      setActionError(collaborationErrorMessage(mapBoundaryError(error)));
+    });
+  }, [args.open, refreshAgentEndpoints, scopeKey]);
 
   const refresh = useCallback(async () => {
     if (!api || !args.open || !args.workItem || args.workItem.kind !== "block") return;
     if (!sessionConnected) return;
+    const requestScopeKey = scopeKey;
+    const requestScopeGeneration = scopeGenerationRef.current;
+    const isCurrentRefreshScope = () =>
+      requestScopeKey === scopeKeyRef.current &&
+      requestScopeGeneration === scopeGenerationRef.current;
+    if (!isCurrentRefreshScope()) return;
     const generation = ++generationRef.current;
+    const canWrite = () => generation === generationRef.current && isCurrentRefreshScope();
     setLoading(true);
     setActionError(null);
     try {
@@ -202,7 +312,7 @@ export function useRemoteRunPanelController(
         observation: observationRef.current
       });
       if (!operationId) {
-        if (generation === generationRef.current) {
+        if (canWrite()) {
           setObservation(null);
           setPendingInteractions([]);
           setEvents([]);
@@ -212,7 +322,7 @@ export function useRemoteRunPanelController(
         return;
       }
       const next = await api.observeCollaborationRemoteOperation({ operationId });
-      if (generation !== generationRef.current) return;
+      if (!canWrite()) return;
       setObservation(next);
 
       setLoadingInteractions(true);
@@ -221,10 +331,10 @@ export function useRemoteRunPanelController(
           operationId,
           query: { cursor: 0, limit: 50 }
         });
-        if (generation !== generationRef.current) return;
+        if (!canWrite()) return;
         setPendingInteractions(page.items.filter((item) => item.status === "pending"));
       } finally {
-        if (generation === generationRef.current) setLoadingInteractions(false);
+        if (canWrite()) setLoadingInteractions(false);
       }
 
       setLoadingEvents(true);
@@ -233,23 +343,23 @@ export function useRemoteRunPanelController(
           operationId,
           query: { afterCursor: 0 }
         });
-        if (generation !== generationRef.current) return;
+        if (!canWrite()) return;
         const adapted = adaptRemoteAcpEvents(replay.events);
         setEvents(adapted);
         setEventCursor(replay.cursor);
         setEventsHasMore(replay.hasMore);
       } finally {
-        if (generation === generationRef.current) setLoadingEvents(false);
+        if (canWrite()) setLoadingEvents(false);
       }
     } catch (error) {
-      if (generation !== generationRef.current) return;
+      if (!canWrite()) return;
       const mapped = mapBoundaryError(error);
       setActionError(collaborationErrorMessage(mapped));
       if (mapped.kind === "auth" || mapped.code.includes("auth")) {
         setObservation(null);
       }
     } finally {
-      if (generation === generationRef.current) setLoading(false);
+      if (canWrite()) setLoading(false);
     }
   }, [
     api,
@@ -258,7 +368,8 @@ export function useRemoteRunPanelController(
     args.runtimeRemoteExecution,
     sessionConnected,
     assignment,
-    observerRun
+    observerRun,
+    scopeKey
   ]);
 
   // Refresh when observer remote-run milestones advance for this work item.
@@ -300,30 +411,62 @@ export function useRemoteRunPanelController(
   }, [api, observation, eventsHasMore, eventCursor]);
 
   const runAction = useCallback(
-    async (kind: RemoteRunAuthorizedActionKind, execute: () => Promise<void>): Promise<void> => {
+    async (
+      kind: RemoteRunAuthorizedActionKind,
+      execute: (isCurrentScope: () => boolean) => Promise<void>
+    ): Promise<void> => {
       if (actionInFlight) return;
+      const actionScopeKey = scopeKey;
+      const actionScopeGeneration = scopeGenerationRef.current;
+      const isCurrentScope = () =>
+        actionScopeKey === scopeKeyRef.current &&
+        actionScopeGeneration === scopeGenerationRef.current;
       setActionInFlight(kind);
       setActionError(null);
       try {
-        await execute();
+        await execute(isCurrentScope);
+        if (!isCurrentScope()) return;
         setConfirmKind(null);
         await refresh();
       } catch (error) {
+        if (!isCurrentScope()) return;
         const mapped = mapBoundaryError(error);
         setActionError(collaborationErrorMessage(mapped));
-        if (mapped.kind === "conflict" || mapped.code.includes("stale")) {
+        if (
+          (mapped.kind === "conflict" || mapped.code.includes("stale")) &&
+          !mapped.code.startsWith("agent_endpoint_")
+        ) {
           await refresh();
         }
       } finally {
-        setActionInFlight(null);
+        if (isCurrentScope()) setActionInFlight(null);
       }
     },
-    [actionInFlight, refresh]
+    [actionInFlight, refresh, scopeKey]
   );
 
   const dispatch = useCallback(async () => {
     const workItem = args.workItem;
-    if (!api || !workItem || workItem.kind !== "block") return;
+    if (!workItem || workItem.kind !== "block") return;
+    const selectedEndpoint = agentEndpoints.find(
+      (endpoint) => endpoint.id === selectedAgentEndpointId
+    );
+    if (!selectedEndpoint?.available) {
+      setActionError("agent_endpoint_selection_required");
+      return;
+    }
+    if (selectedEndpoint.source === "local") {
+      await runAction("dispatch", async () => {
+        if (!bridge || !args.canvasRef) throw new Error("local_agent_endpoint_unavailable");
+        await bridge.startAutoRun(
+          args.canvasRef,
+          { kind: "block", blockRef: workItem.blockRef },
+          20
+        );
+      });
+      return;
+    }
+    if (!api) return;
     const projectId =
       snapshot.projectId ??
       status?.profiles.find((profile) => profile.profileId === status.activeProfileId)?.projectId ??
@@ -332,24 +475,38 @@ export function useRemoteRunPanelController(
       setActionError("collaboration_project_unavailable");
       return;
     }
-    await runAction("dispatch", async () => {
-      // Prefer independent authority revisions; never invent Host authority from DOM/paths.
-      const revisions = workAuthority?.revisions ?? {
-        responsibilityRevision: 0,
-        reviewerRevision: 0,
-        executionTargetRevision: assignment?.revision ?? 0
-      };
-      const result = await api.dispatchCollaborationRemoteOperation({
-        schemaVersion: "remote-run/v2",
-        projectId,
-        canvasId: workItem.canvasId,
-        blockRef: workItem.blockRef,
-        idempotencyKey: `desktop-dispatch-${createId()}`,
-        expectedResponsibilityRevision: revisions.responsibilityRevision,
-        expectedReviewerRevision: revisions.reviewerRevision,
-        expectedExecutionTargetRevision: revisions.executionTargetRevision
-      });
-      setObservation(result);
+    await runAction("dispatch", async (isCurrentScope) => {
+      if (!workAuthority) throw new Error("work_authority_unavailable");
+      const revisions = workAuthority.revisions;
+      if (!selectedEndpoint.remoteEndpointId) throw new Error("agent_endpoint_selection_required");
+      try {
+        const result = await api.dispatchCollaborationRemoteOperation({
+          schemaVersion: "remote-run/v3",
+          projectId,
+          canvasId: workItem.canvasId,
+          blockRef: workItem.blockRef,
+          agentEndpointId: selectedEndpoint.remoteEndpointId,
+          idempotencyKey: `desktop-dispatch-${createId()}`,
+          expectedResponsibilityRevision: revisions.responsibilityRevision,
+          expectedReviewerRevision: revisions.reviewerRevision
+        });
+        if (isCurrentScope()) setObservation(result);
+      } catch (error) {
+        const mapped = mapBoundaryError(error);
+        if (
+          isCurrentScope() &&
+          mapped.kind === "conflict" &&
+          mapped.code.startsWith("agent_endpoint_")
+        ) {
+          setSelectedAgentEndpointIdState(null);
+          try {
+            await refreshAgentEndpoints();
+          } catch (refreshError) {
+            console.warn(collaborationErrorMessage(mapBoundaryError(refreshError)));
+          }
+        }
+        throw error;
+      }
     });
   }, [
     api,
@@ -358,8 +515,11 @@ export function useRemoteRunPanelController(
     createId,
     snapshot.projectId,
     status,
-    workAuthority?.revisions,
-    assignment?.revision
+    workAuthority,
+    agentEndpoints,
+    selectedAgentEndpointId,
+    args.canvasRef,
+    refreshAgentEndpoints
   ]);
 
   const cancel = useCallback(
@@ -458,36 +618,44 @@ export function useRemoteRunPanelController(
     [api, observation, runAction]
   );
 
-  const viewModel = useMemo(
-    () =>
-      projectRemoteRunPanelViewModel({
-        observation,
-        runtime: args.runtimeRemoteExecution ?? null,
-        assignment,
-        observerRun,
-        pendingInteractions,
-        events,
-        eventCursor,
-        eventsHasMore,
-        authorized: !offline && Boolean(sessionConnected),
-        offline: Boolean(offline),
-        localAutoRunActive: Boolean(args.localAutoRunActive),
-        hostOnline: assignment?.host?.online ?? null
-      }),
-    [
+  const viewModel = useMemo(() => {
+    const selectedEndpoint = agentEndpoints.find(
+      (endpoint) => endpoint.id === selectedAgentEndpointId
+    );
+    const localSelected = selectedEndpoint?.source === "local";
+    return projectRemoteRunPanelViewModel({
       observation,
-      args.runtimeRemoteExecution,
-      args.localAutoRunActive,
+      runtime: args.runtimeRemoteExecution ?? null,
       assignment,
       observerRun,
       pendingInteractions,
       events,
       eventCursor,
       eventsHasMore,
-      offline,
-      sessionConnected
-    ]
-  );
+      authorized: localSelected
+        ? Boolean(bridge && args.canvasRef)
+        : !offline && Boolean(sessionConnected),
+      offline: localSelected ? false : Boolean(offline),
+      localAutoRunActive: Boolean(args.localAutoRunActive),
+      hostOnline: assignment?.host?.online ?? null,
+      endpointDispatchAvailable: Boolean(selectedEndpoint?.available)
+    });
+  }, [
+    observation,
+    args.runtimeRemoteExecution,
+    args.localAutoRunActive,
+    assignment,
+    observerRun,
+    pendingInteractions,
+    events,
+    eventCursor,
+    eventsHasMore,
+    offline,
+    sessionConnected,
+    agentEndpoints,
+    selectedAgentEndpointId,
+    args.canvasRef
+  ]);
 
   return {
     viewModel,
@@ -496,6 +664,11 @@ export function useRemoteRunPanelController(
     loadingInteractions,
     actionInFlight,
     actionError,
+    agentEndpoints,
+    selectedAgentEndpointId,
+    setSelectedAgentEndpointId: setSelectedAgentEndpointIdState,
+    refreshingAgentEndpoints,
+    refreshAgentEndpoints,
     confirmKind,
     setConfirmKind,
     refresh,

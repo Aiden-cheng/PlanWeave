@@ -663,7 +663,7 @@ describe("remote execution action migration v22", () => {
     applyMigrations(database);
 
     expect(centralSchemaVersion(database)).toBe(latestCentralSchemaVersion);
-    expect(latestCentralSchemaVersion).toBe(43);
+    expect(latestCentralSchemaVersion).toBe(44);
     expect(
       new RemoteExecutionActionRepository(database).getRequired(cancelAction.actionId)
     ).toMatchObject({

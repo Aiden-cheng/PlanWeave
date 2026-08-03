@@ -1,8 +1,15 @@
 import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
-import type { RemoteBlockExecutionReadModel } from "@planweave-ai/runtime";
+import type { DesktopCanvasReference, RemoteBlockExecutionReadModel } from "@planweave-ai/runtime";
 import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import type { createTranslator } from "../i18n";
 import { useRemoteRunPanelController } from "../hooks/useRemoteRunPanelController";
@@ -11,11 +18,15 @@ import type {
   RemoteRunAuthorizedActionKind,
   RemoteRunPanelViewModel
 } from "../collaboration/remoteRunViewModels";
+import type { LocalAgentEndpointInput } from "../collaboration/agentEndpointViewModel";
 
 export type RemoteRunPanelProps = {
   workItem: WorkItemRef | null;
   runtimeRemoteExecution?: RemoteBlockExecutionReadModel | null;
   localAutoRunActive?: boolean;
+  canvasRef?: DesktopCanvasReference | null;
+  localAgentEndpoint?: LocalAgentEndpointInput | null;
+  requiredCapabilities?: readonly string[];
   open?: boolean;
   api?: PlanWeaveCollaborationApi | null;
   t: ReturnType<typeof createTranslator>;
@@ -80,6 +91,9 @@ export function RemoteRunPanel({
   workItem,
   runtimeRemoteExecution = null,
   localAutoRunActive = false,
+  canvasRef = null,
+  localAgentEndpoint = null,
+  requiredCapabilities = [],
   open = true,
   api,
   t,
@@ -89,6 +103,9 @@ export function RemoteRunPanel({
     workItem,
     runtimeRemoteExecution,
     localAutoRunActive,
+    canvasRef,
+    localAgentEndpoint,
+    requiredCapabilities,
     open,
     api,
     t
@@ -145,6 +162,39 @@ export function RemoteRunPanel({
         </p>
       ) : null}
 
+      <div className="flex flex-col gap-1" data-testid="agent-endpoint-selector">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] font-medium">{t("agentEndpointLabel")}</span>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={controller.refreshingAgentEndpoints}
+            onClick={() => void controller.refreshAgentEndpoints()}
+          >
+            {t("agentEndpointRefresh")}
+          </Button>
+        </div>
+        <Select
+          value={controller.selectedAgentEndpointId ?? undefined}
+          onValueChange={controller.setSelectedAgentEndpointId}
+        >
+          <SelectTrigger data-testid="agent-endpoint-select">
+            <SelectValue placeholder={t("agentEndpointPlaceholder")} />
+          </SelectTrigger>
+          <SelectContent>
+            {controller.agentEndpoints.map((endpoint) => (
+              <SelectItem key={endpoint.id} value={endpoint.id} disabled={!endpoint.available}>
+                {endpoint.displayName} · {endpoint.locationName}
+                {!endpoint.available && endpoint.unavailableReason
+                  ? ` — ${endpoint.unavailableReason}`
+                  : ""}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-[10px] text-muted-foreground">{t("agentEndpointLocalHint")}</p>
+      </div>
+
       {identity ? (
         <dl
           className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1 text-[11px]"
@@ -156,8 +206,12 @@ export function RemoteRunPanel({
           <dd className="truncate font-mono">{identity.dispatchId}</dd>
           <dt className="text-muted-foreground">{t("remoteRunAttemptId")}</dt>
           <dd className="truncate font-mono">{identity.executionAttemptId}</dd>
-          <dt className="text-muted-foreground">{t("remoteRunHostId")}</dt>
-          <dd className="truncate font-mono">{identity.hostId ?? t("remoteRunUnavailable")}</dd>
+          <dt className="text-muted-foreground">{t("remoteRunEndpoint")}</dt>
+          <dd className="truncate">
+            {identity.agentEndpoint
+              ? `${identity.agentEndpoint.displayName} — ${identity.agentEndpoint.hostDisplayName}`
+              : t("remoteRunLegacyRemote")}
+          </dd>
           <dt className="text-muted-foreground">{t("remoteRunLeaseId")}</dt>
           <dd className="truncate font-mono">{identity.leaseId ?? t("remoteRunUnavailable")}</dd>
           <dt className="text-muted-foreground">{t("remoteRunSessionId")}</dt>

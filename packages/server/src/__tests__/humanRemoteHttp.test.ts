@@ -195,10 +195,12 @@ async function setup() {
   return {
     origin: `http://127.0.0.1:${address.port}`,
     projectId,
+    workspaceId,
     canvasId,
     blockRef,
     otherProjectId,
     host,
+    authority,
     coordination,
     executionTargetRevision: executionTarget.revision,
     setAcceptingMutations(value: boolean) {
@@ -263,6 +265,92 @@ async function joinMember(origin: string, projectId: string, ownerToken: string)
 }
 
 describe("human remote operation HTTP", () => {
+  it("dispatches v3 through an exact Agent Endpoint without exposing Host routing", async () => {
+    const fixture = await setup();
+    const token = await bootstrap(fixture.origin, fixture.projectId, "endpoint-owner");
+    fixture.authority.applyExecutionTarget({
+      mutation: {
+        schemaVersion: "execution-target/v1",
+        scope: {
+          kind: "block",
+          workspaceId: fixture.workspaceId,
+          projectId: fixture.projectId,
+          canvasId: fixture.canvasId,
+          blockRef: fixture.blockRef
+        },
+        target: { kind: "unassigned" },
+        expectedRevision: fixture.executionTargetRevision
+      },
+      actor: { kind: "system", id: "endpoint-v3-test" }
+    });
+    const endpoint = fixture.coordination.agentEndpoints.listVisible(fixture.workspaceId).items[0];
+    expect(endpoint).toBeDefined();
+    const dispatched = await fetch(
+      `${fixture.origin}/api/v1/projects/${fixture.projectId}/remote-operations`,
+      {
+        method: "POST",
+        headers: headers(token),
+        body: JSON.stringify({
+          schemaVersion: "remote-run/v3",
+          projectId: fixture.projectId,
+          canvasId: fixture.canvasId,
+          blockRef: fixture.blockRef,
+          agentEndpointId: endpoint?.endpointId,
+          idempotencyKey: "human-endpoint-dispatch",
+          expectedResponsibilityRevision: 0,
+          expectedReviewerRevision: 0
+        })
+      }
+    );
+    const body = (await dispatched.json()) as Record<string, unknown>;
+    expect({ status: dispatched.status, body }).toMatchObject({
+      status: 202,
+      body: {
+        agentEndpoint: {
+          schemaVersion: "agent-endpoint/v1",
+          endpointId: endpoint?.endpointId,
+          profileId: "codex-acp",
+          agentId: "codex",
+          hostDisplayName: "Human Remote Host"
+        }
+      }
+    });
+    expect(JSON.stringify(body)).not.toContain(fixture.host.id);
+    expect(body).not.toHaveProperty("hostId");
+    const operationId = String(body.operationId);
+    expect(
+      fixture.coordination.operations.getRequired(operationId).endpointSelection?.authority
+    ).toEqual({
+      schemaVersion: "endpoint-authority/v1",
+      responsibilityRevision: 0,
+      reviewerRevision: 0
+    });
+  });
+
+  it("returns a stable conflict when a selected Agent Endpoint no longer exists", async () => {
+    const fixture = await setup();
+    const token = await bootstrap(fixture.origin, fixture.projectId, "missing-endpoint-owner");
+    const response = await fetch(
+      `${fixture.origin}/api/v1/projects/${fixture.projectId}/remote-operations`,
+      {
+        method: "POST",
+        headers: headers(token),
+        body: JSON.stringify({
+          schemaVersion: "remote-run/v3",
+          projectId: fixture.projectId,
+          canvasId: fixture.canvasId,
+          blockRef: fixture.blockRef,
+          agentEndpointId: "missing-agent-endpoint",
+          idempotencyKey: "missing-endpoint-dispatch",
+          expectedResponsibilityRevision: 0,
+          expectedReviewerRevision: 0
+        })
+      }
+    );
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "agent_endpoint_unknown" });
+  });
+
   it("serves strict dispatch, observation, replay, action, and interaction routes to members", async () => {
     const fixture = await setup();
     const ownerToken = await bootstrap(fixture.origin, fixture.projectId, "remote-owner");

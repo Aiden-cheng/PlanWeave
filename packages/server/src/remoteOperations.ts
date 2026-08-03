@@ -12,6 +12,10 @@ import {
   dispatchHostSelectionSnapshotSchema,
   type DispatchHostSelectionSnapshot
 } from "./work/dispatchIntegration.js";
+import {
+  endpointSelectionSnapshotSchema,
+  type EndpointSelectionSnapshot
+} from "./endpointSelection.js";
 
 const boundedKeySchema = z
   .string()
@@ -88,7 +92,8 @@ export const createRemoteOperationInputSchema = z
      * Authorized Host selection at dispatch begin. Optional when no assignment gate is wired.
      * When present, persisted with the operation and never re-derived from a later assignment.
      */
-    hostSelection: dispatchHostSelectionSnapshotSchema.optional()
+    hostSelection: dispatchHostSelectionSnapshotSchema.optional(),
+    endpointSelection: endpointSelectionSnapshotSchema.optional()
   })
   .strict();
 
@@ -113,6 +118,7 @@ const operationRowSchema = z
       .nullable(),
     envelope_reference: boundedKeySchema.nullable(),
     host_selection_json: z.string().nullable(),
+    endpoint_selection_json: z.string().nullable(),
     created_at: timestampSchema,
     updated_at: timestampSchema,
     terminal_at: timestampSchema.nullable()
@@ -184,6 +190,8 @@ export type RemoteOperation = {
   envelopeReference?: string;
   /** Durable Host selection authorized at dispatch begin (restart-safe). */
   hostSelection?: DispatchHostSelectionSnapshot;
+  /** Durable exact Endpoint route for v3; internal hostId is never human-projected. */
+  endpointSelection?: EndpointSelectionSnapshot;
   createdAt: string;
   updatedAt: string;
   terminalAt?: string;
@@ -193,7 +201,8 @@ export type RemoteOperation = {
 const operationColumns = `
   id,workspace_id,project_id,canvas_id,block_ref,ownership_generation,idempotency_key,request_fingerprint,
   source_fingerprint,required_capabilities_json,state,dispatch_id,execution_attempt_id,
-  envelope_digest,envelope_reference,host_selection_json,created_at,updated_at,terminal_at
+  envelope_digest,envelope_reference,host_selection_json,endpoint_selection_json,
+  created_at,updated_at,terminal_at
 `;
 
 const attemptColumns = `
@@ -203,7 +212,7 @@ const attemptColumns = `
 `;
 
 function requestFingerprint(input: CreateRemoteOperationInput): string {
-  // hostSelection is authorization evidence at dispatch begin, not part of caller identity.
+  // Host selection is v2 authority evidence; Endpoint identity is caller-selected in v3.
   return createHash("sha256")
     .update(
       JSON.stringify({
@@ -214,7 +223,8 @@ function requestFingerprint(input: CreateRemoteOperationInput): string {
         ownershipGeneration: input.ownershipGeneration,
         idempotencyKey: input.idempotencyKey,
         sourceFingerprint: input.sourceFingerprint,
-        requiredCapabilities: input.requiredCapabilities
+        requiredCapabilities: input.requiredCapabilities,
+        agentEndpointId: input.endpointSelection?.endpointId
       })
     )
     .digest("hex");
@@ -223,6 +233,11 @@ function requestFingerprint(input: CreateRemoteOperationInput): string {
 function parseHostSelection(raw: string | null): DispatchHostSelectionSnapshot | undefined {
   if (raw === null || raw === undefined) return undefined;
   return dispatchHostSelectionSnapshotSchema.parse(JSON.parse(raw));
+}
+
+function parseEndpointSelection(raw: string | null): EndpointSelectionSnapshot | undefined {
+  if (raw === null || raw === undefined) return undefined;
+  return endpointSelectionSnapshotSchema.parse(JSON.parse(raw));
 }
 
 function parseAttempt(row: Record<string, unknown>): RemoteExecutionAttempt {
@@ -271,7 +286,8 @@ export class RemoteOperationRepository {
           existing.requiredCapabilities.length !== input.requiredCapabilities.length ||
           existing.requiredCapabilities.some(
             (capability, index) => capability !== input.requiredCapabilities[index]
-          )
+          ) ||
+          existing.endpointSelection?.endpointId !== input.endpointSelection?.endpointId
         ) {
           throw new Error("remote_operation_idempotency_conflict");
         }
@@ -284,13 +300,17 @@ export class RemoteOperationRepository {
       const hostSelectionJson = input.hostSelection
         ? JSON.stringify(dispatchHostSelectionSnapshotSchema.parse(input.hostSelection))
         : null;
+      const endpointSelectionJson = input.endpointSelection
+        ? JSON.stringify(endpointSelectionSnapshotSchema.parse(input.endpointSelection))
+        : null;
       this.database
         .prepare(
           `INSERT INTO remote_operations(
             id,workspace_id,project_id,canvas_id,block_ref,ownership_generation,idempotency_key,
             request_fingerprint,source_fingerprint,required_capabilities_json,state,
-            dispatch_id,execution_attempt_id,host_selection_json,created_at,updated_at
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,'preparing',?,?,?,?,?)`
+            dispatch_id,execution_attempt_id,host_selection_json,endpoint_selection_json,
+            created_at,updated_at
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,'preparing',?,?,?,?,?,?)`
         )
         .run(
           operationId,
@@ -306,6 +326,7 @@ export class RemoteOperationRepository {
           dispatchId,
           executionAttemptId,
           hostSelectionJson,
+          endpointSelectionJson,
           now,
           now
         );
@@ -450,6 +471,7 @@ export class RemoteOperationRepository {
         envelopeDigest: parsed.envelope_digest ?? undefined,
         envelopeReference: parsed.envelope_reference ?? undefined,
         hostSelection: parseHostSelection(parsed.host_selection_json),
+        endpointSelection: parseEndpointSelection(parsed.endpoint_selection_json),
         createdAt: parsed.created_at,
         updatedAt: parsed.updated_at,
         terminalAt: parsed.terminal_at ?? undefined,

@@ -42,7 +42,6 @@ import { serverPackageVersion } from "./packageInfo.js";
 import { ServerReadinessController, type ServerReadiness } from "./readiness.js";
 import { RemoteControlService } from "./remoteControlService.js";
 import { HumanRemoteControlService } from "./humanRemoteControlService.js";
-import { AgentEndpointCatalog } from "./agentEndpointCatalog.js";
 import { observerEventsForActivity } from "./humanObserverActivity.js";
 import { HumanObserverJournal } from "./humanObserverJournal.js";
 import {
@@ -811,12 +810,6 @@ export async function createDistributedServerComposition(
         });
       }
     });
-    const agentEndpointCatalog = new AgentEndpointCatalog({
-      hosts: coordination.hosts,
-      capacities: coordination.reservations,
-      hostOfflineAfterMs: config.limits.hostOfflineAfterMs,
-      clock
-    });
     requestListener = createDistributedHttpRequestListener({
       readiness,
       inflightRequests,
@@ -826,7 +819,7 @@ export async function createDistributedServerComposition(
       projectAuthority: runtimeRegistry,
       transportAdmission,
       registryService,
-      agentEndpointCatalog,
+      agentEndpointCatalog: coordination.agentEndpoints,
       humanRemoteControl,
       resolveAssignmentService: (workspaceId, projectId) =>
         assignmentServices.get(assignmentServiceKey(workspaceId, projectId)),

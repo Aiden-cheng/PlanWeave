@@ -96,6 +96,7 @@ import { type CanvasLiveSyncServerMessage } from "@planweave-ai/collaboration-pr
 import {
   type RemoteActionView,
   type RemoteDispatchIntent,
+  type RemoteDispatchIntentV3,
   type RemoteDispatchWireCommand,
   type RemoteEventReplay,
   type RemoteHumanExecutionActionCommand,
@@ -104,6 +105,7 @@ import {
   type RemoteInteractionView,
   type RemoteOperationObservation
 } from "@planweave-ai/collaboration-protocol/remote-run";
+import type { RemoteAgentEndpointList } from "@planweave-ai/collaboration-protocol/agent-endpoint";
 import { type ResponsibilityReadModel } from "@planweave-ai/collaboration-protocol/work/responsibility";
 import { type ReviewAssignmentReadModel } from "@planweave-ai/collaboration-protocol/work/review";
 import { type ExecutionTargetReadModel } from "@planweave-ai/collaboration-protocol/work/execution-target";
@@ -916,8 +918,9 @@ export type PlanWeaveCollaborationApi = {
   readCollaborationCommentAttachment: (
     input: CollaborationReadCommentAttachmentInput
   ) => Promise<CollaborationCommentAttachmentBody>;
+  listCollaborationAgentEndpoints: () => Promise<RemoteAgentEndpointList>;
   dispatchCollaborationRemoteOperation: (
-    input: RemoteDispatchIntent | RemoteDispatchWireCommand
+    input: RemoteDispatchIntent | RemoteDispatchIntentV3 | RemoteDispatchWireCommand
   ) => Promise<RemoteOperationObservation>;
   observeCollaborationRemoteOperation: (
     input: CollaborationRemoteOperationIdInput

@@ -163,9 +163,10 @@ describe("collaboration migration reconciliation", () => {
       { name: "observer-workspace-scope", versions: [38] },
       { name: "attachment-workspace-scope", versions: [39] },
       { name: "remote-workspace-scope", versions: [40] },
-      { name: "server-exposure", versions: [43] }
+      { name: "server-exposure", versions: [43] },
+      { name: "endpoint-selection", versions: [44] }
     ]);
-    expect(latestCentralSchemaVersion).toBe(43);
+    expect(latestCentralSchemaVersion).toBe(44);
   });
 
   it("maps a representative v26 project to one stable Workspace and package registry key", async () => {
@@ -363,5 +364,58 @@ describe("collaboration migration reconciliation", () => {
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%presence%'")
         .all()
     ).toEqual([]);
+  });
+
+  it("reconciles the endpoint selection column after migration-record rollback", async () => {
+    const database = await openDatabase();
+    applyMigrations(database);
+    expect(
+      database
+        .prepare(
+          "SELECT name FROM pragma_table_info('remote_operations') WHERE name='endpoint_selection_json'"
+        )
+        .get()
+    ).toEqual({ name: "endpoint_selection_json" });
+
+    database
+      .prepare(
+        `INSERT INTO remote_operations(
+          id,workspace_id,project_id,canvas_id,block_ref,ownership_generation,idempotency_key,
+          request_fingerprint,source_fingerprint,required_capabilities_json,state,dispatch_id,
+          execution_attempt_id,endpoint_selection_json,created_at,updated_at
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+      )
+      .run(
+        "operation-migration",
+        "workspace-1",
+        "project-1",
+        "default",
+        "T-1#B-1",
+        "generation-1",
+        "idempotency-1",
+        "a".repeat(64),
+        "source-1",
+        "[]",
+        "preparing",
+        "dispatch-migration",
+        "attempt-migration",
+        null,
+        "2030-01-01T00:00:00.000Z",
+        "2030-01-01T00:00:00.000Z"
+      );
+    database.prepare("DELETE FROM schema_migrations WHERE version=44").run();
+
+    applyMigrations(database);
+
+    expect(
+      database.prepare("SELECT version FROM schema_migrations WHERE version=44").get()
+    ).toEqual({
+      version: 44
+    });
+    expect(
+      database
+        .prepare("SELECT endpoint_selection_json FROM remote_operations WHERE id=?")
+        .get("operation-migration")
+    ).toEqual({ endpoint_selection_json: null });
   });
 });

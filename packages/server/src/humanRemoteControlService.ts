@@ -1,6 +1,6 @@
 import {
   remoteActionViewSchema,
-  remoteDispatchIntentSchema,
+  remoteDispatchVersionedIntentSchema,
   remoteEventQuerySchema,
   remoteEventReplaySchema,
   remoteHumanExecutionActionCommandSchema,
@@ -8,6 +8,7 @@ import {
   remoteInteractionPageSchema,
   remoteInteractionResponseSchema,
   remoteInteractionViewSchema,
+  remoteEndpointOperationObservationSchema,
   remoteOperationObservationSchema
 } from "@planweave-ai/collaboration-protocol/remote-run";
 import type {
@@ -20,6 +21,7 @@ import { RemoteBlockCoordinator } from "./remoteBlockCoordinator.js";
 import { RemoteInteractionService } from "./remoteInteractions.js";
 import { RemoteOperationRepository, type RemoteOperation } from "./remoteOperations.js";
 import { DispatchService } from "./dispatches.js";
+import { toHumanEndpointSnapshot } from "./endpointSelection.js";
 
 export class HumanRemoteControlError extends Error {
   constructor(readonly code: string) {
@@ -52,7 +54,7 @@ export class HumanRemoteControlService {
   async dispatch(scope: AuthenticatedCollaborationScope, rawRequest: unknown) {
     const { actor: context, projectId } = scope;
     this.authorize(context, projectId);
-    const request = remoteDispatchIntentSchema.parse(rawRequest);
+    const request = remoteDispatchVersionedIntentSchema.parse(rawRequest);
     if (request.projectId !== projectId)
       throw new HumanRemoteControlError("human_remote_project_mismatch");
     this.options.authorizeCanvas?.(context, {
@@ -60,17 +62,30 @@ export class HumanRemoteControlService {
       projectId: request.projectId,
       canvasId: request.canvasId
     });
-    const outcome = await this.options.coordinator.dispatch({
-      workspaceId: scope.workspaceId,
-      projectId: request.projectId,
-      canvasId: request.canvasId,
-      blockRef: request.blockRef,
-      idempotencyKey: request.idempotencyKey,
-      expectedResponsibilityRevision: request.expectedResponsibilityRevision,
-      expectedReviewerRevision: request.expectedReviewerRevision,
-      expectedExecutionTargetRevision: request.expectedExecutionTargetRevision,
-      strictAuthority: true
-    });
+    const outcome = await this.options.coordinator.dispatch(
+      request.schemaVersion === "remote-run/v3"
+        ? {
+            workspaceId: scope.workspaceId,
+            projectId: request.projectId,
+            canvasId: request.canvasId,
+            blockRef: request.blockRef,
+            idempotencyKey: request.idempotencyKey,
+            agentEndpointId: request.agentEndpointId,
+            expectedResponsibilityRevision: request.expectedResponsibilityRevision,
+            expectedReviewerRevision: request.expectedReviewerRevision
+          }
+        : {
+            workspaceId: scope.workspaceId,
+            projectId: request.projectId,
+            canvasId: request.canvasId,
+            blockRef: request.blockRef,
+            idempotencyKey: request.idempotencyKey,
+            expectedResponsibilityRevision: request.expectedResponsibilityRevision,
+            expectedReviewerRevision: request.expectedReviewerRevision,
+            expectedExecutionTargetRevision: request.expectedExecutionTargetRevision,
+            strictAuthority: true
+          }
+    );
     return this.observeOperation(scope, outcome.operation.id);
   }
 
@@ -78,7 +93,7 @@ export class HumanRemoteControlService {
     const operation = this.operationFor(scope, operationId);
     const runtime = await this.options.coordinator.query(operation.id);
     const dispatch = this.options.dispatches.get(operation.dispatchId);
-    return remoteOperationObservationSchema.parse({
+    const observation = {
       operationId: operation.id,
       projectId: operation.projectId,
       canvasId: operation.canvasId,
@@ -89,11 +104,14 @@ export class HumanRemoteControlService {
       createdAt: operation.createdAt,
       updatedAt: operation.updatedAt,
       terminalAt: operation.terminalAt,
+      ...(operation.endpointSelection
+        ? { agentEndpoint: toHumanEndpointSnapshot(operation.endpointSelection) }
+        : {}),
       attempt: {
         executionAttemptId: operation.attempt.executionAttemptId,
         dispatchId: operation.attempt.dispatchId,
         status: operation.attempt.status,
-        hostId: operation.attempt.hostId,
+        ...(operation.endpointSelection ? {} : { hostId: operation.attempt.hostId }),
         leaseId: operation.attempt.leaseId,
         leaseExpiresAt: operation.attempt.leaseExpiresAt,
         stateVersion: operation.attempt.stateVersion
@@ -130,7 +148,10 @@ export class HumanRemoteControlService {
           ? { divergenceReason: runtime.divergenceReason }
           : {})
       }
-    });
+    };
+    return operation.endpointSelection
+      ? remoteEndpointOperationObservationSchema.parse(observation)
+      : remoteOperationObservationSchema.parse(observation);
   }
 
   async executeAction(

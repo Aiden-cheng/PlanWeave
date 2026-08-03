@@ -1435,16 +1435,24 @@ export const enCatalog = {
   activitySourceComment: "Comment",
   activitySourceRemoteRun: "Remote run",
 
-  // Remote ACP run observation/control (DX-003#B-002) — not local Auto Run
-  remoteRunTitle: "Remote ACP run",
+  // Unified local / remote Agent run control
+  remoteRunTitle: "Agent run",
   remoteRunNotice:
-    "Server-authorized remote dispatch and ACP observation. Separate from local Auto Run and human comments.",
+    "Choose the current local Agent or a compatible remote Agent Endpoint, then run from one control surface.",
+  agentEndpointLabel: "Agent Endpoint",
+  agentEndpointRefresh: "Refresh",
+  agentEndpointPlaceholder: "Select an Agent Endpoint",
+  agentEndpointThisDevice: "This device",
+  agentEndpointLocalHint:
+    "The local option uses this Block's current logical Agent. Change the default Agent above if needed.",
   remoteRunLocalCoexistence:
     "A local Auto Run is active for this Block. Local and remote authorities are not merged.",
   remoteRunOperationId: "Operation",
   remoteRunDispatchId: "Dispatch",
   remoteRunAttemptId: "Attempt",
   remoteRunHostId: "Host",
+  remoteRunEndpoint: "Agent Endpoint",
+  remoteRunLegacyRemote: "Legacy remote run",
   remoteRunLeaseId: "Lease",
   remoteRunSessionId: "ACP session",
   remoteRunAttemptVersion: "Attempt version",

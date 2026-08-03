@@ -63,6 +63,7 @@ export type RemoteRunIdentitySummary = {
   executionAttemptId: string;
   attemptVersion: number;
   hostId: string | null;
+  agentEndpoint: { displayName: string; hostDisplayName: string } | null;
   leaseId: string | null;
   leaseExpiresAt: string | null;
   acpSessionId: string | null;
@@ -265,6 +266,12 @@ export function projectRemoteRunIdentity(
     executionAttemptId: observation.executionAttemptId,
     attemptVersion: observation.attempt.stateVersion,
     hostId: observation.attempt.hostId ?? null,
+    agentEndpoint: observation.agentEndpoint
+      ? {
+          displayName: observation.agentEndpoint.displayName,
+          hostDisplayName: observation.agentEndpoint.hostDisplayName
+        }
+      : null,
     leaseId: observation.attempt.leaseId ?? null,
     leaseExpiresAt: observation.attempt.leaseExpiresAt ?? null,
     acpSessionId: recovery?.acpSessionId ?? null,
@@ -443,8 +450,10 @@ export function projectRemoteRunPanelViewModel(input: {
   offline: boolean;
   localAutoRunActive: boolean;
   hostOnline?: boolean | null;
+  endpointDispatchAvailable?: boolean;
 }): RemoteRunPanelViewModel {
-  const assignmentEligible = isAssignmentEligibleForRemoteDispatch(input.assignment);
+  const assignmentEligible =
+    input.endpointDispatchAvailable ?? isAssignmentEligibleForRemoteDispatch(input.assignment);
   const interruptionResumable = Boolean(
     input.observation?.runtime.interruption?.resumable ||
       (input.observation?.state === "interrupted" &&

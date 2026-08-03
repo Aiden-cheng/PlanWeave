@@ -31,6 +31,7 @@ import type { ServerStorageConfig } from "./config.js";
 import {
   createAssignmentDispatchGate,
   createAuthorityDispatchGate,
+  DispatchAssignmentError,
   type AssignmentDispatchGate
 } from "./work/dispatchIntegration.js";
 import { WorkAssignmentRepository } from "./work/repository.js";
@@ -41,6 +42,8 @@ import { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
 import { ProjectAccessRepository } from "./projectAccessRepository.js";
 import { evaluateHostAuthorization } from "./work/authorityPolicy.js";
 import { hostAuthorizationFactsSchema } from "@planweave-ai/collaboration-protocol/work/host-authorization";
+import { workspaceIdSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
+import { AgentEndpointCatalog } from "./agentEndpointCatalog.js";
 
 export type RemoteBlockCoordinationOptions = {
   leaseDurationMs: number;
@@ -88,6 +91,12 @@ export function createRemoteBlockCoordination(
     hostOfflineAfterMs: options.hostOfflineAfterMs,
     clock: options.clock
   });
+  const agentEndpoints = new AgentEndpointCatalog({
+    hosts,
+    capacities: reservations,
+    hostOfflineAfterMs: options.hostOfflineAfterMs,
+    clock: options.clock
+  });
   const acpEvents = new RemoteAcpEventRepository(database, {
     clock: options.clock,
     maxEvents: options.eventRetentionMaxEvents,
@@ -128,6 +137,36 @@ export function createRemoteBlockCoordination(
   const authorityRepository = new AuthorityRepository(database, { clock: options.clock });
   const workspaceIdentity = new WorkspaceIdentityRepository(database);
   const projectAccess = new ProjectAccessRepository(database, options.clock);
+  const endpointAuthorize: NonNullable<
+    ConstructorParameters<typeof RemoteBlockCoordinator>[0]["endpointAuthorize"]
+  > = (input) => {
+    const scope = {
+      kind: "block" as const,
+      workspaceId: workspaceIdSchema.parse(input.workspaceId),
+      projectId: input.projectId,
+      canvasId: input.canvasId,
+      blockRef: input.blockRef
+    };
+    if (!workspaceIdentity.workspaceExists(scope.workspaceId)) {
+      throw new DispatchAssignmentError("work_host_not_authorized");
+    }
+    const project = projectAccess.registry.projectInternal(scope.workspaceId, scope.projectId);
+    const canvas = projectAccess.registry.canvasInternal(
+      scope.workspaceId,
+      scope.projectId,
+      scope.canvasId
+    );
+    if (!project || project.revokedAt !== null || !canvas || canvas.revokedAt !== null) {
+      throw new DispatchAssignmentError("work_host_not_authorized");
+    }
+    const current = authorityRepository.currentRevisions(scope);
+    if (
+      current.responsibilityRevision !== input.expectedResponsibilityRevision ||
+      current.reviewerRevision !== input.expectedReviewerRevision
+    ) {
+      throw new DispatchAssignmentError("work_revision_conflict");
+    }
+  };
   const assignmentGate: AssignmentDispatchGate | undefined = legacyAssignmentGate
     ? {
         resolve(input) {
@@ -283,6 +322,8 @@ export function createRemoteBlockCoordination(
     artifactContent: options.artifactContent,
     checkpoints: options.checkpoints,
     assignmentGate,
+    agentEndpoints,
+    endpointAuthorize,
     finalAuthorize,
     serverInstanceOwnerToken: startupContext.serverInstanceOwnerToken
   });
@@ -344,6 +385,7 @@ export function createRemoteBlockCoordination(
     acpEvents,
     interactions,
     reservations,
+    agentEndpoints,
     coordinator,
     dispatches,
     workAssignments,

@@ -245,6 +245,7 @@ class StartupHarness {
       DROP TABLE comment_attachment_bindings_unscoped_legacy;
       DROP TABLE remote_operations_unscoped_legacy;
       DROP TABLE dispatches_unscoped_legacy;
+      DROP TABLE server_exposure_leases;
       DELETE FROM project_access_grants;
       DELETE FROM canvas_registry;
       DELETE FROM project_registry;
@@ -254,6 +255,7 @@ class StartupHarness {
       DELETE FROM review_assignment_records;
       DELETE FROM assignment_authority_migrations;
       ALTER TABLE dispatches ADD COLUMN package_ref TEXT NOT NULL DEFAULT '';
+      ALTER TABLE remote_operations DROP COLUMN endpoint_selection_json;
       ALTER TABLE remote_operations DROP COLUMN host_selection_json;
       DELETE FROM schema_migrations WHERE version >= 18;
     `);

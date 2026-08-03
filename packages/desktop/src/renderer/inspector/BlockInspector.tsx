@@ -40,6 +40,7 @@ import { buildExecutorOptionViews, executorOptionName } from "../executors/execu
 import { useExecutorPreflight } from "../hooks/useExecutorPreflight";
 import type { createTranslator } from "../i18n";
 import { isLocalAutoRunActiveFromBlockRecords } from "../collaboration/remoteRunViewModels";
+import { buildLocalAgentEndpoint } from "../collaboration/agentEndpointViewModel";
 import { AssigneeInspectorField } from "../team/AssigneeInspectorField";
 import { RemoteRunPanel } from "../team/RemoteRunPanel";
 import { WorkItemCollaborationPanel } from "../team/WorkItemCollaborationPanel";
@@ -153,6 +154,28 @@ export function BlockInspector({
     canvasRef: canvasRef ?? null,
     executorName: concreteExecutor
   });
+  const graphBlock = graph?.tasks
+    .find((task) => task.taskId === selectedBlock?.taskId)
+    ?.blocks.find((block) => block.ref === selectedBlock?.ref);
+  const requiredCapabilities = graphBlock?.requiredCapabilities ?? [];
+  const localAgentEndpoint = concreteExecutor
+    ? (() => {
+        const option = blockExecutorOptions.find(
+          (candidate) =>
+            candidate.name === executorOptionName(concreteExecutor, graph?.packageExecutorNames)
+        );
+        return buildLocalAgentEndpoint({
+          executorName: concreteExecutor,
+          displayName: option?.label ?? concreteExecutor,
+          locationName: t("agentEndpointThisDevice"),
+          profileExists: option !== undefined,
+          detected: option !== undefined && !option.disabled,
+          preflightLoading: preflight.loading,
+          preflightError: preflight.error,
+          preflightOk: preflight.result?.ok ?? null
+        });
+      })()
+    : null;
   const blockPromptBaselineRef = useRef<{ promptMarkdown: string; ref: string } | null>(null);
   const taskBlocks = useMemo(() => {
     if (!graph || !selectedBlock) {
@@ -373,6 +396,9 @@ export function BlockInspector({
               }
               runtimeRemoteExecution={selectedBlock.remoteExecution}
               localAutoRunActive={localAutoRunActive}
+              canvasRef={canvasRef}
+              localAgentEndpoint={localAgentEndpoint}
+              requiredCapabilities={requiredCapabilities}
               t={t}
             />
             <WorkItemCollaborationPanel

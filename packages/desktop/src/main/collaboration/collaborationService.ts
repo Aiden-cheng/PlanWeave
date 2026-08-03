@@ -1,4 +1,3 @@
-import { COLLABORATION_REQUEST_TIMEOUT_MS } from "@planweave-ai/collaboration-protocol/core/limits";
 import {
   collaborationConnectionProfileSchema,
   type CollaborationConnectionProfile,
@@ -6,15 +5,6 @@ import {
   type WorkspacePickerPage
 } from "@planweave-ai/collaboration-protocol/connection";
 import {
-  humanBootstrapRequestSchema,
-  humanConsumeInvitationRequestSchema,
-  humanDeviceListQuerySchema,
-  humanInvitationListQuerySchema,
-  humanPageQuerySchema,
-  type HumanBootstrapRequest,
-  type HumanBootstrapResponse,
-  type HumanConsumeInvitationRequest,
-  type HumanConsumeInvitationResponse,
   type HumanDevicePage,
   type HumanInvitationPage,
   type HumanInvitationView,
@@ -57,17 +47,6 @@ import {
 } from "@planweave-ai/collaboration-protocol/access/control";
 import {
   assertNoSmuggledCollaborationSecrets,
-  COLLABORATION_SESSION_ONLY_WARNING,
-  collaborationBootstrapInputSchema,
-  collaborationConsumeInvitationInputSchema,
-  collaborationCreateInvitationInputSchema,
-  collaborationDeviceCredentialIdInputSchema,
-  collaborationHumanPrincipalIdInputSchema,
-  collaborationImportDeviceCredentialInputSchema,
-  collaborationInvitationIdInputSchema,
-  collaborationInvitationIdsInputSchema,
-  collaborationProfileIdInputSchema,
-  collaborationUpsertProfileInputSchema,
   collaborationCurrentCanvasAccessInputSchema,
   collaborationAccessMutationInputSchema,
   collaborationCanvasSessionInputSchema,
@@ -81,11 +60,7 @@ import {
   type CollaborationStatus,
   type CollaborationUpsertProfileInput
 } from "../../shared/collaboration.js";
-import {
-  CollaborationClient,
-  type CollaborationClientOptions,
-  type CollaborationObserverStatus
-} from "./CollaborationClient.js";
+import { CollaborationClient, type CollaborationClientOptions } from "./CollaborationClient.js";
 import { CollaborationRegistryService } from "./CollaborationRegistryService.js";
 import {
   CollaborationCanvasCommandFacade,
@@ -119,6 +94,9 @@ import {
 } from "./workspaceConnectionProfileStore.js";
 import { redactCollaborationText } from "./redaction.js";
 import { CollaborationInvitationVault } from "./collaborationInvitationVault.js";
+import { CollaborationIdentityOperations } from "./CollaborationIdentityOperations.js";
+import { CollaborationProfileLifecycle } from "./CollaborationProfileLifecycle.js";
+import { CollaborationSessionLifecycle } from "./CollaborationSessionLifecycle.js";
 import { CanvasReplicaStore } from "./CanvasReplicaStore.js";
 import { CanvasReplicaDiskMirror } from "./CanvasReplicaDiskMirror.js";
 import type { CollaborationCanvasReplicaSignal } from "../../shared/canvasReplicaIpc.js";
@@ -126,13 +104,6 @@ import type { CollaborationCanvasReplicaSignal } from "../../shared/canvasReplic
 export type CollaborationClientFactory = (
   options: CollaborationClientOptions
 ) => CollaborationClient;
-
-function observerFailureMessage(code: string): string {
-  if (code === "collaboration_observer_http_403") {
-    return "Realtime updates are unavailable because this member does not have project read access. Ask an owner to share the project or grant this member project access.";
-  }
-  return code;
-}
 
 export type CollaborationServiceOptions = {
   profileStore?: CollaborationProfileStore;
@@ -153,30 +124,6 @@ export type CollaborationServiceOptions = {
   onCanvasLiveSyncSignal?: (signal: CollaborationCanvasLiveSyncSignal) => void;
   onCanvasReplicaSignal?: (signal: CollaborationCanvasReplicaSignal) => void;
 };
-
-function stripAuthHandoff(
-  response: HumanBootstrapResponse | HumanConsumeInvitationResponse,
-  persistence: CollaborationAuthHandoffView["deviceCredentialPersistence"],
-  nonPersistenceWarning: string | null
-): CollaborationAuthHandoffView {
-  const base: CollaborationAuthHandoffView = {
-    principal: response.principal,
-    membership: response.membership,
-    device: response.device,
-    deviceCredentialPersistence: persistence,
-    nonPersistenceWarning
-  };
-  if ("created" in response) {
-    base.created = response.created;
-  }
-  if ("principalCreated" in response) {
-    base.principalCreated = response.principalCreated;
-  }
-  if ("invitation" in response) {
-    base.invitation = response.invitation;
-  }
-  return base;
-}
 
 /**
  * Electron-main orchestration for collaboration profiles, device credentials, and session lifecycle.
@@ -203,6 +150,9 @@ export class CollaborationService {
   private readonly readMutations: CollaborationReadMutationsFacade;
   private readonly workspaceConnection: CollaborationWorkspaceConnection;
   private readonly workspaceConnectionFacade: CollaborationWorkspaceConnectionFacade;
+  private readonly profileLifecycle: CollaborationProfileLifecycle;
+  private readonly identityOperations: CollaborationIdentityOperations;
+  private readonly sessionLifecycle: CollaborationSessionLifecycle;
   private workspaceHydrated = false;
 
   private client: CollaborationClient | null = null;
@@ -211,12 +161,6 @@ export class CollaborationService {
   private sessionDetail: string | null = null;
   private lastErrorCode: string | null = null;
   private lastErrorMessage: string | null = null;
-  private observerStatus: CollaborationObserverStatus = { state: "stopped" };
-  /** Last validated observer cursor preserved across dispose/reconnect for the same profile. */
-  private lastValidatedObserverCursor = 0;
-  private lastValidatedObserverProfileId: string | null = null;
-  private observerGeneration = 0;
-  private observerConnectDeadline: ReturnType<typeof setTimeout> | null = null;
   private readonly presenceSession: CollaborationPresenceSession;
   private readonly canvasLiveSyncSession: CollaborationCanvasLiveSyncSession;
   private disposed = false;
@@ -289,7 +233,7 @@ export class CollaborationService {
       mirror: this.canvasReplicaMirror
     });
     this.remoteOperations = new CollaborationRemoteOperationsFacade((operation) =>
-      this.withActiveClient(operation)
+      this.withActiveClient((client) => operation(client.remoteOperations()))
     );
     this.presenceSession = new CollaborationPresenceSession({
       getClient: () => this.client,
@@ -325,6 +269,47 @@ export class CollaborationService {
       connection: this.workspaceConnection,
       publishStatus: () => this.publishStatus(),
       setSession: (phase, detail, error) => this.setSession(phase, detail, error)
+    });
+    this.sessionLifecycle = new CollaborationSessionLifecycle({
+      profiles: this.profiles,
+      vault: this.vault,
+      presenceSession: this.presenceSession,
+      canvasLiveSyncSession: this.canvasLiveSyncSession,
+      canvasCommands: this.canvasCommands,
+      enqueue: (operation) => this.enqueue(operation),
+      assertOpen: () => this.assertOpen(),
+      getClient: () => this.client,
+      getClientProfileId: () => this.clientProfileId,
+      setClient: (client, profileId) => {
+        this.client = client;
+        this.clientProfileId = profileId;
+      },
+      getSessionPhase: () => this.sessionPhase,
+      setSession: (phase, detail, error) => this.setSession(phase, detail, error),
+      clientForProfile: (profileId, requireCredential) =>
+        this.clientForProfile(profileId, requireCredential),
+      publishStatus: () => this.publishStatus(),
+      publishObserverSignal: (signal) => this.publishObserverSignal(signal)
+    });
+    this.profileLifecycle = new CollaborationProfileLifecycle({
+      profiles: this.profiles,
+      vault: this.vault,
+      invitationVault: this.invitationVault,
+      enqueue: (operation) => this.enqueue(operation),
+      assertOpen: () => this.assertOpen(),
+      getClientProfileId: () => this.clientProfileId,
+      getSessionPhase: () => this.sessionPhase,
+      setSession: (phase, detail, error) => this.setSession(phase, detail, error),
+      disposeClient: (reason) => this.disposeClient(reason),
+      clearRememberedObserverCursor: (profileId) => this.clearRememberedObserverCursor(profileId),
+      publishStatus: () => this.publishStatus(),
+      clientForProfile: async (profileId, requireCredential) =>
+        (await this.clientForProfile(profileId, requireCredential)).client
+    });
+    this.identityOperations = new CollaborationIdentityOperations({
+      invitationVault: this.invitationVault,
+      getClientProfileId: () => this.clientProfileId,
+      withActiveClient: (operation) => this.withActiveClient(operation)
     });
   }
 
@@ -377,7 +362,7 @@ export class CollaborationService {
         lastErrorCode: this.lastErrorCode,
         lastErrorMessage: this.lastErrorMessage,
         clientProfileId: this.clientProfileId,
-        observerStatus: this.observerStatus,
+        observerStatus: this.sessionLifecycle.getObserverStatus(),
         client: this.client
       },
       clock: this.clock
@@ -417,129 +402,27 @@ export class CollaborationService {
   }
 
   async upsertProfile(input: unknown): Promise<CollaborationStatus> {
-    return this.enqueue(async () => {
-      this.assertOpen();
-      assertNoSmuggledCollaborationSecrets(input, "upsertCollaborationProfile");
-      const profile = collaborationUpsertProfileInputSchema.parse(input);
-      const existing = await this.profiles.get(profile.profileId);
-      const connectionIdentityChanged =
-        !existing ||
-        existing.serverBaseUrl !== profile.serverBaseUrl ||
-        existing.projectId !== profile.projectId ||
-        existing.allowInsecureTransport !== profile.allowInsecureTransport ||
-        JSON.stringify(existing.endpoint) !== JSON.stringify(profile.endpoint);
-      await this.profiles.upsert(profile);
-      if (this.clientProfileId === profile.profileId && connectionIdentityChanged) {
-        // Profile identity changed; drop live client so callers reconnect explicitly.
-        await this.disposeClient("profile_updated");
-      }
-      if (
-        existing &&
-        (existing.serverBaseUrl !== profile.serverBaseUrl ||
-          existing.projectId !== profile.projectId)
-      ) {
-        this.clearRememberedObserverCursor(profile.profileId);
-      }
-      return this.publishStatus();
-    });
+    return this.profileLifecycle.upsertProfile(input);
   }
 
   async removeProfile(input: unknown): Promise<CollaborationStatus> {
-    return this.enqueue(async () => {
-      this.assertOpen();
-      assertNoSmuggledCollaborationSecrets(input, "removeCollaborationProfile");
-      const { profileId } = collaborationProfileIdInputSchema.parse(input);
-      if (this.clientProfileId === profileId) {
-        await this.disposeClient("profile_removed");
-      } else {
-        this.clearRememberedObserverCursor(profileId);
-      }
-      await this.vault.clear(profileId);
-      await this.invitationVault.clearProfile(profileId);
-      await this.profiles.remove(profileId);
-      return this.publishStatus();
-    });
+    return this.profileLifecycle.removeProfile(input);
   }
 
   async setActiveProfile(input: unknown): Promise<CollaborationStatus> {
-    return this.enqueue(async () => {
-      this.assertOpen();
-      assertNoSmuggledCollaborationSecrets(input, "setActiveCollaborationProfile");
-      const { profileId } = collaborationProfileIdInputSchema.parse(input);
-      const profile = await this.profiles.get(profileId);
-      if (!profile) {
-        throw new Error(`Unknown collaboration profile: ${profileId}`);
-      }
-      if (this.clientProfileId && this.clientProfileId !== profileId) {
-        await this.disposeClient("project_switch");
-      }
-      await this.profiles.setActiveProfileId(profileId);
-      this.setSession(this.clientProfileId === profileId ? this.sessionPhase : "idle", null, null);
-      return this.publishStatus();
-    });
+    return this.profileLifecycle.setActiveProfile(input);
   }
 
   async clearActiveProfile(): Promise<CollaborationStatus> {
-    return this.enqueue(async () => {
-      this.assertOpen();
-      await this.disposeClient("active_cleared");
-      await this.profiles.setActiveProfileId(null);
-      this.setSession("idle", null, null);
-      return this.publishStatus();
-    });
+    return this.profileLifecycle.clearActiveProfile();
   }
 
   async importDeviceCredential(input: unknown): Promise<CollaborationStatus> {
-    return this.enqueue(async () => {
-      this.assertOpen();
-      // deviceToken is allowed only on this method — do not use assertNoSmuggled for the whole object.
-      if (!input || typeof input !== "object") {
-        throw new Error("importDeviceCredential requires an object payload.");
-      }
-      const record = input as Record<string, unknown>;
-      for (const key of [
-        "encryptedDeviceToken",
-        "authorization",
-        "Authorization",
-        "credentialPath",
-        "credentialsPath",
-        "existingDeviceToken"
-      ] as const) {
-        if (key in record && record[key] !== undefined) {
-          throw new Error(
-            `Collaboration IPC rejected importDeviceCredential: field "${key}" is not allowed.`
-          );
-        }
-      }
-      const parsed = collaborationImportDeviceCredentialInputSchema.parse(input);
-      const profile = await this.profiles.get(parsed.profileId);
-      if (!profile) {
-        throw new Error(`Unknown collaboration profile: ${parsed.profileId}`);
-      }
-      await this.vault.setDeviceToken(parsed.profileId, parsed.deviceToken, {
-        deviceCredentialId: parsed.deviceCredentialId ?? null,
-        humanPrincipalId: parsed.humanPrincipalId ?? null
-      });
-      if (this.clientProfileId === parsed.profileId) {
-        await this.disposeClient("credential_imported");
-      }
-      return this.publishStatus();
-    });
+    return this.profileLifecycle.importDeviceCredential(input);
   }
 
   async clearDeviceCredential(input: unknown): Promise<CollaborationStatus> {
-    return this.enqueue(async () => {
-      this.assertOpen();
-      assertNoSmuggledCollaborationSecrets(input, "clearDeviceCredential");
-      const { profileId } = collaborationProfileIdInputSchema.parse(input);
-      if (this.clientProfileId === profileId) {
-        await this.disposeClient("logout");
-      } else {
-        this.clearRememberedObserverCursor(profileId);
-      }
-      await this.vault.clear(profileId);
-      return this.publishStatus();
-    });
+    return this.profileLifecycle.clearDeviceCredential(input);
   }
 
   private async clientForProfile(
@@ -575,54 +458,12 @@ export class CollaborationService {
   }
 
   async bootstrapOwner(input: unknown): Promise<CollaborationAuthHandoffView> {
-    return this.enqueue(async () => {
-      this.assertOpen();
-      assertNoSmuggledCollaborationSecrets(
-        input && typeof input === "object" ? { ...(input as object), request: undefined } : input,
-        "bootstrapCollaborationOwner"
-      );
-      if (input && typeof input === "object" && "request" in (input as object)) {
-        assertNoSmuggledCollaborationSecrets(
-          (input as { request: unknown }).request,
-          "bootstrapCollaborationOwner.request"
-        );
-      }
-      const parsed = collaborationBootstrapInputSchema.parse(input);
-      const request: HumanBootstrapRequest = humanBootstrapRequestSchema.parse(parsed.request);
-      const { client } = await this.clientForProfile(parsed.profileId, false);
-      try {
-        this.setSession("connecting", "bootstrap");
-        const response = await client.bootstrapOwner(request);
-        let persistence: CollaborationAuthHandoffView["deviceCredentialPersistence"] = "missing";
-        if (response.deviceToken) {
-          persistence = await this.vault.setDeviceToken(parsed.profileId, response.deviceToken, {
-            deviceCredentialId: response.device.deviceCredentialId,
-            humanPrincipalId: response.principal.humanPrincipalId
-          });
-        }
-        await this.profiles.setActiveProfileId(parsed.profileId);
-        this.setSession("ready", "bootstrap_complete", null);
-        await this.publishStatus();
-        const warning = persistence === "session-only" ? COLLABORATION_SESSION_ONLY_WARNING : null;
-        return stripAuthHandoff(response, persistence, warning);
-      } catch (error) {
-        const mapped = collaborationErrorFromUnknown(error);
-        this.setSession("error", "bootstrap_failed", {
-          code: mapped.code,
-          message: mapped.message
-        });
-        await this.publishStatus();
-        throw mapped;
-      } finally {
-        client.dispose();
-      }
-    });
+    return this.profileLifecycle.bootstrapOwner(input);
   }
 
   /** Main-only identity lookup for local coordinator authorization; never crosses IPC. */
   async activeHumanPrincipalId(profileId: string): Promise<string | null> {
-    const metadata = await this.vault.getMetadata(profileId);
-    return metadata?.humanPrincipalId ?? null;
+    return this.profileLifecycle.activeHumanPrincipalId(profileId);
   }
 
   /** Main-only compatibility migration from the former global loopback profile. */
@@ -630,220 +471,19 @@ export class CollaborationService {
     sourceProfileId: string,
     targetProfileId: string
   ): Promise<void> {
-    return this.enqueue(async () => {
-      this.assertOpen();
-      if (sourceProfileId === targetProfileId) return;
-      const [sourceProfile, targetProfile, targetToken] = await Promise.all([
-        this.profiles.get(sourceProfileId),
-        this.profiles.get(targetProfileId),
-        this.vault.getDeviceToken(targetProfileId)
-      ]);
-      if (!sourceProfile || !targetProfile || sourceProfile.projectId !== targetProfile.projectId) {
-        return;
-      }
-      if (targetToken) return;
-      const [sourceToken, sourceMetadata] = await Promise.all([
-        this.vault.getDeviceToken(sourceProfileId),
-        this.vault.getMetadata(sourceProfileId)
-      ]);
-      if (!sourceToken) return;
-      await this.vault.setDeviceToken(targetProfileId, sourceToken, sourceMetadata ?? undefined);
-    });
+    return this.profileLifecycle.migrateLocalProfileCredential(sourceProfileId, targetProfileId);
   }
 
   async consumeInvitation(input: unknown): Promise<CollaborationAuthHandoffView> {
-    return this.enqueue(async () => {
-      this.assertOpen();
-      if (!input || typeof input !== "object") {
-        throw new Error("consumeCollaborationInvitation requires an object payload.");
-      }
-      const outer = input as Record<string, unknown>;
-      if ("existingDeviceToken" in outer && outer.existingDeviceToken !== undefined) {
-        throw new Error(
-          'Collaboration IPC rejected consumeCollaborationInvitation: field "existingDeviceToken" is not allowed across the renderer boundary.'
-        );
-      }
-      assertNoSmuggledCollaborationSecrets(
-        { profileId: outer.profileId },
-        "consumeCollaborationInvitation"
-      );
-      if (outer.request && typeof outer.request === "object") {
-        assertNoSmuggledCollaborationSecrets(
-          outer.request,
-          "consumeCollaborationInvitation.request"
-        );
-      }
-      const parsed = collaborationConsumeInvitationInputSchema.parse(input);
-      const existing = await this.vault.getDeviceToken(parsed.profileId);
-      const request: HumanConsumeInvitationRequest = humanConsumeInvitationRequestSchema.parse({
-        ...parsed.request,
-        ...(existing ? { existingDeviceToken: existing } : {})
-      });
-      const { client } = await this.clientForProfile(parsed.profileId, false);
-      try {
-        this.setSession("connecting", "consume_invitation");
-        const response = await client.consumeInvitation(request);
-        const persistence = await this.vault.setDeviceToken(
-          parsed.profileId,
-          response.deviceToken,
-          {
-            deviceCredentialId: response.device.deviceCredentialId,
-            humanPrincipalId: response.principal.humanPrincipalId
-          }
-        );
-        await this.profiles.setActiveProfileId(parsed.profileId);
-        this.setSession("ready", "consume_invitation_complete", null);
-        await this.publishStatus();
-        const warning = persistence === "session-only" ? COLLABORATION_SESSION_ONLY_WARNING : null;
-        return stripAuthHandoff(response, persistence, warning);
-      } catch (error) {
-        const mapped = collaborationErrorFromUnknown(error);
-        this.setSession("error", "consume_invitation_failed", {
-          code: mapped.code,
-          message: mapped.message
-        });
-        await this.publishStatus();
-        throw mapped;
-      } finally {
-        client.dispose();
-      }
-    });
+    return this.profileLifecycle.consumeInvitation(input);
   }
-
   async connectSession(input: unknown): Promise<CollaborationStatus> {
-    return this.enqueue(async () => {
-      this.assertOpen();
-      assertNoSmuggledCollaborationSecrets(input, "connectCollaborationSession");
-      const { profileId } = collaborationProfileIdInputSchema.parse(input);
-      if (
-        this.clientProfileId === profileId &&
-        this.client &&
-        (this.sessionPhase === "connecting" ||
-          (this.sessionPhase === "connected" &&
-            this.observerStatus.state !== "failed" &&
-            this.observerStatus.state !== "stopped"))
-      ) {
-        return this.publishStatus();
-      }
-      await this.disposeClient("reconnect");
-      const token = await this.vault.getDeviceToken(profileId);
-      if (!token) {
-        throw new Error("Human device credential is not available for this profile.");
-      }
-      const { client, profile } = await this.clientForProfile(profileId, true);
-      this.client = client;
-      this.clientProfileId = profileId;
-      const observerGeneration = this.observerGeneration;
-      const isCurrentObserver = () =>
-        this.client === client &&
-        this.clientProfileId === profileId &&
-        this.observerGeneration === observerGeneration;
-      await this.profiles.setActiveProfileId(profileId);
-      this.observerStatus = { state: "stopped" };
-      const resumeCursor =
-        this.lastValidatedObserverProfileId === profileId ? this.lastValidatedObserverCursor : 0;
-      let preflightComplete = false;
-      try {
-        this.setSession("connecting", "http_preflight", null);
-        await client.verifyAccess();
-        preflightComplete = true;
-        this.setSession("connected", "http_ready", null);
-        this.armObserverConnectDeadline({ client, profileId, observerGeneration });
-        client.startObserver(
-          {
-            onStatus: (status) => {
-              if (!isCurrentObserver()) return;
-              this.observerStatus = status;
-              if (status.state === "connected") {
-                this.clearObserverConnectDeadline();
-                this.rememberObserverCursor(profileId, status.cursor);
-                this.setSession("connected", `observer:${status.state}`, null);
-                this.publishObserverSignal({
-                  type: "human.observer.cursor",
-                  profileId,
-                  projectId: profile.projectId,
-                  cursor: status.cursor
-                });
-              } else if (status.state === "auth_expired") {
-                this.clearObserverConnectDeadline();
-                this.setSession("error", `observer:${status.state}`, {
-                  code: status.code,
-                  message: "Collaboration device credential was rejected by the server."
-                });
-                void this.vault.clear(profileId).then(() => this.publishStatus());
-              } else if (status.state === "failed") {
-                this.clearObserverConnectDeadline();
-                this.setSession("connected", `observer:${status.state}`, {
-                  code: status.code,
-                  message: observerFailureMessage(status.code)
-                });
-              } else if (status.state === "reconnecting" || status.state === "connecting") {
-                if (status.state === "reconnecting" && this.observerConnectDeadline === null) {
-                  this.armObserverConnectDeadline({ client, profileId, observerGeneration });
-                }
-                this.setSession("connected", `observer:${status.state}`);
-              } else if (status.state === "catching_up") {
-                this.clearObserverConnectDeadline();
-                this.rememberObserverCursor(profileId, status.resumeCursor);
-                this.setSession("connected", `observer:${status.state}`);
-              }
-              void this.publishStatus();
-            },
-            onEvent: (message) => {
-              if (!isCurrentObserver()) return;
-              this.rememberObserverCursor(profileId, message.cursor);
-              this.publishObserverSignal({
-                type: "human.observer.event",
-                profileId,
-                projectId: profile.projectId,
-                event: message
-              });
-            },
-            onCatchupRequired: (message) => {
-              if (!isCurrentObserver()) return;
-              this.rememberObserverCursor(profileId, message.resumeCursor);
-              this.publishObserverSignal({
-                type: "human.observer.catchup_required",
-                profileId,
-                projectId: profile.projectId,
-                reason: message.reason,
-                resumeCursor: message.resumeCursor,
-                droppedThroughCursor: message.droppedThroughCursor
-              });
-            }
-          },
-          { cursor: resumeCursor }
-        );
-      } catch (error) {
-        const mapped = collaborationErrorFromUnknown(error);
-        await this.disposeClient("connect_failed");
-        if (!preflightComplete && mapped.kind === "auth") {
-          await this.vault.clear(profileId);
-        }
-        this.setSession(
-          "error",
-          preflightComplete ? "connect_failed" : "connect_preflight_failed",
-          {
-            code: mapped.code,
-            message: mapped.message
-          }
-        );
-        await this.publishStatus();
-        throw mapped;
-      }
-      return this.publishStatus();
-    });
+    return this.sessionLifecycle.connect(input);
   }
 
   async disconnectSession(): Promise<CollaborationStatus> {
-    return this.enqueue(async () => {
-      this.assertOpen();
-      await this.disposeClient("disconnect");
-      this.setSession("idle", null, null);
-      return this.publishStatus();
-    });
+    return this.sessionLifecycle.disconnect();
   }
-
   async redeemSetupCode(input: unknown): Promise<CollaborationStatus> {
     return this.enqueue(async () => {
       this.assertOpen();
@@ -1178,9 +818,7 @@ export class CollaborationService {
   // ---------------------------------------------------------------------------
 
   async listMembers(input: unknown = {}): Promise<HumanMemberPage> {
-    return this.withActiveClient((client) =>
-      client.listMembers(humanPageQuerySchema.parse(input ?? {}))
-    );
+    return this.identityOperations.listMembers(input);
   }
 
   registry(): CollaborationRegistryService {
@@ -1188,81 +826,43 @@ export class CollaborationService {
   }
 
   async listDevices(input: unknown = {}): Promise<HumanDevicePage> {
-    return this.withActiveClient((client) =>
-      client.listDevices(humanDeviceListQuerySchema.parse(input ?? {}))
-    );
+    return this.identityOperations.listDevices(input);
   }
 
   async listInvitations(input: unknown = {}): Promise<HumanInvitationPage> {
-    return this.withActiveClient((client) =>
-      client.listInvitations(humanInvitationListQuerySchema.parse(input ?? {}))
-    );
+    return this.identityOperations.listInvitations(input);
   }
 
   async createInvitation(input: unknown = {}): Promise<CollaborationInvitationCreateView> {
-    const parsed = collaborationCreateInvitationInputSchema.parse(input ?? {});
-    const profileId = this.clientProfileId;
-    if (!profileId) {
-      return this.withActiveClient((client) => client.createInvitation(parsed));
-    }
-    const invitation = await this.withActiveClient((client) => client.createInvitation(parsed));
-    await this.invitationVault.set(profileId, invitation);
-    return invitation;
+    return this.identityOperations.createInvitation(input);
   }
 
   async getInvitationSecret(input: unknown): Promise<CollaborationInvitationCreateView> {
-    const { invitationId } = collaborationInvitationIdInputSchema.parse(input);
-    const profileId = this.clientProfileId;
-    if (!profileId) {
-      throw new Error("No active collaboration profile.");
-    }
-    const invitation = await this.invitationVault.get(profileId, invitationId);
-    if (!invitation) {
-      throw new Error(
-        "Complete invitation is unavailable. Create a new invitation to store it securely."
-      );
-    }
-    return invitation;
+    return this.identityOperations.getInvitationSecret(input);
   }
 
   async revokeInvitation(input: unknown): Promise<HumanInvitationView> {
-    const { invitationId } = collaborationInvitationIdInputSchema.parse(input);
-    const profileId = this.clientProfileId;
-    const revoked = await this.withActiveClient((client) => client.revokeInvitation(invitationId));
-    if (profileId) await this.invitationVault.delete(profileId, invitationId);
-    return revoked;
+    return this.identityOperations.revokeInvitation(input);
   }
 
   async revokeInvitations(input: unknown) {
-    const parsed = collaborationInvitationIdsInputSchema.parse(input);
-    const profileId = this.clientProfileId;
-    const revoked = await this.withActiveClient((client) => client.revokeInvitations(parsed));
-    if (profileId) {
-      await Promise.all(
-        parsed.invitationIds.map((id) => this.invitationVault.delete(profileId, id))
-      );
-    }
-    return revoked;
+    return this.identityOperations.revokeInvitations(input);
   }
 
   async removeMember(input: unknown): Promise<void> {
-    const { humanPrincipalId } = collaborationHumanPrincipalIdInputSchema.parse(input);
-    return this.withActiveClient((client) => client.removeMember(humanPrincipalId));
+    return this.identityOperations.removeMember(input);
   }
 
   async promoteOwner(input: unknown): Promise<void> {
-    const { humanPrincipalId } = collaborationHumanPrincipalIdInputSchema.parse(input);
-    return this.withActiveClient((client) => client.promoteOwner(humanPrincipalId));
+    return this.identityOperations.promoteOwner(input);
   }
 
   async demoteOwner(input: unknown): Promise<void> {
-    const { humanPrincipalId } = collaborationHumanPrincipalIdInputSchema.parse(input);
-    return this.withActiveClient((client) => client.demoteOwner(humanPrincipalId));
+    return this.identityOperations.demoteOwner(input);
   }
 
   async revokeDevice(input: unknown): Promise<void> {
-    const { deviceCredentialId } = collaborationDeviceCredentialIdInputSchema.parse(input);
-    return this.withActiveClient((client) => client.revokeDevice(deviceCredentialId));
+    return this.identityOperations.revokeDevice(input);
   }
 
   async listAssignments(input: unknown = {}): Promise<AssignmentListPage> {
@@ -1327,6 +927,10 @@ export class CollaborationService {
 
   async dispatchRemoteOperation(input: unknown): Promise<RemoteOperationObservation> {
     return this.remoteOperations.dispatch(input);
+  }
+
+  async listAgentEndpoints() {
+    return this.remoteOperations.listAgentEndpoints();
   }
 
   async observeRemoteOperation(input: unknown): Promise<RemoteOperationObservation> {
@@ -1427,124 +1031,13 @@ export class CollaborationService {
     this.onCanvasLiveSyncSignal?.(signal);
   }
 
-  private rememberObserverCursor(profileId: string, cursor: number): void {
-    if (!Number.isFinite(cursor) || cursor < 0) return;
-    if (this.lastValidatedObserverProfileId !== profileId) {
-      this.lastValidatedObserverProfileId = profileId;
-      this.lastValidatedObserverCursor = cursor;
-      return;
-    }
-    if (cursor > this.lastValidatedObserverCursor) {
-      this.lastValidatedObserverCursor = cursor;
-    }
-  }
-
   private clearRememberedObserverCursor(profileId?: string | null): void {
-    if (profileId == null || this.lastValidatedObserverProfileId === profileId) {
-      this.lastValidatedObserverCursor = 0;
-      this.lastValidatedObserverProfileId = null;
-    }
-  }
-
-  private clearObserverConnectDeadline(): void {
-    if (this.observerConnectDeadline === null) return;
-    clearTimeout(this.observerConnectDeadline);
-    this.observerConnectDeadline = null;
-  }
-
-  private armObserverConnectDeadline(input: {
-    client: CollaborationClient;
-    profileId: string;
-    observerGeneration: number;
-  }): void {
-    this.clearObserverConnectDeadline();
-    const deadline = setTimeout(() => {
-      this.observerConnectDeadline = null;
-      void this.enqueue(async () => {
-        const isCurrentObserver =
-          this.client === input.client &&
-          this.clientProfileId === input.profileId &&
-          this.observerGeneration === input.observerGeneration;
-        if (
-          !isCurrentObserver ||
-          (this.observerStatus.state !== "connecting" &&
-            this.observerStatus.state !== "reconnecting")
-        ) {
-          return;
-        }
-
-        input.client.stopObserver();
-        this.observerStatus = { state: "stopped" };
-        this.setSession("connected", "observer:connect_timeout", {
-          code: "collaboration_observer_connect_timeout",
-          message:
-            "Authenticated HTTP access is available, but realtime WebSocket updates did not connect before the deadline."
-        });
-        await this.publishStatus();
-      });
-    }, COLLABORATION_REQUEST_TIMEOUT_MS);
-    deadline.unref?.();
-    this.observerConnectDeadline = deadline;
+    this.sessionLifecycle.clearRememberedObserverCursor(profileId);
   }
 
   private async disposeClient(reason: string): Promise<void> {
-    this.clearObserverConnectDeadline();
-    const client = this.client;
-    const profileId = this.clientProfileId;
-    this.observerGeneration += 1;
-    this.presenceSession.reset();
-    this.canvasLiveSyncSession.reset();
-    try {
-      await this.canvasCommands.flushMaterialization();
-    } catch (error) {
-      const mapped = collaborationErrorFromUnknown(error);
-      this.setSession("error", "canvas_replica_persistence_failed", {
-        code: mapped.code,
-        message: mapped.message
-      });
-    }
-    // Bump replica generations so late baseline/submit responses cannot overwrite the next session.
-    this.canvasCommands.clearAllSessions();
-    // Preserve validated cursor across dispose so the next connectSession can resume.
-    if (client && profileId) {
-      try {
-        this.rememberObserverCursor(profileId, client.lastObserverCursor());
-      } catch {
-        // ignore cursor capture races during dispose
-      }
-    }
-    this.client = null;
-    this.clientProfileId = null;
-    this.observerStatus = { state: "stopped" };
-    this.setSession("idle", reason, null);
-    if (client) {
-      try {
-        client.stopPresence();
-      } catch {
-        // ignore stop errors during dispose
-      }
-      try {
-        client.stopLiveSync();
-      } catch {
-        // ignore stop errors during dispose
-      }
-      try {
-        client.stopObserver();
-      } catch {
-        // ignore stop errors during dispose
-      }
-      try {
-        client.dispose();
-      } catch {
-        // ignore dispose errors
-      }
-    }
-    // Drop resume continuity only when the device/profile identity is torn down.
-    if (reason === "logout" || reason === "profile_removed" || reason === "shutdown") {
-      this.clearRememberedObserverCursor(profileId);
-    }
+    return this.sessionLifecycle.dispose(reason);
   }
-
   /** Abort live clients and clear process memory on app shutdown. Durable ciphertext is kept. */
   async shutdown(): Promise<void> {
     await this.enqueue(async () => {

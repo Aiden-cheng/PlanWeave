@@ -33,7 +33,7 @@ function connectedStatus(): CollaborationStatus {
         deviceCredentialPersistence: "persisted",
         deviceCredentialId: "device-1",
         humanPrincipalId: "human-1",
-        updatedAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:00:00.000Z"
       }
     ],
     activeProfileId: "profile-1",
@@ -47,16 +47,16 @@ function connectedStatus(): CollaborationStatus {
       lastErrorMessage: null
     },
     updatedAt: "2030-01-01T00:00:00.000Z",
-  workspaceConnection: {
-    schemaVersion: "workspace-setup/v1",
-    status: "local_only",
-    profile: null,
-    workspaceId: null,
-    workspaceDisplayName: null,
-    connectedAt: null,
-    error: null
-  },
-  workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
+    workspaceConnection: {
+      schemaVersion: "workspace-setup/v1",
+      status: "local_only",
+      profile: null,
+      workspaceId: null,
+      workspaceDisplayName: null,
+      connectedAt: null,
+      error: null
+    },
+    workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
   };
 }
 
@@ -104,9 +104,19 @@ function createApi() {
         executionAttemptId: "attempt-1",
         dispatchId: "dispatch-1",
         status: "running",
-        hostId: "host-1",
         leaseId: "lease-1",
         stateVersion: 1
+      },
+      agentEndpoint: {
+        schemaVersion: "agent-endpoint/v1",
+        endpointId: "endpoint-vps",
+        profileId: "codex-acp",
+        agentId: "codex",
+        displayName: "Codex",
+        hostDisplayName: "Build Mac",
+        capabilities: ["acp.codex"],
+        status: "available",
+        resolvedAt: "2030-01-01T00:00:00.000Z"
       },
       runtime: { ref: "T-1#B-1", status: "in_progress" }
     }),
@@ -138,7 +148,7 @@ afterEach(() => {
 });
 
 describe("RemoteRunPanel", () => {
-  it("renders remote identity and events without using local Auto Run labels as authority", async () => {
+  it("renders remote identity, events, and the unified Agent Endpoint guidance", async () => {
     const api = createApi();
     const bridge = api as unknown as CollaborationReadBridgePort;
     apis.push(bridge);
@@ -176,8 +186,10 @@ describe("RemoteRunPanel", () => {
     });
     expect(screen.getByTestId("remote-run-events")).toBeInTheDocument();
     expect(screen.getByText(/remote hello/)).toBeInTheDocument();
+    expect(screen.getByText("Codex — Build Mac")).toBeInTheDocument();
+    expect(screen.queryByText("host-1")).not.toBeInTheDocument();
     expect(screen.getByTestId("remote-run-notice")).toHaveTextContent(
-      /Separate from local Auto Run/i
+      /compatible remote Agent Endpoint/i
     );
   });
 

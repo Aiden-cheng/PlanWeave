@@ -16,6 +16,7 @@ import { z } from "zod";
 import { collaborationRevisionSchema, responsibilitySchemaVersion } from "./responsibility.js";
 import { executionTargetSchemaVersion } from "./executionTarget.js";
 import { timestampSchema, workItemRefSchema } from "./primitives.js";
+import { availableRemoteAgentEndpointSchema } from "./agentEndpoint.js";
 
 /**
  * Human-facing remote ACP run observation / control wire contracts.
@@ -128,11 +129,29 @@ export const remoteOperationObservationSchema = z
     terminalAt: timestampSchema.optional(),
     attempt: remoteAttemptViewSchema,
     dispatchStatus: remoteDispatchStatusSchema.optional(),
+    agentEndpoint: availableRemoteAgentEndpointSchema
+      .extend({ resolvedAt: timestampSchema })
+      .strict()
+      .optional(),
     /** Runtime authority projection — never merged into Server lifecycle as truth. */
     runtime: remoteRuntimeBindingProjectionSchema
   })
-  .strict();
+  .strict()
+  .superRefine((observation, context) => {
+    if (observation.agentEndpoint && observation.attempt.hostId !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["attempt", "hostId"],
+        message: "endpoint_observation_must_redact_host_id"
+      });
+    }
+  });
 export type RemoteOperationObservation = z.infer<typeof remoteOperationObservationSchema>;
+
+export const remoteEndpointOperationObservationSchema = remoteOperationObservationSchema.refine(
+  (observation) => observation.agentEndpoint !== undefined,
+  { message: "endpoint_observation_required", path: ["agentEndpoint"] }
+);
 
 export const remoteDispatchWireCommandSchema = z
   .object({
@@ -171,6 +190,29 @@ export type RemoteDispatchIntent = z.infer<typeof remoteDispatchIntentSchema>;
 export const remoteDispatchWireCommandV2Schema = remoteDispatchIntentSchema;
 export const remoteBlockDispatchIntentSchema = remoteDispatchIntentSchema;
 export type RemoteDispatchWireCommandV2 = RemoteDispatchIntent;
+
+/** Strict v3 intent: one opaque Agent Endpoint, never a caller-selected Host. */
+export const remoteDispatchIntentV3Schema = z
+  .object({
+    schemaVersion: z.literal("remote-run/v3"),
+    projectId: opaqueIdentifierSchema,
+    canvasId: opaqueIdentifierSchema,
+    blockRef: blockRefSchema,
+    agentEndpointId: opaqueIdentifierSchema,
+    idempotencyKey: z.string().trim().min(1).max(256),
+    expectedResponsibilityRevision: collaborationRevisionSchema,
+    expectedReviewerRevision: collaborationRevisionSchema
+  })
+  .strict();
+export type RemoteDispatchIntentV3 = z.infer<typeof remoteDispatchIntentV3Schema>;
+export const remoteDispatchWireCommandV3Schema = remoteDispatchIntentV3Schema;
+
+/** Explicit version branch; v3 is not modeled as optional v2 authority fields. */
+export const remoteDispatchVersionedIntentSchema = z.discriminatedUnion("schemaVersion", [
+  remoteDispatchIntentSchema,
+  remoteDispatchIntentV3Schema
+]);
+export type RemoteDispatchVersionedIntent = z.infer<typeof remoteDispatchVersionedIntentSchema>;
 
 /** Version markers carried by the three independent assignment authorities. */
 export const remoteDispatchAuthorityVersionsSchema = z

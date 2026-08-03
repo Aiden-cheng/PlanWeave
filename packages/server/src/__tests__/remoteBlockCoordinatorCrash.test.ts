@@ -22,6 +22,7 @@ import type {
 import { RemoteRuntimePortRegistry } from "../remoteRuntimeLocator.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
+import { ProjectAccessRepository } from "../projectAccessRepository.js";
 import { WorkAssignmentRepository } from "../work/repository.js";
 
 type Coordination = ReturnType<typeof createRemoteBlockCoordination>;
@@ -283,6 +284,58 @@ async function prepareInterruptedAction(harness: CoordinatorHarness, resumable: 
   return { hostId, outcome, dispatch };
 }
 
+async function prepareInterruptedV3Action(harness: CoordinatorHarness) {
+  const hostId = harness.registerHost();
+  const coordination = harness.requireCoordination();
+  const access = new ProjectAccessRepository(harness.requireServer().database);
+  access.registerProjectInternal({
+    workspaceId: harness.locator.workspaceId,
+    projectId: harness.locator.projectId,
+    projectRoot: harness.workspace.root
+  });
+  access.registerCanvasInternal({
+    workspaceId: harness.locator.workspaceId,
+    projectId: harness.locator.projectId,
+    canvasId: harness.locator.canvasId,
+    packageDir: harness.workspace.init.workspace.packageDir
+  });
+  const endpoint = coordination.agentEndpoints.listVisible(harness.locator.workspaceId).items[0];
+  if (!endpoint) throw new Error("expected_test_endpoint");
+  const outcome = await coordination.coordinator.dispatch({
+    ...harness.request("T-001#B-001", "v3-action-crash"),
+    agentEndpointId: endpoint.endpointId,
+    expectedResponsibilityRevision: 0,
+    expectedReviewerRevision: 0
+  });
+  const dispatch = coordination.dispatches.getRequired(outcome.operation.dispatchId);
+  coordination.dispatches.accept(
+    hostId,
+    "v3-action-crash-accepted",
+    dispatch.id,
+    dispatch.leaseId,
+    dispatch.executionAttemptId
+  );
+  coordination.dispatches.interrupt(hostId, "v3-action-crash-interrupted", {
+    type: "dispatch.interrupted",
+    protocolVersion: 1,
+    messageId: "v3-action-crash-interrupted",
+    dispatchId: dispatch.id,
+    leaseId: dispatch.leaseId,
+    executionAttemptId: dispatch.executionAttemptId,
+    reason: "acp_session_lost",
+    resumable: false
+  });
+  const lease = coordination.reservations.getRequired(dispatch.leaseId);
+  coordination.reservations.release({
+    leaseId: lease.leaseId,
+    fencingToken: lease.fencingToken,
+    expectedVersion: lease.version,
+    reason: "expired"
+  });
+  await coordination.coordinator.reenter(outcome.operation.id);
+  return { hostId, outcome, dispatch, endpoint };
+}
+
 describe("RemoteBlockCoordinator crash reconciliation", () => {
   it.each([
     "block",
@@ -431,6 +484,62 @@ describe("RemoteBlockCoordinator crash reconciliation", () => {
     });
     expect(count(harness.requireServer().database, "dispatches")).toBe(2);
     expect(count(harness.requireServer().database, "mailbox_messages")).toBe(2);
+  });
+
+  it("fails v3 retry crash recovery when the durable Endpoint identity changes", async () => {
+    const harness = await CoordinatorHarness.create();
+    const prepared = await prepareInterruptedV3Action(harness);
+    let coordination = await harness.restart(new CrashOnce("after_action_side_effect"));
+    const interrupted = coordination.operations.getRequired(prepared.outcome.operation.id);
+    const request = {
+      actionId: "v3-retry-action-crash",
+      operationId: interrupted.id,
+      dispatchId: interrupted.dispatchId,
+      executionAttemptId: interrupted.executionAttemptId,
+      expectedAttemptVersion: interrupted.attempt.stateVersion,
+      kind: "retry_new_attempt",
+      priorLeaseId: prepared.dispatch.leaseId,
+      newDispatchId: "dispatch-v3-retry-crash-2",
+      newExecutionAttemptId: "attempt-v3-retry-crash-2",
+      reason: "retry v3 before recovery identity drift"
+    } as const;
+    await expect(coordination.coordinator.executeAction(request)).rejects.toThrowError(
+      "injected_crash:after_action_side_effect"
+    );
+    const mutated = coordination.operations.getRequired(interrupted.id);
+    expect(mutated.endpointSelection).toEqual(interrupted.endpointSelection);
+
+    coordination.hosts.reportOnline(prepared.hostId, ["acp.codex"], 1, {
+      workspaceMappings: [{ workspaceId: harness.locator.workspaceId, status: "ready" }],
+      acpProfiles: [
+        {
+          profileId: "replacement-profile",
+          agentId: "replacement-agent",
+          displayName: "Replacement",
+          status: "ready",
+          capabilities: ["acp.codex"]
+        }
+      ]
+    });
+    coordination = await harness.restart();
+    await expect(
+      coordination.reconcile({
+        serverInstanceOwnerToken: harness.requireServer().serverInstanceOwnerToken
+      })
+    ).rejects.toThrow(/agent_endpoint_(unknown|incompatible)/);
+    expect(coordination.operations.getRequired(interrupted.id)).toMatchObject({
+      dispatchId: request.newDispatchId,
+      executionAttemptId: request.newExecutionAttemptId,
+      endpointSelection: interrupted.endpointSelection
+    });
+    expect(
+      harness
+        .requireServer()
+        .database.prepare(
+          "SELECT COUNT(*) AS count FROM remote_execution_attempts WHERE operation_id=?"
+        )
+        .get(interrupted.id)
+    ).toEqual({ count: 2 });
   });
 
   it("rejects completion without durable terminal evidence", async () => {

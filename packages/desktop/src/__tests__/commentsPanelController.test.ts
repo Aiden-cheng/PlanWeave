@@ -13,6 +13,7 @@ import { useCommentsPanelController } from "../renderer/hooks/useCommentsPanelCo
 import { useActivityPanelController } from "../renderer/hooks/useActivityPanelController";
 import { createTranslator } from "../renderer/i18n";
 import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../shared/collaboration";
+import { workItemKey } from "../shared/collaborationReadModels";
 
 const taskItem: WorkItemRef = { kind: "task", canvasId: "canvas-1", taskId: "T-1" };
 
@@ -343,7 +344,7 @@ describe("useCommentsPanelController", () => {
     });
 
     await waitFor(() => {
-      expect(shell.controller.getSnapshot().commentsByWorkItem["task:canvas-1:T-1"]).toEqual([
+      expect(shell.controller.getSnapshot().commentsByWorkItem[workItemKey(taskItem)]).toEqual([
         removedComment
       ]);
       expect(result.current.rows).toEqual([]);

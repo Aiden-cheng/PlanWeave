@@ -22,10 +22,14 @@ export interface AgentEndpointCapacityPort {
 }
 
 export type ResolvedAgentEndpoint = {
+  endpointId: string;
   hostId: string;
   profileId: string;
   agentId: string;
+  displayName: string;
+  hostDisplayName: string;
   capabilities: string[];
+  resolvedAt: string;
 };
 
 type CatalogErrorCode = Extract<
@@ -156,11 +160,53 @@ export class AgentEndpointCatalog {
     ) {
       throw new AgentEndpointCatalogError("agent_endpoint_incompatible");
     }
+    return this.toResolved(candidate);
+  }
+
+  resolveForReservedRun(
+    endpointIdInput: string,
+    workspaceIdInput: string,
+    requiredCapabilitiesInput: readonly string[],
+    expectedHostIdInput: string
+  ): ResolvedAgentEndpoint {
+    const endpointId = opaqueIdentifierSchema.parse(endpointIdInput);
+    const workspaceId = workspaceIdSchema.parse(workspaceIdInput);
+    const expectedHostId = opaqueIdentifierSchema.parse(expectedHostIdInput);
+    const requiredCapabilities = agentEndpointCapabilitiesSchema.parse(requiredCapabilitiesInput);
+    const candidate = this.currentCandidates(workspaceId).find(
+      (current) => current.endpoint.endpointId === endpointId
+    );
+    if (!candidate || candidate.host.id !== expectedHostId) {
+      throw new AgentEndpointCatalogError("agent_endpoint_unknown");
+    }
+    if (
+      candidate.endpoint.status !== "available" &&
+      candidate.endpoint.unavailableReason !== "at_capacity"
+    ) {
+      throw new AgentEndpointCatalogError("agent_endpoint_unavailable");
+    }
+    if (
+      !requiredCapabilities.every(
+        (capability) =>
+          candidate.host.capabilities.includes(capability) &&
+          candidate.profile.capabilities.includes(capability)
+      )
+    ) {
+      throw new AgentEndpointCatalogError("agent_endpoint_incompatible");
+    }
+    return this.toResolved(candidate);
+  }
+
+  private toResolved(candidate: InternalCandidate): ResolvedAgentEndpoint {
     return {
+      endpointId: candidate.endpoint.endpointId,
       hostId: candidate.host.id,
       profileId: candidate.profile.profileId,
       agentId: candidate.profile.agentId,
-      capabilities: [...candidate.profile.capabilities]
+      displayName: candidate.profile.displayName,
+      hostDisplayName: candidate.host.displayName,
+      capabilities: [...candidate.profile.capabilities],
+      resolvedAt: this.clock().toISOString()
     };
   }
 

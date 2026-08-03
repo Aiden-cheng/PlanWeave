@@ -455,6 +455,8 @@ const collaborationApi: PlanWeaveCollaborationApi = {
     ipcRenderer.invoke(collaborationInvokeChannels.finalizeCollaborationPendingAttachment, input),
   readCollaborationCommentAttachment: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.readCollaborationCommentAttachment, input),
+  listCollaborationAgentEndpoints: async () =>
+    ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationAgentEndpoints),
   dispatchCollaborationRemoteOperation: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.dispatchCollaborationRemoteOperation, input),
   observeCollaborationRemoteOperation: async (input) =>

@@ -322,24 +322,36 @@ export type {
   RemoteOperationObservation
 };
 
-/** Stable identity key for Task/Block work items across server + local runtime. */
+const encodedWorkItemKeySchema = z.union([
+  z.tuple([z.literal("task"), z.string(), z.string()]),
+  z.tuple([z.literal("block"), z.string(), z.string()])
+]);
+
+/** Lossless renderer identity key for Task/Block work items. */
 export function workItemKey(workItem: WorkItemRef): string {
   if (workItem.kind === "task") {
-    return `task:${workItem.canvasId}:${workItem.taskId}`;
+    return JSON.stringify([workItem.kind, workItem.canvasId, workItem.taskId]);
   }
-  return `block:${workItem.canvasId}:${workItem.blockRef}`;
+  return JSON.stringify([workItem.kind, workItem.canvasId, workItem.blockRef]);
 }
 
 export function parseWorkItemKey(key: string): WorkItemRef | null {
-  const taskMatch = /^task:([^:]+):(.+)$/.exec(key);
-  if (taskMatch) {
-    return { kind: "task", canvasId: taskMatch[1]!, taskId: taskMatch[2]! };
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(key);
+  } catch {
+    return null;
   }
-  const blockMatch = /^block:([^:]+):(.+)$/.exec(key);
-  if (blockMatch) {
-    return { kind: "block", canvasId: blockMatch[1]!, blockRef: blockMatch[2]! };
+  const encoded = encodedWorkItemKeySchema.safeParse(decoded);
+  if (!encoded.success) return null;
+  const [kind, canvasId, ref] = encoded.data;
+  const parsed = workItemRefSchema.safeParse(
+    kind === "task" ? { kind, canvasId, taskId: ref } : { kind, canvasId, blockRef: ref }
+  );
+  if (!parsed.success) {
+    return null;
   }
-  return null;
+  return parsed.data;
 }
 
 export type CollaborationReadModelSnapshot = {

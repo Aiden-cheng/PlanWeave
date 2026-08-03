@@ -110,8 +110,91 @@ async function setup(withHost: boolean) {
     coordinator: coordination.coordinator,
     dispatches: coordination.dispatches,
     reservations: coordination.reservations,
+    agentEndpoints: coordination.agentEndpoints,
     artifactAuthorization: coordination.artifactAuthorization
   };
+}
+
+async function setupInterruptedV3EndpointOperation(idempotencyKey: string) {
+  const fixture = await setup(true);
+  if (!fixture.host) throw new Error("expected_test_host");
+  const access = new ProjectAccessRepository(fixture.server.database);
+  access.registerProjectInternal({
+    workspaceId: fixture.locator.workspaceId,
+    projectId: fixture.locator.projectId,
+    projectRoot: fixture.workspace.root
+  });
+  access.registerCanvasInternal({
+    workspaceId: fixture.locator.workspaceId,
+    projectId: fixture.locator.projectId,
+    canvasId: fixture.locator.canvasId,
+    packageDir: fixture.workspace.init.workspace.packageDir
+  });
+  const endpoint = fixture.agentEndpoints.listVisible(fixture.locator.workspaceId).items[0];
+  if (!endpoint) throw new Error("expected_test_endpoint");
+  const dispatched = await fixture.coordinator.dispatch({
+    ...fixture.locator,
+    blockRef: "T-001#B-001",
+    idempotencyKey,
+    agentEndpointId: endpoint.endpointId,
+    expectedResponsibilityRevision: 0,
+    expectedReviewerRevision: 0
+  });
+  const dispatch = fixture.dispatches.getRequired(dispatched.operation.dispatchId);
+  fixture.dispatches.accept(
+    fixture.host.id,
+    `${idempotencyKey}-accepted`,
+    dispatch.id,
+    dispatch.leaseId,
+    dispatch.executionAttemptId
+  );
+  fixture.dispatches.interrupt(fixture.host.id, `${idempotencyKey}-interrupted`, {
+    type: "dispatch.interrupted",
+    protocolVersion: 1,
+    messageId: `${idempotencyKey}-interrupted`,
+    dispatchId: dispatch.id,
+    leaseId: dispatch.leaseId,
+    executionAttemptId: dispatch.executionAttemptId,
+    reason: "acp_session_lost",
+    resumable: false
+  });
+  const lease = fixture.reservations.getRequired(dispatch.leaseId);
+  fixture.reservations.release({
+    leaseId: lease.leaseId,
+    fencingToken: lease.fencingToken,
+    expectedVersion: lease.version,
+    reason: "expired"
+  });
+  await fixture.coordinator.reenter(dispatched.operation.id);
+  return { fixture, operation: fixture.operations.getRequired(dispatched.operation.id), endpoint };
+}
+
+async function setupActiveV3EndpointOperation(idempotencyKey: string) {
+  const fixture = await setup(true);
+  if (!fixture.host) throw new Error("expected_test_host");
+  const access = new ProjectAccessRepository(fixture.server.database);
+  access.registerProjectInternal({
+    workspaceId: fixture.locator.workspaceId,
+    projectId: fixture.locator.projectId,
+    projectRoot: fixture.workspace.root
+  });
+  access.registerCanvasInternal({
+    workspaceId: fixture.locator.workspaceId,
+    projectId: fixture.locator.projectId,
+    canvasId: fixture.locator.canvasId,
+    packageDir: fixture.workspace.init.workspace.packageDir
+  });
+  const endpoint = fixture.agentEndpoints.listVisible(fixture.locator.workspaceId).items[0];
+  if (!endpoint) throw new Error("expected_test_endpoint");
+  const outcome = await fixture.coordinator.dispatch({
+    ...fixture.locator,
+    blockRef: "T-001#B-001",
+    idempotencyKey,
+    agentEndpointId: endpoint.endpointId,
+    expectedResponsibilityRevision: 0,
+    expectedReviewerRevision: 0
+  });
+  return { fixture, operation: outcome.operation };
 }
 
 describe("RemoteBlockCoordinator", () => {
@@ -544,6 +627,100 @@ describe("RemoteBlockCoordinator", () => {
         count: number;
       }
     ).toEqual({ count: 0 });
+  });
+
+  it.each([
+    "revoked",
+    "offline",
+    "profile_identity_changed"
+  ] as const)("rejects v3 retry before attempt mutation when the durable Endpoint is %s", async (failure) => {
+    const { fixture, operation } = await setupInterruptedV3EndpointOperation(
+      `v3-retry-freshness-${failure}`
+    );
+    if (!fixture.host) throw new Error("expected_test_host");
+    if (failure === "revoked") {
+      fixture.hosts.revoke(fixture.host.id);
+    } else if (failure === "offline") {
+      fixture.server.database
+        .prepare("UPDATE agent_hosts SET last_seen_at=? WHERE id=?")
+        .run("2000-01-01T00:00:00.000Z", fixture.host.id);
+    } else {
+      fixture.hosts.reportOnline(fixture.host.id, ["acp.codex"], 1, {
+        workspaceMappings: [{ workspaceId: fixture.locator.workspaceId, status: "ready" }],
+        acpProfiles: [
+          {
+            profileId: "other-profile",
+            agentId: "other-agent",
+            displayName: "Other Agent",
+            status: "ready",
+            capabilities: ["acp.codex"]
+          }
+        ]
+      });
+    }
+
+    await expect(
+      fixture.coordinator.executeAction({
+        actionId: `v3-retry-${failure}`,
+        operationId: operation.id,
+        dispatchId: operation.dispatchId,
+        executionAttemptId: operation.executionAttemptId,
+        expectedAttemptVersion: operation.attempt.stateVersion,
+        kind: "retry_new_attempt",
+        priorLeaseId: operation.attempt.leaseId,
+        newDispatchId: `dispatch-v3-retry-${failure}`,
+        newExecutionAttemptId: `attempt-v3-retry-${failure}`,
+        reason: "fresh Endpoint authorization must precede retry mutation"
+      })
+    ).rejects.toThrow(/agent_endpoint_(unavailable|unknown|incompatible)/);
+
+    expect(fixture.operations.getRequired(operation.id)).toMatchObject({
+      dispatchId: operation.dispatchId,
+      executionAttemptId: operation.executionAttemptId,
+      attempt: { stateVersion: operation.attempt.stateVersion }
+    });
+    expect(
+      fixture.server.database
+        .prepare("SELECT COUNT(*) AS count FROM remote_execution_attempts WHERE operation_id=?")
+        .get(operation.id)
+    ).toEqual({ count: 1 });
+  });
+
+  it("retries a v3 operation on the exact durable Endpoint", async () => {
+    const { fixture, operation, endpoint } =
+      await setupInterruptedV3EndpointOperation("v3-retry-same-endpoint");
+    await fixture.coordinator.executeAction({
+      actionId: "v3-retry-same-endpoint-action",
+      operationId: operation.id,
+      dispatchId: operation.dispatchId,
+      executionAttemptId: operation.executionAttemptId,
+      expectedAttemptVersion: operation.attempt.stateVersion,
+      kind: "retry_new_attempt",
+      priorLeaseId: operation.attempt.leaseId,
+      newDispatchId: "dispatch-v3-retry-same-endpoint",
+      newExecutionAttemptId: "attempt-v3-retry-same-endpoint",
+      reason: "retry exact durable Endpoint"
+    });
+    const retried = fixture.operations.getRequired(operation.id);
+    expect(retried.endpointSelection).toEqual(operation.endpointSelection);
+    expect(retried.endpointSelection?.endpointId).toBe(endpoint.endpointId);
+    expect(retried.attempt.hostId).toBe(operation.endpointSelection?.hostId);
+  });
+
+  it("rejects v3 reentry on a stale Endpoint without changing the durable attempt", async () => {
+    const { fixture, operation } = await setupActiveV3EndpointOperation(
+      "v3-reentry-stale-endpoint"
+    );
+    if (!fixture.host) throw new Error("expected_test_host");
+    fixture.hosts.revoke(fixture.host.id);
+    await expect(fixture.coordinator.reenter(operation.id)).rejects.toThrow(
+      "agent_endpoint_unavailable"
+    );
+    expect(fixture.operations.getRequired(operation.id)).toMatchObject({
+      dispatchId: operation.dispatchId,
+      executionAttemptId: operation.executionAttemptId,
+      endpointSelection: operation.endpointSelection
+    });
   });
 
   it("fails closed on source drift and on a missing restart locator", async () => {

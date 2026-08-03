@@ -27,6 +27,7 @@ import {
   type CommentTombstoneWireCommand
 } from "@planweave-ai/collaboration-protocol/activity/comments";
 import { COMMENT_ATTACHMENT_MAX_BYTES } from "@planweave-ai/collaboration-protocol/core/limits";
+import type { HumanObserverCursor } from "@planweave-ai/collaboration-protocol/activity/observer";
 import {
   assignmentDisplayProjectionSchema,
   assignmentListPageSchema,
@@ -81,26 +82,11 @@ import {
   type HumanMemberPage
 } from "@planweave-ai/collaboration-protocol/identity/workspace";
 import {
-  humanObserverHelloSchema,
-  parseHumanObserverServerMessage,
-  type HumanObserverCursor,
-  type HumanObserverServerMessage
-} from "@planweave-ai/collaboration-protocol/activity/observer";
-import { HUMAN_OBSERVER_PROTOCOL_VERSION } from "@planweave-ai/collaboration-protocol/core/limits";
-import {
-  remoteActionViewSchema,
-  remoteDispatchIntentSchema,
-  remoteDispatchWireCommandSchema,
   remoteEventQuerySchema,
-  remoteEventReplaySchema,
-  remoteHumanExecutionActionCommandSchema,
   remoteInteractionPageQuerySchema,
-  remoteInteractionPageSchema,
-  remoteInteractionResponseSchema,
-  remoteInteractionViewSchema,
-  remoteOperationObservationSchema,
   type RemoteActionView,
   type RemoteDispatchIntent,
+  type RemoteDispatchIntentV3,
   type RemoteDispatchWireCommand,
   type RemoteEventReplay,
   type RemoteHumanExecutionActionCommand,
@@ -109,6 +95,7 @@ import {
   type RemoteInteractionView,
   type RemoteOperationObservation
 } from "@planweave-ai/collaboration-protocol/remote-run";
+import type { RemoteAgentEndpointList } from "@planweave-ai/collaboration-protocol/agent-endpoint";
 import {
   responsibilityReadModelSchema,
   responsibilityUpdateWireCommandSchema,
@@ -161,9 +148,6 @@ import {
 } from "@planweave-ai/collaboration-protocol/connection";
 import type { z, ZodType } from "zod";
 import { CollaborationClientError, collaborationErrorFromHttp } from "./collaborationErrors.js";
-import { reconnectDelay } from "./reconnectBackoff.js";
-import { redactCollaborationText } from "./redaction.js";
-import { derivedWebSocketOrigin } from "./webSocketOrigin.js";
 import { CanvasPresenceClient } from "./CanvasPresenceClient.js";
 import {
   CanvasLiveSyncClient,
@@ -178,8 +162,7 @@ import type {
   CollaborationObserverStatus,
   CollaborationPresenceHandlers,
   CollaborationPresenceStatus,
-  CollaborationWebSocketConstructor,
-  CollaborationWebSocketLike
+  CollaborationWebSocketConstructor
 } from "./collaborationClientTypes.js";
 import { systemCollaborationClock } from "./collaborationClientTypes.js";
 import { CollaborationHttpTransport } from "./collaborationHttpTransport.js";
@@ -191,6 +174,11 @@ import {
   type CanvasCommandSubmitInput
 } from "./CanvasCommandClient.js";
 import type { CanvasCommandSessionSnapshot } from "./canvasCommandSession.js";
+import {
+  CollaborationRemoteOperationsClient,
+  type CollaborationRemoteOperationsPort
+} from "./CollaborationRemoteOperationsClient.js";
+import { HumanObserverClient } from "./HumanObserverClient.js";
 
 export type {
   CollaborationClientClock,
@@ -226,18 +214,12 @@ export class CollaborationClient {
   private readonly random: () => number;
   private disposed = false;
 
-  private observerSocket?: CollaborationWebSocketLike;
-  private observerHandlers?: CollaborationObserverHandlers;
-  private observerStatus: CollaborationObserverStatus = { state: "stopped" };
-  private observerCursor: HumanObserverCursor = 0;
-  private observerReconnectAttempt = 0;
-  private observerReconnectTimer?: unknown;
-  private observerWanted = false;
-
   private readonly presence: CanvasPresenceClient;
   private readonly liveSync: CanvasLiveSyncClient;
   private readonly registryClient: CollaborationRegistryClient;
   private readonly canvasCommands: CanvasCommandClient;
+  private readonly remoteOperationsClient: CollaborationRemoteOperationsClient;
+  private readonly observer: HumanObserverClient;
 
   constructor(private readonly options: CollaborationClientOptions) {
     if (options.profile.endpoint.tlsTrust === "configured_ca") {
@@ -279,6 +261,19 @@ export class CollaborationClient {
       })
     );
     this.canvasCommands = new CanvasCommandClient(this.transport, options.profile.projectId);
+    this.remoteOperationsClient = new CollaborationRemoteOperationsClient(
+      options.profile.projectId,
+      this.transport
+    );
+    this.observer = new HumanObserverClient({
+      profile: options.profile,
+      credential: options.credential,
+      WebSocketImpl: options.WebSocketImpl,
+      clock: this.clock,
+      random: this.random,
+      limits: this.transport.limits,
+      logger: options.logger
+    });
   }
 
   get projectId(): string {
@@ -301,12 +296,16 @@ export class CollaborationClient {
     return this.registryClient;
   }
 
+  remoteOperations(): CollaborationRemoteOperationsPort {
+    return this.remoteOperationsClient;
+  }
+
   observerState(): CollaborationObserverStatus {
-    return this.observerStatus;
+    return this.observer.state();
   }
 
   lastObserverCursor(): HumanObserverCursor {
-    return this.observerCursor;
+    return this.observer.lastCursor();
   }
 
   presenceState(): CollaborationPresenceStatus {
@@ -750,32 +749,22 @@ export class CollaborationClient {
   // Distinct from local Runtime Auto Run and Host mailbox.
   // ---------------------------------------------------------------------------
 
+  async listAgentEndpoints(signal?: AbortSignal): Promise<RemoteAgentEndpointList> {
+    return this.remoteOperationsClient.listAgentEndpoints(signal);
+  }
+
   async dispatchRemoteOperation(
-    command: RemoteDispatchIntent | RemoteDispatchWireCommand,
+    command: RemoteDispatchIntent | RemoteDispatchIntentV3 | RemoteDispatchWireCommand,
     signal?: AbortSignal
   ): Promise<RemoteOperationObservation> {
-    const body =
-      "schemaVersion" in command && command.schemaVersion === "remote-run/v2"
-        ? remoteDispatchIntentSchema.parse(command)
-        : remoteDispatchWireCommandSchema.parse(command);
-    return this.json(
-      "POST",
-      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/remote-operations`,
-      remoteOperationObservationSchema,
-      { body, signal }
-    );
+    return this.remoteOperationsClient.dispatchRemoteOperation(command, signal);
   }
 
   async observeRemoteOperation(
     operationId: string,
     signal?: AbortSignal
   ): Promise<RemoteOperationObservation> {
-    return this.json(
-      "GET",
-      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/remote-operations/${encodeURIComponent(operationId)}`,
-      remoteOperationObservationSchema,
-      { signal }
-    );
+    return this.remoteOperationsClient.observeRemoteOperation(operationId, signal);
   }
 
   async executeRemoteOperationAction(
@@ -783,13 +772,7 @@ export class CollaborationClient {
     action: RemoteHumanExecutionActionCommand,
     signal?: AbortSignal
   ): Promise<RemoteActionView> {
-    const body = remoteHumanExecutionActionCommandSchema.parse(action);
-    return this.json(
-      "POST",
-      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/remote-operations/${encodeURIComponent(operationId)}/actions`,
-      remoteActionViewSchema,
-      { body, signal }
-    );
+    return this.remoteOperationsClient.executeRemoteOperationAction(operationId, action, signal);
   }
 
   async replayRemoteOperationEvents(
@@ -797,14 +780,7 @@ export class CollaborationClient {
     query: z.input<typeof remoteEventQuerySchema> = {},
     signal?: AbortSignal
   ): Promise<RemoteEventReplay> {
-    const q = remoteEventQuerySchema.parse(query);
-    const params = new URLSearchParams({ afterCursor: String(q.afterCursor) });
-    return this.json(
-      "GET",
-      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/remote-operations/${encodeURIComponent(operationId)}/events?${params}`,
-      remoteEventReplaySchema,
-      { signal }
-    );
+    return this.remoteOperationsClient.replayRemoteOperationEvents(operationId, query, signal);
   }
 
   async listRemoteOperationInteractions(
@@ -812,17 +788,7 @@ export class CollaborationClient {
     query: z.input<typeof remoteInteractionPageQuerySchema> = {},
     signal?: AbortSignal
   ): Promise<RemoteInteractionPage> {
-    const q = remoteInteractionPageQuerySchema.parse(query);
-    const params = new URLSearchParams({
-      cursor: String(q.cursor),
-      limit: String(q.limit)
-    });
-    return this.json(
-      "GET",
-      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/remote-operations/${encodeURIComponent(operationId)}/interactions?${params}`,
-      remoteInteractionPageSchema,
-      { signal }
-    );
+    return this.remoteOperationsClient.listRemoteOperationInteractions(operationId, query, signal);
   }
 
   async settleRemoteOperationInteraction(
@@ -830,12 +796,10 @@ export class CollaborationClient {
     settlement: RemoteInteractionResponse,
     signal?: AbortSignal
   ): Promise<RemoteInteractionView> {
-    const body = remoteInteractionResponseSchema.parse(settlement);
-    return this.json(
-      "POST",
-      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/remote-operations/${encodeURIComponent(operationId)}/interactions/respond`,
-      remoteInteractionViewSchema,
-      { body, signal }
+    return this.remoteOperationsClient.settleRemoteOperationInteraction(
+      operationId,
+      settlement,
+      signal
     );
   }
 
@@ -1140,33 +1104,11 @@ export class CollaborationClient {
    */
   startObserver(handlers: CollaborationObserverHandlers = {}, options?: { cursor?: number }): void {
     this.ensureOpen();
-    if (!this.options.WebSocketImpl) {
-      throw new CollaborationClientError({
-        kind: "protocol",
-        code: "collaboration_websocket_unavailable",
-        message: "WebSocket implementation was not provided to CollaborationClient."
-      });
-    }
-    this.observerHandlers = handlers;
-    this.observerWanted = true;
-    if (options?.cursor !== undefined) this.observerCursor = options.cursor;
-    this.connectObserver();
+    this.observer.start(handlers, options);
   }
 
   stopObserver(): void {
-    this.observerWanted = false;
-    if (this.observerReconnectTimer) this.clock.clearTimeout(this.observerReconnectTimer);
-    this.observerReconnectTimer = undefined;
-    const socket = this.observerSocket;
-    this.observerSocket = undefined;
-    if (socket && socket.readyState !== 3) {
-      try {
-        socket.close(1000, "observer stopped");
-      } catch {
-        // ignore close races
-      }
-    }
-    this.setObserverStatus({ state: "stopped" });
+    this.observer.stop();
   }
 
   /**
@@ -1175,7 +1117,7 @@ export class CollaborationClient {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.stopObserver();
+    this.observer.dispose();
     this.stopPresence();
     this.stopLiveSync();
     this.canvasCommands.clearSession();
@@ -1226,223 +1168,5 @@ export class CollaborationClient {
     options: { body?: unknown; auth?: boolean; signal?: AbortSignal }
   ): Promise<T | null> {
     return this.transport.jsonNullable(method, path, schema, options);
-  }
-
-  private connectObserver(): void {
-    if (!this.observerWanted || this.disposed) return;
-    const WebSocketImpl = this.options.WebSocketImpl;
-    if (!WebSocketImpl) return;
-
-    this.setObserverStatus({
-      state: "connecting",
-      attempt: this.observerReconnectAttempt + 1
-    });
-
-    void (async () => {
-      try {
-        const token = await this.options.credential.getDeviceToken();
-        if (!token) {
-          this.setObserverStatus({
-            state: "auth_expired",
-            code: "collaboration_credential_missing"
-          });
-          this.observerWanted = false;
-          return;
-        }
-        const base = new URL(this.profile.serverBaseUrl);
-        const wsUrl = new URL(base.origin);
-        wsUrl.protocol = base.protocol === "https:" ? "wss:" : "ws:";
-        wsUrl.pathname = `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/human/observe`;
-
-        const socket = new WebSocketImpl(wsUrl.toString(), {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            Origin: derivedWebSocketOrigin(this.profile.serverBaseUrl)
-          }
-        });
-        this.observerSocket = socket;
-
-        socket.on?.("unexpected-response", (_request, response) => {
-          if (this.observerSocket !== socket) return;
-          response.resume?.();
-          const statusCode = response.statusCode;
-          const code =
-            statusCode === undefined
-              ? "collaboration_observer_handshake_rejected"
-              : `collaboration_observer_http_${statusCode}`;
-          if (statusCode === 401) {
-            this.observerWanted = false;
-            this.setObserverStatus({ state: "auth_expired", code });
-            return;
-          }
-          this.setObserverStatus({ state: "failed", code });
-          this.observerSocket = undefined;
-          this.scheduleObserverReconnect();
-        });
-
-        const onOpen = () => {
-          if (this.observerSocket !== socket) return;
-          const hello = humanObserverHelloSchema.parse({
-            type: "human.observer.hello",
-            protocolVersion: HUMAN_OBSERVER_PROTOCOL_VERSION,
-            projectId: this.profile.projectId,
-            lastCursor: this.observerCursor
-          });
-          socket.send(JSON.stringify(hello));
-        };
-
-        const onMessage = (event: unknown) => {
-          if (this.observerSocket !== socket) return;
-          try {
-            const data =
-              typeof event === "object" && event !== null && "data" in event
-                ? (event as { data: unknown }).data
-                : event;
-            if (
-              typeof data !== "string" &&
-              !(data instanceof ArrayBuffer) &&
-              !ArrayBuffer.isView(data)
-            ) {
-              throw new CollaborationClientError({
-                kind: "protocol",
-                code: "collaboration_observer_payload_type",
-                message: "Observer payload must be text."
-              });
-            }
-            const text =
-              typeof data === "string"
-                ? data
-                : Buffer.from(
-                    data instanceof ArrayBuffer ? data : (data as ArrayBufferView).buffer,
-                    data instanceof ArrayBuffer ? 0 : (data as ArrayBufferView).byteOffset,
-                    data instanceof ArrayBuffer
-                      ? data.byteLength
-                      : (data as ArrayBufferView).byteLength
-                  ).toString("utf8");
-            if (Buffer.byteLength(text, "utf8") > this.limits.observerMaxPayloadBytes) {
-              throw new CollaborationClientError({
-                kind: "payload_too_large",
-                code: "collaboration_observer_payload_too_large",
-                message: "Observer payload exceeded size limit."
-              });
-            }
-            const message = parseHumanObserverServerMessage(JSON.parse(text));
-            this.handleObserverMessage(message);
-          } catch (error) {
-            this.options.logger?.error?.(
-              redactCollaborationText(
-                error instanceof Error ? error.message : "observer message failed"
-              )
-            );
-            try {
-              socket.close(4000, "protocol error");
-            } catch {
-              // ignore
-            }
-          }
-        };
-
-        const onClose = () => {
-          if (this.observerSocket !== socket) return;
-          this.observerSocket = undefined;
-          if (this.observerStatus.state === "auth_expired") return;
-          if (!this.observerWanted || this.disposed) {
-            this.setObserverStatus({ state: "stopped" });
-            return;
-          }
-          this.scheduleObserverReconnect();
-        };
-
-        const onError = () => {
-          if (this.observerSocket !== socket) return;
-          this.options.logger?.warn?.("collaboration observer socket error");
-        };
-
-        socket.addEventListener("open", onOpen);
-        socket.addEventListener("message", onMessage);
-        socket.addEventListener("close", onClose);
-        socket.addEventListener("error", onError);
-      } catch (error) {
-        this.options.logger?.error?.(
-          redactCollaborationText(
-            error instanceof Error ? error.message : "observer connect failed"
-          )
-        );
-        if (this.observerWanted && !this.disposed) this.scheduleObserverReconnect();
-      }
-    })();
-  }
-
-  private handleObserverMessage(message: HumanObserverServerMessage): void {
-    switch (message.type) {
-      case "human.observer.welcome":
-        this.observerCursor = message.cursor;
-        this.observerReconnectAttempt = 0;
-        this.setObserverStatus({
-          state: "connected",
-          cursor: message.cursor,
-          connectedAt: this.clock.now().toISOString()
-        });
-        break;
-      case "human.observer.event":
-        if (message.previousCursor !== this.observerCursor) {
-          throw new CollaborationClientError({
-            kind: "protocol",
-            code: "collaboration_observer_cursor_gap",
-            message: "Observer event did not continue from the last validated cursor."
-          });
-        }
-        this.observerCursor = message.cursor;
-        this.observerHandlers?.onEvent?.(message);
-        break;
-      case "human.observer.catchup_required":
-        this.observerCursor = message.resumeCursor;
-        this.setObserverStatus({
-          state: "catching_up",
-          resumeCursor: message.resumeCursor
-        });
-        this.observerHandlers?.onCatchupRequired?.(message);
-        break;
-      case "human.observer.auth_expired":
-        this.observerWanted = false;
-        this.setObserverStatus({ state: "auth_expired", code: message.code });
-        this.observerHandlers?.onAuthExpired?.(message);
-        try {
-          this.observerSocket?.close(4001, "auth expired");
-        } catch {
-          // ignore
-        }
-        break;
-      case "human.observer.pong":
-        break;
-      default: {
-        const _exhaustive: never = message;
-        void _exhaustive;
-      }
-    }
-  }
-
-  private scheduleObserverReconnect(): void {
-    if (!this.observerWanted || this.disposed) return;
-    this.observerReconnectAttempt += 1;
-    const delayMs = reconnectDelay(this.observerReconnectAttempt, this.random, {
-      initialDelayMs: this.limits.reconnectInitialDelayMs,
-      maxDelayMs: this.limits.reconnectMaxDelayMs
-    });
-    this.setObserverStatus({
-      state: "reconnecting",
-      attempt: this.observerReconnectAttempt,
-      delayMs
-    });
-    if (this.observerReconnectTimer) this.clock.clearTimeout(this.observerReconnectTimer);
-    this.observerReconnectTimer = this.clock.setTimeout(() => {
-      this.observerReconnectTimer = undefined;
-      this.connectObserver();
-    }, delayMs);
-  }
-
-  private setObserverStatus(status: CollaborationObserverStatus): void {
-    this.observerStatus = status;
-    this.observerHandlers?.onStatus?.(status);
   }
 }

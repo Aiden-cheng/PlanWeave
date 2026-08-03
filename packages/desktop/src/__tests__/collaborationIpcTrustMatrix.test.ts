@@ -130,7 +130,13 @@ describe("Desktop collaboration IPC trust matrix", () => {
       displayName: "Demo",
       serverBaseUrl: "https://collab.example.com/",
       projectId: "project-1",
-      allowInsecureTransport: false
+      allowInsecureTransport: false,
+      endpoint: {
+        topology: "public_https",
+        serverOrigin: "https://collab.example.com/",
+        allowedClientOrigins: ["https://collab.example.com/"],
+        tlsTrust: "system_ca"
+      }
     });
     await collab.importDeviceCredential({
       profileId: "p1",
@@ -192,7 +198,13 @@ describe("Desktop collaboration IPC trust matrix", () => {
       displayName: "Demo",
       serverBaseUrl: "https://collab.example.com/",
       projectId: "project-1",
-      allowInsecureTransport: false
+      allowInsecureTransport: false,
+      endpoint: {
+        topology: "public_https",
+        serverOrigin: "https://collab.example.com/",
+        allowedClientOrigins: ["https://collab.example.com/"],
+        tlsTrust: "system_ca"
+      }
     });
     // Adjacent hostile file must not be treated as vault input.
     await writeFile(

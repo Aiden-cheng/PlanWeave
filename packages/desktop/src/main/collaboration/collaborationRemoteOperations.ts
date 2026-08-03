@@ -1,6 +1,7 @@
 import { opaqueIdentifierSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
 import {
   remoteDispatchIntentSchema,
+  remoteDispatchIntentV3Schema,
   remoteDispatchWireCommandSchema,
   remoteEventQuerySchema,
   remoteInteractionPageQuerySchema,
@@ -10,13 +11,14 @@ import {
   type RemoteInteractionView,
   type RemoteOperationObservation
 } from "@planweave-ai/collaboration-protocol/remote-run";
+import type { RemoteAgentEndpointList } from "@planweave-ai/collaboration-protocol/agent-endpoint";
 import { z } from "zod";
 import {
   collaborationRemoteActionInputSchema,
   collaborationRemoteInteractionRespondInputSchema,
   collaborationRemoteOperationIdInputSchema
 } from "../../shared/collaborationReadModels.js";
-import type { CollaborationClient } from "./CollaborationClient.js";
+import type { CollaborationRemoteOperationsPort } from "./CollaborationRemoteOperationsClient.js";
 import { CollaborationClientError } from "./collaborationErrors.js";
 
 /**
@@ -26,18 +28,27 @@ import { CollaborationClientError } from "./collaborationErrors.js";
 export class CollaborationRemoteOperationsFacade {
   constructor(
     private readonly withActiveClient: <T>(
-      operation: (client: CollaborationClient) => Promise<T>
+      operation: (client: CollaborationRemoteOperationsPort) => Promise<T>
     ) => Promise<T>
   ) {}
+
+  async listAgentEndpoints(): Promise<RemoteAgentEndpointList> {
+    return this.withActiveClient((client) => client.listAgentEndpoints());
+  }
 
   async dispatch(input: unknown): Promise<RemoteOperationObservation> {
     const command =
       input &&
       typeof input === "object" &&
       "schemaVersion" in input &&
-      (input as { schemaVersion?: string }).schemaVersion === "remote-run/v2"
-        ? remoteDispatchIntentSchema.parse(input)
-        : remoteDispatchWireCommandSchema.parse(input);
+      (input as { schemaVersion?: string }).schemaVersion === "remote-run/v3"
+        ? remoteDispatchIntentV3Schema.parse(input)
+        : input &&
+            typeof input === "object" &&
+            "schemaVersion" in input &&
+            (input as { schemaVersion?: string }).schemaVersion === "remote-run/v2"
+          ? remoteDispatchIntentSchema.parse(input)
+          : remoteDispatchWireCommandSchema.parse(input);
     return this.withActiveClient((client) => client.dispatchRemoteOperation(command));
   }
 
@@ -89,9 +100,9 @@ export class CollaborationRemoteOperationsFacade {
 }
 
 export function requireActiveCollaborationClient(
-  client: CollaborationClient | null,
+  client: CollaborationRemoteOperationsPort | null,
   clientProfileId: string | null
-): CollaborationClient {
+): CollaborationRemoteOperationsPort {
   if (!client || !clientProfileId) {
     throw new CollaborationClientError({
       kind: "offline",

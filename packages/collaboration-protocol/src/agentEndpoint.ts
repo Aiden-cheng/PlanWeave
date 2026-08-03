@@ -29,7 +29,7 @@ const agentEndpointBaseSchema = agentProfileDescriptorSchema.extend({
   hostDisplayName: hostAcpProfileObservationSchema.shape.displayName
 });
 
-const availableAgentEndpointSchema = agentEndpointBaseSchema.extend({
+export const availableRemoteAgentEndpointSchema = agentEndpointBaseSchema.extend({
   status: z.literal("available")
 });
 
@@ -40,7 +40,7 @@ const unavailableAgentEndpointSchema = agentEndpointBaseSchema.extend({
 
 /** Strict, redacted human-visible projection of one exact Host ACP profile. */
 export const remoteAgentEndpointSchema = z.discriminatedUnion("status", [
-  availableAgentEndpointSchema,
+  availableRemoteAgentEndpointSchema,
   unavailableAgentEndpointSchema
 ]);
 

@@ -133,7 +133,13 @@ describe("CollaborationClient", () => {
         displayName: "Test",
         serverBaseUrl: origin,
         projectId: "project-demo-001",
-        allowInsecureTransport: true
+        allowInsecureTransport: true,
+        endpoint: {
+          topology: "loopback_http",
+          serverOrigin: origin,
+          allowedClientOrigins: [origin],
+          tlsTrust: "not_applicable"
+        }
       },
       credential: {
         getDeviceToken: () => overrides.token
@@ -201,7 +207,11 @@ describe("CollaborationClient", () => {
         name: "wrong digest",
         frames: [
           transferHeader(),
-          { type: "member", index: 0, member: { ...transferMembers[0], digestSha256: "b".repeat(64) } }
+          {
+            type: "member",
+            index: 0,
+            member: { ...transferMembers[0], digestSha256: "b".repeat(64) }
+          }
         ],
         end: true,
         code: "content_transfer_member_digest_invalid"
@@ -243,7 +253,9 @@ describe("CollaborationClient", () => {
     for (const testCase of cases) {
       const fixture = await listen((_req, res) => {
         if (testCase.name === "unterminated") {
-          res.writeHead(200, { "content-type": `${contentVersionTransferMediaType}; charset=utf-8` });
+          res.writeHead(200, {
+            "content-type": `${contentVersionTransferMediaType}; charset=utf-8`
+          });
           res.end(JSON.stringify(transferHeader()));
           return;
         }
@@ -793,7 +805,10 @@ describe("CollaborationClient", () => {
     });
 
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("observer authorization retry timeout")), 3_000);
+      const timer = setTimeout(
+        () => reject(new Error("observer authorization retry timeout")),
+        3_000
+      );
       client.startObserver({
         onStatus: (status) => {
           if (status.state === "connected") {
@@ -1003,9 +1018,7 @@ describe("CollaborationClient", () => {
     });
     cleanups.push(http.close);
     http.server.on("upgrade", (_request, socket) => {
-      socket.end(
-        "HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
-      );
+      socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
     });
 
     const client = clientFor(http.origin, {

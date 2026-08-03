@@ -84,7 +84,9 @@ describe("assigneeSurfaceViewModels", () => {
     expect(lookupTaskCardAssigneeChip(index, "canvas-1", "T-1", ["T-1#B-001"])?.workItemKey).toBe(
       workItemKey(assignment.workItem)
     );
-    expect(taskWorkItemKey("canvas-1", "T-1")).toBe("task:canvas-1:T-1");
+    expect(taskWorkItemKey("canvas-1", "T-1")).toBe(
+      workItemKey({ kind: "task", canvasId: "canvas-1", taskId: "T-1" })
+    );
   });
 
   it("localizes automatic host compact chips via catalog labels", () => {
@@ -149,7 +151,11 @@ describe("assigneeSurfaceViewModels", () => {
         {
           mutationId: "mut-ok",
           kind: "assignment",
-          workItemKey: "block:canvas-1:T-1#B-001",
+          workItemKey: workItemKey({
+            kind: "block",
+            canvasId: "canvas-1",
+            blockRef: "T-1#B-001"
+          }),
           status: "confirmed",
           submittedAt: "2030-01-01T00:00:00.000Z",
           resolvedAt: "2030-01-01T00:00:01.000Z"

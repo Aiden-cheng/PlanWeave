@@ -51,6 +51,42 @@ const operationInput = {
 } as const;
 
 describe("RemoteOperationRepository", () => {
+  it("persists an endpoint selection across reload and binds it to idempotency", async () => {
+    const server = await setup();
+    const repository = new RemoteOperationRepository(server.database);
+    const endpointSelection = {
+      schemaVersion: "endpoint-selection/v1" as const,
+      endpointId: "aep-primary",
+      profileId: "codex-acp",
+      agentId: "codex",
+      displayName: "Codex",
+      hostId: "host-internal",
+      hostDisplayName: "VPS Singapore",
+      capabilities: ["linux", "acp.codex"],
+      resolvedAt: "2030-01-01T00:00:00.000Z",
+      authority: {
+        schemaVersion: "endpoint-authority/v1" as const,
+        responsibilityRevision: 2,
+        reviewerRevision: 3
+      }
+    };
+    const created = repository.create({ ...operationInput, endpointSelection });
+
+    expect(repository.getRequired(created.id).endpointSelection).toEqual(endpointSelection);
+    expect(repository.create({ ...operationInput, endpointSelection })).toEqual(created);
+    expect(() =>
+      repository.create({
+        ...operationInput,
+        endpointSelection: { ...endpointSelection, endpointId: "aep-other" }
+      })
+    ).toThrowError("remote_operation_idempotency_conflict");
+    expect(
+      server.database
+        .prepare("SELECT endpoint_selection_json FROM remote_operations WHERE id=?")
+        .get(created.id)?.endpoint_selection_json
+    ).toEqual(expect.stringContaining('"endpointId":"aep-primary"'));
+  });
+
   it("creates stable dispatch and attempt identities, replays identical input, and rejects conflict", async () => {
     const server = await setup();
     const repository = new RemoteOperationRepository(server.database);

@@ -34,6 +34,15 @@ import {
   type AssignmentDispatchGate,
   type DispatchHostSelectionSnapshot
 } from "./work/dispatchIntegration.js";
+import {
+  AgentEndpointCatalog,
+  AgentEndpointCatalogError,
+  type ResolvedAgentEndpoint
+} from "./agentEndpointCatalog.js";
+import {
+  endpointSelectionSnapshotSchema,
+  type EndpointSelectionSnapshot
+} from "./endpointSelection.js";
 
 export type RemoteDispatchRequest = RemoteRuntimeLocator & {
   blockRef: string;
@@ -42,6 +51,8 @@ export type RemoteDispatchRequest = RemoteRuntimeLocator & {
   expectedReviewerRevision?: number;
   expectedExecutionTargetRevision?: number;
   strictAuthority?: boolean;
+  /** v3 exact Endpoint identity. Mutually exclusive with Host/execution-target routing. */
+  agentEndpointId?: string;
   /** Optional exact Host request; revalidated against assignment + live Host facts. */
   requestedHostId?: string;
   /**
@@ -84,6 +95,15 @@ export type RemoteBlockCoordinatorOptions = {
    * automatic uses the deterministic selector with package capabilities.
    */
   assignmentGate?: AssignmentDispatchGate;
+  agentEndpoints?: AgentEndpointCatalog;
+  endpointAuthorize?: (input: {
+    workspaceId: string;
+    projectId: string;
+    canvasId: string;
+    blockRef: string;
+    expectedResponsibilityRevision: number;
+    expectedReviewerRevision: number;
+  }) => void;
   /** Final server-side HostAuthorization check after a lease exists and before activation. */
   finalAuthorize?: (input: {
     operation: RemoteOperation;
@@ -115,8 +135,8 @@ function buildEnvelope(operation: RemoteOperation, candidate: RemoteBlockDispatc
     dependencySummaries: candidate.dependencySummaries,
     inputArtifacts: candidate.inputArtifacts,
     workspaceId: candidate.workspaceId,
-    agentId: candidate.agentId,
-    agentProfileId: candidate.agentProfileId,
+    agentId: operation.endpointSelection?.agentId ?? candidate.agentId,
+    agentProfileId: operation.endpointSelection?.profileId ?? candidate.agentProfileId,
     session: candidate.session,
     requiredCapabilities: candidate.requiredCapabilities,
     output: {
@@ -170,16 +190,30 @@ export class RemoteBlockCoordinator {
   }
 
   async dispatch(request: RemoteDispatchRequest): Promise<RemoteDispatchOutcome> {
+    const endpointDispatch = request.agentEndpointId !== undefined;
     if (
       request.strictAuthority &&
+      !endpointDispatch &&
       (request.expectedResponsibilityRevision === undefined ||
         request.expectedReviewerRevision === undefined ||
         request.expectedExecutionTargetRevision === undefined)
     ) {
       throw new Error("remote_run_v2_required");
     }
+    if (
+      endpointDispatch &&
+      (request.expectedResponsibilityRevision === undefined ||
+        request.expectedReviewerRevision === undefined)
+    ) {
+      throw new Error("remote_run_v3_required");
+    }
     const existing = this.options.operations.findByCallerIdentity(request);
-    if (existing) return this.reenter(existing.id);
+    if (existing) {
+      if (existing.endpointSelection?.endpointId !== request.agentEndpointId) {
+        throw new Error("remote_operation_idempotency_conflict");
+      }
+      return this.reenter(existing.id);
+    }
 
     const candidate = await this.withRuntime(request, (runtime) =>
       runtime.inspect({ ref: request.blockRef })
@@ -197,7 +231,42 @@ export class RemoteBlockCoordinator {
     // redirect this operation to an arbitrary Host. Persist with the operation so restart
     // cannot re-resolve from a later assignment.
     let selection: DispatchHostSelectionSnapshot | undefined;
-    if (this.options.assignmentGate) {
+    let endpointSelection: EndpointSelectionSnapshot | undefined;
+    if (endpointDispatch) {
+      const endpointId = request.agentEndpointId;
+      const expectedResponsibilityRevision = request.expectedResponsibilityRevision;
+      const expectedReviewerRevision = request.expectedReviewerRevision;
+      if (
+        endpointId === undefined ||
+        expectedResponsibilityRevision === undefined ||
+        expectedReviewerRevision === undefined
+      ) {
+        throw new Error("remote_run_v3_required");
+      }
+      if (!this.options.agentEndpoints || !this.options.endpointAuthorize) {
+        throw new Error("agent_endpoint_dispatch_not_configured");
+      }
+      this.options.endpointAuthorize({
+        workspaceId: candidate.workspaceId,
+        projectId: candidate.projectId,
+        canvasId: candidate.canvasId,
+        blockRef: candidate.blockRef,
+        expectedResponsibilityRevision,
+        expectedReviewerRevision
+      });
+      endpointSelection = this.snapshotEndpoint(
+        this.options.agentEndpoints.resolveForRun(
+          endpointId,
+          candidate.workspaceId,
+          candidate.requiredCapabilities
+        ),
+        candidate,
+        {
+          responsibilityRevision: expectedResponsibilityRevision,
+          reviewerRevision: expectedReviewerRevision
+        }
+      );
+    } else if (this.options.assignmentGate) {
       selection = this.options.assignmentGate.resolve({
         workspaceId: candidate.workspaceId,
         projectId: candidate.projectId,
@@ -230,7 +299,8 @@ export class RemoteBlockCoordinator {
       idempotencyKey: request.idempotencyKey,
       sourceFingerprint: candidate.graphFingerprint,
       requiredCapabilities: candidate.requiredCapabilities,
-      hostSelection: selection
+      hostSelection: selection,
+      endpointSelection
     });
     if (operation.hostSelection) {
       this.hostSelectionByOperation.set(operation.id, operation.hostSelection);
@@ -255,11 +325,17 @@ export class RemoteBlockCoordinator {
       "running",
       "awaiting_writeback"
     ].includes(operation.attempt.status);
-    if (activeAuthorityAttempt && operation.attempt.leaseId && this.options.finalAuthorize) {
-      this.options.finalAuthorize({
-        operation,
-        reservation: this.options.reservations.getRequired(operation.attempt.leaseId)
-      });
+    if (activeAuthorityAttempt && operation.attempt.leaseId) {
+      const reservation = this.options.reservations.getRequired(operation.attempt.leaseId);
+      if (operation.endpointSelection) {
+        this.authorizeReservedEndpoint(
+          operation,
+          candidateForIdentity(operation, this.options.candidates),
+          reservation
+        );
+      } else if (this.options.finalAuthorize) {
+        this.options.finalAuthorize({ operation, reservation });
+      }
     }
     if (operation.state !== "preparing") {
       try {
@@ -408,20 +484,30 @@ export class RemoteBlockCoordinator {
       : undefined;
     if (!reservation) {
       try {
-        const preferredHostId = this.resolvePreferredHostId(operation, candidate);
+        if (operation.endpointSelection) this.authorizeEndpointOperation(operation);
+        const resolvedEndpoint = operation.endpointSelection
+          ? this.resolveDurableEndpoint(operation, candidate)
+          : undefined;
+        const preferredHostId =
+          resolvedEndpoint?.hostId ?? this.resolvePreferredHostId(operation, candidate);
         reservation = this.options.reservations.reserve(operation.id, {
           preferredHostId,
-          agentId: candidate.agentId,
-          agentProfileId: candidate.agentProfileId
+          agentId: resolvedEndpoint?.agentId ?? candidate.agentId,
+          agentProfileId: resolvedEndpoint?.profileId ?? candidate.agentProfileId
         });
-        this.options.finalAuthorize?.({
-          operation: this.options.operations.getRequired(operation.id),
-          reservation
-        });
+        const reservedOperation = this.options.operations.getRequired(operation.id);
+        if (reservedOperation.endpointSelection) {
+          this.authorizeReservedEndpoint(reservedOperation, candidate, reservation);
+        } else {
+          this.options.finalAuthorize?.({ operation: reservedOperation, reservation });
+        }
         await this.checkpoint("after_host_reservation");
         this.options.operations.clearDiagnostic(operation.id);
       } catch (error) {
         if (error instanceof Error && error.message === "no_compatible_agent_host") {
+          if (operation.endpointSelection) {
+            throw new AgentEndpointCatalogError("agent_endpoint_unavailable");
+          }
           this.options.operations.recordDiagnostic(
             operation.id,
             "no_compatible_agent_host",
@@ -431,6 +517,9 @@ export class RemoteBlockCoordinator {
             operation: this.options.operations.getRequired(operation.id),
             status: "awaiting_host"
           };
+        }
+        if (operation.endpointSelection && error instanceof AgentEndpointCatalogError) {
+          throw error;
         }
         // Legacy null host_selection recovery may revalidate assignment and find it no longer
         // agent-dispatchable. Record diagnostics and leave non-terminal — never abort other
@@ -486,7 +575,18 @@ export class RemoteBlockCoordinator {
   async reenterPending(): Promise<RemoteDispatchOutcome[]> {
     const outcomes: RemoteDispatchOutcome[] = [];
     for (const operation of this.options.operations.listNonTerminal()) {
-      outcomes.push(await this.reenter(operation.id));
+      try {
+        outcomes.push(await this.reenter(operation.id));
+      } catch (error) {
+        if (!(operation.endpointSelection && error instanceof AgentEndpointCatalogError)) {
+          throw error;
+        }
+        this.options.operations.recordDiagnostic(operation.id, error.code, error.message);
+        outcomes.push({
+          operation: this.options.operations.getRequired(operation.id),
+          status: "awaiting_host"
+        });
+      }
     }
     return outcomes;
   }
@@ -523,6 +623,7 @@ export class RemoteBlockCoordinator {
     this.actionsCoordinator ??= new RemoteBlockActionCoordinator(this.options, {
       reenter: (operationId) => this.reenter(operationId),
       fail: (operationId) => this.fail(operationId),
+      authorizeEndpointOperation: (operation) => this.authorizeEndpointOperation(operation),
       checkpoint: () => this.checkpoint("after_action_side_effect")
     });
     return this.actionsCoordinator;
@@ -530,11 +631,15 @@ export class RemoteBlockCoordinator {
 
   async complete(operationId: string): Promise<void> {
     let operation = this.options.operations.getRequired(operationId);
-    if (operation.attempt.leaseId && this.options.finalAuthorize) {
-      this.options.finalAuthorize({
-        operation,
-        reservation: this.options.reservations.getRequired(operation.attempt.leaseId)
-      });
+    if (operation.attempt.leaseId) {
+      const reservation = this.options.reservations.getRequired(operation.attempt.leaseId);
+      const candidate = this.options.candidates.get(operation.id);
+      if (operation.endpointSelection) {
+        if (!candidate) throw new Error("remote_operation_candidate_missing");
+        this.authorizeReservedEndpoint(operation, candidate, reservation);
+      } else if (this.options.finalAuthorize) {
+        this.options.finalAuthorize({ operation, reservation });
+      }
     }
     const terminal = this.options.dispatches.inspect(operation).dispatch;
     if (terminal?.status !== "awaiting_writeback" || terminal.terminalAction?.kind !== "complete") {
@@ -559,11 +664,15 @@ export class RemoteBlockCoordinator {
 
   async fail(operationId: string): Promise<void> {
     let operation = this.options.operations.getRequired(operationId);
-    if (operation.attempt.leaseId && this.options.finalAuthorize) {
-      this.options.finalAuthorize({
-        operation,
-        reservation: this.options.reservations.getRequired(operation.attempt.leaseId)
-      });
+    if (operation.attempt.leaseId) {
+      const reservation = this.options.reservations.getRequired(operation.attempt.leaseId);
+      const candidate = this.options.candidates.get(operation.id);
+      if (operation.endpointSelection) {
+        if (!candidate) throw new Error("remote_operation_candidate_missing");
+        this.authorizeReservedEndpoint(operation, candidate, reservation);
+      } else if (this.options.finalAuthorize) {
+        this.options.finalAuthorize({ operation, reservation });
+      }
     }
     const terminal = this.options.dispatches.inspect(operation).dispatch;
     if (terminal?.status !== "awaiting_writeback" || terminal.terminalAction?.kind !== "fail") {
@@ -711,4 +820,134 @@ export class RemoteBlockCoordinator {
     this.hostSelectionByOperation.set(operation.id, authorized);
     return authorized.preferredHostId;
   }
+
+  private snapshotEndpoint(
+    resolved: ResolvedAgentEndpoint,
+    candidate: RemoteBlockDispatchCandidate,
+    revisions: { responsibilityRevision: number; reviewerRevision: number }
+  ): EndpointSelectionSnapshot {
+    if (resolved.agentId !== candidate.agentId || resolved.profileId !== candidate.agentProfileId) {
+      throw new AgentEndpointCatalogError("agent_endpoint_incompatible");
+    }
+    return endpointSelectionSnapshotSchema.parse({
+      schemaVersion: "endpoint-selection/v1",
+      ...resolved,
+      authority: {
+        schemaVersion: "endpoint-authority/v1",
+        ...revisions
+      }
+    });
+  }
+
+  private resolveDurableEndpoint(
+    operation: RemoteOperation,
+    candidate: RemoteBlockDispatchCandidate
+  ): ResolvedAgentEndpoint {
+    const selection = operation.endpointSelection;
+    if (!selection || !this.options.agentEndpoints) {
+      throw new Error("agent_endpoint_dispatch_not_configured");
+    }
+    const resolved = this.options.agentEndpoints.resolveForRun(
+      selection.endpointId,
+      operation.workspaceId,
+      operation.requiredCapabilities
+    );
+    this.assertEndpointIdentity(selection, resolved, candidate);
+    return resolved;
+  }
+
+  private assertReservedEndpoint(
+    operation: RemoteOperation,
+    candidate: RemoteBlockDispatchCandidate,
+    reservation: HostCapacityReservation
+  ): void {
+    const selection = operation.endpointSelection;
+    if (!selection || !this.options.agentEndpoints) {
+      throw new Error("agent_endpoint_dispatch_not_configured");
+    }
+    const resolved = this.options.agentEndpoints.resolveForReservedRun(
+      selection.endpointId,
+      operation.workspaceId,
+      operation.requiredCapabilities,
+      reservation.hostId
+    );
+    this.assertEndpointIdentity(selection, resolved, candidate);
+  }
+
+  private authorizeReservedEndpoint(
+    operation: RemoteOperation,
+    candidate: RemoteBlockDispatchCandidate,
+    reservation: HostCapacityReservation
+  ): void {
+    try {
+      this.authorizeEndpointOperation(operation, reservation, candidate);
+    } catch (error) {
+      if (reservation.status === "active") {
+        this.options.reservations.release({
+          leaseId: reservation.leaseId,
+          fencingToken: reservation.fencingToken,
+          expectedVersion: reservation.version,
+          reason: "expired"
+        });
+      }
+      throw error;
+    }
+  }
+
+  authorizeEndpointOperation(
+    operation: RemoteOperation,
+    reservation?: HostCapacityReservation,
+    candidate: RemoteBlockDispatchCandidate = candidateForIdentity(
+      operation,
+      this.options.candidates
+    )
+  ): void {
+    const selection = operation.endpointSelection;
+    if (!selection || !this.options.endpointAuthorize || !this.options.agentEndpoints) {
+      throw new Error("agent_endpoint_dispatch_not_configured");
+    }
+    this.options.endpointAuthorize({
+      workspaceId: operation.workspaceId,
+      projectId: operation.projectId,
+      canvasId: operation.canvasId,
+      blockRef: operation.blockRef,
+      expectedResponsibilityRevision: selection.authority.responsibilityRevision,
+      expectedReviewerRevision: selection.authority.reviewerRevision
+    });
+    if (reservation) {
+      this.assertReservedEndpoint(operation, candidate, reservation);
+      return;
+    }
+    this.resolveDurableEndpoint(operation, candidate);
+  }
+
+  private assertEndpointIdentity(
+    selection: EndpointSelectionSnapshot,
+    resolved: ResolvedAgentEndpoint,
+    candidate: RemoteBlockDispatchCandidate
+  ): void {
+    if (
+      resolved.endpointId !== selection.endpointId ||
+      resolved.hostId !== selection.hostId ||
+      resolved.profileId !== selection.profileId ||
+      resolved.agentId !== selection.agentId ||
+      resolved.displayName !== selection.displayName ||
+      resolved.hostDisplayName !== selection.hostDisplayName ||
+      resolved.capabilities.length !== selection.capabilities.length ||
+      resolved.capabilities.some((capability) => !selection.capabilities.includes(capability)) ||
+      resolved.profileId !== candidate.agentProfileId ||
+      resolved.agentId !== candidate.agentId
+    ) {
+      throw new AgentEndpointCatalogError("agent_endpoint_incompatible");
+    }
+  }
+}
+
+function candidateForIdentity(
+  operation: RemoteOperation,
+  candidates: RemoteOperationCandidatePort
+): RemoteBlockDispatchCandidate {
+  const candidate = candidates.get(operation.id);
+  if (!candidate) throw new Error("remote_operation_candidate_missing");
+  return candidate;
 }
