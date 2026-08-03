@@ -1,9 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
   credentialSha256Schema,
-  setupCodeTokenSchema,
-  SETUP_CODE_TOKEN_PREFIX
-} from "@planweave-ai/collaboration-protocol";
+  setupCodeTokenSchema
+} from "@planweave-ai/collaboration-protocol/core/primitives";
+import { SETUP_CODE_TOKEN_PREFIX } from "@planweave-ai/collaboration-protocol/core/limits";
 import { HUMAN_TOKEN_SECRET_CHAR_LENGTH } from "./limits.js";
 
 export function hashSetupCode(token: string): string {

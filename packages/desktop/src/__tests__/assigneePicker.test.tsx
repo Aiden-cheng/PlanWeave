@@ -4,7 +4,7 @@ import "@testing-library/jest-dom/vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { WorkItemRef } from "@planweave-ai/collaboration-protocol";
+import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import { createTranslator } from "../renderer/i18n";
 import {
   buildAssigneePickerViewModel,
@@ -16,7 +16,7 @@ import {
   stubSelectLayoutApis
 } from "./helpers/rendererTestEnvironment";
 import type { CollaborationStatus } from "../shared/collaboration";
-import type { HumanMembershipView } from "@planweave-ai/collaboration-protocol";
+import type { HumanMembershipView } from "@planweave-ai/collaboration-protocol/identity/workspace";
 
 const t = createTranslator("en");
 

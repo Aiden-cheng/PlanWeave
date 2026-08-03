@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type {
   AssignmentDisplayProjection,
-  EligibleAssigneesResponse,
-  HumanMembershipView,
-  WorkItemRef
-} from "@planweave-ai/collaboration-protocol";
+  EligibleAssigneesResponse
+} from "@planweave-ai/collaboration-protocol/work/assignment";
+import type { HumanMembershipView } from "@planweave-ai/collaboration-protocol/identity/workspace";
+import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import {
   assigneeDisplayLabelsFromTranslator,
   buildAssigneeCurrentDisplay,

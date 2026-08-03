@@ -1,4 +1,4 @@
-import type { CollaborationConnectionProfile } from "@planweave-ai/collaboration-protocol";
+import type { CollaborationConnectionProfile } from "@planweave-ai/collaboration-protocol/connection";
 import {
   COLLABORATION_SESSION_ONLY_WARNING,
   type CollaborationProfileView,

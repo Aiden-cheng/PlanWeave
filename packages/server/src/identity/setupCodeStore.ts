@@ -3,17 +3,19 @@ import {
   deriveSetupCodeLifecycleState,
   setupCodeGrantSchema,
   setupCodeGrantViewSchema,
-  setupCodeIdSchema,
-  setupCodeRevocationIdSchema,
   setupCodeRevocationSchema,
-  setupCodeTtlMsSchema,
-  setupCredentialPurposeSchema,
   defaultSetupCodeTtlMs,
   type SetupCodeGrant,
   type SetupCodeGrantView,
-  type SetupCodeRevocation,
+  type SetupCodeRevocation
+} from "@planweave-ai/collaboration-protocol/setup";
+import {
+  setupCodeIdSchema,
+  setupCodeRevocationIdSchema,
+  setupCodeTtlMsSchema,
+  setupCredentialPurposeSchema,
   type SetupCredentialPurpose
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/core/primitives";
 import type { SqliteDatabase } from "../sqlite.js";
 import { hashSetupCode, mintSetupCodeToken } from "./setupCodeCrypto.js";
 

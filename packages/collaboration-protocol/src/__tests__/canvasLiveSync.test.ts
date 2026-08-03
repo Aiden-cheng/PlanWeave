@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { CANVAS_LIVE_SYNC_PROTOCOL_VERSION } from "../limits.js";
+import { exampleCanvasJournalEntry } from "../fixtures/collaboration.js";
 import {
-  CANVAS_LIVE_SYNC_PROTOCOL_VERSION,
-  exampleCanvasJournalEntry,
   canvasLiveSyncClientMessageSchema,
   canvasLiveSyncServerMessageSchema
-} from "../index.js";
+} from "../canvasLiveSync.js";
 
 describe("canvas live sync contracts", () => {
   const hello = {

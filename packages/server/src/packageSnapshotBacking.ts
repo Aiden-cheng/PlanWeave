@@ -5,11 +5,13 @@ import {
   packageSnapshotDigestSchema,
   packageSnapshotRelativePathSchema,
   packageSnapshotSizeSchema,
-  packageSnapshotSourceRevisionSchema,
+  packageSnapshotSourceRevisionSchema
+} from "@planweave-ai/collaboration-protocol/content/snapshot";
+import {
   PACKAGE_SNAPSHOT_MAX_FILE_BYTES,
   PACKAGE_SNAPSHOT_MAX_PROMPT_DIGESTS,
   PACKAGE_SNAPSHOT_MAX_TOTAL_BYTES
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/core/limits";
 import { z } from "zod";
 
 export const snapshotFileSchema = z

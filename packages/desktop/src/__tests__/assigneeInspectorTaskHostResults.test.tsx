@@ -4,7 +4,8 @@ import "@testing-library/jest-dom/vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { WorkAuthorityProjection, WorkItemRef } from "@planweave-ai/collaboration-protocol";
+import type { WorkAuthorityProjection } from "@planweave-ai/collaboration-protocol/work/authority";
+import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import {
   acquireCollaborationReadModelController,
   resetCollaborationReadModelHubForTests

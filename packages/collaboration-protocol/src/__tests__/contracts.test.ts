@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
+import packageJson from "../../package.json";
+import { assertHumanDisplayDtoRedacted } from "../identity.js";
 import {
-  assertHumanDisplayDtoRedacted,
   collaborationBoundaryErrorKindSchema,
+  mapHttpStatusToBoundaryKind
+} from "../errors.js";
+import {
   exampleActivityRecord,
   exampleAssignmentProjection,
   exampleBootstrapResponse,
@@ -12,16 +16,78 @@ import {
   exampleObserverCatchupRequired,
   exampleObserverEvent,
   exampleObserverWelcome,
-  exampleSecretsForRedaction,
-  COLLABORATION_JSON_BODY_MAX_BYTES,
+  exampleSecretsForRedaction
+} from "../fixtures/collaboration.js";
+import { COLLABORATION_JSON_BODY_MAX_BYTES } from "../limits.js";
+import {
   humanObserverEventSchema,
-  mapHttpStatusToBoundaryKind,
-  parseCollaborationClientLimits,
-  parseCollaborationConnectionProfile,
   parseHumanObserverServerMessage
-} from "../index.js";
+} from "../observer.js";
+import {
+  parseCollaborationClientLimits,
+  parseCollaborationConnectionProfile
+} from "../connection.js";
+
+const productionExportPaths = [
+  "./core/primitives",
+  "./core/limits",
+  "./errors",
+  "./identity/workspace",
+  "./identity/migration",
+  "./access/project",
+  "./access/control",
+  "./content/snapshot",
+  "./content/version",
+  "./content/authority",
+  "./content/transfer",
+  "./work/assignment",
+  "./work/responsibility",
+  "./work/review",
+  "./work/execution-target",
+  "./work/host-authorization",
+  "./work/authority",
+  "./work/assignment-migration",
+  "./canvas/commands",
+  "./canvas/live-sync",
+  "./canvas/status",
+  "./canvas/presence",
+  "./activity/comments",
+  "./activity/attachments",
+  "./activity/observer",
+  "./connection",
+  "./setup",
+  "./handoff/setup",
+  "./handoff/invitation",
+  "./deployment",
+  "./loopback",
+  "./remote-run"
+] as const;
+
+const fixtureExportPaths = [
+  "./fixtures/collaboration",
+  "./fixtures/content-version"
+] as const;
 
 describe("collaboration-protocol", () => {
+  it("exposes only explicit domain and fixture subpaths", () => {
+    expect("main" in packageJson).toBe(false);
+    expect("types" in packageJson).toBe(false);
+    expect(packageJson.exports["." as keyof typeof packageJson.exports]).toBeUndefined();
+    expect(Object.keys(packageJson.exports).sort()).toEqual(
+      [...productionExportPaths, ...fixtureExportPaths].sort()
+    );
+    for (const exportPath of [...productionExportPaths, ...fixtureExportPaths]) {
+      expect(packageJson.exports[exportPath]).toEqual({
+        types: expect.stringMatching(/^\.\/dist\/.+\.d\.ts$/),
+        import: expect.stringMatching(/^\.\/dist\/.+\.js$/)
+      });
+    }
+    for (const exportPath of productionExportPaths) {
+      expect(packageJson.exports[exportPath].types).not.toContain("/fixtures/");
+      expect(packageJson.exports[exportPath].import).not.toContain("/fixtures/");
+    }
+  });
+
   it("parses explicitly enabled private-LAN HTTP and rejects public insecure HTTP", () => {
     expect(exampleConnectionProfile.projectId).toBe("project-demo-001");
     expect(exampleLoopbackConnectionProfile.allowInsecureTransport).toBe(true);

@@ -4,7 +4,7 @@ import {
   type HostEnrollmentCompleted,
   type HostEnrollmentRequest
 } from "@planweave-ai/agent-host-protocol";
-import { setupCodeTokenSchema } from "@planweave-ai/collaboration-protocol";
+import { setupCodeTokenSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
 import type { AgentHostConfig } from "../config/schema.js";
 import type {
   ActiveHostCredential,

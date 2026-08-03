@@ -1,28 +1,36 @@
 import {
   activityListWireQuerySchema,
-  assignmentListQuerySchema,
-  assignmentUpdateWireCommandSchema,
   commentCreateWireCommandSchema,
   commentEditWireCommandSchema,
   commentListWireQuerySchema,
   commentTombstoneWireCommandSchema,
-  createPendingAttachmentRequestSchema,
-  workItemRefSchema,
   type ActivityListPage,
+  type CommentDisplayProjection,
+  type CommentListPage
+} from "@planweave-ai/collaboration-protocol/activity/comments";
+import {
+  assignmentListQuerySchema,
+  assignmentUpdateWireCommandSchema,
   type AssignmentDisplayProjection,
   type AssignmentListPage,
-  type CommentDisplayProjection,
-  type CommentListPage,
-  type EligibleAssigneesResponse,
-  type ExecutionTargetReadModel,
+  type EligibleAssigneesResponse
+} from "@planweave-ai/collaboration-protocol/work/assignment";
+import {
+  createPendingAttachmentRequestSchema,
   type FinalizePendingAttachmentResponse,
-  type PendingAttachmentView,
-  type ResponsibilityReadModel,
-  type ReviewAssignmentReadModel,
-  type CollaborationWorkScope,
-  type WorkAuthorityProjection,
+  type PendingAttachmentView
+} from "@planweave-ai/collaboration-protocol/activity/attachments";
+import {
+  workItemRefSchema,
   type WorkItemRef
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/core/primitives";
+import { type ExecutionTargetReadModel } from "@planweave-ai/collaboration-protocol/work/execution-target";
+import {
+  type ResponsibilityReadModel,
+  type CollaborationWorkScope
+} from "@planweave-ai/collaboration-protocol/work/responsibility";
+import { type ReviewAssignmentReadModel } from "@planweave-ai/collaboration-protocol/work/review";
+import { type WorkAuthorityProjection } from "@planweave-ai/collaboration-protocol/work/authority";
 import {
   collaborationExecutionTargetUpdateInputSchema,
   collaborationResponsibilityUpdateInputSchema,

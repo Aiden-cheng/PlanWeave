@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  HUMAN_INVITATION_IDEMPOTENCY_KEY_MAX_LENGTH,
-  humanCreateInvitationRequestSchema
-} from "../index.js";
+import { HUMAN_INVITATION_IDEMPOTENCY_KEY_MAX_LENGTH } from "../limits.js";
+import { humanCreateInvitationRequestSchema } from "../identity.js";
 
 describe("human invitation contracts", () => {
   it("accepts a bounded optional create idempotency key", () => {

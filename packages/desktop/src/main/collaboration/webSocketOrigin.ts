@@ -1,4 +1,4 @@
-import { collaborationServerOriginSchema } from "@planweave-ai/collaboration-protocol";
+import { collaborationServerOriginSchema } from "@planweave-ai/collaboration-protocol/connection";
 
 /**
  * Electron main derives the only Origin header used by Desktop WebSockets.

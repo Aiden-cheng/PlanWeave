@@ -3,7 +3,7 @@ import {
   type CollaborationClientLimits,
   type WorkspaceConnectionProfile,
   type WorkspacePickerPage
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/connection";
 import type {
   CollaborationClientClock,
   CollaborationCredentialPort

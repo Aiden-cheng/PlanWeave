@@ -4,7 +4,7 @@ import {
   humanDeviceTokenSchema,
   opaqueIdentifierSchema,
   timestampSchema
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/core/primitives";
 import { z } from "zod";
 import type {
   CollaborationCredentialPersistence,

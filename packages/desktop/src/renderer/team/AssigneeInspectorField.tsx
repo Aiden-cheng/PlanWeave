@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
-import type { AssignmentTarget, WorkItemRef } from "@planweave-ai/collaboration-protocol";
+import type { AssignmentTarget } from "@planweave-ai/collaboration-protocol/work/assignment";
+import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import { parseWorkItemKey, workItemKey } from "../../shared/collaborationReadModels.js";
 import {
   useAssigneePickerController,

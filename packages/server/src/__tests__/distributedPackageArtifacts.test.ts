@@ -29,6 +29,8 @@ type PackageJson = {
   bugs?: { url?: string };
   dependencies?: Record<string, string>;
   exports?: Record<string, unknown>;
+  main?: string;
+  types?: string;
   scripts?: Record<string, string>;
 };
 
@@ -111,6 +113,17 @@ describe("distributed package artifact contracts", () => {
     expect(host.dependencies?.["@planweave-ai/agent-host-protocol"]).toBe("workspace:*");
     expect(runtime.dependencies?.["@planweave-ai/agent-host-protocol"]).toBe("workspace:*");
     expect(contracts.dependencies?.["@planweave-ai/agent-host-protocol"]).toBe("workspace:*");
+    expect(contracts.main).toBeUndefined();
+    expect(contracts.types).toBeUndefined();
+    expect(contracts.exports?.["."]).toBeUndefined();
+    expect(contracts.exports?.["./core/primitives"]).toEqual({
+      types: "./dist/primitives.d.ts",
+      import: "./dist/primitives.js"
+    });
+    expect(contracts.exports?.["./fixtures/collaboration"]).toEqual({
+      types: "./dist/fixtures/collaboration.d.ts",
+      import: "./dist/fixtures/collaboration.js"
+    });
     expect(server.dependencies?.["@planweave-ai/collaboration-protocol"]).toBe("workspace:*");
     expect(agentHostProtocolVersion).toBe(1);
 

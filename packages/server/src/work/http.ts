@@ -1,10 +1,10 @@
 import {
   assignmentListQuerySchema,
-  assignmentUpdateWireCommandSchema,
-  executionTargetUpdateWireCommandSchema,
-  reviewAssignmentUpdateWireCommandSchema,
-  responsibilityUpdateWireCommandSchema
-} from "@planweave-ai/collaboration-protocol";
+  assignmentUpdateWireCommandSchema
+} from "@planweave-ai/collaboration-protocol/work/assignment";
+import { executionTargetUpdateWireCommandSchema } from "@planweave-ai/collaboration-protocol/work/execution-target";
+import { reviewAssignmentUpdateWireCommandSchema } from "@planweave-ai/collaboration-protocol/work/review";
+import { responsibilityUpdateWireCommandSchema } from "@planweave-ai/collaboration-protocol/work/responsibility";
 import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";

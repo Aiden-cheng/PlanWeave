@@ -1,11 +1,15 @@
 import {
   executionTargetRecordSchema,
+  type ExecutionTargetRecord
+} from "@planweave-ai/collaboration-protocol/work/execution-target";
+import {
   responsibilityRecordSchema,
+  type ResponsibilityRecord
+} from "@planweave-ai/collaboration-protocol/work/responsibility";
+import {
   reviewAssignmentRecordSchema,
-  type ExecutionTargetRecord,
-  type ResponsibilityRecord,
   type ReviewAssignmentRecord
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/work/review";
 import { inWriteTransaction, type SqliteDatabase } from "../sqlite.js";
 import {
   authorityScopeSchema,

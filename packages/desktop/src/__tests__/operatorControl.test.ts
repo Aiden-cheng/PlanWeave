@@ -2,10 +2,8 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  exampleSetupCodeIssueResponse,
-  parseCollaborationSetupHandoffV1
-} from "@planweave-ai/collaboration-protocol";
+import { exampleSetupCodeIssueResponse } from "@planweave-ai/collaboration-protocol/fixtures/collaboration";
+import { parseCollaborationSetupHandoffV1 } from "@planweave-ai/collaboration-protocol/handoff/setup";
 import {
   OPERATOR_CONTROL_JSON_BODY_MAX_BYTES,
   OperatorControlClient

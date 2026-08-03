@@ -1,38 +1,51 @@
 import { z } from "zod";
 import {
   activityListWireQuerySchema,
-  assignmentListQuerySchema,
-  assignmentUpdateWireCommandSchema,
-  collaborationRevisionSchema,
   commentCreateWireCommandSchema,
   commentEditWireCommandSchema,
   commentListWireQuerySchema,
   commentTombstoneWireCommandSchema,
-  executionTargetSchema,
+  type ActivityListPage,
+  type ActivityRecord,
+  type CommentDisplayProjection,
+  type CommentListPage
+} from "@planweave-ai/collaboration-protocol/activity/comments";
+import {
+  assignmentListQuerySchema,
+  assignmentUpdateWireCommandSchema,
+  type AssignmentDisplayProjection,
+  type AssignmentListPage,
+  type EligibleAssigneesResponse
+} from "@planweave-ai/collaboration-protocol/work/assignment";
+import {
+  collaborationRevisionSchema,
+  workspaceMemberPrincipalSchema
+} from "@planweave-ai/collaboration-protocol/work/responsibility";
+import { executionTargetSchema } from "@planweave-ai/collaboration-protocol/work/execution-target";
+import {
   humanDeviceListQuerySchema,
   humanInvitationListQuerySchema,
+  humanPageQuerySchema,
+  type HumanDevicePage,
+  type HumanInvitationPage,
+  type HumanMemberPage,
+  type HumanMembershipView
+} from "@planweave-ai/collaboration-protocol/identity/workspace";
+import {
   humanObserverCatchupRequiredSchema,
   humanObserverEventSchema,
-  humanPageQuerySchema,
+  type HumanObserverEvent
+} from "@planweave-ai/collaboration-protocol/activity/observer";
+import {
   opaqueIdentifierSchema,
+  workItemRefSchema,
+  type WorkItemRef
+} from "@planweave-ai/collaboration-protocol/core/primitives";
+import {
   remoteEventQuerySchema,
   remoteHumanExecutionActionCommandSchema,
   remoteInteractionPageQuerySchema,
   remoteInteractionResponseSchema,
-  workspaceMemberPrincipalSchema,
-  workItemRefSchema,
-  type ActivityListPage,
-  type ActivityRecord,
-  type AssignmentDisplayProjection,
-  type AssignmentListPage,
-  type CommentDisplayProjection,
-  type CommentListPage,
-  type EligibleAssigneesResponse,
-  type HumanDevicePage,
-  type HumanInvitationPage,
-  type HumanMemberPage,
-  type HumanMembershipView,
-  type HumanObserverEvent,
   type RemoteActionView,
   type RemoteDispatchWireCommand,
   type RemoteEventReplay,
@@ -40,10 +53,9 @@ import {
   type RemoteInteractionPage,
   type RemoteInteractionResponse,
   type RemoteInteractionView,
-  type RemoteOperationObservation,
-  type WorkAuthorityProjection,
-  type WorkItemRef
-} from "@planweave-ai/collaboration-protocol";
+  type RemoteOperationObservation
+} from "@planweave-ai/collaboration-protocol/remote-run";
+import { type WorkAuthorityProjection } from "@planweave-ai/collaboration-protocol/work/authority";
 
 /**
  * Renderer-facing collaboration sync lifecycle.

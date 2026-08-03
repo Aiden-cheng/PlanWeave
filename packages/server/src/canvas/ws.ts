@@ -2,12 +2,14 @@ import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import {
   CANVAS_COMMAND_MAX_FRAME_BYTES,
-  CANVAS_COMMAND_PROTOCOL_VERSION,
+  CANVAS_COMMAND_PROTOCOL_VERSION
+} from "@planweave-ai/collaboration-protocol/core/limits";
+import {
   canvasCommandClientMessageSchema,
   canvasCommandOperationIdSchema,
   canvasCommandServerMessageSchema,
   type CanvasCommandServerMessage
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/canvas/commands";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import {
   authenticateCollaborationForScope,

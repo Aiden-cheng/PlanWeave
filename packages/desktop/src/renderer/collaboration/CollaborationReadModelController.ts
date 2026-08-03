@@ -1,13 +1,11 @@
-import type {
-  AssignmentDisplayProjection,
-  CommentDisplayProjection,
-  ExecutionTargetReadModel,
-  HumanObserverEvent,
-  ResponsibilityReadModel,
-  ReviewAssignmentReadModel,
-  WorkAuthorityProjection,
-  WorkItemRef
-} from "@planweave-ai/collaboration-protocol";
+import type { AssignmentDisplayProjection } from "@planweave-ai/collaboration-protocol/work/assignment";
+import type { CommentDisplayProjection } from "@planweave-ai/collaboration-protocol/activity/comments";
+import type { ExecutionTargetReadModel } from "@planweave-ai/collaboration-protocol/work/execution-target";
+import type { HumanObserverEvent } from "@planweave-ai/collaboration-protocol/activity/observer";
+import type { ResponsibilityReadModel } from "@planweave-ai/collaboration-protocol/work/responsibility";
+import type { ReviewAssignmentReadModel } from "@planweave-ai/collaboration-protocol/work/review";
+import type { WorkAuthorityProjection } from "@planweave-ai/collaboration-protocol/work/authority";
+import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
 import {
   workItemKey,

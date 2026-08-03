@@ -10,9 +10,9 @@ import type {
   CanvasCommandAccepted,
   CanvasCommandIntent,
   CanvasJournalEntry,
-  CanvasReconnectResponse,
-  CompleteContentVersion
-} from "@planweave-ai/collaboration-protocol";
+  CanvasReconnectResponse
+} from "@planweave-ai/collaboration-protocol/canvas/commands";
+import type { CompleteContentVersion } from "@planweave-ai/collaboration-protocol/content/version";
 import { CollaborationClientError } from "./collaborationErrors.js";
 
 export type LocalCanvasCommandBinding = {

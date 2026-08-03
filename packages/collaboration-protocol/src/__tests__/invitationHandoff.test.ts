@@ -4,7 +4,7 @@ import {
   collaborationInvitationHandoffV1Schema,
   parseCollaborationInvitationHandoffV1,
   serializeCollaborationInvitationHandoffV1
-} from "../index.js";
+} from "../invitationHandoff.js";
 
 const invitationToken = `pw_inv_${"A".repeat(43)}`;
 

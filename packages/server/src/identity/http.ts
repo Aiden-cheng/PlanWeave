@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   humanCreateInvitationRequestSchema,
   type HumanCreateInvitationRequest
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/identity/workspace";
 import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
 import { humanNetworkTransportAllowed, isLoopbackAddress } from "../insecureTransport.js";

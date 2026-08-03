@@ -1,9 +1,9 @@
+import { assertHumanDisplayDtoRedacted } from "@planweave-ai/collaboration-protocol/identity/workspace";
 import {
-  assertHumanDisplayDtoRedacted,
   collaborationClientLimitsSchema,
   collaborationServerOriginSchema,
   type CollaborationClientLimits
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/connection";
 import type { ZodType } from "zod";
 import {
   CollaborationClientError,

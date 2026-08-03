@@ -1,13 +1,15 @@
 import { randomUUID } from "node:crypto";
 import {
   completedContentVersionRefSchema,
+  type CompleteContentVersion,
+  type CompletedContentVersionRef
+} from "@planweave-ai/collaboration-protocol/content/version";
+import {
   contentVersionAuthorityDiscoveryToDesktopReadModel,
   contentVersionDesktopReadModelSchema,
-  type CompleteContentVersion,
-  type CanvasAccessRecord,
-  type CompletedContentVersionRef,
   type ContentVersionDesktopReadModel
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/content/authority";
+import { type CanvasAccessRecord } from "@planweave-ai/collaboration-protocol/access/project";
 import {
   captureAuthorizedCanvasContent,
   createManagedProjectFromAuthoritativeContent,

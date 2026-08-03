@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { COLLABORATION_REQUEST_TIMEOUT_MS } from "@planweave-ai/collaboration-protocol/core/limits";
 import {
-  COLLABORATION_REQUEST_TIMEOUT_MS,
   exampleBootstrapResponse,
   exampleHumanDeviceToken,
   exampleInvitationToken,
@@ -13,7 +13,7 @@ import {
   exampleObserverEvent,
   exampleSetupCode,
   exampleSetupCodeRedeemDeviceResponse
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/fixtures/collaboration";
 import {
   CollaborationClientError,
   CollaborationCredentialVault,

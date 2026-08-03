@@ -4,7 +4,7 @@ import {
   parseCollaborationInvitationHandoffV1,
   serializeCollaborationInvitationHandoffV1,
   type CollaborationInvitationHandoffV1
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/handoff/invitation";
 
 export { collaborationInvitationHandoffV1Prefix };
 export type CollaborationInvitationHandoff = CollaborationInvitationHandoffV1;

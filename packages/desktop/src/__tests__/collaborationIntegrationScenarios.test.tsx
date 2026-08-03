@@ -9,10 +9,8 @@ import "@testing-library/jest-dom/vitest";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  exampleObserverCatchupRequired,
-  type WorkItemRef
-} from "@planweave-ai/collaboration-protocol";
+import { exampleObserverCatchupRequired } from "@planweave-ai/collaboration-protocol/fixtures/collaboration";
+import { type WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import {
   acquireCollaborationReadModelController,
   resetCollaborationReadModelHubForTests

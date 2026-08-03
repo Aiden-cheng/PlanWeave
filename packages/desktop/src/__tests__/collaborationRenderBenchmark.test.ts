@@ -10,10 +10,10 @@ import {
   ACTIVITY_LIST_PAGE_DEFAULT,
   ACTIVITY_LIST_PAGE_MAX,
   COMMENT_LIST_PAGE_DEFAULT,
-  COMMENT_LIST_PAGE_MAX,
-  type HumanMembershipView,
-  type WorkItemRef
-} from "@planweave-ai/collaboration-protocol";
+  COMMENT_LIST_PAGE_MAX
+} from "@planweave-ai/collaboration-protocol/core/limits";
+import { type HumanMembershipView } from "@planweave-ai/collaboration-protocol/identity/workspace";
+import { type WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import {
   acquireCollaborationReadModelController,
   resetCollaborationReadModelHubForTests

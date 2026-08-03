@@ -2,12 +2,14 @@ import {
   collaborationClientLimitsSchema,
   collaborationServerOriginSchema,
   isPrivateNetworkHostname,
+  type CollaborationClientLimits
+} from "@planweave-ai/collaboration-protocol/connection";
+import {
   setupCodeRedeemDeviceRequestSchema,
   setupCodeRedeemDeviceResponseSchema,
-  type CollaborationClientLimits,
   type SetupCodeRedeemDeviceRequest,
   type SetupCodeRedeemDeviceResponse
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/setup";
 import {
   CollaborationClientError,
   collaborationErrorFromHttp,

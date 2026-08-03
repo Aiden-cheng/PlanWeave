@@ -2,9 +2,9 @@ import { chmod, mkdir, readFile, rename, stat, writeFile } from "node:fs/promise
 import { dirname } from "node:path";
 import {
   humanCreateInvitationResponseSchema,
-  opaqueIdentifierSchema,
   type HumanCreateInvitationResponse
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/identity/workspace";
+import { opaqueIdentifierSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
 import { z } from "zod";
 import { desktopHomePaths } from "../planweaveHomePaths.js";
 import type { CollaborationSafeStoragePort } from "./collaborationCredentialVault.js";

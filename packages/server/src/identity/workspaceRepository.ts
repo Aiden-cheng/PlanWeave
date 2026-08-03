@@ -1,22 +1,26 @@
 import { createHash } from "node:crypto";
 import {
   agentHostIdentityViewSchema,
+  workspaceIdentityViewSchema,
+  workspaceHumanPrincipalViewSchema,
+  workspaceMembershipViewSchema,
+  type AgentHostIdentityView,
+  type WorkspaceIdentityView
+} from "@planweave-ai/collaboration-protocol/identity/workspace";
+import {
   deviceSessionIdSchema,
   humanDisplayNameSchema,
   humanDeviceTokenSchema,
   humanPrincipalIdSchema,
-  identityMigrationStateSchema,
-  workspaceIdentityViewSchema,
   workspaceIdSchema,
-  workspaceHumanPrincipalViewSchema,
-  workspaceMembershipViewSchema,
-  workspacePickerItemSchema,
-  type AgentHostIdentityView,
   type DeviceSessionId,
-  type WorkspaceId,
-  type WorkspaceIdentityView,
+  type WorkspaceId
+} from "@planweave-ai/collaboration-protocol/core/primitives";
+import { identityMigrationStateSchema } from "@planweave-ai/collaboration-protocol/identity/migration";
+import {
+  workspacePickerItemSchema,
   type WorkspacePickerItem
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/connection";
 import { hashHumanToken } from "./crypto.js";
 import type { SqliteDatabase } from "../sqlite.js";
 

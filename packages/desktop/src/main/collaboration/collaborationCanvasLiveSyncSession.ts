@@ -6,7 +6,7 @@ import type { CollaborationClient } from "./CollaborationClient.js";
 import { CollaborationClientError } from "./collaborationErrors.js";
 import type { ResolvedCollaborationCanvasBinding } from "./ContentVersionFacade.js";
 import type { CanvasLiveSyncHandlers, CanvasLiveSyncStatus } from "./CanvasLiveSyncClient.js";
-import type { CanvasLiveSyncServerMessage } from "@planweave-ai/collaboration-protocol";
+import type { CanvasLiveSyncServerMessage } from "@planweave-ai/collaboration-protocol/canvas/live-sync";
 
 export type CollaborationCanvasLiveSyncClientPort = Pick<
   CollaborationClient,

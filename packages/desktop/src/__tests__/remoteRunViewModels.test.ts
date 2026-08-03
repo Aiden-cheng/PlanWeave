@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
+import type { AssignmentDisplayProjection } from "@planweave-ai/collaboration-protocol/work/assignment";
 import type {
-  AssignmentDisplayProjection,
   RemoteInteractionView,
   RemoteOperationObservation
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/remote-run";
 import {
   adaptRemoteAcpEvents,
   buildRemoteActionIdentity,

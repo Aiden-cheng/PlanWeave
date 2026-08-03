@@ -1,4 +1,4 @@
-import type { WorkItemRef } from "@planweave-ai/collaboration-protocol";
+import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import { workItemKey } from "../../shared/collaborationReadModels.js";
 
 export type CommentComposerDraft = {

@@ -1,18 +1,22 @@
 import {
   accessScopeSchema,
   evaluateEffectiveAccess,
-  humanPrincipalIdSchema,
-  membershipGrantSchema,
-  projectAccessDecisionSchema,
   type AccessCapability,
   type AccessDisabledReason,
-  type ActorRef,
-  type EffectiveAccessView,
+  type EffectiveAccessView
+} from "@planweave-ai/collaboration-protocol/access/control";
+import {
+  humanPrincipalIdSchema,
+  type ActorRef
+} from "@planweave-ai/collaboration-protocol/core/primitives";
+import {
+  membershipGrantSchema,
+  projectAccessDecisionSchema,
   type MembershipGrant,
   type ProjectAccessDecision,
   type ProjectAccessRecord,
   type CanvasAccessRecord
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/access/project";
 import type { SqliteDatabase } from "./sqlite.js";
 import {
   activeWorkspacePrincipal,

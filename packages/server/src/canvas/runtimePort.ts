@@ -2,10 +2,8 @@ import type {
   ApplyAuthorizedCanvasCommandInput,
   ApplyAuthorizedCanvasCommandResult
 } from "@planweave-ai/runtime";
-import {
-  type CanvasRuntimeStatusProjection,
-  type CompleteContentVersion
-} from "@planweave-ai/collaboration-protocol";
+import { type CanvasRuntimeStatusProjection } from "@planweave-ai/collaboration-protocol/canvas/status";
+import { type CompleteContentVersion } from "@planweave-ai/collaboration-protocol/content/version";
 
 /**
  * Server-side port to Runtime graph mutation. Implementations must not re-parse

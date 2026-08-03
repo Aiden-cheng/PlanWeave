@@ -4,7 +4,7 @@ import {
   collaborationSetupHandoffV1Schema,
   parseCollaborationSetupHandoffV1,
   serializeCollaborationSetupHandoffV1
-} from "../index.js";
+} from "../setupHandoff.js";
 
 const setupCode = `pw_setup_${"A".repeat(43)}`;
 

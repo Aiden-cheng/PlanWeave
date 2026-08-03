@@ -2,7 +2,7 @@ import {
   accessMutationRequestSchema,
   currentCanvasAccessViewSchema,
   effectiveAccessViewSchema
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/access/control";
 import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";

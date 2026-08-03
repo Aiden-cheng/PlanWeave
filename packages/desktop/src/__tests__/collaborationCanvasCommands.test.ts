@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type {
   CanvasCommandOutcome,
-  CanvasReconnectResponse,
-  CompleteContentVersion
-} from "@planweave-ai/collaboration-protocol";
+  CanvasReconnectResponse
+} from "@planweave-ai/collaboration-protocol/canvas/commands";
+import type { CompleteContentVersion } from "@planweave-ai/collaboration-protocol/content/version";
 import {
   applyCanvasReplicaIntent,
   decodeCanvasReplicaDocument,

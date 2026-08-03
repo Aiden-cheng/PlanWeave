@@ -2,13 +2,15 @@ import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import {
   CANVAS_LIVE_SYNC_MAX_FRAME_BYTES,
-  CANVAS_LIVE_SYNC_PROTOCOL_VERSION,
+  CANVAS_LIVE_SYNC_PROTOCOL_VERSION
+} from "@planweave-ai/collaboration-protocol/core/limits";
+import {
   canvasLiveSyncClientMessageSchema,
   canvasLiveSyncServerMessageSchema,
-  type CanvasJournalEntry,
   type CanvasLiveSyncErrorCode,
   type CanvasLiveSyncServerMessage
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/canvas/live-sync";
+import { type CanvasJournalEntry } from "@planweave-ai/collaboration-protocol/canvas/commands";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import {
   authenticateCollaborationForProject,

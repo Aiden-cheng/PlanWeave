@@ -2,11 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AssignmentDisplayProjection,
   AssignmentTarget,
-  EligibleAssigneesResponse,
-  ExecutionTarget,
-  WorkAuthorityProjection,
-  WorkItemRef
-} from "@planweave-ai/collaboration-protocol";
+  EligibleAssigneesResponse
+} from "@planweave-ai/collaboration-protocol/work/assignment";
+import type { ExecutionTarget } from "@planweave-ai/collaboration-protocol/work/execution-target";
+import type { WorkAuthorityProjection } from "@planweave-ai/collaboration-protocol/work/authority";
+import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import { collaborationBridge } from "../bridge";
 import {
   assigneeDisplayLabelsFromTranslator,

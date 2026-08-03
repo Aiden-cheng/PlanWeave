@@ -1,10 +1,10 @@
 import { useId, useRef, useState } from "react";
 import { ServerIcon } from "lucide-react";
+import { parseCollaborationSetupHandoffV1 } from "@planweave-ai/collaboration-protocol/handoff/setup";
 import {
-  parseCollaborationSetupHandoffV1,
   type ActiveWorkspaceConnectionView,
   type WorkspacePickerItem
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/connection";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";

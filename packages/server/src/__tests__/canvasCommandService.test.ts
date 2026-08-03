@@ -2,12 +2,12 @@ import { createHash } from "node:crypto";
 import { rm } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CANVAS_COMMAND_PROTOCOL_VERSION } from "@planweave-ai/collaboration-protocol/core/limits";
 import {
-  CANVAS_COMMAND_PROTOCOL_VERSION,
   type CanvasCommandAccepted,
   type CanvasCommandIntent,
   type CanvasJournalEntry
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/canvas/commands";
 import { createTestWorkspace } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import {
   CanvasCommandRepository,

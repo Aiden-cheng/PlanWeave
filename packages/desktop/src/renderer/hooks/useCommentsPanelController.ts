@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   COMMENT_ATTACHMENTS_MAX_COUNT,
-  COMMENT_LIST_PAGE_DEFAULT,
-  type CommentDisplayProjection,
-  type WorkItemRef
-} from "@planweave-ai/collaboration-protocol";
+  COMMENT_LIST_PAGE_DEFAULT
+} from "@planweave-ai/collaboration-protocol/core/limits";
+import { type CommentDisplayProjection } from "@planweave-ai/collaboration-protocol/activity/comments";
+import { type WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import { collaborationBridge } from "../bridge";
 import {
   createStagedAttachmentFromFile,

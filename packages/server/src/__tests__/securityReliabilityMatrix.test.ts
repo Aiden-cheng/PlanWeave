@@ -18,7 +18,7 @@ import {
   HUMAN_COMMENT_BODY_MAX_LENGTH,
   HUMAN_OBSERVER_MAX_PAYLOAD_BYTES,
   WORK_ASSIGNMENT_BATCH_MAX
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/core/limits";
 import {
   EXECUTION_ENVELOPE_MAX_BYTES,
   OUTPUT_MAX_ARTIFACT_BYTES,

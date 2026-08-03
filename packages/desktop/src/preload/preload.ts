@@ -8,7 +8,7 @@ import {
   humanInvitationViewSchema,
   humanMemberPageSchema,
   humanRevokeInvitationsResponseSchema
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/identity/workspace";
 import type {
   DesktopAutoRunEvent,
   DesktopBridgeApi,

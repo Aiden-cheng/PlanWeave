@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { CanvasAccessPage, ProjectAccessPage } from "@planweave-ai/collaboration-protocol";
+import type {
+  CanvasAccessPage,
+  ProjectAccessPage
+} from "@planweave-ai/collaboration-protocol/access/project";
 import type {
   CollaborationRegistryPageInput,
   PlanWeaveCollaborationApi

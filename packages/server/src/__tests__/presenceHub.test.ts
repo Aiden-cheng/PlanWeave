@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { CanvasPresenceServerMessage } from "@planweave-ai/collaboration-protocol";
+import type { CanvasPresenceServerMessage } from "@planweave-ai/collaboration-protocol/canvas/presence";
 import {
   CanvasPresenceHub,
   CanvasPresenceHubError,

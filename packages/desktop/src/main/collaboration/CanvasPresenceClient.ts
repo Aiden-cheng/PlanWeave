@@ -1,14 +1,16 @@
 import {
   CANVAS_PRESENCE_MAX_FRAME_BYTES,
-  CANVAS_PRESENCE_PROTOCOL_VERSION,
+  CANVAS_PRESENCE_PROTOCOL_VERSION
+} from "@planweave-ai/collaboration-protocol/core/limits";
+import {
   canvasPresenceClientUpdateSchema,
   canvasPresenceHelloSchema,
   canvasPresenceServerMessageSchema,
   type CanvasPresencePointer,
   type CanvasPresenceSelectionId,
-  type CanvasPresenceServerMessage,
-  type CollaborationConnectionProfile
-} from "@planweave-ai/collaboration-protocol";
+  type CanvasPresenceServerMessage
+} from "@planweave-ai/collaboration-protocol/canvas/presence";
+import { type CollaborationConnectionProfile } from "@planweave-ai/collaboration-protocol/connection";
 import { CollaborationClientError } from "./collaborationErrors.js";
 import { reconnectDelay } from "./reconnectBackoff.js";
 import { redactCollaborationText } from "./redaction.js";

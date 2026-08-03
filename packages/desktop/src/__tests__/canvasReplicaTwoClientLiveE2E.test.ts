@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
-import type { CanvasCommandIntent } from "@planweave-ai/collaboration-protocol";
+import type { CanvasCommandIntent } from "@planweave-ai/collaboration-protocol/canvas/commands";
 import {
   CollaborationClient,
   type CollaborationWebSocketConstructor

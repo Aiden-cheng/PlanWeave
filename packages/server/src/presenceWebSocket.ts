@@ -1,12 +1,12 @@
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
+import { CANVAS_PRESENCE_MAX_FRAME_BYTES } from "@planweave-ai/collaboration-protocol/core/limits";
 import {
-  CANVAS_PRESENCE_MAX_FRAME_BYTES,
   canvasPresenceClientMessageSchema,
   canvasPresenceServerMessageSchema,
   type CanvasPresenceErrorCode,
   type CanvasPresenceServerMessage
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/canvas/presence";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import {
   authenticateCollaborationForScope,

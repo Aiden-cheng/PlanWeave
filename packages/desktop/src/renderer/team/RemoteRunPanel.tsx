@@ -1,4 +1,4 @@
-import type { WorkItemRef } from "@planweave-ai/collaboration-protocol";
+import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import type { RemoteBlockExecutionReadModel } from "@planweave-ai/runtime";
 import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";

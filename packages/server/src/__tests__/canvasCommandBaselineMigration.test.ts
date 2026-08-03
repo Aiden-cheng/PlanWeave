@@ -1,11 +1,11 @@
 import { rm } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
+import { CANVAS_COMMAND_PROTOCOL_VERSION } from "@planweave-ai/collaboration-protocol/core/limits";
 import {
-  CANVAS_COMMAND_PROTOCOL_VERSION,
   exampleAuthoritativeContentVersion,
-  exampleCompleteContentVersion,
-  type AuthoritativeContentHead
-} from "@planweave-ai/collaboration-protocol";
+  exampleCompleteContentVersion
+} from "@planweave-ai/collaboration-protocol/fixtures/content-version";
+import { type AuthoritativeContentHead } from "@planweave-ai/collaboration-protocol/content/version";
 import { createTestWorkspace } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { applyMigrations, latestCentralSchemaVersion } from "../migrations.js";
 import { migrations } from "../migrations/registry.js";

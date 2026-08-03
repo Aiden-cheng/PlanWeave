@@ -4,9 +4,9 @@ import type {
   CanvasCommandIntent,
   CanvasCommandOutcome,
   CanvasJournalEntry,
-  CanvasReconnectResponse,
-  CompleteContentVersion
-} from "@planweave-ai/collaboration-protocol";
+  CanvasReconnectResponse
+} from "@planweave-ai/collaboration-protocol/canvas/commands";
+import type { CompleteContentVersion } from "@planweave-ai/collaboration-protocol/content/version";
 import type {
   CanvasReplicaPendingOperation,
   CanvasReplicaScope

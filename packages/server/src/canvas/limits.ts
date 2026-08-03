@@ -2,7 +2,7 @@ import {
   CANVAS_COMMAND_MAX_FRAME_BYTES,
   CANVAS_COMMAND_MAX_JOURNAL_DELTA_ENTRIES,
   CANVAS_COMMAND_MAX_JOURNAL_RETAINED
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/core/limits";
 
 /** Server-side canvas command journal retention (bounded by contract max). */
 export const CANVAS_COMMAND_JOURNAL_RETAINED_DEFAULT = Math.min(

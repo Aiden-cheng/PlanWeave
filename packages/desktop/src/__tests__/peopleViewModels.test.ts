@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { HumanMembershipView } from "@planweave-ai/collaboration-protocol";
+import type { HumanMembershipView } from "@planweave-ai/collaboration-protocol/identity/workspace";
 import {
   buildPeopleHostRows,
   buildPeopleMemberRows,

@@ -1,23 +1,54 @@
 import {
   accessMutationRequestSchema,
   accessMutationResultSchema,
+  currentCanvasAccessViewSchema,
+  type AccessMutationResult,
+  type CurrentCanvasAccessView
+} from "@planweave-ai/collaboration-protocol/access/control";
+import {
   activityListPageSchema,
   activityListWireQuerySchema,
-  assignmentDisplayProjectionSchema,
-  assignmentListPageSchema,
-  assignmentListQuerySchema,
-  assignmentUpdateWireCommandSchema,
   commentCreateWireCommandSchema,
   commentDisplayProjectionSchema,
   commentEditWireCommandSchema,
   commentListPageSchema,
   commentListWireQuerySchema,
   commentTombstoneWireCommandSchema,
-  createPendingAttachmentRequestSchema,
+  type ActivityListPage,
+  type CommentCreateWireCommand,
+  type CommentDisplayProjection,
+  type CommentEditWireCommand,
+  type CommentListPage,
+  type CommentListWireQuery,
+  type CommentTombstoneWireCommand
+} from "@planweave-ai/collaboration-protocol/activity/comments";
+import {
+  assignmentDisplayProjectionSchema,
+  assignmentListPageSchema,
+  assignmentListQuerySchema,
+  assignmentUpdateWireCommandSchema,
   eligibleAssigneesResponseSchema,
+  type AssignmentDisplayProjection,
+  type AssignmentListPage,
+  type AssignmentUpdateWireCommand,
+  type EligibleAssigneesResponse
+} from "@planweave-ai/collaboration-protocol/work/assignment";
+import {
+  createPendingAttachmentRequestSchema,
+  finalizePendingAttachmentResponseSchema,
+  pendingAttachmentViewSchema,
+  uploadPendingAttachmentResponseSchema,
+  type CreatePendingAttachmentRequest,
+  type FinalizePendingAttachmentResponse,
+  type PendingAttachmentView
+} from "@planweave-ai/collaboration-protocol/activity/attachments";
+import {
   executionTargetReadModelSchema,
   executionTargetUpdateWireCommandSchema,
-  finalizePendingAttachmentResponseSchema,
+  type ExecutionTargetReadModel,
+  type ExecutionTargetUpdateWireCommand
+} from "@planweave-ai/collaboration-protocol/work/execution-target";
+import {
   humanBootstrapRequestSchema,
   humanBootstrapResponseSchema,
   humanConsumeInvitationRequestSchema,
@@ -32,11 +63,26 @@ import {
   humanRevokeInvitationsRequestSchema,
   humanRevokeInvitationsResponseSchema,
   humanMemberPageSchema,
-  humanObserverHelloSchema,
   humanPageQuerySchema,
-  HUMAN_OBSERVER_PROTOCOL_VERSION,
+  type HumanBootstrapRequest,
+  type HumanBootstrapResponse,
+  type HumanConsumeInvitationRequest,
+  type HumanConsumeInvitationResponse,
+  type HumanCreateInvitationResponse,
+  type HumanDevicePage,
+  type HumanInvitationPage,
+  type HumanInvitationView,
+  type HumanRevokeInvitationsResponse,
+  type HumanMemberPage
+} from "@planweave-ai/collaboration-protocol/identity/workspace";
+import {
+  humanObserverHelloSchema,
   parseHumanObserverServerMessage,
-  pendingAttachmentViewSchema,
+  type HumanObserverCursor,
+  type HumanObserverServerMessage
+} from "@planweave-ai/collaboration-protocol/activity/observer";
+import { HUMAN_OBSERVER_PROTOCOL_VERSION } from "@planweave-ai/collaboration-protocol/core/limits";
+import {
   remoteActionViewSchema,
   remoteDispatchIntentSchema,
   remoteDispatchWireCommandSchema,
@@ -48,53 +94,6 @@ import {
   remoteInteractionResponseSchema,
   remoteInteractionViewSchema,
   remoteOperationObservationSchema,
-  responsibilityReadModelSchema,
-  responsibilityUpdateWireCommandSchema,
-  reviewAssignmentReadModelSchema,
-  reviewAssignmentUpdateWireCommandSchema,
-  uploadPendingAttachmentResponseSchema,
-  workAuthorityProjectionSchema,
-  contentVersionAcknowledgementSchema,
-  contentVersionAuthorityDiscoveryResultSchema,
-  firstContentVersionPublishResultSchema,
-  currentCanvasAccessViewSchema,
-  canvasRuntimeStatusProjectionSchema,
-  type ActivityListPage,
-  type AssignmentDisplayProjection,
-  type AssignmentListPage,
-  type AssignmentUpdateWireCommand,
-  type CanvasCommandOutcome,
-  type CanvasScopeRef,
-  type CollaborationWorkScope,
-  type ExecutionTargetReadModel,
-  type ExecutionTargetUpdateWireCommand,
-  type CanvasPresencePointer,
-  type CanvasPresenceSelectionId,
-  type CanvasRevision,
-  type CollaborationClientLimits,
-  type CollaborationConnectionProfile,
-  type CommentCreateWireCommand,
-  type CommentDisplayProjection,
-  type CommentEditWireCommand,
-  type CommentListPage,
-  type CommentListWireQuery,
-  type CommentTombstoneWireCommand,
-  type CreatePendingAttachmentRequest,
-  type EligibleAssigneesResponse,
-  type FinalizePendingAttachmentResponse,
-  type HumanBootstrapRequest,
-  type HumanBootstrapResponse,
-  type HumanConsumeInvitationRequest,
-  type HumanConsumeInvitationResponse,
-  type HumanCreateInvitationResponse,
-  type HumanDevicePage,
-  type HumanInvitationPage,
-  type HumanInvitationView,
-  type HumanRevokeInvitationsResponse,
-  type HumanMemberPage,
-  type HumanObserverCursor,
-  type HumanObserverServerMessage,
-  type PendingAttachmentView,
   type RemoteActionView,
   type RemoteDispatchIntent,
   type RemoteDispatchWireCommand,
@@ -103,23 +102,58 @@ import {
   type RemoteInteractionPage,
   type RemoteInteractionResponse,
   type RemoteInteractionView,
-  type RemoteOperationObservation,
+  type RemoteOperationObservation
+} from "@planweave-ai/collaboration-protocol/remote-run";
+import {
+  responsibilityReadModelSchema,
+  responsibilityUpdateWireCommandSchema,
+  type CollaborationWorkScope,
   type ResponsibilityReadModel,
-  type ResponsibilityUpdateWireCommand,
+  type ResponsibilityUpdateWireCommand
+} from "@planweave-ai/collaboration-protocol/work/responsibility";
+import {
+  reviewAssignmentReadModelSchema,
+  reviewAssignmentUpdateWireCommandSchema,
   type ReviewAssignmentReadModel,
-  type ReviewAssignmentUpdateWireCommand,
-  type WorkAuthorityProjection,
-  type WorkItemRef,
+  type ReviewAssignmentUpdateWireCommand
+} from "@planweave-ai/collaboration-protocol/work/review";
+import {
+  workAuthorityProjectionSchema,
+  type WorkAuthorityProjection
+} from "@planweave-ai/collaboration-protocol/work/authority";
+import {
+  contentVersionAcknowledgementSchema,
+  firstContentVersionPublishResultSchema,
   type AuthoritativeContentVersion,
   type CompleteContentVersion,
   type CompletedContentVersionRef,
   type ContentVersionAcknowledgement,
-  type ContentVersionAuthorityDiscoveryResult,
-  type FirstContentVersionPublishResult,
-  type AccessMutationResult,
-  type CurrentCanvasAccessView,
+  type FirstContentVersionPublishResult
+} from "@planweave-ai/collaboration-protocol/content/version";
+import {
+  contentVersionAuthorityDiscoveryResultSchema,
+  type ContentVersionAuthorityDiscoveryResult
+} from "@planweave-ai/collaboration-protocol/content/authority";
+import {
+  canvasRuntimeStatusProjectionSchema,
   type CanvasRuntimeStatusProjection
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/canvas/status";
+import {
+  type CanvasCommandOutcome,
+  type CanvasRevision
+} from "@planweave-ai/collaboration-protocol/canvas/commands";
+import {
+  type CanvasScopeRef,
+  type WorkItemRef
+} from "@planweave-ai/collaboration-protocol/core/primitives";
+import {
+  type CanvasPresencePointer,
+  type CanvasPresenceSelectionId
+} from "@planweave-ai/collaboration-protocol/canvas/presence";
+import {
+  type CollaborationClientLimits,
+  type CollaborationConnectionProfile
+} from "@planweave-ai/collaboration-protocol/connection";
 import type { z, ZodType } from "zod";
 import { CollaborationClientError, collaborationErrorFromHttp } from "./collaborationErrors.js";
 import { reconnectDelay } from "./reconnectBackoff.js";

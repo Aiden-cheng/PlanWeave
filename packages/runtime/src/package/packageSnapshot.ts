@@ -6,10 +6,12 @@ import {
   PACKAGE_SNAPSHOT_MAX_FILE_BYTES,
   PACKAGE_SNAPSHOT_MAX_PROMPT_DIGESTS,
   PACKAGE_SNAPSHOT_MAX_SOURCE_REVISION_LENGTH,
-  PACKAGE_SNAPSHOT_MAX_TOTAL_BYTES,
+  PACKAGE_SNAPSHOT_MAX_TOTAL_BYTES
+} from "@planweave-ai/collaboration-protocol/core/limits";
+import {
   packageSnapshotDigestManifestSchema,
   type PackageSnapshotDigestManifest
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/content/snapshot";
 import type { PackageWorkspaceRef } from "../types.js";
 import { loadPackage, resolvePackageWorkspace } from "./loadPackage.js";
 import { resolvePackagePath } from "./resolvePackagePath.js";

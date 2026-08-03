@@ -5,7 +5,7 @@ import {
   projectRegistryRefSchema,
   type CanvasAccessRecord,
   type ProjectAccessRecord
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/access/project";
 
 export type InternalProjectRecord = {
   projectRegistryId: string;

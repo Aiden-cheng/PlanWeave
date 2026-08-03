@@ -1,40 +1,66 @@
 import { z } from "zod";
 import type { CollaborationCanvasReplicaProjection, CollaborationCanvasReplicaSignal } from "./canvasReplicaIpc.js";
+import { COMMENT_ATTACHMENT_MAX_BYTES } from "@planweave-ai/collaboration-protocol/core/limits";
 import {
-  COMMENT_ATTACHMENT_MAX_BYTES,
   canvasCommandIntentSchema,
+  type CanvasCommandOutcome,
+  type CanvasJournalEntry,
+  type CanvasReconnectResponse
+} from "@planweave-ai/collaboration-protocol/canvas/commands";
+import {
   canvasPresencePointerSchema,
   canvasPresenceSelectionIdsSchema,
+  type CanvasPresenceServerMessage
+} from "@planweave-ai/collaboration-protocol/canvas/presence";
+import {
   accessMutationRequestSchema,
+  type CurrentCanvasAccessView,
+  type AccessMutationResult
+} from "@planweave-ai/collaboration-protocol/access/control";
+import {
   collaborationConnectionProfileSchema,
   collaborationServerOriginSchema,
+  type ActiveWorkspaceConnectionView,
+  type CollaborationConnectionProfile,
+  type WorkspacePickerPage
+} from "@planweave-ai/collaboration-protocol/connection";
+import {
   commentContentSha256Schema,
-  createPendingAttachmentRequestSchema,
   humanDisplayNameSchema,
   humanDeviceLabelSchema,
   setupCodeTokenSchema,
-  type ActiveWorkspaceConnectionView,
+  humanDeviceTokenSchema,
+  pendingAttachmentUploadIdSchema,
+  workspaceIdSchema
+} from "@planweave-ai/collaboration-protocol/core/primitives";
+import {
+  createPendingAttachmentRequestSchema,
+  type CreatePendingAttachmentRequest,
+  type FinalizePendingAttachmentResponse,
+  type PendingAttachmentView
+} from "@planweave-ai/collaboration-protocol/activity/attachments";
+import {
   type ConnectivityValidationView,
   type DeploymentGuidanceView,
-  type DesktopDeploymentActionRequest,
+  type DesktopDeploymentActionRequest
+} from "@planweave-ai/collaboration-protocol/deployment";
+import {
   type CanvasAccessPage,
+  type ProjectAccessPage,
+  type RegistryPageQuery
+} from "@planweave-ai/collaboration-protocol/access/project";
+import {
   type CreatePackageSnapshotRequest,
   type CreatePackageSnapshotResult,
+  type PackageSnapshot,
+  type RestorePackageSnapshotRequest,
+  type RestorePackageSnapshotResult
+} from "@planweave-ai/collaboration-protocol/content/snapshot";
+import {
   humanBootstrapRequestSchema,
   humanConsumeInvitationRequestSchema,
   humanCreateInvitationRequestSchema,
   humanRevokeInvitationsRequestSchema,
-  humanDeviceTokenSchema,
-  pendingAttachmentUploadIdSchema,
-  type ActivityListPage,
-  type AssignmentDisplayProjection,
-  type AssignmentListPage,
-  type CollaborationConnectionProfile,
-  type CommentDisplayProjection,
-  type CommentListPage,
-  type CreatePendingAttachmentRequest,
-  type EligibleAssigneesResponse,
-  type FinalizePendingAttachmentResponse,
   type HumanBootstrapRequest,
   type HumanConsumeInvitationRequest,
   type HumanCreateInvitationResponse,
@@ -45,17 +71,21 @@ import {
   type HumanRevokeInvitationsResponse,
   type HumanMemberPage,
   type HumanMembershipView,
-  type HumanPrincipalView,
-  type PackageSnapshot,
-  type PendingAttachmentView,
-  type ProjectAccessPage,
-  type RegistryPageQuery,
-  type CanvasCommandOutcome,
-  type CanvasJournalEntry,
-  type CanvasReconnectResponse,
-  type CanvasRuntimeStatusProjection,
-  type CanvasPresenceServerMessage,
-  type CanvasLiveSyncServerMessage,
+  type HumanPrincipalView
+} from "@planweave-ai/collaboration-protocol/identity/workspace";
+import {
+  type ActivityListPage,
+  type CommentDisplayProjection,
+  type CommentListPage
+} from "@planweave-ai/collaboration-protocol/activity/comments";
+import {
+  type AssignmentDisplayProjection,
+  type AssignmentListPage,
+  type EligibleAssigneesResponse
+} from "@planweave-ai/collaboration-protocol/work/assignment";
+import { type CanvasRuntimeStatusProjection } from "@planweave-ai/collaboration-protocol/canvas/status";
+import { type CanvasLiveSyncServerMessage } from "@planweave-ai/collaboration-protocol/canvas/live-sync";
+import {
   type RemoteActionView,
   type RemoteDispatchIntent,
   type RemoteDispatchWireCommand,
@@ -64,22 +94,20 @@ import {
   type RemoteInteractionPage,
   type RemoteInteractionResponse,
   type RemoteInteractionView,
-  type RemoteOperationObservation,
-  type ResponsibilityReadModel,
-  type RestorePackageSnapshotRequest,
-  type RestorePackageSnapshotResult,
-  type ReviewAssignmentReadModel,
-  type ExecutionTargetReadModel,
-  type WorkAuthorityProjection,
-  type WorkspacePickerPage,
-  workspaceIdSchema,
+  type RemoteOperationObservation
+} from "@planweave-ai/collaboration-protocol/remote-run";
+import { type ResponsibilityReadModel } from "@planweave-ai/collaboration-protocol/work/responsibility";
+import { type ReviewAssignmentReadModel } from "@planweave-ai/collaboration-protocol/work/review";
+import { type ExecutionTargetReadModel } from "@planweave-ai/collaboration-protocol/work/execution-target";
+import { type WorkAuthorityProjection } from "@planweave-ai/collaboration-protocol/work/authority";
+import {
   contentVersionDesktopReadModelSchema,
-  type ContentVersionDesktopReadModel,
-  type CurrentCanvasAccessView,
-  type AccessMutationResult,
+  type ContentVersionDesktopReadModel
+} from "@planweave-ai/collaboration-protocol/content/authority";
+import {
   type LoopbackProjectRegistrationView,
   type LoopbackTrustedProjectScope
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/loopback";
 import type {
   CollaborationActivityListQueryInput,
   CollaborationAssignmentListQueryInput,
@@ -671,7 +699,7 @@ export type PlanWeaveCollaborationApi = {
   ) => Promise<{ state: "copied"; copiedAt: string }>;
   exportDeploymentComposeBundle: (
     input: Extract<DesktopDeploymentActionRequest, { action: "export_supported_compose_bundle" }>
-  ) => Promise<import("@planweave-ai/collaboration-protocol").DeploymentBundleExportView>;
+  ) => Promise<import("@planweave-ai/collaboration-protocol/deployment").DeploymentBundleExportView>;
   validateDeploymentConnectivity: (
     input: Extract<DesktopDeploymentActionRequest, { action: "validate_connectivity" }>
   ) => Promise<ConnectivityValidationView>;

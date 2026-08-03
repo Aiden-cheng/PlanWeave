@@ -1,4 +1,4 @@
-import type { CanvasCommandIntent } from "@planweave-ai/collaboration-protocol";
+import type { CanvasCommandIntent } from "@planweave-ai/collaboration-protocol/canvas/commands";
 import type {
   CollaborationCanvasSessionInput,
   CollaborationCanvasCommandSessionView,

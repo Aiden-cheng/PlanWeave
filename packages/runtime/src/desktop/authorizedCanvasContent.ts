@@ -4,9 +4,9 @@ import {
   compareContentVersionMemberPaths,
   completeContentVersionSchema,
   contentVersionDesktopLayoutMemberPath,
-  type CompleteContentVersion,
-  type PackageSnapshotDigestManifest
-} from "@planweave-ai/collaboration-protocol";
+  type CompleteContentVersion
+} from "@planweave-ai/collaboration-protocol/content/version";
+import { type PackageSnapshotDigestManifest } from "@planweave-ai/collaboration-protocol/content/snapshot";
 import { capturePackageSnapshot } from "../package/packageSnapshot.js";
 import { resolvePackageWorkspace } from "../package/loadPackage.js";
 import type { PackageWorkspaceRef } from "../types.js";

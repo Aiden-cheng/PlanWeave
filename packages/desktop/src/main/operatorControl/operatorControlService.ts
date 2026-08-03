@@ -1,4 +1,4 @@
-import { serializeCollaborationSetupHandoffV1 } from "@planweave-ai/collaboration-protocol";
+import { serializeCollaborationSetupHandoffV1 } from "@planweave-ai/collaboration-protocol/handoff/setup";
 import { operatorTokenSchema } from "@planweave-ai/agent-host-protocol";
 import { randomBytes } from "node:crypto";
 import {

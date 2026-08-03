@@ -2,17 +2,21 @@ import { randomUUID } from "node:crypto";
 import {
   CANVAS_PRESENCE_MAX_SESSIONS_PER_CANVAS,
   CANVAS_PRESENCE_MAX_UPDATES_PER_SECOND,
-  CANVAS_PRESENCE_SESSION_TTL_MS,
+  CANVAS_PRESENCE_SESSION_TTL_MS
+} from "@planweave-ai/collaboration-protocol/core/limits";
+import {
   canvasPresenceSessionIdSchema,
   canvasPresenceSessionSchema,
-  humanProjectIdSchema,
-  opaqueIdentifierSchema,
-  workspaceIdSchema,
   type CanvasPresencePointer,
   type CanvasPresenceServerMessage,
   type CanvasPresenceSession,
   type CanvasPresenceSessionId
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/canvas/presence";
+import {
+  humanProjectIdSchema,
+  opaqueIdentifierSchema,
+  workspaceIdSchema
+} from "@planweave-ai/collaboration-protocol/core/primitives";
 
 export type CanvasPresenceScope = {
   workspaceId: string;

@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { XYPosition, OnSelectionChangeParams } from "@xyflow/react";
-import {
-  CANVAS_PRESENCE_MAX_SELECTION_IDS,
-  canvasPresenceSelectionIdSchema
-} from "@planweave-ai/collaboration-protocol";
+import { CANVAS_PRESENCE_MAX_SELECTION_IDS } from "@planweave-ai/collaboration-protocol/core/limits";
+import { canvasPresenceSelectionIdSchema } from "@planweave-ai/collaboration-protocol/canvas/presence";
 import { collaborationBridge } from "../bridge";
 import {
   CanvasPresenceController,

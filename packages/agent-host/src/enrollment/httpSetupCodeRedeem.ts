@@ -1,7 +1,7 @@
 import {
   setupCodeRedeemHostResponseSchema,
   type SetupCodeRedeemHostResponse
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/setup";
 
 const MAX_RESPONSE_BYTES = 16_384;
 const JSON_CONTENT_TYPE = /^application\/json(?:;\s*charset=utf-8)?$/i;

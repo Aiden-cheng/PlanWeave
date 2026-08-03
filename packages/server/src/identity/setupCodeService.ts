@@ -2,11 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
   assertSetupRedeemPurposeMatch,
   assertSetupViewRedacted,
-  collaborationServerOriginSchema,
   evaluateSetupCodeUsability,
-  humanDeviceTokenSchema,
-  isPrivateNetworkHostname,
-  operatorCredentialTokenSchema,
   setupCodeGrantPageSchema,
   setupCodeIssueRequestSchema,
   setupCodeIssueResponseSchema,
@@ -17,15 +13,23 @@ import {
   setupCodeRedeemRequestSchema,
   setupCodeRevokeRequestSchema,
   setupCodeRevocationSchema,
-  workspaceConnectionProfileSchema,
-  workspaceIdSchema,
-  workspaceNameSchema,
   type SetupCodeGrantPage,
   type SetupCodeIssueResponse,
   type SetupCodeRedeemResponse,
-  type SetupCodeRevocation,
+  type SetupCodeRevocation
+} from "@planweave-ai/collaboration-protocol/setup";
+import {
+  collaborationServerOriginSchema,
+  isPrivateNetworkHostname,
+  workspaceConnectionProfileSchema,
   type WorkspaceConnectionProfile
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/connection";
+import {
+  humanDeviceTokenSchema,
+  operatorCredentialTokenSchema,
+  workspaceIdSchema,
+  workspaceNameSchema
+} from "@planweave-ai/collaboration-protocol/core/primitives";
 import { canonicalizeJson } from "@planweave-ai/agent-host-protocol";
 import { AgentHostRepository } from "../hosts.js";
 import type { OperatorPrincipal } from "../operatorAuth.js";

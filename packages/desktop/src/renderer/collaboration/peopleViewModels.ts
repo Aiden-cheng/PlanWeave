@@ -2,7 +2,7 @@ import type {
   HumanDeviceView,
   HumanInvitationView,
   HumanMembershipView
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/identity/workspace";
 import type {
   CollaborationBoundaryErrorView,
   CollaborationHostProjection,

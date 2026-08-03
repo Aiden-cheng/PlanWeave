@@ -1,14 +1,14 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
+import { CANVAS_COMMAND_PROTOCOL_VERSION } from "@planweave-ai/collaboration-protocol/core/limits";
 import {
-  CANVAS_COMMAND_PROTOCOL_VERSION,
   exampleCanvasCommandAccepted,
   exampleCanvasReconnectTruncatedJournal,
   exampleCanvasCommandStaleRevisionRejected,
   exampleCanvasReconnectAfterDisconnect,
   exampleHumanDeviceToken
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/fixtures/collaboration";
 import { CanvasCommandSessionState, CollaborationClient } from "../main/collaboration/index.js";
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;

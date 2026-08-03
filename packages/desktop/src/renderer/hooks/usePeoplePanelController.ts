@@ -3,7 +3,7 @@ import type {
   HumanDeviceView,
   HumanInvitationView,
   HumanMembershipView
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/identity/workspace";
 import { collaborationBridge } from "../bridge";
 import { collaborationErrorMessage } from "../collaboration/formatCollaborationError";
 import {

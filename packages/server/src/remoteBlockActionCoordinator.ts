@@ -6,7 +6,7 @@ import {
 import {
   remoteHumanExecutionActionCommandSchema,
   type RemoteHumanExecutionActionCommand
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/remote-run";
 import type {
   RemoteExecutionActionDecision,
   RemoteExecutionActionRequest

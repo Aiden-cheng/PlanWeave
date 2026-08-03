@@ -6,11 +6,11 @@ import {
   completeContentVersionSchema,
   contentVersionDesktopLayoutMemberPath,
   contentVersionMemberPathSchema,
-  timestampSchema,
   type CompleteContentVersion,
   type ContentVersionMember,
   type ContentVersionMemberKind
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/content/version";
+import { timestampSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
 import { validateAuthoritativeCanvasContent } from "../desktop/contentVersionValidation.js";
 import {
   desktopLayoutFileSchema,

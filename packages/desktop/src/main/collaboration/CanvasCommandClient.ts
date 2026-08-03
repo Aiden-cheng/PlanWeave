@@ -1,5 +1,5 @@
+import { CANVAS_COMMAND_PROTOCOL_VERSION } from "@planweave-ai/collaboration-protocol/core/limits";
 import {
-  CANVAS_COMMAND_PROTOCOL_VERSION,
   canvasCommandIntentSchema,
   canvasCommandOperationIdSchema,
   canvasCommandOutcomeSchema,
@@ -12,7 +12,7 @@ import {
   type CanvasJournalEntry,
   type CanvasReconnectResponse,
   type CanvasRevision
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/canvas/commands";
 import { CollaborationClientError } from "./collaborationErrors.js";
 import type { CollaborationHttpTransport } from "./collaborationHttpTransport.js";
 import {

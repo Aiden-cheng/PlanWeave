@@ -3,10 +3,10 @@ import type {
   CanvasCommandIntent,
   CanvasCommandOutcome,
   CanvasJournalEntry,
-  CanvasReconnectResponse,
-  CompleteContentVersion
-} from "@planweave-ai/collaboration-protocol";
-import { CANVAS_LIVE_SYNC_PROTOCOL_VERSION } from "@planweave-ai/collaboration-protocol";
+  CanvasReconnectResponse
+} from "@planweave-ai/collaboration-protocol/canvas/commands";
+import type { CompleteContentVersion } from "@planweave-ai/collaboration-protocol/content/version";
+import { CANVAS_LIVE_SYNC_PROTOCOL_VERSION } from "@planweave-ai/collaboration-protocol/core/limits";
 import {
   applyCanvasReplicaIntent,
   encodeCanvasReplicaDocument,

@@ -1,9 +1,9 @@
 import { timingSafeEqual } from "node:crypto";
 import {
   credentialSha256Schema,
-  operatorSessionIdSchema,
-  type OperatorSession
-} from "@planweave-ai/collaboration-protocol";
+  operatorSessionIdSchema
+} from "@planweave-ai/collaboration-protocol/core/primitives";
+import { type OperatorSession } from "@planweave-ai/collaboration-protocol/identity/workspace";
 import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
 import type { SqliteDatabase } from "./sqlite.js";

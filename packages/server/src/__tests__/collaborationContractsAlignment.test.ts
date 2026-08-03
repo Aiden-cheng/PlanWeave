@@ -6,15 +6,21 @@ import {
   exampleCommentProjection,
   exampleMemberPage,
   exampleObserverEvent,
-  exampleObserverWelcome,
+  exampleObserverWelcome
+} from "@planweave-ai/collaboration-protocol/fixtures/collaboration";
+import {
   humanBootstrapResponseSchema as contractBootstrap,
-  humanMemberPageSchema as contractMemberPage,
-  assignmentDisplayProjectionSchema as contractAssignment,
+  humanMemberPageSchema as contractMemberPage
+} from "@planweave-ai/collaboration-protocol/identity/workspace";
+import { assignmentDisplayProjectionSchema as contractAssignment } from "@planweave-ai/collaboration-protocol/work/assignment";
+import {
   commentDisplayProjectionSchema as contractComment,
-  activityRecordSchema as contractActivity,
+  activityRecordSchema as contractActivity
+} from "@planweave-ai/collaboration-protocol/activity/comments";
+import {
   humanObserverEventSchema as contractObserverEvent,
   humanObserverWelcomeSchema as contractObserverWelcome
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/activity/observer";
 import { humanBootstrapResponseSchema, humanMemberPageSchema } from "../identity/dtos.js";
 import { assignmentDisplayProjectionSchema } from "../work/schemas.js";
 import { activityRecordSchema, commentDisplayProjectionSchema } from "../comments/schemas.js";

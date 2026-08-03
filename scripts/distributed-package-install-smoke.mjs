@@ -45,6 +45,43 @@ const packOrder = [
   "agent-host"
 ];
 
+const collaborationProtocolModules = [
+  ["core/primitives", "primitives"],
+  ["core/limits", "limits"],
+  ["errors", "errors"],
+  ["identity/workspace", "identity"],
+  ["identity/migration", "migration"],
+  ["access/project", "projectAccess"],
+  ["access/control", "accessControl"],
+  ["content/snapshot", "packageSnapshot"],
+  ["content/version", "contentVersion"],
+  ["content/authority", "contentAuthority"],
+  ["content/transfer", "contentVersionTransfer"],
+  ["work/assignment", "assignment"],
+  ["work/responsibility", "responsibility"],
+  ["work/review", "review"],
+  ["work/execution-target", "executionTarget"],
+  ["work/host-authorization", "hostAuthorization"],
+  ["work/authority", "workAuthority"],
+  ["work/assignment-migration", "assignmentMigration"],
+  ["canvas/commands", "canvasCommands"],
+  ["canvas/live-sync", "canvasLiveSync"],
+  ["canvas/status", "runtimeStatus"],
+  ["canvas/presence", "presence"],
+  ["activity/comments", "comments"],
+  ["activity/attachments", "attachments"],
+  ["activity/observer", "observer"],
+  ["connection", "connection"],
+  ["setup", "setup"],
+  ["handoff/setup", "setupHandoff"],
+  ["handoff/invitation", "invitationHandoff"],
+  ["deployment", "deployment"],
+  ["loopback", "loopbackServer"],
+  ["remote-run", "remoteRun"],
+  ["fixtures/collaboration", "fixtures/collaboration"],
+  ["fixtures/content-version", "fixtures/contentVersion"]
+];
+
 const packageMeta = {
   "agent-host-protocol": {
     name: "@planweave-ai/agent-host-protocol",
@@ -54,7 +91,10 @@ const packageMeta = {
   "collaboration-protocol": {
     name: "@planweave-ai/collaboration-protocol",
     dir: "packages/collaboration-protocol",
-    requiredPaths: ["dist/index.js"]
+    requiredPaths: collaborationProtocolModules.flatMap(([, target]) => [
+      `dist/${target}.js`,
+      `dist/${target}.d.ts`
+    ])
   },
   runtime: {
     name: "@planweave-ai/runtime",
@@ -372,6 +412,23 @@ async function main() {
       cwd: installDir
     });
     const consumerAudit = auditInstalledConsumer(installDir);
+
+    const collaborationImportSmokePath = join(installDir, "collaboration-import-smoke.mjs");
+    writeFileSync(
+      collaborationImportSmokePath,
+      [
+        `const packageName = ${JSON.stringify(packageMeta["collaboration-protocol"].name)};`,
+        `const subpaths = ${JSON.stringify(collaborationProtocolModules.map(([subpath]) => subpath))};`,
+        "for (const subpath of subpaths) await import(`${packageName}/${subpath}`);",
+        "try {",
+        "  await import(packageName);",
+        '  throw new Error("collaboration_protocol_root_export_available");',
+        "} catch (error) {",
+        '  if (error?.code !== "ERR_PACKAGE_PATH_NOT_EXPORTED") throw error;',
+        "}"
+      ].join("\n")
+    );
+    run(process.execPath, [collaborationImportSmokePath], { cwd: installDir });
 
     const serverPackageRoot = join(installDir, "node_modules/@planweave-ai/server");
     const hostPackageRoot = join(installDir, "node_modules/@planweave-ai/agent-host");

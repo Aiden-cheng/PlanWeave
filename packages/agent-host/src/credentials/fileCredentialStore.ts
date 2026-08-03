@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { lstat, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { HostEnrollmentCompleted } from "@planweave-ai/agent-host-protocol";
-import type { SetupCodeRedeemHostResponse } from "@planweave-ai/collaboration-protocol";
+import type { SetupCodeRedeemHostResponse } from "@planweave-ai/collaboration-protocol/setup";
 import {
   hostCredentialDocumentSchema,
   type ActiveHostCredential,

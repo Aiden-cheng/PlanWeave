@@ -1,4 +1,4 @@
-import type { LoopbackProjectRegistrationView } from "@planweave-ai/collaboration-protocol";
+import type { LoopbackProjectRegistrationView } from "@planweave-ai/collaboration-protocol/loopback";
 import type { LocalCollaborationRegistrationInput } from "../../shared/localCollaborationScopes.js";
 
 type LocalCollaborationProfile = {

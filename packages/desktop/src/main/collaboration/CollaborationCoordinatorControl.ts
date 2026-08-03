@@ -7,11 +7,11 @@ import {
 import {
   loopbackProjectRegistrationViewSchema,
   loopbackServerProfileSchema,
-  type DeploymentTargetDraft,
   type LoopbackServerProfile,
   type LoopbackTrustedProjectScope,
   type LoopbackProjectRegistrationView
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/loopback";
+import { type DeploymentTargetDraft } from "@planweave-ai/collaboration-protocol/deployment";
 import { listProjects, resolveTaskCanvasWorkspace } from "@planweave-ai/runtime";
 import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:net";

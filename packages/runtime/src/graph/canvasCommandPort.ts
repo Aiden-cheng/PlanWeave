@@ -3,10 +3,12 @@ import { cp, mkdtemp, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   canvasCommandIntentSchema,
+  type CanvasCommandIntent
+} from "@planweave-ai/collaboration-protocol/canvas/commands";
+import {
   packageSnapshotDigestManifestSchema,
-  type CanvasCommandIntent,
   type PackageSnapshotDigestManifest
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/content/snapshot";
 import {
   buildCanvasCommandApplication,
   CanvasCommandMutationError,

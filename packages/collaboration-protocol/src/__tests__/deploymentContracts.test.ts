@@ -8,7 +8,7 @@ import {
   deploymentTargetDraftSchema,
   deploymentWebSocketOrigin,
   desktopDeploymentActionRequestSchema
-} from "../index.js";
+} from "../deployment.js";
 
 const capabilities = [
   "workspace_connection",

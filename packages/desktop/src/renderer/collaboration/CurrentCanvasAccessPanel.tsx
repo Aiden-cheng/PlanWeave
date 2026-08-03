@@ -1,7 +1,7 @@
 import type {
   ActiveCanvasPersonGrant,
   CurrentCanvasAccessView
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/access/control";
 import { LockKeyholeIcon, ShieldCheckIcon, UsersRoundIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { createTranslator } from "../i18n";

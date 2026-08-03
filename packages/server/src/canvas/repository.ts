@@ -1,22 +1,22 @@
 import { createHash, randomUUID } from "node:crypto";
+import { CANVAS_COMMAND_PROTOCOL_VERSION } from "@planweave-ai/collaboration-protocol/core/limits";
 import {
-  CANVAS_COMMAND_PROTOCOL_VERSION,
   canvasCommandAcceptedSchema,
   canvasCommandOutcomeSchema,
   canvasCommandRejectedSchema,
   canvasJournalEntrySchema,
   canvasSnapshotContentSchema,
   canvasSnapshotMetadataSchema,
-  type ActorRef,
   type CanvasCommandAccepted,
   type CanvasCommandIntent,
   type CanvasCommandOutcome,
   type CanvasCommandRejected,
   type CanvasJournalEntry,
   type CanvasSnapshotContent,
-  type CanvasSnapshotMetadata,
-  type PackageSnapshotDigestManifest
-} from "@planweave-ai/collaboration-protocol";
+  type CanvasSnapshotMetadata
+} from "@planweave-ai/collaboration-protocol/canvas/commands";
+import { type ActorRef } from "@planweave-ai/collaboration-protocol/core/primitives";
+import { type PackageSnapshotDigestManifest } from "@planweave-ai/collaboration-protocol/content/snapshot";
 import { inWriteTransaction, type SqliteDatabase } from "../sqlite.js";
 import {
   CANVAS_COMMAND_JOURNAL_RETAINED_DEFAULT,

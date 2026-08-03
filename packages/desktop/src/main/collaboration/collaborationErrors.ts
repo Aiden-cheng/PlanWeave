@@ -3,7 +3,7 @@ import {
   isRetryableBoundaryKind,
   mapHttpStatusToBoundaryKind,
   type CollaborationBoundaryErrorKind
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/errors";
 import { redactCollaborationText } from "./redaction.js";
 
 export class CollaborationClientError extends Error {

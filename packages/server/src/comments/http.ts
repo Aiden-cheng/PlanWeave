@@ -4,7 +4,7 @@ import {
   commentEditWireCommandSchema,
   commentListWireQuerySchema,
   commentTombstoneWireCommandSchema
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/activity/comments";
 import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";

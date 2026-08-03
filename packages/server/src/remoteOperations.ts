@@ -3,7 +3,7 @@ import {
   executionAttemptIdSchema,
   opaqueIdentifierSchema
 } from "@planweave-ai/agent-host-protocol";
-import { workspaceIdSchema } from "@planweave-ai/collaboration-protocol";
+import { workspaceIdSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { capabilitiesSchema } from "./protocol.js";

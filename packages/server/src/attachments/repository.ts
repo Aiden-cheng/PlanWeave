@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { workspaceIdSchema } from "@planweave-ai/collaboration-protocol";
+import { workspaceIdSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
 import { z } from "zod";
 import {
   commentAttachmentFileNameSchema,

@@ -1,5 +1,5 @@
+import { opaqueIdentifierSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
 import {
-  opaqueIdentifierSchema,
   remoteDispatchIntentSchema,
   remoteDispatchWireCommandSchema,
   remoteEventQuerySchema,
@@ -9,7 +9,7 @@ import {
   type RemoteInteractionPage,
   type RemoteInteractionView,
   type RemoteOperationObservation
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/remote-run";
 import { z } from "zod";
 import {
   collaborationRemoteActionInputSchema,

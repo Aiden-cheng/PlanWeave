@@ -11,12 +11,14 @@ import {
   exampleObserverCatchupRequired,
   exampleObserverEvent,
   exampleObserverWelcome,
-  exampleSecretsForRedaction,
-  accessCapabilityFlags,
+  exampleSecretsForRedaction
+} from "@planweave-ai/collaboration-protocol/fixtures/collaboration";
+import { accessCapabilityFlags } from "@planweave-ai/collaboration-protocol/access/control";
+import {
   CONTENT_VERSION_MAX_TOTAL_BYTES,
-  contentVersionTransferMediaType,
   HUMAN_OBSERVER_PROTOCOL_VERSION
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/core/limits";
+import { contentVersionTransferMediaType } from "@planweave-ai/collaboration-protocol/content/transfer";
 import {
   CollaborationClient,
   CollaborationClientError,

@@ -1,16 +1,18 @@
 import {
   authorizedContentVersionAcknowledgementSchema,
-  authorizedContentVersionAuthorityDiscoverySchema,
   authorizedContentVersionFetchSchema,
-  contentVersionAuthorityDiscoveryRequestSchema,
   contentVersionAcknowledgementRequestSchema,
   contentVersionFetchRequestSchema,
   firstContentVersionPublishRequestSchema,
   firstContentVersionPublishResultSchema,
   type ContentVersionAcknowledgement,
-  type ContentVersionAuthorityDiscoveryResult,
   type FirstContentVersionPublishResult
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/content/version";
+import {
+  authorizedContentVersionAuthorityDiscoverySchema,
+  contentVersionAuthorityDiscoveryRequestSchema,
+  type ContentVersionAuthorityDiscoveryResult
+} from "@planweave-ai/collaboration-protocol/content/authority";
 import type { CollaborationAuthContext } from "../identity/auth.js";
 import type { ProjectAccessRepository } from "../projectAccessRepository.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";

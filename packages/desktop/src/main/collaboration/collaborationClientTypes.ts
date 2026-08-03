@@ -2,10 +2,12 @@ import type {
   CanvasPresenceError,
   CanvasPresenceLeave,
   CanvasPresenceSnapshot,
-  CanvasPresenceUpdate,
+  CanvasPresenceUpdate
+} from "@planweave-ai/collaboration-protocol/canvas/presence";
+import type {
   HumanObserverCursor,
   HumanObserverServerMessage
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/activity/observer";
 
 /** Returns the current human device bearer (`pw_hdev_…`) or undefined when unauthenticated. */
 export type CollaborationCredentialPort = {

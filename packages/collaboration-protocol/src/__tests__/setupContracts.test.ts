@@ -1,11 +1,27 @@
 import { describe, expect, it } from "vitest";
 import {
   activeWorkspaceConnectionViewSchema,
+  collaborationServerOriginSchema,
+  workspaceConnectionProfileSchema,
+  workspacePickerPageSchema
+} from "../connection.js";
+import {
   assertSetupRedeemPurposeMatch,
   assertSetupViewRedacted,
-  collaborationServerOriginSchema,
   deriveSetupCodeLifecycleState,
   evaluateSetupCodeUsability,
+  hostBootstrapEnrollmentSecretSchema,
+  hostBootstrapHandoffViewSchema,
+  setupCodeGrantSchema,
+  setupCodeIssueRequestSchema,
+  setupCodeIssueResponseSchema,
+  setupCodeRedeemDeviceRequestSchema,
+  setupCodeRedeemHostRequestSchema,
+  setupCodeRedeemOperatorRequestSchema,
+  setupCodeRedeemRequestSchema,
+  setupCodeRedeemResponseSchema
+} from "../setup.js";
+import {
   exampleActiveWorkspaceConnectionConnected,
   exampleActiveWorkspaceConnectionLocalOnly,
   exampleHostBootstrapEnrollmentSecret,
@@ -20,22 +36,10 @@ import {
   exampleSetupCodeRedeemOperatorResponse,
   exampleSetupCodeRevocation,
   exampleWorkspaceConnectionProfile,
-  exampleWorkspacePickerPage,
-  hostBootstrapEnrollmentSecretSchema,
-  hostBootstrapHandoffViewSchema,
-  setupCodeGrantSchema,
-  setupCodeIssueRequestSchema,
-  setupCodeIssueResponseSchema,
-  setupCodeRedeemDeviceRequestSchema,
-  setupCodeRedeemHostRequestSchema,
-  setupCodeRedeemOperatorRequestSchema,
-  setupCodeRedeemRequestSchema,
-  setupCodeRedeemResponseSchema,
-  setupCodeTokenSchema,
-  setupPurposeCredentialDomain,
-  workspaceConnectionProfileSchema,
-  workspacePickerPageSchema
-} from "../index.js";
+  exampleWorkspacePickerPage
+} from "../fixtures/collaboration.js";
+import { setupCodeTokenSchema } from "../primitives.js";
+import { setupPurposeCredentialDomain } from "../identity.js";
 
 const now = new Date("2030-01-01T00:30:00.000Z");
 

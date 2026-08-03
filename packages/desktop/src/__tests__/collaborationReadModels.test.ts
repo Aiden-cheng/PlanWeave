@@ -4,15 +4,17 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
   assignmentDisplayProjectionSchema,
+  type AssignmentDisplayProjection
+} from "@planweave-ai/collaboration-protocol/work/assignment";
+import {
   exampleActivityListPage,
   exampleAssignmentProjection,
   exampleCommentListPage,
   exampleCommentProjection,
   exampleMemberPage,
   exampleObserverCatchupRequired,
-  exampleObserverEvent,
-  type AssignmentDisplayProjection
-} from "@planweave-ai/collaboration-protocol";
+  exampleObserverEvent
+} from "@planweave-ai/collaboration-protocol/fixtures/collaboration";
 import { CollaborationReadModelController } from "../renderer/collaboration/CollaborationReadModelController";
 import {
   buildCollaborationProjectViewModel,

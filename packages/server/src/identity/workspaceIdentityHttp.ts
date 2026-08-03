@@ -1,8 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import {
-  assertWorkspaceIdentityViewRedacted,
-  opaqueIdentifierSchema
-} from "@planweave-ai/collaboration-protocol";
+import { assertWorkspaceIdentityViewRedacted } from "@planweave-ai/collaboration-protocol/identity/workspace";
+import { opaqueIdentifierSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
 import { z } from "zod";
 import { OperatorTokenRegistry, type OperatorPrincipal } from "../operatorAuth.js";
 import { workspaceIdentityReadModelSchema, type WorkspaceIdentityReadModel } from "./dtos.js";

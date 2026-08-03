@@ -1,12 +1,14 @@
 import {
   CANVAS_LIVE_SYNC_MAX_FRAME_BYTES,
-  CANVAS_LIVE_SYNC_PROTOCOL_VERSION,
+  CANVAS_LIVE_SYNC_PROTOCOL_VERSION
+} from "@planweave-ai/collaboration-protocol/core/limits";
+import {
   canvasLiveSyncHelloSchema,
   canvasLiveSyncServerMessageSchema,
-  type CanvasLiveSyncServerMessage,
-  type CanvasRevision,
-  type CollaborationConnectionProfile
-} from "@planweave-ai/collaboration-protocol";
+  type CanvasLiveSyncServerMessage
+} from "@planweave-ai/collaboration-protocol/canvas/live-sync";
+import { type CanvasRevision } from "@planweave-ai/collaboration-protocol/canvas/commands";
+import { type CollaborationConnectionProfile } from "@planweave-ai/collaboration-protocol/connection";
 import { CollaborationClientError } from "./collaborationErrors.js";
 import { reconnectDelay } from "./reconnectBackoff.js";
 import { redactCollaborationText } from "./redaction.js";

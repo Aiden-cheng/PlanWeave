@@ -3,9 +3,9 @@
 import "@testing-library/jest-dom/vitest";
 import {
   accessCapabilityFlags,
-  serializeCollaborationSetupHandoffV1,
   type CurrentCanvasAccessView
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/access/control";
+import { serializeCollaborationSetupHandoffV1 } from "@planweave-ai/collaboration-protocol/handoff/setup";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";

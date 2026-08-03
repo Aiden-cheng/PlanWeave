@@ -2,10 +2,12 @@ import type {
   AssignmentAvailability,
   AssignmentDisplayProjection,
   AssignmentTarget,
-  EligibleAssigneesResponse,
+  EligibleAssigneesResponse
+} from "@planweave-ai/collaboration-protocol/work/assignment";
+import type {
   HumanPrincipalId,
   WorkItemRef
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/core/primitives";
 import type {
   CollaborationBoundaryErrorView,
   CollaborationHostProjection,

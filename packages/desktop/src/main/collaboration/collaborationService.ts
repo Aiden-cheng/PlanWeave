@@ -1,21 +1,16 @@
+import { COLLABORATION_REQUEST_TIMEOUT_MS } from "@planweave-ai/collaboration-protocol/core/limits";
 import {
-  COLLABORATION_REQUEST_TIMEOUT_MS,
   collaborationConnectionProfileSchema,
+  type CollaborationConnectionProfile,
+  type ActiveWorkspaceConnectionView,
+  type WorkspacePickerPage
+} from "@planweave-ai/collaboration-protocol/connection";
+import {
   humanBootstrapRequestSchema,
   humanConsumeInvitationRequestSchema,
   humanDeviceListQuerySchema,
   humanInvitationListQuerySchema,
   humanPageQuerySchema,
-  type ActivityListPage,
-  type AssignmentDisplayProjection,
-  type AssignmentListPage,
-  type CollaborationConnectionProfile,
-  type CollaborationWorkScope,
-  type CommentDisplayProjection,
-  type CommentListPage,
-  type EligibleAssigneesResponse,
-  type ExecutionTargetReadModel,
-  type FinalizePendingAttachmentResponse,
   type HumanBootstrapRequest,
   type HumanBootstrapResponse,
   type HumanConsumeInvitationRequest,
@@ -23,24 +18,43 @@ import {
   type HumanDevicePage,
   type HumanInvitationPage,
   type HumanInvitationView,
-  type HumanMemberPage,
-  type PendingAttachmentView,
+  type HumanMemberPage
+} from "@planweave-ai/collaboration-protocol/identity/workspace";
+import {
+  type ActivityListPage,
+  type CommentDisplayProjection,
+  type CommentListPage
+} from "@planweave-ai/collaboration-protocol/activity/comments";
+import {
+  type AssignmentDisplayProjection,
+  type AssignmentListPage,
+  type EligibleAssigneesResponse
+} from "@planweave-ai/collaboration-protocol/work/assignment";
+import {
+  type CollaborationWorkScope,
+  type ResponsibilityReadModel
+} from "@planweave-ai/collaboration-protocol/work/responsibility";
+import { type ExecutionTargetReadModel } from "@planweave-ai/collaboration-protocol/work/execution-target";
+import {
+  type FinalizePendingAttachmentResponse,
+  type PendingAttachmentView
+} from "@planweave-ai/collaboration-protocol/activity/attachments";
+import {
   type RemoteActionView,
   type RemoteEventReplay,
   type RemoteInteractionPage,
   type RemoteInteractionView,
-  type RemoteOperationObservation,
-  type ResponsibilityReadModel,
-  type ReviewAssignmentReadModel,
-  type WorkAuthorityProjection,
-  type WorkItemRef,
-  type ActiveWorkspaceConnectionView,
-  type WorkspacePickerPage,
+  type RemoteOperationObservation
+} from "@planweave-ai/collaboration-protocol/remote-run";
+import { type ReviewAssignmentReadModel } from "@planweave-ai/collaboration-protocol/work/review";
+import { type WorkAuthorityProjection } from "@planweave-ai/collaboration-protocol/work/authority";
+import { type WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
+import {
   type AccessScope,
   type AccessMutationRequest,
   type AccessMutationResult,
   type CurrentCanvasAccessView
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/access/control";
 import {
   assertNoSmuggledCollaborationSecrets,
   COLLABORATION_SESSION_ONLY_WARNING,

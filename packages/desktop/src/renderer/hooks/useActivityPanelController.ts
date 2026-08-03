@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  ACTIVITY_LIST_PAGE_DEFAULT,
-  type ActivityRecord,
-  type WorkItemRef
-} from "@planweave-ai/collaboration-protocol";
+import { ACTIVITY_LIST_PAGE_DEFAULT } from "@planweave-ai/collaboration-protocol/core/limits";
+import { type ActivityRecord } from "@planweave-ai/collaboration-protocol/activity/comments";
+import { type WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import { collaborationBridge } from "../bridge";
 import {
   buildActivityRowViewModel,

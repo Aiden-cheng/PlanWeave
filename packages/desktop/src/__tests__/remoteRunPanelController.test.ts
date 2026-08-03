@@ -2,7 +2,7 @@
 
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { WorkItemRef } from "@planweave-ai/collaboration-protocol";
+import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import {
   acquireCollaborationReadModelController,
   resetCollaborationReadModelHubForTests

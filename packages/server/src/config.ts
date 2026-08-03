@@ -5,7 +5,7 @@ import {
   OUTPUT_MAX_ARTIFACT_BYTES,
   opaqueIdentifierSchema
 } from "@planweave-ai/agent-host-protocol";
-import { deploymentEndpointSchema } from "@planweave-ai/collaboration-protocol";
+import { deploymentEndpointSchema } from "@planweave-ai/collaboration-protocol/deployment";
 import {
   RUNNER_EVENT_RETENTION_MAX_BYTES,
   RUNNER_EVENT_RETENTION_MAX_EVENTS

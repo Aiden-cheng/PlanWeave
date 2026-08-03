@@ -7,7 +7,7 @@ import {
   workspaceIdSchema,
   type DeviceSessionId,
   type WorkspaceId
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/core/primitives";
 import type { HumanIdentityRepository } from "./repository.js";
 import type { WorkspaceIdentityRepository } from "./workspaceRepository.js";
 import type { HumanProjectAuthority } from "./service.js";

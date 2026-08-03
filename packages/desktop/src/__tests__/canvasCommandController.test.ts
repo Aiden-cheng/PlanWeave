@@ -1,7 +1,7 @@
 import {
   exampleCanvasCommandAccepted,
   exampleCanvasReconnectAfterDisconnect
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/fixtures/collaboration";
 import { describe, expect, it, vi } from "vitest";
 import {
   CanvasCommandController,

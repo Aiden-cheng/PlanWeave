@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { workspaceIdSchema } from "@planweave-ai/collaboration-protocol";
+import { workspaceIdSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
 import { humanProjectIdSchema } from "../identity/schemas.js";
 import { inWriteTransaction, type SqliteDatabase } from "../sqlite.js";
 import { workItemKeyParts } from "../work/repository.js";

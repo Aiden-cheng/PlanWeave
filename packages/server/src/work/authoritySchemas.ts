@@ -2,18 +2,22 @@ import {
   executionTargetSchema,
   executionTargetRecordSchema,
   exactBlockExecutionScopeSchema,
+  executionTargetUpdateWireCommandSchema,
+  type ExecutionTarget,
+  type ExecutionTargetRecord
+} from "@planweave-ai/collaboration-protocol/work/execution-target";
+import {
   reviewAssignmentRecordSchema,
+  reviewAssignmentUpdateWireCommandSchema,
+  type ReviewAssignmentRecord
+} from "@planweave-ai/collaboration-protocol/work/review";
+import {
   responsibilityRecordSchema,
   collaborationWorkScopeSchema,
-  executionTargetUpdateWireCommandSchema,
-  reviewAssignmentUpdateWireCommandSchema,
   responsibilityUpdateWireCommandSchema,
   type CollaborationWorkScope,
-  type ExecutionTarget,
-  type ExecutionTargetRecord,
-  type ReviewAssignmentRecord,
   type ResponsibilityRecord
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/work/responsibility";
 import { blockRefSchema, opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
 

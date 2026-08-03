@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   canvasScopeRefSchema,
-  loopbackServerProfileSchema,
   type ActorRef,
   type CanvasScopeRef
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/core/primitives";
+import { loopbackServerProfileSchema } from "@planweave-ai/collaboration-protocol/loopback";
 import { serverReadinessSchema } from "../readiness.js";
 import { serverConfigSchema, type ServerConfig } from "../config.js";
 import type { DistributedServerProcess } from "../serverServe.js";

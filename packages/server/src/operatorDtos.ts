@@ -20,7 +20,7 @@ import {
 import {
   remoteDispatchIntentSchema,
   type RemoteDispatchIntent
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/remote-run";
 import { remoteBlockBindingViewSchema } from "@planweave-ai/runtime";
 import { z } from "zod";
 import { dispatchStatusSchema } from "./dispatches.js";

@@ -1,8 +1,6 @@
-import type {
-  AssignmentDisplayProjection,
-  CommentDisplayProjection,
-  WorkItemRef
-} from "@planweave-ai/collaboration-protocol";
+import type { AssignmentDisplayProjection } from "@planweave-ai/collaboration-protocol/work/assignment";
+import type { CommentDisplayProjection } from "@planweave-ai/collaboration-protocol/activity/comments";
+import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import {
   workItemKey,
   type CollaborationHostProjection,

@@ -1,18 +1,20 @@
 import { createHash } from "node:crypto";
 import {
   authoritativeContentVersionSchema,
-  CONTENT_VERSION_MAX_TOTAL_BYTES,
   compareContentVersionMemberPaths,
+  type AuthoritativeContentVersion,
+  type CompletedContentVersionRef,
+  type ContentVersionMember
+} from "@planweave-ai/collaboration-protocol/content/version";
+import { CONTENT_VERSION_MAX_TOTAL_BYTES } from "@planweave-ai/collaboration-protocol/core/limits";
+import {
   contentVersionTransferCompleteFrameSchema,
   contentVersionTransferFrameSchema,
   contentVersionTransferHeaderFrameSchema,
   contentVersionTransferLimits,
-  contentVersionTransferMediaType,
-  type AuthoritativeContentVersion,
-  type CanvasScopeRef,
-  type CompletedContentVersionRef,
-  type ContentVersionMember
-} from "@planweave-ai/collaboration-protocol";
+  contentVersionTransferMediaType
+} from "@planweave-ai/collaboration-protocol/content/transfer";
+import { type CanvasScopeRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import { CollaborationClientError, collaborationErrorFromHttp } from "./collaborationErrors.js";
 import { CollaborationHttpTransport } from "./collaborationHttpTransport.js";
 

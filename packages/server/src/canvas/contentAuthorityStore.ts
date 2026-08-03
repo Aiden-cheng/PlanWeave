@@ -1,11 +1,11 @@
+import type { ActorRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import type {
-  ActorRef,
   AuthoritativeContentHead,
   AuthoritativeContentVersion,
   CompletedContentVersionRef,
-  ContentVersionAcknowledgement,
-  ContentVersionAuthorityDiscoveryResult
-} from "@planweave-ai/collaboration-protocol";
+  ContentVersionAcknowledgement
+} from "@planweave-ai/collaboration-protocol/content/version";
+import type { ContentVersionAuthorityDiscoveryResult } from "@planweave-ai/collaboration-protocol/content/authority";
 import type { CanvasScopeKey } from "./repository.js";
 
 /**

@@ -8,11 +8,9 @@ import {
   resolveTaskCanvasWorkspace,
   saveDesktopLayout
 } from "@planweave-ai/runtime";
-import {
-  CANVAS_COMMAND_PROTOCOL_VERSION,
-  exampleHumanDeviceToken,
-  type HumanObserverEvent
-} from "@planweave-ai/collaboration-protocol";
+import { CANVAS_COMMAND_PROTOCOL_VERSION } from "@planweave-ai/collaboration-protocol/core/limits";
+import { exampleHumanDeviceToken } from "@planweave-ai/collaboration-protocol/fixtures/collaboration";
+import { type HumanObserverEvent } from "@planweave-ai/collaboration-protocol/activity/observer";
 import {
   basicManifest,
   createTestWorkspace

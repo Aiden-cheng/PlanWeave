@@ -7,7 +7,7 @@ import {
   hashExecutionEnvelope,
   mailboxCommandSchema
 } from "@planweave-ai/agent-host-protocol";
-import { workspaceIdSchema } from "@planweave-ai/collaboration-protocol";
+import { workspaceIdSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
 import type { RemoteBlockDispatchCandidate, RemoteBlockRuntimePort } from "@planweave-ai/runtime";
 import { remoteBlockFailureInputSchema } from "@planweave-ai/runtime";
 import type {

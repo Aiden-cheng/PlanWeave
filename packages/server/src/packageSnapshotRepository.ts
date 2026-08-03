@@ -4,11 +4,11 @@ import {
   createPackageSnapshotResultSchema,
   packageSnapshotSchema,
   restorePackageSnapshotResultSchema,
-  type ActorRef,
   type CreatePackageSnapshotResult,
   type PackageSnapshot,
   type RestorePackageSnapshotResult
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/content/snapshot";
+import { type ActorRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import {
   capturePackageSnapshot,
   restorePackageSnapshot,

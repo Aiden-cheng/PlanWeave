@@ -1,9 +1,9 @@
+import { CANVAS_COMMAND_PROTOCOL_VERSION } from "@planweave-ai/collaboration-protocol/core/limits";
 import {
-  CANVAS_COMMAND_PROTOCOL_VERSION,
   canvasCommandOutcomeSchema,
-  canvasReconnectResponseSchema,
-  canvasRuntimeStatusProjectionSchema
-} from "@planweave-ai/collaboration-protocol";
+  canvasReconnectResponseSchema
+} from "@planweave-ai/collaboration-protocol/canvas/commands";
+import { canvasRuntimeStatusProjectionSchema } from "@planweave-ai/collaboration-protocol/canvas/status";
 import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {

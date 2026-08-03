@@ -13,7 +13,7 @@ import {
 import {
   setupCodeIssueResponseSchema,
   type SetupCodeIssueResponse
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/setup";
 import { z, type ZodType } from "zod";
 import {
   OperatorControlError,

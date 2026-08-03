@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
   ActiveCanvasPersonGrant,
-  ActiveWorkspaceConnectionStatus,
   AccessMutationResult,
   CurrentCanvasAccessView
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/access/control";
+import type { ActiveWorkspaceConnectionStatus } from "@planweave-ai/collaboration-protocol/connection";
 import { collaborationErrorMessage } from "../collaboration/formatCollaborationError";
 import type {
   CollaborationSessionPhase,

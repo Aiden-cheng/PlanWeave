@@ -1,6 +1,8 @@
 import {
   isLoopbackHostname,
-  isPrivateNetworkHostname,
+  isPrivateNetworkHostname
+} from "@planweave-ai/collaboration-protocol/connection";
+import {
   loopbackProjectRegistrationRequestSchema,
   loopbackProjectRegistrationViewSchema,
   loopbackServerLifecycleRequestSchema,
@@ -13,8 +15,8 @@ import {
   type LoopbackServerProfile,
   type LoopbackServerStatus,
   type LoopbackTrustedProjectScope
-} from "@planweave-ai/collaboration-protocol";
-import type { ActorRef } from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/loopback";
+import type { ActorRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import { serverConfigSchema, type ServerConfig } from "./config.js";
 import type { DistributedServerProcess } from "./serverServe.js";
 import { serveDistributedServer } from "./serverServe.js";

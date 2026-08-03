@@ -1,15 +1,17 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   credentialSha256Schema,
-  evaluateOperatorSessionUsability,
   operatorIdSchema,
-  operatorSessionSchema,
   operatorSessionIdSchema,
   operatorCredentialTokenSchema,
   timestampSchema,
-  workspaceIdSchema,
+  workspaceIdSchema
+} from "@planweave-ai/collaboration-protocol/core/primitives";
+import {
+  evaluateOperatorSessionUsability,
+  operatorSessionSchema,
   type OperatorSession
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/identity/workspace";
 import type { SqliteDatabase } from "../sqlite.js";
 
 export type OperatorSessionInput = {

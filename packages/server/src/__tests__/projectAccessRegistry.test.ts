@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { accessMutationRequestSchema } from "@planweave-ai/collaboration-protocol";
+import { accessMutationRequestSchema } from "@planweave-ai/collaboration-protocol/access/control";
 import { applyMigrations } from "../migrations.js";
 import { HumanIdentityRepository } from "../identity/repository.js";
 import { ProjectAccessRepository } from "../projectAccessRepository.js";

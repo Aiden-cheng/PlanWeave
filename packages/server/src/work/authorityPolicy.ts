@@ -4,10 +4,12 @@ import {
   type HostAuthorizationDecision,
   type HostAuthorizationFacts,
   type HostAuthorizationCurrentRevisions,
-  type HostAuthorizationDecisionReason,
+  type HostAuthorizationDecisionReason
+} from "@planweave-ai/collaboration-protocol/work/host-authorization";
+import {
   type ExactBlockExecutionScope,
   type ExecutionTarget
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/work/execution-target";
 import type { AgentHost } from "../hosts.js";
 import {
   hostExecutionProfileAvailability,

@@ -1,10 +1,10 @@
+import type { ActorRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import type {
-  ActorRef,
   CanvasCommandAccepted,
-  CanvasCommandIntent,
-  CompletedContentVersionRef,
-  PackageSnapshotDigestManifest
-} from "@planweave-ai/collaboration-protocol";
+  CanvasCommandIntent
+} from "@planweave-ai/collaboration-protocol/canvas/commands";
+import type { CompletedContentVersionRef } from "@planweave-ai/collaboration-protocol/content/version";
+import type { PackageSnapshotDigestManifest } from "@planweave-ai/collaboration-protocol/content/snapshot";
 import type { CanvasScopeKey } from "./repository.js";
 
 export type AuthoritativeCanvasAcceptedCommit = {

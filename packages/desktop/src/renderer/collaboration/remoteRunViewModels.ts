@@ -1,13 +1,13 @@
 import {
   remoteHumanExecutionActionCommandSchema,
-  type AssignmentDisplayProjection,
   type RemoteAttemptStatus,
   type RemoteEventReplay,
   type RemoteHumanExecutionActionCommand,
   type RemoteInteractionView,
   type RemoteOperationObservation,
   type RemoteOperationState
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/remote-run";
+import { type AssignmentDisplayProjection } from "@planweave-ai/collaboration-protocol/work/assignment";
 import type { RemoteBlockExecutionReadModel } from "@planweave-ai/runtime";
 
 type NormalizedAcpEvent = RemoteEventReplay["events"][number];

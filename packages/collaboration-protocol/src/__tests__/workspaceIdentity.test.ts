@@ -8,6 +8,11 @@ import {
   evaluateAgentHostUsability,
   evaluateDeviceSessionUsability,
   evaluateOperatorSessionUsability,
+  operatorSessionSchema,
+  workspaceMembershipSchema,
+  workspaceSchema
+} from "../identity.js";
+import {
   exampleAgentHostIdentity,
   exampleDeviceSession,
   exampleIdentityMigrationMatrix,
@@ -17,14 +22,13 @@ import {
   exampleOperatorSession,
   exampleWorkspace,
   exampleWorkspaceMembership,
-  exampleWorkspacePrincipal,
+  exampleWorkspacePrincipal
+} from "../fixtures/collaboration.js";
+import {
   identityMigrationMatrixSchema,
-  identityMigrationStateSchema,
-  operatorSessionSchema,
-  workspaceConnectionProfileSchema,
-  workspaceMembershipSchema,
-  workspaceSchema
-} from "../index.js";
+  identityMigrationStateSchema
+} from "../migration.js";
+import { workspaceConnectionProfileSchema } from "../connection.js";
 
 const now = new Date("2030-01-01T12:00:00.000Z");
 

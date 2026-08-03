@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { AssignmentDisplayProjection } from "@planweave-ai/collaboration-protocol/work/assignment";
 import type {
-  AssignmentDisplayProjection,
   RemoteEventReplay,
   RemoteInteractionResponse,
   RemoteInteractionView,
-  RemoteOperationObservation,
-  WorkItemRef
-} from "@planweave-ai/collaboration-protocol";
+  RemoteOperationObservation
+} from "@planweave-ai/collaboration-protocol/remote-run";
+import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import type { RemoteBlockExecutionReadModel } from "@planweave-ai/runtime";
 import { collaborationBridge } from "../bridge";
 import { collaborationErrorMessage } from "../collaboration/formatCollaborationError";

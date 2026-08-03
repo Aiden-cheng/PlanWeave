@@ -1,13 +1,13 @@
 import {
   canvasCommandSubmissionIntentSchema,
-  opaqueIdentifierSchema,
   type CanvasCommandIntent,
   type CanvasCommandOutcome,
   type CanvasJournalEntry,
-  type CanvasLiveSyncServerMessage,
-  type CanvasReconnectResponse,
-  type CompleteContentVersion
-} from "@planweave-ai/collaboration-protocol";
+  type CanvasReconnectResponse
+} from "@planweave-ai/collaboration-protocol/canvas/commands";
+import { opaqueIdentifierSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
+import { type CanvasLiveSyncServerMessage } from "@planweave-ai/collaboration-protocol/canvas/live-sync";
+import { type CompleteContentVersion } from "@planweave-ai/collaboration-protocol/content/version";
 import { z } from "zod";
 import {
   collaborationCanvasSessionInputSchema,

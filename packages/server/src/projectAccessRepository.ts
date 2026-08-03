@@ -3,22 +3,26 @@ import {
   accessDisabledReasonSchema,
   accessMutationRequestSchema,
   activeCanvasPersonGrantSchema,
-  canvasScopeRefSchema,
-  humanPrincipalIdSchema,
   requiredCapabilityForAccessMutation,
-  aclRevisionSchema,
-  actorRefSchema,
-  membershipGrantSchema,
   type AccessMutationRequest,
   type AccessMutationResult,
   type ActiveCanvasPersonGrant,
-  type ActorRef,
-  type EffectiveAccessView,
+  type EffectiveAccessView
+} from "@planweave-ai/collaboration-protocol/access/control";
+import {
+  canvasScopeRefSchema,
+  humanPrincipalIdSchema,
+  actorRefSchema,
+  type ActorRef
+} from "@planweave-ai/collaboration-protocol/core/primitives";
+import {
+  aclRevisionSchema,
+  membershipGrantSchema,
   type MembershipGrant,
   type ProjectAccessDecision,
   type ProjectAccessRecord,
   type CanvasAccessRecord
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/access/project";
 import { z } from "zod";
 import { inWriteTransaction, type SqliteDatabase } from "./sqlite.js";
 import { assertNoPendingSnapshotRestore } from "./authorizationFence.js";

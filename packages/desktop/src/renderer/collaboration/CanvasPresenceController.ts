@@ -2,14 +2,16 @@ import type {
   CanvasPresencePointer,
   CanvasPresenceServerMessage,
   CanvasPresenceSession
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/canvas/presence";
 import {
   CANVAS_PRESENCE_MAX_SELECTION_IDS,
-  CANVAS_PRESENCE_MAX_SESSIONS_PER_CANVAS,
+  CANVAS_PRESENCE_MAX_SESSIONS_PER_CANVAS
+} from "@planweave-ai/collaboration-protocol/core/limits";
+import {
   canvasPresencePointerSchema,
   canvasPresenceSelectionIdSchema,
   canvasPresenceSessionSchema
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/canvas/presence";
 import type {
   CollaborationPresenceSignal,
   CollaborationPresenceUpdateInput,

@@ -1,27 +1,33 @@
 import {
   CANVAS_COMMAND_MAX_JOURNAL_DELTA_ENTRIES,
-  CANVAS_COMMAND_PROTOCOL_VERSION,
+  CANVAS_COMMAND_PROTOCOL_VERSION
+} from "@planweave-ai/collaboration-protocol/core/limits";
+import {
   canvasScopeRefSchema,
+  type ActorRef
+} from "@planweave-ai/collaboration-protocol/core/primitives";
+import {
   canvasCommandAcceptedSchema,
   canvasCommandSubmitSchema,
   canvasReconnectDeltaSchema,
   canvasReconnectErrorSchema,
   canvasReconnectRequestSchema,
   canvasReconnectSnapshotSchema,
-  type AuthoritativeContentVersion,
-  type ActorRef,
   type CanvasCommandAccepted,
   type CanvasCommandOutcome,
   type CanvasJournalEntry,
   type CanvasCommandSubmit,
   type CanvasReconnectRequest,
   type CanvasReconnectResponse,
-  type CanvasRuntimeStatusProjection,
-  type CompleteContentVersion,
   type CanvasCommandIntent,
-  type CanvasSnapshotContent,
-  type PackageSnapshotDigestManifest
-} from "@planweave-ai/collaboration-protocol";
+  type CanvasSnapshotContent
+} from "@planweave-ai/collaboration-protocol/canvas/commands";
+import {
+  type AuthoritativeContentVersion,
+  type CompleteContentVersion
+} from "@planweave-ai/collaboration-protocol/content/version";
+import { type CanvasRuntimeStatusProjection } from "@planweave-ai/collaboration-protocol/canvas/status";
+import { type PackageSnapshotDigestManifest } from "@planweave-ai/collaboration-protocol/content/snapshot";
 import {
   applyCanvasReplicaIntent,
   decodeCanvasReplicaDocument,

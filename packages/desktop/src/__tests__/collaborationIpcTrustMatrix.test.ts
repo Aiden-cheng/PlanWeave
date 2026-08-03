@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   exampleHumanDeviceToken,
   exampleSecretsForRedaction
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/fixtures/collaboration";
 import {
   CollaborationCredentialVault,
   CollaborationProfileStore,

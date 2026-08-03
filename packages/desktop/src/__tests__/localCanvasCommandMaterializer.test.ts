@@ -2,12 +2,12 @@ import { cp, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { CANVAS_COMMAND_PROTOCOL_VERSION } from "@planweave-ai/collaboration-protocol/core/limits";
 import {
-  CANVAS_COMMAND_PROTOCOL_VERSION,
   canvasCommandAcceptedSchema,
   canvasReconnectDeltaSchema,
   canvasReconnectSnapshotSchema
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/canvas/commands";
 import {
   applyAuthorizedCanvasCommand,
   captureAuthorizedCanvasContent,

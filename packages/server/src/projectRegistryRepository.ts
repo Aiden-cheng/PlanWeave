@@ -1,9 +1,9 @@
 import { isAbsolute } from "node:path";
+import { canvasScopeRefSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
 import {
-  canvasScopeRefSchema,
   type CanvasAccessRecord,
   type ProjectAccessRecord
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/access/project";
 import { z } from "zod";
 import {
   aclMigrationIdFor,

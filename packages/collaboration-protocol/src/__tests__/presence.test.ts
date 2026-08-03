@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   CANVAS_PRESENCE_COORDINATE_ABS_MAX,
   CANVAS_PRESENCE_MAX_SELECTION_IDS,
-  CANVAS_PRESENCE_PROTOCOL_VERSION,
+  CANVAS_PRESENCE_PROTOCOL_VERSION
+} from "../limits.js";
+import {
   canvasPresenceClientMessageSchema,
   canvasPresenceServerMessageSchema
-} from "../index.js";
+} from "../presence.js";
 
 const scope = {
   protocolVersion: CANVAS_PRESENCE_PROTOCOL_VERSION,

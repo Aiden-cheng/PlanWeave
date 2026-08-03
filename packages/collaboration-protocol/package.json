@@ -4,16 +4,146 @@
   "description": "Schema-only public wire contracts for PlanWeave human collaboration (Desktop ↔ Server).",
   "license": "MIT",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "files": [
     "dist",
     "LICENSE"
   ],
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+    "./core/primitives": {
+      "types": "./dist/primitives.d.ts",
+      "import": "./dist/primitives.js"
+    },
+    "./core/limits": {
+      "types": "./dist/limits.d.ts",
+      "import": "./dist/limits.js"
+    },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "import": "./dist/errors.js"
+    },
+    "./identity/workspace": {
+      "types": "./dist/identity.d.ts",
+      "import": "./dist/identity.js"
+    },
+    "./identity/migration": {
+      "types": "./dist/migration.d.ts",
+      "import": "./dist/migration.js"
+    },
+    "./access/project": {
+      "types": "./dist/projectAccess.d.ts",
+      "import": "./dist/projectAccess.js"
+    },
+    "./access/control": {
+      "types": "./dist/accessControl.d.ts",
+      "import": "./dist/accessControl.js"
+    },
+    "./content/snapshot": {
+      "types": "./dist/packageSnapshot.d.ts",
+      "import": "./dist/packageSnapshot.js"
+    },
+    "./content/version": {
+      "types": "./dist/contentVersion.d.ts",
+      "import": "./dist/contentVersion.js"
+    },
+    "./content/authority": {
+      "types": "./dist/contentAuthority.d.ts",
+      "import": "./dist/contentAuthority.js"
+    },
+    "./content/transfer": {
+      "types": "./dist/contentVersionTransfer.d.ts",
+      "import": "./dist/contentVersionTransfer.js"
+    },
+    "./work/assignment": {
+      "types": "./dist/assignment.d.ts",
+      "import": "./dist/assignment.js"
+    },
+    "./work/responsibility": {
+      "types": "./dist/responsibility.d.ts",
+      "import": "./dist/responsibility.js"
+    },
+    "./work/review": {
+      "types": "./dist/review.d.ts",
+      "import": "./dist/review.js"
+    },
+    "./work/execution-target": {
+      "types": "./dist/executionTarget.d.ts",
+      "import": "./dist/executionTarget.js"
+    },
+    "./work/host-authorization": {
+      "types": "./dist/hostAuthorization.d.ts",
+      "import": "./dist/hostAuthorization.js"
+    },
+    "./work/authority": {
+      "types": "./dist/workAuthority.d.ts",
+      "import": "./dist/workAuthority.js"
+    },
+    "./work/assignment-migration": {
+      "types": "./dist/assignmentMigration.d.ts",
+      "import": "./dist/assignmentMigration.js"
+    },
+    "./canvas/commands": {
+      "types": "./dist/canvasCommands.d.ts",
+      "import": "./dist/canvasCommands.js"
+    },
+    "./canvas/live-sync": {
+      "types": "./dist/canvasLiveSync.d.ts",
+      "import": "./dist/canvasLiveSync.js"
+    },
+    "./canvas/status": {
+      "types": "./dist/runtimeStatus.d.ts",
+      "import": "./dist/runtimeStatus.js"
+    },
+    "./canvas/presence": {
+      "types": "./dist/presence.d.ts",
+      "import": "./dist/presence.js"
+    },
+    "./activity/comments": {
+      "types": "./dist/comments.d.ts",
+      "import": "./dist/comments.js"
+    },
+    "./activity/attachments": {
+      "types": "./dist/attachments.d.ts",
+      "import": "./dist/attachments.js"
+    },
+    "./activity/observer": {
+      "types": "./dist/observer.d.ts",
+      "import": "./dist/observer.js"
+    },
+    "./connection": {
+      "types": "./dist/connection.d.ts",
+      "import": "./dist/connection.js"
+    },
+    "./setup": {
+      "types": "./dist/setup.d.ts",
+      "import": "./dist/setup.js"
+    },
+    "./handoff/setup": {
+      "types": "./dist/setupHandoff.d.ts",
+      "import": "./dist/setupHandoff.js"
+    },
+    "./handoff/invitation": {
+      "types": "./dist/invitationHandoff.d.ts",
+      "import": "./dist/invitationHandoff.js"
+    },
+    "./deployment": {
+      "types": "./dist/deployment.d.ts",
+      "import": "./dist/deployment.js"
+    },
+    "./loopback": {
+      "types": "./dist/loopbackServer.d.ts",
+      "import": "./dist/loopbackServer.js"
+    },
+    "./remote-run": {
+      "types": "./dist/remoteRun.d.ts",
+      "import": "./dist/remoteRun.js"
+    },
+    "./fixtures/collaboration": {
+      "types": "./dist/fixtures/collaboration.d.ts",
+      "import": "./dist/fixtures/collaboration.js"
+    },
+    "./fixtures/content-version": {
+      "types": "./dist/fixtures/contentVersion.d.ts",
+      "import": "./dist/fixtures/contentVersion.js"
     }
   },
   "homepage": "https://github.com/GaosCode/PlanWeave#readme",

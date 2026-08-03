@@ -9,15 +9,17 @@ import {
   canvasPersonAccessViewSchema,
   effectiveAccessEvaluationSchema,
   evaluateEffectiveAccess,
+  roleHasAccessCapability,
+  serverAccessMutationContextSchema
+} from "../accessControl.js";
+import {
   loopbackOwnerConnectionRequestSchema,
   loopbackProjectRegistrationRequestSchema,
   loopbackServerLifecycleRequestSchema,
   loopbackServerProfileSchema,
-  loopbackServerStatusSchema,
-  roleHasAccessCapability,
-  serverAccessMutationContextSchema,
-  type ProjectAccessRole
-} from "../index.js";
+  loopbackServerStatusSchema
+} from "../loopbackServer.js";
+import { type ProjectAccessRole } from "../projectAccess.js";
 
 const workspaceId = "workspace-acl-001";
 const projectId = "project-acl-001";

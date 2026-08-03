@@ -1,23 +1,27 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   actorRefSchema,
+  type ActorRef
+} from "@planweave-ai/collaboration-protocol/core/primitives";
+import {
   canvasAccessPageSchema,
   canvasAccessRequestSchema,
-  createPackageSnapshotRequestSchema,
-  createPackageSnapshotResultSchema,
-  packageSnapshotSchema,
   projectAccessPageSchema,
   projectAccessRequestSchema,
   registryPageQuerySchema,
+  type CanvasAccessPage,
+  type ProjectAccessPage
+} from "@planweave-ai/collaboration-protocol/access/project";
+import {
+  createPackageSnapshotRequestSchema,
+  createPackageSnapshotResultSchema,
+  packageSnapshotSchema,
   restorePackageSnapshotRequestSchema,
   restorePackageSnapshotResultSchema,
-  type ActorRef,
-  type CanvasAccessPage,
   type CreatePackageSnapshotResult,
   type PackageSnapshot,
-  type ProjectAccessPage,
   type RestorePackageSnapshotResult
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/content/snapshot";
 import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
 import {

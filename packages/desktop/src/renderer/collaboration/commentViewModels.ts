@@ -2,12 +2,14 @@ import {
   COMMENT_ATTACHMENT_ALLOWED_MEDIA_TYPES,
   COMMENT_ATTACHMENT_MAX_BYTES,
   COMMENT_ATTACHMENTS_MAX_COUNT,
-  HUMAN_COMMENT_BODY_MAX_LENGTH,
+  HUMAN_COMMENT_BODY_MAX_LENGTH
+} from "@planweave-ai/collaboration-protocol/core/limits";
+import {
   type ActivityRecord,
   type ActivityType,
-  type CommentDisplayProjection,
-  type WorkItemRef
-} from "@planweave-ai/collaboration-protocol";
+  type CommentDisplayProjection
+} from "@planweave-ai/collaboration-protocol/activity/comments";
+import { type WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import type { CollaborationSyncPhase } from "../../shared/collaborationReadModels.js";
 
 export type CommentsPanelMode =

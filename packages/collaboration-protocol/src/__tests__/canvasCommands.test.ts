@@ -3,17 +3,21 @@ import {
   CANVAS_COMMAND_MAX_BULK_UPDATES,
   CANVAS_COMMAND_MAX_LAYOUT_NODES,
   CANVAS_COMMAND_MAX_PROMPT_MARKDOWN_CHARS,
-  CANVAS_COMMAND_PROTOCOL_VERSION,
+  CANVAS_COMMAND_PROTOCOL_VERSION
+} from "../limits.js";
+import {
   canvasCommandClientMessageSchema,
   canvasCommandIntentSchema,
   canvasCommandOutcomeSchema,
   canvasCommandServerMessageSchema,
   canvasCommandSubmitSchema,
   canvasJournalEntrySchema,
-  canvasPresenceClientMessageSchema,
   canvasReconnectRequestSchema,
   canvasReconnectResponseSchema,
-  canvasSnapshotContentSchema,
+  canvasSnapshotContentSchema
+} from "../canvasCommands.js";
+import { canvasPresenceClientMessageSchema } from "../presence.js";
+import {
   exampleCanvasCommandAccepted,
   exampleCanvasCommandDuplicateOperationIdReplay,
   exampleCanvasCommandRejectedAcl,
@@ -24,7 +28,7 @@ import {
   exampleCanvasReconnectAfterDisconnect,
   exampleCanvasReconnectRequest,
   exampleCanvasReconnectTruncatedJournal
-} from "../index.js";
+} from "../fixtures/collaboration.js";
 
 const digestA = "a".repeat(64);
 const digestB = "b".repeat(64);

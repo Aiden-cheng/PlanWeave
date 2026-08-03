@@ -1,19 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
   executionTargetReadModelSchema,
-  executionTargetUpdateWireCommandSchema,
+  executionTargetUpdateWireCommandSchema
+} from "../executionTarget.js";
+import {
   hostAuthorizationDecisionSchema,
   hostAuthorizationFactsSchema,
   hostAuthorizationAttemptFactSchema,
   hostAuthorizationLeaseFactSchema,
-  hostAuthorizationReadModelSchema,
+  hostAuthorizationReadModelSchema
+} from "../hostAuthorization.js";
+import {
   legacyAssignmentMappingSchema,
-  mapLegacyAssignmentTarget,
-  remoteDispatchIntentSchema,
-  responsibilityUpdateWireCommandSchema,
-  reviewAssignmentUpdateWireCommandSchema,
-  workAuthorityProjectionSchema
-} from "../index.js";
+  mapLegacyAssignmentTarget
+} from "../assignmentMigration.js";
+import { remoteDispatchIntentSchema } from "../remoteRun.js";
+import { responsibilityUpdateWireCommandSchema } from "../responsibility.js";
+import { reviewAssignmentUpdateWireCommandSchema } from "../review.js";
+import { workAuthorityProjectionSchema } from "../workAuthority.js";
 
 const taskScope = {
   kind: "task" as const,

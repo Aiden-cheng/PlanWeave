@@ -3,7 +3,7 @@ import {
   hostEnrollmentCodeSchema,
   opaqueIdentifierSchema
 } from "@planweave-ai/agent-host-protocol";
-import { setupCodeTokenSchema } from "@planweave-ai/collaboration-protocol";
+import { setupCodeTokenSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
 import { z } from "zod";
 
 const pendingBase = {

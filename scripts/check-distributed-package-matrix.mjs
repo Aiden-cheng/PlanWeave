@@ -19,13 +19,26 @@ const packageDirectories = new Map([
   ["@planweave-ai/server", "packages/server"],
   ["@planweave-ai/agent-host", "packages/agent-host"]
 ]);
+const packageImportSpecifiers = new Map([
+  ["@planweave-ai/agent-host-protocol", ["@planweave-ai/agent-host-protocol"]],
+  [
+    "@planweave-ai/collaboration-protocol",
+    [
+      "@planweave-ai/collaboration-protocol/core/primitives",
+      "@planweave-ai/collaboration-protocol/setup"
+    ]
+  ],
+  ["@planweave-ai/runtime", ["@planweave-ai/runtime"]],
+  ["@planweave-ai/server", ["@planweave-ai/server"]],
+  ["@planweave-ai/agent-host", ["@planweave-ai/agent-host"]]
+]);
 
 function assertRootOrder(scriptName) {
   const script = rootPackage.scripts?.[scriptName];
   if (typeof script !== "string") throw new Error(`root_${scriptName}_script_missing`);
   const positions = packages.map((packageName) => ({
     packageName,
-    index: script.indexOf(packageName)
+    index: script.indexOf(`--filter ${packageName} `)
   }));
   for (const position of positions) {
     if (position.index < 0) throw new Error(`root_${scriptName}_omits:${position.packageName}`);
@@ -58,7 +71,11 @@ for (const packageName of packages) {
   });
   execFileSync(
     process.execPath,
-    ["--input-type=module", "--eval", `await import(${JSON.stringify(packageName)});`],
+    [
+      "--input-type=module",
+      "--eval",
+      `await Promise.all(${JSON.stringify(packageImportSpecifiers.get(packageName))}.map((specifier) => import(specifier)));`
+    ],
     {
       cwd: resolve(repoRoot, packageDirectories.get(packageName)),
       stdio: "inherit"

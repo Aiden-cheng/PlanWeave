@@ -5,13 +5,13 @@ import type {
   AuthoritativeContentVersion,
   CompleteContentVersion,
   ContentVersionAcknowledgement,
-  ContentVersionAuthorityDiscoveryResult,
   FirstContentVersionPublishResult
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/content/version";
+import type { ContentVersionAuthorityDiscoveryResult } from "@planweave-ai/collaboration-protocol/content/authority";
 import {
   completedContentVersionRefSchema,
   type CompletedContentVersionRef
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/content/version";
 import { ContentVersionFacade } from "../main/collaboration/ContentVersionFacade.js";
 import {
   CollaborationContentReplicaStore,

@@ -2,10 +2,12 @@ import { chmod, mkdir, readFile, rename, stat, writeFile } from "node:fs/promise
 import { dirname, join } from "node:path";
 import {
   opaqueIdentifierSchema,
-  timestampSchema,
+  timestampSchema
+} from "@planweave-ai/collaboration-protocol/core/primitives";
+import {
   workspaceConnectionProfileSchema,
   type WorkspaceConnectionProfile
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/connection";
 import { z } from "zod";
 import { desktopHomePaths } from "../planweaveHomePaths.js";
 

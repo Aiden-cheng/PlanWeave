@@ -1,9 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import {
-  WORKSPACE_PICKER_MAX_ITEMS_PER_PAGE,
-  humanDeviceTokenSchema,
-  workspacePickerPageSchema
-} from "@planweave-ai/collaboration-protocol";
+import { WORKSPACE_PICKER_MAX_ITEMS_PER_PAGE } from "@planweave-ai/collaboration-protocol/core/limits";
+import { humanDeviceTokenSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
+import { workspacePickerPageSchema } from "@planweave-ai/collaboration-protocol/connection";
 import { humanTransportAllowed } from "./http.js";
 import { WorkspaceIdentityRepository } from "./workspaceRepository.js";
 

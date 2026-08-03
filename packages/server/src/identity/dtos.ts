@@ -1,19 +1,19 @@
 import { z } from "zod";
 import {
   agentHostIdentityViewSchema,
-  identityMigrationStateSchema,
   workspaceHumanPrincipalViewSchema,
   workspaceIdentityViewSchema,
   workspaceMembershipViewSchema
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/identity/workspace";
+import { identityMigrationStateSchema } from "@planweave-ai/collaboration-protocol/identity/migration";
 export {
   humanRevokeInvitationsRequestSchema,
   humanRevokeInvitationsResponseSchema
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/identity/workspace";
 export type {
   HumanRevokeInvitationsRequest,
   HumanRevokeInvitationsResponse
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/identity/workspace";
 import {
   HUMAN_DEVICE_LABEL_MAX_LENGTH,
   HUMAN_DISPLAY_NAME_MAX_LENGTH,

@@ -3,7 +3,7 @@ import { rm } from "node:fs/promises";
 import {
   canonicalContentVersionDigestPayload,
   type CompleteContentVersion
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/content/version";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestWorkspace } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { ContentVersionRepository } from "../canvas/contentVersionRepository.js";

@@ -1,20 +1,22 @@
 import {
   canvasAccessPageSchema,
-  createPackageSnapshotRequestSchema,
-  createPackageSnapshotResultSchema,
-  packageSnapshotSchema,
   projectAccessPageSchema,
   projectAccessRequestSchema,
   registryPageQuerySchema,
+  type CanvasAccessPage,
+  type ProjectAccessPage,
+  type RegistryPageQuery
+} from "@planweave-ai/collaboration-protocol/access/project";
+import {
+  createPackageSnapshotRequestSchema,
+  createPackageSnapshotResultSchema,
+  packageSnapshotSchema,
   restorePackageSnapshotRequestSchema,
   restorePackageSnapshotResultSchema,
-  type CanvasAccessPage,
   type CreatePackageSnapshotResult,
   type PackageSnapshot,
-  type ProjectAccessPage,
-  type RegistryPageQuery,
   type RestorePackageSnapshotResult
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/content/snapshot";
 import type { z, ZodType } from "zod";
 
 export type RegistryJsonRequest = <T>(

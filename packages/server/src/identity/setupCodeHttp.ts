@@ -1,8 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import {
-  opaqueIdentifierSchema,
-  setupCodeIssueRequestSchema
-} from "@planweave-ai/collaboration-protocol";
+import { opaqueIdentifierSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
+import { setupCodeIssueRequestSchema } from "@planweave-ai/collaboration-protocol/setup";
 import { z } from "zod";
 import { OperatorTokenRegistry, type OperatorPrincipal } from "../operatorAuth.js";
 import { SetupCodeError, SetupCodeService } from "./setupCodeService.js";

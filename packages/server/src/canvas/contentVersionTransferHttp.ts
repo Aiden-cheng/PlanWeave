@@ -3,10 +3,12 @@ import {
   contentVersionTransferCompleteFrameSchema,
   contentVersionTransferHeaderFrameSchema,
   contentVersionTransferLimits,
-  contentVersionTransferMediaType,
+  contentVersionTransferMediaType
+} from "@planweave-ai/collaboration-protocol/content/transfer";
+import {
   compareContentVersionMemberPaths,
   type CompletedContentVersionRef
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/content/version";
 import type { CanvasScopeKey } from "./repository.js";
 import { ContentVersionRepository } from "./contentVersionRepository.js";
 

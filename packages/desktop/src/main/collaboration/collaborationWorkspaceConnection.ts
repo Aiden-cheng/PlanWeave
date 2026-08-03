@@ -1,13 +1,13 @@
 import {
   activeWorkspaceConnectionViewSchema,
-  assertSetupViewRedacted,
   workspacePickerPageSchema,
   type ActiveWorkspaceConnectionError,
   type ActiveWorkspaceConnectionStatus,
   type ActiveWorkspaceConnectionView,
   type WorkspaceConnectionProfile,
   type WorkspacePickerPage
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/connection";
+import { assertSetupViewRedacted } from "@planweave-ai/collaboration-protocol/setup";
 import type { CollaborationCredentialVault } from "./collaborationCredentialVault.js";
 import {
   CollaborationSetupCodeClient,

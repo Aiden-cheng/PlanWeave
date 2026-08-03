@@ -1,24 +1,28 @@
 import {
   authoritativeContentHeadSchema,
   authoritativeContentVersionSchema,
-  canvasScopeRefSchema,
   compareContentVersionMemberPaths,
   completedContentVersionRefSchema,
   contentVersionMemberSchema,
   contentVersionAcknowledgementSchema,
-  contentVersionAuthorityDiscoveryResultSchema,
   contentVersionJournalEntrySchema,
-  type ActorRef,
   type AuthoritativeContentHead,
   type AuthoritativeContentVersion,
   type CompleteContentVersion,
   type CompletedContentVersionRef,
-  type ContentReplicaStatus,
   type ContentVersionAcknowledgement,
-  type ContentVersionAuthorityDiscoveryResult,
-  type ContentVersionMember,
-  type ContentVersionTransferHeaderFrame
-} from "@planweave-ai/collaboration-protocol";
+  type ContentVersionMember
+} from "@planweave-ai/collaboration-protocol/content/version";
+import {
+  canvasScopeRefSchema,
+  type ActorRef
+} from "@planweave-ai/collaboration-protocol/core/primitives";
+import {
+  contentVersionAuthorityDiscoveryResultSchema,
+  type ContentReplicaStatus,
+  type ContentVersionAuthorityDiscoveryResult
+} from "@planweave-ai/collaboration-protocol/content/authority";
+import { type ContentVersionTransferHeaderFrame } from "@planweave-ai/collaboration-protocol/content/transfer";
 import { validateAuthoritativeCanvasContent } from "@planweave-ai/runtime";
 import { inWriteTransaction, type SqliteDatabase } from "../sqlite.js";
 import type { ContentAuthorityStore } from "./contentAuthorityStore.js";

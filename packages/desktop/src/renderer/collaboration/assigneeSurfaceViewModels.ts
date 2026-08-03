@@ -1,8 +1,6 @@
-import type {
-  ActivityRecord,
-  AssignmentDisplayProjection,
-  WorkItemRef
-} from "@planweave-ai/collaboration-protocol";
+import type { ActivityRecord } from "@planweave-ai/collaboration-protocol/activity/comments";
+import type { AssignmentDisplayProjection } from "@planweave-ai/collaboration-protocol/work/assignment";
+import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import {
   workItemKey,
   type CollaborationMutationRecord,

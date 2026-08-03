@@ -1,14 +1,20 @@
 import {
   executionTargetReadModelSchema,
-  hostAuthorizationReadModelSchema,
+  type ExecutionTargetReadModel
+} from "@planweave-ai/collaboration-protocol/work/execution-target";
+import { hostAuthorizationReadModelSchema } from "@planweave-ai/collaboration-protocol/work/host-authorization";
+import {
   responsibilityReadModelSchema,
+  type ResponsibilityReadModel
+} from "@planweave-ai/collaboration-protocol/work/responsibility";
+import {
   reviewAssignmentReadModelSchema,
+  type ReviewAssignmentReadModel
+} from "@planweave-ai/collaboration-protocol/work/review";
+import {
   workAuthorityProjectionSchema,
-  type ExecutionTargetReadModel,
-  type ResponsibilityReadModel,
-  type ReviewAssignmentReadModel,
   type WorkAuthorityProjection
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/work/authority";
 import type { CollaborationAuthContext } from "../identity/index.js";
 import type { ProjectAccessRepository } from "../projectAccessRepository.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";

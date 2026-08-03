@@ -4,7 +4,7 @@ import type {
   DeploymentGuidanceView,
   DeploymentTargetDraft,
   DeploymentTopology
-} from "@planweave-ai/collaboration-protocol";
+} from "@planweave-ai/collaboration-protocol/deployment";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
