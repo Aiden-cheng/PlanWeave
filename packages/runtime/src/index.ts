@@ -28,6 +28,7 @@ export {
 } from "./process/agentProcessEnv.js";
 export type { AgentProcessPathOptions } from "./process/agentProcessEnv.js";
 export { readProjectPaths, resolvePlanweaveHome } from "./paths.js";
+export { readGlobalPrompt, updateGlobalPrompt } from "./globalPrompt.js";
 export { createManagedProjectId, createProjectId } from "./projectId.js";
 export {
   builtinExecutorNames,

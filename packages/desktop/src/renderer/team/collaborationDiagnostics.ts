@@ -46,11 +46,6 @@ export type CollaborationReadModelDiagnosticContext = Pick<
   | "updatedAt"
 >;
 
-/** Diagnostic payloads are an internal troubleshooting surface, not product UI. */
-export function shouldShowCollaborationDiagnostics(): boolean {
-  return !import.meta.env.PROD;
-}
-
 /** Builds an allowlisted, copy-safe report. Credentials and invitation secrets are never included. */
 export function buildCollaborationDiagnosticReport(
   status: CollaborationStatus,

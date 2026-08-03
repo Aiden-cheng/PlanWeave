@@ -16,7 +16,9 @@ import type { DesktopProjectSummary } from "@planweave-ai/runtime";
 
 const settings: DesktopUiSettings = {
   runtimePath: "/tmp/project",
+  planweaveHome: "",
   defaultExecutor: "",
+  developerMode: false,
   appearance: "system",
   reducedMotion: false,
   language: "en",
@@ -61,6 +63,10 @@ const settings: DesktopUiSettings = {
     },
     autoRunControl: {
       position: null
+    },
+    collaborationScope: {
+      collapsed: true,
+      expandedProjectIds: []
     }
   },
   agents: {
@@ -931,7 +937,27 @@ describe("desktop renderer settings interactions", () => {
       />
     );
 
-    await userEvent.click(screen.getByRole("switch", { name: "Inherit global prompt" }));
+    const inheritanceSwitch = screen.getByRole("switch", { name: "Inherit global prompt" });
+    const inheritanceField = inheritanceSwitch.closest('[data-slot="field"]');
+    const globalPromptField = screen
+      .getByRole("textbox", { name: "Global Prompt" })
+      .closest('[data-slot="field"]');
+    const projectPromptField = screen
+      .getByRole("textbox", { name: "Project Prompt" })
+      .closest('[data-slot="field"]');
+
+    expect(inheritanceField?.compareDocumentPosition(globalPromptField as Node)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    );
+    expect(globalPromptField?.compareDocumentPosition(projectPromptField as Node)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    );
+    expect(projectPromptField).toContainElement(screen.getByRole("combobox", { name: "Project" }));
+    for (const field of [inheritanceField, globalPromptField, projectPromptField]) {
+      expect(field).not.toHaveClass("border-b");
+    }
+
+    await userEvent.click(inheritanceSwitch);
 
     expect(updateProjectPromptPolicy).toHaveBeenCalledWith({ includeGlobalPrompt: false });
   });
@@ -967,7 +993,7 @@ describe("desktop renderer settings interactions", () => {
     expect(loadProject).toHaveBeenCalledWith(projectB);
   });
 
-  it("shows and saves the current project canvas prompt", async () => {
+  it("shows and saves the current project prompt without implying canvas scope", async () => {
     stubLayoutApis();
     const updateProjectPrompt = vi.fn().mockResolvedValue(undefined);
 
@@ -977,7 +1003,7 @@ describe("desktop renderer settings interactions", () => {
         agents={[]}
         graph={null}
         language="en"
-        projectPromptMarkdown={"# Project/Canvas Prompt\n\nVisible policy."}
+        projectPromptMarkdown={"# Project Prompt\n\nVisible policy."}
         projectPromptPolicy={{ includeGlobalPrompt: true }}
         selectedProject={projectA}
         refreshAgentDetections={vi.fn().mockResolvedValue(undefined)}
@@ -993,11 +1019,11 @@ describe("desktop renderer settings interactions", () => {
       />
     );
 
-    const editor = screen.getByRole("textbox", { name: "Project/Canvas Prompt" });
-    expect(editor).toHaveValue("# Project/Canvas Prompt\n\nVisible policy.");
+    const editor = screen.getByRole("textbox", { name: "Project Prompt" });
+    expect(editor).toHaveValue("# Project Prompt\n\nVisible policy.");
     await userEvent.clear(editor);
     await userEvent.type(editor, "Updated project policy.");
-    await userEvent.click(screen.getByRole("button", { name: "Save Project/Canvas Prompt" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save Project Prompt" }));
 
     expect(updateProjectPrompt).toHaveBeenCalledWith("Updated project policy.");
   });
@@ -1028,12 +1054,70 @@ describe("desktop renderer settings interactions", () => {
       />
     );
 
-    const editor = screen.getByRole("textbox", { name: "Project/Canvas Prompt" });
+    const editor = screen.getByRole("textbox", { name: "Project Prompt" });
     expect(editor).toBeEnabled();
     await userEvent.type(editor, "Policy while graph is unavailable.");
-    await userEvent.click(screen.getByRole("button", { name: "Save Project/Canvas Prompt" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save Project Prompt" }));
 
     expect(updateProjectPrompt).toHaveBeenCalledWith("Policy while graph is unavailable.");
+  });
+
+  it("shows and saves the global prompt independently of project selection", async () => {
+    stubLayoutApis();
+    const updateGlobalPrompt = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <SettingsView
+        agentDetectionRefreshing={false}
+        agents={[]}
+        globalPromptMarkdown={"# Global Prompt\n\nShared policy."}
+        graph={null}
+        language="en"
+        projects={[]}
+        refreshAgentDetections={vi.fn().mockResolvedValue(undefined)}
+        refreshRuntimeTools={vi.fn().mockResolvedValue(undefined)}
+        runtimeTools={{ tmux: { available: true, command: "tmux" } }}
+        setActiveView={vi.fn()}
+        settings={settings}
+        t={createTranslator("en")}
+        updateGlobalPrompt={updateGlobalPrompt}
+        updateSettings={vi.fn()}
+      />
+    );
+
+    const editor = screen.getByRole("textbox", { name: "Global Prompt" });
+    expect(editor).toHaveValue("# Global Prompt\n\nShared policy.");
+    await userEvent.clear(editor);
+    await userEvent.type(editor, "Updated global policy.");
+    await userEvent.click(screen.getByRole("button", { name: "Save Global Prompt" }));
+
+    expect(updateGlobalPrompt).toHaveBeenCalledWith("Updated global policy.");
+  });
+
+  it("persists the developer mode switch explicitly", async () => {
+    stubLayoutApis();
+    const updateSettings = vi.fn();
+
+    render(
+      <SettingsView
+        agentDetectionRefreshing={false}
+        agents={[]}
+        graph={null}
+        language="en"
+        projects={[]}
+        refreshAgentDetections={vi.fn().mockResolvedValue(undefined)}
+        refreshRuntimeTools={vi.fn().mockResolvedValue(undefined)}
+        runtimeTools={{ tmux: { available: true, command: "tmux" } }}
+        setActiveView={vi.fn()}
+        settings={settings}
+        t={createTranslator("en")}
+        updateSettings={updateSettings}
+      />
+    );
+
+    await userEvent.click(screen.getByRole("switch", { name: "Developer mode" }));
+
+    expect(updateSettings).toHaveBeenCalledWith({ developerMode: true });
   });
 
   it("disables agent switches when the CLI is not detected", async () => {

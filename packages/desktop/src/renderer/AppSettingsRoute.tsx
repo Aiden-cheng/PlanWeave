@@ -14,6 +14,7 @@ type AppSettingsRouteProps = {
   agentDetectionRefreshing: boolean;
   agents: DesktopAgentDetection[];
   graph: DesktopGraphViewModel | null;
+  globalPromptMarkdown: string | null;
   language: Language;
   refreshAgentDetections: () => Promise<void>;
   refreshRuntimeTools: () => Promise<void>;
@@ -30,6 +31,7 @@ type AppSettingsRouteProps = {
   t: ReturnType<typeof createTranslator>;
   updateProjectPrompt: (markdown: string) => Promise<void>;
   updateProjectPromptPolicy: (patch: Partial<ProjectPromptPolicy>) => Promise<void>;
+  updateGlobalPrompt: (markdown: string) => Promise<void>;
   updateSettings: (update: DesktopSettingsUpdate) => void;
   updateSettingsAndWait: (update: DesktopSettingsUpdate) => Promise<void>;
 };
@@ -38,6 +40,7 @@ export function AppSettingsRoute({
   agentDetectionRefreshing,
   agents,
   graph,
+  globalPromptMarkdown,
   language,
   refreshAgentDetections,
   refreshRuntimeTools,
@@ -54,6 +57,7 @@ export function AppSettingsRoute({
   t,
   updateProjectPrompt,
   updateProjectPromptPolicy,
+  updateGlobalPrompt,
   updateSettingsAndWait,
   updateSettings
 }: AppSettingsRouteProps) {
@@ -61,6 +65,7 @@ export function AppSettingsRoute({
     <div className="h-screen min-h-0 overflow-hidden text-foreground">
       <SettingsView
         graph={graph}
+        globalPromptMarkdown={globalPromptMarkdown}
         agents={agents}
         agentDetectionRefreshing={agentDetectionRefreshing}
         language={language}
@@ -79,6 +84,7 @@ export function AppSettingsRoute({
         t={t}
         updateProjectPrompt={updateProjectPrompt}
         updateProjectPromptPolicy={updateProjectPromptPolicy}
+        updateGlobalPrompt={updateGlobalPrompt}
         updateSettingsAndWait={updateSettingsAndWait}
         updateSettings={updateSettings}
       />

@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { createTranslator } from "../renderer/i18n";
 import { CollaborationConnectForm } from "../renderer/team/CollaborationConnectForm";
 import { CollaborationDiagnosticsDetails } from "../renderer/team/CollaborationDiagnosticsDetails";
@@ -53,16 +53,14 @@ const diagnosticStatus: CollaborationStatus = {
 };
 
 afterEach(() => {
-  vi.unstubAllEnvs();
   cleanupRendererTestEnvironment();
 });
 
 describe("collaboration diagnostics visibility", () => {
-  it("does not render member diagnostics in a production build", () => {
-    vi.stubEnv("PROD", true);
-
+  it("does not render member diagnostics while developer mode is disabled", () => {
     render(
       <CollaborationDiagnosticsDetails
+        enabled={false}
         report="internal connection diagnostics"
         t={translator}
         testIdPrefix="people-member-diagnostics"
@@ -72,12 +70,11 @@ describe("collaboration diagnostics visibility", () => {
     expect(screen.queryByTestId("people-member-diagnostics")).not.toBeInTheDocument();
   });
 
-  it("does not render connection diagnostics in a production build", () => {
-    vi.stubEnv("PROD", true);
-
+  it("does not render connection diagnostics while developer mode is disabled", () => {
     render(
       <CollaborationConnectForm
         api={null}
+        diagnosticsEnabled={false}
         status={diagnosticStatus}
         t={translator}
         fixedMode="connect"
@@ -85,5 +82,18 @@ describe("collaboration diagnostics visibility", () => {
     );
 
     expect(screen.queryByTestId("people-connection-diagnostics")).not.toBeInTheDocument();
+  });
+
+  it("renders diagnostics when the explicit developer setting is enabled", () => {
+    render(
+      <CollaborationDiagnosticsDetails
+        enabled
+        report="internal connection diagnostics"
+        t={translator}
+        testIdPrefix="people-member-diagnostics"
+      />
+    );
+
+    expect(screen.getByTestId("people-member-diagnostics")).toBeInTheDocument();
   });
 });

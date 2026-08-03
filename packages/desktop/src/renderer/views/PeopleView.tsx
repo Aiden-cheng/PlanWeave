@@ -32,6 +32,7 @@ type PeopleSection = "workspace" | "hosting";
 
 export type PeopleViewProps = {
   t: ReturnType<typeof createTranslator>;
+  diagnosticsEnabled?: boolean;
   /** Injected API for tests. */
   api?: PlanWeaveCollaborationApi | null;
   /** Optional clipboard writer; defaults to navigator.clipboard. */
@@ -70,6 +71,7 @@ export function formatPeoplePanelError(
 /** Active-project member administration surface. */
 export function PeopleView({
   t,
+  diagnosticsEnabled = false,
   api: apiProp,
   copyText = defaultCopyText,
   localProjectId = null,
@@ -158,10 +160,10 @@ export function PeopleView({
   });
   const diagnosticReport = useMemo(
     () =>
-      status
+      diagnosticsEnabled && status
         ? buildCollaborationDiagnosticReport(status, undefined, snapshot, currentCanvasAccess.view)
         : null,
-    [currentCanvasAccess.view, snapshot, status]
+    [currentCanvasAccess.view, diagnosticsEnabled, snapshot, status]
   );
 
   const handleManageInvitations = useCallback(() => {
@@ -245,6 +247,7 @@ export function PeopleView({
               existingServerSlot={
                 <CollaborationConnectForm
                   api={api}
+                  diagnosticsEnabled={diagnosticsEnabled}
                   status={status}
                   t={t}
                   fixedMode="setup"
@@ -257,6 +260,7 @@ export function PeopleView({
               joinSlot={
                 <CollaborationConnectForm
                   api={api}
+                  diagnosticsEnabled={diagnosticsEnabled}
                   status={status}
                   t={t}
                   fixedMode="join"
@@ -318,6 +322,7 @@ export function PeopleView({
                   revealInvitationManagement={revealInvitationManagement}
                   showTitle={false}
                   diagnosticReport={diagnosticReport}
+                  diagnosticsEnabled={diagnosticsEnabled}
                   onCopyDiagnostics={copyText}
                   t={t}
                   onCreateInvitation={panel.createInvitation}
@@ -386,6 +391,7 @@ export function PeopleView({
                   connectSlot={
                     <CollaborationConnectForm
                       api={api}
+                      diagnosticsEnabled={diagnosticsEnabled}
                       status={status}
                       t={t}
                       initialMode={activeProfile ? "connect" : "join"}

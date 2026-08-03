@@ -165,6 +165,7 @@ export {
   updateProjectPrompt,
   updateProjectPromptPolicy
 } from "../projectPromptPolicy.js";
+export { readGlobalPrompt, updateGlobalPrompt } from "../globalPrompt.js";
 export type { ProjectPromptPolicy } from "../projectPromptPolicy.js";
 export { getDesktopGraphDiagnostics } from "./diagnosticsApi.js";
 export {

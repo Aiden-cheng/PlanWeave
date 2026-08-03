@@ -333,6 +333,8 @@ export type DesktopBridgeApi = {
   ): Promise<DesktopTaskExecutionOrder>;
   getTodoGroups(projectRoot: string): Promise<DesktopTodoGroups>;
   getProjectExecutionPlan(projectRoot: string): Promise<DesktopProjectExecutionPlan>;
+  readGlobalPrompt(): Promise<string>;
+  updateGlobalPrompt(markdown: string): Promise<string>;
   readProjectPrompt(projectRoot: string): Promise<string>;
   updateProjectPrompt(projectRoot: string, markdown: string): Promise<string>;
   readProjectPromptPolicy(projectRoot: string): Promise<ProjectPromptPolicy>;

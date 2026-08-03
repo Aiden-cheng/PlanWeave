@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const promptSourceKinds = [
   "global",
-  "projectCanvas",
+  "project",
   "projectGraph",
   "taskNode",
   "block"

@@ -7,12 +7,14 @@ type SettingsSwitchRowProps = {
   title: string;
   description: ReactNode;
   checked: boolean;
+  className?: string;
   disabled?: boolean;
   onCheckedChange: (checked: boolean) => void;
 };
 
 export function SettingsSwitchRow({
   checked,
+  className,
   description,
   disabled = false,
   onCheckedChange,
@@ -24,7 +26,8 @@ export function SettingsSwitchRow({
       orientation="horizontal"
       className={cn(
         "items-center justify-between gap-4 border-b px-5 py-4 last:border-b-0",
-        disabled ? "opacity-45" : ""
+        disabled ? "opacity-45" : "",
+        className
       )}
     >
       <FieldContent>

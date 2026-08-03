@@ -16,6 +16,8 @@ describe("renderPrompt", () => {
 
     const prompt = await renderPrompt({ projectRoot: root, ref: "T-001#B-001" });
 
+    expect(prompt).toContain("## Project Prompt");
+    expect(prompt).not.toContain("## Project/Canvas Prompt");
     expect(prompt).toContain("Global policy");
     expect(prompt).toContain("Project policy");
     expect(prompt).toContain("# T-001 task prompt");

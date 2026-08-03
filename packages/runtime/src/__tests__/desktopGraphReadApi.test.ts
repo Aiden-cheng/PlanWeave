@@ -408,8 +408,8 @@ describe("desktop graph read API", () => {
     expect(inheritedDetail.promptSources).toEqual([
       expect.objectContaining({ kind: "global", label: "PlanWeave Global Prompt", included: true }),
       expect.objectContaining({
-        kind: "projectCanvas",
-        label: "Project/Canvas Prompt",
+        kind: "project",
+        label: "Project Prompt",
         included: true
       }),
       expect.objectContaining({
@@ -437,17 +437,15 @@ describe("desktop graph read API", () => {
     });
   });
 
-  it("reads and updates the project canvas prompt from the desktop API", async () => {
+  it("reads and updates the project prompt from the desktop API", async () => {
     const { root } = await createTestWorkspace();
 
     await expect(readProjectPrompt(root)).resolves.toContain("# Project Prompt");
-    await updateProjectPrompt(root, "Project/Canvas prompt visible in settings.\n");
+    await updateProjectPrompt(root, "Project prompt visible in settings.\n");
 
-    await expect(readProjectPrompt(root)).resolves.toBe(
-      "Project/Canvas prompt visible in settings.\n"
-    );
+    await expect(readProjectPrompt(root)).resolves.toBe("Project prompt visible in settings.\n");
     await expect(getBlockDetail(root, "T-001#B-001")).resolves.toMatchObject({
-      promptSurfaceMarkdown: expect.stringContaining("Project/Canvas prompt visible in settings.")
+      promptSurfaceMarkdown: expect.stringContaining("Project prompt visible in settings.")
     });
   });
 

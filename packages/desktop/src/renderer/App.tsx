@@ -8,6 +8,7 @@ import { useDesktopSettingsEffects } from "./hooks/useDesktopSettingsEffects";
 import { useDesktopSettingsBridge } from "./hooks/useDesktopSettingsBridge";
 import { useDetectedAgents } from "./hooks/useDetectedAgents";
 import { useRuntimeTools } from "./hooks/useRuntimeTools";
+import { useGlobalPrompt } from "./hooks/useGlobalPrompt";
 import { useResizableSidebarLayout } from "./hooks/useResizableSidebarLayout";
 import { CollapsedSidebarControls, RightPaletteSidebar } from "./AppSidebars";
 import { AppSettingsRoute } from "./AppSettingsRoute";
@@ -120,14 +121,23 @@ function AppSettingsChrome({
 export function App() {
   const rendererPlatform = detectRendererPlatform();
   const [error, setError] = useState<string | null>(null);
-  const { settings, settingsHydrated, updateLayoutSettings, updateSettings, updateSettingsAndWait } =
-    useDesktopSettingsBridge({ setError });
+  const {
+    settings,
+    settingsHydrated,
+    updateLayoutSettings,
+    updateSettings,
+    updateSettingsAndWait
+  } = useDesktopSettingsBridge({ setError });
   const language = settings.language;
   const t = useMemo(() => createTranslator(language), [language]);
   const [activeView, setActiveView, appHistory] = useAppViewHistory("graph");
   const { agentDetectionRefreshing, agentDetections, refreshAgentDetections } = useDetectedAgents();
   const { refreshRuntimeTools, runtimeTools } = useRuntimeTools();
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const { globalPromptMarkdown, updateGlobalPrompt } = useGlobalPrompt(
+    setError,
+    settings.planweaveHome
+  );
 
   useEffect(() => {
     if (!bridge) {
@@ -162,6 +172,7 @@ export function App() {
       appHistory,
       agentDetectionRefreshing,
       agentDetections,
+      globalPromptMarkdown,
       language,
       refreshAgentDetections,
       refreshRuntimeTools,
@@ -173,6 +184,7 @@ export function App() {
       settingsHydrated,
       t,
       updateLayoutSettings,
+      updateGlobalPrompt,
       updateSettings,
       updateSettingsAndWait
     }),
@@ -181,6 +193,7 @@ export function App() {
       appHistory,
       agentDetectionRefreshing,
       agentDetections,
+      globalPromptMarkdown,
       language,
       refreshAgentDetections,
       refreshRuntimeTools,
@@ -190,6 +203,7 @@ export function App() {
       settingsHydrated,
       t,
       updateLayoutSettings,
+      updateGlobalPrompt,
       updateSettings,
       updateSettingsAndWait
     ]

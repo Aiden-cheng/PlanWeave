@@ -15,6 +15,7 @@ export type DesktopUiSettings = {
   runtimePath: string;
   planweaveHome: string;
   defaultExecutor: string;
+  developerMode: boolean;
   appearance: AppearanceMode;
   reducedMotion: boolean;
   language: DesktopSettingsLanguage;
@@ -75,6 +76,7 @@ export type DesktopSettingsPatch = Partial<{
   runtimePath: string;
   planweaveHome: string;
   defaultExecutor: string;
+  developerMode: boolean;
   appearance: AppearanceMode;
   reducedMotion: boolean;
   language: DesktopSettingsLanguage;
@@ -123,6 +125,7 @@ export const defaultDesktopSettings: DesktopUiSettings = {
   runtimePath: "",
   planweaveHome: "",
   defaultExecutor: "",
+  developerMode: false,
   appearance: "system",
   reducedMotion: false,
   language: "zh-CN",
@@ -435,6 +438,9 @@ export function normalizeDesktopSettingsPatch(value: unknown): DesktopSettingsPa
   }
   if (typeof value.defaultExecutor === "string") {
     patch.defaultExecutor = value.defaultExecutor;
+  }
+  if (typeof value.developerMode === "boolean") {
+    patch.developerMode = value.developerMode;
   }
   if (isAppearanceMode(value.appearance)) {
     patch.appearance = value.appearance;

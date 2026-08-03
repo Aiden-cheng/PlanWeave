@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { createTranslator } from "../i18n";
-import { shouldShowCollaborationDiagnostics } from "./collaborationDiagnostics";
 
 export type CollaborationDiagnosticsDetailsProps = {
+  enabled: boolean;
   report: string;
   t: ReturnType<typeof createTranslator>;
   onCopy?: (report: string) => Promise<void>;
@@ -12,6 +12,7 @@ export type CollaborationDiagnosticsDetailsProps = {
 
 /** Flat, collapsed troubleshooting output containing only allowlisted diagnostic fields. */
 export function CollaborationDiagnosticsDetails({
+  enabled,
   report,
   t,
   onCopy,
@@ -20,7 +21,7 @@ export function CollaborationDiagnosticsDetails({
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
 
-  if (!shouldShowCollaborationDiagnostics()) return null;
+  if (!enabled) return null;
 
   return (
     <details

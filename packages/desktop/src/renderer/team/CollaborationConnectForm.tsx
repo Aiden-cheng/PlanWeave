@@ -26,10 +26,7 @@ import {
 } from "./collaborationInvitationHandoff";
 import { CollaborationInvitationJoinFields } from "./CollaborationInvitationJoinFields";
 import { CollaborationSetupHandoffFields } from "./CollaborationSetupHandoffFields";
-import {
-  buildCollaborationDiagnosticReport,
-  shouldShowCollaborationDiagnostics
-} from "./collaborationDiagnostics";
+import { buildCollaborationDiagnosticReport } from "./collaborationDiagnostics";
 
 export type CollaborationConnectFormProps = {
   api: PlanWeaveCollaborationApi | null;
@@ -48,6 +45,7 @@ export type CollaborationConnectFormProps = {
   showConnectionSummary?: boolean;
   /** Clipboard boundary supplied by the containing desktop view. */
   copyText?: (text: string) => Promise<void>;
+  diagnosticsEnabled?: boolean;
 };
 
 export type ConnectMode = "setup" | "join" | "bootstrap" | "connect";
@@ -96,7 +94,8 @@ export function CollaborationConnectForm({
   fixedMode,
   showHeader = true,
   showConnectionSummary = true,
-  copyText
+  copyText,
+  diagnosticsEnabled = false
 }: CollaborationConnectFormProps) {
   const formId = useId();
   const [mode, setMode] = useState<ConnectMode>(fixedMode ?? initialMode);
@@ -125,9 +124,7 @@ export function CollaborationConnectForm({
   const workspaceConnection = status?.workspaceConnection ?? null;
   const workspacePickerItems: WorkspacePickerItem[] = status?.workspacePicker?.items ?? [];
   const diagnosticReport =
-    status && shouldShowCollaborationDiagnostics()
-      ? buildCollaborationDiagnosticReport(status)
-      : null;
+    status && diagnosticsEnabled ? buildCollaborationDiagnosticReport(status) : null;
   const existingServerBaseUrl = activeProfile?.serverBaseUrl ?? "";
   const submitLabel =
     mode === "setup"

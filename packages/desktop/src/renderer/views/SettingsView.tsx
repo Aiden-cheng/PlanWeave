@@ -28,6 +28,7 @@ type SettingsViewProps = {
   agentDetectionRefreshing: boolean;
   agents: DesktopAgentDetection[];
   graph: DesktopGraphViewModel | null;
+  globalPromptMarkdown?: string | null;
   language: Language;
   refreshAgentDetections: () => Promise<void>;
   refreshRuntimeTools: () => Promise<void>;
@@ -44,6 +45,7 @@ type SettingsViewProps = {
   t: ReturnType<typeof createTranslator>;
   updateProjectPrompt?: (markdown: string) => Promise<void>;
   updateProjectPromptPolicy?: (patch: Partial<ProjectPromptPolicy>) => Promise<void>;
+  updateGlobalPrompt?: (markdown: string) => Promise<void>;
   updateSettings: (update: DesktopSettingsUpdate) => void;
   updateSettingsAndWait: (update: DesktopSettingsUpdate) => Promise<void>;
 };
@@ -52,6 +54,7 @@ export function SettingsView({
   agentDetectionRefreshing,
   agents,
   graph,
+  globalPromptMarkdown,
   language,
   refreshAgentDetections,
   refreshRuntimeTools,
@@ -68,12 +71,15 @@ export function SettingsView({
   t,
   updateProjectPrompt,
   updateProjectPromptPolicy,
+  updateGlobalPrompt,
   updateSettingsAndWait,
   updateSettings
 }: SettingsViewProps) {
   const [section, setSection] = useState<SettingsSection>("general");
   const [projectPromptDraft, setProjectPromptDraft] = useState(projectPromptMarkdown ?? "");
   const [projectPromptSaving, setProjectPromptSaving] = useState(false);
+  const [globalPromptDraft, setGlobalPromptDraft] = useState(globalPromptMarkdown ?? "");
+  const [globalPromptSaving, setGlobalPromptSaving] = useState(false);
   const projectPromptAvailable = Boolean(selectedProject && updateProjectPrompt);
   const projectPromptPolicyAvailable = Boolean(
     selectedProject && projectPromptPolicy && updateProjectPromptPolicy
@@ -86,6 +92,10 @@ export function SettingsView({
   useEffect(() => {
     setProjectPromptDraft(projectPromptMarkdown ?? "");
   }, [projectPromptMarkdown]);
+
+  useEffect(() => {
+    setGlobalPromptDraft(globalPromptMarkdown ?? "");
+  }, [globalPromptMarkdown]);
 
   const selectProject = (projectId: string) => {
     const project = projects.find((item) => item.projectId === projectId);
@@ -100,6 +110,12 @@ export function SettingsView({
     }
     setProjectPromptSaving(true);
     void updateProjectPrompt(projectPromptDraft).finally(() => setProjectPromptSaving(false));
+  };
+
+  const saveGlobalPrompt = () => {
+    if (!updateGlobalPrompt) return;
+    setGlobalPromptSaving(true);
+    void updateGlobalPrompt(globalPromptDraft).finally(() => setGlobalPromptSaving(false));
   };
 
   return (
@@ -119,7 +135,12 @@ export function SettingsView({
           <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-12 py-10 pb-16">
             {section === "general" ? (
               <SettingsGeneralSection
+                globalPromptAvailable={Boolean(updateGlobalPrompt)}
+                globalPromptDraft={globalPromptDraft}
+                globalPromptSaving={globalPromptSaving}
                 language={language}
+                onGlobalPromptDraftChange={setGlobalPromptDraft}
+                onGlobalPromptSave={saveGlobalPrompt}
                 onProjectPromptDraftChange={setProjectPromptDraft}
                 onProjectPromptSave={saveProjectPrompt}
                 onProjectSelect={selectProject}

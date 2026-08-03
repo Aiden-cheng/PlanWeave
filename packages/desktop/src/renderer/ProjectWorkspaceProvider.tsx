@@ -127,6 +127,7 @@ export type ProjectWorkspaceShellInput = {
   appHistory: AppViewHistoryController;
   agentDetectionRefreshing: boolean;
   agentDetections: DesktopAgentDetection[];
+  globalPromptMarkdown: string | null;
   language: DesktopUiSettings["language"];
   refreshAgentDetections: () => Promise<void>;
   refreshRuntimeTools: () => Promise<void>;
@@ -138,6 +139,7 @@ export type ProjectWorkspaceShellInput = {
   settingsHydrated: boolean;
   t: ReturnType<typeof createTranslator>;
   updateLayoutSettings: (patch: LayoutSettingsPatch) => void;
+  updateGlobalPrompt: (markdown: string) => Promise<void>;
   updateSettings: (update: DesktopSettingsUpdate) => void;
   updateSettingsAndWait: (update: DesktopSettingsUpdate) => Promise<void>;
 };
@@ -185,6 +187,7 @@ export function ProjectWorkspaceProvider({
     appHistory,
     agentDetectionRefreshing,
     agentDetections,
+    globalPromptMarkdown,
     language,
     refreshAgentDetections,
     refreshRuntimeTools,
@@ -196,6 +199,7 @@ export function ProjectWorkspaceProvider({
     settingsHydrated,
     t,
     updateLayoutSettings,
+    updateGlobalPrompt,
     updateSettings,
     updateSettingsAndWait
   } = shellInput;
@@ -962,6 +966,7 @@ export function ProjectWorkspaceProvider({
     graph,
     agents: agentDetections,
     agentDetectionRefreshing,
+    globalPromptMarkdown,
     language,
     refreshAgentDetections,
     refreshRuntimeTools,
@@ -978,6 +983,7 @@ export function ProjectWorkspaceProvider({
     t,
     updateProjectPrompt,
     updateProjectPromptPolicy,
+    updateGlobalPrompt,
     updateSettingsAndWait,
     updateSettings
   });
@@ -998,6 +1004,7 @@ export function ProjectWorkspaceProvider({
       setActiveView,
       setError,
       setSuccessMessage,
+      developerMode: settings.developerMode,
       collaborationScopeLayout: settings.layout.collaborationScope,
       updateCollaborationScopeLayout: (patch) =>
         updateLayoutSettings({ collaborationScope: patch }),
@@ -1019,6 +1026,7 @@ export function ProjectWorkspaceProvider({
       setActiveView,
       setError,
       setSuccessMessage,
+      settings.developerMode,
       settings.layout.collaborationScope,
       t,
       updateLayoutSettings

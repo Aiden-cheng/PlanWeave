@@ -70,6 +70,19 @@ describe("DesktopSettingsStore", () => {
 
     await expect(store.read()).resolves.toEqual(defaultDesktopSettings);
     await expect(exists(store.settingsFile)).resolves.toBe(false);
+    expect(defaultDesktopSettings.developerMode).toBe(false);
+  });
+
+  it("persists developer mode without changing other settings", async () => {
+    const home = await tempHome();
+    const store = testStore(join(home, "config", "desktop-settings.json"));
+
+    await store.mergePatch({ developerMode: true });
+
+    await expect(store.read()).resolves.toEqual({
+      ...defaultDesktopSettings,
+      developerMode: true
+    });
   });
 
   it("enables macOS window material when a settings file has not been initialized yet", async () => {

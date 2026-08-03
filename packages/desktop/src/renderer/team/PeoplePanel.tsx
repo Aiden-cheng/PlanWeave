@@ -42,6 +42,7 @@ export type PeoplePanelProps = {
   connectSlot?: ReactNode;
   /** Allowlisted read/session context for cross-device troubleshooting. */
   diagnosticReport?: string | null;
+  diagnosticsEnabled?: boolean;
   onCopyDiagnostics?: (report: string) => Promise<void>;
   /** Page shells may already expose the selected destination. */
   showTitle?: boolean;
@@ -100,6 +101,7 @@ export function PeoplePanel({
   renderMemberAccess,
   connectSlot,
   diagnosticReport = null,
+  diagnosticsEnabled = false,
   onCopyDiagnostics,
   showTitle = true
 }: PeoplePanelProps) {
@@ -154,6 +156,7 @@ export function PeoplePanel({
 
   const diagnostics = diagnosticReport ? (
     <CollaborationDiagnosticsDetails
+      enabled={diagnosticsEnabled}
       report={diagnosticReport}
       t={t}
       onCopy={onCopyDiagnostics}

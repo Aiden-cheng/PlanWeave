@@ -79,6 +79,7 @@ const TaskWorkspaceAppRoute = lazy(() =>
 
 export type WorkspaceTabsShellProps = {
   activeView: AppView;
+  developerMode: boolean;
   assigneeIndex?: import("../collaboration/assigneeSurfaceViewModels").AssigneeSurfaceIndex | null;
   handleOpenProject: () => Promise<void>;
   handleRevealPathInFinder: (path: string | null | undefined) => Promise<void>;
@@ -302,6 +303,7 @@ function PeopleRoute({
   return (
     <PeopleView
       t={shell.t}
+      diagnosticsEnabled={shell.developerMode}
       localProjectId={shell.selectedProject?.projectId ?? null}
       canvasId={shell.selectedCanvasId}
       onContentMaterialized={() =>

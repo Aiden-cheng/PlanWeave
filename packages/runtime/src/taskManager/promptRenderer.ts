@@ -257,8 +257,8 @@ export async function renderPromptSurfaceFromContext(
       disabledReason: promptPolicy.includeGlobalPrompt ? null : "Disabled for this project."
     }),
     promptSourceSummary({
-      kind: "projectCanvas",
-      label: "Project/Canvas Prompt",
+      kind: "project",
+      label: "Project Prompt",
       markdown: projectPrompt.markdown,
       included: true,
       missing: projectPrompt.missing
@@ -350,8 +350,8 @@ export async function renderPromptSurfaceFromContext(
     `# ${task.id}#${block.id}: ${block.title}`,
     promptPolicy.includeGlobalPrompt ? "## PlanWeave Global Prompt" : "",
     promptPolicy.includeGlobalPrompt ? globalPrompt.markdown.trim() || "- No global prompt." : "",
-    "## Project/Canvas Prompt",
-    projectPrompt.markdown.trim() || "- No project/canvas prompt.",
+    "## Project Prompt",
+    projectPrompt.markdown.trim() || "- No project prompt.",
     "## Project Canvas Context",
     projectCanvasContext.markdown.trim(),
     "## PlanGraph Claim Context",

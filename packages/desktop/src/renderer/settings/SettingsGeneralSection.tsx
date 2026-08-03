@@ -30,7 +30,12 @@ type SettingsProjectOption = {
 };
 
 type SettingsGeneralSectionProps = {
+  globalPromptAvailable: boolean;
+  globalPromptDraft: string;
+  globalPromptSaving: boolean;
   language: Language;
+  onGlobalPromptDraftChange: (value: string) => void;
+  onGlobalPromptSave: () => void;
   onProjectPromptDraftChange: (value: string) => void;
   onProjectPromptSave: () => void;
   onProjectSelect: (projectId: string) => void;
@@ -80,7 +85,12 @@ function SettingGroup({ children, title }: { children: ReactNode; title: string 
 }
 
 export function SettingsGeneralSection({
+  globalPromptAvailable,
+  globalPromptDraft,
+  globalPromptSaving,
   language,
+  onGlobalPromptDraftChange,
+  onGlobalPromptSave,
   onProjectPromptDraftChange,
   onProjectPromptSave,
   onProjectSelect,
@@ -300,34 +310,8 @@ export function SettingsGeneralSection({
         </div>
       </SettingGroup>
       <SettingGroup title={t("promptSettings")}>
-        <Field
-          orientation="horizontal"
-          className="items-center justify-between gap-4 border-b px-5 py-4 last:border-b-0"
-        >
-          <FieldContent>
-            <FieldLabel className="text-sm font-semibold">{t("projectPromptProject")}</FieldLabel>
-            <FieldDescription>{t("projectPromptProjectHint")}</FieldDescription>
-          </FieldContent>
-          <Select
-            value={selectedProjectId ?? ""}
-            disabled={!projectSelectorAvailable}
-            onValueChange={onProjectSelect}
-          >
-            <SelectTrigger aria-label={t("projectPromptProject")} className="w-72">
-              <SelectValue placeholder={t("projectMissing")} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {projects.map((project) => (
-                  <SelectItem key={project.projectId} value={project.projectId}>
-                    {project.name}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </Field>
         <SettingsSwitchRow
+          className="border-b-0"
           checked={projectPromptPolicy?.includeGlobalPrompt ?? false}
           disabled={!projectPromptPolicyAvailable}
           title={t("inheritGlobalPrompt")}
@@ -340,24 +324,66 @@ export function SettingsGeneralSection({
             void updateProjectPromptPolicy?.({ includeGlobalPrompt: checked });
           }}
         />
-        <Field
-          data-disabled={!projectPromptAvailable}
-          orientation="vertical"
-          className="border-b px-5 py-4 last:border-b-0"
-        >
+        <Field orientation="vertical" className="px-5 py-4">
           <FieldContent>
-            <FieldLabel htmlFor="project-canvas-prompt" className="text-sm font-semibold">
-              {t("projectCanvasPrompt")}
+            <FieldLabel htmlFor="global-prompt" className="text-sm font-semibold">
+              {t("globalPrompt")}
             </FieldLabel>
-            <FieldDescription>
-              {projectPromptAvailable
-                ? t("projectCanvasPromptHint")
-                : t("projectCanvasPromptUnavailableHint")}
-            </FieldDescription>
+            <FieldDescription>{t("globalPromptHint")}</FieldDescription>
           </FieldContent>
           <Textarea
-            aria-label={t("projectCanvasPrompt")}
-            id="project-canvas-prompt"
+            aria-label={t("globalPrompt")}
+            id="global-prompt"
+            className="min-h-44 resize-y font-mono text-xs"
+            disabled={!globalPromptAvailable}
+            value={globalPromptDraft}
+            onChange={(event) => onGlobalPromptDraftChange(event.target.value)}
+          />
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!globalPromptAvailable || globalPromptSaving}
+              onClick={onGlobalPromptSave}
+            >
+              {t("saveGlobalPrompt")}
+            </Button>
+          </div>
+        </Field>
+        <Field data-disabled={!projectPromptAvailable} orientation="vertical" className="px-5 py-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <FieldContent>
+              <FieldLabel htmlFor="project-prompt" className="text-sm font-semibold">
+                {t("projectPrompt")}
+              </FieldLabel>
+              <FieldDescription>
+                {projectPromptAvailable
+                  ? t("projectPromptHint")
+                  : t("projectPromptUnavailableHint")}
+              </FieldDescription>
+            </FieldContent>
+            <Select
+              value={selectedProjectId ?? ""}
+              disabled={!projectSelectorAvailable}
+              onValueChange={onProjectSelect}
+            >
+              <SelectTrigger aria-label={t("projectPromptProject")} className="w-full sm:w-72">
+                <SelectValue placeholder={t("projectMissing")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {projects.map((project) => (
+                    <SelectItem key={project.projectId} value={project.projectId}>
+                      {project.name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
+          <Textarea
+            aria-label={t("projectPrompt")}
+            id="project-prompt"
             className="min-h-44 resize-y font-mono text-xs"
             disabled={!projectPromptAvailable}
             value={projectPromptDraft}
@@ -370,10 +396,18 @@ export function SettingsGeneralSection({
               disabled={!projectPromptAvailable || projectPromptSaving}
               onClick={onProjectPromptSave}
             >
-              {t("saveProjectCanvasPrompt")}
+              {t("saveProjectPrompt")}
             </Button>
           </div>
         </Field>
+      </SettingGroup>
+      <SettingGroup title={t("developerSettings")}>
+        <SettingsSwitchRow
+          checked={settings.developerMode}
+          title={t("developerMode")}
+          description={t("developerModeHint")}
+          onCheckedChange={(checked) => updateSettings({ developerMode: checked })}
+        />
       </SettingGroup>
     </section>
   );
