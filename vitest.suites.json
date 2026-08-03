@@ -551,7 +551,7 @@
       "unit": [
         "artifactMediaType.test.ts",
         "clientOrigin.test.ts",
-        "collaborationContractsAlignment.test.ts",
+        "collaborationProtocolAuthority.test.ts",
         "commentActivityPolicy.test.ts",
         "commentActivityProjection.test.ts",
         "commentActivitySchemas.test.ts",

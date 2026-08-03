@@ -1,20 +1,12 @@
-/**
- * Bounds for work assignment contracts (coordination metadata only).
- * Assignment never mutates Plan Package content and never stores secrets.
- */
+/** Public assignment wire budgets are owned by collaboration-protocol. */
+export {
+  WORK_ASSIGNMENT_BATCH_MAX,
+  WORK_HOST_DISPLAY_NAME_MAX_LENGTH,
+  WORK_HOST_DISPLAY_NAME_MIN_LENGTH
+} from "@planweave-ai/collaboration-protocol/core/limits";
 
-/** Reuse identity assign-reason budget for optional reassignment notes. */
+/** Reuse the public identity assignment-reason budget. */
 export { HUMAN_ASSIGN_REASON_MAX_LENGTH as WORK_ASSIGN_REASON_MAX_LENGTH } from "../identity/limits.js";
 
-/** Host display name budget for assignment projections (aligned with AgentHostRepository). */
-export const WORK_HOST_DISPLAY_NAME_MIN_LENGTH = 1 as const;
-export const WORK_HOST_DISPLAY_NAME_MAX_LENGTH = 128 as const;
-
-/** Maximum WorkItemRefs accepted in one batch read/update command (B-002 APIs). */
-export const WORK_ASSIGNMENT_BATCH_MAX = 100 as const;
-
-/**
- * Revision 0 means "no durable assignment row yet".
- * First successful assign/unassign write becomes revision 1.
- */
+/** Revision 0 means no durable assignment row exists yet. */
 export const WORK_ASSIGNMENT_INITIAL_REVISION = 0 as const;

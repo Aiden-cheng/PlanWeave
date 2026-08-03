@@ -50,6 +50,7 @@ export const assignmentAvailabilityReasonSchema = z.enum([
   "ready",
   "automatic_pending_selection"
 ]);
+export type AssignmentAvailabilityReason = z.infer<typeof assignmentAvailabilityReasonSchema>;
 
 export const assignmentAvailabilitySchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("ready"), reason: z.literal("ready") }).strict(),
@@ -88,6 +89,7 @@ export const assignmentHumanDisplaySchema = z
     membershipActive: z.boolean()
   })
   .strict();
+export type AssignmentHumanDisplay = z.infer<typeof assignmentHumanDisplaySchema>;
 
 export const assignmentHostDisplaySchema = z
   .object({
@@ -102,6 +104,7 @@ export const assignmentHostDisplaySchema = z
     capabilitiesSatisfied: z.boolean().optional()
   })
   .strict();
+export type AssignmentHostDisplay = z.infer<typeof assignmentHostDisplaySchema>;
 
 /** Read-model projection for Task/Block assignment views. */
 export const assignmentDisplayProjectionSchema = z
@@ -168,6 +171,7 @@ export const assignmentMembershipFactsSchema = z
     displayName: humanDisplayNameSchema.optional()
   })
   .strict();
+export type AssignmentMembershipFacts = z.infer<typeof assignmentMembershipFactsSchema>;
 
 export const assignmentHostFactsSchema = z
   .object({
@@ -188,6 +192,7 @@ export const assignmentHostFactsSchema = z
     capacityRemaining: z.number().int().nonnegative().optional()
   })
   .strict();
+export type AssignmentHostFacts = z.infer<typeof assignmentHostFactsSchema>;
 
 export const eligibleAssigneesResponseSchema = z
   .object({

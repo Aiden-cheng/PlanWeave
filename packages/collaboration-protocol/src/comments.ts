@@ -42,6 +42,11 @@ function hasAsciiControlCharacter(value: string): boolean {
 }
 
 export const commentBodyFormatSchema = z.literal(COMMENT_BODY_FORMAT);
+export type CommentBodyFormat = z.infer<typeof commentBodyFormatSchema>;
+
+/** Public semantic alias for Markdown comment bodies. */
+export const commentBodySchema = humanCommentBodySchema;
+export type CommentBody = z.infer<typeof commentBodySchema>;
 
 export const commentAttachmentFileNameSchema = z
   .string()
@@ -57,13 +62,21 @@ export const commentAttachmentFileNameSchema = z
       !hasAsciiControlCharacter(value),
     { message: "Attachment file name must not be a path or contain control characters." }
   );
+export type CommentAttachmentFileName = z.infer<typeof commentAttachmentFileNameSchema>;
 
 export const commentAttachmentMediaTypeSchema = z.enum(COMMENT_ATTACHMENT_ALLOWED_MEDIA_TYPES);
+export type CommentAttachmentMediaType = z.infer<typeof commentAttachmentMediaTypeSchema>;
 export const commentAttachmentSizeBytesSchema = z
   .number()
   .int()
   .positive()
   .max(COMMENT_ATTACHMENT_MAX_BYTES);
+export type CommentAttachmentSizeBytes = z.infer<typeof commentAttachmentSizeBytesSchema>;
+
+export const commentTombstoneReasonSchema = z
+  .string()
+  .min(1)
+  .max(COMMENT_TOMBSTONE_REASON_MAX_LENGTH);
 
 export const commentAttachmentProjectionSchema = z
   .object({
@@ -73,6 +86,7 @@ export const commentAttachmentProjectionSchema = z
     fileName: commentAttachmentFileNameSchema.optional()
   })
   .strict();
+export type CommentAttachmentProjection = z.infer<typeof commentAttachmentProjectionSchema>;
 
 export const commentAuthorDisplaySchema = z
   .object({
@@ -81,8 +95,10 @@ export const commentAuthorDisplaySchema = z
     membershipActive: z.boolean()
   })
   .strict();
+export type CommentAuthorDisplay = z.infer<typeof commentAuthorDisplaySchema>;
 
 export const commentWorkItemPresenceSchema = z.enum(["present", "missing"]);
+export type CommentWorkItemPresence = z.infer<typeof commentWorkItemPresenceSchema>;
 
 export const commentDisplayProjectionSchema = z
   .object({
@@ -101,7 +117,31 @@ export const commentDisplayProjectionSchema = z
     attachments: z.array(commentAttachmentProjectionSchema).max(COMMENT_ATTACHMENTS_MAX_COUNT),
     workItemPresence: commentWorkItemPresenceSchema
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.tombstoned) {
+      if (value.body !== null) {
+        ctx.addIssue({
+          code: "custom",
+          message: "tombstoned comment projections must redact body",
+          path: ["body"]
+        });
+      }
+      if (value.tombstonedAt === undefined) {
+        ctx.addIssue({
+          code: "custom",
+          message: "tombstoned projection requires tombstonedAt",
+          path: ["tombstonedAt"]
+        });
+      }
+    } else if (value.body === null) {
+      ctx.addIssue({
+        code: "custom",
+        message: "active comment projections require body",
+        path: ["body"]
+      });
+    }
+  });
 export type CommentDisplayProjection = z.infer<typeof commentDisplayProjectionSchema>;
 
 export const commentListCursorSchema = z
@@ -110,6 +150,7 @@ export const commentListCursorSchema = z
     commentId: commentIdSchema
   })
   .strict();
+export type CommentListCursor = z.infer<typeof commentListCursorSchema>;
 
 export const commentListPageSchema = z
   .object({
@@ -128,6 +169,7 @@ export const commentAttachmentInputSchema = z
     fileName: commentAttachmentFileNameSchema.optional()
   })
   .strict();
+export type CommentAttachmentInput = z.infer<typeof commentAttachmentInputSchema>;
 
 /** Wire create — no actor field (Server binds actor from bearer). */
 export const commentCreateWireCommandSchema = z
@@ -155,7 +197,7 @@ export const commentTombstoneWireCommandSchema = z
   .object({
     commentId: commentIdSchema,
     expectedRevision: z.number().int().positive(),
-    reason: z.string().min(1).max(COMMENT_TOMBSTONE_REASON_MAX_LENGTH).optional()
+    reason: commentTombstoneReasonSchema.optional()
   })
   .strict();
 export type CommentTombstoneWireCommand = z.infer<typeof commentTombstoneWireCommandSchema>;
@@ -202,6 +244,7 @@ export const activitySourceKindSchema = z.enum([
   "comment",
   "remote_run"
 ]);
+export type ActivitySourceKind = z.infer<typeof activitySourceKindSchema>;
 
 export const activitySourceSchema = z
   .object({
@@ -209,6 +252,7 @@ export const activitySourceSchema = z
     sourceId: opaqueIdentifierSchema
   })
   .strict();
+export type ActivitySource = z.infer<typeof activitySourceSchema>;
 
 export const activitySubjectSchema = z.discriminatedUnion("kind", [
   z
@@ -234,6 +278,7 @@ export const activitySubjectSchema = z.discriminatedUnion("kind", [
     })
     .strict()
 ]);
+export type ActivitySubject = z.infer<typeof activitySubjectSchema>;
 
 export const activitySummarySchema = z
   .object({
@@ -247,6 +292,7 @@ export const activitySummarySchema = z
     hostId: opaqueIdentifierSchema.optional()
   })
   .strict();
+export type ActivitySummary = z.infer<typeof activitySummarySchema>;
 
 export const activityRecordSchema = z
   .object({
@@ -259,7 +305,89 @@ export const activityRecordSchema = z
     workItem: workItemRefSchema.optional(),
     occurredAt: timestampSchema
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    const { type, source, summary, workItem } = value;
+    const requireSourceKind = (kind: ActivitySourceKind, path: string) => {
+      if (source.kind !== kind) {
+        ctx.addIssue({
+          code: "custom",
+          message: `${path} requires source.kind=${kind}`,
+          path: ["source", "kind"]
+        });
+      }
+    };
+
+    switch (type) {
+      case "member_joined":
+      case "member_left":
+      case "member_removed":
+      case "owner_promoted":
+      case "owner_demoted":
+        requireSourceKind("membership", type);
+        if (summary.humanPrincipalId === undefined) {
+          ctx.addIssue({
+            code: "custom",
+            message: `${type} summary requires humanPrincipalId`,
+            path: ["summary", "humanPrincipalId"]
+          });
+        }
+        break;
+      case "assignment_updated":
+        requireSourceKind("assignment", type);
+        if (workItem === undefined && summary.workItem === undefined) {
+          ctx.addIssue({
+            code: "custom",
+            message: "assignment_updated requires workItem scope",
+            path: ["workItem"]
+          });
+        }
+        if (summary.assignmentRevision === undefined) {
+          ctx.addIssue({
+            code: "custom",
+            message: "assignment_updated summary requires assignmentRevision",
+            path: ["summary", "assignmentRevision"]
+          });
+        }
+        break;
+      case "comment_created":
+      case "comment_edited":
+      case "comment_tombstoned":
+        requireSourceKind("comment", type);
+        if (summary.commentId === undefined) {
+          ctx.addIssue({
+            code: "custom",
+            message: `${type} summary requires commentId`,
+            path: ["summary", "commentId"]
+          });
+        }
+        if (workItem === undefined && summary.workItem === undefined) {
+          ctx.addIssue({
+            code: "custom",
+            message: `${type} requires workItem scope`,
+            path: ["workItem"]
+          });
+        }
+        break;
+      case "remote_run_started":
+      case "remote_run_succeeded":
+      case "remote_run_failed":
+      case "remote_run_interrupted":
+        requireSourceKind("remote_run", type);
+        if (summary.dispatchId === undefined) {
+          ctx.addIssue({
+            code: "custom",
+            message: `${type} summary requires dispatchId`,
+            path: ["summary", "dispatchId"]
+          });
+        }
+        break;
+      default: {
+        const exhaustive: never = type;
+        void exhaustive;
+      }
+    }
+  });
 export type ActivityRecord = z.infer<typeof activityRecordSchema>;
 
 export const activityListCursorSchema = z
@@ -268,6 +396,7 @@ export const activityListCursorSchema = z
     activityId: activityIdSchema
   })
   .strict();
+export type ActivityListCursor = z.infer<typeof activityListCursorSchema>;
 
 export const activityListPageSchema = z
   .object({

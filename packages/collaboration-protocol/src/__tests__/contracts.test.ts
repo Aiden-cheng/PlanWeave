@@ -1,15 +1,19 @@
 import { describe, expect, it } from "vitest";
 import packageJson from "../../package.json";
-import { assertHumanDisplayDtoRedacted } from "../identity.js";
 import {
-  collaborationBoundaryErrorKindSchema,
-  mapHttpStatusToBoundaryKind
-} from "../errors.js";
+  assertHumanDisplayDtoRedacted,
+  humanDeviceListQuerySchema,
+  humanInvitationListQuerySchema,
+  humanPageQuerySchema
+} from "../identity.js";
+import { activityRecordSchema, commentDisplayProjectionSchema } from "../comments.js";
+import { collaborationBoundaryErrorKindSchema, mapHttpStatusToBoundaryKind } from "../errors.js";
 import {
   exampleActivityRecord,
   exampleAssignmentProjection,
   exampleBootstrapResponse,
   exampleConnectionProfile,
+  exampleCommentProjection,
   exampleHumanDeviceToken,
   exampleLoopbackConnectionProfile,
   exampleMemberPage,
@@ -19,10 +23,7 @@ import {
   exampleSecretsForRedaction
 } from "../fixtures/collaboration.js";
 import { COLLABORATION_JSON_BODY_MAX_BYTES } from "../limits.js";
-import {
-  humanObserverEventSchema,
-  parseHumanObserverServerMessage
-} from "../observer.js";
+import { humanObserverEventSchema, parseHumanObserverServerMessage } from "../observer.js";
 import {
   parseCollaborationClientLimits,
   parseCollaborationConnectionProfile
@@ -63,10 +64,7 @@ const productionExportPaths = [
   "./remote-run"
 ] as const;
 
-const fixtureExportPaths = [
-  "./fixtures/collaboration",
-  "./fixtures/content-version"
-] as const;
+const fixtureExportPaths = ["./fixtures/collaboration", "./fixtures/content-version"] as const;
 
 describe("collaboration-protocol", () => {
   it("exposes only explicit domain and fixture subpaths", () => {
@@ -123,6 +121,53 @@ describe("collaboration-protocol", () => {
     assertHumanDisplayDtoRedacted(exampleAssignmentProjection);
     expect(exampleActivityRecord.type).toBe("comment_created");
     expect(exampleHumanDeviceToken.startsWith("pw_hdev_")).toBe(true);
+  });
+
+  it("normalizes HTTP identity queries at the protocol boundary", () => {
+    expect(humanPageQuerySchema.parse({ cursor: "2", limit: "25" })).toEqual({
+      cursor: 2,
+      limit: 25
+    });
+    expect(humanInvitationListQuerySchema.parse({})).toEqual({
+      cursor: 0,
+      limit: 50,
+      openOnly: true
+    });
+    expect(humanInvitationListQuerySchema.parse({ openOnly: "false" }).openOnly).toBe(false);
+    expect(humanDeviceListQuerySchema.parse({ cursor: "1", limit: "10" })).toEqual({
+      cursor: 1,
+      limit: 10,
+      scope: "own"
+    });
+  });
+
+  it("rejects inconsistent comment and activity wire projections", () => {
+    expect(() =>
+      commentDisplayProjectionSchema.parse({
+        ...exampleCommentProjection,
+        tombstoned: true,
+        body: "must be redacted",
+        tombstonedAt: "2030-01-01T00:00:00.000Z"
+      })
+    ).toThrow();
+    expect(() =>
+      commentDisplayProjectionSchema.parse({
+        ...exampleCommentProjection,
+        body: null
+      })
+    ).toThrow();
+    expect(() =>
+      activityRecordSchema.parse({
+        ...exampleActivityRecord,
+        source: { kind: "assignment", sourceId: "source-1" }
+      })
+    ).toThrow();
+    expect(() =>
+      activityRecordSchema.parse({
+        ...exampleActivityRecord,
+        summary: { headline: "Comment created" }
+      })
+    ).toThrow();
   });
 
   it("validates human observer messages and cursor advance", () => {

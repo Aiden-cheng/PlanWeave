@@ -34,6 +34,7 @@ import {
   projectMembershipIdSchema,
   timestampSchema
 } from "./primitives.js";
+import { identityMigrationStateSchema } from "./migration.js";
 
 const hostCapabilitySchema = z.string().trim().min(1).max(128);
 const hostCapabilitiesSchema = z
@@ -334,6 +335,19 @@ export const agentHostIdentityViewSchema = z
   .strict();
 export type AgentHostIdentityView = z.infer<typeof agentHostIdentityViewSchema>;
 
+/** Redacted, Workspace-authoritative identity read model for trusted clients. */
+export const workspaceIdentityReadModelSchema = z
+  .object({
+    schemaVersion: workspaceIdentitySchemaVersionSchema,
+    workspace: workspaceIdentityViewSchema,
+    principals: z.array(workspaceHumanPrincipalViewSchema).max(1_000),
+    memberships: z.array(workspaceMembershipViewSchema).max(1_000),
+    hosts: z.array(agentHostIdentityViewSchema).max(1_000),
+    migration: identityMigrationStateSchema
+  })
+  .strict();
+export type WorkspaceIdentityReadModel = z.infer<typeof workspaceIdentityReadModelSchema>;
+
 /** Public principal view — never digests or secrets. */
 export const humanPrincipalViewSchema = z
   .object({
@@ -400,6 +414,18 @@ export const humanDevicePageSchema = z
   })
   .strict();
 export type HumanDevicePage = z.infer<typeof humanDevicePageSchema>;
+
+/** One-shot device bearer handoff. Plaintext tokens must not be persisted in renderer state. */
+export const humanDeviceTokenHandoffSchema = z
+  .object({
+    deviceToken: humanDeviceTokenSchema,
+    deviceCredentialId: humanDeviceCredentialIdSchema,
+    humanPrincipalId: humanPrincipalIdSchema,
+    projectId: humanProjectIdSchema,
+    expiresAt: timestampSchema.optional()
+  })
+  .strict();
+export type HumanDeviceTokenHandoff = z.infer<typeof humanDeviceTokenHandoffSchema>;
 
 export const humanInvitationPageSchema = z
   .object({
@@ -498,25 +524,32 @@ export type HumanConsumeInvitationResponse = z.infer<typeof humanConsumeInvitati
 
 export const humanPageQuerySchema = z
   .object({
-    cursor: z.number().int().nonnegative().default(0),
-    limit: z.number().int().min(1).max(100).default(50)
+    cursor: z.coerce.number().int().nonnegative().default(0),
+    limit: z.coerce.number().int().min(1).max(100).default(50)
   })
   .strict();
 export type HumanPageQuery = z.infer<typeof humanPageQuerySchema>;
 
 export const humanInvitationListQuerySchema = z
   .object({
-    cursor: z.number().int().nonnegative().default(0),
-    limit: z.number().int().min(1).max(100).default(50),
-    openOnly: z.boolean().optional()
+    cursor: z.coerce.number().int().nonnegative().default(0),
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+    openOnly: z
+      .union([z.literal("true"), z.literal("false"), z.boolean()])
+      .optional()
+      .transform((value) => {
+        if (value === undefined) return true;
+        if (typeof value === "boolean") return value;
+        return value !== "false";
+      })
   })
   .strict();
 export type HumanInvitationListQuery = z.infer<typeof humanInvitationListQuerySchema>;
 
 export const humanDeviceListQuerySchema = z
   .object({
-    cursor: z.number().int().nonnegative().default(0),
-    limit: z.number().int().min(1).max(100).default(50),
+    cursor: z.coerce.number().int().nonnegative().default(0),
+    limit: z.coerce.number().int().min(1).max(100).default(50),
     scope: z.enum(["own", "project"]).default("own")
   })
   .strict();
