@@ -14,17 +14,6 @@ import { createTranslator } from "../renderer/i18n";
 
 const taskItem: WorkItemRef = { kind: "task", canvasId: "canvas-1", taskId: "T-1" };
 const blockItem: WorkItemRef = { kind: "block", canvasId: "canvas-1", blockRef: "T-1#B-001" };
-const secondBlockItem: WorkItemRef = {
-  kind: "block",
-  canvasId: "canvas-1",
-  blockRef: "T-1#B-002"
-};
-const blockedBlockItem: WorkItemRef = {
-  kind: "block",
-  canvasId: "canvas-1",
-  blockRef: "T-1#B-003"
-};
-
 function connectedStatus(): CollaborationStatus {
   return {
     profiles: [
@@ -80,20 +69,6 @@ function createApi() {
     revision: 1,
     updatedAt: "2030-01-01T00:00:00.000Z",
     availability: "active"
-  });
-  const updateExecutionTarget = vi.fn().mockResolvedValue({
-    schemaVersion: "execution-target/v1",
-    scope: {
-      kind: "block",
-      workspaceId: "w",
-      projectId: "project-1",
-      canvasId: "canvas-1",
-      blockRef: "T-1#B-001"
-    },
-    target: { kind: "automatic_host" },
-    revision: 1,
-    updatedAt: "2030-01-01T00:00:00.000Z",
-    availability: { status: "pending", reason: "automatic_pending_selection" }
   });
   const getWorkAuthority = vi
     .fn()
@@ -212,7 +187,6 @@ function createApi() {
     getCollaborationWorkAuthority: getWorkAuthority,
     updateCollaborationResponsibility: updateResponsibility,
     updateCollaborationReviewer: vi.fn(),
-    updateCollaborationExecutionTarget: updateExecutionTarget,
     listCollaborationComments: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
     listCollaborationActivity: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
     updateCollaborationAssignment: vi.fn(),
@@ -226,7 +200,6 @@ function createApi() {
   return {
     api,
     updateResponsibility,
-    updateExecutionTarget,
     listEligibleAssignees,
     dispatchRemoteOperation
   };
@@ -238,7 +211,7 @@ afterEach(() => {
 
 describe("useAssigneePickerController", () => {
   it("hard-rejects Host targets on the responsibility axis without calling Host mutation", async () => {
-    const { api, updateResponsibility, updateExecutionTarget } = createApi();
+    const { api, updateResponsibility } = createApi();
     const shell = acquireCollaborationReadModelController(api);
     await shell.controller.setActiveProject({
       profileId: "profile-1",
@@ -266,7 +239,6 @@ describe("useAssigneePickerController", () => {
     });
     expect(ok).toBe(false);
     expect(updateResponsibility).not.toHaveBeenCalled();
-    expect(updateExecutionTarget).not.toHaveBeenCalled();
     expect(result.current.viewModel?.lastError).toBe("Task 不能分配给 Agent Host。");
 
     await act(async () => {
@@ -276,14 +248,13 @@ describe("useAssigneePickerController", () => {
       });
     });
     expect(ok).toBe(false);
-    expect(updateExecutionTarget).not.toHaveBeenCalled();
 
     shell.release();
     resetCollaborationReadModelHubForTests(api);
   });
 
-  it("routes Block automatic_host only through the execution_target authority", async () => {
-    const { api, updateResponsibility, updateExecutionTarget } = createApi();
+  it("does not expose a Host authority axis for Blocks", async () => {
+    const { api, updateResponsibility } = createApi();
     const shell = acquireCollaborationReadModelController(api);
     await shell.controller.setActiveProject({
       profileId: "profile-1",
@@ -294,9 +265,8 @@ describe("useAssigneePickerController", () => {
     const { result } = renderHook(() =>
       useAssigneePickerController({
         workItem: blockItem,
-        authorityRole: "execution_target",
         api,
-        detailsOpen: false,
+        detailsOpen: true,
         t: createTranslator("en")
       })
     );
@@ -305,86 +275,11 @@ describe("useAssigneePickerController", () => {
       expect(result.current.viewModel).not.toBeNull();
     });
 
-    let ok = false;
-    await act(async () => {
-      ok = await result.current.selectTarget({ kind: "automatic_host" });
-    });
-    expect(ok).toBe(true);
-    expect(updateExecutionTarget).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workItem: blockItem,
-        target: { kind: "automatic_host" }
-      })
-    );
-    expect(updateResponsibility).not.toHaveBeenCalled();
-
-    shell.release();
-    resetCollaborationReadModelHubForTests(api);
-  });
-
-  it("expands a Task Host selection into eligible exact-Block dispatches in runtime order", async () => {
-    const { api, updateExecutionTarget, listEligibleAssignees, dispatchRemoteOperation } =
-      createApi();
-    const shell = acquireCollaborationReadModelController(api);
-    await shell.controller.setActiveProject({
-      profileId: "profile-1",
-      projectId: "project-1",
-      canvasId: "canvas-1"
-    });
-
-    const { result } = renderHook(() =>
-      useAssigneePickerController({
-        workItem: taskItem,
-        taskExecutionBlocks: [
-          { workItem: blockItem, dispatchable: true },
-          { workItem: secondBlockItem, dispatchable: true },
-          { workItem: blockedBlockItem, dispatchable: false }
-        ],
-        authorityRole: "execution_target",
-        api,
-        detailsOpen: true,
-        createId: vi.fn().mockReturnValueOnce("id-1").mockReturnValueOnce("id-2"),
-        t: createTranslator("en")
-      })
-    );
-
-    await waitFor(() => {
-      expect(result.current.viewModel?.sections[0]?.options.map((option) => option.id)).toEqual([
-        "exact_host:host-1"
-      ]);
-    });
-
-    let ok = true;
-    await act(async () => {
-      ok = await result.current.selectTarget({ kind: "exact_host", hostId: "host-1" });
-    });
-
-    expect(ok).toBe(false);
-    expect(updateExecutionTarget).toHaveBeenCalledTimes(2);
-    expect(updateExecutionTarget.mock.calls.map(([input]) => input.workItem)).toEqual([
-      blockItem,
-      secondBlockItem
-    ]);
-    expect(dispatchRemoteOperation.mock.calls.map(([input]) => input.blockRef)).toEqual([
-      blockItem.blockRef,
-      secondBlockItem.blockRef
-    ]);
-    expect(dispatchRemoteOperation.mock.calls.map(([input]) => input.idempotencyKey)).toEqual([
-      "desktop-task-dispatch-id-1",
-      "desktop-task-dispatch-id-2"
-    ]);
-    expect(result.current.taskDispatchResults).toEqual([
-      { blockRef: blockItem.blockRef, ok: true, message: "task_block_dispatched" },
-      { blockRef: secondBlockItem.blockRef, ok: true, message: "task_block_dispatched" },
-      {
-        blockRef: blockedBlockItem.blockRef,
-        ok: false,
-        message: "task_block_not_dispatchable"
-      }
-    ]);
-    expect(listEligibleAssignees.mock.calls.some(([input]) => input.workItem.kind === "task")).toBe(
+    expect(result.current.viewModel?.sections.some((section) => section.id === "hosts")).toBe(
       false
     );
+    expect(result.current.authorityRole).toBe("responsibility");
+    expect(updateResponsibility).not.toHaveBeenCalled();
 
     shell.release();
     resetCollaborationReadModelHubForTests(api);

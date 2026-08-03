@@ -44,6 +44,10 @@ export class AgentEndpointCatalogError extends Error {
   }
 }
 
+export function agentEndpointCatalogErrorCode(error: unknown): CatalogErrorCode | undefined {
+  return error instanceof AgentEndpointCatalogError ? error.code : undefined;
+}
+
 export type AgentEndpointCatalogOptions = {
   hosts: AgentEndpointHostPort;
   capacities: AgentEndpointCapacityPort;

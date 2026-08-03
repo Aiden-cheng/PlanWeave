@@ -262,10 +262,11 @@ ACP run 通过 CLI 和 Desktop 提供结构化进度、产物、usage 和交互�
 **远程 Agent 与多机执行**
 
 - 其他机器上的 **Agent Host** 执行 Block，使用与本机相同的 ACP agent（Codex、Claude Code、OpenCode、Pi、Grok 等）
-- 在 Block 的 **远程运行** 面板中发起执行、查看进度、处理交互，以及取消 / 恢复 / 重试
-- 本机 **Auto Run** 在本地跑 agent；远程运行把同一任务图上的工作派到 Host
-- 把 Block 指定到某台 Host，或让项目按能力要求选择可用 Host
-- 指派记录归属；调度 / 远程运行启动执行
+- 在 Block 的 **Agent 运行** 面板中选择本机 Agent 或远程 Agent Endpoint，然后查看进度、处理交互，以及取消 / 恢复 / 重试
+- 本机 **Auto Run** 在当前设备运行所选 Agent；远程 Agent Endpoint 在已暴露设备上运行，无需再选择 Host
+- Host 只出现在设备管理中，用于注册设备和暴露 Agent，不参与每次运行选择
+- 旧 Host 运行设置仍可读取，但已只读；新运行请选择本机或远程 Agent
+- 指派记录人员归属；Agent 运行派发启动执行
 
 **在 Desktop 中**
 

@@ -4,7 +4,6 @@ import type {
   AssignmentTarget,
   EligibleAssigneesResponse
 } from "@planweave-ai/collaboration-protocol/work/assignment";
-import type { ExecutionTarget } from "@planweave-ai/collaboration-protocol/work/execution-target";
 import type { WorkAuthorityProjection } from "@planweave-ai/collaboration-protocol/work/authority";
 import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import { collaborationBridge } from "../bridge";
@@ -24,18 +23,11 @@ import { useCollaborationStatus } from "./useCollaborationStatus";
 import { isCollaborationSessionConnected } from "../collaboration/sessionState";
 import type { PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
 
-/** Independent OSS-003 authority axes. Responsibility/reviewer are human-only; execution is Host-only. */
-export type AssigneeAuthorityRole = "responsibility" | "reviewer" | "execution_target";
+/** Human responsibility and reviewer authorities shown in ordinary inspectors. */
+export type AssigneeAuthorityRole = "responsibility" | "reviewer";
 
 export type UseAssigneePickerControllerArgs = {
   workItem: WorkItemRef | null;
-  /** Runtime-stable Block list for the Task's composite Host action. */
-  taskExecutionBlocks?: readonly {
-    workItem: Extract<WorkItemRef, { kind: "block" }>;
-    dispatchable: boolean;
-  }[];
-  /** Optional random source for deterministic composite-dispatch tests. */
-  createId?: () => string;
   /**
    * Which independent authority this picker mutates.
    * Defaults to responsibility (human owner). Reviewer never changes execution target.
@@ -66,18 +58,11 @@ export type UseAssigneePickerControllerResult = {
   selectTarget: (target: AssignmentTarget) => Promise<boolean>;
   refresh: () => Promise<void>;
   retryLastTarget: () => Promise<boolean>;
-  taskDispatchResults: readonly TaskHostDispatchResult[];
-};
-
-export type TaskHostDispatchResult = {
-  blockRef: string;
-  ok: boolean;
-  message: string;
 };
 
 /**
  * Project independent authority into the legacy assignment display shape so section builders reuse.
- * Responsibility/reviewer map to human targets; execution_target maps to Host targets only.
+ * Responsibility and reviewer map to human targets only.
  */
 export function assignmentProjectionFromAuthority(input: {
   workItem: WorkItemRef;
@@ -88,91 +73,28 @@ export function assignmentProjectionFromAuthority(input: {
   const authority = input.authority;
   if (!authority) return null;
 
-  if (input.role === "responsibility" || input.role === "reviewer") {
-    const human = input.role === "responsibility" ? authority.responsibility : authority.reviewer;
-    const principal = human.principal;
-    const availability =
-      human.availability === "active"
-        ? ({ status: "ready", reason: "ready" } as const)
-        : human.availability === "unassigned"
-          ? ({ status: "unassigned", reason: "unassigned" } as const)
-          : ({ status: "invalid", reason: "human_membership_inactive" } as const);
-    return {
-      projectId: input.projectId,
-      workItem: input.workItem,
-      target: principal
-        ? { kind: "human", humanPrincipalId: principal.humanPrincipalId }
-        : { kind: "unassigned" },
-      revision: human.revision,
-      availability,
-      ...(principal
-        ? {
-            human: {
-              humanPrincipalId: principal.humanPrincipalId,
-              displayName: principal.humanPrincipalId,
-              membershipActive: human.availability === "active"
-            }
-          }
-        : {})
-    };
-  }
-
-  const execution = authority.executionTarget;
-  if (!execution || input.workItem.kind !== "block") {
-    return {
-      projectId: input.projectId,
-      workItem: input.workItem,
-      target: { kind: "unassigned" },
-      revision: authority.revisions.executionTargetRevision,
-      availability: { status: "unassigned", reason: "unassigned" }
-    };
-  }
-
-  const target: AssignmentTarget =
-    execution.target.kind === "exact_host"
-      ? { kind: "exact_host", hostId: execution.target.hostId }
-      : execution.target.kind === "automatic_host"
-        ? { kind: "automatic_host" }
-        : { kind: "unassigned" };
-
-  const availability: AssignmentDisplayProjection["availability"] =
-    execution.availability.status === "ready"
-      ? { status: "ready", reason: "ready" }
-      : execution.availability.status === "unassigned"
-        ? { status: "unassigned", reason: "unassigned" }
-        : execution.availability.status === "pending"
-          ? { status: "pending", reason: "automatic_pending_selection" }
-          : execution.availability.reason === "host_offline" ||
-              execution.availability.reason === "host_at_capacity"
-            ? { status: "unavailable", reason: execution.availability.reason }
-            : {
-                status: "invalid",
-                reason:
-                  execution.availability.reason === "host_missing" ||
-                  execution.availability.reason === "host_revoked" ||
-                  execution.availability.reason === "host_not_authorized" ||
-                  execution.availability.reason === "host_capability_mismatch"
-                    ? execution.availability.reason
-                    : "host_missing"
-              };
-
+  const human = input.role === "responsibility" ? authority.responsibility : authority.reviewer;
+  const principal = human.principal;
+  const availability =
+    human.availability === "active"
+      ? ({ status: "ready", reason: "ready" } as const)
+      : human.availability === "unassigned"
+        ? ({ status: "unassigned", reason: "unassigned" } as const)
+        : ({ status: "invalid", reason: "human_membership_inactive" } as const);
   return {
     projectId: input.projectId,
     workItem: input.workItem,
-    target,
-    revision: execution.revision,
+    target: principal
+      ? { kind: "human", humanPrincipalId: principal.humanPrincipalId }
+      : { kind: "unassigned" },
+    revision: human.revision,
     availability,
-    ...(authority.selectedHost
+    ...(principal
       ? {
-          host: {
-            hostId: authority.selectedHost.hostId,
-            displayName: authority.selectedHost.hostId,
-            online: authority.selectedHost.availabilityReason !== "host_offline",
-            authorizedForProject:
-              authority.selectedHost.availabilityReason !== "host_not_authorized",
-            revoked: authority.selectedHost.availabilityReason === "host_revoked",
-            capabilitiesSatisfied:
-              authority.selectedHost.availabilityReason !== "host_capability_mismatch"
+          human: {
+            humanPrincipalId: principal.humanPrincipalId,
+            displayName: principal.humanPrincipalId,
+            membershipActive: human.availability === "active"
           }
         }
       : {})
@@ -180,55 +102,19 @@ export function assignmentProjectionFromAuthority(input: {
 }
 
 function filterEligibleForRole(
-  eligible: EligibleAssigneesResponse | null,
-  role: AssigneeAuthorityRole,
-  workItem: WorkItemRef
+  eligible: EligibleAssigneesResponse | null
 ): EligibleAssigneesResponse | null {
   if (!eligible) return null;
-  if (role === "responsibility" || role === "reviewer") {
-    return {
-      ...eligible,
-      hosts: [],
-      nextHostCursor: null
-    };
-  }
-  if (workItem.kind !== "block") {
-    return {
-      ...eligible,
-      humans: [],
-      nextHumanCursor: null,
-      nextHostCursor: null
-    };
-  }
   return {
     ...eligible,
-    humans: [],
-    nextHumanCursor: null
+    hosts: [],
+    nextHostCursor: null
   };
-}
-
-function isReadyHost(host: EligibleAssigneesResponse["hosts"][number]): boolean {
-  return (
-    host.exists &&
-    !host.revoked &&
-    host.authorizedForProject &&
-    host.online &&
-    host.capacityRemaining !== 0
-  );
-}
-
-function createDispatchId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `task-dispatch-${Date.now()}`;
 }
 
 /**
  * Task/Block authority picker controller.
- * Routes mutations to independent responsibility / reviewer / execution-target CAS paths.
- * Task Host selection is a Desktop composite action over the Task's exact runtime Blocks.
- * Server authority and dispatch remain strictly Block-scoped.
+ * Routes mutations to independent responsibility and reviewer CAS paths.
  */
 export function useAssigneePickerController(
   args: UseAssigneePickerControllerArgs
@@ -271,19 +157,6 @@ export function useAssigneePickerController(
   const [localStaleConflict, setLocalStaleConflict] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [lastAttemptedTarget, setLastAttemptedTarget] = useState<AssignmentTarget | null>(null);
-  const [taskDispatchResults, setTaskDispatchResults] = useState<readonly TaskHostDispatchResult[]>(
-    []
-  );
-
-  const taskExecutionBlocksKey =
-    args.taskExecutionBlocks
-      ?.map((block) => `${workItemKey(block.workItem)}:${block.dispatchable ? "1" : "0"}`)
-      .join("|") ?? "";
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the content key stabilizes equivalent caller arrays
-  const taskExecutionBlocks = useMemo(
-    () => args.taskExecutionBlocks ?? [],
-    [taskExecutionBlocksKey]
-  );
 
   const generationRef = useRef(0);
   const pendingRef = useRef(false);
@@ -301,7 +174,6 @@ export function useAssigneePickerController(
     setLocalStaleConflict(false);
     setActionError(null);
     setLastAttemptedTarget(null);
-    setTaskDispatchResults([]);
   }, [workItemKeyValue, authorityRole]);
 
   useEffect(() => {
@@ -325,33 +197,9 @@ export function useAssigneePickerController(
     const generation = generationRef.current;
     setEligibleLoading(true);
     try {
-      let page: EligibleAssigneesResponse;
-      if (authorityRole === "execution_target" && args.workItem.kind === "task") {
-        const dispatchableBlocks = taskExecutionBlocks.filter((block) => block.dispatchable);
-        const blockPages = await Promise.all(
-          dispatchableBlocks.map((block) =>
-            api.listCollaborationEligibleAssignees({ workItem: block.workItem })
-          )
-        );
-        const readyHostIds = blockPages.map(
-          (blockPage) => new Set(blockPage.hosts.filter(isReadyHost).map((host) => host.hostId))
-        );
-        const hosts =
-          blockPages[0]?.hosts.filter(
-            (host) => isReadyHost(host) && readyHostIds.every((ids) => ids.has(host.hostId))
-          ) ?? [];
-        page = {
-          workItem: args.workItem,
-          humans: [],
-          hosts,
-          nextHumanCursor: null,
-          nextHostCursor: null
-        };
-      } else {
-        page = await api.listCollaborationEligibleAssignees({ workItem: args.workItem });
-      }
+      const page = await api.listCollaborationEligibleAssignees({ workItem: args.workItem });
       if (generation !== generationRef.current) return;
-      setEligible(filterEligibleForRole(page, authorityRole, args.workItem));
+      setEligible(filterEligibleForRole(page));
     } catch (error) {
       if (generation !== generationRef.current) return;
       setActionError(collaborationErrorMessage(error));
@@ -361,7 +209,7 @@ export function useAssigneePickerController(
         setEligibleLoading(false);
       }
     }
-  }, [api, args.workItem, authorityRole, sessionConnected, taskExecutionBlocks]);
+  }, [api, args.workItem, sessionConnected]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: workItemKeyValue remounts eligible load
   useEffect(() => {
@@ -405,186 +253,17 @@ export function useAssigneePickerController(
       if (!api || !args.workItem || !controller) return false;
       if (pendingRef.current) return false;
 
-      if (authorityRole === "responsibility" || authorityRole === "reviewer") {
-        if (target.kind === "exact_host" || target.kind === "automatic_host") {
-          const errorMessage =
-            authorityRole === "reviewer"
-              ? labels.taskDisallowsMachine
-              : labels.taskDisallowsMachine;
-          setActionError(errorMessage);
-          setLastAttemptedTarget(target);
-          onOutcomeRef.current?.({
-            ok: false,
-            workItem: args.workItem,
-            target,
-            errorMessage
-          });
-          return false;
-        }
-      } else {
-        if (args.workItem.kind === "task" && target.kind !== "exact_host") {
-          const errorMessage = "Task execution requires one exact Agent Host.";
-          setActionError(errorMessage);
-          setLastAttemptedTarget(target);
-          onOutcomeRef.current?.({
-            ok: false,
-            workItem: args.workItem,
-            target,
-            errorMessage
-          });
-          return false;
-        }
-        if (target.kind === "human") {
-          const errorMessage = "Execution targets accept only Host selections.";
-          setActionError(errorMessage);
-          setLastAttemptedTarget(target);
-          onOutcomeRef.current?.({
-            ok: false,
-            workItem: args.workItem,
-            target,
-            errorMessage
-          });
-          return false;
-        }
-      }
-
-      if (
-        authorityRole === "execution_target" &&
-        args.workItem.kind === "task" &&
-        target.kind === "exact_host"
-      ) {
-        const blocks = taskExecutionBlocks;
-        if (blocks.length === 0 || projectId === "unknown") {
-          const errorMessage =
-            blocks.length === 0
-              ? "task_has_no_execution_blocks"
-              : "collaboration_project_unavailable";
-          setActionError(errorMessage);
-          setLastAttemptedTarget(target);
-          onOutcomeRef.current?.({
-            ok: false,
-            workItem: args.workItem,
-            target,
-            errorMessage
-          });
-          return false;
-        }
-
-        pendingRef.current = true;
-        setPending(true);
+      if (target.kind === "exact_host" || target.kind === "automatic_host") {
+        const errorMessage = labels.taskDisallowsMachine;
+        setActionError(errorMessage);
         setLastAttemptedTarget(target);
-        setActionError(null);
-        setTaskDispatchResults([]);
-        const generation = generationRef.current;
-        const workItem = args.workItem;
-        const results: TaskHostDispatchResult[] = [];
-
-        try {
-          for (const block of blocks) {
-            if (!block.dispatchable) {
-              results.push({
-                blockRef: block.workItem.blockRef,
-                ok: false,
-                message: "task_block_not_dispatchable"
-              });
-              continue;
-            }
-
-            try {
-              const eligiblePage = await api.listCollaborationEligibleAssignees({
-                workItem: block.workItem
-              });
-              const selectedHost = eligiblePage.hosts.find(
-                (host) => host.hostId === target.hostId && isReadyHost(host)
-              );
-              if (!selectedHost) {
-                results.push({
-                  blockRef: block.workItem.blockRef,
-                  ok: false,
-                  message: "task_host_unavailable"
-                });
-                continue;
-              }
-
-              let blockAuthority = await controller.ensureWorkAuthority(block.workItem);
-              if (!blockAuthority?.executionTarget) {
-                results.push({
-                  blockRef: block.workItem.blockRef,
-                  ok: false,
-                  message: "task_authority_unavailable"
-                });
-                continue;
-              }
-
-              const currentTarget = blockAuthority.executionTarget.target;
-              if (currentTarget.kind !== "exact_host" || currentTarget.hostId !== target.hostId) {
-                const updated = await controller.updateExecutionTarget({
-                  workItem: block.workItem,
-                  target: { kind: "exact_host", hostId: target.hostId },
-                  expectedRevision: blockAuthority.revisions.executionTargetRevision
-                });
-                if (!updated) {
-                  results.push({
-                    blockRef: block.workItem.blockRef,
-                    ok: false,
-                    message: "task_execution_target_update_failed"
-                  });
-                  continue;
-                }
-              }
-
-              blockAuthority = await controller.ensureWorkAuthority(block.workItem);
-              if (!blockAuthority?.executionTarget) {
-                results.push({
-                  blockRef: block.workItem.blockRef,
-                  ok: false,
-                  message: "task_authority_unavailable"
-                });
-                continue;
-              }
-
-              await api.dispatchCollaborationRemoteOperation({
-                schemaVersion: "remote-run/v2",
-                projectId,
-                canvasId: block.workItem.canvasId,
-                blockRef: block.workItem.blockRef,
-                idempotencyKey: `desktop-task-dispatch-${(args.createId ?? createDispatchId)()}`,
-                expectedResponsibilityRevision: blockAuthority.revisions.responsibilityRevision,
-                expectedReviewerRevision: blockAuthority.revisions.reviewerRevision,
-                expectedExecutionTargetRevision: blockAuthority.revisions.executionTargetRevision
-              });
-              results.push({
-                blockRef: block.workItem.blockRef,
-                ok: true,
-                message: "task_block_dispatched"
-              });
-            } catch (error) {
-              results.push({
-                blockRef: block.workItem.blockRef,
-                ok: false,
-                message: collaborationErrorMessage(error) ?? "task_block_dispatch_failed"
-              });
-            }
-          }
-
-          if (generation !== generationRef.current) return false;
-          setTaskDispatchResults(results);
-          const ok = results.length > 0 && results.every((result) => result.ok);
-          const errorMessage = ok
-            ? null
-            : (results.find((result) => !result.ok)?.message ?? "task_block_dispatch_failed");
-          setActionError(errorMessage);
-          if (detailsOpen) {
-            await loadEligible();
-          }
-          onOutcomeRef.current?.({ ok, workItem, target, errorMessage });
-          return ok;
-        } finally {
-          if (generation === generationRef.current) {
-            pendingRef.current = false;
-            setPending(false);
-          }
-        }
+        onOutcomeRef.current?.({
+          ok: false,
+          workItem: args.workItem,
+          target,
+          errorMessage
+        });
+        return false;
       }
 
       const current = assignment;
@@ -601,7 +280,7 @@ export function useAssigneePickerController(
       const workItem = args.workItem;
 
       try {
-        let result: { revision?: number } | null = null;
+        let result: { revision?: number } | null;
         if (authorityRole === "responsibility") {
           result = await controller.updateResponsibility({
             workItem,
@@ -611,25 +290,13 @@ export function useAssigneePickerController(
                 : null,
             expectedRevision
           });
-        } else if (authorityRole === "reviewer") {
+        } else {
           result = await controller.updateReviewer({
             workItem,
             principal:
               target.kind === "human"
                 ? { kind: "human", humanPrincipalId: target.humanPrincipalId }
                 : null,
-            expectedRevision
-          });
-        } else {
-          const executionTarget: ExecutionTarget =
-            target.kind === "exact_host"
-              ? { kind: "exact_host", hostId: target.hostId }
-              : target.kind === "automatic_host"
-                ? { kind: "automatic_host" }
-                : { kind: "unassigned" };
-          result = await controller.updateExecutionTarget({
-            workItem,
-            target: executionTarget,
             expectedRevision
           });
         }
@@ -681,15 +348,12 @@ export function useAssigneePickerController(
     [
       api,
       args.workItem,
-      args.createId,
       assignment,
       authorityRole,
       controller,
       detailsOpen,
       labels.taskDisallowsMachine,
-      loadEligible,
-      projectId,
-      taskExecutionBlocks
+      loadEligible
     ]
   );
 
@@ -713,10 +377,6 @@ export function useAssigneePickerController(
       workItem: args.workItem,
       assignment,
       members: projectView.members,
-      hosts:
-        authorityRole === "execution_target" && args.workItem.kind === "task"
-          ? []
-          : projectView.hosts,
       eligible,
       status,
       syncPhase: snapshot.syncPhase,
@@ -739,7 +399,6 @@ export function useAssigneePickerController(
     labels,
     localStaleConflict,
     pending,
-    projectView.hosts,
     projectView.members,
     query,
     snapshot.lastError,
@@ -756,7 +415,6 @@ export function useAssigneePickerController(
     setQuery,
     selectTarget,
     refresh,
-    retryLastTarget,
-    taskDispatchResults
+    retryLastTarget
   };
 }

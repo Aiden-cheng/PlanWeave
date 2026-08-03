@@ -106,14 +106,20 @@ describe("CollaborationRemoteOperationsClient", () => {
     );
   });
 
-  it("keeps the v2 compatibility response branch", async () => {
-    const { client } = fixture(observation());
-    await expect(
+  it("rejects legacy dispatch commands before transport", async () => {
+    const { client, json } = fixture(observation());
+    expect(() =>
       client.dispatchRemoteOperation({
+        schemaVersion: "remote-run/v2",
+        projectId: "project-demo-001",
         canvasId: "default",
         blockRef: "T-1#B-1",
-        idempotencyKey: "legacy-v2"
-      })
-    ).resolves.toMatchObject({ operationId: "operation-v3" });
+        idempotencyKey: "legacy-v2",
+        expectedResponsibilityRevision: 0,
+        expectedReviewerRevision: 0,
+        expectedExecutionTargetRevision: 0
+      } as never)
+    ).toThrow();
+    expect(json).not.toHaveBeenCalled();
   });
 });

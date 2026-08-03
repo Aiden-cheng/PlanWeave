@@ -1,5 +1,6 @@
 import { createServer, type Server as HttpServer } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AgentEndpointCatalogError } from "../agentEndpointCatalog.js";
 import { applyMigrations } from "../migrations.js";
 import { OperatorSessionStore } from "../identity/operatorSessionStore.js";
 import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
@@ -12,6 +13,10 @@ import {
   operatorTransportAllowed,
   type OperatorControlPort
 } from "../operatorHttp.js";
+import {
+  directHttpsTransportAdmission,
+  loopbackHttpTransportAdmission
+} from "./support/transportAdmission.js";
 
 const servers: HttpServer[] = [];
 const databases: SqliteDatabase[] = [];
@@ -31,6 +36,10 @@ function control(): OperatorControlPort {
       expiresAt: "2030-01-01T00:00:00.000Z"
     })),
     listHosts: vi.fn(() => ({ items: [], nextCursor: null })),
+    listAgentEndpoints: vi.fn(() => ({
+      schemaVersion: "agent-endpoint-list/v1",
+      items: []
+    })),
     getHost: vi.fn(),
     revokeHost: vi.fn(),
     dispatch: vi.fn(async (_principal, request) => {
@@ -51,7 +60,8 @@ function control(): OperatorControlPort {
 
 async function setup(
   allowInsecureDevelopment: boolean,
-  readiness: "ready" | "reconciling" = "ready"
+  readiness: "ready" | "reconciling" = "ready",
+  serverAdmin = true
 ) {
   const service = control();
   const database = await openServerDatabase(":memory:", 5_000);
@@ -72,7 +82,7 @@ async function setup(
       operatorId: "operator-1",
       tokenSha256: hashOperatorToken(token),
       projectIds: ["project-a"],
-      serverAdmin: true
+      serverAdmin
     }
   ]);
   const server = createServer((request, response) => {
@@ -82,7 +92,9 @@ async function setup(
       readiness: () => ({ status: readiness, schemaVersion: 1 }),
       serverVersion: "test",
       limits: { maxArtifactBytes: 1024, maxWebSocketPayloadBytes: 2048 },
-      allowInsecureDevelopment
+      transportAdmission: allowInsecureDevelopment
+        ? loopbackHttpTransportAdmission
+        : directHttpsTransportAdmission
     });
   });
   servers.push(server);
@@ -95,16 +107,67 @@ async function setup(
 const authorization = { Authorization: `Bearer ${token}` };
 
 describe("operator HTTP boundary", () => {
-  it("uses the v2 remote dispatch contract as its sole request schema", () => {
+  it("lists redacted Agent Endpoints with strict admin-scoped query handling", async () => {
+    const fixture = await setup(true);
+    vi.mocked(fixture.service.listAgentEndpoints).mockReturnValue({
+      schemaVersion: "agent-endpoint-list/v1",
+      items: [
+        {
+          schemaVersion: "agent-endpoint/v1",
+          endpointId: "endpoint-1",
+          profileId: "codex-acp",
+          agentId: "codex",
+          displayName: "Codex",
+          hostDisplayName: "Builder",
+          capabilities: ["acp.codex"],
+          status: "available"
+        }
+      ]
+    });
+
+    const endpointUrl = `${fixture.origin}/api/v1/agent-endpoints?projectId=project-a`;
+    const first = await fetch(endpointUrl, { headers: authorization });
+    const second = await fetch(endpointUrl, { headers: authorization });
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    const firstBody = await first.json();
+    expect(await second.json()).toEqual(firstBody);
+    expect(fixture.service.listAgentEndpoints).toHaveBeenCalledWith(
+      expect.objectContaining({ serverAdmin: true }),
+      { projectId: "project-a" }
+    );
+    expect(JSON.stringify(firstBody)).not.toMatch(/hostId|path|env|token|readiness/i);
+
+    for (const suffix of [
+      "projectId=project-a&projectId=project-b",
+      "projectId=project-a&workspaceId=workspace-a"
+    ]) {
+      const response = await fetch(`${fixture.origin}/api/v1/agent-endpoints?${suffix}`, {
+        headers: authorization
+      });
+      expect(response.status).toBe(400);
+    }
+
+    const nonAdmin = await setup(true, "ready", false);
+    const forbidden = await fetch(
+      `${nonAdmin.origin}/api/v1/agent-endpoints?projectId=project-a&unknown=1`,
+      { headers: authorization }
+    );
+    expect(forbidden.status).toBe(403);
+    await expect(forbidden.json()).resolves.toEqual({ error: "operator_admin_required" });
+    expect(nonAdmin.service.listAgentEndpoints).not.toHaveBeenCalled();
+  });
+
+  it("uses the v3 Agent Endpoint dispatch contract as its sole request schema", () => {
     const request = {
-      schemaVersion: "remote-run/v2" as const,
+      schemaVersion: "remote-run/v3" as const,
       projectId: "project-a",
       canvasId: "default",
       blockRef: "T-001#B-001",
-      idempotencyKey: "operator-v2-contract",
+      agentEndpointId: "endpoint-1",
+      idempotencyKey: "operator-v3-contract",
       expectedResponsibilityRevision: 0,
-      expectedReviewerRevision: 0,
-      expectedExecutionTargetRevision: 1
+      expectedReviewerRevision: 0
     };
     expect(operatorDispatchRequestSchema.parse(request)).toEqual(request);
     expect(
@@ -118,10 +181,21 @@ describe("operator HTTP boundary", () => {
   });
 
   it("enforces transport policy before reading a bearer credential", async () => {
-    expect(operatorTransportAllowed({ encrypted: true, remoteAddress: "203.0.113.1" })).toBe(true);
-    expect(operatorTransportAllowed({ remoteAddress: "127.0.0.1" })).toBe(false);
-    expect(operatorTransportAllowed({ remoteAddress: "127.0.0.1" }, true)).toBe(true);
-    expect(operatorTransportAllowed({ remoteAddress: "203.0.113.1" }, true)).toBe(false);
+    expect(
+      operatorTransportAllowed(
+        { encrypted: true, remoteAddress: "203.0.113.1" },
+        directHttpsTransportAdmission
+      )
+    ).toBe(true);
+    expect(
+      operatorTransportAllowed({ remoteAddress: "127.0.0.1" }, directHttpsTransportAdmission)
+    ).toBe(false);
+    expect(
+      operatorTransportAllowed({ remoteAddress: "127.0.0.1" }, loopbackHttpTransportAdmission)
+    ).toBe(true);
+    expect(
+      operatorTransportAllowed({ remoteAddress: "203.0.113.1" }, loopbackHttpTransportAdmission)
+    ).toBe(false);
 
     const fixture = await setup(false);
     const response = await fetch(`${fixture.origin}/api/v1/hosts`, { headers: authorization });
@@ -173,6 +247,31 @@ describe("operator HTTP boundary", () => {
       headers: authorization
     });
     expect(invalidPage.status).toBe(400);
+  });
+
+  it("returns a stable redacted conflict for an incompatible Agent Endpoint", async () => {
+    const fixture = await setup(true);
+    vi.mocked(fixture.service.dispatch).mockRejectedValueOnce(
+      new AgentEndpointCatalogError("agent_endpoint_incompatible")
+    );
+    const response = await fetch(`${fixture.origin}/api/v1/remote-operations`, {
+      method: "POST",
+      headers: { ...authorization, "content-type": "application/json" },
+      body: JSON.stringify({
+        schemaVersion: "remote-run/v3",
+        projectId: "project-a",
+        canvasId: "default",
+        blockRef: "T-001#B-001",
+        agentEndpointId: "private-endpoint-id",
+        idempotencyKey: "incompatible-endpoint",
+        expectedResponsibilityRevision: 0,
+        expectedReviewerRevision: 0
+      })
+    });
+    expect(response.status).toBe(409);
+    const body = await response.json();
+    expect(body).toEqual({ error: "agent_endpoint_incompatible" });
+    expect(JSON.stringify(body)).not.toContain("private-endpoint-id");
   });
 
   it("serves public health and delegates bounded host pagination", async () => {

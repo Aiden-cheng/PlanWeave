@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
+import { agentEndpointCatalogErrorCode } from "./agentEndpointCatalog.js";
 import { OperatorTokenRegistry, type OperatorPrincipal } from "./operatorAuth.js";
 import { serverReadinessSchema, type ServerReadiness } from "./readiness.js";
 import { DispatchAssignmentError } from "./work/dispatchIntegration.js";
@@ -41,6 +42,7 @@ export type OperatorHttpOptions = {
 export type OperatorControlPort = {
   createEnrollmentGrant(principal: OperatorPrincipal, request: unknown): unknown;
   listHosts(principal: OperatorPrincipal, query: unknown): unknown;
+  listAgentEndpoints(principal: OperatorPrincipal, query: unknown): unknown;
   getHost(principal: OperatorPrincipal, hostId: string): unknown;
   revokeHost(principal: OperatorPrincipal, hostId: string): unknown;
   dispatch(principal: OperatorPrincipal, request: unknown): Promise<unknown>;
@@ -65,6 +67,7 @@ type OperatorRoute =
   | { kind: "version" }
   | { kind: "create_enrollment" }
   | { kind: "list_hosts" }
+  | { kind: "list_agent_endpoints" }
   | { kind: "get_host" | "revoke_host"; hostId: string }
   | { kind: "dispatch" }
   | {
@@ -89,6 +92,9 @@ function route(request: IncomingMessage, pathname: string): OperatorRoute | unde
   }
   if (request.method === "GET" && pathname === "/api/v1/hosts") {
     return { kind: "list_hosts" };
+  }
+  if (request.method === "GET" && pathname === "/api/v1/agent-endpoints") {
+    return { kind: "list_agent_endpoints" };
   }
   if (request.method === "POST" && pathname === "/api/v1/remote-operations") {
     return { kind: "dispatch" };
@@ -174,6 +180,8 @@ function query(url: URL, allowed: readonly string[]): Record<string, string | un
 
 function safeError(error: unknown): { status: number; code: string } {
   if (error instanceof z.ZodError) return { status: 400, code: "operator_request_invalid" };
+  const endpointErrorCode = agentEndpointCatalogErrorCode(error);
+  if (endpointErrorCode) return { status: 409, code: endpointErrorCode };
   if (error instanceof RemoteExecutionActionRejectedError) {
     return { status: 409, code: error.code };
   }
@@ -192,6 +200,9 @@ function safeError(error: unknown): { status: number; code: string } {
     return { status: 400, code: error.code };
   }
   if (!(error instanceof Error)) return { status: 500, code: "operator_request_failed" };
+  if (error.message === "remote_run_v3_required") {
+    return { status: 400, code: error.message };
+  }
   if (
     [
       "operator_body_too_large",
@@ -310,6 +321,14 @@ export async function handleOperatorHttpRequest(
           response,
           200,
           options.service.listHosts(principal, query(url, ["workspaceId", "cursor", "limit"]))
+        );
+        break;
+      case "list_agent_endpoints":
+        options.authorization.requireServerAdmin(principal);
+        respond(
+          response,
+          200,
+          options.service.listAgentEndpoints(principal, query(url, ["projectId"]))
         );
         break;
       case "get_host":

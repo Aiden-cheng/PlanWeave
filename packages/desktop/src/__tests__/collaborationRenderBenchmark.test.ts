@@ -214,7 +214,6 @@ function createAuditApi() {
     }),
     updateCollaborationResponsibility: vi.fn(),
     updateCollaborationReviewer: vi.fn(),
-    updateCollaborationExecutionTarget: vi.fn(),
     listCollaborationInvitations: listInvitations,
     listCollaborationDevices: listDevices,
     revokeCollaborationInvitation: revokeInvitation,

@@ -128,18 +128,6 @@ export function TaskInspector({
     }
     return graph.tasks.find((task) => task.taskId === selectedTask.taskId)?.blocks ?? [];
   }, [graph, selectedTask]);
-  const taskExecutionBlocks = useMemo(
-    () =>
-      taskBlocks.map((block) => ({
-        workItem: {
-          kind: "block" as const,
-          canvasId: canvasRef?.canvasId ?? "default",
-          blockRef: block.ref
-        },
-        dispatchable: block.dispatchable
-      })),
-    [canvasRef?.canvasId, taskBlocks]
-  );
   const selectedExecutor = selectedTaskExecutorValue(
     selectedTask,
     taskBlocks,
@@ -342,7 +330,6 @@ export function TaskInspector({
                     }
                   : null
               }
-              taskExecutionBlocks={taskExecutionBlocks}
               t={t}
             />
             <section className="border-t border-border/80 pt-4 text-xs">

@@ -305,25 +305,6 @@ export function adaptRemoteAcpEvents(
   return [...byCursor.values()].sort((a, b) => a.cursor - b.cursor);
 }
 
-export function isAssignmentEligibleForRemoteDispatch(
-  assignment: AssignmentDisplayProjection | null | undefined
-): boolean {
-  if (!assignment || assignment.workItem.kind !== "block") return false;
-  if (assignment.target.kind === "unassigned") return false;
-  if (assignment.target.kind === "human") return false;
-  if (
-    assignment.availability.status === "unavailable" ||
-    assignment.availability.status === "invalid" ||
-    assignment.availability.status === "unassigned"
-  ) {
-    return false;
-  }
-  if (assignment.host && assignment.host.online === false) return false;
-  if (assignment.host && assignment.host.revoked) return false;
-  if (assignment.host && assignment.host.capabilitiesSatisfied === false) return false;
-  return assignment.target.kind === "exact_host" || assignment.target.kind === "automatic_host";
-}
-
 export function projectRemoteRunActions(input: {
   observation: RemoteOperationObservation | null;
   pendingInteractions: readonly RemoteInteractionView[];
@@ -450,10 +431,9 @@ export function projectRemoteRunPanelViewModel(input: {
   offline: boolean;
   localAutoRunActive: boolean;
   hostOnline?: boolean | null;
-  endpointDispatchAvailable?: boolean;
+  endpointDispatchAvailable: boolean;
 }): RemoteRunPanelViewModel {
-  const assignmentEligible =
-    input.endpointDispatchAvailable ?? isAssignmentEligibleForRemoteDispatch(input.assignment);
+  const assignmentEligible = input.endpointDispatchAvailable;
   const interruptionResumable = Boolean(
     input.observation?.runtime.interruption?.resumable ||
       (input.observation?.state === "interrupted" &&

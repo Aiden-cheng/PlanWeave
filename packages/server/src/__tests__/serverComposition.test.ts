@@ -1,42 +1,35 @@
 import { createServer, type Server as HttpServer } from "node:http";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { PlanPackageManifest } from "@planweave-ai/runtime";
 import { afterEach, describe, expect, it } from "vitest";
+import { createTestWorkspace } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import {
-  basicManifest,
-  createTestWorkspace,
-  writePromptFiles
-} from "../../../runtime/src/__tests__/promptTestHelpers.js";
-import {
-  canonicalProjectCanvasNode,
   loadProjectGraph,
   projectCanvasWorkspace,
   writeProjectGraph
 } from "../../../runtime/src/projectGraph/index.js";
-import { writeJsonFile } from "../../../runtime/src/json.js";
 import { hashOperatorToken } from "../operatorAuth.js";
 import { parseServerConfig } from "../config.js";
 import { ProjectAccessRepository } from "../projectAccessRepository.js";
-import {
-  aclMigrationIdFor,
-  applyMigrations,
-  latestCentralSchemaVersion,
-  projectRegistryIdFor
-} from "../migrations.js";
+import { aclMigrationIdFor, applyMigrations, projectRegistryIdFor } from "../migrations.js";
 import { openServerDatabase } from "../sqlite.js";
 import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
-import { AuthorityRepository } from "../work/authorityRepository.js";
 import {
   createDistributedServerComposition,
   type DistributedServerComposition
 } from "../serverComposition.js";
+import {
+  adminToken,
+  addSecondaryCanvas,
+  configureAutomaticExecutionTarget,
+  jsonHeaders,
+  remoteManifest,
+  setupServerCompositionFixture
+} from "./support/serverCompositionFixture.js";
 
 const httpServers: HttpServer[] = [];
 const compositions: DistributedServerComposition[] = [];
 const directories: string[] = [];
-const adminToken = `pw_operator_${"A".repeat(43)}`;
-const projectToken = `pw_operator_${"B".repeat(43)}`;
 
 afterEach(async () => {
   for (const composition of compositions.splice(0)) await composition.close();
@@ -50,127 +43,8 @@ afterEach(async () => {
   );
 });
 
-function remoteManifest(): PlanPackageManifest {
-  const manifest = basicManifest();
-  manifest.execution.defaultExecutor = "codex-acp";
-  manifest.executors = {
-    "codex-acp": { adapter: "agent", agent: "codex", runner: { transport: "acp" } }
-  };
-  return manifest;
-}
-
-async function configureAutomaticExecutionTarget(input: {
-  databasePath: string;
-  workspaceId: string;
-  projectId: string;
-  canvasId: string;
-  blockRef: string;
-}): Promise<number> {
-  const database = await openServerDatabase(input.databasePath, 5_000);
-  try {
-    return new AuthorityRepository(database).applyExecutionTarget({
-      mutation: {
-        schemaVersion: "execution-target/v1",
-        scope: {
-          kind: "block",
-          workspaceId: input.workspaceId,
-          projectId: input.projectId,
-          canvasId: input.canvasId,
-          blockRef: input.blockRef
-        },
-        target: { kind: "automatic_host" },
-        expectedRevision: 0
-      },
-      actor: { kind: "system", id: "server-composition-test" }
-    }).revision;
-  } finally {
-    database.close();
-  }
-}
-
 async function setup() {
-  const workspace = await createTestWorkspace(remoteManifest());
-  directories.push(workspace.home, workspace.root);
-  const httpServer = createServer();
-  httpServers.push(httpServer);
-  const dataDirectory = join(workspace.root, "server-data");
-  const projectId = workspace.init.workspace.id;
-  const workspaceId = "workspace-server";
-  const config = parseServerConfig({
-    version: "server-config/v1",
-    bind: { host: "127.0.0.1", port: 7_443 },
-    publicUrl: "http://127.0.0.1:7443",
-    allowInsecureDevelopment: true,
-    dataDirectory,
-    trustedProjects: [{ workspaceId, projectId, canvasId: "default", projectRoot: workspace.root }],
-    operatorCredentials: [
-      {
-        operatorId: "admin",
-        tokenSha256: hashOperatorToken(adminToken),
-        projectIds: [],
-        serverAdmin: true
-      },
-      {
-        operatorId: "project-operator",
-        tokenSha256: hashOperatorToken(projectToken),
-        projectIds: [projectId]
-      }
-    ]
-  });
-  const composition = await createDistributedServerComposition({
-    httpServer,
-    config
-  });
-  compositions.push(composition);
-  const executionTargetRevision = await configureAutomaticExecutionTarget({
-    databasePath: config.databasePath,
-    workspaceId,
-    projectId,
-    canvasId: "default",
-    blockRef: "T-001#B-001"
-  });
-  await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
-  const address = httpServer.address();
-  if (!address || typeof address === "string") throw new Error("Expected HTTP address");
-  return {
-    composition,
-    projectId,
-    workspaceId,
-    databasePath: config.databasePath,
-    origin: `http://127.0.0.1:${address.port}`,
-    executionTargetRevision
-  };
-}
-
-async function addSecondaryCanvas(root: string): Promise<void> {
-  const loaded = await loadProjectGraph(root);
-  const secondaryCanvas = canonicalProjectCanvasNode({
-    id: "secondary",
-    title: "Secondary canvas"
-  });
-  const secondaryWorkspace = projectCanvasWorkspace(loaded.workspace, secondaryCanvas);
-  const manifest = remoteManifest();
-  await mkdir(secondaryWorkspace.packageDir, { recursive: true });
-  await writeJsonFile(secondaryWorkspace.manifestFile, manifest);
-  await writePromptFiles(secondaryWorkspace.packageDir, manifest);
-  await writeFile(secondaryWorkspace.stateFile, await readFile(loaded.workspace.stateFile));
-  await mkdir(secondaryWorkspace.resultsDir, { recursive: true });
-  await mkdir(join(loaded.workspace.workspaceRoot, "canvases", "undeclared"), {
-    recursive: true
-  });
-  await writeProjectGraph(loaded.workspace, {
-    version: "plan-project/v1",
-    canvases: [
-      canonicalProjectCanvasNode({ id: "default", title: "Default canvas" }),
-      secondaryCanvas
-    ],
-    edges: [],
-    crossTaskEdges: []
-  });
-}
-
-function jsonHeaders(token: string) {
-  return { Authorization: `Bearer ${token}`, "content-type": "application/json" };
+  return setupServerCompositionFixture({ directories, httpServers, compositions });
 }
 
 describe("distributed server composition", () => {
@@ -659,8 +533,10 @@ describe("distributed server composition", () => {
         })
       })
     ]);
-    expect(blockAssignmentA.status).toBe(200);
-    expect(blockAssignmentB.status).toBe(200);
+    expect(blockAssignmentA.status).toBe(400);
+    expect(blockAssignmentB.status).toBe(400);
+    await expect(blockAssignmentA.json()).resolves.toEqual({ error: "execution_target_read_only" });
+    await expect(blockAssignmentB.json()).resolves.toEqual({ error: "execution_target_read_only" });
     const blockQueryA = `${executionTargetUrl}?scope=${encodeURIComponent(JSON.stringify(executionScopeA))}`;
     const blockQueryB = `${executionTargetUrl}?scope=${encodeURIComponent(JSON.stringify(executionScopeB))}`;
     const [blockReadA, blockReadB] = await Promise.all([
@@ -669,14 +545,8 @@ describe("distributed server composition", () => {
     ]);
     expect(blockReadA.status).toBe(200);
     expect(blockReadB.status).toBe(200);
-    await expect(blockReadA.json()).resolves.toMatchObject({
-      scope: executionScopeA,
-      target: { kind: "automatic_host" }
-    });
-    await expect(blockReadB.json()).resolves.toMatchObject({
-      scope: executionScopeB,
-      target: { kind: "unassigned" }
-    });
+    await expect(blockReadA.json()).resolves.toBeNull();
+    await expect(blockReadB.json()).resolves.toBeNull();
     const [crossTaskRead, crossBlockWrite] = await Promise.all([
       fetch(taskQueryB, { headers: { Authorization: `Bearer ${tokenA}` } }),
       fetch(executionTargetUrl, {
@@ -875,7 +745,8 @@ describe("distributed server composition", () => {
         expectedExecutionTargetRevision: executionTargetRevision
       })
     });
-    expect(secondaryDispatch.status).toBe(202);
+    expect(secondaryDispatch.status).toBe(400);
+    await expect(secondaryDispatch.json()).resolves.toEqual({ error: "remote_run_v3_required" });
   });
 
   it("does not expose secondary canvases through legacy canvas trust", async () => {
@@ -944,88 +815,6 @@ describe("distributed server composition", () => {
       })
     });
     expect(secondaryDispatch.status).not.toBe(202);
-  });
-
-  it("wires health, enrollment, scoped dispatch, idempotency, pagination, and shutdown", async () => {
-    const fixture = await setup();
-    expect(fixture.composition.ownsHttpServer).toBe(false);
-    await expect((await fetch(`${fixture.origin}/readyz`)).json()).resolves.toEqual({
-      status: "ready",
-      schemaVersion: latestCentralSchemaVersion
-    });
-
-    const trustedBootstrap = await fetch(
-      `${fixture.origin}/api/v1/projects/${fixture.projectId}/human/bootstrap`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ displayName: "Trusted Owner", humanPrincipalId: "trusted-owner" })
-      }
-    );
-    expect(trustedBootstrap.status).toBe(201);
-
-    const unknownBootstrap = await fetch(
-      `${fixture.origin}/api/v1/projects/unknown-project/human/bootstrap`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ displayName: "Unknown Owner", humanPrincipalId: "unknown-owner" })
-      }
-    );
-    expect(unknownBootstrap.status).toBe(403);
-    await expect(unknownBootstrap.json()).resolves.toEqual({
-      error: "human_cross_project_forbidden"
-    });
-
-    const enrollment = await fetch(`${fixture.origin}/api/v1/host-enrollments`, {
-      method: "POST",
-      headers: jsonHeaders(adminToken),
-      body: JSON.stringify({
-        expiresAt: "2030-01-01T00:00:00.000Z",
-        credentialExpiresAt: "2030-01-02T00:00:00.000Z"
-      })
-    });
-    expect(enrollment.status).toBe(201);
-    await expect(enrollment.json()).resolves.toMatchObject({
-      enrollmentCode: expect.stringMatching(/^pw_enroll_/)
-    });
-
-    const request = {
-      schemaVersion: "remote-run/v2",
-      projectId: fixture.projectId,
-      canvasId: "default",
-      blockRef: "T-001#B-001",
-      idempotencyKey: "composition-dispatch-1",
-      expectedResponsibilityRevision: 0,
-      expectedReviewerRevision: 0,
-      expectedExecutionTargetRevision: fixture.executionTargetRevision
-    };
-    const dispatch = async (token: string, body = request) =>
-      fetch(`${fixture.origin}/api/v1/remote-operations`, {
-        method: "POST",
-        headers: jsonHeaders(token),
-        body: JSON.stringify(body)
-      });
-    const first = await dispatch(adminToken);
-    const second = await dispatch(adminToken);
-    expect(first.status).toBe(202);
-    expect(second.status).toBe(202);
-    const firstBody = await first.json();
-    const secondBody = await second.json();
-    expect(secondBody.operationId).toBe(firstBody.operationId);
-
-    const forbidden = await dispatch(projectToken, { ...request, projectId: "different-project" });
-    expect(forbidden.status).toBe(403);
-    const hosts = await fetch(`${fixture.origin}/api/v1/hosts?limit=1`, {
-      headers: { Authorization: `Bearer ${adminToken}` }
-    });
-    expect(hosts.status).toBe(200);
-    await expect(hosts.json()).resolves.toEqual({ items: [], nextCursor: null });
-
-    await fixture.composition.close();
-    await fixture.composition.close();
-    expect(fixture.composition.readiness()).toMatchObject({ status: "draining" });
-    compositions.splice(compositions.indexOf(fixture.composition), 1);
   });
 
   it("binds an unbound legacy registry row without rewriting package/state/results", async () => {

@@ -162,6 +162,15 @@ export function RemoteRunPanel({
         </p>
       ) : null}
 
+      {controller.legacyHostTargetPresent ? (
+        <p
+          className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px]"
+          data-testid="remote-run-legacy-host-target-notice"
+        >
+          {t("remoteRunLegacyHostTargetNotice")}
+        </p>
+      ) : null}
+
       <div className="flex flex-col gap-1" data-testid="agent-endpoint-selector">
         <div className="flex items-center justify-between gap-2">
           <span className="text-[11px] font-medium">{t("agentEndpointLabel")}</span>

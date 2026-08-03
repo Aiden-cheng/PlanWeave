@@ -44,27 +44,12 @@ import {
   type EndpointSelectionSnapshot
 } from "./endpointSelection.js";
 
-export type RemoteDispatchRequest = RemoteRuntimeLocator & {
+export type RemoteEndpointDispatchRequest = RemoteRuntimeLocator & {
   blockRef: string;
   idempotencyKey: string;
-  expectedResponsibilityRevision?: number;
-  expectedReviewerRevision?: number;
-  expectedExecutionTargetRevision?: number;
-  strictAuthority?: boolean;
-  /** v3 exact Endpoint identity. Mutually exclusive with Host/execution-target routing. */
-  agentEndpointId?: string;
-  /** Optional exact Host request; revalidated against assignment + live Host facts. */
-  requestedHostId?: string;
-  /**
-   * When true, allow dispatch of human/unassigned Blocks (API-level override).
-   * When assignmentGate is configured and this is false/omitted, human/unassigned deny.
-   */
-  allowHumanOverride?: boolean;
-  /**
-   * Optional assignment revision fingerprint. When set, must match durable assignment
-   * revision at dispatch begin or the call fails with a clear conflict.
-   */
-  expectedAssignmentRevision?: number;
+  agentEndpointId: string;
+  expectedResponsibilityRevision: number;
+  expectedReviewerRevision: number;
 };
 
 export type RemoteDispatchOutcome = {
@@ -189,24 +174,7 @@ export class RemoteBlockCoordinator {
     return this.hostSelectionByOperation.get(operationId);
   }
 
-  async dispatch(request: RemoteDispatchRequest): Promise<RemoteDispatchOutcome> {
-    const endpointDispatch = request.agentEndpointId !== undefined;
-    if (
-      request.strictAuthority &&
-      !endpointDispatch &&
-      (request.expectedResponsibilityRevision === undefined ||
-        request.expectedReviewerRevision === undefined ||
-        request.expectedExecutionTargetRevision === undefined)
-    ) {
-      throw new Error("remote_run_v2_required");
-    }
-    if (
-      endpointDispatch &&
-      (request.expectedResponsibilityRevision === undefined ||
-        request.expectedReviewerRevision === undefined)
-    ) {
-      throw new Error("remote_run_v3_required");
-    }
+  async dispatch(request: RemoteEndpointDispatchRequest): Promise<RemoteDispatchOutcome> {
     const existing = this.options.operations.findByCallerIdentity(request);
     if (existing) {
       if (existing.endpointSelection?.endpointId !== request.agentEndpointId) {
@@ -226,68 +194,31 @@ export class RemoteBlockCoordinator {
       throw new Error("remote_runtime_locator_candidate_mismatch");
     }
 
-    // Assignment revalidation is a separate read from dispatch persistence.
-    // Capture the authorized selection before reservation so concurrent reassignment cannot
-    // redirect this operation to an arbitrary Host. Persist with the operation so restart
-    // cannot re-resolve from a later assignment.
-    let selection: DispatchHostSelectionSnapshot | undefined;
-    let endpointSelection: EndpointSelectionSnapshot | undefined;
-    if (endpointDispatch) {
-      const endpointId = request.agentEndpointId;
-      const expectedResponsibilityRevision = request.expectedResponsibilityRevision;
-      const expectedReviewerRevision = request.expectedReviewerRevision;
-      if (
-        endpointId === undefined ||
-        expectedResponsibilityRevision === undefined ||
-        expectedReviewerRevision === undefined
-      ) {
-        throw new Error("remote_run_v3_required");
-      }
-      if (!this.options.agentEndpoints || !this.options.endpointAuthorize) {
-        throw new Error("agent_endpoint_dispatch_not_configured");
-      }
-      this.options.endpointAuthorize({
-        workspaceId: candidate.workspaceId,
-        projectId: candidate.projectId,
-        canvasId: candidate.canvasId,
-        blockRef: candidate.blockRef,
-        expectedResponsibilityRevision,
-        expectedReviewerRevision
-      });
-      endpointSelection = this.snapshotEndpoint(
-        this.options.agentEndpoints.resolveForRun(
-          endpointId,
-          candidate.workspaceId,
-          candidate.requiredCapabilities
-        ),
-        candidate,
-        {
-          responsibilityRevision: expectedResponsibilityRevision,
-          reviewerRevision: expectedReviewerRevision
-        }
-      );
-    } else if (this.options.assignmentGate) {
-      selection = this.options.assignmentGate.resolve({
-        workspaceId: candidate.workspaceId,
-        projectId: candidate.projectId,
-        canvasId: candidate.canvasId,
-        blockRef: candidate.blockRef,
-        requiredCapabilities: candidate.requiredCapabilities,
-        agentId: candidate.agentId,
-        agentProfileId: candidate.agentProfileId,
-        requestedHostId: request.requestedHostId,
-        allowHumanOverride: request.allowHumanOverride,
-        expectedAssignmentRevision: request.expectedAssignmentRevision,
-        ...(request.strictAuthority
-          ? {
-              expectedResponsibilityRevision: request.expectedResponsibilityRevision,
-              expectedReviewerRevision: request.expectedReviewerRevision,
-              expectedExecutionTargetRevision: request.expectedExecutionTargetRevision,
-              preferAuthority: true
-            }
-          : {})
-      });
+    // Endpoint authorization and the redacted route snapshot are captured before persistence.
+    // Reentry always uses this durable exact Endpoint identity.
+    if (!this.options.agentEndpoints || !this.options.endpointAuthorize) {
+      throw new Error("agent_endpoint_dispatch_not_configured");
     }
+    this.options.endpointAuthorize({
+      workspaceId: candidate.workspaceId,
+      projectId: candidate.projectId,
+      canvasId: candidate.canvasId,
+      blockRef: candidate.blockRef,
+      expectedResponsibilityRevision: request.expectedResponsibilityRevision,
+      expectedReviewerRevision: request.expectedReviewerRevision
+    });
+    const endpointSelection = this.snapshotEndpoint(
+      this.options.agentEndpoints.resolveForRun(
+        request.agentEndpointId,
+        candidate.workspaceId,
+        candidate.requiredCapabilities
+      ),
+      candidate,
+      {
+        responsibilityRevision: request.expectedResponsibilityRevision,
+        reviewerRevision: request.expectedReviewerRevision
+      }
+    );
 
     await this.checkpoint("before_operation_commit");
     const operation = this.options.operations.create({
@@ -299,12 +230,8 @@ export class RemoteBlockCoordinator {
       idempotencyKey: request.idempotencyKey,
       sourceFingerprint: candidate.graphFingerprint,
       requiredCapabilities: candidate.requiredCapabilities,
-      hostSelection: selection,
       endpointSelection
     });
-    if (operation.hostSelection) {
-      this.hostSelectionByOperation.set(operation.id, operation.hostSelection);
-    }
     await this.checkpoint("after_operation_commit");
     this.options.candidates.record(operation.id, candidate);
     await this.checkpoint("after_candidate_persistence");

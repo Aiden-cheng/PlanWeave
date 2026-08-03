@@ -23,7 +23,13 @@ import { RemoteRuntimePortRegistry } from "../remoteRuntimeLocator.js";
 import { startPlanweaveServer, type PlanweaveServer } from "../lifecycle.js";
 import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { ProjectAccessRepository } from "../projectAccessRepository.js";
+import { canonicalRemoteRuntimePort } from "../canonicalRemoteRuntimePort.js";
 import { WorkAssignmentRepository } from "../work/repository.js";
+import {
+  endpointDispatchRequest,
+  registerEndpointDispatchAccess
+} from "./support/endpointCoordinatorFixture.js";
+import { seedLegacyRemoteOperation } from "./support/legacyRemoteOperationSeed.js";
 
 type Coordination = ReturnType<typeof createRemoteBlockCoordination>;
 
@@ -68,6 +74,7 @@ class CoordinatorHarness {
   coordination?: Coordination;
   runtime?: RemoteBlockRuntimePort;
   artifacts?: ArtifactStore;
+  private agentEndpointId?: string;
 
   private constructor(
     readonly workspace: Awaited<ReturnType<typeof createTestWorkspace>>,
@@ -131,6 +138,12 @@ class CoordinatorHarness {
     };
     this.coordination = createRemoteBlockCoordination(this.server.database, options, {
       serverInstanceOwnerToken: this.server.serverInstanceOwnerToken
+    });
+    registerEndpointDispatchAccess({
+      database: this.server.database,
+      locator: this.locator,
+      projectRoot: this.workspace.root,
+      packageDir: this.workspace.init.workspace.packageDir
     });
     return this.coordination;
   }
@@ -204,7 +217,15 @@ class CoordinatorHarness {
   }
 
   request(blockRef = "T-001#B-001", idempotencyKey = "crash-matrix-request") {
-    return { ...this.locator, blockRef, idempotencyKey };
+    const request = endpointDispatchRequest({
+      agentEndpoints: this.requireCoordination().agentEndpoints,
+      locator: this.locator,
+      blockRef,
+      idempotencyKey,
+      agentEndpointId: this.agentEndpointId
+    });
+    this.agentEndpointId = request.agentEndpointId;
+    return request;
   }
 }
 
@@ -249,9 +270,26 @@ async function prepareInterruptedAction(harness: CoordinatorHarness, resumable: 
       ]
     });
   }
-  const outcome = await coordination.coordinator.dispatch(
-    harness.request("T-001#B-001", `action-crash-${resumable}`)
-  );
+  const blockRef = "T-001#B-001";
+  const candidate = await canonicalRemoteRuntimePort(
+    harness.requireRuntime(),
+    harness.locator.workspaceId
+  ).inspect({ ref: blockRef });
+  const operation = seedLegacyRemoteOperation({
+    database: harness.requireServer().database,
+    operations: coordination.operations,
+    locator: harness.locator,
+    candidate,
+    idempotencyKey: `action-crash-${resumable}`,
+    hostSelection: {
+      workspaceId: harness.locator.workspaceId,
+      assignmentRevision: 0,
+      target: { kind: "automatic_host" },
+      selection: "automatic",
+      requiredCapabilities: candidate.requiredCapabilities
+    }
+  });
+  const outcome = await coordination.coordinator.reenter(operation.id);
   const dispatch = coordination.dispatches.getRequired(outcome.operation.dispatchId);
   coordination.dispatches.accept(
     hostId,
@@ -410,47 +448,25 @@ describe("RemoteBlockCoordinator crash reconciliation", () => {
 
   it("recovers a retry crash after dispatching the new attempt but before settling the action", async () => {
     const harness = await CoordinatorHarness.create();
-    const hostId = harness.registerHost();
+    const prepared = await prepareInterruptedAction(harness, false);
     let coordination = harness.requireCoordination();
+    const { outcome, dispatch } = prepared;
     new WorkAssignmentRepository(harness.requireServer().database).applyCasUpdate({
       expectedRevision: 0,
       record: {
         workspaceId: harness.locator.workspaceId,
         projectId: harness.locator.projectId,
-        workItem: { kind: "block", canvasId: harness.locator.canvasId, blockRef: "T-001#B-001" },
-        target: { kind: "exact_host", hostId },
+        workItem: {
+          kind: "block",
+          canvasId: harness.locator.canvasId,
+          blockRef: outcome.operation.blockRef
+        },
+        target: { kind: "exact_host", hostId: prepared.hostId },
         revision: 1,
         updatedBy: { kind: "system", id: "retry-crash-test" },
         updatedAt: "2030-01-01T00:00:00.000Z"
       }
     });
-    const outcome = await coordination.coordinator.dispatch(harness.request());
-    const dispatch = coordination.dispatches.getRequired(outcome.operation.dispatchId);
-    coordination.dispatches.accept(
-      hostId,
-      "retry-accepted",
-      dispatch.id,
-      dispatch.leaseId,
-      dispatch.executionAttemptId
-    );
-    coordination.dispatches.interrupt(hostId, "retry-interrupted", {
-      type: "dispatch.interrupted",
-      protocolVersion: 1,
-      messageId: "retry-interrupted",
-      dispatchId: dispatch.id,
-      leaseId: dispatch.leaseId,
-      executionAttemptId: dispatch.executionAttemptId,
-      reason: "acp_session_lost",
-      resumable: false
-    });
-    const lease = coordination.reservations.getRequired(dispatch.leaseId);
-    coordination.reservations.release({
-      leaseId: lease.leaseId,
-      fencingToken: lease.fencingToken,
-      expectedVersion: lease.version,
-      reason: "expired"
-    });
-    await coordination.coordinator.reenter(outcome.operation.id);
     coordination = await harness.restart(new CrashOnce("after_action_side_effect"));
     const interrupted = coordination.operations.getRequired(outcome.operation.id);
     const request = {
@@ -687,9 +703,28 @@ describe("RemoteBlockCoordinator crash reconciliation", () => {
     expect(count(harness.requireServer().database, "dispatch_artifact_links")).toBe(1);
   });
 
-  it("blocks a restarted operation when its Runtime source has drifted", async () => {
+  it("blocks a restarted legacy operation when its Runtime source has drifted", async () => {
     const harness = await CoordinatorHarness.create();
-    const outcome = await harness.requireCoordination().coordinator.dispatch(harness.request());
+    const coordination = harness.requireCoordination();
+    const candidate = await canonicalRemoteRuntimePort(
+      harness.requireRuntime(),
+      harness.locator.workspaceId
+    ).inspect({ ref: "T-001#B-001" });
+    const operation = seedLegacyRemoteOperation({
+      database: harness.requireServer().database,
+      operations: coordination.operations,
+      locator: harness.locator,
+      candidate,
+      idempotencyKey: "source-drift-before-host",
+      hostSelection: {
+        workspaceId: harness.locator.workspaceId,
+        assignmentRevision: 0,
+        target: { kind: "automatic_host" },
+        selection: "automatic",
+        requiredCapabilities: candidate.requiredCapabilities
+      }
+    });
+    const outcome = await coordination.coordinator.reenter(operation.id);
     expect(outcome.status).toBe("awaiting_host");
     await appendFile(
       join(harness.workspace.init.workspace.packageDir, "nodes/T-001/blocks/B-001.prompt.md"),
@@ -867,18 +902,20 @@ describe("RemoteBlockCoordinator concurrency reconciliation", () => {
     expect(count(harness.requireServer().database, "mailbox_messages")).toBe(1);
   });
 
-  it("keeps Host capacity transactional across different Blocks", async () => {
+  it("rejects a second strict Endpoint dispatch when Host capacity is exhausted", async () => {
     const harness = await CoordinatorHarness.create(true);
     harness.registerHost(1);
     const coordination = harness.requireCoordination();
-    const outcomes = await Promise.all([
+    const outcomes = await Promise.allSettled([
       coordination.coordinator.dispatch(harness.request("T-001#B-001", "capacity-a")),
       coordination.coordinator.dispatch(harness.request("T-002#B-001", "capacity-b"))
     ]);
-    expect(outcomes.map((outcome) => outcome.status).sort()).toEqual([
-      "activated",
-      "awaiting_host"
-    ]);
+    const fulfilled = outcomes.filter((outcome) => outcome.status === "fulfilled");
+    const rejected = outcomes.filter((outcome) => outcome.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(fulfilled[0]?.value.status).toBe("activated");
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.reason).toMatchObject({ code: "agent_endpoint_unavailable" });
     expect(count(harness.requireServer().database, "host_capacity_reservations")).toBe(1);
     expect(count(harness.requireServer().database, "mailbox_messages")).toBe(1);
   });

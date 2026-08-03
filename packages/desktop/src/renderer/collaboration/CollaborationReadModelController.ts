@@ -1,6 +1,5 @@
 import type { AssignmentDisplayProjection } from "@planweave-ai/collaboration-protocol/work/assignment";
 import type { CommentDisplayProjection } from "@planweave-ai/collaboration-protocol/activity/comments";
-import type { ExecutionTargetReadModel } from "@planweave-ai/collaboration-protocol/work/execution-target";
 import type { HumanObserverEvent } from "@planweave-ai/collaboration-protocol/activity/observer";
 import type { ResponsibilityReadModel } from "@planweave-ai/collaboration-protocol/work/responsibility";
 import type { ReviewAssignmentReadModel } from "@planweave-ai/collaboration-protocol/work/review";
@@ -17,7 +16,6 @@ import {
   type CollaborationCommentEditInput,
   type CollaborationCommentListQueryInput,
   type CollaborationCommentTombstoneInput,
-  type CollaborationExecutionTargetUpdateInput,
   type CollaborationHostProjection,
   type CollaborationMutationRecord,
   type CollaborationObserverSignal,
@@ -40,7 +38,6 @@ export type CollaborationReadBridgePort = Pick<
   | "getCollaborationWorkAuthority"
   | "updateCollaborationResponsibility"
   | "updateCollaborationReviewer"
-  | "updateCollaborationExecutionTarget"
   | "listCollaborationComments"
   | "listCollaborationActivity"
   | "updateCollaborationAssignment"
@@ -398,26 +395,6 @@ export class CollaborationReadModelController {
       workItem: command.workItem,
       expectedRevision: command.expectedRevision,
       execute: () => this.api.updateCollaborationReviewer(command),
-      onConfirmed: () => undefined
-    });
-    if (result) {
-      try {
-        await this.reloadWorkAuthority(command.workItem, this.state.generation);
-      } catch {
-        // Mutation succeeded; projection refresh errors surface via lastError on next load.
-      }
-    }
-    return result;
-  }
-
-  async updateExecutionTarget(
-    command: CollaborationExecutionTargetUpdateInput
-  ): Promise<ExecutionTargetReadModel | null> {
-    const result = await this.runMutation({
-      kind: "execution_target",
-      workItem: command.workItem,
-      expectedRevision: command.expectedRevision,
-      execute: () => this.api.updateCollaborationExecutionTarget(command),
       onConfirmed: () => undefined
     });
     if (result) {

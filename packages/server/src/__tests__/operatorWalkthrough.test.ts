@@ -69,7 +69,7 @@ function remoteManifest(): PlanPackageManifest {
   manifest.executors = {
     "codex-acp": { adapter: "agent", agent: "codex", runner: { transport: "acp" } }
   };
-  manifest.nodes[0].blocks[0].requirements = { capabilities: ["acp.test"] };
+  manifest.nodes[0].blocks[0].requirements = { capabilities: ["acp.codex"] };
   return manifest;
 }
 
@@ -135,8 +135,8 @@ async function startServerBin(configPath: string, publicUrl: string): Promise<Ru
           `server_not_ready:${running.logs.stderr || running.logs.stdout || "no_output"}`
         );
       }
-      const parsed = JSON.parse(line) as { status?: string; publicUrl?: string };
-      expect(parsed).toMatchObject({ status: "ready", publicUrl });
+      const parsed = JSON.parse(line) as { status?: string; advertisedOrigin?: string };
+      expect(parsed).toMatchObject({ status: "ready", advertisedOrigin: publicUrl });
     },
     { timeout: 15_000 }
   );
@@ -392,8 +392,39 @@ describe("remote operator walkthrough", () => {
         })
       }
     );
-    expect(executionTarget.status).toBe(200);
-    const executionTargetBody = (await executionTarget.json()) as { revision: number };
+    expect(executionTarget.status).toBe(400);
+    await expect(executionTarget.json()).resolves.toEqual({ error: "execution_target_read_only" });
+
+    const endpointResponse = await fetch(
+      `${origin}/api/v1/projects/${workspace.init.workspace.id}/agent-endpoints`,
+      { headers: { Authorization: `Bearer ${deviceToken}` } }
+    );
+    expect(endpointResponse.status).toBe(200);
+    const endpointPage = (await endpointResponse.json()) as {
+      items: Array<{ endpointId: string }>;
+    };
+    expect(endpointPage.items).toHaveLength(1);
+    const agentEndpointId = endpointPage.items[0]?.endpointId;
+    expect(agentEndpointId).toBeTruthy();
+
+    for (const schemaVersion of ["remote-run/v1", "remote-run/v2"]) {
+      const legacyDispatch = await fetch(`${origin}/api/v1/remote-operations`, {
+        method: "POST",
+        headers: { ...authorization, "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion,
+          projectId: workspace.init.workspace.id,
+          canvasId: "default",
+          blockRef: "T-001#B-001",
+          idempotencyKey: `operator-legacy-dispatch-${schemaVersion}`,
+          expectedResponsibilityRevision: 0,
+          expectedReviewerRevision: 0,
+          expectedExecutionTargetRevision: 0
+        })
+      });
+      expect(legacyDispatch.status).toBe(400);
+      await expect(legacyDispatch.json()).resolves.toEqual({ error: "remote_run_v3_required" });
+    }
 
     // Operator dispatch proof: HTTP 202 only means the Coordinator accepted the request.
     // Production success requires Host acceptance (leased/running) and a terminal outcome.
@@ -401,18 +432,19 @@ describe("remote operator walkthrough", () => {
       method: "POST",
       headers: { ...authorization, "content-type": "application/json" },
       body: JSON.stringify({
-        schemaVersion: "remote-run/v2",
+        schemaVersion: "remote-run/v3",
         projectId: workspace.init.workspace.id,
         canvasId: "default",
         blockRef: "T-001#B-001",
+        agentEndpointId,
         idempotencyKey: "operator-walkthrough-dispatch",
         expectedResponsibilityRevision: 0,
-        expectedReviewerRevision: 0,
-        expectedExecutionTargetRevision: executionTargetBody.revision
+        expectedReviewerRevision: 0
       })
     });
-    expect(dispatchResponse.status).toBe(202);
-    const dispatched = (await dispatchResponse.json()) as {
+    const dispatchBody = await dispatchResponse.json();
+    expect(dispatchResponse.status, JSON.stringify(dispatchBody)).toBe(202);
+    const dispatched = dispatchBody as {
       operationId: string;
       projectId: string;
       blockRef: string;
@@ -431,6 +463,7 @@ describe("remote operator walkthrough", () => {
       state: string;
       dispatchStatus?: string;
       attempt?: { status?: string; hostId?: string };
+      agentEndpoint?: { endpointId: string };
     };
 
     const observeOperation = async (operationId: string): Promise<OperatorOperationView> => {
@@ -451,7 +484,8 @@ describe("remote operator walkthrough", () => {
       },
       { timeout: 20_000 }
     );
-    expect(accepted.attempt?.hostId).toBe(hostId);
+    expect(accepted.agentEndpoint?.endpointId).toBe(agentEndpointId);
+    expect(accepted.attempt?.hostId).toBeUndefined();
 
     // Terminal: request acceptance is not success; wait for completed/failed/cancelled.
     const terminal = await vi.waitFor(

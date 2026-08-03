@@ -14,7 +14,14 @@ import {
   operatorPageQuerySchema,
   type OperatorOperationView
 } from "./operatorDtos.js";
-import { remoteDispatchIntentSchema } from "@planweave-ai/collaboration-protocol/remote-run";
+import { remoteDispatchIntentV3Schema } from "@planweave-ai/collaboration-protocol/remote-run";
+import {
+  remoteAgentEndpointListSchema,
+  type RemoteAgentEndpointList
+} from "@planweave-ai/collaboration-protocol/agent-endpoint";
+import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
+import { z } from "zod";
+import { AgentEndpointCatalog } from "./agentEndpointCatalog.js";
 import { HostEnrollmentService } from "./hostEnrollment.js";
 import {
   DEFAULT_HOST_OFFLINE_AFTER_MS,
@@ -29,12 +36,14 @@ import { RemoteBlockCoordinator } from "./remoteBlockCoordinator.js";
 import { RemoteInteractionService } from "./remoteInteractions.js";
 import { RemoteOperationRepository, type RemoteOperation } from "./remoteOperations.js";
 import { DispatchService } from "./dispatches.js";
+import { toHumanEndpointSnapshot } from "./endpointSelection.js";
 import { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
 
 export type RemoteControlServiceOptions = {
   authorization: OperatorTokenRegistry;
   enrollments: HostEnrollmentService;
   hosts: AgentHostRepository;
+  agentEndpoints: AgentEndpointCatalog;
   operations: RemoteOperationRepository;
   dispatches: DispatchService;
   coordinator: RemoteBlockCoordinator;
@@ -44,7 +53,11 @@ export type RemoteControlServiceOptions = {
   hostOfflineAfterMs?: number;
   clock?: () => Date;
   workspaceIdentity: WorkspaceIdentityRepository;
+  authorizeProjectScope(scope: { workspaceId: string; projectId: string }): void;
+  authorizeCanvas?: (scope: { workspaceId: string; projectId: string; canvasId: string }) => void;
 };
+
+const operatorAgentEndpointQuerySchema = z.object({ projectId: opaqueIdentifierSchema }).strict();
 
 export class RemoteControlService {
   private readonly clock: () => Date;
@@ -87,6 +100,17 @@ export class RemoteControlService {
     });
   }
 
+  listAgentEndpoints(principal: OperatorPrincipal, rawQuery: unknown): RemoteAgentEndpointList {
+    this.options.authorization.requireServerAdmin(principal);
+    const query = operatorAgentEndpointQuerySchema.parse(rawQuery);
+    const workspaceId = this.resolveWorkspace(principal, principal.workspaceId);
+    this.options.authorization.authorizeProject(principal, query.projectId);
+    this.options.authorizeProjectScope({ workspaceId, projectId: query.projectId });
+    return remoteAgentEndpointListSchema.parse(
+      this.options.agentEndpoints.listVisible(workspaceId)
+    );
+  }
+
   getHost(principal: OperatorPrincipal, hostId: string) {
     this.options.authorization.requireServerAdmin(principal);
     const workspaceId = this.requireHostWorkspace(hostId);
@@ -104,22 +128,41 @@ export class RemoteControlService {
   }
 
   async dispatch(principal: OperatorPrincipal, rawRequest: unknown) {
-    const request = remoteDispatchIntentSchema.parse(rawRequest);
-    this.options.authorization.authorizeProject(principal, request.projectId);
     const workspaceId = this.resolveWorkspace(principal, principal.workspaceId);
     this.authorizeWorkspace(principal, workspaceId);
-    // Assignment and dispatch remain separate operations; the coordinator revalidates
-    // current assignment before Host reservation (never trusts a UI eligibility list).
+    if (
+      rawRequest !== null &&
+      typeof rawRequest === "object" &&
+      "projectId" in rawRequest &&
+      typeof rawRequest.projectId === "string"
+    ) {
+      this.options.authorization.authorizeProject(principal, rawRequest.projectId);
+      if ("canvasId" in rawRequest && typeof rawRequest.canvasId === "string") {
+        this.options.authorizeCanvas?.({
+          workspaceId,
+          projectId: rawRequest.projectId,
+          canvasId: rawRequest.canvasId
+        });
+      }
+    }
+    if (
+      rawRequest !== null &&
+      typeof rawRequest === "object" &&
+      (!("schemaVersion" in rawRequest) || rawRequest.schemaVersion !== "remote-run/v3")
+    ) {
+      throw new Error("remote_run_v3_required");
+    }
+    const request = remoteDispatchIntentV3Schema.parse(rawRequest);
+    this.options.authorization.authorizeProject(principal, request.projectId);
     const outcome = await this.options.coordinator.dispatch({
       workspaceId,
       projectId: request.projectId,
       canvasId: request.canvasId,
       blockRef: request.blockRef,
       idempotencyKey: request.idempotencyKey,
+      agentEndpointId: request.agentEndpointId,
       expectedResponsibilityRevision: request.expectedResponsibilityRevision,
-      expectedReviewerRevision: request.expectedReviewerRevision,
-      expectedExecutionTargetRevision: request.expectedExecutionTargetRevision,
-      strictAuthority: true
+      expectedReviewerRevision: request.expectedReviewerRevision
     });
     return this.observeOperation(principal, outcome.operation.id);
   }
@@ -144,11 +187,14 @@ export class RemoteControlService {
       createdAt: operation.createdAt,
       updatedAt: operation.updatedAt,
       terminalAt: operation.terminalAt,
+      ...(operation.endpointSelection
+        ? { agentEndpoint: toHumanEndpointSnapshot(operation.endpointSelection) }
+        : {}),
       attempt: {
         executionAttemptId: operation.attempt.executionAttemptId,
         dispatchId: operation.attempt.dispatchId,
         status: operation.attempt.status,
-        hostId: operation.attempt.hostId,
+        ...(operation.endpointSelection ? {} : { hostId: operation.attempt.hostId }),
         leaseId: operation.attempt.leaseId,
         leaseExpiresAt: operation.attempt.leaseExpiresAt,
         stateVersion: operation.attempt.stateVersion

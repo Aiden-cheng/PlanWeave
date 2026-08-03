@@ -24,7 +24,6 @@ import {
   workItemRefSchema,
   type WorkItemRef
 } from "@planweave-ai/collaboration-protocol/core/primitives";
-import { type ExecutionTargetReadModel } from "@planweave-ai/collaboration-protocol/work/execution-target";
 import {
   type ResponsibilityReadModel,
   type CollaborationWorkScope
@@ -32,7 +31,6 @@ import {
 import { type ReviewAssignmentReadModel } from "@planweave-ai/collaboration-protocol/work/review";
 import { type WorkAuthorityProjection } from "@planweave-ai/collaboration-protocol/work/authority";
 import {
-  collaborationExecutionTargetUpdateInputSchema,
   collaborationResponsibilityUpdateInputSchema,
   collaborationReviewerUpdateInputSchema,
   collaborationWorkAuthorityScopeInputSchema
@@ -120,34 +118,6 @@ export class CollaborationReadMutationsFacade {
         schemaVersion: "review-assignment/v1",
         scope,
         principal: command.principal,
-        expectedRevision: command.expectedRevision,
-        ...(command.reason === undefined ? {} : { reason: command.reason })
-      });
-    });
-  }
-
-  updateExecutionTarget(input: unknown): Promise<ExecutionTargetReadModel> {
-    const command = collaborationExecutionTargetUpdateInputSchema.parse(input);
-    if (command.workItem.kind !== "block") {
-      throw new CollaborationClientError({
-        kind: "validation",
-        code: "execution_target_requires_exact_block",
-        message: "Host execution targets accept only exact Task#Block refs."
-      });
-    }
-    return this.withActiveClient(async (client) => {
-      const scope = await this.toAuthorityScope(client, command.workItem);
-      if (scope.kind !== "block") {
-        throw new CollaborationClientError({
-          kind: "validation",
-          code: "execution_target_requires_exact_block",
-          message: "Host execution targets accept only exact Task#Block refs."
-        });
-      }
-      return client.updateExecutionTarget({
-        schemaVersion: "execution-target/v1",
-        scope,
-        target: command.target,
         expectedRevision: command.expectedRevision,
         ...(command.reason === undefined ? {} : { reason: command.reason })
       });

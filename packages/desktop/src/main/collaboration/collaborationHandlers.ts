@@ -516,10 +516,6 @@ export function registerCollaborationHandlers(
     collaborationInvokeChannels.updateCollaborationReviewer,
     (_event, input: unknown) => active.updateReviewer(input)
   );
-  ipcMain.handle(
-    collaborationInvokeChannels.updateCollaborationExecutionTarget,
-    (_event, input: unknown) => active.updateExecutionTarget(input)
-  );
   ipcMain.handle(collaborationInvokeChannels.listCollaborationComments, (_event, input: unknown) =>
     active.listComments(input)
   );

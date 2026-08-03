@@ -4,8 +4,7 @@ import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/prim
 import { parseWorkItemKey, workItemKey } from "../../shared/collaborationReadModels.js";
 import {
   useAssigneePickerController,
-  type AssigneeAuthorityRole,
-  type TaskHostDispatchResult
+  type AssigneeAuthorityRole
 } from "../hooks/useAssigneePickerController";
 import type { createTranslator } from "../i18n";
 import type { PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
@@ -16,13 +15,9 @@ export type AssigneeInspectorFieldProps = {
   t: ReturnType<typeof createTranslator>;
   api?: PlanWeaveCollaborationApi | null;
   className?: string;
-  taskExecutionBlocks?: readonly {
-    workItem: Extract<WorkItemRef, { kind: "block" }>;
-    dispatchable: boolean;
-  }[];
   /**
    * Which independent authority axes to render.
-   * Defaults to responsibility + reviewer, plus Host execution for Block work items.
+   * Defaults to responsibility + reviewer.
    */
   roles?: readonly AssigneeAuthorityRole[];
   onAssignmentOutcome?: (outcome: {
@@ -39,30 +34,9 @@ function roleLabel(role: AssigneeAuthorityRole, t: ReturnType<typeof createTrans
       return t("authorityResponsibility");
     case "reviewer":
       return t("authorityReviewer");
-    case "execution_target":
-      return t("authorityExecutionHost");
     default:
       return role;
   }
-}
-
-function roleHint(
-  role: AssigneeAuthorityRole,
-  authority: ReturnType<typeof useAssigneePickerController>["authority"],
-  t: ReturnType<typeof createTranslator>
-): string | null {
-  if (role !== "execution_target" || !authority?.selectedHost) return null;
-  const host = authority.selectedHost;
-  const reason = host.authorization?.reason ?? host.availabilityReason;
-  const lease =
-    host.lease.status === "none"
-      ? t("authorityLeaseNone")
-      : host.lease.status === "active"
-        ? t("authorityLeaseActive")
-        : host.lease.status === "expired"
-          ? t("authorityLeaseExpired")
-          : t("authorityLeaseRevoked");
-  return `${t("authorityHostReason")}: ${reason} · ${lease}`;
 }
 
 function SingleAuthorityField({
@@ -71,7 +45,6 @@ function SingleAuthorityField({
   t,
   api,
   className,
-  taskExecutionBlocks,
   onAssignmentOutcome
 }: {
   workItem: WorkItemRef;
@@ -79,13 +52,11 @@ function SingleAuthorityField({
   t: ReturnType<typeof createTranslator>;
   api?: PlanWeaveCollaborationApi | null;
   className?: string;
-  taskExecutionBlocks?: AssigneeInspectorFieldProps["taskExecutionBlocks"];
   onAssignmentOutcome?: AssigneeInspectorFieldProps["onAssignmentOutcome"];
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const controller = useAssigneePickerController({
     workItem,
-    taskExecutionBlocks: role === "execution_target" ? taskExecutionBlocks : undefined,
     authorityRole: role,
     api,
     detailsOpen,
@@ -100,24 +71,6 @@ function SingleAuthorityField({
   if (!controller.viewModel) {
     return null;
   }
-
-  const hint = roleHint(role, controller.authority, t);
-
-  const resultLabel = (result: TaskHostDispatchResult): string => {
-    if (result.ok) return t("taskHostDispatchSucceeded");
-    switch (result.message) {
-      case "task_block_not_dispatchable":
-        return t("taskHostDispatchNotDispatchable");
-      case "task_host_unavailable":
-        return t("taskHostDispatchHostUnavailable");
-      case "task_authority_unavailable":
-        return t("taskHostDispatchAuthorityUnavailable");
-      case "task_execution_target_update_failed":
-        return t("taskHostDispatchAssignmentFailed");
-      default:
-        return t("taskHostDispatchFailed");
-    }
-  };
 
   return (
     <div className={className} data-testid={`authority-field-${role}`} data-authority-role={role}>
@@ -134,37 +87,12 @@ function SingleAuthorityField({
         onOpenChange={handleOpenChange}
         t={t}
       />
-      {hint ? (
-        <p
-          className="mt-1 text-[10px] text-muted-foreground"
-          data-testid={`authority-host-status-${role}`}
-        >
-          {hint}
-        </p>
-      ) : null}
-      {role === "execution_target" && controller.taskDispatchResults.length > 0 ? (
-        <div
-          className="mt-2 space-y-1 text-[10px]"
-          data-testid="task-host-dispatch-results"
-          aria-live="polite"
-        >
-          <p className="font-medium text-muted-foreground">{t("taskHostDispatchResults")}</p>
-          {controller.taskDispatchResults.map((result) => (
-            <p
-              key={result.blockRef}
-              className={result.ok ? "text-emerald-700" : "text-destructive"}
-            >
-              <span className="font-mono">{result.blockRef}</span>: {resultLabel(result)}
-            </p>
-          ))}
-        </div>
-      ) : null}
     </div>
   );
 }
 
 /**
- * Inspector metadata fields for independent responsibility, reviewer, and Host execution.
+ * Inspector metadata fields for independent responsibility and reviewer authorities.
  * Collaboration session/read models come from the shared hub; eligible options load only
  * while each picker popover is open. Axes never overwrite each other.
  */
@@ -174,7 +102,6 @@ export function AssigneeInspectorField({
   api,
   className,
   roles,
-  taskExecutionBlocks,
   onAssignmentOutcome
 }: AssigneeInspectorFieldProps) {
   const workKey = workItem ? workItemKey(workItem) : null;
@@ -183,13 +110,8 @@ export function AssigneeInspectorField({
   const resolvedRoles = useMemo((): AssigneeAuthorityRole[] => {
     if (roles) return [...roles];
     if (!stableWorkItem) return [];
-    if (stableWorkItem.kind === "block") {
-      return ["responsibility", "reviewer", "execution_target"];
-    }
-    return taskExecutionBlocks && taskExecutionBlocks.length > 0
-      ? ["responsibility", "reviewer", "execution_target"]
-      : ["responsibility", "reviewer"];
-  }, [roles, stableWorkItem, taskExecutionBlocks]);
+    return ["responsibility", "reviewer"];
+  }, [roles, stableWorkItem]);
 
   if (!stableWorkItem) {
     return null;
@@ -209,7 +131,6 @@ export function AssigneeInspectorField({
           t={t}
           api={api}
           className="mb-2 last:mb-0"
-          taskExecutionBlocks={taskExecutionBlocks}
           onAssignmentOutcome={onAssignmentOutcome}
         />
       ))}

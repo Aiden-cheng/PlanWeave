@@ -80,7 +80,6 @@ export const collaborationInvokeChannels = {
   getCollaborationWorkAuthority: "planweave-collaboration:getWorkAuthority",
   updateCollaborationResponsibility: "planweave-collaboration:updateResponsibility",
   updateCollaborationReviewer: "planweave-collaboration:updateReviewer",
-  updateCollaborationExecutionTarget: "planweave-collaboration:updateExecutionTarget",
   listCollaborationComments: "planweave-collaboration:listComments",
   listCollaborationActivity: "planweave-collaboration:listActivity",
   listCollaborationAuthorizedProjects: "planweave-collaboration:listAuthorizedProjects",

@@ -1,6 +1,6 @@
 import {
   remoteActionViewSchema,
-  remoteDispatchVersionedIntentSchema,
+  remoteDispatchIntentV3Schema,
   remoteEventQuerySchema,
   remoteEventReplaySchema,
   remoteHumanExecutionActionCommandSchema,
@@ -54,38 +54,47 @@ export class HumanRemoteControlService {
   async dispatch(scope: AuthenticatedCollaborationScope, rawRequest: unknown) {
     const { actor: context, projectId } = scope;
     this.authorize(context, projectId);
-    const request = remoteDispatchVersionedIntentSchema.parse(rawRequest);
+    if (rawRequest !== null && typeof rawRequest === "object") {
+      if (
+        "projectId" in rawRequest &&
+        typeof rawRequest.projectId === "string" &&
+        rawRequest.projectId !== projectId
+      ) {
+        throw new HumanRemoteControlError("human_remote_project_mismatch");
+      }
+      if (
+        "projectId" in rawRequest &&
+        typeof rawRequest.projectId === "string" &&
+        "canvasId" in rawRequest &&
+        typeof rawRequest.canvasId === "string"
+      ) {
+        this.options.authorizeCanvas?.(context, {
+          workspaceId: scope.workspaceId,
+          projectId: rawRequest.projectId,
+          canvasId: rawRequest.canvasId
+        });
+      }
+    }
+    if (
+      rawRequest !== null &&
+      typeof rawRequest === "object" &&
+      (!("schemaVersion" in rawRequest) || rawRequest.schemaVersion !== "remote-run/v3")
+    ) {
+      throw new HumanRemoteControlError("remote_run_v3_required");
+    }
+    const request = remoteDispatchIntentV3Schema.parse(rawRequest);
     if (request.projectId !== projectId)
       throw new HumanRemoteControlError("human_remote_project_mismatch");
-    this.options.authorizeCanvas?.(context, {
+    const outcome = await this.options.coordinator.dispatch({
       workspaceId: scope.workspaceId,
       projectId: request.projectId,
-      canvasId: request.canvasId
+      canvasId: request.canvasId,
+      blockRef: request.blockRef,
+      idempotencyKey: request.idempotencyKey,
+      agentEndpointId: request.agentEndpointId,
+      expectedResponsibilityRevision: request.expectedResponsibilityRevision,
+      expectedReviewerRevision: request.expectedReviewerRevision
     });
-    const outcome = await this.options.coordinator.dispatch(
-      request.schemaVersion === "remote-run/v3"
-        ? {
-            workspaceId: scope.workspaceId,
-            projectId: request.projectId,
-            canvasId: request.canvasId,
-            blockRef: request.blockRef,
-            idempotencyKey: request.idempotencyKey,
-            agentEndpointId: request.agentEndpointId,
-            expectedResponsibilityRevision: request.expectedResponsibilityRevision,
-            expectedReviewerRevision: request.expectedReviewerRevision
-          }
-        : {
-            workspaceId: scope.workspaceId,
-            projectId: request.projectId,
-            canvasId: request.canvasId,
-            blockRef: request.blockRef,
-            idempotencyKey: request.idempotencyKey,
-            expectedResponsibilityRevision: request.expectedResponsibilityRevision,
-            expectedReviewerRevision: request.expectedReviewerRevision,
-            expectedExecutionTargetRevision: request.expectedExecutionTargetRevision,
-            strictAuthority: true
-          }
-    );
     return this.observeOperation(scope, outcome.operation.id);
   }
 

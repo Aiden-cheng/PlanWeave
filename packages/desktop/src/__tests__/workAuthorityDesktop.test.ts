@@ -14,10 +14,7 @@ import {
   useAssigneePickerController
 } from "../renderer/hooks/useAssigneePickerController";
 import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../shared/collaboration";
-import {
-  collaborationExecutionTargetUpdateInputSchema,
-  workItemKey
-} from "../shared/collaborationReadModels";
+import { workItemKey } from "../shared/collaborationReadModels";
 import { createTranslator } from "../renderer/i18n";
 
 const taskItem: WorkItemRef = { kind: "task", canvasId: "canvas-1", taskId: "T-1" };
@@ -36,7 +33,7 @@ function connectedStatus(): CollaborationStatus {
         deviceCredentialPersistence: "persisted",
         deviceCredentialId: "device-1",
         humanPrincipalId: "human-1",
-        updatedAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:00:00.000Z"
       }
     ],
     activeProfileId: "profile-1",
@@ -50,16 +47,16 @@ function connectedStatus(): CollaborationStatus {
       lastErrorMessage: null
     },
     updatedAt: "2030-01-01T00:00:00.000Z",
-  workspaceConnection: {
-    schemaVersion: "workspace-setup/v1",
-    status: "local_only",
-    profile: null,
-    workspaceId: null,
-    workspaceDisplayName: null,
-    connectedAt: null,
-    error: null
-  },
-  workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
+    workspaceConnection: {
+      schemaVersion: "workspace-setup/v1",
+      status: "local_only",
+      profile: null,
+      workspaceId: null,
+      workspaceDisplayName: null,
+      connectedAt: null,
+      error: null
+    },
+    workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
   };
 }
 
@@ -144,12 +141,13 @@ function authorityFor(
   return { ...base, ...overrides };
 }
 
-function createApi(handlers: {
-  updateResponsibility?: ReturnType<typeof vi.fn>;
-  updateReviewer?: ReturnType<typeof vi.fn>;
-  updateExecutionTarget?: ReturnType<typeof vi.fn>;
-  getWorkAuthority?: ReturnType<typeof vi.fn>;
-} = {}) {
+function createApi(
+  handlers: {
+    updateResponsibility?: ReturnType<typeof vi.fn>;
+    updateReviewer?: ReturnType<typeof vi.fn>;
+    getWorkAuthority?: ReturnType<typeof vi.fn>;
+  } = {}
+) {
   const status = connectedStatus();
   const authorityState = new Map<string, WorkAuthorityProjection>();
   authorityState.set(workItemKey(taskItem), authorityFor(taskItem));
@@ -162,70 +160,52 @@ function createApi(handlers: {
     });
   const updateResponsibility =
     handlers.updateResponsibility ??
-    vi.fn(async (input: { workItem: WorkItemRef; principal: unknown; expectedRevision: number }) => {
-      const current = authorityState.get(workItemKey(input.workItem))!;
-      if (input.expectedRevision !== current.responsibility.revision) {
-        const error = Object.assign(new Error("stale"), {
-          kind: "conflict",
-          code: "work_revision_conflict",
-          retryable: false
-        });
-        throw error;
-      }
-      const next = authorityFor(input.workItem, {
-        responsibility: {
-          ...current.responsibility,
-          principal: input.principal as WorkAuthorityProjection["responsibility"]["principal"],
-          revision: current.responsibility.revision + 1
-        },
-        revisions: {
-          ...current.revisions,
-          responsibilityRevision: current.responsibility.revision + 1
+    vi.fn(
+      async (input: { workItem: WorkItemRef; principal: unknown; expectedRevision: number }) => {
+        const current = authorityState.get(workItemKey(input.workItem))!;
+        if (input.expectedRevision !== current.responsibility.revision) {
+          const error = Object.assign(new Error("stale"), {
+            kind: "conflict",
+            code: "work_revision_conflict",
+            retryable: false
+          });
+          throw error;
         }
-      });
-      authorityState.set(workItemKey(input.workItem), next);
-      return next.responsibility;
-    });
+        const next = authorityFor(input.workItem, {
+          responsibility: {
+            ...current.responsibility,
+            principal: input.principal as WorkAuthorityProjection["responsibility"]["principal"],
+            revision: current.responsibility.revision + 1
+          },
+          revisions: {
+            ...current.revisions,
+            responsibilityRevision: current.responsibility.revision + 1
+          }
+        });
+        authorityState.set(workItemKey(input.workItem), next);
+        return next.responsibility;
+      }
+    );
   const updateReviewer =
     handlers.updateReviewer ??
-    vi.fn(async (input: { workItem: WorkItemRef; principal: unknown; expectedRevision: number }) => {
-      const current = authorityState.get(workItemKey(input.workItem))!;
-      const next = authorityFor(input.workItem, {
-        reviewer: {
-          ...current.reviewer,
-          principal: input.principal as WorkAuthorityProjection["reviewer"]["principal"],
-          revision: current.reviewer.revision + 1
-        },
-        revisions: {
-          ...current.revisions,
-          reviewerRevision: current.reviewer.revision + 1
-        }
-      });
-      authorityState.set(workItemKey(input.workItem), next);
-      return next.reviewer;
-    });
-  const updateExecutionTarget =
-    handlers.updateExecutionTarget ??
-    vi.fn(async (input: { workItem: WorkItemRef; target: unknown; expectedRevision: number }) => {
-      const current = authorityState.get(workItemKey(input.workItem))!;
-      const next = authorityFor(input.workItem, {
-        executionTarget: {
-          schemaVersion: "execution-target/v1",
-          scope: current.scope as Extract<WorkAuthorityProjection["scope"], { kind: "block" }>,
-          target: input.target as NonNullable<WorkAuthorityProjection["executionTarget"]>["target"],
-          revision: (current.executionTarget?.revision ?? 0) + 1,
-          updatedAt: "2030-01-01T00:00:00.000Z",
-          availability: { status: "ready", reason: "ready" }
-        },
-        revisions: {
-          ...current.revisions,
-          executionTargetRevision: (current.executionTarget?.revision ?? 0) + 1
-        }
-      });
-      authorityState.set(workItemKey(input.workItem), next);
-      return next.executionTarget!;
-    });
-
+    vi.fn(
+      async (input: { workItem: WorkItemRef; principal: unknown; expectedRevision: number }) => {
+        const current = authorityState.get(workItemKey(input.workItem))!;
+        const next = authorityFor(input.workItem, {
+          reviewer: {
+            ...current.reviewer,
+            principal: input.principal as WorkAuthorityProjection["reviewer"]["principal"],
+            revision: current.reviewer.revision + 1
+          },
+          revisions: {
+            ...current.revisions,
+            reviewerRevision: current.reviewer.revision + 1
+          }
+        });
+        authorityState.set(workItemKey(input.workItem), next);
+        return next.reviewer;
+      }
+    );
   const api = {
     getCollaborationStatus: vi.fn().mockResolvedValue(status),
     listCollaborationMembers: vi.fn().mockResolvedValue({
@@ -237,7 +217,7 @@ function createApi(handlers: {
           displayName: "Ada",
           role: "owner",
           createdAt: "2030-01-01T00:00:00.000Z",
-          updatedAt: "2030-01-01T00:00:00.000Z",
+          updatedAt: "2030-01-01T00:00:00.000Z"
         },
         {
           membershipId: "m-2",
@@ -246,7 +226,7 @@ function createApi(handlers: {
           displayName: "Bob",
           role: "member",
           createdAt: "2030-01-01T00:00:00.000Z",
-          updatedAt: "2030-01-01T00:00:00.000Z",
+          updatedAt: "2030-01-01T00:00:00.000Z"
         }
       ],
       nextCursor: null
@@ -294,7 +274,6 @@ function createApi(handlers: {
     getCollaborationWorkAuthority: getWorkAuthority,
     updateCollaborationResponsibility: updateResponsibility,
     updateCollaborationReviewer: updateReviewer,
-    updateCollaborationExecutionTarget: updateExecutionTarget,
     listCollaborationComments: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
     listCollaborationActivity: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
     updateCollaborationAssignment: vi.fn(),
@@ -309,7 +288,6 @@ function createApi(handlers: {
     api,
     updateResponsibility,
     updateReviewer,
-    updateExecutionTarget,
     getWorkAuthority,
     authorityState
   };
@@ -322,7 +300,7 @@ afterEach(() => {
 
 describe("desktop work authority wiring (OSS-003#B-003)", () => {
   it("keeps responsibility CAS independent from reviewer and execution target", async () => {
-    const { api, updateResponsibility, updateReviewer, updateExecutionTarget } = createApi();
+    const { api, updateResponsibility, updateReviewer } = createApi();
     const shell = acquireCollaborationReadModelController(api);
     await shell.controller.setActiveProject({
       profileId: "profile-1",
@@ -356,51 +334,13 @@ describe("desktop work authority wiring (OSS-003#B-003)", () => {
       })
     );
     expect(updateReviewer).not.toHaveBeenCalled();
-    expect(updateExecutionTarget).not.toHaveBeenCalled();
     await waitFor(() => {
       expect(result.current.authority?.revisions.executionTargetRevision).toBe(3);
       expect(result.current.authority?.reviewer.revision).toBe(2);
     });
   });
 
-  it("rejects Task Host execution targets at IPC schema and controller boundaries", async () => {
-    expect(() =>
-      collaborationExecutionTargetUpdateInputSchema.parse({
-        workItem: taskItem,
-        target: { kind: "exact_host", hostId: "host-1" },
-        expectedRevision: 0
-      })
-    ).toThrow(/execution_target_requires_exact_block/);
-
-    const { api, updateExecutionTarget } = createApi();
-    const shell = acquireCollaborationReadModelController(api);
-    await shell.controller.setActiveProject({
-      profileId: "profile-1",
-      projectId: "project-1",
-      canvasId: "canvas-1"
-    });
-
-    const { result } = renderHook(() =>
-      useAssigneePickerController({
-        workItem: taskItem,
-        authorityRole: "execution_target",
-        api,
-        detailsOpen: true,
-        t: createTranslator("en")
-      })
-    );
-
-    await act(async () => {
-      const ok = await result.current.selectTarget({
-        kind: "exact_host",
-        hostId: "host-1"
-      });
-      expect(ok).toBe(false);
-    });
-    expect(updateExecutionTarget).not.toHaveBeenCalled();
-  });
-
-  it("does not couple reviewer identity to selected Host execution target", () => {
+  it("projects responsibility and reviewer without exposing Host execution as a picker axis", () => {
     const authority = authorityFor(blockItem);
     const responsibility = assignmentProjectionFromAuthority({
       workItem: blockItem,
@@ -414,20 +354,12 @@ describe("desktop work authority wiring (OSS-003#B-003)", () => {
       authority,
       role: "reviewer"
     });
-    const execution = assignmentProjectionFromAuthority({
-      workItem: blockItem,
-      projectId: "project-1",
-      authority,
-      role: "execution_target"
-    });
     expect(responsibility?.target).toEqual({ kind: "human", humanPrincipalId: "human-1" });
     expect(reviewer?.target).toEqual({ kind: "human", humanPrincipalId: "human-2" });
-    expect(execution?.target).toEqual({ kind: "exact_host", hostId: "host-1" });
-    expect(execution?.revision).toBe(3);
     expect(reviewer?.revision).toBe(2);
   });
 
-  it("surfaces revoked Hosts as non-selectable while keeping human roles independent", async () => {
+  it("keeps Host options out of ordinary Block assignment pickers", async () => {
     const { api } = createApi();
     const shell = acquireCollaborationReadModelController(api);
     await shell.controller.setActiveProject({
@@ -439,7 +371,6 @@ describe("desktop work authority wiring (OSS-003#B-003)", () => {
     const { result } = renderHook(() =>
       useAssigneePickerController({
         workItem: blockItem,
-        authorityRole: "execution_target",
         api,
         detailsOpen: true,
         t: createTranslator("en")
@@ -449,19 +380,11 @@ describe("desktop work authority wiring (OSS-003#B-003)", () => {
     await waitFor(() => {
       expect(result.current.viewModel).toBeTruthy();
       expect(result.current.viewModel?.sections.some((section) => section.id === "hosts")).toBe(
-        true
+        false
       );
     });
-
-    const revoked = result.current.viewModel?.filteredOptions.find(
-      (option) => option.kind === "exact_host" && option.target.kind === "exact_host"
-        ? option.target.hostId === "host-revoked"
-        : false
+    expect(result.current.viewModel?.sections.some((section) => section.id === "people")).toBe(
+      true
     );
-    expect(revoked?.selectable).toBe(false);
-    expect(revoked?.unavailableReason).toBe("host_revoked");
-    expect(
-      result.current.viewModel?.sections.some((section) => section.id === "people")
-    ).toBe(false);
   });
 });

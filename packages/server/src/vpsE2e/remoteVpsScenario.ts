@@ -3,6 +3,7 @@ import { access, readFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import type { RemoteDispatchIntentV3 } from "@planweave-ai/collaboration-protocol/remote-run";
 import type { RemoteVpsE2eConfig } from "./config.js";
 import { emptyChecks, emptyIdentities, type VpsE2eEvidence } from "./evidence.js";
 import type { VpsE2eGate } from "./gate.js";
@@ -41,6 +42,29 @@ export type RemoteHostRevocationResult = {
   localRevoked: boolean;
   diagnostics: string[];
 };
+
+export function buildRemoteVpsDispatchIntent(input: {
+  projectId: string;
+  canvasId: string;
+  blockRef: string;
+  agentEndpointId: string;
+  idempotencyKey: string;
+}): RemoteDispatchIntentV3 {
+  return {
+    schemaVersion: "remote-run/v3",
+    projectId: input.projectId,
+    canvasId: input.canvasId,
+    blockRef: input.blockRef,
+    agentEndpointId: input.agentEndpointId,
+    idempotencyKey: input.idempotencyKey,
+    expectedResponsibilityRevision: 0,
+    expectedReviewerRevision: 0
+  };
+}
+
+export function remoteVpsAgentEndpointListPath(projectId: string): string {
+  return `/api/v1/agent-endpoints?projectId=${encodeURIComponent(projectId)}`;
+}
 
 export async function revokeRemoteHostCredentials(input: {
   revokeServer(): Promise<void>;
@@ -523,19 +547,35 @@ export async function runRemoteVpsScenario(options: {
     checks.heartbeatObserved = Boolean(hostOnline.lastSeenAt);
     const firstLastSeenAt = hostOnline.lastSeenAt;
 
+    const endpointResponse = await trusted.request(
+      `${origin}${remoteVpsAgentEndpointListPath(options.config.projectId)}`,
+      { headers: { Authorization: `Bearer ${options.operatorToken}` } }
+    );
+    const endpointPage = (await endpointResponse.json()) as {
+      items?: Array<{ endpointId?: string; status?: string }>;
+    };
+    const agentEndpointId = endpointPage.items?.find(
+      (endpoint) => endpoint.status === "available"
+    )?.endpointId;
+    if (endpointResponse.status !== 200 || !agentEndpointId) {
+      return base({ result: "failed", diagnostic: "remote_vps_agent_endpoint_missing" });
+    }
+
     const dispatch = await trusted.request(`${origin}/api/v1/remote-operations`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${options.operatorToken}`,
         "content-type": "application/json"
       },
-      body: JSON.stringify({
-        projectId: options.config.projectId,
-        canvasId: options.config.canvasId,
-        blockRef: options.config.blockRef,
-        requestedHostId: packagedHostId,
-        idempotencyKey: `vps-e2e-remote-${Date.now()}`
-      })
+      body: JSON.stringify(
+        buildRemoteVpsDispatchIntent({
+          projectId: options.config.projectId,
+          canvasId: options.config.canvasId,
+          blockRef: options.config.blockRef,
+          agentEndpointId,
+          idempotencyKey: `vps-e2e-remote-${Date.now()}`
+        })
+      )
     });
 
     if (dispatch.status !== 202) {
@@ -562,13 +602,14 @@ export async function runRemoteVpsScenario(options: {
       dispatchId: string;
       executionAttemptId: string;
       attempt?: { leaseId?: string; hostId?: string };
+      agentEndpoint?: { endpointId?: string };
       state?: string;
       runtime?: { status?: string };
     };
-    if (view.attempt?.hostId !== packagedHostId) {
+    if (view.agentEndpoint?.endpointId !== agentEndpointId || view.attempt?.hostId !== undefined) {
       return base({
         result: "failed",
-        diagnostic: "remote_vps_dispatch_host_identity_mismatch"
+        diagnostic: "remote_vps_dispatch_endpoint_identity_mismatch"
       });
     }
     identities.operationId = view.operationId;
@@ -582,6 +623,7 @@ export async function runRemoteVpsScenario(options: {
     let terminal: {
       state: string;
       attempt?: { hostId?: string };
+      agentEndpoint?: { endpointId?: string };
       envelopeDigest?: string;
       reportArtifactRef?: string;
       runtime?: { status?: string };
@@ -594,8 +636,11 @@ export async function runRemoteVpsScenario(options: {
         );
         if (!observe.ok) return false;
         terminal = (await observe.json()) as typeof terminal;
-        if (terminal.attempt?.hostId !== packagedHostId) {
-          throw new Error("remote_vps_terminal_host_identity_mismatch");
+        if (
+          terminal.agentEndpoint?.endpointId !== agentEndpointId ||
+          terminal.attempt?.hostId !== undefined
+        ) {
+          throw new Error("remote_vps_terminal_endpoint_identity_mismatch");
         }
         return ["completed", "failed", "cancelled"].includes(terminal.state);
       },

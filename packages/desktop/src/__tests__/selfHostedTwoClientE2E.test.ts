@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   adminToken,
-  assertFixturesDoNotShareAcceptanceState,
-  clearIsolatedCanvasContentHead,
   configureWorkspaceAccess,
   deviceToken,
   discoverContentHead,
@@ -87,11 +85,19 @@ describe("self-hosted two-Desktop collaboration flow (OSS-006 B-002)", () => {
       ["/api/v1/registry/directories", { error: "registry_resource_not_found" }],
       [
         "/api/v1/files/watch",
-        { error: "not_found", feature: "/api/v1/files/watch", detail: "canvas_feature_not_supported" }
+        {
+          error: "not_found",
+          feature: "/api/v1/files/watch",
+          detail: "canvas_feature_not_supported"
+        }
       ],
       [
         "/api/v1/files/upload",
-        { error: "not_found", feature: "/api/v1/files/upload", detail: "canvas_feature_not_supported" }
+        {
+          error: "not_found",
+          feature: "/api/v1/files/upload",
+          detail: "canvas_feature_not_supported"
+        }
       ],
       [
         "/api/v1/files/download",
@@ -106,28 +112,25 @@ describe("self-hosted two-Desktop collaboration flow (OSS-006 B-002)", () => {
         {
           error: "not_found",
           feature: "/api/v1/sync/bidirectional",
-          detail: "canvas_feature_not_supported",
-        },
+          detail: "canvas_feature_not_supported"
+        }
       ],
       [
         "/api/v1/billing/subscription",
         {
           error: "not_found",
           feature: "/api/v1/billing/subscription",
-          detail: "canvas_feature_not_supported",
-        },
+          detail: "canvas_feature_not_supported"
+        }
       ],
-      [
-        "/api/v1/licenses/entitlements",
-        { error: "route_not_found" },
-      ],
+      ["/api/v1/licenses/entitlements", { error: "route_not_found" }],
       [
         "/api/v1/ssh/vps",
         {
           error: "not_found",
           feature: "/api/v1/ssh/vps",
-          detail: "canvas_feature_not_supported",
-        },
+          detail: "canvas_feature_not_supported"
+        }
       ],
       ["/api/v1/crdt/v1", { error: "route_not_found" }]
     ] as const) {
@@ -273,44 +276,50 @@ describe("self-hosted two-Desktop collaboration flow (OSS-006 B-002)", () => {
           }
         ]
       ] as const) {
-        const response = await postJson(fixture.origin, `${assignmentPath}${path}`, ownerToken, body);
+        const response = await postJson(
+          fixture.origin,
+          `${assignmentPath}${path}`,
+          ownerToken,
+          body
+        );
         expect(response.status).toBe(200);
       }
 
-      const target = await postJson(fixture.origin, `${assignmentPath}/execution-target`, ownerToken, {
-        schemaVersion: "execution-target/v1",
-        scope: blockScope,
-        target: { kind: "exact_host", hostId: configured.hostId },
-        expectedRevision: 0
-      });
-      const targetBody = await target.json();
-      expect(target.status, JSON.stringify(targetBody)).toBe(200);
-      expect(targetBody).toMatchObject({
-        target: { kind: "exact_host", hostId: configured.hostId },
-        revision: 1
-      });
+      const endpointResponse = await fetch(
+        `${fixture.origin}/api/v1/projects/${encodeURIComponent(fixture.projectId)}/agent-endpoints`,
+        { headers: { authorization: `Bearer ${ownerToken}` } }
+      );
+      expect(endpointResponse.status).toBe(200);
+      const endpointPage = (await endpointResponse.json()) as {
+        items: Array<{ endpointId: string; status: string }>;
+      };
+      const agentEndpointId = endpointPage.items.find(
+        (endpoint) => endpoint.status === "available"
+      )?.endpointId;
+      expect(agentEndpointId).toBeTruthy();
 
       const dispatched = await postJson(
         fixture.origin,
         `/api/v1/projects/${encodeURIComponent(fixture.projectId)}/remote-operations`,
         ownerToken,
         {
-          schemaVersion: "remote-run/v2",
+          schemaVersion: "remote-run/v3",
           projectId: fixture.projectId,
           canvasId: "default",
           blockRef: "T-001#B-001",
+          agentEndpointId,
           idempotencyKey: "two-client-exact-block-dispatch",
           expectedResponsibilityRevision: 1,
-          expectedReviewerRevision: 1,
-          expectedExecutionTargetRevision: 1
+          expectedReviewerRevision: 1
         }
       );
       const dispatchedBody = await dispatched.json();
       expect(dispatched.status, JSON.stringify(dispatchedBody)).toBe(202);
       expect(dispatchedBody).toMatchObject({
         blockRef: "T-001#B-001",
-        attempt: { hostId: configured.hostId }
+        agentEndpoint: { endpointId: agentEndpointId }
       });
+      expect(dispatchedBody.attempt?.hostId).toBeUndefined();
       if (typeof dispatchedBody.operationId !== "string") {
         throw new Error("remote_operation_id_missing");
       }
@@ -322,28 +331,28 @@ describe("self-hosted two-Desktop collaboration flow (OSS-006 B-002)", () => {
       await expect(observed.json()).resolves.toMatchObject({
         operationId: dispatchedBody.operationId,
         blockRef: "T-001#B-001",
-        attempt: { hostId: configured.hostId }
+        agentEndpoint: { endpointId: agentEndpointId }
       });
       const retry = await postJson(
         fixture.origin,
         `/api/v1/projects/${encodeURIComponent(fixture.projectId)}/remote-operations`,
         ownerToken,
         {
-          schemaVersion: "remote-run/v2",
+          schemaVersion: "remote-run/v3",
           projectId: fixture.projectId,
           canvasId: "default",
           blockRef: "T-001#B-001",
+          agentEndpointId,
           idempotencyKey: "two-client-exact-block-dispatch",
           expectedResponsibilityRevision: 1,
-          expectedReviewerRevision: 1,
-          expectedExecutionTargetRevision: 1
+          expectedReviewerRevision: 1
         }
       );
       expect(retry.status).toBe(202);
       await expect(retry.json()).resolves.toMatchObject({
         operationId: dispatchedBody.operationId,
         dispatchId: dispatchedBody.dispatchId,
-        attempt: { hostId: configured.hostId }
+        agentEndpoint: { endpointId: agentEndpointId }
       });
 
       for (const [request, status] of [
@@ -356,14 +365,14 @@ describe("self-hosted two-Desktop collaboration flow (OSS-006 B-002)", () => {
           `/api/v1/projects/${encodeURIComponent(fixture.projectId)}/remote-operations`,
           ownerToken,
           {
-            schemaVersion: "remote-run/v2",
+            schemaVersion: "remote-run/v3",
             projectId: fixture.projectId,
             canvasId: "default",
             blockRef: "T-001#B-001",
+            agentEndpointId,
             idempotencyKey: `two-client-rejected-${status}`,
             expectedResponsibilityRevision: 1,
             expectedReviewerRevision: 1,
-            expectedExecutionTargetRevision: 1,
             ...request
           }
         );
@@ -376,12 +385,17 @@ describe("self-hosted two-Desktop collaboration flow (OSS-006 B-002)", () => {
         { workspaceId: fixture.workspaceId, projectId: fixture.projectId, canvasId: "default" },
         { workspaceId: fixture.workspaceId, projectId: fixture.projectId }
       ]) {
-        const response = await postJson(fixture.origin, `${assignmentPath}/execution-target`, ownerToken, {
-          schemaVersion: "execution-target/v1",
-          scope: invalidScope,
-          target: { kind: "exact_host", hostId: configured.hostId },
-          expectedRevision: 0
-        });
+        const response = await postJson(
+          fixture.origin,
+          `${assignmentPath}/execution-target`,
+          ownerToken,
+          {
+            schemaVersion: "execution-target/v1",
+            scope: invalidScope,
+            target: { kind: "exact_host", hostId: configured.hostId },
+            expectedRevision: 0
+          }
+        );
         expect(response.status).toBe(400);
       }
 
@@ -409,7 +423,11 @@ describe("self-hosted two-Desktop collaboration flow (OSS-006 B-002)", () => {
         {
           operationId: "two-client-command-1",
           expectedRevision: 0,
-          intent: { kind: "update_task_prompt", taskId: "T-001", promptMarkdown: "# owner mutation" }
+          intent: {
+            kind: "update_task_prompt",
+            taskId: "T-001",
+            promptMarkdown: "# owner mutation"
+          }
         }
       );
       expect(firstCommand.status).toBe(200);
@@ -424,7 +442,11 @@ describe("self-hosted two-Desktop collaboration flow (OSS-006 B-002)", () => {
         {
           operationId: "two-client-command-2",
           expectedRevision: 1,
-          intent: { kind: "update_task_prompt", taskId: "T-001", promptMarkdown: "# member mutation" }
+          intent: {
+            kind: "update_task_prompt",
+            taskId: "T-001",
+            promptMarkdown: "# member mutation"
+          }
         }
       );
       expect(secondCommand.status).toBe(200);

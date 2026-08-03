@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { rm } from "node:fs/promises";
+import { remoteDispatchIntentV3Schema } from "@planweave-ai/collaboration-protocol/remote-run";
 import {
   parseVpsE2eGate,
   precondition,
@@ -13,8 +14,10 @@ import {
 } from "../vpsE2e/index.js";
 import {
   assertCoordinatorOrigin,
+  buildRemoteVpsDispatchIntent,
   findOnlineHostById,
   resolvePackagedHostId,
+  remoteVpsAgentEndpointListPath,
   revokeRemoteHostCredentials,
   runRemoteVpsScenario
 } from "../vpsE2e/remoteVpsScenario.js";
@@ -28,6 +31,26 @@ afterEach(async () => {
 });
 
 describe("VPS e2e gate and redaction (unit)", () => {
+  it("builds endpoint-v3 dispatch intent without legacy Host routing fields", () => {
+    const intent = buildRemoteVpsDispatchIntent({
+      projectId: "project-example",
+      canvasId: "default",
+      blockRef: "T-001#B-001",
+      agentEndpointId: "endpoint-1",
+      idempotencyKey: "vps-e2e-1"
+    });
+
+    expect(remoteDispatchIntentV3Schema.parse(intent)).toEqual(intent);
+    expect(intent).not.toHaveProperty("requestedHostId");
+    expect(intent).not.toHaveProperty("expectedExecutionTargetRevision");
+  });
+
+  it("uses the operator Endpoint list route without Human bootstrap", () => {
+    const path = remoteVpsAgentEndpointListPath("project/a");
+    expect(path).toBe("/api/v1/agent-endpoints?projectId=project%2Fa");
+    expect(path).not.toContain("/human/bootstrap");
+  });
+
   it("parses soft, require, disabled gates and profile defaults", () => {
     expect(parseVpsE2eGate({})).toEqual({
       enabled: false,

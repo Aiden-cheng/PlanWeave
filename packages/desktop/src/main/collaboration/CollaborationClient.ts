@@ -50,9 +50,7 @@ import {
 } from "@planweave-ai/collaboration-protocol/activity/attachments";
 import {
   executionTargetReadModelSchema,
-  executionTargetUpdateWireCommandSchema,
-  type ExecutionTargetReadModel,
-  type ExecutionTargetUpdateWireCommand
+  type ExecutionTargetReadModel
 } from "@planweave-ai/collaboration-protocol/work/execution-target";
 import {
   humanBootstrapRequestSchema,
@@ -85,9 +83,7 @@ import {
   remoteEventQuerySchema,
   remoteInteractionPageQuerySchema,
   type RemoteActionView,
-  type RemoteDispatchIntent,
   type RemoteDispatchIntentV3,
-  type RemoteDispatchWireCommand,
   type RemoteEventReplay,
   type RemoteHumanExecutionActionCommand,
   type RemoteInteractionPage,
@@ -650,19 +646,6 @@ export class CollaborationClient {
     );
   }
 
-  async updateExecutionTarget(
-    command: ExecutionTargetUpdateWireCommand,
-    signal?: AbortSignal
-  ): Promise<ExecutionTargetReadModel> {
-    const body = executionTargetUpdateWireCommandSchema.parse(command);
-    return this.json(
-      "POST",
-      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/assignments/execution-target`,
-      executionTargetReadModelSchema,
-      { body, signal }
-    );
-  }
-
   // ---------------------------------------------------------------------------
   // Comments / activity
   // ---------------------------------------------------------------------------
@@ -754,7 +737,7 @@ export class CollaborationClient {
   }
 
   async dispatchRemoteOperation(
-    command: RemoteDispatchIntent | RemoteDispatchIntentV3 | RemoteDispatchWireCommand,
+    command: RemoteDispatchIntentV3,
     signal?: AbortSignal
   ): Promise<RemoteOperationObservation> {
     return this.remoteOperationsClient.dispatchRemoteOperation(command, signal);

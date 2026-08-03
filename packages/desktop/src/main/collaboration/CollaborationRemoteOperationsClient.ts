@@ -1,8 +1,6 @@
 import {
   remoteActionViewSchema,
-  remoteDispatchIntentSchema,
   remoteDispatchIntentV3Schema,
-  remoteDispatchWireCommandSchema,
   remoteEventQuerySchema,
   remoteEventReplaySchema,
   remoteHumanExecutionActionCommandSchema,
@@ -13,9 +11,7 @@ import {
   remoteEndpointOperationObservationSchema,
   remoteOperationObservationSchema,
   type RemoteActionView,
-  type RemoteDispatchIntent,
   type RemoteDispatchIntentV3,
-  type RemoteDispatchWireCommand,
   type RemoteEventReplay,
   type RemoteHumanExecutionActionCommand,
   type RemoteInteractionPage,
@@ -42,7 +38,7 @@ export interface CollaborationRemoteOperationsTransportPort {
 export interface CollaborationRemoteOperationsPort {
   listAgentEndpoints(signal?: AbortSignal): Promise<RemoteAgentEndpointList>;
   dispatchRemoteOperation(
-    command: RemoteDispatchIntent | RemoteDispatchIntentV3 | RemoteDispatchWireCommand,
+    command: RemoteDispatchIntentV3,
     signal?: AbortSignal
   ): Promise<RemoteOperationObservation>;
   observeRemoteOperation(
@@ -87,23 +83,14 @@ export class CollaborationRemoteOperationsClient implements CollaborationRemoteO
   }
 
   dispatchRemoteOperation(
-    command: RemoteDispatchIntent | RemoteDispatchIntentV3 | RemoteDispatchWireCommand,
+    command: RemoteDispatchIntentV3,
     signal?: AbortSignal
   ): Promise<RemoteOperationObservation> {
-    const body =
-      "schemaVersion" in command
-        ? command.schemaVersion === "remote-run/v3"
-          ? remoteDispatchIntentV3Schema.parse(command)
-          : remoteDispatchIntentSchema.parse(command)
-        : remoteDispatchWireCommandSchema.parse(command);
-    const responseSchema =
-      "schemaVersion" in body && body.schemaVersion === "remote-run/v3"
-        ? remoteEndpointOperationObservationSchema
-        : remoteOperationObservationSchema;
+    const body = remoteDispatchIntentV3Schema.parse(command);
     return this.transport.json(
       "POST",
       `/api/v1/projects/${encodeURIComponent(this.projectId)}/remote-operations`,
-      responseSchema,
+      remoteEndpointOperationObservationSchema,
       { body, signal }
     );
   }

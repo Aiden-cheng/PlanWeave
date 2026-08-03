@@ -1,8 +1,6 @@
 import { opaqueIdentifierSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
 import {
-  remoteDispatchIntentSchema,
   remoteDispatchIntentV3Schema,
-  remoteDispatchWireCommandSchema,
   remoteEventQuerySchema,
   remoteInteractionPageQuerySchema,
   type RemoteActionView,
@@ -37,18 +35,7 @@ export class CollaborationRemoteOperationsFacade {
   }
 
   async dispatch(input: unknown): Promise<RemoteOperationObservation> {
-    const command =
-      input &&
-      typeof input === "object" &&
-      "schemaVersion" in input &&
-      (input as { schemaVersion?: string }).schemaVersion === "remote-run/v3"
-        ? remoteDispatchIntentV3Schema.parse(input)
-        : input &&
-            typeof input === "object" &&
-            "schemaVersion" in input &&
-            (input as { schemaVersion?: string }).schemaVersion === "remote-run/v2"
-          ? remoteDispatchIntentSchema.parse(input)
-          : remoteDispatchWireCommandSchema.parse(input);
+    const command = remoteDispatchIntentV3Schema.parse(input);
     return this.withActiveClient((client) => client.dispatchRemoteOperation(command));
   }
 

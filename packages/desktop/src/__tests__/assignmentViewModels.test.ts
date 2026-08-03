@@ -17,7 +17,6 @@ import {
   type AssigneeDisplayLabels
 } from "../renderer/collaboration/assignmentViewModels";
 import { createTranslator } from "../renderer/i18n";
-import type { CollaborationHostProjection } from "../shared/collaborationReadModels";
 import type { CollaborationStatus } from "../shared/collaboration";
 
 const taskItem: WorkItemRef = { kind: "task", canvasId: "canvas-1", taskId: "T-1" };
@@ -84,23 +83,10 @@ describe("assignmentViewModels", () => {
       member({ humanPrincipalId: "human-1", displayName: "Ada", role: "owner" }),
       member({ humanPrincipalId: "human-2", displayName: "Bob", role: "member" })
     ];
-    const hosts: CollaborationHostProjection[] = [
-      {
-        hostId: "host-1",
-        projectId: "project-1",
-        displayName: "Builder",
-        online: true,
-        revoked: false,
-        authorizedForProject: true,
-        exists: true,
-        capabilities: ["shell"]
-      }
-    ];
     const sections = buildAssigneeSections({
       workItem: taskItem,
       assignment: null,
       members,
-      hosts,
       eligible: null
     });
     expect(sections.map((section) => section.id)).toEqual(["unassigned", "people"]);
@@ -116,7 +102,7 @@ describe("assignmentViewModels", () => {
     ]);
   });
 
-  it("offers only exact eligible Hosts for the Task execution composite", () => {
+  it("does not expose Host targets even when eligibility includes Hosts", () => {
     const eligible: EligibleAssigneesResponse = {
       workItem: taskItem,
       humans: [],
@@ -141,18 +127,16 @@ describe("assignmentViewModels", () => {
       workItem: taskItem,
       assignment: null,
       members: [],
-      hosts: [],
-      eligible,
-      authorityRole: "execution_target"
+      eligible
     });
 
-    expect(sections.map((section) => section.id)).toEqual(["hosts"]);
-    expect(sections[0]?.options.map((option) => option.target)).toEqual([
-      { kind: "exact_host", hostId: "host-1" }
-    ]);
+    expect(sections.map((section) => section.id)).toEqual(["unassigned", "people"]);
+    expect(
+      sections.flatMap((section) => section.options).some((option) => option.kind === "exact_host")
+    ).toBe(false);
   });
 
-  it("builds Block sections with people, compatible hosts, and automatic selection", () => {
+  it("builds Block sections with people only", () => {
     const members = [member({ humanPrincipalId: "human-1", displayName: "Ada", role: "owner" })];
     const eligible: EligibleAssigneesResponse = {
       workItem: blockItem,
@@ -207,60 +191,10 @@ describe("assignmentViewModels", () => {
       workItem: blockItem,
       assignment: null,
       members,
-      hosts: [],
       eligible
     });
-    expect(sections.map((s) => s.id)).toEqual(["unassigned", "people", "hosts", "automatic"]);
-    const hosts = sections.find((s) => s.id === "hosts")?.options ?? [];
-    const offline = hosts.find((h) => h.id === "exact_host:host-offline");
-    expect(offline?.selectable).toBe(true);
-    expect(offline?.warningReason).toBe("host_offline");
-    const full = hosts.find((h) => h.id === "exact_host:host-cap");
-    expect(full?.selectable).toBe(true);
-    expect(full?.warningReason).toBe("host_at_capacity");
-    expect(sections.find((s) => s.id === "automatic")?.options[0]?.target).toEqual({
-      kind: "automatic_host"
-    });
-  });
-
-  it("marks incompatible or revoked hosts as not selectable with explicit reasons", () => {
-    const sections = buildAssigneeSections({
-      workItem: blockItem,
-      assignment: null,
-      members: [],
-      hosts: [
-        {
-          hostId: "host-revoked",
-          projectId: "project-1",
-          displayName: "Revoked",
-          online: true,
-          revoked: true,
-          authorizedForProject: true,
-          exists: true,
-          capabilities: ["shell"]
-        },
-        {
-          hostId: "host-mismatch",
-          projectId: "project-1",
-          displayName: "Mismatch",
-          online: true,
-          revoked: false,
-          authorizedForProject: true,
-          exists: true,
-          capabilities: ["shell"]
-        }
-      ],
-      eligible: null,
-      requiredCapabilities: ["gpu"]
-    });
-    const hosts = sections.find((s) => s.id === "hosts")?.options ?? [];
-    expect(hosts.find((h) => h.id === "exact_host:host-revoked")?.unavailableReason).toBe(
-      "host_revoked"
-    );
-    expect(hosts.find((h) => h.id === "exact_host:host-mismatch")?.unavailableReason).toBe(
-      "host_capability_mismatch"
-    );
-    expect(hosts.every((h) => !h.selectable)).toBe(true);
+    expect(sections.map((section) => section.id)).toEqual(["unassigned", "people"]);
+    expect(sections.find((section) => section.id === "people")?.options).toHaveLength(1);
   });
 
   it("surfaces inactive current human assignment without inventing a new target", () => {
@@ -285,7 +219,6 @@ describe("assignmentViewModels", () => {
       workItem: taskItem,
       assignment,
       members: [],
-      hosts: [],
       eligible: null
     });
     const option = sections.flatMap((s) => s.options).find((o) => o.id === "human:gone");
@@ -302,7 +235,6 @@ describe("assignmentViewModels", () => {
         member({ humanPrincipalId: "h1", displayName: "Ada Lovelace", role: "owner" }),
         member({ humanPrincipalId: "h2", displayName: "Grace Hopper", role: "member" })
       ],
-      hosts: [],
       eligible: null
     });
     const filtered = filterAssigneeOptions(sections, "hop");
@@ -350,7 +282,6 @@ describe("assignmentViewModels", () => {
       workItem: taskItem,
       assignment,
       members: [member({ humanPrincipalId: "human-1", displayName: "Ada", role: "owner" })],
-      hosts: [],
       eligible: null,
       status: statusFor("outsider"),
       syncPhase: "ready",
@@ -406,7 +337,6 @@ describe("assignmentViewModels", () => {
       workItem: blockItem,
       assignment: null,
       members: [],
-      hosts: [],
       eligible: {
         workItem: blockItem,
         humans: [
@@ -437,18 +367,11 @@ describe("assignmentViewModels", () => {
     });
 
     expect(sections.find((s) => s.id === "unassigned")?.options[0]?.label).toBe("未分配");
-    expect(sections.find((s) => s.id === "automatic")?.options[0]?.label).toBe("自动选择 Host");
-    expect(sections.find((s) => s.id === "automatic")?.options[0]?.secondaryLabel).toBe(
-      "派发时由服务器选择兼容 Host"
-    );
+    expect(sections.find((s) => s.id === "automatic")).toBeUndefined();
     expect(
       sections.find((s) => s.id === "people")?.options.find((o) => o.id === "human:gone")
         ?.secondaryLabel
     ).toBe("成员资格已失效");
-    expect(
-      sections
-        .find((s) => s.id === "hosts")
-        ?.options.find((o) => o.id === "exact_host:host-offline")?.secondaryLabel
-    ).toContain("离线");
+    expect(sections.find((s) => s.id === "hosts")).toBeUndefined();
   });
 });

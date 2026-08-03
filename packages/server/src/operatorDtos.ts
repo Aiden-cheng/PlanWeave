@@ -18,9 +18,10 @@ import {
   operatorPageQuerySchema
 } from "@planweave-ai/agent-host-protocol";
 import {
-  remoteDispatchIntentSchema,
-  type RemoteDispatchIntent
+  remoteDispatchIntentV3Schema,
+  type RemoteDispatchIntentV3
 } from "@planweave-ai/collaboration-protocol/remote-run";
+import { availableRemoteAgentEndpointSchema } from "@planweave-ai/collaboration-protocol/agent-endpoint";
 import { remoteBlockBindingViewSchema } from "@planweave-ai/runtime";
 import { z } from "zod";
 import { dispatchStatusSchema } from "./dispatches.js";
@@ -41,7 +42,7 @@ export {
 
 const timestampSchema = z.iso.datetime();
 
-export const operatorDispatchRequestSchema = remoteDispatchIntentSchema;
+export const operatorDispatchRequestSchema = remoteDispatchIntentV3Schema;
 
 export const operatorActionRequestSchema = remoteExecutionActionRequestSchema;
 export const operatorInteractionResponseSchema = interactionSettlementSchema;
@@ -76,11 +77,24 @@ export const operatorOperationViewSchema = z
     createdAt: timestampSchema,
     updatedAt: timestampSchema,
     terminalAt: timestampSchema.optional(),
+    agentEndpoint: availableRemoteAgentEndpointSchema
+      .extend({ resolvedAt: timestampSchema })
+      .strict()
+      .optional(),
     attempt: operatorAttemptViewSchema,
     dispatchStatus: dispatchStatusSchema.optional(),
     runtime: remoteBlockBindingViewSchema
   })
-  .strict();
+  .strict()
+  .superRefine((observation, context) => {
+    if (observation.agentEndpoint && observation.attempt.hostId !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["attempt", "hostId"],
+        message: "endpoint_observation_must_redact_host_id"
+      });
+    }
+  });
 
 export const operatorActionViewSchema = z
   .object({
@@ -147,7 +161,7 @@ export const operatorInteractionPageSchema = z
   .strict();
 
 export type OperatorEnrollmentGrantRequest = z.infer<typeof operatorEnrollmentGrantRequestSchema>;
-export type OperatorDispatchRequest = RemoteDispatchIntent;
+export type OperatorDispatchRequest = RemoteDispatchIntentV3;
 export type OperatorActionRequest = z.infer<typeof operatorActionRequestSchema>;
 export type OperatorInteractionResponse = z.infer<typeof operatorInteractionResponseSchema>;
 export type OperatorOperationView = z.infer<typeof operatorOperationViewSchema>;

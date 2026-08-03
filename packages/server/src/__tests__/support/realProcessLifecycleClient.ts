@@ -11,9 +11,6 @@ import {
   REAL_PROCESS_ACP_HARNESS_DEFAULT_TIMEOUT_MS,
   type RealProcessAcpHarness
 } from "./realProcessAcpHarness.js";
-import { WorkspaceIdentityRepository } from "../../identity/workspaceRepository.js";
-import { AuthorityRepository } from "../../work/authorityRepository.js";
-import { openServerDatabase } from "../../sqlite.js";
 
 const require = createRequire(import.meta.url);
 
@@ -153,6 +150,8 @@ async function waitFor(
 }
 
 export class RealProcessLifecycleClient {
+  private humanDeviceToken: string | undefined;
+
   constructor(
     readonly harness: RealProcessAcpHarness,
     readonly timeoutMs = REAL_PROCESS_ACP_HARNESS_DEFAULT_TIMEOUT_MS * 3
@@ -172,19 +171,19 @@ export class RealProcessLifecycleClient {
     idempotencyKey: string;
     canvasId?: string;
   }): Promise<OperatorOperationView> {
-    await this.prepareAutomaticExecutionTarget(input.blockRef, input.canvasId ?? "default");
+    const agentEndpointId = await this.availableAgentEndpointId();
     const response = await fetch(`${this.harness.origin}/api/v1/remote-operations`, {
       method: "POST",
       headers: this.headers(true),
       body: JSON.stringify({
-        schemaVersion: "remote-run/v2",
+        schemaVersion: "remote-run/v3",
         projectId: this.harness.projectId,
         canvasId: input.canvasId ?? "default",
         blockRef: input.blockRef,
+        agentEndpointId,
         idempotencyKey: input.idempotencyKey,
         expectedResponsibilityRevision: 0,
-        expectedReviewerRevision: 0,
-        expectedExecutionTargetRevision: 1
+        expectedReviewerRevision: 0
       })
     });
     const body = (await response.json()) as OperatorOperationView & { error?: string };
@@ -460,42 +459,42 @@ export class RealProcessLifecycleClient {
     return join(this.harness.paths.serverData, "planweave-server.sqlite");
   }
 
-  private async prepareAutomaticExecutionTarget(blockRef: string, canvasId: string): Promise<void> {
-    const database = await openServerDatabase(this.serverDatabasePath(), 5_000);
-    try {
-      const workspaceId = new WorkspaceIdentityRepository(database).workspaceForLegacyProject(
-        this.harness.projectId
-      );
-      if (!workspaceId) {
-        throw new Error("real_process_lifecycle_workspace_mapping_missing");
-      }
-      const scope = {
-        kind: "block" as const,
-        workspaceId,
-        projectId: this.harness.projectId,
-        canvasId,
-        blockRef
-      };
-      const repository = new AuthorityRepository(database);
-      const existing = repository.getExecutionTarget(scope);
-      if (existing) {
-        if (existing.revision !== 1 || existing.target.kind !== "automatic_host") {
-          throw new Error("real_process_lifecycle_execution_target_conflict");
+  async availableAgentEndpointId(): Promise<string> {
+    if (!this.humanDeviceToken) {
+      const bootstrap = await fetch(
+        `${this.harness.origin}/api/v1/projects/${encodeURIComponent(this.harness.projectId)}/human/bootstrap`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            displayName: "Real process lifecycle owner",
+            humanPrincipalId: "real-process-lifecycle-owner"
+          })
         }
-        return;
+      );
+      const body = (await bootstrap.json()) as { deviceToken?: string; error?: string };
+      if (bootstrap.status !== 201 || !body.deviceToken) {
+        throw new Error(
+          `real_process_lifecycle_bootstrap_failed:${bootstrap.status}:${body.error ?? "missing_token"}`
+        );
       }
-      repository.applyExecutionTarget({
-        mutation: {
-          schemaVersion: "execution-target/v1",
-          scope,
-          target: { kind: "automatic_host" },
-          expectedRevision: 0
-        },
-        actor: { kind: "system", id: "real-process-lifecycle" }
-      });
-    } finally {
-      database.close();
+      this.humanDeviceToken = body.deviceToken;
     }
+    const response = await fetch(
+      `${this.harness.origin}/api/v1/projects/${encodeURIComponent(this.harness.projectId)}/agent-endpoints`,
+      { headers: { Authorization: `Bearer ${this.humanDeviceToken}` } }
+    );
+    const page = (await response.json()) as {
+      items?: Array<{ endpointId?: string; status?: string }>;
+      error?: string;
+    };
+    const endpointId = page.items?.find((endpoint) => endpoint.status === "available")?.endpointId;
+    if (response.status !== 200 || !endpointId) {
+      throw new Error(
+        `real_process_lifecycle_endpoint_failed:${response.status}:${page.error ?? "missing_endpoint"}`
+      );
+    }
+    return endpointId;
   }
 
   hostDatabasePath(dataDir = this.harness.paths.hostData): string {
@@ -600,7 +599,8 @@ export class RealProcessLifecycleClient {
     credentialToken: string;
   } {
     const path = join(hostDataDir, "credentials.json");
-    if (!existsSync(path)) throw new Error(`real_process_lifecycle_host_credential_missing:${path}`);
+    if (!existsSync(path))
+      throw new Error(`real_process_lifecycle_host_credential_missing:${path}`);
     const document = JSON.parse(readFileSync(path, "utf8")) as {
       active?: { hostId?: string; credentialToken?: string };
     };
@@ -633,8 +633,15 @@ export class RealProcessLifecycleClient {
     const match = /^artifact:sha256:([a-f0-9]{64})$/.exec(artifactRef);
     if (!match) throw new Error(`real_process_lifecycle_artifact_ref_invalid:${artifactRef}`);
     const sha256 = match[1];
-    const path = join(this.harness.paths.serverData, "artifacts", "sha256", sha256.slice(0, 2), sha256);
-    if (!existsSync(path)) throw new Error(`real_process_lifecycle_artifact_blob_missing:${sha256}`);
+    const path = join(
+      this.harness.paths.serverData,
+      "artifacts",
+      "sha256",
+      sha256.slice(0, 2),
+      sha256
+    );
+    if (!existsSync(path))
+      throw new Error(`real_process_lifecycle_artifact_blob_missing:${sha256}`);
     const bytes = readFileSync(path);
     const digest = createHash("sha256").update(bytes).digest("hex");
     if (digest !== sha256) throw new Error("real_process_lifecycle_artifact_digest_mismatch");

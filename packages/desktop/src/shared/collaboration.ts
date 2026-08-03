@@ -95,9 +95,7 @@ import { type CanvasRuntimeStatusProjection } from "@planweave-ai/collaboration-
 import { type CanvasLiveSyncServerMessage } from "@planweave-ai/collaboration-protocol/canvas/live-sync";
 import {
   type RemoteActionView,
-  type RemoteDispatchIntent,
   type RemoteDispatchIntentV3,
-  type RemoteDispatchWireCommand,
   type RemoteEventReplay,
   type RemoteHumanExecutionActionCommand,
   type RemoteInteractionPage,
@@ -108,7 +106,6 @@ import {
 import type { RemoteAgentEndpointList } from "@planweave-ai/collaboration-protocol/agent-endpoint";
 import { type ResponsibilityReadModel } from "@planweave-ai/collaboration-protocol/work/responsibility";
 import { type ReviewAssignmentReadModel } from "@planweave-ai/collaboration-protocol/work/review";
-import { type ExecutionTargetReadModel } from "@planweave-ai/collaboration-protocol/work/execution-target";
 import { type WorkAuthorityProjection } from "@planweave-ai/collaboration-protocol/work/authority";
 import {
   contentVersionDesktopReadModelSchema,
@@ -127,7 +124,6 @@ import type {
   CollaborationCommentListQueryInput,
   CollaborationCommentTombstoneInput,
   CollaborationDeviceListQueryInput,
-  CollaborationExecutionTargetUpdateInput,
   CollaborationInvitationListQueryInput,
   CollaborationObserverSignal,
   CollaborationPageQueryInput,
@@ -870,9 +866,6 @@ export type PlanWeaveCollaborationApi = {
   updateCollaborationReviewer: (
     input: CollaborationReviewerUpdateInput
   ) => Promise<ReviewAssignmentReadModel>;
-  updateCollaborationExecutionTarget: (
-    input: CollaborationExecutionTargetUpdateInput
-  ) => Promise<ExecutionTargetReadModel>;
   listCollaborationComments: (
     input: CollaborationCommentListQueryInput
   ) => Promise<CommentListPage>;
@@ -920,7 +913,7 @@ export type PlanWeaveCollaborationApi = {
   ) => Promise<CollaborationCommentAttachmentBody>;
   listCollaborationAgentEndpoints: () => Promise<RemoteAgentEndpointList>;
   dispatchCollaborationRemoteOperation: (
-    input: RemoteDispatchIntent | RemoteDispatchIntentV3 | RemoteDispatchWireCommand
+    input: RemoteDispatchIntentV3
   ) => Promise<RemoteOperationObservation>;
   observeCollaborationRemoteOperation: (
     input: CollaborationRemoteOperationIdInput
@@ -968,7 +961,6 @@ export type {
   CollaborationCommentListQueryInput,
   CollaborationCommentTombstoneInput,
   CollaborationDeviceListQueryInput,
-  CollaborationExecutionTargetUpdateInput,
   CollaborationInvitationListQueryInput,
   CollaborationObserverSignal,
   CollaborationPageQueryInput,

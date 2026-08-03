@@ -473,7 +473,6 @@ function createScenarioApi(state: ScenarioState) {
     }),
     updateCollaborationResponsibility: vi.fn(),
     updateCollaborationReviewer: vi.fn(),
-    updateCollaborationExecutionTarget: vi.fn(),
     updateCollaborationAssignment: updateAssignment,
     createCollaborationPendingAttachment: vi.fn(),
     uploadCollaborationPendingAttachment: vi.fn(),

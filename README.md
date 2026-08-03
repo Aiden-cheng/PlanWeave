@@ -262,10 +262,11 @@ A connected project lets people share one task board and run agents across machi
 **Remote agents and multi-machine runs**
 
 - **Agent Hosts** on other machines execute Blocks with the same ACP agents used locally (Codex, Claude Code, OpenCode, Pi, Grok, …)
-- Use the Block **Remote run** panel to dispatch work, watch progress, respond to interactions, and cancel / resume / retry
-- Local **Auto Run** runs agents on your machine; remote run targets Hosts on the same Block graph
-- Point a Block at a specific Host, or let the project pick an available Host that matches required capabilities
-- Assignment records ownership; dispatch / remote run starts execution
+- Use the Block **Agent run** panel to choose either a local Agent or a remote Agent Endpoint, then watch progress, respond to interactions, and cancel / resume / retry
+- Local **Auto Run** runs the selected Agent on this device; a remote Agent Endpoint runs it on an exposed device without a separate Host choice
+- Hosts appear in device management, where administrators register devices and expose Agents; they are not selected for each run
+- Legacy Host run settings remain readable but are read-only. Choose this device or a remote Agent for new runs
+- Assignment records human ownership; Agent run dispatch starts execution
 
 **In Desktop**
 

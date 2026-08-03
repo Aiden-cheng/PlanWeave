@@ -21,7 +21,6 @@ import {
   collaborationRevisionSchema,
   workspaceMemberPrincipalSchema
 } from "@planweave-ai/collaboration-protocol/work/responsibility";
-import { executionTargetSchema } from "@planweave-ai/collaboration-protocol/work/execution-target";
 import {
   humanDeviceListQuerySchema,
   humanInvitationListQuerySchema,
@@ -47,7 +46,6 @@ import {
   remoteInteractionPageQuerySchema,
   remoteInteractionResponseSchema,
   type RemoteActionView,
-  type RemoteDispatchWireCommand,
   type RemoteEventReplay,
   type RemoteHumanExecutionActionCommand,
   type RemoteInteractionPage,
@@ -242,27 +240,6 @@ export type CollaborationReviewerUpdateInput = z.infer<
   typeof collaborationReviewerUpdateInputSchema
 >;
 
-export const collaborationExecutionTargetUpdateInputSchema = z
-  .object({
-    workItem: workItemRefSchema,
-    target: executionTargetSchema,
-    expectedRevision: collaborationRevisionSchema,
-    reason: collaborationReasonInputSchema
-  })
-  .strict()
-  .superRefine((value, context) => {
-    if (value.workItem.kind !== "block") {
-      context.addIssue({
-        code: "custom",
-        message: "execution_target_requires_exact_block",
-        path: ["workItem"]
-      });
-    }
-  });
-export type CollaborationExecutionTargetUpdateInput = z.infer<
-  typeof collaborationExecutionTargetUpdateInputSchema
->;
-
 export const collaborationCommentCreateInputSchema = commentCreateWireCommandSchema;
 export type CollaborationCommentCreateInput = z.input<typeof collaborationCommentCreateInputSchema>;
 
@@ -313,7 +290,6 @@ export type CollaborationRemoteInteractionRespondInput = z.infer<
 
 export type {
   RemoteActionView,
-  RemoteDispatchWireCommand,
   RemoteEventReplay,
   RemoteHumanExecutionActionCommand,
   RemoteInteractionPage,

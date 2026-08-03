@@ -60,7 +60,7 @@ function connectedStatus(): CollaborationStatus {
   };
 }
 
-function createApi() {
+function createApi(executionTarget: "exact_host" | "unassigned" = "exact_host") {
   const status = connectedStatus();
   const api = {
     getCollaborationStatus: vi.fn().mockResolvedValue(status),
@@ -90,6 +90,69 @@ function createApi() {
     listCollaborationActivity: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
     listCollaborationComments: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
     listCollaborationEligibleAssignees: vi.fn().mockResolvedValue({ humans: [], hosts: [] }),
+    getCollaborationWorkAuthority: vi.fn().mockResolvedValue({
+      schemaVersion: "work-authority/v1",
+      scope: {
+        kind: "block",
+        workspaceId: "workspace-1",
+        projectId: "project-1",
+        canvasId: "default",
+        blockRef: "T-1#B-1"
+      },
+      responsibility: {
+        schemaVersion: "responsibility/v1",
+        scope: {
+          kind: "block",
+          workspaceId: "workspace-1",
+          projectId: "project-1",
+          canvasId: "default",
+          blockRef: "T-1#B-1"
+        },
+        principal: null,
+        revision: 0,
+        updatedAt: "2030-01-01T00:00:00.000Z",
+        availability: "unassigned"
+      },
+      reviewer: {
+        schemaVersion: "review-assignment/v1",
+        scope: {
+          kind: "block",
+          workspaceId: "workspace-1",
+          projectId: "project-1",
+          canvasId: "default",
+          blockRef: "T-1#B-1"
+        },
+        principal: null,
+        revision: 0,
+        updatedAt: "2030-01-01T00:00:00.000Z",
+        availability: "unassigned"
+      },
+      executionTarget: {
+        schemaVersion: "execution-target/v1",
+        scope: {
+          kind: "block",
+          workspaceId: "workspace-1",
+          projectId: "project-1",
+          canvasId: "default",
+          blockRef: "T-1#B-1"
+        },
+        target:
+          executionTarget === "exact_host"
+            ? { kind: "exact_host", hostId: "private-host-id" }
+            : { kind: "unassigned" },
+        revision: 1,
+        updatedAt: "2030-01-01T00:00:00.000Z",
+        availability:
+          executionTarget === "exact_host"
+            ? { status: "ready", reason: "ready" }
+            : { status: "unassigned", reason: "unassigned" }
+      },
+      revisions: {
+        responsibilityRevision: 0,
+        reviewerRevision: 0,
+        executionTargetRevision: 1
+      }
+    }),
     observeCollaborationRemoteOperation: vi.fn().mockResolvedValue({
       operationId: "op-1",
       projectId: "project-1",
@@ -191,6 +254,25 @@ describe("RemoteRunPanel", () => {
     expect(screen.getByTestId("remote-run-notice")).toHaveTextContent(
       /compatible remote Agent Endpoint/i
     );
+    expect(screen.getByTestId("remote-run-legacy-host-target-notice")).toHaveTextContent(
+      "Legacy Host run settings are now read-only. Choose this device or a remote Agent."
+    );
+    expect(screen.queryByText("private-host-id")).not.toBeInTheDocument();
+  });
+
+  it("does not show a migration notice for an unassigned legacy target", async () => {
+    const api = createApi("unassigned");
+    const bridge = api as unknown as CollaborationReadBridgePort;
+    apis.push(bridge);
+    const shell = acquireCollaborationReadModelController(bridge);
+    await shell.controller.setActiveProject({
+      profileId: "profile-1",
+      projectId: "project-1",
+      canvasId: "default"
+    });
+    render(<RemoteRunPanel workItem={blockItem} open api={api} t={createTranslator("en")} />);
+    await waitFor(() => expect(api.getCollaborationWorkAuthority).toHaveBeenCalled());
+    expect(screen.queryByTestId("remote-run-legacy-host-target-notice")).not.toBeInTheDocument();
   });
 
   it("requires confirmation before cancel", async () => {

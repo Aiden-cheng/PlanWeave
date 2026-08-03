@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 
 import "@testing-library/jest-dom/vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
@@ -34,16 +34,16 @@ function member(
     role: partial.role,
     createdAt: "2030-01-01T00:00:00.000Z",
     updatedAt: "2030-01-01T00:00:00.000Z",
-  workspaceConnection: {
-    schemaVersion: "workspace-setup/v1",
-    status: "local_only",
-    profile: null,
-    workspaceId: null,
-    workspaceDisplayName: null,
-    connectedAt: null,
-    error: null
-  },
-  workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
+    workspaceConnection: {
+      schemaVersion: "workspace-setup/v1",
+      status: "local_only",
+      profile: null,
+      workspaceId: null,
+      workspaceDisplayName: null,
+      connectedAt: null,
+      error: null
+    },
+    workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
   };
 }
 
@@ -60,7 +60,7 @@ function connectedStatus(principalId = "human-1"): CollaborationStatus {
         deviceCredentialPersistence: "persisted",
         deviceCredentialId: "device-1",
         humanPrincipalId: principalId,
-        updatedAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:00:00.000Z"
       }
     ],
     activeProfileId: "profile-1",
@@ -74,16 +74,16 @@ function connectedStatus(principalId = "human-1"): CollaborationStatus {
       lastErrorMessage: null
     },
     updatedAt: "2030-01-01T00:00:00.000Z",
-  workspaceConnection: {
-    schemaVersion: "workspace-setup/v1",
-    status: "local_only",
-    profile: null,
-    workspaceId: null,
-    workspaceDisplayName: null,
-    connectedAt: null,
-    error: null
-  },
-  workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
+    workspaceConnection: {
+      schemaVersion: "workspace-setup/v1",
+      status: "local_only",
+      profile: null,
+      workspaceId: null,
+      workspaceDisplayName: null,
+      connectedAt: null,
+      error: null
+    },
+    workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null }
   };
 }
 
@@ -103,7 +103,6 @@ function taskViewModel(
       member({ humanPrincipalId: "human-1", displayName: "Ada Lovelace", role: "owner" }),
       member({ humanPrincipalId: "human-2", displayName: "Grace Hopper", role: "member" })
     ],
-    hosts: [],
     eligible: null,
     status: connectedStatus(),
     syncPhase: "ready",
@@ -126,7 +125,6 @@ function blockViewModel() {
       availability: { status: "unassigned", reason: "unassigned" }
     },
     members: [member({ humanPrincipalId: "human-1", displayName: "Ada", role: "owner" })],
-    hosts: [],
     eligible: {
       workItem: blockItem,
       humans: [
@@ -231,26 +229,15 @@ describe("AssigneePicker", () => {
     });
   });
 
-  it("exposes Block host and automatic sections and blocks revoked hosts", async () => {
+  it("does not expose Block Host or automatic sections", async () => {
     stubSelectLayoutApis();
     const user = userEvent.setup();
-    const { onSelect } = renderPicker(blockViewModel());
+    renderPicker(blockViewModel());
 
     await user.click(screen.getByTestId("assignee-picker-trigger"));
-    expect(await screen.findByTestId("assignee-section-hosts")).toBeInTheDocument();
-    expect(screen.getByTestId("assignee-section-automatic")).toBeInTheDocument();
-
-    const revoked = screen
-      .getAllByTestId("assignee-option")
-      .find((node) => node.getAttribute("data-option-id") === "exact_host:host-bad");
-    expect(revoked).toHaveAttribute("data-selectable", "false");
-    expect(within(revoked!).getByTestId("assignee-option-reason")).toHaveTextContent(/revoked/i);
-
-    const auto = screen
-      .getAllByTestId("assignee-option")
-      .find((node) => node.getAttribute("data-option-id") === "automatic_host");
-    await user.click(auto!);
-    expect(onSelect).toHaveBeenCalledWith({ kind: "automatic_host" });
+    expect(await screen.findByTestId("assignee-section-people")).toBeInTheDocument();
+    expect(screen.queryByTestId("assignee-section-hosts")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("assignee-section-automatic")).not.toBeInTheDocument();
   });
 
   it("does not offer host sections for Tasks", async () => {

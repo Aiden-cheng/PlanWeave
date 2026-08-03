@@ -785,6 +785,7 @@ export async function createDistributedServerComposition(
       authorization,
       enrollments,
       hosts: coordination.hosts,
+      agentEndpoints: coordination.agentEndpoints,
       operations: coordination.operations,
       dispatches: coordination.dispatches,
       coordinator: coordination.coordinator,
@@ -792,6 +793,12 @@ export async function createDistributedServerComposition(
       interactions: coordination.interactions,
       disconnectHost: (hostId) => attachedWebSockets.disconnectHost(hostId),
       workspaceIdentity,
+      authorizeProjectScope: (scope) => {
+        if (!runtimeRegistry.hasScope(scope)) throw new Error("operator_project_forbidden");
+      },
+      authorizeCanvas: (scope) => {
+        if (!runtimeRegistry.hasScope(scope)) throw new Error("operator_project_forbidden");
+      },
       hostOfflineAfterMs: config.limits.hostOfflineAfterMs,
       clock
     });

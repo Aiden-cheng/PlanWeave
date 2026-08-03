@@ -10,7 +10,6 @@ import type {
 } from "@planweave-ai/collaboration-protocol/core/primitives";
 import type {
   CollaborationBoundaryErrorView,
-  CollaborationHostProjection,
   CollaborationMutationRecord,
   CollaborationSyncPhase,
   HumanMembershipView
@@ -183,19 +182,6 @@ export function targetsEqual(left: AssignmentTarget, right: AssignmentTarget): b
   return assignmentTargetKey(left) === assignmentTargetKey(right);
 }
 
-export function hostSatisfiesCapabilities(
-  hostCapabilities: readonly string[],
-  requiredCapabilities: readonly string[]
-): boolean {
-  if (requiredCapabilities.length === 0) return true;
-  const available = setOf(hostCapabilities);
-  return requiredCapabilities.every((capability) => available.has(capability));
-}
-
-function setOf(values: readonly string[]): Set<string> {
-  return new Set(values);
-}
-
 export function resolveAssigneePickerMode(input: {
   status: CollaborationStatus | null;
   syncPhase: CollaborationSyncPhase;
@@ -353,74 +339,6 @@ export function buildAssigneeCurrentDisplay(
   }
 }
 
-function evaluateHostOption(input: {
-  host: {
-    hostId: string;
-    displayName?: string;
-    exists: boolean;
-    revoked: boolean;
-    authorizedForProject: boolean;
-    online: boolean;
-    capabilities: readonly string[];
-    capacityRemaining?: number;
-  };
-  requiredCapabilities: readonly string[];
-  selected: boolean;
-  allowMachineTargets: boolean;
-  labels: AssigneeDisplayLabels;
-}): AssigneeOption {
-  const label = input.host.displayName?.trim() || input.host.hostId;
-  const target: AssignmentTarget = { kind: "exact_host", hostId: input.host.hostId };
-  if (!input.allowMachineTargets) {
-    return {
-      id: assignmentTargetKey(target),
-      kind: "exact_host",
-      target,
-      label,
-      secondaryLabel: input.labels.host,
-      selectable: false,
-      unavailableReason: "task_disallows_machine",
-      selected: input.selected,
-      searchText: `${label} ${input.host.hostId} host`.toLowerCase(),
-      warningReason: null
-    };
-  }
-
-  let unavailableReason: AssigneeUnavailableReason | null = null;
-  if (!input.host.exists) unavailableReason = "host_missing";
-  else if (input.host.revoked) unavailableReason = "host_revoked";
-  else if (!input.host.authorizedForProject) unavailableReason = "host_not_authorized";
-  else if (!hostSatisfiesCapabilities(input.host.capabilities, input.requiredCapabilities)) {
-    unavailableReason = "host_capability_mismatch";
-  }
-
-  let warningReason: AssigneeOption["warningReason"] = null;
-  if (!unavailableReason) {
-    if (!input.host.online) warningReason = "host_offline";
-    else if (input.host.capacityRemaining === 0) warningReason = "host_at_capacity";
-  }
-
-  const secondaryParts: string[] = [];
-  if (warningReason === "host_offline") secondaryParts.push(input.labels.hostOffline);
-  if (warningReason === "host_at_capacity") secondaryParts.push(input.labels.hostAtCapacity);
-  if (input.host.capabilities.length > 0) {
-    secondaryParts.push(input.host.capabilities.slice(0, 3).join(", "));
-  }
-
-  return {
-    id: assignmentTargetKey(target),
-    kind: "exact_host",
-    target,
-    label,
-    secondaryLabel: secondaryParts.length > 0 ? secondaryParts.join(" · ") : input.labels.agentHost,
-    selectable: unavailableReason === null,
-    unavailableReason,
-    selected: input.selected,
-    searchText: `${label} ${input.host.hostId} ${input.host.capabilities.join(" ")}`.toLowerCase(),
-    warningReason
-  };
-}
-
 function evaluateHumanOption(input: {
   humanPrincipalId: HumanPrincipalId;
   displayName: string;
@@ -451,34 +369,18 @@ function evaluateHumanOption(input: {
 
 /**
  * Build Task/Block assignee picker sections from authoritative projections + eligible list.
- * Task execution surfaces may expose exact Hosts as a Desktop composite action.
- * Server authority remains Block-scoped; Project and Canvas never become executable targets.
+ * Responsibility and reviewer axes expose human principals only.
  */
 export function buildAssigneeSections(input: {
   workItem: WorkItemRef;
   assignment: AssignmentDisplayProjection | null | undefined;
   members: readonly HumanMembershipView[];
-  hosts: readonly CollaborationHostProjection[];
   eligible: EligibleAssigneesResponse | null | undefined;
-  requiredCapabilities?: readonly string[];
   labels?: AssigneeDisplayLabels;
-  /**
-   * Independent authority axis. People axes never expose Host options; Host axis never
-   * exposes humans. Defaults preserve legacy Block people+hosts / Task people-only rules.
-   */
-  authorityRole?: "responsibility" | "reviewer" | "execution_target";
+  authorityRole?: "responsibility" | "reviewer";
 }): AssigneeSection[] {
   const labels = input.labels ?? DEFAULT_ASSIGNEE_DISPLAY_LABELS;
   const selected = input.assignment?.target ?? { kind: "unassigned" as const };
-  const role = input.authorityRole;
-  const allowPeopleTargets = role !== "execution_target";
-  const allowMachineTargets =
-    role === "execution_target"
-      ? true
-      : role === "responsibility" || role === "reviewer"
-        ? false
-        : input.workItem.kind === "block";
-  const packageCaps = input.requiredCapabilities ?? [];
 
   const unassigned: AssigneeOption = {
     id: "unassigned",
@@ -495,163 +397,57 @@ export function buildAssigneeSections(input: {
 
   const humanById = new Map<string, AssigneeOption>();
 
-  if (allowPeopleTargets) {
-    for (const member of input.members) {
-      humanById.set(
-        member.humanPrincipalId,
-        evaluateHumanOption({
-          humanPrincipalId: member.humanPrincipalId,
-          displayName: member.displayName,
-          membershipActive: true,
-          selected:
-            selected.kind === "human" && selected.humanPrincipalId === member.humanPrincipalId,
-          labels
-        })
-      );
-    }
+  for (const member of input.members) {
+    humanById.set(
+      member.humanPrincipalId,
+      evaluateHumanOption({
+        humanPrincipalId: member.humanPrincipalId,
+        displayName: member.displayName,
+        membershipActive: true,
+        selected:
+          selected.kind === "human" && selected.humanPrincipalId === member.humanPrincipalId,
+        labels
+      })
+    );
+  }
 
-    for (const human of input.eligible?.humans ?? []) {
-      const existing = humanById.get(human.humanPrincipalId);
-      if (existing && human.membershipActive) continue;
-      humanById.set(
-        human.humanPrincipalId,
-        evaluateHumanOption({
-          humanPrincipalId: human.humanPrincipalId,
-          displayName: human.displayName?.trim() || existing?.label || human.humanPrincipalId,
-          membershipActive: human.membershipActive,
-          selected:
-            selected.kind === "human" && selected.humanPrincipalId === human.humanPrincipalId,
-          labels
-        })
-      );
-    }
+  for (const human of input.eligible?.humans ?? []) {
+    const existing = humanById.get(human.humanPrincipalId);
+    if (existing && human.membershipActive) continue;
+    humanById.set(
+      human.humanPrincipalId,
+      evaluateHumanOption({
+        humanPrincipalId: human.humanPrincipalId,
+        displayName: human.displayName?.trim() || existing?.label || human.humanPrincipalId,
+        membershipActive: human.membershipActive,
+        selected: selected.kind === "human" && selected.humanPrincipalId === human.humanPrincipalId,
+        labels
+      })
+    );
+  }
 
-    // Current human assignment may no longer be in membership/eligible lists.
-    if (selected.kind === "human" && !humanById.has(selected.humanPrincipalId)) {
-      humanById.set(
-        selected.humanPrincipalId,
-        evaluateHumanOption({
-          humanPrincipalId: selected.humanPrincipalId,
-          displayName: input.assignment?.human?.displayName?.trim() || selected.humanPrincipalId,
-          membershipActive: input.assignment?.human?.membershipActive ?? false,
-          selected: true,
-          labels
-        })
-      );
-    }
+  // Current human assignment may no longer be in membership/eligible lists.
+  if (selected.kind === "human" && !humanById.has(selected.humanPrincipalId)) {
+    humanById.set(
+      selected.humanPrincipalId,
+      evaluateHumanOption({
+        humanPrincipalId: selected.humanPrincipalId,
+        displayName: input.assignment?.human?.displayName?.trim() || selected.humanPrincipalId,
+        membershipActive: input.assignment?.human?.membershipActive ?? false,
+        selected: true,
+        labels
+      })
+    );
   }
 
   const people = [...humanById.values()].sort((left, right) =>
     left.label.localeCompare(right.label)
   );
 
-  const taskExecutionComposite = role === "execution_target" && input.workItem.kind === "task";
-  const sections: AssigneeSection[] = taskExecutionComposite
-    ? []
-    : [{ id: "unassigned", options: [unassigned] }];
-  if (allowPeopleTargets) {
-    sections.push({ id: "people", options: people });
-  }
-
-  if (!allowMachineTargets) {
-    return sections;
-  }
-
-  const hostById = new Map<string, AssigneeOption>();
-  const caps = packageCaps;
-
-  for (const host of input.eligible?.hosts ?? []) {
-    hostById.set(
-      host.hostId,
-      evaluateHostOption({
-        host: {
-          hostId: host.hostId,
-          displayName: host.displayName,
-          exists: host.exists,
-          revoked: host.revoked,
-          authorizedForProject: host.authorizedForProject,
-          online: host.online,
-          capabilities: host.capabilities,
-          capacityRemaining: host.capacityRemaining
-        },
-        requiredCapabilities: caps,
-        selected: selected.kind === "exact_host" && selected.hostId === host.hostId,
-        allowMachineTargets: true,
-        labels
-      })
-    );
-  }
-
-  // Merge snapshot hosts that may show current assignment degradation.
-  for (const host of taskExecutionComposite ? [] : input.hosts) {
-    if (hostById.has(host.hostId)) continue;
-    hostById.set(
-      host.hostId,
-      evaluateHostOption({
-        host: {
-          hostId: host.hostId,
-          displayName: host.displayName,
-          exists: host.exists,
-          revoked: host.revoked,
-          authorizedForProject: host.authorizedForProject,
-          online: host.online,
-          capabilities: host.capabilities,
-          capacityRemaining: host.capacityRemaining
-        },
-        requiredCapabilities: caps,
-        selected: selected.kind === "exact_host" && selected.hostId === host.hostId,
-        allowMachineTargets: true,
-        labels
-      })
-    );
-  }
-
-  if (selected.kind === "exact_host" && !hostById.has(selected.hostId)) {
-    const hostDisplay = input.assignment?.host;
-    hostById.set(
-      selected.hostId,
-      evaluateHostOption({
-        host: {
-          hostId: selected.hostId,
-          displayName: hostDisplay?.displayName,
-          exists: !!hostDisplay,
-          revoked: hostDisplay?.revoked ?? true,
-          authorizedForProject: hostDisplay?.authorizedForProject ?? false,
-          online: hostDisplay?.online ?? false,
-          capabilities: [],
-          capacityRemaining: undefined
-        },
-        requiredCapabilities: caps,
-        selected: true,
-        allowMachineTargets: true,
-        labels
-      })
-    );
-  }
-
-  const hosts = [...hostById.values()].sort((left, right) => left.label.localeCompare(right.label));
-  sections.push({ id: "hosts", options: hosts });
-
-  if (taskExecutionComposite) {
-    return sections;
-  }
-
-  const automatic: AssigneeOption = {
-    id: "automatic_host",
-    kind: "automatic_host",
-    target: { kind: "automatic_host" },
-    label: labels.automaticHostSelection,
-    secondaryLabel: labels.automaticHostSecondary,
-    selectable: true,
-    unavailableReason: null,
-    selected: selected.kind === "automatic_host",
-    searchText:
-      `${labels.automaticHostSelection} automatic host selection auto machine`.toLowerCase(),
-    warningReason: null
-  };
-  sections.push({ id: "automatic", options: [automatic] });
-
-  return sections;
+  return [
+    { id: "unassigned", options: [unassigned] },
+    { id: "people", options: people }
+  ];
 }
 
 export function filterAssigneeOptions(
@@ -683,9 +479,7 @@ export function buildAssigneePickerViewModel(input: {
   workItem: WorkItemRef;
   assignment: AssignmentDisplayProjection | null | undefined;
   members: readonly HumanMembershipView[];
-  hosts: readonly CollaborationHostProjection[];
   eligible: EligibleAssigneesResponse | null | undefined;
-  requiredCapabilities?: readonly string[];
   status: CollaborationStatus | null;
   syncPhase: CollaborationSyncPhase;
   loading: boolean;
@@ -695,7 +489,7 @@ export function buildAssigneePickerViewModel(input: {
   query?: string;
   pendingMutations?: readonly CollaborationMutationRecord[];
   labels?: AssigneeDisplayLabels;
-  authorityRole?: "responsibility" | "reviewer" | "execution_target";
+  authorityRole?: "responsibility" | "reviewer";
 }): AssigneePickerViewModel {
   const labels = input.labels ?? DEFAULT_ASSIGNEE_DISPLAY_LABELS;
   const mode = resolveAssigneePickerMode({
@@ -722,9 +516,7 @@ export function buildAssigneePickerViewModel(input: {
     workItem: input.workItem,
     assignment: input.assignment,
     members: input.members,
-    hosts: input.hosts,
     eligible: input.eligible,
-    requiredCapabilities: input.requiredCapabilities,
     labels,
     authorityRole: input.authorityRole
   }).map((section) => ({

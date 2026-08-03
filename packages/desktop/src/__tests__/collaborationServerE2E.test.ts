@@ -40,9 +40,7 @@ afterEach(async () => {
   }
   for (const composition of compositions.splice(0)) await composition.close();
   await Promise.all(
-    servers
-      .splice(0)
-      .map((server) => new Promise<void>((resolve) => server.close(() => resolve())))
+    servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve())))
   );
   await Promise.all(
     directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
@@ -116,7 +114,13 @@ function clientFor(origin: string, projectId: string, token?: string): Collabora
       displayName: "Desktop E2E",
       serverBaseUrl: `${origin}/`,
       projectId,
-      allowInsecureTransport: true
+      allowInsecureTransport: true,
+      endpoint: {
+        topology: "loopback_http",
+        serverOrigin: origin,
+        allowedClientOrigins: [origin],
+        tlsTrust: "not_applicable"
+      }
     },
     credential: { getDeviceToken: () => token },
     WebSocketImpl: WebSocket as unknown as CollaborationWebSocketConstructor
@@ -255,19 +259,22 @@ function startObserverAndWait(
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("observer_status_timeout")), 5_000);
-    client.startObserver({
-      ...handlers,
-      onStatus: (status) => {
-        handlers.onStatus?.(status);
-        if (status.state === "connected") {
-          clearTimeout(timer);
-          resolve();
-        } else if (status.state === "auth_expired" || status.state === "failed") {
-          clearTimeout(timer);
-          reject(new Error(`observer_${status.state}_${status.code}`));
+    client.startObserver(
+      {
+        ...handlers,
+        onStatus: (status) => {
+          handlers.onStatus?.(status);
+          if (status.state === "connected") {
+            clearTimeout(timer);
+            resolve();
+          } else if (status.state === "auth_expired" || status.state === "failed") {
+            clearTimeout(timer);
+            reject(new Error(`observer_${status.state}_${status.code}`));
+          }
         }
-      }
-    }, options);
+      },
+      options
+    );
   });
 }
 
@@ -275,8 +282,8 @@ async function createIdentityFixture() {
   const fixture = await setup();
   const anonymous = clientFor(fixture.origin, fixture.projectId);
   const ownerBootstrap = await anonymous.bootstrapOwner({
-      displayName: "Desktop Owner",
-      humanPrincipalId: "desktop-e2e-owner"
+    displayName: "Desktop Owner",
+    humanPrincipalId: "desktop-e2e-owner"
   });
   if (!ownerBootstrap.deviceToken) throw new Error("owner_bootstrap_missing_device_token");
   const owner = clientFor(fixture.origin, fixture.projectId, ownerBootstrap.deviceToken);
@@ -342,13 +349,8 @@ const blockWorkItem = {
 
 describe("Desktop CollaborationClient against the Server composition", () => {
   it("covers identity, membership, assignment, and comment mutations", async () => {
-    const {
-      fixture,
-      owner,
-      member,
-      ownerBootstrap,
-      memberBootstrap
-    } = await createIdentityFixture();
+    const { fixture, owner, member, ownerBootstrap, memberBootstrap } =
+      await createIdentityFixture();
 
     const revocableInvitation = await owner.createInvitation();
     const openInvitations = await owner.listInvitations({ openOnly: true });
@@ -443,13 +445,17 @@ describe("Desktop CollaborationClient against the Server composition", () => {
       (await workspaceOwner.listComments({ workItem: blockWorkItem, limit: 50 })).items
     ).toEqual([]);
     expect(
-      (await workspaceOwner.listComments({
-        workItem: blockWorkItem,
-        limit: 50,
-        includeTombstoned: true
-      })).items
+      (
+        await workspaceOwner.listComments({
+          workItem: blockWorkItem,
+          limit: 50,
+          includeTombstoned: true
+        })
+      ).items
     ).toEqual(expect.arrayContaining([expect.objectContaining({ tombstoned: true })]));
-    expect((await workspaceOwner.listActivity({ workItem: blockWorkItem, limit: 50 })).items).toEqual(
+    expect(
+      (await workspaceOwner.listActivity({ workItem: blockWorkItem, limit: 50 })).items
+    ).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           type: "comment_tombstoned",
@@ -482,27 +488,20 @@ describe("Desktop CollaborationClient against the Server composition", () => {
     const { fixture, ownerBootstrap } = await createIdentityFixture();
     const { workspaceOwner } = await configureWorkspaceWorkAccess({ fixture, ownerBootstrap });
     const host = await connectEnrolledHost(fixture.origin, fixture.adminToken);
-    const executionTarget = await workspaceOwner.updateExecutionTarget({
-      schemaVersion: "execution-target/v1",
-      scope: {
-        kind: "block",
-        workspaceId: host.workspaceId,
-        projectId: fixture.projectId,
-        canvasId: blockWorkItem.canvasId,
-        blockRef: blockWorkItem.blockRef
-      },
-      target: { kind: "exact_host", hostId: host.hostId },
-      expectedRevision: 0
-    });
+    const endpointPage = await workspaceOwner.listAgentEndpoints();
+    const agentEndpointId = endpointPage.items.find(
+      (endpoint) => endpoint.status === "available"
+    )?.endpointId;
+    expect(agentEndpointId).toBeTruthy();
     const remoteDispatch = workspaceOwner.dispatchRemoteOperation({
-      schemaVersion: "remote-run/v2",
+      schemaVersion: "remote-run/v3",
       projectId: fixture.projectId,
       canvasId: blockWorkItem.canvasId,
       blockRef: blockWorkItem.blockRef,
+      agentEndpointId: agentEndpointId!,
       idempotencyKey: "desktop-e2e-remote-operation",
       expectedResponsibilityRevision: 0,
-      expectedReviewerRevision: 0,
-      expectedExecutionTargetRevision: executionTarget.revision
+      expectedReviewerRevision: 0
     });
     const execute = await host.next();
     expect(execute.type).toBe("mailbox.message");
@@ -678,7 +677,9 @@ describe("Desktop CollaborationClient against the Server composition", () => {
 
     const comments = await owner.listComments({ workItem: blockWorkItem, limit: 50 });
     expect(comments.items).toEqual(
-      expect.arrayContaining([expect.objectContaining({ commentId: disconnectedComment.commentId })])
+      expect.arrayContaining([
+        expect.objectContaining({ commentId: disconnectedComment.commentId })
+      ])
     );
     const activity = await owner.listActivity({ workItem: blockWorkItem, limit: 50 });
     expect(activity.items).toEqual(

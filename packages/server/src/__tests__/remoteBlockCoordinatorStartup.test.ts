@@ -23,6 +23,10 @@ import type {
 import { RemoteRuntimePortRegistry } from "../remoteRuntimeLocator.js";
 import { WorkAssignmentRepository } from "../work/repository.js";
 import type { AssignmentTarget } from "../work/schemas.js";
+import { canonicalRemoteRuntimePort } from "../canonicalRemoteRuntimePort.js";
+import type { DispatchHostSelectionSnapshot } from "../work/dispatchIntegration.js";
+import { endpointDispatchRequest } from "./support/endpointCoordinatorFixture.js";
+import { seedLegacyRemoteOperation } from "./support/legacyRemoteOperationSeed.js";
 
 type StartedCoordination = Awaited<ReturnType<typeof startRemoteBlockCoordinationServer>>;
 type Coordination = StartedCoordination["coordination"];
@@ -59,6 +63,7 @@ class StartupHarness {
   coordination?: Coordination;
   runtime?: RemoteBlockRuntimePort;
   artifacts?: ArtifactStore;
+  private agentEndpointId?: string;
 
   private constructor(
     readonly workspace: Awaited<ReturnType<typeof createTestWorkspace>>,
@@ -207,11 +212,35 @@ class StartupHarness {
   }
 
   request(idempotencyKey: string) {
-    return {
-      ...this.locator,
+    const request = endpointDispatchRequest({
+      agentEndpoints: this.requireCoordination().agentEndpoints,
+      locator: this.locator,
       blockRef: "T-001#B-001",
-      idempotencyKey
-    };
+      idempotencyKey,
+      agentEndpointId: this.agentEndpointId
+    });
+    this.agentEndpointId = request.agentEndpointId;
+    return request;
+  }
+
+  async seedLegacy(
+    blockRef: string,
+    idempotencyKey: string,
+    hostSelection?: DispatchHostSelectionSnapshot
+  ) {
+    if (!this.runtime) throw new Error("test_runtime_not_started");
+    const candidate = await canonicalRemoteRuntimePort(
+      this.runtime,
+      this.locator.workspaceId
+    ).inspect({ ref: blockRef });
+    return seedLegacyRemoteOperation({
+      database: this.requireServer().database,
+      operations: this.requireCoordination().operations,
+      locator: this.locator,
+      candidate,
+      idempotencyKey,
+      ...(hostSelection === undefined ? {} : { hostSelection })
+    });
   }
 
   assign(blockRef: string, target: AssignmentTarget, expectedRevision = 0): void {
@@ -280,19 +309,35 @@ describe("RemoteBlockCoordinator startup reconciliation", () => {
   it("does not replay a rejected retry and still reconciles other pending work", async () => {
     const harness = await StartupHarness.create({ includeSecondTask: true });
     const coordination = harness.requireCoordination();
-    const legalPending = await coordination.coordinator.dispatch({
-      ...harness.locator,
-      blockRef: "T-002#B-001",
-      idempotencyKey: "pending-beside-rejected-retry"
-    });
+    const legalOperation = await harness.seedLegacy(
+      "T-002#B-001",
+      "pending-beside-rejected-retry",
+      {
+        workspaceId: harness.locator.workspaceId,
+        assignmentRevision: 0,
+        target: { kind: "automatic_host" },
+        selection: "automatic",
+        requiredCapabilities: ["acp.codex"]
+      }
+    );
+    const legalPending = await coordination.coordinator.reenter(legalOperation.id);
     expect(legalPending.status).toBe("awaiting_host");
 
     const hostId = harness.registerHost();
     harness.assign("T-001#B-001", { kind: "exact_host", hostId });
-    const denied = await coordination.coordinator.dispatch({
-      ...harness.request("retry-rejected-before-startup"),
-      expectedAssignmentRevision: 1
-    });
+    const deniedOperation = await harness.seedLegacy(
+      "T-001#B-001",
+      "retry-rejected-before-startup",
+      {
+        workspaceId: harness.locator.workspaceId,
+        assignmentRevision: 1,
+        target: { kind: "exact_host", hostId },
+        selection: "exact",
+        preferredHostId: hostId,
+        requiredCapabilities: ["acp.codex"]
+      }
+    );
+    const denied = await coordination.coordinator.reenter(deniedOperation.id);
     const dispatch = coordination.dispatches.getRequired(denied.operation.dispatchId);
     coordination.dispatches.accept(
       hostId,
@@ -379,20 +424,14 @@ describe("RemoteBlockCoordinator startup reconciliation", () => {
     await harness.start(new CrashEveryTime("after_input_materialization"));
     const coordination = harness.requireCoordination();
 
-    await expect(
-      coordination.coordinator.dispatch({
-        ...harness.locator,
-        blockRef: "T-001#B-001",
-        idempotencyKey: `v17-denied-${deniedTargetKind}`
-      })
-    ).rejects.toThrowError("injected_crash:after_input_materialization");
-    await expect(
-      coordination.coordinator.dispatch({
-        ...harness.locator,
-        blockRef: "T-002#B-001",
-        idempotencyKey: `v17-legal-${deniedTargetKind}`
-      })
-    ).rejects.toThrowError("injected_crash:after_input_materialization");
+    const deniedSeed = await harness.seedLegacy("T-001#B-001", `v17-denied-${deniedTargetKind}`);
+    const legalSeed = await harness.seedLegacy("T-002#B-001", `v17-legal-${deniedTargetKind}`);
+    await expect(coordination.coordinator.reenter(deniedSeed.id)).rejects.toThrowError(
+      "injected_crash:after_input_materialization"
+    );
+    await expect(coordination.coordinator.reenter(legalSeed.id)).rejects.toThrowError(
+      "injected_crash:after_input_materialization"
+    );
 
     const denied = coordination.operations.findByCallerIdentity({
       ...harness.locator,
@@ -607,11 +646,16 @@ describe("RemoteBlockCoordinator startup reconciliation", () => {
     ).toBe(1);
   });
 
-  it("fails startup visibly, closes the failed database, and succeeds on the next restart", async () => {
+  it("fails legacy-operation startup visibly, closes the database, and succeeds next restart", async () => {
     const harness = await StartupHarness.create();
-    const pending = await harness
-      .requireCoordination()
-      .coordinator.dispatch(harness.request("startup-visible-failure"));
+    const operation = await harness.seedLegacy("T-001#B-001", "startup-visible-failure", {
+      workspaceId: harness.locator.workspaceId,
+      assignmentRevision: 0,
+      target: { kind: "automatic_host" },
+      selection: "automatic",
+      requiredCapabilities: ["acp.codex"]
+    });
+    const pending = await harness.requireCoordination().coordinator.reenter(operation.id);
     expect(pending.status).toBe("awaiting_host");
 
     await expect(harness.start(new CrashOnce("after_input_materialization"))).rejects.toThrowError(

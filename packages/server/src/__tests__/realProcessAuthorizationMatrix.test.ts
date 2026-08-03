@@ -173,19 +173,20 @@ describe("real-process adversarial authorization matrix", () => {
         name: "wrong projectId on create",
         run: async ({ client: c, operationId, dispatchId }) => {
           // Positive control: the non-admin principal reaches the real project/runtime seam.
+          const agentEndpointId = await c.availableAgentEndpointId();
           const trusted = await c.rawRequest({
             method: "POST",
             path: "/api/v1/remote-operations",
             authorization: projectOperatorToken,
             body: {
-              schemaVersion: "remote-run/v2",
+              schemaVersion: "remote-run/v3",
               projectId: c.harness.projectId,
               canvasId: "default",
               blockRef: "T-001#B-001",
+              agentEndpointId,
               idempotencyKey: "auth-matrix-1",
               expectedResponsibilityRevision: 0,
-              expectedReviewerRevision: 0,
-              expectedExecutionTargetRevision: 1
+              expectedReviewerRevision: 0
             }
           });
           expect(trusted).toMatchObject({

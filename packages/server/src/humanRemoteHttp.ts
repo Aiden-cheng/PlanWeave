@@ -17,7 +17,7 @@ import {
   type HumanRemoteControlService
 } from "./humanRemoteControlService.js";
 import type { ServerReadiness } from "./readiness.js";
-import { AgentEndpointCatalogError } from "./agentEndpointCatalog.js";
+import { agentEndpointCatalogErrorCode } from "./agentEndpointCatalog.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -127,7 +127,8 @@ function safeError(error: unknown): { status: number; code: string } {
   if (error instanceof z.ZodError) return { status: 400, code: "human_remote_request_invalid" };
   if (error instanceof RemoteExecutionActionRejectedError) return { status: 409, code: error.code };
   if (error instanceof DispatchAssignmentError) return { status: 409, code: error.code };
-  if (error instanceof AgentEndpointCatalogError) return { status: 409, code: error.code };
+  const endpointErrorCode = agentEndpointCatalogErrorCode(error);
+  if (endpointErrorCode) return { status: 409, code: endpointErrorCode };
   if (error instanceof HumanRemoteControlError) {
     if (error.code === "human_remote_body_too_large") return { status: 413, code: error.code };
     if (error.code.includes("forbidden") || error.code.includes("project_mismatch")) {

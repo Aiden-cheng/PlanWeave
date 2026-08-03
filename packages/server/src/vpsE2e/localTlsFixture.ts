@@ -492,48 +492,34 @@ export async function runLocalTlsFixture(options: {
     }
     const owner = (await ownerResponse.json()) as { deviceToken?: string };
     if (!owner.deviceToken) throw new Error("vps_e2e_owner_credential_missing");
-    const executionTargetResponse = await request(
-      `${origin}/api/v1/projects/${encodeURIComponent(workspace.projectId)}/assignments/execution-target`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${owner.deviceToken}`,
-          "content-type": "application/json"
-        },
-        body: JSON.stringify({
-          schemaVersion: "execution-target/v1",
-          scope: {
-            kind: "block",
-            workspaceId,
-            projectId: workspace.projectId,
-            canvasId: "default",
-            blockRef: "T-001#B-001"
-          },
-          target: { kind: "exact_host", hostId: hostOnline.id },
-          expectedRevision: 0
-        })
-      }
+    const endpointResponse = await request(
+      `${origin}/api/v1/projects/${encodeURIComponent(workspace.projectId)}/agent-endpoints`,
+      { headers: { Authorization: `Bearer ${owner.deviceToken}` } }
     );
-    if (executionTargetResponse.status !== 200) {
-      throw new Error(`vps_e2e_execution_target_failed:${executionTargetResponse.status}`);
+    if (endpointResponse.status !== 200) {
+      throw new Error(`vps_e2e_agent_endpoint_list_failed:${endpointResponse.status}`);
     }
-    const executionTarget = (await executionTargetResponse.json()) as { revision?: number };
-    if (executionTarget.revision !== 1)
-      throw new Error("vps_e2e_execution_target_revision_invalid");
+    const endpointPage = (await endpointResponse.json()) as {
+      items?: Array<{ endpointId?: string; status?: string }>;
+    };
+    const agentEndpointId = endpointPage.items?.find(
+      (endpoint) => endpoint.status === "available"
+    )?.endpointId;
+    if (!agentEndpointId) throw new Error("vps_e2e_agent_endpoint_missing");
 
     // Dispatch bounded fixture block.
     const dispatchResponse = await request(`${origin}/api/v1/remote-operations`, {
       method: "POST",
       headers: authHeaders,
       body: JSON.stringify({
-        schemaVersion: "remote-run/v2",
+        schemaVersion: "remote-run/v3",
         projectId: workspace.projectId,
         canvasId: "default",
         blockRef: "T-001#B-001",
+        agentEndpointId,
         idempotencyKey: `vps-e2e-local-tls-${Date.now()}`,
         expectedResponsibilityRevision: 0,
-        expectedReviewerRevision: 0,
-        expectedExecutionTargetRevision: executionTarget.revision
+        expectedReviewerRevision: 0
       })
     });
     if (dispatchResponse.status !== 202) {
@@ -554,7 +540,7 @@ export async function runLocalTlsFixture(options: {
         identities.leaseId
     );
     commandsSanitized.push(
-      "POST /api/v1/remote-operations { schemaVersion: remote-run/v2, projectId, canvasId, blockRef: T-001#B-001, idempotencyKey, expected authority revisions }"
+      "POST /api/v1/remote-operations { schemaVersion: remote-run/v3, projectId, canvasId, blockRef: T-001#B-001, agentEndpointId, idempotencyKey, expected human authority revisions }"
     );
 
     // Wait for terminal completion (success path for local mock fixture).

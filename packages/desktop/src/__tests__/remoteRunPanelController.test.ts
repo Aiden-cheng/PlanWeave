@@ -322,7 +322,6 @@ function createApi() {
     }),
     updateCollaborationResponsibility: vi.fn(),
     updateCollaborationReviewer: vi.fn(),
-    updateCollaborationExecutionTarget: vi.fn(),
     listCollaborationAgentEndpoints: listAgentEndpoints,
     observeCollaborationRemoteOperation: observe,
     dispatchCollaborationRemoteOperation: dispatch,

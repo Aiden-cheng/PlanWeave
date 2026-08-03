@@ -19,6 +19,11 @@ import { RemoteRuntimePortRegistry } from "../remoteRuntimeLocator.js";
 import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { ProjectAccessRepository } from "../projectAccessRepository.js";
 import { AuthorityRepository } from "../work/authorityRepository.js";
+import {
+  endpointDispatchRequest,
+  registerEndpointDispatchAccess
+} from "./support/endpointCoordinatorFixture.js";
+import { seedLegacyRemoteOperation } from "./support/legacyRemoteOperationSeed.js";
 
 const directories: string[] = [];
 const servers: PlanweaveServer[] = [];
@@ -80,6 +85,12 @@ async function setup(withHost: boolean) {
     },
     { serverInstanceOwnerToken: server.serverInstanceOwnerToken }
   );
+  registerEndpointDispatchAccess({
+    database: server.database,
+    locator,
+    projectRoot: workspace.root,
+    packageDir: workspace.init.workspace.packageDir
+  });
   const host = withHost ? coordination.hosts.register("Coordinator Host").host : undefined;
   if (host) {
     coordination.hosts.bindToWorkspace(host.id, workspaceId);
@@ -202,11 +213,12 @@ describe("RemoteBlockCoordinator", () => {
     const fixture = await setup(true);
     const publish = vi.fn();
     const unsubscribe = fixture.mailbox.subscribe(fixture.host?.id ?? "", publish);
-    const request = {
-      ...fixture.locator,
+    const request = endpointDispatchRequest({
+      agentEndpoints: fixture.agentEndpoints,
+      locator: fixture.locator,
       blockRef: "T-001#B-001",
       idempotencyKey: "dispatch-request-1"
-    };
+    });
 
     const first = await fixture.coordinator.dispatch(request);
     const replay = await fixture.coordinator.dispatch(request);
@@ -236,14 +248,30 @@ describe("RemoteBlockCoordinator", () => {
     ).resolves.toMatchObject({ ownership: { phase: "active" } });
   });
 
-  it("keeps a claimed operation actionable until capacity appears", async () => {
+  it("keeps an existing legacy automatic operation actionable until capacity appears", async () => {
     const fixture = await setup(false);
     const request = {
-      ...fixture.locator,
       blockRef: "T-001#B-001",
       idempotencyKey: "dispatch-request-no-host"
     };
-    const pending = await fixture.coordinator.dispatch(request);
+    const candidate = await fixture.registry.resolve(fixture.locator).inspect({
+      ref: request.blockRef
+    });
+    const operation = seedLegacyRemoteOperation({
+      database: fixture.server.database,
+      operations: fixture.operations,
+      locator: fixture.locator,
+      candidate,
+      idempotencyKey: request.idempotencyKey,
+      hostSelection: {
+        workspaceId: fixture.locator.workspaceId,
+        assignmentRevision: 0,
+        target: { kind: "automatic_host" },
+        selection: "automatic",
+        requiredCapabilities: candidate.requiredCapabilities
+      }
+    });
+    const pending = await fixture.coordinator.reenter(operation.id);
     expect(pending.status).toBe("awaiting_host");
     expect(pending.operation.state).toBe("claimed");
     expect(
@@ -275,7 +303,7 @@ describe("RemoteBlockCoordinator", () => {
     });
   });
 
-  it("dispatches automatic Host selection only to a ready workspace ACP Host", async () => {
+  it("dispatches the selected catalog Endpoint only to its ready workspace ACP Host", async () => {
     const fixture = await setup(false);
     const missingWorkspace = fixture.hosts.register("Missing workspace readiness").host;
     const missingAcp = fixture.hosts.register("Missing ACP readiness").host;
@@ -312,11 +340,14 @@ describe("RemoteBlockCoordinator", () => {
       ]
     });
 
-    const outcome = await fixture.coordinator.dispatch({
-      ...fixture.locator,
-      blockRef: "T-001#B-001",
-      idempotencyKey: "automatic-ready-host"
-    });
+    const outcome = await fixture.coordinator.dispatch(
+      endpointDispatchRequest({
+        agentEndpoints: fixture.agentEndpoints,
+        locator: fixture.locator,
+        blockRef: "T-001#B-001",
+        idempotencyKey: "selected-ready-endpoint"
+      })
+    );
     expect(outcome).toMatchObject({
       status: "activated",
       operation: { attempt: { hostId: ready.id } }
@@ -358,15 +389,16 @@ describe("RemoteBlockCoordinator", () => {
       },
       actor: { kind: "system", id: "test-system" }
     });
-    const outcome = await fixture.coordinator.dispatch({
-      ...fixture.locator,
-      blockRef: scope.blockRef,
-      idempotencyKey: "strict-authority-recheck",
-      expectedResponsibilityRevision: 0,
-      expectedReviewerRevision: 0,
-      expectedExecutionTargetRevision: 1,
-      strictAuthority: true
-    });
+    const outcome = await fixture.coordinator.dispatch(
+      endpointDispatchRequest({
+        agentEndpoints: fixture.agentEndpoints,
+        locator: fixture.locator,
+        blockRef: scope.blockRef,
+        idempotencyKey: "strict-authority-recheck",
+        expectedResponsibilityRevision: 0,
+        expectedReviewerRevision: 0
+      })
+    );
     authority.applyReviewer({
       mutation: {
         schemaVersion: "review-assignment/v1",
@@ -377,9 +409,9 @@ describe("RemoteBlockCoordinator", () => {
       actor: { kind: "system", id: "test-system" }
     });
 
-    await expect(fixture.coordinator.reenter(outcome.operation.id)).rejects.toThrow(
-      "host_authorization_denied:stale_reviewer_revision"
-    );
+    await expect(fixture.coordinator.reenter(outcome.operation.id)).rejects.toMatchObject({
+      code: "work_revision_conflict"
+    });
     expect(
       fixture.server.database
         .prepare("SELECT status FROM host_capacity_reservations WHERE lease_id=?")
@@ -446,15 +478,14 @@ describe("RemoteBlockCoordinator", () => {
       )
     ).toBeUndefined();
 
-    const outcome = await fixture.coordinator.dispatch({
-      ...secondLocator,
-      blockRef: scope.blockRef,
-      idempotencyKey: "strict-authority-exact-workspace",
-      expectedResponsibilityRevision: 0,
-      expectedReviewerRevision: 0,
-      expectedExecutionTargetRevision: 1,
-      strictAuthority: true
-    });
+    const outcome = await fixture.coordinator.dispatch(
+      endpointDispatchRequest({
+        agentEndpoints: fixture.agentEndpoints,
+        locator: secondLocator,
+        blockRef: scope.blockRef,
+        idempotencyKey: "strict-authority-exact-workspace"
+      })
+    );
     expect(outcome).toMatchObject({
       status: "activated",
       operation: {
@@ -478,7 +509,7 @@ describe("RemoteBlockCoordinator", () => {
     });
   });
 
-  it("retry_new_attempt follows authority tables after execution target change (not legacy)", async () => {
+  it("recovers a legacy retry from authority tables after execution target change", async () => {
     const fixture = await setup(true);
     if (!fixture.host) throw new Error("expected_test_host");
     const workspaceId = new WorkspaceIdentityRepository(
@@ -537,15 +568,30 @@ describe("RemoteBlockCoordinator", () => {
       }
     ).toEqual({ count: 0 });
 
-    const dispatched = await fixture.coordinator.dispatch({
-      ...fixture.locator,
-      blockRef: scope.blockRef,
-      idempotencyKey: "retry-authority-only",
-      expectedResponsibilityRevision: 0,
-      expectedReviewerRevision: 0,
-      expectedExecutionTargetRevision: 1,
-      strictAuthority: true
+    const candidate = await fixture.registry.resolve(fixture.locator).inspect({
+      ref: scope.blockRef
     });
+    const legacyOperation = seedLegacyRemoteOperation({
+      database: fixture.server.database,
+      operations: fixture.operations,
+      locator: fixture.locator,
+      candidate,
+      idempotencyKey: "retry-authority-only",
+      hostSelection: {
+        workspaceId,
+        assignmentRevision: 1,
+        authorityRevisions: {
+          responsibilityRevision: 0,
+          reviewerRevision: 0,
+          executionTargetRevision: 1
+        },
+        target: { kind: "exact_host", hostId: hostA.id },
+        selection: "exact",
+        preferredHostId: hostA.id,
+        requiredCapabilities: candidate.requiredCapabilities
+      }
+    });
+    const dispatched = await fixture.coordinator.reenter(legacyOperation.id);
     expect(dispatched.operation.attempt.hostId).toBe(hostA.id);
     expect(dispatched.operation.hostSelection?.authorityRevisions).toEqual({
       responsibilityRevision: 0,
@@ -724,7 +770,7 @@ describe("RemoteBlockCoordinator", () => {
   });
 
   it("fails closed on source drift and on a missing restart locator", async () => {
-    const fixture = await setup(false);
+    const fixture = await setup(true);
     const acquireScoped = vi.fn(() => ({
       runtime: canonicalRemoteRuntimePort(fixture.runtime, fixture.locator.workspaceId),
       artifacts: createRemoteBlockArtifactSource({ projectRoot: fixture.workspace.root }),
@@ -732,9 +778,12 @@ describe("RemoteBlockCoordinator", () => {
     }));
     fixture.registry.setScopedResolver(acquireScoped);
     const pending = await fixture.coordinator.dispatch({
-      ...fixture.locator,
-      blockRef: "T-001#B-001",
-      idempotencyKey: "dispatch-request-drift"
+      ...endpointDispatchRequest({
+        agentEndpoints: fixture.agentEndpoints,
+        locator: fixture.locator,
+        blockRef: "T-001#B-001",
+        idempotencyKey: "dispatch-request-drift"
+      })
     });
     await appendFile(
       join(fixture.workspace.init.workspace.packageDir, "nodes/T-001/blocks/B-001.prompt.md"),
@@ -764,11 +813,14 @@ describe("RemoteBlockCoordinator", () => {
 
   it("re-enters terminal completion through the Runtime authority", async () => {
     const fixture = await setup(true);
-    const outcome = await fixture.coordinator.dispatch({
-      ...fixture.locator,
-      blockRef: "T-001#B-001",
-      idempotencyKey: "dispatch-request-complete"
-    });
+    const outcome = await fixture.coordinator.dispatch(
+      endpointDispatchRequest({
+        agentEndpoints: fixture.agentEndpoints,
+        locator: fixture.locator,
+        blockRef: "T-001#B-001",
+        idempotencyKey: "dispatch-request-complete"
+      })
+    );
     const report = Buffer.from("# Remote result\n\nCompleted by the remote host.\n");
     const artifact = await fixture.artifacts.put({
       expectedSha256: createHash("sha256").update(report).digest("hex"),

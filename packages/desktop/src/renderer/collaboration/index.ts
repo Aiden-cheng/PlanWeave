@@ -46,7 +46,6 @@ export {
   DEFAULT_ASSIGNEE_DISPLAY_LABELS,
   filterAssigneeOptions,
   filterAssigneeSections,
-  hostSatisfiesCapabilities,
   mapAvailabilityToIssue,
   resolveAssigneePickerMode,
   targetsEqual,
@@ -121,7 +120,6 @@ export {
 export {
   adaptRemoteAcpEvents,
   buildRemoteActionIdentity,
-  isAssignmentEligibleForRemoteDispatch,
   isLocalAutoRunActiveFromBlockRecords,
   projectRemoteLifecyclePhase,
   projectRemoteRunActions,

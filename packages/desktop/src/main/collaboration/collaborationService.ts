@@ -24,7 +24,6 @@ import {
   type CollaborationWorkScope,
   type ResponsibilityReadModel
 } from "@planweave-ai/collaboration-protocol/work/responsibility";
-import { type ExecutionTargetReadModel } from "@planweave-ai/collaboration-protocol/work/execution-target";
 import {
   type FinalizePendingAttachmentResponse,
   type PendingAttachmentView
@@ -887,10 +886,6 @@ export class CollaborationService {
 
   async updateReviewer(input: unknown): Promise<ReviewAssignmentReadModel> {
     return this.readMutations.updateReviewer(input);
-  }
-
-  async updateExecutionTarget(input: unknown): Promise<ExecutionTargetReadModel> {
-    return this.readMutations.updateExecutionTarget(input);
   }
 
   async listComments(input: unknown): Promise<CommentListPage> {

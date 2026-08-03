@@ -7,13 +7,12 @@ import type {
 import {
   adaptRemoteAcpEvents,
   buildRemoteActionIdentity,
-  isAssignmentEligibleForRemoteDispatch,
   isLocalAutoRunActiveFromBlockRecords,
   projectRemoteLifecyclePhase,
   projectRemoteRunActions,
   projectRemoteRunIdentity,
   projectRemoteRunPanelViewModel,
-  REMOTE_RUN_ACTION_STATE_TABLE,
+  REMOTE_RUN_ACTION_STATE_TABLE
 } from "../renderer/collaboration/remoteRunViewModels";
 
 function assignment(
@@ -102,7 +101,8 @@ describe("remoteRunViewModels", () => {
       eventsHasMore: false,
       authorized: true,
       offline: false,
-      localAutoRunActive: true
+      localAutoRunActive: true,
+      endpointDispatchAvailable: true
     });
     expect(vm.authority).toBe("remote_dispatch");
     expect(vm.localAutoRunCoexisting).toBe(true);
@@ -126,27 +126,45 @@ describe("remoteRunViewModels", () => {
     expect(adapted[1]).toMatchObject({ text: "second-new" });
   });
 
-  it("gates dispatch on assignment eligibility", () => {
-    expect(isAssignmentEligibleForRemoteDispatch(assignment())).toBe(true);
+  it("gates dispatch only on explicit Endpoint availability", () => {
+    const input = {
+      observation: null,
+      runtime: null,
+      assignment: assignment(),
+      observerRun: null,
+      pendingInteractions: [],
+      events: [],
+      eventCursor: 0,
+      eventsHasMore: false,
+      authorized: true,
+      offline: false,
+      localAutoRunActive: false,
+      hostOnline: true
+    };
+    const dispatch = (endpointDispatchAvailable: boolean, target = input.assignment) =>
+      projectRemoteRunPanelViewModel({
+        ...input,
+        assignment: target,
+        endpointDispatchAvailable
+      }).actions.find((action) => action.kind === "dispatch");
+
+    expect(dispatch(false)).toMatchObject({ available: false, reason: "assignment_ineligible" });
     expect(
-      isAssignmentEligibleForRemoteDispatch(
-        assignment({ target: { kind: "human", humanPrincipalId: "human-1" as never } })
-      )
-    ).toBe(false);
-    expect(
-      isAssignmentEligibleForRemoteDispatch(
+      dispatch(
+        false,
         assignment({
-          availability: { status: "unavailable", reason: "host_offline" },
-          host: {
-            hostId: "host-1",
-            displayName: "Host One",
-            online: false,
-            authorizedForProject: true,
-            revoked: false
-          }
+          target: { kind: "automatic_host" },
+          availability: { status: "pending", reason: "automatic_pending_selection" }
         })
       )
-    ).toBe(false);
+    ).toMatchObject({ available: false, reason: "assignment_ineligible" });
+    expect(dispatch(true)).toMatchObject({ available: true });
+
+    const missing = Reflect.apply(projectRemoteRunPanelViewModel, undefined, [input]);
+    expect(missing.actions.find((action) => action.kind === "dispatch")).toMatchObject({
+      available: false,
+      reason: "assignment_ineligible"
+    });
   });
 
   it("shows interruption as action_required style phase and enables resume/fail/retry", () => {

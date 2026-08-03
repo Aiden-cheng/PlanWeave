@@ -218,7 +218,7 @@ export {
   RemoteBlockCoordinator,
   type RemoteBlockCoordinatorOptions,
   type RemoteDispatchOutcome,
-  type RemoteDispatchRequest
+  type RemoteEndpointDispatchRequest
 } from "./remoteBlockCoordinator.js";
 export type {
   RemoteArtifactContentPort,

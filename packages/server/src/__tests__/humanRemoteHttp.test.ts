@@ -213,15 +213,17 @@ function remoteDispatchBody(
   fixture: Awaited<ReturnType<typeof setup>>,
   idempotencyKey: string
 ): Record<string, unknown> {
+  const endpoint = fixture.coordination.agentEndpoints.listVisible(fixture.workspaceId).items[0];
+  if (!endpoint) throw new Error("human_remote_test_endpoint_missing");
   return {
-    schemaVersion: "remote-run/v2",
+    schemaVersion: "remote-run/v3",
     projectId: fixture.projectId,
     canvasId: fixture.canvasId,
     blockRef: fixture.blockRef,
+    agentEndpointId: endpoint.endpointId,
     idempotencyKey,
     expectedResponsibilityRevision: 0,
-    expectedReviewerRevision: 0,
-    expectedExecutionTargetRevision: fixture.executionTargetRevision
+    expectedReviewerRevision: 0
   };
 }
 
@@ -351,6 +353,34 @@ describe("human remote operation HTTP", () => {
     await expect(response.json()).resolves.toEqual({ error: "agent_endpoint_unknown" });
   });
 
+  it.each([
+    "remote-run/v1",
+    "remote-run/v2"
+  ])("rejects authorized %s dispatch without creating an operation", async (schemaVersion) => {
+    const fixture = await setup();
+    const token = await bootstrap(fixture.origin, fixture.projectId, "legacy-dispatch-owner");
+    const response = await fetch(
+      `${fixture.origin}/api/v1/projects/${fixture.projectId}/remote-operations`,
+      {
+        method: "POST",
+        headers: headers(token),
+        body: JSON.stringify({
+          schemaVersion,
+          projectId: fixture.projectId,
+          canvasId: fixture.canvasId,
+          blockRef: fixture.blockRef,
+          idempotencyKey: "legacy-dispatch",
+          expectedResponsibilityRevision: 0,
+          expectedReviewerRevision: 0,
+          expectedExecutionTargetRevision: fixture.executionTargetRevision
+        })
+      }
+    );
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "remote_run_v3_required" });
+    expect(fixture.coordination.operations.listNonTerminal()).toEqual([]);
+  });
+
   it("serves strict dispatch, observation, replay, action, and interaction routes to members", async () => {
     const fixture = await setup();
     const ownerToken = await bootstrap(fixture.origin, fixture.projectId, "remote-owner");
@@ -466,24 +496,30 @@ describe("human remote operation HTTP", () => {
     const fixture = await setup();
     const token = await bootstrap(fixture.origin, fixture.projectId, "boundary-owner");
     const body = JSON.stringify(remoteDispatchBody(fixture, "boundary-dispatch"));
-    const targetPaths = [
-      `${fixture.origin}/api/v1/projects/${fixture.otherProjectId}/remote-operations`,
-      `${fixture.origin}/api/v1/projects/untrusted-project/remote-operations`
+    const targets = [
+      {
+        path: `${fixture.origin}/api/v1/projects/${fixture.otherProjectId}/remote-operations`,
+        error: "human_remote_project_mismatch"
+      },
+      {
+        path: `${fixture.origin}/api/v1/projects/untrusted-project/remote-operations`,
+        error: "human_cross_project_forbidden"
+      }
     ];
 
-    for (const path of targetPaths) {
-      const denied = await fetch(path, {
+    for (const target of targets) {
+      const denied = await fetch(target.path, {
         method: "POST",
         headers: headers(token),
         body
       });
       expect(denied.status).toBe(403);
-      await expect(denied.json()).resolves.toEqual({ error: "human_cross_project_forbidden" });
+      await expect(denied.json()).resolves.toEqual({ error: target.error });
     }
 
     for (const credential of [undefined, "pw_host_not_human", "operator-token-not-human"]) {
-      for (const path of targetPaths) {
-        const denied = await fetch(path, {
+      for (const target of targets) {
+        const denied = await fetch(target.path, {
           method: "POST",
           headers: headers(credential),
           body

@@ -62,6 +62,7 @@ export type UseRemoteRunPanelControllerResult = {
   selectedAgentEndpointId: string | null;
   setSelectedAgentEndpointId: (endpointId: string) => void;
   refreshingAgentEndpoints: boolean;
+  legacyHostTargetPresent: boolean;
   refreshAgentEndpoints: () => Promise<void>;
   confirmKind: "cancel" | "retry_new_attempt" | "fail_interruption" | null;
   setConfirmKind: (kind: "cancel" | "retry_new_attempt" | "fail_interruption" | null) => void;
@@ -151,6 +152,9 @@ export function useRemoteRunPanelController(
     workKey && snapshot.workAuthorityByWorkItem[workKey]
       ? snapshot.workAuthorityByWorkItem[workKey]!
       : null;
+  const legacyHostTargetPresent =
+    workAuthority?.executionTarget?.target.kind === "exact_host" ||
+    workAuthority?.executionTarget?.target.kind === "automatic_host";
 
   // Ensure independent authority projections are available for dispatch CAS.
   useEffect(() => {
@@ -668,6 +672,7 @@ export function useRemoteRunPanelController(
     selectedAgentEndpointId,
     setSelectedAgentEndpointId: setSelectedAgentEndpointIdState,
     refreshingAgentEndpoints,
+    legacyHostTargetPresent,
     refreshAgentEndpoints,
     confirmKind,
     setConfirmKind,

@@ -6,6 +6,7 @@ import { createRemoteBlockRuntimePort, type PlanPackageManifest } from "@planwea
 import { WebSocket } from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRemoteBlockCoordination } from "../distributedCoordination.js";
+import { canonicalRemoteRuntimePort } from "../canonicalRemoteRuntimePort.js";
 import { RemoteRuntimePortRegistry } from "../remoteRuntimeLocator.js";
 import { HostEnrollmentService } from "../hostEnrollment.js";
 import { hashOperatorToken, OperatorTokenRegistry } from "../operatorAuth.js";
@@ -19,6 +20,11 @@ import {
   createTestWorkspace,
   basicManifest
 } from "../../../runtime/src/__tests__/promptTestHelpers.js";
+import {
+  endpointDispatchRequest,
+  registerEndpointDispatchAccess
+} from "./support/endpointCoordinatorFixture.js";
+import { seedLegacyRemoteOperation } from "./support/legacyRemoteOperationSeed.js";
 
 const directories: string[] = [];
 const databases: PlanweaveServer[] = [];
@@ -136,7 +142,8 @@ async function createWsCoordination() {
     canvasId: "default"
   };
   const registry = new RemoteRuntimePortRegistry();
-  registry.bind(locator, createRemoteBlockRuntimePort({ projectRoot: workspace.root }));
+  const runtime = createRemoteBlockRuntimePort({ projectRoot: workspace.root });
+  registry.bind(locator, runtime);
   const coordination = createRemoteBlockCoordination(
     database.database,
     {
@@ -152,7 +159,13 @@ async function createWsCoordination() {
     },
     { serverInstanceOwnerToken: database.serverInstanceOwnerToken }
   );
-  return { database, coordination, locator, workspaceIdentity, workspaceId };
+  registerEndpointDispatchAccess({
+    database: database.database,
+    locator,
+    projectRoot: workspace.root,
+    packageDir: workspace.init.workspace.packageDir
+  });
+  return { database, coordination, locator, runtime, workspaceIdentity, workspaceId };
 }
 
 describe("agent host WebSocket transport", () => {
@@ -211,8 +224,8 @@ describe("agent host WebSocket transport", () => {
     ).toBe(401);
   });
 
-  it("disconnects a server-revoked Host, rejects its old credential, and fences dispatch", async () => {
-    const { database, coordination, locator, workspaceIdentity, workspaceId } =
+  it("disconnects a server-revoked Host, rejects its old credential, and fences legacy recovery", async () => {
+    const { database, coordination, locator, runtime, workspaceIdentity, workspaceId } =
       await createWsCoordination();
     const registration = coordination.hosts.register("Revocation Host");
     workspaceIdentity.bindHostToWorkspace(registration.host.id, workspaceId);
@@ -224,6 +237,7 @@ describe("agent host WebSocket transport", () => {
     const transport = attachAgentHostWebSocketServer({
       server: httpServer,
       hosts: coordination.hosts,
+      agentEndpoints: coordination.agentEndpoints,
       mailbox: coordination.mailbox,
       dispatches: coordination.dispatches,
       acpEvents: coordination.acpEvents,
@@ -273,13 +287,15 @@ describe("agent host WebSocket transport", () => {
       authorization,
       enrollments: new HostEnrollmentService(database.database),
       hosts: coordination.hosts,
+      agentEndpoints: coordination.agentEndpoints,
       operations: coordination.operations,
       dispatches: coordination.dispatches,
       coordinator: coordination.coordinator,
       events: coordination.acpEvents,
       interactions: coordination.interactions,
       disconnectHost: transport.disconnectHost,
-      workspaceIdentity
+      workspaceIdentity,
+      authorizeProjectScope: () => {}
     });
     const closed = new Promise<{ code: number; reason: string }>((resolve) => {
       socket.once("close", (code, reason) => resolve({ code, reason: reason.toString() }));
@@ -304,12 +320,25 @@ describe("agent host WebSocket transport", () => {
       reconnect.once("open", () => resolve(101));
     });
     expect(rejectedStatus).toBe(401);
-    const afterRevoke = await coordination.coordinator.dispatch({
-      ...locator,
-      blockRef: "T-001#B-001",
-      idempotencyKey: "revoked-host-dispatch",
-      requestedHostId: registration.host.id
+    const candidate = await canonicalRemoteRuntimePort(runtime, workspaceId).inspect({
+      ref: "T-001#B-001"
     });
+    const legacyOperation = seedLegacyRemoteOperation({
+      database: database.database,
+      operations: coordination.operations,
+      locator,
+      candidate,
+      idempotencyKey: "revoked-host-recovery",
+      hostSelection: {
+        workspaceId,
+        assignmentRevision: 1,
+        target: { kind: "exact_host", hostId: registration.host.id },
+        selection: "exact",
+        preferredHostId: registration.host.id,
+        requiredCapabilities: candidate.requiredCapabilities
+      }
+    });
+    const afterRevoke = await coordination.coordinator.reenter(legacyOperation.id);
     expect(afterRevoke).toMatchObject({
       status: "awaiting_host",
       operation: { attempt: { hostId: undefined } }
@@ -357,11 +386,14 @@ describe("agent host WebSocket transport", () => {
       })
     );
     await events.next();
-    const outcome = await coordination.coordinator.dispatch({
-      ...locator,
-      blockRef: "T-001#B-001",
-      idempotencyKey: "ws-action-lifecycle"
-    });
+    const outcome = await coordination.coordinator.dispatch(
+      endpointDispatchRequest({
+        agentEndpoints: coordination.agentEndpoints,
+        locator,
+        blockRef: "T-001#B-001",
+        idempotencyKey: "ws-action-lifecycle"
+      })
+    );
     const execute = await events.next();
     if (execute.type !== "mailbox.message") throw new Error("Expected execute mailbox message.");
     const dispatch = coordination.dispatches.getRequired(outcome.operation.dispatchId);
@@ -518,11 +550,14 @@ describe("agent host WebSocket transport", () => {
     );
     await expect(firstEvents.next()).resolves.toMatchObject({ type: "host.welcome" });
 
-    const outcome = await coordination.coordinator.dispatch({
-      ...locator,
-      blockRef: "T-001#B-001",
-      idempotencyKey: "ws-replay"
-    });
+    const outcome = await coordination.coordinator.dispatch(
+      endpointDispatchRequest({
+        agentEndpoints: coordination.agentEndpoints,
+        locator,
+        blockRef: "T-001#B-001",
+        idempotencyKey: "ws-replay"
+      })
+    );
     const dispatch = coordination.dispatches.getRequired(outcome.operation.dispatchId);
     const firstDelivery = await firstEvents.next();
     expect(firstDelivery).toMatchObject({
@@ -697,11 +732,14 @@ describe("agent host WebSocket transport", () => {
       })
     );
     await firstEvents.next();
-    const outcome = await coordination.coordinator.dispatch({
-      ...locator,
-      blockRef: "T-001#B-001",
-      idempotencyKey: "ws-offline-expiry"
-    });
+    const outcome = await coordination.coordinator.dispatch(
+      endpointDispatchRequest({
+        agentEndpoints: coordination.agentEndpoints,
+        locator,
+        blockRef: "T-001#B-001",
+        idempotencyKey: "ws-offline-expiry"
+      })
+    );
     const dispatch = coordination.dispatches.getRequired(outcome.operation.dispatchId);
     await firstEvents.next();
     first.send(
@@ -837,11 +875,14 @@ describe("agent host WebSocket transport", () => {
       })
     );
     await expect(events.next()).resolves.toMatchObject({ type: "host.welcome" });
-    const outcome = await coordination.coordinator.dispatch({
-      ...locator,
-      blockRef: "T-001#B-001",
-      idempotencyKey: "ws-interruption"
-    });
+    const outcome = await coordination.coordinator.dispatch(
+      endpointDispatchRequest({
+        agentEndpoints: coordination.agentEndpoints,
+        locator,
+        blockRef: "T-001#B-001",
+        idempotencyKey: "ws-interruption"
+      })
+    );
     const dispatch = coordination.dispatches.getRequired(outcome.operation.dispatchId);
     await expect(events.next()).resolves.toMatchObject({ type: "mailbox.message" });
     socket.send(

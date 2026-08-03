@@ -288,6 +288,7 @@ function statusFor(error: WorkAssignmentServiceError): number {
     case "work_host_capability_mismatch":
     case "work_not_agent_assigned":
     case "work_dispatch_host_mismatch":
+    case "execution_target_read_only":
       return 400;
     default:
       return 400;
@@ -414,6 +415,9 @@ export async function handleWorkAssignmentHttpRequest(
           capability: "assignment",
           access: options.access
         });
+        if (body.target.kind === "exact_host" || body.target.kind === "automatic_host") {
+          throw new WorkAssignmentServiceError("execution_target_read_only");
+        }
         if (body.target.kind === "human") {
           assertPrincipalAccessCapability({
             workspaceId: authenticated.workspaceId,
@@ -604,6 +608,12 @@ export async function handleWorkAssignmentHttpRequest(
           capability: "assignment",
           access: options.access
         });
+        if (
+          body.scope.workspaceId !== authenticated.workspaceId ||
+          body.scope.projectId !== matched.projectId
+        ) {
+          throw new WorkAssignmentServiceError("work_cross_project_forbidden");
+        }
         if (!options.projectAuthority.hasScope({ ...authenticated, canvasId: body.scope.canvasId }))
           throw new WorkAssignmentServiceError("work_cross_project_forbidden");
         const handle = options.acquireAuthorityService?.(
@@ -630,6 +640,12 @@ export async function handleWorkAssignmentHttpRequest(
           capability: "assignment",
           access: options.access
         });
+        if (
+          body.scope.workspaceId !== authenticated.workspaceId ||
+          body.scope.projectId !== matched.projectId
+        ) {
+          throw new WorkAssignmentServiceError("work_cross_project_forbidden");
+        }
         if (!options.projectAuthority.hasScope({ ...authenticated, canvasId: body.scope.canvasId }))
           throw new WorkAssignmentServiceError("work_cross_project_forbidden");
         const handle = options.acquireAuthorityService?.(
@@ -656,20 +672,15 @@ export async function handleWorkAssignmentHttpRequest(
           capability: "assignment",
           access: options.access
         });
+        if (
+          body.scope.workspaceId !== authenticated.workspaceId ||
+          body.scope.projectId !== matched.projectId
+        ) {
+          throw new WorkAssignmentServiceError("work_cross_project_forbidden");
+        }
         if (!options.projectAuthority.hasScope({ ...authenticated, canvasId: body.scope.canvasId }))
           throw new WorkAssignmentServiceError("work_cross_project_forbidden");
-        const handle = options.acquireAuthorityService?.(
-          authenticated.workspaceId,
-          matched.projectId,
-          body.scope.canvasId
-        );
-        if (!handle) throw new WorkAssignmentServiceError("work_cross_project_forbidden");
-        try {
-          respond(response, 200, handle.service.updateExecutionTarget(actor, body));
-        } finally {
-          handle.release();
-        }
-        return true;
+        throw new WorkAssignmentServiceError("execution_target_read_only");
       }
       case "authority_get": {
         const parameters = query(url, ["scope"]);

@@ -1,8 +1,7 @@
 /* @vitest-environment jsdom */
 
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkAuthorityProjection } from "@planweave-ai/collaboration-protocol/work/authority";
 import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
@@ -28,16 +27,6 @@ const firstBlock: Extract<WorkItemRef, { kind: "block" }> = {
   kind: "block",
   canvasId: "canvas-1",
   blockRef: "T-1#B-001"
-};
-const secondBlock: Extract<WorkItemRef, { kind: "block" }> = {
-  kind: "block",
-  canvasId: "canvas-1",
-  blockRef: "T-1#B-002"
-};
-const blockedBlock: Extract<WorkItemRef, { kind: "block" }> = {
-  kind: "block",
-  canvasId: "canvas-1",
-  blockRef: "T-1#B-003"
 };
 
 type AssigneeFieldApi = Pick<
@@ -192,23 +181,15 @@ function createApi(): AssigneeFieldApi {
     getCollaborationWorkAuthority: getWorkAuthority,
     updateCollaborationResponsibility: vi.fn(),
     updateCollaborationReviewer: vi.fn(),
-    updateCollaborationExecutionTarget: vi.fn(async ({ workItem, target }) => ({
-      ...authorityFor(workItem).executionTarget!,
-      target,
-      revision: 1
-    })),
     listCollaborationComments: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
     listCollaborationActivity: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
     updateCollaborationAssignment: vi.fn(),
     createCollaborationComment: vi.fn(),
     editCollaborationComment: vi.fn(),
     tombstoneCollaborationComment: vi.fn(),
-    dispatchCollaborationRemoteOperation: vi.fn(async ({ blockRef }: { blockRef: string }) => {
-      if (blockRef === secondBlock.blockRef) {
-        throw new Error("remote_dispatch_failed");
-      }
-      return { operationId: `operation-${blockRef}` };
-    }),
+    dispatchCollaborationRemoteOperation: vi.fn(async ({ blockRef }: { blockRef: string }) => ({
+      operationId: `operation-${blockRef}`
+    })),
     onCollaborationStatusChanged: vi.fn(() => () => undefined),
     onCollaborationObserverSignal: vi.fn(
       (_callback: (signal: CollaborationObserverSignal) => void) => () => undefined
@@ -231,78 +212,35 @@ afterEach(() => {
   resetCollaborationReadModelHubForTests();
 });
 
-describe("AssigneeInspectorField Task Host dispatch results", () => {
-  it("shows the result for every Block after an exact Host Task dispatch", async () => {
+describe("AssigneeInspectorField human authority axes", () => {
+  it("does not expose Host execution authority for Tasks or Blocks", async () => {
     stubSelectLayoutApis();
-    const user = userEvent.setup();
     const api = createApi();
     const shell = await prepare(api);
 
-    render(
+    const view = render(
       <AssigneeInspectorField
         workItem={taskItem}
-        roles={["execution_target"]}
-        taskExecutionBlocks={[
-          { workItem: firstBlock, dispatchable: true },
-          { workItem: secondBlock, dispatchable: true },
-          { workItem: blockedBlock, dispatchable: false }
-        ]}
+        roles={["responsibility", "reviewer"]}
         api={api as PlanWeaveCollaborationApi}
         t={createTranslator("en")}
       />
     );
 
-    const field = await screen.findByTestId("authority-field-execution_target");
-    await user.click(within(field).getByTestId("assignee-picker-trigger"));
-    const hostOption = (await screen.findAllByTestId("assignee-option")).find(
-      (option) => option.getAttribute("data-option-id") === "exact_host:host-1"
-    );
-    expect(hostOption).toBeTruthy();
-    await user.click(hostOption!);
+    expect(await screen.findByTestId("authority-field-responsibility")).toBeInTheDocument();
+    expect(screen.getByTestId("authority-field-reviewer")).toBeInTheDocument();
+    expect(screen.queryByTestId("authority-field-execution_target")).not.toBeInTheDocument();
 
-    const results = await within(field).findByTestId("task-host-dispatch-results");
-    expect(results).toHaveTextContent("Block dispatch results");
-    expect(results).toHaveTextContent(`${firstBlock.blockRef}: Dispatched`);
-    expect(results).toHaveTextContent(`${secondBlock.blockRef}: Dispatch failed`);
-    expect(results).toHaveTextContent(`${blockedBlock.blockRef}: Not ready to dispatch`);
-    expect(api.dispatchCollaborationRemoteOperation).toHaveBeenCalledTimes(2);
-
-    shell.release();
-  });
-
-  it("keeps the Block execution picker Host and automatic choices available", async () => {
-    stubSelectLayoutApis();
-    const user = userEvent.setup();
-    const api = createApi();
-    const shell = await prepare(api);
-
-    render(
+    view.rerender(
       <AssigneeInspectorField
         workItem={firstBlock}
-        roles={["execution_target"]}
+        roles={["responsibility", "reviewer"]}
         api={api as PlanWeaveCollaborationApi}
         t={createTranslator("en")}
       />
     );
-
-    const field = await screen.findByTestId("authority-field-execution_target");
-    await user.click(within(field).getByTestId("assignee-picker-trigger"));
-    expect(await screen.findByTestId("assignee-section-hosts")).toBeInTheDocument();
-    expect(screen.getByTestId("assignee-section-automatic")).toBeInTheDocument();
-
-    const automaticOption = screen
-      .getAllByTestId("assignee-option")
-      .find((option) => option.getAttribute("data-option-id") === "automatic_host");
-    expect(automaticOption).toBeTruthy();
-    await user.click(automaticOption!);
-    await waitFor(() => {
-      expect(api.updateCollaborationExecutionTarget).toHaveBeenCalledWith(
-        expect.objectContaining({
-          workItem: firstBlock,
-          target: { kind: "automatic_host" }
-        })
-      );
-    });
+    expect(await screen.findByTestId("authority-field-responsibility")).toBeInTheDocument();
+    expect(screen.queryByTestId("authority-field-execution_target")).not.toBeInTheDocument();
 
     shell.release();
   });
