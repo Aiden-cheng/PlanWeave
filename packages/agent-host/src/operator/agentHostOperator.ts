@@ -1,7 +1,6 @@
-import { access, mkdir, readFile, realpath, stat } from "node:fs/promises";
-import { constants } from "node:fs";
+import { mkdir, readFile, realpath, stat } from "node:fs/promises";
 import { hostname } from "node:os";
-import { delimiter, isAbsolute, join } from "node:path";
+import { join } from "node:path";
 import { parseAgentHostConfig, type AgentHostConfig } from "../config/schema.js";
 import { observeHostReadiness } from "../config/readiness.js";
 import { ConfiguredAcpProfileResolver, ConfiguredWorkspaceResolver } from "../config/resolvers.js";
@@ -40,6 +39,7 @@ import {
 } from "../config/defaultPaths.js";
 import { createPlatformBackgroundService } from "../background/platformBackground.js";
 import type { AgentHostBackgroundService } from "../background/backgroundService.js";
+import { resolveHostExecutable } from "../platform/resolveHostExecutable.js";
 
 const MAX_CONFIG_BYTES = 256 * 1_024;
 
@@ -77,33 +77,6 @@ export async function loadAgentHostConfig(path: string): Promise<AgentHostConfig
   }
 }
 
-async function resolvePresetCommand(command: string, pathEnv: string | undefined): Promise<string> {
-  const candidates = isAbsolute(command)
-    ? [command]
-    : (pathEnv ?? "")
-        .split(delimiter)
-        .filter(Boolean)
-        .map((directory) => join(directory, command));
-  for (const candidate of candidates) {
-    try {
-      const resolved = await realpath(candidate);
-      await access(resolved, constants.X_OK);
-      return resolved;
-    } catch (error) {
-      if (
-        error &&
-        typeof error === "object" &&
-        "code" in error &&
-        (error.code === "ENOENT" || error.code === "EACCES")
-      ) {
-        continue;
-      }
-      throw error;
-    }
-  }
-  throw new Error("agent_host_preset_binary_missing");
-}
-
 function credentialStore(config: AgentHostConfig): FileHostCredentialStore {
   return new FileHostCredentialStore(join(config.dataDirectory, "credentials.json"));
 }
@@ -117,15 +90,27 @@ function transportOrigin(value: string): string {
 
 export class AgentHostOperator {
   constructor(
-    private readonly backgroundService: AgentHostBackgroundService | null = createPlatformBackgroundService()
+    private readonly backgroundService: AgentHostBackgroundService | null = createPlatformBackgroundService(),
+    private readonly hostPlatform: NodeJS.Platform = process.platform,
+    private readonly hostEnvironment: Readonly<Record<string, string | undefined>> = process.env
   ) {}
+
+  private async resolvePresetCommand(command: string): Promise<string> {
+    const resolved = await resolveHostExecutable({
+      command,
+      platform: this.hostPlatform,
+      env: this.hostEnvironment
+    });
+    if (!resolved) throw new Error("agent_host_preset_binary_missing");
+    return resolved;
+  }
 
   async initializePreset(configPath: string, presetId: string): Promise<AgentHostConfig> {
     if (presetId !== "codex-acp") throw new Error("agent_host_preset_unsupported");
     const config = await loadAgentHostConfig(configPath);
     const preset = findSupportedHostAcpProfile(presetId);
     if (!preset) throw new Error("agent_host_preset_unsupported");
-    const command = await resolvePresetCommand(preset.command, process.env.PATH);
+    const command = await this.resolvePresetCommand(preset.command);
     const profile = {
       id: preset.profileId,
       agentId: preset.agentId,
@@ -154,13 +139,13 @@ export class AgentHostOperator {
 
   async listAgents(configPath: string): Promise<AgentExposureStatus[]> {
     const config = await loadAgentHostConfig(configPath);
-    return listAgentExposure(config, (command) => resolvePresetCommand(command, process.env.PATH));
+    return listAgentExposure(config, (command) => this.resolvePresetCommand(command));
   }
 
   async exposeAgent(configPath: string, profileId: string): Promise<AgentExposureMutationResult> {
     const preset = requireSupportedAgentProfile(profileId);
     const config = await loadAgentHostConfig(configPath);
-    const command = await resolvePresetCommand(preset.command, process.env.PATH);
+    const command = await this.resolvePresetCommand(preset.command);
     const existing = config.agentProfiles.find((profile) => profile.id === profileId);
     if (existing && existing.agentId !== preset.agentId) {
       throw new Error("agent_host_agent_profile_conflict");

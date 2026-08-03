@@ -5,6 +5,7 @@ import {
   ACP_SDK_AUTHORITY,
   probeInstalledAcpAgent,
   resolveAgentDefinition,
+  resolveWindowsProcessInvocation,
   type AcpPreflightProbeResult
 } from "@planweave-ai/runtime";
 import type { RealAcpGate, RealAcpPrecondition } from "./gate.js";
@@ -49,12 +50,58 @@ export type RealAcpPreflightOutcome =
       evidence?: RealAcpPreflightEvidence;
     };
 
-async function probeVersion(commandPath: string): Promise<string | null> {
+type VersionProbeRunner = (
+  command: string,
+  args: readonly string[],
+  options: {
+    encoding: "utf8";
+    timeout: number;
+    maxBuffer: number;
+    shell: false;
+    windowsVerbatimArguments: boolean;
+    cwd: string | undefined;
+    env: NodeJS.ProcessEnv;
+  }
+) => Promise<{ stdout: string; stderr: string }>;
+
+const runVersionProbe: VersionProbeRunner = async (command, args, options) => {
+  const result = await execFileAsync(command, args, options);
+  return { stdout: result.stdout, stderr: result.stderr };
+};
+
+export async function probeAgentVersion(options: {
+  commandPath: string;
+  cwd?: string;
+  env?: Readonly<Record<string, string | undefined>>;
+  platform?: NodeJS.Platform;
+  run?: VersionProbeRunner;
+  resolveWindowsInvocation?: typeof resolveWindowsProcessInvocation;
+}): Promise<string | null> {
   try {
-    const result = await execFileAsync(commandPath, ["--version"], {
+    const platform = options.platform ?? process.platform;
+    const env = { ...(options.env ?? process.env) };
+    const invocation =
+      platform === "win32"
+        ? (options.resolveWindowsInvocation ?? resolveWindowsProcessInvocation)({
+            command: options.commandPath,
+            args: ["--version"],
+            cwd: options.cwd,
+            env
+          })
+        : {
+            command: options.commandPath,
+            args: ["--version"],
+            windowsVerbatimArguments: false
+          };
+    if (!invocation) return null;
+    const result = await (options.run ?? runVersionProbe)(invocation.command, invocation.args, {
       encoding: "utf8",
       timeout: 10_000,
-      maxBuffer: 64 * 1024
+      maxBuffer: 64 * 1024,
+      shell: false,
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+      cwd: options.cwd,
+      env
     });
     const text = `${result.stdout}${result.stderr}`.trim();
     return text.length > 0 ? text.split(/\r?\n/, 1)[0]!.slice(0, 256) : null;
@@ -86,19 +133,26 @@ export async function preflightRealAcp(options: {
   cwd: string;
   env?: Readonly<Record<string, string | undefined>>;
   pathEnv?: string;
+  platform?: NodeJS.Platform;
   signal?: AbortSignal;
 }): Promise<RealAcpPreflightOutcome> {
   const resolved = await resolveRealAcpHostProfile({
     gate: options.gate,
     env: options.env,
-    pathEnv: options.pathEnv
+    pathEnv: options.pathEnv,
+    platform: options.platform
   });
   if (resolved.status === "precondition") {
     return { status: "precondition", precondition: resolved.precondition };
   }
 
   const { profile } = resolved;
-  const versionOutput = await probeVersion(profile.commandPath);
+  const versionOutput = await probeAgentVersion({
+    commandPath: profile.commandPath,
+    cwd: options.cwd,
+    env: options.env,
+    platform: options.platform
+  });
   profile.versionOutput = versionOutput;
 
   const definition = resolveAgentDefinition(profile.supported.agentId);

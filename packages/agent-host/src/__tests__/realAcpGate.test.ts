@@ -1,9 +1,9 @@
-import { chmod, mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseRealAcpGate, precondition } from "../realAcp/gate.js";
-import { evidenceCommandLabel, preflightRealAcp } from "../realAcp/preflight.js";
+import { evidenceCommandLabel, preflightRealAcp, probeAgentVersion } from "../realAcp/preflight.js";
 import { resolveRealAcpHostProfile } from "../realAcp/resolveProfile.js";
 import { listSupportedHostAcpProfiles } from "../realAcp/supportedProfiles.js";
 import { runRealAcpSmokeCli } from "../realAcp/cli.js";
@@ -107,6 +107,70 @@ describe("real ACP gate and profile resolution", () => {
     expect(outcome.profile.hostProfile.launch.command.endsWith("/codex-acp")).toBe(true);
   });
 
+  it("resolves a Windows npm ACP shim through Path and PATHEXT", async () => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-real-acp-win32-"));
+    tempRoots.push(root);
+    const command = join(root, "codex-acp.cmd");
+    await writeFile(command, "@echo off\r\n", "utf8");
+
+    const outcome = await resolveRealAcpHostProfile({
+      gate: { enabled: true, mode: "soft", preferredProfileId: "codex-acp" },
+      env: {
+        Path: root,
+        PATHEXT: ".CMD",
+        NoDefaultCurrentDirectoryInExePath: "1"
+      },
+      platform: "win32"
+    });
+
+    expect(outcome.status).toBe("resolved");
+    if (outcome.status !== "resolved") return;
+    const canonicalCommand = await realpath(command);
+    expect(outcome.profile.commandPath).toBe(canonicalCommand);
+    expect(outcome.profile.hostProfile.launch.command).toBe(canonicalCommand);
+  });
+
+  it("runs the Windows version probe through a controlled process invocation", async () => {
+    const resolveWindowsInvocation = vi.fn(() => ({
+      command: "C:\\Windows\\System32\\cmd.exe",
+      args: ["/d", "/s", "/c", '"C:\\Tools\\codex-acp.cmd --version"'],
+      target: { executable: "C:\\Tools\\codex-acp.cmd", launchMode: "batch" as const },
+      windowsVerbatimArguments: true
+    }));
+    const run = vi.fn(async () => ({ stdout: "codex-acp 1.2.3\r\n", stderr: "" }));
+
+    await expect(
+      probeAgentVersion({
+        commandPath: "C:\\Tools\\codex-acp.cmd",
+        cwd: "C:\\workspace",
+        env: { Path: "C:\\Tools", PATHEXT: ".CMD" },
+        platform: "win32",
+        resolveWindowsInvocation,
+        run
+      })
+    ).resolves.toBe("codex-acp 1.2.3");
+    expect(resolveWindowsInvocation).toHaveBeenCalledWith({
+      command: "C:\\Tools\\codex-acp.cmd",
+      args: ["--version"],
+      cwd: "C:\\workspace",
+      env: { Path: "C:\\Tools", PATHEXT: ".CMD" }
+    });
+    expect(run).toHaveBeenCalledWith(
+      "C:\\Windows\\System32\\cmd.exe",
+      ["/d", "/s", "/c", '"C:\\Tools\\codex-acp.cmd --version"'],
+      {
+        encoding: "utf8",
+        timeout: 10_000,
+        maxBuffer: 64 * 1024,
+        shell: false,
+        windowsVerbatimArguments: true,
+        cwd: "C:\\workspace",
+        env: { Path: "C:\\Tools", PATHEXT: ".CMD" }
+      }
+    );
+    expect(run.mock.calls[0]?.[2].env).toBe(resolveWindowsInvocation.mock.calls[0]?.[0].env);
+  });
+
   it("records skip disposition in precondition helpers", () => {
     expect(precondition("soft", "auth_required", "login needed", "grok-acp")).toEqual({
       kind: "auth_required",
@@ -172,11 +236,7 @@ describe("real ACP gate and profile resolution", () => {
     const root = await mkdtemp(join(tmpdir(), "planweave-real-acp-evidence-path-"));
     tempRoots.push(root);
     const command = join(root, "codex-acp");
-    await writeFile(
-      command,
-      "#!/bin/sh\necho 'not a real acp agent'\nexit 1\n",
-      "utf8"
-    );
+    await writeFile(command, "#!/bin/sh\necho 'not a real acp agent'\nexit 1\n", "utf8");
     await chmod(command, 0o755);
 
     const outcome = await preflightRealAcp({

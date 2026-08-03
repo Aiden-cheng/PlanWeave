@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -76,6 +76,47 @@ describe("Agent exposure allowlist", () => {
       true
     );
     expect(JSON.stringify(listed)).not.toMatch(/command|environment|token|\/Users\//i);
+  });
+
+  it("initializes, detects, and exposes a Windows npm ACP shim by absolute path", async () => {
+    const binaryRoot = await mkdtemp(join(tmpdir(), "planweave-agent-exposure-win32-"));
+    roots.push(binaryRoot);
+    const commandPath = join(binaryRoot, "codex-acp.cmd");
+    await writeFile(commandPath, "@echo off\r\n", "utf8");
+    const value = await config();
+    const configPath = join(value.dataDirectory, "config.json");
+    await writePrivateJsonFile(configPath, value);
+    const operator = new AgentHostOperator(null, "win32", {
+      Path: binaryRoot,
+      PATHEXT: ".CMD",
+      NoDefaultCurrentDirectoryInExePath: "1"
+    });
+
+    const initialized = await operator.initializePreset(configPath, "codex-acp");
+    const canonicalCommandPath = await realpath(commandPath);
+    expect(initialized.agentProfiles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "codex-acp", command: canonicalCommandPath })
+      ])
+    );
+    await expect(operator.listAgents(configPath)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ profileId: "codex-acp", detected: true, ready: true })
+      ])
+    );
+
+    const exposed = await operator.exposeAgent(configPath, "codex-acp");
+    expect(exposed.agents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ profileId: "codex-acp", exposed: true, ready: true })
+      ])
+    );
+    const persisted = JSON.parse(await readFile(configPath, "utf8")) as {
+      agentProfiles: Array<{ id: string; command: string }>;
+    };
+    expect(persisted.agentProfiles.find((profile) => profile.id === "codex-acp")?.command).toBe(
+      canonicalCommandPath
+    );
   });
 
   it("fails closed for unknown profile ids", () => {

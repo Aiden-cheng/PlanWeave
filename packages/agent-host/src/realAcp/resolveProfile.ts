@@ -1,7 +1,5 @@
-import { access, realpath } from "node:fs/promises";
-import { constants } from "node:fs";
-import { delimiter, isAbsolute, join } from "node:path";
 import type { ResolvedAgentHostAcpProfile } from "../execution/remoteAcpPorts.js";
+import { resolveHostExecutable } from "../platform/resolveHostExecutable.js";
 import type { RealAcpGate, RealAcpPrecondition } from "./gate.js";
 import { precondition } from "./gate.js";
 import {
@@ -21,27 +19,15 @@ export type ResolveRealAcpOutcome =
   | { status: "resolved"; profile: ResolvedRealAcpHostProfile }
   | { status: "precondition"; precondition: RealAcpPrecondition };
 
-async function pathExistsExecutable(candidate: string): Promise<string | null> {
-  try {
-    const resolved = isAbsolute(candidate) ? await realpath(candidate) : candidate;
-    await access(resolved, constants.X_OK);
-    return isAbsolute(resolved) ? resolved : null;
-  } catch {
-    return null;
-  }
-}
-
-async function which(command: string, pathEnv: string | undefined): Promise<string | null> {
-  if (isAbsolute(command)) {
-    return pathExistsExecutable(command);
-  }
-  const directories = (pathEnv ?? "").split(delimiter).filter(Boolean);
-  for (const directory of directories) {
-    const candidate = join(directory, command);
-    const resolved = await pathExistsExecutable(candidate);
-    if (resolved) return resolved;
-  }
-  return null;
+function withPathOverride(
+  env: Readonly<Record<string, string | undefined>>,
+  pathEnv: string | undefined
+): Readonly<Record<string, string | undefined>> {
+  if (pathEnv === undefined) return env;
+  return {
+    ...Object.fromEntries(Object.entries(env).filter(([name]) => name.toLowerCase() !== "path")),
+    PATH: pathEnv
+  };
 }
 
 function collectEnvironment(
@@ -65,9 +51,9 @@ export async function resolveRealAcpHostProfile(options: {
   gate: RealAcpGate;
   env?: Readonly<Record<string, string | undefined>>;
   pathEnv?: string;
+  platform?: NodeJS.Platform;
 }): Promise<ResolveRealAcpOutcome> {
-  const env = options.env ?? process.env;
-  const pathEnv = options.pathEnv ?? env.PATH;
+  const env = withPathOverride(options.env ?? process.env, options.pathEnv);
   const gate = options.gate;
 
   if (!gate.enabled) {
@@ -100,7 +86,11 @@ export async function resolveRealAcpHostProfile(options: {
     }
   } else {
     for (const candidate of catalog) {
-      const commandPath = await which(candidate.command, pathEnv);
+      const commandPath = await resolveHostExecutable({
+        command: candidate.command,
+        env,
+        platform: options.platform
+      });
       if (commandPath) {
         selected = candidate;
         break;
@@ -120,7 +110,11 @@ export async function resolveRealAcpHostProfile(options: {
     }
   }
 
-  const commandPath = await which(selected.command, pathEnv);
+  const commandPath = await resolveHostExecutable({
+    command: selected.command,
+    env,
+    platform: options.platform
+  });
   if (!commandPath) {
     return {
       status: "precondition",
