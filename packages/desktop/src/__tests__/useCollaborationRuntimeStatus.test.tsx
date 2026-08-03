@@ -95,7 +95,6 @@ describe("collaboration runtime status", () => {
     expect(merged.tasks[0]?.blocks[0]?.dispatchable).toBe(true);
 
     for (const invalidStatus of [
-      { ...remoteStatus, packageFingerprint: `pkg-${"b".repeat(64)}` },
       { ...remoteStatus, tasks: remoteStatus.tasks.slice(0, 1) },
       {
         ...remoteStatus,
@@ -121,6 +120,15 @@ describe("collaboration runtime status", () => {
       expect(failClosed.tasks[0]?.status).toBe("ready");
       expect(failClosed.tasks[0]?.blocks[0]?.dispatchable).toBe(false);
     }
+
+    const contentChanged = mergeCollaborationRuntimeStatus(
+      { ...graphWithBlock, packageFingerprint: `pkg-${"b".repeat(64)}` },
+      remoteStatus,
+      scope
+    );
+    expect(contentChanged.tasks[0]?.status).toBe("implemented");
+    expect(contentChanged.tasks[0]?.blocks[0]?.status).toBe("ready");
+    expect(contentChanged.tasks[0]?.blocks[0]?.dispatchable).toBe(false);
 
     const scopeMismatch = mergeCollaborationRuntimeStatus(graphWithBlock, remoteStatus, {
       ...scope,
@@ -151,6 +159,77 @@ describe("collaboration runtime status", () => {
 
     rerender({ input: hookInput({ api: bridge, profileId: "profile-2" }) });
     expect(result.current.graph?.tasks[0]?.status).toBe("ready");
+    expect(result.current.graph?.tasks[0]?.blocks[0]?.dispatchable).toBe(false);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(result.current.graph?.tasks[0]?.status).toBe("implemented");
+  });
+
+  it("keeps the last committed status while same-canvas content refresh is pending", async () => {
+    let resolveRefresh: ((status: typeof remoteStatus) => void) | null = null;
+    const pendingRefresh = new Promise<typeof remoteStatus>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    const read = vi
+      .fn()
+      .mockResolvedValueOnce(remoteStatus)
+      .mockReturnValueOnce(pendingRefresh);
+    const bridge = api(read);
+    const { result, rerender } = renderHook(
+      ({ input }) => useCollaborationRuntimeStatus(input),
+      { initialProps: { input: hookInput({ api: bridge }) } }
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(result.current.graph?.tasks[0]?.status).toBe("implemented");
+
+    const changedGraph = {
+      ...graphWithBlock,
+      packageFingerprint: `pkg-${"b".repeat(64)}`
+    };
+    rerender({ input: hookInput({ api: bridge, graph: changedGraph }) });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(result.current.graph?.tasks[0]?.status).toBe("implemented");
+    expect(result.current.graph?.tasks[0]?.blocks[0]?.dispatchable).toBe(false);
+
+    await act(async () => {
+      resolveRefresh?.(remoteStatus);
+      await pendingRefresh;
+    });
+  });
+
+  it("preserves status but disables dispatch when shared content changes ahead of Runtime", async () => {
+    const bridge = api();
+    const changedGraph = {
+      ...graphWithBlock,
+      packageFingerprint: `pkg-${"b".repeat(64)}`
+    };
+    const { result } = renderHook(() =>
+      useCollaborationRuntimeStatus(hookInput({ api: bridge, graph: changedGraph }))
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(result.current.graph?.tasks[0]?.status).toBe("implemented");
+    expect(result.current.graph?.tasks[0]?.blocks[0]?.status).toBe("ready");
     expect(result.current.graph?.tasks[0]?.blocks[0]?.dispatchable).toBe(false);
   });
 

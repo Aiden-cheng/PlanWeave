@@ -25,20 +25,6 @@ type RuntimeStatusSnapshot = {
   status: CanvasRuntimeStatusProjection;
 };
 
-function sameCanvasIdentity(
-  left: ResolvedCanvasIdentity,
-  right: ResolvedCanvasIdentity
-): boolean {
-  return (
-    left.profileId === right.profileId &&
-    left.localProjectId === right.localProjectId &&
-    left.localCanvasId === right.localCanvasId &&
-    left.remoteWorkspaceId === right.remoteWorkspaceId &&
-    left.remoteProjectId === right.remoteProjectId &&
-    left.remoteCanvasId === right.remoteCanvasId
-  );
-}
-
 function sameRuntimeScope(
   left: CanvasRuntimeStatusProjection["scope"],
   right: CanvasRuntimeStatusProjection["scope"]
@@ -96,12 +82,12 @@ export function mergeCollaborationRuntimeStatus(
   if (
     !status ||
     !expectedScope ||
-    status.packageFingerprint !== graph.packageFingerprint ||
     !sameRuntimeScope(status.scope, expectedScope) ||
     !hasExactRuntimeIdentity(graph, status)
   ) {
     return failClosedDispatchability(graph);
   }
+  const contentMatchesRuntime = status.packageFingerprint === graph.packageFingerprint;
   const taskStatuses = new Map(status.tasks.map((task) => [task.taskId, task]));
   const blockStatuses = new Map(status.blocks.map((block) => [block.ref, block]));
   return {
@@ -119,7 +105,7 @@ export function mergeCollaborationRuntimeStatus(
             ...block,
             status: remoteBlock.status,
             exceptionReason: remoteBlock.blockedReason ?? remoteBlock.divergenceReason ?? null,
-            dispatchable: remoteBlock.dispatchable
+            dispatchable: contentMatchesRuntime && remoteBlock.dispatchable
           };
         });
       const blocks = mergeBlocks(task.blocks);
@@ -172,11 +158,9 @@ export function useCollaborationRuntimeStatus(input: {
     const activeProjectId = input.activeProjectId;
     const localProjectId = input.localProjectId;
     const localCanvasId = input.localCanvasId;
-    const packageFingerprint = input.graph.packageFingerprint;
     let active = true;
     let inFlight = false;
     let identity: ResolvedCanvasIdentity | null = null;
-    setSnapshot(null);
     setError(null);
 
     const refresh = async () => {
@@ -191,17 +175,12 @@ export function useCollaborationRuntimeStatus(input: {
         if (!active) return;
         if (
           !next ||
-          next.packageFingerprint !== packageFingerprint ||
           !matchesResolvedCanvas(next, currentIdentity)
         ) {
           setSnapshot(null);
           return;
         }
-        setSnapshot((current) => {
-          if (current && !sameCanvasIdentity(current.identity, currentIdentity)) return null;
-          if (current && !sameRuntimeScope(current.status.scope, next.scope)) return null;
-          return { identity: currentIdentity, status: next };
-        });
+        setSnapshot({ identity: currentIdentity, status: next });
         setError(null);
       } catch (caught) {
         if (active) {

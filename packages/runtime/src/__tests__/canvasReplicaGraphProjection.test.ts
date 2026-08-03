@@ -209,6 +209,8 @@ describe("canvas replica graph projection", () => {
       status: { ...status, packageFingerprint: `pkg-${"b".repeat(64)}` },
       scope: status.scope
     });
+    expect(fingerprintMismatch.tasks[0]?.status).toBe("in_progress");
+    expect(fingerprintMismatch.tasks[0]?.blocks[0]?.status).toBe("in_progress");
     expect(fingerprintMismatch.tasks[0]?.blocks.every((block) => !block.dispatchable)).toBe(true);
   });
 });

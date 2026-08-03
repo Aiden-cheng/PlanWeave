@@ -244,11 +244,11 @@ export function overlayCanvasReplicaRuntimeStatus(input: {
   if (
     !status ||
     !sameScope(status.scope, scope) ||
-    status.packageFingerprint !== content.packageFingerprint ||
     !hasExactRuntimeIdentity(content, status)
   ) {
     return baseline;
   }
+  const contentMatchesRuntime = status.packageFingerprint === content.packageFingerprint;
   const taskStatuses = new Map(status.tasks.map((task) => [task.taskId, task]));
   const blockStatuses = new Map(status.blocks.map((block) => [block.ref, block]));
   const taskOpenFeedbackCountByTaskId: Record<string, number> = {};
@@ -261,7 +261,7 @@ export function overlayCanvasReplicaRuntimeStatus(input: {
         ...block,
         status: remoteBlock.status,
         exceptionReason: remoteBlock.blockedReason ?? remoteBlock.divergenceReason ?? null,
-        dispatchable: remoteBlock.dispatchable
+        dispatchable: contentMatchesRuntime && remoteBlock.dispatchable
       };
     });
     const blockByRef = new Map(blocks.map((block) => [block.ref, block]));
