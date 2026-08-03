@@ -307,7 +307,7 @@ export function BlockInspector({
                   void saveSelectedBlockExecutor(value === "__inherit" ? null : value)
                 }
               >
-                <SelectTrigger>
+                <SelectTrigger aria-label={t("agent")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

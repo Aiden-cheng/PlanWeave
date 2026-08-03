@@ -255,7 +255,7 @@ export function TaskInspector({
                 value={selectedExecutor}
                 onValueChange={(value) => void saveSelectedTaskExecutor(value)}
               >
-                <SelectTrigger>
+                <SelectTrigger aria-label={t("agent")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

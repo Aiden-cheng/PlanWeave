@@ -187,7 +187,7 @@ export function RemoteRunPanel({
           value={controller.selectedAgentEndpointId ?? undefined}
           onValueChange={controller.setSelectedAgentEndpointId}
         >
-          <SelectTrigger data-testid="agent-endpoint-select">
+          <SelectTrigger aria-label={t("agentEndpointLabel")} data-testid="agent-endpoint-select">
             <SelectValue placeholder={t("agentEndpointPlaceholder")} />
           </SelectTrigger>
           <SelectContent>

@@ -202,7 +202,7 @@ describe("desktop renderer component interactions", () => {
       />
     );
 
-    await userEvent.click(screen.getByRole("combobox"));
+    await userEvent.click(screen.getByRole("combobox", { name: "Agent" }));
 
     expect(await screen.findByRole("option", { name: "custom-shell" })).toBeInTheDocument();
   });
@@ -253,9 +253,9 @@ describe("desktop renderer component interactions", () => {
       />
     );
 
-    expect(screen.getByRole("combobox")).toHaveTextContent("pi");
+    expect(screen.getByRole("combobox", { name: "Agent" })).toHaveTextContent("pi");
 
-    await userEvent.click(screen.getByRole("combobox"));
+    await userEvent.click(screen.getByRole("combobox", { name: "Agent" }));
 
     expect(await screen.findByRole("option", { name: /pi/i })).toHaveAttribute("data-disabled");
     expect(screen.queryByRole("option", { name: "pi-auto" })).not.toBeInTheDocument();
@@ -305,8 +305,8 @@ describe("desktop renderer component interactions", () => {
       />
     );
 
-    expect(screen.getByRole("combobox")).toHaveTextContent("legacy-executor");
-    expect(screen.getByRole("combobox")).not.toHaveTextContent("Inherit");
+    expect(screen.getByRole("combobox", { name: "Agent" })).toHaveTextContent("legacy-executor");
+    expect(screen.getByRole("combobox", { name: "Agent" })).not.toHaveTextContent("Inherit");
   });
 
   it("lets block prompt textareas grow into the inspector page scroll", () => {
@@ -466,7 +466,7 @@ describe("desktop renderer component interactions", () => {
 
     expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("Task");
     expect(screen.queryByText("Task Detail")).not.toBeInTheDocument();
-    expect(screen.getByRole("combobox")).toHaveTextContent("legacy-executor");
+    expect(screen.getByRole("combobox", { name: "Agent" })).toHaveTextContent("legacy-executor");
   });
 
   it("folds auto executor aliases and disables missing agents in the task inspector dropdown", async () => {
@@ -528,9 +528,9 @@ describe("desktop renderer component interactions", () => {
       />
     );
 
-    expect(screen.getByRole("combobox")).toHaveTextContent("pi");
+    expect(screen.getByRole("combobox", { name: "Agent" })).toHaveTextContent("pi");
 
-    await userEvent.click(screen.getByRole("combobox"));
+    await userEvent.click(screen.getByRole("combobox", { name: "Agent" }));
 
     expect(await screen.findByRole("option", { name: /pi/i })).toHaveAttribute("data-disabled");
     expect(screen.queryByRole("option", { name: "pi-auto" })).not.toBeInTheDocument();
