@@ -1025,6 +1025,8 @@ export const zhCnCatalog = {
   peopleConnectionDiagnosticsCopyFailed: "无法复制诊断信息，请重试。",
   peopleRefresh: "刷新",
   peopleRequestRateLimited: "协作请求过于频繁。请稍候再试。",
+  peopleServerUnreachable:
+    "无法连接共享 Server。请确认 Server 已启动，并且当前设备可以访问其地址，然后重试。",
   peopleLoading: "加载中…",
   peopleConnecting: "正在连接协作…",
   peopleDisconnected: "尚未连接协作项目。",
@@ -1391,7 +1393,8 @@ export const zhCnCatalog = {
     "画布版本已过期（本地期望 {expected}，服务端为 {authoritative}）。请重连后重试。",
   canvasCommandRejected: "画布命令被拒绝：{code}",
   canvasCommandReconnectFailed: "画布重连失败：{code}",
-  canvasCommandNotConnected: "共享画布命令会话未连接。",
+  canvasCommandNotConnected:
+    "共享画布当前离线，无法编辑。请先启动或检查 Server，然后前往“成员”页面点击“刷新”重新连接。",
   canvasCommandUnsupportedLocalOnly:
     "共享画布已连接时无法执行此编辑。请断开协作连接，或改用受支持的共享命令。",
   contentAuthorityTitle: "权威内容版本",

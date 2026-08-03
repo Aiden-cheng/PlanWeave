@@ -23,6 +23,7 @@ import { LocalCollaborationServerPanel } from "../collaboration/LocalCollaborati
 import { useCurrentCanvasAccess } from "../hooks/useCurrentCanvasAccess";
 import { isCollaborationSessionConnected } from "../collaboration/sessionState";
 import {
+  collaborationConnectionErrorMessage,
   collaborationErrorCode,
   collaborationErrorMessage
 } from "../collaboration/formatCollaborationError";
@@ -122,6 +123,8 @@ export function PeopleView({
   const [section, setSection] = useState<PeopleSection>("workspace");
   const [localHostingOpen, setLocalHostingOpen] = useState(false);
   const [revealInvitationManagement, setRevealInvitationManagement] = useState(false);
+  const [reconnectPending, setReconnectPending] = useState(false);
+  const [reconnectError, setReconnectError] = useState<string | null>(null);
   const [internalLocalInvitationHandoff, setInternalLocalInvitationHandoff] = useState<
     string | null
   >(null);
@@ -157,6 +160,10 @@ export function PeopleView({
   }, [status]);
 
   const sessionConnected = isCollaborationSessionConnected(status);
+
+  useEffect(() => {
+    if (sessionConnected) setReconnectError(null);
+  }, [sessionConnected]);
   const workspaceConnectionActive =
     status?.workspaceConnection.status === "connecting" ||
     status?.workspaceConnection.status === "connected" ||
@@ -223,6 +230,25 @@ export function PeopleView({
     if (controller && activeProfile) {
       await controller.refreshAuthoritative({ reason: "people_member_mutation" });
     }
+  };
+
+  const handleRefreshDetails = async () => {
+    if (reconnectPending) return;
+    setReconnectError(null);
+    if (!sessionConnected && api && activeProfile?.hasDeviceCredential) {
+      setReconnectPending(true);
+      try {
+        await api.connectCollaborationSession({ profileId: activeProfile.profileId });
+      } catch (error) {
+        setReconnectError(collaborationConnectionErrorMessage(t, error));
+      } finally {
+        await refreshCollaborationStatus();
+        setReconnectPending(false);
+      }
+      return;
+    }
+    await panel.refreshDetails();
+    await refreshMembers();
   };
 
   const reportMembership = (ok: boolean, message: string) => {
@@ -324,13 +350,22 @@ export function PeopleView({
 
             {section === "workspace" ? (
               <div className="flex flex-col gap-6" data-testid="people-workspace-section">
+                {reconnectError ? (
+                  <div
+                    className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+                    data-testid="people-reconnect-error"
+                    role="alert"
+                  >
+                    {reconnectError}
+                  </div>
+                ) : null}
                 <PeoplePanel
                   mode={panel.mode}
                   presence={panel.presence}
                   members={panel.members}
                   invitations={panel.invitations}
                   devices={panel.devices}
-                  detailsLoading={panel.detailsLoading}
+                  detailsLoading={panel.detailsLoading || reconnectPending}
                   detailsError={panel.detailsError}
                   actionError={panel.actionError}
                   actionBusy={panel.actionBusy}
@@ -385,10 +420,7 @@ export function PeopleView({
                     reportMembership(ok, membershipResult(ok));
                     return ok;
                   }}
-                  onRefreshDetails={async () => {
-                    await panel.refreshDetails();
-                    await refreshMembers();
-                  }}
+                  onRefreshDetails={handleRefreshDetails}
                   renderMemberAccess={(member) => {
                     if (currentCanvasAccess.loading && !currentCanvasAccess.view) {
                       return <p className="text-xs text-muted-foreground">{t("accessLoading")}</p>;

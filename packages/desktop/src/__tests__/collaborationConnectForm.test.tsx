@@ -376,6 +376,48 @@ describe("CollaborationConnectForm connection diagnostics", () => {
     );
   });
 
+  it("explains how to recover when the configured Server is unreachable", async () => {
+    const user = userEvent.setup();
+    const api = {
+      connectWorkspaceConnection: vi.fn().mockResolvedValue(undefined),
+      setActiveCollaborationProfile: vi.fn().mockResolvedValue(undefined),
+      connectCollaborationSession: vi.fn().mockRejectedValue({
+        kind: "offline",
+        code: "collaboration_offline",
+        message: "Network request failed.",
+        retryable: true
+      })
+    } as unknown as PlanWeaveCollaborationApi;
+
+    render(
+      <CollaborationConnectForm
+        api={api}
+        status={{
+          ...diagnosticStatus,
+          session: {
+            ...diagnosticStatus.session,
+            phase: "error",
+            detail: "connect_preflight_failed",
+            lastErrorCode: "collaboration_offline",
+            lastErrorMessage: "Network request failed."
+          },
+          workspaceConnection: {
+            ...diagnosticStatus.workspaceConnection,
+            status: "disconnected"
+          }
+        }}
+        t={createTranslator("en")}
+        fixedMode="connect"
+      />
+    );
+
+    await user.click(screen.getByTestId("people-connect-submit"));
+
+    expect(await screen.findByTestId("people-connect-error")).toHaveTextContent(
+      "Could not reach the shared Server. Make sure it is running and this device can access its address, then try again."
+    );
+  });
+
   it("updates a stale server address without replacing the existing member identity", async () => {
     const user = userEvent.setup();
     const upsertCollaborationProfile = vi.fn().mockResolvedValue(undefined);

@@ -1083,6 +1083,8 @@ export const enCatalog = {
   peopleConnectionDiagnosticsCopyFailed: "Could not copy the diagnostics. Try again.",
   peopleRefresh: "Refresh",
   peopleRequestRateLimited: "Too many collaboration requests. Wait a moment, then try again.",
+  peopleServerUnreachable:
+    "Could not reach the shared Server. Make sure it is running and this device can access its address, then try again.",
   peopleLoading: "Loading…",
   peopleConnecting: "Connecting to collaboration…",
   peopleDisconnected: "Not connected to a collaboration project.",
@@ -1460,7 +1462,8 @@ export const enCatalog = {
     "Canvas is out of date (expected revision {expected}, server is at {authoritative}). Reconnect and retry.",
   canvasCommandRejected: "Canvas command rejected: {code}",
   canvasCommandReconnectFailed: "Canvas reconnect failed: {code}",
-  canvasCommandNotConnected: "Shared canvas command session is not connected.",
+  canvasCommandNotConnected:
+    "This shared canvas is offline and cannot be edited. Start or check the Server, then go to People and select Refresh to reconnect.",
   canvasCommandUnsupportedLocalOnly:
     "This edit is not available while the shared canvas is connected. Disconnect collaboration or use a supported shared command.",
   contentAuthorityTitle: "Authoritative content",

@@ -893,6 +893,94 @@ describe("PeopleView", () => {
     expect(screen.queryByTestId("collaboration-workspace-onboarding")).not.toBeInTheDocument();
   });
 
+  it("reconnects a stored project session when refresh is clicked while disconnected", async () => {
+    const user = userEvent.setup();
+    const disconnectedStatus = {
+      profiles: [
+        {
+          profileId: "profile-1",
+          displayName: "Team workspace",
+          serverBaseUrl: "http://192.168.123.23:56584/",
+          projectId: "project-1",
+          allowInsecureTransport: true,
+          hasDeviceCredential: true,
+          deviceCredentialPersistence: "persisted",
+          deviceCredentialId: "device-1",
+          humanPrincipalId: "human-1",
+          updatedAt: "2030-01-01T00:00:00.000Z"
+        }
+      ],
+      activeProfileId: "profile-1",
+      credentialStorage: "available",
+      nonPersistenceWarning: null,
+      session: {
+        phase: "error",
+        activeProfileId: "profile-1",
+        detail: "connect_preflight_failed",
+        lastErrorCode: "collaboration_offline",
+        lastErrorMessage: "Network request failed."
+      },
+      workspaceConnection: {
+        schemaVersion: "workspace-setup/v1",
+        status: "disconnected",
+        profile: null,
+        workspaceId: null,
+        workspaceDisplayName: null,
+        connectedAt: null,
+        error: null
+      },
+      workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null },
+      updatedAt: "2030-01-01T00:00:00.000Z"
+    } satisfies CollaborationStatus;
+    const connectedStatus = {
+      ...disconnectedStatus,
+      session: {
+        phase: "connected",
+        activeProfileId: "profile-1",
+        detail: null,
+        lastErrorCode: null,
+        lastErrorMessage: null
+      },
+      updatedAt: "2030-01-01T00:00:01.000Z"
+    } satisfies CollaborationStatus;
+    const connectCollaborationSession = vi.fn().mockResolvedValue(connectedStatus);
+    const getCollaborationStatus = vi
+      .fn()
+      .mockResolvedValueOnce(disconnectedStatus)
+      .mockResolvedValue(connectedStatus);
+    const api = {
+      getCollaborationStatus,
+      connectCollaborationSession,
+      onCollaborationStatusChanged: vi.fn(() => () => undefined),
+      onCollaborationObserverSignal: vi.fn(() => () => undefined),
+      listCollaborationContentBootstrapCandidates: vi.fn().mockResolvedValue([]),
+      getLocalCollaborationServerStatus: vi.fn().mockResolvedValue({
+        profile: null,
+        state: "stopped",
+        startedAt: null,
+        reason: null,
+        lanSharingEnabled: false,
+        lanServerBaseUrl: null
+      })
+    } as unknown as PlanWeaveCollaborationApi;
+
+    render(
+      <PeopleView
+        api={api}
+        t={createTranslator("en")}
+        collaborationScopeLayout={scopeLayout}
+        onCollaborationScopeLayoutChange={onScopeLayoutChange}
+      />
+    );
+
+    await user.click(await screen.findByTestId("people-refresh-details"));
+
+    await waitFor(() =>
+      expect(connectCollaborationSession).toHaveBeenCalledWith({ profileId: "profile-1" })
+    );
+    expect(getCollaborationStatus).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps onboarding visible when a failed join left only an uncredentialed profile", async () => {
     const api = {
       getCollaborationStatus: vi.fn().mockResolvedValue({

@@ -15,7 +15,10 @@ import {
   type CollaborationStatus,
   type PlanWeaveCollaborationApi
 } from "../../shared/collaboration.js";
-import { collaborationErrorMessage } from "../collaboration/formatCollaborationError";
+import {
+  collaborationConnectionErrorMessage,
+  collaborationErrorMessage
+} from "../collaboration/formatCollaborationError";
 import { parseCollaborationInvitationHandoff } from "./collaborationInvitationHandoff";
 import { CollaborationInvitationJoinFields } from "./CollaborationInvitationJoinFields";
 import { CollaborationSetupHandoffFields } from "./CollaborationSetupHandoffFields";
@@ -229,7 +232,7 @@ export function CollaborationConnectForm({
         await api.connectCollaborationSession({ profileId: activeProfile.profileId });
         if (workspaceConnectError) {
           setInfo(
-            `${t("peopleWorkspaceError")}: ${collaborationErrorMessage(workspaceConnectError)}`
+            `${t("peopleWorkspaceError")}: ${collaborationConnectionErrorMessage(t, workspaceConnectError)}`
           );
         }
         await onConnected?.();
@@ -301,7 +304,7 @@ export function CollaborationConnectForm({
       setInvitationDetails("");
       await onConnected?.();
     } catch (submitError) {
-      setError(collaborationErrorMessage(submitError));
+      setError(collaborationConnectionErrorMessage(t, submitError));
     } finally {
       setBusy(false);
     }
@@ -342,7 +345,7 @@ export function CollaborationConnectForm({
       await api.retryWorkspaceConnection();
       await onConnected?.();
     } catch (retryError) {
-      setError(collaborationErrorMessage(retryError));
+      setError(collaborationConnectionErrorMessage(t, retryError));
     } finally {
       setBusy(false);
     }
