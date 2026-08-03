@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { OperatorHostPage, OperatorHostView } from "@planweave-ai/agent-host-protocol";
 import {
   OperatorControlError,
-  type OperatorHostBootstrapConfig,
   type OperatorHostBootstrapHandoffView,
   type OperatorMemberSetupCodeHandoffView,
-  type OperatorControlProfile,
+  type OperatorControlProfileInput,
   type OperatorControlStatus,
   type OperatorProfileView
 } from "../../shared/operatorControl";
@@ -25,15 +24,13 @@ export type HostAdministrationController = {
   memberSetupCodeHandoff: OperatorMemberSetupCodeHandoffView | null;
   refresh: () => Promise<void>;
   refreshHosts: () => Promise<void>;
-  saveProfile: (profile: OperatorControlProfile) => Promise<boolean>;
+  saveProfile: (profile: OperatorControlProfileInput) => Promise<boolean>;
   removeProfile: (profileId: string) => Promise<boolean>;
   selectProfile: (profileId: string) => Promise<boolean>;
   clearActiveProfile: () => Promise<boolean>;
   importCredential: (profileId: string, operatorId?: string) => Promise<boolean>;
   clearCredential: (profileId: string) => Promise<boolean>;
-  copyBootstrapHandoff: (
-    bootstrap: OperatorHostBootstrapConfig
-  ) => Promise<OperatorHostBootstrapHandoffView | null>;
+  copyBootstrapHandoff: () => Promise<OperatorHostBootstrapHandoffView | null>;
   copyMemberSetupCode: () => Promise<OperatorMemberSetupCodeHandoffView | null>;
   revokeHost: (hostId: string) => Promise<OperatorHostView | null>;
   dismissHandoff: () => void;
@@ -100,9 +97,14 @@ export function useHostAdministrationController(): HostAdministrationController 
     () => status?.profiles.find((profile) => profile.profileId === status.activeProfileId) ?? null,
     [status]
   );
+  const previousActiveProfileId = useRef(activeProfile?.profileId);
 
   useEffect(() => {
-    setMemberSetupCodeHandoff(null);
+    const activeProfileId = activeProfile?.profileId;
+    if (previousActiveProfileId.current !== activeProfileId) {
+      previousActiveProfileId.current = activeProfileId;
+      setMemberSetupCodeHandoff(null);
+    }
   }, [activeProfile?.profileId]);
 
   const refreshHosts = useCallback(async () => {
@@ -158,7 +160,7 @@ export function useHostAdministrationController(): HostAdministrationController 
   );
 
   const saveProfile = useCallback(
-    (profile: OperatorControlProfile) =>
+    (profile: OperatorControlProfileInput) =>
       runStatusAction(() => operatorControlBridge!.upsertOperatorProfile(profile)),
     [runStatusAction]
   );
@@ -197,34 +199,30 @@ export function useHostAdministrationController(): HostAdministrationController 
     [runStatusAction]
   );
 
-  const copyBootstrapHandoff = useCallback(
-    async (bootstrap: OperatorHostBootstrapConfig) => {
-      if (!operatorControlBridge || !activeProfile || !activeProfile.hasOperatorCredential) {
-        setError("operator_credential_missing");
-        return null;
-      }
-      setBusy(true);
-      try {
-        const result = await operatorControlBridge.copyOperatorHostBootstrapHandoff({
-          profileId: activeProfile.profileId,
-          request: {
-            expiresAt: nextExpiry(15),
-            credentialExpiresAt: nextExpiry(24 * 60)
-          },
-          bootstrap
-        });
-        setHandoff(result);
-        setError(null);
-        return result;
-      } catch (cause) {
-        setError(errorMessage(cause));
-        return null;
-      } finally {
-        setBusy(false);
-      }
-    },
-    [activeProfile]
-  );
+  const copyBootstrapHandoff = useCallback(async () => {
+    if (!operatorControlBridge || !activeProfile || !activeProfile.hasOperatorCredential) {
+      setError("operator_credential_missing");
+      return null;
+    }
+    setBusy(true);
+    try {
+      const result = await operatorControlBridge.copyOperatorHostBootstrapHandoff({
+        profileId: activeProfile.profileId,
+        request: {
+          expiresAt: nextExpiry(15),
+          credentialExpiresAt: nextExpiry(24 * 60)
+        }
+      });
+      setHandoff(result);
+      setError(null);
+      return result;
+    } catch (cause) {
+      setError(errorMessage(cause));
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }, [activeProfile]);
 
   const copyMemberSetupCode = useCallback(async () => {
     if (!operatorControlBridge || !activeProfile || !activeProfile.hasOperatorCredential) {

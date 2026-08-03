@@ -95,7 +95,13 @@ describe("collaboration-protocol", () => {
         displayName: "LAN",
         serverBaseUrl: "http://192.168.1.20:8787/",
         projectId: "project-1",
-        allowInsecureTransport: true
+        allowInsecureTransport: true,
+        endpoint: {
+          topology: "lan_http",
+          serverOrigin: "http://192.168.1.20:8787/",
+          allowedClientOrigins: ["http://192.168.1.20:8787/"],
+          tlsTrust: "not_applicable"
+        }
       }).serverBaseUrl
     ).toBe("http://192.168.1.20:8787/");
     expect(() =>

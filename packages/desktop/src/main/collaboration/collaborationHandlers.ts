@@ -33,6 +33,7 @@ import { DeploymentActions } from "./deploymentActions.js";
 import { runCollaborationCommand } from "./collaborationCommandHandler.js";
 import { createLocalCollaborationActivationCommand } from "./localCollaborationSelectionActivation.js";
 import { CollaborationInvitationHandoffCoordinator } from "./CollaborationInvitationHandoffCoordinator.js";
+import { getOperatorControlService } from "../operatorControl/operatorControlHandlers.js";
 import { createCollaborationCoordinationQueue } from "./collaborationCoordinationQueue.js";
 import { switchLocalCollaborationExposure } from "./localCollaborationExposureSwitch.js";
 import { assertRendererProfileNamespace } from "./collaborationProfileEndpoint.js";
@@ -139,7 +140,8 @@ export function registerCollaborationHandlers(
       isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
       encryptString: (value) => safeStorage.encryptString(value),
       decryptString: (value) => safeStorage.decryptString(value)
-    }
+    },
+    syncOperatorProfile: (input) => getOperatorControlService().ensureMainOwnedServerProfile(input)
   });
   const local = coordinator;
   const localReady = local.restore();

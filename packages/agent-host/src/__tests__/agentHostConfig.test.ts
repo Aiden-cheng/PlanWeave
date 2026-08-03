@@ -125,6 +125,7 @@ describe("Agent Host configuration", () => {
         {
           profileId: "acp.test",
           agentId: "test-agent",
+          displayName: "acp.test",
           status: "ready",
           capabilities: ["acp.test-agent"]
         }

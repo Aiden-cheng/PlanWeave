@@ -185,6 +185,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     const fake = fakeControl();
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
+      syncOperatorProfile: async () => undefined,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
       networkStore: networkStore(),
       resolveLanAddress: () => "192.168.1.20",
@@ -208,6 +209,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     const storedNetwork = networkStore(true);
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
+      syncOperatorProfile: async () => undefined,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
       networkStore: storedNetwork,
       resolveLanAddress: () => "192.168.1.20",
@@ -240,6 +242,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
       | undefined;
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
+      syncOperatorProfile: async () => undefined,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
       networkStore: storedNetwork,
       resolveLanAddress: () => "192.168.1.20",
@@ -282,6 +285,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     const fake = fakeControl();
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
+      syncOperatorProfile: async () => undefined,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
       networkStore: networkStore(true),
       resolveLanAddress: () => "10.0.0.15",
@@ -308,6 +312,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     );
     const firstControl = new LocalCollaborationCoordinatorControl({
       safeStorage,
+      syncOperatorProfile: async () => undefined,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
       networkStore: storedNetwork,
       resolveLanAddress: () => "192.168.1.20",
@@ -330,6 +335,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     );
     const secondControl = new LocalCollaborationCoordinatorControl({
       safeStorage,
+      syncOperatorProfile: async () => undefined,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
       networkStore: storedNetwork,
       resolveLanAddress: () => "192.168.1.20",
@@ -358,6 +364,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     });
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
+      syncOperatorProfile: async () => undefined,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
       networkStore: storedNetwork,
       resolveLanAddress: () => "192.168.1.20",
@@ -395,6 +402,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     const fake = fakeControl();
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
+      syncOperatorProfile: async () => undefined,
       scopeStore: scopeStore([]),
       networkStore: networkStore(),
       projects: {
@@ -438,6 +446,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     const resolveAuthorityProjectId = vi.fn().mockResolvedValue(authorityProjectId);
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
+      syncOperatorProfile: async () => undefined,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
       networkStore: networkStore(),
       projects: { listProjects: async () => [project], resolveAuthorityProjectId },
@@ -501,6 +510,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     });
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
+      syncOperatorProfile: async () => undefined,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
       networkStore: networkStore(),
       projects: {
@@ -520,6 +530,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
 
     const unambiguousControl = new LocalCollaborationCoordinatorControl({
       safeStorage,
+      syncOperatorProfile: async () => undefined,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
       networkStore: networkStore(),
       projects: {
@@ -554,6 +565,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
       | undefined;
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
+      syncOperatorProfile: async () => undefined,
       scopeStore: scopeStore(),
       networkStore: networkStore(),
       projects: {
@@ -622,6 +634,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     });
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
+      syncOperatorProfile: async () => undefined,
       scopeStore: scopeStore(),
       networkStore: networkStore(),
       projects: {
@@ -670,6 +683,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
       .mockReturnValueOnce(second.control);
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
+      syncOperatorProfile: async () => undefined,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
       networkStore: networkStore(),
       projects: {
@@ -705,6 +719,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     const allocatePort = vi.fn().mockResolvedValueOnce(18_788).mockResolvedValueOnce(18_789);
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
+      syncOperatorProfile: async () => undefined,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
       networkStore: networkStore(),
       projects: {
@@ -751,6 +766,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
       .mockResolvedValueOnce(18_792);
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
+      syncOperatorProfile: async () => undefined,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
       networkStore: networkStore(),
       projects: {
@@ -773,11 +789,13 @@ describe("LocalCollaborationCoordinatorControl", () => {
 
   it("activates Tailscale with a loopback backend and exposes only the advertised endpoint", async () => {
     const fake = fakeControl();
+    const syncOperatorProfile = vi.fn().mockResolvedValue(undefined);
     let configFactory:
       | ((profile: NonNullable<LoopbackServerStatus["profile"]>) => ServerConfig)
       | undefined;
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
+      syncOperatorProfile,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
       networkStore: networkStore(),
       tailscale: tailscaleControl(),
@@ -812,6 +830,17 @@ describe("LocalCollaborationCoordinatorControl", () => {
         advertisedOrigin: "https://planweave.example.ts.net"
       }
     });
+    expect(syncOperatorProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profile: expect.objectContaining({
+          endpoint: expect.objectContaining({
+            topology: "tailscale_https",
+            serverOrigin: "https://planweave.example.ts.net/"
+          })
+        }),
+        operatorToken: expect.any(String)
+      })
+    );
     expect(JSON.stringify(control.getExposureView())).not.toMatch(
       /127\.0\.0\.1|backend|lease|stdout|stderr|token/i
     );
@@ -828,6 +857,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     );
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
+      syncOperatorProfile: async () => undefined,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
       networkStore: networkStore(),
       tailscale,
@@ -862,6 +892,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     );
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
+      syncOperatorProfile: async () => undefined,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
       networkStore: networkStore(),
       tailscale: tailscaleControl(),
@@ -886,6 +917,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     const fake = fakeControl();
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
+      syncOperatorProfile: async () => undefined,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
       networkStore: networkStore(),
       resolveLanAddress: () => "192.168.1.20",
@@ -908,6 +940,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
       workspaceProfileStorePaths: { profilesPath: join(root, "workspace-profiles.json") },
       invitationsPath: join(root, "invitations.json"),
       safeStorage,
+      syncOperatorProfile: async () => undefined,
       createClient: () =>
         ({
           bootstrapOwner: vi.fn().mockResolvedValue(exampleBootstrapResponse),

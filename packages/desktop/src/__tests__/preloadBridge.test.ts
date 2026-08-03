@@ -217,14 +217,6 @@ describe("preload bridge invocation", () => {
       request: {
         expiresAt: "2030-01-01T00:15:00.000Z",
         credentialExpiresAt: "2030-01-02T00:00:00.000Z"
-      },
-      bootstrap: {
-        configPath: "/etc/planweave/agent-host.json",
-        dataDirectory: "/var/lib/planweave-agent-host",
-        workspaceRoot: "/var/lib/planweave-agent-host/workspaces",
-        workspacePath: "project",
-        acpProfilePreset: "codex-acp",
-        host: { displayName: "Host A", capacity: 1, capabilities: ["linux.x64"] }
       }
     };
 

@@ -18,6 +18,7 @@ import type { AgentFamily } from "@planweave-ai/runtime";
 export type SupportedHostAcpProfile = {
   profileId: string;
   agentId: AgentFamily;
+  displayName: string;
   /** Preferred absolute-or-PATH command from agent definition launch metadata. */
   command: string;
   args: readonly string[];
@@ -48,6 +49,25 @@ function profileIdFor(agent: AgentFamily): string {
   }
 }
 
+function displayNameFor(agent: AgentFamily): string {
+  switch (agent) {
+    case "claude-code":
+      return "Claude Code";
+    case "codex":
+      return "Codex";
+    case "opencode":
+      return "OpenCode";
+    case "pi":
+      return "Pi";
+    case "grok":
+      return "Grok";
+    default: {
+      const exhaustive: never = agent;
+      return exhaustive;
+    }
+  }
+}
+
 function environmentFor(
   definition: AgentDefinition
 ): readonly { name: string; required: boolean }[] {
@@ -67,6 +87,7 @@ function fromDefinition(definition: AgentDefinition): SupportedHostAcpProfile | 
   return {
     profileId: profileIdFor(definition.agent),
     agentId: definition.agent,
+    displayName: displayNameFor(definition.agent),
     command: launch.command,
     args: launch.args,
     environment: environmentFor(definition),

@@ -75,7 +75,13 @@ async function fixture() {
   hosts.reportOnline(host.id, ["acp.codex"], 1, {
     workspaceMappings: [{ workspaceId: "w", status: "ready" }],
     acpProfiles: [
-      { profileId: "codex-acp", agentId: "codex", status: "ready", capabilities: ["acp.codex"] }
+      {
+        profileId: "codex-acp",
+        agentId: "codex",
+        displayName: "Codex",
+        status: "ready",
+        capabilities: ["acp.codex"]
+      }
     ]
   });
   const repository = new AuthorityRepository(database, { clock: now });
@@ -281,6 +287,7 @@ describe("strict Host dispatch authority", () => {
         {
           profileId: "codex-acp",
           agentId: "codex",
+          displayName: "Test Agent",
           status: "ready",
           capabilities: ["acp.codex"]
         }
@@ -423,6 +430,7 @@ describe("strict Host dispatch authority", () => {
             {
               profileId: "codex-acp",
               agentId: "codex",
+              displayName: "Test Agent",
               status: "ready",
               capabilities: ["acp.other"]
             }
@@ -454,6 +462,7 @@ describe("strict Host dispatch authority", () => {
             {
               profileId: "codex-acp",
               agentId: "codex",
+              displayName: "Test Agent",
               status: "ready",
               capabilities: ["acp.codex"]
             }
@@ -479,12 +488,14 @@ describe("strict Host dispatch authority", () => {
             {
               profileId: "codex-acp",
               agentId: "codex",
+              displayName: "Test Agent",
               status: "missing",
               capabilities: ["acp.codex"]
             },
             {
               profileId: "opencode-acp",
               agentId: "opencode",
+              displayName: "Test Agent",
               status: "ready",
               capabilities: ["acp.opencode"]
             }
@@ -567,7 +578,13 @@ describe("strict Host dispatch authority", () => {
     hosts.reportOnline(host.id, ["acp.other"], 1, {
       workspaceMappings: [{ workspaceId: "w", status: "ready" }],
       acpProfiles: [
-        { profileId: "codex-acp", agentId: "codex", status: "ready", capabilities: ["acp.other"] }
+        {
+          profileId: "codex-acp",
+          agentId: "codex",
+          displayName: "Codex",
+          status: "ready",
+          capabilities: ["acp.other"]
+        }
       ]
     });
     const gate = createAuthorityDispatchGate({

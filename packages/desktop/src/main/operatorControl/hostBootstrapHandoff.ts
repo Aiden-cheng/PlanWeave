@@ -1,42 +1,31 @@
 import type { OperatorEnrollmentGrantResponse } from "@planweave-ai/agent-host-protocol/operator-control";
+import {
+  serializeAgentHostSetupHandoff,
+  type DeploymentEndpoint
+} from "@planweave-ai/agent-host-protocol";
 import type {
   OperatorControlProfile,
   OperatorCopyHostBootstrapHandoffInput
 } from "../../shared/operatorControl.js";
 
-function quotePosixShellArgument(value: string): string {
-  return `'${value.replaceAll("'", `"'"'`)}'`;
-}
-
-/** Builds the clipboard-only Host bootstrap script while the enrollment code is still in main. */
+/** Builds one portable command while the one-time code remains owned by Electron main. */
 export function buildHostBootstrapHandoff(
   profile: OperatorControlProfile,
-  input: OperatorCopyHostBootstrapHandoffInput,
+  _input: OperatorCopyHostBootstrapHandoffInput,
   grant: OperatorEnrollmentGrantResponse
 ): string {
-  const coordinatorUrl = new URL(profile.serverBaseUrl);
-  const loopback = coordinatorUrl.hostname === "127.0.0.1" || coordinatorUrl.hostname === "[::1]";
-  const config = {
-    version: "agent-host-config/v1",
-    coordinator: {
-      url: profile.serverBaseUrl,
-      allowInsecureDevelopment: coordinatorUrl.protocol === "http:" && loopback
-    },
-    dataDirectory: input.bootstrap.dataDirectory,
-    workspaceRoot: input.bootstrap.workspaceRoot,
-    host: input.bootstrap.host,
-    workspaces: [{ id: grant.workspaceId, path: input.bootstrap.workspacePath }],
-    agentProfiles: []
-  };
-  const encodedConfig = Buffer.from(JSON.stringify(config, null, 2), "utf8").toString("base64");
-  const configPath = quotePosixShellArgument(input.bootstrap.configPath);
-  const enrollmentCode = quotePosixShellArgument(grant.enrollmentCode);
-
-  return [
-    `printf %s '${encodedConfig}' | base64 --decode > ${configPath}`,
-    `planweave-agent-host config-init --config ${configPath} --preset ${input.bootstrap.acpProfilePreset}`,
-    `planweave-agent-host preflight --config ${configPath}`,
-    `planweave-agent-host enroll --config ${configPath} --code ${enrollmentCode}`,
-    `planweave-agent-host run --config ${configPath}`
-  ].join("\n");
+  if (!profile.endpoint) throw new Error("operator_deployment_endpoint_required");
+  const endpoint: DeploymentEndpoint = profile.endpoint;
+  const handoff = serializeAgentHostSetupHandoff({
+    version: "agent-host-setup/v1",
+    endpoint,
+    workspaceId: grant.workspaceId,
+    enrollmentCode: grant.enrollmentCode,
+    expiresAt: grant.expiresAt,
+    display: {
+      workspaceName: `Workspace ${grant.workspaceId}`,
+      serverName: profile.displayName
+    }
+  });
+  return `planweave-agent-host enroll ${handoff}`;
 }

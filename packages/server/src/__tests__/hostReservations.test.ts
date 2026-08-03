@@ -65,6 +65,7 @@ function reportReady(
       {
         profileId: "codex-acp",
         agentId: "codex",
+        displayName: "Test Agent",
         status: "ready",
         capabilities
       }
@@ -130,7 +131,13 @@ describe("HostReservationRepository", () => {
     hosts.reportOnline(missingWorkspace.id, ["linux"], 1, {
       workspaceMappings: [],
       acpProfiles: [
-        { profileId: "codex-acp", agentId: "codex", status: "ready", capabilities: ["linux"] }
+        {
+          profileId: "codex-acp",
+          agentId: "codex",
+          displayName: "Codex",
+          status: "ready",
+          capabilities: ["linux"]
+        }
       ]
     });
     hosts.reportOnline(missingAcp.id, ["linux"], 1, {
@@ -143,12 +150,14 @@ describe("HostReservationRepository", () => {
         {
           profileId: "codex-acp",
           agentId: "codex",
+          displayName: "Test Agent",
           status: "missing",
           capabilities: ["linux"]
         },
         {
           profileId: "opencode-acp",
           agentId: "opencode",
+          displayName: "Test Agent",
           status: "ready",
           capabilities: ["linux"]
         }
@@ -160,6 +169,7 @@ describe("HostReservationRepository", () => {
         {
           profileId: "codex-acp",
           agentId: "codex",
+          displayName: "Test Agent",
           status: "ready",
           capabilities: ["acp.codex"]
         }

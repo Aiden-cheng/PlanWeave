@@ -645,9 +645,8 @@ export const enCatalog = {
   hostAdminNotReported: "Not reported",
   hostAdminRevoke: "Revoke Host",
   hostAdminRevokeConfirm: "Revoke this Host? This immediately removes its enrollment authority.",
-  hostAdminBootstrapTitle: "Self-managed VPS bootstrap",
-  hostAdminBootstrapDescription:
-    "Generate a bounded enrollment handoff for an operator to run on a VPS you control.",
+  hostAdminBootstrapTitle: "Connect an Agent Host",
+  hostAdminBootstrapDescription: "Copy one portable enrollment command for Windows or Linux.",
   hostAdminBootstrapIdle: "Host bootstrap is idle.",
   hostAdminBootstrapPending: "Creating Host enrollment handoff…",
   hostAdminBootstrapReady: "Host enrollment handoff was copied by Desktop main.",
@@ -663,9 +662,9 @@ export const enCatalog = {
   hostAdminHostCapacity: "Host capacity",
   hostAdminHostCapabilities: "Capabilities (comma separated)",
   hostAdminBootstrapCodexPreset:
-    "This handoff maps the enrolled Server workspace and initializes the fixed codex-acp preset on the target Host. The target Host resolves and verifies the local adapter before it connects.",
+    "Enrollment exposes no agents by default. On the Host, use agents list and agents expose for a supported installed agent.",
   hostAdminBootstrapSecureCoordinator:
-    "Use a secure coordinator URL (or loopback HTTP for local development).",
+    "This profile does not have a Main-validated advertised endpoint. Start or reconnect the server first.",
   hostAdminBootstrapAbsolutePaths:
     "Config, data, and workspace paths must be absolute Host-local paths.",
   hostAdminBootstrapWorkspacePath:
@@ -674,11 +673,11 @@ export const enCatalog = {
   hostAdminBootstrapCapacity: "Capacity must be an integer from 1 to 128.",
   hostAdminBootstrapCapabilities: "Capabilities must use lowercase portable identifiers.",
   hostAdminBootstrapBoundary:
-    "Desktop main creates and copies the handoff. The renderer never receives enrollment codes, Host credentials, operator tokens, SSH material, or generated commands.",
+    "Desktop main creates and copies the complete command. This page receives only expiry and workspace metadata.",
   hostAdminCreateGrant: "Create and copy one-time enrollment",
   hostAdminGrantOnceTitle: "Bootstrap handoff copied",
   hostAdminGrantOnceWarning:
-    "The full bootstrap handoff was copied directly by Desktop main. It expires at {expiry}.",
+    "The one-time enrollment command was copied directly by Desktop main. It expires at {expiry}.",
   hostAdminEnrollmentSecret: "Enrollment secret",
   hostAdminCopy: "Copy secret",
   hostAdminCopyConfig: "Copy config",
@@ -688,7 +687,7 @@ export const enCatalog = {
   hostAdminBootstrapConfig: "Bootstrap configuration",
   hostAdminBootstrapCommand: "Bootstrap command",
   hostAdminBootstrapHeartbeatNote:
-    "After the Host process is installed and started by your operator, refresh the inventory to confirm a new heartbeat. Desktop does not run those remote steps.",
+    "Run the copied command on the Host, then refresh this inventory to confirm its heartbeat.",
   hostAdminOffline: "The server is offline or timed out. No fresh Host projection is available.",
   hostAdminUnauthorized: "The operator credential was rejected. Re-import a valid credential.",
   hostAdminForbidden: "This operator is not allowed to administer Hosts.",

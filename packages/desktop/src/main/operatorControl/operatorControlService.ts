@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import {
   assertNoSmuggledOperatorSecrets,
   operatorControlProfileSchema,
+  operatorControlProfileInputSchema,
   operatorCreateEnrollmentGrantInputSchema,
   operatorCopyHostBootstrapHandoffInputSchema,
   operatorHostBootstrapHandoffViewSchema,
@@ -76,6 +77,7 @@ function toPublicProfile(
     displayName: profile.displayName,
     serverBaseUrl: profile.serverBaseUrl,
     allowInsecureTransport: profile.allowInsecureTransport,
+    ...(profile.endpoint ? { endpoint: profile.endpoint } : {}),
     operatorId: credential.operatorId ?? profile.operatorId ?? null,
     hasOperatorCredential: credential.hasOperatorCredential,
     operatorCredentialPersistence: credential.operatorCredentialPersistence,
@@ -183,8 +185,12 @@ export class OperatorControlService {
     return this.enqueue(async () => {
       this.assertOpen();
       assertNoSmuggledOperatorSecrets(input, "upsertOperatorProfile");
-      const profile = operatorControlProfileSchema.parse(input);
-      await this.profiles.upsert(profile);
+      const profile = operatorControlProfileInputSchema.parse(input);
+      const existing = await this.profiles.get(profile.profileId);
+      await this.profiles.upsert({
+        ...profile,
+        ...(existing?.endpoint ? { endpoint: existing.endpoint } : {})
+      });
       return this.publishStatus();
     });
   }
@@ -213,7 +219,11 @@ export class OperatorControlService {
         return existingToken;
       }
       const operatorToken = `pw_operator_${randomBytes(32).toString("base64url")}`;
-      const persistence = await this.vault.setOperatorToken(profile.profileId, operatorToken, operatorId);
+      const persistence = await this.vault.setOperatorToken(
+        profile.profileId,
+        operatorToken,
+        operatorId
+      );
       if (persistence !== "persisted") {
         await this.vault.clear(profile.profileId);
         throw new Error("deployment_operator_credential_persistence_required");
@@ -225,6 +235,24 @@ export class OperatorControlService {
         throw error;
       }
       return operatorToken;
+    });
+  }
+
+  /** Main-only registration for an already-running Desktop-owned server and its existing token. */
+  async ensureMainOwnedServerProfile(input: {
+    profile: OperatorControlProfile;
+    operatorId: string;
+    operatorToken: string;
+  }): Promise<void> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      const profile = operatorControlProfileSchema.parse(input.profile);
+      if (!profile.endpoint) throw new Error("operator_deployment_endpoint_required");
+      const operatorId = input.operatorId.trim();
+      const operatorToken = operatorTokenSchema.parse(input.operatorToken);
+      if (!operatorId) throw new Error("deployment_operator_id_required");
+      await this.vault.setOperatorToken(profile.profileId, operatorToken, operatorId);
+      await this.profiles.upsert(profile);
     });
   }
 
@@ -336,7 +364,8 @@ export class OperatorControlService {
           state: "ready",
           workspaceId: grant.workspaceId,
           expiresAt: grant.expiresAt,
-          copiedAt: new Date().toISOString()
+          copiedAt: new Date().toISOString(),
+          commandPreview: "planweave-agent-host enroll <handoff>"
         });
       })
     );
@@ -395,6 +424,7 @@ export class OperatorControlService {
         displayName: profile.displayName,
         serverBaseUrl: profile.serverBaseUrl,
         allowInsecureTransport: profile.allowInsecureTransport,
+        ...(profile.endpoint ? { endpoint: profile.endpoint } : {}),
         ...(profile.operatorId ? { operatorId: profile.operatorId } : {})
       }),
       credential: { getOperatorToken: () => this.vault.getOperatorToken(parsed.profileId) },

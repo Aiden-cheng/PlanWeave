@@ -193,6 +193,7 @@ class CoordinatorHarness {
         {
           profileId: "codex-acp",
           agentId: "codex",
+          displayName: "Test Agent",
           status: "ready",
           capabilities: ["acp.codex"]
         }
@@ -240,6 +241,7 @@ async function prepareInterruptedAction(harness: CoordinatorHarness, resumable: 
         {
           profileId: "codex-acp",
           agentId: "codex",
+          displayName: "Test Agent",
           status: "ready",
           capabilities: ["acp.codex", "acp.session.load"]
         }

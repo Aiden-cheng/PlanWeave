@@ -1,46 +1,65 @@
 import { describe, expect, it } from "vitest";
+import { parseAgentHostSetupHandoff } from "@planweave-ai/agent-host-protocol";
 import { buildHostBootstrapHandoff } from "../main/operatorControl/hostBootstrapHandoff.js";
 
-describe("main-owned Host bootstrap handoff", () => {
-  it("contains the enrollment code only in the clipboard payload", () => {
+describe("main-owned Host setup handoff", () => {
+  it("copies one portable command with the validated advertised endpoint", () => {
     const enrollmentCode = `pw_enroll_${"A".repeat(43)}`;
-    const handoff = buildHostBootstrapHandoff(
+    const command = buildHostBootstrapHandoff(
       {
         profileId: "profile-a",
         displayName: "Operator A",
-        serverBaseUrl: "https://operator.example.test/",
-        allowInsecureTransport: false
+        serverBaseUrl: "https://planweave.tail1234.ts.net/",
+        allowInsecureTransport: false,
+        endpoint: {
+          topology: "tailscale_https",
+          serverOrigin: "https://planweave.tail1234.ts.net",
+          allowedClientOrigins: ["https://planweave.tail1234.ts.net"],
+          tlsTrust: "system_ca"
+        }
       },
       {
         profileId: "profile-a",
         request: {
           expiresAt: "2030-01-01T00:15:00.000Z",
           credentialExpiresAt: "2030-01-02T00:00:00.000Z"
-        },
-        bootstrap: {
-          configPath: "/etc/planweave/agent-host.json",
-          dataDirectory: "/var/lib/planweave-agent-host",
-          workspaceRoot: "/var/lib/planweave-agent-host/workspaces",
-          workspacePath: "project",
-          acpProfilePreset: "codex-acp",
-          host: { displayName: "Host A", capacity: 1, capabilities: ["linux.x64"] }
         }
       },
       { enrollmentCode, workspaceId: "workspace-a", expiresAt: "2030-01-01T00:15:00.000Z" }
     );
 
-    expect(handoff).toContain(`--code '${enrollmentCode}'`);
-    expect(handoff).toContain("base64 --decode > '/etc/planweave/agent-host.json'");
-    expect(handoff).toContain(
-      "planweave-agent-host config-init --config '/etc/planweave/agent-host.json' --preset codex-acp"
-    );
-    expect(handoff).toContain("planweave-agent-host run");
-    const encodedConfig = handoff.match(/printf %s '([^']+)'/)?.[1];
-    expect(encodedConfig).toBeDefined();
-    if (!encodedConfig) throw new Error("host_bootstrap_config_missing");
-    expect(JSON.parse(Buffer.from(encodedConfig, "base64").toString("utf8"))).toMatchObject({
-      workspaces: [{ id: "workspace-a", path: "project" }],
-      agentProfiles: []
+    expect(command).toMatch(/^planweave-agent-host enroll planweave-agent-host-setup:/);
+    const encoded = command.slice("planweave-agent-host enroll ".length);
+    expect(parseAgentHostSetupHandoff(encoded, new Date("2029-01-01"))).toMatchObject({
+      endpoint: { topology: "tailscale_https", tlsTrust: "system_ca" },
+      workspaceId: "workspace-a",
+      enrollmentCode
     });
+    expect(command).not.toMatch(/\/etc\/|\/var\/lib|--config|--code|base64 --decode/);
+  });
+
+  it("rejects profiles without a Main-validated endpoint", () => {
+    expect(() =>
+      buildHostBootstrapHandoff(
+        {
+          profileId: "legacy",
+          displayName: "Legacy",
+          serverBaseUrl: "https://server.example/",
+          allowInsecureTransport: false
+        },
+        {
+          profileId: "legacy",
+          request: {
+            expiresAt: "2030-01-01T00:15:00.000Z",
+            credentialExpiresAt: "2030-01-02T00:00:00.000Z"
+          }
+        },
+        {
+          enrollmentCode: `pw_enroll_${"A".repeat(43)}`,
+          workspaceId: "workspace-a",
+          expiresAt: "2030-01-01T00:15:00.000Z"
+        }
+      )
+    ).toThrow("operator_deployment_endpoint_required");
   });
 });

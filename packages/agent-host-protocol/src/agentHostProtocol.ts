@@ -43,6 +43,7 @@ export const hostAcpProfileObservationSchema = z
   .object({
     profileId: opaqueIdentifierSchema,
     agentId: opaqueIdentifierSchema,
+    displayName: z.string().trim().min(1).max(128),
     status: z.enum(["ready", "missing", "invalid"]),
     capabilities: capabilitiesSchema
   })
@@ -241,6 +242,4 @@ export type HostToServerEvent = z.infer<typeof hostToServerEventSchema>;
 export type ObservationEvent = z.infer<typeof observationEventSchema>;
 export type HostEvent = z.infer<typeof hostEventSchema>;
 export type ServerEvent = z.infer<typeof serverEventSchema>;
-export type HostWorkspaceMappingObservation = z.infer<
-  typeof hostWorkspaceMappingObservationSchema
->;
+export type HostWorkspaceMappingObservation = z.infer<typeof hostWorkspaceMappingObservationSchema>;

@@ -231,6 +231,7 @@ async function connectEnrolledHost(origin: string, adminToken: string) {
           {
             profileId: "codex-acp",
             agentId: "codex",
+            displayName: "Test Agent",
             status: "ready",
             capabilities: enrollmentRequest.capabilities
           }

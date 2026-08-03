@@ -27,6 +27,7 @@ import { dirname, join } from "node:path";
 import type { OperatorSafeStoragePort } from "../operatorControl/operatorCredentialVault.js";
 import { OperatorCredentialVault } from "../operatorControl/operatorCredentialVault.js";
 import { getOperatorControlService } from "../operatorControl/operatorControlHandlers.js";
+import type { OperatorControlService } from "../operatorControl/operatorControlService.js";
 import { desktopHomePaths } from "../planweaveHomePaths.js";
 import {
   collaborationCurrentSelectionInputSchema,
@@ -158,6 +159,9 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   private readonly allocatePort: (host: string, preferredPort: number | null) => Promise<number>;
   private readonly resolveLanAddress: () => string | null;
   private readonly tailscale: TailscaleControlPort;
+  private readonly syncOperatorProfile: (
+    input: Parameters<OperatorControlService["ensureMainOwnedServerProfile"]>[0]
+  ) => Promise<void>;
 
   constructor(options: {
     safeStorage: OperatorSafeStoragePort;
@@ -171,6 +175,9 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     networkStore?: LocalCollaborationNetworkStorePort;
     resolveLanAddress?: () => string | null;
     tailscale?: TailscaleControlPort;
+    syncOperatorProfile: (
+      input: Parameters<OperatorControlService["ensureMainOwnedServerProfile"]>[0]
+    ) => Promise<void>;
   }) {
     this.vault = new OperatorCredentialVault({ safeStorage: options.safeStorage });
     this.projects = options.projects ?? {
@@ -188,6 +195,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     this.networkStore = options.networkStore ?? new LocalCollaborationNetworkStore();
     this.resolveLanAddress = options.resolveLanAddress ?? resolveLocalCollaborationLanAddress;
     this.tailscale = options.tailscale ?? new TailscaleCliAdapter();
+    this.syncOperatorProfile = options.syncOperatorProfile;
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -317,6 +325,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
           this.preferredPort = this.localPort;
           await this.persistNetworkState();
         }
+        await this.syncMainOwnedOperatorProfile();
         return this.status();
       }
       lastStatus = this.status();
@@ -609,6 +618,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
         displayName: `${target.displayName} operator`,
         serverBaseUrl: target.endpoint.serverOrigin,
         allowInsecureTransport: false,
+        endpoint: target.endpoint,
         operatorId: "desktop-self-host-admin"
       },
       operatorId: "desktop-self-host-admin"
@@ -781,6 +791,24 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     const token = `pw_operator_${randomBytes(32).toString("base64url")}`;
     this.operatorToken = token;
     await this.vault.setOperatorToken(localOperatorCredentialKey, token, "desktop-local-admin");
+  }
+
+  private async syncMainOwnedOperatorProfile(): Promise<void> {
+    const endpoint = this.invitationEndpoint();
+    if (!endpoint || !this.operatorToken) return;
+    await this.syncOperatorProfile({
+      profile: {
+        profileId: localOperatorCredentialKey,
+        displayName: "PlanWeave local server",
+        serverBaseUrl: endpoint.serverOrigin,
+        allowInsecureTransport:
+          endpoint.topology === "loopback_http" || endpoint.topology === "lan_http",
+        endpoint,
+        operatorId: "desktop-local-admin"
+      },
+      operatorId: "desktop-local-admin",
+      operatorToken: this.operatorToken
+    });
   }
 
   private createConfig(

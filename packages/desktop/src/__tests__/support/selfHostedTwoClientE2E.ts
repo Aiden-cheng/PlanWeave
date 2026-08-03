@@ -257,6 +257,7 @@ export async function configureWorkspaceAccess(input: {
       {
         profileId: "codex-acp",
         agentId: "codex",
+        displayName: "Test Agent",
         status: "ready",
         capabilities: ["acp.codex"]
       }

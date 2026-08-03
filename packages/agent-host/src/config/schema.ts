@@ -1,6 +1,7 @@
 import { isAbsolute } from "node:path";
 import {
   capabilitiesSchema,
+  deploymentEndpointSchema,
   hostCapacitySchema,
   opaqueIdentifierSchema
 } from "@planweave-ai/agent-host-protocol";
@@ -58,7 +59,8 @@ export const agentHostConfigSchema = z
           .max(4096)
           .refine(isAbsolute, "caCertificatePath must be absolute.")
           .optional(),
-        allowInsecureDevelopment: z.boolean().default(false)
+        allowInsecureDevelopment: z.boolean().default(false),
+        endpoint: deploymentEndpointSchema.optional()
       })
       .strict(),
     dataDirectory: z.string().min(1).refine(isAbsolute, "dataDirectory must be absolute."),
@@ -130,7 +132,10 @@ export const agentHostConfigSchema = z
     const development =
       config.coordinator.allowInsecureDevelopment &&
       (url.protocol === "http:" || url.protocol === "ws:") &&
-      (url.hostname === "127.0.0.1" || url.hostname === "[::1]");
+      (config.coordinator.endpoint?.topology === "lan_http" ||
+        url.hostname === "localhost" ||
+        url.hostname === "127.0.0.1" ||
+        url.hostname === "[::1]");
     if (!secure && !development) {
       context.addIssue({
         code: "custom",
@@ -146,7 +151,23 @@ export const agentHostConfigSchema = z
         message: "A custom CA is only supported with secure coordinator transport."
       });
     }
+    if (
+      config.coordinator.endpoint &&
+      config.coordinator.endpoint.serverOrigin !== transportOrigin(url)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["coordinator", "endpoint"],
+        message: "Coordinator endpoint origin must match coordinator.url."
+      });
+    }
   });
+
+function transportOrigin(url: URL): string {
+  if (url.protocol === "wss:") url.protocol = "https:";
+  if (url.protocol === "ws:") url.protocol = "http:";
+  return url.origin;
+}
 
 export type AgentHostConfig = z.infer<typeof agentHostConfigSchema>;
 

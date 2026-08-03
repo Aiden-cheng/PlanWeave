@@ -62,6 +62,7 @@ function readyObservation(workspaceId: string, capabilities: readonly string[]) 
       {
         profileId: "codex-acp",
         agentId: "codex",
+        displayName: "Test Agent",
         status: "ready" as const,
         capabilities: [...capabilities]
       }
@@ -424,6 +425,7 @@ describe("work assignment service API", () => {
         {
           profileId: "codex-acp",
           agentId: "codex",
+          displayName: "Test Agent",
           status: "ready",
           capabilities: ["acp.codex", "linux", "git.read"]
         }
@@ -660,6 +662,7 @@ describe("work assignment host port facts", () => {
         {
           profileId: "codex-acp",
           agentId: "codex",
+          displayName: "Test Agent",
           status: "ready",
           capabilities
         }

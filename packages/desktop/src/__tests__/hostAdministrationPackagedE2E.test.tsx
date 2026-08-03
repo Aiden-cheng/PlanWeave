@@ -3,6 +3,7 @@
 import "@testing-library/jest-dom/vitest";
 import { spawnManagedProcess, type ManagedProcessTree } from "@planweave-ai/runtime";
 import { agentHostConfigSchema } from "../../../agent-host/src/config/schema.js";
+import { parseAgentHostSetupHandoff } from "@planweave-ai/agent-host-protocol";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -180,7 +181,13 @@ describe("packaged Host administration control plane", () => {
       profileId,
       displayName: "UI Generated Host",
       serverBaseUrl: `${harness.origin}/`,
-      allowInsecureTransport: true
+      allowInsecureTransport: true,
+      endpoint: {
+        topology: "loopback_http",
+        serverOrigin: harness.origin,
+        allowedClientOrigins: [harness.origin],
+        tlsTrust: "not_applicable"
+      }
     } as const;
     const service = new OperatorControlService({
       profileStorePaths: { profilesPath: join(desktopRoot, "profiles.json") },
@@ -221,14 +228,6 @@ describe("packaged Host administration control plane", () => {
         request: {
           expiresAt: new Date(Date.now() + 60_000).toISOString(),
           credentialExpiresAt: new Date(Date.now() + 3_600_000).toISOString()
-        },
-        bootstrap: {
-          configPath: "/etc/planweave/agent-host.json",
-          dataDirectory: join(harness.paths.root, "ui-host-data"),
-          workspaceRoot: harness.paths.workspaceRoot,
-          workspacePath: "project",
-          acpProfilePreset: "codex-acp",
-          host: { displayName: "UI Generated Host", capacity: 1, capabilities: ["acp.test"] }
         }
       },
       (content) => copiedHandoffs.push(content)
@@ -237,13 +236,22 @@ describe("packaged Host administration control plane", () => {
     expect(JSON.stringify(handoff)).not.toContain("pw_enroll_");
     expect(copiedHandoffs).toHaveLength(1);
     const copiedHandoff = copiedHandoffs[0]!;
-    const encodedConfig = copiedHandoff.match(/printf %s '([A-Za-z0-9+/=]+)' \| base64/)?.[1];
-    const enrollmentCode = copiedHandoff.match(/--code '(pw_enroll_[A-Za-z0-9_-]{43})'/)?.[1];
-    if (!encodedConfig || !enrollmentCode) throw new Error("main_owned_handoff_missing_content");
-    const uiConfig = JSON.parse(Buffer.from(encodedConfig, "base64").toString("utf8")) as Record<
-      string,
-      unknown
-    >;
+    const encodedHandoff = copiedHandoff.slice("planweave-agent-host enroll ".length);
+    const parsedHandoff = parseAgentHostSetupHandoff(encodedHandoff);
+    const enrollmentCode = parsedHandoff.enrollmentCode;
+    const uiConfig = {
+      version: "agent-host-config/v1",
+      coordinator: {
+        url: parsedHandoff.endpoint.serverOrigin,
+        allowInsecureDevelopment: true,
+        endpoint: parsedHandoff.endpoint
+      },
+      dataDirectory: join(harness.paths.root, "ui-host-data"),
+      workspaceRoot: harness.paths.workspaceRoot,
+      host: { displayName: "UI Generated Host", capacity: 1, capabilities: ["acp.test"] },
+      workspaces: [{ id: parsedHandoff.workspaceId, path: "project" }],
+      agentProfiles: []
+    };
     expect(uiConfig).not.toHaveProperty("enrollmentCode");
     expect(agentHostConfigSchema.parse(uiConfig)).toEqual(uiConfig);
 

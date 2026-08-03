@@ -46,6 +46,7 @@ export function createRemoteDispatchFixture(
           {
             profileId: sourceEnvelope.agentProfileId,
             agentId: sourceEnvelope.agentId,
+            displayName: "Test Agent",
             status: "ready",
             capabilities: candidateHost.capabilities
           }

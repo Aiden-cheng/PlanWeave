@@ -125,6 +125,7 @@ async function setup() {
       {
         profileId: "codex-acp",
         agentId: "codex",
+        displayName: "Test Agent",
         status: "ready",
         capabilities: ["acp.codex", "acp.session.load"]
       }

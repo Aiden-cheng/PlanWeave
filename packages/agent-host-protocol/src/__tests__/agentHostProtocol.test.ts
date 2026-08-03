@@ -62,6 +62,7 @@ describe("versioned Agent Host protocol", () => {
             {
               profileId: "codex-acp",
               agentId: "codex",
+              displayName: "Codex",
               status: "ready",
               capabilities: ["acp.codex"]
             }
@@ -74,6 +75,7 @@ describe("versioned Agent Host protocol", () => {
         {
           profileId: "codex-acp",
           agentId: "codex",
+          displayName: "Codex",
           status: "ready",
           capabilities: ["acp.codex"]
         }

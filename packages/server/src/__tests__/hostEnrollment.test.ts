@@ -138,6 +138,7 @@ describe("Agent Host enrollment", () => {
         {
           profileId: "codex-acp",
           agentId: "codex",
+          displayName: "Test Agent",
           status: "ready" as const,
           capabilities: ["acp.codex"]
         }

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { lstat, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
+import { lstat, open, readFile, rename, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { HostEnrollmentCompleted } from "@planweave-ai/agent-host-protocol";
 import type { SetupCodeRedeemHostResponse } from "@planweave-ai/collaboration-protocol/setup";
@@ -9,12 +9,20 @@ import {
   type HostCredentialDocument,
   type PendingHostEnrollment
 } from "./credentialContract.js";
+import {
+  createPrivateStorageSecurity,
+  type PrivateStorageSecurityPort
+} from "../storage/privateStorageSecurity.js";
 
 function missing(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
-async function secureMetadata(path: string, kind: "directory" | "file"): Promise<void> {
+async function secureMetadata(
+  path: string,
+  kind: "directory" | "file",
+  permissionModel: PrivateStorageSecurityPort["permissionModel"]
+): Promise<void> {
   const metadata = await lstat(path);
   if (
     (kind === "directory" && !metadata.isDirectory()) ||
@@ -23,20 +31,23 @@ async function secureMetadata(path: string, kind: "directory" | "file"): Promise
     throw new Error("agent_host_credential_path_unsafe");
   }
   const expected = kind === "directory" ? 0o700 : 0o600;
-  if ((metadata.mode & 0o777) !== expected)
+  if (permissionModel === "posix" && (metadata.mode & 0o777) !== expected)
     throw new Error("agent_host_credential_permissions_unsafe");
-  if (process.platform !== "win32" && process.getuid && metadata.uid !== process.getuid()) {
+  if (permissionModel === "posix" && process.getuid && metadata.uid !== process.getuid()) {
     throw new Error("agent_host_credential_owner_unsafe");
   }
 }
 
 export class FileHostCredentialStore {
-  constructor(readonly path: string) {}
+  constructor(
+    readonly path: string,
+    private readonly security: PrivateStorageSecurityPort = createPrivateStorageSecurity()
+  ) {}
 
   async read(): Promise<HostCredentialDocument | null> {
     try {
-      await secureMetadata(dirname(this.path), "directory");
-      await secureMetadata(this.path, "file");
+      await secureMetadata(dirname(this.path), "directory", this.security.permissionModel);
+      await secureMetadata(this.path, "file", this.security.permissionModel);
       return hostCredentialDocumentSchema.parse(JSON.parse(await readFile(this.path, "utf8")));
     } catch (error) {
       if (missing(error)) return null;
@@ -126,14 +137,14 @@ export class FileHostCredentialStore {
     const parsed = hostCredentialDocumentSchema.parse(document);
     const directory = dirname(this.path);
     try {
-      await secureMetadata(directory, "directory");
+      await secureMetadata(directory, "directory", this.security.permissionModel);
     } catch (error) {
       if (!missing(error)) throw error;
-      await mkdir(directory, { recursive: true, mode: 0o700 });
-      await secureMetadata(directory, "directory");
+      await this.security.prepareDirectory(directory);
+      await secureMetadata(directory, "directory", this.security.permissionModel);
     }
     try {
-      await secureMetadata(this.path, "file");
+      await secureMetadata(this.path, "file", this.security.permissionModel);
     } catch (error) {
       if (!missing(error)) throw error;
     }
@@ -149,7 +160,8 @@ export class FileHostCredentialStore {
       }
       await rename(temporary, this.path);
       renamed = true;
-      await secureMetadata(this.path, "file");
+      await this.security.secureFile(this.path);
+      await secureMetadata(this.path, "file", this.security.permissionModel);
       const directoryHandle = await open(directory, "r");
       try {
         await directoryHandle.sync();

@@ -336,7 +336,7 @@ describe("scoped access capability contracts", () => {
           allowInsecureTransport: false
         }
       })
-    ).toThrow(/loopback_server_requires_literal_loopback_origin/);
+    ).toThrow(/loopback_server_requires_loopback_or_tailscale_advertised_origin/);
     expect(
       loopbackProjectRegistrationRequestSchema.parse({
         workspaceId,

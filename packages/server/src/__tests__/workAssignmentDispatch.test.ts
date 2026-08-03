@@ -176,6 +176,7 @@ async function setup(
         {
           profileId: "codex-acp",
           agentId: "codex",
+          displayName: "Test Agent",
           status: "ready",
           capabilities: hostSpec.capabilities
         }
@@ -1374,13 +1375,25 @@ describe("HostReservationRepository preferred Host selection", () => {
     hosts.reportOnline(preferred.id, ["linux"], 1, {
       workspaceMappings: [{ workspaceId, status: "ready" }],
       acpProfiles: [
-        { profileId: "codex-acp", agentId: "codex", status: "ready", capabilities: ["linux"] }
+        {
+          profileId: "codex-acp",
+          agentId: "codex",
+          displayName: "Codex",
+          status: "ready",
+          capabilities: ["linux"]
+        }
       ]
     });
     hosts.reportOnline(alternate.id, ["linux"], 1, {
       workspaceMappings: [{ workspaceId, status: "ready" }],
       acpProfiles: [
-        { profileId: "codex-acp", agentId: "codex", status: "ready", capabilities: ["linux"] }
+        {
+          profileId: "codex-acp",
+          agentId: "codex",
+          displayName: "Codex",
+          status: "ready",
+          capabilities: ["linux"]
+        }
       ]
     });
     // Make preferred offline.

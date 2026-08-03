@@ -32,6 +32,10 @@ function operator(overrides: Partial<AgentHostOperatorService> = {}): AgentHostO
     createDaemon: vi.fn(),
     status: vi.fn(),
     revoke: vi.fn(),
+    enrollHandoff: vi.fn(),
+    listAgents: vi.fn(),
+    exposeAgent: vi.fn(),
+    hideAgent: vi.fn(),
     ...overrides
   };
 }

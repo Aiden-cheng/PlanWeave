@@ -1,6 +1,7 @@
 import type { HostReadinessObservation } from "@planweave-ai/agent-host-protocol";
 import { ConfiguredAcpProfileResolver, ConfiguredWorkspaceResolver } from "./resolvers.js";
 import type { AgentHostConfig } from "./schema.js";
+import { findSupportedHostAcpProfile } from "../realAcp/supportedProfiles.js";
 
 function observationStatus(error: unknown): "missing" | "invalid" {
   if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
@@ -22,7 +23,8 @@ function observationStatus(error: unknown): "missing" | "invalid" {
  */
 export async function observeHostReadiness(
   config: AgentHostConfig,
-  environment: Readonly<Record<string, string | undefined>> = process.env
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+  exposedProfileIds: readonly string[] = config.agentProfiles.map((profile) => profile.id)
 ): Promise<HostReadinessObservation> {
   const workspaces = new ConfiguredWorkspaceResolver(config);
   const profiles = new ConfiguredAcpProfileResolver(config, environment);
@@ -37,24 +39,29 @@ export async function observeHostReadiness(
     })
   );
   const acpProfiles = await Promise.all(
-    config.agentProfiles.map(async (profile) => {
-      try {
-        await profiles.resolve(profile.id, profile.agentId);
-        return {
-          profileId: profile.id,
-          agentId: profile.agentId,
-          status: "ready" as const,
-          capabilities: [`acp.${profile.agentId}`]
-        };
-      } catch (error) {
-        return {
-          profileId: profile.id,
-          agentId: profile.agentId,
-          status: observationStatus(error),
-          capabilities: [`acp.${profile.agentId}`]
-        };
-      }
-    })
+    config.agentProfiles
+      .filter((profile) => exposedProfileIds.includes(profile.id))
+      .map(async (profile) => {
+        const displayName = findSupportedHostAcpProfile(profile.id)?.displayName ?? profile.id;
+        try {
+          await profiles.resolve(profile.id, profile.agentId);
+          return {
+            profileId: profile.id,
+            agentId: profile.agentId,
+            displayName,
+            status: "ready" as const,
+            capabilities: [`acp.${profile.agentId}`]
+          };
+        } catch (error) {
+          return {
+            profileId: profile.id,
+            agentId: profile.agentId,
+            displayName,
+            status: observationStatus(error),
+            capabilities: [`acp.${profile.agentId}`]
+          };
+        }
+      })
   );
   return { workspaceMappings, acpProfiles };
 }

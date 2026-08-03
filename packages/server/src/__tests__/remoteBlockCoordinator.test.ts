@@ -89,6 +89,7 @@ async function setup(withHost: boolean) {
         {
           profileId: "codex-acp",
           agentId: "codex",
+          displayName: "Test Agent",
           status: "ready",
           capabilities: ["acp.codex"]
         }
@@ -180,6 +181,7 @@ describe("RemoteBlockCoordinator", () => {
         {
           profileId: "codex-acp",
           agentId: "codex",
+          displayName: "Test Agent",
           status: "ready",
           capabilities: ["acp.codex"]
         }
@@ -204,6 +206,7 @@ describe("RemoteBlockCoordinator", () => {
         {
           profileId: "codex-acp",
           agentId: "codex",
+          displayName: "Test Agent",
           status: "ready",
           capabilities: ["acp.codex"]
         }
@@ -219,6 +222,7 @@ describe("RemoteBlockCoordinator", () => {
         {
           profileId: "codex-acp",
           agentId: "codex",
+          displayName: "Test Agent",
           status: "ready",
           capabilities: ["acp.codex"]
         }
@@ -329,6 +333,7 @@ describe("RemoteBlockCoordinator", () => {
         {
           profileId: "codex-acp",
           agentId: "codex",
+          displayName: "Test Agent",
           status: "ready",
           capabilities: ["acp.codex"]
         }
@@ -419,6 +424,7 @@ describe("RemoteBlockCoordinator", () => {
         {
           profileId: "codex-acp",
           agentId: "codex",
+          displayName: "Test Agent",
           status: "ready",
           capabilities: ["acp.codex"]
         }

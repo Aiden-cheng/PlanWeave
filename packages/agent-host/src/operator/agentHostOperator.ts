@@ -1,5 +1,6 @@
-import { access, mkdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, realpath, stat } from "node:fs/promises";
 import { constants } from "node:fs";
+import { hostname } from "node:os";
 import { delimiter, isAbsolute, join } from "node:path";
 import { parseAgentHostConfig, type AgentHostConfig } from "../config/schema.js";
 import { observeHostReadiness } from "../config/readiness.js";
@@ -23,6 +24,22 @@ import { AgentHostClient } from "../transport/agentHostClient.js";
 import { agentHostPackageVersion } from "../packageInfo.js";
 import { createAgentHostTlsTrust } from "../tls/trust.js";
 import { findSupportedHostAcpProfile } from "../realAcp/supportedProfiles.js";
+import { writePrivateJsonFile } from "../config/privateConfigWriter.js";
+import {
+  listAgentExposure,
+  parseAgentExposureProfileId,
+  readExposedAgentProfileIds,
+  requireSupportedAgentProfile,
+  writeExposedAgentProfileIds,
+  type AgentExposureStatus
+} from "./agentExposure.js";
+import { parseAgentHostSetupHandoff } from "@planweave-ai/agent-host-protocol";
+import {
+  configFromAgentHostSetupHandoff,
+  resolveAgentHostDefaultPaths
+} from "../config/defaultPaths.js";
+import { createPlatformBackgroundService } from "../background/platformBackground.js";
+import type { AgentHostBackgroundService } from "../background/backgroundService.js";
 
 const MAX_CONFIG_BYTES = 256 * 1_024;
 
@@ -36,6 +53,18 @@ export type AgentHostDiagnostics = {
   connection: "offline";
   recoverableExecutions: number;
   actionableError?: string;
+};
+
+export type PortableEnrollmentResult = {
+  state: "ready" | "background_setup_required" | "tls_trust_configuration_required";
+  workspaceId: string;
+  credential: AgentHostDiagnostics["credential"];
+  background: "running" | "disabled" | "setup_required";
+};
+
+export type AgentExposureMutationResult = {
+  agents: AgentExposureStatus[];
+  reload: "restarted" | "restart_required";
 };
 
 export async function loadAgentHostConfig(path: string): Promise<AgentHostConfig> {
@@ -87,6 +116,10 @@ function transportOrigin(value: string): string {
 }
 
 export class AgentHostOperator {
+  constructor(
+    private readonly backgroundService: AgentHostBackgroundService | null = createPlatformBackgroundService()
+  ) {}
+
   async initializePreset(configPath: string, presetId: string): Promise<AgentHostConfig> {
     if (presetId !== "codex-acp") throw new Error("agent_host_preset_unsupported");
     const config = await loadAgentHostConfig(configPath);
@@ -115,10 +148,189 @@ export class AgentHostOperator {
       },
       agentProfiles: existing ? config.agentProfiles : [...config.agentProfiles, profile]
     });
-    const temporaryPath = `${configPath}.preset-${process.pid}-${Date.now()}`;
-    await writeFile(temporaryPath, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
-    await rename(temporaryPath, configPath);
+    await writePrivateJsonFile(configPath, next);
     return next;
+  }
+
+  async listAgents(configPath: string): Promise<AgentExposureStatus[]> {
+    const config = await loadAgentHostConfig(configPath);
+    return listAgentExposure(config, (command) => resolvePresetCommand(command, process.env.PATH));
+  }
+
+  async exposeAgent(configPath: string, profileId: string): Promise<AgentExposureMutationResult> {
+    const preset = requireSupportedAgentProfile(profileId);
+    const config = await loadAgentHostConfig(configPath);
+    const command = await resolvePresetCommand(preset.command, process.env.PATH);
+    const existing = config.agentProfiles.find((profile) => profile.id === profileId);
+    if (existing && existing.agentId !== preset.agentId) {
+      throw new Error("agent_host_agent_profile_conflict");
+    }
+    const next = existing
+      ? config
+      : parseAgentHostConfig({
+          ...config,
+          host: {
+            ...config.host,
+            capabilities: [...new Set([...config.host.capabilities, `acp.${preset.agentId}`])]
+          },
+          agentProfiles: [
+            ...config.agentProfiles,
+            {
+              id: preset.profileId,
+              agentId: preset.agentId,
+              command,
+              args: [...preset.args],
+              environment: [...preset.environment]
+            }
+          ]
+        });
+    if (next !== config) await writePrivateJsonFile(configPath, next);
+    const exposed = new Set(await readExposedAgentProfileIds(next));
+    exposed.add(profileId);
+    await writeExposedAgentProfileIds(next, [...exposed]);
+    return {
+      agents: await this.listAgents(configPath),
+      reload: await this.reloadBackground(next)
+    };
+  }
+
+  async hideAgent(configPath: string, profileId: string): Promise<AgentExposureMutationResult> {
+    const parsedProfileId = parseAgentExposureProfileId(profileId);
+    const config = await loadAgentHostConfig(configPath);
+    const exposed = new Set(await readExposedAgentProfileIds(config));
+    exposed.delete(parsedProfileId);
+    await writeExposedAgentProfileIds(config, [...exposed]);
+    return {
+      agents: await this.listAgents(configPath),
+      reload: await this.reloadBackground(config)
+    };
+  }
+
+  async enrollHandoff(
+    encodedHandoff: string,
+    options: {
+      workspaceRoot?: string;
+      caCertificatePath?: string;
+      installBackground?: boolean;
+      executablePath?: string;
+    } = {}
+  ): Promise<PortableEnrollmentResult> {
+    const handoff = parseAgentHostSetupHandoff(encodedHandoff);
+    const paths = resolveAgentHostDefaultPaths(handoff.workspaceId);
+    let config: AgentHostConfig;
+    try {
+      config = await loadAgentHostConfig(paths.configPath);
+      if (
+        config.coordinator.url !== handoff.endpoint.serverOrigin ||
+        !config.workspaces.some((workspace) => workspace.id === handoff.workspaceId)
+      ) {
+        throw new Error("agent_host_handoff_config_conflict");
+      }
+    } catch (error) {
+      if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) {
+        if (
+          !(
+            error instanceof Error &&
+            error.message === "agent_host_config_invalid" &&
+            error.cause &&
+            typeof error.cause === "object" &&
+            "code" in error.cause &&
+            error.cause.code === "ENOENT"
+          )
+        ) {
+          throw error;
+        }
+      }
+      config = configFromAgentHostSetupHandoff(handoff, {
+        paths,
+        workspaceRoot: options.workspaceRoot,
+        hostDisplayName: hostname(),
+        caCertificatePath: options.caCertificatePath
+      });
+      await mkdir(join(config.workspaceRoot, handoff.workspaceId), {
+        recursive: true,
+        mode: 0o700
+      });
+      await writePrivateJsonFile(paths.configPath, config);
+      await writeExposedAgentProfileIds(config, []);
+    }
+
+    if (handoff.endpoint.tlsTrust === "configured_ca" && !config.coordinator.caCertificatePath) {
+      return {
+        state: "tls_trust_configuration_required",
+        workspaceId: handoff.workspaceId,
+        credential: (await this.diagnostics(config)).credential,
+        background: "setup_required"
+      };
+    }
+
+    const store = credentialStore(config);
+    const document = await store.read();
+    if (!document?.active) {
+      if (document?.pending) await this.resumeEnrollment(paths.configPath);
+      else await this.enroll(paths.configPath, handoff.enrollmentCode);
+    } else if (document.active.workspaceId !== handoff.workspaceId) {
+      throw new Error("agent_host_handoff_credential_conflict");
+    }
+
+    if (options.installBackground === false) {
+      return {
+        state: "ready",
+        workspaceId: handoff.workspaceId,
+        credential: "active",
+        background: "disabled"
+      };
+    }
+    if (!this.backgroundService) {
+      return {
+        state: "background_setup_required",
+        workspaceId: handoff.workspaceId,
+        credential: "active",
+        background: "setup_required"
+      };
+    }
+    try {
+      await this.backgroundService.install({
+        workspaceId: handoff.workspaceId,
+        executablePath: options.executablePath ?? process.argv[1] ?? process.execPath,
+        configPath: paths.configPath,
+        privateDirectory: paths.baseDirectory
+      });
+      return {
+        state: "ready",
+        workspaceId: handoff.workspaceId,
+        credential: "active",
+        background: "running"
+      };
+    } catch {
+      return {
+        state: "background_setup_required",
+        workspaceId: handoff.workspaceId,
+        credential: "active",
+        background: "setup_required"
+      };
+    }
+  }
+
+  async resumeEnrollment(configPath: string): Promise<AgentHostDiagnostics> {
+    const config = await loadAgentHostConfig(configPath);
+    const trust = await createAgentHostTlsTrust(config.coordinator.caCertificatePath);
+    try {
+      const exchangeOptions = {
+        allowInsecureDevelopment: config.coordinator.allowInsecureDevelopment,
+        request: trust.request
+      };
+      await new AgentHostEnrollmentService(
+        config,
+        credentialStore(config),
+        new HttpAgentHostEnrollmentExchange(config.coordinator.url, exchangeOptions),
+        () => new Date(),
+        new HttpAgentHostSetupCodeRedeem(config.coordinator.url, exchangeOptions)
+      ).resume();
+    } finally {
+      await trust.close();
+    }
+    return this.diagnostics(config);
   }
 
   async preflight(configPath: string): Promise<AgentHostDiagnostics> {
@@ -185,7 +397,11 @@ export class AgentHostOperator {
     await mkdir(config.dataDirectory, { recursive: true, mode: 0o700 });
     await credentialStore(config).read();
     const credential = await credentialStore(config).requireUsable();
-    const readiness = await observeHostReadiness(config);
+    const readiness = await observeHostReadiness(
+      config,
+      process.env,
+      await readExposedAgentProfileIds(config)
+    );
     await ensureDurableHostIdentity(
       config.dataDirectory,
       credential.hostId,
@@ -295,5 +511,17 @@ export class AgentHostOperator {
       recoverableExecutions,
       actionableError
     };
+  }
+
+  private async reloadBackground(
+    config: AgentHostConfig
+  ): Promise<"restarted" | "restart_required"> {
+    if (!this.backgroundService) return "restart_required";
+    const credential = await credentialStore(config).read();
+    if (!credential?.active) return "restart_required";
+    const status = await this.backgroundService.status(credential.active.workspaceId);
+    if (status.state !== "running") return "restart_required";
+    await this.backgroundService.restart(credential.active.workspaceId);
+    return "restarted";
   }
 }

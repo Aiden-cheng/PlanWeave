@@ -49,6 +49,11 @@ export {
   parseHostTransportLimits
 } from "./transport/hostTransport.js";
 export { AgentHostOperator, loadAgentHostConfig } from "./operator/agentHostOperator.js";
+export type {
+  AgentExposureMutationResult,
+  AgentHostDiagnostics,
+  PortableEnrollmentResult
+} from "./operator/agentHostOperator.js";
 export {
   parseAgentHostArgs,
   runAgentHostCli,
@@ -66,6 +71,24 @@ export {
   ConfiguredWorkspaceResolver
 } from "./config/resolvers.js";
 export { observeHostReadiness } from "./config/readiness.js";
+export {
+  configFromAgentHostSetupHandoff,
+  resolveAgentHostDefaultPaths,
+  type AgentHostDefaultPaths
+} from "./config/defaultPaths.js";
+export { createPlatformBackgroundService } from "./background/platformBackground.js";
+export type {
+  AgentHostBackgroundInstall,
+  AgentHostBackgroundResult,
+  AgentHostBackgroundService,
+  AgentHostBackgroundState
+} from "./background/backgroundService.js";
+export {
+  createPrivateStorageSecurity,
+  PosixPrivateStorageSecurity,
+  WindowsPrivateStorageSecurity,
+  type PrivateStorageSecurityPort
+} from "./storage/privateStorageSecurity.js";
 export {
   activeHostCredentialSchema,
   hostCredentialDocumentSchema,

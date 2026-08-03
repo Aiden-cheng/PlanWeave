@@ -34,6 +34,12 @@ const status = () => ({
       displayName: "Production admin",
       serverBaseUrl: "https://server.example/",
       allowInsecureTransport: false,
+      endpoint: {
+        topology: "public_https" as const,
+        serverOrigin: "https://server.example",
+        allowedClientOrigins: ["https://server.example"],
+        tlsTrust: "system_ca" as const
+      },
       operatorId: "operator-a",
       hasOperatorCredential: true,
       operatorCredentialPersistence: "persisted" as const,
@@ -87,7 +93,8 @@ beforeEach(() => {
     state: "ready",
     workspaceId: "workspace-a",
     expiresAt: "2030-01-01T00:15:00.000Z",
-    copiedAt: "2030-01-01T00:00:00.000Z"
+    copiedAt: "2030-01-01T00:00:00.000Z",
+    commandPreview: "planweave-agent-host enroll <handoff>"
   });
   bridgeMock.copyOperatorMemberSetupCode.mockResolvedValue({
     state: "ready",
@@ -150,6 +157,7 @@ describe("Host administration surface", () => {
               {
                 profileId: "codex-acp",
                 agentId: "codex",
+                displayName: "Codex",
                 status: "ready",
                 capabilities: ["acp.codex"]
               }
@@ -182,6 +190,7 @@ describe("Host administration surface", () => {
               {
                 profileId: "codex-acp",
                 agentId: "codex",
+                displayName: "Codex",
                 status: "ready",
                 capabilities: ["acp.codex"]
               }
@@ -214,14 +223,6 @@ describe("Host administration surface", () => {
       request: {
         expiresAt: expect.any(String),
         credentialExpiresAt: expect.any(String)
-      },
-      bootstrap: {
-        configPath: "/etc/planweave/agent-host.json",
-        dataDirectory: "/var/lib/planweave-agent-host",
-        workspaceRoot: "/var/lib/planweave-agent-host/workspaces",
-        workspacePath: "project",
-        acpProfilePreset: "codex-acp",
-        host: { displayName: "Production admin", capacity: 1, capabilities: ["linux.x64"] }
       }
     });
     expect(screen.queryByTestId("host-admin-enrollment-secret")).not.toBeInTheDocument();
@@ -229,6 +230,9 @@ describe("Host administration surface", () => {
     expect(screen.queryByTestId("host-admin-bootstrap-command")).not.toBeInTheDocument();
     expect(JSON.stringify(bridgeMock.copyOperatorHostBootstrapHandoff.mock.calls)).not.toContain(
       "pw_enroll_"
+    );
+    expect(JSON.stringify(bridgeMock.copyOperatorHostBootstrapHandoff.mock.results)).not.toMatch(
+      /enrollmentCode|credentialToken|planweave-agent-host-setup:/
     );
 
     await user.click(screen.getByTestId("host-admin-close-grant"));

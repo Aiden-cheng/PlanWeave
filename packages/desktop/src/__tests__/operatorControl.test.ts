@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { exampleSetupCodeIssueResponse } from "@planweave-ai/collaboration-protocol/fixtures/collaboration";
 import { parseCollaborationSetupHandoffV1 } from "@planweave-ai/collaboration-protocol/handoff/setup";
+import { parseAgentHostSetupHandoff } from "@planweave-ai/agent-host-protocol";
 import {
   OPERATOR_CONTROL_JSON_BODY_MAX_BYTES,
   OperatorControlClient
@@ -123,6 +124,121 @@ describe("Desktop operator control trust boundary", () => {
     expect(() =>
       operatorControlProfileSchema.parse({ ...profile("profile-b"), operatorToken: tokenA })
     ).toThrow();
+    expect(() =>
+      assertNoSmuggledOperatorSecrets(
+        {
+          ...profile("profile-b"),
+          endpoint: {
+            topology: "public_https",
+            serverOrigin: "https://other.example",
+            allowedClientOrigins: ["https://other.example"],
+            tlsTrust: "system_ca"
+          }
+        },
+        "upsertOperatorProfile"
+      )
+    ).toThrow(/endpoint/);
+  });
+
+  it("rejects a renderer URL edit that conflicts with a Main-owned endpoint", async () => {
+    const directory = await root("planweave-operator-endpoint-");
+    const store = new OperatorProfileStore({ profilesPath: join(directory, "profiles.json") });
+    await store.upsert({
+      ...profile("profile-endpoint", "https://server.example/"),
+      endpoint: {
+        topology: "public_https",
+        serverOrigin: "https://server.example",
+        allowedClientOrigins: ["https://server.example"],
+        tlsTrust: "system_ca"
+      }
+    });
+    const service = new OperatorControlService({ profileStore: store });
+    await expect(
+      service.upsertProfile(profile("profile-endpoint", "https://other.example/"))
+    ).rejects.toThrow();
+    await expect(store.get("profile-endpoint")).resolves.toMatchObject({
+      serverBaseUrl: "https://server.example/",
+      endpoint: { serverOrigin: "https://server.example" }
+    });
+  });
+
+  it("preserves a Main-owned persisted endpoint when copying a Host setup handoff", async () => {
+    const directory = await root("planweave-operator-host-handoff-");
+    const enrollmentCode = `pw_enroll_${"A".repeat(43)}`;
+    const request = vi.fn(async (input: RequestInfo | URL) => {
+      expect(String(input)).toBe("https://operator.example.test/api/v1/host-enrollments");
+      return new Response(
+        JSON.stringify({
+          enrollmentCode,
+          workspaceId: "workspace-1",
+          expiresAt: "2030-01-01T00:15:00.000Z"
+        }),
+        { status: 201 }
+      );
+    });
+    const profilesPath = join(directory, "profiles.json");
+    const credentialsPath = join(directory, "credentials.json");
+    const service = new OperatorControlService({
+      profileStore: new OperatorProfileStore({ profilesPath }),
+      vault: new OperatorCredentialVault({
+        paths: { credentialsPath },
+        safeStorage: safeStorage(true)
+      })
+    });
+    await service.ensureMainOwnedServerProfile({
+      profile: {
+        ...profile("profile-handoff"),
+        endpoint: {
+          topology: "public_https",
+          serverOrigin: "https://operator.example.test",
+          allowedClientOrigins: ["https://operator.example.test"],
+          tlsTrust: "system_ca"
+        }
+      },
+      operatorId: "desktop-local-admin",
+      operatorToken: tokenA
+    });
+    const restartedService = new OperatorControlService({
+      profileStore: new OperatorProfileStore({ profilesPath }),
+      vault: new OperatorCredentialVault({
+        paths: { credentialsPath },
+        safeStorage: safeStorage(true)
+      }),
+      request
+    });
+    const copyText = vi.fn();
+
+    const view = await restartedService.copyHostBootstrapHandoff(
+      {
+        profileId: "profile-handoff",
+        request: {
+          expiresAt: "2030-01-01T00:15:00.000Z",
+          credentialExpiresAt: "2030-01-02T00:00:00.000Z"
+        }
+      },
+      copyText
+    );
+
+    const command = copyText.mock.calls[0]?.[0] ?? "";
+    const handoff = parseAgentHostSetupHandoff(
+      command.slice("planweave-agent-host enroll ".length)
+    );
+    expect(handoff.endpoint).toEqual({
+      topology: "public_https",
+      serverOrigin: "https://operator.example.test",
+      allowedClientOrigins: ["https://operator.example.test"],
+      tlsTrust: "system_ca"
+    });
+    expect(handoff.enrollmentCode).toBe(enrollmentCode);
+    expect(view.commandPreview).toBe("planweave-agent-host enroll <handoff>");
+    await expect(restartedService.getStatus()).resolves.toMatchObject({
+      profiles: [
+        {
+          profileId: "profile-handoff",
+          endpoint: { serverOrigin: "https://operator.example.test" }
+        }
+      ]
+    });
   });
 
   it("uses only bounded application endpoints and maps 401/403/malformed responses", async () => {
@@ -305,7 +421,10 @@ describe("Desktop operator control trust boundary", () => {
       operatorId: "desktop-self-host-admin"
     });
     const second = await service.ensureDeploymentProfile({
-      profile: { ...profile("deployment-server", "https://collab.example.test/"), displayName: "Updated" },
+      profile: {
+        ...profile("deployment-server", "https://collab.example.test/"),
+        displayName: "Updated"
+      },
       operatorId: "desktop-self-host-admin"
     });
     expect(second).toBe(first);

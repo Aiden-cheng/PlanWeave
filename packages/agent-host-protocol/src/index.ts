@@ -1,5 +1,25 @@
 export { artifactRefSchema, type ArtifactRef } from "./artifacts.js";
 export {
+  agentHostSetupHandoffPrefix,
+  agentHostSetupHandoffSchema,
+  agentHostSetupHandoffVersion,
+  parseAgentHostSetupHandoff,
+  serializeAgentHostSetupHandoff,
+  type AgentHostSetupHandoff
+} from "./agentHostSetupHandoff.js";
+export {
+  deploymentEndpointSchema,
+  deploymentServerOriginSchema,
+  deploymentTlsTrustSchema,
+  deploymentTopologySchema,
+  isDeploymentServerOrigin,
+  isLoopbackDeploymentHostname,
+  isPrivateDeploymentHostname,
+  type DeploymentEndpoint,
+  type DeploymentTlsTrust,
+  type DeploymentTopology
+} from "./deploymentEndpoint.js";
+export {
   ARTIFACT_MEDIA_TYPE_MAX_LENGTH,
   artifactMediaTypeSchema,
   type ArtifactMediaType

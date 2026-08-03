@@ -197,6 +197,7 @@ class StartupHarness {
         {
           profileId: "codex-acp",
           agentId: "codex",
+          displayName: "Test Agent",
           status: "ready",
           capabilities: ["acp.codex"]
         }

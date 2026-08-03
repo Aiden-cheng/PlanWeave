@@ -6,65 +6,84 @@ import {
   type OperatorHostPage,
   type OperatorHostView
 } from "@planweave-ai/agent-host-protocol/operator-control";
+import {
+  deploymentEndpointSchema,
+  isPrivateDeploymentHostname
+} from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
 
 const operatorProfileIdSchema = z.string().trim().min(1).max(128);
 
-/** Non-secret Desktop profile. Credentials are held by Electron main only. */
+const operatorControlProfileFields = {
+  profileId: operatorProfileIdSchema,
+  displayName: z.string().trim().min(1).max(128),
+  serverBaseUrl: z
+    .string()
+    .url()
+    .refine((value) => {
+      try {
+        const url = new URL(value);
+        return (
+          (url.protocol === "https:" || url.protocol === "http:") &&
+          url.username === "" &&
+          url.password === "" &&
+          url.pathname === "/" &&
+          url.search === "" &&
+          url.hash === ""
+        );
+      } catch {
+        return false;
+      }
+    }, "serverBaseUrl must be an http(s) origin without credentials or a path"),
+  allowInsecureTransport: z.boolean().default(false),
+  operatorId: operatorProfileIdSchema.optional()
+} as const;
+
+function refineOperatorTransport(
+  value: { serverBaseUrl: string; allowInsecureTransport: boolean },
+  context: z.RefinementCtx
+): void {
+  const url = new URL(value.serverBaseUrl);
+  if (url.protocol !== "https:" && !value.allowInsecureTransport) {
+    context.addIssue({
+      code: "custom",
+      message: "HTTPS is required unless allowInsecureTransport is true",
+      path: ["serverBaseUrl"]
+    });
+  }
+  if (url.protocol === "http:" && !isPrivateDeploymentHostname(url.hostname.toLowerCase())) {
+    context.addIssue({
+      code: "custom",
+      message: "Insecure HTTP is only allowed for loopback or private-network hosts",
+      path: ["serverBaseUrl"]
+    });
+  }
+}
+
+/** Non-secret Main-owned profile. Credentials are held by Electron main only. */
 export const operatorControlProfileSchema = z
-  .object({
-    profileId: operatorProfileIdSchema,
-    displayName: z.string().trim().min(1).max(128),
-    serverBaseUrl: z
-      .string()
-      .url()
-      .refine((value) => {
-        try {
-          const url = new URL(value);
-          return (
-            (url.protocol === "https:" || url.protocol === "http:") &&
-            url.username === "" &&
-            url.password === "" &&
-            url.pathname === "/" &&
-            url.search === "" &&
-            url.hash === ""
-          );
-        } catch {
-          return false;
-        }
-      }, "serverBaseUrl must be an http(s) origin without credentials or a path"),
-    allowInsecureTransport: z.boolean().default(false),
-    operatorId: operatorProfileIdSchema.optional()
-  })
+  .object({ ...operatorControlProfileFields, endpoint: deploymentEndpointSchema.optional() })
   .strict()
+  .superRefine(refineOperatorTransport)
   .superRefine((value, context) => {
-    const url = new URL(value.serverBaseUrl);
-    if (url.protocol === "https:") return;
-    if (!value.allowInsecureTransport) {
+    if (
+      value.endpoint &&
+      new URL(value.endpoint.serverOrigin).origin !== new URL(value.serverBaseUrl).origin
+    ) {
       context.addIssue({
         code: "custom",
-        message: "HTTPS is required unless allowInsecureTransport is true",
-        path: ["serverBaseUrl"]
-      });
-      return;
-    }
-    const hostname = url.hostname.toLowerCase();
-    const loopback =
-      hostname === "localhost" ||
-      hostname.endsWith(".localhost") ||
-      hostname === "127.0.0.1" ||
-      hostname === "[::1]" ||
-      hostname === "::1";
-    if (!loopback) {
-      context.addIssue({
-        code: "custom",
-        message: "Insecure HTTP is only allowed for loopback hosts",
-        path: ["serverBaseUrl"]
+        message: "operator_endpoint_origin_mismatch",
+        path: ["endpoint"]
       });
     }
   });
 
 export type OperatorControlProfile = z.infer<typeof operatorControlProfileSchema>;
+export const operatorControlProfileInputSchema = z
+  .object(operatorControlProfileFields)
+  .strict()
+  .superRefine(refineOperatorTransport);
+export type OperatorControlProfileInput = z.infer<typeof operatorControlProfileInputSchema>;
 
 export const operatorProfileIdInputSchema = z
   .object({ profileId: operatorProfileIdSchema })
@@ -97,52 +116,10 @@ export type OperatorCreateEnrollmentGrantInput = z.input<
   typeof operatorCreateEnrollmentGrantInputSchema
 >;
 
-const hostBootstrapAbsolutePathSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(4096)
-  .refine((value) => /^(?:\/|[A-Za-z]:[\\/])/.test(value), "path must be absolute");
-
-const hostBootstrapRelativeWorkspacePathSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(1024)
-  .refine(
-    (value) =>
-      !/^(?:\/|[A-Za-z]:[\\/])/.test(value) &&
-      !value.includes("\\") &&
-      value.split("/").every((segment) => segment !== "" && segment !== "." && segment !== ".."),
-    "workspacePath must be a safe relative path"
-  );
-
-export const operatorHostBootstrapConfigSchema = z
-  .object({
-    configPath: hostBootstrapAbsolutePathSchema,
-    dataDirectory: hostBootstrapAbsolutePathSchema,
-    workspaceRoot: hostBootstrapAbsolutePathSchema,
-    workspacePath: hostBootstrapRelativeWorkspacePathSchema,
-    acpProfilePreset: z.literal("codex-acp"),
-    host: z
-      .object({
-        displayName: z.string().trim().min(1).max(128),
-        capacity: z.number().int().min(1).max(128),
-        capabilities: z
-          .array(z.string().regex(/^[a-z0-9][a-z0-9._:-]*$/))
-          .min(1)
-          .max(128)
-      })
-      .strict()
-  })
-  .strict();
-export type OperatorHostBootstrapConfig = z.infer<typeof operatorHostBootstrapConfigSchema>;
-
 export const operatorCopyHostBootstrapHandoffInputSchema = z
   .object({
     profileId: operatorProfileIdSchema,
-    request: operatorEnrollmentGrantRequestSchema,
-    bootstrap: operatorHostBootstrapConfigSchema
+    request: operatorEnrollmentGrantRequestSchema
   })
   .strict();
 export type OperatorCopyHostBootstrapHandoffInput = z.input<
@@ -162,7 +139,8 @@ const operatorClipboardHandoffViewSchema = z
     state: z.literal("ready"),
     workspaceId: operatorProfileIdSchema,
     expiresAt: z.iso.datetime(),
-    copiedAt: z.iso.datetime()
+    copiedAt: z.iso.datetime(),
+    commandPreview: z.literal("planweave-agent-host enroll <handoff>").optional()
   })
   .strict();
 export const operatorHostBootstrapHandoffViewSchema = operatorClipboardHandoffViewSchema;
@@ -191,6 +169,7 @@ export type OperatorProfileView = {
   displayName: string;
   serverBaseUrl: string;
   allowInsecureTransport: boolean;
+  endpoint?: z.infer<typeof deploymentEndpointSchema>;
   operatorId: string | null;
   hasOperatorCredential: boolean;
   operatorCredentialPersistence: OperatorCredentialPersistence;
@@ -254,7 +233,8 @@ const forbiddenSecretKeys = [
   "headers",
   "url",
   "path",
-  "command"
+  "command",
+  "endpoint"
 ] as const;
 
 const OPERATOR_IPC_MAX_DEPTH = 16;
@@ -309,7 +289,7 @@ export {
 
 export type PlanWeaveOperatorControlApi = {
   getOperatorControlStatus: () => Promise<OperatorControlStatus>;
-  upsertOperatorProfile: (input: OperatorControlProfile) => Promise<OperatorControlStatus>;
+  upsertOperatorProfile: (input: OperatorControlProfileInput) => Promise<OperatorControlStatus>;
   removeOperatorProfile: (input: OperatorProfileIdInput) => Promise<OperatorControlStatus>;
   setActiveOperatorProfile: (input: OperatorProfileIdInput) => Promise<OperatorControlStatus>;
   clearActiveOperatorProfile: () => Promise<OperatorControlStatus>;

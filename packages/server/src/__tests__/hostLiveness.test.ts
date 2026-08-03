@@ -57,6 +57,7 @@ describe("server-authoritative Host liveness", () => {
               {
                 profileId: "codex-acp",
                 agentId: "codex",
+                displayName: "Test Agent",
                 status: "ready",
                 capabilities: ["acp.codex"]
               }

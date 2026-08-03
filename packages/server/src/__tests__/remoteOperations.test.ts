@@ -113,6 +113,7 @@ describe("RemoteOperationRepository", () => {
         {
           profileId: "codex-acp",
           agentId: "codex",
+          displayName: "Test Agent",
           status: "ready",
           capabilities: ["linux", "acp.codex"]
         }
