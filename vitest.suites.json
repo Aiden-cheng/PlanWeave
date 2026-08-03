@@ -561,7 +561,9 @@
         "hostLiveness.test.ts",
         "protocolPrimitives.test.ts",
         "publicExports.test.ts",
+        "serverExposureManager.test.ts",
         "serverCliHelp.test.ts",
+        "tailscaleCliAdapter.test.ts",
         "workAssignmentPolicy.test.ts",
         "workAssignmentSchemas.test.ts",
         "workAssignmentWorkItemRef.test.ts"
@@ -591,6 +593,7 @@
         "contentVersionRepository.test.ts",
         "dispatches.test.ts",
         "distributedPackageArtifacts.test.ts",
+        "exposureLeaseRepository.test.ts",
         "hostEnrollment.test.ts",
         "hostReservations.test.ts",
         "humanIdentityHttp.test.ts",

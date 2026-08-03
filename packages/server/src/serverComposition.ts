@@ -104,6 +104,8 @@ import {
   handleWorkAssignmentHttpRequest,
   WorkAssignmentService
 } from "./work/index.js";
+import { SqliteExposureLeaseStore } from "./exposure/exposureLeaseRepository.js";
+import type { ExposureLeaseStorePort } from "./exposure/types.js";
 
 export type DistributedServerCompositionOptions = {
   httpServer: HttpServer;
@@ -115,6 +117,7 @@ export type DistributedServerCompositionOptions = {
 export type DistributedServerComposition = {
   readonly ownsHttpServer: false;
   readonly trustedProjectControl: TrustedProjectControlPort;
+  readonly exposureLeaseStore: ExposureLeaseStorePort;
   readiness(): ServerReadiness;
   beginDrain(): void;
   drainTransports(): Promise<void>;
@@ -986,7 +989,8 @@ export async function createDistributedServerComposition(
       contentVersions: contentVersionRepository,
       authoritativeCommits: authoritativeCanvasCommits,
       onAcceptedEntry: (entry) => attachedCanvasLiveSyncWebSockets.publishAcceptedEntry(entry),
-      onAcceptedEntryUnavailable: (input) => attachedCanvasLiveSyncWebSockets.invalidateScope(input),
+      onAcceptedEntryUnavailable: (input) =>
+        attachedCanvasLiveSyncWebSockets.invalidateScope(input),
       clock
     });
     await canvasCommandService.recoverInterrupted();
@@ -1245,6 +1249,7 @@ export async function createDistributedServerComposition(
         runtimeRegistry,
         projectAccess: initializedProjectAccess
       }),
+      exposureLeaseStore: new SqliteExposureLeaseStore(server.database),
       readiness: () => readiness.readiness(),
       beginDrain,
       drainTransports,

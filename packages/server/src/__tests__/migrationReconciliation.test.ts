@@ -26,6 +26,7 @@ async function openDatabaseAtV26(): Promise<SqliteDatabase> {
   applyMigrations(database);
   database.exec("PRAGMA foreign_keys=OFF");
   for (const table of [
+    "server_exposure_leases",
     "setup_code_host_enrollment_outcomes",
     "setup_code_revocations",
     "setup_code_grants",
@@ -161,9 +162,10 @@ describe("collaboration migration reconciliation", () => {
       { name: "assignment-workspace-scope", versions: [37] },
       { name: "observer-workspace-scope", versions: [38] },
       { name: "attachment-workspace-scope", versions: [39] },
-      { name: "remote-workspace-scope", versions: [40] }
+      { name: "remote-workspace-scope", versions: [40] },
+      { name: "server-exposure", versions: [43] }
     ]);
-    expect(latestCentralSchemaVersion).toBe(42);
+    expect(latestCentralSchemaVersion).toBe(43);
   });
 
   it("maps a representative v26 project to one stable Workspace and package registry key", async () => {

@@ -5,6 +5,13 @@ import type { Server as HttpServer } from "node:http";
 import type { Socket } from "node:net";
 import type { ServerConfig } from "./config.js";
 import { serverConfigSummary } from "./config.js";
+import { ServerExposureManager } from "./exposure/serverExposureManager.js";
+import { TailscaleCliAdapter } from "./exposure/tailscaleCliAdapter.js";
+import type {
+  ExposureLeaseStorePort,
+  ExposureOwnership,
+  ServerExposureLifecyclePort
+} from "./exposure/types.js";
 import { serverPackageVersion } from "./packageInfo.js";
 import { ServerReadinessController, type ServerReadiness } from "./readiness.js";
 import {
@@ -12,6 +19,16 @@ import {
   type DistributedServerComposition
 } from "./serverComposition.js";
 import type { TrustedProjectControlPort } from "./trustedProjectControl.js";
+
+export type DistributedServerExposureRuntime = {
+  lifecycle: ServerExposureLifecyclePort;
+  close?(): void | Promise<void>;
+};
+
+export type DistributedServerServeOptions = {
+  exposure?: DistributedServerExposureRuntime;
+  createExposureLifecycle?: (leases: ExposureLeaseStorePort) => ServerExposureLifecyclePort;
+};
 
 export type DistributedServerProcess = {
   readonly version: string;
@@ -83,28 +100,65 @@ async function stopListenerBounded(
 }
 
 export async function serveDistributedServer(
-  config: ServerConfig
+  config: ServerConfig,
+  options: DistributedServerServeOptions = {}
 ): Promise<DistributedServerProcess> {
   const readiness = new ServerReadinessController();
-  const server = await createListener(config);
+  let server: HttpServer;
+  try {
+    server = await createListener(config);
+  } catch (error) {
+    try {
+      await options.exposure?.close?.();
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "distributed_server_listener_creation_cleanup_failed",
+        { cause: error }
+      );
+    }
+    throw error;
+  }
   const sockets = new Set<Socket>();
   server.on("connection", (socket) => {
     sockets.add(socket);
     socket.once("close", () => sockets.delete(socket));
   });
   let composition: DistributedServerComposition | undefined;
+  let exposure = options.exposure;
+  let ownership: ExposureOwnership | undefined;
   try {
     composition = await createDistributedServerComposition({
       httpServer: server,
       config,
       readiness
     });
+    if (!exposure && config.transport.mode === "tailscale_https") {
+      exposure = {
+        lifecycle:
+          options.createExposureLifecycle?.(composition.exposureLeaseStore) ??
+          new ServerExposureManager({
+            tailscale: new TailscaleCliAdapter(),
+            leases: composition.exposureLeaseStore
+          })
+      };
+    }
+    await exposure?.lifecycle.inspect(config);
     await listen(server, config);
     const schemaVersion = composition.readiness().schemaVersion;
     readiness.transition("listening", schemaVersion);
+    const prepared = await exposure?.lifecycle.activate(config);
+    ownership = prepared?.ownership;
     readiness.transition("ready", schemaVersion);
   } catch (error) {
     const cleanupErrors: unknown[] = [];
+    if (ownership?.createdByActivation) {
+      try {
+        await exposure?.lifecycle.release(ownership);
+      } catch (cleanupError) {
+        cleanupErrors.push(cleanupError);
+      }
+    }
     try {
       await stopListenerBounded(server, sockets, config.limits.shutdownTimeoutMs);
     } catch (cleanupError) {
@@ -112,6 +166,11 @@ export async function serveDistributedServer(
     }
     try {
       await composition?.close();
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError);
+    }
+    try {
+      await exposure?.close?.();
     } catch (cleanupError) {
       cleanupErrors.push(cleanupError);
     }
@@ -136,6 +195,13 @@ export async function serveDistributedServer(
       closePromise ??= (async () => {
         activeComposition.beginDrain();
         const errors: unknown[] = [];
+        if (ownership) {
+          try {
+            await exposure?.lifecycle.release(ownership);
+          } catch (error) {
+            errors.push(error);
+          }
+        }
         const transportResults = await Promise.allSettled([
           stopListenerBounded(server, sockets, config.limits.shutdownTimeoutMs),
           activeComposition.drainTransports()
@@ -145,6 +211,11 @@ export async function serveDistributedServer(
         }
         try {
           await activeComposition.close();
+        } catch (error) {
+          errors.push(error);
+        }
+        try {
+          await exposure?.close?.();
         } catch (error) {
           errors.push(error);
         }

@@ -86,21 +86,23 @@ describe("server config", () => {
     );
   });
 
-  it.each(["userinfo", "path", "query", "fragment"] as const)(
-    "rejects v1 public origins containing %s before normalization",
-    async (part) => {
-      const input = await secureConfig();
-      const publicUrl = {
-        userinfo: "https://user@server.example.test:7443",
-        path: "https://server.example.test:7443/api",
-        query: "https://server.example.test:7443/?mode=test",
-        fragment: "https://server.example.test:7443/#setup"
-      }[part];
-      expect(() => parseServerConfig({ ...input, publicUrl })).toThrow(
-        "server_public_url_must_be_origin"
-      );
-    }
-  );
+  it.each([
+    "userinfo",
+    "path",
+    "query",
+    "fragment"
+  ] as const)("rejects v1 public origins containing %s before normalization", async (part) => {
+    const input = await secureConfig();
+    const publicUrl = {
+      userinfo: "https://user@server.example.test:7443",
+      path: "https://server.example.test:7443/api",
+      query: "https://server.example.test:7443/?mode=test",
+      fragment: "https://server.example.test:7443/#setup"
+    }[part];
+    expect(() => parseServerConfig({ ...input, publicUrl })).toThrow(
+      "server_public_url_must_be_origin"
+    );
+  });
 
   it("accepts trusted TLS on a literal loopback endpoint", async () => {
     const input = await secureConfig();
@@ -313,6 +315,16 @@ describe("server config", () => {
         ...base,
         transport: {
           mode: "tailscale_https",
+          listener: { protocol: "http", host: "::1", port: 8787 },
+          advertisedOrigin: "https://planweave.tailnet.ts.net"
+        }
+      })
+    ).toThrow("server_tailscale_https_transport_invalid");
+    expect(() =>
+      parseServerConfig({
+        ...base,
+        transport: {
+          mode: "tailscale_https",
           listener: {
             protocol: "http",
             host: "127.0.0.1",
@@ -325,60 +337,62 @@ describe("server config", () => {
     ).toThrow();
   });
 
-  it.each(["userinfo", "path", "query", "fragment"] as const)(
-    "rejects v2 direct and Tailscale advertised origins containing %s before normalization",
-    async (part) => {
-      const v1 = await secureConfig();
-      const directOrigin = {
-        userinfo: "https://user@server.example.test:7443",
-        path: "https://server.example.test:7443/api",
-        query: "https://server.example.test:7443/?mode=test",
-        fragment: "https://server.example.test:7443/#setup"
-      }[part];
-      expect(() =>
-        parseServerConfig({
-          version: "server-config/v2",
-          transport: {
-            mode: "direct_https",
-            listener: { protocol: "https", ...v1.bind, tls: v1.tls },
-            advertisedOrigin: directOrigin
-          },
-          deployment: v1.deployment,
-          allowedClientOrigins: v1.deployment.allowedClientOrigins,
-          dataDirectory: v1.dataDirectory,
-          trustedProjects: v1.trustedProjects,
-          operatorCredentials: v1.operatorCredentials
-        })
-      ).toThrow("serverBaseUrl must be an http(s) origin without a path");
+  it.each([
+    "userinfo",
+    "path",
+    "query",
+    "fragment"
+  ] as const)("rejects v2 direct and Tailscale advertised origins containing %s before normalization", async (part) => {
+    const v1 = await secureConfig();
+    const directOrigin = {
+      userinfo: "https://user@server.example.test:7443",
+      path: "https://server.example.test:7443/api",
+      query: "https://server.example.test:7443/?mode=test",
+      fragment: "https://server.example.test:7443/#setup"
+    }[part];
+    expect(() =>
+      parseServerConfig({
+        version: "server-config/v2",
+        transport: {
+          mode: "direct_https",
+          listener: { protocol: "https", ...v1.bind, tls: v1.tls },
+          advertisedOrigin: directOrigin
+        },
+        deployment: v1.deployment,
+        allowedClientOrigins: v1.deployment.allowedClientOrigins,
+        dataDirectory: v1.dataDirectory,
+        trustedProjects: v1.trustedProjects,
+        operatorCredentials: v1.operatorCredentials
+      })
+    ).toThrow("serverBaseUrl must be an http(s) origin without a path");
 
-      const tailscaleOrigin = {
-        userinfo: "https://user@planweave.tailnet.ts.net",
-        path: "https://planweave.tailnet.ts.net/api",
-        query: "https://planweave.tailnet.ts.net/?mode=test",
-        fragment: "https://planweave.tailnet.ts.net/#setup"
-      }[part];
-      expect(() =>
-        parseServerConfig({
-          version: "server-config/v2",
-          transport: {
-            mode: "tailscale_https",
-            listener: { protocol: "http", host: "127.0.0.1", port: 8787 },
-            advertisedOrigin: tailscaleOrigin
-          },
-          deployment: {
-            topology: "tailscale_https",
-            serverOrigin: "https://planweave.tailnet.ts.net",
-            allowedClientOrigins: ["https://planweave.tailnet.ts.net"],
-            tlsTrust: "system_ca"
-          },
+    const tailscaleOrigin = {
+      userinfo: "https://user@planweave.tailnet.ts.net",
+      path: "https://planweave.tailnet.ts.net/api",
+      query: "https://planweave.tailnet.ts.net/?mode=test",
+      fragment: "https://planweave.tailnet.ts.net/#setup"
+    }[part];
+    expect(() =>
+      parseServerConfig({
+        version: "server-config/v2",
+        transport: {
+          mode: "tailscale_https",
+          listener: { protocol: "http", host: "127.0.0.1", port: 8787 },
+          advertisedOrigin: tailscaleOrigin
+        },
+        deployment: {
+          topology: "tailscale_https",
+          serverOrigin: "https://planweave.tailnet.ts.net",
           allowedClientOrigins: ["https://planweave.tailnet.ts.net"],
-          dataDirectory: v1.dataDirectory,
-          trustedProjects: v1.trustedProjects,
-          operatorCredentials: v1.operatorCredentials
-        })
-      ).toThrow("serverBaseUrl must be an http(s) origin without a path");
-    }
-  );
+          tlsTrust: "system_ca"
+        },
+        allowedClientOrigins: ["https://planweave.tailnet.ts.net"],
+        dataDirectory: v1.dataDirectory,
+        trustedProjects: v1.trustedProjects,
+        operatorCredentials: v1.operatorCredentials
+      })
+    ).toThrow("serverBaseUrl must be an http(s) origin without a path");
+  });
 
   it("keeps the v1 deployment schema frozen while normalizing legacy input once", async () => {
     const v1 = await secureConfig();
@@ -418,9 +432,9 @@ describe("server config", () => {
         allowInsecureDevelopment: true
       }
     ];
-    expect(originalTopologies.map((input) => parseServerConfig(input).deployment?.topology)).toEqual(
-      ["lan_https", "loopback_https", "public_https", "loopback_http"]
-    );
+    expect(
+      originalTopologies.map((input) => parseServerConfig(input).deployment?.topology)
+    ).toEqual(["lan_https", "loopback_https", "public_https", "loopback_http"]);
     expect(() =>
       parseServerConfig({
         ...v1,

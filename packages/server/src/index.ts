@@ -66,8 +66,11 @@ export {
 } from "./readiness.js";
 export {
   serveDistributedServer,
-  type DistributedServerProcess
+  type DistributedServerExposureRuntime,
+  type DistributedServerProcess,
+  type DistributedServerServeOptions
 } from "./serverServe.js";
+export * from "./exposure/index.js";
 export {
   createDistributedServerComposition,
   type DistributedServerComposition,

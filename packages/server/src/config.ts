@@ -35,11 +35,7 @@ const serverConfigV1TopologySchema = z.enum(
   ["loopback_http", "loopback_https", "lan_https", "public_https"],
   { error: "server_config_v1_deployment_topology_invalid" }
 );
-const serverConfigV1TlsTrustSchema = z.enum([
-  "not_applicable",
-  "system_ca",
-  "configured_ca"
-]);
+const serverConfigV1TlsTrustSchema = z.enum(["not_applicable", "system_ca", "configured_ca"]);
 const serverConfigV1AllowedClientOriginsSchema = z
   .array(collaborationServerOriginSchema)
   .min(1)
@@ -68,10 +64,7 @@ const serverConfigV1DeploymentEndpointSchema = z
         value.tlsTrust !== "not_applicable" ||
         value.allowedClientOrigins.some((origin) => {
           const client = new URL(origin);
-          return (
-            client.protocol !== "http:" ||
-            !isLoopbackHostname(client.hostname)
-          );
+          return client.protocol !== "http:" || !isLoopbackHostname(client.hostname);
         })
       ) {
         context.addIssue({
@@ -89,10 +82,7 @@ const serverConfigV1DeploymentEndpointSchema = z
         value.tlsTrust === "not_applicable" ||
         value.allowedClientOrigins.some((origin) => {
           const client = new URL(origin);
-          return (
-            client.protocol !== "https:" ||
-            !isLoopbackHostname(client.hostname)
-          );
+          return client.protocol !== "https:" || !isLoopbackHostname(client.hostname);
         })
       ) {
         context.addIssue({
@@ -109,10 +99,7 @@ const serverConfigV1DeploymentEndpointSchema = z
       value.tlsTrust === "not_applicable" ||
       value.allowedClientOrigins.some((origin) => {
         const client = new URL(origin);
-        return (
-          client.protocol !== "https:" ||
-          isLoopbackHostname(client.hostname)
-        );
+        return client.protocol !== "https:" || isLoopbackHostname(client.hostname);
       })
     ) {
       context.addIssue({
@@ -121,10 +108,7 @@ const serverConfigV1DeploymentEndpointSchema = z
         path: ["serverOrigin"]
       });
     }
-    if (
-      value.topology === "public_https" &&
-      Number(url.port || "443") !== 443
-    ) {
+    if (value.topology === "public_https" && Number(url.port || "443") !== 443) {
       context.addIssue({
         code: "custom",
         message: "public_https_requires_direct_tls_port_443",
@@ -445,7 +429,7 @@ function validateNormalizedTransport(
   }
   if (transport.mode === "tailscale_https") {
     if (
-      !["127.0.0.1", "::1"].includes(transport.listener.host) ||
+      transport.listener.host !== "127.0.0.1" ||
       advertised.protocol !== "https:" ||
       !advertised.hostname.toLowerCase().endsWith(".ts.net") ||
       originPort(advertised) !== 443 ||
@@ -635,11 +619,7 @@ export function serverConfigFileInput(
   config: ServerConfig
 ): z.infer<typeof serverConfigV2InputSchema> {
   const validated = serverConfigSchema.parse(config);
-  const {
-    databasePath: _databasePath,
-    insecurePolicy: _insecurePolicy,
-    ...input
-  } = validated;
+  const { databasePath: _databasePath, insecurePolicy: _insecurePolicy, ...input } = validated;
   return serverConfigV2InputSchema.parse(input);
 }
 
