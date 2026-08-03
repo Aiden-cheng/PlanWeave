@@ -1,5 +1,5 @@
 import type { TaskWorkspace, TaskWorkspaceBlock } from "@planweave-ai/runtime";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils";
 import type { TaskWorkspacePromptLabels, TaskWorkspacePromptSaveInput } from "./contracts";
 
 type PromptSaveStatus = "idle" | "saving" | "saved" | "error";
+
+const promptAutosaveDelayMs = 700;
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -96,6 +98,7 @@ function EditablePromptBody({
   const [draft, setDraft] = useState(markdown);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<PromptSaveStatus>("idle");
+  const saving = useRef(false);
   const pendingSourceMarkdown = useRef<string | null>(null);
   const sourceMarkdown = useRef(markdown);
   const dirty = draft !== baseline;
@@ -124,11 +127,12 @@ function EditablePromptBody({
     }
   }, [dirty, markdown]);
 
-  const save = async () => {
-    if (!dirty || status === "saving") {
+  const save = useCallback(async () => {
+    if (!dirty || saving.current) {
       return;
     }
     const submitted = draft;
+    saving.current = true;
     setError(null);
     setStatus("saving");
     try {
@@ -138,15 +142,27 @@ function EditablePromptBody({
     } catch (saveError: unknown) {
       setError(errorMessage(saveError));
       setStatus("error");
+    } finally {
+      saving.current = false;
     }
-  };
+  }, [baseline, dirty, draft, onSave]);
+
+  useEffect(() => {
+    if (!dirty || status !== "idle") {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      void save();
+    }, promptAutosaveDelayMs);
+    return () => window.clearTimeout(timer);
+  }, [dirty, save, status]);
 
   return (
     <form
       className="space-y-1.5"
       onSubmit={(event) => {
         event.preventDefault();
-        save();
+        void save();
       }}
     >
       <div className="flex items-center justify-between gap-2">
@@ -176,6 +192,9 @@ function EditablePromptBody({
           setDraft(event.target.value);
           setError(null);
           setStatus("idle");
+        }}
+        onBlur={() => {
+          void save();
         }}
         spellCheck={false}
         value={draft}

@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -12,7 +12,10 @@ import type { TaskWorkspacePromptLabels } from "../renderer/task-workspace/contr
 import { cleanupRendererTestEnvironment } from "./helpers/rendererTestEnvironment";
 import { taskWorkspaceInspectorFixture } from "./helpers/taskWorkspaceInspectorFixture";
 
-afterEach(cleanupRendererTestEnvironment);
+afterEach(() => {
+  vi.useRealTimers();
+  cleanupRendererTestEnvironment();
+});
 
 const labels: TaskWorkspacePromptLabels = {
   blockPrompt: "Block prompt",
@@ -29,6 +32,91 @@ const labels: TaskWorkspacePromptLabels = {
 };
 
 describe("Task Workspace prompt editing", () => {
+  it("automatically saves a settled Task prompt draft", async () => {
+    vi.useFakeTimers();
+    const onSave = vi.fn(async () => undefined);
+    render(
+      <TaskWorkspaceTaskPrompt
+        labels={labels}
+        onSave={onSave}
+        task={{
+          taskId: "T-001",
+          title: "Task",
+          status: "ready",
+          executor: null,
+          promptMarkdown: "# Original Task prompt",
+          promptMissing: false,
+          acceptance: []
+        }}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("Task prompt"), {
+      target: { value: "# Automatically saved Task prompt" }
+    });
+    await vi.advanceTimersByTimeAsync(800);
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave).toHaveBeenCalledWith({
+      baseMarkdown: "# Original Task prompt",
+      markdown: "# Automatically saved Task prompt"
+    });
+  });
+
+  it("flushes a pending Block prompt save when editing loses focus", async () => {
+    vi.useFakeTimers();
+    const block = taskWorkspaceInspectorFixture().selectedRun.block;
+    const onSave = vi.fn(async () => undefined);
+    render(<TaskWorkspaceBlockPrompts block={block} labels={labels} onSave={onSave} />);
+    const blockPrompt = screen.getByLabelText("Block prompt");
+
+    fireEvent.change(blockPrompt, { target: { value: "# Saved on blur" } });
+    fireEvent.blur(blockPrompt);
+    await vi.runAllTimersAsync();
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave).toHaveBeenCalledWith({
+      baseMarkdown: block.promptMarkdown,
+      markdown: "# Saved on blur"
+    });
+  });
+
+  it("does not submit twice when blur and the manual save action happen together", async () => {
+    let resolveSave: (() => void) | null = null;
+    const onSave = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSave = resolve;
+        })
+    );
+    render(
+      <TaskWorkspaceTaskPrompt
+        labels={labels}
+        onSave={onSave}
+        task={{
+          taskId: "T-001",
+          title: "Task",
+          status: "ready",
+          executor: null,
+          promptMarkdown: "# Original Task prompt",
+          promptMissing: false,
+          acceptance: []
+        }}
+      />
+    );
+    const prompt = screen.getByLabelText("Task prompt");
+
+    fireEvent.change(prompt, { target: { value: "# Updated once" } });
+    fireEvent.blur(prompt);
+    fireEvent.click(screen.getByRole("button", { name: "Save Prompt" }));
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolveSave?.();
+      await Promise.resolve();
+    });
+  });
+
   it("saves an edited Task prompt with its original source as the conflict baseline", async () => {
     const onSave = vi.fn(async () => undefined);
     render(
