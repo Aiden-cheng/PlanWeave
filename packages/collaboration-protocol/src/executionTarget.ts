@@ -20,13 +20,18 @@ export const exactBlockExecutionScopeSchema = z
 export type ExactBlockExecutionScope = z.infer<typeof exactBlockExecutionScopeSchema>;
 export const executionTargetScopeSchema = exactBlockExecutionScopeSchema;
 
-/** No human is an execution target. Automatic selection is capability-compatible Host only. */
+/**
+ * Legacy Host target parser retained for stored-record reads and assignment migration.
+ * @deprecated New dispatch writes select an Agent Endpoint instead of a Host target.
+ */
 export const executionTargetSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("unassigned") }).strict(),
   z.object({ kind: z.literal("exact_host"), hostId: opaqueIdentifierSchema }).strict(),
   z.object({ kind: z.literal("automatic_host") }).strict()
 ]);
+/** @deprecated Use only for legacy stored-record reads, migration, or rejection boundaries. */
 export type ExecutionTarget = z.infer<typeof executionTargetSchema>;
+/** @deprecated Use only for legacy stored-record reads, migration, or rejection boundaries. */
 export const executionTargetUnionSchema = executionTargetSchema;
 
 const targetRevisionSchema = z.number().int().nonnegative().max(COLLABORATION_REVISION_MAX);
@@ -44,7 +49,10 @@ export const executionTargetRecordSchema = z
 export type ExecutionTargetRecord = z.infer<typeof executionTargetRecordSchema>;
 export const executionTargetAssignmentSchema = executionTargetRecordSchema;
 
-/** Desktop wire command contains no actor, auth context, lease, path, or credential. */
+/**
+ * Legacy Host-target write shape retained so Server boundaries can parse and reject it explicitly.
+ * @deprecated New dispatch writes select an Agent Endpoint and must not emit this intent.
+ */
 export const executionTargetUpdateIntentSchema = z
   .object({
     schemaVersion: executionTargetSchemaVersionSchema,
@@ -54,8 +62,11 @@ export const executionTargetUpdateIntentSchema = z
     reason: z.string().trim().min(1).max(COLLABORATION_REASON_MAX_LENGTH).optional()
   })
   .strict();
+/** @deprecated Retained only for the legacy Host-target rejection boundary. */
 export type ExecutionTargetUpdateIntent = z.infer<typeof executionTargetUpdateIntentSchema>;
+/** @deprecated Retained only for the legacy Host-target rejection boundary. */
 export const executionTargetUpdateWireCommandSchema = executionTargetUpdateIntentSchema;
+/** @deprecated Retained only for the legacy Host-target rejection boundary. */
 export type ExecutionTargetUpdateWireCommand = ExecutionTargetUpdateIntent;
 
 export const executionTargetAvailabilityReasonSchema = z.enum([

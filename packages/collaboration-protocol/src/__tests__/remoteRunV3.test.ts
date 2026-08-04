@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  legacyRemoteDispatchIntentV2Schema,
   remoteDispatchIntentSchema,
   remoteDispatchIntentV3Schema,
   remoteDispatchVersionedIntentSchema,
@@ -23,6 +24,7 @@ describe("remote-run/v3 dispatch contract", () => {
     expect(remoteDispatchIntentV3Schema.parse(v3)).toEqual(v3);
     for (const forbidden of [
       { hostId: "host-a" },
+      { requestedHostId: "host-a" },
       { executionTarget: { kind: "exact_host", hostId: "host-a" } },
       { expectedExecutionTargetRevision: 1 },
       { unknown: true }
@@ -73,7 +75,7 @@ describe("remote-run/v3 dispatch contract", () => {
     ).toThrowError("endpoint_observation_must_redact_host_id");
   });
 
-  it("keeps v2 strict and independently parseable", () => {
+  it("keeps legacy v2 strict and independently parseable for migration", () => {
     const v2 = {
       schemaVersion: "remote-run/v2" as const,
       projectId: "project-a",
@@ -84,9 +86,16 @@ describe("remote-run/v3 dispatch contract", () => {
       expectedReviewerRevision: 2,
       expectedExecutionTargetRevision: 4
     };
-    expect(remoteDispatchIntentSchema.parse(v2)).toEqual(v2);
+    expect(legacyRemoteDispatchIntentV2Schema.parse(v2)).toEqual(v2);
+    expect(remoteDispatchIntentSchema).toBe(legacyRemoteDispatchIntentV2Schema);
     expect(remoteDispatchVersionedIntentSchema.parse(v2)).toEqual(v2);
     expect(remoteDispatchVersionedIntentSchema.parse(v3)).toEqual(v3);
-    expect(() => remoteDispatchIntentSchema.parse(v3)).toThrow();
+    for (const forbidden of [
+      { agentEndpointId: "endpoint-1" },
+      { agentEndpoint: { endpointId: "endpoint-1" } }
+    ]) {
+      expect(() => legacyRemoteDispatchIntentV2Schema.parse({ ...v2, ...forbidden })).toThrow();
+    }
+    expect(() => legacyRemoteDispatchIntentV2Schema.parse(v3)).toThrow();
   });
 });

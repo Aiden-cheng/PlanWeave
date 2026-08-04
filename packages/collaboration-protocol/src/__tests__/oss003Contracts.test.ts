@@ -14,7 +14,7 @@ import {
   legacyAssignmentMappingSchema,
   mapLegacyAssignmentTarget
 } from "../assignmentMigration.js";
-import { remoteDispatchIntentSchema } from "../remoteRun.js";
+import { legacyRemoteDispatchIntentV2Schema } from "../remoteRun.js";
 import { responsibilityUpdateWireCommandSchema } from "../responsibility.js";
 import { reviewAssignmentUpdateWireCommandSchema } from "../review.js";
 import { workAuthorityProjectionSchema } from "../workAuthority.js";
@@ -257,7 +257,7 @@ describe("OSS-003 collaboration authority contracts", () => {
   });
 
   it("binds remote dispatch to exact Block and three independent revisions", () => {
-    const command = remoteDispatchIntentSchema.parse({
+    const command = legacyRemoteDispatchIntentV2Schema.parse({
       schemaVersion: "remote-run/v2",
       projectId: blockScope.projectId,
       canvasId: blockScope.canvasId,
@@ -270,15 +270,20 @@ describe("OSS-003 collaboration authority contracts", () => {
     expect(command.blockRef).toBe(blockScope.blockRef);
     expect(command.expectedReviewerRevision).toBe(0);
     expect(() =>
-      remoteDispatchIntentSchema.parse({
+      legacyRemoteDispatchIntentV2Schema.parse({
         ...command,
         expectedReviewerRevision: null
       })
     ).toThrow();
     expect(() =>
-      remoteDispatchIntentSchema.parse({ ...command, actor: { kind: "human", id: "h" } })
+      legacyRemoteDispatchIntentV2Schema.parse({
+        ...command,
+        actor: { kind: "human", id: "h" }
+      })
     ).toThrow();
-    expect(() => remoteDispatchIntentSchema.parse({ ...command, taskId: "task-1" })).toThrow();
+    expect(() =>
+      legacyRemoteDispatchIntentV2Schema.parse({ ...command, taskId: "task-1" })
+    ).toThrow();
   });
 
   it("projects redacted Task/Block authority without secrets or Task Host targets", () => {

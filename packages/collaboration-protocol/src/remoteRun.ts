@@ -172,8 +172,11 @@ export type RemoteDispatchWireCommand = z.infer<typeof remoteDispatchWireCommand
 export const legacyRemoteDispatchWireCommandSchema = remoteDispatchWireCommandSchema;
 export type LegacyRemoteDispatchWireCommand = RemoteDispatchWireCommand;
 
-/** Strict Desktop intent for one exact Task#Block. Actor/auth/lease are Server-owned. */
-export const remoteDispatchIntentSchema = z
+/**
+ * Legacy v2 Desktop intent retained for migration and recovery reads only.
+ * Actor/auth/lease are Server-owned. New dispatch writes must use v3.
+ */
+export const legacyRemoteDispatchIntentV2Schema = z
   .object({
     schemaVersion: z.literal("remote-run/v2"),
     projectId: opaqueIdentifierSchema,
@@ -186,12 +189,20 @@ export const remoteDispatchIntentSchema = z
     expectedExecutionTargetRevision: collaborationRevisionSchema
   })
   .strict();
-export type RemoteDispatchIntent = z.infer<typeof remoteDispatchIntentSchema>;
-export const remoteDispatchWireCommandV2Schema = remoteDispatchIntentSchema;
-export const remoteBlockDispatchIntentSchema = remoteDispatchIntentSchema;
-export type RemoteDispatchWireCommandV2 = RemoteDispatchIntent;
+export type LegacyRemoteDispatchIntentV2 = z.infer<typeof legacyRemoteDispatchIntentV2Schema>;
 
-/** Strict v3 intent: one opaque Agent Endpoint, never a caller-selected Host. */
+/** @deprecated Use only to read legacy v2 dispatch intents during migration or recovery. */
+export const remoteDispatchIntentSchema = legacyRemoteDispatchIntentV2Schema;
+/** @deprecated Use `LegacyRemoteDispatchIntentV2` only for migration or recovery reads. */
+export type RemoteDispatchIntent = LegacyRemoteDispatchIntentV2;
+/** @deprecated New dispatch writes must use `remoteDispatchWireCommandV3Schema`. */
+export const remoteDispatchWireCommandV2Schema = legacyRemoteDispatchIntentV2Schema;
+/** @deprecated Use only to read legacy v2 dispatch intents during migration or recovery. */
+export const remoteBlockDispatchIntentSchema = legacyRemoteDispatchIntentV2Schema;
+/** @deprecated New dispatch writes must use `RemoteDispatchIntentV3`. */
+export type RemoteDispatchWireCommandV2 = LegacyRemoteDispatchIntentV2;
+
+/** Current write intent: one opaque Agent Endpoint, never a caller-selected Host. */
 export const remoteDispatchIntentV3Schema = z
   .object({
     schemaVersion: z.literal("remote-run/v3"),
@@ -207,11 +218,15 @@ export const remoteDispatchIntentV3Schema = z
 export type RemoteDispatchIntentV3 = z.infer<typeof remoteDispatchIntentV3Schema>;
 export const remoteDispatchWireCommandV3Schema = remoteDispatchIntentV3Schema;
 
-/** Explicit version branch; v3 is not modeled as optional v2 authority fields. */
+/**
+ * Migration-only parser for persisted intents across v2 and v3.
+ * @deprecated New dispatch writes must parse with `remoteDispatchIntentV3Schema` directly.
+ */
 export const remoteDispatchVersionedIntentSchema = z.discriminatedUnion("schemaVersion", [
-  remoteDispatchIntentSchema,
+  legacyRemoteDispatchIntentV2Schema,
   remoteDispatchIntentV3Schema
 ]);
+/** @deprecated Use only for migration or recovery reads across persisted intent versions. */
 export type RemoteDispatchVersionedIntent = z.infer<typeof remoteDispatchVersionedIntentSchema>;
 
 /** Version markers carried by the three independent assignment authorities. */
