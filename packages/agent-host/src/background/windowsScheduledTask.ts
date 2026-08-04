@@ -3,6 +3,7 @@ import type {
   AgentHostBackgroundResult,
   AgentHostBackgroundService
 } from "./backgroundService.js";
+import { AgentHostBackgroundSetupError } from "./backgroundService.js";
 import { runFixedArgv, type FixedArgvRunner } from "./processRunner.js";
 
 function taskName(workspaceId: string): string {
@@ -10,11 +11,17 @@ function taskName(workspaceId: string): string {
 }
 
 function quoteWindowsCommand(value: string): string {
-  return `"${value.replaceAll('"', '\\"')}"`;
+  if ([...value].some((character) => [0, 10, 13].includes(character.codePointAt(0) ?? -1))) {
+    throw new Error("agent_host_background_task_value_invalid");
+  }
+  const escaped = value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/g, "$1$1");
+  return `"${escaped}"`;
 }
 
 function taskCommand(input: AgentHostBackgroundInstall): string {
-  return `${quoteWindowsCommand(input.executablePath)} run --config ${quoteWindowsCommand(input.configPath)}`;
+  return [input.executablePath, ...(input.fixedArgs ?? []), "run", "--config", input.configPath]
+    .map(quoteWindowsCommand)
+    .join(" ");
 }
 
 function processErrorCode(error: unknown): number | undefined {
@@ -27,20 +34,26 @@ export class WindowsScheduledTaskService implements AgentHostBackgroundService {
   constructor(private readonly runner: FixedArgvRunner = runFixedArgv) {}
 
   async install(input: AgentHostBackgroundInstall): Promise<AgentHostBackgroundResult> {
-    await this.runner("schtasks.exe", [
-      "/Create",
-      "/TN",
-      taskName(input.workspaceId),
-      "/SC",
-      "ONLOGON",
-      "/RL",
-      "LIMITED",
-      "/TR",
-      taskCommand(input),
-      "/F"
-    ]);
-    await this.runner("schtasks.exe", ["/Run", "/TN", taskName(input.workspaceId)]);
-    return { state: "running", platform: "windows-scheduled-task" };
+    try {
+      await this.runner("schtasks.exe", [
+        "/Create",
+        "/TN",
+        taskName(input.workspaceId),
+        "/SC",
+        "ONLOGON",
+        "/RL",
+        "LIMITED",
+        "/TR",
+        taskCommand(input),
+        "/F"
+      ]);
+      await this.runner("schtasks.exe", ["/Run", "/TN", taskName(input.workspaceId)]);
+      return { state: "running", platform: "windows-scheduled-task" };
+    } catch (error) {
+      throw new AgentHostBackgroundSetupError("check_scheduled_task_permissions", {
+        cause: error
+      });
+    }
   }
 
   async uninstall(workspaceId: string): Promise<AgentHostBackgroundResult> {

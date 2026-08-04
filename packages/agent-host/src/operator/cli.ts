@@ -1,4 +1,5 @@
 import type { AgentHostComposition } from "../composition/agentHostComposition.js";
+import type { AgentHostBackgroundLauncher } from "../background/backgroundService.js";
 import { runRealAcpSmokeCli } from "../realAcp/cli.js";
 import { AgentHostOperator } from "./agentHostOperator.js";
 
@@ -58,6 +59,7 @@ export interface AgentHostOperatorService {
       caCertificatePath?: string;
       installBackground?: boolean;
       executablePath?: string;
+      fixedArgs?: readonly string[];
     }
   ): Promise<unknown>;
   listAgents(configPath: string): Promise<unknown>;
@@ -189,6 +191,7 @@ export async function runAgentHostCli(
     io?: AgentHostCliIo;
     processLike?: Pick<NodeJS.Process, "once" | "off">;
     env?: Readonly<Record<string, string | undefined>>;
+    launcher?: AgentHostBackgroundLauncher;
   } = {}
 ): Promise<number> {
   const io = options.io ?? { stdout: console.log, stderr: console.error };
@@ -227,11 +230,16 @@ export async function runAgentHostCli(
       result = await operator.initializePreset(parsed.configPath, parsed.preset);
     } else if (parsed.command === "enroll") {
       if (parsed.handoff) {
+        const launcher = options.launcher ?? {
+          executablePath: process.execPath,
+          fixedArgs: process.argv[1] ? [process.argv[1]] : []
+        };
         result = await operator.enrollHandoff(parsed.handoff, {
           workspaceRoot: parsed.workspaceRoot,
           caCertificatePath: parsed.caCertificatePath,
           installBackground: parsed.installBackground,
-          executablePath: process.argv[1]
+          executablePath: launcher.executablePath,
+          fixedArgs: launcher.fixedArgs
         });
       } else {
         if (!parsed.configPath) throw new Error("agent_host_cli_config_required");

@@ -7,6 +7,7 @@ import type {
   AgentHostBackgroundResult,
   AgentHostBackgroundService
 } from "./backgroundService.js";
+import { AgentHostBackgroundSetupError } from "./backgroundService.js";
 import { runFixedArgv, type FixedArgvRunner } from "./processRunner.js";
 
 function serviceName(workspaceId: string): string {
@@ -17,7 +18,11 @@ function quoteSystemd(value: string): string {
   if ([...value].some((character) => [0, 10, 13].includes(character.codePointAt(0) ?? -1))) {
     throw new Error("agent_host_background_unit_value_invalid");
   }
-  return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+  return `"${value
+    .replaceAll("\\", "\\\\")
+    .replaceAll('"', '\\"')
+    .replaceAll("%", "%%")
+    .replaceAll("$", () => "$$")}"`;
 }
 
 function unitText(input: AgentHostBackgroundInstall): string {
@@ -29,7 +34,15 @@ function unitText(input: AgentHostBackgroundInstall): string {
     "",
     "[Service]",
     "Type=simple",
-    `ExecStart=${quoteSystemd(input.executablePath)} run --config ${quoteSystemd(input.configPath)}`,
+    `ExecStart=${[
+      input.executablePath,
+      ...(input.fixedArgs ?? []),
+      "run",
+      "--config",
+      input.configPath
+    ]
+      .map(quoteSystemd)
+      .join(" ")}`,
     "Restart=on-failure",
     "RestartSec=5s",
     "TimeoutStopSec=30s",
@@ -56,7 +69,7 @@ export class LinuxUserSystemdService implements AgentHostBackgroundService {
       await this.runner("systemctl", ["--user", "enable", "--now", unit]);
       return { state: "running", platform: "linux-systemd-user" };
     } catch (error) {
-      throw new Error("agent_host_background_setup_required:enable_user_linger", { cause: error });
+      throw new AgentHostBackgroundSetupError("enable_user_linger", { cause: error });
     }
   }
 

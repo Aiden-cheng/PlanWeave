@@ -19,6 +19,7 @@ import {
 import { AgentHostEnrollmentService } from "../enrollment/enrollmentService.js";
 import { AgentHostOperator, loadAgentHostConfig } from "../operator/agentHostOperator.js";
 import { parseAgentHostArgs, runAgentHostCli } from "../operator/cli.js";
+import { AgentHostBackgroundSetupError } from "../background/backgroundService.js";
 
 const mockedHome = vi.hoisted(() => ({ path: "" }));
 vi.mock("node:os", async (importOriginal) => ({
@@ -114,6 +115,49 @@ describe("portable Agent Host setup", () => {
     expect(JSON.stringify(stderr.mock.calls)).not.toContain(handoff);
   });
 
+  it("passes the real npm Node launcher shape and prints structured next steps", async () => {
+    const stdout = vi.fn();
+    const enrollHandoff = vi.fn().mockResolvedValue({
+      state: "ready",
+      workspaceId: "workspace-1",
+      credential: "active",
+      background: "running",
+      configPath: "/Users/operator/PlanWeave Host/config.json",
+      agents: [],
+      nextSteps: {
+        listAgents: {
+          command: "planweave-agent-host",
+          args: ["agents", "list", "--config", "/Users/operator/PlanWeave Host/config.json"]
+        }
+      }
+    });
+    await expect(
+      runAgentHostCli(["enroll", encodedHandoff()], {
+        operator: { enrollHandoff } as never,
+        launcher: {
+          executablePath: "/Applications/Node Runtime/bin/node",
+          fixedArgs: ["/opt/npm packages/@planweave-ai/agent-host/dist/bin.js"]
+        },
+        io: { stdout, stderr: vi.fn() }
+      })
+    ).resolves.toBe(0);
+    expect(enrollHandoff).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        executablePath: "/Applications/Node Runtime/bin/node",
+        fixedArgs: ["/opt/npm packages/@planweave-ai/agent-host/dist/bin.js"]
+      })
+    );
+    expect(JSON.parse(stdout.mock.calls[0]?.[0] as string)).toMatchObject({
+      configPath: "/Users/operator/PlanWeave Host/config.json",
+      nextSteps: {
+        listAgents: {
+          args: ["agents", "list", "--config", "/Users/operator/PlanWeave Host/config.json"]
+        }
+      }
+    });
+  });
+
   it("persists portable pending on interruption and promotes the same provenance on resume", async () => {
     const home = await mkdtemp(join(tmpdir(), "planweave-portable-operator-"));
     directories.push(home);
@@ -174,7 +218,65 @@ describe("portable Agent Host setup", () => {
 
     await expect(
       operator.enrollHandoff(handoff, { installBackground: false })
-    ).resolves.toMatchObject({ state: "ready", credential: "active", background: "disabled" });
+    ).resolves.toMatchObject({
+      state: "ready",
+      credential: "active",
+      background: "disabled",
+      configPath: paths.configPath,
+      agents: expect.arrayContaining([
+        expect.objectContaining({ profileId: "codex-acp", exposed: false })
+      ]),
+      nextSteps: {
+        listAgents: {
+          command: "planweave-agent-host",
+          args: ["agents", "list", "--config", paths.configPath]
+        },
+        exposeAgent: {
+          args: ["agents", "expose", "<supported-profile>", "--config", paths.configPath]
+        },
+        hideAgent: {
+          args: ["agents", "hide", "<supported-profile>", "--config", paths.configPath]
+        }
+      }
+    });
+    const failedBackground = {
+      install: vi.fn().mockRejectedValue(
+        new AgentHostBackgroundSetupError("check_scheduled_task_permissions", {
+          cause: new Error("private scheduler output")
+        })
+      ),
+      uninstall: vi.fn(),
+      status: vi.fn(),
+      restart: vi.fn()
+    };
+    await expect(
+      new AgentHostOperator(failedBackground).enrollHandoff(handoff, {
+        executablePath: "C:\\Program Files\\nodejs\\node.exe",
+        fixedArgs: ["C:\\npm packages\\agent-host\\dist\\bin.js"]
+      })
+    ).resolves.toMatchObject({
+      state: "background_setup_required",
+      background: "setup_required",
+      backgroundGuidance: "check_scheduled_task_permissions",
+      configPath: paths.configPath
+    });
+    expect(failedBackground.install).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executablePath: "C:\\Program Files\\nodejs\\node.exe",
+        fixedArgs: ["C:\\npm packages\\agent-host\\dist\\bin.js"],
+        configPath: paths.configPath
+      })
+    );
+    failedBackground.install.mockClear();
+    await new AgentHostOperator(failedBackground).enrollHandoff(handoff, {
+      executablePath: "/opt/PlanWeave/planweave-agent-host"
+    });
+    expect(failedBackground.install).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executablePath: "/opt/PlanWeave/planweave-agent-host",
+        fixedArgs: []
+      })
+    );
     const config = await loadAgentHostConfig(paths.configPath);
     const restarted = await new FileHostCredentialStore(store.path).read();
     expect(restarted?.active?.provenance).toMatchObject(pending.provenance ?? {});

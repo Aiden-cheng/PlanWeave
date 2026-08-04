@@ -42,7 +42,11 @@ import {
   resolveAgentHostDefaultPaths
 } from "../config/defaultPaths.js";
 import { createPlatformBackgroundService } from "../background/platformBackground.js";
-import type { AgentHostBackgroundService } from "../background/backgroundService.js";
+import {
+  AgentHostBackgroundSetupError,
+  type AgentHostBackgroundGuidance,
+  type AgentHostBackgroundService
+} from "../background/backgroundService.js";
 import { resolveHostExecutable } from "../platform/resolveHostExecutable.js";
 
 const MAX_CONFIG_BYTES = 256 * 1_024;
@@ -64,6 +68,20 @@ export type PortableEnrollmentResult = {
   workspaceId: string;
   credential: AgentHostDiagnostics["credential"];
   background: "running" | "disabled" | "setup_required";
+  backgroundGuidance?: AgentHostBackgroundGuidance;
+  configPath: string;
+  agents: AgentExposureStatus[];
+  nextSteps: {
+    listAgents: PortableAgentHostCommand;
+    exposeAgent: PortableAgentHostCommand;
+    hideAgent: PortableAgentHostCommand;
+    runManually: PortableAgentHostCommand;
+  };
+};
+
+export type PortableAgentHostCommand = {
+  command: "planweave-agent-host";
+  args: readonly string[];
 };
 
 export type AgentExposureMutationResult = {
@@ -202,6 +220,7 @@ export class AgentHostOperator {
       caCertificatePath?: string;
       installBackground?: boolean;
       executablePath?: string;
+      fixedArgs?: readonly string[];
     } = {}
   ): Promise<PortableEnrollmentResult> {
     const handoff = parseAgentHostSetupHandoff(encodedHandoff);
@@ -246,7 +265,9 @@ export class AgentHostOperator {
         state: "tls_trust_configuration_required",
         workspaceId: handoff.workspaceId,
         credential: (await this.diagnostics(config)).credential,
-        background: "setup_required"
+        background: "setup_required",
+        backgroundGuidance: "configure_ca_certificate",
+        ...(await this.portableEnrollmentContext(paths.configPath))
       };
     }
 
@@ -277,7 +298,8 @@ export class AgentHostOperator {
         state: "ready",
         workspaceId: handoff.workspaceId,
         credential: "active",
-        background: "disabled"
+        background: "disabled",
+        ...(await this.portableEnrollmentContext(paths.configPath))
       };
     }
     if (!this.backgroundService) {
@@ -285,13 +307,18 @@ export class AgentHostOperator {
         state: "background_setup_required",
         workspaceId: handoff.workspaceId,
         credential: "active",
-        background: "setup_required"
+        background: "setup_required",
+        backgroundGuidance: "run_agent_host_manually",
+        ...(await this.portableEnrollmentContext(paths.configPath))
       };
     }
     try {
       await this.backgroundService.install({
         workspaceId: handoff.workspaceId,
-        executablePath: options.executablePath ?? process.argv[1] ?? process.execPath,
+        executablePath: options.executablePath ?? process.execPath,
+        fixedArgs:
+          options.fixedArgs ??
+          (options.executablePath ? [] : process.argv[1] ? [process.argv[1]] : []),
         configPath: paths.configPath,
         privateDirectory: paths.baseDirectory
       });
@@ -299,16 +326,44 @@ export class AgentHostOperator {
         state: "ready",
         workspaceId: handoff.workspaceId,
         credential: "active",
-        background: "running"
+        background: "running",
+        ...(await this.portableEnrollmentContext(paths.configPath))
       };
-    } catch {
+    } catch (error) {
       return {
         state: "background_setup_required",
         workspaceId: handoff.workspaceId,
         credential: "active",
-        background: "setup_required"
+        background: "setup_required",
+        backgroundGuidance:
+          error instanceof AgentHostBackgroundSetupError
+            ? error.guidance
+            : "run_agent_host_manually",
+        ...(await this.portableEnrollmentContext(paths.configPath))
       };
     }
+  }
+
+  private async portableEnrollmentContext(
+    configPath: string
+  ): Promise<Pick<PortableEnrollmentResult, "configPath" | "agents" | "nextSteps">> {
+    const command = "planweave-agent-host" as const;
+    return {
+      configPath,
+      agents: await this.listAgents(configPath),
+      nextSteps: {
+        listAgents: { command, args: ["agents", "list", "--config", configPath] },
+        exposeAgent: {
+          command,
+          args: ["agents", "expose", "<supported-profile>", "--config", configPath]
+        },
+        hideAgent: {
+          command,
+          args: ["agents", "hide", "<supported-profile>", "--config", configPath]
+        },
+        runManually: { command, args: ["run", "--config", configPath] }
+      }
+    };
   }
 
   async resumeEnrollment(configPath: string): Promise<AgentHostDiagnostics> {

@@ -2,8 +2,12 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AgentHostBackgroundSetupError } from "../background/backgroundService.js";
 import { LinuxUserSystemdService, linuxAgentHostUnitText } from "../background/linuxUserSystemd.js";
-import { WindowsScheduledTaskService } from "../background/windowsScheduledTask.js";
+import {
+  WindowsScheduledTaskService,
+  windowsAgentHostTaskCommand
+} from "../background/windowsScheduledTask.js";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -14,20 +18,21 @@ afterEach(async () => {
 
 const install = {
   workspaceId: "workspace-1",
-  executablePath: "/opt/PlanWeave/planweave-agent-host",
+  executablePath: "/opt/Node Runtime/bin/node",
+  fixedArgs: ["/opt/PlanWeave package/dist/bin.js"],
   configPath: "/home/user/.planweave/agent-host/instances/workspace-1/config.json",
   privateDirectory: "/home/user/.planweave/agent-host"
 };
 
 describe("Agent Host background adapters", () => {
-  it("writes a user systemd unit containing only executable and config arguments", async () => {
+  it("writes a user systemd unit with a Node npm launcher and fixed argv", async () => {
     const root = await mkdtemp(join(tmpdir(), "planweave-systemd-"));
     directories.push(root);
     const runner = vi.fn().mockResolvedValue({ stdout: "active\n", stderr: "" });
     await new LinuxUserSystemdService(runner, root).install(install);
     const unit = await readFile(join(root, "planweave-agent-host-workspace-1.service"), "utf8");
     expect(unit).toContain(
-      'run --config "/home/user/.planweave/agent-host/instances/workspace-1/config.json"'
+      'ExecStart="/opt/Node Runtime/bin/node" "/opt/PlanWeave package/dist/bin.js" "run" "--config" "/home/user/.planweave/agent-host/instances/workspace-1/config.json"'
     );
     expect(unit).not.toMatch(/pw_(?:enroll|host)_/);
     expect(runner).toHaveBeenNthCalledWith(1, "systemctl", ["--user", "daemon-reload"]);
@@ -41,6 +46,7 @@ describe("Agent Host background adapters", () => {
 
   it.each([
     ["executable newline", { executablePath: "/opt/PlanWeave/host\nEnvironment=BAD=1" }],
+    ["fixed arg newline", { fixedArgs: ["/opt/host.js\nEnvironment=BAD=1"] }],
     ["config carriage return", { configPath: "/tmp/config.json\rExecStart=/bin/false" }],
     ["executable NUL", { executablePath: "/opt/PlanWeave/host\0suffix" }]
   ])("rejects %s at the systemd unit construction boundary", (_label, override) => {
@@ -49,17 +55,64 @@ describe("Agent Host background adapters", () => {
     );
   });
 
+  it("preserves literal systemd dollars and accepts legacy launchers without fixed args", () => {
+    const legacyInstall = {
+      workspaceId: install.workspaceId,
+      executablePath: "/opt/$release/planweave-agent-host",
+      configPath: "/home/$USER/agent-host.json",
+      privateDirectory: install.privateDirectory
+    };
+    expect(linuxAgentHostUnitText(legacyInstall)).toContain(
+      'ExecStart="/opt/$$release/planweave-agent-host" "run" "--config" "/home/$$USER/agent-host.json"'
+    );
+    expect(windowsAgentHostTaskCommand(legacyInstall)).toContain(
+      '"/opt/$release/planweave-agent-host" "run" "--config" "/home/$USER/agent-host.json"'
+    );
+  });
+
   it("creates a LIMITED current-user ONLOGON task with fixed argv", async () => {
     const runner = vi.fn().mockResolvedValue({ stdout: "", stderr: "" });
     await new WindowsScheduledTaskService(runner).install({
       ...install,
-      executablePath: "C:\\PlanWeave\\planweave-agent-host.exe",
+      executablePath: "C:\\Program Files\\nodejs\\node.exe",
+      fixedArgs: [
+        "C:\\Users\\user\\App Data\\npm\\node_modules\\@planweave-ai\\agent-host\\dist\\bin.js"
+      ],
       configPath: "C:\\Users\\user\\.planweave\\agent-host\\config.json",
       privateDirectory: "C:\\Users\\user\\.planweave\\agent-host"
     });
     const createArgs = runner.mock.calls[0]?.[1] as string[];
     expect(createArgs).toContain("ONLOGON");
     expect(createArgs).toContain("LIMITED");
+    expect(createArgs).toContain(
+      '"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\user\\App Data\\npm\\node_modules\\@planweave-ai\\agent-host\\dist\\bin.js" "run" "--config" "C:\\Users\\user\\.planweave\\agent-host\\config.json"'
+    );
     expect(createArgs.join(" ")).not.toMatch(/pw_(?:enroll|host)_/);
+  });
+
+  it("quotes Windows argv containing quotes and trailing backslashes", () => {
+    const command = windowsAgentHostTaskCommand({
+      ...install,
+      fixedArgs: ['C:\\Program Files\\host "stable"\\']
+    });
+    expect(command).toContain('"C:\\Program Files\\host \\"stable\\"\\\\"');
+  });
+
+  it("returns stable actionable setup errors from systemd", async () => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-failed-bg-"));
+    directories.push(root);
+    const runner = vi.fn().mockRejectedValue(new Error("private runner detail"));
+    await expect(new LinuxUserSystemdService(runner, root).install(install)).rejects.toMatchObject({
+      message: "agent_host_background_setup_required",
+      guidance: "enable_user_linger"
+    } satisfies Partial<AgentHostBackgroundSetupError>);
+  });
+
+  it("returns stable actionable setup errors from Scheduled Tasks", async () => {
+    const runner = vi.fn().mockRejectedValue(new Error("private runner detail"));
+    await expect(new WindowsScheduledTaskService(runner).install(install)).rejects.toMatchObject({
+      message: "agent_host_background_setup_required",
+      guidance: "check_scheduled_task_permissions"
+    } satisfies Partial<AgentHostBackgroundSetupError>);
   });
 });
