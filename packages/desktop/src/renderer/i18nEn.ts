@@ -1444,13 +1444,17 @@ export const enCatalog = {
   // Unified local / remote Agent run control
   remoteRunTitle: "Agent run",
   remoteRunNotice:
-    "Choose the current local Agent or a compatible remote Agent Endpoint, then run from one control surface.",
+    "Choose a compatible local or remote Agent Endpoint, then run from one control surface.",
   agentEndpointLabel: "Agent Endpoint",
   agentEndpointRefresh: "Refresh",
   agentEndpointPlaceholder: "Select an Agent Endpoint",
   agentEndpointThisDevice: "This device",
   agentEndpointLocalHint:
-    "The local option uses this Block's current logical Agent. Change the default Agent above if needed.",
+    "The selected Endpoint applies to this run only. The Plan Package logical executor stays unchanged.",
+  blockTaskConfiguration: "Task configuration",
+  logicalExecutor: "Logical executor",
+  logicalExecutorHint:
+    "Sets the reproducible Plan Package default. It does not select where this run executes.",
   remoteRunLocalCoexistence:
     "A local Auto Run is active for this Block. Local and remote authorities are not merged.",
   remoteRunOperationId: "Operation",
@@ -1466,13 +1470,14 @@ export const enCatalog = {
   remoteRunAttemptVersion: "Attempt version",
   remoteRunUnavailable: "—",
   remoteRunNoActiveOperation: "No active remote operation. Choose an Agent Endpoint to run.",
-  remoteRunReadyToDispatch: "The Block is ready. Dispatch starts a new remote attempt.",
+  remoteRunReadyToDispatch:
+    "The Block is ready. Run starts a new attempt on the selected Endpoint.",
   remoteRunRuntimeResult: "Runtime result",
   remoteRunPendingInteractions: "Pending interactions",
   remoteRunAcpEvents: "Normalized ACP events",
   remoteRunLoadMoreEvents: "Load more events",
   remoteRunRefresh: "Refresh",
-  remoteRunActionDispatch: "Dispatch remote run",
+  remoteRunActionDispatch: "Run",
   remoteRunActionAnswer: "Answer interaction",
   remoteRunActionCancel: "Cancel",
   remoteRunActionResume: "Resume session",

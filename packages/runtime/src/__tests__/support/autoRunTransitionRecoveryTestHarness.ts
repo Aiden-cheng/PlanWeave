@@ -6,7 +6,7 @@ import {
 import { initializeAutoRunUnderCanvasLock, stopAutoRun } from "../../desktop/runApi.js";
 import { writePersistedAutoRunState } from "../../desktop/runStateRepository.js";
 import { appendAutoRunEvent } from "../../desktop/runStateStore.js";
-import type { DesktopAutoRunState } from "../../desktop/types.js";
+import type { DesktopAutoRunOptions, DesktopAutoRunState } from "../../desktop/types.js";
 import { canvasDirFromStateFile, withCanvasLock } from "../../fs/withCanvasLock.js";
 import { appendRunSessionEvent, updateRunSession } from "../../runSessions/index.js";
 import type { ProjectWorkspace } from "../../types.js";
@@ -25,10 +25,14 @@ export function forgetTransitionTestRun(runId: string): void {
 
 export async function initializeTransitionTestRun(
   root: string,
-  workspace: ProjectWorkspace
+  workspace: ProjectWorkspace,
+  options: DesktopAutoRunOptions = {}
 ): Promise<DesktopAutoRunState> {
   const run = await withCanvasLock(canvasDirFromStateFile(workspace.stateFile), () =>
-    initializeAutoRunUnderCanvasLock(workspace, root, null, { kind: "project" }, 2, noTmux)
+    initializeAutoRunUnderCanvasLock(workspace, root, null, { kind: "project" }, 2, {
+      ...noTmux,
+      ...options
+    })
   );
   startedRunIds.add(run.runId);
   return run;
@@ -86,7 +90,7 @@ export function sessionSummaryBuilder(parallel = false) {
     desktopRunId: state.runId,
     stepCount: state.stepCount,
     parallel,
-    executorOverride: null,
+    executorOverride: state.options.executorOverride,
     effectiveExecutor: state.currentExecutor,
     agentId: null,
     runnerKind: null,

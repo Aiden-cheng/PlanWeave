@@ -252,7 +252,7 @@ describe("RemoteRunPanel", () => {
     expect(screen.getByText("Codex — Build Mac")).toBeInTheDocument();
     expect(screen.queryByText("host-1")).not.toBeInTheDocument();
     expect(screen.getByTestId("remote-run-notice")).toHaveTextContent(
-      /compatible remote Agent Endpoint/i
+      /compatible local or remote Agent Endpoint/i
     );
     expect(screen.getByTestId("remote-run-legacy-host-target-notice")).toHaveTextContent(
       "Legacy Host run settings are now read-only. Choose this device or a remote Agent."

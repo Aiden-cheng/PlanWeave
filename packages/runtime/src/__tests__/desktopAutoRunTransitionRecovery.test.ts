@@ -41,6 +41,24 @@ afterEach(async () => {
 });
 
 describe("Auto Run transition coordinator recovery", () => {
+  it("preserves the persisted executor override when default recovery heals the session", async () => {
+    const { root, init } = await createTestWorkspace(manifestTestBuilder().build());
+    const run = await initializeTransitionTestRun(root, init.workspace, {
+      executorOverride: "manual"
+    });
+    const committed = await writeCommittedState(run, "stopped");
+    const intent = makeIntent(run, "stopped", "run_stopped", {
+      expectedAuthority: buildExpectedAuthority(committed)
+    });
+    await writePendingTransitionIntent(init.workspace, intent);
+
+    const recovered = await recoverPendingTransition(init.workspace, run.runId, () => null);
+    expect(recovered.recovered).toBe(true);
+    await expect(getRunSession(init.workspace, run.runSessionId!)).resolves.toMatchObject({
+      session: { autoRun: { executorOverride: "manual" } }
+    });
+  });
+
   it("concurrent recoverPendingTransition yields exactly one Auto Run and session event", async () => {
     const { root, init } = await createTestWorkspace(manifestTestBuilder().build());
     const run = await initializeTransitionTestRun(root, init.workspace);

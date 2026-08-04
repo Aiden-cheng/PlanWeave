@@ -32,6 +32,7 @@ describe("executor option view model", () => {
         label: "legacy-executor",
         name: "legacy-executor",
         source: "current-value",
+        capabilities: [],
         detected: null,
         detectionMessage: null,
         custom: false
@@ -41,6 +42,7 @@ describe("executor option view model", () => {
         label: "manual",
         name: "manual",
         source: "manifest",
+        capabilities: [],
         detected: null,
         detectionMessage: null,
         custom: false
@@ -50,6 +52,7 @@ describe("executor option view model", () => {
         label: "custom-shell",
         name: "custom-shell",
         source: "manifest",
+        capabilities: [],
         detected: null,
         detectionMessage: null,
         custom: true
@@ -59,6 +62,7 @@ describe("executor option view model", () => {
         label: "codex",
         name: "codex",
         source: "manifest",
+        capabilities: [],
         detected: false,
         detectionMessage: "not found",
         custom: false
@@ -132,6 +136,38 @@ describe("executor option view model", () => {
         executorOptions: ["codex"]
       })[0]
     ).toMatchObject({ disabled: true, detected: false, detectionMessage: "not found" });
+  });
+
+  it("derives only verified ACP host capability evidence for local options", () => {
+    const detections = [
+      {
+        kind: "codex" as const,
+        runnerKind: "acp" as const,
+        name: "Codex",
+        command: "codex-acp",
+        versionArgs: [],
+        execArgs: [],
+        fullAccessArgs: [],
+        installed: true,
+        version: null,
+        unavailableReason: null
+      }
+    ];
+
+    expect(
+      buildExecutorOptionViews({
+        agentDetections: detections,
+        agentTransport: "acp",
+        executorOptions: ["codex"]
+      })[0]
+    ).toMatchObject({ capabilities: ["acp.codex"] });
+    expect(
+      buildExecutorOptionViews({
+        agentDetections: detections,
+        agentTransport: "cli",
+        executorOptions: ["codex"]
+      })[0]
+    ).toMatchObject({ capabilities: [] });
   });
 
   it("uses the selected transport for the canonical Grok option", () => {

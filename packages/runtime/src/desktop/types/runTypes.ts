@@ -22,6 +22,8 @@ export type DesktopAutoRunPhase =
 export type DesktopAutoRunOptions = {
   tmuxEnabled?: boolean;
   acpRecovery?: AcpRunRecoveryExecution | null;
+  /** One-run executor choice. This never rewrites the Plan Package default. */
+  executorOverride?: string | null;
 };
 
 export type DesktopRuntimeResetOptions = {

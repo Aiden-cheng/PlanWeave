@@ -68,6 +68,12 @@ describe("desktop graph read API", () => {
       expect.arrayContaining(["codex-auto", "codex-acp", "pi-auto", "pi-acp"])
     );
     expect(graph.agentTransport).toBe("acp");
+    expect(graph.executorProfileBindings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "codex", agentId: "codex", runnerKind: "acp" }),
+        expect.objectContaining({ name: "codex-acp", agentId: "codex", runnerKind: "acp" })
+      ])
+    );
     expect(graph.edges).toEqual([]);
     expect(graph.tasks[0]).toMatchObject({
       taskId: "T-001",

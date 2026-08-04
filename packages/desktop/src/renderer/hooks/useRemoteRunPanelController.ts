@@ -42,7 +42,8 @@ export type UseRemoteRunPanelControllerArgs = {
   /** True when a local Auto Run record is active for the same Block. */
   localAutoRunActive?: boolean;
   canvasRef?: DesktopCanvasReference | null;
-  localAgentEndpoint?: LocalAgentEndpointInput | null;
+  localAgentEndpoints?: readonly LocalAgentEndpointInput[];
+  requiredProfileId?: string | null;
   requiredCapabilities?: readonly string[];
   open: boolean;
   api?: PlanWeaveCollaborationApi | null;
@@ -201,12 +202,17 @@ export function useRemoteRunPanelController(
   const agentEndpoints = useMemo(
     () =>
       buildAvailableAgentEndpoints({
-        local: args.localAgentEndpoint ?? null,
+        local: args.localAgentEndpoints ?? [],
         remote: remoteAgentEndpoints,
-        requiredProfileId: args.localAgentEndpoint?.executorName ?? null,
+        requiredProfileId: args.requiredProfileId ?? null,
         requiredCapabilities: args.requiredCapabilities ?? []
       }),
-    [args.localAgentEndpoint, args.requiredCapabilities, remoteAgentEndpoints]
+    [
+      args.localAgentEndpoints,
+      args.requiredCapabilities,
+      args.requiredProfileId,
+      remoteAgentEndpoints
+    ]
   );
 
   const refreshAgentEndpoints = useCallback(async () => {
@@ -462,10 +468,14 @@ export function useRemoteRunPanelController(
     if (selectedEndpoint.source === "local") {
       await runAction("dispatch", async () => {
         if (!bridge || !args.canvasRef) throw new Error("local_agent_endpoint_unavailable");
+        if (!selectedEndpoint.localExecutorName) {
+          throw new Error("agent_endpoint_selection_required");
+        }
         await bridge.startAutoRun(
           args.canvasRef,
           { kind: "block", blockRef: workItem.blockRef },
-          20
+          20,
+          { executorOverride: selectedEndpoint.localExecutorName }
         );
       });
       return;

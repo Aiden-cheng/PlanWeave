@@ -19,6 +19,7 @@ import { buildPlanGraphViewProjection, loadPlanGraphPackage } from "../../plangr
 import type { BlockStatus, ClaimResult, PackageWorkspaceRef, TaskStatus } from "../../types.js";
 import type {
   DesktopBlockDetail,
+  DesktopExecutorProfileBinding,
   DesktopGraphViewModel,
   DesktopTaskDetail,
   DesktopTaskExecutionOrder
@@ -65,6 +66,7 @@ export type DesktopGraphViewModelContext = RuntimeContext & {
   status: ExecutionStatus;
   executorOptions: string[];
   packageExecutorNames: string[];
+  executorProfileBindings: DesktopExecutorProfileBinding[];
   agentTransport: "cli" | "acp";
   claimReadiness: ClaimReadiness;
 };
@@ -104,6 +106,11 @@ export function buildDesktopGraphViewModelContext(
     packageExecutorNames: executorProfiles
       .filter((profile) => profile.source === "package")
       .map((profile) => profile.name),
+    executorProfileBindings: executorProfiles.map((profile) => ({
+      name: profile.name,
+      agentId: profile.agentId ?? null,
+      runnerKind: profile.runnerKind ?? null
+    })),
     agentTransport: selectedDesktopAgentTransport(),
     claimReadiness: buildClaimReadiness({
       graph: runtime.graph,
@@ -190,7 +197,14 @@ function resolveAutoRunPreflightClaim(
 export async function buildGraphViewModel(
   context: DesktopGraphViewModelContext
 ): Promise<DesktopGraphViewModel> {
-  const { workspace, status, executorOptions, packageExecutorNames, agentTransport } = context;
+  const {
+    workspace,
+    status,
+    executorOptions,
+    packageExecutorNames,
+    executorProfileBindings,
+    agentTransport
+  } = context;
   // Prompt bodies and missing/read diagnostics already come from the PlanGraph
   // index built by loadPlanGraphPackage (promptMarkdownByPath + graph.diagnostics).
   // Do not re-read every task/block prompt file on each view-model build.
@@ -218,6 +232,7 @@ export async function buildGraphViewModel(
       packageFingerprint: planGraphPackage.graph.packageFingerprint,
       executorOptions,
       packageExecutorNames,
+      executorProfileBindings,
       agentTransport,
       autoRunPreflightExecutorHint: resolveAutoRunPreflightExecutorHint(context),
       tasks: projection.tasks,

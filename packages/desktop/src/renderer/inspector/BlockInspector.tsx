@@ -158,24 +158,69 @@ export function BlockInspector({
     .find((task) => task.taskId === selectedBlock?.taskId)
     ?.blocks.find((block) => block.ref === selectedBlock?.ref);
   const requiredCapabilities = graphBlock?.requiredCapabilities ?? [];
-  const localAgentEndpoint = concreteExecutor
-    ? (() => {
-        const option = blockExecutorOptions.find(
-          (candidate) =>
-            candidate.name === executorOptionName(concreteExecutor, graph?.packageExecutorNames)
-        );
-        return buildLocalAgentEndpoint({
-          executorName: concreteExecutor,
-          displayName: option?.label ?? concreteExecutor,
-          locationName: t("agentEndpointThisDevice"),
-          profileExists: option !== undefined,
-          detected: option !== undefined && !option.disabled,
-          preflightLoading: preflight.loading,
-          preflightError: preflight.error,
-          preflightOk: preflight.result?.ok ?? null
-        });
-      })()
+  const requiredProfileId = concreteExecutor;
+  const requiredOptionName = concreteExecutor
+    ? executorOptionName(concreteExecutor, graph?.packageExecutorNames)
     : null;
+  const requiredLocalOption = requiredOptionName
+    ? blockExecutorOptions.find((option) => option.name === requiredOptionName)
+    : undefined;
+  const requiredProfileBinding = concreteExecutor
+    ? graph?.executorProfileBindings?.find((binding) => binding.name === concreteExecutor)
+    : undefined;
+  const requiredProfileDetection = requiredProfileBinding?.agentId
+    ? agentDetections.find(
+        (detection) =>
+          detection.kind === requiredProfileBinding.agentId &&
+          detection.runnerKind === requiredProfileBinding.runnerKind
+      )
+    : undefined;
+  const hasExactProfileBindings = graph?.executorProfileBindings !== undefined;
+  const requiredProfileExists = hasExactProfileBindings
+    ? requiredProfileBinding !== undefined
+    : requiredLocalOption !== undefined;
+  const requiredProfileDetected = hasExactProfileBindings
+    ? requiredProfileBinding !== undefined &&
+      (requiredProfileBinding.agentId === null || requiredProfileBinding.runnerKind === null
+        ? true
+        : requiredProfileDetection?.installed === true)
+    : requiredLocalOption !== undefined && !requiredLocalOption.disabled;
+  const requiredProfileCapabilities = hasExactProfileBindings
+    ? requiredProfileDetection?.installed === true && requiredProfileDetection.runnerKind === "acp"
+      ? [`acp.${requiredProfileDetection.kind}`]
+      : []
+    : (requiredLocalOption?.capabilities ?? []);
+  const requiredLocalEndpoint = concreteExecutor
+    ? buildLocalAgentEndpoint({
+        executorName: concreteExecutor,
+        displayName: requiredLocalOption?.label ?? concreteExecutor,
+        locationName: t("agentEndpointThisDevice"),
+        capabilities: requiredProfileCapabilities,
+        profileExists: requiredProfileExists,
+        detected: requiredProfileDetected,
+        preflightLoading: preflight.loading,
+        preflightError: preflight.error,
+        preflightOk: preflight.result?.ok ?? null
+      })
+    : null;
+  const localAgentEndpoints = [
+    ...(requiredLocalEndpoint ? [requiredLocalEndpoint] : []),
+    ...blockExecutorOptions
+      .filter((option) => option.name !== requiredOptionName)
+      .map((option) =>
+        buildLocalAgentEndpoint({
+          executorName: option.name,
+          displayName: option.label,
+          locationName: t("agentEndpointThisDevice"),
+          capabilities: option.capabilities,
+          profileExists: true,
+          detected: !option.disabled,
+          preflightLoading: false,
+          preflightError: null,
+          preflightOk: null
+        })
+      )
+  ];
   const blockPromptBaselineRef = useRef<{ promptMarkdown: string; ref: string } | null>(null);
   const taskBlocks = useMemo(() => {
     if (!graph || !selectedBlock) {
@@ -299,79 +344,6 @@ export function BlockInspector({
           />
         ) : selectedBlock ? (
           <div data-testid="block-inspector-content" className="flex flex-col gap-5">
-            <div className="flex flex-col gap-1">
-              <div className="text-xs font-medium text-muted-foreground">{t("agent")}</div>
-              <Select
-                value={selectedExecutor}
-                onValueChange={(value) =>
-                  void saveSelectedBlockExecutor(value === "__inherit" ? null : value)
-                }
-              >
-                <SelectTrigger aria-label={t("agent")}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="__inherit">{t("inheritExecutor")}</SelectItem>
-                    {blockExecutorOptions.map((executor) => (
-                      <SelectItem
-                        disabled={executor.disabled}
-                        value={executor.name}
-                        key={executor.name}
-                      >
-                        <span className="flex min-w-0 items-center gap-2">
-                          <span>{executor.label}</span>
-                          {executor.custom ? (
-                            <span className="text-xs text-muted-foreground">
-                              {t("customExecutor")}
-                            </span>
-                          ) : null}
-                          {executor.disabled ? (
-                            <span className="text-xs text-muted-foreground">
-                              {t("unavailable")}
-                            </span>
-                          ) : null}
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-              <div className="flex min-h-7 items-center gap-2 text-xs text-muted-foreground">
-                {!concreteExecutorLabel ? (
-                  <span>{t("executorPreflightSelectConcrete")}</span>
-                ) : preflight.result ? (
-                  <Badge
-                    data-testid="block-executor-preflight-status"
-                    variant={preflight.result.ok ? "secondary" : "destructive"}
-                  >
-                    {preflight.result.ok ? t("preflightPassed") : t("preflightFailed")}
-                  </Badge>
-                ) : preflight.error ? (
-                  <span className="min-w-0 truncate text-destructive">{preflight.error}</span>
-                ) : preflightUsesInheritedExecutor ? (
-                  <span>
-                    {t("inheritExecutor")}: {concreteExecutorLabel}
-                  </span>
-                ) : (
-                  <span>{t("executorPreflightNotRun")}</span>
-                )}
-                <Button
-                  data-testid="block-executor-preflight"
-                  disabled={!canvasRef || !concreteExecutorLabel || preflight.loading}
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label={t("runPreflight")}
-                  title={t("runPreflight")}
-                  onClick={() => void preflight.runPreflight()}
-                >
-                  <RefreshCwIcon
-                    className={preflight.loading ? "animate-spin" : undefined}
-                    data-icon="inline-start"
-                  />
-                </Button>
-              </div>
-            </div>
             <AssigneeInspectorField
               workItem={
                 selectedBlock
@@ -397,7 +369,8 @@ export function BlockInspector({
               runtimeRemoteExecution={selectedBlock.remoteExecution}
               localAutoRunActive={localAutoRunActive}
               canvasRef={canvasRef}
-              localAgentEndpoint={localAgentEndpoint}
+              localAgentEndpoints={localAgentEndpoints}
+              requiredProfileId={requiredProfileId}
               requiredCapabilities={requiredCapabilities}
               t={t}
             />
@@ -413,6 +386,90 @@ export function BlockInspector({
               }
               t={t}
             />
+            <details
+              className="rounded-lg border bg-card p-3"
+              data-testid="block-task-configuration"
+            >
+              <summary className="cursor-pointer text-sm font-semibold">
+                {t("blockTaskConfiguration")}
+              </summary>
+              <div className="mt-3 flex flex-col gap-1">
+                <div className="text-xs font-medium text-muted-foreground">
+                  {t("logicalExecutor")}
+                </div>
+                <p className="text-xs text-muted-foreground">{t("logicalExecutorHint")}</p>
+                <Select
+                  value={selectedExecutor}
+                  onValueChange={(value) =>
+                    void saveSelectedBlockExecutor(value === "__inherit" ? null : value)
+                  }
+                >
+                  <SelectTrigger aria-label={t("logicalExecutor")}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="__inherit">{t("inheritExecutor")}</SelectItem>
+                      {blockExecutorOptions.map((executor) => (
+                        <SelectItem
+                          disabled={executor.disabled}
+                          value={executor.name}
+                          key={executor.name}
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span>{executor.label}</span>
+                            {executor.custom ? (
+                              <span className="text-xs text-muted-foreground">
+                                {t("customExecutor")}
+                              </span>
+                            ) : null}
+                            {executor.disabled ? (
+                              <span className="text-xs text-muted-foreground">
+                                {t("unavailable")}
+                              </span>
+                            ) : null}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                <div className="flex min-h-7 items-center gap-2 text-xs text-muted-foreground">
+                  {!concreteExecutorLabel ? (
+                    <span>{t("executorPreflightSelectConcrete")}</span>
+                  ) : preflight.result ? (
+                    <Badge
+                      data-testid="block-executor-preflight-status"
+                      variant={preflight.result.ok ? "secondary" : "destructive"}
+                    >
+                      {preflight.result.ok ? t("preflightPassed") : t("preflightFailed")}
+                    </Badge>
+                  ) : preflight.error ? (
+                    <span className="min-w-0 truncate text-destructive">{preflight.error}</span>
+                  ) : preflightUsesInheritedExecutor ? (
+                    <span>
+                      {t("inheritExecutor")}: {concreteExecutorLabel}
+                    </span>
+                  ) : (
+                    <span>{t("executorPreflightNotRun")}</span>
+                  )}
+                  <Button
+                    data-testid="block-executor-preflight"
+                    disabled={!canvasRef || !concreteExecutorLabel || preflight.loading}
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={t("runPreflight")}
+                    title={t("runPreflight")}
+                    onClick={() => void preflight.runPreflight()}
+                  >
+                    <RefreshCwIcon
+                      className={preflight.loading ? "animate-spin" : undefined}
+                      data-icon="inline-start"
+                    />
+                  </Button>
+                </div>
+              </div>
+            </details>
             <div className="shrink-0 rounded-lg border bg-card p-3 text-xs">
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">

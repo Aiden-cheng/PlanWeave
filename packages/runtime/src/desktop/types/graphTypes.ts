@@ -1,4 +1,5 @@
 import type {
+  AgentFamily,
   BlockStatus,
   BlockType,
   EdgeType,
@@ -6,13 +7,13 @@ import type {
   GraphEditResult,
   GraphQualityReport,
   ReviewGateHint,
+  RunnerTransport,
   TaskStatus,
   ValidationIssue
 } from "../../types.js";
 import type { PromptSourceSummary } from "../../taskManager/promptContracts.js";
 import type { ProjectPromptPolicy } from "../../projectPromptPolicy.js";
 import type { PendingImportTransaction } from "../../package/importRecovery.js";
-import type { RunnerTransport } from "../../types.js";
 import type { DesktopLayout, DesktopLayoutNode } from "./desktopLayoutSchema.js";
 import type { RemoteBlockExecutionReadModel } from "../../schema/remoteExecutionReadModel.js";
 
@@ -72,6 +73,13 @@ export type DesktopGraphEdgeViewModel = {
   type: EdgeType;
 };
 
+/** Exact runtime binding used to match a logical executor profile to local detection evidence. */
+export type DesktopExecutorProfileBinding = {
+  name: string;
+  agentId: AgentFamily | null;
+  runnerKind: RunnerTransport | null;
+};
+
 export type DesktopGraphViewModel = {
   projectId: string;
   projectTitle: string;
@@ -79,6 +87,8 @@ export type DesktopGraphViewModel = {
   packageFingerprint: string;
   executorOptions: string[];
   packageExecutorNames?: string[];
+  /** Present on current Runtime responses; optional for source compatibility with older bridges. */
+  executorProfileBindings?: DesktopExecutorProfileBinding[];
   agentTransport?: RunnerTransport;
   autoRunPreflightExecutorHint: string | null;
   tasks: DesktopTaskNodeViewModel[];

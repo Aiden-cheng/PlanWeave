@@ -18,12 +18,13 @@ export const desktopAutoRunScopeSchema = z.discriminatedUnion("kind", [
 ]);
 
 /**
- * Transport options only. Defaults (tmuxEnabled=true, acpRecovery=null) stay in runtime.
+ * Per-run options only. Defaults stay in runtime and never rewrite the Plan Package.
  */
 export const desktopAutoRunOptionsSchema = z
   .object({
     tmuxEnabled: z.boolean().optional(),
-    acpRecovery: acpRunRecoveryExecutionSchema.nullable().optional()
+    acpRecovery: acpRunRecoveryExecutionSchema.nullable().optional(),
+    executorOverride: z.string().trim().min(1).nullable().optional()
   })
   .strict();
 

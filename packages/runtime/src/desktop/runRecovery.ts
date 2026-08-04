@@ -79,12 +79,24 @@ function normalizeOptions(value: unknown): Required<DesktopAutoRunOptions> | nul
   if (!isRecord(value) || typeof value.tmuxEnabled !== "boolean") {
     return null;
   }
+  if (
+    value.executorOverride !== undefined &&
+    value.executorOverride !== null &&
+    (typeof value.executorOverride !== "string" || value.executorOverride.trim().length === 0)
+  ) {
+    return null;
+  }
   const recovery =
     value.acpRecovery === null || value.acpRecovery === undefined
       ? null
       : acpRunRecoveryExecutionSchema.safeParse(value.acpRecovery);
   if (recovery !== null && !recovery.success) return null;
-  return { tmuxEnabled: value.tmuxEnabled, acpRecovery: recovery?.data ?? null };
+  return {
+    tmuxEnabled: value.tmuxEnabled,
+    acpRecovery: recovery?.data ?? null,
+    executorOverride:
+      typeof value.executorOverride === "string" ? value.executorOverride.trim() : null
+  };
 }
 
 function validExplanation(value: unknown): AutoRunExplanation | null {

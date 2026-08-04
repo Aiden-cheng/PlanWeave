@@ -3,17 +3,18 @@ import { buildAvailableAgentEndpoints, buildLocalAgentEndpoint } from "./agentEn
 
 describe("buildLocalAgentEndpoint", () => {
   it.each([
-    ["null result", false, null, null, false],
+    ["not run", false, null, null, true],
     ["loading", true, null, null, false],
     ["failure result", false, null, false, false],
     ["preflight error", false, "preflight failed", null, false],
     ["explicit success", false, null, true, true]
-  ] as const)("requires explicit non-loading preflight success for %s", (_name, preflightLoading, preflightError, preflightOk, available) => {
+  ] as const)("keeps preflight optional but respects an observed %s state", (_name, preflightLoading, preflightError, preflightOk, available) => {
     expect(
       buildLocalAgentEndpoint({
         executorName: "codex-acp",
         displayName: "Codex",
         locationName: "This device",
+        capabilities: ["acp.codex"],
         profileExists: true,
         detected: true,
         preflightLoading,
@@ -28,15 +29,26 @@ describe("buildLocalAgentEndpoint", () => {
 });
 
 describe("buildAvailableAgentEndpoints", () => {
-  it("merges the current local executor with compatible remote Endpoints", () => {
+  it("merges all local candidates with compatible remote Endpoints", () => {
     const endpoints = buildAvailableAgentEndpoints({
-      local: {
-        executorName: "codex-acp",
-        displayName: "Codex",
-        locationName: "This device",
-        available: true,
-        unavailableReason: null
-      },
+      local: [
+        {
+          executorName: "codex-acp",
+          displayName: "Codex",
+          locationName: "This device",
+          capabilities: ["acp.codex"],
+          available: true,
+          unavailableReason: null
+        },
+        {
+          executorName: "claude-acp",
+          displayName: "Claude",
+          locationName: "This device",
+          capabilities: ["acp.claude-code"],
+          available: true,
+          unavailableReason: null
+        }
+      ],
       requiredProfileId: "codex-acp",
       requiredCapabilities: ["acp.codex"],
       remote: [
@@ -66,6 +78,12 @@ describe("buildAvailableAgentEndpoints", () => {
     expect(endpoints).toEqual([
       expect.objectContaining({ id: "local:codex-acp", source: "local", available: true }),
       expect.objectContaining({
+        id: "local:claude-acp",
+        source: "local",
+        available: false,
+        unavailableReason: "agent_endpoint_incompatible"
+      }),
+      expect.objectContaining({
         id: "remote:endpoint-vps",
         source: "remote",
         locationName: "VPS",
@@ -82,7 +100,7 @@ describe("buildAvailableAgentEndpoints", () => {
 
   it("keeps Server availability failures visible and disabled", () => {
     const endpoints = buildAvailableAgentEndpoints({
-      local: null,
+      local: [],
       requiredProfileId: "codex-acp",
       requiredCapabilities: ["acp.codex"],
       remote: [
@@ -107,7 +125,7 @@ describe("buildAvailableAgentEndpoints", () => {
 
   it("keeps capability-incompatible Endpoints visible and disabled", () => {
     const endpoints = buildAvailableAgentEndpoints({
-      local: null,
+      local: [],
       requiredProfileId: "codex-acp",
       requiredCapabilities: ["acp.codex", "network"],
       remote: [
@@ -126,6 +144,30 @@ describe("buildAvailableAgentEndpoints", () => {
 
     expect(endpoints[0]).toMatchObject({
       id: "remote:endpoint-without-network",
+      available: false,
+      unavailableReason: "agent_endpoint_incompatible"
+    });
+  });
+
+  it("applies required capabilities to local Endpoints too", () => {
+    const endpoints = buildAvailableAgentEndpoints({
+      local: [
+        {
+          executorName: "codex-acp",
+          displayName: "Codex",
+          locationName: "This device",
+          capabilities: ["acp.codex"],
+          available: true,
+          unavailableReason: null
+        }
+      ],
+      requiredProfileId: "codex-acp",
+      requiredCapabilities: ["acp.codex", "linux"],
+      remote: []
+    });
+
+    expect(endpoints[0]).toMatchObject({
+      id: "local:codex-acp",
       available: false,
       unavailableReason: "agent_endpoint_incompatible"
     });

@@ -108,9 +108,10 @@ export async function evaluateTaskWorkspaceAcpRecovery(options: {
   } catch {
     sourceIdentityValid = false;
   }
-  const profile = options.block.effectiveExecutor
+  const source = metadata.success ? metadata.data : null;
+  const profile = source?.executorProfile
     ? (await listExecutorProfiles({ projectRoot: options.workspace })).find(
-        (candidate) => candidate.name === options.block.effectiveExecutor
+        (candidate) => candidate.name === source.executorProfile
       )
     : undefined;
   const resolvedLaunch =
@@ -120,7 +121,6 @@ export async function evaluateTaskWorkspaceAcpRecovery(options: {
           args: profile.acpLaunch.args
         })
       : null;
-  const source = metadata.success ? metadata.data : null;
   sourceIdentityValid =
     sourceIdentityValid &&
     (source === null ||
@@ -140,7 +140,7 @@ export async function evaluateTaskWorkspaceAcpRecovery(options: {
     sourceAgentId: source?.agentId ?? null,
     resolvedAgentId: profile?.agentId ?? null,
     sourceExecutorProfile: source?.executorProfile ?? null,
-    resolvedExecutorProfile: options.block.effectiveExecutor,
+    resolvedExecutorProfile: profile?.name ?? null,
     sourceLaunch: source?.acpLaunch ?? null,
     resolvedLaunch,
     loadSessionAvailable:
@@ -280,7 +280,8 @@ export async function recoverTaskWorkspaceAcpRun(
         { kind: "block", blockRef: identity.claimRef },
         20,
         {
-          acpRecovery: recoveryExecution
+          acpRecovery: recoveryExecution,
+          executorOverride: identity.executorProfile
         }
       );
     } catch (error) {

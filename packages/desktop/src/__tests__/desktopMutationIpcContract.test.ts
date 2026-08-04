@@ -274,7 +274,7 @@ describe("desktop mutation IPC transport schemas", () => {
     it("parses scope and options without defaulting in main", async () => {
       const handler = registeredHandler(desktopBridgeInvokeChannels.startAutoRun);
       const scope = { kind: "task" as const, taskId: "T-001" };
-      const options = { tmuxEnabled: false };
+      const options = { tmuxEnabled: false, executorOverride: "codex-acp" };
 
       await expect(handler({}, validRef, scope, 5, options)).resolves.toMatchObject({
         runId: "RUN-001"
@@ -311,6 +311,7 @@ describe("desktop mutation IPC transport schemas", () => {
       await expect(
         handler({}, validRef, scope, 5, { acpRecovery: { incomplete: true } })
       ).rejects.toThrow();
+      await expect(handler({}, validRef, scope, 5, { executorOverride: "   " })).rejects.toThrow();
       expect(runtimeMock.startAutoRun).not.toHaveBeenCalled();
     });
 

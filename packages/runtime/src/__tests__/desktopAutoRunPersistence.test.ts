@@ -607,7 +607,14 @@ describe("desktop auto run persistence", () => {
       phase: "completed"
     });
     await expect(readLatestPersistedAutoRunState(init.workspace)).resolves.toMatchObject({
-      state: expect.objectContaining({ runId: "DESKTOP-RUN-0002" }),
+      state: expect.objectContaining({
+        runId: "DESKTOP-RUN-0002",
+        options: {
+          tmuxEnabled: false,
+          acpRecovery: null,
+          executorOverride: null
+        }
+      }),
       diagnostics: [
         expect.objectContaining({
           code: "auto_run_state_invalid_json",

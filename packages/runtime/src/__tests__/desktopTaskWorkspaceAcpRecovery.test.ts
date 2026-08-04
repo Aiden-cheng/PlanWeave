@@ -615,11 +615,12 @@ describe("desktop Task Workspace ACP recovery", () => {
         sourceTerminalEventSequence: 1
       }
     });
+    expect(recoveryResult?.state.options.executorOverride).toBe("codex-acp");
     expect(recoveryResult?.detail.item.run.nextActions).toEqual(recoveryResult?.nextActions);
     expect(await readFile(fixture.metadataPath, "utf8")).toBe(sourceMetadata);
   });
 
-  it("fails closed when the current executor profile no longer matches", async () => {
+  it("recovers with the source executor profile when the logical default has changed", async () => {
     const fixture = await createRecoveryFixture();
     const manifest = manifestTestBuilder().withDefaultExecutor("claude-code-acp").build();
     await writeJsonFile(fixture.init.workspace.manifestFile, manifest);
@@ -634,13 +635,21 @@ describe("desktop Task Workspace ACP recovery", () => {
       { selectedRecordId: "T-001#B-001::RUN-001" }
     );
 
-    expect(detail.item.run.capabilities.recoverAcpSession).toMatchObject({
-      available: false,
-      reason: { code: "agent_mismatch" },
-      identity: null
+    const recovery = detail.item.run.capabilities.recoverAcpSession;
+    expect(recovery).toMatchObject({
+      available: true,
+      reason: null,
+      identity: { executorProfile: "codex-acp", agentId: "codex" }
     });
-    expect(detail.item.run.nextActions.actions.map((action) => action.kind)).toEqual([
-      "retry_new_session"
-    ]);
+    if (!recovery.identity) throw new Error("Expected an ACP recovery identity.");
+
+    const result = await recoverTaskWorkspaceAcpRun(recovery.identity, {
+      source: "profile-override-test",
+      reason: "Continue the interrupted ACP session."
+    });
+    expect(result.state.options).toMatchObject({
+      executorOverride: "codex-acp",
+      acpRecovery: { executorProfile: "codex-acp" }
+    });
   });
 });

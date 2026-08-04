@@ -631,7 +631,7 @@ async function recoverPendingTransitionUnlocked(
         desktopRunId: state.runId,
         stepCount: state.stepCount,
         parallel,
-        executorOverride: null,
+        executorOverride: state.options.executorOverride,
         effectiveExecutor: state.currentExecutor,
         agentId,
         runnerKind,

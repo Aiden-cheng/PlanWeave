@@ -12,6 +12,13 @@ import { useRemoteRunPanelController } from "../renderer/hooks/useRemoteRunPanel
 import { createTranslator } from "../renderer/i18n";
 import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../shared/collaboration";
 
+const startAutoRun = vi.hoisted(() => vi.fn(async () => undefined));
+
+vi.mock("../renderer/bridge", () => ({
+  bridge: { startAutoRun },
+  collaborationBridge: null
+}));
+
 const blockItem: WorkItemRef = {
   kind: "block",
   canvasId: "default",
@@ -31,6 +38,7 @@ const availableLocalEndpoint = {
   executorName: "codex-acp",
   displayName: "Codex",
   locationName: "This device",
+  capabilities: ["acp.codex"],
   available: true,
   unavailableReason: null
 } as const;
@@ -346,12 +354,44 @@ function createApi() {
 const apis: CollaborationReadBridgePort[] = [];
 
 afterEach(() => {
+  startAutoRun.mockClear();
   while (apis.length > 0) {
     resetCollaborationReadModelHubForTests(apis.pop());
   }
 });
 
 describe("useRemoteRunPanelController", () => {
+  it("uses the selected local Endpoint as the one-run executor override", async () => {
+    const canvasRef = { projectRoot: "/tmp/project", canvasId: "default" };
+    const { result } = renderHook(() =>
+      useRemoteRunPanelController({
+        workItem: blockItem,
+        canvasRef,
+        localAgentEndpoints: [availableLocalEndpoint],
+        requiredProfileId: "codex-acp",
+        open: true,
+        t: createTranslator("en")
+      })
+    );
+
+    await waitFor(() =>
+      expect(result.current.agentEndpoints).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: "local:codex-acp", available: true })
+        ])
+      )
+    );
+    act(() => result.current.setSelectedAgentEndpointId("local:codex-acp"));
+    await act(async () => result.current.dispatch());
+
+    expect(startAutoRun).toHaveBeenCalledWith(
+      canvasRef,
+      { kind: "block", blockRef: "T-1#B-1" },
+      20,
+      { executorOverride: "codex-acp" }
+    );
+  });
+
   it("loads observation, events, and interactions when open", async () => {
     const { api, observe, replay, listInteractions } = createApi();
     const bridge = api as unknown as CollaborationReadBridgePort;
@@ -403,7 +443,8 @@ describe("useRemoteRunPanelController", () => {
         runtimeRemoteExecution: activeRuntimeExecution,
         open: true,
         api,
-        localAgentEndpoint: availableLocalEndpoint,
+        localAgentEndpoints: [availableLocalEndpoint],
+        requiredProfileId: "codex-acp",
         t: createTranslator("en"),
         createId: () => "id-fixed"
       })
@@ -494,7 +535,8 @@ describe("useRemoteRunPanelController", () => {
           workItem,
           runtimeRemoteExecution: activeRuntimeExecution,
           open: true,
-          localAgentEndpoint: availableLocalEndpoint,
+          localAgentEndpoints: [availableLocalEndpoint],
+          requiredProfileId: "codex-acp",
           api,
           t: createTranslator("en")
         }),
@@ -551,7 +593,8 @@ describe("useRemoteRunPanelController", () => {
         useRemoteRunPanelController({
           workItem,
           open: true,
-          localAgentEndpoint: availableLocalEndpoint,
+          localAgentEndpoints: [availableLocalEndpoint],
+          requiredProfileId: "codex-acp",
           api,
           t: createTranslator("en")
         }),
@@ -701,7 +744,8 @@ describe("useRemoteRunPanelController", () => {
           workItem,
           runtimeRemoteExecution: runtime ? activeRuntimeExecution : null,
           open: true,
-          localAgentEndpoint: availableLocalEndpoint,
+          localAgentEndpoints: [availableLocalEndpoint],
+          requiredProfileId: "codex-acp",
           api,
           t: createTranslator("en"),
           createId: () => `late-dispatch-${settlement}`
@@ -868,7 +912,8 @@ describe("useRemoteRunPanelController", () => {
         useRemoteRunPanelController({
           workItem,
           open: true,
-          localAgentEndpoint: availableLocalEndpoint,
+          localAgentEndpoints: [availableLocalEndpoint],
+          requiredProfileId: "codex-acp",
           api,
           t: createTranslator("en")
         }),
@@ -920,7 +965,8 @@ describe("useRemoteRunPanelController", () => {
         workItem: blockItem,
         runtimeRemoteExecution: activeRuntimeExecution,
         open: true,
-        localAgentEndpoint: availableLocalEndpoint,
+        localAgentEndpoints: [availableLocalEndpoint],
+        requiredProfileId: "codex-acp",
         api,
         t: createTranslator("en"),
         createId: () => "conflict"
@@ -981,7 +1027,8 @@ describe("useRemoteRunPanelController", () => {
         workItem: blockItem,
         runtimeRemoteExecution: activeRuntimeExecution,
         open: true,
-        localAgentEndpoint: availableLocalEndpoint,
+        localAgentEndpoints: [availableLocalEndpoint],
+        requiredProfileId: "codex-acp",
         api,
         t: createTranslator("en")
       })

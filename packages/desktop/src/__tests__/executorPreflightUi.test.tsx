@@ -980,7 +980,7 @@ describe("executor preflight desktop UI", () => {
       />
     );
 
-    expect(screen.getByRole("combobox", { name: "Agent" })).toHaveTextContent("codex");
+    expect(screen.getByRole("combobox", { name: "Logical executor" })).toHaveTextContent("codex");
     await userEvent.click(screen.getByTestId("block-executor-preflight"));
     expect(bridgeMock.api.testExecutorProfile).toHaveBeenCalledWith(canvasRef, "codex-acp");
   });
@@ -1011,8 +1011,10 @@ describe("executor preflight desktop UI", () => {
       />
     );
 
-    expect(screen.getByRole("combobox", { name: "Agent" })).toHaveTextContent("codex");
-    expect(screen.getByRole("combobox", { name: "Agent" })).not.toHaveTextContent("Custom");
+    expect(screen.getByRole("combobox", { name: "Logical executor" })).toHaveTextContent("codex");
+    expect(screen.getByRole("combobox", { name: "Logical executor" })).not.toHaveTextContent(
+      "Custom"
+    );
   });
 
   it("preflights an explicit legacy ACP task profile without changing its identity", async () => {

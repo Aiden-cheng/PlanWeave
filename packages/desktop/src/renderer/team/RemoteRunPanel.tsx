@@ -25,7 +25,8 @@ export type RemoteRunPanelProps = {
   runtimeRemoteExecution?: RemoteBlockExecutionReadModel | null;
   localAutoRunActive?: boolean;
   canvasRef?: DesktopCanvasReference | null;
-  localAgentEndpoint?: LocalAgentEndpointInput | null;
+  localAgentEndpoints?: readonly LocalAgentEndpointInput[];
+  requiredProfileId?: string | null;
   requiredCapabilities?: readonly string[];
   open?: boolean;
   api?: PlanWeaveCollaborationApi | null;
@@ -83,16 +84,14 @@ function phaseLabel(
   }
 }
 
-/**
- * Explicit remote ACP run observation/control surface.
- * Visually and semantically separate from local Auto Run / Agent conversation.
- */
+/** Unified local Auto Run and remote ACP execution control with distinct runtime authorities. */
 export function RemoteRunPanel({
   workItem,
   runtimeRemoteExecution = null,
   localAutoRunActive = false,
   canvasRef = null,
-  localAgentEndpoint = null,
+  localAgentEndpoints = [],
+  requiredProfileId = null,
   requiredCapabilities = [],
   open = true,
   api,
@@ -104,7 +103,8 @@ export function RemoteRunPanel({
     runtimeRemoteExecution,
     localAutoRunActive,
     canvasRef,
-    localAgentEndpoint,
+    localAgentEndpoints,
+    requiredProfileId,
     requiredCapabilities,
     open,
     api,

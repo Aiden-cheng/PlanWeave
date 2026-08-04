@@ -9,6 +9,8 @@ export type ExecutorOptionView = {
   name: string;
   label: string;
   source: "manifest" | "current-value";
+  /** Host-capability evidence derivable from the detected local runner. */
+  capabilities: string[];
   detected: boolean | null;
   detectionMessage: string | null;
   disabled: boolean;
@@ -106,6 +108,10 @@ function viewForName(
     name: canonicalName,
     label: canonicalName,
     source,
+    capabilities:
+      detection?.installed === true && detection.runnerKind === "acp"
+        ? [`acp.${detection.kind}`]
+        : [],
     detected: detection ? detection.installed : null,
     detectionMessage: detection ? (detection.version ?? detection.unavailableReason) : null,
     disabled: detection?.installed === false,

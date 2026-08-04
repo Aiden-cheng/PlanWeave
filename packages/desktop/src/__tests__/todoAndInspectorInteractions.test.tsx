@@ -202,7 +202,7 @@ describe("desktop renderer component interactions", () => {
       />
     );
 
-    await userEvent.click(screen.getByRole("combobox", { name: "Agent" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Logical executor" }));
 
     expect(await screen.findByRole("option", { name: "custom-shell" })).toBeInTheDocument();
   });
@@ -253,9 +253,9 @@ describe("desktop renderer component interactions", () => {
       />
     );
 
-    expect(screen.getByRole("combobox", { name: "Agent" })).toHaveTextContent("pi");
+    expect(screen.getByRole("combobox", { name: "Logical executor" })).toHaveTextContent("pi");
 
-    await userEvent.click(screen.getByRole("combobox", { name: "Agent" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Logical executor" }));
 
     expect(await screen.findByRole("option", { name: /pi/i })).toHaveAttribute("data-disabled");
     expect(screen.queryByRole("option", { name: "pi-auto" })).not.toBeInTheDocument();
@@ -305,8 +305,12 @@ describe("desktop renderer component interactions", () => {
       />
     );
 
-    expect(screen.getByRole("combobox", { name: "Agent" })).toHaveTextContent("legacy-executor");
-    expect(screen.getByRole("combobox", { name: "Agent" })).not.toHaveTextContent("Inherit");
+    expect(screen.getByRole("combobox", { name: "Logical executor" })).toHaveTextContent(
+      "legacy-executor"
+    );
+    expect(screen.getByRole("combobox", { name: "Logical executor" })).not.toHaveTextContent(
+      "Inherit"
+    );
   });
 
   it("lets block prompt textareas grow into the inspector page scroll", () => {

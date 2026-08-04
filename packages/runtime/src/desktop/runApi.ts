@@ -116,9 +116,14 @@ const desktopInteractionBroker: RunnerInteractionBroker = {
 type DesktopRunSessionStopReason = RunSessionAutoRunSummary["stopReason"];
 
 function normalizeAutoRunOptions(options?: DesktopAutoRunOptions): Required<DesktopAutoRunOptions> {
+  const executorOverride = options?.executorOverride?.trim() ?? null;
+  if (options?.executorOverride != null && executorOverride === "") {
+    throw new Error("Desktop Auto Run executor override must not be empty.");
+  }
   return {
     tmuxEnabled: options?.tmuxEnabled ?? true,
-    acpRecovery: options?.acpRecovery ?? null
+    acpRecovery: options?.acpRecovery ?? null,
+    executorOverride
   };
 }
 
@@ -198,7 +203,7 @@ async function autoRunSessionSummary(
     desktopRunId: state.runId,
     stepCount: state.stepCount,
     parallel: manifest.execution.parallel.enabled,
-    executorOverride: null,
+    executorOverride: state.options.executorOverride,
     effectiveExecutor: state.currentExecutor,
     agentId: profileEvidence?.agentId ?? null,
     runnerKind: profileEvidence?.runnerKind ?? null,
@@ -312,6 +317,7 @@ async function runLoop(runId: string): Promise<void> {
         if (operation) operation.inFlight = true;
         const step = await runAutoRunStep({
           projectRoot: workspace,
+          executorName: current.options.executorOverride ?? undefined,
           parallel: manifest.execution.parallel.enabled,
           scope: claimScope(current.scope),
           tmuxEnabled: current.options.tmuxEnabled,
@@ -640,6 +646,7 @@ export async function initializeAutoRunUnderCanvasLock(
     sessionId = session.sessionId;
     const root = autoRunRoot(workspace, runId);
     const timestamp = now();
+    const normalizedOptions = normalizeAutoRunOptions(options);
     const state = withExplanation({
       runId,
       runSessionId: session.sessionId,
@@ -657,7 +664,7 @@ export async function initializeAutoRunUnderCanvasLock(
       latestRecordPath: null,
       statePath: join(root, "state.json"),
       eventLogPath: join(root, "events.ndjson"),
-      options: normalizeAutoRunOptions(options),
+      options: normalizedOptions,
       error: null,
       startedAt: timestamp,
       updatedAt: timestamp
@@ -681,7 +688,7 @@ export async function initializeAutoRunUnderCanvasLock(
         desktopRunId: runId,
         stepCount: 0,
         parallel: manifest.execution.parallel.enabled,
-        executorOverride: null,
+        executorOverride: normalizedOptions.executorOverride,
         effectiveExecutor: null,
         agentId: null,
         runnerKind: null,
