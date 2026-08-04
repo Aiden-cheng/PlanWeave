@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CollaborationContentBootstrapResult,
   LocalCollaborationServerStatus,
@@ -28,6 +28,7 @@ import {
   collaborationErrorMessage
 } from "../collaboration/formatCollaborationError";
 import type { DesktopUiSettings } from "../types";
+import type { DesktopServerExposureView } from "../../shared/deploymentExposure";
 
 type PeopleSection = "workspace" | "hosting";
 
@@ -91,6 +92,8 @@ export function PeopleView({
   const [revealInvitationManagement, setRevealInvitationManagement] = useState(false);
   const [reconnectPending, setReconnectPending] = useState(false);
   const [reconnectError, setReconnectError] = useState<string | null>(null);
+  const [desktopServerExposure, setDesktopServerExposure] =
+    useState<DesktopServerExposureView | null>(null);
   const [internalLocalInvitationHandoff, setInternalLocalInvitationHandoff] = useState<
     string | null
   >(null);
@@ -100,6 +103,20 @@ export function PeopleView({
       : controlledLocalInvitationHandoff;
   const setLocalInvitationHandoff =
     onLocalInvitationHandoffChange ?? setInternalLocalInvitationHandoff;
+  const desktopServerExposureRef = useRef<DesktopServerExposureView | null>(null);
+  const handleDesktopServerExposureChange = useCallback(
+    (nextExposure: DesktopServerExposureView) => {
+      const previousExposure = desktopServerExposureRef.current;
+      const endpointChanged =
+        previousExposure !== null &&
+        (previousExposure.mode !== nextExposure.mode ||
+          previousExposure.advertisedOrigin !== nextExposure.advertisedOrigin);
+      desktopServerExposureRef.current = nextExposure;
+      setDesktopServerExposure(nextExposure);
+      if (endpointChanged) setLocalInvitationHandoff(null);
+    },
+    [setLocalInvitationHandoff]
+  );
   const {
     status,
     loading: collaborationStatusLoading,
@@ -124,6 +141,22 @@ export function PeopleView({
   const hasConfiguredWorkspace =
     activeProfile?.hasDeviceCredential === true || workspaceConnectionActive;
   const showOnboarding = !hasConfiguredWorkspace;
+
+  useEffect(() => {
+    if (!api || typeof api.getDesktopServerExposure !== "function") return;
+    let cancelled = false;
+    void api.getDesktopServerExposure().then(
+      (nextExposure) => {
+        if (!cancelled) handleDesktopServerExposureChange(nextExposure);
+      },
+      () => {
+        if (!cancelled) setDesktopServerExposure(null);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [api, handleDesktopServerExposureChange]);
 
   useEffect(() => {
     if (hasConfiguredWorkspace && localHostingOpen) {
@@ -232,7 +265,11 @@ export function PeopleView({
               onLocalHostingOpenChange={setLocalHostingOpen}
               localHostingSlot={
                 <div className="flex flex-col gap-6">
-                  <DeploymentConnectionCard t={t} />
+                  <DeploymentConnectionCard
+                    presentation="plain"
+                    t={t}
+                    onExposureChange={handleDesktopServerExposureChange}
+                  />
                   <LocalCollaborationServerPanel
                     api={api}
                     t={t}
@@ -245,6 +282,7 @@ export function PeopleView({
                     onInvitationHandoffChange={setLocalInvitationHandoff}
                     onManageInvitations={handleManageInvitations}
                     onStatusChange={handleLocalServerStatusChange}
+                    serverExposure={desktopServerExposure}
                   />
                 </div>
               }
@@ -407,7 +445,11 @@ export function PeopleView({
               </div>
             ) : (
               <div className="flex flex-col" data-testid="people-hosting-section">
-                <DeploymentConnectionCard t={t} />
+                <DeploymentConnectionCard
+                  presentation="plain"
+                  t={t}
+                  onExposureChange={handleDesktopServerExposureChange}
+                />
                 <LocalCollaborationServerPanel
                   api={api}
                   t={t}
@@ -420,6 +462,7 @@ export function PeopleView({
                   onInvitationHandoffChange={setLocalInvitationHandoff}
                   onManageInvitations={handleManageInvitations}
                   onStatusChange={handleLocalServerStatusChange}
+                  serverExposure={desktopServerExposure}
                 />
                 <CurrentCanvasAccessPanel
                   view={currentCanvasAccess.view}

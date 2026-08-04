@@ -55,21 +55,34 @@ export function HostBootstrapCard({
       </div>
       <div className="mt-5 grid max-w-3xl gap-3">
         {!canCreate && !busy ? (
-          <p className="border-l-2 border-border pl-3 text-xs leading-5 text-text-muted">
-            {t("hostAdminBootstrapSecureCoordinator")}
-          </p>
-        ) : null}
-        <Button
-          type="button"
-          className="w-fit"
-          data-testid="host-admin-create-grant"
-          disabled={!canCreate}
-          onClick={() => void copyBootstrapHandoff()}
-        >
-          <ClipboardCopyIcon data-icon="inline-start" />
-          {busy ? t("hostAdminBootstrapPending") : t("hostAdminCreateGrant")}
-        </Button>
-        {resolvedHandoffState === "failed" && onRetry ? (
+          <div className="max-w-2xl border-l-2 border-border pl-3">
+            <p className="text-sm font-medium text-text-strong">
+              {t("hostAdminBootstrapUnavailableTitle")}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-text-muted">
+              {t("hostAdminBootstrapSecureCoordinator")}
+            </p>
+          </div>
+        ) : (
+          <>
+            <Button
+              type="button"
+              className="w-fit"
+              data-testid="host-admin-create-grant"
+              disabled={busy}
+              onClick={() => void copyBootstrapHandoff()}
+            >
+              <ClipboardCopyIcon data-icon="inline-start" />
+              {busy ? t("hostAdminBootstrapPending") : t("hostAdminCreateGrant")}
+            </Button>
+            {!handoff ? (
+              <p className="max-w-2xl text-xs leading-5 text-text-muted">
+                {t("hostAdminBootstrapPasteDestination")}
+              </p>
+            ) : null}
+          </>
+        )}
+        {resolvedHandoffState === "failed" && onRetry && canCreate ? (
           <Button
             type="button"
             size="sm"
@@ -82,7 +95,7 @@ export function HostBootstrapCard({
             {t("hostAdminBootstrapRetry")}
           </Button>
         ) : null}
-        {handoff ? (
+        {handoff && canCreate ? (
           <div
             className="grid gap-2 border-l-2 border-emerald-500 pl-3"
             data-testid="host-admin-grant-once"
@@ -109,9 +122,7 @@ export function HostBootstrapCard({
               {t("hostAdminCloseGrant")}
             </Button>
           </div>
-        ) : (
-          <p className="text-xs leading-5 text-text-muted">{t("hostAdminBootstrapBoundary")}</p>
-        )}
+        ) : null}
       </div>
     </section>
   );

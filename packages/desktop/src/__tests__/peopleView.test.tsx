@@ -269,6 +269,16 @@ describe("PeopleView", () => {
       onCollaborationStatusChanged: vi.fn(() => () => undefined),
       onCollaborationObserverSignal: vi.fn(() => () => undefined),
       listCollaborationContentBootstrapCandidates: vi.fn().mockResolvedValue([]),
+      getDesktopServerExposure: vi.fn().mockResolvedValue({
+        mode: "lan_http",
+        topology: "lan_http",
+        provider: null,
+        lifecycle: "ready",
+        advertisedOrigin: "http://192.168.1.20:56584/",
+        errorCode: null,
+        canActivate: true,
+        canInvite: true
+      }),
       getLocalCollaborationServerStatus: vi.fn().mockResolvedValue({
         profile: {
           profileId: "planweave-local-server",
@@ -356,6 +366,16 @@ describe("PeopleView", () => {
       onCollaborationStatusChanged: vi.fn(() => () => undefined),
       onCollaborationObserverSignal: vi.fn(() => () => undefined),
       listCollaborationContentBootstrapCandidates: vi.fn().mockResolvedValue([]),
+      getDesktopServerExposure: vi.fn().mockResolvedValue({
+        mode: "lan_http",
+        topology: "lan_http",
+        provider: null,
+        lifecycle: "ready",
+        advertisedOrigin: "http://192.168.1.20:56584/",
+        errorCode: null,
+        canActivate: true,
+        canInvite: true
+      }),
       getLocalCollaborationServerStatus: vi.fn().mockResolvedValue({
         profile: {
           profileId: "planweave-local-server",
@@ -404,7 +424,7 @@ describe("PeopleView", () => {
     expect(await screen.findByTestId("people-workspace-section")).toBeVisible();
     expect(createInvitation).not.toHaveBeenCalled();
     await user.click(screen.getByTestId("people-section-hosting"));
-    expect(await screen.findByText("http://192.168.1.20:56584/")).toBeVisible();
+    expect(await screen.findByText("Invite collaborators")).toBeVisible();
     expect(createInvitation).not.toHaveBeenCalled();
     await user.click(screen.getByTestId("people-section-workspace"));
     await user.click(screen.getByTestId("people-section-hosting"));
@@ -493,6 +513,16 @@ describe("PeopleView", () => {
       onCollaborationStatusChanged: vi.fn(() => () => undefined),
       onCollaborationObserverSignal: vi.fn(() => () => undefined),
       listCollaborationContentBootstrapCandidates: vi.fn().mockResolvedValue([]),
+      getDesktopServerExposure: vi.fn().mockResolvedValue({
+        mode: "lan_http",
+        topology: "lan_http",
+        provider: null,
+        lifecycle: "ready",
+        advertisedOrigin: "http://192.168.1.20:56584/",
+        errorCode: null,
+        canActivate: true,
+        canInvite: true
+      }),
       getLocalCollaborationServerStatus: vi.fn().mockResolvedValue({
         profile: {
           profileId: "planweave-local-server",

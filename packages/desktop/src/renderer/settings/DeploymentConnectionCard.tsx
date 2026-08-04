@@ -19,7 +19,7 @@ import type { createTranslator } from "../i18n";
 
 type Props = {
   t: ReturnType<typeof createTranslator>;
-  presentation?: "card" | "section";
+  presentation?: "card" | "section" | "plain";
   onExposureChange?: (exposure: DesktopServerExposureView) => void;
 };
 
@@ -378,6 +378,20 @@ export function DeploymentConnectionCard({ t, presentation = "card", onExposureC
   if (presentation === "section") {
     return (
       <section className="mt-7 border-t border-border/70 py-8" data-testid="deployment-connection">
+        <div className="mb-5 max-w-3xl">
+          <h2 className="text-lg font-semibold tracking-[-0.01em] text-text-strong">
+            {t("deploymentTitle")}
+          </h2>
+          <p className="mt-1 text-sm leading-6 text-text-muted">{t("deploymentDescription")}</p>
+        </div>
+        {content}
+      </section>
+    );
+  }
+
+  if (presentation === "plain") {
+    return (
+      <section className="pb-8" data-testid="deployment-connection">
         <div className="mb-5 max-w-3xl">
           <h2 className="text-lg font-semibold tracking-[-0.01em] text-text-strong">
             {t("deploymentTitle")}

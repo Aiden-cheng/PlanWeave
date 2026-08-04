@@ -96,6 +96,35 @@ export function LocalAgentHostCard({
                     ? t("hostAdminLocalHostSetupRequired")
                     : t("hostAdminLocalHostNotRegistered")}
             </p>
+            {!localServerHosted && status.state === "not_registered" ? (
+              <div className="grid gap-2">
+                <p className="text-xs leading-5 text-text-muted">
+                  {t("hostAdminLocalHostHandoffPrompt")}
+                </p>
+                <label
+                  className="grid gap-1.5 text-sm font-medium text-text-strong"
+                  htmlFor="host-admin-local-handoff"
+                >
+                  {t("hostAdminLocalHostHandoffLabel")}
+                  <Textarea
+                    id="host-admin-local-handoff"
+                    data-testid="host-admin-local-handoff"
+                    value={handoff}
+                    rows={4}
+                    spellCheck={false}
+                    autoComplete="off"
+                    placeholder={t("hostAdminLocalHostHandoffPlaceholder")}
+                    disabled={busy || loading}
+                    onChange={(event) => setHandoff(event.target.value)}
+                  />
+                </label>
+              </div>
+            ) : null}
+            {!localServerHosted ? (
+              <p className="text-sm font-medium text-text-strong">
+                {t("hostAdminLocalHostAgentSelectionLabel")}
+              </p>
+            ) : null}
             <div className="divide-y divide-border/60 border-y border-border/60">
               {status.agents.map((agent) => (
                 <label
@@ -125,26 +154,8 @@ export function LocalAgentHostCard({
             {!localServerHosted ? (
               <p className="text-xs text-text-muted">{t("hostAdminLocalHostCredentialBoundary")}</p>
             ) : null}
-            {!localServerHosted && status.state === "not_registered" && !canRegisterDirectly ? (
-              <div className="grid gap-2">
-                <p className="text-xs text-text-muted">{t("hostAdminLocalHostHandoffPrompt")}</p>
-                <label
-                  className="grid gap-1.5 text-sm text-text-strong"
-                  htmlFor="host-admin-local-handoff"
-                >
-                  {t("hostAdminLocalHostHandoffLabel")}
-                  <Textarea
-                    id="host-admin-local-handoff"
-                    data-testid="host-admin-local-handoff"
-                    value={handoff}
-                    rows={3}
-                    spellCheck={false}
-                    autoComplete="off"
-                    placeholder={t("hostAdminLocalHostHandoffPlaceholder")}
-                    disabled={busy || loading}
-                    onChange={(event) => setHandoff(event.target.value)}
-                  />
-                </label>
+            {!localServerHosted && status.state === "not_registered" ? (
+              <div className="grid gap-3">
                 <Button
                   type="button"
                   className="w-fit"
@@ -158,6 +169,11 @@ export function LocalAgentHostCard({
                 >
                   {t("hostAdminEnrollThisComputer")}
                 </Button>
+                {canRegisterDirectly ? (
+                  <p className="text-xs leading-5 text-text-muted">
+                    {t("hostAdminLocalHostDirectRegistrationAlternative")}
+                  </p>
+                ) : null}
               </div>
             ) : null}
             {canRegisterDirectly || canUpdate ? (
@@ -170,7 +186,7 @@ export function LocalAgentHostCard({
                 onClick={() => void register(selected)}
               >
                 {status.state === "not_registered"
-                  ? t("hostAdminRegisterThisComputer")
+                  ? t("hostAdminRegisterWithCurrentProfile")
                   : t("hostAdminUpdateThisComputer")}
               </Button>
             ) : null}

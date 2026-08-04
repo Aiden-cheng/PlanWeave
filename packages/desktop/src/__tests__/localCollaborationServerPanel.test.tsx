@@ -12,6 +12,7 @@ import {
   serializeCollaborationInvitationHandoff
 } from "../renderer/team/collaborationInvitationHandoff";
 import type { PlanWeaveCollaborationApi } from "../shared/collaboration";
+import type { DesktopServerExposureView } from "../shared/deploymentExposure";
 
 const profile = {
   profileId: "planweave-local-server",
@@ -25,6 +26,16 @@ const expandedScopeLayout = {
 };
 const onScopeLayoutChange = vi.fn();
 const copyText = vi.fn(async () => undefined);
+const remoteServerExposure: DesktopServerExposureView = {
+  mode: "private_https",
+  topology: "private_https",
+  provider: { id: "private-network", displayName: "Private network" },
+  lifecycle: "ready",
+  advertisedOrigin: "https://planweave.example.test/",
+  errorCode: null,
+  canActivate: true,
+  canInvite: true
+};
 afterEach(cleanup);
 
 function invitationHandoff(invitationToken: string, invitationId = "invitation-default") {
@@ -44,18 +55,20 @@ function invitationHandoff(invitationToken: string, invitationId = "invitation-d
   };
 }
 
-function LocalCollaborationServerPanelHarness(
-  props: Omit<
-    ComponentProps<typeof LocalCollaborationServerPanel>,
-    "invitationHandoff" | "onInvitationHandoffChange"
-  >
-) {
+function LocalCollaborationServerPanelHarness({
+  serverExposure = remoteServerExposure,
+  ...props
+}: Omit<
+  ComponentProps<typeof LocalCollaborationServerPanel>,
+  "invitationHandoff" | "onInvitationHandoffChange" | "serverExposure"
+> & { serverExposure?: DesktopServerExposureView | null }) {
   const [invitationHandoff, setInvitationHandoff] = useState<string | null>(null);
   return (
     <LocalCollaborationServerPanel
       {...props}
       invitationHandoff={invitationHandoff}
       onInvitationHandoffChange={setInvitationHandoff}
+      serverExposure={serverExposure}
     />
   );
 }
@@ -246,8 +259,7 @@ describe("LocalCollaborationServerPanel", () => {
       "shadow-sm",
       "bg-background"
     );
-    expect(screen.getByTestId("local-collaboration-section-icon")).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Local network sharing" })).toHaveClass("text-base");
+    expect(screen.getByRole("heading", { name: "Hosted canvases" })).toHaveClass("text-base");
     await userEvent.click(screen.getByRole("button", { name: "Hide hosted canvas selection" }));
     expect(onLayoutChange).toHaveBeenLastCalledWith({ collapsed: true });
 
@@ -289,18 +301,17 @@ describe("LocalCollaborationServerPanel", () => {
     });
   });
 
-  it("enables LAN sharing and keeps raw address copying as a secondary action", async () => {
+  it("uses Server connection as the only remote-access control", async () => {
     const collaborationApi = api({
       getLocalCollaborationServerStatus: vi.fn().mockResolvedValue({
         profile,
         state: "running",
         startedAt: "2030-01-01T00:00:00.000Z",
         reason: null,
-        lanSharingEnabled: true,
-        lanServerBaseUrl: "http://192.168.1.20:8787/"
+        lanSharingEnabled: false,
+        lanServerBaseUrl: null
       })
     });
-    const copy = vi.fn(async () => undefined);
     render(
       <LocalCollaborationServerPanelHarness
         api={collaborationApi}
@@ -309,17 +320,15 @@ describe("LocalCollaborationServerPanel", () => {
         canvasId="canvas-1"
         scopeLayout={expandedScopeLayout}
         onScopeLayoutChange={onScopeLayoutChange}
-        copyText={copy}
+        copyText={copyText}
       />
     );
 
-    expect(await screen.findByText("http://192.168.1.20:8787/")).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "Copy address only" }));
-    expect(copy).toHaveBeenCalledWith("http://192.168.1.20:8787/");
-    await userEvent.click(screen.getByRole("switch", { name: "Share on local network" }));
-    expect(collaborationApi.setLocalCollaborationLanSharing).toHaveBeenCalledWith({
-      enabled: false
-    });
+    expect(await screen.findByRole("heading", { name: "Hosted canvases" })).toBeVisible();
+    expect(screen.getByText("Invite collaborators")).toBeVisible();
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Copy address only" })).not.toBeInTheDocument();
+    expect(collaborationApi.setLocalCollaborationLanSharing).not.toHaveBeenCalled();
   });
 
   it("creates and displays a complete invitation only after an explicit user action", async () => {
@@ -368,7 +377,7 @@ describe("LocalCollaborationServerPanel", () => {
       />
     );
 
-    expect(await screen.findByText("http://192.168.1.20:8787/")).toBeVisible();
+    expect(await screen.findByText("Invite collaborators")).toBeVisible();
     expect(collaborationApi.registerLocalCollaborationCurrentProject).not.toHaveBeenCalled();
     expect(collaborationApi.createCollaborationInvitationHandoff).not.toHaveBeenCalled();
 

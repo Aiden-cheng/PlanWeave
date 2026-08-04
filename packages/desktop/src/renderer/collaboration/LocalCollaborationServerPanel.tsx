@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDownIcon, ChevronRightIcon, CopyIcon, WifiIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, CopyIcon } from "lucide-react";
 import type { LoopbackTrustedProjectScope } from "@planweave-ai/collaboration-protocol/loopback";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import type {
   LocalCollaborationServerStatus,
   LocalCollaborationScope,
   LocalCollaborationScopeCatalog,
   PlanWeaveCollaborationApi
 } from "../../shared/collaboration.js";
+import type { DesktopServerExposureView } from "../../shared/deploymentExposure";
 import type { createTranslator } from "../i18n";
 import type { DesktopUiSettings } from "../types";
 import { collaborationErrorMessage } from "./formatCollaborationError";
@@ -52,7 +52,8 @@ export function LocalCollaborationServerPanel({
   invitationHandoff,
   onInvitationHandoffChange,
   onManageInvitations,
-  onStatusChange
+  onStatusChange,
+  serverExposure
 }: {
   api: PlanWeaveCollaborationApi | null;
   t: ReturnType<typeof createTranslator>;
@@ -65,6 +66,7 @@ export function LocalCollaborationServerPanel({
   onInvitationHandoffChange: (handoff: string | null) => void;
   onManageInvitations?: () => void;
   onStatusChange?: (status: LocalCollaborationServerStatus) => void;
+  serverExposure: DesktopServerExposureView | null;
 }) {
   const [status, setStatus] = useState<LocalCollaborationServerStatus | null>(null);
   const [catalog, setCatalog] = useState<LocalCollaborationScopeCatalog | null>(null);
@@ -167,8 +169,6 @@ export function LocalCollaborationServerPanel({
 
   if (!api) return null;
   const running = status?.state === "running";
-  const lanSharingEnabled = status?.lanSharingEnabled ?? false;
-  const lanAvailable = running && lanSharingEnabled && status?.lanServerBaseUrl !== null;
   const statusLabel =
     status?.state === "error"
       ? status.reason === "stop_failed"
@@ -176,9 +176,11 @@ export function LocalCollaborationServerPanel({
         : status.reason === "unavailable"
           ? t("localServerUnavailable")
           : t("localServerStartFailed")
-      : lanAvailable
-        ? t("localServerLanEnabled")
-        : t("localServerLanDisabled");
+      : running
+        ? t("localServerRunning")
+        : t("localServerStopped");
+  const remoteInvitationAvailable =
+    serverExposure?.canInvite === true && serverExposure.advertisedOrigin !== null;
 
   const toggleScope = (scope: LocalCollaborationScope) => {
     const key = scopeKey(scope);
@@ -217,35 +219,6 @@ export function LocalCollaborationServerPanel({
     }
   };
 
-  const setLanSharing = async (enabled: boolean) => {
-    setBusy(true);
-    onInvitationHandoffChange(null);
-    setInvitationCopied(false);
-    try {
-      const nextStatus = await api.setLocalCollaborationLanSharing({ enabled });
-      setStatus(nextStatus);
-      onStatusChange?.(nextStatus);
-      await refresh();
-    } catch (caught) {
-      setError({ message: collaborationErrorMessage(caught) });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const copyLanAddress = async () => {
-    if (!status?.lanServerBaseUrl) return;
-    setBusy(true);
-    try {
-      await copyText(status.lanServerBaseUrl);
-      setError(null);
-    } catch (caught) {
-      setError({ message: collaborationErrorMessage(caught) });
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const copyInvitation = async () => {
     if (!invitationHandoff) return;
     setInvitationBusy(true);
@@ -267,14 +240,8 @@ export function LocalCollaborationServerPanel({
       data-testid="local-collaboration-server-panel"
       aria-labelledby="local-collaboration-server-title"
     >
-      <div className="grid grid-cols-[2rem_minmax(0,1fr)] gap-x-3 px-1 pb-5 sm:grid-cols-[2rem_minmax(0,1fr)_auto]">
-        <div
-          className="flex size-8 items-center justify-center text-emerald-700 dark:text-emerald-300"
-          data-testid="local-collaboration-section-icon"
-        >
-          <WifiIcon className="size-5" aria-hidden="true" />
-        </div>
-        <div className="min-w-0 pt-0.5">
+      <div className="px-1 pb-5">
+        <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h2
               id="local-collaboration-server-title"
@@ -284,14 +251,14 @@ export function LocalCollaborationServerPanel({
             </h2>
             <span
               className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                lanAvailable
+                running
                   ? "bg-emerald-500/10 text-emerald-800 dark:text-emerald-200"
                   : "bg-muted text-muted-foreground"
               }`}
               data-testid="local-collaboration-server-status"
             >
               <span
-                className={`size-1.5 rounded-full ${lanAvailable ? "bg-emerald-500" : "bg-muted-foreground/50"}`}
+                className={`size-1.5 rounded-full ${running ? "bg-emerald-500" : "bg-muted-foreground/50"}`}
               />
               {statusLabel}
             </span>
@@ -300,73 +267,44 @@ export function LocalCollaborationServerPanel({
             {t("localServerDescription")}
           </p>
         </div>
-        <div className="col-start-2 mt-4 flex shrink-0 items-center gap-3 sm:col-start-3 sm:row-start-1 sm:mt-0 sm:justify-end">
-          <span className="text-xs font-medium text-muted-foreground">
-            {t("localServerLanToggle")}
-          </span>
-          <Switch
-            checked={lanSharingEnabled}
-            disabled={busy || status === null}
-            aria-label={t("localServerLanToggle")}
-            onCheckedChange={(checked) => void setLanSharing(checked)}
-          />
-        </div>
       </div>
 
-      {lanSharingEnabled ? (
-        <div className="border-t border-border/70 px-1 py-5 sm:ml-11">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      {remoteInvitationAvailable ? (
+        <div className="border-t border-border/70 px-1 py-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
-              <div className="text-xs font-semibold text-text-strong">
-                {t("localServerLanAddress")}
+              <div className="text-sm font-semibold text-text-strong">
+                {t("localServerInvitationSectionTitle")}
               </div>
-              {status?.lanServerBaseUrl ? (
-                <code className="mt-1 block truncate font-mono text-xs text-emerald-700 dark:text-emerald-300">
-                  {status.lanServerBaseUrl}
-                </code>
-              ) : (
-                <p className="mt-1 text-xs text-muted-foreground">{t("localServerLanNoScope")}</p>
-              )}
+              <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
+                {t("localServerInvitationSectionHint")}
+              </p>
             </div>
-            {status?.lanServerBaseUrl ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={busy || invitationBusy}
-                  onClick={() => void prepareInvitation()}
-                >
-                  <CopyIcon className="size-3.5" aria-hidden="true" />
-                  {invitationBusy
-                    ? t("localServerPreparingInvitation")
-                    : t("localServerRetryInvitation")}
-                </Button>
-                {invitationHandoff ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    disabled={busy || invitationBusy}
-                    onClick={() => void copyInvitation()}
-                  >
-                    {t("localServerCopyInvitation")}
-                  </Button>
-                ) : null}
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                disabled={busy || invitationBusy}
+                onClick={() => void prepareInvitation()}
+              >
+                <CopyIcon className="size-3.5" aria-hidden="true" />
+                {invitationBusy
+                  ? t("localServerPreparingInvitation")
+                  : t("localServerRetryInvitation")}
+              </Button>
+              {invitationHandoff ? (
                 <Button
                   type="button"
                   size="sm"
                   variant="ghost"
                   disabled={busy || invitationBusy}
-                  onClick={() => void copyLanAddress()}
+                  onClick={() => void copyInvitation()}
                 >
-                  {t("localServerCopyAddress")}
+                  {t("localServerCopyInvitation")}
                 </Button>
-              </div>
-            ) : null}
+              ) : null}
+            </div>
           </div>
-          <p className="mt-2 max-w-3xl text-[11px] leading-4 text-muted-foreground">
-            {t("localServerLanHint")}
-          </p>
           {invitationHandoff ? (
             <div className="mt-4 border-l-2 border-emerald-500 bg-emerald-500/5 px-3 py-3">
               <div className="text-xs font-semibold text-text-strong">
@@ -393,7 +331,7 @@ export function LocalCollaborationServerPanel({
         </div>
       ) : null}
 
-      <div className="border-y border-border/70 px-1 py-5 sm:ml-11">
+      <div className="border-y border-border/70 px-1 py-5">
         <button
           type="button"
           className="flex w-full items-start gap-3 text-left outline-none transition-colors hover:text-text-strong focus-visible:ring-2 focus-visible:ring-ring"
@@ -561,7 +499,7 @@ export function LocalCollaborationServerPanel({
 
       {error ? (
         <div
-          className="flex items-center justify-between gap-3 border-b border-destructive/30 bg-destructive/5 px-1 py-3 text-xs text-destructive sm:ml-11"
+          className="flex items-center justify-between gap-3 border-b border-destructive/30 bg-destructive/5 px-1 py-3 text-xs text-destructive"
           role="alert"
         >
           <span>{error.message}</span>

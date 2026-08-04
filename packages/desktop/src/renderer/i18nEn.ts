@@ -666,9 +666,12 @@ export const enCatalog = {
   hostAdminLocalHostCredentialBoundary:
     "Agent login credentials remain on this computer and are never uploaded to Server.",
   hostAdminLocalHostHandoffPrompt:
-    "Copy one-time device enrollment details on the managing computer, then paste them below.",
+    "Paste the one-time device enrollment details copied on the managing computer here.",
   hostAdminLocalHostHandoffLabel: "Device enrollment details",
   hostAdminLocalHostHandoffPlaceholder: "Paste the one-time enrollment details",
+  hostAdminLocalHostAgentSelectionLabel: "Choose the agents this computer may share",
+  hostAdminLocalHostDirectRegistrationAlternative:
+    "Or use this computer's existing administrator connection to the current Server.",
   hostAdminLocalHostAgentMissing:
     "The selected Agent is not installed or is unavailable in the Desktop environment.",
   hostAdminEnrollThisComputer: "Register this computer",
@@ -677,6 +680,8 @@ export const enCatalog = {
   hostAdminUpdateThisComputer: "Update exposed agents",
   hostAdminBootstrapDescription:
     "Copy one-time enrollment details for another Mac, Windows computer, or VPS.",
+  hostAdminBootstrapPasteDestination:
+    "After copying, paste in Agent Host → This computer on the target Mac or Windows computer. On a VPS, use PlanWeave CLI.",
   hostAdminBootstrapIdle: "No device enrollment details have been created yet.",
   hostAdminBootstrapPending: "Preparing…",
   hostAdminBootstrapReady: "Device enrollment details copied.",
@@ -695,6 +700,7 @@ export const enCatalog = {
     "Enrollment exposes no agents by default. On the Host, use agents list and agents expose for a supported installed agent.",
   hostAdminBootstrapSecureCoordinator:
     "Start or connect a PlanWeave Server you manage from People first.",
+  hostAdminBootstrapUnavailableTitle: "A managed Server is required",
   hostAdminBootstrapAbsolutePaths:
     "Config, data, and workspace paths must be absolute Host-local paths.",
   hostAdminBootstrapWorkspacePath:
@@ -702,8 +708,6 @@ export const enCatalog = {
   hostAdminBootstrapHostName: "Enter a Host display name.",
   hostAdminBootstrapCapacity: "Capacity must be an integer from 1 to 128.",
   hostAdminBootstrapCapabilities: "Capabilities must use lowercase portable identifiers.",
-  hostAdminBootstrapBoundary:
-    "Enrollment details are written only to the system clipboard. Paste them explicitly into PlanWeave Desktop on Mac or Windows, or use them with PlanWeave CLI on a VPS.",
   hostAdminCreateGrant: "Copy device enrollment details",
   hostAdminGrantOnceTitle: "Device enrollment details copied",
   hostAdminGrantOnceWarning: "Register the target device before these details expire at {expiry}.",
@@ -1589,9 +1593,9 @@ export const enCatalog = {
   contentBootstrapSuccess: "The authoritative Plan Package was synced and opened.",
   contentBootstrapAcknowledgementPending:
     "Content was synced, but Server acknowledgement is still pending. Retry later.",
-  localServerTitle: "Local network sharing",
+  localServerTitle: "Hosted canvases",
   localServerDescription:
-    "PlanWeave keeps its internal service running automatically for selected canvases. Turn on local network sharing only when another computer needs access.",
+    "Choose the canvases hosted by this computer. Remote access is managed by Server connection above.",
   localServerRunning: "Running on this device",
   localServerStopped: "Stopped",
   localServerStart: "Start local server",
@@ -1617,14 +1621,9 @@ export const enCatalog = {
   localServerStartFailed: "Could not start the local server. Retry when ready.",
   localServerStopFailed: "Could not stop the local server. Retry the stop action.",
   localServerUnavailable: "The local server is unavailable.",
-  localServerLanEnabled: "Available on local network",
-  localServerLanDisabled: "Local network access off",
-  localServerLanToggle: "Share on local network",
-  localServerLanAddress: "Connection address",
-  localServerLanNoScope: "Select at least one canvas to create a connection address.",
-  localServerLanHint:
-    "Other devices must be on the same trusted network. HTTP is accepted only for private local-network addresses; public internet HTTP remains blocked.",
-  localServerCopyAddress: "Copy address only",
+  localServerInvitationSectionTitle: "Invite collaborators",
+  localServerInvitationSectionHint:
+    "The current connection can be reached from other devices. Create a complete invitation containing the Server address, project, and one-time token.",
   localServerCopyInvitation: "Copy complete invitation",
   localServerPreparingInvitation: "Preparing complete invitation…",
   localServerRetryInvitation: "Create complete invitation",

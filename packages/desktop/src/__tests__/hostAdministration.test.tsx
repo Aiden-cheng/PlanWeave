@@ -216,6 +216,38 @@ describe("Agent Host settings", () => {
     expect(screen.queryByTestId("host-admin-local-handoff")).not.toBeInTheDocument();
   });
 
+  it("always shows the explicit enrollment input on a remote computer", () => {
+    render(
+      <LocalAgentHostCard
+        activeProfile={status().profiles[0]}
+        busy={false}
+        localServerHosted={false}
+        loading={false}
+        status={{
+          supported: true,
+          state: "not_registered",
+          agents: [
+            {
+              profileId: "codex-acp",
+              agentId: "codex",
+              displayName: "Codex",
+              detected: true,
+              exposed: false,
+              ready: false
+            }
+          ]
+        }}
+        register={vi.fn()}
+        enroll={vi.fn()}
+        t={createTranslator("en")}
+      />
+    );
+
+    expect(screen.getByTestId("host-admin-local-handoff")).toBeInTheDocument();
+    expect(screen.getByTestId("host-admin-enroll-local")).toBeDisabled();
+    expect(screen.getByTestId("host-admin-register-local")).toBeDisabled();
+  });
+
   it("shows only user-facing device and agent information", async () => {
     const { container } = render(<HostAdministrationSection t={createTranslator("en")} />);
 
@@ -325,6 +357,24 @@ describe("Agent Host settings", () => {
 
     await user.click(screen.getByTestId("host-admin-close-grant"));
     expect(screen.queryByTestId("host-admin-grant-once")).not.toBeInTheDocument();
+  });
+
+  it("shows one clear prerequisite instead of disabled enrollment steps", async () => {
+    bridgeMock.getOperatorControlStatus.mockResolvedValue({
+      ...status(),
+      profiles: [],
+      activeProfileId: null
+    });
+
+    render(<HostAdministrationSection t={createTranslator("en")} />);
+
+    expect(await screen.findByText("A managed Server is required")).toBeVisible();
+    expect(
+      screen.getByText("Start or connect a PlanWeave Server you manage from People first.")
+    ).toBeVisible();
+    expect(screen.queryByTestId("host-admin-create-grant")).not.toBeInTheDocument();
+    expect(screen.queryByText(/^1\./)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^2\./)).not.toBeInTheDocument();
   });
 
   it("registers this computer with an explicitly selected Agent", async () => {

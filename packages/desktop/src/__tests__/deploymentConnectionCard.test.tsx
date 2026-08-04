@@ -118,4 +118,13 @@ describe("DeploymentConnectionCard", () => {
       "lan_http"
     );
   });
+
+  it("supports a flat presentation without nesting another card", () => {
+    const { container } = render(
+      <DeploymentConnectionCard presentation="plain" t={createTranslator("en")} />
+    );
+
+    expect(screen.getByRole("heading", { name: "Server connection" })).toBeVisible();
+    expect(container.querySelector('[data-slot="card"]')).not.toBeInTheDocument();
+  });
 });
