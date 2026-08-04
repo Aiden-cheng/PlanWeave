@@ -26,12 +26,24 @@ export class WindowsPrivateStorageSecurity implements PrivateStorageSecurityPort
   async prepareDirectory(path: string): Promise<void> {
     await mkdir(path, { recursive: true });
     const sid = await this.currentUserSid();
-    await this.runner("icacls.exe", [path, "/inheritance:r", "/grant:r", `*${sid}:(OI)(CI)F`]);
+    await this.runner("icacls.exe", [
+      path,
+      "/inheritance:r",
+      "/grant:r",
+      `*${sid}:(OI)(CI)F`,
+      "*S-1-5-32-544:(OI)(CI)F"
+    ]);
   }
 
   async secureFile(path: string): Promise<void> {
     const sid = await this.currentUserSid();
-    await this.runner("icacls.exe", [path, "/inheritance:r", "/grant:r", `*${sid}:F`]);
+    await this.runner("icacls.exe", [
+      path,
+      "/inheritance:r",
+      "/grant:r",
+      `*${sid}:F`,
+      "*S-1-5-32-544:F"
+    ]);
   }
 
   private async currentUserSid(): Promise<string> {

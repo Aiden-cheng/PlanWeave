@@ -73,13 +73,35 @@ describe("private storage security port", () => {
       join(root, "private"),
       "/inheritance:r",
       "/grant:r",
-      "*S-1-5-21-123:(OI)(CI)F"
+      "*S-1-5-21-123:(OI)(CI)F",
+      "*S-1-5-32-544:(OI)(CI)F"
     ]);
     expect(runner).toHaveBeenNthCalledWith(4, "icacls.exe", [
       path,
       "/inheritance:r",
       "/grant:r",
-      "*S-1-5-21-123:F"
+      "*S-1-5-21-123:F",
+      "*S-1-5-32-544:F"
+    ]);
+  });
+
+  it("passes paths with shell metacharacters as a single fixed argument", async () => {
+    const runner = vi
+      .fn()
+      .mockResolvedValueOnce({ stdout: '"USER","S-1-5-21-123"\n', stderr: "" })
+      .mockResolvedValueOnce({ stdout: "", stderr: "" });
+    const security = new WindowsPrivateStorageSecurity(runner);
+    const path = 'C:\\private & whoami | powershell -Command "bad"';
+
+    await security.secureFile(path);
+
+    expect(runner).toHaveBeenNthCalledWith(1, "whoami.exe", ["/user", "/fo", "csv", "/nh"]);
+    expect(runner).toHaveBeenNthCalledWith(2, "icacls.exe", [
+      path,
+      "/inheritance:r",
+      "/grant:r",
+      "*S-1-5-21-123:F",
+      "*S-1-5-32-544:F"
     ]);
   });
 
