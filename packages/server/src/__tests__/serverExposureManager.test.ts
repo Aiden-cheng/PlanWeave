@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { parseServerConfig, type ServerConfig } from "../config.js";
 import { TailscaleExposureError } from "../exposure/errors.js";
 import { ServerExposureManager } from "../exposure/serverExposureManager.js";
+import type { TailscaleWebSocketProbe } from "../exposure/tailscaleWebSocketProbe.js";
 import type {
   ExposureLeaseStorePort,
   TailscaleControlPort,
@@ -184,13 +185,16 @@ function readyProbe(status: 200 | 503 = 503) {
   });
 }
 
-async function createOwnedFixture() {
+const successfulWebSocketProbe: TailscaleWebSocketProbe = async () => {};
+
+async function createOwnedFixture(webSocketProbe = successfulWebSocketProbe) {
   const tailscale = new FakeTailscale();
   const leases = new MemoryLeaseStore();
   const manager = new ServerExposureManager({
     tailscale,
     leases,
     request: readyProbe(),
+    webSocketProbe,
     clock: () => new Date("2026-08-03T00:00:00.000Z")
   });
   const prepared = await manager.activate(config());
@@ -206,8 +210,20 @@ function expectCode(error: unknown, code: string): boolean {
 }
 
 describe("ServerExposureManager", () => {
-  it("creates, records, probes, and path-exact releases an absent route", async () => {
-    const { manager, tailscale, leases, ownership } = await createOwnedFixture();
+  it("requires the advertised external WSS readiness upgrade before reporting activation", async () => {
+    const probes: Array<{ url: string; origin: string; aborted: boolean }> = [];
+    const { manager, tailscale, leases, ownership } = await createOwnedFixture(
+      async (url, { origin, signal }) => {
+        probes.push({ url, origin, aborted: signal.aborted });
+      }
+    );
+    expect(probes).toEqual([
+      {
+        url: "wss://planweave.tailnet.ts.net/readyz/ws",
+        origin: "https://planweave.tailnet.ts.net",
+        aborted: false
+      }
+    ]);
     expect(ownership.createdByActivation).toBe(true);
     await manager.release(ownership);
     expect(tailscale.releases).toBe(1);
@@ -279,7 +295,8 @@ describe("ServerExposureManager", () => {
     const manager = new ServerExposureManager({
       tailscale,
       leases: new MemoryLeaseStore(),
-      request: readyProbe()
+      request: readyProbe(),
+      webSocketProbe: successfulWebSocketProbe
     });
     await expect(manager.inspect(config())).rejects.toSatisfy((error: unknown) =>
       expectCode(error, "TAILSCALE_SERVE_CONFLICT")
@@ -292,7 +309,12 @@ describe("ServerExposureManager", () => {
     const initial = nonTargetRaw();
     tailscale.state = { config: serve(structuredClone(initial)) };
     const leases = new MemoryLeaseStore();
-    const manager = new ServerExposureManager({ tailscale, leases, request: readyProbe() });
+    const manager = new ServerExposureManager({
+      tailscale,
+      leases,
+      request: readyProbe(),
+      webSocketProbe: successfulWebSocketProbe
+    });
     const prepared = await manager.activate(config());
     if (!prepared.ownership) throw new Error("expected_exposure_ownership");
     await manager.release(prepared.ownership);
@@ -352,6 +374,7 @@ describe("ServerExposureManager", () => {
       tailscale,
       leases,
       probeTimeoutMs: 10,
+      webSocketProbe: successfulWebSocketProbe,
       request: async (_url, { signal }) =>
         new Promise((_resolve, reject) => {
           signal.addEventListener("abort", () => {
@@ -368,6 +391,57 @@ describe("ServerExposureManager", () => {
     expect(leases.lease).toBeNull();
   });
 
+  it("fails closed on WSS upgrade failure and preserves every pre-existing route", async () => {
+    const tailscale = new FakeTailscale();
+    const initial = nonTargetRaw();
+    tailscale.state = { config: serve(structuredClone(initial)) };
+    const leases = new MemoryLeaseStore();
+    const manager = new ServerExposureManager({
+      tailscale,
+      leases,
+      request: readyProbe(200),
+      webSocketProbe: async () => {
+        throw Object.assign(new Error("upgrade rejected"), { code: "WS_UPGRADE_REJECTED" });
+      }
+    });
+
+    await expect(manager.activate(config())).rejects.toSatisfy((error: unknown) =>
+      expectCode(error, "TAILSCALE_EXTERNAL_PROBE_FAILED")
+    );
+    expect(tailscale.releases).toBe(1);
+    expect(leases.lease).toBeNull();
+    expect(tailscale.state.config?.raw).toEqual(initial);
+  });
+
+  it("bounds the WSS upgrade probe and exactly releases only its new route", async () => {
+    const tailscale = new FakeTailscale();
+    const initial = nonTargetRaw();
+    tailscale.state = { config: serve(structuredClone(initial)) };
+    const leases = new MemoryLeaseStore();
+    let aborted = false;
+    const manager = new ServerExposureManager({
+      tailscale,
+      leases,
+      request: readyProbe(200),
+      probeTimeoutMs: 10,
+      webSocketProbe: async (_url, { signal }) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener("abort", () => {
+            aborted = true;
+            reject(Object.assign(new Error("aborted"), { code: "ABORT_ERR" }));
+          });
+        })
+    });
+
+    await expect(manager.activate(config())).rejects.toSatisfy((error: unknown) =>
+      expectCode(error, "TAILSCALE_EXTERNAL_PROBE_FAILED")
+    );
+    expect(aborted).toBe(true);
+    expect(tailscale.releases).toBe(1);
+    expect(leases.lease).toBeNull();
+    expect(tailscale.state.config?.raw).toEqual(initial);
+  });
+
   it("reuses the precise concurrent CAS winner without deleting its route", async () => {
     const tailscale = new FakeTailscale();
     const leases = new MemoryLeaseStore();
@@ -379,7 +453,12 @@ describe("ServerExposureManager", () => {
       };
       return false;
     };
-    const manager = new ServerExposureManager({ tailscale, leases, request: readyProbe() });
+    const manager = new ServerExposureManager({
+      tailscale,
+      leases,
+      request: readyProbe(),
+      webSocketProbe: successfulWebSocketProbe
+    });
     const prepared = await manager.activate(config());
     expect(prepared.ownership).toEqual({
       kind: "tailscale_https",
@@ -411,7 +490,12 @@ describe("ServerExposureManager", () => {
       leases.lease = { ...candidate, configFingerprint: "0".repeat(64) };
       return false;
     };
-    const manager = new ServerExposureManager({ tailscale, leases, request: readyProbe() });
+    const manager = new ServerExposureManager({
+      tailscale,
+      leases,
+      request: readyProbe(),
+      webSocketProbe: successfulWebSocketProbe
+    });
     await expect(manager.activate(config())).rejects.toSatisfy((error: unknown) =>
       expectCode(error, "TAILSCALE_LEASE_PERSISTENCE_FAILED")
     );
@@ -437,7 +521,8 @@ describe("ServerExposureManager", () => {
     const manager = new ServerExposureManager({
       tailscale,
       leases: new MemoryLeaseStore(),
-      request: readyProbe()
+      request: readyProbe(),
+      webSocketProbe: successfulWebSocketProbe
     });
     await expect(manager.inspect(config())).rejects.toSatisfy((error: unknown) =>
       expectCode(error, "TAILSCALE_SERVE_UNOWNED")

@@ -3,6 +3,10 @@ import { serverConfigSchema, type ServerConfig } from "../config.js";
 import { serverReadinessSchema } from "../readiness.js";
 import { tailscaleExposureFailure } from "./errors.js";
 import {
+  probeTailscaleWebSocketUpgrade,
+  type TailscaleWebSocketProbe
+} from "./tailscaleWebSocketProbe.js";
+import {
   tailscaleServeLeaseSchema,
   type ExposureInspection,
   type ExposureLeaseStorePort,
@@ -30,6 +34,7 @@ export type ServerExposureManagerOptions = {
   tailscale: TailscaleControlPort;
   leases: ExposureLeaseStorePort;
   request?: ReadinessRequest;
+  webSocketProbe?: TailscaleWebSocketProbe;
   probeTimeoutMs?: number;
   clock?: () => Date;
 };
@@ -233,11 +238,13 @@ function sameLease(left: TailscaleServeLease, right: TailscaleServeLease): boole
 
 export class ServerExposureManager implements ServerExposureLifecyclePort {
   private readonly request: ReadinessRequest;
+  private readonly webSocketProbe: TailscaleWebSocketProbe;
   private readonly clock: () => Date;
   private readonly probeTimeoutMs: number;
 
   constructor(private readonly options: ServerExposureManagerOptions) {
     this.request = options.request ?? ((url, requestOptions) => fetch(url, requestOptions));
+    this.webSocketProbe = options.webSocketProbe ?? probeTailscaleWebSocketUpgrade;
     this.clock = options.clock ?? (() => new Date());
     this.probeTimeoutMs = options.probeTimeoutMs ?? 5_000;
   }
@@ -467,6 +474,13 @@ export class ServerExposureManager implements ServerExposureLifecyclePort {
         ((response.status === 200 && readiness.data.status === "ready") ||
           (response.status === 503 && readiness.data.status === "listening"));
       if (!reachable) throw new Error("tailscale_readiness_response_invalid");
+      const webSocketOrigin = new URL(origin);
+      webSocketOrigin.protocol = "wss:";
+      webSocketOrigin.pathname = "/readyz/ws";
+      await this.webSocketProbe(webSocketOrigin.href, {
+        origin,
+        signal: controller.signal
+      });
     } catch (error) {
       if (error instanceof Error && error.name === "TailscaleExposureError") throw error;
       throw tailscaleExposureFailure("TAILSCALE_EXTERNAL_PROBE_FAILED", this.safeCause(error));
