@@ -44,7 +44,10 @@ import {
 import { createPlatformBackgroundService } from "../background/platformBackground.js";
 import {
   AgentHostBackgroundSetupError,
+  type AgentHostBackgroundLauncher,
   type AgentHostBackgroundGuidance,
+  type AgentHostBackgroundLogs,
+  type AgentHostBackgroundResult,
   type AgentHostBackgroundService
 } from "../background/backgroundService.js";
 import { resolveHostExecutable } from "../platform/resolveHostExecutable.js";
@@ -468,6 +471,46 @@ export class AgentHostOperator {
     return this.diagnostics(await loadAgentHostConfig(configPath));
   }
 
+  async installBackground(
+    configPath: string,
+    launcher: AgentHostBackgroundLauncher
+  ): Promise<AgentHostBackgroundResult> {
+    const service = this.requireBackgroundService();
+    const config = await loadAgentHostConfig(configPath);
+    const credential = await credentialStore(config).requireUsable();
+    return service.install({
+      workspaceId: credential.workspaceId,
+      executablePath: launcher.executablePath,
+      fixedArgs: launcher.fixedArgs,
+      configPath,
+      privateDirectory: config.dataDirectory
+    });
+  }
+
+  async uninstallBackground(configPath: string): Promise<AgentHostBackgroundResult> {
+    const service = this.requireBackgroundService();
+    const workspaceId = await this.backgroundIdentity(configPath);
+    return service.uninstall(workspaceId);
+  }
+
+  async backgroundStatus(configPath: string): Promise<AgentHostBackgroundResult> {
+    const service = this.requireBackgroundService();
+    const workspaceId = await this.backgroundIdentity(configPath);
+    return service.status(workspaceId);
+  }
+
+  async restartBackground(configPath: string): Promise<AgentHostBackgroundResult> {
+    const service = this.requireBackgroundService();
+    const workspaceId = await this.backgroundIdentity(configPath);
+    return service.restart(workspaceId);
+  }
+
+  async backgroundLogs(configPath: string): Promise<AgentHostBackgroundLogs> {
+    const service = this.requireBackgroundService();
+    const workspaceId = await this.backgroundIdentity(configPath);
+    return service.logs(workspaceId);
+  }
+
   async createDaemon(configPath: string): Promise<AgentHostComposition> {
     const config = await loadAgentHostConfig(configPath);
     await realpath(config.workspaceRoot);
@@ -600,5 +643,17 @@ export class AgentHostOperator {
     if (status.state !== "running") return "restart_required";
     await this.backgroundService.restart(credential.active.workspaceId);
     return "restarted";
+  }
+
+  private requireBackgroundService(): AgentHostBackgroundService {
+    if (!this.backgroundService) throw new Error("agent_host_background_service_unavailable");
+    return this.backgroundService;
+  }
+
+  private async backgroundIdentity(configPath: string): Promise<string> {
+    const config = await loadAgentHostConfig(configPath);
+    const document = await credentialStore(config).read();
+    if (!document?.active) throw new Error("agent_host_background_identity_unavailable");
+    return document.active.workspaceId;
   }
 }

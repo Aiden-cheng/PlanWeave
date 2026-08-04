@@ -1,5 +1,6 @@
 import type {
   AgentHostBackgroundInstall,
+  AgentHostBackgroundLogs,
   AgentHostBackgroundResult,
   AgentHostBackgroundService
 } from "./backgroundService.js";
@@ -95,6 +96,16 @@ export class WindowsScheduledTaskService implements AgentHostBackgroundService {
     }
     await this.runner("schtasks.exe", ["/Run", "/TN", taskName(workspaceId)]);
     return { state: "running", platform: "windows-scheduled-task" };
+  }
+
+  async logs(workspaceId: string): Promise<AgentHostBackgroundLogs> {
+    return {
+      platform: "windows-scheduled-task",
+      source: "task-scheduler-diagnostics",
+      eventLog: "Microsoft-Windows-TaskScheduler/Operational",
+      taskName: taskName(workspaceId),
+      capturesHostStdout: false
+    };
   }
 }
 

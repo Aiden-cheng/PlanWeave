@@ -36,6 +36,11 @@ function operator(overrides: Partial<AgentHostOperatorService> = {}): AgentHostO
     listAgents: vi.fn(),
     exposeAgent: vi.fn(),
     hideAgent: vi.fn(),
+    installBackground: vi.fn(),
+    uninstallBackground: vi.fn(),
+    backgroundStatus: vi.fn(),
+    restartBackground: vi.fn(),
+    backgroundLogs: vi.fn(),
     ...overrides
   };
 }
@@ -106,6 +111,59 @@ describe("Agent Host operator CLI", () => {
     expect(() => parseAgentHostArgs(["config-init", "--config", "/config.json"])).toThrow(
       "agent_host_cli_preset_required"
     );
+    expect(parseAgentHostArgs(["service", "status", "--config", "/config.json"])).toEqual({
+      command: "service-status",
+      configPath: "/config.json",
+      replace: false
+    });
+    expect(() => parseAgentHostArgs(["service", "status", "/config.json"])).toThrow(
+      "agent_host_cli_config_required"
+    );
+    expect(() =>
+      parseAgentHostArgs(["service", "status", "--config", "relative.json"])
+    ).toThrow("agent_host_cli_config_absolute_required");
+    expect(() =>
+      parseAgentHostArgs(["service", "status", "--config", "/config.json", "--extra"])
+    ).toThrow("agent_host_cli_usage");
+  });
+
+  it("routes service lifecycle commands without changing Host diagnostics status", async () => {
+    const stdout = vi.fn();
+    const stderr = vi.fn();
+    const methods = {
+      installBackground: vi.fn().mockResolvedValue({ state: "running" }),
+      uninstallBackground: vi.fn().mockResolvedValue({ state: "not_installed" }),
+      backgroundStatus: vi.fn().mockResolvedValue({ state: "stopped" }),
+      restartBackground: vi.fn().mockResolvedValue({ state: "running" }),
+      backgroundLogs: vi.fn().mockResolvedValue({ source: "systemd-journal" }),
+      status: vi.fn().mockResolvedValue({ credential: "active" })
+    };
+    const service = operator(methods);
+    const launcher = {
+      executablePath: "/opt/node/bin/node",
+      fixedArgs: ["/opt/agent-host/dist/bin.js"]
+    };
+    for (const action of ["install", "uninstall", "status", "restart", "logs"] as const) {
+      await expect(
+        runAgentHostCli(["service", action, "--config", "/private/config.json"], {
+          operator: service,
+          launcher,
+          io: { stdout, stderr }
+        })
+      ).resolves.toBe(0);
+    }
+    await runAgentHostCli(["status", "--config", "/private/config.json"], {
+      operator: service,
+      io: { stdout, stderr }
+    });
+
+    expect(methods.installBackground).toHaveBeenCalledWith("/private/config.json", launcher);
+    expect(methods.uninstallBackground).toHaveBeenCalledWith("/private/config.json");
+    expect(methods.backgroundStatus).toHaveBeenCalledWith("/private/config.json");
+    expect(methods.restartBackground).toHaveBeenCalledWith("/private/config.json");
+    expect(methods.backgroundLogs).toHaveBeenCalledWith("/private/config.json");
+    expect(methods.status).toHaveBeenCalledWith("/private/config.json");
+    expect(JSON.stringify(stdout.mock.calls)).not.toContain("/private/config.json");
   });
 
   it("initializes only the fixed ACP preset through the operator service", async () => {
@@ -147,6 +205,8 @@ describe("Agent Host operator CLI", () => {
     await expect(runAgentHostCli([argument], { io: { stdout, stderr } })).resolves.toBe(0);
     expect(stdout).toHaveBeenCalledWith(AGENT_HOST_CLI_USAGE);
     expect(stderr).not.toHaveBeenCalled();
+    expect(AGENT_HOST_CLI_USAGE).toContain("service install --config <absolute-path>");
+    expect(AGENT_HOST_CLI_USAGE).toContain("service logs --config <absolute-path>");
   });
 
   it("reports usage on stderr and exits 2 when no command is provided", async () => {

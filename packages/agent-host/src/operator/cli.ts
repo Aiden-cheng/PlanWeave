@@ -1,5 +1,7 @@
 import type { AgentHostComposition } from "../composition/agentHostComposition.js";
 import type { AgentHostBackgroundLauncher } from "../background/backgroundService.js";
+import { isAbsolute } from "node:path";
+import { fileURLToPath } from "node:url";
 import { runRealAcpSmokeCli } from "../realAcp/cli.js";
 import { AgentHostOperator } from "./agentHostOperator.js";
 
@@ -17,6 +19,11 @@ export const AGENT_HOST_CLI_USAGE = [
   "  agents list --config <absolute-path>",
   "  agents expose <supported-profile> --config <absolute-path>",
   "  agents hide <supported-profile> --config <absolute-path>",
+  "  service install --config <absolute-path>",
+  "  service uninstall --config <absolute-path>",
+  "  service status --config <absolute-path>",
+  "  service restart --config <absolute-path>",
+  "  service logs --config <absolute-path>",
   "  status --config <absolute-path>",
   "  run --config <absolute-path>",
   "  revoke --config <absolute-path>",
@@ -33,7 +40,12 @@ type ParsedCommand = {
     | "revoke"
     | "agents-list"
     | "agents-expose"
-    | "agents-hide";
+    | "agents-hide"
+    | "service-install"
+    | "service-uninstall"
+    | "service-status"
+    | "service-restart"
+    | "service-logs";
   configPath?: string;
   code?: string;
   handoff?: string;
@@ -65,10 +77,38 @@ export interface AgentHostOperatorService {
   listAgents(configPath: string): Promise<unknown>;
   exposeAgent(configPath: string, profileId: string): Promise<unknown>;
   hideAgent(configPath: string, profileId: string): Promise<unknown>;
+  installBackground(configPath: string, launcher: AgentHostBackgroundLauncher): Promise<unknown>;
+  uninstallBackground(configPath: string): Promise<unknown>;
+  backgroundStatus(configPath: string): Promise<unknown>;
+  restartBackground(configPath: string): Promise<unknown>;
+  backgroundLogs(configPath: string): Promise<unknown>;
+}
+
+function defaultAgentHostLauncher(): AgentHostBackgroundLauncher {
+  return {
+    executablePath: process.execPath,
+    fixedArgs: [fileURLToPath(new URL("../bin.js", import.meta.url))]
+  };
 }
 
 export function parseAgentHostArgs(argv: readonly string[]): ParsedCommand {
   const [command, ...args] = argv;
+  if (command === "service") {
+    const [action, configFlag, configPath, ...extra] = args;
+    if (!action || !["install", "uninstall", "status", "restart", "logs"].includes(action)) {
+      throw new Error("agent_host_cli_usage");
+    }
+    if (configFlag !== "--config" || !configPath || configPath.startsWith("--")) {
+      throw new Error("agent_host_cli_config_required");
+    }
+    if (extra.length > 0) throw new Error("agent_host_cli_usage");
+    if (!isAbsolute(configPath)) throw new Error("agent_host_cli_config_absolute_required");
+    return {
+      command: `service-${action}` as ParsedCommand["command"],
+      configPath,
+      replace: false
+    };
+  }
   if (command === "agents") {
     const [action, profileOrOption, ...tail] = args;
     const profileId = action === "list" ? undefined : profileOrOption;
@@ -214,7 +254,25 @@ export async function runAgentHostCli(
       return 0;
     }
     let result: unknown;
-    if (parsed.command === "agents-list") {
+    if (parsed.command === "service-install") {
+      if (!parsed.configPath) throw new Error("agent_host_cli_config_required");
+      result = await operator.installBackground(
+        parsed.configPath,
+        options.launcher ?? defaultAgentHostLauncher()
+      );
+    } else if (parsed.command === "service-uninstall") {
+      if (!parsed.configPath) throw new Error("agent_host_cli_config_required");
+      result = await operator.uninstallBackground(parsed.configPath);
+    } else if (parsed.command === "service-status") {
+      if (!parsed.configPath) throw new Error("agent_host_cli_config_required");
+      result = await operator.backgroundStatus(parsed.configPath);
+    } else if (parsed.command === "service-restart") {
+      if (!parsed.configPath) throw new Error("agent_host_cli_config_required");
+      result = await operator.restartBackground(parsed.configPath);
+    } else if (parsed.command === "service-logs") {
+      if (!parsed.configPath) throw new Error("agent_host_cli_config_required");
+      result = await operator.backgroundLogs(parsed.configPath);
+    } else if (parsed.command === "agents-list") {
       if (!parsed.configPath) throw new Error("agent_host_cli_config_required");
       result = await operator.listAgents(parsed.configPath);
     } else if (parsed.command === "agents-expose" || parsed.command === "agents-hide") {

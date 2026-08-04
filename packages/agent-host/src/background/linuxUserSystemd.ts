@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { writePrivateTextFile } from "../config/privateConfigWriter.js";
 import type {
   AgentHostBackgroundInstall,
+  AgentHostBackgroundLogs,
   AgentHostBackgroundResult,
   AgentHostBackgroundService
 } from "./backgroundService.js";
@@ -119,6 +120,17 @@ export class LinuxUserSystemdService implements AgentHostBackgroundService {
     if (status.state === "not_installed") return status;
     await this.runner("systemctl", ["--user", "restart", unit]);
     return { state: "running", platform: "linux-systemd-user" };
+  }
+
+  async logs(workspaceId: string): Promise<AgentHostBackgroundLogs> {
+    return {
+      platform: "linux-systemd-user",
+      source: "systemd-journal",
+      command: {
+        executable: "journalctl",
+        args: ["--user", "-u", serviceName(workspaceId)]
+      }
+    };
   }
 }
 

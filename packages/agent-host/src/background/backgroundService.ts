@@ -23,6 +23,20 @@ export type AgentHostBackgroundResult = {
   guidance?: AgentHostBackgroundGuidance;
 };
 
+export type AgentHostBackgroundLogs =
+  | {
+      platform: "linux-systemd-user";
+      source: "systemd-journal";
+      command: { executable: "journalctl"; args: readonly string[] };
+    }
+  | {
+      platform: "windows-scheduled-task";
+      source: "task-scheduler-diagnostics";
+      eventLog: "Microsoft-Windows-TaskScheduler/Operational";
+      taskName: string;
+      capturesHostStdout: false;
+    };
+
 export class AgentHostBackgroundSetupError extends Error {
   readonly code = "agent_host_background_setup_required";
 
@@ -39,4 +53,5 @@ export interface AgentHostBackgroundService {
   uninstall(workspaceId: string): Promise<AgentHostBackgroundResult>;
   status(workspaceId: string): Promise<AgentHostBackgroundResult>;
   restart(workspaceId: string): Promise<AgentHostBackgroundResult>;
+  logs(workspaceId: string): Promise<AgentHostBackgroundLogs>;
 }

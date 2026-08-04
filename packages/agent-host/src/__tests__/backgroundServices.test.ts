@@ -115,4 +115,75 @@ describe("Agent Host background adapters", () => {
       guidance: "check_scheduled_task_permissions"
     } satisfies Partial<AgentHostBackgroundSetupError>);
   });
+
+  it("uses fixed systemctl argv for lifecycle operations and describes journal logs", async () => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-systemd-lifecycle-"));
+    directories.push(root);
+    const unitPath = join(root, "planweave-agent-host-workspace-1.service");
+    await new LinuxUserSystemdService(vi.fn().mockResolvedValue({ stdout: "", stderr: "" }), root)
+      .install(install);
+    const runner = vi.fn().mockResolvedValue({ stdout: "active\n", stderr: "" });
+    const service = new LinuxUserSystemdService(runner, root);
+
+    await expect(service.status(install.workspaceId)).resolves.toMatchObject({ state: "running" });
+    await expect(service.restart(install.workspaceId)).resolves.toMatchObject({ state: "running" });
+    await expect(service.logs(install.workspaceId)).resolves.toEqual({
+      platform: "linux-systemd-user",
+      source: "systemd-journal",
+      command: {
+        executable: "journalctl",
+        args: ["--user", "-u", "planweave-agent-host-workspace-1.service"]
+      }
+    });
+    await expect(service.uninstall(install.workspaceId)).resolves.toMatchObject({
+      state: "not_installed"
+    });
+
+    expect(runner.mock.calls).toEqual([
+      ["systemctl", ["--user", "is-active", "planweave-agent-host-workspace-1.service"]],
+      ["systemctl", ["--user", "is-active", "planweave-agent-host-workspace-1.service"]],
+      ["systemctl", ["--user", "restart", "planweave-agent-host-workspace-1.service"]],
+      [
+        "systemctl",
+        ["--user", "disable", "--now", "planweave-agent-host-workspace-1.service"]
+      ],
+      ["systemctl", ["--user", "daemon-reload"]]
+    ]);
+    await expect(readFile(unitPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("uses fixed schtasks argv and identifies scheduler diagnostics without claiming stdout", async () => {
+    const runner = vi.fn().mockResolvedValue({
+      stdout: '"PlanWeave Agent Host workspace-1","Running"',
+      stderr: ""
+    });
+    const service = new WindowsScheduledTaskService(runner);
+
+    await expect(service.status(install.workspaceId)).resolves.toMatchObject({ state: "running" });
+    await expect(service.restart(install.workspaceId)).resolves.toMatchObject({ state: "running" });
+    await expect(service.logs(install.workspaceId)).resolves.toEqual({
+      platform: "windows-scheduled-task",
+      source: "task-scheduler-diagnostics",
+      eventLog: "Microsoft-Windows-TaskScheduler/Operational",
+      taskName: "PlanWeave Agent Host workspace-1",
+      capturesHostStdout: false
+    });
+    await expect(service.uninstall(install.workspaceId)).resolves.toMatchObject({
+      state: "not_installed"
+    });
+
+    expect(runner.mock.calls).toEqual([
+      [
+        "schtasks.exe",
+        ["/Query", "/TN", "PlanWeave Agent Host workspace-1", "/FO", "CSV", "/NH"]
+      ],
+      [
+        "schtasks.exe",
+        ["/Query", "/TN", "PlanWeave Agent Host workspace-1", "/FO", "CSV", "/NH"]
+      ],
+      ["schtasks.exe", ["/End", "/TN", "PlanWeave Agent Host workspace-1"]],
+      ["schtasks.exe", ["/Run", "/TN", "PlanWeave Agent Host workspace-1"]],
+      ["schtasks.exe", ["/Delete", "/TN", "PlanWeave Agent Host workspace-1", "/F"]]
+    ]);
+  });
 });
