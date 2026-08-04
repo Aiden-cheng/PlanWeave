@@ -87,17 +87,79 @@ describe("portable Agent Host setup", () => {
   });
 
   it("parses the single-command handoff and exposure commands", () => {
-    expect(parseAgentHostArgs(["enroll", encodedHandoff(), "--no-background"])).toMatchObject({
+    expect(
+      parseAgentHostArgs([
+        "enroll",
+        encodedHandoff(),
+        "--expose",
+        "codex-acp,claude-agent-acp",
+        "--no-background"
+      ])
+    ).toMatchObject({
       command: "enroll",
       handoff: encodedHandoff(),
+      exposeProfiles: ["codex-acp", "claude-agent-acp"],
       installBackground: false
     });
     expect(parseAgentHostArgs(["agents", "expose", "codex-acp", "--config", "/cfg"])).toEqual({
       command: "agents-expose",
       configPath: "/cfg",
       profileId: "codex-acp",
+      exposeProfiles: [],
       replace: false
     });
+    expect(() =>
+      parseAgentHostArgs(["status", "--config", "/cfg", "--expose", "codex-acp"])
+    ).toThrow("agent_host_cli_usage");
+    expect(() =>
+      parseAgentHostArgs(["enroll", encodedHandoff(), "--expose", "--no-background"])
+    ).toThrow("agent_host_cli_usage");
+  });
+
+  it("exposes selected profiles during the same enrollment command", async () => {
+    const stdout = vi.fn();
+    const enrollment = {
+      state: "ready" as const,
+      workspaceId: "workspace-1",
+      credential: "active" as const,
+      background: "running" as const,
+      configPath: "/private/config.json",
+      agents: [],
+      nextSteps: {} as never
+    };
+    const exposeAgent = vi
+      .fn()
+      .mockResolvedValueOnce({
+        reload: "restarted",
+        agents: [{ profileId: "codex-acp", exposed: true }]
+      })
+      .mockResolvedValueOnce({
+        reload: "restarted",
+        agents: [
+          { profileId: "codex-acp", exposed: true },
+          { profileId: "claude-agent-acp", exposed: true }
+        ]
+      });
+
+    await expect(
+      runAgentHostCli(
+        ["enroll", encodedHandoff(), "--expose", "codex-acp,claude-agent-acp"],
+        {
+          operator: {
+            enrollHandoff: vi.fn().mockResolvedValue(enrollment),
+            exposeAgent
+          } as never,
+          io: { stdout, stderr: vi.fn() },
+          launcher: { executablePath: "node", fixedArgs: ["planweave", "agent-host"] }
+        }
+      )
+    ).resolves.toBe(0);
+    expect(exposeAgent).toHaveBeenNthCalledWith(1, enrollment.configPath, "codex-acp");
+    expect(exposeAgent).toHaveBeenNthCalledWith(2, enrollment.configPath, "claude-agent-acp");
+    expect(JSON.parse(stdout.mock.calls[0]?.[0] as string).agents).toEqual([
+      { profileId: "codex-acp", exposed: true },
+      { profileId: "claude-agent-acp", exposed: true }
+    ]);
   });
 
   it("does not echo a handoff when enrollment fails", async () => {

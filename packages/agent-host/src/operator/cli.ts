@@ -3,7 +3,11 @@ import type { AgentHostBackgroundLauncher } from "../background/backgroundServic
 import { isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runRealAcpSmokeCli } from "../realAcp/cli.js";
-import { AgentHostOperator } from "./agentHostOperator.js";
+import {
+  AgentHostOperator,
+  type AgentExposureMutationResult,
+  type PortableEnrollmentResult
+} from "./agentHostOperator.js";
 
 export type AgentHostCliIo = { stdout(value: string): void; stderr(value: string): void };
 
@@ -14,7 +18,7 @@ export const AGENT_HOST_CLI_USAGE = [
   "Commands:",
   "  config-init --config <absolute-path> --preset codex-acp",
   "  preflight --config <absolute-path>",
-  "  enroll <handoff> [--workspace-root <absolute-path>] [--ca-certificate <absolute-path>] [--no-background]",
+  "  enroll <handoff> [--expose <profile,...>] [--workspace-root <absolute-path>] [--ca-certificate <absolute-path>] [--no-background]",
   "  enroll --config <absolute-path> --code <enrollment-or-setup-code> [--replace]",
   "  agents list --config <absolute-path>",
   "  agents expose <supported-profile> --config <absolute-path>",
@@ -52,6 +56,7 @@ type ParsedCommand = {
   workspaceRoot?: string;
   caCertificatePath?: string;
   installBackground?: boolean;
+  exposeProfiles: string[];
   profileId?: string;
   preset?: "codex-acp";
   replace: boolean;
@@ -73,10 +78,10 @@ export interface AgentHostOperatorService {
       executablePath?: string;
       fixedArgs?: readonly string[];
     }
-  ): Promise<unknown>;
+  ): Promise<PortableEnrollmentResult>;
   listAgents(configPath: string): Promise<unknown>;
-  exposeAgent(configPath: string, profileId: string): Promise<unknown>;
-  hideAgent(configPath: string, profileId: string): Promise<unknown>;
+  exposeAgent(configPath: string, profileId: string): Promise<AgentExposureMutationResult>;
+  hideAgent(configPath: string, profileId: string): Promise<AgentExposureMutationResult>;
   installBackground(configPath: string, launcher: AgentHostBackgroundLauncher): Promise<unknown>;
   uninstallBackground(configPath: string): Promise<unknown>;
   backgroundStatus(configPath: string): Promise<unknown>;
@@ -106,6 +111,7 @@ export function parseAgentHostArgs(argv: readonly string[]): ParsedCommand {
     return {
       command: `service-${action}` as ParsedCommand["command"],
       configPath,
+      exposeProfiles: [],
       replace: false
     };
   }
@@ -126,6 +132,7 @@ export function parseAgentHostArgs(argv: readonly string[]): ParsedCommand {
       command: `agents-${action}` as ParsedCommand["command"],
       configPath: options[1],
       profileId,
+      exposeProfiles: [],
       replace: false
     };
   }
@@ -142,6 +149,7 @@ export function parseAgentHostArgs(argv: readonly string[]): ParsedCommand {
   const configPath = option("--config");
   const code = option("--code");
   const preset = option("--preset");
+  const expose = option("--expose");
   const portableEnrollment = command === "enroll" && args[0] && !args[0].startsWith("--");
   if (!portableEnrollment && !configPath) throw new Error("agent_host_cli_config_required");
   if (command === "enroll" && !portableEnrollment && !code) {
@@ -163,6 +171,7 @@ export function parseAgentHostArgs(argv: readonly string[]): ParsedCommand {
     "--replace",
     "--workspace-root",
     "--ca-certificate",
+    "--expose",
     "--no-background"
   ]);
   for (let index = portableEnrollment ? 1 : 0; index < args.length; index++) {
@@ -173,6 +182,23 @@ export function parseAgentHostArgs(argv: readonly string[]): ParsedCommand {
   if (portableEnrollment && (configPath || code || preset || args.includes("--replace"))) {
     throw new Error("agent_host_cli_usage");
   }
+  if (
+    (!portableEnrollment && args.includes("--expose")) ||
+    (args.includes("--expose") && (!expose || expose.startsWith("--")))
+  ) {
+    throw new Error("agent_host_cli_usage");
+  }
+  const exposeProfiles = [
+    ...new Set(
+      (expose ?? "")
+        .split(",")
+        .map((profileId) => profileId.trim())
+        .filter(Boolean)
+    )
+  ];
+  if (args.includes("--expose") && exposeProfiles.length === 0) {
+    throw new Error("agent_host_cli_usage");
+  }
   return {
     command: command as ParsedCommand["command"],
     configPath,
@@ -181,6 +207,7 @@ export function parseAgentHostArgs(argv: readonly string[]): ParsedCommand {
     workspaceRoot: option("--workspace-root"),
     caCertificatePath: option("--ca-certificate"),
     installBackground: portableEnrollment ? !args.includes("--no-background") : undefined,
+    exposeProfiles: portableEnrollment ? exposeProfiles : [],
     preset: preset === "codex-acp" ? preset : undefined,
     replace: args.includes("--replace")
   };
@@ -292,13 +319,18 @@ export async function runAgentHostCli(
           executablePath: process.execPath,
           fixedArgs: process.argv[1] ? [process.argv[1]] : []
         };
-        result = await operator.enrollHandoff(parsed.handoff, {
+        const enrollment = await operator.enrollHandoff(parsed.handoff, {
           workspaceRoot: parsed.workspaceRoot,
           caCertificatePath: parsed.caCertificatePath,
           installBackground: parsed.installBackground,
           executablePath: launcher.executablePath,
           fixedArgs: launcher.fixedArgs
         });
+        let agents = enrollment.agents;
+        for (const profileId of parsed.exposeProfiles) {
+          agents = (await operator.exposeAgent(enrollment.configPath, profileId)).agents;
+        }
+        result = parsed.exposeProfiles.length > 0 ? { ...enrollment, agents } : enrollment;
       } else {
         if (!parsed.configPath) throw new Error("agent_host_cli_config_required");
         if (!parsed.code) throw new Error("agent_host_cli_enrollment_code_required");

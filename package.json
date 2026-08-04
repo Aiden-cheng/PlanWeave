@@ -34,6 +34,7 @@
     "desktop:verify:packaged:mac": "pnpm --dir packages/desktop verify:packaged:mac",
     "pack:npm": "pnpm -r --filter @planweave-ai/agent-host-protocol --filter @planweave-ai/collaboration-protocol --filter @planweave-ai/runtime --filter @planweave-ai/mcp --filter @planweave-ai/cli pack",
     "pack:distributed": "pnpm -r --filter @planweave-ai/agent-host-protocol --filter @planweave-ai/collaboration-protocol --filter @planweave-ai/runtime --filter @planweave-ai/server --filter @planweave-ai/agent-host pack",
+    "pack:agent-host:vps": "node scripts/build-agent-host-bundle.mjs",
     "planweave": "pnpm --filter @planweave-ai/cli planweave",
     "prepare": "husky",
     "publish:npm": "pnpm -r --filter @planweave-ai/agent-host-protocol --filter @planweave-ai/collaboration-protocol --filter @planweave-ai/runtime --filter @planweave-ai/mcp --filter @planweave-ai/cli publish --access public",

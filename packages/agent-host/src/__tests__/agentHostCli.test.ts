@@ -88,6 +88,7 @@ describe("Agent Host operator CLI", () => {
       command: "status",
       configPath: "/config.json",
       code: undefined,
+      exposeProfiles: [],
       replace: false
     });
     expect(
@@ -100,6 +101,7 @@ describe("Agent Host operator CLI", () => {
       configPath: "/config.json",
       preset: "codex-acp",
       code: undefined,
+      exposeProfiles: [],
       replace: false
     });
     expect(() => parseAgentHostArgs(["enroll", "--config", "/config.json"])).toThrow(
@@ -114,6 +116,7 @@ describe("Agent Host operator CLI", () => {
     expect(parseAgentHostArgs(["service", "status", "--config", "/config.json"])).toEqual({
       command: "service-status",
       configPath: "/config.json",
+      exposeProfiles: [],
       replace: false
     });
     expect(() => parseAgentHostArgs(["service", "status", "/config.json"])).toThrow(
