@@ -28,8 +28,8 @@ describe("main-owned Host setup handoff", () => {
       { enrollmentCode, workspaceId: "workspace-a", expiresAt: "2030-01-01T00:15:00.000Z" }
     );
 
-    expect(command).toMatch(/^planweave-agent-host enroll planweave-agent-host-setup:/);
-    const encoded = command.slice("planweave-agent-host enroll ".length);
+    expect(command).toMatch(/^planweave agent-host enroll planweave-agent-host-setup:/);
+    const encoded = command.slice("planweave agent-host enroll ".length);
     expect(parseAgentHostSetupHandoff(encoded, new Date("2029-01-01"))).toMatchObject({
       endpoint: { topology: "tailscale_https", tlsTrust: "system_ca" },
       workspaceId: "workspace-a",

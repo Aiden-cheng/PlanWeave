@@ -140,7 +140,7 @@ const operatorClipboardHandoffViewSchema = z
     workspaceId: operatorProfileIdSchema,
     expiresAt: z.iso.datetime(),
     copiedAt: z.iso.datetime(),
-    commandPreview: z.literal("planweave-agent-host enroll <handoff>").optional()
+    commandPreview: z.literal("planweave agent-host enroll <handoff>").optional()
   })
   .strict();
 export const operatorHostBootstrapHandoffViewSchema = operatorClipboardHandoffViewSchema;

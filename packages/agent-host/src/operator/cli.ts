@@ -7,9 +7,9 @@ import { AgentHostOperator } from "./agentHostOperator.js";
 
 export type AgentHostCliIo = { stdout(value: string): void; stderr(value: string): void };
 
-/** Public usage text for `planweave-agent-host --help` (stdout, exit 0). */
+/** Public usage text for `planweave agent-host --help` (stdout, exit 0). */
 export const AGENT_HOST_CLI_USAGE = [
-  "Usage: planweave-agent-host <command> [options]",
+  "Usage: planweave agent-host <command> [options]",
   "",
   "Commands:",
   "  config-init --config <absolute-path> --preset codex-acp",

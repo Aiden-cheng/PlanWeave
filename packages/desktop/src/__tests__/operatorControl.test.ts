@@ -221,7 +221,7 @@ describe("Desktop operator control trust boundary", () => {
 
     const command = copyText.mock.calls[0]?.[0] ?? "";
     const handoff = parseAgentHostSetupHandoff(
-      command.slice("planweave-agent-host enroll ".length)
+      command.slice("planweave agent-host enroll ".length)
     );
     expect(handoff.endpoint).toEqual({
       topology: "public_https",
@@ -230,7 +230,7 @@ describe("Desktop operator control trust boundary", () => {
       tlsTrust: "system_ca"
     });
     expect(handoff.enrollmentCode).toBe(enrollmentCode);
-    expect(view.commandPreview).toBe("planweave-agent-host enroll <handoff>");
+    expect(view.commandPreview).toBe("planweave agent-host enroll <handoff>");
     await expect(restartedService.getStatus()).resolves.toMatchObject({
       profiles: [
         {

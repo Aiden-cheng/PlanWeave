@@ -27,5 +27,5 @@ export function buildHostBootstrapHandoff(
       serverName: profile.displayName
     }
   });
-  return `planweave-agent-host enroll ${handoff}`;
+  return `planweave agent-host enroll ${handoff}`;
 }

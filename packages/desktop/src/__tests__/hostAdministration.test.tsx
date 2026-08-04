@@ -94,7 +94,7 @@ beforeEach(() => {
     workspaceId: "workspace-a",
     expiresAt: "2030-01-01T00:15:00.000Z",
     copiedAt: "2030-01-01T00:00:00.000Z",
-    commandPreview: "planweave-agent-host enroll <handoff>"
+    commandPreview: "planweave agent-host enroll <handoff>"
   });
   bridgeMock.copyOperatorMemberSetupCode.mockResolvedValue({
     state: "ready",

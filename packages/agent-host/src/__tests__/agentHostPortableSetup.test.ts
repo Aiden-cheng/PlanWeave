@@ -126,8 +126,14 @@ describe("portable Agent Host setup", () => {
       agents: [],
       nextSteps: {
         listAgents: {
-          command: "planweave-agent-host",
-          args: ["agents", "list", "--config", "/Users/operator/PlanWeave Host/config.json"]
+          command: "planweave",
+          args: [
+            "agent-host",
+            "agents",
+            "list",
+            "--config",
+            "/Users/operator/PlanWeave Host/config.json"
+          ]
         }
       }
     });
@@ -152,7 +158,13 @@ describe("portable Agent Host setup", () => {
       configPath: "/Users/operator/PlanWeave Host/config.json",
       nextSteps: {
         listAgents: {
-          args: ["agents", "list", "--config", "/Users/operator/PlanWeave Host/config.json"]
+          args: [
+            "agent-host",
+            "agents",
+            "list",
+            "--config",
+            "/Users/operator/PlanWeave Host/config.json"
+          ]
         }
       }
     });
@@ -228,14 +240,28 @@ describe("portable Agent Host setup", () => {
       ]),
       nextSteps: {
         listAgents: {
-          command: "planweave-agent-host",
-          args: ["agents", "list", "--config", paths.configPath]
+          command: "planweave",
+          args: ["agent-host", "agents", "list", "--config", paths.configPath]
         },
         exposeAgent: {
-          args: ["agents", "expose", "<supported-profile>", "--config", paths.configPath]
+          args: [
+            "agent-host",
+            "agents",
+            "expose",
+            "<supported-profile>",
+            "--config",
+            paths.configPath
+          ]
         },
         hideAgent: {
-          args: ["agents", "hide", "<supported-profile>", "--config", paths.configPath]
+          args: [
+            "agent-host",
+            "agents",
+            "hide",
+            "<supported-profile>",
+            "--config",
+            paths.configPath
+          ]
         }
       }
     });

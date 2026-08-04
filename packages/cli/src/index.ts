@@ -45,6 +45,7 @@ import { registerHelpCommand } from "./commands/help.js";
 import { registerSchemaCommand } from "./commands/schema.js";
 import { registerMcpCommand } from "./commands/mcp.js";
 import { registerTrustCommand } from "./commands/trust.js";
+import { registerAgentHostCommand } from "./commands/agentHost.js";
 import { formatCliError } from "./errors.js";
 import { addProjectRootOption } from "./projectRoot.js";
 
@@ -100,6 +101,7 @@ export function createProgram(): Command {
   registerSchemaCommand(program);
   registerMcpCommand(program);
   registerTrustCommand(program);
+  registerAgentHostCommand(program);
   registerHelpCommand(program);
 
   return program;

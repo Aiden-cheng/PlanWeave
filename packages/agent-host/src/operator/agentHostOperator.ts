@@ -83,7 +83,7 @@ export type PortableEnrollmentResult = {
 };
 
 export type PortableAgentHostCommand = {
-  command: "planweave-agent-host";
+  command: "planweave";
   args: readonly string[];
 };
 
@@ -350,21 +350,35 @@ export class AgentHostOperator {
   private async portableEnrollmentContext(
     configPath: string
   ): Promise<Pick<PortableEnrollmentResult, "configPath" | "agents" | "nextSteps">> {
-    const command = "planweave-agent-host" as const;
+    const command = "planweave" as const;
     return {
       configPath,
       agents: await this.listAgents(configPath),
       nextSteps: {
-        listAgents: { command, args: ["agents", "list", "--config", configPath] },
+        listAgents: { command, args: ["agent-host", "agents", "list", "--config", configPath] },
         exposeAgent: {
           command,
-          args: ["agents", "expose", "<supported-profile>", "--config", configPath]
+          args: [
+            "agent-host",
+            "agents",
+            "expose",
+            "<supported-profile>",
+            "--config",
+            configPath
+          ]
         },
         hideAgent: {
           command,
-          args: ["agents", "hide", "<supported-profile>", "--config", configPath]
+          args: [
+            "agent-host",
+            "agents",
+            "hide",
+            "<supported-profile>",
+            "--config",
+            configPath
+          ]
         },
-        runManually: { command, args: ["run", "--config", configPath] }
+        runManually: { command, args: ["agent-host", "run", "--config", configPath] }
       }
     };
   }

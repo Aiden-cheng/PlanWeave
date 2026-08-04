@@ -239,7 +239,7 @@ describe("packaged Host administration control plane", () => {
     expect(JSON.stringify(handoff)).not.toContain("pw_enroll_");
     expect(copiedHandoffs).toHaveLength(1);
     const copiedHandoff = copiedHandoffs[0]!;
-    const encodedHandoff = copiedHandoff.slice("planweave-agent-host enroll ".length);
+    const encodedHandoff = copiedHandoff.slice("planweave agent-host enroll ".length);
     const parsedHandoff = parseAgentHostSetupHandoff(encodedHandoff);
     const enrollmentCode = parsedHandoff.enrollmentCode;
     const uiConfig = {

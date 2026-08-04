@@ -94,7 +94,7 @@ export function HostBootstrapCard({
           ) : null}
         </div>
         <div className="rounded-md border border-border/70 p-3 text-xs text-text-muted">
-          <code>planweave-agent-host enroll &lt;handoff&gt;</code>
+          <code>planweave agent-host enroll &lt;handoff&gt;</code>
           <p className="mt-2">{t("hostAdminBootstrapCodexPreset")}</p>
         </div>
         {!activeProfile?.endpoint ? (

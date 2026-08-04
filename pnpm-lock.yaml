@@ -75,6 +75,9 @@ importers:
 
   packages/cli:
     dependencies:
+      '@planweave-ai/agent-host':
+        specifier: workspace:*
+        version: link:../agent-host
       '@planweave-ai/mcp':
         specifier: workspace:*
         version: link:../mcp

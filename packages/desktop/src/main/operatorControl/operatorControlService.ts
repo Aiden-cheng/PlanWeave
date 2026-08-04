@@ -365,7 +365,7 @@ export class OperatorControlService {
           workspaceId: grant.workspaceId,
           expiresAt: grant.expiresAt,
           copiedAt: new Date().toISOString(),
-          commandPreview: "planweave-agent-host enroll <handoff>"
+          commandPreview: "planweave agent-host enroll <handoff>"
         });
       })
     );
