@@ -6,6 +6,7 @@ import { useHostAdministrationController } from "../hooks/useHostAdministrationC
 import { HostBootstrapCard } from "./HostBootstrapCard";
 import { LocalAgentHostCard } from "./LocalAgentHostCard";
 import { HostAvailabilityCard } from "./HostAvailabilityCard";
+import { DeploymentConnectionCard } from "./DeploymentConnectionCard";
 
 type HostAdministrationSectionProps = {
   t: ReturnType<typeof createTranslator>;
@@ -79,7 +80,7 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
   const currentError = errorLabel(error, t);
 
   return (
-    <div className="flex flex-col gap-6" data-testid="host-administration">
+    <div className="flex flex-col" data-testid="host-administration">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-[-0.02em] text-text-strong">
@@ -121,27 +122,28 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
         </div>
       ) : null}
 
-      <div className="grid items-start gap-6 xl:grid-cols-2">
-        <LocalAgentHostCard
-          activeProfile={activeProfile}
-          busy={busy}
-          loading={localAgentHostLoading}
-          status={localAgentHost}
-          register={registerLocalAgentHost}
-          enrollFromClipboard={enrollLocalAgentHostFromClipboard}
-          t={t}
-        />
-        <HostBootstrapCard
-          activeProfile={activeProfile}
-          busy={busy}
-          copyBootstrapHandoff={copyBootstrapHandoff}
-          dismissHandoff={dismissHandoff}
-          handoff={handoff}
-          handoffState={busy ? "pending" : handoff ? "ready" : error ? "failed" : "idle"}
-          onRetry={copyBootstrapHandoff}
-          t={t}
-        />
-      </div>
+      <DeploymentConnectionCard presentation="section" t={t} />
+
+      <LocalAgentHostCard
+        activeProfile={activeProfile}
+        busy={busy}
+        loading={localAgentHostLoading}
+        status={localAgentHost}
+        register={registerLocalAgentHost}
+        enrollFromClipboard={enrollLocalAgentHostFromClipboard}
+        t={t}
+      />
+
+      <HostBootstrapCard
+        activeProfile={activeProfile}
+        busy={busy}
+        copyBootstrapHandoff={copyBootstrapHandoff}
+        dismissHandoff={dismissHandoff}
+        handoff={handoff}
+        handoffState={busy ? "pending" : handoff ? "ready" : error ? "failed" : "idle"}
+        onRetry={copyBootstrapHandoff}
+        t={t}
+      />
 
       <HostAvailabilityCard
         busy={busy}

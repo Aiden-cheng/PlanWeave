@@ -472,30 +472,31 @@ export const enCatalog = {
     "Bring agents from this computer or remote devices into one list and use them just like local agents.",
   hostAdminDesktopBoundary:
     "Desktop creates the secure onboarding handoff only. It does not SSH to a VPS, provision infrastructure, install software, or start a system service.",
-  deploymentTitle: "Server deployment connection",
-  deploymentDescription: "Review a supported topology and verify its configured Server endpoint.",
+  deploymentTitle: "Server connection",
+  deploymentDescription:
+    "Choose how this computer and remote devices reach PlanWeave Server. Tailscale provides a private HTTPS address automatically.",
   deploymentBoundary:
-    "Desktop only reviews and copies a fixed Compose handoff. It never runs shell commands, provisions a provider, or exposes workspace paths or credentials.",
+    "Changing the connection only changes how Server is reached. Workspace, member, task, and agent data stay unchanged.",
   deploymentPreConnection:
-    "A Workspace connection is not required to review this deployment target. Complete setup or connect only after the Server is running.",
-  deploymentTopology: "Topology",
-  deploymentLoopback: "Local loopback HTTP",
+    "Before connecting Windows or a VPS, enable a connection that remote devices can reach.",
+  deploymentTopology: "Connection",
+  deploymentLoopback: "This computer only (HTTP)",
   deploymentLoopbackTls: "Local loopback HTTPS",
   deploymentLan: "LAN HTTPS",
   deploymentPublic: "Public HTTPS",
-  deploymentTailscale: "Tailscale private network",
-  deploymentCustomHttps: "Custom HTTPS",
-  deploymentCustomTopology: "HTTPS topology",
+  deploymentTailscale: "Tailscale private network (HTTPS, recommended)",
+  deploymentCustomHttps: "Existing HTTPS Server",
+  deploymentCustomTopology: "Server reach",
   deploymentLoopbackHttps: "Loopback HTTPS",
   deploymentLanHttps: "LAN HTTPS",
   deploymentPublicHttps: "Public HTTPS",
-  deploymentLanAdvanced: "LAN HTTP (advanced/development)",
+  deploymentLanAdvanced: "LAN HTTP (development only)",
   deploymentTailscaleNote:
-    "PlanWeave discovers the private .ts.net address and manages only its owned Serve route. No Origin entry is required.",
+    "PlanWeave configures its own Tailscale Serve route and displays the .ts.net HTTPS address. Only approved devices in the same tailnet can reach it.",
   deploymentLanAdvancedNote:
     "LAN HTTP is unencrypted and should only be used for explicit development on a trusted private network.",
-  deploymentActivate: "Apply connection mode",
-  deploymentAdvertisedOrigin: "Advertised address",
+  deploymentActivate: "Enable this connection",
+  deploymentAdvertisedOrigin: "Connection address",
   deploymentTailscaleNotInstalled: "Install Tailscale, then try again.",
   deploymentTailscaleLoginRequired: "Sign in to Tailscale on this device, then try again.",
   deploymentTailscaleHttpsUnavailable:
@@ -505,14 +506,13 @@ export const enCatalog = {
   deploymentTailscaleUnavailable:
     "Tailscale private sharing is unavailable. Check Tailscale and retry.",
   deploymentServerStartFailed: "The PlanWeave Server could not start in this connection mode.",
-  deploymentOrigin: "Server origin",
-  deploymentDisplayName: "Deployment name",
+  deploymentOrigin: "HTTPS address",
+  deploymentDisplayName: "Server name",
   deploymentLoopbackNote:
-    "Loopback is for an explicitly started local development Server or a future local supervisor; it has no Compose/TLS handoff.",
+    "Only this computer can connect. It uses local HTTP and is not suitable for remote devices.",
   deploymentSystemTrustNote:
     "HTTPS certificates must be trusted by the operating system. For a private CA, install it in the system trust store first.",
-  deploymentTopologySource:
-    "A connected Workspace profile can prefill this target, but topology is reviewed here and is never persisted as an authenticated connection.",
+  deploymentTopologySource: "This prepares and validates Server but does not join a Workspace.",
   deploymentReview: "Review handoff",
   deploymentValidate: "Validate endpoint",
   deploymentDurableState: "Durable Server state is required.",

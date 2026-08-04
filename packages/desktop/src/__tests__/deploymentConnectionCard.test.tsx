@@ -93,7 +93,7 @@ describe("DeploymentConnectionCard", () => {
     await user.selectOptions(screen.getByTestId("deployment-topology"), "tailscale_private");
     expect(screen.queryByTestId("deployment-origin")).not.toBeInTheDocument();
     expect(screen.queryByTestId("deployment-display-name")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Apply connection mode" }));
+    await user.click(screen.getByRole("button", { name: "Enable this connection" }));
 
     expect(collaborationBridge.setDesktopServerExposureMode).toHaveBeenCalledWith({
       mode: "tailscale_private"
@@ -106,7 +106,7 @@ describe("DeploymentConnectionCard", () => {
   it("labels raw LAN HTTP as an advanced separate option", () => {
     render(<DeploymentConnectionCard t={createTranslator("en")} />);
 
-    expect(screen.getByRole("option", { name: "LAN HTTP (advanced/development)" })).toHaveValue(
+    expect(screen.getByRole("option", { name: "LAN HTTP (development only)" })).toHaveValue(
       "lan_http"
     );
   });

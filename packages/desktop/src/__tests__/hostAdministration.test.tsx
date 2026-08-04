@@ -181,9 +181,12 @@ afterEach(() => {
 
 describe("Agent Host settings", () => {
   it("shows only user-facing device and agent information", async () => {
-    render(<HostAdministrationSection t={createTranslator("en")} />);
+    const { container } = render(<HostAdministrationSection t={createTranslator("en")} />);
 
     expect(await screen.findByTestId("host-administration")).toBeInTheDocument();
+    expect(screen.getByTestId("deployment-connection")).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Tailscale private network/ })).toBeInTheDocument();
+    expect(container.querySelector('[data-slot="card"]')).not.toBeInTheDocument();
     expect(await screen.findByTestId("host-availability-status-host-1")).toHaveTextContent(
       "Offline"
     );
@@ -207,7 +210,6 @@ describe("Agent Host settings", () => {
     expect(screen.queryByTestId("host-admin-credential")).not.toBeInTheDocument();
     expect(screen.queryByTestId("host-admin-inventory")).not.toBeInTheDocument();
     expect(screen.queryByTestId("host-admin-member-setup")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("deployment-connection")).not.toBeInTheDocument();
   });
 
   it("shows friendly agent names while keeping profile IDs and capabilities private", async () => {

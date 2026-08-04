@@ -2,9 +2,8 @@ import type {
   OperatorHostAvailabilityReason,
   OperatorHostView
 } from "@planweave-ai/agent-host-protocol";
-import { MonitorIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
+import { RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { createTranslator } from "../i18n";
 
 type HostAvailabilityCardProps = {
@@ -45,49 +44,46 @@ export function HostAvailabilityCard({
   const activeHosts = hosts.filter((host) => !host.revokedAt);
 
   return (
-    <Card data-testid="host-availability">
-      <CardHeader>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <CardTitle>{t("hostAvailabilityTitle")}</CardTitle>
-            <CardDescription>{t("hostAvailabilityDescription")}</CardDescription>
-          </div>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            data-testid="host-availability-refresh"
-            disabled={loading}
-            onClick={onRefresh}
-          >
-            <RefreshCwIcon data-icon="inline-start" />
-            {t("hostAdminRefresh")}
-          </Button>
+    <section className="border-y border-border/70 py-8" data-testid="host-availability">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="max-w-3xl">
+          <h2 className="text-lg font-semibold tracking-[-0.01em] text-text-strong">
+            {t("hostAvailabilityTitle")}
+          </h2>
+          <p className="mt-1 text-sm leading-6 text-text-muted">
+            {t("hostAvailabilityDescription")}
+          </p>
         </div>
-      </CardHeader>
-      <CardContent>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          data-testid="host-availability-refresh"
+          disabled={loading}
+          onClick={onRefresh}
+        >
+          <RefreshCwIcon data-icon="inline-start" />
+          {t("hostAdminRefresh")}
+        </Button>
+      </div>
+      <div className="mt-5">
         {activeHosts.length === 0 ? (
-          <div
-            className="flex min-h-28 flex-col items-center justify-center rounded-lg border border-dashed border-border/80 bg-surface-muted/20 px-5 text-center"
-            data-testid="host-availability-empty"
-          >
-            <MonitorIcon className="mb-2 size-5 text-text-muted" aria-hidden="true" />
+          <div className="py-6" data-testid="host-availability-empty">
             <p className="text-sm font-medium text-text-strong">{t("hostAvailabilityEmpty")}</p>
-            <p className="mt-1 max-w-md text-xs leading-5 text-text-muted">
+            <p className="mt-1 max-w-xl text-xs leading-5 text-text-muted">
               {t("hostAvailabilityEmptyHint")}
             </p>
           </div>
         ) : (
-          <ul className="grid gap-3" aria-label={t("hostAvailabilityTitle")}>
+          <ul
+            className="divide-y divide-border/60 border-y border-border/60"
+            aria-label={t("hostAvailabilityTitle")}
+          >
             {activeHosts.map((host) => {
               const reason = availabilityReason(host);
               const agents = agentNames(host);
               return (
-                <li
-                  className="rounded-lg border border-border/80 bg-surface-muted/20 p-4"
-                  data-testid={`host-availability-${host.id}`}
-                  key={host.id}
-                >
+                <li className="py-4" data-testid={`host-availability-${host.id}`} key={host.id}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
@@ -111,13 +107,10 @@ export function HostAvailabilityCard({
                           {t(`hostAvailability_${reason}`)}
                         </span>
                       </div>
-                      <div className="mt-3 flex flex-wrap gap-1.5">
+                      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
                         {agents.length > 0 ? (
                           agents.map((agent) => (
-                            <span
-                              className="rounded-full border border-border/80 bg-background px-2.5 py-1 text-xs text-text-strong"
-                              key={agent}
-                            >
+                            <span className="text-xs text-text-strong" key={agent}>
                               {agent}
                             </span>
                           ))
@@ -151,7 +144,7 @@ export function HostAvailabilityCard({
             })}
           </ul>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 }

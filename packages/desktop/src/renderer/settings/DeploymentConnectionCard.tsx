@@ -17,7 +17,10 @@ import { Label } from "@/components/ui/label";
 import { collaborationBridge } from "../bridge";
 import type { createTranslator } from "../i18n";
 
-type Props = { t: ReturnType<typeof createTranslator> };
+type Props = {
+  t: ReturnType<typeof createTranslator>;
+  presentation?: "card" | "section";
+};
 
 function normalizedOrigin(value: string): string {
   return `${new URL(value.trim()).origin}/`;
@@ -52,7 +55,7 @@ function exposureErrorLabel(
   return t("deploymentServerStartFailed");
 }
 
-export function DeploymentConnectionCard({ t }: Props) {
+export function DeploymentConnectionCard({ t, presentation = "card" }: Props) {
   const [origin, setOrigin] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [mode, setMode] = useState<DesktopServerExposureMode>("local_only");
@@ -179,192 +182,205 @@ export function DeploymentConnectionCard({ t }: Props) {
     }
   };
 
+  const content = (
+    <div className="grid max-w-3xl gap-3">
+      <p className="text-xs text-text-muted">{t("deploymentBoundary")}</p>
+      <p className="text-xs text-text-muted">{t("deploymentPreConnection")}</p>
+      <div className="grid gap-3">
+        <div className="grid gap-1.5">
+          <Label htmlFor="deployment-topology">{t("deploymentTopology")}</Label>
+          <select
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+            data-testid="deployment-topology"
+            id="deployment-topology"
+            value={mode}
+            onChange={(event) => setMode(event.target.value as DesktopServerExposureMode)}
+          >
+            <option value="local_only">{t("deploymentLoopback")}</option>
+            <option value="tailscale_private">{t("deploymentTailscale")}</option>
+            <option value="custom_https">{t("deploymentCustomHttps")}</option>
+            <option value="lan_http">{t("deploymentLanAdvanced")}</option>
+          </select>
+        </div>
+        {mode === "custom_https" ? (
+          <>
+            <div className="grid gap-1.5">
+              <Label htmlFor="deployment-display-name">{t("deploymentDisplayName")}</Label>
+              <Input
+                id="deployment-display-name"
+                data-testid="deployment-display-name"
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="deployment-origin">{t("deploymentOrigin")}</Label>
+              <Input
+                id="deployment-origin"
+                data-testid="deployment-origin"
+                value={origin}
+                onChange={(event) => setOrigin(event.target.value)}
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="deployment-custom-topology">{t("deploymentCustomTopology")}</Label>
+              <select
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                data-testid="deployment-custom-topology"
+                id="deployment-custom-topology"
+                value={customTopology}
+                onChange={(event) => setCustomTopology(event.target.value as typeof customTopology)}
+              >
+                <option value="loopback_https">{t("deploymentLoopbackHttps")}</option>
+                <option value="lan_https">{t("deploymentLanHttps")}</option>
+                <option value="public_https">{t("deploymentPublicHttps")}</option>
+              </select>
+            </div>
+          </>
+        ) : null}
+      </div>
+      {mode === "local_only" ? (
+        <p className="text-xs text-text-muted">{t("deploymentLoopbackNote")}</p>
+      ) : null}
+      {mode === "tailscale_private" ? (
+        <p className="text-xs text-text-muted" data-testid="deployment-tailscale-note">
+          {t("deploymentTailscaleNote")}
+        </p>
+      ) : null}
+      {mode === "lan_http" ? (
+        <p className="text-xs text-destructive">{t("deploymentLanAdvancedNote")}</p>
+      ) : null}
+      {mode === "custom_https" ? (
+        <div className="grid gap-1 text-xs text-text-muted">
+          <p>{t("deploymentSystemTrustNote")}</p>
+          <p>{t("deploymentTopologySource")}</p>
+        </div>
+      ) : null}
+      {mode !== "custom_https" ? (
+        <Button
+          type="button"
+          size="sm"
+          className="w-fit"
+          disabled={busy !== null || exposure?.canActivate === false}
+          onClick={() => void activate()}
+        >
+          {t("deploymentActivate")}
+        </Button>
+      ) : null}
+      {exposure?.advertisedOrigin ? (
+        <p className="text-xs" data-testid="deployment-advertised-origin">
+          {t("deploymentAdvertisedOrigin")}: {exposure.advertisedOrigin}
+        </p>
+      ) : null}
+      {exposure?.errorCode ? (
+        <p
+          className="text-xs text-destructive"
+          data-testid="deployment-exposure-error"
+          data-error-code={exposure.errorCode}
+        >
+          {exposureErrorLabel(exposure.errorCode, t)}
+        </p>
+      ) : null}
+      {mode === "custom_https" ? (
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
+            disabled={!target || busy !== null}
+            onClick={() => void requestGuidance()}
+          >
+            {t("deploymentReview")}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={!target || busy !== null}
+            onClick={() => void validate()}
+          >
+            {t("deploymentValidate")}
+          </Button>
+        </div>
+      ) : null}
+      {guidance ? (
+        <div className="grid gap-1 rounded-md border p-3 text-xs" data-testid="deployment-guidance">
+          <div>{t("deploymentDurableState")}</div>
+          <div>{t("deploymentHealthcheck")}</div>
+          {guidance.handoff.state === "supported" ? (
+            <>
+              <code className="break-all">{guidance.handoff.preview}</code>
+              <p>
+                {t("deploymentMount")}: {guidance.handoff.projectsMountTarget}
+              </p>
+              <p>
+                {t("deploymentTrustedPath")}: {guidance.handoff.trustedProjectRootPattern}
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                className="w-fit"
+                disabled={busy !== null}
+                onClick={() => void copy()}
+              >
+                {t("deploymentCopy")}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="w-fit"
+                disabled={busy !== null}
+                onClick={() => void exportBundle()}
+              >
+                {t("deploymentExport")}
+              </Button>
+              <p className="text-text-muted">{t("deploymentExportInstructions")}</p>
+            </>
+          ) : (
+            <p>{t("deploymentLoopbackNote")}</p>
+          )}
+        </div>
+      ) : null}
+      {connectivity ? (
+        <p className="text-xs" data-testid="deployment-connectivity">
+          {t("deploymentConnectivity")}: {connectivityLabel(connectivity, t)}
+        </p>
+      ) : null}
+      {notice === "copied" ? (
+        <p className="text-xs" role="status">
+          {t("deploymentCopied")}
+        </p>
+      ) : null}
+      {notice === "exported" ? <p className="text-xs">{t("deploymentExported")}</p> : null}
+      {notice === "invalid" ? (
+        <p className="text-xs text-destructive" role="alert">
+          {t("deploymentInvalid")}
+        </p>
+      ) : null}
+    </div>
+  );
+
+  if (presentation === "section") {
+    return (
+      <section className="mt-7 border-t border-border/70 py-8" data-testid="deployment-connection">
+        <div className="mb-5 max-w-3xl">
+          <h2 className="text-lg font-semibold tracking-[-0.01em] text-text-strong">
+            {t("deploymentTitle")}
+          </h2>
+          <p className="mt-1 text-sm leading-6 text-text-muted">{t("deploymentDescription")}</p>
+        </div>
+        {content}
+      </section>
+    );
+  }
+
   return (
     <Card data-testid="deployment-connection">
       <CardHeader>
         <CardTitle>{t("deploymentTitle")}</CardTitle>
         <CardDescription>{t("deploymentDescription")}</CardDescription>
       </CardHeader>
-      <CardContent className="grid gap-3">
-        <p className="text-xs text-text-muted">{t("deploymentBoundary")}</p>
-        <p className="text-xs text-text-muted">{t("deploymentPreConnection")}</p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="grid gap-1.5">
-            <Label htmlFor="deployment-topology">{t("deploymentTopology")}</Label>
-            <select
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-              data-testid="deployment-topology"
-              id="deployment-topology"
-              value={mode}
-              onChange={(event) => setMode(event.target.value as DesktopServerExposureMode)}
-            >
-              <option value="local_only">{t("deploymentLoopback")}</option>
-              <option value="tailscale_private">{t("deploymentTailscale")}</option>
-              <option value="custom_https">{t("deploymentCustomHttps")}</option>
-              <option value="lan_http">{t("deploymentLanAdvanced")}</option>
-            </select>
-          </div>
-          {mode === "custom_https" ? (
-            <>
-              <div className="grid gap-1.5">
-                <Label htmlFor="deployment-display-name">{t("deploymentDisplayName")}</Label>
-                <Input
-                  id="deployment-display-name"
-                  data-testid="deployment-display-name"
-                  value={displayName}
-                  onChange={(event) => setDisplayName(event.target.value)}
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="deployment-origin">{t("deploymentOrigin")}</Label>
-                <Input
-                  id="deployment-origin"
-                  data-testid="deployment-origin"
-                  value={origin}
-                  onChange={(event) => setOrigin(event.target.value)}
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="deployment-custom-topology">{t("deploymentCustomTopology")}</Label>
-                <select
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-                  data-testid="deployment-custom-topology"
-                  id="deployment-custom-topology"
-                  value={customTopology}
-                  onChange={(event) =>
-                    setCustomTopology(event.target.value as typeof customTopology)
-                  }
-                >
-                  <option value="loopback_https">{t("deploymentLoopbackHttps")}</option>
-                  <option value="lan_https">{t("deploymentLanHttps")}</option>
-                  <option value="public_https">{t("deploymentPublicHttps")}</option>
-                </select>
-              </div>
-            </>
-          ) : null}
-        </div>
-        {mode === "local_only" ? (
-          <p className="text-xs text-text-muted">{t("deploymentLoopbackNote")}</p>
-        ) : null}
-        {mode === "tailscale_private" ? (
-          <p className="text-xs text-text-muted" data-testid="deployment-tailscale-note">
-            {t("deploymentTailscaleNote")}
-          </p>
-        ) : null}
-        {mode === "lan_http" ? (
-          <p className="text-xs text-destructive">{t("deploymentLanAdvancedNote")}</p>
-        ) : null}
-        {mode === "custom_https" ? (
-          <div className="grid gap-1 text-xs text-text-muted">
-            <p>{t("deploymentSystemTrustNote")}</p>
-            <p>{t("deploymentTopologySource")}</p>
-          </div>
-        ) : null}
-        {mode !== "custom_https" ? (
-          <Button
-            type="button"
-            size="sm"
-            className="w-fit"
-            disabled={busy !== null || exposure?.canActivate === false}
-            onClick={() => void activate()}
-          >
-            {t("deploymentActivate")}
-          </Button>
-        ) : null}
-        {exposure?.advertisedOrigin ? (
-          <p className="text-xs" data-testid="deployment-advertised-origin">
-            {t("deploymentAdvertisedOrigin")}: {exposure.advertisedOrigin}
-          </p>
-        ) : null}
-        {exposure?.errorCode ? (
-          <p
-            className="text-xs text-destructive"
-            data-testid="deployment-exposure-error"
-            data-error-code={exposure.errorCode}
-          >
-            {exposureErrorLabel(exposure.errorCode, t)}
-          </p>
-        ) : null}
-        {mode === "custom_https" ? (
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              size="sm"
-              disabled={!target || busy !== null}
-              onClick={() => void requestGuidance()}
-            >
-              {t("deploymentReview")}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={!target || busy !== null}
-              onClick={() => void validate()}
-            >
-              {t("deploymentValidate")}
-            </Button>
-          </div>
-        ) : null}
-        {guidance ? (
-          <div
-            className="grid gap-1 rounded-md border p-3 text-xs"
-            data-testid="deployment-guidance"
-          >
-            <div>{t("deploymentDurableState")}</div>
-            <div>{t("deploymentHealthcheck")}</div>
-            {guidance.handoff.state === "supported" ? (
-              <>
-                <code className="break-all">{guidance.handoff.preview}</code>
-                <p>
-                  {t("deploymentMount")}: {guidance.handoff.projectsMountTarget}
-                </p>
-                <p>
-                  {t("deploymentTrustedPath")}: {guidance.handoff.trustedProjectRootPattern}
-                </p>
-                <Button
-                  type="button"
-                  size="sm"
-                  className="w-fit"
-                  disabled={busy !== null}
-                  onClick={() => void copy()}
-                >
-                  {t("deploymentCopy")}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="w-fit"
-                  disabled={busy !== null}
-                  onClick={() => void exportBundle()}
-                >
-                  {t("deploymentExport")}
-                </Button>
-                <p className="text-text-muted">{t("deploymentExportInstructions")}</p>
-              </>
-            ) : (
-              <p>{t("deploymentLoopbackNote")}</p>
-            )}
-          </div>
-        ) : null}
-        {connectivity ? (
-          <p className="text-xs" data-testid="deployment-connectivity">
-            {t("deploymentConnectivity")}: {connectivityLabel(connectivity, t)}
-          </p>
-        ) : null}
-        {notice === "copied" ? (
-          <p className="text-xs" role="status">
-            {t("deploymentCopied")}
-          </p>
-        ) : null}
-        {notice === "exported" ? <p className="text-xs">{t("deploymentExported")}</p> : null}
-        {notice === "invalid" ? (
-          <p className="text-xs text-destructive" role="alert">
-            {t("deploymentInvalid")}
-          </p>
-        ) : null}
-      </CardContent>
+      <CardContent>{content}</CardContent>
     </Card>
   );
 }

@@ -1,6 +1,5 @@
-import { ClipboardCopyIcon, PlusIcon } from "lucide-react";
+import { ClipboardCopyIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type {
   OperatorHostBootstrapHandoffView,
   OperatorProfileView
@@ -41,17 +40,22 @@ export function HostBootstrapCard({
   );
 
   return (
-    <Card data-testid="host-admin-bootstrap" data-handoff-state={resolvedHandoffState}>
-      <CardHeader>
-        <div className="flex size-9 items-center justify-center rounded-lg bg-state-selected-surface text-text-strong">
-          <PlusIcon className="size-4" aria-hidden="true" />
-        </div>
-        <CardTitle>{t("hostAdminBootstrapTitle")}</CardTitle>
-        <CardDescription>{t("hostAdminBootstrapDescription")}</CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-3">
+    <section
+      className="border-t border-border/70 py-8"
+      data-testid="host-admin-bootstrap"
+      data-handoff-state={resolvedHandoffState}
+    >
+      <div className="max-w-3xl">
+        <h2 className="text-lg font-semibold tracking-[-0.01em] text-text-strong">
+          {t("hostAdminBootstrapTitle")}
+        </h2>
+        <p className="mt-1 text-sm leading-6 text-text-muted">
+          {t("hostAdminBootstrapDescription")}
+        </p>
+      </div>
+      <div className="mt-5 grid max-w-3xl gap-3">
         {!canCreate && !busy ? (
-          <p className="rounded-lg border border-border/70 bg-surface-muted/30 px-3 py-2 text-xs leading-5 text-text-muted">
+          <p className="border-l-2 border-border pl-3 text-xs leading-5 text-text-muted">
             {t("hostAdminBootstrapSecureCoordinator")}
           </p>
         ) : null}
@@ -80,7 +84,7 @@ export function HostBootstrapCard({
         ) : null}
         {handoff ? (
           <div
-            className="grid gap-2 rounded-lg border border-emerald-500/35 bg-emerald-500/10 p-3"
+            className="grid gap-2 border-l-2 border-emerald-500 pl-3"
             data-testid="host-admin-grant-once"
             role="status"
           >
@@ -108,7 +112,7 @@ export function HostBootstrapCard({
         ) : (
           <p className="text-xs leading-5 text-text-muted">{t("hostAdminBootstrapBoundary")}</p>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 }

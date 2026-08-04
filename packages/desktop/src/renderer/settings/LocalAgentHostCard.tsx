@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
-import { LaptopIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type {
   OperatorLocalAgentHostStatus,
   OperatorProfileView
@@ -57,15 +55,16 @@ export function LocalAgentHostCard({
   const canRegisterDirectly = status?.state === "not_registered" && hasDirectRegistration;
 
   return (
-    <Card data-testid="host-admin-local-agent-host">
-      <CardHeader>
-        <div className="flex size-9 items-center justify-center rounded-lg bg-state-selected-surface text-text-strong">
-          <LaptopIcon className="size-4" aria-hidden="true" />
-        </div>
-        <CardTitle>{t("hostAdminLocalHostTitle")}</CardTitle>
-        <CardDescription>{t("hostAdminLocalHostDescription")}</CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-3">
+    <section className="border-t border-border/70 py-8" data-testid="host-admin-local-agent-host">
+      <div className="max-w-3xl">
+        <h2 className="text-lg font-semibold tracking-[-0.01em] text-text-strong">
+          {t("hostAdminLocalHostTitle")}
+        </h2>
+        <p className="mt-1 text-sm leading-6 text-text-muted">
+          {t("hostAdminLocalHostDescription")}
+        </p>
+      </div>
+      <div className="mt-5 grid max-w-3xl gap-4">
         {loading ? <p className="text-sm text-text-muted">{t("hostAdminLoading")}</p> : null}
         {status && !status.supported ? (
           <p className="text-sm text-text-muted" data-testid="host-admin-local-unsupported">
@@ -86,10 +85,10 @@ export function LocalAgentHostCard({
                   ? t("hostAdminLocalHostSetupRequired")
                   : t("hostAdminLocalHostNotRegistered")}
             </p>
-            <div className="grid gap-2">
+            <div className="divide-y divide-border/60 border-y border-border/60">
               {status.agents.map((agent) => (
                 <label
-                  className="flex items-center justify-between gap-3 text-sm"
+                  className="flex items-center justify-between gap-3 py-3 text-sm"
                   key={agent.profileId}
                 >
                   <span>
@@ -143,7 +142,7 @@ export function LocalAgentHostCard({
             ) : null}
           </>
         ) : null}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 }
