@@ -179,8 +179,8 @@ export function LocalCollaborationServerPanel({
       : running
         ? t("localServerRunning")
         : t("localServerStopped");
-  const remoteInvitationAvailable =
-    serverExposure?.canInvite === true && serverExposure.advertisedOrigin !== null;
+  const invitationPreparationAvailable =
+    running && invitationScope !== null && serverExposure?.advertisedOrigin != null;
 
   const toggleScope = (scope: LocalCollaborationScope) => {
     const key = scopeKey(scope);
@@ -269,7 +269,7 @@ export function LocalCollaborationServerPanel({
         </div>
       </div>
 
-      {remoteInvitationAvailable ? (
+      {invitationPreparationAvailable ? (
         <div className="border-t border-border/70 px-1 py-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">

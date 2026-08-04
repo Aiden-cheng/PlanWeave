@@ -482,6 +482,40 @@ describe("LocalCollaborationServerPanel", () => {
     expect(collaborationApi.registerLocalCollaborationCurrentProject).toHaveBeenCalledTimes(1);
   });
 
+  it("shows the invitation action before a hosted canvas becomes the active route", async () => {
+    const collaborationApi = api({
+      getLocalCollaborationServerStatus: vi.fn().mockResolvedValue({
+        profile,
+        state: "running",
+        startedAt: "2030-01-01T00:00:00.000Z",
+        reason: null,
+        lanSharingEnabled: false,
+        lanServerBaseUrl: null
+      })
+    });
+
+    render(
+      <LocalCollaborationServerPanelHarness
+        api={collaborationApi}
+        t={createTranslator("en")}
+        projectId="another-project"
+        canvasId="another-canvas"
+        scopeLayout={expandedScopeLayout}
+        onScopeLayoutChange={onScopeLayoutChange}
+        copyText={copyText}
+        serverExposure={{ ...remoteServerExposure, canInvite: false }}
+      />
+    );
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Create complete invitation" })
+    );
+    expect(collaborationApi.registerLocalCollaborationCurrentProject).toHaveBeenCalledWith({
+      selection: { projectId: "desktop-project-1", canvasId: "canvas-1" }
+    });
+    expect(collaborationApi.createCollaborationInvitationHandoff).toHaveBeenCalledOnce();
+  });
+
   it("shows localized guidance instead of a raw rate-limit error", async () => {
     const collaborationApi = api({
       getLocalCollaborationServerStatus: vi.fn().mockResolvedValue({
