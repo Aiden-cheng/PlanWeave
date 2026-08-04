@@ -41,20 +41,21 @@ async function config(command = process.execPath) {
 }
 
 describe("Agent exposure allowlist", () => {
-  it("migrates configured legacy profiles once to a durable explicit allowlist", async () => {
+  it("initializes a missing allowlist as empty instead of exposing configured profiles", async () => {
     const value = await config();
-    await expect(readExposedAgentProfileIds(value)).resolves.toEqual(["custom-acp"]);
+    await expect(readExposedAgentProfileIds(value)).resolves.toEqual([]);
     await expect(
       readFile(join(value.dataDirectory, "agent-exposure.json"), "utf8")
-    ).resolves.toContain('"custom-acp"');
+    ).resolves.toContain('"profileIds": []');
     const restartedConfig = parseAgentHostConfig(JSON.parse(JSON.stringify(value)));
-    await expect(readExposedAgentProfileIds(restartedConfig)).resolves.toEqual(["custom-acp"]);
+    await expect(readExposedAgentProfileIds(restartedConfig)).resolves.toEqual([]);
   });
 
-  it("hides a migrated custom profile even after its binary has been uninstalled", async () => {
+  it("hides an explicitly exposed custom profile even after its binary has been uninstalled", async () => {
     const value = await config("/missing/custom-acp");
     const configPath = join(value.dataDirectory, "config.json");
     await writePrivateJsonFile(configPath, value);
+    await writeExposedAgentProfileIds(value, ["custom-acp"]);
     await expect(readExposedAgentProfileIds(value)).resolves.toEqual(["custom-acp"]);
 
     await expect(
@@ -124,7 +125,12 @@ describe("Agent exposure allowlist", () => {
     );
     await expect(operator.listAgents(configPath)).resolves.toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ profileId: "codex-acp", detected: true, ready: true })
+        expect.objectContaining({
+          profileId: "codex-acp",
+          detected: true,
+          exposed: false,
+          ready: false
+        })
       ])
     );
 

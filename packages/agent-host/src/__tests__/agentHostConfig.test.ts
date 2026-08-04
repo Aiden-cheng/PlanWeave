@@ -119,7 +119,9 @@ describe("Agent Host configuration", () => {
   it("reports only redacted local readiness facts", async () => {
     const { directory, workspaceRoot } = await setup();
     const config = parseAgentHostConfig(input(directory, workspaceRoot));
-    await expect(observeHostReadiness(config, { SAFE_API_KEY: "present" })).resolves.toEqual({
+    await expect(
+      observeHostReadiness(config, { SAFE_API_KEY: "present" }, ["acp.test"])
+    ).resolves.toEqual({
       workspaceMappings: [{ workspaceId: "workspace.core", status: "ready" }],
       acpProfiles: [
         {
@@ -131,7 +133,7 @@ describe("Agent Host configuration", () => {
         }
       ]
     });
-    await expect(observeHostReadiness(config, {})).resolves.toMatchObject({
+    await expect(observeHostReadiness(config, {}, ["acp.test"])).resolves.toMatchObject({
       acpProfiles: [{ profileId: "acp.test", status: "invalid" }]
     });
   });

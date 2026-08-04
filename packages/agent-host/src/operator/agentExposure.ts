@@ -31,9 +31,8 @@ export async function readExposedAgentProfileIds(config: AgentHostConfig): Promi
     input = await readFile(exposurePath(config), "utf8");
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-      const profileIds = config.agentProfiles.map((profile) => profile.id);
-      await writeExposedAgentProfileIds(config, profileIds);
-      return profileIds;
+      await writeExposedAgentProfileIds(config, []);
+      return [];
     }
     throw new Error("agent_host_exposure_config_invalid", { cause: error });
   }

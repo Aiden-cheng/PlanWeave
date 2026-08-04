@@ -23,8 +23,8 @@ function observationStatus(error: unknown): "missing" | "invalid" {
  */
 export async function observeHostReadiness(
   config: AgentHostConfig,
-  environment: Readonly<Record<string, string | undefined>> = process.env,
-  exposedProfileIds: readonly string[] = config.agentProfiles.map((profile) => profile.id)
+  environment: Readonly<Record<string, string | undefined>>,
+  exposedProfileIds: readonly string[]
 ): Promise<HostReadinessObservation> {
   const workspaces = new ConfiguredWorkspaceResolver(config);
   const profiles = new ConfiguredAcpProfileResolver(config, environment);
