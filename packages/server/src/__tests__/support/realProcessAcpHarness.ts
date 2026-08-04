@@ -407,6 +407,7 @@ export class RealProcessAcpHarness {
   readonly hostDisplayName: string;
   readonly hostCapacity: number;
   readonly hostCapabilities: readonly string[];
+  readonly hostAgentProfileId: string;
   readonly graceMs: number;
 
   private server: ManagedChild | undefined;
@@ -431,6 +432,7 @@ export class RealProcessAcpHarness {
     hostDisplayName: string;
     hostCapacity: number;
     hostCapabilities: readonly string[];
+    hostAgentProfileId: string;
     graceMs: number;
     ownedRoots: string[];
   }) {
@@ -444,6 +446,7 @@ export class RealProcessAcpHarness {
     this.hostDisplayName = init.hostDisplayName;
     this.hostCapacity = init.hostCapacity;
     this.hostCapabilities = init.hostCapabilities;
+    this.hostAgentProfileId = init.hostAgentProfileId;
     this.graceMs = init.graceMs;
     this.ownedRoots = init.ownedRoots;
     this.acpControl = new FakeAcpControl(init.paths.control);
@@ -580,6 +583,7 @@ export class RealProcessAcpHarness {
       hostDisplayName,
       hostCapacity,
       hostCapabilities,
+      hostAgentProfileId: hostAgentProfile.id,
       graceMs,
       ownedRoots
     });
@@ -845,9 +849,13 @@ export class RealProcessAcpHarness {
     };
   }
 
-  private async exposeCodexProfile(configPath: string, errorCode: string): Promise<void> {
+  private async exposeProfile(
+    configPath: string,
+    profileId: string,
+    errorCode: string
+  ): Promise<void> {
     const result = await this.runHostCommand(
-      ["agents", "expose", "codex-acp", "--config", configPath],
+      ["agents", "expose", profileId, "--config", configPath],
       { PATH: this.paths.agentBin, PATHEXT: ".CMD" }
     );
     if (result.code !== 0) {
@@ -889,8 +897,9 @@ export class RealProcessAcpHarness {
         `real_process_harness_enroll_failed:${enrollment.code}\n${enrollment.stderr}\n${this.diagnostics()}`
       );
     }
-    await this.exposeCodexProfile(
+    await this.exposeProfile(
       this.paths.hostConfig,
+      this.hostAgentProfileId,
       "real_process_harness_agent_expose_failed"
     );
     this.enrolled = true;
@@ -1029,7 +1038,11 @@ export class RealProcessAcpHarness {
         `real_process_harness_secondary_enroll_failed:${enrollment.code}\n${enrollment.stderr}\n${this.diagnostics()}`
       );
     }
-    await this.exposeCodexProfile(configPath, "real_process_harness_secondary_agent_expose_failed");
+    await this.exposeProfile(
+      configPath,
+      "codex-acp",
+      "real_process_harness_secondary_agent_expose_failed"
+    );
     const entry = this.secondaryHosts.get(key)!;
     entry.enrolled = true;
     entry.child = this.spawnLongLived(
