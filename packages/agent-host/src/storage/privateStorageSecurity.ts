@@ -25,25 +25,26 @@ export class WindowsPrivateStorageSecurity implements PrivateStorageSecurityPort
 
   async prepareDirectory(path: string): Promise<void> {
     await mkdir(path, { recursive: true });
-    const sid = await this.currentUserSid();
-    await this.runner("icacls.exe", [
-      path,
-      "/inheritance:r",
-      "/grant:r",
-      `*${sid}:(OI)(CI)F`,
-      "*S-1-5-32-544:(OI)(CI)F"
-    ]);
+    await this.replaceAccessControl(path, "directory");
   }
 
   async secureFile(path: string): Promise<void> {
+    await this.replaceAccessControl(path, "file");
+  }
+
+  private async replaceAccessControl(path: string, kind: "directory" | "file"): Promise<void> {
     const sid = await this.currentUserSid();
-    await this.runner("icacls.exe", [
-      path,
-      "/inheritance:r",
-      "/grant:r",
-      `*${sid}:F`,
-      "*S-1-5-32-544:F"
-    ]);
+    await this.runner(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", REPLACE_ACCESS_CONTROL_SCRIPT],
+      {
+        environment: {
+          PLANWEAVE_PRIVATE_STORAGE_PATH: path,
+          PLANWEAVE_PRIVATE_STORAGE_SID: sid,
+          PLANWEAVE_PRIVATE_STORAGE_KIND: kind
+        }
+      }
+    );
   }
 
   private async currentUserSid(): Promise<string> {
@@ -53,6 +54,17 @@ export class WindowsPrivateStorageSecurity implements PrivateStorageSecurityPort
     return match[0];
   }
 }
+
+const REPLACE_ACCESS_CONTROL_SCRIPT = [
+  "$ErrorActionPreference='Stop';",
+  "$path=$env:PLANWEAVE_PRIVATE_STORAGE_PATH;",
+  "$sid=$env:PLANWEAVE_PRIVATE_STORAGE_SID;",
+  "$flags=if($env:PLANWEAVE_PRIVATE_STORAGE_KIND -eq 'directory'){'OICI'}else{''};",
+  "$sddl='D:P(A;'+$flags+';FA;;;'+$sid+')(A;'+$flags+';FA;;;S-1-5-32-544)';",
+  "$acl=Get-Acl -LiteralPath $path;",
+  "$acl.SetSecurityDescriptorSddlForm($sddl,[System.Security.AccessControl.AccessControlSections]::Access);",
+  "Set-Acl -LiteralPath $path -AclObject $acl"
+].join("");
 
 export function createPrivateStorageSecurity(
   platform: NodeJS.Platform = process.platform

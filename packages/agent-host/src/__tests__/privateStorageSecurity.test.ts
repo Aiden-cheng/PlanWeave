@@ -69,20 +69,41 @@ describe("private storage security port", () => {
     const path = join(root, "private", "config.json");
     await writePrivateJsonFile(path, { safe: true }, security);
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ safe: true });
-    expect(runner).toHaveBeenNthCalledWith(2, "icacls.exe", [
-      join(root, "private"),
-      "/inheritance:r",
-      "/grant:r",
-      "*S-1-5-21-123:(OI)(CI)F",
-      "*S-1-5-32-544:(OI)(CI)F"
-    ]);
-    expect(runner).toHaveBeenNthCalledWith(4, "icacls.exe", [
-      path,
-      "/inheritance:r",
-      "/grant:r",
-      "*S-1-5-21-123:F",
-      "*S-1-5-32-544:F"
-    ]);
+    expect(runner).toHaveBeenNthCalledWith(
+      2,
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        expect.stringContaining("SetSecurityDescriptorSddlForm")
+      ],
+      {
+        environment: {
+          PLANWEAVE_PRIVATE_STORAGE_PATH: join(root, "private"),
+          PLANWEAVE_PRIVATE_STORAGE_SID: "S-1-5-21-123",
+          PLANWEAVE_PRIVATE_STORAGE_KIND: "directory"
+        }
+      }
+    );
+    expect(runner.mock.calls[1]?.[1]?.[3]).toContain("D:P");
+    expect(runner).toHaveBeenNthCalledWith(
+      4,
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        expect.stringContaining("SetSecurityDescriptorSddlForm")
+      ],
+      {
+        environment: {
+          PLANWEAVE_PRIVATE_STORAGE_PATH: path,
+          PLANWEAVE_PRIVATE_STORAGE_SID: "S-1-5-21-123",
+          PLANWEAVE_PRIVATE_STORAGE_KIND: "file"
+        }
+      }
+    );
   });
 
   it("passes paths with shell metacharacters as a single fixed argument", async () => {
@@ -96,13 +117,23 @@ describe("private storage security port", () => {
     await security.secureFile(path);
 
     expect(runner).toHaveBeenNthCalledWith(1, "whoami.exe", ["/user", "/fo", "csv", "/nh"]);
-    expect(runner).toHaveBeenNthCalledWith(2, "icacls.exe", [
-      path,
-      "/inheritance:r",
-      "/grant:r",
-      "*S-1-5-21-123:F",
-      "*S-1-5-32-544:F"
-    ]);
+    expect(runner).toHaveBeenNthCalledWith(
+      2,
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        expect.stringContaining("SetSecurityDescriptorSddlForm")
+      ],
+      {
+        environment: {
+          PLANWEAVE_PRIVATE_STORAGE_PATH: path,
+          PLANWEAVE_PRIVATE_STORAGE_SID: "S-1-5-21-123",
+          PLANWEAVE_PRIVATE_STORAGE_KIND: "file"
+        }
+      }
+    );
   });
 
   it("uses the same security port for credential directory and final credential file", async () => {
@@ -125,5 +156,32 @@ describe("private storage security port", () => {
     );
     expect(runner).toHaveBeenCalledTimes(4);
     expect(JSON.stringify(runner.mock.calls)).not.toContain("pw_host_");
+  });
+
+  it("reapplies the private directory policy before writing into an existing directory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-private-existing-"));
+    directories.push(root);
+    const directory = join(root, "credentials");
+    await mkdir(directory, { recursive: true });
+    const prepareDirectory = vi.fn();
+    const security: PrivateStorageSecurityPort = {
+      permissionModel: "windows-acl",
+      prepareDirectory,
+      secureFile: vi.fn()
+    };
+    const store = new FileHostCredentialStore(join(directory, "credentials.json"), security);
+
+    await store.begin(
+      {
+        kind: "host_enrollment_code",
+        enrollmentAttemptId: "attempt-existing",
+        enrollmentCode: `pw_enroll_${"c".repeat(43)}`,
+        credentialToken: `pw_host_${"d".repeat(43)}`,
+        createdAt: "2029-01-01T00:00:00.000Z"
+      },
+      false
+    );
+
+    expect(prepareDirectory).toHaveBeenCalledWith(directory);
   });
 });

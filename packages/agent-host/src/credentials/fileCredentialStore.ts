@@ -47,8 +47,11 @@ export class FileHostCredentialStore {
 
   async read(): Promise<HostCredentialDocument | null> {
     try {
-      await secureMetadata(dirname(this.path), "directory", this.security.permissionModel);
+      const directory = dirname(this.path);
+      await secureMetadata(directory, "directory", this.security.permissionModel);
       await secureMetadata(this.path, "file", this.security.permissionModel);
+      await this.security.prepareDirectory(directory);
+      await this.security.secureFile(this.path);
       return hostCredentialDocumentSchema.parse(JSON.parse(await readFile(this.path, "utf8")));
     } catch (error) {
       if (missing(error)) return null;
@@ -152,13 +155,8 @@ export class FileHostCredentialStore {
   private async write(document: HostCredentialDocument): Promise<void> {
     const parsed = hostCredentialDocumentSchema.parse(document);
     const directory = dirname(this.path);
-    try {
-      await secureMetadata(directory, "directory", this.security.permissionModel);
-    } catch (error) {
-      if (!missing(error)) throw error;
-      await this.security.prepareDirectory(directory);
-      await secureMetadata(directory, "directory", this.security.permissionModel);
-    }
+    await this.security.prepareDirectory(directory);
+    await secureMetadata(directory, "directory", this.security.permissionModel);
     try {
       await secureMetadata(this.path, "file", this.security.permissionModel);
     } catch (error) {

@@ -30,13 +30,17 @@ export class ConfiguredWorkspaceResolver implements AgentHostWorkspaceResolver {
 export class ConfiguredAcpProfileResolver implements AgentHostAcpProfileResolver {
   constructor(
     private readonly config: AgentHostConfig,
-    private readonly environment: Readonly<Record<string, string | undefined>> = process.env
+    private readonly environment: Readonly<Record<string, string | undefined>> = process.env,
+    private readonly isProfileExposed?: (agentProfileId: string) => Promise<boolean>
   ) {}
 
   async resolve(agentProfileId: string, agentId: string): Promise<ResolvedAgentHostAcpProfile> {
     const profile = this.config.agentProfiles.find((candidate) => candidate.id === agentProfileId);
     if (!profile || profile.agentId !== agentId)
       throw new Error("agent_host_profile_not_configured");
+    if (this.isProfileExposed && !(await this.isProfileExposed(agentProfileId))) {
+      throw new Error("agent_host_profile_not_exposed");
+    }
     const command = await realpath(profile.command);
     await access(command, constants.X_OK);
     const env: Record<string, string> = {};

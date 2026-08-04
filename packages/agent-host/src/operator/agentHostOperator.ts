@@ -501,7 +501,7 @@ export class AgentHostOperator {
 
   async restartBackground(configPath: string): Promise<AgentHostBackgroundResult> {
     const service = this.requireBackgroundService();
-    const workspaceId = await this.backgroundIdentity(configPath);
+    const workspaceId = await this.usableBackgroundIdentity(configPath);
     return service.restart(workspaceId);
   }
 
@@ -538,7 +538,12 @@ export class AgentHostOperator {
       const interactionRelay = new DurableAcpInteractionRelay(state);
       const executor = new RemoteAcpExecutor({
         workspaceResolver: new ConfiguredWorkspaceResolver(config),
-        profileResolver: new ConfiguredAcpProfileResolver(config),
+        profileResolver: new ConfiguredAcpProfileResolver(
+          config,
+          process.env,
+          async (agentProfileId) =>
+            (await readExposedAgentProfileIds(config)).includes(agentProfileId)
+        ),
         outbox: state,
         interactionResponder: interactionRelay,
         hostCapabilities: config.host.capabilities
@@ -637,11 +642,18 @@ export class AgentHostOperator {
     config: AgentHostConfig
   ): Promise<"restarted" | "restart_required"> {
     if (!this.backgroundService) return "restart_required";
-    const credential = await credentialStore(config).read();
-    if (!credential?.active) return "restart_required";
-    const status = await this.backgroundService.status(credential.active.workspaceId);
+    let workspaceId: string;
+    try {
+      workspaceId = (await credentialStore(config).requireUsable()).workspaceId;
+    } catch (error) {
+      if (error instanceof Error && error.message === "agent_host_credential_unavailable") {
+        return "restart_required";
+      }
+      throw error;
+    }
+    const status = await this.backgroundService.status(workspaceId);
     if (status.state !== "running") return "restart_required";
-    await this.backgroundService.restart(credential.active.workspaceId);
+    await this.backgroundService.restart(workspaceId);
     return "restarted";
   }
 
@@ -655,5 +667,10 @@ export class AgentHostOperator {
     const document = await credentialStore(config).read();
     if (!document?.active) throw new Error("agent_host_background_identity_unavailable");
     return document.active.workspaceId;
+  }
+
+  private async usableBackgroundIdentity(configPath: string): Promise<string> {
+    const config = await loadAgentHostConfig(configPath);
+    return (await credentialStore(config).requireUsable()).workspaceId;
   }
 }

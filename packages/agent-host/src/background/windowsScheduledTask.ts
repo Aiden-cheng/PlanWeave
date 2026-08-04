@@ -31,6 +31,20 @@ function processErrorCode(error: unknown): number | undefined {
     : undefined;
 }
 
+const QUERY_TASK_STATE_SCRIPT = [
+  "$ErrorActionPreference='Stop';",
+  "$task=Get-ScheduledTask -TaskName $env:PLANWEAVE_AGENT_HOST_TASK_NAME;",
+  "[Console]::Out.Write([int]$task.State)"
+].join("");
+
+function taskState(stdout: string): "running" | "stopped" {
+  const state = Number.parseInt(stdout.trim(), 10);
+  if (!Number.isInteger(state) || state < 0 || state > 4) {
+    throw new Error("agent_host_background_task_state_invalid");
+  }
+  return state === 4 ? "running" : "stopped";
+}
+
 export class WindowsScheduledTaskService implements AgentHostBackgroundService {
   constructor(private readonly runner: FixedArgvRunner = runFixedArgv) {}
 
@@ -68,7 +82,7 @@ export class WindowsScheduledTaskService implements AgentHostBackgroundService {
 
   async status(workspaceId: string): Promise<AgentHostBackgroundResult> {
     try {
-      const result = await this.runner("schtasks.exe", [
+      await this.runner("schtasks.exe", [
         "/Query",
         "/TN",
         taskName(workspaceId),
@@ -76,16 +90,25 @@ export class WindowsScheduledTaskService implements AgentHostBackgroundService {
         "CSV",
         "/NH"
       ]);
-      return {
-        state: /running/i.test(result.stdout) ? "running" : "stopped",
-        platform: "windows-scheduled-task"
-      };
     } catch (error) {
       if (processErrorCode(error) === 1) {
         return { state: "not_installed", platform: "windows-scheduled-task" };
       }
       throw error;
     }
+    const result = await this.runner(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", QUERY_TASK_STATE_SCRIPT],
+      {
+        environment: {
+          PLANWEAVE_AGENT_HOST_TASK_NAME: taskName(workspaceId)
+        }
+      }
+    );
+    return {
+      state: taskState(result.stdout),
+      platform: "windows-scheduled-task"
+    };
   }
 
   async restart(workspaceId: string): Promise<AgentHostBackgroundResult> {

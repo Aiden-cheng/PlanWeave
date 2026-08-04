@@ -1,7 +1,8 @@
-import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ConfiguredAcpProfileResolver } from "../config/resolvers.js";
 import { parseAgentHostConfig } from "../config/schema.js";
 import { writePrivateJsonFile } from "../config/privateConfigWriter.js";
 import { AgentHostOperator } from "../operator/agentHostOperator.js";
@@ -67,6 +68,28 @@ describe("Agent exposure allowlist", () => {
     );
   });
 
+  it("enforces exposure dynamically at execution resolution without a daemon restart", async () => {
+    const value = await config();
+    const resolver = new ConfiguredAcpProfileResolver(value, process.env, async (agentProfileId) =>
+      (await readExposedAgentProfileIds(value)).includes(agentProfileId)
+    );
+
+    await writeExposedAgentProfileIds(value, []);
+    await expect(resolver.resolve("custom-acp", "custom")).rejects.toThrow(
+      "agent_host_profile_not_exposed"
+    );
+
+    await writeExposedAgentProfileIds(value, ["custom-acp"]);
+    await expect(resolver.resolve("custom-acp", "custom")).resolves.toMatchObject({
+      agentId: "custom"
+    });
+
+    await writeExposedAgentProfileIds(value, []);
+    await expect(resolver.resolve("custom-acp", "custom")).rejects.toThrow(
+      "agent_host_profile_not_exposed"
+    );
+  });
+
   it("lists only safe supported registry metadata", async () => {
     const value = await config();
     await writeExposedAgentProfileIds(value, []);
@@ -123,5 +146,43 @@ describe("Agent exposure allowlist", () => {
     expect(() => requireSupportedAgentProfile("custom-acp")).toThrow(
       "agent_host_agent_profile_unsupported"
     );
+  });
+
+  it("does not restart the background task after a credential is revoked", async () => {
+    const value = await config();
+    const configPath = join(value.dataDirectory, "config.json");
+    await writePrivateJsonFile(configPath, value);
+    await mkdir(value.dataDirectory, { recursive: true, mode: 0o700 });
+    await writePrivateJsonFile(join(value.dataDirectory, "credentials.json"), {
+      version: "agent-host-credentials/v1",
+      active: {
+        hostId: "host-revoked",
+        workspaceId: "workspace-revoked",
+        credentialToken: `pw_host_${"a".repeat(43)}`,
+        issuedAt: "2029-01-01T00:00:00.000Z",
+        expiresAt: "2030-01-01T00:00:00.000Z",
+        revokedAt: "2029-01-02T00:00:00.000Z"
+      }
+    });
+    const background = {
+      install: vi.fn(),
+      uninstall: vi.fn(),
+      status: vi.fn().mockResolvedValue({
+        state: "running",
+        platform: "linux-systemd-user"
+      }),
+      restart: vi.fn(),
+      logs: vi.fn()
+    };
+
+    const operator = new AgentHostOperator(background);
+    await expect(operator.restartBackground(configPath)).rejects.toThrow(
+      "agent_host_credential_unavailable"
+    );
+    await expect(operator.hideAgent(configPath, "custom-acp")).resolves.toMatchObject({
+      reload: "restart_required"
+    });
+    expect(background.status).not.toHaveBeenCalled();
+    expect(background.restart).not.toHaveBeenCalled();
   });
 });

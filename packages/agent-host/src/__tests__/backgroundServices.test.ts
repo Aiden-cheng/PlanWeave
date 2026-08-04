@@ -120,8 +120,10 @@ describe("Agent Host background adapters", () => {
     const root = await mkdtemp(join(tmpdir(), "planweave-systemd-lifecycle-"));
     directories.push(root);
     const unitPath = join(root, "planweave-agent-host-workspace-1.service");
-    await new LinuxUserSystemdService(vi.fn().mockResolvedValue({ stdout: "", stderr: "" }), root)
-      .install(install);
+    await new LinuxUserSystemdService(
+      vi.fn().mockResolvedValue({ stdout: "", stderr: "" }),
+      root
+    ).install(install);
     const runner = vi.fn().mockResolvedValue({ stdout: "active\n", stderr: "" });
     const service = new LinuxUserSystemdService(runner, root);
 
@@ -143,20 +145,20 @@ describe("Agent Host background adapters", () => {
       ["systemctl", ["--user", "is-active", "planweave-agent-host-workspace-1.service"]],
       ["systemctl", ["--user", "is-active", "planweave-agent-host-workspace-1.service"]],
       ["systemctl", ["--user", "restart", "planweave-agent-host-workspace-1.service"]],
-      [
-        "systemctl",
-        ["--user", "disable", "--now", "planweave-agent-host-workspace-1.service"]
-      ],
+      ["systemctl", ["--user", "disable", "--now", "planweave-agent-host-workspace-1.service"]],
       ["systemctl", ["--user", "daemon-reload"]]
     ]);
     await expect(readFile(unitPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("uses fixed schtasks argv and identifies scheduler diagnostics without claiming stdout", async () => {
-    const runner = vi.fn().mockResolvedValue({
-      stdout: '"PlanWeave Agent Host workspace-1","Running"',
-      stderr: ""
-    });
+    const runner = vi
+      .fn()
+      .mockResolvedValueOnce({ stdout: '"localized task output"', stderr: "" })
+      .mockResolvedValueOnce({ stdout: "4", stderr: "" })
+      .mockResolvedValueOnce({ stdout: '"localized task output"', stderr: "" })
+      .mockResolvedValueOnce({ stdout: "4", stderr: "" })
+      .mockResolvedValue({ stdout: "", stderr: "" });
     const service = new WindowsScheduledTaskService(runner);
 
     await expect(service.status(install.workspaceId)).resolves.toMatchObject({ state: "running" });
@@ -173,17 +175,41 @@ describe("Agent Host background adapters", () => {
     });
 
     expect(runner.mock.calls).toEqual([
+      ["schtasks.exe", ["/Query", "/TN", "PlanWeave Agent Host workspace-1", "/FO", "CSV", "/NH"]],
       [
-        "schtasks.exe",
-        ["/Query", "/TN", "PlanWeave Agent Host workspace-1", "/FO", "CSV", "/NH"]
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-Command", expect.stringContaining("[int]$task.State")],
+        {
+          environment: {
+            PLANWEAVE_AGENT_HOST_TASK_NAME: "PlanWeave Agent Host workspace-1"
+          }
+        }
       ],
+      ["schtasks.exe", ["/Query", "/TN", "PlanWeave Agent Host workspace-1", "/FO", "CSV", "/NH"]],
       [
-        "schtasks.exe",
-        ["/Query", "/TN", "PlanWeave Agent Host workspace-1", "/FO", "CSV", "/NH"]
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-Command", expect.stringContaining("[int]$task.State")],
+        {
+          environment: {
+            PLANWEAVE_AGENT_HOST_TASK_NAME: "PlanWeave Agent Host workspace-1"
+          }
+        }
       ],
       ["schtasks.exe", ["/End", "/TN", "PlanWeave Agent Host workspace-1"]],
       ["schtasks.exe", ["/Run", "/TN", "PlanWeave Agent Host workspace-1"]],
       ["schtasks.exe", ["/Delete", "/TN", "PlanWeave Agent Host workspace-1", "/F"]]
     ]);
+  });
+
+  it("uses the locale-independent numeric Windows task state", async () => {
+    const runner = vi
+      .fn()
+      .mockResolvedValueOnce({ stdout: '"任务状态","正在运行"', stderr: "" })
+      .mockResolvedValueOnce({ stdout: "3", stderr: "" });
+
+    await expect(new WindowsScheduledTaskService(runner).status("workspace-1")).resolves.toEqual({
+      state: "stopped",
+      platform: "windows-scheduled-task"
+    });
   });
 });
