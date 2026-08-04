@@ -37,6 +37,97 @@ function closeServer(server: ClosableServer): Promise<void> {
   });
 }
 
+function proxiedUrl(url: string | URL, proxyOrigin: string): URL {
+  const target = new URL(url);
+  const proxy = new URL(proxyOrigin);
+  target.protocol = proxy.protocol;
+  target.hostname = proxy.hostname;
+  target.port = proxy.port;
+  return target;
+}
+
+async function requestBody(
+  input: string | URL | Request,
+  init: RequestInit | undefined
+): Promise<Uint8Array | string | undefined> {
+  const body = init?.body;
+  if (body === undefined || body === null) {
+    if (!(input instanceof Request) || input.method === "GET" || input.method === "HEAD") {
+      return undefined;
+    }
+    return new Uint8Array(await input.arrayBuffer());
+  }
+  if (typeof body === "string") return body;
+  if (body instanceof ArrayBuffer) return new Uint8Array(body);
+  if (ArrayBuffer.isView(body)) {
+    return new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+  }
+  throw new Error("proxy_desktop_request_body_unsupported");
+}
+
+export function createProxyDesktopTransports(input: { proxyOrigin: string; certificate: Buffer }) {
+  const request: typeof fetch = async (resource, init) => {
+    const sourceUrl = resource instanceof Request ? resource.url : resource;
+    const target = proxiedUrl(sourceUrl, input.proxyOrigin);
+    const headers = new Headers(resource instanceof Request ? resource.headers : undefined);
+    new Headers(init?.headers).forEach((value, key) => {
+      headers.set(key, value);
+    });
+    const body = await requestBody(resource, init);
+    return new Promise<Response>((resolve, reject) => {
+      const outbound = httpsRequest(
+        target,
+        {
+          method: init?.method ?? (resource instanceof Request ? resource.method : "GET"),
+          headers: Object.fromEntries(headers.entries()),
+          ca: input.certificate,
+          signal: init?.signal ?? undefined
+        },
+        (response) => {
+          const chunks: Buffer[] = [];
+          response.on("data", (chunk: Buffer) => chunks.push(chunk));
+          response.once("error", reject);
+          response.once("end", () => {
+            const responseHeaders = new Headers();
+            for (let index = 0; index < response.rawHeaders.length; index += 2) {
+              responseHeaders.append(
+                response.rawHeaders[index] ?? "",
+                response.rawHeaders[index + 1] ?? ""
+              );
+            }
+            resolve(
+              new Response(chunks.length === 0 ? null : Buffer.concat(chunks), {
+                status: response.statusCode ?? 500,
+                statusText: response.statusMessage,
+                headers: responseHeaders
+              })
+            );
+          });
+        }
+      );
+      outbound.once("error", reject);
+      outbound.end(body);
+    });
+  };
+
+  class ProxyDesktopWebSocket extends WebSocket {
+    constructor(
+      url: string,
+      protocolsOrOptions?: string | string[] | { headers?: Record<string, string> }
+    ) {
+      const target = proxiedUrl(url, input.proxyOrigin);
+      if (typeof protocolsOrOptions === "string" || Array.isArray(protocolsOrOptions)) {
+        super(target, protocolsOrOptions, { ca: input.certificate });
+      } else {
+        super(target, { ...protocolsOrOptions, ca: input.certificate });
+      }
+      this.once("open", () => sockets.push(this));
+    }
+  }
+
+  return { request, WebSocketImpl: ProxyDesktopWebSocket };
+}
+
 export async function cleanupProxyHarness(): Promise<void> {
   for (const tunnel of proxyTunnels.splice(0)) tunnel.destroy();
   await Promise.all(
@@ -82,7 +173,6 @@ export async function setupProxyHarness() {
       }
     ]
   } as const;
-  const bootstrapServer = createHttpServer();
   const bootstrapConfig = parseServerConfig({
     version: "server-config/v2",
     transport: {
@@ -99,46 +189,79 @@ export async function setupProxyHarness() {
     allowedClientOrigins: ["http://127.0.0.1:7442"],
     ...commonConfig
   });
-  const bootstrapComposition = await createDistributedServerComposition({
-    httpServer: bootstrapServer,
-    config: bootstrapConfig
-  });
-  const bootstrapOrigin = `http://127.0.0.1:${await listen(bootstrapServer)}`;
-  const ownerResponse = await fetch(
-    `${bootstrapOrigin}/api/v1/projects/${projectId}/human/bootstrap`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ displayName: "Proxy Owner", humanPrincipalId: "proxy-owner" })
+  const { owner, member } = await (async () => {
+    const bootstrapServer = createHttpServer();
+    const bootstrapComposition = await createDistributedServerComposition({
+      httpServer: bootstrapServer,
+      config: bootstrapConfig
+    });
+    try {
+      const bootstrapOrigin = `http://127.0.0.1:${await listen(bootstrapServer)}`;
+      const ownerResponse = await fetch(
+        `${bootstrapOrigin}/api/v1/projects/${projectId}/human/bootstrap`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ displayName: "Proxy Owner", humanPrincipalId: "proxy-owner" })
+        }
+      );
+      const owner = (await ownerResponse.json()) as { deviceToken: string };
+      const invitationResponse = await fetch(
+        `${bootstrapOrigin}/api/v1/projects/${projectId}/human/invitations`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${owner.deviceToken}`,
+            "content-type": "application/json"
+          },
+          body: "{}"
+        }
+      );
+      const invitation = (await invitationResponse.json()) as { invitationToken: string };
+      const memberResponse = await fetch(
+        `${bootstrapOrigin}/api/v1/projects/${projectId}/human/invitations/consume`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            invitationToken: invitation.invitationToken,
+            displayName: "Proxy Member"
+          })
+        }
+      );
+      const member = (await memberResponse.json()) as {
+        deviceToken: string;
+        principal: { humanPrincipalId: string };
+      };
+      const memberCanvasGrant = await fetch(
+        `${bootstrapOrigin}/api/v1/projects/${projectId}/canvases/default/access`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${owner.deviceToken}`,
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            operation: "grant",
+            scope: { scopeKind: "canvas", workspaceId, projectId, canvasId: "default" },
+            expectedAclRevision: 0,
+            humanPrincipalId: member.principal.humanPrincipalId,
+            role: "editor"
+          })
+        }
+      );
+      if (!memberCanvasGrant.ok) {
+        throw new Error(`proxy_member_canvas_grant_failed:${memberCanvasGrant.status}`);
+      }
+      return { owner, member };
+    } finally {
+      try {
+        await bootstrapComposition.close();
+      } finally {
+        if (bootstrapServer.listening) await closeServer(bootstrapServer);
+      }
     }
-  );
-  const owner = (await ownerResponse.json()) as { deviceToken: string };
-  const invitationResponse = await fetch(
-    `${bootstrapOrigin}/api/v1/projects/${projectId}/human/invitations`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${owner.deviceToken}`,
-        "content-type": "application/json"
-      },
-      body: "{}"
-    }
-  );
-  const invitation = (await invitationResponse.json()) as { invitationToken: string };
-  const memberResponse = await fetch(
-    `${bootstrapOrigin}/api/v1/projects/${projectId}/human/invitations/consume`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        invitationToken: invitation.invitationToken,
-        displayName: "Proxy Member"
-      })
-    }
-  );
-  const member = (await memberResponse.json()) as { deviceToken: string };
-  await bootstrapComposition.close();
-  await closeServer(bootstrapServer);
+  })();
 
   const database = await openServerDatabase(bootstrapConfig.databasePath, 5_000);
   const hosts = new AgentHostRepository(database);
