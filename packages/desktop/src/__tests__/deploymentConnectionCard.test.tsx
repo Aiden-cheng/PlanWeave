@@ -47,7 +47,7 @@ describe("DeploymentConnectionCard", () => {
     expect(screen.getByRole("button", { name: "Validate endpoint" })).toBeEnabled();
   });
 
-  it("passes an explicit LAN HTTPS topology and TLS trust for a non-standard port", async () => {
+  it("uses system trust for a LAN HTTPS endpoint on a non-standard port", async () => {
     const user = userEvent.setup();
     render(<DeploymentConnectionCard t={createTranslator("en")} />);
 
@@ -55,7 +55,12 @@ describe("DeploymentConnectionCard", () => {
     await user.type(screen.getByTestId("deployment-display-name"), "LAN Server");
     await user.type(screen.getByTestId("deployment-origin"), "https://192.168.1.20:7443");
     await user.selectOptions(screen.getByTestId("deployment-custom-topology"), "lan_https");
-    await user.selectOptions(screen.getByTestId("deployment-tls-trust"), "configured_ca");
+    expect(screen.queryByTestId("deployment-tls-trust")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "HTTPS certificates must be trusted by the operating system. For a private CA, install it in the system trust store first."
+      )
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Review handoff" }));
 
     expect(collaborationBridge.getDeploymentGuidance).toHaveBeenCalledWith({
@@ -65,7 +70,7 @@ describe("DeploymentConnectionCard", () => {
           topology: "lan_https",
           serverOrigin: "https://192.168.1.20:7443/",
           allowedClientOrigins: ["https://192.168.1.20:7443/"],
-          tlsTrust: "configured_ca"
+          tlsTrust: "system_ca"
         }
       })
     });

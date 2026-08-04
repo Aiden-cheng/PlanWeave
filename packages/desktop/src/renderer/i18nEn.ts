@@ -489,9 +489,6 @@ export const enCatalog = {
   deploymentLoopbackHttps: "Loopback HTTPS",
   deploymentLanHttps: "LAN HTTPS",
   deploymentPublicHttps: "Public HTTPS",
-  deploymentTlsTrust: "TLS trust",
-  deploymentSystemCa: "System CA",
-  deploymentConfiguredCa: "Configured CA",
   deploymentLanAdvanced: "LAN HTTP (advanced/development)",
   deploymentTailscaleNote:
     "PlanWeave discovers the private .ts.net address and manages only its owned Serve route. No Origin entry is required.",
@@ -512,6 +509,8 @@ export const enCatalog = {
   deploymentDisplayName: "Deployment name",
   deploymentLoopbackNote:
     "Loopback is for an explicitly started local development Server or a future local supervisor; it has no Compose/TLS handoff.",
+  deploymentSystemTrustNote:
+    "HTTPS certificates must be trusted by the operating system. For a private CA, install it in the system trust store first.",
   deploymentTopologySource:
     "A connected Workspace profile can prefill this target, but topology is reviewed here and is never persisted as an authenticated connection.",
   deploymentReview: "Review handoff",

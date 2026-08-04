@@ -481,9 +481,6 @@ export const zhCnCatalog = {
   deploymentLoopbackHttps: "本机 HTTPS",
   deploymentLanHttps: "局域网 HTTPS",
   deploymentPublicHttps: "公网 HTTPS",
-  deploymentTlsTrust: "TLS 信任",
-  deploymentSystemCa: "系统 CA",
-  deploymentConfiguredCa: "已配置 CA",
   deploymentLanAdvanced: "LAN HTTP（高级/开发）",
   deploymentTailscaleNote:
     "PlanWeave 会自动发现私有 .ts.net 地址，并且只管理自己拥有的 Serve 路由，无需手填 Origin。",
@@ -500,6 +497,8 @@ export const zhCnCatalog = {
   deploymentDisplayName: "部署名称",
   deploymentLoopbackNote:
     "loopback 用于已显式启动的本机开发 Server 或未来本机 supervisor；它没有 Compose/TLS 交接。",
+  deploymentSystemTrustNote:
+    "HTTPS 证书必须受操作系统信任；如使用私有 CA，请先将其安装到系统信任库。",
   deploymentTopologySource:
     "已连接的 Workspace 配置可预填此目标，但拓扑在此处审阅，绝不会被持久化为已认证连接。",
   deploymentReview: "审阅交接",

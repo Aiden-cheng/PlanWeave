@@ -3,7 +3,6 @@ import type {
   ConnectivityValidationView,
   DeploymentGuidanceView,
   DeploymentTargetDraft,
-  DeploymentTlsTrust,
   DeploymentTopology
 } from "@planweave-ai/collaboration-protocol/deployment";
 import type {
@@ -61,8 +60,6 @@ export function DeploymentConnectionCard({ t }: Props) {
     useState<Extract<DeploymentTopology, "loopback_https" | "lan_https" | "public_https">>(
       "public_https"
     );
-  const [tlsTrust, setTlsTrust] =
-    useState<Extract<DeploymentTlsTrust, "system_ca" | "configured_ca">>("system_ca");
   const [exposure, setExposure] = useState<DesktopServerExposureView | null>(null);
   const [guidance, setGuidance] = useState<DeploymentGuidanceView | null>(null);
   const [connectivity, setConnectivity] = useState<ConnectivityValidationView | null>(null);
@@ -97,14 +94,14 @@ export function DeploymentConnectionCard({ t }: Props) {
           topology: customTopology,
           serverOrigin,
           allowedClientOrigins: [serverOrigin],
-          tlsTrust
+          tlsTrust: "system_ca"
         },
         capabilities: ["deployment_guidance", "connectivity_validation"]
       } satisfies DeploymentTargetDraft;
     } catch {
       return null;
     }
-  }, [customTopology, displayName, mode, origin, tlsTrust]);
+  }, [customTopology, displayName, mode, origin]);
 
   const activate = async () => {
     if (!collaborationBridge || mode === "custom_https") return;
@@ -243,19 +240,6 @@ export function DeploymentConnectionCard({ t }: Props) {
                   <option value="public_https">{t("deploymentPublicHttps")}</option>
                 </select>
               </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="deployment-tls-trust">{t("deploymentTlsTrust")}</Label>
-                <select
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-                  data-testid="deployment-tls-trust"
-                  id="deployment-tls-trust"
-                  value={tlsTrust}
-                  onChange={(event) => setTlsTrust(event.target.value as typeof tlsTrust)}
-                >
-                  <option value="system_ca">{t("deploymentSystemCa")}</option>
-                  <option value="configured_ca">{t("deploymentConfiguredCa")}</option>
-                </select>
-              </div>
             </>
           ) : null}
         </div>
@@ -271,7 +255,10 @@ export function DeploymentConnectionCard({ t }: Props) {
           <p className="text-xs text-destructive">{t("deploymentLanAdvancedNote")}</p>
         ) : null}
         {mode === "custom_https" ? (
-          <p className="text-xs text-text-muted">{t("deploymentTopologySource")}</p>
+          <div className="grid gap-1 text-xs text-text-muted">
+            <p>{t("deploymentSystemTrustNote")}</p>
+            <p>{t("deploymentTopologySource")}</p>
+          </div>
         ) : null}
         {mode !== "custom_https" ? (
           <Button
