@@ -166,6 +166,51 @@ describe("Desktop operator control trust boundary", () => {
     });
   });
 
+  it("publishes the first Main-owned Server as the active Host administration profile", async () => {
+    const directory = await root("planweave-operator-main-owned-status-");
+    const onStatusChange = vi.fn();
+    const service = new OperatorControlService({
+      profileStore: new OperatorProfileStore({
+        profilesPath: join(directory, "profiles.json")
+      }),
+      vault: new OperatorCredentialVault({
+        paths: { credentialsPath: join(directory, "credentials.json") },
+        safeStorage: safeStorage(true)
+      }),
+      onStatusChange
+    });
+
+    await service.ensureMainOwnedServerProfile({
+      profile: {
+        ...profile("planweave-local-operator", "https://planweave.example.ts.net/"),
+        endpoint: {
+          topology: "tailscale_https",
+          serverOrigin: "https://planweave.example.ts.net",
+          allowedClientOrigins: ["https://planweave.example.ts.net"],
+          tlsTrust: "system_ca"
+        }
+      },
+      operatorId: "desktop-local-admin",
+      operatorToken: tokenA
+    });
+
+    expect(onStatusChange).toHaveBeenCalledTimes(1);
+    expect(onStatusChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        activeProfileId: "planweave-local-operator",
+        profiles: [
+          expect.objectContaining({
+            profileId: "planweave-local-operator",
+            hasOperatorCredential: true,
+            endpoint: expect.objectContaining({
+              serverOrigin: "https://planweave.example.ts.net"
+            })
+          })
+        ]
+      })
+    );
+  });
+
   it("preserves a Main-owned persisted endpoint when copying a Host setup handoff", async () => {
     const directory = await root("planweave-operator-host-handoff-");
     const enrollmentCode = `pw_enroll_${"A".repeat(43)}`;

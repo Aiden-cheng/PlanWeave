@@ -267,6 +267,10 @@ export class OperatorControlService {
       if (!operatorId) throw new Error("deployment_operator_id_required");
       await this.vault.setOperatorToken(profile.profileId, operatorToken, operatorId);
       await this.profiles.upsert(profile);
+      if ((await this.profiles.getActiveProfileId()) === null) {
+        await this.profiles.setActiveProfileId(profile.profileId);
+      }
+      await this.publishStatus();
     });
   }
 
