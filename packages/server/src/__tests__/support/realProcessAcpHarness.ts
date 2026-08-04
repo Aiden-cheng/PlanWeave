@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnManagedProcess, type ManagedProcessTree } from "@planweave-ai/runtime";
 import type { PlanPackageManifest } from "@planweave-ai/runtime";
@@ -816,7 +816,10 @@ export class RealProcessAcpHarness {
   ): Promise<void> {
     const result = await this.runHostCommand(
       ["agents", "expose", profileId, "--config", configPath],
-      { PATH: this.paths.agentBin, PATHEXT: ".CMD" }
+      {
+        PATH: [this.paths.agentBin, process.env.PATH].filter(Boolean).join(delimiter),
+        PATHEXT: ".CMD"
+      }
     );
     if (result.code !== 0) {
       throw new Error(`${errorCode}:${result.code}\n${result.stderr}\n${this.diagnostics()}`);

@@ -5,8 +5,6 @@ import type { Server as HttpServer } from "node:http";
 import type { Socket } from "node:net";
 import type { ServerConfig } from "./config.js";
 import { serverConfigSummary } from "./config.js";
-import { ServerExposureManager } from "./exposure/serverExposureManager.js";
-import { TailscaleCliAdapter } from "./exposure/tailscaleCliAdapter.js";
 import type {
   ExposureLeaseStorePort,
   ExposureOwnership,
@@ -133,14 +131,13 @@ export async function serveDistributedServer(
       config,
       readiness
     });
-    if (!exposure && config.transport.mode === "tailscale_https") {
+    if (
+      !exposure &&
+      config.transport.mode === "reverse_proxy_https" &&
+      options.createExposureLifecycle
+    ) {
       exposure = {
-        lifecycle:
-          options.createExposureLifecycle?.(composition.exposureLeaseStore) ??
-          new ServerExposureManager({
-            tailscale: new TailscaleCliAdapter(),
-            leases: composition.exposureLeaseStore
-          })
+        lifecycle: options.createExposureLifecycle(composition.exposureLeaseStore)
       };
     }
     await exposure?.lifecycle.inspect(config);

@@ -92,7 +92,7 @@ describe("Tailscale proxy with two Desktop clients", () => {
           projectId: fixture.projectId,
           allowInsecureTransport: false,
           endpoint: {
-            topology: "tailscale_https",
+            topology: "private_https",
             serverOrigin: `${proxyAdvertisedOrigin}/`,
             allowedClientOrigins: [`${proxyAdvertisedOrigin}/`],
             tlsTrust: "system_ca"

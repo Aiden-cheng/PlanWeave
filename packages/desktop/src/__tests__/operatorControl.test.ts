@@ -184,7 +184,7 @@ describe("Desktop operator control trust boundary", () => {
       profile: {
         ...profile("planweave-local-operator", "https://planweave.example.ts.net/"),
         endpoint: {
-          topology: "tailscale_https",
+          topology: "private_https",
           serverOrigin: "https://planweave.example.ts.net",
           allowedClientOrigins: ["https://planweave.example.ts.net"],
           tlsTrust: "system_ca"
@@ -385,7 +385,7 @@ describe("Desktop operator control trust boundary", () => {
     const encodedHandoff = serializeAgentHostSetupHandoff({
       version: "agent-host-setup/v1",
       endpoint: {
-        topology: "tailscale_https",
+        topology: "private_https",
         serverOrigin: "https://planweave.example.ts.net",
         allowedClientOrigins: ["https://planweave.example.ts.net"],
         tlsTrust: "system_ca"

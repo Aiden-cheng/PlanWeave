@@ -274,12 +274,12 @@ export async function setupProxyHarness() {
   const config = parseServerConfig({
     version: "server-config/v2",
     transport: {
-      mode: "tailscale_https",
+      mode: "reverse_proxy_https",
       listener: { protocol: "http", host: "127.0.0.1", port: 7_443 },
       advertisedOrigin: proxyAdvertisedOrigin
     },
     deployment: {
-      topology: "tailscale_https",
+      topology: "private_https",
       serverOrigin: proxyAdvertisedOrigin,
       allowedClientOrigins: [proxyAdvertisedOrigin],
       tlsTrust: "system_ca"

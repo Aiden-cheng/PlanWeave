@@ -9,7 +9,7 @@ import {
 const handoff = agentHostSetupHandoffSchema.parse({
   version: "agent-host-setup/v1",
   endpoint: {
-    topology: "tailscale_https",
+    topology: "private_https",
     serverOrigin: "https://planweave.tail1234.ts.net",
     allowedClientOrigins: ["https://planweave.tail1234.ts.net"],
     tlsTrust: "system_ca"

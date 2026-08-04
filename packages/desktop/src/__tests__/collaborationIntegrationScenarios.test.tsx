@@ -571,7 +571,7 @@ describe("collaboration integration scenarios", () => {
     const invitationToken = `pw_inv_${"A".repeat(43)}`;
     const invitationHandoff = serializeCollaborationInvitationHandoff({
       endpoint: {
-        topology: "tailscale_https",
+        topology: "private_https",
         serverOrigin: "https://planweave.example.ts.net/",
         allowedClientOrigins: ["https://planweave.example.ts.net/"],
         tlsTrust: "system_ca"
@@ -632,7 +632,7 @@ describe("collaboration integration scenarios", () => {
         serverBaseUrl: "https://planweave.example.ts.net/",
         projectId: "project-1",
         allowInsecureTransport: false,
-        endpoint: expect.objectContaining({ topology: "tailscale_https" })
+        endpoint: expect.objectContaining({ topology: "private_https" })
       })
     );
     expect(api.consumeCollaborationInvitation).toHaveBeenCalledWith({

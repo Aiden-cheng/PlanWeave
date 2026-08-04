@@ -60,7 +60,7 @@ describe("DeploymentActions", () => {
     expect(copied).toEqual([guidance.handoff.preview]);
   });
 
-  it("keeps loopback and Tailscale proxy TLS out of the direct-TLS Compose handoff", () => {
+  it("keeps loopback out of direct-TLS handoff without rejecting generic private HTTPS", () => {
     const actions = new DeploymentActions();
     const loopback = {
       ...target,
@@ -83,10 +83,10 @@ describe("DeploymentActions", () => {
         target: loopback
       })
     ).toThrow("deployment_compose_handoff_not_supported");
-    const tailscale = {
+    const privateHttps = {
       ...target,
       endpoint: {
-        topology: "tailscale_https" as const,
+        topology: "private_https" as const,
         serverOrigin: "https://planweave.tailnet.ts.net/",
         allowedClientOrigins: ["https://planweave.tailnet.ts.net/"],
         tlsTrust: "system_ca" as const
@@ -95,15 +95,9 @@ describe("DeploymentActions", () => {
     expect(
       actions.guidance({
         action: "request_deployment_guidance",
-        target: tailscale
+        target: privateHttps
       }).handoff.state
-    ).toBe("not_applicable");
-    expect(() =>
-      actions.copyComposeHandoff({
-        action: "copy_supported_compose_handoff",
-        target: tailscale
-      })
-    ).toThrow("deployment_compose_handoff_not_supported");
+    ).toBe("supported");
   });
 
   it("reports static origin configuration failures without claiming a WebSocket probe", async () => {

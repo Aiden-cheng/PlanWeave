@@ -134,7 +134,7 @@ describe("CollaborationConnectForm invitation onboarding", () => {
     const invitationToken = `pw_inv_${"A".repeat(43)}`;
     const handoff = serializeCollaborationInvitationHandoff({
       endpoint: {
-        topology: "tailscale_https",
+        topology: "private_https",
         serverOrigin: "https://planweave.example.ts.net",
         allowedClientOrigins: ["https://planweave.example.ts.net"],
         tlsTrust: "system_ca"
@@ -170,7 +170,7 @@ describe("CollaborationConnectForm invitation onboarding", () => {
           serverBaseUrl: "https://planweave.example.ts.net",
           projectId: "project-1",
           allowInsecureTransport: false,
-          endpoint: expect.objectContaining({ topology: "tailscale_https" })
+          endpoint: expect.objectContaining({ topology: "private_https" })
         })
       )
     );
@@ -182,18 +182,18 @@ describe("CollaborationConnectForm invitation onboarding", () => {
     expect(api.connectCollaborationSession).toHaveBeenCalledTimes(1);
   });
 
-  it("shows a tailnet reachability recovery without exposing transport details", async () => {
+  it("shows a private-network reachability recovery without exposing transport details", async () => {
     const user = userEvent.setup();
     const api = joinApi();
     vi.mocked(api.consumeCollaborationInvitation).mockRejectedValue({
       kind: "offline",
-      code: "TAILNET_UNREACHABLE",
+      code: "PRIVATE_NETWORK_UNREACHABLE",
       message: "The Server could not be reached through the configured tailnet endpoint.",
       retryable: true
     });
     const handoff = serializeCollaborationInvitationHandoff({
       endpoint: {
-        topology: "tailscale_https",
+        topology: "private_https",
         serverOrigin: "https://planweave.example.ts.net",
         allowedClientOrigins: ["https://planweave.example.ts.net"],
         tlsTrust: "system_ca"
@@ -218,12 +218,12 @@ describe("CollaborationConnectForm invitation onboarding", () => {
     await user.click(screen.getByTestId("people-connect-submit"));
 
     const error = await screen.findByTestId("people-connect-error");
-    expect(error).toHaveTextContent("Could not reach the shared Server through Tailscale");
+    expect(error).toHaveTextContent("Could not reach the shared Server through the private network");
     expect(error).not.toHaveTextContent("permission for this Workspace");
     expect(error).not.toHaveTextContent("planweave.example.ts.net");
   });
 
-  it("shows reached-Server Workspace denial separately from tailnet reachability", async () => {
+  it("shows reached-Server Workspace denial separately from private-network reachability", async () => {
     const user = userEvent.setup();
     const api = joinApi();
     vi.mocked(api.consumeCollaborationInvitation).mockRejectedValue({
@@ -235,7 +235,7 @@ describe("CollaborationConnectForm invitation onboarding", () => {
     });
     const handoff = serializeCollaborationInvitationHandoff({
       endpoint: {
-        topology: "tailscale_https",
+        topology: "private_https",
         serverOrigin: "https://planweave.example.ts.net",
         allowedClientOrigins: ["https://planweave.example.ts.net"],
         tlsTrust: "system_ca"
@@ -431,7 +431,7 @@ describe("CollaborationConnectForm connection diagnostics", () => {
 
   it.each([
     {
-      topology: "tailscale_https" as const,
+      topology: "private_https" as const,
       serverOrigin: "https://planweave.example.ts.net/",
       tlsTrust: "system_ca" as const
     },
@@ -441,7 +441,7 @@ describe("CollaborationConnectForm connection diagnostics", () => {
       tlsTrust: "system_ca" as const
     },
     {
-      topology: "lan_https" as const,
+      topology: "private_https" as const,
       serverOrigin: "https://192.168.1.20:7443/",
       tlsTrust: "system_ca" as const
     },

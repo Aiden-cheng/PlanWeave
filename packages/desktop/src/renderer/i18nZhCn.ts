@@ -467,7 +467,7 @@ export const zhCnCatalog = {
     "Desktop 只生成安全入驻交接，不会通过 SSH 连接 VPS、创建基础设施、安装软件或启动系统服务。",
   deploymentTitle: "Server 连接方式",
   deploymentDescription:
-    "选择这台电脑和远程设备如何访问 PlanWeave Server。使用 Tailscale 可以自动获得私有 HTTPS 地址。",
+    "选择这台电脑和远程设备如何访问 PlanWeave Server。私有网络可以自动建立 HTTPS，也可以使用已有地址。",
   deploymentBoundary: "连接方式只改变 Server 的访问地址，不会改变工作区、成员、任务或 Agent 数据。",
   deploymentPreConnection: "要连接 Windows 或 VPS，请先启用一种可供远程设备访问的连接方式。",
   deploymentTopology: "连接方式",
@@ -475,23 +475,24 @@ export const zhCnCatalog = {
   deploymentLoopbackTls: "本机 loopback HTTPS",
   deploymentLan: "LAN HTTPS",
   deploymentPublic: "公网 HTTPS",
-  deploymentTailscale: "Tailscale 私有网络（HTTPS，推荐）",
+  deploymentPrivateHttps: "私有网络 HTTPS（自动配置，推荐）",
   deploymentCustomHttps: "已有 HTTPS Server",
   deploymentCustomTopology: "Server 使用范围",
   deploymentLoopbackHttps: "本机 HTTPS",
-  deploymentLanHttps: "局域网 HTTPS",
+  deploymentPrivateHttpsTopology: "私有网络 HTTPS",
   deploymentPublicHttps: "公网 HTTPS",
   deploymentLanAdvanced: "局域网 HTTP（仅开发）",
-  deploymentTailscaleNote:
-    "启用后，PlanWeave 会自动配置自己的 Tailscale Serve 路由并显示 .ts.net HTTPS 地址；只有同一 tailnet 中获准的设备可以访问。",
+  deploymentPrivateHttpsNote:
+    "PlanWeave 通过可用的适配器自动建立私有 HTTPS。当前内置适配器使用 Tailscale Serve；其他私有网络可选择“已有 HTTPS Server”。",
   deploymentLanAdvancedNote: "LAN HTTP 未加密，只应在明确受信任的私有网络中用于开发。",
   deploymentActivate: "启用此连接方式",
   deploymentAdvertisedOrigin: "可用连接地址",
-  deploymentTailscaleNotInstalled: "请安装 Tailscale，然后重试。",
-  deploymentTailscaleLoginRequired: "请先在此设备登录 Tailscale，然后重试。",
-  deploymentTailscaleHttpsUnavailable: "请为当前 tailnet 启用 MagicDNS 和 HTTPS 证书，然后重试。",
-  deploymentTailscaleServeConflict: "Tailscale Serve 根路由已被占用，PlanWeave 未覆盖该路由。",
-  deploymentTailscaleUnavailable: "Tailscale 私有共享不可用，请检查 Tailscale 后重试。",
+  deploymentPrivateHttpsProvider: "自动配置适配器",
+  deploymentPrivateHttpsProviderNotInstalled: "自动配置适配器尚未安装，请安装后重试。",
+  deploymentPrivateHttpsProviderAuthRequired: "请先登录并授权自动配置适配器，然后重试。",
+  deploymentPrivateHttpsUnavailable: "私有 DNS 或 HTTPS 证书不可用，请检查适配器配置后重试。",
+  deploymentPrivateHttpsRouteConflict: "私有 HTTPS 根路由已被占用，PlanWeave 未覆盖该路由。",
+  deploymentPrivateHttpsProviderUnavailable: "自动配置私有 HTTPS 失败，请检查适配器后重试。",
   deploymentServerStartFailed: "PlanWeave Server 无法以此连接模式启动。",
   deploymentOrigin: "HTTPS 地址",
   deploymentDisplayName: "Server 名称",
@@ -627,6 +628,8 @@ export const zhCnCatalog = {
   hostAdminLocalHostHandoffInvalid: "请输入有效的 Agent Host 入驻信息。",
   hostAdminLocalHostHandoffExpired: "Agent Host 入驻信息已经过期，请在 Server 管理电脑上重新生成。",
   hostAdminLocalHostNotRegistered: "这台电脑尚未注册为 Agent Host。",
+  hostAdminLocalHostUsesLocalServer:
+    "PlanWeave Server 正在这台电脑上运行，本机 Agent 可直接使用，无需注册 Agent Host。",
   hostAdminLocalHostReady: "这台电脑已连接，Agent Host 正在后台运行。",
   hostAdminLocalHostSetupRequired: "注册已完成，但后台服务需要重新启动。",
   hostAdminLocalHostDetected: "已检测到",
@@ -1064,8 +1067,8 @@ export const zhCnCatalog = {
   peopleRequestRateLimited: "协作请求过于频繁。请稍候再试。",
   peopleServerUnreachable:
     "无法连接共享 Server。请确认 Server 已启动，并且当前设备可以访问其地址，然后重试。",
-  peopleTailnetUnreachable:
-    "无法通过 Tailscale 连接共享 Server。请确认当前设备已登录受邀 tailnet、Server 在线，然后重试。",
+  peoplePrivateNetworkUnreachable:
+    "无法通过私有网络连接共享 Server。请确认当前设备已加入对应私有网络、Server 在线，然后重试。",
   peopleWorkspaceForbidden:
     "网络已连接到 Server，但你没有此 Workspace 的权限。请联系 Workspace 所有者授权后重试。",
   peopleWorkspaceUnauthorized:

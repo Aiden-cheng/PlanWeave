@@ -12,7 +12,7 @@ describe("main-owned Host setup handoff", () => {
         serverBaseUrl: "https://planweave.tail1234.ts.net/",
         allowInsecureTransport: false,
         endpoint: {
-          topology: "tailscale_https",
+          topology: "private_https",
           serverOrigin: "https://planweave.tail1234.ts.net",
           allowedClientOrigins: ["https://planweave.tail1234.ts.net"],
           tlsTrust: "system_ca"
@@ -31,7 +31,7 @@ describe("main-owned Host setup handoff", () => {
     expect(command).toMatch(/^planweave agent-host enroll planweave-agent-host-setup:/);
     const encoded = command.slice("planweave agent-host enroll ".length);
     expect(parseAgentHostSetupHandoff(encoded, new Date("2029-01-01"))).toMatchObject({
-      endpoint: { topology: "tailscale_https", tlsTrust: "system_ca" },
+      endpoint: { topology: "private_https", tlsTrust: "system_ca" },
       workspaceId: "workspace-a",
       enrollmentCode
     });

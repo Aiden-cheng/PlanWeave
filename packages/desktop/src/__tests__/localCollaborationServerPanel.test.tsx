@@ -76,6 +76,7 @@ function api(overrides: Partial<PlanWeaveCollaborationApi> = {}): PlanWeaveColla
     getDesktopServerExposure: vi.fn().mockResolvedValue({
       mode: "lan_http",
       topology: "lan_http",
+      provider: null,
       lifecycle: "ready",
       advertisedOrigin: "http://192.168.1.20:8787/",
       errorCode: null,

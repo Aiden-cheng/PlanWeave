@@ -58,8 +58,8 @@ function sha256(value: string): string {
 }
 
 function targetFor(config: ServerConfig): TailscaleTarget {
-  if (config.transport.mode !== "tailscale_https") {
-    throw new Error("tailscale_exposure_transport_required");
+  if (config.transport.mode !== "reverse_proxy_https") {
+    throw new Error("reverse_proxy_https_transport_required");
   }
   const advertisedOrigin = new URL(config.transport.advertisedOrigin).origin;
   const backendOrigin = `http://127.0.0.1:${config.transport.listener.port}`;
@@ -67,7 +67,7 @@ function targetFor(config: ServerConfig): TailscaleTarget {
     advertisedOrigin,
     backendOrigin,
     configFingerprint: sha256(
-      `tailscale_https\0${advertisedOrigin}\0${backendOrigin}\0${config.databasePath}`
+      `tailscale_serve\0${advertisedOrigin}\0${backendOrigin}\0${config.databasePath}`
     )
   };
 }
@@ -251,7 +251,7 @@ export class ServerExposureManager implements ServerExposureLifecyclePort {
 
   async inspect(rawConfig: ServerConfig): Promise<ExposureInspection> {
     const config = serverConfigSchema.parse(rawConfig);
-    if (config.transport.mode !== "tailscale_https") {
+    if (config.transport.mode !== "reverse_proxy_https") {
       return {
         state: "not_applicable",
         listener: config.transport.listener,
@@ -269,7 +269,7 @@ export class ServerExposureManager implements ServerExposureLifecyclePort {
 
   async activate(rawConfig: ServerConfig): Promise<PreparedServerExposure> {
     const config = serverConfigSchema.parse(rawConfig);
-    if (config.transport.mode !== "tailscale_https") {
+    if (config.transport.mode !== "reverse_proxy_https") {
       return {
         listener: config.transport.listener,
         advertisedOrigin: config.transport.advertisedOrigin
@@ -284,7 +284,7 @@ export class ServerExposureManager implements ServerExposureLifecyclePort {
       return {
         listener: config.transport.listener,
         advertisedOrigin: config.transport.advertisedOrigin,
-        ownership: { kind: "tailscale_https", lease, createdByActivation: false }
+        ownership: { kind: "tailscale_serve", lease, createdByActivation: false }
       };
     }
 
@@ -332,7 +332,7 @@ export class ServerExposureManager implements ServerExposureLifecyclePort {
         listener: config.transport.listener,
         advertisedOrigin: config.transport.advertisedOrigin,
         ownership: {
-          kind: "tailscale_https",
+          kind: "tailscale_serve",
           lease: concurrentLease,
           createdByActivation: false
         }
@@ -342,7 +342,7 @@ export class ServerExposureManager implements ServerExposureLifecyclePort {
       await this.probe(inspected.target.advertisedOrigin);
     } catch (error) {
       try {
-        await this.release({ kind: "tailscale_https", lease, createdByActivation: true });
+        await this.release({ kind: "tailscale_serve", lease, createdByActivation: true });
       } catch (cleanupError) {
         throw tailscaleExposureFailure(
           "TAILSCALE_EXTERNAL_PROBE_FAILED",
@@ -357,7 +357,7 @@ export class ServerExposureManager implements ServerExposureLifecyclePort {
     return {
       listener: config.transport.listener,
       advertisedOrigin: config.transport.advertisedOrigin,
-      ownership: { kind: "tailscale_https", lease, createdByActivation: true }
+      ownership: { kind: "tailscale_serve", lease, createdByActivation: true }
     };
   }
 

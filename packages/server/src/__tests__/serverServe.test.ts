@@ -103,12 +103,12 @@ describe("distributed server listener", () => {
     const config = parseServerConfig({
       version: "server-config/v2",
       transport: {
-        mode: "tailscale_https",
+        mode: "reverse_proxy_https",
         listener: { protocol: "http", host: "127.0.0.1", port },
         advertisedOrigin
       },
       deployment: {
-        topology: "tailscale_https",
+        topology: "private_https",
         serverOrigin: advertisedOrigin,
         allowedClientOrigins: [advertisedOrigin],
         tlsTrust: "system_ca"
@@ -134,7 +134,7 @@ describe("distributed server listener", () => {
     });
     const events: string[] = [];
     const ownership: ExposureOwnership = {
-      kind: "tailscale_https",
+      kind: "tailscale_serve",
       createdByActivation: true,
       lease: {
         leaseId: "1".repeat(64),
@@ -290,12 +290,12 @@ describe("distributed server listener", () => {
     const config = parseServerConfig({
       version: "server-config/v2",
       transport: {
-        mode: "tailscale_https",
+        mode: "reverse_proxy_https",
         listener: { protocol: "http", host: "127.0.0.1", port },
         advertisedOrigin
       },
       deployment: {
-        topology: "tailscale_https",
+        topology: "private_https",
         serverOrigin: advertisedOrigin,
         allowedClientOrigins: [advertisedOrigin],
         tlsTrust: "system_ca"
@@ -400,12 +400,12 @@ describe("distributed server listener", () => {
     const config = parseServerConfig({
       version: "server-config/v2",
       transport: {
-        mode: "tailscale_https",
+        mode: "reverse_proxy_https",
         listener: { protocol: "http", host: "127.0.0.1", port },
         advertisedOrigin
       },
       deployment: {
-        topology: "tailscale_https",
+        topology: "private_https",
         serverOrigin: advertisedOrigin,
         allowedClientOrigins: [advertisedOrigin],
         tlsTrust: "system_ca"

@@ -55,9 +55,9 @@ describe("collaboration invitation handoff", () => {
 
   it.each([
     ["loopback_https", "https://127.0.0.1:7443/", "configured_ca"],
-    ["lan_https", "https://192.168.1.20:7443/", "configured_ca"],
+    ["private_https", "https://192.168.1.20:7443/", "configured_ca"],
     ["public_https", "https://server.example.test/", "system_ca"],
-    ["tailscale_https", "https://planweave.example.ts.net/", "system_ca"]
+    ["private_https", "https://planweave.example.ts.net/", "system_ca"]
   ] as const)("preserves %s endpoint authority through V2 join parsing", (topology, origin, tlsTrust) => {
     const endpoint = {
       topology,

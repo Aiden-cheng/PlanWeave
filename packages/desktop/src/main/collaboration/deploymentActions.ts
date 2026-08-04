@@ -64,10 +64,7 @@ function requirements(target: DeploymentTargetDraft) {
 }
 
 function handoff(target: DeploymentTargetDraft) {
-  if (
-    target.endpoint.topology === "loopback_http" ||
-    target.endpoint.topology === "tailscale_https"
-  ) {
+  if (target.endpoint.topology === "loopback_http") {
     return {
       state: "not_applicable" as const,
       copyAction: null,

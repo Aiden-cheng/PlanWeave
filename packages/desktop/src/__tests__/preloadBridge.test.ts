@@ -833,7 +833,7 @@ describe("preload bridge invocation", () => {
             invitationToken: `pw_inv_${"A".repeat(43)}`,
             handoff: `planweave-collaboration-invitation/v2:${JSON.stringify({
               endpoint: {
-                topology: "tailscale_https",
+                topology: "private_https",
                 serverOrigin: "https://planweave.example.ts.net/",
                 allowedClientOrigins: ["https://planweave.example.ts.net/"],
                 tlsTrust: "system_ca"
@@ -849,8 +849,9 @@ describe("preload bridge invocation", () => {
         channel === collaborationInvokeChannels.setDesktopServerExposureMode
       ) {
         return {
-          mode: "tailscale_private",
-          topology: "tailscale_https",
+          mode: "private_https",
+          topology: "private_https",
+          provider: { id: "tailscale", displayName: "Tailscale" },
           lifecycle: "ready",
           advertisedOrigin: "https://planweave.example.ts.net/",
           errorCode: null,
@@ -952,7 +953,7 @@ describe("preload bridge invocation", () => {
     await api.stopLocalCollaborationServer();
     await api.setLocalCollaborationLanSharing({ enabled: true });
     await api.getDesktopServerExposure();
-    await api.setDesktopServerExposureMode({ mode: "tailscale_private" });
+    await api.setDesktopServerExposureMode({ mode: "private_https" });
     await api.listLocalCollaborationTrustedScopes();
     await api.registerLocalCollaborationCurrentProject({ ownerDisplayName: "Local owner" });
     await api.startCollaborationPresence({ canvasId: "default" });
@@ -1071,7 +1072,7 @@ describe("preload bridge invocation", () => {
     );
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       collaborationInvokeChannels.setDesktopServerExposureMode,
-      { mode: "tailscale_private" }
+      { mode: "private_https" }
     );
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       collaborationInvokeChannels.createCollaborationInvitationHandoff,

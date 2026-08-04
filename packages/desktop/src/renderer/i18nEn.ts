@@ -474,7 +474,7 @@ export const enCatalog = {
     "Desktop creates the secure onboarding handoff only. It does not SSH to a VPS, provision infrastructure, install software, or start a system service.",
   deploymentTitle: "Server connection",
   deploymentDescription:
-    "Choose how this computer and remote devices reach PlanWeave Server. Tailscale provides a private HTTPS address automatically.",
+    "Choose how this computer and remote devices reach PlanWeave Server. Private HTTPS can be configured automatically or supplied as an existing address.",
   deploymentBoundary:
     "Changing the connection only changes how Server is reached. Workspace, member, task, and agent data stay unchanged.",
   deploymentPreConnection:
@@ -484,27 +484,30 @@ export const enCatalog = {
   deploymentLoopbackTls: "Local loopback HTTPS",
   deploymentLan: "LAN HTTPS",
   deploymentPublic: "Public HTTPS",
-  deploymentTailscale: "Tailscale private network (HTTPS, recommended)",
+  deploymentPrivateHttps: "Private network HTTPS (automatic, recommended)",
   deploymentCustomHttps: "Existing HTTPS Server",
   deploymentCustomTopology: "Server reach",
   deploymentLoopbackHttps: "Loopback HTTPS",
-  deploymentLanHttps: "LAN HTTPS",
+  deploymentPrivateHttpsTopology: "Private network HTTPS",
   deploymentPublicHttps: "Public HTTPS",
   deploymentLanAdvanced: "LAN HTTP (development only)",
-  deploymentTailscaleNote:
-    "PlanWeave configures its own Tailscale Serve route and displays the .ts.net HTTPS address. Only approved devices in the same tailnet can reach it.",
+  deploymentPrivateHttpsNote:
+    "PlanWeave uses an available adapter to establish private HTTPS automatically. The built-in adapter currently uses Tailscale Serve; choose Existing HTTPS Server for other private networks.",
   deploymentLanAdvancedNote:
     "LAN HTTP is unencrypted and should only be used for explicit development on a trusted private network.",
   deploymentActivate: "Enable this connection",
   deploymentAdvertisedOrigin: "Connection address",
-  deploymentTailscaleNotInstalled: "Install Tailscale, then try again.",
-  deploymentTailscaleLoginRequired: "Sign in to Tailscale on this device, then try again.",
-  deploymentTailscaleHttpsUnavailable:
-    "Enable MagicDNS and HTTPS certificates for this tailnet, then try again.",
-  deploymentTailscaleServeConflict:
-    "The Tailscale Serve root route is already in use. PlanWeave did not overwrite it.",
-  deploymentTailscaleUnavailable:
-    "Tailscale private sharing is unavailable. Check Tailscale and retry.",
+  deploymentPrivateHttpsProvider: "Automatic configuration adapter",
+  deploymentPrivateHttpsProviderNotInstalled:
+    "The automatic configuration adapter is not installed. Install it and retry.",
+  deploymentPrivateHttpsProviderAuthRequired:
+    "Sign in to and authorize the automatic configuration adapter, then retry.",
+  deploymentPrivateHttpsUnavailable:
+    "Private DNS or HTTPS certificates are unavailable. Check the adapter configuration and retry.",
+  deploymentPrivateHttpsRouteConflict:
+    "The private HTTPS root route is already in use. PlanWeave did not overwrite it.",
+  deploymentPrivateHttpsProviderUnavailable:
+    "Automatic private HTTPS configuration failed. Check the adapter and retry.",
   deploymentServerStartFailed: "The PlanWeave Server could not start in this connection mode.",
   deploymentOrigin: "HTTPS address",
   deploymentDisplayName: "Server name",
@@ -654,6 +657,8 @@ export const enCatalog = {
   hostAdminLocalHostHandoffExpired:
     "The Agent Host enrollment handoff has expired. Create a new one on the server-admin computer.",
   hostAdminLocalHostNotRegistered: "This computer is not registered as an Agent Host.",
+  hostAdminLocalHostUsesLocalServer:
+    "PlanWeave Server is running on this computer. Local agents are already available and do not need Agent Host registration.",
   hostAdminLocalHostReady: "This computer is connected and Agent Host is running.",
   hostAdminLocalHostSetupRequired:
     "Registration completed, but the background service needs to be restarted.",
@@ -1139,8 +1144,8 @@ export const enCatalog = {
   peopleRequestRateLimited: "Too many collaboration requests. Wait a moment, then try again.",
   peopleServerUnreachable:
     "Could not reach the shared Server. Make sure it is running and this device can access its address, then try again.",
-  peopleTailnetUnreachable:
-    "Could not reach the shared Server through Tailscale. Make sure this device is signed in to the invited tailnet, confirm the Server is online, then try again.",
+  peoplePrivateNetworkUnreachable:
+    "Could not reach the shared Server through the private network. Make sure this device has joined that network and the Server is online, then try again.",
   peopleWorkspaceForbidden:
     "The Server is reachable, but you do not have permission for this Workspace. Ask a Workspace owner to grant access, then try again.",
   peopleWorkspaceUnauthorized:

@@ -118,7 +118,7 @@ describe("operator control main-owned Host handoff", () => {
     const encodedHandoff = serializeAgentHostSetupHandoff({
       version: "agent-host-setup/v1",
       endpoint: {
-        topology: "tailscale_https",
+        topology: "private_https",
         serverOrigin: "https://planweave.example.ts.net",
         allowedClientOrigins: ["https://planweave.example.ts.net"],
         tlsTrust: "system_ca"

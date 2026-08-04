@@ -4,7 +4,7 @@ import type { Socket } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { parseServerConfig, type ServerConfig } from "../config.js";
-import { attachTailscaleWebSocketReadiness } from "../exposure/tailscaleWebSocketReadiness.js";
+import { attachReverseProxyWebSocketReadiness } from "../exposure/reverseProxyWebSocketReadiness.js";
 import { createTransportAdmissionPolicy } from "../insecureTransport.js";
 import { hashOperatorToken } from "../operatorAuth.js";
 import { WebSocketUpgradeRouter } from "../webSocketUpgradeRouter.js";
@@ -29,17 +29,17 @@ function config(): ServerConfig {
   return parseServerConfig({
     version: "server-config/v2",
     transport: {
-      mode: "tailscale_https",
+      mode: "reverse_proxy_https",
       listener: { protocol: "http", host: "127.0.0.1", port: 8787 },
-      advertisedOrigin: "https://planweave.tailnet.ts.net"
+      advertisedOrigin: "https://planweave.mesh.example"
     },
     deployment: {
-      topology: "tailscale_https",
-      serverOrigin: "https://planweave.tailnet.ts.net",
-      allowedClientOrigins: ["https://planweave.tailnet.ts.net"],
+      topology: "private_https",
+      serverOrigin: "https://planweave.mesh.example",
+      allowedClientOrigins: ["https://planweave.mesh.example"],
       tlsTrust: "system_ca"
     },
-    allowedClientOrigins: ["https://planweave.tailnet.ts.net"],
+    allowedClientOrigins: ["https://planweave.mesh.example"],
     dataDirectory: "/tmp/planweave-wss-readiness-test",
     trustedProjects: [
       {
@@ -152,19 +152,19 @@ function rejectedStatus(port: number, origin: string): Promise<number | undefine
   });
 }
 
-describe("Tailscale WebSocket readiness", () => {
+describe("reverse-proxy WebSocket readiness", () => {
   it("returns a real 101 only for the advertised Origin and closes immediately", async () => {
     const server = createServer();
     const serverConfig = config();
     const upgradeRouter = new WebSocketUpgradeRouter(server);
-    attachTailscaleWebSocketReadiness({
+    attachReverseProxyWebSocketReadiness({
       config: serverConfig,
       upgradeRouter,
       transportAdmission: createTransportAdmissionPolicy(serverConfig)
     });
     const port = await listen(server);
 
-    await expect(connect(port, "https://planweave.tailnet.ts.net")).resolves.toEqual({
+    await expect(connect(port, "https://planweave.mesh.example")).resolves.toEqual({
       opened: true,
       closeCode: 1000
     });
@@ -172,11 +172,11 @@ describe("Tailscale WebSocket readiness", () => {
     upgradeRouter.close();
   });
 
-  it("does not register the readiness route outside tailscale_https", async () => {
+  it("does not register the readiness route outside reverse_proxy_https", async () => {
     const server = createServer();
     const serverConfig = loopbackConfig();
     const upgradeRouter = new WebSocketUpgradeRouter(server);
-    attachTailscaleWebSocketReadiness({
+    attachReverseProxyWebSocketReadiness({
       config: serverConfig,
       upgradeRouter,
       transportAdmission: createTransportAdmissionPolicy(serverConfig)

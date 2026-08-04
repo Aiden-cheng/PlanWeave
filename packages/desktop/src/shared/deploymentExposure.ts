@@ -6,7 +6,7 @@ import {
 
 export const desktopServerExposureModeSchema = z.enum([
   "local_only",
-  "tailscale_private",
+  "private_https",
   "custom_https",
   "lan_http"
 ]);
@@ -14,21 +14,13 @@ export type DesktopServerExposureMode = z.infer<typeof desktopServerExposureMode
 
 export const desktopServerExposureErrorCodeSchema = z.union([
   z.enum([
-    "TAILSCALE_NOT_INSTALLED",
-    "TAILSCALE_VERSION_UNSUPPORTED",
-    "TAILSCALE_DAEMON_NOT_RUNNING",
-    "TAILSCALE_LOGIN_REQUIRED",
-    "TAILSCALE_MACHINE_AUTH_REQUIRED",
-    "TAILSCALE_MAGIC_DNS_UNAVAILABLE",
-    "TAILSCALE_HTTPS_UNAVAILABLE",
-    "TAILSCALE_ORIGIN_MISMATCH",
-    "TAILSCALE_SERVE_CONFLICT",
-    "TAILSCALE_SERVE_UNOWNED",
-    "TAILSCALE_LEASE_DRIFT",
-    "TAILSCALE_LEASE_PERSISTENCE_FAILED",
-    "TAILSCALE_COMMAND_FAILED",
-    "TAILSCALE_JSON_INVALID",
-    "TAILSCALE_EXTERNAL_PROBE_FAILED",
+    "PRIVATE_HTTPS_PROVIDER_NOT_INSTALLED",
+    "PRIVATE_HTTPS_PROVIDER_AUTH_REQUIRED",
+    "PRIVATE_HTTPS_DNS_UNAVAILABLE",
+    "PRIVATE_HTTPS_CERTIFICATE_UNAVAILABLE",
+    "PRIVATE_HTTPS_ROUTE_CONFLICT",
+    "PRIVATE_HTTPS_EXTERNAL_PROBE_FAILED",
+    "PRIVATE_HTTPS_PROVIDER_UNAVAILABLE",
     "SERVER_START_FAILED",
     "SERVER_STOP_FAILED",
     "SERVER_SELECTION_REQUIRED",
@@ -41,6 +33,10 @@ export const desktopServerExposureViewSchema = z
   .object({
     mode: desktopServerExposureModeSchema,
     topology: deploymentTopologySchema.nullable(),
+    provider: z
+      .object({ id: z.string().min(1).max(64), displayName: z.string().min(1).max(128) })
+      .strict()
+      .nullable(),
     lifecycle: z.enum(["stopped", "preparing", "ready", "error"]),
     advertisedOrigin: z.string().url().nullable(),
     errorCode: desktopServerExposureErrorCodeSchema.nullable(),

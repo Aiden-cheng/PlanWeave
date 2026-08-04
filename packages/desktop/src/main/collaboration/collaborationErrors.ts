@@ -9,7 +9,7 @@ import { redactCollaborationText } from "./redaction.js";
 
 export const COLLABORATION_CONNECTION_ERROR_CODES = {
   serverUnreachable: "SERVER_UNREACHABLE",
-  tailnetUnreachable: "TAILNET_UNREACHABLE",
+  privateNetworkUnreachable: "PRIVATE_NETWORK_UNREACHABLE",
   workspaceForbidden: "WORKSPACE_FORBIDDEN",
   workspaceUnauthorized: "WORKSPACE_UNAUTHORIZED"
 } as const;
@@ -137,7 +137,7 @@ export function collaborationErrorFromUnknown(error: unknown): CollaborationClie
 
 /**
  * Converts transport/auth failures into the stable connection semantics shown during onboarding.
- * The topology comes from the validated handoff/profile; hostnames are never guessed as Tailscale.
+ * The topology comes from the validated handoff/profile; hostnames are never used to guess scope.
  */
 export function collaborationConnectionErrorFromUnknown(
   error: unknown,
@@ -145,14 +145,14 @@ export function collaborationConnectionErrorFromUnknown(
 ): CollaborationClientError {
   const mapped = collaborationErrorFromUnknown(error);
   if ((mapped.kind === "offline" || mapped.kind === "timeout") && mapped.httpStatus === undefined) {
-    const tailnet = topology === "tailscale_https";
+    const privateNetwork = topology === "private_https";
     return new CollaborationClientError({
       kind: mapped.kind,
-      code: tailnet
-        ? COLLABORATION_CONNECTION_ERROR_CODES.tailnetUnreachable
+      code: privateNetwork
+        ? COLLABORATION_CONNECTION_ERROR_CODES.privateNetworkUnreachable
         : COLLABORATION_CONNECTION_ERROR_CODES.serverUnreachable,
-      message: tailnet
-        ? "The Server could not be reached through the configured tailnet endpoint."
+      message: privateNetwork
+        ? "The Server could not be reached through the configured private network endpoint."
         : "The configured Server could not be reached.",
       httpStatus: mapped.httpStatus,
       retryAfterMs: mapped.retryAfterMs,

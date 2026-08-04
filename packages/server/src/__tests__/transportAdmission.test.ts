@@ -8,18 +8,18 @@ import {
   operatorNetworkTransportAllowed
 } from "../insecureTransport.js";
 
-function tailscalePolicy() {
-  const advertisedOrigin = "https://planweave.example.ts.net";
+function reverseProxyPolicy() {
+  const advertisedOrigin = "https://planweave.mesh.example";
   return createTransportAdmissionPolicy(
     parseServerConfig({
       version: "server-config/v2",
       transport: {
-        mode: "tailscale_https",
+        mode: "reverse_proxy_https",
         listener: { protocol: "http", host: "127.0.0.1", port: 7_443 },
         advertisedOrigin
       },
       deployment: {
-        topology: "tailscale_https",
+        topology: "private_https",
         serverOrigin: advertisedOrigin,
         allowedClientOrigins: [advertisedOrigin],
         tlsTrust: "system_ca"
@@ -47,8 +47,8 @@ function tailscalePolicy() {
 }
 
 describe("transport admission policy", () => {
-  it("accepts TLS and only loopback HTTP for a Tailscale Serve backend", () => {
-    const policy = tailscalePolicy();
+  it("accepts TLS and only loopback HTTP for a reverse-proxy HTTPS backend", () => {
+    const policy = reverseProxyPolicy();
 
     expect(
       humanNetworkTransportAllowed({ encrypted: true, remoteAddress: "203.0.113.5" }, policy)
@@ -60,7 +60,7 @@ describe("transport admission policy", () => {
   });
 
   it("does not let proxy-visible loopback grant local owner bootstrap", () => {
-    const policy = tailscalePolicy();
+    const policy = reverseProxyPolicy();
 
     expect(localAdminBootstrapAllowed({ remoteAddress: "127.0.0.1" }, policy)).toBe(false);
     expect(
@@ -69,12 +69,12 @@ describe("transport admission policy", () => {
   });
 
   it("ignores forwarded identity and transport headers by construction", () => {
-    const policy = tailscalePolicy();
+    const policy = reverseProxyPolicy();
     const socket = { remoteAddress: "192.168.1.20" };
     const forgedHeaders = {
       "x-forwarded-for": "127.0.0.1",
       "x-forwarded-proto": "https",
-      "x-forwarded-host": "planweave.example.ts.net"
+      "x-forwarded-host": "planweave.mesh.example"
     };
 
     expect(forgedHeaders["x-forwarded-proto"]).toBe("https");

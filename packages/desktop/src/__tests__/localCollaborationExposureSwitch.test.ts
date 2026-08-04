@@ -2,9 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { switchLocalCollaborationExposure } from "../main/collaboration/localCollaborationExposureSwitch.js";
 import { createLocalCollaborationActivationCommand } from "../main/collaboration/localCollaborationSelectionActivation.js";
 
-const view = (mode: "local_only" | "tailscale_private") => ({
+const view = (mode: "local_only" | "private_https") => ({
   mode,
-  topology: mode === "local_only" ? ("loopback_http" as const) : ("tailscale_https" as const),
+  topology: mode === "local_only" ? ("loopback_http" as const) : ("private_https" as const),
+  provider: mode === "private_https" ? { id: "tailscale", displayName: "Tailscale" } : null,
   lifecycle: "ready" as const,
   advertisedOrigin: mode === "local_only" ? null : "https://planweave.example.ts.net/",
   errorCode: null,
@@ -14,7 +15,7 @@ const view = (mode: "local_only" | "tailscale_private") => ({
 
 describe("switchLocalCollaborationExposure", () => {
   it("reconciles the active local profile after the endpoint changes", async () => {
-    let mode: "local_only" | "tailscale_private" = "local_only";
+    let mode: "local_only" | "private_https" = "local_only";
     const reconcile = vi.fn().mockResolvedValue(null);
     const local = {
       getExposureView: () => view(mode),
@@ -25,13 +26,13 @@ describe("switchLocalCollaborationExposure", () => {
       })
     };
     await expect(
-      switchLocalCollaborationExposure(local, { reconcile }, { mode: "tailscale_private" })
-    ).resolves.toMatchObject({ mode: "tailscale_private" });
+      switchLocalCollaborationExposure(local, { reconcile }, { mode: "private_https" })
+    ).resolves.toMatchObject({ mode: "private_https" });
     expect(reconcile).toHaveBeenCalledWith("local-project-1");
   });
 
   it("runs the activation chain against the newly advertised local origin", async () => {
-    let mode: "local_only" | "tailscale_private" = "local_only";
+    let mode: "local_only" | "private_https" = "local_only";
     const coordinator = {
       getExposureView: () => view(mode),
       setExposureMode: vi.fn(async (input: { mode: typeof mode }) => {
@@ -59,7 +60,7 @@ describe("switchLocalCollaborationExposure", () => {
                 tlsTrust: "not_applicable" as const
               }
             : {
-                topology: "tailscale_https" as const,
+                topology: "private_https" as const,
                 serverOrigin: "https://planweave.example.ts.net/",
                 tlsTrust: "system_ca" as const
               }
@@ -89,7 +90,7 @@ describe("switchLocalCollaborationExposure", () => {
     const activation = createLocalCollaborationActivationCommand({ coordinator, service });
 
     await switchLocalCollaborationExposure(coordinator, activation, {
-      mode: "tailscale_private"
+      mode: "private_https"
     });
 
     expect(service.upsertProfile).toHaveBeenCalledWith(
@@ -99,7 +100,7 @@ describe("switchLocalCollaborationExposure", () => {
   });
 
   it("restores the previous mode when activation fails", async () => {
-    let mode: "local_only" | "tailscale_private" = "local_only";
+    let mode: "local_only" | "private_https" = "local_only";
     const reconcile = vi
       .fn()
       .mockRejectedValueOnce(new Error("activation_failed"))
@@ -113,7 +114,7 @@ describe("switchLocalCollaborationExposure", () => {
       })
     };
     await expect(
-      switchLocalCollaborationExposure(local, { reconcile }, { mode: "tailscale_private" })
+      switchLocalCollaborationExposure(local, { reconcile }, { mode: "private_https" })
     ).rejects.toThrow("activation_failed");
     expect(mode).toBe("local_only");
     expect(local.setExposureMode).toHaveBeenCalledTimes(2);
@@ -121,14 +122,14 @@ describe("switchLocalCollaborationExposure", () => {
   });
 
   it("restores the previous endpoint when the new local server fails to start", async () => {
-    let mode: "local_only" | "tailscale_private" = "local_only";
+    let mode: "local_only" | "private_https" = "local_only";
     const reconcile = vi.fn().mockResolvedValue(null);
     const local = {
       getExposureView: () => view(mode),
       localProfile: () => ({ profileId: "local-project-1" }),
       setExposureMode: vi.fn(async (input: { mode: typeof mode }) => {
         mode = input.mode;
-        if (mode === "tailscale_private") {
+        if (mode === "private_https") {
           return {
             ...view(mode),
             lifecycle: "error" as const,
@@ -140,9 +141,9 @@ describe("switchLocalCollaborationExposure", () => {
       })
     };
     await expect(
-      switchLocalCollaborationExposure(local, { reconcile }, { mode: "tailscale_private" })
+      switchLocalCollaborationExposure(local, { reconcile }, { mode: "private_https" })
     ).resolves.toMatchObject({
-      mode: "tailscale_private",
+      mode: "private_https",
       lifecycle: "error",
       errorCode: "TAILSCALE_HTTPS_UNAVAILABLE"
     });
@@ -151,14 +152,14 @@ describe("switchLocalCollaborationExposure", () => {
   });
 
   it("fails closed when restoring the previous mode returns an error view", async () => {
-    let mode: "local_only" | "tailscale_private" = "local_only";
+    let mode: "local_only" | "private_https" = "local_only";
     const reconcile = vi.fn().mockResolvedValue(null);
     const local = {
       getExposureView: () => view(mode),
       localProfile: () => ({ profileId: "local-project-1" }),
       setExposureMode: vi.fn(async (input: { mode: typeof mode }) => {
         mode = input.mode;
-        if (mode === "tailscale_private") {
+        if (mode === "private_https") {
           return {
             ...view(mode),
             lifecycle: "error" as const,
@@ -176,13 +177,13 @@ describe("switchLocalCollaborationExposure", () => {
     };
 
     await expect(
-      switchLocalCollaborationExposure(local, { reconcile }, { mode: "tailscale_private" })
+      switchLocalCollaborationExposure(local, { reconcile }, { mode: "private_https" })
     ).rejects.toThrow("local_collaboration_exposure_rollback_failed");
     expect(reconcile).not.toHaveBeenCalled();
   });
 
   it("does not reconcile when the restored authority differs from the previous endpoint", async () => {
-    let mode: "local_only" | "tailscale_private" = "local_only";
+    let mode: "local_only" | "private_https" = "local_only";
     let changes = 0;
     const reconcile = vi.fn().mockRejectedValueOnce(new Error("activation_failed"));
     const local = {
@@ -202,7 +203,7 @@ describe("switchLocalCollaborationExposure", () => {
     };
 
     await expect(
-      switchLocalCollaborationExposure(local, { reconcile }, { mode: "tailscale_private" })
+      switchLocalCollaborationExposure(local, { reconcile }, { mode: "private_https" })
     ).rejects.toThrow("local_collaboration_exposure_rollback_failed");
     expect(reconcile).toHaveBeenCalledTimes(1);
   });

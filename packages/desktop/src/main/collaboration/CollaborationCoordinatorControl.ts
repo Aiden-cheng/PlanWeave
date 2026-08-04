@@ -2,9 +2,7 @@ import {
   hashOperatorToken,
   LoopbackServerController,
   parseServerConfig,
-  TailscaleCliAdapter,
-  TailscaleExposureError,
-  type TailscaleControlPort,
+  serveDistributedServer,
   type ServerConfig
 } from "@planweave-ai/server";
 import {
@@ -53,6 +51,11 @@ import {
   type LocalCollaborationNetworkStorePort
 } from "./LocalCollaborationNetworkStore.js";
 import { resolveLocalCollaborationLanAddress } from "./localNetworkAddress.js";
+import {
+  ManagedPrivateHttpsExposureError,
+  TailscaleManagedPrivateHttpsAdapter,
+  type ManagedPrivateHttpsExposurePort
+} from "./managedPrivateHttpsExposure.js";
 
 type ResolvedSelection = {
   desktopProjectId: string;
@@ -71,7 +74,7 @@ type LoopbackServerControlPort = Pick<
   "status" | "apply" | "listTrustedProjectScopes" | "registerTrustedProject"
 >;
 
-type LocalExposureMode = "local_only" | "tailscale_private" | "lan_http";
+type LocalExposureMode = "local_only" | "private_https" | "lan_http";
 
 const localOperatorCredentialKey = "planweave-local-loopback";
 const localServerProfileId = "planweave-local-server";
@@ -143,7 +146,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   private lanSharingEnabled = false;
   private lanAddress: string | null = null;
   private exposureMode: LocalExposureMode = "local_only";
-  private tailscaleOrigin: string | null = null;
+  private privateHttpsOrigin: string | null = null;
   private exposureErrorCode: DesktopServerExposureErrorCode | null = null;
   private operatorToken: string | null = null;
   private operationQueue: Promise<unknown> = Promise.resolve();
@@ -158,7 +161,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   ) => LoopbackServerControlPort;
   private readonly allocatePort: (host: string, preferredPort: number | null) => Promise<number>;
   private readonly resolveLanAddress: () => string | null;
-  private readonly tailscale: TailscaleControlPort;
+  private readonly privateHttpsExposure: ManagedPrivateHttpsExposurePort;
   private readonly syncOperatorProfile: (
     input: Parameters<OperatorControlService["ensureMainOwnedServerProfile"]>[0]
   ) => Promise<void>;
@@ -174,7 +177,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     scopeStore?: LocalCollaborationScopeStorePort;
     networkStore?: LocalCollaborationNetworkStorePort;
     resolveLanAddress?: () => string | null;
-    tailscale?: TailscaleControlPort;
+    privateHttpsExposure?: ManagedPrivateHttpsExposurePort;
     syncOperatorProfile: (
       input: Parameters<OperatorControlService["ensureMainOwnedServerProfile"]>[0]
     ) => Promise<void>;
@@ -186,15 +189,24 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
         return (await resolveTaskCanvasWorkspace(projectRoot, canvasId)).id;
       }
     };
+    this.privateHttpsExposure =
+      options.privateHttpsExposure ?? new TailscaleManagedPrivateHttpsAdapter();
     this.createController =
       options.createController ??
       ((createConfig, onLifecycleError) =>
-        new LoopbackServerController({ createConfig, onLifecycleError }));
+        new LoopbackServerController({
+          createConfig,
+          onLifecycleError,
+          serve: (config) =>
+            serveDistributedServer(config, {
+              createExposureLifecycle: (leases) =>
+                this.privateHttpsExposure.createLifecycle(leases)
+            })
+        }));
     this.allocatePort = options.allocatePort ?? allocateLocalPort;
     this.scopeStore = options.scopeStore ?? new LocalCollaborationScopeStore();
     this.networkStore = options.networkStore ?? new LocalCollaborationNetworkStore();
     this.resolveLanAddress = options.resolveLanAddress ?? resolveLocalCollaborationLanAddress;
-    this.tailscale = options.tailscale ?? new TailscaleCliAdapter();
     this.syncOperatorProfile = options.syncOperatorProfile;
   }
 
@@ -285,17 +297,16 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     const trustedProjects = await this.resolveTrustedProjects();
     let lastStatus: LocalCollaborationServerStatus = current;
     for (let attempt = 0; attempt < localStartAttempts; attempt += 1) {
-      if (this.exposureMode === "tailscale_private") {
+      if (this.exposureMode === "private_https") {
         try {
-          const node = await this.tailscale.inspectNode();
-          this.tailscaleOrigin = `https://${node.dnsName}/`;
+          this.privateHttpsOrigin = await this.privateHttpsExposure.resolveAdvertisedOrigin();
           this.exposureErrorCode = null;
         } catch (error) {
           this.exposureErrorCode = this.exposureCode(error);
           throw error;
         }
       } else {
-        this.tailscaleOrigin = null;
+        this.privateHttpsOrigin = null;
       }
       this.lanAddress = this.lanSharingEnabled ? this.resolveLanAddress() : null;
       if (this.lanSharingEnabled && !this.lanAddress) {
@@ -393,14 +404,16 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     const status = this.status();
     const running = status.state === "running";
     const topology =
-      this.exposureMode === "tailscale_private"
-        ? "tailscale_https"
+      this.exposureMode === "private_https"
+        ? "private_https"
         : this.exposureMode === "lan_http"
           ? "lan_http"
           : "loopback_http";
     return desktopServerExposureViewSchema.parse({
       mode: this.exposureMode,
       topology,
+      provider:
+        this.exposureMode === "private_https" ? this.privateHttpsExposure.provider : null,
       lifecycle:
         this.exposureErrorCode !== null
           ? "error"
@@ -412,8 +425,8 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
                 ? "ready"
                 : "stopped",
       advertisedOrigin:
-        running && this.exposureMode === "tailscale_private"
-          ? this.tailscaleOrigin
+        running && this.exposureMode === "private_https"
+          ? this.privateHttpsOrigin
           : running && this.exposureMode === "lan_http"
             ? status.lanServerBaseUrl
             : null,
@@ -430,6 +443,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
         return desktopServerExposureViewSchema.parse({
           mode,
           topology: null,
+          provider: null,
           lifecycle: "stopped",
           advertisedOrigin: null,
           errorCode: "CUSTOM_HTTPS_CONFIGURATION_REQUIRED",
@@ -467,12 +481,12 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     const selection = this.selection;
     if (!selection || !this.isTrustedSelection(selection)) return null;
     const profile = this.connectionProfileFor(selection);
-    if (this.exposureMode === "tailscale_private") {
-      if (!this.tailscaleOrigin) return null;
+    if (this.exposureMode === "private_https") {
+      if (!this.privateHttpsOrigin) return null;
       return deploymentEndpointSchema.parse({
-        topology: "tailscale_https",
-        serverOrigin: this.tailscaleOrigin,
-        allowedClientOrigins: [this.tailscaleOrigin],
+        topology: "private_https",
+        serverOrigin: this.privateHttpsOrigin,
+        allowedClientOrigins: [this.privateHttpsOrigin],
         tlsTrust: "system_ca"
       });
     }
@@ -591,8 +605,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   }> {
     if (
       target.endpoint.topology === "loopback_http" ||
-      target.endpoint.topology === "lan_http" ||
-      target.endpoint.topology === "tailscale_https"
+      target.endpoint.topology === "lan_http"
     ) {
       throw new DeploymentBundleUnavailableError(
         "needs_project",
@@ -700,15 +713,15 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     const localPort = this.localPort;
     if (localPort === null) throw new Error("local_collaboration_port_allocation_required");
     const serverBaseUrl =
-      this.exposureMode === "tailscale_private"
-        ? this.tailscaleOrigin
+      this.exposureMode === "private_https"
+        ? this.privateHttpsOrigin
         : `http://127.0.0.1:${localPort}/`;
-    if (!serverBaseUrl) throw new Error("tailscale_advertised_origin_unavailable");
+    if (!serverBaseUrl) throw new Error("private_https_advertised_origin_unavailable");
     return loopbackServerProfileSchema.parse({
       profileId: localServerProfileId,
       displayName: "Local collaboration server",
       serverBaseUrl,
-      allowInsecureTransport: this.exposureMode !== "tailscale_private"
+      allowInsecureTransport: this.exposureMode !== "private_https"
     });
   }
 
@@ -831,11 +844,11 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
       "desktop",
       "local-collaboration-server"
     );
-    if (this.exposureMode === "tailscale_private") {
-      const advertisedOrigin = this.tailscaleOrigin;
-      if (!advertisedOrigin) throw new Error("tailscale_advertised_origin_unavailable");
+    if (this.exposureMode === "private_https") {
+      const advertisedOrigin = this.privateHttpsOrigin;
+      if (!advertisedOrigin) throw new Error("private_https_advertised_origin_unavailable");
       const endpoint = deploymentEndpointSchema.parse({
-        topology: "tailscale_https",
+        topology: "private_https",
         serverOrigin: advertisedOrigin,
         allowedClientOrigins: [advertisedOrigin],
         tlsTrust: "system_ca"
@@ -843,7 +856,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
       return parseServerConfig({
         version: "server-config/v2",
         transport: {
-          mode: "tailscale_https",
+          mode: "reverse_proxy_https",
           listener: { protocol: "http", host: "127.0.0.1", port: localPort },
           advertisedOrigin
         },
@@ -903,7 +916,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   }
 
   private exposureCode(error: unknown): DesktopServerExposureErrorCode {
-    if (error instanceof TailscaleExposureError) return error.code;
+    if (error instanceof ManagedPrivateHttpsExposureError) return error.code;
     if (error instanceof AggregateError) {
       for (const nestedError of error.errors) {
         const code = this.exposureCode(nestedError);

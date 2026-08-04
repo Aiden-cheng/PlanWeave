@@ -42,7 +42,7 @@ describe("CollaborationInvitationHandoffCoordinator", () => {
   it("uses the coordinator endpoint only for its reserved local profile namespace", async () => {
     const activeProfile = profile("planweave-local-project-1", "https://planweave.example.ts.net/");
     activeProfile.endpoint = {
-      topology: "tailscale_https",
+      topology: "private_https",
       serverOrigin: activeProfile.serverBaseUrl,
       allowedClientOrigins: [activeProfile.serverBaseUrl],
       tlsTrust: "system_ca"
@@ -59,7 +59,7 @@ describe("CollaborationInvitationHandoffCoordinator", () => {
     const coordinator = new CollaborationInvitationHandoffCoordinator(service, {
       recognizesLocalProfile: (profileId) => profileId.startsWith("planweave-local-"),
       invitationEndpoint: () => ({
-        topology: "tailscale_https",
+        topology: "private_https",
         serverOrigin: "https://planweave.example.ts.net/",
         allowedClientOrigins: ["https://planweave.example.ts.net/"],
         tlsTrust: "system_ca"
@@ -70,7 +70,7 @@ describe("CollaborationInvitationHandoffCoordinator", () => {
 
     const result = await coordinator.create({});
     expect(parseCollaborationInvitationHandoffV2(result.handoff)?.endpoint.topology).toBe(
-      "tailscale_https"
+      "private_https"
     );
   });
 

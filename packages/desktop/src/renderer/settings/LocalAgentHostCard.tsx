@@ -10,6 +10,7 @@ import type { createTranslator } from "../i18n";
 type LocalAgentHostCardProps = {
   activeProfile: OperatorProfileView | null;
   busy: boolean;
+  localServerHosted: boolean;
   loading: boolean;
   status: OperatorLocalAgentHostStatus | null;
   register: (profileIds: readonly string[]) => Promise<OperatorLocalAgentHostStatus | null>;
@@ -23,6 +24,7 @@ type LocalAgentHostCardProps = {
 export function LocalAgentHostCard({
   activeProfile,
   busy,
+  localServerHosted,
   loading,
   status,
   register,
@@ -45,18 +47,21 @@ export function LocalAgentHostCard({
       activeProfile.endpoint.tlsTrust !== "configured_ca"
   );
   const canRegisterWithAdmin = Boolean(
-    hasDirectRegistration && selected.length > 0 && !busy && !loading
+    !localServerHosted && hasDirectRegistration && selected.length > 0 && !busy && !loading
   );
   const canEnroll = Boolean(
-    status?.supported &&
+    !localServerHosted &&
+      status?.supported &&
       status.state === "not_registered" &&
       handoff.trim().length > 0 &&
       selected.length > 0 &&
       !busy &&
       !loading
   );
-  const canUpdate = status?.state !== "not_registered" && hasDirectRegistration;
-  const canRegisterDirectly = status?.state === "not_registered" && hasDirectRegistration;
+  const canUpdate =
+    !localServerHosted && status?.state !== "not_registered" && hasDirectRegistration;
+  const canRegisterDirectly =
+    !localServerHosted && status?.state === "not_registered" && hasDirectRegistration;
 
   return (
     <section className="border-t border-border/70 py-8" data-testid="host-admin-local-agent-host">
@@ -83,11 +88,13 @@ export function LocalAgentHostCard({
               </p>
             ) : null}
             <p className="text-xs text-text-muted" data-testid="host-admin-local-status">
-              {status.state === "ready"
-                ? t("hostAdminLocalHostReady")
-                : status.state === "background_setup_required"
-                  ? t("hostAdminLocalHostSetupRequired")
-                  : t("hostAdminLocalHostNotRegistered")}
+              {localServerHosted
+                ? t("hostAdminLocalHostUsesLocalServer")
+                : status.state === "ready"
+                  ? t("hostAdminLocalHostReady")
+                  : status.state === "background_setup_required"
+                    ? t("hostAdminLocalHostSetupRequired")
+                    : t("hostAdminLocalHostNotRegistered")}
             </p>
             <div className="divide-y divide-border/60 border-y border-border/60">
               {status.agents.map((agent) => (
@@ -103,7 +110,7 @@ export function LocalAgentHostCard({
                     type="checkbox"
                     data-testid={`host-admin-local-agent-${agent.profileId}`}
                     checked={selected.includes(agent.profileId)}
-                    disabled={busy || loading}
+                    disabled={localServerHosted || busy || loading}
                     onChange={(event) =>
                       setSelected((current) =>
                         event.target.checked
@@ -115,8 +122,10 @@ export function LocalAgentHostCard({
                 </label>
               ))}
             </div>
-            <p className="text-xs text-text-muted">{t("hostAdminLocalHostCredentialBoundary")}</p>
-            {status.state === "not_registered" && !canRegisterDirectly ? (
+            {!localServerHosted ? (
+              <p className="text-xs text-text-muted">{t("hostAdminLocalHostCredentialBoundary")}</p>
+            ) : null}
+            {!localServerHosted && status.state === "not_registered" && !canRegisterDirectly ? (
               <div className="grid gap-2">
                 <p className="text-xs text-text-muted">{t("hostAdminLocalHostHandoffPrompt")}</p>
                 <label

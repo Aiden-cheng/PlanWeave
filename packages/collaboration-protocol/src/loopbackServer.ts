@@ -11,15 +11,12 @@ function requireLoopbackDevelopmentOrigin(
   ctx: z.RefinementCtx
 ): void {
   const url = new URL(value.serverBaseUrl);
-  const tailscaleAdvertisedOrigin =
-    url.protocol === "https:" &&
-    url.hostname.toLowerCase().endsWith(".ts.net") &&
-    !url.port &&
-    value.allowInsecureTransport === false;
-  if (!isLoopbackHostname(url.hostname) && !tailscaleAdvertisedOrigin) {
+  const trustedReverseProxyOrigin =
+    url.protocol === "https:" && value.allowInsecureTransport === false;
+  if (!isLoopbackHostname(url.hostname) && !trustedReverseProxyOrigin) {
     ctx.addIssue({
       code: "custom",
-      message: "loopback_server_requires_loopback_or_tailscale_advertised_origin",
+      message: "local_server_requires_loopback_or_trusted_https_advertised_origin",
       path: ["serverBaseUrl"]
     });
   }
@@ -32,7 +29,7 @@ function requireLoopbackDevelopmentOrigin(
   }
 }
 
-/** A local Server profile with a loopback or Tailscale-advertised Origin. */
+/** A local Server profile with a loopback or trusted reverse-proxy Origin. */
 export const loopbackServerProfileSchema = z
   .object({
     profileId: z.string().trim().min(1).max(128),

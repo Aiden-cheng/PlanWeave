@@ -44,7 +44,7 @@ export function createTransportAdmissionPolicyForMode(
   return Object.freeze({
     allowsNetworkTransport(socket: TransportSocket): boolean {
       if (socket.encrypted === true) return true;
-      if (mode === "tailscale_https") return isLoopbackAddress(socket.remoteAddress);
+      if (mode === "reverse_proxy_https") return isLoopbackAddress(socket.remoteAddress);
       if (mode === "loopback_http" || mode === "lan_http") {
         return isPrivateNetworkAddress(socket.remoteAddress);
       }
@@ -52,13 +52,13 @@ export function createTransportAdmissionPolicyForMode(
     },
     allowsOperatorTransport(socket: TransportSocket): boolean {
       if (socket.encrypted === true) return true;
-      if (mode === "tailscale_https" || mode === "loopback_http" || mode === "lan_http") {
+      if (mode === "reverse_proxy_https" || mode === "loopback_http" || mode === "lan_http") {
         return isLoopbackAddress(socket.remoteAddress);
       }
       return false;
     },
     allowsLocalAdminBootstrap(socket: TransportSocket): boolean {
-      return mode !== "tailscale_https" && isLoopbackAddress(socket.remoteAddress);
+      return mode !== "reverse_proxy_https" && isLoopbackAddress(socket.remoteAddress);
     }
   });
 }

@@ -20,6 +20,7 @@ import type { createTranslator } from "../i18n";
 type Props = {
   t: ReturnType<typeof createTranslator>;
   presentation?: "card" | "section";
+  onExposureChange?: (exposure: DesktopServerExposureView) => void;
 };
 
 function normalizedOrigin(value: string): string {
@@ -41,26 +42,33 @@ function exposureErrorLabel(
   code: DesktopServerExposureErrorCode,
   t: ReturnType<typeof createTranslator>
 ): string {
-  if (code === "TAILSCALE_NOT_INSTALLED") return t("deploymentTailscaleNotInstalled");
-  if (code === "TAILSCALE_LOGIN_REQUIRED" || code === "TAILSCALE_MACHINE_AUTH_REQUIRED") {
-    return t("deploymentTailscaleLoginRequired");
+  if (code === "PRIVATE_HTTPS_PROVIDER_NOT_INSTALLED") {
+    return t("deploymentPrivateHttpsProviderNotInstalled");
   }
-  if (code === "TAILSCALE_MAGIC_DNS_UNAVAILABLE" || code === "TAILSCALE_HTTPS_UNAVAILABLE") {
-    return t("deploymentTailscaleHttpsUnavailable");
+  if (code === "PRIVATE_HTTPS_PROVIDER_AUTH_REQUIRED") {
+    return t("deploymentPrivateHttpsProviderAuthRequired");
   }
-  if (code === "TAILSCALE_SERVE_CONFLICT" || code === "TAILSCALE_SERVE_UNOWNED") {
-    return t("deploymentTailscaleServeConflict");
+  if (
+    code === "PRIVATE_HTTPS_DNS_UNAVAILABLE" ||
+    code === "PRIVATE_HTTPS_CERTIFICATE_UNAVAILABLE"
+  ) {
+    return t("deploymentPrivateHttpsUnavailable");
   }
-  if (code.startsWith("TAILSCALE_")) return t("deploymentTailscaleUnavailable");
+  if (code === "PRIVATE_HTTPS_ROUTE_CONFLICT") {
+    return t("deploymentPrivateHttpsRouteConflict");
+  }
+  if (code.startsWith("PRIVATE_HTTPS_")) {
+    return t("deploymentPrivateHttpsProviderUnavailable");
+  }
   return t("deploymentServerStartFailed");
 }
 
-export function DeploymentConnectionCard({ t, presentation = "card" }: Props) {
+export function DeploymentConnectionCard({ t, presentation = "card", onExposureChange }: Props) {
   const [origin, setOrigin] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [mode, setMode] = useState<DesktopServerExposureMode>("local_only");
   const [customTopology, setCustomTopology] =
-    useState<Extract<DeploymentTopology, "loopback_https" | "lan_https" | "public_https">>(
+    useState<Extract<DeploymentTopology, "loopback_https" | "private_https" | "public_https">>(
       "public_https"
     );
   const [exposure, setExposure] = useState<DesktopServerExposureView | null>(null);
@@ -78,12 +86,13 @@ export function DeploymentConnectionCard({ t, presentation = "card" }: Props) {
       collaborationBridge.getDesktopServerExposure()
     ]).then(([connection, nextExposure]) => {
       setExposure(nextExposure);
+      onExposureChange?.(nextExposure);
       setMode(nextExposure.mode);
       if (!connection.profile || !connection.workspaceId) return;
       setOrigin(connection.profile.serverBaseUrl);
       setDisplayName(connection.profile.displayName);
     });
-  }, []);
+  }, [onExposureChange]);
 
   const target = useMemo(() => {
     try {
@@ -112,6 +121,7 @@ export function DeploymentConnectionCard({ t, presentation = "card" }: Props) {
     try {
       const next = await collaborationBridge.setDesktopServerExposureMode({ mode });
       setExposure(next);
+      onExposureChange?.(next);
       setNotice(next.lifecycle === "error" ? "invalid" : null);
     } catch {
       setNotice("invalid");
@@ -197,7 +207,7 @@ export function DeploymentConnectionCard({ t, presentation = "card" }: Props) {
             onChange={(event) => setMode(event.target.value as DesktopServerExposureMode)}
           >
             <option value="local_only">{t("deploymentLoopback")}</option>
-            <option value="tailscale_private">{t("deploymentTailscale")}</option>
+            <option value="private_https">{t("deploymentPrivateHttps")}</option>
             <option value="custom_https">{t("deploymentCustomHttps")}</option>
             <option value="lan_http">{t("deploymentLanAdvanced")}</option>
           </select>
@@ -232,7 +242,7 @@ export function DeploymentConnectionCard({ t, presentation = "card" }: Props) {
                 onChange={(event) => setCustomTopology(event.target.value as typeof customTopology)}
               >
                 <option value="loopback_https">{t("deploymentLoopbackHttps")}</option>
-                <option value="lan_https">{t("deploymentLanHttps")}</option>
+                <option value="private_https">{t("deploymentPrivateHttpsTopology")}</option>
                 <option value="public_https">{t("deploymentPublicHttps")}</option>
               </select>
             </div>
@@ -242,9 +252,9 @@ export function DeploymentConnectionCard({ t, presentation = "card" }: Props) {
       {mode === "local_only" ? (
         <p className="text-xs text-text-muted">{t("deploymentLoopbackNote")}</p>
       ) : null}
-      {mode === "tailscale_private" ? (
-        <p className="text-xs text-text-muted" data-testid="deployment-tailscale-note">
-          {t("deploymentTailscaleNote")}
+      {mode === "private_https" ? (
+        <p className="text-xs text-text-muted" data-testid="deployment-private-https-note">
+          {t("deploymentPrivateHttpsNote")}
         </p>
       ) : null}
       {mode === "lan_http" ? (
@@ -270,6 +280,11 @@ export function DeploymentConnectionCard({ t, presentation = "card" }: Props) {
       {exposure?.advertisedOrigin ? (
         <p className="text-xs" data-testid="deployment-advertised-origin">
           {t("deploymentAdvertisedOrigin")}: {exposure.advertisedOrigin}
+        </p>
+      ) : null}
+      {exposure?.provider ? (
+        <p className="text-xs text-text-muted" data-testid="deployment-exposure-provider">
+          {t("deploymentPrivateHttpsProvider")}: {exposure.provider.displayName}
         </p>
       ) : null}
       {exposure?.errorCode ? (

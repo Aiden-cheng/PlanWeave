@@ -295,13 +295,16 @@ describe("scoped access capability contracts", () => {
     expect(() =>
       loopbackServerProfileSchema.parse({ ...loopback, serverBaseUrl: "http://example.com/" })
     ).toThrow();
-    expect(() =>
+    expect(
       loopbackServerProfileSchema.parse({
         ...loopback,
         serverBaseUrl: "https://server.example.com/",
         allowInsecureTransport: false
       })
-    ).toThrow();
+    ).toMatchObject({
+      serverBaseUrl: "https://server.example.com/",
+      allowInsecureTransport: false
+    });
     expect(loopbackServerLifecycleRequestSchema.parse({ action: "start", profile: loopback }).action).toBe("start");
     expect(loopbackServerLifecycleRequestSchema.parse({ action: "stop", profileId: loopback.profileId }).action).toBe("stop");
     expect(() =>
@@ -324,7 +327,7 @@ describe("scoped access capability contracts", () => {
         }
       })
     ).toThrow();
-    expect(() =>
+    expect(
       loopbackOwnerConnectionRequestSchema.parse({
         workspaceId,
         profile: {
@@ -336,7 +339,10 @@ describe("scoped access capability contracts", () => {
           allowInsecureTransport: false
         }
       })
-    ).toThrow(/loopback_server_requires_loopback_or_tailscale_advertised_origin/);
+    ).toMatchObject({
+      workspaceId,
+      profile: { serverBaseUrl: "https://server.example.com/" }
+    });
     expect(
       loopbackProjectRegistrationRequestSchema.parse({
         workspaceId,

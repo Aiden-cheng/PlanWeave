@@ -12,6 +12,7 @@ const collaborationBridge = vi.hoisted(() => ({
   getDesktopServerExposure: vi.fn().mockResolvedValue({
     mode: "local_only",
     topology: "loopback_http",
+    provider: null,
     lifecycle: "ready",
     advertisedOrigin: null,
     errorCode: null,
@@ -47,14 +48,14 @@ describe("DeploymentConnectionCard", () => {
     expect(screen.getByRole("button", { name: "Validate endpoint" })).toBeEnabled();
   });
 
-  it("uses system trust for a LAN HTTPS endpoint on a non-standard port", async () => {
+  it("uses system trust for a private HTTPS endpoint on a non-standard port", async () => {
     const user = userEvent.setup();
     render(<DeploymentConnectionCard t={createTranslator("en")} />);
 
     await user.selectOptions(screen.getByTestId("deployment-topology"), "custom_https");
     await user.type(screen.getByTestId("deployment-display-name"), "LAN Server");
     await user.type(screen.getByTestId("deployment-origin"), "https://192.168.1.20:7443");
-    await user.selectOptions(screen.getByTestId("deployment-custom-topology"), "lan_https");
+    await user.selectOptions(screen.getByTestId("deployment-custom-topology"), "private_https");
     expect(screen.queryByTestId("deployment-tls-trust")).not.toBeInTheDocument();
     expect(
       screen.getByText(
@@ -67,7 +68,7 @@ describe("DeploymentConnectionCard", () => {
       action: "request_deployment_guidance",
       target: expect.objectContaining({
         endpoint: {
-          topology: "lan_https",
+          topology: "private_https",
           serverOrigin: "https://192.168.1.20:7443/",
           allowedClientOrigins: ["https://192.168.1.20:7443/"],
           tlsTrust: "system_ca"
@@ -76,30 +77,37 @@ describe("DeploymentConnectionCard", () => {
     });
   });
 
-  it("activates Tailscale without asking the renderer for an Origin", async () => {
+  it("activates automatic private HTTPS without asking the renderer for an Origin", async () => {
     const user = userEvent.setup();
+    const onExposureChange = vi.fn();
     collaborationBridge.setDesktopServerExposureMode.mockResolvedValue({
-      mode: "tailscale_private",
-      topology: "tailscale_https",
+      mode: "private_https",
+      topology: "private_https",
+      provider: { id: "tailscale", displayName: "Tailscale" },
       lifecycle: "ready",
       advertisedOrigin: "https://planweave.example.ts.net/",
       errorCode: null,
       canActivate: true,
       canInvite: true
     });
-    render(<DeploymentConnectionCard t={createTranslator("en")} />);
+    render(
+      <DeploymentConnectionCard t={createTranslator("en")} onExposureChange={onExposureChange} />
+    );
     await waitFor(() => expect(collaborationBridge.getDesktopServerExposure).toHaveBeenCalled());
 
-    await user.selectOptions(screen.getByTestId("deployment-topology"), "tailscale_private");
+    await user.selectOptions(screen.getByTestId("deployment-topology"), "private_https");
     expect(screen.queryByTestId("deployment-origin")).not.toBeInTheDocument();
     expect(screen.queryByTestId("deployment-display-name")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Enable this connection" }));
 
     expect(collaborationBridge.setDesktopServerExposureMode).toHaveBeenCalledWith({
-      mode: "tailscale_private"
+      mode: "private_https"
     });
     expect(screen.getByTestId("deployment-advertised-origin")).toHaveTextContent(
       "https://planweave.example.ts.net/"
+    );
+    expect(onExposureChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ mode: "private_https", lifecycle: "ready" })
     );
   });
 

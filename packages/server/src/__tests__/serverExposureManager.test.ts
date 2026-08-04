@@ -21,12 +21,12 @@ function config(): ServerConfig {
   return parseServerConfig({
     version: "server-config/v2",
     transport: {
-      mode: "tailscale_https",
+      mode: "reverse_proxy_https",
       listener: { protocol: "http", host: "127.0.0.1", port: 8787 },
       advertisedOrigin: "https://planweave.tailnet.ts.net"
     },
     deployment: {
-      topology: "tailscale_https",
+      topology: "private_https",
       serverOrigin: "https://planweave.tailnet.ts.net",
       allowedClientOrigins: ["https://planweave.tailnet.ts.net"],
       tlsTrust: "system_ca"
@@ -461,7 +461,7 @@ describe("ServerExposureManager", () => {
     });
     const prepared = await manager.activate(config());
     expect(prepared.ownership).toEqual({
-      kind: "tailscale_https",
+      kind: "tailscale_serve",
       lease: leases.lease,
       createdByActivation: false
     });

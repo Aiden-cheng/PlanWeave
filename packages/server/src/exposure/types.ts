@@ -51,7 +51,7 @@ export interface ExposureLeaseStorePort {
 }
 
 export type ExposureOwnership = {
-  kind: "tailscale_https";
+  kind: "tailscale_serve";
   lease: TailscaleServeLease;
   createdByActivation: boolean;
 };

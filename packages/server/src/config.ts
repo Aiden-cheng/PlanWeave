@@ -333,9 +333,9 @@ const lanHttpTransportSchema = z
     acknowledgeInsecureLan: z.literal(true)
   })
   .strict();
-const tailscaleHttpsTransportSchema = z
+const reverseProxyHttpsTransportSchema = z
   .object({
-    mode: z.literal("tailscale_https"),
+    mode: z.literal("reverse_proxy_https"),
     listener: httpListenerSchema,
     advertisedOrigin: collaborationServerOriginSchema
   })
@@ -351,7 +351,7 @@ const directHttpsTransportSchema = z
 export const serverTransportSchema = z.discriminatedUnion("mode", [
   loopbackHttpTransportSchema,
   lanHttpTransportSchema,
-  tailscaleHttpsTransportSchema,
+  reverseProxyHttpsTransportSchema,
   directHttpsTransportSchema
 ]);
 export type ServerTransport = z.infer<typeof serverTransportSchema>;
@@ -427,17 +427,15 @@ function validateNormalizedTransport(
     }
     return;
   }
-  if (transport.mode === "tailscale_https") {
+  if (transport.mode === "reverse_proxy_https") {
     if (
       transport.listener.host !== "127.0.0.1" ||
       advertised.protocol !== "https:" ||
-      !advertised.hostname.toLowerCase().endsWith(".ts.net") ||
-      originPort(advertised) !== 443 ||
       !deployment ||
-      !new Set<string>(["tailscale_https"]).has(deployment.topology) ||
+      !new Set<string>(["private_https", "public_https"]).has(deployment.topology) ||
       new URL(deployment.serverOrigin).origin !== advertised.origin
     ) {
-      context.addIssue({ code: "custom", message: "server_tailscale_https_transport_invalid" });
+      context.addIssue({ code: "custom", message: "server_reverse_proxy_https_transport_invalid" });
     }
     return;
   }
@@ -445,7 +443,9 @@ function validateNormalizedTransport(
     advertised.protocol !== "https:" ||
     originPort(advertised) !== transport.listener.port ||
     !deployment ||
-    !new Set<string>(["loopback_https", "lan_https", "public_https"]).has(deployment.topology) ||
+    !new Set<string>(["loopback_https", "private_https", "public_https"]).has(
+      deployment.topology
+    ) ||
     new URL(deployment.serverOrigin).origin !== advertised.origin
   ) {
     context.addIssue({ code: "custom", message: "server_direct_https_transport_invalid" });
@@ -544,7 +544,15 @@ function normalizedPolicy(mode: ServerTransport["mode"]): ServerConfig["insecure
 function normalizeV1Config(config: z.infer<typeof serverConfigV1Schema>): ServerConfig {
   const advertisedOrigin = new URL(config.publicUrl).origin;
   let transport: ServerTransport;
-  let deployment = config.deployment ?? null;
+  let deployment = config.deployment
+    ? deploymentEndpointSchema.parse({
+        ...config.deployment,
+        topology:
+          config.deployment.topology === "lan_https"
+            ? "private_https"
+            : config.deployment.topology
+      })
+    : null;
   if (config.allowInsecureLan) {
     transport = {
       mode: "lan_http",
@@ -558,7 +566,7 @@ function normalizeV1Config(config: z.infer<typeof serverConfigV1Schema>): Server
       listener: { protocol: "http", ...config.bind },
       advertisedOrigin
     };
-    deployment ??= serverConfigV1DeploymentEndpointSchema.parse({
+    deployment ??= deploymentEndpointSchema.parse({
       topology: "loopback_http",
       serverOrigin: advertisedOrigin,
       allowedClientOrigins: [advertisedOrigin],
@@ -585,7 +593,7 @@ function normalizeV1Config(config: z.infer<typeof serverConfigV1Schema>): Server
     version: "server-config/v2",
     transport,
     deployment,
-    allowedClientOrigins: config.deployment?.allowedClientOrigins ?? null,
+    allowedClientOrigins: config.deployment ? deployment?.allowedClientOrigins ?? null : null,
     insecurePolicy: normalizedPolicy(transport.mode)
   });
 }
@@ -688,14 +696,18 @@ export const serverConfigSummarySchema = z
       })
       .strict(),
     advertisedOrigin: z.url(),
-    transportMode: z.enum(["loopback_http", "lan_http", "tailscale_https", "direct_https"]),
+    transportMode: z.enum([
+      "loopback_http",
+      "lan_http",
+      "reverse_proxy_https",
+      "direct_https"
+    ]),
     deployment: z
       .object({
         topology: z.enum([
           "loopback_http",
           "loopback_https",
-          "lan_https",
-          "tailscale_https",
+          "private_https",
           "public_https"
         ]),
         allowedClientOrigins: z.array(z.url()).max(32)

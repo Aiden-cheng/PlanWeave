@@ -26,8 +26,27 @@ describe("LocalCollaborationNetworkStore", () => {
       preferredPort: 18_787
     });
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
-      version: 3,
+      version: 4,
       exposureMode: "lan_http",
+      preferredPort: 18_787
+    });
+  });
+
+  it("migrates the provider-specific private HTTPS mode to the generic mode", async () => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-local-network-"));
+    const path = join(root, "local-network.json");
+    await writeFile(
+      path,
+      `${JSON.stringify({
+        version: 3,
+        exposureMode: "tailscale_private",
+        preferredPort: 18_787
+      })}\n`
+    );
+
+    await expect(new LocalCollaborationNetworkStore(path).read()).resolves.toEqual({
+      lanSharingEnabled: false,
+      exposureMode: "private_https",
       preferredPort: 18_787
     });
   });

@@ -84,21 +84,21 @@ describe("runCollaborationCommand", () => {
 });
 
 describe("collaboration connection error semantics", () => {
-  it("uses the validated Tailscale topology for unreachable network failures", () => {
+  it("uses the validated private-network topology for unreachable network failures", () => {
     const error = collaborationConnectionErrorFromUnknown(
-      new TypeError("fetch failed: getaddrinfo ENOTFOUND private.example.ts.net"),
-      "tailscale_https"
+      new TypeError("fetch failed: getaddrinfo ENOTFOUND planweave.mesh.example"),
+      "private_https"
     );
 
     expect(error).toMatchObject({
       kind: "offline",
-      code: "TAILNET_UNREACHABLE",
+      code: "PRIVATE_NETWORK_UNREACHABLE",
       retryable: true
     });
-    expect(error.message).not.toContain("private.example.ts.net");
+    expect(error.message).not.toContain("planweave.mesh.example");
   });
 
-  it("does not infer Tailscale from an unclassified network failure", () => {
+  it("does not infer private-network reachability from an unclassified network failure", () => {
     const error = collaborationConnectionErrorFromUnknown(new TypeError("fetch failed"));
 
     expect(error).toMatchObject({
@@ -111,7 +111,7 @@ describe("collaboration connection error semantics", () => {
   it("preserves an HTTP error because receiving a response proves the Server was reached", () => {
     const error = collaborationConnectionErrorFromUnknown(
       collaborationErrorFromHttp(503, JSON.stringify({ error: "collaboration_offline" })),
-      "tailscale_https"
+      "private_https"
     );
 
     expect(error).toMatchObject({
@@ -127,11 +127,11 @@ describe("collaboration connection error semantics", () => {
         403,
         JSON.stringify({ error: "human_role_insufficient", message: "internal policy detail" })
       ),
-      "tailscale_https"
+      "private_https"
     );
     const unauthorized = collaborationConnectionErrorFromUnknown(
       collaborationErrorFromHttp(401, JSON.stringify({ error: "human_unauthenticated" })),
-      "tailscale_https"
+      "private_https"
     );
 
     expect(forbidden).toMatchObject({
@@ -156,7 +156,7 @@ describe("collaboration connection error semantics", () => {
         code: "collaboration_credential_missing",
         retryable: false
       }),
-      "tailscale_https"
+      "private_https"
     );
     const localPolicyFailure = collaborationConnectionErrorFromUnknown(
       new CollaborationClientError({
@@ -164,7 +164,7 @@ describe("collaboration connection error semantics", () => {
         code: "local_policy_forbidden",
         retryable: false
       }),
-      "tailscale_https"
+      "private_https"
     );
 
     expect(missingCredential.code).toBe("collaboration_credential_missing");

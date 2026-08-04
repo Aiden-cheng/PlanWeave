@@ -103,16 +103,16 @@ export class LoopbackServerController {
       isLoopbackHostname(config.transport.listener.host) &&
       isLoopbackHostname(configUrl.hostname) &&
       configUrl.origin === profileUrl.origin;
-    const fixedTailscaleConfig =
-      config.transport.mode === "tailscale_https" &&
+    const fixedReverseProxyConfig =
+      config.transport.mode === "reverse_proxy_https" &&
       config.transport.listener.protocol === "http" &&
       config.transport.listener.host === "127.0.0.1" &&
       profileUrl.protocol === "https:" &&
       profile.allowInsecureTransport === false &&
       configUrl.origin === profileUrl.origin;
     if (
-      (!fixedTailscaleConfig && config.transport.listener.port !== expectedPort) ||
-      (!fixedLanConfig && !fixedLoopbackConfig && !fixedTailscaleConfig)
+      (!fixedReverseProxyConfig && config.transport.listener.port !== expectedPort) ||
+      (!fixedLanConfig && !fixedLoopbackConfig && !fixedReverseProxyConfig)
     ) {
       throw new Error("loopback_profile_configuration_mismatch");
     }

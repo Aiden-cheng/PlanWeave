@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTranslator } from "../renderer/i18n";
 import { HostAdministrationSection } from "../renderer/settings/HostAdministrationSection";
+import { LocalAgentHostCard } from "../renderer/settings/LocalAgentHostCard";
 
 const bridgeMock = vi.hoisted(() => ({
   getOperatorControlStatus: vi.fn(),
@@ -180,12 +181,47 @@ afterEach(() => {
 });
 
 describe("Agent Host settings", () => {
+  it("keeps local Agent selection disabled while this computer hosts the Server", () => {
+    render(
+      <LocalAgentHostCard
+        activeProfile={status().profiles[0]}
+        busy={false}
+        localServerHosted={true}
+        loading={false}
+        status={{
+          supported: true,
+          state: "not_registered",
+          agents: [
+            {
+              profileId: "codex-acp",
+              agentId: "codex",
+              displayName: "Codex",
+              detected: true,
+              exposed: false,
+              ready: false
+            }
+          ]
+        }}
+        register={vi.fn()}
+        enroll={vi.fn()}
+        t={createTranslator("en")}
+      />
+    );
+
+    expect(screen.getByTestId("host-admin-local-agent-codex-acp")).toBeDisabled();
+    expect(screen.getByTestId("host-admin-local-status")).toHaveTextContent(
+      "Local agents are already available"
+    );
+    expect(screen.queryByTestId("host-admin-register-local")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("host-admin-local-handoff")).not.toBeInTheDocument();
+  });
+
   it("shows only user-facing device and agent information", async () => {
     const { container } = render(<HostAdministrationSection t={createTranslator("en")} />);
 
     expect(await screen.findByTestId("host-administration")).toBeInTheDocument();
     expect(screen.getByTestId("deployment-connection")).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /Tailscale private network/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Private network HTTPS/ })).toBeInTheDocument();
     expect(container.querySelector('[data-slot="card"]')).not.toBeInTheDocument();
     expect(await screen.findByTestId("host-availability-status-host-1")).toHaveTextContent(
       "Offline"

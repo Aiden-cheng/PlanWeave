@@ -26,6 +26,10 @@ import { CollaborationProfileStore } from "../main/collaboration/collaborationPr
 import { CollaborationService } from "../main/collaboration/collaborationService";
 import { createLocalCollaborationActivationCommand } from "../main/collaboration/localCollaborationSelectionActivation";
 import { switchLocalCollaborationExposure } from "../main/collaboration/localCollaborationExposureSwitch";
+import {
+  ManagedPrivateHttpsExposureError,
+  TailscaleManagedPrivateHttpsAdapter
+} from "../main/collaboration/managedPrivateHttpsExposure";
 
 const project: DesktopProjectSummary = {
   projectId: "project-1",
@@ -801,7 +805,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
       syncOperatorProfile,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
       networkStore: networkStore(),
-      tailscale: tailscaleControl(),
+      privateHttpsExposure: new TailscaleManagedPrivateHttpsAdapter(tailscaleControl()),
       projects: {
         listProjects: async () => [project],
         resolveAuthorityProjectId: async () => authorityProjectId
@@ -814,9 +818,10 @@ describe("LocalCollaborationCoordinatorControl", () => {
     });
     await control.setCurrentSelection({ projectId: project.projectId, canvasId: "canvas-1" });
 
-    await expect(control.setExposureMode({ mode: "tailscale_private" })).resolves.toMatchObject({
-      mode: "tailscale_private",
-      topology: "tailscale_https",
+    await expect(control.setExposureMode({ mode: "private_https" })).resolves.toMatchObject({
+      mode: "private_https",
+      topology: "private_https",
+      provider: { id: "tailscale", displayName: "Tailscale" },
       lifecycle: "ready",
       advertisedOrigin: "https://planweave.example.ts.net/",
       errorCode: null,
@@ -828,7 +833,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     });
     expect(configFactory!(control.status().profile!)).toMatchObject({
       transport: {
-        mode: "tailscale_https",
+        mode: "reverse_proxy_https",
         listener: { protocol: "http", host: "127.0.0.1", port: 18_787 },
         advertisedOrigin: "https://planweave.example.ts.net"
       }
@@ -837,7 +842,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
       expect.objectContaining({
         profile: expect.objectContaining({
           endpoint: expect.objectContaining({
-            topology: "tailscale_https",
+            topology: "private_https",
             serverOrigin: "https://planweave.example.ts.net/"
           })
         }),
@@ -850,20 +855,20 @@ describe("LocalCollaborationCoordinatorControl", () => {
   });
 
   it.each([
-    "TAILSCALE_NOT_INSTALLED",
-    "TAILSCALE_LOGIN_REQUIRED",
-    "TAILSCALE_HTTPS_UNAVAILABLE"
-  ] as const)("returns the stable %s activation error without raw details", async (code) => {
+    ["TAILSCALE_NOT_INSTALLED", "PRIVATE_HTTPS_PROVIDER_NOT_INSTALLED"],
+    ["TAILSCALE_LOGIN_REQUIRED", "PRIVATE_HTTPS_PROVIDER_AUTH_REQUIRED"],
+    ["TAILSCALE_HTTPS_UNAVAILABLE", "PRIVATE_HTTPS_CERTIFICATE_UNAVAILABLE"]
+  ] as const)("maps %s to stable %s without raw details", async (providerCode, expectedCode) => {
     const tailscale = tailscaleControl();
     vi.mocked(tailscale.inspectNode).mockRejectedValue(
-      new TailscaleExposureError(code, { cause: new Error("secret stderr output") })
+      new TailscaleExposureError(providerCode, { cause: new Error("secret stderr output") })
     );
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
       syncOperatorProfile: async () => undefined,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
       networkStore: networkStore(),
-      tailscale,
+      privateHttpsExposure: new TailscaleManagedPrivateHttpsAdapter(tailscale),
       projects: {
         listProjects: async () => [project],
         resolveAuthorityProjectId: async () => authorityProjectId
@@ -872,11 +877,11 @@ describe("LocalCollaborationCoordinatorControl", () => {
       allocatePort: async () => 18_787
     });
 
-    const view = await control.setExposureMode({ mode: "tailscale_private" });
+    const view = await control.setExposureMode({ mode: "private_https" });
     expect(view).toMatchObject({
       lifecycle: "error",
       advertisedOrigin: null,
-      errorCode: code,
+      errorCode: expectedCode,
       canInvite: false
     });
     expect(JSON.stringify(view)).not.toContain("secret stderr output");
@@ -889,7 +894,9 @@ describe("LocalCollaborationCoordinatorControl", () => {
         _createConfig: (profile: NonNullable<LoopbackServerStatus["profile"]>) => ServerConfig,
         onLifecycleError: (error: unknown) => void
       ) => {
-        onLifecycleError(new TailscaleExposureError("TAILSCALE_SERVE_CONFLICT"));
+        onLifecycleError(
+          new ManagedPrivateHttpsExposureError("PRIVATE_HTTPS_ROUTE_CONFLICT")
+        );
         return fake.control;
       }
     );
@@ -898,7 +905,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
       syncOperatorProfile: async () => undefined,
       scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
       networkStore: networkStore(),
-      tailscale: tailscaleControl(),
+      privateHttpsExposure: new TailscaleManagedPrivateHttpsAdapter(tailscaleControl()),
       projects: {
         listProjects: async () => [project],
         resolveAuthorityProjectId: async () => authorityProjectId
@@ -907,9 +914,9 @@ describe("LocalCollaborationCoordinatorControl", () => {
       allocatePort: async () => 18_787
     });
 
-    await expect(control.setExposureMode({ mode: "tailscale_private" })).resolves.toMatchObject({
+    await expect(control.setExposureMode({ mode: "private_https" })).resolves.toMatchObject({
       lifecycle: "error",
-      errorCode: "TAILSCALE_SERVE_CONFLICT",
+      errorCode: "PRIVATE_HTTPS_ROUTE_CONFLICT",
       advertisedOrigin: null,
       canInvite: false
     });

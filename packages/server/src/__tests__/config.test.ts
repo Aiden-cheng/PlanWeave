@@ -70,7 +70,7 @@ describe("server config", () => {
       advertisedOrigin: "https://server.example.test:7443",
       transportMode: "direct_https",
       deployment: {
-        topology: "lan_https",
+        topology: "private_https",
         allowedClientOrigins: ["https://desktop.example.test/"]
       },
       projectIds: ["project-1"]
@@ -178,10 +178,13 @@ describe("server config", () => {
       deployment: undefined,
       allowInsecureDevelopment: true
     };
-    expect(parseServerConfig(insecure).insecurePolicy).toEqual({
+    const normalized = parseServerConfig(insecure);
+    expect(normalized.insecurePolicy).toEqual({
       allowInsecureTransport: true,
       allowInsecureLan: false
     });
+    expect(normalized.deployment?.topology).toBe("loopback_http");
+    expect(normalized.allowedClientOrigins).toBeNull();
     expect(() => parseServerConfig({ ...insecure, publicUrl: "http://localhost:7443" })).toThrow(
       "server_insecure_development_requires_literal_loopback"
     );
@@ -226,7 +229,7 @@ describe("server config", () => {
         listener: { protocol: "https", ...v1.bind, tls: v1.tls },
         advertisedOrigin: v1.publicUrl
       },
-      deployment: v1.deployment,
+      deployment: { ...v1.deployment, topology: "private_https" },
       allowedClientOrigins: v1.deployment.allowedClientOrigins,
       ...common
     });
@@ -265,24 +268,24 @@ describe("server config", () => {
     expect(lan.insecurePolicy.allowInsecureLan).toBe(true);
     expect(lan.allowedClientOrigins).toEqual(["http://192.168.1.20:7443"]);
 
-    const tailscale = parseServerConfig({
+    const reverseProxy = parseServerConfig({
       version: "server-config/v2",
       transport: {
-        mode: "tailscale_https",
+        mode: "reverse_proxy_https",
         listener: { protocol: "http", host: "127.0.0.1", port: 8787 },
-        advertisedOrigin: "https://planweave.tailnet.ts.net"
+        advertisedOrigin: "https://planweave.mesh.example"
       },
       deployment: {
-        topology: "tailscale_https",
-        serverOrigin: "https://planweave.tailnet.ts.net",
-        allowedClientOrigins: ["https://planweave.tailnet.ts.net"],
+        topology: "private_https",
+        serverOrigin: "https://planweave.mesh.example",
+        allowedClientOrigins: ["https://planweave.mesh.example"],
         tlsTrust: "system_ca"
       },
-      allowedClientOrigins: ["https://planweave.tailnet.ts.net"],
+      allowedClientOrigins: ["https://planweave.mesh.example"],
       ...common
     });
-    expect(tailscale.transport.listener.protocol).toBe("http");
-    expect(tailscale.insecurePolicy.allowInsecureTransport).toBe(false);
+    expect(reverseProxy.transport.listener.protocol).toBe("http");
+    expect(reverseProxy.insecurePolicy.allowInsecureTransport).toBe(false);
   });
 
   it("rejects invalid v2 transport combinations without fallback", async () => {
@@ -290,12 +293,12 @@ describe("server config", () => {
     const base = {
       version: "server-config/v2",
       deployment: {
-        topology: "tailscale_https",
-        serverOrigin: "https://planweave.tailnet.ts.net",
-        allowedClientOrigins: ["https://planweave.tailnet.ts.net"],
+        topology: "private_https",
+        serverOrigin: "https://planweave.mesh.example",
+        allowedClientOrigins: ["https://planweave.mesh.example"],
         tlsTrust: "system_ca"
       },
-      allowedClientOrigins: ["https://planweave.tailnet.ts.net"],
+      allowedClientOrigins: ["https://planweave.mesh.example"],
       dataDirectory: v1.dataDirectory,
       trustedProjects: v1.trustedProjects,
       operatorCredentials: v1.operatorCredentials
@@ -304,34 +307,34 @@ describe("server config", () => {
       parseServerConfig({
         ...base,
         transport: {
-          mode: "tailscale_https",
+          mode: "reverse_proxy_https",
           listener: { protocol: "http", host: "0.0.0.0", port: 8787 },
-          advertisedOrigin: "https://planweave.tailnet.ts.net"
+          advertisedOrigin: "https://planweave.mesh.example"
         }
       })
-    ).toThrow("server_tailscale_https_transport_invalid");
+    ).toThrow("server_reverse_proxy_https_transport_invalid");
     expect(() =>
       parseServerConfig({
         ...base,
         transport: {
-          mode: "tailscale_https",
+          mode: "reverse_proxy_https",
           listener: { protocol: "http", host: "::1", port: 8787 },
-          advertisedOrigin: "https://planweave.tailnet.ts.net"
+          advertisedOrigin: "https://planweave.mesh.example"
         }
       })
-    ).toThrow("server_tailscale_https_transport_invalid");
+    ).toThrow("server_reverse_proxy_https_transport_invalid");
     expect(() =>
       parseServerConfig({
         ...base,
         transport: {
-          mode: "tailscale_https",
+          mode: "reverse_proxy_https",
           listener: {
             protocol: "http",
             host: "127.0.0.1",
             port: 8787,
             tls: v1.tls
           },
-          advertisedOrigin: "https://planweave.tailnet.ts.net"
+          advertisedOrigin: "https://planweave.mesh.example"
         }
       })
     ).toThrow();
@@ -342,7 +345,7 @@ describe("server config", () => {
     "path",
     "query",
     "fragment"
-  ] as const)("rejects v2 direct and Tailscale advertised origins containing %s before normalization", async (part) => {
+  ] as const)("rejects v2 direct and reverse-proxy origins containing %s before normalization", async (part) => {
     const v1 = await secureConfig();
     const directOrigin = {
       userinfo: "https://user@server.example.test:7443",
@@ -358,7 +361,7 @@ describe("server config", () => {
           listener: { protocol: "https", ...v1.bind, tls: v1.tls },
           advertisedOrigin: directOrigin
         },
-        deployment: v1.deployment,
+        deployment: { ...v1.deployment, topology: "private_https" },
         allowedClientOrigins: v1.deployment.allowedClientOrigins,
         dataDirectory: v1.dataDirectory,
         trustedProjects: v1.trustedProjects,
@@ -366,27 +369,27 @@ describe("server config", () => {
       })
     ).toThrow("serverBaseUrl must be an http(s) origin without a path");
 
-    const tailscaleOrigin = {
-      userinfo: "https://user@planweave.tailnet.ts.net",
-      path: "https://planweave.tailnet.ts.net/api",
-      query: "https://planweave.tailnet.ts.net/?mode=test",
-      fragment: "https://planweave.tailnet.ts.net/#setup"
+    const reverseProxyOrigin = {
+      userinfo: "https://user@planweave.mesh.example",
+      path: "https://planweave.mesh.example/api",
+      query: "https://planweave.mesh.example/?mode=test",
+      fragment: "https://planweave.mesh.example/#setup"
     }[part];
     expect(() =>
       parseServerConfig({
         version: "server-config/v2",
         transport: {
-          mode: "tailscale_https",
+          mode: "reverse_proxy_https",
           listener: { protocol: "http", host: "127.0.0.1", port: 8787 },
-          advertisedOrigin: tailscaleOrigin
+          advertisedOrigin: reverseProxyOrigin
         },
         deployment: {
-          topology: "tailscale_https",
-          serverOrigin: "https://planweave.tailnet.ts.net",
-          allowedClientOrigins: ["https://planweave.tailnet.ts.net"],
+          topology: "private_https",
+          serverOrigin: "https://planweave.mesh.example",
+          allowedClientOrigins: ["https://planweave.mesh.example"],
           tlsTrust: "system_ca"
         },
-        allowedClientOrigins: ["https://planweave.tailnet.ts.net"],
+        allowedClientOrigins: ["https://planweave.mesh.example"],
         dataDirectory: v1.dataDirectory,
         trustedProjects: v1.trustedProjects,
         operatorCredentials: v1.operatorCredentials
@@ -434,14 +437,14 @@ describe("server config", () => {
     ];
     expect(
       originalTopologies.map((input) => parseServerConfig(input).deployment?.topology)
-    ).toEqual(["lan_https", "loopback_https", "public_https", "loopback_http"]);
+    ).toEqual(["private_https", "loopback_https", "public_https", "loopback_http"]);
     expect(() =>
       parseServerConfig({
         ...v1,
         publicUrl: "https://planweave.tailnet.ts.net",
         bind: { host: "127.0.0.1", port: 443 },
         deployment: {
-          topology: "tailscale_https",
+          topology: "private_https",
           serverOrigin: "https://planweave.tailnet.ts.net",
           allowedClientOrigins: ["https://planweave.tailnet.ts.net"],
           tlsTrust: "system_ca"

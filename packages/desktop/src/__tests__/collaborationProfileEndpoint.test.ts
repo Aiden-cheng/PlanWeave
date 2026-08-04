@@ -16,7 +16,7 @@ import {
 } from "../main/collaboration/collaborationProfileEndpoint.js";
 
 const configuredEndpoint = {
-  topology: "lan_https" as const,
+  topology: "private_https" as const,
   serverOrigin: "https://192.168.1.20:7443/",
   allowedClientOrigins: ["https://192.168.1.20:7443/"],
   tlsTrust: "configured_ca" as const

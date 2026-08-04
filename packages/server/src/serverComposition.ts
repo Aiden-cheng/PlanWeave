@@ -79,7 +79,7 @@ import {
   WorkAssignmentService
 } from "./work/index.js";
 import { SqliteExposureLeaseStore } from "./exposure/exposureLeaseRepository.js";
-import { attachTailscaleWebSocketReadiness } from "./exposure/tailscaleWebSocketReadiness.js";
+import { attachReverseProxyWebSocketReadiness } from "./exposure/reverseProxyWebSocketReadiness.js";
 import type { ExposureLeaseStorePort } from "./exposure/types.js";
 import { createDistributedHttpRequestListener } from "./distributedHttpRequestListener.js";
 import {
@@ -732,7 +732,7 @@ export async function createDistributedServerComposition(
       );
     }
     upgradeRouter = new WebSocketUpgradeRouter(options.httpServer);
-    attachTailscaleWebSocketReadiness({ config, upgradeRouter, transportAdmission });
+    attachReverseProxyWebSocketReadiness({ config, upgradeRouter, transportAdmission });
     webSockets = attachAgentHostWebSocketServer({
       server: options.httpServer,
       upgradeRouter,

@@ -16,7 +16,7 @@ describe("collaboration invitation handoff contract", () => {
   it("serializes new handoffs as V2 with the validated advertised endpoint", () => {
     const handoff = {
       endpoint: {
-        topology: "tailscale_https" as const,
+        topology: "private_https" as const,
         serverOrigin: "https://planweave.example.ts.net/",
         allowedClientOrigins: ["https://planweave.example.ts.net/"],
         tlsTrust: "system_ca" as const
@@ -64,7 +64,7 @@ describe("collaboration invitation handoff contract", () => {
   it("rejects invalid V2 endpoints while retaining V1 parsing compatibility", () => {
     expect(
       parseCollaborationInvitationHandoff(
-        `${collaborationInvitationHandoffV2Prefix}{"endpoint":{"topology":"tailscale_https","serverOrigin":"https://example.test/","allowedClientOrigins":["https://example.test/"],"tlsTrust":"system_ca"},"projectId":"project-1","invitationToken":"${invitationToken}"}`
+        `${collaborationInvitationHandoffV2Prefix}{"endpoint":{"topology":"private_https","serverOrigin":"http://example.test/","allowedClientOrigins":["http://example.test/"],"tlsTrust":"not_applicable"},"projectId":"project-1","invitationToken":"${invitationToken}"}`
       )
     ).toBeNull();
 

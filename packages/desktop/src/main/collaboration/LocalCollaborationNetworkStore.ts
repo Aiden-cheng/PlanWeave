@@ -3,7 +3,8 @@ import { dirname } from "node:path";
 import { z } from "zod";
 import { desktopHomePaths } from "../planweaveHomePaths.js";
 
-const localExposureModeSchema = z.enum(["local_only", "tailscale_private", "lan_http"]);
+const legacyExposureModeSchema = z.enum(["local_only", "tailscale_private", "lan_http"]);
+const localExposureModeSchema = z.enum(["local_only", "private_https", "lan_http"]);
 
 const preferredPortSchema = z.number().int().min(1).max(65_535).nullable();
 const legacyDocumentSchema = z
@@ -16,9 +17,16 @@ const documentSchema = z
     preferredPort: preferredPortSchema
   })
   .strict();
-const currentDocumentSchema = z
+const previousDocumentSchema = z
   .object({
     version: z.literal(3),
+    exposureMode: legacyExposureModeSchema,
+    preferredPort: preferredPortSchema
+  })
+  .strict();
+const currentDocumentSchema = z
+  .object({
+    version: z.literal(4),
     exposureMode: localExposureModeSchema,
     preferredPort: preferredPortSchema
   })
@@ -26,12 +34,13 @@ const currentDocumentSchema = z
 const storedDocumentSchema = z.discriminatedUnion("version", [
   legacyDocumentSchema,
   documentSchema,
+  previousDocumentSchema,
   currentDocumentSchema
 ]);
 
 export type LocalCollaborationNetworkState = {
   lanSharingEnabled: boolean;
-  exposureMode?: "local_only" | "tailscale_private" | "lan_http";
+  exposureMode?: "local_only" | "private_https" | "lan_http";
   preferredPort: number | null;
 };
 
@@ -52,12 +61,16 @@ export class LocalCollaborationNetworkStore implements LocalCollaborationNetwork
       const document = storedDocumentSchema.parse(JSON.parse(await readFile(this.path, "utf8")));
       return {
         lanSharingEnabled:
-          document.version === 3
+          document.version === 3 || document.version === 4
             ? document.exposureMode === "lan_http"
             : document.lanSharingEnabled,
         exposureMode:
-          document.version === 3
+          document.version === 4
             ? document.exposureMode
+            : document.version === 3
+              ? document.exposureMode === "tailscale_private"
+                ? "private_https"
+                : document.exposureMode
             : document.lanSharingEnabled
               ? "lan_http"
               : "local_only",
@@ -73,7 +86,7 @@ export class LocalCollaborationNetworkStore implements LocalCollaborationNetwork
 
   async write(input: LocalCollaborationNetworkState): Promise<void> {
     const document = currentDocumentSchema.parse({
-      version: 3,
+      version: 4,
       exposureMode: input.exposureMode ?? (input.lanSharingEnabled ? "lan_http" : "local_only"),
       preferredPort: input.preferredPort
     });

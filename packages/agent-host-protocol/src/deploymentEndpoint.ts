@@ -53,8 +53,7 @@ export const deploymentTopologySchema = z.enum([
   "loopback_http",
   "lan_http",
   "loopback_https",
-  "lan_https",
-  "tailscale_https",
+  "private_https",
   "public_https"
 ]);
 export type DeploymentTopology = z.infer<typeof deploymentTopologySchema>;
@@ -140,29 +139,6 @@ function validateDeploymentEndpoint(
       context.addIssue({
         code: "custom",
         message: "loopback_https_requires_trusted_loopback_https_origins",
-        path: ["serverOrigin"]
-      });
-    }
-    return;
-  }
-  if (value.topology === "tailscale_https") {
-    if (
-      url.protocol !== "https:" ||
-      loopback ||
-      !url.hostname.toLowerCase().endsWith(".ts.net") ||
-      originPort(url) !== 443 ||
-      value.tlsTrust !== "system_ca" ||
-      !originsMatch(
-        "https:",
-        (client) =>
-          !isLoopbackDeploymentHostname(client.hostname) &&
-          client.hostname.toLowerCase().endsWith(".ts.net") &&
-          originPort(client) === 443
-      )
-    ) {
-      context.addIssue({
-        code: "custom",
-        message: "tailscale_https_requires_system_ca_ts_net_port_443_origins",
         path: ["serverOrigin"]
       });
     }

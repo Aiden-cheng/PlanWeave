@@ -62,12 +62,12 @@ function tailscaleConfig(): ServerConfig {
     ...base,
     version: "server-config/v2",
     transport: {
-      mode: "tailscale_https",
+      mode: "reverse_proxy_https",
       listener: { protocol: "http", host: "127.0.0.1", port: 7443 },
       advertisedOrigin: origin
     },
     deployment: {
-      topology: "tailscale_https",
+      topology: "private_https",
       serverOrigin: origin,
       allowedClientOrigins: [origin],
       tlsTrust: "system_ca"
@@ -199,7 +199,7 @@ describe("loopback controller", () => {
     expect(onLifecycleError).not.toHaveBeenCalled();
     expect(status).toMatchObject({ state: "running", profile: tailscaleProfile });
     expect(received?.transport).toMatchObject({
-      mode: "tailscale_https",
+      mode: "reverse_proxy_https",
       listener: { protocol: "http", host: "127.0.0.1", port: 7443 },
       advertisedOrigin: new URL(tailscaleProfile.serverBaseUrl).origin
     });

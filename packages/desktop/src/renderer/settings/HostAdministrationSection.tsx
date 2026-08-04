@@ -1,6 +1,8 @@
 import type { OperatorHostView } from "@planweave-ai/agent-host-protocol";
+import { useCallback, useState } from "react";
 import { RefreshCwIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import type { DesktopServerExposureView } from "../../shared/deploymentExposure";
 import type { createTranslator } from "../i18n";
 import { useHostAdministrationController } from "../hooks/useHostAdministrationController";
 import { HostBootstrapCard } from "./HostBootstrapCard";
@@ -53,6 +55,11 @@ function errorLabel(code: string | null, t: ReturnType<typeof createTranslator>)
 
 export function HostAdministrationSection({ t }: HostAdministrationSectionProps) {
   const controller = useHostAdministrationController();
+  const [desktopServerExposure, setDesktopServerExposure] =
+    useState<DesktopServerExposureView | null>(null);
+  const handleExposureChange = useCallback((exposure: DesktopServerExposureView) => {
+    setDesktopServerExposure(exposure);
+  }, []);
   const {
     activeProfile,
     busy,
@@ -122,11 +129,16 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
         </div>
       ) : null}
 
-      <DeploymentConnectionCard presentation="section" t={t} />
+      <DeploymentConnectionCard
+        presentation="section"
+        t={t}
+        onExposureChange={handleExposureChange}
+      />
 
       <LocalAgentHostCard
         activeProfile={activeProfile}
         busy={busy}
+        localServerHosted={desktopServerExposure?.lifecycle === "ready"}
         loading={localAgentHostLoading}
         status={localAgentHost}
         register={registerLocalAgentHost}

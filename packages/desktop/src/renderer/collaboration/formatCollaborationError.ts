@@ -63,8 +63,8 @@ export function collaborationConnectionErrorMessage(
   error: unknown
 ): string {
   const code = collaborationErrorCode(error);
-  if (code === "TAILNET_UNREACHABLE") {
-    return t("peopleTailnetUnreachable");
+  if (code === "PRIVATE_NETWORK_UNREACHABLE") {
+    return t("peoplePrivateNetworkUnreachable");
   }
   if (code === "WORKSPACE_FORBIDDEN") {
     return t("peopleWorkspaceForbidden");

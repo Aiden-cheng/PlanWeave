@@ -35,12 +35,12 @@ function connectionRequestsUpgrade(request: IncomingMessage): boolean {
   );
 }
 
-export function attachTailscaleWebSocketReadiness(options: {
+export function attachReverseProxyWebSocketReadiness(options: {
   config: ServerConfig;
   upgradeRouter: WebSocketUpgradeRouter;
   transportAdmission: TransportAdmissionPolicy;
 }): void {
-  if (options.config.transport.mode !== "tailscale_https") return;
+  if (options.config.transport.mode !== "reverse_proxy_https") return;
   const advertisedOrigin = new URL(options.config.transport.advertisedOrigin).origin;
   options.upgradeRouter.register({
     matches: (request) => request.url === readinessPath,
