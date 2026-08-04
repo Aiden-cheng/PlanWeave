@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -142,6 +142,45 @@ describe("Desktop operator control trust boundary", () => {
         "upsertOperatorProfile"
       )
     ).toThrow(/endpoint/);
+  });
+
+  it.each([
+    ["tailscale_https", "https://planweave.example-tailnet.ts.net/"],
+    ["lan_https", "https://192.168.1.20:7443/"]
+  ] as const)("migrates legacy operator %s endpoints to private HTTPS", async (topology, serverOrigin) => {
+    const directory = await root("planweave-operator-topology-migration-");
+    const profilesPath = join(directory, "profiles.json");
+    await writeFile(
+      profilesPath,
+      JSON.stringify({
+        version: 1,
+        activeProfileId: "private-server",
+        profiles: [
+          {
+            profileId: "private-server",
+            displayName: "Private server",
+            serverBaseUrl: serverOrigin,
+            allowInsecureTransport: false,
+            endpoint: {
+              topology,
+              serverOrigin,
+              allowedClientOrigins: [serverOrigin],
+              tlsTrust: "system_ca"
+            },
+            updatedAt: "2030-01-01T00:00:00.000Z"
+          }
+        ]
+      })
+    );
+
+    const document = await new OperatorProfileStore({ profilesPath }).read();
+
+    expect(document.profiles[0]?.endpoint?.topology).toBe("private_https");
+    expect(JSON.parse(await readFile(profilesPath, "utf8"))).toMatchObject({
+      version: 1,
+      activeProfileId: "private-server",
+      profiles: [{ endpoint: { topology: "private_https" } }]
+    });
   });
 
   it("rejects a renderer URL edit that conflicts with a Main-owned endpoint", async () => {

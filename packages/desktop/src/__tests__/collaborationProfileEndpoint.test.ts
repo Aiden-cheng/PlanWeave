@@ -200,6 +200,15 @@ describe("collaboration profile endpoint authority", () => {
       { ...persisted, profiles: [{ ...reconnect, endpoint: ready.endpoint }] },
       { ...persisted, profiles: [{ ...ready, connectionState: "reconnect_required" }] },
       { ...persisted, profiles: [{ ...reconnect, connectionState: "ready" }] },
+      {
+        ...persisted,
+        profiles: [
+          {
+            ...ready,
+            endpoint: { ...ready.endpoint, topology: "unknown_https" }
+          }
+        ]
+      },
       { ...persisted, profiles: [{ ...ready, unexpected: true }] },
       { ...persisted, version: 4 }
     ];
@@ -253,6 +262,50 @@ describe("collaboration profile endpoint authority", () => {
       version: 3,
       activeProfileId: "remote-v3",
       profiles: [{ profileId: "remote-v3", connectionState: "ready" }]
+    });
+  });
+
+  it.each([
+    ["tailscale_https", "https://planweave.example-tailnet.ts.net/"],
+    ["lan_https", "https://192.168.1.20:7443/"]
+  ] as const)("migrates legacy %s endpoints to private HTTPS", async (topology, serverOrigin) => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-profile-topology-migration-"));
+    const profilesPath = join(root, "profiles.json");
+    await writeFile(
+      profilesPath,
+      JSON.stringify({
+        version: 3,
+        activeProfileId: "remote-private",
+        profiles: [
+          {
+            profileId: "remote-private",
+            displayName: "Private server",
+            serverBaseUrl: serverOrigin,
+            projectId: "project-1",
+            allowInsecureTransport: false,
+            endpoint: {
+              topology,
+              serverOrigin,
+              allowedClientOrigins: [serverOrigin],
+              tlsTrust: "system_ca"
+            },
+            updatedAt: "2030-01-01T00:00:00.000Z",
+            connectionState: "ready"
+          }
+        ]
+      })
+    );
+
+    const document = await new CollaborationProfileStore({ profilesPath }).read();
+
+    expect(document.profiles[0]).toMatchObject({
+      connectionState: "ready",
+      endpoint: { topology: "private_https" }
+    });
+    expect(JSON.parse(await readFile(profilesPath, "utf8"))).toMatchObject({
+      version: 3,
+      activeProfileId: "remote-private",
+      profiles: [{ endpoint: { topology: "private_https" } }]
     });
   });
 

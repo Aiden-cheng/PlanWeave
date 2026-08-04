@@ -10,6 +10,7 @@ import {
   timestampSchema
 } from "@planweave-ai/collaboration-protocol/core/primitives";
 import { z } from "zod";
+import { migrateRetiredPrivateHttpsProfileEndpoints } from "../deploymentEndpointPersistenceMigration.js";
 import { desktopHomePaths } from "../planweaveHomePaths.js";
 import { migrateLegacyStoredCollaborationProfile } from "./collaborationProfileEndpoint.js";
 
@@ -118,12 +119,17 @@ function parseProfilesDocument(input: unknown): {
   document: CollaborationProfilesDocument;
   requiresWrite: boolean;
 } {
-  const current = currentCollaborationProfilesDocumentSchema.safeParse(input);
+  const retiredTopologyMigration = migrateRetiredPrivateHttpsProfileEndpoints(input);
+  const current = currentCollaborationProfilesDocumentSchema.safeParse(
+    retiredTopologyMigration.input
+  );
   if (current.success) {
-    return { document: current.data, requiresWrite: false };
+    return { document: current.data, requiresWrite: retiredTopologyMigration.migrated };
   }
 
-  const preDiscriminator = preDiscriminatorCollaborationProfilesDocumentSchema.safeParse(input);
+  const preDiscriminator = preDiscriminatorCollaborationProfilesDocumentSchema.safeParse(
+    retiredTopologyMigration.input
+  );
   if (preDiscriminator.success) {
     return {
       document: currentCollaborationProfilesDocumentSchema.parse({

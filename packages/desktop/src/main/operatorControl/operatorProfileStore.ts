@@ -5,6 +5,7 @@ import {
   operatorControlProfileSchema,
   type OperatorControlProfile
 } from "../../shared/operatorControl.js";
+import { migrateRetiredPrivateHttpsProfileEndpoints } from "../deploymentEndpointPersistenceMigration.js";
 import { desktopHomePaths } from "../planweaveHomePaths.js";
 
 const storedOperatorProfileSchema = operatorControlProfileSchema.extend({
@@ -103,12 +104,22 @@ export class OperatorProfileStore {
       }
       throw new Error("Failed to read operator profiles.");
     }
+    let input: unknown;
     try {
-      this.loaded = operatorProfilesDocumentSchema.parse(JSON.parse(raw));
-      return this.loaded;
+      input = JSON.parse(raw);
     } catch {
       throw new Error("Invalid operator profiles JSON.");
     }
+    const migration = migrateRetiredPrivateHttpsProfileEndpoints(input);
+    let parsed: OperatorProfilesDocument;
+    try {
+      parsed = operatorProfilesDocumentSchema.parse(migration.input);
+    } catch {
+      throw new Error("Invalid operator profiles JSON.");
+    }
+    if (migration.migrated) await writePrivateJson(this.paths.profilesPath, parsed);
+    this.loaded = parsed;
+    return this.loaded;
   }
 
   async write(document: OperatorProfilesDocument): Promise<OperatorProfilesDocument> {
