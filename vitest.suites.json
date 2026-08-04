@@ -650,6 +650,7 @@
         "serverExposureManager.test.ts",
         "serverCliHelp.test.ts",
         "tailscaleCliAdapter.test.ts",
+        "tailscaleWebSocketProbe.test.ts",
         "workAssignmentPolicy.test.ts",
         "workAssignmentSchemas.test.ts",
         "workAssignmentWorkItemRef.test.ts"
