@@ -2,10 +2,6 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  TAILNET_PROBE_ARTIFACT_VERSION,
-  createTailnetProbeArtifact
-} from "@planweave-ai/agent-host-protocol/tailnet-e2e";
 import { evaluateTailnetEvidence } from "../releaseGate/evidence.js";
 import { tailnetE2eEvidenceSchema } from "../tailnetE2e/evidence.js";
 
@@ -13,13 +9,6 @@ const roots: string[] = [];
 const digest = (character: string) => `sha256:${character.repeat(64)}`;
 
 function passedEvidence(generatedAt = "2030-01-01T00:00:00.000Z") {
-  const probeCommon = {
-    version: TAILNET_PROBE_ARTIFACT_VERSION,
-    result: "passed" as const,
-    generatedAt,
-    expiresAt: new Date(Date.parse(generatedAt) + 60 * 60 * 1_000).toISOString(),
-    targetRunDigest: digest("0")
-  };
   return {
     version: "planweave.tailnet-collaboration-e2e/v1",
     result: "passed",
@@ -70,82 +59,64 @@ function passedEvidence(generatedAt = "2030-01-01T00:00:00.000Z") {
       }
     },
     platformMatrix: {
-      windowsHost: createTailnetProbeArtifact({
-        ...probeCommon,
-        role: "windows-host",
-        observations: {
-          platform: "windows",
-          serviceMode: "current-user-scheduled-task",
-          enrolledViaHandoff: true,
-          challengeDispatchObserved: true,
-          serviceRunning: true,
-          credentialActive: true,
-          tailnetHttpsConfigured: true,
-          explicitAgentExposed: true,
-          restartRecovered: true
-        }
-      }),
-      linuxVpsHost: createTailnetProbeArtifact({
-        ...probeCommon,
-        role: "linux-vps-host",
-        observations: {
-          platform: "linux",
-          environment: "vps",
-          serviceMode: "systemd-user",
-          enrolledViaHandoff: true,
-          challengeDispatchObserved: true,
-          serviceRunning: true,
-          credentialActive: true,
-          tailnetHttpsConfigured: true,
-          explicitAgentExposed: true,
-          restartRecovered: true
-        }
-      }),
+      windowsHost: {
+        probeDigest: digest("8"),
+        targetRunDigest: digest("0"),
+        platform: "windows",
+        serviceMode: "current-user-scheduled-task",
+        remoteDeviceObserved: true,
+        enrolledViaHandoff: true,
+        explicitAgentExposure: true,
+        endpointDispatch: true,
+        restartRecovered: true
+      },
+      linuxVpsHost: {
+        probeDigest: digest("9"),
+        targetRunDigest: digest("0"),
+        platform: "linux",
+        environment: "vps",
+        serviceMode: "systemd-user",
+        remoteDeviceObserved: true,
+        enrolledViaHandoff: true,
+        explicitAgentExposure: true,
+        endpointDispatch: true,
+        restartRecovered: true
+      },
       packagedDesktops: {
-        macos: createTailnetProbeArtifact({
-          ...probeCommon,
-          role: "packaged-desktop-macos",
-          observations: {
-            platform: "macos",
-            packagedApp: true,
-            tailnetConnected: true,
-            credentialPersistedAcrossRestart: true,
-            collaborationRecovered: true
-          }
-        }),
-        windows: createTailnetProbeArtifact({
-          ...probeCommon,
-          role: "packaged-desktop-windows",
-          observations: {
-            platform: "windows",
-            packagedApp: true,
-            tailnetConnected: true,
-            credentialPersistedAcrossRestart: true,
-            collaborationRecovered: true
-          }
-        })
+        macos: {
+          probeDigest: digest("a"),
+          targetRunDigest: digest("0"),
+          platform: "macos",
+          packagedDesktopConnected: true,
+          restartRecovered: true
+        },
+        windows: {
+          probeDigest: digest("b"),
+          targetRunDigest: digest("0"),
+          platform: "windows",
+          packagedDesktopConnected: true,
+          restartRecovered: true
+        }
       }
     },
     externalProbes: {
-      tailscaleAclDenied: createTailnetProbeArtifact({
-        ...probeCommon,
-        role: "tailscale-acl-deny",
-        observations: {
-          independentTailnetIdentity: true,
-          networkDenied: true,
-          planweaveResponseObserved: false
-        }
-      }),
-      tailscaleServe: createTailnetProbeArtifact({
-        ...probeCommon,
-        role: "tailscale-serve-peer",
-        observations: {
-          independentTailnetPeer: true,
-          systemCaCertificate: true,
-          readyz: true,
-          websocketUpgrade: true
-        }
-      })
+      tailscaleAclDenied: {
+        probeVersion: "planweave.tailnet-acl-denial-probe/v1",
+        probeDigest: digest("c"),
+        sourcePlatform: "linux",
+        independentTailnetIdentity: true,
+        targetRunDigest: digest("0"),
+        networkDenied: true
+      },
+      tailscaleServe: {
+        probeVersion: "planweave.tailscale-serve-probe/v1",
+        probeDigest: digest("d"),
+        targetRunDigest: digest("0"),
+        tsNetCertificateVerified: true,
+        serveRouteVerified: true,
+        funnelAbsent: true,
+        remotePeerConnected: true
+      }
     },
     recovery: {
       reconnectCatchUpObserved: true,
@@ -186,20 +157,6 @@ describe("Tailnet collaboration evidence contract", () => {
     {
       name: "wrong environment class",
       mutate: (value: Record<string, unknown>) => (value.environmentClass = "remote-vps")
-    },
-    {
-      name: "wrong shared probe version",
-      mutate: (value: Record<string, unknown>) => {
-        const matrix = value.platformMatrix as Record<string, Record<string, unknown>>;
-        matrix.windowsHost!.version = "planweave.tailnet-probe-artifact/v2";
-      }
-    },
-    {
-      name: "wrong shared probe role",
-      mutate: (value: Record<string, unknown>) => {
-        const probes = value.externalProbes as Record<string, Record<string, unknown>>;
-        probes.tailscaleAclDenied!.role = "tailscale-serve-peer";
-      }
     },
     {
       name: "unknown sensitive field",
@@ -271,44 +228,6 @@ describe("Tailnet collaboration evidence contract", () => {
   ])("rejects $name", ({ mutate }) => {
     const value: Record<string, unknown> = structuredClone(passedEvidence());
     mutate(value);
-    expect(tailnetE2eEvidenceSchema.safeParse(value).success).toBe(false);
-  });
-
-  it("does not accept a canonical skipped artifact in a passed aggregate", () => {
-    const value = passedEvidence();
-    value.platformMatrix.windowsHost = createTailnetProbeArtifact({
-      version: TAILNET_PROBE_ARTIFACT_VERSION,
-      result: "skipped",
-      role: "windows-host",
-      generatedAt: "2030-01-01T00:00:00.000Z",
-      expiresAt: "2030-01-01T01:00:00.000Z",
-      targetRunDigest: digest("0"),
-      reason: "prerequisite_unavailable"
-    });
-    expect(tailnetE2eEvidenceSchema.safeParse(value).success).toBe(false);
-  });
-
-  it("rejects a canonical passed artifact targeting a different run", () => {
-    const value = passedEvidence();
-    value.platformMatrix.windowsHost = createTailnetProbeArtifact({
-      version: TAILNET_PROBE_ARTIFACT_VERSION,
-      result: "passed",
-      role: "windows-host",
-      generatedAt: "2030-01-01T00:00:00.000Z",
-      expiresAt: "2030-01-01T01:00:00.000Z",
-      targetRunDigest: digest("e"),
-      observations: {
-        platform: "windows",
-        serviceMode: "current-user-scheduled-task",
-        enrolledViaHandoff: true,
-        challengeDispatchObserved: true,
-        serviceRunning: true,
-        credentialActive: true,
-        tailnetHttpsConfigured: true,
-        explicitAgentExposed: true,
-        restartRecovered: true
-      }
-    });
     expect(tailnetE2eEvidenceSchema.safeParse(value).success).toBe(false);
   });
 

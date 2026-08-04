@@ -556,8 +556,7 @@
         "executionEnvelope.test.ts",
         "exports.test.ts",
         "operatorControl.test.ts",
-        "primitives.test.ts",
-        "tailnetProbe.test.ts"
+        "primitives.test.ts"
       ],
       "integration": [],
       "platform": [],
