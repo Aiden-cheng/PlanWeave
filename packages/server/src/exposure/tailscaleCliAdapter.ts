@@ -54,7 +54,6 @@ const nodeStatusSchema = z
 const serveConfigSchema = z.record(z.string(), z.unknown());
 
 export const TAILSCALE_MINIMUM_STABLE_MINOR = 52;
-export const TAILSCALE_MAXIMUM_STABLE_MINOR = 98;
 
 function defaultExecFileRunner(
   file: string,
@@ -94,7 +93,6 @@ function parseVersion(output: string): string {
   if (
     major !== 1 ||
     minor < TAILSCALE_MINIMUM_STABLE_MINOR ||
-    minor > TAILSCALE_MAXIMUM_STABLE_MINOR ||
     minor % 2 !== 0
   ) {
     throw tailscaleExposureFailure("TAILSCALE_VERSION_UNSUPPORTED");

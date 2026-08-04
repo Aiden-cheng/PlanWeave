@@ -10,7 +10,6 @@ export {
 } from "./serverExposureManager.js";
 export {
   TailscaleCliAdapter,
-  TAILSCALE_MAXIMUM_STABLE_MINOR,
   TAILSCALE_MINIMUM_STABLE_MINOR,
   type TailscaleExecFileResult,
   type TailscaleExecFileRunner

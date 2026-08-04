@@ -131,7 +131,9 @@ describe("TailscaleCliAdapter", () => {
     "1.52.0",
     "1.52.999",
     "1.80.1",
-    "1.98.9"
+    "1.98.9",
+    "1.100.0",
+    "1.102.1"
   ])("accepts explicitly verified stable version %s", async (version) => {
     const fake = queuedRunner([
       { stdout: { majorMinorPatch: version } },
@@ -146,7 +148,6 @@ describe("TailscaleCliAdapter", () => {
     "1.51.9",
     "1.53.0",
     "1.99.0",
-    "1.100.0",
     "2.0.0",
     "1.98.9-rc1",
     "dev"
