@@ -16,10 +16,10 @@ import {
   type ReleaseGateTierId,
   type RollbackCheckDefinition
 } from "./checklist.js";
-import { tailnetE2eEvidenceSchema } from "../tailnetE2e/evidence.js";
+import { redactSensitiveText } from "../vpsE2e/redaction.js";
 import { vpsE2eEvidenceSchema } from "../vpsE2e/evidence.js";
 
-export const RELEASE_GATE_REPORT_VERSION = "planweave.release-gate/v2" as const;
+export const RELEASE_GATE_REPORT_VERSION = "planweave.release-gate/v1" as const;
 
 export type TierEvaluationStatus =
   | "passed"
@@ -128,9 +128,7 @@ function rejectForgedPassed(
 function notProvided(tierId: ReleaseGateTierId): TierEvaluation {
   const tier = RELEASE_GATE_TIERS.find((item) => item.id === tierId)!;
   const liveExternalBlocker =
-    tierId === "local_real_acp_compatibility" ||
-    tierId === "remote_authenticated_vps" ||
-    tierId === "tailnet_collaboration_agent_host";
+    tierId === "local_real_acp_compatibility" || tierId === "remote_authenticated_vps";
   return {
     tierId,
     requirement: tier.requirement,
@@ -138,7 +136,7 @@ function notProvided(tierId: ReleaseGateTierId): TierEvaluation {
     countsAsPass: false,
     evidenceDigest: null,
     diagnostic: liveExternalBlocker
-      ? `external_blocker: no ${tier.evidenceVersion ?? tierId} evidence provided. Required live infrastructure is operator-owned; mock or local fixtures must not be substituted as a pass.`
+      ? `external_blocker: no ${tier.evidenceVersion ?? tierId} evidence path. Live ACP/VPS infrastructure is operator-owned; mock or local fixtures must not be substituted as a pass.`
       : "No evidence path provided for this tier.",
     observedAt: null,
     environmentClass: null
@@ -150,7 +148,7 @@ async function readJsonFile(path: string): Promise<unknown> {
   try {
     return JSON.parse(raw) as unknown;
   } catch {
-    throw new Error("release_gate_evidence_json_invalid");
+    throw new Error(`release_gate_evidence_json_invalid:${path}`);
   }
 }
 
@@ -229,14 +227,16 @@ export async function evaluateDeterministicEvidence(
       observedAt: resolveObservedAt(parsed.data.generatedAt),
       environmentClass: "ci"
     };
-  } catch {
+  } catch (error) {
     return {
       tierId,
       requirement: "required_ci",
       status: "invalid",
       countsAsPass: false,
       evidenceDigest: null,
-      diagnostic: "deterministic_evidence_read_failed",
+      diagnostic: redactSensitiveText(
+        error instanceof Error ? error.message : "deterministic_evidence_read_failed"
+      ),
       observedAt: null,
       environmentClass: null
     };
@@ -351,14 +351,16 @@ export async function evaluateRealAcpEvidence(
       observedAt,
       environmentClass: "host-local"
     };
-  } catch {
+  } catch (error) {
     return {
       tierId,
       requirement: "required_supported_version_release",
       status: "invalid",
       countsAsPass: false,
       evidenceDigest: null,
-      diagnostic: "real_acp_evidence_read_failed",
+      diagnostic: redactSensitiveText(
+        error instanceof Error ? error.message : "real_acp_evidence_read_failed"
+      ),
       observedAt: null,
       environmentClass: null
     };
@@ -441,94 +443,16 @@ export async function evaluateVpsEvidence(
       observedAt,
       environmentClass: "remote-vps"
     };
-  } catch {
+  } catch (error) {
     return {
       tierId,
       requirement: "required_pre_release_evidence",
       status: "invalid",
       countsAsPass: false,
       evidenceDigest: null,
-      diagnostic: "vps_evidence_read_failed",
-      observedAt: null,
-      environmentClass: null
-    };
-  }
-}
-
-export async function evaluateTailnetEvidence(
-  path: string | undefined,
-  now: Date
-): Promise<TierEvaluation> {
-  const tierId = "tailnet_collaboration_agent_host" as const;
-  if (!path) return notProvided(tierId);
-  try {
-    const raw = await readJsonFile(path);
-    const parsed = tailnetE2eEvidenceSchema.safeParse(raw);
-    if (!parsed.success) {
-      return {
-        tierId,
-        requirement: "required_pre_release_evidence",
-        status: "invalid",
-        countsAsPass: false,
-        evidenceDigest: digestJson(raw),
-        diagnostic:
-          "Tailnet evidence schema mismatch: complete strict sanitized evidence is required (forged result rejected; unknown fields rejected).",
-        observedAt: null,
-        environmentClass: null
-      };
-    }
-
-    const observedAt = resolveObservedAt(parsed.data.generatedAt);
-    const freshness = evidenceFreshness(observedAt, now);
-    if (parsed.data.result === "passed" && freshness === "future") {
-      return {
-        tierId,
-        requirement: "required_pre_release_evidence",
-        status: "invalid",
-        countsAsPass: false,
-        evidenceDigest: digestJson(parsed.data),
-        diagnostic: "Tailnet evidence generatedAt exceeds the allowed clock skew.",
-        observedAt,
-        environmentClass: "tailnet-live"
-      };
-    }
-    if (parsed.data.result === "passed" && freshness === "expired") {
-      return {
-        tierId,
-        requirement: "required_pre_release_evidence",
-        status: "expired",
-        countsAsPass: false,
-        evidenceDigest: digestJson(parsed.data),
-        diagnostic: `Tailnet evidence expired (max age ${RELEASE_GATE_EVIDENCE_MAX_AGE_HOURS}h).`,
-        observedAt,
-        environmentClass: "tailnet-live"
-      };
-    }
-
-    const status = parsed.data.result;
-    return {
-      tierId,
-      requirement: "required_pre_release_evidence",
-      status,
-      countsAsPass: countsAsPass(status),
-      evidenceDigest: digestJson(parsed.data),
-      diagnostic:
-        status === "skipped"
-          ? "external_blocker: skipped live Tailnet collaboration evidence is not a pre-release pass."
-          : status === "passed"
-            ? null
-            : "Tailnet collaboration result=failed",
-      observedAt,
-      environmentClass: "tailnet-live"
-    };
-  } catch {
-    return {
-      tierId,
-      requirement: "required_pre_release_evidence",
-      status: "invalid",
-      countsAsPass: false,
-      evidenceDigest: null,
-      diagnostic: "tailnet_evidence_read_failed",
+      diagnostic: redactSensitiveText(
+        error instanceof Error ? error.message : "vps_evidence_read_failed"
+      ),
       observedAt: null,
       environmentClass: null
     };
@@ -539,7 +463,6 @@ export type BuildReleaseGateReportInput = {
   deterministicEvidencePath?: string;
   realAcpEvidencePath?: string;
   vpsEvidencePath?: string;
-  tailnetEvidencePath?: string;
   agentHostVersion?: string | null;
   protocolPackageVersion?: string | null;
   now?: Date;
@@ -572,8 +495,7 @@ export async function buildReleaseGateReport(
   const tiers = await Promise.all([
     evaluateDeterministicEvidence(input.deterministicEvidencePath),
     evaluateRealAcpEvidence(input.realAcpEvidencePath, now),
-    evaluateVpsEvidence(input.vpsEvidencePath, now),
-    evaluateTailnetEvidence(input.tailnetEvidencePath, now)
+    evaluateVpsEvidence(input.vpsEvidencePath, now)
   ]);
 
   const byId = Object.fromEntries(tiers.map((tier) => [tier.tierId, tier])) as Record<
@@ -584,10 +506,7 @@ export async function buildReleaseGateReport(
   const ciReady = byId.deterministic_process_suite.countsAsPass && protocolCheck.ok;
   const supportedReady =
     ciReady && byId.local_real_acp_compatibility.countsAsPass && packageMajorCheck.ok;
-  const preReleaseReady =
-    supportedReady &&
-    byId.remote_authenticated_vps.countsAsPass &&
-    byId.tailnet_collaboration_agent_host.countsAsPass;
+  const preReleaseReady = supportedReady && byId.remote_authenticated_vps.countsAsPass;
 
   const diagnostics = [
     !protocolCheck.ok ? protocolCheck.message : null,
@@ -637,7 +556,7 @@ export async function buildReleaseGateReport(
     },
     ownership: {
       liveInfrastructure:
-        "Release operators own disposable VPS access, Tailnet/Serve resources, Desktop identities, TLS material, enrollment tokens, and Host-local provider credentials. CI must not hold these secrets.",
+        "Release operators own disposable VPS access, TLS material, enrollment tokens, and Host-local provider credentials. CI must not hold these secrets.",
       ci: "CI owns the deterministic multi-process suite only."
     },
     releaseReady: {

@@ -1,15 +1,14 @@
 /**
  * Release-facing live gate checklist.
  *
- * Four tiers are intentionally separate. A skipped live tier is never treated
+ * Three tiers are intentionally separate. A skipped live tier is never treated
  * as a pass for the release readiness verdict.
  */
 
 export type ReleaseGateTierId =
   | "deterministic_process_suite"
   | "local_real_acp_compatibility"
-  | "remote_authenticated_vps"
-  | "tailnet_collaboration_agent_host";
+  | "remote_authenticated_vps";
 
 export type ReleaseGateTierRequirement =
   | "required_ci"
@@ -32,7 +31,6 @@ export type ReleaseGateTierDefinition = {
 
 export const RELEASE_GATE_EVIDENCE_MAX_AGE_HOURS = 336 as const; // 14 days
 export const RELEASE_GATE_EVIDENCE_MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
-export const RELEASE_GATE_CHECKLIST_VERSION = "planweave.release-gate.checklist/v2" as const;
 
 export const RELEASE_GATE_TIERS: readonly ReleaseGateTierDefinition[] = [
   {
@@ -84,20 +82,6 @@ export const RELEASE_GATE_TIERS: readonly ReleaseGateTierDefinition[] = [
     evidenceVersion: "planweave.vps-authenticated-e2e/v1",
     ownership:
       "Release operator disposable VPS and secret store (endpoints, TLS material, enrollment tokens, SSH). Never stored in the repository.",
-    evidenceMaxAgeHours: RELEASE_GATE_EVIDENCE_MAX_AGE_HOURS
-  },
-  {
-    id: "tailnet_collaboration_agent_host",
-    requirement: "required_pre_release_evidence",
-    title: "Live Tailnet collaboration and Agent Host path",
-    summary:
-      "Required pre-release evidence for the real Tailscale Serve path, two independent Desktop clients, collaboration, authorization boundaries, selected Agent endpoint dispatch, and restart/revocation recovery. remote-vps evidence never substitutes for this tier.",
-    command:
-      "PLANWEAVE_TAILNET_E2E_REQUIRE=1 node scripts/tailnet-collaboration-e2e.mjs --require --evidence <sanitized-path>",
-    environment: ["TAILSCALE_AUTH_MATERIAL (operator-owned; never persisted in evidence)"],
-    evidenceVersion: "planweave.tailnet-collaboration-e2e/v1",
-    ownership:
-      "Release operator-owned Tailnet, Tailscale Serve lease, two independent Desktop identities/profiles/vaults, Server, and Agent Host. Origins, hostnames, credentials, device identifiers, and absolute paths never enter evidence.",
     evidenceMaxAgeHours: RELEASE_GATE_EVIDENCE_MAX_AGE_HOURS
   }
 ] as const;

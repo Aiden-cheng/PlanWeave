@@ -721,7 +721,6 @@
         "serverCompositionStageH.test.ts",
         "serverServe.test.ts",
         "setupCodeFlow.test.ts",
-        "tailnetE2eEvidence.test.ts",
         "tailscaleProxyTransport.test.ts",
         "transportAdmission.test.ts",
         "vpsE2eGate.test.ts",

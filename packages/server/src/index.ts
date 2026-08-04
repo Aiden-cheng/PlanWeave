@@ -58,14 +58,7 @@ export {
   type RemoteVpsE2eConfig
 } from "./vpsE2e/index.js";
 export {
-  TAILNET_E2E_EVIDENCE_VERSION,
-  tailnetE2eEvidenceSchema,
-  type TailnetE2eEvidence
-} from "./tailnetE2e/index.js";
-export {
   RELEASE_GATE_EVIDENCE_MAX_AGE_HOURS,
-  RELEASE_GATE_CHECKLIST_VERSION,
-  RELEASE_GATE_CLI_USAGE,
   RELEASE_GATE_REPORT_VERSION,
   RELEASE_GATE_ROLLBACK_CHECKS,
   RELEASE_GATE_TIERS,

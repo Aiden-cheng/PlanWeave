@@ -1,7 +1,6 @@
 export {
   RELEASE_GATE_EVIDENCE_MAX_AGE_HOURS,
   RELEASE_GATE_EVIDENCE_MAX_CLOCK_SKEW_MS,
-  RELEASE_GATE_CHECKLIST_VERSION,
   RELEASE_GATE_ROLLBACK_CHECKS,
   RELEASE_GATE_TIERS,
   tierById,
@@ -15,7 +14,6 @@ export {
   buildReleaseGateReport,
   evaluateDeterministicEvidence,
   evaluateRealAcpEvidence,
-  evaluateTailnetEvidence,
   evaluateVpsEvidence,
   writeReleaseGateReport,
   type BuildReleaseGateReportInput,
@@ -27,4 +25,4 @@ export {
   runDeterministicProcessSuite,
   type DeterministicSuiteEvidence
 } from "./runDeterministic.js";
-export { RELEASE_GATE_CLI_USAGE, runReleaseGateCli, type ReleaseGateCliIo } from "./cli.js";
+export { runReleaseGateCli, type ReleaseGateCliIo } from "./cli.js";

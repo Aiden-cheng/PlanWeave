@@ -2,7 +2,7 @@
 /**
  * Release-facing gate helper.
  *
- * Prints the four-tier checklist, evaluates sanitized evidence digests, and
+ * Prints the three-tier checklist, evaluates sanitized evidence digests, and
  * optionally runs the deterministic multi-process suite.
  *
  * Soft live tiers remain opt-in via existing REAL_ACP / VPS_E2E commands.
@@ -15,7 +15,6 @@
  *     --deterministic-evidence /tmp/det.json \
  *     --real-acp-evidence /tmp/real-acp.json \
  *     --vps-evidence /tmp/vps-e2e.json \
- *     --tailnet-evidence /tmp/tailnet-e2e.json \
  *     --report /tmp/release-gate.json
  */
 import { spawnSync } from "node:child_process";

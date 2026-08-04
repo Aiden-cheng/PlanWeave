@@ -4,8 +4,6 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { rm } from "node:fs/promises";
 import {
-  RELEASE_GATE_CHECKLIST_VERSION,
-  RELEASE_GATE_CLI_USAGE,
   RELEASE_GATE_TIERS,
   buildReleaseGateReport,
   runReleaseGateCli
@@ -90,129 +88,6 @@ function vpsEvidence(input: {
   };
 }
 
-function tailnetPassedEvidence(generatedAt = new Date().toISOString()) {
-  const digest = (character: string) => `sha256:${character.repeat(64)}`;
-  return {
-    version: "planweave.tailnet-collaboration-e2e/v1",
-    result: "passed",
-    generatedAt,
-    environmentClass: "tailnet-live",
-    runDigest: digest("0"),
-    transport: {
-      httpsVerified: true,
-      tailnetDnsVerified: true,
-      loopbackBackendVerified: true
-    },
-    serve: {
-      nodeOriginMatched: true,
-      routeExact: true,
-      ownedLease: true,
-      funnelAbsent: true,
-      readyProbePassed: true
-    },
-    desktops: {
-      count: 2,
-      identityDigests: [digest("1"), digest("2")],
-      profileDigests: [digest("3"), digest("4")],
-      vaultDigests: [digest("5"), digest("6")],
-      checks: { identitiesDistinct: true, profilesDistinct: true, vaultsDistinct: true }
-    },
-    presence: {
-      cursorObserved: true,
-      selectionObserved: true,
-      leaveObserved: true,
-      rejoinObserved: true
-    },
-    collaboration: {
-      liveSyncObserved: true,
-      commandObserved: true,
-      commentObserved: true,
-      observerObserved: true,
-      humanAndHostWebSocketsConcurrent: true
-    },
-    endpoint: {
-      endpointDigest: digest("7"),
-      checks: {
-        explicitEndpointSelected: true,
-        heartbeatObserved: true,
-        v3DispatchObserved: true,
-        completionObserved: true,
-        eventObserved: true,
-        artifactObserved: true
-      }
-    },
-    platformMatrix: {
-      windowsHost: {
-        probeDigest: digest("8"),
-        targetRunDigest: digest("0"),
-        platform: "windows",
-        serviceMode: "current-user-scheduled-task",
-        remoteDeviceObserved: true,
-        enrolledViaHandoff: true,
-        explicitAgentExposure: true,
-        endpointDispatch: true,
-        restartRecovered: true
-      },
-      linuxVpsHost: {
-        probeDigest: digest("9"),
-        targetRunDigest: digest("0"),
-        platform: "linux",
-        environment: "vps",
-        serviceMode: "systemd-user",
-        remoteDeviceObserved: true,
-        enrolledViaHandoff: true,
-        explicitAgentExposure: true,
-        endpointDispatch: true,
-        restartRecovered: true
-      },
-      packagedDesktops: {
-        macos: {
-          probeDigest: digest("a"),
-          targetRunDigest: digest("0"),
-          platform: "macos",
-          packagedDesktopConnected: true,
-          restartRecovered: true
-        },
-        windows: {
-          probeDigest: digest("b"),
-          targetRunDigest: digest("0"),
-          platform: "windows",
-          packagedDesktopConnected: true,
-          restartRecovered: true
-        }
-      }
-    },
-    externalProbes: {
-      tailscaleAclDenied: {
-        probeVersion: "planweave.tailnet-acl-denial-probe/v1",
-        probeDigest: digest("c"),
-        sourcePlatform: "linux",
-        independentTailnetIdentity: true,
-        targetRunDigest: digest("0"),
-        networkDenied: true
-      },
-      tailscaleServe: {
-        probeVersion: "planweave.tailscale-serve-probe/v1",
-        probeDigest: digest("d"),
-        targetRunDigest: digest("0"),
-        tsNetCertificateVerified: true,
-        serveRouteVerified: true,
-        funnelAbsent: true,
-        remotePeerConnected: true
-      }
-    },
-    recovery: {
-      reconnectCatchUpObserved: true,
-      serveRestartRecovered: true,
-      serverRestartRecovered: true,
-      desktopRestartRecovered: true,
-      hostRestartRecovered: true
-    },
-    authorization: { workspaceAclDenied: true },
-    credentialLifecycle: { temporaryDesktopCredentialRevoked: true }
-  };
-}
-
 afterEach(async () => {
   await Promise.all(
     roots.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
@@ -226,24 +101,17 @@ async function tempDir(): Promise<string> {
 }
 
 describe("release gate checklist and evaluation", () => {
-  it("defines four distinct tiers with separate requirements", () => {
+  it("defines three distinct tiers with separate requirements", () => {
     expect(RELEASE_GATE_TIERS.map((tier) => tier.id)).toEqual([
       "deterministic_process_suite",
       "local_real_acp_compatibility",
-      "remote_authenticated_vps",
-      "tailnet_collaboration_agent_host"
+      "remote_authenticated_vps"
     ]);
     expect(RELEASE_GATE_TIERS.map((tier) => tier.requirement)).toEqual([
       "required_ci",
       "required_supported_version_release",
-      "required_pre_release_evidence",
       "required_pre_release_evidence"
     ]);
-    expect(
-      RELEASE_GATE_TIERS.find((tier) => tier.id === "tailnet_collaboration_agent_host")?.command
-    ).toBe(
-      "PLANWEAVE_TAILNET_E2E_REQUIRE=1 node scripts/tailnet-collaboration-e2e.mjs --require --evidence <sanitized-path>"
-    );
   });
 
   it("treats missing evidence as not_provided and never release-ready", async () => {
@@ -536,7 +404,6 @@ describe("release gate checklist and evaluation", () => {
     const forgedDet = join(root, "forged-det.json");
     const forgedAcp = join(root, "forged-acp.json");
     const forgedVps = join(root, "forged-vps.json");
-    const forgedTailnet = join(root, "forged-tailnet.json");
     await writeFile(
       forgedDet,
       JSON.stringify({
@@ -563,21 +430,11 @@ describe("release gate checklist and evaluation", () => {
         generatedAt: now
       })
     );
-    await writeFile(
-      forgedTailnet,
-      JSON.stringify({
-        version: "planweave.tailnet-collaboration-e2e/v1",
-        result: "passed",
-        environmentClass: "tailnet-live",
-        generatedAt: now
-      })
-    );
 
     const report = await buildReleaseGateReport({
       deterministicEvidencePath: forgedDet,
       realAcpEvidencePath: forgedAcp,
       vpsEvidencePath: forgedVps,
-      tailnetEvidencePath: forgedTailnet,
       agentHostVersion: "0.3.0",
       protocolPackageVersion: "0.3.0"
     });
@@ -624,13 +481,12 @@ describe("release gate checklist and evaluation", () => {
     }
   });
 
-  it("requires all four tiers and does not let remote VPS replace Tailnet evidence", async () => {
+  it("becomes pre-release ready only when all three tiers pass and majors match", async () => {
     const root = await tempDir();
     const now = new Date().toISOString();
     const deterministicPath = join(root, "det.json");
     const realAcpPath = join(root, "acp.json");
     const vpsPath = join(root, "vps.json");
-    const tailnetPath = join(root, "tailnet.json");
     await writeFile(
       deterministicPath,
       JSON.stringify({
@@ -669,33 +525,18 @@ describe("release gate checklist and evaluation", () => {
       )
     );
 
-    const firstThree = await buildReleaseGateReport({
-      deterministicEvidencePath: deterministicPath,
-      realAcpEvidencePath: realAcpPath,
-      vpsEvidencePath: vpsPath,
-      agentHostVersion: "0.3.0",
-      protocolPackageVersion: "0.3.0"
-    });
-    expect(firstThree.releaseReady).toEqual({
-      ci: true,
-      supportedVersionRelease: true,
-      preRelease: false
-    });
-    expect(
-      firstThree.tiers.find((tier) => tier.tierId === "tailnet_collaboration_agent_host")
-    ).toMatchObject({ status: "not_provided", countsAsPass: false });
-
-    await writeFile(tailnetPath, JSON.stringify(tailnetPassedEvidence(now)));
     const report = await buildReleaseGateReport({
       deterministicEvidencePath: deterministicPath,
       realAcpEvidencePath: realAcpPath,
       vpsEvidencePath: vpsPath,
-      tailnetEvidencePath: tailnetPath,
       agentHostVersion: "0.3.0",
       protocolPackageVersion: "0.3.0"
     });
-    expect(report.version).toBe("planweave.release-gate/v2");
-    expect(report.releaseReady.preRelease).toBe(true);
+    expect(report.releaseReady).toEqual({
+      ci: true,
+      supportedVersionRelease: true,
+      preRelease: true
+    });
     expect(report.diagnostic).toBeNull();
   });
 
@@ -717,25 +558,13 @@ describe("release gate checklist and evaluation", () => {
       }
     });
     expect(code).toBe(0);
-    const body = JSON.parse(lines.join("")) as { version: string; tiers: unknown[] };
-    expect(body.version).toBe(RELEASE_GATE_CHECKLIST_VERSION);
-    expect(body.tiers).toHaveLength(4);
-    expect(JSON.stringify(body)).toContain("tailnet_collaboration_agent_host");
+    const body = JSON.parse(lines.join("")) as { tiers: unknown[] };
+    expect(body.tiers).toHaveLength(3);
 
     const usage = await runReleaseGateCli(["--unknown"], {
       io: { stdout: () => {}, stderr: () => {} }
     });
     expect(usage).toBe(2);
-  });
-
-  it.each(["--help", "-h"])("CLI %s prints stable usage with Tailnet evidence", async (flag) => {
-    const lines: string[] = [];
-    const code = await runReleaseGateCli([flag], {
-      io: { stdout: (value) => lines.push(value), stderr: () => {} }
-    });
-    expect(code).toBe(0);
-    expect(lines).toEqual([RELEASE_GATE_CLI_USAGE]);
-    expect(lines[0]).toContain("--tailnet-evidence <path>");
   });
 
   it("CLI evaluates evidence and exits non-zero when live tiers are missing", async () => {
@@ -754,31 +583,6 @@ describe("release gate checklist and evaluation", () => {
       { io: { stdout: () => {}, stderr: () => {} } }
     );
     expect(code).toBe(1);
-  });
-
-  it("CLI accepts --tailnet-evidence and evaluates the dedicated tier", async () => {
-    const root = await tempDir();
-    const tailnetPath = join(root, "tailnet.json");
-    await writeFile(tailnetPath, JSON.stringify(tailnetPassedEvidence()));
-    const lines: string[] = [];
-    const code = await runReleaseGateCli(
-      [
-        "--tailnet-evidence",
-        tailnetPath,
-        "--agent-host-version",
-        "0.3.0",
-        "--protocol-version",
-        "0.3.0"
-      ],
-      { io: { stdout: (value) => lines.push(value), stderr: () => {} } }
-    );
-    expect(code).toBe(1);
-    const report = JSON.parse(lines.join("")) as {
-      tiers: Array<{ tierId: string; status: string }>;
-    };
-    expect(
-      report.tiers.find((tier) => tier.tierId === "tailnet_collaboration_agent_host")
-    ).toMatchObject({ status: "passed" });
   });
 
   it("terminates a stalled deterministic command at the configured deadline", async () => {
