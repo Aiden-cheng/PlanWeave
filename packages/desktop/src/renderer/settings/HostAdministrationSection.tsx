@@ -14,8 +14,8 @@ type HostAdministrationSectionProps = {
 
 function errorLabel(code: string | null, t: ReturnType<typeof createTranslator>): string | null {
   if (!code) return null;
-  if (code === "local_agent_host_windows_only" || code === "local_agent_host_unavailable") {
-    return t("hostAdminLocalHostWindowsOnly");
+  if (code === "local_agent_host_unavailable") {
+    return t("hostAdminLocalHostUnsupported");
   }
   if (code === "local_agent_host_custom_ca_unsupported") {
     return t("hostAdminLocalHostCustomCaUnsupported");
@@ -58,7 +58,7 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
     busy,
     copyBootstrapHandoff,
     dismissHandoff,
-    enrollLocalAgentHostFromClipboard,
+    enrollLocalAgentHost,
     error,
     handoff,
     hosts,
@@ -130,7 +130,7 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
         loading={localAgentHostLoading}
         status={localAgentHost}
         register={registerLocalAgentHost}
-        enrollFromClipboard={enrollLocalAgentHostFromClipboard}
+        enroll={enrollLocalAgentHost}
         t={t}
       />
 

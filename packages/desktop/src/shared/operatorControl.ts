@@ -219,11 +219,15 @@ export type OperatorRegisterLocalAgentHostInput = z.infer<
   typeof operatorRegisterLocalAgentHostInputSchema
 >;
 
-export const operatorEnrollLocalAgentHostFromClipboardInputSchema = z
-  .object({ exposedProfileIds: exposedLocalAgentProfilesSchema })
+/** The one-time handoff is the only credential deliberately accepted from renderer input. */
+export const operatorEnrollLocalAgentHostInputSchema = z
+  .object({
+    handoff: z.string().trim().min(1).max(65_536),
+    exposedProfileIds: exposedLocalAgentProfilesSchema
+  })
   .strict();
-export type OperatorEnrollLocalAgentHostFromClipboardInput = z.infer<
-  typeof operatorEnrollLocalAgentHostFromClipboardInputSchema
+export type OperatorEnrollLocalAgentHostInput = z.infer<
+  typeof operatorEnrollLocalAgentHostInputSchema
 >;
 
 export type OperatorCredentialStorage = "available" | "unavailable";
@@ -313,7 +317,7 @@ function operatorIpcValidationError(context: string, detail: string): OperatorCo
   });
 }
 
-/** Reject secrets and transport escapes crossing the renderer IPC boundary. */
+/** Reject arbitrary secret fields and transport escapes crossing the renderer IPC boundary. */
 export function assertNoSmuggledOperatorSecrets(value: unknown, context: string): void {
   const stack: Array<{ candidate: unknown; depth: number }> = [{ candidate: value, depth: 0 }];
   const seen = new WeakSet<object>();
@@ -376,8 +380,8 @@ export type PlanWeaveOperatorControlApi = {
   registerOperatorLocalAgentHost: (
     input: OperatorRegisterLocalAgentHostInput
   ) => Promise<OperatorLocalAgentHostStatus>;
-  enrollOperatorLocalAgentHostFromClipboard: (
-    input: OperatorEnrollLocalAgentHostFromClipboardInput
+  enrollOperatorLocalAgentHost: (
+    input: OperatorEnrollLocalAgentHostInput
   ) => Promise<OperatorLocalAgentHostStatus>;
   onOperatorControlStatusChanged: (callback: (status: OperatorControlStatus) => void) => () => void;
 };

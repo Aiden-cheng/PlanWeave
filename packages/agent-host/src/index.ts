@@ -76,7 +76,10 @@ export {
   resolveAgentHostDefaultPaths,
   type AgentHostDefaultPaths
 } from "./config/defaultPaths.js";
-export { createPlatformBackgroundService } from "./background/platformBackground.js";
+export {
+  createPlatformBackgroundService,
+  supportsPlatformBackgroundService
+} from "./background/platformBackground.js";
 export type {
   AgentHostBackgroundInstall,
   AgentHostBackgroundLauncher,

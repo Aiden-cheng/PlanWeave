@@ -114,7 +114,7 @@ describe("operator control main-owned Host handoff", () => {
     expect(electronMock.writeText).not.toHaveBeenCalled();
   });
 
-  it("reads a Host handoff in main for local Windows enrollment", async () => {
+  it("accepts an explicitly supplied Host handoff without reading the clipboard", async () => {
     const encodedHandoff = serializeAgentHostSetupHandoff({
       version: "agent-host-setup/v1",
       endpoint: {
@@ -128,7 +128,6 @@ describe("operator control main-owned Host handoff", () => {
       expiresAt: "2030-01-01T00:15:00.000Z",
       display: { workspaceName: "Workspace", serverName: "Server" }
     });
-    electronMock.readText.mockReturnValue(`planweave agent-host enroll ${encodedHandoff}`);
     const register = vi.fn().mockResolvedValue({
       supported: true,
       state: "ready",
@@ -142,20 +141,24 @@ describe("operator control main-owned Host handoff", () => {
         register
       }
     });
-    const handler = electronMock.handlers.get(
-      operatorControlInvokeChannels.enrollLocalAgentHostFromClipboard
+    const handler = electronMock.handlers.get(operatorControlInvokeChannels.enrollLocalAgentHost);
+    if (!handler) throw new Error("operator_local_host_enrollment_handler_missing");
+
+    const result = await handler(
+      {},
+      {
+        handoff: `planweave agent-host enroll ${encodedHandoff}`,
+        exposedProfileIds: ["codex-acp"]
+      }
     );
-    if (!handler) throw new Error("operator_local_host_clipboard_handler_missing");
 
-    const result = await handler({}, { exposedProfileIds: ["codex-acp"] });
-
-    expect(electronMock.readText).toHaveBeenCalledTimes(1);
+    expect(electronMock.readText).not.toHaveBeenCalled();
     expect(register).toHaveBeenCalledWith(undefined, encodedHandoff, ["codex-acp"]);
     expect(JSON.stringify(result)).not.toContain(encodedHandoff);
-    expect(() =>
-      handler({}, { exposedProfileIds: ["codex-acp"], enrollmentCode: "smuggled" })
-    ).toThrow("Operator IPC rejected enrollLocalAgentHostFromClipboard");
-    expect(electronMock.readText).toHaveBeenCalledTimes(1);
+    await expect(
+      handler({}, { handoff: encodedHandoff, exposedProfileIds: ["codex-acp"], endpoint: {} })
+    ).rejects.toThrow("Operator IPC rejected enrollLocalAgentHost");
+    expect(electronMock.readText).not.toHaveBeenCalled();
   });
 });
 

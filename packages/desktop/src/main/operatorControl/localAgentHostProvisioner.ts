@@ -2,6 +2,7 @@ import {
   AgentHostOperator,
   listSupportedHostAcpProfiles,
   resolveAgentHostDefaultPaths,
+  supportsPlatformBackgroundService,
   type AgentExposureMutationResult,
   type AgentHostBackgroundLauncher,
   type AgentHostBackgroundResult,
@@ -71,7 +72,7 @@ export class DesktopLocalAgentHostProvisioner implements LocalAgentHostProvision
   }
 
   async status(profileId?: string): Promise<OperatorLocalAgentHostStatus> {
-    if (this.platform !== "win32") {
+    if (!supportsPlatformBackgroundService(this.platform)) {
       return operatorLocalAgentHostStatusSchema.parse({
         supported: false,
         state: "not_registered",
@@ -107,7 +108,9 @@ export class DesktopLocalAgentHostProvisioner implements LocalAgentHostProvision
     handoff: string,
     exposedProfileIds: readonly string[]
   ): Promise<OperatorLocalAgentHostStatus> {
-    if (this.platform !== "win32") throw new Error("local_agent_host_windows_only");
+    if (!supportsPlatformBackgroundService(this.platform)) {
+      throw new Error("local_agent_host_unavailable");
+    }
     const enrollment = await this.operator.enrollHandoff(handoff, {
       installBackground: true,
       executablePath: this.launcher.executablePath,

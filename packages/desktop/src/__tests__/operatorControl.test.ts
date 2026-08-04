@@ -16,7 +16,7 @@ import {
   OperatorCredentialVault,
   type OperatorSafeStoragePort
 } from "../main/operatorControl/operatorCredentialVault.js";
-import { parseAgentHostClipboardHandoff } from "../main/operatorControl/localAgentHostClipboardHandoff.js";
+import { parseAgentHostHandoffInput } from "../main/operatorControl/localAgentHostHandoff.js";
 import { OperatorControlService } from "../main/operatorControl/operatorControlService.js";
 import { OperatorProfileStore } from "../main/operatorControl/operatorProfileStore.js";
 import {
@@ -381,7 +381,7 @@ describe("Desktop operator control trust boundary", () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 
-  it("accepts a raw or copied Host command without exposing it to the renderer contract", async () => {
+  it("accepts a raw or copied Host command through the bounded enrollment contract", async () => {
     const encodedHandoff = serializeAgentHostSetupHandoff({
       version: "agent-host-setup/v1",
       endpoint: {
@@ -395,21 +395,21 @@ describe("Desktop operator control trust boundary", () => {
       expiresAt: "2030-01-01T00:15:00.000Z",
       display: { workspaceName: "Workspace", serverName: "Server" }
     });
-    expect(parseAgentHostClipboardHandoff(encodedHandoff)).toMatchObject({
+    expect(parseAgentHostHandoffInput(encodedHandoff)).toMatchObject({
       encodedHandoff,
       handoff: { workspaceId: "workspace-clipboard" }
     });
     expect(
-      parseAgentHostClipboardHandoff(`planweave agent-host enroll ${encodedHandoff}`)
+      parseAgentHostHandoffInput(`planweave agent-host enroll ${encodedHandoff}`)
     ).toMatchObject({ encodedHandoff });
-    expect(() => parseAgentHostClipboardHandoff("planweave agent-host enroll ")).toThrow(
+    expect(() => parseAgentHostHandoffInput("planweave agent-host enroll ")).toThrow(
       "local_agent_host_handoff_invalid"
     );
     const expiredHandoff = serializeAgentHostSetupHandoff({
       ...parseAgentHostSetupHandoff(encodedHandoff, new Date("2029-01-01T00:00:00.000Z")),
       expiresAt: "2020-01-01T00:00:00.000Z"
     });
-    expect(() => parseAgentHostClipboardHandoff(expiredHandoff)).toThrow(
+    expect(() => parseAgentHostHandoffInput(expiredHandoff)).toThrow(
       "local_agent_host_handoff_expired"
     );
 
@@ -426,19 +426,20 @@ describe("Desktop operator control trust boundary", () => {
         register
       }
     });
-    const result = await service.enrollLocalAgentHostFromClipboard(
-      { exposedProfileIds: ["codex-acp"] },
-      `planweave agent-host enroll ${encodedHandoff}`
-    );
+    const result = await service.enrollLocalAgentHost({
+      handoff: `planweave agent-host enroll ${encodedHandoff}`,
+      exposedProfileIds: ["codex-acp"]
+    });
 
     expect(register).toHaveBeenCalledWith(undefined, encodedHandoff, ["codex-acp"]);
     expect(JSON.stringify(result)).not.toMatch(/enrollmentCode|planweave-agent-host-setup:/);
     await expect(
-      service.enrollLocalAgentHostFromClipboard(
-        { exposedProfileIds: ["codex-acp"], enrollmentCode: "smuggled" },
-        encodedHandoff
-      )
-    ).rejects.toThrow("Operator IPC rejected enrollLocalAgentHostFromClipboard");
+      service.enrollLocalAgentHost({
+        handoff: encodedHandoff,
+        exposedProfileIds: ["codex-acp"],
+        enrollmentCode: "smuggled"
+      })
+    ).rejects.toThrow("Operator IPC rejected enrollLocalAgentHost");
   });
 
   it("uses only bounded application endpoints and maps 401/403/malformed responses", async () => {

@@ -13,13 +13,14 @@ export type AgentHostBackgroundInstall = AgentHostBackgroundLauncher & {
 
 export type AgentHostBackgroundGuidance =
   | "enable_user_linger"
+  | "check_launch_agent_permissions"
   | "check_scheduled_task_permissions"
   | "configure_ca_certificate"
   | "run_agent_host_manually";
 
 export type AgentHostBackgroundResult = {
   state: AgentHostBackgroundState;
-  platform: "linux-systemd-user" | "windows-scheduled-task";
+  platform: "linux-systemd-user" | "macos-launch-agent" | "windows-scheduled-task";
   guidance?: AgentHostBackgroundGuidance;
 };
 
@@ -28,6 +29,12 @@ export type AgentHostBackgroundLogs =
       platform: "linux-systemd-user";
       source: "systemd-journal";
       command: { executable: "journalctl"; args: readonly string[] };
+    }
+  | {
+      platform: "macos-launch-agent";
+      source: "launch-agent-files";
+      stdoutPath: string;
+      stderrPath: string;
     }
   | {
       platform: "windows-scheduled-task";

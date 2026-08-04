@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import type {
   OperatorLocalAgentHostStatus,
   OperatorProfileView
@@ -12,7 +13,8 @@ type LocalAgentHostCardProps = {
   loading: boolean;
   status: OperatorLocalAgentHostStatus | null;
   register: (profileIds: readonly string[]) => Promise<OperatorLocalAgentHostStatus | null>;
-  enrollFromClipboard: (
+  enroll: (
+    handoff: string,
     profileIds: readonly string[]
   ) => Promise<OperatorLocalAgentHostStatus | null>;
   t: ReturnType<typeof createTranslator>;
@@ -24,10 +26,11 @@ export function LocalAgentHostCard({
   loading,
   status,
   register,
-  enrollFromClipboard,
+  enroll,
   t
 }: LocalAgentHostCardProps) {
   const [selected, setSelected] = useState<string[]>([]);
+  const [handoff, setHandoff] = useState("");
 
   useEffect(() => {
     setSelected(
@@ -44,9 +47,10 @@ export function LocalAgentHostCard({
   const canRegisterWithAdmin = Boolean(
     hasDirectRegistration && selected.length > 0 && !busy && !loading
   );
-  const canEnrollFromClipboard = Boolean(
+  const canEnroll = Boolean(
     status?.supported &&
       status.state === "not_registered" &&
+      handoff.trim().length > 0 &&
       selected.length > 0 &&
       !busy &&
       !loading
@@ -68,7 +72,7 @@ export function LocalAgentHostCard({
         {loading ? <p className="text-sm text-text-muted">{t("hostAdminLoading")}</p> : null}
         {status && !status.supported ? (
           <p className="text-sm text-text-muted" data-testid="host-admin-local-unsupported">
-            {t("hostAdminLocalHostWindowsOnly")}
+            {t("hostAdminLocalHostUnsupported")}
           </p>
         ) : null}
         {status?.supported ? (
@@ -114,15 +118,36 @@ export function LocalAgentHostCard({
             <p className="text-xs text-text-muted">{t("hostAdminLocalHostCredentialBoundary")}</p>
             {status.state === "not_registered" && !canRegisterDirectly ? (
               <div className="grid gap-2">
-                <p className="text-xs text-text-muted">{t("hostAdminLocalHostClipboardHandoff")}</p>
+                <p className="text-xs text-text-muted">{t("hostAdminLocalHostHandoffPrompt")}</p>
+                <label
+                  className="grid gap-1.5 text-sm text-text-strong"
+                  htmlFor="host-admin-local-handoff"
+                >
+                  {t("hostAdminLocalHostHandoffLabel")}
+                  <Textarea
+                    id="host-admin-local-handoff"
+                    data-testid="host-admin-local-handoff"
+                    value={handoff}
+                    rows={3}
+                    spellCheck={false}
+                    autoComplete="off"
+                    placeholder={t("hostAdminLocalHostHandoffPlaceholder")}
+                    disabled={busy || loading}
+                    onChange={(event) => setHandoff(event.target.value)}
+                  />
+                </label>
                 <Button
                   type="button"
                   className="w-fit"
-                  data-testid="host-admin-enroll-local-clipboard"
-                  disabled={!canEnrollFromClipboard}
-                  onClick={() => void enrollFromClipboard(selected)}
+                  data-testid="host-admin-enroll-local"
+                  disabled={!canEnroll}
+                  onClick={() =>
+                    void enroll(handoff, selected).then((next) => {
+                      if (next) setHandoff("");
+                    })
+                  }
                 >
-                  {t("hostAdminEnrollThisComputerFromClipboard")}
+                  {t("hostAdminEnrollThisComputer")}
                 </Button>
               </div>
             ) : null}

@@ -39,7 +39,8 @@ export type HostAdministrationController = {
   registerLocalAgentHost: (
     exposedProfileIds: readonly string[]
   ) => Promise<OperatorLocalAgentHostStatus | null>;
-  enrollLocalAgentHostFromClipboard: (
+  enrollLocalAgentHost: (
+    handoff: string,
     exposedProfileIds: readonly string[]
   ) => Promise<OperatorLocalAgentHostStatus | null>;
   dismissHandoff: () => void;
@@ -60,7 +61,6 @@ function errorMessage(error: unknown): string {
     "operator_admin_required",
     "operator_server_admin_required",
     "operator_forbidden",
-    "local_agent_host_windows_only",
     "local_agent_host_unavailable",
     "local_agent_host_custom_ca_unsupported",
     "local_agent_host_handoff_invalid",
@@ -355,15 +355,16 @@ export function useHostAdministrationController(): HostAdministrationController 
     [activeProfile, refreshHosts]
   );
 
-  const enrollLocalAgentHostFromClipboard = useCallback(
-    async (exposedProfileIds: readonly string[]) => {
+  const enrollLocalAgentHost = useCallback(
+    async (handoff: string, exposedProfileIds: readonly string[]) => {
       if (!operatorControlBridge) {
         setError("operator_bridge_unavailable");
         return null;
       }
       setBusy(true);
       try {
-        const next = await operatorControlBridge.enrollOperatorLocalAgentHostFromClipboard({
+        const next = await operatorControlBridge.enrollOperatorLocalAgentHost({
+          handoff,
           exposedProfileIds: [...exposedProfileIds]
         });
         setLocalAgentHost(next);
@@ -380,7 +381,7 @@ export function useHostAdministrationController(): HostAdministrationController 
           );
         } catch (statusCause) {
           console.warn(
-            "Failed to refresh local Agent Host status after clipboard enrollment error.",
+            "Failed to refresh local Agent Host status after enrollment error.",
             statusCause
           );
         }
@@ -416,7 +417,7 @@ export function useHostAdministrationController(): HostAdministrationController 
     copyMemberSetupCode,
     revokeHost,
     registerLocalAgentHost,
-    enrollLocalAgentHostFromClipboard,
+    enrollLocalAgentHost,
     dismissHandoff: () => setHandoff(null),
     dismissMemberSetupCodeHandoff: () => setMemberSetupCodeHandoff(null),
     clearError: () => setError(null)

@@ -646,12 +646,11 @@ export const enCatalog = {
   hostAdminLocalHostTitle: "This computer",
   hostAdminLocalHostDescription:
     "Choose which agents this computer may share and keep them available in the background.",
-  hostAdminLocalHostWindowsOnly:
-    "One-click local Agent Host registration is available in the Windows Desktop build.",
+  hostAdminLocalHostUnsupported:
+    "Background Agent Host registration is unavailable on this system or Desktop build.",
   hostAdminLocalHostCustomCaUnsupported:
-    "The current Server connection does not support one-click registration. Register from the clipboard instead.",
-  hostAdminLocalHostHandoffInvalid:
-    "The clipboard does not contain a valid Agent Host enrollment handoff.",
+    "The current Server connection does not support one-click registration. Paste device enrollment details instead.",
+  hostAdminLocalHostHandoffInvalid: "Enter valid Agent Host enrollment details.",
   hostAdminLocalHostHandoffExpired:
     "The Agent Host enrollment handoff has expired. Create a new one on the server-admin computer.",
   hostAdminLocalHostNotRegistered: "This computer is not registered as an Agent Host.",
@@ -661,16 +660,18 @@ export const enCatalog = {
   hostAdminLocalHostDetected: "detected",
   hostAdminLocalHostCredentialBoundary:
     "Agent login credentials remain on this computer and are never uploaded to Server.",
-  hostAdminLocalHostClipboardHandoff:
-    "Copy device enrollment details on the managing computer, then return here to register.",
+  hostAdminLocalHostHandoffPrompt:
+    "Copy one-time device enrollment details on the managing computer, then paste them below.",
+  hostAdminLocalHostHandoffLabel: "Device enrollment details",
+  hostAdminLocalHostHandoffPlaceholder: "Paste the one-time enrollment details",
   hostAdminLocalHostAgentMissing:
     "The selected Agent is not installed or is unavailable in the Desktop environment.",
-  hostAdminEnrollThisComputerFromClipboard: "Register from clipboard",
+  hostAdminEnrollThisComputer: "Register this computer",
   hostAdminRegisterThisComputer: "Register this computer",
   hostAdminRegisterWithCurrentProfile: "Register with current admin profile",
   hostAdminUpdateThisComputer: "Update exposed agents",
   hostAdminBootstrapDescription:
-    "Copy one-time enrollment details for another Windows computer or VPS.",
+    "Copy one-time enrollment details for another Mac, Windows computer, or VPS.",
   hostAdminBootstrapIdle: "No device enrollment details have been created yet.",
   hostAdminBootstrapPending: "Preparing…",
   hostAdminBootstrapReady: "Device enrollment details copied.",
@@ -697,7 +698,7 @@ export const enCatalog = {
   hostAdminBootstrapCapacity: "Capacity must be an integer from 1 to 128.",
   hostAdminBootstrapCapabilities: "Capabilities must use lowercase portable identifiers.",
   hostAdminBootstrapBoundary:
-    "Enrollment details are written only to the system clipboard. PlanWeave Desktop on Windows and the PlanWeave CLI on a VPS can both use them directly.",
+    "Enrollment details are written only to the system clipboard. Paste them explicitly into PlanWeave Desktop on Mac or Windows, or use them with PlanWeave CLI on a VPS.",
   hostAdminCreateGrant: "Copy device enrollment details",
   hostAdminGrantOnceTitle: "Device enrollment details copied",
   hostAdminGrantOnceWarning: "Register the target device before these details expire at {expiry}.",

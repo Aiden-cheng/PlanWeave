@@ -12,10 +12,25 @@ afterEach(async () => {
 });
 
 describe("Desktop local Agent Host provisioner", () => {
-  it("reports the capability as unavailable outside Windows", async () => {
+  it("supports macOS through the platform background capability", async () => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-local-agent-host-macos-"));
+    roots.push(root);
     const provisioner = new DesktopLocalAgentHostProvisioner({
       platform: "darwin",
       launcher: { executablePath: "/Applications/PlanWeave.app/PlanWeave" },
+      operator: {} as never,
+      registrations: new LocalAgentHostRegistrationStore(join(root, "registrations.json"))
+    });
+    await expect(provisioner.status("profile-a")).resolves.toMatchObject({
+      supported: true,
+      state: "not_registered"
+    });
+  });
+
+  it("reports the capability as unavailable when no background adapter exists", async () => {
+    const provisioner = new DesktopLocalAgentHostProvisioner({
+      platform: "aix",
+      launcher: { executablePath: "/opt/PlanWeave/PlanWeave" },
       operator: {} as never
     });
     await expect(provisioner.status("profile-a")).resolves.toMatchObject({
@@ -105,8 +120,8 @@ describe("Desktop local Agent Host provisioner", () => {
     });
   });
 
-  it("indexes clipboard enrollment by Workspace when no operator profile is present", async () => {
-    const root = await mkdtemp(join(tmpdir(), "planweave-local-agent-host-clipboard-"));
+  it("indexes handoff enrollment by Workspace when no operator profile is present", async () => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-local-agent-host-handoff-"));
     roots.push(root);
     const registrations = new LocalAgentHostRegistrationStore(join(root, "registrations.json"));
     const agents = [
@@ -122,10 +137,10 @@ describe("Desktop local Agent Host provisioner", () => {
     const operator = {
       enrollHandoff: vi.fn().mockResolvedValue({
         state: "ready",
-        workspaceId: "workspace-clipboard",
+        workspaceId: "workspace-handoff",
         credential: "active",
         background: "running",
-        configPath: "C:\\private\\clipboard.json",
+        configPath: "C:\\private\\handoff.json",
         agents,
         nextSteps: {}
       }),
@@ -144,12 +159,12 @@ describe("Desktop local Agent Host provisioner", () => {
 
     await provisioner.register(undefined, "opaque-handoff", ["codex-acp"]);
 
-    await expect(registrations.get("workspace-clipboard")).resolves.toMatchObject({
-      workspaceId: "workspace-clipboard"
+    await expect(registrations.get("workspace-handoff")).resolves.toMatchObject({
+      workspaceId: "workspace-handoff"
     });
     await expect(provisioner.status()).resolves.toMatchObject({
       state: "ready",
-      workspaceId: "workspace-clipboard"
+      workspaceId: "workspace-handoff"
     });
   });
 });

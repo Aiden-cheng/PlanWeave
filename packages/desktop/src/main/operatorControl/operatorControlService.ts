@@ -13,7 +13,7 @@ import {
   operatorImportCredentialInputSchema,
   operatorListHostsInputSchema,
   operatorGetLocalAgentHostStatusInputSchema,
-  operatorEnrollLocalAgentHostFromClipboardInputSchema,
+  operatorEnrollLocalAgentHostInputSchema,
   operatorRegisterLocalAgentHostInputSchema,
   operatorProfileIdInputSchema,
   operatorRevokeHostInputSchema,
@@ -31,7 +31,7 @@ import {
   type LocalAgentHostProvisioner,
   unavailableLocalAgentHostProvisioner
 } from "./localAgentHostProvisioner.js";
-import { parseAgentHostClipboardHandoff } from "./localAgentHostClipboardHandoff.js";
+import { parseAgentHostHandoffInput } from "./localAgentHostHandoff.js";
 import {
   OperatorControlClient,
   type OperatorControlClientOptions
@@ -443,7 +443,7 @@ export class OperatorControlService {
     return this.enqueue(() =>
       this.withProfile(parsed, async (client, value) => {
         if (!(await this.localAgentHost.status(value.profileId)).supported) {
-          throw new Error("local_agent_host_windows_only");
+          throw new Error("local_agent_host_unavailable");
         }
         if (client.connectionProfile.endpoint?.tlsTrust === "configured_ca") {
           throw new Error("local_agent_host_custom_ca_unsupported");
@@ -455,21 +455,21 @@ export class OperatorControlService {
     );
   }
 
-  async enrollLocalAgentHostFromClipboard(input: unknown, clipboardText: string) {
-    assertNoSmuggledOperatorSecrets(input, "enrollLocalAgentHostFromClipboard");
-    const parsed = operatorEnrollLocalAgentHostFromClipboardInputSchema.parse(input);
-    const clipboardHandoff = parseAgentHostClipboardHandoff(clipboardText);
+  async enrollLocalAgentHost(input: unknown) {
+    assertNoSmuggledOperatorSecrets(input, "enrollLocalAgentHost");
+    const parsed = operatorEnrollLocalAgentHostInputSchema.parse(input);
+    const enrollmentHandoff = parseAgentHostHandoffInput(parsed.handoff);
     return this.enqueue(async () => {
       this.assertOpen();
       if (!(await this.localAgentHost.status()).supported) {
-        throw new Error("local_agent_host_windows_only");
+        throw new Error("local_agent_host_unavailable");
       }
-      if (clipboardHandoff.handoff.endpoint.tlsTrust === "configured_ca") {
+      if (enrollmentHandoff.handoff.endpoint.tlsTrust === "configured_ca") {
         throw new Error("local_agent_host_custom_ca_unsupported");
       }
       return this.localAgentHost.register(
         undefined,
-        clipboardHandoff.encodedHandoff,
+        enrollmentHandoff.encodedHandoff,
         parsed.exposedProfileIds
       );
     });

@@ -5,8 +5,7 @@ import {
 
 const AGENT_HOST_ENROLL_COMMAND_PREFIX = "planweave agent-host enroll ";
 
-/** Parses a main-process clipboard value without exposing the one-time handoff to renderer. */
-export function parseAgentHostClipboardHandoff(value: string): {
+export function parseAgentHostHandoffInput(value: string): {
   encodedHandoff: string;
   handoff: AgentHostSetupHandoff;
 } {

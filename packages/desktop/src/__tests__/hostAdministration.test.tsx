@@ -22,7 +22,7 @@ const bridgeMock = vi.hoisted(() => ({
   revokeOperatorHost: vi.fn(),
   getOperatorLocalAgentHostStatus: vi.fn(),
   registerOperatorLocalAgentHost: vi.fn(),
-  enrollOperatorLocalAgentHostFromClipboard: vi.fn()
+  enrollOperatorLocalAgentHost: vi.fn()
 }));
 
 vi.mock("../renderer/bridge", () => ({
@@ -139,7 +139,7 @@ beforeEach(() => {
       }
     ]
   });
-  bridgeMock.enrollOperatorLocalAgentHostFromClipboard.mockResolvedValue({
+  bridgeMock.enrollOperatorLocalAgentHost.mockResolvedValue({
     supported: true,
     state: "ready",
     workspaceId: "workspace-a",
@@ -291,7 +291,7 @@ describe("Agent Host settings", () => {
     expect(screen.queryByTestId("host-admin-grant-once")).not.toBeInTheDocument();
   });
 
-  it("registers this Windows computer with an explicitly selected Agent", async () => {
+  it("registers this computer with an explicitly selected Agent", async () => {
     const user = userEvent.setup();
     render(<HostAdministrationSection t={createTranslator("en")} />);
     const checkbox = await screen.findByTestId("host-admin-local-agent-codex-acp");
@@ -312,7 +312,7 @@ describe("Agent Host settings", () => {
     );
   });
 
-  it("enrolls from the main-owned clipboard without an administrative connection", async () => {
+  it("enrolls explicitly pasted details without an administrative connection", async () => {
     const user = userEvent.setup();
     bridgeMock.getOperatorControlStatus.mockResolvedValue({
       ...status(),
@@ -323,17 +323,23 @@ describe("Agent Host settings", () => {
     const checkbox = await screen.findByTestId("host-admin-local-agent-codex-acp");
 
     await user.click(checkbox);
-    await user.click(screen.getByTestId("host-admin-enroll-local-clipboard"));
+    await user.type(
+      screen.getByTestId("host-admin-local-handoff"),
+      "planweave-agent-host-setup:example"
+    );
+    await user.click(screen.getByTestId("host-admin-enroll-local"));
 
-    expect(bridgeMock.enrollOperatorLocalAgentHostFromClipboard).toHaveBeenCalledWith({
+    expect(bridgeMock.enrollOperatorLocalAgentHost).toHaveBeenCalledWith({
+      handoff: "planweave-agent-host-setup:example",
       exposedProfileIds: ["codex-acp"]
     });
     expect(await screen.findByTestId("host-admin-local-status")).toHaveTextContent(
       "This computer is connected"
     );
+    expect(screen.queryByTestId("host-admin-local-handoff")).not.toBeInTheDocument();
   });
 
-  it("offers clipboard registration when the current Server cannot register directly", async () => {
+  it("offers explicit enrollment input when the current Server cannot register directly", async () => {
     const customCaStatus = status();
     bridgeMock.getOperatorControlStatus.mockResolvedValue({
       ...customCaStatus,
@@ -352,7 +358,8 @@ describe("Agent Host settings", () => {
     );
     expect(screen.queryByText(/custom CA|configured_ca/i)).not.toBeInTheDocument();
     expect(screen.queryByTestId("host-admin-register-local")).not.toBeInTheDocument();
-    expect(screen.getByTestId("host-admin-enroll-local-clipboard")).toBeInTheDocument();
+    expect(screen.getByTestId("host-admin-local-handoff")).toBeInTheDocument();
+    expect(screen.getByTestId("host-admin-enroll-local")).toBeDisabled();
   });
 
   it("requires confirmation before removing a remote device", async () => {
