@@ -34,6 +34,7 @@ function operator(overrides: Partial<AgentHostOperatorService> = {}): AgentHostO
     revoke: vi.fn(),
     enrollHandoff: vi.fn(),
     listAgents: vi.fn(),
+    reconcileAgentExposure: vi.fn(),
     exposeAgent: vi.fn(),
     hideAgent: vi.fn(),
     installBackground: vi.fn(),

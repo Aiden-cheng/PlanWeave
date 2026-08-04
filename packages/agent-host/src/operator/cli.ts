@@ -80,6 +80,10 @@ export interface AgentHostOperatorService {
     }
   ): Promise<PortableEnrollmentResult>;
   listAgents(configPath: string): Promise<unknown>;
+  reconcileAgentExposure(
+    configPath: string,
+    profileIds: readonly string[]
+  ): Promise<AgentExposureMutationResult>;
   exposeAgent(configPath: string, profileId: string): Promise<AgentExposureMutationResult>;
   hideAgent(configPath: string, profileId: string): Promise<AgentExposureMutationResult>;
   installBackground(configPath: string, launcher: AgentHostBackgroundLauncher): Promise<unknown>;
@@ -326,11 +330,18 @@ export async function runAgentHostCli(
           executablePath: launcher.executablePath,
           fixedArgs: launcher.fixedArgs
         });
-        let agents = enrollment.agents;
-        for (const profileId of parsed.exposeProfiles) {
-          agents = (await operator.exposeAgent(enrollment.configPath, profileId)).agents;
-        }
-        result = parsed.exposeProfiles.length > 0 ? { ...enrollment, agents } : enrollment;
+        result =
+          parsed.exposeProfiles.length > 0
+            ? {
+                ...enrollment,
+                agents: (
+                  await operator.reconcileAgentExposure(
+                    enrollment.configPath,
+                    parsed.exposeProfiles
+                  )
+                ).agents
+              }
+            : enrollment;
       } else {
         if (!parsed.configPath) throw new Error("agent_host_cli_config_required");
         if (!parsed.code) throw new Error("agent_host_cli_enrollment_code_required");

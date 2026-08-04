@@ -167,6 +167,55 @@ export class AgentHostOperator {
     return listAgentExposure(config, (command) => this.resolvePresetCommand(command));
   }
 
+  async reconcileAgentExposure(
+    configPath: string,
+    profileIds: readonly string[]
+  ): Promise<AgentExposureMutationResult> {
+    const requested = new Set<string>();
+    const presets = profileIds.map((profileId) => {
+      const parsedProfileId = parseAgentExposureProfileId(profileId);
+      if (requested.has(parsedProfileId)) {
+        throw new Error("duplicate_exposed_agent_profile");
+      }
+      requested.add(parsedProfileId);
+      return requireSupportedAgentProfile(parsedProfileId);
+    });
+    const config = await loadAgentHostConfig(configPath);
+    const additions: AgentHostConfig["agentProfiles"] = [];
+    const capabilities = new Set(config.host.capabilities);
+    for (const preset of presets) {
+      const existing = config.agentProfiles.find((profile) => profile.id === preset.profileId);
+      if (existing && existing.agentId !== preset.agentId) {
+        throw new Error("agent_host_agent_profile_conflict");
+      }
+      const command = await this.resolvePresetCommand(existing?.command ?? preset.command);
+      capabilities.add(`acp.${preset.agentId}`);
+      if (!existing) {
+        additions.push({
+          id: preset.profileId,
+          agentId: preset.agentId,
+          command,
+          args: [...preset.args],
+          environment: [...preset.environment]
+        });
+      }
+    }
+    const next =
+      additions.length === 0 && capabilities.size === config.host.capabilities.length
+        ? config
+        : parseAgentHostConfig({
+            ...config,
+            host: { ...config.host, capabilities: [...capabilities] },
+            agentProfiles: [...config.agentProfiles, ...additions]
+          });
+    if (next !== config) await writePrivateJsonFile(configPath, next);
+    await writeExposedAgentProfileIds(next, [...requested]);
+    return {
+      agents: await this.listAgents(configPath),
+      reload: await this.reloadBackground(next)
+    };
+  }
+
   async exposeAgent(configPath: string, profileId: string): Promise<AgentExposureMutationResult> {
     const preset = requireSupportedAgentProfile(profileId);
     const config = await loadAgentHostConfig(configPath);

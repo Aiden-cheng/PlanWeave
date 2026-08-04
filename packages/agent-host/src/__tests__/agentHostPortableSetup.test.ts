@@ -127,19 +127,13 @@ describe("portable Agent Host setup", () => {
       agents: [],
       nextSteps: {} as never
     };
-    const exposeAgent = vi
-      .fn()
-      .mockResolvedValueOnce({
-        reload: "restarted",
-        agents: [{ profileId: "codex-acp", exposed: true }]
-      })
-      .mockResolvedValueOnce({
-        reload: "restarted",
-        agents: [
-          { profileId: "codex-acp", exposed: true },
-          { profileId: "claude-agent-acp", exposed: true }
-        ]
-      });
+    const reconcileAgentExposure = vi.fn().mockResolvedValue({
+      reload: "restarted",
+      agents: [
+        { profileId: "codex-acp", exposed: true },
+        { profileId: "claude-agent-acp", exposed: true }
+      ]
+    });
 
     await expect(
       runAgentHostCli(
@@ -147,15 +141,17 @@ describe("portable Agent Host setup", () => {
         {
           operator: {
             enrollHandoff: vi.fn().mockResolvedValue(enrollment),
-            exposeAgent
+            reconcileAgentExposure
           } as never,
           io: { stdout, stderr: vi.fn() },
           launcher: { executablePath: "node", fixedArgs: ["planweave", "agent-host"] }
         }
       )
     ).resolves.toBe(0);
-    expect(exposeAgent).toHaveBeenNthCalledWith(1, enrollment.configPath, "codex-acp");
-    expect(exposeAgent).toHaveBeenNthCalledWith(2, enrollment.configPath, "claude-agent-acp");
+    expect(reconcileAgentExposure).toHaveBeenCalledWith(enrollment.configPath, [
+      "codex-acp",
+      "claude-agent-acp"
+    ]);
     expect(JSON.parse(stdout.mock.calls[0]?.[0] as string).agents).toEqual([
       { profileId: "codex-acp", exposed: true },
       { profileId: "claude-agent-acp", exposed: true }

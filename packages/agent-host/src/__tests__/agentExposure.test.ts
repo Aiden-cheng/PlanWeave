@@ -99,6 +99,38 @@ describe("Agent exposure allowlist", () => {
     await expect(readExposedAgentProfileIds(value)).resolves.toEqual(["codex-acp"]);
   });
 
+  it("validates and replaces the complete exposed profile set before one reload", async () => {
+    const base = await config();
+    const value = parseAgentHostConfig({
+      ...base,
+      agentProfiles: [
+        ...base.agentProfiles,
+        {
+          id: "codex-acp",
+          agentId: "codex",
+          command: process.execPath,
+          args: [],
+          environment: []
+        }
+      ]
+    });
+    const configPath = join(value.dataDirectory, "config.json");
+    await writePrivateJsonFile(configPath, value);
+    await writeExposedAgentProfileIds(value, ["custom-acp"]);
+
+    const result = await new AgentHostOperator(null, "linux", {}).reconcileAgentExposure(
+      configPath,
+      ["codex-acp"]
+    );
+
+    expect(result).toMatchObject({ reload: "restart_required" });
+    await expect(readExposedAgentProfileIds(value)).resolves.toEqual(["codex-acp"]);
+    await expect(
+      new AgentHostOperator(null, "linux", {}).reconcileAgentExposure(configPath, ["unknown-acp"])
+    ).rejects.toThrow("agent_host_agent_profile_unsupported");
+    await expect(readExposedAgentProfileIds(value)).resolves.toEqual(["codex-acp"]);
+  });
+
   it("enforces exposure dynamically at execution resolution without a daemon restart", async () => {
     const value = await config();
     const resolver = new ConfiguredAcpProfileResolver(value, process.env, async (agentProfileId) =>
