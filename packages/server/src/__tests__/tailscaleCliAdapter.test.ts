@@ -125,6 +125,16 @@ describe("TailscaleCliAdapter", () => {
     await expect(new TailscaleCliAdapter(noCertificate.run).inspectNode()).rejects.toMatchObject({
       code: "TAILSCALE_HTTPS_UNAVAILABLE"
     });
+
+    const nullCertificateDomains = queuedRunner([
+      { stdout: { majorMinorPatch: "1.102.1" } },
+      { stdout: { ...healthyStatus, CertDomains: null } }
+    ]);
+    await expect(
+      new TailscaleCliAdapter(nullCertificateDomains.run).inspectNode()
+    ).rejects.toMatchObject({
+      code: "TAILSCALE_HTTPS_UNAVAILABLE"
+    });
   });
 
   it.each([

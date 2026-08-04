@@ -47,7 +47,7 @@ const nodeStatusSchema = z
       })
       .loose()
       .optional(),
-    CertDomains: z.array(z.string()).optional()
+    CertDomains: z.array(z.string()).nullish()
   })
   .loose();
 
