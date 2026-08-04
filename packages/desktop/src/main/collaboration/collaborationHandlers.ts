@@ -150,14 +150,18 @@ export function registerCollaborationHandlers(
   });
   const localActivation = createLocalCollaborationActivationCommand({
     coordinator: local,
-    service: active
+    service: active,
+    coordinatorReady: localReady
   });
   const runCoordinationOperation = createCollaborationCoordinationQueue();
-  const deactivateLocalSelection = async (
-    profileId = local.localProfile()?.profileId
-  ): Promise<void> => {
+  const persistedWorkspaceReady = localReady
+    .then(() => runCoordinationOperation(() => localActivation.reconcile()))
+    .catch((error: unknown) => {
+      console.error("Failed to restore the persisted collaboration Workspace.", error);
+    });
+  const suspendLocalSession = async (profileId = local.localProfile()?.profileId): Promise<void> => {
     if (profileId && (await active.getStatus()).activeProfileId === profileId) {
-      await active.clearActiveProfile();
+      await active.disconnectSession();
     }
   };
   const deploymentActions = new DeploymentActions({
@@ -177,7 +181,10 @@ export function registerCollaborationHandlers(
   });
   const invitationHandoff = new CollaborationInvitationHandoffCoordinator(active, local);
 
-  ipcMain.handle(collaborationInvokeChannels.getCollaborationStatus, () => active.getStatus());
+  ipcMain.handle(collaborationInvokeChannels.getCollaborationStatus, async () => {
+    await persistedWorkspaceReady;
+    return active.getStatus();
+  });
   ipcMain.handle(collaborationInvokeChannels.upsertCollaborationProfile, (_event, input: unknown) =>
     runCoordinationOperation(() => {
       assertRendererProfileNamespace(input);
@@ -366,9 +373,7 @@ export function registerCollaborationHandlers(
   );
   ipcMain.handle(collaborationInvokeChannels.clearCollaborationCurrentSelection, () =>
     runCoordinationOperation(async () => {
-      const previousProfileId = local.localProfile()?.profileId;
       await local.clearCurrentSelection();
-      await deactivateLocalSelection(previousProfileId);
     })
   );
   ipcMain.handle(collaborationInvokeChannels.getLocalCollaborationServerStatus, async () => {
@@ -382,9 +387,8 @@ export function registerCollaborationHandlers(
     collaborationInvokeChannels.setLocalCollaborationTrustedScopes,
     (_event, input: unknown) =>
       runCoordinationOperation(async () => {
-        const previousProfileId = local.localProfile()?.profileId;
         const catalog = await local.setTrustedScopes(input);
-        await localActivation.reconcile(previousProfileId);
+        await localActivation.reconcile();
         return catalog;
       })
   );
@@ -400,7 +404,7 @@ export function registerCollaborationHandlers(
     runCoordinationOperation(async () => {
       const previousProfileId = local.localProfile()?.profileId;
       const status = await local.stop();
-      await deactivateLocalSelection(previousProfileId);
+      await suspendLocalSession(previousProfileId);
       return status;
     })
   );
@@ -408,9 +412,8 @@ export function registerCollaborationHandlers(
     collaborationInvokeChannels.setLocalCollaborationLanSharing,
     (_event, input: unknown) =>
       runCoordinationOperation(async () => {
-        const previousProfileId = local.localProfile()?.profileId;
         const status = await local.setLanSharing(input);
-        await localActivation.reconcile(previousProfileId);
+        await localActivation.reconcile();
         return status;
       })
   );

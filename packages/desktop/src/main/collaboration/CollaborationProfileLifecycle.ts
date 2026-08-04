@@ -41,6 +41,11 @@ type CollaborationProfileLifecycleDependencies = {
   clearRememberedObserverCursor(profileId?: string | null): void;
   publishStatus(): Promise<CollaborationStatus>;
   clientForProfile(profileId: string, requireCredential: boolean): Promise<CollaborationClient>;
+  activateWorkspaceAuthority(input: {
+    profileId: string;
+    workspaceId: string;
+    membershipRole: "owner" | "member";
+  }): Promise<void>;
 };
 
 function stripAuthHandoff(
@@ -49,6 +54,7 @@ function stripAuthHandoff(
   nonPersistenceWarning: string | null
 ): CollaborationAuthHandoffView {
   const base: CollaborationAuthHandoffView = {
+    workspaceId: response.workspaceId,
     principal: response.principal,
     membership: response.membership,
     device: response.device,
@@ -226,6 +232,11 @@ export class CollaborationProfileLifecycle {
           );
         }
         await this.dependencies.profiles.setActiveProfileId(parsed.profileId);
+        await this.dependencies.activateWorkspaceAuthority({
+          profileId: parsed.profileId,
+          workspaceId: response.workspaceId,
+          membershipRole: "owner"
+        });
         this.dependencies.setSession("ready", "bootstrap_complete", null);
         await this.dependencies.publishStatus();
         return stripAuthHandoff(
@@ -325,6 +336,11 @@ export class CollaborationProfileLifecycle {
           }
         );
         await this.dependencies.profiles.setActiveProfileId(parsed.profileId);
+        await this.dependencies.activateWorkspaceAuthority({
+          profileId: parsed.profileId,
+          workspaceId: response.workspaceId,
+          membershipRole: "member"
+        });
         this.dependencies.setSession("ready", "consume_invitation_complete", null);
         await this.dependencies.publishStatus();
         return stripAuthHandoff(

@@ -13,7 +13,7 @@ import type { CollaborationStatus } from "../../shared/collaboration.js";
 type LocalInvitationAuthority = {
   recognizesLocalProfile(profileId: string): boolean;
   invitationEndpoint(): DeploymentEndpoint | null;
-  localProfile(): {
+  localProfileForId(profileId: string): {
     profileId: string;
     projectId: string;
     serverBaseUrl: string;
@@ -67,7 +67,7 @@ export class CollaborationInvitationHandoffCoordinator {
       };
     }
     const endpoint = this.local.invitationEndpoint();
-    const localProfile = this.local.localProfile();
+    const localProfile = this.local.localProfileForId(profile.profileId);
     if (
       !endpoint ||
       !localProfile ||

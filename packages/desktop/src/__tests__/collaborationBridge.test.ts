@@ -737,6 +737,90 @@ describe("CollaborationService IPC trust boundary", () => {
       const status = await service.getStatus();
       expect(status.profiles[0]?.hasDeviceCredential).toBe(true);
       expect(status.activeProfileId).toBe("profile-1");
+      expect(status.workspaceConnection).toMatchObject({
+        status: "connected",
+        workspaceId: "workspace-demo-001",
+        profile: { profileId: "profile-1" }
+      });
+
+      await service.shutdown();
+      const restarted = await serviceWithRoot(root, true);
+      const restoredStatus = await restarted.getStatus();
+      expect(restoredStatus.workspaceConnection).toMatchObject({
+        status: "disconnected",
+        workspaceId: "workspace-demo-001",
+        profile: { profileId: "profile-1" }
+      });
+      await restarted.shutdown();
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("promotes an invitation join into the canonical Workspace connection", async () => {
+    const fixture = await listen(async (req, res) => {
+      expect(req.method).toBe("POST");
+      expect(req.url).toContain("/human/invitations/consume");
+      await readBody(req);
+      json(res, 200, {
+        workspaceId: "workspace-demo-001",
+        principal: {
+          humanPrincipalId: "human-member-001",
+          displayName: "Member",
+          createdAt: "2030-01-01T00:00:00.000Z"
+        },
+        membership: {
+          membershipId: "membership-member-001",
+          projectId: "project-demo-001",
+          humanPrincipalId: "human-member-001",
+          displayName: "Member",
+          role: "member",
+          createdAt: "2030-01-01T00:00:00.000Z",
+          updatedAt: "2030-01-01T00:00:00.000Z"
+        },
+        device: {
+          deviceCredentialId: "device-member-001",
+          humanPrincipalId: "human-member-001",
+          mintedForProjectId: "project-demo-001",
+          createdAt: "2030-01-01T00:00:00.000Z"
+        },
+        deviceToken: exampleHumanDeviceToken,
+        invitation: {
+          invitationId: "invitation-001",
+          projectId: "project-demo-001",
+          role: "member",
+          createdByHumanPrincipalId: "human-owner-001",
+          createdAt: "2030-01-01T00:00:00.000Z",
+          expiresAt: "2030-01-02T00:00:00.000Z",
+          consumedAt: "2030-01-01T00:00:00.000Z"
+        },
+        principalCreated: true
+      });
+    });
+    try {
+      const root = await tempDir("planweave-collab-consume-");
+      const service = await serviceWithRoot(root, true);
+      await service.upsertProfile({
+        profileId: "profile-member",
+        displayName: "Demo",
+        serverBaseUrl: fixture.origin,
+        projectId: "project-demo-001",
+        allowInsecureTransport: true,
+        endpoint: loopbackEndpoint(fixture.origin)
+      });
+
+      const handoff = await service.consumeInvitation({
+        profileId: "profile-member",
+        request: { invitationToken: exampleInvitationToken, displayName: "Member" }
+      });
+
+      expect(handoff.workspaceId).toBe("workspace-demo-001");
+      const status = await service.getStatus();
+      expect(status.workspaceConnection).toMatchObject({
+        status: "connected",
+        workspaceId: "workspace-demo-001",
+        profile: { profileId: "profile-member" }
+      });
     } finally {
       await fixture.close();
     }

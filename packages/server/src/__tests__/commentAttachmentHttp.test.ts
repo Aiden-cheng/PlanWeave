@@ -68,6 +68,8 @@ async function setup(options?: { clock?: () => Date }) {
   const humanService = new HumanMembershipService({
     repository: humanRepository,
     projectAuthority,
+    workspaceForProject: (projectId) =>
+      projectId === "project-a" ? workspaceA : projectId === "project-b" ? workspaceB : undefined,
     clock: options?.clock
   });
   const attachmentRepository = new CommentAttachmentRepository(database);

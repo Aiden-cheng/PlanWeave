@@ -70,7 +70,7 @@ export function formatPeoplePanelError(
   return collaborationErrorMessage(error);
 }
 
-/** Active-project member administration surface. */
+/** Workspace member administration with current-canvas access controls. */
 export function PeopleView({
   t,
   diagnosticsEnabled = false,
@@ -134,12 +134,8 @@ export function PeopleView({
   useEffect(() => {
     if (sessionConnected) setReconnectError(null);
   }, [sessionConnected]);
-  const workspaceConnectionActive =
-    status?.workspaceConnection.status === "connecting" ||
-    status?.workspaceConnection.status === "connected" ||
-    status?.workspaceConnection.status === "reconnecting";
   const hasConfiguredWorkspace =
-    activeProfile?.hasDeviceCredential === true || workspaceConnectionActive;
+    status !== null && status.workspaceConnection.workspaceId !== null;
   const showOnboarding = !hasConfiguredWorkspace;
 
   useEffect(() => {

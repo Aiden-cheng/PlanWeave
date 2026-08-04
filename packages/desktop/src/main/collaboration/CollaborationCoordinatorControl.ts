@@ -131,6 +131,18 @@ export interface CollaborationCoordinatorControl {
     allowInsecureTransport: boolean;
     endpoint: DeploymentEndpoint;
   } | null;
+  localProfileForId(profileId: string): {
+    profileId: string;
+    displayName: string;
+    serverBaseUrl: string;
+    projectId: string;
+    allowInsecureTransport: boolean;
+    endpoint: DeploymentEndpoint;
+  } | null;
+  registerLocalProfile(
+    profileId: string,
+    actor: { kind: "human"; id: string }
+  ): LoopbackProjectRegistrationView;
   createSelfHostedDeploymentSource(target: DeploymentTargetDraft): Promise<{
     config: ServerConfig;
     workspaceRoot: string;
@@ -598,6 +610,45 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     });
   }
 
+  localProfileForId(profileId: string) {
+    const authorityProjectId = this.authorityProjectIdForLocalProfile(profileId);
+    if (!authorityProjectId || this.localPort === null) return null;
+    const endpoint = this.invitationEndpoint();
+    if (!endpoint) return null;
+    const profile = this.connectionProfileFor({ authorityProjectId });
+    return collaborationConnectionProfileSchema.parse({
+      ...profile,
+      serverBaseUrl: endpoint.serverOrigin,
+      projectId: authorityProjectId,
+      allowInsecureTransport:
+        endpoint.topology === "loopback_http" || endpoint.topology === "lan_http",
+      endpoint
+    });
+  }
+
+  registerLocalProfile(
+    profileId: string,
+    actor: { kind: "human"; id: string }
+  ): LoopbackProjectRegistrationView {
+    const authorityProjectId = this.authorityProjectIdForLocalProfile(profileId);
+    if (!authorityProjectId) throw new Error("local_collaboration_profile_not_hosted");
+    const profile = this.requireRunningProfile();
+    const scopes = this.controller!
+      .listTrustedProjectScopes({ profileId: profile.profileId })
+      .filter((scope) => scope.projectId === authorityProjectId)
+      .sort((left, right) => left.canvasId.localeCompare(right.canvasId));
+    const scope = scopes[0];
+    if (!scope) throw new Error("local_collaboration_profile_not_hosted");
+    return loopbackProjectRegistrationViewSchema.parse(
+      this.controller!.registerTrustedProject(actor, {
+        workspaceId: scope.workspaceId,
+        projectId: scope.projectId,
+        canvasId: scope.canvasId,
+        profileId: profile.profileId
+      })
+    );
+  }
+
   async createSelfHostedDeploymentSource(target: DeploymentTargetDraft): Promise<{
     config: ServerConfig;
     workspaceRoot: string;
@@ -725,11 +776,25 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     });
   }
 
-  private connectionProfileFor(selection: ResolvedSelection): LoopbackServerProfile {
+  private connectionProfileFor(
+    selection: Pick<ResolvedSelection, "authorityProjectId">
+  ): LoopbackServerProfile {
     return loopbackServerProfileSchema.parse({
       ...this.serverProfile(),
       profileId: localProfileIdForProject(selection.authorityProjectId)
     });
+  }
+
+  private authorityProjectIdForLocalProfile(profileId: string): string | null {
+    const status = this.status();
+    if (status.state !== "running" || !status.profile || !this.controller) return null;
+    const authorityProjectIds = new Set(
+      this.controller
+        .listTrustedProjectScopes({ profileId: status.profile.profileId })
+        .filter((scope) => localProfileIdForProject(scope.projectId) === profileId)
+        .map((scope) => scope.projectId)
+    );
+    return authorityProjectIds.size === 1 ? [...authorityProjectIds][0]! : null;
   }
 
   private async resolveTrustedProjects(): Promise<ServerConfig["trustedProjects"]> {

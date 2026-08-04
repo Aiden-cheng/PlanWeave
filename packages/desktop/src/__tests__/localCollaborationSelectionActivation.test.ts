@@ -13,7 +13,84 @@ const profile = {
 };
 
 describe("activateLocalCollaborationSelection", () => {
-  it("clears a stale local profile when a cold-start selection is not trusted", async () => {
+  it("waits for local server restoration before reconciling a persisted workspace", async () => {
+    let resolveReady!: () => void;
+    let restored = false;
+    const ready = new Promise<void>((resolve) => {
+      resolveReady = () => {
+        restored = true;
+        resolve();
+      };
+    });
+    const coordinator = {
+      currentSelection: vi.fn(() => null),
+      status: vi.fn(() => ({ state: restored ? "running" : "stopped" })),
+      currentSelectionIsTrusted: vi.fn(() => restored),
+      setCurrentSelection: vi.fn(async () => undefined),
+      clearCurrentSelection: vi.fn(async () => undefined),
+      localProfile: vi.fn(() => (restored ? profile : null)),
+      localProfileForId: vi.fn(() => (restored ? profile : null)),
+      ownsLocalProfile: vi.fn(() => true),
+      registerCurrentProject: vi.fn(() => ({
+        workspaceId: "workspace-1",
+        projectId: "project-1",
+        canvasId: "canvas-1",
+        profileId: profile.profileId,
+        registeredAt: "2030-01-01T00:00:00.000Z"
+      })),
+      registerLocalProfile: vi.fn(() => ({
+        workspaceId: "workspace-1",
+        projectId: "project-1",
+        canvasId: "canvas-1",
+        profileId: profile.profileId,
+        registeredAt: "2030-01-01T00:00:00.000Z"
+      }))
+    };
+    const service = {
+      getStatus: vi.fn(async () => ({
+        activeProfileId: profile.profileId,
+        profiles: [{ profileId: profile.profileId, hasDeviceCredential: true }],
+        session: { phase: "idle" }
+      })),
+      runStatusPublicationTransaction: vi.fn(async <T>(operation: () => Promise<T>) => operation()),
+      clearActiveProfile: vi.fn(async () => undefined),
+      setActiveProfile: vi.fn(async () => undefined),
+      connectSession: vi.fn(async () => undefined),
+      upsertProfile: vi.fn(async () => undefined),
+      migrateLocalProfileCredential: vi.fn(async () => undefined),
+      adoptWorkspaceAuthority: vi.fn(async () => undefined),
+      activeHumanPrincipalId: vi.fn(async () => "human-owner"),
+      bootstrapOwner: vi.fn()
+    };
+
+    const command = createLocalCollaborationActivationCommand({
+      coordinator,
+      service,
+      coordinatorReady: ready
+    });
+    const reconciliation = command.selectAndReconcile({
+      projectId: "desktop-project-1",
+      canvasId: "canvas-1"
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(service.clearActiveProfile).not.toHaveBeenCalled();
+    expect(service.upsertProfile).not.toHaveBeenCalled();
+
+    resolveReady();
+    await reconciliation;
+
+    expect(service.clearActiveProfile).not.toHaveBeenCalled();
+    expect(service.upsertProfile).toHaveBeenCalledWith(profile);
+    expect(service.adoptWorkspaceAuthority).toHaveBeenCalledWith({
+      profileId: profile.profileId,
+      workspaceId: "workspace-1",
+      membershipRole: "owner"
+    });
+    expect(service.connectSession).toHaveBeenCalledWith({ profileId: profile.profileId });
+  });
+
+  it("preserves a configured workspace when the selected project is not hosted", async () => {
     const coordinator = {
       currentSelection: vi.fn(() => null),
       status: vi.fn(() => ({ state: "running" })),
@@ -21,12 +98,15 @@ describe("activateLocalCollaborationSelection", () => {
       setCurrentSelection: vi.fn(async () => undefined),
       clearCurrentSelection: vi.fn(async () => undefined),
       localProfile: vi.fn(() => null),
+      localProfileForId: vi.fn(() => null),
       ownsLocalProfile: vi.fn((profileId: string) => profileId === "planweave-local-tiny"),
-      registerCurrentProject: vi.fn()
+      registerCurrentProject: vi.fn(),
+      registerLocalProfile: vi.fn()
     };
     const service = {
       getStatus: vi.fn(async () => ({
         activeProfileId: "planweave-local-tiny",
+        profiles: [{ profileId: "planweave-local-tiny", hasDeviceCredential: true }],
         session: { phase: "idle" }
       })),
       runStatusPublicationTransaction: vi.fn(async <T>(operation: () => Promise<T>) => operation()),
@@ -35,6 +115,7 @@ describe("activateLocalCollaborationSelection", () => {
       connectSession: vi.fn(),
       upsertProfile: vi.fn(),
       migrateLocalProfileCredential: vi.fn(),
+      adoptWorkspaceAuthority: vi.fn(),
       activeHumanPrincipalId: vi.fn(),
       bootstrapOwner: vi.fn()
     };
@@ -42,7 +123,8 @@ describe("activateLocalCollaborationSelection", () => {
     const command = createLocalCollaborationActivationCommand({ coordinator, service });
     await command.selectAndReconcile({ projectId: "desktop-apollo", canvasId: "default" });
 
-    expect(service.clearActiveProfile).toHaveBeenCalledOnce();
+    expect(service.clearActiveProfile).not.toHaveBeenCalled();
+    expect(service.setActiveProfile).not.toHaveBeenCalled();
   });
 
   it("preserves a remote profile when the selected local project is not trusted", async () => {
@@ -53,12 +135,15 @@ describe("activateLocalCollaborationSelection", () => {
       setCurrentSelection: vi.fn(async () => undefined),
       clearCurrentSelection: vi.fn(async () => undefined),
       localProfile: vi.fn(() => null),
+      localProfileForId: vi.fn(() => null),
       ownsLocalProfile: vi.fn(() => false),
-      registerCurrentProject: vi.fn()
+      registerCurrentProject: vi.fn(),
+      registerLocalProfile: vi.fn()
     };
     const service = {
       getStatus: vi.fn(async () => ({
         activeProfileId: "remote-team",
+        profiles: [{ profileId: "remote-team", hasDeviceCredential: true }],
         session: { phase: "connected" }
       })),
       runStatusPublicationTransaction: vi.fn(async <T>(operation: () => Promise<T>) => operation()),
@@ -67,6 +152,7 @@ describe("activateLocalCollaborationSelection", () => {
       connectSession: vi.fn(),
       upsertProfile: vi.fn(),
       migrateLocalProfileCredential: vi.fn(),
+      adoptWorkspaceAuthority: vi.fn(),
       activeHumanPrincipalId: vi.fn(),
       bootstrapOwner: vi.fn()
     };
@@ -74,6 +160,66 @@ describe("activateLocalCollaborationSelection", () => {
     const command = createLocalCollaborationActivationCommand({ coordinator, service });
     await command.selectAndReconcile({ projectId: "desktop-apollo", canvasId: "default" });
 
+    expect(service.clearActiveProfile).not.toHaveBeenCalled();
+  });
+
+  it("restores the active local workspace without switching to the sidebar project", async () => {
+    const activeWorkspaceProfile = {
+      ...profile,
+      profileId: "planweave-local-workspace-a",
+      projectId: "workspace-project-a"
+    };
+    const selectedProjectProfile = {
+      ...profile,
+      profileId: "planweave-local-sidebar-project",
+      projectId: "sidebar-project"
+    };
+    const coordinator = {
+      currentSelection: vi.fn(() => null),
+      status: vi.fn(() => ({ state: "running" })),
+      currentSelectionIsTrusted: vi.fn(() => true),
+      setCurrentSelection: vi.fn(async () => undefined),
+      clearCurrentSelection: vi.fn(async () => undefined),
+      localProfile: vi.fn(() => selectedProjectProfile),
+      localProfileForId: vi.fn((profileId: string) =>
+        profileId === activeWorkspaceProfile.profileId ? activeWorkspaceProfile : null
+      ),
+      registerCurrentProject: vi.fn(),
+      registerLocalProfile: vi.fn(() => ({
+        workspaceId: "workspace-a",
+        projectId: activeWorkspaceProfile.projectId,
+        canvasId: "canvas-a",
+        profileId: activeWorkspaceProfile.profileId,
+        registeredAt: "2030-01-01T00:00:00.000Z"
+      }))
+    };
+    const service = {
+      getStatus: vi.fn(async () => ({
+        activeProfileId: activeWorkspaceProfile.profileId,
+        profiles: [{ profileId: activeWorkspaceProfile.profileId, hasDeviceCredential: true }],
+        session: { phase: "idle" }
+      })),
+      runStatusPublicationTransaction: vi.fn(async <T>(operation: () => Promise<T>) => operation()),
+      clearActiveProfile: vi.fn(async () => undefined),
+      setActiveProfile: vi.fn(async () => undefined),
+      connectSession: vi.fn(async () => undefined),
+      upsertProfile: vi.fn(async () => undefined),
+      migrateLocalProfileCredential: vi.fn(async () => undefined),
+      adoptWorkspaceAuthority: vi.fn(async () => undefined),
+      activeHumanPrincipalId: vi.fn(async () => "human-owner"),
+      bootstrapOwner: vi.fn()
+    };
+
+    const command = createLocalCollaborationActivationCommand({ coordinator, service });
+    await command.selectAndReconcile({ projectId: "desktop-sidebar", canvasId: "default" });
+
+    expect(service.upsertProfile).toHaveBeenCalledWith(activeWorkspaceProfile);
+    expect(service.upsertProfile).not.toHaveBeenCalledWith(selectedProjectProfile);
+    expect(coordinator.registerLocalProfile).toHaveBeenCalledWith(
+      activeWorkspaceProfile.profileId,
+      { kind: "human", id: "human-owner" }
+    );
+    expect(coordinator.registerCurrentProject).not.toHaveBeenCalled();
     expect(service.clearActiveProfile).not.toHaveBeenCalled();
   });
 
@@ -89,7 +235,18 @@ describe("activateLocalCollaborationSelection", () => {
       }),
       clearCurrentSelection: vi.fn(async () => undefined),
       localProfile: vi.fn(() => profile),
+      localProfileForId: vi.fn(() => profile),
       registerCurrentProject: vi.fn(() => {
+        calls.push("register");
+        return {
+          workspaceId: "workspace-1",
+          projectId: "project-1",
+          canvasId: "canvas-1",
+          profileId: profile.profileId,
+          registeredAt: "2030-01-01T00:00:00.000Z"
+        };
+      }),
+      registerLocalProfile: vi.fn(() => {
         calls.push("register");
         return {
           workspaceId: "workspace-1",
@@ -105,6 +262,7 @@ describe("activateLocalCollaborationSelection", () => {
         calls.push("upsert");
       }),
       migrateLocalProfileCredential: vi.fn(async () => undefined),
+      adoptWorkspaceAuthority: vi.fn(async () => undefined),
       setActiveProfile: vi.fn(async () => undefined),
       activeHumanPrincipalId: vi.fn(async () => "human-owner"),
       bootstrapOwner: vi.fn(async () => {
@@ -116,6 +274,7 @@ describe("activateLocalCollaborationSelection", () => {
       clearActiveProfile: vi.fn(async () => undefined),
       getStatus: vi.fn(async () => ({
         activeProfileId: profile.profileId,
+        profiles: [{ profileId: profile.profileId, hasDeviceCredential: true }],
         session: { phase: "connected" }
       })),
       runStatusPublicationTransaction: vi.fn(async <T>(operation: () => Promise<T>) => operation())
@@ -137,6 +296,8 @@ describe("activateLocalCollaborationSelection", () => {
       setCurrentSelection: vi.fn(async () => undefined),
       clearCurrentSelection: vi.fn(async () => undefined),
       localProfile: vi.fn(() => profile),
+      localProfileForId: vi.fn(() => profile),
+      registerLocalProfile: vi.fn(),
       registerCurrentProject: vi.fn(() => {
         calls.push("register");
         return {
@@ -151,6 +312,7 @@ describe("activateLocalCollaborationSelection", () => {
     const service = {
       upsertProfile: vi.fn(async () => undefined),
       migrateLocalProfileCredential: vi.fn(async () => undefined),
+      adoptWorkspaceAuthority: vi.fn(async () => undefined),
       setActiveProfile: vi.fn(async () => undefined),
       activeHumanPrincipalId: vi.fn(async () => "human-owner"),
       bootstrapOwner: vi.fn(async () => {
@@ -174,6 +336,11 @@ describe("activateLocalCollaborationSelection", () => {
       kind: "human",
       id: "human-owner"
     });
+    expect(service.adoptWorkspaceAuthority).toHaveBeenCalledWith({
+      profileId: profile.profileId,
+      workspaceId: "workspace-1",
+      membershipRole: "owner"
+    });
   });
 
   it("initializes the local owner once and continues activation automatically", async () => {
@@ -181,6 +348,8 @@ describe("activateLocalCollaborationSelection", () => {
       setCurrentSelection: vi.fn(async () => undefined),
       clearCurrentSelection: vi.fn(async () => undefined),
       localProfile: vi.fn(() => profile),
+      localProfileForId: vi.fn(() => profile),
+      registerLocalProfile: vi.fn(),
       registerCurrentProject: vi.fn(() => ({
         workspaceId: "workspace-1",
         projectId: "project-1",
@@ -192,9 +361,11 @@ describe("activateLocalCollaborationSelection", () => {
     const service = {
       upsertProfile: vi.fn(async () => undefined),
       migrateLocalProfileCredential: vi.fn(async () => undefined),
+      adoptWorkspaceAuthority: vi.fn(async () => undefined),
       setActiveProfile: vi.fn(async () => undefined),
       activeHumanPrincipalId: vi.fn(async () => null),
       bootstrapOwner: vi.fn(async () => ({
+        workspaceId: "workspace-1",
         principal: { humanPrincipalId: "human-new-owner" }
       })),
       connectSession: vi.fn(async () => undefined),
@@ -218,6 +389,46 @@ describe("activateLocalCollaborationSelection", () => {
     expect(service.connectSession).toHaveBeenCalledWith({ profileId: profile.profileId });
   });
 
+  it("rejects a local bootstrap whose Workspace does not match the registered project", async () => {
+    const coordinator = {
+      setCurrentSelection: vi.fn(async () => undefined),
+      clearCurrentSelection: vi.fn(async () => undefined),
+      localProfile: vi.fn(() => profile),
+      localProfileForId: vi.fn(() => profile),
+      registerLocalProfile: vi.fn(),
+      registerCurrentProject: vi.fn(() => ({
+        workspaceId: "workspace-registration",
+        projectId: "project-1",
+        canvasId: "canvas-1",
+        profileId: profile.profileId,
+        registeredAt: "2030-01-01T00:00:00.000Z"
+      }))
+    };
+    const service = {
+      upsertProfile: vi.fn(async () => undefined),
+      migrateLocalProfileCredential: vi.fn(async () => undefined),
+      adoptWorkspaceAuthority: vi.fn(async () => undefined),
+      setActiveProfile: vi.fn(async () => undefined),
+      activeHumanPrincipalId: vi.fn(async () => null),
+      bootstrapOwner: vi.fn(async () => ({
+        workspaceId: "workspace-bootstrap",
+        principal: { humanPrincipalId: "human-new-owner" }
+      })),
+      connectSession: vi.fn(async () => undefined),
+      clearActiveProfile: vi.fn(async () => undefined)
+    };
+
+    await expect(
+      activateLocalCollaborationSelection({
+        coordinator,
+        service,
+        ownerDisplayName: "Local owner"
+      })
+    ).rejects.toThrow("local_collaboration_workspace_mismatch");
+    expect(service.adoptWorkspaceAuthority).not.toHaveBeenCalled();
+    expect(service.connectSession).not.toHaveBeenCalled();
+  });
+
   it("restores the previous stable selection and profile when activation fails", async () => {
     const previousSelection = { projectId: "desktop-project-1", canvasId: "canvas-stable" };
     const nextSelection = { projectId: "desktop-project-1", canvasId: "canvas-next" };
@@ -234,6 +445,8 @@ describe("activateLocalCollaborationSelection", () => {
         throw new Error("a previous stable selection must not be cleared");
       }),
       localProfile: vi.fn(() => profile),
+      localProfileForId: vi.fn(() => null),
+      registerLocalProfile: vi.fn(),
       registerCurrentProject: vi.fn(() => {
         throw new Error("registration_failed");
       })
@@ -241,15 +454,18 @@ describe("activateLocalCollaborationSelection", () => {
     const service = {
       upsertProfile: vi.fn(async () => undefined),
       migrateLocalProfileCredential: vi.fn(async () => undefined),
+      adoptWorkspaceAuthority: vi.fn(async () => undefined),
       setActiveProfile: vi.fn(async () => undefined),
       activeHumanPrincipalId: vi.fn(async () => "human-owner"),
       bootstrapOwner: vi.fn(async () => ({
+        workspaceId: "workspace-1",
         principal: { humanPrincipalId: "human-owner" }
       })),
       connectSession: vi.fn(async () => undefined),
       clearActiveProfile: vi.fn(async () => undefined),
       getStatus: vi.fn(async () => ({
         activeProfileId: "profile-stable",
+        profiles: [{ profileId: "profile-stable", hasDeviceCredential: true }],
         session: { phase: "connected" }
       })),
       runStatusPublicationTransaction: vi.fn(async <T>(operation: () => Promise<T>) => operation())
@@ -292,7 +508,18 @@ describe("activateLocalCollaborationSelection", () => {
       }),
       clearCurrentSelection: vi.fn(async () => undefined),
       localProfile: vi.fn(() => ({ ...profile, projectId: selectedCanvasId })),
+      localProfileForId: vi.fn(() => ({ ...profile, projectId: selectedCanvasId })),
       registerCurrentProject: vi.fn(() => {
+        calls.push(`register:${selectedCanvasId}`);
+        return {
+          workspaceId: "workspace-1",
+          projectId: selectedCanvasId,
+          canvasId: selectedCanvasId,
+          profileId: profile.profileId,
+          registeredAt: "2030-01-01T00:00:00.000Z"
+        };
+      }),
+      registerLocalProfile: vi.fn(() => {
         calls.push(`register:${selectedCanvasId}`);
         return {
           workspaceId: "workspace-1",
@@ -306,6 +533,7 @@ describe("activateLocalCollaborationSelection", () => {
     const service = {
       upsertProfile: vi.fn(async () => undefined),
       migrateLocalProfileCredential: vi.fn(async () => undefined),
+      adoptWorkspaceAuthority: vi.fn(async () => undefined),
       setActiveProfile: vi.fn(async () => undefined),
       activeHumanPrincipalId: vi.fn(async () => "human-owner"),
       bootstrapOwner: vi.fn(async () => {
@@ -317,6 +545,7 @@ describe("activateLocalCollaborationSelection", () => {
       clearActiveProfile: vi.fn(async () => undefined),
       getStatus: vi.fn(async () => ({
         activeProfileId: profile.profileId,
+        profiles: [{ profileId: profile.profileId, hasDeviceCredential: true }],
         session: { phase: "connected" }
       })),
       runStatusPublicationTransaction: vi.fn(async <T>(operation: () => Promise<T>) => operation())

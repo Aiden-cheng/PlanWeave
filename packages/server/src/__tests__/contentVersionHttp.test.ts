@@ -114,7 +114,8 @@ async function fixture() {
   const identity = new HumanIdentityRepository(database);
   const membership = new HumanMembershipService({
     repository: identity,
-    projectAuthority: { hasProject: (id) => id === "p" }
+    projectAuthority: { hasProject: (id) => id === "p" },
+    workspaceForProject: (id) => (id === "p" ? "w" : undefined)
   });
   const owner = membership.bootstrapOwner("p", { humanPrincipalId: "owner", displayName: "Owner" });
   const member = identity.createInvitation({ projectId: "p", createdByHumanPrincipalId: "owner" });

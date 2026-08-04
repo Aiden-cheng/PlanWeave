@@ -359,6 +359,7 @@ export const exampleWorkspaceRedactedViews = {
 };
 
 export const exampleBootstrapResponse = humanBootstrapResponseSchema.parse({
+  workspaceId: "workspace-demo-001",
   principal: {
     humanPrincipalId: "human-owner-001",
     displayName: "Owner",

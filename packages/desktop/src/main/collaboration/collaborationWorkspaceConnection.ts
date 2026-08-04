@@ -1,9 +1,11 @@
 import {
   activeWorkspaceConnectionViewSchema,
+  workspaceConnectionProfileSchema,
   workspacePickerPageSchema,
   type ActiveWorkspaceConnectionError,
   type ActiveWorkspaceConnectionStatus,
   type ActiveWorkspaceConnectionView,
+  type CollaborationConnectionProfile,
   type WorkspaceConnectionProfile,
   type WorkspacePickerPage
 } from "@planweave-ai/collaboration-protocol/connection";
@@ -318,6 +320,39 @@ export class CollaborationWorkspaceConnection {
       this.onChange?.();
       throw mapped;
     }
+  }
+
+  /**
+   * Promote an authenticated project route into the single Workspace authority.
+   * The project profile remains a routing detail; its credential is shared by profileId.
+   */
+  async adoptAuthenticatedProject(input: {
+    projectProfile: CollaborationConnectionProfile;
+    workspaceId: string;
+    membershipRole: "owner" | "member";
+  }): Promise<ActiveWorkspaceConnectionView> {
+    const profile = workspaceConnectionProfileSchema.parse({
+      schemaVersion: "workspace-identity/v1",
+      profileId: input.projectProfile.profileId,
+      displayName: input.projectProfile.displayName,
+      serverBaseUrl: input.projectProfile.serverBaseUrl,
+      workspaceId: input.workspaceId,
+      allowInsecureTransport: input.projectProfile.allowInsecureTransport
+    });
+    const stored = await this.store.upsert({
+      profile,
+      workspaceDisplayName: profile.displayName,
+      membershipRole: input.membershipRole,
+      membershipActive: true
+    });
+    await this.store.setActiveProfileId(stored.profileId);
+    this.activeProfileId = stored.profileId;
+    this.workspaceDisplayName = stored.workspaceDisplayName;
+    this.status = "connected";
+    this.connectedAt = nowIso(this.clock);
+    this.error = null;
+    this.onChange?.();
+    return this.buildView();
   }
 
   async connectActiveProfile(): Promise<ActiveWorkspaceConnectionView> {

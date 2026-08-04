@@ -181,6 +181,22 @@ describe("PeopleView", () => {
       ],
       activeProfileId: "profile-1",
       session: { ...localOnlyStatus.session, activeProfileId: "profile-1" },
+      workspaceConnection: {
+        schemaVersion: "workspace-setup/v1",
+        status: "disconnected",
+        profile: {
+          schemaVersion: "workspace-identity/v1",
+          profileId: "profile-1",
+          displayName: "Local workspace",
+          serverBaseUrl: "http://127.0.0.1:56584/",
+          workspaceId: "workspace-1",
+          allowInsecureTransport: true
+        },
+        workspaceId: "workspace-1",
+        workspaceDisplayName: "Local workspace",
+        connectedAt: null,
+        error: null
+      },
       updatedAt: "2030-01-01T00:00:01.000Z"
     } satisfies CollaborationStatus;
     const api = {
@@ -320,10 +336,10 @@ describe("PeopleView", () => {
     expect(screen.queryByTestId("collaboration-workspace-onboarding")).not.toBeInTheDocument();
   });
 
-  it("keeps an explicitly created complete invitation across workspace and hosting tab switches", async () => {
+  it("keeps complete invitation creation reachable after a persisted workspace restart", async () => {
     const user = userEvent.setup();
     const invitationToken = `pw_inv_${"P".repeat(43)}`;
-    const connectedStatus = {
+    const restoredStatus = {
       profiles: [
         {
           profileId: "profile-1",
@@ -342,7 +358,7 @@ describe("PeopleView", () => {
       credentialStorage: "available",
       nonPersistenceWarning: null,
       session: {
-        phase: "connected",
+        phase: "idle",
         activeProfileId: "profile-1",
         detail: null,
         lastErrorCode: null,
@@ -350,11 +366,18 @@ describe("PeopleView", () => {
       },
       workspaceConnection: {
         schemaVersion: "workspace-setup/v1",
-        status: "connected",
-        profile: null,
+        status: "disconnected",
+        profile: {
+          schemaVersion: "workspace-identity/v1",
+          profileId: "profile-1",
+          displayName: "Team workspace",
+          serverBaseUrl: "http://127.0.0.1:56584/",
+          workspaceId: "workspace-1",
+          allowInsecureTransport: true
+        },
         workspaceId: "workspace-1",
-        workspaceDisplayName: "Team",
-        connectedAt: "2030-01-01T00:00:00.000Z",
+        workspaceDisplayName: "Team workspace",
+        connectedAt: null,
         error: null
       },
       workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null },
@@ -362,7 +385,7 @@ describe("PeopleView", () => {
     } as const;
     const createInvitation = vi.fn().mockResolvedValue(invitationHandoff(invitationToken));
     const api = {
-      getCollaborationStatus: vi.fn().mockResolvedValue(connectedStatus),
+      getCollaborationStatus: vi.fn().mockResolvedValue(restoredStatus),
       onCollaborationStatusChanged: vi.fn(() => () => undefined),
       onCollaborationObserverSignal: vi.fn(() => () => undefined),
       listCollaborationContentBootstrapCandidates: vi.fn().mockResolvedValue([]),
@@ -856,9 +879,16 @@ describe("PeopleView", () => {
         workspaceConnection: {
           schemaVersion: "workspace-setup/v1",
           status: "disconnected",
-          profile: null,
-          workspaceId: null,
-          workspaceDisplayName: null,
+          profile: {
+            schemaVersion: "workspace-identity/v1",
+            profileId: "profile-1",
+            displayName: "Team workspace",
+            serverBaseUrl: "https://collaboration.example.test",
+            workspaceId: "workspace-1",
+            allowInsecureTransport: false
+          },
+          workspaceId: "workspace-1",
+          workspaceDisplayName: "Team workspace",
           connectedAt: null,
           error: null
         },
@@ -887,6 +917,78 @@ describe("PeopleView", () => {
 
     expect(await screen.findByTestId("people-workspace-section")).toBeVisible();
     expect(screen.getByTestId("people-panel")).toBeVisible();
+    expect(screen.queryByTestId("collaboration-workspace-onboarding")).not.toBeInTheDocument();
+  });
+
+  it("keeps a persisted workspace visible when no sidebar project profile is active", async () => {
+    const api = {
+      getCollaborationStatus: vi.fn().mockResolvedValue({
+        profiles: [
+          {
+            profileId: "profile-persisted",
+            displayName: "Persisted workspace",
+            serverBaseUrl: "https://collaboration.example.test/",
+            projectId: "workspace-project",
+            allowInsecureTransport: false,
+            hasDeviceCredential: true,
+            deviceCredentialPersistence: "persisted",
+            deviceCredentialId: "device-1",
+            humanPrincipalId: "human-1",
+            updatedAt: "2030-01-01T00:00:00.000Z"
+          }
+        ],
+        activeProfileId: null,
+        credentialStorage: "available",
+        nonPersistenceWarning: null,
+        session: {
+          phase: "idle",
+          activeProfileId: null,
+          detail: null,
+          lastErrorCode: null,
+          lastErrorMessage: null
+        },
+        workspaceConnection: {
+          schemaVersion: "workspace-setup/v1",
+          status: "disconnected",
+          profile: {
+            schemaVersion: "workspace-identity/v1",
+            profileId: "profile-persisted",
+            displayName: "Persisted workspace",
+            serverBaseUrl: "https://collaboration.example.test/",
+            workspaceId: "workspace-persisted",
+            allowInsecureTransport: false
+          },
+          workspaceId: "workspace-persisted",
+          workspaceDisplayName: "Persisted workspace",
+          connectedAt: null,
+          error: null
+        },
+        workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null },
+        updatedAt: "2030-01-01T00:00:00.000Z"
+      }),
+      onCollaborationStatusChanged: vi.fn(() => () => undefined),
+      onCollaborationObserverSignal: vi.fn(() => () => undefined),
+      listCollaborationContentBootstrapCandidates: vi.fn().mockResolvedValue([]),
+      getLocalCollaborationServerStatus: vi.fn().mockResolvedValue({
+        profile: null,
+        state: "stopped",
+        startedAt: null,
+        reason: null,
+        lanSharingEnabled: false,
+        lanServerBaseUrl: null
+      })
+    } as unknown as PlanWeaveCollaborationApi;
+
+    render(
+      <PeopleView
+        api={api}
+        t={createTranslator("en")}
+        collaborationScopeLayout={scopeLayout}
+        onCollaborationScopeLayoutChange={onScopeLayoutChange}
+      />
+    );
+
+    expect(await screen.findByTestId("people-workspace-section")).toBeVisible();
     expect(screen.queryByTestId("collaboration-workspace-onboarding")).not.toBeInTheDocument();
   });
 
@@ -920,9 +1022,16 @@ describe("PeopleView", () => {
       workspaceConnection: {
         schemaVersion: "workspace-setup/v1",
         status: "disconnected",
-        profile: null,
-        workspaceId: null,
-        workspaceDisplayName: null,
+        profile: {
+          schemaVersion: "workspace-identity/v1",
+          profileId: "profile-1",
+          displayName: "Team workspace",
+          serverBaseUrl: "http://192.168.123.23:56584/",
+          workspaceId: "workspace-1",
+          allowInsecureTransport: true
+        },
+        workspaceId: "workspace-1",
+        workspaceDisplayName: "Team workspace",
         connectedAt: null,
         error: null
       },

@@ -581,6 +581,8 @@ export async function createDistributedServerComposition(
     const humanMembership = new HumanMembershipService({
       repository: humanIdentity,
       projectAuthority: runtimeRegistry,
+      workspaceForProject: (projectId) =>
+        workspaceIdentity.ensureWorkspaceForLegacyProject(projectId),
       clock
     });
     const commentAttachmentRepository = new CommentAttachmentRepository(server.database, {

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import packageJson from "../../package.json";
 import {
   assertHumanDisplayDtoRedacted,
+  humanBootstrapResponseSchema,
+  humanConsumeInvitationResponseSchema,
   humanDeviceListQuerySchema,
   humanInvitationListQuerySchema,
   humanPageQuerySchema
@@ -128,6 +130,34 @@ describe("collaboration-protocol", () => {
     assertHumanDisplayDtoRedacted(exampleAssignmentProjection);
     expect(exampleActivityRecord.type).toBe("comment_created");
     expect(exampleHumanDeviceToken.startsWith("pw_hdev_")).toBe(true);
+  });
+
+  it("requires Workspace identity on owner bootstrap and invitation join responses", () => {
+    expect(humanBootstrapResponseSchema.parse(exampleBootstrapResponse).workspaceId).toBe(
+      "workspace-demo-001"
+    );
+    expect(
+      humanBootstrapResponseSchema.safeParse({
+        ...exampleBootstrapResponse,
+        workspaceId: undefined
+      }).success
+    ).toBe(false);
+    expect(
+      humanConsumeInvitationResponseSchema.safeParse({
+        ...exampleBootstrapResponse,
+        invitation: {
+          invitationId: "invitation-demo-001",
+          projectId: "project-demo-001",
+          role: "member",
+          createdByHumanPrincipalId: "human-owner-001",
+          createdAt: "2030-01-01T00:00:00.000Z",
+          expiresAt: "2030-01-02T00:00:00.000Z",
+          consumedAt: "2030-01-01T00:00:00.000Z"
+        },
+        principalCreated: true,
+        workspaceId: undefined
+      }).success
+    ).toBe(false);
   });
 
   it("normalizes HTTP identity queries at the protocol boundary", () => {

@@ -235,6 +235,7 @@ export type CollaborationStatus = {
 
 /** Bootstrap / consume handoff returned to renderer — deviceToken always stripped. */
 export type CollaborationAuthHandoffView = {
+  workspaceId: string;
   principal: HumanPrincipalView;
   membership: HumanMembershipView;
   device: HumanDeviceView;

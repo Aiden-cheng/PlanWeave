@@ -55,13 +55,16 @@ async function setup(
   databases.push(database);
   applyMigrations(database);
   const repository = new HumanIdentityRepository(database);
+  const workspaceIdentity = new WorkspaceIdentityRepository(database);
   const authorizedProjectIds = new Set([...defaultTestProjectIds, ...additionalProjectIds]);
   const projectAuthority = {
     hasProject: (projectId: string) => authorizedProjectIds.has(projectId)
   };
   const service = new HumanMembershipService({
     repository,
-    projectAuthority
+    projectAuthority,
+    workspaceForProject: (projectId) =>
+      workspaceIdentity.ensureWorkspaceForLegacyProject(projectId)
   });
   const server = createServer((request, response) => {
     void handleHumanHttpRequest(request, response, {
@@ -145,6 +148,7 @@ async function bootstrap(
   });
   const payload = (await response.json()) as {
     error?: string;
+    workspaceId?: string;
     deviceToken?: string;
     principal?: { humanPrincipalId: string };
     membership?: { role: string };
@@ -164,6 +168,7 @@ describe("human membership HTTP APIs", () => {
     const first = await bootstrap(origin);
     expect(first.response.status).toBe(201);
     expect(first.payload.created).toBe(true);
+    expect(first.payload.workspaceId).toMatch(/^workspace-legacy-/);
     expect(first.payload.membership?.role).toBe("owner");
     expect(first.payload.deviceToken).toMatch(/^pw_hdev_/);
     expect(first.payload.device?.tokenSha256).toBeUndefined();
@@ -282,10 +287,12 @@ describe("human membership HTTP APIs", () => {
     });
     expect(joined.status).toBe(201);
     const member = (await joined.json()) as {
+      workspaceId: string;
       deviceToken: string;
       membership: { role: string; humanPrincipalId: string };
       principal: { humanPrincipalId: string };
     };
+    expect(member.workspaceId).toBe(owner.payload.workspaceId);
     expect(member.membership.role).toBe("member");
     expect(member.deviceToken).toMatch(/^pw_hdev_/);
 

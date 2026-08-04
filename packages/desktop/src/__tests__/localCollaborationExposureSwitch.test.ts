@@ -65,6 +65,33 @@ describe("switchLocalCollaborationExposure", () => {
                 tlsTrust: "system_ca" as const
               }
       })),
+      localProfileForId: vi.fn(() => ({
+        profileId: "local-project-1",
+        displayName: "Local Server",
+        serverBaseUrl:
+          mode === "local_only" ? "http://127.0.0.1:8787/" : "https://planweave.example.ts.net/",
+        projectId: "project-1",
+        allowInsecureTransport: mode === "local_only",
+        endpoint:
+          mode === "local_only"
+            ? {
+                topology: "loopback_http" as const,
+                serverOrigin: "http://127.0.0.1:8787/",
+                tlsTrust: "not_applicable" as const
+              }
+            : {
+                topology: "private_https" as const,
+                serverOrigin: "https://planweave.example.ts.net/",
+                tlsTrust: "system_ca" as const
+              }
+      })),
+      registerLocalProfile: vi.fn(() => ({
+        workspaceId: "workspace-1",
+        projectId: "project-1",
+        canvasId: "canvas-1",
+        profileId: "local-project-1",
+        registeredAt: "2030-01-01T00:00:00.000Z"
+      })),
       registerCurrentProject: vi.fn(() => ({
         workspaceId: "workspace-1",
         projectId: "project-1",
@@ -81,6 +108,7 @@ describe("switchLocalCollaborationExposure", () => {
       runStatusPublicationTransaction: vi.fn(async <T>(operation: () => Promise<T>) => operation()),
       upsertProfile: vi.fn(async () => undefined),
       migrateLocalProfileCredential: vi.fn(async () => undefined),
+      adoptWorkspaceAuthority: vi.fn(async () => undefined),
       setActiveProfile: vi.fn(async () => undefined),
       activeHumanPrincipalId: vi.fn(async () => "human-owner"),
       bootstrapOwner: vi.fn(),

@@ -585,6 +585,8 @@ describe("LocalCollaborationCoordinatorControl", () => {
     });
     await control.setCurrentSelection({ projectId: project.projectId, canvasId: "canvas-1" });
     await control.start();
+    const firstWorkspaceProfile = control.localProfile();
+    expect(firstWorkspaceProfile).not.toBeNull();
     const firstProfileId = control.status().profile?.profileId;
     const runningProfile = control.status().profile;
     expect(runningProfile).not.toBeNull();
@@ -624,6 +626,20 @@ describe("LocalCollaborationCoordinatorControl", () => {
     expect(control.status().profile?.profileId).toBe(firstProfileId);
     expect(control.localProfile()?.projectId).toBe("authority-project-2");
     expect(control.localProfile()?.profileId).not.toBe(firstProfileId);
+    expect(control.localProfileForId(firstWorkspaceProfile!.profileId)).toMatchObject({
+      profileId: firstWorkspaceProfile!.profileId,
+      projectId: authorityProjectId
+    });
+    expect(
+      control.registerLocalProfile(firstWorkspaceProfile!.profileId, {
+        kind: "human",
+        id: "owner-1"
+      })
+    ).toMatchObject({
+      workspaceId: "workspace-1",
+      projectId: authorityProjectId,
+      canvasId: "canvas-1"
+    });
     expect(control.registerCurrentProject({ kind: "human", id: "owner-2" })).toMatchObject({
       workspaceId: "workspace-2",
       projectId: "authority-project-2",

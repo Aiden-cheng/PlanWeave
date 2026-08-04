@@ -469,6 +469,7 @@ export type HumanBootstrapRequest = z.infer<typeof humanBootstrapRequestSchema>;
 
 export const humanBootstrapResponseSchema = z
   .object({
+    workspaceId: workspaceIdSchema,
     principal: humanPrincipalViewSchema,
     membership: humanMembershipViewSchema,
     device: humanDeviceViewSchema,
@@ -512,6 +513,7 @@ export type HumanConsumeInvitationRequest = z.infer<typeof humanConsumeInvitatio
 
 export const humanConsumeInvitationResponseSchema = z
   .object({
+    workspaceId: workspaceIdSchema,
     principal: humanPrincipalViewSchema,
     membership: humanMembershipViewSchema,
     device: humanDeviceViewSchema,

@@ -55,6 +55,7 @@ function mapIdentityError(error: unknown): never {
 export type HumanMembershipServiceOptions = {
   repository: HumanIdentityRepository;
   projectAuthority: HumanProjectAuthority;
+  workspaceForProject(projectId: string): string | undefined;
   clock?: () => Date;
 };
 
@@ -70,11 +71,13 @@ export type HumanProjectAuthority = {
 export class HumanMembershipService {
   private readonly repository: HumanIdentityRepository;
   private readonly projectAuthority: HumanProjectAuthority;
+  private readonly workspaceForProject: (projectId: string) => string | undefined;
   private readonly clock: () => Date;
 
   constructor(options: HumanMembershipServiceOptions) {
     this.repository = options.repository;
     this.projectAuthority = options.projectAuthority;
+    this.workspaceForProject = options.workspaceForProject;
     this.clock = options.clock ?? (() => new Date());
   }
 
@@ -82,6 +85,12 @@ export class HumanMembershipService {
     const pid = humanProjectIdSchema.parse(projectId);
     if (!this.projectAuthority.hasProject(pid)) deny("human_cross_project_forbidden");
     return pid;
+  }
+
+  private requireWorkspace(projectId: string): string {
+    const workspaceId = this.workspaceForProject(projectId);
+    if (!workspaceId) deny("human_cross_project_forbidden");
+    return workspaceId;
   }
 
   /**
@@ -93,6 +102,7 @@ export class HumanMembershipService {
     request: unknown,
     issuedAt?: string
   ): {
+    workspaceId: string;
     principal: HumanPrincipalView;
     membership: HumanMembershipView;
     device: HumanDeviceView;
@@ -101,6 +111,7 @@ export class HumanMembershipService {
   } {
     try {
       const pid = this.requireProject(projectId);
+      const workspaceId = this.requireWorkspace(pid);
       const body = humanBootstrapRequestSchema.parse(request);
       const humanPrincipalId = body.humanPrincipalId ?? humanPrincipalIdSchema.parse(randomUUID());
       const proof = localAdministrativeProofSchema.parse({
@@ -131,6 +142,7 @@ export class HumanMembershipService {
         deviceTtlMs: body.deviceTtlMs
       });
       return {
+        workspaceId,
         principal: toPrincipalView(result.principal),
         membership: toMembershipView(result.membership, result.principal.displayName),
         device: toDeviceView(result.device),
@@ -258,6 +270,7 @@ export class HumanMembershipService {
     projectId: string,
     request: unknown
   ): {
+    workspaceId: string;
     principal: HumanPrincipalView;
     membership: HumanMembershipView;
     device: HumanDeviceView;
@@ -267,6 +280,7 @@ export class HumanMembershipService {
   } {
     try {
       const pid = this.requireProject(projectId);
+      const workspaceId = this.requireWorkspace(pid);
       const body = humanConsumeInvitationRequestSchema.parse(request);
 
       const matched = this.repository.findInvitationByToken(body.invitationToken);
@@ -296,6 +310,7 @@ export class HumanMembershipService {
       });
 
       return {
+        workspaceId,
         principal: toPrincipalView(result.principal),
         membership: toMembershipView(result.membership, result.principal.displayName),
         device: toDeviceView(result.device),

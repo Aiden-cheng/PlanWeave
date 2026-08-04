@@ -79,7 +79,9 @@ async function setup() {
   };
   const membership = new HumanMembershipService({
     repository: identity,
-    projectAuthority
+    projectAuthority,
+    workspaceForProject: (candidate) =>
+      candidate === projectId || candidate === otherProjectId ? workspaceId : undefined
   });
   const access = new ProjectAccessRepository(storage.database);
   access.registerProjectInternal({

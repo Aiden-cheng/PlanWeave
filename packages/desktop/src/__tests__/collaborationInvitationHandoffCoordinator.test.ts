@@ -56,6 +56,9 @@ describe("CollaborationInvitationHandoffCoordinator", () => {
       getInvitationSecret: vi.fn().mockResolvedValue(invitation),
       revokeInvitation: vi.fn()
     };
+    const localProfileForId = vi.fn((profileId: string) =>
+      profileId === activeProfile.profileId ? activeProfile : null
+    );
     const coordinator = new CollaborationInvitationHandoffCoordinator(service, {
       recognizesLocalProfile: (profileId) => profileId.startsWith("planweave-local-"),
       invitationEndpoint: () => ({
@@ -64,7 +67,7 @@ describe("CollaborationInvitationHandoffCoordinator", () => {
         allowedClientOrigins: ["https://planweave.example.ts.net/"],
         tlsTrust: "system_ca"
       }),
-      localProfile: () => activeProfile,
+      localProfileForId,
       getExposureView: () => ({ canInvite: true })
     });
 
@@ -72,6 +75,7 @@ describe("CollaborationInvitationHandoffCoordinator", () => {
     expect(parseCollaborationInvitationHandoffV2(result.handoff)?.endpoint.topology).toBe(
       "private_https"
     );
+    expect(localProfileForId).toHaveBeenCalledWith(activeProfile.profileId);
   });
 
   it("uses the active remote profile endpoint instead of the local coordinator", async () => {
@@ -88,7 +92,7 @@ describe("CollaborationInvitationHandoffCoordinator", () => {
     const coordinator = new CollaborationInvitationHandoffCoordinator(service, {
       recognizesLocalProfile: () => false,
       invitationEndpoint: () => null,
-      localProfile: () => null,
+      localProfileForId: () => null,
       getExposureView: () => ({ canInvite: false })
     });
 
@@ -115,7 +119,7 @@ describe("CollaborationInvitationHandoffCoordinator", () => {
     const coordinator = new CollaborationInvitationHandoffCoordinator(service, {
       recognizesLocalProfile: () => false,
       invitationEndpoint: () => null,
-      localProfile: () => null,
+      localProfileForId: () => null,
       getExposureView: () => ({ canInvite: false })
     });
 
@@ -140,7 +144,7 @@ describe("CollaborationInvitationHandoffCoordinator", () => {
     const coordinator = new CollaborationInvitationHandoffCoordinator(service, {
       recognizesLocalProfile: () => false,
       invitationEndpoint: () => null,
-      localProfile: () => null,
+      localProfileForId: () => null,
       getExposureView: () => ({ canInvite: false })
     });
 

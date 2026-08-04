@@ -303,7 +303,8 @@ export class CollaborationService {
       clearRememberedObserverCursor: (profileId) => this.clearRememberedObserverCursor(profileId),
       publishStatus: () => this.publishStatus(),
       clientForProfile: async (profileId, requireCredential) =>
-        (await this.clientForProfile(profileId, requireCredential)).client
+        (await this.clientForProfile(profileId, requireCredential)).client,
+      activateWorkspaceAuthority: (input) => this.activateWorkspaceAuthorityInternal(input)
     });
     this.identityOperations = new CollaborationIdentityOperations({
       invitationVault: this.invitationVault,
@@ -316,6 +317,31 @@ export class CollaborationService {
     if (this.workspaceHydrated) return;
     await this.workspaceConnection.hydrate();
     this.workspaceHydrated = true;
+  }
+
+  private async activateWorkspaceAuthorityInternal(input: {
+    profileId: string;
+    workspaceId: string;
+    membershipRole: "owner" | "member";
+  }): Promise<void> {
+    await this.ensureWorkspaceHydrated();
+    const stored = await this.profiles.get(input.profileId);
+    if (!stored || stored.connectionState !== "ready") {
+      throw new Error(`Collaboration profile is not ready: ${input.profileId}`);
+    }
+    const projectProfile = collaborationConnectionProfileSchema.parse({
+      profileId: stored.profileId,
+      displayName: stored.displayName,
+      serverBaseUrl: stored.serverBaseUrl,
+      projectId: stored.projectId,
+      allowInsecureTransport: stored.allowInsecureTransport,
+      endpoint: stored.endpoint
+    });
+    await this.workspaceConnection.adoptAuthenticatedProject({
+      projectProfile,
+      workspaceId: input.workspaceId,
+      membershipRole: input.membershipRole
+    });
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -471,6 +497,19 @@ export class CollaborationService {
     targetProfileId: string
   ): Promise<void> {
     return this.profileLifecycle.migrateLocalProfileCredential(sourceProfileId, targetProfileId);
+  }
+
+  /** Main-only migration from a hosted project route to the canonical Workspace connection. */
+  async adoptWorkspaceAuthority(input: {
+    profileId: string;
+    workspaceId: string;
+    membershipRole: "owner" | "member";
+  }): Promise<void> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      await this.activateWorkspaceAuthorityInternal(input);
+      await this.publishStatus();
+    });
   }
 
   async consumeInvitation(input: unknown): Promise<CollaborationAuthHandoffView> {
