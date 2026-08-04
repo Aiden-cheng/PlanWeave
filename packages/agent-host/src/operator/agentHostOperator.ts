@@ -9,6 +9,10 @@ import {
   type AgentHostComposition
 } from "../composition/agentHostComposition.js";
 import { FileHostCredentialStore } from "../credentials/fileCredentialStore.js";
+import {
+  pendingProvenanceMatchesHandoff,
+  portableHandoffConfigMatches
+} from "../credentials/handoffProvenance.js";
 import { AgentHostEnrollmentService } from "../enrollment/enrollmentService.js";
 import { HttpAgentHostEnrollmentExchange } from "../enrollment/httpEnrollmentExchange.js";
 import { HttpAgentHostSetupCodeRedeem } from "../enrollment/httpSetupCodeRedeem.js";
@@ -205,10 +209,7 @@ export class AgentHostOperator {
     let config: AgentHostConfig;
     try {
       config = await loadAgentHostConfig(paths.configPath);
-      if (
-        config.coordinator.url !== handoff.endpoint.serverOrigin ||
-        !config.workspaces.some((workspace) => workspace.id === handoff.workspaceId)
-      ) {
+      if (!portableHandoffConfigMatches(handoff, config)) {
         throw new Error("agent_host_handoff_config_conflict");
       }
     } catch (error) {
@@ -251,11 +252,24 @@ export class AgentHostOperator {
 
     const store = credentialStore(config);
     const document = await store.read();
-    if (!document?.active) {
-      if (document?.pending) await this.resumeEnrollment(paths.configPath);
-      else await this.enroll(paths.configPath, handoff.enrollmentCode);
+    if (document?.active && document.pending) {
+      throw new Error("agent_host_handoff_pending_conflict");
+    }
+    if (document?.pending) {
+      if (
+        document.pending.kind !== "host_enrollment_code" ||
+        !document.pending.provenance ||
+        !pendingProvenanceMatchesHandoff(document.pending.provenance, handoff, config)
+      ) {
+        throw new Error("agent_host_handoff_pending_conflict");
+      }
+      await this.resumeEnrollment(paths.configPath);
+    } else if (!document?.active) {
+      await this.enrollPortableHandoff(config, encodedHandoff, paths.configPath);
     } else if (document.active.workspaceId !== handoff.workspaceId) {
       throw new Error("agent_host_handoff_credential_conflict");
+    } else {
+      await store.requireUsable();
     }
 
     if (options.installBackground === false) {
@@ -316,6 +330,29 @@ export class AgentHostOperator {
       await trust.close();
     }
     return this.diagnostics(config);
+  }
+
+  private async enrollPortableHandoff(
+    config: AgentHostConfig,
+    encodedHandoff: string,
+    configPath: string
+  ): Promise<void> {
+    await this.preflight(configPath);
+    await assertDurableStateReplacementSafe(config.dataDirectory);
+    const trust = await createAgentHostTlsTrust(config.coordinator.caCertificatePath);
+    try {
+      const exchangeOptions = {
+        allowInsecureDevelopment: config.coordinator.allowInsecureDevelopment,
+        request: trust.request
+      };
+      await new AgentHostEnrollmentService(
+        config,
+        credentialStore(config),
+        new HttpAgentHostEnrollmentExchange(config.coordinator.url, exchangeOptions)
+      ).enrollPortableHandoff(encodedHandoff);
+    } finally {
+      await trust.close();
+    }
   }
 
   async preflight(configPath: string): Promise<AgentHostDiagnostics> {

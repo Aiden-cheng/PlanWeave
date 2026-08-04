@@ -77,6 +77,7 @@ describe("Agent Host enrollment and protected credentials", () => {
       secret("pw_enroll_")
     );
     expect(active.hostId).toBe("host-001");
+    expect(active.provenance).toBeUndefined();
     expect((await store.read())?.pending).toBeUndefined();
     expect((await stat(join(config.dataDirectory, "..", "credentials"))).mode & 0o777).toBe(0o700);
     expect((await stat(store.path)).mode & 0o777).toBe(0o600);
@@ -332,7 +333,11 @@ describe("Agent Host enrollment and protected credentials", () => {
       new AgentHostEnrollmentService(
         config,
         store,
-        { exchange: async () => { throw new Error("legacy enrollment path must not run"); } },
+        {
+          exchange: async () => {
+            throw new Error("legacy enrollment path must not run");
+          }
+        },
         () => new Date(),
         setupRedeem
       ).enroll(secret("pw_setup_"))

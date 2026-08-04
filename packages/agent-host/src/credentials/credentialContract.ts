@@ -5,6 +5,10 @@ import {
 } from "@planweave-ai/agent-host-protocol";
 import { setupCodeTokenSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
 import { z } from "zod";
+import {
+  activePortableHandoffProvenanceSchema,
+  pendingPortableHandoffProvenanceSchema
+} from "./handoffProvenance.js";
 
 const pendingBase = {
   enrollmentAttemptId: opaqueIdentifierSchema,
@@ -17,7 +21,8 @@ export const pendingHostEnrollmentSchema = z.discriminatedUnion("kind", [
     .object({
       ...pendingBase,
       kind: z.literal("host_enrollment_code"),
-      enrollmentCode: hostEnrollmentCodeSchema
+      enrollmentCode: hostEnrollmentCodeSchema,
+      provenance: pendingPortableHandoffProvenanceSchema.optional()
     })
     .strict(),
   z
@@ -36,7 +41,8 @@ export const activeHostCredentialSchema = z
     credentialToken: hostCredentialTokenSchema,
     issuedAt: z.string().datetime(),
     expiresAt: z.string().datetime(),
-    revokedAt: z.string().datetime().optional()
+    revokedAt: z.string().datetime().optional(),
+    provenance: activePortableHandoffProvenanceSchema.optional()
   })
   .strict();
 

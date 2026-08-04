@@ -605,6 +605,7 @@
         "agentHostClientLoad.test.ts",
         "agentHostConfig.test.ts",
         "agentHostEnrollment.test.ts",
+        "agentHostHandoffProvenance.test.ts",
         "agentHostExecutionState.test.ts",
         "agentHostPortableSetup.test.ts",
         "agentHostRecovery.test.ts",

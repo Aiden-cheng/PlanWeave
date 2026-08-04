@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import {
   hostEnrollmentCompletedSchema,
+  parseAgentHostSetupHandoff,
   type HostEnrollmentCompleted,
   type HostEnrollmentRequest
 } from "@planweave-ai/agent-host-protocol";
@@ -11,6 +12,10 @@ import type {
   PendingHostEnrollment
 } from "../credentials/credentialContract.js";
 import { FileHostCredentialStore } from "../credentials/fileCredentialStore.js";
+import {
+  createPendingPortableHandoffProvenance,
+  portableHandoffPendingWorkspaceId
+} from "../credentials/handoffProvenance.js";
 import type { HttpAgentHostSetupCodeRedeem } from "./httpSetupCodeRedeem.js";
 
 export interface AgentHostEnrollmentExchange {
@@ -51,6 +56,28 @@ export class AgentHostEnrollmentService {
     return this.completeEnrollmentCode(pending, signal);
   }
 
+  async enrollPortableHandoff(
+    encodedHandoff: string,
+    signal?: AbortSignal
+  ): Promise<ActiveHostCredential> {
+    const acceptedAt = this.clock();
+    const handoff = parseAgentHostSetupHandoff(encodedHandoff, acceptedAt);
+    const provenance = createPendingPortableHandoffProvenance(handoff, acceptedAt);
+    const pending: PendingHostEnrollment = {
+      kind: "host_enrollment_code",
+      enrollmentAttemptId: `enroll-${randomUUID()}`,
+      enrollmentCode: handoff.enrollmentCode,
+      credentialToken: `pw_host_${randomBytes(32).toString("base64url")}`,
+      createdAt: acceptedAt.toISOString(),
+      provenance
+    };
+    if (portableHandoffPendingWorkspaceId(provenance, this.config) !== handoff.workspaceId) {
+      throw new Error("agent_host_handoff_config_conflict");
+    }
+    await this.credentials.begin(pending, false);
+    return this.completeEnrollmentCode(pending, signal);
+  }
+
   private async enrollWithSetupCode(
     setupCode: string,
     options: { replaceExisting?: boolean; signal?: AbortSignal }
@@ -71,6 +98,12 @@ export class AgentHostEnrollmentService {
     pending: Extract<PendingHostEnrollment, { kind: "host_enrollment_code" }>,
     signal?: AbortSignal
   ): Promise<ActiveHostCredential> {
+    const portableWorkspaceId = pending.provenance
+      ? portableHandoffPendingWorkspaceId(pending.provenance, this.config)
+      : undefined;
+    if (pending.provenance && !portableWorkspaceId) {
+      throw new Error("agent_host_handoff_provenance_invalid");
+    }
     const response = hostEnrollmentCompletedSchema.parse(
       await this.exchange.exchange(
         {
@@ -86,6 +119,9 @@ export class AgentHostEnrollmentService {
         signal
       )
     );
+    if (portableWorkspaceId && response.workspaceId !== portableWorkspaceId) {
+      throw new Error("agent_host_enrollment_response_mismatch");
+    }
     return this.credentials.promote(response, this.clock());
   }
 

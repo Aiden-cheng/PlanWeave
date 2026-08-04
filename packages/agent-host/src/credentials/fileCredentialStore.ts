@@ -9,6 +9,7 @@ import {
   type HostCredentialDocument,
   type PendingHostEnrollment
 } from "./credentialContract.js";
+import { consumePortableHandoffProvenance } from "./handoffProvenance.js";
 import {
   createPrivateStorageSecurity,
   type PrivateStorageSecurityPort
@@ -78,12 +79,27 @@ export class FileHostCredentialStore {
     if (Date.parse(response.credentialExpiresAt) <= now.getTime()) {
       throw new Error("agent_host_enrollment_response_expired");
     }
-    const active = {
+    const active: ActiveHostCredential = {
       hostId: response.hostId,
       workspaceId: response.workspaceId,
       credentialToken: current.pending.credentialToken,
       issuedAt: now.toISOString(),
-      expiresAt: response.credentialExpiresAt
+      expiresAt: response.credentialExpiresAt,
+      ...(current.pending.provenance
+        ? {
+            provenance: consumePortableHandoffProvenance(
+              current.pending.provenance,
+              {
+                hostId: response.hostId,
+                workspaceId: response.workspaceId,
+                credentialToken: current.pending.credentialToken,
+                issuedAt: now.toISOString(),
+                expiresAt: response.credentialExpiresAt
+              },
+              now
+            )
+          }
+        : {})
     };
     await this.write({ version: "agent-host-credentials/v1", active });
     return active;
