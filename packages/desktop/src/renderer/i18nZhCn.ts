@@ -1053,6 +1053,12 @@ export const zhCnCatalog = {
   peopleRequestRateLimited: "协作请求过于频繁。请稍候再试。",
   peopleServerUnreachable:
     "无法连接共享 Server。请确认 Server 已启动，并且当前设备可以访问其地址，然后重试。",
+  peopleTailnetUnreachable:
+    "无法通过 Tailscale 连接共享 Server。请确认当前设备已登录受邀 tailnet、Server 在线，然后重试。",
+  peopleWorkspaceForbidden:
+    "网络已连接到 Server，但你没有此 Workspace 的权限。请联系 Workspace 所有者授权后重试。",
+  peopleWorkspaceUnauthorized:
+    "网络已连接到 Server，但 Workspace 身份验证未通过。请重新打开有效邀请或重新连接此设备后重试。",
   peopleLoading: "加载中…",
   peopleConnecting: "正在连接协作…",
   peopleDisconnected: "尚未连接协作项目。",

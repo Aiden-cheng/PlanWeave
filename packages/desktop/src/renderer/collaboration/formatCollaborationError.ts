@@ -62,6 +62,16 @@ export function collaborationConnectionErrorMessage(
   t: ReturnType<typeof createTranslator>,
   error: unknown
 ): string {
+  const code = collaborationErrorCode(error);
+  if (code === "TAILNET_UNREACHABLE") {
+    return t("peopleTailnetUnreachable");
+  }
+  if (code === "WORKSPACE_FORBIDDEN") {
+    return t("peopleWorkspaceForbidden");
+  }
+  if (code === "WORKSPACE_UNAUTHORIZED") {
+    return t("peopleWorkspaceUnauthorized");
+  }
   if (isCollaborationConnectionUnavailable(error)) {
     return t("peopleServerUnreachable");
   }

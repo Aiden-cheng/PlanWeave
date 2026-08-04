@@ -1115,6 +1115,12 @@ export const enCatalog = {
   peopleRequestRateLimited: "Too many collaboration requests. Wait a moment, then try again.",
   peopleServerUnreachable:
     "Could not reach the shared Server. Make sure it is running and this device can access its address, then try again.",
+  peopleTailnetUnreachable:
+    "Could not reach the shared Server through Tailscale. Make sure this device is signed in to the invited tailnet, confirm the Server is online, then try again.",
+  peopleWorkspaceForbidden:
+    "The Server is reachable, but you do not have permission for this Workspace. Ask a Workspace owner to grant access, then try again.",
+  peopleWorkspaceUnauthorized:
+    "The Server is reachable, but your Workspace sign-in was not accepted. Reopen a valid invitation or reconnect this device, then try again.",
   peopleLoading: "Loading…",
   peopleConnecting: "Connecting to collaboration…",
   peopleDisconnected: "Not connected to a collaboration project.",

@@ -128,16 +128,16 @@ describe("CollaborationConnectForm Server setup onboarding", () => {
 });
 
 describe("CollaborationConnectForm invitation onboarding", () => {
-  it("joins from one complete invitation without exposing manual connection fields", async () => {
+  it("joins a Tailscale invitation without asking for the Server Origin", async () => {
     const user = userEvent.setup();
     const api = joinApi();
     const invitationToken = `pw_inv_${"A".repeat(43)}`;
     const handoff = serializeCollaborationInvitationHandoff({
       endpoint: {
-        topology: "lan_http",
-        serverOrigin: "http://192.168.1.20:56584",
-        allowedClientOrigins: ["http://192.168.1.20:56584"],
-        tlsTrust: "not_applicable"
+        topology: "tailscale_https",
+        serverOrigin: "https://planweave.example.ts.net",
+        allowedClientOrigins: ["https://planweave.example.ts.net"],
+        tlsTrust: "system_ca"
       },
       projectId: "project-1",
       invitationToken
@@ -167,9 +167,10 @@ describe("CollaborationConnectForm invitation onboarding", () => {
       expect(api.upsertCollaborationProfile).toHaveBeenCalledWith(
         expect.objectContaining({
           displayName: "Windows member",
-          serverBaseUrl: "http://192.168.1.20:56584",
+          serverBaseUrl: "https://planweave.example.ts.net",
           projectId: "project-1",
-          allowInsecureTransport: true
+          allowInsecureTransport: false,
+          endpoint: expect.objectContaining({ topology: "tailscale_https" })
         })
       )
     );
@@ -179,6 +180,89 @@ describe("CollaborationConnectForm invitation onboarding", () => {
       })
     );
     expect(api.connectCollaborationSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a tailnet reachability recovery without exposing transport details", async () => {
+    const user = userEvent.setup();
+    const api = joinApi();
+    vi.mocked(api.consumeCollaborationInvitation).mockRejectedValue({
+      kind: "offline",
+      code: "TAILNET_UNREACHABLE",
+      message: "The Server could not be reached through the configured tailnet endpoint.",
+      retryable: true
+    });
+    const handoff = serializeCollaborationInvitationHandoff({
+      endpoint: {
+        topology: "tailscale_https",
+        serverOrigin: "https://planweave.example.ts.net",
+        allowedClientOrigins: ["https://planweave.example.ts.net"],
+        tlsTrust: "system_ca"
+      },
+      projectId: "project-1",
+      invitationToken: `pw_inv_${"C".repeat(43)}`
+    });
+
+    render(
+      <CollaborationConnectForm
+        api={api}
+        status={null}
+        t={createTranslator("en")}
+        fixedMode="join"
+        showHeader={false}
+        showConnectionSummary={false}
+      />
+    );
+    fireEvent.change(screen.getByTestId("people-connect-invitation-details"), {
+      target: { value: handoff }
+    });
+    await user.click(screen.getByTestId("people-connect-submit"));
+
+    const error = await screen.findByTestId("people-connect-error");
+    expect(error).toHaveTextContent("Could not reach the shared Server through Tailscale");
+    expect(error).not.toHaveTextContent("permission for this Workspace");
+    expect(error).not.toHaveTextContent("planweave.example.ts.net");
+  });
+
+  it("shows reached-Server Workspace denial separately from tailnet reachability", async () => {
+    const user = userEvent.setup();
+    const api = joinApi();
+    vi.mocked(api.consumeCollaborationInvitation).mockRejectedValue({
+      kind: "forbidden",
+      code: "WORKSPACE_FORBIDDEN",
+      message: "The Server is reachable, but this identity cannot access the Workspace.",
+      httpStatus: 403,
+      retryable: false
+    });
+    const handoff = serializeCollaborationInvitationHandoff({
+      endpoint: {
+        topology: "tailscale_https",
+        serverOrigin: "https://planweave.example.ts.net",
+        allowedClientOrigins: ["https://planweave.example.ts.net"],
+        tlsTrust: "system_ca"
+      },
+      projectId: "project-1",
+      invitationToken: `pw_inv_${"D".repeat(43)}`
+    });
+
+    render(
+      <CollaborationConnectForm
+        api={api}
+        status={null}
+        t={createTranslator("en")}
+        fixedMode="join"
+        showHeader={false}
+        showConnectionSummary={false}
+      />
+    );
+    fireEvent.change(screen.getByTestId("people-connect-invitation-details"), {
+      target: { value: handoff }
+    });
+    await user.click(screen.getByTestId("people-connect-submit"));
+
+    const error = await screen.findByTestId("people-connect-error");
+    expect(error).toHaveTextContent("The Server is reachable");
+    expect(error).toHaveTextContent("permission for this Workspace");
+    expect(error).not.toHaveTextContent("through Tailscale");
   });
 
   it("creates a separate member profile and waits for the connected workspace refresh", async () => {

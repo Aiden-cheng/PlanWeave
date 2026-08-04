@@ -13,7 +13,11 @@ import {
   CollaborationSetupCodeClient,
   setupCodeFailureMessage
 } from "./collaborationSetupCodeClient.js";
-import { CollaborationClientError, collaborationErrorFromUnknown } from "./collaborationErrors.js";
+import {
+  COLLABORATION_CONNECTION_ERROR_CODES,
+  CollaborationClientError,
+  collaborationConnectionErrorFromUnknown
+} from "./collaborationErrors.js";
 import { CollaborationWorkspaceClient } from "./CollaborationWorkspaceClient.js";
 import { redactCollaborationText } from "./redaction.js";
 import {
@@ -287,7 +291,8 @@ export class CollaborationWorkspaceConnection {
       const stored = await this.store.upsert({
         profile: response.connectionProfile,
         workspaceDisplayName: response.workspaceDisplayName,
-        membershipRole: response.role === "owner" || response.role === "member" ? response.role : null,
+        membershipRole:
+          response.role === "owner" || response.role === "member" ? response.role : null,
         membershipActive: true
       });
       await this.vault.setDeviceToken(stored.profileId, response.deviceToken, {
@@ -299,7 +304,7 @@ export class CollaborationWorkspaceConnection {
       this.workspaceDisplayName = response.workspaceDisplayName;
       return await this.connectActiveProfile();
     } catch (error) {
-      const mapped = collaborationErrorFromUnknown(error);
+      const mapped = collaborationConnectionErrorFromUnknown(error);
       this.status = "error";
       this.error = {
         code: mapped.code,
@@ -342,7 +347,7 @@ export class CollaborationWorkspaceConnection {
       if (!authoritative) {
         throw new CollaborationClientError({
           kind: "forbidden",
-          code: "workspace_connection_workspace_unavailable",
+          code: COLLABORATION_CONNECTION_ERROR_CODES.workspaceForbidden,
           message: "The Server did not authorize this Workspace for the active device.",
           retryable: false
         });
@@ -361,7 +366,7 @@ export class CollaborationWorkspaceConnection {
       this.onChange?.();
       return this.buildView();
     } catch (error) {
-      const mapped = collaborationErrorFromUnknown(error);
+      const mapped = collaborationConnectionErrorFromUnknown(error);
       this.status = "error";
       this.connectedAt = null;
       this.error = {

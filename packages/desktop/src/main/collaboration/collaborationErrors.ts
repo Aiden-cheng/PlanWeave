@@ -4,7 +4,15 @@ import {
   mapHttpStatusToBoundaryKind,
   type CollaborationBoundaryErrorKind
 } from "@planweave-ai/collaboration-protocol/errors";
+import type { DeploymentTopology } from "@planweave-ai/collaboration-protocol/connection";
 import { redactCollaborationText } from "./redaction.js";
+
+export const COLLABORATION_CONNECTION_ERROR_CODES = {
+  serverUnreachable: "SERVER_UNREACHABLE",
+  tailnetUnreachable: "TAILNET_UNREACHABLE",
+  workspaceForbidden: "WORKSPACE_FORBIDDEN",
+  workspaceUnauthorized: "WORKSPACE_UNAUTHORIZED"
+} as const;
 
 export class CollaborationClientError extends Error {
   readonly kind: CollaborationBoundaryErrorKind;
@@ -125,4 +133,54 @@ export function collaborationErrorFromUnknown(error: unknown): CollaborationClie
     retryable: false,
     cause: error
   });
+}
+
+/**
+ * Converts transport/auth failures into the stable connection semantics shown during onboarding.
+ * The topology comes from the validated handoff/profile; hostnames are never guessed as Tailscale.
+ */
+export function collaborationConnectionErrorFromUnknown(
+  error: unknown,
+  topology?: DeploymentTopology
+): CollaborationClientError {
+  const mapped = collaborationErrorFromUnknown(error);
+  if ((mapped.kind === "offline" || mapped.kind === "timeout") && mapped.httpStatus === undefined) {
+    const tailnet = topology === "tailscale_https";
+    return new CollaborationClientError({
+      kind: mapped.kind,
+      code: tailnet
+        ? COLLABORATION_CONNECTION_ERROR_CODES.tailnetUnreachable
+        : COLLABORATION_CONNECTION_ERROR_CODES.serverUnreachable,
+      message: tailnet
+        ? "The Server could not be reached through the configured tailnet endpoint."
+        : "The configured Server could not be reached.",
+      httpStatus: mapped.httpStatus,
+      retryAfterMs: mapped.retryAfterMs,
+      retryable: true,
+      cause: mapped
+    });
+  }
+  if (mapped.kind === "forbidden" && mapped.httpStatus === 403) {
+    return new CollaborationClientError({
+      kind: mapped.kind,
+      code: COLLABORATION_CONNECTION_ERROR_CODES.workspaceForbidden,
+      message: "The Server is reachable, but this identity cannot access the Workspace.",
+      httpStatus: mapped.httpStatus,
+      retryAfterMs: mapped.retryAfterMs,
+      retryable: false,
+      cause: mapped
+    });
+  }
+  if (mapped.kind === "auth" && mapped.httpStatus === 401) {
+    return new CollaborationClientError({
+      kind: mapped.kind,
+      code: COLLABORATION_CONNECTION_ERROR_CODES.workspaceUnauthorized,
+      message: "The Server is reachable, but Workspace authentication was not accepted.",
+      httpStatus: mapped.httpStatus,
+      retryAfterMs: mapped.retryAfterMs,
+      retryable: false,
+      cause: mapped
+    });
+  }
+  return mapped;
 }

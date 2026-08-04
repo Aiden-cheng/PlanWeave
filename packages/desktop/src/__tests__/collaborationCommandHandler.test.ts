@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { CollaborationClientError } from "../main/collaboration/collaborationErrors.js";
+import {
+  CollaborationClientError,
+  collaborationConnectionErrorFromUnknown,
+  collaborationErrorFromHttp
+} from "../main/collaboration/collaborationErrors.js";
 import { runCollaborationCommand } from "../main/collaboration/collaborationCommandHandler.js";
 
 describe("runCollaborationCommand", () => {
@@ -76,5 +80,96 @@ describe("runCollaborationCommand", () => {
     });
     if (result.ok) throw new Error("expected command failure");
     expect(result.error.message).toHaveLength(512);
+  });
+});
+
+describe("collaboration connection error semantics", () => {
+  it("uses the validated Tailscale topology for unreachable network failures", () => {
+    const error = collaborationConnectionErrorFromUnknown(
+      new TypeError("fetch failed: getaddrinfo ENOTFOUND private.example.ts.net"),
+      "tailscale_https"
+    );
+
+    expect(error).toMatchObject({
+      kind: "offline",
+      code: "TAILNET_UNREACHABLE",
+      retryable: true
+    });
+    expect(error.message).not.toContain("private.example.ts.net");
+  });
+
+  it("does not infer Tailscale from an unclassified network failure", () => {
+    const error = collaborationConnectionErrorFromUnknown(new TypeError("fetch failed"));
+
+    expect(error).toMatchObject({
+      kind: "offline",
+      code: "SERVER_UNREACHABLE",
+      retryable: true
+    });
+  });
+
+  it("preserves an HTTP error because receiving a response proves the Server was reached", () => {
+    const error = collaborationConnectionErrorFromUnknown(
+      collaborationErrorFromHttp(503, JSON.stringify({ error: "collaboration_offline" })),
+      "tailscale_https"
+    );
+
+    expect(error).toMatchObject({
+      kind: "offline",
+      code: "collaboration_offline",
+      httpStatus: 503
+    });
+  });
+
+  it("keeps reached-Server authorization failures distinct from reachability", () => {
+    const forbidden = collaborationConnectionErrorFromUnknown(
+      collaborationErrorFromHttp(
+        403,
+        JSON.stringify({ error: "human_role_insufficient", message: "internal policy detail" })
+      ),
+      "tailscale_https"
+    );
+    const unauthorized = collaborationConnectionErrorFromUnknown(
+      collaborationErrorFromHttp(401, JSON.stringify({ error: "human_unauthenticated" })),
+      "tailscale_https"
+    );
+
+    expect(forbidden).toMatchObject({
+      kind: "forbidden",
+      code: "WORKSPACE_FORBIDDEN",
+      httpStatus: 403,
+      retryable: false
+    });
+    expect(forbidden.message).not.toContain("internal policy detail");
+    expect(unauthorized).toMatchObject({
+      kind: "auth",
+      code: "WORKSPACE_UNAUTHORIZED",
+      httpStatus: 401,
+      retryable: false
+    });
+  });
+
+  it("does not claim the Server was reached for local credential failures", () => {
+    const missingCredential = collaborationConnectionErrorFromUnknown(
+      new CollaborationClientError({
+        kind: "auth",
+        code: "collaboration_credential_missing",
+        retryable: false
+      }),
+      "tailscale_https"
+    );
+    const localPolicyFailure = collaborationConnectionErrorFromUnknown(
+      new CollaborationClientError({
+        kind: "forbidden",
+        code: "local_policy_forbidden",
+        retryable: false
+      }),
+      "tailscale_https"
+    );
+
+    expect(missingCredential.code).toBe("collaboration_credential_missing");
+    expect(missingCredential.httpStatus).toBeUndefined();
+    expect(localPolicyFailure.code).toBe("local_policy_forbidden");
+    expect(localPolicyFailure.httpStatus).toBeUndefined();
   });
 });

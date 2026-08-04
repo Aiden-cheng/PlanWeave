@@ -632,11 +632,7 @@ describe("CollaborationService IPC trust boundary", () => {
   });
 
   it.each([
-    [
-      "offline",
-      () => Promise.reject(new TypeError("network unavailable")),
-      "collaboration_offline"
-    ],
+    ["offline", () => Promise.reject(new TypeError("network unavailable")), "SERVER_UNREACHABLE"],
     [
       "revoked",
       () =>
@@ -646,7 +642,7 @@ describe("CollaborationService IPC trust boundary", () => {
             headers: { "content-type": "application/json" }
           })
         ),
-      "workspace_connection_unauthorized"
+      "WORKSPACE_UNAUTHORIZED"
     ],
     [
       "cross-workspace",
@@ -670,7 +666,7 @@ describe("CollaborationService IPC trust boundary", () => {
             { status: 200, headers: { "content-type": "application/json" } }
           )
         ),
-      "workspace_connection_workspace_unavailable"
+      "WORKSPACE_FORBIDDEN"
     ]
   ])("fails closed when Workspace readiness is %s", async (_name, workspaceResponse, code) => {
     const root = await tempDir("planweave-collab-workspace-readiness-");
@@ -984,7 +980,7 @@ describe("CollaborationService IPC trust boundary", () => {
 
     expect((await service.connectSession({ profileId: "profile-retry" })).session).toMatchObject({
       phase: "connected",
-      lastErrorCode: "collaboration_observer_http_403",
+      lastErrorCode: "WORKSPACE_FORBIDDEN",
       lastErrorMessage:
         "Realtime updates are unavailable because this member does not have project read access. Ask an owner to share the project or grant this member project access."
     });
@@ -1036,14 +1032,14 @@ describe("CollaborationService IPC trust boundary", () => {
     });
 
     await expect(service.connectSession({ profileId: "profile-preflight" })).rejects.toMatchObject({
-      code: "human_auth_unauthenticated",
+      code: "WORKSPACE_UNAUTHORIZED",
       httpStatus: 401
     });
     expect(startObserver).not.toHaveBeenCalled();
     expect((await service.getStatus()).session).toMatchObject({
       phase: "error",
       detail: "connect_preflight_failed",
-      lastErrorCode: "human_auth_unauthenticated"
+      lastErrorCode: "WORKSPACE_UNAUTHORIZED"
     });
     expect(
       (await service.getStatus()).profiles.find(

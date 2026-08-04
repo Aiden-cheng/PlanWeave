@@ -20,7 +20,7 @@ import {
 } from "../../shared/collaboration.js";
 import type { CollaborationClient } from "./CollaborationClient.js";
 import type { CollaborationCredentialVault } from "./collaborationCredentialVault.js";
-import { collaborationErrorFromUnknown } from "./collaborationErrors.js";
+import { collaborationConnectionErrorFromUnknown } from "./collaborationErrors.js";
 import type { CollaborationInvitationVault } from "./collaborationInvitationVault.js";
 import type { CollaborationProfileStore } from "./collaborationProfileStore.js";
 
@@ -234,7 +234,10 @@ export class CollaborationProfileLifecycle {
           persistence === "session-only" ? COLLABORATION_SESSION_ONLY_WARNING : null
         );
       } catch (error) {
-        const mapped = collaborationErrorFromUnknown(error);
+        const mapped = collaborationConnectionErrorFromUnknown(
+          error,
+          client.connectionProfile.endpoint.topology
+        );
         this.dependencies.setSession("error", "bootstrap_failed", {
           code: mapped.code,
           message: mapped.message
@@ -330,7 +333,10 @@ export class CollaborationProfileLifecycle {
           persistence === "session-only" ? COLLABORATION_SESSION_ONLY_WARNING : null
         );
       } catch (error) {
-        const mapped = collaborationErrorFromUnknown(error);
+        const mapped = collaborationConnectionErrorFromUnknown(
+          error,
+          client.connectionProfile.endpoint.topology
+        );
         this.dependencies.setSession("error", "consume_invitation_failed", {
           code: mapped.code,
           message: mapped.message
