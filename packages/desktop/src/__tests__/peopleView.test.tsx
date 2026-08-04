@@ -303,6 +303,7 @@ describe("PeopleView", () => {
     expect(screen.queryByTestId("content-authority-panel")).not.toBeInTheDocument();
     await user.click(await screen.findByTestId("people-section-hosting"));
     expect(await screen.findByTestId("people-hosting-section")).toBeVisible();
+    expect(screen.getByTestId("deployment-connection")).toBeVisible();
     expect(screen.getByTestId("content-authority-panel")).toBeVisible();
     await waitFor(() => expect(api.getLocalCollaborationScopeCatalog).toHaveBeenCalledOnce());
     expect(getCollaborationStatus).toHaveBeenCalledOnce();

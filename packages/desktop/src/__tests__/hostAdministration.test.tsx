@@ -179,20 +179,38 @@ afterEach(() => {
   });
 });
 
-describe("Host administration surface", () => {
-  it("keeps Host administration separate and shows only redacted credential state", async () => {
+describe("Agent Host settings", () => {
+  it("shows only user-facing device and agent information", async () => {
     render(<HostAdministrationSection t={createTranslator("en")} />);
 
     expect(await screen.findByTestId("host-administration")).toBeInTheDocument();
     expect(await screen.findByTestId("host-availability-status-host-1")).toHaveTextContent(
-      "Unavailable: offline"
+      "Offline"
     );
-    expect(screen.getByText("Credential available · OS vault")).toBeInTheDocument();
-    expect(screen.getByText("linux.x64, codex")).toBeInTheDocument();
-    expect(screen.queryByText(/operator_a_token|Bearer/i)).not.toBeInTheDocument();
+    expect(screen.getByText("Build Host")).toBeInTheDocument();
+
+    for (const internalValue of [
+      "profile-a",
+      "workspace-a",
+      "host-1",
+      "linux.x64",
+      "server-admin",
+      "Operator credential",
+      "Profile ID",
+      "Server URL",
+      "Workspace mapping",
+      "ACP profiles"
+    ]) {
+      expect(screen.queryByText(internalValue, { exact: false })).not.toBeInTheDocument();
+    }
+    expect(screen.queryByTestId("host-admin-profiles")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("host-admin-credential")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("host-admin-inventory")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("host-admin-member-setup")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("deployment-connection")).not.toBeInTheDocument();
   });
 
-  it("shows the Server-projected native Host readiness without target-machine details", async () => {
+  it("shows friendly agent names while keeping profile IDs and capabilities private", async () => {
     bridgeMock.listOperatorHosts.mockResolvedValueOnce({
       items: [
         {
@@ -220,31 +238,20 @@ describe("Host administration surface", () => {
     render(<HostAdministrationSection t={createTranslator("en")} />);
 
     expect(await screen.findByTestId("host-availability-status-host-1")).toHaveTextContent(
-      "Available"
+      "Online"
     );
-    expect(screen.queryByText(/\/var\/lib|codex-acp --|PATH=/)).not.toBeInTheDocument();
+    expect(screen.getByText("Codex", { exact: true })).toBeInTheDocument();
+    expect(screen.queryByText("codex-acp", { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText("acp.codex", { exact: true })).not.toBeInTheDocument();
   });
 
-  it("renders the Server availability result instead of recomputing readiness in the renderer", async () => {
+  it("uses the Server availability result but explains the action without protocol jargon", async () => {
     bridgeMock.listOperatorHosts.mockResolvedValueOnce({
       items: [
         {
           ...host,
           online: true,
-          capabilities: ["linux.x64", "acp.codex"],
-          availability: { status: "unavailable", reason: "capability_mismatch" },
-          readinessObservation: {
-            workspaceMappings: [{ workspaceId: "workspace-a", status: "ready" }],
-            acpProfiles: [
-              {
-                profileId: "codex-acp",
-                agentId: "codex",
-                displayName: "Codex",
-                status: "ready",
-                capabilities: ["acp.codex"]
-              }
-            ]
-          }
+          availability: { status: "unavailable", reason: "capability_mismatch" }
         }
       ],
       nextCursor: null
@@ -253,14 +260,13 @@ describe("Host administration surface", () => {
     render(<HostAdministrationSection t={createTranslator("en")} />);
 
     expect(await screen.findByTestId("host-availability-status-host-1")).toHaveTextContent(
-      "Unavailable: capability mismatch"
+      "Update required"
     );
-    expect(
-      screen.getByText(/Restart the Host after the configured ACP preset/i)
-    ).toBeInTheDocument();
+    expect(screen.getByText("Update the agents shared by the target device.")).toBeInTheDocument();
+    expect(screen.queryByText(/capability|ACP|preset|heartbeat/i)).not.toBeInTheDocument();
   });
 
-  it("keeps enrollment secrets out of renderer state while showing redacted main-owned handoff status", async () => {
+  it("copies enrollment details without displaying commands, workspace IDs, or secrets", async () => {
     const user = userEvent.setup();
     render(<HostAdministrationSection t={createTranslator("en")} />);
     await screen.findByTestId("host-administration");
@@ -274,40 +280,13 @@ describe("Host administration surface", () => {
         credentialExpiresAt: expect.any(String)
       }
     });
-    expect(screen.queryByTestId("host-admin-enrollment-secret")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("host-admin-bootstrap-config")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("host-admin-bootstrap-command")).not.toBeInTheDocument();
-    expect(JSON.stringify(bridgeMock.copyOperatorHostBootstrapHandoff.mock.calls)).not.toContain(
-      "pw_enroll_"
-    );
-    expect(JSON.stringify(bridgeMock.copyOperatorHostBootstrapHandoff.mock.results)).not.toMatch(
-      /enrollmentCode|credentialToken|planweave-agent-host-setup:/
-    );
+    expect(
+      screen.queryByText(/planweave agent-host enroll|workspace-a|pw_enroll_/i)
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("host-admin-bootstrap-error")).not.toBeInTheDocument();
 
     await user.click(screen.getByTestId("host-admin-close-grant"));
     expect(screen.queryByTestId("host-admin-grant-once")).not.toBeInTheDocument();
-  });
-
-  it("creates a member setup code through main without exposing the secret in the renderer", async () => {
-    const user = userEvent.setup();
-    render(<HostAdministrationSection t={createTranslator("en")} />);
-    await screen.findByTestId("host-administration");
-
-    await user.click(screen.getByTestId("host-admin-member-setup-copy"));
-
-    expect(bridgeMock.copyOperatorMemberSetupCode).toHaveBeenCalledWith({
-      profileId: "profile-a"
-    });
-    expect(await screen.findByTestId("host-admin-member-setup-copied")).toHaveTextContent(
-      "workspace-a"
-    );
-    expect(screen.queryByDisplayValue(/pw_setup_/)).not.toBeInTheDocument();
-    expect(JSON.stringify(bridgeMock.copyOperatorMemberSetupCode.mock.calls)).not.toContain(
-      "pw_setup_"
-    );
-
-    await user.click(screen.getByTestId("host-admin-member-setup-dismiss"));
-    expect(screen.queryByTestId("host-admin-member-setup-copied")).not.toBeInTheDocument();
   });
 
   it("registers this Windows computer with an explicitly selected Agent", async () => {
@@ -327,11 +306,11 @@ describe("Host administration surface", () => {
       exposedProfileIds: ["codex-acp"]
     });
     expect(await screen.findByTestId("host-admin-local-status")).toHaveTextContent(
-      "background Agent Host is running"
+      "This computer is connected"
     );
   });
 
-  it("enrolls from the main-owned clipboard without a server-admin profile", async () => {
+  it("enrolls from the main-owned clipboard without an administrative connection", async () => {
     const user = userEvent.setup();
     bridgeMock.getOperatorControlStatus.mockResolvedValue({
       ...status(),
@@ -341,20 +320,18 @@ describe("Host administration surface", () => {
     render(<HostAdministrationSection t={createTranslator("en")} />);
     const checkbox = await screen.findByTestId("host-admin-local-agent-codex-acp");
 
-    expect(bridgeMock.getOperatorLocalAgentHostStatus).toHaveBeenCalledWith({});
     await user.click(checkbox);
     await user.click(screen.getByTestId("host-admin-enroll-local-clipboard"));
 
     expect(bridgeMock.enrollOperatorLocalAgentHostFromClipboard).toHaveBeenCalledWith({
       exposedProfileIds: ["codex-acp"]
     });
-    expect(screen.queryByTestId("host-admin-register-local")).not.toBeInTheDocument();
     expect(await screen.findByTestId("host-admin-local-status")).toHaveTextContent(
-      "background Agent Host is running"
+      "This computer is connected"
     );
   });
 
-  it("disables one-click registration for a custom CA endpoint", async () => {
+  it("offers clipboard registration when the current Server cannot register directly", async () => {
     const customCaStatus = status();
     bridgeMock.getOperatorControlStatus.mockResolvedValue({
       ...customCaStatus,
@@ -369,15 +346,17 @@ describe("Host administration surface", () => {
     render(<HostAdministrationSection t={createTranslator("en")} />);
 
     expect(await screen.findByTestId("host-admin-local-custom-ca")).toHaveTextContent(
-      "does not yet support servers that use a custom CA certificate"
+      "does not support one-click registration"
     );
-    expect(screen.getByTestId("host-admin-register-local")).toBeDisabled();
+    expect(screen.queryByText(/custom CA|configured_ca/i)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("host-admin-register-local")).not.toBeInTheDocument();
+    expect(screen.getByTestId("host-admin-enroll-local-clipboard")).toBeInTheDocument();
   });
 
-  it("requires confirmation before revoking and reflects revoked state", async () => {
+  it("requires confirmation before removing a remote device", async () => {
     const user = userEvent.setup();
     render(<HostAdministrationSection t={createTranslator("en")} />);
-    await screen.findByTestId("host-admin-host-host-1");
+    await screen.findByTestId("host-availability-host-1");
 
     await user.click(screen.getByTestId("host-admin-revoke-host-1"));
     expect(bridgeMock.revokeOperatorHost).toHaveBeenCalledWith({
@@ -385,32 +364,16 @@ describe("Host administration surface", () => {
       hostId: "host-1"
     });
     await waitFor(() =>
-      expect(screen.getByTestId("host-admin-host-status-host-1")).toHaveAttribute(
-        "data-status",
-        "revoked"
-      )
+      expect(screen.queryByTestId("host-availability-host-1")).not.toBeInTheDocument()
     );
   });
 
-  it("requests a main-process clipboard import without accepting the token", async () => {
-    const user = userEvent.setup();
-    render(<HostAdministrationSection t={createTranslator("en")} />);
-    await screen.findByTestId("host-administration");
-
-    expect(screen.queryByTestId("host-admin-operator-token")).not.toBeInTheDocument();
-    await user.click(screen.getByTestId("host-admin-import-credential"));
-
-    expect(bridgeMock.importOperatorCredential).toHaveBeenCalledWith({
-      profileId: "profile-a"
-    });
-  });
-
-  it("maps a plain IPC error code to an honest forbidden state", async () => {
+  it("maps administrative errors to a user-facing permission message", async () => {
     bridgeMock.listOperatorHosts.mockRejectedValueOnce(new Error("operator_admin_required"));
     render(<HostAdministrationSection t={createTranslator("en")} />);
 
     expect(
-      await screen.findByText("This operator is not allowed to administer Hosts.")
+      await screen.findByText("Your account cannot manage remote devices.")
     ).toBeInTheDocument();
   });
 });

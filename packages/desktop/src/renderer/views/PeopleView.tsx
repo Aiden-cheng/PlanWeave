@@ -19,6 +19,7 @@ import {
   CurrentCanvasMemberAccess
 } from "../collaboration/CurrentCanvasAccessPanel";
 import { LocalCollaborationServerPanel } from "../collaboration/LocalCollaborationServerPanel";
+import { DeploymentConnectionCard } from "../settings/DeploymentConnectionCard";
 import { useCurrentCanvasAccess } from "../hooks/useCurrentCanvasAccess";
 import { isCollaborationSessionConnected } from "../collaboration/sessionState";
 import {
@@ -230,19 +231,22 @@ export function PeopleView({
               t={t}
               onLocalHostingOpenChange={setLocalHostingOpen}
               localHostingSlot={
-                <LocalCollaborationServerPanel
-                  api={api}
-                  t={t}
-                  projectId={null}
-                  canvasId={canvasId}
-                  scopeLayout={collaborationScopeLayout}
-                  onScopeLayoutChange={onCollaborationScopeLayoutChange}
-                  copyText={copyText}
-                  invitationHandoff={localInvitationHandoff}
-                  onInvitationHandoffChange={setLocalInvitationHandoff}
-                  onManageInvitations={handleManageInvitations}
-                  onStatusChange={handleLocalServerStatusChange}
-                />
+                <div className="flex flex-col gap-6">
+                  <DeploymentConnectionCard t={t} />
+                  <LocalCollaborationServerPanel
+                    api={api}
+                    t={t}
+                    projectId={null}
+                    canvasId={canvasId}
+                    scopeLayout={collaborationScopeLayout}
+                    onScopeLayoutChange={onCollaborationScopeLayoutChange}
+                    copyText={copyText}
+                    invitationHandoff={localInvitationHandoff}
+                    onInvitationHandoffChange={setLocalInvitationHandoff}
+                    onManageInvitations={handleManageInvitations}
+                    onStatusChange={handleLocalServerStatusChange}
+                  />
+                </div>
               }
               existingServerSlot={
                 <CollaborationConnectForm
@@ -403,6 +407,7 @@ export function PeopleView({
               </div>
             ) : (
               <div className="flex flex-col" data-testid="people-hosting-section">
+                <DeploymentConnectionCard t={t} />
                 <LocalCollaborationServerPanel
                   api={api}
                   t={t}

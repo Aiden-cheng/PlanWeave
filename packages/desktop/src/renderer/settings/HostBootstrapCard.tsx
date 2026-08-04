@@ -1,3 +1,4 @@
+import { ClipboardCopyIcon, PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type {
@@ -14,7 +15,6 @@ type HostBootstrapCardProps = {
   handoff: OperatorHostBootstrapHandoffView | null;
   t: ReturnType<typeof createTranslator>;
   handoffState?: "idle" | "pending" | "ready" | "failed" | "expired" | "revoked";
-  handoffError?: string | null;
   onRetry?: () => void;
 };
 
@@ -31,20 +31,11 @@ export function HostBootstrapCard({
   handoff,
   t,
   handoffState = "idle",
-  handoffError = null,
   onRetry
 }: HostBootstrapCardProps) {
   const locale = t("hostAdminLocale");
   const resolvedHandoffState =
-    handoffState !== "idle"
-      ? handoffState
-      : busy
-        ? "pending"
-        : handoff
-          ? "ready"
-          : handoffError
-            ? "failed"
-            : "idle";
+    handoffState !== "idle" ? handoffState : busy ? "pending" : handoff ? "ready" : "idle";
   const canCreate = Boolean(
     activeProfile?.hasOperatorCredential && activeProfile.endpoint && !busy
   );
@@ -52,57 +43,15 @@ export function HostBootstrapCard({
   return (
     <Card data-testid="host-admin-bootstrap" data-handoff-state={resolvedHandoffState}>
       <CardHeader>
+        <div className="flex size-9 items-center justify-center rounded-lg bg-state-selected-surface text-text-strong">
+          <PlusIcon className="size-4" aria-hidden="true" />
+        </div>
         <CardTitle>{t("hostAdminBootstrapTitle")}</CardTitle>
         <CardDescription>{t("hostAdminBootstrapDescription")}</CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
-        <p className="text-xs text-text-muted">{t("hostAdminBootstrapBoundary")}</p>
-        <div
-          className="rounded-md border border-border/70 bg-muted/20 px-2 py-1.5 text-xs"
-          data-testid="host-admin-bootstrap-status"
-          data-state={resolvedHandoffState}
-          role="status"
-        >
-          {resolvedHandoffState === "pending"
-            ? t("hostAdminBootstrapPending")
-            : resolvedHandoffState === "ready"
-              ? t("hostAdminBootstrapReady")
-              : resolvedHandoffState === "failed"
-                ? t("hostAdminBootstrapFailed")
-                : resolvedHandoffState === "expired"
-                  ? t("hostAdminBootstrapExpired")
-                  : resolvedHandoffState === "revoked"
-                    ? t("hostAdminBootstrapRevoked")
-                    : t("hostAdminBootstrapIdle")}
-          {handoffError ? (
-            <div className="mt-1 text-destructive" data-testid="host-admin-bootstrap-error">
-              {handoffError}
-            </div>
-          ) : null}
-          {resolvedHandoffState === "failed" && onRetry ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="mt-2"
-              data-testid="host-admin-bootstrap-retry"
-              disabled={busy}
-              onClick={onRetry}
-            >
-              {t("hostAdminBootstrapRetry")}
-            </Button>
-          ) : null}
-        </div>
-        <div className="rounded-md border border-border/70 p-3 text-xs text-text-muted">
-          <code>planweave agent-host enroll &lt;handoff&gt;</code>
-          <p className="mt-2">{t("hostAdminBootstrapCodexPreset")}</p>
-        </div>
-        {!activeProfile?.endpoint ? (
-          <p
-            className="text-xs text-destructive"
-            role="alert"
-            data-testid="host-admin-bootstrap-validation"
-          >
+        {!canCreate && !busy ? (
+          <p className="rounded-lg border border-border/70 bg-surface-muted/30 px-3 py-2 text-xs leading-5 text-text-muted">
             {t("hostAdminBootstrapSecureCoordinator")}
           </p>
         ) : null}
@@ -113,22 +62,38 @@ export function HostBootstrapCard({
           disabled={!canCreate}
           onClick={() => void copyBootstrapHandoff()}
         >
-          {t("hostAdminCreateGrant")}
+          <ClipboardCopyIcon data-icon="inline-start" />
+          {busy ? t("hostAdminBootstrapPending") : t("hostAdminCreateGrant")}
         </Button>
+        {resolvedHandoffState === "failed" && onRetry ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="w-fit"
+            data-testid="host-admin-bootstrap-retry"
+            disabled={!canCreate}
+            onClick={onRetry}
+          >
+            {t("hostAdminBootstrapRetry")}
+          </Button>
+        ) : null}
         {handoff ? (
           <div
-            className="grid gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3"
+            className="grid gap-2 rounded-lg border border-emerald-500/35 bg-emerald-500/10 p-3"
             data-testid="host-admin-grant-once"
-            role="alertdialog"
+            role="status"
           >
             <div className="font-medium text-text-strong">{t("hostAdminGrantOnceTitle")}</div>
-            <p className="text-xs text-text-muted">
+            <p className="text-xs leading-5 text-text-muted">
               {t("hostAdminGrantOnceWarning").replace(
                 "{expiry}",
                 formatDate(handoff.expiresAt, locale)
               )}
             </p>
-            <code className="text-xs">{handoff.commandPreview}</code>
+            <p className="text-xs leading-5 text-text-muted">
+              {t("hostAdminBootstrapHeartbeatNote")}
+            </p>
             <Button
               type="button"
               size="sm"
@@ -139,9 +104,10 @@ export function HostBootstrapCard({
             >
               {t("hostAdminCloseGrant")}
             </Button>
-            <p className="text-xs text-text-muted">{t("hostAdminBootstrapHeartbeatNote")}</p>
           </div>
-        ) : null}
+        ) : (
+          <p className="text-xs leading-5 text-text-muted">{t("hostAdminBootstrapBoundary")}</p>
+        )}
       </CardContent>
     </Card>
   );

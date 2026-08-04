@@ -467,9 +467,9 @@ export const enCatalog = {
   settingsMcpTunnelHint:
     "Run the local PlanWeave MCP server and connect it to ChatGPT through OpenAI Secure MCP Tunnel.",
   hostAdminLocale: "en-US",
-  hostAdminTitle: "Agent Host administration",
+  hostAdminTitle: "Agent Host",
   hostAdminDescription:
-    "Manage server-admin profiles, enrollment handoffs, and authoritative Host projections separately from project People.",
+    "Bring agents from this computer or remote devices into one list and use them just like local agents.",
   hostAdminDesktopBoundary:
     "Desktop creates the secure onboarding handoff only. It does not SSH to a VPS, provision infrastructure, install software, or start a system service.",
   deploymentTitle: "Server deployment connection",
@@ -543,43 +543,40 @@ export const enCatalog = {
   deploymentHostCapabilitiesNone: "No capabilities reported",
   deploymentHostUnavailable:
     "Unavailable: the Server does not yet report workspace mapping or ACP profile readiness.",
-  hostAvailabilityTitle: "Agent Host availability",
-  hostAvailabilityDescription:
-    "The Server combines authenticated target-machine observations with Host liveness and revocation. Paths, commands, and credentials are never displayed.",
-  hostAvailabilityEmpty: "No Agent Hosts are currently reported by the Server.",
+  hostAvailabilityTitle: "Remote devices",
+  hostAvailabilityDescription: "Registered devices automatically show the agents they share.",
+  hostAvailabilityEmpty: "No remote devices yet",
+  hostAvailabilityEmptyHint: "Copy enrollment details above, then register another computer.",
+  hostAvailabilityNoAgents: "This device is not sharing any agents yet",
   hostAvailabilityWorkspace: "Workspace mapping",
   hostAvailabilityProfiles: "ACP profiles",
   hostAvailabilityProfile_ready: "ready",
   hostAvailabilityProfile_missing: "missing",
   hostAvailabilityProfile_invalid: "invalid",
-  hostAvailability_ready: "Available",
-  hostAvailability_revoked: "Unavailable: revoked",
-  hostAvailability_offline: "Unavailable: offline",
-  hostAvailability_readiness_not_reported: "Unavailable: Host has not reported readiness",
-  hostAvailability_workspace_mapping_missing: "Unavailable: workspace mapping missing",
-  hostAvailability_workspace_mapping_invalid: "Unavailable: workspace mapping invalid",
-  hostAvailability_acp_profile_missing: "Unavailable: ACP profile missing",
-  hostAvailability_acp_profile_invalid: "Unavailable: ACP profile invalid",
-  hostAvailability_capability_mismatch: "Unavailable: capability mismatch",
-  hostAvailabilityAction_revoked:
-    "Create a new enrollment handoff after the Host is authorized again.",
-  hostAvailabilityAction_offline:
-    "Start the native Agent Host and refresh after its authenticated heartbeat arrives.",
+  hostAvailability_ready: "Online",
+  hostAvailability_revoked: "Removed",
+  hostAvailability_offline: "Offline",
+  hostAvailability_readiness_not_reported: "Initializing",
+  hostAvailability_workspace_mapping_missing: "Register again",
+  hostAvailability_workspace_mapping_invalid: "Register again",
+  hostAvailability_acp_profile_missing: "Agent unavailable",
+  hostAvailability_acp_profile_invalid: "Agent unavailable",
+  hostAvailability_capability_mismatch: "Update required",
+  hostAvailabilityAction_revoked: "Register this device again if you still want to use it.",
+  hostAvailabilityAction_offline: "Make sure the device is on and PlanWeave Agent Host is running.",
   hostAvailabilityAction_readiness_not_reported:
-    "Run the current Host handoff so the target machine can report its local readiness.",
-  hostAvailabilityAction_workspace_mapping_missing:
-    "Create a Host handoff with the correct relative workspace path, then run it on the target machine.",
-  hostAvailabilityAction_workspace_mapping_invalid:
-    "Correct the target Host workspace path, then rerun the native Host handoff.",
+    "The device is preparing its agents. Refresh again shortly.",
+  hostAvailabilityAction_workspace_mapping_missing: "Register the target device again.",
+  hostAvailabilityAction_workspace_mapping_invalid: "Register the target device again.",
   hostAvailabilityAction_acp_profile_missing:
-    "Use the codex-acp preset handoff and ensure its adapter is installed on the target Host.",
+    "Install or sign in to the agent on the target device, then share it again.",
   hostAvailabilityAction_acp_profile_invalid:
-    "Repair the target Host's codex-acp installation or login, then restart the native Host.",
-  hostAvailabilityAction_capability_mismatch:
-    "Restart the Host after the configured ACP preset is available so it can publish matching capabilities.",
+    "Sign in to the agent again on the target device, then restart Agent Host.",
+  hostAvailabilityAction_capability_mismatch: "Update the agents shared by the target device.",
   hostAdminRefresh: "Refresh",
   hostAdminLoading: "Loading…",
-  hostAdminBridgeUnavailable: "Host administration is unavailable in this Desktop session.",
+  hostAdminBridgeUnavailable:
+    "Agent Host management is unavailable. Restart or update PlanWeave and try again.",
   hostAdminSessionOnlyWarning:
     "The operator credential is available for this session only; it is not persisted by the operating system vault.",
   hostAdminMemberSetupTitle: "Member device onboarding",
@@ -620,7 +617,8 @@ export const enCatalog = {
   hostAdminImportCredential: "Import token from clipboard",
   hostAdminClearCredential: "Clear credential",
   hostAdminCredentialAvailable: "Credential available",
-  hostAdminCredentialMissing: "Credential unavailable",
+  hostAdminCredentialMissing:
+    "The current Server cannot create device enrollment details. Connect it from People first.",
   hostAdminCredentialPersistence_persisted: "OS vault",
   "hostAdminCredentialPersistence_session-only": "session only",
   hostAdminCredentialPersistence_missing: "not configured",
@@ -642,42 +640,44 @@ export const enCatalog = {
   hostAdminCredentialExpiry: "Credential expiry",
   hostAdminRevokedAt: "Revoked at",
   hostAdminNotReported: "Not reported",
-  hostAdminRevoke: "Revoke Host",
-  hostAdminRevokeConfirm: "Revoke this Host? This immediately removes its enrollment authority.",
-  hostAdminBootstrapTitle: "Connect an Agent Host",
-  hostAdminLocalHostTitle: "This Windows computer",
+  hostAdminRevoke: "Remove device",
+  hostAdminRevokeConfirm: "Remove this device? Its shared agents will no longer be available.",
+  hostAdminBootstrapTitle: "Add a remote device",
+  hostAdminLocalHostTitle: "This computer",
   hostAdminLocalHostDescription:
-    "Register this Desktop as an Agent Host and choose which installed agents it may expose.",
+    "Choose which agents this computer may share and keep them available in the background.",
   hostAdminLocalHostWindowsOnly:
     "One-click local Agent Host registration is available in the Windows Desktop build.",
   hostAdminLocalHostCustomCaUnsupported:
-    "One-click Agent Host registration does not yet support servers that use a custom CA certificate.",
+    "The current Server connection does not support one-click registration. Register from the clipboard instead.",
   hostAdminLocalHostHandoffInvalid:
     "The clipboard does not contain a valid Agent Host enrollment handoff.",
   hostAdminLocalHostHandoffExpired:
     "The Agent Host enrollment handoff has expired. Create a new one on the server-admin computer.",
   hostAdminLocalHostNotRegistered: "This computer is not registered as an Agent Host.",
-  hostAdminLocalHostReady: "The background Agent Host is running.",
+  hostAdminLocalHostReady: "This computer is connected and Agent Host is running.",
   hostAdminLocalHostSetupRequired:
-    "Enrollment completed, but the Windows background task needs attention.",
+    "Registration completed, but the background service needs to be restarted.",
   hostAdminLocalHostDetected: "detected",
   hostAdminLocalHostCredentialBoundary:
     "Agent login credentials remain on this computer and are never uploaded to Server.",
   hostAdminLocalHostClipboardHandoff:
-    "On the server-admin computer, copy a Host enrollment handoff. Then return here with that handoff in the system clipboard.",
+    "Copy device enrollment details on the managing computer, then return here to register.",
   hostAdminLocalHostAgentMissing:
     "The selected Agent is not installed or is unavailable in the Desktop environment.",
   hostAdminEnrollThisComputerFromClipboard: "Register from clipboard",
+  hostAdminRegisterThisComputer: "Register this computer",
   hostAdminRegisterWithCurrentProfile: "Register with current admin profile",
   hostAdminUpdateThisComputer: "Update exposed agents",
-  hostAdminBootstrapDescription: "Copy one portable enrollment command for Windows or Linux.",
-  hostAdminBootstrapIdle: "Host bootstrap is idle.",
-  hostAdminBootstrapPending: "Creating Host enrollment handoff…",
-  hostAdminBootstrapReady: "Host enrollment handoff was copied by Desktop main.",
-  hostAdminBootstrapFailed: "Host bootstrap failed.",
-  hostAdminBootstrapExpired: "Host enrollment handoff expired.",
-  hostAdminBootstrapRevoked: "Host enrollment handoff was revoked.",
-  hostAdminBootstrapRetry: "Retry bootstrap",
+  hostAdminBootstrapDescription:
+    "Copy one-time enrollment details for another Windows computer or VPS.",
+  hostAdminBootstrapIdle: "No device enrollment details have been created yet.",
+  hostAdminBootstrapPending: "Preparing…",
+  hostAdminBootstrapReady: "Device enrollment details copied.",
+  hostAdminBootstrapFailed: "Device enrollment details could not be created.",
+  hostAdminBootstrapExpired: "Device enrollment details expired.",
+  hostAdminBootstrapRevoked: "Device enrollment details are no longer valid.",
+  hostAdminBootstrapRetry: "Try again",
   hostAdminConfigPath: "Absolute config path on the Host",
   hostAdminDataDirectory: "Absolute data directory on the Host",
   hostAdminWorkspaceRoot: "Absolute workspace root on the Host",
@@ -688,7 +688,7 @@ export const enCatalog = {
   hostAdminBootstrapCodexPreset:
     "Enrollment exposes no agents by default. On the Host, use agents list and agents expose for a supported installed agent.",
   hostAdminBootstrapSecureCoordinator:
-    "This profile does not have a Main-validated advertised endpoint. Start or reconnect the server first.",
+    "Start or connect a PlanWeave Server you manage from People first.",
   hostAdminBootstrapAbsolutePaths:
     "Config, data, and workspace paths must be absolute Host-local paths.",
   hostAdminBootstrapWorkspacePath:
@@ -697,26 +697,25 @@ export const enCatalog = {
   hostAdminBootstrapCapacity: "Capacity must be an integer from 1 to 128.",
   hostAdminBootstrapCapabilities: "Capabilities must use lowercase portable identifiers.",
   hostAdminBootstrapBoundary:
-    "Desktop main creates and copies the complete command. This page receives only expiry and workspace metadata.",
-  hostAdminCreateGrant: "Create and copy one-time enrollment",
-  hostAdminGrantOnceTitle: "Bootstrap handoff copied",
-  hostAdminGrantOnceWarning:
-    "The one-time enrollment command was copied directly by Desktop main. It expires at {expiry}.",
+    "Enrollment details are written only to the system clipboard. PlanWeave Desktop on Windows and the PlanWeave CLI on a VPS can both use them directly.",
+  hostAdminCreateGrant: "Copy device enrollment details",
+  hostAdminGrantOnceTitle: "Device enrollment details copied",
+  hostAdminGrantOnceWarning: "Register the target device before these details expire at {expiry}.",
   hostAdminEnrollmentSecret: "Enrollment secret",
   hostAdminCopy: "Copy secret",
   hostAdminCopyConfig: "Copy config",
   hostAdminCopyCommand: "Copy command",
   hostAdminCopied: "Copied",
-  hostAdminCloseGrant: "Dismiss handoff status",
+  hostAdminCloseGrant: "Done",
   hostAdminBootstrapConfig: "Bootstrap configuration",
   hostAdminBootstrapCommand: "Bootstrap command",
   hostAdminBootstrapHeartbeatNote:
-    "Run the copied command on the Host, then refresh this inventory to confirm its heartbeat.",
-  hostAdminOffline: "The server is offline or timed out. No fresh Host projection is available.",
-  hostAdminUnauthorized: "The operator credential was rejected. Re-import a valid credential.",
-  hostAdminForbidden: "This operator is not allowed to administer Hosts.",
-  hostAdminProfileMissing: "The selected server-admin profile no longer exists.",
-  hostAdminErrorGeneric: "Host administration request failed. Check the server and try again.",
+    "After registration, the device and its shared agents appear automatically below.",
+  hostAdminOffline: "PlanWeave Server cannot be reached. Check your network and try again.",
+  hostAdminUnauthorized: "Server management access expired. Reconnect from People.",
+  hostAdminForbidden: "Your account cannot manage remote devices.",
+  hostAdminProfileMissing: "The current Server connection is unavailable. Reconnect from People.",
+  hostAdminErrorGeneric: "The Agent Host action failed. Try again shortly.",
   agentInstallStatus: "Local agent installation status",
   agentRefresh: "Refresh",
   agentRefreshing: "Refreshing",

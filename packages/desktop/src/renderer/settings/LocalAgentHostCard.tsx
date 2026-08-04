@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { LaptopIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type {
@@ -36,14 +37,14 @@ export function LocalAgentHostCard({
     );
   }, [status]);
 
-  const canRegisterWithAdmin = Boolean(
+  const hasDirectRegistration = Boolean(
     status?.supported &&
       activeProfile?.hasOperatorCredential &&
       activeProfile.endpoint &&
-      activeProfile.endpoint.tlsTrust !== "configured_ca" &&
-      selected.length > 0 &&
-      !busy &&
-      !loading
+      activeProfile.endpoint.tlsTrust !== "configured_ca"
+  );
+  const canRegisterWithAdmin = Boolean(
+    hasDirectRegistration && selected.length > 0 && !busy && !loading
   );
   const canEnrollFromClipboard = Boolean(
     status?.supported &&
@@ -52,10 +53,15 @@ export function LocalAgentHostCard({
       !busy &&
       !loading
   );
+  const canUpdate = status?.state !== "not_registered" && hasDirectRegistration;
+  const canRegisterDirectly = status?.state === "not_registered" && hasDirectRegistration;
 
   return (
     <Card data-testid="host-admin-local-agent-host">
       <CardHeader>
+        <div className="flex size-9 items-center justify-center rounded-lg bg-state-selected-surface text-text-strong">
+          <LaptopIcon className="size-4" aria-hidden="true" />
+        </div>
         <CardTitle>{t("hostAdminLocalHostTitle")}</CardTitle>
         <CardDescription>{t("hostAdminLocalHostDescription")}</CardDescription>
       </CardHeader>
@@ -107,7 +113,7 @@ export function LocalAgentHostCard({
               ))}
             </div>
             <p className="text-xs text-text-muted">{t("hostAdminLocalHostCredentialBoundary")}</p>
-            {status.state === "not_registered" ? (
+            {status.state === "not_registered" && !canRegisterDirectly ? (
               <div className="grid gap-2">
                 <p className="text-xs text-text-muted">{t("hostAdminLocalHostClipboardHandoff")}</p>
                 <Button
@@ -121,7 +127,7 @@ export function LocalAgentHostCard({
                 </Button>
               </div>
             ) : null}
-            {activeProfile?.hasOperatorCredential ? (
+            {canRegisterDirectly || canUpdate ? (
               <Button
                 type="button"
                 className="w-fit"
@@ -131,7 +137,7 @@ export function LocalAgentHostCard({
                 onClick={() => void register(selected)}
               >
                 {status.state === "not_registered"
-                  ? t("hostAdminRegisterWithCurrentProfile")
+                  ? t("hostAdminRegisterThisComputer")
                   : t("hostAdminUpdateThisComputer")}
               </Button>
             ) : null}
