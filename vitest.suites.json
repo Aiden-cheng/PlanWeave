@@ -12,6 +12,7 @@
     {
       "root": "packages/cli/src/__tests__",
       "unit": [
+        "agentHostCommand.test.ts",
         "commandsFormatters.test.ts",
         "commandsRegistration.test.ts",
         "commandsRunOutput.test.ts",
@@ -22,6 +23,7 @@
       "integration": [
         "acpCliE2E.test.ts",
         "acpLiveSmoke.test.ts",
+        "agentHostBundleInstall.test.ts",
         "canvasCli.test.ts",
         "ciSlowTestReport.test.ts",
         "claimCli.test.ts",
@@ -106,6 +108,7 @@
         "commentsPanelController.test.ts",
         "contentAuthorityPanel.test.tsx",
         "currentCanvasAccessPanel.test.tsx",
+        "desktopAgentHostServiceMode.test.ts",
         "desktopBridgeContract.test.ts",
         "desktopDiagnostics.test.ts",
         "desktopDiagnosticsPopover.test.tsx",
@@ -247,6 +250,7 @@
         "importRecoveryNotifications.test.tsx",
         "hostAdministrationPackagedE2E.test.tsx",
         "localCanvasCommandMaterializer.test.ts",
+        "localAgentHostProvisioner.test.ts",
         "localCollaborationCoordinatorControl.test.ts",
         "localCollaborationNetworkStore.test.ts",
         "localCollaborationScopeStore.test.ts",
