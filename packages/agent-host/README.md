@@ -5,6 +5,7 @@
 ## Requirements
 
 - Node.js 22.5 or newer
+- pnpm when running the pre-release Host from a source checkout
 - A Windows user account or Linux user account that will own the Host process and its private files
 - The selected ACP agent installed and authenticated on that same account (for example, Codex for `codex-acp`)
 - One reachable PlanWeave Server Origin
@@ -13,12 +14,15 @@ Tailscale HTTPS and direct HTTPS are supported connection topologies; either top
 
 ## Install
 
-Install the published package on the machine that will run the Agent Host:
+This source tree does not assert that `@planweave-ai/agent-host` is already available from the npm registry. For pre-release testing from a source checkout, install workspace dependencies and build the Host:
 
 ```bash
-npm install -g @planweave-ai/agent-host
-planweave-agent-host --help
+pnpm install
+pnpm --dir packages/agent-host build
+node packages/agent-host/dist/bin.js --help
 ```
+
+When using a source checkout, replace `planweave-agent-host` in the commands below with `node <absolute-repository-path>/packages/agent-host/dist/bin.js`. After an npm registry release is available, `npm install -g @planweave-ai/agent-host` provides the shorter global command shown in this guide.
 
 Install and sign in to the selected ACP agent before enrolling the Host. PlanWeave does not start the agent's interactive login flow for you.
 
@@ -130,7 +134,8 @@ Background mode creates a current-user `ONLOGON` Scheduled Task with limited pri
 ## Security boundary
 
 - Treat the enrollment handoff as a short-lived secret: use it once, before it expires, and never put it in project files, chat, shell transcripts, or logs.
-- ACP credentials, resolved ACP command paths, environment-variable values, and the Host credential token stay in Host-private storage. They are not uploaded to PlanWeave Server.
+- ACP credentials, resolved ACP command paths, and environment-variable values stay in Host-private storage and are not uploaded to PlanWeave Server.
+- The Host credential token is persisted in plaintext only in Host-private storage. It is sent to the configured Server during enrollment and as Bearer authentication for Host WebSocket and HTTP requests; the Server persists its one-way hash rather than the plaintext token.
 - The Server receives the Host identity, liveness, capacity, capabilities, workspace readiness, and exposed Agent readiness needed for dispatch; it does not receive Host-local secret values or command paths.
 - Keep the generated config, data directory, and credential files private to the operating-system user that runs the Host.
 - Prefer Tailscale HTTPS or direct HTTPS. Use LAN HTTP only as an explicit insecure development mode on a trusted private network.

@@ -271,11 +271,7 @@ A connected project lets people share one task board and run agents across machi
 **Install a remote Agent Host**
 
 1. In Desktop, open **Settings -> Agent Hosts**, select a server-admin profile, then use **Connect an Agent Host** to create and copy the one-time enrollment command.
-2. On the Windows machine or Linux VPS that will run the Host, install and sign in to the selected ACP agent (for example, Codex), then install the published Host package:
-
-```bash
-npm install -g @planweave-ai/agent-host
-```
+2. On the Windows machine or Linux VPS that will run the Host, install and sign in to the selected ACP agent (for example, Codex), then install the Agent Host from the same PlanWeave build. This repository does not assume that `@planweave-ai/agent-host` has been published to npm; for the current source-checkout workflow and future registry installation, see the [Agent Host package guide](packages/agent-host/README.md).
 
 3. Run the complete `planweave-agent-host enroll <handoff>` command copied by Desktop. Its JSON output includes `configPath`; use that absolute path in the following commands.
 4. Inspect the supported Host-local agents, expose the one you want, verify the configuration, and inspect the background process:
@@ -292,7 +288,7 @@ planweave-agent-host service logs --config <absolute-config-path>
 
 On Linux, background mode uses user-systemd for the current user; an administrator may need to enable linger for that user. On Windows, it uses a current-user `ONLOGON` Scheduled Task, not a Windows SCM service, so it runs after that user signs in. Windows `service logs` points to Task Scheduler diagnostics and does not capture Host stdout. See the [Agent Host package guide](packages/agent-host/README.md) for the full lifecycle and non-interactive commands.
 
-The enrollment handoff is single-use and expires. ACP credentials, ACP command paths, environment-variable values, and the Host credential token stay on the Host and are not uploaded to PlanWeave Server. Never put a handoff or token in project files, chat, or logs. Tailscale HTTPS and direct HTTPS each use one PlanWeave Server Origin shared by Desktop and the Host; LAN HTTP is available only as an explicit insecure development mode.
+The enrollment handoff is single-use and expires. ACP credentials, ACP command paths, and environment-variable values stay on the Host and are not uploaded to PlanWeave Server. The Host credential token is persisted in plaintext only in Host-private storage, but it is sent to the configured Server during enrollment and as Bearer authentication; the Server persists its one-way hash. Never put a handoff or token in project files, chat, or logs. Tailscale HTTPS and direct HTTPS each use one PlanWeave Server Origin shared by Desktop and the Host; LAN HTTP is available only as an explicit insecure development mode.
 
 **In Desktop**
 

@@ -271,11 +271,7 @@ ACP run 通过 CLI 和 Desktop 提供结构化进度、产物、usage 和交互�
 **安装远程 Agent Host**
 
 1. 在 Desktop 打开 **设置 -> Agent Host**，选择一个 server-admin 配置，然后在 **连接 Agent Host** 中创建并复制一次性入驻命令。
-2. 在运行 Host 的 Windows 机器或 Linux VPS 上，先安装并登录所选 ACP Agent（例如 Codex），再安装已发布的 Host 包：
-
-```bash
-npm install -g @planweave-ai/agent-host
-```
+2. 在运行 Host 的 Windows 机器或 Linux VPS 上，先安装并登录所选 ACP Agent（例如 Codex），再安装与当前 PlanWeave 构建配套的 Agent Host。本仓库不假定 `@planweave-ai/agent-host` 已发布到 npm；当前源码检出方式和未来 registry 安装方式见 [Agent Host 包指南](../packages/agent-host/README.md)。
 
 3. 运行 Desktop 复制的完整 `planweave-agent-host enroll <handoff>` 命令。其 JSON 输出包含 `configPath`；后续命令使用这个绝对路径。
 4. 查看 Host 本机支持的 Agent、暴露需要使用的 Agent、检查配置，并查看后台进程：
@@ -292,7 +288,7 @@ planweave-agent-host service logs --config <absolute-config-path>
 
 Linux 后台模式使用当前用户的 user-systemd；管理员可能需要为该用户启用 linger。Windows 使用当前用户的 `ONLOGON` Scheduled Task，而不是 Windows SCM service，因此需要该用户登录后才会运行。Windows 的 `service logs` 只指向 Task Scheduler diagnostics，不捕获 Host stdout。完整生命周期与非交互命令见 [Agent Host 包指南](../packages/agent-host/README.md)。
 
-入驻 handoff 只能使用一次且会过期。ACP 凭证、ACP 命令路径、环境变量值和 Host credential token 都留在 Host 上，不会上传 PlanWeave Server。不要把 handoff 或 token 写进项目文件、聊天或日志。Tailscale HTTPS 与 direct HTTPS 都只使用一个由 Desktop 和 Host 共用的 PlanWeave Server Origin；LAN HTTP 仅用于显式启用的不安全开发模式。
+入驻 handoff 只能使用一次且会过期。ACP 凭证、ACP 命令路径和环境变量值留在 Host 上，不会上传 PlanWeave Server。Host credential token 的明文只持久化在 Host 私有存储中，但 enrollment 和后续 Bearer 认证会把它发送给所配置的 Server；Server 持久化的是其单向哈希。不要把 handoff 或 token 写进项目文件、聊天或日志。Tailscale HTTPS 与 direct HTTPS 都只使用一个由 Desktop 和 Host 共用的 PlanWeave Server Origin；LAN HTTP 仅用于显式启用的不安全开发模式。
 
 **在 Desktop 中**
 
