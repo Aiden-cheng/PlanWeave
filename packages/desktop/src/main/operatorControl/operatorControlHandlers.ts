@@ -2,6 +2,7 @@ import { app, BrowserWindow, clipboard, ipcMain, safeStorage } from "electron";
 import {
   assertNoSmuggledOperatorSecrets,
   operatorControlInvokeChannels,
+  operatorEnrollLocalAgentHostFromClipboardInputSchema,
   operatorImportCredentialInputSchema,
   operatorControlStatusChangedChannel,
   type OperatorControlStatus,
@@ -17,6 +18,7 @@ let service: OperatorControlService | null = null;
 
 export type OperatorControlHandlerOptions = OperatorControlServiceOptions & {
   readOperatorToken?: () => string;
+  readAgentHostHandoff?: () => string;
 };
 
 function publishStatusToRenderers(status: OperatorControlStatus): void {
@@ -68,7 +70,11 @@ export function setOperatorControlServiceForTests(next: OperatorControlService |
 export function registerOperatorControlHandlers(
   options: OperatorControlHandlerOptions = {}
 ): OperatorControlService {
-  const { readOperatorToken = () => clipboard.readText(), ...serviceOptions } = options;
+  const {
+    readOperatorToken = () => clipboard.readText(),
+    readAgentHostHandoff = () => clipboard.readText(),
+    ...serviceOptions
+  } = options;
   service = createDefaultService(serviceOptions);
   const active = service;
   ipcMain.handle(operatorControlInvokeChannels.getStatus, () => active.getStatus());
@@ -112,6 +118,14 @@ export function registerOperatorControlHandlers(
   );
   ipcMain.handle(operatorControlInvokeChannels.registerLocalAgentHost, (_event, input: unknown) =>
     active.registerLocalAgentHost(input)
+  );
+  ipcMain.handle(
+    operatorControlInvokeChannels.enrollLocalAgentHostFromClipboard,
+    (_event, input: unknown) => {
+      assertNoSmuggledOperatorSecrets(input, "enrollLocalAgentHostFromClipboard");
+      const parsed = operatorEnrollLocalAgentHostFromClipboardInputSchema.parse(input);
+      return active.enrollLocalAgentHostFromClipboard(parsed, readAgentHostHandoff());
+    }
   );
   return active;
 }

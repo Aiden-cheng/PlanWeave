@@ -21,7 +21,8 @@ const bridgeMock = vi.hoisted(() => ({
   copyOperatorMemberSetupCode: vi.fn(),
   revokeOperatorHost: vi.fn(),
   getOperatorLocalAgentHostStatus: vi.fn(),
-  registerOperatorLocalAgentHost: vi.fn()
+  registerOperatorLocalAgentHost: vi.fn(),
+  enrollOperatorLocalAgentHostFromClipboard: vi.fn()
 }));
 
 vi.mock("../renderer/bridge", () => ({
@@ -123,6 +124,22 @@ beforeEach(() => {
     ]
   });
   bridgeMock.registerOperatorLocalAgentHost.mockResolvedValue({
+    supported: true,
+    state: "ready",
+    workspaceId: "workspace-a",
+    background: "running",
+    agents: [
+      {
+        profileId: "codex-acp",
+        agentId: "codex",
+        displayName: "Codex",
+        detected: true,
+        exposed: true,
+        ready: true
+      }
+    ]
+  });
+  bridgeMock.enrollOperatorLocalAgentHostFromClipboard.mockResolvedValue({
     supported: true,
     state: "ready",
     workspaceId: "workspace-a",
@@ -309,6 +326,29 @@ describe("Host administration surface", () => {
       },
       exposedProfileIds: ["codex-acp"]
     });
+    expect(await screen.findByTestId("host-admin-local-status")).toHaveTextContent(
+      "background Agent Host is running"
+    );
+  });
+
+  it("enrolls from the main-owned clipboard without a server-admin profile", async () => {
+    const user = userEvent.setup();
+    bridgeMock.getOperatorControlStatus.mockResolvedValue({
+      ...status(),
+      profiles: [],
+      activeProfileId: null
+    });
+    render(<HostAdministrationSection t={createTranslator("en")} />);
+    const checkbox = await screen.findByTestId("host-admin-local-agent-codex-acp");
+
+    expect(bridgeMock.getOperatorLocalAgentHostStatus).toHaveBeenCalledWith({});
+    await user.click(checkbox);
+    await user.click(screen.getByTestId("host-admin-enroll-local-clipboard"));
+
+    expect(bridgeMock.enrollOperatorLocalAgentHostFromClipboard).toHaveBeenCalledWith({
+      exposedProfileIds: ["codex-acp"]
+    });
+    expect(screen.queryByTestId("host-admin-register-local")).not.toBeInTheDocument();
     expect(await screen.findByTestId("host-admin-local-status")).toHaveTextContent(
       "background Agent Host is running"
     );

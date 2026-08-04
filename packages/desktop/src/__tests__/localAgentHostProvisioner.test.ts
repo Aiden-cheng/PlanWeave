@@ -98,5 +98,58 @@ describe("Desktop local Agent Host provisioner", () => {
       workspaceId: "workspace-1",
       agents
     });
+    await expect(provisioner.status()).resolves.toMatchObject({
+      state: "ready",
+      workspaceId: "workspace-1",
+      agents
+    });
+  });
+
+  it("indexes clipboard enrollment by Workspace when no operator profile is present", async () => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-local-agent-host-clipboard-"));
+    roots.push(root);
+    const registrations = new LocalAgentHostRegistrationStore(join(root, "registrations.json"));
+    const agents = [
+      {
+        profileId: "codex-acp",
+        agentId: "codex",
+        displayName: "Codex",
+        detected: true,
+        exposed: true,
+        ready: true
+      }
+    ];
+    const operator = {
+      enrollHandoff: vi.fn().mockResolvedValue({
+        state: "ready",
+        workspaceId: "workspace-clipboard",
+        credential: "active",
+        background: "running",
+        configPath: "C:\\private\\clipboard.json",
+        agents,
+        nextSteps: {}
+      }),
+      reconcileAgentExposure: vi.fn().mockResolvedValue({ agents, reload: "restarted" }),
+      listAgents: vi.fn().mockResolvedValue(agents),
+      backgroundStatus: vi
+        .fn()
+        .mockResolvedValue({ state: "running", platform: "windows-scheduled-task" })
+    };
+    const provisioner = new DesktopLocalAgentHostProvisioner({
+      platform: "win32",
+      launcher: { executablePath: "C:\\PlanWeave.exe", fixedArgs: ["--agent-host-service"] },
+      operator,
+      registrations
+    });
+
+    await provisioner.register(undefined, "opaque-handoff", ["codex-acp"]);
+
+    await expect(registrations.get("workspace-clipboard")).resolves.toMatchObject({
+      workspaceId: "workspace-clipboard"
+    });
+    await expect(provisioner.status()).resolves.toMatchObject({
+      state: "ready",
+      workspaceId: "workspace-clipboard"
+    });
   });
 });

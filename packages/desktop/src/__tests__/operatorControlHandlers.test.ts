@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { exampleSetupCodeIssueResponse } from "@planweave-ai/collaboration-protocol/fixtures/collaboration";
 import { parseCollaborationSetupHandoffV1 } from "@planweave-ai/collaboration-protocol/handoff/setup";
+import { serializeAgentHostSetupHandoff } from "@planweave-ai/agent-host-protocol";
 import {
   registerOperatorControlHandlers,
   shutdownOperatorControlService
@@ -112,6 +113,50 @@ describe("operator control main-owned Host handoff", () => {
     ).rejects.toThrow("Operator IPC rejected copyHostBootstrapHandoff");
     expect(electronMock.writeText).not.toHaveBeenCalled();
   });
+
+  it("reads a Host handoff in main for local Windows enrollment", async () => {
+    const encodedHandoff = serializeAgentHostSetupHandoff({
+      version: "agent-host-setup/v1",
+      endpoint: {
+        topology: "tailscale_https",
+        serverOrigin: "https://planweave.example.ts.net",
+        allowedClientOrigins: ["https://planweave.example.ts.net"],
+        tlsTrust: "system_ca"
+      },
+      workspaceId: "workspace-handler",
+      enrollmentCode: `pw_enroll_${"D".repeat(43)}`,
+      expiresAt: "2030-01-01T00:15:00.000Z",
+      display: { workspaceName: "Workspace", serverName: "Server" }
+    });
+    electronMock.readText.mockReturnValue(`planweave agent-host enroll ${encodedHandoff}`);
+    const register = vi.fn().mockResolvedValue({
+      supported: true,
+      state: "ready",
+      workspaceId: "workspace-handler",
+      background: "running",
+      agents: []
+    });
+    registerOperatorControlHandlers({
+      localAgentHost: {
+        status: vi.fn().mockResolvedValue({ supported: true, state: "not_registered", agents: [] }),
+        register
+      }
+    });
+    const handler = electronMock.handlers.get(
+      operatorControlInvokeChannels.enrollLocalAgentHostFromClipboard
+    );
+    if (!handler) throw new Error("operator_local_host_clipboard_handler_missing");
+
+    const result = await handler({}, { exposedProfileIds: ["codex-acp"] });
+
+    expect(electronMock.readText).toHaveBeenCalledTimes(1);
+    expect(register).toHaveBeenCalledWith(undefined, encodedHandoff, ["codex-acp"]);
+    expect(JSON.stringify(result)).not.toContain(encodedHandoff);
+    expect(() =>
+      handler({}, { exposedProfileIds: ["codex-acp"], enrollmentCode: "smuggled" })
+    ).toThrow("Operator IPC rejected enrollLocalAgentHostFromClipboard");
+    expect(electronMock.readText).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("operator control main-owned member setup code", () => {
@@ -121,8 +166,8 @@ describe("operator control main-owned member setup code", () => {
     const service = registerOperatorControlHandlers({
       profileStorePaths: { profilesPath: join(root, "profiles.json") },
       credentialsPath: join(root, "credentials.json"),
-      request: vi.fn(async () =>
-        new Response(JSON.stringify(exampleSetupCodeIssueResponse), { status: 201 })
+      request: vi.fn(
+        async () => new Response(JSON.stringify(exampleSetupCodeIssueResponse), { status: 201 })
       )
     });
     await service.upsertProfile({

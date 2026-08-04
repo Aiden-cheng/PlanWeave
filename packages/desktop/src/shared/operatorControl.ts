@@ -188,30 +188,42 @@ export const operatorLocalAgentHostStatusSchema = z
 export type OperatorLocalAgentHostStatus = z.infer<typeof operatorLocalAgentHostStatusSchema>;
 
 export const operatorGetLocalAgentHostStatusInputSchema = z
-  .object({ profileId: operatorProfileIdSchema })
+  .object({ profileId: operatorProfileIdSchema.optional() })
   .strict();
 export type OperatorGetLocalAgentHostStatusInput = z.infer<
   typeof operatorGetLocalAgentHostStatusInputSchema
 >;
 
+const exposedLocalAgentProfilesSchema = z
+  .array(localAgentHostProfileIdSchema)
+  .min(1)
+  .max(32)
+  .superRefine((value, context) => {
+    if (new Set(value).size !== value.length) {
+      context.addIssue({
+        code: "custom",
+        message: "duplicate local Agent Host profile",
+        path: []
+      });
+    }
+  });
+
 export const operatorRegisterLocalAgentHostInputSchema = z
   .object({
     profileId: operatorProfileIdSchema,
     request: operatorEnrollmentGrantRequestSchema,
-    exposedProfileIds: z.array(localAgentHostProfileIdSchema).min(1).max(32)
+    exposedProfileIds: exposedLocalAgentProfilesSchema
   })
-  .strict()
-  .superRefine((value, context) => {
-    if (new Set(value.exposedProfileIds).size !== value.exposedProfileIds.length) {
-      context.addIssue({
-        code: "custom",
-        message: "duplicate local Agent Host profile",
-        path: ["exposedProfileIds"]
-      });
-    }
-  });
+  .strict();
 export type OperatorRegisterLocalAgentHostInput = z.infer<
   typeof operatorRegisterLocalAgentHostInputSchema
+>;
+
+export const operatorEnrollLocalAgentHostFromClipboardInputSchema = z
+  .object({ exposedProfileIds: exposedLocalAgentProfilesSchema })
+  .strict();
+export type OperatorEnrollLocalAgentHostFromClipboardInput = z.infer<
+  typeof operatorEnrollLocalAgentHostFromClipboardInputSchema
 >;
 
 export type OperatorCredentialStorage = "available" | "unavailable";
@@ -363,6 +375,9 @@ export type PlanWeaveOperatorControlApi = {
   ) => Promise<OperatorLocalAgentHostStatus>;
   registerOperatorLocalAgentHost: (
     input: OperatorRegisterLocalAgentHostInput
+  ) => Promise<OperatorLocalAgentHostStatus>;
+  enrollOperatorLocalAgentHostFromClipboard: (
+    input: OperatorEnrollLocalAgentHostFromClipboardInput
   ) => Promise<OperatorLocalAgentHostStatus>;
   onOperatorControlStatusChanged: (callback: (status: OperatorControlStatus) => void) => () => void;
 };

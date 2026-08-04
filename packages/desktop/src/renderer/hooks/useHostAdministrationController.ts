@@ -39,6 +39,9 @@ export type HostAdministrationController = {
   registerLocalAgentHost: (
     exposedProfileIds: readonly string[]
   ) => Promise<OperatorLocalAgentHostStatus | null>;
+  enrollLocalAgentHostFromClipboard: (
+    exposedProfileIds: readonly string[]
+  ) => Promise<OperatorLocalAgentHostStatus | null>;
   dismissHandoff: () => void;
   dismissMemberSetupCodeHandoff: () => void;
   clearError: () => void;
@@ -60,6 +63,8 @@ function errorMessage(error: unknown): string {
     "local_agent_host_windows_only",
     "local_agent_host_unavailable",
     "local_agent_host_custom_ca_unsupported",
+    "local_agent_host_handoff_invalid",
+    "local_agent_host_handoff_expired",
     "agent_host_preset_binary_missing",
     "agent_host_background_setup_required"
   ]);
@@ -110,6 +115,8 @@ export function useHostAdministrationController(): HostAdministrationController 
     () => status?.profiles.find((profile) => profile.profileId === status.activeProfileId) ?? null,
     [status]
   );
+  const activeProfileId = activeProfile?.profileId;
+  const activeProfileHasOperatorCredential = activeProfile?.hasOperatorCredential === true;
   const previousActiveProfileId = useRef(activeProfile?.profileId);
 
   useEffect(() => {
@@ -121,14 +128,14 @@ export function useHostAdministrationController(): HostAdministrationController 
   }, [activeProfile?.profileId]);
 
   const refreshHosts = useCallback(async () => {
-    if (!operatorControlBridge || !activeProfile || !activeProfile.hasOperatorCredential) {
+    if (!operatorControlBridge || !activeProfileId || !activeProfileHasOperatorCredential) {
       setHosts([]);
       return;
     }
     setHostsLoading(true);
     try {
       const page: OperatorHostPage = await operatorControlBridge.listOperatorHosts({
-        profileId: activeProfile.profileId,
+        profileId: activeProfileId,
         query: { cursor: 0, limit: 100 }
       });
       setHosts(page.items);
@@ -139,7 +146,7 @@ export function useHostAdministrationController(): HostAdministrationController 
     } finally {
       setHostsLoading(false);
     }
-  }, [activeProfile?.profileId, activeProfile?.hasOperatorCredential]);
+  }, [activeProfileId, activeProfileHasOperatorCredential]);
 
   useEffect(() => {
     void refresh();
@@ -152,14 +159,14 @@ export function useHostAdministrationController(): HostAdministrationController 
   }, [refreshHosts]);
 
   useEffect(() => {
-    if (!operatorControlBridge || !activeProfile) {
+    if (!operatorControlBridge) {
       setLocalAgentHost(null);
       return;
     }
     let active = true;
     setLocalAgentHostLoading(true);
     void operatorControlBridge
-      .getOperatorLocalAgentHostStatus({ profileId: activeProfile.profileId })
+      .getOperatorLocalAgentHostStatus(activeProfileId ? { profileId: activeProfileId } : {})
       .then((next) => {
         if (active) setLocalAgentHost(next);
       })
@@ -172,7 +179,7 @@ export function useHostAdministrationController(): HostAdministrationController 
     return () => {
       active = false;
     };
-  }, [activeProfile?.profileId]);
+  }, [activeProfileId]);
 
   const runStatusAction = useCallback(
     async (action: () => Promise<OperatorControlStatus>): Promise<boolean> => {
@@ -348,6 +355,43 @@ export function useHostAdministrationController(): HostAdministrationController 
     [activeProfile, refreshHosts]
   );
 
+  const enrollLocalAgentHostFromClipboard = useCallback(
+    async (exposedProfileIds: readonly string[]) => {
+      if (!operatorControlBridge) {
+        setError("operator_bridge_unavailable");
+        return null;
+      }
+      setBusy(true);
+      try {
+        const next = await operatorControlBridge.enrollOperatorLocalAgentHostFromClipboard({
+          exposedProfileIds: [...exposedProfileIds]
+        });
+        setLocalAgentHost(next);
+        setError(null);
+        await refreshHosts();
+        return next;
+      } catch (cause) {
+        setError(errorMessage(cause));
+        try {
+          setLocalAgentHost(
+            await operatorControlBridge.getOperatorLocalAgentHostStatus(
+              activeProfileId ? { profileId: activeProfileId } : {}
+            )
+          );
+        } catch (statusCause) {
+          console.warn(
+            "Failed to refresh local Agent Host status after clipboard enrollment error.",
+            statusCause
+          );
+        }
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [activeProfileId, refreshHosts]
+  );
+
   return {
     status,
     hosts,
@@ -372,6 +416,7 @@ export function useHostAdministrationController(): HostAdministrationController 
     copyMemberSetupCode,
     revokeHost,
     registerLocalAgentHost,
+    enrollLocalAgentHostFromClipboard,
     dismissHandoff: () => setHandoff(null),
     dismissMemberSetupCodeHandoff: () => setMemberSetupCodeHandoff(null),
     clearError: () => setError(null)

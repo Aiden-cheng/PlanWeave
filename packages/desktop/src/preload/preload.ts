@@ -535,6 +535,8 @@ const operatorControlApi: PlanWeaveOperatorControlApi = {
     ipcRenderer.invoke(operatorControlInvokeChannels.getLocalAgentHostStatus, input),
   registerOperatorLocalAgentHost: async (input) =>
     ipcRenderer.invoke(operatorControlInvokeChannels.registerLocalAgentHost, input),
+  enrollOperatorLocalAgentHostFromClipboard: async (input) =>
+    ipcRenderer.invoke(operatorControlInvokeChannels.enrollLocalAgentHostFromClipboard, input),
   onOperatorControlStatusChanged: (callback) => {
     const listener = (_event: IpcRendererEvent, payload: OperatorControlStatus) =>
       callback(payload);

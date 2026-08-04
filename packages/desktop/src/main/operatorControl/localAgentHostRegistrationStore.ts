@@ -50,7 +50,8 @@ export class LocalAgentHostRegistrationStore {
     try {
       this.loaded = documentSchema.parse(JSON.parse(await readFile(this.filePath, "utf8")));
     } catch (error) {
-      if (!isMissingFile(error)) throw new Error("local_agent_host_store_invalid", { cause: error });
+      if (!isMissingFile(error))
+        throw new Error("local_agent_host_store_invalid", { cause: error });
       this.loaded = { version: 1, registrations: [] };
     }
     return this.loaded;
@@ -60,6 +61,10 @@ export class LocalAgentHostRegistrationStore {
     return (
       (await this.readDocument()).registrations.find((item) => item.profileId === profileId) ?? null
     );
+  }
+
+  async latest(): Promise<LocalAgentHostRegistration | null> {
+    return (await this.readDocument()).registrations.at(-1) ?? null;
   }
 
   async upsert(profileId: string, workspaceId: string): Promise<LocalAgentHostRegistration> {

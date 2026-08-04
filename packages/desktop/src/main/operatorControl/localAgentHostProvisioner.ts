@@ -31,9 +31,9 @@ export interface LocalAgentHostOperatorPort {
 }
 
 export interface LocalAgentHostProvisioner {
-  status(profileId: string): Promise<OperatorLocalAgentHostStatus>;
+  status(profileId?: string): Promise<OperatorLocalAgentHostStatus>;
   register(
-    profileId: string,
+    profileId: string | undefined,
     handoff: string,
     exposedProfileIds: readonly string[]
   ): Promise<OperatorLocalAgentHostStatus>;
@@ -70,7 +70,7 @@ export class DesktopLocalAgentHostProvisioner implements LocalAgentHostProvision
     this.registrations = options.registrations ?? new LocalAgentHostRegistrationStore();
   }
 
-  async status(profileId: string): Promise<OperatorLocalAgentHostStatus> {
+  async status(profileId?: string): Promise<OperatorLocalAgentHostStatus> {
     if (this.platform !== "win32") {
       return operatorLocalAgentHostStatusSchema.parse({
         supported: false,
@@ -78,7 +78,9 @@ export class DesktopLocalAgentHostProvisioner implements LocalAgentHostProvision
         agents: supportedProfiles()
       });
     }
-    const registration = await this.registrations.get(profileId);
+    const registration =
+      (profileId ? await this.registrations.get(profileId) : null) ??
+      (await this.registrations.latest());
     if (!registration) {
       return operatorLocalAgentHostStatusSchema.parse({
         supported: true,
@@ -101,7 +103,7 @@ export class DesktopLocalAgentHostProvisioner implements LocalAgentHostProvision
   }
 
   async register(
-    profileId: string,
+    profileId: string | undefined,
     handoff: string,
     exposedProfileIds: readonly string[]
   ): Promise<OperatorLocalAgentHostStatus> {
@@ -111,14 +113,13 @@ export class DesktopLocalAgentHostProvisioner implements LocalAgentHostProvision
       executablePath: this.launcher.executablePath,
       fixedArgs: [...(this.launcher.fixedArgs ?? [])]
     });
-    await this.registrations.upsert(profileId, enrollment.workspaceId);
+    await this.registrations.upsert(profileId ?? enrollment.workspaceId, enrollment.workspaceId);
     const agents = (
       await this.operator.reconcileAgentExposure(enrollment.configPath, exposedProfileIds)
     ).agents;
     return operatorLocalAgentHostStatusSchema.parse({
       supported: true,
-      state:
-        enrollment.background === "running" ? "ready" : "background_setup_required",
+      state: enrollment.background === "running" ? "ready" : "background_setup_required",
       workspaceId: enrollment.workspaceId,
       background: enrollment.background,
       agents

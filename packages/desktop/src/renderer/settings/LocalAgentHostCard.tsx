@@ -13,6 +13,9 @@ type LocalAgentHostCardProps = {
   loading: boolean;
   status: OperatorLocalAgentHostStatus | null;
   register: (profileIds: readonly string[]) => Promise<OperatorLocalAgentHostStatus | null>;
+  enrollFromClipboard: (
+    profileIds: readonly string[]
+  ) => Promise<OperatorLocalAgentHostStatus | null>;
   t: ReturnType<typeof createTranslator>;
 };
 
@@ -22,19 +25,29 @@ export function LocalAgentHostCard({
   loading,
   status,
   register,
+  enrollFromClipboard,
   t
 }: LocalAgentHostCardProps) {
   const [selected, setSelected] = useState<string[]>([]);
 
   useEffect(() => {
-    setSelected(status?.agents.filter((agent) => agent.exposed).map((agent) => agent.profileId) ?? []);
+    setSelected(
+      status?.agents.filter((agent) => agent.exposed).map((agent) => agent.profileId) ?? []
+    );
   }, [status]);
 
-  const enabled = Boolean(
+  const canRegisterWithAdmin = Boolean(
     status?.supported &&
       activeProfile?.hasOperatorCredential &&
       activeProfile.endpoint &&
       activeProfile.endpoint.tlsTrust !== "configured_ca" &&
+      selected.length > 0 &&
+      !busy &&
+      !loading
+  );
+  const canEnrollFromClipboard = Boolean(
+    status?.supported &&
+      status.state === "not_registered" &&
       selected.length > 0 &&
       !busy &&
       !loading
@@ -69,7 +82,10 @@ export function LocalAgentHostCard({
             </p>
             <div className="grid gap-2">
               {status.agents.map((agent) => (
-                <label className="flex items-center justify-between gap-3 text-sm" key={agent.profileId}>
+                <label
+                  className="flex items-center justify-between gap-3 text-sm"
+                  key={agent.profileId}
+                >
                   <span>
                     {agent.displayName}
                     {agent.detected ? ` · ${t("hostAdminLocalHostDetected")}` : ""}
@@ -91,17 +107,34 @@ export function LocalAgentHostCard({
               ))}
             </div>
             <p className="text-xs text-text-muted">{t("hostAdminLocalHostCredentialBoundary")}</p>
-            <Button
-              type="button"
-              className="w-fit"
-              data-testid="host-admin-register-local"
-              disabled={!enabled}
-              onClick={() => void register(selected)}
-            >
-              {status.state === "not_registered"
-                ? t("hostAdminRegisterThisComputer")
-                : t("hostAdminUpdateThisComputer")}
-            </Button>
+            {status.state === "not_registered" ? (
+              <div className="grid gap-2">
+                <p className="text-xs text-text-muted">{t("hostAdminLocalHostClipboardHandoff")}</p>
+                <Button
+                  type="button"
+                  className="w-fit"
+                  data-testid="host-admin-enroll-local-clipboard"
+                  disabled={!canEnrollFromClipboard}
+                  onClick={() => void enrollFromClipboard(selected)}
+                >
+                  {t("hostAdminEnrollThisComputerFromClipboard")}
+                </Button>
+              </div>
+            ) : null}
+            {activeProfile?.hasOperatorCredential ? (
+              <Button
+                type="button"
+                className="w-fit"
+                variant="outline"
+                data-testid="host-admin-register-local"
+                disabled={!canRegisterWithAdmin}
+                onClick={() => void register(selected)}
+              >
+                {status.state === "not_registered"
+                  ? t("hostAdminRegisterWithCurrentProfile")
+                  : t("hostAdminUpdateThisComputer")}
+              </Button>
+            ) : null}
           </>
         ) : null}
       </CardContent>

@@ -652,6 +652,10 @@ export const enCatalog = {
     "One-click local Agent Host registration is available in the Windows Desktop build.",
   hostAdminLocalHostCustomCaUnsupported:
     "One-click Agent Host registration does not yet support servers that use a custom CA certificate.",
+  hostAdminLocalHostHandoffInvalid:
+    "The clipboard does not contain a valid Agent Host enrollment handoff.",
+  hostAdminLocalHostHandoffExpired:
+    "The Agent Host enrollment handoff has expired. Create a new one on the server-admin computer.",
   hostAdminLocalHostNotRegistered: "This computer is not registered as an Agent Host.",
   hostAdminLocalHostReady: "The background Agent Host is running.",
   hostAdminLocalHostSetupRequired:
@@ -659,9 +663,12 @@ export const enCatalog = {
   hostAdminLocalHostDetected: "detected",
   hostAdminLocalHostCredentialBoundary:
     "Agent login credentials remain on this computer and are never uploaded to Server.",
+  hostAdminLocalHostClipboardHandoff:
+    "On the server-admin computer, copy a Host enrollment handoff. Then return here with that handoff in the system clipboard.",
   hostAdminLocalHostAgentMissing:
     "The selected Agent is not installed or is unavailable in the Desktop environment.",
-  hostAdminRegisterThisComputer: "Register this computer",
+  hostAdminEnrollThisComputerFromClipboard: "Register from clipboard",
+  hostAdminRegisterWithCurrentProfile: "Register with current admin profile",
   hostAdminUpdateThisComputer: "Update exposed agents",
   hostAdminBootstrapDescription: "Copy one portable enrollment command for Windows or Linux.",
   hostAdminBootstrapIdle: "Host bootstrap is idle.",

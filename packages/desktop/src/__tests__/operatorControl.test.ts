@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { exampleSetupCodeIssueResponse } from "@planweave-ai/collaboration-protocol/fixtures/collaboration";
 import { parseCollaborationSetupHandoffV1 } from "@planweave-ai/collaboration-protocol/handoff/setup";
-import { parseAgentHostSetupHandoff } from "@planweave-ai/agent-host-protocol";
+import {
+  parseAgentHostSetupHandoff,
+  serializeAgentHostSetupHandoff
+} from "@planweave-ai/agent-host-protocol";
 import {
   OPERATOR_CONTROL_JSON_BODY_MAX_BYTES,
   OperatorControlClient
@@ -13,6 +16,7 @@ import {
   OperatorCredentialVault,
   type OperatorSafeStoragePort
 } from "../main/operatorControl/operatorCredentialVault.js";
+import { parseAgentHostClipboardHandoff } from "../main/operatorControl/localAgentHostClipboardHandoff.js";
 import { OperatorControlService } from "../main/operatorControl/operatorControlService.js";
 import { OperatorProfileStore } from "../main/operatorControl/operatorProfileStore.js";
 import {
@@ -244,15 +248,16 @@ describe("Desktop operator control trust boundary", () => {
   it("redeems a local Host handoff entirely in main and returns only redacted status", async () => {
     const directory = await root("planweave-operator-local-host-");
     const enrollmentCode = `pw_enroll_${"B".repeat(43)}`;
-    const request = vi.fn(async () =>
-      new Response(
-        JSON.stringify({
-          enrollmentCode,
-          workspaceId: "workspace-local",
-          expiresAt: "2030-01-01T00:15:00.000Z"
-        }),
-        { status: 201 }
-      )
+    const request = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            enrollmentCode,
+            workspaceId: "workspace-local",
+            expiresAt: "2030-01-01T00:15:00.000Z"
+          }),
+          { status: 201 }
+        )
     );
     const register = vi.fn().mockResolvedValue({
       supported: true,
@@ -329,6 +334,66 @@ describe("Desktop operator control trust boundary", () => {
       })
     ).rejects.toThrow("local_agent_host_custom_ca_unsupported");
     expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts a raw or copied Host command without exposing it to the renderer contract", async () => {
+    const encodedHandoff = serializeAgentHostSetupHandoff({
+      version: "agent-host-setup/v1",
+      endpoint: {
+        topology: "tailscale_https",
+        serverOrigin: "https://planweave.example.ts.net",
+        allowedClientOrigins: ["https://planweave.example.ts.net"],
+        tlsTrust: "system_ca"
+      },
+      workspaceId: "workspace-clipboard",
+      enrollmentCode: `pw_enroll_${"C".repeat(43)}`,
+      expiresAt: "2030-01-01T00:15:00.000Z",
+      display: { workspaceName: "Workspace", serverName: "Server" }
+    });
+    expect(parseAgentHostClipboardHandoff(encodedHandoff)).toMatchObject({
+      encodedHandoff,
+      handoff: { workspaceId: "workspace-clipboard" }
+    });
+    expect(
+      parseAgentHostClipboardHandoff(`planweave agent-host enroll ${encodedHandoff}`)
+    ).toMatchObject({ encodedHandoff });
+    expect(() => parseAgentHostClipboardHandoff("planweave agent-host enroll ")).toThrow(
+      "local_agent_host_handoff_invalid"
+    );
+    const expiredHandoff = serializeAgentHostSetupHandoff({
+      ...parseAgentHostSetupHandoff(encodedHandoff, new Date("2029-01-01T00:00:00.000Z")),
+      expiresAt: "2020-01-01T00:00:00.000Z"
+    });
+    expect(() => parseAgentHostClipboardHandoff(expiredHandoff)).toThrow(
+      "local_agent_host_handoff_expired"
+    );
+
+    const register = vi.fn().mockResolvedValue({
+      supported: true,
+      state: "ready",
+      workspaceId: "workspace-clipboard",
+      background: "running",
+      agents: []
+    });
+    const service = new OperatorControlService({
+      localAgentHost: {
+        status: vi.fn().mockResolvedValue({ supported: true, state: "not_registered", agents: [] }),
+        register
+      }
+    });
+    const result = await service.enrollLocalAgentHostFromClipboard(
+      { exposedProfileIds: ["codex-acp"] },
+      `planweave agent-host enroll ${encodedHandoff}`
+    );
+
+    expect(register).toHaveBeenCalledWith(undefined, encodedHandoff, ["codex-acp"]);
+    expect(JSON.stringify(result)).not.toMatch(/enrollmentCode|planweave-agent-host-setup:/);
+    await expect(
+      service.enrollLocalAgentHostFromClipboard(
+        { exposedProfileIds: ["codex-acp"], enrollmentCode: "smuggled" },
+        encodedHandoff
+      )
+    ).rejects.toThrow("Operator IPC rejected enrollLocalAgentHostFromClipboard");
   });
 
   it("uses only bounded application endpoints and maps 401/403/malformed responses", async () => {

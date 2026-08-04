@@ -213,6 +213,7 @@ describe("preload bridge invocation", () => {
       copyOperatorMemberSetupCode: (input: unknown) => Promise<unknown>;
       getOperatorLocalAgentHostStatus: (input: unknown) => Promise<unknown>;
       registerOperatorLocalAgentHost: (input: unknown) => Promise<unknown>;
+      enrollOperatorLocalAgentHostFromClipboard: (input: unknown) => Promise<unknown>;
     };
     const input = {
       profileId: "profile-a",
@@ -246,6 +247,13 @@ describe("preload bridge invocation", () => {
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       operatorControlInvokeChannels.registerLocalAgentHost,
       localInput
+    );
+
+    const clipboardInput = { exposedProfileIds: ["codex-acp"] };
+    await operator.enrollOperatorLocalAgentHostFromClipboard(clipboardInput);
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      operatorControlInvokeChannels.enrollLocalAgentHostFromClipboard,
+      clipboardInput
     );
   });
 

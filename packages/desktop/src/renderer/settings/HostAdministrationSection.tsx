@@ -37,6 +37,12 @@ function errorLabel(code: string | null, t: ReturnType<typeof createTranslator>)
   if (code === "local_agent_host_custom_ca_unsupported") {
     return t("hostAdminLocalHostCustomCaUnsupported");
   }
+  if (code === "local_agent_host_handoff_invalid") {
+    return t("hostAdminLocalHostHandoffInvalid");
+  }
+  if (code === "local_agent_host_handoff_expired") {
+    return t("hostAdminLocalHostHandoffExpired");
+  }
   if (code === "agent_host_preset_binary_missing") {
     return t("hostAdminLocalHostAgentMissing");
   }
@@ -83,6 +89,7 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
     memberSetupCodeHandoff,
     localAgentHost,
     localAgentHostLoading,
+    enrollLocalAgentHostFromClipboard,
     hosts,
     hostsLoading,
     importCredential,
@@ -217,6 +224,7 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
         loading={localAgentHostLoading}
         status={localAgentHost}
         register={registerLocalAgentHost}
+        enrollFromClipboard={enrollLocalAgentHostFromClipboard}
         t={t}
       />
 
