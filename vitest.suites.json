@@ -556,7 +556,8 @@
         "executionEnvelope.test.ts",
         "exports.test.ts",
         "operatorControl.test.ts",
-        "primitives.test.ts"
+        "primitives.test.ts",
+        "tailnetProbe.test.ts"
       ],
       "integration": [],
       "platform": [],
@@ -720,6 +721,7 @@
         "serverCompositionStageH.test.ts",
         "serverServe.test.ts",
         "setupCodeFlow.test.ts",
+        "tailnetE2eEvidence.test.ts",
         "tailscaleProxyTransport.test.ts",
         "transportAdmission.test.ts",
         "vpsE2eGate.test.ts",

@@ -1,8 +1,17 @@
+import {
+  linuxVpsHostTailnetProbeArtifactSchema,
+  packagedDesktopMacosTailnetProbeArtifactSchema,
+  packagedDesktopWindowsTailnetProbeArtifactSchema,
+  tailscaleAclDenyTailnetProbeArtifactSchema,
+  tailscaleServePeerTailnetProbeArtifactSchema,
+  tailnetProbeSha256DigestSchema,
+  windowsHostTailnetProbeArtifactSchema
+} from "@planweave-ai/agent-host-protocol/tailnet-e2e";
 import { z } from "zod";
 
 export const TAILNET_E2E_EVIDENCE_VERSION = "planweave.tailnet-collaboration-e2e/v1" as const;
 
-const sha256DigestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
+const sha256DigestSchema = tailnetProbeSha256DigestSchema;
 const passedCheckSchema = z.literal(true);
 
 function checkGroup<T extends readonly [string, ...string[]]>(keys: T, check: z.ZodType<boolean>) {
@@ -49,19 +58,6 @@ const recoveryKeys = [
 const authorizationKeys = ["workspaceAclDenied"] as const;
 const credentialKeys = ["temporaryDesktopCredentialRevoked"] as const;
 
-const hostProbeChecks = {
-  remoteDeviceObserved: z.literal(true),
-  enrolledViaHandoff: z.literal(true),
-  explicitAgentExposure: z.literal(true),
-  endpointDispatch: z.literal(true),
-  restartRecovered: z.literal(true)
-} as const;
-
-const packagedDesktopProbeChecks = {
-  packagedDesktopConnected: z.literal(true),
-  restartRecovered: z.literal(true)
-} as const;
-
 const passedEvidenceShape = {
   generatedAt: z.iso.datetime(),
   environmentClass: z.literal("tailnet-live"),
@@ -87,70 +83,20 @@ const passedEvidenceShape = {
     .strict(),
   platformMatrix: z
     .object({
-      windowsHost: z
-        .object({
-          probeDigest: sha256DigestSchema,
-          targetRunDigest: sha256DigestSchema,
-          platform: z.literal("windows"),
-          serviceMode: z.literal("current-user-scheduled-task"),
-          ...hostProbeChecks
-        })
-        .strict(),
-      linuxVpsHost: z
-        .object({
-          probeDigest: sha256DigestSchema,
-          targetRunDigest: sha256DigestSchema,
-          platform: z.literal("linux"),
-          environment: z.literal("vps"),
-          serviceMode: z.literal("systemd-user"),
-          ...hostProbeChecks
-        })
-        .strict(),
+      windowsHost: windowsHostTailnetProbeArtifactSchema,
+      linuxVpsHost: linuxVpsHostTailnetProbeArtifactSchema,
       packagedDesktops: z
         .object({
-          macos: z
-            .object({
-              probeDigest: sha256DigestSchema,
-              targetRunDigest: sha256DigestSchema,
-              platform: z.literal("macos"),
-              ...packagedDesktopProbeChecks
-            })
-            .strict(),
-          windows: z
-            .object({
-              probeDigest: sha256DigestSchema,
-              targetRunDigest: sha256DigestSchema,
-              platform: z.literal("windows"),
-              ...packagedDesktopProbeChecks
-            })
-            .strict()
+          macos: packagedDesktopMacosTailnetProbeArtifactSchema,
+          windows: packagedDesktopWindowsTailnetProbeArtifactSchema
         })
         .strict()
     })
     .strict(),
   externalProbes: z
     .object({
-      tailscaleAclDenied: z
-        .object({
-          probeVersion: z.literal("planweave.tailnet-acl-denial-probe/v1"),
-          probeDigest: sha256DigestSchema,
-          sourcePlatform: z.enum(["macos", "windows", "linux"]),
-          independentTailnetIdentity: z.literal(true),
-          targetRunDigest: sha256DigestSchema,
-          networkDenied: z.literal(true)
-        })
-        .strict(),
-      tailscaleServe: z
-        .object({
-          probeVersion: z.literal("planweave.tailscale-serve-probe/v1"),
-          probeDigest: sha256DigestSchema,
-          targetRunDigest: sha256DigestSchema,
-          tsNetCertificateVerified: z.literal(true),
-          serveRouteVerified: z.literal(true),
-          funnelAbsent: z.literal(true),
-          remotePeerConnected: z.literal(true)
-        })
-        .strict()
+      tailscaleAclDenied: tailscaleAclDenyTailnetProbeArtifactSchema,
+      tailscaleServe: tailscaleServePeerTailnetProbeArtifactSchema
     })
     .strict(),
   recovery: checkGroup(recoveryKeys, passedCheckSchema),

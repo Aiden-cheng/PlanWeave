@@ -18,6 +18,10 @@
     "./operator-control": {
       "types": "./dist/operatorControl.d.ts",
       "import": "./dist/operatorControl.js"
+    },
+    "./tailnet-e2e": {
+      "types": "./dist/tailnetProbe.d.ts",
+      "import": "./dist/tailnetProbe.js"
     }
   },
   "homepage": "https://github.com/GaosCode/PlanWeave#readme",
