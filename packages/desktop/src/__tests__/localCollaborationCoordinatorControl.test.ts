@@ -271,6 +271,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
       preferredPort: 18_787
     });
     expect(configFactory!(status.profile!)).toMatchObject({
+      version: "server-config/v2",
       transport: {
         mode: "lan_http",
         listener: { protocol: "http", host: "0.0.0.0", port: 18_787 },
@@ -584,6 +585,8 @@ describe("LocalCollaborationCoordinatorControl", () => {
     const runningProfile = control.status().profile;
     expect(runningProfile).not.toBeNull();
     const config = configFactory!(runningProfile!);
+    expect(config.version).toBe("server-config/v2");
+    expect(config.transport.mode).toBe("loopback_http");
     expect(config.trustedProjects).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

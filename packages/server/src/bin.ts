@@ -2,6 +2,7 @@
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { loadServerConfig, resolveServerConfigPath, serverConfigSummary } from "./config.js";
+import { migrateServerConfigFile } from "./configMigration.js";
 import { runReleaseGateCli } from "./releaseGate/cli.js";
 import { serveDistributedServer, type DistributedServerProcess } from "./serverServe.js";
 import { runVpsE2eCli } from "./vpsE2e/cli.js";
@@ -14,6 +15,7 @@ export const SERVER_CLI_USAGE = [
   "",
   "Commands:",
   "  serve --config <absolute-path>",
+  "  config migrate --config <absolute-path>",
   "  vps-e2e [options]",
   "  release-gate [options]",
   "",
@@ -48,6 +50,7 @@ export async function runServerCli(
     io?: ServerCliIo;
     processLike?: Pick<NodeJS.Process, "once" | "off">;
     serve?: typeof serveDistributedServer;
+    migrateConfig?: typeof migrateServerConfigFile;
   } = {}
 ): Promise<number> {
   const io = options.io ?? { stdout: console.log, stderr: console.error };
@@ -65,6 +68,13 @@ export async function runServerCli(
         io,
         env: options.env ? { ...options.env } : undefined
       });
+    }
+    if (command === "config") {
+      if (args[0] !== "migrate") throw new Error("server_cli_usage");
+      const configPath = resolveServerConfigPath(args.slice(1), {});
+      const result = await (options.migrateConfig ?? migrateServerConfigFile)(configPath);
+      io.stdout(JSON.stringify(result));
+      return 0;
     }
     if (command !== "serve") throw new Error("server_cli_usage");
     const config = await loadServerConfig(resolveServerConfigPath(args, options.env));

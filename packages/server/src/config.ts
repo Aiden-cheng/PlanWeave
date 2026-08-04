@@ -590,11 +590,21 @@ function normalizeV1Config(config: z.infer<typeof serverConfigV1Schema>): Server
   });
 }
 
-export function parseServerConfig(input: unknown): ServerConfig {
+export type ServerConfigInputVersion = "server-config/v1" | "server-config/v2";
+
+export function serverConfigInputVersion(input: unknown): ServerConfigInputVersion {
   if (typeof input !== "object" || input === null || !("version" in input)) {
     throw new Error("server_config_invalid_version");
   }
-  if (input.version === "server-config/v1") {
+  if (input.version !== "server-config/v1" && input.version !== "server-config/v2") {
+    throw new Error("server_config_invalid_version");
+  }
+  return input.version;
+}
+
+export function parseServerConfig(input: unknown): ServerConfig {
+  const version = serverConfigInputVersion(input);
+  if (version === "server-config/v1") {
     const parsed = serverConfigV1InputSchema.parse(input);
     const validated = serverConfigV1Schema.parse({
       ...parsed,
@@ -602,7 +612,7 @@ export function parseServerConfig(input: unknown): ServerConfig {
     });
     return normalizeV1Config(validated);
   }
-  if (input.version === "server-config/v2") {
+  if (version === "server-config/v2") {
     const parsed = serverConfigV2InputSchema.parse(input);
     const advertisedOrigin = new URL(parsed.transport.advertisedOrigin).origin;
     return serverConfigSchema.parse({
@@ -624,15 +634,31 @@ export function serverConfigFileInput(
 }
 
 export async function loadServerConfig(path: string): Promise<ServerConfig> {
-  if (!isAbsolute(path)) throw new Error("server_config_path_must_be_absolute");
-  const bytes = await readFile(path);
+  return (await loadServerConfigDocument(path)).config;
+}
+
+export type LoadedServerConfigDocument = {
+  sourceVersion: ServerConfigInputVersion;
+  config: ServerConfig;
+};
+
+export function parseServerConfigDocumentBytes(bytes: Buffer): LoadedServerConfigDocument {
   if (bytes.byteLength > MAX_CONFIG_BYTES) throw new Error("server_config_too_large");
   try {
-    return parseServerConfig(JSON.parse(bytes.toString("utf8")));
+    const input: unknown = JSON.parse(bytes.toString("utf8"));
+    return {
+      sourceVersion: serverConfigInputVersion(input),
+      config: parseServerConfig(input)
+    };
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("server_")) throw error;
     throw new Error("server_config_invalid", { cause: error });
   }
+}
+
+export async function loadServerConfigDocument(path: string): Promise<LoadedServerConfigDocument> {
+  if (!isAbsolute(path)) throw new Error("server_config_path_must_be_absolute");
+  return parseServerConfigDocumentBytes(await readFile(path));
 }
 
 export function resolveServerConfigPath(

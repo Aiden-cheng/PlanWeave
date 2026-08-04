@@ -626,14 +626,22 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     const projectRoot = `/var/lib/planweave/projects/${workspace.id}`;
     return {
       config: parseServerConfig({
-        version: "server-config/v1",
-        bind: { host: "0.0.0.0", port: 443 },
-        publicUrl: target.endpoint.serverOrigin,
-        deployment: target.endpoint,
-        tls: {
-          certificatePath: "/run/planweave/input/tls/server.crt",
-          privateKeyPath: "/run/planweave/input/tls/server.key"
+        version: "server-config/v2",
+        transport: {
+          mode: "direct_https",
+          listener: {
+            protocol: "https",
+            host: "0.0.0.0",
+            port: 443,
+            tls: {
+              certificatePath: "/run/planweave/input/tls/server.crt",
+              privateKeyPath: "/run/planweave/input/tls/server.key"
+            }
+          },
+          advertisedOrigin: target.endpoint.serverOrigin
         },
+        deployment: target.endpoint,
+        allowedClientOrigins: target.endpoint.allowedClientOrigins,
         dataDirectory: "/var/lib/planweave-server",
         trustedProjects: [
           {
@@ -853,15 +861,34 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
         ]
       });
     }
+    const advertisedOrigin =
+      this.lanSharingEnabled && this.lanAddress
+        ? new URL(`http://${this.lanAddress}:${localPort}/`).origin
+        : new URL(profile.serverBaseUrl).origin;
+    const deployment = this.lanSharingEnabled
+      ? null
+      : deploymentEndpointSchema.parse({
+          topology: "loopback_http",
+          serverOrigin: advertisedOrigin,
+          allowedClientOrigins: [advertisedOrigin],
+          tlsTrust: "not_applicable"
+        });
     return parseServerConfig({
-      version: "server-config/v1" as const,
-      bind: { host: this.lanSharingEnabled ? "0.0.0.0" : "127.0.0.1", port: localPort },
-      publicUrl:
-        this.lanSharingEnabled && this.lanAddress
-          ? `http://${this.lanAddress}:${localPort}/`
-          : profile.serverBaseUrl,
-      allowInsecureDevelopment: true,
-      allowInsecureLan: this.lanSharingEnabled,
+      version: "server-config/v2" as const,
+      transport: this.lanSharingEnabled
+        ? {
+            mode: "lan_http" as const,
+            listener: { protocol: "http" as const, host: "0.0.0.0", port: localPort },
+            advertisedOrigin,
+            acknowledgeInsecureLan: true as const
+          }
+        : {
+            mode: "loopback_http" as const,
+            listener: { protocol: "http" as const, host: "127.0.0.1", port: localPort },
+            advertisedOrigin
+          },
+      deployment,
+      allowedClientOrigins: null,
       dataDirectory,
       trustedProjects,
       operatorCredentials: [

@@ -670,6 +670,7 @@
         "commentAttachmentHttp.test.ts",
         "commentService.test.ts",
         "config.test.ts",
+        "configMigration.test.ts",
         "containerPrepare.test.ts",
         "contentVersionHttp.test.ts",
         "contentVersionRepository.test.ts",
