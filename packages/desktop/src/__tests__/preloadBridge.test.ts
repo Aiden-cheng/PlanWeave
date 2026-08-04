@@ -211,6 +211,8 @@ describe("preload bridge invocation", () => {
     const operator = electronMock.exposed.get("planweaveOperatorControl") as {
       copyOperatorHostBootstrapHandoff: (input: unknown) => Promise<unknown>;
       copyOperatorMemberSetupCode: (input: unknown) => Promise<unknown>;
+      getOperatorLocalAgentHostStatus: (input: unknown) => Promise<unknown>;
+      registerOperatorLocalAgentHost: (input: unknown) => Promise<unknown>;
     };
     const input = {
       profileId: "profile-a",
@@ -231,6 +233,19 @@ describe("preload bridge invocation", () => {
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       operatorControlInvokeChannels.copyMemberSetupCode,
       { profileId: "profile-a" }
+    );
+
+    await operator.getOperatorLocalAgentHostStatus({ profileId: "profile-a" });
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      operatorControlInvokeChannels.getLocalAgentHostStatus,
+      { profileId: "profile-a" }
+    );
+
+    const localInput = { ...input, exposedProfileIds: ["codex-acp"] };
+    await operator.registerOperatorLocalAgentHost(localInput);
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      operatorControlInvokeChannels.registerLocalAgentHost,
+      localInput
     );
   });
 

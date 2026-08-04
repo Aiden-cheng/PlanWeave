@@ -161,6 +161,59 @@ export const operatorRevokeHostInputSchema = z
   .strict();
 export type OperatorRevokeHostInput = z.infer<typeof operatorRevokeHostInputSchema>;
 
+const localAgentHostProfileIdSchema = z.string().trim().min(1).max(128);
+export const operatorLocalAgentHostProfileViewSchema = z
+  .object({
+    profileId: localAgentHostProfileIdSchema,
+    agentId: localAgentHostProfileIdSchema,
+    displayName: z.string().trim().min(1).max(128),
+    detected: z.boolean(),
+    exposed: z.boolean(),
+    ready: z.boolean()
+  })
+  .strict();
+export type OperatorLocalAgentHostProfileView = z.infer<
+  typeof operatorLocalAgentHostProfileViewSchema
+>;
+
+export const operatorLocalAgentHostStatusSchema = z
+  .object({
+    supported: z.boolean(),
+    state: z.enum(["not_registered", "ready", "background_setup_required"]),
+    workspaceId: operatorProfileIdSchema.optional(),
+    background: z.enum(["running", "stopped", "not_installed", "setup_required"]).optional(),
+    agents: z.array(operatorLocalAgentHostProfileViewSchema).max(32)
+  })
+  .strict();
+export type OperatorLocalAgentHostStatus = z.infer<typeof operatorLocalAgentHostStatusSchema>;
+
+export const operatorGetLocalAgentHostStatusInputSchema = z
+  .object({ profileId: operatorProfileIdSchema })
+  .strict();
+export type OperatorGetLocalAgentHostStatusInput = z.infer<
+  typeof operatorGetLocalAgentHostStatusInputSchema
+>;
+
+export const operatorRegisterLocalAgentHostInputSchema = z
+  .object({
+    profileId: operatorProfileIdSchema,
+    request: operatorEnrollmentGrantRequestSchema,
+    exposedProfileIds: z.array(localAgentHostProfileIdSchema).min(1).max(32)
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (new Set(value.exposedProfileIds).size !== value.exposedProfileIds.length) {
+      context.addIssue({
+        code: "custom",
+        message: "duplicate local Agent Host profile",
+        path: ["exposedProfileIds"]
+      });
+    }
+  });
+export type OperatorRegisterLocalAgentHostInput = z.infer<
+  typeof operatorRegisterLocalAgentHostInputSchema
+>;
+
 export type OperatorCredentialStorage = "available" | "unavailable";
 export type OperatorCredentialPersistence = "persisted" | "session-only" | "missing";
 
@@ -305,6 +358,12 @@ export type PlanWeaveOperatorControlApi = {
     input: OperatorCopyMemberSetupCodeInput
   ) => Promise<OperatorMemberSetupCodeHandoffView>;
   revokeOperatorHost: (input: OperatorRevokeHostInput) => Promise<OperatorHostView>;
+  getOperatorLocalAgentHostStatus: (
+    input: OperatorGetLocalAgentHostStatusInput
+  ) => Promise<OperatorLocalAgentHostStatus>;
+  registerOperatorLocalAgentHost: (
+    input: OperatorRegisterLocalAgentHostInput
+  ) => Promise<OperatorLocalAgentHostStatus>;
   onOperatorControlStatusChanged: (callback: (status: OperatorControlStatus) => void) => () => void;
 };
 

@@ -6,6 +6,7 @@ import {
   type OperatorMemberSetupCodeHandoffView,
   type OperatorControlProfileInput,
   type OperatorControlStatus,
+  type OperatorLocalAgentHostStatus,
   type OperatorProfileView
 } from "../../shared/operatorControl";
 import { operatorControlBridge } from "../bridge";
@@ -22,6 +23,8 @@ export type HostAdministrationController = {
   error: string | null;
   handoff: OperatorHostBootstrapHandoffView | null;
   memberSetupCodeHandoff: OperatorMemberSetupCodeHandoffView | null;
+  localAgentHost: OperatorLocalAgentHostStatus | null;
+  localAgentHostLoading: boolean;
   refresh: () => Promise<void>;
   refreshHosts: () => Promise<void>;
   saveProfile: (profile: OperatorControlProfileInput) => Promise<boolean>;
@@ -33,6 +36,9 @@ export type HostAdministrationController = {
   copyBootstrapHandoff: () => Promise<OperatorHostBootstrapHandoffView | null>;
   copyMemberSetupCode: () => Promise<OperatorMemberSetupCodeHandoffView | null>;
   revokeHost: (hostId: string) => Promise<OperatorHostView | null>;
+  registerLocalAgentHost: (
+    exposedProfileIds: readonly string[]
+  ) => Promise<OperatorLocalAgentHostStatus | null>;
   dismissHandoff: () => void;
   dismissMemberSetupCodeHandoff: () => void;
   clearError: () => void;
@@ -50,7 +56,12 @@ function errorMessage(error: unknown): string {
     "operator_credential_invalid",
     "operator_admin_required",
     "operator_server_admin_required",
-    "operator_forbidden"
+    "operator_forbidden",
+    "local_agent_host_windows_only",
+    "local_agent_host_unavailable",
+    "local_agent_host_custom_ca_unsupported",
+    "agent_host_preset_binary_missing",
+    "agent_host_background_setup_required"
   ]);
   if (error instanceof OperatorControlError && knownCodes.has(error.code)) return error.code;
   if (error && typeof error === "object" && "code" in error) {
@@ -75,6 +86,8 @@ export function useHostAdministrationController(): HostAdministrationController 
   const [handoff, setHandoff] = useState<OperatorHostBootstrapHandoffView | null>(null);
   const [memberSetupCodeHandoff, setMemberSetupCodeHandoff] =
     useState<OperatorMemberSetupCodeHandoffView | null>(null);
+  const [localAgentHost, setLocalAgentHost] = useState<OperatorLocalAgentHostStatus | null>(null);
+  const [localAgentHostLoading, setLocalAgentHostLoading] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!operatorControlBridge) {
@@ -126,7 +139,7 @@ export function useHostAdministrationController(): HostAdministrationController 
     } finally {
       setHostsLoading(false);
     }
-  }, [activeProfile]);
+  }, [activeProfile?.profileId, activeProfile?.hasOperatorCredential]);
 
   useEffect(() => {
     void refresh();
@@ -137,6 +150,29 @@ export function useHostAdministrationController(): HostAdministrationController 
   useEffect(() => {
     void refreshHosts();
   }, [refreshHosts]);
+
+  useEffect(() => {
+    if (!operatorControlBridge || !activeProfile) {
+      setLocalAgentHost(null);
+      return;
+    }
+    let active = true;
+    setLocalAgentHostLoading(true);
+    void operatorControlBridge
+      .getOperatorLocalAgentHostStatus({ profileId: activeProfile.profileId })
+      .then((next) => {
+        if (active) setLocalAgentHost(next);
+      })
+      .catch((cause) => {
+        if (active) setError(errorMessage(cause));
+      })
+      .finally(() => {
+        if (active) setLocalAgentHostLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeProfile?.profileId]);
 
   const runStatusAction = useCallback(
     async (action: () => Promise<OperatorControlStatus>): Promise<boolean> => {
@@ -270,6 +306,48 @@ export function useHostAdministrationController(): HostAdministrationController 
     [activeProfile]
   );
 
+  const registerLocalAgentHost = useCallback(
+    async (exposedProfileIds: readonly string[]) => {
+      if (!operatorControlBridge || !activeProfile || !activeProfile.hasOperatorCredential) {
+        setError("operator_credential_missing");
+        return null;
+      }
+      setBusy(true);
+      try {
+        const next = await operatorControlBridge.registerOperatorLocalAgentHost({
+          profileId: activeProfile.profileId,
+          request: {
+            expiresAt: nextExpiry(15),
+            credentialExpiresAt: nextExpiry(24 * 60)
+          },
+          exposedProfileIds: [...exposedProfileIds]
+        });
+        setLocalAgentHost(next);
+        setError(null);
+        await refreshHosts();
+        return next;
+      } catch (cause) {
+        setError(errorMessage(cause));
+        try {
+          setLocalAgentHost(
+            await operatorControlBridge.getOperatorLocalAgentHostStatus({
+              profileId: activeProfile.profileId
+            })
+          );
+        } catch (statusCause) {
+          console.warn(
+            "Failed to refresh local Agent Host status after registration error.",
+            statusCause
+          );
+        }
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [activeProfile, refreshHosts]
+  );
+
   return {
     status,
     hosts,
@@ -280,6 +358,8 @@ export function useHostAdministrationController(): HostAdministrationController 
     error,
     handoff,
     memberSetupCodeHandoff,
+    localAgentHost,
+    localAgentHostLoading,
     refresh,
     refreshHosts,
     saveProfile,
@@ -291,6 +371,7 @@ export function useHostAdministrationController(): HostAdministrationController 
     copyBootstrapHandoff,
     copyMemberSetupCode,
     revokeHost,
+    registerLocalAgentHost,
     dismissHandoff: () => setHandoff(null),
     dismissMemberSetupCodeHandoff: () => setMemberSetupCodeHandoff(null),
     clearError: () => setError(null)

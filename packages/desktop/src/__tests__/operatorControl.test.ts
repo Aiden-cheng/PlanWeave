@@ -241,6 +241,96 @@ describe("Desktop operator control trust boundary", () => {
     });
   });
 
+  it("redeems a local Host handoff entirely in main and returns only redacted status", async () => {
+    const directory = await root("planweave-operator-local-host-");
+    const enrollmentCode = `pw_enroll_${"B".repeat(43)}`;
+    const request = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          enrollmentCode,
+          workspaceId: "workspace-local",
+          expiresAt: "2030-01-01T00:15:00.000Z"
+        }),
+        { status: 201 }
+      )
+    );
+    const register = vi.fn().mockResolvedValue({
+      supported: true,
+      state: "ready",
+      workspaceId: "workspace-local",
+      background: "running",
+      agents: []
+    });
+    const service = new OperatorControlService({
+      profileStore: new OperatorProfileStore({ profilesPath: join(directory, "profiles.json") }),
+      vault: new OperatorCredentialVault({
+        paths: { credentialsPath: join(directory, "credentials.json") },
+        safeStorage: safeStorage(true)
+      }),
+      request,
+      localAgentHost: {
+        status: vi.fn().mockResolvedValue({ supported: true, state: "not_registered", agents: [] }),
+        register
+      }
+    });
+    await service.ensureMainOwnedServerProfile({
+      profile: {
+        ...profile("profile-local"),
+        endpoint: {
+          topology: "public_https",
+          serverOrigin: "https://operator.example.test",
+          allowedClientOrigins: ["https://operator.example.test"],
+          tlsTrust: "system_ca"
+        }
+      },
+      operatorId: "desktop-local-admin",
+      operatorToken: tokenA
+    });
+
+    const result = await service.registerLocalAgentHost({
+      profileId: "profile-local",
+      request: {
+        expiresAt: "2030-01-01T00:15:00.000Z",
+        credentialExpiresAt: "2030-01-02T00:00:00.000Z"
+      },
+      exposedProfileIds: ["codex-acp"]
+    });
+
+    expect(register).toHaveBeenCalledWith(
+      "profile-local",
+      expect.stringMatching(/^planweave-agent-host-setup:/),
+      ["codex-acp"]
+    );
+    expect(JSON.stringify(result)).not.toMatch(/enrollmentCode|credentialToken|configPath/);
+    const localHandoff = parseAgentHostSetupHandoff(String(register.mock.calls[0]?.[1]));
+    expect(localHandoff.enrollmentCode).toBe(enrollmentCode);
+
+    await service.ensureMainOwnedServerProfile({
+      profile: {
+        ...profile("profile-local"),
+        endpoint: {
+          topology: "public_https",
+          serverOrigin: "https://operator.example.test",
+          allowedClientOrigins: ["https://operator.example.test"],
+          tlsTrust: "configured_ca"
+        }
+      },
+      operatorId: "desktop-local-admin",
+      operatorToken: tokenA
+    });
+    await expect(
+      service.registerLocalAgentHost({
+        profileId: "profile-local",
+        request: {
+          expiresAt: "2030-01-01T00:15:00.000Z",
+          credentialExpiresAt: "2030-01-02T00:00:00.000Z"
+        },
+        exposedProfileIds: ["codex-acp"]
+      })
+    ).rejects.toThrow("local_agent_host_custom_ca_unsupported");
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
   it("uses only bounded application endpoints and maps 401/403/malformed responses", async () => {
     const requests: Array<{ url: string; authorization: string | null }> = [];
     const request = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

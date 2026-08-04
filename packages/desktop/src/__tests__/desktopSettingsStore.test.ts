@@ -68,7 +68,13 @@ describe("DesktopSettingsStore", () => {
       localCollaborationNetworkFile: join(home, "desktop", "collaboration", "local-network.json"),
       operatorControlDir: join(home, "desktop", "operator-control"),
       operatorProfilesFile: join(home, "desktop", "operator-control", "profiles.json"),
-      operatorCredentialsFile: join(home, "desktop", "operator-control", "credentials.json")
+      operatorCredentialsFile: join(home, "desktop", "operator-control", "credentials.json"),
+      operatorLocalAgentHostsFile: join(
+        home,
+        "desktop",
+        "operator-control",
+        "local-agent-hosts.json"
+      )
     });
   });
 

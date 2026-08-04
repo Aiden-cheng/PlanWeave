@@ -14,6 +14,13 @@ export function buildHostBootstrapHandoff(
   _input: OperatorCopyHostBootstrapHandoffInput,
   grant: OperatorEnrollmentGrantResponse
 ): string {
+  return `planweave agent-host enroll ${buildHostBootstrapHandoffPayload(profile, grant)}`;
+}
+
+export function buildHostBootstrapHandoffPayload(
+  profile: OperatorControlProfile,
+  grant: OperatorEnrollmentGrantResponse
+): string {
   if (!profile.endpoint) throw new Error("operator_deployment_endpoint_required");
   const endpoint: DeploymentEndpoint = profile.endpoint;
   const handoff = serializeAgentHostSetupHandoff({
@@ -27,5 +34,5 @@ export function buildHostBootstrapHandoff(
       serverName: profile.displayName
     }
   });
-  return `planweave agent-host enroll ${handoff}`;
+  return handoff;
 }

@@ -20,6 +20,7 @@ export type DesktopHomePaths = {
   operatorControlDir: string;
   operatorProfilesFile: string;
   operatorCredentialsFile: string;
+  operatorLocalAgentHostsFile: string;
 };
 
 export function desktopHomePaths(): DesktopHomePaths {
@@ -45,6 +46,7 @@ export function desktopHomePaths(): DesktopHomePaths {
     localCollaborationNetworkFile: join(collaborationDir, "local-network.json"),
     operatorControlDir,
     operatorProfilesFile: join(operatorControlDir, "profiles.json"),
-    operatorCredentialsFile: join(operatorControlDir, "credentials.json")
+    operatorCredentialsFile: join(operatorControlDir, "credentials.json"),
+    operatorLocalAgentHostsFile: join(operatorControlDir, "local-agent-hosts.json")
   };
 }

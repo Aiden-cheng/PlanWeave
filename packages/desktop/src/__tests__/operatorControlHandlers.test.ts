@@ -25,6 +25,7 @@ const electronMock = vi.hoisted(() => {
 });
 
 vi.mock("electron", () => ({
+  app: { isPackaged: false },
   BrowserWindow: { getAllWindows: () => [] },
   clipboard: { readText: electronMock.readText, writeText: electronMock.writeText },
   ipcMain: electronMock.ipcMain,

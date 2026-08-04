@@ -646,6 +646,24 @@ export const enCatalog = {
   hostAdminRevoke: "Revoke Host",
   hostAdminRevokeConfirm: "Revoke this Host? This immediately removes its enrollment authority.",
   hostAdminBootstrapTitle: "Connect an Agent Host",
+  hostAdminLocalHostTitle: "This Windows computer",
+  hostAdminLocalHostDescription:
+    "Register this Desktop as an Agent Host and choose which installed agents it may expose.",
+  hostAdminLocalHostWindowsOnly:
+    "One-click local Agent Host registration is available in the Windows Desktop build.",
+  hostAdminLocalHostCustomCaUnsupported:
+    "One-click Agent Host registration does not yet support servers that use a custom CA certificate.",
+  hostAdminLocalHostNotRegistered: "This computer is not registered as an Agent Host.",
+  hostAdminLocalHostReady: "The background Agent Host is running.",
+  hostAdminLocalHostSetupRequired:
+    "Enrollment completed, but the Windows background task needs attention.",
+  hostAdminLocalHostDetected: "detected",
+  hostAdminLocalHostCredentialBoundary:
+    "Agent login credentials remain on this computer and are never uploaded to Server.",
+  hostAdminLocalHostAgentMissing:
+    "The selected Agent is not installed or is unavailable in the Desktop environment.",
+  hostAdminRegisterThisComputer: "Register this computer",
+  hostAdminUpdateThisComputer: "Update exposed agents",
   hostAdminBootstrapDescription: "Copy one portable enrollment command for Windows or Linux.",
   hostAdminBootstrapIdle: "Host bootstrap is idle.",
   hostAdminBootstrapPending: "Creating Host enrollment handoff…",

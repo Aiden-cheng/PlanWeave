@@ -102,6 +102,9 @@ importers:
       '@fontsource-variable/geist':
         specifier: ^5.2.9
         version: 5.2.9
+      '@planweave-ai/agent-host':
+        specifier: workspace:*
+        version: link:../agent-host
       '@planweave-ai/agent-host-protocol':
         specifier: workspace:*
         version: link:../agent-host-protocol

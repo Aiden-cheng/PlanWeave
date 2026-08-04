@@ -19,7 +19,9 @@ const bridgeMock = vi.hoisted(() => ({
   listOperatorHosts: vi.fn(),
   copyOperatorHostBootstrapHandoff: vi.fn(),
   copyOperatorMemberSetupCode: vi.fn(),
-  revokeOperatorHost: vi.fn()
+  revokeOperatorHost: vi.fn(),
+  getOperatorLocalAgentHostStatus: vi.fn(),
+  registerOperatorLocalAgentHost: vi.fn()
 }));
 
 vi.mock("../renderer/bridge", () => ({
@@ -105,6 +107,36 @@ beforeEach(() => {
   bridgeMock.revokeOperatorHost.mockResolvedValue({
     ...host,
     revokedAt: "2030-01-01T00:01:00.000Z"
+  });
+  bridgeMock.getOperatorLocalAgentHostStatus.mockResolvedValue({
+    supported: true,
+    state: "not_registered",
+    agents: [
+      {
+        profileId: "codex-acp",
+        agentId: "codex",
+        displayName: "Codex",
+        detected: true,
+        exposed: false,
+        ready: false
+      }
+    ]
+  });
+  bridgeMock.registerOperatorLocalAgentHost.mockResolvedValue({
+    supported: true,
+    state: "ready",
+    workspaceId: "workspace-a",
+    background: "running",
+    agents: [
+      {
+        profileId: "codex-acp",
+        agentId: "codex",
+        displayName: "Codex",
+        detected: true,
+        exposed: true,
+        ready: true
+      }
+    ]
   });
   bridgeMock.upsertOperatorProfile.mockResolvedValue(status());
   bridgeMock.setActiveOperatorProfile.mockResolvedValue(status());
@@ -259,6 +291,47 @@ describe("Host administration surface", () => {
 
     await user.click(screen.getByTestId("host-admin-member-setup-dismiss"));
     expect(screen.queryByTestId("host-admin-member-setup-copied")).not.toBeInTheDocument();
+  });
+
+  it("registers this Windows computer with an explicitly selected Agent", async () => {
+    const user = userEvent.setup();
+    render(<HostAdministrationSection t={createTranslator("en")} />);
+    const checkbox = await screen.findByTestId("host-admin-local-agent-codex-acp");
+
+    await user.click(checkbox);
+    await user.click(screen.getByTestId("host-admin-register-local"));
+
+    expect(bridgeMock.registerOperatorLocalAgentHost).toHaveBeenCalledWith({
+      profileId: "profile-a",
+      request: {
+        expiresAt: expect.any(String),
+        credentialExpiresAt: expect.any(String)
+      },
+      exposedProfileIds: ["codex-acp"]
+    });
+    expect(await screen.findByTestId("host-admin-local-status")).toHaveTextContent(
+      "background Agent Host is running"
+    );
+  });
+
+  it("disables one-click registration for a custom CA endpoint", async () => {
+    const customCaStatus = status();
+    bridgeMock.getOperatorControlStatus.mockResolvedValue({
+      ...customCaStatus,
+      profiles: customCaStatus.profiles.map((profile) => ({
+        ...profile,
+        endpoint: profile.endpoint
+          ? { ...profile.endpoint, tlsTrust: "configured_ca" as const }
+          : undefined
+      }))
+    });
+
+    render(<HostAdministrationSection t={createTranslator("en")} />);
+
+    expect(await screen.findByTestId("host-admin-local-custom-ca")).toHaveTextContent(
+      "does not yet support servers that use a custom CA certificate"
+    );
+    expect(screen.getByTestId("host-admin-register-local")).toBeDisabled();
   });
 
   it("requires confirmation before revoking and reflects revoked state", async () => {

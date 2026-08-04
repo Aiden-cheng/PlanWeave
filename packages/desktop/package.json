@@ -25,7 +25,7 @@
   ],
   "scripts": {
     "build": "tsx ../../scripts/run-workspace-consumer-build.ts desktop",
-    "build:standalone": "pnpm --filter @planweave-ai/agent-host-protocol build && pnpm --filter @planweave-ai/collaboration-protocol build && pnpm --filter @planweave-ai/runtime build && pnpm --filter @planweave-ai/mcp build && pnpm --filter @planweave-ai/server build && pnpm build:workspace",
+    "build:standalone": "pnpm --filter @planweave-ai/agent-host-protocol build && pnpm --filter @planweave-ai/collaboration-protocol build && pnpm --filter @planweave-ai/runtime build && pnpm --filter @planweave-ai/agent-host build && pnpm --filter @planweave-ai/mcp build && pnpm --filter @planweave-ai/server build && pnpm build:workspace",
     "build:workspace": "tsc -p tsconfig.json && tsc -p tsconfig.main.json --noEmit && node scripts/build-electron.mjs && node scripts/copy-windows-job-helper.mjs && node scripts/prepare-self-host-server-resource.mjs && vite build",
     "dev": "node scripts/dev-desktop.mjs",
     "dev:renderer": "vite --host 127.0.0.1",
@@ -73,6 +73,7 @@
     "zod": "^4.1.12",
     "@planweave-ai/collaboration-protocol": "workspace:*",
     "@planweave-ai/agent-host-protocol": "workspace:*",
+    "@planweave-ai/agent-host": "workspace:*",
     "ws": "^8.21.0"
   },
   "devDependencies": {

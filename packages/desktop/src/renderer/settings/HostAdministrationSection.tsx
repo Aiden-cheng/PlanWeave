@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import type { createTranslator } from "../i18n";
 import { useHostAdministrationController } from "../hooks/useHostAdministrationController";
 import { HostBootstrapCard } from "./HostBootstrapCard";
+import { LocalAgentHostCard } from "./LocalAgentHostCard";
 import { HostAvailabilityCard } from "./HostAvailabilityCard";
 import { DeploymentConnectionCard } from "./DeploymentConnectionCard";
 import { MemberSetupCodeCard } from "./MemberSetupCodeCard";
@@ -30,6 +31,18 @@ function formatDate(value: string | undefined, locale: string, fallback: string)
 
 function errorLabel(code: string | null, t: ReturnType<typeof createTranslator>): string | null {
   if (!code) return null;
+  if (code === "local_agent_host_windows_only" || code === "local_agent_host_unavailable") {
+    return t("hostAdminLocalHostWindowsOnly");
+  }
+  if (code === "local_agent_host_custom_ca_unsupported") {
+    return t("hostAdminLocalHostCustomCaUnsupported");
+  }
+  if (code === "agent_host_preset_binary_missing") {
+    return t("hostAdminLocalHostAgentMissing");
+  }
+  if (code === "agent_host_background_setup_required") {
+    return t("hostAdminLocalHostSetupRequired");
+  }
   const key =
     code === "operator_bridge_unavailable"
       ? "hostAdminBridgeUnavailable"
@@ -68,6 +81,8 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
     error,
     handoff,
     memberSetupCodeHandoff,
+    localAgentHost,
+    localAgentHostLoading,
     hosts,
     hostsLoading,
     importCredential,
@@ -75,6 +90,7 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
     refresh,
     refreshHosts,
     removeProfile,
+    registerLocalAgentHost,
     saveProfile,
     selectProfile,
     status
@@ -192,6 +208,15 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
         hosts={hosts}
         loading={hostsLoading}
         onRefresh={() => void refreshHosts()}
+        t={t}
+      />
+
+      <LocalAgentHostCard
+        activeProfile={activeProfile}
+        busy={busy}
+        loading={localAgentHostLoading}
+        status={localAgentHost}
+        register={registerLocalAgentHost}
         t={t}
       />
 

@@ -12,6 +12,8 @@ import {
   operatorMemberSetupCodeHandoffViewSchema,
   operatorImportCredentialInputSchema,
   operatorListHostsInputSchema,
+  operatorGetLocalAgentHostStatusInputSchema,
+  operatorRegisterLocalAgentHostInputSchema,
   operatorProfileIdInputSchema,
   operatorRevokeHostInputSchema,
   OperatorControlError,
@@ -20,7 +22,14 @@ import {
   type OperatorCredentialPersistence,
   type OperatorProfileView
 } from "../../shared/operatorControl.js";
-import { buildHostBootstrapHandoff } from "./hostBootstrapHandoff.js";
+import {
+  buildHostBootstrapHandoff,
+  buildHostBootstrapHandoffPayload
+} from "./hostBootstrapHandoff.js";
+import {
+  type LocalAgentHostProvisioner,
+  unavailableLocalAgentHostProvisioner
+} from "./localAgentHostProvisioner.js";
 import {
   OperatorControlClient,
   type OperatorControlClientOptions
@@ -58,6 +67,7 @@ export type OperatorControlServiceOptions = {
   request?: typeof fetch;
   clock?: { now(): Date };
   onStatusChange?: (status: OperatorControlStatus) => void;
+  localAgentHost?: LocalAgentHostProvisioner;
 };
 
 function nowIso(clock?: { now(): Date }): string {
@@ -93,6 +103,7 @@ export class OperatorControlService {
   private readonly request?: typeof fetch;
   private readonly clock?: { now(): Date };
   private readonly onStatusChange?: (status: OperatorControlStatus) => void;
+  private readonly localAgentHost: LocalAgentHostProvisioner;
   private disposed = false;
   private queue: Promise<unknown> = Promise.resolve();
   private lastErrorCode: string | null = null;
@@ -114,6 +125,7 @@ export class OperatorControlService {
     this.request = options.request;
     this.clock = options.clock;
     this.onStatusChange = options.onStatusChange;
+    this.localAgentHost = options.localAgentHost ?? unavailableLocalAgentHostProvisioner();
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -404,6 +416,40 @@ export class OperatorControlService {
     const parsed = operatorRevokeHostInputSchema.parse(input);
     return this.enqueue(() =>
       this.withProfile(parsed, (client, value) => client.revokeHost(value.hostId))
+    );
+  }
+
+  async getLocalAgentHostStatus(input: unknown) {
+    assertNoSmuggledOperatorSecrets(input, "getLocalAgentHostStatus");
+    const parsed = operatorGetLocalAgentHostStatusInputSchema.parse(input);
+    return this.enqueue(async () => {
+      this.assertOpen();
+      if (!(await this.profiles.get(parsed.profileId))) {
+        throw new OperatorControlError({ kind: "validation", code: "operator_profile_not_found" });
+      }
+      return this.localAgentHost.status(parsed.profileId);
+    });
+  }
+
+  async registerLocalAgentHost(input: unknown) {
+    assertNoSmuggledOperatorSecrets(input, "registerLocalAgentHost");
+    const parsed = operatorRegisterLocalAgentHostInputSchema.parse(input);
+    return this.enqueue(() =>
+      this.withProfile(parsed, async (client, value) => {
+        if (!(await this.localAgentHost.status(value.profileId)).supported) {
+          throw new Error("local_agent_host_windows_only");
+        }
+        if (client.connectionProfile.endpoint?.tlsTrust === "configured_ca") {
+          throw new Error("local_agent_host_custom_ca_unsupported");
+        }
+        const grant = await client.createEnrollmentGrant(value.request);
+        const handoff = buildHostBootstrapHandoffPayload(client.connectionProfile, grant);
+        return this.localAgentHost.register(
+          value.profileId,
+          handoff,
+          value.exposedProfileIds
+        );
+      })
     );
   }
 

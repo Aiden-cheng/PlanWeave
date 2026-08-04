@@ -13,7 +13,9 @@ export const operatorControlInvokeChannels = {
   listHosts: "planweave-operator:listHosts",
   copyHostBootstrapHandoff: "planweave-operator:copyHostBootstrapHandoff",
   copyMemberSetupCode: "planweave-operator:copyMemberSetupCode",
-  revokeHost: "planweave-operator:revokeHost"
+  revokeHost: "planweave-operator:revokeHost",
+  getLocalAgentHostStatus: "planweave-operator:getLocalAgentHostStatus",
+  registerLocalAgentHost: "planweave-operator:registerLocalAgentHost"
 } as const;
 
 export const operatorControlStatusChangedChannel = "planweave-operator:statusChanged";

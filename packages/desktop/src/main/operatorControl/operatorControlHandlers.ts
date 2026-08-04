@@ -1,4 +1,4 @@
-import { BrowserWindow, clipboard, ipcMain, safeStorage } from "electron";
+import { app, BrowserWindow, clipboard, ipcMain, safeStorage } from "electron";
 import {
   assertNoSmuggledOperatorSecrets,
   operatorControlInvokeChannels,
@@ -11,6 +11,7 @@ import {
   OperatorControlService,
   type OperatorControlServiceOptions
 } from "./operatorControlService.js";
+import { DesktopLocalAgentHostProvisioner } from "./localAgentHostProvisioner.js";
 
 let service: OperatorControlService | null = null;
 
@@ -34,6 +35,17 @@ function createDefaultService(options: OperatorControlServiceOptions = {}): Oper
       encryptString: (value) => safeStorage.encryptString(value),
       decryptString: (value) => safeStorage.decryptString(value)
     },
+    localAgentHost:
+      options.localAgentHost ??
+      new DesktopLocalAgentHostProvisioner({
+        launcher: {
+          executablePath: process.execPath,
+          fixedArgs:
+            app.isPackaged || !process.argv[1]
+              ? ["--agent-host-service"]
+              : [process.argv[1], "--agent-host-service"]
+        }
+      }),
     onStatusChange: options.onStatusChange ?? publishStatusToRenderers
   });
 }
@@ -94,6 +106,12 @@ export function registerOperatorControlHandlers(
   );
   ipcMain.handle(operatorControlInvokeChannels.revokeHost, (_event, input: unknown) =>
     active.revokeHost(input)
+  );
+  ipcMain.handle(operatorControlInvokeChannels.getLocalAgentHostStatus, (_event, input: unknown) =>
+    active.getLocalAgentHostStatus(input)
+  );
+  ipcMain.handle(operatorControlInvokeChannels.registerLocalAgentHost, (_event, input: unknown) =>
+    active.registerLocalAgentHost(input)
   );
   return active;
 }
