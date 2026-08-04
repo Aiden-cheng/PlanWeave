@@ -16,7 +16,8 @@ import {
 import {
   COLLABORATION_CONNECTION_ERROR_CODES,
   CollaborationClientError,
-  collaborationConnectionErrorFromUnknown
+  collaborationConnectionErrorFromUnknown,
+  collaborationErrorFromUnknown
 } from "./collaborationErrors.js";
 import { CollaborationWorkspaceClient } from "./CollaborationWorkspaceClient.js";
 import { redactCollaborationText } from "./redaction.js";
@@ -304,7 +305,10 @@ export class CollaborationWorkspaceConnection {
       this.workspaceDisplayName = response.workspaceDisplayName;
       return await this.connectActiveProfile();
     } catch (error) {
-      const mapped = collaborationConnectionErrorFromUnknown(error);
+      const setupError = collaborationErrorFromUnknown(error);
+      const mapped = setupError.code.startsWith("setup_code_")
+        ? setupError
+        : collaborationConnectionErrorFromUnknown(setupError);
       this.status = "error";
       this.error = {
         code: mapped.code,
