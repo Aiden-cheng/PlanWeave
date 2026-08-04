@@ -69,6 +69,36 @@ describe("Agent exposure allowlist", () => {
     );
   });
 
+  it("explicitly exposes an existing profile that uses an absolute command", async () => {
+    const base = await config();
+    const value = parseAgentHostConfig({
+      ...base,
+      agentProfiles: [
+        {
+          id: "codex-acp",
+          agentId: "codex",
+          command: process.execPath,
+          args: [],
+          environment: []
+        }
+      ]
+    });
+    const configPath = join(value.dataDirectory, "config.json");
+    await writePrivateJsonFile(configPath, value);
+
+    const result = await new AgentHostOperator(null, "linux", {}).exposeAgent(
+      configPath,
+      "codex-acp"
+    );
+
+    expect(result.agents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ profileId: "codex-acp", exposed: true, ready: true })
+      ])
+    );
+    await expect(readExposedAgentProfileIds(value)).resolves.toEqual(["codex-acp"]);
+  });
+
   it("enforces exposure dynamically at execution resolution without a daemon restart", async () => {
     const value = await config();
     const resolver = new ConfiguredAcpProfileResolver(value, process.env, async (agentProfileId) =>

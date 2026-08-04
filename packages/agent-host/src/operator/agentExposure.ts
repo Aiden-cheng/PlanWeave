@@ -69,24 +69,24 @@ export async function listAgentExposure(
   const exposed = new Set(await readExposedAgentProfileIds(config));
   return Promise.all(
     listSupportedHostAcpProfiles().map(async (profile) => {
+      const configuredProfile = config.agentProfiles.find(
+        (candidate) => candidate.id === profile.profileId
+      );
       let detected = false;
       try {
-        await resolveCommand(profile.command);
+        await resolveCommand(configuredProfile?.command ?? profile.command);
         detected = true;
       } catch (error) {
         if (!(error instanceof Error && error.message === "agent_host_preset_binary_missing"))
           throw error;
       }
-      const configured = config.agentProfiles.some(
-        (candidate) => candidate.id === profile.profileId
-      );
       return {
         profileId: profile.profileId,
         agentId: profile.agentId,
         displayName: profile.displayName,
         detected,
         exposed: exposed.has(profile.profileId),
-        ready: detected && configured && exposed.has(profile.profileId)
+        ready: detected && configuredProfile !== undefined && exposed.has(profile.profileId)
       };
     })
   );

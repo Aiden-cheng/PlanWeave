@@ -336,6 +336,20 @@ describe("remote operator walkthrough", () => {
     expect(enrollment.code).toBe(0);
     expect(JSON.parse(enrollment.stdout)).toMatchObject({ credential: "active" });
 
+    const exposure = await runAgentHostBin([
+      "agents",
+      "expose",
+      "codex-acp",
+      "--config",
+      hostConfigPath
+    ]);
+    expect(exposure.code).toBe(0);
+    expect(JSON.parse(exposure.stdout)).toMatchObject({
+      agents: expect.arrayContaining([
+        expect.objectContaining({ profileId: "codex-acp", exposed: true, ready: true })
+      ])
+    });
+
     const status = await runAgentHostBin(["status", "--config", hostConfigPath]);
     expect(status.code).toBe(0);
     expect(JSON.parse(status.stdout)).toMatchObject({

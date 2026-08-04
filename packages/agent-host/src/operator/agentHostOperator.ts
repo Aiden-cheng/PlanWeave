@@ -170,11 +170,11 @@ export class AgentHostOperator {
   async exposeAgent(configPath: string, profileId: string): Promise<AgentExposureMutationResult> {
     const preset = requireSupportedAgentProfile(profileId);
     const config = await loadAgentHostConfig(configPath);
-    const command = await this.resolvePresetCommand(preset.command);
     const existing = config.agentProfiles.find((profile) => profile.id === profileId);
     if (existing && existing.agentId !== preset.agentId) {
       throw new Error("agent_host_agent_profile_conflict");
     }
+    const command = await this.resolvePresetCommand(existing?.command ?? preset.command);
     const next = existing
       ? config
       : parseAgentHostConfig({
