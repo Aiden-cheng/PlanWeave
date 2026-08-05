@@ -186,5 +186,5 @@ const agentHostServiceExitCode = await runDesktopAgentHostServiceMode(process.ar
 if (agentHostServiceExitCode === null) {
   startDesktopApplication();
 } else {
-  process.exitCode = agentHostServiceExitCode;
+  app.exit(agentHostServiceExitCode);
 }

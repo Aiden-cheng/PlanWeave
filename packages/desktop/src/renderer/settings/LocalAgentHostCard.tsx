@@ -14,6 +14,7 @@ type LocalAgentHostCardProps = {
   loading: boolean;
   status: OperatorLocalAgentHostStatus | null;
   register: (profileIds: readonly string[]) => Promise<OperatorLocalAgentHostStatus | null>;
+  repair: () => Promise<OperatorLocalAgentHostStatus | null>;
   enroll: (
     handoff: string,
     profileIds: readonly string[]
@@ -28,6 +29,7 @@ export function LocalAgentHostCard({
   loading,
   status,
   register,
+  repair,
   enroll,
   t
 }: LocalAgentHostCardProps) {
@@ -109,10 +111,12 @@ export function LocalAgentHostCard({
                   <Textarea
                     id="host-admin-local-handoff"
                     data-testid="host-admin-local-handoff"
+                    className="cursor-text caret-text-strong"
                     value={handoff}
                     rows={4}
                     spellCheck={false}
                     autoComplete="off"
+                    autoFocus
                     placeholder={t("hostAdminLocalHostHandoffPlaceholder")}
                     disabled={busy || loading}
                     onChange={(event) => setHandoff(event.target.value)}
@@ -154,6 +158,19 @@ export function LocalAgentHostCard({
             {!localServerHosted ? (
               <p className="text-xs text-text-muted">{t("hostAdminLocalHostCredentialBoundary")}</p>
             ) : null}
+            {!localServerHosted && status.state !== "not_registered" ? (
+              <Button
+                type="button"
+                className="w-fit"
+                data-testid="host-admin-repair-local"
+                disabled={busy || loading}
+                onClick={() => void repair()}
+              >
+                {status.state === "ready"
+                  ? t("hostAdminRestartLocalHost")
+                  : t("hostAdminStartLocalHost")}
+              </Button>
+            ) : null}
             {!localServerHosted && status.state === "not_registered" ? (
               <div className="grid gap-3">
                 <Button
@@ -161,11 +178,11 @@ export function LocalAgentHostCard({
                   className="w-fit"
                   data-testid="host-admin-enroll-local"
                   disabled={!canEnroll}
-                  onClick={() =>
+                  onClick={() => {
                     void enroll(handoff, selected).then((next) => {
                       if (next) setHandoff("");
-                    })
-                  }
+                    });
+                  }}
                 >
                   {t("hostAdminEnrollThisComputer")}
                 </Button>

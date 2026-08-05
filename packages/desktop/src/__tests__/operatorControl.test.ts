@@ -359,6 +359,7 @@ describe("Desktop operator control trust boundary", () => {
       request,
       localAgentHost: {
         status: vi.fn().mockResolvedValue({ supported: true, state: "not_registered", agents: [] }),
+        repair: vi.fn(),
         register
       }
     });
@@ -462,6 +463,7 @@ describe("Desktop operator control trust boundary", () => {
     const service = new OperatorControlService({
       localAgentHost: {
         status: vi.fn().mockResolvedValue({ supported: true, state: "not_registered", agents: [] }),
+        repair: vi.fn(),
         register
       }
     });
@@ -479,6 +481,66 @@ describe("Desktop operator control trust boundary", () => {
         enrollmentCode: "smuggled"
       })
     ).rejects.toThrow("Operator IPC rejected enrollLocalAgentHost");
+  });
+
+  it("repairs an existing local Host without issuing another enrollment grant", async () => {
+    const repair = vi.fn().mockResolvedValue({
+      supported: true,
+      state: "ready",
+      workspaceId: "workspace-repair",
+      background: "running",
+      agents: []
+    });
+    const service = new OperatorControlService({
+      localAgentHost: {
+        status: vi.fn(),
+        repair,
+        register: vi.fn()
+      }
+    });
+
+    await expect(service.repairLocalAgentHost({ profileId: "profile-a" })).resolves.toMatchObject({
+      state: "ready",
+      workspaceId: "workspace-repair"
+    });
+    expect(repair).toHaveBeenCalledWith("profile-a");
+  });
+
+  it("preserves a safe Agent Host error code across the operator boundary", async () => {
+    const service = new OperatorControlService({
+      localAgentHost: {
+        status: vi.fn().mockResolvedValue({ supported: true, state: "not_registered", agents: [] }),
+        repair: vi.fn(),
+        register: vi.fn().mockRejectedValue(new Error("agent_host_background_service_unavailable"))
+      }
+    });
+
+    await expect(
+      service.enrollLocalAgentHost({
+        handoff: serializeAgentHostSetupHandoff({
+          version: "agent-host-setup/v1",
+          endpoint: {
+            topology: "private_https",
+            serverOrigin: "https://server.example/",
+            allowedClientOrigins: ["https://server.example/"],
+            tlsTrust: "system_ca"
+          },
+          workspaceId: "workspace-diagnostics",
+          enrollmentCode: `pw_enroll_${"D".repeat(43)}`,
+          expiresAt: "2030-01-01T00:15:00.000Z",
+          display: { workspaceName: "Workspace", serverName: "Server" }
+        }),
+        exposedProfileIds: ["codex-acp"]
+      })
+    ).rejects.toMatchObject({
+      name: "OperatorControlError",
+      code: "agent_host_background_service_unavailable",
+      message: "agent_host_background_service_unavailable"
+    });
+
+    await expect(service.getStatus()).resolves.toMatchObject({
+      lastErrorCode: "agent_host_background_service_unavailable"
+    });
   });
 
   it("uses only bounded application endpoints and maps 401/403/malformed responses", async () => {

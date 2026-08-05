@@ -656,12 +656,27 @@ export const enCatalog = {
   hostAdminLocalHostHandoffInvalid: "Enter valid Agent Host enrollment details.",
   hostAdminLocalHostHandoffExpired:
     "The Agent Host enrollment handoff has expired. Create a new one on the server-admin computer.",
+  hostAdminLocalHostEnrollmentRejected:
+    "The enrollment details have expired, were already used, or were rejected by the Server. Copy new details from the managing computer.",
+  hostAdminLocalHostEnrollmentUnreachable:
+    "The PlanWeave Server in the enrollment details cannot be reached. Make sure this computer has joined the same private network and can access its HTTPS address.",
+  hostAdminLocalHostEnrollmentTransportUnsupported:
+    "The enrollment details use an unsupported connection method. Remote devices require a reachable HTTPS Server.",
+  hostAdminLocalHostEnrollmentResponseInvalid:
+    "The PlanWeave Server returned an unrecognized response. Make sure both computers use compatible versions and try again.",
+  hostAdminLocalHostEnrollmentConflict:
+    "This computer has an active credential or a registration state that cannot be recovered safely. PlanWeave will not overwrite it.",
+  hostAdminLocalHostWindowsIdentityUnavailable:
+    "The current Windows user could not be identified, so the Agent Host background task cannot be installed. Reopen PlanWeave in a regular user session.",
   hostAdminLocalHostNotRegistered: "This computer is not registered as an Agent Host.",
   hostAdminLocalHostUsesLocalServer:
     "PlanWeave Server is running on this computer. Local agents are already available and do not need Agent Host registration.",
-  hostAdminLocalHostReady: "This computer is connected and Agent Host is running.",
+  hostAdminLocalHostReady:
+    "The Agent Host background service is running. Check the remote device list below for its Server connection status.",
   hostAdminLocalHostSetupRequired:
-    "Registration completed, but the background service needs to be restarted.",
+    "Registration completed, but Agent Host is not running on this computer.",
+  hostAdminStartLocalHost: "Start Agent Host",
+  hostAdminRestartLocalHost: "Restart Agent Host",
   hostAdminLocalHostDetected: "detected",
   hostAdminLocalHostCredentialBoundary:
     "Agent login credentials remain on this computer and are never uploaded to Server.",
@@ -726,6 +741,7 @@ export const enCatalog = {
   hostAdminForbidden: "Your account cannot manage remote devices.",
   hostAdminProfileMissing: "The current Server connection is unavailable. Reconnect from People.",
   hostAdminErrorGeneric: "The Agent Host action failed. Try again shortly.",
+  hostAdminDiagnosticCode: "Diagnostic code",
   agentInstallStatus: "Local agent installation status",
   agentRefresh: "Refresh",
   agentRefreshing: "Refreshing",

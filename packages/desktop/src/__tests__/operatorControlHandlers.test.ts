@@ -138,6 +138,7 @@ describe("operator control main-owned Host handoff", () => {
     registerOperatorControlHandlers({
       localAgentHost: {
         status: vi.fn().mockResolvedValue({ supported: true, state: "not_registered", agents: [] }),
+        repair: vi.fn(),
         register
       }
     });

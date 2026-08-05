@@ -627,11 +627,26 @@ export const zhCnCatalog = {
   hostAdminLocalHostCustomCaUnsupported: "当前 Server 连接不支持一键注册，请改为粘贴设备入驻信息。",
   hostAdminLocalHostHandoffInvalid: "请输入有效的 Agent Host 入驻信息。",
   hostAdminLocalHostHandoffExpired: "Agent Host 入驻信息已经过期，请在 Server 管理电脑上重新生成。",
+  hostAdminLocalHostEnrollmentRejected:
+    "设备入驻信息已过期、已使用或被 Server 拒绝，请在管理电脑上重新复制一份。",
+  hostAdminLocalHostEnrollmentUnreachable:
+    "无法访问设备入驻信息中的 PlanWeave Server。请确认这台电脑已加入同一私有网络，并且能够访问该 HTTPS 地址。",
+  hostAdminLocalHostEnrollmentTransportUnsupported:
+    "设备入驻信息使用了不受支持的连接方式。远程设备需要可访问的 HTTPS Server。",
+  hostAdminLocalHostEnrollmentResponseInvalid:
+    "PlanWeave Server 返回了无法识别的响应，请确认两台电脑使用兼容版本后重试。",
+  hostAdminLocalHostEnrollmentConflict:
+    "这台电脑已有生效凭证或无法安全自动恢复的注册状态，PlanWeave 不会覆盖它。",
+  hostAdminLocalHostWindowsIdentityUnavailable:
+    "无法确认当前 Windows 用户身份，暂时不能安装 Agent Host 后台任务。请使用普通用户会话重新打开 PlanWeave。",
   hostAdminLocalHostNotRegistered: "这台电脑尚未注册为 Agent Host。",
   hostAdminLocalHostUsesLocalServer:
     "PlanWeave Server 正在这台电脑上运行，本机 Agent 可直接使用，无需注册 Agent Host。",
-  hostAdminLocalHostReady: "这台电脑已连接，Agent Host 正在后台运行。",
-  hostAdminLocalHostSetupRequired: "注册已完成，但后台服务需要重新启动。",
+  hostAdminLocalHostReady:
+    "Agent Host 后台服务已启动；是否已连接 Server，请以下方远程设备状态为准。",
+  hostAdminLocalHostSetupRequired: "注册已完成，但这台电脑上的 Agent Host 尚未运行。",
+  hostAdminStartLocalHost: "启动 Agent Host",
+  hostAdminRestartLocalHost: "重启 Agent Host",
   hostAdminLocalHostDetected: "已检测到",
   hostAdminLocalHostCredentialBoundary: "Agent 登录凭证始终留在这台电脑，不会上传到 Server。",
   hostAdminLocalHostHandoffPrompt: "把管理电脑复制的一次性设备入驻信息粘贴到这里。",
@@ -688,6 +703,7 @@ export const zhCnCatalog = {
   hostAdminForbidden: "当前账号没有管理远程设备的权限。",
   hostAdminProfileMissing: "当前 Server 连接不可用，请在“成员”中重新连接。",
   hostAdminErrorGeneric: "Agent Host 操作失败，请稍后重试。",
+  hostAdminDiagnosticCode: "诊断代码",
   agentInstallStatus: "本地 Agent 安装状态",
   agentRefresh: "刷新",
   agentRefreshing: "刷新中",

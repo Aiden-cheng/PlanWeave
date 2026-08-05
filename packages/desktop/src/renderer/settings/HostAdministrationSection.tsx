@@ -11,6 +11,7 @@ import { HostAvailabilityCard } from "./HostAvailabilityCard";
 import { DeploymentConnectionCard } from "./DeploymentConnectionCard";
 
 type HostAdministrationSectionProps = {
+  diagnosticsEnabled?: boolean;
   t: ReturnType<typeof createTranslator>;
 };
 
@@ -27,6 +28,40 @@ function errorLabel(code: string | null, t: ReturnType<typeof createTranslator>)
   }
   if (code === "local_agent_host_handoff_expired") {
     return t("hostAdminLocalHostHandoffExpired");
+  }
+  if (
+    code === "agent_host_enrollment_rejected" ||
+    code === "agent_host_enrollment_response_expired" ||
+    code === "agent_host_enrollment_response_mismatch"
+  ) {
+    return t("hostAdminLocalHostEnrollmentRejected");
+  }
+  if (code === "agent_host_enrollment_exchange_failed") {
+    return t("hostAdminLocalHostEnrollmentUnreachable");
+  }
+  if (
+    code === "agent_host_enrollment_transport_insecure" ||
+    code === "agent_host_enrollment_transport_unsupported"
+  ) {
+    return t("hostAdminLocalHostEnrollmentTransportUnsupported");
+  }
+  if (
+    code === "agent_host_enrollment_response_malformed" ||
+    code === "agent_host_enrollment_response_too_large"
+  ) {
+    return t("hostAdminLocalHostEnrollmentResponseInvalid");
+  }
+  if (
+    code === "agent_host_enrollment_already_pending" ||
+    code === "agent_host_handoff_config_conflict" ||
+    code === "agent_host_handoff_pending_conflict" ||
+    code === "agent_host_handoff_credential_conflict" ||
+    code === "agent_host_handoff_provenance_invalid"
+  ) {
+    return t("hostAdminLocalHostEnrollmentConflict");
+  }
+  if (code === "agent_host_windows_user_sid_unavailable") {
+    return t("hostAdminLocalHostWindowsIdentityUnavailable");
   }
   if (code === "agent_host_preset_binary_missing") {
     return t("hostAdminLocalHostAgentMissing");
@@ -53,7 +88,10 @@ function errorLabel(code: string | null, t: ReturnType<typeof createTranslator>)
   return t(key);
 }
 
-export function HostAdministrationSection({ t }: HostAdministrationSectionProps) {
+export function HostAdministrationSection({
+  diagnosticsEnabled = false,
+  t
+}: HostAdministrationSectionProps) {
   const controller = useHostAdministrationController();
   const [desktopServerExposure, setDesktopServerExposure] =
     useState<DesktopServerExposureView | null>(null);
@@ -75,7 +113,8 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
     localAgentHostLoading,
     refresh,
     refreshHosts,
-    registerLocalAgentHost
+    registerLocalAgentHost,
+    repairLocalAgentHost
   } = controller;
 
   const handleRevoke = async (host: OperatorHostView) => {
@@ -125,7 +164,12 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
           role="alert"
           data-testid="host-admin-error"
         >
-          {currentError}
+          <p>{currentError}</p>
+          {diagnosticsEnabled && error ? (
+            <p className="mt-2 font-mono text-xs" data-testid="host-admin-error-code">
+              {t("hostAdminDiagnosticCode")}: {error}
+            </p>
+          ) : null}
         </div>
       ) : null}
 
@@ -142,6 +186,7 @@ export function HostAdministrationSection({ t }: HostAdministrationSectionProps)
         loading={localAgentHostLoading}
         status={localAgentHost}
         register={registerLocalAgentHost}
+        repair={repairLocalAgentHost}
         enroll={enrollLocalAgentHost}
         t={t}
       />

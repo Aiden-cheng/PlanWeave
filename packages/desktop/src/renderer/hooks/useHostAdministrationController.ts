@@ -39,6 +39,7 @@ export type HostAdministrationController = {
   registerLocalAgentHost: (
     exposedProfileIds: readonly string[]
   ) => Promise<OperatorLocalAgentHostStatus | null>;
+  repairLocalAgentHost: () => Promise<OperatorLocalAgentHostStatus | null>;
   enrollLocalAgentHost: (
     handoff: string,
     exposedProfileIds: readonly string[]
@@ -48,32 +49,64 @@ export type HostAdministrationController = {
   clearError: () => void;
 };
 
+const knownErrorCodes = new Set([
+  "operator_bridge_unavailable",
+  "operator_credential_missing",
+  "operator_profile_missing",
+  "operator_profile_not_found",
+  "operator_offline",
+  "operator_timeout",
+  "operator_unauthorized",
+  "operator_credential_invalid",
+  "operator_admin_required",
+  "operator_server_admin_required",
+  "operator_forbidden",
+  "local_agent_host_unavailable",
+  "local_agent_host_custom_ca_unsupported",
+  "local_agent_host_handoff_invalid",
+  "local_agent_host_handoff_expired",
+  "agent_host_enrollment_rejected",
+  "agent_host_enrollment_exchange_failed",
+  "agent_host_enrollment_transport_insecure",
+  "agent_host_enrollment_transport_unsupported",
+  "agent_host_enrollment_response_malformed",
+  "agent_host_enrollment_response_too_large",
+  "agent_host_enrollment_response_mismatch",
+  "agent_host_enrollment_response_expired",
+  "agent_host_enrollment_already_pending",
+  "agent_host_handoff_config_conflict",
+  "agent_host_handoff_pending_conflict",
+  "agent_host_handoff_credential_conflict",
+  "agent_host_handoff_provenance_invalid",
+  "agent_host_windows_user_sid_unavailable",
+  "agent_host_preset_binary_missing",
+  "agent_host_background_setup_required"
+]);
+
+function knownErrorCode(value: string): string | null {
+  for (const code of knownErrorCodes) {
+    if (value === code || value.includes(`: ${code}`)) return code;
+  }
+  return null;
+}
+
+function safeAgentHostErrorCode(value: string): string | null {
+  return value.match(/(?:agent_host|local_agent_host)_[a-z0-9_]+/)?.[0] ?? null;
+}
+
 function errorMessage(error: unknown): string {
-  const knownCodes = new Set([
-    "operator_bridge_unavailable",
-    "operator_credential_missing",
-    "operator_profile_missing",
-    "operator_profile_not_found",
-    "operator_offline",
-    "operator_timeout",
-    "operator_unauthorized",
-    "operator_credential_invalid",
-    "operator_admin_required",
-    "operator_server_admin_required",
-    "operator_forbidden",
-    "local_agent_host_unavailable",
-    "local_agent_host_custom_ca_unsupported",
-    "local_agent_host_handoff_invalid",
-    "local_agent_host_handoff_expired",
-    "agent_host_preset_binary_missing",
-    "agent_host_background_setup_required"
-  ]);
-  if (error instanceof OperatorControlError && knownCodes.has(error.code)) return error.code;
+  if (error instanceof OperatorControlError && knownErrorCodes.has(error.code)) return error.code;
   if (error && typeof error === "object" && "code" in error) {
     const code = (error as { code?: unknown }).code;
-    if (typeof code === "string" && knownCodes.has(code)) return code;
+    if (typeof code === "string" && knownErrorCodes.has(code)) return code;
   }
-  if (error instanceof Error && knownCodes.has(error.message)) return error.message;
+  if (error instanceof Error) {
+    return (
+      knownErrorCode(error.message) ??
+      safeAgentHostErrorCode(error.message) ??
+      "operator_request_failed"
+    );
+  }
   return "operator_request_failed";
 }
 
@@ -393,6 +426,28 @@ export function useHostAdministrationController(): HostAdministrationController 
     [activeProfileId, refreshHosts]
   );
 
+  const repairLocalAgentHost = useCallback(async () => {
+    if (!operatorControlBridge) {
+      setError("operator_bridge_unavailable");
+      return null;
+    }
+    setBusy(true);
+    try {
+      const next = await operatorControlBridge.repairOperatorLocalAgentHost(
+        activeProfileId ? { profileId: activeProfileId } : {}
+      );
+      setLocalAgentHost(next);
+      setError(null);
+      await refreshHosts();
+      return next;
+    } catch (cause) {
+      setError(errorMessage(cause));
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }, [activeProfileId, refreshHosts]);
+
   return {
     status,
     hosts,
@@ -417,6 +472,7 @@ export function useHostAdministrationController(): HostAdministrationController 
     copyMemberSetupCode,
     revokeHost,
     registerLocalAgentHost,
+    repairLocalAgentHost,
     enrollLocalAgentHost,
     dismissHandoff: () => setHandoff(null),
     dismissMemberSetupCodeHandoff: () => setMemberSetupCodeHandoff(null),

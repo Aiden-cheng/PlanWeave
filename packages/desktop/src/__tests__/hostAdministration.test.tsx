@@ -23,6 +23,7 @@ const bridgeMock = vi.hoisted(() => ({
   revokeOperatorHost: vi.fn(),
   getOperatorLocalAgentHostStatus: vi.fn(),
   registerOperatorLocalAgentHost: vi.fn(),
+  repairOperatorLocalAgentHost: vi.fn(),
   enrollOperatorLocalAgentHost: vi.fn()
 }));
 
@@ -140,6 +141,22 @@ beforeEach(() => {
       }
     ]
   });
+  bridgeMock.repairOperatorLocalAgentHost.mockResolvedValue({
+    supported: true,
+    state: "ready",
+    workspaceId: "workspace-a",
+    background: "running",
+    agents: [
+      {
+        profileId: "codex-acp",
+        agentId: "codex",
+        displayName: "Codex",
+        detected: true,
+        exposed: true,
+        ready: true
+      }
+    ]
+  });
   bridgeMock.enrollOperatorLocalAgentHost.mockResolvedValue({
     supported: true,
     state: "ready",
@@ -203,6 +220,7 @@ describe("Agent Host settings", () => {
           ]
         }}
         register={vi.fn()}
+        repair={vi.fn()}
         enroll={vi.fn()}
         t={createTranslator("en")}
       />
@@ -238,6 +256,7 @@ describe("Agent Host settings", () => {
           ]
         }}
         register={vi.fn()}
+        repair={vi.fn()}
         enroll={vi.fn()}
         t={createTranslator("en")}
       />
@@ -246,6 +265,37 @@ describe("Agent Host settings", () => {
     expect(screen.getByTestId("host-admin-local-handoff")).toBeInTheDocument();
     expect(screen.getByTestId("host-admin-enroll-local")).toBeDisabled();
     expect(screen.getByTestId("host-admin-register-local")).toBeDisabled();
+  });
+
+  it("focuses the enrollment input when a remote computer opens Agent Host settings", () => {
+    render(
+      <LocalAgentHostCard
+        activeProfile={status().profiles[0]}
+        busy={false}
+        localServerHosted={false}
+        loading={false}
+        status={{
+          supported: true,
+          state: "not_registered",
+          agents: [
+            {
+              profileId: "codex-acp",
+              agentId: "codex",
+              displayName: "Codex",
+              detected: true,
+              exposed: false,
+              ready: false
+            }
+          ]
+        }}
+        register={vi.fn()}
+        repair={vi.fn()}
+        enroll={vi.fn()}
+        t={createTranslator("en")}
+      />
+    );
+
+    expect(screen.getByTestId("host-admin-local-handoff")).toHaveFocus();
   });
 
   it("shows only user-facing device and agent information", async () => {
@@ -394,8 +444,83 @@ describe("Agent Host settings", () => {
       exposedProfileIds: ["codex-acp"]
     });
     expect(await screen.findByTestId("host-admin-local-status")).toHaveTextContent(
-      "This computer is connected"
+      "background service is running"
     );
+  });
+
+  it("starts an enrolled Agent Host whose background process is not running", async () => {
+    const user = userEvent.setup();
+    const repair = vi.fn().mockResolvedValue(null);
+    render(
+      <LocalAgentHostCard
+        activeProfile={status().profiles[0]}
+        busy={false}
+        localServerHosted={false}
+        loading={false}
+        status={{
+          supported: true,
+          state: "background_setup_required",
+          workspaceId: "workspace-a",
+          background: "stopped",
+          agents: [
+            {
+              profileId: "codex-acp",
+              agentId: "codex",
+              displayName: "Codex",
+              detected: true,
+              exposed: true,
+              ready: true
+            }
+          ]
+        }}
+        register={vi.fn()}
+        repair={repair}
+        enroll={vi.fn()}
+        t={createTranslator("en")}
+      />
+    );
+
+    await user.click(screen.getByTestId("host-admin-repair-local"));
+
+    expect(repair).toHaveBeenCalledOnce();
+  });
+
+  it("offers an explicit restart without requiring another enrollment", async () => {
+    const user = userEvent.setup();
+    const repair = vi.fn().mockResolvedValue(null);
+    render(
+      <LocalAgentHostCard
+        activeProfile={null}
+        busy={false}
+        localServerHosted={false}
+        loading={false}
+        status={{
+          supported: true,
+          state: "ready",
+          workspaceId: "workspace-a",
+          background: "running",
+          agents: [
+            {
+              profileId: "codex-acp",
+              agentId: "codex",
+              displayName: "Codex",
+              detected: true,
+              exposed: true,
+              ready: true
+            }
+          ]
+        }}
+        register={vi.fn()}
+        repair={repair}
+        enroll={vi.fn()}
+        t={createTranslator("en")}
+      />
+    );
+
+    await user.click(screen.getByTestId("host-admin-repair-local"));
+
+    expect(screen.getByRole("button", { name: "Restart Agent Host" })).toBeVisible();
+    expect(repair).toHaveBeenCalledOnce();
   });
 
   it("enrolls explicitly pasted details without an administrative connection", async () => {
@@ -411,18 +536,122 @@ describe("Agent Host settings", () => {
     await user.click(checkbox);
     await user.type(
       screen.getByTestId("host-admin-local-handoff"),
-      "planweave-agent-host-setup:example"
+      "planweave agent-host enroll planweave-agent-host-setup:example"
     );
     await user.click(screen.getByTestId("host-admin-enroll-local"));
 
     expect(bridgeMock.enrollOperatorLocalAgentHost).toHaveBeenCalledWith({
-      handoff: "planweave-agent-host-setup:example",
+      handoff: "planweave agent-host enroll planweave-agent-host-setup:example",
       exposedProfileIds: ["codex-acp"]
     });
     expect(await screen.findByTestId("host-admin-local-status")).toHaveTextContent(
-      "This computer is connected"
+      "background service is running"
     );
     expect(screen.queryByTestId("host-admin-local-handoff")).not.toBeInTheDocument();
+  });
+
+  it("explains when the Server in pasted enrollment details is unreachable", async () => {
+    const user = userEvent.setup();
+    bridgeMock.getOperatorControlStatus.mockResolvedValue({
+      ...status(),
+      profiles: [],
+      activeProfileId: null
+    });
+    bridgeMock.enrollOperatorLocalAgentHost.mockRejectedValueOnce(
+      new Error(
+        "Error invoking remote method 'operator:enrollLocalAgentHost': Error: agent_host_enrollment_exchange_failed"
+      )
+    );
+    render(<HostAdministrationSection t={createTranslator("en")} />);
+
+    await user.click(await screen.findByTestId("host-admin-local-agent-codex-acp"));
+    await user.type(
+      screen.getByTestId("host-admin-local-handoff"),
+      "planweave agent-host enroll planweave-agent-host-setup:example"
+    );
+    await user.click(screen.getByTestId("host-admin-enroll-local"));
+
+    expect(await screen.findByText(/cannot be reached.*same private network/i)).toBeInTheDocument();
+    expect(screen.queryByText(/action failed.*shortly/i)).not.toBeInTheDocument();
+  });
+
+  it("explains when pasted enrollment details were rejected", async () => {
+    const user = userEvent.setup();
+    bridgeMock.getOperatorControlStatus.mockResolvedValue({
+      ...status(),
+      profiles: [],
+      activeProfileId: null
+    });
+    bridgeMock.enrollOperatorLocalAgentHost.mockRejectedValueOnce(
+      new Error("agent_host_enrollment_rejected")
+    );
+    render(<HostAdministrationSection t={createTranslator("en")} />);
+
+    await user.click(await screen.findByTestId("host-admin-local-agent-codex-acp"));
+    await user.type(
+      screen.getByTestId("host-admin-local-handoff"),
+      "planweave agent-host enroll planweave-agent-host-setup:example"
+    );
+    await user.click(screen.getByTestId("host-admin-enroll-local"));
+
+    expect(await screen.findByText(/expired, were already used, or were rejected/i)).toBeVisible();
+  });
+
+  it("does not offer a destructive retry for an enrollment state that cannot be replaced safely", async () => {
+    const user = userEvent.setup();
+    bridgeMock.getOperatorControlStatus.mockResolvedValue({
+      ...status(),
+      profiles: [],
+      activeProfileId: null
+    });
+    bridgeMock.enrollOperatorLocalAgentHost.mockRejectedValueOnce(
+      new Error("agent_host_handoff_pending_conflict")
+    );
+    render(<HostAdministrationSection t={createTranslator("en")} />);
+
+    await user.click(await screen.findByTestId("host-admin-local-agent-codex-acp"));
+    await user.type(
+      screen.getByTestId("host-admin-local-handoff"),
+      "planweave agent-host enroll planweave-agent-host-setup:fresh"
+    );
+    await user.click(screen.getByTestId("host-admin-enroll-local"));
+
+    expect(
+      await screen.findByText(/active credential or a registration state.*cannot be recovered/i)
+    ).toBeVisible();
+    expect(screen.queryByTestId("host-admin-pending-enrollment-guidance")).not.toBeInTheDocument();
+    expect(bridgeMock.enrollOperatorLocalAgentHost).toHaveBeenCalledTimes(1);
+    expect(bridgeMock.enrollOperatorLocalAgentHost).toHaveBeenCalledWith({
+      handoff: "planweave agent-host enroll planweave-agent-host-setup:fresh",
+      exposedProfileIds: ["codex-acp"]
+    });
+  });
+
+  it("shows only a sanitized failure code when developer diagnostics are enabled", async () => {
+    const user = userEvent.setup();
+    bridgeMock.getOperatorControlStatus.mockResolvedValue({
+      ...status(),
+      profiles: [],
+      activeProfileId: null
+    });
+    bridgeMock.enrollOperatorLocalAgentHost.mockRejectedValueOnce(
+      new Error(
+        "Error invoking remote method 'operator:enrollLocalAgentHost': Error: agent_host_background_service_unavailable"
+      )
+    );
+    render(<HostAdministrationSection diagnosticsEnabled t={createTranslator("en")} />);
+
+    await user.click(await screen.findByTestId("host-admin-local-agent-codex-acp"));
+    await user.type(
+      screen.getByTestId("host-admin-local-handoff"),
+      "planweave agent-host enroll planweave-agent-host-setup:secret-value"
+    );
+    await user.click(screen.getByTestId("host-admin-enroll-local"));
+
+    expect(await screen.findByTestId("host-admin-error-code")).toHaveTextContent(
+      "agent_host_background_service_unavailable"
+    );
+    expect(screen.getByTestId("host-admin-error-code")).not.toHaveTextContent("secret-value");
   });
 
   it("offers explicit enrollment input when the current Server cannot register directly", async () => {

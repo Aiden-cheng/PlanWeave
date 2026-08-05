@@ -76,6 +76,17 @@ function nowIso(clock?: { now(): Date }): string {
   return (clock?.now() ?? new Date()).toISOString();
 }
 
+const localAgentHostErrorCodePattern = /^(?:agent_host|local_agent_host)_[a-z0-9_]+$/;
+
+function localAgentHostErrorFromUnknown(error: unknown): OperatorControlError {
+  if (error instanceof OperatorControlError) return error;
+  const code =
+    error instanceof Error && localAgentHostErrorCodePattern.test(error.message)
+      ? error.message
+      : "local_agent_host_registration_failed";
+  return new OperatorControlError({ kind: "unknown", code, cause: error });
+}
+
 function toPublicProfile(
   profile: OperatorControlProfile & { updatedAt: string },
   credential: {
@@ -450,28 +461,60 @@ export class OperatorControlService {
         }
         const grant = await client.createEnrollmentGrant(value.request);
         const handoff = buildHostBootstrapHandoffPayload(client.connectionProfile, grant);
-        return this.localAgentHost.register(value.profileId, handoff, value.exposedProfileIds);
+        try {
+          return await this.localAgentHost.register(
+            value.profileId,
+            handoff,
+            value.exposedProfileIds
+          );
+        } catch (error) {
+          throw localAgentHostErrorFromUnknown(error);
+        }
       })
     );
+  }
+
+  async repairLocalAgentHost(input: unknown) {
+    assertNoSmuggledOperatorSecrets(input, "repairLocalAgentHost");
+    const parsed = operatorGetLocalAgentHostStatusInputSchema.parse(input);
+    return this.enqueue(async () => {
+      try {
+        this.assertOpen();
+        return await this.localAgentHost.repair(parsed.profileId);
+      } catch (error) {
+        const publicError = localAgentHostErrorFromUnknown(error);
+        this.rememberError(publicError);
+        throw publicError;
+      }
+    });
   }
 
   async enrollLocalAgentHost(input: unknown) {
     assertNoSmuggledOperatorSecrets(input, "enrollLocalAgentHost");
     const parsed = operatorEnrollLocalAgentHostInputSchema.parse(input);
-    const enrollmentHandoff = parseAgentHostHandoffInput(parsed.handoff);
     return this.enqueue(async () => {
-      this.assertOpen();
-      if (!(await this.localAgentHost.status()).supported) {
-        throw new Error("local_agent_host_unavailable");
+      try {
+        this.assertOpen();
+        const enrollmentHandoff = parseAgentHostHandoffInput(parsed.handoff);
+        if (!(await this.localAgentHost.status()).supported) {
+          throw new Error("local_agent_host_unavailable");
+        }
+        if (enrollmentHandoff.handoff.endpoint.tlsTrust === "configured_ca") {
+          throw new Error("local_agent_host_custom_ca_unsupported");
+        }
+        const result = await this.localAgentHost.register(
+          undefined,
+          enrollmentHandoff.encodedHandoff,
+          parsed.exposedProfileIds
+        );
+        this.lastErrorCode = null;
+        this.lastErrorMessage = null;
+        return result;
+      } catch (error) {
+        const publicError = localAgentHostErrorFromUnknown(error);
+        this.rememberError(publicError);
+        throw publicError;
       }
-      if (enrollmentHandoff.handoff.endpoint.tlsTrust === "configured_ca") {
-        throw new Error("local_agent_host_custom_ca_unsupported");
-      }
-      return this.localAgentHost.register(
-        undefined,
-        enrollmentHandoff.encodedHandoff,
-        parsed.exposedProfileIds
-      );
     });
   }
 

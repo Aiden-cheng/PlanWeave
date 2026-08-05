@@ -213,6 +213,7 @@ describe("preload bridge invocation", () => {
       copyOperatorMemberSetupCode: (input: unknown) => Promise<unknown>;
       getOperatorLocalAgentHostStatus: (input: unknown) => Promise<unknown>;
       registerOperatorLocalAgentHost: (input: unknown) => Promise<unknown>;
+      repairOperatorLocalAgentHost: (input: unknown) => Promise<unknown>;
       enrollOperatorLocalAgentHost: (input: unknown) => Promise<unknown>;
     };
     const input = {
@@ -247,6 +248,12 @@ describe("preload bridge invocation", () => {
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       operatorControlInvokeChannels.registerLocalAgentHost,
       localInput
+    );
+
+    await operator.repairOperatorLocalAgentHost({ profileId: "profile-a" });
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      operatorControlInvokeChannels.repairLocalAgentHost,
+      { profileId: "profile-a" }
     );
 
     const enrollmentInput = {

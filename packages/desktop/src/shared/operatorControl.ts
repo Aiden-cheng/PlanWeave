@@ -377,6 +377,9 @@ export type PlanWeaveOperatorControlApi = {
   getOperatorLocalAgentHostStatus: (
     input: OperatorGetLocalAgentHostStatusInput
   ) => Promise<OperatorLocalAgentHostStatus>;
+  repairOperatorLocalAgentHost: (
+    input: OperatorGetLocalAgentHostStatusInput
+  ) => Promise<OperatorLocalAgentHostStatus>;
   registerOperatorLocalAgentHost: (
     input: OperatorRegisterLocalAgentHostInput
   ) => Promise<OperatorLocalAgentHostStatus>;

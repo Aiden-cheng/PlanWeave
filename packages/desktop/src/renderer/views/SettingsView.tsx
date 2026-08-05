@@ -197,7 +197,7 @@ export function SettingsView({
                   </div>
                 }
               >
-                <HostAdministrationSection t={t} />
+                <HostAdministrationSection diagnosticsEnabled={settings.developerMode} t={t} />
               </Suspense>
             ) : null}
           </div>
