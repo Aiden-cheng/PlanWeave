@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { TaskWorkspaceExecutorSelect } from "../TaskWorkspaceExecutorSelect";
+import type { AvailableAgentEndpoint } from "../../collaboration/agentEndpointViewModel";
 import { TaskWorkspaceBlockPrompts, TaskWorkspaceTaskPrompt } from "../TaskWorkspacePrompts";
 import type { TaskWorkspaceLabels, TaskWorkspacePromptSaveInput } from "../contracts";
 import type { TaskWorkspaceTimelineLabels } from "./types";
@@ -35,19 +36,19 @@ function artifactPath(workspace: TaskWorkspace): string | null {
 
 function BlockPromptDisclosure({
   initiallyOpen,
-  executorOptions,
+  endpoints,
   labels,
   block,
   onSaveExecutor,
-  packageExecutorNames,
+  selectedEndpointId,
   onSavePrompt
 }: {
   initiallyOpen: boolean;
-  executorOptions: readonly string[];
+  endpoints: readonly AvailableAgentEndpoint[];
   labels: TaskWorkspaceLabels;
   block: TaskWorkspace["blocks"][number];
-  onSaveExecutor: (executorName: string | null) => Promise<void>;
-  packageExecutorNames: readonly string[];
+  onSaveExecutor: (endpointId: string | null) => Promise<void>;
+  selectedEndpointId: string | null;
   onSavePrompt: (input: TaskWorkspacePromptSaveInput) => Promise<void>;
 }) {
   const [open, setOpen] = useState(initiallyOpen);
@@ -73,17 +74,16 @@ function BlockPromptDisclosure({
         <TaskWorkspaceExecutorSelect
           className="w-full min-w-0"
           compact
-          executorName={block.executor}
-          executorOptions={executorOptions}
+          endpoints={endpoints}
           inheritLabel={labels.inheritTaskExecutor}
           label={labels.blockExecutor}
           labels={{
-            custom: labels.customExecutor,
             saved: labels.executorSaved,
             saving: labels.executorSaving
           }}
           onSave={onSaveExecutor}
-          packageExecutorNames={packageExecutorNames}
+          selectedEndpointId={selectedEndpointId}
+          unavailableLabel={labels.unavailable}
         />
         <Badge className="min-w-0 max-w-full justify-self-center truncate" variant="outline">
           {block.status}
@@ -165,24 +165,28 @@ export function TaskWorkspaceOverview({
 }
 
 export function TaskWorkspaceOverviewPanel({
-  executorOptions,
+  agentEndpointsForBlock,
+  agentEndpointsForTask,
   focusedBlockRef,
   labels,
-  onSaveBlockExecutor,
+  onSaveBlockAgentEndpoint,
   onSaveBlockPrompt,
-  onSaveTaskExecutor,
+  onSaveTaskAgentEndpoint,
   onSaveTaskPrompt,
-  packageExecutorNames,
+  selectedAgentEndpointIdForBlock,
+  selectedAgentEndpointIdForTask,
   workspace
 }: {
-  executorOptions: readonly string[];
+  agentEndpointsForBlock: (blockRef: string) => AvailableAgentEndpoint[];
+  agentEndpointsForTask: readonly AvailableAgentEndpoint[];
   focusedBlockRef: string | null;
   labels: TaskWorkspaceLabels;
-  onSaveBlockExecutor: (blockRef: string, executorName: string | null) => Promise<void>;
+  onSaveBlockAgentEndpoint: (blockRef: string, endpointId: string | null) => Promise<void>;
   onSaveBlockPrompt: (blockRef: string, input: TaskWorkspacePromptSaveInput) => Promise<void>;
-  onSaveTaskExecutor: (executorName: string | null) => Promise<void>;
+  onSaveTaskAgentEndpoint: (endpointId: string) => Promise<void>;
   onSaveTaskPrompt: (input: TaskWorkspacePromptSaveInput) => Promise<void>;
-  packageExecutorNames: readonly string[];
+  selectedAgentEndpointIdForBlock: (blockRef: string) => string | null;
+  selectedAgentEndpointIdForTask: string;
   workspace: TaskWorkspace;
 }) {
   const runs = activeRuns(workspace);
@@ -205,16 +209,17 @@ export function TaskWorkspaceOverviewPanel({
             <p className="font-mono text-xs text-text-muted">{workspace.task.taskId}</p>
           </div>
           <TaskWorkspaceExecutorSelect
-            executorName={workspace.task.executor}
-            executorOptions={executorOptions}
+            endpoints={agentEndpointsForTask}
             label={labels.taskExecutor}
             labels={{
-              custom: labels.customExecutor,
               saved: labels.executorSaved,
               saving: labels.executorSaving
             }}
-            onSave={onSaveTaskExecutor}
-            packageExecutorNames={packageExecutorNames}
+            onSave={async (endpointId) => {
+              if (endpointId) await onSaveTaskAgentEndpoint(endpointId);
+            }}
+            selectedEndpointId={selectedAgentEndpointIdForTask}
+            unavailableLabel={labels.unavailable}
           />
         </header>
 
@@ -293,13 +298,13 @@ export function TaskWorkspaceOverviewPanel({
               return (
                 <BlockPromptDisclosure
                   block={block}
-                  executorOptions={executorOptions}
+                  endpoints={agentEndpointsForBlock(block.ref)}
                   initiallyOpen={initiallyOpen}
                   key={`${block.ref}:${initiallyOpen}`}
                   labels={labels}
-                  onSaveExecutor={(executorName) => onSaveBlockExecutor(block.ref, executorName)}
+                  onSaveExecutor={(endpointId) => onSaveBlockAgentEndpoint(block.ref, endpointId)}
                   onSavePrompt={(input) => onSaveBlockPrompt(block.ref, input)}
-                  packageExecutorNames={packageExecutorNames}
+                  selectedEndpointId={selectedAgentEndpointIdForBlock(block.ref)}
                 />
               );
             })}

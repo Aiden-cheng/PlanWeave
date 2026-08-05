@@ -27,6 +27,25 @@ import {
 afterEach(cleanupRendererTestEnvironment);
 
 describe("Task Workspace selected run controller", () => {
+  it("does not apply an explicit Block executor capability to the Task Endpoint selector", async () => {
+    const { api } = controllerApi({ readModel: () => null });
+    const { result } = renderHook(() => useControllerHarness(api, navigation()));
+
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    expect(
+      result.current.agentEndpointsForTask.find((endpoint) => endpoint.id === "local:codex")
+    ).toMatchObject({ available: true });
+    expect(
+      result.current
+        .agentEndpointsForBlock("T-001#B-001")
+        .find((endpoint) => endpoint.id === "local:codex")
+    ).toMatchObject({
+      available: false,
+      unavailableReason: "agent_endpoint_incompatible"
+    });
+  });
+
   it("opens a direct task target on Task Overview even when the workspace suggests a run", async () => {
     const { api } = controllerApi({ readModel: () => null });
     const taskNavigation = taskWorkspaceNavigationIdentity(

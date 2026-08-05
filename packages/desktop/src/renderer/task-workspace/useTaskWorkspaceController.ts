@@ -10,7 +10,16 @@ import type {
   TaskWorkspaceRunListItem,
   TaskWorkspaceRunsCursor
 } from "@planweave-ai/runtime";
+import type { DesktopAgentEndpointPreference } from "../../shared/desktopSettings";
 import { bridge } from "../bridge";
+import {
+  agentEndpointPreferenceKey,
+  selectedAgentEndpointId
+} from "../collaboration/agentEndpointPreferences";
+import {
+  applyAgentEndpointRequirements,
+  type AvailableAgentEndpoint
+} from "../collaboration/agentEndpointViewModel";
 import { runDurablePackageWrite } from "../collaboration/packageWriteAdapter";
 import type { AppViewHistoryController } from "../hooks/useAppViewHistory";
 import type { SharedCanvasCommandsResult } from "../hooks/useSharedCanvasCommands";
@@ -50,9 +59,10 @@ type TaskWorkspaceApi = Pick<
 
 type WorkspaceLoad = {
   error: string | null;
-  executorOptions: string[];
   key: string;
   packageExecutorNames: string[];
+  requiredCapabilitiesByBlockRef: Record<string, string[]>;
+  taskRequiredCapabilities: string[];
   status: "idle" | "loading" | "ready" | "error";
   workspace: TaskWorkspace | null;
 };
@@ -68,9 +78,10 @@ type RecordLoad = {
 
 const idleWorkspaceLoad: WorkspaceLoad = {
   error: null,
-  executorOptions: [],
   key: "",
   packageExecutorNames: [],
+  requiredCapabilitiesByBlockRef: {},
+  taskRequiredCapabilities: [],
   status: "idle",
   workspace: null
 };
@@ -128,12 +139,25 @@ function initialRunForNavigation(
 }
 
 export function useTaskWorkspaceController(options: {
+  agentEndpointCatalog: readonly AvailableAgentEndpoint[];
+  agentEndpointPreferences: Record<string, DesktopAgentEndpointPreference>;
   api?: TaskWorkspaceApi | null;
   history: AppViewHistoryController;
+  saveAgentEndpointPreference: (
+    key: string,
+    endpoint: AvailableAgentEndpoint | null
+  ) => Promise<void>;
   /** When enabled, task/block prompt and executor writes use shared canvas commands. */
   sharedCanvas?: SharedCanvasCommandsResult | null;
 }): TaskWorkspaceController {
-  const { api = bridge, history, sharedCanvas = null } = options;
+  const {
+    agentEndpointCatalog,
+    agentEndpointPreferences,
+    api = bridge,
+    history,
+    saveAgentEndpointPreference,
+    sharedCanvas = null
+  } = options;
   const navigation = history.taskWorkspaceNavigation;
   const [refreshVersion, setRefreshVersion] = useState(0);
   const refresh = useCallback(() => setRefreshVersion((current) => current + 1), []);
@@ -187,9 +211,10 @@ export function useTaskWorkspaceController(options: {
     if (!api) {
       setWorkspaceLoad({
         error: "Task Workspace bridge is unavailable.",
-        executorOptions: [],
         key,
         packageExecutorNames: [],
+        requiredCapabilitiesByBlockRef: {},
+        taskRequiredCapabilities: [],
         status: "error",
         workspace: null
       });
@@ -201,9 +226,10 @@ export function useTaskWorkspaceController(options: {
       }
       return {
         error: null,
-        executorOptions: [],
         key,
         packageExecutorNames: [],
+        requiredCapabilitiesByBlockRef: {},
+        taskRequiredCapabilities: [],
         status: "loading",
         workspace: null
       };
@@ -232,12 +258,14 @@ export function useTaskWorkspaceController(options: {
         if (!currentNavigation || taskWorkspaceAuthorityKey(currentNavigation) !== key) {
           return;
         }
-        if (!graph.tasks.some((task) => task.taskId === currentNavigation.taskId)) {
+        const graphTask = graph.tasks.find((task) => task.taskId === currentNavigation.taskId);
+        if (!graphTask) {
           setWorkspaceLoad({
             error: `Task '${currentNavigation.taskId}' is unavailable in the current graph view.`,
-            executorOptions: [],
             key,
             packageExecutorNames: [],
+            requiredCapabilitiesByBlockRef: {},
+            taskRequiredCapabilities: [],
             status: "error",
             workspace: null
           });
@@ -249,9 +277,10 @@ export function useTaskWorkspaceController(options: {
         ) {
           setWorkspaceLoad({
             error: `Block '${currentNavigation.blockRef}' is unavailable for task '${currentNavigation.taskId}'.`,
-            executorOptions: [],
             key,
             packageExecutorNames: [],
+            requiredCapabilitiesByBlockRef: {},
+            taskRequiredCapabilities: [],
             status: "error",
             workspace: null
           });
@@ -283,11 +312,22 @@ export function useTaskWorkspaceController(options: {
             })
           );
         }
+        const requiredCapabilitiesByBlockRef = Object.fromEntries(
+          graphTask.blocks.map((block) => [block.ref, [...block.requiredCapabilities]])
+        );
+        const taskRequiredCapabilities = [
+          ...new Set(
+            graphTask.blocks
+              .filter((block) => block.executor === null)
+              .flatMap((block) => block.requiredCapabilities)
+          )
+        ];
         setWorkspaceLoad({
           error: null,
-          executorOptions: graph.executorOptions,
           key,
           packageExecutorNames: graph.packageExecutorNames ?? [],
+          requiredCapabilitiesByBlockRef,
+          taskRequiredCapabilities,
           status: "ready",
           workspace
         });
@@ -298,9 +338,10 @@ export function useTaskWorkspaceController(options: {
         }
         setWorkspaceLoad({
           error: errorMessage(error),
-          executorOptions: [],
           key,
           packageExecutorNames: [],
+          requiredCapabilitiesByBlockRef: {},
+          taskRequiredCapabilities: [],
           status: "error",
           workspace: null
         });
@@ -315,7 +356,6 @@ export function useTaskWorkspaceController(options: {
         : null,
     [loadedWorkspace, sharedCanvas?.projection]
   );
-  const executorOptions = workspaceLoad.key === key ? workspaceLoad.executorOptions : [];
   const packageExecutorNames = workspaceLoad.key === key ? workspaceLoad.packageExecutorNames : [];
   const routedSelectedRun = useMemo(() => {
     if (!workspace || !navigation?.blockRef || !navigation.recordId) {
@@ -797,6 +837,97 @@ export function useTaskWorkspaceController(options: {
     sharedCanvas
   });
 
+  const agentEndpointsForTask = useMemo(
+    () =>
+      applyAgentEndpointRequirements(
+        agentEndpointCatalog,
+        workspaceLoad.key === key ? workspaceLoad.taskRequiredCapabilities : []
+      ),
+    [agentEndpointCatalog, key, workspaceLoad]
+  );
+  const agentEndpointsForBlock = useCallback(
+    (blockRef: string) =>
+      applyAgentEndpointRequirements(
+        agentEndpointCatalog,
+        workspaceLoad.key === key
+          ? (workspaceLoad.requiredCapabilitiesByBlockRef[blockRef] ?? [])
+          : []
+      ),
+    [agentEndpointCatalog, key, workspaceLoad]
+  );
+  const taskEndpointPreferenceKey = navigation
+    ? agentEndpointPreferenceKey({
+        projectRoot: navigation.projectRoot,
+        canvasId: navigation.canvasId,
+        scope: { kind: "task", taskId: navigation.taskId }
+      })
+    : null;
+  const selectedAgentEndpointIdForTask = selectedAgentEndpointId({
+    executorName: workspace?.task.executor ?? "manual",
+    preference: taskEndpointPreferenceKey
+      ? agentEndpointPreferences[taskEndpointPreferenceKey]
+      : undefined
+  });
+  const selectedAgentEndpointIdForBlock = useCallback(
+    (blockRef: string): string | null => {
+      const block = workspace?.blocks.find((candidate) => candidate.ref === blockRef);
+      if (!block || !navigation || !block.executor) return null;
+      const preferenceKey = agentEndpointPreferenceKey({
+        projectRoot: navigation.projectRoot,
+        canvasId: navigation.canvasId,
+        scope: { kind: "block", blockRef }
+      });
+      return selectedAgentEndpointId({
+        executorName: block.executor,
+        preference: agentEndpointPreferences[preferenceKey]
+      });
+    },
+    [agentEndpointPreferences, navigation, workspace]
+  );
+  const saveTaskAgentEndpoint = useCallback<TaskWorkspaceController["saveTaskAgentEndpoint"]>(
+    async (endpointId) => {
+      if (!taskEndpointPreferenceKey) {
+        throw new Error("Cannot save an Agent Endpoint without a Task Workspace identity.");
+      }
+      const endpoint = agentEndpointsForTask.find(
+        (candidate) => candidate.id === endpointId && candidate.available
+      );
+      if (!endpoint) throw new Error("The selected Agent Endpoint is unavailable.");
+      await saveTaskExecutor(endpoint.executorName);
+      await saveAgentEndpointPreference(taskEndpointPreferenceKey, endpoint);
+    },
+    [
+      agentEndpointsForTask,
+      saveAgentEndpointPreference,
+      saveTaskExecutor,
+      taskEndpointPreferenceKey
+    ]
+  );
+  const saveBlockAgentEndpoint = useCallback<TaskWorkspaceController["saveBlockAgentEndpoint"]>(
+    async (blockRef, endpointId) => {
+      if (!navigation) {
+        throw new Error("Cannot save an Agent Endpoint without a Task Workspace identity.");
+      }
+      const preferenceKey = agentEndpointPreferenceKey({
+        projectRoot: navigation.projectRoot,
+        canvasId: navigation.canvasId,
+        scope: { kind: "block", blockRef }
+      });
+      if (endpointId === null) {
+        await saveBlockExecutor(blockRef, null);
+        await saveAgentEndpointPreference(preferenceKey, null);
+        return;
+      }
+      const endpoint = agentEndpointsForBlock(blockRef).find(
+        (candidate) => candidate.id === endpointId && candidate.available
+      );
+      if (!endpoint) throw new Error("The selected Agent Endpoint is unavailable.");
+      await saveBlockExecutor(blockRef, endpoint.executorName);
+      await saveAgentEndpointPreference(preferenceKey, endpoint);
+    },
+    [agentEndpointsForBlock, navigation, saveAgentEndpointPreference, saveBlockExecutor]
+  );
+
   const liveStatus = useMemo<TaskWorkspaceLiveStatus>(() => {
     if (overviewSelected || !selectedRecordKey) return "idle";
     if (visibleRecordLoad.status === "loading") return "loading";
@@ -832,8 +963,9 @@ export function useTaskWorkspaceController(options: {
 
   return useMemo<TaskWorkspaceController>(
     () => ({
+      agentEndpointsForBlock,
+      agentEndpointsForTask,
       error,
-      executorOptions,
       getRunScrollTop: (recordId) => runScrollPositions.current.get(recordId) ?? 0,
       hasMoreRuns,
       liveStatus,
@@ -851,8 +983,10 @@ export function useTaskWorkspaceController(options: {
       returnToCanvas: history.returnToTaskWorkspaceSource,
       runnerModel: liveProjection.runnerModel,
       saveBlockExecutor,
+      saveBlockAgentEndpoint,
       saveBlockPrompt,
       saveTaskExecutor,
+      saveTaskAgentEndpoint,
       saveTaskPrompt,
       selectAnnotation,
       selectRun,
@@ -860,13 +994,16 @@ export function useTaskWorkspaceController(options: {
       selectedRecord,
       selectedRecordId,
       selectedRun: liveProjection.selectedRun,
+      selectedAgentEndpointIdForBlock,
+      selectedAgentEndpointIdForTask,
       status,
       subscriptionError: monitor.subscriptionError,
       workspace: liveProjection.workspace
     }),
     [
       error,
-      executorOptions,
+      agentEndpointsForBlock,
+      agentEndpointsForTask,
       hasMoreRuns,
       history.returnToTaskWorkspaceSource,
       liveStatus,
@@ -881,14 +1018,18 @@ export function useTaskWorkspaceController(options: {
       recordError,
       refresh,
       saveBlockExecutor,
+      saveBlockAgentEndpoint,
       saveBlockPrompt,
       saveTaskExecutor,
+      saveTaskAgentEndpoint,
       saveTaskPrompt,
       selectAnnotation,
       selectRun,
       selectedAnnotation,
       selectedRecordId,
       selectedRecord,
+      selectedAgentEndpointIdForBlock,
+      selectedAgentEndpointIdForTask,
       status
     ]
   );

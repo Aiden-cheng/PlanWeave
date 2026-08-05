@@ -980,7 +980,7 @@ describe("executor preflight desktop UI", () => {
       />
     );
 
-    expect(screen.getByRole("combobox", { name: "Logical executor" })).toHaveTextContent("codex");
+    expect(screen.getByRole("combobox", { name: "Agent Endpoint" })).toHaveTextContent("codex");
     await userEvent.click(screen.getByTestId("block-executor-preflight"));
     expect(bridgeMock.api.testExecutorProfile).toHaveBeenCalledWith(canvasRef, "codex-acp");
   });
@@ -1011,8 +1011,8 @@ describe("executor preflight desktop UI", () => {
       />
     );
 
-    expect(screen.getByRole("combobox", { name: "Logical executor" })).toHaveTextContent("codex");
-    expect(screen.getByRole("combobox", { name: "Logical executor" })).not.toHaveTextContent(
+    expect(screen.getByRole("combobox", { name: "Agent Endpoint" })).toHaveTextContent("codex");
+    expect(screen.getByRole("combobox", { name: "Agent Endpoint" })).not.toHaveTextContent(
       "Custom"
     );
   });

@@ -1,3 +1,4 @@
+import type { RemoteAgentEndpoint } from "@planweave-ai/collaboration-protocol/agent-endpoint";
 import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import type { DesktopCanvasReference, RemoteBlockExecutionReadModel } from "@planweave-ai/runtime";
 import { useMemo } from "react";
@@ -18,18 +19,30 @@ import type {
   RemoteRunAuthorizedActionKind,
   RemoteRunPanelViewModel
 } from "../collaboration/remoteRunViewModels";
-import type { LocalAgentEndpointInput } from "../collaboration/agentEndpointViewModel";
+import {
+  agentEndpointDisplayLabel,
+  type AvailableAgentEndpoint,
+  type LocalAgentEndpointInput
+} from "../collaboration/agentEndpointViewModel";
+import { inheritAgentEndpointValue } from "../collaboration/AgentEndpointSelect";
 
 export type RemoteRunPanelProps = {
+  agentEndpoints?: readonly AvailableAgentEndpoint[];
   workItem: WorkItemRef | null;
   runtimeRemoteExecution?: RemoteBlockExecutionReadModel | null;
   localAutoRunActive?: boolean;
   canvasRef?: DesktopCanvasReference | null;
   localAgentEndpoints?: readonly LocalAgentEndpointInput[];
   requiredProfileId?: string | null;
+  requiredAgentId?: RemoteAgentEndpoint["agentId"] | null;
   requiredCapabilities?: readonly string[];
   open?: boolean;
   api?: PlanWeaveCollaborationApi | null;
+  onAgentEndpointChange?: (endpointId: string) => void;
+  inheritAgentEndpointLabel?: string;
+  onRefreshAgentEndpoints?: () => Promise<void>;
+  refreshingAgentEndpoints?: boolean;
+  selectedAgentEndpointId?: string | null;
   t: ReturnType<typeof createTranslator>;
   className?: string;
 };
@@ -86,28 +99,41 @@ function phaseLabel(
 
 /** Unified local Auto Run and remote ACP execution control with distinct runtime authorities. */
 export function RemoteRunPanel({
+  agentEndpoints,
   workItem,
   runtimeRemoteExecution = null,
   localAutoRunActive = false,
   canvasRef = null,
   localAgentEndpoints = [],
   requiredProfileId = null,
+  requiredAgentId = null,
   requiredCapabilities = [],
   open = true,
   api,
+  onAgentEndpointChange,
+  inheritAgentEndpointLabel,
+  onRefreshAgentEndpoints,
+  refreshingAgentEndpoints,
+  selectedAgentEndpointId,
   t,
   className
 }: RemoteRunPanelProps) {
   const controller = useRemoteRunPanelController({
+    agentEndpoints,
     workItem,
     runtimeRemoteExecution,
     localAutoRunActive,
     canvasRef,
     localAgentEndpoints,
     requiredProfileId,
+    requiredAgentId,
     requiredCapabilities,
     open,
     api,
+    onAgentEndpointChange,
+    refreshAgentEndpoints: onRefreshAgentEndpoints,
+    refreshingAgentEndpoints,
+    selectedAgentEndpointId,
     t
   });
 
@@ -191,9 +217,12 @@ export function RemoteRunPanel({
             <SelectValue placeholder={t("agentEndpointPlaceholder")} />
           </SelectTrigger>
           <SelectContent>
+            {inheritAgentEndpointLabel ? (
+              <SelectItem value={inheritAgentEndpointValue}>{inheritAgentEndpointLabel}</SelectItem>
+            ) : null}
             {controller.agentEndpoints.map((endpoint) => (
               <SelectItem key={endpoint.id} value={endpoint.id} disabled={!endpoint.available}>
-                {endpoint.displayName} · {endpoint.locationName}
+                {agentEndpointDisplayLabel(endpoint)}
                 {!endpoint.available && endpoint.unavailableReason
                   ? ` — ${endpoint.unavailableReason}`
                   : ""}

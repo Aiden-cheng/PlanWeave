@@ -1,56 +1,38 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
-import { buildExecutorOptionViews, executorOptionName } from "../executors/executorOptionViewModel";
-
-const inheritExecutorValue = "__inherit";
+import {
+  AgentEndpointSelect,
+  inheritAgentEndpointValue
+} from "../collaboration/AgentEndpointSelect";
+import type { AvailableAgentEndpoint } from "../collaboration/agentEndpointViewModel";
 
 type ExecutorSaveStatus = "idle" | "saving" | "saved" | "error";
 
 export function TaskWorkspaceExecutorSelect({
   className,
   compact = false,
-  executorName,
-  executorOptions,
+  endpoints,
   inheritLabel,
   label,
   labels,
   onSave,
-  packageExecutorNames
+  selectedEndpointId,
+  unavailableLabel
 }: {
   className?: string;
   compact?: boolean;
-  executorName: string | null;
-  executorOptions: readonly string[];
+  endpoints: readonly AvailableAgentEndpoint[];
   inheritLabel?: string;
   label: string;
-  labels: { custom: string; saved: string; saving: string };
-  onSave: (executorName: string | null) => Promise<void>;
-  packageExecutorNames: readonly string[];
+  labels: { saved: string; saving: string };
+  onSave: (endpointId: string | null) => Promise<void>;
+  selectedEndpointId: string | null;
+  unavailableLabel: string;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<ExecutorSaveStatus>("idle");
-  const selectedValue = executorOptionName(
-    executorName ?? (inheritLabel ? inheritExecutorValue : "manual"),
-    packageExecutorNames
-  );
+  const selectedValue = selectedEndpointId ?? inheritAgentEndpointValue;
   const [displayedValue, setDisplayedValue] = useState(selectedValue);
-  const options = useMemo(
-    () =>
-      buildExecutorOptionViews({
-        currentExecutorNames: executorName ? [executorName] : inheritLabel ? [] : ["manual"],
-        executorOptions,
-        literalExecutorNames: packageExecutorNames
-      }),
-    [executorName, executorOptions, inheritLabel, packageExecutorNames]
-  );
 
   useEffect(() => {
     setDisplayedValue(selectedValue);
@@ -63,7 +45,7 @@ export function TaskWorkspaceExecutorSelect({
     setError(null);
     setStatus("saving");
     try {
-      await onSave(value === inheritExecutorValue ? null : value);
+      await onSave(value === inheritAgentEndpointValue ? null : value);
       setStatus("saved");
     } catch (caught: unknown) {
       setDisplayedValue(selectedValue);
@@ -80,36 +62,16 @@ export function TaskWorkspaceExecutorSelect({
       <div className="mb-1 text-[11px] font-semibold tracking-wide text-text-muted uppercase">
         {label}
       </div>
-      <Select
+      <AgentEndpointSelect
+        ariaLabel={label}
         disabled={status === "saving"}
+        endpoints={endpoints}
+        inheritLabel={inheritLabel}
         onValueChange={(value) => void save(value)}
-        value={displayedValue}
-      >
-        <SelectTrigger
-          aria-label={label}
-          className={cn("w-full", compact && "h-8 text-xs")}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectGroup>
-            {inheritLabel ? (
-              <SelectItem value={inheritExecutorValue}>{inheritLabel}</SelectItem>
-            ) : null}
-            {options.map((executor) => (
-              <SelectItem key={executor.name} value={executor.name}>
-                <span className="flex min-w-0 items-center gap-2">
-                  <span>{executor.label}</span>
-                  {executor.custom ? (
-                    <span className="text-xs text-muted-foreground">{labels.custom}</span>
-                  ) : null}
-                </span>
-              </SelectItem>
-            ))}
-          </SelectGroup>
-        </SelectContent>
-      </Select>
+        selectedEndpointId={displayedValue}
+        triggerClassName={cn("w-full", compact && "h-8 text-xs")}
+        unavailableLabel={unavailableLabel}
+      />
       {status === "saving" ? (
         <p className="mt-1 text-xs text-text-muted" role="status">
           {labels.saving}

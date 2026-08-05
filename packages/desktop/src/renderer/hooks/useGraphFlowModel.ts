@@ -2,14 +2,12 @@ import { useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { Edge } from "@xyflow/react";
 import type {
-  DesktopAgentDetection,
   DesktopBlockDetail,
   DesktopBlockRunRecordSummary,
   DesktopFeedbackRecord,
   DesktopGraphViewModel,
   DesktopLayout,
-  DesktopReviewAttemptSummary,
-  RunnerTransport
+  DesktopReviewAttemptSummary
 } from "@planweave-ai/runtime";
 import {
   graphEdges,
@@ -21,11 +19,11 @@ import {
 import { taskNodeLabels } from "../graph/taskNodeLabels";
 import type { createTranslator } from "../i18n";
 import type { AppFlowNode, TaskNodeData } from "../types";
+import type { AvailableAgentEndpoint } from "../collaboration/agentEndpointViewModel";
 
 type GraphFlowSource = {
-  agentDetections: DesktopAgentDetection[];
-  agentTransport?: RunnerTransport;
-  executorOptions: string[];
+  agentEndpoints: AvailableAgentEndpoint[];
+  selectedAgentEndpointIdForTask: (taskId: string, executorName: string) => string;
   graph: DesktopGraphViewModel | null;
   layout: DesktopLayout | null;
   selectedBlock: DesktopBlockDetail | null;
@@ -61,7 +59,7 @@ type GraphFlowTaskActions = {
   handlePromptHistoryRedo: TaskNodeData["onPromptHistoryRedo"];
   handlePromptHistoryUndo: TaskNodeData["onPromptHistoryUndo"];
   handlePromptSave: TaskNodeData["onPromptSave"];
-  handleTaskExecutorChange: TaskNodeData["onExecutorChange"];
+  handleTaskAgentEndpointChange: TaskNodeData["onAgentEndpointChange"];
   handleTitleChange: TaskNodeData["onTitleChange"];
   handleTitleSave: TaskNodeData["onTitleSave"];
   startAutoRunWithScope: TaskNodeData["onAutoRunScopeStart"];
@@ -97,9 +95,8 @@ export function useGraphFlowModel({
   taskActions
 }: UseGraphFlowModelArgs) {
   const {
-    agentDetections,
-    agentTransport,
-    executorOptions,
+    agentEndpoints,
+    selectedAgentEndpointIdForTask,
     graph,
     layout,
     selectedBlock,
@@ -129,7 +126,7 @@ export function useGraphFlowModel({
     handlePromptHistoryRedo,
     handlePromptHistoryUndo,
     handlePromptSave,
-    handleTaskExecutorChange,
+    handleTaskAgentEndpointChange,
     handleTitleChange,
     handleTitleSave,
     startAutoRunWithScope
@@ -153,10 +150,10 @@ export function useGraphFlowModel({
     };
     setNodes(
       graphNodes(
-        agentTransport ? { ...graph, agentTransport } : graph,
+        graph,
         layout,
-        agentDetections,
-        executorOptions,
+        agentEndpoints,
+        selectedAgentEndpointIdForTask,
         titleDrafts,
         promptDrafts,
         saveStates,
@@ -167,7 +164,7 @@ export function useGraphFlowModel({
         blockFeedbackRecords,
         handleTitleChange,
         handleTitleSave,
-        handleTaskExecutorChange,
+        handleTaskAgentEndpointChange,
         handlePromptChange,
         handlePromptSave,
         handlePromptHistoryRedo,
@@ -204,9 +201,8 @@ export function useGraphFlowModel({
     blockFeedbackRecords,
     blockReviewAttempts,
     blockRunRecords,
-    agentDetections,
-    agentTransport,
-    executorOptions,
+    agentEndpoints,
+    selectedAgentEndpointIdForTask,
     graph,
     handleDeleteBlock,
     handleDeleteTaskNode,
@@ -221,7 +217,7 @@ export function useGraphFlowModel({
     handlePromptHistoryRedo,
     handlePromptHistoryUndo,
     handlePromptSave,
-    handleTaskExecutorChange,
+    handleTaskAgentEndpointChange,
     handleTitleChange,
     handleTitleSave,
     layout,

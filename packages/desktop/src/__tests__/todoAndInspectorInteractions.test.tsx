@@ -202,9 +202,9 @@ describe("desktop renderer component interactions", () => {
       />
     );
 
-    await userEvent.click(screen.getByRole("combobox", { name: "Logical executor" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Agent Endpoint" }));
 
-    expect(await screen.findByRole("option", { name: "custom-shell" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: /^custom-shell/i })).toBeInTheDocument();
   });
 
   it("folds auto executor aliases and disables missing agents in the block inspector dropdown", async () => {
@@ -253,9 +253,9 @@ describe("desktop renderer component interactions", () => {
       />
     );
 
-    expect(screen.getByRole("combobox", { name: "Logical executor" })).toHaveTextContent("pi");
+    expect(screen.getByRole("combobox", { name: "Agent Endpoint" })).toHaveTextContent(/pi/i);
 
-    await userEvent.click(screen.getByRole("combobox", { name: "Logical executor" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Agent Endpoint" }));
 
     expect(await screen.findByRole("option", { name: /pi/i })).toHaveAttribute("data-disabled");
     expect(screen.queryByRole("option", { name: "pi-auto" })).not.toBeInTheDocument();
@@ -305,10 +305,10 @@ describe("desktop renderer component interactions", () => {
       />
     );
 
-    expect(screen.getByRole("combobox", { name: "Logical executor" })).toHaveTextContent(
+    expect(screen.getByRole("combobox", { name: "Agent Endpoint" })).toHaveTextContent(
       "legacy-executor"
     );
-    expect(screen.getByRole("combobox", { name: "Logical executor" })).not.toHaveTextContent(
+    expect(screen.getByRole("combobox", { name: "Agent Endpoint" })).not.toHaveTextContent(
       "Inherit"
     );
   });

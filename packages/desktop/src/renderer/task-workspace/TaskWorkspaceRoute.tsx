@@ -257,14 +257,16 @@ export function TaskWorkspaceRoute({
     ))
   ) : !controller.selectedRun ? (
     <TaskWorkspaceOverviewPanel
-      executorOptions={controller.executorOptions}
+      agentEndpointsForBlock={controller.agentEndpointsForBlock}
+      agentEndpointsForTask={controller.agentEndpointsForTask}
       focusedBlockRef={controller.navigation?.blockRef ?? null}
       labels={labels}
-      onSaveBlockExecutor={controller.saveBlockExecutor}
+      onSaveBlockAgentEndpoint={controller.saveBlockAgentEndpoint}
       onSaveBlockPrompt={controller.saveBlockPrompt}
-      onSaveTaskExecutor={controller.saveTaskExecutor}
+      onSaveTaskAgentEndpoint={controller.saveTaskAgentEndpoint}
       onSaveTaskPrompt={controller.saveTaskPrompt}
-      packageExecutorNames={controller.packageExecutorNames}
+      selectedAgentEndpointIdForBlock={controller.selectedAgentEndpointIdForBlock}
+      selectedAgentEndpointIdForTask={controller.selectedAgentEndpointIdForTask}
       workspace={controller.workspace}
     />
   ) : controller.recordError ? (

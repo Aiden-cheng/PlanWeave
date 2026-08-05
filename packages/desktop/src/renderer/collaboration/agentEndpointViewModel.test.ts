@@ -1,5 +1,143 @@
 import { describe, expect, it } from "vitest";
-import { buildAvailableAgentEndpoints, buildLocalAgentEndpoint } from "./agentEndpointViewModel";
+import {
+  applyAgentEndpointRequirements,
+  agentEndpointDisplayLabel,
+  buildAgentEndpointCatalog,
+  buildAvailableAgentEndpoints,
+  buildLocalAgentEndpoint
+} from "./agentEndpointViewModel";
+
+describe("buildAgentEndpointCatalog", () => {
+  it("keeps built-in, custom, and multiple same-family remote Endpoints together", () => {
+    const endpoints = buildAgentEndpointCatalog({
+      logicalExecutors: [
+        {
+          executorName: "codex",
+          profileId: "codex",
+          agentId: "codex",
+          displayName: "Codex",
+          capabilities: ["acp.codex"],
+          available: true,
+          unavailableReason: null,
+          custom: false
+        },
+        {
+          executorName: "custom-shell",
+          profileId: "custom-shell",
+          agentId: null,
+          displayName: "custom-shell",
+          capabilities: [],
+          available: true,
+          unavailableReason: null,
+          custom: true
+        }
+      ],
+      remote: [
+        {
+          schemaVersion: "agent-endpoint/v1",
+          endpointId: "endpoint-windows",
+          profileId: "codex-acp",
+          agentId: "codex",
+          displayName: "Codex",
+          hostDisplayName: "LINANIML",
+          status: "available",
+          capabilities: ["acp.codex"]
+        },
+        {
+          schemaVersion: "agent-endpoint/v1",
+          endpointId: "endpoint-vps",
+          profileId: "codex-acp",
+          agentId: "codex",
+          displayName: "Codex",
+          hostDisplayName: "VPS",
+          status: "available",
+          capabilities: ["acp.codex"]
+        }
+      ]
+    });
+
+    expect(endpoints.map((endpoint) => endpoint.id)).toEqual([
+      "local:codex",
+      "local:custom-shell",
+      "remote:endpoint-windows",
+      "remote:endpoint-vps"
+    ]);
+    expect(endpoints.map(agentEndpointDisplayLabel)).toEqual([
+      "Codex",
+      "custom-shell",
+      "Codex · LINANIML",
+      "Codex · VPS"
+    ]);
+    expect(endpoints.map((endpoint) => endpoint.executorName)).toEqual([
+      "codex",
+      "custom-shell",
+      "codex",
+      "codex"
+    ]);
+  });
+
+  it("keeps incompatible Endpoints visible but disabled", () => {
+    const endpoints = applyAgentEndpointRequirements(
+      buildAgentEndpointCatalog({
+        logicalExecutors: [
+          {
+            executorName: "codex",
+            profileId: "codex",
+            agentId: "codex",
+            displayName: "Codex",
+            capabilities: [],
+            available: true,
+            unavailableReason: null,
+            custom: false
+          }
+        ],
+        remote: []
+      }),
+      ["acp.codex"]
+    );
+
+    expect(endpoints[0]).toMatchObject({
+      id: "local:codex",
+      available: false,
+      unavailableReason: "agent_endpoint_incompatible"
+    });
+  });
+
+  it("does not let a same-named custom logic executor claim a remote Agent profile", () => {
+    const endpoints = buildAgentEndpointCatalog({
+      logicalExecutors: [
+        {
+          executorName: "codex-acp",
+          profileId: "codex-acp",
+          agentId: null,
+          displayName: "codex-acp",
+          capabilities: [],
+          available: true,
+          unavailableReason: null,
+          custom: true
+        }
+      ],
+      remote: [
+        {
+          schemaVersion: "agent-endpoint/v1",
+          endpointId: "endpoint-windows",
+          profileId: "codex-acp",
+          agentId: "codex",
+          displayName: "Codex",
+          hostDisplayName: "LINANIML",
+          status: "available",
+          capabilities: ["acp.codex"]
+        }
+      ]
+    });
+
+    expect(endpoints[1]).toMatchObject({
+      id: "remote:endpoint-windows",
+      available: false,
+      unavailableReason: "agent_endpoint_incompatible"
+    });
+  });
+});
 
 describe("buildLocalAgentEndpoint", () => {
   it.each([
@@ -29,6 +167,70 @@ describe("buildLocalAgentEndpoint", () => {
 });
 
 describe("buildAvailableAgentEndpoints", () => {
+  it("keeps local and remote instances distinct while suffixing only the remote Host", () => {
+    const endpoints = buildAvailableAgentEndpoints({
+      local: [
+        {
+          executorName: "codex",
+          displayName: "Codex",
+          locationName: "This device",
+          capabilities: ["acp.codex"],
+          available: true,
+          unavailableReason: null
+        }
+      ],
+      requiredProfileId: "codex",
+      requiredAgentId: "codex",
+      requiredCapabilities: ["acp.codex"],
+      remote: [
+        {
+          schemaVersion: "agent-endpoint/v1",
+          endpointId: "endpoint-windows",
+          profileId: "codex-acp",
+          agentId: "codex",
+          displayName: "Codex",
+          hostDisplayName: "LINANIML",
+          status: "available",
+          capabilities: ["acp.codex"]
+        }
+      ]
+    });
+
+    expect(endpoints.map((endpoint) => endpoint.id)).toEqual([
+      "local:codex",
+      "remote:endpoint-windows"
+    ]);
+    expect(endpoints.map(agentEndpointDisplayLabel)).toEqual(["Codex", "Codex · LINANIML"]);
+    expect(endpoints.every((endpoint) => endpoint.available)).toBe(true);
+  });
+
+  it("does not let an Agent-family match override a custom profile identity", () => {
+    const endpoints = buildAvailableAgentEndpoints({
+      local: [],
+      requiredProfileId: "custom-codex-review",
+      requiredAgentId: null,
+      requiredCapabilities: ["acp.codex"],
+      remote: [
+        {
+          schemaVersion: "agent-endpoint/v1",
+          endpointId: "endpoint-windows",
+          profileId: "codex-acp",
+          agentId: "codex",
+          displayName: "Codex",
+          hostDisplayName: "LINANIML",
+          status: "available",
+          capabilities: ["acp.codex"]
+        }
+      ]
+    });
+
+    expect(endpoints[0]).toMatchObject({
+      id: "remote:endpoint-windows",
+      available: false,
+      unavailableReason: "agent_endpoint_incompatible"
+    });
+  });
+
   it("merges all local candidates with compatible remote Endpoints", () => {
     const endpoints = buildAvailableAgentEndpoints({
       local: [

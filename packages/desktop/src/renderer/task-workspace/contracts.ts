@@ -6,6 +6,7 @@ import type {
   TaskWorkspaceBlock
 } from "@planweave-ai/runtime";
 import type { ReactNode } from "react";
+import type { AvailableAgentEndpoint } from "../collaboration/agentEndpointViewModel";
 import type { TaskWorkspaceNavigationIdentity } from "../taskWorkspaceNavigation";
 import type { TaskWorkspaceLayout } from "./useTaskWorkspaceLayout";
 
@@ -94,8 +95,9 @@ export type TaskWorkspaceLabels = {
 };
 
 export type TaskWorkspaceController = {
+  agentEndpointsForBlock: (blockRef: string) => AvailableAgentEndpoint[];
+  agentEndpointsForTask: AvailableAgentEndpoint[];
   error: string | null;
-  executorOptions: string[];
   getRunScrollTop: (recordId: string) => number;
   /** True when listTaskWorkspaceRuns returned a nextCursor that has not been exhausted. */
   hasMoreRuns: boolean;
@@ -112,8 +114,10 @@ export type TaskWorkspaceController = {
   returnToCanvas: () => void;
   runnerModel: RunnerRecordReadModel | null;
   saveBlockExecutor: (blockRef: string, executorName: string | null) => Promise<void>;
+  saveBlockAgentEndpoint: (blockRef: string, endpointId: string | null) => Promise<void>;
   saveBlockPrompt: (blockRef: string, input: TaskWorkspacePromptSaveInput) => Promise<void>;
   saveTaskExecutor: (executorName: string | null) => Promise<void>;
+  saveTaskAgentEndpoint: (endpointId: string) => Promise<void>;
   saveTaskPrompt: (input: TaskWorkspacePromptSaveInput) => Promise<void>;
   selectRun: (selection: { blockRef: string; recordId: string } | null) => void;
   selectAnnotation: (selection: { blockRef: string; annotationId: string }) => void;
@@ -122,6 +126,8 @@ export type TaskWorkspaceController = {
   /** The history-backed run target, available before its detail projection finishes loading. */
   selectedRecordId: string | null;
   selectedRun: TaskWorkspaceSelectedRun | null;
+  selectedAgentEndpointIdForBlock: (blockRef: string) => string | null;
+  selectedAgentEndpointIdForTask: string;
   status: TaskWorkspaceLoadStatus;
   subscriptionError: string | null;
   workspace: TaskWorkspace | null;

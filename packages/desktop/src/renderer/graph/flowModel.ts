@@ -1,6 +1,5 @@
 import { MarkerType, type Edge, type EdgeTypes } from "@xyflow/react";
 import type {
-  DesktopAgentDetection,
   DesktopBlockDetail,
   DesktopBlockRunRecordSummary,
   DesktopFeedbackRecord,
@@ -9,6 +8,10 @@ import type {
   DesktopReviewAttemptSummary
 } from "@planweave-ai/runtime";
 import type { AssigneeSurfaceIndex } from "../collaboration/assigneeSurfaceViewModels";
+import {
+  applyAgentEndpointRequirements,
+  type AvailableAgentEndpoint
+} from "../collaboration/agentEndpointViewModel";
 import {
   lookupBlockAssigneeChip,
   lookupTaskCardAssigneeChip
@@ -174,8 +177,8 @@ function parentRowWeight(
 export function graphNodes(
   graph: DesktopGraphViewModel,
   layout: DesktopLayout | null,
-  agentDetections: DesktopAgentDetection[],
-  executorOptions: string[],
+  agentEndpoints: readonly AvailableAgentEndpoint[],
+  selectedAgentEndpointIdForTask: (taskId: string, executorName: string) => string,
   titleDrafts: Record<string, string>,
   promptDrafts: Record<string, string>,
   saveStates: Record<string, TaskNodeData["saveState"]>,
@@ -186,7 +189,7 @@ export function graphNodes(
   blockFeedbackRecords: DesktopFeedbackRecord[],
   onTitleChange: TaskNodeData["onTitleChange"],
   onTitleSave: TaskNodeData["onTitleSave"],
-  onExecutorChange: TaskNodeData["onExecutorChange"],
+  onAgentEndpointChange: TaskNodeData["onAgentEndpointChange"],
   onPromptChange: TaskNodeData["onPromptChange"],
   onPromptSave: TaskNodeData["onPromptSave"],
   onPromptHistoryRedo: TaskNodeData["onPromptHistoryRedo"],
@@ -238,6 +241,13 @@ export function graphNodes(
     const resourceHighlighted = resourceUi.activeResource != null && activeMembers.has(task.taskId);
     const dimmed = resourceUi.activeResource != null && !activeMembers.has(task.taskId);
     const blockRefs = task.blocks.map((block) => block.ref);
+    const requiredCapabilities = Array.from(
+      new Set(
+        task.blocks
+          .filter((block) => block.executor === null)
+          .flatMap((block) => block.requiredCapabilities)
+      )
+    );
     const blockAssigneeChips: TaskNodeData["blockAssigneeChips"] = {};
     if (assigneeIndex) {
       for (const block of task.blocks) {
@@ -253,10 +263,11 @@ export function graphNodes(
         titleDraft: titleDrafts[task.taskId] ?? task.title,
         promptDraft: promptDrafts[task.taskId] ?? task.promptMarkdown,
         saveState: saveStates[task.taskId] ?? "idle",
-        agentDetections,
-        agentTransport: graph.agentTransport,
-        executorOptions,
-        packageExecutorNames: graph.packageExecutorNames,
+        agentEndpoints: applyAgentEndpointRequirements(agentEndpoints, requiredCapabilities),
+        selectedAgentEndpointId: selectedAgentEndpointIdForTask(
+          task.taskId,
+          task.executorLabel === "Mixed" ? "manual" : task.executorLabel
+        ),
         labels,
         selectedBlock,
         blockRunRecords,
@@ -302,7 +313,7 @@ export function graphNodes(
           : null,
         onTitleChange,
         onTitleSave,
-        onExecutorChange,
+        onAgentEndpointChange,
         onPromptChange,
         onPromptSave,
         onPromptHistoryRedo,

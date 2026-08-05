@@ -400,12 +400,24 @@ describe("useRemoteRunPanelController", () => {
 
     const { result } = renderHook(() =>
       useRemoteRunPanelController({
+        agentEndpoints: [
+          {
+            id: "remote:endpoint-vps",
+            source: "remote",
+            executorName: "codex",
+            displayName: "Codex",
+            locationName: "VPS",
+            capabilities: ["acp.codex"],
+            available: true,
+            unavailableReason: null,
+            remoteEndpointId: "endpoint-vps"
+          }
+        ],
         workItem: blockItem,
         runtimeRemoteExecution: activeRuntimeExecution,
         open: true,
         api,
-        localAgentEndpoints: [availableLocalEndpoint],
-        requiredProfileId: "codex-acp",
+        selectedAgentEndpointId: "remote:endpoint-vps",
         t: createTranslator("en"),
         createId: () => "id-fixed"
       })
@@ -418,10 +430,6 @@ describe("useRemoteRunPanelController", () => {
           expect.objectContaining({ id: "remote:endpoint-vps", available: true })
         ])
       );
-    });
-
-    act(() => {
-      result.current.setSelectedAgentEndpointId("remote:endpoint-vps");
     });
 
     await act(async () => {
@@ -904,7 +912,7 @@ describe("useRemoteRunPanelController", () => {
     expect(result.current.refreshingAgentEndpoints).toBe(false);
   });
 
-  it("refreshes endpoints and clears selection after a dispatch conflict", async () => {
+  it("refreshes endpoints and keeps the unavailable selection explicit after a dispatch conflict", async () => {
     const { api, dispatch, listAgentEndpoints } = createApi();
     dispatch.mockRejectedValueOnce({
       kind: "conflict",
@@ -947,7 +955,7 @@ describe("useRemoteRunPanelController", () => {
 
     expect(dispatch).toHaveBeenCalledOnce();
     expect(listAgentEndpoints).toHaveBeenCalledTimes(2);
-    expect(result.current.selectedAgentEndpointId).toBeNull();
+    expect(result.current.selectedAgentEndpointId).toBe("remote:endpoint-vps");
     expect(result.current.refreshingAgentEndpoints).toBe(false);
     expect(result.current.actionError).toContain("agent_endpoint_unavailable");
 
@@ -962,7 +970,7 @@ describe("useRemoteRunPanelController", () => {
     await act(async () => result.current.dispatch());
 
     expect(listAgentEndpoints).toHaveBeenCalledTimes(3);
-    expect(result.current.selectedAgentEndpointId).toBeNull();
+    expect(result.current.selectedAgentEndpointId).toBe("remote:endpoint-vps");
     expect(result.current.actionError).toContain("agent_endpoint_unavailable");
   });
 

@@ -9,6 +9,12 @@ import {
   applyPersistedPlanweaveHomeSetting
 } from "../main/desktopSettingsStore";
 import { desktopHomePaths } from "../main/planweaveHomePaths";
+import {
+  agentEndpointPreferenceKey,
+  clearAgentEndpointPreference,
+  selectedAgentEndpointId,
+  updateAgentEndpointPreferences
+} from "../renderer/collaboration/agentEndpointPreferences";
 
 const tempRoots: string[] = [];
 const originalPlanweaveHome = process.env.PLANWEAVE_HOME;
@@ -96,6 +102,28 @@ describe("DesktopSettingsStore", () => {
     await expect(store.read()).resolves.toEqual({
       ...defaultDesktopSettings,
       developerMode: true
+    });
+  });
+
+  it("persists concrete remote Agent Endpoint preferences separately from executors", async () => {
+    const home = await tempHome();
+    const store = testStore(join(home, "config", "desktop-settings.json"));
+    const key = JSON.stringify(["/projects/demo", "canvas-main", "block", "T-001#B-001"]);
+
+    await store.mergePatch({
+      execution: {
+        agentEndpointPreferences: {
+          [key]: { executorName: "codex", remoteEndpointId: "endpoint-windows" }
+        }
+      }
+    });
+
+    await expect(store.read()).resolves.toMatchObject({
+      execution: {
+        agentEndpointPreferences: {
+          [key]: { executorName: "codex", remoteEndpointId: "endpoint-windows" }
+        }
+      }
     });
   });
 
@@ -375,7 +403,10 @@ describe("DesktopSettingsStore", () => {
     });
 
     const patched = await store.mergePatch({ execution: { agentTransport: "cli" } });
-    expect(patched.execution).toEqual({ tmuxMonitoring: true, agentTransport: "cli" });
+    expect(patched.execution).toEqual({
+      ...defaultDesktopSettings.execution,
+      agentTransport: "cli"
+    });
 
     await writeFile(
       store.settingsFile,
@@ -543,5 +574,71 @@ describe("DesktopSettingsStore", () => {
     await expect(store.read()).resolves.toMatchObject({
       appearance: "light"
     });
+  });
+});
+
+describe("Agent Endpoint preferences", () => {
+  const key = agentEndpointPreferenceKey({
+    projectRoot: "/workspace/project",
+    canvasId: "default",
+    scope: { kind: "block", blockRef: "T-001#B-001" }
+  });
+
+  it("persists only the concrete remote Endpoint beside the logical executor", () => {
+    const preferences = updateAgentEndpointPreferences({
+      current: {},
+      key,
+      endpoint: {
+        id: "remote:endpoint-windows",
+        source: "remote",
+        executorName: "codex",
+        displayName: "Codex",
+        locationName: "LINANIML",
+        available: true,
+        unavailableReason: null,
+        capabilities: ["acp.codex"],
+        remoteEndpointId: "endpoint-windows"
+      }
+    });
+
+    expect(preferences[key]).toEqual({
+      executorName: "codex",
+      remoteEndpointId: "endpoint-windows"
+    });
+    expect(selectedAgentEndpointId({ executorName: "codex", preference: preferences[key] })).toBe(
+      "remote:endpoint-windows"
+    );
+  });
+
+  it("clears a remote preference when the user selects a local Endpoint", () => {
+    const preferences = updateAgentEndpointPreferences({
+      current: { [key]: { executorName: "codex", remoteEndpointId: "endpoint-windows" } },
+      key,
+      endpoint: {
+        id: "local:codex",
+        source: "local",
+        executorName: "codex",
+        displayName: "Codex",
+        locationName: "",
+        available: true,
+        unavailableReason: null,
+        capabilities: ["acp.codex"],
+        localExecutorName: "codex"
+      }
+    });
+
+    expect(preferences).toEqual({});
+    expect(selectedAgentEndpointId({ executorName: "codex", preference: undefined })).toBe(
+      "local:codex"
+    );
+  });
+
+  it("clears an explicit Block preference when the Block returns to inheritance", () => {
+    expect(
+      clearAgentEndpointPreference(
+        { [key]: { executorName: "codex", remoteEndpointId: "endpoint-windows" } },
+        key
+      )
+    ).toEqual({});
   });
 });

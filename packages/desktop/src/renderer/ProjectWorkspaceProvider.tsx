@@ -56,6 +56,9 @@ import { usePromptDrafts } from "./hooks/usePromptDrafts";
 import { useGraphDeleteActions } from "./hooks/useGraphDeleteActions";
 import { useTaskNodeFocus } from "./hooks/useTaskNodeFocus";
 import { useTaskExecutorActions } from "./hooks/useTaskExecutorActions";
+import { useTaskAgentEndpointSelection } from "./hooks/useTaskAgentEndpointSelection";
+import { useWorkspaceAgentEndpointCatalog } from "./hooks/useWorkspaceAgentEndpointCatalog";
+import { useWorkspaceAgentEndpointRun } from "./hooks/useWorkspaceAgentEndpointRun";
 import { useDesktopProjectActions } from "./hooks/useDesktopProjectActions";
 import { useGraphFlowModel } from "./hooks/useGraphFlowModel";
 import { useGraphHistoryActions } from "./hooks/useGraphHistoryActions";
@@ -100,7 +103,6 @@ import type {
   TaskWorkspaceNavigationTarget
 } from "./taskWorkspaceNavigation";
 
-const emptyExecutorOptions: string[] = [];
 type TaskCanvasSummary = DesktopProjectSummary["taskCanvases"][number];
 type AppSettingsRouteProps = ComponentProps<typeof AppSettingsRoute>;
 type ProjectSidebarProps = ComponentProps<typeof ProjectSidebar>;
@@ -277,7 +279,7 @@ export function ProjectWorkspaceProvider({
   const replicaGraph = useMemo(
     () =>
       sharedCanvasCommands.projection
-        ? canvasReplicaProjectionToDesktopGraph(sharedCanvasCommands.projection)
+        ? canvasReplicaProjectionToDesktopGraph(sharedCanvasCommands.projection, localGraph)
         : localGraph,
     [localGraph, sharedCanvasCommands.projection]
   );
@@ -292,6 +294,15 @@ export function ProjectWorkspaceProvider({
     graph: replicaGraph
   });
   const graph = collaborationRuntimeStatus.graph;
+  const agentEndpointCatalog = useWorkspaceAgentEndpointCatalog({
+    agentDetections,
+    agentTransport: settings.execution.agentTransport,
+    enabled: collaborationSurface.sessionConnected,
+    graph,
+    profileId: collaborationSurface.activeProfileId,
+    projectId: collaborationSurface.activeProjectId,
+    updateSettingsAndWait
+  });
 
   const pinnedProjectIds = useMemo(
     () => new Set(settings.pinnedProjectIds),
@@ -421,7 +432,10 @@ export function ProjectWorkspaceProvider({
     setError
   });
   const taskWorkspace = useTaskWorkspaceController({
+    agentEndpointCatalog: agentEndpointCatalog.endpoints,
+    agentEndpointPreferences: settings.execution.agentEndpointPreferences,
     history: appHistory,
+    saveAgentEndpointPreference: agentEndpointCatalog.savePreference,
     sharedCanvas: sharedCanvasCommands
   });
   const currentRouteRef = useRef(appHistory.route);
@@ -676,6 +690,26 @@ export function ProjectWorkspaceProvider({
     setError,
     sharedCanvas: sharedCanvasCommands
   });
+  const taskAgentEndpointSelection = useTaskAgentEndpointSelection({
+    agentEndpoints: agentEndpointCatalog.endpoints,
+    canvasId: selectedCanvasId,
+    changeLogicalExecutor: handleTaskExecutorChange,
+    preferences: settings.execution.agentEndpointPreferences,
+    projectRoot: selectedProject?.rootPath ?? null,
+    savePreference: agentEndpointCatalog.savePreference,
+    setError
+  });
+  const startAutoRunWithSelectedEndpoint = useWorkspaceAgentEndpointRun({
+    activeProjectId: collaborationSurface.activeProjectId,
+    agentEndpoints: agentEndpointCatalog.endpoints,
+    collaborationController: collaborationSurface.controller,
+    graph,
+    preferences: settings.execution.agentEndpointPreferences,
+    selectedCanvasId,
+    selectedProject,
+    setError,
+    startLocal: autoRunController.startAutoRunWithScope
+  });
 
   const {
     handleBindSourceRoot,
@@ -868,9 +902,8 @@ export function ProjectWorkspaceProvider({
       blockRunRecords
     },
     source: {
-      agentDetections,
-      agentTransport: settings.execution.agentTransport,
-      executorOptions: graph?.executorOptions ?? emptyExecutorOptions,
+      agentEndpoints: agentEndpointCatalog.endpoints,
+      selectedAgentEndpointIdForTask: taskAgentEndpointSelection.selectedEndpointId,
       graph,
       layout,
       selectedBlock,
@@ -893,10 +926,10 @@ export function ProjectWorkspaceProvider({
       handlePromptHistoryRedo: handleRedoGraph,
       handlePromptHistoryUndo: handleUndoGraph,
       handlePromptSave,
-      handleTaskExecutorChange,
+      handleTaskAgentEndpointChange: taskAgentEndpointSelection.changeEndpoint,
       handleTitleChange,
       handleTitleSave,
-      startAutoRunWithScope: autoRunController.startAutoRunWithScope
+      startAutoRunWithScope: startAutoRunWithSelectedEndpoint
     }
   });
 

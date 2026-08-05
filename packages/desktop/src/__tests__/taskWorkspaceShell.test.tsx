@@ -181,9 +181,67 @@ const workspace: TaskWorkspace = {
 };
 
 function controller(patch: Partial<TaskWorkspaceController> = {}): TaskWorkspaceController {
+  const agentEndpoints: TaskWorkspaceController["agentEndpointsForTask"] = [
+    {
+      id: "local:manual",
+      source: "local",
+      executorName: "manual",
+      displayName: "Manual",
+      locationName: "",
+      capabilities: [],
+      available: true,
+      unavailableReason: null,
+      localExecutorName: "manual"
+    },
+    {
+      id: "local:codex",
+      source: "local",
+      executorName: "codex",
+      displayName: "Codex",
+      locationName: "",
+      capabilities: [],
+      available: true,
+      unavailableReason: null,
+      localExecutorName: "codex"
+    },
+    {
+      id: "remote:codex-windows",
+      source: "remote",
+      executorName: "codex",
+      displayName: "Codex",
+      locationName: "LINANIML",
+      capabilities: [],
+      available: true,
+      unavailableReason: null,
+      remoteEndpointId: "codex-windows"
+    },
+    {
+      id: "local:claude-code",
+      source: "local",
+      executorName: "claude-code",
+      displayName: "Claude Code",
+      locationName: "",
+      capabilities: [],
+      available: true,
+      unavailableReason: null,
+      localExecutorName: "claude-code"
+    },
+    {
+      id: "local:pi",
+      source: "local",
+      executorName: "pi",
+      displayName: "Pi",
+      locationName: "",
+      capabilities: [],
+      available: true,
+      unavailableReason: null,
+      localExecutorName: "pi"
+    }
+  ];
   return {
+    agentEndpointsForBlock: () => agentEndpoints,
+    agentEndpointsForTask: agentEndpoints,
     error: null,
-    executorOptions: ["manual", "codex", "claude-code", "pi"],
     getRunScrollTop: () => 0,
     hasMoreRuns: false,
     liveStatus: "idle",
@@ -204,8 +262,10 @@ function controller(patch: Partial<TaskWorkspaceController> = {}): TaskWorkspace
     returnToCanvas: vi.fn(),
     runnerModel: null,
     saveBlockExecutor: vi.fn(async () => undefined),
+    saveBlockAgentEndpoint: vi.fn(async () => undefined),
     saveBlockPrompt: vi.fn(async () => undefined),
     saveTaskExecutor: vi.fn(async () => undefined),
+    saveTaskAgentEndpoint: vi.fn(async () => undefined),
     saveTaskPrompt: vi.fn(async () => undefined),
     selectAnnotation: vi.fn(),
     selectRun: vi.fn(),
@@ -213,6 +273,11 @@ function controller(patch: Partial<TaskWorkspaceController> = {}): TaskWorkspace
     selectedRecord: null,
     selectedRecordId: null,
     selectedRun: null,
+    selectedAgentEndpointIdForBlock: (blockRef) => {
+      const block = workspace.blocks.find((candidate) => candidate.ref === blockRef);
+      return block?.executor ? `local:${block.executor}` : null;
+    },
+    selectedAgentEndpointIdForTask: `local:${workspace.task.executor ?? "manual"}`,
     status: "ready",
     subscriptionError: null,
     workspace,
@@ -405,9 +470,9 @@ describe("Task Workspace shell", () => {
     render(<TaskWorkspaceRoute controller={controller()} labels={labels} />);
 
     const taskExecutor = screen.getByLabelText("Task executor");
-    expect(taskExecutor).toHaveTextContent("manual");
+    expect(taskExecutor).toHaveTextContent("Manual");
     fireEvent.click(taskExecutor);
-    expect(screen.getByRole("option", { name: "manual" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Manual" })).toBeInTheDocument();
     expect(
       screen.queryByRole("option", { name: /inherit canvas default/i })
     ).not.toBeInTheDocument();
@@ -415,8 +480,8 @@ describe("Task Workspace shell", () => {
 
   it("edits Task and Block executors from the overview while preserving current custom values", async () => {
     const fixture = taskWorkspaceInspectorFixture();
-    const saveTaskExecutor = vi.fn(async () => undefined);
-    const saveBlockExecutor = vi.fn(async () => undefined);
+    const saveTaskAgentEndpoint = vi.fn(async () => undefined);
+    const saveBlockAgentEndpoint = vi.fn(async () => undefined);
     const block = { ...fixture.selectedRun.block, runs: [] };
     const executorWorkspace = {
       ...fixture.workspace,
@@ -429,10 +494,24 @@ describe("Task Workspace shell", () => {
     render(
       <TaskWorkspaceRoute
         controller={controller({
-          executorOptions: ["manual", "codex", "claude-code", "pi"],
-          packageExecutorNames: [],
-          saveBlockExecutor,
-          saveTaskExecutor,
+          agentEndpointsForTask: [
+            ...controller().agentEndpointsForTask,
+            {
+              id: "local:legacy-agent",
+              source: "local",
+              executorName: "legacy-agent",
+              displayName: "legacy-agent",
+              locationName: "",
+              capabilities: [],
+              available: true,
+              unavailableReason: null,
+              localExecutorName: "legacy-agent"
+            }
+          ],
+          saveBlockAgentEndpoint,
+          saveTaskAgentEndpoint,
+          selectedAgentEndpointIdForBlock: () => "local:codex",
+          selectedAgentEndpointIdForTask: "local:legacy-agent",
           workspace: executorWorkspace
         })}
         labels={labels}
@@ -441,8 +520,8 @@ describe("Task Workspace shell", () => {
 
     fireEvent.click(screen.getByLabelText("Task executor"));
     expect(screen.getByRole("option", { name: "legacy-agent" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("option", { name: "claude-code" }));
-    expect(saveTaskExecutor).toHaveBeenCalledWith("claude-code");
+    fireEvent.click(screen.getByRole("option", { name: "Claude Code" }));
+    expect(saveTaskAgentEndpoint).toHaveBeenCalledWith("local:claude-code");
 
     const blockExecutor = screen.getByLabelText("Block executor");
     const blockSummary = blockExecutor.closest("summary");
@@ -458,19 +537,34 @@ describe("Task Workspace shell", () => {
 
     fireEvent.click(blockExecutor);
     fireEvent.click(screen.getByRole("option", { name: "Inherit Task" }));
-    expect(saveBlockExecutor).toHaveBeenCalledWith(block.ref, null);
+    expect(saveBlockAgentEndpoint).toHaveBeenCalledWith(block.ref, null);
+  });
+
+  it("uses the same local and remote Endpoint IDs in the Task Workspace selector", async () => {
+    const saveTaskAgentEndpoint = vi.fn(async () => undefined);
+    render(
+      <TaskWorkspaceRoute controller={controller({ saveTaskAgentEndpoint })} labels={labels} />
+    );
+
+    fireEvent.click(screen.getByLabelText("Task executor"));
+    expect(screen.getByRole("option", { name: "Codex" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("option", { name: "Codex · LINANIML" }));
+
+    expect(saveTaskAgentEndpoint).toHaveBeenCalledWith("remote:codex-windows");
   });
 
   it("keeps a newly selected Task executor visible while its save is pending", async () => {
     const pendingSave = deferred<void>();
-    const saveTaskExecutor = vi.fn(() => pendingSave.promise);
-    render(<TaskWorkspaceRoute controller={controller({ saveTaskExecutor })} labels={labels} />);
+    const saveTaskAgentEndpoint = vi.fn(() => pendingSave.promise);
+    render(
+      <TaskWorkspaceRoute controller={controller({ saveTaskAgentEndpoint })} labels={labels} />
+    );
 
     const taskExecutor = screen.getByLabelText("Task executor");
     fireEvent.click(taskExecutor);
-    fireEvent.click(screen.getByRole("option", { name: "codex" }));
+    fireEvent.click(screen.getByRole("option", { name: "Codex" }));
 
-    expect(taskExecutor).toHaveTextContent("codex");
+    expect(taskExecutor).toHaveTextContent("Codex");
     expect(taskExecutor).toBeDisabled();
 
     pendingSave.resolve(undefined);
@@ -478,13 +572,15 @@ describe("Task Workspace shell", () => {
   });
 
   it("keeps executor edit failures visible beside the selector", async () => {
-    const saveTaskExecutor = vi.fn(async () => {
+    const saveTaskAgentEndpoint = vi.fn(async () => {
       throw new Error("Executor profile is unavailable.");
     });
-    render(<TaskWorkspaceRoute controller={controller({ saveTaskExecutor })} labels={labels} />);
+    render(
+      <TaskWorkspaceRoute controller={controller({ saveTaskAgentEndpoint })} labels={labels} />
+    );
 
     fireEvent.click(screen.getByLabelText("Task executor"));
-    fireEvent.click(screen.getByRole("option", { name: "codex" }));
+    fireEvent.click(screen.getByRole("option", { name: "Codex" }));
 
     await waitFor(() =>
       expect(screen.getByRole("alert")).toHaveTextContent("Executor profile is unavailable.")

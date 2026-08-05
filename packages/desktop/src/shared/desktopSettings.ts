@@ -10,6 +10,10 @@ export type DesktopAcpAgentSettings = {
   modeId: string | null;
   configOptions: Record<string, DesktopAcpConfigValue>;
 };
+export type DesktopAgentEndpointPreference = {
+  executorName: string;
+  remoteEndpointId: string;
+};
 
 export type DesktopUiSettings = {
   runtimePath: string;
@@ -30,6 +34,7 @@ export type DesktopUiSettings = {
   execution: {
     tmuxMonitoring: boolean;
     agentTransport: DesktopAgentTransport;
+    agentEndpointPreferences: Record<string, DesktopAgentEndpointPreference>;
   };
   windowMaterial: {
     enabled: boolean;
@@ -139,7 +144,8 @@ export const defaultDesktopSettings: DesktopUiSettings = {
   },
   execution: {
     tmuxMonitoring: true,
-    agentTransport: "acp"
+    agentTransport: "acp",
+    agentEndpointPreferences: {}
   },
   windowMaterial: {
     enabled: false
@@ -345,6 +351,34 @@ function stringArray(value: unknown): string[] | undefined {
     : undefined;
 }
 
+function agentEndpointPreferences(
+  value: unknown
+): Record<string, DesktopAgentEndpointPreference> | undefined {
+  if (!isRecord(value)) return undefined;
+  const entries = Object.entries(value).flatMap(([key, preference]) => {
+    if (
+      !key ||
+      !isRecord(preference) ||
+      typeof preference.executorName !== "string" ||
+      !preference.executorName.trim() ||
+      typeof preference.remoteEndpointId !== "string" ||
+      !preference.remoteEndpointId.trim()
+    ) {
+      return [];
+    }
+    return [
+      [
+        key,
+        {
+          executorName: preference.executorName,
+          remoteEndpointId: preference.remoteEndpointId
+        }
+      ] as const
+    ];
+  });
+  return Object.fromEntries(entries);
+}
+
 function booleanField<T extends Record<string, boolean>>(
   defaults: T,
   source: unknown
@@ -466,10 +500,12 @@ export function normalizeDesktopSettingsPatch(value: unknown): DesktopSettingsPa
     const agentTransport = isAgentTransport(value.execution.agentTransport)
       ? value.execution.agentTransport
       : undefined;
-    if (execution || agentTransport) {
+    const endpointPreferences = agentEndpointPreferences(value.execution.agentEndpointPreferences);
+    if (execution || agentTransport || endpointPreferences) {
       patch.execution = {
         ...execution,
-        ...(agentTransport ? { agentTransport } : {})
+        ...(agentTransport ? { agentTransport } : {}),
+        ...(endpointPreferences ? { agentEndpointPreferences: endpointPreferences } : {})
       };
     }
   }

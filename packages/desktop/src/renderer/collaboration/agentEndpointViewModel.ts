@@ -3,6 +3,7 @@ import type { RemoteAgentEndpoint } from "@planweave-ai/collaboration-protocol/a
 export type AvailableAgentEndpoint = {
   id: string;
   source: "local" | "remote";
+  executorName: string;
   displayName: string;
   locationName: string;
   available: boolean;
@@ -11,6 +12,23 @@ export type AvailableAgentEndpoint = {
   localExecutorName?: string;
   remoteEndpointId?: string;
 };
+
+export type LogicalAgentEndpointInput = {
+  executorName: string;
+  profileId: string;
+  agentId: string | null;
+  displayName: string;
+  capabilities: string[];
+  available: boolean;
+  unavailableReason: string | null;
+  custom: boolean;
+};
+
+export function agentEndpointDisplayLabel(endpoint: AvailableAgentEndpoint): string {
+  return endpoint.source === "local"
+    ? endpoint.displayName
+    : `${endpoint.displayName} · ${endpoint.locationName}`;
+}
 
 export type LocalAgentEndpointInput = {
   executorName: string;
@@ -60,6 +78,7 @@ export function buildAvailableAgentEndpoints(input: {
   local: readonly LocalAgentEndpointInput[];
   remote: readonly RemoteAgentEndpoint[];
   requiredProfileId: string | null;
+  requiredAgentId?: RemoteAgentEndpoint["agentId"] | null;
   requiredCapabilities: readonly string[];
 }): AvailableAgentEndpoint[] {
   const local = input.local.map((endpoint): AvailableAgentEndpoint => {
@@ -71,6 +90,7 @@ export function buildAvailableAgentEndpoints(input: {
     return {
       id: `local:${endpoint.executorName}`,
       source: "local",
+      executorName: endpoint.executorName,
       displayName: endpoint.displayName,
       locationName: endpoint.locationName,
       capabilities: [...endpoint.capabilities],
@@ -84,13 +104,18 @@ export function buildAvailableAgentEndpoints(input: {
   });
   const remote = input.remote.map((endpoint): AvailableAgentEndpoint => {
     const profileCompatible =
-      input.requiredProfileId !== null && endpoint.profileId === input.requiredProfileId;
+      input.requiredProfileId !== null &&
+      (endpoint.profileId === input.requiredProfileId ||
+        (input.requiredAgentId !== null &&
+          input.requiredAgentId !== undefined &&
+          endpoint.agentId === input.requiredAgentId));
     const capabilitiesCompatible = input.requiredCapabilities.every((capability) =>
       endpoint.capabilities.includes(capability)
     );
     return {
       id: `remote:${endpoint.endpointId}`,
       source: "remote",
+      executorName: input.requiredProfileId ?? endpoint.profileId,
       displayName: endpoint.displayName,
       locationName: endpoint.hostDisplayName,
       capabilities: [...endpoint.capabilities],
@@ -105,4 +130,78 @@ export function buildAvailableAgentEndpoints(input: {
     };
   });
   return [...local, ...remote];
+}
+
+function remoteLogicalExecutor(
+  endpoint: RemoteAgentEndpoint,
+  logicalExecutors: readonly LogicalAgentEndpointInput[]
+): LogicalAgentEndpointInput | null {
+  const exactProfile = logicalExecutors.find(
+    (executor) => executor.profileId === endpoint.profileId && executor.agentId === endpoint.agentId
+  );
+  if (exactProfile) return exactProfile;
+  return (
+    logicalExecutors.find(
+      (executor) => !executor.custom && executor.agentId === endpoint.agentId
+    ) ?? null
+  );
+}
+
+/** Build the one user-facing local + remote Endpoint directory for a workspace. */
+export function buildAgentEndpointCatalog(input: {
+  logicalExecutors: readonly LogicalAgentEndpointInput[];
+  remote: readonly RemoteAgentEndpoint[];
+}): AvailableAgentEndpoint[] {
+  const local = input.logicalExecutors.map(
+    (executor): AvailableAgentEndpoint => ({
+      id: `local:${executor.executorName}`,
+      source: "local",
+      executorName: executor.executorName,
+      displayName: executor.displayName,
+      locationName: "",
+      available: executor.available,
+      unavailableReason: executor.unavailableReason,
+      capabilities: [...executor.capabilities],
+      localExecutorName: executor.executorName
+    })
+  );
+  const remote = input.remote.map((endpoint): AvailableAgentEndpoint => {
+    const logicalExecutor = remoteLogicalExecutor(endpoint, input.logicalExecutors);
+    return {
+      id: `remote:${endpoint.endpointId}`,
+      source: "remote",
+      executorName: logicalExecutor?.executorName ?? endpoint.agentId,
+      displayName: endpoint.displayName,
+      locationName: endpoint.hostDisplayName,
+      available: endpoint.status === "available" && logicalExecutor !== null,
+      unavailableReason:
+        endpoint.status === "available"
+          ? logicalExecutor
+            ? null
+            : "agent_endpoint_incompatible"
+          : (endpoint.unavailableReason ?? "agent_endpoint_unavailable"),
+      capabilities: [...endpoint.capabilities],
+      remoteEndpointId: endpoint.endpointId
+    };
+  });
+  return [...local, ...remote];
+}
+
+export function applyAgentEndpointRequirements(
+  endpoints: readonly AvailableAgentEndpoint[],
+  requiredCapabilities: readonly string[]
+): AvailableAgentEndpoint[] {
+  return endpoints.map((endpoint) => {
+    const compatible = requiredCapabilities.every((capability) =>
+      endpoint.capabilities.includes(capability)
+    );
+    return compatible
+      ? { ...endpoint, capabilities: [...endpoint.capabilities] }
+      : {
+          ...endpoint,
+          capabilities: [...endpoint.capabilities],
+          available: false,
+          unavailableReason: "agent_endpoint_incompatible"
+        };
+  });
 }

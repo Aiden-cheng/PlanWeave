@@ -48,8 +48,8 @@ function remoteManifest(): PlanPackageManifest {
   return manifest;
 }
 
-async function setup(withHost: boolean) {
-  const workspace = await createTestWorkspace(remoteManifest());
+async function setup(withHost: boolean, manifest: PlanPackageManifest = remoteManifest()) {
+  const workspace = await createTestWorkspace(manifest);
   directories.push(workspace.home, workspace.root);
   const dataDirectory = join(workspace.root, "server-data");
   const server = await startPlanweaveServer({
@@ -209,6 +209,39 @@ async function setupActiveV3EndpointOperation(idempotencyKey: string) {
 }
 
 describe("RemoteBlockCoordinator", () => {
+  it("routes a built-in logical executor through the selected Host ACP profile", async () => {
+    const manifest = basicManifest();
+    manifest.execution.defaultExecutor = "codex";
+    const fixture = await setup(true, manifest);
+    const endpoint = fixture.agentEndpoints.listVisible(fixture.locator.workspaceId).items[0];
+    if (!endpoint) throw new Error("expected_test_endpoint");
+
+    const outcome = await fixture.coordinator.dispatch({
+      ...fixture.locator,
+      blockRef: "T-001#B-001",
+      idempotencyKey: "built-in-codex-selected-endpoint",
+      agentEndpointId: endpoint.endpointId,
+      expectedResponsibilityRevision: 0,
+      expectedReviewerRevision: 0
+    });
+
+    expect(outcome).toMatchObject({
+      status: "activated",
+      operation: {
+        endpointSelection: {
+          agentId: "codex",
+          profileId: "codex-acp"
+        }
+      }
+    });
+    expect(fixture.mailbox.listAfter(fixture.host?.id ?? "", 0)[0]?.command).toMatchObject({
+      envelope: {
+        agentId: "codex",
+        agentProfileId: "codex-acp"
+      }
+    });
+  });
+
   it("uses one stable identity and replays claim, grants, mailbox enqueue, and publish", async () => {
     const fixture = await setup(true);
     const publish = vi.fn();

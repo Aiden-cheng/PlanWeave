@@ -14,11 +14,18 @@ import type {
 import { autoRunEventMatchesCanvas } from "./autoRunEvents";
 import { bridge, collaborationBridge } from "./bridge";
 import { runDurablePackageWrite } from "./collaboration/packageWriteAdapter";
+import {
+  agentEndpointPreferenceKey,
+  selectedAgentEndpointId
+} from "./collaboration/agentEndpointPreferences";
+import { applyAgentEndpointRequirements } from "./collaboration/agentEndpointViewModel";
+import { inheritAgentEndpointValue } from "./collaboration/AgentEndpointSelect";
 import { createTranslator, type Language } from "./i18n";
 import { BlockInspector } from "./inspector/BlockInspector";
 import { useCollaborationStatus } from "./hooks/useCollaborationStatus";
 import { useDetectedAgents } from "./hooks/useDetectedAgents";
 import { useDesktopSettingsBridge } from "./hooks/useDesktopSettingsBridge";
+import { useWorkspaceAgentEndpointCatalog } from "./hooks/useWorkspaceAgentEndpointCatalog";
 import { useSharedCanvasCommands } from "./hooks/useSharedCanvasCommands";
 import { isCollaborationSessionConnected } from "./collaboration/sessionState";
 
@@ -66,7 +73,7 @@ export function BlockInspectorWindow() {
   const [tmuxAvailable, setTmuxAvailable] = useState(false);
   const [error, setError] = useState<string | null>(bridge ? null : t("bridgeUnavailable"));
   const [draftDirty, setDraftDirty] = useState(false);
-  const { settings } = useDesktopSettingsBridge({ setError });
+  const { settings, updateSettingsAndWait } = useDesktopSettingsBridge({ setError });
   const { agentDetections } = useDetectedAgents();
   const draftDirtyRef = useRef(false);
 
@@ -216,6 +223,49 @@ export function BlockInspectorWindow() {
     onAuthoritativeChange: async () => {
       await refreshBlock();
     }
+  });
+  const agentEndpointCatalog = useWorkspaceAgentEndpointCatalog({
+    agentDetections,
+    agentTransport: settings.execution.agentTransport,
+    enabled: sharedCanvasEnabled,
+    graph,
+    profileId: activeCollaborationProfile?.profileId ?? null,
+    projectId: sharedProjectId,
+    updateSettingsAndWait
+  });
+  const graphBlock = graph?.tasks
+    .find((task) => task.taskId === selectedBlock?.taskId)
+    ?.blocks.find((block) => block.ref === selectedBlock?.ref);
+  const availableAgentEndpoints = useMemo(
+    () =>
+      applyAgentEndpointRequirements(
+        agentEndpointCatalog.endpoints,
+        graphBlock?.requiredCapabilities ?? []
+      ),
+    [agentEndpointCatalog.endpoints, graphBlock?.requiredCapabilities]
+  );
+  const endpointPreferenceKey = selectedBlock
+    ? agentEndpointPreferenceKey({
+        projectRoot,
+        canvasId: canvasId ?? "default",
+        scope: { kind: "block", blockRef: selectedBlock.ref }
+      })
+    : null;
+  const inheritedTaskPreferenceKey = selectedBlock
+    ? agentEndpointPreferenceKey({
+        projectRoot,
+        canvasId: canvasId ?? "default",
+        scope: { kind: "task", taskId: selectedBlock.taskId }
+      })
+    : null;
+  const selectedBlockAgentEndpointId = selectedAgentEndpointId({
+    executorName: selectedBlock?.executor ?? selectedBlock?.effectiveExecutor ?? "manual",
+    preference:
+      selectedBlock?.executor && endpointPreferenceKey
+        ? settings.execution.agentEndpointPreferences[endpointPreferenceKey]
+        : inheritedTaskPreferenceKey
+          ? settings.execution.agentEndpointPreferences[inheritedTaskPreferenceKey]
+          : undefined
   });
 
   const handleBlockSelect = useCallback(
@@ -367,7 +417,7 @@ export function BlockInspectorWindow() {
   const saveSelectedBlockExecutor = useCallback(
     async (executorName: string | null) => {
       if (!projectRoot || !selectedBlock) {
-        return;
+        return false;
       }
       try {
         const mode = await runDurablePackageWrite({
@@ -392,13 +442,40 @@ export function BlockInspectorWindow() {
             }
           }
         });
-        if (mode === "failed") return;
+        if (mode === "failed") return false;
         await refreshBlock();
+        return true;
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : String(caught));
+        return false;
       }
     },
     [canvasId, projectRoot, refreshBlock, selectedBlock, sharedCanvas]
+  );
+
+  const handleAgentEndpointChange = useCallback(
+    async (endpointId: string) => {
+      if (endpointId === inheritAgentEndpointValue) {
+        if (!endpointPreferenceKey || !(await saveSelectedBlockExecutor(null))) return;
+        await agentEndpointCatalog.savePreference(endpointPreferenceKey, null);
+        return;
+      }
+      const endpoint = availableAgentEndpoints.find(
+        (candidate) => candidate.id === endpointId && candidate.available
+      );
+      if (!endpoint || !endpointPreferenceKey) {
+        setError(endpoint?.unavailableReason ?? "agent_endpoint_selection_unavailable");
+        return;
+      }
+      if (!(await saveSelectedBlockExecutor(endpoint.executorName))) return;
+      await agentEndpointCatalog.savePreference(endpointPreferenceKey, endpoint);
+    },
+    [
+      availableAgentEndpoints,
+      agentEndpointCatalog.savePreference,
+      endpointPreferenceKey,
+      saveSelectedBlockExecutor
+    ]
   );
 
   const saveSelectedBlockPrompt = useCallback(async () => {
@@ -439,6 +516,7 @@ export function BlockInspectorWindow() {
 
   return (
     <BlockInspector
+      agentEndpoints={agentEndpointCatalog.endpoints}
       blockFeedbackRecords={blockFeedbackRecords}
       blockReviewAttempts={blockReviewAttempts}
       blockRunRecords={blockRunRecords}
@@ -453,13 +531,16 @@ export function BlockInspectorWindow() {
       onOpenTerminal={handleOpenTerminal}
       onOpenRunTerminal={handleOpenRunTerminal}
       onBlockSelect={handleBlockSelect}
+      onAgentEndpointChange={(endpointId) => void handleAgentEndpointChange(endpointId)}
       onClose={() => window.close()}
       onDraftDirtyChange={updateDraftDirty}
       onTerminalDefaultAppChange={handleTerminalDefaultAppChange}
-      saveSelectedBlockExecutor={saveSelectedBlockExecutor}
+      onRefreshAgentEndpoints={agentEndpointCatalog.refresh}
+      refreshingAgentEndpoints={agentEndpointCatalog.refreshing}
       saveSelectedBlockPrompt={saveSelectedBlockPrompt}
       saveSelectedBlockTitle={saveSelectedBlockTitle}
       selectedBlock={selectedBlock}
+      selectedAgentEndpointId={selectedBlockAgentEndpointId}
       selectedRunRecord={selectedRunRecord}
       setSelectedBlock={setSelectedBlock}
       setSelectedRunRecord={setSelectedRunRecord}

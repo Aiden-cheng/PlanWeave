@@ -216,6 +216,7 @@
         "windowExternalLinks.test.ts",
         "workAuthorityDesktop.test.ts",
         "workItemIdentity.test.ts",
+        "workspaceAgentEndpointRun.test.tsx",
         "workspaceTabsLazyRoutes.test.tsx"
       ],
       "integration": [

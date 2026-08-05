@@ -353,9 +353,11 @@ function controllerApi(options: { active: boolean; readModel: RunnerRecordReadMo
               title: "Implement",
               status: "in_progress" as const,
               executor: "codex",
+              requiredCapabilities: [],
               promptMissing: false,
               exceptionReason: null,
-              dispatchable: false
+              dispatchable: false,
+              remoteExecution: null
             }
           ],
           blockPreview: [],
@@ -417,7 +419,13 @@ function useControllerHarness(api: ReturnType<typeof controllerApi>) {
     }),
     [currentNavigation]
   );
-  return useTaskWorkspaceController({ api, history });
+  return useTaskWorkspaceController({
+    agentEndpointCatalog: [],
+    agentEndpointPreferences: {},
+    api,
+    history,
+    saveAgentEndpointPreference: async () => undefined
+  });
 }
 
 describe("Task Workspace clock isolation", () => {

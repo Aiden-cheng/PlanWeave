@@ -9,6 +9,7 @@ import {
   type TaskWorkspaceNavigationTarget
 } from "../../renderer/taskWorkspaceNavigation";
 import { useTaskWorkspaceController } from "../../renderer/task-workspace/useTaskWorkspaceController";
+import type { AvailableAgentEndpoint } from "../../renderer/collaboration/agentEndpointViewModel";
 import {
   navigation,
   projectedRun,
@@ -17,6 +18,32 @@ import {
   taskWorkspaceSource,
   workspaceHeader
 } from "./taskWorkspaceControllerModelFixture";
+
+const agentEndpointCatalog: AvailableAgentEndpoint[] = [
+  {
+    id: "local:manual",
+    source: "local",
+    executorName: "manual",
+    displayName: "Manual",
+    locationName: "",
+    capabilities: [],
+    available: true,
+    unavailableReason: null,
+    localExecutorName: "manual"
+  },
+  {
+    id: "local:codex",
+    source: "local",
+    executorName: "codex",
+    displayName: "Codex",
+    locationName: "",
+    capabilities: [],
+    available: true,
+    unavailableReason: null,
+    localExecutorName: "codex"
+  }
+];
+const saveAgentEndpointPreference = vi.fn(async () => undefined);
 
 function controllerApi(options: { readModel: (recordId: string) => RunnerRecordReadModel | null }) {
   const unsubscribes = new Map<string, ReturnType<typeof vi.fn>>();
@@ -79,7 +106,6 @@ function controllerApi(options: { readModel: (recordId: string) => RunnerRecordR
       projectTitle: "Demo",
       graphVersion: "pgv-1",
       packageFingerprint: "fingerprint-1",
-      executorOptions: ["manual", "codex", "claude-code", "pi"],
       packageExecutorNames: [],
       agentTransport: "acp" as const,
       autoRunPreflightExecutorHint: "codex",
@@ -102,9 +128,11 @@ function controllerApi(options: { readModel: (recordId: string) => RunnerRecordR
               title: "Implement",
               status: "in_progress" as const,
               executor: "codex",
+              requiredCapabilities: ["explicit-block-capability"],
               promptMissing: false,
               exceptionReason: null,
-              dispatchable: false
+              dispatchable: false,
+              remoteExecution: null
             }
           ],
           blockPreview: [],
@@ -190,7 +218,14 @@ function useControllerHarness(
     }),
     [currentNavigation, replaceTaskWorkspaceTarget]
   );
-  return useTaskWorkspaceController({ api, history, sharedCanvas });
+  return useTaskWorkspaceController({
+    agentEndpointCatalog,
+    agentEndpointPreferences: {},
+    api,
+    history,
+    saveAgentEndpointPreference,
+    sharedCanvas
+  });
 }
 
 function useControlledNavigationHarness(
@@ -212,7 +247,13 @@ function useControlledNavigationHarness(
     }),
     [currentNavigation]
   );
-  return useTaskWorkspaceController({ api, history });
+  return useTaskWorkspaceController({
+    agentEndpointCatalog,
+    agentEndpointPreferences: {},
+    api,
+    history,
+    saveAgentEndpointPreference
+  });
 }
 
 export { controllerApi, useControlledNavigationHarness, useControllerHarness };

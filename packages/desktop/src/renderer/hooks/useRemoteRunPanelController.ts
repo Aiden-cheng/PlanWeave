@@ -36,6 +36,7 @@ import {
 } from "../collaboration/agentEndpointViewModel";
 
 export type UseRemoteRunPanelControllerArgs = {
+  agentEndpoints?: readonly AvailableAgentEndpoint[];
   workItem: WorkItemRef | null;
   /** Runtime remoteExecution projection for the selected Block (local authority). */
   runtimeRemoteExecution?: RemoteBlockExecutionReadModel | null;
@@ -44,9 +45,14 @@ export type UseRemoteRunPanelControllerArgs = {
   canvasRef?: DesktopCanvasReference | null;
   localAgentEndpoints?: readonly LocalAgentEndpointInput[];
   requiredProfileId?: string | null;
+  requiredAgentId?: RemoteAgentEndpoint["agentId"] | null;
   requiredCapabilities?: readonly string[];
   open: boolean;
   api?: PlanWeaveCollaborationApi | null;
+  onAgentEndpointChange?: (endpointId: string) => void;
+  refreshAgentEndpoints?: () => Promise<void>;
+  refreshingAgentEndpoints?: boolean;
+  selectedAgentEndpointId?: string | null;
   t: ReturnType<typeof createTranslator>;
   /** Optional clock/random for deterministic tests. */
   createId?: () => string;
@@ -59,7 +65,7 @@ export type UseRemoteRunPanelControllerResult = {
   loadingInteractions: boolean;
   actionInFlight: RemoteRunAuthorizedActionKind | null;
   actionError: string | null;
-  agentEndpoints: AvailableAgentEndpoint[];
+  agentEndpoints: readonly AvailableAgentEndpoint[];
   selectedAgentEndpointId: string | null;
   setSelectedAgentEndpointId: (endpointId: string) => void;
   refreshingAgentEndpoints: boolean;
@@ -177,7 +183,9 @@ export function useRemoteRunPanelController(
 
   const [observation, setObservation] = useState<RemoteOperationObservation | null>(null);
   const [remoteAgentEndpoints, setRemoteAgentEndpoints] = useState<RemoteAgentEndpoint[]>([]);
-  const [selectedAgentEndpointId, setSelectedAgentEndpointIdState] = useState<string | null>(null);
+  const [selectedAgentEndpointIdState, setSelectedAgentEndpointIdState] = useState<string | null>(
+    null
+  );
   const [refreshingAgentEndpoints, setRefreshingAgentEndpoints] = useState(false);
   const [pendingInteractions, setPendingInteractions] = useState<RemoteInteractionView[]>([]);
   const [events, setEvents] = useState<RemoteEventReplay["events"]>([]);
@@ -199,23 +207,45 @@ export function useRemoteRunPanelController(
   const scopeKey = JSON.stringify([snapshot.projectId ?? null, workKey]);
   const scopeKeyRef = useRef(scopeKey);
 
-  const agentEndpoints = useMemo(
+  const discoveredAgentEndpoints = useMemo(
     () =>
       buildAvailableAgentEndpoints({
         local: args.localAgentEndpoints ?? [],
         remote: remoteAgentEndpoints,
         requiredProfileId: args.requiredProfileId ?? null,
+        requiredAgentId: args.requiredAgentId ?? null,
         requiredCapabilities: args.requiredCapabilities ?? []
       }),
     [
       args.localAgentEndpoints,
       args.requiredCapabilities,
+      args.requiredAgentId,
       args.requiredProfileId,
       remoteAgentEndpoints
     ]
   );
+  const agentEndpoints = args.agentEndpoints ?? discoveredAgentEndpoints;
+  const selectedAgentEndpointId =
+    args.selectedAgentEndpointId === undefined
+      ? selectedAgentEndpointIdState
+      : args.selectedAgentEndpointId;
+  const setSelectedAgentEndpointId = useCallback(
+    (endpointId: string) => {
+      if (args.onAgentEndpointChange) args.onAgentEndpointChange(endpointId);
+      else setSelectedAgentEndpointIdState(endpointId);
+    },
+    [args.onAgentEndpointChange]
+  );
 
   const refreshAgentEndpoints = useCallback(async () => {
+    if (args.refreshAgentEndpoints) {
+      await args.refreshAgentEndpoints();
+      return;
+    }
+    if (args.agentEndpoints) {
+      setRefreshingAgentEndpoints(false);
+      return;
+    }
     const requestGeneration = ++endpointRequestGenerationRef.current;
     const requestScopeKey = scopeKey;
     const requestScopeGeneration = scopeGenerationRef.current;
@@ -249,18 +279,7 @@ export function useRemoteRunPanelController(
         setRefreshingAgentEndpoints(false);
       }
     }
-  }, [api, sessionConnected, scopeKey]);
-
-  useEffect(() => {
-    if (
-      selectedAgentEndpointId !== null &&
-      !agentEndpoints.some(
-        (endpoint) => endpoint.id === selectedAgentEndpointId && endpoint.available
-      )
-    ) {
-      setSelectedAgentEndpointIdState(null);
-    }
-  }, [agentEndpoints, selectedAgentEndpointId]);
+  }, [api, args.agentEndpoints, args.refreshAgentEndpoints, sessionConnected, scopeKey]);
 
   useLayoutEffect(() => {
     if (scopeKeyRef.current !== scopeKey) {
@@ -512,7 +531,6 @@ export function useRemoteRunPanelController(
           mapped.kind === "conflict" &&
           mapped.code.startsWith("agent_endpoint_")
         ) {
-          setSelectedAgentEndpointIdState(null);
           try {
             await refreshAgentEndpoints();
           } catch (refreshError) {
@@ -680,8 +698,8 @@ export function useRemoteRunPanelController(
     actionError,
     agentEndpoints,
     selectedAgentEndpointId,
-    setSelectedAgentEndpointId: setSelectedAgentEndpointIdState,
-    refreshingAgentEndpoints,
+    setSelectedAgentEndpointId,
+    refreshingAgentEndpoints: args.refreshingAgentEndpoints ?? refreshingAgentEndpoints,
     legacyHostTargetPresent,
     refreshAgentEndpoints,
     confirmKind,

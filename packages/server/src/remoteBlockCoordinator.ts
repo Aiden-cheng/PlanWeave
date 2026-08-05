@@ -753,7 +753,7 @@ export class RemoteBlockCoordinator {
     candidate: RemoteBlockDispatchCandidate,
     revisions: { responsibilityRevision: number; reviewerRevision: number }
   ): EndpointSelectionSnapshot {
-    if (resolved.agentId !== candidate.agentId || resolved.profileId !== candidate.agentProfileId) {
+    if (resolved.agentId !== candidate.agentId) {
       throw new AgentEndpointCatalogError("agent_endpoint_incompatible");
     }
     return endpointSelectionSnapshotSchema.parse({
@@ -862,7 +862,6 @@ export class RemoteBlockCoordinator {
       resolved.hostDisplayName !== selection.hostDisplayName ||
       resolved.capabilities.length !== selection.capabilities.length ||
       resolved.capabilities.some((capability) => !selection.capabilities.includes(capability)) ||
-      resolved.profileId !== candidate.agentProfileId ||
       resolved.agentId !== candidate.agentId
     ) {
       throw new AgentEndpointCatalogError("agent_endpoint_incompatible");

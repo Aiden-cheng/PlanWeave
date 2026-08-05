@@ -26,21 +26,21 @@ import {
   CardTitle
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
-import { buildExecutorOptionViews, executorOptionName } from "../executors/executorOptionViewModel";
+import {
+  builtinExecutorAgentKind,
+  buildExecutorOptionViews,
+  executorOptionName
+} from "../executors/executorOptionViewModel";
 import { useExecutorPreflight } from "../hooks/useExecutorPreflight";
 import type { createTranslator } from "../i18n";
 import { isLocalAutoRunActiveFromBlockRecords } from "../collaboration/remoteRunViewModels";
-import { buildLocalAgentEndpoint } from "../collaboration/agentEndpointViewModel";
+import {
+  applyAgentEndpointRequirements,
+  buildLocalAgentEndpoint,
+  type AvailableAgentEndpoint
+} from "../collaboration/agentEndpointViewModel";
 import { AssigneeInspectorField } from "../team/AssigneeInspectorField";
 import { RemoteRunPanel } from "../team/RemoteRunPanel";
 import { WorkItemCollaborationPanel } from "../team/WorkItemCollaborationPanel";
@@ -51,6 +51,7 @@ import { BlockRunRecordCard } from "./BlockRunRecordCard";
 import { TerminalOpenButton } from "./TerminalOpenButton";
 
 type BlockInspectorProps = {
+  agentEndpoints?: readonly AvailableAgentEndpoint[];
   agentDetections?: DesktopAgentDetection[];
   agentTransport?: RunnerTransport;
   blockFeedbackRecords: DesktopFeedbackRecord[];
@@ -65,13 +66,16 @@ type BlockInspectorProps = {
   onOpenTerminal?: (recordId: string | null, appId: DesktopTerminalAppId) => Promise<void>;
   onOpenRunTerminal?: (recordId: string, appId: DesktopTerminalAppId) => Promise<void>;
   onBlockSelect: (ref: string) => Promise<void>;
+  onAgentEndpointChange?: (endpointId: string) => void;
   onClose: () => void;
   onDraftDirtyChange?: (dirty: boolean) => void;
   onTerminalDefaultAppChange?: (appId: DesktopTerminalAppId) => Promise<void> | void;
-  saveSelectedBlockExecutor: (executorName: string | null) => Promise<void>;
+  onRefreshAgentEndpoints?: () => Promise<void>;
+  refreshingAgentEndpoints?: boolean;
   saveSelectedBlockPrompt: () => Promise<void>;
   saveSelectedBlockTitle: () => Promise<void>;
   selectedBlock: DesktopBlockDetail | null;
+  selectedAgentEndpointId?: string | null;
   selectedRunRecord: DesktopRunRecord | null;
   setSelectedBlock: Dispatch<SetStateAction<DesktopBlockDetail | null>>;
   setSelectedRunRecord: Dispatch<SetStateAction<DesktopRunRecord | null>>;
@@ -86,6 +90,7 @@ type BlockInspectorProps = {
 const blockPromptAutosaveDelayMs = 700;
 
 export function BlockInspector({
+  agentEndpoints,
   agentDetections = [],
   agentTransport,
   blockFeedbackRecords,
@@ -100,13 +105,16 @@ export function BlockInspector({
   onOpenTerminal,
   onOpenRunTerminal,
   onBlockSelect,
+  onAgentEndpointChange,
   onClose,
   onDraftDirtyChange,
   onTerminalDefaultAppChange,
-  saveSelectedBlockExecutor,
+  onRefreshAgentEndpoints,
+  refreshingAgentEndpoints,
   saveSelectedBlockPrompt,
   saveSelectedBlockTitle,
   selectedBlock,
+  selectedAgentEndpointId,
   selectedRunRecord,
   setSelectedBlock,
   setSelectedRunRecord,
@@ -133,9 +141,6 @@ export function BlockInspector({
     ? t("tmuxTerminalNoLiveBlockSession")
     : t("tmuxTerminalNoBlockSession");
   const latestReviewAttempt = blockReviewAttempts[0];
-  const selectedExecutor = selectedBlock?.executor
-    ? executorOptionName(selectedBlock.executor, graph?.packageExecutorNames)
-    : "__inherit";
   const concreteExecutor = selectedBlock?.executor ?? selectedBlock?.effectiveExecutor ?? null;
   const concreteExecutorLabel = concreteExecutor
     ? executorOptionName(concreteExecutor, graph?.packageExecutorNames)
@@ -168,6 +173,10 @@ export function BlockInspector({
   const requiredProfileBinding = concreteExecutor
     ? graph?.executorProfileBindings?.find((binding) => binding.name === concreteExecutor)
     : undefined;
+  const builtinAgentKind = concreteExecutor ? builtinExecutorAgentKind(concreteExecutor) : null;
+  const requiredAgentId = builtinAgentKind
+    ? (requiredProfileBinding?.agentId ?? builtinAgentKind)
+    : null;
   const requiredProfileDetection = requiredProfileBinding?.agentId
     ? agentDetections.find(
         (detection) =>
@@ -221,6 +230,29 @@ export function BlockInspector({
         })
       )
   ];
+  const blockAgentEndpoints = agentEndpoints
+    ? applyAgentEndpointRequirements(
+        agentEndpoints.map((endpoint) =>
+          requiredLocalEndpoint && endpoint.id === `local:${requiredLocalEndpoint.executorName}`
+            ? {
+                ...endpoint,
+                available: endpoint.available && requiredLocalEndpoint.available,
+                unavailableReason:
+                  endpoint.available && requiredLocalEndpoint.available
+                    ? null
+                    : (requiredLocalEndpoint.unavailableReason ?? endpoint.unavailableReason)
+              }
+            : endpoint
+        ),
+        requiredCapabilities
+      )
+    : undefined;
+  const effectiveSelectedAgentEndpointId =
+    selectedAgentEndpointId === undefined
+      ? concreteExecutor
+        ? `local:${concreteExecutor}`
+        : null
+      : selectedAgentEndpointId;
   const blockPromptBaselineRef = useRef<{ promptMarkdown: string; ref: string } | null>(null);
   const taskBlocks = useMemo(() => {
     if (!graph || !selectedBlock) {
@@ -357,6 +389,7 @@ export function BlockInspector({
               t={t}
             />
             <RemoteRunPanel
+              agentEndpoints={blockAgentEndpoints}
               workItem={
                 selectedBlock
                   ? {
@@ -370,8 +403,14 @@ export function BlockInspector({
               localAutoRunActive={localAutoRunActive}
               canvasRef={canvasRef}
               localAgentEndpoints={localAgentEndpoints}
+              inheritAgentEndpointLabel={t("inheritExecutor")}
+              onAgentEndpointChange={onAgentEndpointChange}
+              onRefreshAgentEndpoints={onRefreshAgentEndpoints}
+              refreshingAgentEndpoints={refreshingAgentEndpoints}
               requiredProfileId={requiredProfileId}
+              requiredAgentId={requiredAgentId}
               requiredCapabilities={requiredCapabilities}
+              selectedAgentEndpointId={effectiveSelectedAgentEndpointId}
               t={t}
             />
             <WorkItemCollaborationPanel
@@ -398,42 +437,6 @@ export function BlockInspector({
                   {t("logicalExecutor")}
                 </div>
                 <p className="text-xs text-muted-foreground">{t("logicalExecutorHint")}</p>
-                <Select
-                  value={selectedExecutor}
-                  onValueChange={(value) =>
-                    void saveSelectedBlockExecutor(value === "__inherit" ? null : value)
-                  }
-                >
-                  <SelectTrigger aria-label={t("logicalExecutor")}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem value="__inherit">{t("inheritExecutor")}</SelectItem>
-                      {blockExecutorOptions.map((executor) => (
-                        <SelectItem
-                          disabled={executor.disabled}
-                          value={executor.name}
-                          key={executor.name}
-                        >
-                          <span className="flex min-w-0 items-center gap-2">
-                            <span>{executor.label}</span>
-                            {executor.custom ? (
-                              <span className="text-xs text-muted-foreground">
-                                {t("customExecutor")}
-                              </span>
-                            ) : null}
-                            {executor.disabled ? (
-                              <span className="text-xs text-muted-foreground">
-                                {t("unavailable")}
-                              </span>
-                            ) : null}
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
                 <div className="flex min-h-7 items-center gap-2 text-xs text-muted-foreground">
                   {!concreteExecutorLabel ? (
                     <span>{t("executorPreflightSelectConcrete")}</span>

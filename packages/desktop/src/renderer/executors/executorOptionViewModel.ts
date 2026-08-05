@@ -38,6 +38,27 @@ const executorAgentDetectionBindings: Record<string, ExecutorAgentDetectionBindi
   grok: { kind: "grok" }
 };
 
+export function builtinExecutorAgentKind(name: string): DesktopAgentKind | null {
+  if (!isBuiltinExecutorName(name)) {
+    return null;
+  }
+  return executorAgentDetectionBindings[canonicalBuiltinExecutorName(name)]?.kind ?? null;
+}
+
+const builtinExecutorDisplayNames: Record<string, string> = {
+  manual: "Manual",
+  codex: "Codex",
+  opencode: "OpenCode",
+  "claude-code": "Claude Code",
+  pi: "Pi",
+  grok: "Grok"
+};
+
+export function executorDisplayName(name: string): string {
+  const canonicalName = canonicalBuiltinExecutorName(name);
+  return builtinExecutorDisplayNames[canonicalName] ?? name;
+}
+
 export function canonicalExecutorName(name: string): string {
   return canonicalBuiltinExecutorName(name);
 }

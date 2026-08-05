@@ -1,6 +1,5 @@
 import type { Node } from "@xyflow/react";
 import type {
-  DesktopAgentDetection,
   DesktopAutoRunScope,
   DesktopBlockDetail,
   DesktopBlockRunRecordSummary,
@@ -8,11 +7,11 @@ import type {
   DesktopCanvasNodeViewModel,
   DesktopFeedbackRecord,
   DesktopReviewAttemptSummary,
-  DesktopTaskNodeViewModel,
-  RunnerTransport
+  DesktopTaskNodeViewModel
 } from "@planweave-ai/runtime";
 import type { DesktopSettingsPatch, DesktopUiSettings } from "../shared/desktopSettings";
 import type { CompactAssigneeChip } from "./collaboration/assigneeSurfaceViewModels";
+import type { AvailableAgentEndpoint } from "./collaboration/agentEndpointViewModel";
 import type { createTranslator } from "./i18n";
 import type { TaskWorkspaceNavigationTarget } from "./taskWorkspaceNavigation";
 export type {
@@ -71,10 +70,8 @@ export type TaskNodeData = {
   titleDraft: string;
   promptDraft: string;
   saveState: "idle" | "saving" | "saved" | "error";
-  agentDetections: DesktopAgentDetection[];
-  agentTransport?: RunnerTransport;
-  executorOptions: string[];
-  packageExecutorNames?: string[];
+  agentEndpoints: AvailableAgentEndpoint[];
+  selectedAgentEndpointId: string;
   labels: TaskNodeLabels;
   selectedBlock: DesktopBlockDetail | null;
   blockRunRecords: DesktopBlockRunRecordSummary[];
@@ -99,7 +96,7 @@ export type TaskNodeData = {
   } | null;
   onTitleChange: (taskId: string, value: string) => void;
   onTitleSave: (taskId: string) => void;
-  onExecutorChange: (taskId: string, executorName: string | null) => void;
+  onAgentEndpointChange: (taskId: string, endpointId: string) => void;
   onPromptChange: (taskId: string, value: string) => void;
   onPromptSave: (taskId: string) => void;
   onPromptHistoryRedo: () => Promise<void>;

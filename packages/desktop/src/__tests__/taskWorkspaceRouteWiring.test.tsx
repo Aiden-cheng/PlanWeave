@@ -29,9 +29,23 @@ function readyTaskWorkspace(
   fixture: ReturnType<typeof taskWorkspaceInspectorFixture>,
   patch: Partial<TaskWorkspaceController> = {}
 ): TaskWorkspaceController {
+  const agentEndpoints: TaskWorkspaceController["agentEndpointsForTask"] = [
+    {
+      id: "local:codex",
+      source: "local",
+      executorName: "codex",
+      displayName: "Codex",
+      locationName: "",
+      capabilities: [],
+      available: true,
+      unavailableReason: null,
+      localExecutorName: "codex"
+    }
+  ];
   return {
+    agentEndpointsForBlock: () => agentEndpoints,
+    agentEndpointsForTask: agentEndpoints,
     error: null,
-    executorOptions: ["manual", "codex", "claude-code", "pi"],
     getRunScrollTop: vi.fn(() => 0),
     hasMoreRuns: false,
     liveStatus: "live",
@@ -52,14 +66,18 @@ function readyTaskWorkspace(
     returnToCanvas: vi.fn(),
     runnerModel: fixture.selectedRecord.runnerReadModel,
     saveBlockExecutor: vi.fn(async () => undefined),
+    saveBlockAgentEndpoint: vi.fn(async () => undefined),
     saveBlockPrompt: vi.fn(async () => undefined),
     saveTaskExecutor: vi.fn(async () => undefined),
+    saveTaskAgentEndpoint: vi.fn(async () => undefined),
     saveTaskPrompt: vi.fn(async () => undefined),
     selectRun: vi.fn(),
     selectedAnnotation: null,
     selectedRecord: fixture.selectedRecord,
     selectedRecordId: fixture.selectedRun.item.run.record.recordId,
     selectedRun: fixture.selectedRun,
+    selectedAgentEndpointIdForBlock: () => "local:codex",
+    selectedAgentEndpointIdForTask: "local:codex",
     status: "ready",
     subscriptionError: null,
     workspace: fixture.workspace,

@@ -102,8 +102,20 @@ function nodeData(patch: Partial<TaskNodeData> = {}): TaskNodeData {
     titleDraft: "Task",
     promptDraft: "# Prompt",
     saveState: "idle",
-    agentDetections: [],
-    executorOptions: ["manual"],
+    agentEndpoints: [
+      {
+        id: "local:manual",
+        source: "local",
+        executorName: "manual",
+        displayName: "Manual",
+        locationName: "",
+        capabilities: [],
+        available: true,
+        unavailableReason: null,
+        localExecutorName: "manual"
+      }
+    ],
+    selectedAgentEndpointId: "local:manual",
     labels: taskNodeLabels(createTranslator("en")),
     selectedBlock: null,
     blockRunRecords: [],
@@ -112,7 +124,7 @@ function nodeData(patch: Partial<TaskNodeData> = {}): TaskNodeData {
     commentUi: null,
     onTitleChange: vi.fn(),
     onTitleSave: vi.fn(),
-    onExecutorChange: vi.fn(),
+    onAgentEndpointChange: vi.fn(),
     onPromptChange: vi.fn(),
     onPromptSave: vi.fn(),
     onPromptHistoryRedo: vi.fn().mockResolvedValue(undefined),
@@ -167,34 +179,114 @@ describe("TaskNodeCard prompt history shortcuts", () => {
 });
 
 describe("TaskNodeCard executor options", () => {
-  it("shows manifest custom executors in the task node dropdown", async () => {
+  it("shows distinct local and remote Agent Endpoints in the task node selector", async () => {
     stubSelectLayoutApis();
-    renderTaskNode(nodeData({ executorOptions: ["manual", "custom-shell"] }));
+    const onAgentEndpointChange = vi.fn();
+    const data = Object.assign(nodeData(), {
+      agentEndpoints: [
+        {
+          id: "local:codex",
+          source: "local" as const,
+          executorName: "codex",
+          displayName: "Codex",
+          locationName: "This device",
+          capabilities: ["acp.codex"],
+          available: true,
+          unavailableReason: null,
+          localExecutorName: "codex"
+        },
+        {
+          id: "remote:endpoint-windows",
+          source: "remote" as const,
+          executorName: "codex",
+          displayName: "Codex",
+          locationName: "LINANIML",
+          capabilities: ["acp.codex"],
+          available: true,
+          unavailableReason: null,
+          remoteEndpointId: "endpoint-windows"
+        }
+      ],
+      selectedAgentEndpointId: "local:codex",
+      onAgentEndpointChange
+    });
+    renderTaskNode(data);
+
+    await userEvent.click(screen.getByRole("combobox"));
+
+    expect(await screen.findByRole("option", { name: "Codex" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("option", { name: "Codex · LINANIML" }));
+    expect(onAgentEndpointChange).toHaveBeenCalledWith("T-001", "remote:endpoint-windows");
+  });
+
+  it("keeps built-in and remote Endpoints when a Plan Package adds a custom executor", async () => {
+    stubSelectLayoutApis();
+    renderTaskNode(
+      nodeData({
+        agentEndpoints: [
+          ...nodeData().agentEndpoints,
+          {
+            id: "local:codex",
+            source: "local",
+            executorName: "codex",
+            displayName: "Codex",
+            locationName: "",
+            capabilities: ["acp.codex"],
+            available: true,
+            unavailableReason: null,
+            localExecutorName: "codex"
+          },
+          {
+            id: "local:custom-shell",
+            source: "local",
+            executorName: "custom-shell",
+            displayName: "custom-shell",
+            locationName: "",
+            capabilities: [],
+            available: true,
+            unavailableReason: null,
+            localExecutorName: "custom-shell"
+          },
+          {
+            id: "remote:endpoint-windows",
+            source: "remote",
+            executorName: "codex",
+            displayName: "Codex",
+            locationName: "LINANIML",
+            capabilities: ["acp.codex"],
+            available: true,
+            unavailableReason: null,
+            remoteEndpointId: "endpoint-windows"
+          }
+        ]
+      })
+    );
 
     await userEvent.click(screen.getByRole("combobox"));
 
     expect(await screen.findByRole("option", { name: "custom-shell" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Codex" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Codex · LINANIML" })).toBeInTheDocument();
   });
 
-  it("disables detected missing agent executors in the task node dropdown", async () => {
+  it("disables unavailable Agent Endpoints in the task node dropdown", async () => {
     stubSelectLayoutApis();
     renderTaskNode(
       nodeData({
-        agentDetections: [
+        agentEndpoints: [
+          ...nodeData().agentEndpoints,
           {
-            kind: "pi",
-            runnerKind: "cli",
-            name: "Pi",
-            command: "pi",
-            versionArgs: ["--version"],
-            execArgs: ["-p"],
-            fullAccessArgs: ["-p"],
-            installed: false,
-            version: null,
-            unavailableReason: "not found"
+            id: "local:pi",
+            source: "local",
+            executorName: "pi",
+            displayName: "Pi",
+            locationName: "",
+            capabilities: [],
+            available: false,
+            unavailableReason: "not found",
+            localExecutorName: "pi"
           }
-        ],
-        executorOptions: ["manual", "pi", "pi-auto"]
+        ]
       })
     );
 

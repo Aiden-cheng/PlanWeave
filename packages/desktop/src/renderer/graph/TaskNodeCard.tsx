@@ -33,17 +33,9 @@ import {
   PopoverTitle,
   PopoverTrigger
 } from "@/components/ui/popover";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select";
+import { AgentEndpointSelect } from "../collaboration/AgentEndpointSelect";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { buildExecutorOptionViews, executorOptionName } from "../executors/executorOptionViewModel";
 import type { TaskFlowNode } from "../types";
 import { BlockPreviewButton } from "./BlockPreviewButton";
 import { CompactAssigneeChipView } from "../team/CompactAssigneeChip";
@@ -68,10 +60,8 @@ export function TaskNodeCard({ data, selected }: NodeProps<TaskFlowNode>) {
     titleDraft,
     promptDraft,
     saveState,
-    agentDetections,
-    agentTransport,
-    executorOptions,
-    packageExecutorNames,
+    agentEndpoints,
+    selectedAgentEndpointId,
     labels,
     selectedBlock,
     sharedResources = [],
@@ -85,7 +75,7 @@ export function TaskNodeCard({ data, selected }: NodeProps<TaskFlowNode>) {
     commentUi = null,
     onTitleChange,
     onTitleSave,
-    onExecutorChange,
+    onAgentEndpointChange,
     onPromptChange,
     onPromptHistoryRedo,
     onPromptHistoryUndo,
@@ -104,18 +94,6 @@ export function TaskNodeCard({ data, selected }: NodeProps<TaskFlowNode>) {
   } = data;
   const [taskCommentsOpen, setTaskCommentsOpen] = useState(false);
   const hasException = task.exceptions.length > 0;
-  const selectedExecutor =
-    task.executorLabel === "Mixed"
-      ? "__custom"
-      : executorOptionName(task.executorLabel, packageExecutorNames);
-  const taskExecutorOptions = buildExecutorOptionViews({
-    agentDetections,
-    agentTransport,
-    literalExecutorNames: packageExecutorNames,
-    currentExecutorNames:
-      selectedExecutor !== "__custom" && selectedExecutor ? [selectedExecutor] : [],
-    executorOptions
-  });
   const statusVisual = taskNodeStatusVisual(task.status, hasException);
   const highlightColor =
     resourceHighlighted && highlightedResource
@@ -187,44 +165,14 @@ export function TaskNodeCard({ data, selected }: NodeProps<TaskFlowNode>) {
               />
             </CardTitle>
             <CardDescription className="flex flex-wrap items-center gap-2">
-              <Select
-                value={selectedExecutor}
-                onValueChange={(value) => onExecutorChange(task.taskId, value)}
-              >
-                <SelectTrigger className="h-7 w-28 border-border/80 bg-surface-base text-xs text-text shadow-none">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {selectedExecutor === "__custom" ? (
-                      <SelectItem value="__custom" disabled>
-                        {labels.customExecutor}
-                      </SelectItem>
-                    ) : null}
-                    {taskExecutorOptions.map((executor) => (
-                      <SelectItem
-                        disabled={executor.disabled}
-                        value={executor.name}
-                        key={executor.name}
-                      >
-                        <span className="flex min-w-0 items-center gap-2">
-                          <span>{executor.label}</span>
-                          {executor.custom ? (
-                            <span className="text-xs text-muted-foreground">
-                              {labels.customExecutor}
-                            </span>
-                          ) : null}
-                          {executor.disabled ? (
-                            <span className="text-xs text-muted-foreground">
-                              {labels.unavailable}
-                            </span>
-                          ) : null}
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+              <AgentEndpointSelect
+                ariaLabel={labels.agent}
+                endpoints={agentEndpoints}
+                onValueChange={(value) => onAgentEndpointChange(task.taskId, value)}
+                selectedEndpointId={selectedAgentEndpointId}
+                triggerClassName="h-7 w-32 border-border/80 bg-surface-base text-xs text-text shadow-none"
+                unavailableLabel={labels.unavailable}
+              />
               {assigneeChip ? (
                 <CompactAssigneeChipView chip={assigneeChip} label={labels.assignee} size="sm" />
               ) : null}

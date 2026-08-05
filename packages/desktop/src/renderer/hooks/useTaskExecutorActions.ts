@@ -23,7 +23,7 @@ export function useTaskExecutorActions({
   const handleTaskExecutorChange = useCallback(
     async (taskId: string, executorName: string | null) => {
       if (!selectedProject) {
-        return;
+        return false;
       }
       try {
         const mode = await runDurablePackageWrite({
@@ -48,10 +48,12 @@ export function useTaskExecutorActions({
             }
           }
         });
-        if (mode === "failed") return;
+        if (mode === "failed") return false;
         await refreshGraph();
+        return true;
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : String(caught));
+        return false;
       }
     },
     [refreshGraph, selectedCanvasId, selectedProject, setError, sharedCanvas]

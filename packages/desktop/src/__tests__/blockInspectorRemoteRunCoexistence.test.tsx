@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   DesktopAgentDetection,
@@ -17,6 +17,12 @@ const remoteRunPanelPropsSpy = vi.fn();
 
 vi.mock("../renderer/team/RemoteRunPanel", () => ({
   RemoteRunPanel: (props: {
+    agentEndpoints?: Array<{
+      id: string;
+      source: "local" | "remote";
+      displayName: string;
+      locationName: string;
+    }>;
     localAutoRunActive?: boolean;
     localAgentEndpoints?: Array<{
       executorName: string;
@@ -24,6 +30,9 @@ vi.mock("../renderer/team/RemoteRunPanel", () => ({
       capabilities: string[];
     }>;
     requiredProfileId?: string | null;
+    requiredAgentId?: string | null;
+    onAgentEndpointChange?: (endpointId: string) => void;
+    selectedAgentEndpointId?: string | null;
     workItem: { blockRef?: string } | null;
   }) => {
     remoteRunPanelPropsSpy(props);
@@ -34,10 +43,25 @@ vi.mock("../renderer/team/RemoteRunPanel", () => ({
       >
         <label>
           Agent Endpoint
-          <select aria-label="Agent Endpoint">
-            {props.localAgentEndpoints?.map((endpoint) => (
-              <option key={endpoint.executorName}>{endpoint.executorName}</option>
+          <select
+            aria-label="Agent Endpoint"
+            onChange={(event) => props.onAgentEndpointChange?.(event.target.value)}
+            value={props.selectedAgentEndpointId ?? ""}
+          >
+            {(props.agentEndpoints ?? []).map((endpoint) => (
+              <option key={endpoint.id} value={endpoint.id}>
+                {endpoint.source === "remote"
+                  ? `${endpoint.displayName} · ${endpoint.locationName}`
+                  : endpoint.displayName}
+              </option>
             ))}
+            {!props.agentEndpoints
+              ? props.localAgentEndpoints?.map((endpoint) => (
+                  <option key={endpoint.executorName} value={`local:${endpoint.executorName}`}>
+                    {endpoint.executorName}
+                  </option>
+                ))
+              : null}
           </select>
         </label>
       </div>
@@ -144,6 +168,72 @@ function unfinishedRecord(): DesktopBlockRunRecordSummary {
 }
 
 describe("BlockInspector remote run coexistence wiring", () => {
+  it("consumes the shared local and remote Endpoint catalog with distinct IDs", () => {
+    const onAgentEndpointChange = vi.fn();
+    render(
+      <BlockInspector
+        agentEndpoints={[
+          {
+            id: "local:codex",
+            source: "local",
+            executorName: "codex",
+            displayName: "Codex",
+            locationName: "",
+            capabilities: [],
+            available: true,
+            unavailableReason: null,
+            localExecutorName: "codex"
+          },
+          {
+            id: "remote:codex-windows",
+            source: "remote",
+            executorName: "codex",
+            displayName: "Codex",
+            locationName: "LINANIML",
+            capabilities: [],
+            available: true,
+            unavailableReason: null,
+            remoteEndpointId: "codex-windows"
+          }
+        ]}
+        blockFeedbackRecords={[]}
+        blockReviewAttempts={[]}
+        blockRunRecords={[]}
+        error={null}
+        executorOptions={["codex"]}
+        graph={null}
+        handleOpenRunRecord={vi.fn()}
+        onAgentEndpointChange={onAgentEndpointChange}
+        onBlockSelect={vi.fn()}
+        onClose={vi.fn()}
+        saveSelectedBlockPrompt={vi.fn()}
+        saveSelectedBlockTitle={vi.fn()}
+        selectedAgentEndpointId="local:codex"
+        selectedBlock={selectedBlock({ executor: "codex" })}
+        selectedRunRecord={null}
+        setSelectedBlock={vi.fn()}
+        setSelectedRunRecord={vi.fn()}
+        t={createTranslator("en")}
+      />
+    );
+
+    const selector = screen.getByRole("combobox", { name: "Agent Endpoint" });
+    expect(screen.getByRole("option", { name: "Codex" })).toHaveValue("local:codex");
+    expect(screen.getByRole("option", { name: "Codex · LINANIML" })).toHaveValue(
+      "remote:codex-windows"
+    );
+    fireEvent.change(selector, { target: { value: "remote:codex-windows" } });
+    expect(onAgentEndpointChange).toHaveBeenCalledWith("remote:codex-windows");
+    expect(remoteRunPanelPropsSpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        agentEndpoints: expect.arrayContaining([
+          expect.objectContaining({ id: "local:codex" }),
+          expect.objectContaining({ id: "remote:codex-windows" })
+        ])
+      })
+    );
+  });
+
   it("passes localAutoRunActive when the selected Block has an unfinished local run", () => {
     render(
       <BlockInspector
@@ -175,7 +265,8 @@ describe("BlockInspector remote run coexistence wiring", () => {
       expect.objectContaining({
         localAutoRunActive: true,
         localAgentEndpoints: [expect.objectContaining({ executorName: "codex" })],
-        requiredProfileId: "codex"
+        requiredProfileId: "codex",
+        requiredAgentId: "codex"
       })
     );
     expect(screen.getByRole("combobox", { name: "Agent Endpoint" })).toBeInTheDocument();
@@ -269,7 +360,8 @@ describe("BlockInspector remote run coexistence wiring", () => {
             capabilities
           })
         ],
-        requiredProfileId: "codex-acp"
+        requiredProfileId: "codex-acp",
+        requiredAgentId: "codex"
       })
     );
   });
