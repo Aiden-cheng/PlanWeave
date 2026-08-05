@@ -1,11 +1,54 @@
 import { describe, expect, it } from "vitest";
 import {
   applyAgentEndpointRequirements,
+  applyAgentEndpointTaskScopeSupport,
   agentEndpointDisplayLabel,
   buildAgentEndpointCatalog,
   buildAvailableAgentEndpoints,
   buildLocalAgentEndpoint
 } from "./agentEndpointViewModel";
+
+describe("applyAgentEndpointTaskScopeSupport", () => {
+  it("keeps remote Endpoints visible but disables Task scope without hiding prior failures", () => {
+    const local = {
+      id: "local:codex",
+      source: "local" as const,
+      executorName: "codex",
+      displayName: "Codex",
+      locationName: "",
+      available: true,
+      unavailableReason: null,
+      capabilities: ["acp.codex"]
+    };
+    const remote = {
+      id: "remote:endpoint-windows",
+      source: "remote" as const,
+      executorName: "codex",
+      displayName: "Codex",
+      locationName: "LINANIML",
+      available: true,
+      unavailableReason: null,
+      capabilities: ["acp.codex"],
+      remoteEndpointId: "endpoint-windows"
+    };
+    const offline = {
+      ...remote,
+      id: "remote:endpoint-offline",
+      available: false,
+      unavailableReason: "host_offline"
+    };
+
+    expect(applyAgentEndpointTaskScopeSupport([local, remote, offline])).toEqual([
+      local,
+      {
+        ...remote,
+        available: false,
+        unavailableReason: "agent_endpoint_task_scope_unsupported"
+      },
+      offline
+    ]);
+  });
+});
 
 describe("buildAgentEndpointCatalog", () => {
   it("keeps built-in, custom, and multiple same-family remote Endpoints together", () => {

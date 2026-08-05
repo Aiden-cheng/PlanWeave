@@ -37,7 +37,8 @@ export function useWorkspaceAgentEndpointCatalog(input: {
   const catalog = useAgentEndpointCatalog({
     enabled: input.enabled,
     logicalExecutors,
-    scopeKey: input.profileId && input.projectId ? `${input.profileId}:${input.projectId}` : null
+    profileId: input.profileId,
+    projectId: input.projectId
   });
   const savePreference = useCallback(
     async (key: string, endpoint: AvailableAgentEndpoint | null) => {

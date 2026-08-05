@@ -148,13 +148,13 @@ describe("workspace Agent Endpoint routing", () => {
     expect(setError).toHaveBeenCalledWith("agent_endpoint_incompatible");
   });
 
-  it("does not silently fall back to local execution for unsupported remote Task scope", async () => {
+  it("rejects the selected remote Task Endpoint before either dispatch or local fallback", async () => {
     const { result, dispatch, setError, startLocal } = renderRun();
 
     await act(() => result.current({ kind: "task", taskId: "T-001" }));
 
     expect(dispatch).not.toHaveBeenCalled();
     expect(startLocal).not.toHaveBeenCalled();
-    expect(setError).toHaveBeenCalledWith("remote_task_scope_dispatch_unsupported");
+    expect(setError).toHaveBeenCalledWith("agent_endpoint_task_scope_unsupported");
   });
 });

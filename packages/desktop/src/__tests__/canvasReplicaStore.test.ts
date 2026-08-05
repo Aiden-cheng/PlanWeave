@@ -9,10 +9,12 @@ import {
   applyCanvasReplicaIntent,
   encodeCanvasReplicaDocument,
   parseCanvasReplicaDocument,
-  type CanvasReplicaDocument
+  type CanvasReplicaDocument,
+  type DesktopGraphViewModel
 } from "@planweave-ai/runtime";
 import { basicManifest } from "../../../runtime/src/__tests__/promptTestHelpers.js";
 import { CanvasReplicaStore } from "../main/collaboration/CanvasReplicaStore.js";
+import { canvasReplicaProjectionToDesktopGraph } from "../renderer/collaboration/canvasReplicaGraphAdapter.js";
 import type { CollaborationCanvasReplicaProjection } from "../shared/canvasReplicaIpc.js";
 
 function documentFixture(): CanvasReplicaDocument {
@@ -100,6 +102,72 @@ function accepted(
 }
 
 describe("CanvasReplicaStore", () => {
+  it("keeps the Runtime executor catalog while applying replica-owned canvas content", () => {
+    const runtimeGraph: DesktopGraphViewModel = {
+      projectId: "project-1",
+      projectTitle: "Local title",
+      graphVersion: "pgv-local",
+      packageFingerprint: `pkg-${"a".repeat(64)}`,
+      executorOptions: ["manual", "codex", "opencode", "claude-code", "pi", "grok"],
+      packageExecutorNames: ["package-review"],
+      executorProfileBindings: [
+        { name: "codex", agentId: "codex", runnerKind: "cli" },
+        { name: "package-review", agentId: null, runnerKind: null }
+      ],
+      agentTransport: "cli",
+      autoRunPreflightExecutorHint: "codex",
+      tasks: [],
+      edges: [],
+      sharedResourceGroups: [],
+      diagnostics: [],
+      dirtyPromptRefs: ["T-001#B-001"]
+    };
+    const replica: CollaborationCanvasReplicaProjection = {
+      authorityId: "authority-1",
+      localProjectId: "project-1",
+      localCanvasId: "canvas-main",
+      workspaceId: "workspace-1",
+      projectId: "remote-project-1",
+      canvasId: "canvas-main",
+      revision: 2,
+      contentDigest: "b".repeat(64),
+      canEdit: true,
+      optimisticOperationIds: [],
+      rejections: [],
+      content: {
+        projectTitle: "Shared title",
+        graphVersion: "pgv-shared",
+        packageFingerprint: `pkg-${"c".repeat(64)}`,
+        tasks: [],
+        edges: [],
+        sharedResourceGroups: [],
+        diagnostics: [],
+        layout: {
+          version: "desktop-layout/v1",
+          projectId: "project-1",
+          nodes: [],
+          updatedAt: "2026-08-05T00:00:00.000Z"
+        },
+        blockDependenciesByRef: {},
+        taskOpenFeedbackCountByTaskId: {},
+        blockPromptMarkdownByRef: {}
+      }
+    };
+
+    const graph = canvasReplicaProjectionToDesktopGraph(replica, runtimeGraph);
+
+    expect(graph).toMatchObject({
+      projectTitle: "Shared title",
+      graphVersion: "pgv-shared",
+      executorOptions: ["manual", "codex", "opencode", "claude-code", "pi", "grok"],
+      packageExecutorNames: ["package-review"],
+      executorProfileBindings: runtimeGraph.executorProfileBindings,
+      agentTransport: "cli",
+      autoRunPreflightExecutorHint: null
+    });
+    expect(graph.dirtyPromptRefs).toEqual([]);
+  });
+
   it("publishes only committed content to the durable replica listener", () => {
     const committed: Array<{ revision: number; contentDigest: string }> = [];
     const store = new CanvasReplicaStore(

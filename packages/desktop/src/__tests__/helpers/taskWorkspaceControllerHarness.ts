@@ -197,7 +197,8 @@ function controllerApi(options: { readModel: (recordId: string) => RunnerRecordR
 function useControllerHarness(
   api: ReturnType<typeof controllerApi>["api"],
   initialNavigation = navigation(),
-  sharedCanvas: SharedCanvasCommandsResult | null = null
+  sharedCanvas: SharedCanvasCommandsResult | null = null,
+  endpoints: readonly AvailableAgentEndpoint[] = agentEndpointCatalog
 ) {
   const [currentNavigation, setCurrentNavigation] = useState(initialNavigation);
   const replaceTaskWorkspaceTarget = useCallback(
@@ -219,7 +220,7 @@ function useControllerHarness(
     [currentNavigation, replaceTaskWorkspaceTarget]
   );
   return useTaskWorkspaceController({
-    agentEndpointCatalog,
+    agentEndpointCatalog: endpoints,
     agentEndpointPreferences: {},
     api,
     history,

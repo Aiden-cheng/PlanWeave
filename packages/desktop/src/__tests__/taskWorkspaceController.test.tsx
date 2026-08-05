@@ -27,6 +27,37 @@ import {
 afterEach(cleanupRendererTestEnvironment);
 
 describe("Task Workspace selected run controller", () => {
+  it("keeps a remote Endpoint available for Blocks but disables it for Task execution", async () => {
+    const { api } = controllerApi({ readModel: () => null });
+    const remoteEndpoint = {
+      id: "remote:endpoint-windows",
+      source: "remote" as const,
+      executorName: "codex",
+      displayName: "Codex",
+      locationName: "LINANIML",
+      capabilities: ["explicit-block-capability"],
+      available: true,
+      unavailableReason: null,
+      remoteEndpointId: "endpoint-windows"
+    };
+    const { result } = renderHook(() =>
+      useControllerHarness(api, navigation(), null, [remoteEndpoint])
+    );
+
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    expect(result.current.agentEndpointsForTask[0]).toMatchObject({
+      id: remoteEndpoint.id,
+      available: false,
+      unavailableReason: "agent_endpoint_task_scope_unsupported"
+    });
+    expect(result.current.agentEndpointsForBlock("T-001#B-001")[0]).toMatchObject({
+      id: remoteEndpoint.id,
+      available: true,
+      unavailableReason: null
+    });
+  });
+
   it("does not apply an explicit Block executor capability to the Task Endpoint selector", async () => {
     const { api } = controllerApi({ readModel: () => null });
     const { result } = renderHook(() => useControllerHarness(api, navigation()));

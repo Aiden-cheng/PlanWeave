@@ -179,7 +179,7 @@ describe("TaskNodeCard prompt history shortcuts", () => {
 });
 
 describe("TaskNodeCard executor options", () => {
-  it("shows distinct local and remote Agent Endpoints in the task node selector", async () => {
+  it("shows remote Task Endpoints as selected but disabled with the exact support reason", async () => {
     stubSelectLayoutApis();
     const onAgentEndpointChange = vi.fn();
     const data = Object.assign(nodeData(), {
@@ -202,12 +202,12 @@ describe("TaskNodeCard executor options", () => {
           displayName: "Codex",
           locationName: "LINANIML",
           capabilities: ["acp.codex"],
-          available: true,
-          unavailableReason: null,
+          available: false,
+          unavailableReason: "agent_endpoint_task_scope_unsupported",
           remoteEndpointId: "endpoint-windows"
         }
       ],
-      selectedAgentEndpointId: "local:codex",
+      selectedAgentEndpointId: "remote:endpoint-windows",
       onAgentEndpointChange
     });
     renderTaskNode(data);
@@ -215,8 +215,12 @@ describe("TaskNodeCard executor options", () => {
     await userEvent.click(screen.getByRole("combobox"));
 
     expect(await screen.findByRole("option", { name: "Codex" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("option", { name: "Codex · LINANIML" }));
-    expect(onAgentEndpointChange).toHaveBeenCalledWith("T-001", "remote:endpoint-windows");
+    expect(
+      screen.getByRole("option", {
+        name: /Codex · LINANIML.*agent_endpoint_task_scope_unsupported/
+      })
+    ).toHaveAttribute("aria-disabled", "true");
+    expect(onAgentEndpointChange).not.toHaveBeenCalled();
   });
 
   it("keeps built-in and remote Endpoints when a Plan Package adds a custom executor", async () => {
@@ -254,8 +258,8 @@ describe("TaskNodeCard executor options", () => {
             displayName: "Codex",
             locationName: "LINANIML",
             capabilities: ["acp.codex"],
-            available: true,
-            unavailableReason: null,
+            available: false,
+            unavailableReason: "agent_endpoint_task_scope_unsupported",
             remoteEndpointId: "endpoint-windows"
           }
         ]
@@ -266,7 +270,7 @@ describe("TaskNodeCard executor options", () => {
 
     expect(await screen.findByRole("option", { name: "custom-shell" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Codex" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Codex · LINANIML" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Codex · LINANIML/ })).toBeInTheDocument();
   });
 
   it("disables unavailable Agent Endpoints in the task node dropdown", async () => {

@@ -57,7 +57,9 @@ export function AgentEndpointSelect({
               <span className="flex min-w-0 items-center gap-2">
                 <span>{agentEndpointDisplayLabel(endpoint)}</span>
                 {!endpoint.available ? (
-                  <span className="text-xs text-muted-foreground">{unavailableLabel}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {endpoint.unavailableReason ?? unavailableLabel}
+                  </span>
                 ) : null}
               </span>
             </SelectItem>

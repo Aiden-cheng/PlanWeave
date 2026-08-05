@@ -8,11 +8,19 @@ import {
   type LogicalAgentEndpointInput
 } from "../collaboration/agentEndpointViewModel";
 
+type AgentEndpointCatalogApi = Pick<
+  PlanWeaveCollaborationApi,
+  "listCollaborationAgentEndpoints" | "onCollaborationObserverSignal"
+>;
+
+export const agentEndpointCatalogRefreshIntervalMs = 30_000;
+
 export function useAgentEndpointCatalog(input: {
   enabled: boolean;
   logicalExecutors: readonly LogicalAgentEndpointInput[];
-  scopeKey: string | null;
-  api?: PlanWeaveCollaborationApi | null;
+  profileId: string | null;
+  projectId: string | null;
+  api?: AgentEndpointCatalogApi | null;
 }): {
   endpoints: AvailableAgentEndpoint[];
   error: string | null;
@@ -24,15 +32,17 @@ export function useAgentEndpointCatalog(input: {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const generationRef = useRef(0);
-  const scopeKeyRef = useRef(input.scopeKey);
-  scopeKeyRef.current = input.scopeKey;
+  const scopeKey =
+    input.profileId && input.projectId ? `${input.profileId}:${input.projectId}` : null;
+  const scopeKeyRef = useRef(scopeKey);
+  scopeKeyRef.current = scopeKey;
 
   const refresh = useCallback(async () => {
     const generation = ++generationRef.current;
-    const requestScopeKey = input.scopeKey;
+    const requestScopeKey = scopeKey;
     const canWrite = () =>
       generation === generationRef.current && requestScopeKey === scopeKeyRef.current;
-    if (!input.enabled || !api?.listCollaborationAgentEndpoints) {
+    if (!input.enabled || !requestScopeKey || !api?.listCollaborationAgentEndpoints) {
       setRemoteEndpoints([]);
       setError(null);
       setRefreshing(false);
@@ -50,7 +60,7 @@ export function useAgentEndpointCatalog(input: {
     } finally {
       if (canWrite()) setRefreshing(false);
     }
-  }, [api, input.enabled, input.scopeKey]);
+  }, [api, input.enabled, scopeKey]);
 
   useEffect(() => {
     setRemoteEndpoints([]);
@@ -59,6 +69,30 @@ export function useAgentEndpointCatalog(input: {
       generationRef.current += 1;
     };
   }, [refresh]);
+
+  useEffect(() => {
+    if (!input.enabled || !scopeKey || !api) return;
+    const refreshFromServerState = () => {
+      void refresh();
+    };
+    const unsubscribeObserver = api.onCollaborationObserverSignal((signal) => {
+      if (signal.profileId !== input.profileId || signal.projectId !== input.projectId) return;
+      if (
+        signal.type === "human.observer.catchup_required" ||
+        (signal.type === "human.observer.event" && signal.event.kind === "remote_run")
+      ) {
+        refreshFromServerState();
+      }
+    });
+    const interval = window.setInterval(
+      refreshFromServerState,
+      agentEndpointCatalogRefreshIntervalMs
+    );
+    return () => {
+      window.clearInterval(interval);
+      unsubscribeObserver();
+    };
+  }, [api, input.enabled, input.profileId, input.projectId, refresh, scopeKey]);
 
   const endpoints = useMemo(() => {
     const catalog = buildAgentEndpointCatalog({

@@ -146,13 +146,24 @@ export function BlockInspector({
     ? executorOptionName(concreteExecutor, graph?.packageExecutorNames)
     : null;
   const preflightUsesInheritedExecutor = Boolean(!selectedBlock?.executor && concreteExecutor);
-  const blockExecutorOptions = buildExecutorOptionViews({
-    agentDetections,
-    agentTransport: agentTransport ?? graph?.agentTransport,
-    literalExecutorNames: graph?.packageExecutorNames,
-    currentExecutorNames: selectedBlock?.executor ? [selectedBlock.executor] : [],
-    executorOptions
-  });
+  const blockExecutorOptions = useMemo(
+    () =>
+      buildExecutorOptionViews({
+        agentDetections,
+        agentTransport: agentTransport ?? graph?.agentTransport,
+        literalExecutorNames: graph?.packageExecutorNames,
+        currentExecutorNames: selectedBlock?.executor ? [selectedBlock.executor] : [],
+        executorOptions
+      }),
+    [
+      agentDetections,
+      agentTransport,
+      executorOptions,
+      graph?.agentTransport,
+      graph?.packageExecutorNames,
+      selectedBlock?.executor
+    ]
+  );
   const preflight = useExecutorPreflight({
     bridgeUnavailableMessage: t("bridgeUnavailable"),
     cacheKey: graph ? `${graph.graphVersion}:${graph.packageFingerprint}` : null,
@@ -194,59 +205,85 @@ export function BlockInspector({
         ? true
         : requiredProfileDetection?.installed === true)
     : requiredLocalOption !== undefined && !requiredLocalOption.disabled;
-  const requiredProfileCapabilities = hasExactProfileBindings
-    ? requiredProfileDetection?.installed === true && requiredProfileDetection.runnerKind === "acp"
-      ? [`acp.${requiredProfileDetection.kind}`]
-      : []
-    : (requiredLocalOption?.capabilities ?? []);
-  const requiredLocalEndpoint = concreteExecutor
-    ? buildLocalAgentEndpoint({
-        executorName: concreteExecutor,
-        displayName: requiredLocalOption?.label ?? concreteExecutor,
-        locationName: t("agentEndpointThisDevice"),
-        capabilities: requiredProfileCapabilities,
-        profileExists: requiredProfileExists,
-        detected: requiredProfileDetected,
-        preflightLoading: preflight.loading,
-        preflightError: preflight.error,
-        preflightOk: preflight.result?.ok ?? null
-      })
-    : null;
-  const localAgentEndpoints = [
-    ...(requiredLocalEndpoint ? [requiredLocalEndpoint] : []),
-    ...blockExecutorOptions
-      .filter((option) => option.name !== requiredOptionName)
-      .map((option) =>
-        buildLocalAgentEndpoint({
-          executorName: option.name,
-          displayName: option.label,
-          locationName: t("agentEndpointThisDevice"),
-          capabilities: option.capabilities,
-          profileExists: true,
-          detected: !option.disabled,
-          preflightLoading: false,
-          preflightError: null,
-          preflightOk: null
-        })
-      )
-  ];
-  const blockAgentEndpoints = agentEndpoints
-    ? applyAgentEndpointRequirements(
-        agentEndpoints.map((endpoint) =>
-          requiredLocalEndpoint && endpoint.id === `local:${requiredLocalEndpoint.executorName}`
-            ? {
-                ...endpoint,
-                available: endpoint.available && requiredLocalEndpoint.available,
-                unavailableReason:
-                  endpoint.available && requiredLocalEndpoint.available
-                    ? null
-                    : (requiredLocalEndpoint.unavailableReason ?? endpoint.unavailableReason)
-              }
-            : endpoint
-        ),
-        requiredCapabilities
-      )
-    : undefined;
+  const requiredProfileCapabilities = useMemo(
+    () =>
+      hasExactProfileBindings
+        ? requiredProfileDetection?.installed === true &&
+          requiredProfileDetection.runnerKind === "acp"
+          ? [`acp.${requiredProfileDetection.kind}`]
+          : []
+        : (requiredLocalOption?.capabilities ?? []),
+    [hasExactProfileBindings, requiredLocalOption?.capabilities, requiredProfileDetection]
+  );
+  const requiredLocalEndpoint = useMemo(
+    () =>
+      concreteExecutor
+        ? buildLocalAgentEndpoint({
+            executorName: concreteExecutor,
+            displayName: requiredLocalOption?.label ?? concreteExecutor,
+            locationName: t("agentEndpointThisDevice"),
+            capabilities: requiredProfileCapabilities,
+            profileExists: requiredProfileExists,
+            detected: requiredProfileDetected,
+            preflightLoading: preflight.loading,
+            preflightError: preflight.error,
+            preflightOk: preflight.result?.ok ?? null
+          })
+        : null,
+    [
+      concreteExecutor,
+      preflight.error,
+      preflight.loading,
+      preflight.result?.ok,
+      requiredLocalOption?.label,
+      requiredProfileCapabilities,
+      requiredProfileDetected,
+      requiredProfileExists,
+      t
+    ]
+  );
+  const localAgentEndpoints = useMemo(
+    () => [
+      ...(requiredLocalEndpoint ? [requiredLocalEndpoint] : []),
+      ...blockExecutorOptions
+        .filter((option) => option.name !== requiredOptionName)
+        .map((option) =>
+          buildLocalAgentEndpoint({
+            executorName: option.name,
+            displayName: option.label,
+            locationName: t("agentEndpointThisDevice"),
+            capabilities: option.capabilities,
+            profileExists: true,
+            detected: !option.disabled,
+            preflightLoading: false,
+            preflightError: null,
+            preflightOk: null
+          })
+        )
+    ],
+    [blockExecutorOptions, requiredLocalEndpoint, requiredOptionName, t]
+  );
+  const blockAgentEndpoints = useMemo(
+    () =>
+      agentEndpoints
+        ? applyAgentEndpointRequirements(
+            agentEndpoints.map((endpoint) =>
+              requiredLocalEndpoint && endpoint.id === `local:${requiredLocalEndpoint.executorName}`
+                ? {
+                    ...endpoint,
+                    available: endpoint.available && requiredLocalEndpoint.available,
+                    unavailableReason:
+                      endpoint.available && requiredLocalEndpoint.available
+                        ? null
+                        : (requiredLocalEndpoint.unavailableReason ?? endpoint.unavailableReason)
+                  }
+                : endpoint
+            ),
+            requiredCapabilities
+          )
+        : undefined,
+    [agentEndpoints, requiredCapabilities, requiredLocalEndpoint]
+  );
   const effectiveSelectedAgentEndpointId =
     selectedAgentEndpointId === undefined
       ? concreteExecutor

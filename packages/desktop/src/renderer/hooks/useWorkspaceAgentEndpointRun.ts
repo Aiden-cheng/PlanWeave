@@ -6,7 +6,10 @@ import type {
 } from "@planweave-ai/runtime";
 import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import type { AvailableAgentEndpoint } from "../collaboration/agentEndpointViewModel";
-import { applyAgentEndpointRequirements } from "../collaboration/agentEndpointViewModel";
+import {
+  applyAgentEndpointRequirements,
+  applyAgentEndpointTaskScopeSupport
+} from "../collaboration/agentEndpointViewModel";
 import {
   agentEndpointPreferenceKey,
   selectedAgentEndpointId
@@ -74,9 +77,14 @@ export function useWorkspaceAgentEndpointRun(input: {
         executorName,
         preference: preferenceKey ? input.preferences[preferenceKey] : undefined
       });
-      const endpoint = applyAgentEndpointRequirements(
+      const compatibleEndpoints = applyAgentEndpointRequirements(
         input.agentEndpoints,
         block?.requiredCapabilities ?? []
+      );
+      const endpoint = (
+        scope.kind === "task"
+          ? applyAgentEndpointTaskScopeSupport(compatibleEndpoints)
+          : compatibleEndpoints
       ).find((candidate) => candidate.id === endpointId);
       if (!endpoint?.available) {
         input.setError(endpoint?.unavailableReason ?? "agent_endpoint_selection_unavailable");
@@ -86,8 +94,8 @@ export function useWorkspaceAgentEndpointRun(input: {
         await input.startLocal(scope);
         return;
       }
-      if (scope.kind === "task") {
-        input.setError("remote_task_scope_dispatch_unsupported");
+      if (scope.kind !== "block") {
+        input.setError("agent_endpoint_task_scope_unsupported");
         return;
       }
       if (

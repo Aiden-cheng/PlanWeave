@@ -225,6 +225,7 @@ export function useRemoteRunPanelController(
     ]
   );
   const agentEndpoints = args.agentEndpoints ?? discoveredAgentEndpoints;
+  const hasProvidedAgentEndpoints = args.agentEndpoints !== undefined;
   const selectedAgentEndpointId =
     args.selectedAgentEndpointId === undefined
       ? selectedAgentEndpointIdState
@@ -242,7 +243,7 @@ export function useRemoteRunPanelController(
       await args.refreshAgentEndpoints();
       return;
     }
-    if (args.agentEndpoints) {
+    if (hasProvidedAgentEndpoints) {
       setRefreshingAgentEndpoints(false);
       return;
     }
@@ -279,7 +280,7 @@ export function useRemoteRunPanelController(
         setRefreshingAgentEndpoints(false);
       }
     }
-  }, [api, args.agentEndpoints, args.refreshAgentEndpoints, sessionConnected, scopeKey]);
+  }, [api, args.refreshAgentEndpoints, hasProvidedAgentEndpoints, sessionConnected, scopeKey]);
 
   useLayoutEffect(() => {
     if (scopeKeyRef.current !== scopeKey) {

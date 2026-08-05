@@ -206,6 +206,7 @@
         "taskWorkspaceUsage.test.tsx",
         "terminalRecordInteractions.test.tsx",
         "todoAndInspectorInteractions.test.tsx",
+        "useAgentEndpointCatalog.test.tsx",
         "useCanvasMapHook.test.tsx",
         "useCollaborationCanvasPresence.test.tsx",
         "useCollaborationRuntimeStatus.test.tsx",
