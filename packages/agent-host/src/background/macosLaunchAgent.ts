@@ -2,8 +2,8 @@ import { mkdir, readFile, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { writePrivateTextFile } from "../config/privateConfigWriter.js";
-import { resolveAgentHostDefaultPaths } from "../config/defaultPaths.js";
 import type {
+  AgentHostBackgroundIdentity,
   AgentHostBackgroundInstall,
   AgentHostBackgroundLogs,
   AgentHostBackgroundResult,
@@ -120,7 +120,9 @@ export class MacosLaunchAgentService implements AgentHostBackgroundService {
     }
   }
 
-  async uninstall(workspaceId: string): Promise<AgentHostBackgroundResult> {
+  async uninstall({
+    workspaceId
+  }: AgentHostBackgroundIdentity): Promise<AgentHostBackgroundResult> {
     const label = launchAgentLabel(workspaceId);
     try {
       await this.runner("launchctl", ["bootout", `${this.domain()}/${label}`]);
@@ -136,7 +138,7 @@ export class MacosLaunchAgentService implements AgentHostBackgroundService {
     return { state: "not_installed", platform: "macos-launch-agent" };
   }
 
-  async status(workspaceId: string): Promise<AgentHostBackgroundResult> {
+  async status({ workspaceId }: AgentHostBackgroundIdentity): Promise<AgentHostBackgroundResult> {
     const label = launchAgentLabel(workspaceId);
     try {
       const result = await this.runner("launchctl", ["print", `${this.domain()}/${label}`]);
@@ -158,9 +160,10 @@ export class MacosLaunchAgentService implements AgentHostBackgroundService {
     }
   }
 
-  async restart(workspaceId: string): Promise<AgentHostBackgroundResult> {
+  async restart(identity: AgentHostBackgroundIdentity): Promise<AgentHostBackgroundResult> {
+    const { workspaceId } = identity;
     const label = launchAgentLabel(workspaceId);
-    const status = await this.status(workspaceId);
+    const status = await this.status(identity);
     if (status.state === "not_installed") return status;
     const domain = this.domain();
     if (status.state === "stopped") {
@@ -174,10 +177,11 @@ export class MacosLaunchAgentService implements AgentHostBackgroundService {
     return { state: "running", platform: "macos-launch-agent" };
   }
 
-  async logs(workspaceId: string): Promise<AgentHostBackgroundLogs> {
-    const directory =
-      this.logDirectories.get(workspaceId) ??
-      resolveAgentHostDefaultPaths(workspaceId).baseDirectory;
+  async logs({
+    workspaceId,
+    privateDirectory
+  }: AgentHostBackgroundIdentity): Promise<AgentHostBackgroundLogs> {
+    const directory = this.logDirectories.get(workspaceId) ?? privateDirectory;
     return {
       platform: "macos-launch-agent",
       source: "launch-agent-files",

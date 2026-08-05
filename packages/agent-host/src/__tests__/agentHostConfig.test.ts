@@ -90,6 +90,27 @@ describe("Agent Host configuration", () => {
     ).toThrow();
   });
 
+  it("treats equivalent endpoint origins with or without a trailing slash as the same origin", async () => {
+    const { directory, workspaceRoot } = await setup();
+    const valid = input(directory, workspaceRoot);
+
+    expect(
+      parseAgentHostConfig({
+        ...valid,
+        coordinator: {
+          url: "https://coordinator.example.com/",
+          allowInsecureDevelopment: false,
+          endpoint: {
+            topology: "private_https",
+            serverOrigin: "https://coordinator.example.com/",
+            allowedClientOrigins: ["https://coordinator.example.com/"],
+            tlsTrust: "system_ca"
+          }
+        }
+      })
+    ).toBeDefined();
+  });
+
   it("resolves only logical workspace ids and rejects traversal or symlink escape", async () => {
     const { directory, workspaceRoot } = await setup();
     const config = parseAgentHostConfig(input(directory, workspaceRoot));

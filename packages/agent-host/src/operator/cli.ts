@@ -176,12 +176,15 @@ export function parseAgentHostArgs(argv: readonly string[]): ParsedCommand {
     "--workspace-root",
     "--ca-certificate",
     "--expose",
-    "--no-background"
+    "--no-background",
+    "--background-instance"
   ]);
   for (let index = portableEnrollment ? 1 : 0; index < args.length; index++) {
     const value = args[index];
     if (!known.has(value)) throw new Error("agent_host_cli_usage");
-    if (value !== "--replace" && value !== "--no-background") index++;
+    if (value !== "--replace" && value !== "--no-background") {
+      index++;
+    }
   }
   if (portableEnrollment && (configPath || code || preset || args.includes("--replace"))) {
     throw new Error("agent_host_cli_usage");
@@ -189,6 +192,16 @@ export function parseAgentHostArgs(argv: readonly string[]): ParsedCommand {
   if (
     (!portableEnrollment && args.includes("--expose")) ||
     (args.includes("--expose") && (!expose || expose.startsWith("--")))
+  ) {
+    throw new Error("agent_host_cli_usage");
+  }
+  if (args.includes("--background-instance") && command !== "run") {
+    throw new Error("agent_host_cli_usage");
+  }
+  const backgroundInstance = option("--background-instance");
+  if (
+    args.includes("--background-instance") &&
+    (!backgroundInstance || !/^[a-f0-9]{16}$/u.test(backgroundInstance))
   ) {
     throw new Error("agent_host_cli_usage");
   }

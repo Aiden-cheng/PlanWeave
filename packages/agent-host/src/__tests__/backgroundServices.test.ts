@@ -14,9 +14,9 @@ import {
   supportsPlatformBackgroundService
 } from "../background/platformBackground.js";
 import {
-  WindowsScheduledTaskService,
-  windowsAgentHostTaskCommand
-} from "../background/windowsScheduledTask.js";
+  WindowsUserStartupService,
+  windowsAgentHostStartupCommand
+} from "../background/windowsUserStartup.js";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -31,6 +31,10 @@ const install = {
   fixedArgs: ["/opt/PlanWeave package/dist/bin.js"],
   configPath: "/home/user/.planweave/agent-host/instances/workspace-1/config.json",
   privateDirectory: "/home/user/.planweave/agent-host"
+};
+const identity = {
+  workspaceId: install.workspaceId,
+  privateDirectory: install.privateDirectory
 };
 
 describe("Agent Host background adapters", () => {
@@ -88,7 +92,7 @@ describe("Agent Host background adapters", () => {
     expect(plist).toContain("--label=&lt;Agent Host&gt;");
     await service.install(specialInstall);
 
-    await expect(service.logs(install.workspaceId)).resolves.toEqual({
+    await expect(service.logs(identity)).resolves.toEqual({
       platform: "macos-launch-agent",
       source: "launch-agent-files",
       stdoutPath: join(install.privateDirectory, "agent-host.stdout.log"),
@@ -117,13 +121,13 @@ describe("Agent Host background adapters", () => {
       .mockRejectedValueOnce(Object.assign(new Error("service not found"), { code: 3 }));
     const service = new MacosLaunchAgentService(lifecycleRunner, root, () => 503);
 
-    await expect(service.status(install.workspaceId)).resolves.toMatchObject({ state: "running" });
-    await expect(service.status(install.workspaceId)).resolves.toMatchObject({ state: "stopped" });
-    await expect(service.restart(install.workspaceId)).resolves.toMatchObject({ state: "running" });
-    await expect(service.uninstall(install.workspaceId)).resolves.toMatchObject({
+    await expect(service.status(identity)).resolves.toMatchObject({ state: "running" });
+    await expect(service.status(identity)).resolves.toMatchObject({ state: "stopped" });
+    await expect(service.restart(identity)).resolves.toMatchObject({ state: "running" });
+    await expect(service.uninstall(identity)).resolves.toMatchObject({
       state: "not_installed"
     });
-    await expect(service.uninstall(install.workspaceId)).resolves.toMatchObject({
+    await expect(service.uninstall(identity)).resolves.toMatchObject({
       state: "not_installed"
     });
 
@@ -144,7 +148,7 @@ describe("Agent Host background adapters", () => {
         vi.fn().mockRejectedValue(missingService()),
         root,
         () => 503
-      ).status(install.workspaceId)
+      ).status(identity)
     ).resolves.toMatchObject({ state: "not_installed" });
   });
 
@@ -200,37 +204,105 @@ describe("Agent Host background adapters", () => {
     expect(linuxAgentHostUnitText(legacyInstall)).toContain(
       'ExecStart="/opt/$$release/planweave-agent-host" "run" "--config" "/home/$$USER/agent-host.json"'
     );
-    expect(windowsAgentHostTaskCommand(legacyInstall)).toContain(
+    expect(
+      windowsAgentHostStartupCommand({
+        executablePath: legacyInstall.executablePath,
+        args: [
+          "run",
+          "--config",
+          legacyInstall.configPath,
+          "--background-instance",
+          "0123456789abcdef"
+        ],
+        marker: "0123456789abcdef"
+      })
+    ).toContain(
       '"/opt/$release/planweave-agent-host" "run" "--config" "/home/$USER/agent-host.json"'
     );
   });
 
-  it("creates a LIMITED current-user ONLOGON task with fixed argv", async () => {
+  it("registers current-user startup and immediately launches fixed argv", async () => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-windows-startup-"));
+    directories.push(root);
     const runner = vi.fn().mockResolvedValue({ stdout: "", stderr: "" });
-    await new WindowsScheduledTaskService(runner).install({
+    const starter = vi.fn().mockResolvedValue(undefined);
+    await new WindowsUserStartupService(runner, starter, {
+      LOCALAPPDATA: "C:\\Users\\user\\AppData\\Local",
+      USERPROFILE: "C:\\Users\\user"
+    }).install({
       ...install,
       executablePath: "C:\\Program Files\\nodejs\\node.exe",
       fixedArgs: [
         "C:\\Users\\user\\App Data\\npm\\node_modules\\@planweave-ai\\agent-host\\dist\\bin.js"
       ],
       configPath: "C:\\Users\\user\\.planweave\\agent-host\\config.json",
-      privateDirectory: "C:\\Users\\user\\.planweave\\agent-host"
+      privateDirectory: root
     });
-    const createArgs = runner.mock.calls[0]?.[1] as string[];
-    expect(createArgs).toContain("ONLOGON");
-    expect(createArgs).toContain("LIMITED");
-    expect(createArgs).toContain(
-      '"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\user\\App Data\\npm\\node_modules\\@planweave-ai\\agent-host\\dist\\bin.js" "run" "--config" "C:\\Users\\user\\.planweave\\agent-host\\config.json"'
+    expect(runner).toHaveBeenCalledWith("reg.exe", [
+      "ADD",
+      "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+      "/V",
+      expect.stringMatching(/^PlanWeaveAgentHost-[a-f0-9]{16}$/u),
+      "/T",
+      "REG_EXPAND_SZ",
+      "/D",
+      expect.stringContaining(
+        '"C:\\Program Files\\nodejs\\node.exe" "%USERPROFILE%\\App Data\\npm\\node_modules\\@planweave-ai\\agent-host\\dist\\bin.js" "run" "--config" "%USERPROFILE%\\.planweave\\agent-host\\config.json"'
+      ),
+      "/F"
+    ]);
+    expect(starter).toHaveBeenCalledWith("C:\\Program Files\\nodejs\\node.exe", [
+      "C:\\Users\\user\\App Data\\npm\\node_modules\\@planweave-ai\\agent-host\\dist\\bin.js",
+      "run",
+      "--config",
+      "C:\\Users\\user\\.planweave\\agent-host\\config.json",
+      "--background-instance",
+      expect.stringMatching(/^[a-f0-9]{16}$/u)
+    ]);
+    expect(runner).toHaveBeenCalledWith(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", expect.stringContaining("Stop-Process")],
+      {
+        environment: {
+          PLANWEAVE_AGENT_HOST_INSTANCE: expect.stringMatching(/^[a-f0-9]{16}$/u)
+        }
+      }
     );
-    expect(createArgs.join(" ")).not.toMatch(/pw_(?:enroll|host)_/);
+    expect(JSON.stringify(runner.mock.calls)).not.toMatch(/pw_(?:enroll|host)_/);
   });
 
   it("quotes Windows argv containing quotes and trailing backslashes", () => {
-    const command = windowsAgentHostTaskCommand({
-      ...install,
-      fixedArgs: ['C:\\Program Files\\host "stable"\\']
+    const command = windowsAgentHostStartupCommand({
+      executablePath: "C:\\Program Files\\host.exe",
+      args: ['C:\\Program Files\\host "stable"\\'],
+      marker: "0123456789abcdef"
     });
     expect(command).toContain('"C:\\Program Files\\host \\"stable\\"\\\\"');
+  });
+
+  it("keeps the default packaged startup command within the Windows Run-key limit", () => {
+    const command = windowsAgentHostStartupCommand(
+      {
+        executablePath: "C:\\Users\\TESTUSER\\AppData\\Local\\Programs\\PlanWeave\\PlanWeave.exe",
+        args: [
+          "--agent-host-service",
+          "run",
+          "--config",
+          "C:\\Users\\TESTUSER\\.planweave\\agent-host\\instances\\workspace-local-d5e342216f40e0632c512d0d61b94e71\\config.json",
+          "--background-instance",
+          "0123456789abcdef"
+        ],
+        marker: "0123456789abcdef"
+      },
+      {
+        LOCALAPPDATA: "C:\\Users\\TESTUSER\\AppData\\Local",
+        USERPROFILE: "C:\\Users\\TESTUSER"
+      }
+    );
+
+    expect(command).toContain('"%LOCALAPPDATA%\\Programs\\PlanWeave\\PlanWeave.exe"');
+    expect(command).toContain('"%USERPROFILE%\\.planweave\\agent-host\\instances');
+    expect(command.length).toBeLessThanOrEqual(260);
   });
 
   it("returns stable actionable setup errors from systemd", async () => {
@@ -243,11 +315,13 @@ describe("Agent Host background adapters", () => {
     } satisfies Partial<AgentHostBackgroundSetupError>);
   });
 
-  it("returns stable actionable setup errors from Scheduled Tasks", async () => {
+  it("returns stable actionable setup errors from Windows user startup", async () => {
     const runner = vi.fn().mockRejectedValue(new Error("private runner detail"));
-    await expect(new WindowsScheduledTaskService(runner).install(install)).rejects.toMatchObject({
+    await expect(
+      new WindowsUserStartupService(runner, vi.fn()).install(install)
+    ).rejects.toMatchObject({
       message: "agent_host_background_setup_required",
-      guidance: "check_scheduled_task_permissions"
+      guidance: "run_agent_host_manually"
     } satisfies Partial<AgentHostBackgroundSetupError>);
   });
 
@@ -262,9 +336,9 @@ describe("Agent Host background adapters", () => {
     const runner = vi.fn().mockResolvedValue({ stdout: "active\n", stderr: "" });
     const service = new LinuxUserSystemdService(runner, root);
 
-    await expect(service.status(install.workspaceId)).resolves.toMatchObject({ state: "running" });
-    await expect(service.restart(install.workspaceId)).resolves.toMatchObject({ state: "running" });
-    await expect(service.logs(install.workspaceId)).resolves.toEqual({
+    await expect(service.status(identity)).resolves.toMatchObject({ state: "running" });
+    await expect(service.restart(identity)).resolves.toMatchObject({ state: "running" });
+    await expect(service.logs(identity)).resolves.toEqual({
       platform: "linux-systemd-user",
       source: "systemd-journal",
       command: {
@@ -272,7 +346,7 @@ describe("Agent Host background adapters", () => {
         args: ["--user", "-u", "planweave-agent-host-workspace-1.service"]
       }
     });
-    await expect(service.uninstall(install.workspaceId)).resolves.toMatchObject({
+    await expect(service.uninstall(identity)).resolves.toMatchObject({
       state: "not_installed"
     });
 
@@ -286,65 +360,15 @@ describe("Agent Host background adapters", () => {
     await expect(readFile(unitPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("uses fixed schtasks argv and identifies scheduler diagnostics without claiming stdout", async () => {
+  it("uses registry presence and a process marker for Windows background status", async () => {
     const runner = vi
       .fn()
-      .mockResolvedValueOnce({ stdout: '"localized task output"', stderr: "" })
-      .mockResolvedValueOnce({ stdout: "4", stderr: "" })
-      .mockResolvedValueOnce({ stdout: '"localized task output"', stderr: "" })
-      .mockResolvedValueOnce({ stdout: "4", stderr: "" })
-      .mockResolvedValue({ stdout: "", stderr: "" });
-    const service = new WindowsScheduledTaskService(runner);
+      .mockResolvedValueOnce({ stdout: "registry value", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "0", stderr: "" });
 
-    await expect(service.status(install.workspaceId)).resolves.toMatchObject({ state: "running" });
-    await expect(service.restart(install.workspaceId)).resolves.toMatchObject({ state: "running" });
-    await expect(service.logs(install.workspaceId)).resolves.toEqual({
-      platform: "windows-scheduled-task",
-      source: "task-scheduler-diagnostics",
-      eventLog: "Microsoft-Windows-TaskScheduler/Operational",
-      taskName: "PlanWeave Agent Host workspace-1",
-      capturesHostStdout: false
-    });
-    await expect(service.uninstall(install.workspaceId)).resolves.toMatchObject({
-      state: "not_installed"
-    });
-
-    expect(runner.mock.calls).toEqual([
-      ["schtasks.exe", ["/Query", "/TN", "PlanWeave Agent Host workspace-1", "/FO", "CSV", "/NH"]],
-      [
-        "powershell.exe",
-        ["-NoProfile", "-NonInteractive", "-Command", expect.stringContaining("[int]$task.State")],
-        {
-          environment: {
-            PLANWEAVE_AGENT_HOST_TASK_NAME: "PlanWeave Agent Host workspace-1"
-          }
-        }
-      ],
-      ["schtasks.exe", ["/Query", "/TN", "PlanWeave Agent Host workspace-1", "/FO", "CSV", "/NH"]],
-      [
-        "powershell.exe",
-        ["-NoProfile", "-NonInteractive", "-Command", expect.stringContaining("[int]$task.State")],
-        {
-          environment: {
-            PLANWEAVE_AGENT_HOST_TASK_NAME: "PlanWeave Agent Host workspace-1"
-          }
-        }
-      ],
-      ["schtasks.exe", ["/End", "/TN", "PlanWeave Agent Host workspace-1"]],
-      ["schtasks.exe", ["/Run", "/TN", "PlanWeave Agent Host workspace-1"]],
-      ["schtasks.exe", ["/Delete", "/TN", "PlanWeave Agent Host workspace-1", "/F"]]
-    ]);
-  });
-
-  it("uses the locale-independent numeric Windows task state", async () => {
-    const runner = vi
-      .fn()
-      .mockResolvedValueOnce({ stdout: '"任务状态","正在运行"', stderr: "" })
-      .mockResolvedValueOnce({ stdout: "3", stderr: "" });
-
-    await expect(new WindowsScheduledTaskService(runner).status("workspace-1")).resolves.toEqual({
+    await expect(new WindowsUserStartupService(runner).status(identity)).resolves.toEqual({
       state: "stopped",
-      platform: "windows-scheduled-task"
+      platform: "windows-user-startup"
     });
   });
 });

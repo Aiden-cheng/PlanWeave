@@ -59,11 +59,13 @@ const REPLACE_ACCESS_CONTROL_SCRIPT = [
   "$ErrorActionPreference='Stop';",
   "$path=$env:PLANWEAVE_PRIVATE_STORAGE_PATH;",
   "$sid=$env:PLANWEAVE_PRIVATE_STORAGE_SID;",
-  "$flags=if($env:PLANWEAVE_PRIVATE_STORAGE_KIND -eq 'directory'){'OICI'}else{''};",
+  "$isDirectory=$env:PLANWEAVE_PRIVATE_STORAGE_KIND -eq 'directory';",
+  "$flags=if($isDirectory){'OICI'}else{''};",
   "$sddl='D:P(A;'+$flags+';FA;;;'+$sid+')(A;'+$flags+';FA;;;S-1-5-32-544)';",
-  "$acl=Get-Acl -LiteralPath $path;",
+  "$acl=if($isDirectory){New-Object System.Security.AccessControl.DirectorySecurity}else{New-Object System.Security.AccessControl.FileSecurity};",
   "$acl.SetSecurityDescriptorSddlForm($sddl,[System.Security.AccessControl.AccessControlSections]::Access);",
-  "Set-Acl -LiteralPath $path -AclObject $acl"
+  "$target=if($isDirectory){New-Object System.IO.DirectoryInfo($path)}else{New-Object System.IO.FileInfo($path)};",
+  "$target.SetAccessControl($acl)"
 ].join("");
 
 export function createPrivateStorageSecurity(

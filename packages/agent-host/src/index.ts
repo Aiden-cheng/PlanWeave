@@ -81,6 +81,7 @@ export {
   supportsPlatformBackgroundService
 } from "./background/platformBackground.js";
 export type {
+  AgentHostBackgroundIdentity,
   AgentHostBackgroundInstall,
   AgentHostBackgroundLauncher,
   AgentHostBackgroundLogs,

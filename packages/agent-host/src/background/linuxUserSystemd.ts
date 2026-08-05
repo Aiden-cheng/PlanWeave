@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { writePrivateTextFile } from "../config/privateConfigWriter.js";
 import type {
+  AgentHostBackgroundIdentity,
   AgentHostBackgroundInstall,
   AgentHostBackgroundLogs,
   AgentHostBackgroundResult,
@@ -74,12 +75,13 @@ export class LinuxUserSystemdService implements AgentHostBackgroundService {
     }
   }
 
-  async uninstall(workspaceId: string): Promise<AgentHostBackgroundResult> {
+  async uninstall(identity: AgentHostBackgroundIdentity): Promise<AgentHostBackgroundResult> {
+    const { workspaceId } = identity;
     const unit = serviceName(workspaceId);
     try {
       await this.runner("systemctl", ["--user", "disable", "--now", unit]);
     } catch (error) {
-      const status = await this.status(workspaceId);
+      const status = await this.status(identity);
       if (status.state !== "not_installed") throw error;
     }
     try {
@@ -93,7 +95,7 @@ export class LinuxUserSystemdService implements AgentHostBackgroundService {
     return { state: "not_installed", platform: "linux-systemd-user" };
   }
 
-  async status(workspaceId: string): Promise<AgentHostBackgroundResult> {
+  async status({ workspaceId }: AgentHostBackgroundIdentity): Promise<AgentHostBackgroundResult> {
     const unit = serviceName(workspaceId);
     try {
       const result = await this.runner("systemctl", ["--user", "is-active", unit]);
@@ -114,15 +116,16 @@ export class LinuxUserSystemdService implements AgentHostBackgroundService {
     }
   }
 
-  async restart(workspaceId: string): Promise<AgentHostBackgroundResult> {
+  async restart(identity: AgentHostBackgroundIdentity): Promise<AgentHostBackgroundResult> {
+    const { workspaceId } = identity;
     const unit = serviceName(workspaceId);
-    const status = await this.status(workspaceId);
+    const status = await this.status(identity);
     if (status.state === "not_installed") return status;
     await this.runner("systemctl", ["--user", "restart", unit]);
     return { state: "running", platform: "linux-systemd-user" };
   }
 
-  async logs(workspaceId: string): Promise<AgentHostBackgroundLogs> {
+  async logs({ workspaceId }: AgentHostBackgroundIdentity): Promise<AgentHostBackgroundLogs> {
     return {
       platform: "linux-systemd-user",
       source: "systemd-journal",

@@ -1,7 +1,11 @@
-import { lstat, mkdir, open, readFile } from "node:fs/promises";
+import { lstat, open, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
+import {
+  createPrivateStorageSecurity,
+  type PrivateStorageSecurityPort
+} from "../storage/privateStorageSecurity.js";
 
 const durableHostIdentitySchema = z
   .object({
@@ -23,7 +27,11 @@ function exists(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "EEXIST";
 }
 
-async function assertSecure(path: string, kind: "directory" | "file"): Promise<void> {
+async function assertSecure(
+  path: string,
+  kind: "directory" | "file",
+  permissionModel: PrivateStorageSecurityPort["permissionModel"]
+): Promise<void> {
   const metadata = await lstat(path);
   if (
     (kind === "directory" && !metadata.isDirectory()) ||
@@ -32,16 +40,19 @@ async function assertSecure(path: string, kind: "directory" | "file"): Promise<v
     throw new Error("agent_host_durable_identity_path_unsafe");
   }
   const expectedMode = kind === "directory" ? 0o700 : 0o600;
-  if ((metadata.mode & 0o777) !== expectedMode) {
+  if (permissionModel === "posix" && (metadata.mode & 0o777) !== expectedMode) {
     throw new Error("agent_host_durable_identity_permissions_unsafe");
   }
-  if (process.platform !== "win32" && process.getuid && metadata.uid !== process.getuid()) {
+  if (permissionModel === "posix" && process.getuid && metadata.uid !== process.getuid()) {
     throw new Error("agent_host_durable_identity_owner_unsafe");
   }
 }
 
-async function readIdentity(path: string): Promise<z.infer<typeof durableHostIdentitySchema>> {
-  await assertSecure(path, "file");
+async function readIdentity(
+  path: string,
+  permissionModel: PrivateStorageSecurityPort["permissionModel"]
+): Promise<z.infer<typeof durableHostIdentitySchema>> {
+  await assertSecure(path, "file", permissionModel);
   return durableHostIdentitySchema.parse(JSON.parse(await readFile(path, "utf8")));
 }
 
@@ -58,12 +69,13 @@ async function pathExists(path: string): Promise<boolean> {
 export async function ensureDurableHostIdentity(
   dataDirectory: string,
   hostId: string,
-  workspaceId: string
+  workspaceId: string,
+  security: PrivateStorageSecurityPort = createPrivateStorageSecurity()
 ): Promise<void> {
   const parsedHostId = opaqueIdentifierSchema.parse(hostId);
   const parsedWorkspaceId = opaqueIdentifierSchema.parse(workspaceId);
-  await mkdir(dataDirectory, { recursive: true, mode: 0o700 });
-  await assertSecure(dataDirectory, "directory");
+  await security.prepareDirectory(dataDirectory);
+  await assertSecure(dataDirectory, "directory", security.permissionModel);
   const path = join(dataDirectory, identityFileName);
   if (!(await pathExists(path))) {
     for (const name of legacyStoreNames) {
@@ -90,7 +102,8 @@ export async function ensureDurableHostIdentity(
   } catch (error) {
     if (!exists(error)) throw error;
   }
-  const identity = await readIdentity(path);
+  await security.secureFile(path);
+  const identity = await readIdentity(path, security.permissionModel);
   if (identity.hostId !== parsedHostId || identity.workspaceId !== parsedWorkspaceId) {
     throw new Error("agent_host_durable_identity_mismatch");
   }

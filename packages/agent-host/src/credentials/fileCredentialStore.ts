@@ -39,6 +39,19 @@ async function secureMetadata(
   }
 }
 
+async function syncParentDirectory(
+  path: string,
+  permissionModel: PrivateStorageSecurityPort["permissionModel"]
+): Promise<void> {
+  if (permissionModel === "windows-acl") return;
+  const handle = await open(path, "r");
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
 export class FileHostCredentialStore {
   constructor(
     readonly path: string,
@@ -59,9 +72,26 @@ export class FileHostCredentialStore {
     }
   }
 
-  async begin(pending: PendingHostEnrollment, replaceExisting: boolean): Promise<void> {
+  async begin(
+    pending: PendingHostEnrollment,
+    replaceExisting: boolean,
+    restartPendingEnrollment = false
+  ): Promise<void> {
     const current = await this.read();
-    if (current?.pending) throw new Error("agent_host_enrollment_already_pending");
+    if (current?.pending) {
+      if (!restartPendingEnrollment) {
+        throw new Error("agent_host_enrollment_already_pending");
+      }
+      if (
+        current.active ||
+        current.pending.kind !== "host_enrollment_code" ||
+        !current.pending.provenance ||
+        pending.kind !== "host_enrollment_code" ||
+        !pending.provenance
+      ) {
+        throw new Error("agent_host_handoff_pending_conflict");
+      }
+    }
     if (current?.active && !replaceExisting)
       throw new Error("agent_host_credential_replacement_requires_operator");
     await this.write({ version: "agent-host-credentials/v1", active: current?.active, pending });
@@ -176,12 +206,7 @@ export class FileHostCredentialStore {
       renamed = true;
       await this.security.secureFile(this.path);
       await secureMetadata(this.path, "file", this.security.permissionModel);
-      const directoryHandle = await open(directory, "r");
-      try {
-        await directoryHandle.sync();
-      } finally {
-        await directoryHandle.close();
-      }
+      await syncParentDirectory(directory, this.security.permissionModel);
     } catch (error) {
       if (renamed) {
         throw new Error("agent_host_credential_commit_durability_failed", { cause: error });

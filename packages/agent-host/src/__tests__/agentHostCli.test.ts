@@ -8,6 +8,7 @@ import {
   assertDurableStateReplacementSafe,
   ensureDurableHostIdentity
 } from "../state/durableHostIdentity.js";
+import type { PrivateStorageSecurityPort } from "../storage/privateStorageSecurity.js";
 import {
   AGENT_HOST_CLI_USAGE,
   type AgentHostOperatorService,
@@ -123,11 +124,23 @@ describe("Agent Host operator CLI", () => {
     expect(() => parseAgentHostArgs(["service", "status", "/config.json"])).toThrow(
       "agent_host_cli_config_required"
     );
-    expect(() =>
-      parseAgentHostArgs(["service", "status", "--config", "relative.json"])
-    ).toThrow("agent_host_cli_config_absolute_required");
+    expect(() => parseAgentHostArgs(["service", "status", "--config", "relative.json"])).toThrow(
+      "agent_host_cli_config_absolute_required"
+    );
     expect(() =>
       parseAgentHostArgs(["service", "status", "--config", "/config.json", "--extra"])
+    ).toThrow("agent_host_cli_usage");
+    expect(
+      parseAgentHostArgs([
+        "run",
+        "--config",
+        "/config.json",
+        "--background-instance",
+        "0123456789abcdef"
+      ])
+    ).toMatchObject({ command: "run", configPath: "/config.json" });
+    expect(() =>
+      parseAgentHostArgs(["run", "--config", "/config.json", "--background-instance", "invalid"])
     ).toThrow("agent_host_cli_usage");
   });
 
@@ -349,5 +362,25 @@ describe("Agent Host operator CLI", () => {
     await expect(
       new AgentHostOperator().enroll(configPath, `pw_enroll_${"a".repeat(43)}`)
     ).rejects.toThrow("agent_host_reenrollment_requires_durable_state_export");
+  });
+
+  it("uses the platform security policy for durable identity instead of POSIX modes on Windows", async () => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-agent-host-windows-identity-"));
+    directories.push(root);
+    const dataDirectory = join(root, "data");
+    const prepareDirectory = vi.fn(async (path: string) => mkdir(path, { recursive: true }));
+    const secureFile = vi.fn(async () => undefined);
+    const security: PrivateStorageSecurityPort = {
+      permissionModel: "windows-acl",
+      prepareDirectory,
+      secureFile
+    };
+
+    await expect(
+      ensureDurableHostIdentity(dataDirectory, "host-windows", "workspace-001", security)
+    ).resolves.toBeUndefined();
+
+    expect(prepareDirectory).toHaveBeenCalledWith(dataDirectory);
+    expect(secureFile).toHaveBeenCalledWith(join(dataDirectory, "durable-host.json"));
   });
 });

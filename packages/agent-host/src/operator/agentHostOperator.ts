@@ -329,14 +329,22 @@ export class AgentHostOperator {
       throw new Error("agent_host_handoff_pending_conflict");
     }
     if (document?.pending) {
-      if (
+      const conflictsWithCurrentHandoff =
         document.pending.kind !== "host_enrollment_code" ||
         !document.pending.provenance ||
-        !pendingProvenanceMatchesHandoff(document.pending.provenance, handoff, config)
-      ) {
-        throw new Error("agent_host_handoff_pending_conflict");
+        !pendingProvenanceMatchesHandoff(document.pending.provenance, handoff, config);
+      if (conflictsWithCurrentHandoff) {
+        if (
+          document.pending.kind !== "host_enrollment_code" ||
+          !document.pending.provenance ||
+          document.active
+        ) {
+          throw new Error("agent_host_handoff_pending_conflict");
+        }
+        await this.enrollPortableHandoff(config, encodedHandoff, paths.configPath, true);
+      } else {
+        await this.resumeEnrollment(paths.configPath);
       }
-      await this.resumeEnrollment(paths.configPath);
     } else if (!document?.active) {
       await this.enrollPortableHandoff(config, encodedHandoff, paths.configPath);
     } else if (document.active.workspaceId !== handoff.workspaceId) {
@@ -372,7 +380,7 @@ export class AgentHostOperator {
           options.fixedArgs ??
           (options.executablePath ? [] : process.argv[1] ? [process.argv[1]] : []),
         configPath: paths.configPath,
-        privateDirectory: paths.baseDirectory
+        privateDirectory: config.dataDirectory
       });
       return {
         state: "ready",
@@ -407,25 +415,11 @@ export class AgentHostOperator {
         listAgents: { command, args: ["agent-host", "agents", "list", "--config", configPath] },
         exposeAgent: {
           command,
-          args: [
-            "agent-host",
-            "agents",
-            "expose",
-            "<supported-profile>",
-            "--config",
-            configPath
-          ]
+          args: ["agent-host", "agents", "expose", "<supported-profile>", "--config", configPath]
         },
         hideAgent: {
           command,
-          args: [
-            "agent-host",
-            "agents",
-            "hide",
-            "<supported-profile>",
-            "--config",
-            configPath
-          ]
+          args: ["agent-host", "agents", "hide", "<supported-profile>", "--config", configPath]
         },
         runManually: { command, args: ["agent-host", "run", "--config", configPath] }
       }
@@ -456,7 +450,8 @@ export class AgentHostOperator {
   private async enrollPortableHandoff(
     config: AgentHostConfig,
     encodedHandoff: string,
-    configPath: string
+    configPath: string,
+    restartPendingEnrollment = false
   ): Promise<void> {
     await this.preflight(configPath);
     await assertDurableStateReplacementSafe(config.dataDirectory);
@@ -470,7 +465,7 @@ export class AgentHostOperator {
         config,
         credentialStore(config),
         new HttpAgentHostEnrollmentExchange(config.coordinator.url, exchangeOptions)
-      ).enrollPortableHandoff(encodedHandoff);
+      ).enrollPortableHandoff(encodedHandoff, { restartPendingEnrollment });
     } finally {
       await trust.close();
     }
@@ -552,26 +547,22 @@ export class AgentHostOperator {
 
   async uninstallBackground(configPath: string): Promise<AgentHostBackgroundResult> {
     const service = this.requireBackgroundService();
-    const workspaceId = await this.backgroundIdentity(configPath);
-    return service.uninstall(workspaceId);
+    return service.uninstall(await this.backgroundIdentity(configPath));
   }
 
   async backgroundStatus(configPath: string): Promise<AgentHostBackgroundResult> {
     const service = this.requireBackgroundService();
-    const workspaceId = await this.backgroundIdentity(configPath);
-    return service.status(workspaceId);
+    return service.status(await this.backgroundIdentity(configPath));
   }
 
   async restartBackground(configPath: string): Promise<AgentHostBackgroundResult> {
     const service = this.requireBackgroundService();
-    const workspaceId = await this.usableBackgroundIdentity(configPath);
-    return service.restart(workspaceId);
+    return service.restart(await this.usableBackgroundIdentity(configPath));
   }
 
   async backgroundLogs(configPath: string): Promise<AgentHostBackgroundLogs> {
     const service = this.requireBackgroundService();
-    const workspaceId = await this.backgroundIdentity(configPath);
-    return service.logs(workspaceId);
+    return service.logs(await this.backgroundIdentity(configPath));
   }
 
   async createDaemon(configPath: string): Promise<AgentHostComposition> {
@@ -714,9 +705,10 @@ export class AgentHostOperator {
       }
       throw error;
     }
-    const status = await this.backgroundService.status(workspaceId);
+    const identity = { workspaceId, privateDirectory: config.dataDirectory };
+    const status = await this.backgroundService.status(identity);
     if (status.state !== "running") return "restart_required";
-    await this.backgroundService.restart(workspaceId);
+    await this.backgroundService.restart(identity);
     return "restarted";
   }
 
@@ -725,15 +717,22 @@ export class AgentHostOperator {
     return this.backgroundService;
   }
 
-  private async backgroundIdentity(configPath: string): Promise<string> {
+  private async backgroundIdentity(
+    configPath: string
+  ): Promise<{ workspaceId: string; privateDirectory: string }> {
     const config = await loadAgentHostConfig(configPath);
     const document = await credentialStore(config).read();
     if (!document?.active) throw new Error("agent_host_background_identity_unavailable");
-    return document.active.workspaceId;
+    return { workspaceId: document.active.workspaceId, privateDirectory: config.dataDirectory };
   }
 
-  private async usableBackgroundIdentity(configPath: string): Promise<string> {
+  private async usableBackgroundIdentity(
+    configPath: string
+  ): Promise<{ workspaceId: string; privateDirectory: string }> {
     const config = await loadAgentHostConfig(configPath);
-    return (await credentialStore(config).requireUsable()).workspaceId;
+    return {
+      workspaceId: (await credentialStore(config).requireUsable()).workspaceId,
+      privateDirectory: config.dataDirectory
+    };
   }
 }

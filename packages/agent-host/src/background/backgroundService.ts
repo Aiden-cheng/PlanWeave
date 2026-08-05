@@ -11,16 +11,20 @@ export type AgentHostBackgroundInstall = AgentHostBackgroundLauncher & {
   privateDirectory: string;
 };
 
+export type AgentHostBackgroundIdentity = Pick<
+  AgentHostBackgroundInstall,
+  "workspaceId" | "privateDirectory"
+>;
+
 export type AgentHostBackgroundGuidance =
   | "enable_user_linger"
   | "check_launch_agent_permissions"
-  | "check_scheduled_task_permissions"
   | "configure_ca_certificate"
   | "run_agent_host_manually";
 
 export type AgentHostBackgroundResult = {
   state: AgentHostBackgroundState;
-  platform: "linux-systemd-user" | "macos-launch-agent" | "windows-scheduled-task";
+  platform: "linux-systemd-user" | "macos-launch-agent" | "windows-user-startup";
   guidance?: AgentHostBackgroundGuidance;
 };
 
@@ -37,10 +41,9 @@ export type AgentHostBackgroundLogs =
       stderrPath: string;
     }
   | {
-      platform: "windows-scheduled-task";
-      source: "task-scheduler-diagnostics";
-      eventLog: "Microsoft-Windows-TaskScheduler/Operational";
-      taskName: string;
+      platform: "windows-user-startup";
+      source: "user-startup-diagnostics";
+      registryValueName: string;
       capturesHostStdout: false;
     };
 
@@ -57,8 +60,8 @@ export class AgentHostBackgroundSetupError extends Error {
 
 export interface AgentHostBackgroundService {
   install(input: AgentHostBackgroundInstall): Promise<AgentHostBackgroundResult>;
-  uninstall(workspaceId: string): Promise<AgentHostBackgroundResult>;
-  status(workspaceId: string): Promise<AgentHostBackgroundResult>;
-  restart(workspaceId: string): Promise<AgentHostBackgroundResult>;
-  logs(workspaceId: string): Promise<AgentHostBackgroundLogs>;
+  uninstall(identity: AgentHostBackgroundIdentity): Promise<AgentHostBackgroundResult>;
+  status(identity: AgentHostBackgroundIdentity): Promise<AgentHostBackgroundResult>;
+  restart(identity: AgentHostBackgroundIdentity): Promise<AgentHostBackgroundResult>;
+  logs(identity: AgentHostBackgroundIdentity): Promise<AgentHostBackgroundLogs>;
 }

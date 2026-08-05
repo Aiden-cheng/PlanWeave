@@ -153,7 +153,7 @@ export const agentHostConfigSchema = z
     }
     if (
       config.coordinator.endpoint &&
-      config.coordinator.endpoint.serverOrigin !== transportOrigin(url)
+      transportOrigin(new URL(config.coordinator.endpoint.serverOrigin)) !== transportOrigin(url)
     ) {
       context.addIssue({
         code: "custom",

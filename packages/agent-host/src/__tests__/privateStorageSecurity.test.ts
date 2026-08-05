@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +8,23 @@ import {
   WindowsPrivateStorageSecurity,
   type PrivateStorageSecurityPort
 } from "../storage/privateStorageSecurity.js";
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    open: vi.fn(async (...args: Parameters<typeof actual.open>) => {
+      if (args[1] === "r") {
+        throw Object.assign(new Error("EPERM: operation not permitted, fsync"), {
+          code: "EPERM",
+          errno: -4048,
+          syscall: "fsync"
+        });
+      }
+      return actual.open(...args);
+    })
+  };
+});
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -26,6 +43,14 @@ function windowsSecurity() {
     .mockResolvedValueOnce({ stdout: "", stderr: "" });
   return { runner, security: new WindowsPrivateStorageSecurity(runner) };
 }
+
+const pendingCredential = {
+  kind: "host_enrollment_code" as const,
+  enrollmentAttemptId: "attempt-windows-durability",
+  enrollmentCode: `pw_enroll_${"a".repeat(43)}`,
+  credentialToken: `pw_host_${"b".repeat(43)}`,
+  createdAt: "2029-01-01T00:00:00.000Z"
+};
 
 describe("private storage security port", () => {
   it("atomically completes concurrent writes to the same first-use path", async () => {
@@ -86,7 +111,13 @@ describe("private storage security port", () => {
         }
       }
     );
-    expect(runner.mock.calls[1]?.[1]?.[3]).toContain("D:P");
+    const directoryAclScript = runner.mock.calls[1]?.[1]?.[3];
+    expect(directoryAclScript).toContain("System.Security.AccessControl.DirectorySecurity");
+    expect(directoryAclScript).toContain("System.Security.AccessControl.FileSecurity");
+    expect(directoryAclScript).toContain("$target.SetAccessControl($acl)");
+    expect(directoryAclScript).not.toContain("Get-Acl");
+    expect(directoryAclScript).not.toContain("Set-Acl");
+    expect(directoryAclScript).toContain("D:P");
     expect(runner).toHaveBeenNthCalledWith(
       4,
       "powershell.exe",
@@ -183,5 +214,45 @@ describe("private storage security port", () => {
     );
 
     expect(prepareDirectory).toHaveBeenCalledWith(directory);
+  });
+
+  it("commits credentials when Windows rejects POSIX parent-directory fsync", async () => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-windows-credential-"));
+    directories.push(root);
+    const security: PrivateStorageSecurityPort = {
+      permissionModel: "windows-acl",
+      prepareDirectory: async (path) => mkdir(path, { recursive: true }),
+      secureFile: vi.fn(async () => undefined)
+    };
+    const path = join(root, "credentials", "credentials.json");
+    const store = new FileHostCredentialStore(path, security);
+
+    await store.begin(pendingCredential, false);
+
+    expect(JSON.parse(await readFile(path, "utf8"))).toMatchObject({
+      version: "agent-host-credentials/v1",
+      pending: { enrollmentAttemptId: pendingCredential.enrollmentAttemptId }
+    });
+  });
+
+  it("still treats a POSIX parent-directory fsync failure as a failed commit", async () => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-posix-credential-"));
+    directories.push(root);
+    const security: PrivateStorageSecurityPort = {
+      permissionModel: "posix",
+      prepareDirectory: async (path) => {
+        await mkdir(path, { recursive: true, mode: 0o700 });
+        await chmod(path, 0o700);
+      },
+      secureFile: async (path) => chmod(path, 0o600)
+    };
+    const store = new FileHostCredentialStore(
+      join(root, "credentials", "credentials.json"),
+      security
+    );
+
+    await expect(store.begin(pendingCredential, false)).rejects.toThrow(
+      "agent_host_credential_commit_durability_failed"
+    );
   });
 });

@@ -12,10 +12,7 @@ import {
   resolveAgentHostDefaultPaths
 } from "../config/defaultPaths.js";
 import { FileHostCredentialStore } from "../credentials/fileCredentialStore.js";
-import {
-  createPendingPortableHandoffProvenance,
-  verifyActivePortableHandoffProvenance
-} from "../credentials/handoffProvenance.js";
+import { verifyActivePortableHandoffProvenance } from "../credentials/handoffProvenance.js";
 import { AgentHostEnrollmentService } from "../enrollment/enrollmentService.js";
 import { AgentHostOperator, loadAgentHostConfig } from "../operator/agentHostOperator.js";
 import { parseAgentHostArgs, runAgentHostCli } from "../operator/cli.js";
@@ -114,6 +111,9 @@ describe("portable Agent Host setup", () => {
     expect(() =>
       parseAgentHostArgs(["enroll", encodedHandoff(), "--expose", "--no-background"])
     ).toThrow("agent_host_cli_usage");
+    expect(() => parseAgentHostArgs(["enroll", encodedHandoff(), "--restart-pending"])).toThrow(
+      "agent_host_cli_usage"
+    );
   });
 
   it("exposes selected profiles during the same enrollment command", async () => {
@@ -136,17 +136,14 @@ describe("portable Agent Host setup", () => {
     });
 
     await expect(
-      runAgentHostCli(
-        ["enroll", encodedHandoff(), "--expose", "codex-acp,claude-agent-acp"],
-        {
-          operator: {
-            enrollHandoff: vi.fn().mockResolvedValue(enrollment),
-            reconcileAgentExposure
-          } as never,
-          io: { stdout, stderr: vi.fn() },
-          launcher: { executablePath: "node", fixedArgs: ["planweave", "agent-host"] }
-        }
-      )
+      runAgentHostCli(["enroll", encodedHandoff(), "--expose", "codex-acp,claude-agent-acp"], {
+        operator: {
+          enrollHandoff: vi.fn().mockResolvedValue(enrollment),
+          reconcileAgentExposure
+        } as never,
+        io: { stdout, stderr: vi.fn() },
+        launcher: { executablePath: "node", fixedArgs: ["planweave", "agent-host"] }
+      })
     ).resolves.toBe(0);
     expect(reconcileAgentExposure).toHaveBeenCalledWith(enrollment.configPath, [
       "codex-acp",
@@ -325,7 +322,7 @@ describe("portable Agent Host setup", () => {
     });
     const failedBackground = {
       install: vi.fn().mockRejectedValue(
-        new AgentHostBackgroundSetupError("check_scheduled_task_permissions", {
+        new AgentHostBackgroundSetupError("run_agent_host_manually", {
           cause: new Error("private scheduler output")
         })
       ),
@@ -341,7 +338,7 @@ describe("portable Agent Host setup", () => {
     ).resolves.toMatchObject({
       state: "background_setup_required",
       background: "setup_required",
-      backgroundGuidance: "check_scheduled_task_permissions",
+      backgroundGuidance: "run_agent_host_manually",
       configPath: paths.configPath
     });
     expect(failedBackground.install).toHaveBeenCalledWith(
@@ -467,7 +464,7 @@ describe("portable Agent Host setup", () => {
     expect(await store.read()).toBeNull();
   });
 
-  it("rejects ordinary or different portable pending state instead of upgrading or reusing it", async () => {
+  it("rejects ordinary pending state instead of treating it as a portable handoff", async () => {
     const home = await mkdtemp(join(tmpdir(), "planweave-portable-conflict-"));
     directories.push(home);
     mockedHome.path = home;
@@ -502,33 +499,71 @@ describe("portable Agent Host setup", () => {
     await expect(
       new AgentHostOperator(null).enrollHandoff(firstEncoded, { installBackground: false })
     ).rejects.toThrow("agent_host_handoff_pending_conflict");
-    expect((await store.read())?.pending?.provenance).toBeUndefined();
-
-    const acceptedAt = new Date("2029-01-01T00:00:00.000Z");
-    await writeFile(
-      store.path,
-      `${JSON.stringify({
-        version: "agent-host-credentials/v1",
-        pending: {
-          kind: "host_enrollment_code",
-          enrollmentAttemptId: "portable-attempt",
-          enrollmentCode: first.enrollmentCode,
-          credentialToken: `pw_host_${"f".repeat(43)}`,
-          createdAt: acceptedAt.toISOString(),
-          provenance: createPendingPortableHandoffProvenance(first, acceptedAt)
-        }
-      })}\n`,
-      { mode: 0o600 }
-    );
-    const differentHandoff = encodedHandoff({
-      workspaceId,
-      enrollmentCode: `pw_enroll_${"g".repeat(43)}`
-    });
     await expect(
-      new AgentHostOperator(null).enrollHandoff(differentHandoff, {
-        installBackground: false
-      })
+      new AgentHostEnrollmentService(config, store, {
+        exchange: vi.fn()
+      }).enrollPortableHandoff(firstEncoded, { restartPendingEnrollment: true })
     ).rejects.toThrow("agent_host_handoff_pending_conflict");
+    expect((await store.read())?.pending?.provenance).toBeUndefined();
+  });
+
+  it("automatically replaces an incomplete portable enrollment with a fresh handoff", async () => {
+    const home = await mkdtemp(join(tmpdir(), "planweave-portable-restart-"));
+    directories.push(home);
+    mockedHome.path = home;
+    const workspaceId = "workspace-pending-restart";
+    let requests = 0;
+    const server = createServer((request, response) => {
+      requests += 1;
+      let body = "";
+      request.on("data", (chunk) => {
+        body += chunk;
+      });
+      request.on("end", () => {
+        if (requests === 1) {
+          request.socket.destroy();
+          return;
+        }
+        const parsed = JSON.parse(body) as { enrollmentAttemptId: string };
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            type: "host.enrollment.completed",
+            protocolVersion: 1,
+            enrollmentAttemptId: parsed.enrollmentAttemptId,
+            hostId: "host-pending-restart",
+            workspaceId,
+            credentialExpiresAt: "2030-01-01T00:00:00.000Z"
+          })
+        );
+      });
+    });
+    servers.push(server);
+    const port = await listen(server);
+    const firstHandoff = encodedHandoff({
+      workspaceId,
+      enrollmentCode: `pw_enroll_${"j".repeat(43)}`,
+      serverOrigin: `http://127.0.0.1:${port}`
+    });
+    const freshHandoff = encodedHandoff({
+      workspaceId,
+      enrollmentCode: `pw_enroll_${"k".repeat(43)}`,
+      serverOrigin: `http://127.0.0.1:${port}`
+    });
+    const operator = new AgentHostOperator(null);
+
+    await expect(
+      operator.enrollHandoff(firstHandoff, { installBackground: false })
+    ).rejects.toThrow();
+    await expect(
+      operator.enrollHandoff(freshHandoff, { installBackground: false })
+    ).resolves.toMatchObject({
+      state: "ready",
+      workspaceId,
+      credential: "active",
+      background: "disabled"
+    });
+    expect(requests).toBe(2);
   });
 
   it("rejects a handoff while an ordinary replacement is pending beside active state", async () => {
