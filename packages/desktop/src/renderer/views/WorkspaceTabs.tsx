@@ -150,6 +150,7 @@ export type WorkspaceTabsAutoRunProps = {
   autoRunRetrospective: DesktopAutoRunRetrospectiveSummary | null;
   autoRunScopeMode: AutoRunScopeMode;
   autoRunState: DesktopAutoRunState | null;
+  endpointScopeRunPhase: "running" | "completed" | "failed" | null;
   handleAutoRunClick: () => Promise<void>;
   handleAutoRunNextAction: (action: AutoRunNextActionDescriptor) => Promise<void>;
   miniRunPanelOpen: boolean;

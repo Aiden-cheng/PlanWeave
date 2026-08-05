@@ -368,6 +368,52 @@ describe("ContentVersionFacade", () => {
     ).resolves.toEqual(status);
   });
 
+  it("resolves only a persisted shared replica while disconnected", async () => {
+    const workspace = await createTestWorkspace();
+    directories.push(workspace.home, workspace.root);
+    const storePath = join(workspace.home, "offline-replicas.json");
+    const store = new CollaborationContentReplicaStore(storePath);
+    const authority = {
+      profileId: "profile-test",
+      serverOrigin: "http://127.0.0.1:50653",
+      projectId: "remote-project"
+    };
+    const now = "2026-08-05T00:00:00.000Z";
+    await store.add({
+      remote: {
+        serverOrigin: authority.serverOrigin,
+        workspaceId: "workspace-test",
+        projectId: authority.projectId,
+        canvasId: "remote-canvas"
+      },
+      local: { projectId: "local-replica", canvasId: "default" },
+      phase: "ready",
+      projectName: "Shared project",
+      reservationToken: null,
+      createdAt: now,
+      updatedAt: now
+    });
+    const offline = new ContentVersionFacade(
+      () => null,
+      store,
+      () => authority
+    );
+
+    await expect(
+      offline.resolveCanvasScope({
+        localProjectId: "local-replica",
+        canvasId: "default"
+      })
+    ).resolves.toEqual({
+      workspaceId: "workspace-test",
+      projectId: "remote-project",
+      canvasId: "remote-canvas"
+    });
+    await expect(
+      offline.resolveCanvasScope({ localProjectId: "local-only", canvasId: "default" })
+    ).resolves.toBeNull();
+  });
+
   it("bootstraps a missing local package from Server authority and restores the mapping after restart", async () => {
     const workspace = await createTestWorkspace();
     directories.push(workspace.home, workspace.root);

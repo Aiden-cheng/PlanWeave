@@ -254,9 +254,12 @@ describe("useSharedCanvasCommands", () => {
     expect(result.current.projection?.optimisticOperationIds).toEqual([]);
   });
 
-  it("does not bind a command session before collaboration is connected", async () => {
+  it("does not mark an unmapped local canvas as shared while collaboration is offline", async () => {
     vi.useFakeTimers();
-    const bridge = createBridge();
+    const resolveScope = vi.fn<SharedCanvasCommandBridge["resolveCollaborationCanvasScope"]>(
+      async () => null
+    );
+    const bridge = createBridge({ resolveScope });
 
     const { result } = renderHook(() =>
       useSharedCanvasCommands({
@@ -266,9 +269,11 @@ describe("useSharedCanvasCommands", () => {
     );
     await flushEffects();
 
+    expect(resolveScope).toHaveBeenCalledWith({ localProjectId: "project-1", canvasId: "default" });
     expect(bridge.bind).not.toHaveBeenCalled();
     expect(bridge.reconnect).not.toHaveBeenCalled();
-    expect(result.current.enabled).toBe(true);
+    expect(result.current.enabled).toBe(false);
+    expect(result.current.offline).toBe(false);
   });
 
   it("keeps the command facade stable when its inputs and snapshot are unchanged", () => {

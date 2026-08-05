@@ -2,7 +2,11 @@ import { createHash } from "node:crypto";
 import { appendFile, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { getGraphViewModel, getTaskWorkspace } from "../desktop/index.js";
+import {
+  getGraphViewModel,
+  getTaskWorkspace,
+  getTaskWorkspaceRunDetail
+} from "../desktop/index.js";
 import { resetRuntimeState } from "../runSessions/index.js";
 import { readState } from "../state.js";
 import { runAutoRunStep } from "../taskManager/autoRun.js";
@@ -19,6 +23,7 @@ import {
   submitBlockResult,
   unblockBlock
 } from "../taskManager/index.js";
+import { projectRemoteAcpTimeline } from "../autoRun/remoteAcpEventProjection.js";
 import type { PlanPackageManifest } from "../types.js";
 import { basicManifest, createTestWorkspace, writeReport } from "./promptTestHelpers.js";
 
@@ -74,7 +79,13 @@ function activeIdentity(candidate: { sourceRevision: string; graphFingerprint: s
 function reportInput(bytes: Buffer) {
   return {
     reportArtifactRef: `artifact:sha256:${createHash("sha256").update(bytes).digest("hex")}`,
-    reportBytes: bytes
+    reportBytes: bytes,
+    transcript: {
+      sessionId: "remote-session-001",
+      executor: "codex-acp",
+      agentId: "codex" as const,
+      events: []
+    }
   };
 }
 
@@ -214,6 +225,19 @@ describe("remote block runtime binding", () => {
 });
 
 describe("remote block runtime terminal transitions", () => {
+  it("projects remote ACP tool updates through the canonical conversation timeline", () => {
+    expect(
+      projectRemoteAcpTimeline([
+        { cursor: 1, kind: "agent_message", text: "Working remotely" },
+        { cursor: 2, kind: "tool_call", callId: "tool-1", title: "Write file", status: "running" },
+        { cursor: 3, kind: "tool_call", callId: "tool-1", title: "Write file", status: "completed" }
+      ])
+    ).toMatchObject([
+      { kind: "message", content: "Working remotely" },
+      { kind: "tool", callId: "tool-1", title: "Write file", status: "completed" }
+    ]);
+  });
+
   it("persists exact report bytes and idempotently replays only the same completion", async () => {
     const { init, port, identity } = await activateReadyBlock();
     const bytes = Buffer.from("# Remote result\n\nExact UTF-8 bytes.\n");
@@ -281,6 +305,87 @@ describe("remote block runtime terminal transitions", () => {
     expect(reset).not.toHaveProperty("remoteOperationReceipt");
   });
 
+  it("materializes remote ACP events as the canonical Task Workspace conversation", async () => {
+    const { init, port, identity } = await activateReadyBlock();
+    const bytes = Buffer.from("# Remote result\n\nCreated the requested file.\n");
+    const completed = await port.complete({
+      ref: "T-001#B-001",
+      ...identity,
+      ...reportInput(bytes),
+      transcript: {
+        sessionId: "remote-session-001",
+        executor: "codex-acp",
+        agentId: "codex",
+        events: [
+          {
+            timestamp: "2026-08-05T10:48:45.000Z",
+            event: {
+              cursor: 1,
+              kind: "agent_message",
+              text: "I will create the requested file."
+            }
+          },
+          {
+            timestamp: "2026-08-05T10:48:48.000Z",
+            event: {
+              cursor: 2,
+              kind: "tool_call",
+              callId: "write-file-001",
+              title: "Write E:\\code\\planweave-remote-task-a.js",
+              status: "completed"
+            }
+          }
+        ]
+      }
+    });
+
+    const runDir = join(
+      init.workspace.resultsDir,
+      "T-001",
+      "blocks",
+      "B-001",
+      "runs",
+      completed.runId
+    );
+    const events = await readFile(join(runDir, "events.ndjson"), "utf8");
+    expect(events).toContain("I will create the requested file.");
+    expect(events).toContain("write-file-001");
+    expect(JSON.parse(await readFile(join(runDir, "conversation.json"), "utf8"))).toMatchObject({
+      version: "planweave.conversation/v1",
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "message",
+          content: "I will create the requested file."
+        })
+      ])
+    });
+
+    const detail = await getTaskWorkspaceRunDetail({
+      projectRoot: init.workspace.rootPath,
+      canvasId: "default",
+      taskId: "T-001",
+      recordId: `T-001#B-001::${completed.runId}`
+    });
+    expect(detail.record.runnerReadModel?.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          timestamp: "2026-08-05T10:48:45.000Z",
+          body: expect.objectContaining({
+            kind: "message",
+            role: "assistant",
+            content: "I will create the requested file."
+          })
+        }),
+        expect.objectContaining({
+          body: expect.objectContaining({
+            kind: "terminal",
+            outcome: expect.objectContaining({ state: "succeeded", artifactValidated: true })
+          })
+        })
+      ])
+    );
+  });
+
   it("records structured failure, rejects foreign replay, and clears receipt on retry reset", async () => {
     const { init, port, identity } = await activateReadyBlock();
     const failure = {
@@ -337,6 +442,15 @@ describe("remote block runtime terminal transitions", () => {
       false
     ],
     ["token=secret-value-123", "authentication_failed", "Remote authentication failed.", false],
+    [
+      "agent stopped after side effect",
+      "acp_incomplete_response",
+      "Remote ACP execution ended without a complete response.",
+      false
+    ],
+    ["private process details", "acp_process_error", "Remote ACP process failed.", true],
+    ["private protocol frame", "acp_protocol_error", "Remote ACP protocol failed.", false],
+    ["private elapsed timing", "acp_operation_timeout", "Remote ACP execution timed out.", true],
     ["ordinary host diagnostic", "token_secret_failure", "Remote execution failed.", false]
   ])("maps private failure diagnostic %s to a stable public contract", async (rawMessage, inputCode, publicMessage, retryable) => {
     const { root, init, port, identity } = await activateReadyBlock();

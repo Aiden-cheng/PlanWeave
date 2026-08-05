@@ -331,6 +331,61 @@ describe("human remote operation HTTP", () => {
     });
   });
 
+  it("returns the normalized Host failure in the human operation observation", async () => {
+    const fixture = await setup();
+    const token = await bootstrap(fixture.origin, fixture.projectId, "failure-observer");
+    const collection = `${fixture.origin}/api/v1/projects/${fixture.projectId}/remote-operations`;
+    const dispatched = await fetch(collection, {
+      method: "POST",
+      headers: headers(token),
+      body: JSON.stringify(remoteDispatchBody(fixture, "human-failed-dispatch"))
+    });
+    const operation = (await dispatched.json()) as {
+      operationId: string;
+      dispatchId: string;
+      executionAttemptId: string;
+      attempt: { leaseId: string };
+    };
+    expect(dispatched.status).toBe(202);
+
+    fixture.coordination.dispatches.accept(
+      fixture.host.id,
+      "human-failed-accept",
+      operation.dispatchId,
+      operation.attempt.leaseId,
+      operation.executionAttemptId
+    );
+    await fixture.coordination.dispatches.fail(
+      fixture.host.id,
+      "human-failed-terminal",
+      operation.dispatchId,
+      operation.attempt.leaseId,
+      operation.executionAttemptId,
+      {
+        code: "acp_authentication_required",
+        message: "ACP authentication is required.",
+        retryable: false
+      }
+    );
+
+    const observed = await fetch(`${collection}/${operation.operationId}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const observedBody = (await observed.json()) as Record<string, unknown>;
+    expect({ status: observed.status, body: observedBody }).toMatchObject({
+      status: 200,
+      body: {
+        state: "failed",
+        dispatchStatus: "failed",
+        failure: {
+          code: "acp_authentication_required",
+          message: "ACP authentication is required.",
+          retryable: false
+        }
+      }
+    });
+  });
+
   it("returns a stable conflict when a selected Agent Endpoint no longer exists", async () => {
     const fixture = await setup();
     const token = await bootstrap(fixture.origin, fixture.projectId, "missing-endpoint-owner");

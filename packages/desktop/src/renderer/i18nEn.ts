@@ -955,6 +955,7 @@ export const enCatalog = {
   taskWorkspaceLoadMoreRuns: "Load older runs",
   taskWorkspaceLoadingMoreRuns: "Loading older runs…",
   taskWorkspaceNoConversation: "Select a run to view its conversation.",
+  taskWorkspaceRemoteAcpLive: "Live conversation from the remote ACP Agent",
   taskWorkspaceNoInspector: "Select a run or Block to inspect its details.",
   taskWorkspaceNoTask: "No Task Workspace navigation target is available.",
   taskWorkspaceLocale: "en-US",

@@ -220,6 +220,32 @@ export class RemoteAcpEventRepository {
     };
   }
 
+  readCompletionTranscript(executionAttemptId: string): {
+    sessionId: string;
+    events: Array<{ timestamp: string; event: NormalizedAcpEvent }>;
+  } | null {
+    const stream = this.database
+      .prepare("SELECT * FROM remote_acp_event_streams WHERE execution_attempt_id=?")
+      .get(executionAttemptId);
+    if (!stream) return null;
+    if (Number(stream.dropped_count) > 0) {
+      throw new Error("remote_acp_event_transcript_truncated");
+    }
+    return {
+      sessionId: String(stream.acp_session_id),
+      events: this.database
+        .prepare(
+          `SELECT event_json,received_at FROM remote_acp_events
+           WHERE execution_attempt_id=? ORDER BY cursor`
+        )
+        .all(executionAttemptId)
+        .map((row) => ({
+          timestamp: z.string().datetime().parse(row.received_at),
+          event: normalizedAcpEventSchema.parse(JSON.parse(String(row.event_json)))
+        }))
+    };
+  }
+
   private requireWritableAttempt(input: {
     hostId: string;
     dispatchId: string;

@@ -332,6 +332,7 @@ export function conversationProps(
     liveUnavailableReason: null,
     onRunScrollTopChange: vi.fn(),
     recordError: null,
+    remoteConversation: null,
     runnerModel: model,
     selectedRecord: record(model),
     selectedRun,

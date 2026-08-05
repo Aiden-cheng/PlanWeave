@@ -5,6 +5,7 @@ import type {
   NormalizedFailure
 } from "@planweave-ai/agent-host-protocol";
 import type { RemoteBlockDispatchCandidate, RemoteBlockRuntimePort } from "@planweave-ai/runtime";
+import type { RemoteBlockCompletionInput } from "@planweave-ai/runtime";
 import type { HostCapacityReservation } from "./hostReservations.js";
 import type { MailboxMessage } from "./mailbox.js";
 import type { RemoteOperation } from "./remoteOperations.js";
@@ -126,6 +127,12 @@ export interface RemoteMailboxPublisherPort {
 
 export interface RemoteArtifactContentPort {
   readReport(artifactRef: string): Promise<Uint8Array>;
+}
+
+export interface RemoteAcpTranscriptPort {
+  readCompletionTranscript(
+    executionAttemptId: string
+  ): Pick<NonNullable<RemoteBlockCompletionInput["transcript"]>, "sessionId" | "events"> | null;
 }
 
 export interface RemoteInputArtifactPort {

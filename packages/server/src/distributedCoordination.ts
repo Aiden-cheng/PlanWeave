@@ -320,6 +320,7 @@ export function createRemoteBlockCoordination(
     mailbox,
     inputArtifacts: options.inputArtifacts,
     artifactContent: options.artifactContent,
+    acpTranscript: acpEvents,
     checkpoints: options.checkpoints,
     assignmentGate,
     agentEndpoints,

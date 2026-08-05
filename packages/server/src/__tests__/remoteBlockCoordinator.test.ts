@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   createRemoteBlockArtifactSource,
   createRemoteBlockRuntimePort,
+  getTaskWorkspaceRunDetail,
   type PlanPackageManifest
 } from "@planweave-ai/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -116,6 +117,7 @@ async function setup(withHost: boolean, manifest: PlanPackageManifest = remoteMa
     hosts: coordination.hosts,
     host,
     mailbox: coordination.mailbox,
+    acpEvents: coordination.acpEvents,
     artifacts,
     operations: coordination.operations,
     coordinator: coordination.coordinator,
@@ -871,6 +873,22 @@ describe("RemoteBlockCoordinator", () => {
       dispatch.leaseId,
       dispatch.executionAttemptId
     );
+    fixture.acpEvents.ingest(dispatch.hostId, "remote-acp-message-1", {
+      type: "acp.events",
+      dispatchId: dispatch.id,
+      leaseId: dispatch.leaseId,
+      executionAttemptId: dispatch.executionAttemptId,
+      acpSessionId: "remote-session-001",
+      afterCursor: 0,
+      cursor: 1,
+      events: [
+        {
+          cursor: 1,
+          kind: "agent_message",
+          text: "Created the requested file on the remote Host."
+        }
+      ]
+    });
     const grant = fixture.artifactAuthorization.createOutputGrant({
       operationId: "coordinator-completion-report",
       workspaceId: dispatch.workspaceId,
@@ -912,5 +930,27 @@ describe("RemoteBlockCoordinator", () => {
       fixture.runtime.query({ ref: "T-001#B-001", operationId: outcome.operation.id })
     ).resolves.toMatchObject({ status: "completed" });
     expect(fixture.operations.getRequired(outcome.operation.id).state).toBe("completed");
+    const binding = await fixture.runtime.query({
+      ref: "T-001#B-001",
+      operationId: outcome.operation.id
+    });
+    const runId = binding.terminalReceipt?.runId;
+    if (!runId) throw new Error("expected_remote_completion_run");
+    const detail = await getTaskWorkspaceRunDetail({
+      projectRoot: fixture.workspace.root,
+      canvasId: "default",
+      taskId: "T-001",
+      recordId: `T-001#B-001::${runId}`
+    });
+    expect(detail.record.runnerReadModel?.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          body: expect.objectContaining({
+            kind: "message",
+            content: "Created the requested file on the remote Host."
+          })
+        })
+      ])
+    );
   });
 });

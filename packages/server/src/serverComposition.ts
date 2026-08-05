@@ -41,6 +41,7 @@ import type { RegistryHttpService } from "./registryHttp.js";
 import { serverPackageVersion } from "./packageInfo.js";
 import { ServerReadinessController, type ServerReadiness } from "./readiness.js";
 import { RemoteControlService } from "./remoteControlService.js";
+import { RemoteCoordinationMaintenance } from "./remoteCoordinationMaintenance.js";
 import { HumanRemoteControlService } from "./humanRemoteControlService.js";
 import { observerEventsForActivity } from "./humanObserverActivity.js";
 import { HumanObserverJournal } from "./humanObserverJournal.js";
@@ -177,6 +178,7 @@ export async function createDistributedServerComposition(
   let activityRepository: ActivityRepository | undefined;
   let activityProjection: ActivityProjectionService | undefined;
   let activityRetention: ActivityRetentionMaintenance | undefined;
+  let remoteCoordinationMaintenance: RemoteCoordinationMaintenance | undefined;
   let webSockets: AgentHostWebSocketServer | undefined;
   let humanObserverWebSockets: HumanObserverWebSocketServer | undefined;
   let canvasPresenceWebSockets: CanvasPresenceWebSocketServer | undefined;
@@ -857,6 +859,11 @@ export async function createDistributedServerComposition(
     });
     options.httpServer.on("request", requestListener);
     const attachedRequestListener = requestListener;
+    remoteCoordinationMaintenance = new RemoteCoordinationMaintenance(
+      () => coordination.reconcile(),
+      config.limits.heartbeatIntervalMs
+    );
+    remoteCoordinationMaintenance.start();
     if (!options.readiness) readiness.transition("ready", schemaVersion);
     let closePromise: Promise<void> | undefined;
     const beginDrain = () => {
@@ -896,6 +903,11 @@ export async function createDistributedServerComposition(
         closePromise ??= (async () => {
           const errors: unknown[] = [];
           try {
+            await remoteCoordinationMaintenance?.close();
+          } catch (error) {
+            errors.push(error);
+          }
+          try {
             await activityRetention?.close();
           } catch (error) {
             errors.push(error);
@@ -928,6 +940,11 @@ export async function createDistributedServerComposition(
   } catch (error) {
     if (readiness.readiness().status !== "draining") readiness.transition("draining");
     const cleanupErrors: unknown[] = [];
+    try {
+      await remoteCoordinationMaintenance?.close();
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError);
+    }
     try {
       await activityRetention?.close();
     } catch (cleanupError) {

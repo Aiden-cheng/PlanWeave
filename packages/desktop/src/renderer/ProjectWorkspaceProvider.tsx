@@ -476,6 +476,17 @@ export function ProjectWorkspaceProvider({
     [appHistory.openTaskWorkspace]
   );
 
+  const startAutoRunWithSelectedEndpoint = useWorkspaceAgentEndpointRun({
+    activeProjectId: collaborationSurface.activeProjectId,
+    agentEndpoints: agentEndpointCatalog.endpoints,
+    collaborationController: collaborationSurface.controller,
+    graph,
+    preferences: settings.execution.agentEndpointPreferences,
+    selectedCanvasId,
+    selectedProject,
+    setError
+  });
+
   const autoRunController = useAutoRunController({
     autoRunState,
     onAutoRunDerivedStateRefresh: refreshGraph,
@@ -489,7 +500,8 @@ export function ProjectWorkspaceProvider({
     t,
     tmuxMonitoringEnabled: settings.execution.tmuxMonitoring && runtimeTools.tmux.available,
     position: settings.layout.autoRunControl.position,
-    onPositionCommit: (position) => updateLayoutSettings({ autoRunControl: { position } })
+    onPositionCommit: (position) => updateLayoutSettings({ autoRunControl: { position } }),
+    startAutoRunScope: startAutoRunWithSelectedEndpoint
   });
   useTaskNodeFocus({
     activeView,
@@ -699,18 +711,6 @@ export function ProjectWorkspaceProvider({
     savePreference: agentEndpointCatalog.savePreference,
     setError
   });
-  const startAutoRunWithSelectedEndpoint = useWorkspaceAgentEndpointRun({
-    activeProjectId: collaborationSurface.activeProjectId,
-    agentEndpoints: agentEndpointCatalog.endpoints,
-    collaborationController: collaborationSurface.controller,
-    graph,
-    preferences: settings.execution.agentEndpointPreferences,
-    selectedCanvasId,
-    selectedProject,
-    setError,
-    startLocal: autoRunController.startAutoRunWithScope
-  });
-
   const {
     handleBindSourceRoot,
     handleCopyCanvasToNewProject,
@@ -929,7 +929,7 @@ export function ProjectWorkspaceProvider({
       handleTaskAgentEndpointChange: taskAgentEndpointSelection.changeEndpoint,
       handleTitleChange,
       handleTitleSave,
-      startAutoRunWithScope: startAutoRunWithSelectedEndpoint
+      startAutoRunWithScope: autoRunController.startAutoRunWithScope
     }
   });
 

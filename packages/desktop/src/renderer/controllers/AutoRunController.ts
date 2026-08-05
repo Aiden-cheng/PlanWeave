@@ -12,6 +12,7 @@ import { bridge } from "../bridge";
 import type { createTranslator } from "../i18n";
 import type { FloatingControlPosition } from "../types";
 import { useAutoRunControl } from "../hooks/useAutoRunControl";
+import type { WorkspaceAgentEndpointScopeStarter } from "../hooks/useWorkspaceAgentEndpointRun";
 import { usePackageFileSync } from "../hooks/usePackageFileSync";
 import type { WorkspaceTabsAutoRunProps, WorkspaceTabsFileSyncProps } from "../views/WorkspaceTabs";
 
@@ -44,7 +45,8 @@ export function useAutoRunController({
   setAutoRunState,
   setError,
   t,
-  tmuxMonitoringEnabled
+  tmuxMonitoringEnabled,
+  startAutoRunScope
 }: {
   autoRunState: DesktopAutoRunState | null;
   openRunWorkspace: (locator: {
@@ -63,6 +65,7 @@ export function useAutoRunController({
   setError: (message: string | null) => void;
   t: ReturnType<typeof createTranslator>;
   tmuxMonitoringEnabled: boolean;
+  startAutoRunScope?: WorkspaceAgentEndpointScopeStarter;
 }): AutoRunController {
   const {
     autoRunControlRef,
@@ -71,6 +74,7 @@ export function useAutoRunController({
     autoRunRetrospective,
     autoRunScopeMode,
     autoRunState: currentAutoRunState,
+    endpointScopeRunPhase,
     handleAutoRunClick,
     handleAutoRunNextAction,
     miniRunPanelOpen,
@@ -95,7 +99,8 @@ export function useAutoRunController({
     t,
     tmuxMonitoringEnabled,
     position,
-    onPositionCommit
+    onPositionCommit,
+    startAutoRunScope
   });
 
   return useMemo(
@@ -107,6 +112,7 @@ export function useAutoRunController({
         autoRunRetrospective,
         autoRunScopeMode,
         autoRunState: currentAutoRunState,
+        endpointScopeRunPhase,
         handleAutoRunClick,
         handleAutoRunNextAction,
         miniRunPanelOpen,
@@ -126,6 +132,7 @@ export function useAutoRunController({
       autoRunRetrospective,
       autoRunScopeMode,
       currentAutoRunState,
+      endpointScopeRunPhase,
       handleAutoRunClick,
       handleAutoRunNextAction,
       miniRunPanelOpen,

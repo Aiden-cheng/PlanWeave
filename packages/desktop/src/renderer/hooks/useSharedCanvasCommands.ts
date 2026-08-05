@@ -172,7 +172,6 @@ export function useSharedCanvasCommands(input: {
       setScopeResolution({ phase: "idle" });
       return undefined;
     }
-    if (!input.sessionConnected) return undefined;
     const localProjectId = input.selectedProjectId;
     const localCanvasId = input.canvasId;
     const activeProjectId = input.activeProjectId;
@@ -207,8 +206,7 @@ export function useSharedCanvasCommands(input: {
     collaborationConfigured,
     input.activeProjectId,
     input.canvasId,
-    input.selectedProjectId,
-    input.sessionConnected
+    input.selectedProjectId
   ]);
 
   useEffect(() => {

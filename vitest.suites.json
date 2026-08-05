@@ -285,7 +285,7 @@
     },
     {
       "root": "packages/desktop/src/renderer/collaboration",
-      "unit": ["agentEndpointViewModel.test.ts"],
+      "unit": ["agentEndpointViewModel.test.ts", "remoteTaskEndpointRun.test.ts"],
       "integration": [],
       "platform": [],
       "performance": []
@@ -717,6 +717,7 @@
         "remoteBlockCoordinator.test.ts",
         "remoteBlockCoordinatorCrash.test.ts",
         "remoteBlockCoordinatorStartup.test.ts",
+        "remoteCoordinationMaintenance.test.ts",
         "remoteExecutionActions.test.ts",
         "remoteExecutionLifecycle.test.ts",
         "remoteObservations.test.ts",

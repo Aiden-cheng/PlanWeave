@@ -75,6 +75,41 @@ describe("remote-run/v3 dispatch contract", () => {
     ).toThrowError("endpoint_observation_must_redact_host_id");
   });
 
+  it("projects a normalized terminal failure for human observation", () => {
+    const failure = {
+      code: "acp_authentication_required",
+      message: "ACP authentication is required.",
+      retryable: false
+    };
+    const observation = {
+      operationId: "operation-1",
+      projectId: "project-a",
+      canvasId: "default",
+      blockRef: "T-001#B-001",
+      state: "failed" as const,
+      dispatchId: "dispatch-1",
+      executionAttemptId: "attempt-1",
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:01:00.000Z",
+      terminalAt: "2030-01-01T00:01:00.000Z",
+      attempt: {
+        executionAttemptId: "attempt-1",
+        dispatchId: "dispatch-1",
+        status: "failed" as const,
+        stateVersion: 2
+      },
+      dispatchStatus: "failed" as const,
+      failure,
+      runtime: {
+        ref: "T-001#B-001",
+        status: "blocked",
+        blockedReason: "[remote_execution_failed] Remote execution failed."
+      }
+    };
+
+    expect(remoteOperationObservationSchema.parse(observation)).toEqual(observation);
+  });
+
   it("keeps legacy v2 strict and independently parseable for migration", () => {
     const v2 = {
       schemaVersion: "remote-run/v2" as const,

@@ -33,6 +33,7 @@ type FloatingAutoRunControlProps = {
   autoRunRetrospective: DesktopAutoRunRetrospectiveSummary | null;
   autoRunScopeMode: AutoRunScopeMode;
   autoRunState: DesktopAutoRunState | null;
+  endpointScopeRunPhase?: "running" | "completed" | "failed" | null;
   controlRef: Ref<HTMLDivElement>;
   diagnostics: ValidationIssue[];
   projectDiagnostics: ValidationIssue[];
@@ -95,6 +96,7 @@ export function FloatingAutoRunControl({
   autoRunRetrospective,
   autoRunScopeMode,
   autoRunState,
+  endpointScopeRunPhase = null,
   controlRef,
   diagnostics,
   projectDiagnostics,
@@ -303,12 +305,14 @@ export function FloatingAutoRunControl({
       <Badge
         title={t("runStatus")}
         variant={
-          autoRunState?.phase === "blocked" || autoRunState?.phase === "failed"
+          endpointScopeRunPhase === "failed" ||
+          autoRunState?.phase === "blocked" ||
+          autoRunState?.phase === "failed"
             ? "destructive"
             : "outline"
         }
       >
-        {autoRunState?.phase ?? t("autoRunStopped")}
+        {endpointScopeRunPhase ?? autoRunState?.phase ?? t("autoRunStopped")}
       </Badge>
     </div>
   );

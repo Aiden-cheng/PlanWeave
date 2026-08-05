@@ -10,6 +10,7 @@ import {
   interactionSettlementSchema,
   leaseIdSchema,
   normalizedAcpEventSchema,
+  normalizedFailureSchema,
   opaqueIdentifierSchema,
   operatorEnrollmentGrantRequestSchema,
   operatorEnrollmentGrantResponseSchema,
@@ -83,6 +84,7 @@ export const operatorOperationViewSchema = z
       .optional(),
     attempt: operatorAttemptViewSchema,
     dispatchStatus: dispatchStatusSchema.optional(),
+    failure: normalizedFailureSchema.optional(),
     runtime: remoteBlockBindingViewSchema
   })
   .strict()

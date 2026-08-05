@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { OUTPUT_MAX_ARTIFACT_BYTES } from "@planweave-ai/agent-host-protocol";
 import {
   materializeArtifactBytes,
@@ -43,6 +43,7 @@ import {
   type RemoteBlockCompletionInput
 } from "./remoteBlockRuntimeContracts.js";
 import { remoteBlockSourceEvidence } from "./remoteBlockSource.js";
+import { materializeRemoteAcpTranscript } from "./remoteAcpTranscript.js";
 
 type BlockSubmissionArtifact =
   | { mode: "legacy"; bytes: Buffer }
@@ -50,7 +51,11 @@ type BlockSubmissionArtifact =
 
 type SubmissionAuthority =
   | { kind: "local" }
-  | { kind: "remote"; identity: ActiveRemoteOperationIdentity };
+  | {
+      kind: "remote";
+      identity: ActiveRemoteOperationIdentity;
+      transcript?: NonNullable<RemoteBlockCompletionInput["transcript"]>;
+    };
 
 async function runHasSubmittedResult(
   runDir: string,
@@ -213,6 +218,7 @@ export async function submitRemoteBlockResult(
     hooks,
     {
       kind: "remote",
+      ...(input.transcript ? { transcript: input.transcript } : {}),
       identity: {
         operationId: input.operationId,
         sourceRevision: input.sourceRevision,
@@ -388,6 +394,21 @@ async function submitBlockResultArtifact(
     if (artifact.mode === "legacy") {
       await writeFile(reportDestination, artifact.bytes);
     }
+    const remoteTiming =
+      authority.kind === "remote" && authority.transcript
+        ? await materializeRemoteAcpTranscript({
+            workspace,
+            ref: options.ref,
+            runId,
+            runDir,
+            transcript: authority.transcript,
+            artifact:
+              artifactReference ??
+              (() => {
+                throw new Error("Remote ACP transcript requires a verified artifact reference.");
+              })()
+          })
+        : null;
     const previousMetadata: ImplementationRunMetadata = (await exists(metadataPath))
       ? await readImplementationRunMetadataFile(metadataPath)
       : {};
@@ -400,6 +421,26 @@ async function submitBlockResultArtifact(
       submittedAt: new Date().toISOString(),
       reportHash,
       ...(artifactReference ? { artifactReference } : {}),
+      ...(authority.kind === "remote" && authority.transcript
+        ? {
+            claimRef: options.ref,
+            projectId: workspace.id,
+            canvasId: basename(dirname(workspace.packageDir)),
+            executor: authority.transcript.executor,
+            adapter: "agent",
+            agentId: authority.transcript.agentId,
+            runnerKind: "acp",
+            executorRunId: runId,
+            runSessionId: null,
+            desktopRunId: null,
+            sessionId: authority.transcript.sessionId,
+            agentSessionId: authority.transcript.sessionId,
+            status: "completed",
+            startedAt: remoteTiming?.startedAt,
+            finishedAt: remoteTiming?.finishedAt,
+            exitCode: 0
+          }
+        : {}),
       ...(options.reportPath ? { sourceReportPath: options.reportPath } : {})
     });
     await upsertBlockRunInIndex(runRoot, runId, true);

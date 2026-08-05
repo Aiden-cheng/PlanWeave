@@ -33,6 +33,9 @@ function normalizedProtocolEvent(
       return {
         cursor,
         kind: "tool_call",
+        ...(typeof body.callId === "string" && body.callId !== ""
+          ? { callId: boundedText(body.callId, 256) }
+          : {}),
         title: boundedText(body.title ?? body.callId ?? "ACP tool", 512) || "ACP tool",
         status
       };

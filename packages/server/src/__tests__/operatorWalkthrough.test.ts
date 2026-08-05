@@ -375,16 +375,19 @@ describe("remote operator walkthrough", () => {
     let host = startAgentHostBin(hostConfigPath);
     let firstLastSeenAt: string | undefined;
     let hostId: string | undefined;
-    await vi.waitFor(async () => {
-      const observedHost = await readHost();
-      expect(observedHost).toMatchObject({
-        displayName: "Walkthrough Host",
-        capacity: 2,
-        lastSeenAt: expect.any(String)
-      });
-      firstLastSeenAt = observedHost.lastSeenAt;
-      hostId = observedHost.id;
-    });
+    await vi.waitFor(
+      async () => {
+        const observedHost = await readHost();
+        expect(observedHost).toMatchObject({
+          displayName: "Walkthrough Host",
+          capacity: 2,
+          lastSeenAt: expect.any(String)
+        });
+        firstLastSeenAt = observedHost.lastSeenAt;
+        hostId = observedHost.id;
+      },
+      { timeout: 30_000 }
+    );
     expect(hostId).toBeTruthy();
 
     const executionTarget = await fetch(
@@ -520,9 +523,12 @@ describe("remote operator walkthrough", () => {
     await stopPublicBin(host);
 
     host = startAgentHostBin(hostConfigPath);
-    await vi.waitFor(async () => {
-      expect((await readHost()).lastSeenAt).not.toBe(firstLastSeenAt);
-    });
+    await vi.waitFor(
+      async () => {
+        expect((await readHost()).lastSeenAt).not.toBe(firstLastSeenAt);
+      },
+      { timeout: 30_000 }
+    );
     await stopPublicBin(host);
     await stopPublicBin(server);
 

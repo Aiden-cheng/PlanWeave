@@ -126,6 +126,7 @@ export class HumanRemoteControlService {
         stateVersion: operation.attempt.stateVersion
       },
       dispatchStatus: dispatch?.status,
+      ...(dispatch?.failure ? { failure: dispatch.failure } : {}),
       runtime: {
         ref: runtime.ref,
         status: runtime.status,

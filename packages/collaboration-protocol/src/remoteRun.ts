@@ -129,6 +129,7 @@ export const remoteOperationObservationSchema = z
     terminalAt: timestampSchema.optional(),
     attempt: remoteAttemptViewSchema,
     dispatchStatus: remoteDispatchStatusSchema.optional(),
+    failure: normalizedFailureSchema.optional(),
     agentEndpoint: availableRemoteAgentEndpointSchema
       .extend({ resolvedAt: timestampSchema })
       .strict()

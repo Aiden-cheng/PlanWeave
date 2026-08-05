@@ -1,7 +1,8 @@
 /* @vitest-environment jsdom */
 
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
+import type { PlanWeaveCollaborationApi } from "../shared/collaboration";
 import userEvent from "@testing-library/user-event";
 import { normalizedRunnerEventSchema, runnerRecordReadModelSchema } from "@planweave-ai/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -11,6 +12,7 @@ import {
   TaskWorkspaceComposer,
   TaskWorkspaceConversation
 } from "../renderer/task-workspace/conversation";
+import { useRemoteTaskWorkspaceConversation } from "../renderer/task-workspace/useRemoteTaskWorkspaceConversation";
 import { cleanupRendererTestEnvironment } from "./helpers/rendererTestEnvironment";
 import {
   activeIdentity,
@@ -27,6 +29,104 @@ afterEach(cleanupRendererTestEnvironment);
 const t = createTranslator("en");
 
 describe("Task Workspace conversation", () => {
+  it("replays a terminal remote ACP conversation and refreshes the canonical workspace run", async () => {
+    const onTerminal = vi.fn();
+    const api = {
+      observeCollaborationRemoteOperation: vi.fn(async () => ({
+        operationId: "operation-remote-1",
+        projectId: "project-server",
+        canvasId: "canvas-main",
+        blockRef: "T-001#B-001",
+        state: "completed" as const,
+        dispatchId: "dispatch-remote-1",
+        executionAttemptId: "attempt-remote-1",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        terminalAt: timestamp,
+        attempt: {
+          executionAttemptId: "attempt-remote-1",
+          dispatchId: "dispatch-remote-1",
+          status: "completed" as const,
+          stateVersion: 3
+        },
+        runtime: { ref: "T-001#B-001", status: "completed" as const }
+      })),
+      replayCollaborationRemoteOperationEvents: vi.fn(async () => ({
+        executionAttemptId: "attempt-remote-1",
+        afterCursor: 0,
+        cursor: 1,
+        highWatermark: 1,
+        hasMore: false,
+        events: [
+          {
+            cursor: 1,
+            kind: "agent_message" as const,
+            text: "Created the Windows file."
+          }
+        ]
+      })),
+      onCollaborationObserverSignal: vi.fn(() => () => {})
+    } satisfies Pick<
+      PlanWeaveCollaborationApi,
+      | "observeCollaborationRemoteOperation"
+      | "onCollaborationObserverSignal"
+      | "replayCollaborationRemoteOperationEvents"
+    >;
+
+    const { result } = renderHook(() =>
+      useRemoteTaskWorkspaceConversation({
+        api,
+        blockRef: "T-001#B-001",
+        operationId: "operation-remote-1",
+        onTerminal
+      })
+    );
+
+    await waitFor(() => expect(result.current?.state).toBe("completed"));
+    expect(result.current?.timeline).toEqual([
+      expect.objectContaining({
+        kind: "message",
+        role: "assistant",
+        content: "Created the Windows file."
+      })
+    ]);
+    expect(onTerminal).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the active remote ACP timeline instead of a stale local run", () => {
+    render(
+      <TaskWorkspaceConversation
+        {...conversationProps(selection(), null, {
+          remoteConversation: {
+            blockRef: "T-001#B-001",
+            error: null,
+            operationId: "operation-remote-1",
+            state: "running",
+            timeline: [
+              {
+                sequence: 1,
+                timestamp,
+                kind: "message",
+                role: "assistant",
+                content: "Creating the Windows file now."
+              }
+            ]
+          }
+        })}
+        api={null}
+        t={t}
+      />
+    );
+
+    expect(screen.getByTestId("task-workspace-remote-acp-conversation")).toHaveAttribute(
+      "data-operation-id",
+      "operation-remote-1"
+    );
+    expect(screen.getByText("Creating the Windows file now.")).toBeInTheDocument();
+    expect(screen.getByText(/Live conversation from the remote ACP Agent/)).toBeInTheDocument();
+    expect(screen.queryByText("real stdout summary")).not.toBeInTheDocument();
+  });
+
   it("keeps the workspace subtree mounted when cancel controls become unavailable", () => {
     const model = readModel();
     const selectedRun = selection({ model });

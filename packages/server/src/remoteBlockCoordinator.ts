@@ -12,6 +12,7 @@ import type { RemoteBlockDispatchCandidate, RemoteBlockRuntimePort } from "@plan
 import { remoteBlockFailureInputSchema } from "@planweave-ai/runtime";
 import type {
   RemoteArtifactContentPort,
+  RemoteAcpTranscriptPort,
   RemoteBlockRuntimeResolverPort,
   RemoteCoordinatorCheckpoint,
   RemoteCoordinatorCheckpointPort,
@@ -73,6 +74,7 @@ export type RemoteBlockCoordinatorOptions = {
   mailbox: RemoteMailboxPublisherPort;
   inputArtifacts: RemoteInputArtifactPort;
   artifactContent: RemoteArtifactContentPort;
+  acpTranscript: RemoteAcpTranscriptPort;
   checkpoints?: RemoteCoordinatorCheckpointPort;
   /**
    * Optional assignment gate consulted before Host reservation.
@@ -577,9 +579,26 @@ export class RemoteBlockCoordinator {
     const reportBytes = new Uint8Array(
       await this.options.artifactContent.readReport(reportArtifactRef)
     );
+    const candidate = this.options.candidates.get(operation.id);
+    if (!candidate) throw new Error("remote_operation_candidate_missing");
+    const observedTranscript = this.options.acpTranscript.readCompletionTranscript(
+      operation.executionAttemptId
+    );
+    const transcript = observedTranscript
+      ? {
+          ...observedTranscript,
+          executor: candidate.effectiveExecutor,
+          agentId: candidate.agentId
+        }
+      : null;
     await this.checkpoint("before_runtime_writeback");
     await this.withRuntime(operation, (runtime) =>
-      runtime.complete({ ...remoteBlockIdentity(operation), reportArtifactRef, reportBytes })
+      runtime.complete({
+        ...remoteBlockIdentity(operation),
+        reportArtifactRef,
+        reportBytes,
+        ...(transcript ? { transcript } : {})
+      })
     );
     await this.checkpoint("after_runtime_writeback");
     operation = this.options.operations.getRequired(operation.id);

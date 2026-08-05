@@ -230,22 +230,7 @@ export class DispatchService {
       const now = new Date();
       this.hosts.touch(hostId, now, readiness);
       for (const lease of activeLeases) {
-        const dispatch = this.get(lease.dispatchId);
-        if (
-          !dispatch ||
-          dispatch.hostId !== hostId ||
-          dispatch.leaseId !== lease.leaseId ||
-          dispatch.executionAttemptId !== lease.executionAttemptId ||
-          !["leased", "running", "cancelling"].includes(dispatch.status) ||
-          new Date(dispatch.leaseExpiresAt).getTime() <= now.getTime()
-        ) {
-          continue;
-        }
-        const leaseExpiresAt = new Date(now.getTime() + this.options.leaseDurationMs).toISOString();
-        this.database
-          .prepare("UPDATE dispatches SET lease_expires_at=? WHERE id=? AND lease_id=?")
-          .run(leaseExpiresAt, dispatch.id, dispatch.leaseId);
-        this.appendEvent(dispatch.id, "lease.renewed", { leaseExpiresAt });
+        this.renewCurrentLease(hostId, lease, now);
       }
     });
     return activeLeases.flatMap((lease) => {
@@ -265,6 +250,47 @@ export class DispatchService {
           ]
         : [];
     });
+  }
+
+  renewLeaseForActivity(
+    hostId: string,
+    identity: { dispatchId: string; leaseId: string; executionAttemptId: string },
+    now = new Date()
+  ):
+    | { dispatchId: string; leaseId: string; executionAttemptId: string; leaseExpiresAt: string }
+    | undefined {
+    return this.renewCurrentLease(hostId, identity, now);
+  }
+
+  private renewCurrentLease(
+    hostId: string,
+    identity: { dispatchId: string; leaseId: string; executionAttemptId: string },
+    now: Date
+  ):
+    | { dispatchId: string; leaseId: string; executionAttemptId: string; leaseExpiresAt: string }
+    | undefined {
+    const dispatch = this.get(identity.dispatchId);
+    if (
+      !dispatch ||
+      dispatch.hostId !== hostId ||
+      dispatch.leaseId !== identity.leaseId ||
+      dispatch.executionAttemptId !== identity.executionAttemptId ||
+      !["leased", "running", "cancelling"].includes(dispatch.status) ||
+      new Date(dispatch.leaseExpiresAt).getTime() <= now.getTime()
+    ) {
+      return undefined;
+    }
+    const leaseExpiresAt = new Date(now.getTime() + this.options.leaseDurationMs).toISOString();
+    this.database
+      .prepare("UPDATE dispatches SET lease_expires_at=? WHERE id=? AND lease_id=?")
+      .run(leaseExpiresAt, dispatch.id, dispatch.leaseId);
+    this.appendEvent(dispatch.id, "lease.renewed", { leaseExpiresAt });
+    return {
+      dispatchId: dispatch.id,
+      leaseId: dispatch.leaseId,
+      executionAttemptId: dispatch.executionAttemptId,
+      leaseExpiresAt
+    };
   }
 
   recordProgress(

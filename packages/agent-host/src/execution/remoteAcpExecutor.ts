@@ -259,7 +259,10 @@ export class RemoteAcpExecutor implements AgentHostExecutor {
           clientInfo: { name: "PlanWeave Agent Host", version: agentHostPackageVersion },
           prompt: preparedInputs.prompt,
           sessionStart: context.sessionStart,
-          authentication: profile.authentication,
+          authentication: {
+            ...profile.authentication,
+            requiredPolicy: "probe_session"
+          },
           interactionBroker: interactionBroker({
             identity,
             outbox: this.options.outbox,

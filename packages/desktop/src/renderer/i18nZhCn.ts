@@ -891,6 +891,7 @@ export const zhCnCatalog = {
   taskWorkspaceLoadMoreRuns: "加载更早的运行",
   taskWorkspaceLoadingMoreRuns: "正在加载更早的运行…",
   taskWorkspaceNoConversation: "选择一个运行以查看对话。",
+  taskWorkspaceRemoteAcpLive: "远程 ACP Agent 实时对话",
   taskWorkspaceNoInspector: "选择一个运行或 Block 以查看详情。",
   taskWorkspaceNoTask: "没有可用的 Task Workspace 导航目标。",
   taskWorkspaceLocale: "zh-CN",

@@ -211,6 +211,29 @@ defineAcpExecutionAdapterConformance("Agent Host remote", {
 });
 
 describe("RemoteAcpExecutor", () => {
+  it("probes a usable session when an Agent advertises authentication despite an existing login", async () => {
+    const { outbox } = await openOutbox();
+    const input = command();
+    const executor = new RemoteAcpExecutor({
+      workspaceResolver: { resolve: () => ({ cwd: process.cwd() }) },
+      profileResolver: profileResolver("session-ready-with-agent-auth"),
+      outbox,
+      hostCapabilities: ["linux", "acp.test"]
+    });
+
+    const result = await executor.execute(input, artifactContext(input).context);
+
+    expect(result.reportArtifactRef).toMatch(/^artifact:sha256:/);
+    expect(outbox.records(identity(input))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "engine_event",
+          event: expect.objectContaining({ kind: "session_started", loaded: false })
+        })
+      ])
+    );
+  });
+
   it("replays only identical durable records and rejects conflicting or invalid persisted payloads", async () => {
     const { outbox, path } = await openOutbox();
     const input = command();

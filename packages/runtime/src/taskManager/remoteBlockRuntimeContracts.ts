@@ -5,6 +5,7 @@ import {
   executionAttemptIdSchema,
   executionEnvelopeSchema,
   normalizedFailureSchema,
+  normalizedAcpEventSchema,
   opaqueIdentifierSchema,
   OUTPUT_MAX_ARTIFACT_BYTES
 } from "@planweave-ai/agent-host-protocol";
@@ -20,6 +21,10 @@ import { blockStatuses } from "../types/state.js";
 const envelopeShape = executionEnvelopeSchema.shape;
 
 const publicRemoteFailureCodes = [
+  "acp_incomplete_response",
+  "acp_operation_timeout",
+  "acp_process_error",
+  "acp_protocol_error",
   "acp_capability_missing",
   "authentication_failed",
   "execution_cancelled",
@@ -35,6 +40,10 @@ const publicRemoteFailureCodeSchema = z.enum(publicRemoteFailureCodes);
 type PublicRemoteFailureCode = z.infer<typeof publicRemoteFailureCodeSchema>;
 
 const publicFailureMessagesByCode: Readonly<Record<PublicRemoteFailureCode, string>> = {
+  acp_incomplete_response: "Remote ACP execution ended without a complete response.",
+  acp_operation_timeout: "Remote ACP execution timed out.",
+  acp_process_error: "Remote ACP process failed.",
+  acp_protocol_error: "Remote ACP protocol failed.",
   acp_capability_missing: "Remote ACP capability is missing.",
   authentication_failed: "Remote authentication failed.",
   execution_cancelled: "Remote execution was cancelled.",
@@ -113,7 +122,25 @@ export const remoteBlockCompletionInputSchema = remoteBlockRefIdentitySchema.ext
     .refine(
       (bytes) => bytes.byteLength <= OUTPUT_MAX_ARTIFACT_BYTES,
       `report bytes must not exceed ${OUTPUT_MAX_ARTIFACT_BYTES} bytes`
-    )
+    ),
+  transcript: z
+    .object({
+      sessionId: z.string().min(1).max(256),
+      executor: opaqueIdentifierSchema,
+      agentId: envelopeShape.agentId,
+      events: z
+        .array(
+          z
+            .object({
+              timestamp: z.string().datetime(),
+              event: normalizedAcpEventSchema
+            })
+            .strict()
+        )
+        .max(100_000)
+    })
+    .strict()
+    .optional()
 });
 
 export const remoteBlockFailureInputSchema = remoteBlockRefIdentitySchema.extend({

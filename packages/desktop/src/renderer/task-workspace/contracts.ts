@@ -9,6 +9,7 @@ import type { ReactNode } from "react";
 import type { AvailableAgentEndpoint } from "../collaboration/agentEndpointViewModel";
 import type { TaskWorkspaceNavigationIdentity } from "../taskWorkspaceNavigation";
 import type { TaskWorkspaceLayout } from "./useTaskWorkspaceLayout";
+import type { RemoteTaskWorkspaceConversation } from "./useRemoteTaskWorkspaceConversation";
 
 export type TaskWorkspaceRunItem = TaskWorkspaceBlock["runs"][number];
 
@@ -110,6 +111,7 @@ export type TaskWorkspaceController = {
   onRunScrollTopChange: (recordId: string, scrollTop: number) => void;
   packageExecutorNames: string[];
   recordError: string | null;
+  remoteConversation: RemoteTaskWorkspaceConversation | null;
   refresh: () => void;
   returnToCanvas: () => void;
   runnerModel: RunnerRecordReadModel | null;
@@ -157,6 +159,7 @@ export type TaskWorkspaceConversationSlotProps = Pick<
   | "liveUnavailableReason"
   | "onRunScrollTopChange"
   | "recordError"
+  | "remoteConversation"
   | "runnerModel"
   | "selectedRecord"
   | "selectedRun"

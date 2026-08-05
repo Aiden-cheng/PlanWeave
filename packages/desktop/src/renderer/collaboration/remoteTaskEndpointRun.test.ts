@@ -8,10 +8,7 @@ import {
 } from "@planweave-ai/collaboration-protocol/canvas/status";
 import type { DesktopGraphViewModel } from "@planweave-ai/runtime";
 import { describe, expect, it, vi } from "vitest";
-import {
-  runRemoteTaskEndpoint,
-  waitForRemoteOperationTerminal
-} from "./remoteTaskEndpointRun";
+import { runRemoteTaskEndpoint, waitForRemoteOperationTerminal } from "./remoteTaskEndpointRun";
 
 const task: DesktopGraphViewModel["tasks"][number] = {
   taskId: "T-001",
@@ -73,19 +70,20 @@ function operation(
   blockRef: string,
   state: RemoteOperationObservation["state"]
 ): RemoteOperationObservation {
+  const operationSuffix = blockRef.replace("#", ":");
   return remoteOperationObservationSchema.parse({
-    operationId: `operation-${blockRef}`,
+    operationId: `operation-${operationSuffix}`,
     projectId: "project-1",
     canvasId: "canvas-1",
     blockRef,
     state,
-    dispatchId: `dispatch-${blockRef}`,
-    executionAttemptId: `attempt-${blockRef}`,
+    dispatchId: `dispatch-${operationSuffix}`,
+    executionAttemptId: `attempt-${operationSuffix}`,
     createdAt: "2026-08-05T00:00:00.000Z",
     updatedAt: "2026-08-05T00:00:01.000Z",
     attempt: {
-      executionAttemptId: `attempt-${blockRef}`,
-      dispatchId: `dispatch-${blockRef}`,
+      executionAttemptId: `attempt-${operationSuffix}`,
+      dispatchId: `dispatch-${operationSuffix}`,
       status: state === "completed" ? "completed" : "running",
       stateVersion: 1
     },
@@ -110,7 +108,7 @@ describe("remote Task Endpoint run", () => {
 
     expect(result.state).toBe("completed");
     expect(observeCollaborationRemoteOperation).toHaveBeenCalledWith({
-      operationId: "operation-T-001#B-001"
+      operationId: "operation-T-001:B-001"
     });
     expect(unsubscribe).toHaveBeenCalledTimes(1);
   });

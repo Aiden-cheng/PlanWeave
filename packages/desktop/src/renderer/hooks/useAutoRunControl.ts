@@ -16,6 +16,7 @@ import {
 } from "../run/autoRunNextActions";
 import type { AutoRunScopeMode, FloatingControlDrag, FloatingControlPosition } from "../types";
 import { clamp } from "../viewHelpers";
+import type { WorkspaceAgentEndpointScopeStarter } from "./useWorkspaceAgentEndpointRun";
 
 type UseAutoRunControlArgs = {
   autoRunState: DesktopAutoRunState | null;
@@ -36,6 +37,7 @@ type UseAutoRunControlArgs = {
   initialPosition?: FloatingControlPosition | null;
   position?: FloatingControlPosition | null;
   onPositionCommit?: (position: FloatingControlPosition) => void;
+  startAutoRunScope?: WorkspaceAgentEndpointScopeStarter;
 };
 
 type FloatingControlViewport = {
@@ -146,9 +148,13 @@ export function useAutoRunControl({
   tmuxMonitoringEnabled,
   initialPosition,
   position,
-  onPositionCommit
+  onPositionCommit,
+  startAutoRunScope
 }: UseAutoRunControlArgs) {
   const [autoRunScopeMode, setAutoRunScopeMode] = useState<AutoRunScopeMode>("project");
+  const [endpointScopeRunPhase, setEndpointScopeRunPhase] = useState<
+    "running" | "completed" | "failed" | null
+  >(null);
   const [miniRunPanelOpen, setMiniRunPanelOpen] = useState(false);
   const [autoRunControlPosition, setAutoRunControlPosition] =
     useState<FloatingControlPosition | null>(() => {
@@ -317,15 +323,15 @@ export function useAutoRunControl({
     state: autoRunState
   });
 
-  const startAutoRunWithScope = useCallback(
+  const startLocalAutoRunWithScope = useCallback(
     async (scope: DesktopAutoRunScope) => {
       if (!bridge || !selectedProject) {
-        return;
+        return null;
       }
       try {
         setMiniRunPanelOpen(true);
         if (autoRunState && ["running", "pausing"].includes(autoRunState.phase)) {
-          return;
+          return null;
         }
         if (autoRunState?.phase === "blocked" && autoRunState.currentRef) {
           await bridge.unblockBlock(
@@ -334,16 +340,17 @@ export function useAutoRunControl({
             "Retry requested from Auto Run."
           );
         }
-        await applyAutoRunState(
-          await bridge.startAutoRun(
-            desktopCanvasReference(selectedProject, selectedCanvasId),
-            scope,
-            20,
-            { tmuxEnabled: tmuxMonitoringEnabled }
-          )
+        const started = await bridge.startAutoRun(
+          desktopCanvasReference(selectedProject, selectedCanvasId),
+          scope,
+          20,
+          { tmuxEnabled: tmuxMonitoringEnabled }
         );
+        await applyAutoRunState(started);
+        return started;
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : String(caught));
+        return null;
       }
     },
     [
@@ -356,12 +363,31 @@ export function useAutoRunControl({
     ]
   );
 
+  const startAutoRunWithScope = useCallback(
+    async (scope: DesktopAutoRunScope) => {
+      if (startAutoRunScope) {
+        await startAutoRunScope(scope, startLocalAutoRunWithScope, {
+          onStarted: () => {
+            setAutoRunState(null);
+            setEndpointScopeRunPhase("running");
+          },
+          onCompleted: () => setEndpointScopeRunPhase("completed"),
+          onFailed: () => setEndpointScopeRunPhase("failed")
+        });
+        return;
+      }
+      await startLocalAutoRunWithScope(scope);
+    },
+    [startAutoRunScope, startLocalAutoRunWithScope, setAutoRunState]
+  );
+
   const handleAutoRunClick = useCallback(async () => {
     if (!bridge || !selectedProject) {
       return;
     }
     try {
       setMiniRunPanelOpen(true);
+      if (endpointScopeRunPhase === "running") return;
       if (
         !autoRunState ||
         ["completed", "blocked", "failed", "stopped"].includes(autoRunState.phase)
@@ -387,6 +413,7 @@ export function useAutoRunControl({
   }, [
     applyAutoRunState,
     autoRunState,
+    endpointScopeRunPhase,
     selectedAutoRunScope,
     selectedProject,
     setError,
@@ -624,6 +651,7 @@ export function useAutoRunControl({
     autoRunRetrospective,
     autoRunScopeMode,
     autoRunState,
+    endpointScopeRunPhase,
     handleAutoRunClick,
     handleAutoRunNextAction,
     miniRunPanelOpen,

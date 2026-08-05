@@ -2,6 +2,7 @@ import type { CanvasRuntimeStatusProjection } from "@planweave-ai/collaboration-
 import type { RemoteOperationObservation } from "@planweave-ai/collaboration-protocol/remote-run";
 import type { DesktopGraphViewModel } from "@planweave-ai/runtime";
 import type { CollaborationObserverSignal } from "../../shared/collaborationReadModels";
+import { runAgentEndpointScope } from "./agentEndpointScopeRun";
 
 const TERMINAL_OPERATION_STATES = new Set<RemoteOperationObservation["state"]>([
   "completed",
@@ -93,21 +94,6 @@ export function waitForRemoteOperationTerminal(input: {
 
 type DesktopGraphTask = DesktopGraphViewModel["tasks"][number];
 
-function describeUnavailableTask(status: CanvasRuntimeStatusProjection, task: DesktopGraphTask) {
-  const taskBlocks = new Set(task.blocks.map((block) => block.ref));
-  const blocking = status.blocks.find(
-    (block) =>
-      taskBlocks.has(block.ref) &&
-      (block.status === "blocked" || block.status === "diverged")
-  );
-  if (blocking?.blockedReason) return blocking.blockedReason;
-  if (blocking?.divergenceReason) return blocking.divergenceReason;
-  if (status.blocks.some((block) => taskBlocks.has(block.ref) && block.status === "in_progress")) {
-    return "remote_task_has_in_progress_block";
-  }
-  return "remote_task_has_no_dispatchable_block";
-}
-
 export async function runRemoteTaskEndpoint(input: {
   task: DesktopGraphTask;
   readRuntimeStatus: () => Promise<CanvasRuntimeStatusProjection | null>;
@@ -118,24 +104,18 @@ export async function runRemoteTaskEndpoint(input: {
   ) => Promise<RemoteOperationObservation>;
   signal?: AbortSignal;
 }): Promise<void> {
-  while (!input.signal?.aborted) {
-    const status = await input.readRuntimeStatus();
-    if (!status) throw new Error("collaboration_runtime_status_unavailable");
-    const taskStatus = status.tasks.find((candidate) => candidate.taskId === input.task.taskId);
-    if (!taskStatus) throw new Error("collaboration_runtime_task_status_unavailable");
-    if (taskStatus.status === "implemented") return;
-
-    const statusByBlockRef = new Map(status.blocks.map((block) => [block.ref, block]));
-    const nextBlock = input.task.blocks.find(
-      (block) => statusByBlockRef.get(block.ref)?.dispatchable === true
-    );
-    if (!nextBlock) throw new Error(describeUnavailableTask(status, input.task));
-
-    const dispatched = await input.dispatchBlock(nextBlock.ref);
-    const terminal = await input.waitForTerminal(dispatched, input.signal);
-    if (terminal.state !== "completed") {
-      throw new Error(`remote_task_block_${terminal.state}:${nextBlock.ref}`);
-    }
-  }
-  throw new Error("remote_task_run_cancelled");
+  return runAgentEndpointScope({
+    tasks: [input.task],
+    readRuntimeStatus: input.readRuntimeStatus,
+    executeBlock: async (_task, block) => {
+      const terminal = await input.waitForTerminal(
+        await input.dispatchBlock(block.ref),
+        input.signal
+      );
+      if (terminal.state !== "completed") {
+        throw new Error(`remote_task_block_${terminal.state}:${block.ref}`);
+      }
+    },
+    signal: input.signal
+  });
 }

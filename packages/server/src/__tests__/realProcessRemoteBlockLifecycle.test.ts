@@ -245,7 +245,7 @@ describe("real-process remote Block lifecycle", () => {
       outcome: "failed",
       dispatchId: dispatched.dispatchId,
       executionAttemptId: dispatched.executionAttemptId,
-      failure: { code: "remote_execution_failed", retryable: false }
+      failure: { code: "acp_incomplete_response", retryable: false }
     });
     const hostFailure = client.readHostTerminalFailure(dispatched.dispatchId);
     expect(hostFailure?.code).toEqual(expect.any(String));

@@ -20,6 +20,7 @@ export const normalizedAcpEventSchema = z.discriminatedUnion("kind", [
     .object({
       cursor: deliveredAcpEventCursorSchema,
       kind: z.literal("tool_call"),
+      callId: z.string().min(1).max(256).optional(),
       title: z.string().min(1).max(512),
       status: z.enum(["pending", "running", "completed", "failed"])
     })

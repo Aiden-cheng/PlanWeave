@@ -213,6 +213,7 @@ export function TaskWorkspaceRoute({
     liveUnavailableReason: controller.liveUnavailableReason,
     onRunScrollTopChange: controller.onRunScrollTopChange,
     recordError: controller.recordError,
+    remoteConversation: controller.remoteConversation,
     runnerModel: controller.runnerModel,
     selectedRecord: controller.selectedRecord,
     selectedRun: controller.selectedRun,

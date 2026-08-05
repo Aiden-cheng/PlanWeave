@@ -185,6 +185,14 @@ export function attachAgentHostWebSocketServer(
         case "acp.events": {
           const { protocolVersion: _protocolVersion, messageId: _messageId, ...batch } = event;
           options.acpEvents.ingest(hostId, event.messageId, batch);
+          const renewed = options.dispatches.renewLeaseForActivity(hostId, event);
+          if (renewed) {
+            sendEvent(socket, {
+              type: "lease.renewed",
+              protocolVersion: agentHostProtocolVersion,
+              ...renewed
+            });
+          }
           break;
         }
         case "interaction.permission_requested":

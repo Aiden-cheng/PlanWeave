@@ -188,6 +188,14 @@ export class AcpEventStore {
     return this.appendForWriter(body, correlation, false);
   }
 
+  appendObserved(
+    body: NormalizedRunnerEvent["body"],
+    correlation: AcpCorrelation | undefined,
+    timestamp: string
+  ): Promise<void> {
+    return this.appendForWriter(body, correlation, false, timestamp);
+  }
+
   completedConversationWriter(sessionId: string): AcpCompletedConversationWriter {
     const terminalEvents = this.events.filter((event) => event.body.kind === "terminal");
     const terminal = terminalEvents[0];
@@ -265,7 +273,8 @@ export class AcpEventStore {
   private appendForWriter(
     body: NormalizedRunnerEvent["body"],
     correlation: AcpCorrelation | undefined,
-    completedConversation: boolean
+    completedConversation: boolean,
+    observedAt?: string
   ): Promise<void> {
     return this.serial(async () => {
       if (this.hasTerminal && !completedConversation) {
@@ -277,7 +286,7 @@ export class AcpEventStore {
       const candidate = normalizedRunnerEventSchema.parse({
         version: "planweave.runner-event/v1",
         sequence: this.sequence + 1,
-        timestamp: new Date().toISOString(),
+        timestamp: observedAt ?? new Date().toISOString(),
         identity: this.options.identity,
         runner: this.options.runner,
         correlation,

@@ -41,6 +41,10 @@ export function TaskWorkspaceConversation(
   const { api = bridge, runnerModel, selectedRecord, selectedRun, t } = props;
   const { canvasRef } = props;
 
+  if (props.remoteConversation) {
+    return <RemoteAcpRunConversation conversation={props.remoteConversation} t={t} />;
+  }
+
   if (!selectedRun) {
     return props.liveStatus === "loading" ? (
       <ConversationState
@@ -106,6 +110,47 @@ export function TaskWorkspaceConversation(
       selectedRun={selectedRun}
       t={t}
     />
+  );
+}
+
+function RemoteAcpRunConversation({
+  conversation,
+  t
+}: {
+  conversation: NonNullable<TaskWorkspaceConversationSlotProps["remoteConversation"]>;
+  t: ReturnType<typeof createTranslator>;
+}) {
+  return (
+    <section
+      className="flex h-full min-h-0 flex-col overflow-hidden"
+      data-operation-id={conversation.operationId}
+      data-testid="task-workspace-remote-acp-conversation"
+    >
+      <div className="shrink-0 px-5 pt-5">
+        <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+          {t("taskWorkspaceRemoteAcpLive")} · {conversation.state}
+        </div>
+        {conversation.error ? (
+          <p
+            className="mt-3 rounded-md border border-destructive/40 p-3 text-sm text-destructive"
+            role="alert"
+          >
+            {conversation.error}
+          </p>
+        ) : null}
+      </div>
+      <section
+        className="min-h-0 flex-1 overflow-y-auto px-5 pt-5 pb-5"
+        data-testid="task-workspace-conversation-viewport"
+      >
+        <div
+          className="mx-auto w-full max-w-3xl space-y-4"
+          data-testid="task-workspace-conversation-content"
+        >
+          <AcpConversationItems presentation="workspace" timeline={conversation.timeline} t={t} />
+        </div>
+      </section>
+    </section>
   );
 }
 

@@ -4,6 +4,7 @@ import { act, renderHook } from "@testing-library/react";
 import { useState } from "react";
 import type { DesktopAutoRunState } from "@planweave-ai/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { WorkspaceAgentEndpointScopeStarter } from "../renderer/hooks/useWorkspaceAgentEndpointRun";
 import {
   autoRunState,
   cleanupAutoRunControlTestEnvironment,
@@ -20,6 +21,87 @@ afterEach(() => {
 });
 
 describe("auto run control hook actions", () => {
+  it("routes the Project play control through the configured Endpoint starter", async () => {
+    const bridge = createDesktopBridgeMock({
+      startAutoRun: vi.fn()
+    });
+    stubAutoRunControlBridge(bridge);
+    const startAutoRunScope = vi.fn().mockResolvedValue(undefined);
+    const { useAutoRunControl } = await loadAutoRunControl();
+    const { result } = renderHook(() =>
+      useAutoRunControl({
+        autoRunState: null,
+        openRunWorkspace: vi.fn(),
+        selectedCanvasId: "canvas-main",
+        selectedBlock: null,
+        selectedProject: project,
+        selectedTaskPanelId: null,
+        setAutoRunState: vi.fn(),
+        setError: vi.fn(),
+        t: createTranslator("zh-CN"),
+        tmuxMonitoringEnabled: true,
+        startAutoRunScope
+      })
+    );
+
+    await act(async () => {
+      await result.current.handleAutoRunClick();
+    });
+
+    expect(startAutoRunScope).toHaveBeenCalledWith(
+      { kind: "project" },
+      expect.any(Function),
+      expect.objectContaining({
+        onStarted: expect.any(Function),
+        onCompleted: expect.any(Function),
+        onFailed: expect.any(Function)
+      })
+    );
+    expect(bridge.startAutoRun).not.toHaveBeenCalled();
+  });
+
+  it("replaces a stale local Auto Run badge with coordinated Endpoint lifecycle", async () => {
+    const bridge = createDesktopBridgeMock();
+    stubAutoRunControlBridge(bridge);
+    let lifecycle:
+      | {
+          onStarted: () => void;
+          onCompleted: () => void;
+          onFailed: (message: string) => void;
+        }
+      | undefined;
+    const startAutoRunScope = vi.fn<WorkspaceAgentEndpointScopeStarter>(
+      async (_scope, _startLocal, callbacks) => {
+        lifecycle = callbacks;
+      }
+    );
+    const { useAutoRunControl } = await loadAutoRunControl();
+    const stale = autoRunState({ phase: "blocked", error: "Old local failure" });
+    const { result } = renderHook(() => {
+      const [state, setState] = useState<DesktopAutoRunState | null>(stale);
+      return useAutoRunControl({
+        autoRunState: state,
+        openRunWorkspace: vi.fn(),
+        selectedCanvasId: "canvas-main",
+        selectedBlock: null,
+        selectedProject: project,
+        selectedTaskPanelId: null,
+        setAutoRunState: setState,
+        setError: vi.fn(),
+        t: createTranslator("zh-CN"),
+        tmuxMonitoringEnabled: true,
+        startAutoRunScope
+      });
+    });
+
+    await act(() => result.current.handleAutoRunClick());
+    act(() => lifecycle?.onStarted());
+    expect(result.current.autoRunState).toBeNull();
+    expect(result.current.endpointScopeRunPhase).toBe("running");
+    act(() => lifecycle?.onCompleted());
+    expect(result.current.endpointScopeRunPhase).toBe("completed");
+  });
+
   it("keeps selected block auto-run scope narrow", async () => {
     const runningState = autoRunState({ scope: { kind: "block", blockRef: selectedBlock.ref } });
     const bridge = createDesktopBridgeMock({

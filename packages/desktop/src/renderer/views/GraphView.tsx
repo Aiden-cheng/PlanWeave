@@ -62,6 +62,7 @@ type GraphViewProps = {
   autoRunRetrospective: DesktopAutoRunRetrospectiveSummary | null;
   autoRunScopeMode: AutoRunScopeMode;
   autoRunState: DesktopAutoRunState | null;
+  endpointScopeRunPhase: "running" | "completed" | "failed" | null;
   edges: Edge[];
   fileSyncResult: DesktopPackageFileSyncResult | null;
   graph: DesktopGraphViewModel | null;
@@ -124,6 +125,7 @@ export function GraphView({
   autoRunRetrospective,
   autoRunScopeMode,
   autoRunState,
+  endpointScopeRunPhase,
   edges,
   fileSyncResult,
   graph,
@@ -492,6 +494,7 @@ export function GraphView({
         autoRunNextAction={autoRunNextAction}
         autoRunRetrospective={autoRunRetrospective}
         autoRunState={autoRunState}
+        endpointScopeRunPhase={endpointScopeRunPhase}
         controlRef={autoRunControlRef}
         affectedTasks={fileSyncResult?.affectedTasks ?? []}
         diagnostics={fileSyncResult?.diagnostics ?? []}

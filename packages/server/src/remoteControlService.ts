@@ -200,6 +200,7 @@ export class RemoteControlService {
         stateVersion: operation.attempt.stateVersion
       },
       dispatchStatus: dispatch?.status,
+      ...(dispatch?.failure ? { failure: dispatch.failure } : {}),
       runtime
     });
   }

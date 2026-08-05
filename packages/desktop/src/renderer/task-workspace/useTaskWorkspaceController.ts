@@ -11,7 +11,8 @@ import type {
   TaskWorkspaceRunsCursor
 } from "@planweave-ai/runtime";
 import type { DesktopAgentEndpointPreference } from "../../shared/desktopSettings";
-import { bridge } from "../bridge";
+import type { PlanWeaveCollaborationApi } from "../../shared/collaboration";
+import { bridge, collaborationBridge } from "../bridge";
 import {
   agentEndpointPreferenceKey,
   selectedAgentEndpointId
@@ -39,6 +40,7 @@ import {
   sharedTaskPromptMarkdown
 } from "./taskWorkspaceSharedProjection";
 import { useTaskWorkspaceExecutorActions } from "./useTaskWorkspaceExecutorActions";
+import { useRemoteTaskWorkspaceConversation } from "./useRemoteTaskWorkspaceConversation";
 
 type TaskWorkspaceApi = Pick<
   DesktopBridgeApi,
@@ -142,6 +144,12 @@ export function useTaskWorkspaceController(options: {
   agentEndpointCatalog: readonly AvailableAgentEndpoint[];
   agentEndpointPreferences: Record<string, DesktopAgentEndpointPreference>;
   api?: TaskWorkspaceApi | null;
+  collaborationApi?: Pick<
+    PlanWeaveCollaborationApi,
+    | "observeCollaborationRemoteOperation"
+    | "onCollaborationObserverSignal"
+    | "replayCollaborationRemoteOperationEvents"
+  > | null;
   history: AppViewHistoryController;
   saveAgentEndpointPreference: (
     key: string,
@@ -154,6 +162,7 @@ export function useTaskWorkspaceController(options: {
     agentEndpointCatalog,
     agentEndpointPreferences,
     api = bridge,
+    collaborationApi = collaborationBridge,
     history,
     saveAgentEndpointPreference,
     sharedCanvas = null
@@ -404,6 +413,19 @@ export function useTaskWorkspaceController(options: {
     : (navigation?.recordId ?? selectedRun?.item.run.record.recordId ?? "");
   const selectedBlockRef =
     selectedAnnotation?.block.ref ?? navigation?.blockRef ?? selectedRun?.block.ref ?? "";
+  const selectedRemoteExecution = workspace?.blocks.find(
+    (block) => block.ref === selectedBlockRef
+  )?.remoteExecution;
+  const remoteConversation = useRemoteTaskWorkspaceConversation({
+    api: collaborationApi,
+    blockRef: selectedBlockRef || null,
+    operationId:
+      selectedRemoteExecution &&
+      (selectedRemoteExecution.phase !== "terminal" || selectedRemoteExecution.status === "failed")
+        ? selectedRemoteExecution.identity.operationId
+        : null,
+    onTerminal: refresh
+  });
 
   useEffect(() => {
     const request = ++recordRequest.current;
@@ -979,6 +1001,7 @@ export function useTaskWorkspaceController(options: {
       },
       packageExecutorNames,
       recordError,
+      remoteConversation,
       refresh,
       returnToCanvas: history.returnToTaskWorkspaceSource,
       runnerModel: liveProjection.runnerModel,
@@ -1016,6 +1039,7 @@ export function useTaskWorkspaceController(options: {
       navigation,
       packageExecutorNames,
       recordError,
+      remoteConversation,
       refresh,
       saveBlockExecutor,
       saveBlockAgentEndpoint,

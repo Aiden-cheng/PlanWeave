@@ -405,6 +405,21 @@ export class ContentVersionFacade {
     const authority = await this.authorityContext(client);
     if (!authority) return null;
     if (!client) {
+      const replica = (await this.replicas.list()).find(
+        (candidate) =>
+          candidate.phase === "ready" &&
+          candidate.remote.serverOrigin === authority.serverOrigin &&
+          candidate.remote.projectId === authority.projectId &&
+          candidate.local.projectId === requested.localProjectId &&
+          candidate.local.canvasId === requested.canvasId
+      );
+      if (replica) {
+        return collaborationCanvasScopeResolutionSchema.parse({
+          workspaceId: replica.remote.workspaceId,
+          projectId: replica.remote.projectId,
+          canvasId: replica.remote.canvasId
+        });
+      }
       const cached = await this.runtimeStatuses.get({
         ...authority,
         localProjectId: requested.localProjectId,
