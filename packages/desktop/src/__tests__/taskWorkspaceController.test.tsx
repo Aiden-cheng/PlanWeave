@@ -27,7 +27,7 @@ import {
 afterEach(cleanupRendererTestEnvironment);
 
 describe("Task Workspace selected run controller", () => {
-  it("keeps a remote Endpoint available for Blocks but disables it for Task execution", async () => {
+  it("keeps a compatible remote Endpoint available for both Task and Block selection", async () => {
     const { api } = controllerApi({ readModel: () => null });
     const remoteEndpoint = {
       id: "remote:endpoint-windows",
@@ -48,8 +48,8 @@ describe("Task Workspace selected run controller", () => {
 
     expect(result.current.agentEndpointsForTask[0]).toMatchObject({
       id: remoteEndpoint.id,
-      available: false,
-      unavailableReason: "agent_endpoint_task_scope_unsupported"
+      available: true,
+      unavailableReason: null
     });
     expect(result.current.agentEndpointsForBlock("T-001#B-001")[0]).toMatchObject({
       id: remoteEndpoint.id,

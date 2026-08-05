@@ -179,7 +179,7 @@ describe("TaskNodeCard prompt history shortcuts", () => {
 });
 
 describe("TaskNodeCard executor options", () => {
-  it("shows remote Task Endpoints as selected but disabled with the exact support reason", async () => {
+  it("allows selecting a compatible remote Task Endpoint", async () => {
     stubSelectLayoutApis();
     const onAgentEndpointChange = vi.fn();
     const data = Object.assign(nodeData(), {
@@ -202,12 +202,12 @@ describe("TaskNodeCard executor options", () => {
           displayName: "Codex",
           locationName: "LINANIML",
           capabilities: ["acp.codex"],
-          available: false,
-          unavailableReason: "agent_endpoint_task_scope_unsupported",
+          available: true,
+          unavailableReason: null,
           remoteEndpointId: "endpoint-windows"
         }
       ],
-      selectedAgentEndpointId: "remote:endpoint-windows",
+      selectedAgentEndpointId: "local:codex",
       onAgentEndpointChange
     });
     renderTaskNode(data);
@@ -215,12 +215,10 @@ describe("TaskNodeCard executor options", () => {
     await userEvent.click(screen.getByRole("combobox"));
 
     expect(await screen.findByRole("option", { name: "Codex" })).toBeInTheDocument();
-    expect(
-      screen.getByRole("option", {
-        name: /Codex · LINANIML.*agent_endpoint_task_scope_unsupported/
-      })
-    ).toHaveAttribute("aria-disabled", "true");
-    expect(onAgentEndpointChange).not.toHaveBeenCalled();
+    const remoteOption = screen.getByRole("option", { name: "Codex · LINANIML" });
+    expect(remoteOption).not.toHaveAttribute("aria-disabled", "true");
+    await userEvent.click(remoteOption);
+    expect(onAgentEndpointChange).toHaveBeenCalledWith("T-001", "remote:endpoint-windows");
   });
 
   it("keeps built-in and remote Endpoints when a Plan Package adds a custom executor", async () => {
@@ -258,8 +256,8 @@ describe("TaskNodeCard executor options", () => {
             displayName: "Codex",
             locationName: "LINANIML",
             capabilities: ["acp.codex"],
-            available: false,
-            unavailableReason: "agent_endpoint_task_scope_unsupported",
+            available: true,
+            unavailableReason: null,
             remoteEndpointId: "endpoint-windows"
           }
         ]

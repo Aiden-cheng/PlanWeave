@@ -205,18 +205,3 @@ export function applyAgentEndpointRequirements(
         };
   });
 }
-
-/** Remote execution is currently authoritative only at Block scope (`remote-run/v3`). */
-export function applyAgentEndpointTaskScopeSupport(
-  endpoints: readonly AvailableAgentEndpoint[]
-): AvailableAgentEndpoint[] {
-  return endpoints.map((endpoint) =>
-    endpoint.source === "local" || !endpoint.available
-      ? endpoint
-      : {
-          ...endpoint,
-          available: false,
-          unavailableReason: "agent_endpoint_task_scope_unsupported"
-        }
-  );
-}

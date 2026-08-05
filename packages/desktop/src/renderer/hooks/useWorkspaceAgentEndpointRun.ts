@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type {
   DesktopAutoRunScope,
   DesktopGraphViewModel,
@@ -7,8 +7,7 @@ import type {
 import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import type { AvailableAgentEndpoint } from "../collaboration/agentEndpointViewModel";
 import {
-  applyAgentEndpointRequirements,
-  applyAgentEndpointTaskScopeSupport
+  applyAgentEndpointRequirements
 } from "../collaboration/agentEndpointViewModel";
 import {
   agentEndpointPreferenceKey,
@@ -17,6 +16,10 @@ import {
 import type { DesktopUiSettings } from "../../shared/desktopSettings";
 import type { PlanWeaveCollaborationApi } from "../../shared/collaboration";
 import { collaborationBridge } from "../bridge";
+import {
+  runRemoteTaskEndpoint,
+  waitForRemoteOperationTerminal
+} from "../collaboration/remoteTaskEndpointRun";
 
 function createDispatchId(): string {
   return crypto.randomUUID();
@@ -39,11 +42,26 @@ export function useWorkspaceAgentEndpointRun(input: {
   selectedProject: DesktopProjectSummary | null;
   setError: (message: string | null) => void;
   startLocal: (scope: DesktopAutoRunScope) => Promise<void>;
-  api?: Pick<PlanWeaveCollaborationApi, "dispatchCollaborationRemoteOperation"> | null;
+  api?: Pick<
+    PlanWeaveCollaborationApi,
+    | "dispatchCollaborationRemoteOperation"
+    | "observeCollaborationRemoteOperation"
+    | "onCollaborationObserverSignal"
+    | "readCollaborationCanvasRuntimeStatus"
+  > | null;
   createId?: () => string;
+  waitForTerminal?: typeof waitForRemoteOperationTerminal;
 }): (scope: DesktopAutoRunScope) => Promise<void> {
   const api = input.api === undefined ? collaborationBridge : input.api;
   const createId = input.createId ?? createDispatchId;
+  const activeRemoteTaskRun = useRef<AbortController | null>(null);
+
+  useEffect(
+    () => () => {
+      activeRemoteTaskRun.current?.abort();
+    },
+    []
+  );
 
   return useCallback(
     async (scope: DesktopAutoRunScope) => {
@@ -77,14 +95,12 @@ export function useWorkspaceAgentEndpointRun(input: {
         executorName,
         preference: preferenceKey ? input.preferences[preferenceKey] : undefined
       });
-      const compatibleEndpoints = applyAgentEndpointRequirements(
+      const requiredCapabilities =
+        block?.requiredCapabilities ??
+        [...new Set(task.blocks.flatMap((candidate) => candidate.requiredCapabilities))];
+      const endpoint = applyAgentEndpointRequirements(
         input.agentEndpoints,
-        block?.requiredCapabilities ?? []
-      );
-      const endpoint = (
-        scope.kind === "task"
-          ? applyAgentEndpointTaskScopeSupport(compatibleEndpoints)
-          : compatibleEndpoints
+        requiredCapabilities
       ).find((candidate) => candidate.id === endpointId);
       if (!endpoint?.available) {
         input.setError(endpoint?.unavailableReason ?? "agent_endpoint_selection_unavailable");
@@ -92,10 +108,6 @@ export function useWorkspaceAgentEndpointRun(input: {
       }
       if (endpoint.source === "local") {
         await input.startLocal(scope);
-        return;
-      }
-      if (scope.kind !== "block") {
-        input.setError("agent_endpoint_task_scope_unsupported");
         return;
       }
       if (
@@ -107,24 +119,59 @@ export function useWorkspaceAgentEndpointRun(input: {
         input.setError("collaboration_project_unavailable");
         return;
       }
+      const activeProjectId = input.activeProjectId;
+      const collaborationController = input.collaborationController;
+      const remoteEndpointId = endpoint.remoteEndpointId;
+      const selectedCanvasId = input.selectedCanvasId;
       try {
-        const workItem = {
-          kind: "block" as const,
-          canvasId: input.selectedCanvasId,
-          blockRef: scope.blockRef
+        const dispatchBlock = async (blockRef: string) => {
+          const workItem = {
+            kind: "block" as const,
+            canvasId: selectedCanvasId,
+            blockRef
+          };
+          const authority = await collaborationController.ensureWorkAuthority(workItem);
+          if (!authority) throw new Error("work_authority_unavailable");
+          return api.dispatchCollaborationRemoteOperation({
+            schemaVersion: "remote-run/v3",
+            projectId: activeProjectId,
+            canvasId: selectedCanvasId,
+            blockRef,
+            agentEndpointId: remoteEndpointId,
+            idempotencyKey: `desktop-dispatch-${createId()}`,
+            expectedResponsibilityRevision: authority.revisions.responsibilityRevision,
+            expectedReviewerRevision: authority.revisions.reviewerRevision
+          });
         };
-        const authority = await input.collaborationController.ensureWorkAuthority(workItem);
-        if (!authority) throw new Error("work_authority_unavailable");
-        await api.dispatchCollaborationRemoteOperation({
-          schemaVersion: "remote-run/v3",
-          projectId: input.activeProjectId,
-          canvasId: input.selectedCanvasId,
-          blockRef: scope.blockRef,
-          agentEndpointId: endpoint.remoteEndpointId,
-          idempotencyKey: `desktop-dispatch-${createId()}`,
-          expectedResponsibilityRevision: authority.revisions.responsibilityRevision,
-          expectedReviewerRevision: authority.revisions.reviewerRevision
-        });
+        if (scope.kind === "block") {
+          await dispatchBlock(scope.blockRef);
+          return;
+        }
+        if (!input.selectedProject) throw new Error("collaboration_project_unavailable");
+        const selectedProject = input.selectedProject;
+        if (activeRemoteTaskRun.current) throw new Error("remote_task_run_already_active");
+        const controller = new AbortController();
+        activeRemoteTaskRun.current = controller;
+        try {
+          await runRemoteTaskEndpoint({
+            task,
+            readRuntimeStatus: () =>
+              api.readCollaborationCanvasRuntimeStatus({
+                localProjectId: selectedProject.projectId,
+                canvasId: selectedCanvasId
+              }),
+            dispatchBlock,
+            waitForTerminal: (observation, signal) =>
+              (input.waitForTerminal ?? waitForRemoteOperationTerminal)({
+                api,
+                initial: observation,
+                signal
+              }),
+            signal: controller.signal
+          });
+        } finally {
+          if (activeRemoteTaskRun.current === controller) activeRemoteTaskRun.current = null;
+        }
       } catch (caught) {
         input.setError(caught instanceof Error ? caught.message : String(caught));
       }
@@ -140,7 +187,8 @@ export function useWorkspaceAgentEndpointRun(input: {
       input.selectedCanvasId,
       input.selectedProject,
       input.setError,
-      input.startLocal
+      input.startLocal,
+      input.waitForTerminal
     ]
   );
 }

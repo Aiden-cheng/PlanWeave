@@ -18,7 +18,6 @@ import {
 } from "../collaboration/agentEndpointPreferences";
 import {
   applyAgentEndpointRequirements,
-  applyAgentEndpointTaskScopeSupport,
   type AvailableAgentEndpoint
 } from "../collaboration/agentEndpointViewModel";
 import { runDurablePackageWrite } from "../collaboration/packageWriteAdapter";
@@ -840,11 +839,9 @@ export function useTaskWorkspaceController(options: {
 
   const agentEndpointsForTask = useMemo(
     () =>
-      applyAgentEndpointTaskScopeSupport(
-        applyAgentEndpointRequirements(
-          agentEndpointCatalog,
-          workspaceLoad.key === key ? workspaceLoad.taskRequiredCapabilities : []
-        )
+      applyAgentEndpointRequirements(
+        agentEndpointCatalog,
+        workspaceLoad.key === key ? workspaceLoad.taskRequiredCapabilities : []
       ),
     [agentEndpointCatalog, key, workspaceLoad]
   );

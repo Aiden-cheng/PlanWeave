@@ -10,7 +10,6 @@ import type {
 import type { AssigneeSurfaceIndex } from "../collaboration/assigneeSurfaceViewModels";
 import {
   applyAgentEndpointRequirements,
-  applyAgentEndpointTaskScopeSupport,
   type AvailableAgentEndpoint
 } from "../collaboration/agentEndpointViewModel";
 import {
@@ -264,9 +263,7 @@ export function graphNodes(
         titleDraft: titleDrafts[task.taskId] ?? task.title,
         promptDraft: promptDrafts[task.taskId] ?? task.promptMarkdown,
         saveState: saveStates[task.taskId] ?? "idle",
-        agentEndpoints: applyAgentEndpointTaskScopeSupport(
-          applyAgentEndpointRequirements(agentEndpoints, requiredCapabilities)
-        ),
+        agentEndpoints: applyAgentEndpointRequirements(agentEndpoints, requiredCapabilities),
         selectedAgentEndpointId: selectedAgentEndpointIdForTask(
           task.taskId,
           task.executorLabel === "Mixed" ? "manual" : task.executorLabel
