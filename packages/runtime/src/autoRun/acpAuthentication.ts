@@ -164,6 +164,26 @@ export const acpAuthenticationOutcomeSchema = z.discriminatedUnion("kind", [
 ]);
 export type AcpAuthenticationOutcome = z.infer<typeof acpAuthenticationOutcomeSchema>;
 
+export type PlanWeaveAcpExecutionAuthentication = {
+  readonly hints?: AcpAuthenticationHints;
+  readonly availableEnvironmentVariables?: ReadonlySet<string>;
+  readonly requiredPolicy: "probe_session";
+};
+
+/**
+ * PlanWeave-managed ACP runs validate advertised external login methods by opening the
+ * requested session. This is an execution policy shared by every Agent family, not an
+ * Agent-specific authentication exception.
+ */
+export function planWeaveAcpExecutionAuthentication(
+  authentication?: Omit<PlanWeaveAcpExecutionAuthentication, "requiredPolicy">
+): PlanWeaveAcpExecutionAuthentication {
+  return {
+    ...authentication,
+    requiredPolicy: "probe_session"
+  };
+}
+
 type AcpAuthenticationRequiredOutcome = Extract<
   AcpAuthenticationOutcome,
   { kind: "auth_required" }

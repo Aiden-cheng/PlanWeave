@@ -11,6 +11,7 @@ import {
 import {
   ACP_SDK_AUTHORITY,
   executeAcp,
+  planWeaveAcpExecutionAuthentication,
   type AcpEngineEvent,
   type AcpEngineResult
 } from "@planweave-ai/runtime";
@@ -277,7 +278,7 @@ async function runCancellation(
     prompt:
       "PlanWeave cancellation check. Keep the turn open with a long reasoned reply. Do not use tools or touch files.",
     sessionStart: { kind: "new" },
-    authentication: profile.hostProfile.authentication,
+    authentication: planWeaveAcpExecutionAuthentication(profile.hostProfile.authentication),
     interactionBroker: {
       advertiseElicitation: false,
       requestPermission: async () => ({ kind: "cancel" }),

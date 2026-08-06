@@ -464,7 +464,8 @@ export {
   normalizeAcpAuthMethods,
   planAcpAuthentication,
   hasAdvertisedAcpAuthenticationMethods,
-  coordinateAcpAuthentication
+  coordinateAcpAuthentication,
+  planWeaveAcpExecutionAuthentication
 } from "./autoRun/acpAuthentication.js";
 export type * from "./autoRun/acpAuthentication.js";
 export { AcpEventPublisher } from "./autoRun/acpEventPublisher.js";

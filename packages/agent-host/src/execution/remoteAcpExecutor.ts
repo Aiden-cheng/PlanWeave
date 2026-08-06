@@ -4,6 +4,7 @@ import {
   AcpEngineCapabilityError,
   DEFAULT_ACP_EXECUTION_LIMITS,
   executeAcp,
+  planWeaveAcpExecutionAuthentication,
   type AcpEngineInteractionBroker,
   type AcpEngineLifecycleEvent,
   type AcpExecutionLimits
@@ -259,10 +260,7 @@ export class RemoteAcpExecutor implements AgentHostExecutor {
           clientInfo: { name: "PlanWeave Agent Host", version: agentHostPackageVersion },
           prompt: preparedInputs.prompt,
           sessionStart: context.sessionStart,
-          authentication: {
-            ...profile.authentication,
-            requiredPolicy: "probe_session"
-          },
+          authentication: planWeaveAcpExecutionAuthentication(profile.authentication),
           interactionBroker: interactionBroker({
             identity,
             outbox: this.options.outbox,

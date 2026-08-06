@@ -6,7 +6,8 @@ import {
   acpAuthenticationPlanSchema,
   coordinateAcpAuthentication,
   normalizeAcpAuthMethods,
-  planAcpAuthentication
+  planAcpAuthentication,
+  planWeaveAcpExecutionAuthentication
 } from "../autoRun/acpAuthentication.js";
 import { capabilitiesFromInitialize } from "../autoRun/acpPreflightProbe.js";
 
@@ -241,6 +242,23 @@ describe("ACP authentication coordinator and contracts", () => {
 });
 
 describe("ACP authentication public contracts", () => {
+  it("applies the PlanWeave session probe policy independently of Agent identity", () => {
+    const hints = {
+      preferredMethodIds: ["cached-token"],
+      headlessSafeMethodIds: ["cached-token"]
+    };
+    const availableEnvironmentVariables = new Set(["API_KEY"]);
+
+    expect(planWeaveAcpExecutionAuthentication({ hints, availableEnvironmentVariables })).toEqual({
+      hints,
+      availableEnvironmentVariables,
+      requiredPolicy: "probe_session"
+    });
+    expect(planWeaveAcpExecutionAuthentication()).toEqual({
+      requiredPolicy: "probe_session"
+    });
+  });
+
   it("uses strict Zod authorities for public hints, plans, and outcomes", () => {
     expect(
       acpAuthenticationHintsSchema.safeParse({

@@ -9,7 +9,10 @@ import {
   type AcpConnection,
   type CreateAcpConnectionOptions
 } from "./acpConnection.js";
-import type { AcpAuthenticationHints } from "./acpAuthentication.js";
+import {
+  planWeaveAcpExecutionAuthentication,
+  type AcpAuthenticationHints
+} from "./acpAuthentication.js";
 import type { AcpSessionStart } from "./acpRunRecovery.js";
 
 type PromptDelivery = {
@@ -166,11 +169,10 @@ export async function executeLocalAcpAdapter(options: {
           ? { kind: "load", sessionId: options.sessionStart.sessionId }
           : { kind: "new" },
       sessionLoadUnsupportedMessage: `ACP agent '${options.agentId}' no longer advertises session/load for recovery.`,
-      authentication: {
+      authentication: planWeaveAcpExecutionAuthentication({
         hints: options.authenticationHints,
-        availableEnvironmentVariables: new Set(Object.keys(options.env)),
-        requiredPolicy: "probe_session"
-      },
+        availableEnvironmentVariables: new Set(Object.keys(options.env))
+      }),
       interactionBroker: options.interactionBroker,
       interactionDeadline: options.interactionDeadline,
       followUpPrompts: options.followUpPrompts,
