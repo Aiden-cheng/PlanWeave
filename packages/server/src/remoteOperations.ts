@@ -368,6 +368,60 @@ export class RemoteOperationRepository {
     });
   }
 
+  cancelClaimedAfterRuntimeReset(input: {
+    operationId: string;
+    executionAttemptId: string;
+  }): RemoteOperation {
+    const operationId = opaqueIdentifierSchema.parse(input.operationId);
+    const executionAttemptId = executionAttemptIdSchema.parse(input.executionAttemptId);
+    return inWriteTransaction(this.database, () => {
+      const operation = this.getRequired(operationId);
+      if (
+        operation.state !== "claimed" ||
+        operation.executionAttemptId !== executionAttemptId ||
+        operation.attempt.status !== "prepared" ||
+        operation.attempt.hostId !== undefined ||
+        operation.attempt.leaseId !== undefined ||
+        operation.attempt.leaseExpiresAt !== undefined ||
+        operation.attempt.leaseFencingToken !== 0 ||
+        operation.attempt.stateVersion !== 0 ||
+        operation.attempt.terminalAt !== undefined
+      ) {
+        throw new Error("remote_runtime_reset_recovery_conflict");
+      }
+
+      const now = this.clock().toISOString();
+      const attemptUpdate = this.database
+        .prepare(
+          `UPDATE remote_execution_attempts
+           SET status='cancelled',state_version=state_version+1,updated_at=?,terminal_at=?
+           WHERE execution_attempt_id=? AND operation_id=? AND status='prepared'
+             AND host_id IS NULL AND lease_id IS NULL AND lease_expires_at IS NULL
+             AND lease_fencing_token=0 AND state_version=0 AND terminal_at IS NULL`
+        )
+        .run(now, now, executionAttemptId, operationId);
+      if (attemptUpdate.changes !== 1) {
+        throw new Error("remote_runtime_reset_recovery_conflict");
+      }
+
+      const operationUpdate = this.database
+        .prepare(
+          `UPDATE remote_operations
+           SET state='cancelled',diagnostic_code='runtime_binding_reset',
+             diagnostic_message='Runtime reset removed remote ownership before Host dispatch.',
+             updated_at=?,terminal_at=?
+           WHERE id=? AND state='claimed' AND execution_attempt_id=? AND terminal_at IS NULL`
+        )
+        .run(now, now, operationId, executionAttemptId);
+      if (operationUpdate.changes !== 1) {
+        throw new Error("remote_runtime_reset_recovery_conflict");
+      }
+
+      this.appendEvent(operationId, executionAttemptId, "remote.attempt.cancelled", now);
+      return this.getRequired(operationId);
+    });
+  }
+
   recordEnvelope(input: {
     operationId: string;
     digest: string;

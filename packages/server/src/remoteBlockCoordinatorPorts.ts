@@ -115,6 +115,7 @@ export interface RemoteDispatchPersistencePort {
   markActionRequired(operation: RemoteOperation): void;
   prepareManualFailure(input: { operation: RemoteOperation; failure: NormalizedFailure }): void;
   markMailboxPublished(messageId: string): void;
+  cancelInterruptedAfterRuntimeReset(operation: RemoteOperation): void;
   finishTerminal(input: {
     operation: RemoteOperation;
     status: "completed" | "failed" | "cancelled";

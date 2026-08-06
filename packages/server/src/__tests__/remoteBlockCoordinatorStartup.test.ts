@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import { createRemoteBlockRuntimePort, type RemoteBlockRuntimePort } from "@planweave-ai/runtime";
+import {
+  createRemoteBlockRuntimePort,
+  resetRuntimeState,
+  type RemoteBlockRuntimePort
+} from "@planweave-ai/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   basicManifest,
@@ -306,6 +310,59 @@ function eventCount(database: PlanweaveServer["database"], table: string, type: 
 }
 
 describe("RemoteBlockCoordinator startup reconciliation", () => {
+  it("cancels a pre-dispatch claim after Runtime reset and continues startup", async () => {
+    const harness = await StartupHarness.create();
+    await harness.start(new CrashOnce("after_envelope_persistence"));
+    harness.registerHost();
+    const coordination = harness.requireCoordination();
+
+    await expect(
+      coordination.coordinator.dispatch(harness.request("runtime-reset-before-dispatch"))
+    ).rejects.toThrowError("injected_crash:after_envelope_persistence");
+    const claimed = coordination.operations.findByCallerIdentity({
+      ...harness.locator,
+      blockRef: "T-001#B-001",
+      idempotencyKey: "runtime-reset-before-dispatch"
+    });
+    expect(claimed).toMatchObject({
+      state: "claimed",
+      attempt: { status: "prepared", hostId: undefined, leaseId: undefined }
+    });
+    expect(
+      harness
+        .requireServer()
+        .database.prepare("SELECT COUNT(*) AS count FROM dispatches WHERE id=?")
+        .get(claimed!.dispatchId)?.count
+    ).toBe(0);
+
+    await resetRuntimeState({ projectRoot: harness.workspace.root, force: true });
+
+    const restarted = await harness.start();
+    expect(restarted.operations.getRequired(claimed!.id)).toMatchObject({
+      state: "cancelled",
+      attempt: { status: "cancelled" }
+    });
+    expect(
+      harness
+        .requireServer()
+        .database.prepare(
+          "SELECT diagnostic_code,diagnostic_message FROM remote_operations WHERE id=?"
+        )
+        .get(claimed!.id)
+    ).toEqual({
+      diagnostic_code: "runtime_binding_reset",
+      diagnostic_message: "Runtime reset removed remote ownership before Host dispatch."
+    });
+    expect(restarted.operations.listNonTerminal()).toEqual([]);
+    expect(
+      eventCount(
+        harness.requireServer().database,
+        "remote_operation_events",
+        "remote.attempt.cancelled"
+      )
+    ).toBe(1);
+  });
+
   it("does not replay a rejected retry and still reconciles other pending work", async () => {
     const harness = await StartupHarness.create({ includeSecondTask: true });
     const coordination = harness.requireCoordination();
@@ -693,6 +750,95 @@ describe("RemoteBlockCoordinator startup reconciliation", () => {
     await expect(restarted.coordinator.query(outcome.operation.id)).resolves.toMatchObject({
       status: "diverged",
       interruption: { reason: "lease_lost", resumable: false }
+    });
+  });
+
+  it("cancels a fenced interrupted dispatch after Runtime reset and continues startup", async () => {
+    const harness = await StartupHarness.create();
+    const hostId = harness.registerHost();
+    const coordination = harness.requireCoordination();
+    const outcome = await coordination.coordinator.dispatch(
+      harness.request("runtime-reset-after-interruption")
+    );
+    const dispatch = coordination.dispatches.getRequired(outcome.operation.dispatchId);
+    coordination.dispatches.accept(
+      hostId,
+      "runtime-reset-accepted",
+      dispatch.id,
+      dispatch.leaseId,
+      dispatch.executionAttemptId
+    );
+    coordination.dispatches.interrupt(hostId, "runtime-reset-interrupted", {
+      type: "dispatch.interrupted",
+      protocolVersion: 1,
+      messageId: "runtime-reset-interrupted",
+      dispatchId: dispatch.id,
+      leaseId: dispatch.leaseId,
+      executionAttemptId: dispatch.executionAttemptId,
+      reason: "acp_session_lost",
+      resumable: false
+    });
+    const lease = coordination.reservations.getRequired(dispatch.leaseId);
+    coordination.reservations.release({
+      leaseId: lease.leaseId,
+      fencingToken: lease.fencingToken,
+      expectedVersion: lease.version,
+      reason: "expired"
+    });
+    await coordination.coordinator.reenter(outcome.operation.id);
+    await resetRuntimeState({ projectRoot: harness.workspace.root, force: true });
+
+    const restarted = await harness.start();
+
+    expect(restarted.dispatches.getRequired(dispatch.id)).toMatchObject({
+      status: "cancelled",
+      failure: { code: "execution_cancelled", retryable: false }
+    });
+    expect(restarted.operations.getRequired(outcome.operation.id)).toMatchObject({
+      state: "cancelled",
+      attempt: { status: "cancelled" }
+    });
+    expect(restarted.operations.listNonTerminal()).toEqual([]);
+    expect(
+      harness
+        .requireServer()
+        .database.prepare("SELECT diagnostic_code FROM remote_operations WHERE id=?")
+        .get(outcome.operation.id)
+    ).toEqual({ diagnostic_code: "runtime_binding_reset" });
+  });
+
+  it("keeps an interrupted dispatch fail-closed while its Host lease is active", async () => {
+    const harness = await StartupHarness.create();
+    const hostId = harness.registerHost();
+    const coordination = harness.requireCoordination();
+    const outcome = await coordination.coordinator.dispatch(
+      harness.request("runtime-reset-with-active-lease")
+    );
+    const dispatch = coordination.dispatches.getRequired(outcome.operation.dispatchId);
+    coordination.dispatches.accept(
+      hostId,
+      "active-lease-accepted",
+      dispatch.id,
+      dispatch.leaseId,
+      dispatch.executionAttemptId
+    );
+    coordination.dispatches.interrupt(hostId, "active-lease-interrupted", {
+      type: "dispatch.interrupted",
+      protocolVersion: 1,
+      messageId: "active-lease-interrupted",
+      dispatchId: dispatch.id,
+      leaseId: dispatch.leaseId,
+      executionAttemptId: dispatch.executionAttemptId,
+      reason: "acp_session_lost",
+      resumable: false
+    });
+    await coordination.coordinator.reenter(outcome.operation.id);
+    expect(coordination.reservations.getRequired(dispatch.leaseId).status).toBe("active");
+    await resetRuntimeState({ projectRoot: harness.workspace.root, force: true });
+
+    await expect(harness.start()).rejects.toMatchObject({
+      name: "RemoteOwnershipConflictError",
+      code: "remote_ownership_not_active"
     });
   });
 });

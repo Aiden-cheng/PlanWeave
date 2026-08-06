@@ -284,9 +284,14 @@ describe("canvas command service (OSS-004 B-002)", () => {
     const outcome = await service.submit(actor("owner"), submitBody("op-live-commit-failure", 0));
     expect(outcome).toMatchObject({ type: "canvas.command.rejected", code: "journal_unavailable" });
     expect(published).toEqual([]);
-    expect(repository.head({ workspaceId: "w", projectId: "p", canvasId: "default" }).revision).toBe(0);
     expect(
-      repository.getOperation({ workspaceId: "w", projectId: "p", canvasId: "default" }, "op-live-commit-failure")
+      repository.head({ workspaceId: "w", projectId: "p", canvasId: "default" }).revision
+    ).toBe(0);
+    expect(
+      repository.getOperation(
+        { workspaceId: "w", projectId: "p", canvasId: "default" },
+        "op-live-commit-failure"
+      )
     ).toBeUndefined();
   });
 
@@ -297,15 +302,24 @@ describe("canvas command service (OSS-004 B-002)", () => {
         throw new Error("live_publish_failed");
       },
       onAcceptedEntryUnavailable: ({ scope, headRevision }) =>
-        invalidated.push({ revision: headRevision, scope: `${scope.workspaceId}/${scope.projectId}/${scope.canvasId}` })
+        invalidated.push({
+          revision: headRevision,
+          scope: `${scope.workspaceId}/${scope.projectId}/${scope.canvasId}`
+        })
     });
 
-    const callbackFailure = await service.submit(actor("owner"), submitBody("op-live-callback-failure", 0));
+    const callbackFailure = await service.submit(
+      actor("owner"),
+      submitBody("op-live-callback-failure", 0)
+    );
     expect(callbackFailure).toMatchObject({ type: "canvas.command.accepted", revision: 1 });
     expect(invalidated).toEqual([{ revision: 1, scope: "w/p/default" }]);
 
     vi.spyOn(repository, "journalEntryAt").mockReturnValue(undefined);
-    const entryUnavailable = await service.submit(actor("editor"), submitBody("op-live-entry-missing", 1));
+    const entryUnavailable = await service.submit(
+      actor("editor"),
+      submitBody("op-live-entry-missing", 1)
+    );
     expect(entryUnavailable).toMatchObject({ type: "canvas.command.accepted", revision: 2 });
     expect(invalidated).toEqual([
       { revision: 1, scope: "w/p/default" },
@@ -348,7 +362,7 @@ describe("canvas command service (OSS-004 B-002)", () => {
 
   it("migrates v30 and enforces CAS + operationId idempotency", async () => {
     const { service, repository, runtime, database } = await fixture();
-    expect(latestCentralSchemaVersion).toBe(44);
+    expect(latestCentralSchemaVersion).toBe(45);
     expect(
       database
         .prepare(
@@ -415,7 +429,9 @@ describe("canvas command service (OSS-004 B-002)", () => {
       code: "operation_conflict",
       detail: "base_content_digest_mismatch"
     });
-    expect(repository.head({ workspaceId: "w", projectId: "p", canvasId: "default" }).revision).toBe(0);
+    expect(
+      repository.head({ workspaceId: "w", projectId: "p", canvasId: "default" }).revision
+    ).toBe(0);
   });
 
   it("rejects mixed bulk base content digests without advancing either head", async () => {
@@ -461,15 +477,26 @@ describe("canvas command service (OSS-004 B-002)", () => {
     });
     const scope = { workspaceId: "w", projectId: "p", canvasId: "default" };
     const beforeContent = contentVersions.head(scope);
-    const outcome = await service.submit(actor("owner"), submitBody("op-rollback-after-content", 0));
+    const outcome = await service.submit(
+      actor("owner"),
+      submitBody("op-rollback-after-content", 0)
+    );
     expect(outcome).toMatchObject({ type: "canvas.command.rejected", code: "journal_unavailable" });
     expect(contentVersions.head(scope)).toEqual(beforeContent);
-    expect(database.prepare("SELECT COUNT(*) AS count FROM canvas_content_journal").get()?.count).toBe(1);
+    expect(
+      database.prepare("SELECT COUNT(*) AS count FROM canvas_content_journal").get()?.count
+    ).toBe(1);
     expect(repository.head(scope).revision).toBe(0);
-    expect(database.prepare("SELECT COUNT(*) AS count FROM canvas_command_journal").get()?.count).toBe(0);
-    expect(database.prepare("SELECT COUNT(*) AS count FROM canvas_command_operations").get()?.count).toBe(0);
+    expect(
+      database.prepare("SELECT COUNT(*) AS count FROM canvas_command_journal").get()?.count
+    ).toBe(0);
+    expect(
+      database.prepare("SELECT COUNT(*) AS count FROM canvas_command_operations").get()?.count
+    ).toBe(0);
     expect(published).toEqual([]);
-    expect(database.prepare("SELECT COUNT(*) AS count FROM canvas_content_versions").get()?.count).toBe(2);
+    expect(
+      database.prepare("SELECT COUNT(*) AS count FROM canvas_content_versions").get()?.count
+    ).toBe(2);
   });
 
   it("serializes concurrent writers so only one CAS winner advances revision", async () => {
@@ -704,7 +731,9 @@ describe("canvas command service (OSS-004 B-002)", () => {
 
   it("accepts authority commits when server-local materialization is unavailable", async () => {
     const runtime = createDefaultCanvasRuntimePort();
-    const materialize = vi.spyOn(runtime, "apply").mockRejectedValue(new Error("local_disk_unavailable"));
+    const materialize = vi
+      .spyOn(runtime, "apply")
+      .mockRejectedValue(new Error("local_disk_unavailable"));
     const { service } = await fixture({ runtime });
     const outcome = await service.submit(actor("owner"), {
       type: "canvas.command.submit",
@@ -810,7 +839,10 @@ describe("canvas command service (OSS-004 B-002)", () => {
       taskId: "T-001",
       promptMarkdown: "# recovered authoritative prompt\n"
     };
-    const accepted = await service.submit(actor("owner"), submitBody("op-content-authority", 0, intent));
+    const accepted = await service.submit(
+      actor("owner"),
+      submitBody("op-content-authority", 0, intent)
+    );
     expect(accepted).toMatchObject({ type: "canvas.command.accepted", revision: 1 });
     const canvasHead = repository.head(scope);
     const contentHead = contentVersions.head(scope);
@@ -849,7 +881,7 @@ describe("canvas command service (OSS-004 B-002)", () => {
   it("never reads an owner package to recover an obsolete pending command", async () => {
     const scope = { workspaceId: "w", projectId: "p", canvasId: "default" };
     let digest = digestOf("empty");
-    let digestReadable = false;
+    const digestReadable = false;
     let applyCalls = 0;
     const runtime: CanvasRuntimeMutationPort = {
       async apply(input) {

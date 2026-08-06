@@ -443,6 +443,78 @@ export class SqliteRemoteDispatchPersistence implements RemoteDispatchPersistenc
     this.mailbox.markPublished(messageId);
   }
 
+  cancelInterruptedAfterRuntimeReset(operation: RemoteOperation): void {
+    inWriteTransaction(this.database, () => {
+      const current = this.operations.getRequired(operation.id);
+      if (
+        current.state !== "interrupted" ||
+        current.attempt.status !== "interrupted" ||
+        current.executionAttemptId !== operation.executionAttemptId ||
+        current.attempt.leaseId === undefined
+      ) {
+        throw new Error("remote_runtime_reset_dispatch_conflict");
+      }
+      const reservation = this.database
+        .prepare(
+          "SELECT status FROM host_capacity_reservations WHERE lease_id=? AND execution_attempt_id=?"
+        )
+        .get(current.attempt.leaseId, current.executionAttemptId);
+      if (!reservation || reservation.status === "active") {
+        throw new Error("remote_runtime_reset_dispatch_not_fenced");
+      }
+      const activeAction = this.database
+        .prepare(
+          `SELECT 1 FROM remote_execution_actions
+           WHERE operation_id=? AND execution_attempt_id=?
+             AND state IN ('recorded','delivered','acknowledged') LIMIT 1`
+        )
+        .get(current.id, current.executionAttemptId);
+      if (activeAction) throw new Error("remote_runtime_reset_action_active");
+
+      const dispatch = this.database
+        .prepare("SELECT status,lease_id,execution_attempt_id FROM dispatches WHERE id=?")
+        .get(current.dispatchId);
+      if (
+        !dispatch ||
+        dispatch.lease_id !== current.attempt.leaseId ||
+        dispatch.execution_attempt_id !== current.executionAttemptId
+      ) {
+        throw new Error("remote_runtime_reset_dispatch_conflict");
+      }
+      if (dispatch.status === "cancelled") return;
+      if (dispatch.status !== "interrupted") {
+        throw new Error("remote_runtime_reset_dispatch_not_interrupted");
+      }
+
+      const failure = normalizedFailureSchema.parse({
+        code: "execution_cancelled",
+        message: "Runtime reset abandoned the interrupted remote execution.",
+        retryable: false
+      });
+      const now = new Date().toISOString();
+      const updated = this.database
+        .prepare(
+          `UPDATE dispatches
+           SET status='cancelled',failure_json=?,result_json=NULL,finished_at=?
+           WHERE id=? AND status='interrupted' AND lease_id=? AND execution_attempt_id=?`
+        )
+        .run(
+          JSON.stringify(failure),
+          now,
+          current.dispatchId,
+          current.attempt.leaseId,
+          current.executionAttemptId
+        );
+      if (updated.changes !== 1) throw new Error("remote_runtime_reset_dispatch_conflict");
+      this.database
+        .prepare(
+          `INSERT INTO dispatch_events(dispatch_id,type,payload_json,occurred_at)
+           VALUES (?,'dispatch.cancelled',?,?)`
+        )
+        .run(current.dispatchId, JSON.stringify({ reason: "runtime_binding_reset" }), now);
+    });
+  }
+
   finishTerminal(input: {
     operation: RemoteOperation;
     status: "completed" | "failed" | "cancelled";

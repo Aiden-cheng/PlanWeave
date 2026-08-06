@@ -17,6 +17,7 @@ import { attachmentWorkspaceScopeMigration } from "./attachmentWorkspaceScope.js
 import { remoteWorkspaceScopeMigration } from "./remoteWorkspaceScope.js";
 import { exposureLeaseMigration } from "./exposure.js";
 import { endpointSelectionMigration } from "./endpointSelection.js";
+import { remoteAttemptCancellationMigration } from "./remoteAttemptCancellation.js";
 import type { Migration, MigrationModule } from "./types.js";
 
 const identityModule: MigrationModule = { name: "identity", migrations: identityMigrations };
@@ -46,7 +47,8 @@ export const migrationModules: readonly MigrationModule[] = [
   { name: "attachment-workspace-scope", migrations: [attachmentWorkspaceScopeMigration] },
   { name: "remote-workspace-scope", migrations: [remoteWorkspaceScopeMigration] },
   { name: "server-exposure", migrations: [exposureLeaseMigration] },
-  { name: "endpoint-selection", migrations: [endpointSelectionMigration] }
+  { name: "endpoint-selection", migrations: [endpointSelectionMigration] },
+  { name: "remote-attempt-cancellation", migrations: [remoteAttemptCancellationMigration] }
 ];
 
 const flattened = migrationModules.flatMap((module) => module.migrations);

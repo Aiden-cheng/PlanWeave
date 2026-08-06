@@ -209,7 +209,7 @@ const member = {
 describe("authoritative content version repository", () => {
   it("persists a verified owner-only initial version before creating the first head", async () => {
     const { repository, service } = await fixture();
-    expect(latestCentralSchemaVersion).toBe(44);
+    expect(latestCentralSchemaVersion).toBe(45);
     const result = service.publishInitial(owner, {
       projectId: "p",
       canvasId: "default",
@@ -244,12 +244,12 @@ describe("authoritative content version repository", () => {
     expect(expectedPaths.indexOf("nodes/a/prompt.md")).toBeLessThan(
       expectedPaths.indexOf("nodes/A/prompt.md")
     );
-    expect(repository.readVersion(scope, stored.completed).content.members.map((member) => member.path)).toEqual(
-      expectedPaths
-    );
-    expect([...repository.openTransfer(scope, stored.completed).members].map((member) => member.path)).toEqual(
-      expectedPaths
-    );
+    expect(
+      repository.readVersion(scope, stored.completed).content.members.map((member) => member.path)
+    ).toEqual(expectedPaths);
+    expect(
+      [...repository.openTransfer(scope, stored.completed).members].map((member) => member.path)
+    ).toEqual(expectedPaths);
   });
 
   it("fails closed for malformed digest, non-owner publication, and first-head races", async () => {

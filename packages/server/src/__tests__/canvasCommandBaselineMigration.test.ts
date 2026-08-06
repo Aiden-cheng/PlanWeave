@@ -75,7 +75,13 @@ describe("canvas command baseline migration", () => {
            package_snapshot_id,digest_manifest_json,size_bytes,encoding,integrity
          ) VALUES(?,?,?,?,?,?,NULL,NULL,?,'digest_manifest_only','verified')`
       );
-      insert.run(...Object.values(scope), 1, version.completed.canonicalDigest, "2026-08-02T00:00:00.000Z", version.content.totalBytes);
+      insert.run(
+        ...Object.values(scope),
+        1,
+        version.completed.canonicalDigest,
+        "2026-08-02T00:00:00.000Z",
+        version.content.totalBytes
+      );
       insert.run(...Object.values(scope), 2, "d".repeat(64), "2026-08-02T00:00:00.000Z", 1);
       applyMigrations(database);
       expect(
@@ -152,7 +158,7 @@ describe("canvas command baseline migration", () => {
 
       applyMigrations(database);
 
-      expect(latestCentralSchemaVersion).toBe(44);
+      expect(latestCentralSchemaVersion).toBe(45);
       expect(
         database
           .prepare(
@@ -270,7 +276,11 @@ describe("canvas command baseline migration", () => {
           1,
           oldDigest,
           at,
-          JSON.stringify({ manifest: { digestSha256: oldDigest, sizeBytes: 10 }, prompts: [], totalBytes: 10 }),
+          JSON.stringify({
+            manifest: { digestSha256: oldDigest, sizeBytes: 10 },
+            prompts: [],
+            totalBytes: 10
+          }),
           10,
           "content_version_ref",
           "verified"
@@ -326,10 +336,18 @@ describe("canvas command baseline migration", () => {
 
       expect(first).toEqual(replay);
       expect(first).toMatchObject({ revision: 1, contentDigest: replacementDigest });
-      expect(database.prepare("SELECT COUNT(*) AS count FROM canvas_command_journal").get()?.count).toBe(0);
-      expect(database.prepare("SELECT COUNT(*) AS count FROM canvas_command_operations").get()?.count).toBe(0);
-      expect(database.prepare("SELECT COUNT(*) AS count FROM canvas_command_pending").get()?.count).toBe(0);
-      expect(database.prepare("SELECT COUNT(*) AS count FROM canvas_command_legacy_archive").get()?.count).toBe(4);
+      expect(
+        database.prepare("SELECT COUNT(*) AS count FROM canvas_command_journal").get()?.count
+      ).toBe(0);
+      expect(
+        database.prepare("SELECT COUNT(*) AS count FROM canvas_command_operations").get()?.count
+      ).toBe(0);
+      expect(
+        database.prepare("SELECT COUNT(*) AS count FROM canvas_command_pending").get()?.count
+      ).toBe(0);
+      expect(
+        database.prepare("SELECT COUNT(*) AS count FROM canvas_command_legacy_archive").get()?.count
+      ).toBe(4);
       expect(repository.isLegacyOperationArchived(scope, entry.operationId)).toBe(true);
       expect(
         database
@@ -357,9 +375,21 @@ describe("canvas command baseline migration", () => {
   });
 
   it.each([
-    { name: "rebuilds from authoritative content before reconnect despite local digest drift", action: "reconnect", authorityAvailable: true },
-    { name: "rebuilds from authoritative content before submit despite local digest drift", action: "submit", authorityAvailable: true },
-    { name: "preserves the legacy journal when authoritative content is unavailable", action: "reconnect", authorityAvailable: false }
+    {
+      name: "rebuilds from authoritative content before reconnect despite local digest drift",
+      action: "reconnect",
+      authorityAvailable: true
+    },
+    {
+      name: "rebuilds from authoritative content before submit despite local digest drift",
+      action: "submit",
+      authorityAvailable: true
+    },
+    {
+      name: "preserves the legacy journal when authoritative content is unavailable",
+      action: "reconnect",
+      authorityAvailable: false
+    }
   ])("$name", async ({ action, authorityAvailable }) => {
     const workspace = await createTestWorkspace();
     const database = await openServerDatabase(":memory:", 5_000);
@@ -433,8 +463,17 @@ describe("canvas command baseline migration", () => {
            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)`
         )
         .run(
-          scope.workspaceId, scope.projectId, scope.canvasId, entry.operationId, intentDigest,
-          JSON.stringify(intent), JSON.stringify({ legacy: true }), 1, 1, entry.entryId, acceptedAt
+          scope.workspaceId,
+          scope.projectId,
+          scope.canvasId,
+          entry.operationId,
+          intentDigest,
+          JSON.stringify(intent),
+          JSON.stringify({ legacy: true }),
+          1,
+          1,
+          entry.entryId,
+          acceptedAt
         );
       database
         .prepare(

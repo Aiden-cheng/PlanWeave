@@ -115,6 +115,84 @@ describe("RemoteOperationRepository", () => {
     ).toThrowError("remote_operation_idempotency_conflict");
   });
 
+  it("cancels only a claimed prepared attempt whose Runtime binding was reset before dispatch", async () => {
+    const server = await setup();
+    const clock = () => new Date("2030-01-01T00:00:00.000Z");
+    const repository = new RemoteOperationRepository(server.database, clock);
+    const claimed = repository.markClaimed(repository.create(operationInput).id);
+
+    expect(
+      repository.cancelClaimedAfterRuntimeReset({
+        operationId: claimed.id,
+        executionAttemptId: claimed.executionAttemptId
+      })
+    ).toMatchObject({
+      state: "cancelled",
+      terminalAt: "2030-01-01T00:00:00.000Z",
+      attempt: {
+        status: "cancelled",
+        stateVersion: 1,
+        terminalAt: "2030-01-01T00:00:00.000Z"
+      }
+    });
+    expect(
+      server.database
+        .prepare("SELECT diagnostic_code,diagnostic_message FROM remote_operations WHERE id=?")
+        .get(claimed.id)
+    ).toEqual({
+      diagnostic_code: "runtime_binding_reset",
+      diagnostic_message: "Runtime reset removed remote ownership before Host dispatch."
+    });
+    expect(
+      server.database
+        .prepare(
+          "SELECT COUNT(*) AS count FROM remote_operation_events WHERE operation_id=? AND type='remote.attempt.cancelled'"
+        )
+        .get(claimed.id)?.count
+    ).toBe(1);
+
+    const preparing = repository.create({ ...operationInput, idempotencyKey: "request-2" });
+    expect(() =>
+      repository.cancelClaimedAfterRuntimeReset({
+        operationId: preparing.id,
+        executionAttemptId: preparing.executionAttemptId
+      })
+    ).toThrowError("remote_runtime_reset_recovery_conflict");
+  });
+
+  it("upgrades a v44 prepared attempt before cancelling its reset Runtime binding", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "planweave-remote-v45-migration-"));
+    directories.push(directory);
+    const database = await openServerDatabase(join(directory, "server.sqlite"), 5_000);
+    databases.push(database);
+    database.exec(`
+      CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY,applied_at TEXT NOT NULL);
+      CREATE TRIGGER stop_before_remote_attempt_cancellation
+      BEFORE INSERT ON schema_migrations
+      WHEN NEW.version = 45
+      BEGIN
+        SELECT RAISE(ABORT, 'stop_before_remote_attempt_cancellation');
+      END;
+    `);
+
+    expect(() => applyMigrations(database)).toThrowError("stop_before_remote_attempt_cancellation");
+    expect(centralSchemaVersion(database)).toBe(44);
+    const legacyRepository = new RemoteOperationRepository(database);
+    const claimed = legacyRepository.markClaimed(legacyRepository.create(operationInput).id);
+
+    database.exec("DROP TRIGGER stop_before_remote_attempt_cancellation");
+    applyMigrations(database);
+
+    expect(centralSchemaVersion(database)).toBe(latestCentralSchemaVersion);
+    expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    expect(
+      new RemoteOperationRepository(database).cancelClaimedAfterRuntimeReset({
+        operationId: claimed.id,
+        executionAttemptId: claimed.executionAttemptId
+      })
+    ).toMatchObject({ state: "cancelled", attempt: { status: "cancelled" } });
+  });
+
   it("fails visibly when persisted enum or JSON data is corrupted", async () => {
     const server = await setup();
     const repository = new RemoteOperationRepository(server.database);

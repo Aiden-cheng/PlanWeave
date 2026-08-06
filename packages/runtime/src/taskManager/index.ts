@@ -12,6 +12,8 @@ export type { PromptSourceKind, PromptSourceSummary, PromptSurface } from "./pro
 export { submitBlockResult, submitBlockResultFromBytes } from "./blockSubmission.js";
 export { createRemoteBlockRuntimePort } from "./remoteBlockRuntime.js";
 export type { RemoteBlockRuntimePort } from "./remoteBlockRuntime.js";
+export { RemoteOwnershipConflictError } from "./remoteOwnershipTransitions.js";
+export type { RemoteOwnershipConflictCode } from "./remoteOwnershipTransitions.js";
 export {
   createRemoteBlockArtifactSource,
   remoteBlockArtifactReadInputSchema,

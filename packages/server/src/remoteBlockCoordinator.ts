@@ -9,7 +9,7 @@ import {
 } from "@planweave-ai/agent-host-protocol";
 import { workspaceIdSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
 import type { RemoteBlockDispatchCandidate, RemoteBlockRuntimePort } from "@planweave-ai/runtime";
-import { remoteBlockFailureInputSchema } from "@planweave-ai/runtime";
+import { RemoteOwnershipConflictError, remoteBlockFailureInputSchema } from "@planweave-ai/runtime";
 import type {
   RemoteArtifactContentPort,
   RemoteAcpTranscriptPort,
@@ -283,6 +283,8 @@ export class RemoteBlockCoordinator {
           throw new Error("remote_source_changed");
         }
       } catch (error) {
+        const recovered = this.recoverRuntimeBindingReset(operation, error);
+        if (recovered) return recovered;
         this.options.operations.recordDiagnostic(
           operation.id,
           "runtime_reconciliation_conflict",
@@ -518,6 +520,58 @@ export class RemoteBlockCoordinator {
       }
     }
     return outcomes;
+  }
+
+  private recoverRuntimeBindingReset(
+    operation: RemoteOperation,
+    error: unknown
+  ): RemoteDispatchOutcome | undefined {
+    if (
+      !(error instanceof RemoteOwnershipConflictError) ||
+      error.code !== "remote_ownership_not_active"
+    ) {
+      return undefined;
+    }
+
+    const persisted = this.options.dispatches.inspect(operation);
+    if (
+      operation.state === "claimed" &&
+      operation.attempt.status === "prepared" &&
+      operation.attempt.hostId === undefined &&
+      operation.attempt.leaseId === undefined &&
+      !persisted.dispatch &&
+      !persisted.mailbox
+    ) {
+      const cancelled = this.options.operations.cancelClaimedAfterRuntimeReset({
+        operationId: operation.id,
+        executionAttemptId: operation.executionAttemptId
+      });
+      return { operation: cancelled, status: "terminal" };
+    }
+
+    if (
+      operation.state !== "interrupted" ||
+      operation.attempt.status !== "interrupted" ||
+      operation.attempt.leaseId === undefined ||
+      (persisted.dispatch?.status !== "interrupted" && persisted.dispatch?.status !== "cancelled")
+    ) {
+      return undefined;
+    }
+    const reservation = this.options.reservations.getRequired(operation.attempt.leaseId);
+    if (reservation.status === "active") return undefined;
+    if (persisted.dispatch.status === "interrupted") {
+      this.options.dispatches.cancelInterruptedAfterRuntimeReset(operation);
+    }
+    this.options.operations.recordDiagnostic(
+      operation.id,
+      "runtime_binding_reset",
+      "Runtime reset removed remote ownership after the remote execution was interrupted."
+    );
+    this.finalizeOperationTerminal(operation, "cancelled");
+    return {
+      operation: this.options.operations.getRequired(operation.id),
+      status: "terminal"
+    };
   }
 
   async reenterWaitingForHost(hostId: string): Promise<RemoteDispatchOutcome[]> {

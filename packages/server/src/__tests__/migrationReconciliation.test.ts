@@ -164,9 +164,10 @@ describe("collaboration migration reconciliation", () => {
       { name: "attachment-workspace-scope", versions: [39] },
       { name: "remote-workspace-scope", versions: [40] },
       { name: "server-exposure", versions: [43] },
-      { name: "endpoint-selection", versions: [44] }
+      { name: "endpoint-selection", versions: [44] },
+      { name: "remote-attempt-cancellation", versions: [45] }
     ]);
-    expect(latestCentralSchemaVersion).toBe(44);
+    expect(latestCentralSchemaVersion).toBe(45);
   });
 
   it("maps a representative v26 project to one stable Workspace and package registry key", async () => {
