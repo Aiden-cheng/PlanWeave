@@ -161,6 +161,7 @@ function renderRun(input?: {
   remoteTerminal?: RemoteOperationObservation;
 }) {
   const dispatch = vi.fn(async () => operation("running"));
+  const observe = vi.fn(async () => operation("running"));
   const ensureWorkAuthority = vi.fn(async () => ({
     revisions: { responsibilityRevision: 7, reviewerRevision: 11 }
   }));
@@ -228,7 +229,7 @@ function renderRun(input?: {
       setError,
       api: {
         dispatchCollaborationRemoteOperation: dispatch,
-        observeCollaborationRemoteOperation: vi.fn(async () => operation("completed")),
+        observeCollaborationRemoteOperation: observe,
         onCollaborationObserverSignal: vi.fn(() => () => undefined),
         readCollaborationCanvasRuntimeStatus: readRuntimeStatus
       },
@@ -245,6 +246,7 @@ function renderRun(input?: {
   return {
     ...hook,
     dispatch,
+    observe,
     ensureWorkAuthority,
     readRuntimeStatus,
     setError,
@@ -268,6 +270,45 @@ describe("workspace Agent Endpoint routing", () => {
     );
     expect(waitForTerminal).toHaveBeenCalledTimes(1);
     expect(startLocal).not.toHaveBeenCalled();
+    expect(setError).not.toHaveBeenCalled();
+  });
+
+  it("reattaches to a non-terminal remote Block operation instead of dispatching a conflict", async () => {
+    const existingOperationId = "operation-existing";
+    const graphWithRemoteOwnership: DesktopGraphViewModel = {
+      ...graph,
+      tasks: graph.tasks.map((task) => ({
+        ...task,
+        blocks: task.blocks.map((block) => ({
+          ...block,
+          status: "in_progress",
+          remoteExecution: {
+            identity: { operationId: existingOperationId },
+            phase: "preparing",
+            status: "owned",
+            actionRequired: false,
+            source: { revision: "source-1", graphFingerprint: "fingerprint-1" },
+            dispatchAttempt: null
+          }
+        }))
+      }))
+    };
+    const { result, dispatch, observe, ensureWorkAuthority, waitForTerminal, setError } = renderRun(
+      {
+        graph: graphWithRemoteOwnership
+      }
+    );
+
+    await act(() => result.current({ kind: "project" }));
+
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(observe).toHaveBeenCalledWith({ operationId: existingOperationId });
+    expect(ensureWorkAuthority).not.toHaveBeenCalled();
+    expect(waitForTerminal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initial: expect.objectContaining({ operationId: "operation-1" })
+      })
+    );
     expect(setError).not.toHaveBeenCalled();
   });
 

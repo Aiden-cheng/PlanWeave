@@ -50,6 +50,22 @@ export function createAgentEndpointBlockExecutor(input: {
   };
 
   const executeRemote = async (selection: AgentEndpointBlockSelection, signal?: AbortSignal) => {
+    const existingExecution = selection.block.remoteExecution;
+    if (existingExecution && existingExecution.phase !== "terminal") {
+      const existing = await input.api.observeCollaborationRemoteOperation({
+        operationId: existingExecution.identity.operationId
+      });
+      const terminal = await (input.waitForRemoteTerminal ?? waitForRemoteOperationTerminal)({
+        api: input.api,
+        initial: existing,
+        signal
+      });
+      if (terminal.state === "completed") return;
+      if (terminal.failure) {
+        throw new Error(`${terminal.failure.message} (${terminal.failure.code})`);
+      }
+      throw new Error(`remote_agent_block_${terminal.state}:${selection.block.ref}`);
+    }
     const remoteEndpointId = selection.endpoint.remoteEndpointId;
     if (!remoteEndpointId) throw new Error("collaboration_project_unavailable");
     const authority = await input.collaborationController.ensureWorkAuthority({
