@@ -520,6 +520,31 @@ export class RemoteBlockCoordinator {
     return outcomes;
   }
 
+  async reenterWaitingForHost(hostId: string): Promise<RemoteDispatchOutcome[]> {
+    const waiting = this.options.operations
+      .listNonTerminal()
+      .filter(
+        (operation) =>
+          operation.state === "claimed" &&
+          operation.attempt.status === "prepared" &&
+          operation.endpointSelection?.hostId === hostId
+      );
+    const outcomes: RemoteDispatchOutcome[] = [];
+    for (const operation of waiting) {
+      try {
+        outcomes.push(await this.reenter(operation.id));
+      } catch (error) {
+        if (!(error instanceof AgentEndpointCatalogError)) throw error;
+        this.options.operations.recordDiagnostic(operation.id, error.code, error.message);
+        outcomes.push({
+          operation: this.options.operations.getRequired(operation.id),
+          status: "awaiting_host"
+        });
+      }
+    }
+    return outcomes;
+  }
+
   async query(operationId: string) {
     const operation = this.options.operations.getRequired(operationId);
     return this.withRuntime(operation, (runtime) =>

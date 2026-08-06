@@ -32,6 +32,7 @@ export type AgentHostWebSocketOptions = {
   shutdownTimeoutMs?: number;
   transportAdmission: TransportAdmissionPolicy;
   upgradeRouter?: WebSocketUpgradeRouter;
+  onHostAvailable?: (hostId: string) => Promise<void>;
 };
 
 export type AgentHostWebSocketServer = {
@@ -128,6 +129,7 @@ export function attachAgentHostWebSocketServer(
               protocolVersion: agentHostProtocolVersion,
               ...lease
             });
+          await options.onHostAvailable?.(hostId);
           break;
         }
         case "dispatch.accepted":
@@ -245,6 +247,7 @@ export function attachAgentHostWebSocketServer(
             )) {
               sendMailboxMessage(socket, message);
             }
+            await options.onHostAvailable?.(hostId);
             return;
           }
           await handleHostEvent(hostEventSchema.parse(input));

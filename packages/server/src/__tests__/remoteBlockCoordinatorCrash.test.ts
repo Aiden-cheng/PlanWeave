@@ -902,7 +902,7 @@ describe("RemoteBlockCoordinator concurrency reconciliation", () => {
     expect(count(harness.requireServer().database, "mailbox_messages")).toBe(1);
   });
 
-  it("rejects a second strict Endpoint dispatch when Host capacity is exhausted", async () => {
+  it("re-enters a strict Endpoint operation when its Host becomes available", async () => {
     const harness = await CoordinatorHarness.create(true);
     harness.registerHost(1);
     const coordination = harness.requireCoordination();
@@ -918,5 +918,22 @@ describe("RemoteBlockCoordinator concurrency reconciliation", () => {
     expect(rejected[0]?.reason).toMatchObject({ code: "agent_endpoint_unavailable" });
     expect(count(harness.requireServer().database, "host_capacity_reservations")).toBe(1);
     expect(count(harness.requireServer().database, "mailbox_messages")).toBe(1);
+
+    const active = fulfilled[0]?.value.operation;
+    if (!active?.attempt.leaseId) throw new Error("expected_active_test_lease");
+    const reservation = coordination.reservations.getRequired(active.attempt.leaseId);
+    coordination.reservations.release({
+      leaseId: reservation.leaseId,
+      fencingToken: reservation.fencingToken,
+      expectedVersion: reservation.version,
+      reason: "cancelled"
+    });
+
+    const resumed = await coordination.coordinator.reenterWaitingForHost(
+      active.endpointSelection?.hostId ?? "missing-test-host"
+    );
+    expect(resumed).toHaveLength(1);
+    expect(resumed[0]).toMatchObject({ status: "activated" });
+    expect(count(harness.requireServer().database, "mailbox_messages")).toBe(2);
   });
 });

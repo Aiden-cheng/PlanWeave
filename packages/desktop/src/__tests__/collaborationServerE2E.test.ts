@@ -160,24 +160,57 @@ async function redeemWorkspaceDevice(input: {
   return { token: redeemed.deviceToken, humanPrincipalId: redeemed.humanPrincipalId };
 }
 
-function nextHostMessage(socket: WebSocket): Promise<Record<string, unknown>> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("host_message_timeout")), 5_000);
-    const onError = (error: Error) => {
-      clearTimeout(timer);
-      reject(error);
-    };
-    socket.once("error", onError);
-    socket.once("message", (data) => {
-      clearTimeout(timer);
-      socket.off("error", onError);
-      try {
-        resolve(JSON.parse(data.toString()) as Record<string, unknown>);
-      } catch (error) {
-        reject(error);
-      }
-    });
+function createHostMessageInbox(socket: WebSocket) {
+  const messages: Record<string, unknown>[] = [];
+  const waiters: Array<{
+    resolve: (message: Record<string, unknown>) => void;
+    reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }> = [];
+  socket.on("message", (data) => {
+    const message = JSON.parse(data.toString()) as Record<string, unknown>;
+    const waiter = waiters.shift();
+    if (!waiter) {
+      messages.push(message);
+      return;
+    }
+    clearTimeout(waiter.timer);
+    waiter.resolve(message);
   });
+  socket.on("error", (error) => {
+    for (const waiter of waiters.splice(0)) {
+      clearTimeout(waiter.timer);
+      waiter.reject(error);
+    }
+  });
+  return {
+    next(): Promise<Record<string, unknown>> {
+      const message = messages.shift();
+      if (message) return Promise.resolve(message);
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          const index = waiters.findIndex((waiter) => waiter.timer === timer);
+          if (index >= 0) waiters.splice(index, 1);
+          reject(new Error("host_message_timeout"));
+        }, 5_000);
+        waiters.push({ resolve, reject, timer });
+      });
+    }
+  };
+}
+
+async function nextHostMessageOfType(
+  nextMessage: () => Promise<Record<string, unknown>>,
+  expectedType: string
+): Promise<Record<string, unknown>> {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const message = await nextMessage();
+    if (message.type === expectedType) return message;
+    if (message.type === "protocol.error") {
+      throw new Error(`host_protocol_error:${String(message.code)}`);
+    }
+  }
+  throw new Error(`host_message_type_timeout:${expectedType}`);
 }
 
 async function connectEnrolledHost(origin: string, adminToken: string) {
@@ -217,11 +250,12 @@ async function connectEnrolledHost(origin: string, adminToken: string) {
     { headers: { Authorization: `Bearer ${credentialToken}` } }
   );
   hostSockets.push(socket);
+  const inbox = createHostMessageInbox(socket);
   await new Promise<void>((resolve, reject) => {
     socket.once("open", resolve);
     socket.once("error", reject);
   });
-  const welcomePromise = nextHostMessage(socket);
+  const welcomePromise = inbox.next();
   socket.send(
     JSON.stringify({
       type: "host.hello",
@@ -248,7 +282,7 @@ async function connectEnrolledHost(origin: string, adminToken: string) {
     socket,
     hostId: exchange.hostId,
     workspaceId: grant.workspaceId,
-    next: () => nextHostMessage(socket)
+    next: (expectedType: string) => nextHostMessageOfType(() => inbox.next(), expectedType)
   };
 }
 
@@ -503,7 +537,7 @@ describe("Desktop CollaborationClient against the Server composition", () => {
       expectedResponsibilityRevision: 0,
       expectedReviewerRevision: 0
     });
-    const execute = await host.next();
+    const execute = await host.next("mailbox.message");
     expect(execute.type).toBe("mailbox.message");
     const command = execute.command as {
       dispatchId: string;
@@ -519,7 +553,7 @@ describe("Desktop CollaborationClient against the Server composition", () => {
         sequence
       })
     );
-    await expect(host.next()).resolves.toMatchObject({ type: "host.event_ack" });
+    await expect(host.next("host.event_ack")).resolves.toMatchObject({ type: "host.event_ack" });
     host.socket.send(
       JSON.stringify({
         type: "dispatch.accepted",
@@ -530,7 +564,7 @@ describe("Desktop CollaborationClient against the Server composition", () => {
         executionAttemptId: command.executionAttemptId
       })
     );
-    await expect(host.next()).resolves.toMatchObject({ type: "host.event_ack" });
+    await expect(host.next("host.event_ack")).resolves.toMatchObject({ type: "host.event_ack" });
     host.socket.send(
       JSON.stringify({
         type: "acp.events",
@@ -545,7 +579,7 @@ describe("Desktop CollaborationClient against the Server composition", () => {
         events: [{ cursor: 1, kind: "agent_message", text: "desktop e2e event" }]
       })
     );
-    await expect(host.next()).resolves.toMatchObject({ type: "host.event_ack" });
+    await expect(host.next("host.event_ack")).resolves.toMatchObject({ type: "host.event_ack" });
     const remote = await remoteDispatch;
     expect((await workspaceOwner.observeRemoteOperation(remote.operationId)).operationId).toBe(
       remote.operationId

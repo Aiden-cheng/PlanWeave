@@ -234,6 +234,7 @@ describe("agent host WebSocket transport", () => {
     await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
     const address = httpServer.address();
     if (!address || typeof address === "string") throw new Error("Expected an HTTP port.");
+    const onHostAvailable = vi.fn(async () => undefined);
     const transport = attachAgentHostWebSocketServer({
       server: httpServer,
       hosts: coordination.hosts,
@@ -245,6 +246,7 @@ describe("agent host WebSocket transport", () => {
       actions: coordination.actions,
       heartbeatIntervalMs: 30_000,
       leaseDurationMs: 60_000,
+      onHostAvailable,
       transportAdmission: loopbackHttpTransportAdmission
     });
     webSocketServers.push(transport);
@@ -264,6 +266,7 @@ describe("agent host WebSocket transport", () => {
       })
     );
     await expect(events.next()).resolves.toMatchObject({ type: "host.welcome" });
+    expect(onHostAvailable).toHaveBeenCalledWith(registration.host.id);
 
     const operatorToken = `pw_operator_${"R".repeat(43)}`;
     new OperatorSessionStore(database.database).create({

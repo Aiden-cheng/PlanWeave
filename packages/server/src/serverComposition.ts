@@ -750,6 +750,9 @@ export async function createDistributedServerComposition(
       leaseDurationMs: config.limits.leaseDurationMs,
       maxPayloadBytes: config.limits.maxWebSocketPayloadBytes,
       shutdownTimeoutMs: config.limits.shutdownTimeoutMs,
+      onHostAvailable: async (hostId) => {
+        await coordination.coordinator.reenterWaitingForHost(hostId);
+      },
       transportAdmission
     });
     humanObserverWebSockets = attachHumanObserverWebSocketServer({
