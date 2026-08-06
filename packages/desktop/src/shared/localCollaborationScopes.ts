@@ -3,6 +3,12 @@ import { loopbackServerStatusSchema } from "@planweave-ai/collaboration-protocol
 
 const scopeIdentifierSchema = z.string().trim().min(1).max(128);
 
+export const LOCAL_COLLABORATION_PROFILE_PREFIX = "planweave-local-";
+
+export function isLocalCollaborationProfileId(profileId: string): boolean {
+  return profileId.startsWith(LOCAL_COLLABORATION_PROFILE_PREFIX);
+}
+
 export const localCollaborationScopeSchema = z
   .object({
     projectId: scopeIdentifierSchema,

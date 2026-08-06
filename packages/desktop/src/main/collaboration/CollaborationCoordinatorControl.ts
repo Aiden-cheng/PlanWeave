@@ -32,6 +32,7 @@ import {
   localCollaborationLanSharingInputSchema,
   localCollaborationServerStatusSchema,
   localCollaborationScopeSelectionInputSchema,
+  isLocalCollaborationProfileId,
   type LocalCollaborationScopeCatalog,
   type LocalCollaborationServerStatus
 } from "../../shared/collaboration.js";
@@ -211,8 +212,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
           onLifecycleError,
           serve: (config) =>
             serveDistributedServer(config, {
-              createExposureLifecycle: (leases) =>
-                this.privateHttpsExposure.createLifecycle(leases)
+              createExposureLifecycle: (leases) => this.privateHttpsExposure.createLifecycle(leases)
             })
         }));
     this.allocatePort = options.allocatePort ?? allocateLocalPort;
@@ -424,8 +424,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     return desktopServerExposureViewSchema.parse({
       mode: this.exposureMode,
       topology,
-      provider:
-        this.exposureMode === "private_https" ? this.privateHttpsExposure.provider : null,
+      provider: this.exposureMode === "private_https" ? this.privateHttpsExposure.provider : null,
       lifecycle:
         this.exposureErrorCode !== null
           ? "error"
@@ -564,7 +563,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   }
 
   recognizesLocalProfile(profileId: string): boolean {
-    return profileId.startsWith("planweave-local-");
+    return isLocalCollaborationProfileId(profileId);
   }
 
   listActiveTrustedScopes(): readonly LoopbackTrustedProjectScope[] {
@@ -633,8 +632,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     const authorityProjectId = this.authorityProjectIdForLocalProfile(profileId);
     if (!authorityProjectId) throw new Error("local_collaboration_profile_not_hosted");
     const profile = this.requireRunningProfile();
-    const scopes = this.controller!
-      .listTrustedProjectScopes({ profileId: profile.profileId })
+    const scopes = this.controller!.listTrustedProjectScopes({ profileId: profile.profileId })
       .filter((scope) => scope.projectId === authorityProjectId)
       .sort((left, right) => left.canvasId.localeCompare(right.canvasId));
     const scope = scopes[0];
@@ -654,10 +652,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     workspaceRoot: string;
     projectId: string;
   }> {
-    if (
-      target.endpoint.topology === "loopback_http" ||
-      target.endpoint.topology === "lan_http"
-    ) {
+    if (target.endpoint.topology === "loopback_http" || target.endpoint.topology === "lan_http") {
       throw new DeploymentBundleUnavailableError(
         "needs_project",
         "deployment_bundle_loopback_not_supported"

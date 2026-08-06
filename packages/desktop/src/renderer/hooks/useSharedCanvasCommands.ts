@@ -57,6 +57,8 @@ export function useSharedCanvasCommands(input: {
   profileId: string | null;
   selectedProjectId: string | null;
   activeProjectId: string | null;
+  /** This device owns the selected authority, but its Server is not running. */
+  localOwnerDirectWriteAvailable: boolean;
   t: ReturnType<typeof createTranslator>;
   api?: SharedCanvasCommandBridge | null;
   /** Called after accepted mutation or successful reconnect so ReactFlow can refresh. */
@@ -92,6 +94,7 @@ export function useSharedCanvasCommands(input: {
     scopeResolution.localCanvasId === input.canvasId;
   const collaborationConfigured =
     input.enabled &&
+    !input.localOwnerDirectWriteAvailable &&
     input.selectedProjectId !== null &&
     input.activeProjectId !== null &&
     input.canvasId !== null &&
@@ -100,6 +103,7 @@ export function useSharedCanvasCommands(input: {
     collaborationConfigured &&
     (scopeMayBeShared || currentScope !== null || (!input.sessionConnected && !scopeKnownUnmapped));
   const sessionEnabled = authorityEnabled && input.sessionConnected && currentScope !== null;
+  const resolvedSharedAuthority = currentScope !== null;
 
   const labels = useMemo<CanvasCommandLabels>(
     () => ({
@@ -237,6 +241,10 @@ export function useSharedCanvasCommands(input: {
     const localCanvasId = currentScope?.localCanvasId ?? null;
     if (!api || !controller || !sessionEnabled || !localProjectId || !localCanvasId) {
       void controller?.unbind();
+      if (input.localOwnerDirectWriteAvailable) {
+        setProjection(null);
+        return undefined;
+      }
       const confirmed = lastConfirmedProjectionRef.current;
       setProjection(() =>
         confirmed &&
@@ -371,6 +379,7 @@ export function useSharedCanvasCommands(input: {
     api,
     input.activeProjectId,
     input.canvasId,
+    input.localOwnerDirectWriteAvailable,
     input.profileId,
     input.selectedProjectId,
     refreshAfterMaterialization,
@@ -464,11 +473,19 @@ export function useSharedCanvasCommands(input: {
       snapshot,
       projection: visibleProjection,
       offline: Boolean(
-        authorityEnabled && (!sessionEnabled || snapshot.connectionPhase === "disconnected")
+        resolvedSharedAuthority && (!sessionEnabled || snapshot.connectionPhase === "disconnected")
       ),
       submit,
       reconnect
     }),
-    [authorityEnabled, reconnect, sessionEnabled, snapshot, submit, visibleProjection]
+    [
+      authorityEnabled,
+      reconnect,
+      resolvedSharedAuthority,
+      sessionEnabled,
+      snapshot,
+      submit,
+      visibleProjection
+    ]
   );
 }

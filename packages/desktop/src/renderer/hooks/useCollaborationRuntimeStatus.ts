@@ -243,20 +243,10 @@ export function useCollaborationRuntimeStatus(input: {
   return useMemo(
     () => ({
       graph: input.graph
-        ? input.sessionConnected && !error
-          ? mergeCollaborationRuntimeStatus(
-              input.graph,
-              currentSnapshot?.status ?? null,
-              currentSnapshot
-                ? {
-                    workspaceId: currentSnapshot.identity.remoteWorkspaceId,
-                    projectId: currentSnapshot.identity.remoteProjectId,
-                    canvasId: currentSnapshot.identity.remoteCanvasId
-                  }
-                : null
-            )
-          : failClosedDispatchability(
-              mergeCollaborationRuntimeStatus(
+        ? !input.enabled
+          ? input.graph
+          : input.sessionConnected && !error
+            ? mergeCollaborationRuntimeStatus(
                 input.graph,
                 currentSnapshot?.status ?? null,
                 currentSnapshot
@@ -267,10 +257,22 @@ export function useCollaborationRuntimeStatus(input: {
                     }
                   : null
               )
-            )
+            : failClosedDispatchability(
+                mergeCollaborationRuntimeStatus(
+                  input.graph,
+                  currentSnapshot?.status ?? null,
+                  currentSnapshot
+                    ? {
+                        workspaceId: currentSnapshot.identity.remoteWorkspaceId,
+                        projectId: currentSnapshot.identity.remoteProjectId,
+                        canvasId: currentSnapshot.identity.remoteCanvasId
+                      }
+                    : null
+                )
+              )
         : null,
       error
     }),
-    [currentSnapshot, error, input.graph, input.sessionConnected]
+    [currentSnapshot, error, input.enabled, input.graph, input.sessionConnected]
   );
 }

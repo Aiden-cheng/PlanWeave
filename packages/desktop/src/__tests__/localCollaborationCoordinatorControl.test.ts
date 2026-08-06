@@ -910,9 +910,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
         _createConfig: (profile: NonNullable<LoopbackServerStatus["profile"]>) => ServerConfig,
         onLifecycleError: (error: unknown) => void
       ) => {
-        onLifecycleError(
-          new ManagedPrivateHttpsExposureError("PRIVATE_HTTPS_ROUTE_CONFLICT")
-        );
+        onLifecycleError(new ManagedPrivateHttpsExposureError("PRIVATE_HTTPS_ROUTE_CONFLICT"));
         return fake.control;
       }
     );
@@ -969,7 +967,10 @@ describe("LocalCollaborationCoordinatorControl", () => {
       syncOperatorProfile: async () => undefined,
       createClient: () =>
         ({
-          bootstrapOwner: vi.fn().mockResolvedValue(exampleBootstrapResponse),
+          bootstrapOwner: vi.fn().mockResolvedValue({
+            ...exampleBootstrapResponse,
+            workspaceId: "workspace-2"
+          }),
           verifyAccess: vi.fn().mockResolvedValue(undefined),
           startObserver: vi.fn(),
           stopObserver: vi.fn(),

@@ -271,6 +271,7 @@ export function ProjectWorkspaceProvider({
     profileId: collaborationSurface.activeProfileId,
     selectedProjectId: selectedProject?.projectId ?? null,
     activeProjectId: collaborationSurface.activeProjectId,
+    localOwnerDirectWriteAvailable: collaborationSurface.localOwnerDirectWriteAvailable,
     t,
     onAuthoritativeChange: async () => {
       await refreshProjectDerivedState();
@@ -285,7 +286,7 @@ export function ProjectWorkspaceProvider({
   );
   const layout = sharedCanvasCommands.projection?.content.layout ?? localLayout;
   const collaborationRuntimeStatus = useCollaborationRuntimeStatus({
-    enabled: Boolean(selectedProject),
+    enabled: Boolean(selectedProject) && !collaborationSurface.localOwnerDirectWriteAvailable,
     sessionConnected: collaborationSurface.sessionConnected,
     profileId: collaborationSurface.activeProfileId,
     activeProjectId: collaborationSurface.activeProjectId,

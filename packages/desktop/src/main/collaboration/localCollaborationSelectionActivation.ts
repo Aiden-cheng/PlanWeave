@@ -7,7 +7,9 @@ type LocalCollaborationProfile = CollaborationConnectionProfile;
 type LocalCollaborationCoordinatorPort = {
   currentSelection(): NonNullable<LocalCollaborationRegistrationInput["selection"]> | null;
   status(): { state: string };
+  start(): Promise<{ state: string }>;
   currentSelectionIsTrusted(): boolean;
+  recognizesLocalProfile(profileId: string): boolean;
   setCurrentSelection(
     input: NonNullable<LocalCollaborationRegistrationInput["selection"]>
   ): Promise<void>;
@@ -161,6 +163,22 @@ export function createLocalCollaborationActivationCommand({
           if (registrationInput.selection) {
             await coordinator.setCurrentSelection(registrationInput.selection);
             transitionStarted = true;
+          }
+          if (
+            previousStatus.activeProfileId &&
+            coordinator.recognizesLocalProfile(previousStatus.activeProfileId) &&
+            coordinator.status().state !== "running"
+          ) {
+            try {
+              const restored = await coordinator.start();
+              if (restored.state !== "running") {
+                if (!options.activationRequired) return null;
+                throw new Error("local_collaboration_server_restore_failed");
+              }
+            } catch (error) {
+              if (!options.activationRequired) return null;
+              throw error;
+            }
           }
           if (options.activationRequired) {
             return await activateLocalCollaborationSelection({

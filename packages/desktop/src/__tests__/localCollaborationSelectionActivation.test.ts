@@ -25,7 +25,9 @@ describe("activateLocalCollaborationSelection", () => {
     const coordinator = {
       currentSelection: vi.fn(() => null),
       status: vi.fn(() => ({ state: restored ? "running" : "stopped" })),
+      start: vi.fn(async () => ({ state: "running" })),
       currentSelectionIsTrusted: vi.fn(() => restored),
+      recognizesLocalProfile: vi.fn(() => true),
       setCurrentSelection: vi.fn(async () => undefined),
       clearCurrentSelection: vi.fn(async () => undefined),
       localProfile: vi.fn(() => (restored ? profile : null)),
@@ -90,11 +92,110 @@ describe("activateLocalCollaborationSelection", () => {
     expect(service.connectSession).toHaveBeenCalledWith({ profileId: profile.profileId });
   });
 
+  it("restarts a stopped local owner authority before restoring its command session", async () => {
+    let serverState = "stopped";
+    const registration = {
+      workspaceId: "workspace-1",
+      projectId: "project-1",
+      canvasId: "canvas-1",
+      profileId: profile.profileId,
+      registeredAt: "2030-01-01T00:00:00.000Z"
+    };
+    const coordinator = {
+      currentSelection: vi.fn(() => null),
+      status: vi.fn(() => ({ state: serverState })),
+      start: vi.fn(async () => {
+        serverState = "running";
+        return { state: serverState };
+      }),
+      currentSelectionIsTrusted: vi.fn(() => serverState === "running"),
+      recognizesLocalProfile: vi.fn((profileId: string) => profileId === profile.profileId),
+      setCurrentSelection: vi.fn(async () => undefined),
+      clearCurrentSelection: vi.fn(async () => undefined),
+      localProfile: vi.fn(() => (serverState === "running" ? profile : null)),
+      localProfileForId: vi.fn(() => (serverState === "running" ? profile : null)),
+      registerCurrentProject: vi.fn(() => registration),
+      registerLocalProfile: vi.fn(() => registration)
+    };
+    const service = {
+      getStatus: vi.fn(async () => ({
+        activeProfileId: profile.profileId,
+        profiles: [{ profileId: profile.profileId, hasDeviceCredential: true }],
+        session: { phase: "error" }
+      })),
+      runStatusPublicationTransaction: vi.fn(async <T>(operation: () => Promise<T>) => operation()),
+      clearActiveProfile: vi.fn(async () => undefined),
+      setActiveProfile: vi.fn(async () => undefined),
+      connectSession: vi.fn(async () => undefined),
+      upsertProfile: vi.fn(async () => undefined),
+      migrateLocalProfileCredential: vi.fn(async () => undefined),
+      adoptWorkspaceAuthority: vi.fn(async () => undefined),
+      activeHumanPrincipalId: vi.fn(async () => "human-owner"),
+      bootstrapOwner: vi.fn()
+    };
+
+    const command = createLocalCollaborationActivationCommand({ coordinator, service });
+    await command.selectAndReconcile({ projectId: "desktop-project-1", canvasId: "canvas-1" });
+
+    expect(coordinator.start).toHaveBeenCalledOnce();
+    expect(coordinator.registerLocalProfile).toHaveBeenCalledWith(profile.profileId, {
+      kind: "human",
+      id: "human-owner"
+    });
+    expect(service.connectSession).toHaveBeenCalledWith({ profileId: profile.profileId });
+  });
+
+  it("keeps an old local canvas selectable when automatic Server restoration fails", async () => {
+    const coordinator = {
+      currentSelection: vi.fn(() => null),
+      status: vi.fn(() => ({ state: "stopped" })),
+      start: vi.fn(async () => ({ state: "error" })),
+      currentSelectionIsTrusted: vi.fn(() => false),
+      recognizesLocalProfile: vi.fn(() => true),
+      setCurrentSelection: vi.fn(async () => undefined),
+      clearCurrentSelection: vi.fn(async () => undefined),
+      localProfile: vi.fn(() => null),
+      localProfileForId: vi.fn(() => null),
+      registerCurrentProject: vi.fn(),
+      registerLocalProfile: vi.fn()
+    };
+    const service = {
+      getStatus: vi.fn(async () => ({
+        activeProfileId: profile.profileId,
+        profiles: [{ profileId: profile.profileId, hasDeviceCredential: true }],
+        session: { phase: "error" }
+      })),
+      runStatusPublicationTransaction: vi.fn(async <T>(operation: () => Promise<T>) => operation()),
+      clearActiveProfile: vi.fn(async () => undefined),
+      setActiveProfile: vi.fn(async () => undefined),
+      connectSession: vi.fn(async () => undefined),
+      upsertProfile: vi.fn(),
+      migrateLocalProfileCredential: vi.fn(),
+      adoptWorkspaceAuthority: vi.fn(),
+      activeHumanPrincipalId: vi.fn(),
+      bootstrapOwner: vi.fn()
+    };
+
+    const command = createLocalCollaborationActivationCommand({ coordinator, service });
+    await expect(
+      command.selectAndReconcile({ projectId: "desktop-project-1", canvasId: "canvas-1" })
+    ).resolves.toBeNull();
+
+    expect(coordinator.setCurrentSelection).toHaveBeenCalledWith({
+      projectId: "desktop-project-1",
+      canvasId: "canvas-1"
+    });
+    expect(coordinator.clearCurrentSelection).not.toHaveBeenCalled();
+    expect(service.clearActiveProfile).not.toHaveBeenCalled();
+  });
+
   it("preserves a configured workspace when the selected project is not hosted", async () => {
     const coordinator = {
       currentSelection: vi.fn(() => null),
       status: vi.fn(() => ({ state: "running" })),
+      start: vi.fn(async () => ({ state: "running" })),
       currentSelectionIsTrusted: vi.fn(() => false),
+      recognizesLocalProfile: vi.fn(() => true),
       setCurrentSelection: vi.fn(async () => undefined),
       clearCurrentSelection: vi.fn(async () => undefined),
       localProfile: vi.fn(() => null),
@@ -131,7 +232,9 @@ describe("activateLocalCollaborationSelection", () => {
     const coordinator = {
       currentSelection: vi.fn(() => null),
       status: vi.fn(() => ({ state: "running" })),
+      start: vi.fn(async () => ({ state: "running" })),
       currentSelectionIsTrusted: vi.fn(() => false),
+      recognizesLocalProfile: vi.fn(() => false),
       setCurrentSelection: vi.fn(async () => undefined),
       clearCurrentSelection: vi.fn(async () => undefined),
       localProfile: vi.fn(() => null),
@@ -177,7 +280,9 @@ describe("activateLocalCollaborationSelection", () => {
     const coordinator = {
       currentSelection: vi.fn(() => null),
       status: vi.fn(() => ({ state: "running" })),
+      start: vi.fn(async () => ({ state: "running" })),
       currentSelectionIsTrusted: vi.fn(() => true),
+      recognizesLocalProfile: vi.fn(() => true),
       setCurrentSelection: vi.fn(async () => undefined),
       clearCurrentSelection: vi.fn(async () => undefined),
       localProfile: vi.fn(() => selectedProjectProfile),
@@ -228,7 +333,9 @@ describe("activateLocalCollaborationSelection", () => {
     const coordinator = {
       currentSelection: vi.fn(() => null),
       status: vi.fn(() => ({ state: "running" })),
+      start: vi.fn(async () => ({ state: "running" })),
       currentSelectionIsTrusted: vi.fn(() => true),
+      recognizesLocalProfile: vi.fn(() => true),
       ownsLocalProfile: vi.fn(() => true),
       setCurrentSelection: vi.fn(async () => {
         calls.push("select");
@@ -436,7 +543,9 @@ describe("activateLocalCollaborationSelection", () => {
     const coordinator = {
       currentSelection: vi.fn(() => currentSelection),
       status: vi.fn(() => ({ state: "running" })),
+      start: vi.fn(async () => ({ state: "running" })),
       currentSelectionIsTrusted: vi.fn(() => true),
+      recognizesLocalProfile: vi.fn(() => false),
       ownsLocalProfile: vi.fn(() => false),
       setCurrentSelection: vi.fn(async (selection: typeof previousSelection) => {
         currentSelection = selection;
@@ -499,7 +608,9 @@ describe("activateLocalCollaborationSelection", () => {
         canvasId: selectedCanvasId
       })),
       status: vi.fn(() => ({ state: "running" })),
+      start: vi.fn(async () => ({ state: "running" })),
       currentSelectionIsTrusted: vi.fn(() => true),
+      recognizesLocalProfile: vi.fn(() => true),
       ownsLocalProfile: vi.fn(() => true),
       setCurrentSelection: vi.fn(async (selection: { projectId: string; canvasId: string }) => {
         selectedCanvasId = selection.canvasId;

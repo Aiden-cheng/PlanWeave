@@ -24,6 +24,7 @@ import {
   type SharedCanvasCommandBridge,
   useSharedCanvasCommands
 } from "../renderer/hooks/useSharedCanvasCommands";
+import { canUseLocalOwnerDirectWrites } from "../renderer/hooks/useCollaborationSurface";
 
 const initialSession: CollaborationCanvasCommandSessionView = {
   canvasId: "default",
@@ -164,6 +165,7 @@ function hookInput(
     profileId: "profile-1",
     selectedProjectId: "project-1",
     activeProjectId: "project-1",
+    localOwnerDirectWriteAvailable: false,
     t: translator,
     onAuthoritativeChange
   };
@@ -181,6 +183,27 @@ afterEach(() => {
 });
 
 describe("useSharedCanvasCommands", () => {
+  it("opens direct writes only for a stopped local owner authority", () => {
+    expect(
+      canUseLocalOwnerDirectWrites("planweave-local-project", {
+        state: "error",
+        reason: "start_failed"
+      })
+    ).toBe(true);
+    expect(
+      canUseLocalOwnerDirectWrites("planweave-local-project", {
+        state: "error",
+        reason: "stop_failed"
+      })
+    ).toBe(false);
+    expect(
+      canUseLocalOwnerDirectWrites("remote-workspace", {
+        state: "stopped",
+        reason: null
+      })
+    ).toBe(false);
+  });
+
   it("adopts a live replica projection without refreshing local disk state", async () => {
     vi.useFakeTimers();
     const bridge = createBridge();
@@ -276,6 +299,33 @@ describe("useSharedCanvasCommands", () => {
     expect(result.current.offline).toBe(false);
   });
 
+  it("does not show an offline replica banner before local scope resolution finishes", async () => {
+    vi.useFakeTimers();
+    type ScopeResolution = Awaited<
+      ReturnType<SharedCanvasCommandBridge["resolveCollaborationCanvasScope"]>
+    >;
+    let resolveScope!: (value: ScopeResolution) => void;
+    const pendingScope = new Promise<ScopeResolution>((resolve) => {
+      resolveScope = resolve;
+    });
+    const bridge = createBridge({ resolveScope: async () => pendingScope });
+
+    const { result } = renderHook(() =>
+      useSharedCanvasCommands({
+        ...hookInput(bridge.api),
+        sessionConnected: false
+      })
+    );
+
+    expect(result.current.enabled).toBe(true);
+    expect(result.current.offline).toBe(false);
+
+    resolveScope(null);
+    await flushEffects();
+    expect(result.current.enabled).toBe(false);
+    expect(result.current.offline).toBe(false);
+  });
+
   it("keeps the command facade stable when its inputs and snapshot are unchanged", () => {
     const t = createTranslator("en");
     const { result, rerender } = renderHook(() =>
@@ -287,6 +337,7 @@ describe("useSharedCanvasCommands", () => {
         profileId: null,
         selectedProjectId: null,
         activeProjectId: null,
+        localOwnerDirectWriteAvailable: false,
         t
       })
     );
@@ -295,6 +346,28 @@ describe("useSharedCanvasCommands", () => {
     rerender();
 
     expect(result.current).toBe(initialFacade);
+  });
+
+  it("returns a stopped local owner authority to direct local writes", async () => {
+    vi.useFakeTimers();
+    const bridge = createBridge();
+    const { result, rerender } = renderHook(
+      ({ directWrite }) =>
+        useSharedCanvasCommands({
+          ...hookInput(bridge.api),
+          localOwnerDirectWriteAvailable: directWrite
+        }),
+      { initialProps: { directWrite: false } }
+    );
+    await flushEffects();
+    act(() => bridge.emitReplica(replicaProjection(4)));
+
+    rerender({ directWrite: true });
+    await flushEffects();
+
+    expect(result.current.enabled).toBe(false);
+    expect(result.current.offline).toBe(false);
+    expect(result.current.projection).toBeNull();
   });
 
   it("returns an accepted drag before the background disk mirror finishes", async () => {

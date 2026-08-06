@@ -42,6 +42,15 @@ const graphWithBlock = {
   )
 };
 
+const localAuthoritativeGraph = {
+  ...graphWithBlock,
+  tasks: graphWithBlock.tasks.map((task) => ({
+    ...task,
+    blocks: task.blocks.map((block) => ({ ...block, dispatchable: true })),
+    blockPreview: task.blockPreview.map((block) => ({ ...block, dispatchable: true }))
+  }))
+};
+
 const remoteStatus = {
   schemaVersion: "canvas-runtime-status/v2" as const,
   scope,
@@ -89,6 +98,26 @@ function hookInput(override: Partial<Parameters<typeof useCollaborationRuntimeSt
 }
 
 describe("collaboration runtime status", () => {
+  it("preserves the local Runtime graph when collaboration status projection is disabled", () => {
+    const bridge = api();
+    const { result } = renderHook(() =>
+      useCollaborationRuntimeStatus(
+        hookInput({
+          api: bridge,
+          enabled: false,
+          graph: localAuthoritativeGraph,
+          sessionConnected: false
+        })
+      )
+    );
+
+    expect(bridge.resolveCollaborationCanvasScope).not.toHaveBeenCalled();
+    expect(bridge.readCollaborationCanvasRuntimeStatus).not.toHaveBeenCalled();
+    expect(result.current.graph).toBe(localAuthoritativeGraph);
+    expect(result.current.graph?.tasks[0]?.status).toBe("ready");
+    expect(result.current.graph?.tasks[0]?.blocks[0]?.dispatchable).toBe(true);
+  });
+
   it("overlays only the exact expected scope, graph identity, and package fingerprint", () => {
     const merged = mergeCollaborationRuntimeStatus(graphWithBlock, remoteStatus, scope);
     expect(merged.tasks[0]?.status).toBe("implemented");

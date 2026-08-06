@@ -219,6 +219,7 @@ export function BlockInspectorWindow() {
     profileId: activeCollaborationProfile?.profileId ?? null,
     selectedProjectId: sharedProjectId,
     activeProjectId: sharedProjectId,
+    localOwnerDirectWriteAvailable: false,
     t,
     onAuthoritativeChange: async () => {
       await refreshBlock();

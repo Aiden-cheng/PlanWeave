@@ -162,6 +162,8 @@ export {
   localCollaborationServerStatusSchema,
   localCollaborationScopeSchema,
   localCollaborationScopeSelectionInputSchema,
+  isLocalCollaborationProfileId,
+  LOCAL_COLLABORATION_PROFILE_PREFIX,
   type LocalCollaborationCanvasCatalogItem,
   type LocalCollaborationProjectCatalogItem,
   type LocalCollaborationRegistrationInput,

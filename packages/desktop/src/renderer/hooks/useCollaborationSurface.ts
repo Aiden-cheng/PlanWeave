@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { collaborationBridge } from "../bridge";
 import {
   buildAssigneeSurfaceIndex,
@@ -10,7 +10,12 @@ import type { CollaborationProjectViewModel } from "../collaboration/collaborati
 import type { CollaborationReadModelController } from "../collaboration/CollaborationReadModelController";
 import type { createTranslator } from "../i18n";
 import type { CollaborationReadModelSnapshot } from "../../shared/collaborationReadModels.js";
-import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
+import {
+  isLocalCollaborationProfileId,
+  type CollaborationStatus,
+  type LocalCollaborationServerStatus,
+  type PlanWeaveCollaborationApi
+} from "../../shared/collaboration.js";
 import { useCollaborationReadModels } from "./useCollaborationReadModels";
 import { useCollaborationStatus } from "./useCollaborationStatus";
 import { isCollaborationSessionConnected } from "../collaboration/sessionState";
@@ -31,8 +36,20 @@ export type UseCollaborationSurfaceResult = {
   activeProfileId: string | null;
   activeProjectId: string | null;
   sessionConnected: boolean;
+  localOwnerDirectWriteAvailable: boolean;
   collaborationNotificationDrafts: ReturnType<typeof buildCollaborationNotificationDrafts>;
 };
+
+export function canUseLocalOwnerDirectWrites(
+  profileId: string | null,
+  lifecycle: Pick<LocalCollaborationServerStatus, "state" | "reason"> | null
+): boolean {
+  if (!profileId || !isLocalCollaborationProfileId(profileId)) return false;
+  return (
+    lifecycle?.state === "stopped" ||
+    (lifecycle?.state === "error" && lifecycle.reason !== "stop_failed")
+  );
+}
 
 /**
  * Single project-shell authority for compact assignee surfaces + activity notifications.
@@ -51,6 +68,35 @@ export function useCollaborationSurface(
   }, [status]);
 
   const sessionConnected = isCollaborationSessionConnected(status);
+  const activeProfileIsLocal = activeProfile
+    ? isLocalCollaborationProfileId(activeProfile.profileId)
+    : false;
+  const activeProfileRevision = activeProfile?.updatedAt ?? null;
+  const [localServerLifecycle, setLocalServerLifecycle] = useState<Pick<
+    LocalCollaborationServerStatus,
+    "state" | "reason"
+  > | null>(null);
+
+  useEffect(() => {
+    if (!api || !activeProfileIsLocal || !activeProfileRevision) {
+      setLocalServerLifecycle(null);
+      return undefined;
+    }
+    let active = true;
+    void api
+      .getLocalCollaborationServerStatus()
+      .then((serverStatus) => {
+        if (active) {
+          setLocalServerLifecycle({ state: serverStatus.state, reason: serverStatus.reason });
+        }
+      })
+      .catch(() => {
+        if (active) setLocalServerLifecycle(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeProfileIsLocal, activeProfileRevision, api]);
 
   const profileId = sessionConnected ? (activeProfile?.profileId ?? null) : null;
   const projectId = sessionConnected ? (activeProfile?.projectId ?? null) : null;
@@ -98,6 +144,10 @@ export function useCollaborationSurface(
     activeProfileId: activeProfile?.profileId ?? null,
     activeProjectId: activeProfile?.projectId ?? null,
     sessionConnected,
+    localOwnerDirectWriteAvailable: canUseLocalOwnerDirectWrites(
+      activeProfile?.profileId ?? null,
+      localServerLifecycle
+    ),
     collaborationNotificationDrafts
   };
 }
