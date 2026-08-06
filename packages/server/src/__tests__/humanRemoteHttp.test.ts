@@ -471,6 +471,17 @@ describe("human remote operation HTTP", () => {
     expect(observed.status).toBe(200);
     await expect(observed.json()).resolves.toMatchObject({ operationId: operation.operationId });
 
+    const emptyEvents = await fetch(`${collection}/${operation.operationId}/events?afterCursor=0`, {
+      headers: { Authorization: `Bearer ${member.deviceToken}` }
+    });
+    expect(emptyEvents.status).toBe(200);
+    await expect(emptyEvents.json()).resolves.toMatchObject({
+      afterCursor: 0,
+      cursor: 0,
+      highWatermark: 0,
+      hasMore: false,
+      events: []
+    });
     fixture.coordination.acpEvents.ingest(fixture.host.id, "human-event-1", {
       type: "acp.events",
       dispatchId: operation.dispatchId,

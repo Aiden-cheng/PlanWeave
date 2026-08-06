@@ -220,6 +220,14 @@ export class RemoteAcpEventRepository {
     };
   }
 
+  hasStream(executionAttemptId: string): boolean {
+    return Boolean(
+      this.database
+        .prepare("SELECT 1 AS present FROM remote_acp_event_streams WHERE execution_attempt_id=?")
+        .get(executionAttemptId)?.present
+    );
+  }
+
   readCompletionTranscript(executionAttemptId: string): {
     sessionId: string;
     events: Array<{ timestamp: string; event: NormalizedAcpEvent }>;
