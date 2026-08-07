@@ -152,7 +152,7 @@ export const executionEnvelopeSchema = z
     canvasId: opaqueIdentifierSchema,
     taskId: opaqueIdentifierSchema,
     blockRef: blockRefSchema,
-    blockType: z.literal("implementation"),
+    blockType: z.enum(["implementation", "review"]),
     /** Package or graph revision that produced this rendered envelope. */
     sourceRevision: sourceIdentitySchema,
     /** Optional additional graph fingerprint when distinct from sourceRevision. */
