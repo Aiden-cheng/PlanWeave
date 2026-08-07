@@ -309,8 +309,12 @@ export class AgentHostClient implements HostTransport {
       case "protocol.error":
         this.options.onProtocolError?.(event);
         this.stopped = true;
-        this.transition({ state: "degraded", reason: "protocol_rejected" });
-        this.socket?.close(4003, "protocol rejected");
+        // Preserve Server code + public message so Desktop connection-status can surface them.
+        this.transition({
+          state: "degraded",
+          reason: `${event.code}: ${event.message}`.slice(0, 256)
+        });
+        this.socket?.close(4003, event.code.slice(0, 123));
         return;
     }
   }

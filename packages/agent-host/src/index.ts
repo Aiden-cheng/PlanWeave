@@ -80,6 +80,14 @@ export {
   createPlatformBackgroundService,
   supportsPlatformBackgroundService
 } from "./background/platformBackground.js";
+export {
+  hostConnectionStatusDocumentSchema,
+  hostConnectionStatusPath,
+  readHostConnectionStatus,
+  writeHostConnectionStatus,
+  serializeHostTransportStatus,
+  type HostConnectionStatusDocument
+} from "./transport/connectionStatus.js";
 export type {
   AgentHostBackgroundIdentity,
   AgentHostBackgroundInstall,

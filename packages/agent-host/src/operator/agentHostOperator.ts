@@ -21,6 +21,7 @@ import { DurableAcpInteractionRelay } from "../execution/durableAcpRelay.js";
 import { openAgentHostState } from "../state/agentHostState.js";
 import {
   assertDurableStateReplacementSafe,
+  clearDurableStateForReenrollment,
   ensureDurableHostIdentity
 } from "../state/durableHostIdentity.js";
 import { AgentHostClient } from "../transport/agentHostClient.js";
@@ -61,7 +62,7 @@ export type AgentHostDiagnostics = {
   credential: "missing" | "pending" | "active" | "revoked" | "expired";
   capabilities: string[];
   capacity: number;
-  connection: "offline";
+  connection: "online" | "offline";
   recoverableExecutions: number;
   actionableError?: string;
 };
@@ -346,11 +347,27 @@ export class AgentHostOperator {
         await this.resumeEnrollment(paths.configPath);
       }
     } else if (!document?.active) {
+      // Credentials are gone but a prior Host left durable stores; those cannot resume without a
+      // usable credential, so clear them before portable recovery enrollment.
+      await clearDurableStateForReenrollment(config.dataDirectory);
       await this.enrollPortableHandoff(config, encodedHandoff, paths.configPath);
     } else if (document.active.workspaceId !== handoff.workspaceId) {
       throw new Error("agent_host_handoff_credential_conflict");
     } else {
-      await store.requireUsable();
+      try {
+        await store.requireUsable();
+      } catch (error) {
+        if (!(error instanceof Error) || error.message !== "agent_host_credential_unavailable") {
+          throw error;
+        }
+        // Ordinary (non-portable) credentials stay operator-managed. Portable handoff credentials may
+        // be replaced by pasting a fresh handoff so Desktop can recover without a separate UI.
+        if (!document.active.provenance) {
+          throw error;
+        }
+        await clearDurableStateForReenrollment(config.dataDirectory);
+        await this.enrollPortableHandoff(config, encodedHandoff, paths.configPath, false, true);
+      }
     }
 
     if (options.installBackground === false) {
@@ -451,10 +468,15 @@ export class AgentHostOperator {
     config: AgentHostConfig,
     encodedHandoff: string,
     configPath: string,
-    restartPendingEnrollment = false
+    restartPendingEnrollment = false,
+    replaceExisting = false
   ): Promise<void> {
     await this.preflight(configPath);
-    await assertDurableStateReplacementSafe(config.dataDirectory);
+    // Callers that recover from unusable credentials clear durable state first. Fresh portable
+    // enrollment still refuses silent replacement when prior Host state remains on disk.
+    if (!replaceExisting) {
+      await assertDurableStateReplacementSafe(config.dataDirectory);
+    }
     const trust = await createAgentHostTlsTrust(config.coordinator.caCertificatePath);
     try {
       const exchangeOptions = {
@@ -465,10 +487,15 @@ export class AgentHostOperator {
         config,
         credentialStore(config),
         new HttpAgentHostEnrollmentExchange(config.coordinator.url, exchangeOptions)
-      ).enrollPortableHandoff(encodedHandoff, { restartPendingEnrollment });
+      ).enrollPortableHandoff(encodedHandoff, { restartPendingEnrollment, replaceExisting });
     } finally {
       await trust.close();
     }
+  }
+
+  async requireUsableCredential(configPath: string): Promise<void> {
+    const config = await loadAgentHostConfig(configPath);
+    await credentialStore(config).requireUsable();
   }
 
   async preflight(configPath: string): Promise<AgentHostDiagnostics> {
@@ -600,7 +627,13 @@ export class AgentHostOperator {
         ),
         outbox: state,
         interactionResponder: interactionRelay,
-        hostCapabilities: config.host.capabilities
+        hostCapabilities: config.host.capabilities,
+        // Remote Host ACP work commonly exceeds the local 30s engine default (tool calls + writeback).
+        limits: {
+          operationTimeoutMs: 15 * 60_000,
+          interactionTimeoutMs: 15 * 60_000,
+          cleanupTimeoutMs: 30_000
+        }
       });
       const transport = new AgentHostClient({
         serverUrl: transportOrigin(config.coordinator.url),
@@ -616,6 +649,10 @@ export class AgentHostOperator {
         allowInsecureTransport: config.coordinator.allowInsecureDevelopment,
         ca: trust.ca,
         request: trust.request
+      });
+      const { writeHostConnectionStatus } = await import("../transport/connectionStatus.js");
+      transport.subscribe((status) => {
+        void writeHostConnectionStatus(config.dataDirectory, status).catch(() => undefined);
       });
       return composeAgentHost({ state, transport, closeResources: trust.close });
     } catch (error) {
@@ -679,6 +716,14 @@ export class AgentHostOperator {
         actionableError ??= "execution_state_invalid";
       }
     }
+    let connection: AgentHostDiagnostics["connection"] = "offline";
+    try {
+      const { readHostConnectionStatus } = await import("../transport/connectionStatus.js");
+      const status = await readHostConnectionStatus(config.dataDirectory);
+      if (status?.transport.state === "connected") connection = "online";
+    } catch {
+      // Keep the redacted offline default when status storage is unavailable.
+    }
     return {
       version: agentHostPackageVersion,
       hostId,
@@ -686,7 +731,7 @@ export class AgentHostOperator {
       credential,
       capabilities: [...config.host.capabilities],
       capacity: config.host.capacity,
-      connection: "offline",
+      connection,
       recoverableExecutions,
       actionableError
     };

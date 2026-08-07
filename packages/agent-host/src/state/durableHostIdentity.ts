@@ -1,4 +1,4 @@
-import { lstat, open, readFile } from "node:fs/promises";
+import { lstat, open, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
@@ -114,6 +114,21 @@ export async function assertDurableStateReplacementSafe(dataDirectory: string): 
     try {
       await lstat(join(dataDirectory, name));
       throw new Error("agent_host_reenrollment_requires_durable_state_export");
+    } catch (error) {
+      if (!missing(error)) throw error;
+    }
+  }
+}
+
+/**
+ * Drop Host-local durable stores so a dead credential can be replaced.
+ * Bound execution history cannot be resumed without a usable Host credential,
+ * so recovery re-enrollment must not leave the previous hostId identity in place.
+ */
+export async function clearDurableStateForReenrollment(dataDirectory: string): Promise<void> {
+  for (const name of durableStoreNames) {
+    try {
+      await unlink(join(dataDirectory, name));
     } catch (error) {
       if (!missing(error)) throw error;
     }

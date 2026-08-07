@@ -17,6 +17,7 @@ import { AgentHostEnrollmentService } from "../enrollment/enrollmentService.js";
 import { AgentHostOperator, loadAgentHostConfig } from "../operator/agentHostOperator.js";
 import { parseAgentHostArgs, runAgentHostCli } from "../operator/cli.js";
 import { AgentHostBackgroundSetupError } from "../background/backgroundService.js";
+import { ensureDurableHostIdentity } from "../state/durableHostIdentity.js";
 
 const mockedHome = vi.hoisted(() => ({ path: "" }));
 vi.mock("node:os", async (importOriginal) => ({
@@ -427,6 +428,73 @@ describe("portable Agent Host setup", () => {
         installBackground: false
       })
     ).rejects.toThrow("agent_host_credential_unavailable");
+  });
+
+  it("recovers portable enrollment after unusable credentials leave durable Host state", async () => {
+    const home = await mkdtemp(join(tmpdir(), "planweave-portable-recover-"));
+    directories.push(home);
+    mockedHome.path = home;
+    let enrollments = 0;
+    const server = createServer((request, response) => {
+      let body = "";
+      request.on("data", (chunk) => {
+        body += chunk;
+      });
+      request.on("end", () => {
+        enrollments += 1;
+        const parsed = JSON.parse(body) as { enrollmentAttemptId: string };
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            type: "host.enrollment.completed",
+            protocolVersion: 1,
+            enrollmentAttemptId: parsed.enrollmentAttemptId,
+            hostId: enrollments === 1 ? "host-recover-original" : "host-recover-replacement",
+            workspaceId: "workspace-portable-recover",
+            credentialExpiresAt: "2030-01-01T00:00:00.000Z"
+          })
+        );
+      });
+    });
+    servers.push(server);
+    const port = await listen(server);
+    const workspaceId = "workspace-portable-recover";
+    const firstHandoff = encodedHandoff({
+      workspaceId,
+      enrollmentCode: `pw_enroll_${"d".repeat(43)}`,
+      serverOrigin: `http://127.0.0.1:${port}`
+    });
+    const operator = new AgentHostOperator(null);
+    await expect(
+      operator.enrollHandoff(firstHandoff, { installBackground: false })
+    ).resolves.toMatchObject({ state: "ready", credential: "active" });
+
+    const paths = resolveAgentHostDefaultPaths(workspaceId);
+    await ensureDurableHostIdentity(paths.dataDirectory, "host-recover-original", workspaceId);
+    const store = new FileHostCredentialStore(join(paths.dataDirectory, "credentials.json"));
+    const active = (await store.read())?.active;
+    if (!active?.provenance) throw new Error("expected_portable_provenance");
+    await writeFile(
+      store.path,
+      `${JSON.stringify({
+        version: "agent-host-credentials/v1",
+        active: { ...active, expiresAt: "2020-01-01T00:00:00.000Z" }
+      })}\n`,
+      { mode: 0o600 }
+    );
+
+    const recoveryHandoff = encodedHandoff({
+      workspaceId,
+      enrollmentCode: `pw_enroll_${"e".repeat(43)}`,
+      serverOrigin: `http://127.0.0.1:${port}`
+    });
+    await expect(
+      operator.enrollHandoff(recoveryHandoff, { installBackground: false })
+    ).resolves.toMatchObject({ state: "ready", credential: "active" });
+    const recovered = await store.requireUsable();
+    expect(recovered.hostId).toBe("host-recover-replacement");
+    expect(recovered.provenance?.kind).toBe("portable_handoff");
+    expect(enrollments).toBe(2);
   });
 
   it("rejects full endpoint drift in an existing config before creating pending state", async () => {

@@ -58,7 +58,11 @@ export class AgentHostEnrollmentService {
 
   async enrollPortableHandoff(
     encodedHandoff: string,
-    options: { restartPendingEnrollment?: boolean; signal?: AbortSignal } = {}
+    options: {
+      restartPendingEnrollment?: boolean;
+      replaceExisting?: boolean;
+      signal?: AbortSignal;
+    } = {}
   ): Promise<ActiveHostCredential> {
     const acceptedAt = this.clock();
     const handoff = parseAgentHostSetupHandoff(encodedHandoff, acceptedAt);
@@ -74,7 +78,11 @@ export class AgentHostEnrollmentService {
     if (portableHandoffPendingWorkspaceId(provenance, this.config) !== handoff.workspaceId) {
       throw new Error("agent_host_handoff_config_conflict");
     }
-    await this.credentials.begin(pending, false, options.restartPendingEnrollment === true);
+    await this.credentials.begin(
+      pending,
+      options.replaceExisting === true,
+      options.restartPendingEnrollment === true
+    );
     return this.completeEnrollmentCode(pending, options.signal);
   }
 
