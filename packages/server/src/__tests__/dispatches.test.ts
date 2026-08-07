@@ -433,7 +433,8 @@ describe("DispatchService (test-only thin stack)", () => {
       coordination,
       executionEnvelopeFor("T-001#B-013", ["macos"])
     );
-    expect(() =>
+    // Stale lease/attempt identities soft-drop so Host reconnect races do not kill the WS.
+    expect(
       coordination.dispatches.accept(
         registration.host.id,
         "accept-invalid",
@@ -441,8 +442,8 @@ describe("DispatchService (test-only thin stack)", () => {
         "wrong-lease",
         dispatch.executionAttemptId
       )
-    ).toThrowError("lease_mismatch");
-    expect(() =>
+    ).toMatchObject({ id: dispatch.id, status: "leased", leaseId: dispatch.leaseId });
+    expect(
       coordination.dispatches.accept(
         registration.host.id,
         "accept-wrong-attempt",
@@ -450,7 +451,7 @@ describe("DispatchService (test-only thin stack)", () => {
         dispatch.leaseId,
         "wrong-attempt"
       )
-    ).toThrowError("lease_mismatch");
+    ).toMatchObject({ id: dispatch.id, status: "leased" });
   });
 
   it("persists an interrupted dispatch across server reopen without making it pending", async () => {
@@ -549,17 +550,18 @@ describe("DispatchService (test-only thin stack)", () => {
           retryable: false
         }
       )
-    ).rejects.toThrow("dispatch_not_running");
+    ).resolves.toMatchObject({ id: dispatch.id, status: "interrupted" });
     await expect(persistedCoordination.dispatches.recoverExpiredLeases()).resolves.toEqual([]);
   });
 
-  it("interrupts expired work without automatic failure and rejects late results", async () => {
+  it("interrupts expired work without automatic failure and still accepts late terminal results", async () => {
     const server = await createServer();
     const fail = vi.fn(async () => {});
+    const complete = vi.fn(async () => {});
     const coordination = createTestDispatchCoordination(server.database, {
       leaseDurationMs: 60_000,
       hostOfflineAfterMs: 60_000,
-      writeback: { complete: async () => {}, fail }
+      writeback: { complete, fail }
     });
     const registration = coordination.hosts.register("Expiring Host");
     coordination.hosts.reportOnline(registration.host.id, ["linux"], 1);
@@ -576,6 +578,8 @@ describe("DispatchService (test-only thin stack)", () => {
       dispatch.leaseId,
       dispatch.executionAttemptId
     );
+    // Report grant must be accepted while the dispatch is still running.
+    await acceptReportArtifact(server, coordination, dispatch, registration.host.id);
     server.database
       .prepare("UPDATE dispatches SET lease_expires_at=? WHERE id=?")
       .run("2020-01-01T00:00:00.000Z", dispatch.id);
@@ -590,6 +594,8 @@ describe("DispatchService (test-only thin stack)", () => {
       }
     ]);
     expect(fail).not.toHaveBeenCalled();
+    // Host may still finish after Server-side lease recovery — accept late complete so UI
+    // does not stick on a false transport_failed / lease_lost materialization.
     await expect(
       coordination.dispatches.complete(
         registration.host.id,
@@ -597,8 +603,17 @@ describe("DispatchService (test-only thin stack)", () => {
         dispatch.id,
         dispatch.leaseId,
         dispatch.executionAttemptId,
-        { summary: "Too late", reportArtifactRef, artifactRefs: [] }
+        {
+          summary: "Finished after lease recovery",
+          reportArtifactRef,
+          artifactRefs: [reportArtifactRef]
+        }
       )
-    ).rejects.toThrowError("lease_expired");
+    ).resolves.toMatchObject({
+      id: dispatch.id,
+      status: "completed"
+    });
+    expect(complete).toHaveBeenCalledOnce();
+    expect(fail).not.toHaveBeenCalled();
   });
 });

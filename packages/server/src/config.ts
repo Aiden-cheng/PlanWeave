@@ -120,8 +120,10 @@ const serverConfigV1DeploymentEndpointSchema = z
 const serverLimitsSchema = z
   .object({
     busyTimeoutMs: z.number().int().min(1).max(60_000).default(5_000),
-    leaseDurationMs: z.number().int().min(1_000).max(86_400_000).default(30_000),
-    hostOfflineAfterMs: z.number().int().min(1_000).max(86_400_000).default(90_000),
+    // Lease must comfortably outlive heartbeat jitter, Tailscale blips, and Host busy periods.
+    // Soft-dropped late host events still require enough headroom to finish terminal reports.
+    leaseDurationMs: z.number().int().min(1_000).max(86_400_000).default(120_000),
+    hostOfflineAfterMs: z.number().int().min(1_000).max(86_400_000).default(240_000),
     heartbeatIntervalMs: z.number().int().min(1_000).max(3_600_000).default(15_000),
     maxArtifactBytes: z
       .number()
@@ -181,8 +183,8 @@ const serverConfigV1InputSchema = z
       .default(DEFAULT_OPERATOR_SESSION_TTL_MS),
     limits: serverLimitsSchema.default({
       busyTimeoutMs: 5_000,
-      leaseDurationMs: 30_000,
-      hostOfflineAfterMs: 90_000,
+      leaseDurationMs: 120_000,
+      hostOfflineAfterMs: 240_000,
       heartbeatIntervalMs: 15_000,
       maxArtifactBytes: OUTPUT_MAX_ARTIFACT_BYTES,
       maxWebSocketPayloadBytes: 256 * 1024,

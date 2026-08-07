@@ -31,6 +31,50 @@ export type RemoteAcpEventReplay = {
   }>;
 };
 
+/** Result of ingesting a host ACP batch. Soft drops keep the Host session writable. */
+export type RemoteAcpEventIngestResult = RemoteAcpEventReplay & {
+  accepted: boolean;
+  dropReason?: "remote_acp_event_attempt_not_writable";
+};
+
+function emptyDroppedReplay(
+  executionAttemptId: string,
+  afterCursor: number
+): RemoteAcpEventIngestResult {
+  return {
+    accepted: false,
+    dropReason: "remote_acp_event_attempt_not_writable",
+    executionAttemptId,
+    afterCursor,
+    cursor: afterCursor,
+    highWatermark: afterCursor,
+    hasMore: false,
+    events: [],
+    diagnostics: []
+  };
+}
+
+function logAcpEventDropped(input: {
+  hostId: string;
+  messageId: string;
+  dispatchId: string;
+  leaseId: string;
+  executionAttemptId: string;
+}): void {
+  console.warn(
+    JSON.stringify({
+      scope: "agent-host-ws",
+      event: "remote_acp_event_dropped",
+      reason: "remote_acp_event_attempt_not_writable",
+      hostId: input.hostId,
+      messageId: input.messageId,
+      dispatchId: input.dispatchId,
+      leaseId: input.leaseId,
+      executionAttemptId: input.executionAttemptId
+    })
+  );
+}
+
 type RemoteAcpEventRepositoryOptions = {
   maxEvents?: number;
   maxBytes?: number;
@@ -86,16 +130,22 @@ export class RemoteAcpEventRepository {
     this.clock = options.clock ?? (() => new Date());
   }
 
-  ingest(hostId: string, messageId: string, rawBatch: unknown): RemoteAcpEventReplay {
+  ingest(hostId: string, messageId: string, rawBatch: unknown): RemoteAcpEventIngestResult {
     const batch = normalizedAcpEventBatchSchema.parse(rawBatch);
     const redactedEvents = batch.events.map(redactEvent);
-    this.inbox.process(hostId, messageId, batch.type, batch, () => {
-      const identity = this.requireWritableAttempt({
+    let dropReason: "remote_acp_event_attempt_not_writable" | undefined;
+    const applied = this.inbox.process(hostId, messageId, batch.type, batch, () => {
+      const identity = this.findWritableAttempt({
         hostId,
         dispatchId: batch.dispatchId,
         leaseId: batch.leaseId,
         executionAttemptId: batch.executionAttemptId
       });
+      // Expected race after interrupt, lease resume, or terminal status: drop without killing the Host WS.
+      if (!identity) {
+        dropReason = "remote_acp_event_attempt_not_writable";
+        return;
+      }
       const now = this.clock().toISOString();
       const stream = this.database
         .prepare("SELECT * FROM remote_acp_event_streams WHERE execution_attempt_id=?")
@@ -180,7 +230,32 @@ export class RemoteAcpEventRepository {
         )
         .run(batch.cursor, now, batch.executionAttemptId);
     });
-    return this.replay(batch.executionAttemptId, batch.afterCursor);
+    if (dropReason) {
+      logAcpEventDropped({
+        hostId,
+        messageId,
+        dispatchId: batch.dispatchId,
+        leaseId: batch.leaseId,
+        executionAttemptId: batch.executionAttemptId
+      });
+      return emptyDroppedReplay(batch.executionAttemptId, batch.afterCursor);
+    }
+    // Idempotent retry: accept only when this batch's cursor was actually persisted.
+    // Soft-dropped receipts leave no new events even if an earlier writable lease wrote a stream.
+    if (!applied) {
+      const persisted = this.database
+        .prepare(
+          "SELECT 1 AS present FROM remote_acp_events WHERE execution_attempt_id=? AND cursor=?"
+        )
+        .get(batch.executionAttemptId, batch.cursor);
+      if (!persisted) {
+        return emptyDroppedReplay(batch.executionAttemptId, batch.afterCursor);
+      }
+    }
+    return {
+      accepted: true,
+      ...this.replay(batch.executionAttemptId, batch.afterCursor)
+    };
   }
 
   replay(executionAttemptId: string, rawAfterCursor = 0): RemoteAcpEventReplay {
@@ -254,12 +329,12 @@ export class RemoteAcpEventRepository {
     };
   }
 
-  private requireWritableAttempt(input: {
+  private findWritableAttempt(input: {
     hostId: string;
     dispatchId: string;
     leaseId: string;
     executionAttemptId: string;
-  }): { operationId: string } {
+  }): { operationId: string } | undefined {
     const row = this.database
       .prepare(
         `SELECT a.operation_id,a.dispatch_id,a.host_id,a.lease_id,a.status AS attempt_status,
@@ -285,7 +360,7 @@ export class RemoteAcpEventRepository {
       !["activated", "running"].includes(String(row.attempt_status)) ||
       !["leased", "running", "cancelling"].includes(String(row.dispatch_status))
     ) {
-      throw new Error("remote_acp_event_attempt_not_writable");
+      return undefined;
     }
     return { operationId: String(row.operation_id) };
   }

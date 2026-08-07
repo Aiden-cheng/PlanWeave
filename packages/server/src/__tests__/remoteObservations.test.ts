@@ -312,9 +312,13 @@ describe("remote ACP observations", () => {
         fixture.host.id,
         "event-after-resume",
         eventBatch(fixture, { leaseId: freshLeaseId, afterCursor: 1, cursor: 2, text: "after" })
-      ).events
-    ).toEqual([expect.objectContaining({ cursor: 2 })]);
-    expect(() =>
+      )
+    ).toMatchObject({
+      accepted: true,
+      events: [expect.objectContaining({ cursor: 2 })]
+    });
+    // Stale lease batches are soft-dropped (receipt recorded, no write, no throw) so Host WS stays up.
+    expect(
       events.ingest(
         fixture.host.id,
         "event-old-lease",
@@ -325,7 +329,28 @@ describe("remote ACP observations", () => {
           text: "late"
         })
       )
-    ).toThrowError("remote_acp_event_attempt_not_writable");
+    ).toMatchObject({
+      accepted: false,
+      dropReason: "remote_acp_event_attempt_not_writable",
+      events: []
+    });
+    expect(events.replay(fixture.operation.executionAttemptId, 0).events).toEqual([
+      expect.objectContaining({ cursor: 1 }),
+      expect.objectContaining({ cursor: 2 })
+    ]);
+    // Idempotent retry of the soft-dropped message stays a drop.
+    expect(
+      events.ingest(
+        fixture.host.id,
+        "event-old-lease",
+        eventBatch(fixture, {
+          leaseId: fixture.reservation.leaseId,
+          afterCursor: 2,
+          cursor: 3,
+          text: "late"
+        })
+      )
+    ).toMatchObject({ accepted: false, dropReason: "remote_acp_event_attempt_not_writable" });
   });
 });
 

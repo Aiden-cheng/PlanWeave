@@ -146,6 +146,42 @@ function toDispatch(row: DispatchRow): DispatchRecord {
   };
 }
 
+/** Soft-drop reasons keep the Host WS healthy; they are expected races after reconnect / expiry. */
+export type DispatchEventDropReason =
+  | "dispatch_not_found"
+  | "lease_mismatch"
+  | "lease_expired"
+  | "dispatch_not_awaiting_acceptance"
+  | "dispatch_not_running";
+
+type LeaseResolution =
+  | { ok: true; dispatch: DispatchRecord }
+  | { ok: false; reason: "dispatch_not_found" | "lease_mismatch" | "lease_expired" };
+
+function logDispatchEventDropped(input: {
+  hostId: string;
+  messageId: string;
+  eventType: string;
+  reason: DispatchEventDropReason;
+  dispatchId: string;
+  leaseId: string;
+  executionAttemptId: string;
+}): void {
+  console.warn(
+    JSON.stringify({
+      scope: "agent-host-ws",
+      event: "dispatch_event_dropped",
+      reason: input.reason,
+      eventType: input.eventType,
+      hostId: input.hostId,
+      messageId: input.messageId,
+      dispatchId: input.dispatchId,
+      leaseId: input.leaseId,
+      executionAttemptId: input.executionAttemptId
+    })
+  );
+}
+
 export class DispatchService {
   private readonly inbox: HostEventInbox;
 
@@ -183,17 +219,24 @@ export class DispatchService {
     dispatchId: string,
     leaseId: string,
     executionAttemptId: string
-  ): DispatchRecord {
+  ): DispatchRecord | undefined {
+    let dropReason: DispatchEventDropReason | undefined;
     this.inbox.process(
       hostId,
       messageId,
       "dispatch.accepted",
       { dispatchId, leaseId, executionAttemptId },
       () => {
-        const dispatch = this.requireCurrentLease(hostId, dispatchId, leaseId, executionAttemptId);
+        const resolved = this.resolveCurrentLease(hostId, dispatchId, leaseId, executionAttemptId);
+        if (!resolved.ok) {
+          dropReason = resolved.reason;
+          return;
+        }
+        const dispatch = resolved.dispatch;
         if (dispatch.status !== "leased") {
           if (dispatch.status === "running") return;
-          throw new Error("dispatch_not_awaiting_acceptance");
+          dropReason = "dispatch_not_awaiting_acceptance";
+          return;
         }
         const acceptedAt = new Date().toISOString();
         this.database
@@ -207,7 +250,18 @@ export class DispatchService {
         });
       }
     );
-    return this.getRequired(dispatchId);
+    if (dropReason) {
+      logDispatchEventDropped({
+        hostId,
+        messageId,
+        eventType: "dispatch.accepted",
+        reason: dropReason,
+        dispatchId,
+        leaseId,
+        executionAttemptId
+      });
+    }
+    return this.get(dispatchId);
   }
 
   heartbeat(
@@ -304,38 +358,63 @@ export class DispatchService {
       message?: string;
     }
   ): void {
+    let dropReason: DispatchEventDropReason | undefined;
     this.inbox.process(hostId, messageId, "dispatch.progress", input, () => {
-      const dispatch = this.requireCurrentLease(
+      const resolved = this.resolveCurrentLease(
         hostId,
         input.dispatchId,
         input.leaseId,
         input.executionAttemptId
       );
+      if (!resolved.ok) {
+        dropReason = resolved.reason;
+        return;
+      }
+      const dispatch = resolved.dispatch;
       if (dispatch.status !== "running" && dispatch.status !== "cancelling") {
-        throw new Error("dispatch_not_running");
+        dropReason = "dispatch_not_running";
+        return;
       }
       this.appendEvent(dispatch.id, "dispatch.progress", {
         percent: input.percent,
         message: input.message
       });
     });
+    if (dropReason) {
+      logDispatchEventDropped({
+        hostId,
+        messageId,
+        eventType: "dispatch.progress",
+        reason: dropReason,
+        dispatchId: input.dispatchId,
+        leaseId: input.leaseId,
+        executionAttemptId: input.executionAttemptId
+      });
+    }
   }
 
   interrupt(
     hostId: string,
     messageId: string,
     event: Extract<HostEvent, { type: "dispatch.interrupted" }>
-  ): DispatchRecord {
+  ): DispatchRecord | undefined {
+    let dropReason: DispatchEventDropReason | undefined;
     this.inbox.process(hostId, messageId, event.type, event, () => {
-      const dispatch = this.requireCurrentLease(
+      const resolved = this.resolveCurrentLease(
         hostId,
         event.dispatchId,
         event.leaseId,
         event.executionAttemptId
       );
+      if (!resolved.ok) {
+        dropReason = resolved.reason;
+        return;
+      }
+      const dispatch = resolved.dispatch;
       if (dispatch.status === "interrupted") return;
       if (dispatch.status !== "running" && dispatch.status !== "cancelling") {
-        throw new Error("dispatch_not_running");
+        dropReason = "dispatch_not_running";
+        return;
       }
       this.database
         .prepare(
@@ -362,7 +441,18 @@ export class DispatchService {
         occurredAt
       });
     });
-    return this.getRequired(event.dispatchId);
+    if (dropReason) {
+      logDispatchEventDropped({
+        hostId,
+        messageId,
+        eventType: "dispatch.interrupted",
+        reason: dropReason,
+        dispatchId: event.dispatchId,
+        leaseId: event.leaseId,
+        executionAttemptId: event.executionAttemptId
+      });
+    }
+    return this.get(event.dispatchId);
   }
 
   async complete(
@@ -372,18 +462,27 @@ export class DispatchService {
     leaseId: string,
     executionAttemptId: string,
     result: DispatchResult
-  ): Promise<DispatchRecord> {
+  ): Promise<DispatchRecord | undefined> {
     const parsedResult = dispatchResultSchema.parse(result);
+    let dropReason: DispatchEventDropReason | undefined;
     this.inbox.process(
       hostId,
       messageId,
       "dispatch.completed",
       { dispatchId, leaseId, executionAttemptId, result: parsedResult },
       () => {
-        const dispatch = this.requireCurrentLease(hostId, dispatchId, leaseId, executionAttemptId);
-        if (dispatch.status === "completed") return;
-        if (dispatch.status !== "running" && dispatch.status !== "cancelling") {
-          throw new Error("dispatch_not_running");
+        const resolved = this.resolveCurrentLease(hostId, dispatchId, leaseId, executionAttemptId, {
+          allowExpired: true
+        });
+        if (!resolved.ok) {
+          dropReason = resolved.reason;
+          return;
+        }
+        const dispatch = resolved.dispatch;
+        if (dispatch.status === "completed" || dispatch.status === "awaiting_writeback") return;
+        if (!this.canAcceptTerminalHostResult(dispatch)) {
+          dropReason = "dispatch_not_running";
+          return;
         }
         this.artifactAuthorization.requireResultProvenance(
           {
@@ -398,12 +497,24 @@ export class DispatchService {
         );
         this.database
           .prepare(
-            "UPDATE dispatches SET status='awaiting_writeback',result_json=?,failure_json=NULL WHERE id=?"
+            "UPDATE dispatches SET status='awaiting_writeback',result_json=?,failure_json=NULL,interruption_reason=NULL,interruption_resumable=NULL,interruption_recovery_json=NULL WHERE id=?"
           )
           .run(JSON.stringify(parsedResult), dispatchId);
         this.appendEvent(dispatchId, "dispatch.awaiting_writeback", { outcome: "completed" });
       }
     );
+    if (dropReason) {
+      logDispatchEventDropped({
+        hostId,
+        messageId,
+        eventType: "dispatch.completed",
+        reason: dropReason,
+        dispatchId,
+        leaseId,
+        executionAttemptId
+      });
+      return this.get(dispatchId);
+    }
     return this.writeBack(dispatchId);
   }
 
@@ -431,35 +542,52 @@ export class DispatchService {
     leaseId: string,
     executionAttemptId: string,
     failure: DispatchFailure
-  ): Promise<DispatchRecord> {
+  ): Promise<DispatchRecord | undefined> {
     const parsedFailure = dispatchFailureSchema.parse(failure);
+    let dropReason: DispatchEventDropReason | undefined;
     this.inbox.process(
       hostId,
       messageId,
       "dispatch.failed",
       { dispatchId, leaseId, executionAttemptId, failure: parsedFailure },
       () => {
-        const dispatch = this.requireCurrentLease(hostId, dispatchId, leaseId, executionAttemptId);
-        if (["failed", "cancelled"].includes(dispatch.status)) return;
+        const resolved = this.resolveCurrentLease(hostId, dispatchId, leaseId, executionAttemptId, {
+          allowExpired: true
+        });
+        if (!resolved.ok) {
+          dropReason = resolved.reason;
+          return;
+        }
+        const dispatch = resolved.dispatch;
+        if (["failed", "cancelled", "awaiting_writeback"].includes(dispatch.status)) return;
         const interruptedCancellation =
           dispatch.status === "interrupted" &&
           parsedFailure.code === "execution_cancelled" &&
           this.hasPendingCancellation(dispatch);
-        if (
-          dispatch.status !== "running" &&
-          dispatch.status !== "cancelling" &&
-          !interruptedCancellation
-        ) {
-          throw new Error("dispatch_not_running");
+        if (!this.canAcceptTerminalHostResult(dispatch) && !interruptedCancellation) {
+          dropReason = "dispatch_not_running";
+          return;
         }
         this.database
           .prepare(
-            "UPDATE dispatches SET status='awaiting_writeback',failure_json=?,result_json=NULL WHERE id=?"
+            "UPDATE dispatches SET status='awaiting_writeback',failure_json=?,result_json=NULL,interruption_reason=NULL,interruption_resumable=NULL,interruption_recovery_json=NULL WHERE id=?"
           )
           .run(JSON.stringify(parsedFailure), dispatchId);
         this.appendEvent(dispatchId, "dispatch.awaiting_writeback", { outcome: "failed" });
       }
     );
+    if (dropReason) {
+      logDispatchEventDropped({
+        hostId,
+        messageId,
+        eventType: "dispatch.failed",
+        reason: dropReason,
+        dispatchId,
+        leaseId,
+        executionAttemptId
+      });
+      return this.get(dispatchId);
+    }
     return this.writeBack(dispatchId);
   }
 
@@ -519,22 +647,40 @@ export class DispatchService {
     return recovered;
   }
 
-  private requireCurrentLease(
+  private resolveCurrentLease(
     hostId: string,
     dispatchId: string,
     leaseId: string,
-    executionAttemptId: string
-  ): DispatchRecord {
-    const dispatch = this.getRequired(dispatchId);
+    executionAttemptId: string,
+    options: { allowExpired?: boolean } = {}
+  ): LeaseResolution {
+    const dispatch = this.get(dispatchId);
+    if (!dispatch) return { ok: false, reason: "dispatch_not_found" };
     if (
       dispatch.hostId !== hostId ||
       dispatch.leaseId !== leaseId ||
       dispatch.executionAttemptId !== executionAttemptId
     ) {
-      throw new Error("lease_mismatch");
+      return { ok: false, reason: "lease_mismatch" };
     }
-    if (new Date(dispatch.leaseExpiresAt).getTime() <= Date.now()) throw new Error("lease_expired");
-    return dispatch;
+    // Terminal complete/fail may arrive after wall-clock expiry; still accept identity match.
+    // Soft-dropping those caused false lease_lost materializations while work already finished.
+    if (
+      !options.allowExpired &&
+      new Date(dispatch.leaseExpiresAt).getTime() <= Date.now()
+    ) {
+      return { ok: false, reason: "lease_expired" };
+    }
+    return { ok: true, dispatch };
+  }
+
+  /** Whether a Host may still report terminal complete/fail for this dispatch. */
+  private canAcceptTerminalHostResult(dispatch: DispatchRecord): boolean {
+    if (dispatch.status === "running" || dispatch.status === "cancelling") return true;
+    // Late terminal after Server-side lease recovery interrupted the dispatch.
+    return (
+      dispatch.status === "interrupted" && dispatch.interruption?.reason === "lease_lost"
+    );
   }
 
   private async writeBack(dispatchId: string): Promise<DispatchRecord> {

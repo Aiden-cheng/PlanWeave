@@ -958,6 +958,7 @@ describe("agent host WebSocket transport", () => {
       })
     );
     const rejection = await events.next();
+    // Free-form internal errors stay redacted on the wire; full detail is Server-logged only.
     expect(rejection).toEqual({
       type: "protocol.error",
       protocolVersion: 1,
@@ -980,68 +981,93 @@ describe("agent host WebSocket transport", () => {
       messageId: "heartbeat-after-adversarial-error"
     });
 
-    const unsupportedEvents = [
-      {
+    // lease.renew remains a hard protocol rejection (unsupported host event type).
+    socket.send(
+      JSON.stringify({
         type: "lease.renew",
-        messageId: "unsupported-renewal"
-      },
+        protocolVersion: 1,
+        messageId: "unsupported-renewal",
+        dispatchId: dispatch.id,
+        leaseId: dispatch.leaseId,
+        executionAttemptId: dispatch.executionAttemptId
+      })
+    );
+    await expect(events.next()).resolves.toMatchObject({
+      type: "protocol.error",
+      code: "host_event_unsupported:lease.renew",
+      message: expect.any(String)
+    });
+    socket.send(
+      JSON.stringify({
+        type: "host.heartbeat",
+        protocolVersion: 1,
+        messageId: "heartbeat-after-unsupported-renew",
+        activeLeases: []
+      })
+    );
+    await expect(events.next()).resolves.toMatchObject({
+      type: "host.event_ack",
+      messageId: "heartbeat-after-unsupported-renew"
+    });
+
+    // After interrupt, late ACP / interaction batches soft-drop with host.event_ack
+    // (not protocol.error) so a reconnecting Host is not forced into degraded.
+    const softDropEvents = [
       {
         type: "acp.events",
-        messageId: "unsupported-acp",
+        messageId: "soft-drop-acp",
+        acpSessionId: "session-1",
         afterCursor: 0,
         cursor: 1,
-        events: [{ cursor: 1, kind: "agent_message", text: "recovered" }]
+        events: [{ cursor: 1, kind: "agent_message", text: "late after interrupt" }]
       },
       {
         type: "interaction.permission_requested",
-        messageId: "unsupported-permission",
+        messageId: "soft-drop-permission",
         actionId: "permission-1",
         title: "Permission",
-        description: "Allow this operation?"
+        description: "Allow this operation?",
+        acpSessionId: "session-1",
+        expiresAt: "2030-01-01T00:00:00.000Z"
       },
       {
         type: "interaction.elicitation_requested",
-        messageId: "unsupported-elicitation",
+        messageId: "soft-drop-elicitation",
         actionId: "elicitation-1",
         prompt: "Choose",
-        options: ["one"]
+        options: ["one"],
+        acpSessionId: "session-1",
+        expiresAt: "2030-01-01T00:00:00.000Z"
       },
       {
         type: "interaction.authentication_required",
-        messageId: "unsupported-authentication",
+        messageId: "soft-drop-authentication",
         actionId: "authentication-1",
         agentProfileId: "acp.codex",
-        hostInstruction: "Sign in locally."
+        hostInstruction: "Sign in locally.",
+        acpSessionId: "session-1",
+        expiresAt: "2030-01-01T00:00:00.000Z"
       }
     ];
-    for (const [index, unsupported] of unsupportedEvents.entries()) {
+    for (const softDrop of softDropEvents) {
       socket.send(
         JSON.stringify({
           protocolVersion: 1,
           dispatchId: dispatch.id,
           leaseId: dispatch.leaseId,
           executionAttemptId: dispatch.executionAttemptId,
-          ...unsupported
-        })
-      );
-      await expect(events.next()).resolves.toMatchObject({
-        type: "protocol.error",
-        code: "event_rejected",
-        message: "The server rejected the host event."
-      });
-      const heartbeatMessageId = `heartbeat-after-rejection-${index}`;
-      socket.send(
-        JSON.stringify({
-          type: "host.heartbeat",
-          protocolVersion: 1,
-          messageId: heartbeatMessageId,
-          activeLeases: []
+          ...softDrop
         })
       );
       await expect(events.next()).resolves.toMatchObject({
         type: "host.event_ack",
-        messageId: heartbeatMessageId
+        messageId: softDrop.messageId
       });
     }
+    // Soft drop must not create a stream or leave a writable attempt side effect.
+    expect(() => coordination.acpEvents.replay(dispatch.executionAttemptId, 0)).toThrowError(
+      "remote_acp_event_stream_not_found"
+    );
+    expect(coordination.interactions.listPending(outcome.operation.id)).toHaveLength(0);
   });
 });

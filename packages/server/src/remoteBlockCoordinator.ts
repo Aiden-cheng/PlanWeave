@@ -371,7 +371,10 @@ export class RemoteBlockCoordinator {
       await this.withRuntime(operation, (runtime) =>
         runtime.markInterrupted({
           ...remoteBlockIdentity(operation),
-          interruption
+          interruption,
+          ...(operation.endpointSelection?.agentId
+            ? { agentId: operation.endpointSelection.agentId }
+            : {})
         })
       );
       return {

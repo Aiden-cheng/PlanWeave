@@ -220,6 +220,18 @@ export class AgentEndpointCatalog {
     const activeCounts = this.options.capacities.activeCountsForHosts(hosts.map((host) => host.id));
     const candidates: InternalCandidate[] = [];
     for (const host of hosts) {
+      // Removed or credential-dead Hosts must not remain selectable as executors.
+      if (host.revokedAt !== undefined) continue;
+      const credentialExpiry =
+        host.credentialExpiresAt === undefined
+          ? undefined
+          : Date.parse(host.credentialExpiresAt);
+      if (
+        credentialExpiry !== undefined &&
+        (!Number.isFinite(credentialExpiry) || credentialExpiry <= now.getTime())
+      ) {
+        continue;
+      }
       const profiles = host.readinessObservation?.acpProfiles ?? [];
       const identityCounts = new Map<string, number>();
       for (const profile of profiles) {

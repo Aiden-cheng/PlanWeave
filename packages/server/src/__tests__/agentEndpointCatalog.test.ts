@@ -140,15 +140,18 @@ describe("AgentEndpointCatalog", () => {
     expect(new Set([base, ...variants]).size).toBe(5);
   });
 
-  it.each([
-    ["offline", { lastSeenAt: "2026-08-03T07:00:00.000Z" }, "host_offline"],
-    ["revoked", { revokedAt: "2026-08-03T07:59:00.000Z" }, "host_revoked"],
-    ["expired", { credentialExpiresAt: now.toISOString() }, "host_credential_expired"]
-  ] as const)("projects %s Host state", (_name, overrides, reason) => {
-    expect(endpointFor(readyHost(overrides))).toMatchObject({
+  it("projects offline Host state as unavailable", () => {
+    expect(endpointFor(readyHost({ lastSeenAt: "2026-08-03T07:00:00.000Z" }))).toMatchObject({
       status: "unavailable",
-      unavailableReason: reason
+      unavailableReason: "host_offline"
     });
+  });
+
+  it.each([
+    ["revoked", { revokedAt: "2026-08-03T07:59:00.000Z" }],
+    ["expired", { credentialExpiresAt: now.toISOString() }]
+  ] as const)("omits %s Hosts from the visible executor catalog", (_name, overrides) => {
+    expect(endpointFor(readyHost(overrides))).toBeUndefined();
   });
 
   it.each([

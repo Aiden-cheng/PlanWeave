@@ -17,6 +17,10 @@ import {
 } from "./protocol.js";
 import type { WebSocketUpgradeRouter } from "./webSocketUpgradeRouter.js";
 import type { TransportAdmissionPolicy } from "./insecureTransport.js";
+import {
+  logHostProtocolRejection,
+  publicHostProtocolRejection
+} from "./hostProtocolRejection.js";
 
 export type AgentHostWebSocketOptions = {
   server: HttpServer;
@@ -186,14 +190,17 @@ export function attachAgentHostWebSocketServer(
           throw new Error(`host_event_unsupported:${event.type}`);
         case "acp.events": {
           const { protocolVersion: _protocolVersion, messageId: _messageId, ...batch } = event;
-          options.acpEvents.ingest(hostId, event.messageId, batch);
-          const renewed = options.dispatches.renewLeaseForActivity(hostId, event);
-          if (renewed) {
-            sendEvent(socket, {
-              type: "lease.renewed",
-              protocolVersion: agentHostProtocolVersion,
-              ...renewed
-            });
+          const ingested = options.acpEvents.ingest(hostId, event.messageId, batch);
+          // Soft-dropped stale batches (old lease / terminal attempt) are acked without renew.
+          if (ingested.accepted) {
+            const renewed = options.dispatches.renewLeaseForActivity(hostId, event);
+            if (renewed) {
+              sendEvent(socket, {
+                type: "lease.renewed",
+                protocolVersion: agentHostProtocolVersion,
+                ...renewed
+              });
+            }
           }
           break;
         }
@@ -252,12 +259,15 @@ export function attachAgentHostWebSocketServer(
           }
           await handleHostEvent(hostEventSchema.parse(input));
         })
-        .catch(() => {
+        .catch((error: unknown) => {
+          const phase = initialized ? "event" : "hello";
+          const publicRejection = publicHostProtocolRejection(error);
+          logHostProtocolRejection({ hostId, phase, error, publicRejection });
           sendEvent(socket, {
             type: "protocol.error",
             protocolVersion: agentHostProtocolVersion,
-            code: "event_rejected",
-            message: "The server rejected the host event."
+            code: publicRejection.code,
+            message: publicRejection.message
           });
         });
     });

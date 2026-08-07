@@ -142,11 +142,26 @@ export class RemoteInteractionService {
     this.clock = options.clock ?? (() => new Date());
   }
 
-  recordRequest(hostId: string, messageId: string, rawRequest: unknown): RemoteInteractionRecord {
+  /**
+   * Record a host interaction request. When the attempt is no longer active
+   * (interrupt, expired lease, terminal status), the message is acknowledged
+   * as a soft drop so the Host WS stays healthy; returns undefined.
+   */
+  recordRequest(
+    hostId: string,
+    messageId: string,
+    rawRequest: unknown
+  ): RemoteInteractionRecord | undefined {
     const request = interactionRequestSchema.parse(rawRequest);
     const redacted = redactRequest(request);
-    this.inbox.process(hostId, messageId, request.type, request, () => {
-      const identity = this.requireActiveAttempt({ hostId, request });
+    let dropReason: "remote_interaction_attempt_not_active" | undefined;
+    const applied = this.inbox.process(hostId, messageId, request.type, request, () => {
+      const identity = this.findActiveAttempt({ hostId, request });
+      // Expected race after interrupt / lease change: drop without killing the Host WS.
+      if (!identity) {
+        dropReason = "remote_interaction_attempt_not_active";
+        return;
+      }
       const requestJson = canonicalizeJson(redacted);
       const existing = this.get(requestIdentity(hostId, redacted));
       if (existing) {
@@ -179,6 +194,29 @@ export class RemoteInteractionService {
           now
         );
     });
+    if (dropReason) {
+      console.warn(
+        JSON.stringify({
+          scope: "agent-host-ws",
+          event: "remote_interaction_dropped",
+          reason: dropReason,
+          hostId,
+          messageId,
+          dispatchId: request.dispatchId,
+          leaseId: request.leaseId,
+          executionAttemptId: request.executionAttemptId,
+          actionId: request.actionId
+        })
+      );
+      return undefined;
+    }
+    // Idempotent retry of a previously soft-dropped request.
+    if (!applied) {
+      const existing = this.get(requestIdentity(hostId, request));
+      if (!existing) return undefined;
+      this.expireDue();
+      return existing;
+    }
     this.expireDue();
     return this.getRequired(requestIdentity(hostId, request));
   }
@@ -366,9 +404,9 @@ export class RemoteInteractionService {
       .map(toRecord);
   }
 
-  private requireActiveAttempt(input: { hostId: string; request: InteractionRequest }): {
-    operationId: string;
-  } {
+  private findActiveAttempt(input: { hostId: string; request: InteractionRequest }):
+    | { operationId: string }
+    | undefined {
     const row = this.database
       .prepare(
         `SELECT a.operation_id,a.dispatch_id,a.host_id,a.lease_id,a.status AS attempt_status,
@@ -393,9 +431,17 @@ export class RemoteInteractionService {
       !["activated", "running"].includes(String(row.attempt_status)) ||
       !["leased", "running", "cancelling"].includes(String(row.dispatch_status))
     ) {
-      throw new Error("remote_interaction_attempt_not_active");
+      return undefined;
     }
     return { operationId: String(row.operation_id) };
+  }
+
+  private requireActiveAttempt(input: { hostId: string; request: InteractionRequest }): {
+    operationId: string;
+  } {
+    const identity = this.findActiveAttempt(input);
+    if (!identity) throw new Error("remote_interaction_attempt_not_active");
+    return identity;
   }
 
   private expiryCommand(request: InteractionRequest): InteractionSettlement | undefined {
