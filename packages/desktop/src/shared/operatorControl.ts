@@ -176,12 +176,37 @@ export type OperatorLocalAgentHostProfileView = z.infer<
   typeof operatorLocalAgentHostProfileViewSchema
 >;
 
+export const operatorLocalAgentHostServerConnectionSchema = z
+  .object({
+    state: z.enum([
+      "connected",
+      "connecting",
+      "backing-off",
+      "degraded",
+      "auth-failed",
+      "stopped",
+      "unknown"
+    ]),
+    updatedAt: z.string().datetime().optional(),
+    connectedAt: z.string().datetime().optional(),
+    attempt: z.number().int().positive().optional(),
+    delayMs: z.number().int().nonnegative().optional(),
+    retryAt: z.string().datetime().optional(),
+    reason: z.string().trim().min(1).max(256).optional(),
+    serverOrigin: z.string().url().optional()
+  })
+  .strict();
+export type OperatorLocalAgentHostServerConnection = z.infer<
+  typeof operatorLocalAgentHostServerConnectionSchema
+>;
+
 export const operatorLocalAgentHostStatusSchema = z
   .object({
     supported: z.boolean(),
     state: z.enum(["not_registered", "ready", "background_setup_required"]),
     workspaceId: operatorProfileIdSchema.optional(),
     background: z.enum(["running", "stopped", "not_installed", "setup_required"]).optional(),
+    serverConnection: operatorLocalAgentHostServerConnectionSchema.optional(),
     agents: z.array(operatorLocalAgentHostProfileViewSchema).max(32)
   })
   .strict();

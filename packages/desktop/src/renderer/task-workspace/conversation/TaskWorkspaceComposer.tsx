@@ -35,6 +35,7 @@ export function TaskWorkspaceComposer({
   cancelController,
   liveStatus,
   refresh,
+  remoteConversation = null,
   runnerModel,
   selectedRun,
   t
@@ -45,6 +46,20 @@ export function TaskWorkspaceComposer({
   cancelController?: TaskWorkspaceCancelRunController;
   t: ReturnType<typeof createTranslator>;
 }) {
+  // Remote ACP turns are not promptable through the local owned-session composer.
+  if (remoteConversation) {
+    return (
+      <ComposerUnavailable
+        accessory={accessory}
+        reason={
+          remoteConversation.error ??
+          (remoteConversation.state === "failed" || remoteConversation.state === "cancelled"
+            ? t("taskWorkspaceRemoteAcpComposerClosed")
+            : t("taskWorkspaceRemoteAcpComposerLive"))
+        }
+      />
+    );
+  }
   if (!selectedRun) {
     return <ComposerUnavailable accessory={accessory} reason={t("acpPromptUnavailable")} />;
   }

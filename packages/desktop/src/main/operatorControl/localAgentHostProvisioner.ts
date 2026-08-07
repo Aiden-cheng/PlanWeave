@@ -1,6 +1,10 @@
+import { join } from "node:path";
 import {
   AgentHostOperator,
+  FileHostCredentialStore,
   listSupportedHostAcpProfiles,
+  loadAgentHostConfig,
+  readHostConnectionStatus,
   resolveAgentHostDefaultPaths,
   supportsPlatformBackgroundService,
   type AgentExposureMutationResult,
@@ -10,6 +14,7 @@ import {
 } from "@planweave-ai/agent-host";
 import {
   operatorLocalAgentHostStatusSchema,
+  type OperatorLocalAgentHostServerConnection,
   type OperatorLocalAgentHostStatus
 } from "../../shared/operatorControl.js";
 import { LocalAgentHostRegistrationStore } from "./localAgentHostRegistrationStore.js";
@@ -28,6 +33,7 @@ export interface LocalAgentHostOperatorPort {
     profileIds: readonly string[]
   ): Promise<AgentExposureMutationResult>;
   listAgents(configPath: string): Promise<PortableEnrollmentResult["agents"]>;
+  requireUsableCredential(configPath: string): Promise<void>;
   installBackground(
     configPath: string,
     launcher: AgentHostBackgroundLauncher
@@ -104,6 +110,123 @@ function supportedProfiles() {
   }));
 }
 
+function isAgentHostCredentialUnavailable(error: unknown): boolean {
+  return error instanceof Error && error.message === "agent_host_credential_unavailable";
+}
+
+function notRegisteredStatus(): OperatorLocalAgentHostStatus {
+  return operatorLocalAgentHostStatusSchema.parse({
+    supported: true,
+    state: "not_registered",
+    agents: supportedProfiles()
+  });
+}
+
+async function resolveServerConnection(
+  configPath: string,
+  backgroundState: OperatorLocalAgentHostStatus["background"]
+): Promise<OperatorLocalAgentHostServerConnection> {
+  let serverOrigin: string | undefined;
+  let dataDirectory: string | undefined;
+  try {
+    const config = await loadAgentHostConfig(configPath);
+    serverOrigin = config.coordinator.endpoint?.serverOrigin ?? config.coordinator.url;
+    dataDirectory = config.dataDirectory;
+  } catch {
+    // Config may be temporarily unreadable; still report a connection state below.
+  }
+
+  if (backgroundState !== "running") {
+    return {
+      state: "stopped",
+      ...(serverOrigin ? { serverOrigin } : {})
+    };
+  }
+
+  if (!dataDirectory) {
+    return {
+      state: "unknown",
+      ...(serverOrigin ? { serverOrigin } : {})
+    };
+  }
+
+  try {
+    const document = await readHostConnectionStatus(dataDirectory);
+    if (!document) {
+      return {
+        state: "unknown",
+        ...(serverOrigin ? { serverOrigin } : {})
+      };
+    }
+    const base = {
+      updatedAt: document.updatedAt,
+      ...(serverOrigin ? { serverOrigin } : {})
+    };
+    switch (document.transport.state) {
+      case "connected":
+        return {
+          ...base,
+          state: "connected",
+          connectedAt: document.transport.connectedAt
+        };
+      case "connecting":
+        return {
+          ...base,
+          state: "connecting",
+          attempt: document.transport.attempt
+        };
+      case "backing-off":
+        return {
+          ...base,
+          state: "backing-off",
+          attempt: document.transport.attempt,
+          delayMs: document.transport.delayMs,
+          retryAt: document.transport.retryAt
+        };
+      case "degraded":
+        return {
+          ...base,
+          state: "degraded",
+          reason: document.transport.reason
+        };
+      case "auth-failed":
+        return {
+          ...base,
+          state: "auth-failed",
+          reason: document.transport.reason
+        };
+      case "stopped":
+        return {
+          ...base,
+          state: "stopped"
+        };
+    }
+  } catch {
+    return {
+      state: "unknown",
+      ...(serverOrigin ? { serverOrigin } : {})
+    };
+  }
+}
+
+function createDefaultLocalAgentHostOperator(): LocalAgentHostOperatorPort {
+  const operator = new AgentHostOperator();
+  return {
+    enrollHandoff: (handoff, options) => operator.enrollHandoff(handoff, options),
+    reconcileAgentExposure: (configPath, profileIds) =>
+      operator.reconcileAgentExposure(configPath, profileIds),
+    listAgents: (configPath) => operator.listAgents(configPath),
+    requireUsableCredential: async (configPath) => {
+      const config = await loadAgentHostConfig(configPath);
+      await new FileHostCredentialStore(
+        join(config.dataDirectory, "credentials.json")
+      ).requireUsable();
+    },
+    installBackground: (configPath, launcher) => operator.installBackground(configPath, launcher),
+    backgroundStatus: (configPath) => operator.backgroundStatus(configPath)
+  };
+}
+
 export class DesktopLocalAgentHostProvisioner implements LocalAgentHostProvisioner {
   private readonly platform: NodeJS.Platform;
   private readonly launcher: AgentHostBackgroundLauncher;
@@ -113,7 +236,7 @@ export class DesktopLocalAgentHostProvisioner implements LocalAgentHostProvision
   constructor(options: LocalAgentHostProvisionerOptions) {
     this.platform = options.platform ?? process.platform;
     this.launcher = options.launcher;
-    this.operator = options.operator ?? new AgentHostOperator();
+    this.operator = options.operator ?? createDefaultLocalAgentHostOperator();
     this.registrations = options.registrations ?? new LocalAgentHostRegistrationStore();
   }
 
@@ -129,11 +252,7 @@ export class DesktopLocalAgentHostProvisioner implements LocalAgentHostProvision
       (profileId ? await this.registrations.get(profileId) : null) ??
       (await this.registrations.latest());
     if (!registration) {
-      return operatorLocalAgentHostStatusSchema.parse({
-        supported: true,
-        state: "not_registered",
-        agents: supportedProfiles()
-      });
+      return notRegisteredStatus();
     }
     const configPath = resolveAgentHostDefaultPaths(registration.workspaceId).configPath;
     let agents: PortableEnrollmentResult["agents"];
@@ -141,23 +260,32 @@ export class DesktopLocalAgentHostProvisioner implements LocalAgentHostProvision
       agents = await this.operator.listAgents(configPath);
     } catch (error) {
       if (systemErrorSuffix(error) === "enoent") {
-        return operatorLocalAgentHostStatusSchema.parse({
-          supported: true,
-          state: "not_registered",
-          agents: supportedProfiles()
-        });
+        await this.registrations.remove(registration.profileId);
+        return notRegisteredStatus();
       }
       throw localAgentHostStageError("local_agent_host_agent_status_read_failed", error);
+    }
+    try {
+      await this.operator.requireUsableCredential(configPath);
+    } catch (error) {
+      if (isAgentHostCredentialUnavailable(error) || systemErrorSuffix(error) === "enoent") {
+        // Stale Desktop registration with missing/expired Host credential → restore paste UI.
+        await this.registrations.remove(registration.profileId);
+        return notRegisteredStatus();
+      }
+      throw localAgentHostStageError("local_agent_host_credential_status_failed", error);
     }
     const background = await withinLocalAgentHostStage(
       "local_agent_host_background_status_read_failed",
       () => this.operator.backgroundStatus(configPath)
     );
+    const serverConnection = await resolveServerConnection(configPath, background.state);
     return operatorLocalAgentHostStatusSchema.parse({
       supported: true,
       state: background.state === "running" ? "ready" : "background_setup_required",
       workspaceId: registration.workspaceId,
       background: background.state,
+      serverConnection,
       agents
     });
   }
@@ -189,11 +317,16 @@ export class DesktopLocalAgentHostProvisioner implements LocalAgentHostProvision
       "local_agent_host_background_install_failed",
       () => this.operator.installBackground(enrollment.configPath, this.launcher)
     );
+    const serverConnection = await resolveServerConnection(
+      enrollment.configPath,
+      background.state
+    );
     return operatorLocalAgentHostStatusSchema.parse({
       supported: true,
       state: background.state === "running" ? "ready" : "background_setup_required",
       workspaceId: enrollment.workspaceId,
       background: background.state,
+      serverConnection,
       agents
     });
   }
@@ -204,19 +337,30 @@ export class DesktopLocalAgentHostProvisioner implements LocalAgentHostProvision
       (await this.registrations.latest());
     if (!registration) throw new Error("local_agent_host_registration_missing");
     const configPath = resolveAgentHostDefaultPaths(registration.workspaceId).configPath;
-    const background = await withinLocalAgentHostStage(
-      "local_agent_host_background_install_failed",
-      () => this.operator.installBackground(configPath, this.launcher)
-    );
+    let background: AgentHostBackgroundResult;
+    try {
+      background = await withinLocalAgentHostStage(
+        "local_agent_host_background_install_failed",
+        () => this.operator.installBackground(configPath, this.launcher)
+      );
+    } catch (error) {
+      if (isAgentHostCredentialUnavailable(error)) {
+        await this.registrations.remove(registration.profileId);
+        return notRegisteredStatus();
+      }
+      throw error;
+    }
     const agents = await withinLocalAgentHostStage(
       "local_agent_host_agent_status_read_failed",
       () => this.operator.listAgents(configPath)
     );
+    const serverConnection = await resolveServerConnection(configPath, background.state);
     return operatorLocalAgentHostStatusSchema.parse({
       supported: true,
       state: background.state === "running" ? "ready" : "background_setup_required",
       workspaceId: registration.workspaceId,
       background: background.state,
+      serverConnection,
       agents
     });
   }

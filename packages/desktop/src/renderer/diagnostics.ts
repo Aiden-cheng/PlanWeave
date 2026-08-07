@@ -35,7 +35,11 @@ const desktopDiagnosticSourceOrder: DesktopDiagnosticSource[] = [
 const desktopPerformanceDiagnosticCodes = new Set([
   "desktop_projection_slow_part",
   "desktop_search_index_slow_part",
-  "desktop_statistics_slow_part"
+  "desktop_statistics_slow_part",
+  // Capacity bounds: index still works on newest files; do not surface as blocking project errors.
+  "desktop_results_index_file_limit_exceeded",
+  "desktop_results_index_byte_limit_exceeded",
+  "desktop_search_body_index_skipped_by_limit"
 ]);
 
 const packageDiagnosticPrefixes = ["package_", "manifest_", "prompt_", "project_canvas_manifest_"];

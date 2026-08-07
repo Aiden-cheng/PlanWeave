@@ -130,6 +130,12 @@ beforeEach(() => {
     state: "ready",
     workspaceId: "workspace-a",
     background: "running",
+    serverConnection: {
+      state: "connected",
+      updatedAt: "2030-01-01T00:00:00.000Z",
+      connectedAt: "2030-01-01T00:00:00.000Z",
+      serverOrigin: "https://server.example"
+    },
     agents: [
       {
         profileId: "codex-acp",
@@ -146,6 +152,12 @@ beforeEach(() => {
     state: "ready",
     workspaceId: "workspace-a",
     background: "running",
+    serverConnection: {
+      state: "connected",
+      updatedAt: "2030-01-01T00:00:00.000Z",
+      connectedAt: "2030-01-01T00:00:00.000Z",
+      serverOrigin: "https://server.example"
+    },
     agents: [
       {
         profileId: "codex-acp",
@@ -162,6 +174,12 @@ beforeEach(() => {
     state: "ready",
     workspaceId: "workspace-a",
     background: "running",
+    serverConnection: {
+      state: "connected",
+      updatedAt: "2030-01-01T00:00:00.000Z",
+      connectedAt: "2030-01-01T00:00:00.000Z",
+      serverOrigin: "https://server.example"
+    },
     agents: [
       {
         profileId: "codex-acp",
@@ -444,7 +462,13 @@ describe("Agent Host settings", () => {
       exposedProfileIds: ["codex-acp"]
     });
     expect(await screen.findByTestId("host-admin-local-status")).toHaveTextContent(
-      "background service is running"
+      "registered as an Agent Host"
+    );
+    expect(await screen.findByTestId("host-admin-local-background-status")).toHaveTextContent(
+      "Background service: Running"
+    );
+    expect(await screen.findByTestId("host-admin-local-server-connection")).toHaveTextContent(
+      "Server connection: Connected"
     );
   });
 
@@ -462,6 +486,7 @@ describe("Agent Host settings", () => {
           state: "background_setup_required",
           workspaceId: "workspace-a",
           background: "stopped",
+          serverConnection: { state: "stopped", serverOrigin: "https://server.example" },
           agents: [
             {
               profileId: "codex-acp",
@@ -480,6 +505,12 @@ describe("Agent Host settings", () => {
       />
     );
 
+    expect(screen.getByTestId("host-admin-local-background-status")).toHaveTextContent(
+      "Background service: Stopped"
+    );
+    expect(screen.getByTestId("host-admin-local-server-connection")).toHaveTextContent(
+      "Server connection: Offline"
+    );
     await user.click(screen.getByTestId("host-admin-repair-local"));
 
     expect(repair).toHaveBeenCalledOnce();
@@ -499,6 +530,14 @@ describe("Agent Host settings", () => {
           state: "ready",
           workspaceId: "workspace-a",
           background: "running",
+          serverConnection: {
+            state: "backing-off",
+            attempt: 3,
+            delayMs: 5_000,
+            retryAt: "2030-01-01T00:00:05.000Z",
+            updatedAt: "2030-01-01T00:00:00.000Z",
+            serverOrigin: "https://server.example"
+          },
           agents: [
             {
               profileId: "codex-acp",
@@ -517,6 +556,12 @@ describe("Agent Host settings", () => {
       />
     );
 
+    expect(screen.getByTestId("host-admin-local-server-connection")).toHaveTextContent(
+      "Server connection: Reconnecting"
+    );
+    expect(screen.getByTestId("host-admin-local-server-origin")).toHaveTextContent(
+      "https://server.example"
+    );
     await user.click(screen.getByTestId("host-admin-repair-local"));
 
     expect(screen.getByRole("button", { name: "Restart Agent Host" })).toBeVisible();
@@ -545,7 +590,7 @@ describe("Agent Host settings", () => {
       exposedProfileIds: ["codex-acp"]
     });
     expect(await screen.findByTestId("host-admin-local-status")).toHaveTextContent(
-      "background service is running"
+      "registered as an Agent Host"
     );
     expect(screen.queryByTestId("host-admin-local-handoff")).not.toBeInTheDocument();
   });

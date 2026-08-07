@@ -197,20 +197,32 @@ export function useHostAdministrationController(): HostAdministrationController 
       return;
     }
     let active = true;
-    setLocalAgentHostLoading(true);
-    void operatorControlBridge
-      .getOperatorLocalAgentHostStatus(activeProfileId ? { profileId: activeProfileId } : {})
-      .then((next) => {
-        if (active) setLocalAgentHost(next);
-      })
-      .catch((cause) => {
-        if (active) setError(errorMessage(cause));
-      })
-      .finally(() => {
-        if (active) setLocalAgentHostLoading(false);
-      });
+    let pollTimer: ReturnType<typeof setInterval> | undefined;
+
+    const loadLocalAgentHost = (options?: { silent?: boolean }) => {
+      if (!options?.silent) setLocalAgentHostLoading(true);
+      return operatorControlBridge!
+        .getOperatorLocalAgentHostStatus(activeProfileId ? { profileId: activeProfileId } : {})
+        .then((next) => {
+          if (active) setLocalAgentHost(next);
+        })
+        .catch((cause) => {
+          if (active && !options?.silent) setError(errorMessage(cause));
+        })
+        .finally(() => {
+          if (active && !options?.silent) setLocalAgentHostLoading(false);
+        });
+    };
+
+    void loadLocalAgentHost();
+    // Refresh connection-status.json while Host is registered so process vs Server state stays current.
+    pollTimer = setInterval(() => {
+      void loadLocalAgentHost({ silent: true });
+    }, 5_000);
+
     return () => {
       active = false;
+      if (pollTimer) clearInterval(pollTimer);
     };
   }, [activeProfileId]);
 

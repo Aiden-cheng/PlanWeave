@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type {
+  OperatorLocalAgentHostServerConnection,
   OperatorLocalAgentHostStatus,
   OperatorProfileView
 } from "../../shared/operatorControl";
@@ -21,6 +22,48 @@ type LocalAgentHostCardProps = {
   ) => Promise<OperatorLocalAgentHostStatus | null>;
   t: ReturnType<typeof createTranslator>;
 };
+
+function backgroundServiceLabel(
+  background: OperatorLocalAgentHostStatus["background"],
+  t: ReturnType<typeof createTranslator>
+): string {
+  switch (background) {
+    case "running":
+      return t("hostAdminLocalHostBackgroundRunning");
+    case "stopped":
+      return t("hostAdminLocalHostBackgroundStopped");
+    case "setup_required":
+      return t("hostAdminLocalHostBackgroundSetupRequired");
+    case "not_installed":
+      return t("hostAdminLocalHostBackgroundNotInstalled");
+    default:
+      return t("hostAdminLocalHostBackgroundUnknown");
+  }
+}
+
+function serverConnectionLabel(
+  connection: OperatorLocalAgentHostServerConnection | undefined,
+  t: ReturnType<typeof createTranslator>
+): string {
+  if (!connection) return t("hostAdminLocalHostServerUnknown");
+  switch (connection.state) {
+    case "connected":
+      return t("hostAdminLocalHostServerConnected");
+    case "connecting":
+      return t("hostAdminLocalHostServerConnecting");
+    case "backing-off":
+      return t("hostAdminLocalHostServerReconnecting");
+    case "degraded":
+      return t("hostAdminLocalHostServerDegraded");
+    case "auth-failed":
+      return t("hostAdminLocalHostServerAuthFailed");
+    case "stopped":
+      return t("hostAdminLocalHostServerStopped");
+    case "unknown":
+    default:
+      return t("hostAdminLocalHostServerUnknown");
+  }
+}
 
 export function LocalAgentHostCard({
   activeProfile,
@@ -98,6 +141,38 @@ export function LocalAgentHostCard({
                     ? t("hostAdminLocalHostSetupRequired")
                     : t("hostAdminLocalHostNotRegistered")}
             </p>
+            {!localServerHosted && status.state !== "not_registered" ? (
+              <div
+                className="grid gap-1.5 rounded-md border border-border/60 bg-surface/40 px-3 py-2.5 text-xs leading-5 text-text-muted"
+                data-testid="host-admin-local-connection-panel"
+              >
+                <p data-testid="host-admin-local-background-status">
+                  <span className="font-medium text-text-strong">
+                    {t("hostAdminLocalHostBackgroundLabel")}
+                  </span>
+                  {": "}
+                  {backgroundServiceLabel(status.background, t)}
+                </p>
+                <p data-testid="host-admin-local-server-connection">
+                  <span className="font-medium text-text-strong">
+                    {t("hostAdminLocalHostServerLabel")}
+                  </span>
+                  {": "}
+                  {serverConnectionLabel(status.serverConnection, t)}
+                  {status.serverConnection?.reason
+                    ? ` · ${status.serverConnection.reason}`
+                    : null}
+                </p>
+                {status.serverConnection?.serverOrigin ? (
+                  <p
+                    className="break-all text-[11px] text-text-muted/90"
+                    data-testid="host-admin-local-server-origin"
+                  >
+                    {status.serverConnection.serverOrigin}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
             {!localServerHosted && status.state === "not_registered" ? (
               <div className="grid gap-2">
                 <p className="text-xs leading-5 text-text-muted">

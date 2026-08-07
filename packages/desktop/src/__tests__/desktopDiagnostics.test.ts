@@ -12,7 +12,10 @@ describe("desktop diagnostics", () => {
     expect(desktopDiagnosticSource({ code: "prompt_missing" })).toBe("package");
     expect(desktopDiagnosticSource({ code: "desktop_result_metadata_read_failed" })).toBe("search");
     expect(desktopDiagnosticSource({ code: "desktop_results_index_byte_limit_exceeded" })).toBe(
-      "search"
+      "performance"
+    );
+    expect(desktopDiagnosticSource({ code: "desktop_results_index_file_limit_exceeded" })).toBe(
+      "performance"
     );
     expect(desktopDiagnosticSource({ code: "auto_run_state_invalid_json" })).toBe("runtime");
     expect(desktopDiagnosticSource({ code: "desktop_canvas_runtime_input_failed" })).toBe(

@@ -40,6 +40,7 @@ type WorkspaceAgentEndpointRunInput = {
     PlanWeaveCollaborationApi,
     | "dispatchCollaborationRemoteOperation"
     | "observeCollaborationRemoteOperation"
+    | "executeCollaborationRemoteOperationAction"
     | "onCollaborationObserverSignal"
     | "readCollaborationCanvasRuntimeStatus"
   > | null;

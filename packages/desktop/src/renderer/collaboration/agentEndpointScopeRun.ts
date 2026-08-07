@@ -88,21 +88,60 @@ export function waitForLocalAutoRunTerminal(input: {
   });
 }
 
+/**
+ * Runtime `dispatchable` is implementation-oriented (planweave claim --dispatch).
+ * Review gates become ready/claimable after required implementations complete but stay
+ * `dispatchable: false` in claim hints. Scope scheduling still treats ready review blocks as
+ * executable so Project/Task Auto Run continues through the full block graph (including remote Host).
+ */
+export function isAgentEndpointScopeExecutableBlock(
+  block: Pick<DesktopGraphBlock, "type">,
+  status: CanvasRuntimeStatusProjection["blocks"][number] | undefined
+): boolean {
+  if (!status) return false;
+  if (status.dispatchable) return true;
+  return block.type === "review" && status.status === "ready";
+}
+
 function describeUnavailableScope(
   status: CanvasRuntimeStatusProjection,
   tasks: readonly DesktopGraphTask[]
 ): string {
-  const blockRefs = new Set(tasks.flatMap((task) => task.blocks.map((block) => block.ref)));
+  const graphBlocks = tasks.flatMap((task) =>
+    task.blocks.map((block) => ({ taskId: task.taskId, block }))
+  );
+  const blockRefs = new Set(graphBlocks.map(({ block }) => block.ref));
+  const statusByRef = new Map(status.blocks.map((block) => [block.ref, block]));
+  const details = graphBlocks.map(({ taskId, block }) => {
+    const row = statusByRef.get(block.ref);
+    if (!row) {
+      return `${block.ref}(task=${taskId},type=${block.type},status=missing_from_runtime_status)`;
+    }
+    const reasons = [
+      `type=${block.type}`,
+      `status=${row.status}`,
+      `dispatchable=${row.dispatchable}`,
+      `scopeExecutable=${isAgentEndpointScopeExecutableBlock(block, row)}`
+    ];
+    if (row.blockedReason) reasons.push(`blockedReason=${row.blockedReason}`);
+    if (row.divergenceReason) reasons.push(`divergenceReason=${row.divergenceReason}`);
+    if (row.completionReason) reasons.push(`completionReason=${row.completionReason}`);
+    return `${block.ref}(${reasons.join(",")})`;
+  });
   const blocking = status.blocks.find(
     (block) =>
       blockRefs.has(block.ref) && (block.status === "blocked" || block.status === "diverged")
   );
-  if (blocking?.blockedReason) return blocking.blockedReason;
-  if (blocking?.divergenceReason) return blocking.divergenceReason;
-  if (status.blocks.some((block) => blockRefs.has(block.ref) && block.status === "in_progress")) {
-    return "agent_endpoint_scope_has_in_progress_block";
+  if (blocking?.blockedReason) {
+    return `agent_endpoint_scope_blocked:${blocking.ref}:${blocking.blockedReason}; blocks=[${details.join("; ")}]`;
   }
-  return "agent_endpoint_scope_has_no_dispatchable_block";
+  if (blocking?.divergenceReason) {
+    return `agent_endpoint_scope_diverged:${blocking.ref}:${blocking.divergenceReason}; blocks=[${details.join("; ")}]`;
+  }
+  if (status.blocks.some((block) => blockRefs.has(block.ref) && block.status === "in_progress")) {
+    return `agent_endpoint_scope_has_in_progress_block; blocks=[${details.join("; ")}]`;
+  }
+  return `agent_endpoint_scope_has_no_dispatchable_block; blocks=[${details.join("; ")}]`;
 }
 
 export async function runAgentEndpointScope(input: {
@@ -132,7 +171,9 @@ export async function runAgentEndpointScope(input: {
     const statusByBlockRef = new Map(status.blocks.map((block) => [block.ref, block]));
     const next = input.tasks
       .flatMap((task) => task.blocks.map((block) => ({ task, block })))
-      .find(({ block }) => statusByBlockRef.get(block.ref)?.dispatchable === true);
+      .find(({ block }) =>
+        isAgentEndpointScopeExecutableBlock(block, statusByBlockRef.get(block.ref))
+      );
     if (!next) throw new Error(describeUnavailableScope(status, input.tasks));
     await input.executeBlock(next.task, next.block);
   }

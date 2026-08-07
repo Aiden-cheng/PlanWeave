@@ -81,6 +81,22 @@ export class LocalAgentHostRegistrationStore {
         registration
       ]
     });
+    await this.writeDocument(document);
+    return registration;
+  }
+
+  async remove(profileId: string): Promise<void> {
+    const current = await this.readDocument();
+    if (!current.registrations.some((item) => item.profileId === profileId)) return;
+    await this.writeDocument(
+      documentSchema.parse({
+        version: 1,
+        registrations: current.registrations.filter((item) => item.profileId !== profileId)
+      })
+    );
+  }
+
+  private async writeDocument(document: z.infer<typeof documentSchema>): Promise<void> {
     await mkdir(dirname(this.filePath), { recursive: true, mode: 0o700 });
     const temporaryPath = `${this.filePath}.tmp`;
     await writeFile(temporaryPath, `${JSON.stringify(document, null, 2)}\n`, {
@@ -92,6 +108,5 @@ export class LocalAgentHostRegistrationStore {
       if (error.code !== "EPERM") throw error;
     });
     this.loaded = document;
-    return registration;
   }
 }

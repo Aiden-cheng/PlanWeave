@@ -325,6 +325,50 @@ describe("buildAvailableAgentEndpoints", () => {
     });
   });
 
+  it("omits permanently dead Hosts from the executor picker", () => {
+    const endpoints = buildAvailableAgentEndpoints({
+      local: [],
+      requiredProfileId: "codex-acp",
+      requiredCapabilities: ["acp.codex"],
+      remote: [
+        {
+          schemaVersion: "agent-endpoint/v1",
+          endpointId: "endpoint-revoked",
+          profileId: "codex-acp",
+          agentId: "codex",
+          displayName: "Codex",
+          hostDisplayName: "LINANIML",
+          status: "unavailable",
+          unavailableReason: "host_revoked",
+          capabilities: ["acp.codex"]
+        },
+        {
+          schemaVersion: "agent-endpoint/v1",
+          endpointId: "endpoint-expired",
+          profileId: "codex-acp",
+          agentId: "codex",
+          displayName: "Codex",
+          hostDisplayName: "LINANIML",
+          status: "unavailable",
+          unavailableReason: "host_credential_expired",
+          capabilities: ["acp.codex"]
+        },
+        {
+          schemaVersion: "agent-endpoint/v1",
+          endpointId: "endpoint-offline",
+          profileId: "codex-acp",
+          agentId: "codex",
+          displayName: "Codex",
+          hostDisplayName: "LINANIML",
+          status: "unavailable",
+          unavailableReason: "host_offline",
+          capabilities: ["acp.codex"]
+        }
+      ]
+    });
+    expect(endpoints.map((endpoint) => endpoint.id)).toEqual(["remote:endpoint-offline"]);
+  });
+
   it("keeps capability-incompatible Endpoints visible and disabled", () => {
     const endpoints = buildAvailableAgentEndpoints({
       local: [],

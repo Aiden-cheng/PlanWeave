@@ -1,9 +1,11 @@
 import type { DesktopAutoRunState, DesktopGraphViewModel } from "@planweave-ai/runtime";
 import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
+import type { RemoteOperationObservation } from "@planweave-ai/collaboration-protocol/remote-run";
 import type { PlanWeaveCollaborationApi } from "../../shared/collaboration";
 import { bridge } from "../bridge";
 import type { AgentEndpointBlockSelection } from "./agentEndpointRunPlan";
 import { type LocalAutoRunObserver, waitForLocalAutoRunTerminal } from "./agentEndpointScopeRun";
+import { buildRemoteActionIdentity } from "./remoteRunViewModels";
 import { waitForRemoteOperationTerminal } from "./remoteTaskEndpointRun";
 
 type GraphTask = DesktopGraphViewModel["tasks"][number];
@@ -12,8 +14,110 @@ type RemoteOperationsApi = Pick<
   PlanWeaveCollaborationApi,
   | "dispatchCollaborationRemoteOperation"
   | "observeCollaborationRemoteOperation"
+  | "executeCollaborationRemoteOperationAction"
   | "onCollaborationObserverSignal"
 >;
+
+const TERMINAL_OPERATION_STATES = new Set<RemoteOperationObservation["state"]>([
+  "completed",
+  "failed",
+  "cancelled"
+]);
+
+function isInterruptedObservation(observation: RemoteOperationObservation): boolean {
+  return (
+    observation.state === "interrupted" ||
+    observation.attempt.status === "interrupted" ||
+    observation.runtime.status === "interrupted" ||
+    Boolean(observation.runtime.interruption)
+  );
+}
+
+function interruptionResumable(observation: RemoteOperationObservation): boolean {
+  const interruption = observation.runtime.interruption;
+  return Boolean(interruption?.resumable && interruption.recovery);
+}
+
+/**
+ * After Host reconnect / partial claim, a non-terminal operation still owns the block.
+ * A fresh dispatch collides with that ownership (human_remote_operation_conflict).
+ * Recover the same operation via resume/retry when interrupted; otherwise keep waiting
+ * on the existing operation (do not mint a second dispatch).
+ */
+async function recoverExistingRemoteOperation(input: {
+  api: RemoteOperationsApi;
+  observation: RemoteOperationObservation;
+  createId: () => string;
+}): Promise<RemoteOperationObservation> {
+  let observation = input.observation;
+  if (TERMINAL_OPERATION_STATES.has(observation.state)) {
+    return observation;
+  }
+  if (!isInterruptedObservation(observation)) {
+    return observation;
+  }
+  if (!observation.attempt.leaseId) {
+    throw new Error(
+      `remote_agent_block_interrupted_missing_lease:${observation.blockRef}:${observation.operationId}`
+    );
+  }
+
+  const suffix = input.createId();
+  if (interruptionResumable(observation)) {
+    const action = buildRemoteActionIdentity({
+      observation,
+      kind: "resume_same_session",
+      actionId: `action-resume-${suffix}`,
+      reason: "Resume remote attempt after Agent Host reconnection."
+    });
+    await input.api.executeCollaborationRemoteOperationAction({
+      operationId: observation.operationId,
+      action
+    });
+  } else {
+    const action = buildRemoteActionIdentity({
+      observation,
+      kind: "retry_new_attempt",
+      actionId: `action-retry-${suffix}`,
+      reason: "Retry remote attempt after Agent Host reconnection.",
+      newDispatchId: `dispatch-retry-${suffix}`,
+      newExecutionAttemptId: `attempt-retry-${suffix}`
+    });
+    await input.api.executeCollaborationRemoteOperationAction({
+      operationId: observation.operationId,
+      action
+    });
+  }
+
+  observation = await input.api.observeCollaborationRemoteOperation({
+    operationId: observation.operationId
+  });
+  if (isInterruptedObservation(observation) && !TERMINAL_OPERATION_STATES.has(observation.state)) {
+    throw new Error(
+      `remote_agent_block_recovery_still_interrupted:${observation.blockRef}:${observation.operationId}`
+    );
+  }
+  return observation;
+}
+
+async function waitForRemoteCompletion(input: {
+  api: RemoteOperationsApi;
+  observation: RemoteOperationObservation;
+  blockRef: string;
+  signal?: AbortSignal;
+  waitForRemoteTerminal: typeof waitForRemoteOperationTerminal;
+}): Promise<void> {
+  const terminal = await input.waitForRemoteTerminal({
+    api: input.api,
+    initial: input.observation,
+    signal: input.signal
+  });
+  if (terminal.state === "completed") return;
+  if (terminal.failure) {
+    throw new Error(`${terminal.failure.message} (${terminal.failure.code})`);
+  }
+  throw new Error(`remote_agent_block_${terminal.state}:${input.blockRef}`);
+}
 
 export function createAgentEndpointBlockExecutor(input: {
   activeProjectId: string;
@@ -34,6 +138,8 @@ export function createAgentEndpointBlockExecutor(input: {
   waitForLocalTerminal?: typeof waitForLocalAutoRunTerminal;
   waitForRemoteTerminal?: typeof waitForRemoteOperationTerminal;
 }): (task: GraphTask, block: GraphBlock, signal?: AbortSignal) => Promise<void> {
+  const waitForRemoteTerminal = input.waitForRemoteTerminal ?? waitForRemoteOperationTerminal;
+
   const executeLocal = async (selection: AgentEndpointBlockSelection, signal?: AbortSignal) => {
     const started = await input.startLocal({ kind: "block", blockRef: selection.block.ref });
     if (!started) throw new Error(`local_agent_run_not_started:${selection.block.ref}`);
@@ -51,21 +157,39 @@ export function createAgentEndpointBlockExecutor(input: {
 
   const executeRemote = async (selection: AgentEndpointBlockSelection, signal?: AbortSignal) => {
     const existingExecution = selection.block.remoteExecution;
-    if (existingExecution && existingExecution.phase !== "terminal") {
-      const existing = await input.api.observeCollaborationRemoteOperation({
-        operationId: existingExecution.identity.operationId
+    // Any non-terminal remote ownership still binds the block. Resolve that operation first —
+    // a fresh dispatch collides with the same ownership after Host reconnect / lease_lost.
+    const existingOperationId =
+      existingExecution && existingExecution.phase !== "terminal"
+        ? existingExecution.identity.operationId
+        : null;
+
+    if (existingOperationId) {
+      let observation = await input.api.observeCollaborationRemoteOperation({
+        operationId: existingOperationId
       });
-      const terminal = await (input.waitForRemoteTerminal ?? waitForRemoteOperationTerminal)({
+      observation = await recoverExistingRemoteOperation({
         api: input.api,
-        initial: existing,
-        signal
+        observation,
+        createId: input.createId
       });
-      if (terminal.state === "completed") return;
-      if (terminal.failure) {
-        throw new Error(`${terminal.failure.message} (${terminal.failure.code})`);
+      if (observation.state === "completed") return;
+      if (TERMINAL_OPERATION_STATES.has(observation.state)) {
+        if (observation.failure) {
+          throw new Error(`${observation.failure.message} (${observation.failure.code})`);
+        }
+        throw new Error(`remote_agent_block_${observation.state}:${selection.block.ref}`);
       }
-      throw new Error(`remote_agent_block_${terminal.state}:${selection.block.ref}`);
+      await waitForRemoteCompletion({
+        api: input.api,
+        observation,
+        blockRef: selection.block.ref,
+        signal,
+        waitForRemoteTerminal
+      });
+      return;
     }
+
     const remoteEndpointId = selection.endpoint.remoteEndpointId;
     if (!remoteEndpointId) throw new Error("collaboration_project_unavailable");
     const authority = await input.collaborationController.ensureWorkAuthority({
@@ -84,23 +208,20 @@ export function createAgentEndpointBlockExecutor(input: {
       expectedResponsibilityRevision: authority.revisions.responsibilityRevision,
       expectedReviewerRevision: authority.revisions.reviewerRevision
     });
-    const terminal = await (input.waitForRemoteTerminal ?? waitForRemoteOperationTerminal)({
+    await waitForRemoteCompletion({
       api: input.api,
-      initial: dispatched,
-      signal
+      observation: dispatched,
+      blockRef: selection.block.ref,
+      signal,
+      waitForRemoteTerminal
     });
-    if (terminal.state !== "completed") {
-      if (terminal.failure) {
-        throw new Error(`${terminal.failure.message} (${terminal.failure.code})`);
-      }
-      throw new Error(`remote_agent_block_${terminal.state}:${selection.block.ref}`);
-    }
   };
 
   const adapters = { local: executeLocal, remote: executeRemote };
   return async (_task, block, signal) => {
     const selection = input.selectionByBlockRef.get(block.ref);
     if (!selection) throw new Error(`agent_endpoint_selection_missing:${block.ref}`);
+    // Implementation and review both follow the Task Endpoint selection (local Auto Run or remote Host).
     await adapters[selection.endpoint.source](selection, signal);
   };
 }

@@ -240,6 +240,7 @@ export function TaskWorkspaceRoute({
   const composerProps = {
     liveStatus: controller.liveStatus,
     refresh: controller.refresh,
+    remoteConversation: controller.remoteConversation,
     runnerModel: controller.runnerModel,
     selectedRun: controller.selectedRun,
     workspace: controller.workspace

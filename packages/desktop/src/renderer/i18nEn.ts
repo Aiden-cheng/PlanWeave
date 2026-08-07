@@ -671,10 +671,23 @@ export const enCatalog = {
   hostAdminLocalHostNotRegistered: "This computer is not registered as an Agent Host.",
   hostAdminLocalHostUsesLocalServer:
     "PlanWeave Server is running on this computer. Local agents are already available and do not need Agent Host registration.",
-  hostAdminLocalHostReady:
-    "The Agent Host background service is running. Check the remote device list below for its Server connection status.",
+  hostAdminLocalHostReady: "This computer is registered as an Agent Host.",
   hostAdminLocalHostSetupRequired:
     "Registration completed, but Agent Host is not running on this computer.",
+  hostAdminLocalHostBackgroundLabel: "Background service",
+  hostAdminLocalHostBackgroundRunning: "Running",
+  hostAdminLocalHostBackgroundStopped: "Stopped",
+  hostAdminLocalHostBackgroundSetupRequired: "Setup required",
+  hostAdminLocalHostBackgroundNotInstalled: "Not installed",
+  hostAdminLocalHostBackgroundUnknown: "Unknown",
+  hostAdminLocalHostServerLabel: "Server connection",
+  hostAdminLocalHostServerConnected: "Connected",
+  hostAdminLocalHostServerConnecting: "Connecting",
+  hostAdminLocalHostServerReconnecting: "Reconnecting",
+  hostAdminLocalHostServerDegraded: "Degraded",
+  hostAdminLocalHostServerAuthFailed: "Authentication failed",
+  hostAdminLocalHostServerStopped: "Offline",
+  hostAdminLocalHostServerUnknown: "Unknown",
   hostAdminStartLocalHost: "Start Agent Host",
   hostAdminRestartLocalHost: "Restart Agent Host",
   hostAdminLocalHostDetected: "detected",
@@ -956,6 +969,12 @@ export const enCatalog = {
   taskWorkspaceLoadingMoreRuns: "Loading older runs…",
   taskWorkspaceNoConversation: "Select a run to view its conversation.",
   taskWorkspaceRemoteAcpLive: "Live conversation from the remote ACP Agent",
+  taskWorkspaceRemoteAcpTerminal: "Remote ACP Agent run",
+  taskWorkspaceRemoteAcpEmpty: "No ACP events were recorded for this remote attempt yet.",
+  taskWorkspaceRemoteAcpComposerLive:
+    "This run is owned by a remote ACP Agent. Follow the live conversation above; local follow-up prompts are unavailable until the remote attempt finishes.",
+  taskWorkspaceRemoteAcpComposerClosed:
+    "This remote ACP attempt is no longer active. Use the canvas exception details or start a new remote attempt after resetting the Block.",
   taskWorkspaceNoInspector: "Select a run or Block to inspect its details.",
   taskWorkspaceNoTask: "No Task Workspace navigation target is available.",
   taskWorkspaceLocale: "en-US",

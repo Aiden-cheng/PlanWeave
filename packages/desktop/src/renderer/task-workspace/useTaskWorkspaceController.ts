@@ -41,6 +41,14 @@ import {
 } from "./taskWorkspaceSharedProjection";
 import { useTaskWorkspaceExecutorActions } from "./useTaskWorkspaceExecutorActions";
 import { useRemoteTaskWorkspaceConversation } from "./useRemoteTaskWorkspaceConversation";
+import {
+  agentFamilyFromExecutorName,
+  diskSelectedRecordId,
+  isRemoteLiveRecordId,
+  remoteLiveRecordId,
+  withRemoteLiveTimelineRuns,
+  type RemoteLiveAgentHint
+} from "./remoteLiveRun";
 
 type TaskWorkspaceApi = Pick<
   DesktopBridgeApi,
@@ -134,8 +142,42 @@ function initialRunForNavigation(
   }
   if (navigation.blockRef) {
     const block = workspace.blocks.find((candidate) => candidate.ref === navigation.blockRef);
-    const item = block?.runs.find((candidate) => candidate.active) ?? block?.runs.at(-1);
+    // Prefer live remote attempt over the previous completed local run.
+    const item =
+      block?.runs.find(
+        (candidate) => candidate.active && isRemoteLiveRecordId(candidate.run.record.recordId)
+      ) ??
+      block?.runs.find((candidate) => candidate.active) ??
+      block?.runs.at(-1);
     return block && item ? { block, item } : null;
+  }
+  // Task-level open: still prefer any in-flight remote live row.
+  for (const block of workspace.blocks) {
+    const live = block.runs.find(
+      (candidate) => candidate.active && isRemoteLiveRecordId(candidate.run.record.recordId)
+    );
+    if (live) return { block, item: live };
+  }
+  return null;
+}
+
+function preferredRemoteLiveSelection(
+  workspace: TaskWorkspace,
+  preferredBlockRef: string | null | undefined
+): { blockRef: string; recordId: string } | null {
+  const ordered = preferredBlockRef
+    ? [
+        ...workspace.blocks.filter((block) => block.ref === preferredBlockRef),
+        ...workspace.blocks.filter((block) => block.ref !== preferredBlockRef)
+      ]
+    : workspace.blocks;
+  for (const block of ordered) {
+    const remote = block.remoteExecution;
+    if (!remote || remote.phase === "terminal") continue;
+    return {
+      blockRef: block.ref,
+      recordId: remoteLiveRecordId(block.ref, remote.identity.operationId)
+    };
   }
   return null;
 }
@@ -251,7 +293,8 @@ export function useTaskWorkspaceController(options: {
       api.getTaskWorkspace({
         ...canvasRef,
         taskId: requestedNavigation.taskId,
-        selectedRecordId: requestedNavigation.recordId ?? null
+        // Synthetic remote-live ids are not on disk — never ask Runtime to resolve them.
+        selectedRecordId: diskSelectedRecordId(requestedNavigation.recordId)
       }),
       api.listTaskWorkspaceRuns({
         ...canvasRef,
@@ -295,12 +338,27 @@ export function useTaskWorkspaceController(options: {
           });
           return;
         }
-        const selectedHint = currentNavigation.recordId ?? header.selectedRecordId;
+        const selectedHint = diskSelectedRecordId(currentNavigation.recordId) ?? header.selectedRecordId;
         const pageItems: TaskWorkspaceRunListItem[] = runsPage.items.map((item) => ({
           ...item,
           selected: selectedHint !== null && item.run.record.recordId === selectedHint
         }));
-        const workspace = composeTaskWorkspaceRuns(header, pageItems);
+        const composed = composeTaskWorkspaceRuns(header, pageItems);
+        const agentHints = new Map<string, RemoteLiveAgentHint>();
+        for (const block of composed.blocks) {
+          const graphBlock = graphTask.blocks.find((candidate) => candidate.ref === block.ref);
+          const executorName =
+            block.executor ??
+            graphBlock?.executor ??
+            composed.task.executor ??
+            graphTask.executorLabel ??
+            null;
+          agentHints.set(block.ref, {
+            executorName,
+            agentId: agentFamilyFromExecutorName(executorName)
+          });
+        }
+        const workspace = withRemoteLiveTimelineRuns(composed, agentHints);
         runItemsRef.current = pageItems;
         nextCursorRef.current = runsPage.nextCursor;
         setHasMoreRuns(runsPage.nextCursor !== null);
@@ -308,9 +366,50 @@ export function useTaskWorkspaceController(options: {
         setLoadingMoreRuns(false);
         loadingMoreRef.current = false;
         const selected = initialRunForNavigation(workspace, currentNavigation);
-        // Missing selection on the first page is OK when navigating to an older record;
-        // getTaskWorkspaceRunDetail validates ownership when the record is selected.
-        if (!currentNavigation.recordId && selected && !overviewSelectedRef.current) {
+        const liveSelection = preferredRemoteLiveSelection(
+          workspace,
+          currentNavigation.blockRef
+        );
+        // Prefer the live remote attempt over a stale historical record while remote is active.
+        if (
+          liveSelection &&
+          !overviewSelectedRef.current &&
+          currentNavigation.recordId !== liveSelection.recordId
+        ) {
+          history.replaceTaskWorkspaceTarget(
+            taskWorkspaceNavigationTargetSchema.parse({
+              projectRoot: currentNavigation.projectRoot,
+              canvasId: currentNavigation.canvasId,
+              taskId: currentNavigation.taskId,
+              blockRef: liveSelection.blockRef,
+              recordId: liveSelection.recordId
+            })
+          );
+        } else if (
+          isRemoteLiveRecordId(currentNavigation.recordId) &&
+          !liveSelection &&
+          !overviewSelectedRef.current
+        ) {
+          // Remote finished: leave the synthetic id so reload does not hit disk index.
+          const blockRef = currentNavigation.blockRef;
+          const block = blockRef
+            ? workspace.blocks.find((candidate) => candidate.ref === blockRef)
+            : null;
+          const latestReal = block?.runs
+            .filter((item) => !isRemoteLiveRecordId(item.run.record.recordId))
+            .at(-1);
+          history.replaceTaskWorkspaceTarget(
+            taskWorkspaceNavigationTargetSchema.parse({
+              projectRoot: currentNavigation.projectRoot,
+              canvasId: currentNavigation.canvasId,
+              taskId: currentNavigation.taskId,
+              blockRef: latestReal?.run.record.ref ?? blockRef ?? undefined,
+              recordId: latestReal?.run.record.recordId ?? undefined
+            })
+          );
+        } else if (!currentNavigation.recordId && selected && !overviewSelectedRef.current) {
+          // Missing selection on the first page is OK when navigating to an older record;
+          // getTaskWorkspaceRunDetail validates ownership when the record is selected.
           history.replaceTaskWorkspaceTarget(
             taskWorkspaceNavigationTargetSchema.parse({
               projectRoot: currentNavigation.projectRoot,
@@ -365,6 +464,8 @@ export function useTaskWorkspaceController(options: {
         : null,
     [loadedWorkspace, sharedCanvas?.projection]
   );
+  const workspaceRef = useRef(workspace);
+  workspaceRef.current = workspace;
   const packageExecutorNames = workspaceLoad.key === key ? workspaceLoad.packageExecutorNames : [];
   const routedSelectedRun = useMemo(() => {
     if (!workspace || !navigation?.blockRef || !navigation.recordId) {
@@ -440,6 +541,22 @@ export function useTaskWorkspaceController(options: {
       setRecordLoad(idleRecordLoad);
       return;
     }
+    // Synthetic remote-live rows are not persisted on disk; project from the live workspace only.
+    if (isRemoteLiveRecordId(selectedRecordKey)) {
+      const found =
+        selectedBlockRef && workspaceRef.current
+          ? findRun(workspaceRef.current, selectedBlockRef, selectedRecordKey)
+          : null;
+      setRecordLoad({
+        blockRef: found?.block.ref ?? (selectedBlockRef || null),
+        error: found ? null : "Remote live attempt is no longer active.",
+        item: found?.item ?? null,
+        key: selectedRecordKey,
+        record: null,
+        status: found ? "ready" : "error"
+      });
+      return;
+    }
     const cacheKey = taskWorkspaceRecordKey(key, selectedRecordKey);
     const cachedLoad = recordLoads.current.get(cacheKey) ?? null;
     setRecordLoad(
@@ -498,7 +615,9 @@ export function useTaskWorkspaceController(options: {
             }
             return {
               ...current,
-              workspace: composeTaskWorkspaceRuns(current.workspace, runItemsRef.current)
+              workspace: withRemoteLiveTimelineRuns(
+                composeTaskWorkspaceRuns(current.workspace, runItemsRef.current)
+              )
             };
           });
         }
@@ -534,7 +653,9 @@ export function useTaskWorkspaceController(options: {
     navigationTaskId,
     overviewSelected,
     selectedBlockRef,
-    selectedRecordKey
+    selectedRecordKey,
+    // Re-project synthetic remote-live rows when workspace remoteExecution changes.
+    workspace?.blocks.map((block) => block.remoteExecution?.identity.operationId).join("|") ?? ""
   ]);
 
   const selectedRecord =
@@ -708,7 +829,9 @@ export function useTaskWorkspaceController(options: {
         }
         return {
           ...current,
-          workspace: composeTaskWorkspaceRuns(current.workspace, runItemsRef.current)
+          workspace: withRemoteLiveTimelineRuns(
+            composeTaskWorkspaceRuns(current.workspace, runItemsRef.current)
+          )
         };
       });
     } catch (error: unknown) {

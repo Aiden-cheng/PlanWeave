@@ -120,23 +120,42 @@ function RemoteAcpRunConversation({
   conversation: NonNullable<TaskWorkspaceConversationSlotProps["remoteConversation"]>;
   t: ReturnType<typeof createTranslator>;
 }) {
+  const terminal =
+    conversation.state === "failed" ||
+    conversation.state === "cancelled" ||
+    conversation.state === "completed";
   return (
     <section
       className="flex h-full min-h-0 flex-col overflow-hidden"
       data-operation-id={conversation.operationId}
       data-testid="task-workspace-remote-acp-conversation"
     >
-      <div className="shrink-0 px-5 pt-5">
-        <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-          {t("taskWorkspaceRemoteAcpLive")} · {conversation.state}
+      <div className="shrink-0 space-y-3 px-5 pt-5">
+        <div
+          className={
+            conversation.error || conversation.state === "failed"
+              ? "rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+              : "rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground"
+          }
+        >
+          {terminal
+            ? `${t("taskWorkspaceRemoteAcpTerminal")} · ${conversation.state}`
+            : `${t("taskWorkspaceRemoteAcpLive")} · ${conversation.state}`}
+          <div className="mt-1 font-mono text-[11px] opacity-80">
+            operationId: {conversation.operationId}
+          </div>
         </div>
         {conversation.error ? (
           <p
-            className="mt-3 rounded-md border border-destructive/40 p-3 text-sm text-destructive"
+            className="rounded-md border border-destructive/40 p-3 text-sm text-destructive"
             role="alert"
+            data-testid="task-workspace-remote-acp-error"
           >
             {conversation.error}
           </p>
+        ) : null}
+        {conversation.timeline.length === 0 && !conversation.error ? (
+          <p className="text-sm text-muted-foreground">{t("taskWorkspaceRemoteAcpEmpty")}</p>
         ) : null}
       </div>
       <section

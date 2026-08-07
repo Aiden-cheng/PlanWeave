@@ -1,14 +1,18 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { resolveAgentHostDefaultPaths } from "@planweave-ai/agent-host";
+import {
+  resolveAgentHostDefaultPaths,
+  writeHostConnectionStatus
+} from "@planweave-ai/agent-host";
 import { DesktopLocalAgentHostProvisioner } from "../main/operatorControl/localAgentHostProvisioner.js";
 import { LocalAgentHostRegistrationStore } from "../main/operatorControl/localAgentHostRegistrationStore.js";
 
 const roots: string[] = [];
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -83,6 +87,7 @@ describe("Desktop local Agent Host provisioner", () => {
         platform: "windows-user-startup"
       }),
       listAgents: vi.fn().mockResolvedValue(agents),
+      requireUsableCredential: vi.fn().mockResolvedValue(undefined),
       backgroundStatus: vi
         .fn()
         .mockResolvedValue({ state: "running", platform: "windows-user-startup" })
@@ -155,6 +160,7 @@ describe("Desktop local Agent Host provisioner", () => {
         platform: "windows-user-startup"
       }),
       listAgents: vi.fn().mockResolvedValue(agents),
+      requireUsableCredential: vi.fn().mockResolvedValue(undefined),
       backgroundStatus: vi.fn().mockResolvedValue({
         state: "running",
         platform: "windows-user-startup"
@@ -211,7 +217,8 @@ describe("Desktop local Agent Host provisioner", () => {
         state: "running",
         platform: "windows-user-startup"
       }),
-      listAgents: vi.fn().mockResolvedValue(agents)
+      listAgents: vi.fn().mockResolvedValue(agents),
+      requireUsableCredential: vi.fn().mockResolvedValue(undefined)
     };
     const launcher = {
       executablePath: "C:\\Program Files\\PlanWeave\\PlanWeave.exe",
@@ -263,6 +270,7 @@ describe("Desktop local Agent Host provisioner", () => {
         platform: "windows-user-startup"
       }),
       listAgents: vi.fn().mockResolvedValue(agents),
+      requireUsableCredential: vi.fn().mockResolvedValue(undefined),
       backgroundStatus: vi
         .fn()
         .mockResolvedValue({ state: "running", platform: "windows-user-startup" })
@@ -309,6 +317,7 @@ describe("Desktop local Agent Host provisioner", () => {
     await registrations.upsert("workspace-status", "workspace-status");
     const operator = {
       listAgents: vi.fn().mockResolvedValue([]),
+      requireUsableCredential: vi.fn().mockResolvedValue(undefined),
       backgroundStatus: vi.fn().mockRejectedValue(new Error("private scheduled task command"))
     };
     const provisioner = new DesktopLocalAgentHostProvisioner({
@@ -333,6 +342,7 @@ describe("Desktop local Agent Host provisioner", () => {
     });
     const operator = {
       listAgents: vi.fn().mockRejectedValue(missingConfigError),
+      requireUsableCredential: vi.fn(),
       backgroundStatus: vi.fn()
     };
     const provisioner = new DesktopLocalAgentHostProvisioner({
@@ -346,7 +356,52 @@ describe("Desktop local Agent Host provisioner", () => {
       supported: true,
       state: "not_registered"
     });
+    expect(operator.requireUsableCredential).not.toHaveBeenCalled();
     expect(operator.backgroundStatus).not.toHaveBeenCalled();
+    await expect(registrations.get("workspace-orphaned")).resolves.toBeNull();
+  });
+
+  it("restores not_registered when stored Host credentials are unusable", async () => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-local-agent-host-credential-"));
+    roots.push(root);
+    const registrations = new LocalAgentHostRegistrationStore(join(root, "registrations.json"));
+    await registrations.upsert("profile-a", "workspace-credential");
+    const configPath = resolveAgentHostDefaultPaths("workspace-credential").configPath;
+    const operator = {
+      listAgents: vi.fn().mockResolvedValue([]),
+      requireUsableCredential: vi
+        .fn()
+        .mockRejectedValue(new Error("agent_host_credential_unavailable")),
+      backgroundStatus: vi.fn(),
+      installBackground: vi
+        .fn()
+        .mockRejectedValue(new Error("agent_host_credential_unavailable"))
+    };
+    const provisioner = new DesktopLocalAgentHostProvisioner({
+      platform: "win32",
+      launcher: { executablePath: "C:\\PlanWeave.exe", fixedArgs: ["--agent-host-service"] },
+      operator: operator as never,
+      registrations
+    });
+
+    await expect(provisioner.status("profile-a")).resolves.toMatchObject({
+      supported: true,
+      state: "not_registered"
+    });
+    expect(operator.requireUsableCredential).toHaveBeenCalledWith(configPath);
+    expect(operator.backgroundStatus).not.toHaveBeenCalled();
+    await expect(registrations.get("profile-a")).resolves.toBeNull();
+
+    await registrations.upsert("profile-a", "workspace-credential");
+    await expect(provisioner.repair("profile-a")).resolves.toMatchObject({
+      supported: true,
+      state: "not_registered"
+    });
+    expect(operator.installBackground).toHaveBeenCalledWith(configPath, {
+      executablePath: "C:\\PlanWeave.exe",
+      fixedArgs: ["--agent-host-service"]
+    });
+    await expect(registrations.get("profile-a")).resolves.toBeNull();
   });
 
   it("preserves an existing Agent Host error code", async () => {
@@ -363,4 +418,136 @@ describe("Desktop local Agent Host provisioner", () => {
       "agent_host_enrollment_rejected"
     );
   });
+
+  it("reports Server connection from the Host connection-status file while the process is running", async () => {
+    const home = await mkdtemp(join(tmpdir(), "planweave-local-agent-host-connection-home-"));
+    roots.push(home);
+    vi.stubEnv("HOME", home);
+    const workspaceId = "workspace-connection";
+    const paths = resolveAgentHostDefaultPaths(workspaceId, home);
+    await mkdir(paths.dataDirectory, { recursive: true });
+    await mkdir(paths.workspaceRoot, { recursive: true });
+    await writeFile(
+      paths.configPath,
+      `${JSON.stringify(
+        {
+          version: "agent-host-config/v1",
+          coordinator: {
+            url: "https://mac-server.example",
+            allowInsecureDevelopment: false
+          },
+          dataDirectory: paths.dataDirectory,
+          workspaceRoot: paths.workspaceRoot,
+          host: { displayName: "Win Host", capacity: 1, capabilities: [] },
+          workspaces: [{ id: workspaceId, path: workspaceId }],
+          agentProfiles: []
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await writeHostConnectionStatus(
+      paths.dataDirectory,
+      { state: "connected", connectedAt: "2030-01-01T00:00:10.000Z" },
+      new Date("2030-01-01T00:00:11.000Z")
+    );
+
+    const registrations = new LocalAgentHostRegistrationStore(join(home, "registrations.json"));
+    await registrations.upsert("profile-a", workspaceId);
+    const agents = [
+      {
+        profileId: "codex-acp",
+        agentId: "codex",
+        displayName: "Codex",
+        detected: true,
+        exposed: true,
+        ready: true
+      }
+    ];
+    const operator = {
+      listAgents: vi.fn().mockResolvedValue(agents),
+      requireUsableCredential: vi.fn().mockResolvedValue(undefined),
+      backgroundStatus: vi
+        .fn()
+        .mockResolvedValue({ state: "running", platform: "windows-user-startup" })
+    };
+    const provisioner = new DesktopLocalAgentHostProvisioner({
+      platform: "win32",
+      launcher: { executablePath: "C:\\PlanWeave.exe", fixedArgs: ["--agent-host-service"] },
+      operator: operator as never,
+      registrations
+    });
+
+    await expect(provisioner.status("profile-a")).resolves.toMatchObject({
+      state: "ready",
+      background: "running",
+      serverConnection: {
+        state: "connected",
+        connectedAt: "2030-01-01T00:00:10.000Z",
+        serverOrigin: "https://mac-server.example"
+      }
+    });
+  });
+
+  it("forces Server connection offline when the background process is not running", async () => {
+    const home = await mkdtemp(join(tmpdir(), "planweave-local-agent-host-offline-home-"));
+    roots.push(home);
+    vi.stubEnv("HOME", home);
+    const workspaceId = "workspace-offline";
+    const paths = resolveAgentHostDefaultPaths(workspaceId, home);
+    await mkdir(paths.dataDirectory, { recursive: true });
+    await mkdir(paths.workspaceRoot, { recursive: true });
+    await writeFile(
+      paths.configPath,
+      `${JSON.stringify(
+        {
+          version: "agent-host-config/v1",
+          coordinator: {
+            url: "https://mac-server.example",
+            allowInsecureDevelopment: false
+          },
+          dataDirectory: paths.dataDirectory,
+          workspaceRoot: paths.workspaceRoot,
+          host: { displayName: "Win Host", capacity: 1, capabilities: [] },
+          workspaces: [{ id: workspaceId, path: workspaceId }],
+          agentProfiles: []
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await writeHostConnectionStatus(paths.dataDirectory, {
+      state: "connected",
+      connectedAt: "2030-01-01T00:00:10.000Z"
+    });
+
+    const registrations = new LocalAgentHostRegistrationStore(join(home, "registrations.json"));
+    await registrations.upsert("profile-a", workspaceId);
+    const operator = {
+      listAgents: vi.fn().mockResolvedValue([]),
+      requireUsableCredential: vi.fn().mockResolvedValue(undefined),
+      backgroundStatus: vi
+        .fn()
+        .mockResolvedValue({ state: "stopped", platform: "windows-user-startup" })
+    };
+    const provisioner = new DesktopLocalAgentHostProvisioner({
+      platform: "win32",
+      launcher: { executablePath: "C:\\PlanWeave.exe", fixedArgs: ["--agent-host-service"] },
+      operator: operator as never,
+      registrations
+    });
+
+    await expect(provisioner.status("profile-a")).resolves.toMatchObject({
+      state: "background_setup_required",
+      background: "stopped",
+      serverConnection: {
+        state: "stopped",
+        serverOrigin: "https://mac-server.example"
+      }
+    });
+  });
 });
+
+

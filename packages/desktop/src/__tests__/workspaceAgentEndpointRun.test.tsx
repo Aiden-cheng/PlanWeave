@@ -162,6 +162,10 @@ function renderRun(input?: {
 }) {
   const dispatch = vi.fn(async () => operation("running"));
   const observe = vi.fn(async () => operation("running"));
+  const executeAction = vi.fn(async () => ({
+    request: { kind: "retry_new_attempt" },
+    state: "settled"
+  }));
   const ensureWorkAuthority = vi.fn(async () => ({
     revisions: { responsibilityRevision: 7, reviewerRevision: 11 }
   }));
@@ -230,6 +234,7 @@ function renderRun(input?: {
       api: {
         dispatchCollaborationRemoteOperation: dispatch,
         observeCollaborationRemoteOperation: observe,
+        executeCollaborationRemoteOperationAction: executeAction,
         onCollaborationObserverSignal: vi.fn(() => () => undefined),
         readCollaborationCanvasRuntimeStatus: readRuntimeStatus
       },
@@ -247,6 +252,7 @@ function renderRun(input?: {
     ...hook,
     dispatch,
     observe,
+    executeAction,
     ensureWorkAuthority,
     readRuntimeStatus,
     setError,
@@ -270,6 +276,146 @@ describe("workspace Agent Endpoint routing", () => {
     );
     expect(waitForTerminal).toHaveBeenCalledTimes(1);
     expect(startLocal).not.toHaveBeenCalled();
+    expect(setError).not.toHaveBeenCalled();
+  });
+
+  it("retries an interrupted remote attempt instead of dispatching a conflicting operation", async () => {
+    const graphWithInterruptedOwnership: DesktopGraphViewModel = {
+      ...graph,
+      tasks: graph.tasks.map((task) => ({
+        ...task,
+        blocks: task.blocks.map((block) => ({
+          ...block,
+          status: "in_progress",
+          remoteExecution: {
+            identity: { operationId: "operation-interrupted" },
+            phase: "active",
+            status: "interrupted",
+            actionRequired: true,
+            source: { revision: "source-1", graphFingerprint: "fingerprint-1" },
+            dispatchAttempt: {
+              dispatchId: "dispatch-interrupted",
+              executionAttemptId: "attempt-interrupted"
+            }
+          }
+        }))
+      }))
+    };
+    const interrupted = {
+      ...operation("interrupted"),
+      operationId: "operation-interrupted",
+      dispatchId: "dispatch-interrupted",
+      executionAttemptId: "attempt-interrupted",
+      attempt: {
+        executionAttemptId: "attempt-interrupted",
+        dispatchId: "dispatch-interrupted",
+        status: "interrupted" as const,
+        leaseId: "lease-interrupted",
+        stateVersion: 3
+      },
+      runtime: {
+        ref: "T-001#B-001",
+        status: "interrupted" as const,
+        interruption: { resumable: false as const }
+      }
+    };
+    const recovered = {
+      ...operation("running"),
+      operationId: "operation-interrupted",
+      dispatchId: "dispatch-retry-operation-1",
+      executionAttemptId: "attempt-retry-operation-1"
+    };
+    const { result, dispatch, observe, executeAction, waitForTerminal, setError } = renderRun({
+      graph: graphWithInterruptedOwnership
+    });
+    observe.mockResolvedValueOnce(interrupted).mockResolvedValue(recovered);
+
+    await act(() => result.current({ kind: "block", blockRef: "T-001#B-001" }));
+
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(observe).toHaveBeenCalledWith({ operationId: "operation-interrupted" });
+    expect(executeAction).toHaveBeenCalledWith({
+      operationId: "operation-interrupted",
+      action: expect.objectContaining({
+        kind: "retry_new_attempt",
+        priorLeaseId: "lease-interrupted",
+        newDispatchId: "dispatch-retry-operation-1",
+        newExecutionAttemptId: "attempt-retry-operation-1"
+      })
+    });
+    expect(waitForTerminal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initial: expect.objectContaining({ operationId: "operation-interrupted" })
+      })
+    );
+    expect(setError).not.toHaveBeenCalled();
+  });
+
+  it("resumes a resumable interrupted remote attempt after Host reconnect", async () => {
+    const graphWithInterruptedOwnership: DesktopGraphViewModel = {
+      ...graph,
+      tasks: graph.tasks.map((task) => ({
+        ...task,
+        blocks: task.blocks.map((block) => ({
+          ...block,
+          status: "in_progress",
+          remoteExecution: {
+            identity: { operationId: "operation-resume" },
+            phase: "active",
+            status: "interrupted",
+            actionRequired: true,
+            source: { revision: "source-1", graphFingerprint: "fingerprint-1" },
+            dispatchAttempt: {
+              dispatchId: "dispatch-resume",
+              executionAttemptId: "attempt-resume"
+            }
+          }
+        }))
+      }))
+    };
+    const interrupted = {
+      ...operation("interrupted"),
+      operationId: "operation-resume",
+      dispatchId: "dispatch-resume",
+      executionAttemptId: "attempt-resume",
+      attempt: {
+        executionAttemptId: "attempt-resume",
+        dispatchId: "dispatch-resume",
+        status: "interrupted" as const,
+        leaseId: "lease-resume",
+        stateVersion: 2
+      },
+      runtime: {
+        ref: "T-001#B-001",
+        status: "interrupted" as const,
+        interruption: {
+          resumable: true as const,
+          recovery: { acpSessionId: "session-1", recoveryId: "recovery-1" }
+        }
+      }
+    };
+    const resumed = {
+      ...operation("running"),
+      operationId: "operation-resume",
+      dispatchId: "dispatch-resume",
+      executionAttemptId: "attempt-resume"
+    };
+    const { result, dispatch, observe, executeAction, waitForTerminal, setError } = renderRun({
+      graph: graphWithInterruptedOwnership
+    });
+    observe.mockResolvedValueOnce(interrupted).mockResolvedValue(resumed);
+
+    await act(() => result.current({ kind: "block", blockRef: "T-001#B-001" }));
+
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(executeAction).toHaveBeenCalledWith({
+      operationId: "operation-resume",
+      action: expect.objectContaining({
+        kind: "resume_same_session",
+        priorLeaseId: "lease-resume"
+      })
+    });
+    expect(waitForTerminal).toHaveBeenCalledTimes(1);
     expect(setError).not.toHaveBeenCalled();
   });
 

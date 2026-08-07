@@ -179,7 +179,7 @@ export type TaskWorkspaceInspectorSlotProps = Pick<
 
 export type TaskWorkspaceComposerSlotProps = Pick<
   TaskWorkspaceController,
-  "liveStatus" | "refresh" | "runnerModel" | "selectedRun"
+  "liveStatus" | "refresh" | "remoteConversation" | "runnerModel" | "selectedRun"
 > & {
   workspace: TaskWorkspace;
 };

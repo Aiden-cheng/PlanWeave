@@ -13,6 +13,18 @@ export type AvailableAgentEndpoint = {
   remoteEndpointId?: string;
 };
 
+/** Hosts that can never accept work again — omit from the executor picker entirely. */
+const REMOTE_ENDPOINT_TERMINAL_HOST_REASONS = new Set([
+  "host_revoked",
+  "host_credential_expired"
+]);
+
+export function isSelectableRemoteAgentEndpoint(endpoint: RemoteAgentEndpoint): boolean {
+  if (endpoint.status === "available") return true;
+  const reason = endpoint.unavailableReason;
+  return reason === undefined || !REMOTE_ENDPOINT_TERMINAL_HOST_REASONS.has(reason);
+}
+
 export type LogicalAgentEndpointInput = {
   executorName: string;
   profileId: string;
@@ -102,33 +114,35 @@ export function buildAvailableAgentEndpoints(input: {
       localExecutorName: endpoint.executorName
     };
   });
-  const remote = input.remote.map((endpoint): AvailableAgentEndpoint => {
-    const profileCompatible =
-      input.requiredProfileId !== null &&
-      (endpoint.profileId === input.requiredProfileId ||
-        (input.requiredAgentId !== null &&
-          input.requiredAgentId !== undefined &&
-          endpoint.agentId === input.requiredAgentId));
-    const capabilitiesCompatible = input.requiredCapabilities.every((capability) =>
-      endpoint.capabilities.includes(capability)
-    );
-    return {
-      id: `remote:${endpoint.endpointId}`,
-      source: "remote",
-      executorName: input.requiredProfileId ?? endpoint.profileId,
-      displayName: endpoint.displayName,
-      locationName: endpoint.hostDisplayName,
-      capabilities: [...endpoint.capabilities],
-      available: endpoint.status === "available" && profileCompatible && capabilitiesCompatible,
-      unavailableReason:
-        endpoint.status === "unavailable"
-          ? (endpoint.unavailableReason ?? "agent_endpoint_unavailable")
-          : profileCompatible && capabilitiesCompatible
-            ? null
-            : "agent_endpoint_incompatible",
-      remoteEndpointId: endpoint.endpointId
-    };
-  });
+  const remote = input.remote
+    .filter(isSelectableRemoteAgentEndpoint)
+    .map((endpoint): AvailableAgentEndpoint => {
+      const profileCompatible =
+        input.requiredProfileId !== null &&
+        (endpoint.profileId === input.requiredProfileId ||
+          (input.requiredAgentId !== null &&
+            input.requiredAgentId !== undefined &&
+            endpoint.agentId === input.requiredAgentId));
+      const capabilitiesCompatible = input.requiredCapabilities.every((capability) =>
+        endpoint.capabilities.includes(capability)
+      );
+      return {
+        id: `remote:${endpoint.endpointId}`,
+        source: "remote",
+        executorName: input.requiredProfileId ?? endpoint.profileId,
+        displayName: endpoint.displayName,
+        locationName: endpoint.hostDisplayName,
+        capabilities: [...endpoint.capabilities],
+        available: endpoint.status === "available" && profileCompatible && capabilitiesCompatible,
+        unavailableReason:
+          endpoint.status === "unavailable"
+            ? (endpoint.unavailableReason ?? "agent_endpoint_unavailable")
+            : profileCompatible && capabilitiesCompatible
+              ? null
+              : "agent_endpoint_incompatible",
+        remoteEndpointId: endpoint.endpointId
+      };
+    });
   return [...local, ...remote];
 }
 
@@ -165,25 +179,27 @@ export function buildAgentEndpointCatalog(input: {
       localExecutorName: executor.executorName
     })
   );
-  const remote = input.remote.map((endpoint): AvailableAgentEndpoint => {
-    const logicalExecutor = remoteLogicalExecutor(endpoint, input.logicalExecutors);
-    return {
-      id: `remote:${endpoint.endpointId}`,
-      source: "remote",
-      executorName: logicalExecutor?.executorName ?? endpoint.agentId,
-      displayName: endpoint.displayName,
-      locationName: endpoint.hostDisplayName,
-      available: endpoint.status === "available" && logicalExecutor !== null,
-      unavailableReason:
-        endpoint.status === "available"
-          ? logicalExecutor
-            ? null
-            : "agent_endpoint_incompatible"
-          : (endpoint.unavailableReason ?? "agent_endpoint_unavailable"),
-      capabilities: [...endpoint.capabilities],
-      remoteEndpointId: endpoint.endpointId
-    };
-  });
+  const remote = input.remote
+    .filter(isSelectableRemoteAgentEndpoint)
+    .map((endpoint): AvailableAgentEndpoint => {
+      const logicalExecutor = remoteLogicalExecutor(endpoint, input.logicalExecutors);
+      return {
+        id: `remote:${endpoint.endpointId}`,
+        source: "remote",
+        executorName: logicalExecutor?.executorName ?? endpoint.agentId,
+        displayName: endpoint.displayName,
+        locationName: endpoint.hostDisplayName,
+        available: endpoint.status === "available" && logicalExecutor !== null,
+        unavailableReason:
+          endpoint.status === "available"
+            ? logicalExecutor
+              ? null
+              : "agent_endpoint_incompatible"
+            : (endpoint.unavailableReason ?? "agent_endpoint_unavailable"),
+        capabilities: [...endpoint.capabilities],
+        remoteEndpointId: endpoint.endpointId
+      };
+    });
   return [...local, ...remote];
 }
 
