@@ -94,14 +94,17 @@ describe("remote ownership transitions", () => {
     ).toBe(active);
   });
 
-  it("rejects review ownership, local retrofit, foreign operations, and activation mismatch", () => {
-    expect(() =>
+  it("accepts review ownership and rejects local retrofit, foreign operations, and activation mismatch", () => {
+    expect(
       prepareRemoteBlockOwnership({
         blockType: "review",
         blockState: { status: "ready" },
         ownership: source
       })
-    ).toThrow(RemoteOwnershipConflictError);
+    ).toEqual({
+      status: "in_progress",
+      remoteOwnership: { phase: "preparing", ...source }
+    });
     expect(() => prepare({ status: "in_progress" })).toThrow(/cannot be retroactively/i);
 
     const prepared = prepare();

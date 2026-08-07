@@ -415,11 +415,11 @@ describe("remote block runtime inspection", () => {
     }
   });
 
-  it("rejects review and locally in-progress blocks", async () => {
+  it("rejects review before implementation completes and rejects locally in-progress blocks", async () => {
     const reviewWorkspace = await createTestWorkspace(remoteManifest());
     const reviewPort = createRemoteBlockRuntimePort({ projectRoot: reviewWorkspace.root });
     await expect(reviewPort.inspect({ ref: "T-001#R-001" })).rejects.toMatchObject({
-      code: "remote_block_not_implementation"
+      code: "remote_block_not_dispatchable"
     });
 
     const localWorkspace = await createTestWorkspace(remoteManifest());

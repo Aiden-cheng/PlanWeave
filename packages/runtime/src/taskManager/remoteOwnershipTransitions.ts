@@ -13,6 +13,8 @@ import type { NormalizedFailure } from "@planweave-ai/agent-host-protocol";
 import type { BlockState, BlockStatus, BlockType } from "../types.js";
 
 export type RemoteOwnershipConflictCode =
+  | "remote_ownership_requires_executable_block"
+  /** @deprecated Alias of remote_ownership_requires_executable_block */
   | "remote_ownership_requires_implementation"
   | "remote_ownership_requires_ready_block"
   | "remote_ownership_operation_conflict"
@@ -45,11 +47,12 @@ function sameSource(
   );
 }
 
-function assertImplementation(blockType: BlockType): void {
-  if (blockType !== "implementation") {
+/** Remote ownership is valid for every auto-run block type (implementation + review). */
+function assertRemoteExecutableBlockType(blockType: BlockType): void {
+  if (blockType !== "implementation" && blockType !== "review") {
     throw new RemoteOwnershipConflictError(
-      "remote_ownership_requires_implementation",
-      "Only implementation blocks may have remote ownership."
+      "remote_ownership_requires_executable_block",
+      `Block type '${blockType}' cannot have remote ownership.`
     );
   }
 }
@@ -61,7 +64,7 @@ export function assertRemoteBlockOwnershipInvariant(options: {
   if (!options.blockState.remoteOwnership) {
     return;
   }
-  assertImplementation(options.blockType);
+  assertRemoteExecutableBlockType(options.blockType);
   if (options.blockState.status !== "in_progress" && options.blockState.status !== "diverged") {
     throw new RemoteOwnershipConflictError(
       "remote_ownership_status_conflict",
@@ -95,7 +98,7 @@ export function assertActiveRemoteBlockOwnership(options: {
   blockState: BlockState;
   ownership: ActiveRemoteOperationIdentity;
 }): RemoteBlockOwnership & { phase: "active" } {
-  assertImplementation(options.blockType);
+  assertRemoteExecutableBlockType(options.blockType);
   assertRemoteBlockOwnershipInvariant(options);
   const requested = activeRemoteBlockOwnershipSchema.parse({
     phase: "active",
@@ -144,7 +147,7 @@ export function prepareRemoteBlockOwnership(options: {
   blockState: BlockState;
   ownership: Omit<PreparingRemoteBlockOwnershipInput, "phase">;
 }): BlockState {
-  assertImplementation(options.blockType);
+  assertRemoteExecutableBlockType(options.blockType);
   assertRemoteBlockOwnershipInvariant(options);
   const requested = preparingRemoteBlockOwnershipSchema.parse({
     phase: "preparing",
@@ -176,7 +179,7 @@ export function activateRemoteBlockOwnership(options: {
   blockState: BlockState;
   ownership: Omit<ActiveRemoteBlockOwnershipInput, "phase">;
 }): BlockState {
-  assertImplementation(options.blockType);
+  assertRemoteExecutableBlockType(options.blockType);
   assertRemoteBlockOwnershipInvariant(options);
   const requested = activeRemoteBlockOwnershipSchema.parse({
     phase: "active",
@@ -222,7 +225,7 @@ export function markRemoteBlockOwnershipSourceDrift(options: {
   graphFingerprint: string;
   reason: string;
 }): BlockState {
-  assertImplementation(options.blockType);
+  assertRemoteExecutableBlockType(options.blockType);
   assertRemoteBlockOwnershipInvariant(options);
   const owner = options.blockState.remoteOwnership;
   if (!owner) {
@@ -262,6 +265,7 @@ export function interruptRemoteBlockOwnership(options: {
   ownership: ActiveRemoteOperationIdentity;
   interruption: RemoteInterruption;
   reason: string;
+  runId?: string;
 }): BlockState {
   assertActiveRemoteBlockOwnership(options);
   const interruption = remoteInterruptionSchema.parse(options.interruption);
@@ -278,7 +282,9 @@ export function interruptRemoteBlockOwnership(options: {
       options.blockState.remoteInterruption.resumable === interruption.resumable &&
       options.blockState.divergenceReason === reason
     ) {
-      return options.blockState;
+      return options.runId && options.blockState.lastRunId !== options.runId
+        ? { ...options.blockState, lastRunId: options.runId }
+        : options.blockState;
     }
     throw new RemoteOwnershipConflictError(
       "remote_ownership_terminal_conflict",
@@ -295,7 +301,8 @@ export function interruptRemoteBlockOwnership(options: {
     ...options.blockState,
     status: "diverged",
     divergenceReason: reason,
-    remoteInterruption: interruption
+    remoteInterruption: interruption,
+    ...(options.runId ? { lastRunId: options.runId } : {})
   };
 }
 
@@ -372,10 +379,45 @@ export function completeRemoteBlockOwnership(options: {
   const receipt = remoteOperationReceiptSchema.parse({
     outcome: "completed",
     ...options.ownership,
-    runId: options.runId
+    runId: options.runId,
+    blockType: options.blockType === "review" ? "review" : "implementation"
   });
   const cleared = withoutRemoteBlockOwnership(options.blockState, "completed");
   return { ...cleared, lastRunId: options.runId, remoteOperationReceipt: receipt };
+}
+
+/**
+ * After remote Host writeback, release active ownership while keeping domain status.
+ *
+ * Terminal domain outcomes (completed / blocked) get an immutable remoteOperationReceipt.
+ * Non-terminal review outcomes such as needs_changes (still in_progress with open feedback)
+ * only clear ownership — a completed receipt is not allowed on non-terminal block status.
+ */
+export function sealRemoteBlockOperationCompleted(options: {
+  blockType: BlockType;
+  blockState: BlockState;
+  ownership: ActiveRemoteOperationIdentity;
+  runId: string;
+}): BlockState {
+  const cleared = clearRemoteBlockOperationState(options.blockState);
+  if (options.blockState.status !== "completed" && options.blockState.status !== "blocked") {
+    return cleared;
+  }
+  if (options.blockState.status === "blocked") {
+    // Failed domain outcomes should use failRemoteBlockOwnership; keep ownership-free.
+    return cleared;
+  }
+  const receipt = remoteOperationReceiptSchema.parse({
+    outcome: "completed",
+    ...options.ownership,
+    runId: options.runId,
+    blockType: options.blockType === "review" ? "review" : "implementation"
+  });
+  return {
+    ...cleared,
+    lastRunId: options.runId,
+    remoteOperationReceipt: receipt
+  };
 }
 
 export function failRemoteBlockOwnership(options: {
@@ -384,18 +426,21 @@ export function failRemoteBlockOwnership(options: {
   ownership: ActiveRemoteOperationIdentity;
   failure: NormalizedFailure;
   blockedReason: string;
+  runId?: string;
 }): BlockState {
   assertActiveRemoteBlockOwnership(options);
   const receipt = remoteOperationReceiptSchema.parse({
     outcome: "failed",
     ...options.ownership,
-    failure: options.failure
+    failure: options.failure,
+    blockType: options.blockType === "review" ? "review" : "implementation"
   });
   const cleared = withoutRemoteBlockOwnership(options.blockState, "blocked");
   return {
     ...cleared,
     blockedReason: options.blockedReason,
-    remoteOperationReceipt: receipt
+    remoteOperationReceipt: receipt,
+    ...(options.runId ? { lastRunId: options.runId } : {})
   };
 }
 

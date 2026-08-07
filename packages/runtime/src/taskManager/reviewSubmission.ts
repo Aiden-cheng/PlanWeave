@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import { isNodeFileNotFoundError, optionalReaddir } from "../fs/optionalFile.js";
@@ -39,9 +39,65 @@ import {
   updateTaskIndex
 } from "./resultIndex.js";
 import { computeWorkRevision, getBlock, getTask, isActiveFeedbackStatus } from "./selectors.js";
+import {
+  assertActiveRemoteBlockOwnership,
+  matchesRemoteOperationReceipt,
+  sealRemoteBlockOperationCompleted,
+  type ActiveRemoteOperationIdentity
+} from "./remoteOwnershipTransitions.js";
+import {
+  extractFinalArtifactEnvelope,
+  FinalArtifactContractError
+} from "../autoRun/finalArtifactContract.js";
+import { RemoteBlockRuntimeError } from "./remoteBlockRuntimeContracts.js";
 
 function reviewResultHash(result: ReviewResult): string {
   return createHash("sha256").update(JSON.stringify(result)).digest("hex");
+}
+
+/** Parse Host/ACP report bytes into a validated review result (JSON or final-artifact marker). */
+export function parseRemoteReviewResultBytes(options: {
+  ref: string;
+  taskId: string;
+  bytes: Uint8Array | Buffer;
+}): ReviewResult {
+  const text = Buffer.from(options.bytes).toString("utf8").trim();
+  if (!text) {
+    throw new RemoteBlockRuntimeError(
+      "remote_block_result_conflict",
+      `Remote review result for '${options.ref}' is empty.`
+    );
+  }
+  try {
+    const envelope = extractFinalArtifactEnvelope(text, {
+      kind: "review",
+      ref: options.ref,
+      taskId: options.taskId
+    });
+    if (envelope.artifact.kind === "review") {
+      return reviewResultSchema.parse(envelope.artifact.reviewResult);
+    }
+  } catch (error) {
+    if (!(error instanceof FinalArtifactContractError)) {
+      // Fall through to plain JSON parsing.
+    }
+  }
+  try {
+    return reviewResultSchema.parse(JSON.parse(text));
+  } catch {
+    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenced?.[1]) {
+      try {
+        return reviewResultSchema.parse(JSON.parse(fenced[1].trim()));
+      } catch {
+        // continue
+      }
+    }
+  }
+  throw new RemoteBlockRuntimeError(
+    "remote_block_result_conflict",
+    `Remote review result for '${options.ref}' is not valid review-result JSON.`
+  );
 }
 
 type PersistedReviewAttempt = {
@@ -316,6 +372,7 @@ export async function submitReviewResultValue(
     ref: string;
     resultPath: string;
     session?: ExecutionGraphSession;
+    remote?: ActiveRemoteOperationIdentity;
   },
   value: unknown
 ): Promise<SubmitReviewResult> {
@@ -327,12 +384,41 @@ export async function submitReviewResultValue(
   );
 }
 
+export async function submitRemoteReviewResult(options: {
+  projectRoot: PackageWorkspaceRef;
+  ref: string;
+  reportBytes: Uint8Array;
+  ownership: ActiveRemoteOperationIdentity;
+}): Promise<SubmitReviewResult> {
+  const { taskId } = parseBlockRef(options.ref);
+  const parsed = parseRemoteReviewResultBytes({
+    ref: options.ref,
+    taskId,
+    bytes: options.reportBytes
+  });
+  const { workspace } = await loadPackage(options.projectRoot);
+  const stagingDir = join(workspace.resultsDir, taskId, "blocks", "remote-review-staging");
+  await mkdir(stagingDir, { recursive: true });
+  const resultPath = join(stagingDir, `${options.ownership.executionAttemptId}.json`);
+  await writeFile(resultPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+  return submitReviewResultValue(
+    {
+      projectRoot: options.projectRoot,
+      ref: options.ref,
+      resultPath,
+      remote: options.ownership
+    },
+    parsed
+  );
+}
+
 async function submitReviewResultLocked(
   options: {
     projectRoot: PackageWorkspaceRef;
     ref: string;
     resultPath: string;
     session?: ExecutionGraphSession;
+    remote?: ActiveRemoteOperationIdentity;
   },
   parsed: ReviewResult,
   resultHash: string
@@ -348,9 +434,62 @@ async function submitReviewResultLocked(
   if (parsed.reviewBlockRef !== options.ref || parsed.taskId !== taskId) {
     throw new Error("review-result.json does not match the submitted review block ref.");
   }
-  if (state.blocks[options.ref]?.status !== "in_progress") {
-    throw new Error(`Review block '${options.ref}' must be in_progress before submit-review.`);
+  const blockState = state.blocks[options.ref];
+  if (options.remote) {
+    if (blockState?.remoteOperationReceipt) {
+      if (
+        blockState.remoteOperationReceipt.outcome !== "completed" ||
+        !matchesRemoteOperationReceipt(blockState.remoteOperationReceipt, options.remote) ||
+        blockState.remoteOperationReceipt.runId !== blockState.latestReviewAttemptId
+      ) {
+        throw new RemoteBlockRuntimeError(
+          "remote_block_result_conflict",
+          `Remote review completion for '${options.ref}' conflicts with its terminal operation receipt.`
+        );
+      }
+      return {
+        ref: options.ref,
+        reviewAttemptId: blockState.remoteOperationReceipt.runId,
+        verdict: parsed.verdict,
+        status: blockState.status,
+        ...(blockState.completionReason === "passed" ||
+        blockState.completionReason === "max_cycles_reached"
+          ? { completionReason: blockState.completionReason }
+          : {}),
+        feedbackCreated: Boolean(blockState.activeFeedbackId)
+      };
+    }
+    assertActiveRemoteBlockOwnership({
+      blockType: "review",
+      blockState,
+      ownership: options.remote
+    });
+    const remoteCanSubmit =
+      blockState?.status === "in_progress" ||
+      (blockState?.status === "diverged" && blockState.remoteInterruption?.resumable === true);
+    if (!remoteCanSubmit) {
+      throw new Error(`Review block '${options.ref}' must be in_progress before submit-review.`);
+    }
+  } else {
+    if (blockState?.remoteOwnership) {
+      throw new Error(
+        `Remote-owned review '${options.ref}' must be completed through the remote operation port.`
+      );
+    }
+    if (blockState?.status !== "in_progress") {
+      throw new Error(`Review block '${options.ref}' must be in_progress before submit-review.`);
+    }
   }
+
+  const sealRemoteCompletion = (attemptId: string): void => {
+    if (!options.remote) return;
+    state.blocks[options.ref] = sealRemoteBlockOperationCompleted({
+      blockType: "review",
+      blockState: state.blocks[options.ref],
+      ownership: options.remote,
+      runId: attemptId
+    });
+  };
   const workRevision = computeWorkRevision(graph, state, options.ref);
   const persistedAttempt = await findPersistedReviewAttempt({
     workspace,
@@ -446,6 +585,7 @@ async function submitReviewResultLocked(
           ? state.currentRefs
           : [...state.currentRefs, options.ref];
       }
+      sealRemoteCompletion(attemptId);
       state = refreshDerivedState(manifest, state);
       await writeState(workspace.stateFile, state);
       return {
@@ -470,6 +610,7 @@ async function submitReviewResultLocked(
       state.currentReviewBlockRef =
         state.currentReviewBlockRef === options.ref ? null : state.currentReviewBlockRef;
       state.currentRefs = state.currentRefs.filter((ref) => ref !== options.ref);
+      sealRemoteCompletion(attemptId);
       state = refreshDerivedState(manifest, state);
       await writeState(workspace.stateFile, state);
       return {
@@ -507,6 +648,7 @@ async function submitReviewResultLocked(
     state.currentReviewBlockRef =
       state.currentReviewBlockRef === options.ref ? null : state.currentReviewBlockRef;
     state.currentRefs = state.currentRefs.filter((ref) => ref !== options.ref);
+    sealRemoteCompletion(attemptId);
     state = refreshDerivedState(manifest, state);
     await writeState(workspace.stateFile, state);
     return {
@@ -543,6 +685,7 @@ async function submitReviewResultLocked(
     state.currentReviewBlockRef =
       state.currentReviewBlockRef === options.ref ? null : state.currentReviewBlockRef;
     state.currentRefs = state.currentRefs.filter((ref) => ref !== options.ref);
+    sealRemoteCompletion(attemptId);
     state = refreshDerivedState(manifest, state);
     await writeState(workspace.stateFile, state);
     return {
@@ -577,6 +720,7 @@ async function submitReviewResultLocked(
       blockedReason: `Review hook failed: ${error instanceof Error ? error.message : String(error)}`
     };
     state.currentRefs = state.currentRefs.filter((ref) => ref !== options.ref);
+    sealRemoteCompletion(attemptId);
     state = refreshDerivedState(manifest, state);
     await writeState(workspace.stateFile, state);
     return {
@@ -620,6 +764,7 @@ async function submitReviewResultLocked(
   state.currentFeedbackId = feedbackId;
   state.currentReviewBlockRef = options.ref;
   state.currentRefs = withoutCurrentRef(state.currentRefs, options.ref);
+  sealRemoteCompletion(attemptId);
   state = refreshDerivedState(manifest, state);
   await writeState(workspace.stateFile, state);
   return {

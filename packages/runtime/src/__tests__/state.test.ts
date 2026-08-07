@@ -198,7 +198,7 @@ describe("readState Zod validation", () => {
 });
 
 describe("ensureStateForManifest manifest-drift repair", () => {
-  it("fails closed when a remote-owned block is removed or changes to review", () => {
+  it("fails closed when a remote-owned block is removed, and keeps review remote ownership", () => {
     const active = runtimeStateSchema.parse({
       ...createEmptyState(),
       blocks: {
@@ -231,9 +231,13 @@ describe("ensureStateForManifest manifest-drift repair", () => {
         }
       }
     });
-    expect(() => ensureStateForManifest(basicManifest(), reviewOwned)).toThrow(
-      /only implementation blocks/i
-    );
+    expect(ensureStateForManifest(basicManifest(), reviewOwned).blocks["T-001#R-001"]).toMatchObject({
+      status: "in_progress",
+      remoteOwnership: {
+        phase: "preparing",
+        operationId: "operation-001"
+      }
+    });
   });
 
   it.each([

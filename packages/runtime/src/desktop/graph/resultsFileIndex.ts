@@ -15,8 +15,9 @@ import {
 const resultFilePattern = /\.(md|json|log|txt)$/;
 
 export const maxIndexedResultFileBytes = 256_000;
-export const maxIndexedResultFileCount = 2_000;
-export const maxIndexedResultTotalBodyBytes = 16_000_000;
+/** Newest-first selection still applies when a project exceeds this bound. */
+export const maxIndexedResultFileCount = 10_000;
+export const maxIndexedResultTotalBodyBytes = 48_000_000;
 
 const resultsIndexConcurrency = {
   directoryReads: 8,

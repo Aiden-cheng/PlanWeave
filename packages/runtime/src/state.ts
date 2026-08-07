@@ -154,8 +154,16 @@ export function ensureStateForManifest(
 
   for (const [ref, blockState] of Object.entries(state.blocks)) {
     const block = graph.blocksByRef.get(ref);
-    if (blockState.remoteOperationReceipt && block && block.type !== "implementation") {
-      terminalReceiptTypeDriftRefs.add(ref);
+    if (blockState.remoteOperationReceipt && block) {
+      const receiptType = blockState.remoteOperationReceipt.blockType;
+      // New receipts stamp blockType. Legacy receipts without it only fit implementation.
+      const receiptMatchesType =
+        receiptType === undefined
+          ? block.type === "implementation"
+          : receiptType === block.type;
+      if (!receiptMatchesType) {
+        terminalReceiptTypeDriftRefs.add(ref);
+      }
     }
     if (!blockState.remoteOwnership) {
       continue;

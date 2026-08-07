@@ -238,6 +238,69 @@ describe("remote block runtime terminal transitions", () => {
     ]);
   });
 
+  it("coalesces streamed remote agent_message chunks into one conversation message", () => {
+    expect(
+      projectRemoteAcpTimeline([
+        { cursor: 1, kind: "agent_message", text: "no " },
+        { cursor: 2, kind: "agent_message", text: "trailing " },
+        { cursor: 3, kind: "agent_message", text: "newline" }
+      ])
+    ).toMatchObject([{ kind: "message", content: "no trailing newline" }]);
+  });
+
+  it("dispatches and completes a ready review block through the remote port", async () => {
+    const { init, port, identity } = await activateReadyBlock();
+    const implBytes = Buffer.from("# Implementation complete\n");
+    await port.complete({
+      ref: "T-001#B-001",
+      ...identity,
+      ...reportInput(implBytes)
+    });
+
+    const reviewCandidate = await port.inspect({ ref: "T-001#R-001" });
+    expect(reviewCandidate.blockType).toBe("review");
+    const reviewIdentity = {
+      operationId: "operation-review-001",
+      sourceRevision: reviewCandidate.sourceRevision,
+      graphFingerprint: reviewCandidate.graphFingerprint,
+      dispatchId: "dispatch-review-001",
+      executionAttemptId: "attempt-review-001"
+    };
+    await port.claim({
+      ref: "T-001#R-001",
+      operationId: reviewIdentity.operationId,
+      sourceRevision: reviewIdentity.sourceRevision,
+      graphFingerprint: reviewIdentity.graphFingerprint
+    });
+    await port.activate({ ref: "T-001#R-001", ...reviewIdentity });
+
+    const reviewJson = JSON.stringify({
+      reviewBlockRef: "T-001#R-001",
+      taskId: "T-001",
+      verdict: "passed",
+      content: "Remote review accepted the implementation evidence."
+    });
+    const completed = await port.complete({
+      ref: "T-001#R-001",
+      ...reviewIdentity,
+      ...reportInput(Buffer.from(reviewJson, "utf8"))
+    });
+    expect(completed).toMatchObject({ ref: "T-001#R-001", status: "completed" });
+    const reviewState = (await readState(init.workspace.stateFile)).blocks["T-001#R-001"];
+    expect(reviewState).toMatchObject({
+      status: "completed",
+      completionReason: "passed",
+      lastRunId: completed.runId,
+      remoteOperationReceipt: {
+        outcome: "completed",
+        operationId: reviewIdentity.operationId,
+        runId: completed.runId,
+        blockType: "review"
+      }
+    });
+    expect(reviewState).not.toHaveProperty("remoteOwnership");
+  });
+
   it("persists exact report bytes and idempotently replays only the same completion", async () => {
     const { init, port, identity } = await activateReadyBlock();
     const bytes = Buffer.from("# Remote result\n\nExact UTF-8 bytes.\n");
@@ -404,11 +467,25 @@ describe("remote block runtime terminal transitions", () => {
     await expect(port.fail({ ...input, operationId: "operation-foreign" })).rejects.toMatchObject({
       code: "remote_ownership_terminal_conflict"
     });
-    expect((await readState(init.workspace.stateFile)).blocks["T-001#B-001"]).toMatchObject({
+    const failedState = (await readState(init.workspace.stateFile)).blocks["T-001#B-001"];
+    expect(failedState).toMatchObject({
       status: "blocked",
       blockedReason: "[executor_failed] Remote executor failed.",
       remoteOperationReceipt: { outcome: "failed", ...identity, failure }
     });
+    expect(failedState?.lastRunId).toMatch(/^RUN-/);
+    const failedRunDir = join(
+      init.workspace.resultsDir,
+      "T-001",
+      "blocks",
+      "B-001",
+      "runs",
+      failedState!.lastRunId!
+    );
+    await expect(stat(failedRunDir)).resolves.toMatchObject({ isDirectory: expect.any(Function) });
+    await expect(readFile(join(failedRunDir, "metadata.json"), "utf8")).resolves.toContain(
+      "executor_failed"
+    );
 
     await unblockBlock({
       projectRoot: init.workspace,

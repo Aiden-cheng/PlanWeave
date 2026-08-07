@@ -1,12 +1,18 @@
-import { dirname } from "node:path";
+import { mkdir } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { allocateRunId } from "../autoRun/executorShared.js";
+import { upsertBlockRunInIndex } from "../autoRun/blockRunIndex.js";
 import { withCanvasLock } from "../fs/withCanvasLock.js";
+import { parseBlockRef } from "../graph/compileTaskGraph.js";
 import { loadPackage } from "../package/loadPackage.js";
 import { writeState } from "../state.js";
 import type { PackageWorkspaceRef } from "../types.js";
 import { submitRemoteBlockResult } from "./blockSubmission.js";
+import { materializeRemoteAcpFailure } from "./remoteAcpTranscript.js";
+import { updateTaskIndex } from "./resultIndex.js";
 import {
   assertRemoteBlockDispatchable,
-  assertRemoteBlockImplementation,
+  assertRemoteBlockExecutable,
   inspectRemoteBlockCandidate
 } from "./remoteBlockInspection.js";
 import {
@@ -115,6 +121,10 @@ function identityFromInput(input: {
   });
 }
 
+function remoteExecutableBlockType(context: RuntimeContext, ref: string) {
+  return assertRemoteBlockExecutable(context, ref);
+}
+
 export interface RemoteBlockRuntimePort {
   inspect(input: RemoteBlockInspectInput): Promise<RemoteBlockDispatchCandidate>;
   claim(input: RemoteBlockClaimInput): Promise<RemoteBlockBindingView>;
@@ -149,10 +159,10 @@ export function createRemoteBlockRuntimePort(options: {
     claim: async (rawInput) => {
       const input = remoteBlockClaimInputSchema.parse(rawInput);
       return withLock(async (context) => {
-        assertRemoteBlockImplementation(context, input.ref);
+        const blockType = remoteExecutableBlockType(context, input.ref);
         const current = context.state.blocks[input.ref];
         const prepared = prepareRemoteBlockOwnership({
-          blockType: "implementation",
+          blockType,
           blockState: current,
           ownership: {
             operationId: input.operationId,
@@ -164,7 +174,7 @@ export function createRemoteBlockRuntimePort(options: {
           const source = await remoteBlockSourceEvidence(context, input.ref);
           if (!sameRemoteBlockSource(source, input)) {
             context.state.blocks[input.ref] = markRemoteBlockOwnershipSourceDrift({
-              blockType: "implementation",
+              blockType,
               blockState: current,
               ...source,
               reason: `Remote source changed after operation '${input.operationId}' was prepared.`
@@ -187,6 +197,9 @@ export function createRemoteBlockRuntimePort(options: {
         }
         context.state.blocks[input.ref] = prepared;
         context.state.currentRefs = withCurrentRef(context.state.currentRefs, input.ref);
+        if (blockType === "review") {
+          context.state.currentReviewBlockRef = input.ref;
+        }
         await writeLockedState(context);
         return bindingView(context, input.ref);
       });
@@ -195,16 +208,16 @@ export function createRemoteBlockRuntimePort(options: {
     activate: async (rawInput) => {
       const input = remoteBlockRefIdentitySchema.parse(rawInput);
       return withLock(async (context) => {
-        assertRemoteBlockImplementation(context, input.ref);
+        const blockType = remoteExecutableBlockType(context, input.ref);
         activateRemoteBlockOwnership({
-          blockType: "implementation",
+          blockType,
           blockState: context.state.blocks[input.ref],
           ownership: identityFromInput(input)
         });
         const source = await remoteBlockSourceEvidence(context, input.ref);
         if (!sameRemoteBlockSource(source, input)) {
           context.state.blocks[input.ref] = markRemoteBlockOwnershipSourceDrift({
-            blockType: "implementation",
+            blockType,
             blockState: context.state.blocks[input.ref],
             ...source,
             reason: `Remote source changed before activation of '${input.ref}'.`
@@ -216,7 +229,7 @@ export function createRemoteBlockRuntimePort(options: {
           );
         }
         context.state.blocks[input.ref] = activateRemoteBlockOwnership({
-          blockType: "implementation",
+          blockType,
           blockState: context.state.blocks[input.ref],
           ownership: identityFromInput(input)
         });
@@ -228,7 +241,7 @@ export function createRemoteBlockRuntimePort(options: {
     query: async (rawInput) => {
       const { ref, operationId } = remoteBlockOperationQuerySchema.parse(rawInput);
       const context = await loadRuntimeReadonly({ projectRoot });
-      assertRemoteBlockImplementation(context, ref);
+      remoteExecutableBlockType(context, ref);
       const view = bindingView(context, ref);
       assertOperationMatchesView(view, operationId);
       return view;
@@ -237,7 +250,7 @@ export function createRemoteBlockRuntimePort(options: {
     reconcile: async (rawInput) => {
       const { ref, operationId } = remoteBlockOperationQuerySchema.parse(rawInput);
       return withLock(async (context) => {
-        assertRemoteBlockImplementation(context, ref);
+        const blockType = remoteExecutableBlockType(context, ref);
         let view = bindingView(context, ref);
         assertOperationMatchesView(view, operationId);
         if (!view.ownership) {
@@ -246,7 +259,7 @@ export function createRemoteBlockRuntimePort(options: {
         const source = await remoteBlockSourceEvidence(context, ref);
         if (!sameRemoteBlockSource(source, view.ownership)) {
           context.state.blocks[ref] = markRemoteBlockOwnershipSourceDrift({
-            blockType: "implementation",
+            blockType,
             blockState: context.state.blocks[ref],
             ...source,
             reason: `Remote source changed while operation '${operationId}' was active.`
@@ -261,16 +274,16 @@ export function createRemoteBlockRuntimePort(options: {
     markInterrupted: async (rawInput) => {
       const input = remoteBlockInterruptionInputSchema.parse(rawInput);
       return withLock(async (context) => {
-        assertRemoteBlockImplementation(context, input.ref);
+        const blockType = remoteExecutableBlockType(context, input.ref);
         assertActiveRemoteBlockOwnership({
-          blockType: "implementation",
+          blockType,
           blockState: context.state.blocks[input.ref],
           ownership: identityFromInput(input)
         });
         const source = await remoteBlockSourceEvidence(context, input.ref);
         if (!sameRemoteBlockSource(source, input)) {
           context.state.blocks[input.ref] = markRemoteBlockOwnershipSourceDrift({
-            blockType: "implementation",
+            blockType,
             blockState: context.state.blocks[input.ref],
             ...source,
             reason: `Remote source changed before interruption of '${input.ref}'.`
@@ -281,12 +294,44 @@ export function createRemoteBlockRuntimePort(options: {
             `Remote source changed before interruption of '${input.ref}'.`
           );
         }
+        let runId: string | undefined;
+        // Non-resumable interruptions (e.g. lease_lost) never create a local run unless we
+        // materialize one here — otherwise Task Workspace keeps showing older local Auto Runs.
+        if (!input.interruption.resumable) {
+          const { taskId, blockId } = parseBlockRef(input.ref);
+          const runRoot = join(context.workspace.resultsDir, taskId, "blocks", blockId, "runs");
+          runId = await allocateRunId(runRoot);
+          const runDir = join(runRoot, runId);
+          await mkdir(runDir, { recursive: true });
+          await materializeRemoteAcpFailure({
+            workspace: context.workspace,
+            ref: input.ref,
+            runId,
+            runDir,
+            failure: {
+              code: "transport_failed",
+              message: `Remote execution interrupted: ${input.interruption.reason}.`,
+              retryable: false
+            },
+            identity: identityFromInput(input),
+            ...(input.agentId ? { agentId: input.agentId } : {})
+          });
+          await upsertBlockRunInIndex(runRoot, runId, true);
+          await updateTaskIndex(context.workspace, taskId, (index) => ({
+            ...index,
+            latestRunByBlock: {
+              ...(index.latestRunByBlock ?? {}),
+              [input.ref]: runId!
+            }
+          }));
+        }
         context.state.blocks[input.ref] = interruptRemoteBlockOwnership({
-          blockType: "implementation",
+          blockType,
           blockState: context.state.blocks[input.ref],
           ownership: identityFromInput(input),
           interruption: input.interruption,
-          reason: `Remote execution interrupted: ${input.interruption.reason}.`
+          reason: `Remote execution interrupted: ${input.interruption.reason}.`,
+          runId
         });
         await writeLockedState(context);
         return remoteBlockMutationResultSchema.parse({
@@ -301,7 +346,7 @@ export function createRemoteBlockRuntimePort(options: {
     resumeAttempt: async (rawInput) => {
       const input = remoteBlockRefIdentitySchema.parse(rawInput);
       return withLock(async (context) => {
-        assertRemoteBlockImplementation(context, input.ref);
+        const blockType = remoteExecutableBlockType(context, input.ref);
         const current = context.state.blocks[input.ref];
         const requested = identityFromInput(input);
         if (
@@ -313,14 +358,14 @@ export function createRemoteBlockRuntimePort(options: {
           return bindingView(context, input.ref);
         }
         assertActiveRemoteBlockOwnership({
-          blockType: "implementation",
+          blockType,
           blockState: current,
           ownership: requested
         });
         const source = await remoteBlockSourceEvidence(context, input.ref);
         if (!sameRemoteBlockSource(source, input)) {
           context.state.blocks[input.ref] = markRemoteBlockOwnershipSourceDrift({
-            blockType: "implementation",
+            blockType,
             blockState: context.state.blocks[input.ref],
             ...source,
             reason: `Remote source changed before resume of '${input.ref}'.`
@@ -332,7 +377,7 @@ export function createRemoteBlockRuntimePort(options: {
           );
         }
         context.state.blocks[input.ref] = resumeRemoteBlockOwnership({
-          blockType: "implementation",
+          blockType,
           blockState: context.state.blocks[input.ref],
           ownership: identityFromInput(input)
         });
@@ -344,7 +389,7 @@ export function createRemoteBlockRuntimePort(options: {
     retryAttempt: async (rawInput) => {
       const input = remoteBlockRetryAttemptInputSchema.parse(rawInput);
       return withLock(async (context) => {
-        assertRemoteBlockImplementation(context, input.ref);
+        const blockType = remoteExecutableBlockType(context, input.ref);
         const current = context.state.blocks[input.ref];
         const retriedIdentity = identityFromInput({
           ...input,
@@ -360,14 +405,14 @@ export function createRemoteBlockRuntimePort(options: {
           return bindingView(context, input.ref);
         }
         assertActiveRemoteBlockOwnership({
-          blockType: "implementation",
+          blockType,
           blockState: current,
           ownership: identityFromInput(input)
         });
         const source = await remoteBlockSourceEvidence(context, input.ref);
         if (!sameRemoteBlockSource(source, input)) {
           context.state.blocks[input.ref] = markRemoteBlockOwnershipSourceDrift({
-            blockType: "implementation",
+            blockType,
             blockState: context.state.blocks[input.ref],
             ...source,
             reason: `Remote source changed before retry of '${input.ref}'.`
@@ -379,7 +424,7 @@ export function createRemoteBlockRuntimePort(options: {
           );
         }
         context.state.blocks[input.ref] = retryRemoteBlockOwnership({
-          blockType: "implementation",
+          blockType,
           blockState: context.state.blocks[input.ref],
           ownership: identityFromInput(input),
           newDispatchId: input.newDispatchId,
@@ -398,7 +443,7 @@ export function createRemoteBlockRuntimePort(options: {
     fail: async (rawInput) => {
       const input = remoteBlockFailureInputSchema.parse(rawInput);
       return withLock(async (context) => {
-        assertRemoteBlockImplementation(context, input.ref);
+        const blockType = remoteExecutableBlockType(context, input.ref);
         const current = context.state.blocks[input.ref];
         if (current.remoteOperationReceipt) {
           if (
@@ -417,14 +462,14 @@ export function createRemoteBlockRuntimePort(options: {
           });
         }
         assertActiveRemoteBlockOwnership({
-          blockType: "implementation",
+          blockType,
           blockState: current,
           ownership: identityFromInput(input)
         });
         const source = await remoteBlockSourceEvidence(context, input.ref);
         if (!sameRemoteBlockSource(source, input)) {
           context.state.blocks[input.ref] = markRemoteBlockOwnershipSourceDrift({
-            blockType: "implementation",
+            blockType,
             blockState: current,
             ...source,
             reason: `Remote source changed before failure of '${input.ref}'.`
@@ -435,12 +480,34 @@ export function createRemoteBlockRuntimePort(options: {
             `Remote source changed before failure of '${input.ref}'.`
           );
         }
+        const { taskId, blockId } = parseBlockRef(input.ref);
+        const runRoot = join(context.workspace.resultsDir, taskId, "blocks", blockId, "runs");
+        const runId = await allocateRunId(runRoot);
+        const runDir = join(runRoot, runId);
+        await mkdir(runDir, { recursive: true });
+        await materializeRemoteAcpFailure({
+          workspace: context.workspace,
+          ref: input.ref,
+          runId,
+          runDir,
+          failure: input.failure,
+          identity: identityFromInput(input)
+        });
+        await upsertBlockRunInIndex(runRoot, runId, true);
+        await updateTaskIndex(context.workspace, taskId, (index) => ({
+          ...index,
+          latestRunByBlock: {
+            ...(index.latestRunByBlock ?? {}),
+            [input.ref]: runId
+          }
+        }));
         context.state.blocks[input.ref] = failRemoteBlockOwnership({
-          blockType: "implementation",
+          blockType,
           blockState: current,
           ownership: identityFromInput(input),
           failure: input.failure,
-          blockedReason: `[${input.failure.code}] ${input.failure.message}`
+          blockedReason: `[${input.failure.code}] ${input.failure.message}`,
+          runId
         });
         context.state.currentRefs = context.state.currentRefs.filter((ref) => ref !== input.ref);
         await writeLockedState(context);

@@ -44,19 +44,24 @@ const activeRemoteOperationIdentityShape = {
   executionAttemptId: executionAttemptIdSchema
 };
 
+const remoteOperationReceiptBlockTypeSchema = z.enum(["implementation", "review"]);
+
 export const remoteOperationReceiptSchema = z.discriminatedUnion("outcome", [
   z
     .object({
       outcome: z.literal("completed"),
       ...activeRemoteOperationIdentityShape,
-      runId: opaqueIdentifierSchema
+      runId: opaqueIdentifierSchema,
+      /** Present on new receipts; used to detect manifest type drift at the same ref. */
+      blockType: remoteOperationReceiptBlockTypeSchema.optional()
     })
     .strict(),
   z
     .object({
       outcome: z.literal("failed"),
       ...activeRemoteOperationIdentityShape,
-      failure: normalizedFailureSchema
+      failure: normalizedFailureSchema,
+      blockType: remoteOperationReceiptBlockTypeSchema.optional()
     })
     .strict()
 ]);

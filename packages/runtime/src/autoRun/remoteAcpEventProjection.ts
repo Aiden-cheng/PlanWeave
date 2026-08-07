@@ -14,8 +14,10 @@ export function remoteAcpEventBody(
 ): NormalizedRunnerEvent["body"] {
   switch (event.kind) {
     case "agent_message": {
+      // Remote ACP streams as many agent_message events; mark chunks so the canonical
+      // conversation projector coalesces them instead of rendering one line per token.
       const content = normalizedRedactedContent(event.text);
-      return { kind: "message", role: "assistant", messageId: null, chunk: false, ...content };
+      return { kind: "message", role: "assistant", messageId: null, chunk: true, ...content };
     }
     case "plan": {
       const content = normalizedRedactedContent(event.text);

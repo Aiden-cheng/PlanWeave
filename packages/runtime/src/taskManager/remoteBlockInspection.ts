@@ -13,13 +13,23 @@ import {
   remoteBlockSourceSnapshot
 } from "./remoteBlockSourceSnapshot.js";
 import { loadRuntimeReadonly, type RuntimeContext } from "./runtimeContext.js";
+import type { BlockType } from "../types.js";
 import {
+  canClaimReviewBlock,
   canDispatchImplementationBlock,
   effectiveBlockExecutor,
+  requireBlockState,
   validateClaimScope
 } from "./selectors.js";
 
-export function assertRemoteBlockImplementation(context: RuntimeContext, ref: string): void {
+/**
+ * Remote Host ACP can execute every auto-run block type in the package model
+ * (implementation + review). Returns the resolved block type.
+ */
+export function assertRemoteBlockExecutable(
+  context: RuntimeContext,
+  ref: string
+): Extract<BlockType, "implementation" | "review"> {
   const invalidScope = validateClaimScope({ kind: "block", blockRef: ref }, context.graph);
   if (invalidScope) {
     const reason = "reason" in invalidScope ? invalidScope.reason : undefined;
@@ -28,32 +38,51 @@ export function assertRemoteBlockImplementation(context: RuntimeContext, ref: st
       reason ?? `Block '${ref}' does not exist.`
     );
   }
-  if (context.graph.blocksByRef.get(ref)?.type !== "implementation") {
+  const blockType = context.graph.blocksByRef.get(ref)?.type;
+  if (blockType !== "implementation" && blockType !== "review") {
     throw new RemoteBlockRuntimeError(
-      "remote_block_not_implementation",
-      `Remote dispatch supports implementation blocks only; '${ref}' is not dispatchable.`
+      "remote_block_not_executable",
+      `Remote dispatch supports implementation and review blocks; '${ref}' is not executable remotely.`
     );
   }
+  return blockType;
+}
+
+/** @deprecated Use assertRemoteBlockExecutable. */
+export function assertRemoteBlockImplementation(context: RuntimeContext, ref: string): void {
+  assertRemoteBlockExecutable(context, ref);
 }
 
 export async function assertRemoteBlockDispatchable(
   context: RuntimeContext,
   ref: string
 ): Promise<void> {
-  assertRemoteBlockImplementation(context, ref);
+  const blockType = assertRemoteBlockExecutable(context, ref);
   const taskId = context.graph.blockTaskByRef.get(ref);
   const blocker = projectBlockerReason(await createProjectGraphClaimGuard(context), taskId);
   if (blocker) {
     throw new RemoteBlockRuntimeError("remote_block_not_dispatchable", blocker);
   }
+  if (blockType === "implementation") {
+    if (
+      !canDispatchImplementationBlock(context.graph, context.state, ref, {
+        maxConcurrent: context.manifest.execution.parallel.maxConcurrent
+      })
+    ) {
+      throw new RemoteBlockRuntimeError(
+        "remote_block_not_dispatchable",
+        `Block '${ref}' is not dispatchable right now.`
+      );
+    }
+    return;
+  }
   if (
-    !canDispatchImplementationBlock(context.graph, context.state, ref, {
-      maxConcurrent: context.manifest.execution.parallel.maxConcurrent
-    })
+    requireBlockState(context.state, ref).status !== "ready" ||
+    !canClaimReviewBlock(context.graph, context.state, ref)
   ) {
     throw new RemoteBlockRuntimeError(
       "remote_block_not_dispatchable",
-      `Block '${ref}' is not dispatchable right now.`
+      `Review block '${ref}' is not claimable right now.`
     );
   }
 }
@@ -74,6 +103,7 @@ export async function inspectRemoteBlockCandidate(
       `Remote source changed while inspecting '${ref}'; inspect again.`
     );
   }
+  const blockType = assertRemoteBlockExecutable(context, ref);
   const taskId = context.graph.blockTaskByRef.get(ref)!;
   const task = context.graph.tasksById.get(taskId)!;
   const effectiveExecutor = effectiveBlockExecutor(
@@ -94,7 +124,7 @@ export async function inspectRemoteBlockCandidate(
     canvasId: (await commandCanvasIdForWorkspace(context.workspace)) ?? "default",
     taskId,
     blockRef: ref,
-    blockType: "implementation",
+    blockType,
     sourceRevision: sourceBefore.sourceRevision,
     graphFingerprint: sourceBefore.graphFingerprint,
     renderedPrompt: sourceBefore.renderedPrompt,

@@ -148,7 +148,9 @@ export const remoteBlockFailureInputSchema = remoteBlockRefIdentitySchema.extend
 });
 
 export const remoteBlockInterruptionInputSchema = remoteBlockRefIdentitySchema.extend({
-  interruption: remoteInterruptionSchema
+  interruption: remoteInterruptionSchema,
+  /** When present, Task Workspace failure materialization labels the run with this agent. */
+  agentId: envelopeShape.agentId.optional()
 });
 
 export const remoteBlockRetryAttemptInputSchema = remoteBlockRefIdentitySchema
@@ -211,6 +213,8 @@ export type RemoteBlockCompletionResult = z.infer<typeof remoteBlockCompletionRe
 
 export type RemoteBlockRuntimeErrorCode =
   | "remote_block_not_found"
+  | "remote_block_not_executable"
+  /** @deprecated Alias kept for older tests/callers; prefer remote_block_not_executable. */
   | "remote_block_not_implementation"
   | "remote_block_not_dispatchable"
   | "remote_block_executor_not_acp"

@@ -327,8 +327,18 @@ export async function renderPromptSurfaceFromContext(
           ),
           "```",
           "",
-          REVIEW_RESULT_CONTENT_GUIDANCE
-        ].join("\n")
+          REVIEW_RESULT_CONTENT_GUIDANCE,
+          remoteDispatchMode
+            ? [
+                "",
+                "Remote Host writeback accepts either:",
+                "1) a final response that is exactly this JSON object, or",
+                "2) a PLANWEAVE_FINAL_ARTIFACT envelope with artifact.kind = review and the same reviewResult fields."
+              ].join("\n")
+            : ""
+        ]
+          .filter(Boolean)
+          .join("\n")
       : "";
   const implementationReportGuidance =
     block.type === "implementation"

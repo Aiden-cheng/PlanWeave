@@ -26,7 +26,7 @@ import {
   readImplementationRunMetadataFile,
   type ImplementationRunMetadata
 } from "./implementationRunMetadata.js";
-import { exists, loadRuntime, refreshDerivedState } from "./runtimeContext.js";
+import { exists, loadRuntime, loadRuntimeReadonly, refreshDerivedState } from "./runtimeContext.js";
 import { getBlock } from "./selectors.js";
 import { incrementTaskIndexCount, readTaskIndex, updateTaskIndex } from "./resultIndex.js";
 import { withoutRemoteBlockOwnership } from "./remoteOwnershipTransitions.js";
@@ -44,6 +44,7 @@ import {
 } from "./remoteBlockRuntimeContracts.js";
 import { remoteBlockSourceEvidence } from "./remoteBlockSource.js";
 import { materializeRemoteAcpTranscript } from "./remoteAcpTranscript.js";
+import { submitRemoteReviewResult } from "./reviewSubmission.js";
 
 type BlockSubmissionArtifact =
   | { mode: "legacy"; bytes: Buffer }
@@ -198,6 +199,29 @@ export async function submitRemoteBlockResult(
       "Remote report artifact reference does not match the supplied bytes."
     );
   }
+  const identity = {
+    operationId: input.operationId,
+    sourceRevision: input.sourceRevision,
+    graphFingerprint: input.graphFingerprint,
+    dispatchId: input.dispatchId,
+    executionAttemptId: input.executionAttemptId
+  };
+  const context = await loadRuntimeReadonly({ projectRoot: options.projectRoot });
+  const block = getBlock(context.graph, input.ref);
+  if (block.type === "review") {
+    const review = await submitRemoteReviewResult({
+      projectRoot: options.projectRoot,
+      ref: input.ref,
+      reportBytes: bytes,
+      ownership: identity
+    });
+    // Remote operation terminal shape is always completed when Host writeback succeeds.
+    return {
+      ref: review.ref,
+      runId: review.reviewAttemptId,
+      status: "completed"
+    };
+  }
   return submitBlockResultArtifact(
     {
       projectRoot: options.projectRoot,
@@ -219,13 +243,7 @@ export async function submitRemoteBlockResult(
     {
       kind: "remote",
       ...(input.transcript ? { transcript: input.transcript } : {}),
-      identity: {
-        operationId: input.operationId,
-        sourceRevision: input.sourceRevision,
-        graphFingerprint: input.graphFingerprint,
-        dispatchId: input.dispatchId,
-        executionAttemptId: input.executionAttemptId
-      }
+      identity
     }
   );
 }
