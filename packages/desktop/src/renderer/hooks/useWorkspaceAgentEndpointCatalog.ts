@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from "react";
 import type { DesktopAgentDetection, DesktopGraphViewModel } from "@planweave-ai/runtime";
+import type { PlanWeaveOperatorControlApi } from "../../shared/operatorControl";
 import type { DesktopSettingsUpdate, DesktopUiSettings } from "../types";
 import { logicalAgentEndpointInputs } from "../collaboration/agentEndpointCatalogInput";
 import {
@@ -14,9 +15,10 @@ export function useWorkspaceAgentEndpointCatalog(input: {
   agentDetections: DesktopAgentDetection[];
   agentTransport: DesktopUiSettings["execution"]["agentTransport"];
   enabled: boolean;
+  operatorProfileId: string | null;
+  fleetCatalogBlockedCode?: string | null;
+  fleetApi?: Pick<PlanWeaveOperatorControlApi, "listOperatorAgentEndpoints"> | null;
   graph: DesktopGraphViewModel | null;
-  profileId: string | null;
-  projectId: string | null;
   updateSettingsAndWait: (update: DesktopSettingsUpdate) => Promise<void>;
 }) {
   const logicalExecutors = useMemo(
@@ -36,9 +38,10 @@ export function useWorkspaceAgentEndpointCatalog(input: {
   );
   const catalog = useAgentEndpointCatalog({
     enabled: input.enabled,
+    fleetApi: input.fleetApi,
+    fleetCatalogBlockedCode: input.fleetCatalogBlockedCode,
     logicalExecutors,
-    profileId: input.profileId,
-    projectId: input.projectId
+    operatorProfileId: input.operatorProfileId
   });
   const savePreference = useCallback(
     async (key: string, endpoint: AvailableAgentEndpoint | null) => {

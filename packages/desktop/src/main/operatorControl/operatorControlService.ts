@@ -12,6 +12,7 @@ import {
   operatorMemberSetupCodeHandoffViewSchema,
   operatorImportCredentialInputSchema,
   operatorListHostsInputSchema,
+  operatorListAgentEndpointsInputSchema,
   operatorGetLocalAgentHostStatusInputSchema,
   operatorRepairLocalAgentHostInputSchema,
   operatorEnrollLocalAgentHostInputSchema,
@@ -367,6 +368,16 @@ export class OperatorControlService {
     const parsed = operatorListHostsInputSchema.parse(input);
     return this.enqueue(() =>
       this.withProfile(parsed, (client, value) => client.listHosts(value.query ?? {}))
+    );
+  }
+
+  async listAgentEndpoints(
+    input: unknown
+  ): Promise<Awaited<ReturnType<OperatorControlClient["listAgentEndpoints"]>>> {
+    assertNoSmuggledOperatorSecrets(input, "listAgentEndpoints");
+    const parsed = operatorListAgentEndpointsInputSchema.parse(input);
+    return this.enqueue(() =>
+      this.withProfile(parsed, (client) => client.listAgentEndpoints())
     );
   }
 

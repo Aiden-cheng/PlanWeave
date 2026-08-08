@@ -27,6 +27,7 @@ import { BlockInspector } from "./inspector/BlockInspector";
 import { useCollaborationStatus } from "./hooks/useCollaborationStatus";
 import { useDetectedAgents } from "./hooks/useDetectedAgents";
 import { useDesktopSettingsBridge } from "./hooks/useDesktopSettingsBridge";
+import { useOwnerControlPlaneAvailability } from "./hooks/useOwnerControlPlaneAvailability";
 import { useWorkspaceAgentEndpointCatalog } from "./hooks/useWorkspaceAgentEndpointCatalog";
 import { useSharedCanvasCommands } from "./hooks/useSharedCanvasCommands";
 import { isCollaborationSessionConnected } from "./collaboration/sessionState";
@@ -227,13 +228,14 @@ export function BlockInspectorWindow() {
       await refreshBlock();
     }
   });
+  const ownerControlPlane = useOwnerControlPlaneAvailability();
   const agentEndpointCatalog = useWorkspaceAgentEndpointCatalog({
     agentDetections,
     agentTransport: settings.execution.agentTransport,
-    enabled: sharedCanvasEnabled,
+    enabled: ownerControlPlane.fleetCatalogEnabled,
+    fleetCatalogBlockedCode: ownerControlPlane.fleetCatalogBlockedCode,
     graph,
-    profileId: activeCollaborationProfile?.profileId ?? null,
-    projectId: sharedProjectId,
+    operatorProfileId: ownerControlPlane.operatorProfileId,
     updateSettingsAndWait
   });
   const graphBlock = graph?.tasks

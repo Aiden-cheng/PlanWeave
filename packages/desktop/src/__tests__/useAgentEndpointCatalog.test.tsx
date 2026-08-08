@@ -3,8 +3,8 @@
 import { act, renderHook } from "@testing-library/react";
 import type { RemoteAgentEndpoint } from "@planweave-ai/collaboration-protocol/agent-endpoint";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CollaborationObserverSignal } from "../shared/collaborationReadModels";
 import { useAgentEndpointCatalog } from "../renderer/hooks/useAgentEndpointCatalog";
+import { updateAgentEndpointPreferences } from "../renderer/collaboration/agentEndpointPreferences";
 
 const online: RemoteAgentEndpoint = {
   schemaVersion: "agent-endpoint/v1",
@@ -23,38 +23,125 @@ const offline: RemoteAgentEndpoint = {
   unavailableReason: "host_offline"
 };
 
+const localCodex = {
+  executorName: "codex",
+  profileId: "codex-acp",
+  agentId: "codex",
+  displayName: "Codex",
+  capabilities: ["acp.codex"],
+  available: true,
+  unavailableReason: null,
+  custom: false
+};
+
+describe("useAgentEndpointCatalog owner fleet", () => {
+  it("C1: loads remote endpoints when operator control plane is enabled without collaboration session", async () => {
+    const listOperatorAgentEndpoints = vi.fn(async () => ({
+      schemaVersion: "agent-endpoint-list/v1" as const,
+      items: [online]
+    }));
+    const api = { listOperatorAgentEndpoints };
+    const { result } = renderHook(() =>
+      useAgentEndpointCatalog({
+        fleetApi: api,
+        enabled: true,
+        logicalExecutors: [localCodex],
+        operatorProfileId: "operator-profile-1"
+      })
+    );
+
+    await act(async () => undefined);
+    expect(listOperatorAgentEndpoints).toHaveBeenCalledWith({
+      profileId: "operator-profile-1"
+    });
+    expect(
+      result.current.endpoints.find((endpoint) => endpoint.id === "remote:endpoint-windows")
+    ).toMatchObject({ available: true, source: "remote" });
+    expect(result.current.errorCode).toBeNull();
+  });
+
+  it("C2: returns empty remotes and operator credential message without People CTA when credential is missing", async () => {
+    const listOperatorAgentEndpoints = vi.fn();
+    const fleetApi = { listOperatorAgentEndpoints };
+    const { result } = renderHook(() =>
+      useAgentEndpointCatalog({
+        fleetApi,
+        enabled: false,
+        fleetCatalogBlockedCode: "operator_credential_missing",
+        logicalExecutors: [localCodex],
+        operatorProfileId: "operator-profile-1"
+      })
+    );
+
+    await act(async () => undefined);
+    expect(listOperatorAgentEndpoints).not.toHaveBeenCalled();
+    expect(result.current.endpoints.some((endpoint) => endpoint.source === "remote")).toBe(false);
+    expect(result.current.errorCode).toBe("operator_credential_missing");
+    expect(result.current.error).toBe("operator_credential_missing");
+  });
+
+  it("C3: preference write still persists selected remote endpoint locally", async () => {
+    const remoteCatalogEntry = {
+      id: "remote:endpoint-windows",
+      source: "remote" as const,
+      executorName: "codex",
+      displayName: "Codex",
+      locationName: "LINANIML",
+      available: true,
+      unavailableReason: null,
+      capabilities: ["acp.codex"],
+      remoteEndpointId: "endpoint-windows"
+    };
+    const next = updateAgentEndpointPreferences({
+      current: {},
+      key: "project-local:default:task-1",
+      endpoint: remoteCatalogEntry
+    });
+    expect(next["project-local:default:task-1"]).toMatchObject({
+      kind: "remote",
+      remoteEndpointId: "endpoint-windows"
+    });
+  });
+
+  it("C4: keeps local logical executors in the merged catalog", async () => {
+    const listOperatorAgentEndpoints = vi.fn(async () => ({
+      schemaVersion: "agent-endpoint-list/v1" as const,
+      items: [online]
+    }));
+    const fleetApi = { listOperatorAgentEndpoints };
+    const { result } = renderHook(() =>
+      useAgentEndpointCatalog({
+        fleetApi,
+        enabled: true,
+        logicalExecutors: [localCodex],
+        operatorProfileId: "operator-profile-1"
+      })
+    );
+
+    await act(async () => undefined);
+    expect(result.current.endpoints.find((endpoint) => endpoint.id === "local:codex")).toEqual(
+      expect.objectContaining({ source: "local", executorName: "codex" })
+    );
+  });
+});
+
 describe("useAgentEndpointCatalog freshness", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
   it("refreshes liveness at a low frequency and preserves an unavailable Endpoint id", async () => {
     let current = online;
-    const listCollaborationAgentEndpoints = vi.fn(async () => ({
+    const listOperatorAgentEndpoints = vi.fn(async () => ({
       schemaVersion: "agent-endpoint-list/v1" as const,
       items: [current]
     }));
-    const api = {
-      listCollaborationAgentEndpoints,
-      onCollaborationObserverSignal: vi.fn(() => () => undefined)
-    };
+    const api = { listOperatorAgentEndpoints };
     const { result } = renderHook(() =>
       useAgentEndpointCatalog({
-        api,
+        fleetApi: api,
         enabled: true,
-        logicalExecutors: [
-          {
-            executorName: "codex",
-            profileId: "codex-acp",
-            agentId: "codex",
-            displayName: "Codex",
-            capabilities: ["acp.codex"],
-            available: true,
-            unavailableReason: null,
-            custom: false
-          }
-        ],
-        profileId: "profile-1",
-        projectId: "project-1"
+        logicalExecutors: [localCodex],
+        operatorProfileId: "operator-profile-1"
       })
     );
 
@@ -65,7 +152,7 @@ describe("useAgentEndpointCatalog freshness", () => {
 
     current = offline;
     await act(async () => vi.advanceTimersByTimeAsync(29_999));
-    expect(listCollaborationAgentEndpoints).toHaveBeenCalledTimes(1);
+    expect(listOperatorAgentEndpoints).toHaveBeenCalledTimes(1);
     await act(async () => vi.advanceTimersByTimeAsync(1));
     expect(
       result.current.endpoints.find((endpoint) => endpoint.id === "remote:endpoint-windows")
@@ -80,64 +167,5 @@ describe("useAgentEndpointCatalog freshness", () => {
     expect(
       result.current.endpoints.find((endpoint) => endpoint.id === "remote:endpoint-windows")
     ).toMatchObject({ available: true, unavailableReason: null });
-  });
-
-  it("refreshes when the active project receives a remote run observer event", async () => {
-    let current = online;
-    let observerListener: ((signal: CollaborationObserverSignal) => void) | null = null;
-    const listCollaborationAgentEndpoints = vi.fn(async () => ({
-      schemaVersion: "agent-endpoint-list/v1" as const,
-      items: [current]
-    }));
-    const api = {
-      listCollaborationAgentEndpoints,
-      onCollaborationObserverSignal: vi.fn(
-        (listener: (signal: CollaborationObserverSignal) => void) => {
-          observerListener = listener;
-          return () => undefined;
-        }
-      )
-    };
-    const { result } = renderHook(() =>
-      useAgentEndpointCatalog({
-        api,
-        enabled: true,
-        logicalExecutors: [],
-        profileId: "profile-1",
-        projectId: "project-1"
-      })
-    );
-
-    await act(async () => undefined);
-    current = offline;
-    const event: CollaborationObserverSignal = {
-      type: "human.observer.event",
-      profileId: "profile-1",
-      projectId: "project-1",
-      event: {
-        type: "human.observer.event",
-        protocolVersion: 1,
-        cursor: 1,
-        previousCursor: 0,
-        occurredAt: "2030-01-01T00:00:00.000Z",
-        kind: "remote_run",
-        dispatchId: "dispatch-1",
-        remoteRunStatus: "started",
-        workItem: {
-          canvasId: "default",
-          blockRef: "project-1:task-1:block-1"
-        }
-      }
-    };
-    expect(observerListener).not.toBeNull();
-    await act(async () => observerListener?.(event));
-
-    expect(listCollaborationAgentEndpoints).toHaveBeenCalledTimes(2);
-    expect(
-      result.current.endpoints.find((endpoint) => endpoint.id === "remote:endpoint-windows")
-    ).toMatchObject({
-      available: false,
-      unavailableReason: "host_offline"
-    });
   });
 });

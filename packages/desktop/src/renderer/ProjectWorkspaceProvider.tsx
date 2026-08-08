@@ -57,6 +57,7 @@ import { useGraphDeleteActions } from "./hooks/useGraphDeleteActions";
 import { useTaskNodeFocus } from "./hooks/useTaskNodeFocus";
 import { useTaskExecutorActions } from "./hooks/useTaskExecutorActions";
 import { useTaskAgentEndpointSelection } from "./hooks/useTaskAgentEndpointSelection";
+import { useOwnerControlPlaneAvailability } from "./hooks/useOwnerControlPlaneAvailability";
 import { useWorkspaceAgentEndpointCatalog } from "./hooks/useWorkspaceAgentEndpointCatalog";
 import { useWorkspaceAgentEndpointRun } from "./hooks/useWorkspaceAgentEndpointRun";
 import { useDesktopProjectActions } from "./hooks/useDesktopProjectActions";
@@ -295,13 +296,14 @@ export function ProjectWorkspaceProvider({
     graph: replicaGraph
   });
   const graph = collaborationRuntimeStatus.graph;
+  const ownerControlPlane = useOwnerControlPlaneAvailability();
   const agentEndpointCatalog = useWorkspaceAgentEndpointCatalog({
     agentDetections,
     agentTransport: settings.execution.agentTransport,
-    enabled: collaborationSurface.sessionConnected,
+    enabled: ownerControlPlane.fleetCatalogEnabled,
+    fleetCatalogBlockedCode: ownerControlPlane.fleetCatalogBlockedCode,
     graph,
-    profileId: collaborationSurface.activeProfileId,
-    projectId: collaborationSurface.activeProjectId,
+    operatorProfileId: ownerControlPlane.operatorProfileId,
     updateSettingsAndWait
   });
 

@@ -1,66 +1,88 @@
 import type { RemoteAgentEndpoint } from "@planweave-ai/collaboration-protocol/agent-endpoint";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { PlanWeaveCollaborationApi } from "../../shared/collaboration";
-import { collaborationBridge } from "../bridge";
+import {
+  OperatorControlError,
+  type PlanWeaveOperatorControlApi
+} from "../../shared/operatorControl";
+import { operatorControlBridge } from "../bridge";
 import {
   buildAgentEndpointCatalog,
   type AvailableAgentEndpoint,
   type LogicalAgentEndpointInput
 } from "../collaboration/agentEndpointViewModel";
 
-type AgentEndpointCatalogApi = Pick<
-  PlanWeaveCollaborationApi,
-  "listCollaborationAgentEndpoints" | "onCollaborationObserverSignal"
->;
+type FleetEndpointCatalogApi = Pick<PlanWeaveOperatorControlApi, "listOperatorAgentEndpoints">;
 
 export const agentEndpointCatalogRefreshIntervalMs = 30_000;
 
+function operatorFleetErrorCode(error: unknown): string {
+  if (error instanceof OperatorControlError) return error.code;
+  if (error && typeof error === "object" && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === "string" && code.length > 0) return code;
+  }
+  if (error instanceof Error && error.message.trim().length > 0) return error.message;
+  return "agent_endpoint_request_failed";
+}
+
 export function useAgentEndpointCatalog(input: {
   enabled: boolean;
+  operatorProfileId: string | null;
   logicalExecutors: readonly LogicalAgentEndpointInput[];
-  profileId: string | null;
-  projectId: string | null;
-  api?: AgentEndpointCatalogApi | null;
+  fleetApi?: FleetEndpointCatalogApi | null;
+  fleetCatalogBlockedCode?: string | null;
 }): {
   endpoints: AvailableAgentEndpoint[];
   error: string | null;
+  errorCode: string | null;
   refreshing: boolean;
   refresh: () => Promise<void>;
 } {
-  const api = input.api === undefined ? collaborationBridge : input.api;
+  const fleetApi = input.fleetApi === undefined ? operatorControlBridge : input.fleetApi;
+  const listFleetEndpoints = fleetApi?.listOperatorAgentEndpoints;
   const [remoteEndpoints, setRemoteEndpoints] = useState<RemoteAgentEndpoint[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const generationRef = useRef(0);
-  const scopeKey =
-    input.profileId && input.projectId ? `${input.profileId}:${input.projectId}` : null;
-  const scopeKeyRef = useRef(scopeKey);
-  scopeKeyRef.current = scopeKey;
+  const operatorProfileId = input.operatorProfileId;
+  const operatorProfileIdRef = useRef(operatorProfileId);
+  operatorProfileIdRef.current = operatorProfileId;
 
   const refresh = useCallback(async () => {
     const generation = ++generationRef.current;
-    const requestScopeKey = scopeKey;
+    const requestProfileId = operatorProfileId;
     const canWrite = () =>
-      generation === generationRef.current && requestScopeKey === scopeKeyRef.current;
-    if (!input.enabled || !requestScopeKey || !api?.listCollaborationAgentEndpoints) {
+      generation === generationRef.current &&
+      requestProfileId === operatorProfileIdRef.current;
+    if (!input.enabled || !requestProfileId || !listFleetEndpoints) {
       setRemoteEndpoints([]);
-      setError(null);
+      setError(input.fleetCatalogBlockedCode ?? null);
+      setErrorCode(input.fleetCatalogBlockedCode ?? null);
       setRefreshing(false);
       return;
     }
     setRefreshing(true);
     setError(null);
+    setErrorCode(null);
     try {
-      const result = await api.listCollaborationAgentEndpoints();
+      const result = await listFleetEndpoints({ profileId: requestProfileId });
       if (canWrite()) setRemoteEndpoints(result.items);
     } catch (caught: unknown) {
       if (canWrite()) {
-        setError(caught instanceof Error ? caught.message : String(caught));
+        const code = operatorFleetErrorCode(caught);
+        setError(code);
+        setErrorCode(code);
       }
     } finally {
       if (canWrite()) setRefreshing(false);
     }
-  }, [api, input.enabled, scopeKey]);
+  }, [
+    listFleetEndpoints,
+    input.enabled,
+    input.fleetCatalogBlockedCode,
+    operatorProfileId
+  ]);
 
   useEffect(() => {
     setRemoteEndpoints([]);
@@ -71,35 +93,21 @@ export function useAgentEndpointCatalog(input: {
   }, [refresh]);
 
   useEffect(() => {
-    if (!input.enabled || !scopeKey || !api) return;
-    const refreshFromServerState = () => {
+    if (!input.enabled || !operatorProfileId) return;
+    const interval = window.setInterval(() => {
       void refresh();
-    };
-    const unsubscribeObserver = api.onCollaborationObserverSignal((signal) => {
-      if (signal.profileId !== input.profileId || signal.projectId !== input.projectId) return;
-      if (
-        signal.type === "human.observer.catchup_required" ||
-        (signal.type === "human.observer.event" && signal.event.kind === "remote_run")
-      ) {
-        refreshFromServerState();
-      }
-    });
-    const interval = window.setInterval(
-      refreshFromServerState,
-      agentEndpointCatalogRefreshIntervalMs
-    );
+    }, agentEndpointCatalogRefreshIntervalMs);
     return () => {
       window.clearInterval(interval);
-      unsubscribeObserver();
     };
-  }, [api, input.enabled, input.profileId, input.projectId, refresh, scopeKey]);
+  }, [input.enabled, operatorProfileId, refresh]);
 
   const endpoints = useMemo(() => {
     const catalog = buildAgentEndpointCatalog({
       logicalExecutors: input.logicalExecutors,
       remote: remoteEndpoints
     });
-    return error
+    return errorCode && errorCode !== input.fleetCatalogBlockedCode
       ? catalog.map((endpoint) =>
           endpoint.source === "remote"
             ? {
@@ -110,7 +118,7 @@ export function useAgentEndpointCatalog(input: {
             : endpoint
         )
       : catalog;
-  }, [error, input.logicalExecutors, remoteEndpoints]);
+  }, [errorCode, input.fleetCatalogBlockedCode, input.logicalExecutors, remoteEndpoints]);
 
-  return { endpoints, error, refreshing, refresh };
+  return { endpoints, error, errorCode, refreshing, refresh };
 }

@@ -11,6 +11,10 @@ import {
   type OperatorHostView
 } from "@planweave-ai/agent-host-protocol";
 import {
+  remoteAgentEndpointListSchema,
+  type RemoteAgentEndpointList
+} from "@planweave-ai/collaboration-protocol/agent-endpoint";
+import {
   setupCodeIssueResponseSchema,
   type SetupCodeIssueResponse
 } from "@planweave-ai/collaboration-protocol/setup";
@@ -125,6 +129,10 @@ export class OperatorControlClient {
       limit: String(query.limit)
     });
     return this.json("GET", `/api/v1/hosts?${params.toString()}`, operatorHostPageSchema);
+  }
+
+  async listAgentEndpoints(): Promise<RemoteAgentEndpointList> {
+    return this.json("GET", "/api/v1/agent-endpoints", remoteAgentEndpointListSchema);
   }
 
   async createEnrollmentGrant(

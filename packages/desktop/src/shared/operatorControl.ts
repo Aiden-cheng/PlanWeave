@@ -10,6 +10,7 @@ import {
   deploymentEndpointSchema,
   isPrivateDeploymentHostname
 } from "@planweave-ai/agent-host-protocol";
+import type { RemoteAgentEndpointList } from "@planweave-ai/collaboration-protocol/agent-endpoint";
 import { z } from "zod";
 
 const operatorProfileIdSchema = z.string().trim().min(1).max(128);
@@ -105,6 +106,15 @@ export const operatorListHostsInputSchema = z
   })
   .strict();
 export type OperatorListHostsInput = z.input<typeof operatorListHostsInputSchema>;
+
+export const operatorListAgentEndpointsInputSchema = z
+  .object({
+    profileId: operatorProfileIdSchema
+  })
+  .strict();
+export type OperatorListAgentEndpointsInput = z.infer<
+  typeof operatorListAgentEndpointsInputSchema
+>;
 
 export const operatorCreateEnrollmentGrantInputSchema = z
   .object({
@@ -417,6 +427,9 @@ export type PlanWeaveOperatorControlApi = {
   ) => Promise<OperatorControlStatus>;
   clearOperatorCredential: (input: OperatorProfileIdInput) => Promise<OperatorControlStatus>;
   listOperatorHosts: (input: OperatorListHostsInput) => Promise<OperatorHostPage>;
+  listOperatorAgentEndpoints: (
+    input: OperatorListAgentEndpointsInput
+  ) => Promise<RemoteAgentEndpointList>;
   copyOperatorHostBootstrapHandoff: (
     input: OperatorCopyHostBootstrapHandoffInput
   ) => Promise<OperatorHostBootstrapHandoffView>;

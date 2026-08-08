@@ -555,6 +555,13 @@ describe("Desktop operator control trust boundary", () => {
         url: String(input),
         authorization: new Headers(init?.headers).get("authorization")
       });
+      const url = String(input);
+      if (url.includes("/api/v1/agent-endpoints")) {
+        return new Response(
+          JSON.stringify({ schemaVersion: "agent-endpoint-list/v1", items: [] }),
+          { status: 200 }
+        );
+      }
       return new Response(JSON.stringify({ items: [], nextCursor: null }), { status: 200 });
     });
     const client = new OperatorControlClient({
@@ -566,8 +573,16 @@ describe("Desktop operator control trust boundary", () => {
       items: [],
       nextCursor: null
     });
+    await expect(client.listAgentEndpoints()).resolves.toEqual({
+      schemaVersion: "agent-endpoint-list/v1",
+      items: []
+    });
     expect(requests[0]).toMatchObject({
       url: expect.stringContaining("/api/v1/hosts?cursor=0&limit=100"),
+      authorization: `Bearer ${tokenA}`
+    });
+    expect(requests[1]).toMatchObject({
+      url: expect.stringContaining("/api/v1/agent-endpoints"),
       authorization: `Bearer ${tokenA}`
     });
 

@@ -11,6 +11,7 @@ import { useDetectedAgents } from "./hooks/useDetectedAgents";
 import { useDesktopSettingsBridge } from "./hooks/useDesktopSettingsBridge";
 import { useSharedCanvasCommands } from "./hooks/useSharedCanvasCommands";
 import { useTaskAgentEndpointSelection } from "./hooks/useTaskAgentEndpointSelection";
+import { useOwnerControlPlaneAvailability } from "./hooks/useOwnerControlPlaneAvailability";
 import { useWorkspaceAgentEndpointCatalog } from "./hooks/useWorkspaceAgentEndpointCatalog";
 import { isCollaborationSessionConnected } from "./collaboration/sessionState";
 
@@ -128,13 +129,14 @@ export function TaskInspectorWindow() {
       await loadTask();
     }
   });
+  const ownerControlPlane = useOwnerControlPlaneAvailability();
   const agentEndpointCatalog = useWorkspaceAgentEndpointCatalog({
     agentDetections,
     agentTransport: settings.execution.agentTransport,
-    enabled: sharedCanvasEnabled,
+    enabled: ownerControlPlane.fleetCatalogEnabled,
+    fleetCatalogBlockedCode: ownerControlPlane.fleetCatalogBlockedCode,
     graph,
-    profileId: activeCollaborationProfile?.profileId ?? null,
-    projectId: sharedProjectId,
+    operatorProfileId: ownerControlPlane.operatorProfileId,
     updateSettingsAndWait
   });
 

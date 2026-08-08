@@ -23,9 +23,17 @@ export const agentEndpointRunEnCatalog = {
   remoteAgentFailureError:
     "{message} Fix the Host/remote failure for this block, then retry. [{code}]",
   collaborationRuntimeStatusUnavailableError:
-    "Collaboration runtime status is unavailable. Reconnect or wait for projection sync, then re-run. [{code}]",
+    "Collaboration runtime status is unavailable. Open Settings → Server to publish or sync authoritative content, then re-run. [{code}]",
   collaborationRuntimeTaskStatusUnavailableError:
     "Collaboration status for task {task} is missing. Refresh the canvas or reconnect, then re-run. [{code}]",
   collaborationRuntimeBlockStatusUnavailableError:
-    "Collaboration status for block {block} is missing. Refresh the canvas or reconnect, then re-run. [{code}]"
+    "Collaboration status for block {block} is missing. Refresh the canvas or reconnect, then re-run. [{code}]",
+  agentEndpointFleetCredentialMissing:
+    "Remote Agent Hosts need a server-admin credential. Open Settings → Server and import an operator token. [{code}]",
+  agentEndpointFleetProfileNotActive:
+    "Select a server-admin profile in Settings → Server to list remote Agent Hosts. [{code}]",
+  agentEndpointFleetBridgeUnavailable:
+    "Desktop cannot reach server-admin controls. Restart Desktop and try again. [{code}]",
+  agentEndpointFleetLoadFailed:
+    "Could not load remote Agent Host endpoints. Check Settings → Server and retry. [{code}]"
 } as const;
