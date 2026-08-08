@@ -524,6 +524,9 @@ export function createRemoteBlockRuntimePort(options: {
           runId
         });
         context.state.currentRefs = context.state.currentRefs.filter((ref) => ref !== input.ref);
+        if (context.state.currentReviewBlockRef === input.ref) {
+          context.state.currentReviewBlockRef = null;
+        }
         await writeLockedState(context);
         return remoteBlockMutationResultSchema.parse({
           binding: bindingView(context, input.ref),

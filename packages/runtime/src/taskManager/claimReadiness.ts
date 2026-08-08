@@ -298,9 +298,15 @@ function buildClaimOrder(input: {
     };
   }
 
+  // Remote-owned reviews match remote-owned implementations: omit from local claim order.
   const inProgressReview = input.graph.blockRefsInManifestOrder.find((ref) => {
     const block = getBlock(input.graph, ref);
-    return block.type === "review" && requireBlockState(input.state, ref).status === "in_progress";
+    const blockState = requireBlockState(input.state, ref);
+    return (
+      block.type === "review" &&
+      blockState.status === "in_progress" &&
+      blockState.remoteOwnership === undefined
+    );
   });
   if (inProgressReview) {
     if (input.blockType && input.blockType !== "review") {
@@ -321,9 +327,7 @@ function buildClaimOrder(input: {
     }
     const form = reviewClaimForm(input.graph, input.state, inProgressReview);
     const blockState = requireBlockState(input.state, inProgressReview);
-    // currentReview covers local resume and any in-progress review that still lacks a
-    // remoteOwnership filter at the find site (implementation current already filters).
-    if (form.kind === "resume" || blockState.remoteOwnership !== undefined) {
+    if (form.kind === "resume") {
       if (input.state.currentFeedbackId) {
         // Feedback map lookup by id is dynamic / may be stale (public probe).
         const currentFeedback = input.state.feedback[input.state.currentFeedbackId];

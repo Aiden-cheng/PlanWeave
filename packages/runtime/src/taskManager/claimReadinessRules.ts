@@ -48,7 +48,12 @@ export function currentClaimBlockedReason(
   }
   const inProgressReview = graph.blockRefsInManifestOrder.find((ref) => {
     const block = getBlock(graph, ref);
-    return block.type === "review" && requireBlockState(state, ref).status === "in_progress";
+    const blockState = requireBlockState(state, ref);
+    return (
+      block.type === "review" &&
+      blockState.status === "in_progress" &&
+      blockState.remoteOwnership === undefined
+    );
   });
   if (inProgressReview) {
     return `Default claims are blocked by current review block '${inProgressReview}'.`;

@@ -164,5 +164,9 @@ describe("claim readiness", () => {
       kind: "not_claimable",
       reason: expect.stringMatching(/remote operation/i)
     });
+
+    const ownedReadiness = buildClaimReadiness(resumeContext);
+    expect(ownedReadiness.claimOrder.kind).toBe("ready");
+    expect(ownedReadiness.defaultClaimBlockedReason).toBeNull();
   });
 });

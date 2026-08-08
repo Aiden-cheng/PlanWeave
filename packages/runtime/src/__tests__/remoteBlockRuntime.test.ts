@@ -410,6 +410,123 @@ describe("remote block runtime terminal transitions", () => {
     expect(finalState.tasks["T-001"]?.status).toBe("implemented");
   });
 
+  it("keeps remote-owned in_progress review out of local claimNext currentReview", async () => {
+    const { root, init, port, identity } = await activateReadyBlock();
+    await port.complete({
+      ref: "T-001#B-001",
+      ...identity,
+      ...reportInput(Buffer.from("# Implementation complete\n"))
+    });
+
+    const reviewCandidate = await port.inspect({ ref: "T-001#R-001" });
+    const reviewIdentity = {
+      operationId: "operation-review-owned",
+      sourceRevision: reviewCandidate.sourceRevision,
+      graphFingerprint: reviewCandidate.graphFingerprint,
+      dispatchId: "dispatch-review-owned",
+      executionAttemptId: "attempt-review-owned"
+    };
+    await port.claim({
+      ref: "T-001#R-001",
+      ...claimIdentity(reviewIdentity)
+    });
+    await port.activate({ ref: "T-001#R-001", ...reviewIdentity });
+
+    const owned = await readState(init.workspace.stateFile);
+    expect(owned.blocks["T-001#R-001"]).toMatchObject({
+      status: "in_progress",
+      remoteOwnership: reviewIdentity
+    });
+    expect(owned.currentReviewBlockRef).toBe("T-001#R-001");
+
+    await expect(claimNext({ projectRoot: root, dryRun: true })).resolves.toEqual({
+      kind: "none",
+      reason: "no_claimable_blocks"
+    });
+    await expect(claimNext({ projectRoot: root })).resolves.toEqual({
+      kind: "none",
+      reason: "no_claimable_blocks"
+    });
+    expect((await getExecutionStatus({ projectRoot: root })).currentReviewBlockRef).toBe(
+      "T-001#R-001"
+    );
+  });
+
+  it("clears currentReviewBlockRef when a remote review fails and allows reclaim after unblock", async () => {
+    const { init, port, identity } = await activateReadyBlock();
+    await port.complete({
+      ref: "T-001#B-001",
+      ...identity,
+      ...reportInput(Buffer.from("# Implementation complete\n"))
+    });
+
+    const reviewCandidate = await port.inspect({ ref: "T-001#R-001" });
+    const reviewIdentity = {
+      operationId: "operation-review-fail",
+      sourceRevision: reviewCandidate.sourceRevision,
+      graphFingerprint: reviewCandidate.graphFingerprint,
+      dispatchId: "dispatch-review-fail",
+      executionAttemptId: "attempt-review-fail"
+    };
+    await port.claim({
+      ref: "T-001#R-001",
+      ...claimIdentity(reviewIdentity)
+    });
+    await port.activate({ ref: "T-001#R-001", ...reviewIdentity });
+    expect((await readState(init.workspace.stateFile)).currentReviewBlockRef).toBe("T-001#R-001");
+
+    const failure = {
+      code: "executor_failed" as const,
+      message: "Remote executor failed.",
+      retryable: true
+    };
+    const failed = await port.fail({
+      ref: "T-001#R-001",
+      ...reviewIdentity,
+      failure
+    });
+    expect(failed.retryDecision).toBe("manual_retry_required");
+
+    const afterFail = await readState(init.workspace.stateFile);
+    expect(afterFail.currentReviewBlockRef).toBeNull();
+    expect(afterFail.currentRefs).not.toContain("T-001#R-001");
+    expect(afterFail.blocks["T-001#R-001"]).toMatchObject({
+      status: "blocked",
+      blockedReason: "[executor_failed] Remote executor failed.",
+      remoteOperationReceipt: { outcome: "failed", ...reviewIdentity, failure }
+    });
+    expect(afterFail.blocks["T-001#R-001"]).not.toHaveProperty("remoteOwnership");
+
+    await unblockBlock({
+      projectRoot: init.workspace,
+      ref: "T-001#R-001",
+      reason: "Operator approved a new review operation generation."
+    });
+    const afterUnblock = await readState(init.workspace.stateFile);
+    expect(afterUnblock.blocks["T-001#R-001"]).toMatchObject({ status: "ready" });
+    expect(afterUnblock.blocks["T-001#R-001"]).not.toHaveProperty("remoteOperationReceipt");
+
+    const reclaimCandidate = await port.inspect({ ref: "T-001#R-001" });
+    const reclaimIdentity = {
+      operationId: "operation-review-reclaim",
+      sourceRevision: reclaimCandidate.sourceRevision,
+      graphFingerprint: reclaimCandidate.graphFingerprint,
+      dispatchId: "dispatch-review-reclaim",
+      executionAttemptId: "attempt-review-reclaim"
+    };
+    await port.claim({
+      ref: "T-001#R-001",
+      ...claimIdentity(reclaimIdentity)
+    });
+    await port.activate({ ref: "T-001#R-001", ...reclaimIdentity });
+    const afterReclaim = await readState(init.workspace.stateFile);
+    expect(afterReclaim.blocks["T-001#R-001"]).toMatchObject({
+      status: "in_progress",
+      remoteOwnership: reclaimIdentity
+    });
+    expect(afterReclaim.currentReviewBlockRef).toBe("T-001#R-001");
+  });
+
   it("persists exact report bytes and idempotently replays only the same completion", async () => {
     const { init, port, identity } = await activateReadyBlock();
     const bytes = Buffer.from("# Remote result\n\nExact UTF-8 bytes.\n");

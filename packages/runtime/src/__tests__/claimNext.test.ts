@@ -128,6 +128,14 @@ describe("claimNext", () => {
     expect(prompt).toContain("Focused Re-review Context");
     expect(prompt).toContain("Please update tests.");
     expect(prompt).toContain("Tests updated.");
+
+    // Local in_progress review without remoteOwnership remains currentReview (dry + true).
+    const localDry = await claimNext({ projectRoot: root, dryRun: true });
+    expect(localDry).toMatchObject({
+      kind: "block",
+      ref: "T-001#R-001",
+      reason: "current"
+    });
   });
 
   it("reports blocked claims before returning none", async () => {
