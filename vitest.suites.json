@@ -137,6 +137,7 @@
         "executorPreflightUi.test.tsx",
         "fileSyncPopover.test.tsx",
         "floatingAutoRunControl.test.tsx",
+        "formatAgentEndpointRunError.test.ts",
         "globalPromptHook.test.tsx",
         "graphActionsHook.test.tsx",
         "graphDependencyEdges.test.ts",

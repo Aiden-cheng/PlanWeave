@@ -167,6 +167,32 @@ describe("runClaimBusScope", () => {
         ...ports
       })
     ).rejects.toThrow("claim_bus_idle:no_claimable_blocks");
+
+    expect(ports.completion.isSatisfied).toHaveBeenNthCalledWith(2, { refresh: true });
+  });
+
+  it("refreshes completion after claim none before judging idle vs complete", async () => {
+    const optionsSeen: Array<{ refresh?: boolean } | undefined> = [];
+    let checks = 0;
+    const ports = createPorts({
+      previews: [{ kind: "none", reason: "no_claimable_blocks" }]
+    });
+    ports.completion.isSatisfied = vi.fn(async (options) => {
+      optionsSeen.push(options);
+      checks += 1;
+      // Stale first check is incomplete; refreshed check after none becomes complete.
+      return checks >= 2;
+    });
+
+    await expect(
+      runClaimBusScope({
+        scope: { kind: "project" },
+        ...ports
+      })
+    ).resolves.toBeUndefined();
+
+    expect(optionsSeen).toEqual([undefined, { refresh: true }]);
+    expect(ports.localBlock.execute).not.toHaveBeenCalled();
   });
 
   it("returns successfully when none while scope is satisfied", async () => {
@@ -187,6 +213,7 @@ describe("runClaimBusScope", () => {
       })
     ).resolves.toBeUndefined();
 
+    expect(ports.completion.isSatisfied).toHaveBeenNthCalledWith(2, { refresh: true });
     expect(ports.localBlock.execute).not.toHaveBeenCalled();
   });
 
@@ -250,6 +277,7 @@ describe("runClaimBusScope", () => {
         ...ports
       })
     ).rejects.toThrow(/claim_bus_idle:at_capacity/);
+    expect(ports.completion.isSatisfied).toHaveBeenNthCalledWith(2, { refresh: true });
     expect(ports.localBlock.execute).not.toHaveBeenCalled();
     expect(ports.remoteBlock.execute).not.toHaveBeenCalled();
   });

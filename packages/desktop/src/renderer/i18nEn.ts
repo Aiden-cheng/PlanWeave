@@ -1,3 +1,4 @@
+import { agentEndpointRunEnCatalog } from "./i18nAgentEndpointRunEn";
 import { runnerEnCatalog } from "./i18nRunnerEn";
 
 export const enCatalog = {
@@ -955,6 +956,7 @@ export const enCatalog = {
   sharedResourceOverlap:
     "Multiple tasks are currently using this resource. Coordinate when their changes overlap.",
   ...runnerEnCatalog,
+  ...agentEndpointRunEnCatalog,
   inspectTask: "Open task inspector",
   inspectBlock: "Open block inspector",
   taskWorkspaceBackToCanvas: "Back to canvas",

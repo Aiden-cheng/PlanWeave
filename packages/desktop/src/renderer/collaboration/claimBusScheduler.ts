@@ -15,8 +15,16 @@ export type FeedbackExecutionPort = {
   ) => Promise<void>;
 };
 
+export type ScopeCompletionCheckOptions = {
+  /**
+   * Force a fresh collaboration runtime-status projection read before judging.
+   * Used after claim-none / at_capacity so a lagging projection cannot false-idle a finished scope.
+   */
+  refresh?: boolean;
+};
+
 export type ScopeCompletionPort = {
-  isSatisfied: () => Promise<boolean>;
+  isSatisfied: (options?: ScopeCompletionCheckOptions) => Promise<boolean>;
 };
 
 export type EndpointRoutingPort = {
@@ -60,7 +68,8 @@ export async function runClaimBusScope(input: ClaimBusScopeInput): Promise<void>
     const unit = await input.preview.previewNext(input.scope);
 
     if (unit.kind === "none") {
-      if (await input.completion.isSatisfied()) {
+      // Projection may lag the just-finished unit; refresh before idle vs complete.
+      if (await input.completion.isSatisfied({ refresh: true })) {
         return;
       }
       throw new Error(`claim_bus_idle:${unit.reason ?? "unknown"}`);
@@ -79,7 +88,7 @@ export async function runClaimBusScope(input: ClaimBusScopeInput): Promise<void>
       // Parallel dry-run may report retained in_progress holders as batch+at_capacity
       // (same as runAutoRunStep idle). Never re-dispatch those refs.
       if (unit.reason === "at_capacity") {
-        if (await input.completion.isSatisfied()) {
+        if (await input.completion.isSatisfied({ refresh: true })) {
           return;
         }
         throw new Error("claim_bus_idle:at_capacity");

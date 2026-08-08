@@ -1,0 +1,77 @@
+import { describe, expect, it } from "vitest";
+import { formatAgentEndpointRunError } from "../renderer/collaboration/formatAgentEndpointRunError";
+import { createTranslator } from "../renderer/i18n";
+
+describe("formatAgentEndpointRunError", () => {
+  const en = createTranslator("en");
+  const zh = createTranslator("zh-CN");
+
+  it("humanizes claim_bus_blocked with reason and original code", () => {
+    const formatted = formatAgentEndpointRunError("claim_bus_blocked:dependency_incomplete", en);
+    expect(formatted).toContain("dependency_incomplete");
+    expect(formatted).toContain("run again");
+    expect(formatted).toContain("[claim_bus_blocked:dependency_incomplete]");
+  });
+
+  it("humanizes claim_bus_idle and claim_bus_cancelled", () => {
+    expect(formatAgentEndpointRunError("claim_bus_idle:no_claimable_blocks", en)).toContain(
+      "[claim_bus_idle:no_claimable_blocks]"
+    );
+    expect(formatAgentEndpointRunError("claim_bus_cancelled", en)).toContain(
+      "[claim_bus_cancelled]"
+    );
+  });
+
+  it("humanizes local_agent_unit failure with block and phase", () => {
+    const formatted = formatAgentEndpointRunError("local_agent_unit_failed:T-002#B-001", en);
+    expect(formatted).toContain("T-002#B-001");
+    expect(formatted).toContain("failed");
+    expect(formatted).toContain("[local_agent_unit_failed:T-002#B-001]");
+  });
+
+  it("humanizes preference mismatch and selection missing", () => {
+    const mismatch = formatAgentEndpointRunError(
+      "agent_endpoint_preference_mismatch:T-003#B-001:grok->codex",
+      en
+    );
+    expect(mismatch).toContain("T-003#B-001");
+    expect(mismatch).toContain("grok->codex");
+    expect(mismatch).toContain("Re-select");
+    expect(mismatch).toContain("[agent_endpoint_preference_mismatch:T-003#B-001:grok->codex]");
+
+    const missing = formatAgentEndpointRunError(
+      "agent_endpoint_selection_missing:T-001#R-001",
+      en
+    );
+    expect(missing).toContain("T-001#R-001");
+    expect(missing).toContain("[agent_endpoint_selection_missing:T-001#R-001]");
+  });
+
+  it("humanizes remote failure codes and host failure shape", () => {
+    const remote = formatAgentEndpointRunError("remote_agent_block_failed:T-001#B-001", en);
+    expect(remote).toContain("T-001#B-001");
+    expect(remote).toContain("failed");
+    expect(remote).toContain("[remote_agent_block_failed:T-001#B-001]");
+
+    const host = formatAgentEndpointRunError(
+      "ACP authentication is required. (acp_authentication_required)",
+      en
+    );
+    expect(host).toContain("ACP authentication is required.");
+    expect(host).toContain("[acp_authentication_required]");
+  });
+
+  it("provides zh-CN copy with the same diagnostic code", () => {
+    const formatted = formatAgentEndpointRunError(
+      "agent_endpoint_preference_mismatch:T-003#B-001:grok->codex",
+      zh
+    );
+    expect(formatted).toContain("T-003#B-001");
+    expect(formatted).toContain("重新选择");
+    expect(formatted).toContain("[agent_endpoint_preference_mismatch:T-003#B-001:grok->codex]");
+  });
+
+  it("passes through unknown messages", () => {
+    expect(formatAgentEndpointRunError("totally_unknown_error", en)).toBe("totally_unknown_error");
+  });
+});

@@ -894,6 +894,64 @@ describe("workspace Agent Endpoint routing", () => {
 
     expect(setError).toHaveBeenCalledWith("claim_bus_idle:no_claimable_blocks");
     expect(lifecycle.onFailed).toHaveBeenCalledWith("claim_bus_idle:no_claimable_blocks");
+    // loop check (1) + refresh path (2 dedicated reads)
+    expect(readRuntimeStatus).toHaveBeenCalledTimes(3);
+  });
+
+  it("refreshes completion projection after claim none before judging idle", async () => {
+    const previewClaimNext = vi.fn(async () => ({
+      kind: "none" as const,
+      reason: "no_claimable_blocks"
+    }));
+    const incomplete = statusProjection({
+      taskStatus: "in_progress",
+      blocks: [{ ref: "T-001#B-001", status: "ready" }]
+    });
+    const complete = statusProjection({
+      taskStatus: "implemented",
+      blocks: [{ ref: "T-001#B-001", status: "completed", dispatchable: false }]
+    });
+    const readRuntimeStatus = vi
+      .fn()
+      .mockResolvedValueOnce(incomplete) // loop-start check
+      .mockResolvedValueOnce(incomplete) // refresh first read (still lagging)
+      .mockResolvedValue(complete); // refresh second read catches up
+    const { result, setError, lifecycle, dispatch } = renderRun({
+      previewClaimNext,
+      readRuntimeStatus
+    });
+
+    await act(() => result.current({ kind: "project" }));
+
+    expect(lifecycle.onCompleted).toHaveBeenCalled();
+    expect(setError).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(readRuntimeStatus).toHaveBeenCalledTimes(3);
+  });
+
+  it("surfaces collaboration_runtime_status_unavailable when refresh cannot read status", async () => {
+    const previewClaimNext = vi.fn(async () => ({
+      kind: "none" as const,
+      reason: "no_claimable_blocks"
+    }));
+    const readRuntimeStatus = vi
+      .fn()
+      .mockResolvedValueOnce(
+        statusProjection({
+          taskStatus: "in_progress",
+          blocks: [{ ref: "T-001#B-001", status: "ready" }]
+        })
+      )
+      .mockResolvedValue(null);
+    const { result, setError, lifecycle } = renderRun({
+      previewClaimNext,
+      readRuntimeStatus
+    });
+
+    await act(() => result.current({ kind: "project" }));
+
+    expect(setError).toHaveBeenCalledWith("collaboration_runtime_status_unavailable");
+    expect(lifecycle.onFailed).toHaveBeenCalledWith("collaboration_runtime_status_unavailable");
   });
 
   it("runs coordinated_block through claim bus rather than execute-once", async () => {

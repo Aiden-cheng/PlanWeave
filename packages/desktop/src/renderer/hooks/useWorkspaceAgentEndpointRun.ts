@@ -232,12 +232,22 @@ export function useWorkspaceAgentEndpointRun(
             }
           },
           completion: {
-            isSatisfied: async () => {
-              const status = await api.readCollaborationCanvasRuntimeStatus({
-                localProjectId: selectedProject.projectId,
-                canvasId: selectedCanvasId
-              });
-              if (!status) throw new Error("collaboration_runtime_status_unavailable");
+            isSatisfied: async (options) => {
+              const readStatus = async () => {
+                const status = await api.readCollaborationCanvasRuntimeStatus({
+                  localProjectId: selectedProject.projectId,
+                  canvasId: selectedCanvasId
+                });
+                if (!status) throw new Error("collaboration_runtime_status_unavailable");
+                return status;
+              };
+
+              // refresh: dedicated re-read so claim-none idle cannot use a lagging projection.
+              // Authority stays on collaboration runtime status (not local Auto Run state).
+              let status = await readStatus();
+              if (options?.refresh) {
+                status = await readStatus();
+              }
 
               if (scope.kind === "block") {
                 const row = status.blocks.find((block) => block.ref === scope.blockRef);

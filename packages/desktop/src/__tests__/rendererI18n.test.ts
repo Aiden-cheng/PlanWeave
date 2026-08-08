@@ -14,6 +14,26 @@ describe("desktop renderer i18n", () => {
     expect(Object.keys(resources["zh-CN"]).sort()).toEqual(Object.keys(resources.en).sort());
   });
 
+  it("includes claim-bus and agent-endpoint run error keys in both languages", () => {
+    const keys = [
+      "claimBusBlockedError",
+      "claimBusIdleError",
+      "claimBusCancelledError",
+      "localAgentUnitFailedError",
+      "agentEndpointPreferenceMismatchError",
+      "agentEndpointSelectionMissingError",
+      "remoteAgentBlockFailedError",
+      "remoteAgentFailureError",
+      "collaborationRuntimeStatusUnavailableError"
+    ] as const;
+    for (const key of keys) {
+      expect(resources.en[key].length).toBeGreaterThan(0);
+      expect(resources["zh-CN"][key].length).toBeGreaterThan(0);
+      expect(resources.en[key]).toContain("{code}");
+      expect(resources["zh-CN"][key]).toContain("{code}");
+    }
+  });
+
   it("keeps catalog data outside the translator runtime module", async () => {
     const i18nSource = await readFile(resolve(sourceDir, "renderer", "i18n.ts"), "utf8");
 

@@ -1,4 +1,5 @@
 import type { TranslationKey } from "./i18nEn";
+import { agentEndpointRunZhCnCatalog } from "./i18nAgentEndpointRunZhCn";
 import { runnerZhCnCatalog } from "./i18nRunnerZhCn";
 
 export const zhCnCatalog = {
@@ -891,6 +892,7 @@ export const zhCnCatalog = {
   sharedResourceNonBlocking: "这些任务关联同一资源，改动范围重叠时需要协调。",
   sharedResourceOverlap: "多个任务正在使用该资源，改动范围重叠时需要协调。",
   ...runnerZhCnCatalog,
+  ...agentEndpointRunZhCnCatalog,
   inspectTask: "打开 Task 检查器",
   inspectBlock: "打开 Block 检查器",
   taskWorkspaceBackToCanvas: "返回画布",
