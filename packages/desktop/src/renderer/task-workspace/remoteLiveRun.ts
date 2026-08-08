@@ -1,8 +1,5 @@
-import {
-  taskWorkspaceRunItemSchema,
-  type TaskWorkspace,
-  type TaskWorkspaceBlock
-} from "@planweave-ai/runtime";
+import type { TaskWorkspace, TaskWorkspaceBlock } from "@planweave-ai/runtime";
+import { taskWorkspaceRunItemSchema } from "@planweave-ai/runtime/browser";
 
 /** Synthetic run id prefix for an in-flight remote operation without local materialization yet. */
 const REMOTE_LIVE_RUN_PREFIX = "remote-live-";
