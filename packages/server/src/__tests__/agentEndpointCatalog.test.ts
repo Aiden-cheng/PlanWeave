@@ -244,6 +244,47 @@ describe("AgentEndpointCatalog", () => {
     });
   });
 
+  it("rejects resolveForRun when a workspace-bound host has a missing workspace mapping", () => {
+    const host = readyHost({
+      readinessObservation: {
+        workspaceMappings: [],
+        acpProfiles: readyHost().readinessObservation!.acpProfiles
+      }
+    });
+    const state = fixture([host]);
+    const endpoint = state.catalog.listVisibleFleet().items[0]!;
+    expect(state.catalog.listVisible("workspace-a").items[0]).toMatchObject({
+      status: "unavailable",
+      unavailableReason: "workspace_mapping_missing"
+    });
+    expect(() =>
+      state.catalog.resolveForRun(endpoint.endpointId, "workspace-a", ["acp.codex"])
+    ).toThrowError(new AgentEndpointCatalogError("agent_endpoint_unavailable"));
+  });
+
+  it("keeps fleet rules for resolveForRun when the host is not workspace-bound", () => {
+    const host = readyHost({
+      readinessObservation: {
+        workspaceMappings: [],
+        acpProfiles: readyHost().readinessObservation!.acpProfiles
+      }
+    });
+    const hostPort: AgentEndpointHostPort = {
+      listActiveHosts: () => activeHosts([host]),
+      listExclusivelyBoundToWorkspace: () => []
+    };
+    const catalog = new AgentEndpointCatalog({
+      hosts: hostPort,
+      capacities: { activeCountsForHosts: () => new Map() },
+      hostOfflineAfterMs: 60_000,
+      clock: () => now
+    });
+    const endpoint = catalog.listVisibleFleet().items[0]!;
+    expect(
+      catalog.resolveForRun(endpoint.endpointId, "workspace-a", ["acp.codex"])
+    ).toMatchObject({ hostId: "host-primary", profileId: "profile-main", agentId: "codex" });
+  });
+
   it.each([
     ["revoked", { revokedAt: "2026-08-03T07:59:00.000Z" }],
     ["expired", { credentialExpiresAt: now.toISOString() }]

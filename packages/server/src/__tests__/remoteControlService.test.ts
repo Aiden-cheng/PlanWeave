@@ -137,6 +137,21 @@ function registerFleetHost(
 }
 
 describe("RemoteControlService owner fleet control plane", () => {
+  it("returns an unbound fleet host from getHost without workspace scope", () => {
+    const run = async () => {
+      const fixture = await setup();
+      const host = registerFleetHost(fixture.coordination);
+      const view = fixture.service.getHost(fixture.principal, host.id);
+      expect(view).toMatchObject({
+        id: host.id,
+        displayName: "Fleet Host",
+        availability: { status: "available", reason: null }
+      });
+      expect(view.workspaceId).toBeUndefined();
+    };
+    return run();
+  });
+
   it("lists fleet hosts without workspace binding and revokes them by hostId", () => {
     const run = async () => {
       const fixture = await setup();

@@ -216,7 +216,7 @@ export class AgentEndpointCatalog {
     const requiredCapabilities = agentEndpointCapabilitiesSchema.parse(requiredCapabilitiesInput);
     const candidate = this.findCandidateForResolve(endpointId, workspaceId);
     if (!candidate) throw new AgentEndpointCatalogError("agent_endpoint_unknown");
-    if (candidate.endpoint.status !== "available") {
+    if (this.unavailableReasonForResolve(candidate, workspaceId) !== undefined) {
       throw new AgentEndpointCatalogError("agent_endpoint_unavailable");
     }
     if (
@@ -245,10 +245,8 @@ export class AgentEndpointCatalog {
     if (!candidate || candidate.host.id !== expectedHostId) {
       throw new AgentEndpointCatalogError("agent_endpoint_unknown");
     }
-    if (
-      candidate.endpoint.status !== "available" &&
-      candidate.endpoint.unavailableReason !== "at_capacity"
-    ) {
+    const reason = this.unavailableReasonForResolve(candidate, workspaceId);
+    if (reason !== undefined && reason !== "at_capacity") {
       throw new AgentEndpointCatalogError("agent_endpoint_unavailable");
     }
     if (
@@ -261,6 +259,28 @@ export class AgentEndpointCatalog {
       throw new AgentEndpointCatalogError("agent_endpoint_incompatible");
     }
     return this.toResolved(candidate);
+  }
+
+  private unavailableReasonForResolve(
+    candidate: InternalCandidate,
+    workspaceId: string
+  ): AgentEndpointUnavailableReason | undefined {
+    const boundHostIds = new Set(
+      this.options.hosts
+        .listExclusivelyBoundToWorkspace(workspaceId)
+        .map((host) => host.id)
+    );
+    const scope: CandidateScope = boundHostIds.has(candidate.host.id) ? "workspace" : "fleet";
+    return unavailableReason(
+      candidate.host,
+      scope === "workspace" ? workspaceId : undefined,
+      candidate.profile,
+      this.options.capacities.activeCountsForHosts([candidate.host.id]).get(candidate.host.id) ?? 0,
+      this.clock(),
+      this.options.hostOfflineAfterMs,
+      this.profileIdentityCount(candidate.host, candidate.profile) !== 1,
+      scope
+    );
   }
 
   private findCandidateForResolve(
