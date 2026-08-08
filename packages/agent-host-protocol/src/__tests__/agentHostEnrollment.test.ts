@@ -36,6 +36,15 @@ describe("Agent Host enrollment protocol", () => {
       }).hostId
     ).toBe("host-enrolled-001");
     expect(
+      hostEnrollmentCompletedSchema.parse({
+        type: "host.enrollment.completed",
+        protocolVersion: 1,
+        enrollmentAttemptId: "attempt-enrollment-001",
+        hostId: "host-enrolled-001",
+        credentialExpiresAt: new Date(Date.now() + 60_000).toISOString()
+      }).workspaceId
+    ).toBeUndefined();
+    expect(
       hostEnrollmentErrorSchema.parse({
         type: "host.enrollment.error",
         protocolVersion: 1,

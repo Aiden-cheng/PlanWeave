@@ -23,8 +23,8 @@ export const hostEnrollmentCompletedSchema = versioned.extend({
   type: z.literal("host.enrollment.completed"),
   enrollmentAttemptId: opaqueIdentifierSchema,
   hostId: opaqueIdentifierSchema,
-  /** Server-authoritative Workspace scope resolved from the enrollment grant. */
-  workspaceId: opaqueIdentifierSchema,
+  /** Optional legacy collaboration workspace scope; server-scoped fleet enrollment does not require it. */
+  workspaceId: opaqueIdentifierSchema.optional(),
   credentialExpiresAt: z.string().datetime()
 });
 
