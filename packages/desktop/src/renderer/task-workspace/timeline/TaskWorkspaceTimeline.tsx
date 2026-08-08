@@ -3,9 +3,7 @@ import type { KeyboardEvent, ReactNode } from "react";
 import type { TaskWorkspaceAnnotation } from "@planweave-ai/runtime";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { VerticalResizeHandle } from "../../components/VerticalResizeHandle";
 import { LiveRunElapsedText } from "../LiveDurationText";
-import { taskWorkspacePanelMaxWidth, taskWorkspacePanelMinWidth } from "../useTaskWorkspaceLayout";
 import { TaskWorkspaceOverview } from "./TaskWorkspaceOverview";
 import { projectTaskWorkspaceTimeline } from "./timelineProjection";
 import type {
@@ -14,7 +12,6 @@ import type {
   TimelineRunProjection,
   TimelineRunStatus
 } from "./types";
-import { useTimelineResize } from "./useTimelineResize";
 import { useTimelineWindow } from "./useTimelineWindow";
 
 const statusClasses: Record<TimelineRunStatus, string> = {
@@ -273,8 +270,6 @@ export function TaskWorkspaceTimeline({
   selectRun,
   selectedAnnotation,
   selectedRecordId,
-  setTimelineWidth,
-  timelineWidth,
   workspace
 }: TaskWorkspaceTimelineProps) {
   const projection = useMemo(() => projectTaskWorkspaceTimeline(workspace), [workspace]);
@@ -287,7 +282,6 @@ export function TaskWorkspaceTimeline({
     selectedRecordId,
     recordIds
   );
-  const resize = useTimelineResize({ setTimelineWidth, timelineWidth });
   const timelineWindow = useTimelineWindow(recordIds.length);
   const visibleRuns = projection.runs.slice(timelineWindow.start, timelineWindow.end);
 
@@ -460,7 +454,7 @@ export function TaskWorkspaceTimeline({
   }
 
   return (
-    <div className="relative min-h-full pr-1">
+    <div className="relative min-h-full">
       <TaskWorkspaceOverview
         labels={labels}
         onSelect={() => selectRun(null)}
@@ -473,18 +467,6 @@ export function TaskWorkspaceTimeline({
         </h2>
         {timelineContent}
       </section>
-      <VerticalResizeHandle
-        aria-label={labels.resizeTimeline}
-        aria-orientation="vertical"
-        aria-valuemax={taskWorkspacePanelMaxWidth}
-        aria-valuemin={taskWorkspacePanelMinWidth}
-        aria-valuenow={timelineWidth}
-        onKeyDown={resize.resizeWithKeyboard}
-        onPointerDown={resize.startResize}
-        role="separator"
-        side="right"
-        tabIndex={0}
-      />
     </div>
   );
 }

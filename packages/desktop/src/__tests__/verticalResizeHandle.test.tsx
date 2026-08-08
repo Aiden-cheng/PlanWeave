@@ -40,4 +40,19 @@ describe("VerticalResizeHandle", () => {
     expect(separator).toHaveClass("inset-y-0", "after:top-11", "after:bottom-0");
     expect(separator).not.toHaveClass("after:inset-y-0");
   });
+
+  it("can omit the visible line when a panel border is the separator", () => {
+    render(
+      <VerticalResizeHandle
+        aria-label="Resize without line"
+        role="separator"
+        showVisualLine={false}
+        side="right"
+      />
+    );
+
+    const separator = screen.getByRole("separator", { name: "Resize without line" });
+    expect(separator).toHaveClass("w-2", "bg-transparent", "right-0", "cursor-col-resize");
+    expect(separator).not.toHaveClass("after:w-px", "after:bg-border/80");
+  });
 });

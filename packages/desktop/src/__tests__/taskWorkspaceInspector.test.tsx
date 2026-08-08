@@ -8,10 +8,6 @@ import {
   TaskWorkspaceInspector,
   type TaskWorkspaceInspectorLabels
 } from "../renderer/task-workspace/inspector/TaskWorkspaceInspector";
-import {
-  taskWorkspacePanelMaxWidth,
-  taskWorkspacePanelMinWidth
-} from "../renderer/task-workspace/useTaskWorkspaceLayout";
 import { cleanupRendererTestEnvironment } from "./helpers/rendererTestEnvironment";
 import {
   taskWorkspaceInspectorFixture,
@@ -262,34 +258,12 @@ describe("TaskWorkspaceInspector", () => {
     expect(screen.queryByText("Recorded")).not.toBeInTheDocument();
   });
 
-  it("uses the authoritative layout setters for close, pointer resize, and keyboard resize", async () => {
+  it("uses the authoritative layout setter for close", async () => {
     const setInspectorCollapsed = vi.fn();
-    const setInspectorWidth = vi.fn();
     const user = userEvent.setup();
-    renderInspector({ setInspectorCollapsed, setInspectorWidth });
+    renderInspector({ setInspectorCollapsed });
 
-    const separator = screen.getByRole("separator", { name: "Resize inspector" });
-    expect(separator).toHaveAttribute("aria-valuemin", String(taskWorkspacePanelMinWidth));
-    expect(separator).toHaveAttribute("aria-valuemax", String(taskWorkspacePanelMaxWidth));
-    expect(separator).toHaveAttribute("aria-valuenow", "360");
-    expect(separator).toHaveClass(
-      "w-2",
-      "cursor-col-resize",
-      "after:w-px",
-      "after:bg-border/80",
-      "hover:after:bg-foreground/30",
-      "active:after:bg-foreground/50"
-    );
-    expect(separator).not.toHaveClass("hover:bg-state-selected/10", "active:bg-state-selected/20");
-    fireEvent.pointerDown(separator, { clientX: 100 });
-    fireEvent.pointerMove(window, { clientX: 140 });
-    expect(setInspectorWidth).toHaveBeenCalledWith(320);
-
-    fireEvent.keyDown(separator, { key: "ArrowLeft" });
-    expect(setInspectorWidth).toHaveBeenCalledWith(376);
-    fireEvent.keyDown(separator, { key: "ArrowRight" });
-    expect(setInspectorWidth).toHaveBeenCalledWith(344);
-
+    expect(screen.queryByRole("separator", { name: "Resize inspector" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Close inspector" }));
     expect(setInspectorCollapsed).toHaveBeenCalledWith(true);
   });

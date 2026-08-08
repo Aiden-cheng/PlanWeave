@@ -6,10 +6,6 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TaskWorkspaceTimeline } from "../renderer/task-workspace/timeline";
 import type { TaskWorkspaceTimelineLabels } from "../renderer/task-workspace/timeline";
-import {
-  taskWorkspacePanelMaxWidth,
-  taskWorkspacePanelMinWidth
-} from "../renderer/task-workspace/useTaskWorkspaceLayout";
 import { cleanupRendererTestEnvironment } from "./helpers/rendererTestEnvironment";
 import {
   reviewAnnotationFixture,
@@ -346,44 +342,6 @@ describe("TaskWorkspaceTimeline", () => {
     expect(selectedOption).toHaveAttribute("aria-selected", "true");
     expect(selectedOption).toHaveAttribute("tabindex", "0");
     expect(screen.getAllByRole("option").filter((option) => option.tabIndex === 0)).toHaveLength(1);
-  });
-
-  it("resizes through the authoritative layout setter with pointer and keyboard input", () => {
-    const fixture = timelineProps();
-    render(
-      <TaskWorkspaceTimeline
-        getRunScrollTop={() => 0}
-        labels={labels}
-        onRunScrollTopChange={vi.fn()}
-        selectRun={vi.fn()}
-        selectedRecordId={null}
-        setTimelineWidth={fixture.setTimelineWidth}
-        timelineWidth={280}
-        workspace={fixture.workspace}
-      />
-    );
-
-    const separator = screen.getByRole("separator", { name: "Resize timeline" });
-    expect(separator).toHaveAttribute("aria-valuemin", String(taskWorkspacePanelMinWidth));
-    expect(separator).toHaveAttribute("aria-valuemax", String(taskWorkspacePanelMaxWidth));
-    expect(separator).toHaveAttribute("aria-valuenow", "280");
-    expect(separator).toHaveClass(
-      "w-2",
-      "cursor-col-resize",
-      "after:w-px",
-      "after:bg-border/80",
-      "hover:after:bg-foreground/30",
-      "active:after:bg-foreground/50"
-    );
-    expect(separator).not.toHaveClass("hover:bg-state-selected/10", "active:bg-state-selected/20");
-    fireEvent.pointerDown(separator, { clientX: 100 });
-    fireEvent.pointerMove(window, { clientX: 150 });
-    expect(fixture.setTimelineWidth).toHaveBeenCalledWith(330);
-
-    fireEvent.keyDown(separator, { key: "ArrowRight" });
-    expect(fixture.setTimelineWidth).toHaveBeenLastCalledWith(296);
-    fireEvent.keyDown(separator, { key: "ArrowLeft" });
-    expect(fixture.setTimelineWidth).toHaveBeenLastCalledWith(264);
   });
 
   it("opens persisted feedback runs while keeping native review annotations local", () => {

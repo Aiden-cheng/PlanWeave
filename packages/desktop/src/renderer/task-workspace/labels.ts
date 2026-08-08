@@ -149,6 +149,8 @@ export function taskWorkspaceLabels(t: Translator): TaskWorkspaceLabels {
     permission: t("taskWorkspacePermission"),
     promptLabels: promptLabels(t),
     reasoning: t("taskWorkspaceReasoning"),
+    resizeInspector: t("taskWorkspaceResizeInspector"),
+    resizeTimeline: t("taskWorkspaceResizeTimeline"),
     reviewVerdict: {
       needs_changes: t("taskWorkspaceReviewNeedsChanges"),
       passed: t("taskWorkspaceReviewPassed")

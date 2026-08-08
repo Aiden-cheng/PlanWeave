@@ -8,17 +8,14 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { VerticalResizeHandle } from "../../components/VerticalResizeHandle";
 import type { TaskWorkspaceInspectorSlotProps } from "../contracts";
 import type { TaskWorkspacePromptLabels } from "../contracts";
 import { TaskWorkspaceBlockPrompts, TaskWorkspaceTaskPrompt } from "../TaskWorkspacePrompts";
 import { taskWorkspaceRunStatus } from "../timeline/timelineProjection";
-import { taskWorkspacePanelMaxWidth, taskWorkspacePanelMinWidth } from "../useTaskWorkspaceLayout";
 import { DeferredInspectorSection } from "./DeferredInspectorSection";
 import { displayConfigurationValue } from "./formatters";
 import { TaskWorkspaceUsageDetails } from "./TaskWorkspaceUsage";
 import type { TaskWorkspaceUsageLabels } from "./TaskWorkspaceUsage";
-import { useInspectorResize } from "./useInspectorResize";
 
 type EventKind = NormalizedRunnerEvent["body"]["kind"];
 type ArtifactKind = ArtifactReference["kind"];
@@ -224,17 +221,13 @@ const historyLimit = 100;
 export function TaskWorkspaceInspector({
   focusedBlock,
   inspectorCollapsed,
-  inspectorWidth,
   labels,
   runnerModel,
   selectedRecord,
   selectedRun,
   setInspectorCollapsed,
-  setInspectorWidth,
   workspace
 }: TaskWorkspaceInspectorSlotProps & { labels: TaskWorkspaceInspectorLabels }) {
-  const resize = useInspectorResize({ inspectorWidth, setInspectorWidth });
-
   if (inspectorCollapsed) {
     return null;
   }
@@ -251,19 +244,6 @@ export function TaskWorkspaceInspector({
 
   return (
     <aside className="relative min-h-full min-w-0" aria-label={labels.overview}>
-      <VerticalResizeHandle
-        aria-label={labels.resizeInspector}
-        aria-orientation="vertical"
-        aria-valuemax={taskWorkspacePanelMaxWidth}
-        aria-valuemin={taskWorkspacePanelMinWidth}
-        aria-valuenow={inspectorWidth}
-        onKeyDown={resize.resizeWithKeyboard}
-        onPointerDown={resize.startResize}
-        role="separator"
-        side="left"
-        tabIndex={0}
-      />
-
       <header className="sticky top-0 z-[1] flex min-w-0 items-center gap-2 border-b border-border bg-app-panel/95 px-3 py-2 backdrop-blur">
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-xs font-semibold tracking-wide uppercase">

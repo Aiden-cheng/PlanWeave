@@ -86,6 +86,8 @@ export type TaskWorkspaceLabels = {
   permission: string;
   promptLabels: TaskWorkspacePromptLabels;
   reasoning: string;
+  resizeInspector: string;
+  resizeTimeline: string;
   reviewVerdict: Record<"needs_changes" | "passed", string>;
   runStatus: Record<"active" | "cancelled" | "completed" | "failed" | "waiting", string>;
   status: string;

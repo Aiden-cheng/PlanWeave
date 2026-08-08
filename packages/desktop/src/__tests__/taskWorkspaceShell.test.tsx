@@ -105,6 +105,8 @@ const labels: TaskWorkspaceLabels = {
     taskPrompt: "Task prompt"
   },
   reasoning: "Reasoning",
+  resizeInspector: "Resize inspector",
+  resizeTimeline: "Resize timeline",
   reviewVerdict: {
     needs_changes: "Needs changes",
     passed: "Passed"
@@ -851,14 +853,15 @@ describe("Task Workspace shell", () => {
       gridTemplateColumns: `${initialTimelineWidth}px minmax(0, 1fr)`
     });
     const headerTimeline = screen.getByTestId("task-workspace-header-timeline");
-    expect(headerTimeline).toHaveClass("h-full", "border-r", "border-b", "border-border/80");
+    expect(headerTimeline).toHaveClass("h-full", "border-b", "border-border/80");
+    expect(headerTimeline).not.toHaveClass("border-r");
     const headerMain = screen.getByTestId("task-workspace-header-main");
     expect(headerMain).toHaveClass("border-b", "border-border/80");
     expect(headerMain).not.toHaveClass("border-l");
-    expect(screen.getByTestId("task-workspace-timeline-slot")).toHaveClass(
-      "border-r",
-      "border-border/80"
-    );
+    expect(screen.getByTestId("task-workspace-timeline-slot")).not.toHaveClass("border-r");
+    expect(screen.getByTestId("task-workspace-timeline-resize-rail")).toHaveStyle({ width: "280px" });
+    const timelineSeparator = screen.getByRole("separator", { name: "Resize timeline" });
+    expect(timelineSeparator).toHaveClass("after:w-px", "after:bg-border/80", "right-0");
     const timelineToggle = within(header).getByRole("button", { name: "Timeline" });
     const backToCanvas = within(header).getByRole("button", { name: "Back to canvas" });
     expect(backToCanvas.nextElementSibling).toBe(timelineToggle);
@@ -910,5 +913,32 @@ describe("Task Workspace shell", () => {
       "duration-[var(--motion-duration-panel)]",
       "motion-reduce:transition-none"
     );
+  });
+
+  it("resizes the full-height timeline rail through pointer and keyboard input", async () => {
+    const user = userEvent.setup();
+    render(<TaskWorkspaceRoute controller={controller()} labels={labels} />);
+
+    const separator = screen.getByRole("separator", { name: "Resize timeline" });
+    expect(screen.getByTestId("task-workspace-timeline-resize-rail")).toHaveClass(
+      "absolute",
+      "inset-y-0"
+    );
+    expect(separator).toHaveAttribute("aria-valuenow", String(initialTimelineWidth));
+    expect(separator).toHaveClass("after:w-px", "after:bg-border/80", "right-0");
+
+    fireEvent.pointerDown(separator, { clientX: 100 });
+    fireEvent.pointerMove(window, { clientX: 140 });
+    expect(screen.getByTestId("task-workspace-timeline-slot")).toHaveStyle({
+      width: `${initialTimelineWidth + 40}px`
+    });
+
+    fireEvent.keyDown(separator, { key: "ArrowRight" });
+    expect(screen.getByTestId("task-workspace-timeline-slot")).toHaveStyle({
+      width: `${initialTimelineWidth + 56}px`
+    });
+
+    await user.click(screen.getByRole("button", { name: "Timeline" }));
+    expect(screen.queryByRole("separator", { name: "Resize timeline" })).not.toBeInTheDocument();
   });
 });

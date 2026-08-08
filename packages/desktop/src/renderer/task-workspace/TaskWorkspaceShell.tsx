@@ -4,9 +4,12 @@ import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { CompactAssigneeChip } from "../collaboration/assigneeSurfaceViewModels";
+import { VerticalResizeHandle } from "../components/VerticalResizeHandle";
 import { useElementHeight } from "../hooks/useElementHeight";
 import type { TaskWorkspaceLabels } from "./contracts";
+import { useInspectorResize } from "./inspector/useInspectorResize";
 import { TaskWorkspaceHeader } from "./TaskWorkspaceHeader";
+import { useTimelineResize } from "./timeline/useTimelineResize";
 import {
   taskWorkspaceConversationMinWidth,
   taskWorkspacePanelMaxWidth,
@@ -36,15 +39,11 @@ function AnimatedWorkspacePanel({
   let minimumWidth = taskWorkspacePanelMinWidth;
   let panelWidth = width;
   let inert: true | undefined;
-  let borderClassName = "border-r border-border/80";
   if (collapsed) {
     interactionClassName = "pointer-events-none opacity-0";
     minimumWidth = 0;
     panelWidth = 0;
     inert = true;
-  }
-  if (side === "right") {
-    borderClassName = "border-l border-border/80";
   }
 
   return (
@@ -53,9 +52,9 @@ function AnimatedWorkspacePanel({
       aria-label={label}
       className={cn(
         "relative min-h-0 shrink overflow-x-hidden overflow-y-auto bg-app-panel transition-[width,opacity] duration-[var(--motion-duration-panel)] ease-[var(--motion-ease-emphasized)] motion-reduce:transition-none",
-        borderClassName,
         interactionClassName
       )}
+      data-side={side}
       data-testid={testId}
       inert={inert}
       style={{ maxWidth: taskWorkspacePanelMaxWidth, minWidth: minimumWidth, width: panelWidth }}
@@ -135,6 +134,14 @@ export function TaskWorkspaceShell({
   const composerSlot = useElementHeight<HTMLDivElement>();
   const retainedInspector = useRef<{ content: ReactNode; workspaceIdentity: string } | null>(null);
   const workspaceIdentity = `${workspace.project.projectId}\0${workspace.project.canvasId}\0${workspace.task.taskId}`;
+  const timelineResize = useTimelineResize({
+    setTimelineWidth: layout.setTimelineWidth,
+    timelineWidth: layout.timelineWidth
+  });
+  const inspectorResize = useInspectorResize({
+    inspectorWidth: layout.inspectorWidth,
+    setInspectorWidth: layout.setInspectorWidth
+  });
 
   useEffect(() => {
     if (!layout.inspectorCollapsed) {
@@ -152,7 +159,7 @@ export function TaskWorkspaceShell({
 
   return (
     <section
-      className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-app-shell text-text"
+      className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-app-shell text-text"
       data-task-id={workspace.task.taskId}
       data-testid="task-workspace-shell"
       data-workspace-status="ready"
@@ -166,7 +173,7 @@ export function TaskWorkspaceShell({
         onReturnToCanvas={onReturnToCanvas}
         workspace={workspace}
       />
-      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+      <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         <AnimatedWorkspacePanel
           collapsed={layout.timelineCollapsed}
           label={labels.timeline}
@@ -211,7 +218,49 @@ export function TaskWorkspaceShell({
         >
           {inspectorContent}
         </AnimatedWorkspacePanel>
+        {!layout.inspectorCollapsed ? (
+          <div
+            className="pointer-events-none absolute inset-y-0 right-0 z-30"
+            data-testid="task-workspace-inspector-resize-rail"
+            style={{ width: layout.inspectorWidth }}
+          >
+            <VerticalResizeHandle
+              aria-label={labels.resizeInspector}
+              aria-orientation="vertical"
+              aria-valuemax={taskWorkspacePanelMaxWidth}
+              aria-valuemin={taskWorkspacePanelMinWidth}
+              aria-valuenow={layout.inspectorWidth}
+              className="pointer-events-auto"
+              onKeyDown={inspectorResize.resizeWithKeyboard}
+              onPointerDown={inspectorResize.startResize}
+              role="separator"
+              side="left"
+              tabIndex={0}
+            />
+          </div>
+        ) : null}
       </div>
+      {!layout.timelineCollapsed ? (
+        <div
+          className="pointer-events-none absolute inset-y-0 left-0 z-30"
+          data-testid="task-workspace-timeline-resize-rail"
+          style={{ width: layout.timelineWidth }}
+        >
+          <VerticalResizeHandle
+            aria-label={labels.resizeTimeline}
+            aria-orientation="vertical"
+            aria-valuemax={taskWorkspacePanelMaxWidth}
+            aria-valuemin={taskWorkspacePanelMinWidth}
+            aria-valuenow={layout.timelineWidth}
+            className="pointer-events-auto"
+            onKeyDown={timelineResize.resizeWithKeyboard}
+            onPointerDown={timelineResize.startResize}
+            role="separator"
+            side="right"
+            tabIndex={0}
+          />
+        </div>
+      ) : null}
     </section>
   );
 }
