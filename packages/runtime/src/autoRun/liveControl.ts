@@ -97,6 +97,120 @@ export class RunnerCleanupError extends AggregateError {
   }
 }
 
+export const runnerCleanupSteps = [
+  "pending_request",
+  "pending_operation",
+  "session_cancel",
+  "session_close",
+  "connection_close",
+  "process_terminate"
+] as const;
+
+export type RunnerCleanupStep = (typeof runnerCleanupSteps)[number];
+
+export type RunnerCleanupFailureSummary = {
+  step: RunnerCleanupStep | "unknown";
+  name: string;
+  message: string;
+};
+
+/** Durable Auto Run / operator-visible shape for soft-stop cleanup noise. */
+export type RunnerCleanupWarning = {
+  alreadyCleaned: boolean;
+  message: string;
+  failures: RunnerCleanupFailureSummary[];
+};
+
+const cleanupStepBrand = Symbol("planweave.runnerCleanupStep");
+
+type TaggedCleanupFailure = Error & {
+  readonly [cleanupStepBrand]?: RunnerCleanupStep;
+  readonly cleanupStep?: RunnerCleanupStep;
+};
+
+function taggedCleanupFailure(step: RunnerCleanupStep, reason: unknown): TaggedCleanupFailure {
+  const error = sanitizedCleanupError(reason) as TaggedCleanupFailure;
+  Object.defineProperty(error, cleanupStepBrand, { value: step, enumerable: false });
+  Object.defineProperty(error, "cleanupStep", { value: step, enumerable: true });
+  return error;
+}
+
+function cleanupFailureStep(error: unknown): RunnerCleanupStep | "unknown" {
+  if (typeof error === "object" && error !== null && "cleanupStep" in error) {
+    const step = (error as { cleanupStep?: unknown }).cleanupStep;
+    if (typeof step === "string" && (runnerCleanupSteps as readonly string[]).includes(step)) {
+      return step as RunnerCleanupStep;
+    }
+  }
+  return "unknown";
+}
+
+function isIgnorableCleanupFailure(step: RunnerCleanupStep, reason: unknown): boolean {
+  if (step !== "connection_close" && step !== "process_terminate" && step !== "session_close") {
+    return false;
+  }
+  const message = reason instanceof Error ? reason.message : String(reason ?? "");
+  const code =
+    typeof reason === "object" && reason !== null && "code" in reason
+      ? String((reason as { code?: unknown }).code ?? "")
+      : "";
+  return (
+    code === "ESRCH" ||
+    code === "ECHILD" ||
+    /already (exited|closed|disposed|terminated|killed)/i.test(message) ||
+    /no such process/i.test(message) ||
+    /process does not exist/i.test(message)
+  );
+}
+
+function collectCleanupFailures(
+  step: RunnerCleanupStep,
+  results: readonly PromiseSettledResult<unknown>[],
+  failures: Error[]
+): void {
+  for (const result of results) {
+    if (result.status !== "rejected") continue;
+    if (isIgnorableCleanupFailure(step, result.reason)) continue;
+    failures.push(taggedCleanupFailure(step, result.reason));
+  }
+}
+
+export function summarizeRunnerCleanupError(error: RunnerCleanupError): RunnerCleanupWarning {
+  return {
+    alreadyCleaned: error.result.alreadyCleaned,
+    message: error.message,
+    failures: error.errors.map((item) => {
+      const sanitized = sanitizedCleanupError(item);
+      return {
+        step: cleanupFailureStep(item),
+        name: sanitized.name,
+        message: sanitized.message
+      };
+    })
+  };
+}
+
+/**
+ * Soft-stop may continue after RunnerCleanupError (or an AggregateError of only those).
+ * Returns a durable warning payload, or null when the failure must still abort stop.
+ */
+export function softStopAgentCleanupWarning(error: unknown): RunnerCleanupWarning | null {
+  if (error instanceof RunnerCleanupError) {
+    return summarizeRunnerCleanupError(error);
+  }
+  if (error instanceof AggregateError && error.errors.length > 0) {
+    const nested = error.errors.map((item) => softStopAgentCleanupWarning(item));
+    if (nested.every((item) => item !== null)) {
+      return {
+        alreadyCleaned: nested.some((item) => item!.alreadyCleaned),
+        message: error.message,
+        failures: nested.flatMap((item) => item!.failures)
+      };
+    }
+  }
+  return null;
+}
+
 const cleanupByControl = new WeakMap<RunnerLiveControl, Promise<RunnerCleanupResult>>();
 const respondingRequests = new WeakSet<LivePendingRequestHandle>();
 const respondingRequestPromises = new WeakMap<LivePendingRequestHandle, Promise<void>>();
@@ -274,37 +388,37 @@ async function performRunnerCleanup(
       }
     })
   );
-  const cancellationResults: PromiseSettledResult<unknown>[] = [];
+  const failures: Error[] = [];
+  collectCleanupFailures("pending_request", requestResults, failures);
+
   if (cancelSession && control.sessionId) {
-    cancellationResults.push(
-      ...(await Promise.allSettled([control.connection.cancelSession(control.sessionId)]))
-    );
+    const cancelResults = await Promise.allSettled([
+      control.connection.cancelSession(control.sessionId)
+    ]);
+    collectCleanupFailures("session_cancel", cancelResults, failures);
     await boundedGrace(RUNNER_CANCEL_GRACE_MS);
     if (control.connection.supportsSessionClose) {
-      cancellationResults.push(
-        ...(await Promise.allSettled([control.connection.closeSession(control.sessionId)]))
-      );
+      const closeSessionResults = await Promise.allSettled([
+        control.connection.closeSession(control.sessionId)
+      ]);
+      collectCleanupFailures("session_close", closeSessionResults, failures);
     }
   }
+
   const operationResults = await Promise.allSettled(
     operations.map((operation) => Promise.resolve().then(() => operation.reject(reason)))
   );
-  const processResults = await Promise.allSettled([
-    Promise.resolve().then(() => control.connection.close(reason)),
+  collectCleanupFailures("pending_operation", operationResults, failures);
+
+  const connectionCloseResults = await Promise.allSettled([
+    Promise.resolve().then(() => control.connection.close(reason))
+  ]);
+  collectCleanupFailures("connection_close", connectionCloseResults, failures);
+  const processTerminateResults = await Promise.allSettled([
     Promise.resolve().then(() => control.process.terminate(reason))
   ]);
-  const results = [
-    ...requestResults,
-    ...operationResults,
-    ...cancellationResults,
-    ...processResults
-  ];
-  const failures: unknown[] = [];
-  for (const result of results) {
-    if (result.status === "rejected") {
-      failures.push(sanitizedCleanupError(result.reason));
-    }
-  }
+  collectCleanupFailures("process_terminate", processTerminateResults, failures);
+
   const cleanupResult = { history, alreadyCleaned: false };
   if (failures.length > 0) {
     throw new RunnerCleanupError(failures, cleanupResult);

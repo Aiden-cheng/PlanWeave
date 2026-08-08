@@ -12,6 +12,8 @@ import {
   stopAutoRun
 } from "../desktop/index.js";
 import type { DesktopAutoRunPhase } from "../desktop/index.js";
+import * as activeAgentRunRegistryApi from "../autoRun/activeAgentRunRegistry.js";
+import { RunnerCleanupError } from "../autoRun/liveControl.js";
 import { isTmuxAvailable } from "../autoRun/tmuxExecutor.js";
 import { getRunSession, listRunSessions } from "../runSessions/index.js";
 import type {
@@ -581,6 +583,58 @@ describe("desktop auto run API", () => {
         expect.objectContaining({ type: "stopped_step_ignored" })
       ])
     });
+  });
+
+  it("soft-stops Pause while recording agent cleanup step failures on run_stopped", async () => {
+    const cleanupFailure = Object.assign(new Error("session cancel failed"), {
+      cleanupStep: "session_cancel",
+      name: "RunnerCleanupOperationError"
+    });
+    const spy = vi.spyOn(activeAgentRunRegistryApi, "shutdownDesktopAgentRun").mockRejectedValue(
+      new RunnerCleanupError([cleanupFailure], { history: [], alreadyCleaned: false })
+    );
+    try {
+      const manifest = manifestTestBuilder()
+        .withExecutor("slow-codex", {
+          adapter: "codex-exec",
+          command: process.execPath,
+          args: [
+            "-e",
+            "let input=''; process.stdin.on('data', c => input += c); process.stdin.on('end', () => setTimeout(() => console.log('must not run ' + input.split('\\n')[0]), 5_000));"
+          ]
+        })
+        .withDefaultExecutor("slow-codex")
+        .build();
+      const { root } = await createTestWorkspace(manifest);
+      const started = await startAutoRun(root, null, { kind: "project" }, 2, noTmux);
+      startedRunIds.add(started.runId);
+
+      await expect(stopAutoRun(started.runId)).resolves.toMatchObject({ phase: "stopped" });
+      const eventLog = await listAutoRunEvents(root, null, started.runId);
+      expect(eventLog.diagnostics).toEqual([]);
+      expect(eventLog.events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "run_stopped",
+            data: expect.objectContaining({
+              agentCleanupWarning: {
+                alreadyCleaned: false,
+                message: "Runner terminal cleanup did not complete cleanly.",
+                failures: [
+                  {
+                    step: "session_cancel",
+                    name: "RunnerCleanupOperationError",
+                    message: "session cancel failed"
+                  }
+                ]
+              }
+            })
+          })
+        ])
+      );
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("can disable tmux monitoring while preserving streaming run records", async () => {

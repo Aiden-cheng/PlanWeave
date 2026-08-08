@@ -11,7 +11,7 @@ import {
 import {
   type JsonRpcValue,
   type RunnerInteractionBroker,
-  RunnerCleanupError
+  softStopAgentCleanupWarning
 } from "../autoRun/liveControl.js";
 import { redactRunnerEventText } from "../autoRun/runnerEventRedaction.js";
 import { createAutoRunExplanation, runAutoRunStep } from "../taskManager/autoRun.js";
@@ -829,8 +829,10 @@ export async function stopAutoRun(runId: string): Promise<DesktopAutoRunState> {
         `Auto Run '${runId}' Agent and tmux cleanup did not complete cleanly.`
       );
     }
+    const agentCleanupWarning =
+      agentCleanupError !== undefined ? softStopAgentCleanupWarning(agentCleanupError) : null;
     // Soft-stop: terminal agent cleanup noise must not block Pause from marking stopped.
-    if (agentCleanupError !== undefined && !(agentCleanupError instanceof RunnerCleanupError)) {
+    if (agentCleanupError !== undefined && agentCleanupWarning === null) {
       throw agentCleanupError;
     }
     if (tmuxCleanupError !== undefined) throw tmuxCleanupError;
@@ -838,7 +840,16 @@ export async function stopAutoRun(runId: string): Promise<DesktopAutoRunState> {
     let terminalError: unknown;
     try {
       stopped = await setState(runId, { phase: "stopped" }, "run_stopped", {
-        killedTmuxSessions: killed
+        killedTmuxSessions: killed,
+        ...(agentCleanupWarning
+          ? {
+              agentCleanupWarning: {
+                alreadyCleaned: agentCleanupWarning.alreadyCleaned,
+                message: agentCleanupWarning.message,
+                failures: agentCleanupWarning.failures
+              }
+            }
+          : {})
       });
     } catch (error) {
       terminalError = error;

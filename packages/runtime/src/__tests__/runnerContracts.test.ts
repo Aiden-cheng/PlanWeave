@@ -26,6 +26,8 @@ import {
   createLiveOwnership,
   persistedInteractionHistory,
   respondToPendingRunnerRequest,
+  softStopAgentCleanupWarning,
+  summarizeRunnerCleanupError,
   type RunnerLiveControl
 } from "../autoRun/liveControl.js";
 import {
@@ -606,11 +608,73 @@ describe("live ownership and cleanup", () => {
       expect(error).toBeInstanceOf(RunnerCleanupError);
       const cleanupError = error as RunnerCleanupError;
       expect(cleanupError.errors).toHaveLength(3);
+      expect(cleanupError.errors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ cleanupStep: "pending_request", message: "reject failed" }),
+          expect.objectContaining({ cleanupStep: "connection_close", message: "close failed" }),
+          expect.objectContaining({ cleanupStep: "process_terminate", message: "terminate failed" })
+        ])
+      );
+      expect(summarizeRunnerCleanupError(cleanupError)).toEqual({
+        alreadyCleaned: false,
+        message: "Runner terminal cleanup did not complete cleanly.",
+        failures: expect.arrayContaining([
+          {
+            step: "pending_request",
+            name: "RunnerCleanupOperationError",
+            message: "reject failed"
+          },
+          {
+            step: "connection_close",
+            name: "RunnerCleanupOperationError",
+            message: "close failed"
+          },
+          {
+            step: "process_terminate",
+            name: "RunnerCleanupOperationError",
+            message: "terminate failed"
+          }
+        ])
+      });
+      expect(softStopAgentCleanupWarning(cleanupError)?.failures).toHaveLength(3);
       expect(cleanupError.result.history).toEqual([
         expect.objectContaining({ actionable: false, nonActionableReason: "terminal_cleanup" })
       ]);
       expect(JSON.stringify(cleanupError.result.history)).not.toContain("secret value");
     }
+  });
+
+  it("ignores already-exited process teardown during terminal cleanup", async () => {
+    const ownership = createLiveOwnership("RUN-001", 1);
+    const exited = Object.assign(new Error("Process has already exited."), { code: "ESRCH" });
+    const control = liveControl({
+      ownership,
+      close: vi.fn(async () => Promise.reject(new Error("connection already closed"))),
+      terminate: vi.fn(async () => Promise.reject(exited))
+    });
+    await expect(cleanupRunnerLiveControl(control, ownership, "terminal")).resolves.toMatchObject({
+      alreadyCleaned: false
+    });
+  });
+
+  it("exposes soft-stop cleanup warnings for Auto Run event persistence", () => {
+    const nested = new RunnerCleanupError(
+      [Object.assign(new Error("session cancel failed"), { cleanupStep: "session_cancel" })],
+      { history: [], alreadyCleaned: true }
+    );
+    const aggregate = new AggregateError([nested], "ACP cleanup failed for Desktop run 'AR-1'.");
+    expect(softStopAgentCleanupWarning(aggregate)).toEqual({
+      alreadyCleaned: true,
+      message: "ACP cleanup failed for Desktop run 'AR-1'.",
+      failures: [
+        {
+          step: "session_cancel",
+          name: "RunnerCleanupOperationError",
+          message: "session cancel failed"
+        }
+      ]
+    });
+    expect(softStopAgentCleanupWarning(new Error("unexpected stop failure"))).toBeNull();
   });
 
   it("performs terminal cleanup once and returns idempotent history", async () => {
