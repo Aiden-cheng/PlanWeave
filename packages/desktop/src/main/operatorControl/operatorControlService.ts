@@ -392,7 +392,7 @@ export class OperatorControlService {
         copyText(buildHostBootstrapHandoff(client.connectionProfile, value, grant));
         return operatorHostBootstrapHandoffViewSchema.parse({
           state: "ready",
-          workspaceId: grant.workspaceId,
+          ...(grant.workspaceId ? { workspaceId: grant.workspaceId } : {}),
           expiresAt: grant.expiresAt,
           copiedAt: new Date().toISOString(),
           commandPreview: "planweave agent-host enroll <handoff>"

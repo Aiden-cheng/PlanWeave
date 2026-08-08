@@ -10,7 +10,8 @@ export const agentHostSetupHandoffSchema = z
   .object({
     version: z.literal(agentHostSetupHandoffVersion),
     endpoint: deploymentEndpointSchema,
-    workspaceId: opaqueIdentifierSchema,
+    /** Optional legacy collaboration workspace scope; server-scoped fleet grants omit it. */
+    workspaceId: opaqueIdentifierSchema.optional(),
     enrollmentCode: hostEnrollmentCodeSchema,
     expiresAt: z.string().datetime(),
     display: z

@@ -137,7 +137,8 @@ export type OperatorCopyMemberSetupCodeInput = z.infer<
 const operatorClipboardHandoffViewSchema = z
   .object({
     state: z.literal("ready"),
-    workspaceId: operatorProfileIdSchema,
+    /** Present for legacy workspace-scoped grants; omitted for server-scoped fleet grants. */
+    workspaceId: operatorProfileIdSchema.optional(),
     expiresAt: z.iso.datetime(),
     copiedAt: z.iso.datetime(),
     commandPreview: z.literal("planweave agent-host enroll <handoff>").optional()

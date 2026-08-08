@@ -29,6 +29,20 @@ describe("Agent Host setup handoff", () => {
     );
   });
 
+  it("round-trips server-scoped fleet handoffs without workspace binding", () => {
+    const fleetHandoff = agentHostSetupHandoffSchema.parse({
+      version: "agent-host-setup/v1",
+      endpoint: handoff.endpoint,
+      enrollmentCode: handoff.enrollmentCode,
+      expiresAt: handoff.expiresAt,
+      display: { workspaceName: "Owner fleet", serverName: "Private server" }
+    });
+    const encoded = serializeAgentHostSetupHandoff(fleetHandoff);
+    expect(parseAgentHostSetupHandoff(encoded, new Date("2029-01-01T00:00:00.000Z"))).toEqual(
+      fleetHandoff
+    );
+  });
+
   it("rejects expiration, unknown fields, and invalid endpoint policy", () => {
     expect(() =>
       parseAgentHostSetupHandoff(serializeAgentHostSetupHandoff(handoff), new Date("2031-01-01"))

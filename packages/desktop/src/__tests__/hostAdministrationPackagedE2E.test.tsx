@@ -235,7 +235,8 @@ describe("packaged Host administration control plane", () => {
       },
       (content) => copiedHandoffs.push(content)
     );
-    expect(handoff).toMatchObject({ state: "ready", workspaceId: expect.any(String) });
+    expect(handoff).toMatchObject({ state: "ready" });
+    expect(handoff.workspaceId).toBeUndefined();
     expect(JSON.stringify(handoff)).not.toContain("pw_enroll_");
     expect(copiedHandoffs).toHaveLength(1);
     const copiedHandoff = copiedHandoffs[0]!;
@@ -252,7 +253,9 @@ describe("packaged Host administration control plane", () => {
       dataDirectory: join(harness.paths.root, "ui-host-data"),
       workspaceRoot: harness.paths.workspaceRoot,
       host: { displayName: "UI Generated Host", capacity: 1, capabilities: ["acp.test"] },
-      workspaces: [{ id: parsedHandoff.workspaceId, path: "project" }],
+      workspaces: parsedHandoff.workspaceId
+        ? [{ id: parsedHandoff.workspaceId, path: "project" }]
+        : [],
       agentProfiles: []
     };
     expect(uiConfig).not.toHaveProperty("enrollmentCode");

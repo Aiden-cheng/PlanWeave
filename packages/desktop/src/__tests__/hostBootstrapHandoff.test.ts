@@ -38,6 +38,42 @@ describe("main-owned Host setup handoff", () => {
     expect(command).not.toMatch(/\/etc\/|\/var\/lib|--config|--code|base64 --decode/);
   });
 
+  it("omits workspace scope for server-scoped fleet grants", () => {
+    const enrollmentCode = `pw_enroll_${"B".repeat(43)}`;
+    const command = buildHostBootstrapHandoff(
+      {
+        profileId: "profile-a",
+        displayName: "Operator A",
+        serverBaseUrl: "https://planweave.tail1234.ts.net/",
+        allowInsecureTransport: false,
+        endpoint: {
+          topology: "private_https",
+          serverOrigin: "https://planweave.tail1234.ts.net",
+          allowedClientOrigins: ["https://planweave.tail1234.ts.net"],
+          tlsTrust: "system_ca"
+        }
+      },
+      {
+        profileId: "profile-a",
+        request: {
+          expiresAt: "2030-01-01T00:15:00.000Z",
+          credentialExpiresAt: "2030-01-02T00:00:00.000Z"
+        }
+      },
+      { enrollmentCode, expiresAt: "2030-01-01T00:15:00.000Z" }
+    );
+
+    const encoded = command.slice("planweave agent-host enroll ".length);
+    expect(parseAgentHostSetupHandoff(encoded, new Date("2029-01-01"))).toMatchObject({
+      endpoint: { topology: "private_https", tlsTrust: "system_ca" },
+      enrollmentCode,
+      display: { workspaceName: "Operator A", serverName: "Operator A" }
+    });
+    expect(parseAgentHostSetupHandoff(encoded, new Date("2029-01-01"))).not.toHaveProperty(
+      "workspaceId"
+    );
+  });
+
   it("rejects profiles without a Main-validated endpoint", () => {
     expect(() =>
       buildHostBootstrapHandoff(

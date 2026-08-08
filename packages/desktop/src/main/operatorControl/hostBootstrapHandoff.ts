@@ -26,11 +26,13 @@ export function buildHostBootstrapHandoffPayload(
   const handoff = serializeAgentHostSetupHandoff({
     version: "agent-host-setup/v1",
     endpoint,
-    workspaceId: grant.workspaceId,
+    ...(grant.workspaceId ? { workspaceId: grant.workspaceId } : {}),
     enrollmentCode: grant.enrollmentCode,
     expiresAt: grant.expiresAt,
     display: {
-      workspaceName: `Workspace ${grant.workspaceId}`,
+      workspaceName: grant.workspaceId
+        ? `Workspace ${grant.workspaceId}`
+        : profile.displayName,
       serverName: profile.displayName
     }
   });
