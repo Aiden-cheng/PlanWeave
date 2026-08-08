@@ -14,6 +14,7 @@ import type {
 import { FileHostCredentialStore } from "../credentials/fileCredentialStore.js";
 import {
   createPendingPortableHandoffProvenance,
+  portableHandoffEndpointBindingMatches,
   portableHandoffPendingWorkspaceId
 } from "../credentials/handoffProvenance.js";
 import type { HttpAgentHostSetupCodeRedeem } from "./httpSetupCodeRedeem.js";
@@ -75,7 +76,10 @@ export class AgentHostEnrollmentService {
       createdAt: acceptedAt.toISOString(),
       provenance
     };
-    if (portableHandoffPendingWorkspaceId(provenance, this.config) !== handoff.workspaceId) {
+    if (
+      (portableHandoffPendingWorkspaceId(provenance, this.config) ?? null) !==
+      (handoff.workspaceId ?? null)
+    ) {
       throw new Error("agent_host_handoff_config_conflict");
     }
     await this.credentials.begin(
@@ -109,8 +113,14 @@ export class AgentHostEnrollmentService {
     const portableWorkspaceId = pending.provenance
       ? portableHandoffPendingWorkspaceId(pending.provenance, this.config)
       : undefined;
-    if (pending.provenance && !portableWorkspaceId) {
-      throw new Error("agent_host_handoff_provenance_invalid");
+    if (pending.provenance) {
+      if (portableWorkspaceId) {
+        // Legacy collaboration workspace binding resolved from config.
+      } else if (this.config.workspaces.length > 0) {
+        throw new Error("agent_host_handoff_provenance_invalid");
+      } else if (!portableHandoffEndpointBindingMatches(pending.provenance, this.config)) {
+        throw new Error("agent_host_handoff_provenance_invalid");
+      }
     }
     const response = hostEnrollmentCompletedSchema.parse(
       await this.exchange.exchange(

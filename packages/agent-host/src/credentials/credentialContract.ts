@@ -37,7 +37,8 @@ export const pendingHostEnrollmentSchema = z.discriminatedUnion("kind", [
 export const activeHostCredentialSchema = z
   .object({
     hostId: opaqueIdentifierSchema,
-    workspaceId: opaqueIdentifierSchema,
+    /** Absent for server-scoped fleet enrollment without a collaboration workspace binding. */
+    workspaceId: opaqueIdentifierSchema.optional(),
     credentialToken: hostCredentialTokenSchema,
     issuedAt: z.string().datetime(),
     expiresAt: z.string().datetime(),
@@ -61,3 +62,10 @@ export const hostCredentialDocumentSchema = z
 export type PendingHostEnrollment = z.infer<typeof pendingHostEnrollmentSchema>;
 export type ActiveHostCredential = z.infer<typeof activeHostCredentialSchema>;
 export type HostCredentialDocument = z.infer<typeof hostCredentialDocumentSchema>;
+
+/** Stable per-host instance key for background services and durable identity when workspace scope is absent. */
+export function credentialInstanceId(
+  credential: Pick<ActiveHostCredential, "hostId" | "workspaceId">
+): string {
+  return credential.workspaceId ?? credential.hostId;
+}

@@ -75,6 +75,47 @@ async function setup(): Promise<{
   };
 }
 
+async function setupFleet(): Promise<{
+  config: AgentHostConfig;
+  encodedHandoff: string;
+  handoff: AgentHostSetupHandoff;
+  store: FileHostCredentialStore;
+}> {
+  const directory = await mkdtemp(join(tmpdir(), "planweave-handoff-fleet-"));
+  directories.push(directory);
+  const handoff = agentHostSetupHandoffSchema.parse({
+    version: "agent-host-setup/v1",
+    endpoint: {
+      topology: "lan_http",
+      serverOrigin: "http://192.168.1.8:4317",
+      allowedClientOrigins: ["http://192.168.1.8:4317"],
+      tlsTrust: "not_applicable"
+    },
+    enrollmentCode: secret("pw_enroll_"),
+    expiresAt: "2030-01-01T00:00:00.000Z",
+    display: { workspaceName: "Owner fleet", serverName: "Private server" }
+  });
+  const config = parseAgentHostConfig({
+    version: "agent-host-config/v1",
+    coordinator: {
+      url: handoff.endpoint.serverOrigin,
+      allowInsecureDevelopment: true,
+      endpoint: handoff.endpoint
+    },
+    dataDirectory: join(directory, "data"),
+    workspaceRoot: directory,
+    host: { displayName: "Fleet Host", capacity: 1, capabilities: ["linux"] },
+    workspaces: [],
+    agentProfiles: []
+  });
+  return {
+    config,
+    encodedHandoff: serializeAgentHostSetupHandoff(handoff),
+    handoff,
+    store: new FileHostCredentialStore(join(directory, "credentials", "host.json"))
+  };
+}
+
 function successfulExchange(
   workspaceId: string,
   hostId = "host-portable"
@@ -86,6 +127,18 @@ function successfulExchange(
       enrollmentAttemptId: request.enrollmentAttemptId,
       hostId,
       workspaceId,
+      credentialExpiresAt: "2030-01-01T00:00:00.000Z"
+    })
+  };
+}
+
+function successfulFleetExchange(hostId = "host-fleet"): AgentHostEnrollmentExchange {
+  return {
+    exchange: async (request) => ({
+      type: "host.enrollment.completed",
+      protocolVersion: 1,
+      enrollmentAttemptId: request.enrollmentAttemptId,
+      hostId,
       credentialExpiresAt: "2030-01-01T00:00:00.000Z"
     })
   };
@@ -184,7 +237,7 @@ describe("Agent Host portable handoff enrollment provenance", () => {
     const active = await new AgentHostEnrollmentService(
       config,
       store,
-      successfulExchange(handoff.workspaceId),
+      successfulExchange(handoff.workspaceId!),
       clock
     ).enrollPortableHandoff(encodedHandoff);
 
@@ -233,7 +286,7 @@ describe("Agent Host portable handoff enrollment provenance", () => {
     const active = await new AgentHostEnrollmentService(
       config,
       store,
-      successfulExchange(handoff.workspaceId, "host-resumed"),
+      successfulExchange(handoff.workspaceId!, "host-resumed"),
       () => new Date("2029-01-01T00:00:03.000Z")
     ).resume();
     expect(active.provenance).toMatchObject(pending.provenance);
@@ -288,7 +341,7 @@ describe("Agent Host portable handoff enrollment provenance", () => {
     const service = new AgentHostEnrollmentService(
       config,
       store,
-      successfulExchange(handoff.workspaceId),
+      successfulExchange(handoff.workspaceId!),
       () => new Date("2029-01-01T00:00:01.000Z")
     );
     const portable = await service.enrollPortableHandoff(encodedHandoff);
@@ -392,5 +445,19 @@ describe("Agent Host portable handoff enrollment provenance", () => {
     expect(legacy.active && verifyActivePortableHandoffProvenance(legacy.active, config)).toBe(
       false
     );
+  });
+
+  it("enrolls server-scoped fleet handoffs without workspace binding", async () => {
+    const { config, encodedHandoff, store } = await setupFleet();
+    const active = await new AgentHostEnrollmentService(
+      config,
+      store,
+      successfulFleetExchange(),
+      () => new Date("2029-01-01T00:00:00.000Z")
+    ).enrollPortableHandoff(encodedHandoff);
+
+    expect(active.workspaceId).toBeUndefined();
+    expect(active.provenance).toMatchObject({ kind: "portable_handoff" });
+    expect(verifyActivePortableHandoffProvenance(active, config)).toBe(true);
   });
 });

@@ -1,6 +1,10 @@
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { AgentHostSetupHandoff } from "@planweave-ai/agent-host-protocol";
+import {
+  canonicalizeJson,
+  type AgentHostSetupHandoff
+} from "@planweave-ai/agent-host-protocol";
 import { parseAgentHostConfig, type AgentHostConfig } from "./schema.js";
 
 export type AgentHostDefaultPaths = {
@@ -10,12 +14,24 @@ export type AgentHostDefaultPaths = {
   workspaceRoot: string;
 };
 
+/** Stable instance directory key for portable setup and background services. */
+export function handoffInstanceKey(handoff: AgentHostSetupHandoff): string {
+  if (handoff.workspaceId !== undefined) {
+    return handoff.workspaceId;
+  }
+  const digest = createHash("sha256")
+    .update(canonicalizeJson(handoff.endpoint), "utf8")
+    .digest("hex")
+    .slice(0, 16);
+  return `fleet-${digest}`;
+}
+
 export function resolveAgentHostDefaultPaths(
-  workspaceId: string,
+  instanceKey: string,
   homeDirectory: string = homedir()
 ): AgentHostDefaultPaths {
   const baseDirectory = join(homeDirectory, ".planweave", "agent-host");
-  const instanceDirectory = join(baseDirectory, "instances", workspaceId);
+  const instanceDirectory = join(baseDirectory, "instances", instanceKey);
   return {
     baseDirectory,
     configPath: join(instanceDirectory, "config.json"),
@@ -46,7 +62,10 @@ export function configFromAgentHostSetupHandoff(
     dataDirectory: input.paths.dataDirectory,
     workspaceRoot: input.workspaceRoot ?? input.paths.workspaceRoot,
     host: { displayName: input.hostDisplayName, capacity: 1, capabilities: [] },
-    workspaces: [{ id: handoff.workspaceId, path: handoff.workspaceId }],
+    workspaces:
+      handoff.workspaceId !== undefined
+        ? [{ id: handoff.workspaceId, path: handoff.workspaceId }]
+        : [],
     agentProfiles: []
   });
 }

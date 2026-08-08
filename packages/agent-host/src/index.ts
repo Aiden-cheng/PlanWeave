@@ -73,6 +73,7 @@ export {
 export { observeHostReadiness } from "./config/readiness.js";
 export {
   configFromAgentHostSetupHandoff,
+  handoffInstanceKey,
   resolveAgentHostDefaultPaths,
   type AgentHostDefaultPaths
 } from "./config/defaultPaths.js";

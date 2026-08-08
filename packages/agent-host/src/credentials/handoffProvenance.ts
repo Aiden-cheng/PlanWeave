@@ -36,7 +36,7 @@ export type ActivePortableHandoffProvenance = z.infer<typeof activePortableHando
 
 type CredentialBinding = {
   hostId: string;
-  workspaceId: string;
+  workspaceId?: string;
   credentialToken: string;
   issuedAt: string;
   expiresAt: string;
@@ -50,9 +50,17 @@ function endpointWorkspaceBindingDigest(
   handoffDigest: string,
   acceptedAt: string,
   endpoint: AgentHostSetupHandoff["endpoint"],
-  workspaceId: string
+  workspaceId?: string
 ): string {
-  return digest({ acceptedAt, endpoint, handoffDigest, workspaceId });
+  return digest(
+    workspaceId === undefined
+      ? { acceptedAt, endpoint, handoffDigest }
+      : { acceptedAt, endpoint, handoffDigest, workspaceId }
+  );
+}
+
+function handoffScopeId(workspaceId: string | null | undefined): string | null {
+  return workspaceId ?? null;
 }
 
 function pendingFields(
@@ -69,7 +77,7 @@ function pendingFields(
 function credentialFields(credential: CredentialBinding): CredentialBinding {
   return {
     hostId: credential.hostId,
-    workspaceId: credential.workspaceId,
+    ...(credential.workspaceId !== undefined ? { workspaceId: credential.workspaceId } : {}),
     credentialToken: credential.credentialToken,
     issuedAt: credential.issuedAt,
     expiresAt: credential.expiresAt
@@ -96,6 +104,22 @@ export function createPendingPortableHandoffProvenance(
   });
 }
 
+export function portableHandoffEndpointBindingMatches(
+  provenance: PendingPortableHandoffProvenance,
+  config: AgentHostConfig
+): boolean {
+  const endpoint = config.coordinator.endpoint;
+  if (!endpoint) return false;
+  return (
+    endpointWorkspaceBindingDigest(
+      provenance.handoffDigest,
+      provenance.acceptedAt,
+      endpoint,
+      undefined
+    ) === provenance.endpointWorkspaceBindingDigest
+  );
+}
+
 export function portableHandoffPendingWorkspaceId(
   provenance: PendingPortableHandoffProvenance,
   config: AgentHostConfig
@@ -119,11 +143,12 @@ export function portableHandoffConfigMatches(
   config: AgentHostConfig
 ): boolean {
   const endpoint = config.coordinator.endpoint;
-  return (
-    endpoint !== undefined &&
-    canonicalizeJson(endpoint) === canonicalizeJson(handoff.endpoint) &&
-    config.workspaces.some((workspace) => workspace.id === handoff.workspaceId)
-  );
+  if (endpoint === undefined) return false;
+  if (canonicalizeJson(endpoint) !== canonicalizeJson(handoff.endpoint)) return false;
+  if (handoff.workspaceId === undefined) {
+    return config.workspaces.length === 0;
+  }
+  return config.workspaces.some((workspace) => workspace.id === handoff.workspaceId);
 }
 
 export function pendingProvenanceMatchesHandoff(
@@ -135,7 +160,8 @@ export function pendingProvenanceMatchesHandoff(
   return (
     provenance.handoffDigest === expected.handoffDigest &&
     provenance.endpointWorkspaceBindingDigest === expected.endpointWorkspaceBindingDigest &&
-    portableHandoffPendingWorkspaceId(provenance, config) === handoff.workspaceId
+    handoffScopeId(portableHandoffPendingWorkspaceId(provenance, config)) ===
+      handoffScopeId(handoff.workspaceId)
   );
 }
 
@@ -166,7 +192,12 @@ export function verifyActivePortableHandoffProvenance(
   const parsed = activePortableHandoffProvenanceSchema.safeParse(provenance);
   if (!parsed.success) return false;
   const pending = pendingFields(parsed.data);
-  if (portableHandoffPendingWorkspaceId(pending, config) !== credential.workspaceId) return false;
+  if (
+    handoffScopeId(portableHandoffPendingWorkspaceId(pending, config)) !==
+    handoffScopeId(credential.workspaceId)
+  ) {
+    return false;
+  }
   return (
     digest({
       credential: credentialFields(credential),

@@ -9,6 +9,7 @@ import {
   type AgentHostComposition
 } from "../composition/agentHostComposition.js";
 import { FileHostCredentialStore } from "../credentials/fileCredentialStore.js";
+import { credentialInstanceId } from "../credentials/credentialContract.js";
 import {
   pendingProvenanceMatchesHandoff,
   portableHandoffConfigMatches
@@ -40,6 +41,7 @@ import {
 import { parseAgentHostSetupHandoff } from "@planweave-ai/agent-host-protocol";
 import {
   configFromAgentHostSetupHandoff,
+  handoffInstanceKey,
   resolveAgentHostDefaultPaths
 } from "../config/defaultPaths.js";
 import { createPlatformBackgroundService } from "../background/platformBackground.js";
@@ -70,7 +72,8 @@ export type AgentHostDiagnostics = {
 
 export type PortableEnrollmentResult = {
   state: "ready" | "background_setup_required" | "tls_trust_configuration_required";
-  workspaceId: string;
+  /** Legacy collaboration workspace scope; omitted for server-scoped fleet enrollment. */
+  workspaceId?: string;
   credential: AgentHostDiagnostics["credential"];
   background: "running" | "disabled" | "setup_required";
   backgroundGuidance?: AgentHostBackgroundGuidance;
@@ -281,7 +284,8 @@ export class AgentHostOperator {
     } = {}
   ): Promise<PortableEnrollmentResult> {
     const handoff = parseAgentHostSetupHandoff(encodedHandoff);
-    const paths = resolveAgentHostDefaultPaths(handoff.workspaceId);
+    const instanceKey = handoffInstanceKey(handoff);
+    const paths = resolveAgentHostDefaultPaths(instanceKey);
     let config: AgentHostConfig;
     try {
       config = await loadAgentHostConfig(paths.configPath);
@@ -309,10 +313,12 @@ export class AgentHostOperator {
         hostDisplayName: hostname(),
         caCertificatePath: options.caCertificatePath
       });
-      await mkdir(join(config.workspaceRoot, handoff.workspaceId), {
-        recursive: true,
-        mode: 0o700
-      });
+      if (handoff.workspaceId !== undefined) {
+        await mkdir(join(config.workspaceRoot, handoff.workspaceId), {
+          recursive: true,
+          mode: 0o700
+        });
+      }
       await writePrivateJsonFile(paths.configPath, config);
       await writeExposedAgentProfileIds(config, []);
     }
@@ -395,7 +401,7 @@ export class AgentHostOperator {
     }
     try {
       await this.backgroundService.install({
-        workspaceId: handoff.workspaceId,
+        workspaceId: instanceKey,
         executablePath: options.executablePath ?? process.execPath,
         fixedArgs:
           options.fixedArgs ??
@@ -568,7 +574,7 @@ export class AgentHostOperator {
     const config = await loadAgentHostConfig(configPath);
     const credential = await credentialStore(config).requireUsable();
     return service.install({
-      workspaceId: credential.workspaceId,
+      workspaceId: credentialInstanceId(credential),
       executablePath: launcher.executablePath,
       fixedArgs: launcher.fixedArgs,
       configPath,
@@ -610,7 +616,7 @@ export class AgentHostOperator {
     await ensureDurableHostIdentity(
       config.dataDirectory,
       credential.hostId,
-      credential.workspaceId
+      credentialInstanceId(credential)
     );
     const trust = await createAgentHostTlsTrust(config.coordinator.caCertificatePath);
     let state: Awaited<ReturnType<typeof openAgentHostState>> | undefined;
@@ -747,7 +753,7 @@ export class AgentHostOperator {
     if (!this.backgroundService) return "restart_required";
     let workspaceId: string;
     try {
-      workspaceId = (await credentialStore(config).requireUsable()).workspaceId;
+      workspaceId = credentialInstanceId(await credentialStore(config).requireUsable());
     } catch (error) {
       if (error instanceof Error && error.message === "agent_host_credential_unavailable") {
         return "restart_required";
@@ -772,7 +778,10 @@ export class AgentHostOperator {
     const config = await loadAgentHostConfig(configPath);
     const document = await credentialStore(config).read();
     if (!document?.active) throw new Error("agent_host_background_identity_unavailable");
-    return { workspaceId: document.active.workspaceId, privateDirectory: config.dataDirectory };
+    return {
+      workspaceId: credentialInstanceId(document.active),
+      privateDirectory: config.dataDirectory
+    };
   }
 
   private async usableBackgroundIdentity(
@@ -780,7 +789,7 @@ export class AgentHostOperator {
   ): Promise<{ workspaceId: string; privateDirectory: string }> {
     const config = await loadAgentHostConfig(configPath);
     return {
-      workspaceId: (await credentialStore(config).requireUsable()).workspaceId,
+      workspaceId: credentialInstanceId(await credentialStore(config).requireUsable()),
       privateDirectory: config.dataDirectory
     };
   }

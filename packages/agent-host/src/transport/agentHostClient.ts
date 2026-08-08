@@ -36,7 +36,8 @@ import {
 export type AgentHostClientOptions = {
   serverUrl: string;
   hostId: string;
-  workspaceId: string;
+  /** Legacy collaboration workspace scope; omitted for server-scoped fleet enrollment. */
+  workspaceId?: string;
   token: string;
   capabilities: readonly string[];
   capacity: number;
@@ -124,7 +125,7 @@ export class AgentHostClient implements HostTransport {
     if (this.baseUrl.protocol !== "https:" && !options.allowInsecureTransport) {
       throw new Error("agent_host_secure_transport_required");
     }
-    if (!options.hostId || !options.workspaceId || !options.token)
+    if (!options.hostId || !options.token)
       throw new Error("agent_host_credentials_required");
     if (!Number.isInteger(options.capacity) || options.capacity < 1 || options.capacity > 128) {
       throw new Error("agent_host_capacity_out_of_range");
@@ -188,7 +189,9 @@ export class AgentHostClient implements HostTransport {
       `/agent-hosts/${encodeURIComponent(this.options.hostId)}/connect`,
       true
     );
-    url.searchParams.set("workspaceId", this.options.workspaceId);
+    if (this.options.workspaceId !== undefined) {
+      url.searchParams.set("workspaceId", this.options.workspaceId);
+    }
     const socket = new WebSocket(url, {
       headers: { Authorization: `Bearer ${this.options.token}` },
       maxPayload: this.limits.maxPayloadBytes,
@@ -409,7 +412,10 @@ export class AgentHostClient implements HostTransport {
     sessionStart: AgentHostExecutionContext["sessionStart"]
   ): Promise<void> {
     try {
-      if (execution.command.envelope.workspaceId !== this.options.workspaceId) {
+      if (
+        this.options.workspaceId !== undefined &&
+        execution.command.envelope.workspaceId !== this.options.workspaceId
+      ) {
         throw new AgentHostExecutionError({
           code: "host_workspace_mismatch",
           message: "The execution envelope workspace does not match the local Host credential.",

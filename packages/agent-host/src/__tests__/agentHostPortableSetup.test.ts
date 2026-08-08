@@ -9,6 +9,7 @@ import {
 } from "@planweave-ai/agent-host-protocol";
 import {
   configFromAgentHostSetupHandoff,
+  handoffInstanceKey,
   resolveAgentHostDefaultPaths
 } from "../config/defaultPaths.js";
 import { FileHostCredentialStore } from "../credentials/fileCredentialStore.js";
@@ -58,6 +59,26 @@ function encodedHandoff(
   );
 }
 
+function encodedFleetHandoff(
+  input: { enrollmentCode?: string; serverOrigin?: string } = {}
+) {
+  const serverOrigin = input.serverOrigin ?? "http://192.168.1.8:4317";
+  return serializeAgentHostSetupHandoff(
+    agentHostSetupHandoffSchema.parse({
+      version: "agent-host-setup/v1",
+      endpoint: {
+        topology: serverOrigin.includes("127.0.0.1") ? "loopback_http" : "lan_http",
+        serverOrigin,
+        allowedClientOrigins: [serverOrigin],
+        tlsTrust: "not_applicable"
+      },
+      enrollmentCode: input.enrollmentCode ?? `pw_enroll_${"a".repeat(43)}`,
+      expiresAt: "2030-01-01T00:00:00.000Z",
+      display: { workspaceName: "Owner fleet", serverName: "Private server" }
+    })
+  );
+}
+
 async function listen(server: Server): Promise<number> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
@@ -82,6 +103,23 @@ describe("portable Agent Host setup", () => {
     expect(config.agentProfiles).toEqual([]);
     expect(paths.configPath).toContain(join("instances", "workspace-1"));
     expect(JSON.stringify(config)).not.toContain("pw_enroll_");
+  });
+
+  it("derives fleet instance paths without workspace binding", async () => {
+    const home = await mkdtemp(join(tmpdir(), "planweave-portable-fleet-"));
+    directories.push(home);
+    const handoff = (
+      await import("@planweave-ai/agent-host-protocol")
+    ).parseAgentHostSetupHandoff(encodedFleetHandoff(), new Date("2029-01-01"));
+    const instanceKey = handoffInstanceKey(handoff);
+    expect(instanceKey.startsWith("fleet-")).toBe(true);
+    const paths = resolveAgentHostDefaultPaths(instanceKey, home);
+    const config = configFromAgentHostSetupHandoff(handoff, {
+      paths,
+      hostDisplayName: "Fleet host"
+    });
+    expect(config.workspaces).toEqual([]);
+    expect(paths.configPath).toContain(join("instances", instanceKey));
   });
 
   it("parses the single-command handoff and exposure commands", () => {
