@@ -5,7 +5,8 @@ import {
   assertAgentHostProtocolCompatible,
   executionEnvelopeSchema,
   hashExecutionEnvelope,
-  mailboxCommandSchema
+  mailboxCommandSchema,
+  type OwnerPackageLocator
 } from "@planweave-ai/agent-host-protocol";
 import { workspaceIdSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
 import type { RemoteBlockDispatchCandidate, RemoteBlockRuntimePort } from "@planweave-ai/runtime";
@@ -102,10 +103,18 @@ export type RemoteBlockCoordinatorOptions = {
     operation: RemoteOperation;
     reservation: HostCapacityReservation;
   }) => void;
+  ownerPackageLocatorForHost?: (input: {
+    hostId: string;
+    candidate: RemoteBlockDispatchCandidate;
+  }) => OwnerPackageLocator | undefined;
   serverInstanceOwnerToken: string;
 };
 
-function buildEnvelope(operation: RemoteOperation, candidate: RemoteBlockDispatchCandidate) {
+function buildEnvelope(
+  operation: RemoteOperation,
+  candidate: RemoteBlockDispatchCandidate,
+  ownerPackageLocator?: OwnerPackageLocator
+) {
   const protocolCheck = assertAgentHostProtocolCompatible(agentHostProtocolVersion);
   if (!protocolCheck.ok) {
     throw new Error(`${protocolCheck.code}:${protocolCheck.message}`);
@@ -128,6 +137,7 @@ function buildEnvelope(operation: RemoteOperation, candidate: RemoteBlockDispatc
     dependencySummaries: candidate.dependencySummaries,
     inputArtifacts: candidate.inputArtifacts,
     workspaceId: candidate.workspaceId,
+    ...(ownerPackageLocator === undefined ? {} : { ownerPackageLocator }),
     agentId: operation.endpointSelection?.agentId ?? candidate.agentId,
     agentProfileId: operation.endpointSelection?.profileId ?? candidate.agentProfileId,
     session: candidate.session,
@@ -362,7 +372,14 @@ export class RemoteBlockCoordinator {
       }
     }
 
-    const envelope = buildEnvelope(operation, candidate);
+    const ownerPackageLocator =
+      operation.endpointSelection === undefined
+        ? undefined
+        : this.options.ownerPackageLocatorForHost?.({
+            hostId: operation.endpointSelection.hostId,
+            candidate
+          });
+    const envelope = buildEnvelope(operation, candidate, ownerPackageLocator);
     const envelopeDigest = hashExecutionEnvelope(envelope);
     operation = this.options.operations.recordEnvelope({
       operationId: operation.id,

@@ -27,6 +27,16 @@ export {
 export { blockRefSchema, type BlockRef } from "./blockRef.js";
 export { canonicalizeJson } from "./canonicalJson.js";
 export {
+  ownerPackageLocatorForRun,
+  ownerPackageLocatorSchema,
+  OwnerRunWorkspaceResolverError,
+  resolveOwnerRunWorkspace,
+  resolvedHostWorkspaceSchema,
+  type OwnerPackageLocator,
+  type OwnerRunWorkspaceResolverErrorCode,
+  type ResolvedHostWorkspace
+} from "./ownerRunWorkspace.js";
+export {
   canonicalizeExecutionEnvelope,
   dependencyOutcomeSchema,
   dependencyResultSummarySchema,

@@ -185,7 +185,10 @@ export interface AgentHostRemoteInteractionResponder {
 export type ResolvedAgentHostWorkspace = { cwd: string };
 
 export interface AgentHostWorkspaceResolver {
-  resolve(workspaceId: string): Promise<ResolvedAgentHostWorkspace> | ResolvedAgentHostWorkspace;
+  resolve(
+    workspaceId: string,
+    ownerPackageLocator?: import("@planweave-ai/agent-host-protocol").OwnerPackageLocator
+  ): Promise<ResolvedAgentHostWorkspace> | ResolvedAgentHostWorkspace;
 }
 
 export type AgentHostAcpSessionProfile = {

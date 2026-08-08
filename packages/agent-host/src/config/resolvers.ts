@@ -1,4 +1,9 @@
-import { access, realpath } from "node:fs/promises";
+import {
+  ownerPackageLocatorSchema,
+  resolveOwnerRunWorkspace,
+  type OwnerPackageLocator
+} from "@planweave-ai/agent-host-protocol";
+import { access, mkdir, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import { agentProcessEnvRecord } from "@planweave-ai/runtime";
@@ -18,7 +23,29 @@ function contained(root: string, candidate: string): boolean {
 export class ConfiguredWorkspaceResolver implements AgentHostWorkspaceResolver {
   constructor(private readonly config: AgentHostConfig) {}
 
-  async resolve(workspaceId: string): Promise<ResolvedAgentHostWorkspace> {
+  async resolve(
+    workspaceId: string,
+    ownerPackageLocator?: OwnerPackageLocator
+  ): Promise<ResolvedAgentHostWorkspace> {
+    const locator = ownerPackageLocator
+      ? ownerPackageLocatorSchema.parse(ownerPackageLocator)
+      : undefined;
+    if (locator) {
+      const resolved = resolveOwnerRunWorkspace({
+        workspaceRoot: this.config.workspaceRoot,
+        locator
+      });
+      const cwd = await realpath(resolved.absolutePath).catch(async () => {
+        await mkdir(resolved.absolutePath, { recursive: true });
+        return realpath(resolved.absolutePath);
+      });
+      const root = await realpath(this.config.workspaceRoot);
+      if (!contained(root, cwd)) throw new Error("agent_host_workspace_escape");
+      await access(cwd).catch(async () => {
+        await mkdir(cwd, { recursive: true });
+      });
+      return { cwd };
+    }
     const mapping = this.config.workspaces.find((workspace) => workspace.id === workspaceId);
     if (!mapping) throw new Error("agent_host_workspace_not_configured");
     const root = await realpath(this.config.workspaceRoot);

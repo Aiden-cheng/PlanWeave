@@ -206,7 +206,10 @@ export class RemoteAcpExecutor implements AgentHostExecutor {
     let profile: Awaited<ReturnType<AgentHostAcpProfileResolver["resolve"]>>;
     try {
       [workspace, profile] = await Promise.all([
-        this.options.workspaceResolver.resolve(command.envelope.workspaceId),
+        this.options.workspaceResolver.resolve(
+          command.envelope.workspaceId,
+          command.envelope.ownerPackageLocator
+        ),
         this.options.profileResolver.resolve(
           command.envelope.agentProfileId,
           command.envelope.agentId

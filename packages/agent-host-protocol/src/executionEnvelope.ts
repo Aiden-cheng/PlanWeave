@@ -21,6 +21,7 @@ import {
   SESSION_CONFIG_OPTION_MAX_COUNT,
   SOURCE_IDENTITY_MAX_LENGTH
 } from "./limits.js";
+import { ownerPackageLocatorSchema } from "./ownerRunWorkspace.js";
 import { agentHostProtocolVersionSchema } from "./version.js";
 
 /** Digest algorithm used for Execution Envelope content addressing. */
@@ -165,6 +166,8 @@ export const executionEnvelopeSchema = z
     inputArtifacts: z.array(dispatchInputArtifactSchema).max(INPUT_ARTIFACT_MAX_COUNT),
     /** Logical workspace identity; Host maps via local allowlist. */
     workspaceId: opaqueIdentifierSchema,
+    /** Owner Fleet run workspace hint when Host has no collaboration workspace mapping. */
+    ownerPackageLocator: ownerPackageLocatorSchema.optional(),
     /** Logical ACP agent/profile identity; Host maps via local allowlist. */
     agentId: opaqueIdentifierSchema,
     agentProfileId: opaqueIdentifierSchema,

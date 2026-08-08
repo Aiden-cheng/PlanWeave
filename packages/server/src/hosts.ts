@@ -96,6 +96,34 @@ export function fleetHostAvailability(
   return { status: "available", reason: null };
 }
 
+/** Operation-specific fleet readiness without collaboration workspace mapping. */
+export function fleetHostExecutionProfileAvailability(
+  host: AgentHost,
+  input: {
+    online: boolean;
+    agentId: string;
+    agentProfileId: string;
+    requiredCapabilities: readonly string[];
+  }
+): OperatorHostAvailability {
+  const generic = fleetHostAvailability(host, input.online);
+  if (generic.status !== "available") return generic;
+  const profile = host.readinessObservation?.acpProfiles.find(
+    (candidate) =>
+      candidate.profileId === input.agentProfileId && candidate.agentId === input.agentId
+  );
+  if (!profile || profile.status === "missing") {
+    return { status: "unavailable", reason: "acp_profile_missing" };
+  }
+  if (profile.status === "invalid") {
+    return { status: "unavailable", reason: "acp_profile_invalid" };
+  }
+  if (!input.requiredCapabilities.every((capability) => host.capabilities.includes(capability))) {
+    return { status: "unavailable", reason: "capability_mismatch" };
+  }
+  return { status: "available", reason: null };
+}
+
 /** Operation-specific readiness for the exact ACP profile carried by an execution envelope. */
 export function hostExecutionProfileAvailability(
   host: AgentHost,
@@ -105,8 +133,12 @@ export function hostExecutionProfileAvailability(
     agentId: string;
     agentProfileId: string;
     requiredCapabilities: readonly string[];
+    fleetUnbound?: boolean;
   }
 ): OperatorHostAvailability {
+  if (input.fleetUnbound) {
+    return fleetHostExecutionProfileAvailability(host, input);
+  }
   const generic = operatorHostAvailability(host, input.workspaceId, input.online);
   if (generic.status !== "available") return generic;
   const profile = host.readinessObservation?.acpProfiles.find(

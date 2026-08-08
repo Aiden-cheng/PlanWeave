@@ -245,6 +245,7 @@ export class HostReservationRepository {
               now,
               hostOfflineAfterMs: this.options.hostOfflineAfterMs
             });
+            const fleetUnbound = this.workspaceIdentity.workspaceForHost(candidate.id) === undefined;
             return (
               this.workspaceIdentity.hostUsable(candidate.id, now) &&
               this.workspaceIdentity.hostUsable(candidate.id, now, workspaceId) &&
@@ -253,7 +254,8 @@ export class HostReservationRepository {
                 online,
                 agentId: options.agentId,
                 agentProfileId: options.agentProfileId,
-                requiredCapabilities: operation.requiredCapabilities
+                requiredCapabilities: operation.requiredCapabilities,
+                fleetUnbound
               }).status === "available"
             );
           });

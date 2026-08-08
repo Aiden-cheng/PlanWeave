@@ -151,12 +151,13 @@ export function hostCanSatisfyBlock(
   }
 ): boolean {
   const workspace = input.workspaceIdentity.workspaceForHost(host.id);
+  const fleetUnbound = workspace === undefined;
+  if (!fleetUnbound && workspace !== input.scope.workspaceId) return false;
   const online = isAgentHostOnline(host, {
     now: input.now,
     hostOfflineAfterMs: input.hostOfflineAfterMs
   });
   return (
-    workspace === input.scope.workspaceId &&
     host.revokedAt === undefined &&
     online &&
     hostExecutionProfileAvailability(host, {
@@ -164,7 +165,8 @@ export function hostCanSatisfyBlock(
       online,
       agentId: input.agentId,
       agentProfileId: input.agentProfileId,
-      requiredCapabilities: input.requiredCapabilities
+      requiredCapabilities: input.requiredCapabilities,
+      fleetUnbound
     }).status === "available" &&
     host.capacity > input.activeReservations
   );
@@ -197,7 +199,7 @@ export function evaluateHostAuthorization(input: {
 }): HostAuthorizationDecision {
   const facts = hostAuthorizationFactsSchema.parse(input.facts);
   const { scope, hostId, currentRevisions, evaluatedAt } = facts;
-  if (facts.hostWorkspaceId !== scope.workspaceId)
+  if (facts.hostWorkspaceId !== "" && facts.hostWorkspaceId !== scope.workspaceId)
     return denyDecision({
       scope,
       hostId,

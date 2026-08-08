@@ -1,3 +1,4 @@
+import { ownerPackageLocatorForRun } from "@planweave-ai/agent-host-protocol";
 import { DispatchService, type DispatchRecord } from "./dispatches.js";
 import { ArtifactAuthorizationRepository } from "./artifactAuthorization.js";
 import {
@@ -219,6 +220,7 @@ export function createRemoteBlockCoordination(
       const now = (options.clock ?? (() => new Date()))();
       const online =
         !!host && isAgentHostOnline(host, { now, hostOfflineAfterMs: options.hostOfflineAfterMs });
+      const fleetUnbound = host ? workspaceIdentity.workspaceForHost(host.id) === undefined : false;
       if (
         !host ||
         hostExecutionProfileAvailability(host, {
@@ -226,7 +228,8 @@ export function createRemoteBlockCoordination(
           online,
           agentId: candidate.agentId,
           agentProfileId: candidate.agentProfileId,
-          requiredCapabilities: operation.requiredCapabilities
+          requiredCapabilities: operation.requiredCapabilities,
+          fleetUnbound
         }).status !== "available"
       ) {
         throw new Error("host_authorization_denied:capability_mismatch");
@@ -326,6 +329,13 @@ export function createRemoteBlockCoordination(
     agentEndpoints,
     endpointAuthorize,
     finalAuthorize,
+    ownerPackageLocatorForHost: ({ hostId, candidate }) => {
+      if (workspaceIdentity.workspaceForHost(hostId) !== undefined) return undefined;
+      return ownerPackageLocatorForRun({
+        projectId: candidate.projectId,
+        canvasId: candidate.canvasId
+      });
+    },
     serverInstanceOwnerToken: startupContext.serverInstanceOwnerToken
   });
   const dispatches = new DispatchService(database, hosts, artifactAuthorization, {
