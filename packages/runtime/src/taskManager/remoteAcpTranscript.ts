@@ -1,6 +1,11 @@
-import { basename, dirname } from "node:path";
+import { createHash } from "node:crypto";
+import { mkdir } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import type { NormalizedFailure } from "@planweave-ai/agent-host-protocol";
+import { materializeArtifactBytes } from "../autoRun/artifactReferenceContract.js";
 import { AcpEventStore } from "../autoRun/acpEventStore.js";
+import { upsertBlockRunInIndex } from "../autoRun/blockRunIndex.js";
+import { allocateRunId } from "../autoRun/executorShared.js";
 import { remoteAcpEventBody } from "../autoRun/remoteAcpEventProjection.js";
 import {
   acpCorrelationSchema,
@@ -8,13 +13,128 @@ import {
   runnerRunIdentitySchema,
   type ArtifactReference
 } from "../autoRun/runnerContractSchemas.js";
+import { optionalReaddir } from "../fs/optionalFile.js";
 import { parseBlockRef } from "../graph/compileTaskGraph.js";
 import { writeJsonFile } from "../json.js";
 import type { ProjectWorkspace } from "../types.js";
+import {
+  readImplementationRunMetadataFile
+} from "./implementationRunMetadata.js";
+import { incrementTaskIndexCount, updateTaskIndex } from "./resultIndex.js";
 import type { ActiveRemoteOperationIdentity } from "./remoteOwnershipTransitions.js";
 import type { RemoteBlockCompletionInput } from "./remoteBlockRuntimeContracts.js";
 
 type RemoteAcpTranscript = NonNullable<RemoteBlockCompletionInput["transcript"]>;
+
+async function findRunIdByExecutionAttempt(
+  runRoot: string,
+  executionAttemptId: string
+): Promise<string | null> {
+  const entries = await optionalReaddir(runRoot, { withFileTypes: true });
+  if (!entries) {
+    return null;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !/^RUN-\d+$/.test(entry.name)) {
+      continue;
+    }
+    try {
+      const metadata = await readImplementationRunMetadataFile(
+        join(runRoot, entry.name, "metadata.json")
+      );
+      if (metadata.executionAttemptId === executionAttemptId) {
+        return entry.name;
+      }
+    } catch (error) {
+      if (error instanceof Error && /is (invalid|malformed JSON):/.test(error.message)) {
+        throw error;
+      }
+      continue;
+    }
+  }
+  return null;
+}
+
+/**
+ * Persist a successful remote review as a Task Workspace ACP run so conversation
+ * survives after the live remote row disappears (receipt runId stays REV-*).
+ */
+export async function ensureRemoteReviewAcpConversationRun(options: {
+  workspace: ProjectWorkspace;
+  ref: string;
+  transcript: RemoteAcpTranscript;
+  reportBytes: Uint8Array;
+  identity: ActiveRemoteOperationIdentity;
+  reviewAttemptId: string;
+}): Promise<string> {
+  const { taskId, blockId } = parseBlockRef(options.ref);
+  const runRoot = join(options.workspace.resultsDir, taskId, "blocks", blockId, "runs");
+  const existing = await findRunIdByExecutionAttempt(
+    runRoot,
+    options.identity.executionAttemptId
+  );
+  if (existing) {
+    return existing;
+  }
+
+  const runId = await allocateRunId(runRoot);
+  const runDir = join(runRoot, runId);
+  await mkdir(runDir, { recursive: true });
+  const reportBytes = Buffer.from(options.reportBytes);
+  const artifactReference = await materializeArtifactBytes({
+    rootDir: runDir,
+    relativePath: "review-result.json",
+    kind: "review",
+    content: reportBytes
+  });
+  const remoteTiming = await materializeRemoteAcpTranscript({
+    workspace: options.workspace,
+    ref: options.ref,
+    runId,
+    runDir,
+    transcript: options.transcript,
+    artifact: artifactReference
+  });
+  await writeJsonFile(join(runDir, "metadata.json"), {
+    ref: options.ref,
+    taskId,
+    blockId,
+    runId,
+    submittedAt: new Date().toISOString(),
+    reportHash: createHash("sha256").update(reportBytes).digest("hex"),
+    artifactReference,
+    reviewAttemptId: options.reviewAttemptId,
+    claimRef: options.ref,
+    projectId: options.workspace.id,
+    canvasId: basename(dirname(options.workspace.packageDir)),
+    executor: options.transcript.executor,
+    adapter: "agent",
+    agentId: options.transcript.agentId,
+    runnerKind: "acp",
+    executorRunId: runId,
+    runSessionId: null,
+    desktopRunId: null,
+    sessionId: options.transcript.sessionId,
+    agentSessionId: options.transcript.sessionId,
+    status: "completed",
+    startedAt: remoteTiming.startedAt,
+    finishedAt: remoteTiming.finishedAt,
+    exitCode: 0,
+    operationId: options.identity.operationId,
+    dispatchId: options.identity.dispatchId,
+    executionAttemptId: options.identity.executionAttemptId
+  });
+  await upsertBlockRunInIndex(runRoot, runId, true);
+  await updateTaskIndex(options.workspace, taskId, (index) => ({
+    ...index,
+    latestRunByBlock: {
+      ...(index.latestRunByBlock ?? {}),
+      [options.ref]: runId
+    },
+    counts: incrementTaskIndexCount(index, "runs")
+  }));
+  return runId;
+}
 
 export async function materializeRemoteAcpTranscript(options: {
   workspace: ProjectWorkspace;

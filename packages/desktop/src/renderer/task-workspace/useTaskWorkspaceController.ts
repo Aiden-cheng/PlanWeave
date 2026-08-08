@@ -136,6 +136,23 @@ function findRun(
   return block && item ? { block, item } : null;
 }
 
+function preferredPersistedRun(
+  runs: NonNullable<TaskWorkspace["blocks"][number]["runs"]>
+): TaskWorkspace["blocks"][number]["runs"][number] | undefined {
+  // Prefer conversation-capable ACP runs over legacy local-review / unknown transports.
+  for (let index = runs.length - 1; index >= 0; index -= 1) {
+    if (runs[index]?.run.metadata.runnerKind === "acp") {
+      return runs[index];
+    }
+  }
+  for (let index = runs.length - 1; index >= 0; index -= 1) {
+    if (runs[index]?.run.metadata.runnerKind === "cli") {
+      return runs[index];
+    }
+  }
+  return runs.at(-1);
+}
+
 function initialRunForNavigation(
   workspace: TaskWorkspace,
   navigation: TaskWorkspaceNavigationIdentity
@@ -151,7 +168,7 @@ function initialRunForNavigation(
         (candidate) => candidate.active && isRemoteLiveRecordId(candidate.run.record.recordId)
       ) ??
       block?.runs.find((candidate) => candidate.active) ??
-      block?.runs.at(-1);
+      (block ? preferredPersistedRun(block.runs) : undefined);
     return block && item ? { block, item } : null;
   }
   // Task-level open: still prefer any in-flight remote live row.

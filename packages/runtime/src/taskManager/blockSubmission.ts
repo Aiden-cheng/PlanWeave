@@ -213,7 +213,8 @@ export async function submitRemoteBlockResult(
       projectRoot: options.projectRoot,
       ref: input.ref,
       reportBytes: bytes,
-      ownership: identity
+      ownership: identity,
+      ...(input.transcript ? { transcript: input.transcript } : {})
     });
     // Remote operation terminal shape is always completed when Host writeback succeeds.
     return {

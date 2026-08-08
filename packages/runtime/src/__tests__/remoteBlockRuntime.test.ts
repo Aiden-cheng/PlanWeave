@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { appendFile, readFile, stat } from "node:fs/promises";
+import { appendFile, readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -301,6 +301,38 @@ describe("remote block runtime terminal transitions", () => {
       }
     });
     expect(reviewState).not.toHaveProperty("remoteOwnership");
+
+    const reviewRunRoot = join(init.workspace.resultsDir, "T-001", "blocks", "R-001", "runs");
+    const reviewRunIds = (await readdir(reviewRunRoot))
+      .filter((name) => /^RUN-\d+$/.test(name))
+      .sort();
+    expect(reviewRunIds.length).toBeGreaterThan(0);
+    const reviewRunId = reviewRunIds.at(-1)!;
+    expect(
+      JSON.parse(await readFile(join(reviewRunRoot, reviewRunId, "metadata.json"), "utf8"))
+    ).toMatchObject({
+      runnerKind: "acp",
+      agentId: "codex",
+      executor: "codex-acp",
+      executionAttemptId: reviewIdentity.executionAttemptId,
+      reviewAttemptId: completed.runId
+    });
+    const detail = await getTaskWorkspaceRunDetail({
+      projectRoot: init.workspace.rootPath,
+      canvasId: "default",
+      taskId: "T-001",
+      recordId: `T-001#R-001::${reviewRunId}`
+    });
+    expect(detail.record.runnerReadModel?.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          body: expect.objectContaining({
+            kind: "terminal",
+            outcome: expect.objectContaining({ state: "succeeded", artifactValidated: true })
+          })
+        })
+      ])
+    );
   });
 
   it("reclaims an in_progress review after remote needs_changes and local feedback resolve", async () => {

@@ -8,7 +8,11 @@ import {
   type ActiveAgentRunActionIdentity,
   type ActiveAgentRunSessionActionIdentity
 } from "../autoRun/activeAgentRunRegistry.js";
-import type { JsonRpcValue, RunnerInteractionBroker } from "../autoRun/liveControl.js";
+import {
+  type JsonRpcValue,
+  type RunnerInteractionBroker,
+  RunnerCleanupError
+} from "../autoRun/liveControl.js";
 import { redactRunnerEventText } from "../autoRun/runnerEventRedaction.js";
 import { createAutoRunExplanation, runAutoRunStep } from "../taskManager/autoRun.js";
 import {
@@ -825,7 +829,10 @@ export async function stopAutoRun(runId: string): Promise<DesktopAutoRunState> {
         `Auto Run '${runId}' Agent and tmux cleanup did not complete cleanly.`
       );
     }
-    if (agentCleanupError !== undefined) throw agentCleanupError;
+    // Soft-stop: terminal agent cleanup noise must not block Pause from marking stopped.
+    if (agentCleanupError !== undefined && !(agentCleanupError instanceof RunnerCleanupError)) {
+      throw agentCleanupError;
+    }
     if (tmuxCleanupError !== undefined) throw tmuxCleanupError;
     let stopped: DesktopAutoRunState | undefined;
     let terminalError: unknown;

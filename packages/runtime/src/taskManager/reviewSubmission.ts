@@ -49,7 +49,11 @@ import {
   extractFinalArtifactEnvelope,
   FinalArtifactContractError
 } from "../autoRun/finalArtifactContract.js";
-import { RemoteBlockRuntimeError } from "./remoteBlockRuntimeContracts.js";
+import { ensureRemoteReviewAcpConversationRun } from "./remoteAcpTranscript.js";
+import {
+  RemoteBlockRuntimeError,
+  type RemoteBlockCompletionInput
+} from "./remoteBlockRuntimeContracts.js";
 
 function reviewResultHash(result: ReviewResult): string {
   return createHash("sha256").update(JSON.stringify(result)).digest("hex");
@@ -373,6 +377,8 @@ export async function submitReviewResultValue(
     resultPath: string;
     session?: ExecutionGraphSession;
     remote?: ActiveRemoteOperationIdentity;
+    transcript?: NonNullable<RemoteBlockCompletionInput["transcript"]>;
+    reportBytes?: Uint8Array;
   },
   value: unknown
 ): Promise<SubmitReviewResult> {
@@ -389,6 +395,7 @@ export async function submitRemoteReviewResult(options: {
   ref: string;
   reportBytes: Uint8Array;
   ownership: ActiveRemoteOperationIdentity;
+  transcript?: NonNullable<RemoteBlockCompletionInput["transcript"]>;
 }): Promise<SubmitReviewResult> {
   const { taskId } = parseBlockRef(options.ref);
   const parsed = parseRemoteReviewResultBytes({
@@ -406,7 +413,9 @@ export async function submitRemoteReviewResult(options: {
       projectRoot: options.projectRoot,
       ref: options.ref,
       resultPath,
-      remote: options.ownership
+      remote: options.ownership,
+      reportBytes: options.reportBytes,
+      ...(options.transcript ? { transcript: options.transcript } : {})
     },
     parsed
   );
@@ -419,6 +428,8 @@ async function submitReviewResultLocked(
     resultPath: string;
     session?: ExecutionGraphSession;
     remote?: ActiveRemoteOperationIdentity;
+    transcript?: NonNullable<RemoteBlockCompletionInput["transcript"]>;
+    reportBytes?: Uint8Array;
   },
   parsed: ReviewResult,
   resultHash: string
@@ -435,6 +446,19 @@ async function submitReviewResultLocked(
     throw new Error("review-result.json does not match the submitted review block ref.");
   }
   const blockState = state.blocks[options.ref];
+  const materializeRemoteConversation = async (attemptId: string): Promise<void> => {
+    if (!options.remote || !options.transcript || !options.reportBytes) {
+      return;
+    }
+    await ensureRemoteReviewAcpConversationRun({
+      workspace,
+      ref: options.ref,
+      transcript: options.transcript,
+      reportBytes: options.reportBytes,
+      identity: options.remote,
+      reviewAttemptId: attemptId
+    });
+  };
   if (options.remote) {
     if (blockState?.remoteOperationReceipt) {
       if (
@@ -447,6 +471,7 @@ async function submitReviewResultLocked(
           `Remote review completion for '${options.ref}' conflicts with its terminal operation receipt.`
         );
       }
+      await materializeRemoteConversation(blockState.remoteOperationReceipt.runId);
       return {
         ref: options.ref,
         reviewAttemptId: blockState.remoteOperationReceipt.runId,
@@ -481,7 +506,7 @@ async function submitReviewResultLocked(
     }
   }
 
-  const sealRemoteCompletion = (attemptId: string): void => {
+  const sealRemoteCompletion = async (attemptId: string): Promise<void> => {
     if (!options.remote) return;
     state.blocks[options.ref] = sealRemoteBlockOperationCompleted({
       blockType: "review",
@@ -489,6 +514,7 @@ async function submitReviewResultLocked(
       ownership: options.remote,
       runId: attemptId
     });
+    await materializeRemoteConversation(attemptId);
   };
   const workRevision = computeWorkRevision(graph, state, options.ref);
   const persistedAttempt = await findPersistedReviewAttempt({
@@ -585,7 +611,7 @@ async function submitReviewResultLocked(
           ? state.currentRefs
           : [...state.currentRefs, options.ref];
       }
-      sealRemoteCompletion(attemptId);
+      await sealRemoteCompletion(attemptId);
       state = refreshDerivedState(manifest, state);
       await writeState(workspace.stateFile, state);
       return {
@@ -610,7 +636,7 @@ async function submitReviewResultLocked(
       state.currentReviewBlockRef =
         state.currentReviewBlockRef === options.ref ? null : state.currentReviewBlockRef;
       state.currentRefs = state.currentRefs.filter((ref) => ref !== options.ref);
-      sealRemoteCompletion(attemptId);
+      await sealRemoteCompletion(attemptId);
       state = refreshDerivedState(manifest, state);
       await writeState(workspace.stateFile, state);
       return {
@@ -648,7 +674,7 @@ async function submitReviewResultLocked(
     state.currentReviewBlockRef =
       state.currentReviewBlockRef === options.ref ? null : state.currentReviewBlockRef;
     state.currentRefs = state.currentRefs.filter((ref) => ref !== options.ref);
-    sealRemoteCompletion(attemptId);
+    await sealRemoteCompletion(attemptId);
     state = refreshDerivedState(manifest, state);
     await writeState(workspace.stateFile, state);
     return {
@@ -685,7 +711,7 @@ async function submitReviewResultLocked(
     state.currentReviewBlockRef =
       state.currentReviewBlockRef === options.ref ? null : state.currentReviewBlockRef;
     state.currentRefs = state.currentRefs.filter((ref) => ref !== options.ref);
-    sealRemoteCompletion(attemptId);
+    await sealRemoteCompletion(attemptId);
     state = refreshDerivedState(manifest, state);
     await writeState(workspace.stateFile, state);
     return {
@@ -720,7 +746,7 @@ async function submitReviewResultLocked(
       blockedReason: `Review hook failed: ${error instanceof Error ? error.message : String(error)}`
     };
     state.currentRefs = state.currentRefs.filter((ref) => ref !== options.ref);
-    sealRemoteCompletion(attemptId);
+    await sealRemoteCompletion(attemptId);
     state = refreshDerivedState(manifest, state);
     await writeState(workspace.stateFile, state);
     return {
@@ -764,7 +790,7 @@ async function submitReviewResultLocked(
   state.currentFeedbackId = feedbackId;
   state.currentReviewBlockRef = options.ref;
   state.currentRefs = withoutCurrentRef(state.currentRefs, options.ref);
-  sealRemoteCompletion(attemptId);
+  await sealRemoteCompletion(attemptId);
   state = refreshDerivedState(manifest, state);
   await writeState(workspace.stateFile, state);
   return {
