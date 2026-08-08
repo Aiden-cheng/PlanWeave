@@ -6,9 +6,11 @@ import type {
 } from "@planweave-ai/runtime";
 import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import type { RemoteOperationObservation } from "@planweave-ai/collaboration-protocol/remote-run";
+import type { RemoteHumanExecutionActionCommand } from "@planweave-ai/collaboration-protocol/remote-run";
 import type { PlanWeaveCollaborationApi } from "../../shared/collaboration";
 import { bridge } from "../bridge";
 import type { AgentEndpointBlockSelection } from "./agentEndpointRunPlan";
+import type { OwnerFleetRemoteDispatchApi } from "./ownerFleetRemoteDispatch";
 import {
   type LocalAutoRunObserver,
   runClaimBusLocalAutoRunUnit,
@@ -26,6 +28,43 @@ type RemoteOperationsApi = Pick<
   | "executeCollaborationRemoteOperationAction"
   | "onCollaborationObserverSignal"
 >;
+
+type RemoteDispatchSurface = {
+  dispatch(command: {
+    schemaVersion: "remote-run/v3";
+    projectId: string;
+    canvasId: string;
+    blockRef: string;
+    agentEndpointId: string;
+    idempotencyKey: string;
+    expectedResponsibilityRevision: number;
+    expectedReviewerRevision: number;
+  }): Promise<RemoteOperationObservation>;
+  observe(input: { operationId: string }): Promise<RemoteOperationObservation>;
+  executeAction(input: {
+    operationId: string;
+    action: RemoteHumanExecutionActionCommand;
+  }): Promise<unknown>;
+  onObserverSignal?: RemoteOperationsApi["onCollaborationObserverSignal"];
+};
+
+function collaborationRemoteDispatchSurface(api: RemoteOperationsApi): RemoteDispatchSurface {
+  return {
+    dispatch: (command) => api.dispatchCollaborationRemoteOperation(command),
+    observe: (input) => api.observeCollaborationRemoteOperation(input),
+    executeAction: (input) => api.executeCollaborationRemoteOperationAction(input),
+    onObserverSignal: api.onCollaborationObserverSignal
+  };
+}
+
+function ownerFleetRemoteDispatchSurface(api: OwnerFleetRemoteDispatchApi): RemoteDispatchSurface {
+  return {
+    dispatch: (command) =>
+      api.dispatchOwnerFleetRemoteOperation({ command }),
+    observe: (input) => api.observeOwnerFleetRemoteOperation(input),
+    executeAction: (input) => api.executeOwnerFleetRemoteOperationAction(input)
+  };
+}
 
 /** Live remote-ownership binding for a block (read-model), not a renderer graph snapshot. */
 export type ResolveLiveRemoteBinding = (
@@ -66,7 +105,7 @@ function interruptionResumable(observation: RemoteOperationObservation): boolean
  * on the existing operation (do not mint a second dispatch).
  */
 async function recoverExistingRemoteOperation(input: {
-  api: RemoteOperationsApi;
+  api: RemoteDispatchSurface;
   observation: RemoteOperationObservation;
   createId: () => string;
 }): Promise<RemoteOperationObservation> {
@@ -91,7 +130,7 @@ async function recoverExistingRemoteOperation(input: {
       actionId: `action-resume-${suffix}`,
       reason: "Resume remote attempt after Agent Host reconnection."
     });
-    await input.api.executeCollaborationRemoteOperationAction({
+    await input.api.executeAction({
       operationId: observation.operationId,
       action
     });
@@ -104,13 +143,13 @@ async function recoverExistingRemoteOperation(input: {
       newDispatchId: `dispatch-retry-${suffix}`,
       newExecutionAttemptId: `attempt-retry-${suffix}`
     });
-    await input.api.executeCollaborationRemoteOperationAction({
+    await input.api.executeAction({
       operationId: observation.operationId,
       action
     });
   }
 
-  observation = await input.api.observeCollaborationRemoteOperation({
+  observation = await input.api.observe({
     operationId: observation.operationId
   });
   if (isInterruptedObservation(observation) && !TERMINAL_OPERATION_STATES.has(observation.state)) {
@@ -122,14 +161,18 @@ async function recoverExistingRemoteOperation(input: {
 }
 
 async function waitForRemoteCompletion(input: {
-  api: RemoteOperationsApi;
+  api: RemoteDispatchSurface;
   observation: RemoteOperationObservation;
   blockRef: string;
   signal?: AbortSignal;
   waitForRemoteTerminal: typeof waitForRemoteOperationTerminal;
 }): Promise<void> {
   const terminal = await input.waitForRemoteTerminal({
-    api: input.api,
+    api: {
+      observeCollaborationRemoteOperation: (observeInput) => input.api.observe(observeInput),
+      onCollaborationObserverSignal:
+        input.api.onObserverSignal ?? (() => () => undefined)
+    },
     initial: input.observation,
     signal: input.signal
   });
@@ -144,12 +187,16 @@ export function createAgentEndpointBlockExecutor(input: {
   activeProjectId: string;
   canvasId: string;
   selectionByBlockRef: ReadonlyMap<string, AgentEndpointBlockSelection>;
-  collaborationController: {
+  collaborationController?: {
     ensureWorkAuthority: (workItem: WorkItemRef) => Promise<{
       revisions: { responsibilityRevision: number; reviewerRevision: number };
     } | null>;
-  };
-  api: RemoteOperationsApi;
+  } | null;
+  api?: RemoteOperationsApi | null;
+  ownerFleetApi?: OwnerFleetRemoteDispatchApi | null;
+  resolveRemoteWorkAuthority?: (workItem: WorkItemRef) => Promise<{
+    revisions: { responsibilityRevision: number; reviewerRevision: number };
+  } | null>;
   /**
    * Authority for existing-operation recovery: live remoteExecution read-model for the block.
    * Must not be derived from the renderer graph snapshot captured at run start (C3).
@@ -167,6 +214,12 @@ export function createAgentEndpointBlockExecutor(input: {
   waitForRemoteTerminal?: typeof waitForRemoteOperationTerminal;
 }): (task: GraphTask, block: GraphBlock, signal?: AbortSignal) => Promise<void> {
   const waitForRemoteTerminal = input.waitForRemoteTerminal ?? waitForRemoteOperationTerminal;
+  const remoteDispatch =
+    input.ownerFleetApi !== undefined && input.ownerFleetApi !== null
+      ? ownerFleetRemoteDispatchSurface(input.ownerFleetApi)
+      : input.api
+        ? collaborationRemoteDispatchSurface(input.api)
+        : null;
 
   const executeLocal = async (selection: AgentEndpointBlockSelection, signal?: AbortSignal) => {
     const localApi = input.localAutoRunApi === undefined ? bridge : input.localAutoRunApi;
@@ -184,16 +237,17 @@ export function createAgentEndpointBlockExecutor(input: {
   };
 
   const executeRemote = async (selection: AgentEndpointBlockSelection, signal?: AbortSignal) => {
+    if (!remoteDispatch) throw new Error("owner_fleet_dispatch_unavailable");
     // Live binding only — selection.block.remoteExecution is a stale run-start snapshot for UI.
     const liveBinding = await input.resolveLiveRemoteBinding(selection.block.ref);
     const existingOperationId = nonTerminalOperationId(liveBinding);
 
     if (existingOperationId) {
-      let observation = await input.api.observeCollaborationRemoteOperation({
+      let observation = await remoteDispatch.observe({
         operationId: existingOperationId
       });
       observation = await recoverExistingRemoteOperation({
-        api: input.api,
+        api: remoteDispatch,
         observation,
         createId: input.createId
       });
@@ -205,7 +259,7 @@ export function createAgentEndpointBlockExecutor(input: {
         throw new Error(`remote_agent_block_${observation.state}:${selection.block.ref}`);
       }
       await waitForRemoteCompletion({
-        api: input.api,
+        api: remoteDispatch,
         observation,
         blockRef: selection.block.ref,
         signal,
@@ -215,14 +269,19 @@ export function createAgentEndpointBlockExecutor(input: {
     }
 
     const remoteEndpointId = selection.endpoint.remoteEndpointId;
-    if (!remoteEndpointId) throw new Error("collaboration_project_unavailable");
-    const authority = await input.collaborationController.ensureWorkAuthority({
-      kind: "block",
+    if (!remoteEndpointId) throw new Error("owner_fleet_endpoint_unavailable");
+    const workItem = {
+      kind: "block" as const,
       canvasId: input.canvasId,
       blockRef: selection.block.ref
-    });
+    };
+    const authority =
+      (await input.resolveRemoteWorkAuthority?.(workItem)) ??
+      (input.collaborationController
+        ? await input.collaborationController.ensureWorkAuthority(workItem)
+        : null);
     if (!authority) throw new Error("work_authority_unavailable");
-    const dispatched = await input.api.dispatchCollaborationRemoteOperation({
+    const dispatched = await remoteDispatch.dispatch({
       schemaVersion: "remote-run/v3",
       projectId: input.activeProjectId,
       canvasId: input.canvasId,
@@ -233,7 +292,7 @@ export function createAgentEndpointBlockExecutor(input: {
       expectedReviewerRevision: authority.revisions.reviewerRevision
     });
     await waitForRemoteCompletion({
-      api: input.api,
+      api: remoteDispatch,
       observation: dispatched,
       blockRef: selection.block.ref,
       signal,

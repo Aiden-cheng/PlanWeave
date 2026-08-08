@@ -486,6 +486,8 @@ export function ProjectWorkspaceProvider({
     preferences: settings.execution.agentEndpointPreferences,
     selectedCanvasId,
     selectedProject,
+    operatorProfileId: ownerControlPlane.operatorProfileId,
+    ownerFleetDispatchEnabled: ownerControlPlane.fleetCatalogEnabled,
     setError
   });
 

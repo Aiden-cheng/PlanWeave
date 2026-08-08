@@ -2,6 +2,7 @@ import { join } from "node:path";
 import {
   AgentHostOperator,
   FileHostCredentialStore,
+  handoffInstanceKey,
   listSupportedHostAcpProfiles,
   loadAgentHostConfig,
   readHostConnectionStatus,
@@ -12,6 +13,7 @@ import {
   type AgentHostBackgroundResult,
   type PortableEnrollmentResult
 } from "@planweave-ai/agent-host";
+import { parseAgentHostSetupHandoff } from "@planweave-ai/agent-host-protocol";
 import {
   operatorLocalAgentHostStatusSchema,
   type OperatorLocalAgentHostServerConnection,
@@ -123,6 +125,13 @@ function notRegisteredStatus(): OperatorLocalAgentHostStatus {
     state: "not_registered",
     agents: supportedProfiles()
   });
+}
+
+function resolveEnrollmentInstanceKey(
+  enrollment: PortableEnrollmentResult,
+  handoff: string
+): string {
+  return enrollment.workspaceId ?? handoffInstanceKey(parseAgentHostSetupHandoff(handoff));
 }
 
 async function resolveServerConnection(
@@ -314,8 +323,9 @@ export class DesktopLocalAgentHostProvisioner implements LocalAgentHostProvision
         fixedArgs: [...(this.launcher.fixedArgs ?? [])]
       })
     );
+    const instanceKey = resolveEnrollmentInstanceKey(enrollment, handoff);
     await withinLocalAgentHostStage("local_agent_host_registration_store_failed", () =>
-      this.registrations.upsert(profileId ?? enrollment.workspaceId, enrollment.workspaceId)
+      this.registrations.upsert(profileId ?? instanceKey, instanceKey)
     );
     const agents = (
       await withinLocalAgentHostStage("local_agent_host_agent_exposure_failed", () =>

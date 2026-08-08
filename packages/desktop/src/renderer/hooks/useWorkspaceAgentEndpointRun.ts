@@ -10,11 +10,12 @@ import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/prim
 import { useCallback, useEffect, useRef } from "react";
 import type { PlanWeaveCollaborationApi } from "../../shared/collaboration";
 import type { DesktopUiSettings } from "../../shared/desktopSettings";
-import { bridge, collaborationBridge, desktopCanvasReference } from "../bridge";
+import { bridge, collaborationBridge, desktopCanvasReference, operatorControlBridge } from "../bridge";
 import {
   createAgentEndpointBlockExecutor,
   type ResolveLiveRemoteBinding
 } from "../collaboration/agentEndpointBlockExecutor";
+import { createOwnerFleetRemoteDispatchApi } from "../collaboration/ownerFleetRemoteDispatch";
 import { createAgentEndpointRunPlan } from "../collaboration/agentEndpointRunPlan";
 import type { AvailableAgentEndpoint } from "../collaboration/agentEndpointViewModel";
 import {
@@ -44,6 +45,8 @@ type WorkspaceAgentEndpointRunInput = {
   preferences: DesktopUiSettings["execution"]["agentEndpointPreferences"];
   selectedCanvasId: string | null;
   selectedProject: DesktopProjectSummary | null;
+  operatorProfileId?: string | null;
+  ownerFleetDispatchEnabled?: boolean;
   setError: (message: string | null) => void;
   api?: Pick<
     PlanWeaveCollaborationApi,
@@ -133,11 +136,31 @@ export function useWorkspaceAgentEndpointRun(
         await startLocal(plan.scope);
         return;
       }
+      const usesRemoteEndpoint =
+        plan.kind === "coordinated_block"
+          ? plan.selection.endpoint.source === "remote"
+          : [...plan.selectionByBlockRef.values()].some(
+              (selection) => selection.endpoint.source === "remote"
+            );
+      const ownerFleetReady =
+        Boolean(input.ownerFleetDispatchEnabled) &&
+        Boolean(input.operatorProfileId) &&
+        Boolean(operatorControlBridge);
+      const collaborationReady = Boolean(
+        input.collaborationController && api && input.activeProjectId
+      );
+      if (usesRemoteEndpoint && !ownerFleetReady && !collaborationReady) {
+        input.setError("owner_fleet_dispatch_unavailable");
+        return;
+      }
+      if (!usesRemoteEndpoint && !input.selectedProject) return;
+      if (usesRemoteEndpoint && !input.selectedProject) {
+        input.setError("owner_fleet_project_unavailable");
+        return;
+      }
       if (
-        !input.activeProjectId ||
-        !input.selectedProject ||
-        !input.collaborationController ||
-        !api
+        !usesRemoteEndpoint &&
+        (!input.activeProjectId || !input.selectedProject || !input.collaborationController || !api)
       ) {
         input.setError("collaboration_project_unavailable");
         return;
@@ -151,6 +174,10 @@ export function useWorkspaceAgentEndpointRun(
       activeEndpointScopeRun.current = controller;
       lifecycle?.onStarted();
       const selectedProject = input.selectedProject;
+      if (!selectedProject) {
+        input.setError("owner_fleet_project_unavailable");
+        return;
+      }
       const selectedCanvasId = input.selectedCanvasId;
       const canvasRef = desktopCanvasReference(selectedProject, selectedCanvasId);
       const stopLocal =
@@ -179,11 +206,21 @@ export function useWorkspaceAgentEndpointRun(
             return detail.remoteExecution;
           });
         const executeBlock = createAgentEndpointBlockExecutor({
-          activeProjectId: input.activeProjectId,
+          activeProjectId: input.activeProjectId ?? selectedProject.projectId,
           canvasId: selectedCanvasId,
           selectionByBlockRef,
           collaborationController: input.collaborationController,
-          api,
+          api: ownerFleetReady ? null : api,
+          ownerFleetApi:
+            ownerFleetReady && input.operatorProfileId
+              ? createOwnerFleetRemoteDispatchApi({
+                  operatorProfileId: input.operatorProfileId,
+                  fleetApi: operatorControlBridge!
+                })
+              : null,
+          resolveRemoteWorkAuthority: ownerFleetReady
+            ? async () => ({ revisions: { responsibilityRevision: 0, reviewerRevision: 0 } })
+            : undefined,
           resolveLiveRemoteBinding,
           createId,
           startLocal,
@@ -233,7 +270,20 @@ export function useWorkspaceAgentEndpointRun(
           },
           completion: {
             isSatisfied: async (options) => {
+              if (ownerFleetReady && !collaborationReady) {
+                if (!bridge) throw new Error("desktop_bridge_unavailable");
+                if (scope.kind === "block") {
+                  const detail = await bridge.getBlockDetail(canvasRef, scope.blockRef);
+                  return detail.status === "completed";
+                }
+                for (const taskId of taskIds) {
+                  const detail = await bridge.getTaskDetail(canvasRef, taskId);
+                  if (detail.status !== "implemented") return false;
+                }
+                return true;
+              }
               const readStatus = async () => {
+                if (!api) throw new Error("collaboration_runtime_status_unavailable");
                 const status = await api.readCollaborationCanvasRuntimeStatus({
                   localProjectId: selectedProject.projectId,
                   canvasId: selectedCanvasId
@@ -293,6 +343,8 @@ export function useWorkspaceAgentEndpointRun(
       input.resolveLiveRemoteBinding,
       input.selectedCanvasId,
       input.selectedProject,
+      input.operatorProfileId,
+      input.ownerFleetDispatchEnabled,
       input.setError,
       input.stopLocal,
       input.waitForLocalTerminal,

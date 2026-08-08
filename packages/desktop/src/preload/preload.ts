@@ -541,6 +541,12 @@ const operatorControlApi: PlanWeaveOperatorControlApi = {
     ipcRenderer.invoke(operatorControlInvokeChannels.registerLocalAgentHost, input),
   enrollOperatorLocalAgentHost: async (input) =>
     ipcRenderer.invoke(operatorControlInvokeChannels.enrollLocalAgentHost, input),
+  dispatchOwnerFleetRemoteOperation: async (input) =>
+    ipcRenderer.invoke(operatorControlInvokeChannels.dispatchOwnerFleetRemoteOperation, input),
+  observeOwnerFleetRemoteOperation: async (input) =>
+    ipcRenderer.invoke(operatorControlInvokeChannels.observeOwnerFleetRemoteOperation, input),
+  executeOwnerFleetRemoteOperationAction: async (input) =>
+    ipcRenderer.invoke(operatorControlInvokeChannels.executeOwnerFleetRemoteOperationAction, input),
   onOperatorControlStatusChanged: (callback) => {
     const listener = (_event: IpcRendererEvent, payload: OperatorControlStatus) =>
       callback(payload);

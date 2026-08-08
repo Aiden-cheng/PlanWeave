@@ -162,6 +162,43 @@ export class OperatorControlClient {
     );
   }
 
+  async dispatchRemoteOperation(
+    command: import("@planweave-ai/collaboration-protocol/remote-run").RemoteDispatchIntentV3
+  ) {
+    const { operatorObservationToRemoteRun } = await import("./operatorRemoteOperations.js");
+    const { remoteDispatchIntentV3Schema } = await import(
+      "@planweave-ai/collaboration-protocol/remote-run"
+    );
+    const body = remoteDispatchIntentV3Schema.parse(command);
+    return operatorObservationToRemoteRun(
+      await this.json("POST", "/api/v1/remote-operations", z.object({}).passthrough(), { body })
+    );
+  }
+
+  async observeRemoteOperation(operationId: string) {
+    const { operatorObservationToRemoteRun } = await import("./operatorRemoteOperations.js");
+    const id = opaqueIdentifierSchema.parse(operationId);
+    return operatorObservationToRemoteRun(
+      await this.json("GET", `/api/v1/remote-operations/${encodeURIComponent(id)}`, z.object({}).passthrough())
+    );
+  }
+
+  async executeRemoteOperationAction(
+    operationId: string,
+    action: import("@planweave-ai/collaboration-protocol/remote-run").RemoteHumanExecutionActionCommand
+  ) {
+    const { remoteHumanExecutionActionCommandSchema, remoteActionViewSchema } = await import(
+      "@planweave-ai/collaboration-protocol/remote-run"
+    );
+    const id = opaqueIdentifierSchema.parse(operationId);
+    return this.json(
+      "POST",
+      `/api/v1/remote-operations/${encodeURIComponent(id)}/actions`,
+      remoteActionViewSchema,
+      { body: remoteHumanExecutionActionCommandSchema.parse(action) }
+    );
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;

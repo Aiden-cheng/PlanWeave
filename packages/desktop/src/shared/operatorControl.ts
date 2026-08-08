@@ -12,6 +12,11 @@ import {
 } from "@planweave-ai/agent-host-protocol";
 import type { RemoteAgentEndpointList } from "@planweave-ai/collaboration-protocol/agent-endpoint";
 import { z } from "zod";
+import { remoteDispatchIntentV3Schema } from "@planweave-ai/collaboration-protocol/remote-run";
+import { remoteHumanExecutionActionCommandSchema } from "@planweave-ai/collaboration-protocol/remote-run";
+import type { RemoteOperationObservation } from "@planweave-ai/collaboration-protocol/remote-run";
+import type { RemoteHumanExecutionActionCommand } from "@planweave-ai/collaboration-protocol/remote-run";
+import type { RemoteDispatchIntentV3 } from "@planweave-ai/collaboration-protocol/remote-run";
 
 const operatorProfileIdSchema = z.string().trim().min(1).max(128);
 
@@ -171,6 +176,37 @@ export const operatorRevokeHostInputSchema = z
   })
   .strict();
 export type OperatorRevokeHostInput = z.infer<typeof operatorRevokeHostInputSchema>;
+
+export const operatorDispatchOwnerFleetRemoteOperationInputSchema = z
+  .object({
+    profileId: operatorProfileIdSchema,
+    command: remoteDispatchIntentV3Schema
+  })
+  .strict();
+export type OperatorDispatchOwnerFleetRemoteOperationInput = z.infer<
+  typeof operatorDispatchOwnerFleetRemoteOperationInputSchema
+>;
+
+export const operatorObserveOwnerFleetRemoteOperationInputSchema = z
+  .object({
+    profileId: operatorProfileIdSchema,
+    operationId: operatorProfileIdSchema
+  })
+  .strict();
+export type OperatorObserveOwnerFleetRemoteOperationInput = z.infer<
+  typeof operatorObserveOwnerFleetRemoteOperationInputSchema
+>;
+
+export const operatorExecuteOwnerFleetRemoteOperationActionInputSchema = z
+  .object({
+    profileId: operatorProfileIdSchema,
+    operationId: operatorProfileIdSchema,
+    action: remoteHumanExecutionActionCommandSchema
+  })
+  .strict();
+export type OperatorExecuteOwnerFleetRemoteOperationActionInput = z.infer<
+  typeof operatorExecuteOwnerFleetRemoteOperationActionInputSchema
+>;
 
 const localAgentHostProfileIdSchema = z.string().trim().min(1).max(128);
 export const operatorLocalAgentHostProfileViewSchema = z
@@ -449,6 +485,15 @@ export type PlanWeaveOperatorControlApi = {
   enrollOperatorLocalAgentHost: (
     input: OperatorEnrollLocalAgentHostInput
   ) => Promise<OperatorLocalAgentHostStatus>;
+  dispatchOwnerFleetRemoteOperation: (
+    input: OperatorDispatchOwnerFleetRemoteOperationInput
+  ) => Promise<RemoteOperationObservation>;
+  observeOwnerFleetRemoteOperation: (
+    input: OperatorObserveOwnerFleetRemoteOperationInput
+  ) => Promise<RemoteOperationObservation>;
+  executeOwnerFleetRemoteOperationAction: (
+    input: OperatorExecuteOwnerFleetRemoteOperationActionInput
+  ) => Promise<unknown>;
   onOperatorControlStatusChanged: (callback: (status: OperatorControlStatus) => void) => () => void;
 };
 

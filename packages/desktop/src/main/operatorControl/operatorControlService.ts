@@ -19,6 +19,9 @@ import {
   operatorRegisterLocalAgentHostInputSchema,
   operatorProfileIdInputSchema,
   operatorRevokeHostInputSchema,
+  operatorDispatchOwnerFleetRemoteOperationInputSchema,
+  operatorObserveOwnerFleetRemoteOperationInputSchema,
+  operatorExecuteOwnerFleetRemoteOperationActionInputSchema,
   OperatorControlError,
   type OperatorControlProfile,
   type OperatorControlStatus,
@@ -528,6 +531,32 @@ export class OperatorControlService {
         throw publicError;
       }
     });
+  }
+
+  async dispatchOwnerFleetRemoteOperation(input: unknown) {
+    assertNoSmuggledOperatorSecrets(input, "dispatchOwnerFleetRemoteOperation");
+    const parsed = operatorDispatchOwnerFleetRemoteOperationInputSchema.parse(input);
+    return this.enqueue(() =>
+      this.withProfile(parsed, (client, value) => client.dispatchRemoteOperation(value.command))
+    );
+  }
+
+  async observeOwnerFleetRemoteOperation(input: unknown) {
+    assertNoSmuggledOperatorSecrets(input, "observeOwnerFleetRemoteOperation");
+    const parsed = operatorObserveOwnerFleetRemoteOperationInputSchema.parse(input);
+    return this.enqueue(() =>
+      this.withProfile(parsed, (client, value) => client.observeRemoteOperation(value.operationId))
+    );
+  }
+
+  async executeOwnerFleetRemoteOperationAction(input: unknown) {
+    assertNoSmuggledOperatorSecrets(input, "executeOwnerFleetRemoteOperationAction");
+    const parsed = operatorExecuteOwnerFleetRemoteOperationActionInputSchema.parse(input);
+    return this.enqueue(() =>
+      this.withProfile(parsed, (client, value) =>
+        client.executeRemoteOperationAction(value.operationId, value.action)
+      )
+    );
   }
 
   private async withProfile<T, P extends { profileId: string }>(

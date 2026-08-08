@@ -216,4 +216,41 @@ describe("createAgentEndpointBlockExecutor live remote binding (C3)", () => {
     expect(dispatch).toHaveBeenCalledTimes(1);
     expect(observe).not.toHaveBeenCalled();
   });
+
+  it("D3: dispatches through owner fleet operator control without collaboration session", async () => {
+    const dispatchOwnerFleet = vi.fn(async () => observation("operation-fleet", "running"));
+    const observeOwnerFleet = vi.fn();
+    const waitForRemoteTerminal = vi.fn(async () => observation("operation-fleet", "completed"));
+
+    const execute = createAgentEndpointBlockExecutor({
+      activeProjectId: "project-server",
+      canvasId: "canvas-main",
+      selectionByBlockRef: new Map([["T-001#R-001", selection(null)]]),
+      ownerFleetApi: {
+        dispatchOwnerFleetRemoteOperation: dispatchOwnerFleet,
+        observeOwnerFleetRemoteOperation: observeOwnerFleet,
+        executeOwnerFleetRemoteOperationAction: vi.fn()
+      },
+      resolveRemoteWorkAuthority: async () => ({
+        revisions: { responsibilityRevision: 0, reviewerRevision: 0 }
+      }),
+      resolveLiveRemoteBinding: vi.fn(async () => null),
+      createId: () => "fleet-dispatch-1",
+      startLocal: vi.fn(async () => null as DesktopAutoRunState | null),
+      stopLocal: vi.fn(),
+      waitForRemoteTerminal
+    });
+
+    await execute(task, block(null));
+
+    expect(dispatchOwnerFleet).toHaveBeenCalledWith({
+      command: expect.objectContaining({
+        schemaVersion: "remote-run/v3",
+        projectId: "project-server",
+        agentEndpointId: "endpoint-windows",
+        expectedResponsibilityRevision: 0,
+        expectedReviewerRevision: 0
+      })
+    });
+  });
 });

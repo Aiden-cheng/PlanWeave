@@ -18,7 +18,10 @@ export const operatorControlInvokeChannels = {
   getLocalAgentHostStatus: "planweave-operator:getLocalAgentHostStatus",
   repairLocalAgentHost: "planweave-operator:repairLocalAgentHost",
   registerLocalAgentHost: "planweave-operator:registerLocalAgentHost",
-  enrollLocalAgentHost: "planweave-operator:enrollLocalAgentHost"
+  enrollLocalAgentHost: "planweave-operator:enrollLocalAgentHost",
+  dispatchOwnerFleetRemoteOperation: "planweave-operator:dispatchOwnerFleetRemoteOperation",
+  observeOwnerFleetRemoteOperation: "planweave-operator:observeOwnerFleetRemoteOperation",
+  executeOwnerFleetRemoteOperationAction: "planweave-operator:executeOwnerFleetRemoteOperationAction"
 } as const;
 
 export const operatorControlStatusChangedChannel = "planweave-operator:statusChanged";

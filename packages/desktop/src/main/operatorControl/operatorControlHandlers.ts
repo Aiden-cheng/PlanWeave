@@ -122,6 +122,18 @@ export function registerOperatorControlHandlers(
   ipcMain.handle(operatorControlInvokeChannels.enrollLocalAgentHost, (_event, input: unknown) =>
     active.enrollLocalAgentHost(input)
   );
+  ipcMain.handle(
+    operatorControlInvokeChannels.dispatchOwnerFleetRemoteOperation,
+    (_event, input: unknown) => active.dispatchOwnerFleetRemoteOperation(input)
+  );
+  ipcMain.handle(
+    operatorControlInvokeChannels.observeOwnerFleetRemoteOperation,
+    (_event, input: unknown) => active.observeOwnerFleetRemoteOperation(input)
+  );
+  ipcMain.handle(
+    operatorControlInvokeChannels.executeOwnerFleetRemoteOperationAction,
+    (_event, input: unknown) => active.executeOwnerFleetRemoteOperationAction(input)
+  );
   return active;
 }
 

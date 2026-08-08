@@ -273,6 +273,7 @@
         "localCollaborationScopeStore.test.ts",
         "operatorControlHandlers.test.ts",
         "operatorControl.test.ts",
+        "operatorRemoteOperations.test.ts",
         "mcpTunnel.test.ts",
         "packageWatch.test.ts",
         "packageWatchControllerIdentity.test.ts",
@@ -588,6 +589,7 @@
         "compatibility.test.ts",
         "executionEnvelope.test.ts",
         "exports.test.ts",
+        "ownerRunWorkspace.test.ts",
         "operatorControl.test.ts",
         "primitives.test.ts"
       ],
