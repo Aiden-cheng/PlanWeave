@@ -1,8 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { claimBlock, claimNext } from "../taskManager/claimScheduler.js";
-import { buildClaimReadiness } from "../taskManager/claimReadiness.js";
+import {
+  submitBlockResult,
+  submitFeedback,
+  submitReviewResult
+} from "../taskManager/index.js";
+import { buildClaimReadiness, reviewClaimForm } from "../taskManager/claimReadiness.js";
 import { loadRuntime } from "../taskManager/runtimeContext.js";
-import { basicManifest, createTestWorkspace } from "./promptTestHelpers.js";
+import {
+  basicManifest,
+  createTestWorkspace,
+  writeReport,
+  writeReviewResult
+} from "./promptTestHelpers.js";
 
 describe("claim readiness", () => {
   it("derives claim hints and next claimable refs without mutating runtime state", async () => {
@@ -99,6 +109,60 @@ describe("claim readiness", () => {
         ref: "T-001#B-001",
         reason: "current"
       }
+    });
+  });
+
+  it("classifies review claim form as initial, resume, or not_claimable", async () => {
+    const { root } = await createTestWorkspace();
+    await claimNext({ projectRoot: root });
+    await submitBlockResult({
+      projectRoot: root,
+      ref: "T-001#B-001",
+      reportPath: await writeReport(root, "b.md")
+    });
+
+    const readyContext = await loadRuntime({ projectRoot: root });
+    expect(reviewClaimForm(readyContext.graph, readyContext.state, "T-001#R-001")).toEqual({
+      kind: "initial"
+    });
+    expect(reviewClaimForm(readyContext.graph, readyContext.state, "T-001#B-001")).toMatchObject({
+      kind: "not_claimable"
+    });
+
+    await claimNext({ projectRoot: root });
+    await submitReviewResult({
+      projectRoot: root,
+      ref: "T-001#R-001",
+      resultPath: await writeReviewResult(root, "needs_changes", "Please update tests.")
+    });
+    const openFeedbackContext = await loadRuntime({ projectRoot: root });
+    expect(reviewClaimForm(openFeedbackContext.graph, openFeedbackContext.state, "T-001#R-001")).toMatchObject({
+      kind: "not_claimable",
+      reason: expect.stringMatching(/open feedback/i)
+    });
+
+    await claimNext({ projectRoot: root });
+    await submitFeedback({
+      projectRoot: root,
+      reportPath: await writeReport(root, "feedback.md", "Tests updated.\n")
+    });
+    const resumeContext = await loadRuntime({ projectRoot: root });
+    expect(reviewClaimForm(resumeContext.graph, resumeContext.state, "T-001#R-001")).toEqual({
+      kind: "resume"
+    });
+
+    resumeContext.state.blocks["T-001#R-001"] = {
+      ...resumeContext.state.blocks["T-001#R-001"],
+      remoteOwnership: {
+        phase: "preparing",
+        operationId: "operation-owned",
+        sourceRevision: "pgv-pkg-revision-001",
+        graphFingerprint: "pkg-fingerprint-001"
+      }
+    };
+    expect(reviewClaimForm(resumeContext.graph, resumeContext.state, "T-001#R-001")).toMatchObject({
+      kind: "not_claimable",
+      reason: expect.stringMatching(/remote operation/i)
     });
   });
 });

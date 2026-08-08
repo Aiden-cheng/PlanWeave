@@ -12,6 +12,7 @@ import type {
 } from "../types.js";
 import { claimDispatchedBlock } from "./claimBlockDispatch.js";
 import { buildClaimReadiness, type ClaimCandidate } from "./claimReadiness.js";
+import { applyCurrentReviewResumeClaim } from "./blockStatusMutations.js";
 import { patchFeedbackArtifact } from "./feedbackArtifacts.js";
 import { createProjectGraphClaimGuard } from "./projectGraphClaimGuard.js";
 import { updateTaskIndex } from "./resultIndex.js";
@@ -23,10 +24,6 @@ import {
   normalizeClaimScope,
   validateClaimScope
 } from "./selectors.js";
-
-function withCurrentRef(currentRefs: string[], ref: string): string[] {
-  return currentRefs.includes(ref) ? currentRefs : [...currentRefs, ref];
-}
 
 function withoutCurrentRef(currentRefs: string[], ref: string): string[] {
   return currentRefs.filter((currentRef) => currentRef !== ref);
@@ -116,15 +113,9 @@ async function claimNextUnlocked(options: {
     if (dryRun) {
       return readiness.claimOrder.result;
     }
-    state.blocks[readiness.claimOrder.ref] = {
-      ...state.blocks[readiness.claimOrder.ref],
-      pendingFeedbackId: null
-    };
-    state.currentRefs = withCurrentRef(state.currentRefs, readiness.claimOrder.ref);
-    if (readiness.claimOrder.clearCurrentFeedback) {
-      state.currentFeedbackId = null;
-    }
-    state.currentReviewBlockRef = readiness.claimOrder.ref;
+    applyCurrentReviewResumeClaim(state, readiness.claimOrder.ref, {
+      clearCurrentFeedback: readiness.claimOrder.clearCurrentFeedback
+    });
     await writeState(workspace.stateFile, refreshDerivedState(manifest, state));
     return readiness.claimOrder.result;
   }

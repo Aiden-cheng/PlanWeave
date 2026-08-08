@@ -94,6 +94,82 @@ describe("remote ownership transitions", () => {
     ).toBe(active);
   });
 
+  it("accepts ready blocks and review resume; rejects retrofit and terminal statuses", () => {
+    expect(
+      prepareRemoteBlockOwnership({
+        blockType: "implementation",
+        blockState: { status: "ready" },
+        ownership: source
+      })
+    ).toEqual({
+      status: "in_progress",
+      remoteOwnership: { phase: "preparing", ...source }
+    });
+    expect(
+      prepareRemoteBlockOwnership({
+        blockType: "review",
+        blockState: { status: "ready" },
+        ownership: source
+      })
+    ).toEqual({
+      status: "in_progress",
+      remoteOwnership: { phase: "preparing", ...source }
+    });
+    expect(
+      prepareRemoteBlockOwnership({
+        blockType: "review",
+        blockState: { status: "in_progress" },
+        ownership: source
+      })
+    ).toEqual({
+      status: "in_progress",
+      remoteOwnership: { phase: "preparing", ...source }
+    });
+
+    expect(() =>
+      prepareRemoteBlockOwnership({
+        blockType: "implementation",
+        blockState: { status: "in_progress" },
+        ownership: source
+      })
+    ).toThrow(/cannot be retroactively/i);
+
+    const reviewOwned = prepareRemoteBlockOwnership({
+      blockType: "review",
+      blockState: { status: "ready" },
+      ownership: source
+    });
+    expect(
+      prepareRemoteBlockOwnership({
+        blockType: "review",
+        blockState: reviewOwned,
+        ownership: source
+      })
+    ).toBe(reviewOwned);
+    expect(() =>
+      prepareRemoteBlockOwnership({
+        blockType: "review",
+        blockState: reviewOwned,
+        ownership: { ...source, operationId: "operation-foreign" }
+      })
+    ).toThrow(/conflicts with owner/i);
+
+    expect(() =>
+      prepareRemoteBlockOwnership({
+        blockType: "review",
+        blockState: { status: "blocked" },
+        ownership: source
+      })
+    ).toThrow(/requires a ready block/i);
+    expect(() =>
+      prepareRemoteBlockOwnership({
+        blockType: "implementation",
+        blockState: { status: "diverged" },
+        ownership: source
+      })
+    ).toThrow(/requires a ready block/i);
+  });
+
   it("accepts review ownership and rejects local retrofit, foreign operations, and activation mismatch", () => {
     expect(
       prepareRemoteBlockOwnership({

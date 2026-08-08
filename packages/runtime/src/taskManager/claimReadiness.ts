@@ -22,6 +22,7 @@ import {
 } from "./claimReadinessRules.js";
 import {
   blockInScope,
+  canClaimReviewBlock,
   canDispatchImplementationBlock,
   claimResultForBlock,
   activeOpenFeedback,
@@ -30,9 +31,59 @@ import {
   getBlock,
   inProgressImplementationRefs,
   normalizeClaimScope,
+  openFeedbackForReview,
   requireBlockState,
   validateClaimScope
 } from "./selectors.js";
+
+/**
+ * Shared review claim shape for local claim order and remote dispatch inspection.
+ * Resume requires in_progress without remote ownership and without open feedback.
+ */
+export type ReviewClaimForm =
+  | { kind: "initial" }
+  | { kind: "resume" }
+  | { kind: "not_claimable"; reason: string };
+
+export function reviewClaimForm(
+  graph: CompiledExecutionGraph,
+  state: RuntimeState,
+  ref: string
+): ReviewClaimForm {
+  const block = graph.blocksByRef.get(ref);
+  if (block?.type !== "review") {
+    return { kind: "not_claimable", reason: `Block '${ref}' is not a review block.` };
+  }
+  const blockState = requireBlockState(state, ref);
+  if (blockState.status === "ready") {
+    if (canClaimReviewBlock(graph, state, ref)) {
+      return { kind: "initial" };
+    }
+    return {
+      kind: "not_claimable",
+      reason: `Review block '${ref}' is not claimable right now.`
+    };
+  }
+  if (blockState.status === "in_progress") {
+    if (blockState.remoteOwnership !== undefined) {
+      return {
+        kind: "not_claimable",
+        reason: `Review block '${ref}' is owned by a remote operation.`
+      };
+    }
+    if (openFeedbackForReview(state, ref) !== null) {
+      return {
+        kind: "not_claimable",
+        reason: `Review block '${ref}' still has open feedback.`
+      };
+    }
+    return { kind: "resume" };
+  }
+  return {
+    kind: "not_claimable",
+    reason: `Review block '${ref}' status '${blockState.status}' is not claimable.`
+  };
+}
 
 export type ClaimCandidate = {
   ref: string;
@@ -251,40 +302,6 @@ function buildClaimOrder(input: {
     const block = getBlock(input.graph, ref);
     return block.type === "review" && requireBlockState(input.state, ref).status === "in_progress";
   });
-  if (inProgressReview && input.state.currentFeedbackId) {
-    if (input.blockType && input.blockType !== "review") {
-      return blockedByClaimType(
-        inProgressReview,
-        "A review block is in progress outside the selected claim type."
-      );
-    }
-    // Feedback map lookup by id is dynamic / may be stale (public probe).
-    const currentFeedback = input.state.feedback[input.state.currentFeedbackId];
-    if (currentFeedback?.status === "resolved") {
-      if (!blockInScope(inProgressReview, input.graph, input.scope)) {
-        return {
-          kind: "blocked",
-          result: {
-            kind: "blocked",
-            ref: inProgressReview,
-            reason: "A review block is in progress outside the selected Auto Run scope."
-          }
-        };
-      }
-      return {
-        kind: "currentReview",
-        ref: inProgressReview,
-        reason: "feedback_resolved",
-        clearCurrentFeedback: true,
-        result: claimCandidate(
-          inProgressReview,
-          input.graph,
-          "feedback_resolved",
-          input.manifest.execution.defaultExecutor
-        ).result
-      };
-    }
-  }
   if (inProgressReview) {
     if (input.blockType && input.blockType !== "review") {
       return blockedByClaimType(
@@ -302,21 +319,43 @@ function buildClaimOrder(input: {
         }
       };
     }
-    const reason = requireBlockState(input.state, inProgressReview).pendingFeedbackId
-      ? "feedback_resolved"
-      : "current";
-    return {
-      kind: "currentReview",
-      ref: inProgressReview,
-      reason,
-      clearCurrentFeedback: false,
-      result: claimCandidate(
-        inProgressReview,
-        input.graph,
+    const form = reviewClaimForm(input.graph, input.state, inProgressReview);
+    const blockState = requireBlockState(input.state, inProgressReview);
+    // currentReview covers local resume and any in-progress review that still lacks a
+    // remoteOwnership filter at the find site (implementation current already filters).
+    if (form.kind === "resume" || blockState.remoteOwnership !== undefined) {
+      if (input.state.currentFeedbackId) {
+        // Feedback map lookup by id is dynamic / may be stale (public probe).
+        const currentFeedback = input.state.feedback[input.state.currentFeedbackId];
+        if (currentFeedback?.status === "resolved") {
+          return {
+            kind: "currentReview",
+            ref: inProgressReview,
+            reason: "feedback_resolved",
+            clearCurrentFeedback: true,
+            result: claimCandidate(
+              inProgressReview,
+              input.graph,
+              "feedback_resolved",
+              input.manifest.execution.defaultExecutor
+            ).result
+          };
+        }
+      }
+      const reason = blockState.pendingFeedbackId ? "feedback_resolved" : "current";
+      return {
+        kind: "currentReview",
+        ref: inProgressReview,
         reason,
-        input.manifest.execution.defaultExecutor
-      ).result
-    };
+        clearCurrentFeedback: false,
+        result: claimCandidate(
+          inProgressReview,
+          input.graph,
+          reason,
+          input.manifest.execution.defaultExecutor
+        ).result
+      };
+    }
   }
 
   const current = input.graph.blockRefsInManifestOrder.find((ref) => {

@@ -158,7 +158,11 @@ export function prepareRemoteBlockOwnership(options: {
     assertSameRemoteOwnershipGeneration(current, requested);
     return options.blockState;
   }
-  if (options.blockState.status !== "ready") {
+  const isReviewResume =
+    options.blockType === "review" &&
+    options.blockState.status === "in_progress" &&
+    options.blockState.remoteOwnership === undefined;
+  if (options.blockState.status !== "ready" && !isReviewResume) {
     throw new RemoteOwnershipConflictError(
       "remote_ownership_requires_ready_block",
       options.blockState.status === "in_progress"

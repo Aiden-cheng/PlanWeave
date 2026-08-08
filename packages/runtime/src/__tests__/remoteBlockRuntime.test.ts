@@ -21,8 +21,10 @@ import {
   runDoctor,
   remoteBlockFailureInputSchema,
   submitBlockResult,
+  submitFeedback,
   unblockBlock
 } from "../taskManager/index.js";
+import { previewClaimNext } from "../desktop/claimPreviewApi.js";
 import { projectRemoteAcpTimeline } from "../autoRun/remoteAcpEventProjection.js";
 import type { PlanPackageManifest } from "../types.js";
 import { basicManifest, createTestWorkspace, writeReport } from "./promptTestHelpers.js";
@@ -299,6 +301,113 @@ describe("remote block runtime terminal transitions", () => {
       }
     });
     expect(reviewState).not.toHaveProperty("remoteOwnership");
+  });
+
+  it("reclaims an in_progress review after remote needs_changes and local feedback resolve", async () => {
+    const { root, init, port, identity } = await activateReadyBlock();
+    await port.complete({
+      ref: "T-001#B-001",
+      ...identity,
+      ...reportInput(Buffer.from("# Implementation complete\n"))
+    });
+
+    const firstReviewCandidate = await port.inspect({ ref: "T-001#R-001" });
+    const firstReviewIdentity = {
+      operationId: "operation-review-needs-changes",
+      sourceRevision: firstReviewCandidate.sourceRevision,
+      graphFingerprint: firstReviewCandidate.graphFingerprint,
+      dispatchId: "dispatch-review-needs-changes",
+      executionAttemptId: "attempt-review-needs-changes"
+    };
+    await port.claim({
+      ref: "T-001#R-001",
+      ...claimIdentity(firstReviewIdentity)
+    });
+    await port.activate({ ref: "T-001#R-001", ...firstReviewIdentity });
+    await port.complete({
+      ref: "T-001#R-001",
+      ...firstReviewIdentity,
+      ...reportInput(
+        Buffer.from(
+          JSON.stringify({
+            reviewBlockRef: "T-001#R-001",
+            taskId: "T-001",
+            verdict: "needs_changes",
+            content: "Please update tests."
+          }),
+          "utf8"
+        )
+      )
+    });
+
+    const afterNeedsChanges = await readState(init.workspace.stateFile);
+    expect(afterNeedsChanges.blocks["T-001#R-001"]).toMatchObject({
+      status: "in_progress"
+    });
+    expect(afterNeedsChanges.blocks["T-001#R-001"]).not.toHaveProperty("remoteOwnership");
+
+    await claimNext({ projectRoot: root });
+    await submitFeedback({
+      projectRoot: root,
+      reportPath: await writeReport(root, "feedback-remote-rereview.md", "Tests updated.\n")
+    });
+
+    const preview = await previewClaimNext(root, null, { kind: "project" });
+    expect(preview).toMatchObject({
+      kind: "block",
+      ref: "T-001#R-001",
+      blockType: "review",
+      reason: "feedback_resolved"
+    });
+
+    const resumeCandidate = await port.inspect({ ref: "T-001#R-001" });
+    const resumeIdentity = {
+      operationId: "operation-review-resume",
+      sourceRevision: resumeCandidate.sourceRevision,
+      graphFingerprint: resumeCandidate.graphFingerprint,
+      dispatchId: "dispatch-review-resume",
+      executionAttemptId: "attempt-review-resume"
+    };
+    await port.claim({
+      ref: "T-001#R-001",
+      ...claimIdentity(resumeIdentity)
+    });
+    const afterResumeClaim = await readState(init.workspace.stateFile);
+    expect(afterResumeClaim.blocks["T-001#R-001"]).toMatchObject({
+      status: "in_progress",
+      pendingFeedbackId: null,
+      remoteOwnership: {
+        phase: "preparing",
+        operationId: resumeIdentity.operationId
+      }
+    });
+    expect(afterResumeClaim.currentReviewBlockRef).toBe("T-001#R-001");
+    expect(afterResumeClaim.currentRefs).toContain("T-001#R-001");
+
+    await port.activate({ ref: "T-001#R-001", ...resumeIdentity });
+    const completed = await port.complete({
+      ref: "T-001#R-001",
+      ...resumeIdentity,
+      ...reportInput(
+        Buffer.from(
+          JSON.stringify({
+            reviewBlockRef: "T-001#R-001",
+            taskId: "T-001",
+            verdict: "passed",
+            content: "Remote re-review accepted the fix."
+          }),
+          "utf8"
+        )
+      )
+    });
+    expect(completed).toMatchObject({ ref: "T-001#R-001", status: "completed" });
+    const finalState = await readState(init.workspace.stateFile);
+    expect(finalState.blocks["T-001#R-001"]).toMatchObject({
+      status: "completed",
+      completionReason: "passed"
+    });
+    expect(finalState.blocks["T-001#R-001"]).not.toHaveProperty("remoteOwnership");
+    expect(finalState.tasks["T-001"]?.status).toBe("implemented");
   });
 
   it("persists exact report bytes and idempotently replays only the same completion", async () => {

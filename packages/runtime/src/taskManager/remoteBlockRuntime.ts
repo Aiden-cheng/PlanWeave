@@ -8,6 +8,8 @@ import { loadPackage } from "../package/loadPackage.js";
 import { writeState } from "../state.js";
 import type { PackageWorkspaceRef } from "../types.js";
 import { submitRemoteBlockResult } from "./blockSubmission.js";
+import { applyCurrentReviewResumeClaim } from "./blockStatusMutations.js";
+import { reviewClaimForm } from "./claimReadiness.js";
 import { materializeRemoteAcpFailure } from "./remoteAcpTranscript.js";
 import { updateTaskIndex } from "./resultIndex.js";
 import {
@@ -161,6 +163,10 @@ export function createRemoteBlockRuntimePort(options: {
       return withLock(async (context) => {
         const blockType = remoteExecutableBlockType(context, input.ref);
         const current = context.state.blocks[input.ref];
+        const reviewForm =
+          blockType === "review" && !current.remoteOwnership
+            ? reviewClaimForm(context.graph, context.state, input.ref)
+            : null;
         const prepared = prepareRemoteBlockOwnership({
           blockType,
           blockState: current,
@@ -196,9 +202,17 @@ export function createRemoteBlockRuntimePort(options: {
           }
         }
         context.state.blocks[input.ref] = prepared;
-        context.state.currentRefs = withCurrentRef(context.state.currentRefs, input.ref);
-        if (blockType === "review") {
-          context.state.currentReviewBlockRef = input.ref;
+        if (reviewForm?.kind === "resume") {
+          const clearCurrentFeedback = Boolean(
+            context.state.currentFeedbackId &&
+              context.state.feedback[context.state.currentFeedbackId]?.status === "resolved"
+          );
+          applyCurrentReviewResumeClaim(context.state, input.ref, { clearCurrentFeedback });
+        } else {
+          context.state.currentRefs = withCurrentRef(context.state.currentRefs, input.ref);
+          if (blockType === "review") {
+            context.state.currentReviewBlockRef = input.ref;
+          }
         }
         await writeLockedState(context);
         return bindingView(context, input.ref);

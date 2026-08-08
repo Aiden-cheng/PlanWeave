@@ -1,5 +1,6 @@
 import type { PackageWorkspaceRef } from "../types.js";
 import { commandCanvasIdForWorkspace } from "./canvasCommandScope.js";
+import { reviewClaimForm } from "./claimReadiness.js";
 import { projectBlockerReason } from "./claimReadinessRules.js";
 import { createProjectGraphClaimGuard } from "./projectGraphClaimGuard.js";
 import {
@@ -15,10 +16,8 @@ import {
 import { loadRuntimeReadonly, type RuntimeContext } from "./runtimeContext.js";
 import type { BlockType } from "../types.js";
 import {
-  canClaimReviewBlock,
   canDispatchImplementationBlock,
   effectiveBlockExecutor,
-  requireBlockState,
   validateClaimScope
 } from "./selectors.js";
 
@@ -76,14 +75,9 @@ export async function assertRemoteBlockDispatchable(
     }
     return;
   }
-  if (
-    requireBlockState(context.state, ref).status !== "ready" ||
-    !canClaimReviewBlock(context.graph, context.state, ref)
-  ) {
-    throw new RemoteBlockRuntimeError(
-      "remote_block_not_dispatchable",
-      `Review block '${ref}' is not claimable right now.`
-    );
+  const form = reviewClaimForm(context.graph, context.state, ref);
+  if (form.kind === "not_claimable") {
+    throw new RemoteBlockRuntimeError("remote_block_not_dispatchable", form.reason);
   }
 }
 

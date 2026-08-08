@@ -10,6 +10,7 @@ import {
   submitReviewResult,
   submitFeedback
 } from "../taskManager/index.js";
+import { readState } from "../state.js";
 import {
   basicManifest,
   createTestWorkspace,
@@ -79,7 +80,7 @@ describe("claimNext", () => {
   });
 
   it("continues the same review block after feedback is resolved", async () => {
-    const { root } = await createTestWorkspace();
+    const { root, init } = await createTestWorkspace();
     await claimNext({ projectRoot: root });
     await submitBlockResult({
       projectRoot: root,
@@ -106,14 +107,24 @@ describe("claimNext", () => {
       reportPath: await writeReport(root, "feedback.md", "Tests updated.\n")
     });
 
+    const beforeResume = await readState(init.workspace.stateFile);
+    expect(beforeResume.blocks["T-001#R-001"]).toMatchObject({
+      status: "in_progress",
+      pendingFeedbackId: "FE-001"
+    });
+
     const reviewClaim = await claimNext({ projectRoot: root });
     const prompt = await renderPrompt({ projectRoot: root, ref: "T-001#R-001" });
+    const afterResume = await readState(init.workspace.stateFile);
 
     expect(reviewClaim).toMatchObject({
       kind: "block",
       ref: "T-001#R-001",
       reason: "feedback_resolved"
     });
+    expect(afterResume.blocks["T-001#R-001"]?.pendingFeedbackId).toBeNull();
+    expect(afterResume.currentReviewBlockRef).toBe("T-001#R-001");
+    expect(afterResume.currentRefs).toContain("T-001#R-001");
     expect(prompt).toContain("Focused Re-review Context");
     expect(prompt).toContain("Please update tests.");
     expect(prompt).toContain("Tests updated.");

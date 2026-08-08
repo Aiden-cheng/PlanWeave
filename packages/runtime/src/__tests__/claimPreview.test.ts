@@ -4,6 +4,7 @@ import {
   claimNext,
   getExecutionStatus,
   submitBlockResult,
+  submitFeedback,
   submitReviewResult
 } from "../taskManager/index.js";
 import {
@@ -85,5 +86,40 @@ describe("previewClaimNext", () => {
     const statusAfter = await getExecutionStatus({ projectRoot: root });
     expect(statusAfter).toEqual(statusBefore);
     expect(statusAfter.blocks.find((block) => block.ref === "T-001#B-001")?.status).toBe("ready");
+  });
+
+  it("returns the same review block after feedback is resolved", async () => {
+    const { root } = await createTestWorkspace();
+    await claimNext({ projectRoot: root });
+    await submitBlockResult({
+      projectRoot: root,
+      ref: "T-001#B-001",
+      reportPath: await writeReport(root, "b.md")
+    });
+    await claimNext({ projectRoot: root });
+    await submitReviewResult({
+      projectRoot: root,
+      ref: "T-001#R-001",
+      resultPath: await writeReviewResult(root, "needs_changes", "Please update tests.")
+    });
+    await claimNext({ projectRoot: root });
+    await submitFeedback({
+      projectRoot: root,
+      reportPath: await writeReport(root, "feedback.md", "Tests updated.\n")
+    });
+
+    const statusBefore = await getExecutionStatus({ projectRoot: root });
+    const preview = await previewClaimNext(root, null, { kind: "project" });
+    expect(preview).toMatchObject({
+      kind: "block",
+      ref: "T-001#R-001",
+      blockType: "review",
+      reason: "feedback_resolved"
+    });
+    const statusAfter = await getExecutionStatus({ projectRoot: root });
+    expect(statusAfter).toEqual(statusBefore);
+    expect(statusAfter.blocks.find((block) => block.ref === "T-001#R-001")?.status).toBe(
+      "in_progress"
+    );
   });
 });

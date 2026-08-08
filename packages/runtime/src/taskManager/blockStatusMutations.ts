@@ -2,7 +2,7 @@ import { dirname } from "node:path";
 import { withCanvasLock } from "../fs/withCanvasLock.js";
 import { loadPackage } from "../package/loadPackage.js";
 import { writeState } from "../state.js";
-import type { BlockStatus, ExecutionGraphSession, PackageWorkspaceRef } from "../types.js";
+import type { BlockStatus, ExecutionGraphSession, PackageWorkspaceRef, RuntimeState } from "../types.js";
 import { loadRuntime, refreshDerivedState } from "./runtimeContext.js";
 import {
   clearRemoteBlockOperationState,
@@ -10,6 +10,33 @@ import {
 } from "./remoteOwnershipTransitions.js";
 import { clearReviewCompletionReason } from "./resultIndex.js";
 import { blockDependenciesCompleted, getBlock, openFeedbackForReview } from "./selectors.js";
+
+/**
+ * Shared currentReview resume claim side effects for local claimNext and remote claim.
+ * Clears pendingFeedbackId, binds currentRefs / currentReviewBlockRef, and optionally
+ * clears a resolved currentFeedbackId pointer.
+ */
+export function applyCurrentReviewResumeClaim(
+  state: RuntimeState,
+  ref: string,
+  options: { clearCurrentFeedback: boolean }
+): void {
+  const blockState = state.blocks[ref];
+  if (!blockState) {
+    throw new Error(`Block '${ref}' does not exist in runtime state.`);
+  }
+  state.blocks[ref] = {
+    ...blockState,
+    pendingFeedbackId: null
+  };
+  state.currentRefs = state.currentRefs.includes(ref)
+    ? state.currentRefs
+    : [...state.currentRefs, ref];
+  if (options.clearCurrentFeedback) {
+    state.currentFeedbackId = null;
+  }
+  state.currentReviewBlockRef = ref;
+}
 
 async function withLockedRuntime<T>(
   options: { projectRoot: PackageWorkspaceRef; session?: ExecutionGraphSession },
