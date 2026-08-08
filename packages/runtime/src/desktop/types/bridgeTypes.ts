@@ -506,6 +506,15 @@ export type DesktopBridgeApi = {
     stepLimit?: number,
     options?: DesktopAutoRunOptions
   ): Promise<DesktopAutoRunState>;
+  /**
+   * Dry-run the next claim unit (same readiness as Auto Run claimNext).
+   * Does not mutate runtime state.
+   */
+  previewClaimNext(
+    ref: DesktopCanvasReference,
+    scope: DesktopAutoRunScope,
+    options?: { parallel?: boolean }
+  ): Promise<ClaimResult>;
   resetRuntimeState(
     ref: DesktopCanvasReference,
     options?: DesktopRuntimeResetOptions

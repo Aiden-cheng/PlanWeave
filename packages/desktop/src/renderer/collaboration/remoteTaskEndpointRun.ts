@@ -1,8 +1,5 @@
-import type { CanvasRuntimeStatusProjection } from "@planweave-ai/collaboration-protocol/canvas/status";
 import type { RemoteOperationObservation } from "@planweave-ai/collaboration-protocol/remote-run";
-import type { DesktopGraphViewModel } from "@planweave-ai/runtime";
 import type { CollaborationObserverSignal } from "../../shared/collaborationReadModels";
-import { runAgentEndpointScope } from "./agentEndpointScopeRun";
 
 const TERMINAL_OPERATION_STATES = new Set<RemoteOperationObservation["state"]>([
   "completed",
@@ -89,33 +86,5 @@ export function waitForRemoteOperationTerminal(input: {
     }
     input.signal?.addEventListener("abort", onAbort, { once: true });
     void refresh();
-  });
-}
-
-type DesktopGraphTask = DesktopGraphViewModel["tasks"][number];
-
-export async function runRemoteTaskEndpoint(input: {
-  task: DesktopGraphTask;
-  readRuntimeStatus: () => Promise<CanvasRuntimeStatusProjection | null>;
-  dispatchBlock: (blockRef: string) => Promise<RemoteOperationObservation>;
-  waitForTerminal: (
-    observation: RemoteOperationObservation,
-    signal?: AbortSignal
-  ) => Promise<RemoteOperationObservation>;
-  signal?: AbortSignal;
-}): Promise<void> {
-  return runAgentEndpointScope({
-    tasks: [input.task],
-    readRuntimeStatus: input.readRuntimeStatus,
-    executeBlock: async (_task, block) => {
-      const terminal = await input.waitForTerminal(
-        await input.dispatchBlock(block.ref),
-        input.signal
-      );
-      if (terminal.state !== "completed") {
-        throw new Error(`remote_task_block_${terminal.state}:${block.ref}`);
-      }
-    },
-    signal: input.signal
   });
 }

@@ -666,6 +666,7 @@ export {
   removeProject,
   removeTaskNode,
   pauseAutoRun,
+  previewClaimNext,
   resetDesktopRuntimeState,
   resumeAutoRun,
   respondToDesktopAgentRequest,

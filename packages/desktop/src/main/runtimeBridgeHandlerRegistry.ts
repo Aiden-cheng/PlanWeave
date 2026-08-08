@@ -90,6 +90,7 @@ import {
   searchProjectWithDiagnostics,
   selectTaskCanvas,
   claimBlock,
+  previewClaimNext,
   startAutoRun,
   stopAutoRun,
   testExecutorProfile,
@@ -873,6 +874,15 @@ export const runtimeBridgeHandlers = {
       desktopAutoRunScopeSchema.parse(scope),
       stepLimit === undefined ? undefined : desktopAutoRunStepLimitSchema.parse(stepLimit),
       options === undefined ? undefined : desktopAutoRunOptionsSchema.parse(options)
+    );
+  },
+  previewClaimNext: async (_event, ref, scope, options) => {
+    const parsedRef = desktopCanvasReferenceSchema.parse(ref);
+    return previewClaimNext(
+      parsedRef.projectRoot,
+      parsedRef.canvasId,
+      desktopAutoRunScopeSchema.parse(scope),
+      options === undefined ? undefined : { parallel: options.parallel }
     );
   },
   resetRuntimeState: async (_event, ref, options) => {

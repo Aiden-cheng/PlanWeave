@@ -2,6 +2,8 @@
 
 import { act, renderHook } from "@testing-library/react";
 import type {
+  ClaimResult,
+  DesktopAutoRunScope,
   DesktopAutoRunState,
   DesktopGraphViewModel,
   DesktopProjectSummary
@@ -111,15 +113,19 @@ function operation(
   };
 }
 
-function localRunState(phase: DesktopAutoRunState["phase"]): DesktopAutoRunState {
+function localRunState(
+  phase: DesktopAutoRunState["phase"],
+  overrides?: Partial<DesktopAutoRunState>
+): DesktopAutoRunState {
+  const stepLimitReached = phase === "paused" && overrides?.error === "Step limit reached.";
   return {
     runId: "DESKTOP-RUN-LOCAL",
     projectRoot: project.rootPath,
     canvasId: "canvas-main",
     scope: { kind: "block", blockRef: "T-001#B-001" },
     phase,
-    stepCount: phase === "completed" ? 1 : 0,
-    stepLimit: 20,
+    stepCount: phase === "completed" || stepLimitReached ? 1 : 0,
+    stepLimit: 1,
     currentRef: phase === "running" ? "T-001#B-001" : null,
     currentExecutor: phase === "running" ? "codex" : null,
     elapsedMs: 1,
@@ -133,7 +139,7 @@ function localRunState(phase: DesktopAutoRunState["phase"]): DesktopAutoRunState
       latestRecordId: null,
       latestRecordPath: null,
       latestOutputSummary: null,
-      error: null,
+      error: overrides?.error ?? null,
       nextAction: {
         kind: phase === "completed" ? "wait" : "wait",
         message: "Wait.",
@@ -147,7 +153,59 @@ function localRunState(phase: DesktopAutoRunState["phase"]): DesktopAutoRunState
     options: { tmuxEnabled: false },
     error: null,
     startedAt: "2026-08-05T00:00:00.000Z",
-    updatedAt: "2026-08-05T00:00:01.000Z"
+    updatedAt: "2026-08-05T00:00:01.000Z",
+    ...overrides
+  };
+}
+
+function blockClaim(ref: string): Extract<ClaimResult, { kind: "block" }> {
+  const [taskId, blockId] = ref.split("#");
+  return {
+    kind: "block",
+    ref,
+    taskId: taskId ?? "T-001",
+    blockId: blockId ?? "B-001",
+    blockType: "implementation",
+    effectiveExecutor: "codex",
+    reason: "claimed"
+  };
+}
+
+function feedbackClaim(
+  feedbackId = "FE-001"
+): Extract<ClaimResult, { kind: "feedback" }> {
+  return {
+    kind: "feedback",
+    feedbackId,
+    sourceReviewBlockRef: "T-001#R-001",
+    taskId: "T-001",
+    content: "Please fix",
+    effectiveExecutor: "codex"
+  };
+}
+
+function statusProjection(input: {
+  taskStatus: "ready" | "in_progress" | "implemented";
+  blocks: Array<{
+    ref: string;
+    status: "ready" | "planned" | "completed" | "in_progress";
+    dispatchable?: boolean;
+  }>;
+}) {
+  return {
+    schemaVersion: "canvas-runtime-status/v2" as const,
+    scope: { workspaceId: "workspace-1", projectId: "project-server", canvasId: "canvas-main" },
+    packageFingerprint: `pkg-${"a".repeat(64)}`,
+    capturedAt: "2026-08-05T00:00:00.000Z",
+    tasks: [{ taskId: "T-001", status: input.taskStatus, openFeedbackCount: 0 }],
+    blocks: input.blocks.map((block) => ({
+      ref: block.ref,
+      status: block.status,
+      completionReason: block.status === "completed" ? ("passed" as const) : null,
+      blockedReason: null,
+      divergenceReason: null,
+      dispatchable: block.dispatchable ?? block.status === "ready"
+    }))
   };
 }
 
@@ -157,6 +215,7 @@ function renderRun(input?: {
   graph?: DesktopGraphViewModel;
   preferences?: Record<string, { executorName: string; remoteEndpointId: string }>;
   readRuntimeStatus?: ReturnType<typeof vi.fn>;
+  previewClaimNext?: ReturnType<typeof vi.fn>;
   activeProjectId?: string | null;
   remoteTerminal?: RemoteOperationObservation;
 }) {
@@ -170,47 +229,43 @@ function renderRun(input?: {
     revisions: { responsibilityRevision: 7, reviewerRevision: 11 }
   }));
   const setError = vi.fn();
+  const lifecycle = {
+    onStarted: vi.fn(),
+    onCompleted: vi.fn(),
+    onFailed: vi.fn()
+  };
+  // Real Desktop Auto Run: start → running, then stepLimit settles as paused + Step limit reached.
   const startLocal = vi.fn(async () => localRunState("running"));
+  const stopLocal = vi.fn(async () =>
+    localRunState("stopped", { error: null, stepCount: 1 })
+  );
   const readRuntimeStatus =
     input?.readRuntimeStatus ??
     vi
       .fn()
-      .mockResolvedValueOnce({
-        schemaVersion: "canvas-runtime-status/v2",
-        scope: { workspaceId: "workspace-1", projectId: "project-server", canvasId: "canvas-main" },
-        packageFingerprint: `pkg-${"a".repeat(64)}`,
-        capturedAt: "2026-08-05T00:00:00.000Z",
-        tasks: [{ taskId: "T-001", status: "ready", openFeedbackCount: 0 }],
-        blocks: [
-          {
-            ref: "T-001#B-001",
-            status: "ready",
-            completionReason: null,
-            blockedReason: null,
-            divergenceReason: null,
-            dispatchable: true
-          }
-        ]
-      })
-      .mockResolvedValue({
-        schemaVersion: "canvas-runtime-status/v2",
-        scope: { workspaceId: "workspace-1", projectId: "project-server", canvasId: "canvas-main" },
-        packageFingerprint: `pkg-${"a".repeat(64)}`,
-        capturedAt: "2026-08-05T00:00:02.000Z",
-        tasks: [{ taskId: "T-001", status: "implemented", openFeedbackCount: 0 }],
-        blocks: [
-          {
-            ref: "T-001#B-001",
-            status: "completed",
-            completionReason: "passed",
-            blockedReason: null,
-            divergenceReason: null,
-            dispatchable: false
-          }
-        ]
-      });
+      .mockResolvedValueOnce(
+        statusProjection({
+          taskStatus: "ready",
+          blocks: [{ ref: "T-001#B-001", status: "ready" }]
+        })
+      )
+      .mockResolvedValue(
+        statusProjection({
+          taskStatus: "implemented",
+          blocks: [{ ref: "T-001#B-001", status: "completed", dispatchable: false }]
+        })
+      );
+  const previewClaimNext =
+    input?.previewClaimNext ??
+    vi
+      .fn()
+      .mockResolvedValueOnce(blockClaim("T-001#B-001"))
+      .mockResolvedValue({ kind: "none", reason: "no_claimable_blocks" });
   const waitForTerminal = vi.fn(async () => input?.remoteTerminal ?? operation("completed"));
-  const waitForLocalTerminal = vi.fn(async () => localRunState("completed"));
+  // Honest local unit settle: stepLimit:1 → paused + Step limit reached. (not completed)
+  const waitForLocalUnit = vi.fn(async () =>
+    localRunState("paused", { error: "Step limit reached.", stepCount: 1 })
+  );
   const hook = renderHook(() => {
     const startWithEndpoint = useWorkspaceAgentEndpointRun({
       activeProjectId:
@@ -240,13 +295,17 @@ function renderRun(input?: {
       },
       createId: () => "operation-1",
       localAutoRunApi: {
-        getAutoRunState: vi.fn(async () => localRunState("completed")),
+        getAutoRunState: vi.fn(async () =>
+          localRunState("paused", { error: "Step limit reached.", stepCount: 1 })
+        ),
         onAutoRunChanged: vi.fn(() => () => undefined)
       },
-      waitForLocalTerminal,
-      waitForTerminal
+      stopLocal,
+      waitForLocalUnit,
+      waitForTerminal,
+      previewClaimNext
     });
-    return (scope: Parameters<typeof startWithEndpoint>[0]) => startWithEndpoint(scope, startLocal);
+    return (scope: DesktopAutoRunScope) => startWithEndpoint(scope, startLocal, lifecycle);
   });
   return {
     ...hook,
@@ -255,9 +314,12 @@ function renderRun(input?: {
     executeAction,
     ensureWorkAuthority,
     readRuntimeStatus,
+    previewClaimNext,
     setError,
     startLocal,
-    waitForLocalTerminal,
+    stopLocal,
+    lifecycle,
+    waitForLocalUnit,
     waitForTerminal
   };
 }
@@ -325,8 +387,23 @@ describe("workspace Agent Endpoint routing", () => {
       dispatchId: "dispatch-retry-operation-1",
       executionAttemptId: "attempt-retry-operation-1"
     };
+    const readRuntimeStatus = vi
+      .fn()
+      .mockResolvedValueOnce(
+        statusProjection({
+          taskStatus: "in_progress",
+          blocks: [{ ref: "T-001#B-001", status: "in_progress", dispatchable: false }]
+        })
+      )
+      .mockResolvedValue(
+        statusProjection({
+          taskStatus: "implemented",
+          blocks: [{ ref: "T-001#B-001", status: "completed", dispatchable: false }]
+        })
+      );
     const { result, dispatch, observe, executeAction, waitForTerminal, setError } = renderRun({
-      graph: graphWithInterruptedOwnership
+      graph: graphWithInterruptedOwnership,
+      readRuntimeStatus
     });
     observe.mockResolvedValueOnce(interrupted).mockResolvedValue(recovered);
 
@@ -400,8 +477,23 @@ describe("workspace Agent Endpoint routing", () => {
       dispatchId: "dispatch-resume",
       executionAttemptId: "attempt-resume"
     };
+    const readRuntimeStatus = vi
+      .fn()
+      .mockResolvedValueOnce(
+        statusProjection({
+          taskStatus: "in_progress",
+          blocks: [{ ref: "T-001#B-001", status: "in_progress", dispatchable: false }]
+        })
+      )
+      .mockResolvedValue(
+        statusProjection({
+          taskStatus: "implemented",
+          blocks: [{ ref: "T-001#B-001", status: "completed", dispatchable: false }]
+        })
+      );
     const { result, dispatch, observe, executeAction, waitForTerminal, setError } = renderRun({
-      graph: graphWithInterruptedOwnership
+      graph: graphWithInterruptedOwnership,
+      readRuntimeStatus
     });
     observe.mockResolvedValueOnce(interrupted).mockResolvedValue(resumed);
 
@@ -481,18 +573,22 @@ describe("workspace Agent Endpoint routing", () => {
   });
 
   it("fails Project preflight before partial execution when a selected endpoint is unavailable", async () => {
-    const { result, dispatch, readRuntimeStatus, setError, startLocal } = renderRun({
-      endpoint: {
-        ...remoteEndpoint,
-        available: false,
-        unavailableReason: "agent_endpoint_host_offline"
-      }
-    });
+    const previewClaimNext = vi.fn();
+    const { result, dispatch, readRuntimeStatus, setError, startLocal, previewClaimNext: preview } =
+      renderRun({
+        endpoint: {
+          ...remoteEndpoint,
+          available: false,
+          unavailableReason: "agent_endpoint_host_offline"
+        },
+        previewClaimNext
+      });
 
     await act(() => result.current({ kind: "project" }));
 
     expect(setError).toHaveBeenCalledWith("agent_endpoint_host_offline");
     expect(readRuntimeStatus).not.toHaveBeenCalled();
+    expect(preview).not.toHaveBeenCalled();
     expect(dispatch).not.toHaveBeenCalled();
     expect(startLocal).not.toHaveBeenCalled();
   });
@@ -509,16 +605,21 @@ describe("workspace Agent Endpoint routing", () => {
       capabilities: ["acp.codex"],
       remoteEndpointId: null
     };
-    const { result, dispatch, setError, startLocal } = renderRun({ endpoint: localEndpoint });
+    const previewClaimNext = vi.fn();
+    const { result, dispatch, setError, startLocal, previewClaimNext: preview } = renderRun({
+      endpoint: localEndpoint,
+      previewClaimNext
+    });
 
     await act(() => result.current({ kind: "project" }));
 
     expect(startLocal).toHaveBeenCalledWith({ kind: "project" });
+    expect(preview).not.toHaveBeenCalled();
     expect(dispatch).not.toHaveBeenCalled();
     expect(setError).not.toHaveBeenCalled();
   });
 
-  it("returns an explicit local-review Block to the local adapter after a remote implementation", async () => {
+  it("continues claim-bus multi-unit work: remote impl then local review", async () => {
     const mixedGraph: DesktopGraphViewModel = {
       ...graph,
       tasks: [
@@ -540,80 +641,43 @@ describe("workspace Agent Endpoint routing", () => {
         }
       ]
     };
-    const statusBase = {
-      schemaVersion: "canvas-runtime-status/v2" as const,
-      scope: { workspaceId: "workspace-1", projectId: "project-server", canvasId: "canvas-main" },
-      packageFingerprint: `pkg-${"a".repeat(64)}`,
-      capturedAt: "2026-08-05T00:00:00.000Z"
-    };
     const readRuntimeStatus = vi
       .fn()
+      .mockResolvedValueOnce(
+        statusProjection({
+          taskStatus: "ready",
+          blocks: [
+            { ref: "T-001#B-001", status: "ready" },
+            { ref: "T-001#R-001", status: "planned", dispatchable: false }
+          ]
+        })
+      )
+      .mockResolvedValueOnce(
+        statusProjection({
+          taskStatus: "in_progress",
+          blocks: [
+            { ref: "T-001#B-001", status: "completed", dispatchable: false },
+            { ref: "T-001#R-001", status: "ready" }
+          ]
+        })
+      )
+      .mockResolvedValue(
+        statusProjection({
+          taskStatus: "implemented",
+          blocks: [
+            { ref: "T-001#B-001", status: "completed", dispatchable: false },
+            { ref: "T-001#R-001", status: "completed", dispatchable: false }
+          ]
+        })
+      );
+    const previewClaimNext = vi
+      .fn()
+      .mockResolvedValueOnce(blockClaim("T-001#B-001"))
       .mockResolvedValueOnce({
-        ...statusBase,
-        tasks: [{ taskId: "T-001", status: "ready", openFeedbackCount: 0 }],
-        blocks: [
-          {
-            ref: "T-001#B-001",
-            status: "ready",
-            completionReason: null,
-            blockedReason: null,
-            divergenceReason: null,
-            dispatchable: true
-          },
-          {
-            ref: "T-001#R-001",
-            status: "planned",
-            completionReason: null,
-            blockedReason: null,
-            divergenceReason: null,
-            dispatchable: false
-          }
-        ]
+        ...blockClaim("T-001#R-001"),
+        blockType: "review" as const
       })
-      .mockResolvedValueOnce({
-        ...statusBase,
-        tasks: [{ taskId: "T-001", status: "in_progress", openFeedbackCount: 0 }],
-        blocks: [
-          {
-            ref: "T-001#B-001",
-            status: "completed",
-            completionReason: "submitted",
-            blockedReason: null,
-            divergenceReason: null,
-            dispatchable: false
-          },
-          {
-            ref: "T-001#R-001",
-            status: "ready",
-            completionReason: null,
-            blockedReason: null,
-            divergenceReason: null,
-            dispatchable: true
-          }
-        ]
-      })
-      .mockResolvedValue({
-        ...statusBase,
-        tasks: [{ taskId: "T-001", status: "implemented", openFeedbackCount: 0 }],
-        blocks: [
-          {
-            ref: "T-001#B-001",
-            status: "completed",
-            completionReason: "submitted",
-            blockedReason: null,
-            divergenceReason: null,
-            dispatchable: false
-          },
-          {
-            ref: "T-001#R-001",
-            status: "completed",
-            completionReason: "passed",
-            blockedReason: null,
-            divergenceReason: null,
-            dispatchable: false
-          }
-        ]
-      });
+      .mockResolvedValue({ kind: "none", reason: "no_claimable_blocks" });
     const localReview: AvailableAgentEndpoint = {
       id: "local:local-review",
       source: "local",
@@ -625,7 +689,7 @@ describe("workspace Agent Endpoint routing", () => {
       capabilities: [],
       remoteEndpointId: null
     };
-    const { result, dispatch, setError, startLocal } = renderRun({
+    const { result, dispatch, setError, startLocal, previewClaimNext: preview } = renderRun({
       endpoints: [remoteEndpoint, localReview],
       graph: mixedGraph,
       preferences: {
@@ -634,15 +698,251 @@ describe("workspace Agent Endpoint routing", () => {
           remoteEndpointId: "endpoint-windows"
         }
       },
+      readRuntimeStatus,
+      previewClaimNext
+    });
+
+    await act(() => result.current({ kind: "project" }));
+
+    expect(preview).toHaveBeenCalledTimes(2);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ blockRef: "T-001#B-001" }));
+    expect(startLocal).toHaveBeenCalledTimes(1);
+    expect(startLocal).toHaveBeenCalledWith(
+      { kind: "block", blockRef: "T-001#R-001" },
+      { stepLimit: 1 }
+    );
+    expect(setError).not.toHaveBeenCalled();
+  });
+
+  it("accepts step-limit paused as local unit success and stops to free the workspace", async () => {
+    // selectedAgentEndpointId for no preference is `local:${executorName}` → local:codex
+    const localOnly: AvailableAgentEndpoint = {
+      id: "local:codex",
+      source: "local",
+      executorName: "codex",
+      displayName: "Local Codex",
+      locationName: null,
+      available: true,
+      unavailableReason: null,
+      capabilities: ["acp.codex"],
+      remoteEndpointId: null
+    };
+    // all-local short-circuits to startLocal without claim bus — force coordinated via remote preference on a second block path
+    // Use mixed: one local block via claim bus (project with remote endpoint preference but execute only local by endpoint map)
+    const localGraph: DesktopGraphViewModel = {
+      ...graph,
+      tasks: [
+        {
+          ...graph.tasks[0]!,
+          blocks: [
+            {
+              ...graph.tasks[0]!.blocks[0]!,
+              ref: "T-001#B-001",
+              status: "ready",
+              dispatchable: true
+            },
+            {
+              ...graph.tasks[0]!.blocks[0]!,
+              ref: "T-001#B-002",
+              blockId: "B-002",
+              status: "ready",
+              dispatchable: true
+            }
+          ]
+        }
+      ]
+    };
+    // Prefer local for both so plan is local_scope — that won't hit claim bus.
+    // To force claim bus with local units, need at least one remote endpoint selected for another block.
+    const remotePrefGraph = localGraph;
+    const previewClaimNext = vi
+      .fn()
+      .mockResolvedValueOnce(blockClaim("T-001#B-001"))
+      .mockResolvedValueOnce(blockClaim("T-001#B-002"))
+      .mockResolvedValue({ kind: "none", reason: "no_claimable_blocks" });
+    const readRuntimeStatus = vi
+      .fn()
+      .mockResolvedValueOnce(
+        statusProjection({
+          taskStatus: "ready",
+          blocks: [
+            { ref: "T-001#B-001", status: "ready" },
+            { ref: "T-001#B-002", status: "ready" }
+          ]
+        })
+      )
+      .mockResolvedValueOnce(
+        statusProjection({
+          taskStatus: "in_progress",
+          blocks: [
+            { ref: "T-001#B-001", status: "completed", dispatchable: false },
+            { ref: "T-001#B-002", status: "ready" }
+          ]
+        })
+      )
+      .mockResolvedValue(
+        statusProjection({
+          taskStatus: "implemented",
+          blocks: [
+            { ref: "T-001#B-001", status: "completed", dispatchable: false },
+            { ref: "T-001#B-002", status: "completed", dispatchable: false }
+          ]
+        })
+      );
+    const { result, startLocal, stopLocal, waitForLocalUnit, lifecycle, setError } = renderRun({
+      endpoints: [remoteEndpoint, localOnly],
+      graph: remotePrefGraph,
+      // No preference for B-001 → local; remote preference only on B-002 → coordinated claim bus.
+      preferences: {
+        [agentEndpointPreferenceKey({
+          projectRoot: project.rootPath,
+          canvasId: "canvas-main",
+          scope: { kind: "block", blockRef: "T-001#B-002" }
+        })]: {
+          executorName: "codex",
+          remoteEndpointId: "endpoint-windows"
+        }
+      },
+      previewClaimNext,
       readRuntimeStatus
     });
 
     await act(() => result.current({ kind: "project" }));
 
-    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(waitForLocalUnit).toHaveBeenCalled();
+    await expect(waitForLocalUnit.mock.results[0]!.value).resolves.toMatchObject({
+      phase: "paused",
+      error: "Step limit reached."
+    });
+    expect(startLocal).toHaveBeenCalledWith(
+      { kind: "block", blockRef: "T-001#B-001" },
+      { stepLimit: 1 }
+    );
+    expect(stopLocal).toHaveBeenCalledWith("DESKTOP-RUN-LOCAL");
+    expect(lifecycle.onCompleted).toHaveBeenCalled();
+    expect(setError).not.toHaveBeenCalled();
+  });
+
+  it("executes a feedback claim unit with stepLimit 1 then continues", async () => {
+    const readRuntimeStatus = vi
+      .fn()
+      .mockResolvedValueOnce(
+        statusProjection({
+          taskStatus: "in_progress",
+          blocks: [{ ref: "T-001#B-001", status: "ready" }]
+        })
+      )
+      .mockResolvedValueOnce(
+        statusProjection({
+          taskStatus: "in_progress",
+          blocks: [{ ref: "T-001#B-001", status: "ready" }]
+        })
+      )
+      .mockResolvedValue(
+        statusProjection({
+          taskStatus: "implemented",
+          blocks: [{ ref: "T-001#B-001", status: "completed", dispatchable: false }]
+        })
+      );
+    const previewClaimNext = vi
+      .fn()
+      .mockResolvedValueOnce(feedbackClaim("FE-001"))
+      .mockResolvedValueOnce(blockClaim("T-001#B-001"))
+      .mockResolvedValue({ kind: "none", reason: "no_claimable_blocks" });
+    const { result, dispatch, setError, startLocal, stopLocal, waitForLocalUnit, lifecycle } =
+      renderRun({
+        readRuntimeStatus,
+        previewClaimNext
+      });
+
+    await act(() => result.current({ kind: "project" }));
+
+    expect(startLocal).toHaveBeenCalledWith({ kind: "task", taskId: "T-001" }, { stepLimit: 1 });
+    expect(waitForLocalUnit).toHaveBeenCalled();
+    expect(stopLocal).toHaveBeenCalledWith("DESKTOP-RUN-LOCAL");
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ blockRef: "T-001#B-001" }));
-    expect(startLocal).toHaveBeenCalledTimes(1);
-    expect(startLocal).toHaveBeenCalledWith({ kind: "block", blockRef: "T-001#R-001" });
+    expect(lifecycle.onCompleted).toHaveBeenCalled();
+    expect(setError).not.toHaveBeenCalled();
+  });
+
+  it("surfaces claim_bus_blocked through lifecycle.onFailed", async () => {
+    const previewClaimNext = vi.fn(async () => ({
+      kind: "blocked" as const,
+      reason: "dependency_incomplete",
+      ref: "T-001#B-002"
+    }));
+    const readRuntimeStatus = vi.fn().mockResolvedValue(
+      statusProjection({
+        taskStatus: "ready",
+        blocks: [{ ref: "T-001#B-001", status: "ready" }]
+      })
+    );
+    const { result, dispatch, setError, lifecycle } = renderRun({
+      previewClaimNext,
+      readRuntimeStatus
+    });
+
+    await act(() => result.current({ kind: "project" }));
+
+    expect(setError).toHaveBeenCalledWith("claim_bus_blocked:dependency_incomplete");
+    expect(lifecycle.onFailed).toHaveBeenCalledWith("claim_bus_blocked:dependency_incomplete");
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("surfaces claim_bus_idle when preview returns none while scope is incomplete", async () => {
+    const previewClaimNext = vi.fn(async () => ({
+      kind: "none" as const,
+      reason: "no_claimable_blocks"
+    }));
+    const readRuntimeStatus = vi.fn().mockResolvedValue(
+      statusProjection({
+        taskStatus: "in_progress",
+        blocks: [{ ref: "T-001#B-001", status: "ready" }]
+      })
+    );
+    const { result, setError, lifecycle } = renderRun({
+      previewClaimNext,
+      readRuntimeStatus
+    });
+
+    await act(() => result.current({ kind: "project" }));
+
+    expect(setError).toHaveBeenCalledWith("claim_bus_idle:no_claimable_blocks");
+    expect(lifecycle.onFailed).toHaveBeenCalledWith("claim_bus_idle:no_claimable_blocks");
+  });
+
+  it("runs coordinated_block through claim bus rather than execute-once", async () => {
+    const previewClaimNext = vi
+      .fn()
+      .mockResolvedValueOnce(blockClaim("T-001#B-001"))
+      .mockResolvedValue({ kind: "none", reason: "done" });
+    const readRuntimeStatus = vi
+      .fn()
+      .mockResolvedValueOnce(
+        statusProjection({
+          taskStatus: "ready",
+          blocks: [{ ref: "T-001#B-001", status: "ready" }]
+        })
+      )
+      .mockResolvedValue(
+        statusProjection({
+          taskStatus: "implemented",
+          blocks: [{ ref: "T-001#B-001", status: "completed", dispatchable: false }]
+        })
+      );
+    const { result, dispatch, previewClaimNext: preview, setError } = renderRun({
+      previewClaimNext,
+      readRuntimeStatus
+    });
+
+    await act(() => result.current({ kind: "block", blockRef: "T-001#B-001" }));
+
+    expect(preview).toHaveBeenCalledWith(
+      { projectRoot: project.rootPath, canvasId: "canvas-main" },
+      { kind: "block", blockRef: "T-001#B-001" }
+    );
+    expect(dispatch).toHaveBeenCalledTimes(1);
     expect(setError).not.toHaveBeenCalled();
   });
 
@@ -705,7 +1005,7 @@ describe("workspace Agent Endpoint routing", () => {
       result,
       dispatch,
       ensureWorkAuthority,
-      readRuntimeStatus,
+      previewClaimNext,
       setError,
       startLocal,
       waitForTerminal
@@ -713,7 +1013,7 @@ describe("workspace Agent Endpoint routing", () => {
 
     await act(() => result.current({ kind: "task", taskId: "T-001" }));
 
-    expect(readRuntimeStatus).toHaveBeenCalledTimes(2);
+    expect(previewClaimNext).toHaveBeenCalled();
     expect(ensureWorkAuthority).toHaveBeenCalledWith({
       kind: "block",
       canvasId: "canvas-main",

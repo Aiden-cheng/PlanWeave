@@ -1,32 +1,45 @@
-import type { CanvasRuntimeStatusProjection } from "@planweave-ai/collaboration-protocol/canvas/status";
 import type {
   DesktopAutoRunEvent,
-  DesktopAutoRunState,
-  DesktopGraphViewModel
+  DesktopAutoRunScope,
+  DesktopAutoRunState
 } from "@planweave-ai/runtime";
 
-const TERMINAL_LOCAL_PHASES = new Set<DesktopAutoRunState["phase"]>([
+/** Resource-release terminal phases for a finished Auto Run (not recoverable ownership). */
+const RESOURCE_TERMINAL_LOCAL_PHASES = new Set<DesktopAutoRunState["phase"]>([
   "completed",
   "blocked",
   "failed",
   "stopped"
 ]);
 
-type DesktopGraphTask = DesktopGraphViewModel["tasks"][number];
-type DesktopGraphBlock = DesktopGraphTask["blocks"][number];
+/**
+ * Claim-bus one-unit settle set. Desktop Auto Run ends successful stepLimit runs as
+ * `paused` + "Step limit reached." (see runApi step_limit_reached), not `completed`.
+ */
+const CLAIM_BUS_LOCAL_SETTLE_PHASES = new Set<DesktopAutoRunState["phase"]>([
+  "completed",
+  "blocked",
+  "failed",
+  "stopped",
+  "paused",
+  "manual"
+]);
+
+export const CLAIM_BUS_STEP_LIMIT_ERROR = "Step limit reached.";
 
 export type LocalAutoRunObserver = {
   getAutoRunState: (runId: string) => Promise<DesktopAutoRunState>;
   onAutoRunChanged: (callback: (event: DesktopAutoRunEvent) => void) => () => void;
 };
 
-export function waitForLocalAutoRunTerminal(input: {
+function waitForLocalAutoRunPhases(input: {
   api: LocalAutoRunObserver;
   initial: DesktopAutoRunState;
+  settlePhases: ReadonlySet<DesktopAutoRunState["phase"]>;
   signal?: AbortSignal;
   fallbackRefreshMs?: number;
 }): Promise<DesktopAutoRunState> {
-  if (TERMINAL_LOCAL_PHASES.has(input.initial.phase)) return Promise.resolve(input.initial);
+  if (input.settlePhases.has(input.initial.phase)) return Promise.resolve(input.initial);
 
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -60,7 +73,7 @@ export function waitForLocalAutoRunTerminal(input: {
       }
       try {
         const state = await input.api.getAutoRunState(input.initial.runId);
-        if (TERMINAL_LOCAL_PHASES.has(state.phase)) {
+        if (input.settlePhases.has(state.phase)) {
           finish(state);
           return;
         }
@@ -74,7 +87,7 @@ export function waitForLocalAutoRunTerminal(input: {
     const onAbort = () => fail(new Error("agent_endpoint_scope_run_cancelled"));
     const unsubscribe = input.api.onAutoRunChanged((event) => {
       if (event.runId !== input.initial.runId) return;
-      if (TERMINAL_LOCAL_PHASES.has(event.state.phase)) {
+      if (input.settlePhases.has(event.state.phase)) {
         finish(event.state);
       }
     });
@@ -88,94 +101,92 @@ export function waitForLocalAutoRunTerminal(input: {
   });
 }
 
-/**
- * Runtime `dispatchable` is implementation-oriented (planweave claim --dispatch).
- * Review gates become ready/claimable after required implementations complete but stay
- * `dispatchable: false` in claim hints. Scope scheduling still treats ready review blocks as
- * executable so Project/Task Auto Run continues through the full block graph (including remote Host).
- */
-export function isAgentEndpointScopeExecutableBlock(
-  block: Pick<DesktopGraphBlock, "type">,
-  status: CanvasRuntimeStatusProjection["blocks"][number] | undefined
-): boolean {
-  if (!status) return false;
-  if (status.dispatchable) return true;
-  return block.type === "review" && status.status === "ready";
-}
-
-function describeUnavailableScope(
-  status: CanvasRuntimeStatusProjection,
-  tasks: readonly DesktopGraphTask[]
-): string {
-  const graphBlocks = tasks.flatMap((task) =>
-    task.blocks.map((block) => ({ taskId: task.taskId, block }))
-  );
-  const blockRefs = new Set(graphBlocks.map(({ block }) => block.ref));
-  const statusByRef = new Map(status.blocks.map((block) => [block.ref, block]));
-  const details = graphBlocks.map(({ taskId, block }) => {
-    const row = statusByRef.get(block.ref);
-    if (!row) {
-      return `${block.ref}(task=${taskId},type=${block.type},status=missing_from_runtime_status)`;
-    }
-    const reasons = [
-      `type=${block.type}`,
-      `status=${row.status}`,
-      `dispatchable=${row.dispatchable}`,
-      `scopeExecutable=${isAgentEndpointScopeExecutableBlock(block, row)}`
-    ];
-    if (row.blockedReason) reasons.push(`blockedReason=${row.blockedReason}`);
-    if (row.divergenceReason) reasons.push(`divergenceReason=${row.divergenceReason}`);
-    if (row.completionReason) reasons.push(`completionReason=${row.completionReason}`);
-    return `${block.ref}(${reasons.join(",")})`;
-  });
-  const blocking = status.blocks.find(
-    (block) =>
-      blockRefs.has(block.ref) && (block.status === "blocked" || block.status === "diverged")
-  );
-  if (blocking?.blockedReason) {
-    return `agent_endpoint_scope_blocked:${blocking.ref}:${blocking.blockedReason}; blocks=[${details.join("; ")}]`;
-  }
-  if (blocking?.divergenceReason) {
-    return `agent_endpoint_scope_diverged:${blocking.ref}:${blocking.divergenceReason}; blocks=[${details.join("; ")}]`;
-  }
-  if (status.blocks.some((block) => blockRefs.has(block.ref) && block.status === "in_progress")) {
-    return `agent_endpoint_scope_has_in_progress_block; blocks=[${details.join("; ")}]`;
-  }
-  return `agent_endpoint_scope_has_no_dispatchable_block; blocks=[${details.join("; ")}]`;
-}
-
-export async function runAgentEndpointScope(input: {
-  tasks: readonly DesktopGraphTask[];
-  readRuntimeStatus: () => Promise<CanvasRuntimeStatusProjection | null>;
-  executeBlock: (task: DesktopGraphTask, block: DesktopGraphBlock) => Promise<void>;
+/** Wait until Auto Run reaches a resource-terminal phase (completed/blocked/failed/stopped). */
+export function waitForLocalAutoRunTerminal(input: {
+  api: LocalAutoRunObserver;
+  initial: DesktopAutoRunState;
   signal?: AbortSignal;
-}): Promise<void> {
-  const taskIds = new Set(input.tasks.map((task) => task.taskId));
-  while (!input.signal?.aborted) {
-    const status = await input.readRuntimeStatus();
-    if (!status) throw new Error("collaboration_runtime_status_unavailable");
-    const taskStatusById = new Map(status.tasks.map((task) => [task.taskId, task]));
-    for (const task of input.tasks) {
-      if (!taskStatusById.has(task.taskId)) {
-        throw new Error(`collaboration_runtime_task_status_unavailable:${task.taskId}`);
+  fallbackRefreshMs?: number;
+}): Promise<DesktopAutoRunState> {
+  return waitForLocalAutoRunPhases({
+    ...input,
+    settlePhases: RESOURCE_TERMINAL_LOCAL_PHASES
+  });
+}
+
+/**
+ * Wait until a claim-bus one-unit Auto Run settles, including successful step-limit pause.
+ */
+export function waitForClaimBusLocalAutoRunUnit(input: {
+  api: LocalAutoRunObserver;
+  initial: DesktopAutoRunState;
+  signal?: AbortSignal;
+  fallbackRefreshMs?: number;
+}): Promise<DesktopAutoRunState> {
+  return waitForLocalAutoRunPhases({
+    ...input,
+    settlePhases: CLAIM_BUS_LOCAL_SETTLE_PHASES
+  });
+}
+
+/** True when Desktop Auto Run finished one claim-bus unit successfully. */
+export function isClaimBusLocalUnitSuccess(state: DesktopAutoRunState): boolean {
+  if (state.phase === "completed") return true;
+  return state.phase === "paused" && state.error === CLAIM_BUS_STEP_LIMIT_ERROR;
+}
+
+/**
+ * Run exactly one Auto Run step for claim-bus local block/feedback units.
+ * Accepts real stepLimit terminal semantics (paused + Step limit reached.) and always
+ * stops a non-resource-terminal run so the next unit can startAutoRun.
+ */
+export async function runClaimBusLocalAutoRunUnit(input: {
+  scope: DesktopAutoRunScope;
+  startLocal: (
+    scope: DesktopAutoRunScope,
+    options?: { stepLimit?: number }
+  ) => Promise<DesktopAutoRunState | null | undefined>;
+  stopLocal: (runId: string) => Promise<unknown>;
+  api: LocalAutoRunObserver;
+  unitLabel: string;
+  signal?: AbortSignal;
+  waitForUnit?: typeof waitForClaimBusLocalAutoRunUnit;
+}): Promise<DesktopAutoRunState> {
+  const started = await input.startLocal(input.scope, { stepLimit: 1 });
+  if (!started) {
+    throw new Error(`local_agent_run_not_started:${input.unitLabel}`);
+  }
+  const wait = input.waitForUnit ?? waitForClaimBusLocalAutoRunUnit;
+  let settled: DesktopAutoRunState;
+  try {
+    settled = await wait({
+      api: input.api,
+      initial: started,
+      signal: input.signal
+    });
+  } catch (caught) {
+    try {
+      await input.stopLocal(started.runId);
+    } catch {
+      // Prefer the settle/abort error; stop is best-effort release.
+    }
+    throw caught;
+  }
+
+  if (!isClaimBusLocalUnitSuccess(settled)) {
+    if (!RESOURCE_TERMINAL_LOCAL_PHASES.has(settled.phase)) {
+      try {
+        await input.stopLocal(settled.runId);
+      } catch {
+        // still report the unit failure
       }
     }
-    if (
-      status.tasks
-        .filter((task) => taskIds.has(task.taskId))
-        .every((task) => task.status === "implemented")
-    ) {
-      return;
-    }
-
-    const statusByBlockRef = new Map(status.blocks.map((block) => [block.ref, block]));
-    const next = input.tasks
-      .flatMap((task) => task.blocks.map((block) => ({ task, block })))
-      .find(({ block }) =>
-        isAgentEndpointScopeExecutableBlock(block, statusByBlockRef.get(block.ref))
-      );
-    if (!next) throw new Error(describeUnavailableScope(status, input.tasks));
-    await input.executeBlock(next.task, next.block);
+    throw new Error(`local_agent_unit_${settled.phase}:${input.unitLabel}`);
   }
-  throw new Error("agent_endpoint_scope_run_cancelled");
+
+  // Successful step-limit runs remain non-terminal (paused) and block the next startAutoRun.
+  if (!RESOURCE_TERMINAL_LOCAL_PHASES.has(settled.phase)) {
+    await input.stopLocal(settled.runId);
+  }
+  return settled;
 }

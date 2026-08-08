@@ -324,7 +324,7 @@ export function useAutoRunControl({
   });
 
   const startLocalAutoRunWithScope = useCallback(
-    async (scope: DesktopAutoRunScope) => {
+    async (scope: DesktopAutoRunScope, options?: { stepLimit?: number }) => {
       if (!bridge || !selectedProject) {
         return null;
       }
@@ -343,7 +343,7 @@ export function useAutoRunControl({
         const started = await bridge.startAutoRun(
           desktopCanvasReference(selectedProject, selectedCanvasId),
           scope,
-          20,
+          options?.stepLimit ?? 20,
           { tmuxEnabled: tmuxMonitoringEnabled }
         );
         await applyAutoRunState(started);

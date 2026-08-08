@@ -231,6 +231,7 @@ export {
   stopAutoRun,
   subscribeAutoRunEvents
 } from "./runApi.js";
+export { previewClaimNext } from "./claimPreviewApi.js";
 export type {
   ActiveAgentRunActionIdentity,
   ActiveAgentRunSessionActionIdentity

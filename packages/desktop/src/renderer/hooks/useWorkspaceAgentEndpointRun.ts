@@ -1,6 +1,8 @@
 import type {
+  ClaimResult,
   DesktopAutoRunScope,
   DesktopAutoRunState,
+  DesktopCanvasReference,
   DesktopGraphViewModel,
   DesktopProjectSummary
 } from "@planweave-ai/runtime";
@@ -8,20 +10,24 @@ import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/prim
 import { useCallback, useEffect, useRef } from "react";
 import type { PlanWeaveCollaborationApi } from "../../shared/collaboration";
 import type { DesktopUiSettings } from "../../shared/desktopSettings";
+import { bridge, collaborationBridge, desktopCanvasReference } from "../bridge";
 import { createAgentEndpointBlockExecutor } from "../collaboration/agentEndpointBlockExecutor";
 import { createAgentEndpointRunPlan } from "../collaboration/agentEndpointRunPlan";
 import type { AvailableAgentEndpoint } from "../collaboration/agentEndpointViewModel";
 import {
   type LocalAutoRunObserver,
-  runAgentEndpointScope,
+  runClaimBusLocalAutoRunUnit,
+  waitForClaimBusLocalAutoRunUnit,
   waitForLocalAutoRunTerminal
 } from "../collaboration/agentEndpointScopeRun";
+import { runClaimBusScope } from "../collaboration/claimBusScheduler";
 import { waitForRemoteOperationTerminal } from "../collaboration/remoteTaskEndpointRun";
-import { collaborationBridge } from "../bridge";
 
 function createDispatchId(): string {
   return crypto.randomUUID();
 }
+
+type GraphTask = DesktopGraphViewModel["tasks"][number];
 
 type WorkspaceAgentEndpointRunInput = {
   activeProjectId: string | null;
@@ -47,11 +53,23 @@ type WorkspaceAgentEndpointRunInput = {
   createId?: () => string;
   localAutoRunApi?: LocalAutoRunObserver | null;
   waitForLocalTerminal?: typeof waitForLocalAutoRunTerminal;
+  waitForLocalUnit?: typeof waitForClaimBusLocalAutoRunUnit;
   waitForTerminal?: typeof waitForRemoteOperationTerminal;
+  /** Injectable stop for claim-bus one-unit release (defaults to bridge.stopAutoRun). */
+  stopLocal?: (runId: string) => Promise<unknown>;
+  /**
+   * Injectable dry-run claim preview (defaults to desktop bridge.previewClaimNext).
+   * Used by claim-bus coordinated scopes only.
+   */
+  previewClaimNext?: (
+    ref: DesktopCanvasReference,
+    scope: DesktopAutoRunScope
+  ) => Promise<ClaimResult>;
 };
 
 export type LocalAutoRunScopeStarter = (
-  scope: DesktopAutoRunScope
+  scope: DesktopAutoRunScope,
+  options?: { stepLimit?: number }
 ) => Promise<DesktopAutoRunState | null | undefined>;
 
 export type WorkspaceAgentEndpointScopeStarter = (
@@ -63,6 +81,15 @@ export type WorkspaceAgentEndpointScopeStarter = (
     onFailed: (message: string) => void;
   }
 ) => Promise<void>;
+
+function scopeTaskIds(
+  plan:
+    | { kind: "coordinated_scope"; tasks: readonly GraphTask[] }
+    | { kind: "coordinated_block"; selection: { task: GraphTask } }
+): readonly string[] {
+  if (plan.kind === "coordinated_block") return [plan.selection.task.taskId];
+  return plan.tasks.map((task) => task.taskId);
+}
 
 export function useWorkspaceAgentEndpointRun(
   input: WorkspaceAgentEndpointRunInput
@@ -117,6 +144,20 @@ export function useWorkspaceAgentEndpointRun(
       lifecycle?.onStarted();
       const selectedProject = input.selectedProject;
       const selectedCanvasId = input.selectedCanvasId;
+      const canvasRef = desktopCanvasReference(selectedProject, selectedCanvasId);
+      const stopLocal =
+        input.stopLocal ??
+        (async (runId: string) => {
+          if (!bridge) throw new Error("desktop_bridge_unavailable");
+          return bridge.stopAutoRun(runId);
+        });
+      const previewClaimNext =
+        input.previewClaimNext ??
+        ((ref: DesktopCanvasReference, claimScope: DesktopAutoRunScope) => {
+          if (!bridge) throw new Error("desktop_bridge_unavailable");
+          return bridge.previewClaimNext(ref, claimScope);
+        });
+
       try {
         const selectionByBlockRef =
           plan.kind === "coordinated_block"
@@ -130,23 +171,73 @@ export function useWorkspaceAgentEndpointRun(
           api,
           createId,
           startLocal,
+          stopLocal,
           localAutoRunApi: input.localAutoRunApi,
-          waitForLocalTerminal: input.waitForLocalTerminal,
+          waitForLocalUnit: input.waitForLocalUnit,
           waitForRemoteTerminal: input.waitForTerminal
         });
-        if (plan.kind === "coordinated_block") {
-          await executeBlock(plan.selection.task, plan.selection.block, controller.signal);
-          lifecycle?.onCompleted();
-          return;
-        }
-        await runAgentEndpointScope({
-          tasks: plan.tasks,
-          readRuntimeStatus: () =>
-            api.readCollaborationCanvasRuntimeStatus({
-              localProjectId: selectedProject.projectId,
-              canvasId: selectedCanvasId
-            }),
-          executeBlock: (task, block) => executeBlock(task, block, controller.signal),
+
+        const executeClaimUnit = async (ref: string, signal?: AbortSignal) => {
+          const selection = selectionByBlockRef.get(ref);
+          if (!selection) throw new Error(`agent_endpoint_selection_missing:${ref}`);
+          await executeBlock(selection.task, selection.block, signal);
+        };
+
+        const taskIds = new Set(scopeTaskIds(plan));
+
+        await runClaimBusScope({
+          scope,
+          preview: {
+            previewNext: (claimScope) => previewClaimNext(canvasRef, claimScope)
+          },
+          route: {
+            routeForBlock: (ref) => {
+              const selection = selectionByBlockRef.get(ref);
+              if (!selection) throw new Error(`agent_endpoint_selection_missing:${ref}`);
+              return selection.endpoint.source === "remote" ? "remote" : "local";
+            }
+          },
+          localBlock: { execute: executeClaimUnit },
+          remoteBlock: { execute: executeClaimUnit },
+          feedback: {
+            execute: async (claim, signal) => {
+              const localApi = input.localAutoRunApi === undefined ? bridge : input.localAutoRunApi;
+              if (!localApi) throw new Error("desktop_bridge_unavailable");
+              // One claim unit only; real stepLimit ends paused and must be stopped.
+              await runClaimBusLocalAutoRunUnit({
+                scope: { kind: "task", taskId: claim.taskId },
+                startLocal,
+                stopLocal,
+                api: localApi,
+                unitLabel: `feedback:${claim.feedbackId}`,
+                signal,
+                waitForUnit: input.waitForLocalUnit
+              });
+            }
+          },
+          completion: {
+            isSatisfied: async () => {
+              const status = await api.readCollaborationCanvasRuntimeStatus({
+                localProjectId: selectedProject.projectId,
+                canvasId: selectedCanvasId
+              });
+              if (!status) throw new Error("collaboration_runtime_status_unavailable");
+
+              if (scope.kind === "block") {
+                const row = status.blocks.find((block) => block.ref === scope.blockRef);
+                return row?.status === "completed";
+              }
+
+              for (const taskId of taskIds) {
+                if (!status.tasks.some((task) => task.taskId === taskId)) {
+                  throw new Error(`collaboration_runtime_task_status_unavailable:${taskId}`);
+                }
+              }
+              return status.tasks
+                .filter((task) => taskIds.has(task.taskId))
+                .every((task) => task.status === "implemented");
+            }
+          },
           signal: controller.signal
         });
         lifecycle?.onCompleted();
@@ -167,10 +258,13 @@ export function useWorkspaceAgentEndpointRun(
       input.graph,
       input.localAutoRunApi,
       input.preferences,
+      input.previewClaimNext,
       input.selectedCanvasId,
       input.selectedProject,
       input.setError,
+      input.stopLocal,
       input.waitForLocalTerminal,
+      input.waitForLocalUnit,
       input.waitForTerminal
     ]
   );

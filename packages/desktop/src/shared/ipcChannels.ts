@@ -117,6 +117,7 @@ export const desktopBridgeInvokeChannels = {
   searchProjectWithDiagnostics: "planweave:searchProjectWithDiagnostics",
   selectTaskCanvas: "planweave:selectTaskCanvas",
   startAutoRun: "planweave:startAutoRun",
+  previewClaimNext: "planweave:previewClaimNext",
   stopAutoRun: "planweave:stopAutoRun",
   respondToAgentRequest: "planweave:respondToAgentRequest",
   respondToAgentAuthenticationRequest: "planweave:respondToAgentAuthenticationRequest",

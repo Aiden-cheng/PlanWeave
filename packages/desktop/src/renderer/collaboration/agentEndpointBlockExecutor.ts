@@ -1,10 +1,18 @@
-import type { DesktopAutoRunState, DesktopGraphViewModel } from "@planweave-ai/runtime";
+import type {
+  DesktopAutoRunScope,
+  DesktopAutoRunState,
+  DesktopGraphViewModel
+} from "@planweave-ai/runtime";
 import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import type { RemoteOperationObservation } from "@planweave-ai/collaboration-protocol/remote-run";
 import type { PlanWeaveCollaborationApi } from "../../shared/collaboration";
 import { bridge } from "../bridge";
 import type { AgentEndpointBlockSelection } from "./agentEndpointRunPlan";
-import { type LocalAutoRunObserver, waitForLocalAutoRunTerminal } from "./agentEndpointScopeRun";
+import {
+  type LocalAutoRunObserver,
+  runClaimBusLocalAutoRunUnit,
+  waitForClaimBusLocalAutoRunUnit
+} from "./agentEndpointScopeRun";
 import { buildRemoteActionIdentity } from "./remoteRunViewModels";
 import { waitForRemoteOperationTerminal } from "./remoteTaskEndpointRun";
 
@@ -130,29 +138,31 @@ export function createAgentEndpointBlockExecutor(input: {
   };
   api: RemoteOperationsApi;
   createId: () => string;
-  startLocal: (scope: {
-    kind: "block";
-    blockRef: string;
-  }) => Promise<DesktopAutoRunState | null | undefined>;
+  startLocal: (
+    scope: DesktopAutoRunScope,
+    options?: { stepLimit?: number }
+  ) => Promise<DesktopAutoRunState | null | undefined>;
+  /** Required so step-limit paused runs release the workspace for the next claim-bus unit. */
+  stopLocal: (runId: string) => Promise<unknown>;
   localAutoRunApi?: LocalAutoRunObserver | null;
-  waitForLocalTerminal?: typeof waitForLocalAutoRunTerminal;
+  waitForLocalUnit?: typeof waitForClaimBusLocalAutoRunUnit;
   waitForRemoteTerminal?: typeof waitForRemoteOperationTerminal;
 }): (task: GraphTask, block: GraphBlock, signal?: AbortSignal) => Promise<void> {
   const waitForRemoteTerminal = input.waitForRemoteTerminal ?? waitForRemoteOperationTerminal;
 
   const executeLocal = async (selection: AgentEndpointBlockSelection, signal?: AbortSignal) => {
-    const started = await input.startLocal({ kind: "block", blockRef: selection.block.ref });
-    if (!started) throw new Error(`local_agent_run_not_started:${selection.block.ref}`);
     const localApi = input.localAutoRunApi === undefined ? bridge : input.localAutoRunApi;
     if (!localApi) throw new Error("desktop_bridge_unavailable");
-    const terminal = await (input.waitForLocalTerminal ?? waitForLocalAutoRunTerminal)({
+    // Real Auto Run ends stepLimit:1 as paused + "Step limit reached."; release via stopLocal.
+    await runClaimBusLocalAutoRunUnit({
+      scope: { kind: "block", blockRef: selection.block.ref },
+      startLocal: input.startLocal,
+      stopLocal: input.stopLocal,
       api: localApi,
-      initial: started,
-      signal
+      unitLabel: selection.block.ref,
+      signal,
+      waitForUnit: input.waitForLocalUnit
     });
-    if (terminal.phase !== "completed") {
-      throw new Error(`local_agent_block_${terminal.phase}:${selection.block.ref}`);
-    }
   };
 
   const executeRemote = async (selection: AgentEndpointBlockSelection, signal?: AbortSignal) => {

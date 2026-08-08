@@ -1,12 +1,17 @@
 {
   "integrationShards": {
-    "cli": ["packages/cli/src/__tests__"],
+    "cli": [
+      "packages/cli/src/__tests__"
+    ],
     "core": [
       "packages/desktop/src/__tests__",
       "packages/mcp/src/__tests__",
       "packages/runtime/src/__tests__"
     ],
-    "distributed": ["packages/server/src/__tests__", "packages/agent-host/src/__tests__"]
+    "distributed": [
+      "packages/server/src/__tests__",
+      "packages/agent-host/src/__tests__"
+    ]
   },
   "groups": [
     {
@@ -56,6 +61,7 @@
       "unit": [
         "acpConversationTimeline.test.tsx",
         "agentCapabilityProbeSessionCache.test.tsx",
+        "agentEndpointScopeRun.test.ts",
         "agentPrompt.test.ts",
         "agentShellEnvironment.test.ts",
         "agentTools.test.ts",
@@ -88,6 +94,7 @@
         "canvasReplicaLiveBroadcast.test.ts",
         "canvasReplicaStore.test.ts",
         "chromiumAccessibility.test.ts",
+        "claimBusScheduler.test.ts",
         "collaborationAccessibility.test.tsx",
         "collaborationCanvasCommands.test.ts",
         "collaborationCanvasLiveSyncSession.test.ts",
@@ -96,18 +103,19 @@
         "collaborationDiagnosticsVisibility.test.tsx",
         "collaborationIntegrationScenarios.test.tsx",
         "collaborationInvitationHandoffCoordinator.test.ts",
-        "collaborationRegistryClient.test.ts",
-        "collaborationRegistryReadModelsHook.test.tsx",
         "collaborationReadModelHub.test.ts",
         "collaborationReadModels.test.ts",
+        "collaborationRegistryClient.test.ts",
+        "collaborationRegistryReadModelsHook.test.tsx",
         "collaborationRemoteOperationsClient.test.ts",
-        "collaborationSessionState.test.ts",
         "collaborationRenderBenchmark.test.ts",
+        "collaborationSessionState.test.ts",
         "commentViewModels.test.ts",
         "commentsPanel.test.tsx",
         "commentsPanelController.test.ts",
         "contentAuthorityPanel.test.tsx",
         "currentCanvasAccessPanel.test.tsx",
+        "deploymentConnectionCard.test.tsx",
         "desktopAgentHostServiceMode.test.ts",
         "desktopBridgeContract.test.ts",
         "desktopDiagnostics.test.ts",
@@ -120,8 +128,6 @@
         "desktopSearchHook.test.tsx",
         "desktopSettingsBridge.test.tsx",
         "desktopSettingsEffects.test.tsx",
-        "deploymentConnectionCard.test.tsx",
-        "hostAdministration.test.tsx",
         "diagnosticFixActions.test.ts",
         "executorOptionViewModel.test.ts",
         "executorPreflightAuthenticationUi.test.tsx",
@@ -135,6 +141,7 @@
         "graphPaletteActions.test.tsx",
         "graphViewViewport.test.tsx",
         "historyNavigationButtons.test.tsx",
+        "hostAdministration.test.tsx",
         "hostBootstrapHandoff.test.ts",
         "inspectorAutoRunEvents.test.tsx",
         "inspectorWindowSecurity.test.ts",
@@ -153,8 +160,8 @@
         "peoplePanelInvitationCopy.test.tsx",
         "peopleView.test.tsx",
         "peopleViewModels.test.ts",
-        "preloadBundleBoundary.test.ts",
         "preloadBridge.test.ts",
+        "preloadBundleBoundary.test.ts",
         "preloadCollaborationCommandBridge.test.ts",
         "projectSidebarInteractions.test.tsx",
         "promptDraftsHook.test.tsx",
@@ -174,10 +181,10 @@
         "searchResultList.test.tsx",
         "searchView.test.tsx",
         "selectedBlockHook.test.tsx",
+        "sharedCanvasCommands.test.tsx",
+        "sharedPackageWriteAdapter.test.tsx",
         "sharedResourceBadges.test.tsx",
         "sharedResourceHighlight.test.tsx",
-        "sharedPackageWriteAdapter.test.tsx",
-        "sharedCanvasCommands.test.tsx",
         "singleInstanceLifecycle.test.ts",
         "smokeFailureGate.test.ts",
         "statisticsAndSettingsViews.test.tsx",
@@ -280,12 +287,18 @@
         "smokeProcessGate.test.ts",
         "tailscaleProxyTwoDesktopE2E.test.ts"
       ],
-      "platform": ["agentToolsWindows.test.ts", "runtimeStateWatch.test.ts"],
+      "platform": [
+        "agentToolsWindows.test.ts",
+        "runtimeStateWatch.test.ts"
+      ],
       "performance": []
     },
     {
       "root": "packages/desktop/src/renderer/collaboration",
-      "unit": ["agentEndpointViewModel.test.ts", "remoteTaskEndpointRun.test.ts"],
+      "unit": [
+        "agentEndpointViewModel.test.ts",
+        "remoteTaskEndpointRun.test.ts"
+      ],
       "integration": [],
       "platform": [],
       "performance": []
@@ -354,6 +367,7 @@
         "boundedContent.test.ts",
         "canvasReplicaGraphProjection.test.ts",
         "claimNext.test.ts",
+        "claimPreview.test.ts",
         "claimReadiness.test.ts",
         "compileProjectGraph.test.ts",
         "desktopAutoRunEvents.test.ts",
@@ -551,7 +565,9 @@
         "managedProcessTree.test.ts",
         "stateConcurrency.test.ts"
       ],
-      "performance": ["blockRunIndexPerformance.test.ts"]
+      "performance": [
+        "blockRunIndexPerformance.test.ts"
+      ]
     },
     {
       "root": "packages/agent-host-protocol/src/__tests__",
