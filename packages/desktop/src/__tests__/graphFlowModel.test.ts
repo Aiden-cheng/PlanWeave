@@ -79,7 +79,6 @@ describe("desktop graph flow model", () => {
       vi.fn(),
       vi.fn(),
       vi.fn(),
-      vi.fn(),
       vi.fn()
     );
 
@@ -104,8 +103,7 @@ describe("desktop graph flow model", () => {
       [],
       [],
       [],
-      // 22 task/block callbacks (onTitleChange … onOpenRunRecord)
-      noop,
+      // 21 task/block callbacks (onTitleChange … onOpenRunRecord)
       noop,
       noop,
       noop,
