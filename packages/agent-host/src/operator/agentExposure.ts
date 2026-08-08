@@ -31,7 +31,8 @@ export async function readExposedAgentProfileIds(config: AgentHostConfig): Promi
     input = await readFile(exposurePath(config), "utf8");
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-      await writeExposedAgentProfileIds(config, []);
+      // Missing file means no allowlist yet. Do not write an empty file here — a concurrent
+      // Windows rename/replace can briefly look like ENOENT and would otherwise wipe exposure.
       return [];
     }
     throw new Error("agent_host_exposure_config_invalid", { cause: error });

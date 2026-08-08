@@ -41,14 +41,14 @@ async function config(command = process.execPath) {
 }
 
 describe("Agent exposure allowlist", () => {
-  it("initializes a missing allowlist as empty instead of exposing configured profiles", async () => {
+  it("treats a missing allowlist as empty without creating a destructive empty file", async () => {
     const value = await config();
     await expect(readExposedAgentProfileIds(value)).resolves.toEqual([]);
-    await expect(
-      readFile(join(value.dataDirectory, "agent-exposure.json"), "utf8")
-    ).resolves.toContain('"profileIds": []');
-    const restartedConfig = parseAgentHostConfig(JSON.parse(JSON.stringify(value)));
-    await expect(readExposedAgentProfileIds(restartedConfig)).resolves.toEqual([]);
+    await expect(readFile(join(value.dataDirectory, "agent-exposure.json"), "utf8")).rejects.toMatchObject(
+      { code: "ENOENT" }
+    );
+    await writeExposedAgentProfileIds(value, ["codex-acp"]);
+    await expect(readExposedAgentProfileIds(value)).resolves.toEqual(["codex-acp"]);
   });
 
   it("hides an explicitly exposed custom profile even after its binary has been uninstalled", async () => {
@@ -209,6 +209,51 @@ describe("Agent exposure allowlist", () => {
       canonicalCommandPath
     );
   });
+
+  it.runIf(process.platform === "win32")(
+    "discovers pi-acp from the Windows AppData npm shim directory when Path is short",
+    async () => {
+      const home = await mkdtemp(join(tmpdir(), "planweave-agent-exposure-pi-home-"));
+      roots.push(home);
+      const npmRoot = join(home, "AppData", "Roaming", "npm");
+      await mkdir(npmRoot, { recursive: true });
+      const commandPath = join(npmRoot, "pi-acp.cmd");
+      await writeFile(commandPath, "@echo off\r\n", "utf8");
+      const value = await config();
+      const configPath = join(value.dataDirectory, "config.json");
+      await writePrivateJsonFile(configPath, value);
+      const operator = new AgentHostOperator(null, "win32", {
+        Path: join(home, "missing-path"),
+        USERPROFILE: home,
+        APPDATA: join(home, "AppData", "Roaming"),
+        LOCALAPPDATA: join(home, "AppData", "Local"),
+        PATHEXT: ".CMD",
+        NoDefaultCurrentDirectoryInExePath: "1"
+      });
+
+      await expect(operator.listAgents(configPath)).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            profileId: "pi-acp",
+            detected: true,
+            exposed: false
+          })
+        ])
+      );
+      const exposed = await operator.exposeAgent(configPath, "pi-acp");
+      expect(exposed.agents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ profileId: "pi-acp", exposed: true, ready: true })
+        ])
+      );
+      const persisted = JSON.parse(await readFile(configPath, "utf8")) as {
+        agentProfiles: Array<{ id: string; command: string }>;
+      };
+      expect(persisted.agentProfiles.find((profile) => profile.id === "pi-acp")?.command).toBe(
+        await realpath(commandPath)
+      );
+    }
+  );
 
   it("fails closed for unknown profile ids", () => {
     expect(() => requireSupportedAgentProfile("custom-acp")).toThrow(

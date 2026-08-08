@@ -31,24 +31,63 @@ describe("agentProcessEnv", () => {
     expect(entries).toEqual(expect.arrayContaining(["/opt/homebrew/bin", "/usr/local/bin"]));
   });
 
-  it("uses Windows delimiters without POSIX fallbacks", () => {
+  it("adds common user-level agent install paths on Windows", () => {
+    expect(
+      agentProcessPath({
+        envPath: String.raw`C:\Windows\System32`,
+        platform: "win32",
+        env: {
+          USERPROFILE: String.raw`C:\Users\dev`,
+          APPDATA: String.raw`C:\Users\dev\AppData\Roaming`,
+          LOCALAPPDATA: String.raw`C:\Users\dev\AppData\Local`
+        }
+      }).split(";")
+    ).toEqual(
+      expect.arrayContaining([
+        String.raw`C:\Windows\System32`,
+        String.raw`C:\Users\dev\AppData\Roaming\npm`,
+        String.raw`C:\Users\dev\AppData\Local\pnpm`,
+        String.raw`C:\Users\dev\.local\bin`,
+        String.raw`C:\Users\dev\.grok\bin`
+      ])
+    );
+  });
+
+  it("uses Windows delimiters and keeps existing Path entries first", () => {
     expect(
       agentProcessPath({
         envPath: String.raw`C:\Tools;C:\Users\dev\AppData\Roaming\npm`,
-        platform: "win32"
+        platform: "win32",
+        env: {
+          USERPROFILE: String.raw`C:\Users\dev`,
+          APPDATA: String.raw`C:\Users\dev\AppData\Roaming`,
+          LOCALAPPDATA: String.raw`C:\Users\dev\AppData\Local`
+        }
       }).split(";")
-    ).toEqual([String.raw`C:\Tools`, String.raw`C:\Users\dev\AppData\Roaming\npm`]);
+    ).toEqual(
+      expect.arrayContaining([
+        String.raw`C:\Tools`,
+        String.raw`C:\Users\dev\AppData\Roaming\npm`,
+        String.raw`C:\Users\dev\AppData\Local\pnpm`
+      ])
+    );
   });
 
-  it("collapses Path/PATH on Windows", () => {
+  it("collapses Path/PATH on Windows while keeping user install fallbacks", () => {
     const env = agentProcessEnv({
       platform: "win32",
       env: {
         Path: String.raw`C:\Tools`,
-        PATH: "should-not-survive"
+        PATH: "should-not-survive",
+        USERPROFILE: String.raw`C:\Users\dev`,
+        APPDATA: String.raw`C:\Users\dev\AppData\Roaming`,
+        LOCALAPPDATA: String.raw`C:\Users\dev\AppData\Local`
       }
     });
-    expect(env.Path).toBe(String.raw`C:\Tools`);
+    expect(env.Path?.split(";")[0]).toBe(String.raw`C:\Tools`);
+    expect(env.Path?.split(";")).toEqual(
+      expect.arrayContaining([String.raw`C:\Users\dev\AppData\Roaming\npm`])
+    );
     expect(env.PATH).toBeUndefined();
   });
 

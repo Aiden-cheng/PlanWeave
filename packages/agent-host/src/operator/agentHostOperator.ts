@@ -52,6 +52,7 @@ import {
   type AgentHostBackgroundService
 } from "../background/backgroundService.js";
 import { resolveHostExecutable } from "../platform/resolveHostExecutable.js";
+import { agentProcessEnv } from "@planweave-ai/runtime";
 
 const MAX_CONFIG_BYTES = 256 * 1_024;
 
@@ -125,7 +126,10 @@ export class AgentHostOperator {
     const resolved = await resolveHostExecutable({
       command,
       platform: this.hostPlatform,
-      env: this.hostEnvironment
+      env: agentProcessEnv({
+        platform: this.hostPlatform,
+        env: { ...this.hostEnvironment }
+      })
     });
     if (!resolved) throw new Error("agent_host_preset_binary_missing");
     return resolved;

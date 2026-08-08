@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, win32 as windowsPath } from "node:path";
 
 const posixSystemPathEntries = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"];
 let agentProcessEnvironmentOverlay: Readonly<NodeJS.ProcessEnv> | null = null;
@@ -31,6 +31,37 @@ function posixUserPathEntries(env: NodeJS.ProcessEnv, platform: NodeJS.Platform)
   ];
   if (platform === "darwin") entries.push(join(homeDirectory, "Library", "pnpm"));
   return entries;
+}
+
+function windowsHomeDirectory(env: NodeJS.ProcessEnv): string {
+  const profile = environmentValue(env, "USERPROFILE");
+  if (profile) return profile;
+  const homeDrive = environmentValue(env, "HOMEDRIVE");
+  const homePath = environmentValue(env, "HOMEPATH");
+  if (homeDrive && homePath) return windowsPath.join(homeDrive, homePath);
+  return homedir();
+}
+
+/**
+ * Packaged Electron / Task Scheduler hosts often inherit a short PATH that omits the
+ * user npm/pnpm shim directories where ACP adapters like `pi-acp.cmd` are installed.
+ */
+function windowsUserPathEntries(env: NodeJS.ProcessEnv): string[] {
+  const homeDirectory = windowsHomeDirectory(env);
+  const appData =
+    environmentValue(env, "APPDATA") ?? windowsPath.join(homeDirectory, "AppData", "Roaming");
+  const localAppData =
+    environmentValue(env, "LOCALAPPDATA") ?? windowsPath.join(homeDirectory, "AppData", "Local");
+  return [
+    windowsPath.join(appData, "npm"),
+    windowsPath.join(localAppData, "pnpm"),
+    windowsPath.join(homeDirectory, ".local", "bin"),
+    windowsPath.join(homeDirectory, ".grok", "bin"),
+    windowsPath.join(homeDirectory, ".opencode", "bin"),
+    windowsPath.join(homeDirectory, ".bun", "bin"),
+    windowsPath.join(homeDirectory, ".volta", "bin"),
+    windowsPath.join(homeDirectory, ".cargo", "bin")
+  ];
 }
 
 function definedEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -71,8 +102,8 @@ export type AgentProcessPathOptions = {
 
 /**
  * PATH used to resolve agent CLI / ACP binaries.
- * Uses the platform delimiter. POSIX hosts may append common shell install locations;
- * Windows uses only the process environment PATH (no guessed install directories).
+ * Uses the platform delimiter. POSIX and Windows hosts append common user install
+ * locations (Homebrew/npm/pnpm shims) when missing from the process PATH.
  */
 export function agentProcessPath(
   envPathOrOptions?: string | AgentProcessPathOptions,
@@ -89,7 +120,9 @@ export function agentProcessPath(
     options.envPath ?? environmentValue(env, "PATH") ?? environmentValue(process.env, "PATH");
   const existingEntries = source?.split(pathDelimiter).filter(Boolean) ?? [];
   const fallbackEntries =
-    platform === "win32" ? [] : [...posixUserPathEntries(env, platform), ...posixSystemPathEntries];
+    platform === "win32"
+      ? windowsUserPathEntries(env)
+      : [...posixUserPathEntries(env, platform), ...posixSystemPathEntries];
   return [...new Set([...existingEntries, ...fallbackEntries])].join(pathDelimiter);
 }
 

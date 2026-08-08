@@ -141,27 +141,44 @@ describe("desktop agent tool detection", () => {
     expect(linuxEntries).not.toContain("/home/example/Library/pnpm");
   });
 
-  it("uses Windows path delimiter and does not append guessed install locations", async () => {
+  it("uses Windows path delimiter and appends common user install locations", async () => {
     const { agentDetectionPath, agentDetectionEnv } = await import("../main/agentTools");
 
     expect(
       agentDetectionPath({
         envPath: String.raw`C:\Tools;C:\Users\dev\AppData\Roaming\npm`,
-        platform: "win32"
+        platform: "win32",
+        env: {
+          USERPROFILE: String.raw`C:\Users\dev`,
+          APPDATA: String.raw`C:\Users\dev\AppData\Roaming`,
+          LOCALAPPDATA: String.raw`C:\Users\dev\AppData\Local`
+        }
       }).split(";")
-    ).toEqual([String.raw`C:\Tools`, String.raw`C:\Users\dev\AppData\Roaming\npm`]);
+    ).toEqual(
+      expect.arrayContaining([
+        String.raw`C:\Tools`,
+        String.raw`C:\Users\dev\AppData\Roaming\npm`,
+        String.raw`C:\Users\dev\AppData\Local\pnpm`
+      ])
+    );
 
     const env = agentDetectionEnv({
       platform: "win32",
       env: {
         Path: String.raw`C:\Tools;C:\Users\dev\AppData\Roaming\npm`,
-        PATH: "should-not-survive"
+        PATH: "should-not-survive",
+        USERPROFILE: String.raw`C:\Users\dev`,
+        APPDATA: String.raw`C:\Users\dev\AppData\Roaming`,
+        LOCALAPPDATA: String.raw`C:\Users\dev\AppData\Local`
       }
     });
-    expect(env.Path?.split(";")).toEqual([
-      String.raw`C:\Tools`,
-      String.raw`C:\Users\dev\AppData\Roaming\npm`
-    ]);
+    expect(env.Path?.split(";")[0]).toBe(String.raw`C:\Tools`);
+    expect(env.Path?.split(";")).toEqual(
+      expect.arrayContaining([
+        String.raw`C:\Users\dev\AppData\Roaming\npm`,
+        String.raw`C:\Users\dev\AppData\Local\pnpm`
+      ])
+    );
     expect(env.PATH).toBeUndefined();
     expect(env.Path).not.toContain("/opt/homebrew/bin");
   });

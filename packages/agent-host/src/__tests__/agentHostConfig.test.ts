@@ -169,8 +169,13 @@ describe("Agent Host configuration", () => {
     await expect(resolver.resolve("acp.test", "test-agent")).resolves.toMatchObject({
       agentId: "test-agent",
       launch: { command: process.execPath, args: ["agent.mjs"] },
-      env: { SAFE_API_KEY: "local-secret" }
+      env: expect.objectContaining({ SAFE_API_KEY: "local-secret" })
     });
+    const resolved = await resolver.resolve("acp.test", "test-agent");
+    expect(resolved.env).not.toHaveProperty("UNTRUSTED_OVERRIDE");
+    expect(
+      Object.keys(resolved.env).some((key) => key.toLowerCase() === "path")
+    ).toBe(true);
     await expect(resolver.resolve("acp.test", "wrong-agent")).rejects.toThrow("not_configured");
     expect(() =>
       parseAgentHostConfig({

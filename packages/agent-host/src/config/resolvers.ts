@@ -1,6 +1,7 @@
 import { access, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
+import { agentProcessEnvRecord } from "@planweave-ai/runtime";
 import type {
   AgentHostAcpProfileResolver,
   AgentHostWorkspaceResolver,
@@ -43,7 +44,30 @@ export class ConfiguredAcpProfileResolver implements AgentHostAcpProfileResolver
     }
     const command = await realpath(profile.command);
     await access(command, constants.X_OK);
+    // Keep the Host allowlist tight, but always provide Path/PATHEXT (and Windows system
+    // roots) so npm `.cmd` ACP shims can resolve `node` under short Electron PATHs.
+    const agentEnv = agentProcessEnvRecord({
+      env: { ...this.environment }
+    });
     const env: Record<string, string> = {};
+    for (const [key, value] of Object.entries(agentEnv)) {
+      const normalized = key.toLowerCase();
+      if (
+        normalized === "path" ||
+        normalized === "pathext" ||
+        normalized === "systemroot" ||
+        normalized === "comspec" ||
+        normalized === "userprofile" ||
+        normalized === "appdata" ||
+        normalized === "localappdata" ||
+        normalized === "home" ||
+        normalized === "tmp" ||
+        normalized === "temp" ||
+        normalized === "username"
+      ) {
+        env[key] = value;
+      }
+    }
     for (const entry of profile.environment) {
       const value = this.environment[entry.name];
       if (value === undefined) {
