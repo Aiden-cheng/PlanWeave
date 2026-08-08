@@ -3,7 +3,10 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
-import { useRemoteRunPanelController } from "../renderer/hooks/useRemoteRunPanelController";
+import {
+  logicalExecutorsFromLocalAgentEndpoints,
+  useRemoteRunPanelController
+} from "../renderer/hooks/useRemoteRunPanelController";
 import { createTranslator } from "../renderer/i18n";
 
 const startAutoRun = vi.hoisted(() => vi.fn(async () => undefined));
@@ -29,6 +32,23 @@ const availableLocalEndpoint = {
 } as const;
 
 afterEach(() => startAutoRun.mockClear());
+
+describe("logicalExecutorsFromLocalAgentEndpoints", () => {
+  it("maps profile-style local names to logical agent family executors", () => {
+    expect(logicalExecutorsFromLocalAgentEndpoints([availableLocalEndpoint])).toEqual([
+      {
+        executorName: "codex",
+        profileId: "codex-acp",
+        agentId: "codex",
+        displayName: "Codex",
+        capabilities: ["acp.codex"],
+        available: true,
+        unavailableReason: null,
+        custom: false
+      }
+    ]);
+  });
+});
 
 describe("useRemoteRunPanelController local Endpoint", () => {
   it("uses the selected local Endpoint as the one-run executor override", async () => {

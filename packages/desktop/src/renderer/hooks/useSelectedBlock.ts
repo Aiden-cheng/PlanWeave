@@ -201,51 +201,6 @@ export function useSelectedBlock({
     sharedCanvas
   ]);
 
-  const saveSelectedBlockExecutor = useCallback(
-    async (executorName: string | null) => {
-      if (!selectedProject || !selectedBlock) {
-        return;
-      }
-      try {
-        const mode = await runDurablePackageWrite({
-          sharedCanvas,
-          intent: {
-            kind: "update_block_fields",
-            blockRef: selectedBlock.ref,
-            fields: { executor: executorName }
-          },
-          onError: setError,
-          localWrite: async () => {
-            if (!bridge) return;
-            const result = await bridge.updateBlockExecutor(
-              desktopCanvasReference(selectedProject, selectedCanvasId),
-              selectedBlock.ref,
-              executorName
-            );
-            if (!result.ok) {
-              throw new Error(
-                result.diagnostics.map((diagnostic) => diagnostic.message).join("\n")
-              );
-            }
-          }
-        });
-        if (mode === "failed") return;
-        if (bridge && mode === "local") {
-          setSelectedBlock(
-            await bridge.getBlockDetail(
-              desktopCanvasReference(selectedProject, selectedCanvasId),
-              selectedBlock.ref
-            )
-          );
-        }
-        await refreshGraph();
-      } catch (caught) {
-        setError(caught instanceof Error ? caught.message : String(caught));
-      }
-    },
-    [refreshGraph, selectedBlock, selectedCanvasId, selectedProject, setError, sharedCanvas]
-  );
-
   const saveSelectedBlockPrompt = useCallback(async () => {
     if (!selectedProject || !selectedBlock) {
       return;
@@ -305,7 +260,6 @@ export function useSelectedBlock({
     handleBlockSelect,
     handleOpenRunRecord,
     restoreBlockSelection,
-    saveSelectedBlockExecutor,
     saveSelectedBlockPrompt,
     saveSelectedBlockTitle,
     selectedBlock,

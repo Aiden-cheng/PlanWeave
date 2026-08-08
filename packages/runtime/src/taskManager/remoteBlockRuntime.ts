@@ -68,6 +68,17 @@ function withCurrentRef(currentRefs: string[], ref: string): string[] {
   return currentRefs.includes(ref) ? currentRefs : [...currentRefs, ref];
 }
 
+/** Drop dangling current pointers after remote fail / interrupt / source-drift. */
+function releaseCurrentBlockPointers(
+  state: Pick<RuntimeContext["state"], "currentRefs" | "currentReviewBlockRef">,
+  ref: string
+): void {
+  state.currentRefs = state.currentRefs.filter((current) => current !== ref);
+  if (state.currentReviewBlockRef === ref) {
+    state.currentReviewBlockRef = null;
+  }
+}
+
 function bindingView(context: RuntimeContext, ref: string): RemoteBlockBindingView {
   const state = context.state.blocks[ref];
   if (!state) {
@@ -185,6 +196,7 @@ export function createRemoteBlockRuntimePort(options: {
               ...source,
               reason: `Remote source changed after operation '${input.operationId}' was prepared.`
             });
+            releaseCurrentBlockPointers(context.state, input.ref);
             await writeLockedState(context);
             throw new RemoteBlockRuntimeError(
               "remote_block_source_changed",
@@ -236,6 +248,7 @@ export function createRemoteBlockRuntimePort(options: {
             ...source,
             reason: `Remote source changed before activation of '${input.ref}'.`
           });
+          releaseCurrentBlockPointers(context.state, input.ref);
           await writeLockedState(context);
           throw new RemoteBlockRuntimeError(
             "remote_block_source_changed",
@@ -278,6 +291,7 @@ export function createRemoteBlockRuntimePort(options: {
             ...source,
             reason: `Remote source changed while operation '${operationId}' was active.`
           });
+          releaseCurrentBlockPointers(context.state, ref);
           await writeLockedState(context);
           view = bindingView(context, ref);
         }
@@ -302,6 +316,7 @@ export function createRemoteBlockRuntimePort(options: {
             ...source,
             reason: `Remote source changed before interruption of '${input.ref}'.`
           });
+          releaseCurrentBlockPointers(context.state, input.ref);
           await writeLockedState(context);
           throw new RemoteBlockRuntimeError(
             "remote_block_source_changed",
@@ -347,6 +362,7 @@ export function createRemoteBlockRuntimePort(options: {
           reason: `Remote execution interrupted: ${input.interruption.reason}.`,
           runId
         });
+        releaseCurrentBlockPointers(context.state, input.ref);
         await writeLockedState(context);
         return remoteBlockMutationResultSchema.parse({
           binding: bindingView(context, input.ref),
@@ -384,6 +400,7 @@ export function createRemoteBlockRuntimePort(options: {
             ...source,
             reason: `Remote source changed before resume of '${input.ref}'.`
           });
+          releaseCurrentBlockPointers(context.state, input.ref);
           await writeLockedState(context);
           throw new RemoteBlockRuntimeError(
             "remote_block_source_changed",
@@ -431,6 +448,7 @@ export function createRemoteBlockRuntimePort(options: {
             ...source,
             reason: `Remote source changed before retry of '${input.ref}'.`
           });
+          releaseCurrentBlockPointers(context.state, input.ref);
           await writeLockedState(context);
           throw new RemoteBlockRuntimeError(
             "remote_block_source_changed",
@@ -488,6 +506,7 @@ export function createRemoteBlockRuntimePort(options: {
             ...source,
             reason: `Remote source changed before failure of '${input.ref}'.`
           });
+          releaseCurrentBlockPointers(context.state, input.ref);
           await writeLockedState(context);
           throw new RemoteBlockRuntimeError(
             "remote_block_source_changed",
@@ -523,10 +542,7 @@ export function createRemoteBlockRuntimePort(options: {
           blockedReason: `[${input.failure.code}] ${input.failure.message}`,
           runId
         });
-        context.state.currentRefs = context.state.currentRefs.filter((ref) => ref !== input.ref);
-        if (context.state.currentReviewBlockRef === input.ref) {
-          context.state.currentReviewBlockRef = null;
-        }
+        releaseCurrentBlockPointers(context.state, input.ref);
         await writeLockedState(context);
         return remoteBlockMutationResultSchema.parse({
           binding: bindingView(context, input.ref),

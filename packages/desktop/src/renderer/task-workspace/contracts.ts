@@ -115,10 +115,8 @@ export type TaskWorkspaceController = {
   refresh: () => void;
   returnToCanvas: () => void;
   runnerModel: RunnerRecordReadModel | null;
-  saveBlockExecutor: (blockRef: string, executorName: string | null) => Promise<void>;
   saveBlockAgentEndpoint: (blockRef: string, endpointId: string | null) => Promise<void>;
   saveBlockPrompt: (blockRef: string, input: TaskWorkspacePromptSaveInput) => Promise<void>;
-  saveTaskExecutor: (executorName: string | null) => Promise<void>;
   saveTaskAgentEndpoint: (endpointId: string) => Promise<void>;
   saveTaskPrompt: (input: TaskWorkspacePromptSaveInput) => Promise<void>;
   selectRun: (selection: { blockRef: string; recordId: string } | null) => void;

@@ -22,7 +22,8 @@ import type {
 import {
   agentEndpointDisplayLabel,
   type AvailableAgentEndpoint,
-  type LocalAgentEndpointInput
+  type LocalAgentEndpointInput,
+  type LogicalAgentEndpointInput
 } from "../collaboration/agentEndpointViewModel";
 import { inheritAgentEndpointValue } from "../collaboration/AgentEndpointSelect";
 
@@ -33,6 +34,7 @@ export type RemoteRunPanelProps = {
   localAutoRunActive?: boolean;
   canvasRef?: DesktopCanvasReference | null;
   localAgentEndpoints?: readonly LocalAgentEndpointInput[];
+  logicalExecutors?: readonly LogicalAgentEndpointInput[];
   requiredProfileId?: string | null;
   requiredAgentId?: RemoteAgentEndpoint["agentId"] | null;
   requiredCapabilities?: readonly string[];
@@ -105,6 +107,7 @@ export function RemoteRunPanel({
   localAutoRunActive = false,
   canvasRef = null,
   localAgentEndpoints = [],
+  logicalExecutors,
   requiredProfileId = null,
   requiredAgentId = null,
   requiredCapabilities = [],
@@ -125,6 +128,7 @@ export function RemoteRunPanel({
     localAutoRunActive,
     canvasRef,
     localAgentEndpoints,
+    logicalExecutors,
     requiredProfileId,
     requiredAgentId,
     requiredCapabilities,

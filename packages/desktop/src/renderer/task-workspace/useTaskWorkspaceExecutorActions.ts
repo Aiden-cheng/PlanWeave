@@ -3,7 +3,6 @@ import type { DesktopBridgeApi } from "@planweave-ai/runtime";
 import { runDurablePackageWrite } from "../collaboration/packageWriteAdapter";
 import type { SharedCanvasCommandsResult } from "../hooks/useSharedCanvasCommands";
 import type { TaskWorkspaceNavigationIdentity } from "../taskWorkspaceNavigation";
-import type { TaskWorkspaceController } from "./contracts";
 
 type TaskWorkspaceExecutorApi = Pick<
   DesktopBridgeApi,
@@ -24,11 +23,14 @@ export function useTaskWorkspaceExecutorActions(options: {
   navigation: TaskWorkspaceNavigationIdentity | null;
   onSaved: () => void;
   sharedCanvas?: SharedCanvasCommandsResult | null;
-}): Pick<TaskWorkspaceController, "saveBlockExecutor" | "saveTaskExecutor"> {
+}): {
+  saveBlockExecutor: (blockRef: string, executorName: string | null) => Promise<void>;
+  saveTaskExecutor: (executorName: string | null) => Promise<void>;
+} {
   const { api, navigation, onSaved, sharedCanvas = null } = options;
 
-  const saveTaskExecutor = useCallback<TaskWorkspaceController["saveTaskExecutor"]>(
-    async (executorName) => {
+  const saveTaskExecutor = useCallback(
+    async (executorName: string | null) => {
       if (!api || !navigation) {
         throw new Error(
           "Cannot save a Task executor without a Task Workspace bridge and identity."
@@ -68,8 +70,8 @@ export function useTaskWorkspaceExecutorActions(options: {
     [api, navigation, onSaved, sharedCanvas]
   );
 
-  const saveBlockExecutor = useCallback<TaskWorkspaceController["saveBlockExecutor"]>(
-    async (blockRef, executorName) => {
+  const saveBlockExecutor = useCallback(
+    async (blockRef: string, executorName: string | null) => {
       if (!api || !navigation) {
         throw new Error(
           "Cannot save a Block executor without a Task Workspace bridge and identity."

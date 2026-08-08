@@ -32,8 +32,28 @@ import { isCollaborationSessionConnected } from "../collaboration/sessionState";
 import {
   buildAvailableAgentEndpoints,
   type AvailableAgentEndpoint,
-  type LocalAgentEndpointInput
+  type LocalAgentEndpointInput,
+  type LogicalAgentEndpointInput
 } from "../collaboration/agentEndpointViewModel";
+
+/** Derive a logical-executor directory from local Endpoint rows for discovery fallback. */
+export function logicalExecutorsFromLocalAgentEndpoints(
+  local: readonly LocalAgentEndpointInput[]
+): LogicalAgentEndpointInput[] {
+  return local.map((endpoint) => {
+    const agentId = endpoint.executorName.replace(/-acp$/i, "").replace(/-auto$/i, "");
+    return {
+      executorName: agentId,
+      profileId: endpoint.executorName,
+      agentId,
+      displayName: endpoint.displayName,
+      capabilities: [...endpoint.capabilities],
+      available: endpoint.available,
+      unavailableReason: endpoint.unavailableReason,
+      custom: false
+    };
+  });
+}
 
 export type UseRemoteRunPanelControllerArgs = {
   agentEndpoints?: readonly AvailableAgentEndpoint[];
@@ -44,6 +64,8 @@ export type UseRemoteRunPanelControllerArgs = {
   localAutoRunActive?: boolean;
   canvasRef?: DesktopCanvasReference | null;
   localAgentEndpoints?: readonly LocalAgentEndpointInput[];
+  /** Same logical-executor directory used by catalog builders (discovery fallback). */
+  logicalExecutors?: readonly LogicalAgentEndpointInput[];
   requiredProfileId?: string | null;
   requiredAgentId?: RemoteAgentEndpoint["agentId"] | null;
   requiredCapabilities?: readonly string[];
@@ -207,23 +229,26 @@ export function useRemoteRunPanelController(
   const scopeKey = JSON.stringify([snapshot.projectId ?? null, workKey]);
   const scopeKeyRef = useRef(scopeKey);
 
-  const discoveredAgentEndpoints = useMemo(
-    () =>
-      buildAvailableAgentEndpoints({
-        local: args.localAgentEndpoints ?? [],
-        remote: remoteAgentEndpoints,
-        requiredProfileId: args.requiredProfileId ?? null,
-        requiredAgentId: args.requiredAgentId ?? null,
-        requiredCapabilities: args.requiredCapabilities ?? []
-      }),
-    [
-      args.localAgentEndpoints,
-      args.requiredCapabilities,
-      args.requiredAgentId,
-      args.requiredProfileId,
-      remoteAgentEndpoints
-    ]
-  );
+  const discoveredAgentEndpoints = useMemo(() => {
+    const logicalExecutors =
+      args.logicalExecutors ??
+      logicalExecutorsFromLocalAgentEndpoints(args.localAgentEndpoints ?? []);
+    return buildAvailableAgentEndpoints({
+      local: args.localAgentEndpoints ?? [],
+      remote: remoteAgentEndpoints,
+      logicalExecutors,
+      requiredProfileId: args.requiredProfileId ?? null,
+      requiredAgentId: args.requiredAgentId ?? null,
+      requiredCapabilities: args.requiredCapabilities ?? []
+    });
+  }, [
+    args.localAgentEndpoints,
+    args.logicalExecutors,
+    args.requiredCapabilities,
+    args.requiredAgentId,
+    args.requiredProfileId,
+    remoteAgentEndpoints
+  ]);
   const agentEndpoints = args.agentEndpoints ?? discoveredAgentEndpoints;
   const hasProvidedAgentEndpoints = args.agentEndpoints !== undefined;
   const selectedAgentEndpointId =

@@ -152,7 +152,7 @@ describe("Task Workspace selected run controller", () => {
     const initialWorkspace = workspaceHeader("T-001#B-001::RUN-001");
     const refreshedWorkspace = {
       ...initialWorkspace,
-      task: { ...initialWorkspace.task, executor: "claude-code" }
+      task: { ...initialWorkspace.task, executor: "codex" }
     };
     const pendingRefresh = deferred<TaskWorkspace>();
     api.getTaskWorkspace
@@ -162,7 +162,7 @@ describe("Task Workspace selected run controller", () => {
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
     await act(async () => {
-      await result.current.saveTaskExecutor("claude-code");
+      await result.current.saveTaskAgentEndpoint("local:codex");
     });
     await waitFor(() => expect(api.getTaskWorkspace).toHaveBeenCalledTimes(2));
 
@@ -170,7 +170,7 @@ describe("Task Workspace selected run controller", () => {
     expect(result.current.workspace?.task.executor).toBe(initialWorkspace.task.executor);
 
     pendingRefresh.resolve(refreshedWorkspace);
-    await waitFor(() => expect(result.current.workspace?.task.executor).toBe("claude-code"));
+    await waitFor(() => expect(result.current.workspace?.task.executor).toBe("codex"));
   });
 
   it("saves a Task executor without changing Block overrides", async () => {
@@ -179,13 +179,13 @@ describe("Task Workspace selected run controller", () => {
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
     await act(async () => {
-      await result.current.saveTaskExecutor("claude-code");
+      await result.current.saveTaskAgentEndpoint("local:codex");
     });
 
     expect(api.updateTaskExecutor).toHaveBeenCalledWith(
       { projectRoot: "/projects/demo", canvasId: "canvas-main" },
       "T-001",
-      "claude-code"
+      "codex"
     );
     expect(api.updateBlockExecutor).not.toHaveBeenCalled();
     await waitFor(() => expect(api.getTaskWorkspace).toHaveBeenCalledTimes(2));
@@ -197,7 +197,7 @@ describe("Task Workspace selected run controller", () => {
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
     await act(async () => {
-      await result.current.saveBlockExecutor("T-001#B-001", null);
+      await result.current.saveBlockAgentEndpoint("T-001#B-001", null);
     });
 
     expect(api.updateBlockExecutor).toHaveBeenCalledWith(
@@ -217,7 +217,7 @@ describe("Task Workspace selected run controller", () => {
     const { result } = renderHook(() => useControllerHarness(api));
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
-    await expect(result.current.saveTaskExecutor("missing-agent")).rejects.toThrow(
+    await expect(result.current.saveTaskAgentEndpoint("local:codex")).rejects.toThrow(
       "Executor is unavailable."
     );
     expect(api.getTaskWorkspace).toHaveBeenCalledTimes(1);

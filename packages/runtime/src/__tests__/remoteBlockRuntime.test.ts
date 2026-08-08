@@ -527,6 +527,84 @@ describe("remote block runtime terminal transitions", () => {
     expect(afterReclaim.currentReviewBlockRef).toBe("T-001#R-001");
   });
 
+  it("clears currentRefs and currentReviewBlockRef when a remote review is interrupted", async () => {
+    const { init, port, identity } = await activateReadyBlock();
+    await port.complete({
+      ref: "T-001#B-001",
+      ...identity,
+      ...reportInput(Buffer.from("# Implementation complete\n"))
+    });
+
+    const reviewCandidate = await port.inspect({ ref: "T-001#R-001" });
+    const reviewIdentity = {
+      operationId: "operation-review-interrupt",
+      sourceRevision: reviewCandidate.sourceRevision,
+      graphFingerprint: reviewCandidate.graphFingerprint,
+      dispatchId: "dispatch-review-interrupt",
+      executionAttemptId: "attempt-review-interrupt"
+    };
+    await port.claim({
+      ref: "T-001#R-001",
+      ...claimIdentity(reviewIdentity)
+    });
+    await port.activate({ ref: "T-001#R-001", ...reviewIdentity });
+    expect((await readState(init.workspace.stateFile)).currentReviewBlockRef).toBe("T-001#R-001");
+
+    await port.markInterrupted({
+      ref: "T-001#R-001",
+      ...reviewIdentity,
+      interruption: { reason: "transport_lost", resumable: true }
+    });
+
+    const afterInterrupt = await readState(init.workspace.stateFile);
+    expect(afterInterrupt.currentReviewBlockRef).toBeNull();
+    expect(afterInterrupt.currentRefs).not.toContain("T-001#R-001");
+    expect(afterInterrupt.blocks["T-001#R-001"]).toMatchObject({
+      status: "diverged",
+      remoteInterruption: { reason: "transport_lost", resumable: true }
+    });
+  });
+
+  it("clears current pointers when reconcile records remote source drift", async () => {
+    const { init, port, identity } = await activateReadyBlock();
+    await port.complete({
+      ref: "T-001#B-001",
+      ...identity,
+      ...reportInput(Buffer.from("# Implementation complete\n"))
+    });
+
+    const reviewCandidate = await port.inspect({ ref: "T-001#R-001" });
+    const reviewIdentity = {
+      operationId: "operation-review-drift",
+      sourceRevision: reviewCandidate.sourceRevision,
+      graphFingerprint: reviewCandidate.graphFingerprint,
+      dispatchId: "dispatch-review-drift",
+      executionAttemptId: "attempt-review-drift"
+    };
+    await port.claim({
+      ref: "T-001#R-001",
+      ...claimIdentity(reviewIdentity)
+    });
+    await port.activate({ ref: "T-001#R-001", ...reviewIdentity });
+    expect((await readState(init.workspace.stateFile)).currentReviewBlockRef).toBe("T-001#R-001");
+
+    await appendFile(
+      join(init.workspace.packageDir, "nodes/T-001/blocks/R-001.prompt.md"),
+      "\nchanged while remote review was active\n",
+      "utf8"
+    );
+
+    const drifted = await port.reconcile({
+      ref: "T-001#R-001",
+      operationId: reviewIdentity.operationId
+    });
+    expect(drifted).toMatchObject({ status: "diverged" });
+
+    const afterDrift = await readState(init.workspace.stateFile);
+    expect(afterDrift.currentReviewBlockRef).toBeNull();
+    expect(afterDrift.currentRefs).not.toContain("T-001#R-001");
+  });
+
   it("persists exact report bytes and idempotently replays only the same completion", async () => {
     const { init, port, identity } = await activateReadyBlock();
     const bytes = Buffer.from("# Remote result\n\nExact UTF-8 bytes.\n");

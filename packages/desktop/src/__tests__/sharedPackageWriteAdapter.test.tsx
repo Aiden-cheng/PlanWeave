@@ -165,14 +165,12 @@ describe("shared-mode package write gate", () => {
 
     await act(async () => {
       await result.current.saveSelectedBlockTitle();
-      await result.current.saveSelectedBlockExecutor("codex");
       await result.current.saveSelectedBlockPrompt();
     });
 
     expect(bridge.updateBlockTitle).not.toHaveBeenCalled();
-    expect(bridge.updateBlockExecutor).not.toHaveBeenCalled();
     expect(bridge.updateBlockPrompt).not.toHaveBeenCalled();
-    expect(submit).toHaveBeenCalledTimes(3);
+    expect(submit).toHaveBeenCalledTimes(2);
   });
 
   it("routes task executor changes through shared intents", async () => {
