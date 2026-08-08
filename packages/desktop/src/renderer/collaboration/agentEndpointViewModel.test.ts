@@ -4,7 +4,8 @@ import {
   agentEndpointDisplayLabel,
   buildAgentEndpointCatalog,
   buildAvailableAgentEndpoints,
-  buildLocalAgentEndpoint
+  buildLocalAgentEndpoint,
+  type LogicalAgentEndpointInput
 } from "./agentEndpointViewModel";
 
 describe("buildAgentEndpointCatalog", () => {
@@ -166,6 +167,110 @@ describe("buildLocalAgentEndpoint", () => {
   });
 });
 
+describe("remote endpoint executorName derivation", () => {
+  const logicalExecutors: LogicalAgentEndpointInput[] = [
+    {
+      executorName: "codex",
+      profileId: "codex",
+      agentId: "codex",
+      displayName: "Codex",
+      capabilities: ["acp.codex"],
+      available: true,
+      unavailableReason: null,
+      custom: false
+    },
+    {
+      executorName: "grok",
+      profileId: "grok",
+      agentId: "grok",
+      displayName: "Grok",
+      capabilities: ["acp.grok"],
+      available: true,
+      unavailableReason: null,
+      custom: false
+    }
+  ];
+
+  const remote = [
+    {
+      schemaVersion: "agent-endpoint/v1" as const,
+      endpointId: "endpoint-codex-host",
+      profileId: "codex-acp",
+      agentId: "codex" as const,
+      displayName: "Codex",
+      hostDisplayName: "LINANIML",
+      status: "available" as const,
+      capabilities: ["acp.codex"]
+    },
+    {
+      schemaVersion: "agent-endpoint/v1" as const,
+      endpointId: "endpoint-grok-host",
+      profileId: "grok-acp",
+      agentId: "grok" as const,
+      displayName: "Grok",
+      hostDisplayName: "VPS",
+      status: "available" as const,
+      capabilities: ["acp.grok"]
+    }
+  ];
+
+  it("yields the same executorName from catalog and available-endpoint builders (§5.2-3)", () => {
+    const fromCatalog = buildAgentEndpointCatalog({
+      logicalExecutors,
+      remote
+    });
+    const fromAvailable = buildAvailableAgentEndpoints({
+      local: [],
+      logicalExecutors,
+      // Deliberately different from logical executorName — must not override derivation.
+      requiredProfileId: "codex-acp",
+      requiredAgentId: "codex",
+      requiredCapabilities: [],
+      remote
+    });
+
+    for (const endpointId of ["endpoint-codex-host", "endpoint-grok-host"] as const) {
+      const catalogName = fromCatalog.find(
+        (endpoint) => endpoint.remoteEndpointId === endpointId
+      )?.executorName;
+      const availableName = fromAvailable.find(
+        (endpoint) => endpoint.remoteEndpointId === endpointId
+      )?.executorName;
+      expect(catalogName).toBeDefined();
+      expect(availableName).toBe(catalogName);
+    }
+
+    expect(
+      fromCatalog.find((endpoint) => endpoint.remoteEndpointId === "endpoint-codex-host")
+        ?.executorName
+    ).toBe("codex");
+    expect(
+      fromAvailable.find((endpoint) => endpoint.remoteEndpointId === "endpoint-codex-host")
+        ?.executorName
+    ).toBe("codex");
+    expect(
+      fromCatalog.find((endpoint) => endpoint.remoteEndpointId === "endpoint-grok-host")
+        ?.executorName
+    ).toBe("grok");
+  });
+
+  it("does not let requiredProfileId override remote executorName", () => {
+    const endpoints = buildAvailableAgentEndpoints({
+      local: [],
+      logicalExecutors,
+      requiredProfileId: "codex-acp",
+      requiredCapabilities: ["acp.codex"],
+      remote: [remote[0]]
+    });
+
+    expect(endpoints[0]).toMatchObject({
+      id: "remote:endpoint-codex-host",
+      executorName: "codex",
+      available: true
+    });
+  });
+});
+
 describe("buildAvailableAgentEndpoints", () => {
   it("keeps local and remote instances distinct while suffixing only the remote Host", () => {
     const endpoints = buildAvailableAgentEndpoints({
@@ -177,6 +282,18 @@ describe("buildAvailableAgentEndpoints", () => {
           capabilities: ["acp.codex"],
           available: true,
           unavailableReason: null
+        }
+      ],
+      logicalExecutors: [
+        {
+          executorName: "codex",
+          profileId: "codex",
+          agentId: "codex",
+          displayName: "Codex",
+          capabilities: ["acp.codex"],
+          available: true,
+          unavailableReason: null,
+          custom: false
         }
       ],
       requiredProfileId: "codex",
@@ -201,6 +318,7 @@ describe("buildAvailableAgentEndpoints", () => {
       "remote:endpoint-windows"
     ]);
     expect(endpoints.map(agentEndpointDisplayLabel)).toEqual(["Codex", "Codex · LINANIML"]);
+    expect(endpoints.map((endpoint) => endpoint.executorName)).toEqual(["codex", "codex"]);
     expect(endpoints.every((endpoint) => endpoint.available)).toBe(true);
   });
 

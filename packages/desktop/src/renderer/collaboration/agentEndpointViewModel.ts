@@ -86,13 +86,43 @@ export function buildLocalAgentEndpoint(
   };
 }
 
+function remoteLogicalExecutor(
+  endpoint: RemoteAgentEndpoint,
+  logicalExecutors: readonly LogicalAgentEndpointInput[]
+): LogicalAgentEndpointInput | null {
+  const exactProfile = logicalExecutors.find(
+    (executor) => executor.profileId === endpoint.profileId && executor.agentId === endpoint.agentId
+  );
+  if (exactProfile) return exactProfile;
+  return (
+    logicalExecutors.find(
+      (executor) => !executor.custom && executor.agentId === endpoint.agentId
+    ) ?? null
+  );
+}
+
+/**
+ * Single source for a remote Endpoint's logical executorName.
+ * Match profile+agent, then non-custom agent family; otherwise fall back to agentId.
+ * Never use requiredProfileId or raw profileId as a display/routing override.
+ */
+export function remoteAgentEndpointExecutorName(
+  endpoint: RemoteAgentEndpoint,
+  logicalExecutors: readonly LogicalAgentEndpointInput[]
+): string {
+  return remoteLogicalExecutor(endpoint, logicalExecutors)?.executorName ?? endpoint.agentId;
+}
+
 export function buildAvailableAgentEndpoints(input: {
   local: readonly LocalAgentEndpointInput[];
   remote: readonly RemoteAgentEndpoint[];
+  /** Same logical-executor directory used by `buildAgentEndpointCatalog` (for executorName). */
+  logicalExecutors?: readonly LogicalAgentEndpointInput[];
   requiredProfileId: string | null;
   requiredAgentId?: RemoteAgentEndpoint["agentId"] | null;
   requiredCapabilities: readonly string[];
 }): AvailableAgentEndpoint[] {
+  const logicalExecutors = input.logicalExecutors ?? [];
   const local = input.local.map((endpoint): AvailableAgentEndpoint => {
     const profileCompatible =
       input.requiredProfileId !== null && endpoint.executorName === input.requiredProfileId;
@@ -129,7 +159,7 @@ export function buildAvailableAgentEndpoints(input: {
       return {
         id: `remote:${endpoint.endpointId}`,
         source: "remote",
-        executorName: input.requiredProfileId ?? endpoint.profileId,
+        executorName: remoteAgentEndpointExecutorName(endpoint, logicalExecutors),
         displayName: endpoint.displayName,
         locationName: endpoint.hostDisplayName,
         capabilities: [...endpoint.capabilities],
@@ -144,21 +174,6 @@ export function buildAvailableAgentEndpoints(input: {
       };
     });
   return [...local, ...remote];
-}
-
-function remoteLogicalExecutor(
-  endpoint: RemoteAgentEndpoint,
-  logicalExecutors: readonly LogicalAgentEndpointInput[]
-): LogicalAgentEndpointInput | null {
-  const exactProfile = logicalExecutors.find(
-    (executor) => executor.profileId === endpoint.profileId && executor.agentId === endpoint.agentId
-  );
-  if (exactProfile) return exactProfile;
-  return (
-    logicalExecutors.find(
-      (executor) => !executor.custom && executor.agentId === endpoint.agentId
-    ) ?? null
-  );
 }
 
 /** Build the one user-facing local + remote Endpoint directory for a workspace. */
@@ -186,7 +201,7 @@ export function buildAgentEndpointCatalog(input: {
       return {
         id: `remote:${endpoint.endpointId}`,
         source: "remote",
-        executorName: logicalExecutor?.executorName ?? endpoint.agentId,
+        executorName: remoteAgentEndpointExecutorName(endpoint, input.logicalExecutors),
         displayName: endpoint.displayName,
         locationName: endpoint.hostDisplayName,
         available: endpoint.status === "available" && logicalExecutor !== null,
