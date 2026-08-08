@@ -3,6 +3,7 @@ import type { DesktopUiSettings } from "../types";
 import type { AvailableAgentEndpoint } from "../collaboration/agentEndpointViewModel";
 import {
   agentEndpointPreferenceKey,
+  agentEndpointSelectionId,
   selectedAgentEndpointId
 } from "../collaboration/agentEndpointPreferences";
 
@@ -29,12 +30,15 @@ export function useTaskAgentEndpointSelection(input: {
   const selectedEndpointId = useCallback(
     (taskId: string, executorName: string) => {
       const key = preferenceKey(taskId);
-      return selectedAgentEndpointId({
-        executorName,
-        preference: key ? input.preferences[key] : undefined
-      });
+      return agentEndpointSelectionId(
+        selectedAgentEndpointId({
+          executorName,
+          preference: key ? input.preferences[key] : undefined,
+          endpoints: input.agentEndpoints
+        })
+      );
     },
-    [input.preferences, preferenceKey]
+    [input.agentEndpoints, input.preferences, preferenceKey]
   );
   const changeEndpoint = useCallback(
     async (taskId: string, endpointId: string) => {

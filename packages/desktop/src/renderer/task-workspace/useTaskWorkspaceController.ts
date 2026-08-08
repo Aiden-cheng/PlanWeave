@@ -15,6 +15,7 @@ import type { PlanWeaveCollaborationApi } from "../../shared/collaboration";
 import { bridge, collaborationBridge } from "../bridge";
 import {
   agentEndpointPreferenceKey,
+  agentEndpointSelectionId,
   selectedAgentEndpointId
 } from "../collaboration/agentEndpointPreferences";
 import {
@@ -1007,12 +1008,15 @@ export function useTaskWorkspaceController(options: {
         scope: { kind: "task", taskId: navigation.taskId }
       })
     : null;
-  const selectedAgentEndpointIdForTask = selectedAgentEndpointId({
-    executorName: workspace?.task.executor ?? "manual",
-    preference: taskEndpointPreferenceKey
-      ? agentEndpointPreferences[taskEndpointPreferenceKey]
-      : undefined
-  });
+  const selectedAgentEndpointIdForTask = agentEndpointSelectionId(
+    selectedAgentEndpointId({
+      executorName: workspace?.task.executor ?? "manual",
+      preference: taskEndpointPreferenceKey
+        ? agentEndpointPreferences[taskEndpointPreferenceKey]
+        : undefined,
+      endpoints: agentEndpointsForTask
+    })
+  );
   const selectedAgentEndpointIdForBlock = useCallback(
     (blockRef: string): string | null => {
       const block = workspace?.blocks.find((candidate) => candidate.ref === blockRef);
@@ -1022,12 +1026,15 @@ export function useTaskWorkspaceController(options: {
         canvasId: navigation.canvasId,
         scope: { kind: "block", blockRef }
       });
-      return selectedAgentEndpointId({
-        executorName: block.executor,
-        preference: agentEndpointPreferences[preferenceKey]
-      });
+      return agentEndpointSelectionId(
+        selectedAgentEndpointId({
+          executorName: block.executor,
+          preference: agentEndpointPreferences[preferenceKey],
+          endpoints: agentEndpointsForBlock(blockRef)
+        })
+      );
     },
-    [agentEndpointPreferences, navigation, workspace]
+    [agentEndpointPreferences, agentEndpointsForBlock, navigation, workspace]
   );
   const saveTaskAgentEndpoint = useCallback<TaskWorkspaceController["saveTaskAgentEndpoint"]>(
     async (endpointId) => {

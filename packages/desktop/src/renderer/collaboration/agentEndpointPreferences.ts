@@ -5,6 +5,11 @@ export type AgentEndpointPreferenceScope =
   | { kind: "task"; taskId: string }
   | { kind: "block"; blockRef: string };
 
+export type EndpointSelection =
+  | { kind: "endpoint"; id: string }
+  | { kind: "default_local"; id: string }
+  | { kind: "mismatch"; detail: string };
+
 export function agentEndpointPreferenceKey(input: {
   projectRoot: string;
   canvasId: string;
@@ -14,13 +19,62 @@ export function agentEndpointPreferenceKey(input: {
   return JSON.stringify([input.projectRoot, input.canvasId, input.scope.kind, scopeId]);
 }
 
+/** UI/select display id. Mismatch never silently becomes local:. */
+export function agentEndpointSelectionId(selection: EndpointSelection): string {
+  if (selection.kind === "mismatch") {
+    return `mismatch:${selection.detail}`;
+  }
+  return selection.id;
+}
+
+function findRemoteEndpoint(
+  endpoints: readonly AvailableAgentEndpoint[],
+  remoteEndpointId: string
+): AvailableAgentEndpoint | undefined {
+  return endpoints.find(
+    (endpoint) =>
+      endpoint.source === "remote" &&
+      (endpoint.remoteEndpointId === remoteEndpointId || endpoint.id === `remote:${remoteEndpointId}`)
+  );
+}
+
+/**
+ * Resolve the effective Agent Endpoint selection for a block/task.
+ * Mismatch is based on live endpoint facts vs manifest executor — never on a stored executorName snapshot.
+ */
 export function selectedAgentEndpointId(input: {
   executorName: string;
   preference: DesktopAgentEndpointPreference | undefined;
-}): string {
-  return input.preference?.executorName === input.executorName
-    ? `remote:${input.preference.remoteEndpointId}`
-    : `local:${input.executorName}`;
+  endpoints: readonly AvailableAgentEndpoint[];
+}): EndpointSelection {
+  if (!input.preference) {
+    return { kind: "default_local", id: `local:${input.executorName}` };
+  }
+
+  if (input.preference.kind === "local") {
+    if (input.preference.executorName !== input.executorName) {
+      return {
+        kind: "mismatch",
+        detail: `${input.preference.executorName}->${input.executorName}`
+      };
+    }
+    return { kind: "endpoint", id: `local:${input.preference.executorName}` };
+  }
+
+  const endpoint = findRemoteEndpoint(input.endpoints, input.preference.remoteEndpointId);
+  if (!endpoint) {
+    return {
+      kind: "mismatch",
+      detail: `agent_endpoint_unknown:${input.preference.remoteEndpointId}`
+    };
+  }
+  if (endpoint.executorName !== input.executorName) {
+    return {
+      kind: "mismatch",
+      detail: `${endpoint.executorName}->${input.executorName}`
+    };
+  }
+  return { kind: "endpoint", id: endpoint.id };
 }
 
 export function updateAgentEndpointPreferences(input: {
@@ -31,11 +85,14 @@ export function updateAgentEndpointPreferences(input: {
   const next = { ...input.current };
   if (input.endpoint.source === "remote" && input.endpoint.remoteEndpointId) {
     next[input.key] = {
-      executorName: input.endpoint.executorName,
+      kind: "remote",
       remoteEndpointId: input.endpoint.remoteEndpointId
     };
   } else {
-    delete next[input.key];
+    next[input.key] = {
+      kind: "local",
+      executorName: input.endpoint.executorName
+    };
   }
   return next;
 }

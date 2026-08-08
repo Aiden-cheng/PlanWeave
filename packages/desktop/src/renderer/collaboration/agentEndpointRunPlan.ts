@@ -8,7 +8,11 @@ import {
   applyAgentEndpointRequirements,
   type AvailableAgentEndpoint
 } from "./agentEndpointViewModel";
-import { agentEndpointPreferenceKey, selectedAgentEndpointId } from "./agentEndpointPreferences";
+import {
+  agentEndpointPreferenceKey,
+  selectedAgentEndpointId,
+  type EndpointSelection
+} from "./agentEndpointPreferences";
 
 type GraphTask = DesktopGraphViewModel["tasks"][number];
 type GraphBlock = GraphTask["blocks"][number];
@@ -29,6 +33,38 @@ export type AgentEndpointRunPlan =
       tasks: readonly GraphTask[];
       selectionByBlockRef: ReadonlyMap<string, AgentEndpointBlockSelection>;
     };
+
+function rejectedForMismatch(blockRef: string, selection: Extract<EndpointSelection, { kind: "mismatch" }>): AgentEndpointRunPlan {
+  if (selection.detail.startsWith("agent_endpoint_unknown:")) {
+    const remoteEndpointId = selection.detail.slice("agent_endpoint_unknown:".length);
+    return {
+      kind: "rejected",
+      reason: `agent_endpoint_unknown:${blockRef}:remote:${remoteEndpointId}:agent_endpoint_unknown`
+    };
+  }
+  return {
+    kind: "rejected",
+    reason: `agent_endpoint_preference_mismatch:${blockRef}:${selection.detail}`
+  };
+}
+
+function rejectedForUnavailable(input: {
+  blockRef: string;
+  endpoint: AvailableAgentEndpoint | undefined;
+  endpointId: string;
+}): AgentEndpointRunPlan {
+  const sourceLabel =
+    input.endpoint?.displayName ??
+    input.endpoint?.id ??
+    input.endpointId;
+  const reasonCode =
+    input.endpoint?.unavailableReason ??
+    (input.endpoint ? "agent_endpoint_selection_unavailable" : "agent_endpoint_unknown");
+  return {
+    kind: "rejected",
+    reason: `agent_endpoint_unavailable:${input.blockRef}:${sourceLabel}:${reasonCode}`
+  };
+}
 
 export function createAgentEndpointRunPlan(input: {
   graph: DesktopGraphViewModel;
@@ -73,19 +109,25 @@ export function createAgentEndpointRunPlan(input: {
       const preference =
         (blockPreferenceKey ? input.preferences[blockPreferenceKey] : undefined) ??
         (taskPreferenceKey ? input.preferences[taskPreferenceKey] : undefined);
-      const endpointId = selectedAgentEndpointId({
+      const selection = selectedAgentEndpointId({
         executorName,
-        preference
+        preference,
+        endpoints: input.endpoints
       });
+      if (selection.kind === "mismatch") {
+        return rejectedForMismatch(block.ref, selection);
+      }
+      const endpointId = selection.id;
       const endpoint = applyAgentEndpointRequirements(
         input.endpoints,
         block.requiredCapabilities
       ).find((candidate) => candidate.id === endpointId);
       if (!endpoint?.available) {
-        return {
-          kind: "rejected",
-          reason: endpoint?.unavailableReason ?? "agent_endpoint_selection_unavailable"
-        };
+        return rejectedForUnavailable({
+          blockRef: block.ref,
+          endpoint,
+          endpointId
+        });
       }
       selectionByBlockRef.set(block.ref, { task: candidateTask, block, endpoint });
     }

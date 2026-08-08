@@ -1,4 +1,5 @@
 import type { BlockType, DesktopAgentKind } from "@planweave-ai/runtime";
+import { z } from "zod";
 
 export type AppearanceMode = "system" | "light" | "dark";
 export type DesktopSettingsLanguage = "system" | "en" | "zh-CN";
@@ -10,10 +11,44 @@ export type DesktopAcpAgentSettings = {
   modeId: string | null;
   configOptions: Record<string, DesktopAcpConfigValue>;
 };
-export type DesktopAgentEndpointPreference = {
-  executorName: string;
-  remoteEndpointId: string;
-};
+
+const desktopAgentEndpointPreferenceRemoteSchema = z
+  .object({
+    kind: z.literal("remote"),
+    remoteEndpointId: z.string().trim().min(1)
+  })
+  .strict();
+
+const desktopAgentEndpointPreferenceLocalSchema = z
+  .object({
+    kind: z.literal("local"),
+    executorName: z.string().trim().min(1)
+  })
+  .strict();
+
+/** Legacy on-disk shape: remote binding with an executorName snapshot (discarded on parse). */
+const desktopAgentEndpointPreferenceLegacySchema = z
+  .object({
+    executorName: z.string().trim().min(1),
+    remoteEndpointId: z.string().trim().min(1)
+  })
+  .strict()
+  .transform(
+    (value): z.infer<typeof desktopAgentEndpointPreferenceRemoteSchema> => ({
+      kind: "remote",
+      remoteEndpointId: value.remoteEndpointId
+    })
+  );
+
+export const desktopAgentEndpointPreferenceSchema = z.union([
+  desktopAgentEndpointPreferenceRemoteSchema,
+  desktopAgentEndpointPreferenceLocalSchema,
+  desktopAgentEndpointPreferenceLegacySchema
+]);
+
+export type DesktopAgentEndpointPreference = z.infer<
+  typeof desktopAgentEndpointPreferenceRemoteSchema
+> | z.infer<typeof desktopAgentEndpointPreferenceLocalSchema>;
 
 export type DesktopUiSettings = {
   runtimePath: string;
@@ -356,25 +391,10 @@ function agentEndpointPreferences(
 ): Record<string, DesktopAgentEndpointPreference> | undefined {
   if (!isRecord(value)) return undefined;
   const entries = Object.entries(value).flatMap(([key, preference]) => {
-    if (
-      !key ||
-      !isRecord(preference) ||
-      typeof preference.executorName !== "string" ||
-      !preference.executorName.trim() ||
-      typeof preference.remoteEndpointId !== "string" ||
-      !preference.remoteEndpointId.trim()
-    ) {
-      return [];
-    }
-    return [
-      [
-        key,
-        {
-          executorName: preference.executorName,
-          remoteEndpointId: preference.remoteEndpointId
-        }
-      ] as const
-    ];
+    if (!key) return [];
+    const parsed = desktopAgentEndpointPreferenceSchema.safeParse(preference);
+    if (!parsed.success) return [];
+    return [[key, parsed.data] as const];
   });
   return Object.fromEntries(entries);
 }

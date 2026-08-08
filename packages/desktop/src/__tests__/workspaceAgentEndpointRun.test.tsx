@@ -213,7 +213,7 @@ function renderRun(input?: {
   endpoint?: AvailableAgentEndpoint;
   endpoints?: AvailableAgentEndpoint[];
   graph?: DesktopGraphViewModel;
-  preferences?: Record<string, { executorName: string; remoteEndpointId: string }>;
+  preferences?: Record<string, { kind: "remote"; remoteEndpointId: string } | { kind: "local"; executorName: string }>;
   readRuntimeStatus?: ReturnType<typeof vi.fn>;
   previewClaimNext?: ReturnType<typeof vi.fn>;
   activeProjectId?: string | null;
@@ -279,7 +279,7 @@ function renderRun(input?: {
           ? {}
           : {
               [taskPreferenceKey]: {
-                executorName: "codex",
+                kind: "remote",
                 remoteEndpointId: "endpoint-windows"
               }
             }),
@@ -586,7 +586,9 @@ describe("workspace Agent Endpoint routing", () => {
 
     await act(() => result.current({ kind: "project" }));
 
-    expect(setError).toHaveBeenCalledWith("agent_endpoint_host_offline");
+    expect(setError).toHaveBeenCalledWith(
+      "agent_endpoint_unavailable:T-001#B-001:Codex:agent_endpoint_host_offline"
+    );
     expect(readRuntimeStatus).not.toHaveBeenCalled();
     expect(preview).not.toHaveBeenCalled();
     expect(dispatch).not.toHaveBeenCalled();
@@ -693,8 +695,12 @@ describe("workspace Agent Endpoint routing", () => {
       endpoints: [remoteEndpoint, localReview],
       graph: mixedGraph,
       preferences: {
-        [taskPreferenceKey]: {
-          executorName: "codex",
+        [agentEndpointPreferenceKey({
+          projectRoot: project.rootPath,
+          canvasId: "canvas-main",
+          scope: { kind: "block", blockRef: "T-001#B-001" }
+        })]: {
+          kind: "remote",
           remoteEndpointId: "endpoint-windows"
         }
       },
@@ -800,7 +806,7 @@ describe("workspace Agent Endpoint routing", () => {
           canvasId: "canvas-main",
           scope: { kind: "block", blockRef: "T-001#B-002" }
         })]: {
-          executorName: "codex",
+          kind: "remote",
           remoteEndpointId: "endpoint-windows"
         }
       },
@@ -997,7 +1003,9 @@ describe("workspace Agent Endpoint routing", () => {
 
     expect(dispatch).not.toHaveBeenCalled();
     expect(ensureWorkAuthority).not.toHaveBeenCalled();
-    expect(setError).toHaveBeenCalledWith("agent_endpoint_incompatible");
+    expect(setError).toHaveBeenCalledWith(
+      "agent_endpoint_unavailable:T-001#B-001:Codex:agent_endpoint_incompatible"
+    );
   });
 
   it("runs a remote Task through its next authoritative Block and waits for completion", async () => {

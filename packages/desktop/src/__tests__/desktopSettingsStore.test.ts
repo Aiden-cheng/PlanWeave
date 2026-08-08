@@ -113,7 +113,7 @@ describe("DesktopSettingsStore", () => {
     await store.mergePatch({
       execution: {
         agentEndpointPreferences: {
-          [key]: { executorName: "codex", remoteEndpointId: "endpoint-windows" }
+          [key]: { kind: "remote", remoteEndpointId: "endpoint-windows" }
         }
       }
     });
@@ -121,7 +121,33 @@ describe("DesktopSettingsStore", () => {
     await expect(store.read()).resolves.toMatchObject({
       execution: {
         agentEndpointPreferences: {
-          [key]: { executorName: "codex", remoteEndpointId: "endpoint-windows" }
+          [key]: { kind: "remote", remoteEndpointId: "endpoint-windows" }
+        }
+      }
+    });
+  });
+
+  it("migrates legacy remote Agent Endpoint preferences on read", async () => {
+    const home = await tempHome();
+    const settingsFile = join(home, "desktop-settings.json");
+    const store = testStore(settingsFile);
+    const key = JSON.stringify(["/projects/demo", "canvas-main", "block", "T-001#B-001"]);
+
+    await writeFile(
+      settingsFile,
+      JSON.stringify({
+        execution: {
+          agentEndpointPreferences: {
+            [key]: { executorName: "codex", remoteEndpointId: "endpoint-windows" }
+          }
+        }
+      })
+    );
+
+    await expect(store.read()).resolves.toMatchObject({
+      execution: {
+        agentEndpointPreferences: {
+          [key]: { kind: "remote", remoteEndpointId: "endpoint-windows" }
         }
       }
     });
@@ -583,60 +609,83 @@ describe("Agent Endpoint preferences", () => {
     canvasId: "default",
     scope: { kind: "block", blockRef: "T-001#B-001" }
   });
+  const localCodex = {
+    id: "local:codex",
+    source: "local" as const,
+    executorName: "codex",
+    displayName: "Codex",
+    locationName: "",
+    available: true,
+    unavailableReason: null,
+    capabilities: ["acp.codex"],
+    localExecutorName: "codex"
+  };
+  const remoteWindows = {
+    id: "remote:endpoint-windows",
+    source: "remote" as const,
+    executorName: "codex",
+    displayName: "Codex",
+    locationName: "LINANIML",
+    available: true,
+    unavailableReason: null,
+    capabilities: ["acp.codex"],
+    remoteEndpointId: "endpoint-windows"
+  };
 
   it("persists only the concrete remote Endpoint beside the logical executor", () => {
     const preferences = updateAgentEndpointPreferences({
       current: {},
       key,
-      endpoint: {
-        id: "remote:endpoint-windows",
-        source: "remote",
-        executorName: "codex",
-        displayName: "Codex",
-        locationName: "LINANIML",
-        available: true,
-        unavailableReason: null,
-        capabilities: ["acp.codex"],
-        remoteEndpointId: "endpoint-windows"
-      }
+      endpoint: remoteWindows
     });
 
     expect(preferences[key]).toEqual({
-      executorName: "codex",
+      kind: "remote",
       remoteEndpointId: "endpoint-windows"
     });
-    expect(selectedAgentEndpointId({ executorName: "codex", preference: preferences[key] })).toBe(
-      "remote:endpoint-windows"
-    );
+    expect(
+      selectedAgentEndpointId({
+        executorName: "codex",
+        preference: preferences[key],
+        endpoints: [localCodex, remoteWindows]
+      })
+    ).toEqual({ kind: "endpoint", id: "remote:endpoint-windows" });
   });
 
-  it("clears a remote preference when the user selects a local Endpoint", () => {
+  it("records an explicit local Endpoint instead of deleting the preference", () => {
     const preferences = updateAgentEndpointPreferences({
-      current: { [key]: { executorName: "codex", remoteEndpointId: "endpoint-windows" } },
+      current: { [key]: { kind: "remote", remoteEndpointId: "endpoint-windows" } },
       key,
-      endpoint: {
-        id: "local:codex",
-        source: "local",
-        executorName: "codex",
-        displayName: "Codex",
-        locationName: "",
-        available: true,
-        unavailableReason: null,
-        capabilities: ["acp.codex"],
-        localExecutorName: "codex"
-      }
+      endpoint: localCodex
     });
 
-    expect(preferences).toEqual({});
-    expect(selectedAgentEndpointId({ executorName: "codex", preference: undefined })).toBe(
-      "local:codex"
-    );
+    expect(preferences[key]).toEqual({
+      kind: "local",
+      executorName: "codex"
+    });
+    expect(
+      selectedAgentEndpointId({
+        executorName: "codex",
+        preference: preferences[key],
+        endpoints: [localCodex, remoteWindows]
+      })
+    ).toEqual({ kind: "endpoint", id: "local:codex" });
+  });
+
+  it("defaults to local when preference was never set", () => {
+    expect(
+      selectedAgentEndpointId({
+        executorName: "codex",
+        preference: undefined,
+        endpoints: [localCodex, remoteWindows]
+      })
+    ).toEqual({ kind: "default_local", id: "local:codex" });
   });
 
   it("clears an explicit Block preference when the Block returns to inheritance", () => {
     expect(
       clearAgentEndpointPreference(
-        { [key]: { executorName: "codex", remoteEndpointId: "endpoint-windows" } },
+        { [key]: { kind: "remote", remoteEndpointId: "endpoint-windows" } },
         key
       )
     ).toEqual({});

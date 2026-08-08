@@ -61,6 +61,8 @@
       "unit": [
         "acpConversationTimeline.test.tsx",
         "agentCapabilityProbeSessionCache.test.tsx",
+        "agentEndpointPreferences.test.ts",
+        "agentEndpointRunPlan.test.ts",
         "agentEndpointScopeRun.test.ts",
         "agentPrompt.test.ts",
         "agentShellEnvironment.test.ts",

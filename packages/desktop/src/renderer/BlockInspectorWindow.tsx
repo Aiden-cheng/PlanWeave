@@ -16,6 +16,7 @@ import { bridge, collaborationBridge } from "./bridge";
 import { runDurablePackageWrite } from "./collaboration/packageWriteAdapter";
 import {
   agentEndpointPreferenceKey,
+  agentEndpointSelectionId,
   selectedAgentEndpointId
 } from "./collaboration/agentEndpointPreferences";
 import { applyAgentEndpointRequirements } from "./collaboration/agentEndpointViewModel";
@@ -259,15 +260,18 @@ export function BlockInspectorWindow() {
         scope: { kind: "task", taskId: selectedBlock.taskId }
       })
     : null;
-  const selectedBlockAgentEndpointId = selectedAgentEndpointId({
-    executorName: selectedBlock?.executor ?? selectedBlock?.effectiveExecutor ?? "manual",
-    preference:
-      selectedBlock?.executor && endpointPreferenceKey
-        ? settings.execution.agentEndpointPreferences[endpointPreferenceKey]
-        : inheritedTaskPreferenceKey
-          ? settings.execution.agentEndpointPreferences[inheritedTaskPreferenceKey]
-          : undefined
-  });
+  const selectedBlockAgentEndpointId = agentEndpointSelectionId(
+    selectedAgentEndpointId({
+      executorName: selectedBlock?.executor ?? selectedBlock?.effectiveExecutor ?? "manual",
+      preference:
+        selectedBlock?.executor && endpointPreferenceKey
+          ? settings.execution.agentEndpointPreferences[endpointPreferenceKey]
+          : inheritedTaskPreferenceKey
+            ? settings.execution.agentEndpointPreferences[inheritedTaskPreferenceKey]
+            : undefined,
+      endpoints: availableAgentEndpoints
+    })
+  );
 
   const handleBlockSelect = useCallback(
     async (ref: string) => {
