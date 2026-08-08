@@ -250,6 +250,31 @@ export class AgentHostRepository {
   }
 
   /**
+   * Server-scoped fleet inventory: active Host rows from agent_hosts.
+   * Revoked or credential-expired Hosts are excluded.
+   */
+  listActiveHosts(limit = 100, offset = 0): AgentHost[] {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 101) {
+      throw new Error("agent_host_list_limit_invalid");
+    }
+    if (!Number.isSafeInteger(offset) || offset < 0) {
+      throw new Error("agent_host_list_offset_invalid");
+    }
+    const nowIso = this.clock().toISOString();
+    return (
+      this.database
+        .prepare(
+          `SELECT * FROM agent_hosts
+           WHERE revoked_at IS NULL
+             AND (credential_expires_at IS NULL OR credential_expires_at > ?)
+           ORDER BY display_name,id
+           LIMIT ? OFFSET ?`
+        )
+        .all(nowIso, limit, offset) as HostRow[]
+    ).map(toHost);
+  }
+
+  /**
    * Read authoritative Host rows for Hosts bound to exactly one workspace.
    * The workspace projection is used only as an identity binding; liveness and
    * readiness always come from the canonical agent_hosts row.

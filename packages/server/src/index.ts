@@ -12,6 +12,8 @@ export {
 export {
   AgentEndpointCatalog,
   AgentEndpointCatalogError,
+  endpointIdFor,
+  legacyEndpointIdFor,
   type AgentEndpointCapacityPort,
   type AgentEndpointCatalogOptions,
   type AgentEndpointHostPort,

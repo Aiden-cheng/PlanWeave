@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   AgentEndpointCatalog,
   AgentEndpointCatalogError,
+  endpointIdFor,
+  legacyEndpointIdFor,
   type AgentEndpointCapacityPort,
   type AgentEndpointHostPort
 } from "../agentEndpointCatalog.js";
@@ -34,10 +36,26 @@ function readyHost(overrides: Partial<AgentHost> = {}): AgentHost {
   };
 }
 
+function activeHosts(hosts: AgentHost[]): AgentHost[] {
+  return hosts.filter((host) => {
+    if (host.revokedAt !== undefined) return false;
+    const credentialExpiry =
+      host.credentialExpiresAt === undefined ? undefined : Date.parse(host.credentialExpiresAt);
+    if (
+      credentialExpiry !== undefined &&
+      (!Number.isFinite(credentialExpiry) || credentialExpiry <= now.getTime())
+    ) {
+      return false;
+    }
+    return true;
+  });
+}
+
 function fixture(hostsInput: AgentHost[] = [readyHost()]) {
   let hosts = hostsInput;
   let counts = new Map<string, number>();
   const hostPort: AgentEndpointHostPort = {
+    listActiveHosts: () => activeHosts(hosts),
     listExclusivelyBoundToWorkspace: () => hosts
   };
   const capacityPort: AgentEndpointCapacityPort = {
@@ -61,14 +79,95 @@ function fixture(hostsInput: AgentHost[] = [readyHost()]) {
   };
 }
 
-function endpointFor(host: AgentHost = readyHost(), workspaceId = "workspace-a") {
+function fleetEndpointFor(host: AgentHost = readyHost()) {
+  return fixture([host]).catalog.listVisibleFleet().items[0];
+}
+
+function workspaceEndpointFor(host: AgentHost = readyHost(), workspaceId = "workspace-a") {
   return fixture([host]).catalog.listVisible(workspaceId).items[0];
 }
 
 describe("AgentEndpointCatalog", () => {
+  it("B1: lists both Hosts in the fleet and derives ids without workspace", () => {
+    const first = readyHost({
+      id: "host-alpha",
+      displayName: "Alpha",
+      readinessObservation: {
+        workspaceMappings: [],
+        acpProfiles: [
+          {
+            profileId: "profile-pi",
+            agentId: "pi",
+            displayName: "Pi",
+            status: "ready",
+            capabilities: ["acp.codex"]
+          }
+        ]
+      }
+    });
+    const second = readyHost({
+      id: "host-beta",
+      displayName: "Beta",
+      readinessObservation: {
+        workspaceMappings: [],
+        acpProfiles: [
+          {
+            profileId: "profile-pi",
+            agentId: "pi",
+            displayName: "Pi",
+            status: "ready",
+            capabilities: ["acp.codex"]
+          }
+        ]
+      }
+    });
+    const state = fixture([first, second]);
+    const fleet = state.catalog.listVisibleFleet().items;
+    expect(fleet).toHaveLength(2);
+    expect(fleet.every((item) => item.agentId === "pi" && item.status === "available")).toBe(true);
+    expect(new Set(fleet.map((item) => item.endpointId)).size).toBe(2);
+    expect(fleet.map((item) => item.endpointId)).toEqual(
+      expect.arrayContaining([
+        endpointIdFor({ hostId: "host-alpha", profileId: "profile-pi", agentId: "pi" }),
+        endpointIdFor({ hostId: "host-beta", profileId: "profile-pi", agentId: "pi" })
+      ])
+    );
+    const singleHostState = fixture([readyHost()]);
+    const workspaceA = singleHostState.catalog.listVisible("workspace-a").items[0]!;
+    const workspaceB = singleHostState.catalog.listVisible("workspace-b").items[0]!;
+    expect(workspaceA.endpointId).toBe(workspaceB.endpointId);
+    expect(workspaceA.endpointId).toBe(
+      endpointIdFor({ hostId: "host-primary", profileId: "profile-main", agentId: "codex" })
+    );
+  });
+
+  it("B2: resolves legacy workspace-scoped endpoint ids", () => {
+    const state = fixture();
+    const endpoint = state.catalog.listVisibleFleet().items[0]!;
+    const legacyId = legacyEndpointIdFor({
+      workspaceId: "workspace-a",
+      hostId: "host-primary",
+      profileId: "profile-main",
+      agentId: "codex"
+    });
+    expect(legacyId).not.toBe(endpoint.endpointId);
+    expect(
+      state.catalog.resolveForRun(legacyId, "workspace-a", ["acp.codex"])
+    ).toMatchObject({ hostId: "host-primary", profileId: "profile-main", agentId: "codex" });
+  });
+
+  it("B3: projects offline Host state as unavailable in the fleet list", () => {
+    expect(
+      fleetEndpointFor(readyHost({ lastSeenAt: "2026-08-03T07:00:00.000Z" }))
+    ).toMatchObject({
+      status: "unavailable",
+      unavailableReason: "host_offline"
+    });
+  });
+
   it("keeps IDs stable across presentation and availability changes", () => {
-    const original = endpointFor();
-    const changed = endpointFor(
+    const original = fleetEndpointFor();
+    const changed = fleetEndpointFor(
       readyHost({
         displayName: "Renamed Host",
         capacity: 8,
@@ -91,11 +190,11 @@ describe("AgentEndpointCatalog", () => {
     expect(changed).toMatchObject({ status: "unavailable", unavailableReason: "host_offline" });
   });
 
-  it("isolates IDs by workspace, Host, profile, and agent identity", () => {
-    const base = endpointFor()?.endpointId;
+  it("isolates IDs by Host, profile, and agent identity", () => {
+    const base = fleetEndpointFor()?.endpointId;
     const variants = [
-      endpointFor(readyHost({ id: "host-other" }))?.endpointId,
-      endpointFor(
+      fleetEndpointFor(readyHost({ id: "host-other" }))?.endpointId,
+      fleetEndpointFor(
         readyHost({
           readinessObservation: {
             workspaceMappings: [{ workspaceId: "workspace-a", status: "ready" }],
@@ -111,7 +210,7 @@ describe("AgentEndpointCatalog", () => {
           }
         })
       )?.endpointId,
-      endpointFor(
+      fleetEndpointFor(
         readyHost({
           readinessObservation: {
             workspaceMappings: [{ workspaceId: "workspace-a", status: "ready" }],
@@ -126,24 +225,22 @@ describe("AgentEndpointCatalog", () => {
             ]
           }
         })
-      )?.endpointId,
-      endpointFor(
-        readyHost({
-          readinessObservation: {
-            workspaceMappings: [{ workspaceId: "workspace-b", status: "ready" }],
-            acpProfiles: readyHost().readinessObservation!.acpProfiles
-          }
-        }),
-        "workspace-b"
       )?.endpointId
     ];
-    expect(new Set([base, ...variants]).size).toBe(5);
+    expect(new Set([base, ...variants]).size).toBe(4);
   });
 
-  it("projects offline Host state as unavailable", () => {
-    expect(endpointFor(readyHost({ lastSeenAt: "2026-08-03T07:00:00.000Z" }))).toMatchObject({
+  it("lists Hosts without workspace mapping in the fleet catalog", () => {
+    const host = readyHost({
+      readinessObservation: {
+        workspaceMappings: [],
+        acpProfiles: readyHost().readinessObservation!.acpProfiles
+      }
+    });
+    expect(fleetEndpointFor(host)).toMatchObject({ status: "available" });
+    expect(workspaceEndpointFor(host)).toMatchObject({
       status: "unavailable",
-      unavailableReason: "host_offline"
+      unavailableReason: "workspace_mapping_missing"
     });
   });
 
@@ -151,25 +248,25 @@ describe("AgentEndpointCatalog", () => {
     ["revoked", { revokedAt: "2026-08-03T07:59:00.000Z" }],
     ["expired", { credentialExpiresAt: now.toISOString() }]
   ] as const)("omits %s Hosts from the visible executor catalog", (_name, overrides) => {
-    expect(endpointFor(readyHost(overrides))).toBeUndefined();
+    expect(fleetEndpointFor(readyHost(overrides))).toBeUndefined();
   });
 
   it.each([
     ["missing", "workspace_mapping_missing"],
     ["invalid", "workspace_mapping_invalid"]
-  ] as const)("projects a %s workspace mapping", (status, reason) => {
+  ] as const)("projects a %s workspace mapping for legacy listVisible", (status, reason) => {
     const host = readyHost();
     host.readinessObservation = {
       workspaceMappings: [{ workspaceId: "workspace-a", status }],
       acpProfiles: host.readinessObservation!.acpProfiles
     };
-    expect(endpointFor(host)).toMatchObject({ status: "unavailable", unavailableReason: reason });
+    expect(workspaceEndpointFor(host)).toMatchObject({ status: "unavailable", unavailableReason: reason });
   });
 
   it("treats a profile capability outside the Host capability set as invalid", () => {
     const host = readyHost();
     host.readinessObservation!.acpProfiles[0]!.capabilities = ["profile-only"];
-    expect(endpointFor(host)).toMatchObject({
+    expect(fleetEndpointFor(host)).toMatchObject({
       status: "unavailable",
       unavailableReason: "profile_invalid"
     });
@@ -181,21 +278,21 @@ describe("AgentEndpointCatalog", () => {
   ] as const)("projects a %s exact profile", (status, reason) => {
     const host = readyHost();
     host.readinessObservation!.acpProfiles[0]!.status = status;
-    expect(endpointFor(host)).toMatchObject({ status: "unavailable", unavailableReason: reason });
+    expect(fleetEndpointFor(host)).toMatchObject({ status: "unavailable", unavailableReason: reason });
   });
 
   it("uses active reservations for capacity without changing endpoint identity", () => {
     const state = fixture();
-    const before = state.catalog.listVisible("workspace-a").items[0]!;
+    const before = state.catalog.listVisibleFleet().items[0]!;
     state.setActive("host-primary", 2);
-    const after = state.catalog.listVisible("workspace-a").items[0]!;
+    const after = state.catalog.listVisibleFleet().items[0]!;
     expect(after.endpointId).toBe(before.endpointId);
     expect(after).toMatchObject({ status: "unavailable", unavailableReason: "at_capacity" });
   });
 
   it("resolves from a fresh snapshot and checks Host and profile capabilities separately", () => {
     const state = fixture();
-    const endpoint = state.catalog.listVisible("workspace-a").items[0]!;
+    const endpoint = state.catalog.listVisibleFleet().items[0]!;
     expect(
       state.catalog.resolveForRun(endpoint.endpointId, "workspace-a", ["acp.codex"])
     ).toMatchObject({ hostId: "host-primary", profileId: "profile-main", agentId: "codex" });
@@ -206,7 +303,7 @@ describe("AgentEndpointCatalog", () => {
 
   it("revalidates an exact reserved Endpoint while discounting its own capacity lease", () => {
     const state = fixture();
-    const endpoint = state.catalog.listVisible("workspace-a").items[0]!;
+    const endpoint = state.catalog.listVisibleFleet().items[0]!;
     state.setActive("host-primary", 2);
     expect(
       state.catalog.resolveForReservedRun(
@@ -231,7 +328,7 @@ describe("AgentEndpointCatalog", () => {
     const second = readyHost({ id: "host-secondary", displayName: "Second Host" });
     const state = fixture([first, second]);
     const endpoint = state.catalog
-      .listVisible("workspace-a")
+      .listVisibleFleet()
       .items.find((item) => item.hostDisplayName === "Build Mac")!;
     state.setHosts([{ ...first, lastSeenAt: "2026-08-03T07:00:00.000Z" }, second]);
     expect(() =>
@@ -241,7 +338,7 @@ describe("AgentEndpointCatalog", () => {
 
   it("returns one stable unknown error when the endpoint identity disappears", () => {
     const state = fixture();
-    const endpoint = state.catalog.listVisible("workspace-a").items[0]!;
+    const endpoint = state.catalog.listVisibleFleet().items[0]!;
     state.setHosts([]);
     expect(() => state.catalog.resolveForRun(endpoint.endpointId, "workspace-a", [])).toThrowError(
       new AgentEndpointCatalogError("agent_endpoint_unknown")
@@ -249,7 +346,7 @@ describe("AgentEndpointCatalog", () => {
   });
 
   it("returns opaque, strictly redacted projections", () => {
-    const serialized = JSON.stringify(fixture().catalog.listVisible("workspace-a"));
+    const serialized = JSON.stringify(fixture().catalog.listVisibleFleet());
     expect(serialized).not.toContain("host-primary");
     for (const sensitive of [
       '"hostId"',
