@@ -207,25 +207,30 @@ export class HostReservationRepository {
                     (SELECT COUNT(*) FROM host_capacity_reservations r
                       WHERE r.host_id=h.id AND r.status='active') AS active_reservations
                    FROM agent_hosts h
-                   JOIN workspace_agent_hosts wh
-                     ON wh.host_id=h.id AND wh.workspace_id=?
                    WHERE h.id=? AND h.revoked_at IS NULL AND h.last_seen_at>=?
                      AND (h.credential_expires_at IS NULL OR h.credential_expires_at>?)`
                 )
-                .all(workspaceId, preferredHostId, onlineAfter, now.toISOString())
+                .all(preferredHostId, onlineAfter, now.toISOString())
             : this.database
                 .prepare(
                   `SELECT h.id,h.capabilities_json,h.capacity,h.last_seen_at,
                     (SELECT COUNT(*) FROM host_capacity_reservations r
                       WHERE r.host_id=h.id AND r.status='active') AS active_reservations
                    FROM agent_hosts h
-                   JOIN workspace_agent_hosts wh
-                     ON wh.host_id=h.id AND wh.workspace_id=?
                    WHERE h.revoked_at IS NULL AND h.last_seen_at>=?
                      AND (h.credential_expires_at IS NULL OR h.credential_expires_at>?)
+                     AND (
+                       EXISTS (
+                         SELECT 1 FROM workspace_agent_hosts wh
+                         WHERE wh.host_id=h.id AND wh.workspace_id=?
+                       )
+                       OR NOT EXISTS (
+                         SELECT 1 FROM workspace_agent_hosts wh WHERE wh.host_id=h.id
+                       )
+                     )
                    ORDER BY active_reservations ASC,h.last_seen_at DESC,h.id ASC`
                 )
-                .all(workspaceId, onlineAfter, now.toISOString())
+                .all(onlineAfter, now.toISOString(), workspaceId)
         )
           .map((row) => {
             try {

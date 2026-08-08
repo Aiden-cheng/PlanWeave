@@ -14,6 +14,28 @@ import { agentEndpointPreferenceKey } from "../renderer/collaboration/agentEndpo
 import type { AvailableAgentEndpoint } from "../renderer/collaboration/agentEndpointViewModel";
 import { useWorkspaceAgentEndpointRun } from "../renderer/hooks/useWorkspaceAgentEndpointRun";
 
+const operatorControlBridgeMock = vi.hoisted(() => ({
+  dispatchOwnerFleetRemoteOperation: vi.fn(),
+  observeOwnerFleetRemoteOperation: vi.fn(),
+  executeOwnerFleetRemoteOperationAction: vi.fn()
+}));
+
+const bridgeMock = vi.hoisted(() => ({
+  getBlockDetail: vi.fn(),
+  getTaskDetail: vi.fn(),
+  previewClaimNext: vi.fn(),
+  stopAutoRun: vi.fn()
+}));
+
+vi.mock("../renderer/bridge", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../renderer/bridge")>();
+  return {
+    ...actual,
+    bridge: bridgeMock,
+    operatorControlBridge: operatorControlBridgeMock
+  };
+});
+
 const graph: DesktopGraphViewModel = {
   projectId: "project-local",
   projectTitle: "Project",
@@ -326,6 +348,83 @@ function renderRun(input?: {
     lifecycle,
     waitForLocalUnit,
     waitForTerminal
+  };
+}
+
+function renderOwnerFleetRun(input?: {
+  previewClaimNext?: ReturnType<typeof vi.fn>;
+  waitForTerminal?: ReturnType<typeof vi.fn>;
+  getBlockDetail?: ReturnType<typeof vi.fn>;
+}) {
+  const setError = vi.fn();
+  const lifecycle = {
+    onStarted: vi.fn(),
+    onCompleted: vi.fn(),
+    onFailed: vi.fn()
+  };
+  const startLocal = vi.fn(async () => localRunState("running"));
+  const stopLocal = vi.fn(async () => localRunState("stopped", { error: null, stepCount: 1 }));
+  const previewClaimNext =
+    input?.previewClaimNext ??
+    vi
+      .fn()
+      .mockResolvedValueOnce(blockClaim("T-001#B-001"))
+      .mockResolvedValue({ kind: "none", reason: "no_claimable_blocks" });
+  const waitForTerminal =
+    input?.waitForTerminal ?? vi.fn(async () => operation("completed", undefined));
+  const getBlockDetail =
+    input?.getBlockDetail ??
+    vi.fn(async () => ({
+      ref: "T-001#B-001",
+      status: "ready" as const,
+      remoteExecution: null
+    }));
+  bridgeMock.getBlockDetail.mockImplementation(getBlockDetail);
+  operatorControlBridgeMock.dispatchOwnerFleetRemoteOperation.mockResolvedValue(
+    operation("running")
+  );
+  operatorControlBridgeMock.observeOwnerFleetRemoteOperation.mockResolvedValue(
+    operation("completed")
+  );
+  const hook = renderHook(() => {
+    const startWithEndpoint = useWorkspaceAgentEndpointRun({
+      activeProjectId: null,
+      agentEndpoints: [remoteEndpoint],
+      collaborationController: null,
+      graph,
+      preferences: {
+        [taskPreferenceKey]: {
+          kind: "remote",
+          remoteEndpointId: "endpoint-windows"
+        }
+      },
+      selectedCanvasId: "canvas-main",
+      selectedProject: project,
+      operatorProfileId: "profile-a",
+      ownerFleetDispatchEnabled: true,
+      setError,
+      createId: () => "operation-fleet-1",
+      localAutoRunApi: {
+        getAutoRunState: vi.fn(async () =>
+          localRunState("paused", { error: "Step limit reached.", stepCount: 1 })
+        ),
+        onAutoRunChanged: vi.fn(() => () => undefined)
+      },
+      stopLocal,
+      waitForTerminal,
+      previewClaimNext,
+      resolveLiveRemoteBinding: vi.fn(async () => null)
+    });
+    return (scope: DesktopAutoRunScope) => startWithEndpoint(scope, startLocal, lifecycle);
+  });
+  return {
+    ...hook,
+    setError,
+    lifecycle,
+    startLocal,
+    previewClaimNext,
+    waitForTerminal,
+    getBlockDetail
   };
 }
 
@@ -1121,5 +1220,63 @@ describe("workspace Agent Endpoint routing", () => {
     expect(setError).toHaveBeenCalledWith(
       "ACP authentication is required. (acp_authentication_required)"
     );
+  });
+
+  it("I4: dispatches through owner fleet operator control without collaboration controller", async () => {
+    const { result, lifecycle, setError } = renderOwnerFleetRun();
+
+    await act(() => result.current({ kind: "project" }));
+
+    expect(operatorControlBridgeMock.dispatchOwnerFleetRemoteOperation).toHaveBeenCalledWith({
+      profileId: "profile-a",
+      command: expect.objectContaining({
+        schemaVersion: "remote-run/v3",
+        projectId: "project-local",
+        canvasId: "canvas-main",
+        blockRef: "T-001#B-001",
+        agentEndpointId: "endpoint-windows",
+        expectedResponsibilityRevision: 0,
+        expectedReviewerRevision: 0
+      })
+    });
+    expect(lifecycle.onCompleted).toHaveBeenCalled();
+    expect(setError).not.toHaveBeenCalled();
+  });
+
+  it("I3: treats owner fleet terminal observation as scope completion when local block status lags", async () => {
+    const laggingBlockDetail = vi.fn(async () => ({
+      ref: "T-001#B-001",
+      status: "ready" as const,
+      remoteExecution: null
+    }));
+    const previewClaimNext = vi
+      .fn()
+      .mockResolvedValueOnce(blockClaim("T-001#B-001"))
+      .mockResolvedValue({ kind: "none", reason: "no_claimable_blocks" });
+    operatorControlBridgeMock.dispatchOwnerFleetRemoteOperation.mockResolvedValueOnce({
+      ...operation("running"),
+      operationId: "operation-fleet-lag"
+    });
+    operatorControlBridgeMock.observeOwnerFleetRemoteOperation.mockResolvedValue({
+      ...operation("completed"),
+      operationId: "operation-fleet-lag"
+    });
+    const { result, lifecycle, setError } = renderOwnerFleetRun({
+      previewClaimNext,
+      getBlockDetail: laggingBlockDetail,
+      waitForTerminal: vi.fn(async () => ({
+        ...operation("completed"),
+        operationId: "operation-fleet-lag"
+      }))
+    });
+
+    await act(() => result.current({ kind: "project" }));
+
+    expect(operatorControlBridgeMock.observeOwnerFleetRemoteOperation).toHaveBeenCalledWith({
+      profileId: "profile-a",
+      operationId: "operation-fleet-lag"
+    });
+    expect(lifecycle.onCompleted).toHaveBeenCalled();
+    expect(setError).not.toHaveBeenCalledWith(expect.stringContaining("claim_bus_idle"));
   });
 });

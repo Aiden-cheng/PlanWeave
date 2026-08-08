@@ -7,6 +7,7 @@ import type {
   DesktopProjectSummary
 } from "@planweave-ai/runtime";
 import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
+import type { RemoteOperationObservation } from "@planweave-ai/collaboration-protocol/remote-run";
 import { useCallback, useEffect, useRef } from "react";
 import type { PlanWeaveCollaborationApi } from "../../shared/collaboration";
 import type { DesktopUiSettings } from "../../shared/desktopSettings";
@@ -27,8 +28,28 @@ import {
 import { runClaimBusScope } from "../collaboration/claimBusScheduler";
 import { waitForRemoteOperationTerminal } from "../collaboration/remoteTaskEndpointRun";
 
+const OWNER_FLEET_TERMINAL_OPERATION_STATES = new Set<RemoteOperationObservation["state"]>([
+  "completed",
+  "failed",
+  "cancelled"
+]);
+
 function createDispatchId(): string {
   return crypto.randomUUID();
+}
+
+function wrapOwnerFleetApiForOperationTracking(
+  api: ReturnType<typeof createOwnerFleetRemoteDispatchApi>,
+  operationsByBlockRef: Map<string, string>
+): ReturnType<typeof createOwnerFleetRemoteDispatchApi> {
+  return {
+    ...api,
+    dispatchOwnerFleetRemoteOperation: async (dispatchInput) => {
+      const observation = await api.dispatchOwnerFleetRemoteOperation(dispatchInput);
+      operationsByBlockRef.set(dispatchInput.command.blockRef, observation.operationId);
+      return observation;
+    }
+  };
 }
 
 type GraphTask = DesktopGraphViewModel["tasks"][number];
@@ -172,6 +193,7 @@ export function useWorkspaceAgentEndpointRun(
 
       const controller = new AbortController();
       activeEndpointScopeRun.current = controller;
+      const ownerFleetOperationsByBlockRef = new Map<string, string>();
       lifecycle?.onStarted();
       const selectedProject = input.selectedProject;
       if (!selectedProject) {
@@ -205,19 +227,23 @@ export function useWorkspaceAgentEndpointRun(
             const detail = await bridge.getBlockDetail(canvasRef, blockRef);
             return detail.remoteExecution;
           });
+        const ownerFleetApi =
+          ownerFleetReady && input.operatorProfileId
+            ? wrapOwnerFleetApiForOperationTracking(
+                createOwnerFleetRemoteDispatchApi({
+                  operatorProfileId: input.operatorProfileId,
+                  fleetApi: operatorControlBridge!
+                }),
+                ownerFleetOperationsByBlockRef
+              )
+            : null;
         const executeBlock = createAgentEndpointBlockExecutor({
           activeProjectId: input.activeProjectId ?? selectedProject.projectId,
           canvasId: selectedCanvasId,
           selectionByBlockRef,
           collaborationController: input.collaborationController,
           api: ownerFleetReady ? null : api,
-          ownerFleetApi:
-            ownerFleetReady && input.operatorProfileId
-              ? createOwnerFleetRemoteDispatchApi({
-                  operatorProfileId: input.operatorProfileId,
-                  fleetApi: operatorControlBridge!
-                })
-              : null,
+          ownerFleetApi,
           resolveRemoteWorkAuthority: ownerFleetReady
             ? async () => ({ revisions: { responsibilityRevision: 0, reviewerRevision: 0 } })
             : undefined,
@@ -237,6 +263,41 @@ export function useWorkspaceAgentEndpointRun(
         };
 
         const taskIds = new Set(scopeTaskIds(plan));
+        const scopedBlockRefs =
+          scope.kind === "block"
+            ? [scope.blockRef]
+            : input.graph.tasks
+                .filter((task) => taskIds.has(task.taskId))
+                .flatMap((task) => task.blocks.map((block) => block.ref));
+
+        const isOwnerFleetBlockSatisfied = async (blockRef: string): Promise<boolean> => {
+          const selection = selectionByBlockRef.get(blockRef);
+          if (selection?.endpoint.source === "remote") {
+            const operationId = ownerFleetOperationsByBlockRef.get(blockRef);
+            if (operationId && ownerFleetApi) {
+              const observation = await ownerFleetApi.observeOwnerFleetRemoteOperation({
+                operationId
+              });
+              if (observation.state === "completed") return true;
+              if (OWNER_FLEET_TERMINAL_OPERATION_STATES.has(observation.state)) return false;
+            }
+          }
+          if (!bridge) throw new Error("desktop_bridge_unavailable");
+          const detail = await bridge.getBlockDetail(canvasRef, blockRef);
+          return detail.status === "completed";
+        };
+
+        const isOwnerFleetScopeSatisfied = async (options?: { refresh?: boolean }) => {
+          const check = async () => {
+            for (const blockRef of scopedBlockRefs) {
+              if (!(await isOwnerFleetBlockSatisfied(blockRef))) return false;
+            }
+            return true;
+          };
+          if (await check()) return true;
+          if (options?.refresh) return check();
+          return false;
+        };
 
         await runClaimBusScope({
           scope,
@@ -271,16 +332,7 @@ export function useWorkspaceAgentEndpointRun(
           completion: {
             isSatisfied: async (options) => {
               if (ownerFleetReady && !collaborationReady) {
-                if (!bridge) throw new Error("desktop_bridge_unavailable");
-                if (scope.kind === "block") {
-                  const detail = await bridge.getBlockDetail(canvasRef, scope.blockRef);
-                  return detail.status === "completed";
-                }
-                for (const taskId of taskIds) {
-                  const detail = await bridge.getTaskDetail(canvasRef, taskId);
-                  if (detail.status !== "implemented") return false;
-                }
-                return true;
+                return isOwnerFleetScopeSatisfied(options);
               }
               const readStatus = async () => {
                 if (!api) throw new Error("collaboration_runtime_status_unavailable");

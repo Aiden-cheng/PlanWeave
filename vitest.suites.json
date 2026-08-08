@@ -717,6 +717,7 @@
         "distributedPackageArtifacts.test.ts",
         "exposureLeaseRepository.test.ts",
         "hostEnrollment.test.ts",
+        "hosts.test.ts",
         "stockHostFleetMigration.test.ts",
         "hostReservations.test.ts",
         "humanIdentityHttp.test.ts",

@@ -8,6 +8,7 @@ import {
   type PlanPackageManifest
 } from "@planweave-ai/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ownerPackageLocatorForRun } from "@planweave-ai/agent-host-protocol";
 import {
   createTestWorkspace,
   basicManifest
@@ -126,6 +127,96 @@ async function setup(withHost: boolean, manifest: PlanPackageManifest = remoteMa
     agentEndpoints: coordination.agentEndpoints,
     artifactAuthorization: coordination.artifactAuthorization
   };
+}
+
+async function setupFleetUnboundHost(manifest: PlanPackageManifest = remoteManifest()) {
+  const fixture = await setup(false, manifest);
+  const host = fixture.hosts.register("Fleet Unbound Host").host;
+  fixture.hosts.reportOnline(host.id, ["acp.codex"], 1, {
+    workspaceMappings: [],
+    acpProfiles: [
+      {
+        profileId: "codex-acp",
+        agentId: "codex",
+        displayName: "Test Agent",
+        status: "ready",
+        capabilities: ["acp.codex"]
+      }
+    ]
+  });
+  const access = new ProjectAccessRepository(fixture.server.database);
+  access.registerProjectInternal({
+    workspaceId: fixture.locator.workspaceId,
+    projectId: fixture.locator.projectId,
+    projectRoot: fixture.workspace.root
+  });
+  access.registerCanvasInternal({
+    workspaceId: fixture.locator.workspaceId,
+    projectId: fixture.locator.projectId,
+    canvasId: fixture.locator.canvasId,
+    packageDir: fixture.workspace.init.workspace.packageDir
+  });
+  return { ...fixture, host };
+}
+
+async function completeDispatchToTerminal(
+  fixture: Awaited<ReturnType<typeof setupFleetUnboundHost>>,
+  outcome: Awaited<ReturnType<typeof fixture.coordinator.dispatch>>
+) {
+  const report = Buffer.from("# Remote result\n\nCompleted by the remote host.\n");
+  const artifact = await fixture.artifacts.put({
+    expectedSha256: createHash("sha256").update(report).digest("hex"),
+    expectedSizeBytes: report.byteLength,
+    mediaType: "text/markdown",
+    chunks: (async function* () {
+      yield report;
+    })()
+  });
+  const dispatch = fixture.dispatches.getRequired(outcome.operation.dispatchId);
+  fixture.dispatches.accept(
+    fixture.host?.id ?? "",
+    "accept-fleet-unbound",
+    dispatch.id,
+    dispatch.leaseId,
+    dispatch.executionAttemptId
+  );
+  const grant = fixture.artifactAuthorization.createOutputGrant({
+    operationId: "fleet-unbound-completion-report",
+    workspaceId: dispatch.workspaceId,
+    projectId: dispatch.projectId,
+    hostId: dispatch.hostId,
+    dispatchId: dispatch.id,
+    leaseId: dispatch.leaseId,
+    executionAttemptId: dispatch.executionAttemptId,
+    permission: "report_write",
+    expectedSha256: artifact.sha256,
+    expectedSizeBytes: artifact.sizeBytes,
+    expectedMediaType: artifact.mediaType
+  });
+  fixture.artifactAuthorization.acceptOutputUpload(
+    {
+      workspaceId: dispatch.workspaceId,
+      projectId: dispatch.projectId,
+      hostId: dispatch.hostId,
+      dispatchId: dispatch.id,
+      leaseId: dispatch.leaseId,
+      executionAttemptId: dispatch.executionAttemptId,
+      grantId: grant.grantId
+    },
+    artifact
+  );
+  await fixture.dispatches.complete(
+    dispatch.hostId,
+    "complete-fleet-unbound",
+    dispatch.id,
+    dispatch.leaseId,
+    dispatch.executionAttemptId,
+    {
+      summary: "Remote completion.",
+      reportArtifactRef: artifact.ref,
+      artifactRefs: []
+    }
+  );
 }
 
 async function setupInterruptedV3EndpointOperation(idempotencyKey: string) {
@@ -1238,5 +1329,38 @@ describe("RemoteBlockCoordinator", () => {
         .prepare("SELECT diagnostic_code FROM remote_operations WHERE id=?")
         .get(first.operation.id)
     ).toEqual({ diagnostic_code: "remote_block_source_changed" });
+  });
+
+  it("D2: dispatches an unbound fleet host to completion with ownerPackageLocator in the envelope", async () => {
+    const fixture = await setupFleetUnboundHost();
+    const endpoint = fixture.agentEndpoints.listVisibleFleet().items[0];
+    if (!endpoint) throw new Error("expected_fleet_endpoint");
+    expect(endpoint.status).toBe("available");
+
+    const outcome = await fixture.coordinator.dispatch({
+      ...fixture.locator,
+      blockRef: "T-001#B-001",
+      idempotencyKey: "fleet-unbound-dispatch",
+      agentEndpointId: endpoint.endpointId,
+      expectedResponsibilityRevision: 0,
+      expectedReviewerRevision: 0
+    });
+    expect(outcome.status).toBe("activated");
+
+    const expectedLocator = ownerPackageLocatorForRun({
+      projectId: fixture.locator.projectId,
+      canvasId: fixture.locator.canvasId
+    });
+    expect(fixture.mailbox.listAfter(fixture.host?.id ?? "", 0)[0]?.command).toMatchObject({
+      envelope: {
+        ownerPackageLocator: expectedLocator
+      }
+    });
+
+    await completeDispatchToTerminal(fixture, outcome);
+    expect(fixture.operations.getRequired(outcome.operation.id).state).toBe("completed");
+    await expect(
+      fixture.runtime.query({ ref: "T-001#B-001", operationId: outcome.operation.id })
+    ).resolves.toMatchObject({ status: "completed" });
   });
 });
