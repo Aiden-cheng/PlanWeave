@@ -24,7 +24,9 @@ describe("desktop renderer i18n", () => {
       "agentEndpointSelectionMissingError",
       "remoteAgentBlockFailedError",
       "remoteAgentFailureError",
-      "collaborationRuntimeStatusUnavailableError"
+      "collaborationRuntimeStatusUnavailableError",
+      "collaborationRuntimeTaskStatusUnavailableError",
+      "collaborationRuntimeBlockStatusUnavailableError"
     ] as const;
     for (const key of keys) {
       expect(resources.en[key].length).toBeGreaterThan(0);

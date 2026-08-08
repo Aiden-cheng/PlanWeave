@@ -173,6 +173,16 @@ export function formatAgentEndpointRunError(
     }
   }
 
+  {
+    const matched = matchPrefix(message, "collaboration_runtime_block_status_unavailable:");
+    if (matched) {
+      return withPlaceholders(t("collaborationRuntimeBlockStatusUnavailableError"), {
+        block: matched.rest || "unknown",
+        code: message
+      });
+    }
+  }
+
   // Host failure shape: "<message> (<code>)"
   const hostFailure = /^(.*) \(([a-z][a-z0-9_]*)\)$/s.exec(message);
   if (hostFailure) {

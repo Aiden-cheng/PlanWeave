@@ -251,7 +251,12 @@ export function useWorkspaceAgentEndpointRun(
 
               if (scope.kind === "block") {
                 const row = status.blocks.find((block) => block.ref === scope.blockRef);
-                return row?.status === "completed";
+                if (!row) {
+                  throw new Error(
+                    `collaboration_runtime_block_status_unavailable:${scope.blockRef}`
+                  );
+                }
+                return row.status === "completed";
               }
 
               for (const taskId of taskIds) {

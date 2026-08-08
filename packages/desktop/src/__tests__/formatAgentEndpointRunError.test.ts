@@ -22,6 +22,26 @@ describe("formatAgentEndpointRunError", () => {
     );
   });
 
+  it("humanizes collaboration runtime projection unavailable codes", () => {
+    const status = formatAgentEndpointRunError("collaboration_runtime_status_unavailable", en);
+    expect(status).toContain("unavailable");
+    expect(status).toContain("[collaboration_runtime_status_unavailable]");
+
+    const task = formatAgentEndpointRunError(
+      "collaboration_runtime_task_status_unavailable:T-001",
+      en
+    );
+    expect(task).toContain("T-001");
+    expect(task).toContain("[collaboration_runtime_task_status_unavailable:T-001]");
+
+    const block = formatAgentEndpointRunError(
+      "collaboration_runtime_block_status_unavailable:T-001#B-001",
+      en
+    );
+    expect(block).toContain("T-001#B-001");
+    expect(block).toContain("[collaboration_runtime_block_status_unavailable:T-001#B-001]");
+  });
+
   it("humanizes local_agent_unit failure with block and phase", () => {
     const formatted = formatAgentEndpointRunError("local_agent_unit_failed:T-002#B-001", en);
     expect(formatted).toContain("T-002#B-001");

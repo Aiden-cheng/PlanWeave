@@ -26,5 +26,7 @@ export const agentEndpointRunZhCnCatalog = {
   collaborationRuntimeStatusUnavailableError:
     "协作运行时状态不可用。请重新连接或等待投影同步后再重跑。[{code}]",
   collaborationRuntimeTaskStatusUnavailableError:
-    "任务 {task} 的协作状态缺失。请刷新画布或重新连接后再重跑。[{code}]"
+    "任务 {task} 的协作状态缺失。请刷新画布或重新连接后再重跑。[{code}]",
+  collaborationRuntimeBlockStatusUnavailableError:
+    "块 {block} 的协作状态缺失。请刷新画布或重新连接后再重跑。[{code}]"
 } satisfies Record<keyof typeof agentEndpointRunEnCatalog, string>;

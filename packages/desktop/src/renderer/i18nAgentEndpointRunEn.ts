@@ -25,5 +25,7 @@ export const agentEndpointRunEnCatalog = {
   collaborationRuntimeStatusUnavailableError:
     "Collaboration runtime status is unavailable. Reconnect or wait for projection sync, then re-run. [{code}]",
   collaborationRuntimeTaskStatusUnavailableError:
-    "Collaboration status for task {task} is missing. Refresh the canvas or reconnect, then re-run. [{code}]"
+    "Collaboration status for task {task} is missing. Refresh the canvas or reconnect, then re-run. [{code}]",
+  collaborationRuntimeBlockStatusUnavailableError:
+    "Collaboration status for block {block} is missing. Refresh the canvas or reconnect, then re-run. [{code}]"
 } as const;

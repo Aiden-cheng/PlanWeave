@@ -954,6 +954,39 @@ describe("workspace Agent Endpoint routing", () => {
     expect(lifecycle.onFailed).toHaveBeenCalledWith("collaboration_runtime_status_unavailable");
   });
 
+  it("surfaces collaboration_runtime_block_status_unavailable when block row missing after refresh", async () => {
+    const previewClaimNext = vi.fn(async () => ({
+      kind: "none" as const,
+      reason: "no_claimable_blocks"
+    }));
+    const withBlock = statusProjection({
+      taskStatus: "in_progress",
+      blocks: [{ ref: "T-001#B-001", status: "ready" }]
+    });
+    const missingBlock = statusProjection({
+      taskStatus: "in_progress",
+      blocks: []
+    });
+    const readRuntimeStatus = vi
+      .fn()
+      .mockResolvedValueOnce(withBlock) // loop-start: block present, not completed
+      .mockResolvedValue(missingBlock); // refresh: target block row still absent
+    const { result, setError, lifecycle } = renderRun({
+      previewClaimNext,
+      readRuntimeStatus
+    });
+
+    await act(() => result.current({ kind: "block", blockRef: "T-001#B-001" }));
+
+    expect(setError).toHaveBeenCalledWith(
+      "collaboration_runtime_block_status_unavailable:T-001#B-001"
+    );
+    expect(lifecycle.onFailed).toHaveBeenCalledWith(
+      "collaboration_runtime_block_status_unavailable:T-001#B-001"
+    );
+    expect(setError).not.toHaveBeenCalledWith("claim_bus_idle:no_claimable_blocks");
+  });
+
   it("runs coordinated_block through claim bus rather than execute-once", async () => {
     const previewClaimNext = vi
       .fn()
