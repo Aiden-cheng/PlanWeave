@@ -35,7 +35,8 @@ export const operatorEnrollmentGrantRequestSchema = z
 export const operatorEnrollmentGrantResponseSchema = z
   .object({
     enrollmentCode: hostEnrollmentCodeSchema,
-    workspaceId: opaqueIdentifierSchema,
+    /** Optional legacy collaboration workspace scope; server-scoped fleet grants omit it. */
+    workspaceId: opaqueIdentifierSchema.optional(),
     expiresAt: timestampSchema
   })
   .strict();

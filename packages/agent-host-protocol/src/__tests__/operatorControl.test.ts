@@ -76,9 +76,15 @@ describe("operator control wire contracts", () => {
     expect(
       operatorEnrollmentGrantResponseSchema.parse({
         enrollmentCode: `pw_enroll_${"A".repeat(43)}`,
-        workspaceId: "workspace-1",
         expiresAt: "2030-01-01T00:15:00.000Z"
       }).enrollmentCode
     ).toBe(`pw_enroll_${"A".repeat(43)}`);
+    expect(
+      operatorEnrollmentGrantResponseSchema.parse({
+        enrollmentCode: `pw_enroll_${"A".repeat(43)}`,
+        workspaceId: "workspace-1",
+        expiresAt: "2030-01-01T00:15:00.000Z"
+      }).workspaceId
+    ).toBe("workspace-1");
   });
 });

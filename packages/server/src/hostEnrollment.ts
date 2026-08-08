@@ -45,16 +45,25 @@ export class HostEnrollmentService {
     this.workspaceIdentity = new WorkspaceIdentityRepository(database);
   }
 
-  createGrant(options: { workspaceId: string; expiresAt: Date; credentialExpiresAt: Date }): {
+  createGrant(options: {
+    workspaceId?: string;
+    expiresAt: Date;
+    credentialExpiresAt: Date;
+  }): {
     enrollmentCode: string;
-    workspaceId: string;
+    workspaceId?: string;
     expiresAt: string;
   } {
-    const workspaceId = opaqueIdentifierSchema.parse(options.workspaceId);
-    if (!this.workspaceIdentity.workspaceExists(workspaceId)) {
-      throw new Error("workspace_not_found");
+    const workspaceId =
+      options.workspaceId === undefined
+        ? undefined
+        : opaqueIdentifierSchema.parse(options.workspaceId);
+    if (workspaceId !== undefined) {
+      if (!this.workspaceIdentity.workspaceExists(workspaceId)) {
+        throw new Error("workspace_not_found");
+      }
+      this.workspaceIdentity.assertReadCutover(workspaceId);
     }
-    this.workspaceIdentity.assertReadCutover(workspaceId);
     const now = this.clock();
     if (
       options.expiresAt.getTime() <= now.getTime() ||
@@ -63,6 +72,7 @@ export class HostEnrollmentService {
       throw new Error("host_enrollment_grant_expiry_invalid");
     }
     const enrollmentCode = `pw_enroll_${randomBytes(32).toString("base64url")}`;
+    const codeHash = hash(enrollmentCode);
     inWriteTransaction(this.database, () => {
       this.database
         .prepare(
@@ -71,14 +81,20 @@ export class HostEnrollmentService {
           ) VALUES(?,?,?,?)`
         )
         .run(
-          hash(enrollmentCode),
+          codeHash,
           options.expiresAt.toISOString(),
           options.credentialExpiresAt.toISOString(),
           now.toISOString()
         );
-      this.workspaceIdentity.bindEnrollmentToWorkspace(hash(enrollmentCode), workspaceId);
+      if (workspaceId !== undefined) {
+        this.workspaceIdentity.bindEnrollmentToWorkspace(codeHash, workspaceId);
+      }
     });
-    return { enrollmentCode, workspaceId, expiresAt: options.expiresAt.toISOString() };
+    return {
+      enrollmentCode,
+      ...(workspaceId === undefined ? {} : { workspaceId }),
+      expiresAt: options.expiresAt.toISOString()
+    };
   }
 
   revokeGrant(enrollmentCode: string): void {
@@ -108,7 +124,6 @@ export class HostEnrollmentService {
       .get(hash(request.enrollmentCode)) as EnrollmentGrantRow | undefined;
     if (!row) throw new HostEnrollmentError("invalid");
     const workspaceId = this.workspaceIdentity.workspaceForEnrollment(row.code_hash);
-    if (!workspaceId) throw new HostEnrollmentError("invalid");
     const now = this.clock();
     if (row.revoked_at) throw new HostEnrollmentError("revoked");
     if (Date.parse(row.expires_at) <= now.getTime()) throw new HostEnrollmentError("expired");
@@ -134,7 +149,7 @@ export class HostEnrollmentService {
         protocolVersion: 1,
         enrollmentAttemptId: request.enrollmentAttemptId,
         hostId: row.host_id,
-        workspaceId,
+        ...(workspaceId === undefined ? {} : { workspaceId }),
         credentialExpiresAt: row.credential_expires_at
       });
     }
@@ -145,7 +160,9 @@ export class HostEnrollmentService {
       request.capacity,
       row.credential_expires_at
     );
-    this.hosts.bindToWorkspace(registration.host.id, workspaceId);
+    if (workspaceId !== undefined) {
+      this.hosts.bindToWorkspace(registration.host.id, workspaceId);
+    }
     const updated = this.database
       .prepare(
         `UPDATE agent_host_enrollment_grants
@@ -166,7 +183,7 @@ export class HostEnrollmentService {
       protocolVersion: 1,
       enrollmentAttemptId: request.enrollmentAttemptId,
       hostId: registration.host.id,
-      workspaceId,
+      ...(workspaceId === undefined ? {} : { workspaceId }),
       credentialExpiresAt: row.credential_expires_at
     });
   }

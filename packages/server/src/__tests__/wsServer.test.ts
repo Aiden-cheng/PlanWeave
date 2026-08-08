@@ -169,7 +169,7 @@ async function createWsCoordination() {
 }
 
 describe("agent host WebSocket transport", () => {
-  it("requires an explicit, unambiguous Workspace scope for Host authentication", async () => {
+  it("authenticates server-scoped hosts without workspace scope and honors legacy bindings", async () => {
     const { coordination, workspaceIdentity, workspaceId } = await createWsCoordination();
     const registration = coordination.hosts.register("Scoped Host");
     const otherWorkspace = workspaceIdentity.ensureWorkspaceForLegacyProject("project-other");
@@ -193,13 +193,13 @@ describe("agent host WebSocket transport", () => {
       })
     );
     const base = `ws://127.0.0.1:${address.port}/agent-hosts/${registration.host.id}/connect`;
-    expect(await upgradeStatus(base, registration.token)).toBe(403);
+    expect(await upgradeStatus(base, registration.token)).toBe(101);
     expect(
       await upgradeStatus(
         `${base}?workspaceId=${encodeURIComponent(workspaceId)}`,
         registration.token
       )
-    ).toBe(401);
+    ).toBe(101);
 
     workspaceIdentity.bindHostToWorkspace(registration.host.id, workspaceId);
     expect(
@@ -221,7 +221,13 @@ describe("agent host WebSocket transport", () => {
         `${base}?workspaceId=${encodeURIComponent(workspaceId)}`,
         registration.token
       )
-    ).toBe(401);
+    ).toBe(101);
+    expect(
+      await upgradeStatus(
+        `${base}?workspaceId=${encodeURIComponent(otherWorkspace)}`,
+        registration.token
+      )
+    ).toBe(101);
   });
 
   it("disconnects a server-revoked Host, rejects its old credential, and fences legacy recovery", async () => {

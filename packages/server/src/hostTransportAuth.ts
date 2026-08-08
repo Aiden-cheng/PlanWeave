@@ -57,20 +57,28 @@ export function authenticateAgentHostRequest(
   }
   const requestedWorkspaceId = workspaceScope(request);
   if (
-    (requestedWorkspaceId && expectedWorkspaceId && requestedWorkspaceId !== expectedWorkspaceId) ||
-    (!requestedWorkspaceId && (hasWorkspaceScopeParameter(request) || !expectedWorkspaceId))
+    requestedWorkspaceId &&
+    expectedWorkspaceId &&
+    requestedWorkspaceId !== expectedWorkspaceId
   ) {
+    return { ok: false, status: 403, message: "Forbidden" };
+  }
+  if (hasWorkspaceScopeParameter(request) && !requestedWorkspaceId) {
     return { ok: false, status: 403, message: "Workspace scope required" };
   }
-  const workspaceId = requestedWorkspaceId ?? expectedWorkspaceId;
-  if (!workspaceId) return { ok: false, status: 403, message: "Workspace scope required" };
   const token = bearerToken(request.headers.authorization);
-  // Require a single authoritative binding before checking the requested scope. A
-  // workspace-specific match alone would accept an ambiguously bound Host.
-  const host = token ? hosts.authenticate(hostId, token) : undefined;
-  const scopedHost = host && token ? hosts.authenticate(hostId, token, workspaceId) : undefined;
-  if (scopedHost) return { ok: true, host: scopedHost };
-  return host
-    ? { ok: false, status: 401, message: "Unauthorized", reason: "workspace_mismatch" }
-    : { ok: false, status: 401, message: "Unauthorized" };
+  if (!token) return { ok: false, status: 401, message: "Unauthorized" };
+
+  const workspaceId = requestedWorkspaceId ?? expectedWorkspaceId;
+  if (workspaceId) {
+    const host = hosts.authenticate(hostId, token);
+    const scopedHost = host ? hosts.authenticate(hostId, token, workspaceId) : undefined;
+    if (scopedHost) return { ok: true, host: scopedHost };
+    return host
+      ? { ok: false, status: 401, message: "Unauthorized", reason: "workspace_mismatch" }
+      : { ok: false, status: 401, message: "Unauthorized" };
+  }
+
+  const host = hosts.authenticate(hostId, token);
+  return host ? { ok: true, host } : { ok: false, status: 401, message: "Unauthorized" };
 }

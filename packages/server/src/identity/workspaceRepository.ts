@@ -628,27 +628,35 @@ export class WorkspaceIdentityRepository {
   }
 
   /**
-   * Authenticate only an explicitly bound Host. Without workspaceId exactly one
-   * persisted binding is required; zero or ambiguous bindings fail closed.
+   * Server-scoped Host usability: unrevoked credential in agent_hosts is sufficient
+   * without workspace binding. When workspaceId is supplied, legacy workspace bindings
+   * are honored when present; unbound fleet Hosts remain usable.
    */
   hostUsable(hostId: string, now: Date, workspaceId?: string): boolean {
-    const rows = workspaceId
-      ? this.database
-          .prepare(
-            `SELECT workspace_id,revoked_at,credential_expires_at
-             FROM workspace_agent_hosts WHERE host_id=? AND workspace_id=?`
-          )
-          .all(hostId, workspaceId)
-      : this.database
-          .prepare(
-            `SELECT workspace_id,revoked_at,credential_expires_at
-             FROM workspace_agent_hosts WHERE host_id=? ORDER BY workspace_id`
-          )
-          .all(hostId);
-    if (rows.length !== 1) return false;
-    const row = rows[0];
-    const boundWorkspaceId = String(row.workspace_id);
-    const state = this.getReadState(boundWorkspaceId);
+    const host = this.database.prepare("SELECT revoked_at,credential_expires_at FROM agent_hosts WHERE id=?").get(
+      hostId
+    ) as { revoked_at: string | null; credential_expires_at: string | null } | undefined;
+    if (!host) return false;
+    if (host.revoked_at !== null) return false;
+    if (
+      host.credential_expires_at !== null &&
+      Date.parse(String(host.credential_expires_at)) <= now.getTime()
+    ) {
+      return false;
+    }
+    if (workspaceId === undefined) return true;
+
+    const bindings = this.database
+      .prepare(
+        `SELECT workspace_id,revoked_at,credential_expires_at
+         FROM workspace_agent_hosts WHERE host_id=? ORDER BY workspace_id`
+      )
+      .all(hostId);
+    if (bindings.length === 0) return true;
+
+    const row = bindings.find((binding) => String(binding.workspace_id) === workspaceId);
+    if (!row) return false;
+    const state = this.getReadState(workspaceId);
     if (
       !state ||
       state.status !== "completed" ||

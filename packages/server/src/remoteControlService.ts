@@ -71,10 +71,13 @@ export class RemoteControlService {
   createEnrollmentGrant(principal: OperatorPrincipal, rawRequest: unknown) {
     this.options.authorization.requireServerAdmin(principal);
     const request = operatorEnrollmentGrantRequestSchema.parse(rawRequest);
-    const workspaceId = this.resolveWorkspace(principal, request.workspaceId);
+    const workspaceId =
+      request.workspaceId === undefined
+        ? undefined
+        : this.resolveWorkspace(principal, request.workspaceId);
     return operatorEnrollmentGrantResponseSchema.parse(
       this.options.enrollments.createGrant({
-        workspaceId,
+        ...(workspaceId === undefined ? {} : { workspaceId }),
         expiresAt: new Date(request.expiresAt),
         credentialExpiresAt: new Date(request.credentialExpiresAt)
       })

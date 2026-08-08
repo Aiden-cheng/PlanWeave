@@ -503,7 +503,7 @@ describe("human observer WSS", () => {
     const hostStatus = await new Promise<number>((resolve) => {
       hostPath.once("unexpected-response", (_request, response) => resolve(response.statusCode));
     });
-    expect(hostStatus).toBe(403);
+    expect(hostStatus).toBe(401);
 
     const unknown = new WebSocket(`${fixture.wsOrigin}/unknown-upgrade`);
     const unknownStatus = await new Promise<number>((resolve) => {

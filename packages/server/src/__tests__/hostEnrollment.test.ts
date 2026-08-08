@@ -70,7 +70,55 @@ async function listen(server: Server): Promise<number> {
 }
 
 describe("Agent Host enrollment", () => {
-  it("exchanges once, replays identically, stores only hashes, and authenticates the bound host", async () => {
+  it("creates server-scoped grants without workspace binding", async () => {
+    const store = await setup();
+    const service = new HostEnrollmentService(store.database);
+    const grant = service.createGrant({
+      expiresAt: new Date(Date.now() + 60_000),
+      credentialExpiresAt: new Date(Date.now() + 3_600_000)
+    });
+    expect(grant.workspaceId).toBeUndefined();
+    expect(grant.enrollmentCode).toMatch(/^pw_enroll_/);
+    const bindings = store.database
+      .prepare("SELECT workspace_id FROM workspace_host_enrollments")
+      .all();
+    expect(bindings).toHaveLength(0);
+  });
+
+  it("exchanges once without workspace binding, replays identically, and authenticates the host", async () => {
+    const store = await setup();
+    const service = new HostEnrollmentService(store.database);
+    const grant = service.createGrant({
+      expiresAt: new Date(Date.now() + 60_000),
+      credentialExpiresAt: new Date(Date.now() + 3_600_000)
+    });
+    const credentialToken = token();
+    const input = request(grant.enrollmentCode, credentialToken);
+
+    const first = service.exchange(input);
+    const replay = service.exchange(input);
+    const hosts = new AgentHostRepository(store.database);
+
+    expect(first.workspaceId).toBeUndefined();
+    expect(replay).toEqual(first);
+    expect(hosts.authenticate(first.hostId, credentialToken)?.id).toBe(first.hostId);
+    const workspaceBindings = store.database
+      .prepare("SELECT workspace_id FROM workspace_agent_hosts WHERE host_id=?")
+      .all(first.hostId);
+    expect(workspaceBindings).toHaveLength(0);
+    store.database
+      .prepare("UPDATE agent_hosts SET credential_expires_at=? WHERE id=?")
+      .run(new Date(Date.now() - 1).toISOString(), first.hostId);
+    expect(hosts.authenticate(first.hostId, credentialToken)).toBeUndefined();
+    const persisted = JSON.stringify({
+      grants: store.database.prepare("SELECT * FROM agent_host_enrollment_grants").all(),
+      hosts: store.database.prepare("SELECT * FROM agent_hosts").all()
+    });
+    expect(persisted).not.toContain(grant.enrollmentCode);
+    expect(persisted).not.toContain(credentialToken);
+  });
+
+  it("exchanges once with legacy workspace binding when grant is workspace-scoped", async () => {
     const store = await setup();
     const workspaceId = new WorkspaceIdentityRepository(
       store.database
@@ -85,35 +133,29 @@ describe("Agent Host enrollment", () => {
     const input = request(grant.enrollmentCode, credentialToken);
 
     const first = service.exchange(input);
-    const replay = service.exchange(input);
     const hosts = new AgentHostRepository(store.database);
 
-    expect(replay).toEqual(first);
+    expect(first.workspaceId).toBe(workspaceId);
+    expect(hosts.authenticate(first.hostId, credentialToken)?.id).toBe(first.hostId);
     expect(hosts.authenticate(first.hostId, credentialToken, workspaceId)?.id).toBe(first.hostId);
-    store.database
-      .prepare("UPDATE agent_hosts SET credential_expires_at=? WHERE id=?")
-      .run(new Date(Date.now() - 1).toISOString(), first.hostId);
-    expect(hosts.authenticate(first.hostId, credentialToken, workspaceId)).toBeUndefined();
-    const persisted = JSON.stringify({
-      grants: store.database.prepare("SELECT * FROM agent_host_enrollment_grants").all(),
-      hosts: store.database.prepare("SELECT * FROM agent_hosts").all()
-    });
-    expect(persisted).not.toContain(grant.enrollmentCode);
-    expect(persisted).not.toContain(credentialToken);
   });
 
-  it("fails closed for unbound Hosts across zero and multiple workspaces", async () => {
+  it("authenticates server-scoped hosts and honors legacy workspace bindings when scoped", async () => {
     const store = await setup();
     const hosts = new AgentHostRepository(store.database);
     const registration = hosts.register("Unbound Host");
-    expect(hosts.authenticate(registration.host.id, registration.token)).toBeUndefined();
+    expect(hosts.authenticate(registration.host.id, registration.token)?.id).toBe(
+      registration.host.id
+    );
 
     const identity = new WorkspaceIdentityRepository(store.database);
     const firstWorkspace = identity.ensureWorkspaceForLegacyProject("project-one");
     const secondWorkspace = identity.ensureWorkspaceForLegacyProject("project-two");
-    expect(hosts.authenticate(registration.host.id, registration.token)).toBeUndefined();
 
     hosts.bindToWorkspace(registration.host.id, firstWorkspace);
+    expect(hosts.authenticate(registration.host.id, registration.token)?.id).toBe(
+      registration.host.id
+    );
     expect(hosts.authenticate(registration.host.id, registration.token, firstWorkspace)?.id).toBe(
       registration.host.id
     );
@@ -122,8 +164,13 @@ describe("Agent Host enrollment", () => {
     ).toBeUndefined();
 
     hosts.bindToWorkspace(registration.host.id, secondWorkspace);
-    expect(hosts.authenticate(registration.host.id, registration.token)).toBeUndefined();
+    expect(hosts.authenticate(registration.host.id, registration.token)?.id).toBe(
+      registration.host.id
+    );
     expect(hosts.authenticate(registration.host.id, registration.token, firstWorkspace)?.id).toBe(
+      registration.host.id
+    );
+    expect(hosts.authenticate(registration.host.id, registration.token, secondWorkspace)?.id).toBe(
       registration.host.id
     );
   });
@@ -159,6 +206,26 @@ describe("Agent Host enrollment", () => {
     expect(
       JSON.stringify(store.database.prepare("SELECT readiness_json FROM agent_hosts").all())
     ).not.toContain("/private/");
+  });
+
+  it("revokes server-scoped grants and enrolled hosts", async () => {
+    const store = await setup();
+    const service = new HostEnrollmentService(store.database);
+    const grant = service.createGrant({
+      expiresAt: new Date(Date.now() + 60_000),
+      credentialExpiresAt: new Date(Date.now() + 3_600_000)
+    });
+    const credentialToken = token();
+    const input = request(grant.enrollmentCode, credentialToken);
+    const completed = service.exchange(input);
+    const hosts = new AgentHostRepository(store.database);
+    expect(hosts.authenticate(completed.hostId, credentialToken)?.id).toBe(completed.hostId);
+
+    service.revokeGrant(grant.enrollmentCode);
+    expect(() => service.exchange(input)).toThrow("Agent Host enrollment was rejected.");
+
+    hosts.revoke(completed.hostId);
+    expect(hosts.authenticate(completed.hostId, credentialToken)).toBeUndefined();
   });
 
   it("rejects conflicting replay, expired and revoked grants without leaking secrets", async () => {

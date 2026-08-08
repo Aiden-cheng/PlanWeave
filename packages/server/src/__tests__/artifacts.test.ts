@@ -323,7 +323,7 @@ describe("content-addressed artifacts", () => {
       headers(owner.token, "wrong-dispatch"),
       bytes
     );
-    expect(foreignScope).toEqual({ status: 401, body: '{"error":"Unauthorized"}' });
+    expect(foreignScope).toEqual({ status: 403, body: '{"error":"artifact_scope_forbidden"}' });
     expect(missingScope).toEqual({
       status: 403,
       body: '{"error":"artifact_scope_forbidden"}'
