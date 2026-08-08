@@ -250,10 +250,13 @@ describe("preload bridge invocation", () => {
       localInput
     );
 
-    await operator.repairOperatorLocalAgentHost({ profileId: "profile-a" });
+    await operator.repairOperatorLocalAgentHost({
+      profileId: "profile-a",
+      exposedProfileIds: ["codex-acp", "pi-acp"]
+    });
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       operatorControlInvokeChannels.repairLocalAgentHost,
-      { profileId: "profile-a" }
+      { profileId: "profile-a", exposedProfileIds: ["codex-acp", "pi-acp"] }
     );
 
     const enrollmentInput = {

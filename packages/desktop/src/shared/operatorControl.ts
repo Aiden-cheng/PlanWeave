@@ -233,6 +233,30 @@ const exposedLocalAgentProfilesSchema = z
     }
   });
 
+/** Restart/start may clear all exposures; empty list is intentional. */
+const repairExposedLocalAgentProfilesSchema = z
+  .array(localAgentHostProfileIdSchema)
+  .max(32)
+  .superRefine((value, context) => {
+    if (new Set(value).size !== value.length) {
+      context.addIssue({
+        code: "custom",
+        message: "duplicate local Agent Host profile",
+        path: []
+      });
+    }
+  });
+
+export const operatorRepairLocalAgentHostInputSchema = z
+  .object({
+    profileId: operatorProfileIdSchema.optional(),
+    exposedProfileIds: repairExposedLocalAgentProfilesSchema
+  })
+  .strict();
+export type OperatorRepairLocalAgentHostInput = z.infer<
+  typeof operatorRepairLocalAgentHostInputSchema
+>;
+
 export const operatorRegisterLocalAgentHostInputSchema = z
   .object({
     profileId: operatorProfileIdSchema,
@@ -403,7 +427,7 @@ export type PlanWeaveOperatorControlApi = {
     input: OperatorGetLocalAgentHostStatusInput
   ) => Promise<OperatorLocalAgentHostStatus>;
   repairOperatorLocalAgentHost: (
-    input: OperatorGetLocalAgentHostStatusInput
+    input: OperatorRepairLocalAgentHostInput
   ) => Promise<OperatorLocalAgentHostStatus>;
   registerOperatorLocalAgentHost: (
     input: OperatorRegisterLocalAgentHostInput

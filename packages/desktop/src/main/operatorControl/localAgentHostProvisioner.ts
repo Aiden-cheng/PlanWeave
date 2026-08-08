@@ -43,7 +43,10 @@ export interface LocalAgentHostOperatorPort {
 
 export interface LocalAgentHostProvisioner {
   status(profileId?: string): Promise<OperatorLocalAgentHostStatus>;
-  repair(profileId?: string): Promise<OperatorLocalAgentHostStatus>;
+  repair(
+    profileId: string | undefined,
+    exposedProfileIds: readonly string[]
+  ): Promise<OperatorLocalAgentHostStatus>;
   register(
     profileId: string | undefined,
     handoff: string,
@@ -270,8 +273,14 @@ export class DesktopLocalAgentHostProvisioner implements LocalAgentHostProvision
     } catch (error) {
       if (isAgentHostCredentialUnavailable(error) || systemErrorSuffix(error) === "enoent") {
         // Stale Desktop registration with missing/expired Host credential → restore paste UI.
+        // Keep the real exposure list so checkboxes are not falsely cleared before re-enroll.
         await this.registrations.remove(registration.profileId);
-        return notRegisteredStatus();
+        return operatorLocalAgentHostStatusSchema.parse({
+          supported: true,
+          state: "not_registered",
+          workspaceId: registration.workspaceId,
+          agents: agents.length > 0 ? agents : supportedProfiles()
+        });
       }
       throw localAgentHostStageError("local_agent_host_credential_status_failed", error);
     }
@@ -331,12 +340,29 @@ export class DesktopLocalAgentHostProvisioner implements LocalAgentHostProvision
     });
   }
 
-  async repair(profileId?: string): Promise<OperatorLocalAgentHostStatus> {
+  async repair(
+    profileId: string | undefined,
+    exposedProfileIds: readonly string[]
+  ): Promise<OperatorLocalAgentHostStatus> {
     const registration =
       (profileId ? await this.registrations.get(profileId) : null) ??
       (await this.registrations.latest());
     if (!registration) throw new Error("local_agent_host_registration_missing");
     const configPath = resolveAgentHostDefaultPaths(registration.workspaceId).configPath;
+    let agents: OperatorLocalAgentHostStatus["agents"];
+    try {
+      agents = (
+        await withinLocalAgentHostStage("local_agent_host_agent_exposure_failed", () =>
+          this.operator.reconcileAgentExposure(configPath, exposedProfileIds)
+        )
+      ).agents;
+    } catch (error) {
+      if (isAgentHostCredentialUnavailable(error)) {
+        await this.registrations.remove(registration.profileId);
+        return notRegisteredStatus();
+      }
+      throw error;
+    }
     let background: AgentHostBackgroundResult;
     try {
       background = await withinLocalAgentHostStage(
@@ -350,10 +376,6 @@ export class DesktopLocalAgentHostProvisioner implements LocalAgentHostProvision
       }
       throw error;
     }
-    const agents = await withinLocalAgentHostStage(
-      "local_agent_host_agent_status_read_failed",
-      () => this.operator.listAgents(configPath)
-    );
     const serverConnection = await resolveServerConnection(configPath, background.state);
     return operatorLocalAgentHostStatusSchema.parse({
       supported: true,
@@ -382,3 +404,4 @@ export function unavailableLocalAgentHostProvisioner(): LocalAgentHostProvisione
     }
   };
 }
+

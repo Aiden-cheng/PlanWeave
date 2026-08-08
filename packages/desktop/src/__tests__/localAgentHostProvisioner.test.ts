@@ -217,6 +217,7 @@ describe("Desktop local Agent Host provisioner", () => {
         state: "running",
         platform: "windows-user-startup"
       }),
+      reconcileAgentExposure: vi.fn().mockResolvedValue({ agents, reload: "restarted" }),
       listAgents: vi.fn().mockResolvedValue(agents),
       requireUsableCredential: vi.fn().mockResolvedValue(undefined)
     };
@@ -231,12 +232,13 @@ describe("Desktop local Agent Host provisioner", () => {
       registrations
     });
 
-    await expect(provisioner.repair("profile-a")).resolves.toMatchObject({
+    await expect(provisioner.repair("profile-a", ["codex-acp"])).resolves.toMatchObject({
       state: "ready",
       background: "running",
       workspaceId: "workspace-repair",
       agents
     });
+    expect(operator.reconcileAgentExposure).toHaveBeenCalledWith(configPath, ["codex-acp"]);
     expect(operator.installBackground).toHaveBeenCalledWith(configPath, launcher);
   });
 
@@ -368,11 +370,23 @@ describe("Desktop local Agent Host provisioner", () => {
     await registrations.upsert("profile-a", "workspace-credential");
     const configPath = resolveAgentHostDefaultPaths("workspace-credential").configPath;
     const operator = {
-      listAgents: vi.fn().mockResolvedValue([]),
+      listAgents: vi.fn().mockResolvedValue([
+        {
+          profileId: "pi-acp",
+          agentId: "pi",
+          displayName: "Pi",
+          detected: true,
+          exposed: true,
+          ready: true
+        }
+      ]),
       requireUsableCredential: vi
         .fn()
         .mockRejectedValue(new Error("agent_host_credential_unavailable")),
       backgroundStatus: vi.fn(),
+      reconcileAgentExposure: vi
+        .fn()
+        .mockRejectedValue(new Error("agent_host_credential_unavailable")),
       installBackground: vi
         .fn()
         .mockRejectedValue(new Error("agent_host_credential_unavailable"))
@@ -386,21 +400,26 @@ describe("Desktop local Agent Host provisioner", () => {
 
     await expect(provisioner.status("profile-a")).resolves.toMatchObject({
       supported: true,
-      state: "not_registered"
+      state: "not_registered",
+      workspaceId: "workspace-credential",
+      agents: [
+        expect.objectContaining({
+          profileId: "pi-acp",
+          exposed: true
+        })
+      ]
     });
     expect(operator.requireUsableCredential).toHaveBeenCalledWith(configPath);
     expect(operator.backgroundStatus).not.toHaveBeenCalled();
     await expect(registrations.get("profile-a")).resolves.toBeNull();
 
     await registrations.upsert("profile-a", "workspace-credential");
-    await expect(provisioner.repair("profile-a")).resolves.toMatchObject({
+    await expect(provisioner.repair("profile-a", ["pi-acp"])).resolves.toMatchObject({
       supported: true,
       state: "not_registered"
     });
-    expect(operator.installBackground).toHaveBeenCalledWith(configPath, {
-      executablePath: "C:\\PlanWeave.exe",
-      fixedArgs: ["--agent-host-service"]
-    });
+    expect(operator.reconcileAgentExposure).toHaveBeenCalledWith(configPath, ["pi-acp"]);
+    expect(operator.installBackground).not.toHaveBeenCalled();
     await expect(registrations.get("profile-a")).resolves.toBeNull();
   });
 

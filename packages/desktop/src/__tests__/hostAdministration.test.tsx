@@ -514,6 +514,7 @@ describe("Agent Host settings", () => {
     await user.click(screen.getByTestId("host-admin-repair-local"));
 
     expect(repair).toHaveBeenCalledOnce();
+    expect(repair).toHaveBeenCalledWith(["codex-acp"]);
   });
 
   it("offers an explicit restart without requiring another enrollment", async () => {
@@ -566,6 +567,54 @@ describe("Agent Host settings", () => {
 
     expect(screen.getByRole("button", { name: "Restart Agent Host" })).toBeVisible();
     expect(repair).toHaveBeenCalledOnce();
+    expect(repair).toHaveBeenCalledWith(["codex-acp"]);
+  });
+
+  it("applies the current Agent selection when restarting the Host", async () => {
+    const user = userEvent.setup();
+    const repair = vi.fn().mockResolvedValue(null);
+    render(
+      <LocalAgentHostCard
+        activeProfile={null}
+        busy={false}
+        localServerHosted={false}
+        loading={false}
+        status={{
+          supported: true,
+          state: "ready",
+          workspaceId: "workspace-a",
+          background: "running",
+          serverConnection: { state: "connected", serverOrigin: "https://server.example" },
+          agents: [
+            {
+              profileId: "codex-acp",
+              agentId: "codex",
+              displayName: "Codex",
+              detected: true,
+              exposed: true,
+              ready: true
+            },
+            {
+              profileId: "pi-acp",
+              agentId: "pi",
+              displayName: "Pi",
+              detected: true,
+              exposed: false,
+              ready: false
+            }
+          ]
+        }}
+        register={vi.fn()}
+        repair={repair}
+        enroll={vi.fn()}
+        t={createTranslator("en")}
+      />
+    );
+
+    await user.click(screen.getByTestId("host-admin-local-agent-pi-acp"));
+    await user.click(screen.getByTestId("host-admin-repair-local"));
+
+    expect(repair).toHaveBeenCalledWith(["codex-acp", "pi-acp"]);
   });
 
   it("enrolls explicitly pasted details without an administrative connection", async () => {

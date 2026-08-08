@@ -15,7 +15,9 @@ type LocalAgentHostCardProps = {
   loading: boolean;
   status: OperatorLocalAgentHostStatus | null;
   register: (profileIds: readonly string[]) => Promise<OperatorLocalAgentHostStatus | null>;
-  repair: () => Promise<OperatorLocalAgentHostStatus | null>;
+  repair: (
+    profileIds: readonly string[]
+  ) => Promise<OperatorLocalAgentHostStatus | null>;
   enroll: (
     handoff: string,
     profileIds: readonly string[]
@@ -239,7 +241,7 @@ export function LocalAgentHostCard({
                 className="w-fit"
                 data-testid="host-admin-repair-local"
                 disabled={busy || loading}
-                onClick={() => void repair()}
+                onClick={() => void repair(selected)}
               >
                 {status.state === "ready"
                   ? t("hostAdminRestartLocalHost")

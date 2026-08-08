@@ -13,6 +13,7 @@ import {
   operatorImportCredentialInputSchema,
   operatorListHostsInputSchema,
   operatorGetLocalAgentHostStatusInputSchema,
+  operatorRepairLocalAgentHostInputSchema,
   operatorEnrollLocalAgentHostInputSchema,
   operatorRegisterLocalAgentHostInputSchema,
   operatorProfileIdInputSchema,
@@ -476,11 +477,11 @@ export class OperatorControlService {
 
   async repairLocalAgentHost(input: unknown) {
     assertNoSmuggledOperatorSecrets(input, "repairLocalAgentHost");
-    const parsed = operatorGetLocalAgentHostStatusInputSchema.parse(input);
+    const parsed = operatorRepairLocalAgentHostInputSchema.parse(input);
     return this.enqueue(async () => {
       try {
         this.assertOpen();
-        return await this.localAgentHost.repair(parsed.profileId);
+        return await this.localAgentHost.repair(parsed.profileId, parsed.exposedProfileIds);
       } catch (error) {
         const publicError = localAgentHostErrorFromUnknown(error);
         this.rememberError(publicError);

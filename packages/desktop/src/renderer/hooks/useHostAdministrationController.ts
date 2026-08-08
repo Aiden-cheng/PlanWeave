@@ -39,7 +39,9 @@ export type HostAdministrationController = {
   registerLocalAgentHost: (
     exposedProfileIds: readonly string[]
   ) => Promise<OperatorLocalAgentHostStatus | null>;
-  repairLocalAgentHost: () => Promise<OperatorLocalAgentHostStatus | null>;
+  repairLocalAgentHost: (
+    exposedProfileIds: readonly string[]
+  ) => Promise<OperatorLocalAgentHostStatus | null>;
   enrollLocalAgentHost: (
     handoff: string,
     exposedProfileIds: readonly string[]
@@ -438,27 +440,31 @@ export function useHostAdministrationController(): HostAdministrationController 
     [activeProfileId, refreshHosts]
   );
 
-  const repairLocalAgentHost = useCallback(async () => {
-    if (!operatorControlBridge) {
-      setError("operator_bridge_unavailable");
-      return null;
-    }
-    setBusy(true);
-    try {
-      const next = await operatorControlBridge.repairOperatorLocalAgentHost(
-        activeProfileId ? { profileId: activeProfileId } : {}
-      );
-      setLocalAgentHost(next);
-      setError(null);
-      await refreshHosts();
-      return next;
-    } catch (cause) {
-      setError(errorMessage(cause));
-      return null;
-    } finally {
-      setBusy(false);
-    }
-  }, [activeProfileId, refreshHosts]);
+  const repairLocalAgentHost = useCallback(
+    async (exposedProfileIds: readonly string[]) => {
+      if (!operatorControlBridge) {
+        setError("operator_bridge_unavailable");
+        return null;
+      }
+      setBusy(true);
+      try {
+        const next = await operatorControlBridge.repairOperatorLocalAgentHost({
+          ...(activeProfileId ? { profileId: activeProfileId } : {}),
+          exposedProfileIds: [...exposedProfileIds]
+        });
+        setLocalAgentHost(next);
+        setError(null);
+        await refreshHosts();
+        return next;
+      } catch (cause) {
+        setError(errorMessage(cause));
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [activeProfileId, refreshHosts]
+  );
 
   return {
     status,

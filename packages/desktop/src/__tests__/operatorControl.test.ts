@@ -499,11 +499,16 @@ describe("Desktop operator control trust boundary", () => {
       }
     });
 
-    await expect(service.repairLocalAgentHost({ profileId: "profile-a" })).resolves.toMatchObject({
+    await expect(
+      service.repairLocalAgentHost({
+        profileId: "profile-a",
+        exposedProfileIds: ["codex-acp", "pi-acp"]
+      })
+    ).resolves.toMatchObject({
       state: "ready",
       workspaceId: "workspace-repair"
     });
-    expect(repair).toHaveBeenCalledWith("profile-a");
+    expect(repair).toHaveBeenCalledWith("profile-a", ["codex-acp", "pi-acp"]);
   });
 
   it("preserves a safe Agent Host error code across the operator boundary", async () => {
