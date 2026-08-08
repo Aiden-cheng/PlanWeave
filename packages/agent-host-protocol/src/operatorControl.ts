@@ -70,7 +70,8 @@ export const operatorHostAvailabilitySchema = z
 export const operatorHostViewSchema = z
   .object({
     id: opaqueIdentifierSchema,
-    workspaceId: opaqueIdentifierSchema,
+    /** Present for legacy workspace-bound Hosts; omitted for server-scoped fleet Hosts. */
+    workspaceId: opaqueIdentifierSchema.optional(),
     displayName: z.string().min(1).max(128),
     capabilities: capabilitiesSchema,
     capacity: z.number().int().min(1).max(128),

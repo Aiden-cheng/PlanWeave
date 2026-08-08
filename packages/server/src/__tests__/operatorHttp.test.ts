@@ -125,6 +125,14 @@ describe("operator HTTP boundary", () => {
       ]
     });
 
+    const fleetUrl = `${fixture.origin}/api/v1/agent-endpoints`;
+    const fleet = await fetch(fleetUrl, { headers: authorization });
+    expect(fleet.status).toBe(200);
+    expect(fixture.service.listAgentEndpoints).toHaveBeenCalledWith(
+      expect.objectContaining({ serverAdmin: true }),
+      {}
+    );
+
     const endpointUrl = `${fixture.origin}/api/v1/agent-endpoints?projectId=project-a`;
     const first = await fetch(endpointUrl, { headers: authorization });
     const second = await fetch(endpointUrl, { headers: authorization });
@@ -140,7 +148,8 @@ describe("operator HTTP boundary", () => {
 
     for (const suffix of [
       "projectId=project-a&projectId=project-b",
-      "projectId=project-a&workspaceId=workspace-a"
+      "projectId=project-a&workspaceId=workspace-a",
+      "unknown=1"
     ]) {
       const response = await fetch(`${fixture.origin}/api/v1/agent-endpoints?${suffix}`, {
         headers: authorization
@@ -149,13 +158,25 @@ describe("operator HTTP boundary", () => {
     }
 
     const nonAdmin = await setup(true, "ready", false);
-    const forbidden = await fetch(
-      `${nonAdmin.origin}/api/v1/agent-endpoints?projectId=project-a&unknown=1`,
-      { headers: authorization }
-    );
+    const forbidden = await fetch(`${nonAdmin.origin}/api/v1/agent-endpoints`, {
+      headers: authorization
+    });
     expect(forbidden.status).toBe(403);
     await expect(forbidden.json()).resolves.toEqual({ error: "operator_admin_required" });
     expect(nonAdmin.service.listAgentEndpoints).not.toHaveBeenCalled();
+  });
+
+  it("rejects unauthenticated fleet endpoint listing and member-only operator tokens", async () => {
+    const fixture = await setup(true);
+    expect((await fetch(`${fixture.origin}/api/v1/agent-endpoints`)).status).toBe(401);
+
+    const memberOnly = await setup(true, "ready", false);
+    const response = await fetch(`${memberOnly.origin}/api/v1/agent-endpoints`, {
+      headers: authorization
+    });
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "operator_admin_required" });
+    expect(memberOnly.service.listAgentEndpoints).not.toHaveBeenCalled();
   });
 
   it("uses the v3 Agent Endpoint dispatch contract as its sole request schema", () => {

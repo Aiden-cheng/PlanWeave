@@ -67,6 +67,35 @@ export function operatorHostAvailability(
   return { status: "available", reason: null };
 }
 
+/** Server-scoped fleet readiness without collaboration workspace mapping requirements. */
+export function fleetHostAvailability(
+  host: AgentHost,
+  online: boolean
+): OperatorHostAvailability {
+  if (host.revokedAt) return { status: "unavailable", reason: "revoked" };
+  if (!online) return { status: "unavailable", reason: "offline" };
+  const observation = host.readinessObservation;
+  if (!observation) return { status: "unavailable", reason: "readiness_not_reported" };
+  if (observation.acpProfiles.length === 0) {
+    return { status: "unavailable", reason: "acp_profile_missing" };
+  }
+  if (observation.acpProfiles.some((profile) => profile.status === "invalid")) {
+    return { status: "unavailable", reason: "acp_profile_invalid" };
+  }
+  const readyProfiles = observation.acpProfiles.filter((profile) => profile.status === "ready");
+  if (readyProfiles.length === 0) {
+    return { status: "unavailable", reason: "acp_profile_missing" };
+  }
+  if (
+    !readyProfiles.some((profile) =>
+      profile.capabilities.every((capability) => host.capabilities.includes(capability))
+    )
+  ) {
+    return { status: "unavailable", reason: "capability_mismatch" };
+  }
+  return { status: "available", reason: null };
+}
+
 /** Operation-specific readiness for the exact ACP profile carried by an execution envelope. */
 export function hostExecutionProfileAvailability(
   host: AgentHost,

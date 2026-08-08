@@ -34,6 +34,21 @@ describe("operator control wire contracts", () => {
         nextCursor: null
       }).items[0]?.online
     ).toBe(false);
+    expect(
+      operatorHostPageSchema.parse({
+        items: [
+          {
+            id: "host-fleet",
+            displayName: "Fleet Host",
+            capabilities: [],
+            capacity: 1,
+            online: true,
+            availability: { status: "available", reason: null }
+          }
+        ],
+        nextCursor: null
+      }).items[0]?.workspaceId
+    ).toBeUndefined();
     expect(() =>
       operatorHostPageSchema.parse({
         items: [

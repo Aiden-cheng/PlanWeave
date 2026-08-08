@@ -72,10 +72,16 @@ describe("distributed server composition Stage H contracts", () => {
     for (const endpoint of firstPage.items) assertRemoteAgentEndpointRedacted(endpoint);
     expect(JSON.stringify(firstPage)).not.toMatch(/hostId|path|env|token|readiness/i);
 
+    const fleetUrl = `${fixture.origin}/api/v1/agent-endpoints`;
+    const fleet = await fetch(fleetUrl, { headers: { Authorization: `Bearer ${adminToken}` } });
+    expect(fleet.status).toBe(200);
+    const fleetPage = remoteAgentEndpointListSchema.parse(await fleet.json());
+    expect(fleetPage.items).toHaveLength(1);
+
     for (const invalidPath of [
-      "/api/v1/agent-endpoints",
       `/api/v1/agent-endpoints?projectId=${fixture.projectId}&projectId=${fixture.projectId}`,
-      `/api/v1/agent-endpoints?projectId=${fixture.projectId}&unknown=1`
+      `/api/v1/agent-endpoints?projectId=${fixture.projectId}&unknown=1`,
+      "/api/v1/agent-endpoints?unknown=1"
     ]) {
       const invalid = await fetch(`${fixture.origin}${invalidPath}`, {
         headers: { Authorization: `Bearer ${adminToken}` }
