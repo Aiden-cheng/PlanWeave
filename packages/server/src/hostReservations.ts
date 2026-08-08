@@ -692,7 +692,9 @@ export class HostReservationRepository {
             `UPDATE remote_execution_attempts
              SET status='awaiting_writeback',state_version=state_version+1,updated_at=?,terminal_at=NULL
              WHERE execution_attempt_id=? AND lease_id=? AND lease_fencing_token=?
-               AND status IN ('running','activated','awaiting_writeback','action_required')`
+               AND status IN (
+                 'running','activated','awaiting_writeback','action_required','interrupted'
+               )`
           )
           .run(
             now,

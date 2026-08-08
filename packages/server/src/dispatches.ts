@@ -696,6 +696,10 @@ export class DispatchService {
         blockRef: dispatch.blockRef,
         result: dispatch.result
       });
+      const afterComplete = this.getRequired(dispatchId);
+      if (afterComplete.status === "failed" || afterComplete.status === "cancelled") {
+        return afterComplete;
+      }
       this.finishWriteback(dispatch, "completed");
     } else if (dispatch.failure) {
       await this.options.writeback.fail({

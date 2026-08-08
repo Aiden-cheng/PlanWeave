@@ -1050,4 +1050,193 @@ describe("RemoteBlockCoordinator", () => {
       fixture.runtime.query({ ref: "T-001#B-001", operationId: outcome.operation.id })
     ).resolves.toMatchObject({ status: "completed" });
   });
+
+  it("seals awaiting_writeback as failed when package writeback rejects the report", async () => {
+    const fixture = await setup(true);
+    if (!fixture.host) throw new Error("expected_test_host");
+    const { RemoteBlockRuntimeError } = await import("@planweave-ai/runtime");
+    const outcome = await fixture.coordinator.dispatch(
+      endpointDispatchRequest({
+        agentEndpoints: fixture.agentEndpoints,
+        locator: fixture.locator,
+        blockRef: "T-001#B-001",
+        idempotencyKey: "dispatch-writeback-result-conflict"
+      })
+    );
+    const report = Buffer.from("# Remote result\n\nNot a valid sealed report for writeback.\n");
+    const artifact = await fixture.artifacts.put({
+      expectedSha256: createHash("sha256").update(report).digest("hex"),
+      expectedSizeBytes: report.byteLength,
+      mediaType: "text/markdown",
+      chunks: (async function* () {
+        yield report;
+      })()
+    });
+    const dispatch = fixture.dispatches.getRequired(outcome.operation.dispatchId);
+    fixture.dispatches.accept(
+      fixture.host.id,
+      "accept-writeback-conflict",
+      dispatch.id,
+      dispatch.leaseId,
+      dispatch.executionAttemptId
+    );
+    const grant = fixture.artifactAuthorization.createOutputGrant({
+      operationId: "writeback-conflict-report",
+      workspaceId: dispatch.workspaceId,
+      projectId: dispatch.projectId,
+      hostId: dispatch.hostId,
+      dispatchId: dispatch.id,
+      leaseId: dispatch.leaseId,
+      executionAttemptId: dispatch.executionAttemptId,
+      permission: "report_write",
+      expectedSha256: artifact.sha256,
+      expectedSizeBytes: artifact.sizeBytes,
+      expectedMediaType: artifact.mediaType
+    });
+    fixture.artifactAuthorization.acceptOutputUpload(
+      {
+        workspaceId: dispatch.workspaceId,
+        projectId: dispatch.projectId,
+        hostId: dispatch.hostId,
+        dispatchId: dispatch.id,
+        leaseId: dispatch.leaseId,
+        executionAttemptId: dispatch.executionAttemptId,
+        grantId: grant.grantId
+      },
+      artifact
+    );
+
+    // Park durable complete evidence without finishing writeback yet.
+    const parkSpy = vi
+      .spyOn(fixture.coordinator, "complete")
+      .mockRejectedValueOnce(new Error("injected_writeback_delay"));
+    await expect(
+      fixture.dispatches.complete(
+        dispatch.hostId,
+        "park-writeback-conflict",
+        dispatch.id,
+        dispatch.leaseId,
+        dispatch.executionAttemptId,
+        {
+          summary: "Host claimed completion with an unusable report.",
+          reportArtifactRef: artifact.ref,
+          artifactRefs: []
+        }
+      )
+    ).rejects.toThrowError("injected_writeback_delay");
+    parkSpy.mockRestore();
+    expect(fixture.dispatches.getRequired(dispatch.id).status).toBe("awaiting_writeback");
+
+    vi.spyOn(fixture.runtime, "complete").mockRejectedValueOnce(
+      new RemoteBlockRuntimeError(
+        "remote_block_result_conflict",
+        "Remote review result for 'T-001#R-001' is not valid review-result JSON."
+      )
+    );
+
+    await expect(fixture.coordinator.reenter(outcome.operation.id)).resolves.toMatchObject({
+      status: "terminal"
+    });
+    expect(fixture.operations.getRequired(outcome.operation.id).state).toBe("failed");
+    expect(fixture.dispatches.getRequired(dispatch.id).status).toBe("failed");
+    expect(
+      fixture.server.database
+        .prepare("SELECT diagnostic_code FROM remote_operations WHERE id=?")
+        .get(outcome.operation.id)
+    ).toEqual({ diagnostic_code: "remote_block_result_conflict" });
+  });
+
+  it("reenterPending seals one writeback domain failure without aborting the batch", async () => {
+    const fixture = await setup(true);
+    if (!fixture.host) throw new Error("expected_test_host");
+    const { RemoteBlockRuntimeError } = await import("@planweave-ai/runtime");
+    const first = await fixture.coordinator.dispatch(
+      endpointDispatchRequest({
+        agentEndpoints: fixture.agentEndpoints,
+        locator: fixture.locator,
+        blockRef: "T-001#B-001",
+        idempotencyKey: "dispatch-reenter-pending-isolate-a"
+      })
+    );
+    const report = Buffer.from("# Remote result\n\nBatch isolation report.\n");
+    const artifact = await fixture.artifacts.put({
+      expectedSha256: createHash("sha256").update(report).digest("hex"),
+      expectedSizeBytes: report.byteLength,
+      mediaType: "text/markdown",
+      chunks: (async function* () {
+        yield report;
+      })()
+    });
+    const dispatch = fixture.dispatches.getRequired(first.operation.dispatchId);
+    fixture.dispatches.accept(
+      fixture.host.id,
+      "accept-reenter-pending-isolate",
+      dispatch.id,
+      dispatch.leaseId,
+      dispatch.executionAttemptId
+    );
+    const grant = fixture.artifactAuthorization.createOutputGrant({
+      operationId: "reenter-pending-isolate-report",
+      workspaceId: dispatch.workspaceId,
+      projectId: dispatch.projectId,
+      hostId: dispatch.hostId,
+      dispatchId: dispatch.id,
+      leaseId: dispatch.leaseId,
+      executionAttemptId: dispatch.executionAttemptId,
+      permission: "report_write",
+      expectedSha256: artifact.sha256,
+      expectedSizeBytes: artifact.sizeBytes,
+      expectedMediaType: artifact.mediaType
+    });
+    fixture.artifactAuthorization.acceptOutputUpload(
+      {
+        workspaceId: dispatch.workspaceId,
+        projectId: dispatch.projectId,
+        hostId: dispatch.hostId,
+        dispatchId: dispatch.id,
+        leaseId: dispatch.leaseId,
+        executionAttemptId: dispatch.executionAttemptId,
+        grantId: grant.grantId
+      },
+      artifact
+    );
+    const parkSpy = vi
+      .spyOn(fixture.coordinator, "complete")
+      .mockRejectedValueOnce(new Error("injected_writeback_delay"));
+    await expect(
+      fixture.dispatches.complete(
+        dispatch.hostId,
+        "park-reenter-pending-isolate",
+        dispatch.id,
+        dispatch.leaseId,
+        dispatch.executionAttemptId,
+        {
+          summary: "Parked for batch isolation.",
+          reportArtifactRef: artifact.ref,
+          artifactRefs: []
+        }
+      )
+    ).rejects.toThrowError("injected_writeback_delay");
+    parkSpy.mockRestore();
+
+    // Force reenter's early writeback to throw a domain failure so reenterPending
+    // must classify + seal without aborting the batch.
+    vi.spyOn(fixture.coordinator, "complete").mockRejectedValueOnce(
+      new RemoteBlockRuntimeError(
+        "remote_block_source_changed",
+        "Remote source changed before writeback."
+      )
+    );
+
+    await expect(fixture.coordinator.reenterPending()).resolves.toEqual(
+      expect.arrayContaining([expect.objectContaining({ status: "terminal" })])
+    );
+    expect(fixture.operations.getRequired(first.operation.id).state).toBe("failed");
+    expect(fixture.dispatches.getRequired(dispatch.id).status).toBe("failed");
+    expect(
+      fixture.server.database
+        .prepare("SELECT diagnostic_code FROM remote_operations WHERE id=?")
+        .get(first.operation.id)
+    ).toEqual({ diagnostic_code: "remote_block_source_changed" });
+  });
 });

@@ -734,14 +734,14 @@ describe("RemoteBlockCoordinator crash reconciliation", () => {
 
     await harness.restart();
     harness.registerHost();
-    await expect(harness.requireCoordination().coordinator.reenterPending()).rejects.toThrowError(
-      "remote_source_changed"
-    );
+    await expect(harness.requireCoordination().coordinator.reenterPending()).resolves.toMatchObject([
+      { status: "terminal" }
+    ]);
+    expect(
+      harness.requireCoordination().operations.getRequired(outcome.operation.id).state
+    ).toBe("cancelled");
     expect(count(harness.requireServer().database, "host_capacity_reservations")).toBe(0);
     expect(count(harness.requireServer().database, "mailbox_messages")).toBe(0);
-    expect(diagnosticCode(harness.requireServer().database, outcome.operation.id)).toBe(
-      "runtime_reconciliation_conflict"
-    );
   });
 
   it("rejects foreign Runtime ownership before reserving a Host", async () => {

@@ -673,6 +673,7 @@
         "insecureTransport.test.ts",
         "protocolPrimitives.test.ts",
         "publicExports.test.ts",
+        "remoteReenterRecovery.test.ts",
         "serverExposureManager.test.ts",
         "serverCliHelp.test.ts",
         "tailscaleCliAdapter.test.ts",

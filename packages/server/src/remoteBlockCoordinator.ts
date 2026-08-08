@@ -44,6 +44,12 @@ import {
   endpointSelectionSnapshotSchema,
   type EndpointSelectionSnapshot
 } from "./endpointSelection.js";
+import {
+  classifyReenterFailure,
+  diagnosticFromReenterFailure,
+  isMissingActiveOwnership,
+  isWritebackDomainFailure
+} from "./remoteReenterRecovery.js";
 
 export type RemoteEndpointDispatchRequest = RemoteRuntimeLocator & {
   blockRef: string;
@@ -527,14 +533,22 @@ export class RemoteBlockCoordinator {
       try {
         outcomes.push(await this.reenter(operation.id));
       } catch (error) {
-        if (!(operation.endpointSelection && error instanceof AgentEndpointCatalogError)) {
-          throw error;
+        const decision = classifyReenterFailure(error);
+        if (decision === "fatal") throw error;
+        const diagnostic = diagnosticFromReenterFailure(error);
+        this.options.operations.recordDiagnostic(
+          operation.id,
+          diagnostic.code,
+          diagnostic.message
+        );
+        if (decision === "defer_host") {
+          outcomes.push({
+            operation: this.options.operations.getRequired(operation.id),
+            status: "awaiting_host"
+          });
+          continue;
         }
-        this.options.operations.recordDiagnostic(operation.id, error.code, error.message);
-        outcomes.push({
-          operation: this.options.operations.getRequired(operation.id),
-          status: "awaiting_host"
-        });
+        outcomes.push(await this.sealOperationLocalFailure(operation, error));
       }
     }
     return outcomes;
@@ -680,20 +694,121 @@ export class RemoteBlockCoordinator {
         }
       : null;
     await this.checkpoint("before_runtime_writeback");
-    await this.withRuntime(operation, (runtime) =>
-      runtime.complete({
-        ...remoteBlockIdentity(operation),
-        reportArtifactRef,
-        reportBytes,
-        ...(transcript ? { transcript } : {})
-      })
-    );
+    try {
+      await this.withRuntime(operation, (runtime) =>
+        runtime.complete({
+          ...remoteBlockIdentity(operation),
+          reportArtifactRef,
+          reportBytes,
+          ...(transcript ? { transcript } : {})
+        })
+      );
+    } catch (error) {
+      if (!isWritebackDomainFailure(error)) throw error;
+      await this.sealRejectedWriteback(operation, error);
+      return;
+    }
     await this.checkpoint("after_runtime_writeback");
     operation = this.options.operations.getRequired(operation.id);
     this.options.dispatches.finishTerminal({ operation, status: "completed" });
     await this.checkpoint("after_dispatch_terminal_persistence");
     this.finalizeOperationTerminal(operation, "completed");
     await this.checkpoint("after_terminal_persistence");
+  }
+
+  /**
+   * Host parked durable complete evidence, but package writeback rejected it.
+   * Seal Server terminal state as failed so one bad report cannot wedge startup.
+   */
+  private async sealRejectedWriteback(operation: RemoteOperation, error: unknown): Promise<void> {
+    const diagnostic = diagnosticFromReenterFailure(error);
+    this.options.operations.recordDiagnostic(operation.id, diagnostic.code, diagnostic.message);
+    try {
+      await this.withRuntime(operation, (runtime) =>
+        runtime.fail(
+          remoteBlockFailureInputSchema.parse({
+            ...remoteBlockIdentity(operation),
+            failure: {
+              code: "protocol_error",
+              message: diagnostic.message,
+              retryable: false
+            },
+            ...(operation.endpointSelection?.agentId
+              ? { agentId: operation.endpointSelection.agentId }
+              : {})
+          })
+        )
+      );
+    } catch (failError) {
+      if (!isMissingActiveOwnership(failError)) throw failError;
+    }
+    await this.checkpoint("after_runtime_writeback");
+    const current = this.options.operations.getRequired(operation.id);
+    this.options.dispatches.finishTerminal({ operation: current, status: "failed" });
+    await this.checkpoint("after_dispatch_terminal_persistence");
+    this.finalizeOperationTerminal(current, "failed");
+    await this.checkpoint("after_terminal_persistence");
+  }
+
+  private async sealOperationLocalFailure(
+    operation: RemoteOperation,
+    error: unknown
+  ): Promise<RemoteDispatchOutcome> {
+    const current = this.options.operations.getRequired(operation.id);
+    if (["completed", "failed", "cancelled"].includes(current.state)) {
+      return { operation: current, status: "terminal" };
+    }
+    const persisted = this.options.dispatches.inspect(current).dispatch;
+    if (persisted?.status === "awaiting_writeback" && persisted.terminalAction?.kind === "complete") {
+      await this.sealRejectedWriteback(current, error);
+      return {
+        operation: this.options.operations.getRequired(current.id),
+        status: "terminal"
+      };
+    }
+    if (persisted?.status === "awaiting_writeback" && persisted.terminalAction?.kind === "fail") {
+      try {
+        await this.fail(current.id);
+      } catch (failError) {
+        if (!isMissingActiveOwnership(failError) && !isWritebackDomainFailure(failError)) {
+          throw failError;
+        }
+        this.forceFailedTerminal(current);
+      }
+      return {
+        operation: this.options.operations.getRequired(current.id),
+        status: "terminal"
+      };
+    }
+    this.forceFailedTerminal(current);
+    return {
+      operation: this.options.operations.getRequired(current.id),
+      status: "terminal"
+    };
+  }
+
+  private forceFailedTerminal(operation: RemoteOperation): void {
+    const current = this.options.operations.getRequired(operation.id);
+    if (["completed", "failed", "cancelled"].includes(current.state)) return;
+    const persisted = this.options.dispatches.inspect(current).dispatch;
+    if (persisted?.status === "awaiting_writeback") {
+      this.options.dispatches.finishTerminal({ operation: current, status: "failed" });
+    }
+    if (current.attempt.leaseId) {
+      this.finalizeOperationTerminal(current, "failed");
+      return;
+    }
+    if (
+      current.state === "claimed" &&
+      current.attempt.status === "prepared" &&
+      current.attempt.hostId === undefined &&
+      !persisted
+    ) {
+      this.options.operations.cancelClaimedAfterRuntimeReset({
+        operationId: current.id,
+        executionAttemptId: current.executionAttemptId
+      });
+    }
   }
 
   async fail(operationId: string): Promise<void> {
