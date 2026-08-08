@@ -51,6 +51,7 @@ import { BlockRunRecordCard } from "./BlockRunRecordCard";
 import { TerminalOpenButton } from "./TerminalOpenButton";
 
 type BlockInspectorProps = {
+  agentEndpointCatalogErrorCode?: string | null;
   agentEndpoints?: readonly AvailableAgentEndpoint[];
   agentDetections?: DesktopAgentDetection[];
   agentTransport?: RunnerTransport;
@@ -90,6 +91,7 @@ type BlockInspectorProps = {
 const blockPromptAutosaveDelayMs = 700;
 
 export function BlockInspector({
+  agentEndpointCatalogErrorCode = null,
   agentEndpoints,
   agentDetections = [],
   agentTransport,
@@ -426,6 +428,7 @@ export function BlockInspector({
               t={t}
             />
             <RemoteRunPanel
+              agentEndpointCatalogErrorCode={agentEndpointCatalogErrorCode}
               agentEndpoints={blockAgentEndpoints}
               workItem={
                 selectedBlock

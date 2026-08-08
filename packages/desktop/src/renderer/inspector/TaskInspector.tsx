@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { AgentEndpointFleetCatalogHint } from "../collaboration/AgentEndpointFleetCatalogHint";
 import { AgentEndpointSelect } from "../collaboration/AgentEndpointSelect";
 import type { AvailableAgentEndpoint } from "../collaboration/agentEndpointViewModel";
 import { useExecutorPreflight } from "../hooks/useExecutorPreflight";
@@ -30,6 +31,7 @@ import { WorkItemCollaborationPanel } from "../team/WorkItemCollaborationPanel";
 import { statusVariant } from "../viewHelpers";
 
 type TaskInspectorProps = {
+  agentEndpointCatalogErrorCode?: string | null;
   agentEndpoints?: readonly AvailableAgentEndpoint[];
   canvasRef?: DesktopCanvasReference | null;
   className?: string;
@@ -73,6 +75,7 @@ function taskPreflightExecutorValue(
 }
 
 export function TaskInspector({
+  agentEndpointCatalogErrorCode = null,
   agentEndpoints = [],
   canvasRef,
   className,
@@ -233,6 +236,7 @@ export function TaskInspector({
                 selectedEndpointId={endpointSelectValue}
                 unavailableLabel={t("unavailable")}
               />
+              <AgentEndpointFleetCatalogHint errorCode={agentEndpointCatalogErrorCode} t={t} />
               <div className="flex min-h-7 items-center gap-2 text-xs text-muted-foreground">
                 {!concreteExecutor ? (
                   <span>{t("executorPreflightSelectConcrete")}</span>

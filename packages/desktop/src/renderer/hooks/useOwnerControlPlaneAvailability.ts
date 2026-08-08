@@ -12,8 +12,12 @@ export type OwnerControlPlaneAvailability = {
   refresh: () => Promise<void>;
 };
 
-function deriveFleetCatalogBlockedCode(status: OperatorControlStatus | null): string | null {
-  if (!operatorControlBridge) return "operator_bridge_unavailable";
+export function deriveFleetCatalogBlockedCode(
+  status: OperatorControlStatus | null,
+  options?: { bridgeAvailable?: boolean }
+): string | null {
+  const bridgeAvailable = options?.bridgeAvailable ?? Boolean(operatorControlBridge);
+  if (!bridgeAvailable) return "operator_bridge_unavailable";
   if (!status?.activeProfileId) return "operator_profile_not_active";
   const active = status.profiles.find((profile) => profile.profileId === status.activeProfileId);
   if (!active) return "operator_profile_not_found";

@@ -71,6 +71,7 @@ export type TaskNodeData = {
   promptDraft: string;
   saveState: "idle" | "saving" | "saved" | "error";
   agentEndpoints: AvailableAgentEndpoint[];
+  agentEndpointFleetCatalogError: string | null;
   selectedAgentEndpointId: string;
   labels: TaskNodeLabels;
   selectedBlock: DesktopBlockDetail | null;

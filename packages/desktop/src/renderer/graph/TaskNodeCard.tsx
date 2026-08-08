@@ -61,6 +61,7 @@ export function TaskNodeCard({ data, selected }: NodeProps<TaskFlowNode>) {
     promptDraft,
     saveState,
     agentEndpoints,
+    agentEndpointFleetCatalogError = null,
     selectedAgentEndpointId,
     labels,
     selectedBlock,
@@ -165,14 +166,25 @@ export function TaskNodeCard({ data, selected }: NodeProps<TaskFlowNode>) {
               />
             </CardTitle>
             <CardDescription className="flex flex-wrap items-center gap-2">
-              <AgentEndpointSelect
-                ariaLabel={labels.agent}
-                endpoints={agentEndpoints}
-                onValueChange={(value) => onAgentEndpointChange(task.taskId, value)}
-                selectedEndpointId={selectedAgentEndpointId}
-                triggerClassName="h-7 w-32 border-border/80 bg-surface-base text-xs text-text shadow-none"
-                unavailableLabel={labels.unavailable}
-              />
+              <div className="flex min-w-0 flex-col gap-1">
+                <AgentEndpointSelect
+                  ariaLabel={labels.agent}
+                  endpoints={agentEndpoints}
+                  onValueChange={(value) => onAgentEndpointChange(task.taskId, value)}
+                  selectedEndpointId={selectedAgentEndpointId}
+                  triggerClassName="h-7 w-32 border-border/80 bg-surface-base text-xs text-text shadow-none"
+                  unavailableLabel={labels.unavailable}
+                />
+                {agentEndpointFleetCatalogError ? (
+                  <p
+                    className="max-w-48 text-[10px] leading-snug text-destructive"
+                    data-testid="agent-endpoint-fleet-catalog-error"
+                    role="alert"
+                  >
+                    {agentEndpointFleetCatalogError}
+                  </p>
+                ) : null}
+              </div>
               {assigneeChip ? (
                 <CompactAssigneeChipView chip={assigneeChip} label={labels.assignee} size="sm" />
               ) : null}

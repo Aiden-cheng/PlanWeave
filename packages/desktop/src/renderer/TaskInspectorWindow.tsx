@@ -285,6 +285,7 @@ export function TaskInspectorWindow() {
 
   return (
     <TaskInspector
+      agentEndpointCatalogErrorCode={agentEndpointCatalog.errorCode}
       agentEndpoints={agentEndpointCatalog.endpoints}
       canvasRef={{ projectRoot, canvasId }}
       className="inset-0 h-screen w-screen min-w-0 rounded-none border-0 shadow-none ring-0"

@@ -513,6 +513,7 @@ export function BlockInspectorWindow() {
 
   return (
     <BlockInspector
+      agentEndpointCatalogErrorCode={agentEndpointCatalog.errorCode}
       agentEndpoints={agentEndpointCatalog.endpoints}
       blockFeedbackRecords={blockFeedbackRecords}
       blockReviewAttempts={blockReviewAttempts}

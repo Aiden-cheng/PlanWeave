@@ -26,8 +26,10 @@ import {
   type LogicalAgentEndpointInput
 } from "../collaboration/agentEndpointViewModel";
 import { inheritAgentEndpointValue } from "../collaboration/AgentEndpointSelect";
+import { AgentEndpointFleetCatalogHint } from "../collaboration/AgentEndpointFleetCatalogHint";
 
 export type RemoteRunPanelProps = {
+  agentEndpointCatalogErrorCode?: string | null;
   agentEndpoints?: readonly AvailableAgentEndpoint[];
   workItem: WorkItemRef | null;
   runtimeRemoteExecution?: RemoteBlockExecutionReadModel | null;
@@ -101,6 +103,7 @@ function phaseLabel(
 
 /** Unified local Auto Run and remote ACP execution control with distinct runtime authorities. */
 export function RemoteRunPanel({
+  agentEndpointCatalogErrorCode = null,
   agentEndpoints,
   workItem,
   runtimeRemoteExecution = null,
@@ -234,6 +237,11 @@ export function RemoteRunPanel({
             ))}
           </SelectContent>
         </Select>
+        <AgentEndpointFleetCatalogHint
+          className="text-[10px] text-destructive"
+          errorCode={agentEndpointCatalogErrorCode}
+          t={t}
+        />
         <p className="text-[10px] text-muted-foreground">{t("agentEndpointLocalHint")}</p>
       </div>
 

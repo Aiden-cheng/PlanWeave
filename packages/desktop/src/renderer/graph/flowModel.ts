@@ -178,6 +178,7 @@ export function graphNodes(
   graph: DesktopGraphViewModel,
   layout: DesktopLayout | null,
   agentEndpoints: readonly AvailableAgentEndpoint[],
+  agentEndpointFleetCatalogError: string | null,
   selectedAgentEndpointIdForTask: (taskId: string, executorName: string) => string,
   titleDrafts: Record<string, string>,
   promptDrafts: Record<string, string>,
@@ -263,6 +264,7 @@ export function graphNodes(
         promptDraft: promptDrafts[task.taskId] ?? task.promptMarkdown,
         saveState: saveStates[task.taskId] ?? "idle",
         agentEndpoints: applyAgentEndpointRequirements(agentEndpoints, requiredCapabilities),
+        agentEndpointFleetCatalogError,
         selectedAgentEndpointId: selectedAgentEndpointIdForTask(
           task.taskId,
           task.executorLabel === "Mixed" ? "manual" : task.executorLabel

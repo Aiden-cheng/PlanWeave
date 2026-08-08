@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createTranslator } from "../i18n";
-import { formatAgentEndpointFleetCatalogError } from "./formatAgentEndpointFleetCatalogError";
+import { formatAgentEndpointFleetCatalogError } from "../renderer/collaboration/formatAgentEndpointFleetCatalogError";
+import { createTranslator } from "../renderer/i18n";
 
 describe("formatAgentEndpointFleetCatalogError", () => {
   it("does not route fleet credential failures to People / Workspace connection copy", () => {

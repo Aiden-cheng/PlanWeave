@@ -20,8 +20,10 @@ import { taskNodeLabels } from "../graph/taskNodeLabels";
 import type { createTranslator } from "../i18n";
 import type { AppFlowNode, TaskNodeData } from "../types";
 import type { AvailableAgentEndpoint } from "../collaboration/agentEndpointViewModel";
+import { formatAgentEndpointFleetCatalogError } from "../collaboration/formatAgentEndpointFleetCatalogError";
 
 type GraphFlowSource = {
+  agentEndpointCatalogErrorCode?: string | null;
   agentEndpoints: AvailableAgentEndpoint[];
   selectedAgentEndpointIdForTask: (taskId: string, executorName: string) => string;
   graph: DesktopGraphViewModel | null;
@@ -94,6 +96,7 @@ export function useGraphFlowModel({
   taskActions
 }: UseGraphFlowModelArgs) {
   const {
+    agentEndpointCatalogErrorCode = null,
     agentEndpoints,
     selectedAgentEndpointIdForTask,
     graph,
@@ -133,6 +136,10 @@ export function useGraphFlowModel({
   const { saveSelectedBlockPrompt, saveSelectedBlockTitle } =
     blockActions;
   const { setEdges, setNodes, setSelectedBlock } = flowState;
+  const agentEndpointFleetCatalogError = formatAgentEndpointFleetCatalogError(
+    agentEndpointCatalogErrorCode,
+    t
+  );
 
   useEffect(() => {
     if (!graph) {
@@ -152,6 +159,7 @@ export function useGraphFlowModel({
         graph,
         layout,
         agentEndpoints,
+        agentEndpointFleetCatalogError,
         selectedAgentEndpointIdForTask,
         titleDrafts,
         promptDrafts,
@@ -199,6 +207,8 @@ export function useGraphFlowModel({
     blockFeedbackRecords,
     blockReviewAttempts,
     blockRunRecords,
+    agentEndpointCatalogErrorCode,
+    agentEndpointFleetCatalogError,
     agentEndpoints,
     selectedAgentEndpointIdForTask,
     graph,

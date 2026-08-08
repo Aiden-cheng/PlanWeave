@@ -903,6 +903,7 @@ export function ProjectWorkspaceProvider({
       blockRunRecords
     },
     source: {
+      agentEndpointCatalogErrorCode: agentEndpointCatalog.errorCode,
       agentEndpoints: agentEndpointCatalog.endpoints,
       selectedAgentEndpointIdForTask: taskAgentEndpointSelection.selectedEndpointId,
       graph,

@@ -116,6 +116,7 @@ function nodeData(patch: Partial<TaskNodeData> = {}): TaskNodeData {
       }
     ],
     selectedAgentEndpointId: "local:manual",
+    agentEndpointFleetCatalogError: null,
     labels: taskNodeLabels(createTranslator("en")),
     selectedBlock: null,
     blockRunRecords: [],
