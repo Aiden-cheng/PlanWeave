@@ -228,14 +228,17 @@ async function claimNextUnlocked(options: {
     };
   }
 
-  const implementationClaim = readiness.sequentialImplementationCandidates[0];
-  if (implementationClaim) {
-    return claimCandidate(implementationClaim);
-  }
-
+  // Sequential claim is task-closed-loop: finish a ready review gate before
+  // starting another task's implementation. Parallel keeps the opposite bias
+  // (implementation batches first; review only as sequential fallback above).
   const reviewClaim = await claimSequentialReviewBlock();
   if (reviewClaim) {
     return reviewClaim;
+  }
+
+  const implementationClaim = readiness.sequentialImplementationCandidates[0];
+  if (implementationClaim) {
+    return claimCandidate(implementationClaim);
   }
 
   if (readiness.firstProjectBlockedResult) {

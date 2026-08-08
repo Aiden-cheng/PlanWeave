@@ -427,6 +427,8 @@ export function buildClaimReadiness(input: BuildClaimReadinessInput): ClaimReadi
     .map((ref) =>
       claimCandidate(ref, input.graph, "claimed", input.manifest.execution.defaultExecutor)
     );
+  // Sequential claimNext prefers this list before implementations (task closed-loop).
+  // Parallel claimNext uses it only after the implementation batch is empty.
   const sequentialReviewCandidates = scopedReadyRefs
     .filter((ref) => getBlock(input.graph, ref).type === "review")
     .map((ref) =>

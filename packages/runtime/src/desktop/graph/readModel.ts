@@ -188,8 +188,8 @@ function resolveAutoRunPreflightClaim(
     return claimReadiness.sequentialImplementationCandidates[0]?.result ?? null;
   }
   return (
-    claimReadiness.sequentialImplementationCandidates[0]?.result ??
     claimReadiness.sequentialReviewCandidates[0]?.result ??
+    claimReadiness.sequentialImplementationCandidates[0]?.result ??
     null
   );
 }

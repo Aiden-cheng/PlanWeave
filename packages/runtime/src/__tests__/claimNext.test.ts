@@ -182,6 +182,59 @@ describe("claimNext", () => {
     expect(status.nextClaimable).not.toContain("T-001#R-001");
   });
 
+  it("prefers a ready review over another task's ready implementation in sequential mode", async () => {
+    const { root } = await createTestWorkspace(basicManifest({ includeSecondTask: true }));
+    await claimNext({ projectRoot: root });
+    await submitBlockResult({
+      projectRoot: root,
+      ref: "T-001#B-001",
+      reportPath: await writeReport(root, "b.md")
+    });
+
+    const status = await getExecutionStatus({ projectRoot: root });
+    expect(status.nextClaimable).toEqual(["T-001#R-001", "T-002#B-001"]);
+
+    expect(await claimNext({ projectRoot: root, dryRun: true })).toMatchObject({
+      kind: "block",
+      ref: "T-001#R-001",
+      blockType: "review"
+    });
+    expect(await claimNext({ projectRoot: root })).toMatchObject({
+      kind: "block",
+      ref: "T-001#R-001",
+      blockType: "review",
+      reason: "claimed"
+    });
+  });
+
+  it("keeps parallel batches on implementations when a peer review is also ready", async () => {
+    const { root } = await createTestWorkspace(
+      basicManifest({ includeSecondTask: true, parallel: true, maxConcurrent: 2 })
+    );
+    await claimBlock({ projectRoot: root, ref: "T-001#B-001" });
+    await submitBlockResult({
+      projectRoot: root,
+      ref: "T-001#B-001",
+      reportPath: await writeReport(root, "b-001.md")
+    });
+
+    // T-001#R is ready, but parallel still prefers the remaining ready implementation.
+    expect(await claimNext({ projectRoot: root, parallel: true, dryRun: true })).toEqual({
+      kind: "batch",
+      refs: ["T-002#B-001"],
+      effectiveExecutors: {
+        "T-002#B-001": "default"
+      }
+    });
+    expect(await claimNext({ projectRoot: root, parallel: true })).toEqual({
+      kind: "batch",
+      refs: ["T-002#B-001"],
+      effectiveExecutors: {
+        "T-002#B-001": "default"
+      }
+    });
+  });
+
   it("falls back to a sequential review claim when no parallel implementation block is available", async () => {
     const { root } = await createTestWorkspace(basicManifest({ parallel: true }));
     await claimNext({ projectRoot: root, parallel: true });
