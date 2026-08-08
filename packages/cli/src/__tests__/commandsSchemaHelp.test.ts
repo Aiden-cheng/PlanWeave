@@ -111,7 +111,7 @@ describe("planweave CLI help and schema output", () => {
     expect(formatSchemaHelp("state")).toContain("canonical remoteExecution projection");
     expect(formatSchemaHelp("state")).toContain("Runtime-derived actionRequired");
     expect(formatSchemaHelp("state")).toContain(
-      "normalize every unknown wire code to remote_execution_failed"
+      "normalize every other unknown wire code to remote_execution_failed"
     );
     expect(formatSchemaHelp("state")).not.toContain("preserve the portable code");
     expect(formatSchemaHelp("layout")).toContain('"desktop-layout/v1"');

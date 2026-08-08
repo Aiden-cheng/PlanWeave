@@ -10,6 +10,7 @@ import {
   OUTPUT_MAX_ARTIFACT_BYTES
 } from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
+import { redactRunnerEventText } from "../autoRun/runnerEventRedaction.js";
 import {
   activeRemoteBlockOwnershipSchema,
   remoteBlockOwnershipSchema,
@@ -26,6 +27,11 @@ const publicRemoteFailureCodes = [
   "acp_process_error",
   "acp_protocol_error",
   "acp_capability_missing",
+  "acp_unknown_error",
+  "acp_authentication_required",
+  "acp_limit_exceeded",
+  "acp_interaction_failed",
+  "acp_interaction_timeout",
   "authentication_failed",
   "execution_cancelled",
   "executor_failed",
@@ -45,6 +51,11 @@ const publicFailureMessagesByCode: Readonly<Record<PublicRemoteFailureCode, stri
   acp_process_error: "Remote ACP process failed.",
   acp_protocol_error: "Remote ACP protocol failed.",
   acp_capability_missing: "Remote ACP capability is missing.",
+  acp_unknown_error: "ACP execution failed.",
+  acp_authentication_required: "ACP authentication is required.",
+  acp_limit_exceeded: "ACP execution exceeded a configured limit.",
+  acp_interaction_failed: "ACP interaction handling failed.",
+  acp_interaction_timeout: "ACP interaction handling timed out.",
   authentication_failed: "Remote authentication failed.",
   execution_cancelled: "Remote execution was cancelled.",
   executor_failed: "Remote executor failed.",
@@ -55,7 +66,39 @@ const publicFailureMessagesByCode: Readonly<Record<PublicRemoteFailureCode, stri
   transport_failed: "Remote transport failed."
 };
 
-/** Runtime-safe terminal failure: identity is preserved while Host diagnostics are discarded. */
+/** Codes where Host already redacts ACP engine diagnostics; keep the detail for operators. */
+const diagnosticPreservingFailureCodes = new Set<PublicRemoteFailureCode>([
+  "acp_unknown_error",
+  "acp_authentication_required",
+  "acp_limit_exceeded",
+  "acp_interaction_failed",
+  "acp_interaction_timeout"
+]);
+
+const PUBLIC_FAILURE_MESSAGE_MAX_CHARS = 2_048;
+
+function looksLikePrivateFilesystemPath(value: string): boolean {
+  return (
+    /(?:^|[\s"'`(])(?:\/(?:Users|home|root|var\/folders|tmp)\/|[A-Za-z]:\\(?:Users|Windows|Program Files)\\|\\\\)/i.test(
+      value
+    ) || /\bfile:\/\//i.test(value)
+  );
+}
+
+function publicRemoteFailureMessage(code: PublicRemoteFailureCode, wireMessage: string): string {
+  const base = publicFailureMessagesByCode[code];
+  if (!diagnosticPreservingFailureCodes.has(code)) return base;
+  const redacted = redactRunnerEventText(wireMessage).text.trim();
+  if (!redacted || looksLikePrivateFilesystemPath(redacted)) return base;
+  return redacted.length <= PUBLIC_FAILURE_MESSAGE_MAX_CHARS
+    ? redacted
+    : redacted.slice(0, PUBLIC_FAILURE_MESSAGE_MAX_CHARS);
+}
+
+/**
+ * Runtime-safe terminal failure: unknown Host codes stay opaque, while selected ACP codes
+ * keep redacted engine diagnostics (e.g. provider usage limits) for operator localization.
+ */
 export const publicRemoteFailureSchema = normalizedFailureSchema.transform((failure) => {
   const parsedCode = publicRemoteFailureCodeSchema.safeParse(failure.code);
   const code: PublicRemoteFailureCode = parsedCode.success
@@ -63,7 +106,7 @@ export const publicRemoteFailureSchema = normalizedFailureSchema.transform((fail
     : "remote_execution_failed";
   return {
     code,
-    message: publicFailureMessagesByCode[code],
+    message: publicRemoteFailureMessage(code, failure.message),
     retryable: failure.retryable
   };
 });
@@ -144,7 +187,9 @@ export const remoteBlockCompletionInputSchema = remoteBlockRefIdentitySchema.ext
 });
 
 export const remoteBlockFailureInputSchema = remoteBlockRefIdentitySchema.extend({
-  failure: publicRemoteFailureSchema
+  failure: publicRemoteFailureSchema,
+  /** When present, Task Workspace failure materialization labels the run with this agent. */
+  agentId: envelopeShape.agentId.optional()
 });
 
 export const remoteBlockInterruptionInputSchema = remoteBlockRefIdentitySchema.extend({

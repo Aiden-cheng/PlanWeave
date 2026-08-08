@@ -43,7 +43,7 @@ function failure(code: string, message: string, retryable = false): AgentHostExe
   return new AgentHostExecutionError({ code, message, retryable });
 }
 
-function engineFailure(reason: string): AgentHostExecutionError {
+function engineFailure(reason: string, diagnostic?: string): AgentHostExecutionError {
   const code = `acp_${reason}`;
   const messages: Record<string, string> = {
     acp_authentication_required: "ACP authentication is required.",
@@ -59,7 +59,10 @@ function engineFailure(reason: string): AgentHostExecutionError {
     acp_protocol_error: "The ACP process violated the protocol.",
     acp_unknown_error: "ACP execution failed."
   };
-  return failure(code, messages[code] ?? "ACP execution failed.");
+  const base = messages[code] ?? "ACP execution failed.";
+  const detail = diagnostic?.trim();
+  // Keep the stable prefix so Desktop can match known codes, but retain the engine diagnostic.
+  return failure(code, detail && detail !== base ? `${base} ${detail}` : base);
 }
 
 function identityOf(command: ReturnType<typeof parseAgentHostExecuteCommand>) {
@@ -345,7 +348,10 @@ export class RemoteAcpExecutor implements AgentHostExecutor {
       if (result.terminal.state === "cancelled") {
         throw failure("execution_cancelled", "The remote ACP execution was cancelled.");
       }
-      throw engineFailure(result.terminal.reason);
+      throw engineFailure(
+        result.terminal.reason,
+        result.terminal.state === "failed" ? result.terminal.message : undefined
+      );
     }
     if (result.output.trim().length === 0) {
       throw failure("report_output_missing", "ACP completed without report output.");

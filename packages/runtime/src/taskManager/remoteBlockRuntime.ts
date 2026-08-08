@@ -524,7 +524,8 @@ export function createRemoteBlockRuntimePort(options: {
           runId,
           runDir,
           failure: input.failure,
-          identity: identityFromInput(input)
+          identity: identityFromInput(input),
+          ...(input.agentId ? { agentId: input.agentId } : {})
         });
         await upsertBlockRunInIndex(runRoot, runId, true);
         await updateTaskIndex(context.workspace, taskId, (index) => ({

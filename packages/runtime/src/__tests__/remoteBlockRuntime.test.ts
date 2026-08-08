@@ -801,6 +801,29 @@ describe("remote block runtime terminal transitions", () => {
     expect(reset).not.toHaveProperty("remoteOperationReceipt");
   });
 
+  it("labels materialized remote failure runs with the endpoint agentId", async () => {
+    const { init, port, identity } = await activateReadyBlock();
+    await port.fail({
+      ref: "T-001#B-001",
+      ...identity,
+      agentId: "grok",
+      failure: {
+        code: "remote_execution_failed",
+        message: "Remote execution failed.",
+        retryable: false
+      }
+    });
+    const lastRunId = (await readState(init.workspace.stateFile)).blocks["T-001#B-001"]?.lastRunId;
+    expect(lastRunId).toMatch(/^RUN-/);
+    const metadata = JSON.parse(
+      await readFile(
+        join(init.workspace.resultsDir, "T-001", "blocks", "B-001", "runs", lastRunId!, "metadata.json"),
+        "utf8"
+      )
+    ) as { agentId: string; executor: string };
+    expect(metadata).toMatchObject({ agentId: "grok", executor: "grok" });
+  });
+
   it.each([
     ["/tmp/private/token.db", "executor_failed", "Remote executor failed.", true],
     [
@@ -832,6 +855,18 @@ describe("remote block runtime terminal transitions", () => {
     ["private process details", "acp_process_error", "Remote ACP process failed.", true],
     ["private protocol frame", "acp_protocol_error", "Remote ACP protocol failed.", false],
     ["private elapsed timing", "acp_operation_timeout", "Remote ACP execution timed out.", true],
+    [
+      "ACP execution failed. provider usage limit exceeded",
+      "acp_unknown_error",
+      "ACP execution failed. provider usage limit exceeded",
+      false
+    ],
+    [
+      "ACP execution failed. /Users/private/token.db",
+      "acp_unknown_error",
+      "ACP execution failed.",
+      false
+    ],
     ["ordinary host diagnostic", "token_secret_failure", "Remote execution failed.", false]
   ])("maps private failure diagnostic %s to a stable public contract", async (rawMessage, inputCode, publicMessage, retryable) => {
     const { root, init, port, identity } = await activateReadyBlock();
@@ -855,10 +890,17 @@ describe("remote block runtime terminal transitions", () => {
         failure: { code, message: publicMessage, retryable }
       }
     });
-    expect(JSON.stringify(result)).not.toContain(rawMessage);
-    expect(JSON.stringify(await readState(init.workspace.stateFile))).not.toContain(rawMessage);
+    if (rawMessage !== publicMessage) {
+      expect(JSON.stringify(result)).not.toContain(rawMessage);
+      expect(JSON.stringify(await readState(init.workspace.stateFile))).not.toContain(rawMessage);
+    }
 
-    const replayDiagnostic = `different private diagnostic for ${inputCode}`;
+    const replayDiagnostic =
+      rawMessage === publicMessage
+        ? rawMessage
+        : inputCode === "acp_unknown_error"
+          ? "ACP execution failed. /Users/private/other-token.db"
+          : `different private diagnostic for ${inputCode}`;
     const replay = await port.fail({
       ...input,
       failure: {
@@ -882,8 +924,12 @@ describe("remote block runtime terminal transitions", () => {
     ];
     for (const surface of surfaces) {
       const serialized = JSON.stringify(surface);
-      expect(serialized).not.toContain(rawMessage);
-      expect(serialized).not.toContain(replayDiagnostic);
+      if (rawMessage !== publicMessage) {
+        expect(serialized).not.toContain(rawMessage);
+      }
+      if (replayDiagnostic !== publicMessage) {
+        expect(serialized).not.toContain(replayDiagnostic);
+      }
     }
   });
 

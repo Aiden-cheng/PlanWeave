@@ -616,4 +616,58 @@ describe("RemoteAcpExecutor", () => {
       vi.resetModules();
     }
   });
+
+  it("includes ACP engine diagnostic text in acp_unknown_error failures", async () => {
+    vi.resetModules();
+    vi.doMock("@planweave-ai/runtime", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("@planweave-ai/runtime")>()),
+      executeAcp: vi.fn(async () => ({
+        sessionId: "session-diagnostic",
+        output: "",
+        terminal: {
+          state: "failed",
+          reason: "unknown_error",
+          message: "spawn EACCES /opt/grok/bin/grok"
+        },
+        cleanup: { attempted: true, completed: true }
+      }))
+    }));
+    vi.doMock("../execution/inputArtifactWorkspace.js", () => ({
+      prepareInputArtifacts: vi.fn(async () => ({
+        prompt: "prepared prompt",
+        cleanup: vi.fn(async () => undefined)
+      }))
+    }));
+
+    try {
+      const { RemoteAcpExecutor: IsolatedRemoteAcpExecutor } = await import(
+        "../execution/remoteAcpExecutor.js"
+      );
+      const { AgentHostExecutionError: IsolatedAgentHostExecutionError } = await import(
+        "../execution/agentHostExecutor.js"
+      );
+      const { outbox } = await openOutbox();
+      const input = command();
+      const executor = new IsolatedRemoteAcpExecutor({
+        workspaceResolver: { resolve: () => ({ cwd: process.cwd() }) },
+        profileResolver: profileResolver("success"),
+        outbox,
+        hostCapabilities: ["linux", "acp.test"]
+      });
+      try {
+        await executor.execute(input, artifactContext(input).context);
+        throw new Error("expected_agent_host_execution_failure");
+      } catch (error) {
+        expect(error).toBeInstanceOf(IsolatedAgentHostExecutionError);
+        expect((error as InstanceType<typeof IsolatedAgentHostExecutionError>).failure.code).toBe(
+          "acp_unknown_error"
+        );
+        expect((error as Error).message).toContain("spawn EACCES /opt/grok/bin/grok");
+      }
+    } finally {
+      vi.doUnmock("@planweave-ai/runtime");
+      vi.doUnmock("../execution/inputArtifactWorkspace.js");
+      vi.resetModules();
+    }
+  });
 });
