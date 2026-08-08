@@ -66,7 +66,6 @@ type GraphFlowTaskActions = {
 };
 
 type GraphFlowBlockActions = {
-  saveSelectedBlockExecutor: TaskNodeData["onBlockExecutorChange"];
   saveSelectedBlockPrompt: TaskNodeData["onBlockPromptSave"];
   saveSelectedBlockTitle: TaskNodeData["onBlockTitleSave"];
 };
@@ -131,7 +130,7 @@ export function useGraphFlowModel({
     handleTitleSave,
     startAutoRunWithScope
   } = taskActions;
-  const { saveSelectedBlockExecutor, saveSelectedBlockPrompt, saveSelectedBlockTitle } =
+  const { saveSelectedBlockPrompt, saveSelectedBlockTitle } =
     blockActions;
   const { setEdges, setNodes, setSelectedBlock } = flowState;
 
@@ -181,7 +180,6 @@ export function useGraphFlowModel({
         handleDeleteBlock,
         setSelectedBlock,
         saveSelectedBlockTitle,
-        saveSelectedBlockExecutor,
         saveSelectedBlockPrompt,
         handleOpenRunRecord,
         resolvedResourceUi,
@@ -222,7 +220,6 @@ export function useGraphFlowModel({
     handleTitleSave,
     layout,
     promptDrafts,
-    saveSelectedBlockExecutor,
     saveSelectedBlockPrompt,
     saveSelectedBlockTitle,
     saveStates,

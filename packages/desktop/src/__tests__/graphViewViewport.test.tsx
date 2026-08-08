@@ -131,7 +131,6 @@ function flowNode(promptDraft = "# Prompt"): AppFlowNode {
       onBlockDelete: vi.fn(),
       onSelectedBlockChange: vi.fn(),
       onBlockTitleSave: vi.fn(),
-      onBlockExecutorChange: vi.fn(),
       onBlockPromptSave: vi.fn(),
       onOpenRunRecord: vi.fn()
     }

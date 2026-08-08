@@ -10,6 +10,8 @@ import { useCollaborationStatus } from "./hooks/useCollaborationStatus";
 import { useDetectedAgents } from "./hooks/useDetectedAgents";
 import { useDesktopSettingsBridge } from "./hooks/useDesktopSettingsBridge";
 import { useSharedCanvasCommands } from "./hooks/useSharedCanvasCommands";
+import { useTaskAgentEndpointSelection } from "./hooks/useTaskAgentEndpointSelection";
+import { useWorkspaceAgentEndpointCatalog } from "./hooks/useWorkspaceAgentEndpointCatalog";
 import { isCollaborationSessionConnected } from "./collaboration/sessionState";
 
 function supportedLanguage(value: string | null): Language {
@@ -62,7 +64,7 @@ export function TaskInspectorWindow() {
   const [graph, setGraph] = useState<DesktopGraphViewModel | null>(null);
   const [error, setError] = useState<string | null>(bridge ? null : t("bridgeUnavailable"));
   const [draftDirty, setDraftDirty] = useState(false);
-  const { settings } = useDesktopSettingsBridge({ setError });
+  const { settings, updateSettingsAndWait } = useDesktopSettingsBridge({ setError });
   const { agentDetections } = useDetectedAgents();
   const draftDirtyRef = useRef(false);
 
@@ -126,6 +128,15 @@ export function TaskInspectorWindow() {
       await loadTask();
     }
   });
+  const agentEndpointCatalog = useWorkspaceAgentEndpointCatalog({
+    agentDetections,
+    agentTransport: settings.execution.agentTransport,
+    enabled: sharedCanvasEnabled,
+    graph,
+    profileId: activeCollaborationProfile?.profileId ?? null,
+    projectId: sharedProjectId,
+    updateSettingsAndWait
+  });
 
   useEffect(() => {
     void loadTask();
@@ -178,17 +189,17 @@ export function TaskInspectorWindow() {
     }
   }, [canvasId, loadTask, projectRoot, selectedTask, sharedCanvas]);
 
-  const saveSelectedTaskExecutor = useCallback(
-    async (executorName: string | null) => {
-      if (!projectRoot || !selectedTask) {
-        return;
+  const changeLogicalExecutor = useCallback(
+    async (targetTaskId: string, executorName: string) => {
+      if (!projectRoot) {
+        return false;
       }
       try {
         const mode = await runDurablePackageWrite({
           sharedCanvas,
           intent: {
             kind: "update_task_fields",
-            taskId: selectedTask.taskId,
+            taskId: targetTaskId,
             fields: { executor: executorName }
           },
           onError: setError,
@@ -196,7 +207,7 @@ export function TaskInspectorWindow() {
             if (!bridge) return;
             const result = await bridge.updateTaskExecutor(
               { projectRoot, canvasId },
-              selectedTask.taskId,
+              targetTaskId,
               executorName
             );
             if (!result.ok) {
@@ -206,14 +217,26 @@ export function TaskInspectorWindow() {
             }
           }
         });
-        if (mode === "failed") return;
+        if (mode === "failed") return false;
         await loadTask();
+        return true;
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : String(caught));
+        return false;
       }
     },
-    [canvasId, loadTask, projectRoot, selectedTask, sharedCanvas]
+    [canvasId, loadTask, projectRoot, sharedCanvas]
   );
+
+  const taskAgentEndpointSelection = useTaskAgentEndpointSelection({
+    agentEndpoints: agentEndpointCatalog.endpoints,
+    canvasId: canvasId ?? "default",
+    changeLogicalExecutor,
+    preferences: settings.execution.agentEndpointPreferences,
+    projectRoot: projectRoot || null,
+    savePreference: agentEndpointCatalog.savePreference,
+    setError
+  });
 
   const saveSelectedTaskPrompt = useCallback(async () => {
     if (!projectRoot || !selectedTask) {
@@ -251,20 +274,31 @@ export function TaskInspectorWindow() {
     }
   }, [canvasId, loadTask, projectRoot, selectedTask, sharedCanvas]);
 
+  const selectedEndpointId = selectedTask
+    ? taskAgentEndpointSelection.selectedEndpointId(
+        selectedTask.taskId,
+        selectedTask.executor ?? "manual"
+      )
+    : null;
+
   return (
     <TaskInspector
+      agentEndpoints={agentEndpointCatalog.endpoints}
       canvasRef={{ projectRoot, canvasId }}
       className="inset-0 h-screen w-screen min-w-0 rounded-none border-0 shadow-none ring-0"
       error={error}
-      agentDetections={agentDetections}
-      agentTransport={settings.execution.agentTransport}
-      executorOptions={graph?.executorOptions ?? []}
       graph={graph}
+      onAgentEndpointChange={(endpointId) => {
+        if (!selectedTask) return;
+        void taskAgentEndpointSelection.changeEndpoint(selectedTask.taskId, endpointId);
+      }}
       onClose={() => window.close()}
       onDraftDirtyChange={updateDraftDirty}
-      saveSelectedTaskExecutor={saveSelectedTaskExecutor}
+      onRefreshAgentEndpoints={agentEndpointCatalog.refresh}
+      refreshingAgentEndpoints={agentEndpointCatalog.refreshing}
       saveSelectedTaskPrompt={saveSelectedTaskPrompt}
       saveSelectedTaskTitle={saveSelectedTaskTitle}
+      selectedAgentEndpointId={selectedEndpointId}
       selectedTask={selectedTask}
       setSelectedTask={setSelectedTask}
       t={t}

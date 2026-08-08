@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { CSSProperties, Dispatch, SetStateAction } from "react";
 import type {
-  DesktopAgentDetection,
   DesktopBlockPreview,
   DesktopCanvasReference,
   DesktopGraphViewModel,
-  DesktopTaskDetail,
-  RunnerTransport
+  DesktopTaskDetail
 } from "@planweave-ai/runtime";
 import { RefreshCwIcon, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -20,18 +18,11 @@ import {
   CardTitle
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { buildExecutorOptionViews, executorOptionName } from "../executors/executorOptionViewModel";
+import { AgentEndpointSelect } from "../collaboration/AgentEndpointSelect";
+import type { AvailableAgentEndpoint } from "../collaboration/agentEndpointViewModel";
 import { useExecutorPreflight } from "../hooks/useExecutorPreflight";
 import type { createTranslator } from "../i18n";
 import { AssigneeInspectorField } from "../team/AssigneeInspectorField";
@@ -39,18 +30,19 @@ import { WorkItemCollaborationPanel } from "../team/WorkItemCollaborationPanel";
 import { statusVariant } from "../viewHelpers";
 
 type TaskInspectorProps = {
+  agentEndpoints?: readonly AvailableAgentEndpoint[];
   canvasRef?: DesktopCanvasReference | null;
   className?: string;
   error: string | null;
-  agentDetections?: DesktopAgentDetection[];
-  agentTransport?: RunnerTransport;
-  executorOptions: string[];
   graph: DesktopGraphViewModel | null;
+  onAgentEndpointChange?: (endpointId: string) => void;
   onClose: () => void;
   onDraftDirtyChange?: (dirty: boolean) => void;
-  saveSelectedTaskExecutor: (executorName: string | null) => Promise<void>;
+  onRefreshAgentEndpoints?: () => Promise<void>;
+  refreshingAgentEndpoints?: boolean;
   saveSelectedTaskPrompt: () => Promise<void>;
   saveSelectedTaskTitle: () => Promise<void>;
+  selectedAgentEndpointId?: string | null;
   selectedTask: DesktopTaskDetail | null;
   setSelectedTask: Dispatch<SetStateAction<DesktopTaskDetail | null>>;
   style?: CSSProperties;
@@ -58,28 +50,6 @@ type TaskInspectorProps = {
 };
 
 const taskPromptAutosaveDelayMs = 700;
-
-function selectedTaskExecutorValue(
-  selectedTask: DesktopTaskDetail | null,
-  taskBlocks: DesktopBlockPreview[],
-  packageExecutorNames: readonly string[]
-): string {
-  if (!selectedTask) {
-    return "";
-  }
-  const blockExecutors = new Set(
-    taskBlocks
-      .map((block) => block.executor)
-      .filter((executor): executor is string => executor !== null)
-  );
-  if (blockExecutors.size > 1) {
-    return "__custom";
-  }
-  return executorOptionName(
-    [...blockExecutors][0] ?? selectedTask.executor ?? "manual",
-    packageExecutorNames
-  );
-}
 
 function taskPreflightExecutorValue(
   selectedTask: DesktopTaskDetail | null,
@@ -94,8 +64,7 @@ function taskPreflightExecutorValue(
       .filter((executor): executor is string => executor !== null)
   );
   if (blockExecutors.size === 1) {
-    const executor = [...blockExecutors][0] ?? null;
-    return executor;
+    return [...blockExecutors][0] ?? null;
   }
   if (blockExecutors.size > 1) {
     return null;
@@ -104,18 +73,19 @@ function taskPreflightExecutorValue(
 }
 
 export function TaskInspector({
-  agentDetections = [],
-  agentTransport,
+  agentEndpoints = [],
   canvasRef,
   className,
   error,
-  executorOptions,
   graph,
+  onAgentEndpointChange,
   onClose,
   onDraftDirtyChange,
-  saveSelectedTaskExecutor,
+  onRefreshAgentEndpoints,
+  refreshingAgentEndpoints = false,
   saveSelectedTaskPrompt,
   saveSelectedTaskTitle,
+  selectedAgentEndpointId = null,
   selectedTask,
   setSelectedTask,
   style,
@@ -128,20 +98,10 @@ export function TaskInspector({
     }
     return graph.tasks.find((task) => task.taskId === selectedTask.taskId)?.blocks ?? [];
   }, [graph, selectedTask]);
-  const selectedExecutor = selectedTaskExecutorValue(
-    selectedTask,
-    taskBlocks,
-    graph?.packageExecutorNames ?? []
-  );
   const concreteExecutor = taskPreflightExecutorValue(selectedTask, taskBlocks);
-  const taskExecutorOptions = buildExecutorOptionViews({
-    agentDetections,
-    agentTransport: agentTransport ?? graph?.agentTransport,
-    literalExecutorNames: graph?.packageExecutorNames,
-    currentExecutorNames:
-      selectedExecutor !== "__custom" && selectedExecutor ? [selectedExecutor] : [],
-    executorOptions
-  });
+  const endpointSelectValue =
+    selectedAgentEndpointId ??
+    `local:${concreteExecutor ?? selectedTask?.executor ?? "manual"}`;
   const preflight = useExecutorPreflight({
     bridgeUnavailableMessage: t("bridgeUnavailable"),
     cacheKey: graph ? `${graph.graphVersion}:${graph.packageFingerprint}` : null,
@@ -249,46 +209,30 @@ export function TaskInspector({
       <CardContent className="flex min-h-0 flex-1 flex-col gap-5 overflow-auto px-5 py-4">
         {selectedTask ? (
           <div className="flex min-h-0 flex-1 flex-col gap-5">
-            <div className="flex flex-col gap-1">
-              <div className="text-xs font-medium text-muted-foreground">{t("agent")}</div>
-              <Select
-                value={selectedExecutor}
-                onValueChange={(value) => void saveSelectedTaskExecutor(value)}
-              >
-                <SelectTrigger aria-label={t("agent")}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {selectedExecutor === "__custom" ? (
-                      <SelectItem value="__custom" disabled>
-                        {t("customExecutor")}
-                      </SelectItem>
-                    ) : null}
-                    {taskExecutorOptions.map((executor) => (
-                      <SelectItem
-                        disabled={executor.disabled}
-                        value={executor.name}
-                        key={executor.name}
-                      >
-                        <span className="flex min-w-0 items-center gap-2">
-                          <span>{executor.label}</span>
-                          {executor.custom ? (
-                            <span className="text-xs text-muted-foreground">
-                              {t("customExecutor")}
-                            </span>
-                          ) : null}
-                          {executor.disabled ? (
-                            <span className="text-xs text-muted-foreground">
-                              {t("unavailable")}
-                            </span>
-                          ) : null}
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+            <div className="flex flex-col gap-1" data-testid="task-agent-endpoint-selector">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs font-medium text-muted-foreground">
+                  {t("agentEndpointLabel")}
+                </div>
+                {onRefreshAgentEndpoints ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={refreshingAgentEndpoints}
+                    onClick={() => void onRefreshAgentEndpoints()}
+                  >
+                    {t("agentEndpointRefresh")}
+                  </Button>
+                ) : null}
+              </div>
+              <AgentEndpointSelect
+                ariaLabel={t("agentEndpointLabel")}
+                disabled={!onAgentEndpointChange}
+                endpoints={agentEndpoints}
+                onValueChange={(value) => onAgentEndpointChange?.(value)}
+                selectedEndpointId={endpointSelectValue}
+                unavailableLabel={t("unavailable")}
+              />
               <div className="flex min-h-7 items-center gap-2 text-xs text-muted-foreground">
                 {!concreteExecutor ? (
                   <span>{t("executorPreflightSelectConcrete")}</span>

@@ -113,7 +113,6 @@ export type TaskNodeData = {
   onBlockDelete: (ref: string) => void;
   onSelectedBlockChange: (block: DesktopBlockDetail) => void;
   onBlockTitleSave: () => void;
-  onBlockExecutorChange: (executorName: string | null) => void;
   onBlockPromptSave: () => void;
   onOpenRunRecord: (recordId: string | null | undefined) => void;
   onResourceHover: (name: string | null) => void;

@@ -6,6 +6,7 @@ import {
   agentEndpointSelectionId,
   selectedAgentEndpointId
 } from "../collaboration/agentEndpointPreferences";
+import { changeAgentEndpointSelection } from "../collaboration/changeAgentEndpoint";
 
 export function useTaskAgentEndpointSelection(input: {
   agentEndpoints: readonly AvailableAgentEndpoint[];
@@ -42,14 +43,17 @@ export function useTaskAgentEndpointSelection(input: {
   );
   const changeEndpoint = useCallback(
     async (taskId: string, endpointId: string) => {
-      const endpoint = input.agentEndpoints.find((candidate) => candidate.id === endpointId);
-      const key = preferenceKey(taskId);
-      if (!endpoint?.available || !key) {
-        input.setError(endpoint?.unavailableReason ?? "agent_endpoint_selection_unavailable");
-        return;
-      }
-      if (!(await input.changeLogicalExecutor(taskId, endpoint.executorName))) return;
-      await input.savePreference(key, endpoint);
+      await changeAgentEndpointSelection({
+        endpointId,
+        endpoints: input.agentEndpoints,
+        preferenceKey: preferenceKey(taskId),
+        changeLogicalExecutor: async (executorName) => {
+          if (executorName === null) return false;
+          return input.changeLogicalExecutor(taskId, executorName);
+        },
+        savePreference: input.savePreference,
+        setError: input.setError
+      });
     },
     [
       input.agentEndpoints,

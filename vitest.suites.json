@@ -146,6 +146,7 @@
         "hostAdministration.test.tsx",
         "hostBootstrapHandoff.test.ts",
         "inspectorAutoRunEvents.test.tsx",
+        "inspectorEndpointPickerUnification.test.tsx",
         "inspectorWindowSecurity.test.ts",
         "ipcContract.test.ts",
         "lerpedNodeDrag.test.tsx",

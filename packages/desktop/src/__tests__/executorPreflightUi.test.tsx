@@ -932,7 +932,6 @@ describe("executor preflight desktop UI", () => {
         handleOpenRunRecord={vi.fn()}
         onBlockSelect={vi.fn()}
         onClose={vi.fn()}
-        saveSelectedBlockExecutor={vi.fn()}
         saveSelectedBlockPrompt={vi.fn()}
         saveSelectedBlockTitle={vi.fn()}
         selectedBlock={blockDetail({ executor: null, effectiveExecutor: "codex" })}
@@ -969,7 +968,6 @@ describe("executor preflight desktop UI", () => {
         handleOpenRunRecord={vi.fn()}
         onBlockSelect={vi.fn()}
         onClose={vi.fn()}
-        saveSelectedBlockExecutor={vi.fn()}
         saveSelectedBlockPrompt={vi.fn()}
         saveSelectedBlockTitle={vi.fn()}
         selectedBlock={blockDetail({ executor: "codex-acp", effectiveExecutor: "codex-acp" })}
@@ -1000,7 +998,6 @@ describe("executor preflight desktop UI", () => {
         handleOpenRunRecord={vi.fn()}
         onBlockSelect={vi.fn()}
         onClose={vi.fn()}
-        saveSelectedBlockExecutor={vi.fn()}
         saveSelectedBlockPrompt={vi.fn()}
         saveSelectedBlockTitle={vi.fn()}
         selectedBlock={blockDetail({ executor: "codex-acp", effectiveExecutor: "codex-acp" })}
@@ -1022,21 +1019,34 @@ describe("executor preflight desktop UI", () => {
 
     render(
       <TaskInspector
+        agentEndpoints={[
+          {
+            id: "local:codex-acp",
+            source: "local",
+            executorName: "codex-acp",
+            displayName: "codex",
+            locationName: "",
+            available: true,
+            unavailableReason: null,
+            capabilities: [],
+            localExecutorName: "codex-acp"
+          }
+        ]}
         canvasRef={canvasRef}
         error={null}
-        executorOptions={["codex"]}
         graph={graphWithExecutors(["codex"], { agentTransport: "cli" })}
+        onAgentEndpointChange={vi.fn()}
         onClose={vi.fn()}
-        saveSelectedTaskExecutor={vi.fn()}
         saveSelectedTaskPrompt={vi.fn()}
         saveSelectedTaskTitle={vi.fn()}
+        selectedAgentEndpointId="local:codex-acp"
         selectedTask={taskDetail({ executor: "codex-acp" })}
         setSelectedTask={vi.fn()}
         t={t}
       />
     );
 
-    expect(screen.getByRole("combobox", { name: "Agent" })).toHaveTextContent("codex");
+    expect(screen.getByRole("combobox", { name: "Agent Endpoint" })).toHaveTextContent("codex");
     await userEvent.click(screen.getByTestId("task-executor-preflight"));
     expect(bridgeMock.api.testExecutorProfile).toHaveBeenCalledWith(canvasRef, "codex-acp");
   });
@@ -1044,12 +1054,35 @@ describe("executor preflight desktop UI", () => {
   it("does not preflight a task executor inferred from renderer fallback defaults", () => {
     render(
       <TaskInspector
+        agentEndpoints={[
+          {
+            id: "local:manual",
+            source: "local",
+            executorName: "manual",
+            displayName: "manual",
+            locationName: "",
+            available: true,
+            unavailableReason: null,
+            capabilities: [],
+            localExecutorName: "manual"
+          },
+          {
+            id: "local:codex",
+            source: "local",
+            executorName: "codex",
+            displayName: "codex",
+            locationName: "",
+            available: true,
+            unavailableReason: null,
+            capabilities: [],
+            localExecutorName: "codex"
+          }
+        ]}
         canvasRef={canvasRef}
         error={null}
-        executorOptions={["manual", "codex"]}
         graph={graphWithExecutors(["manual", "codex"])}
+        onAgentEndpointChange={vi.fn()}
         onClose={vi.fn()}
-        saveSelectedTaskExecutor={vi.fn()}
         saveSelectedTaskPrompt={vi.fn()}
         saveSelectedTaskTitle={vi.fn()}
         selectedTask={taskDetail({ executor: null })}

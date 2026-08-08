@@ -21,6 +21,7 @@ import {
 } from "./collaboration/agentEndpointPreferences";
 import { applyAgentEndpointRequirements } from "./collaboration/agentEndpointViewModel";
 import { inheritAgentEndpointValue } from "./collaboration/AgentEndpointSelect";
+import { changeAgentEndpointSelection } from "./collaboration/changeAgentEndpoint";
 import { createTranslator, type Language } from "./i18n";
 import { BlockInspector } from "./inspector/BlockInspector";
 import { useCollaborationStatus } from "./hooks/useCollaborationStatus";
@@ -253,25 +254,19 @@ export function BlockInspectorWindow() {
         scope: { kind: "block", blockRef: selectedBlock.ref }
       })
     : null;
-  const inheritedTaskPreferenceKey = selectedBlock
-    ? agentEndpointPreferenceKey({
-        projectRoot,
-        canvasId: canvasId ?? "default",
-        scope: { kind: "task", taskId: selectedBlock.taskId }
-      })
-    : null;
-  const selectedBlockAgentEndpointId = agentEndpointSelectionId(
-    selectedAgentEndpointId({
-      executorName: selectedBlock?.executor ?? selectedBlock?.effectiveExecutor ?? "manual",
-      preference:
-        selectedBlock?.executor && endpointPreferenceKey
-          ? settings.execution.agentEndpointPreferences[endpointPreferenceKey]
-          : inheritedTaskPreferenceKey
-            ? settings.execution.agentEndpointPreferences[inheritedTaskPreferenceKey]
-            : undefined,
-      endpoints: availableAgentEndpoints
-    })
-  );
+  const selectedBlockAgentEndpointId = !selectedBlock
+    ? null
+    : !selectedBlock.executor
+      ? inheritAgentEndpointValue
+      : agentEndpointSelectionId(
+          selectedAgentEndpointId({
+            executorName: selectedBlock.executor,
+            preference: endpointPreferenceKey
+              ? settings.execution.agentEndpointPreferences[endpointPreferenceKey]
+              : undefined,
+            endpoints: availableAgentEndpoints
+          })
+        );
 
   const handleBlockSelect = useCallback(
     async (ref: string) => {
@@ -458,22 +453,17 @@ export function BlockInspectorWindow() {
     [canvasId, projectRoot, refreshBlock, selectedBlock, sharedCanvas]
   );
 
-  const handleAgentEndpointChange = useCallback(
+  const changeEndpoint = useCallback(
     async (endpointId: string) => {
-      if (endpointId === inheritAgentEndpointValue) {
-        if (!endpointPreferenceKey || !(await saveSelectedBlockExecutor(null))) return;
-        await agentEndpointCatalog.savePreference(endpointPreferenceKey, null);
-        return;
-      }
-      const endpoint = availableAgentEndpoints.find(
-        (candidate) => candidate.id === endpointId && candidate.available
-      );
-      if (!endpoint || !endpointPreferenceKey) {
-        setError(endpoint?.unavailableReason ?? "agent_endpoint_selection_unavailable");
-        return;
-      }
-      if (!(await saveSelectedBlockExecutor(endpoint.executorName))) return;
-      await agentEndpointCatalog.savePreference(endpointPreferenceKey, endpoint);
+      await changeAgentEndpointSelection({
+        endpointId,
+        endpoints: availableAgentEndpoints,
+        preferenceKey: endpointPreferenceKey,
+        allowInherit: true,
+        changeLogicalExecutor: saveSelectedBlockExecutor,
+        savePreference: agentEndpointCatalog.savePreference,
+        setError
+      });
     },
     [
       availableAgentEndpoints,
@@ -536,7 +526,7 @@ export function BlockInspectorWindow() {
       onOpenTerminal={handleOpenTerminal}
       onOpenRunTerminal={handleOpenRunTerminal}
       onBlockSelect={handleBlockSelect}
-      onAgentEndpointChange={(endpointId) => void handleAgentEndpointChange(endpointId)}
+      onAgentEndpointChange={(endpointId) => void changeEndpoint(endpointId)}
       onClose={() => window.close()}
       onDraftDirtyChange={updateDraftDirty}
       onTerminalDefaultAppChange={handleTerminalDefaultAppChange}

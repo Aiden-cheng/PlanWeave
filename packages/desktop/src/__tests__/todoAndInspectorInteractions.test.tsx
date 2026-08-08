@@ -136,7 +136,6 @@ describe("desktop renderer component interactions", () => {
         handleOpenRunRecord={vi.fn()}
         onBlockSelect={vi.fn()}
         onClose={vi.fn()}
-        saveSelectedBlockExecutor={vi.fn()}
         saveSelectedBlockPrompt={vi.fn()}
         saveSelectedBlockTitle={vi.fn()}
         selectedBlock={selectedBlock}
@@ -191,7 +190,6 @@ describe("desktop renderer component interactions", () => {
         handleOpenRunRecord={vi.fn()}
         onBlockSelect={vi.fn()}
         onClose={vi.fn()}
-        saveSelectedBlockExecutor={vi.fn()}
         saveSelectedBlockPrompt={vi.fn()}
         saveSelectedBlockTitle={vi.fn()}
         selectedBlock={selectedBlock}
@@ -242,7 +240,6 @@ describe("desktop renderer component interactions", () => {
         handleOpenRunRecord={vi.fn()}
         onBlockSelect={vi.fn()}
         onClose={vi.fn()}
-        saveSelectedBlockExecutor={vi.fn()}
         saveSelectedBlockPrompt={vi.fn()}
         saveSelectedBlockTitle={vi.fn()}
         selectedBlock={selectedBlock}
@@ -294,7 +291,6 @@ describe("desktop renderer component interactions", () => {
         handleOpenRunRecord={vi.fn()}
         onBlockSelect={vi.fn()}
         onClose={vi.fn()}
-        saveSelectedBlockExecutor={vi.fn()}
         saveSelectedBlockPrompt={vi.fn()}
         saveSelectedBlockTitle={vi.fn()}
         selectedBlock={selectedBlock}
@@ -359,7 +355,6 @@ describe("desktop renderer component interactions", () => {
           handleOpenRunRecord={vi.fn()}
           onBlockSelect={vi.fn()}
           onClose={vi.fn()}
-          saveSelectedBlockExecutor={vi.fn()}
           saveSelectedBlockPrompt={vi.fn()}
           saveSelectedBlockTitle={vi.fn()}
           selectedBlock={selectedBlock}
@@ -455,13 +450,26 @@ describe("desktop renderer component interactions", () => {
 
     render(
       <TaskInspector
+        agentEndpoints={[
+          {
+            id: "local:legacy-executor",
+            source: "local",
+            executorName: "legacy-executor",
+            displayName: "legacy-executor",
+            locationName: "",
+            available: true,
+            unavailableReason: null,
+            capabilities: [],
+            localExecutorName: "legacy-executor"
+          }
+        ]}
         error={null}
-        executorOptions={graph.executorOptions}
         graph={graph}
+        onAgentEndpointChange={vi.fn()}
         onClose={vi.fn()}
-        saveSelectedTaskExecutor={vi.fn()}
         saveSelectedTaskPrompt={vi.fn()}
         saveSelectedTaskTitle={vi.fn()}
+        selectedAgentEndpointId="local:legacy-executor"
         selectedTask={selectedTask}
         setSelectedTask={vi.fn()}
         t={createTranslator("en")}
@@ -470,7 +478,9 @@ describe("desktop renderer component interactions", () => {
 
     expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("Task");
     expect(screen.queryByText("Task Detail")).not.toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Agent" })).toHaveTextContent("legacy-executor");
+    expect(screen.getByRole("combobox", { name: "Agent Endpoint" })).toHaveTextContent(
+      "legacy-executor"
+    );
   });
 
   it("folds auto executor aliases and disables missing agents in the task inspector dropdown", async () => {
@@ -518,23 +528,46 @@ describe("desktop renderer component interactions", () => {
 
     render(
       <TaskInspector
-        agentDetections={[missingPiAgent]}
+        agentEndpoints={[
+          {
+            id: "local:manual",
+            source: "local",
+            executorName: "manual",
+            displayName: "manual",
+            locationName: "",
+            available: true,
+            unavailableReason: null,
+            capabilities: [],
+            localExecutorName: "manual"
+          },
+          {
+            id: "local:pi",
+            source: "local",
+            executorName: "pi",
+            displayName: "pi",
+            locationName: "",
+            available: false,
+            unavailableReason: "agent_endpoint_local_not_detected",
+            capabilities: [],
+            localExecutorName: "pi"
+          }
+        ]}
         error={null}
-        executorOptions={graph.executorOptions}
         graph={graph}
+        onAgentEndpointChange={vi.fn()}
         onClose={vi.fn()}
-        saveSelectedTaskExecutor={vi.fn()}
         saveSelectedTaskPrompt={vi.fn()}
         saveSelectedTaskTitle={vi.fn()}
+        selectedAgentEndpointId="local:pi"
         selectedTask={selectedTask}
         setSelectedTask={vi.fn()}
         t={createTranslator("en")}
       />
     );
 
-    expect(screen.getByRole("combobox", { name: "Agent" })).toHaveTextContent("pi");
+    expect(screen.getByRole("combobox", { name: "Agent Endpoint" })).toHaveTextContent("pi");
 
-    await userEvent.click(screen.getByRole("combobox", { name: "Agent" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Agent Endpoint" }));
 
     expect(await screen.findByRole("option", { name: /pi/i })).toHaveAttribute("data-disabled");
     expect(screen.queryByRole("option", { name: "pi-auto" })).not.toBeInTheDocument();
@@ -618,7 +651,6 @@ describe("desktop renderer component interactions", () => {
           handleOpenRunRecord={vi.fn()}
           onBlockSelect={vi.fn()}
           onClose={vi.fn()}
-          saveSelectedBlockExecutor={vi.fn()}
           saveSelectedBlockPrompt={saveSelectedBlockPrompt}
           saveSelectedBlockTitle={vi.fn()}
           selectedBlock={selectedBlock}

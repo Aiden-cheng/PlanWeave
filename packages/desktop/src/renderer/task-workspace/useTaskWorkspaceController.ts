@@ -22,6 +22,8 @@ import {
   applyAgentEndpointRequirements,
   type AvailableAgentEndpoint
 } from "../collaboration/agentEndpointViewModel";
+import { inheritAgentEndpointValue } from "../collaboration/AgentEndpointSelect";
+import { changeAgentEndpointSelection } from "../collaboration/changeAgentEndpoint";
 import { runDurablePackageWrite } from "../collaboration/packageWriteAdapter";
 import type { AppViewHistoryController } from "../hooks/useAppViewHistory";
 import type { SharedCanvasCommandsResult } from "../hooks/useSharedCanvasCommands";
@@ -1041,12 +1043,24 @@ export function useTaskWorkspaceController(options: {
       if (!taskEndpointPreferenceKey) {
         throw new Error("Cannot save an Agent Endpoint without a Task Workspace identity.");
       }
-      const endpoint = agentEndpointsForTask.find(
-        (candidate) => candidate.id === endpointId && candidate.available
-      );
-      if (!endpoint) throw new Error("The selected Agent Endpoint is unavailable.");
-      await saveTaskExecutor(endpoint.executorName);
-      await saveAgentEndpointPreference(taskEndpointPreferenceKey, endpoint);
+      let selectionError: string | null = null;
+      await changeAgentEndpointSelection({
+        endpointId,
+        endpoints: agentEndpointsForTask,
+        preferenceKey: taskEndpointPreferenceKey,
+        changeLogicalExecutor: async (executorName) => {
+          if (executorName === null) return false;
+          await saveTaskExecutor(executorName);
+          return true;
+        },
+        savePreference: saveAgentEndpointPreference,
+        setError: (message) => {
+          selectionError = message;
+        }
+      });
+      if (selectionError) {
+        throw new Error(selectionError);
+      }
     },
     [
       agentEndpointsForTask,
@@ -1065,17 +1079,24 @@ export function useTaskWorkspaceController(options: {
         canvasId: navigation.canvasId,
         scope: { kind: "block", blockRef }
       });
-      if (endpointId === null) {
-        await saveBlockExecutor(blockRef, null);
-        await saveAgentEndpointPreference(preferenceKey, null);
-        return;
+      let selectionError: string | null = null;
+      await changeAgentEndpointSelection({
+        endpointId: endpointId === null ? inheritAgentEndpointValue : endpointId,
+        endpoints: agentEndpointsForBlock(blockRef),
+        preferenceKey,
+        allowInherit: true,
+        changeLogicalExecutor: async (executorName) => {
+          await saveBlockExecutor(blockRef, executorName);
+          return true;
+        },
+        savePreference: saveAgentEndpointPreference,
+        setError: (message) => {
+          selectionError = message;
+        }
+      });
+      if (selectionError) {
+        throw new Error(selectionError);
       }
-      const endpoint = agentEndpointsForBlock(blockRef).find(
-        (candidate) => candidate.id === endpointId && candidate.available
-      );
-      if (!endpoint) throw new Error("The selected Agent Endpoint is unavailable.");
-      await saveBlockExecutor(blockRef, endpoint.executorName);
-      await saveAgentEndpointPreference(preferenceKey, endpoint);
     },
     [agentEndpointsForBlock, navigation, saveAgentEndpointPreference, saveBlockExecutor]
   );

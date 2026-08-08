@@ -206,7 +206,6 @@ export function graphNodes(
   onBlockDelete: TaskNodeData["onBlockDelete"],
   onSelectedBlockChange: TaskNodeData["onSelectedBlockChange"],
   onBlockTitleSave: TaskNodeData["onBlockTitleSave"],
-  onBlockExecutorChange: TaskNodeData["onBlockExecutorChange"],
   onBlockPromptSave: TaskNodeData["onBlockPromptSave"],
   onOpenRunRecord: TaskNodeData["onOpenRunRecord"],
   resourceUi: GraphSharedResourceUiState = {
@@ -330,7 +329,6 @@ export function graphNodes(
         onBlockDelete,
         onSelectedBlockChange,
         onBlockTitleSave,
-        onBlockExecutorChange,
         onBlockPromptSave,
         onOpenRunRecord,
         onResourceHover: resourceUi.onResourceHover,

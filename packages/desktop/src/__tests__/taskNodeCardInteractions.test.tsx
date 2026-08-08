@@ -141,7 +141,6 @@ function nodeData(patch: Partial<TaskNodeData> = {}): TaskNodeData {
     onBlockDelete: vi.fn(),
     onSelectedBlockChange: vi.fn(),
     onBlockTitleSave: vi.fn(),
-    onBlockExecutorChange: vi.fn(),
     onBlockPromptSave: vi.fn(),
     onOpenRunRecord: vi.fn(),
     ...patch

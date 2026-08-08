@@ -335,7 +335,6 @@ export function ProjectWorkspaceProvider({
     handleBlockSelect,
     handleOpenRunRecord,
     restoreBlockSelection,
-    saveSelectedBlockExecutor,
     saveSelectedBlockPrompt,
     saveSelectedBlockTitle,
     selectedBlock,
@@ -883,7 +882,6 @@ export function ProjectWorkspaceProvider({
 
   useGraphFlowModel({
     blockActions: {
-      saveSelectedBlockExecutor,
       saveSelectedBlockPrompt,
       saveSelectedBlockTitle
     },
