@@ -63,6 +63,7 @@
         "agentCapabilityProbeSessionCache.test.tsx",
         "agentEndpointPreferences.test.ts",
         "agentEndpointRunPlan.test.ts",
+        "agentEndpointBlockExecutor.test.ts",
         "agentEndpointScopeRun.test.ts",
         "agentPrompt.test.ts",
         "agentShellEnvironment.test.ts",

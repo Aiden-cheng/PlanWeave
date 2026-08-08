@@ -1,7 +1,8 @@
 import type {
   DesktopAutoRunScope,
   DesktopAutoRunState,
-  DesktopGraphViewModel
+  DesktopGraphViewModel,
+  RemoteBlockExecutionReadModel
 } from "@planweave-ai/runtime";
 import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import type { RemoteOperationObservation } from "@planweave-ai/collaboration-protocol/remote-run";
@@ -26,11 +27,23 @@ type RemoteOperationsApi = Pick<
   | "onCollaborationObserverSignal"
 >;
 
+/** Live remote-ownership binding for a block (read-model), not a renderer graph snapshot. */
+export type ResolveLiveRemoteBinding = (
+  blockRef: string
+) => Promise<RemoteBlockExecutionReadModel | null>;
+
 const TERMINAL_OPERATION_STATES = new Set<RemoteOperationObservation["state"]>([
   "completed",
   "failed",
   "cancelled"
 ]);
+
+function nonTerminalOperationId(
+  execution: RemoteBlockExecutionReadModel | null
+): string | null {
+  if (!execution || execution.phase === "terminal") return null;
+  return execution.identity.operationId;
+}
 
 function isInterruptedObservation(observation: RemoteOperationObservation): boolean {
   return (
@@ -137,6 +150,11 @@ export function createAgentEndpointBlockExecutor(input: {
     } | null>;
   };
   api: RemoteOperationsApi;
+  /**
+   * Authority for existing-operation recovery: live remoteExecution read-model for the block.
+   * Must not be derived from the renderer graph snapshot captured at run start (C3).
+   */
+  resolveLiveRemoteBinding: ResolveLiveRemoteBinding;
   createId: () => string;
   startLocal: (
     scope: DesktopAutoRunScope,
@@ -166,13 +184,9 @@ export function createAgentEndpointBlockExecutor(input: {
   };
 
   const executeRemote = async (selection: AgentEndpointBlockSelection, signal?: AbortSignal) => {
-    const existingExecution = selection.block.remoteExecution;
-    // Any non-terminal remote ownership still binds the block. Resolve that operation first —
-    // a fresh dispatch collides with the same ownership after Host reconnect / lease_lost.
-    const existingOperationId =
-      existingExecution && existingExecution.phase !== "terminal"
-        ? existingExecution.identity.operationId
-        : null;
+    // Live binding only — selection.block.remoteExecution is a stale run-start snapshot for UI.
+    const liveBinding = await input.resolveLiveRemoteBinding(selection.block.ref);
+    const existingOperationId = nonTerminalOperationId(liveBinding);
 
     if (existingOperationId) {
       let observation = await input.api.observeCollaborationRemoteOperation({

@@ -11,7 +11,10 @@ import { useCallback, useEffect, useRef } from "react";
 import type { PlanWeaveCollaborationApi } from "../../shared/collaboration";
 import type { DesktopUiSettings } from "../../shared/desktopSettings";
 import { bridge, collaborationBridge, desktopCanvasReference } from "../bridge";
-import { createAgentEndpointBlockExecutor } from "../collaboration/agentEndpointBlockExecutor";
+import {
+  createAgentEndpointBlockExecutor,
+  type ResolveLiveRemoteBinding
+} from "../collaboration/agentEndpointBlockExecutor";
 import { createAgentEndpointRunPlan } from "../collaboration/agentEndpointRunPlan";
 import type { AvailableAgentEndpoint } from "../collaboration/agentEndpointViewModel";
 import {
@@ -65,6 +68,11 @@ type WorkspaceAgentEndpointRunInput = {
     ref: DesktopCanvasReference,
     scope: DesktopAutoRunScope
   ) => Promise<ClaimResult>;
+  /**
+   * Live remoteExecution binding for existing-operation recovery (defaults to getBlockDetail).
+   * Must not use the renderer graph snapshot from run start.
+   */
+  resolveLiveRemoteBinding?: ResolveLiveRemoteBinding;
 };
 
 export type LocalAutoRunScopeStarter = (
@@ -163,12 +171,20 @@ export function useWorkspaceAgentEndpointRun(
           plan.kind === "coordinated_block"
             ? new Map([[plan.selection.block.ref, plan.selection]])
             : plan.selectionByBlockRef;
+        const resolveLiveRemoteBinding: ResolveLiveRemoteBinding =
+          input.resolveLiveRemoteBinding ??
+          (async (blockRef) => {
+            if (!bridge) throw new Error("desktop_bridge_unavailable");
+            const detail = await bridge.getBlockDetail(canvasRef, blockRef);
+            return detail.remoteExecution;
+          });
         const executeBlock = createAgentEndpointBlockExecutor({
           activeProjectId: input.activeProjectId,
           canvasId: selectedCanvasId,
           selectionByBlockRef,
           collaborationController: input.collaborationController,
           api,
+          resolveLiveRemoteBinding,
           createId,
           startLocal,
           stopLocal,
@@ -259,6 +275,7 @@ export function useWorkspaceAgentEndpointRun(
       input.localAutoRunApi,
       input.preferences,
       input.previewClaimNext,
+      input.resolveLiveRemoteBinding,
       input.selectedCanvasId,
       input.selectedProject,
       input.setError,

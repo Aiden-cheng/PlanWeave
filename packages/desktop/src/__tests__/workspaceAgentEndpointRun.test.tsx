@@ -216,6 +216,7 @@ function renderRun(input?: {
   preferences?: Record<string, { kind: "remote"; remoteEndpointId: string } | { kind: "local"; executorName: string }>;
   readRuntimeStatus?: ReturnType<typeof vi.fn>;
   previewClaimNext?: ReturnType<typeof vi.fn>;
+  resolveLiveRemoteBinding?: ReturnType<typeof vi.fn>;
   activeProjectId?: string | null;
   remoteTerminal?: RemoteOperationObservation;
 }) {
@@ -261,6 +262,8 @@ function renderRun(input?: {
       .fn()
       .mockResolvedValueOnce(blockClaim("T-001#B-001"))
       .mockResolvedValue({ kind: "none", reason: "no_claimable_blocks" });
+  // Default: no live remote binding → fresh dispatch (graph snapshot is not authoritative).
+  const resolveLiveRemoteBinding = input?.resolveLiveRemoteBinding ?? vi.fn(async () => null);
   const waitForTerminal = vi.fn(async () => input?.remoteTerminal ?? operation("completed"));
   // Honest local unit settle: stepLimit:1 → paused + Step limit reached. (not completed)
   const waitForLocalUnit = vi.fn(async () =>
@@ -303,7 +306,8 @@ function renderRun(input?: {
       stopLocal,
       waitForLocalUnit,
       waitForTerminal,
-      previewClaimNext
+      previewClaimNext,
+      resolveLiveRemoteBinding
     });
     return (scope: DesktopAutoRunScope) => startWithEndpoint(scope, startLocal, lifecycle);
   });
@@ -315,6 +319,7 @@ function renderRun(input?: {
     ensureWorkAuthority,
     readRuntimeStatus,
     previewClaimNext,
+    resolveLiveRemoteBinding,
     setError,
     startLocal,
     stopLocal,
@@ -342,26 +347,16 @@ describe("workspace Agent Endpoint routing", () => {
   });
 
   it("retries an interrupted remote attempt instead of dispatching a conflicting operation", async () => {
-    const graphWithInterruptedOwnership: DesktopGraphViewModel = {
-      ...graph,
-      tasks: graph.tasks.map((task) => ({
-        ...task,
-        blocks: task.blocks.map((block) => ({
-          ...block,
-          status: "in_progress",
-          remoteExecution: {
-            identity: { operationId: "operation-interrupted" },
-            phase: "active",
-            status: "interrupted",
-            actionRequired: true,
-            source: { revision: "source-1", graphFingerprint: "fingerprint-1" },
-            dispatchAttempt: {
-              dispatchId: "dispatch-interrupted",
-              executionAttemptId: "attempt-interrupted"
-            }
-          }
-        }))
-      }))
+    const liveInterruptedBinding = {
+      identity: { operationId: "operation-interrupted" },
+      phase: "active" as const,
+      status: "interrupted" as const,
+      actionRequired: true,
+      source: { revision: "source-1", graphFingerprint: "fingerprint-1" },
+      dispatchAttempt: {
+        dispatchId: "dispatch-interrupted",
+        executionAttemptId: "attempt-interrupted"
+      }
     };
     const interrupted = {
       ...operation("interrupted"),
@@ -402,8 +397,9 @@ describe("workspace Agent Endpoint routing", () => {
         })
       );
     const { result, dispatch, observe, executeAction, waitForTerminal, setError } = renderRun({
-      graph: graphWithInterruptedOwnership,
-      readRuntimeStatus
+      graph,
+      readRuntimeStatus,
+      resolveLiveRemoteBinding: vi.fn(async () => liveInterruptedBinding)
     });
     observe.mockResolvedValueOnce(interrupted).mockResolvedValue(recovered);
 
@@ -429,26 +425,16 @@ describe("workspace Agent Endpoint routing", () => {
   });
 
   it("resumes a resumable interrupted remote attempt after Host reconnect", async () => {
-    const graphWithInterruptedOwnership: DesktopGraphViewModel = {
-      ...graph,
-      tasks: graph.tasks.map((task) => ({
-        ...task,
-        blocks: task.blocks.map((block) => ({
-          ...block,
-          status: "in_progress",
-          remoteExecution: {
-            identity: { operationId: "operation-resume" },
-            phase: "active",
-            status: "interrupted",
-            actionRequired: true,
-            source: { revision: "source-1", graphFingerprint: "fingerprint-1" },
-            dispatchAttempt: {
-              dispatchId: "dispatch-resume",
-              executionAttemptId: "attempt-resume"
-            }
-          }
-        }))
-      }))
+    const liveResumeBinding = {
+      identity: { operationId: "operation-resume" },
+      phase: "active" as const,
+      status: "interrupted" as const,
+      actionRequired: true,
+      source: { revision: "source-1", graphFingerprint: "fingerprint-1" },
+      dispatchAttempt: {
+        dispatchId: "dispatch-resume",
+        executionAttemptId: "attempt-resume"
+      }
     };
     const interrupted = {
       ...operation("interrupted"),
@@ -492,8 +478,9 @@ describe("workspace Agent Endpoint routing", () => {
         })
       );
     const { result, dispatch, observe, executeAction, waitForTerminal, setError } = renderRun({
-      graph: graphWithInterruptedOwnership,
-      readRuntimeStatus
+      graph,
+      readRuntimeStatus,
+      resolveLiveRemoteBinding: vi.fn(async () => liveResumeBinding)
     });
     observe.mockResolvedValueOnce(interrupted).mockResolvedValue(resumed);
 
@@ -513,27 +500,18 @@ describe("workspace Agent Endpoint routing", () => {
 
   it("reattaches to a non-terminal remote Block operation instead of dispatching a conflict", async () => {
     const existingOperationId = "operation-existing";
-    const graphWithRemoteOwnership: DesktopGraphViewModel = {
-      ...graph,
-      tasks: graph.tasks.map((task) => ({
-        ...task,
-        blocks: task.blocks.map((block) => ({
-          ...block,
-          status: "in_progress",
-          remoteExecution: {
-            identity: { operationId: existingOperationId },
-            phase: "preparing",
-            status: "owned",
-            actionRequired: false,
-            source: { revision: "source-1", graphFingerprint: "fingerprint-1" },
-            dispatchAttempt: null
-          }
-        }))
-      }))
+    const liveExistingBinding = {
+      identity: { operationId: existingOperationId },
+      phase: "preparing" as const,
+      status: "owned" as const,
+      actionRequired: false,
+      source: { revision: "source-1", graphFingerprint: "fingerprint-1" },
+      dispatchAttempt: null
     };
     const { result, dispatch, observe, ensureWorkAuthority, waitForTerminal, setError } = renderRun(
       {
-        graph: graphWithRemoteOwnership
+        graph,
+        resolveLiveRemoteBinding: vi.fn(async () => liveExistingBinding)
       }
     );
 
