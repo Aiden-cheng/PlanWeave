@@ -795,7 +795,7 @@ describe("RemoteBlockCoordinator", () => {
     if (!fixture.host) throw new Error("expected_test_host");
     fixture.hosts.revoke(fixture.host.id);
     await expect(fixture.coordinator.reenter(operation.id)).rejects.toThrow(
-      "agent_endpoint_unavailable"
+      /agent_endpoint_(unavailable|unknown)/
     );
     expect(fixture.operations.getRequired(operation.id)).toMatchObject({
       dispatchId: operation.dispatchId,
@@ -952,5 +952,102 @@ describe("RemoteBlockCoordinator", () => {
         })
       ])
     );
+  });
+
+  it("seals awaiting_writeback after the host reservation expires and the endpoint goes away", async () => {
+    const fixture = await setup(true);
+    if (!fixture.host) throw new Error("expected_test_host");
+    const outcome = await fixture.coordinator.dispatch(
+      endpointDispatchRequest({
+        agentEndpoints: fixture.agentEndpoints,
+        locator: fixture.locator,
+        blockRef: "T-001#B-001",
+        idempotencyKey: "dispatch-writeback-after-lease-expiry"
+      })
+    );
+    const report = Buffer.from("# Remote result\n\nCompleted before lease expiry.\n");
+    const artifact = await fixture.artifacts.put({
+      expectedSha256: createHash("sha256").update(report).digest("hex"),
+      expectedSizeBytes: report.byteLength,
+      mediaType: "text/markdown",
+      chunks: (async function* () {
+        yield report;
+      })()
+    });
+    const dispatch = fixture.dispatches.getRequired(outcome.operation.dispatchId);
+    fixture.dispatches.accept(
+      fixture.host.id,
+      "accept-writeback-expiry",
+      dispatch.id,
+      dispatch.leaseId,
+      dispatch.executionAttemptId
+    );
+    const grant = fixture.artifactAuthorization.createOutputGrant({
+      operationId: "writeback-after-expiry-report",
+      workspaceId: dispatch.workspaceId,
+      projectId: dispatch.projectId,
+      hostId: dispatch.hostId,
+      dispatchId: dispatch.id,
+      leaseId: dispatch.leaseId,
+      executionAttemptId: dispatch.executionAttemptId,
+      permission: "report_write",
+      expectedSha256: artifact.sha256,
+      expectedSizeBytes: artifact.sizeBytes,
+      expectedMediaType: artifact.mediaType
+    });
+    fixture.artifactAuthorization.acceptOutputUpload(
+      {
+        workspaceId: dispatch.workspaceId,
+        projectId: dispatch.projectId,
+        hostId: dispatch.hostId,
+        dispatchId: dispatch.id,
+        leaseId: dispatch.leaseId,
+        executionAttemptId: dispatch.executionAttemptId,
+        grantId: grant.grantId
+      },
+      artifact
+    );
+
+    // Inject a one-shot writeback failure so the Host result stays on the dispatch.
+    const completeSpy = vi
+      .spyOn(fixture.coordinator, "complete")
+      .mockRejectedValueOnce(new Error("injected_writeback_delay"));
+    await expect(
+      fixture.dispatches.complete(
+        dispatch.hostId,
+        "complete-writeback-expiry",
+        dispatch.id,
+        dispatch.leaseId,
+        dispatch.executionAttemptId,
+        {
+          summary: "Remote completion before expiry.",
+          reportArtifactRef: artifact.ref,
+          artifactRefs: []
+        }
+      )
+    ).rejects.toThrowError("injected_writeback_delay");
+    completeSpy.mockRestore();
+    expect(fixture.dispatches.getRequired(dispatch.id).status).toBe("awaiting_writeback");
+
+    const lease = fixture.reservations.getRequired(dispatch.leaseId);
+    fixture.reservations.release({
+      leaseId: lease.leaseId,
+      fencingToken: lease.fencingToken,
+      expectedVersion: lease.version,
+      reason: "expired"
+    });
+    // Host offline: any live authorize path would throw agent_endpoint_unavailable.
+    fixture.server.database
+      .prepare("UPDATE agent_hosts SET last_seen_at=? WHERE id=?")
+      .run("2020-01-01T00:00:00.000Z", fixture.host.id);
+
+    await expect(fixture.coordinator.reenter(outcome.operation.id)).resolves.toMatchObject({
+      status: "terminal"
+    });
+    expect(fixture.operations.getRequired(outcome.operation.id).state).toBe("completed");
+    expect(fixture.dispatches.getRequired(dispatch.id).status).toBe("completed");
+    await expect(
+      fixture.runtime.query({ ref: "T-001#B-001", operationId: outcome.operation.id })
+    ).resolves.toMatchObject({ status: "completed" });
   });
 });

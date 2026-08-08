@@ -663,6 +663,67 @@ export class HostReservationRepository {
           reservation.version
         );
       if (updated.changes !== 1) throw new Error("reservation_version_conflict");
+      const attemptRow = this.database
+        .prepare(
+          `SELECT status FROM remote_execution_attempts
+           WHERE execution_attempt_id=? AND lease_id=? AND lease_fencing_token=?`
+        )
+        .get(reservation.executionAttemptId, reservation.leaseId, reservation.fencingToken) as
+        | { status?: unknown }
+        | undefined;
+      const dispatchRow = this.database
+        .prepare(
+          `SELECT status FROM dispatches
+           WHERE execution_attempt_id=? AND lease_id=?`
+        )
+        .get(reservation.executionAttemptId, reservation.leaseId) as
+        | { status?: unknown }
+        | undefined;
+      // Host already parked a durable terminal payload on the dispatch. Expiring capacity
+      // must keep writeback alive (do not demote to interrupted) even if the attempt row
+      // has not yet been transitioned to awaiting_writeback.
+      const preserveAwaitingWriteback =
+        reason === "expired" &&
+        (attemptRow?.status === "awaiting_writeback" ||
+          dispatchRow?.status === "awaiting_writeback");
+      if (preserveAwaitingWriteback) {
+        this.database
+          .prepare(
+            `UPDATE remote_execution_attempts
+             SET status='awaiting_writeback',state_version=state_version+1,updated_at=?,terminal_at=NULL
+             WHERE execution_attempt_id=? AND lease_id=? AND lease_fencing_token=?
+               AND status IN ('running','activated','awaiting_writeback','action_required')`
+          )
+          .run(
+            now,
+            reservation.executionAttemptId,
+            reservation.leaseId,
+            reservation.fencingToken
+          );
+        this.database
+          .prepare(
+            `UPDATE remote_operations SET state='awaiting_writeback',updated_at=?,terminal_at=NULL
+             WHERE execution_attempt_id=? AND state NOT IN ('completed','failed','cancelled')`
+          )
+          .run(now, reservation.executionAttemptId);
+        const eventRepository = new RemoteOperationRepository(this.database, this.clock);
+        const operation = eventRepository.getRequired(operationId);
+        if (attemptRow?.status !== "awaiting_writeback") {
+          eventRepository.appendEvent(
+            operation.id,
+            operation.executionAttemptId,
+            "remote.attempt.awaiting_writeback",
+            now
+          );
+        }
+        eventRepository.appendEvent(
+          operation.id,
+          operation.executionAttemptId,
+          reservationEventForRelease(reason),
+          now
+        );
+        return this.getRequired(reservation.leaseId);
+      }
       this.database
         .prepare(
           `UPDATE remote_execution_attempts

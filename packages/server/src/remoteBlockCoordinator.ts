@@ -245,6 +245,21 @@ export class RemoteBlockCoordinator {
     if (["completed", "failed", "cancelled"].includes(operation.state)) {
       return { operation, status: "terminal" };
     }
+    // Host already delivered a durable terminal payload: finish package writeback
+    // before any live Host re-authorization. Lease expiry / endpoint blips must not
+    // strand awaiting_writeback as interrupted forever.
+    const pendingWriteback = this.options.dispatches.inspect(operation).dispatch;
+    if (pendingWriteback?.status === "awaiting_writeback" && pendingWriteback.terminalAction) {
+      if (pendingWriteback.terminalAction.kind === "complete") {
+        await this.complete(operation.id);
+      } else {
+        await this.fail(operation.id);
+      }
+      return {
+        operation: this.options.operations.getRequired(operation.id),
+        status: "terminal"
+      };
+    }
     // Recheck Host authority only while an active attempt still holds a lease.
     // Interrupted / action_required recovery releases the prior lease and waits for
     // resume/retry; a new reservation path re-authorizes after it acquires a lease.
@@ -642,16 +657,7 @@ export class RemoteBlockCoordinator {
 
   async complete(operationId: string): Promise<void> {
     let operation = this.options.operations.getRequired(operationId);
-    if (operation.attempt.leaseId) {
-      const reservation = this.options.reservations.getRequired(operation.attempt.leaseId);
-      const candidate = this.options.candidates.get(operation.id);
-      if (operation.endpointSelection) {
-        if (!candidate) throw new Error("remote_operation_candidate_missing");
-        this.authorizeReservedEndpoint(operation, candidate, reservation);
-      } else if (this.options.finalAuthorize) {
-        this.options.finalAuthorize({ operation, reservation });
-      }
-    }
+    this.authorizeWritebackIfLeaseActive(operation);
     const terminal = this.options.dispatches.inspect(operation).dispatch;
     if (terminal?.status !== "awaiting_writeback" || terminal.terminalAction?.kind !== "complete") {
       throw new Error("remote_completion_evidence_missing");
@@ -692,16 +698,7 @@ export class RemoteBlockCoordinator {
 
   async fail(operationId: string): Promise<void> {
     let operation = this.options.operations.getRequired(operationId);
-    if (operation.attempt.leaseId) {
-      const reservation = this.options.reservations.getRequired(operation.attempt.leaseId);
-      const candidate = this.options.candidates.get(operation.id);
-      if (operation.endpointSelection) {
-        if (!candidate) throw new Error("remote_operation_candidate_missing");
-        this.authorizeReservedEndpoint(operation, candidate, reservation);
-      } else if (this.options.finalAuthorize) {
-        this.options.finalAuthorize({ operation, reservation });
-      }
-    }
+    this.authorizeWritebackIfLeaseActive(operation);
     const terminal = this.options.dispatches.inspect(operation).dispatch;
     if (terminal?.status !== "awaiting_writeback" || terminal.terminalAction?.kind !== "fail") {
       const current = this.options.dispatches.inspect(operation).dispatch;
@@ -716,7 +713,13 @@ export class RemoteBlockCoordinator {
     await this.checkpoint("before_runtime_writeback");
     await this.withRuntime(operation, (runtime) =>
       runtime.fail(
-        remoteBlockFailureInputSchema.parse({ ...remoteBlockIdentity(operation), failure })
+        remoteBlockFailureInputSchema.parse({
+          ...remoteBlockIdentity(operation),
+          failure,
+          ...(operation.endpointSelection?.agentId
+            ? { agentId: operation.endpointSelection.agentId }
+            : {})
+        })
       )
     );
     await this.checkpoint("after_runtime_writeback");
@@ -800,6 +803,23 @@ export class RemoteBlockCoordinator {
       message
     );
     throw new Error("remote_persistence_inconsistent");
+  }
+
+  /**
+   * Writeback uses durable dispatch terminal evidence. Re-authorize only while the
+   * attempt lease is still active; an expired reservation must not block package seal.
+   */
+  private authorizeWritebackIfLeaseActive(operation: RemoteOperation): void {
+    if (!operation.attempt.leaseId) return;
+    const reservation = this.options.reservations.getRequired(operation.attempt.leaseId);
+    if (reservation.status !== "active") return;
+    const candidate = this.options.candidates.get(operation.id);
+    if (operation.endpointSelection) {
+      if (!candidate) throw new Error("remote_operation_candidate_missing");
+      this.authorizeReservedEndpoint(operation, candidate, reservation);
+      return;
+    }
+    this.options.finalAuthorize?.({ operation, reservation });
   }
 
   /**

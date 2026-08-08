@@ -10,6 +10,12 @@ function operation(
   state: RemoteOperationObservation["state"]
 ): RemoteOperationObservation {
   const operationSuffix = blockRef.replace("#", ":");
+  const attemptStatus =
+    state === "completed" || state === "failed" || state === "cancelled" || state === "interrupted"
+      ? state
+      : state === "awaiting_writeback"
+        ? "awaiting_writeback"
+        : "running";
   return remoteOperationObservationSchema.parse({
     operationId: `operation-${operationSuffix}`,
     projectId: "project-1",
@@ -23,10 +29,18 @@ function operation(
     attempt: {
       executionAttemptId: `attempt-${operationSuffix}`,
       dispatchId: `dispatch-${operationSuffix}`,
-      status: state === "completed" ? "completed" : "running",
+      status: attemptStatus,
       stateVersion: 1
     },
-    runtime: { ref: blockRef, status: state === "completed" ? "completed" : "in_progress" }
+    runtime: {
+      ref: blockRef,
+      status:
+        state === "completed"
+          ? "completed"
+          : state === "interrupted"
+            ? "interrupted"
+            : "in_progress"
+    }
   });
 }
 
@@ -63,5 +77,48 @@ describe("waitForRemoteOperationTerminal", () => {
     });
     expect(result.state).toBe("completed");
     expect(observeCollaborationRemoteOperation).not.toHaveBeenCalled();
+  });
+
+  it("treats interrupted without pending writeback as wait-terminal", async () => {
+    const observeCollaborationRemoteOperation = vi.fn();
+    const result = await waitForRemoteOperationTerminal({
+      api: {
+        observeCollaborationRemoteOperation,
+        onCollaborationObserverSignal: vi.fn(() => () => undefined)
+      },
+      initial: {
+        ...operation("T-001#B-001", "interrupted"),
+        dispatchStatus: "interrupted"
+      }
+    });
+    expect(result.state).toBe("interrupted");
+    expect(observeCollaborationRemoteOperation).not.toHaveBeenCalled();
+  });
+
+  it("keeps waiting when interrupted but dispatch is still awaiting_writeback", async () => {
+    const unsubscribe = vi.fn();
+    const observeCollaborationRemoteOperation = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ...operation("T-001#R-001", "interrupted"),
+        dispatchStatus: "awaiting_writeback"
+      })
+      .mockResolvedValueOnce(operation("T-001#R-001", "completed"));
+
+    const result = await waitForRemoteOperationTerminal({
+      api: {
+        observeCollaborationRemoteOperation,
+        onCollaborationObserverSignal: vi.fn(() => unsubscribe)
+      },
+      initial: {
+        ...operation("T-001#R-001", "interrupted"),
+        dispatchStatus: "awaiting_writeback"
+      },
+      fallbackRefreshMs: 1
+    });
+
+    expect(result.state).toBe("completed");
+    expect(observeCollaborationRemoteOperation).toHaveBeenCalled();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 });
