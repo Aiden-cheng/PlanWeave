@@ -2,7 +2,7 @@ import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect, it } from "vitest";
-import { getExecutionStatus } from "../index.js";
+import { claimNext, getExecutionStatus, submitBlockResult } from "../index.js";
 import { basicManifest, createTestWorkspace } from "./promptTestHelpers.js";
 import { runContractAutoRunStep } from "./autoRunTestBuilders.js";
 import { readJsonFile } from "../json.js";
@@ -81,6 +81,85 @@ describe("Auto Run parallel execution", () => {
     const status = await getExecutionStatus({ projectRoot: root });
     expect(status.blocks.find((block) => block.ref === "T-001#B-001")?.status).toBe("completed");
     expect(status.blocks.find((block) => block.ref === "T-002#B-001")?.status).toBe("completed");
+  });
+
+  it("executes an implementation and a ready review concurrently in one batch", async () => {
+    const { root } = await createTestWorkspace(
+      basicManifest({ parallel: true, maxConcurrent: 2, includeSecondTask: true })
+    );
+    await claimNext({ projectRoot: root });
+    const firstReport = join(root, "first-implementation.md");
+    await writeFile(firstReport, "first implementation completed\n", "utf8");
+    await submitBlockResult({
+      projectRoot: root,
+      ref: "T-001#B-001",
+      reportPath: firstReport
+    });
+
+    let active = 0;
+    let maxActive = 0;
+    let signalOverlap = () => undefined;
+    let releaseExecutors = () => undefined;
+    const overlap = new Promise<void>((resolve) => {
+      signalOverlap = resolve;
+    });
+    const executorGate = new Promise<void>((resolve) => {
+      releaseExecutors = resolve;
+    });
+    const stepPromise = runContractAutoRunStep({
+      projectRoot: root,
+      parallel: true,
+      executor: {
+        async runBlock({ claim }) {
+          active += 1;
+          maxActive = Math.max(maxActive, active);
+          if (active === 2) signalOverlap();
+          await executorGate;
+          active -= 1;
+          if (claim.blockType === "review") {
+            const resultPath = join(root, `${claim.taskId}-${claim.blockId}.json`);
+            await writeFile(
+              resultPath,
+              JSON.stringify({
+                reviewBlockRef: claim.ref,
+                taskId: claim.taskId,
+                verdict: "passed",
+                content: "ok"
+              }),
+              "utf8"
+            );
+            return { kind: "review" as const, resultPath };
+          }
+          const reportPath = join(root, `${claim.taskId}-${claim.blockId}.md`);
+          await writeFile(reportPath, `${claim.ref} completed\n`, "utf8");
+          return { kind: "block" as const, reportPath };
+        },
+        async runFeedback() {
+          throw new Error("feedback should not run in a mixed parallel batch");
+        }
+      }
+    });
+
+    const overlapped = await Promise.race([
+      overlap.then(() => true),
+      delay(2_000).then(() => false)
+    ]);
+    releaseExecutors();
+    const step = await stepPromise;
+
+    expect(overlapped).toBe(true);
+    expect(maxActive).toBe(2);
+    expect(step).toMatchObject({
+      kind: "batch_submitted",
+      claim: {
+        kind: "batch",
+        refs: ["T-002#B-001", "T-001#R-001"]
+      },
+      steps: [
+        { kind: "submitted", submitResult: { ref: "T-002#B-001", status: "completed" } },
+        { kind: "submitted", submitResult: { ref: "T-001#R-001", status: "completed" } }
+      ]
+    });
   });
 
   it("assigns different authoritative wave ids to separate parallel dispatches", async () => {

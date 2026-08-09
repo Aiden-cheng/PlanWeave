@@ -242,15 +242,15 @@ describe("runClaimBusScope", () => {
     expect(ports.executedLocal).toEqual(["T-001#B-002"]);
   });
 
-  it("starts all refs in a parallel batch before waiting for completion", async () => {
+  it("starts implementation and review refs in one parallel batch before waiting", async () => {
     const ports = createPorts({
       previews: [
         {
           kind: "batch",
-          refs: ["T-001#B-001", "T-002#B-001"],
+          refs: ["T-001#B-001", "T-002#R-001"],
           effectiveExecutors: {
             "T-001#B-001": "default",
-            "T-002#B-001": "default"
+            "T-002#R-001": "default"
           }
         },
         { kind: "none", reason: "done" }

@@ -207,7 +207,7 @@ describe("claimNext", () => {
     });
   });
 
-  it("keeps parallel batches on implementations when a peer review is also ready", async () => {
+  it("fills remaining parallel capacity with a ready peer review after implementations", async () => {
     const { root } = await createTestWorkspace(
       basicManifest({ includeSecondTask: true, parallel: true, maxConcurrent: 2 })
     );
@@ -218,21 +218,26 @@ describe("claimNext", () => {
       reportPath: await writeReport(root, "b-001.md")
     });
 
-    // T-001#R is ready, but parallel still prefers the remaining ready implementation.
+    // Implementation keeps priority, but the ready review fills the remaining slot.
     expect(await claimNext({ projectRoot: root, parallel: true, dryRun: true })).toEqual({
       kind: "batch",
-      refs: ["T-002#B-001"],
+      refs: ["T-002#B-001", "T-001#R-001"],
       effectiveExecutors: {
-        "T-002#B-001": "default"
+        "T-002#B-001": "default",
+        "T-001#R-001": "default"
       }
     });
     expect(await claimNext({ projectRoot: root, parallel: true })).toEqual({
       kind: "batch",
-      refs: ["T-002#B-001"],
+      refs: ["T-002#B-001", "T-001#R-001"],
       effectiveExecutors: {
-        "T-002#B-001": "default"
+        "T-002#B-001": "default",
+        "T-001#R-001": "default"
       }
     });
+    const status = await getExecutionStatus({ projectRoot: root });
+    expect(status.currentRefs).toEqual(["T-002#B-001", "T-001#R-001"]);
+    expect(status.currentReviewBlockRef).toBe("T-001#R-001");
   });
 
   it("falls back to a sequential review claim when no parallel implementation block is available", async () => {

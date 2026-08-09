@@ -29,9 +29,10 @@ import {
   effectiveFeedbackExecutor,
   feedbackInScope,
   getBlock,
-  inProgressImplementationRefs,
+  inProgressBlockRefs,
   normalizeClaimScope,
   openFeedbackForReview,
+  refsConflict,
   requireBlockState,
   validateClaimScope
 } from "./selectors.js";
@@ -154,9 +155,10 @@ function claimCandidate(
 }
 
 /**
- * Select newly claimable implementation blocks up to remaining capacity.
+ * Select newly claimable work up to remaining capacity. Implementations keep priority;
+ * one ready review may fill a leftover slot when no review is already active.
  * Candidates must not conflict with in_progress current refs or with each other.
- * Order is manifest order (deterministic).
+ * Order within each priority group is manifest order (deterministic).
  */
 function selectedParallelBatchRefs(
   graph: CompiledExecutionGraph,
@@ -166,7 +168,7 @@ function selectedParallelBatchRefs(
   blockType: BlockType | undefined,
   projectGuard: ProjectGraphClaimGuard
 ): string[] {
-  const retained = inProgressImplementationRefs(graph, state);
+  const retained = inProgressBlockRefs(graph, state);
   const selected: string[] = [];
   for (const ref of graph.blockRefsInManifestOrder) {
     const taskId = requireMapValue(graph.blockTaskByRef, ref, "blockTaskByRef");
@@ -187,6 +189,30 @@ function selectedParallelBatchRefs(
       continue;
     }
     selected.push(ref);
+  }
+
+  if (
+    selected.length === 0 ||
+    retained.length + selected.length >= manifest.execution.parallel.maxConcurrent ||
+    retained.some((ref) => getBlock(graph, ref).type === "review")
+  ) {
+    return selected;
+  }
+
+  const reviewRef = graph.blockRefsInManifestOrder.find((ref) => {
+    const taskId = requireMapValue(graph.blockTaskByRef, ref, "blockTaskByRef");
+    const block = getBlock(graph, ref);
+    return (
+      block.type === "review" &&
+      blockMatchesClaimFilter(ref, graph, scope, blockType) &&
+      blockReadyWithoutProjectBlockers(graph, state, ref) &&
+      !projectBlockerReason(projectGuard, taskId) &&
+      retained.every((activeRef) => !refsConflict(graph, ref, activeRef)) &&
+      selected.every((selectedRef) => !refsConflict(graph, ref, selectedRef))
+    );
+  });
+  if (reviewRef) {
+    selected.push(reviewRef);
   }
   return selected;
 }
@@ -428,7 +454,7 @@ export function buildClaimReadiness(input: BuildClaimReadinessInput): ClaimReadi
       claimCandidate(ref, input.graph, "claimed", input.manifest.execution.defaultExecutor)
     );
   // Sequential claimNext prefers this list before implementations (task closed-loop).
-  // Parallel claimNext uses it only after the implementation batch is empty.
+  // Parallel selection may use one review to fill capacity after new implementations.
   const sequentialReviewCandidates = scopedReadyRefs
     .filter((ref) => getBlock(input.graph, ref).type === "review")
     .map((ref) =>

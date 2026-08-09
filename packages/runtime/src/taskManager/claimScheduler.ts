@@ -20,7 +20,7 @@ import { loadRuntime, loadRuntimeReadonly, refreshDerivedState } from "./runtime
 import {
   markClaimed,
   effectiveBlockExecutor,
-  inProgressImplementationRefs,
+  inProgressBlockRefs,
   normalizeClaimScope,
   validateClaimScope
 } from "./selectors.js";
@@ -156,7 +156,7 @@ async function claimNextUnlocked(options: {
     if (!manifest.execution.parallel.enabled) {
       return { kind: "blocked", reason: "Parallel execution is disabled by the Plan Package." };
     }
-    const retained = inProgressImplementationRefs(graph, state);
+    const retained = inProgressBlockRefs(graph, state);
     const capacity = manifest.execution.parallel.maxConcurrent - retained.length;
     if (capacity <= 0) {
       return {
@@ -224,6 +224,9 @@ async function claimNextUnlocked(options: {
     }
     for (const ref of selected) {
       state.blocks[ref] = { ...state.blocks[ref], status: "in_progress" };
+      if (graph.blocksByRef.get(ref)?.type === "review") {
+        state.currentReviewBlockRef = ref;
+      }
     }
     // Union retained in_progress with newly claimed; never drop a live ref.
     state.currentRefs = [...retained, ...selected.filter((ref) => !retained.includes(ref))];
@@ -241,8 +244,8 @@ async function claimNextUnlocked(options: {
   }
 
   // Sequential claim is task-closed-loop: finish a ready review gate before
-  // starting another task's implementation. Parallel keeps the opposite bias
-  // (implementation batches first; review only as sequential fallback above).
+  // starting another task's implementation. Parallel keeps implementation priority,
+  // then fills remaining capacity with at most one ready review.
   const reviewClaim = await claimSequentialReviewBlock();
   if (reviewClaim) {
     return reviewClaim;

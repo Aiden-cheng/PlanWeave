@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { claimBlock, claimNext } from "../taskManager/claimScheduler.js";
-import {
-  submitBlockResult,
-  submitFeedback,
-  submitReviewResult
-} from "../taskManager/index.js";
+import { submitBlockResult, submitFeedback, submitReviewResult } from "../taskManager/index.js";
 import { buildClaimReadiness, reviewClaimForm } from "../taskManager/claimReadiness.js";
 import { loadRuntime } from "../taskManager/runtimeContext.js";
 import {
@@ -94,6 +90,60 @@ describe("claim readiness", () => {
     expect(readiness.parallelBatchRefs).toEqual(["T-001#B-001", "T-002#B-001"]);
   });
 
+  it("counts an active remote review against global parallel capacity", async () => {
+    const manifest = basicManifest({ includeSecondTask: true, parallel: true, maxConcurrent: 2 });
+    manifest.nodes.push({
+      id: "T-003",
+      type: "task",
+      title: "Third task",
+      prompt: "nodes/T-003/prompt.md",
+      acceptance: ["Third implementation is complete."],
+      blocks: [
+        {
+          id: "B-001",
+          type: "implementation",
+          title: "Implement third task",
+          prompt: "nodes/T-003/blocks/B-001.prompt.md",
+          depends_on: []
+        },
+        {
+          id: "R-001",
+          type: "review",
+          title: "Review third task",
+          prompt: "nodes/T-003/blocks/R-001.prompt.md",
+          depends_on: ["B-001"],
+          review: { required: true, maxFeedbackCycles: 1, hook: null }
+        }
+      ]
+    });
+    const { root } = await createTestWorkspace(manifest);
+    await claimNext({ projectRoot: root });
+    await submitBlockResult({
+      projectRoot: root,
+      ref: "T-001#B-001",
+      reportPath: await writeReport(root, "t-001.md")
+    });
+    const context = await loadRuntime({ projectRoot: root });
+    context.state.blocks["T-001#R-001"] = {
+      ...context.state.blocks["T-001#R-001"],
+      status: "in_progress",
+      remoteOwnership: {
+        phase: "active",
+        operationId: "operation-review-001",
+        sourceRevision: "revision-001",
+        graphFingerprint: "fingerprint-001",
+        dispatchId: "dispatch-001",
+        executionAttemptId: "attempt-001"
+      }
+    };
+    context.state.currentRefs = ["T-001#R-001"];
+    context.state.currentReviewBlockRef = "T-001#R-001";
+
+    const readiness = buildClaimReadiness(context);
+
+    expect(readiness.parallelBatchRefs).toEqual(["T-002#B-001"]);
+  });
+
   it("derives current in-progress claim order through the readiness interface", async () => {
     const { root } = await createTestWorkspace();
     await claimNext({ projectRoot: root });
@@ -136,7 +186,9 @@ describe("claim readiness", () => {
       resultPath: await writeReviewResult(root, "needs_changes", "Please update tests.")
     });
     const openFeedbackContext = await loadRuntime({ projectRoot: root });
-    expect(reviewClaimForm(openFeedbackContext.graph, openFeedbackContext.state, "T-001#R-001")).toMatchObject({
+    expect(
+      reviewClaimForm(openFeedbackContext.graph, openFeedbackContext.state, "T-001#R-001")
+    ).toMatchObject({
       kind: "not_claimable",
       reason: expect.stringMatching(/open feedback/i)
     });

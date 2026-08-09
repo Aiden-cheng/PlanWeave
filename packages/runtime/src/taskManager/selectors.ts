@@ -284,17 +284,11 @@ export function refsConflict(
   return false;
 }
 
-export function inProgressImplementationRefs(
-  graph: CompiledExecutionGraph,
-  state: RuntimeState
-): string[] {
+export function inProgressBlockRefs(graph: CompiledExecutionGraph, state: RuntimeState): string[] {
   // currentRefs are reconciled to package block refs after load.
-  return state.currentRefs.filter((ref) => {
-    if (requireBlockState(state, ref).status !== "in_progress") {
-      return false;
-    }
-    return getBlock(graph, ref).type === "implementation";
-  });
+  return state.currentRefs.filter(
+    (ref) => requireBlockState(state, ref).status === "in_progress" && graph.blocksByRef.has(ref)
+  );
 }
 
 export function canDispatchImplementationBlock(
@@ -322,7 +316,7 @@ export function canDispatchImplementationBlock(
     return false;
   }
   const selectedRefs = options.selectedRefs ?? [];
-  const runningRefs = inProgressImplementationRefs(graph, state);
+  const runningRefs = inProgressBlockRefs(graph, state);
   if (runningRefs.length + selectedRefs.length >= options.maxConcurrent) {
     return false;
   }

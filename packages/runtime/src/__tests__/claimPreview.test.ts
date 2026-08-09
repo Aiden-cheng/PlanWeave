@@ -122,4 +122,25 @@ describe("previewClaimNext", () => {
       "in_progress"
     );
   });
+
+  it("previews an implementation-first batch that fills spare capacity with review", async () => {
+    const { root } = await createTestWorkspace(
+      basicManifest({ includeSecondTask: true, parallel: true, maxConcurrent: 2 })
+    );
+    await claimNext({ projectRoot: root });
+    await submitBlockResult({
+      projectRoot: root,
+      ref: "T-001#B-001",
+      reportPath: await writeReport(root, "mixed-preview.md")
+    });
+
+    const statusBefore = await getExecutionStatus({ projectRoot: root });
+    const preview = await previewClaimNext(root, null, { kind: "project" });
+
+    expect(preview).toMatchObject({
+      kind: "batch",
+      refs: ["T-002#B-001", "T-001#R-001"]
+    });
+    expect(await getExecutionStatus({ projectRoot: root })).toEqual(statusBefore);
+  });
 });
