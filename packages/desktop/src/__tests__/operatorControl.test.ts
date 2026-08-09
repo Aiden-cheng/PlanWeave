@@ -356,6 +356,72 @@ describe("Desktop operator control trust boundary", () => {
     });
   });
 
+  it("keeps the public Host endpoint while local Operator HTTP uses loopback", async () => {
+    const directory = await root("planweave-operator-local-handoff-");
+    const enrollmentCode = `pw_enroll_${"L".repeat(43)}`;
+    const request = vi.fn(async (input: RequestInfo | URL) => {
+      expect(String(input)).toBe("http://127.0.0.1:50653/api/v1/host-enrollments");
+      return new Response(
+        JSON.stringify({ enrollmentCode, expiresAt: "2030-01-01T00:15:00.000Z" }),
+        { status: 201 }
+      );
+    });
+    const service = new OperatorControlService({
+      profileStore: new OperatorProfileStore({
+        profilesPath: join(directory, "profiles.json")
+      }),
+      vault: new OperatorCredentialVault({
+        paths: { credentialsPath: join(directory, "credentials.json") },
+        safeStorage: safeStorage(true)
+      }),
+      request,
+      localOperatorBackend: {
+        getSnapshot: () => ({
+          running: true,
+          loopbackBaseUrl: "http://127.0.0.1:50653/",
+          advertisedOrigin: "https://owner-device.example.ts.net/"
+        }),
+        whenRunning: vi.fn()
+      }
+    });
+    await service.ensureMainOwnedServerProfile({
+      profile: {
+        ...profile("planweave-local-loopback", "https://owner-device.example.ts.net/"),
+        endpoint: {
+          topology: "private_https",
+          serverOrigin: "https://owner-device.example.ts.net",
+          allowedClientOrigins: ["https://owner-device.example.ts.net"],
+          tlsTrust: "system_ca"
+        }
+      },
+      operatorId: "desktop-local-admin",
+      operatorToken: tokenA
+    });
+    const copyText = vi.fn();
+
+    await service.copyHostBootstrapHandoff(
+      {
+        profileId: "planweave-local-loopback",
+        request: {
+          expiresAt: "2030-01-01T00:15:00.000Z",
+          credentialExpiresAt: "2030-01-02T00:00:00.000Z"
+        }
+      },
+      copyText
+    );
+
+    const command = copyText.mock.calls[0]?.[0] ?? "";
+    const handoff = parseAgentHostSetupHandoff(
+      command.slice("planweave agent-host enroll ".length)
+    );
+    expect(handoff.endpoint).toEqual({
+      topology: "private_https",
+      serverOrigin: "https://owner-device.example.ts.net",
+      allowedClientOrigins: ["https://owner-device.example.ts.net"],
+      tlsTrust: "system_ca"
+    });
+  });
+
   it("redeems a local Host handoff entirely in main and returns only redacted status", async () => {
     const directory = await root("planweave-operator-local-host-");
     const enrollmentCode = `pw_enroll_${"B".repeat(43)}`;

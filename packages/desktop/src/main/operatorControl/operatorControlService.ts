@@ -408,9 +408,9 @@ export class OperatorControlService {
     assertNoSmuggledOperatorSecrets(input, "copyHostBootstrapHandoff");
     const parsed = operatorCopyHostBootstrapHandoffInputSchema.parse(input);
     return this.enqueue(() =>
-      this.withProfile(parsed, async (client, value) => {
+      this.withProfile(parsed, async (client, value, connectionProfile) => {
         const grant = await client.createEnrollmentGrant(value.request);
-        copyText(buildHostBootstrapHandoff(client.connectionProfile, value, grant));
+        copyText(buildHostBootstrapHandoff(connectionProfile, value, grant));
         return operatorHostBootstrapHandoffViewSchema.parse({
           state: "ready",
           ...(grant.workspaceId ? { workspaceId: grant.workspaceId } : {}),
@@ -429,13 +429,13 @@ export class OperatorControlService {
     assertNoSmuggledOperatorSecrets(input, "copyMemberSetupCode");
     const parsed = operatorCopyMemberSetupCodeInputSchema.parse(input);
     return this.enqueue(() =>
-      this.withProfile(parsed, async (client) => {
+      this.withProfile(parsed, async (client, _value, connectionProfile) => {
         const response = await client.issueMemberDeviceSetupCode();
         copyText(
           serializeCollaborationSetupHandoffV1({
-            serverBaseUrl: client.connectionProfile.serverBaseUrl,
+            serverBaseUrl: connectionProfile.serverBaseUrl,
             setupCode: response.setupCode,
-            allowInsecureTransport: client.connectionProfile.allowInsecureTransport
+            allowInsecureTransport: connectionProfile.allowInsecureTransport
           })
         );
         return operatorMemberSetupCodeHandoffViewSchema.parse({
@@ -474,15 +474,15 @@ export class OperatorControlService {
     assertNoSmuggledOperatorSecrets(input, "registerLocalAgentHost");
     const parsed = operatorRegisterLocalAgentHostInputSchema.parse(input);
     return this.enqueue(() =>
-      this.withProfile(parsed, async (client, value) => {
+      this.withProfile(parsed, async (client, value, connectionProfile) => {
         if (!(await this.localAgentHost.status(value.profileId)).supported) {
           throw new Error("local_agent_host_unavailable");
         }
-        if (client.connectionProfile.endpoint?.tlsTrust === "configured_ca") {
+        if (connectionProfile.endpoint?.tlsTrust === "configured_ca") {
           throw new Error("local_agent_host_custom_ca_unsupported");
         }
         const grant = await client.createEnrollmentGrant(value.request);
-        const handoff = buildHostBootstrapHandoffPayload(client.connectionProfile, grant);
+        const handoff = buildHostBootstrapHandoffPayload(connectionProfile, grant);
         try {
           return await this.localAgentHost.register(
             value.profileId,
@@ -580,7 +580,11 @@ export class OperatorControlService {
 
   private async withProfile<T, P extends { profileId: string }>(
     parsed: P,
-    action: (client: OperatorControlClient, parsed: P) => Promise<T>
+    action: (
+      client: OperatorControlClient,
+      parsed: P,
+      connectionProfile: OperatorControlProfile
+    ) => Promise<T>
   ): Promise<T> {
     this.assertOpen();
     const profile = await this.profiles.get(parsed.profileId);
@@ -613,7 +617,7 @@ export class OperatorControlService {
       request: this.request
     });
     try {
-      const result = await action(client, parsed);
+      const result = await action(client, parsed, profile);
       this.lastErrorCode = null;
       this.lastErrorMessage = null;
       return result;
