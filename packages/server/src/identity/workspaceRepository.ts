@@ -234,13 +234,17 @@ export class WorkspaceIdentityRepository {
   }
 
   workspaceForHost(hostId: string): string | undefined {
+    const workspaceIds = this.workspaceIdsForHost(hostId);
+    return workspaceIds.length === 1 ? workspaceIds[0] : undefined;
+  }
+
+  workspaceIdsForHost(hostId: string): string[] {
     const rows = this.database
       .prepare(
         "SELECT workspace_id FROM workspace_agent_hosts WHERE host_id=? ORDER BY workspace_id"
       )
       .all(hostId);
-    if (rows.length !== 1) return undefined;
-    return workspaceIdSchema.parse(String(rows[0].workspace_id));
+    return rows.map((row) => workspaceIdSchema.parse(String(row.workspace_id)));
   }
 
   workspaceForEnrollment(enrollmentCodeSha256: string): string | undefined {

@@ -270,6 +270,7 @@ describe("remote operator walkthrough", () => {
       method: "POST",
       headers: { ...authorization, "content-type": "application/json" },
       body: JSON.stringify({
+        workspaceId: legacyWorkspaceIdForProject(workspace.init.workspace.id),
         expiresAt: enrollmentExpiresAt,
         credentialExpiresAt
       })

@@ -213,7 +213,7 @@ async function nextHostMessageOfType(
   throw new Error(`host_message_type_timeout:${expectedType}`);
 }
 
-async function connectEnrolledHost(origin: string, adminToken: string) {
+async function connectEnrolledHost(origin: string, adminToken: string, workspaceId: string) {
   const grantResponse = await fetch(`${origin}/api/v1/host-enrollments`, {
     method: "POST",
     headers: {
@@ -221,6 +221,7 @@ async function connectEnrolledHost(origin: string, adminToken: string) {
       "content-type": "application/json"
     },
     body: JSON.stringify({
+      workspaceId,
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
       credentialExpiresAt: new Date(Date.now() + 3_600_000).toISOString()
     })
@@ -521,7 +522,11 @@ describe("Desktop CollaborationClient against the Server composition", () => {
   it("maps remote action, event, interaction, and error routes through the client", async () => {
     const { fixture, ownerBootstrap } = await createIdentityFixture();
     const { workspaceOwner } = await configureWorkspaceWorkAccess({ fixture, ownerBootstrap });
-    const host = await connectEnrolledHost(fixture.origin, fixture.adminToken);
+    const host = await connectEnrolledHost(
+      fixture.origin,
+      fixture.adminToken,
+      fixture.workspaceId
+    );
     const endpointPage = await workspaceOwner.listAgentEndpoints();
     const agentEndpointId = endpointPage.items.find(
       (endpoint) => endpoint.status === "available"

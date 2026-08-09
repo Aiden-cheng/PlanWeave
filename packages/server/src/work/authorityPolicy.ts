@@ -150,9 +150,11 @@ export function hostCanSatisfyBlock(
     activeReservations: number;
   }
 ): boolean {
-  const workspace = input.workspaceIdentity.workspaceForHost(host.id);
-  const fleetUnbound = workspace === undefined;
-  if (!fleetUnbound && workspace !== input.scope.workspaceId) return false;
+  const workspaceIds = input.workspaceIdentity.workspaceIdsForHost(host.id);
+  const fleetUnbound = workspaceIds.length === 0;
+  if (!fleetUnbound && (workspaceIds.length !== 1 || workspaceIds[0] !== input.scope.workspaceId)) {
+    return false;
+  }
   const online = isAgentHostOnline(host, {
     now: input.now,
     hostOfflineAfterMs: input.hostOfflineAfterMs

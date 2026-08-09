@@ -837,6 +837,7 @@ export class RealProcessAcpHarness {
         "content-type": "application/json"
       },
       body: JSON.stringify({
+        workspaceId: legacyWorkspaceIdForProject(this.projectId),
         expiresAt: enrollmentExpiresAt,
         credentialExpiresAt
       })
@@ -980,7 +981,11 @@ export class RealProcessAcpHarness {
         ...this.authorizationHeaders(),
         "content-type": "application/json"
       },
-      body: JSON.stringify({ expiresAt: enrollmentExpiresAt, credentialExpiresAt })
+      body: JSON.stringify({
+        workspaceId: legacyWorkspaceIdForProject(this.projectId),
+        expiresAt: enrollmentExpiresAt,
+        credentialExpiresAt
+      })
     });
     if (grantResponse.status !== 201) {
       throw new Error(

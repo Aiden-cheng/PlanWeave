@@ -172,12 +172,11 @@ describe("real-process adversarial authorization matrix", () => {
       {
         name: "wrong projectId on create",
         run: async ({ client: c, operationId, dispatchId }) => {
-          // Positive control: the non-admin principal reaches the real project/runtime seam.
+          // Positive control: the Owner Fleet operator reaches the real project/runtime seam.
           const agentEndpointId = await c.availableAgentEndpointId();
           const trusted = await c.rawRequest({
             method: "POST",
             path: "/api/v1/remote-operations",
-            authorization: projectOperatorToken,
             body: {
               schemaVersion: "remote-run/v3",
               projectId: c.harness.projectId,
@@ -192,6 +191,26 @@ describe("real-process adversarial authorization matrix", () => {
           expect(trusted).toMatchObject({
             status: 202,
             body: { operationId, dispatchId }
+          });
+
+          const collaborationOperatorDenied = await c.rawRequest({
+            method: "POST",
+            path: "/api/v1/remote-operations",
+            authorization: projectOperatorToken,
+            body: {
+              schemaVersion: "remote-run/v3",
+              projectId: c.harness.projectId,
+              canvasId: "default",
+              blockRef: "T-001#B-001",
+              agentEndpointId,
+              idempotencyKey: "auth-matrix-project-operator",
+              expectedResponsibilityRevision: 0,
+              expectedReviewerRevision: 0
+            }
+          });
+          expect(collaborationOperatorDenied).toMatchObject({
+            status: 403,
+            body: { error: "operator_admin_required" }
           });
 
           const durableBaseline = async () => ({
@@ -213,14 +232,14 @@ describe("real-process adversarial authorization matrix", () => {
             path: "/api/v1/remote-operations",
             authorization: projectOperatorToken,
             body: {
-              schemaVersion: "remote-run/v2",
+              schemaVersion: "remote-run/v3",
               projectId: "foreign-project-id",
               canvasId: "default",
               blockRef: "T-001#B-001",
+              agentEndpointId,
               idempotencyKey: "auth-wrong-project",
               expectedResponsibilityRevision: 0,
-              expectedReviewerRevision: 0,
-              expectedExecutionTargetRevision: 1
+              expectedReviewerRevision: 0
             }
           });
           expect({ status: denied.status, body: denied.body }).toEqual({
