@@ -19,6 +19,7 @@ import {
 import { createOwnerFleetRemoteDispatchApi } from "../collaboration/ownerFleetRemoteDispatch";
 import { createAgentEndpointRunPlan } from "../collaboration/agentEndpointRunPlan";
 import type { AvailableAgentEndpoint } from "../collaboration/agentEndpointViewModel";
+import { createRemoteEndpointDispatchGate } from "../collaboration/remoteEndpointDispatchGate";
 import {
   type LocalAutoRunObserver,
   runClaimBusLocalAutoRunUnit,
@@ -195,6 +196,7 @@ export function useWorkspaceAgentEndpointRun(
       const controller = new AbortController();
       activeEndpointScopeRun.current = controller;
       const ownerFleetOperationsByBlockRef = new Map<string, string>();
+      const remoteDispatchGate = createRemoteEndpointDispatchGate();
       lifecycle?.onStarted();
       const selectedProject = input.selectedProject;
       if (!selectedProject) {
@@ -262,7 +264,17 @@ export function useWorkspaceAgentEndpointRun(
         const executeClaimUnit = async (ref: string, signal?: AbortSignal) => {
           const selection = selectionByBlockRef.get(ref);
           if (!selection) throw new Error(`agent_endpoint_selection_missing:${ref}`);
-          await executeBlock(selection.task, selection.block, signal);
+          if (selection.endpoint.source === "local") {
+            await executeBlock(selection.task, selection.block, signal);
+            return;
+          }
+          const endpointId = selection.endpoint.remoteEndpointId;
+          if (!endpointId) throw new Error(`agent_endpoint_selection_missing:${ref}`);
+          await remoteDispatchGate.run({
+            endpointId,
+            execute: () => executeBlock(selection.task, selection.block, signal),
+            signal
+          });
         };
 
         const taskIds = new Set(scopeTaskIds(plan));
@@ -378,6 +390,7 @@ export function useWorkspaceAgentEndpointRun(
         });
         lifecycle?.onCompleted();
       } catch (caught) {
+        controller.abort();
         const message = caught instanceof Error ? caught.message : String(caught);
         input.setError(message);
         lifecycle?.onFailed(message);

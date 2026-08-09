@@ -327,6 +327,128 @@ describe("runClaimBusScope", () => {
     await run;
   });
 
+  it("does not let a settled peer implementation bypass the active review slot", async () => {
+    const ports = createPorts({
+      previews: [
+        {
+          kind: "batch",
+          refs: ["T-001#B-001", "T-002#B-001"],
+          effectiveExecutors: {
+            "T-001#B-001": "default",
+            "T-002#B-001": "default"
+          }
+        },
+        blockClaim("T-001#R-001", "review"),
+        blockClaim("T-002#R-001", "review")
+      ],
+      route: () => "remote"
+    });
+    const completed = new Set<string>();
+    ports.completion.isSatisfied = vi.fn(async () => completed.size === 4);
+    let releaseFirst: (() => void) | undefined;
+    let releaseSecond: (() => void) | undefined;
+    let releaseReview: (() => void) | undefined;
+    const firstReleased = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const secondReleased = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    const reviewReleased = new Promise<void>((resolve) => {
+      releaseReview = resolve;
+    });
+    ports.remoteBlock.execute = vi.fn(async (ref) => {
+      if (ref === "T-001#B-001") await firstReleased;
+      if (ref === "T-002#B-001") await secondReleased;
+      if (ref === "T-001#R-001") await reviewReleased;
+      completed.add(ref);
+    });
+
+    const run = runClaimBusScope({ scope: { kind: "project" }, ...ports });
+    try {
+      await vi.waitFor(() => expect(ports.remoteBlock.execute).toHaveBeenCalledTimes(2));
+      releaseFirst?.();
+      await vi.waitFor(() =>
+        expect(ports.remoteBlock.execute).toHaveBeenCalledWith("T-001#R-001", undefined)
+      );
+      releaseSecond?.();
+      await vi.waitFor(() => expect(completed).toContain("T-002#B-001"));
+      expect(ports.remoteBlock.execute).not.toHaveBeenCalledWith("T-002#R-001", undefined);
+      releaseReview?.();
+      await vi.waitFor(() =>
+        expect(ports.remoteBlock.execute).toHaveBeenCalledWith("T-002#R-001", undefined)
+      );
+    } finally {
+      releaseFirst?.();
+      releaseSecond?.();
+      releaseReview?.();
+    }
+    await run;
+  });
+
+  it("does not dispatch a remote batch ref twice while its claim is still crossing transport", async () => {
+    const repeatedBatch: Extract<ClaimResult, { kind: "batch" }> = {
+      kind: "batch",
+      refs: ["T-002#B-001"],
+      effectiveExecutors: { "T-002#B-001": "default" }
+    };
+    const ports = createPorts({
+      previews: [
+        {
+          kind: "batch",
+          refs: ["T-001#B-001", "T-003#B-001"],
+          effectiveExecutors: {
+            "T-001#B-001": "default",
+            "T-003#B-001": "default"
+          }
+        },
+        repeatedBatch,
+        repeatedBatch,
+        { kind: "none", reason: "done" }
+      ],
+      route: () => "remote"
+    });
+    const completed = new Set<string>();
+    ports.completion.isSatisfied = vi.fn(async () => completed.size === 3);
+    let releaseFirst: (() => void) | undefined;
+    let releasePeer: (() => void) | undefined;
+    let releaseBackfill: (() => void) | undefined;
+    const firstReleased = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const peerReleased = new Promise<void>((resolve) => {
+      releasePeer = resolve;
+    });
+    const backfillReleased = new Promise<void>((resolve) => {
+      releaseBackfill = resolve;
+    });
+    ports.remoteBlock.execute = vi.fn(async (ref) => {
+      if (ref === "T-001#B-001") await firstReleased;
+      if (ref === "T-003#B-001") await peerReleased;
+      if (ref === "T-002#B-001") await backfillReleased;
+      completed.add(ref);
+    });
+
+    const run = runClaimBusScope({ scope: { kind: "project" }, ...ports });
+    try {
+      await vi.waitFor(() => expect(ports.remoteBlock.execute).toHaveBeenCalledTimes(2));
+      releaseFirst?.();
+      await vi.waitFor(() =>
+        expect(ports.remoteBlock.execute).toHaveBeenCalledWith("T-002#B-001", undefined)
+      );
+      releasePeer?.();
+      await vi.waitFor(() => expect(completed).toContain("T-003#B-001"));
+      expect(ports.remoteBlock.execute).toHaveBeenCalledTimes(3);
+      releaseBackfill?.();
+    } finally {
+      releaseFirst?.();
+      releasePeer?.();
+      releaseBackfill?.();
+    }
+    await run;
+    expect(ports.remoteBlock.execute).toHaveBeenCalledTimes(3);
+  });
+
   it("treats batch at_capacity as idle and does not re-dispatch live refs", async () => {
     const ports = createPorts({
       previews: [

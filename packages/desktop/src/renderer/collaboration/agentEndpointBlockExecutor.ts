@@ -46,7 +46,10 @@ type RemoteDispatchSurface = {
     action: RemoteHumanExecutionActionCommand;
   }): Promise<unknown>;
   onObserverSignal?: RemoteOperationsApi["onCollaborationObserverSignal"];
+  fallbackRefreshMs?: number;
 };
+
+const OWNER_FLEET_FALLBACK_REFRESH_MS = 1_000;
 
 function collaborationRemoteDispatchSurface(api: RemoteOperationsApi): RemoteDispatchSurface {
   return {
@@ -62,7 +65,8 @@ function ownerFleetRemoteDispatchSurface(api: OwnerFleetRemoteDispatchApi): Remo
     dispatch: (command) =>
       api.dispatchOwnerFleetRemoteOperation({ command }),
     observe: (input) => api.observeOwnerFleetRemoteOperation(input),
-    executeAction: (input) => api.executeOwnerFleetRemoteOperationAction(input)
+    executeAction: (input) => api.executeOwnerFleetRemoteOperationAction(input),
+    fallbackRefreshMs: OWNER_FLEET_FALLBACK_REFRESH_MS
   };
 }
 
@@ -174,7 +178,10 @@ async function waitForRemoteCompletion(input: {
         input.api.onObserverSignal ?? (() => () => undefined)
     },
     initial: input.observation,
-    signal: input.signal
+    signal: input.signal,
+    ...(input.api.fallbackRefreshMs === undefined
+      ? {}
+      : { fallbackRefreshMs: input.api.fallbackRefreshMs })
   });
   if (terminal.state === "completed") return;
   if (terminal.failure) {

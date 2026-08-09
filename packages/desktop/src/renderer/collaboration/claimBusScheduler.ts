@@ -56,11 +56,12 @@ async function executeBlockRef(ref: string, input: ClaimBusScopeInput): Promise<
 }
 
 type InFlightExecution = {
+  blockRef?: string;
   settled: Promise<{ execution: InFlightExecution; error?: unknown }>;
 };
 
-function startInFlight(execute: () => Promise<void>): InFlightExecution {
-  const execution = {} as InFlightExecution;
+function startInFlight(execute: () => Promise<void>, blockRef?: string): InFlightExecution {
+  const execution = { blockRef } as InFlightExecution;
   execution.settled = execute().then(
     () => ({ execution }),
     (error: unknown) => ({ execution, error })
@@ -68,11 +69,19 @@ function startInFlight(execute: () => Promise<void>): InFlightExecution {
   return execution;
 }
 
+async function settleExecution(
+  inFlight: Set<InFlightExecution>,
+  execution: InFlightExecution
+): Promise<void> {
+  const outcome = await execution.settled;
+  inFlight.delete(outcome.execution);
+  if (outcome.error !== undefined) throw outcome.error;
+}
+
 async function settleNext(inFlight: Set<InFlightExecution>): Promise<void> {
   if (inFlight.size === 0) return;
   const outcome = await Promise.race([...inFlight].map((execution) => execution.settled));
-  inFlight.delete(outcome.execution);
-  if (outcome.error !== undefined) throw outcome.error;
+  await settleExecution(inFlight, outcome.execution);
 }
 
 /**
@@ -81,9 +90,13 @@ async function settleNext(inFlight: Set<InFlightExecution>): Promise<void> {
  */
 export async function runClaimBusScope(input: ClaimBusScopeInput): Promise<void> {
   const inFlight = new Set<InFlightExecution>();
-  const start = (execute: () => Promise<void>) => {
-    inFlight.add(startInFlight(execute));
+  const start = (execute: () => Promise<void>, blockRef?: string) => {
+    const execution = startInFlight(execute, blockRef);
+    inFlight.add(execution);
+    return execution;
   };
+  const executionForBlock = (ref: string) =>
+    [...inFlight].find((execution) => execution.blockRef === ref);
 
   while (!input.signal?.aborted) {
     if (inFlight.size === 0 && (await input.completion.isSatisfied())) {
@@ -109,8 +122,8 @@ export async function runClaimBusScope(input: ClaimBusScopeInput): Promise<void>
     }
 
     if (unit.kind === "feedback") {
-      start(() => input.feedback.execute(unit, input.signal));
-      await settleNext(inFlight);
+      const execution = start(() => input.feedback.execute(unit, input.signal));
+      await settleExecution(inFlight, execution);
       continue;
     }
 
@@ -130,15 +143,31 @@ export async function runClaimBusScope(input: ClaimBusScopeInput): Promise<void>
       if (input.signal?.aborted) {
         throw new Error("claim_bus_cancelled");
       }
-      for (const ref of unit.refs) {
-        start(() => executeBlockRef(ref, input));
+      const newRefs = unit.refs.filter((ref) => executionForBlock(ref) === undefined);
+      for (const ref of newRefs) {
+        start(() => executeBlockRef(ref, input), ref);
       }
+      // A dry-run preview can still observe a just-dispatched remote block as ready while
+      // its claim is crossing IPC/HTTP. Keep the existing local execution as the authority
+      // for that ref and wait instead of dispatching the same block twice.
       await settleNext(inFlight);
       continue;
     }
 
-    start(() => executeBlockRef(unit.ref, input));
-    await settleNext(inFlight);
+    const existingExecution = executionForBlock(unit.ref);
+    if (existingExecution) {
+      await settleExecution(inFlight, existingExecution);
+      continue;
+    }
+    const execution = start(() => executeBlockRef(unit.ref, input), unit.ref);
+    if (unit.blockType === "review") {
+      // Runtime review ownership is a single slot. A settled implementation may still
+      // be present in the local set while the review dispatch is crossing the IPC/HTTP
+      // boundary, so wait for this review rather than racing an older implementation.
+      await settleExecution(inFlight, execution);
+    } else {
+      await settleNext(inFlight);
+    }
   }
 
   throw new Error("claim_bus_cancelled");

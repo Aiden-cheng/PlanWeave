@@ -252,5 +252,8 @@ describe("createAgentEndpointBlockExecutor live remote binding (C3)", () => {
         expectedReviewerRevision: 0
       })
     });
+    expect(waitForRemoteTerminal).toHaveBeenCalledWith(
+      expect.objectContaining({ fallbackRefreshMs: 1_000 })
+    );
   });
 });
