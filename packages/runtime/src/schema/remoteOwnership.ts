@@ -6,8 +6,10 @@ import {
   opaqueIdentifierSchema
 } from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
+import { remoteExecutionControlPlaneSchema } from "./remoteExecutionControlPlane.js";
 
-export const remoteExecutionControlPlaneSchema = z.enum(["collaboration", "owner"]);
+export { remoteExecutionControlPlaneSchema } from "./remoteExecutionControlPlane.js";
+export type { RemoteExecutionControlPlane } from "./remoteExecutionControlPlane.js";
 
 const remoteOwnershipSourceShape = {
   operationId: opaqueIdentifierSchema,
@@ -87,4 +89,3 @@ export type ActiveRemoteBlockOwnershipInput = z.input<typeof activeRemoteBlockOw
 export type RemoteBlockOwnership = z.infer<typeof remoteBlockOwnershipSchema>;
 export type RemoteOperationReceipt = z.infer<typeof remoteOperationReceiptSchema>;
 export type RemoteInterruption = z.infer<typeof remoteInterruptionSchema>;
-export type RemoteExecutionControlPlane = z.infer<typeof remoteExecutionControlPlaneSchema>;

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { remoteExecutionControlPlaneSchema } from "./remoteOwnership.js";
+import { remoteExecutionControlPlaneSchema } from "./remoteExecutionControlPlane.js";
 
 // The durable source state is already validated by agent-host-protocol. This browser-safe
 // public projection independently rejects paths, URLs, whitespace, and unbounded labels.

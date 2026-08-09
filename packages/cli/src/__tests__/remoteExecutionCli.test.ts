@@ -81,6 +81,7 @@ describe("remote execution CLI read models", () => {
       const candidate = await port.inspect({ ref: "T-001#B-001" });
       const activeIdentity = {
         operationId: "operation-failed",
+        controlPlane: "collaboration" as const,
         sourceRevision: candidate.sourceRevision,
         graphFingerprint: candidate.graphFingerprint,
         dispatchId: "dispatch-failed",
@@ -89,6 +90,7 @@ describe("remote execution CLI read models", () => {
       await port.claim({
         ref: "T-001#B-001",
         operationId: activeIdentity.operationId,
+        controlPlane: activeIdentity.controlPlane,
         sourceRevision: activeIdentity.sourceRevision,
         graphFingerprint: activeIdentity.graphFingerprint
       });

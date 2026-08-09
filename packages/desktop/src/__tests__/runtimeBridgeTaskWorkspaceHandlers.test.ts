@@ -48,6 +48,7 @@ describe("Task Workspace runtime bridge", () => {
     const base = taskWorkspaceSchema.parse(await handler(null, input));
     const remoteExecution = {
       identity: { operationId: "operation-001" },
+      controlPlane: "owner" as const,
       phase: "active" as const,
       status: "interrupted" as const,
       actionRequired: true,
