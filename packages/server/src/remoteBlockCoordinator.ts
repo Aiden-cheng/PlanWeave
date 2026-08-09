@@ -256,7 +256,8 @@ export class RemoteBlockCoordinator {
       this.options.agentEndpoints.resolveForRun(
         request.agentEndpointId,
         candidate.workspaceId,
-        candidate.requiredCapabilities
+        candidate.requiredCapabilities,
+        controlPlane
       ),
       candidate,
       {
@@ -1083,7 +1084,8 @@ export class RemoteBlockCoordinator {
     const resolved = this.options.agentEndpoints.resolveForRun(
       selection.endpointId,
       operation.workspaceId,
-      operation.requiredCapabilities
+      operation.requiredCapabilities,
+      selection.authority.controlPlane
     );
     this.assertEndpointIdentity(selection, resolved, candidate);
     return resolved;
@@ -1102,7 +1104,8 @@ export class RemoteBlockCoordinator {
       selection.endpointId,
       operation.workspaceId,
       operation.requiredCapabilities,
-      reservation.hostId
+      reservation.hostId,
+      selection.authority.controlPlane
     );
     this.assertEndpointIdentity(selection, resolved, candidate);
   }

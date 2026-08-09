@@ -173,6 +173,7 @@
         "promptDraftsHook.test.tsx",
         "recordWorkspaceNavigation.test.tsx",
         "recordWorkspaceTarget.test.ts",
+        "remoteEndpointDispatchGate.test.ts",
         "remoteLiveRun.test.ts",
         "remoteRunPanel.test.tsx",
         "remoteRunPanelController.test.ts",

@@ -167,7 +167,7 @@ describe("load / recovery matrix (moderate intended scale)", () => {
     );
   }, 180_000);
 
-  it("capacity contention (1 Host, cap 1, 2 blocks): rejects busy endpoint until caller retries", async () => {
+  it("Owner canvas concurrency admits 2 blocks even when collaboration Host capacity is 1", async () => {
     const { harness, client } = await createHarness({
       hostCapacity: 1,
       manifest: remoteAcpManifestParallelCapacity()
@@ -188,42 +188,30 @@ describe("load / recovery matrix (moderate intended scale)", () => {
       LOAD_RECOVERY_THRESHOLDS.maxDispatchLeasedMs
     );
 
-    const second = await client.rawDispatch({
+    const second = await client.dispatch({
       blockRef: "T-002#B-001",
       idempotencyKey: "load-cap-2",
       agentEndpointId: endpointId
     });
-    expect(second).toMatchObject({
-      status: 409,
-      body: { error: "agent_endpoint_unavailable" }
-    });
-    expect(client.countServerRows("remote_operations")).toBe(1);
-    expect(client.countServerRows("remote_execution_attempts")).toBe(1);
-    expect(client.countServerRows("host_capacity_reservations")).toBe(1);
-    expect(client.countServerRows("mailbox_messages")).toBe(1);
+    await client.waitForDispatchStatus(second.operationId, ["leased", "running"]);
+    expect(client.countServerRows("remote_operations")).toBe(2);
+    expect(client.countServerRows("remote_execution_attempts")).toBe(2);
+    expect(client.countServerRows("host_capacity_reservations")).toBe(2);
+    expect(client.countServerRows("mailbox_messages")).toBe(2);
 
     await harness.acpControl.resume();
-    const term1 = await client.waitForTerminal(first.operationId);
+    const [term1, term2] = await Promise.all([
+      client.waitForTerminal(first.operationId),
+      client.waitForTerminal(second.operationId)
+    ]);
     expect(term1.state).toBe("completed");
-
-    // After capacity frees, the caller retries the rejected request and creates the second operation.
-    const waitStart = Date.now();
-    const secondActivated = await client.dispatch({
-      blockRef: "T-002#B-001",
-      idempotencyKey: "load-cap-2",
-      agentEndpointId: endpointId
-    });
-    const term2 = await client.waitForTerminal(secondActivated.operationId);
-    expect(Date.now() - waitStart).toBeLessThanOrEqual(
-      LOAD_RECOVERY_THRESHOLDS.maxCapacityWaitMs + LOAD_RECOVERY_THRESHOLDS.maxTerminalMs
-    );
     expect(term2.state).toBe("completed");
-    expect(term2.operationId).not.toBe(first.operationId);
+    expect(second.operationId).not.toBe(first.operationId);
 
     expect(
       client.countServerRows("remote_execution_attempts", "operation_id IN (?,?)", [
         first.operationId,
-        secondActivated.operationId
+        second.operationId
       ])
     ).toBe(2);
     expect(

@@ -391,16 +391,20 @@ export class AgentHostClient implements HostTransport {
     }
     this.flushEvents();
 
-    const available = this.options.capacity - this.active.size;
-    for (const pending of this.options.state.pendingResumptions(available || 1)) {
-      if (this.active.size >= this.options.capacity) break;
+    // `capacity` is advertised for the Server's collaboration reservation policy.
+    // Commands delivered here have already passed the authoritative scheduler, so
+    // applying the static Host value again would serialize Owner Fleet operations
+    // that the canvas runtime intentionally admitted concurrently.
+    for (;;) {
+      const pending = this.options.state.pendingResumptions(1)[0];
+      if (!pending) break;
       const resumption = this.options.state.startResumption(pending.sequence);
       if (!resumption) continue;
       this.launch(resumption.execution, { kind: "load", sessionId: resumption.sessionId });
     }
-    const remaining = this.options.capacity - this.active.size;
-    for (const pending of this.options.state.pendingExecutions(remaining || 1)) {
-      if (this.active.size >= this.options.capacity) break;
+    for (;;) {
+      const pending = this.options.state.pendingExecutions(1)[0];
+      if (!pending) break;
       const execution = this.options.state.startExecution(pending.sequence);
       if (!execution) continue;
       this.launch(execution, { kind: "new" });

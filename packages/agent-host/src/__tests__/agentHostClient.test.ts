@@ -478,8 +478,9 @@ describe("Agent Host outbound transport", () => {
     expect(state.activeLeases()).toEqual([]);
   });
 
-  it("does not start more executions than the advertised capacity", async () => {
+  it("does not use advertised collaboration capacity to serialize delivered executions", async () => {
     const firstStarted = deferred<void>();
+    const secondStarted = deferred<void>();
     const releaseFirst = deferred<void>();
     const secondStored = deferred<void>();
     const bothCompleted = deferred<void>();
@@ -526,6 +527,8 @@ describe("Agent Host outbound transport", () => {
           if (executeCount === 1) {
             firstStarted.resolve();
             await releaseFirst.promise;
+          } else {
+            secondStarted.resolve();
           }
           return {
             summary: "Capacity boundary execution completed.",
@@ -552,15 +555,15 @@ describe("Agent Host outbound transport", () => {
     client.start();
 
     await Promise.race([
-      Promise.all([firstStarted.promise, secondStored.promise]),
+      Promise.all([firstStarted.promise, secondStarted.promise, secondStored.promise]),
       protocolFailure.promise
     ]);
-    expect(executeCount).toBe(1);
-    expect(maxActiveCount).toBe(1);
+    expect(executeCount).toBe(2);
+    expect(maxActiveCount).toBe(2);
     releaseFirst.resolve();
     await Promise.race([bothCompleted.promise, protocolFailure.promise]);
     expect(executeCount).toBe(2);
-    expect(maxActiveCount).toBe(1);
+    expect(maxActiveCount).toBe(2);
   });
 
   it("reconnects with the durable acknowledgement cursor", async () => {

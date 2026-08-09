@@ -240,7 +240,7 @@ describe("real-process crash/replay fault matrix", () => {
     expect(client.countServerRows("dispatches", "status=?", ["completed"])).toBe(1);
   }, 120_000);
 
-  it("capacity contention: busy endpoint rejects without creating a queued operation", async () => {
+  it("Owner canvas concurrency bypasses collaboration Host capacity without queuing", async () => {
     const { harness, client } = await createHarness({
       hostCapacity: 1,
       manifest: remoteAcpManifestParallelCapacity(),
@@ -258,33 +258,25 @@ describe("real-process crash/replay fault matrix", () => {
     });
     await client.waitForDispatchStatus(first.operationId, ["leased", "running"]);
 
-    const second = await client.rawDispatch({
+    const second = await client.dispatch({
       blockRef: "T-002#B-001",
       idempotencyKey: "fault-capacity-b",
       agentEndpointId: endpointId
     });
-    expect(second).toMatchObject({
-      status: 409,
-      body: { error: "agent_endpoint_unavailable" }
-    });
-    expect(client.countServerRows("remote_operations")).toBe(1);
-    expect(client.countServerRows("remote_execution_attempts")).toBe(1);
-    expect(client.countServerRows("host_capacity_reservations")).toBe(1);
-    expect(client.countServerRows("mailbox_messages")).toBe(1);
+    await client.waitForDispatchStatus(second.operationId, ["leased", "running"]);
+    expect(client.countServerRows("remote_operations")).toBe(2);
+    expect(client.countServerRows("remote_execution_attempts")).toBe(2);
+    expect(client.countServerRows("host_capacity_reservations")).toBe(2);
+    expect(client.countServerRows("mailbox_messages")).toBe(2);
 
     await harness.acpControl.resume();
-    const firstTerminal = await client.waitForTerminal(first.operationId);
+    const [firstTerminal, secondTerminal] = await Promise.all([
+      client.waitForTerminal(first.operationId),
+      client.waitForTerminal(second.operationId)
+    ]);
     expect(firstTerminal.state).toBe("completed");
-
-    // After capacity frees, the caller retries the rejected request and creates the second operation.
-    const secondActivated = await client.dispatch({
-      blockRef: "T-002#B-001",
-      idempotencyKey: "fault-capacity-b",
-      agentEndpointId: endpointId
-    });
-    const secondTerminal = await client.waitForTerminal(secondActivated.operationId);
     expect(secondTerminal.state).toBe("completed");
-    expect(secondTerminal.operationId).not.toBe(first.operationId);
+    expect(second.operationId).not.toBe(first.operationId);
   }, 180_000);
 
   it("concurrent identical idempotency collapses to one logical remote operation", async () => {

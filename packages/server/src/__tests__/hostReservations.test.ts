@@ -37,7 +37,9 @@ function createOperation(
   workspaceId: string,
   suffix: string,
   capabilities = ["linux"],
-  projectId = "project-a"
+  projectId = "project-a",
+  controlPlane: "collaboration" | "owner" = "collaboration",
+  ownerHostId = "host-owner"
 ) {
   const operation = repository.create({
     workspaceId,
@@ -47,7 +49,28 @@ function createOperation(
     ownershipGeneration: "generation-1",
     idempotencyKey: `request-${suffix}`,
     sourceFingerprint: `fingerprint-${suffix}`,
-    requiredCapabilities: capabilities
+    requiredCapabilities: capabilities,
+    ...(controlPlane === "owner"
+      ? {
+          endpointSelection: {
+            schemaVersion: "endpoint-selection/v1" as const,
+            endpointId: `endpoint-${suffix}`,
+            hostId: ownerHostId,
+            profileId: executionProfile.agentProfileId,
+            agentId: executionProfile.agentId,
+            displayName: "Owner Agent",
+            hostDisplayName: "Owner Host",
+            capabilities,
+            resolvedAt: "2030-01-01T00:00:00.000Z",
+            authority: {
+              schemaVersion: "endpoint-authority/v1" as const,
+              controlPlane: "owner" as const,
+              responsibilityRevision: 0,
+              reviewerRevision: 0
+            }
+          }
+        }
+      : {})
   });
   return repository.markClaimed(operation.id);
 }
@@ -74,6 +97,48 @@ function reportReady(
 }
 
 describe("HostReservationRepository", () => {
+  it("does not let Owner Fleet leases consume collaboration Host capacity", async () => {
+    const server = await setup();
+    const workspaceId = new WorkspaceIdentityRepository(server.database).workspaceForLegacyProject(
+      "project-a"
+    );
+    if (!workspaceId) throw new Error("workspace_mapping_missing");
+    const hosts = new AgentHostRepository(server.database);
+    const host = hosts.register("Owner Host").host;
+    hosts.bindToWorkspace(host.id, workspaceId);
+    reportReady(hosts, host.id, workspaceId, ["linux"], 1);
+    server.database
+      .prepare("UPDATE agent_hosts SET last_seen_at=? WHERE id=?")
+      .run("2030-01-01T00:00:00.000Z", host.id);
+    const operations = new RemoteOperationRepository(server.database);
+    const reservations = new HostReservationRepository(server.database, {
+      hostOfflineAfterMs: 60_000,
+      leaseDurationMs: 60_000,
+      clock: () => new Date("2030-01-01T00:00:00.000Z")
+    });
+
+    const owner = reservations.reserve(
+      createOperation(
+        operations,
+        workspaceId,
+        "owner-capacity",
+        ["linux"],
+        "project-a",
+        "owner",
+        host.id
+      ).id,
+      { ...executionProfile, preferredHostId: host.id }
+    );
+    const collaboration = reservations.reserve(
+      createOperation(operations, workspaceId, "collaboration-capacity").id,
+      { ...executionProfile, preferredHostId: host.id }
+    );
+
+    expect(owner.hostId).toBe(host.id);
+    expect(collaboration.hostId).toBe(host.id);
+    expect(reservations.activeCountsForHosts([host.id]).get(host.id)).toBe(1);
+  });
+
   it("scopes automatic and exact reservations to the operation Workspace", async () => {
     const server = await setup();
     const identity = new WorkspaceIdentityRepository(server.database);

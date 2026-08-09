@@ -7,9 +7,24 @@ import { inWriteTransaction, type SqliteDatabase } from "./sqlite.js";
 import { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
 import {
   AgentHostRepository,
+  fleetHostExecutionProfileAvailability,
   hostExecutionProfileAvailability,
   isAgentHostOnline
 } from "./hosts.js";
+
+const capacityManagedReservationSql = `
+  NOT EXISTS (
+    SELECT 1
+    FROM remote_execution_attempts capacity_attempt
+    JOIN remote_operations capacity_operation
+      ON capacity_operation.id=capacity_attempt.operation_id
+    WHERE capacity_attempt.execution_attempt_id=r.execution_attempt_id
+      AND json_extract(
+        capacity_operation.endpoint_selection_json,
+        '$.authority.controlPlane'
+      )='owner'
+  )
+`;
 
 const timestampSchema = z.iso.datetime();
 const hostCandidateRowSchema = z
@@ -146,17 +161,19 @@ export class HostReservationRepository {
     };
   }
 
-  /** Snapshot active reservation counts for a specific Host set in one query. */
+  /** Snapshot collaboration-capacity reservations for a specific Host set in one query. */
   activeCountsForHosts(hostIds: readonly string[]): ReadonlyMap<string, number> {
     const ids = [...new Set(hostIds.map((hostId) => opaqueIdentifierSchema.parse(hostId)))];
     const counts = new Map(ids.map((hostId) => [hostId, 0]));
     if (ids.length === 0) return counts;
     const rows = this.database
       .prepare(
-        `SELECT host_id,COUNT(*) AS active_reservations
-         FROM host_capacity_reservations
-         WHERE status='active' AND host_id IN (SELECT value FROM json_each(?))
-         GROUP BY host_id`
+        `SELECT r.host_id,COUNT(*) AS active_reservations
+         FROM host_capacity_reservations r
+         WHERE r.status='active'
+           AND r.host_id IN (SELECT value FROM json_each(?))
+           AND ${capacityManagedReservationSql}
+         GROUP BY r.host_id`
       )
       .all(JSON.stringify(ids));
     for (const row of rows) {
@@ -167,7 +184,9 @@ export class HostReservationRepository {
   }
 
   /**
-   * Reserve capacity for an operation attempt.
+   * Reserve a Host for an operation attempt. Collaboration operations consume the
+   * advertised Host capacity; Owner Fleet operations are governed by canvas runtime
+   * concurrency and only require the selected Host/profile to remain usable.
    * When `preferredHostId` is set (exact Host assignment or explicit override), only that Host
    * is considered — never an arbitrary alternate from a UI eligibility cache.
    * When omitted, uses the deterministic automatic selector (active_reservations ASC,
@@ -195,6 +214,7 @@ export class HostReservationRepository {
         const now = this.clock();
         const onlineAfter = new Date(now.getTime() - this.options.hostOfflineAfterMs).toISOString();
         const workspaceId = operation.workspaceId;
+        const ownerFleet = operation.endpointSelection?.authority.controlPlane === "owner";
         const preferredHostId =
           options.preferredHostId === undefined
             ? undefined
@@ -205,7 +225,8 @@ export class HostReservationRepository {
                 .prepare(
                   `SELECT h.id,h.capabilities_json,h.capacity,h.last_seen_at,
                     (SELECT COUNT(*) FROM host_capacity_reservations r
-                      WHERE r.host_id=h.id AND r.status='active') AS active_reservations
+                      WHERE r.host_id=h.id AND r.status='active'
+                        AND ${capacityManagedReservationSql}) AS active_reservations
                    FROM agent_hosts h
                    WHERE h.id=? AND h.revoked_at IS NULL AND h.last_seen_at>=?
                      AND (h.credential_expires_at IS NULL OR h.credential_expires_at>?)`
@@ -215,7 +236,8 @@ export class HostReservationRepository {
                 .prepare(
                   `SELECT h.id,h.capabilities_json,h.capacity,h.last_seen_at,
                     (SELECT COUNT(*) FROM host_capacity_reservations r
-                      WHERE r.host_id=h.id AND r.status='active') AS active_reservations
+                      WHERE r.host_id=h.id AND r.status='active'
+                        AND ${capacityManagedReservationSql}) AS active_reservations
                    FROM agent_hosts h
                    WHERE h.revoked_at IS NULL AND h.last_seen_at>=?
                      AND (h.credential_expires_at IS NULL OR h.credential_expires_at>?)
@@ -250,24 +272,33 @@ export class HostReservationRepository {
               now,
               hostOfflineAfterMs: this.options.hostOfflineAfterMs
             });
-            const fleetUnbound = this.workspaceIdentity.workspaceForHost(candidate.id) === undefined;
+            const fleetUnbound =
+              this.workspaceIdentity.workspaceForHost(candidate.id) === undefined;
+            const profileAvailability = ownerFleet
+              ? fleetHostExecutionProfileAvailability(host, {
+                  online,
+                  agentId: options.agentId,
+                  agentProfileId: options.agentProfileId,
+                  requiredCapabilities: operation.requiredCapabilities
+                })
+              : hostExecutionProfileAvailability(host, {
+                  workspaceId,
+                  online,
+                  agentId: options.agentId,
+                  agentProfileId: options.agentProfileId,
+                  requiredCapabilities: operation.requiredCapabilities,
+                  fleetUnbound
+                });
             return (
               this.workspaceIdentity.hostUsable(candidate.id, now) &&
-              this.workspaceIdentity.hostUsable(candidate.id, now, workspaceId) &&
-              hostExecutionProfileAvailability(host, {
-                workspaceId,
-                online,
-                agentId: options.agentId,
-                agentProfileId: options.agentProfileId,
-                requiredCapabilities: operation.requiredCapabilities,
-                fleetUnbound
-              }).status === "available"
+              (ownerFleet || this.workspaceIdentity.hostUsable(candidate.id, now, workspaceId)) &&
+              profileAvailability.status === "available"
             );
           });
         const required = new Set(operation.requiredCapabilities);
         const host = candidates.find(
           (candidate) =>
-            candidate.active_reservations < candidate.capacity &&
+            (ownerFleet || candidate.active_reservations < candidate.capacity) &&
             [...required].every((capability) => candidate.capabilities.includes(capability))
         );
         if (!host) throw new Error("no_compatible_agent_host");
@@ -415,6 +446,7 @@ export class HostReservationRepository {
       const operation = operations.getRequired(
         opaqueIdentifierSchema.parse(operationRow.operation_id)
       );
+      const ownerFleet = operation.endpointSelection?.authority.controlPlane === "owner";
       if (
         operation.executionAttemptId !== prior.executionAttemptId ||
         operation.attempt.status !== "interrupted" ||
@@ -428,7 +460,8 @@ export class HostReservationRepository {
         .prepare(
           `SELECT capabilities_json,capacity,
              (SELECT COUNT(*) FROM host_capacity_reservations r
-               WHERE r.host_id=agent_hosts.id AND r.status='active') AS active_reservations
+               WHERE r.host_id=agent_hosts.id AND r.status='active'
+                 AND ${capacityManagedReservationSql}) AS active_reservations
            FROM agent_hosts
            WHERE id=? AND revoked_at IS NULL AND last_seen_at>=?
              AND (credential_expires_at IS NULL OR credential_expires_at>?)`
@@ -441,7 +474,9 @@ export class HostReservationRepository {
       }
       const capacity = z.number().int().positive().parse(hostRow.capacity);
       const activeReservations = z.number().int().nonnegative().parse(hostRow.active_reservations);
-      if (activeReservations >= capacity) throw new Error("remote_resume_host_capacity_exhausted");
+      if (!ownerFleet && activeReservations >= capacity) {
+        throw new Error("remote_resume_host_capacity_exhausted");
+      }
       const fencingToken = prior.fencingToken + 1;
       this.database
         .prepare(
@@ -703,12 +738,7 @@ export class HostReservationRepository {
                  'running','activated','awaiting_writeback','action_required','interrupted'
                )`
           )
-          .run(
-            now,
-            reservation.executionAttemptId,
-            reservation.leaseId,
-            reservation.fencingToken
-          );
+          .run(now, reservation.executionAttemptId, reservation.leaseId, reservation.fencingToken);
         this.database
           .prepare(
             `UPDATE remote_operations SET state='awaiting_writeback',updated_at=?,terminal_at=NULL

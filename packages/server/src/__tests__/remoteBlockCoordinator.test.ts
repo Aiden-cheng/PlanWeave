@@ -332,12 +332,14 @@ describe("RemoteBlockCoordinator", () => {
 
   it("preserves a repeated pre-dispatch source conflict without creating an operation", async () => {
     const fixture = await setup(true);
-    const inspect = vi.spyOn(fixture.runtime, "inspect").mockRejectedValue(
-      new RemoteBlockRuntimeError(
-        "remote_block_source_changed",
-        "Remote source keeps changing while inspecting."
-      )
-    );
+    const inspect = vi
+      .spyOn(fixture.runtime, "inspect")
+      .mockRejectedValue(
+        new RemoteBlockRuntimeError(
+          "remote_block_source_changed",
+          "Remote source keeps changing while inspecting."
+        )
+      );
 
     await expect(
       fixture.coordinator.dispatch(
@@ -1416,5 +1418,46 @@ describe("RemoteBlockCoordinator", () => {
     await expect(
       fixture.runtime.query({ ref: "T-001#B-001", operationId: outcome.operation.id })
     ).resolves.toMatchObject({ status: "completed" });
+  });
+
+  it("lets canvas concurrency admit multiple Owner Fleet operations beyond collaboration Host capacity", async () => {
+    const manifest = remoteManifest();
+    const secondTask = basicManifest({ includeSecondTask: true }).nodes.find(
+      (node) => node.id === "T-002"
+    );
+    if (!secondTask) throw new Error("expected_second_task");
+    manifest.nodes.push(secondTask);
+    manifest.execution.parallel = { enabled: true, maxConcurrent: 2 };
+    const fixture = await setupFleetUnboundHost(manifest);
+    const endpoint = fixture.agentEndpoints.listVisibleFleet().items[0];
+    if (!endpoint) throw new Error("expected_fleet_endpoint");
+
+    const dispatchOwner = (blockRef: string, idempotencyKey: string) =>
+      fixture.coordinator.dispatch({
+        ...fixture.locator,
+        blockRef,
+        idempotencyKey,
+        agentEndpointId: endpoint.endpointId,
+        controlPlane: "owner",
+        expectedResponsibilityRevision: 0,
+        expectedReviewerRevision: 0
+      });
+
+    const first = await dispatchOwner("T-001#B-001", "owner-capacity-first");
+    const second = await dispatchOwner("T-002#B-001", "owner-capacity-second");
+
+    expect(first.status).toBe("activated");
+    expect(second.status).toBe("activated");
+    expect(fixture.mailbox.listAfter(fixture.host.id, 0)).toHaveLength(2);
+    expect(fixture.reservations.activeCountsForHosts([fixture.host.id]).get(fixture.host.id)).toBe(
+      0
+    );
+    expect(
+      fixture.server.database
+        .prepare(
+          "SELECT COUNT(*) AS active FROM host_capacity_reservations WHERE host_id=? AND status='active'"
+        )
+        .get(fixture.host.id)
+    ).toEqual({ active: 2 });
   });
 });
