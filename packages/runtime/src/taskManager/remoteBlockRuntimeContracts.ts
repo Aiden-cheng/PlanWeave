@@ -13,6 +13,7 @@ import { z } from "zod";
 import { redactRunnerEventText } from "../autoRun/runnerEventRedaction.js";
 import {
   activeRemoteBlockOwnershipSchema,
+  remoteExecutionControlPlaneSchema,
   remoteBlockOwnershipSchema,
   remoteInterruptionSchema,
   remoteOperationReceiptSchema
@@ -138,6 +139,7 @@ export const remoteBlockClaimInputSchema = z
   .object({
     ref: blockRefSchema,
     operationId: opaqueIdentifierSchema,
+    controlPlane: remoteExecutionControlPlaneSchema,
     sourceRevision: envelopeShape.sourceRevision,
     graphFingerprint: envelopeShape.graphFingerprint.unwrap()
   })

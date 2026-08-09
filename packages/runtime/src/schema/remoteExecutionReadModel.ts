@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { remoteExecutionControlPlaneSchema } from "./remoteOwnership.js";
 
 // The durable source state is already validated by agent-host-protocol. This browser-safe
 // public projection independently rejects paths, URLs, whitespace, and unbounded labels.
@@ -32,6 +33,7 @@ const remoteExecutionDispatchAttemptSchema = z
 export const remoteBlockExecutionReadModelSchema = z
   .object({
     identity: remoteExecutionIdentitySchema,
+    controlPlane: remoteExecutionControlPlaneSchema,
     phase: z.enum(["preparing", "active", "terminal"]),
     status: z.enum(["owned", "interrupted", "source_drift", "completed", "failed"]),
     actionRequired: z.boolean(),

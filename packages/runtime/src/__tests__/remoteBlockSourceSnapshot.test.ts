@@ -57,6 +57,7 @@ function remoteManifest(
 function activeIdentity(candidate: { sourceRevision: string; graphFingerprint: string }) {
   return {
     operationId: "operation-001",
+    controlPlane: "collaboration" as const,
     sourceRevision: candidate.sourceRevision,
     graphFingerprint: candidate.graphFingerprint,
     dispatchId: "dispatch-001",

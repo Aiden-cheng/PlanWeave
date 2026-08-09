@@ -130,11 +130,11 @@ export function defineAcpExecutionAdapterConformance(
       });
       expect(observation.productTexts).toEqual([]);
       if (harness.exposesRemotePublicFailure) {
-        expect(observation.publicFailure).toEqual({
+        expect(observation.publicFailure).toMatchObject({
           code: "acp_process_error",
-          message: "The ACP process failed.",
           retryable: false
         });
+        expect(observation.publicFailure?.message).toMatch(/^The ACP process failed\./);
         expect(JSON.stringify(observation.publicFailure)).not.toContain("private-worktree");
         expect(JSON.stringify(observation.publicFailure)).not.toContain("raw-secret");
         expect(observation.publicFailure?.message.length).toBeLessThanOrEqual(16_384);

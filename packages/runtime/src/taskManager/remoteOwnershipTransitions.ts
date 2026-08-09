@@ -38,12 +38,18 @@ export class RemoteOwnershipConflictError extends Error {
 
 function sameSource(
   owner: RemoteBlockOwnership,
-  source: { operationId: string; sourceRevision: string; graphFingerprint: string }
+  source: {
+    operationId: string;
+    sourceRevision: string;
+    graphFingerprint: string;
+    controlPlane?: "collaboration" | "owner";
+  }
 ): boolean {
   return (
     owner.operationId === source.operationId &&
     owner.sourceRevision === source.sourceRevision &&
-    owner.graphFingerprint === source.graphFingerprint
+    owner.graphFingerprint === source.graphFingerprint &&
+    (owner.controlPlane ?? "collaboration") === (source.controlPlane ?? "collaboration")
   );
 }
 
@@ -239,7 +245,8 @@ export function markRemoteBlockOwnershipSourceDrift(options: {
     phase: "preparing",
     operationId: owner.operationId,
     sourceRevision: options.sourceRevision,
-    graphFingerprint: options.graphFingerprint
+    graphFingerprint: options.graphFingerprint,
+    ...(owner.controlPlane ? { controlPlane: owner.controlPlane } : {})
   });
   if (
     owner.sourceRevision === currentSource.sourceRevision &&

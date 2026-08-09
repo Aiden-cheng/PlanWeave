@@ -144,6 +144,7 @@ describe("desktop graph read API", () => {
 
     expect(graph.tasks[0]?.blocks[0]?.remoteExecution).toEqual({
       identity: { operationId: "operation-001" },
+      controlPlane: "collaboration",
       phase: "active",
       status: "owned",
       actionRequired: false,

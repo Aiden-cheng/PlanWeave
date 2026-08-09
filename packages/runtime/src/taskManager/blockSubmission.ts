@@ -201,6 +201,7 @@ export async function submitRemoteBlockResult(
   }
   const identity = {
     operationId: input.operationId,
+    ...(input.controlPlane ? { controlPlane: input.controlPlane } : {}),
     sourceRevision: input.sourceRevision,
     graphFingerprint: input.graphFingerprint,
     dispatchId: input.dispatchId,

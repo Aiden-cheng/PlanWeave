@@ -17,6 +17,7 @@ export function projectRemoteBlockExecution(
     const sourceDrift = blockState.status === "diverged" && !interrupted;
     return remoteBlockExecutionReadModelSchema.parse({
       identity: { operationId: ownership.operationId },
+      controlPlane: ownership.controlPlane ?? "collaboration",
       phase: ownership.phase,
       status: interrupted ? "interrupted" : sourceDrift ? "source_drift" : "owned",
       actionRequired: interrupted || sourceDrift,
@@ -40,6 +41,7 @@ export function projectRemoteBlockExecution(
   }
   return remoteBlockExecutionReadModelSchema.parse({
     identity: { operationId: receipt.operationId },
+    controlPlane: receipt.controlPlane ?? "collaboration",
     phase: "terminal",
     status: receipt.outcome,
     actionRequired: receipt.outcome === "failed",

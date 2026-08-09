@@ -71,6 +71,7 @@ function remoteManifest(
 function activeIdentity(candidate: { sourceRevision: string; graphFingerprint: string }) {
   return {
     operationId: "operation-001",
+    controlPlane: "collaboration" as const,
     sourceRevision: candidate.sourceRevision,
     graphFingerprint: candidate.graphFingerprint,
     dispatchId: "dispatch-001",
@@ -112,6 +113,7 @@ describe("remote block runtime binding", () => {
 
     const remoteExecution = {
       identity: { operationId: "operation-001" },
+      controlPlane: "collaboration",
       phase: "active",
       status: "owned",
       actionRequired: false,
@@ -263,6 +265,7 @@ describe("remote block runtime terminal transitions", () => {
     expect(reviewCandidate.blockType).toBe("review");
     const reviewIdentity = {
       operationId: "operation-review-001",
+      controlPlane: "collaboration" as const,
       sourceRevision: reviewCandidate.sourceRevision,
       graphFingerprint: reviewCandidate.graphFingerprint,
       dispatchId: "dispatch-review-001",
@@ -271,6 +274,7 @@ describe("remote block runtime terminal transitions", () => {
     await port.claim({
       ref: "T-001#R-001",
       operationId: reviewIdentity.operationId,
+      controlPlane: reviewIdentity.controlPlane,
       sourceRevision: reviewIdentity.sourceRevision,
       graphFingerprint: reviewIdentity.graphFingerprint
     });
@@ -346,6 +350,7 @@ describe("remote block runtime terminal transitions", () => {
     const firstReviewCandidate = await port.inspect({ ref: "T-001#R-001" });
     const firstReviewIdentity = {
       operationId: "operation-review-needs-changes",
+      controlPlane: "collaboration" as const,
       sourceRevision: firstReviewCandidate.sourceRevision,
       graphFingerprint: firstReviewCandidate.graphFingerprint,
       dispatchId: "dispatch-review-needs-changes",
@@ -395,6 +400,7 @@ describe("remote block runtime terminal transitions", () => {
     const resumeCandidate = await port.inspect({ ref: "T-001#R-001" });
     const resumeIdentity = {
       operationId: "operation-review-resume",
+      controlPlane: "collaboration" as const,
       sourceRevision: resumeCandidate.sourceRevision,
       graphFingerprint: resumeCandidate.graphFingerprint,
       dispatchId: "dispatch-review-resume",
@@ -453,6 +459,7 @@ describe("remote block runtime terminal transitions", () => {
     const reviewCandidate = await port.inspect({ ref: "T-001#R-001" });
     const reviewIdentity = {
       operationId: "operation-review-owned",
+      controlPlane: "collaboration" as const,
       sourceRevision: reviewCandidate.sourceRevision,
       graphFingerprint: reviewCandidate.graphFingerprint,
       dispatchId: "dispatch-review-owned",
@@ -495,6 +502,7 @@ describe("remote block runtime terminal transitions", () => {
     const reviewCandidate = await port.inspect({ ref: "T-001#R-001" });
     const reviewIdentity = {
       operationId: "operation-review-fail",
+      controlPlane: "collaboration" as const,
       sourceRevision: reviewCandidate.sourceRevision,
       graphFingerprint: reviewCandidate.graphFingerprint,
       dispatchId: "dispatch-review-fail",
@@ -541,6 +549,7 @@ describe("remote block runtime terminal transitions", () => {
     const reclaimCandidate = await port.inspect({ ref: "T-001#R-001" });
     const reclaimIdentity = {
       operationId: "operation-review-reclaim",
+      controlPlane: "collaboration" as const,
       sourceRevision: reclaimCandidate.sourceRevision,
       graphFingerprint: reclaimCandidate.graphFingerprint,
       dispatchId: "dispatch-review-reclaim",
@@ -570,6 +579,7 @@ describe("remote block runtime terminal transitions", () => {
     const reviewCandidate = await port.inspect({ ref: "T-001#R-001" });
     const reviewIdentity = {
       operationId: "operation-review-interrupt",
+      controlPlane: "collaboration" as const,
       sourceRevision: reviewCandidate.sourceRevision,
       graphFingerprint: reviewCandidate.graphFingerprint,
       dispatchId: "dispatch-review-interrupt",
@@ -608,6 +618,7 @@ describe("remote block runtime terminal transitions", () => {
     const reviewCandidate = await port.inspect({ ref: "T-001#R-001" });
     const reviewIdentity = {
       operationId: "operation-review-drift",
+      controlPlane: "collaboration" as const,
       sourceRevision: reviewCandidate.sourceRevision,
       graphFingerprint: reviewCandidate.graphFingerprint,
       dispatchId: "dispatch-review-drift",
@@ -849,7 +860,15 @@ describe("remote block runtime terminal transitions", () => {
     expect(lastRunId).toMatch(/^RUN-/);
     const metadata = JSON.parse(
       await readFile(
-        join(init.workspace.resultsDir, "T-001", "blocks", "B-001", "runs", lastRunId!, "metadata.json"),
+        join(
+          init.workspace.resultsDir,
+          "T-001",
+          "blocks",
+          "B-001",
+          "runs",
+          lastRunId!,
+          "metadata.json"
+        ),
         "utf8"
       )
     ) as { agentId: string; executor: string };

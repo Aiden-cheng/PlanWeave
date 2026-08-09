@@ -120,6 +120,7 @@ async function writeLockedState(context: RuntimeContext): Promise<void> {
 
 function identityFromInput(input: {
   operationId: string;
+  controlPlane?: "collaboration" | "owner";
   sourceRevision: string;
   graphFingerprint: string;
   dispatchId: string;
@@ -127,6 +128,7 @@ function identityFromInput(input: {
 }): ActiveRemoteOperationIdentity {
   return remoteBlockActiveIdentitySchema.parse({
     operationId: input.operationId,
+    ...(input.controlPlane ? { controlPlane: input.controlPlane } : {}),
     sourceRevision: input.sourceRevision,
     graphFingerprint: input.graphFingerprint,
     dispatchId: input.dispatchId,
@@ -183,6 +185,7 @@ export function createRemoteBlockRuntimePort(options: {
           blockState: current,
           ownership: {
             operationId: input.operationId,
+            controlPlane: input.controlPlane,
             sourceRevision: input.sourceRevision,
             graphFingerprint: input.graphFingerprint
           }

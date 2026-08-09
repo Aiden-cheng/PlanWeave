@@ -12,7 +12,6 @@ import {
   activateRemoteBlockOwnership,
   markRemoteBlockOwnershipSourceDrift,
   prepareRemoteBlockOwnership,
-  RemoteOwnershipConflictError,
   withoutRemoteBlockOwnership
 } from "../taskManager/remoteOwnershipTransitions.js";
 import type { BlockState } from "../types.js";
@@ -20,6 +19,7 @@ import { basicManifest, createTestWorkspace, writeReport } from "./promptTestHel
 
 const source = {
   operationId: "operation-001",
+  controlPlane: "owner" as const,
   sourceRevision: "pgv-pkg-revision-001",
   graphFingerprint: "pkg-fingerprint-001"
 };

@@ -5,6 +5,7 @@ import type { BlockState } from "../types.js";
 
 const source = {
   operationId: "operation-001",
+  controlPlane: "owner" as const,
   sourceRevision: "revision-001",
   graphFingerprint: "fingerprint-001"
 };
@@ -26,6 +27,7 @@ describe("remote execution read model", () => {
       project({ status: "in_progress", remoteOwnership: { phase: "preparing", ...source } })
     ).toEqual({
       identity: { operationId: "operation-001" },
+      controlPlane: "owner",
       phase: "preparing",
       status: "owned",
       actionRequired: false,
@@ -38,6 +40,7 @@ describe("remote execution read model", () => {
       remoteOwnership: { phase: "active", ...source, ...dispatchAttempt }
     });
     expect(active).toMatchObject({
+      controlPlane: "owner",
       phase: "active",
       status: "owned",
       actionRequired: false,
@@ -53,14 +56,14 @@ describe("remote execution read model", () => {
         remoteOwnership: { phase: "active", ...source, ...dispatchAttempt },
         remoteInterruption: { reason: "transport_lost", resumable: true }
       })
-    ).toMatchObject({ status: "interrupted", actionRequired: true });
+    ).toMatchObject({ controlPlane: "owner", status: "interrupted", actionRequired: true });
 
     expect(
       project({
         status: "diverged",
         remoteOwnership: { phase: "active", ...source, ...dispatchAttempt }
       })
-    ).toMatchObject({ status: "source_drift", actionRequired: true });
+    ).toMatchObject({ controlPlane: "owner", status: "source_drift", actionRequired: true });
   });
 
   it("projects completed and failed terminal receipts with fixed action semantics", () => {
@@ -75,7 +78,12 @@ describe("remote execution read model", () => {
           runId: "RUN-001"
         }
       })
-    ).toMatchObject({ phase: "terminal", status: "completed", actionRequired: false });
+    ).toMatchObject({
+      controlPlane: "owner",
+      phase: "terminal",
+      status: "completed",
+      actionRequired: false
+    });
 
     expect(
       project({
@@ -87,11 +95,30 @@ describe("remote execution read model", () => {
           failure: { code: "executor_failed", message: "Public failure.", retryable: false }
         }
       })
-    ).toMatchObject({ phase: "terminal", status: "failed", actionRequired: true });
+    ).toMatchObject({
+      controlPlane: "owner",
+      phase: "terminal",
+      status: "failed",
+      actionRequired: true
+    });
   });
 
   it("returns null for local execution state", () => {
     expect(projectRemoteBlockExecution({ status: "in_progress" })).toBeNull();
+  });
+
+  it("reads legacy remote ownership without a control-plane field as collaboration", () => {
+    expect(
+      project({
+        status: "in_progress",
+        remoteOwnership: {
+          phase: "preparing",
+          operationId: source.operationId,
+          sourceRevision: source.sourceRevision,
+          graphFingerprint: source.graphFingerprint
+        }
+      })
+    ).toMatchObject({ controlPlane: "collaboration", status: "owned" });
   });
 
   it.each([
@@ -102,6 +129,7 @@ describe("remote execution read model", () => {
     expect(
       remoteBlockExecutionReadModelSchema.safeParse({
         identity: { operationId },
+        controlPlane: "owner",
         phase: "preparing",
         status: "owned",
         actionRequired: false,

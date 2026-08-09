@@ -7,10 +7,14 @@ import {
 } from "@planweave-ai/agent-host-protocol";
 import { z } from "zod";
 
+export const remoteExecutionControlPlaneSchema = z.enum(["collaboration", "owner"]);
+
 const remoteOwnershipSourceShape = {
   operationId: opaqueIdentifierSchema,
   sourceRevision: opaqueIdentifierSchema,
-  graphFingerprint: opaqueIdentifierSchema
+  graphFingerprint: opaqueIdentifierSchema,
+  /** Absent only on durable records written before Owner fleet dispatch existed. */
+  controlPlane: remoteExecutionControlPlaneSchema.optional()
 };
 
 /** Durable ownership recorded before a Coordinator dispatch exists. */
@@ -40,6 +44,7 @@ const activeRemoteOperationIdentityShape = {
   operationId: opaqueIdentifierSchema,
   sourceRevision: opaqueIdentifierSchema,
   graphFingerprint: opaqueIdentifierSchema,
+  controlPlane: remoteExecutionControlPlaneSchema.optional(),
   dispatchId: dispatchIdSchema,
   executionAttemptId: executionAttemptIdSchema
 };
@@ -82,3 +87,4 @@ export type ActiveRemoteBlockOwnershipInput = z.input<typeof activeRemoteBlockOw
 export type RemoteBlockOwnership = z.infer<typeof remoteBlockOwnershipSchema>;
 export type RemoteOperationReceipt = z.infer<typeof remoteOperationReceiptSchema>;
 export type RemoteInterruption = z.infer<typeof remoteInterruptionSchema>;
+export type RemoteExecutionControlPlane = z.infer<typeof remoteExecutionControlPlaneSchema>;

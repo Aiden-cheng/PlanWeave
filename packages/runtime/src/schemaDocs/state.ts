@@ -42,16 +42,18 @@ export const stateSchemaDocument: SchemaDocument<"state"> = {
         passedWorkRevision: "string | null, optional",
         remoteOwnership: {
           description:
-            "optional; absent for local/manual/CLI/ACP execution; implementation blocks only",
+            "optional; absent for local/manual/CLI/ACP execution; valid for remote implementation and review blocks",
           preparing: {
             phase: "preparing",
             operationId: "bounded portable identifier",
+            controlPlane: "owner | collaboration; optional only on legacy records",
             sourceRevision: "bounded portable source revision",
             graphFingerprint: "bounded portable graph fingerprint"
           },
           active: {
             phase: "active",
             operationId: "same identifier as preparing",
+            controlPlane: "same control plane as preparing",
             sourceRevision: "same revision as preparing",
             graphFingerprint: "same fingerprint as preparing",
             dispatchId: "exact distributed dispatch identifier",
@@ -83,7 +85,7 @@ export const stateSchemaDocument: SchemaDocument<"state"> = {
   },
   notes: [
     "State is derived from manifest plus runtime actions.",
-    "Use status --json, explain, doctor, or Desktop read models for the canonical remoteExecution projection; it exposes only logical operation/source/dispatch-attempt identity, lifecycle phase/status, and Runtime-derived actionRequired.",
+    "Use status --json, explain, doctor, or Desktop read models for the canonical remoteExecution projection; it exposes the Owner/collaboration control plane plus logical operation/source/dispatch-attempt identity, lifecycle phase/status, and Runtime-derived actionRequired.",
     "Remote ownership is valid only for in_progress or diverged implementation/review blocks; completed, blocked, and reset state never retain an active owner.",
     "Terminal remote receipts are immutable idempotency evidence and are cleared by reset, unblock, or later local recovery mutations.",
     "Remote failure receipts preserve retryability, retain Runtime-owned public codes, keep redacted diagnostics for selected ACP codes (such as acp_unknown_error), and normalize every other unknown wire code to remote_execution_failed with message Remote execution failed.",
