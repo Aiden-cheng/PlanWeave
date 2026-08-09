@@ -51,6 +51,27 @@ describe("storage-neutral ACP execution engine", () => {
     expect(events.at(-1)).toMatchObject({ kind: "terminal", terminal: { state: "succeeded" } });
   });
 
+  it("publishes session identity before updates emitted during session creation", async () => {
+    const events: AcpEngineEvent[] = [];
+    let sessionStarted = false;
+    const result = await executeAcp(
+      engineOptions("early-session-update", {
+        eventSink: (event) => {
+          if (event.kind === "session_update" && !sessionStarted) {
+            throw new Error("remote_execution_session_identity_stale");
+          }
+          events.push(event);
+          if (event.kind === "session_started") sessionStarted = true;
+        }
+      })
+    );
+    expect(result.terminal).toEqual({ state: "succeeded", stopReason: "end_turn" });
+    expect(events.findIndex((event) => event.kind === "session_started")).toBeLessThan(
+      events.findIndex((event) => event.kind === "session_update")
+    );
+    expect(result.output).toContain("update before session/new response");
+  });
+
   it("loads a caller-selected session without adding persistence semantics", async () => {
     const result = await executeAcp(
       engineOptions("load-capable", {

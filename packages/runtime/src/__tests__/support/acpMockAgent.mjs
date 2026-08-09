@@ -342,6 +342,21 @@ const app = agent({ name: "planweave-acp-mock" })
       modeId: currentModeId,
       config: { model: currentModel, "fast-mode": false }
     });
+    if (scenario === "early-session-update") {
+      process.stdout.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          method: "session/update",
+          params: {
+            sessionId,
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              content: { type: "text", text: "update before session/new response" }
+            }
+          }
+        })}\n`
+      );
+    }
     return scenario === "artifact-session-config" ||
       scenario === "artifact-session-config-live" ||
       scenario === "probe-session-config-current-second"

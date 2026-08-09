@@ -187,6 +187,10 @@ async function executeAcpOutcome(
   let sinkFailure: unknown;
   let sessionUpdateFailure: unknown;
   let executionCause: unknown;
+  let sessionIdentityPublished = false;
+  let pendingSessionUpdates: SessionNotification[] = [];
+  let pendingSessionUpdateBytes = 0;
+  let sessionUpdateDrain: Promise<void> = Promise.resolve();
 
   const observeLifecycle = async (event: AcpEngineLifecycleEvent): Promise<void> => {
     await options.lifecycleObserver?.(event);
@@ -209,9 +213,8 @@ async function executeAcpOutcome(
     }
   };
 
-  const onSessionUpdate = async (notification: SessionNotification): Promise<void> => {
-    if (sessionUpdateFailure !== undefined) return;
-    try {
+  const relaySessionUpdate = async (notification: SessionNotification): Promise<void> => {
+    if (sessionUpdateFailure === undefined) {
       const normalized = normalizeAcpSessionNotification(notification);
       if (!normalized) return;
       const outputChunk = assistantTextChunk(notification);
@@ -224,9 +227,34 @@ async function executeAcpOutcome(
         outputBytes = nextBytes;
       }
       await emit({ kind: "session_update", sessionId: notification.sessionId, body: normalized });
-    } catch (error) {
-      sessionUpdateFailure ??= error;
     }
+  };
+
+  const queueSessionUpdate = (notification: SessionNotification): Promise<void> => {
+    sessionUpdateDrain = sessionUpdateDrain.then(async () => {
+      if (sessionUpdateFailure !== undefined) return;
+      try {
+        await relaySessionUpdate(notification);
+      } catch (error) {
+        sessionUpdateFailure ??= error;
+      }
+    });
+    return sessionUpdateDrain;
+  };
+
+  const onSessionUpdate = (notification: SessionNotification): Promise<void> => {
+    if (!sessionIdentityPublished) {
+      const notificationBytes = Buffer.byteLength(JSON.stringify(notification), "utf8");
+      const nextBytes = pendingSessionUpdateBytes + notificationBytes;
+      if (nextBytes > limits.outputMaxBytes) {
+        sessionUpdateFailure ??= new AcpEngineLimitError("output", limits.outputMaxBytes);
+        return Promise.resolve();
+      }
+      pendingSessionUpdates.push(notification);
+      pendingSessionUpdateBytes = nextBytes;
+      return Promise.resolve();
+    }
+    return queueSessionUpdate(notification);
   };
 
   const interactionHandlers = createAcpExecutionInteractionHandlers({
@@ -347,6 +375,14 @@ async function executeAcpOutcome(
       }
     });
     await emit({ kind: "session_started", sessionId, loaded: sessionStart.kind === "load" });
+    sessionIdentityPublished = true;
+    for (const notification of pendingSessionUpdates) {
+      void queueSessionUpdate(notification);
+    }
+    pendingSessionUpdates = [];
+    pendingSessionUpdateBytes = 0;
+    await sessionUpdateDrain;
+    if (sessionUpdateFailure !== undefined) throw sessionUpdateFailure;
     await emit({ kind: "lifecycle", state: "running" });
     let response: PromptResponse | null = null;
     let turn = 0;
