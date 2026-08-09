@@ -13,7 +13,8 @@ const FLEET_CATALOG_ERROR_KEYS = {
   operator_credential_missing: "agentEndpointFleetCredentialMissing",
   operator_profile_not_active: "agentEndpointFleetProfileNotActive",
   operator_profile_not_found: "agentEndpointFleetProfileNotActive",
-  operator_bridge_unavailable: "agentEndpointFleetBridgeUnavailable"
+  operator_bridge_unavailable: "agentEndpointFleetBridgeUnavailable",
+  operator_local_server_not_ready: "agentEndpointFleetLocalServerNotReady"
 } as const;
 
 export function formatAgentEndpointFleetCatalogError(
@@ -25,7 +26,11 @@ export function formatAgentEndpointFleetCatalogError(
   if (key) {
     return withPlaceholders(t(key), { code });
   }
-  if (code === "agent_endpoint_request_failed" || code.startsWith("operator_")) {
+  if (
+    code === "agent_endpoint_request_failed" ||
+    code.startsWith("operator_") ||
+    code.startsWith("http_")
+  ) {
     return withPlaceholders(t("agentEndpointFleetLoadFailed"), { code });
   }
   return null;

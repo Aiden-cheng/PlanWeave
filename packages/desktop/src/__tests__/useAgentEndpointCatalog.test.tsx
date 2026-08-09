@@ -168,4 +168,67 @@ describe("useAgentEndpointCatalog freshness", () => {
       result.current.endpoints.find((endpoint) => endpoint.id === "remote:endpoint-windows")
     ).toMatchObject({ available: true, unavailableReason: null });
   });
+
+  it("keeps last successful remotes when a later refresh fails", async () => {
+    const listOperatorAgentEndpoints = vi
+      .fn()
+      .mockResolvedValueOnce({
+        schemaVersion: "agent-endpoint-list/v1" as const,
+        items: [online]
+      })
+      .mockRejectedValueOnce(Object.assign(new Error("http_502"), { code: "http_502" }));
+    const { result } = renderHook(() =>
+      useAgentEndpointCatalog({
+        fleetApi: { listOperatorAgentEndpoints },
+        enabled: true,
+        logicalExecutors: [localCodex],
+        operatorProfileId: "operator-profile-1"
+      })
+    );
+
+    await act(async () => undefined);
+    expect(
+      result.current.endpoints.find((endpoint) => endpoint.id === "remote:endpoint-windows")
+    ).toMatchObject({ source: "remote", available: true });
+
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(
+      result.current.endpoints.find((endpoint) => endpoint.id === "remote:endpoint-windows")
+    ).toMatchObject({
+      source: "remote",
+      available: false,
+      unavailableReason: "agent_endpoint_request_failed"
+    });
+    expect(result.current.errorCode).toBe("http_502");
+  });
+
+  it("retries quickly after an initial empty-fleet load failure", async () => {
+    const listOperatorAgentEndpoints = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error("http_502"), { code: "http_502" }))
+      .mockResolvedValueOnce({
+        schemaVersion: "agent-endpoint-list/v1" as const,
+        items: [online]
+      });
+    const { result } = renderHook(() =>
+      useAgentEndpointCatalog({
+        fleetApi: { listOperatorAgentEndpoints },
+        enabled: true,
+        logicalExecutors: [localCodex],
+        operatorProfileId: "operator-profile-1"
+      })
+    );
+
+    await act(async () => undefined);
+    expect(result.current.errorCode).toBe("http_502");
+    expect(result.current.endpoints.some((endpoint) => endpoint.source === "remote")).toBe(false);
+
+    await act(async () => vi.advanceTimersByTimeAsync(2_000));
+    expect(
+      result.current.endpoints.find((endpoint) => endpoint.id === "remote:endpoint-windows")
+    ).toMatchObject({ source: "remote", available: true });
+    expect(result.current.errorCode).toBeNull();
+  });
 });

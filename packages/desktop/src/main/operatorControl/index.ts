@@ -26,6 +26,14 @@ export {
   type OperatorControlServiceOptions
 } from "./operatorControlService.js";
 export {
+  LOCAL_OPERATOR_PROFILE_ID,
+  getLocalOperatorBackendPort,
+  setLocalOperatorBackendPort,
+  resolveEffectiveOperatorServerBaseUrl,
+  type LocalOperatorBackendPort,
+  type LocalOperatorBackendSnapshot
+} from "./localOperatorBackend.js";
+export {
   createOperatorControlService,
   getOperatorControlService,
   registerOperatorControlHandlers,

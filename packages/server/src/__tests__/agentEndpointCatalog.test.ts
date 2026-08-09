@@ -126,12 +126,12 @@ describe("AgentEndpointCatalog", () => {
     expect(fleet).toHaveLength(2);
     expect(fleet.every((item) => item.agentId === "pi" && item.status === "available")).toBe(true);
     expect(new Set(fleet.map((item) => item.endpointId)).size).toBe(2);
-    expect(fleet.map((item) => item.endpointId)).toEqual(
-      expect.arrayContaining([
-        endpointIdFor({ hostId: "host-alpha", profileId: "profile-pi", agentId: "pi" }),
-        endpointIdFor({ hostId: "host-beta", profileId: "profile-pi", agentId: "pi" })
-      ])
-    );
+    // Preserve Host addition order from listActiveHosts (not endpointId / displayName sort).
+    expect(fleet.map((item) => item.hostDisplayName)).toEqual(["Alpha", "Beta"]);
+    expect(fleet.map((item) => item.endpointId)).toEqual([
+      endpointIdFor({ hostId: "host-alpha", profileId: "profile-pi", agentId: "pi" }),
+      endpointIdFor({ hostId: "host-beta", profileId: "profile-pi", agentId: "pi" })
+    ]);
     const singleHostState = fixture([readyHost()]);
     const workspaceA = singleHostState.catalog.listVisible("workspace-a").items[0]!;
     const workspaceB = singleHostState.catalog.listVisible("workspace-b").items[0]!;

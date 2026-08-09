@@ -313,6 +313,7 @@ export class AgentHostRepository {
   /**
    * Server-scoped fleet inventory: active Host rows from agent_hosts.
    * Revoked or credential-expired Hosts are excluded.
+   * Ordered by enrollment time so Owner Fleet pickers keep addition order.
    */
   listActiveHosts(limit = 100, offset = 0): AgentHost[] {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 101) {
@@ -328,7 +329,7 @@ export class AgentHostRepository {
           `SELECT * FROM agent_hosts
            WHERE revoked_at IS NULL
              AND (credential_expires_at IS NULL OR credential_expires_at > ?)
-           ORDER BY display_name,id
+           ORDER BY created_at ASC, id ASC
            LIMIT ? OFFSET ?`
         )
         .all(nowIso, limit, offset) as HostRow[]

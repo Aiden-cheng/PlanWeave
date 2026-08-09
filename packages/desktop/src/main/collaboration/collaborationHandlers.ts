@@ -34,6 +34,7 @@ import { runCollaborationCommand } from "./collaborationCommandHandler.js";
 import { createLocalCollaborationActivationCommand } from "./localCollaborationSelectionActivation.js";
 import { CollaborationInvitationHandoffCoordinator } from "./CollaborationInvitationHandoffCoordinator.js";
 import { getOperatorControlService } from "../operatorControl/operatorControlHandlers.js";
+import { setLocalOperatorBackendPort } from "../operatorControl/localOperatorBackend.js";
 import { createCollaborationCoordinationQueue } from "./collaborationCoordinationQueue.js";
 import { switchLocalCollaborationExposure } from "./localCollaborationExposureSwitch.js";
 import { assertRendererProfileNamespace } from "./collaborationProfileEndpoint.js";
@@ -621,5 +622,6 @@ export async function shutdownLocalCollaborationCoordinator(): Promise<void> {
   }
   const active = coordinator;
   coordinator = null;
+  setLocalOperatorBackendPort(null);
   await active.stop();
 }

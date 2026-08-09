@@ -155,6 +155,7 @@
         "localCollaborationExposureSwitch.test.ts",
         "localCollaborationSelectionActivation.test.ts",
         "localCollaborationServerPanel.test.tsx",
+        "localOperatorBackend.test.ts",
         "localMcpProcess.test.ts",
         "notificationController.test.tsx",
         "notificationNavigation.test.ts",

@@ -3,6 +3,7 @@ import {
   SelectContent,
   SelectGroup,
   SelectItem,
+  SelectSeparator,
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
@@ -32,6 +33,21 @@ export function AgentEndpointSelect({
   const selectedKnown =
     selectedEndpointId === inheritAgentEndpointValue ||
     endpoints.some((endpoint) => endpoint.id === selectedEndpointId);
+  // Preserve catalog order: locals first, then remotes in host enrollment / list order.
+  const localEndpoints = endpoints.filter((endpoint) => endpoint.source === "local");
+  const remoteEndpoints = endpoints.filter((endpoint) => endpoint.source === "remote");
+  const renderEndpointItem = (endpoint: AvailableAgentEndpoint) => (
+    <SelectItem disabled={!endpoint.available} key={endpoint.id} value={endpoint.id}>
+      <span className="flex min-w-0 items-center gap-2">
+        <span>{agentEndpointDisplayLabel(endpoint)}</span>
+        {!endpoint.available ? (
+          <span className="text-xs text-muted-foreground">
+            {endpoint.unavailableReason ?? unavailableLabel}
+          </span>
+        ) : null}
+      </span>
+    </SelectItem>
+  );
 
   return (
     <Select disabled={disabled} onValueChange={onValueChange} value={selectedEndpointId}>
@@ -42,7 +58,17 @@ export function AgentEndpointSelect({
       >
         <SelectValue />
       </SelectTrigger>
-      <SelectContent>
+      {/*
+        Popper keeps the panel anchored while scrolling (no item-aligned drift).
+        showScrollDownHint: bottom cue only — never the top scroll button.
+      */}
+      <SelectContent
+        align="start"
+        className="!max-h-56 min-w-48"
+        position="popper"
+        showScrollDownHint
+        sideOffset={4}
+      >
         <SelectGroup>
           {inheritLabel ? (
             <SelectItem value={inheritAgentEndpointValue}>{inheritLabel}</SelectItem>
@@ -52,18 +78,9 @@ export function AgentEndpointSelect({
               {unavailableLabel}
             </SelectItem>
           ) : null}
-          {endpoints.map((endpoint) => (
-            <SelectItem disabled={!endpoint.available} key={endpoint.id} value={endpoint.id}>
-              <span className="flex min-w-0 items-center gap-2">
-                <span>{agentEndpointDisplayLabel(endpoint)}</span>
-                {!endpoint.available ? (
-                  <span className="text-xs text-muted-foreground">
-                    {endpoint.unavailableReason ?? unavailableLabel}
-                  </span>
-                ) : null}
-              </span>
-            </SelectItem>
-          ))}
+          {localEndpoints.map(renderEndpointItem)}
+          {localEndpoints.length > 0 && remoteEndpoints.length > 0 ? <SelectSeparator /> : null}
+          {remoteEndpoints.map(renderEndpointItem)}
         </SelectGroup>
       </SelectContent>
     </Select>

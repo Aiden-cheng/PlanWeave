@@ -14,6 +14,8 @@ import {
 type FleetEndpointCatalogApi = Pick<PlanWeaveOperatorControlApi, "listOperatorAgentEndpoints">;
 
 export const agentEndpointCatalogRefreshIntervalMs = 30_000;
+/** Short retry after a failed load so startup 502s do not leave the picker empty for 30s. */
+export const agentEndpointCatalogRetryAfterFailureMs = 2_000;
 
 function operatorFleetErrorCode(error: unknown): string {
   if (error instanceof OperatorControlError) return error.code;
@@ -45,9 +47,20 @@ export function useAgentEndpointCatalog(input: {
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const generationRef = useRef(0);
+  const retryTimerRef = useRef<number | null>(null);
+  const refreshRef = useRef<() => Promise<void>>(async () => undefined);
   const operatorProfileId = input.operatorProfileId;
   const operatorProfileIdRef = useRef(operatorProfileId);
   operatorProfileIdRef.current = operatorProfileId;
+  const remoteEndpointsRef = useRef(remoteEndpoints);
+  remoteEndpointsRef.current = remoteEndpoints;
+
+  const clearRetryTimer = useCallback(() => {
+    if (retryTimerRef.current !== null) {
+      window.clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     const generation = ++generationRef.current;
@@ -56,6 +69,7 @@ export function useAgentEndpointCatalog(input: {
       generation === generationRef.current &&
       requestProfileId === operatorProfileIdRef.current;
     if (!input.enabled || !requestProfileId || !listFleetEndpoints) {
+      clearRetryTimer();
       setRemoteEndpoints([]);
       setError(input.fleetCatalogBlockedCode ?? null);
       setErrorCode(input.fleetCatalogBlockedCode ?? null);
@@ -67,30 +81,43 @@ export function useAgentEndpointCatalog(input: {
     setErrorCode(null);
     try {
       const result = await listFleetEndpoints({ profileId: requestProfileId });
-      if (canWrite()) setRemoteEndpoints(result.items);
+      if (canWrite()) {
+        clearRetryTimer();
+        setRemoteEndpoints(result.items);
+      }
     } catch (caught: unknown) {
       if (canWrite()) {
         const code = operatorFleetErrorCode(caught);
         setError(code);
         setErrorCode(code);
+        // Keep last successful remotes; only schedule a quick retry when still empty.
+        if (remoteEndpointsRef.current.length === 0 && retryTimerRef.current === null) {
+          retryTimerRef.current = window.setTimeout(() => {
+            retryTimerRef.current = null;
+            void refreshRef.current();
+          }, agentEndpointCatalogRetryAfterFailureMs);
+        }
       }
     } finally {
       if (canWrite()) setRefreshing(false);
     }
   }, [
+    clearRetryTimer,
     listFleetEndpoints,
     input.enabled,
     input.fleetCatalogBlockedCode,
     operatorProfileId
   ]);
+  refreshRef.current = refresh;
 
   useEffect(() => {
-    setRemoteEndpoints([]);
+    // Do not clear remotes here: a failed refresh after clear would hide fleet hosts.
     void refresh();
     return () => {
       generationRef.current += 1;
+      clearRetryTimer();
     };
-  }, [refresh]);
+  }, [clearRetryTimer, refresh]);
 
   useEffect(() => {
     if (!input.enabled || !operatorProfileId) return;

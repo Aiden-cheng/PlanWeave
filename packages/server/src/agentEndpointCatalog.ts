@@ -372,8 +372,6 @@ export class AgentEndpointCatalog {
         candidates.push({ endpoint, host, profile });
       }
     }
-    return candidates.sort((left, right) =>
-      left.endpoint.endpointId.localeCompare(right.endpoint.endpointId)
-    );
+    return candidates;
   }
 }

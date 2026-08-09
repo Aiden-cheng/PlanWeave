@@ -10,4 +10,18 @@ describe("formatAgentEndpointFleetCatalogError", () => {
     expect(message).not.toMatch(/People/i);
     expect(message).not.toMatch(/connect.*workspace/i);
   });
+
+  it("surfaces http transport failures so an empty fleet picker is not silent", () => {
+    const t = createTranslator("en");
+    const message = formatAgentEndpointFleetCatalogError("http_502", t);
+    expect(message).toContain("http_502");
+    expect(message.length).toBeGreaterThan(0);
+  });
+
+  it("surfaces local server not-ready with dedicated copy", () => {
+    const t = createTranslator("en");
+    const message = formatAgentEndpointFleetCatalogError("operator_local_server_not_ready", t);
+    expect(message).toContain("still starting");
+    expect(message).toContain("operator_local_server_not_ready");
+  });
 });

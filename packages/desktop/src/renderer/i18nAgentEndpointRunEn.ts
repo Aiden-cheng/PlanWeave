@@ -34,6 +34,8 @@ export const agentEndpointRunEnCatalog = {
     "Select a server-admin profile in Settings → Server to list remote Agent Hosts. [{code}]",
   agentEndpointFleetBridgeUnavailable:
     "Desktop cannot reach server-admin controls. Restart Desktop and try again. [{code}]",
+  agentEndpointFleetLocalServerNotReady:
+    "The local collaboration server is still starting. Wait a moment and retry. [{code}]",
   agentEndpointFleetLoadFailed:
     "Could not load remote Agent Host endpoints. Check Settings → Server and retry. [{code}]"
 } as const;

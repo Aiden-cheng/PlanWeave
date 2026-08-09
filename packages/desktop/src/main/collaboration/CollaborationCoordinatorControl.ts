@@ -26,6 +26,12 @@ import type { OperatorSafeStoragePort } from "../operatorControl/operatorCredent
 import { OperatorCredentialVault } from "../operatorControl/operatorCredentialVault.js";
 import { getOperatorControlService } from "../operatorControl/operatorControlHandlers.js";
 import type { OperatorControlService } from "../operatorControl/operatorControlService.js";
+import {
+  LOCAL_OPERATOR_BACKEND_READY_TIMEOUT_MS,
+  LOCAL_OPERATOR_PROFILE_ID,
+  setLocalOperatorBackendPort,
+  type LocalOperatorBackendSnapshot
+} from "../operatorControl/localOperatorBackend.js";
 import { desktopHomePaths } from "../planweaveHomePaths.js";
 import {
   collaborationCurrentSelectionInputSchema,
@@ -77,7 +83,7 @@ type LoopbackServerControlPort = Pick<
 
 type LocalExposureMode = "local_only" | "private_https" | "lan_http";
 
-const localOperatorCredentialKey = "planweave-local-loopback";
+const localOperatorCredentialKey = LOCAL_OPERATOR_PROFILE_ID;
 const localServerProfileId = "planweave-local-server";
 const localStartAttempts = 3;
 
@@ -163,6 +169,11 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   private exposureErrorCode: DesktopServerExposureErrorCode | null = null;
   private operatorToken: string | null = null;
   private operationQueue: Promise<unknown> = Promise.resolve();
+  private readonly runningWaiters = new Set<{
+    resolve: (snapshot: LocalOperatorBackendSnapshot) => void;
+    reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
   private readonly vault: OperatorCredentialVault;
   private readonly scopeStore: LocalCollaborationScopeStorePort;
   private readonly networkStore: LocalCollaborationNetworkStorePort;
@@ -220,6 +231,71 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     this.networkStore = options.networkStore ?? new LocalCollaborationNetworkStore();
     this.resolveLanAddress = options.resolveLanAddress ?? resolveLocalCollaborationLanAddress;
     this.syncOperatorProfile = options.syncOperatorProfile;
+    setLocalOperatorBackendPort({
+      getSnapshot: () => this.getLocalOperatorBackendSnapshot(),
+      whenRunning: (timeoutMs) => this.whenLocalOperatorBackendRunning(timeoutMs)
+    });
+  }
+
+  getLocalOperatorBackendSnapshot(): LocalOperatorBackendSnapshot {
+    const running = this.status().state === "running" && this.localPort !== null;
+    const loopbackBaseUrl = running ? `http://127.0.0.1:${this.localPort}/` : null;
+    let advertisedOrigin: string | null = null;
+    if (this.exposureMode === "private_https") {
+      advertisedOrigin = this.privateHttpsOrigin;
+    } else if (running && this.exposureMode === "lan_http" && this.lanAddress && this.localPort) {
+      advertisedOrigin = `http://${this.lanAddress}:${this.localPort}/`;
+    } else if (running && this.localPort !== null) {
+      advertisedOrigin = `http://127.0.0.1:${this.localPort}/`;
+    }
+    return {
+      running,
+      loopbackBaseUrl,
+      advertisedOrigin
+    };
+  }
+
+  whenLocalOperatorBackendRunning(
+    timeoutMs = LOCAL_OPERATOR_BACKEND_READY_TIMEOUT_MS
+  ): Promise<LocalOperatorBackendSnapshot> {
+    const current = this.getLocalOperatorBackendSnapshot();
+    if (current.running && current.loopbackBaseUrl) return Promise.resolve(current);
+
+    return new Promise<LocalOperatorBackendSnapshot>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.runningWaiters.delete(waiter);
+        reject(new Error("operator_local_server_not_ready"));
+      }, timeoutMs);
+      const waiter = {
+        resolve: (snapshot: LocalOperatorBackendSnapshot) => {
+          clearTimeout(timer);
+          this.runningWaiters.delete(waiter);
+          resolve(snapshot);
+        },
+        reject: (error: Error) => {
+          clearTimeout(timer);
+          this.runningWaiters.delete(waiter);
+          reject(error);
+        },
+        timer
+      };
+      this.runningWaiters.add(waiter);
+      // Join the coordinator queue so an in-flight restore/start can settle waiters.
+      void this.operationQueue.finally(() => {
+        const snapshot = this.getLocalOperatorBackendSnapshot();
+        if (snapshot.running && snapshot.loopbackBaseUrl && this.runningWaiters.has(waiter)) {
+          waiter.resolve(snapshot);
+        }
+      });
+    });
+  }
+
+  private resolveLocalOperatorBackendWaiters(): void {
+    const snapshot = this.getLocalOperatorBackendSnapshot();
+    if (!snapshot.running || !snapshot.loopbackBaseUrl) return;
+    for (const waiter of [...this.runningWaiters]) {
+      waiter.resolve(snapshot);
+    }
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -349,6 +425,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
           await this.persistNetworkState();
         }
         await this.syncMainOwnedOperatorProfile();
+        this.resolveLocalOperatorBackendWaiters();
         return this.status();
       }
       lastStatus = this.status();

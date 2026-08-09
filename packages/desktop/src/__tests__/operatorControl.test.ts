@@ -603,6 +603,89 @@ describe("Desktop operator control trust boundary", () => {
     expect(JSON.stringify(requests)).toContain(tokenA);
   });
 
+  it("routes local-owned Operator HTTP through loopback instead of Tailscale origin", async () => {
+    const directory = await root("planweave-operator-loopback-");
+    const seenBases: string[] = [];
+    const createClient = vi.fn((options: ConstructorParameters<typeof OperatorControlClient>[0]) => {
+      seenBases.push(options.profile.serverBaseUrl);
+      return new OperatorControlClient({
+        ...options,
+        request: vi.fn(async () =>
+          new Response(JSON.stringify({ schemaVersion: "agent-endpoint-list/v1", items: [] }), {
+            status: 200
+          })
+        )
+      });
+    });
+    const service = new OperatorControlService({
+      profileStore: new OperatorProfileStore({ profilesPath: join(directory, "profiles.json") }),
+      vault: new OperatorCredentialVault({
+        paths: { credentialsPath: join(directory, "credentials.json") },
+        safeStorage: safeStorage(true)
+      }),
+      createClient,
+      localOperatorBackend: {
+        getSnapshot: () => ({
+          running: true,
+          loopbackBaseUrl: "http://127.0.0.1:50653/",
+          advertisedOrigin: "https://owner-device.example.ts.net/"
+        }),
+        whenRunning: vi.fn()
+      }
+    });
+    await service.upsertProfile(
+      profile("planweave-local-loopback", "https://owner-device.example.ts.net/")
+    );
+    await service.importCredential({
+      profileId: "planweave-local-loopback",
+      operatorToken: tokenA
+    });
+
+    await expect(
+      service.listAgentEndpoints({ profileId: "planweave-local-loopback" })
+    ).resolves.toEqual({ schemaVersion: "agent-endpoint-list/v1", items: [] });
+    expect(seenBases).toEqual(["http://127.0.0.1:50653/"]);
+  });
+
+  it("keeps remote Operator profiles on their persisted serverBaseUrl", async () => {
+    const directory = await root("planweave-operator-remote-no-bypass-");
+    const seenBases: string[] = [];
+    const createClient = vi.fn((options: ConstructorParameters<typeof OperatorControlClient>[0]) => {
+      seenBases.push(options.profile.serverBaseUrl);
+      return new OperatorControlClient({
+        ...options,
+        request: vi.fn(async () =>
+          new Response(JSON.stringify({ schemaVersion: "agent-endpoint-list/v1", items: [] }), {
+            status: 200
+          })
+        )
+      });
+    });
+    const service = new OperatorControlService({
+      profileStore: new OperatorProfileStore({ profilesPath: join(directory, "profiles.json") }),
+      vault: new OperatorCredentialVault({
+        paths: { credentialsPath: join(directory, "credentials.json") },
+        safeStorage: safeStorage(true)
+      }),
+      createClient,
+      localOperatorBackend: {
+        getSnapshot: () => ({
+          running: true,
+          loopbackBaseUrl: "http://127.0.0.1:50653/",
+          advertisedOrigin: "https://owner-device.example.ts.net/"
+        }),
+        whenRunning: vi.fn()
+      }
+    });
+    await service.upsertProfile(profile("profile-remote", "https://remote-operator.example/"));
+    await service.importCredential({ profileId: "profile-remote", operatorToken: tokenA });
+
+    await expect(
+      service.listAgentEndpoints({ profileId: "profile-remote" })
+    ).resolves.toEqual({ schemaVersion: "agent-endpoint-list/v1", items: [] });
+    expect(seenBases).toEqual(["https://remote-operator.example/"]);
+  });
+
   it("copies a member setup code in main and returns only redacted handoff metadata", async () => {
     const directory = await root("planweave-operator-member-setup-");
     const request = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

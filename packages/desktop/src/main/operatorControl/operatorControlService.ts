@@ -42,6 +42,10 @@ import {
   type OperatorControlClientOptions
 } from "./OperatorControlClient.js";
 import {
+  resolveEffectiveOperatorServerBaseUrl,
+  type LocalOperatorBackendPort
+} from "./localOperatorBackend.js";
+import {
   operatorCredentialVaultPaths,
   OperatorCredentialVault,
   type OperatorCredentialVaultOptions,
@@ -75,6 +79,8 @@ export type OperatorControlServiceOptions = {
   clock?: { now(): Date };
   onStatusChange?: (status: OperatorControlStatus) => void;
   localAgentHost?: LocalAgentHostProvisioner;
+  /** Test injection; production uses the coordinator-registered backend port. */
+  localOperatorBackend?: LocalOperatorBackendPort | null;
 };
 
 function nowIso(clock?: { now(): Date }): string {
@@ -122,6 +128,7 @@ export class OperatorControlService {
   private readonly clock?: { now(): Date };
   private readonly onStatusChange?: (status: OperatorControlStatus) => void;
   private readonly localAgentHost: LocalAgentHostProvisioner;
+  private readonly localOperatorBackend: LocalOperatorBackendPort | null | undefined;
   private disposed = false;
   private queue: Promise<unknown> = Promise.resolve();
   private lastErrorCode: string | null = null;
@@ -144,6 +151,7 @@ export class OperatorControlService {
     this.clock = options.clock;
     this.onStatusChange = options.onStatusChange;
     this.localAgentHost = options.localAgentHost ?? unavailableLocalAgentHostProvisioner();
+    this.localOperatorBackend = options.localOperatorBackend;
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -570,13 +578,27 @@ export class OperatorControlService {
     const token = await this.vault.getOperatorToken(parsed.profileId);
     if (!token)
       throw new OperatorControlError({ kind: "unauthorized", code: "operator_credential_missing" });
+    const effective = await resolveEffectiveOperatorServerBaseUrl({
+      profile: {
+        profileId: profile.profileId,
+        serverBaseUrl: profile.serverBaseUrl,
+        allowInsecureTransport: profile.allowInsecureTransport
+      },
+      ...(this.localOperatorBackend !== undefined
+        ? { backend: this.localOperatorBackend }
+        : {})
+    });
     const client = this.createClient({
       profile: operatorControlProfileSchema.parse({
         profileId: profile.profileId,
         displayName: profile.displayName,
-        serverBaseUrl: profile.serverBaseUrl,
-        allowInsecureTransport: profile.allowInsecureTransport,
-        ...(profile.endpoint ? { endpoint: profile.endpoint } : {}),
+        serverBaseUrl: effective.serverBaseUrl,
+        allowInsecureTransport: effective.allowInsecureTransport,
+        ...(profile.endpoint &&
+        new URL(profile.endpoint.serverOrigin).origin ===
+          new URL(effective.serverBaseUrl).origin
+          ? { endpoint: profile.endpoint }
+          : {}),
         ...(profile.operatorId ? { operatorId: profile.operatorId } : {})
       }),
       credential: { getOperatorToken: () => this.vault.getOperatorToken(parsed.profileId) },
